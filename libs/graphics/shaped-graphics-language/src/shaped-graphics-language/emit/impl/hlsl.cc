@@ -299,9 +299,13 @@ public:
         if (_is_vulkan && member.offset >= 0)
             out.appendf("[[vk::offset({})]] ", member.offset);
         // EMIT-168: a mat3 in memory is three whole rows, which no packed layout and no function body holds
-        auto const is_widened = member.offset >= 0 && is_mat3(p.m, member.type)
-                             && (owner == nullptr || (owner->memory_size > 0 && !owner->is_packed));
-        auto const type = is_widened ? cc::string("float4x3") : cc::string(type_text(p, *this, member.type));
+        auto const in_memory = member.offset >= 0 && (owner == nullptr || (owner->memory_size > 0 && !owner->is_packed));
+        auto const is_widened = in_memory && is_mat3(p.m, member.type);
+        // EMIT-169: an array of 3-vectors in memory is one of 4-vectors, which a structured buffer strides by 16 too
+        auto const widened_vector = in_memory ? widened_vector_of(p, member.type) : cc::string();
+        auto const type = is_widened                ? cc::string("float4x3")
+                        : !widened_vector.empty() ? widened_vector
+                                                    : cc::string(type_text(p, *this, member.type));
         // Stated on every matrix, so no `-Zpr` and no `#pragma pack_matrix` can turn one around.
         if (type == "float4x4" || type == "float4x3" || type == "float3x3")
             out += "column_major ";
@@ -364,6 +368,23 @@ public:
         }
         if (memory_size > 0)
             write_padding(out, at, memory_size, count);
+    }
+
+    /// The 4-vector HLSL holds an array of 3-vectors as in GPU memory (EMIT-169), or empty for any other type.
+    [[nodiscard]] cc::string widened_vector_of(plan const& p, type_id type) const
+    {
+        if (p.m.builtin_type_of(type) != nullptr || p.m.at(type).kind != type_kind::array)
+            return {};
+        auto const* const record = p.m.builtin_type_of(p.m.at(type).element);
+        if (record == nullptr || record->leaf_count != 3)
+            return {};
+        auto const family = record->leaf_kind == check::value_kind::scalar_int    ? "int4"
+                          : record->leaf_kind == check::value_kind::scalar_uint   ? "uint4"
+                          : record->leaf_kind == check::value_kind::scalar_half   ? "half4"
+                          : record->leaf_kind == check::value_kind::scalar_short  ? "short4"
+                          : record->leaf_kind == check::value_kind::scalar_ushort ? "ushort4"
+                                                                                  : "float4";
+        return cc::string(builtin_spelling(p, family));
     }
 
     /// Whether any root holds a mat3 as three whole rows, which a write widens through `sgl_widen_mat3`.

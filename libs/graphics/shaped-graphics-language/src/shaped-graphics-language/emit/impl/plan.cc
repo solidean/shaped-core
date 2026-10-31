@@ -544,6 +544,20 @@ struct planner
             if (r.element_form.has_value())
                 r.element_form.value().name = p.names.mint(cc::format("{}_memory", p.m.name_of(r.element)));
         }
+        // an array of structs in a form is spelled as the struct is planned
+        auto const spell_structs = [&](cc::optional<memory_form>& form)
+        {
+            if (form.has_value())
+                for (auto& f : form.value().fields)
+                    if (is_valid(f.struct_type) && p.struct_of_type[index_of(f.struct_type)] >= 0)
+                        f.type = p.structs[p.struct_of_type[index_of(f.struct_type)]].name;
+        };
+        if (p.constants.has_value())
+            spell_structs(p.constants.value().form);
+        for (auto& block : p.group_blocks)
+            spell_structs(block.form);
+        for (auto& r : p.resources)
+            spell_structs(r.element_form);
     }
 
     /// Each struct in GPU memory states where its members sit, which `hlsl-vulkan` writes as `[[vk::offset]]`.
@@ -581,6 +595,7 @@ struct planner
             auto const placed = place_struct(p.m, s, space);
             planned.memory_size = placed.size;
             planned.is_packed = is_packed(space);
+            planned.memory_alignment = placed.alignment;
             for (auto i = isize(0); i < planned.member_of.size(); ++i)
                 if (planned.member_of[i] >= 0)
                 {
@@ -849,6 +864,44 @@ void sgl::emit::impl::validate_binding(check::checked_module const& m, check::sy
                                                            placed.offsets[i], s.name, plain[i].name));
     }
 
+    // CHK-291's arrays that no target places yet, refused alike on every target
+    auto const judge_arrays = [&](auto const& self, check::type_id type, address_space space, cc::string const& where,
+                                  bool is_block_member) -> void
+    {
+        if (type == check::checked_module::void_type || m.builtin_type_of(type) != nullptr)
+            return;
+        auto const& t = m.at(type);
+        if (t.kind == check::type_kind::array)
+        {
+            auto const element = t.element;
+            if (m.builtin_type_of(element) == nullptr && m.at(element).kind == check::type_kind::array)
+                report(error_kind::unsupported, cc::format("a multi-dimensional array in GPU memory: {}", where));
+            // EMIT-154 places a packed block's array of whole rows; any other packed array waits
+            else if (is_packed(space) && !(is_block_member && m.builtin_type_of(element) != nullptr))
+                report(error_kind::unsupported, cc::format("an array in @padding(.none) memory: {}", where));
+            // HLSL would widen each element as it widens one (EMIT-168), which no emitter writes yet
+            else if (is_mat3(m, element))
+                report(error_kind::unsupported, cc::format("an array of mat3 in GPU memory: {}", where));
+            else
+                self(self, element, space, where, false);
+            return;
+        }
+        if (t.kind == check::type_kind::structure)
+            for (auto const& member : m.at(t.members))
+                if (member.type != type)
+                    self(self, member.type, space, cc::format("{}.{}", where, member.name), false);
+    };
+    for (auto const& member : m.at(b.members))
+    {
+        auto const& whole = m.at(member.type);
+        auto const& t = m.takes_slots(member.type) && whole.kind == check::type_kind::array ? m.at(whole.element) : whole;
+        auto const where = cc::format("'{}.{}'", s.name, member.name);
+        if (t.kind == check::type_kind::buffer)
+            judge_arrays(judge_arrays, t.element, element_space(b, member), where, false);
+        else if (!m.takes_slots(member.type))
+            judge_arrays(judge_arrays, member.type, block_space(b), where, true);
+    }
+
     // EMIT-114: a struct has one layout, so every binding places it by one rule; two rules would give it two.
     constexpr address_space spaces[] = {address_space::constants, address_space::storage,
                                         address_space::packed_constants, address_space::packed_storage};
@@ -913,6 +966,15 @@ cc::vector<sgl::check::member_info> sgl::emit::impl::plain_members_of(check::che
 sgl::i32 sgl::emit::impl::first_resource_slot(check::checked_module const& m, check::binding_info const& b)
 {
     return !b.is_inline && !plain_members_of(m, b).empty() ? 1 : 0;
+}
+
+bool sgl::emit::impl::shares_tail(plan const& p, planned_struct const& s, isize member)
+{
+    if (s.memory_size <= 0 || s.is_packed || member + 1 >= s.members.size())
+        return false;
+    auto const* const record = p.m.builtin_type_of(s.members[member].type);
+    return record != nullptr && record->leaf_count == 3
+        && s.members[member + 1].offset < s.members[member].offset + record->msl_layout.size;
 }
 
 sgl::emit::impl::planned_constants const* sgl::emit::impl::block_of(plan const& p, check::symbol_id binding)

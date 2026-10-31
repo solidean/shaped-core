@@ -75,6 +75,40 @@ binding turn:
     turn.mats[id.x] = turn.flat[id.x]
     turn.flat[id.x] = f.basis
 
+// An array strides by its element rounded up to the element's alignment: a float3 by 16, a float by 4, a struct by its
+// size, here 32 with `radius` in `color`'s tail.
+struct lamp:
+    pos: float4
+    color: float3
+    radius: float
+
+// a constant block places its own struct, since one struct has one layout (EMIT-114)
+struct beacon:
+    pos: float4
+    color: float3
+    radius: float
+
+struct track:
+    corners: float3[3]
+    weights: float[4]
+    lamps: lamp[2]
+
+binding lit:
+    lamps: beacon[2]
+    tints: float3[2]
+    tracks: mut buffer[track]
+    sums: mut buffer[float4]
+
+@compute(64) fun light_up(@thread_id id: int3){lit}:
+    let t = lit.tracks[id.x]
+    let l = lit.lamps[id.x % 2]
+    let s = t.corners[0] + t.corners[2] * t.weights[3] + lit.tints[1] * l.radius + t.lamps[1].color
+    lit.sums[id.x] = float4(s.x, s.y, s.z, l.color.y + t.lamps[0].radius)
+    let mut u = t
+    u.corners[1] = l.color
+    u.weights[0] = l.radius
+    lit.tracks[id.x] = u
+
 // `@padding(.none)` places a block as C++ places a struct of tg types, so a host fills it from a struct of its own.
 // `tint` sits at 4 and `bias` right behind it at 16, and `weights` crosses a row from 28: 48 bytes in all.
 @padding(.none) @inline binding host_params:

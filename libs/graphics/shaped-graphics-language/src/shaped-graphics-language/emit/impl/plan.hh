@@ -73,6 +73,8 @@ struct planned_struct
     i32 memory_size = -1;
     /// It stands in GPU memory under `@padding(.none)`.
     bool is_packed = false;
+    /// Its alignment in GPU memory, where it stands there.
+    i32 memory_alignment = 0;
 };
 
 /// An enum the entry point mentions, whose every case is declared whether or not an arm names it (EMIT-77).
@@ -309,6 +311,10 @@ struct block_placement
     /// Where the last member ends.
     i32 size = 0;
 };
+
+/// EMIT-170: whether member `member` of `s`, a struct in natural GPU memory, is a 3-vector the next member sits in the
+/// tail of, which MSL's 16-byte 3-vector would push past, so MSL declares it packed.
+[[nodiscard]] bool shares_tail(plan const& p, planned_struct const& s, isize member);
 
 /// `members` must belong to a binding that passed `validate_binding`.
 [[nodiscard]] block_placement place_block(check::checked_module const& m,

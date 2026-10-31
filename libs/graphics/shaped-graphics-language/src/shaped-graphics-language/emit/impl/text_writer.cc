@@ -218,6 +218,61 @@ struct writer
             && is_mat3(p.m, p.m.at(p.m.at(object_type).members)[member].type);
     }
 
+    /// EMIT-169: whether `x` reaches an array of 3-vectors its target holds in memory as 4-vectors: a member of a struct
+    /// that stands in memory, or of a block that is no memory form.
+    [[nodiscard]] bool reaches_widened_array(flat_expr const& x) const
+    {
+        if (!d.widens_mat3() || !is_array(x.type))
+            return false;
+        auto const* const record = p.m.builtin_type_of(p.m.at(x.type).element);
+        if (record == nullptr || record->leaf_count != 3)
+            return false;
+        if (auto const* const member = x.node.try_as<flat_member>())
+        {
+            auto const object_type = p.e.at(member->object).type;
+            if (is_builtin_type(p.m, object_type) || is_array(object_type))
+                return false;
+            auto const at = p.struct_of_type[index_of(object_type)];
+            return at >= 0 && p.structs[at].memory_size > 0 && !p.structs[at].is_packed;
+        }
+        if (auto const* const b = x.node.try_as<flat_binding_member>())
+            return resource_of(p, b->binding, b->member) < 0 && workgroup_of(p, b->binding, b->member) < 0
+                && !block_of(p, b->binding)->form.has_value();
+        return false;
+    }
+
+    /// The array `raw` holds as 4-vectors, rebuilt into a local of 3-vectors element by element.
+    cc::string narrowed_array(flat_expr const& x, cc::string const& raw)
+    {
+        auto const name = p.names.mint("narrowed");
+        auto declaration = cc::string();
+        d.write_local(declaration, {.name = name,
+                                    .type = type_text(p, d, x.type),
+                                    .dimensions = array_dimensions(p, x.type),
+                                    .is_mut = true});
+        line(declaration);
+        for (auto i = isize(0); i < isize(p.m.at(x.type).count); ++i)
+            line(cc::format("{}[{}] = {}[{}].xyz;", name, i, raw, i));
+        return name;
+    }
+
+    /// Stores `value`, an array of 3-vectors, into `raw`, which holds it as 4-vectors, element by element.
+    void widen_array_into(cc::string_view raw, type_id type, cc::string_view value)
+    {
+        auto const name = p.names.mint("widened");
+        auto declaration = cc::string();
+        d.write_local(declaration, {.name = name,
+                                    .type = type_text(p, d, type),
+                                    .value = value,
+                                    .dimensions = array_dimensions(p, type)});
+        line(declaration);
+        for (auto i = isize(0); i < isize(p.m.at(type).count); ++i)
+            line(cc::format("{}[{}].xyz = {}[{}];", raw, i, name, i));
+    }
+
+    /// Set while the object of an index is written, so an array of 4-vectors is indexed in place rather than rebuilt.
+    bool is_indexing_widened = false;
+
     /// Whether a value of `type` is a struct written with padding fields, which a target writes as memory holds it.
     [[nodiscard]] bool is_padded(type_id type) const
     {
@@ -246,8 +301,14 @@ struct writer
             return;
         }
         auto const& planned = p.structs[p.struct_of_type[index_of(x.type)]];
+        auto const in_memory = planned.memory_size > 0 && !planned.is_packed && d.widens_mat3();
         for (auto i = isize(0); i < arguments.size() && i < planned.member_of.size(); ++i)
-            if (planned.member_of[i] >= 0)
+            if (planned.member_of[i] >= 0 && in_memory && is_array(p.e.at(arguments[i]).type)
+                && p.m.builtin_type_of(p.m.at(p.e.at(arguments[i]).type).element) != nullptr
+                && p.m.builtin_type_of(p.m.at(p.e.at(arguments[i]).type).element)->leaf_count == 3)
+                widen_array_into(cc::format("{}.{}", name, planned.members[planned.member_of[i]].name),
+                                 p.e.at(arguments[i]).type, expr(arguments[i]).text);
+            else if (planned.member_of[i] >= 0)
                 line(cc::format("{}.{} = {};", name, planned.members[planned.member_of[i]].name,
                                 is_widened_member(x.type, i) ? cc::format("sgl_widen_mat3({})", expr(arguments[i]).text)
                                                              : expr(arguments[i]).text));
@@ -590,6 +651,23 @@ struct writer
         if (auto const* const member = p.e.at(a.place).node.try_as<flat_member>();
             member != nullptr && member->is_swizzle())
             return assign_swizzle(*member, a.value);
+        if (auto const* const element = p.e.at(a.place).node.try_as<flat_element>();
+            element != nullptr && reaches_widened_array(p.e.at(element->object)))
+        {
+            auto const value = expr(a.value, true).text;
+            is_indexing_widened = true;
+            auto const object = wrapped(expr(element->object), level::primary);
+            is_indexing_widened = false;
+            return line(cc::format("{}[{}].xyz = {};", object, expr(element->index).text, value));
+        }
+        if (reaches_widened_array(p.e.at(a.place)))
+        {
+            auto const value = expr(a.value, true).text;
+            is_indexing_widened = true;
+            auto const raw = expr(a.place).text;
+            is_indexing_widened = false;
+            return widen_array_into(raw, p.e.at(a.place).type, value);
+        }
         auto value = expr(a.value, true).text;
         if (auto const* const member = p.e.at(a.place).node.try_as<flat_member>();
             member != nullptr && is_widened_member(p.e.at(member->object).type, member->member))
@@ -718,6 +796,8 @@ struct writer
                 }
                 auto const& block = *block_of(p, b.binding);
                 result = {.text = cc::format("{}.{}", block.name, block.members[block.block_member_of[b.member]].name)};
+                if (reaches_widened_array(x) && !cc::exchange(is_indexing_widened, false))
+                    result = {.text = narrowed_array(x, result.text)};
                 // EMIT-168: a block that is no memory form holds its mat3 as three whole rows
                 if (d.widens_mat3() && !block.form.has_value() && is_mat3(p.m, x.type))
                     result = {.text = cc::format("((float3x3){})", result.text)};
@@ -730,6 +810,15 @@ struct writer
             },
             [&](flat_element const& a)
             {
+                // EMIT-169: an element of an array held as 4-vectors is read as its first three lanes
+                if (reaches_widened_array(p.e.at(a.object)))
+                {
+                    is_indexing_widened = true;
+                    auto const object = wrapped(expr(a.object), level::primary);
+                    is_indexing_widened = false;
+                    result = {.text = cc::format("{}[{}].xyz", object, expr(a.index).text), .binds = level::primary};
+                    return;
+                }
                 auto const object = wrapped(expr(a.object), level::primary);
                 auto index = expr(a.index).text;
                 // EMIT-121: a marked index into a binding array tells HLSL, and SPIR-V through it, that it may differ
@@ -740,6 +829,7 @@ struct writer
             },
             [&](flat_member const& member)
             {
+                auto const is_raw = cc::exchange(is_indexing_widened, false);
                 auto const object_type = p.e.at(member.object).type;
                 auto object = wrapped(expr(member.object), level::primary);
                 // EMIT-142: a prelude vector's swizzle is the target's own, spelled alike everywhere
@@ -759,6 +849,10 @@ struct writer
                 result = {.text = cc::format("{}.{}", object, planned.members[planned.member_of[member.member]].name)};
                 if (is_widened_member(object_type, member.member))
                     result = {.text = cc::format("((float3x3){})", result.text)};
+                else if (d.packs_shared_tails() && shares_tail(p, planned, planned.member_of[member.member]))
+                    result = {.text = cc::format("{}({})", type_text(p, d, x.type), result.text)};
+                else if (reaches_widened_array(x) && !is_raw)
+                    result = {.text = narrowed_array(x, result.text)};
             },
             [&](flat_construct const&) { result = construct(x, is_broken); },
             [&](flat_call const& c) { result = call(c, x.type); }, [&](flat_not const& n)

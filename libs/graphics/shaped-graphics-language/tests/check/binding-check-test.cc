@@ -510,8 +510,8 @@ TEST("sgl check - a mat3 stands in GPU memory, and crosses no stage edge yet")
     CHECK(reports_for(listing("    @padding(.none) raw: mut buffer[mat3]\n")) == "");
     CHECK(reports_for("@workgroup binding tile:\n    rows: mat3[4]\n") == "");
 
-    // an array of them in a block or a buffer is an array in GPU memory, which CHK-291 judges
-    CHECK(reports_for(listing("    bases: mat3[2]\n")).contains("unsupported-yet"));
+    // an array of them takes whole rows, which the checker admits; HLSL's widening of each element is still to come
+    CHECK(reports_for(listing("    bases: mat3[2]\n")) == "");
 
     // a mat2's layout is not decided, so memory refuses it at its line
     CHECK(reports_for(listing("    turn: mat2\n"))

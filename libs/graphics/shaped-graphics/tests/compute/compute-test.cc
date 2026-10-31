@@ -369,6 +369,89 @@ ASYNC_INVOCABLE_TEST("sg - a mat3 reaches the shader column by column, 16 bytes 
     }
 }
 
+static_assert(sizeof(shaders::layout::lamp) == 32);
+static_assert(sizeof(shaders::layout::beacon) == 32);
+static_assert(sizeof(shaders::layout::track) == 128);
+static_assert(offsetof(shaders::layout::track, weights) == 48);
+static_assert(offsetof(shaders::layout::track, lamps) == 64);
+
+ASYNC_INVOCABLE_TEST("sg - an array strides by its element rounded to its alignment, in a block and a buffer, on every backend",
+                     (sg::context_handle const& ctx))
+{
+    REQUIRE(ctx != nullptr);
+    if (!sg_test::shaders_reach(*ctx))
+        SKIP("no compiler builds this binary's shaders into a format this context accepts");
+
+    auto const pipeline = co_await shaders::layout::light_up.acquire_pipeline(*ctx);
+    auto const group_layout = ctx->cached.acquire_binding_group_layout<shaders::layout::lit>();
+
+    auto const lamp_of = [](int i)
+    {
+        return shaders::layout::lamp{.pos = tg::vec4f(float(i), 0, 0, 1),
+                                     .color = tg::vec3f(1, float(i + 2), 3),
+                                     .radius = float(i + 5)};
+    };
+    auto const beacon_of = [](int i)
+    {
+        return shaders::layout::beacon{.pos = tg::vec4f(float(i), 0, 0, 1),
+                                       .color = tg::vec3f(1, float(i + 2), 3),
+                                       .radius = float(i + 5)};
+    };
+    auto const track_of = [&](int i)
+    {
+        auto t = shaders::layout::track{};
+        t.corners[0] = tg::vec3f(float(i), 1, 2);
+        t.corners[1] = tg::vec3f(3, 4, 5);
+        t.corners[2] = tg::vec3f(6, float(i), 7);
+        t.weights = {0.5f, 1.0f, 1.5f, 2.0f};
+        t.lamps = {lamp_of(10), lamp_of(20)};
+        return t;
+    };
+
+    constexpr auto count = 64;
+    auto tracks = cc::vector<shaders::layout::track>();
+    for (auto i = 0; i < count; ++i)
+        tracks.push_back(track_of(i));
+    auto const usage = sg::buffer_usage::readwrite_buffer | sg::buffer_usage::copy_src;
+    auto const track_buffer = ctx->persistent.create_buffer_from_data(cc::move(tracks), usage);
+    auto const sum_buffer = ctx->persistent.create_buffer<tg::vec4f>(count, usage);
+
+    auto cmd = ctx->create_command_list();
+    auto const group = ctx->transient.create_binding_group(*cmd, group_layout,
+                                                           shaders::layout::lit{
+                                                               .lamps = {beacon_of(0), beacon_of(1)},
+                                                               .tints = {tg::vec3f(9, 9, 9), tg::vec3f(1, 2, 4)},
+                                                               .tracks = track_buffer.as_readwrite_buffer(),
+                                                               .sums = sum_buffer.as_readwrite_buffer(),
+                                                           });
+    cmd->compute.bind_pipeline(*pipeline);
+    cmd->compute.bind_group(0, *group);
+    cmd->compute.dispatch_threads(count);
+    auto const tracks_back = cmd->download.data_from_buffer(track_buffer);
+    auto const sums_back = cmd->download.data_from_buffer(sum_buffer);
+    ctx->submit_command_list(cc::move(cmd));
+
+    auto const got_tracks = co_await tracks_back.data();
+    auto const got_sums = co_await sums_back.data();
+    REQUIRE(got_tracks.size() == isize(count));
+    REQUIRE(got_sums.size() == isize(count));
+    for (auto i = 0; i < count; ++i)
+    {
+        auto const t = track_of(i);
+        auto const l = beacon_of(i % 2);
+        auto const s = tg::vec3f(t.corners[0]) + tg::vec3f(t.corners[2]) * t.weights[3] + tg::vec3f(1, 2, 4) * l.radius
+                     + t.lamps[1].color;
+        CHECK(got_sums[i] == tg::vec4f(s[0], s[1], s[2], l.color[1] + t.lamps[0].radius));
+        CHECK(tg::vec3f(got_tracks[i].corners[0]) == tg::vec3f(t.corners[0]));
+        CHECK(tg::vec3f(got_tracks[i].corners[1]) == l.color);
+        CHECK(tg::vec3f(got_tracks[i].corners[2]) == tg::vec3f(t.corners[2]));
+        CHECK(got_tracks[i].weights[0] == l.radius);
+        CHECK(got_tracks[i].weights[3] == 2.0f);
+        CHECK(got_tracks[i].lamps[1].color == t.lamps[1].color);
+        CHECK(got_tracks[i].lamps[1].radius == t.lamps[1].radius);
+    }
+}
+
 namespace
 {
 /// What a host writes with no knowledge of HLSL's rows: `host_params` of layout.sgl is placed as this struct is.

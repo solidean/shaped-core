@@ -20,6 +20,36 @@ bool is_struct(checked_module const& m, type_id type)
         && !m.at(type).is_opaque;
 }
 
+placed_members place_from(checked_module const& m,
+                          cc::span<member_info const> members,
+                          address_space space,
+                          i32 base,
+                          cc::span<i32 const> prefix);
+
+/// What one element of an array of `type` takes in `space`: the bytes it strides by and its alignment.
+struct element_shape
+{
+    i32 stride = 0;
+    i32 alignment = 1;
+};
+
+element_shape element_of(checked_module const& m, type_id type, address_space space)
+{
+    if (auto const* const record = m.builtin_type_of(type))
+    {
+        auto const alignment = is_packed(space) ? scalar_size_of(*record) : natural_alignment_of(*record);
+        return {.stride = round_up(memory_size_of(*record, space), alignment), .alignment = alignment};
+    }
+    if (m.at(type).kind == type_kind::array)
+    {
+        auto const inner = element_of(m, m.at(type).element, space);
+        return {.stride = i32(m.at(type).count) * inner.stride, .alignment = inner.alignment};
+    }
+    auto const inner = place_from(m, m.at(m.at(type).members), space, 0, {});
+    auto const alignment = space == address_space::constants ? round_up(inner.alignment, 16) : inner.alignment;
+    return {.stride = round_up(inner.size, alignment), .alignment = alignment};
+}
+
 /// Places `members` from `base`, appending every leaf with its offset from the outermost value.
 /// `prefix` is the path down to these members.
 placed_members place_from(checked_module const& m,
@@ -57,16 +87,16 @@ placed_members place_from(checked_module const& m,
             continue;
         }
 
-        // CHK-291: an array's elements take whole rows, so it starts one and needs no padding
-        // C++ aligns it to its scalar, which EMIT-154 refuses wherever that is no row.
+        // An array strides by its element rounded up to the element's alignment, and starts a row in a constant block.
+        // C++ aligns it to its scalar, which EMIT-154 refuses in a packed block wherever that is no row.
         if (m.at(type).kind == type_kind::array)
         {
             auto const& array = m.at(type);
-            auto const& record = *m.builtin_type_of(array.element);
-            auto const alignment = is_packed(space) ? scalar_size_of(record) : 16;
+            auto const element = element_of(m, array.element, space);
+            auto const alignment = space == address_space::constants ? round_up(element.alignment, 16) : element.alignment;
             at = round_up(at, alignment);
             result.alignment = alignment > result.alignment ? alignment : result.alignment;
-            auto const size = i32(array.count) * memory_size_of(record, space);
+            auto const size = i32(array.count) * element.stride;
             result.offsets.push_back(at);
             result.sizes.push_back(size);
             result.leaves.push_back({.path = cc::move(path),
@@ -167,13 +197,13 @@ cc::string sgl::emit::impl::first_unplaceable(check::checked_module const& m, ch
 {
     if (auto const* const record = m.builtin_type_of(type))
         return record->hlsl_layout.size != 0 ? cc::string() : cc::format(": {}", m.name_of(type));
-    // CHK-291: the checker admits an array only of builtin elements that take whole rows
+    // an array of placeable elements is placeable, at any count but none
     if (is_valid(type) && m.at(type).kind == type_kind::array && m.builtin_type_of(type) == nullptr)
     {
-        auto const* const record = m.builtin_type_of(m.at(type).element);
-        return record != nullptr && record->hlsl_layout.size % 16 == 0 && m.at(type).count > 0
-                 ? cc::string()
-                 : cc::format(": {}", m.name_of(type));
+        if (m.at(type).count == 0)
+            return cc::format(": {}", m.name_of(type));
+        auto const inner = first_unplaceable(m, m.at(type).element);
+        return inner.empty() || !inner.starts_with(":") ? inner : cc::format(": {}", m.name_of(type));
     }
     // an atomic stands in memory as the integer it updates
     if (is_valid(type) && m.at(type).kind == type_kind::atomic)
@@ -240,6 +270,9 @@ cc::vector<cc::string> sgl::emit::impl::padding_of(check::checked_module const& 
 
 void sgl::emit::impl::collect_structs(check::checked_module const& m, check::type_id type, cc::vector<check::type_id>& out)
 {
+    // an array places its element struct as a member places it
+    while (is_valid(type) && m.builtin_type_of(type) == nullptr && m.at(type).kind == type_kind::array)
+        type = m.at(type).element;
     if (!is_struct(m, type))
         return;
     for (auto const known : out)

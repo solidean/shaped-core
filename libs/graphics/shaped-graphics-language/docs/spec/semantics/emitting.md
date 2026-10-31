@@ -550,6 +550,16 @@ The C++ struct a package generates is that layout byte for byte, padding include
 * **EMIT-165** A computed `const` array (CHK-219) is bound once per tree to a local of its name, at the start of the tree's body, and every read of it indexes that local.
   A target writes a constructed array whole wherever it stands, so read in place it would be written once per index: S2H's 192-word font table reached 1.5 MB of text.
   A vector, a matrix or a struct const is written where it is read, since it is no larger than the expression that reads it.
+* **EMIT-169** HLSL holds an array of 3-vectors in GPU memory as one of 4-vectors, which a structured buffer strides by 16 as a constant buffer does ([why](why/emitting.md#emit-169)).
+  An element reads as its first three lanes, `a[i].xyz`, and is written through them.
+  A read of the whole array rebuilds it into a local element by element, and a write of it stores each element so.
+  A struct that stands in memory declares the 4-vectors as its field, so this holds wherever the struct is.
+* **EMIT-170** MSL declares a 3-vector of a struct in GPU memory as its `packed_` type where the next member sits in its tail ([why](why/emitting.md#emit-170)).
+  A padding field keeps it at its offset, since a packed vector aligns to its scalar alone, and `alignas` keeps the struct's own alignment.
+  A read converts it back, `float3(s.color)`, and a write converts into it implicitly.
+  So the struct is placed as SGL places it wherever it stands, in an array too, and a buffer of it needs no memory form.
+* **EMIT-171** An array in GPU memory waits, `unsupported` alike on every target, where it is multi-dimensional, where `@padding(.none)` places it, or where its element is a `mat3`.
+  A packed block's array of whole rows is the exception, which EMIT-154 places.
 * **EMIT-168** HLSL holds a `mat3` in GPU memory as a `column_major float4x3`, three whole rows of a constant buffer and 48 bytes of a buffer ([why](why/emitting.md#emit-168)).
   A read narrows it, `((float3x3)m)`, and a write widens a value through `sgl_widen_mat3`, which the text declares wherever it holds one.
   A struct that stands in memory declares the `float4x3` as its field, so a read of the field narrows wherever the struct is.
@@ -582,9 +592,8 @@ The C++ struct a package generates is that layout byte for byte, padding include
 ## Open
 
 * GLSL, which comes through the same seam.
-* Arrays in GPU memory beyond a constant block's arrays of whole rows (EMIT-164), which the checker refuses today (CHK-291).
-  An array strides by its element's size rounded up to the element's alignment, as a buffer does.
-  In a constant block an element shorter than a row would need component arithmetic at a runtime index, so it is refused without `@padding(.every_element)`, which starts each element on a row.
+* A constant block's array of elements shorter than a row (CHK-291), which `@padding(.every_element)` will start each on a row of.
+* The arrays EMIT-171 refuses: multi-dimensional ones, packed ones, and arrays of `mat3`.
 * `@padding(.every_column)`, which would name a `mat3`'s natural 48 bytes explicitly; `.none` gives the 36 of `tg::mat3f` already.
 * `mat2` in GPU memory, which HLSL's constant buffer would place a row per column.
 * A struct member of a `@padding(.none)` block, which HLSL would read back by building the struct in a local field by field.

@@ -76,7 +76,7 @@ TEST("sgl emit - a half is float16_t in HLSL, f16 in WGSL and half in MSL, and a
     CHECK(wgsl.contains("vec2h(v.x + f16(s.weight), f16(-0.0999755859375))"));
 
     auto const msl = text_of(k_halves, target::msl);
-    CHECK(msl.contains("const half3 v = s.tint * half(0.5) + work.bias_ * work.gain;\n"));
+    CHECK(msl.contains("const half3 v = half3(s.tint) * half(0.5) + work.bias_ * work.gain;\n"));
     CHECK(msl.contains("half2(v.x + half(s.weight), half(-0.0999755859375))"));
 
     // an entry point that holds no half enables nothing
@@ -126,9 +126,9 @@ TEST("sgl emit layout - a 16-bit value aligns to its size in a block and in a bu
     CHECK(wgsl.contains("struct sample {\n    weight: f32,\n    tint: vec3h,\n    scale: f16,\n}\n"));
     CHECK(wgsl.contains("struct work_data {\n    gain: f16,\n    offset: f32,\n    bias: vec3h,\n}\n"));
 
-    // MSL's half3 takes 8 bytes, so a half in its tail makes it packed
+    // MSL's half3 takes 8 bytes, so a half in its tail makes it packed, and a padding field holds it at 8 (EMIT-170)
     auto const msl = text_of(k_halves, target::msl);
-    CHECK(msl.contains("struct sample_memory\n{\n    float weight;\n    uint _pad0;\n    packed_half3 tint;\n"
+    CHECK(msl.contains("struct alignas(8) sample\n{\n    float weight;\n    uint sgl_pad0;\n    packed_half3 tint;\n"
                        "    half scale;\n};\n"));
 
     auto const d = described(k_halves);

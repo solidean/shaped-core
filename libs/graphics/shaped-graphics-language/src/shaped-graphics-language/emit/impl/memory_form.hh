@@ -29,6 +29,8 @@ struct memory_field
     i32 offset = 0;
     /// The field is an array of `count` values of `type`, and 0 where it is one value.
     i32 count = 0;
+    /// The struct an array field holds, whose spelling the plan fills in; none for a builtin.
+    check::type_id struct_type = check::type_id::none;
 };
 
 /// One builtin value of the root and the fields that hold it.

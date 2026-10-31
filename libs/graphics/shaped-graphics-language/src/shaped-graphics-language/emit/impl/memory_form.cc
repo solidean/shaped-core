@@ -71,14 +71,45 @@ native_placement place_natively(checked_module const& m,
     {
         if (member.type == checked_module::void_type)
             continue;
-        // an array of whole-row elements strides by its element's size on every target, with no padding
+        // an array strides by its element rounded up to the element's own alignment, and WGSL's uniform rule starts it
+        // on a row
         if (m.builtin_type_of(member.type) == nullptr && m.at(member.type).kind == type_kind::array)
         {
-            auto const l = native_layout(*m.builtin_type_of(m.at(member.type).element), t, space);
-            at = round_up(at, 16);
+            auto element = m.at(member.type).element;
+            auto count = i32(m.at(member.type).count);
+            while (m.builtin_type_of(element) == nullptr && m.at(element).kind == type_kind::array)
+            {
+                count *= i32(m.at(element).count);
+                element = m.at(element).element;
+            }
+            auto stride = 0;
+            auto element_alignment = 1;
+            if (auto const* const record = m.builtin_type_of(element))
+            {
+                auto const l = native_layout(*record, t, space);
+                stride = round_up(l.size, l.alignment);
+                element_alignment = l.alignment;
+            }
+            else if (t == emit::target::msl && !is_packed(space))
+            {
+                auto const natural = place_struct(m, element, space);
+                element_alignment = natural.alignment;
+                stride = round_up(natural.size, element_alignment);
+            }
+            else
+            {
+                auto dry = cc::vector<i32>();
+                auto const inner = place_natively(m, m.at(m.at(element).members), space, t, 0, dry);
+                element_alignment = t == emit::target::wgsl && !is_storage(space) ? round_up(inner.alignment, 16)
+                                                                                  : inner.alignment;
+                stride = round_up(inner.size, element_alignment);
+            }
+            auto const array_alignment = t == emit::target::wgsl && !is_storage(space) ? round_up(element_alignment, 16)
+                                                                                       : element_alignment;
+            at = round_up(at, array_alignment);
             offsets.push_back(base + at);
-            at += i32(m.at(member.type).count) * l.size;
-            alignment = max_of(alignment, 16);
+            at += count * stride;
+            alignment = max_of(alignment, array_alignment);
             continue;
         }
         if (auto const* const record = m.builtin_type_of(member.type))
@@ -88,6 +119,17 @@ native_placement place_natively(checked_module const& m,
             offsets.push_back(base + at);
             at += l.size;
             alignment = max_of(alignment, l.alignment);
+            continue;
+        }
+        // MSL declares a struct in natural memory as SGL places it, a shared tail packed (EMIT-170)
+        if (t == emit::target::msl && !is_packed(space))
+        {
+            auto const natural = place_struct(m, member.type, space);
+            at = round_up(at, natural.alignment);
+            for (auto const& leaf : natural.leaves)
+                offsets.push_back(base + at + leaf.offset);
+            at += natural.size;
+            alignment = max_of(alignment, natural.alignment);
             continue;
         }
         // The struct's own alignment first, which only a dry run over its members gives.
@@ -206,6 +248,16 @@ struct form_builder
 
     void add_leaf(placed_leaf const& leaf, cc::string const& stem)
     {
+        // an array of structs is one field read in place, which every target places as SGL does where the form is built
+        if (leaf.count > 0 && m.builtin_type_of(leaf.type) == nullptr)
+        {
+            pad_to(leaf.offset);
+            auto result = memory_leaf{.path = leaf.path, .type = leaf.type};
+            result.fields.push_back(add_field(stem, cc::string(m.name_of(leaf.type)), leaf.size, leaf.count));
+            form.fields.back().struct_type = leaf.type;
+            form.leaves.push_back(cc::move(result));
+            return;
+        }
         auto const& record = *m.builtin_type_of(leaf.type);
         pad_to(leaf.offset);
         auto result = memory_leaf{.path = leaf.path, .type = leaf.type};
@@ -217,7 +269,7 @@ struct form_builder
         // a packed mat3's columns stand 12 bytes apart, which no target's own matrix does
         auto const is_packed_mat3 = is_matrix(record) && record.leaf_count == 9 && is_packed(space);
         // an array's elements take whole rows, which every target places as SGL does, so it is never split
-        if (is_hlsl(t) && is_matrix(record) && record.leaf_count == 9 && !is_packed(space))
+        if (is_hlsl(t) && is_matrix(record) && record.leaf_count == 9 && !is_packed(space) && leaf.count == 0)
         {
             result.is_widened = true;
             result.fields.push_back(add_field(stem, "float4x3", 48));
@@ -257,6 +309,8 @@ i32 alignment_of(checked_module const& m, memory_form const& form, emit::target 
     auto result = 1;
     for (auto const& leaf : form.leaves)
     {
+        if (m.builtin_type_of(leaf.type) == nullptr)
+            continue;
         auto const& record = *m.builtin_type_of(leaf.type);
         result = max_of(result, leaf.is_split || leaf.is_packed ? scalar_size_of(record)
                                                                 : native_layout(record, t, space).alignment);
@@ -306,8 +360,9 @@ bool is_natively_placed(checked_module const& m,
     // MSL's float3 takes 16 bytes and its half3 8, so the one value after it has to start past them as well.
     if (t == emit::target::msl)
         for (auto i = isize(0); i + 1 < leaves.size(); ++i)
-            if (auto const& record = *m.builtin_type_of(leaves[i].type);
-                record.leaf_count == 3 && leaves[i + 1].offset < leaves[i].offset + record.msl_layout.size)
+            if (auto const* const record = m.builtin_type_of(leaves[i].type);
+                record != nullptr && leaves[i].count == 0 && record->leaf_count == 3 && leaves[i].path.size() <= 1
+                && leaves[i + 1].offset < leaves[i].offset + record->msl_layout.size)
                 return false;
     return stride == 0 || native.size == stride;
 }
@@ -370,6 +425,9 @@ cc::optional<sgl::emit::impl::memory_form> sgl::emit::impl::element_form_of(chec
             return build(m, members, leaves, space, stride, stride, "value", t, false);
         return form_for(m, members, leaves, space, stride, stride, "value", t);
     }
+    // EMIT-170: MSL declares a struct in natural memory as SGL places it, so its element needs no form
+    if (t == emit::target::msl && !is_packed(space))
+        return {};
     auto const members = m.at(m.at(element).members);
     auto const placed = place(m, members, space);
     return form_for(m, members, placed.leaves, space, placed.size, stride, "value", t);

@@ -972,11 +972,11 @@ A `require` in a test's body that nothing in it uses is `unused-require`, and a 
 * **CHK-290** A square literal converts to the array type expected where it stands, with exactly as many elements, each converting to the element type.
   Where no array is expected it is an array of its first element's type, and every other element converts to that.
   It holds at least one element, and no name and no splat.
-* **CHK-291** An array in a constant block, in a buffer's element or in a struct that crosses a stage edge is `unsupported-yet`, at any depth of the structs holding it.
-  The detail names the path down to it.
-  The one exception is a constant block's member that is a one-dimensional array of `float4`, `int4`, `uint4` or `mat4`.
-  Each takes whole 16-byte rows, which every target places alike (EMIT-164).
-  An array of any other element there is `unsupported-yet`, and the detail names the element.
+* **CHK-291** An array stands in GPU memory at its natural stride (EMIT-110): in a buffer's element, at any depth of its structs, and in a constant block.
+  In a constant block every element must stride by whole 16-byte rows, at any depth, since a runtime index into a shorter one needs component arithmetic.
+  A `float3`, a 4-vector, a `mat3`, a `mat4` and every struct do; a scalar, a 2-vector or a 16-bit vector shorter than a row is `unsupported-yet`, and the detail names it.
+  A buffer's element is never an array itself, which is `unsupported-yet`: a struct holding the array is the element.
+  An array in a struct that crosses a stage edge is `unsupported-yet`, and the detail names the path down to it.
   A tessellation factor is an array by design (CHK-305), and workgroup memory has no host side, so neither counts.
 * **CHK-299** A binding member `T[N]` of a texture, an image or a buffer is a **binding array**, which needs `binding_arrays`.
   Its `N` is at least 2, or it is `invalid-constant-argument`: one resource is a plain member.

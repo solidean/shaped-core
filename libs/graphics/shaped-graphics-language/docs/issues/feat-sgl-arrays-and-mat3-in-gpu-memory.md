@@ -22,6 +22,9 @@ Their layout is decided (the spec's emitting file, "Open"), and they land togeth
 - **The mechanism that is missing** is a memory form holding an array, which a runtime index walks into.
 - **WGSL passes no matrix and no array between stages**, so both cross as one location per column or element.
 
+**Arrays in buffer elements and structs have landed** (CHK-291, EMIT-169, EMIT-170): at their natural stride, in a block where they take whole rows.
+What waits is EMIT-171's (multi-dimensional, packed and `mat3` arrays), sub-row block arrays behind `.every_element`, and stage edges.
+
 **`mat3` in GPU memory has landed** (CHK-397, EMIT-168): 48 bytes natural, 36 under `@padding(.none)`, and HLSL holds it as a `float4x3`.
 
 **A constant block's array of whole rows has landed** (EMIT-164): `float4`, `int4`, `uint4` and `mat4` elements, which every target places alike.

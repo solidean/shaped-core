@@ -339,16 +339,38 @@ cc::string checker::array_path(type_id type) const
     return {};
 }
 
-bool checker::is_whole_row_array(type_id type) const
+sgl::i32 checker::natural_stride_of(type_id type) const
 {
+    auto const round_up = [](i32 n, i32 to) { return (n + to - 1) / to * to; };
+    if (auto const* const record = out.builtin_type_of(type))
+        return round_up(record->wgsl_layout.size, record->wgsl_layout.alignment > 0 ? record->wgsl_layout.alignment : 4);
+    // a struct and an array are sized to their alignment already, which is how workgroup memory measures them
+    return workgroup_size_of(type);
+}
+
+cc::string checker::sub_row_array_path(type_id type) const
+{
+    if (type == checked_module::error_type || out.builtin_type_of(type) != nullptr)
+        return {};
     auto const& t = out.at(type);
-    if (t.kind != type_kind::array || t.count == 0)
-        return false;
-    auto const* const record = out.builtin_type_of(t.element);
-    if (record == nullptr)
-        return false;
-    auto const whole = [](builtins::block_layout l) { return l.size > 0 && l.size % 16 == 0; };
-    return whole(record->hlsl_layout) && whole(record->wgsl_layout) && whole(record->msl_layout);
+    if (t.kind == type_kind::array)
+    {
+        // a struct nested in a constant block takes whole rows (EMIT-110), so only a builtin element can fall short
+        if (auto const* const record = out.builtin_type_of(t.element); record != nullptr && natural_stride_of(t.element) % 16 != 0)
+            return cc::format(": {}", out.name_of(type));
+        auto inner = sub_row_array_path(t.element);
+        return inner.starts_with(":") ? cc::format(": {}", out.name_of(type)) : inner;
+    }
+    if (t.kind != type_kind::structure)
+        return {};
+    for (auto const& m : out.at(t.members))
+    {
+        if (m.type == type || m.factor != tessellation_factor::none)
+            continue;
+        if (auto inner = sub_row_array_path(m.type); !inner.empty())
+            return cc::format(".{}{}", m.name, inner);
+    }
+    return {};
 }
 
 void checker::judge_edge_arrays(i32 file, source_span where, type_id type)

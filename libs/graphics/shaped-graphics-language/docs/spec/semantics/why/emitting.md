@@ -127,6 +127,19 @@ A struct an HLSL text pads is therefore padded in function bodies too, and DXIL 
 A buffer of bare 3-vectors cannot carry padding in a struct of the program, so it is the one root HLSL writes as a memory form under the natural rule.
 `scalarBlockLayout`, which sg's vulkan backend requires, admits every offset the natural rule and `@padding(.none)` produce, and nearly every Vulkan device has it.
 
+## EMIT-169
+
+HLSL strides an array of `float3` by 12 in a structured buffer, where every other target strides it by 16, so one target needs the padding spelled.
+A wrapper struct per element would read as `a[i].value`, where a 4-vector reads as `a[i].xyz`, the swizzle any reader of HLSL expects.
+A constant buffer already starts each element on a row, so the 4-vector is its layout too, and one spelling serves both.
+
+## EMIT-170
+
+MSL's `float3` takes 16 bytes, so a scalar that SGL places in its tail would land 4 bytes later in MSL.
+A memory form flattens a root to fix that, which cannot reach a struct repeated in an array, and the array of lights is the common case.
+Declaring the vector packed fixes the struct itself instead, the way HLSL's padding fields do (EMIT-112), so it holds wherever the struct stands.
+A packed vector converts to its plain type on assignment, but MSL's builtin functions take only the plain one, which is why every read converts it.
+
 ## EMIT-168
 
 HLSL places a `float3x3` differently in each memory: 44 bytes in a constant buffer, each column on a row but the last short, and 36 in a structured buffer.

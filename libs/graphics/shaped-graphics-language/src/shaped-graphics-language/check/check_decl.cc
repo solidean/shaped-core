@@ -715,13 +715,17 @@ ast::range_of<member_info> checker::compile_members(i32 file,
                 innermost = out.at(innermost).element;
             if (!is_resource(out.at(innermost).kind))
             {
-                if (!is_whole_row_array(type))
+                if (auto const path = sub_row_array_path(type); !path.empty())
                 {
+                    auto const stride = out.builtin_type_of(t.element) != nullptr ? natural_stride_of(t.element) : 0;
                     unsupported(file, span_of(file, f.type),
-                                cc::format("an array of {} in a constant block, whose element takes no whole number of "
-                                           "16-byte rows: only `float4`, `int4`, `uint4` and `mat4` elements have a "
-                                           "layout yet",
-                                           out.name_of(t.element)));
+                                path.starts_with(":") && stride > 0
+                                    ? cc::format("an array of {} in a constant block, whose element strides by {} bytes, "
+                                                 "short of a 16-byte row, which a runtime index needs",
+                                                 out.name_of(t.element), stride)
+                                    : cc::format("an array in a constant block, {}{}, whose element strides by less "
+                                                 "than a 16-byte row, which a runtime index needs",
+                                                 out.name_of(type), path.starts_with(":") ? cc::string() : path));
                     type = checked_module::error_type;
                 }
             }
@@ -753,20 +757,24 @@ ast::range_of<member_info> checker::compile_members(i32 file,
             else
                 judge_feature(file, span_of(file, f.type), "a binding array", feature::binding_arrays);
         }
-        // CHK-291: an array deeper in a block's struct, or anywhere in a buffer's element, waits for its layout too
+        // CHK-291: an array deeper in a block's struct strides by whole rows, and a buffer's element is no array itself
         else if (!is_struct && !is_workgroup && type != checked_module::error_type)
         {
             auto const& t = out.at(type);
             auto const is_buffer = t.kind == type_kind::buffer;
             auto const root = is_buffer ? t.element : type;
-            if (auto const path = array_path(root); !path.empty())
+            if (is_buffer && out.builtin_type_of(root) == nullptr && out.at(root).kind == type_kind::array)
             {
-                // a path starting `: ` is the root itself
                 unsupported(file, span_of(file, f.type),
-                            cc::format("an array in {}, {}, whose layout no rule places yet",
-                                       is_buffer ? "a buffer's element" : "a constant block",
-                                       path.starts_with(":") ? cc::string(out.name_of(root))
-                                                             : cc::format("{}{}", out.name_of(root), path)));
+                            cc::format("an array as a buffer's element, {}; a struct holding it is one", out.name_of(root)));
+                type = checked_module::error_type;
+            }
+            else if (auto const path = is_buffer ? cc::string() : sub_row_array_path(root); !path.empty())
+            {
+                unsupported(file, span_of(file, f.type),
+                            cc::format("an array in a constant block, {}{}, whose element strides by less than a 16-byte "
+                                       "row, which a runtime index needs",
+                                       out.name_of(root), path));
                 type = checked_module::error_type;
             }
         }

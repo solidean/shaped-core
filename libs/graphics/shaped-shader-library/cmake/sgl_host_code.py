@@ -241,7 +241,7 @@ def memory_structs_of(entries: SglEntries, path: str) -> dict[str, tuple[str, in
 def array_of(sgl_type: str) -> tuple[str, int] | None:
     """`float4[4]` as its element and its count, or None for a type that is no array.
 
-    The compiler admits only elements that take whole 16-byte rows, so the elements sit back to back with no padding.
+    An element strides by its size rounded up to its alignment, which `sized_host_type` turns into a padded element.
     """
     match = re.fullmatch(r"(.+)\[(\d+)\]", sgl_type)
     return (match.group(1), int(match.group(2))) if match else None
@@ -272,9 +272,20 @@ def host_type(package: str, memory: dict[str, tuple[str, int]], where: str, sgl_
 
 
 def sized_host_type(package: str, memory: dict[str, tuple[str, int]], where: str, sgl_type: str, size: int) -> str:
-    """`host_type` of a value that takes `size` bytes in GPU memory: a `mat3` at its natural 48 is slib::gpu_mat3."""
+    """`host_type` of a value that takes `size` bytes in GPU memory: a `mat3` at its natural 48 is slib::gpu_mat3.
+
+    An array's element strides by `size` over its count, and one that strides past its own bytes, as a 3-vector does, is
+    a slib::gpu_padded of it.
+    """
     if sgl_type == "mat3" and size == 48:
         return "slib::gpu_mat3"
+    if (array := array_of(sgl_type)) is not None and array[1] > 0:
+        element, count = array
+        stride = size // count
+        cpp = sized_host_type(package, memory, where, element, stride)
+        if element in HOST_TYPES and element != "mat3" and stride > HOST_TYPES[element][1]:
+            cpp = f"slib::gpu_padded<{cpp}, {stride}>"
+        return f"cc::fixed_array<{cpp}, {count}>"
     return host_type(package, memory, where, sgl_type)
 
 
@@ -389,7 +400,7 @@ def includes(entries: SglEntries) -> list[str]:
         out.append("<typed-geometry/linalg/mat.hh>")
     if "bool32" in types:
         out.append("<shaped-shader-library/gpu_bool.hh>")
-    if any(padded_element(m) for _, b in entries.bindings for m in b["members"]):
+    if any(padded_element(m) for _, b in entries.bindings for m in b["members"]) or any("[" in t for t in types):
         out.append("<shaped-shader-library/gpu_padded.hh>")
     return list(dict.fromkeys(out))
 
@@ -719,7 +730,8 @@ def pack_members(package: str, memory: dict[str, int], file: SglFile, name: str,
             continue
         cpp = sized_host_type(package, memory, f"'{file.path}' `binding {name}` member '{member['name']}'",
                               member["type"], member["size"])
-        size = 48 if cpp == "slib::gpu_mat3" else host_size(memory, member["type"])
+        # a padded host type is the size the shader gives it, which its own static_assert below pins
+        size = member["size"] if cpp == "slib::gpu_mat3" or "gpu_padded" in cpp else host_size(memory, member["type"])
         if size != member["size"]:
             raise HostCodeError(
                 f"shader package '{package}': '{file.path}' `binding {name}` member '{member['name']}' is "

@@ -123,9 +123,13 @@ public:
         return "";
     }
 
+    [[nodiscard]] bool packs_shared_tails() const override { return true; }
+
     void write_member(cc::string& out, planned_struct const* owner, planned_member const& member, plan const& p) const
     {
-        out.appendf("{}{} {}", k_indent, type_text(p, *this, member.type), member.name);
+        // EMIT-170: a 3-vector whose tail holds the next member is packed, as the struct stands in memory
+        auto const is_packed_tail = owner != nullptr && shares_tail(p, *owner, &member - owner->members.data());
+        out.appendf("{}{}{} {}", k_indent, is_packed_tail ? "packed_" : "", type_text(p, *this, member.type), member.name);
         if (owner != nullptr)
             if (auto const attribute = attribute_of(*owner, member); !attribute.empty())
                 out.appendf(" [[{}]]", attribute);
@@ -285,9 +289,35 @@ public:
         // A struct stands ahead of the groups, whose blocks and buffers may hold it.
         for (auto const& s : p.structs)
         {
-            out.appendf("struct {}\n{{\n", s.name);
-            for (auto const& member : s.members)
+            // EMIT-170: a packed member lowers the struct's own alignment, which `alignas` restores
+            auto is_packing = false;
+            for (auto i = isize(0); i < s.members.size(); ++i)
+                is_packing = is_packing || shares_tail(p, s, i);
+            if (is_packing)
+                out.appendf("struct alignas({}) {}\n{{\n", s.memory_alignment, s.name);
+            else
+                out.appendf("struct {}\n{{\n", s.name);
+            // EMIT-170: a packed 3-vector aligns to its scalar alone, so a padding field keeps it at its offset
+            auto at = 0;
+            auto padding = 0;
+            for (auto i = isize(0); i < s.members.size(); ++i)
+            {
+                auto const& member = s.members[i];
+                if (member.offset >= 0 && shares_tail(p, s, i))
+                    while (at < member.offset)
+                    {
+                        auto const width = member.offset - at >= 4 && at % 4 == 0 ? 4 : 2;
+                        out.appendf("{}{} sgl_pad{};\n", k_indent, width == 4 ? "uint" : "ushort", padding++);
+                        at += width;
+                    }
                 write_member(out, &s, member, p);
+                if (member.offset >= 0)
+                {
+                    auto const* const record = p.m.builtin_type_of(member.type);
+                    auto const is_full_3_vector = record != nullptr && record->leaf_count == 3 && !shares_tail(p, s, i);
+                    at = member.offset + (is_full_3_vector ? record->msl_layout.size : member.size);
+                }
+            }
             out += "};\n\n";
         }
         if (p.e.entry_stage >= stage::raygen)

@@ -170,10 +170,11 @@ TEST("sgl emit layout - a nested struct starts a row in a block, and what follow
     CHECK(wgsl.contains("struct look_data {\n    scale: f32,\n    l: look_t,\n}\n"));
     CHECK(wgsl.contains("let l: look_t = look.l;\n"));
 
-    // MSL's float3 is 16 bytes, so `strength` in its tail makes the block a memory form, and a read rebuilds it.
-    CHECK(text_of(source, target::msl)
-              .contains("const look_t l = look_t{tint{float3(look.l_t_color), look.l_t_strength}, look.l_after, "
-                        "float3(look.l_dir)};\n"));
+    // EMIT-170: MSL's float3 is 16 bytes, so `tint` packs the one `strength` sits in the tail of, and reads it back
+    auto const msl = text_of(source, target::msl);
+    CHECK(msl.contains("struct alignas(16) tint\n{\n    packed_float3 color;\n    float strength;\n};\n"));
+    CHECK(msl.contains("const look_t l = look.l;\n"));
+    CHECK(msl.contains("float3(l.t.color).x"));
 
     auto const d = described(source);
     REQUIRE(d.memory_structs.size() == 2);
@@ -701,4 +702,63 @@ TEST("sgl emit layout - a mat3 is three 16-byte columns, which HLSL holds as who
     auto const msl = text_of(source, target::msl);
     CHECK(msl.contains("    device float3x3* work_mats [[id(2)]];\n"));
     CHECK(msl.contains("float3x3(float3(work_flat[id.x].value_0, work_flat[id.x].value_1, work_flat[id.x].value_2), "));
+}
+
+TEST("sgl emit layout - an array strides by its element rounded to its alignment, and HLSL holds a 3-vector's as 4-vectors")
+{
+    constexpr auto source = "struct lamp:\n"
+                            "    pos: float4\n"
+                            "    color: float3\n"
+                            "    radius: float\n"
+                            "\n"
+                            "struct track:\n"
+                            "    corners: float3[3]\n"
+                            "    weights: float[4]\n"
+                            "\n"
+                            "binding scene:\n"
+                            "    lamps: lamp[2]\n"
+                            "    tracks: mut buffer[track]\n"
+                            "\n"
+                            "@compute(64) fun main(@thread_id id: int3){scene}:\n"
+                            "    let t = scene.tracks[id.x]\n"
+                            "    let mut u = t\n"
+                            "    u.corners[1] = t.corners[0] * scene.lamps[1].radius\n"
+                            "    scene.tracks[id.x] = track(u.corners, t.weights)\n";
+
+    auto const d = described(source);
+    REQUIRE(d.memory_structs.size() == 2);
+    CHECK(d.memory_structs[1].name == "track");
+    CHECK(d.memory_structs[1].size == 64);
+    CHECK(d.memory_structs[1].members[1].offset == 48);
+
+    // EMIT-169: an element reads its first three lanes, writes them, and a whole read or write goes element by element
+    auto const dx12 = text_of(source, target::hlsl_dx12);
+    CHECK(dx12.contains("struct track\n{\n    float4 corners[3];\n    float weights[4];\n};\n"));
+    CHECK(dx12.contains("u.corners[1].xyz = t.corners[0].xyz * scene.lamps[1].radius;\n"));
+    CHECK(dx12.contains("narrowed[2] = u.corners[2].xyz;\n"));
+    CHECK(dx12.contains("track_value.corners[2].xyz = widened[2];\n"));
+
+    // WGSL strides it so natively, and MSL packs the 3-vector `radius` sits in the tail of (EMIT-170)
+    auto const wgsl = text_of(source, target::wgsl);
+    CHECK(wgsl.contains("struct track {\n    corners: array<vec3f, 3>,\n    weights: array<f32, 4>,\n}\n"));
+    auto const msl = text_of(source, target::msl);
+    CHECK(msl.contains("struct alignas(16) lamp\n{\n    float4 pos;\n    packed_float3 color;\n    float radius;\n};\n"));
+    CHECK(msl.contains("    device track* scene_tracks [[id(1)]];\n"));
+}
+
+TEST("sgl emit layout - a multi-dimensional, a packed or a mat3 array in GPU memory waits, alike on every target")
+{
+    auto const in_buffer = [](cc::string_view member, cc::string_view field)
+    {
+        return errors_of(cc::format("struct holder:\n    {}\n\nbinding work:\n    {}\n\n"
+                                    "@compute(64) fun main(@thread_id id: int3){{work}}:\n"
+                                    "    let x = work.items[id.x]\n",
+                                    field, member));
+    };
+    CHECK(in_buffer("items: buffer[holder]", "grid: float4[2, 2]")
+          == "unsupported a multi-dimensional array in GPU memory: 'work.items'.grid\n");
+    CHECK(in_buffer("@padding(.none) items: buffer[holder]", "rows: float4[2]")
+          == "unsupported an array in @padding(.none) memory: 'work.items'.rows\n");
+    CHECK(in_buffer("items: buffer[holder]", "turns: mat3[2]")
+          == "unsupported an array of mat3 in GPU memory: 'work.items'.turns\n");
 }
