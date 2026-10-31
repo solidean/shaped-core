@@ -7,6 +7,7 @@ created: 2026-10-31
 `vec3 as float3`, `pos3 as float3` and `hpos4 as float4` have landed, the way out of a strong type to the plain vector of its width.
 The maintainer's model goes further: a plain vector works on the unrolled member layout of a value, and is permissive about where that layout comes from.
 Each point below is a direction to talk through, not a decision.
+The narrowest step has landed: a plain vector's constructor converts a scalar of another kind of one width (CHK-421).
 
 - **A constructor takes a strong vector without a splat**: `float4(normal * 0.5 + 0.5, 0.0)` rather than `float4(..(normal as float3) * 0.5 + 0.5, 0.0)`.
   This makes the plain-vector constructors special cases of their own.

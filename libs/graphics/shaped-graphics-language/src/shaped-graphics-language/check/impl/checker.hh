@@ -1092,6 +1092,12 @@ struct checker
     /// Nothing where the arguments do not bind or one does not convert.
     /// It reports nothing, so a literal can try every candidate.
     [[nodiscard]] cc::optional<candidate_match> match(i32 file, symbol_id candidate, call_arguments const& arguments);
+    /// CHK-421: `arguments` with each scalar of another kind converted to the kind of the plain vector `candidates`
+    /// construct, where that makes one of them match; nothing for any other call.
+    [[nodiscard]] cc::optional<call_arguments> converted_for_plain_vector(i32 file,
+                                                                          source_span where,
+                                                                          cc::span<symbol_id const> candidates,
+                                                                          call_arguments const& arguments);
     /// The length of the chain that converts written argument `i` to `parameter`; nothing where it does not convert.
     [[nodiscard]] cc::optional<i32> chain_of(i32 file, parameter const& taking, call_arguments const& arguments, isize i);
     /// Whether `expr`, already checked, names a place a body could assign, reporting why not; `what` names the use.

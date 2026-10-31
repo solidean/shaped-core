@@ -553,6 +553,8 @@ fun shade(k: float) -> float:
 * **CHK-53** A local **shadows** every earlier local and parameter of its name, in its own block or an enclosing one, from the statement after its `let`, as in Rust ([why](why/checking.md#chk-53)).
   The value it is given still sees the one it hides, and its type may differ.
 * **CHK-54** A local or a parameter may have the name of a module-level symbol, and shadows it as it shadows a local ([why](why/checking.md#chk-54)).
+* **CHK-420** A `scope:` block (AST-156) is a scope of its own: a local declared in it ends with it, and one of the enclosing block stays visible and may be shadowed.
+  What the block does to the flow is what the statement does, so a `return` in it makes what follows unreachable as an `if` that returns on every path would.
   Types and values share one namespace, so behind it the name is the local wherever it stands: a call of it is CHK-78, and a type position holding it is the normal error `wrong-kind-of-name`.
   A parameter's type is resolved before any parameter is in scope, so `light: light` is fine.
 * **CHK-220** A symbol that carries `@shadowable(false)` is hidden by nothing, and it stays what its name means.
@@ -695,6 +697,10 @@ fun shade(k: float) -> float:
   `as` binds looser than every one of them (OP-5), so `x as float - y` converts to the type `float - y`.
   It is reported once, over the whole run of operators and `as`, with the fix that gives each `as` the operand before it: `(x as float) - y`.
 * **CHK-197** The prelude converts between `float`, `int` and `uint` of one width, and nothing else ([why](why/checking.md#chk-197)).
+* **CHK-421** The constructor of a plain vector, `floatN`, `intN` or `uintN`, converts each scalar argument of another of those kinds to its own, as `as` converts it ([why](why/checking.md#chk-421)).
+  It is tried only where no candidate matches the arguments as written, and a literal converts by CHK-253 instead.
+  A strong vector, `vec3`, `pos3` or `hpos4`, converts nothing, and no width changes: a `half` is no `float` component.
+  Every target writes the conversion, so the text never leans on a target's implicit rules.
   Each family also converts between its widths: `half` and `float`, `short` and `int`, `ushort` and `uint` (CHK-381).
   A `bool` and its vectors convert to `float`, `int` and `uint` of their width as 1 where true and 0 where not; nothing converts to a `bool` but a comparison.
   A float whose truncation the integer holds becomes that integer, truncated toward zero.

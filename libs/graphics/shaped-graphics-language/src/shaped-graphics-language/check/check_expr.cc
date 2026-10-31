@@ -1910,6 +1910,8 @@ type_id checker::resolve_overload(function_scope& scope,
     {
         if (is_silent)
             return error_type;
+        if (auto converted = converted_for_plain_vector(file, where, candidates, arguments); converted.has_value())
+            return resolve_overload(scope, id, callee, candidates, converted.value(), spelling, written_as);
         note_near_misses(file, id, candidates, arguments);
         // A struct's one constructor says what it takes, which is what a reader needs to fix the call.
         // The functions of the struct's name beside it, such as `float3(x)`, change nothing about that.
@@ -2351,6 +2353,59 @@ cc::string checker::miss_hint(function_scope& scope,
     }
     if (rotated_chain >= 0)
         return cc::format(": its condition comes first, as in {}", signature_text(spelling, rotated_types));
+    return {};
+}
+
+cc::optional<call_arguments> checker::converted_for_plain_vector(i32 file,
+                                                                  source_span where,
+                                                                  cc::span<symbol_id const> candidates,
+                                                                  call_arguments const& arguments)
+{
+    // the vector a constructor among the candidates builds: `float3`, `int2` or `uint4`, and never `vec3` or `pos3`
+    auto const* vector = static_cast<builtins::type_record const*>(nullptr);
+    auto vector_type = error_type;
+    for (auto const candidate : candidates)
+    {
+        if (out.at(candidate).role != function_role::constructor || out.at(candidate).info < 0)
+            continue;
+        auto const result = out.functions[out.at(candidate).info].result;
+        auto const* const record = out.builtin_type_of(result);
+        auto const family = record != nullptr ? family_of(record->leaf_kind) : cc::string_view();
+        if (record == nullptr || record->leaf_count < 2 || record->leaf_count > 4
+            || (family != "float" && family != "int" && family != "uint")
+            || out.name_of(result) != cc::format("{}{}", family, record->leaf_count))
+            continue;
+        vector = record;
+        vector_type = result;
+    }
+    if (vector == nullptr)
+        return {};
+
+    // each scalar of another kind of one width converts as `as` converts it; a literal converts by CHK-253 already
+    auto const scalar = prelude_type(family_of(vector->leaf_kind));
+    auto converted = arguments;
+    auto is_changed = false;
+    for (auto i = isize(0); i < converted.written.size(); ++i)
+    {
+        auto const* const record = out.builtin_type_of(converted.types[i]);
+        auto const family = record != nullptr ? family_of(record->leaf_kind) : cc::string_view();
+        if (record == nullptr || record->leaf_count != 1 || converted.numbers[i].is_number
+            || converted.written[i].splat_member >= 0 || converted.written[i].is_function
+            || record->leaf_kind == vector->leaf_kind || (family != "float" && family != "int" && family != "uint"))
+            continue;
+        auto const conversion = conversion_of(file, where, converted.types[i], scalar);
+        if (!is_valid(conversion))
+            continue;
+        converted.types[i] = scalar;
+        converted.written[i].conversion = conversion;
+        is_changed = true;
+    }
+    if (!is_changed)
+        return {};
+    for (auto const candidate : candidates)
+        if (out.at(candidate).role == function_role::constructor && out.at(candidate).info >= 0
+            && out.functions[out.at(candidate).info].result == vector_type && match(file, candidate, converted).has_value())
+            return converted;
     return {};
 }
 

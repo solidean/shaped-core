@@ -1939,7 +1939,14 @@ struct flattener
             }
             if (w.splat_member < 0)
             {
-                result.push_back(flatten_expr(w.expr));
+                // CHK-421: a plain vector's constructor converts a scalar of another kind as `as` would
+                auto value = flatten_expr(w.expr);
+                if (is_valid(w.conversion))
+                {
+                    flat_expr_id const converted[] = {value};
+                    value = builtin_call(w.expr, w.conversion, converted);
+                }
+                result.push_back(value);
                 continue;
             }
             if (w.splat_member == 0)
@@ -3516,6 +3523,17 @@ struct flattener
             auto const body = flatten_body(loop->body);
             current()->loops.remove_back();
             return add_stmt(from, flat_while{.label = label, .condition = condition, .body = body});
+        }
+        // CHK-420: a scope's locals are minted apart already, so its statements join the block it stands in
+        if (auto const* const scoped = s.node.try_as<ast::scope_stmt>())
+        {
+            for (auto const stmt : ast().at(scoped->body.statements))
+            {
+                if (unrolled_depth > 0 && !block.empty() && certain_exit(block.back()).has_value())
+                    break;
+                flatten_stmt(stmt);
+            }
+            return;
         }
         if (auto const* const print = s.node.try_as<ast::print_stmt>())
             return add_stmt(from, flat_print{.value = flatten_expr(print->message)});

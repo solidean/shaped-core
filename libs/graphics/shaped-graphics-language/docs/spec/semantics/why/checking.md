@@ -701,6 +701,12 @@ The natural rule is the fast one (EMIT-110), so packing is the exception a shade
 It costs a memory form on WGSL and MSL wherever a vector lands off its alignment, and the wide loads that alignment buys.
 The attribute names where padding goes rather than a rule's name, so the matrix and array cases it will grow are spelled alike.
 
+## CHK-421
+
+HLSL and GLSL convert a constructor's scalars implicitly, so `float3(a * 4u + b, c, 1.0)` is what every port writes, and SGL made it `float3(uint3(…))`.
+A plain vector is a layout of scalars, so converting into one is what it is for; the strong vectors keep their meaning and convert nothing.
+The rule runs only after an exact match fails, so no call that resolved before changes, and a literal keeps CHK-253's own conversions.
+
 ## CHK-371
 
 RDNA runs a compute shader in subgroups of 32 or 64, and AMD tunes some of FSR's passes for 64, which are correct at either size.

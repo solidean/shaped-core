@@ -848,6 +848,8 @@ struct sgl::check::written_argument
     /// A function handed to a parameter of function type: a function's name, an arrow lambda, or such a parameter
     /// handed on (CHK-318); what it stands for is its expression's target.
     bool is_function = false;
+    /// The `as` a plain vector's constructor converts this scalar through to its own kind (CHK-421); none for most.
+    symbol_id conversion = symbol_id::none;
 
     constexpr bool operator==(written_argument const&) const = default;
 };
