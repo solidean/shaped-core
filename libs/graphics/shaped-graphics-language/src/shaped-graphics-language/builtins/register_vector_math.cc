@@ -585,10 +585,11 @@ void sgl::builtins::register_vector_math(registry& r)
         constant_rule(type, negation_unrepresentable);
     }
 
-    r.add_comment("// a prefix `+` of every number and vector is the value itself, as every target writes it (CHK-410)");
-    for (auto const type : {"float", "half", "int", "uint", "short", "ushort", "float2", "float3", "float4", "half2",
-                            "half3", "half4", "int2",  "int3",  "int4",   "uint2",  "uint3",  "uint4",  "short2",
-                            "short3", "short4", "ushort2", "ushort3", "ushort4", "vec3"})
+    r.add_comment("// a prefix `+` of every number and vector is the value itself, as every target writes it "
+                  "(CHK-410)");
+    for (auto const type : {"float",  "half",   "int",    "uint",    "short",   "ushort",  "float2", "float3", "float4",
+                            "half2",  "half3",  "half4",  "int2",    "int3",    "int4",    "uint2",  "uint3",  "uint4",
+                            "short2", "short3", "short4", "ushort2", "ushort3", "ushort4", "vec3"})
         r.add(function_record{
             .signature = cc::format("@pure @operator(\"+\") fun {}(x: {}) -> {}", named("identity", type), type, type),
             .evaluate = identity,
