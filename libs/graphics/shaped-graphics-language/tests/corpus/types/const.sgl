@@ -128,3 +128,29 @@ binding taps_out:
 
 @compute(4) fun spread_taps(@thread_id id: int3){taps_out}:
     taps_out.values[id.x] = offsets[id.x % 3] * g2 + (sun.tint.xy * norm)
+
+// a function's own const is computed as a file-scope one is, and reads the consts before it (CHK-413)
+fun solid_angle_of(fraction: float) -> float:
+    const sphere = 4.0 * pi
+    const hemisphere = sphere * 0.5
+    return hemisphere * fraction
+
+test solid_angle_of(1.0) > 6.28 and solid_angle_of(1.0) < 6.29
+
+// it may index an array and size one, as a file-scope const may
+test:
+    const n = 2 + 1
+    let row = int[n].filled(4)
+    row[n - 1] == 4 and row.length == n
+
+// a const reads no local: it is known before the function runs
+@expect(error = "unknown-name")
+test:
+    let x = 2.0
+    const twice = x * 2.0
+    twice == 4.0
+
+@expect(error = "unsupported-yet")
+test:
+    @option const k = 1
+    k == 1

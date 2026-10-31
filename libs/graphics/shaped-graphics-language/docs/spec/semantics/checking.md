@@ -248,6 +248,8 @@ fun f(x: float) -> float:
   A call that needs a binding is `binding-not-listed`, and a run that has no value, takes more than 100000 steps or fails an assert is `constant-without-value`.
   A computed `int`, `uint`, `float` or enum case is the same constant a literal is, so an array length or a `case` pattern takes it.
   A written type the value does not have is `type-mismatch`.
+* **CHK-413** A `const` in a function body is one of CHK-219, named from its line to the end of its block, and it takes no attribute.
+  Its value reads the file's names and the consts its body declared before it, and none of the function's parameters or locals: one of those is `unknown-name`.
 * **CHK-221** A `const` whose value is an enum case names that case as a `case` pattern, so it counts for exhaustiveness as `e.case` does (CHK-159).
 * **CHK-222** `true` and `false` are `@shadowable(false)` consts of `core.sgl`, whose values are the cases of `bool` (CHK-218).
 * **CHK-405** `pi` is a `float` const of `core.sgl`, and a program's own `pi` hides it, as any shadowable name of the prelude is (CHK-220).

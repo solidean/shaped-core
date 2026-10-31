@@ -54,7 +54,7 @@ bool checker::is_type_name(i32 file, ast::expr_id expr) const
     return kind == symbol_kind::structure || kind == symbol_kind::enumeration;
 }
 
-cc::optional<i32> checker::constant_count(i32 file, ast::expr_id expr)
+cc::optional<i32> checker::constant_count(i32 file, ast::expr_id expr, function_scope const* scope)
 {
     auto const& e = ast_of(file).at(expr);
     auto const text = text_of(file, span_of(file, expr));
@@ -63,10 +63,21 @@ cc::optional<i32> checker::constant_count(i32 file, ast::expr_id expr)
     auto const* const n = e.node.try_as<ast::name>();
     if (n == nullptr)
         return {};
-    auto const* const found = names_seen_from(file).get_ptr(text);
-    if (found == nullptr || found->empty() || out.at(found->front()).kind != symbol_kind::constant)
-        return {};
-    auto const id = found->front();
+    // a local hides a file-scope const of its name, unless it is a function's own `const` (CHK-413)
+    auto id = symbol_id::none;
+    if (auto const* const local = scope != nullptr ? scope->find_local(text) : nullptr)
+    {
+        if (local->where.kind != target_kind::symbol)
+            return {};
+        id = local->where.symbol;
+    }
+    else
+    {
+        auto const* const found = names_seen_from(file).get_ptr(text);
+        if (found == nullptr || found->empty() || out.at(found->front()).kind != symbol_kind::constant)
+            return {};
+        id = found->front();
+    }
     set_target(file, expr, {.kind = target_kind::symbol, .symbol = id});
     if (demand(id, file, span_of(file, expr)) != symbol_state::checked)
         return {};
@@ -149,8 +160,9 @@ type_id checker::resolve_array(i32 file, ast::expr_id expr, ast::index const& no
     auto counts = cc::vector<i32>();
     for (auto const& a : arguments)
     {
-        auto const count = !a.name.empty() || a.is_splat || !ast::is_valid(a.value) ? cc::optional<i32>()
-                                                                                    : constant_count(file, a.value);
+        auto const count = !a.name.empty() || a.is_splat || !ast::is_valid(a.value)
+                             ? cc::optional<i32>()
+                             : constant_count(file, a.value, scope);
         if (!count.has_value() || count.value() < 1)
         {
             report(diagnostic_kind::invalid_constant_argument, file,

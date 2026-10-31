@@ -398,6 +398,15 @@ struct checker
     /// The symbols in compilation, outermost first, which is the loop a dependency cycle names.
     cc::vector<symbol_id> compiling;
     cc::vector<function_notes> notes;
+    /// A `const` in a function body (CHK-413): a symbol no file scope sees, with the earlier ones of its body it reads.
+    struct local_constant
+    {
+        i32 file = 0;
+        ast::decl_id declaration = ast::decl_id::none;
+        symbol_id symbol = symbol_id::none;
+        cc::vector<local_name> visible;
+    };
+    cc::vector<local_constant> local_constants;
     /// Parallel to the registry's functions: the prelude symbol declaring each, filled before any tree is flattened.
     cc::vector<symbol_id> symbol_of_builtin;
     /// Every call of a function that is no `@builtin`, in the order the bodies were checked.
@@ -705,7 +714,7 @@ struct checker
     /// The generic struct of the prelude `expr` names, `none` where it names no such struct (CHK-339).
     type_id generic_named(i32 file, ast::expr_id expr);
     /// An array's length as written: an int literal or a `const`; none for anything else.
-    [[nodiscard]] cc::optional<i32> constant_count(i32 file, ast::expr_id expr);
+    [[nodiscard]] cc::optional<i32> constant_count(i32 file, ast::expr_id expr, function_scope const* scope = nullptr);
     /// A checked index's value when it is an int literal or names a `const`; none for anything else.
     [[nodiscard]] cc::optional<i32> constant_index(i32 file, ast::expr_id expr) const;
     /// The same of a `uint` index: a literal with its `u` suffix, or a `const` of `uint`.
@@ -981,6 +990,9 @@ struct checker
     void check_condition(function_scope& scope, ast::expr_id condition);
     /// Declares a local, which shadows every earlier local, parameter and module-level symbol of its name (CHK-53, CHK-54).
     void declare_local(function_scope& scope, local_name local);
+    /// The symbol of the `const` that `decl` of a function body declares, minted once however often the body is
+    /// checked.
+    [[nodiscard]] symbol_id local_constant_of(function_scope const& scope, ast::decl_id decl);
     /// A `loop:`; the result is the type its breaks carry, and `nothing` for one that is a statement.
     /// `has_break` is false for a loop nothing leaves, which never ends.
     [[nodiscard]] type_id check_loop(function_scope& scope,

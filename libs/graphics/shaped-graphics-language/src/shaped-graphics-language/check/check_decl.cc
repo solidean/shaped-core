@@ -1261,7 +1261,12 @@ void checker::compile_const(symbol_id id)
                                      .bindings = {.first = u32(out.binding_lists.size()), .count = 0}});
             notes.push_back({});
         }
-        return function_scope{.function = scope_symbol, .file = file};
+        auto scope = function_scope{.function = scope_symbol, .file = file};
+        // CHK-413: a function's own `const` reads the ones its body declared before it
+        for (auto const& local : local_constants)
+            if (local.symbol == id)
+                scope.locals = local.visible;
+        return scope;
     };
     auto const checked_value = [&]
     {

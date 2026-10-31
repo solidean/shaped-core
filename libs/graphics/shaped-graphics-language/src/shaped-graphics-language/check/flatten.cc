@@ -3352,11 +3352,11 @@ struct flattener
         }
         if (auto const* const print = s.node.try_as<ast::print_stmt>())
             return add_stmt(from, flat_print{.value = flatten_expr(print->message)});
-        // A test in a function body never runs where it stands (CHK-224), and a `require` is no code at all.
+        // A test in a function body never runs where it stands (CHK-224), and a `require` and a `const` are no code.
         if (auto const* const d = s.node.try_as<ast::decl_stmt>();
             d != nullptr && ast::is_valid(d->declaration)
-            && (ast().at(d->declaration).node.is<ast::test_decl>()
-                || ast().at(d->declaration).node.is<ast::require_decl>()))
+            && (ast().at(d->declaration).node.is<ast::test_decl>() || ast().at(d->declaration).node.is<ast::require_decl>()
+                || ast().at(d->declaration).node.is<ast::const_decl>()))
             return;
         if (auto const* const a = s.node.try_as<ast::assert_stmt>())
             return flatten_check(from, a->condition, true);

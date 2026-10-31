@@ -770,6 +770,12 @@ type_id checker::check_name(function_scope& scope, ast::expr_id id, ast::name co
 
     if (auto const* const local = scope.find_local(text))
     {
+        // CHK-413: a function's own `const` is the symbol it was compiled to
+        if (local->where.kind == target_kind::symbol && !local->is_captured)
+        {
+            auto const one = cc::vector<symbol_id>{local->where.symbol};
+            return check_symbol_value(scope, id, text, &one);
+        }
         set_target(file, id, local->where);
         if (local->is_captured)
         {
