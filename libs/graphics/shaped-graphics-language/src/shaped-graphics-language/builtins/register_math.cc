@@ -342,6 +342,16 @@ void reinterpret_as_float(leaves in, result& out)
 {
     reinterpret(in, out, value_kind::scalar_float);
 }
+/// CHK-417: a half's 16 bits, as the low bits of a uint whose high bits are zero.
+void reinterpret_half_as_uint(leaves in, result& out)
+{
+    out.push_back(scalar::of_uint(half_bits_of(in[0].as_float())));
+}
+/// CHK-417: the half the low 16 bits of a uint are; the high bits are ignored.
+void reinterpret_uint_as_half(leaves in, result& out)
+{
+    out.push_back(scalar::of_half(f64(float_of_half_bits(in[0].bits & 0xffffu))));
+}
 
 // ---- how targets write what they spell differently ------------------------------------------------------------
 
@@ -490,6 +500,37 @@ written write_reinterpret(call_context const& c)
     return {};
 }
 
+/// CHK-417: the bits travel in a uint everywhere, since WGSL has no 16-bit integer (EMIT-109); WGSL reaches them as
+/// half of a 32-bit `vec2<f16>`, whose first component is its low bits.
+written write_half_as_uint(call_context const& c)
+{
+    auto const& x = c.arguments[0].text;
+    switch (c.target)
+    {
+    case language::hlsl:
+        return {.text = cc::format("uint(asuint16({}))", x)};
+    case language::wgsl:
+        return {.text = cc::format("bitcast<u32>(vec2<f16>({}, 0.0h))", x)};
+    case language::msl:
+        return {.text = cc::format("uint(as_type<ushort>({}))", x)};
+    }
+    return {};
+}
+written write_uint_as_half(call_context const& c)
+{
+    auto const& x = c.arguments[0].text;
+    switch (c.target)
+    {
+    case language::hlsl:
+        return {.text = cc::format("asfloat16(uint16_t({} & 0xffffu))", x)};
+    case language::wgsl:
+        return {.text = cc::format("bitcast<vec2<f16>>({}).x", x)};
+    case language::msl:
+        return {.text = cc::format("as_type<half>(ushort({}))", x)};
+    }
+    return {};
+}
+
 /// HLSL has no packing of four bytes before shader model 6.6's integer forms, so the text declares one per function.
 cc::string hlsl_packing_helper(helper_context const& c, cc::string_view text)
 {
@@ -589,6 +630,7 @@ constexpr cc::string_view k_reverse_bits_wgsl[] = {"reverseBits"};
 constexpr cc::string_view k_reverse_bits_msl[] = {"reverse_bits"};
 constexpr cc::string_view k_reinterpret_hlsl[] = {"asfloat", "asint", "asuint"};
 constexpr cc::string_view k_reinterpret_wgsl[] = {"bitcast"};
+constexpr cc::string_view k_half_bits_hlsl[] = {"asuint16", "asfloat16"};
 constexpr cc::string_view k_as_type[] = {"as_type"};
 constexpr cc::string_view k_pack_unorm_hlsl[] = {"floor", "saturate"};
 constexpr cc::string_view k_pack_snorm_hlsl[] = {"floor", "clamp"};
@@ -849,6 +891,19 @@ void sgl::builtins::register_math(registry& r)
              .hlsl_names = k_reinterpret_hlsl,
              .wgsl_names = k_reinterpret_wgsl,
              .msl_names = k_as_type});
+    r.add_comment("// a half's bits travel as the low 16 bits of a uint, on every target (CHK-417)");
+    add(r, "@pure fun reinterpret_as_uint(x: half) -> uint", reinterpret_half_as_uint,
+        {.kind = spelling_kind::custom,
+         .custom = write_half_as_uint,
+         .hlsl_names = k_half_bits_hlsl,
+         .wgsl_names = k_reinterpret_wgsl,
+         .msl_names = k_as_type});
+    add(r, "@pure fun reinterpret_as_half(x: uint) -> half", reinterpret_uint_as_half,
+        {.kind = spelling_kind::custom,
+         .custom = write_uint_as_half,
+         .hlsl_names = k_half_bits_hlsl,
+         .wgsl_names = k_reinterpret_wgsl,
+         .msl_names = k_as_type});
 
     r.add_comment("// packing into a uint and back: bytes rounded half up, as floor(x + 0.5), and halves rounded to "
                   "even");

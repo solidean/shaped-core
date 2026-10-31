@@ -697,6 +697,8 @@ fun shade(k: float) -> float:
   A float out of the integer's range, and a NaN, become a value the language does not specify, and it may differ between targets.
   Between `int` and `uint` the bits stay.
   The interpreter's choice of the unspecified value is saturation at the integer's bounds, and 0 for a NaN.
+* **CHK-417** `h.bits` of a `half` is its 16 bits as the low bits of a `uint`, whose high bits are zero, and `half.from_bits(u)` is the `half` the low 16 bits of `u` are.
+  The bits travel in a `uint` on every target, since WGSL has no 16-bit integer (EMIT-109), so the arithmetic on them is ordinary `uint` arithmetic.
 * **CHK-412** `vec3` and `pos3` convert to `float3`, and `hpos4` to `float4`, with `as`: the value as the plain vector of its width, each component kept.
   Only that direction converts; the way back is a constructor, `vec3(..v)`, which says what the numbers become.
 * **CHK-396** `T(x)`, where `T` is a numeric scalar or a plain vector, is `x as T` wherever `as` converts the type of `x` to `T`, and `x` where it is a `T` already ([why](why/checking.md#chk-396)).

@@ -81,6 +81,10 @@ fun float2.from_bits(u: uint2) => reinterpret_as_float(u)
 fun float3.from_bits(u: uint3) => reinterpret_as_float(u)
 fun float4.from_bits(u: uint4) => reinterpret_as_float(u)
 
+// a half's bits are the low 16 bits of a uint, since no target but HLSL and MSL has a 16-bit integer to hold them (CHK-417)
+fun half.bits => reinterpret_as_uint(self)
+fun half.from_bits(u: uint) => reinterpret_as_half(u)
+
 fun int.from_bits(u: uint) => reinterpret_as_int(u)
 fun int2.from_bits(u: uint2) => reinterpret_as_int(u)
 fun int3.from_bits(u: uint3) => reinterpret_as_int(u)
