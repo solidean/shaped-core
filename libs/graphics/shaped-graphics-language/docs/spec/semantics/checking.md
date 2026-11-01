@@ -1504,7 +1504,10 @@ A call deduces what each parameter stands for, and inlining writes that in its p
   The same error found by another instance is reported once.
   An inferred result (CHK-122) is each instance's own.
   A generic function of the program that nothing instantiates is the warning `generic-not-instantiated`, since only its names were checked.
-  A type parameter in scope hides every type of its name, and one with a bound, a default or an attribute is `unsupported-yet`.
+  A bare `T`, and `T: type`, is a type parameter; `n: int` is a **value parameter**, of `int`, `uint`, `bool` or `float`.
+  A value parameter is a value of its type in the body, and in an instance the constant it stands for; its name in a type position is `wrong-kind-of-name`.
+  Nothing deduces a value parameter yet, so a call states it (CHK-340).
+  A type parameter in scope hides every type of its name, and one with a default or an attribute is `unsupported-yet`.
   It hides every other symbol of its name too, so its name as a value or before a dot is `wrong-kind-of-name`.
   A call of it, `T(x)`, is a call of what it stands for in each instance: `float(x)` where `T` is `float`.
   An entry point with type parameters is `wrong-kind-of-name`, since the GPU hands it values of known types.
@@ -1515,8 +1518,9 @@ A call deduces what each parameter stands for, and inlining writes that in its p
   Such a function is generic over `A`, which its signature and its body may name as their own type parameter: `fun mixed_hit.procedural(self) -> procedural_hit[A]`.
   The bare name in a type position is the template itself, open in its parameter, which a call deduces as it deduces a type parameter.
 * **CHK-340** A call of a generic function binds each type parameter from its arguments, then from where the call stands.
-  A call may state generic arguments first, each a type, by position or by name as call arguments are: `f[float](x)`, `f[.B = int](x)`.
-  A candidate they do not fit is pruned before anything is deduced: one with fewer type parameters than positional arguments, or none of a name given.
+  A call may state generic arguments first, by position or by name as call arguments are: `f[float](x)`, `f[.B = int](x)`, `blur[3](c)`.
+  Each is a type, or a constant `int`, `uint`, `bool` or `float` for a value parameter; two constants are one argument when their bits are, with every NaN one.
+  A candidate they do not fit is pruned before anything is deduced: one with fewer type parameters than positional arguments, none of a name given, or a parameter of the other kind or another value type.
   An argument whose parameter's type names a type parameter binds it to the argument's type exactly.
   Two arguments that bind one parameter to two types leave the candidate unmatched, and the call is `no-matching-overload`.
   A function and a literal are bound last, since what they meet depends on the rest: a lambda takes the parameter types the call bound, and its result binds what they left.

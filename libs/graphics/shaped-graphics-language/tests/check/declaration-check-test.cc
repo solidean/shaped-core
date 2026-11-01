@@ -265,10 +265,15 @@ TEST("sgl check - a generic body is checked per instantiation, and its names whe
               .contains("note user:[f(2.0)] in f[float], instantiated here"));
     CHECK(reports_for("fun f[A](v: A) -> A:\n    let k = A\n    return v\n")
           == "wrong-kind-of-name user:[A] A is a type parameter, which names a type and no value\n" + not_instantiated);
+    // `n: float` is a value parameter, which names a value and no type; `T: type` is a type parameter spelled out
     CHECK(reports_for("fun f[T: float](x: T) => x\n")
-          == "unsupported-yet user:[T: float] a type parameter with a bound, a default or an attribute\n");
+              .starts_with("wrong-kind-of-name user:[T] T is a value parameter, which names a value and no type\n"));
+    CHECK(reports_for("fun f[T: type](x: T) -> T => x\nfun g() -> int => f(1)\n") == "");
+    CHECK(reports_for("fun f[n: float3](x: float) => x\n")
+              .starts_with("unsupported-yet user:[float3] a value parameter of float3, where int, uint, bool and float "
+                           "are"));
     CHECK(reports_for("fun f[T = float](x: T) => x\n")
-          == "unsupported-yet user:[T = float] a type parameter with a bound, a default or an attribute\n");
+          == "unsupported-yet user:[T = float] a type parameter with a default or an attribute\n");
 }
 
 TEST("sgl check - a generic struct is the prelude's, and an instance names one type argument")

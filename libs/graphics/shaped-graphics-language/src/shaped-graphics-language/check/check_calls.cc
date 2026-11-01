@@ -469,7 +469,7 @@ type_id checker::check_call(function_scope& scope, ast::expr_id id, ast::call co
                 auto is_sound = true;
                 for (auto const& a : ast.at(index->arguments))
                 {
-                    auto const type = resolve_value_type(file, a.value, &scope);
+                    auto const type = stated_argument_of(scope, a.value);
                     is_sound = is_sound && type != error_type && !a.is_splat;
                     stated.push_back({.name = a.name.empty() ? cc::string_view() : text_of(file, a.name), .type = type});
                 }

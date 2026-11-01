@@ -292,6 +292,12 @@ cc::optional<candidate_match> checker::match(i32 file, symbol_id candidate, call
                         parameter = q;
             if (!is_valid(parameter))
                 return cc::nullopt;
+            // a value parameter takes a constant of its type, and a type parameter a type
+            auto const& given = out.at(s.type);
+            auto const wants_value = is_valid(out.at(parameter).element);
+            if ((given.kind == type_kind::constant) != wants_value
+                || (wants_value && given.element != out.at(parameter).element))
+                return cc::nullopt;
             for (auto k = isize(0); k + 1 < result.bindings.size(); k += 2)
                 if (result.bindings[k] == parameter)
                     return cc::nullopt;
@@ -823,10 +829,15 @@ void checker::judge_wide_literals(isize first)
 type_id checker::deduce_result(function_scope const& scope, ast::expr_id id, symbol_id callee, cc::vector<type_id>& bindings)
 {
     auto const info = out.functions[out.at(callee).info];
+    // what its signature names, which is all a synthesized constructor has, and every parameter the function declares,
+    // a value parameter that no type names among them
     auto needed = cc::vector<type_id>();
     for (auto const& p : out.at(info.parameters))
         collect_type_parameters(p.type, needed);
     collect_type_parameters(info.result, needed);
+    for (auto const q : out.at(info.type_parameters))
+        if (!needed.values().any([&](type_id n) { return n == q; }))
+            needed.push_back(q);
     if (needed.empty())
         return info.result;
     if (is_valid(expected_result) && expected_result != error_type)

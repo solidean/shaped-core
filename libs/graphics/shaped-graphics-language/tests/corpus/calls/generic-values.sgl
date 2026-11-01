@@ -1,0 +1,34 @@
+// a generic parameter may be a value, `[n: int]`, which a call states and the body reads as a constant
+
+fun scaled_by[n: int](x: float) -> float => x * float(n)
+
+fun repeated[n: int](x: float) -> float:
+    let mut sum = 0.0
+    for i in 0 ..< n:
+        sum += x
+    return sum
+
+fun chosen[b: bool](x: float) -> float:
+    if b:
+        return x
+    return -x
+
+const three = 3
+
+// each value is its own instance
+test:
+    scaled_by[3](2.0) == 6.0
+    scaled_by[2](2.0) == 4.0
+    repeated[4](0.5) == 2.0
+    chosen[true](1.0) == 1.0
+    chosen[false](1.0) == -1.0
+
+// by name, and from a const
+test:
+    scaled_by[.n = 2](1.5) == 3.0
+    scaled_by[three](1.0) == 3.0
+
+// a type where a value is asked fits no candidate
+@expect(error = "no-matching-overload")
+test:
+    scaled_by[float](1.0) == 1.0

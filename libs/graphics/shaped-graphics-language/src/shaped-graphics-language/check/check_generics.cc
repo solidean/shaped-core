@@ -1,6 +1,7 @@
 #include <clean-core/sequence/sequence.hh>
 #include <clean-core/string/format.hh>
 #include <shaped-graphics-language/check/impl/checker.hh>
+#include <shaped-graphics-language/interpret/scalar.hh>
 
 using namespace sgl;
 using namespace sgl::check;
@@ -380,4 +381,58 @@ i32 checker::existing_function_instance(symbol_id function, cc::span<type_id con
             return i32(i);
     }
     return -1;
+}
+
+type_id checker::constant_type(type_id element, u32 bits)
+{
+    // every NaN is one value, so two spellings of it name one instance
+    if (out.name_of(element) == "float" && (bits & 0x7f800000u) == 0x7f800000u && (bits & 0x007fffffu) != 0)
+        bits = 0x7fc00000u;
+    for (auto i = isize(0); i < out.types.size(); ++i)
+        if (out.types[i].kind == type_kind::constant && out.types[i].element == element && u32(out.types[i].count) == bits)
+            return type_id(i);
+    auto spelled = cc::string();
+    if (out.name_of(element) == "bool")
+        spelled = bits != 0 ? "true" : "false";
+    else if (out.name_of(element) == "float")
+        spelled = cc::format("{}", scalar{.kind = value_kind::scalar_float, .bits = bits}.as_float());
+    else if (out.name_of(element) == "uint")
+        spelled = cc::format("{}u", bits);
+    else
+        spelled = cc::format("{}", i32(bits));
+    auto const id = type_id(out.types.size());
+    out.types.push_back({.kind = type_kind::constant, .element = element, .count = i32(bits), .spelled = spelled});
+    return id;
+}
+
+type_id checker::stated_argument_of(function_scope& scope, ast::expr_id expr)
+{
+    auto const file = scope.file;
+    auto const& node = ast_of(file).at(expr).node;
+    // a name is a type unless it is a value: a local, a const or a case; anything but a name or a type form is a value
+    auto is_value = !node.is<ast::name>() && !node.is<ast::index>() && !node.is<ast::member>();
+    if (auto const* const n = node.try_as<ast::name>())
+    {
+        auto const text = text_of(file, n->where);
+        auto const* const found = seen_from(file, text);
+        is_value = scope.find_local(text) != nullptr
+                || (found != nullptr && !found->empty() && out.at(found->front()).kind == symbol_kind::constant);
+    }
+    if (auto const* const m = node.try_as<ast::member>())
+        is_value = generic_named(file, m->object) == type_id::none && module_named(file, m->object, &scope) < 0;
+    if (!is_value)
+        return resolve_value_type(file, expr, &scope);
+    auto const type = check_expr(scope, expr);
+    if (type == checked_module::error_type)
+        return checked_module::error_type;
+    auto const is_scalar = out.name_of(type) == "int" || out.name_of(type) == "uint" || out.name_of(type) == "bool"
+                        || out.name_of(type) == "float";
+    auto const evaluated = is_scalar ? evaluate_const(scope.function, file, expr, type) : const_evaluation{};
+    if (!evaluated.is_ok || evaluated.leaves.size() != 1)
+    {
+        report(diagnostic_kind::invalid_constant_argument, file, span_of(file, expr),
+               "a generic argument is a type, or a constant int, uint, bool or float");
+        return checked_module::error_type;
+    }
+    return constant_type(type, evaluated.leaves[0].bits);
 }

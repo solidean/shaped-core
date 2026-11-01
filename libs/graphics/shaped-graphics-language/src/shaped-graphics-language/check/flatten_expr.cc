@@ -48,6 +48,19 @@ auto sgl::check::impl::flattener::flatten_expr(ast::expr_id id) -> flat_expr_id
             return add_expr(type, id, flat_file_sampler{.sampler = where.symbol});
         return fail();
     };
+    // CHK-338: a value parameter's name in an instance is the constant it stands for
+    if (where.kind == target_kind::generic_value)
+    {
+        auto const& constant = c.out.types[where.index];
+        auto const element = c.out.name_of(constant.element);
+        auto const kind = element == "float" ? value_kind::scalar_float
+                        : element == "uint"  ? value_kind::scalar_uint
+                        : element == "bool"  ? value_kind::boolean
+                                             : value_kind::scalar_int;
+        scalar const leaf[] = {{.kind = kind, .bits = u32(constant.count)}};
+        auto at = isize(0);
+        return value_of(type, id, leaf, at);
+    }
     if (e.node.is<ast::name>() || e.node.is<ast::self_ref>())
     {
         for (auto const& b : current()->bound)

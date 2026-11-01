@@ -53,6 +53,9 @@ enum class sgl::check::type_kind : sgl::u8
     /// stored and returned, and nothing else (CHK-338).
     /// A call deduces what it stands for, and inlining writes that in its place.
     type_parameter,
+    /// What a value parameter `[n: int]` stands for in an instance: `element` is its type, and `count` its 32 bits, a
+    /// case index for an enum, with every NaN one (CHK-338).
+    constant,
     // Tuples and anonymous struct types come later, each as a kind that is deduplicated by structure.
 };
 
@@ -738,6 +741,9 @@ enum class sgl::check::target_kind : sgl::u8
     undefined_value,
     /// On a cast: `x as texel[F]` to a texel of another width than `x`'s (CHK-391).
     texel_conversion,
+    /// A value parameter's name in an instance: `index` is the constant it stands for, in `checked_module::types`
+    /// (CHK-338).
+    generic_value,
 };
 
 /// What an expression refers to, for an editor: go to definition, hover, rename.

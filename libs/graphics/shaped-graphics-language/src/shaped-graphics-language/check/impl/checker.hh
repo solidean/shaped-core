@@ -905,6 +905,10 @@ struct checker
     i32 instantiate(symbol_id function, cc::span<type_id const> bindings, i32 file, source_span where);
     /// The instance of `function` for `bindings` the check made, or -1.
     [[nodiscard]] i32 existing_function_instance(symbol_id function, cc::span<type_id const> bindings) const;
+    /// The constant `bits` of `element`, interned, which a value parameter stands for in an instance (CHK-338).
+    [[nodiscard]] type_id constant_type(type_id element, u32 bits);
+    /// A generic argument a call states: a type, or the constant a value expression evaluates to (CHK-340).
+    [[nodiscard]] type_id stated_argument_of(function_scope& scope, ast::expr_id expr);
     /// The warning for each generic function of the program that nothing instantiated (CHK-338).
     void warn_uninstantiated_generics(isize first);
     /// The instance whose body is being checked, whose tables `set_type` and `set_target` write; -1 for none.

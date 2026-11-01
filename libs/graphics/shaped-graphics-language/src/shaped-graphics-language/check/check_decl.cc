@@ -358,7 +358,14 @@ type_id checker::resolve_type(i32 file, ast::expr_id expr, function_scope const*
     for (auto i = type_parameter_names.size(); n != nullptr && i > 0 && !is_valid(parameter); --i)
         if (type_parameter_names[i - 1].first == text_of(file, n->where))
             parameter = type_parameter_names[i - 1].second;
-    if (is_valid(parameter))
+    // a value parameter, or the constant it stands for in an instance, names a value and no type
+    if (is_valid(parameter) && (out.at(parameter).kind == type_kind::constant || is_valid(out.at(parameter).element)))
+    {
+        report(diagnostic_kind::wrong_kind_of_name, file, where,
+               cc::format("{} is a value parameter, which names a value and no type", text_of(file, n->where)));
+        result = checked_module::error_type;
+    }
+    else if (is_valid(parameter))
         result = parameter;
     else if (e.node.is<ast::void_ref>())
         result = checked_module::void_type;
@@ -1742,13 +1749,29 @@ void checker::compile_function(symbol_id id)
     auto type_parameters = cc::vector<type_id>();
     for (auto const& p : ast.at(f.type_parameters))
     {
-        if (ast::is_valid(p.type) || ast::is_valid(p.default_value) || !p.attributes.empty())
+        // a bare `T` is `T: type`, and `n: int` a value parameter, which the body reads as a constant
+        auto value_type = type_id::none;
+        if (ast::is_valid(p.type) && text_of(file, span_of(file, p.type)) != "type")
+        {
+            value_type = resolve_value_type(file, p.type);
+            auto const name = out.name_of(value_type);
+            if (value_type != checked_module::error_type && name != "int" && name != "uint" && name != "bool"
+                && name != "float")
+            {
+                unsupported(file, span_of(file, p.type),
+                            cc::format("a value parameter of {}, where int, uint, bool and float are carried", name));
+                is_failed = true;
+            }
+        }
+        if (ast::is_valid(p.default_value) || !p.attributes.empty())
         {
             // still declared, so a mention of it is no second diagnostic
-            unsupported(file, span_of(file, p.form), "a type parameter with a bound, a default or an attribute");
+            unsupported(file, span_of(file, p.form), "a type parameter with a default or an attribute");
             is_failed = true;
         }
         auto const parameter = new_type_parameter(text_of(file, p.name), id);
+        if (is_valid(value_type) && value_type != checked_module::error_type)
+            out.types.own(index_of(parameter)).element = value_type;
         type_parameters.push_back(parameter);
         type_parameter_names.push_back({text_of(file, p.name), parameter});
     }

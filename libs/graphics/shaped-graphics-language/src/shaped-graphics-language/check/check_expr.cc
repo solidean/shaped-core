@@ -792,6 +792,18 @@ type_id checker::check_name(function_scope& scope, ast::expr_id id, ast::name co
     }
     if (is_type_parameter_name(text))
     {
+        auto stands_for = type_id::none;
+        for (auto i = type_parameter_names.size(); i > 0 && !is_valid(stands_for); --i)
+            if (type_parameter_names[i - 1].first == text)
+                stands_for = type_parameter_names[i - 1].second;
+        // CHK-338: a value parameter is a value of its type, and in an instance the constant it stands for
+        if (out.at(stands_for).kind == type_kind::constant)
+        {
+            set_target(file, id, {.kind = target_kind::generic_value, .index = i32(index_of(stands_for))});
+            return out.at(stands_for).element;
+        }
+        if (is_valid(out.at(stands_for).element))
+            return out.at(stands_for).element;
         report(diagnostic_kind::wrong_kind_of_name, file, where,
                cc::format("{} is a type parameter, which names a type and no value", text));
         return error_type;

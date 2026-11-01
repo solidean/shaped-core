@@ -492,6 +492,7 @@ fun sum[T](a: T, b: T) => a + b          // so a body may use what each argument
 twice(3, x => x + 1)                     // A deduced from arguments, a lambda's result, or where the call stands (CHK-340)
 converted[int](2.75)                     // generic arguments stated by position or `[.To = int]`, the rest deduced (CHK-340)
 fun zero_of[T]() -> T => T(0)             // a call of T is a call of what it stands for in each instance
+fun scaled_by[n: int](x: float) => x * float(n)   // a value parameter, a constant in each instance; call scaled_by[3](x)
 ```
 
 ## The language: ray tracing ([docs/spec/raytracing.md](docs/spec/raytracing.md))
