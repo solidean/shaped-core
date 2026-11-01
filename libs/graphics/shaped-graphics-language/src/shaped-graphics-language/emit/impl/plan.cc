@@ -590,13 +590,15 @@ struct planner
             if (r.element_form.has_value())
                 r.element_form.value().name = p.names.mint(cc::format("{}_memory", p.m.name_of(r.element)));
         }
-        // an array of structs in a form is spelled as the struct is planned
+        // an array of structs in a form is spelled as the struct is planned, and an array of arrays as the inner one is
         auto const spell_structs = [&](cc::optional<memory_form>& form)
         {
             if (form.has_value())
                 for (auto& f : form.value().fields)
                     if (is_valid(f.struct_type) && p.struct_of_type[index_of(f.struct_type)] >= 0)
                         f.type = p.structs[p.struct_of_type[index_of(f.struct_type)]].name;
+                    else if (is_valid(f.struct_type) && p.array_of_type[index_of(f.struct_type)] >= 0)
+                        f.type = p.array_texts[p.array_of_type[index_of(f.struct_type)]];
         };
         if (p.constants.has_value())
             spell_structs(p.constants.value().form);
