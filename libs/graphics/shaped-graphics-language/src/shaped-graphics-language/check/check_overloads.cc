@@ -275,6 +275,30 @@ cc::optional<candidate_match> checker::match(i32 file, symbol_id candidate, call
     auto result = candidate_match{.candidate = candidate,
                                   .slots = cc::move(bound.slots),
                                   .chains = cc::vector<i32>::create_filled(arguments.written.size(), 0)};
+    // CHK-340: stated generic arguments bind first, and a candidate they do not fit by position or name is pruned
+    if (!arguments.stated.empty())
+    {
+        auto const type_parameters
+            = cc::vector<type_id>::create_copy_of(out.at(out.functions[out.at(candidate).info].type_parameters));
+        auto positional = isize(0);
+        for (auto const& s : arguments.stated)
+        {
+            auto parameter = type_id::none;
+            if (s.name.empty())
+                parameter = positional < type_parameters.size() ? type_parameters[positional++] : type_id::none;
+            else
+                for (auto const q : type_parameters)
+                    if (out.at(q).spelled == s.name)
+                        parameter = q;
+            if (!is_valid(parameter))
+                return cc::nullopt;
+            for (auto k = isize(0); k + 1 < result.bindings.size(); k += 2)
+                if (result.bindings[k] == parameter)
+                    return cc::nullopt;
+            result.bindings.push_back(parameter);
+            result.bindings.push_back(s.type);
+        }
+    }
     // CHK-340: a parameter whose type names a type parameter binds it to what the argument is, exactly; a function
     // and a literal wait until the rest are bound, since what they meet depends on it
     auto deferred = cc::vector<isize>();

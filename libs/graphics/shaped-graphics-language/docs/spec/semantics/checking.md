@@ -688,7 +688,7 @@ fun shade(k: float) -> float:
 * **CHK-76** A call whose target is a synthesized constructor is a **construction**, and its type is the struct.
 * **CHK-77** A splat argument `..value` in a call of a struct's name stands for the fields of `value`, in order, as positional arguments.
   `value` is of a struct type with fields, or it is `type-mismatch`.
-* **CHK-78** A splat in any other call, a call of a local and type arguments are `unsupported-yet`.
+* **CHK-78** A splat in any other call, a call of a local and type arguments after a struct's name are `unsupported-yet`.
 * **CHK-79** A callee that names a binding is `wrong-kind-of-name`.
 * **CHK-80** `and`, `or` and `not` are no functions: CHK-116.
 * **CHK-195** `x as T` is a call of the `@operator("as")` function whose one parameter is the type of `x` and whose result is `T`.
@@ -1505,9 +1505,9 @@ A call deduces what each parameter stands for, and inlining writes that in its p
   An inferred result (CHK-122) is each instance's own.
   A generic function of the program that nothing instantiates is the warning `generic-not-instantiated`, since only its names were checked.
   A type parameter in scope hides every type of its name, and one with a bound, a default or an attribute is `unsupported-yet`.
-  It hides every other symbol of its name too, so its name as a value, as a callee or before a dot is `wrong-kind-of-name`.
+  It hides every other symbol of its name too, so its name as a value or before a dot is `wrong-kind-of-name`.
+  A call of it, `T(x)`, is a call of what it stands for in each instance: `float(x)` where `T` is `float`.
   An entry point with type parameters is `wrong-kind-of-name`, since the GPU hands it values of known types.
-  A call that states its type arguments, `f[float](x)`, is `unsupported-yet` (CHK-78): a call deduces them.
 * **CHK-339** `struct name[A]:` declares a **generic struct**, over one type parameter its members may name ([why](why/checking.md#chk-339)).
   Only the prelude declares one: in the program's file, and with more than one type parameter, it is `unsupported-yet`.
   `name[T]` in a type position is an **instance**, and two mentions of one instance are one type; a count of type arguments but one is `wrong-kind-of-name`.
@@ -1515,6 +1515,8 @@ A call deduces what each parameter stands for, and inlining writes that in its p
   Such a function is generic over `A`, which its signature and its body may name as their own type parameter: `fun mixed_hit.procedural(self) -> procedural_hit[A]`.
   The bare name in a type position is the template itself, open in its parameter, which a call deduces as it deduces a type parameter.
 * **CHK-340** A call of a generic function binds each type parameter from its arguments, then from where the call stands.
+  A call may state generic arguments first, each a type, by position or by name as call arguments are: `f[float](x)`, `f[.B = int](x)`.
+  A candidate they do not fit is pruned before anything is deduced: one with fewer type parameters than positional arguments, or none of a name given.
   An argument whose parameter's type names a type parameter binds it to the argument's type exactly.
   Two arguments that bind one parameter to two types leave the candidate unmatched, and the call is `no-matching-overload`.
   A function and a literal are bound last, since what they meet depends on the rest: a lambda takes the parameter types the call bound, and its result binds what they left.

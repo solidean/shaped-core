@@ -259,9 +259,10 @@ TEST("sgl check - a generic body is checked per instantiation, and its names whe
     // CHK-338: a type parameter hides every symbol of its name, and names no value
     auto const not_instantiated
         = cc::string("generic-not-instantiated user:[f] nothing instantiates f, so only its names are checked\n");
-    CHECK(reports_for("struct A:\n    x: float\nfun f[A](v: A) -> float => A(1.0).x\n")
-          == "wrong-kind-of-name user:[A] A is a type parameter, and a call needs a function or a struct\n"
-                 + not_instantiated);
+    // a call of one is a call of what it stands for in each instance, here `float(1.0).x`
+    CHECK(reports_for("struct A:\n    x: float\nfun f[A](v: A) -> float => A(1.0).x\n") == not_instantiated);
+    CHECK(reports_for("struct A:\n    x: float\nfun f[A](v: A) -> float => A(1.0).x\nfun g() -> float => f(2.0)\n")
+              .contains("note user:[f(2.0)] in f[float], instantiated here"));
     CHECK(reports_for("fun f[A](v: A) -> A:\n    let k = A\n    return v\n")
           == "wrong-kind-of-name user:[A] A is a type parameter, which names a type and no value\n" + not_instantiated);
     CHECK(reports_for("fun f[T: float](x: T) => x\n")

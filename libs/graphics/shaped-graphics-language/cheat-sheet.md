@@ -490,6 +490,8 @@ apply(x => x * k, 2.0)                   // an arrow lambda, seeing `k`; inlined
 fun twice[A](x: A, f: (A) -> A) -> A => f(f(x))   // the body is checked per instance, its names where written (CHK-338)
 fun sum[T](a: T, b: T) => a + b          // so a body may use what each argument type has; a test that calls it checks it
 twice(3, x => x + 1)                     // A deduced from arguments, a lambda's result, or where the call stands (CHK-340)
+converted[int](2.75)                     // generic arguments stated by position or `[.To = int]`, the rest deduced (CHK-340)
+fun zero_of[T]() -> T => T(0)             // a call of T is a call of what it stands for in each instance
 ```
 
 ## The language: ray tracing ([docs/spec/raytracing.md](docs/spec/raytracing.md))

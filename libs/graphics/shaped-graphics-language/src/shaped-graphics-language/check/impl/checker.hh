@@ -199,6 +199,13 @@ struct number_literal
     f64 real = 0;
 };
 
+/// A generic argument a call states: by position where `name` is empty, else by the parameter's name (CHK-340).
+struct stated_argument
+{
+    cc::string_view name;
+    type_id type = type_id::none;
+};
+
 /// The arguments of one call as it wrote them, a splat spread into one per field, before any candidate is looked at.
 struct call_arguments
 {
@@ -223,6 +230,8 @@ struct call_arguments
     cc::vector<cc::string_view> leading_dots;
     /// An argument had the error type or was reported, so the call reports nothing about its arguments.
     bool is_poisoned = false;
+    /// The generic arguments the call states, `f[float, .B = int](…)`, in the order written (CHK-340).
+    cc::vector<stated_argument> stated;
 };
 
 /// A function's name or a lambda written as an argument, which has no type until a parameter of function type meets it.
@@ -1244,7 +1253,8 @@ struct checker
                                            ast::call const& call,
                                            cc::string_view text,
                                            cc::vector<symbol_id> const* found,
-                                           bool is_qualified);
+                                           bool is_qualified,
+                                           cc::span<stated_argument const> stated = {});
     [[nodiscard]] cc::string signature_text(cc::string_view spelling, cc::span<type_id const> types) const;
     /// A call as it was written, each named argument with its name and a number literal as its text:
     /// `sub(int, b = 2.5)`; `file_of_call` is the file its arguments stand in.

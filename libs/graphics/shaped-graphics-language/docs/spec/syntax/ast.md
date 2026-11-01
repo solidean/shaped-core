@@ -111,7 +111,7 @@ let k = x in 0..<1
 ### Lists
 
 * **AST-23** An element of a paren group reads as an **argument**: an optional name, a value, and whether it is a splat.
-* **AST-24** An assignment directly inside a paren group is a named argument, and its left side, an identifier or a leading-dot form, is the name.
+* **AST-24** An assignment directly inside a paren group or a square list is a named argument, and its left side, an identifier or a leading-dot form, is the name.
 * **AST-25** A paren literal reads as `tuple` when it is round, `array` when it is square and `object` when it is curly.
 * **AST-26** `(x)` is `x` and no tuple, `()` is the empty tuple, and `(x,)`, `(a = 1)` and `(..v)` are each a tuple of one element.
 * **AST-27** An element of an `object` that is one bare identifier is the **object shorthand** for `a = a`, and the AST records the shorthand without expanding it.

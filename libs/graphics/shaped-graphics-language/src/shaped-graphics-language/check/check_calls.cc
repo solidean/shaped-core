@@ -454,6 +454,34 @@ type_id checker::check_call(function_scope& scope, ast::expr_id id, ast::call co
     if (auto const* const index = callee.node.try_as<ast::index>())
         if (auto const table = callables_named(file, index->object); is_valid(table))
             return check_callable_call(scope, id, call, *index, table);
+    // CHK-340: `f[float, .B = int](x)` states generic arguments of a function, each a type, by position or by name
+    if (auto const* const index = callee.node.try_as<ast::index>())
+        if (auto const* const object = ast.at(index->object).node.try_as<ast::name>(); object != nullptr)
+        {
+            auto const name = text_of(file, object->where);
+            auto const* const found = seen_from(file, name);
+            auto const is_function = scope.find_local(name) == nullptr && !is_type_parameter_name(name)
+                                  && found != nullptr && !found->empty()
+                                  && out.at(found->front()).kind == symbol_kind::function;
+            if (is_function)
+            {
+                auto stated = cc::vector<stated_argument>();
+                auto is_sound = true;
+                for (auto const& a : ast.at(index->arguments))
+                {
+                    auto const type = resolve_value_type(file, a.value, &scope);
+                    is_sound = is_sound && type != error_type && !a.is_splat;
+                    stated.push_back({.name = a.name.empty() ? cc::string_view() : text_of(file, a.name), .type = type});
+                }
+                if (!is_sound)
+                {
+                    (void)check_arguments(scope, call.arguments, false);
+                    return error_type;
+                }
+                set_target(file, index->object, {.kind = target_kind::symbol, .symbol = found->front()});
+                return check_named_call(scope, id, call, name, found, false, stated);
+            }
+        }
     if (n == nullptr)
     {
         (void)check_arguments(scope, call.arguments, false);
@@ -498,12 +526,23 @@ type_id checker::check_call(function_scope& scope, ast::expr_id id, ast::call co
         return error_type;
     }
 
-    // CHK-338: a type parameter hides every symbol of its name, a struct's constructor among them
+    // CHK-338: a type parameter hides every symbol of its name, and a call of it is a call of what it stands for in
+    // each instance, which its generic pass leaves to them
     if (is_type_parameter_name(text))
     {
+        auto stands_for = type_id::none;
+        for (auto i = type_parameter_names.size(); i > 0 && !is_valid(stands_for); --i)
+            if (type_parameter_names[i - 1].first == text)
+                stands_for = type_parameter_names[i - 1].second;
+        if (current_instance >= 0 && is_valid(stands_for) && !is_open(stands_for) && is_valid(out.at(stands_for).symbol))
+        {
+            auto const name = out.at(out.at(stands_for).symbol).name;
+            return check_named_call(scope, id, call, name, seen_from(file, name), false);
+        }
         (void)check_arguments(scope, call.arguments, false);
-        report(diagnostic_kind::wrong_kind_of_name, file, callee_where,
-               cc::format("{} is a type parameter, and a call needs a function or a struct", text));
+        if (generic_passes == 0)
+            report(diagnostic_kind::wrong_kind_of_name, file, callee_where,
+                   cc::format("{} is a type parameter, and a call needs a function or a struct", text));
         return error_type;
     }
 
@@ -525,7 +564,8 @@ type_id checker::check_named_call(function_scope& scope,
                                   ast::call const& call,
                                   cc::string_view text,
                                   cc::vector<symbol_id> const* found,
-                                  bool is_qualified)
+                                  bool is_qualified,
+                                  cc::span<stated_argument const> stated)
 {
     auto const file = scope.file;
     auto const where = span_of(file, id);
@@ -539,7 +579,8 @@ type_id checker::check_named_call(function_scope& scope,
         return error_type;
     }
     auto const is_structure = kind == symbol_kind::structure;
-    auto const arguments = check_arguments(scope, call.arguments, is_structure);
+    auto arguments = check_arguments(scope, call.arguments, is_structure);
+    arguments.stated = cc::vector<stated_argument>::create_copy_of(stated);
     auto const first_type
         = arguments.written.empty() || arguments.written[0].splat_member > 0 ? type_id::none : arguments.types[0];
     // CHK-348: `m.f(…)` names the functions of `m`, and no type scope widens them
