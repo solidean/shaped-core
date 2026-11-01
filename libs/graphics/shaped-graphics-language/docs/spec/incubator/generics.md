@@ -95,7 +95,7 @@ let s = ring(items = (1, 2), head = 0)   // n = 2, T = int, deduced from the fie
 * Interning: an instance's key holds value arguments, compared bitwise with NaN canonical.
 * Lowering and emit: struct instances with the same fields become one struct.
 * The [compilation model](compilation-model.md): a module's generic is checked in the layer that instantiates it, which is what it assumes already.
-* `slib`'s host code: what C++ a struct instance in GPU memory becomes.
+* `slib`'s host code: a struct instance in GPU memory is one C++ struct, named as the target text names it, `pair_float_int`.
 * The language server: checking a generic body through its tests.
 
 ## Already fixed by the syntax
@@ -107,6 +107,7 @@ let s = ring(items = (1, 2), head = 0)   // n = 2, T = int, deduced from the fie
 ## Open
 
 * Whether a generic parameter may have a default.
-* What `slib` generates for a struct instance in GPU memory: one C++ struct per instance a binding names, or a C++ template.
+* Whether a value parameter is deduced from anything but an array's length, and whether a type position takes a `float` or `bool` constant.
+* Whether two instances with the same fields lower to one struct; today each instance a target meets is a struct of its own.
 * The set of types a literal fits, which [literal-types.md](literal-types.md) decides.
-* Whether the warning on a generic nothing instantiates belongs to a module or to a file.
+* Whether a library module's generic that nothing instantiates warns too; today only the program's do.
