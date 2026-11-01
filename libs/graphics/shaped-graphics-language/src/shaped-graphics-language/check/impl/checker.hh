@@ -672,7 +672,8 @@ struct checker
     /// which a constant block cannot index without `@padding(.every_element)`; empty when there is none.
     [[nodiscard]] cc::string sub_row_array_path(type_id type) const;
     /// CHK-291: refuses each array a struct crossing a stage edge holds, reported at `where` of `file`.
-    void judge_edge_arrays(i32 file, source_span where, type_id type);
+    /// `is_link`: the edge is a stage link, where a one-dimensional array of builtins crosses an element per location.
+    void judge_edge_arrays(i32 file, source_span where, type_id type, bool is_link = false);
     /// `atomic[uint]` and `atomic[int]` in a type position.
     [[nodiscard]] type_id resolve_atomic(i32 file, ast::expr_id expr, ast::index const& node, function_scope const* scope);
     /// CHK-297: an expression of an atomic's type, which only a builtin's argument may be.
@@ -825,9 +826,10 @@ struct checker
         type_id type = type_id::none;
     };
     /// `in_memory`: what GPU memory holds, where a builtin with a layout there is no value of function bodies alone.
-    [[nodiscard]] local_only_found local_only_path(type_id type, bool in_memory = false) const;
+    [[nodiscard]] local_only_found local_only_path(type_id type, bool in_memory = false, bool in_link = false) const;
     /// CHK-397: refuses a value of function bodies alone a struct crossing a stage edge holds; true where it did.
-    bool judge_edge_local_only(i32 file, source_span where, type_id type);
+    /// `is_link`: the edge is a stage link, where a mat2 and a mat3 cross a column per location (CHK-422).
+    bool judge_edge_local_only(i32 file, source_span where, type_id type, bool is_link = false);
     /// Marks the first body `require` of each feature of `features` in each of `functions` as used (CHK-265).
     void mark_requires_used(cc::span<symbol_id const> functions, feature_set features);
     /// `unused-require` for every `require` of a body that nothing needed (CHK-265).

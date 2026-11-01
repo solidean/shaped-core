@@ -374,7 +374,7 @@ cc::string checker::sub_row_array_path(type_id type) const
     return {};
 }
 
-void checker::judge_edge_arrays(i32 file, source_span where, type_id type)
+void checker::judge_edge_arrays(i32 file, source_span where, type_id type, bool is_link)
 {
     // a patch and a geometry stage's vertices are arrays of the struct that crosses, and a stream holds it
     while (type != checked_module::error_type && out.builtin_type_of(type) == nullptr
@@ -383,11 +383,28 @@ void checker::judge_edge_arrays(i32 file, source_span where, type_id type)
     if (type == checked_module::error_type || out.builtin_type_of(type) != nullptr
         || out.at(type).kind != type_kind::structure)
         return;
-    if (auto const path = array_path(type); !path.empty())
+    // CHK-422: a stage link carries a member that is a one-dimensional array of builtins, an element per location
+    auto refused = cc::string();
+    for (auto const& m : out.at(out.at(type).members))
+    {
+        if (m.factor != tessellation_factor::none || m.type == checked_module::error_type || !refused.empty())
+            continue;
+        auto const& t = out.at(m.type);
+        auto const is_carried = is_link && out.builtin_type_of(m.type) == nullptr && t.kind == type_kind::array
+                             && t.count > 0 && out.builtin_type_of(t.element) != nullptr
+                             && out.builtin_type_of(t.element)->crosses_edges;
+        if (is_carried)
+            continue;
+        if (auto inner = array_path(m.type); !inner.empty())
+            refused = cc::format(".{}{}", m.name, inner);
+        else if (out.builtin_type_of(m.type) == nullptr && t.kind == type_kind::array)
+            refused = cc::format(".{}: {}", m.name, out.name_of(m.type));
+    }
+    if (!refused.empty())
         unsupported(file, where,
                     cc::format("an array crossing a stage edge, in {}{}, which takes a location per element no target "
                                "gives yet",
-                               out.name_of(type), path));
+                               out.name_of(type), refused));
 }
 
 i32 checker::workgroup_size_of(type_id type) const

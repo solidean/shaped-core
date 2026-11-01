@@ -146,6 +146,12 @@ HLSL's constant buffers start each array element on a row, WGSL's uniform rule r
 An array of 4-vectors is the one declaration every target places alike, and reading `.x` of it is what a hand-written port of such a shader does.
 The attribute stands on the array, so its cost, three unused lanes per element, is visible where the array is declared.
 
+## EMIT-174
+
+A location holds one vector of up to four lanes on every target, so a member per column or element is the declaration that means the same thing everywhere.
+Packing two short pieces into one location would save locations but change what `@interpolate` applies to, and the limit of 16 or more has not been reached by any shader yet.
+The rebuild costs nothing a compiler cannot fold, and a literal index reading its piece alone keeps the common case free of the local.
+
 ## EMIT-173
 
 The text writer once worked out how to spell a member from where it was writing it, through flags it set while writing a place or indexing an array.

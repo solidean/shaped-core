@@ -552,7 +552,11 @@ public:
         for (auto const& s : p.structs)
         {
             out.appendf("struct {}{}\n{{\n", is_payload(p, s.type) ? "[raypayload] " : "", s.name);
-            write_members(out, &s, s.members, s.memory_size, p);
+            // a vertex input's semantics are found by where a member stands in `s.members`, and none splits (EMIT-174)
+            if (s.role == struct_role::vertex_input)
+                write_members(out, &s, s.members, s.memory_size, p);
+            else
+                write_members(out, &s, declared_members(s), s.memory_size, p);
             out += "};\n\n";
         }
         write_buffers(out, p, *this);

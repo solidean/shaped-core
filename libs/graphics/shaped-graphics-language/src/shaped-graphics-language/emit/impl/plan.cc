@@ -262,11 +262,51 @@ struct planner
         return members_of(p.m.at(range), has_locations);
     }
 
+    /// EMIT-174: the element of a one-dimensional array of builtins, or the column of a matrix, and how many cross.
+    struct edge_pieces
+    {
+        type_id piece = type_id::none;
+        i32 count = 0;
+    };
+
+    [[nodiscard]] type_id prelude_type_named(cc::string_view name) const
+    {
+        for (auto i = isize(0); i < p.m.types.size(); ++i)
+            if (auto const type = type_id(i32(i)); p.m.builtin_type_of(type) != nullptr && p.m.name_of(type) == name)
+                return type;
+        return type_id::none;
+    }
+
+    [[nodiscard]] edge_pieces pieces_of(type_id type) const
+    {
+        if (!is_valid(type) || type == check::checked_module::error_type)
+            return {};
+        if (auto const* const record = p.m.builtin_type_of(type))
+        {
+            auto const name = p.m.name_of(type);
+            if (name == "mat2" || name == "mat3" || name == "mat4")
+            {
+                auto const n = name == "mat2" ? 2 : name == "mat3" ? 3 : 4;
+                return {.piece = prelude_type_named(n == 2 ? "float2" : n == 3 ? "float3" : "float4"), .count = n};
+            }
+            return {};
+        }
+        auto const& t = p.m.at(type);
+        if (t.kind == type_kind::array && t.count > 0 && p.m.builtin_type_of(t.element) != nullptr)
+            return {.piece = t.element, .count = i32(t.count)};
+        return {};
+    }
+
     cc::vector<planned_member> members_of(cc::span<member_info const> members, bool has_locations, i32 first_location = 0)
     {
         auto result = cc::vector<planned_member>();
         auto next_location = first_location;
         for (auto const& member : members)
+        {
+            auto const split = has_locations && !member.is_position && !member.is_layer
+                                    && member.factor == check::tessellation_factor::none
+                                 ? pieces_of(member.type)
+                                 : edge_pieces();
             result.push_back({
                 .name = spell_member(member.name, members),
                 .source_name = member.name,
@@ -279,10 +319,15 @@ struct planner
                 .location = has_locations && !member.is_position && !member.is_layer
                                  && member.output == check::pixel_output::color
                                  && member.factor == check::tessellation_factor::none
-                              ? next_location++
+                              ? next_location
                               : -1,
                 .is_row_per_element = member.padding == check::padding_kind::every_element,
+                .pieces = split.count,
+                .piece = split.piece,
             });
+            if (result.back().location >= 0)
+                next_location += split.count > 0 ? split.count : 1;
+        }
         return result;
     }
 
@@ -755,7 +800,16 @@ void sgl::emit::impl::validate_edge_struct(check::checked_module const& m,
         // a tessellation factor is an array HLSL passes as a system value, which crosses as no member does
         auto const* const record = m.builtin_type_of(member.type);
         auto const is_factor = role == struct_role::patch_constants && member.factor != check::tessellation_factor::none;
-        if ((record == nullptr || !record->crosses_edges) && !is_factor)
+        // EMIT-174: a stage link carries an array of what crosses, and a matrix, as one member per element or column
+        auto const is_link = role == struct_role::stage_link || role == struct_role::patch_constants;
+        auto const* const element = record == nullptr && m.at(member.type).kind == check::type_kind::array
+                                      ? m.builtin_type_of(m.at(member.type).element)
+                                      : nullptr;
+        auto const is_matrix
+            = record != nullptr
+           && (m.name_of(member.type) == "mat2" || m.name_of(member.type) == "mat3" || m.name_of(member.type) == "mat4");
+        auto const is_carried = is_link && (is_matrix || (element != nullptr && element->crosses_edges));
+        if ((record == nullptr || !record->crosses_edges) && !is_factor && !is_carried)
             report(error_kind::unsupported, info.symbol,
                    cc::format("a member of type '{}' in a {}: '{}.{}'", m.name_of(member.type), role_name(role), name,
                               member.name));
@@ -969,6 +1023,30 @@ cc::vector<sgl::check::member_info> sgl::emit::impl::plain_members_of(check::che
 sgl::i32 sgl::emit::impl::first_resource_slot(check::checked_module const& m, check::binding_info const& b)
 {
     return !b.is_inline && !plain_members_of(m, b).empty() ? 1 : 0;
+}
+
+cc::vector<sgl::emit::impl::planned_member> sgl::emit::impl::declared_members(planned_struct const& s)
+{
+    auto result = cc::vector<planned_member>();
+    for (auto const& member : s.members)
+    {
+        if (member.pieces == 0)
+        {
+            result.push_back(member);
+            continue;
+        }
+        for (auto i = 0; i < member.pieces; ++i)
+        {
+            auto piece = member;
+            piece.name = cc::format("{}_{}", member.name, i);
+            piece.source_name = cc::format("{}_{}", member.source_name, i);
+            piece.type = member.piece;
+            piece.location = member.location + i;
+            piece.pieces = 0;
+            result.push_back(cc::move(piece));
+        }
+    }
+    return result;
 }
 
 bool sgl::emit::impl::shares_tail(plan const& p, planned_struct const& s, isize member)

@@ -60,6 +60,10 @@ struct planned_member
     i32 size = 0;
     /// `@padding(.every_element)`: a constant block's array of values, each element on a row, held as 4-vectors (EMIT-172).
     bool is_row_per_element = false;
+    /// An edge struct's array or matrix, which crosses as `pieces` members of `piece`, its elements or its columns, at
+    /// consecutive locations from `location` (EMIT-174); 0 for any other member.
+    i32 pieces = 0;
+    check::type_id piece = check::type_id::none;
 };
 
 struct planned_struct
@@ -98,6 +102,9 @@ enum class held_as : u8
     /// An array of 4-vectors (EMIT-169, EMIT-172): an element reads through `lanes`, a whole read or write goes element by
     /// element.
     widened_array,
+    /// An edge struct's array or matrix, held as one member per element or column (EMIT-174): a read rebuilds it, a write
+    /// stores each piece.
+    pieces,
 };
 
 /// How one expression reaching GPU memory is spelled, which `plan_memory_accesses` decides before any text is written.
@@ -345,6 +352,14 @@ struct block_placement
 [[nodiscard]] bool shares_tail(plan const& p, planned_struct const& s, isize member);
 /// The same of `members` placed in natural memory, a block's or a struct's.
 [[nodiscard]] bool shares_tail(plan const& p, cc::span<planned_member const> members, isize member);
+
+/// EMIT-174: the members of `s` as its target declares them, an array or a matrix of an edge struct as one member per
+/// element or column, named `<member>_<i>` at consecutive locations.
+[[nodiscard]] cc::vector<planned_member> declared_members(planned_struct const& s);
+
+/// EMIT-174: whether `element` names one piece of an array held as pieces, by a literal index.
+/// `p.accesses` must hold the element's object already.
+[[nodiscard]] bool is_piece(plan const& p, check::flat_element const& element);
 
 /// EMIT-173: fills `p.accesses` from the target, its blocks and its structs in memory, and from where each expression
 /// stands: a place, or an array indexed in place, is spelled as held, and every other read is converted back.

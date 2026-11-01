@@ -24,7 +24,10 @@ Their layout is decided (the spec's emitting file, "Open"), and they land togeth
 
 **Arrays in buffer elements and structs have landed** (CHK-291, EMIT-169, EMIT-170): at their natural stride, in a block where they take whole rows.
 A block's sub-row array has landed behind `@padding(.every_element)` (EMIT-172).
-What waits is EMIT-171's (multi-dimensional, packed and `mat3` arrays), `.every_column`, `mat2` in memory, and stage edges.
+What waits is EMIT-171's (multi-dimensional, packed and `mat3` arrays), `.every_column`, `mat2` in memory, and vertex inputs.
+
+**Matrices and arrays across a stage link have landed** (CHK-422, EMIT-174): a location per column or element, between any two shading stages.
+A vertex input and a pixel output wait, since the host's vertex layout and its render targets are the other side of those.
 
 **`mat3` in GPU memory has landed** (CHK-397, EMIT-168): 48 bytes natural, 36 under `@padding(.none)`, and HLSL holds it as a `float4x3`.
 

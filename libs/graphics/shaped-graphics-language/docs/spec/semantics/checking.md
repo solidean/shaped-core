@@ -130,7 +130,8 @@ use view
   A local, a parameter, a result and a field of a struct a body holds may be one.
   **A `mat3` also stands in GPU memory**: a constant block, a buffer's element and workgroup memory, at its layout of EMIT-110 and EMIT-168.
   A `mat2` there is `unsupported-yet`, at any depth of the structs and arrays holding it, and the detail says its layout in GPU memory is not decided.
-  Either is `unsupported-yet` in every struct that crosses a stage edge: a vertex input, a stage link, a control point, a factors struct, a stream's vertex and a pixel output.
+  A member of a stage link may be either, as CHK-422 has it; any other struct that crosses a stage edge holding one is `unsupported-yet`.
+  That is a vertex input, a pixel output, and a struct or an array in a stage link that holds the matrix.
   So are the ray data of CHK-326: a ray set's payload, a stage's payload, the attributes a hit carries or an intersection reports, and a callable's parameter.
   It is judged before an array holding it is (CHK-291), so the detail names the matrix and the path down to it.
 
@@ -985,8 +986,13 @@ A `require` in a test's body that nothing in it uses is `unused-require`, and a 
   A `float3`, a 4-vector, a `mat3`, a `mat4` and every struct do; a scalar, a 2-vector or a 16-bit vector shorter than a row is `unsupported-yet`, and the detail names it.
   `@padding(.every_element)` on a block member that is such an array starts each element on a row instead (CHK-369).
   A buffer's element is never an array itself, which is `unsupported-yet`: a struct holding the array is the element.
-  An array in a struct that crosses a stage edge is `unsupported-yet`, and the detail names the path down to it.
+  An array in a struct that crosses a stage edge is `unsupported-yet`, and the detail names the path down to it, but where CHK-422 lets a stage link carry it.
   A tessellation factor is an array by design (CHK-305), and workgroup memory has no host side, so neither counts.
+* **CHK-422** A member of a stage link may be a matrix, or a one-dimensional array of a value that crosses an edge itself ([why](why/checking.md#chk-422)).
+  A stage link is every struct one shading stage hands the next: a vertex or an evaluation stage's result, a pixel stage's parameter, a control point, a factors struct and a stream's vertex.
+  It crosses a location per column or per element (EMIT-174), and an `@interpolate` on the member applies to every one.
+  An array of integers is `@interpolate(.flat)`, as an integer is (CHK-273).
+  A vertex input and a pixel output are the host's layouts, and take neither yet.
 * **CHK-299** A binding member `T[N]` of a texture, an image or a buffer is a **binding array**, which needs `binding_arrays`.
   Its `N` is at least 2, or it is `invalid-constant-argument`: one resource is a plain member.
   It is read by element alone, `name[i]`, and naming it whole is `wrong-kind-of-name`; an element is the resource, which only a builtin takes.

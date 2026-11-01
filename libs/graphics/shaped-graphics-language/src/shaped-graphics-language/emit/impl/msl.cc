@@ -335,7 +335,7 @@ public:
             if (s.memory_size > 0 && !s.is_packed)
                 write_memory_members(out, &s, s.members, p);
             else
-                for (auto const& member : s.members)
+                for (auto const& member : declared_members(s))
                     write_member(out, &s, member, p);
             out += "};\n\n";
         }

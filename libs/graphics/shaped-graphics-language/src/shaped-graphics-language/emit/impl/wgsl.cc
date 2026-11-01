@@ -244,7 +244,7 @@ public:
         for (auto const& s : p.structs)
         {
             out.appendf("struct {} {{\n", s.name);
-            write_members(out, s.members, p);
+            write_members(out, declared_members(s), p);
             out += "}\n\n";
         }
         for (auto const& w : p.workgroup)

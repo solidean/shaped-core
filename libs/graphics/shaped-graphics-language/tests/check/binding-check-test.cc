@@ -504,7 +504,7 @@ TEST("sgl check - a binding array is one dimension of resources, bounded, grante
     CHECK(whole.contains("b.t is a binding array, read by element: `b.t[i]`"));
 }
 
-TEST("sgl check - a mat3 stands in GPU memory, and crosses no stage edge yet")
+TEST("sgl check - a mat3 stands in GPU memory, and crosses a stage link alone")
 {
     // CHK-397: its layout in memory is three 16-byte columns (EMIT-110), and no stage edge carries one yet
     constexpr auto why
@@ -555,6 +555,16 @@ TEST("sgl check - a mat3 stands in GPU memory, and crosses no stage edge yet")
     CHECK(crossing.contains(cc::format("user:[vs] a mat3 crossing a stage edge, in varyings.o.h.m: mat3, {}", why)));
     CHECK(crossing.contains(cc::format("user:[ps] a mat3 crossing a stage edge, in varyings.o.h.m: mat3, {}", why)));
     CHECK(crossing.contains(cc::format("user:[shade] a mat3 crossing a stage edge, in target.h.m: mat3, {}", why)));
+
+    // CHK-422: a link carries a matrix it holds itself, a column per location, and none a struct in it holds
+    CHECK(reports_for("struct varyings:\n"
+                      "    @position position: hpos4\n"
+                      "    m: mat3\n"
+                      "@pixel struct target:\n"
+                      "    color: float4\n"
+                      "@pixel fun ps(p: varyings) -> target:\n"
+                      "    return {color = float4((p.m * float3(1.0)).x)}\n")
+          == "");
 
     // an array of them is judged as the mat3 it holds, once, and keeps its length in the path
     auto const arrayed = reports_for("struct varyings:\n"

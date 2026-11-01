@@ -125,14 +125,27 @@ TEST("sgl check - an array in a struct stands in a buffer, and in a block where 
     CHECK(reports_for("binding work:\n    rows: mut buffer[float[4]]\n")
               .contains("an array as a buffer's element, float[4]; a struct holding it is one"));
 
-    // a stage link, and the struct a patch or a stream carries, cross an edge too
-    auto const linked = reports_for("struct varyings:\n"
-                                    "    @position position: hpos4\n"
-                                    "    weights: float[2]\n"
-                                    "\n"
-                                    "@vertex fun vs() -> varyings:\n"
-                                    "    return {position = hpos4(0.0, 0.0, 0.0, 1.0), weights = [1.0, 2.0]}\n");
-    CHECK(linked.contains("an array crossing a stage edge, in varyings.weights: float[2]"));
+    // CHK-422: a stage link carries a one-dimensional array of what crosses, an element per location, and no deeper one
+    constexpr auto linked = "struct varyings:\n"
+                            "    @position position: hpos4\n"
+                            "    weights: {}\n"
+                            "\n"
+                            "@vertex fun vs() -> varyings:\n"
+                            "    return {{position = hpos4(0.0, 0.0, 0.0, 1.0), weights = {}}}\n";
+    CHECK(reports_for(cc::format(linked, "float[2]", "[1.0, 2.0]")) == "");
+    CHECK(reports_for(cc::format(linked, "float[2, 2]", "[[1.0, 2.0], [3.0, 4.0]]"))
+              .contains("an array crossing a stage edge, in varyings.weights"));
+    CHECK(reports_for(cc::format(linked, "bool[2]", "[true, false]"))
+              .contains("an array crossing a stage edge, in varyings.weights: bool[2]"));
+    // a vertex input is the host's layout, which takes no array yet
+    CHECK(reports_for("@vertex struct vin:\n"
+                      "    weights: float[2]\n"
+                      "struct varyings:\n"
+                      "    @position position: hpos4\n"
+                      "\n"
+                      "@vertex fun vs(v: vin) -> varyings:\n"
+                      "    return {position = hpos4(v.weights[0], 0.0, 0.0, 1.0)}\n")
+              .contains("an array crossing a stage edge, in vin.weights: float[2]"));
 
     // workgroup memory is laid out by each target alone, so an array there stays fine
     CHECK(reports_for("@workgroup binding tile:\n    rows: poly[4]\nstruct poly:\n    corners: float2[3]\n") == "");

@@ -49,6 +49,9 @@ struct writer
     bool is_device_coherent = false;
     /// The images the entry point loads a texel of, where the target fences a store before a load (EMIT-151).
     cc::vector<flat_binding_member> fenced_images;
+    /// EMIT-174: a member held as pieces that a write reaches into, and the local it is gathered in meanwhile.
+    flat_expr_id gathered_member = flat_expr_id::none;
+    cc::string gathered_name;
 
     /// The name a target writes member `name` of struct `type` with, which the plan may have renamed.
     [[nodiscard]] cc::string_view member_of(type_id type, cc::string_view name) const
@@ -191,7 +194,129 @@ struct writer
 
     bool needs_member_assignment(flat_expr const& x) const
     {
-        return x.node.is<flat_construct>() && !is_builtin_type(p.m, x.type) && !d.has_struct_constructor();
+        return x.node.is<flat_construct>() && !is_builtin_type(p.m, x.type)
+            && (!d.has_struct_constructor() || has_pieces(x.type));
+    }
+
+    /// EMIT-174: whether `type` is an edge struct holding an array or a matrix as one member per piece.
+    [[nodiscard]] bool has_pieces(type_id type) const
+    {
+        if (!is_valid(type) || is_builtin_type(p.m, type) || p.m.at(type).kind != type_kind::structure
+            || p.struct_of_type[index_of(type)] < 0)
+            return false;
+        for (auto const& m : p.structs[p.struct_of_type[index_of(type)]].members)
+            if (m.pieces > 0)
+                return true;
+        return false;
+    }
+
+    /// EMIT-174: `raw`, an edge struct's member held as one member per piece, rebuilt into the value of `type`.
+    /// `is_local`: always into a mutable local, which a matrix otherwise is not.
+    cc::string rebuilt_from_pieces(type_id type, cc::string_view raw, bool is_local = false)
+    {
+        if (is_array(type))
+        {
+            auto const name = p.names.mint("gathered");
+            auto declaration = cc::string();
+            d.write_local(
+                declaration,
+                {.name = name, .type = type_text(p, d, type), .dimensions = array_dimensions(p, type), .is_mut = true});
+            line(declaration);
+            for (auto i = isize(0); i < isize(p.m.at(type).count); ++i)
+                line(cc::format("{}[{}] = {}_{};", name, i, raw, i));
+            return name;
+        }
+        // a matrix from its columns, which HLSL's constructor reads as rows
+        auto const n = p.m.name_of(type) == "mat2" ? 2 : p.m.name_of(type) == "mat3" ? 3 : 4;
+        auto text = cc::format("{}(", type_text(p, d, type));
+        for (auto i = 0; i < n; ++i)
+            text.appendf("{}{}_{}", i == 0 ? "" : ", ", raw, i);
+        text += ")";
+        if (d.language() == builtins::language::hlsl)
+            text = cc::format("transpose({})", text);
+        if (!is_local)
+            return text;
+        auto const name = p.names.mint("gathered");
+        auto declaration = cc::string();
+        d.write_local(declaration, {.name = name, .type = type_text(p, d, type), .value = text, .is_mut = true});
+        line(declaration);
+        return name;
+    }
+
+    /// `text` without an outermost `transpose(...)` around all of it; empty where there is none.
+    [[nodiscard]] static cc::string_view transposed_inner(cc::string_view text)
+    {
+        constexpr auto head = cc::string_view("transpose(");
+        if (!text.starts_with(head) || !text.ends_with(")"))
+            return {};
+        auto depth = 0;
+        for (auto i = head.size() - 1; i < text.size(); ++i)
+        {
+            depth += text[i] == '(' ? 1 : text[i] == ')' ? -1 : 0;
+            if (depth == 0)
+                return i == text.size() - 1 ? text.subview({.start = head.size(), .end = text.size() - 1})
+                                            : cc::string_view();
+        }
+        return {};
+    }
+
+    [[nodiscard]] static bool is_name(cc::string_view text)
+    {
+        if (text.empty())
+            return false;
+        for (auto const c : text)
+            if (!((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_'))
+                return false;
+        return true;
+    }
+
+    /// EMIT-174: the member held as pieces that a write to `place` reaches into, other than through one named piece.
+    [[nodiscard]] flat_expr_id gathered_by(flat_expr_id place) const
+    {
+        for (auto id = place; is_valid(id);)
+        {
+            auto const& x = p.e.at(id);
+            if (id != place && p.accesses[index_of(id)].held == held_as::pieces)
+                return id;
+            if (auto const* const element = x.node.try_as<flat_element>())
+            {
+                if (is_piece(p, *element))
+                    return flat_expr_id::none;
+                id = element->object;
+            }
+            else if (auto const* const member = x.node.try_as<flat_member>())
+                id = member->object;
+            else
+                break;
+        }
+        return flat_expr_id::none;
+    }
+
+    /// EMIT-174: stores `value`, of `type`, into `raw`'s pieces, its elements or its columns, from one evaluation.
+    void store_pieces(cc::string_view raw, type_id type, cc::string_view value)
+    {
+        auto const is_hlsl_matrix = !is_array(type) && d.language() == builtins::language::hlsl;
+        auto name = cc::string(value);
+        if (is_hlsl_matrix || !is_name(value))
+        {
+            // HLSL indexes a matrix by its rows, so its columns are the rows of its transpose
+            auto const inner = is_hlsl_matrix ? transposed_inner(value) : cc::string_view();
+            name = p.names.mint("scattered");
+            auto declaration = cc::string();
+            d.write_local(declaration, {.name = name,
+                                        .type = type_text(p, d, type),
+                                        .value = !is_hlsl_matrix ? cc::string(value)
+                                               : !inner.empty()  ? cc::string(inner)
+                                                                 : cc::format("transpose({})", value),
+                                        .dimensions = array_dimensions(p, type)});
+            line(declaration);
+        }
+        auto const n = is_array(type)              ? i32(p.m.at(type).count)
+                     : p.m.name_of(type) == "mat2" ? 2
+                     : p.m.name_of(type) == "mat3" ? 3
+                                                   : 4;
+        for (auto i = 0; i < n; ++i)
+            line(cc::format("{}_{} = {}[{}];", raw, i, name, i));
     }
 
     /// `nonuniform i`, whose own text is `i`; `uniform i` is no such mark, since it is written as the plain index.
@@ -251,6 +376,8 @@ struct writer
             return {.text = cc::format("{}({})", type_text(p, d, p.e.at(id).type), text.text)};
         case held_as::widened_array:
             return {.text = narrowed_array(p.e.at(id), text.text, access.lanes)};
+        case held_as::pieces:
+            return {.text = rebuilt_from_pieces(p.e.at(id).type, text.text)};
         }
         return text;
     }
@@ -284,7 +411,10 @@ struct writer
         }
         auto const& planned = p.structs[p.struct_of_type[index_of(x.type)]];
         for (auto i = isize(0); i < arguments.size() && i < planned.member_of.size(); ++i)
-            if (planned.member_of[i] >= 0 && holds_widened_array(p, x.type, i))
+            if (planned.member_of[i] >= 0 && planned.members[planned.member_of[i]].pieces > 0)
+                store_pieces(cc::format("{}.{}", name, planned.members[planned.member_of[i]].name),
+                             p.e.at(arguments[i]).type, expr(arguments[i]).text);
+            else if (planned.member_of[i] >= 0 && holds_widened_array(p, x.type, i))
                 widen_array_into(cc::format("{}.{}", name, planned.members[planned.member_of[i]].name),
                                  p.e.at(arguments[i]).type, expr(arguments[i]).text);
             else if (planned.member_of[i] >= 0)
@@ -631,7 +761,23 @@ struct writer
         if (auto const* const member = p.e.at(a.place).node.try_as<flat_member>();
             member != nullptr && member->is_swizzle())
             return assign_swizzle(*member, a.value);
+        // EMIT-174: a write into a member held as pieces goes through a local it is gathered in, and back
+        if (auto const gathered = gathered_by(a.place); is_valid(gathered) && gathered != gathered_member)
+        {
+            auto const raw = expr(gathered).text;
+            auto const type = p.e.at(gathered).type;
+            gathered_name = rebuilt_from_pieces(type, raw, true);
+            gathered_member = gathered;
+            assign(a);
+            gathered_member = flat_expr_id::none;
+            return store_pieces(raw, type, gathered_name);
+        }
         auto const held = p.accesses[index_of(a.place)].held;
+        if (held == held_as::pieces)
+        {
+            auto const value = expr(a.value, true).text;
+            return store_pieces(expr(a.place).text, p.e.at(a.place).type, value);
+        }
         if (held == held_as::widened_array)
         {
             auto const value = expr(a.value, true).text;
@@ -708,6 +854,8 @@ struct writer
 
     rendered expr(flat_expr_id id, bool is_broken = false)
     {
+        if (id == gathered_member)
+            return {.text = gathered_name};
         auto const& x = p.e.at(id);
         if (auto const memory = memory_of(id); memory.has_value())
             return {.text = read_memory(memory.value())};
@@ -775,6 +923,12 @@ struct writer
             [&](flat_element const& a)
             {
                 auto const object = wrapped(expr(a.object), level::primary);
+                // EMIT-174: a literal index into an array held as pieces names its piece
+                if (id != gathered_member && is_valid(a.object) && a.object != gathered_member && is_piece(p, a))
+                {
+                    result = {.text = cc::format("{}_{}", object, p.e.at(a.index).node.as<flat_int_literal>().value)};
+                    return;
+                }
                 // EMIT-169 and EMIT-172: an element of an array held as 4-vectors is read and written through its lanes
                 if (auto const& held = p.accesses[index_of(a.object)]; held.held == held_as::widened_array)
                 {

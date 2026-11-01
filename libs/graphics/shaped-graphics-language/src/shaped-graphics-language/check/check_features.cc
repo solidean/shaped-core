@@ -190,12 +190,14 @@ void checker::judge_edge_16_bit(i32 file, source_span where, type_id type)
         unsupported(file, where, cc::format("a 16-bit value crossing a stage edge, in {}{}", out.name_of(type), found));
 }
 
-checker::local_only_found checker::local_only_path(type_id type, bool in_memory) const
+checker::local_only_found checker::local_only_path(type_id type, bool in_memory, bool in_link) const
 {
     if (type == checked_module::error_type)
         return {};
+    // CHK-422: a stage link carries a matrix as its columns, a location apiece
+    auto const is_link_matrix = in_link && (out.name_of(type) == "mat2" || out.name_of(type) == "mat3");
     if (auto const* const record = out.builtin_type_of(type))
-        return record->local_only_reason.empty() || (in_memory && record->wgsl_layout.size != 0)
+        return record->local_only_reason.empty() || (in_memory && record->wgsl_layout.size != 0) || is_link_matrix
                  ? local_only_found()
                  : local_only_found{.path = cc::format(": {}", out.name_of(type)),
                                     .reason = record->local_only_reason,
@@ -215,13 +217,15 @@ checker::local_only_found checker::local_only_path(type_id type, bool in_memory)
     {
         if (m.type == type)
             continue;
-        if (auto inner = local_only_path(m.type, in_memory); !inner.path.empty())
+        // a link carries the matrices it holds itself, and none a struct or an array in it holds
+        if (auto inner = local_only_path(m.type, in_memory, in_link && out.builtin_type_of(m.type) != nullptr);
+            !inner.path.empty())
             return {.path = cc::format(".{}{}", m.name, inner.path), .reason = inner.reason, .type = inner.type};
     }
     return {};
 }
 
-bool checker::judge_edge_local_only(i32 file, source_span where, type_id type)
+bool checker::judge_edge_local_only(i32 file, source_span where, type_id type, bool is_link)
 {
     // a patch and a geometry stage's vertices are arrays of the struct that crosses, and a stream holds it
     while (type != checked_module::error_type && out.builtin_type_of(type) == nullptr
@@ -230,7 +234,7 @@ bool checker::judge_edge_local_only(i32 file, source_span where, type_id type)
     if (type == checked_module::error_type || out.builtin_type_of(type) != nullptr
         || out.at(type).kind != type_kind::structure)
         return false;
-    auto const found = local_only_path(type);
+    auto const found = local_only_path(type, false, is_link);
     if (found.path.empty())
         return false;
     unsupported(file, where,

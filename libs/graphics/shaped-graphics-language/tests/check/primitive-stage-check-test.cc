@@ -258,11 +258,9 @@ TEST("sgl check - a geometry stage takes the primitive the pipeline assembles")
               .contains("gs takes a primitive of 3 vertices, and topology .line_list assembles primitives of 2"));
 }
 
-TEST("sgl check - a mat3 crosses no tessellation or geometry edge")
+TEST("sgl check - a matrix crosses a tessellation or geometry edge as its columns")
 {
-    // CHK-397: a control point, a factors struct and a stream's vertex are all edges a target lays out
-    constexpr auto why
-        = "which no stage edge carries yet, since its layout as ray data and across a stage edge is not decided yet";
+    // CHK-422: a control point, a factors struct and a stream's vertex are all stage links
     constexpr auto head = "require geometry_shader\n"
                           "require tessellation_shader\n"
                           "struct framed:\n    position: float3\n    m: mat3\n"
@@ -271,17 +269,15 @@ TEST("sgl check - a mat3 crosses no tessellation or geometry edge")
                           "    @edge_factors edges: float[3]\n"
                           "    @inside_factors inside: float\n"
                           "    m: mat3\n";
-    auto const control = reports_for(
-        cc::format("{}@tessellation_control(partitioning = .fractional_odd, winding = .counter_clockwise)\n"
-                   "fun tc(patch: framed[3]) -> factors:\n"
-                   "    return {{ edges = [1.0, 1.0, 1.0], inside = 1.0, m = patch[0].m }}\n",
-                   head));
-    CHECK(control.contains(cc::format("a mat3 crossing a stage edge, in framed.m: mat3, {}", why)));
-    CHECK(control.contains(cc::format("a mat3 crossing a stage edge, in factors.m: mat3, {}", why)));
-    auto const geometry
-        = reports_for(cc::format("{}@geometry(max_vertices = 3)\n"
+    CHECK(reports_for(cc::format("{}@tessellation_control(partitioning = .fractional_odd, winding = "
+                                 ".counter_clockwise)\n"
+                                 "fun tc(patch: framed[3]) -> factors:\n"
+                                 "    return {{ edges = [1.0, 1.0, 1.0], inside = 1.0, m = patch[0].m }}\n",
+                                 head))
+          == "");
+    CHECK(reports_for(cc::format("{}@geometry(max_vertices = 3)\n"
                                  "fun gs(tri: out_vertex[3], stream: mut triangle_stream[out_vertex]):\n"
                                  "    stream.emit(tri[0])\n",
-                                 head));
-    CHECK(geometry.contains(cc::format("user:[gs] a mat3 crossing a stage edge, in out_vertex.m: mat3, {}", why)));
+                                 head))
+          == "");
 }

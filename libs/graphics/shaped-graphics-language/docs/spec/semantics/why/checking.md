@@ -771,8 +771,18 @@ Unrolling every small constant-range loop without the attribute was not chosen: 
 A rotation or a normal matrix is a `mat3`, and building one from three columns is the common case in a body.
 Its layout in GPU memory is a decision of its own: a constant block starts each column on a row of 16 bytes, a buffer's element may pack it into 36, and each target's memory form differs.
 The natural rule took it (EMIT-110): a `mat3` is three `float3` columns, each at 16, so it takes 48 bytes wherever it stands, and `@padding(.none)` packs it into 36.
-A stage edge and ray data are layouts of their own, which no target agrees on yet, so they still refuse one at its line, the way an array is refused (CHK-291).
+Ray data is a layout of its own, which no target agrees on yet, so it still refuses one at its line, the way an array is refused (CHK-291).
+A stage link crosses one as its columns (CHK-422), and a vertex input and a pixel output wait for the host's side of their layouts.
 A `mat2` waits for a shader that needs one in memory: HLSL starts each of its two columns on a row, which no other target does.
+
+## CHK-422
+
+A normal matrix or a tangent frame handed from the vertex to the pixel stage is common, and so is a small array of weights.
+No target carries either across a link the same way: WGSL takes neither, HLSL takes a matrix but spends a location per row, and MSL a column.
+A location per column or element is what each one can say, and it is what a hand-written port does with the members it splits.
+A vertex input waits because the host fills it, so splitting a member there changes the vertex layout a host writes, which wants that side designed first.
+A pixel output is a render target per location, which an array would silently spread across.
+Nesting is refused because the text would need a name per path, and no shader in the corpus wants one yet.
 
 ## CHK-408
 

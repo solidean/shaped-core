@@ -2161,6 +2161,12 @@ void checker::judge_entry_point(symbol_id id)
     // A ray-tracing stage's hit, candidate or box is a prelude struct the flat tree builds from the stage's builtins,
     // so it crosses no edge and may hold what a body holds, an affine3 among it (CHK-408); a payload does cross.
     auto const ray_stages = stage_bit(stage::closest_hit) | stage_bit(stage::any_hit) | stage_bit(stage::intersection);
+    // CHK-422: a stage link is every edge between two shader stages, and never a vertex input, a pixel output or ray data
+    auto const is_shading_stage = info.entry_stage == stage::vertex || info.entry_stage == stage::pixel
+                               || info.entry_stage == stage::geometry || info.entry_stage == stage::tessellation_control
+                               || info.entry_stage == stage::tessellation_evaluation;
+    auto const links_parameter = is_shading_stage && info.entry_stage != stage::vertex;
+    auto const links_result = is_shading_stage && info.entry_stage != stage::pixel;
     auto const is_built_in_place = [&](type_id type)
     {
         return (stage_bit(info.entry_stage) & ray_stages) != 0 && type != type_id::none
@@ -2192,12 +2198,12 @@ void checker::judge_entry_point(symbol_id id)
         }
         else if (parameter.input == stage_input::none)
         {
-            if (!judge_edge_local_only(file, where, parameter.type))
-                judge_edge_arrays(file, where, parameter.type);
+            if (!judge_edge_local_only(file, where, parameter.type, links_parameter))
+                judge_edge_arrays(file, where, parameter.type, links_parameter);
             judge_edge_16_bit(file, where, parameter.type);
         }
-    if (!judge_edge_local_only(file, where, info.result))
-        judge_edge_arrays(file, where, info.result);
+    if (!judge_edge_local_only(file, where, info.result, links_result))
+        judge_edge_arrays(file, where, info.result, links_result);
     judge_edge_16_bit(file, where, info.result);
 
     // CHK-301 to CHK-306: the geometry and the tessellation stages take arrays of vertices, and are judged apart
@@ -2279,7 +2285,12 @@ void checker::judge_entry_point(symbol_id id)
     {
         for (auto const& m : out.at(out.at(link).members))
         {
-            auto const* const record = out.builtin_type_of(m.type);
+            // an array crosses as its elements, which are what crosses flat or interpolated (CHK-422)
+            auto const crossing = m.type != checked_module::error_type && out.builtin_type_of(m.type) == nullptr
+                                       && out.at(m.type).kind == type_kind::array
+                                    ? out.at(m.type).element
+                                    : m.type;
+            auto const* const record = out.builtin_type_of(crossing);
             auto const is_integer
                 = record != nullptr
                && (record->leaf_kind == value_kind::scalar_int || record->leaf_kind == value_kind::scalar_uint);

@@ -79,6 +79,13 @@ bool sgl::emit::impl::holds_widened_array(plan const& p, check::type_id object_t
     return s != nullptr && is_hlsl(p.which) && is_3_vector_array(p.m, p.m.at(p.m.at(object_type).members)[member].type);
 }
 
+bool sgl::emit::impl::is_piece(plan const& p, flat_element const& element)
+{
+    auto const type = p.e.at(element.object).type;
+    return p.accesses[index_of(element.object)].held == held_as::pieces && p.m.builtin_type_of(type) == nullptr
+        && p.m.at(type).kind == type_kind::array && p.e.at(element.index).node.is<flat_int_literal>();
+}
+
 void sgl::emit::impl::plan_memory_accesses(plan& p)
 {
     p.accesses = cc::vector<memory_access>::create_defaulted(p.e.exprs.size());
@@ -98,6 +105,15 @@ void sgl::emit::impl::plan_memory_accesses(plan& p)
         {
             if (auto const* const s = struct_in_memory(p, p.e.at(member->object).type))
                 p.accesses[i] = access_of(p, s->members, s->member_of[member->member]);
+            // EMIT-174: an edge struct holds an array or a matrix as one member per element or column
+            else if (auto const object_type = p.e.at(member->object).type;
+                     is_valid(object_type) && p.m.builtin_type_of(object_type) == nullptr
+                     && p.m.at(object_type).kind == type_kind::structure && p.struct_of_type[index_of(object_type)] >= 0)
+            {
+                auto const& planned = p.structs[p.struct_of_type[index_of(object_type)]];
+                if (auto const at = planned.member_of[member->member]; at >= 0 && planned.members[at].pieces > 0)
+                    p.accesses[i] = {.held = held_as::pieces};
+            }
         }
     }
 
@@ -106,8 +122,12 @@ void sgl::emit::impl::plan_memory_accesses(plan& p)
         if (auto const* const assign = s.node.try_as<flat_assign>())
             mark_place(p, assign->place);
     // An array held as 4-vectors is indexed in place, its element read through its lanes.
+    // An array held as pieces is too where the index is a literal, which names the piece (EMIT-174).
     for (auto const& x : p.e.exprs)
-        if (auto const* const element = x.node.try_as<flat_element>();
-            element != nullptr && p.accesses[index_of(element->object)].held == held_as::widened_array)
-            p.accesses[index_of(element->object)].is_raw = true;
+        if (auto const* const element = x.node.try_as<flat_element>(); element != nullptr)
+        {
+            auto const held = p.accesses[index_of(element->object)].held;
+            if (held == held_as::widened_array || (held == held_as::pieces && is_piece(p, *element)))
+                p.accesses[index_of(element->object)].is_raw = true;
+        }
 }

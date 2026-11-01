@@ -225,3 +225,32 @@ ASYNC_INVOCABLE_TEST("sg - an inline constants block that ends short of its alig
 
     CHECK(pixels[0].rgba_float(2, 0) == tg::vec4f(2, 0, 7, 4));
 }
+
+ASYNC_INVOCABLE_TEST("sg - a matrix and an array cross from the vertex to the pixel stage, piece by piece",
+                     (sg::context_handle const& ctx))
+{
+    REQUIRE(ctx != nullptr);
+    if (!sg_test::shaders_reach(*ctx))
+        SKIP("no compiler builds this binary's shaders into a format this context accepts");
+
+    auto const pipeline = co_await ctx->cached.acquire_raster_pipeline(shaders::draws::linked_points);
+    auto const grid = point_grid(*ctx);
+    auto const pixels = co_await sg_test::draw_offscreen(
+        *ctx, grid_target(),
+        [&](sg::rendering_scope& scope)
+        {
+            scope.bind_pipeline(*pipeline);
+            grid.bind(scope);
+            scope.draw({.vertex_range = {.offset = 0, .size = columns}, .instance_range = {.offset = 0, .size = rows}});
+        });
+
+    for (auto r = 0; r < rows; ++r)
+        for (auto c = 0; c < columns; ++c)
+        {
+            // the vertex stage adds 10 to the weight its vertex index picks, at a runtime index
+            float weights[] = {float(c), float(r), 0.5f};
+            weights[c % 3] += 10.0f;
+            auto const expected = tg::vec4f(float(2 * c + 1), 2.0f + weights[1], weights[c % 3], float(c - r));
+            CHECK(pixels[0].rgba_float(c, r) == expected).context(cc::format("pixel ({}, {})", c, r));
+        }
+}
