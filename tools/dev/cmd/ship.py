@@ -128,6 +128,36 @@ def _bump(ctx: Context, subs: list[lib.Submodule]) -> None:
     _say(f"committed the bump of {names}")
 
 
+def _on_remote(repo: Path, sha: str) -> bool:
+    """Whether a remote branch of `repo` holds `sha`, after fetching every branch once if the first look misses it."""
+    def held() -> bool:
+        found = _git(repo, "branch", "-r", "--contains", sha)
+        return found.returncode == 0 and found.stdout.strip() != ""
+    if held():
+        return True
+    _git(repo, "fetch", "origin")
+    return held()
+
+
+def _pointers_off_remote(ctx: Context, branch: str, subs: list[lib.Submodule]) -> list[str]:
+    """Submodule pointers the commits about to be pushed record that no remote branch of their submodule holds.
+    Pushed, such a pointer breaks every clone and pull that recurses into submodules, so ship refuses it."""
+    base = f"origin/{branch}"
+    span = f"{base}..HEAD" if _git(ctx.root, "rev-parse", "--verify", "--quiet", base).returncode == 0 else "HEAD"
+    missing = []
+    for s in subs:
+        commits = _git(ctx.root, "log", "--format=%H", span, "--", s.path).stdout.split()
+        shas = []
+        for c in commits:
+            entry = _git(ctx.root, "ls-tree", c, "--", s.path).stdout.split()
+            if len(entry) >= 3 and entry[1] == "commit" and entry[2] not in shas:
+                shas.append(entry[2])
+        for sha in shas:
+            if not _on_remote(ctx.root / s.path, sha):
+                missing.append(f"{s.path} at {sha[:12]}")
+    return missing
+
+
 def _gate(ctx: Context, *, tests: bool) -> None:
     # The static gates first, then the question only they raise, so a fixer's rewrite stops ship before the test tail runs.
     if _dev(ctx, "check", "--fix", "--no-test") != 0:
@@ -205,6 +235,10 @@ def run(args: argparse.Namespace, ctx: Context) -> None:
                 ctx.die(f"ship: pushing {s.path} failed; its remote moved, so ship again to merge it:\n{pushed.stderr.strip()}")
             _say(f"pushed {s.path} to origin/{s.branch}")
         shipping = []
+        # Every pointer the parent's new commits record has to be fetchable, or the push breaks the next recursive pull.
+        if missing := _pointers_off_remote(ctx, branch, subs):
+            ctx.die("ship: these submodule pointers name commits no remote branch holds; push them, or bump to ones it does, "
+                    "and ship again (nothing of this repository was pushed):\n  " + "\n  ".join(missing))
         pushed = _git(ctx.root, "push", "origin", branch)
         if pushed.returncode == 0:
             dev.ui.write_line(console.green(f"ship: pushed {branch} to origin"))
