@@ -829,6 +829,14 @@ TEST("sgl emit layout - MSL starts a constant block's struct on a row, and strid
     auto const msl = text_of(source, target::msl);
     CHECK(msl.contains("struct alignas(16) small\n"));
     CHECK(msl.contains("    float lead;\n    small held;\n    float after;\n"));
+
+    // EMIT-177: Metal's compiler checks each offset SGL placed a member at, and a struct's size, on every compile
+    CHECK(msl.contains("static_assert(__builtin_offsetof(work_data, held) == 16, \"SGL places work_data.held at byte "
+                       "16\");\n"));
+    CHECK(msl.contains("static_assert(__builtin_offsetof(work_data, after) == 32, "));
+    CHECK(msl.contains("static_assert(sizeof(small) == 16, \"SGL makes small 16 bytes\");\n"));
+    // no other target is asked to check its layout this way
+    CHECK(!text_of(source, target::wgsl).contains("static_assert"));
 }
 
 TEST("sgl emit layout - HLSL holds an array of mat3 as one of float4x3, each element narrowed and widened as one is")

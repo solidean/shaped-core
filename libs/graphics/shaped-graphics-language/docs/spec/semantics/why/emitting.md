@@ -146,6 +146,13 @@ HLSL's constant buffers start each array element on a row, WGSL's uniform rule r
 An array of 4-vectors is the one declaration every target places alike, and reading `.x` of it is what a hand-written port of such a shader does.
 The attribute stands on the array, so its cost, three unused lanes per element, is visible where the array is declared.
 
+## EMIT-177
+
+No machine that tests SGL runs Metal: the macOS runner has no Metal 4 device, so the metal backend's suite is skipped there.
+The Metal compiler does run there, on every shader a package builds, so a layout it can check at compile time is checked on every push.
+A wrong offset otherwise reads wrong values without an error, which is how a constant block's struct sat at the wrong byte unnoticed (EMIT-176).
+HLSL and WGSL need no such check: DXC's and WGSL's own reflection already confirm each offset in the cross-compiler layout tests.
+
 ## EMIT-175
 
 A `mat2` is 16 bytes in every buffer layout WGSL, MSL and a structured buffer agree on, and C++'s `tg::mat2f` is the same bytes.

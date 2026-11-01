@@ -279,6 +279,24 @@ public:
         CC_UNREACHABLE("every group MSL writes was given an argument buffer by the plan");
     }
 
+    /// EMIT-177: Metal's compiler checks that `name` holds `field` at byte `offset`, as SGL placed it.
+    static void write_offset_assert(cc::string& out, cc::string_view name, cc::string_view field, i32 offset)
+    {
+        out.appendf("static_assert(__builtin_offsetof({}, {}) == {}, \"SGL places {}.{} at byte {}\");\n", name, field,
+                    offset, name, field, offset);
+    }
+
+    /// EMIT-177: the offset of every member SGL placed, and the struct's size where it is `size` > 0.
+    static void write_layout_asserts(cc::string& out, cc::string_view name, cc::span<planned_member const> members, i32 size)
+    {
+        for (auto const& member : members)
+            if (member.offset >= 0)
+                write_offset_assert(out, name, member.name, member.offset);
+        if (size > 0)
+            out.appendf("static_assert(sizeof({}) == {}, \"SGL makes {} {} bytes\");\n", name, size, name, size);
+        out += "\n";
+    }
+
     /// A root's memory form: its pieces as fields, each where SGL's layout puts it (memory_form.hh).
     static void write_form(cc::string& out, memory_form const& form)
     {
@@ -287,6 +305,9 @@ public:
             out.appendf("{}{} {};\n", k_indent,
                         f.count > 0 ? cc::format("array<{}, {}>", f.type, f.count) : cc::string(f.type), f.name);
         out += "};\n\n";
+        for (auto const& f : form.fields)
+            write_offset_assert(out, form.name, f.name, f.offset);
+        out += "\n";
     }
 
     void write_block_struct(cc::string& out, plan const& p, planned_constants const& block) const
@@ -296,6 +317,8 @@ public:
         out.appendf("struct {}\n{{\n", block.block_name);
         write_memory_members(out, nullptr, block.members, p);
         out += "};\n\n";
+        // a block's own size is MSL's to round, since the host writes it member by member
+        write_layout_asserts(out, block.block_name, block.members, 0);
     }
 
     /// A Metal sampler is a parameter of a raster or compute entry point, which `write_function_head` writes.
@@ -373,6 +396,10 @@ public:
                 for (auto const& member : declared_members(s))
                     write_member(out, &s, member, p);
             out += "};\n\n";
+            // a struct of a constant block is a whole number of rows, which its `alignas(16)` gives it
+            if (s.memory_size > 0 && !s.is_packed)
+                write_layout_asserts(out, s.name, s.members,
+                                     in_constants ? (s.memory_size + 15) / 16 * 16 : s.memory_size);
         }
         if (p.e.entry_stage >= stage::raygen)
             write_ray_tracing_types(out, p);

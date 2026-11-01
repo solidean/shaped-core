@@ -579,6 +579,9 @@ The C++ struct a package generates is that layout byte for byte, padding include
   Under `@padding(.none)` it is `unsupported`, alike on every target.
 * **EMIT-176** MSL places a member of a struct or a block in natural memory where SGL placed it, with padding fields wherever MSL would place it sooner.
   A struct that stands in a constant block is declared `alignas(16)`, so it starts a row and an array of it strides by rows, as EMIT-110 has it.
+* **EMIT-177** MSL states every layout SGL placed as `static_assert`s the Metal compiler checks ([why](why/emitting.md#emit-177)).
+  One per member of a struct, a block and a memory form in GPU memory, `__builtin_offsetof(T, m) == offset`, and one per struct, `sizeof(T) == size`.
+  A struct of a constant block is asserted at its size rounded up to a row, and a block at its members alone.
 * **EMIT-171** An array in GPU memory that `@padding(.none)` places waits, `unsupported` alike on every target.
   So does a multi-dimensional one whose innermost element is a 3-vector or a `mat3`, which HLSL would widen at depth.
   A packed block's array of whole rows is the exception, which EMIT-154 places.
