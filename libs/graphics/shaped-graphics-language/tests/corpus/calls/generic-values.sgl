@@ -32,3 +32,33 @@ test:
 @expect(error = "no-matching-overload")
 test:
     scaled_by[float](1.0) == 1.0
+
+enum mode:
+    add
+    multiply
+
+fun combined[m: mode](a: float, b: float) -> float:
+    if m == mode.add:
+        return a + b
+    return a * b
+
+struct op[m: mode]:
+    scale: float
+
+fun op.apply(self, a: float, b: float) -> float => combined[m](a, b) * self.scale
+
+const doubling = mode.multiply
+
+// an enum case is a value parameter's argument: stated as `E.case` or a const, and as `.case` in a type position
+test:
+    combined[mode.add](2.0, 3.0) == 5.0
+    combined[doubling](2.0, 3.0) == 6.0
+    combined[.m = mode.multiply](2.0, 4.0) == 8.0
+    let o: op[.add] = op(1.0)
+    o.apply(1.0, 2.0) == 3.0
+    op[mode.multiply](2.0).apply(1.0, 2.0) == 4.0
+
+// a stated argument names its enum, since the call has not chosen the parameter that would say it
+@expect(error = "invalid-constant-argument")
+test:
+    combined[.add](1.0, 2.0) == 3.0

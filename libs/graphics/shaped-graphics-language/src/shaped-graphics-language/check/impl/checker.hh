@@ -913,6 +913,8 @@ struct checker
     [[nodiscard]] type_id declare_type_parameter(i32 file, ast::field const& p, symbol_id owner, bool& is_failed);
     /// A generic argument a call states: a type, or the constant a value expression evaluates to (CHK-340).
     [[nodiscard]] type_id stated_argument_of(function_scope& scope, ast::expr_id expr);
+    /// The case of `enumeration` that `expr` names: `.case`, `E.case` or a const holding one; -1 for anything else.
+    [[nodiscard]] i32 enum_case_argument(i32 file, ast::expr_id expr, type_id enumeration, function_scope const* scope);
     /// An argument of a generic struct in a type position, of the kind `parameter` takes: a type, a parameter in
     /// scope, or an int constant for a value parameter (CHK-339).
     [[nodiscard]] type_id type_argument_of(i32 file, ast::expr_id expr, function_scope const* scope, type_id parameter);

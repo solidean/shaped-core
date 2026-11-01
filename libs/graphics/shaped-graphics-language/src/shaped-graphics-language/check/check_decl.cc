@@ -1718,10 +1718,10 @@ type_id checker::declare_type_parameter(i32 file, ast::field const& p, symbol_id
         value_type = resolve_value_type(file, p.type);
         auto const name = out.name_of(value_type);
         if (value_type != checked_module::error_type && name != "int" && name != "uint" && name != "bool"
-            && name != "float")
+            && name != "float" && out.at(value_type).kind != type_kind::enumeration)
         {
             unsupported(file, span_of(file, p.type),
-                        cc::format("a value parameter of {}, where int, uint, bool and float are carried", name));
+                        cc::format("a value parameter of {}, where int, uint, bool, float and enums are carried", name));
             is_failed = true;
         }
     }

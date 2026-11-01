@@ -52,6 +52,8 @@ auto sgl::check::impl::flattener::flatten_expr(ast::expr_id id) -> flat_expr_id
     if (where.kind == target_kind::generic_value)
     {
         auto const& constant = c.out.types[where.index];
+        if (c.out.at(constant.element).kind == type_kind::enumeration)
+            return enum_value(type, id, constant.count);
         auto const element = c.out.name_of(constant.element);
         auto const kind = element == "float" ? value_kind::scalar_float
                         : element == "uint"  ? value_kind::scalar_uint
