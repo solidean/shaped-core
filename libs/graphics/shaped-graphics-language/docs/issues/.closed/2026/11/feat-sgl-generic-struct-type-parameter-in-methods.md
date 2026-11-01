@@ -3,6 +3,8 @@ created: 2026-10-17
 refs:
   - file: libs/graphics/shaped-graphics-language/prelude/raytracing.sgl
   - symbol: procedural_of_mixed
+closed: 2026-11-01
+resolution: fixed
 ---
 
 # A generic struct's type parameter is not in scope in its methods
