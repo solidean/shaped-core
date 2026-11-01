@@ -566,7 +566,8 @@ The C++ struct a package generates is that layout byte for byte, padding include
 * **EMIT-173** How each expression that reaches GPU memory is spelled is decided once per entry point and target, before any text is written ([why](why/emitting.md#emit-173)).
   What the target holds is the value itself, a widened `mat3` (EMIT-168), a widened array (EMIT-169, EMIT-172), or a packed tail (EMIT-170).
   An assignment's place, the objects a write through it reaches, and an array indexed in place are spelled as held; every other read converts back.
-* **EMIT-174** A stage link declares a matrix member as a member per column, and an array member as a member per element ([why](why/emitting.md#emit-174)).
+* **EMIT-174** A vertex input and a stage link declare a matrix member as a member per column, and an array member as a member per element ([why](why/emitting.md#emit-174)).
+  A vertex input's piece `i` has its member's semantic at index `i`, `FRAME0`, and the host's layout names it the same way: one attribute per piece, at the member's offset plus `i` pieces.
   The pieces are named `<member>_<i>` at consecutive locations, every member after them moves on by as many, and the member's interpolation is every piece's.
   A read rebuilds the value: a matrix from its columns, an array into a local element by element, and an element at a literal index reads its piece alone.
   A write stores each piece of the value, evaluated once, and a write into one at a runtime index or through a column gathers it into a local, writes that, and stores it back.

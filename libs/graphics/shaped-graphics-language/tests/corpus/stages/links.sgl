@@ -11,6 +11,9 @@ struct varyings:
 @vertex struct corner:
     position: float2
     color: float4
+    // a vertex input reads one as its columns or its elements too, an attribute apiece
+    @per_instance placement: mat3
+    @format(.rgba8_unorm) shades: float4[2]
 
 @pixel struct target:
     color: float4
@@ -22,11 +25,11 @@ test (framed(float2(2.0, 3.0)) * float3(1.0)).y == 3.0
 @vertex fun corners_vs(c: corner, @vertex_index v: int) -> varyings:
     let mut link = varyings(
         position = hpos4(c.position.x, c.position.y, 0.0, 1.0)
-        frame = framed(c.position)
+        frame = c.placement * framed(c.position)
         turn = mat2(float2(1.0, 0.0), float2(0.0, 1.0))
         weights = [0.25, 0.5, 0.25]
         ids = [v, v / 3]
-        tint = c.color
+        tint = c.shades[1]
     )
     link.weights[2] = c.color.x
     link.weights[v % 3] += 1.0

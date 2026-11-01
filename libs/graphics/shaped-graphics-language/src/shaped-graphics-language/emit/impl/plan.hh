@@ -64,6 +64,9 @@ struct planned_member
     /// consecutive locations from `location` (EMIT-174); 0 for any other member.
     i32 pieces = 0;
     check::type_id piece = check::type_id::none;
+    /// In `declared_members`: where the member stands in its struct's `members`, and which of its pieces this is, or -1.
+    isize whole = -1;
+    i32 piece_index = -1;
 };
 
 struct planned_struct

@@ -136,7 +136,12 @@ cc::string checker::vertex_format_of(i32 file, ast::attribute const* a, type_id 
     {
         if (f.format != name)
             continue;
-        if (out.name_of(member_type) != f.type)
+        // an array's elements are read an attribute apiece (CHK-422), so the format states each one's
+        auto const* const t = member_type == checked_module::error_type || out.builtin_type_of(member_type) != nullptr
+                                ? nullptr
+                                : &out.at(member_type);
+        auto const read = t != nullptr && t->kind == type_kind::array && t->count > 0 ? t->element : member_type;
+        if (out.name_of(read) != f.type)
             report(diagnostic_kind::type_mismatch, file, a->name,
                    cc::format("@format(.{}) decodes into a {}, and the member is a {}", name, f.type,
                               out.name_of(member_type)));
@@ -2161,11 +2166,11 @@ void checker::judge_entry_point(symbol_id id)
     // A ray-tracing stage's hit, candidate or box is a prelude struct the flat tree builds from the stage's builtins,
     // so it crosses no edge and may hold what a body holds, an affine3 among it (CHK-408); a payload does cross.
     auto const ray_stages = stage_bit(stage::closest_hit) | stage_bit(stage::any_hit) | stage_bit(stage::intersection);
-    // CHK-422: a stage link is every edge between two shader stages, and never a vertex input, a pixel output or ray data
+    // CHK-422: every parameter and result of a shading stage carries matrices and arrays, but a pixel output; ray data never
     auto const is_shading_stage = info.entry_stage == stage::vertex || info.entry_stage == stage::pixel
                                || info.entry_stage == stage::geometry || info.entry_stage == stage::tessellation_control
                                || info.entry_stage == stage::tessellation_evaluation;
-    auto const links_parameter = is_shading_stage && info.entry_stage != stage::vertex;
+    auto const links_parameter = is_shading_stage;
     auto const links_result = is_shading_stage && info.entry_stage != stage::pixel;
     auto const is_built_in_place = [&](type_id type)
     {

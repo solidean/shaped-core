@@ -445,6 +445,8 @@ auto const p = co_await ctx.cached.acquire_raster_pipeline(shaders::cube::pipeli
 //   members marked `@per_instance` / `@stream(name)` split it over buffers: then v::<stream> per buffer, in slot order,
 //   and v::buffers{.per_vertex = verts, .per_instance = insts}.views() for bind_vertex_buffers — typed, so a
 //   buffer of the wrong stream does not compile.
+//   a matrix or an array member stays one field (tg::mat3f, cc::fixed_array<float, 3>) and is an attribute per
+//   column or element in layout(): the member's semantic at index i, at its offset plus i pieces (EMIT-174).
 // `@pixel struct target` -> shaders::cube::target: one sg::color_target per member, by name, plus an optional depth_stencil.
 cmd.raster.render_to(shaders::cube::target{.color = rt.cleared(c), .depth_stencil = depth.cleared(1.0f)}); // -> rendering_info
 //   the pipeline side, for one built by hand: .color_targets = shaders::cube::target::states{.color = {.format = f}},

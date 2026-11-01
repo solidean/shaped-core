@@ -96,3 +96,31 @@ pipeline linked_points:
     pixel = linked_ps
     topology = .point_list
     format = .rgba32_float
+
+// The same points, read from vertex buffers that hold an array per vertex and a matrix per instance.
+// Each is read as its elements or its columns, an attribute apiece (CHK-422, EMIT-174).
+@vertex struct framed_point:
+    column: float
+    tags: float[3]
+    @per_instance row: float
+    @per_instance frame: mat3
+
+struct framed_value:
+    @position position: hpos4
+    @interpolate(.flat) value: float4
+
+@vertex fun framed_vs(p: framed_point) -> framed_value:
+    let framed = p.frame * float3(p.tags[0], p.tags[1], p.tags[2])
+    return {
+        position = hpos4(p.column, p.row, 0.5, 1.0)
+        value = float4(framed.x, framed.y, framed.z, p.tags[2])
+    }
+
+@pixel fun framed_ps(p: framed_value) -> index_target:
+    return { indices = p.value }
+
+pipeline framed_points:
+    vertex = framed_vs
+    pixel = framed_ps
+    topology = .point_list
+    format = .rgba32_float

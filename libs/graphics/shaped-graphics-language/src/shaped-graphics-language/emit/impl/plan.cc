@@ -801,7 +801,8 @@ void sgl::emit::impl::validate_edge_struct(check::checked_module const& m,
         auto const* const record = m.builtin_type_of(member.type);
         auto const is_factor = role == struct_role::patch_constants && member.factor != check::tessellation_factor::none;
         // EMIT-174: a stage link carries an array of what crosses, and a matrix, as one member per element or column
-        auto const is_link = role == struct_role::stage_link || role == struct_role::patch_constants;
+        auto const is_link = role == struct_role::stage_link || role == struct_role::patch_constants
+                          || role == struct_role::vertex_input;
         auto const* const element = record == nullptr && m.at(member.type).kind == check::type_kind::array
                                       ? m.builtin_type_of(m.at(member.type).element)
                                       : nullptr;
@@ -1033,11 +1034,14 @@ cc::vector<sgl::emit::impl::planned_member> sgl::emit::impl::declared_members(pl
         if (member.pieces == 0)
         {
             result.push_back(member);
+            result.back().whole = &member - s.members.data();
             continue;
         }
         for (auto i = 0; i < member.pieces; ++i)
         {
             auto piece = member;
+            piece.whole = &member - s.members.data();
+            piece.piece_index = i;
             piece.name = cc::format("{}_{}", member.name, i);
             piece.source_name = cc::format("{}_{}", member.source_name, i);
             piece.type = member.piece;

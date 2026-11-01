@@ -141,6 +141,11 @@ void write_struct(babel::json::object_writer& o, sgl::described_struct const& s)
             mo.write("output", cc::string_view(m.output));
         if (!m.semantic.empty())
             mo.write("semantic", cc::string_view(m.semantic));
+        if (m.pieces > 0)
+        {
+            mo.write("pieces", m.pieces);
+            mo.write("piece", cc::string_view(m.piece));
+        }
     }
 }
 

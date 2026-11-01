@@ -137,15 +137,26 @@ TEST("sgl check - an array in a struct stands in a buffer, and in a block where 
               .contains("an array crossing a stage edge, in varyings.weights"));
     CHECK(reports_for(cc::format(linked, "bool[2]", "[true, false]"))
               .contains("an array crossing a stage edge, in varyings.weights: bool[2]"));
-    // a vertex input is the host's layout, which takes no array yet
-    CHECK(reports_for("@vertex struct vin:\n"
-                      "    weights: float[2]\n"
+    // a vertex input takes one too, an attribute per element, and `@format` states each element's
+    constexpr auto vin = "@vertex struct vin:\n"
+                         "    {}\n"
+                         "struct varyings:\n"
+                         "    @position position: hpos4\n"
+                         "\n"
+                         "@vertex fun vs(v: vin) -> varyings:\n"
+                         "    return {{position = hpos4(v.weights[0].x, 0.0, 0.0, 1.0)}}\n";
+    CHECK(reports_for(cc::format(vin, "weights: float4[2]")) == "");
+    CHECK(reports_for(cc::format(vin, "@format(.rgba8_unorm) weights: float4[2]")) == "");
+    CHECK(reports_for(cc::format(vin, "@format(.rgba8_unorm) weights: float2[2]"))
+              .contains("@format(.rgba8_unorm) decodes into a float4, and the member is a float2[2]"));
+    // a pixel output is a render target per location, which an array would spread over
+    CHECK(reports_for("@pixel struct target:\n"
+                      "    colors: float4[2]\n"
                       "struct varyings:\n"
                       "    @position position: hpos4\n"
-                      "\n"
-                      "@vertex fun vs(v: vin) -> varyings:\n"
-                      "    return {position = hpos4(v.weights[0], 0.0, 0.0, 1.0)}\n")
-              .contains("an array crossing a stage edge, in vin.weights: float[2]"));
+                      "@pixel fun ps(p: varyings) -> target:\n"
+                      "    return {colors = [float4(1.0), float4(0.0)]}\n")
+              .contains("an array crossing a stage edge, in target.colors: float4[2]"));
 
     // workgroup memory is laid out by each target alone, so an array there stays fine
     CHECK(reports_for("@workgroup binding tile:\n    rows: poly[4]\nstruct poly:\n    corners: float2[3]\n") == "");

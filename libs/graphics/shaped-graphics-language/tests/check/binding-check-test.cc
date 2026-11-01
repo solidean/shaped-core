@@ -551,7 +551,7 @@ TEST("sgl check - a mat3 stands in GPU memory, and crosses a stage link alone")
           "@pixel fun shade(p: plain) -> target:\n"
           "    return {color = float4(1.0), h = holder(mat3(float3(1.0), float3(1.0), float3(1.0)))}\n";
     auto const crossing = reports_for(cc::string(nested) + edges);
-    CHECK(crossing.contains(cc::format("user:[vs] a mat3 crossing a stage edge, in vin.m: mat3, {}", why)));
+    CHECK(!crossing.contains("in vin.m"));
     CHECK(crossing.contains(cc::format("user:[vs] a mat3 crossing a stage edge, in varyings.o.h.m: mat3, {}", why)));
     CHECK(crossing.contains(cc::format("user:[ps] a mat3 crossing a stage edge, in varyings.o.h.m: mat3, {}", why)));
     CHECK(crossing.contains(cc::format("user:[shade] a mat3 crossing a stage edge, in target.h.m: mat3, {}", why)));

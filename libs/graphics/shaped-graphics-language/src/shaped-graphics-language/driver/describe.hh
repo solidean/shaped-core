@@ -142,6 +142,10 @@ struct sgl::described_struct_member
     /// A vertex input member's dx12 semantic, which its input layout names it by (EMIT-28); empty on a `@pixel struct`.
     cc::string semantic;
     bool is_per_instance = false;
+    /// A vertex input's matrix or array, which takes `pieces` attributes of type `piece` from `location` on: its columns or
+    /// its elements, each at its member's semantic and its own index (EMIT-174); 0 for any other member.
+    i32 pieces = 0;
+    cc::string piece;
 };
 
 /// A `@vertex struct` or a `@pixel struct`.

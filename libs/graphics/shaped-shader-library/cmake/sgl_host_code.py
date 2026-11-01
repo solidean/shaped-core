@@ -1101,6 +1101,9 @@ PACKED_HOST_TYPES = {"rgba8_unorm": "cc::u32", "rgba8_uint": "cc::u32"}
 def vertex_member_host_type(package: str, where: str, member: dict) -> str:
     fmt = member.get("format", "")
     if fmt in PACKED_HOST_TYPES:
+        # an array's `@format` is each element's (EMIT-174)
+        if member.get("pieces", 0) > 0:
+            return f"cc::fixed_array<{PACKED_HOST_TYPES[fmt]}, {member['pieces']}>"
         return PACKED_HOST_TYPES[fmt]
     return host_type(package, {}, where, member["type"])
 
@@ -1108,9 +1111,10 @@ def vertex_member_host_type(package: str, where: str, member: dict) -> str:
 def vertex_format(package: str, file: SglFile, struct: str, member: dict) -> str:
     if member.get("format"):
         return member["format"]
-    # A vertex attribute is a builtin, never a struct in GPU memory.
-    host_type(package, {}, f"'{file.path}' `@vertex struct {struct}` member '{member['name']}'", member["type"])
-    fmt = HOST_TYPES[member["type"]][2]
+    # A vertex attribute is a builtin, never a struct in GPU memory; a matrix or an array is read piece by piece (EMIT-174).
+    attribute = member.get("piece") or member["type"]
+    host_type(package, {}, f"'{file.path}' `@vertex struct {struct}` member '{member['name']}'", attribute)
+    fmt = HOST_TYPES[attribute][2]
     if fmt is None:
         raise HostCodeError(f"shader package '{package}': '{file.path}' `@vertex struct {struct}` member '{member['name']}' "
                             f"has type '{member['type']}', which no vertex format reads")
@@ -1131,7 +1135,13 @@ def emit_vertex_input(package: str, namespace: str, file: SglFile, struct: dict)
         out = []
         for m in members:
             cpp = vertex_member_host_type(package, f"'{file.path}' `@vertex struct {name}` member '{m['name']}'", m)
-            out.append(f"{indent}{cpp} {m['name']}; ///< location {m['location']}, `{dx12_semantic(m)}` on dx12\n")
+            if m.get("pieces", 0) > 0:
+                last = m["location"] + m["pieces"] - 1
+                where = (f"locations {m['location']} to {last}, "
+                         f"`{dx12_semantic(m)}0` to `{dx12_semantic(m)}{m['pieces'] - 1}` on dx12")
+            else:
+                where = f"location {m['location']}, `{dx12_semantic(m)}` on dx12"
+            out.append(f"{indent}{cpp} {m['name']}; ///< {where}\n")
         return "".join(out)
 
     out = [f"\nnamespace {namespace}\n{{\n"]
@@ -1186,10 +1196,22 @@ def emit_vertex_input_impl(package: str, namespace: str, file: SglFile, struct: 
     out.append("            .attributes = {\n")
     for member in struct["members"]:
         fmt = vertex_format(package, file, name, member)
-        out.append(f'                {{.semantic = "{dx12_semantic(member)}", '
-                   f".format = sg::vertex_attribute_format::{fmt}, "
-                   f".offset = cc::isize(offsetof({owner(member['stream'])}, {member['name']})), "
-                   f".slot = {slot_of[member['stream']]}}},\n")
+        offset = f"cc::isize(offsetof({owner(member['stream'])}, {member['name']}))"
+        if member.get("pieces", 0) == 0:
+            out.append(f'                {{.semantic = "{dx12_semantic(member)}", '
+                       f".format = sg::vertex_attribute_format::{fmt}, "
+                       f".offset = {offset}, "
+                       f".slot = {slot_of[member['stream']]}}},\n")
+            continue
+        # EMIT-174: a matrix's columns or an array's elements, back to back, at one semantic and an index apiece
+        piece = PACKED_HOST_TYPES.get(member.get("format", "")) or host_type(
+            package, {}, f"'{file.path}' `@vertex struct {name}` member '{member['name']}'", member["piece"])
+        for i in range(member["pieces"]):
+            out.append(f'                {{.semantic = "{dx12_semantic(member)}", '
+                       f".semantic_index = {i}, "
+                       f".format = sg::vertex_attribute_format::{fmt}, "
+                       f".offset = {offset}{f' + {i} * cc::isize(sizeof({piece}))' if i > 0 else ''}, "
+                       f".slot = {slot_of[member['stream']]}}},\n")
     out.append("            }};\n}\n")
 
     if not single:

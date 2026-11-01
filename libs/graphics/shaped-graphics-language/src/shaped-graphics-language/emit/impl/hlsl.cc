@@ -74,11 +74,12 @@ public:
         {
         case struct_role::vertex_input:
         {
-            auto const at = &member - s.members.data();
+            // EMIT-174: a piece is its member's semantic at its own index, `FRAME0`, which is how dx12 reads one
+            auto const at = member.whole >= 0 ? member.whole : &member - s.members.data();
             auto const semantics = vertex_semantics(p.m, p.m.at(s.type));
             for (auto i = isize(0); i < s.member_of.size(); ++i)
                 if (s.member_of[i] == at)
-                    return semantics[i];
+                    return member.piece_index >= 0 ? cc::format("{}{}", semantics[i], member.piece_index) : semantics[i];
             return "";
         }
         case struct_role::stage_link:
@@ -552,11 +553,7 @@ public:
         for (auto const& s : p.structs)
         {
             out.appendf("struct {}{}\n{{\n", is_payload(p, s.type) ? "[raypayload] " : "", s.name);
-            // a vertex input's semantics are found by where a member stands in `s.members`, and none splits (EMIT-174)
-            if (s.role == struct_role::vertex_input)
-                write_members(out, &s, s.members, s.memory_size, p);
-            else
-                write_members(out, &s, declared_members(s), s.memory_size, p);
+            write_members(out, &s, declared_members(s), s.memory_size, p);
             out += "};\n\n";
         }
         write_buffers(out, p, *this);

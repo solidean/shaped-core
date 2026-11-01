@@ -286,6 +286,32 @@ def a_packed_vertex_member_is_its_bytes_on_the_host_and_its_format_in_the_layout
     expect_in(".format = sg::vertex_attribute_format::vec3f", source, "a float member's format, from its type")
 
 
+SPLIT = {
+    "name": "split_vertex",
+    "edge": "vertex",
+    "members": [
+        {"name": "frame", "type": "mat3", "location": 0, "stream": "per_vertex", "per_instance": False,
+         "semantic": "FRAME", "pieces": 3, "piece": "float3"},
+        {"name": "tints", "type": "float4[2]", "location": 3, "stream": "per_vertex", "per_instance": False,
+         "format": "rgba8_unorm", "semantic": "TINTS", "pieces": 2, "piece": "float4"},
+    ],
+}
+
+
+@test
+def a_vertex_matrix_or_array_is_one_host_field_and_an_attribute_per_piece():
+    header = sgl_host_code.emit_vertex_input("pkg", "ns", FILE, SPLIT)
+    expect_in("tg::mat3f frame;", header, "a matrix is the host's own matrix")
+    expect_in("cc::fixed_array<cc::u32, 2> tints;", header, "a packed array holds each element's bytes")
+    source = sgl_host_code.emit_vertex_input_impl("pkg", "ns", FILE, SPLIT)
+    expect_in('{.semantic = "FRAME", .semantic_index = 2, .format = sg::vertex_attribute_format::vec3f, '
+              ".offset = cc::isize(offsetof(::ns::split_vertex, frame)) + 2 * cc::isize(sizeof(tg::vec3f))",
+              source, "a column at its semantic index and its offset")
+    expect_in('{.semantic = "TINTS", .semantic_index = 1, .format = sg::vertex_attribute_format::rgba8_unorm, '
+              ".offset = cc::isize(offsetof(::ns::split_vertex, tints)) + 1 * cc::isize(sizeof(cc::u32))",
+              source, "a packed element at its format and its offset")
+
+
 # ---- a pipeline -------------------------------------------------------------------------------------------------------
 
 # Every stage filled, and a vertex stage that draws from no vertex buffer.
