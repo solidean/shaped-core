@@ -40,7 +40,7 @@ bool checker::is_type_name(i32 file, ast::expr_id expr) const
     if (n != nullptr)
     {
         auto const text = text_of(file, n->where);
-        if (text == "sampler" || text == "comparison_sampler" || text == "bytes")
+        if (text == "sampler" || text == "comparison_sampler" || text == "bytes" || is_type_parameter_name(text))
             return true;
         for (auto const& shape : k_shapes)
             if (shape.depth == text)
@@ -168,6 +168,22 @@ type_id checker::resolve_array(i32 file, ast::expr_id expr, ast::index const& no
     if (arguments.empty())
         return array_type(element, 0);
 
+    // CHK-339: `T[n]` over a value parameter is an array whose length an instance says, and in one it is that constant
+    if (arguments.size() == 1 && arguments[0].name.empty() && !arguments[0].is_splat && ast::is_valid(arguments[0].value))
+        if (auto const* const n = ast.at(arguments[0].value).node.try_as<ast::name>(); n != nullptr)
+            for (auto i = type_parameter_names.size(); i > 0; --i)
+                if (type_parameter_names[i - 1].first == text_of(file, n->where))
+                {
+                    auto const stands_for = type_parameter_names[i - 1].second;
+                    auto const& s = out.at(stands_for);
+                    if (s.kind == type_kind::constant && out.name_of(s.element) == "int" && s.count >= 1)
+                        return array_type(element, s.count);
+                    if (s.kind == type_kind::type_parameter && is_valid(s.element) && out.name_of(s.element) == "int")
+                        return symbolic_array_type(element, stands_for);
+                    report(diagnostic_kind::invalid_constant_argument, file, span_of(file, arguments[0].value),
+                           "an array's length is an int constant of at least 1, or an int value parameter");
+                    return checked_module::error_type;
+                }
     auto counts = cc::vector<i32>();
     for (auto const& a : arguments)
     {

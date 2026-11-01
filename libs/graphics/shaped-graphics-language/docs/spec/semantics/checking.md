@@ -1511,12 +1511,16 @@ A call deduces what each parameter stands for, and inlining writes that in its p
   It hides every other symbol of its name too, so its name as a value or before a dot is `wrong-kind-of-name`.
   A call of it, `T(x)`, is a call of what it stands for in each instance: `float(x)` where `T` is `float`.
   An entry point with type parameters is `wrong-kind-of-name`, since the GPU hands it values of known types.
-* **CHK-339** `struct name[A]:` declares a **generic struct**, over one type parameter its members may name ([why](why/checking.md#chk-339)).
-  Only the prelude declares one: in the program's file, and with more than one type parameter, it is `unsupported-yet`.
-  `name[T]` in a type position is an **instance**, and two mentions of one instance are one type; a count of type arguments but one is `wrong-kind-of-name`.
-  An instance's members are the template's with `T` for `A`, and a function of the template's type scope serves every instance.
-  Such a function is generic over `A`, which its signature and its body may name as their own type parameter: `fun mixed_hit.procedural(self) -> procedural_hit[A]`.
-  The bare name in a type position is the template itself, open in its parameter, which a call deduces as it deduces a type parameter.
+* **CHK-339** `struct name[A, n: int]:` declares a **generic struct**, over parameters its members may name, declared as a function's are (CHK-338) ([why](why/checking.md#chk-339)).
+  `name[T, 4]` in a type position is an **instance**, and two mentions of one instance are one type.
+  It takes one argument per parameter: a type for a type parameter, and an `int` literal, an `int` const or a value parameter in scope for a value parameter.
+  Another count is `wrong-kind-of-name`, and an argument of the other kind `wrong-kind-of-name` or `invalid-constant-argument`.
+  `T[n]` over an `int` value parameter is an array whose length each instance says; elsewhere a length is a constant (CHK-285).
+  An instance's members are the template's with each argument for its parameter, and a function of the template's type scope serves every instance.
+  Such a function is generic over the template's parameters, which its signature and its body may name as their own: `fun ring.capacity(self) -> int => n`.
+  The bare name in a type position is the template itself, open in its parameters, which a call deduces as it deduces a type parameter.
+  So the constructor mirrors the parameters: `pair(1, 2.5)` is a `pair[int, float]`, and an array's length binds the value parameter its type names.
+  `name[T, 4](…)` constructs that instance, whose parameters the call then needs no argument to say.
 * **CHK-340** A call of a generic function binds each type parameter from its arguments, then from where the call stands.
   A call may state generic arguments first, by position or by name as call arguments are: `f[float](x)`, `f[.B = int](x)`, `blur[3](c)`.
   Each is a type, or a constant `int`, `uint`, `bool` or `float` for a value parameter; two constants are one argument when their bits are, with every NaN one.

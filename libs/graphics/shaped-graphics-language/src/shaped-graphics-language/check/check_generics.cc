@@ -30,9 +30,18 @@ bool checker::is_open(type_id type) const
     case type_kind::type_parameter:
         return true;
     case type_kind::structure:
-        return t.is_template || (is_valid(t.generic) && is_open(t.element));
+    {
+        if (t.is_template)
+            return true;
+        if (!is_valid(t.generic))
+            return false;
+        for (auto const a : out.at(t.arguments))
+            if (is_open(a))
+                return true;
+        return false;
+    }
     case type_kind::array:
-        return is_open(t.element);
+        return is_valid(t.count_parameter) || is_open(t.element);
     case type_kind::function:
     {
         if (is_open(t.element))
@@ -61,6 +70,14 @@ void checker::collect_type_parameters(type_id type, cc::vector<type_id>& into) c
     if (t.kind == type_kind::function)
         for (auto const& m : out.at(t.members))
             collect_type_parameters(m.type, into);
+    if (t.kind == type_kind::structure)
+    {
+        for (auto const a : out.at(t.arguments))
+            collect_type_parameters(a, into);
+        return;
+    }
+    if (t.kind == type_kind::array)
+        collect_type_parameters(t.count_parameter, into);
     collect_type_parameters(t.element, into);
 }
 
@@ -74,50 +91,99 @@ type_id bound_to(cc::span<type_id const> bindings, type_id parameter)
             return bindings[i + 1];
     return type_id::none;
 }
-} // namespace
 
-namespace
+/// The key of the instance of `generic` for `arguments` in `checker::instances`, which a lookup confirms.
+u64 instance_key(type_id generic, cc::span<type_id const> arguments)
 {
-/// The key of the instance of `generic` for `argument` in `checker::instances`.
-u64 instance_key(type_id generic, type_id argument)
+    auto key = u64(0xcbf29ce484222325);
+    auto const mix = [&](type_id t)
+    {
+        key ^= u64(u32(index_of(t)));
+        key *= u64(0x100000001b3);
+    };
+    mix(generic);
+    for (auto const a : arguments)
+        mix(a);
+    return key;
+}
+
+bool is_same_list(cc::span<type_id const> a, cc::span<type_id const> b)
 {
-    return (u64(u32(index_of(generic))) << 32) | u64(u32(index_of(argument)));
+    if (a.size() != b.size())
+        return false;
+    for (auto i = isize(0); i < a.size(); ++i)
+        if (a[i] != b[i])
+            return false;
+    return true;
 }
 } // namespace
 
-type_id checker::existing_instance(type_id generic, type_id argument) const
+type_id checker::existing_instance(type_id generic, cc::span<type_id const> arguments) const
 {
-    if (argument == out.at(generic).element)
+    // the template itself, where each argument is its own parameter
+    if (is_same_list(out.at(out.at(generic).arguments), arguments))
         return generic;
-    auto const* const found = instances.get_ptr(instance_key(generic, argument));
-    return found != nullptr ? *found : type_id::none;
+    auto const* const found = instances.get_ptr(instance_key(generic, arguments));
+    if (found == nullptr)
+        return type_id::none;
+    if (is_same_list(out.at(out.at(*found).arguments), arguments))
+        return *found;
+    // two argument lists met on one key: the table is the truth
+    for (auto i = isize(0); i < out.types.size(); ++i)
+        if (out.types[i].kind == type_kind::structure && out.types[i].generic == generic
+            && is_same_list(out.at(out.types[i].arguments), arguments))
+            return type_id(i);
+    return type_id::none;
 }
 
-type_id checker::instance_of(type_id generic, type_id argument)
+type_id checker::instance_of(type_id generic, cc::span<type_id const> arguments_in)
 {
-    if (auto const found = existing_instance(generic, argument); is_valid(found))
+    // by value: substituting a member may intern another instance, and `types`, `members` and `type_lists` then move
+    auto const arguments = cc::vector<type_id>::create_copy_of(arguments_in);
+    if (auto const found = existing_instance(generic, arguments); is_valid(found))
         return found;
-    // by value: substituting a member may intern another instance, and `types` and `members` then move
     auto const templated = out.at(generic);
-    type_id const bindings[] = {templated.element, argument};
+    auto const parameters = cc::vector<type_id>::create_copy_of(out.at(templated.arguments));
+    if (parameters.size() != arguments.size())
+        return checked_module::error_type;
+    auto bindings = cc::vector<type_id>();
+    for (auto i = isize(0); i < parameters.size(); ++i)
+    {
+        bindings.push_back(parameters[i]);
+        bindings.push_back(arguments[i]);
+    }
     auto members = cc::vector<member_info>::create_copy_of(out.at(templated.members));
     for (auto& m : members)
         m.type = substitute(m.type, bindings);
     // a member's substitution may have interned this very instance through a nested mention of it
-    if (auto const found = existing_instance(generic, argument); is_valid(found))
+    if (auto const found = existing_instance(generic, arguments); is_valid(found))
         return found;
+    auto spelled = cc::format("{}[", out.at(templated.symbol).name);
+    for (auto i = isize(0); i < arguments.size(); ++i)
+        spelled.appendf("{}{}", i == 0 ? "" : ", ", out.name_of(arguments[i]));
+    spelled += "]";
     auto const id = type_id(out.types.size());
     out.types.push_back({
         .kind = type_kind::structure,
         .symbol = templated.symbol,
         .members = {.first = u32(out.members.size()), .count = u32(members.size())},
-        .element = argument,
-        .spelled = cc::format("{}[{}]", out.at(templated.symbol).name, out.name_of(argument)),
+        .element = arguments[0],
+        .spelled = cc::move(spelled),
         .generic = generic,
+        .arguments = {.first = u32(out.type_lists.size()), .count = u32(arguments.size())},
     });
-    instances[instance_key(generic, argument)] = id;
+    out.type_lists.push_back_range(arguments);
+    instances[instance_key(generic, arguments)] = id;
     out.members.push_back_range(members);
     return id;
+}
+
+type_id checker::symbolic_array_type(type_id element, type_id count_parameter)
+{
+    return resource_type({.kind = type_kind::array,
+                          .element = element,
+                          .count_parameter = count_parameter,
+                          .spelled = cc::format("{}[{}]", out.name_of(element), out.at(count_parameter).spelled)});
 }
 
 type_id checker::substitute(type_id type, cc::span<type_id const> bindings)
@@ -135,11 +201,22 @@ type_id checker::substitute(type_id type, cc::span<type_id const> bindings)
     }
     case type_kind::structure:
     {
-        auto const generic = t.is_template ? type : t.generic;
-        return instance_of(generic, substitute(t.element, bindings));
+        auto arguments = cc::vector<type_id>::create_copy_of(out.at(t.arguments));
+        for (auto& a : arguments)
+            a = substitute(a, bindings);
+        return instance_of(t.is_template ? type : t.generic, arguments);
     }
     case type_kind::array:
-        return array_type(substitute(t.element, bindings), t.count);
+    {
+        auto const element = substitute(t.element, bindings);
+        if (!is_valid(t.count_parameter))
+            return array_type(element, t.count);
+        // CHK-339: `T[n]` with `n` bound to a constant is an array of that length
+        auto const count = bound_to(bindings, t.count_parameter);
+        if (is_valid(count) && out.at(count).kind == type_kind::constant)
+            return array_type(element, out.at(count).count);
+        return symbolic_array_type(element, is_valid(count) ? count : t.count_parameter);
+    }
     case type_kind::function:
     {
         auto parameters = cc::vector<type_id>();
@@ -168,16 +245,29 @@ type_id checker::substitute_existing(type_id type, cc::span<type_id const> bindi
     }
     case type_kind::structure:
     {
-        auto const argument = substitute_existing(t.element, bindings);
-        if (!is_valid(argument))
-            return type_id::none;
-        return existing_instance(t.is_template ? type : t.generic, argument);
+        auto arguments = cc::vector<type_id>();
+        for (auto const a : out.at(t.arguments))
+        {
+            arguments.push_back(substitute_existing(a, bindings));
+            if (!is_valid(arguments.back()))
+                return type_id::none;
+        }
+        return existing_instance(t.is_template ? type : t.generic, arguments);
     }
     case type_kind::array:
     {
         auto const element = substitute_existing(t.element, bindings);
+        auto count = t.count;
+        if (is_valid(t.count_parameter))
+        {
+            auto const bound = bound_to(bindings, t.count_parameter);
+            if (!is_valid(bound) || out.at(bound).kind != type_kind::constant)
+                return type_id::none;
+            count = out.at(bound).count;
+        }
         for (auto i = isize(0); is_valid(element) && i < out.types.size(); ++i)
-            if (out.types[i].kind == type_kind::array && out.types[i].element == element && out.types[i].count == t.count)
+            if (out.types[i].kind == type_kind::array && out.types[i].element == element && out.types[i].count == count
+                && !is_valid(out.types[i].count_parameter))
                 return type_id(i);
         return type_id::none;
     }
@@ -187,14 +277,15 @@ type_id checker::substitute_existing(type_id type, cc::span<type_id const> bindi
     }
 }
 
-bool checker::unify(type_id pattern, type_id actual, cc::vector<type_id>& bindings) const
+bool checker::unify(type_id pattern, type_id actual, cc::vector<type_id>& bindings)
 {
     if (pattern == actual)
         return true;
     if (!is_open(pattern) || !is_valid(actual) || actual == checked_module::error_type)
         return false;
-    auto const& p = out.at(pattern);
-    auto const& a = out.at(actual);
+    // by value: binding an array's length interns a constant, and `types` then moves
+    auto const p = out.at(pattern);
+    auto const a = out.at(actual);
     switch (p.kind)
     {
     case type_kind::type_parameter:
@@ -211,18 +302,34 @@ bool checker::unify(type_id pattern, type_id actual, cc::vector<type_id>& bindin
             return false;
         auto const pattern_generic = p.is_template ? pattern : p.generic;
         auto const actual_generic = a.is_template ? actual : a.generic;
-        return pattern_generic == actual_generic && unify(p.element, a.element, bindings);
+        if (pattern_generic != actual_generic || p.arguments.count != a.arguments.count)
+            return false;
+        for (auto i = u32(0); i < p.arguments.count; ++i)
+            if (!unify(out.type_lists[p.arguments.first + i], out.type_lists[a.arguments.first + i], bindings))
+                return false;
+        return true;
     }
     case type_kind::array:
-        return a.kind == type_kind::array && a.count == p.count && unify(p.element, a.element, bindings);
+    {
+        if (a.kind != type_kind::array)
+            return false;
+        // CHK-339: an array's length binds a value parameter its count names, as a constant of that parameter's type
+        if (is_valid(p.count_parameter) && !is_valid(a.count_parameter) && a.count > 0)
+        {
+            auto const length = constant_type(out.at(p.count_parameter).element, u32(a.count));
+            if (!unify(p.count_parameter, length, bindings))
+                return false;
+        }
+        else if (p.count_parameter != a.count_parameter || a.count != p.count)
+            return false;
+        return unify(p.element, a.element, bindings);
+    }
     case type_kind::function:
     {
         if (a.kind != type_kind::function || a.members.count != p.members.count)
             return false;
-        auto const ps = out.at(p.members);
-        auto const as = out.at(a.members);
-        for (auto i = isize(0); i < ps.size(); ++i)
-            if (!unify(ps[i].type, as[i].type, bindings))
+        for (auto i = u32(0); i < p.members.count; ++i)
+            if (!unify(out.members[p.members.first + i].type, out.members[a.members.first + i].type, bindings))
                 return false;
         return unify(p.element, a.element, bindings);
     }
@@ -435,4 +542,39 @@ type_id checker::stated_argument_of(function_scope& scope, ast::expr_id expr)
         return checked_module::error_type;
     }
     return constant_type(type, evaluated.leaves[0].bits);
+}
+
+type_id checker::type_argument_of(i32 file, ast::expr_id expr, function_scope const* scope, type_id parameter)
+{
+    auto const wants_value = is_valid(out.at(parameter).element);
+    auto const where = span_of(file, expr);
+    // a parameter in scope passes through, the template's own making the template itself
+    if (auto const* const n = ast_of(file).at(expr).node.try_as<ast::name>())
+        for (auto i = type_parameter_names.size(); i > 0; --i)
+            if (type_parameter_names[i - 1].first == text_of(file, n->where))
+            {
+                auto const stands_for = type_parameter_names[i - 1].second;
+                auto const& s = out.at(stands_for);
+                auto const is_value = s.kind == type_kind::constant || is_valid(s.element);
+                if (is_value != wants_value || (is_value && s.element != out.at(parameter).element))
+                    break;
+                return stands_for;
+            }
+    if (!wants_value && ast_of(file).at(expr).node.is<ast::literal>())
+    {
+        report(diagnostic_kind::wrong_kind_of_name, file, where,
+               cc::format("{} is a type parameter, which takes a type", out.at(parameter).spelled));
+        return checked_module::error_type;
+    }
+    if (!wants_value)
+        return resolve_value_type(file, expr, scope);
+    auto const count = constant_count(file, expr, scope);
+    if (!count.has_value() || out.name_of(out.at(parameter).element) != "int")
+    {
+        report(diagnostic_kind::invalid_constant_argument, file, where,
+               cc::format("{} is a value parameter of {}, which takes an int literal, an int const or an int parameter",
+                          out.at(parameter).spelled, out.name_of(out.at(parameter).element)));
+        return checked_module::error_type;
+    }
+    return constant_type(out.at(parameter).element, u32(count.value()));
 }

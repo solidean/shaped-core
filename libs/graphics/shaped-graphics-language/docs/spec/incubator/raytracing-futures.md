@@ -48,9 +48,6 @@ A mixed trace gives one flat `mixed_hit[A]`, whose fields mean something for one
 Both are the shape a language without sum types forces: `hit_kind` plus fields that are meaningful per kind, and `undefined()` where no value exists.
 With `T?`, `report.none()` would be `none`; with payload-carrying enums, a mixed hit would be `case h: .triangle(t) => … .procedural(p) => …`.
 
-**User-declared generic structs.**
-The prelude declares `report[A]` and its neighbours, and a program may not declare a generic struct yet ([generics.md](generics.md)).
-
 ## What it touches
 
 * The check pass: the trace graph (recursion), the stage table (reordering, micromaps, motion), and the type system (`T?`, enums with values).

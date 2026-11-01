@@ -539,9 +539,10 @@ The checked once, opaque rule this replaces let a body only hand a value of `A` 
 
 ## CHK-339
 
-A generic struct is the prelude's alone because the traces need exactly one shape of it, a hit or a report that carries the program's attributes.
-A user-declared one raises questions nothing has answered yet: methods that name the type parameter, several of them, and what a host sees of an instance.
-The [incubator](../../incubator/generics.md) answers them.
+A generic struct takes the parameters a function does, so one rule says what a type parameter and a value parameter are.
+Its constructor mirrors its parameters rather than taking them, since its fields say them: an array field's length is how a value parameter is deduced.
+An instance is a struct of its own after flattening, so nothing about it reaches a target that a plain struct does not.
+What a host sees of an instance in GPU memory is still open, in the [incubator](../../incubator/generics.md).
 
 ## CHK-341
 

@@ -416,14 +416,29 @@ type_id checker::resolve_type(i32 file, ast::expr_id expr, function_scope const*
             result = resolve_atomic(file, expr, *applied, scope);
         else if (auto const generic = generic_named(file, applied->object); is_valid(generic))
         {
-            // CHK-339: `report[T]`, an instance of a generic struct of the prelude
+            // CHK-339: `ring[4, float]`, an instance of a generic struct, one argument per parameter and of its kind
             auto const arguments = ast_of(file).at(applied->arguments);
-            if (arguments.size() != 1 || !arguments[0].name.empty() || arguments[0].is_splat)
+            auto const parameters = cc::vector<type_id>::create_copy_of(out.at(out.at(generic).arguments));
+            if (arguments.size() != parameters.size())
                 report(diagnostic_kind::wrong_kind_of_name, file, where,
-                       cc::format("{} takes one type argument", out.name_of(generic)));
-            else if (auto const argument = resolve_value_type(file, arguments[0].value, scope);
-                     argument != checked_module::error_type)
-                result = instance_of(generic, argument);
+                       cc::format("{} takes {} argument{}", out.name_of(generic), parameters.size(),
+                                  parameters.size() == 1 ? "" : "s"));
+            else
+            {
+                auto given = cc::vector<type_id>();
+                for (auto i = isize(0); i < arguments.size(); ++i)
+                {
+                    auto const& a = arguments[i];
+                    auto const argument = !a.name.empty() || a.is_splat
+                                            ? checked_module::error_type
+                                            : type_argument_of(file, a.value, scope, parameters[i]);
+                    if (argument == checked_module::error_type)
+                        break;
+                    given.push_back(argument);
+                }
+                if (given.size() == parameters.size())
+                    result = instance_of(generic, given);
+            }
         }
         else if (is_named(file, applied->object, "point_stream") || is_named(file, applied->object, "line_stream")
                  || is_named(file, applied->object, "triangle_stream"))
@@ -511,7 +526,7 @@ type_id checker::resolve_value_type(i32 file, ast::expr_id expr, function_scope 
     auto innermost = type;
     while (out.at(innermost).kind == type_kind::array)
     {
-        if (out.at(innermost).count == 0)
+        if (out.at(innermost).count == 0 && !is_valid(out.at(innermost).count_parameter))
         {
             report(diagnostic_kind::wrong_kind_of_name, file, span_of(file, expr),
                    "an array without a length is a binding array, which only a binding member may be");
@@ -1027,25 +1042,22 @@ void checker::compile_struct(symbol_id id)
     if (is_vertex && is_pixel)
         unsupported(file, s.name, "a struct of two stages");
 
-    // CHK-339: a generic struct is the prelude's, over one type parameter its members may name
-    auto parameter = type_id::none;
-    if (!s.type_parameters.empty())
+    // CHK-339: a generic struct's parameters, types and values, which its members may name
+    auto parameters = cc::vector<type_id>();
+    auto are_parameters_failed = false;
+    for (auto const& p : ast_of(file).at(s.type_parameters))
     {
-        auto const parameters = ast_of(file).at(s.type_parameters);
-        if (!is_prelude_file(file) || parameters.size() != 1)
-        {
-            unsupported(file, s.name,
-                        !is_prelude_file(file) ? "a generic struct outside the prelude"
-                                               : "a generic struct of more than one type parameter");
-            out.symbols.own(index_of(id)).state = symbol_state::failed;
-            return;
-        }
-        parameter = new_type_parameter(text_of(file, parameters[0].name), id);
-        type_parameter_names.push_back({text_of(file, parameters[0].name), parameter});
+        parameters.push_back(declare_type_parameter(file, p, id, are_parameters_failed));
+        type_parameter_names.push_back({text_of(file, p.name), parameters.back()});
+    }
+    if (are_parameters_failed)
+    {
+        type_parameter_names.resize_down_to(type_parameter_names.size() - parameters.size());
+        out.symbols.own(index_of(id)).state = symbol_state::failed;
+        return;
     }
     auto const members = compile_members(file, s.members, true, is_pixel, is_vertex);
-    if (is_valid(parameter))
-        type_parameter_names.remove_back();
+    type_parameter_names.resize_down_to(type_parameter_names.size() - parameters.size());
     // CHK-328: a ray type's member is the payload its stages take, which is a struct
     if (s.is_ray_set)
         for (auto const& m : out.at(members))
@@ -1121,9 +1133,11 @@ void checker::compile_struct(symbol_id id)
         .is_no_padding = find_attribute(file, d.attributes, "no_padding") != nullptr,
         .has_swizzles = has_swizzles,
         .swizzle_alias = has_swizzles ? cc::move(swizzle_alias) : cc::string(),
-        .element = parameter,
-        .is_template = is_valid(parameter),
+        .element = parameters.empty() ? type_id::none : parameters[0],
+        .is_template = !parameters.empty(),
+        .arguments = {.first = u32(out.type_lists.size()), .count = u32(parameters.size())},
     });
+    out.type_lists.push_back_range(parameters);
     out.symbols.own(index_of(id)).type = type;
 }
 
@@ -1695,6 +1709,34 @@ cc::vector<symbol_id> checker::binding_list_of(i32 file, ast::range_of<ast::argu
     return bindings;
 }
 
+type_id checker::declare_type_parameter(i32 file, ast::field const& p, symbol_id owner, bool& is_failed)
+{
+    // a bare `T` is `T: type`, and `n: int` a value parameter, which the body reads as a constant
+    auto value_type = type_id::none;
+    if (ast::is_valid(p.type) && text_of(file, span_of(file, p.type)) != "type")
+    {
+        value_type = resolve_value_type(file, p.type);
+        auto const name = out.name_of(value_type);
+        if (value_type != checked_module::error_type && name != "int" && name != "uint" && name != "bool"
+            && name != "float")
+        {
+            unsupported(file, span_of(file, p.type),
+                        cc::format("a value parameter of {}, where int, uint, bool and float are carried", name));
+            is_failed = true;
+        }
+    }
+    if (ast::is_valid(p.default_value) || !p.attributes.empty())
+    {
+        // still declared, so a mention of it is no second diagnostic
+        unsupported(file, span_of(file, p.form), "a type parameter with a default or an attribute");
+        is_failed = true;
+    }
+    auto const parameter = new_type_parameter(text_of(file, p.name), owner);
+    if (is_valid(value_type) && value_type != checked_module::error_type)
+        out.types.own(index_of(parameter)).element = value_type;
+    return parameter;
+}
+
 void checker::compile_function(symbol_id id)
 {
     auto const file = out.at(id).file;
@@ -1749,40 +1791,18 @@ void checker::compile_function(symbol_id id)
     auto type_parameters = cc::vector<type_id>();
     for (auto const& p : ast.at(f.type_parameters))
     {
-        // a bare `T` is `T: type`, and `n: int` a value parameter, which the body reads as a constant
-        auto value_type = type_id::none;
-        if (ast::is_valid(p.type) && text_of(file, span_of(file, p.type)) != "type")
-        {
-            value_type = resolve_value_type(file, p.type);
-            auto const name = out.name_of(value_type);
-            if (value_type != checked_module::error_type && name != "int" && name != "uint" && name != "bool"
-                && name != "float")
-            {
-                unsupported(file, span_of(file, p.type),
-                            cc::format("a value parameter of {}, where int, uint, bool and float are carried", name));
-                is_failed = true;
-            }
-        }
-        if (ast::is_valid(p.default_value) || !p.attributes.empty())
-        {
-            // still declared, so a mention of it is no second diagnostic
-            unsupported(file, span_of(file, p.form), "a type parameter with a default or an attribute");
-            is_failed = true;
-        }
-        auto const parameter = new_type_parameter(text_of(file, p.name), id);
-        if (is_valid(value_type) && value_type != checked_module::error_type)
-            out.types.own(index_of(parameter)).element = value_type;
+        auto const parameter = declare_type_parameter(file, p, id, is_failed);
         type_parameters.push_back(parameter);
         type_parameter_names.push_back({text_of(file, p.name), parameter});
     }
-    // CHK-339: a function of a generic struct's type scope is generic over the struct's parameter, which it may name
+    // CHK-339: a function of a generic struct's type scope is generic over the struct's parameters, which it may name
     if (is_valid(out.at(id).owner))
         if (auto const owner = receiver_of(id); owner != checked_module::error_type && out.at(owner).is_template)
-        {
-            auto const parameter = out.at(owner).element;
-            type_parameters.push_back(parameter);
-            type_parameter_names.push_back({out.at(parameter).spelled, parameter});
-        }
+            for (auto const parameter : cc::vector<type_id>::create_copy_of(out.at(out.at(owner).arguments)))
+            {
+                type_parameters.push_back(parameter);
+                type_parameter_names.push_back({out.at(parameter).spelled, parameter});
+            }
     if (!type_parameters.empty()
         && (is_raster_entry || ray_stage != stage::none || geometry != nullptr || control != nullptr || is_evaluation
             || find_attribute(file, d.attributes, "compute") != nullptr))

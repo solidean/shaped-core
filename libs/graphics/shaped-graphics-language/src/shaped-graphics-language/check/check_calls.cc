@@ -463,6 +463,22 @@ type_id checker::check_call(function_scope& scope, ast::expr_id id, ast::call co
             auto const is_function = scope.find_local(name) == nullptr && !is_type_parameter_name(name)
                                   && found != nullptr && !found->empty()
                                   && out.at(found->front()).kind == symbol_kind::function;
+            // CHK-339: `ring[4, float](…)` constructs that instance, which binds every parameter its constructor has
+            if (scope.find_local(name) == nullptr && !is_type_parameter_name(name)
+                && is_valid(generic_named(file, index->object)))
+            {
+                auto const instance = resolve_value_type(file, call.callee, &scope);
+                if (instance == error_type)
+                {
+                    (void)check_arguments(scope, call.arguments, false);
+                    return error_type;
+                }
+                auto const outer_expected = expected_result;
+                expected_result = instance;
+                auto const result = check_named_call(scope, id, call, name, found, false);
+                expected_result = outer_expected;
+                return result;
+            }
             if (is_function)
             {
                 auto stated = cc::vector<stated_argument>();

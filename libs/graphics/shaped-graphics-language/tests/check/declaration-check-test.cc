@@ -199,9 +199,6 @@ TEST("sgl check - what the tracer does not carry is unsupported-yet, and names t
 {
     CHECK(reports_for("type color = float3\n") == "unsupported-yet user:[type color = float3] type alias\n");
 
-    // CHK-339: a generic struct is the prelude's
-    CHECK(reports_for("struct box[T]:\n    value: T\n")
-          == "unsupported-yet user:[box] a generic struct outside the prelude\n");
     CHECK(reports_for("struct a:\n    x: float\n    fun reset(mut self):\n        self.x = 0.0\n")
           == "unsupported-yet user:[reset] mut self\n");
     CHECK(reports_for("binding b = constants\n") == "unsupported-yet user:[constants] a binding composition\n");
@@ -276,13 +273,22 @@ TEST("sgl check - a generic body is checked per instantiation, and its names whe
           == "unsupported-yet user:[T = float] a type parameter with a default or an attribute\n");
 }
 
-TEST("sgl check - a generic struct is the prelude's, and an instance names one type argument")
+TEST("sgl check - a generic struct takes one argument per parameter, each of its kind")
 {
     // CHK-339
-    CHECK(reports_for("struct box[A]:\n    v: A\n")
-          == "unsupported-yet user:[box] a generic struct outside the prelude\n");
+    CHECK(reports_for("struct box[A]:\n    v: A\n") == "");
     CHECK(reports_for("fun f(r: report[float, float]) => 1.0\n")
-          == "wrong-kind-of-name user:[report[float, float]] report takes one type argument\n");
+          == "wrong-kind-of-name user:[report[float, float]] report takes 1 argument\n");
+    // a value parameter takes an int constant, and a type parameter a type
+    CHECK(reports_for("struct ring[n: int, T]:\n    items: T[n]\nfun f(r: ring[float, float]) => 1.0\n")
+              .starts_with("invalid-constant-argument user:[float] n is a value parameter of int"));
+    CHECK(reports_for("struct ring[n: int, T]:\n    items: T[n]\nfun f(r: ring[2, 3]) => 1.0\n")
+              .starts_with("wrong-kind-of-name user:[3]"));
+    // an array's length names an int value parameter, and nothing else of the parameters
+    CHECK(reports_for("struct bad[n: float]:\n    items: float[n]\n")
+              .starts_with("invalid-constant-argument user:[n] an array's length is an int constant of at least 1, or "
+                           "an "
+                           "int value parameter"));
 }
 
 TEST("sgl check - a mut parameter is spelled on its type, takes no default, and no entry point has one")

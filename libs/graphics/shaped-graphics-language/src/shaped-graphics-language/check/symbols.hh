@@ -264,6 +264,8 @@ struct sgl::check::type_info
     type_id element = type_id::none;
     /// An `array`'s length; 0 for `T[]`, whose length the host binds (CHK-286).
     i32 count = 0;
+    /// An array whose length is a value parameter, `T[n]`, which an instance replaces by its constant (CHK-339).
+    type_id count_parameter = type_id::none;
     /// Whether a `buffer` may be written: `mut buffer[T]` against `buffer[T]`.
     bool is_mut = false;
     /// The shape of a `texture` or an `image`.
@@ -283,6 +285,9 @@ struct sgl::check::type_info
     bool is_template = false;
     /// An instance of one, `report[hit_attributes]`: the template, whose `element` this instance's argument replaces.
     type_id generic = type_id::none;
+    /// A template's parameters in order, and what each stands for in an instance of it; a range of
+    /// `checked_module::type_lists` (CHK-339).
+    ast::range_of<type_id> arguments;
 
     bool operator==(type_info const&) const = default;
 };

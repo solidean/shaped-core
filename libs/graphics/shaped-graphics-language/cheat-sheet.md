@@ -663,15 +663,17 @@ ops[i](mut v)                                            // raygen, miss, closes
 - **A `sampler name:` at file scope is a static sampler of the pipeline layout** (CHK-314), handed to a builtin by its name: `tex.sample(uv, name)`.
   It joins the layout of every entry point whose inlined code reaches it, at its position among the file's samplers (EMIT-133).
   An entry point reaching one at position 16 or later is `too-many-samplers`, and unreached samplers declared above it count.
-- **Still `unsupported-yet`:** generic structs of the program, stated type arguments `f[float](x)`, `mut self`, lambdas beyond `x => value`, nested functions, `use`,
+- **Still `unsupported-yet`:** `mut self`, lambdas beyond `x => value`, nested functions, `use`,
   a `const` whose value is no literal, enum case or const, a `for` over anything but `a ..< b`, a `let` without a value,
   an expression statement that is no call outside a `test`, an `assert` message, and an `assert` whose condition writes.
 - **A function value is never a value of any target.** A function type is a parameter's whole type alone, and a call through it inlines what was handed.
   A `let f = halve` is `unsupported-yet`, and a function type under `mut`, as an element or as a type argument is `wrong-kind-of-name`.
 - **A mut parameter takes no default** (`default-not-allowed-here`), and a function with one is never a function value.
-- **A type parameter is opaque, and a generic body is checked ONCE over it.** No field, operator or call of `A` but one that takes `A` itself; an entry point is never generic.
-  Its name hides every symbol of that name, so `A(1.0)` inside `fun f[A]` is `wrong-kind-of-name` even where a struct `A` exists.
-  Only the prelude declares a generic struct (`report[A]`, `procedural_hit[A]`, `mixed_hit[A]`), and its methods cannot name `A` yet.
+- **A generic body is checked PER INSTANCE, its names where it is written.** Its own pass judges names alone; an entry point is never generic.
+  A type parameter's name hides every symbol of that name, so `A(1.0)` inside `fun f[A]` is what `A` stands for, even where a struct `A` exists.
+  A generic nothing instantiates warns `generic-not-instantiated`: a `test` that calls it is how it is checked.
+- **Generic structs take type and value parameters**, `struct ring[n: int, T]:` with `items: T[n]`; `ring[4, float]` names an instance.
+  The constructor mirrors the parameters, `ring(float[4].filled(0.0), 0)`, and a method names them, `fun ring.capacity(self) -> int => n`.
 - **Two `trace`s**: with a ray type third, `trace(world, r, set.ray, mut p)`, it is the pipeline's; otherwise it is the prelude's inline trace.
   The inline one needs `ray_query` where the entry point REACHES it (CHK-322), so a stage that never traces runs on a device without it.
 - **A trace graph with a cycle is `recursive-trace`** (CHK-332): a miss or closest hit tracing its own ray type, directly or through others, is refused, never bounded.

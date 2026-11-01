@@ -366,9 +366,10 @@ struct planner
     {
         // a closing bracket is dropped, since every one ends the name or stands before another
         auto name = cc::string();
+        // a constant argument such as `-1.5` is spelled with what no identifier holds, so each such character is `_`
         for (auto const c : p.m.name_of(type))
             if (c != ']' && c != ' ')
-                name += c == '[' || c == ',' ? '_' : c;
+                name += (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_' ? c : '_';
         return p.names.mint(name);
     }
 

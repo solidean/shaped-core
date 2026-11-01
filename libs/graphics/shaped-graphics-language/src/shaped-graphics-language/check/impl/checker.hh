@@ -889,15 +889,17 @@ struct checker
     /// Every type parameter `type` names, each once, into `into`.
     void collect_type_parameters(type_id type, cc::vector<type_id>& into) const;
     /// `generic[argument]`, interned; the template itself where `argument` is its own type parameter (CHK-339).
-    type_id instance_of(type_id generic, type_id argument);
+    type_id instance_of(type_id generic, cc::span<type_id const> arguments);
+    /// `element[n]`, an array whose length is the value parameter `count_parameter` (CHK-339).
+    [[nodiscard]] type_id symbolic_array_type(type_id element, type_id count_parameter);
     /// `instance_of` where it exists already, `none` otherwise.
-    [[nodiscard]] type_id existing_instance(type_id generic, type_id argument) const;
+    [[nodiscard]] type_id existing_instance(type_id generic, cc::span<type_id const> arguments) const;
     /// `type` with every parameter `bindings` binds replaced, interning what that makes.
     type_id substitute(type_id type, cc::span<type_id const> bindings);
     /// `substitute` over what exists already, which flattening reads; `none` where an instance was never made.
     [[nodiscard]] type_id substitute_existing(type_id type, cc::span<type_id const> bindings) const;
     /// Whether `actual` is `pattern` with its open parameters bound, extending `bindings` with what that takes (CHK-340).
-    [[nodiscard]] bool unify(type_id pattern, type_id actual, cc::vector<type_id>& bindings) const;
+    [[nodiscard]] bool unify(type_id pattern, type_id actual, cc::vector<type_id>& bindings);
     /// Makes every instance a generic call's inlining will name, before any entry point is flattened.
     void instantiate_generics();
     /// The instance of `function` for `bindings`, checked once; -1 where a binding is open or the function recursive.
@@ -907,8 +909,13 @@ struct checker
     [[nodiscard]] i32 existing_function_instance(symbol_id function, cc::span<type_id const> bindings) const;
     /// The constant `bits` of `element`, interned, which a value parameter stands for in an instance (CHK-338).
     [[nodiscard]] type_id constant_type(type_id element, u32 bits);
+    /// One of a generic function's or struct's parameters: a type parameter, or a value parameter `n: int` (CHK-338).
+    [[nodiscard]] type_id declare_type_parameter(i32 file, ast::field const& p, symbol_id owner, bool& is_failed);
     /// A generic argument a call states: a type, or the constant a value expression evaluates to (CHK-340).
     [[nodiscard]] type_id stated_argument_of(function_scope& scope, ast::expr_id expr);
+    /// An argument of a generic struct in a type position, of the kind `parameter` takes: a type, a parameter in
+    /// scope, or an int constant for a value parameter (CHK-339).
+    [[nodiscard]] type_id type_argument_of(i32 file, ast::expr_id expr, function_scope const* scope, type_id parameter);
     /// The warning for each generic function of the program that nothing instantiated (CHK-338).
     void warn_uninstantiated_generics(isize first);
     /// The instance whose body is being checked, whose tables `set_type` and `set_target` write; -1 for none.

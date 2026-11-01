@@ -2,8 +2,8 @@
 
 *Incubator: not normative.*
 
-What is specified today ([CHK-338 to CHK-341](../semantics/checking.md#generics)): type parameters deduced at the call, and generic structs that only the prelude declares.
-A generic body is checked per instance already, with its names resolved where it is written.
+Most of this is specified now ([CHK-338 to CHK-341](../semantics/checking.md#generics)): bodies checked per instance, stated arguments, value parameters and generic structs.
+What is left is listed under **Open**, and the file goes once that is settled.
 This file is the design that generalizes the parameters and the deduction.
 
 ## The idea
