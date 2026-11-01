@@ -583,6 +583,8 @@ It knows its own verdict, so there is no wrapper exit code to misread and no pus
    `--bump <path>` adds a submodule whose work is pushed already but whose pointer is not.
 6. It runs the project's own `dev.py check --fix`, whatever registry the project wired, so the extra roots cover the submodules' prose and links.
 7. It pushes the submodules first, so every pointer names a commit its remote has, then this repository.
+   Before that push it checks every submodule pointer the new commits record, merges included, and refuses one no remote branch of its submodule holds:
+   pushed, it would break every pull and clone that recurses into submodules, for everyone.
    A rejected push means `origin/<branch>` moved during the gate, so it merges again and reruns the static gates on top of what came in; three rounds, then it stops and says the branch is busy.
    The tests do not rerun: they passed on this change, and what came in was gated by whoever pushed it.
 
