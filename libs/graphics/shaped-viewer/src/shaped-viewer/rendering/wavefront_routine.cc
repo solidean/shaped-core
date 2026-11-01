@@ -274,9 +274,19 @@ sg::routine_outcome wavefront_routine::execute(sg::command_list& cmd, wavefront_
     if (d.restart && ++d.state->generation == 0)
         d.state->generation = 1;
 
+    // A sample's camera ray takes or skips a partial coverage at random, so guides written from it would flicker with the cutout.
+    // Where the trace holds one, each pixel's first sample of the frame follows a guide ray that skips every partial coverage,
+    // and that ray costs a round of its own, so the frame runs one more.
+    auto guide_rays = false;
+    if (d.frame.write_guides != 0)
+        for (auto const* p : bound)
+            guide_rays = guide_rays || p->opacity.can_cut_out();
+    auto const rounds = d.rounds + (guide_rays ? 1 : 0);
+
     auto fc = d.frame;
     fc.generation = d.state->generation;
-    fc.wavefront_flags = d.restart ? impl::wavefront_flag_restart : 0u;
+    fc.wavefront_flags
+        = (d.restart ? impl::wavefront_flag_restart : 0u) | (guide_rays ? impl::wavefront_flag_guide_rays : 0u);
     fc.permutation_count = u32(t.hit_groups.size());
     fc.roulette_after = d.roulette_after;
     auto const frame = ctx.transient.create_buffer_from_pod(cmd, fc, sg::buffer_usage::readonly_buffer);
@@ -337,7 +347,7 @@ sg::routine_outcome wavefront_routine::execute(sg::command_list& cmd, wavefront_
     // One counter per round, copied out of `counters` before the round's own kernels move it.
     auto live = sg::buffer<u32>();
     if (d.live_paths != nullptr)
-        live = ctx.transient.create_buffer<u32>(d.rounds, sg::buffer_usage::copy_dst | sg::buffer_usage::copy_src);
+        live = ctx.transient.create_buffer<u32>(rounds, sg::buffer_usage::copy_dst | sg::buffer_usage::copy_src);
 
     mark(wavefront_stage::begin);
     use(*self->_kernels.reset, second_group::none);
@@ -345,7 +355,7 @@ sg::routine_outcome wavefront_routine::execute(sg::command_list& cmd, wavefront_
     use(*self->_kernels.begin, second_group::none);
     dispatch_slots(cmd, width * height);
 
-    for (auto round = 0; round < d.rounds; ++round)
+    for (auto round = 0; round < rounds; ++round)
     {
         step.parity = u32(round % 2);
         step.permutation = 0;
