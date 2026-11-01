@@ -1752,6 +1752,14 @@ void checker::compile_function(symbol_id id)
         type_parameters.push_back(parameter);
         type_parameter_names.push_back({text_of(file, p.name), parameter});
     }
+    // CHK-339: a function of a generic struct's type scope is generic over the struct's parameter, which it may name
+    if (is_valid(out.at(id).owner))
+        if (auto const owner = receiver_of(id); owner != checked_module::error_type && out.at(owner).is_template)
+        {
+            auto const parameter = out.at(owner).element;
+            type_parameters.push_back(parameter);
+            type_parameter_names.push_back({out.at(parameter).spelled, parameter});
+        }
     if (!type_parameters.empty()
         && (is_raster_entry || ray_stage != stage::none || geometry != nullptr || control != nullptr || is_evaluation
             || find_attribute(file, d.attributes, "compute") != nullptr))

@@ -177,20 +177,18 @@ fun mixed_hit.triangle(self) -> triangle_hit:
     )
 
 /// The hit as a procedural primitive's, which `is_hit` only where the kind is `procedural`.
-fun mixed_hit.procedural(self) => procedural_of_mixed(self)
-
-@internal fun procedural_of_mixed[A](h: mixed_hit[A]) -> procedural_hit[A]:
+fun mixed_hit.procedural(self) -> procedural_hit[A]:
     return procedural_hit(
-        h.kind == hit_kind.procedural
-        h.t
-        h.ray
-        h.instance_id
-        h.instance_index
-        h.geometry_index
-        h.primitive_index
-        h.attributes
-        h.object_to_world
-        h.world_to_object
+        self.kind == hit_kind.procedural
+        self.t
+        self.ray
+        self.instance_id
+        self.instance_index
+        self.geometry_index
+        self.primitive_index
+        self.attributes
+        self.object_to_world
+        self.world_to_object
     )
 
 @internal fun mixed_of_triangle[A](h: triangle_hit, attributes: A) -> mixed_hit[A]:

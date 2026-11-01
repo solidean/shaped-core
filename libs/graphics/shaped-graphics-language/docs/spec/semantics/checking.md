@@ -1506,6 +1506,7 @@ A call deduces what each parameter stands for, and inlining writes that in its p
   Only the prelude declares one: in the program's file, and with more than one type parameter, it is `unsupported-yet`.
   `name[T]` in a type position is an **instance**, and two mentions of one instance are one type; a count of type arguments but one is `wrong-kind-of-name`.
   An instance's members are the template's with `T` for `A`, and a function of the template's type scope serves every instance.
+  Such a function is generic over `A`, which its signature and its body may name as their own type parameter: `fun mixed_hit.procedural(self) -> procedural_hit[A]`.
   The bare name in a type position is the template itself, open in its parameter, which a call deduces as it deduces a type parameter.
 * **CHK-340** A call of a generic function binds each type parameter from its arguments, then from where the call stands.
   An argument whose parameter's type names a type parameter binds it to the argument's type exactly, and a number to the type it was checked as.
