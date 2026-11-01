@@ -679,3 +679,25 @@ TEST("sgl emit - a struct that shadows one of the prelude is written under a nam
         CHECK(e.text.contains("struct light_1"));
     }
 }
+
+TEST("sgl emit - two instances of one template whose members came out alike are one struct")
+{
+    // CHK-339: `op[.add]` and `op[.multiply]` both hold one float, so every target declares one struct for both
+    auto const user = cc::string_view("enum mode:\n"
+                                      "    add\n"
+                                      "    multiply\n"
+                                      "struct op[m: mode]:\n"
+                                      "    scale: float\n"
+                                      "binding data:\n"
+                                      "    adds: mut buffer[op[.add]]\n"
+                                      "    muls: mut buffer[op[.multiply]]\n"
+                                      "@compute(64) fun main(@thread_id id: int3){data}:\n"
+                                      "    data.adds[id.x] = op[mode.add](1.0)\n"
+                                      "    data.muls[id.x] = op[mode.multiply](2.0)\n");
+    for (auto const t : {target::hlsl_dx12, target::wgsl, target::msl})
+    {
+        auto const e = emit_source(user, 0, t);
+        CHECK(e.text.contains("op_mode_add"));
+        CHECK(!e.text.contains("op_mode_multiply"));
+    }
+}

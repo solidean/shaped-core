@@ -68,6 +68,8 @@ struct target_ {
 ## Types
 
 * **EMIT-22** A struct of the program keeps its name, and a builtin type is spelled as its record says, which today is the table below.
+* **EMIT-179** An instance of a generic struct is named after its template and its arguments, `pair_float_int` for `pair[float, int]`, with every character no identifier holds written `_` (CHK-339).
+  Instances of one template whose members came out alike are one struct, named after the first a tree needs: after the front end nothing tells them apart.
 * **EMIT-23** A struct is declared after every struct it holds.
   It is declared where something the body reaches holds one, or where a binding or the stage edge does: a struct LEGAL-61 split into its fields is declared nowhere.
 * **EMIT-106** A field of type `void` holds nothing, so no target declares it, and a construction writes no argument for it.

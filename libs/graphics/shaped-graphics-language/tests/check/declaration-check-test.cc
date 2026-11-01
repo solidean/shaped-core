@@ -267,8 +267,9 @@ TEST("sgl check - a generic body is checked per instantiation, and its names whe
               .starts_with("wrong-kind-of-name user:[T] T is a value parameter, which names a value and no type\n"));
     CHECK(reports_for("fun f[T: type](x: T) -> T => x\nfun g() -> int => f(1)\n") == "");
     CHECK(reports_for("fun f[n: float3](x: float) => x\n")
-              .starts_with("unsupported-yet user:[float3] a value parameter of float3, where int, uint, bool and float "
-                           "are"));
+              .starts_with("unsupported-yet user:[float3] a value parameter of float3, where int, uint, bool, float "
+                           "and "
+                           "enums are"));
     CHECK(reports_for("fun f[T = float](x: T) => x\n")
           == "unsupported-yet user:[T = float] a type parameter with a default or an attribute\n");
 }

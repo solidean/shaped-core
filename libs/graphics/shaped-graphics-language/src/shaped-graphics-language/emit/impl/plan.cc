@@ -385,10 +385,30 @@ struct planner
             return;
         if (p.struct_of_type[index_of(type)] != -1)
             return;
+        auto const& info = p.m.at(type);
+        // CHK-339: two instances of one template whose members came out alike are one struct, since after the front end
+        // nothing tells them apart
+        if (is_valid(info.generic))
+            for (auto i = isize(0); i < p.structs.size(); ++i)
+            {
+                auto const& other = p.m.at(p.structs[i].type);
+                if (other.generic != info.generic || p.structs[i].role != role
+                    || other.members.count != info.members.count)
+                    continue;
+                auto const mine = p.m.at(info.members);
+                auto const theirs = p.m.at(other.members);
+                auto is_alike = true;
+                for (auto k = isize(0); is_alike && k < mine.size(); ++k)
+                    is_alike = mine[k] == theirs[k];
+                if (is_alike)
+                {
+                    p.struct_of_type[index_of(type)] = i32(i);
+                    return;
+                }
+            }
         // Claimed before the members are visited; the check pass reports a struct that holds itself, so this is no loop.
         p.struct_of_type[index_of(type)] = -2;
 
-        auto const& info = p.m.at(type);
         auto written = cc::vector<member_info>();
         auto member_of = cc::vector<i32>();
         for (auto const& member : p.m.at(info.members))

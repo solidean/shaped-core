@@ -1504,7 +1504,7 @@ A call deduces what each parameter stands for, and inlining writes that in its p
   The same error found by another instance is reported once.
   An inferred result (CHK-122) is each instance's own.
   A generic function of the program that nothing instantiates is the warning `generic-not-instantiated`, since only its names were checked.
-  A bare `T`, and `T: type`, is a type parameter; `n: int` is a **value parameter**, of `int`, `uint`, `bool` or `float`.
+  A bare `T`, and `T: type`, is a type parameter; `n: int` is a **value parameter**, of `int`, `uint`, `bool`, `float` or an enum.
   A value parameter is a value of its type in the body, and in an instance the constant it stands for; its name in a type position is `wrong-kind-of-name`.
   Nothing deduces a value parameter yet, so a call states it (CHK-340).
   A type parameter in scope hides every type of its name, and one with a default or an attribute is `unsupported-yet`.
@@ -1513,7 +1513,8 @@ A call deduces what each parameter stands for, and inlining writes that in its p
   An entry point with type parameters is `wrong-kind-of-name`, since the GPU hands it values of known types.
 * **CHK-339** `struct name[A, n: int]:` declares a **generic struct**, over parameters its members may name, declared as a function's are (CHK-338) ([why](why/checking.md#chk-339)).
   `name[T, 4]` in a type position is an **instance**, and two mentions of one instance are one type.
-  It takes one argument per parameter: a type for a type parameter, and an `int` literal, an `int` const or a value parameter in scope for a value parameter.
+  It takes one argument per parameter: a type for a type parameter, and for a value parameter one in scope or a constant.
+  That constant is an `int` literal or const for an `int` parameter, and a case for an enum one, `.add` among them.
   Another count is `wrong-kind-of-name`, and an argument of the other kind `wrong-kind-of-name` or `invalid-constant-argument`.
   `T[n]` over an `int` value parameter is an array whose length each instance says; elsewhere a length is a constant (CHK-285).
   An instance's members are the template's with each argument for its parameter, and a function of the template's type scope serves every instance.
@@ -1524,6 +1525,7 @@ A call deduces what each parameter stands for, and inlining writes that in its p
 * **CHK-340** A call of a generic function binds each type parameter from its arguments, then from where the call stands.
   A call may state generic arguments first, by position or by name as call arguments are: `f[float](x)`, `f[.B = int](x)`, `blur[3](c)`.
   Each is a type, or a constant `int`, `uint`, `bool` or `float` for a value parameter; two constants are one argument when their bits are, with every NaN one.
+  An enum argument is a case that names its enum, `mode.add`, or a const holding one, since a leading dot's enum is said by a parameter not chosen yet.
   A candidate they do not fit is pruned before anything is deduced: one with fewer type parameters than positional arguments, or none of a name given.
   So is one where an argument meets a parameter of the other kind, or a value parameter of another type.
   An argument whose parameter's type names a type parameter binds it to the argument's type exactly.

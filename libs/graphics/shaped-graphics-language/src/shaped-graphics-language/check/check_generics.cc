@@ -499,7 +499,9 @@ type_id checker::constant_type(type_id element, u32 bits)
         if (out.types[i].kind == type_kind::constant && out.types[i].element == element && u32(out.types[i].count) == bits)
             return type_id(i);
     auto spelled = cc::string();
-    if (out.name_of(element) == "bool")
+    if (out.at(element).kind == type_kind::enumeration)
+        spelled = cc::format("{}.{}", out.name_of(element), out.at(out.at(element).cases)[isize(bits)].name);
+    else if (out.name_of(element) == "bool")
         spelled = bits != 0 ? "true" : "false";
     else if (out.name_of(element) == "float")
         spelled = cc::format("{}", scalar{.kind = value_kind::scalar_float, .bits = bits}.as_float());
@@ -521,6 +523,15 @@ type_id checker::stated_argument_of(function_scope& scope, ast::expr_id expr)
     if (auto const* const n = node.try_as<ast::name>())
     {
         auto const text = text_of(file, n->where);
+        // a value parameter in scope is handed on, and in an instance the constant it stands for
+        for (auto i = type_parameter_names.size(); i > 0; --i)
+            if (type_parameter_names[i - 1].first == text)
+            {
+                auto const stands_for = type_parameter_names[i - 1].second;
+                if (out.at(stands_for).kind == type_kind::constant || is_valid(out.at(stands_for).element))
+                    return stands_for;
+                break;
+            }
         auto const* const found = seen_from(file, text);
         is_value = scope.find_local(text) != nullptr
                 || (found != nullptr && !found->empty() && out.at(found->front()).kind == symbol_kind::constant);
@@ -529,9 +540,27 @@ type_id checker::stated_argument_of(function_scope& scope, ast::expr_id expr)
         is_value = generic_named(file, m->object) == type_id::none && module_named(file, m->object, &scope) < 0;
     if (!is_value)
         return resolve_value_type(file, expr, &scope);
+    // the call has not chosen the parameter that would say which enum a leading dot's case is of
+    if (node.is<ast::leading_dot>())
+    {
+        report(diagnostic_kind::invalid_constant_argument, file, span_of(file, expr),
+               "a stated generic argument that is an enum case names its enum, as in `mode.add`");
+        return checked_module::error_type;
+    }
     auto const type = check_expr(scope, expr);
     if (type == checked_module::error_type)
         return checked_module::error_type;
+    if (out.at(type).kind == type_kind::enumeration)
+    {
+        auto const index = enum_case_argument(file, expr, type, &scope);
+        if (index < 0)
+        {
+            report(diagnostic_kind::invalid_constant_argument, file, span_of(file, expr),
+                   "an enum generic argument is a case, `mode.add`, or a const holding one");
+            return checked_module::error_type;
+        }
+        return constant_type(type, u32(index));
+    }
     auto const is_scalar = out.name_of(type) == "int" || out.name_of(type) == "uint" || out.name_of(type) == "bool"
                         || out.name_of(type) == "float";
     auto const evaluated = is_scalar ? evaluate_const(scope.function, file, expr, type) : const_evaluation{};
@@ -568,6 +597,18 @@ type_id checker::type_argument_of(i32 file, ast::expr_id expr, function_scope co
     }
     if (!wants_value)
         return resolve_value_type(file, expr, scope);
+    if (auto const enumeration = out.at(parameter).element; out.at(enumeration).kind == type_kind::enumeration)
+    {
+        auto const index = enum_case_argument(file, expr, enumeration, scope);
+        if (index < 0)
+        {
+            report(diagnostic_kind::invalid_constant_argument, file, where,
+                   cc::format("{} is a value parameter of {}, which takes one of its cases", out.at(parameter).spelled,
+                              out.name_of(enumeration)));
+            return checked_module::error_type;
+        }
+        return constant_type(enumeration, u32(index));
+    }
     auto const count = constant_count(file, expr, scope);
     if (!count.has_value() || out.name_of(out.at(parameter).element) != "int")
     {
@@ -577,4 +618,27 @@ type_id checker::type_argument_of(i32 file, ast::expr_id expr, function_scope co
         return checked_module::error_type;
     }
     return constant_type(out.at(parameter).element, u32(count.value()));
+}
+
+i32 checker::enum_case_argument(i32 file, ast::expr_id expr, type_id enumeration, function_scope const* scope)
+{
+    auto const& node = ast_of(file).at(expr).node;
+    if (auto const* const dot = node.try_as<ast::leading_dot>())
+        return case_index_of(enumeration, text_of(file, dot->name));
+    if (auto const* const m = node.try_as<ast::member>())
+    {
+        auto const* const object = ast_of(file).at(m->object).node.try_as<ast::name>();
+        return object != nullptr && text_of(file, object->where) == out.name_of(enumeration)
+                 ? case_index_of(enumeration, text_of(file, m->name))
+                 : -1;
+    }
+    auto const* const n = node.try_as<ast::name>();
+    if (n == nullptr || (scope != nullptr && scope->find_local(text_of(file, n->where)) != nullptr))
+        return -1;
+    auto const* const found = seen_from(file, text_of(file, n->where));
+    if (found == nullptr || found->empty() || out.at(found->front()).kind != symbol_kind::constant
+        || demand(found->front(), file, span_of(file, expr)) != symbol_state::checked)
+        return -1;
+    auto const& c = out.constants[out.at(found->front()).info];
+    return c.kind == constant_kind::enum_case && c.type == enumeration ? c.case_index : -1;
 }
