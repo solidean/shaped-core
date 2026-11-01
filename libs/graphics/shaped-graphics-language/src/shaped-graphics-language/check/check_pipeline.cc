@@ -579,7 +579,7 @@ void checker::compile_pipeline(symbol_id id)
     auto const& d = ast.at(decl);
     auto const& p = d.node.as<ast::pipeline_decl>();
     auto const where = span_of(file, decl);
-    auto const fail_symbol = [&] { out.symbols[index_of(id)].state = symbol_state::failed; };
+    auto const fail_symbol = [&] { out.symbols.own(index_of(id)).state = symbol_state::failed; };
 
     cc::string_view const known[] = {"raster", "compute", "raytracing"};
     judge_attributes(file, d.attributes, known, "a pipeline");
@@ -1088,7 +1088,7 @@ void checker::compile_pipeline(symbol_id id)
     if (pc.is_failed)
         return fail_symbol();
 
-    out.symbols[index_of(id)].info = i32(out.pipelines.size());
+    out.symbols.own(index_of(id)).info = i32(out.pipelines.size());
     out.pipelines.push_back({
         .symbol = id,
         .vertex = vertex,

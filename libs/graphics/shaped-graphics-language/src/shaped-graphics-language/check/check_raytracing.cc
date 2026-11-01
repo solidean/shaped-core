@@ -306,7 +306,7 @@ void checker::compile_hit_group(symbol_id id)
     auto const file = out.at(id).file;
     auto const& ast = ast_of(file);
     auto const& p = ast.at(out.at(id).declaration).node.as<ast::pipeline_decl>();
-    auto const fail_symbol = [&] { out.symbols[index_of(id)].state = symbol_state::failed; };
+    auto const fail_symbol = [&] { out.symbols.own(index_of(id)).state = symbol_state::failed; };
     auto is_failed = false;
     auto const fail = [&](source_span where, cc::string detail)
     {
@@ -435,7 +435,7 @@ void checker::compile_hit_group(symbol_id id)
     if (is_failed)
         return fail_symbol();
 
-    out.symbols[index_of(id)].info = i32(out.pipelines.size());
+    out.symbols.own(index_of(id)).info = i32(out.pipelines.size());
     out.pipelines.push_back({
         .symbol = id,
         .kind = pipeline_kind::hit_group,
@@ -453,7 +453,7 @@ void checker::compile_raytracing_pipeline(symbol_id id)
     auto const& ast = ast_of(file);
     auto const decl = out.at(id).declaration;
     auto const& p = ast.at(decl).node.as<ast::pipeline_decl>();
-    auto const fail_symbol = [&] { out.symbols[index_of(id)].state = symbol_state::failed; };
+    auto const fail_symbol = [&] { out.symbols.own(index_of(id)).state = symbol_state::failed; };
     auto is_failed = false;
     auto const fail = [&](source_span where, cc::string detail)
     {
@@ -704,7 +704,7 @@ void checker::compile_raytracing_pipeline(symbol_id id)
     if (is_failed)
         return fail_symbol();
 
-    out.symbols[index_of(id)].info = i32(out.pipelines.size());
+    out.symbols.own(index_of(id)).info = i32(out.pipelines.size());
     auto const first = u32(out.binding_lists.size());
     out.binding_lists.push_back_range(misses);
     out.binding_lists.push_back_range(groups);
@@ -732,8 +732,10 @@ void checker::judge_trace_graphs()
                 return e.traced_rays;
         return {};
     };
-    for (auto& pipeline : out.pipelines)
+    // a lower layer's pipelines were judged when it was checked, and are shared
+    for (auto i = out.pipelines.shared_size(); i < out.pipelines.size(); ++i)
     {
+        auto& pipeline = out.pipelines.own(i);
         if (pipeline.kind != pipeline_kind::raytracing)
             continue;
         auto const file = out.at(pipeline.symbol).file;
@@ -764,7 +766,7 @@ void checker::judge_trace_graphs()
                 judge_sets(out.at(out.pipelines[out.at(group).info].records)[r * 2]);
         if (is_foreign)
         {
-            out.symbols[index_of(pipeline.symbol)].state = symbol_state::failed;
+            out.symbols.own(index_of(pipeline.symbol)).state = symbol_state::failed;
             continue;
         }
 
@@ -822,7 +824,7 @@ void checker::judge_trace_graphs()
             visit(visit, r);
         if (is_cyclic)
         {
-            out.symbols[index_of(pipeline.symbol)].state = symbol_state::failed;
+            out.symbols.own(index_of(pipeline.symbol)).state = symbol_state::failed;
             continue;
         }
         auto depth = 0;
@@ -842,7 +844,7 @@ void checker::compile_callables(symbol_id id)
     auto const file = out.at(id).file;
     auto const& ast = ast_of(file);
     auto const& p = ast.at(out.at(id).declaration).node.as<ast::pipeline_decl>();
-    auto const fail_symbol = [&] { out.symbols[index_of(id)].state = symbol_state::failed; };
+    auto const fail_symbol = [&] { out.symbols.own(index_of(id)).state = symbol_state::failed; };
     auto is_failed = false;
     if (!p.is_short_form)
     {
@@ -896,7 +898,7 @@ void checker::compile_callables(symbol_id id)
     }
     if (is_failed)
         return fail_symbol();
-    out.symbols[index_of(id)].info = i32(out.pipelines.size());
+    out.symbols.own(index_of(id)).info = i32(out.pipelines.size());
     out.pipelines.push_back({
         .symbol = id,
         .kind = pipeline_kind::callables,

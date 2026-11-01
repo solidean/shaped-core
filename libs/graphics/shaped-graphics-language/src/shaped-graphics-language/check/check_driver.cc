@@ -248,7 +248,7 @@ void checker::add_member(symbol s, source_span name_where)
         else
             report(diagnostic_kind::member_name_clash, file, name_where,
                    cc::format("{} is a {} of {} already", name, existing, out.at(owner).name));
-        out.symbols[index_of(id)].state = symbol_state::failed;
+        out.symbols.own(index_of(id)).state = symbol_state::failed;
         return;
     }
     type_scopes[i32(index_of(owner))][name].push_back(id);
@@ -439,7 +439,7 @@ void checker::judge_redeclarations(isize first)
                 report(diagnostic_kind::duplicate_declaration, l.file, where,
                        cc::format("{} has these parameters already", l.name));
                 // No call could choose between the two, so the later one is out of every lookup.
-                out.symbols[index_of(later)].state = symbol_state::failed;
+                out.symbols.own(index_of(later)).state = symbol_state::failed;
             }
             alike.push_back(i);
         }
@@ -740,7 +740,7 @@ symbol_state checker::demand(symbol_id id, i32 file, source_span where)
 
 void checker::compile(symbol_id id)
 {
-    out.symbols[index_of(id)].state = symbol_state::in_compilation;
+    out.symbols.own(index_of(id)).state = symbol_state::in_compilation;
     compiling.push_back(id);
 
     // A symbol demanded from inside a binding's members is no member of it: it sees its own file's features alone.
@@ -784,7 +784,7 @@ void checker::compile(symbol_id id)
         // A test's signature is made where it is found, and its body is checked with the others.
         break;
     case symbol_kind::unsupported:
-        out.symbols[index_of(id)].state = symbol_state::failed;
+        out.symbols.own(index_of(id)).state = symbol_state::failed;
         break;
     }
 
@@ -793,5 +793,5 @@ void checker::compile(symbol_id id)
     type_parameter_names = cc::move(outer_parameters);
     compiling.remove_back();
     if (out.at(id).state == symbol_state::in_compilation)
-        out.symbols[index_of(id)].state = symbol_state::checked;
+        out.symbols.own(index_of(id)).state = symbol_state::checked;
 }

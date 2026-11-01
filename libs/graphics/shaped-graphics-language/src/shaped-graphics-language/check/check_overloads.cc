@@ -826,11 +826,11 @@ void checker::record_call(i32 file,
         auto const parameters = out.at(out.functions[out.at(callee).info].parameters);
         for (auto p = isize(0); p < slots.size() && p < parameters.size(); ++p)
             if (auto const i = slots[p]; i >= 0 && parameters[p].is_mut && arguments.written[i].may_be_mut)
-                out.written_arguments[written.first + i].is_mut = true;
+                out.written_arguments.own(written.first + i).is_mut = true;
     }
     auto const slot_range = ast::range_of<i32>{.first = u32(out.call_slots.size()), .count = u32(slots.size())};
     out.call_slots.push_back_range(slots);
-    out.files[file].call_of[ast::index_of(id)] = i32(out.call_records.size());
+    out.files.own(file).call_of[ast::index_of(id)] = i32(out.call_records.size());
     out.call_records.push_back({.callee = callee,
                                 .written = written,
                                 .slots = slot_range,

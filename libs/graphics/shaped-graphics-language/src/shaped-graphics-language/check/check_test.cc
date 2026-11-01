@@ -137,12 +137,12 @@ void checker::check_test(i32 index)
                                        out.at(binding).name, member.name));
             }
         }
-    out.functions[info].bindings = {.first = u32(out.binding_lists.size()), .count = u32(bindings.size())};
+    out.functions.own(info).bindings = {.first = u32(out.binding_lists.size()), .count = u32(bindings.size())};
     out.binding_lists.push_back_range(bindings);
 
     cc::string_view const known[] = {"expect"};
     judge_attributes(file, d.attributes, known, "a test");
-    out.tests[index].expectations = expectations_of(file, d.attributes);
+    out.tests.own(index).expectations = expectations_of(file, d.attributes);
     notes[info].is_body_checked = true;
     auto scope = function_scope{
         .function = test.symbol,

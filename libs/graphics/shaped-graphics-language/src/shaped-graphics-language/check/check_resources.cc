@@ -506,7 +506,7 @@ void checker::compile_file_sampler(symbol_id id)
     auto const& d = ast_of(file).at(out.at(id).declaration);
     judge_attributes(file, d.attributes, {}, "a sampler");
     auto const state = compile_sampler(file, d.node.as<ast::sampler_decl>());
-    auto& s = out.symbols[index_of(id)];
+    auto& s = out.symbols.own(index_of(id));
     s.type = resource_type({.kind = type_kind::sampler, .is_comparison = state.compare >= 0});
     s.info = i32(out.samplers.size());
     out.samplers.push_back(state);

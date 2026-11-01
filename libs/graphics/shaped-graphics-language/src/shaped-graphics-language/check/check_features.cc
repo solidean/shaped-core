@@ -49,7 +49,7 @@ feature_set checker::read_require(i32 file, ast::require_decl const& r, require_
 void checker::judge_entry_features(symbol_id id)
 {
     auto const& s = out.at(id);
-    auto& info = out.functions[s.info];
+    auto& info = out.functions.own(s.info);
     if (info.entry_stage == stage::none)
         return;
 

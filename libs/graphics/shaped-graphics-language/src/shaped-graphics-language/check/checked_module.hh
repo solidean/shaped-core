@@ -7,6 +7,7 @@
 #include <clean-core/string/string.hh>
 #include <shaped-graphics-language/builtins/registry.hh>
 #include <shaped-graphics-language/check/flat.hh>
+#include <shaped-graphics-language/check/layered.hh>
 #include <shaped-graphics-language/check/symbols.hh>
 #include <shaped-graphics-language/source/diagnostic.hh>
 
@@ -152,44 +153,44 @@ struct sgl::check::test_info
 struct sgl::check::checked_module
 {
     /// The module-level declarations of every file, in file order and then in source order.
-    cc::vector<symbol> symbols;
+    layered<symbol> symbols;
     /// Canonical and deduplicated; `types[0]` is the error type and `types[1]` is `void`.
-    cc::vector<type_info> types;
+    layered<type_info> types;
     /// The fields of every struct and the members of every binding.
-    cc::vector<member_info> members;
+    layered<member_info> members;
     /// The cases of every enum.
-    cc::vector<enum_case_info> enum_cases;
-    cc::vector<function_info> functions;
-    cc::vector<parameter> parameters;
-    cc::vector<binding_info> bindings;
+    layered<enum_case_info> enum_cases;
+    layered<function_info> functions;
+    layered<parameter> parameters;
+    layered<binding_info> bindings;
     /// The binding lists of the functions, the layouts of the pipelines, and the shaders of the ray-tracing ones.
-    cc::vector<symbol_id> binding_lists;
+    layered<symbol_id> binding_lists;
     /// The type parameters of the generic functions, and what each generic call deduced them as.
-    cc::vector<type_id> type_lists;
+    layered<type_id> type_lists;
     /// The static samplers a binding declares, which its members name by `member_info::static_sampler`.
-    cc::vector<sampler_state> samplers;
+    layered<sampler_state> samplers;
     /// Only the pipelines that checked without an error.
-    cc::vector<pipeline_info> pipelines;
-    cc::vector<pipeline_setting> pipeline_settings;
+    layered<pipeline_info> pipelines;
+    layered<pipeline_setting> pipeline_settings;
     /// The value of every `const` that checked.
-    cc::vector<constant_info> constants;
+    layered<constant_info> constants;
     /// Every place the program names an option, in the order the pass met them (CHK-355).
-    cc::vector<option_use> option_uses;
+    layered<option_use> option_uses;
     /// How each resolved call fills its callee's parameters; `file_tables::call_of` points in here.
-    cc::vector<call_record> call_records;
-    cc::vector<written_argument> written_arguments;
-    cc::vector<i32> call_slots;
+    layered<call_record> call_records;
+    layered<written_argument> written_arguments;
+    layered<i32> call_slots;
     /// Every candidate of every call that reported `no-matching-overload`, with the reason it did not match.
-    cc::vector<near_miss> near_misses;
+    layered<near_miss> near_misses;
     /// Every trace of a ray-tracing pipeline's ray type: the call, and which ray of which set (CHK-329).
-    cc::vector<ray_trace> ray_traces;
+    layered<ray_trace> ray_traces;
     /// Every call of a callable by its table's index (CHK-344).
-    cc::vector<callable_call> callable_calls;
+    layered<callable_call> callable_calls;
     /// Every assignment to an image's texel (CHK-367).
-    cc::vector<texel_store> texel_stores;
+    layered<texel_store> texel_stores;
 
     /// One entry per file checked: the prelude's, then the library files the program reaches, then the program's.
-    cc::vector<file_tables> files;
+    layered<file_tables> files;
     /// How many of `files` are the prelude's.
     i32 prelude_files = 0;
     /// Parallel to the files between the prelude and the program: each one's position in the library `check` was given.
@@ -202,9 +203,9 @@ struct sgl::check::checked_module
     cc::vector<flat_entry_point> entry_points;
 
     /// Every test, in the order the pass found them: file scope and type bodies first, then the tests of function bodies.
-    cc::vector<test_info> tests;
+    layered<test_info> tests;
     /// The flat trees of the tests that checked without an error, each of stage `none` and without a parameter.
-    cc::vector<flat_entry_point> test_units;
+    layered<flat_entry_point> test_units;
     /// Every entry point's expectation of a diagnostic; such an entry point is judged by them, and has no flat tree.
     cc::vector<entry_expectation> entry_expectations;
 
@@ -336,6 +337,35 @@ struct sgl::check::checked_module
         if (!t.spelled.empty())
             return t.spelled;
         return "<error>";
+    }
+
+    /// Makes every table's entries the shared lower layer a program's check starts from and never writes.
+    void freeze_tables()
+    {
+        symbols.freeze();
+        types.freeze();
+        members.freeze();
+        enum_cases.freeze();
+        functions.freeze();
+        parameters.freeze();
+        bindings.freeze();
+        binding_lists.freeze();
+        type_lists.freeze();
+        samplers.freeze();
+        pipelines.freeze();
+        pipeline_settings.freeze();
+        constants.freeze();
+        option_uses.freeze();
+        call_records.freeze();
+        written_arguments.freeze();
+        call_slots.freeze();
+        near_misses.freeze();
+        ray_traces.freeze();
+        callable_calls.freeze();
+        texel_stores.freeze();
+        files.freeze();
+        tests.freeze();
+        test_units.freeze();
     }
 
     [[nodiscard]] bool operator==(checked_module const& rhs) const

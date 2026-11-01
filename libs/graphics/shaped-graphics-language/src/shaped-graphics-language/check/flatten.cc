@@ -709,7 +709,7 @@ void checker::flatten_test(i32 index)
     f.entry.body = f.root_body();
     judge_constants(f.entry);
     judge_assignments(f.entry);
-    out.tests[index].unit = i32(out.test_units.size());
+    out.tests.own(index).unit = i32(out.test_units.size());
     out.test_units.push_back(cc::move(f.entry));
 }
 
@@ -973,7 +973,10 @@ void checker::flatten_entry_point(symbol_id id, traversal_request const* travers
     // a body's `require` that declares it is used, as one declaring a need of the signature is (CHK-265)
     for (auto const& u : f.feature_uses)
         mark_requires_used(u.within, u.features);
-    out.functions[s.info].features |= used;
+    // only where it adds one: a prelude function reached from a program has its features from the prelude's own
+    // check, and its entry is shared
+    if ((out.functions[s.info].features | used) != out.functions[s.info].features)
+        out.functions.own(s.info).features |= used;
     f.entry.features |= used;
     for (auto const& u : f.unroll_reports)
         of_entry([&]() -> located_diagnostic& { return report_unroll(*this, u); });

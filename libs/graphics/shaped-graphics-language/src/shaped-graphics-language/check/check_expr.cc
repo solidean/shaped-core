@@ -90,7 +90,8 @@ void checker::check_body_of(symbol_id id)
             report(diagnostic_kind::missing_return, file, name,
                    cc::format("{} is a property, and a path through its block ends without a yield", out.at(id).name));
         if (infers)
-            out.functions[index].result = yielded.has_yield && ending != flow::falls_through ? yielded.value : error_type;
+            out.functions.own(index).result
+                = yielded.has_yield && ending != flow::falls_through ? yielded.value : error_type;
         notes[index].is_body_sound = error_count() == errors_before;
         return;
     }
@@ -98,7 +99,7 @@ void checker::check_body_of(symbol_id id)
     auto ending = check_statements(scope, body.statements);
     if (ast::is_valid(body.value) && notes[index].infers_result)
     {
-        out.functions[index].result = check_expr(scope, body.value);
+        out.functions.own(index).result = check_expr(scope, body.value);
         ending = flow::exits;
     }
     else if (ast::is_valid(body.value))

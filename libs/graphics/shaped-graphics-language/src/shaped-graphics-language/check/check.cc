@@ -125,6 +125,8 @@ cc::optional<checked_prelude> sgl::check::check_prelude(cc::span<module_file con
     c.file_module.remove_back();
     c.uses.remove_back();
     c.out.file_modules.remove_back();
+    // shared from here: every program's check reads the prelude's entries in place, rather than copying them
+    c.out.freeze_tables();
     result._resume = {
         .files = i32(prelude.size()),
         .symbols = c.out.symbols.size(),
@@ -473,11 +475,11 @@ void checker::judge_attributes(i32 file,
 void checker::set_type(i32 file, ast::expr_id expr, type_id type)
 {
     if (ast::is_valid(expr))
-        out.files[file].type_of[ast::index_of(expr)] = type;
+        out.files.own(file).type_of[ast::index_of(expr)] = type;
 }
 
 void checker::set_target(i32 file, ast::expr_id expr, target where)
 {
     if (ast::is_valid(expr))
-        out.files[file].target_of[ast::index_of(expr)] = where;
+        out.files.own(file).target_of[ast::index_of(expr)] = where;
 }

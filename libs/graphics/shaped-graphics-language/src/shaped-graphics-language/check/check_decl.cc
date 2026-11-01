@@ -1010,7 +1010,7 @@ void checker::compile_struct(symbol_id id)
     {
         auto const intrinsic = builtins.find_type(out.at(id).name);
         if (is_valid(intrinsic))
-            out.symbols[index_of(id)].intrinsic_type = intrinsic;
+            out.symbols.own(index_of(id)).intrinsic_type = intrinsic;
         else
             report(diagnostic_kind::unknown_builtin, file, s.name, out.at(id).name);
     }
@@ -1030,7 +1030,7 @@ void checker::compile_struct(symbol_id id)
             unsupported(file, s.name,
                         !is_prelude_file(file) ? "a generic struct outside the prelude"
                                                : "a generic struct of more than one type parameter");
-            out.symbols[index_of(id)].state = symbol_state::failed;
+            out.symbols.own(index_of(id)).state = symbol_state::failed;
             return;
         }
         parameter = new_type_parameter(text_of(file, parameters[0].name), id);
@@ -1117,7 +1117,7 @@ void checker::compile_struct(symbol_id id)
         .element = parameter,
         .is_template = is_valid(parameter),
     });
-    out.symbols[index_of(id)].type = type;
+    out.symbols.own(index_of(id)).type = type;
 }
 
 void checker::compile_enum(symbol_id id)
@@ -1138,7 +1138,7 @@ void checker::compile_enum(symbol_id id)
     {
         auto const intrinsic = builtins.find_type(out.at(id).name);
         if (is_valid(intrinsic))
-            out.symbols[index_of(id)].intrinsic_type = intrinsic;
+            out.symbols.own(index_of(id)).intrinsic_type = intrinsic;
         else
             report(diagnostic_kind::unknown_builtin, file, e.name, out.at(id).name);
     }
@@ -1213,7 +1213,7 @@ void checker::compile_enum(symbol_id id)
 
     auto const type = type_id(out.types.size());
     out.types.push_back({.kind = type_kind::enumeration, .symbol = id, .cases = cases});
-    out.symbols[index_of(id)].type = type;
+    out.symbols.own(index_of(id)).type = type;
 }
 
 bool checker::is_shadowable_by(i32 file, ast::range_of<ast::attribute> attributes) const
@@ -1252,7 +1252,7 @@ void checker::compile_const(symbol_id id)
     cc::string_view const known[] = {"shadowable", "option"};
     judge_attributes(file, d.attributes, known, "a const");
 
-    auto const fail = [&] { out.symbols[index_of(id)].state = symbol_state::failed; };
+    auto const fail = [&] { out.symbols.own(index_of(id)).state = symbol_state::failed; };
     if (!ast::is_valid(c.value))
     {
         unsupported(file, c.name, "a const without a value");
@@ -1515,8 +1515,8 @@ void checker::compile_const(symbol_id id)
     }
 
     set_type(file, c.value, info.type);
-    out.symbols[index_of(id)].type = info.type;
-    out.symbols[index_of(id)].info = i32(out.constants.size());
+    out.symbols.own(index_of(id)).type = info.type;
+    out.symbols.own(index_of(id)).info = i32(out.constants.size());
     out.constants.push_back(info);
 }
 
@@ -1548,7 +1548,7 @@ void checker::compile_binding(symbol_id id)
     if (ast::is_valid(b.composition))
     {
         unsupported(file, span_of(file, b.composition), "a binding composition");
-        out.symbols[index_of(id)].state = symbol_state::failed;
+        out.symbols.own(index_of(id)).state = symbol_state::failed;
         return;
     }
 
@@ -1604,7 +1604,7 @@ void checker::compile_binding(symbol_id id)
                 unsupported(
                     file, span_of(file, ast_of(file).at(m.field).type),
                     cc::format("a 16-bit value in an @inline binding, in {}.{}{}", out.at(id).name, m.name, path));
-    out.symbols[index_of(id)].info = i32(out.bindings.size());
+    out.symbols.own(index_of(id)).info = i32(out.bindings.size());
     out.bindings.push_back({
         .symbol = id,
         .is_inline = is_inline,
@@ -1916,7 +1916,7 @@ void checker::compile_function(symbol_id id)
         }
         auto const intrinsic = builtins.find_function(out.at(id).name, types, named_only);
         if (is_valid(intrinsic))
-            out.symbols[index_of(id)].intrinsic = intrinsic;
+            out.symbols.own(index_of(id)).intrinsic = intrinsic;
         else
         {
             // a parameter type that did not resolve was reported, and it is why no record fits
@@ -1949,7 +1949,7 @@ void checker::compile_function(symbol_id id)
     auto const max_vertices = geometry != nullptr ? max_vertices_of(file, *geometry) : 0;
     auto const tessellation = control != nullptr ? tessellation_of(file, *control) : tessellation_mode();
 
-    out.symbols[index_of(id)].info = i32(out.functions.size());
+    out.symbols.own(index_of(id)).info = i32(out.functions.size());
     out.functions.push_back({
         .symbol = id,
         .parameters = {.first = u32(out.parameters.size()), .count = u32(parameters.size())},
@@ -1990,7 +1990,7 @@ void checker::compile_function(symbol_id id)
         judge_entry_point(id);
 
     if (is_failed)
-        out.symbols[index_of(id)].state = symbol_state::failed;
+        out.symbols.own(index_of(id)).state = symbol_state::failed;
 }
 
 void checker::compile_constructor(symbol_id id)
@@ -2016,7 +2016,7 @@ void checker::compile_constructor(symbol_id id)
         }
     }
 
-    out.symbols[index_of(id)].info = i32(out.functions.size());
+    out.symbols.own(index_of(id)).info = i32(out.functions.size());
     out.functions.push_back({
         .symbol = id,
         .parameters = {.first = u32(out.parameters.size()), .count = u32(parameters.size())},
@@ -2027,7 +2027,7 @@ void checker::compile_constructor(symbol_id id)
     // A construction has no body of its own, so there is nothing to check and nothing to inline.
     notes.push_back({.is_body_checked = true, .is_body_sound = true});
     if (!is_checked)
-        out.symbols[index_of(id)].state = symbol_state::failed;
+        out.symbols.own(index_of(id)).state = symbol_state::failed;
 }
 
 type_id checker::receiver_of(symbol_id id)
@@ -2065,7 +2065,7 @@ void checker::compile_property(symbol_id id)
     }
 
     auto const parameters = cc::vector<parameter>{{.name = "self", .type = self}};
-    out.symbols[index_of(id)].info = i32(out.functions.size());
+    out.symbols.own(index_of(id)).info = i32(out.functions.size());
     out.functions.push_back({
         .symbol = id,
         .parameters = {.first = u32(out.parameters.size()), .count = u32(parameters.size())},
@@ -2082,7 +2082,7 @@ void checker::compile_property(symbol_id id)
         is_failed = is_failed || out.functions[out.at(id).info].result == checked_module::error_type;
     }
     if (is_failed)
-        out.symbols[index_of(id)].state = symbol_state::failed;
+        out.symbols.own(index_of(id)).state = symbol_state::failed;
 }
 
 bool checker::is_color_value(type_id type) const
@@ -2337,7 +2337,7 @@ void checker::judge_entry_point(symbol_id id)
         if (result.edge != stage::pixel && info.result != checked_module::void_type)
         {
             if (is_color_value(info.result))
-                out.functions[s.info].pixel_targets = pixel_targets_of(id, info.result);
+                out.functions.own(s.info).pixel_targets = pixel_targets_of(id, info.result);
             else
                 invalid("a @pixel fun returns a @pixel struct, one color value or nothing");
         }
