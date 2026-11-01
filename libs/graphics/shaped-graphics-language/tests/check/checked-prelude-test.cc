@@ -1,6 +1,7 @@
 #include "check-test-support.hh"
 
 #include <clean-core/algorithm/sort.hh>
+#include <clean-core/string/print.hh>
 #include <shaped-graphics-language/check/footprint.hh>
 #include <shaped-graphics-language/emit/emit.hh>
 #include <shaped-graphics-language/legalize/legalize.hh>
@@ -102,6 +103,50 @@ cc::string observed(sgl::check::checked_module const& m, cc::span<sgl::check::mo
     }
     return out;
 }
+
+/// Every place a program's check changed the prelude's part of a table: `functions[12]`, or `symbols: shorter` where it
+/// dropped entries.
+/// Empty is what sharing the prelude needs (the compilation model's checked layers): today a compile copies it instead.
+cc::vector<cc::string> prelude_writes(sgl::check::checked_module const& prelude, sgl::check::checked_module const& m)
+{
+    auto out = cc::vector<cc::string>();
+    auto const compare = [&](cc::string_view name, auto const& before, auto const& after)
+    {
+        if (after.size() < before.size())
+        {
+            out.push_back(cc::format("{}: shorter", name));
+            return;
+        }
+        for (auto i = isize(0); i < before.size(); ++i)
+            if (!(before[i] == after[i]))
+                out.push_back(cc::format("{}[{}]", name, i));
+    };
+    compare("symbols", prelude.symbols, m.symbols);
+    compare("types", prelude.types, m.types);
+    compare("members", prelude.members, m.members);
+    compare("enum_cases", prelude.enum_cases, m.enum_cases);
+    compare("functions", prelude.functions, m.functions);
+    compare("parameters", prelude.parameters, m.parameters);
+    compare("bindings", prelude.bindings, m.bindings);
+    compare("binding_lists", prelude.binding_lists, m.binding_lists);
+    compare("type_lists", prelude.type_lists, m.type_lists);
+    compare("samplers", prelude.samplers, m.samplers);
+    compare("pipelines", prelude.pipelines, m.pipelines);
+    compare("pipeline_settings", prelude.pipeline_settings, m.pipeline_settings);
+    compare("constants", prelude.constants, m.constants);
+    compare("option_uses", prelude.option_uses, m.option_uses);
+    compare("call_records", prelude.call_records, m.call_records);
+    compare("written_arguments", prelude.written_arguments, m.written_arguments);
+    compare("call_slots", prelude.call_slots, m.call_slots);
+    compare("near_misses", prelude.near_misses, m.near_misses);
+    compare("ray_traces", prelude.ray_traces, m.ray_traces);
+    compare("callable_calls", prelude.callable_calls, m.callable_calls);
+    compare("texel_stores", prelude.texel_stores, m.texel_stores);
+    compare("files", prelude.files, m.files);
+    compare("tests", prelude.tests, m.tests);
+    compare("test_units", prelude.test_units, m.test_units);
+    return out;
+}
 } // namespace
 
 TEST("sgl checked prelude - the library's prelude checks clean, so every compile continues from it")
@@ -130,6 +175,13 @@ INVOCABLE_TEST("sgl checked prelude - a program behind it checks as it does with
     CHECK(behind.symbols.size() == together.symbols.size());
     CHECK(behind.types.size() == together.types.size());
     CHECK(behind.tests.size() == together.tests.size());
+
+    // the compilation model's checked layers share the prelude, which needs a program's check to leave its part alone
+    CHECK(checked->module().functions.size() > 0);
+    auto written = cc::string();
+    for (auto const& w : prelude_writes(checked->module(), behind))
+        written.appendf("{} ", w);
+    CHECK(written == "");
 }
 
 // Three drivers rather than one, so the larger sets check in parallel.

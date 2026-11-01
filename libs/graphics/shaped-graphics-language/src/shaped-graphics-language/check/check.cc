@@ -93,6 +93,11 @@ sgl::check::checked_prelude::checked_prelude(checked_prelude&&) noexcept = defau
 sgl::check::checked_prelude& sgl::check::checked_prelude::operator=(checked_prelude&&) noexcept = default;
 sgl::check::checked_prelude::~checked_prelude() = default;
 
+sgl::check::checked_module const& sgl::check::checked_prelude::module() const
+{
+    return _state->out;
+}
+
 cc::optional<checked_prelude> sgl::check::check_prelude(cc::span<module_file const> prelude,
                                                         builtins::registry const& builtins)
 {

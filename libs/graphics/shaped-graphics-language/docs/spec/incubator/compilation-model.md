@@ -110,8 +110,10 @@ A layer is a contiguous part of each flat table, and the side tables split the s
   The program's layer holds what it adds, and a lookup reads its own overlay, then the layer below.
   That covers the module and type scopes, the operator sets, and the interning of generic instances: `interned_types`, where a program's `buffer[foo]` instantiates a prelude template.
 * **What a program's check may not do is write into a lower layer.**
-  Today nothing stops it, which is why a compile copies the prelude rather than sharing it.
-  The first step therefore finds every such write and turns it into an overlay entry, and a test holds the lower layer unchanged across the corpus.
+  It already does not, into `checked_module`'s tables: a program's check only appends to them.
+  `checked-prelude-test.cc` holds that across the corpus, the samples, sg's shaders and the programs written to report.
+  What it does extend is four of the checker's own tables: the merged module scopes, the operator sets, the type scopes an extension adds to, and the interned instances.
+  Those are the overlays, and the rest of the checker's lists are appended to like `checked_module`'s.
 
 ### Ids
 
@@ -155,9 +157,11 @@ Two places keep one:
 Each step stands on its own and is measured by the `sgl profile` tests.
 
 1. **The prelude as a shared layer.**
-   Segmented tables and overlays for the prelude and the program, ids that name their layer, and no write into the prelude's layer.
+   Segmented tables and overlays for the prelude and the program.
+   It needs no change to ids: with two layers, the program's ids continue after the prelude's as they do today.
    The prelude is still checked once per process; what goes is the copy.
 2. **A module is a layer**, checked once per process and kept, reused by every compile that reaches it.
+   This is where ids start to name their layer, since a module's layer then sits at different heights in different compiles.
 3. **Artifacts**: saving and loading a layer, first for the prelude, then for modules, through slib's persistent cache.
 4. **Parallel layers**, and then perhaps an interface-only pass.
 
