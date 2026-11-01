@@ -843,3 +843,23 @@ TEST("sgl describe - a module file saved with a byte-order mark is still a modul
     REQUIRE(r.has_value());
     CHECK(r.value().bindings.size() == 1);
 }
+
+TEST("sgl describe - an instance of a generic struct in GPU memory is named as the target text names it")
+{
+    // CHK-339: the host's C++ struct is named by an identifier, so `pair[float, int]` is `pair_float_int` throughout
+    auto const r = sgl::describe({.source = "struct pair[A, B]:\n"
+                                            "    first: A\n"
+                                            "    second: B\n"
+                                            "binding data:\n"
+                                            "    items: mut buffer[pair[float, int]]\n"
+                                            "@compute(64) fun main(@thread_id id: int3){data}:\n"
+                                            "    data.items[id.x] = pair(1.0, 2)\n"});
+    REQUIRE(r.has_value());
+    auto const& d = r.value();
+    REQUIRE(d.bindings.size() == 1);
+    REQUIRE(d.bindings[0].members.size() == 1);
+    CHECK(d.bindings[0].members[0].type == "pair_float_int");
+    REQUIRE(d.memory_structs.size() == 1);
+    CHECK(d.memory_structs[0].name == "pair_float_int");
+    CHECK(d.memory_structs[0].size == 8);
+}

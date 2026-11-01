@@ -17,6 +17,20 @@ namespace
 {
 namespace emit_impl = sgl::emit::impl;
 
+/// How the host spells a type: as SGL does, but an instance of a generic struct as the target text names it,
+/// `pair_float_int` for `pair[float, int]`, since a C++ struct is named by an identifier (CHK-339).
+cc::string host_spelling(check::checked_module const& m, check::type_id type)
+{
+    auto const& t = m.at(type);
+    if (t.kind != check::type_kind::structure || !check::is_valid(t.generic))
+        return cc::string(m.name_of(type));
+    auto result = cc::string();
+    for (auto const c : m.name_of(type))
+        if (c != ']' && c != ' ')
+            result += (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_' ? c : '_';
+    return result;
+}
+
 /// What kind of sampler `member` is to a layout: a static one says so by its settings, a bound one by its declaration.
 cc::string_view sampler_type_of(check::checked_module const& m, check::member_info const& member)
 {
@@ -94,29 +108,29 @@ described_binding_member describe_resource(check::checked_module const& m,
     {
     case check::type_kind::texture:
         result.kind = described_member_kind::texture;
-        result.type = cc::string(m.name_of(member.type));
+        result.type = host_spelling(m, member.type);
         result.texture_dimension = cc::string(check::info_of(t.shape).sg_name);
         result.sample_type = cc::string(sample_type_of(m, member));
         break;
     case check::type_kind::image:
         result.kind = described_member_kind::image;
-        result.type = cc::string(m.name_of(member.type));
+        result.type = host_spelling(m, member.type);
         result.texture_dimension = cc::string(check::info_of(t.shape).sg_name);
         result.image_format = cc::string(check::k_image_formats[t.format].name);
         result.access = cc::string(access_name(t.access));
         break;
     case check::type_kind::acceleration_structure:
         result.kind = described_member_kind::acceleration_structure;
-        result.type = cc::string(m.name_of(member.type));
+        result.type = host_spelling(m, member.type);
         break;
     case check::type_kind::bytes:
         result.kind = described_member_kind::bytes;
-        result.type = cc::string(m.name_of(member.type));
+        result.type = host_spelling(m, member.type);
         result.access = cc::string(t.is_mut ? "read_write" : "read");
         break;
     case check::type_kind::sampler:
         result.kind = described_member_kind::sampler;
-        result.type = cc::string(m.name_of(member.type));
+        result.type = host_spelling(m, member.type);
         result.sampler_type = cc::string(sampler_type_of(m, member));
         if (member.static_sampler >= 0)
             result.static_sampler = describe_settings(m.samplers[member.static_sampler]);
@@ -158,7 +172,7 @@ described_struct describe_struct(check::checked_module const& m, check::type_inf
         auto const takes_location
             = !member.is_position && !member.is_layer && member.output == check::pixel_output::color;
         result.members.push_back({.name = member.name,
-                                  .type = cc::string(m.name_of(member.type)),
+                                  .type = host_spelling(m, member.type),
                                   .location = takes_location ? location : -1,
                                   .stream = t.edge == check::stage::vertex ? emit_impl::stream_of(member) : cc::string(),
                                   .format = member.vertex_format,
@@ -187,7 +201,7 @@ cc::string host_name_of(check::checked_module const& m, check::symbol_id id)
 cc::string host_type_name_of(check::checked_module const& m, check::type_id type)
 {
     auto const symbol = m.at(type).symbol;
-    return check::is_valid(symbol) ? host_name_of(m, symbol) : cc::string(m.name_of(type));
+    return check::is_valid(symbol) ? host_name_of(m, symbol) : host_spelling(m, type);
 }
 
 /// The module of `type`'s declaration where it is not the source's own; empty otherwise.
@@ -202,7 +216,7 @@ described_memory_struct describe_memory_struct(check::checked_module const& m,
                                                emit_impl::address_space space)
 {
     auto const placed = emit_impl::place_struct(m, type, space);
-    auto result = described_memory_struct{.name = cc::string(m.name_of(type)),
+    auto result = described_memory_struct{.name = host_spelling(m, type),
                                           .module = foreign_module_of_type(m, type),
                                           .space = cc::string(emit_impl::is_storage(space) ? "storage" : "constants"),
                                           .size = placed.size};
@@ -210,7 +224,7 @@ described_memory_struct describe_memory_struct(check::checked_module const& m,
     for (auto i = isize(0); i < members.size(); ++i)
         if (members[i].type != check::checked_module::void_type)
             result.members.push_back({.name = members[i].name,
-                                      .type = cc::string(m.name_of(members[i].type)),
+                                      .type = host_spelling(m, members[i].type),
                                       .offset = placed.offsets[i],
                                       .size = placed.sizes[i]});
     return result;
@@ -642,7 +656,7 @@ sgl::described_binding sgl::driver::impl::describe_binding(check::checked_module
         for (auto i = isize(0); i < members.size(); ++i)
             result.members.push_back({.name = members[i].name,
                                       .kind = described_member_kind::constant,
-                                      .type = cc::string(m.name_of(members[i].type)),
+                                      .type = host_spelling(m, members[i].type),
                                       .offset = placed.offsets[i],
                                       .size = placed.sizes[i]});
         result.block_size = placed.size;
@@ -678,7 +692,7 @@ sgl::described_binding sgl::driver::impl::describe_binding(check::checked_module
             result.members.push_back(
                 {.name = member.name,
                  .kind = described_member_kind::buffer,
-                 .type = cc::string(m.name_of(t.element)),
+                 .type = host_spelling(m, t.element),
                  .slot = slot,
                  .count = count,
                  .stride = sgl::emit::impl::element_stride(m, t.element, sgl::emit::impl::element_space(b, member)),
@@ -697,7 +711,7 @@ sgl::described_binding sgl::driver::impl::describe_binding(check::checked_module
         }
         result.members.push_back({.name = member.name,
                                   .kind = described_member_kind::constant,
-                                  .type = cc::string(m.name_of(member.type)),
+                                  .type = host_spelling(m, member.type),
                                   .offset = placed.offsets[next_constant],
                                   .size = placed.sizes[next_constant]});
         ++next_constant;
