@@ -719,7 +719,7 @@ ops[i](mut v)                                            // raygen, miss, closes
   A constant block admits only elements of whole rows, unless `@padding(.every_element) weights: float[8]` gives each element a row (EMIT-172).
   HLSL holds a 3-vector array as 4-vectors (EMIT-169), and MSL packs a struct's or a block's shared tail (EMIT-170).
   A multi-dimensional array nests the natural stride, and an array of `mat3` strides by 48; the host writes a 3-vector element as `slib::gpu_padded<T, 16>`.
-  Packed arrays, and multi-dimensional ones of 3-vectors or `mat3`, still wait (EMIT-171).
+  Packed arrays, and multi-dimensional ones of `mat3`, still wait (EMIT-171).
   **A `mat3` in memory is three 16-byte columns, 48 bytes**: the host writes `slib::gpu_mat3`, and `tg::mat3f` under `@padding(.none)`.
   HLSL holds it as a `float4x3`, which a read narrows and a write widens (EMIT-168); it rides in no ray payload yet.
 - **A `mat2` in memory is two columns back to back, 16 bytes** (EMIT-175), on a row in a constant block; the host writes `tg::mat2f`.

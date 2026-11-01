@@ -333,6 +333,23 @@ struct writer
     }
 
     /// The array `raw` holds as 4-vectors, rebuilt into a local of its own elements, each read through `lanes`.
+    /// Every index path down `type`'s array dimensions to its innermost elements, `[0][1]`, in order.
+    [[nodiscard]] cc::vector<cc::string> index_paths(type_id type) const
+    {
+        auto paths = cc::vector<cc::string>();
+        paths.push_back({});
+        while (is_array(type) && p.m.builtin_type_of(type) == nullptr)
+        {
+            auto deeper = cc::vector<cc::string>();
+            for (auto const& path : paths)
+                for (auto i = isize(0); i < isize(p.m.at(type).count); ++i)
+                    deeper.push_back(cc::format("{}[{}]", path, i));
+            paths = cc::move(deeper);
+            type = p.m.at(type).element;
+        }
+        return paths;
+    }
+
     cc::string narrowed_array(flat_expr const& x, cc::string const& raw, cc::string_view lanes)
     {
         auto const name = p.names.mint("narrowed");
@@ -342,10 +359,10 @@ struct writer
             {.name = name, .type = type_text(p, d, x.type), .dimensions = array_dimensions(p, x.type), .is_mut = true});
         line(declaration);
         // EMIT-168: an element of an array of mat3 is a float4x3, which narrows as one does
-        auto const is_matrix = is_mat3(p.m, p.m.at(x.type).element);
-        for (auto i = isize(0); i < isize(p.m.at(x.type).count); ++i)
-            line(is_matrix ? cc::format("{}[{}] = ((float3x3){}[{}]);", name, i, raw, i)
-                           : cc::format("{}[{}] = {}[{}]{};", name, i, raw, i, lanes));
+        auto const is_matrix = is_mat3(p.m, innermost_of(p.m, x.type));
+        for (auto const& at : index_paths(x.type))
+            line(is_matrix ? cc::format("{}{} = ((float3x3){}{});", name, at, raw, at)
+                           : cc::format("{}{} = {}{}{};", name, at, raw, at, lanes));
         return name;
     }
 
@@ -358,10 +375,10 @@ struct writer
             declaration,
             {.name = name, .type = type_text(p, d, type), .value = value, .dimensions = array_dimensions(p, type)});
         line(declaration);
-        auto const is_matrix = is_mat3(p.m, p.m.at(type).element);
-        for (auto i = isize(0); i < isize(p.m.at(type).count); ++i)
-            line(is_matrix ? cc::format("{}[{}] = sgl_widen_mat3({}[{}]);", raw, i, name, i)
-                           : cc::format("{}[{}].xyz = {}[{}];", raw, i, name, i));
+        auto const is_matrix = is_mat3(p.m, innermost_of(p.m, type));
+        for (auto const& at : index_paths(type))
+            line(is_matrix ? cc::format("{}{} = sgl_widen_mat3({}{});", raw, at, name, at)
+                           : cc::format("{}{}.xyz = {}{};", raw, at, name, at));
     }
 
     /// EMIT-173: `text`, the expression `id` as its target holds it, converted back to the value it reads as.
@@ -939,7 +956,9 @@ struct writer
                 // EMIT-169 and EMIT-172: an element of an array held as 4-vectors is read and written through its lanes
                 if (auto const& held = p.accesses[index_of(a.object)]; held.held == held_as::widened_array)
                 {
-                    result = read_as_value(id, {.text = cc::format("{}[{}]{}", object, expr(a.index).text, held.lanes),
+                    // an inner array is still held widened, and only its own elements read through the lanes
+                    auto const lanes = is_array(x.type) ? cc::string_view() : held.lanes;
+                    result = read_as_value(id, {.text = cc::format("{}[{}]{}", object, expr(a.index).text, lanes),
                                                 .binds = level::primary});
                     return;
                 }

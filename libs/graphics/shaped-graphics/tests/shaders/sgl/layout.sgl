@@ -123,6 +123,25 @@ binding tiling:
     tiling.picked[id.x] = float4(g.x, t.weights[1, 2], t.weights[id.x % 2, 0], g.w)
     tiling.tiles[id.x] = tile(tiling.rows, t.weights, t.tag + 1.0)
 
+// A multi-dimensional array of float3 strides its innermost element by 16, which HLSL widens at depth.
+struct field:
+    dirs: float3[2, 3]
+    turn: mat3
+    tag: float
+
+binding fielding:
+    grid: float3[2, 2]
+    fields: mut buffer[field]
+    sensed: mut buffer[float4]
+
+@compute(64) fun sense(@thread_id id: int3){fielding}:
+    let f = fielding.fields[id.x]
+    let d = fielding.fields[id.x].dirs[id.x % 2, 2] + fielding.grid[1][id.x % 2]
+    let row = fielding.fields[id.x].dirs[1]
+    let v = fielding.fields[id.x].turn * d
+    fielding.sensed[id.x] = float4(v.x, v.y, row[0].y, f.dirs[0, 1].z)
+    fielding.fields[id.x] = field(f.dirs, f.turn, f.tag + 1.0)
+
 // An array strides by its element rounded up to the element's alignment: a float3 by 16, a float by 4, a struct by its
 // size, here 32 with `radius` in `color`'s tail.
 struct lamp:

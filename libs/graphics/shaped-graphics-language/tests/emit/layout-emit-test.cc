@@ -748,7 +748,7 @@ TEST("sgl emit layout - an array strides by its element rounded to its alignment
     CHECK(msl.contains("    device track* scene_tracks [[id(1)]];\n"));
 }
 
-TEST("sgl emit layout - a packed array, and a multi-dimensional one HLSL would widen, wait alike on every target")
+TEST("sgl emit layout - a packed array, and a multi-dimensional one of mat3, wait alike on every target")
 {
     auto const source_of = [](cc::string_view member, cc::string_view field)
     {
@@ -760,11 +760,12 @@ TEST("sgl emit layout - a packed array, and a multi-dimensional one HLSL would w
     auto const in_buffer
         = [&](cc::string_view member, cc::string_view field) { return errors_of(source_of(member, field)); };
     // EMIT-171: a multi-dimensional array nests its natural stride, and an array of mat3 is held as HLSL holds one
-    for (auto const field : {"grid: float4[2, 2]", "weights: float[2, 3]", "turns: mat3[2]"})
+    for (auto const field : {"grid: float4[2, 2]", "weights: float[2, 3]", "turns: mat3[2]", "dirs: float3[2, 3]"})
         for (auto const t : sgl::emit::all_targets())
             CHECK(sgl::emit::dump_errors(emit_source(source_of("items: buffer[holder]", field), 0, t)) == "").context(field);
-    CHECK(in_buffer("items: buffer[holder]", "grid: float3[2, 2]")
-          == "unsupported a multi-dimensional array of float3 in GPU memory: 'work.items'.grid\n");
+    // HLSL holds a 3-vector as a 4-vector at any depth
+    CHECK(text_of(source_of("items: buffer[holder]", "dirs: float3[2, 3]"), target::hlsl_dx12)
+              .contains("    float4 dirs[2][3];\n"));
     CHECK(in_buffer("items: buffer[holder]", "turns: mat3[2, 2]")
           == "unsupported a multi-dimensional array of mat3 in GPU memory: 'work.items'.turns\n");
     CHECK(in_buffer("@padding(.none) items: buffer[holder]", "rows: float4[2]")

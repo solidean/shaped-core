@@ -959,14 +959,11 @@ void sgl::emit::impl::validate_binding(check::checked_module const& m, check::sy
         if (t.kind == check::type_kind::array)
         {
             auto const element = t.element;
-            auto innermost = element;
-            while (m.builtin_type_of(innermost) == nullptr && m.at(innermost).kind == check::type_kind::array)
-                innermost = m.at(innermost).element;
-            auto const* const leaf = m.builtin_type_of(innermost);
-            // HLSL widens a 3-vector and a mat3 one level deep (EMIT-168, EMIT-169), and no deeper yet
-            if (innermost != element && (is_mat3(m, innermost) || (leaf != nullptr && leaf->leaf_count == 3)))
-                report(error_kind::unsupported,
-                       cc::format("a multi-dimensional array of {} in GPU memory: {}", m.name_of(innermost), where));
+            // DXC's SPIR-V reads the last column of a nested array's float4x3 as zero, where dx12 reads it whole
+            // issue: bug-nested-mat3-array-spirv
+            if (m.builtin_type_of(element) == nullptr && m.at(element).kind == check::type_kind::array
+                && is_mat3(m, innermost_of(m, element)))
+                report(error_kind::unsupported, cc::format("a multi-dimensional array of mat3 in GPU memory: {}", where));
             // EMIT-154 places a packed block's array of whole rows; any other packed array waits
             else if (is_packed(space) && !(is_block_member && m.builtin_type_of(element) != nullptr))
                 report(error_kind::unsupported, cc::format("an array in @padding(.none) memory: {}", where));

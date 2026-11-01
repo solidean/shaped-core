@@ -583,9 +583,10 @@ The C++ struct a package generates is that layout byte for byte, padding include
   One per member of a struct, a block and a memory form in GPU memory, `__builtin_offsetof(T, m) == offset`, and one per struct, `sizeof(T) == size`.
   A struct of a constant block is asserted at its size rounded up to a row, and a block at its members alone.
 * **EMIT-171** An array in GPU memory that `@padding(.none)` places waits, `unsupported` alike on every target.
-  So does a multi-dimensional one whose innermost element is a 3-vector or a `mat3`, which HLSL would widen at depth.
+  So does a multi-dimensional array of `mat3`, whose last column DXC's SPIR-V loses (bug-nested-mat3-array-spirv).
   A packed block's array of whole rows is the exception, which EMIT-154 places.
   Any other multi-dimensional array nests the natural stride: each inner array strides by its size rounded up to its alignment, and every target declares it as nested arrays.
+  HLSL widens a 3-vector at any depth, `float4 dirs[2][3]`, and only the innermost element reads through its lanes.
 * **EMIT-168** HLSL holds a `mat3` in GPU memory as a `column_major float4x3`, three whole rows of a constant buffer and 48 bytes of a buffer ([why](why/emitting.md#emit-168)).
   A read narrows it, `((float3x3)m)`, and a write widens a value through `sgl_widen_mat3`, which the text declares wherever it holds one.
   A struct that stands in memory declares the `float4x3` as its field, so a read of the field narrows wherever the struct is.
@@ -619,7 +620,7 @@ The C++ struct a package generates is that layout byte for byte, padding include
 ## Open
 
 * GLSL, which comes through the same seam.
-* The arrays EMIT-171 refuses: packed ones, and multi-dimensional ones of 3-vectors or of `mat3`, which HLSL would widen at depth.
+* The arrays EMIT-171 refuses: packed ones, and multi-dimensional ones of `mat3`.
 * `@padding(.every_column)`, which would name a `mat3`'s natural 48 bytes explicitly; `.none` gives the 36 of `tg::mat3f` already.
 * A packed `mat2`, which a memory form would read as a vector of four scalars.
 * A struct member of a `@padding(.none)` block, which HLSL would read back by building the struct in a local field by field.

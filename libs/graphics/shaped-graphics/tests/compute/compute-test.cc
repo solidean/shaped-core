@@ -881,3 +881,73 @@ ASYNC_INVOCABLE_TEST("sg - a mat2 is 16 bytes in a buffer's element, and starts 
         CHECK(got[i].tag == float(i) + 0.75f);
     }
 }
+
+ASYNC_INVOCABLE_TEST("sg - a multi-dimensional array of float3 strides its innermost element by 16, on every backend",
+                     (sg::context_handle const& ctx))
+{
+    REQUIRE(ctx != nullptr);
+    if (!sg_test::shaders_reach(*ctx))
+        SKIP("no compiler builds this binary's shaders into a format this context accepts");
+
+    static_assert(sizeof(shaders::layout::field) == 160);
+    static_assert(offsetof(shaders::layout::field, turn) == 96);
+    auto const pipeline = co_await shaders::layout::sense.acquire_pipeline(*ctx);
+    auto const group_layout = ctx->cached.acquire_binding_group_layout<shaders::layout::fielding>();
+
+    auto const dir = [](int i, int a, int b) { return tg::vec3f(float(i), float(10 * a + b), float(a - b)); };
+    // no matrix here is symmetric, so a transposed read or write shows
+    auto const turn = [](int i, int a, int b)
+    {
+        return tg::mat3f::make_from_cols(tg::vec3f(1, float(a), 0), tg::vec3f(float(b), 1, 0), tg::vec3f(0, float(i), 1));
+    };
+    auto const grid_of = [](int a, int b) { return tg::vec3f(float(a), float(b), 0.5f); };
+
+    constexpr auto count = 64;
+    auto fields = cc::vector<shaders::layout::field>();
+    for (auto i = 0; i < count; ++i)
+    {
+        auto f = shaders::layout::field{.tag = float(i)};
+        for (auto a = 0; a < 2; ++a)
+        {
+            for (auto b = 0; b < 3; ++b)
+                f.dirs[a][b] = dir(i, a, b);
+            f.turn = turn(i, 1, 0);
+        }
+        fields.push_back(f);
+    }
+    auto grid = cc::fixed_array<cc::fixed_array<slib::gpu_padded<tg::vec3f, 16>, 2>, 2>();
+    for (auto a = 0; a < 2; ++a)
+        for (auto b = 0; b < 2; ++b)
+            grid[a][b] = grid_of(a, b);
+    auto const usage = sg::buffer_usage::readwrite_buffer | sg::buffer_usage::copy_src;
+    auto const field_buffer = ctx->persistent.create_buffer_from_data(cc::move(fields), usage);
+    auto const sensed_buffer = ctx->persistent.create_buffer<tg::vec4f>(count, usage);
+
+    auto cmd = ctx->create_command_list();
+    auto const group = ctx->transient.create_binding_group(*cmd, group_layout,
+                                                           shaders::layout::fielding{
+                                                               .grid = grid,
+                                                               .fields = field_buffer.as_readwrite_buffer(),
+                                                               .sensed = sensed_buffer.as_readwrite_buffer(),
+                                                           });
+    cmd->compute.bind_pipeline(*pipeline);
+    cmd->compute.bind_group(0, *group);
+    cmd->compute.dispatch_threads(count);
+    auto const fields_back = cmd->download.data_from_buffer(field_buffer);
+    auto const sensed_back = cmd->download.data_from_buffer(sensed_buffer);
+    ctx->submit_command_list(cc::move(cmd));
+
+    auto const got_fields = co_await fields_back.data();
+    auto const got_sensed = co_await sensed_back.data();
+    REQUIRE(got_fields.size() == isize(count));
+    REQUIRE(got_sensed.size() == isize(count));
+    for (auto i = 0; i < count; ++i)
+    {
+        auto const d = dir(i, i % 2, 2) + grid_of(1, i % 2);
+        auto const v = turn(i, 1, 0) * d;
+        CHECK(got_sensed[i] == tg::vec4f(v[0], v[1], dir(i, 1, 0)[1], dir(i, 0, 1)[2])).context(cc::format("element {}", i));
+        CHECK(tg::vec3f(got_fields[i].dirs[1][2]) == dir(i, 1, 2));
+        CHECK(tg::mat3f(got_fields[i].turn) == turn(i, 1, 0));
+        CHECK(got_fields[i].tag == float(i + 1));
+    }
+}
