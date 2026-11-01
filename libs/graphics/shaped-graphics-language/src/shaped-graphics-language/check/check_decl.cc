@@ -958,7 +958,7 @@ ast::range_of<member_info> checker::compile_members(i32 file,
         if (found < 0)
         {
             // a member of the binding hides a file-scope name
-            auto const* const seen = names_seen_from(file).get_ptr(n.name);
+            auto const* const seen = seen_from(file, n.name);
             if (seen == nullptr || seen->empty())
             {
                 report(diagnostic_kind::unknown_member, file, where,
@@ -1229,7 +1229,7 @@ bool checker::is_shadowable_by(i32 file, ast::range_of<ast::attribute> attribute
 void checker::judge_shadowing(i32 file, cc::string_view name, source_span where)
 {
     // CHK-220: a local or a parameter hides a module-level symbol of its name (CHK-54), unless that one says it may not.
-    auto const* const found = names_seen_from(file).get_ptr(name);
+    auto const* const found = seen_from(file, name);
     if (found == nullptr)
         return;
     for (auto const s : *found)

@@ -9,6 +9,7 @@
 #include <clean-core/string/string_view.hh>
 #include <shaped-graphics-language/check/check.hh>
 #include <shaped-graphics-language/check/features.hh>
+#include <shaped-graphics-language/check/layered_map.hh>
 
 namespace sgl::check::impl
 {
@@ -372,20 +373,24 @@ struct checker
 
     /// The prelude's scope: every name its files declare but those of `@operator` functions.
     /// More than one symbol under a name means all of them are functions; the same holds for `module_scopes`.
-    cc::map<cc::string, cc::vector<symbol_id>> prelude_names;
+    layered_map<cc::string, cc::vector<symbol_id>> prelude_names;
     /// Parallel to `modules`: the scope every file of the module shares, the inner one.
     cc::vector<cc::map<cc::string, cc::vector<symbol_id>>> module_scopes;
-    /// Parallel to `modules`: what a file of the module sees, its scope over `prelude_names`, where two overload sets
-    /// of one name merge.
-    /// Built once every file is declared.
+    /// Parallel to `modules`: each name the module declares merged with the prelude's of that name, where two overload
+    /// sets of one name merge (CHK-189); a name it does not declare is found in `prelude_visible`.
+    /// Built once every file is declared, from the module's names alone, so it costs what the program declares.
     cc::vector<cc::map<cc::string, cc::vector<symbol_id>>> merged_scopes;
+    /// What a module's file finds of the prelude: `prelude_names` without the `@internal` symbols (CHK-323).
+    /// Built once, with the prelude, and shared by every program's check behind it.
+    layered_map<cc::string, cc::vector<symbol_id>> prelude_visible;
+    bool has_prelude_visible = false;
     /// `@operator` functions by operator spelling.
-    cc::map<cc::string, cc::vector<symbol_id>> operators;
+    layered_map<cc::string, cc::vector<symbol_id>> operators;
     /// The prelude's alone, which is all a prelude file sees (CHK-190).
-    cc::map<cc::string, cc::vector<symbol_id>> prelude_operators;
+    layered_map<cc::string, cc::vector<symbol_id>> prelude_operators;
     /// The functions of each struct's and enum's type scope, keyed by the index of the type's symbol, then by name.
     /// Members are declared with their type, and extensions once every file is declared (CHK-233, CHK-237).
-    cc::map<i32, cc::map<cc::string, cc::vector<symbol_id>>> type_scopes;
+    layered_map<i32, cc::map<cc::string, cc::vector<symbol_id>>> type_scopes;
     /// The types `resource_type` and `buffer_type` interned, by spelling, so a mention looks up only its equals.
     /// The function arguments of every call checked so far; `call_arguments::functions` indexes it.
     cc::vector<function_argument> function_arguments;
@@ -393,7 +398,7 @@ struct checker
     bool allows_function_type = false;
     /// The type being resolved is a pixel entry point's result, whose attributes are its target's settings (CHK-418).
     bool allows_type_attributes = false;
-    cc::map<cc::string, cc::vector<type_id>> interned_types;
+    layered_map<cc::string, cc::vector<type_id>> interned_types;
     cc::vector<pending_extension> pending_extensions;
     /// Integer literals that do not fit an `int`, judged once every literal has met the type it converts to (CHK-61).
     cc::vector<wide_literal> wide_literals;
@@ -456,9 +461,13 @@ struct checker
     [[nodiscard]] i32 program_file() const { return i32(files.size()) - 1; }
     /// The module-level names a lookup from `file` finds: a prelude file sees the prelude alone, and a module's file sees
     /// its module's names over the prelude's, and no other module's.
-    [[nodiscard]] cc::map<cc::string, cc::vector<symbol_id>> const& names_seen_from(i32 file) const
+    [[nodiscard]] cc::vector<symbol_id> const* seen_from(i32 file, cc::string_view name) const
     {
-        return is_prelude_file(file) ? prelude_names : merged_scopes[file_module[file]];
+        if (is_prelude_file(file))
+            return prelude_names.get_ptr(name);
+        if (auto const* const merged = merged_scopes[file_module[file]].get_ptr(name))
+            return merged;
+        return prelude_visible.get_ptr(name);
     }
     /// The module a `use` line of `file` binds to `name`; -1 for none.
     [[nodiscard]] i32 used_module(i32 file, cc::string_view name) const
@@ -482,7 +491,7 @@ struct checker
                                                              function_scope const* scope,
                                                              bool* is_qualified = nullptr) const;
     /// The `@operator` functions a use of an operator in `file` may choose from, by spelling.
-    [[nodiscard]] cc::map<cc::string, cc::vector<symbol_id>> const& operators_seen_from(i32 file) const
+    [[nodiscard]] layered_map<cc::string, cc::vector<symbol_id>> const& operators_seen_from(i32 file) const
     {
         return is_prelude_file(file) ? prelude_operators : operators;
     }

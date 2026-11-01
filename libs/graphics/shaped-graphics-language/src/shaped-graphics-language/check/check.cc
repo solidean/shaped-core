@@ -127,6 +127,12 @@ cc::optional<checked_prelude> sgl::check::check_prelude(cc::span<module_file con
     c.out.file_modules.remove_back();
     // shared from here: every program's check reads the prelude's entries in place, rather than copying them
     c.out.freeze_tables();
+    c.prelude_names.freeze();
+    c.prelude_operators.freeze();
+    c.operators.freeze();
+    c.type_scopes.freeze();
+    c.interned_types.freeze();
+    c.prelude_visible.freeze();
     result._resume = {
         .files = i32(prelude.size()),
         .symbols = c.out.symbols.size(),

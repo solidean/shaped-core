@@ -267,7 +267,7 @@ void checker::attach_extensions(isize first)
         auto const type_name = text_of(file, extended);
 
         // CHK-237: `T` names a struct or an enum
-        auto const* const found = names_seen_from(file).get_ptr(type_name);
+        auto const* const found = seen_from(file, type_name);
         if (found == nullptr || found->empty())
         {
             report(diagnostic_kind::unknown_name, file, extended, type_name);
@@ -297,7 +297,7 @@ void checker::attach_extensions(isize first)
 cc::vector<symbol_id> checker::candidates_of(i32 file, cc::string_view name, type_id first) const
 {
     auto result = cc::vector<symbol_id>();
-    if (auto const* const named = names_seen_from(file).get_ptr(name))
+    if (auto const* const named = seen_from(file, name))
         for (auto const id : *named)
             if (out.at(id).kind == symbol_kind::function)
                 result.push_back(id);
@@ -375,7 +375,7 @@ cc::vector<symbol_id> const* checker::symbols_named(i32 file,
         auto const text = text_of(file, n->where);
         if ((scope != nullptr && scope->find_local(text) != nullptr) || is_type_parameter_name(text))
             return nullptr;
-        found = names_seen_from(file).get_ptr(text);
+        found = seen_from(file, text);
     }
     else if (auto const* const m = node.try_as<ast::member>())
     {
@@ -478,8 +478,8 @@ void checker::declare_constructors(isize first)
         if (decl.is_opaque || decl.name.empty())
             continue;
         // Only a struct a lookup finds has a constructor there: a duplicate is found by nothing.
-        auto const& scope = is_prelude_file(s.file) ? prelude_names : module_scopes[file_module[s.file]];
-        auto const* const found = scope.get_ptr(s.name);
+        auto const* const found = is_prelude_file(s.file) ? prelude_names.get_ptr(s.name)
+                                                          : module_scopes[file_module[s.file]].get_ptr(s.name);
         if (found == nullptr || found->empty() || found->front() != symbol_id(i))
             continue;
         add_symbol({.file = s.file,
@@ -509,15 +509,23 @@ bool checker::is_internal(symbol_id id) const
 
 void checker::merge_scopes()
 {
+    // CHK-323: an `@internal` symbol of the prelude is the prelude's alone, and no lookup from a module finds it
+    if (!has_prelude_visible)
+    {
+        for (auto const& [name, ids] : prelude_names)
+            for (auto const id : ids)
+                if (!is_internal(id))
+                    prelude_visible[name].push_back(id);
+        has_prelude_visible = true;
+    }
     merged_scopes = {};
     for (auto const& scope : module_scopes)
     {
         auto& names = merged_scopes.emplace_back();
-        // CHK-323: an `@internal` symbol of the prelude is the prelude's alone, and no lookup from a module finds it
-        for (auto const& [name, ids] : prelude_names)
-            for (auto const id : ids)
-                if (!is_internal(id))
-                    names[name].push_back(id);
+        // only the names the module declares: every other one a module's file finds in `prelude_visible`
+        for (auto const& [name, ids] : scope)
+            if (auto const* const prelude = prelude_visible.get_ptr(name))
+                names[name] = *prelude;
         merge_scope(names, scope);
     }
 

@@ -246,7 +246,7 @@ i32 checker::resolve_image_format(i32 file, ast::expr_id argument)
     auto format = dot != nullptr ? find_image_format(text_of(file, dot->name)) : -1;
     if (auto const* const n = ast_of(file).at(argument).node.try_as<ast::name>())
     {
-        auto const* const found = names_seen_from(file).get_ptr(text_of(file, n->where));
+        auto const* const found = seen_from(file, text_of(file, n->where));
         auto const id = found != nullptr && !found->empty() ? found->front() : symbol_id::none;
         if (is_valid(id) && out.at(id).kind == symbol_kind::constant)
         {

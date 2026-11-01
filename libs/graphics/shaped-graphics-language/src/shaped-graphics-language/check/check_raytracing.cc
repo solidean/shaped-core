@@ -147,7 +147,7 @@ cc::optional<ray_trace> checker::ray_type_of(i32 file, ast::expr_id expr)
     auto const* const n = ast_of(file).at(member->object).node.try_as<ast::name>();
     if (n == nullptr)
         return cc::nullopt;
-    auto const* const found = names_seen_from(file).get_ptr(text_of(file, n->where));
+    auto const* const found = seen_from(file, text_of(file, n->where));
     if (found == nullptr || found->empty() || !is_ray_set(found->front()))
         return cc::nullopt;
     auto const set = found->front();
@@ -247,7 +247,7 @@ type_id checker::payload_of(symbol_id entry) const
 symbol_id checker::ray_set_named(i32 file, source_span name)
 {
     auto const text = text_of(file, name);
-    auto const* const found = names_seen_from(file).get_ptr(text);
+    auto const* const found = seen_from(file, text);
     if (found == nullptr || found->empty())
     {
         report(diagnostic_kind::unknown_name, file, name, text);
@@ -271,7 +271,7 @@ symbol_id checker::ray_entry_named(i32 file, ast::expr_id value, stage wanted)
         return symbol_id::none;
     }
     auto const text = text_of(file, n->where);
-    auto const* const found = names_seen_from(file).get_ptr(text);
+    auto const* const found = seen_from(file, text);
     if (found == nullptr || found->empty())
     {
         report(diagnostic_kind::unknown_name, file, n->where, text);
@@ -590,7 +590,7 @@ void checker::compile_raytracing_pipeline(symbol_id id)
                 }
                 auto const* const g = e.try_as<ast::name>();
                 auto const text = g == nullptr ? cc::string_view() : text_of(file, g->where);
-                auto const* const found = g == nullptr ? nullptr : names_seen_from(file).get_ptr(text);
+                auto const* const found = g == nullptr ? nullptr : seen_from(file, text);
                 auto group = symbol_id::none;
                 if (found != nullptr)
                     for (auto const candidate : *found)
@@ -914,7 +914,7 @@ symbol_id checker::callables_named(i32 file, ast::expr_id expr)
     auto const* const n = ast::is_valid(expr) ? ast_of(file).at(expr).node.try_as<ast::name>() : nullptr;
     if (n == nullptr)
         return symbol_id::none;
-    auto const* const found = names_seen_from(file).get_ptr(text_of(file, n->where));
+    auto const* const found = seen_from(file, text_of(file, n->where));
     if (found == nullptr || found->empty() || out.at(found->front()).kind != symbol_kind::pipeline)
         return symbol_id::none;
     auto const table = found->front();

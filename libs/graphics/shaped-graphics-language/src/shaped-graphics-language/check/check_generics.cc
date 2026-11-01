@@ -271,7 +271,7 @@ type_id checker::generic_named(i32 file, ast::expr_id expr)
     auto const* const n = ast::is_valid(expr) ? ast_of(file).at(expr).node.try_as<ast::name>() : nullptr;
     if (n == nullptr)
         return type_id::none;
-    auto const* const found = names_seen_from(file).get_ptr(text_of(file, n->where));
+    auto const* const found = seen_from(file, text_of(file, n->where));
     if (found == nullptr || found->empty() || out.at(found->front()).kind != symbol_kind::structure)
         return type_id::none;
     auto const* const d

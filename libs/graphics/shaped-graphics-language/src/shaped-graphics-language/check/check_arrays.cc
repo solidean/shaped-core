@@ -84,7 +84,7 @@ cc::optional<i32> checker::constant_count(i32 file, ast::expr_id expr, function_
     }
     else
     {
-        auto const* const found = names_seen_from(file).get_ptr(text);
+        auto const* const found = seen_from(file, text);
         if (found == nullptr || found->empty() || out.at(found->front()).kind != symbol_kind::constant)
             return {};
         id = found->front();

@@ -74,7 +74,7 @@ call_arguments checker::check_arguments(function_scope& scope, ast::range_of<ast
         if (auto const* const n = value != nullptr && !a.is_splat && !a.is_mut ? value->try_as<ast::name>() : nullptr;
             n != nullptr && scope.find_local(text_of(file, n->where)) == nullptr)
         {
-            auto const* const found = names_seen_from(file).get_ptr(text_of(file, n->where));
+            auto const* const found = seen_from(file, text_of(file, n->where));
             if (found != nullptr && !found->empty() && out.at(found->front()).kind == symbol_kind::function)
             {
                 auto functions = cc::vector<symbol_id>();
@@ -484,7 +484,7 @@ type_id checker::check_call(function_scope& scope, ast::expr_id id, ast::call co
         }
         // a local hides every symbol of its name, which a port meets as a parameter named like a builtin
         auto hidden = cc::string_view();
-        if (auto const* const found = names_seen_from(file).get_ptr(text))
+        if (auto const* const found = seen_from(file, text))
             for (auto const s : *found)
                 if (out.at(s).kind == symbol_kind::function || out.at(s).kind == symbol_kind::structure)
                     hidden = is_prelude_file(out.at(s).file) ? "the prelude's" : "the module's";
@@ -517,7 +517,7 @@ type_id checker::check_call(function_scope& scope, ast::expr_id id, ast::call co
                                            : check_pipeline_trace(scope, id, call, ray.value());
     }
 
-    return check_named_call(scope, id, call, text, names_seen_from(file).get_ptr(text), false);
+    return check_named_call(scope, id, call, text, seen_from(file, text), false);
 }
 
 type_id checker::check_named_call(function_scope& scope,

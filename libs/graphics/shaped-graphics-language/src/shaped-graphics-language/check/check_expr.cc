@@ -763,7 +763,7 @@ type_id checker::check_name(function_scope& scope, ast::expr_id id, ast::name co
         return error_type;
     }
 
-    auto const* const found = names_seen_from(file).get_ptr(text);
+    auto const* const found = seen_from(file, text);
     if ((found == nullptr || found->empty()) && used_module(file, text) >= 0)
     {
         // CHK-347: a module is reached through its names, and is no value itself

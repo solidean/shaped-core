@@ -634,7 +634,7 @@ void checker::compile_pipeline(symbol_id id)
             return false;
         }
         auto const text = text_of(file, n->where);
-        auto const* const found = names_seen_from(file).get_ptr(text);
+        auto const* const found = seen_from(file, text);
         if (found == nullptr || found->empty())
         {
             report(diagnostic_kind::unknown_name, file, n->where, text);

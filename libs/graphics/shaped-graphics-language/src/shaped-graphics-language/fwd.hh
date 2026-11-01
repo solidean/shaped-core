@@ -334,6 +334,8 @@ struct module_file;
 struct checked_prelude;
 template <class T>
 class layered;
+template <class K, class V>
+class layered_map;
 } // namespace sgl::check
 
 namespace sgl::test

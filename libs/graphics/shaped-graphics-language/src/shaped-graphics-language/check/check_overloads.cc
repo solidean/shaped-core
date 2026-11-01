@@ -420,7 +420,7 @@ cc::vector<symbol_id> checker::functions_named_after(i32 file, type_id to) const
     if (!is_valid(to) || to == error_type || out.at(to).kind != type_kind::structure)
         return result;
     auto const& name = out.at(out.at(to).symbol).name;
-    if (auto const* const found = names_seen_from(file).get_ptr(name))
+    if (auto const* const found = seen_from(file, name))
         for (auto const id : *found)
             if (out.at(id).kind == symbol_kind::function)
                 result.push_back(id);
