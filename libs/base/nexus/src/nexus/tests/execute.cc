@@ -720,10 +720,14 @@ void record_leftover_release(void const*, i32 left, void* user)
     }
 
     // Yielded rather than slept: what this catches mostly lets go within microseconds, and a sleep's tick is milliseconds.
-    // Work homed on this very thread cannot run while it waits, and reads as held after the full wait.
+    // Work homed on this very thread is pumped meanwhile, so it runs and lets go where it would; an unthreaded build homes
+    // all of its work here, and without the pump a holder there would read as held with no stack to name it.
     auto const started = cc::current_time_steady_secs();
     while (cc::async_ambient_outstanding(head) > 0 && cc::current_time_steady_secs() - started < leftover_watch_secs)
+    {
+        cc::thread_pump_all();
         cc::this_thread_yield();
+    }
     auto const waited_ms = (cc::current_time_steady_secs() - started) * 1000.0;
     auto const still_held = cc::async_ambient_outstanding(head);
     cc::async_ambient_unwatch_releases(head);

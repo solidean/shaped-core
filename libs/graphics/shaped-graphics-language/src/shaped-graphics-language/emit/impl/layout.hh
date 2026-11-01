@@ -104,6 +104,9 @@ struct placed_members
 /// Whether `type` is a `mat3`, which HLSL holds in GPU memory as three whole rows (EMIT-168).
 [[nodiscard]] bool is_mat3(check::checked_module const& m, check::type_id type);
 
+/// The element at the bottom of `type`'s array dimensions, `float3` of a `float3[2, 3]`; `type` itself for no array.
+[[nodiscard]] check::type_id innermost_of(check::checked_module const& m, check::type_id type);
+
 /// Whether `type` is a `mat2`, which HLSL holds in a constant block as one `float4` (EMIT-175).
 [[nodiscard]] bool is_mat2(check::checked_module const& m, check::type_id type);
 

@@ -69,6 +69,9 @@ void vulkan_buffer::on_expired() const
 
 vulkan_buffer::~vulkan_buffer()
 {
+    // a pending upload no list waits on can never be read now, so its context waits on nothing (upload_contexts.hh)
+    if (_upload_group != nullptr)
+        _upload_group->contexts.release_unawaited(_upload_group->awaited_value.load(cc::memory_order_acquire));
     release_storage();
 } // no-op if expire() already released the storage
 

@@ -264,6 +264,7 @@ Whole-build like `SC_CHECK_WIDE_ARITH`, for the same ODR reason, and turned on b
 `SC_ASYNC_AMBIENT_TRACE` (default `OFF`) lets a context link's releases be watched; it reaches C++ as `CC_ASYNC_AMBIENT_TRACE`, 0 or 1.
 nexus uses it when a pass ends with async work still carrying the test's context, which fails the pass either way.
 It watches the test's link from just before its count, waits up to a quarter second for the leftover work to let go, and adds the stack of each release to the failure.
+It pumps the calling thread while it waits, so work homed there runs and names itself too, which is all of an unthreaded build's work.
 So the report says whether the work was a straggler that let go a moment later or a real leak, and which code held it.
 
 Off, the release path is exactly what it is without the feature.

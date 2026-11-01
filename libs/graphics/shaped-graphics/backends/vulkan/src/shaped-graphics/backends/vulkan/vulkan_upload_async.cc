@@ -444,7 +444,8 @@ bool vulkan_upload_async_system::run_one_window()
         // The completion value is signalled either way, so the lifetime gate and any forward reader stamped with it
         // never hang — which is the whole reason it is reserved at enqueue rather than at stage time.
         {
-            cc::async_ambient_install_scope const installed(job.ambient);
+            auto const job_context = job.ambient.get();
+            cc::async_ambient_install_scope const installed(job_context);
             signal_on_queue(job.completion);
         }
         settle_now(job, /*delivered =*/false);
@@ -487,7 +488,8 @@ bool vulkan_upload_async_system::run_one_window()
         if (candidate.source != nullptr && candidate.chunk.empty() && !candidate.source_done)
         {
             // The source is the caller's code, so it runs under the caller's context.
-            cc::async_ambient_install_scope const installed(candidate.ambient);
+            auto const job_context = candidate.ambient.get();
+            cc::async_ambient_install_scope const installed(job_context);
 
             auto poll = candidate.source->try_next_chunk();
             if (poll.status == sg::stream_source_status::not_yet)
@@ -544,7 +546,8 @@ bool vulkan_upload_async_system::run_one_window()
         // first, which a timeline rejects.
         if (job.source != nullptr)
         {
-            cc::async_ambient_install_scope const installed(job.ambient);
+            auto const job_context = job.ambient.get();
+            cc::async_ambient_install_scope const installed(job_context);
             signal_on_queue(job.completion);
         }
 
@@ -552,7 +555,8 @@ bool vulkan_upload_async_system::run_one_window()
         {
             if (job.source == nullptr)
             {
-                cc::async_ambient_install_scope const installed(job.ambient);
+                auto const job_context = job.ambient.get();
+                cc::async_ambient_install_scope const installed(job_context);
                 signal_on_queue(job.completion); // nothing was ever queued
             }
             settle_now(job, /*delivered =*/alive);
@@ -596,7 +600,8 @@ bool vulkan_upload_async_system::run_one_window()
     // Recording and submitting this window is the job's alone, so a validation message raised by either finds whoever
     // enqueued it.
     {
-        cc::async_ambient_install_scope const installed(job.ambient);
+        auto const job_context = job.ambient.get();
+        cc::async_ambient_install_scope const installed(job_context);
 
         vkResetCommandPool(_ctx->_device, _window_pools[slot], 0);
         auto const begin = VkCommandBufferBeginInfo{
@@ -813,6 +818,7 @@ void vulkan_upload_async_system::upload_buffer(sg::raw_buffer_handle const& buff
         job.download_wait = {.group = dst->_download_group, .value = pending};
 
     job.drain = _drain.start(); // before the hand-over, so a job still in the inbox is counted too
+    job.ambient = {job.completion.group, job.completion.value};
     _actor->enqueue_message(cc::move(job));
 }
 
@@ -874,6 +880,7 @@ sg::stream_upload_handle vulkan_upload_async_system::stream_source_buffer(sg::ra
     };
 
     job.drain = _drain.start(); // before the hand-over, so a job still in the inbox is counted too
+    job.ambient = {job.completion.group, job.completion.value};
     _actor->enqueue_message(cc::move(job));
     return sg::stream_upload_handle(cc::move(control));
 }
@@ -933,6 +940,7 @@ void vulkan_upload_async_system::upload_texture(sg::raw_texture_handle const& te
     job.wait_token = sg::submission_token(dst->_last_used_submission_token.load(cc::memory_order_acquire));
 
     job.drain = _drain.start(); // before the hand-over, so a job still in the inbox is counted too
+    job.ambient = {job.completion.group, job.completion.value};
     _actor->enqueue_message(cc::move(job));
 }
 
@@ -1005,6 +1013,7 @@ sg::stream_upload_handle vulkan_upload_async_system::stream_source_texture(sg::r
     };
 
     job.drain = _drain.start(); // before the hand-over, so a job still in the inbox is counted too
+    job.ambient = {job.completion.group, job.completion.value};
     _actor->enqueue_message(cc::move(job));
     return sg::stream_upload_handle(cc::move(control));
 }

@@ -881,3 +881,137 @@ ASYNC_INVOCABLE_TEST("sg - a mat2 is 16 bytes in a buffer's element, and starts 
         CHECK(got[i].tag == float(i) + 0.75f);
     }
 }
+
+ASYNC_INVOCABLE_TEST("sg - a multi-dimensional array of float3 strides its innermost element by 16, on every backend",
+                     (sg::context_handle const& ctx))
+{
+    REQUIRE(ctx != nullptr);
+    if (!sg_test::shaders_reach(*ctx))
+        SKIP("no compiler builds this binary's shaders into a format this context accepts");
+
+    static_assert(sizeof(shaders::layout::field) == 160);
+    static_assert(offsetof(shaders::layout::field, turn) == 96);
+    auto const pipeline = co_await shaders::layout::sense.acquire_pipeline(*ctx);
+    auto const group_layout = ctx->cached.acquire_binding_group_layout<shaders::layout::fielding>();
+
+    auto const dir = [](int i, int a, int b) { return tg::vec3f(float(i), float(10 * a + b), float(a - b)); };
+    // no matrix here is symmetric, so a transposed read or write shows
+    auto const turn = [](int i, int a, int b)
+    {
+        return tg::mat3f::make_from_cols(tg::vec3f(1, float(a), 0), tg::vec3f(float(b), 1, 0), tg::vec3f(0, float(i), 1));
+    };
+    auto const grid_of = [](int a, int b) { return tg::vec3f(float(a), float(b), 0.5f); };
+
+    constexpr auto count = 64;
+    auto fields = cc::vector<shaders::layout::field>();
+    for (auto i = 0; i < count; ++i)
+    {
+        auto f = shaders::layout::field{.tag = float(i)};
+        for (auto a = 0; a < 2; ++a)
+        {
+            for (auto b = 0; b < 3; ++b)
+                f.dirs[a][b] = dir(i, a, b);
+            f.turn = turn(i, 1, 0);
+        }
+        fields.push_back(f);
+    }
+    auto grid = cc::fixed_array<cc::fixed_array<slib::gpu_padded<tg::vec3f, 16>, 2>, 2>();
+    for (auto a = 0; a < 2; ++a)
+        for (auto b = 0; b < 2; ++b)
+            grid[a][b] = grid_of(a, b);
+    auto const usage = sg::buffer_usage::readwrite_buffer | sg::buffer_usage::copy_src;
+    auto const field_buffer = ctx->persistent.create_buffer_from_data(cc::move(fields), usage);
+    auto const sensed_buffer = ctx->persistent.create_buffer<tg::vec4f>(count, usage);
+
+    auto cmd = ctx->create_command_list();
+    auto const group = ctx->transient.create_binding_group(*cmd, group_layout,
+                                                           shaders::layout::fielding{
+                                                               .grid = grid,
+                                                               .fields = field_buffer.as_readwrite_buffer(),
+                                                               .sensed = sensed_buffer.as_readwrite_buffer(),
+                                                           });
+    cmd->compute.bind_pipeline(*pipeline);
+    cmd->compute.bind_group(0, *group);
+    cmd->compute.dispatch_threads(count);
+    auto const fields_back = cmd->download.data_from_buffer(field_buffer);
+    auto const sensed_back = cmd->download.data_from_buffer(sensed_buffer);
+    ctx->submit_command_list(cc::move(cmd));
+
+    auto const got_fields = co_await fields_back.data();
+    auto const got_sensed = co_await sensed_back.data();
+    REQUIRE(got_fields.size() == isize(count));
+    REQUIRE(got_sensed.size() == isize(count));
+    for (auto i = 0; i < count; ++i)
+    {
+        auto const d = dir(i, i % 2, 2) + grid_of(1, i % 2);
+        auto const v = turn(i, 1, 0) * d;
+        CHECK(got_sensed[i] == tg::vec4f(v[0], v[1], dir(i, 1, 0)[1], dir(i, 0, 1)[2])).context(cc::format("element {}", i));
+        CHECK(tg::vec3f(got_fields[i].dirs[1][2]) == dir(i, 1, 2));
+        CHECK(tg::mat3f(got_fields[i].turn) == turn(i, 1, 0));
+        CHECK(got_fields[i].tag == float(i + 1));
+    }
+}
+
+ASYNC_INVOCABLE_TEST("sg - a @padding(.none) element's arrays and mat2 stride as a C++ struct's, on every backend",
+                     (sg::context_handle const& ctx))
+{
+    REQUIRE(ctx != nullptr);
+    if (!sg_test::shaders_reach(*ctx))
+        SKIP("no compiler builds this binary's shaders into a format this context accepts");
+
+    static_assert(sizeof(shaders::layout::tight) == 168);
+    static_assert(offsetof(shaders::layout::tight, colors) == 40);
+    static_assert(offsetof(shaders::layout::tight, turn) == 80);
+    auto const pipeline = co_await shaders::layout::tighten.acquire_pipeline(*ctx);
+    auto const group_layout = ctx->cached.acquire_binding_group_layout<shaders::layout::tightening>();
+
+    // no matrix here is symmetric, so a transposed read or write shows
+    auto const frame = [](int i, int k)
+    { return tg::mat3f::make_from_cols(tg::vec3f(1, float(i + k), 0), tg::vec3f(0, 1, 2), tg::vec3f(3, 0, 1)); };
+    auto const turn = [](int i) { return tg::mat2f::make_from_cols(tg::vec2f(1, float(i)), tg::vec2f(-1, 2)); };
+    auto const dir = [](int i, int k) { return tg::vec3f(float(i), float(k), float(i - k)); };
+
+    constexpr auto count = 64;
+    auto tights = cc::vector<shaders::layout::tight>();
+    for (auto i = 0; i < count; ++i)
+        tights.push_back({.lead = float(i),
+                          .dirs = {dir(i, 0), dir(i, 1), dir(i, 2)},
+                          .colors = {tg::vec4f(1, 2, 3, 4), tg::vec4f(5, 6, 7, float(i))},
+                          .weights = {0.5f, float(-i)},
+                          .turn = turn(i),
+                          .frames = {frame(i, 0), frame(i, 1)}});
+    auto const usage = sg::buffer_usage::readwrite_buffer | sg::buffer_usage::copy_src;
+    auto const tight_buffer = ctx->persistent.create_buffer_from_data(cc::move(tights), usage);
+    auto const gathered_buffer = ctx->persistent.create_buffer<tg::vec4f>(count, usage);
+
+    auto cmd = ctx->create_command_list();
+    auto const group = ctx->transient.create_binding_group(*cmd, group_layout,
+                                                           shaders::layout::tightening{
+                                                               .tights = tight_buffer.as_readwrite_buffer(),
+                                                               .gathered = gathered_buffer.as_readwrite_buffer(),
+                                                           });
+    cmd->compute.bind_pipeline(*pipeline);
+    cmd->compute.bind_group(0, *group);
+    cmd->compute.dispatch_threads(count);
+    auto const tights_back = cmd->download.data_from_buffer(tight_buffer);
+    auto const gathered_back = cmd->download.data_from_buffer(gathered_buffer);
+    ctx->submit_command_list(cc::move(cmd));
+
+    auto const got_tights = co_await tights_back.data();
+    auto const got_gathered = co_await gathered_back.data();
+    REQUIRE(got_tights.size() == isize(count));
+    REQUIRE(got_gathered.size() == isize(count));
+    for (auto i = 0; i < count; ++i)
+    {
+        auto const turned = turn(i) * tg::vec2f(1, 2);
+        auto const v = frame(i, i % 2) * (dir(i, i % 3) * turned[1]);
+        CHECK(got_gathered[i] == tg::vec4f(v[0] + float(i), float(-i), dir(i, 2)[2], v[2]))
+            .context(cc::format("element {}", i));
+        CHECK(got_tights[i].lead == float(i + 1));
+        CHECK(got_tights[i].dirs[1] == dir(i, 1));
+        CHECK(got_tights[i].colors[1] == tg::vec4f(5, 6, 7, float(i)));
+        CHECK(got_tights[i].weights[1] == float(-i));
+        CHECK(got_tights[i].turn == turn(i));
+        CHECK(got_tights[i].frames[1] == frame(i, 1));
+    }
+}

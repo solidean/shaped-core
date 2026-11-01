@@ -48,6 +48,9 @@ struct memory_leaf
     bool is_packed = false;
     /// The field is HLSL's `float4x3` of a `mat3`, three whole rows, which a read narrows and a write widens (EMIT-168).
     bool is_widened = false;
+    /// EMIT-178: a packed buffer element's array of `count` such values, in one field: the target's own array, its packed
+    /// one (MSL), or one of every element's scalars back to back where `is_split`; 0 for any other leaf.
+    i32 count = 0;
 };
 
 /// A root written as its memory form.

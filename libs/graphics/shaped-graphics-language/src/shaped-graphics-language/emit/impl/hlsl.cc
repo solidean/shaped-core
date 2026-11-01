@@ -300,11 +300,7 @@ public:
             out.appendf("[[vk::offset({})]] ", member.offset);
         // EMIT-168: a mat3 in memory is three whole rows, which no packed layout and no function body holds
         auto const in_memory = member.offset >= 0 && (owner == nullptr || (owner->memory_size > 0 && !owner->is_packed));
-        auto const is_widened
-            = in_memory
-           && (is_mat3(p.m, member.type)
-               || (p.m.builtin_type_of(member.type) == nullptr && p.m.at(member.type).kind == type_kind::array
-                   && is_mat3(p.m, p.m.at(member.type).element)));
+        auto const is_widened = in_memory && is_mat3(p.m, innermost_of(p.m, member.type));
         // EMIT-169: an array of 3-vectors in memory is one of 4-vectors, which a structured buffer strides by 16 too
         auto const widened_vector = member.is_row_per_element
                                       ? cc::string(builtin_spelling(p, row_vector_of(p, p.m.at(member.type).element)))
@@ -386,7 +382,7 @@ public:
     {
         if (p.m.builtin_type_of(type) != nullptr || p.m.at(type).kind != type_kind::array)
             return {};
-        auto const* const record = p.m.builtin_type_of(p.m.at(type).element);
+        auto const* const record = p.m.builtin_type_of(innermost_of(p.m, type));
         if (record == nullptr || record->leaf_count != 3)
             return {};
         auto const family = record->leaf_kind == check::value_kind::scalar_int    ? "int4"
@@ -405,9 +401,7 @@ public:
         for (auto const& s : p.structs)
             if (s.memory_size > 0 && !s.is_packed)
                 for (auto const& member : s.members)
-                    result = result || is_mat3(p.m, member.type)
-                          || (p.m.builtin_type_of(member.type) == nullptr && p.m.at(member.type).kind == type_kind::array
-                              && is_mat3(p.m, p.m.at(member.type).element));
+                    result = result || is_mat3(p.m, innermost_of(p.m, member.type));
         for (auto const& r : p.resources)
             if (r.element_form.has_value())
                 for (auto const& leaf : r.element_form.value().leaves)
@@ -432,7 +426,8 @@ public:
             out += k_indent;
             if (_is_vulkan)
                 out.appendf("[[vk::offset({})]] ", f.offset);
-            auto const is_matrix = f.type == "float4x4" || f.type == "float4x3" || f.type == "float3x3";
+            auto const is_matrix
+                = f.type == "float4x4" || f.type == "float4x3" || f.type == "float3x3" || f.type == "float2x2";
             out.appendf("{}{} {}{};\n", is_matrix ? "column_major " : "", f.type, f.name,
                         f.count > 0 ? cc::format("[{}]", f.count) : cc::string());
         }

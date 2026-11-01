@@ -12,20 +12,20 @@ bool is_hlsl(emit::target t)
     return t == emit::target::hlsl_dx12 || t == emit::target::hlsl_vulkan;
 }
 
-/// The array of 3-vectors HLSL holds in GPU memory as one of 4-vectors (EMIT-169).
+/// The array of 3-vectors, at any depth, HLSL holds in GPU memory as one of 4-vectors (EMIT-169).
 bool is_3_vector_array(checked_module const& m, type_id type)
 {
     if (!is_valid(type) || m.builtin_type_of(type) != nullptr || m.at(type).kind != type_kind::array)
         return false;
-    auto const* const record = m.builtin_type_of(m.at(type).element);
+    auto const* const record = m.builtin_type_of(innermost_of(m, type));
     return record != nullptr && record->leaf_count == 3;
 }
 
-/// The array of mat3 HLSL holds in GPU memory as one of `float4x3` (EMIT-168).
+/// The array of mat3, at any depth, HLSL holds in GPU memory as one of `float4x3` (EMIT-168).
 bool is_mat3_array(checked_module const& m, type_id type)
 {
     return is_valid(type) && m.builtin_type_of(type) == nullptr && m.at(type).kind == type_kind::array
-        && is_mat3(m, m.at(type).element);
+        && is_mat3(m, innermost_of(m, type));
 }
 
 /// The planned struct of `type` where it stands in natural GPU memory, as its target declares it there; null elsewhere.
@@ -136,14 +136,30 @@ void sgl::emit::impl::plan_memory_accesses(plan& p)
             mark_place(p, assign->place);
     // An array held as 4-vectors is indexed in place, its element read through its lanes.
     // An array held as pieces is too where the index is a literal, which names the piece (EMIT-174).
-    for (auto const& x : p.e.exprs)
-        if (auto const* const element = x.node.try_as<flat_element>(); element != nullptr)
-        {
-            auto const held = p.accesses[index_of(element->object)].held;
-            if (held == held_as::widened_array || (held == held_as::pieces && is_piece(p, *element)))
-                p.accesses[index_of(element->object)].is_raw = true;
-            // an element of an array of mat3 is a widened mat3 of its own, read narrowed and written widened
-            if (held == held_as::widened_array && is_mat3(p.m, x.type))
-                p.accesses[&x - p.e.exprs.data()].held = held_as::widened_mat3;
-        }
+    // An element that is an array itself is held as its outer one is, so a pass reaches one level deeper; the tree
+    // holds no deeper nest than its arrays' dimensions, so as many passes reach every level.
+    for (auto changed = true; changed;)
+    {
+        changed = false;
+        for (auto const& x : p.e.exprs)
+            if (auto const* const element = x.node.try_as<flat_element>(); element != nullptr)
+            {
+                auto const at = &x - p.e.exprs.data();
+                auto const object = p.accesses[index_of(element->object)];
+                if (object.held == held_as::widened_array || (object.held == held_as::pieces && is_piece(p, *element)))
+                    p.accesses[index_of(element->object)].is_raw = true;
+                auto const held = object.held != held_as::widened_array ? p.accesses[at].held
+                                : is_mat3(p.m, x.type)
+                                    ? held_as::widened_mat3 // read narrowed and written widened, as one mat3 is
+                                : p.m.builtin_type_of(x.type) == nullptr && p.m.at(x.type).kind == type_kind::array
+                                    ? held_as::widened_array
+                                    : p.accesses[at].held;
+                if (held != p.accesses[at].held)
+                {
+                    p.accesses[at].held = held;
+                    p.accesses[at].lanes = object.lanes;
+                    changed = true;
+                }
+            }
+    }
 }
