@@ -4,6 +4,8 @@ refs:
   - file: libs/graphics/shaped-viewer/shaders/tracer_pipeline.sgl
   - file: libs/graphics/shaped-viewer/shaders/sgl/tracer_bindings.sgl
   - file: libs/graphics/shaped-viewer/src/shaped-viewer/material/shader_generator.cc
+closed: 2026-11-01
+resolution: fixed
 ---
 
 # A ray set a module declares is named by no other file
