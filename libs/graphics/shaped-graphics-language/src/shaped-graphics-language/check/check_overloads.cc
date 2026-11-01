@@ -356,6 +356,18 @@ cc::optional<candidate_match> checker::match(i32 file, symbol_id candidate, call
                     if (trial[k] == parameter)
                         to = trial[k + 1];
         }
+        // a parameter's default, where it is closed and every number meeting it fits, before a number's own type
+        if (auto const fallback = out.at(parameter).generic; !is_valid(to) && is_valid(fallback) && !is_open(fallback))
+        {
+            auto fits = true;
+            for (auto const q : deferred)
+                if (auto const j = result.slots[q]; out.at(range)[q].type == parameter && arguments.numbers[j].is_number)
+                    fits = fits
+                        && (out.name_of(fallback) == "float" || out.name_of(fallback) == "half"
+                            || arguments.numbers[j].is_integer);
+            if (fits)
+                to = fallback;
+        }
         for (auto const q : deferred)
             if (auto const j = result.slots[q]; !is_valid(to) && out.at(range)[q].type == parameter
                                                 && arguments.numbers[j].is_number && !arguments.numbers[j].is_integer)
@@ -863,6 +875,14 @@ type_id checker::deduce_result(function_scope const& scope, ast::expr_id id, sym
         auto is_bound = false;
         for (auto i = isize(0); i + 1 < bindings.size(); i += 2)
             is_bound = is_bound || bindings[i] == q;
+        // CHK-338: a default binds what nothing else said, as the parameters before it make it
+        if (!is_bound && is_valid(out.at(q).generic))
+        {
+            auto const fallback = substitute(out.at(q).generic, bindings);
+            bindings.push_back(q);
+            bindings.push_back(fallback);
+            is_bound = !is_open(fallback);
+        }
         if (!is_bound)
         {
             report(diagnostic_kind::no_matching_overload, scope.file, span_of(scope.file, id),

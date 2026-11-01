@@ -285,6 +285,7 @@ struct sgl::check::type_info
     /// A generic struct of the prelude, `struct report[A]:`, whose `element` is its type parameter (CHK-339).
     bool is_template = false;
     /// An instance of one, `report[hit_attributes]`: the template, whose `element` this instance's argument replaces.
+    /// For a type parameter, its default, `[T = float]`, which may name a parameter before it (CHK-338).
     type_id generic = type_id::none;
     /// A template's parameters in order, and what each stands for in an instance of it; a range of
     /// `checked_module::type_lists` (CHK-339).

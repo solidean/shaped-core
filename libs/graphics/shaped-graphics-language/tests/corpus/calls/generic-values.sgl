@@ -75,3 +75,22 @@ fun copy_texel[f: pixel_format](img: mut image_2d[f], from: int2, to: int2):
     copy_texel(frames.color, id.xy, id.yx)
     copy_texel(frames.depth, id.xy, id.yx)
     copy_texel[pixel_format.r32_uint](frames.color, id.yx, id.xy)
+
+struct tagged[w: float, on: bool, k: uint]:
+    v: float
+
+fun tagged.weighted(self) -> float:
+    if on:
+        return self.v * w * float(k)
+    return 0.0
+
+const half_weight = 0.5
+
+// a type position takes a float, bool or uint constant: a literal, a folded one, or a const
+test:
+    let a: tagged[1.5, true, 2u] = tagged(2.0)
+    a.weighted() == 6.0
+    let b: tagged[half_weight, false, 1u] = tagged(2.0)
+    b.weighted() == 0.0
+    let c: tagged[-2.0, true, 1u] = tagged(1.0)
+    c.weighted() == -2.0

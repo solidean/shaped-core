@@ -106,8 +106,8 @@ let s = ring(items = (1, 2), head = 0)   // n = 2, T = int, deduced from the fie
 
 ## Open
 
-* Whether a generic parameter may have a default.
-* Whether a value parameter is deduced from anything but an array's length, and whether a type position takes a `float` or `bool` constant.
+* Whether a value parameter is deduced from anything but an array's length or an image's format.
+* Whether a bare template where a value's type stands, `let b: box`, means its all-defaults instance; today it is the template.
 * Whether instances of two templates with the same fields lower to one struct too; one template's alike instances do (EMIT-179).
 * The set of types a literal fits, which [literal-types.md](literal-types.md) decides.
 * Whether a library module's generic that nothing instantiates warns too; today only the program's do.

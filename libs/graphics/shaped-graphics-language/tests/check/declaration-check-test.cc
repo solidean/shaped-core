@@ -270,8 +270,12 @@ TEST("sgl check - a generic body is checked per instantiation, and its names whe
               .starts_with("unsupported-yet user:[float3] a value parameter of float3, where int, uint, bool, float "
                            "and "
                            "enums are"));
-    CHECK(reports_for("fun f[T = float](x: T) => x\n")
-          == "unsupported-yet user:[T = float] a type parameter with a default or an attribute\n");
+    // a default is of the parameter's kind; an attribute on a parameter waits
+    CHECK(reports_for("fun f[T = float](x: int) -> T => T(x)\nfun g() -> float => f(1)\n") == "");
+    CHECK(reports_for("fun f[n: int = float](x: float) => x\n")
+              .starts_with("invalid-constant-argument user:[float] n is a value parameter of int"));
+    CHECK(reports_for("fun f[@x T](x: T) => x\n")
+              .starts_with("unsupported-yet user:[T] a type parameter with an attribute\n"));
 }
 
 TEST("sgl check - a generic struct takes one argument per parameter, each of its kind")

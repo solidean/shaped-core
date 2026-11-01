@@ -495,6 +495,7 @@ fun zero_of[T]() -> T => T(0)             // a call of T is a call of what it st
 fun scaled_by[n: int](x: float) => x * float(n)   // a value parameter, a constant in each instance; call scaled_by[3](x)
 fun combined[m: mode](a: float) => …    // an enum one: combined[mode.add](x); a type position takes `op[.add]`
 fun copy_texel[f: pixel_format](img: mut image_2d[f], a: int2, b: int2)   // an image's format, deduced from the image handed over
+struct box[T = float, n: int = 2]:      // defaults bind what nothing else says; box[int] is box[int, 2]
 ```
 
 ## The language: ray tracing ([docs/spec/raytracing.md](docs/spec/raytracing.md))

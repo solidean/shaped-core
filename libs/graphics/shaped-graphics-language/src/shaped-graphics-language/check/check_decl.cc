@@ -419,22 +419,31 @@ type_id checker::resolve_type(i32 file, ast::expr_id expr, function_scope const*
             // CHK-339: `ring[4, float]`, an instance of a generic struct, one argument per parameter and of its kind
             auto const arguments = ast_of(file).at(applied->arguments);
             auto const parameters = cc::vector<type_id>::create_copy_of(out.at(out.at(generic).arguments));
-            if (arguments.size() != parameters.size())
+            auto required = parameters.size();
+            while (required > 0 && is_valid(out.at(parameters[required - 1]).generic))
+                --required;
+            if (arguments.size() > parameters.size() || arguments.size() < required)
                 report(diagnostic_kind::wrong_kind_of_name, file, where,
-                       cc::format("{} takes {} argument{}", out.name_of(generic), parameters.size(),
-                                  parameters.size() == 1 ? "" : "s"));
+                       required == parameters.size() ? cc::format("{} takes {} argument{}", out.name_of(generic),
+                                                                  parameters.size(), parameters.size() == 1 ? "" : "s")
+                                                     : cc::format("{} takes {} to {} arguments", out.name_of(generic),
+                                                                  required, parameters.size()));
             else
             {
                 auto given = cc::vector<type_id>();
-                for (auto i = isize(0); i < arguments.size(); ++i)
+                auto bindings = cc::vector<type_id>();
+                for (auto i = isize(0); i < parameters.size(); ++i)
                 {
-                    auto const& a = arguments[i];
-                    auto const argument = !a.name.empty() || a.is_splat
-                                            ? checked_module::error_type
-                                            : type_argument_of(file, a.value, scope, parameters[i]);
+                    auto argument = checked_module::error_type;
+                    if (i >= arguments.size())
+                        argument = substitute(out.at(parameters[i]).generic, bindings);
+                    else if (auto const& a = arguments[i]; a.name.empty() && !a.is_splat)
+                        argument = type_argument_of(file, a.value, scope, parameters[i]);
                     if (argument == checked_module::error_type)
                         break;
                     given.push_back(argument);
+                    bindings.push_back(parameters[i]);
+                    bindings.push_back(argument);
                 }
                 if (given.size() == parameters.size())
                     result = instance_of(generic, given);
@@ -1725,15 +1734,24 @@ type_id checker::declare_type_parameter(i32 file, ast::field const& p, symbol_id
             is_failed = true;
         }
     }
-    if (ast::is_valid(p.default_value) || !p.attributes.empty())
+    if (!p.attributes.empty())
     {
         // still declared, so a mention of it is no second diagnostic
-        unsupported(file, span_of(file, p.form), "a type parameter with a default or an attribute");
+        unsupported(file, span_of(file, p.form), "a type parameter with an attribute");
         is_failed = true;
     }
     auto const parameter = new_type_parameter(text_of(file, p.name), owner);
     if (is_valid(value_type) && value_type != checked_module::error_type)
         out.types.own(index_of(parameter)).element = value_type;
+    // CHK-338: a default is a type or a constant of the parameter's kind, which may name a parameter before it
+    if (ast::is_valid(p.default_value))
+    {
+        auto const fallback = type_argument_of(file, p.default_value, nullptr, parameter);
+        if (fallback == checked_module::error_type)
+            is_failed = true;
+        else
+            out.types.own(index_of(parameter)).generic = fallback;
+    }
     return parameter;
 }
 

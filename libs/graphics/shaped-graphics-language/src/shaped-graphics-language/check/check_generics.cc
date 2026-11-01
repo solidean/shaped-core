@@ -633,15 +633,57 @@ type_id checker::type_argument_of(i32 file, ast::expr_id expr, function_scope co
         }
         return constant_type(enumeration, u32(index));
     }
-    auto const count = constant_count(file, expr, scope);
-    if (!count.has_value() || out.name_of(out.at(parameter).element) != "int")
+    // a number, a folded one such as `-1.5` among them, or a const, of a value the parameter's type holds
+    auto const element = out.at(parameter).element;
+    auto const type_name = out.name_of(element);
+    auto bits = cc::optional<u32>();
+    if (auto const n = number_of(file, expr); n.is_number)
+    {
+        if (type_name == "float")
+            bits = scalar::of(f32(n.is_integer ? f64(n.integer) : n.real)).bits;
+        else if (n.is_integer && type_name == "int" && n.integer >= -2147483648 && n.integer <= 2147483647)
+            bits = u32(i32(n.integer));
+        else if (n.is_integer && type_name == "uint" && n.integer >= 0 && n.integer <= 4294967295)
+            bits = u32(n.integer);
+    }
+    else if (auto const* const literal = ast_of(file).at(expr).node.try_as<ast::literal>();
+             literal != nullptr && type_name == "uint")
+    {
+        // `2u`, which names its type by its suffix
+        auto const text = text_of(file, span_of(file, expr));
+        auto const digits = text.ends_with("u") ? text.subview({.offset = 0, .size = text.size() - 1}) : text;
+        if (classify_number(digits) == number_class::plain_integer)
+            if (auto const value = parse_plain_integer(digits); value.has_value() && value.value() >= 0)
+                bits = u32(value.value());
+    }
+    else if (type_name == "int")
+    {
+        if (auto const count = constant_count(file, expr, scope); count.has_value())
+            bits = u32(count.value());
+    }
+    else if (auto const* const n = ast_of(file).at(expr).node.try_as<ast::name>())
+    {
+        auto const* const found = seen_from(file, text_of(file, n->where));
+        auto const id = found != nullptr && !found->empty() ? found->front() : symbol_id::none;
+        if (is_valid(id) && out.at(id).kind == symbol_kind::constant
+            && demand(id, file, span_of(file, expr)) == symbol_state::checked)
+        {
+            set_target(file, expr, {.kind = target_kind::symbol, .symbol = id});
+            auto const& c = out.constants[out.at(id).info];
+            if (type_name == "float" && c.kind == constant_kind::real)
+                bits = scalar::of(f32(c.real)).bits;
+            else if (type_name == "uint" && c.kind == constant_kind::integer && c.is_unsigned)
+                bits = u32(c.integer);
+        }
+    }
+    if (!bits.has_value())
     {
         report(diagnostic_kind::invalid_constant_argument, file, where,
-               cc::format("{} is a value parameter of {}, which takes an int literal, an int const or an int parameter",
-                          out.at(parameter).spelled, out.name_of(out.at(parameter).element)));
+               cc::format("{} is a value parameter of {}, which takes a literal, a const or a parameter of it",
+                          out.at(parameter).spelled, type_name));
         return checked_module::error_type;
     }
-    return constant_type(out.at(parameter).element, u32(count.value()));
+    return constant_type(element, bits.value());
 }
 
 i32 checker::enum_case_argument(i32 file, ast::expr_id expr, type_id enumeration, function_scope const* scope)

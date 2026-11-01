@@ -1507,14 +1507,16 @@ A call deduces what each parameter stands for, and inlining writes that in its p
   A bare `T`, and `T: type`, is a type parameter; `n: int` is a **value parameter**, of `int`, `uint`, `bool`, `float` or an enum.
   A value parameter is a value of its type in the body, and in an instance the constant it stands for; its name in a type position is `wrong-kind-of-name`.
   Nothing deduces a value parameter yet, so a call states it (CHK-340).
-  A type parameter in scope hides every type of its name, and one with a default or an attribute is `unsupported-yet`.
+  A parameter may have a default of its kind, `[T = float]` or `[n: int = 4]`, which may name a parameter before it, `[T, U = T]`.
+  A type parameter in scope hides every type of its name, and one with an attribute is `unsupported-yet`.
   It hides every other symbol of its name too, so its name as a value or before a dot is `wrong-kind-of-name`.
   A call of it, `T(x)`, is a call of what it stands for in each instance: `float(x)` where `T` is `float`.
   An entry point with type parameters is `wrong-kind-of-name`, since the GPU hands it values of known types.
 * **CHK-339** `struct name[A, n: int]:` declares a **generic struct**, over parameters its members may name, declared as a function's are (CHK-338) ([why](why/checking.md#chk-339)).
   `name[T, 4]` in a type position is an **instance**, and two mentions of one instance are one type.
   It takes one argument per parameter: a type for a type parameter, and for a value parameter one in scope or a constant.
-  That constant is an `int` literal or const for an `int` parameter, and a case for an enum one, `.add` among them.
+  That constant is a literal or a const of the parameter's type, `-1.5` and `2u` among them, and for an enum one a case, `.add` too.
+  Trailing parameters with a default may be left out, `box[int]` for `box[int, 2]`.
   Another count is `wrong-kind-of-name`, and an argument of the other kind `wrong-kind-of-name` or `invalid-constant-argument`.
   `T[n]` over an `int` value parameter is an array whose length each instance says; elsewhere a length is a constant (CHK-285).
   An instance's members are the template's with each argument for its parameter, and a function of the template's type scope serves every instance.
@@ -1533,7 +1535,9 @@ A call deduces what each parameter stands for, and inlining writes that in its p
   A function and a literal are bound last, since what they meet depends on the rest: a lambda takes the parameter types the call bound, and its result binds what they left.
   A number fits a set of types, so it binds nothing another argument bound, and must fit what that argument bound.
   A type parameter only numbers meet is bound to a type all of them fit: the one expected where the call stands, else `float` where one of them is written as a float, else the first one's type.
-  What is still unbound is bound from the type expected where the call stands (CHK-82); a type parameter nothing binds is `no-matching-overload`, whose detail names it.
+  What is still unbound is bound from the type expected where the call stands (CHK-82), then from its default in declaration order.
+  A type parameter nothing binds is `no-matching-overload`, whose detail names it.
+  A parameter only numbers meet takes its default before a number's own type, where every number there fits it: `f[T = float](x: T)` makes `f(1)` a float.
   Every instance an inlined body names exists before the first entry point is flattened.
 * **CHK-341** `undefined()` in the prelude is a value of the type of the parameter it meets, and binds no type parameter ([why](why/checking.md#chk-341)).
   It is a local declared and never assigned, which nobody may read: the interpreter reads it as zeroes, and a target reads what its local holds.
