@@ -18,4 +18,5 @@
 #include <babel-serializer/image/pfm.hh>
 #include <babel-serializer/image/png.hh>
 #include <babel-serializer/image/tga.hh>
+#include <babel-serializer/image/webp.hh>
 #include <babel-serializer/trace/chrome_trace.hh>

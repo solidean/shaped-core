@@ -32,7 +32,7 @@ Spin off a third only when a format arrives carrying a dependency nobody should 
 **The namespace never splits with the libraries**: `babel::json` is `babel::json` wherever it is linked from, and `fwd.hh` layers rather than forks.
 
 This library is at an **early stage**.
-A live SQLite handle, OBJ, STL, glTF/GLB and FBX readers, PNG/JPG/HDR/PFM image read+write, DDS/TGA image readers, and a Chrome Trace writer exist so far.
+A live SQLite handle, OBJ, STL, glTF/GLB and FBX readers, PNG/JPG/WebP/HDR/PFM image read+write, DDS/TGA image readers, and a Chrome Trace writer exist so far.
 babel-data carries the base64 codec, the JSON reader and writer, and the markdown block reader underneath them.
 See [docs/structure.md](docs/structure.md) for what is `[done]` vs `[planned]`.
 
@@ -59,7 +59,7 @@ Source lives in `src/babel-serializer/`, grouped by topic:
 | (root)      | `fwd.hh` (forward decls for the formats here, over babel-data's), `all.hh` (umbrella over both libraries) |
 | `data/`     | `sqlite` — a live SQLite handle (`database` / `statement` / `row`); base64, JSON and markdown live in [babel-data](../babel-data/readme.md) |
 | `geometry/` | `obj` — the Wavefront OBJ reader (`data` / `corner` / `face` / `group`, `read`); `stl` — the STL reader, both containers (`data`, `detect_container`, `read`); `gltf` — the glTF 2.0 / GLB reader (`data` + `accessor_view`, `read` over pinned bytes); `fbx` — the FBX reader over the vendored ufbx (`data`, `read`) |
-| `image/`    | `png` / `jpg` / `hdr` / `pfm` — low-level image codecs (pixels + native metadata, `read` / `encode` / `write`); `dds` / `tga` — low-level readers; `bcn` — the BCn block decoders; `image` — the "just the pixels" aggregator (`read` auto-detects, `encode` / `write` by format) |
+| `image/`    | `png` / `jpg` / `webp` / `hdr` / `pfm` — low-level image codecs (pixels + native metadata, `read` / `encode` / `write`); `dds` / `tga` — low-level readers; `bcn` — the BCn block decoders; `image` — the "just the pixels" aggregator (`read` auto-detects, `encode` / `write` by format) |
 | `trace/`    | `chrome_trace` — writes a `cc::rec::recording` as Chrome Trace Event JSON, for `chrome://tracing` and `ui.perfetto.dev` (`encode` / `write`) |
 
 `sqlite` deviates on purpose: SQLite is a live database *engine*, so it is a thin RAII wrapper over an open connection rather than a one-shot parser.
@@ -69,6 +69,7 @@ Its engine backend is fetched on demand and may be absent, so probe `is_availabl
 `image` is babel's first **writer** and first **committed** third-party backend.
 The per-format codecs read *and* write, exposing each format's own metadata; `image` sits on top for the plain-pixels case.
 `png` runs on the vendored **libspng** and reads and writes its ancillary chunks; `jpg` runs on the vendored **stb** and much of its metadata is still `[todo]`.
+`webp` runs on the vendored **libwebp**, a still image lossy or lossless, without the containers' metadata.
 Both are always in-tree and always linked — so no availability probe, unlike sqlite.
 `hdr` / `pfm` reach no backend at all: both formats are small enough to own outright, so they are fully native and complete.
 The sample type follows the format — `u8` for JPEG, `u8` or `u16` for PNG, `f32` for Radiance HDR and PFM — and the aggregator's `encode` rejects a mismatch rather than reinterpreting bytes.
@@ -91,7 +92,7 @@ uv run dev.py test              # build + run the full suite
 uv run dev.py test "sqlite -"   # just the SQLite tests while iterating
 uv run dev.py test "obj -"
 uv run dev.py test "gltf -"
-uv run dev.py test "image -"    # the aggregator; the codecs are "png -", "jpg -", "hdr -", "pfm -", "dds -", "tga -" and "bcn -"
+uv run dev.py test "image -"    # the aggregator; the codecs are "png -", "jpg -", "webp -", "hdr -", "pfm -", "dds -", "tga -" and "bcn -"
 ```
 
 See [building-and-testing](../../../docs/guides/building-and-testing.md) for the full workflow.

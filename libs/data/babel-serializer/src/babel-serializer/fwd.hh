@@ -246,6 +246,14 @@ struct read_options;
 CC_REC_DECLARE_DOMAIN(g_rec_domain);
 } // namespace babel::ktx2
 
+namespace babel::webp
+{
+struct data;
+
+/// The domain every recording site in babel::webp is attributed to.
+CC_REC_DECLARE_DOMAIN(g_rec_domain);
+} // namespace babel::webp
+
 namespace babel::tga
 {
 enum class image_type : u8;

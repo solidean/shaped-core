@@ -60,6 +60,11 @@ namespace babel::pfm
 CC_REC_DEFINE_DOMAIN(g_rec_domain, "babel.pfm");
 } // namespace babel::pfm
 
+namespace babel::webp
+{
+CC_REC_DEFINE_DOMAIN(g_rec_domain, "babel.webp");
+} // namespace babel::webp
+
 namespace babel::dds
 {
 CC_REC_DEFINE_DOMAIN(g_rec_domain, "babel.dds");

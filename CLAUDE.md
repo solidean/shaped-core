@@ -83,6 +83,7 @@ One-liner per library:
   FBX parses through the vendored ufbx and comes back as FBX's own object model, its axes and unit reported rather than applied.
   Also a PNG codec in `babel::png` over the vendored libspng and a JPEG one in `babel::jpg` over the vendored stb, plus fully native Radiance HDR and PFM in `babel::hdr` / `babel::pfm`,
   with the `babel::image` aggregator on top (`image/`) — `u8` samples for JPEG, `u8` or `u16` for PNG, `f32` for the last two.
+  `babel::webp` reads and writes still WebP, lossy or lossless, over the vendored libwebp, `u8` like JPEG.
   Native read-only DDS and TGA too: `babel::dds` hands back every mip, layer and cube face as views of the input, and `babel::bcn` decodes BC1 - BC7.
   `babel::ktx2` reads KTX 2.0 the same way, undoing zstd or zlib supercompression level by level, on a scheduler when given one.
   glTF decodes EXT_meshopt_compression over the vendored meshoptimizer decoders, and a caller registers its own extensions with hooks that decode bufferViews and accessors.
