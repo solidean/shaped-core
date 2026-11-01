@@ -863,3 +863,33 @@ TEST("sgl describe - an instance of a generic struct in GPU memory is named as t
     CHECK(d.memory_structs[0].name == "pair_float_int");
     CHECK(d.memory_structs[0].size == 8);
 }
+
+TEST("sgl describe - a module's ray set a pipeline names is described with the program's, as the module names it")
+{
+    // CHK-329: the host matches a pipeline's set to its description by name, so `rt.path_rays` is listed under it
+    sgl::library_file const library[] = {{.name = "rt.sgl",
+                                          .source = "module rt\n"
+                                                    "struct radiance:\n    color: float3\n"
+                                                    "rays path_rays:\n    surface: radiance\n"}};
+    constexpr auto source
+        = "require raytracing_pipeline\n"
+          "use rt\n"
+          "binding frame:\n    world: acceleration_structure[.triangles]\n    output: mut buffer[float4]\n"
+          "@raygen fun primary(@launch_id id: int3){frame}:\n"
+          "    let mut p = rt.radiance(float3(0.0, 0.0, 0.0))\n"
+          "    trace(frame.world, ray(origin = pos3(0.0, 0.0, 0.0), direction = vec3(0.0, 0.0, 1.0), t_min = 0.0, "
+          "t_max = 1.0), rt.path_rays.surface, mut p)\n"
+          "    frame.output[id.x] = float4(..p.color, 1.0)\n"
+          "@miss fun sky(p: mut rt.radiance):\n    p.color = float3(1.0, 1.0, 1.0)\n"
+          "@raytracing pipeline path:\n    rays = rt.path_rays\n    raygen = primary\n    miss.surface = sky\n"
+          "    hit_groups = (.host)\n    max_recursion_depth = 1\n";
+    auto const r = sgl::describe({.source = source, .library = library});
+    REQUIRE(r.has_value());
+    auto const& d = r.value();
+    REQUIRE(d.raytracing_pipelines.size() == 1);
+    CHECK(d.raytracing_pipelines[0].ray_set == "rt.path_rays");
+    REQUIRE(d.ray_sets.size() == 1);
+    CHECK(d.ray_sets[0].name == "rt.path_rays");
+    REQUIRE(d.ray_sets[0].rays.size() == 1);
+    CHECK(d.ray_sets[0].rays[0] == "surface");
+}

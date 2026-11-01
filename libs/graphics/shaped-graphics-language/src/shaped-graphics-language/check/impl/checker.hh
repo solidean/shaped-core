@@ -990,6 +990,8 @@ struct checker
     symbol_id ray_entry_named(i32 file, ast::expr_id value, stage wanted);
     /// The ray set `name` names, or `none` after a report.
     symbol_id ray_set_named(i32 file, source_span name);
+    /// The symbols a ray set's name finds: `set` as `file` sees it, or `m.set` of a module `file` uses (CHK-329).
+    [[nodiscard]] cc::vector<symbol_id> const* ray_set_candidates(i32 file, cc::string_view text) const;
     /// The payload an entry point of a ray-tracing stage takes, `none` for a raygen.
     [[nodiscard]] type_id payload_of(symbol_id entry) const;
     /// CHK-332: every ray-tracing pipeline's trace graph, once each entry point says what it traces.

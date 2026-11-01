@@ -14,11 +14,6 @@ use scene
 use slug
 use tracer
 
-/// The tracer's two rays, restated from module `tracer`, whose shading traces the shadow ray through its own.
-rays path_rays:
-    surface: tracer.surface_payload
-    occlusion: tracer.shadow_payload
-
 /// One sample's path, walked until it escapes, runs out of bounces or is absorbed — what `path_trace` does per sample.
 @raygen fun path_trace(@launch_id id: int3, @launch_size size: int3){tracer.traced, tracer.bindless, slug.tables}:
     let f = tracer.traced.frame[0]
@@ -74,7 +69,7 @@ rays path_rays:
         if guided:
             guide_hit.guide = 1u
             let gr = ray(origin = pos3(origin.x, origin.y, origin.z), direction = vec3(dir.x, dir.y, dir.z), t_min = 1e-3, t_max = 1e4)
-            trace(tracer.traced.world, gr, path_rays.surface, mut guide_hit)
+            trace(tracer.traced.world, gr, tracer.path_rays.surface, mut guide_hit)
 
         let mut throughput = float3(1.0)
         let mut radiance = float3(0.0)
@@ -108,7 +103,7 @@ rays path_rays:
             let last_bounce = if b + 1 >= f.max_bounces => 1u else 0u
             let mut p = tracer.surface_payload_for(rng, medium_sigma_t, medium_albedo, medium_g, channel, last_bounce)
             let r = ray(origin = pos3(origin.x, origin.y, origin.z), direction = vec3(dir.x, dir.y, dir.z), t_min = 1e-3, t_max = 1e4)
-            trace(tracer.traced.world, r, path_rays.surface, mut p)
+            trace(tracer.traced.world, r, tracer.path_rays.surface, mut p)
 
             // The random state comes back advanced by whatever the hit drew from it.
             rng = p.rng
@@ -425,10 +420,10 @@ fun component_of(v: float3, i: uint) -> float:
 @miss fun shadow_miss(p: mut tracer.shadow_payload){tracer.traced, tracer.bindless, slug.tables}:
     p.visible = 1.0
 
-/// The tracer: the raygen above, a miss per ray type in the order `path_rays` names them, and the host's hit groups.
+/// The tracer: the raygen above, a miss per ray type in the order `tracer.path_rays` names them, and the host's hit groups.
 /// Depth 2: the raygen's surface ray, and the shadow rays its closest hits trace for next-event estimation.
 @raytracing pipeline path:
-    rays = path_rays
+    rays = tracer.path_rays
     raygen = path_trace
     miss.surface = path_miss
     miss.occlusion = shadow_miss

@@ -637,9 +637,6 @@ constexpr auto raster_spelling = body_spelling{.explicit_level = false, .mark = 
 
     auto src = source_header(r, kind, "require raytracing_pipeline\n");
 
-    // Restated rather than named as `tracer.path_rays`, since a hit group names a set of its own file.
-    src += "rays path_rays:\n    surface: tracer.surface_payload\n    occlusion: tracer.shadow_payload\n\n";
-
     auto supplied_frame = cc::string();
     src += material_body(r, layout, supplied_frame, traced_spelling);
 
@@ -655,7 +652,7 @@ constexpr auto raster_spelling = body_spelling{.explicit_level = false, .mark = 
                           "    tracer.shade_quadric(h, mut p, sv_evaluate_material(ctx), {})\n\n",
                           supplied_frame);
         // The intersection is the whole row's, so a shadow ray meets the batch it traverses.
-        src += "hit_group sv_material for path_rays:\n"
+        src += "hit_group sv_material for tracer.path_rays:\n"
                "    geometry = .procedural\n"
                "    intersection = sv_intersection\n"
                "    surface = (closest_hit = sv_closest_hit)\n"
@@ -672,7 +669,7 @@ constexpr auto raster_spelling = body_spelling{.explicit_level = false, .mark = 
 
     if (!can_cut_out)
     {
-        src += "hit_group sv_material for path_rays:\n"
+        src += "hit_group sv_material for tracer.path_rays:\n"
                "    surface = (closest_hit = sv_closest_hit)\n"
                "    occlusion = ()\n";
         return src;
@@ -688,7 +685,7 @@ constexpr auto raster_spelling = body_spelling{.explicit_level = false, .mark = 
     src += "@any_hit fun sv_shadow_any_hit(c: triangle_candidate, p: mut tracer.shadow_payload){tracer.traced, "
            "tracer.bindless} -> hit_decision:\n"
            "    return tracer.cutout(c, p.seed, tracer.candidate_opacity(c))\n\n";
-    src += "hit_group sv_material for path_rays:\n"
+    src += "hit_group sv_material for tracer.path_rays:\n"
            "    surface = (closest_hit = sv_closest_hit, any_hit = sv_any_hit)\n"
            "    occlusion = (any_hit = sv_shadow_any_hit)\n";
     return src;

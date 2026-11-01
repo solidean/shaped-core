@@ -528,3 +528,33 @@ TEST("sgl check - an atomic in a decision an inline trace calls is refused as on
                            "    return true\n";
     CHECK(traced(plain, "bump()") == "");
 }
+
+TEST("sgl check - a module's ray set is named from another file, in a pipeline, a trace and a hit group")
+{
+    // CHK-329: `rt.path_rays` is the module's set wherever the file uses the module, as any of its names is
+    cc::string_view const library[] = {"module rt\n"
+                                       "struct radiance:\n    color: float3\n"
+                                       "rays path_rays:\n    surface: radiance\n"};
+    constexpr auto program = cc::string_view(
+        "require raytracing_pipeline\n"
+        "use rt\n"
+        "binding frame:\n    world: acceleration_structure[.triangles]\n    output: mut buffer[float4]\n"
+        "@raygen fun primary(@launch_id id: int3){frame}:\n"
+        "    let mut p = rt.radiance(float3(0.0, 0.0, 0.0))\n"
+        "    trace(frame.world, ray(origin = pos3(0.0, 0.0, 0.0), direction = vec3(0.0, 0.0, 1.0), t_min = 0.0, "
+        "t_max = 1.0), rt.path_rays.surface, mut p)\n"
+        "    frame.output[id.x] = float4(..p.color, 1.0)\n"
+        "@miss fun sky(p: mut rt.radiance):\n    p.color = float3(1.0, 1.0, 1.0)\n"
+        "@closest_hit fun shade(h: triangle_hit, p: mut rt.radiance):\n    p.color = h.barycentrics\n"
+        "hit_group textured for rt.path_rays:\n    surface = (closest_hit = shade)\n");
+    auto const pipeline = [](cc::string_view set)
+    {
+        return cc::format("@raytracing pipeline path:\n    rays = {}\n    raygen = primary\n    miss.surface = sky\n"
+                          "    hit_groups = (textured)\n",
+                          set);
+    };
+    CHECK(reports_with(library, cc::string(program) + pipeline("rt.path_rays")) == "");
+    // a name the module does not declare is unknown, as any of its names is
+    CHECK(reports_with(library, cc::string(program) + pipeline("rt.other_rays"))
+              .contains("unknown-name user:[rt.other_rays]"));
+}

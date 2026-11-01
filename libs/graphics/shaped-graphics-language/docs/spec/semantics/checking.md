@@ -1272,6 +1272,8 @@ HLSL writes them on dx12 and vulkan; WebGPU and Metal have neither, so WGSL and 
   It gives `void`, and is the target's trace with the ray type's position in its set as the ray contribution and the miss index, and the set's size as the multiplier.
   Its builtin is `@stages(.raygen, .closest_hit, .miss)`, so a trace from any other stage is `stage-not-allowed` (CHK-193).
   A test that reaches one is `unsupported-yet`, since a test runs no pipeline and has no tables to trace through.
+  A set a module declares is named `m.set` wherever the file uses the module: in a trace, `m.set.ray`, in a pipeline's `rays = m.set` and in `hit_group name for m.set:`.
+  The host's description lists such a set under that name beside the file's own (CHK-350).
 * **CHK-343** `callables name = (…)` is a **callables table**: `@callable` entry points of one parameter type, and `.host` last for the host's ([why](why/checking.md#chk-343)).
   A table lists at least one callable, a block of settings is none, and `.host` anywhere but last is `invalid-pipeline`.
   So is a callable of another parameter type, whose detail names both.

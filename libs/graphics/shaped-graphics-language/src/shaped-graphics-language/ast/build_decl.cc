@@ -598,7 +598,9 @@ decl_id builder::hit_group_declaration(statement_head const& head, keyword_parts
         {
             auto const tail_parts = keyword_parts_of(tail);
             if (tail_parts.keywords.size() == 1 && tail_parts.arguments.size() == 1
-                && is_kind(tail_parts.arguments[0], form_kind::identifier) && !is_valid(at(tail).next_sibling))
+                && (is_kind(tail_parts.arguments[0], form_kind::identifier)
+                    || is_kind(tail_parts.arguments[0], form_kind::member))
+                && !is_valid(at(tail).next_sibling))
             {
                 name = head_form;
                 set = at(tail_parts.arguments[0]).where;

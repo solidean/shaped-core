@@ -105,7 +105,7 @@ TEST("sv::generate_material_shader - constants come out of the parameter block")
 
     // No texture, so no palette sampler is named, and nothing cuts out, so there is no any hit.
     CHECK(!g.source.contains("palette_"));
-    CHECK(g.source.contains("hit_group sv_material for path_rays:"));
+    CHECK(g.source.contains("hit_group sv_material for tracer.path_rays:"));
     CHECK(!g.source.contains("any_hit"));
 
     // The layout the CPU fills is the one the source reads.
@@ -132,7 +132,7 @@ TEST("sv::generate_material_shader - an attribute-less type reads no parameter b
     CHECK(g.layout.slots.empty());
     CHECK(!g.source.contains("sv_attribute_"));
     CHECK(g.source.contains("    surface.base_color = float3(1.0, 0.0, 1.0)\n"));
-    CHECK(g.source.contains("hit_group sv_material for path_rays:"));
+    CHECK(g.source.contains("hit_group sv_material for tracer.path_rays:"));
 }
 
 TEST("sv::generate_material_shader - a mesh attribute is loaded through its descriptor")

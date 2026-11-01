@@ -364,7 +364,7 @@ cc::string name_or_empty(check::checked_module const& m, check::symbol_id id)
 described_hit_group describe_hit_group(check::checked_module const& m, check::pipeline_info const& p)
 {
     auto result = described_hit_group{.name = m.at(p.symbol).name,
-                                      .ray_set = m.at(p.ray_set).name,
+                                      .ray_set = m.qualified_name_of(p.ray_set),
                                       .is_procedural = p.is_procedural,
                                       .intersection = name_or_empty(m, p.intersection)};
     auto const records = m.at(p.records);
@@ -385,7 +385,7 @@ described_raytracing_pipeline describe_raytracing_pipeline(check::checked_module
                                                            cc::span<check::flat_entry_point const> legal)
 {
     auto result = described_raytracing_pipeline{.name = m.at(p.symbol).name,
-                                                .ray_set = m.at(p.ray_set).name,
+                                                .ray_set = m.qualified_name_of(p.ray_set),
                                                 .raygen = m.at(p.raygen).name,
                                                 .has_host_hit_groups = p.has_host_hit_groups,
                                                 .max_recursion_depth = p.max_recursion_depth,
@@ -904,15 +904,23 @@ cc::result<sgl::module_description, cc::string> sgl::describe(describe_request c
         else
             result.pipelines.push_back(describe_pipeline(m, p, legal));
     }
-    // every ray set of the program, a pipeline naming it or not
-    for (auto const& s : m.symbols)
-        if (s.kind == check::symbol_kind::structure && !is_module && s.file == front.program_file()
+    // every ray set of the program, a pipeline naming it or not, and every module's a pipeline or a hit group of the
+    // program names, as `m.set` (CHK-329)
+    auto named_sets = cc::vector<check::symbol_id>();
+    for (auto const& p : m.pipelines)
+        if (!is_module && m.at(p.symbol).file == front.program_file() && check::is_valid(p.ray_set))
+            named_sets.push_back(p.ray_set);
+    for (auto i = isize(0); i < m.symbols.size(); ++i)
+    {
+        auto const& s = m.symbols[i];
+        auto const is_named = named_sets.values().any([&](check::symbol_id n) { return n == check::symbol_id(i); });
+        if (s.kind == check::symbol_kind::structure && !is_module && (s.file == front.program_file() || is_named)
             && s.state == check::symbol_state::checked && ast::is_valid(s.declaration))
         {
             auto const* const d = front.asts[s.file]->at(s.declaration).node.try_as<ast::struct_decl>();
             if (d == nullptr || !d->is_ray_set)
                 continue;
-            auto set = described_ray_set{.name = s.name};
+            auto set = described_ray_set{.name = m.qualified_name_of(check::symbol_id(i))};
             for (auto const& ray : m.at(m.at(s.type).members))
             {
                 set.rays.push_back(ray.name);
@@ -922,6 +930,7 @@ cc::result<sgl::module_description, cc::string> sgl::describe(describe_request c
             }
             result.ray_sets.push_back(cc::move(set));
         }
+    }
 
     if (!errors.empty())
     {

@@ -144,10 +144,18 @@ cc::optional<ray_trace> checker::ray_type_of(i32 file, ast::expr_id expr)
     auto const* const member = ast_of(file).at(expr).node.try_as<ast::member>();
     if (member == nullptr || !ast::is_valid(member->object))
         return cc::nullopt;
-    auto const* const n = ast_of(file).at(member->object).node.try_as<ast::name>();
-    if (n == nullptr)
+    // `set.ray`, or `m.set.ray` for a set of a module the file uses
+    auto const& object = ast_of(file).at(member->object).node;
+    auto const* const n = object.try_as<ast::name>();
+    auto const* const qualified = object.try_as<ast::member>();
+    auto const* const module_name = qualified != nullptr && ast::is_valid(qualified->object)
+                                      ? ast_of(file).at(qualified->object).node.try_as<ast::name>()
+                                      : nullptr;
+    if (n == nullptr && module_name == nullptr)
         return cc::nullopt;
-    auto const* const found = seen_from(file, text_of(file, n->where));
+    if (module_name != nullptr && used_module(file, text_of(file, module_name->where)) < 0)
+        return cc::nullopt;
+    auto const* const found = ray_set_candidates(file, text_of(file, span_of(file, member->object)));
     if (found == nullptr || found->empty() || !is_ray_set(found->front()))
         return cc::nullopt;
     auto const set = found->front();
@@ -244,10 +252,21 @@ type_id checker::payload_of(symbol_id entry) const
     return type_id::none;
 }
 
+cc::vector<symbol_id> const* checker::ray_set_candidates(i32 file, cc::string_view text) const
+{
+    // CHK-329: `m.set` names a set module `m` declares, as any of its names is reached
+    if (auto const dot = text.find('.'); dot > 0)
+    {
+        auto const module = used_module(file, text.subview({.offset = 0, .size = dot}));
+        return module < 0 ? nullptr : module_scopes[module].get_ptr(text.subview(dot + 1));
+    }
+    return seen_from(file, text);
+}
+
 symbol_id checker::ray_set_named(i32 file, source_span name)
 {
     auto const text = text_of(file, name);
-    auto const* const found = seen_from(file, text);
+    auto const* const found = ray_set_candidates(file, text);
     if (found == nullptr || found->empty())
     {
         report(diagnostic_kind::unknown_name, file, name, text);
@@ -485,13 +504,14 @@ void checker::compile_raytracing_pipeline(symbol_id id)
         if (auto const* const n = ast::is_valid(s.path) ? ast.at(s.path).node.try_as<ast::name>() : nullptr;
             n != nullptr && text_of(file, n->where) == "rays")
         {
-            auto const* const value = ast.at(s.value).node.try_as<ast::name>();
+            auto const& value = ast.at(s.value).node;
             if (!is_first("rays", span_of(file, s.form)))
                 continue;
-            if (value == nullptr)
+            // a set of the file, or `m.set` of a module it uses
+            if (!value.is<ast::name>() && !value.is<ast::member>())
                 fail(span_of(file, s.form), "`rays` names a ray set");
             else
-                set = ray_set_named(file, value->where);
+                set = ray_set_named(file, span_of(file, s.value));
         }
     if (!is_valid(set))
     {
