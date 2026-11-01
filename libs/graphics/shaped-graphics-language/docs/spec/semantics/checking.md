@@ -1520,7 +1520,8 @@ A call deduces what each parameter stands for, and inlining writes that in its p
 * **CHK-340** A call of a generic function binds each type parameter from its arguments, then from where the call stands.
   A call may state generic arguments first, by position or by name as call arguments are: `f[float](x)`, `f[.B = int](x)`, `blur[3](c)`.
   Each is a type, or a constant `int`, `uint`, `bool` or `float` for a value parameter; two constants are one argument when their bits are, with every NaN one.
-  A candidate they do not fit is pruned before anything is deduced: one with fewer type parameters than positional arguments, none of a name given, or a parameter of the other kind or another value type.
+  A candidate they do not fit is pruned before anything is deduced: one with fewer type parameters than positional arguments, or none of a name given.
+  So is one where an argument meets a parameter of the other kind, or a value parameter of another type.
   An argument whose parameter's type names a type parameter binds it to the argument's type exactly.
   Two arguments that bind one parameter to two types leave the candidate unmatched, and the call is `no-matching-overload`.
   A function and a literal are bound last, since what they meet depends on the rest: a lambda takes the parameter types the call bound, and its result binds what they left.
