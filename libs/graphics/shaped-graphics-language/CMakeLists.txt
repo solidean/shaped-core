@@ -49,6 +49,7 @@ add_library(shaped-graphics-language
     src/shaped-graphics-language/builtins/registry.cc
 
     src/shaped-graphics-language/check/check.cc
+    src/shaped-graphics-language/check/check_driver.cc
     src/shaped-graphics-language/check/check_arrays.cc
     src/shaped-graphics-language/check/check_case.cc
     src/shaped-graphics-language/check/check_assignments.cc
@@ -56,6 +57,8 @@ add_library(shaped-graphics-language
     src/shaped-graphics-language/check/check_decl.cc
     src/shaped-graphics-language/check/check_pipeline.cc
     src/shaped-graphics-language/check/check_expr.cc
+    src/shaped-graphics-language/check/check_calls.cc
+    src/shaped-graphics-language/check/check_overloads.cc
     src/shaped-graphics-language/check/check_features.cc
     src/shaped-graphics-language/check/check_options.cc
     src/shaped-graphics-language/check/check_footprint.cc
@@ -72,6 +75,9 @@ add_library(shaped-graphics-language
     src/shaped-graphics-language/check/flat_builder.cc
     src/shaped-graphics-language/check/structural_hash.cc
     src/shaped-graphics-language/check/flatten.cc
+    src/shaped-graphics-language/check/flatten_expr.cc
+    src/shaped-graphics-language/check/flatten_call.cc
+    src/shaped-graphics-language/check/flatten_stmt.cc
     src/shaped-graphics-language/check/footprint.cc
 
     src/shaped-graphics-language/legalize/core.cc
