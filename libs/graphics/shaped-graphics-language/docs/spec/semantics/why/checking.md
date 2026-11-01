@@ -537,7 +537,7 @@ The first users are the prelude's traces, which carry an intersection's attribut
 
 A generic struct is the prelude's alone because the traces need exactly one shape of it, a hit or a report that carries the program's attributes.
 A user-declared one raises questions nothing has answered yet: methods that name the type parameter, several of them, and what a host sees of an instance.
-The [incubator](../../incubator/function-model.md) holds them.
+The [incubator](../../incubator/generics.md) answers them.
 
 ## CHK-341
 
