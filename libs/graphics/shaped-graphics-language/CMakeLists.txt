@@ -281,6 +281,12 @@ target_compile_features(shaped-graphics-language PUBLIC cxx_std_23)
 target_include_directories(shaped-graphics-language PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src")
 
 target_link_libraries(shaped-graphics-language PUBLIC clean-core)
+sc_declare_pch_tier(SGL EXTENDS CC_STD HEADERS
+    <shaped-graphics-language/check/checked_module.hh>
+    <shaped-graphics-language/check/check.hh>
+    <shaped-graphics-language/syntax/parsed_file.hh>
+    <shaped-graphics-language/emit/emit.hh>)
+sc_target_pch(shaped-graphics-language SGL)
 
 # Enable conforming preprocessor for MSVC
 target_compile_options(shaped-graphics-language PUBLIC $<$<CXX_COMPILER_ID:MSVC>:/Zc:preprocessor>)
@@ -312,6 +318,7 @@ if(SC_BUILD_TOOLS)
         tools/sgl/lsp/protocol/stdio_host.cc
     )
     target_link_libraries(sgl-lsp-protocol PUBLIC clean-core babel-data)
+    sc_target_pch(sgl-lsp-protocol CC_ALL) # babel-data's tier, since no SGL header may reach it
 
     add_executable(sgl
         tools/sgl/main.cc
@@ -349,6 +356,7 @@ if(SC_BUILD_TOOLS)
     endif()
     # babel-data writes `describe`'s JSON; the tool may take it, and the library must not.
     target_link_libraries(sgl PRIVATE shaped-graphics-language sgl-lsp-protocol babel-data nexus)
+    sc_target_pch(sgl SGL NEXUS)
     target_compile_definitions(sgl PRIVATE SGL_SAMPLES_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/samples"
         SGL_LSP_TEST_MODULES_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tools/sgl/lsp/tests/modules")
 endif()
@@ -470,6 +478,7 @@ if(SC_BUILD_TESTS)
         # what a test loads or writes beside SGL: a Chrome trace today, textures later
         babel-serializer
     )
+    sc_target_pch(shaped-graphics-language-test SGL NEXUS)
 
     # Browser test runner (Emscripten only); no-op natively.
     sc_add_nexus_web_runner(shaped-graphics-language-test)
