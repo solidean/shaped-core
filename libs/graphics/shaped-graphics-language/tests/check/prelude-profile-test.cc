@@ -95,17 +95,19 @@ TEST("sgl profile - checking a small program behind the prelude, sampled",
 
 // What every process pays once, before its first compile: parsing the prelude's files, building their ASTs, and
 // checking them.
-// The rounds time it cold each time, since `parsed_prelude()` and `checked_prelude()` keep the first result.
-// It samples the parse and the AST build, and prints where their time goes.
+// The rounds time it cold each time, since `parsed_prelude()` and `checked_prelude()` keep the first result, and the
+// fastest of them is what it reports, the one least disturbed by the rest of the machine.
+// It samples the parse and the AST build, prints where their time goes, and writes a Chrome trace of the samples to
+// CC_TRACE_OUT or the temp directory.
 TEST("sgl profile - parsing and checking the prelude itself",
      nx::config::manual,
      nx::config::exclusive(),
      nx::config::allow_logs(cc::rec::level::warning))
 {
-    auto const rounds = 10;
-    auto parse_secs = 0.0;
-    auto build_secs = 0.0;
-    auto check_secs = 0.0;
+    auto const rounds = 20;
+    auto parse_secs = 1e9;
+    auto build_secs = 1e9;
+    auto check_secs = 1e9;
     cc::rec::recording captured;
     {
         cc::rec::recording_listener capture;
@@ -122,15 +124,15 @@ TEST("sgl profile - parsing and checking the prelude itself",
                 auto const build_start = cc::current_time_steady_secs();
                 for (auto const& f : files)
                     asts.push_back(sgl::ast::build(f));
-                parse_secs += build_start - parse_start;
-                build_secs += cc::current_time_steady_secs() - build_start;
+                parse_secs = cc::min(parse_secs, build_start - parse_start);
+                build_secs = cc::min(build_secs, cc::current_time_steady_secs() - build_start);
             }
             auto const check_start = cc::current_time_steady_secs();
             auto modules = cc::vector<sgl::check::module_file>();
             for (auto j = sgl::isize(0); j < files.size(); ++j)
                 modules.push_back({.file = files[j], .ast = asts[j]});
             auto const checked = sgl::check::check_prelude(modules, sgl::builtins::default_registry());
-            check_secs += cc::current_time_steady_secs() - check_start;
+            check_secs = cc::min(check_secs, cc::current_time_steady_secs() - check_start);
             CHECK(checked.has_value());
         }
         cc::rec::flush_blocking();
@@ -141,9 +143,17 @@ TEST("sgl profile - parsing and checking the prelude itself",
     for (auto const& f : sgl::prelude_files())
         bytes += f.source.size();
     cc::println("prelude: {} bytes; parse {:.2f} ms ({:.0f} MB/s), AST build {:.2f} ms, check {:.2f} ms", bytes,
-                parse_secs * 1000 / rounds, double(bytes) * rounds / parse_secs / 1e6, build_secs * 1000 / rounds,
-                check_secs * 1000 / rounds);
+                parse_secs * 1000, double(bytes) / parse_secs / 1e6, build_secs * 1000, check_secs * 1000);
     auto const hot = cc::rec::hot_functions(captured);
     if (hot.sample_count > 0)
         cc::print("{}", hot.to_string(25));
+
+    auto const path = cc::environment_variable("CC_TRACE_OUT")
+                          .value_or(cc::format("{}/sgl-prelude-parse.trace.json", cc::temp_directory_path()));
+    auto opened = cc::file_write_stream_adapter::create(path);
+    REQUIRE(opened.has_value());
+    cc::write_stream stream = opened.value().stream();
+    REQUIRE(babel::chrome_trace::write(stream, captured).has_value());
+    REQUIRE(stream.flush().has_value());
+    cc::println("wrote {}", path);
 }
