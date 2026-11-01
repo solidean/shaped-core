@@ -288,8 +288,7 @@ cc::optional<candidate_match> checker::match(i32 file, symbol_id candidate, call
             // a leading dot names a case of the enum it meets, which a type parameter does not say
             if (!arguments.leading_dots[i].empty())
                 return cc::nullopt;
-            // a number binds the type it was checked as, since nothing asks it for another
-            if (arguments.functions[i] >= 0 || arguments.literals[i] >= 0)
+            if (arguments.functions[i] >= 0 || arguments.literals[i] >= 0 || arguments.numbers[i].is_number)
                 deferred.push_back(p);
             else if (out.at(range)[p].is_mut
                          != (arguments.written[i].is_mut || (arguments.written[i].may_be_mut && out.at(range)[p].is_mut))
@@ -304,6 +303,37 @@ cc::optional<candidate_match> checker::match(i32 file, symbol_id candidate, call
         if (length.value() > 0 && arguments.numbers[i].is_number && takes_literal_at_default)
             return cc::nullopt;
         result.chains[i] = length.value();
+    }
+    // CHK-340: a number fits a set of types, so a type parameter only numbers meet is bound to one all of them fit:
+    // the type expected where the call stands, else a float where one of them is written as a float, else the first's
+    for (auto const p : deferred)
+    {
+        auto const i = result.slots[p];
+        auto const parameter = out.at(range)[p].type;
+        if (!arguments.numbers[i].is_number || out.at(parameter).kind != type_kind::type_parameter)
+            continue;
+        auto is_bound = false;
+        for (auto k = isize(0); k + 1 < result.bindings.size(); k += 2)
+            is_bound = is_bound || result.bindings[k] == parameter;
+        if (is_bound)
+            continue;
+        auto to = type_id::none;
+        if (is_valid(expected_result) && expected_result != error_type)
+        {
+            auto trial = result.bindings;
+            if (unify(out.functions[out.at(candidate).info].result, expected_result, trial))
+                for (auto k = isize(0); k + 1 < trial.size(); k += 2)
+                    if (trial[k] == parameter)
+                        to = trial[k + 1];
+        }
+        for (auto const q : deferred)
+            if (auto const j = result.slots[q]; !is_valid(to) && out.at(range)[q].type == parameter
+                                                && arguments.numbers[j].is_number && !arguments.numbers[j].is_integer)
+                to = arguments.types[j];
+        if (!is_valid(to))
+            to = arguments.types[i];
+        result.bindings.push_back(parameter);
+        result.bindings.push_back(to);
     }
     for (auto const p : deferred)
     {

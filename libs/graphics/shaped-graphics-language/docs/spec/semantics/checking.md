@@ -1515,9 +1515,11 @@ A call deduces what each parameter stands for, and inlining writes that in its p
   Such a function is generic over `A`, which its signature and its body may name as their own type parameter: `fun mixed_hit.procedural(self) -> procedural_hit[A]`.
   The bare name in a type position is the template itself, open in its parameter, which a call deduces as it deduces a type parameter.
 * **CHK-340** A call of a generic function binds each type parameter from its arguments, then from where the call stands.
-  An argument whose parameter's type names a type parameter binds it to the argument's type exactly, and a number to the type it was checked as.
+  An argument whose parameter's type names a type parameter binds it to the argument's type exactly.
   Two arguments that bind one parameter to two types leave the candidate unmatched, and the call is `no-matching-overload`.
   A function and a literal are bound last, since what they meet depends on the rest: a lambda takes the parameter types the call bound, and its result binds what they left.
+  A number fits a set of types, so it binds nothing another argument bound, and must fit what that argument bound.
+  A type parameter only numbers meet is bound to a type all of them fit: the one expected where the call stands, else `float` where one of them is written as a float, else the first one's type.
   What is still unbound is bound from the type expected where the call stands (CHK-82); a type parameter nothing binds is `no-matching-overload`, whose detail names it.
   Every instance an inlined body names exists before the first entry point is flattened.
 * **CHK-341** `undefined()` in the prelude is a value of the type of the parameter it meets, and binds no type parameter ([why](why/checking.md#chk-341)).

@@ -1,4 +1,4 @@
-// a type parameter is opaque: a value of it is handed on, stored and returned, and a call says what it stands for
+// a call says what each type parameter stands for, from its arguments and from where it stands
 
 fun first[A](a: A, b: A) -> A => a
 
@@ -24,10 +24,17 @@ test:
     let p = apply(pair_of_floats(1.0, 2.0), swap)
     p.a == 2.0
 
-// two arguments that disagree bind nothing
+// a number fits a set of types: numbers alone take a float where one is written as a float, and the expected type
+// where the call stands one
+test:
+    first(1, 2.5) == 1.0
+    let h: half = first(1, 2)
+    h == half(1.0)
+
+// a number that does not fit what the other arguments bound binds nothing
 @expect(error = "no-matching-overload")
 test:
-    first(1, 2.5) == 1
+    first(true, 2) == true
 
 // a function with a mut parameter is no function value, whether the parameter it meets is generic or not
 fun bumped(x: mut int) -> int:
