@@ -487,7 +487,8 @@ fun apply(f: (float) -> float, x: float) -> float => f(x)   // a function type: 
 apply(halve, 3.0)                        // a function's name, whose signature is the type's exactly
 apply(x => x * k, 2.0)                   // an arrow lambda, seeing `k`; inlined where `f` is called (CHK-319)
 
-fun twice[A](x: A, f: (A) -> A) -> A => f(f(x))   // A is opaque: handed on, stored, returned (CHK-338)
+fun twice[A](x: A, f: (A) -> A) -> A => f(f(x))   // the body is checked per instance, its names where written (CHK-338)
+fun sum[T](a: T, b: T) => a + b          // so a body may use what each argument type has; a test that calls it checks it
 twice(3, x => x + 1)                     // A deduced from arguments, a lambda's result, or where the call stands (CHK-340)
 ```
 

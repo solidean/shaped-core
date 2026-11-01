@@ -364,6 +364,46 @@ source_span checker::span_of(i32 file, ast::stmt_id stmt) const
 
 located_diagnostic& checker::report(diagnostic_kind kind, i32 file, source_span where, cc::string detail)
 {
+    auto const is_error = default_severity_of(kind) != severity::warning;
+    // CHK-338: a generic body with its type parameters open is judged for its names alone
+    if (generic_passes > 0 && kind != diagnostic_kind::unknown_name && kind != diagnostic_kind::wrong_kind_of_name)
+    {
+        dropped = {};
+        return dropped;
+    }
+    if (is_error)
+        ++error_events;
+    if (!instantiating.empty())
+    {
+        // the same error from another instantiation is reported once, under the instantiation that found it first
+        for (auto& d : out.diagnostics)
+            if (d.what.kind == kind && d.file == file && d.what.where == where && d.detail == detail)
+                return d;
+        auto& d = out.diagnostics.push_back({
+            .what = {.kind = kind, .level = default_severity_of(kind), .where = where},
+            .file = file,
+            .detail = cc::move(detail),
+        });
+        for (auto i = instantiating.size(); i > 0; --i)
+        {
+            auto const& at = instantiating[i - 1];
+            auto const& instance = out.function_instances[at.instance];
+            auto const& info = out.functions[out.at(instance.function).info];
+            auto arguments = cc::string();
+            for (auto const parameter : out.at(info.type_parameters))
+            {
+                auto const pairs = out.at(instance.bindings);
+                for (auto k = isize(0); k + 1 < pairs.size(); k += 2)
+                    if (pairs[k] == parameter)
+                        arguments.appendf("{}{}", arguments.empty() ? "" : ", ", out.name_of(pairs[k + 1]));
+            }
+            d.notes.push_back(
+                {.file = at.file,
+                 .where = at.where,
+                 .message = cc::format("in {}[{}], instantiated here", out.at(instance.function).name, arguments)});
+        }
+        return d;
+    }
     out.diagnostics.push_back({
         .what = {.kind = kind, .level = default_severity_of(kind), .where = where},
         .file = file,
@@ -490,12 +530,58 @@ void checker::judge_attributes(i32 file,
 
 void checker::set_type(i32 file, ast::expr_id expr, type_id type)
 {
-    if (ast::is_valid(expr))
+    if (!ast::is_valid(expr))
+        return;
+    if (current_instance >= 0 && file == out.at(out.function_instances[current_instance].function).file)
+        out.function_instances.own(current_instance).tables.type_of[own_slot(expr)] = type;
+    else
         out.files.own(file).type_of[ast::index_of(expr)] = type;
 }
 
 void checker::set_target(i32 file, ast::expr_id expr, target where)
 {
-    if (ast::is_valid(expr))
+    if (!ast::is_valid(expr))
+        return;
+    if (current_instance >= 0 && file == out.at(out.function_instances[current_instance].function).file)
+        out.function_instances.own(current_instance).tables.target_of[own_slot(expr)] = where;
+    else
         out.files.own(file).target_of[ast::index_of(expr)] = where;
+}
+
+table_view checker::tables_of(i32 file) const
+{
+    auto const is_own = current_instance >= 0 && file == out.at(out.function_instances[current_instance].function).file;
+    return {.module = &out, .file = file, .instance = is_own ? current_instance : -1};
+}
+
+isize checker::own_slot(ast::expr_id expr)
+{
+    auto& instance = out.function_instances.own(current_instance);
+    auto& t = instance.tables;
+    auto const index = isize(ast::index_of(expr));
+    if (t.type_of.empty())
+        instance.first = i32(index);
+    // grows to the front as well, since a body need not write its first expression first
+    if (index < instance.first)
+    {
+        auto const grow = instance.first - index;
+        auto grown = file_tables{
+            .type_of = cc::vector<type_id>::create_filled(grow, type_id::none),
+            .target_of = cc::vector<target>::create_filled(grow, target{}),
+            .call_of = cc::vector<i32>::create_filled(grow, -2),
+        };
+        grown.type_of.push_back_range(t.type_of);
+        grown.target_of.push_back_range(t.target_of);
+        grown.call_of.push_back_range(t.call_of);
+        t = cc::move(grown);
+        instance.first = i32(index);
+    }
+    auto const slot = index - instance.first;
+    while (t.type_of.size() <= slot)
+    {
+        t.type_of.push_back(type_id::none);
+        t.target_of.push_back(target{});
+        t.call_of.push_back(-2);
+    }
+    return slot;
 }

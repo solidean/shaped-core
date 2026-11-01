@@ -124,7 +124,8 @@ Each term links to the rule that defines it.
 | **setting** | one `name = value` line of a `sampler` block (AST-76), or one `path = value` line of a `pipeline` or `hit_group` block (AST-131, AST-150) |
 | **mut parameter** | a parameter `p: mut T` over a value type: the caller's place, handed over as `mut x` (CHK-315, CHK-316) |
 | **function type** | `(A, B) -> R`, the type of a parameter and of nothing else (CHK-317) |
-| **type parameter** | `A` of `fun f[A](…)` or `struct name[A]:`, opaque where it is declared and deduced at a call (CHK-338, CHK-340) |
+| **type parameter** | `A` of `fun f[A](…)` or `struct name[A]:`, deduced at a call, whose body is checked again for what it stands for (CHK-338, CHK-340) |
+| **instance** | a generic function's body checked for one list of arguments, or a generic struct with its argument (CHK-338, CHK-339) |
 | **generic struct** | a struct over a type parameter, which only the prelude declares; `name[T]` is an **instance** of it (CHK-339) |
 | **swizzle** | `v.zyx`: several fields of a `@swizzle` struct read at once, as a plain vector, and a place where its letters are distinct (CHK-385, CHK-352) |
 | **plain vector families** | `float2` to `float4`, `int2` to `int4`, `uint2` to `uint4` and the 16-bit vectors, whose arithmetic is componentwise ([checking](semantics/checking.md#vectors)) |

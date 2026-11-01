@@ -2,8 +2,9 @@
 
 *Incubator: not normative.*
 
-What is specified today: type parameters that are opaque in the body, deduced at the call, and generic structs that only the prelude declares ([CHK-338 to CHK-341](../semantics/checking.md#generics)).
-This file is the design that replaces the opaque rule and generalizes the parameters.
+What is specified today ([CHK-338 to CHK-341](../semantics/checking.md#generics)): type parameters deduced at the call, and generic structs that only the prelude declares.
+A generic body is checked per instance already, with its names resolved where it is written.
+This file is the design that generalizes the parameters and the deduction.
 
 ## The idea
 
@@ -85,7 +86,6 @@ let s = ring(items = (1, 2), head = 0)   // n = 2, T = int, deduced from the fie
 ## What it touches
 
 * The check pass:
-  * CHK-338's opaque type parameter becomes a check per instantiation.
   * CHK-340's deduction becomes the per-argument merge.
   * CHK-78's refusal of stated type arguments goes.
   * CHK-339 opens to the program, to several parameters and to value parameters.

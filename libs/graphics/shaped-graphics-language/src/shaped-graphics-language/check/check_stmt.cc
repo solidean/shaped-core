@@ -273,7 +273,7 @@ bool checker::judge_place(function_scope& scope, ast::expr_id expr, cc::string_v
 
     auto const is_image_texel = [&](ast::index const& indexed)
     {
-        auto const object = out.files[file].type_at(indexed.object);
+        auto const object = tables_of(file).type_at(indexed.object);
         return object != type_id::none && out.at(object).kind == type_kind::image;
     };
     // CHK-367: a texel is stored whole by an assignment, so neither a member of one nor a call writes through it
@@ -303,11 +303,11 @@ bool checker::judge_place(function_scope& scope, ast::expr_id expr, cc::string_v
         auto const* const m = ast.at(operand).node.try_as<ast::member>();
         if (m == nullptr)
             break;
-        auto const& t = out.files[file].target_at(operand);
+        auto const& t = tables_of(file).target_at(operand);
         auto const is_swizzle = t.kind == target_kind::swizzle;
         if (!is_swizzle
             && (t.kind != target_kind::field || !ast::is_valid(m->object)
-                || out.files[file].target_at(m->object).kind != target_kind::swizzle))
+                || tables_of(file).target_at(m->object).kind != target_kind::swizzle))
             break;
         if (is_swizzle && swizzle::unpacked(t.index).has_repeats())
             return refuse(span_of(file, expr), cc::format("{} names a field twice, and a swizzle that does is no place",
@@ -330,7 +330,7 @@ bool checker::judge_place(function_scope& scope, ast::expr_id expr, cc::string_v
     // An array element is part of the local that holds it, and a buffer element is a place of its own.
     auto const kind_of_object = [&](ast::index const& indexed)
     {
-        auto const object = out.files[file].type_at(indexed.object);
+        auto const object = tables_of(file).type_at(indexed.object);
         return object != type_id::none ? out.at(object).kind : type_kind::error;
     };
 
@@ -340,7 +340,7 @@ bool checker::judge_place(function_scope& scope, ast::expr_id expr, cc::string_v
         indexed = nullptr;
     if (indexed != nullptr)
     {
-        auto const object = out.files[file].type_at(indexed->object);
+        auto const object = tables_of(file).type_at(indexed->object);
         // What it is when it is no buffer at all was reported by `check_index`.
         if (object != type_id::none && out.at(object).kind == type_kind::buffer && !out.at(object).is_mut)
             return refuse(span_of(file, expr), "this buffer is read-only; `mut buffer[T]` declares one a shader "
@@ -363,13 +363,13 @@ bool checker::judge_place(function_scope& scope, ast::expr_id expr, cc::string_v
         }
         if (!node.is<ast::member>())
             break;
-        auto const kind = out.files[file].target_at(root).kind;
+        auto const kind = tables_of(file).target_at(root).kind;
         if ((kind == target_kind::overload || kind == target_kind::array_length) && !ast::is_valid(property))
             property = root;
         root = node.as<ast::member>().object;
     }
     if (ast::is_valid(property))
-        return refuse(span_of(file, expr), out.files[file].target_at(property).kind == target_kind::array_length
+        return refuse(span_of(file, expr), tables_of(file).target_at(property).kind == target_kind::array_length
                                                ? cc::string("an array's length is part of its type, and never assigned")
                                                : cc::format("{} is a property, which is read-only",
                                                             text_of(file, ast.at(property).node.as<ast::member>().name)));
@@ -377,7 +377,7 @@ bool checker::judge_place(function_scope& scope, ast::expr_id expr, cc::string_v
         return true;
 
     auto const* const n = ast.at(root).node.try_as<ast::name>();
-    auto const& named = out.files[file].target_at(root);
+    auto const& named = tables_of(file).target_at(root);
     auto const* local = static_cast<local_name const*>(nullptr);
     for (auto const& l : scope.locals)
         if (n != nullptr && l.where == named)

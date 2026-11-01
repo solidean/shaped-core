@@ -139,8 +139,9 @@ A rule that looked at the condition would make a program's validity depend on wh
 ## CHK-129
 
 The language's model was that a body is checked where it is inlined, since a generic has no types before that.
-Generics arrived the other way: a type parameter is opaque, so a generic body means the same at every call too, and is checked once (CHK-338).
+A function that is not generic means the same at every call, so its body is checked once.
 Checking once is what reports an error in a function nobody calls, and what reports it one time where three calls would report it three times.
+A generic body is checked per instance (CHK-338), and keeps both properties as far as it can: its names are checked where it is written, and an error is reported once.
 
 ## CHK-131
 
@@ -528,10 +529,13 @@ True recursion is the [incubator's](../../incubator/raytracing-futures.md).
 
 ## CHK-338
 
-A type parameter is opaque, so a generic body is checked once, over it, and an error in it is reported where it is written, whatever the calls.
-The alternative, checking the body per instantiation as C++ does, reports an error at a call its author may not own, and reports it once per call.
-Bounds would let a body ask more of `A`; nothing needed them yet, so a body may only hand a value of it on.
-The first users are the prelude's traces, which carry an intersection's attributes of whatever type the program reports.
+Every call inlines, so an instance costs a check and nothing at run time, and a shader holds no data structure complex enough to repay type classes or bounds.
+So a generic body is checked per instance, and may do with a value of `A` whatever the arguments allow.
+What C++ templates get wrong with that is kept out by two rules.
+A name resolves where the body is written, so what is visible at a call never changes what the body means.
+An error is reported at its line in the body, under the instantiations that reached it, and once however many instances repeat it.
+A generic that nothing instantiates would otherwise go unchecked, which the warning says; a `test` that calls it is how its author checks it with chosen arguments.
+The checked once, opaque rule this replaces let a body only hand a value of `A` on, which was enough for the prelude's traces and for nothing a program would write.
 
 ## CHK-339
 

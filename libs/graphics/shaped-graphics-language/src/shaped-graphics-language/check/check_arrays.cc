@@ -110,7 +110,7 @@ cc::optional<i32> checker::constant_index(i32 file, ast::expr_id expr) const
     // the name already checked, so what it names is known, and a local that hides a `const` is no constant
     if (!e.node.is<ast::name>())
         return {};
-    auto const& where = out.files[file].target_at(expr);
+    auto const& where = tables_of(file).target_at(expr);
     if (where.kind != target_kind::symbol || out.at(where.symbol).kind != symbol_kind::constant
         || out.at(where.symbol).state != symbol_state::checked)
         return {};
@@ -130,7 +130,7 @@ cc::optional<i64> checker::constant_unsigned_index(i32 file, ast::expr_id expr) 
     }
     if (!e.node.is<ast::name>())
         return {};
-    auto const& where = out.files[file].target_at(expr);
+    auto const& where = tables_of(file).target_at(expr);
     if (where.kind != target_kind::symbol || out.at(where.symbol).kind != symbol_kind::constant
         || out.at(where.symbol).state != symbol_state::checked)
         return {};

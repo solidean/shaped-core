@@ -1493,11 +1493,17 @@ fun grade(x: float) -> float:
 
 ## Generics
 
-A type parameter is opaque where it is declared, so a generic body is checked once, over it.
+A generic body is checked again for each list of arguments a call binds, and its names mean what they mean where it is written.
 A call deduces what each parameter stands for, and inlining writes that in its place, so no emitter meets one.
 
-* **CHK-338** `fun f[A, B](…)` declares type parameters, which its signature and its body may name and know nothing of ([why](why/checking.md#chk-338)).
-  A value of one is handed on, stored and returned, and nothing else: no field, no operator and no call but one whose parameter is of that type parameter too.
+* **CHK-338** `fun f[A, B](…)` declares type parameters, which its signature and its body may name ([why](why/checking.md#chk-338)).
+  The body is checked once with them open, and there only its names are judged: `unknown-name` and `wrong-kind-of-name` are reported, and nothing else.
+  A call that binds every one of them to a closed type checks the body again with what they stand for, which is an **instance**; one list of arguments is one instance.
+  A name in an instance means what it meant where the body is written; only its types and the overloads it calls follow the arguments.
+  An error an instance finds is reported at its line in the body, with a note for each instantiation that reached it, `in f[int], instantiated here`.
+  The same error found by another instance is reported once.
+  An inferred result (CHK-122) is each instance's own.
+  A generic function of the program that nothing instantiates is the warning `generic-not-instantiated`, since only its names were checked.
   A type parameter in scope hides every type of its name, and one with a bound, a default or an attribute is `unsupported-yet`.
   It hides every other symbol of its name too, so its name as a value, as a callee or before a dot is `wrong-kind-of-name`.
   An entry point with type parameters is `wrong-kind-of-name`, since the GPU hands it values of known types.
@@ -1550,7 +1556,7 @@ fun make_mvp(model: mat4){frame} => frame.proj * frame.view * model
 ## Diagnostic kinds
 
 Every kind below is a normal error by [DIAG-4](../syntax/diagnostics.md#rules), except some warnings.
-They are `unreachable-code`, `no-effect`, `unused-require`, `needless-nonuniform` and `unroll-too-long`.
+They are `unreachable-code`, `no-effect`, `unused-require`, `needless-nonuniform`, `unroll-too-long` and `generic-not-instantiated`.
 A diagnostic of this pass has a kind, a file, a byte span in that file, and a detail.
 
 | kind | reported by |
@@ -1588,6 +1594,7 @@ A diagnostic of this pass has a kind, a file, a byte span in that file, and a de
 | `unknown-feature` | CHK-258 |
 | `feature-not-declared` | CHK-264, CHK-322, CHK-382 |
 | `unused-require` | CHK-265 |
+| `generic-not-instantiated` | CHK-338 |
 | `stage-not-allowed` | CHK-193, CHK-277, CHK-298, CHK-329, CHK-344 |
 | `ambiguous-overload` | CHK-72 |
 | `missing-field`, `unknown-field`, `duplicate-field` | CHK-178 |

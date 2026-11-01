@@ -513,13 +513,17 @@ auto sgl::check::impl::flattener::inline_bound(ast::expr_id call,
         }
     }
 
+    // CHK-338: an instance's body was checked with these bindings, and an inferred result is the instance's
+    auto const instance = c.existing_function_instance(callee, bindings);
+    auto const result = instance >= 0 ? c.out.function_instances[instance].result : info.result;
     frames.push_back({.function = callee,
                       .file = s.file,
-                      .result = info.result,
+                      .result = result,
                       .return_label = label,
                       .chain = chain_range,
                       .bound = cc::move(bound),
-                      .bindings = cc::move(bindings)});
+                      .bindings = cc::move(bindings),
+                      .instance = instance});
     // `self`, the first parameter of a method or a property, is the receiver its body and its defaults read
     auto const has_receiver = s.role == function_role::property
                            || (s.role == function_role::method && function->receiver == ast::receiver_kind::self);
@@ -541,7 +545,7 @@ auto sgl::check::impl::flattener::inline_bound(ast::expr_id call,
     if (property != nullptr && !ast::is_valid(source->value))
         current()->value_blocks.push_back(label);
     // an arrow body of no value is a statement, such as `=> img.store(xy, v)`, which a leave would drop
-    if (ast::is_valid(source->value) && info.result == checked_module::void_type)
+    if (ast::is_valid(source->value) && result == checked_module::void_type)
         flatten_expr_stmt({.file = s.file, .expr = source->value}, source->value);
     else if (ast::is_valid(source->value))
         flatten_return({.file = s.file, .expr = source->value}, source->value);

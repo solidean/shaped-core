@@ -68,6 +68,7 @@ void checker::run(resume_point from)
     // Last, since a test in a function body is found while that body is checked (CHK-224).
     for (auto i = from.tests; i < out.tests.size(); ++i)
         check_test(i32(i));
+    warn_uninstantiated_generics(from.symbols);
 
     judge_wide_literals(from.wide_literals);
     find_recursion(from.symbols);

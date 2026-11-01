@@ -647,7 +647,7 @@ type_id checker::resolve_literal(function_scope& scope, ast::expr_id expr, type_
     if (result != error_type && result != to)
         report(diagnostic_kind::literal_conversion_result, file, where,
                cc::format("this literal converts by {}, which returns {} and not {}",
-                          out.at(out.files[file].target_at(expr).symbol).name, out.name_of(result), out.name_of(to)));
+                          out.at(tables_of(file).target_at(expr).symbol).name, out.name_of(result), out.name_of(to)));
     return result == error_type ? error_type : to;
 }
 
@@ -755,7 +755,7 @@ void checker::judge_wide_literals(isize first)
     for (auto i = first; i < wide_literals.size(); ++i)
     {
         auto const w = wide_literals[i];
-        auto const type = out.files[w.file].type_at(w.expr);
+        auto const type = table_view{.module = &out, .file = w.file, .instance = w.instance}.type_at(w.expr);
         if (!is_valid(type) || type == error_type || holds(number_of(w.file, w.expr), type))
             continue;
         auto const where = span_of(w.file, w.expr);
@@ -806,7 +806,12 @@ type_id checker::deduce_result(function_scope const& scope, ast::expr_id id, sym
             return error_type;
         }
     }
-    return substitute(info.result, bindings);
+    // CHK-338: the callee's body is checked with what this call binds, and an inferred result is that instance's
+    auto const result = substitute(info.result, bindings);
+    auto const instance = instantiate(callee, bindings, scope.file, span_of(scope.file, id));
+    if (instance >= 0 && notes[out.at(callee).info].infers_result)
+        return out.function_instances[instance].result;
+    return result;
 }
 
 void checker::record_call(i32 file,
@@ -830,7 +835,10 @@ void checker::record_call(i32 file,
     }
     auto const slot_range = ast::range_of<i32>{.first = u32(out.call_slots.size()), .count = u32(slots.size())};
     out.call_slots.push_back_range(slots);
-    out.files.own(file).call_of[ast::index_of(id)] = i32(out.call_records.size());
+    if (current_instance >= 0 && file == out.at(out.function_instances[current_instance].function).file)
+        out.function_instances.own(current_instance).tables.call_of[own_slot(id)] = i32(out.call_records.size());
+    else
+        out.files.own(file).call_of[ast::index_of(id)] = i32(out.call_records.size());
     out.call_records.push_back({.callee = callee,
                                 .written = written,
                                 .slots = slot_range,
@@ -913,7 +921,7 @@ type_id checker::check_chain(function_scope& scope, ast::expr_id id, ast::compar
         ast::expr_id const both[] = {i == 0 ? operands[0] : ast::expr_id::none, operands[i + 1]};
         auto const chosen = resolve_operator(file, where, spelling, pair, both);
         if (is_valid(chosen) && ast::is_valid(operands[i + 1]))
-            types[i + 1] = out.files[file].type_at(operands[i + 1]);
+            types[i + 1] = tables_of(file).type_at(operands[i + 1]);
         if (is_valid(chosen) && out.functions[out.at(chosen).info].result != bool_type && bool_type != error_type)
             report(diagnostic_kind::type_mismatch, file, where,
                    cc::format("a comparison in a chain is a bool, and operator {} gives {}", spelling,

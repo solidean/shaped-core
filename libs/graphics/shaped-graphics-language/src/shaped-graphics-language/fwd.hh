@@ -246,6 +246,8 @@ struct callable_call;
 struct texel_store;
 struct flat_traced_ray;
 struct call_record;
+struct function_instance;
+struct table_view;
 enum class miss_reason : u8;
 struct near_miss;
 struct file_tables;

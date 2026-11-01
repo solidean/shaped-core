@@ -222,11 +222,27 @@ TEST("sgl check - a function needs a body unless it is @builtin")
     CHECK(reports_for("fun f(x: float) -> float\n") == "expected-body user:[f] f\n");
 }
 
-TEST("sgl check - a type parameter is opaque, and a call says what it stands for")
+TEST("sgl check - a generic body is checked per instantiation, and its names where it is written")
 {
-    // CHK-338: what a body does with a value of a type parameter is hand it on, store it and return it
-    CHECK(reports_for("fun id[T](x: T) -> T => x\n") == "");
-    CHECK(reports_for("fun twice[T](x: T) -> T => x + x\n").starts_with("no-matching-overload user:[x + x]"));
+    // CHK-338: a body may do with a value of a type parameter whatever each instantiation's arguments allow
+    CHECK(reports_for("fun twice[T](x: T) -> T => x + x\nfun f() -> int => twice(2)\nfun g() -> float => twice(1.5)\n")
+          == "");
+    CHECK(reports_for("fun twice[T](x: T) => x + x\nfun f() -> int => twice(2)\n") == "");
+    // nothing instantiates it, so only its names are checked, and a warning says so
+    CHECK(reports_for("fun twice[T](x: T) -> T => x + x\n")
+          == "generic-not-instantiated user:[twice] nothing instantiates twice, so only its names are checked\n");
+    CHECK(reports_for("fun twice[T](x: T) -> T => x + nope\nfun f() -> int => twice(2)\n")
+              .starts_with("unknown-name user:[nope]"));
+    // an error is reported where the body says it, under the instantiation that reached it
+    auto const negated = reports_for("fun negated[T](x: T) -> T => not x\nfun f() -> int => negated(2)\n");
+    CHECK(negated.starts_with("no-matching-overload user:[not x]"));
+    CHECK(negated.contains("  note user:[negated(2)] in negated[int], instantiated here\n"));
+    // the same error from two instantiations is reported once
+    auto const twice_wrong
+        = reports_for("fun wrong[T](x: T) -> T:\n    let k: int = 1.5\n    return x\nfun f() -> int => wrong(1)\n"
+                      "fun g() -> float => wrong(1.5)\n");
+    CHECK(twice_wrong.starts_with("literal-not-representable user:[1.5]"));
+    CHECK(!cc::string_view(twice_wrong).subview(1).contains("literal-not-representable"));
     // CHK-340: a type parameter the arguments leave open is said by where the call stands, or the call is an error.
     // Only the prelude has a value of an open type to give, `undefined()`, so `pick` stands in a prelude file.
     auto const builtins = builtins_text();
@@ -241,10 +257,13 @@ TEST("sgl check - a type parameter is opaque, and a call says what it stands for
           == "wrong-kind-of-name user:[main] an entry point is no generic function: the GPU hands it values of known "
              "types\n");
     // CHK-338: a type parameter hides every symbol of its name, and names no value
+    auto const not_instantiated
+        = cc::string("generic-not-instantiated user:[f] nothing instantiates f, so only its names are checked\n");
     CHECK(reports_for("struct A:\n    x: float\nfun f[A](v: A) -> float => A(1.0).x\n")
-          == "wrong-kind-of-name user:[A] A is a type parameter, and a call needs a function or a struct\n");
+          == "wrong-kind-of-name user:[A] A is a type parameter, and a call needs a function or a struct\n"
+                 + not_instantiated);
     CHECK(reports_for("fun f[A](v: A) -> A:\n    let k = A\n    return v\n")
-          == "wrong-kind-of-name user:[A] A is a type parameter, which names a type and no value\n");
+          == "wrong-kind-of-name user:[A] A is a type parameter, which names a type and no value\n" + not_instantiated);
     CHECK(reports_for("fun f[T: float](x: T) => x\n")
           == "unsupported-yet user:[T: float] a type parameter with a bound, a default or an attribute\n");
     CHECK(reports_for("fun f[T = float](x: T) => x\n")

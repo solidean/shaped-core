@@ -203,7 +203,7 @@ number_literal folded(cc::string_view op, number_literal const& a, number_litera
 bool checker::calls_prelude_operator(i32 file, ast::expr_id expr) const
 {
     // a program's own operator is a function it calls, which folding would step past
-    auto const& t = out.files[file].target_at(expr);
+    auto const& t = tables_of(file).target_at(expr);
     return t.kind == target_kind::overload && is_valid(t.symbol) && is_valid(out.at(t.symbol).intrinsic)
         && is_prelude_file(out.at(t.symbol).file);
 }
@@ -438,7 +438,7 @@ type_id checker::check_call(function_scope& scope, ast::expr_id id, ast::call co
                                              cc::format("operator {}", spelling));
         // CHK-394: what the operator folds to is judged at the type it ends up with, as a literal written there is
         if (result != error_type && number_of(file, id).is_number)
-            wide_literals.push_back({.file = file, .expr = id, .function = scope.function});
+            wide_literals.push_back({.file = file, .expr = id, .function = scope.function, .instance = current_instance});
         return result;
     }
 
@@ -620,7 +620,7 @@ bool checker::judge_uniform_load(i32 file, cc::span<symbol_id const> candidates,
     if (!is_load || written.size() != 1 || !written[0].name.empty() || written[0].is_splat
         || !ast::is_valid(written[0].value))
         return true;
-    auto const& tables = out.files[file];
+    auto const tables = tables_of(file);
     auto const refuse = [&](ast::expr_id at)
     {
         report(diagnostic_kind::wrong_kind_of_name, file, span_of(file, at),

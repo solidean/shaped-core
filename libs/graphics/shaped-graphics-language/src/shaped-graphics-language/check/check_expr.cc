@@ -20,22 +20,32 @@ constexpr auto void_type = checked_module::void_type;
 
 void checker::check_body(symbol_id id)
 {
-    // CHK-338: a generic body sees its type parameters, as its signature did
+    // CHK-338: a generic body sees its type parameters, as its signature did, and with them open only its names are
+    // judged; each instantiation checks it again with what they stand for
     auto const info = out.at(id).info;
     auto const before = type_parameter_names.size();
+    auto const is_generic = info >= 0 && !out.functions[info].type_parameters.empty();
     if (info >= 0)
         for (auto const p : out.at(out.functions[info].type_parameters))
             type_parameter_names.push_back({out.at(p).spelled, p});
+    // an instance being checked is no place for its callee's generic pass, which would read its tables
+    auto const outer_instance = current_instance;
+    current_instance = -1;
+    if (is_generic)
+        ++generic_passes;
     check_body_of(id);
+    if (is_generic)
+        --generic_passes;
+    current_instance = outer_instance;
     type_parameter_names.resize_down_to(before);
 }
 
-void checker::check_body_of(symbol_id id)
+void checker::check_body_of(symbol_id id, i32 instance)
 {
     auto const file = out.at(id).file;
     auto const& ast = ast_of(file);
     auto const index = out.at(id).info;
-    if (notes[index].is_body_checked)
+    if (instance < 0 && notes[index].is_body_checked)
         return;
     auto const& node = ast.at(out.at(id).declaration).node;
     auto const* const f = node.try_as<ast::fun_decl>();
@@ -46,11 +56,17 @@ void checker::check_body_of(symbol_id id)
     auto const name = f != nullptr ? f->name : property->name;
     if (body.kind == ast::body_kind::none)
         return;
-    notes[index].is_body_checked = true;
+    if (instance < 0)
+        notes[index].is_body_checked = true;
 
     // by value: checking the body may compile another function, and `functions` then moves
     auto const info = out.functions[index];
-    auto scope = function_scope{.function = id, .file = file, .result = info.result};
+    // an instance reads its signature with what its type parameters stand for
+    auto const bindings = instance >= 0
+                            ? cc::vector<type_id>::create_copy_of(out.at(out.function_instances[instance].bindings))
+                            : cc::vector<type_id>();
+    auto const declared_result = substitute(info.result, bindings);
+    auto scope = function_scope{.function = id, .file = file, .result = declared_result};
     // CHK-245: `self` is the receiver of a method and of a property, and its members are read through it alone (CHK-62)
     auto const role = out.at(id).role;
     auto const has_receiver
@@ -59,23 +75,43 @@ void checker::check_body_of(symbol_id id)
     for (auto i = isize(0); i < parameters.size(); ++i)
     {
         auto const& p = parameters[i];
+        auto const type = substitute(p.type, bindings);
         if (has_receiver && i == 0)
         {
-            scope.receiver = p.type;
-            scope.locals.push_back({.name = "self", .where = {.kind = target_kind::receiver}, .type = p.type});
+            scope.receiver = type;
+            scope.locals.push_back({.name = "self", .where = {.kind = target_kind::receiver}, .type = type});
             continue;
         }
         // CHK-54: a parameter may have the name of a module-level symbol, which it hides in the body.
-        judge_shadowing(file, text_of(file, ast.at(p.field).name), ast.at(p.field).name);
+        if (instance < 0)
+            judge_shadowing(file, text_of(file, ast.at(p.field).name), ast.at(p.field).name);
         scope.locals.push_back({
             .name = text_of(file, ast.at(p.field).name),
             .where = {.kind = target_kind::parameter, .index = i32(p.field)},
-            .type = p.type,
+            .type = type,
             .is_mut = p.is_mut,
         });
     }
 
-    auto const errors_before = error_count();
+    auto const errors_before = error_events;
+    // what the body found: an inferred result, and whether it checked without an error
+    auto const finish = [&](type_id inferred, bool sets_result)
+    {
+        auto const is_sound = error_events == errors_before;
+        if (instance >= 0)
+        {
+            auto& own = out.function_instances.own(instance);
+            own.result = sets_result ? inferred : declared_result;
+            own.is_body_sound = is_sound;
+            // an instance that fails fails its function, whose callers then build no tree
+            if (!is_sound)
+                notes[index].is_body_sound = false;
+            return;
+        }
+        if (sets_result)
+            out.functions.own(index).result = inferred;
+        notes[index].is_body_sound = is_sound;
+    };
 
     // A property's `=>:` block is a value block: it has a value only through `yield` (AST-81).
     if (property != nullptr && !ast::is_valid(body.value))
@@ -89,17 +125,15 @@ void checker::check_body_of(symbol_id id)
         if (ending == flow::falls_through)
             report(diagnostic_kind::missing_return, file, name,
                    cc::format("{} is a property, and a path through its block ends without a yield", out.at(id).name));
-        if (infers)
-            out.functions.own(index).result
-                = yielded.has_yield && ending != flow::falls_through ? yielded.value : error_type;
-        notes[index].is_body_sound = error_count() == errors_before;
+        finish(yielded.has_yield && ending != flow::falls_through ? yielded.value : error_type, infers);
         return;
     }
 
     auto ending = check_statements(scope, body.statements);
+    auto inferred = type_id::none;
     if (ast::is_valid(body.value) && notes[index].infers_result)
     {
-        out.functions.own(index).result = check_expr(scope, body.value);
+        inferred = check_expr(scope, body.value);
         ending = flow::exits;
     }
     else if (ast::is_valid(body.value))
@@ -109,12 +143,12 @@ void checker::check_body_of(symbol_id id)
     }
     // a block without a statement was reported where it was parsed
     auto const has_statements = !body.statements.empty() || ast::is_valid(body.value);
-    if (has_statements && ending == flow::falls_through && info.result != void_type && info.result != error_type)
+    if (has_statements && ending == flow::falls_through && declared_result != void_type && declared_result != error_type)
         report(diagnostic_kind::missing_return, file, name,
                cc::format("{} returns {}, and a path through its body ends without a return", out.at(id).name,
-                          out.name_of(info.result)));
+                          out.name_of(declared_result)));
 
-    notes[index].is_body_sound = error_count() == errors_before;
+    finish(inferred, ast::is_valid(body.value) && notes[index].infers_result);
 }
 
 void checker::check_defaults(symbol_id id)
@@ -328,7 +362,7 @@ type_id checker::check_texel(function_scope& scope, ast::expr_id id, ast::index 
     if (loaded == error_type || !is_place)
         return loaded;
     texel_place = id;
-    texel_load = out.files[file].call_at(id);
+    texel_load = tables_of(file).call_at(id);
     texel_arguments = cc::move(arguments);
     return loaded;
 }
@@ -347,7 +381,7 @@ void checker::check_texel_store(function_scope& scope, ast::expr_id value, type_
     if (stored == error_type)
         return;
     out.texel_stores.push_back(
-        {.file = file, .place = place, .store = out.files[file].call_at(place), .load = texel_load});
+        {.file = file, .place = place, .store = tables_of(file).call_at(place), .load = texel_load});
 }
 
 // ---- expressions ----------------------------------------------------------------------------------------------------
@@ -638,7 +672,7 @@ type_id checker::check_literal(function_scope& scope, ast::expr_id id, ast::lite
             return error_type;
         }
         if (value.value() < -2147483647 - 1 || value.value() > 2147483647)
-            wide_literals.push_back({.file = file, .expr = id, .function = scope.function});
+            wide_literals.push_back({.file = file, .expr = id, .function = scope.function, .instance = current_instance});
         return type_of_builtin(builtins::k_int, file, where);
     }
     case number_class::suffixed:

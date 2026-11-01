@@ -166,7 +166,7 @@ void checker::check_test(i32 index)
         auto const& result = arms.empty() ? ast::body() : arms[arms.size() - 1].result;
         value = result.kind == ast::body_kind::arrow ? result.value : ast::expr_id::none;
     }
-    auto const type = ast::is_valid(value) ? out.files[file].type_at(value) : type_id::none;
+    auto const type = ast::is_valid(value) ? tables_of(file).type_at(value) : type_id::none;
     auto const bool_type = type_of_builtin(builtins::k_bool, file, test.where);
     // A test that is to fail or to stop at an assert cannot pass vacuously, so it needs no last check; and a test with
     // no statement was reported where it was parsed.

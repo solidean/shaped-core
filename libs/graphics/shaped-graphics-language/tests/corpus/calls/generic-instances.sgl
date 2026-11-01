@@ -1,0 +1,57 @@
+// a generic body is checked per instantiation: it may do with a value of a type parameter whatever its arguments allow
+
+fun sum[T](a: T, b: T) -> T => a + b
+
+fun doubled[T](x: T) => x + x
+
+fun quadrupled[T](x: T) => doubled(doubled(x))
+
+fun x_of[V](v: V) -> float => v.x
+
+fun scaled[V](v: V, s: float) -> V:
+    let mut result = v
+    result *= s
+    return result
+
+// each argument type is its own instance, with its own operators
+test:
+    sum(1, 2) == 3
+    sum(1.5, 2.0) == 3.5
+    sum(float2(1.0, 2.0), float2(3.0, 4.0)).y == 6.0
+
+// an inferred result is the instance's, and a generic calls a generic with what its own arguments are
+test:
+    doubled(2) == 4
+    doubled(1.5) == 3.0
+    quadrupled(3) == 12
+
+// a field and a method of whatever the argument is
+test:
+    x_of(float2(1.0, 2.0)) == 1.0
+    x_of(float3(4.0, 5.0, 6.0)) == 4.0
+    scaled(float3(1.0, 2.0, 3.0), 2.0).z == 6.0
+    scaled(2.0, 3.0) == 6.0
+
+fun first_of[T](values: T) => values[0]
+
+fun with_first[T](values: T, v: float) -> T:
+    let mut result = values
+    result[0] = v
+    return result
+
+fun mapped[T](x: T, f: (T) -> T) -> T:
+    let once = f(x)
+    return f(once)
+
+// an index and an assignment through one are whatever the argument's are
+test:
+    first_of(float3(1.0, 2.0, 3.0)) == 1.0
+    let arr = float[2].filled(4.0)
+    first_of(arr) == 4.0
+    with_first(float2(1.0, 2.0), 7.0).x == 7.0
+    with_first(arr, 9.0)[0] == 9.0
+
+// a lambda handed to an instance takes the instance's types
+test:
+    mapped(2, x => x * 3) == 18
+    mapped(float2(1.0, 2.0), v => v + v).y == 8.0

@@ -1464,7 +1464,7 @@ void checker::compile_const(symbol_id id)
         auto const type = check_expr(scope, c.value);
         if (type == error_type)
             return fail();
-        auto const& target = out.files[file].target_at(c.value);
+        auto const& target = tables_of(file).target_at(c.value);
         if (target.kind == target_kind::enum_case)
         {
             info.kind = constant_kind::enum_case;
@@ -1987,7 +1987,9 @@ void checker::compile_function(symbol_id id)
     {
         if (!is_failed)
             check_body(id);
-        is_failed = is_failed || out.functions[out.at(id).info].result == checked_module::error_type;
+        // a generic's result is each instance's, which its generic pass need not know (CHK-338)
+        is_failed = is_failed
+                 || (out.functions[out.at(id).info].result == checked_module::error_type && type_parameters.empty());
     }
 
     auto const stages = i32(is_vertex) + i32(is_pixel) + i32(compute != nullptr) + i32(geometry != nullptr)

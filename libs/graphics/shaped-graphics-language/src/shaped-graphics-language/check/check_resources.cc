@@ -514,7 +514,7 @@ void checker::compile_file_sampler(symbol_id id)
 
 void checker::judge_filtering(i32 file, ast::expr_id id, source_span call, cc::span<written_argument const> arguments)
 {
-    auto const record = out.files[file].call_at(id);
+    auto const record = tables_of(file).call_at(id);
     auto const* const callee
         = record >= 0 ? out.builtin_function(out.at(out.call_records[record].callee).intrinsic) : nullptr;
 
@@ -533,7 +533,7 @@ void checker::judge_filtering(i32 file, ast::expr_id id, source_span call, cc::s
         auto named = a.expr;
         if (auto const* const element = ast_of(file).at(named).node.try_as<ast::index>())
             named = element->object;
-        auto const& where = out.files[file].target_at(named);
+        auto const& where = tables_of(file).target_at(named);
         // CHK-314: a file-scope sampler filters as a binding's static sampler does
         if (where.kind == target_kind::symbol && out.at(where.symbol).kind == symbol_kind::sampler
             && out.at(where.symbol).state == symbol_state::checked)
@@ -621,7 +621,7 @@ bool checker::is_constant_argument(i32 file, ast::expr_id expr) const
     auto const& node = ast_of(file).at(expr).node;
     if (node.is<ast::literal>() || node.is<ast::leading_dot>())
         return true;
-    auto const& tables = out.files[file];
+    auto const tables = tables_of(file);
     auto const& where = tables.target_at(expr);
     if (where.kind == target_kind::enum_case)
         return true;
@@ -644,7 +644,7 @@ bool checker::is_constant_argument(i32 file, ast::expr_id expr) const
 
 void checker::judge_constant_arguments(i32 file, ast::expr_id id)
 {
-    auto const record = out.files[file].call_at(id);
+    auto const record = tables_of(file).call_at(id);
     if (record < 0)
         return;
     auto const& r = out.call_records[record];
@@ -729,7 +729,7 @@ void checker::judge_offset_range(i32 file, ast::expr_id expr)
                    "an offset reaches from -8 to 7 texels on every target");
         return;
     }
-    auto const record = out.files[file].call_at(expr);
+    auto const record = tables_of(file).call_at(expr);
     if (record < 0)
         return;
     for (auto const& w : out.at(out.call_records[record].written))

@@ -263,6 +263,18 @@ struct wide_literal
     ast::expr_id expr = ast::expr_id::none;
     /// The function whose body or defaults it stands in; `none` outside one.
     symbol_id function = symbol_id::none;
+    /// The instance whose body it stands in, whose tables hold its type; -1 outside one.
+    i32 instance = -1;
+};
+
+/// A generic function being instantiated, innermost last: what an error in its body is noted under (CHK-338).
+struct instantiation
+{
+    /// A position in `checked_module::function_instances`.
+    i32 instance = -1;
+    /// The call that asked for it.
+    i32 file = 0;
+    source_span where;
 };
 
 /// `fun T.name`, whose type is known only once every file is declared.
@@ -879,6 +891,26 @@ struct checker
     [[nodiscard]] bool unify(type_id pattern, type_id actual, cc::vector<type_id>& bindings) const;
     /// Makes every instance a generic call's inlining will name, before any entry point is flattened.
     void instantiate_generics();
+    /// The instance of `function` for `bindings`, checked once; -1 where a binding is open or the function recursive.
+    /// `file` and `where` are the call that asks, which an error in the body is noted under (CHK-338).
+    i32 instantiate(symbol_id function, cc::span<type_id const> bindings, i32 file, source_span where);
+    /// The instance of `function` for `bindings` the check made, or -1.
+    [[nodiscard]] i32 existing_function_instance(symbol_id function, cc::span<type_id const> bindings) const;
+    /// The warning for each generic function of the program that nothing instantiated (CHK-338).
+    void warn_uninstantiated_generics(isize first);
+    /// The instance whose body is being checked, whose tables `set_type` and `set_target` write; -1 for none.
+    i32 current_instance = -1;
+    cc::vector<instantiation> instantiating;
+    /// Above 0 while a generic body is checked with its type parameters open, where only its names are judged.
+    i32 generic_passes = 0;
+    /// Every error reported, and every one an instance repeated and was not reported again.
+    isize error_events = 0;
+    /// What `report` hands back for a diagnostic it drops.
+    located_diagnostic dropped;
+    /// The tables of `file` as the body being checked reads them.
+    [[nodiscard]] table_view tables_of(i32 file) const;
+    /// The entries of the current instance's tables for `expr`, grown to hold it.
+    [[nodiscard]] isize own_slot(ast::expr_id expr);
     /// The type parameters in scope, innermost last: a generic function's while its signature and body are checked,
     /// and a generic struct's while its members are.
     cc::vector<cc::pair<cc::string_view, type_id>> type_parameter_names;
@@ -932,7 +964,8 @@ struct checker
     // ---- bodies and expressions (check_expr.cc) ---------------------------------------------------------------------
 
     void check_body(symbol_id id);
-    void check_body_of(symbol_id id);
+    /// `instance` -1 checks the body as declared, and an instance's index checks it with that instance's bindings.
+    void check_body_of(symbol_id id, i32 instance = -1);
     /// The defaults of function `id`'s parameters, each in the function's own scope with the parameters before it
     /// visible, and of its parameter's type (CHK-243).
     /// Checked once, after every signature is known, since a default may call what is declared below it.

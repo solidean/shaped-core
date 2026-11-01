@@ -180,6 +180,8 @@ struct sgl::check::checked_module
     layered<call_record> call_records;
     layered<written_argument> written_arguments;
     layered<i32> call_slots;
+    /// Every instantiation of a generic function the check met (CHK-338).
+    layered<function_instance> function_instances;
     /// Every candidate of every call that reported `no-matching-overload`, with the reason it did not match.
     layered<near_miss> near_misses;
     /// Every trace of a ray-tracing pipeline's ray type: the call, and which ray of which set (CHK-329).
@@ -359,6 +361,7 @@ struct sgl::check::checked_module
         call_records.freeze();
         written_arguments.freeze();
         call_slots.freeze();
+        function_instances.freeze();
         near_misses.freeze();
         ray_traces.freeze();
         callable_calls.freeze();
@@ -378,11 +381,59 @@ struct sgl::check::checked_module
             && is_equal(samplers, rhs.samplers) && is_equal(pipelines, rhs.pipelines)
             && is_equal(pipeline_settings, rhs.pipeline_settings) && is_equal(constants, rhs.constants)
             && is_equal(option_uses, rhs.option_uses) && is_equal(call_records, rhs.call_records)
+            && is_equal(function_instances, rhs.function_instances)
             && is_equal(written_arguments, rhs.written_arguments) && is_equal(call_slots, rhs.call_slots)
             && is_equal(near_misses, rhs.near_misses) && is_equal(ray_traces, rhs.ray_traces)
             && is_equal(callable_calls, rhs.callable_calls) && is_equal(texel_stores, rhs.texel_stores)
             && is_equal(files, rhs.files) && is_equal(entry_points, rhs.entry_points) && is_equal(tests, rhs.tests)
             && is_equal(test_units, rhs.test_units) && is_equal(entry_expectations, rhs.entry_expectations)
             && is_equal(diagnostics, rhs.diagnostics) && builtins == rhs.builtins;
+    }
+};
+
+/// One file's side tables as a body reads them: an instance's own entries over the file's (CHK-338).
+/// It holds positions, not references, since checking may add instances while it is read.
+struct sgl::check::table_view
+{
+    checked_module const* module = nullptr;
+    i32 file = 0;
+    /// A position in `checked_module::function_instances`, -1 for the file's tables alone.
+    i32 instance = -1;
+
+    [[nodiscard]] type_id type_at(ast::expr_id id) const
+    {
+        if (auto const* const own = own_tables(id); own != nullptr)
+            if (auto const t = own->type_of[slot_of(id)]; is_valid(t))
+                return t;
+        return module->files[file].type_at(id);
+    }
+    /// By value: an instance's tables move when the check adds another instance.
+    [[nodiscard]] target target_at(ast::expr_id id) const
+    {
+        if (auto const* const own = own_tables(id); own != nullptr)
+            if (auto const& t = own->target_of[slot_of(id)]; t.kind != target_kind::none)
+                return t;
+        return module->files[file].target_at(id);
+    }
+    [[nodiscard]] i32 call_at(ast::expr_id id) const
+    {
+        if (auto const* const own = own_tables(id); own != nullptr)
+            if (auto const c = own->call_of[slot_of(id)]; c != -2)
+                return c;
+        return module->files[file].call_at(id);
+    }
+
+private:
+    [[nodiscard]] isize slot_of(ast::expr_id id) const
+    {
+        return isize(ast::index_of(id)) - module->function_instances[instance].first;
+    }
+    [[nodiscard]] file_tables const* own_tables(ast::expr_id id) const
+    {
+        if (instance < 0)
+            return nullptr;
+        auto const& tables = module->function_instances[instance].tables;
+        auto const slot = slot_of(id);
+        return slot >= 0 && slot < tables.type_of.size() ? &tables : nullptr;
     }
 };

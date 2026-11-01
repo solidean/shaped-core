@@ -1041,7 +1041,8 @@ auto sgl::check::impl::flattener::closure_of(ast::expr_id expr) -> i32
                             .bound = current()->bound,
                             .chain = current()->chain,
                             .owner = current()->function,
-                            .bindings = current()->bindings});
+                            .bindings = current()->bindings,
+                            .instance = current()->instance});
         return i32(closures.size() - 1);
     }
     auto const where = tables().target_at(expr);
@@ -1128,7 +1129,7 @@ auto sgl::check::impl::flattener::call_closure(ast::expr_id id,
     auto const& l = lambda_ast.at(f.lambda).node.as<ast::lambda>();
     auto const fields = lambda_ast.at(l.parameters);
     auto bound = f.bound;
-    auto const lambda_type = c.out.files[f.file].type_at(f.lambda);
+    auto const lambda_type = table_view{.module = &c.out, .file = f.file, .instance = f.instance}.type_at(f.lambda);
     auto const parameter_types = c.out.at(c.out.at(lambda_type).members);
     for (auto p = isize(0); p < fields.size() && p < slots.size(); ++p)
     {
@@ -1162,7 +1163,8 @@ auto sgl::check::impl::flattener::call_closure(ast::expr_id id,
                       .result = type,
                       .chain = f.chain,
                       .bound = cc::move(bound),
-                      .bindings = f.bindings});
+                      .bindings = f.bindings,
+                      .instance = f.instance});
     inlined_decision = decision;
     auto const value = flatten_expr(l.body.value);
     inlined_decision = outer_decision;

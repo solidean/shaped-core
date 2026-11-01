@@ -917,3 +917,22 @@ struct sgl::check::file_tables
             && ast::impl::is_equal(call_of, rhs.call_of);
     }
 };
+
+/// One instantiation of a generic function, whose body is checked with what its type parameters stand for (CHK-338).
+/// Its tables overlay its file's for the body's expressions, which the generic check wrote with the parameters open.
+struct sgl::check::function_instance
+{
+    symbol_id function = symbol_id::none;
+    /// Two by two: a type parameter, then the closed type it stands for; a range of `checked_module::type_lists`.
+    ast::range_of<type_id> bindings;
+    /// The expression the tables' first entries are; they grow to cover every expression the instance wrote.
+    i32 first = 0;
+    /// An entry the instance did not write is `none`, a target of kind `none` or a call of -2, and reads the file's.
+    file_tables tables;
+    /// What an arrow body without `-> T` returns in this instance.
+    type_id result = type_id::none;
+    /// The body checked without an error.
+    bool is_body_sound = false;
+
+    bool operator==(function_instance const&) const = default;
+};

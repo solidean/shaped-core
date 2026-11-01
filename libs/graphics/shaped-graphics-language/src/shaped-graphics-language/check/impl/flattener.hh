@@ -165,6 +165,8 @@ struct flattener
         symbol_id owner = symbol_id::none;
         /// What the type parameters it sees stood for where it was written.
         cc::vector<type_id> bindings;
+        /// The instance whose body it was written in, whose tables hold its types; -1 outside one (CHK-338).
+        i32 instance = -1;
     };
     cc::vector<closure> closures;
     /// Parallel to what `flatten_written` returned last: the closure a function argument hands over, -1 elsewhere.
@@ -197,6 +199,8 @@ struct flattener
         cc::vector<label_id> value_blocks;
         /// What the type parameters of a generic function stand for in this inlining, two by two (CHK-340).
         cc::vector<type_id> bindings;
+        /// The instance of the generic function being written, whose tables its body reads; -1 for none (CHK-338).
+        i32 instance = -1;
     };
     cc::vector<frame> frames;
 
@@ -233,7 +237,10 @@ struct flattener
     /// Read inside ONE expression, which no push can come between; everything else goes through `current`.
     [[nodiscard]] i32 file() const { return frames.back().file; }
     [[nodiscard]] ast::file_ast const& ast() const { return c.ast_of(file()); }
-    [[nodiscard]] file_tables const& tables() const { return c.out.files[file()]; }
+    [[nodiscard]] table_view tables() const
+    {
+        return {.module = &c.out, .file = file(), .instance = frames.back().instance};
+    }
 
     flat_expr_id fail();
 

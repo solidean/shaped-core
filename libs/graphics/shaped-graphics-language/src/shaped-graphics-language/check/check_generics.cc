@@ -292,3 +292,92 @@ type_id checker::generic_named(i32 file, ast::expr_id expr)
     auto const type = out.at(found->front()).type;
     return out.at(type).is_template ? type : type_id::none;
 }
+
+i32 checker::instantiate(symbol_id function, cc::span<type_id const> bindings, i32 file, source_span where)
+{
+    auto const info = out.at(function).info;
+    if (generic_passes > 0 || info < 0 || out.at(function).state != symbol_state::checked)
+        return -1;
+    auto const parameters = cc::vector<type_id>::create_copy_of(out.at(out.functions[info].type_parameters));
+    if (parameters.empty())
+        return -1;
+    // in the order the function declares its parameters, so two calls that bound them in another order meet
+    auto key = cc::vector<type_id>();
+    for (auto const p : parameters)
+    {
+        auto const to = bound_to(bindings, p);
+        if (!is_valid(to) || to == checked_module::error_type || is_open(to))
+            return -1;
+        key.push_back(p);
+        key.push_back(to);
+    }
+    if (auto const found = existing_function_instance(function, key); found >= 0)
+        return found;
+    // recursion was or will be reported where the calls loop, and an instance of it would never end
+    for (auto const& at : instantiating)
+        if (out.function_instances[at.instance].function == function)
+            return -1;
+
+    auto const id = i32(out.function_instances.size());
+    out.function_instances.push_back(
+        {.function = function, .bindings = {.first = u32(out.type_lists.size()), .count = u32(key.size())}});
+    out.type_lists.push_back_range(key);
+
+    // the body names each type parameter, which now stands for its argument; the names are copied, since the type
+    // table they are spelled in grows while the body is checked
+    auto names = cc::vector<cc::string>();
+    for (auto const p : parameters)
+        names.push_back(out.at(p).spelled);
+    auto const outer_names = cc::move(type_parameter_names);
+    type_parameter_names = {};
+    for (auto k = isize(0); k < parameters.size(); ++k)
+        type_parameter_names.push_back({names[k], key[2 * k + 1]});
+    auto const outer_instance = current_instance;
+    auto const outer_expected = expected_result;
+    current_instance = id;
+    expected_result = type_id::none;
+    instantiating.push_back({.instance = id, .file = file, .where = where});
+    check_body_of(function, id);
+    instantiating.remove_back();
+    expected_result = outer_expected;
+    current_instance = outer_instance;
+    type_parameter_names = cc::move(outer_names);
+    return id;
+}
+
+void checker::warn_uninstantiated_generics(isize first)
+{
+    for (auto i = first; i < out.symbols.size(); ++i)
+    {
+        auto const& s = out.symbols[i];
+        if (s.kind != symbol_kind::function || s.state != symbol_state::checked || s.info < 0
+            || s.file != program_file() || out.functions[s.info].type_parameters.empty())
+            continue;
+        auto is_instantiated = false;
+        for (auto const& instance : out.function_instances)
+            is_instantiated = is_instantiated || instance.function == symbol_id(i);
+        auto const* const f = ast_of(s.file).at(s.declaration).node.try_as<ast::fun_decl>();
+        if (!is_instantiated && f != nullptr)
+            report(diagnostic_kind::generic_not_instantiated, s.file, f->name,
+                   cc::format("nothing instantiates {}, so only its names are checked", s.name));
+    }
+}
+
+i32 checker::existing_function_instance(symbol_id function, cc::span<type_id const> bindings) const
+{
+    if (bindings.empty())
+        return -1;
+    for (auto i = isize(0); i < out.function_instances.size(); ++i)
+    {
+        auto const& instance = out.function_instances[i];
+        if (instance.function != function)
+            continue;
+        auto const pairs = out.at(instance.bindings);
+        auto is_match = true;
+        for (auto k = isize(0); is_match && k + 1 < pairs.size(); k += 2)
+            is_match = bound_to(bindings, pairs[k]) == pairs[k + 1];
+        if (is_match)
+            return i32(i);
+    }
+    return -1;
+}
