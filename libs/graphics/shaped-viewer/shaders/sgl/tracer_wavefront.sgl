@@ -24,6 +24,8 @@ const path_flag_primary = 2u
 const path_flag_prev_nee_reachable = 4u
 /// the path belongs to the specular signal, decided by the lobe its first continuation was drawn from
 const path_flag_specular = 8u
+/// the path is a pixel's guide ray, not a sample: its camera ray skips every partial coverage, its hit writes the guides, and it gathers nothing
+const path_flag_guide = 16u
 
 /// `hit_record::kind`.
 const hit_none = 0u
@@ -51,6 +53,9 @@ const dispatch_shade = 4
 
 /// `frame_constants::wavefront_flags`: every path and every tally starts over, since the image describes something else now.
 const wavefront_flag_restart = 1u
+/// `frame_constants::wavefront_flags`: the guides come from guide rays rather than the samples' camera rays, set where the trace writes guides and holds a partial coverage.
+/// A sample's camera ray takes or skips a partial coverage at random, so guides of its hit would flicker with the cutout, and a temporal denoiser keeps what its guides explain.
+const wavefront_flag_guide_rays = 2u
 
 /// `wavefront_step::fill` that starts every free slot.
 const fill_full = 65536u
@@ -197,6 +202,30 @@ fun start_sample(slot: uint, rng_in: uint){traced, wavefront_step}:
     traced.path_media[s] = path_medium(float3(0.0), float3(0.0), 0.0, 3u)
     traced.path_lights[s] = path_light(float3(0.0), float3(0.0))
 
+/// Starts the guide ray of `slot` in place of its sample, which finalize starts once the guide is written.
+/// Its jitter is a stream of its own, and the slot's `rng` stays where it is, so the sample after it traces the same path as without guide rays.
+fun start_guide(slot: uint, rng: uint){traced, wavefront_step}:
+    start_sample(slot, rng)
+    let s = slot as int
+    let f = traced.frame[0]
+    let px = slot_pixel(slot)
+    let mut jitter_rng = pt.hash(rng ^ 0x9e3779b9u)
+    let jitter_x = pt.rand(mut jitter_rng)
+    let jitter_y = pt.rand(mut jitter_rng)
+    let jitter = if f.fixed_jitter != 0u => f.jitter else float2(jitter_x, jitter_y)
+    let cam = scene.camera(..f.camera)
+    let dir = normalize(scene.camera_ray_offset(cam, float2(px.x as float, px.y as float) + jitter, image_size()))
+    traced.path_rays[s] = path_ray(cam.position, dir)
+    let mut st = traced.path_states[s]
+    st.rng = rng
+    st.jitter = jitter
+    st.flags = st.flags | path_flag_guide
+    traced.path_states[s] = st
+
+/// Whether this frame's guides come from guide rays.
+fun guide_rays(){traced} -> bool:
+    return (traced.frame[0].wavefront_flags & wavefront_flag_guide_rays) != 0u
+
 /// Whether the pixel of a slot holding `count` samples takes another: below `sample_target`, or always where it is 0.
 fun wants_sample(count: float){wavefront_step} -> bool:
     return wavefront_step.sample_target == 0u or count < (wavefront_step.sample_target as float)
@@ -248,7 +277,11 @@ fun wavefront_begin(slot: uint){traced, wavefront_step}:
             waiting.fill_draws = draws
             traced.path_states[s] = waiting
             return
-        start_sample(slot, rng)
+        // A pixel's first sample of the frame is preceded by its guide ray, so every pixel that traces this frame gets one.
+        if guide_rays():
+            start_guide(slot, rng)
+        else:
+            start_sample(slot, rng)
 
     let at = traced.counters[counter_queue_a].add(1u)
     traced.queue_a[at as int] = slot
@@ -262,9 +295,11 @@ fun wavefront_extend(index: uint){traced, bindless, wavefront_step}:
     let s = slot as int
     let r = traced.path_rays[s]
     // The path's own stream where the segment leaves, so a cutout's draw belongs to the sample and the bounce, never to the frame.
-    let cutouts = cutout_seed(traced.path_states[s].rng, cutout_ray_surface)
+    let st = traced.path_states[s]
+    let cutouts = cutout_seed(st.rng, cutout_ray_surface)
+    let guide = (st.flags & path_flag_guide) != 0u
     let pr = ray(origin = pos3(r.origin.x, r.origin.y, r.origin.z), direction = vec3(r.direction.x, r.direction.y, r.direction.z), t_min = 1e-3, t_max = 1e4)
-    let h = traced.world.trace(pr, any_hit = c => cutout(c, cutouts, candidate_opacity(c)), intersection = intersect_quadric, procedural_any_hit = c => hit_decision.accept)
+    let h = traced.world.trace(pr, any_hit = c => (if guide => guide_cutout(candidate_opacity(c)) else cutout(c, cutouts, candidate_opacity(c))), intersection = intersect_quadric, procedural_any_hit = c => hit_decision.accept)
 
     if h.kind == hit_kind.triangle:
         traced.hits[s] = hit_record(h.instance_id as uint, h.primitive_index as uint, hit_triangle, h.t, float2(h.barycentrics.y, h.barycentrics.z), float3(0.0))
@@ -299,8 +334,12 @@ fun segment_settle(index: uint){traced, wavefront_step} -> uint3:
     let path_is_specular = (st.flags & path_flag_specular) != 0u
     let prev_nee_reachable = (st.flags & path_flag_prev_nee_reachable) != 0u
 
+    // Under guide rays a sample's camera ray describes nothing: the guide ray before it wrote the guides and the motion.
+    if primary and guide_rays() and (st.flags & path_flag_guide) == 0u:
+        if hit_t < 0.0:
+            st.flags = st.flags & ~path_flag_primary
     // The primary segment reprojects, hit or miss; an escape is a point at infinity, so the sky moves with rotation alone.
-    if primary:
+    else if primary:
         let px = slot_pixel(slot)
         let prev = scene.camera(..f.previous_camera)
         let offset = if hit_t >= 0.0 => origin + dir * hit_t - prev.position else dir
@@ -558,7 +597,9 @@ fun shade_stored(slot: uint, inst: scene.instance, n_obj: float3, surface: openp
     let throughput = st.throughput
     let mut path_is_specular = (st.flags & path_flag_specular) != 0u
 
-    if (st.flags & path_flag_primary) != 0u:
+    let guide = (st.flags & path_flag_guide) != 0u
+    let writes_guides = guide or not guide_rays()
+    if (st.flags & path_flag_primary) != 0u and writes_guides:
         // Linear view depth rather than the distance along the ray, which grows toward the image's edges.
         let cam = scene.camera(..f.camera)
         let mut tally = traced.tallies[s]
@@ -579,6 +620,11 @@ fun shade_stored(slot: uint, inst: scene.instance, n_obj: float3, surface: openp
             tally.primary_view_depth = t_forward * dot(center, normalize(cam.forward))
         traced.tallies[s] = tally
 
+    // A guide ray gathers nothing and ends here, its stream untouched, and finalize starts the sample it stood in for.
+    // It still leaves through the tail's one push_finished, since each queue is appended from one place (docs/wavefront.md).
+    let gathers = not guide
+
+    if (st.flags & path_flag_primary) != 0u and gathers:
         // The lobe the continuation was drawn from is what this path IS, for the denoiser's purposes.
         path_is_specular = openpbr.bsdf_lobe_is_specular(p.lobe)
         st.flags = st.flags & ~path_flag_primary
@@ -586,7 +632,9 @@ fun shade_stored(slot: uint, inst: scene.instance, n_obj: float3, surface: openp
 
     // A surface's own emission reaches the camera at full weight.
     // Past the camera's ray only an emitter of the light table adds it, as the BSDF strategy of the hit's next-event estimate.
-    if b == 0u:
+    if not gathers:
+        light = path_light(float3(0.0), float3(0.0))
+    else if b == 0u:
         light.radiance += throughput * p.emission
     else if light_pdf >= 0.0:
         let prev_reachable = (st.flags & path_flag_prev_nee_reachable) != 0u
@@ -596,12 +644,13 @@ fun shade_stored(slot: uint, inst: scene.instance, n_obj: float3, surface: openp
         if path_is_specular => light.specular += c
 
     // Seeded from the stream where shade left it, as the megakernel's closest hit seeds its own two shadow rays.
-    let light_waits = defer_light(slot, 0u, light_s, throughput, b, path_is_specular, cutout_seed(p.rng, cutout_ray_light), mut light)
-    let env_waits = defer_light(slot, 1u, env_s, throughput, b, path_is_specular, cutout_seed(p.rng, cutout_ray_environment), mut light)
-    if light_waits or env_waits => push_shadow(slot)
+    if gathers:
+        let light_waits = defer_light(slot, 0u, light_s, throughput, b, path_is_specular, cutout_seed(p.rng, cutout_ray_light), mut light)
+        let env_waits = defer_light(slot, 1u, env_s, throughput, b, path_is_specular, cutout_seed(p.rng, cutout_ray_environment), mut light)
+        if light_waits or env_waits => push_shadow(slot)
 
-    let mut rng = p.rng
-    let mut continues = not all(p.throughput <= float3(0.0))
+    let mut rng = if gathers => p.rng else st.rng
+    let mut continues = gathers and not all(p.throughput <= float3(0.0))
     if continues:
         let mut next_throughput = throughput * p.throughput
         st.prev_pdf = p.bsdf_pdf
@@ -667,9 +716,12 @@ fun wavefront_finalize(index: uint){traced, wavefront_step}:
     let st = traced.path_states[s]
     let light = traced.path_lights[s]
 
+    // A guide ray is no sample: it counts nothing, and the sample begin decided on starts in its place, whatever the fill says.
+    let guide = (st.flags & path_flag_guide) != 0u
+
     // One non-finite path would poison its pixel for good, since the sum is never re-derived: it counts as a sample of nothing.
     // Nothing rather than no sample, as the megakernel's frame mean counts it, so a pixel whose paths all go non-finite still reaches a capture's target.
-    if st.generation == f.generation:
+    if st.generation == f.generation and not guide:
         let finite = pt.is_finite(light.radiance)
         let radiance = if finite => light.radiance else float3(0.0)
         let specular = if finite => clamp(light.specular, float3(0.0), max(light.radiance, float3(0.0))) else float3(0.0)
@@ -685,7 +737,7 @@ fun wavefront_finalize(index: uint){traced, wavefront_step}:
     // The next sample continues the path's stream from where this one left it.
     let count = traced.tallies[s].count
     let mut draws = st.fill_draws
-    let starts = wavefront_step.regenerate != 0u and wants_sample(count) and fills(slot, count, mut draws)
+    let starts = guide or (wavefront_step.regenerate != 0u and wants_sample(count) and fills(slot, count, mut draws))
     if starts:
         start_sample(slot, st.rng)
         push_next(slot)

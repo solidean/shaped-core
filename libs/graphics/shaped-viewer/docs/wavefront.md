@@ -209,6 +209,16 @@ The depth and the hit-distance guides carry over a still frame, since few of its
 The depth is kept as view depth and made clip depth at resolve, since a drawing that starts needing it sets the near plane without a restart.
 `sv.wavefront.still_rounds` and `sv.wavefront.still_fill` record what each still frame ran.
 
+### Guides behind a partial coverage come from guide rays
+
+A partial coverage is a stochastic cutout: each camera ray takes or skips the surface.
+Guides of the samples' own hits would flicker with that draw, and a temporal denoiser keeps what its guides explain, so it kept the noise.
+Where a frame writes guides and a hit group can cut out, each pixel's first sample of the frame follows a guide ray: a primary segment that only a full coverage stops.
+Its hit is shaded for the guides and the motion alone and gathers nothing; finalize then starts the sample in its place, from the slot's untouched stream.
+So the image is the same as without it, bit for bit, the frame runs one more round, and the samples' own camera rays write no guide.
+The megakernel does the same with a guide ray per sample, its payload's `guide` set, on the flag the view sets for it.
+`tests/guide-ray-test.cc` pins both.
+
 ### A pixel's samples do not depend on how the frames split them
 
 A capture waits for samples per pixel rather than frames, since how many samples a frame finishes is the GPU's and the budget's.

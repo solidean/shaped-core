@@ -680,11 +680,11 @@ constexpr auto raster_spelling = body_spelling{.explicit_level = false, .mark = 
 
     // The cutout test twice, since an any hit takes the payload of the one ray type its record serves.
     // Neither reads the material's code: opacity comes through the instance's record, the same for every material.
-    // Each draws from its payload: a surface ray from the path's stream as the ray left, a shadow ray from the seed its caller wrote.
+    // Each draws from its payload: a surface ray from the path's stream as the ray left, or none for a guide ray,
+    // and a shadow ray from the seed its caller wrote.
     src += "@any_hit fun sv_any_hit(c: triangle_candidate, p: mut tracer.surface_payload){tracer.traced, "
            "tracer.bindless} -> hit_decision:\n"
-           "    return tracer.cutout(c, tracer.cutout_seed(p.rng, tracer.cutout_ray_surface), "
-           "tracer.candidate_opacity(c))\n\n";
+           "    return tracer.surface_cutout(c, p)\n\n";
     src += "@any_hit fun sv_shadow_any_hit(c: triangle_candidate, p: mut tracer.shadow_payload){tracer.traced, "
            "tracer.bindless} -> hit_decision:\n"
            "    return tracer.cutout(c, p.seed, tracer.candidate_opacity(c))\n\n";
