@@ -216,7 +216,8 @@ struct planner
         return p.names.mint(cc::format("{}_", name));
     }
 
-    /// `spell` for a binding's name, which one list may hold twice from two modules (CHK-350): the second is minted.
+    /// `spell` for a binding's or a file-scope sampler's name, which two modules may each declare (CHK-350): the second
+    /// the tree meets is minted a name of its own.
     cc::string spell_binding(cc::string_view name)
     {
         auto result = spell(name);
@@ -596,8 +597,11 @@ struct planner
             auto at = isize(0);
             while (at < p.samplers.size() && p.samplers[at].index < index)
                 ++at;
-            p.samplers.insert_at(
-                at, {.symbol = smp->sampler, .name = spell(s.name), .host_name = s.name, .type = s.type, .index = index});
+            p.samplers.insert_at(at, {.symbol = smp->sampler,
+                                      .name = spell_binding(s.name),
+                                      .host_name = p.m.qualified_name_of(smp->sampler),
+                                      .type = s.type,
+                                      .index = index});
         }
     }
 

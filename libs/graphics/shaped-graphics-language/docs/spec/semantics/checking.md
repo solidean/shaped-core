@@ -81,7 +81,6 @@ The program is checked with a **library**: the files of the module directories i
   A program file that joins a module (CHK-346) counts as that module.
 * **CHK-350** A module the program uses is a library, and the tracer refuses what it cannot carry of one yet as `unsupported-yet` ([why](why/checking.md#chk-350)).
   Its entry points, pipelines and tests are not built when another file is compiled.
-  A file-scope `sampler` in it is `unsupported-yet`.
   Its `@operator` functions apply in every file that uses it, since an operator has no qualified spelling, and in no other.
   One binding list may name two bindings of one name from different modules, each its own group (EMIT-85).
 

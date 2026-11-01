@@ -134,7 +134,7 @@ TEST("sgl check - a program whose module line names a library module joins it")
     CHECK(reports_with(library, "module view\nfun f(x: float) -> float => brighten(sample(x))\n") == "");
 }
 
-TEST("sgl check - a module's operator applies where the module is used, and no file sampler of its own yet")
+TEST("sgl check - a module's operator applies where the module is used, and its file sampler too")
 {
     cc::string_view const library[] = {"module ops\nstruct v:\n    x: float\n"
                                        "@operator(\"+\") fun plus(a: v, b: v) -> v => v(a.x + b.x)\n",
@@ -145,6 +145,6 @@ TEST("sgl check - a module's operator applies where the module is used, and no f
     // a file that does not use the module sees none of its operators, as it sees none of its names
     CHECK(reports_with(library, "use maker\nfun f() => maker.make() + maker.make()\n")
               .starts_with("no-matching-overload user:[maker.make() + maker.make()]"));
-    CHECK(reports_with(library, "use samplers\n")
-              .contains("unsupported-yet lib.1:[sampler bilinear:] a file-scope sampler in a module the program uses"));
+    // EMIT-133: a module's file-scope sampler shares the program's index space
+    CHECK(reports_with(library, "use samplers\n") == "");
 }

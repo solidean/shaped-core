@@ -291,7 +291,7 @@ described_entry_point describe_entry_point(check::checked_module const& m,
     result.options = option_names(m, e.options);
     result.footprint = check::footprint_of(m, legal);
     for (auto const id : driver::impl::file_samplers_of(legal))
-        result.samplers.push_back(m.at(id).name);
+        result.samplers.push_back(m.qualified_name_of(id));
     if (e.entry_stage >= check::stage::raygen && check::is_valid(e.input))
     {
         result.payload = m.name_of(e.input);
@@ -324,8 +324,8 @@ cc::string baked_samplers(check::checked_module const& m, cc::span<u8 const> is_
     for (auto i = isize(0); i < m.symbols.size(); ++i)
     {
         if (is_reached[i] != 0)
-            result += cc::format("{}{}#{}@{}", result.empty() ? "" : ", ", m.symbols[i].name, sampler_index,
-                                 check::hex_of(check::structural_hash(m.samplers[m.symbols[i].info])));
+            result += cc::format("{}{}#{}@{}", result.empty() ? "" : ", ", m.qualified_name_of(check::symbol_id(i)),
+                                 sampler_index, check::hex_of(check::structural_hash(m.samplers[m.symbols[i].info])));
         sampler_index += m.symbols[i].kind == check::symbol_kind::sampler ? 1 : 0;
     }
     return result;
@@ -476,7 +476,7 @@ described_raytracing_pipeline describe_raytracing_pipeline(check::checked_module
             mark_samplers(m, entry, legal, is_reached);
     for (auto i = isize(0); i < m.symbols.size(); ++i)
         if (is_reached[i] != 0)
-            result.samplers.push_back(m.symbols[i].name);
+            result.samplers.push_back(m.qualified_name_of(check::symbol_id(i)));
 
     // The frozen part: what the generated definition fixes, so a reload that moves it cannot follow.
     auto rays = cc::string();
@@ -562,7 +562,7 @@ described_pipeline describe_pipeline(check::checked_module const& m,
     // One layout serves every stage, so it carries what any of them reaches, in index order.
     for (auto i = isize(0); i < m.symbols.size(); ++i)
         if (is_reached[i] != 0)
-            result.samplers.push_back(m.symbols[i].name);
+            result.samplers.push_back(m.qualified_name_of(check::symbol_id(i)));
     for (auto const b : m.at(p.layout))
         result.layout.push_back(host_name_of(m, b));
     if (check::is_valid(p.inline_constants))
@@ -723,7 +723,7 @@ sgl::described_file_sampler sgl::driver::impl::describe_file_sampler(check::chec
 {
     auto const& s = m.at(id);
     auto const& state = m.samplers[s.info];
-    return {.name = s.name,
+    return {.name = m.qualified_name_of(id),
             .index = emit_impl::file_sampler_index(m, id),
             .sampler_type = cc::string(sampler_type_of(m, {.type = s.type, .static_sampler = s.info})),
             .settings = describe_settings(state),
@@ -823,6 +823,12 @@ cc::result<sgl::module_description, cc::string> sgl::describe(describe_request c
         auto const is_option = s.kind == check::symbol_kind::constant && m.constants[s.info].option == id;
         if (is_option && s.file >= m.prelude_file_count())
             result.options.push_back(describe_option(m, id));
+        // a module's sampler shares the program's index space, so the host binds it too (EMIT-133)
+        if (s.kind == check::symbol_kind::sampler && !is_own(s.file) && s.file >= m.prelude_file_count())
+        {
+            result.samplers.push_back(driver::impl::describe_file_sampler(m, id));
+            continue;
+        }
         if (!is_own(s.file) || is_option)
             continue;
 

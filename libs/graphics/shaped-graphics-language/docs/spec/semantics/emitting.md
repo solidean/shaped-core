@@ -244,7 +244,8 @@ A binding that is not `@inline` is a group.
 * **EMIT-105** An entry point that lists more than three groups is `too-many-groups` on every target, since sg binds three besides the inline constants.
   Only the entry point's list counts: a function that is no entry point takes the groups its caller hands it, which are no addresses of their own.
 * **EMIT-133** A file-scope sampler the entry point's code reaches is one global named as the sampler is, and one the code does not reach is not declared.
-  Its index i is its position among the module's file-scope samplers in declaration order, so every entry point and every stage states the same one.
+  Its index i is its position among every file-scope sampler the program and the modules it uses declare, in declaration order with the modules' files first.
+  So every entry point and every stage states the same one, and a module's is described to the host beside the program's, by its qualified name.
   It stands where sg binds a pipeline layout's static sampler of index i: `register(s<i>, space10)` in `hlsl-dx12`, and `[[vk::binding(i + 1, 3)]]` in `hlsl-vulkan`.
   WGSL writes it as `@group(3) @binding(i + 1)`, since binding 0 of sg's own group is the inline constants', and MSL as the entry point's parameter `sampler name [[sampler(i)]]`.
   A ray-tracing stage's is a `constexpr sampler` of its settings in MSL instead, since a visible or an intersection function has no sampler slot to read.

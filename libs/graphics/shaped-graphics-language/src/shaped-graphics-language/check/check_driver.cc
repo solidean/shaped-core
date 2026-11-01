@@ -691,10 +691,8 @@ void checker::declare(i32 file, ast::decl_id decl)
         },
         [&](ast::sampler_decl const& s)
         {
-            // CHK-350: a file-scope sampler takes a position among its module's, which no other module numbers
-            if (!is_prelude_file(file) && file_module[file] != 0)
-                unsupported_symbol(s.name, "a file-scope sampler in a module the program uses");
-            else if (!s.name.empty())
+            // EMIT-133: a module's sampler takes an index after the samplers declared before it, whatever their module
+            if (!s.name.empty())
                 add_symbol(named(symbol_kind::sampler, s.name), s.name);
         },
         [&](ast::pipeline_decl const& p)
