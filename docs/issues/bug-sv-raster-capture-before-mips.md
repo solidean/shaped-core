@@ -23,7 +23,8 @@ Not narrowed down further.
 shelley works around it with a small throwaway capture before each snapshot, which leaves the textures resident with their chains; every capture after it is identical, across runs too.
 
 **Narrowed down (2026-11-01)**: not the settling, and not mips left ungenerated.
-Each capture's viewer starts with fresh resources and waits: the pending mip work counts down from 11 to 0, the texture lands, and only then does the capture settle, for the first capture and later ones alike.
+Each capture's viewer starts with fresh resources and waits: the pending mip work counts down from 11 to 0, and the texture lands.
+Only then does the capture settle, for the first capture and later ones alike.
 A declined mip pass stays pending (`record_pending_work`), and turning the BC7 swap off (`texture_policy::compress`) changes nothing.
 So what differs is state that outlives a viewer in the process: the first capture samples the texture as if unfiltered, the later ones filtered.
 Every view here, the unlit ones too, runs the traced path (`any_traced` is set), so the tracer's texture level-of-detail inputs are the next suspect.
