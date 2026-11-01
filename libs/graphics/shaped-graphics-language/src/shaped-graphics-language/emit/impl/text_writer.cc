@@ -341,8 +341,11 @@ struct writer
             declaration,
             {.name = name, .type = type_text(p, d, x.type), .dimensions = array_dimensions(p, x.type), .is_mut = true});
         line(declaration);
+        // EMIT-168: an element of an array of mat3 is a float4x3, which narrows as one does
+        auto const is_matrix = is_mat3(p.m, p.m.at(x.type).element);
         for (auto i = isize(0); i < isize(p.m.at(x.type).count); ++i)
-            line(cc::format("{}[{}] = {}[{}]{};", name, i, raw, i, lanes));
+            line(is_matrix ? cc::format("{}[{}] = ((float3x3){}[{}]);", name, i, raw, i)
+                           : cc::format("{}[{}] = {}[{}]{};", name, i, raw, i, lanes));
         return name;
     }
 
@@ -355,8 +358,10 @@ struct writer
             declaration,
             {.name = name, .type = type_text(p, d, type), .value = value, .dimensions = array_dimensions(p, type)});
         line(declaration);
+        auto const is_matrix = is_mat3(p.m, p.m.at(type).element);
         for (auto i = isize(0); i < isize(p.m.at(type).count); ++i)
-            line(cc::format("{}[{}].xyz = {}[{}];", raw, i, name, i));
+            line(is_matrix ? cc::format("{}[{}] = sgl_widen_mat3({}[{}]);", raw, i, name, i)
+                           : cc::format("{}[{}].xyz = {}[{}];", raw, i, name, i));
     }
 
     /// EMIT-173: `text`, the expression `id` as its target holds it, converted back to the value it reads as.
@@ -932,8 +937,8 @@ struct writer
                 // EMIT-169 and EMIT-172: an element of an array held as 4-vectors is read and written through its lanes
                 if (auto const& held = p.accesses[index_of(a.object)]; held.held == held_as::widened_array)
                 {
-                    result = {.text = cc::format("{}[{}]{}", object, expr(a.index).text, held.lanes),
-                              .binds = level::primary};
+                    result = read_as_value(id, {.text = cc::format("{}[{}]{}", object, expr(a.index).text, held.lanes),
+                                                .binds = level::primary});
                     return;
                 }
                 auto index = expr(a.index).text;

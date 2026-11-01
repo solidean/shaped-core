@@ -21,6 +21,13 @@ bool is_3_vector_array(checked_module const& m, type_id type)
     return record != nullptr && record->leaf_count == 3;
 }
 
+/// The array of mat3 HLSL holds in GPU memory as one of `float4x3` (EMIT-168).
+bool is_mat3_array(checked_module const& m, type_id type)
+{
+    return is_valid(type) && m.builtin_type_of(type) == nullptr && m.at(type).kind == type_kind::array
+        && is_mat3(m, m.at(type).element);
+}
+
 /// The planned struct of `type` where it stands in natural GPU memory, as its target declares it there; null elsewhere.
 planned_struct const* struct_in_memory(plan const& p, type_id type)
 {
@@ -45,6 +52,8 @@ memory_access access_of(plan const& p, cc::span<planned_member const> members, i
         return {.held = held_as::widened_mat3};
     if (is_hlsl(p.which) && is_3_vector_array(p.m, member.type))
         return {.held = held_as::widened_array, .lanes = lanes[3]};
+    if (is_hlsl(p.which) && is_mat3_array(p.m, member.type))
+        return {.held = held_as::widened_array};
     if (p.which == emit::target::msl && shares_tail(p, members, index))
         return {.held = held_as::packed_tail};
     return {};
@@ -76,7 +85,8 @@ bool sgl::emit::impl::holds_widened_mat3(plan const& p, check::type_id object_ty
 bool sgl::emit::impl::holds_widened_array(plan const& p, check::type_id object_type, isize member)
 {
     auto const* const s = struct_in_memory(p, object_type);
-    return s != nullptr && is_hlsl(p.which) && is_3_vector_array(p.m, p.m.at(p.m.at(object_type).members)[member].type);
+    auto const type = s != nullptr ? p.m.at(p.m.at(object_type).members)[member].type : check::type_id::none;
+    return s != nullptr && is_hlsl(p.which) && (is_3_vector_array(p.m, type) || is_mat3_array(p.m, type));
 }
 
 bool sgl::emit::impl::is_piece(plan const& p, flat_element const& element)
@@ -129,5 +139,8 @@ void sgl::emit::impl::plan_memory_accesses(plan& p)
             auto const held = p.accesses[index_of(element->object)].held;
             if (held == held_as::widened_array || (held == held_as::pieces && is_piece(p, *element)))
                 p.accesses[index_of(element->object)].is_raw = true;
+            // an element of an array of mat3 is a widened mat3 of its own, read narrowed and written widened
+            if (held == held_as::widened_array && is_mat3(p.m, x.type))
+                p.accesses[&x - p.e.exprs.data()].held = held_as::widened_mat3;
         }
 }

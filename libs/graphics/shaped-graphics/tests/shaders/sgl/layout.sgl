@@ -75,6 +75,39 @@ binding turn:
     turn.mats[id.x] = turn.flat[id.x]
     turn.flat[id.x] = f.basis
 
+// An array of mat3 strides by 48, each element three 16-byte columns, in a block and a buffer's element alike.
+struct posed:
+    frames: mat3[2]
+    tag: float
+
+binding pose:
+    bases: mat3[2]
+    poses: mut buffer[posed]
+    turned: mut buffer[float4]
+
+@compute(64) fun repose(@thread_id id: int3){pose}:
+    let p = pose.poses[id.x]
+    let v = pose.bases[1] * (pose.poses[id.x].frames[id.x % 2] * float3(1.0, 2.0, 3.0))
+    pose.turned[id.x] = float4(v.x, v.y, v.z, p.frames[0].column(1).y + p.tag)
+    pose.poses[id.x] = posed(pose.bases, p.tag * 2.0)
+
+// A multi-dimensional array nests the natural stride: an inner array strides by its own size rounded up to its alignment.
+struct tile:
+    grid: float4[2, 2]
+    weights: float[2, 3]
+    tag: float
+
+binding tiling:
+    rows: float4[2, 2]
+    tiles: mut buffer[tile]
+    picked: mut buffer[float4]
+
+@compute(64) fun retile(@thread_id id: int3){tiling}:
+    let t = tiling.tiles[id.x]
+    let g = tiling.tiles[id.x].grid[id.x % 2, 1] + tiling.rows[1][id.x % 2]
+    tiling.picked[id.x] = float4(g.x, t.weights[1, 2], t.weights[id.x % 2, 0], g.w)
+    tiling.tiles[id.x] = tile(tiling.rows, t.weights, t.tag + 1.0)
+
 // An array strides by its element rounded up to the element's alignment: a float3 by 16, a float by 4, a struct by its
 // size, here 32 with `radius` in `color`'s tail.
 struct lamp:

@@ -718,9 +718,12 @@ ops[i](mut v)                                            // raygen, miss, closes
   **An array in memory strides by its element rounded up to its alignment** (CHK-291): a `float3` by 16, a struct by its size.
   A constant block admits only elements of whole rows, unless `@padding(.every_element) weights: float[8]` gives each element a row (EMIT-172).
   HLSL holds a 3-vector array as 4-vectors (EMIT-169), and MSL packs a struct's or a block's shared tail (EMIT-170).
-  Multi-dimensional, packed and `mat3` arrays in memory still wait (EMIT-171); the host writes a 3-vector element as `slib::gpu_padded<T, 16>`.
+  A multi-dimensional array nests the natural stride, and an array of `mat3` strides by 48; the host writes a 3-vector element as `slib::gpu_padded<T, 16>`.
+  Packed arrays, and multi-dimensional ones of 3-vectors or `mat3`, still wait (EMIT-171).
   **A `mat3` in memory is three 16-byte columns, 48 bytes**: the host writes `slib::gpu_mat3`, and `tg::mat3f` under `@padding(.none)`.
-  HLSL holds it as a `float4x3`, which a read narrows and a write widens (EMIT-168); it crosses no stage edge and rides in no ray payload yet.
+  HLSL holds it as a `float4x3`, which a read narrows and a write widens (EMIT-168); it rides in no ray payload yet.
+- **A vertex input and a stage link carry a matrix or a 1-D array** (CHK-422), a location per column or element: `frame_0`, `frame_1`, … (EMIT-174).
+  A vertex input's host struct keeps the member whole, and its layout names an attribute per piece; a pixel output takes neither.
 - **`scope:` opens a block whose locals end with it** (AST-156), transparent to `break`, `yield` and `return`; it flattens into its parent.
 - **`floatN(…)`, `intN(…)` and `uintN(…)` convert a scalar of another of those kinds**, as `as` would (CHK-421); `vec3` and `pos3` never do.
 - **`half`, `short`, `ushort` and their vectors are the 16-bit families** (CHK-381): `require shader_f16` or `shader_int16`, and WGSL has no short.

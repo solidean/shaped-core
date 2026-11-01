@@ -748,21 +748,50 @@ TEST("sgl emit layout - an array strides by its element rounded to its alignment
     CHECK(msl.contains("    device track* scene_tracks [[id(1)]];\n"));
 }
 
-TEST("sgl emit layout - a multi-dimensional, a packed or a mat3 array in GPU memory waits, alike on every target")
+TEST("sgl emit layout - a packed array, and a multi-dimensional one HLSL would widen, wait alike on every target")
 {
-    auto const in_buffer = [](cc::string_view member, cc::string_view field)
+    auto const source_of = [](cc::string_view member, cc::string_view field)
     {
-        return errors_of(cc::format("struct holder:\n    {}\n\nbinding work:\n    {}\n\n"
-                                    "@compute(64) fun main(@thread_id id: int3){{work}}:\n"
-                                    "    let x = work.items[id.x]\n",
-                                    field, member));
+        return cc::format("struct holder:\n    {}\n\nbinding work:\n    {}\n\n"
+                          "@compute(64) fun main(@thread_id id: int3){{work}}:\n"
+                          "    let x = work.items[id.x]\n",
+                          field, member);
     };
-    CHECK(in_buffer("items: buffer[holder]", "grid: float4[2, 2]")
-          == "unsupported a multi-dimensional array in GPU memory: 'work.items'.grid\n");
+    auto const in_buffer
+        = [&](cc::string_view member, cc::string_view field) { return errors_of(source_of(member, field)); };
+    // EMIT-171: a multi-dimensional array nests its natural stride, and an array of mat3 is held as HLSL holds one
+    for (auto const field : {"grid: float4[2, 2]", "weights: float[2, 3]", "turns: mat3[2]"})
+        for (auto const t : sgl::emit::all_targets())
+            CHECK(sgl::emit::dump_errors(emit_source(source_of("items: buffer[holder]", field), 0, t)) == "").context(field);
+    CHECK(in_buffer("items: buffer[holder]", "grid: float3[2, 2]")
+          == "unsupported a multi-dimensional array of float3 in GPU memory: 'work.items'.grid\n");
+    CHECK(in_buffer("items: buffer[holder]", "turns: mat3[2, 2]")
+          == "unsupported a multi-dimensional array of mat3 in GPU memory: 'work.items'.turns\n");
     CHECK(in_buffer("@padding(.none) items: buffer[holder]", "rows: float4[2]")
           == "unsupported an array in @padding(.none) memory: 'work.items'.rows\n");
-    CHECK(in_buffer("items: buffer[holder]", "turns: mat3[2]")
-          == "unsupported an array of mat3 in GPU memory: 'work.items'.turns\n");
+}
+
+TEST("sgl emit layout - HLSL holds an array of mat3 as one of float4x3, each element narrowed and widened as one is")
+{
+    constexpr auto source = "struct posed:\n"
+                            "    frames: mat3[2]\n"
+                            "\n"
+                            "binding work:\n"
+                            "    poses: mut buffer[posed]\n"
+                            "    out_data: mut buffer[float4]\n"
+                            "\n"
+                            "@compute(64) fun main(@thread_id id: int3){work}:\n"
+                            "    let p = work.poses[id.x]\n"
+                            "    let v = work.poses[id.x].frames[id.x % 2] * float3(1.0)\n"
+                            "    work.out_data[id.x] = float4(v.x, v.y, v.z, 1.0)\n"
+                            "    work.poses[id.x] = posed([p.frames[1], p.frames[0]])\n";
+    auto const hlsl = text_of(source, target::hlsl_dx12);
+    CHECK(hlsl.contains("    column_major float4x3 frames[2];\n"));
+    CHECK(hlsl.contains("mul(((float3x3)work_poses[id.x].frames[id.x % 2]), (float3)1.0)"));
+    CHECK(hlsl.contains("posed_value.frames[1] = sgl_widen_mat3(widened[1]);\n"));
+    // every other target's mat3 is three 16-byte columns already, so the array is its own
+    CHECK(text_of(source, target::wgsl).contains("    frames: array<mat3x3f, 2>,\n"));
+    CHECK(text_of(source, target::msl).contains("    array<float3x3, 2> frames;\n"));
 }
 
 TEST("sgl emit layout - an every_element array is one of 4-vectors on every target, read through its own lanes")
