@@ -326,3 +326,25 @@ TEST("sgl driver - a file-scope sampler the code reaches is an interface binding
     for (auto const& slot : r.value().footprint)
         CHECK(slot.host_name != "edge");
 }
+
+TEST("sgl driver - two bindings of one name from two modules are bound by names of their own")
+{
+    // CHK-350: the program's `frame` keeps its name, and the module's second one is minted another
+    sgl::library_file const library[]
+        = {{.name = "post.sgl", .source = "module post\nbinding frame:\n    exposure: float\n"}};
+    constexpr auto source = "use post\n"
+                            "binding frame:\n"
+                            "    gain: float\n"
+                            "    values: mut buffer[float]\n"
+                            "@compute(64) fun cs(@thread_id id: int3){frame, post.frame}:\n"
+                            "    frame.values[id.x] = frame.gain * post.frame.exposure\n";
+    auto const r
+        = sgl::compile_to_text({.source = source, .library = library, .entry_point = "cs", .target = target::wgsl});
+    REQUIRE(r.has_value());
+    auto const& bindings = r.value().bindings;
+    REQUIRE(bindings.size() == 3);
+    CHECK(bindings[0].emitted == "frame");
+    CHECK(bindings[1].emitted == "frame_values");
+    CHECK(bindings[2].emitted == "frame_1");
+    CHECK(r.value().text.contains("var<uniform> frame_1: frame_data_1;"));
+}

@@ -202,6 +202,8 @@ struct planner
     plan& p;
     /// Every spelling a struct or an enum case was given.
     cc::set<cc::string> type_spellings;
+    /// The names the bindings of the tree were spelled, so a second binding of one name is minted one of its own.
+    cc::set<cc::string> binding_spellings;
     /// Where a factors struct's locations start: after the control point's, which SPIR-V counts in the same space.
     i32 patch_location_base = 0;
 
@@ -212,6 +214,16 @@ struct planner
         if (!is_reserved(p.which, name) && !is_called_by_a_builtin(p.m, p.which, name) && !name.starts_with("sgl_"))
             return name;
         return p.names.mint(cc::format("{}_", name));
+    }
+
+    /// `spell` for a binding's name, which one list may hold twice from two modules (CHK-350): the second is minted.
+    cc::string spell_binding(cc::string_view name)
+    {
+        auto result = spell(name);
+        if (binding_spellings.contains(result))
+            result = p.names.mint(result);
+        binding_spellings.insert(result);
+        return result;
     }
 
     /// `spell` for the name of a struct or an enum case, which the text declares at its top level.
@@ -471,7 +483,7 @@ struct planner
                 p.resources.push_back({.binding = id,
                                        .member = i32(i),
                                        .name = p.names.mint(cc::format("{}_{}", s.name, members[i].name)),
-                                       .host_name = cc::format("{}.{}", s.name, members[i].name),
+                                       .host_name = cc::format("{}.{}", p.m.qualified_name_of(id), members[i].name),
                                        .type = is_array ? whole.element : members[i].type,
                                        .element = t.element,
                                        .space = element_space(p.m.bindings[s.info], members[i]),
@@ -502,8 +514,8 @@ struct planner
                 // The binding is a module-level declaration, so its name is its own unless the target reserves it.
                 auto planned = planned_constants{
                     .symbol = id,
-                    .name = spell(s.name),
-                    .host_name = s.name,
+                    .name = spell_binding(s.name),
+                    .host_name = p.m.qualified_name_of(id),
                     .block_name = p.names.mint(cc::format("{}_data", s.name)),
                     .members = members_of(plain, false),
                     .group = group,
@@ -685,8 +697,8 @@ struct planner
                 continue;
             auto planned = planned_constants{
                 .symbol = id,
-                .name = spell(s.name),
-                .host_name = s.name,
+                .name = spell_binding(s.name),
+                .host_name = p.m.qualified_name_of(id),
                 .block_name = p.names.mint(cc::format("{}_data", s.name)),
                 .members = members_of(b.members, false),
             };

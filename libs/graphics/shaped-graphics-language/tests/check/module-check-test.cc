@@ -74,10 +74,9 @@ TEST("sgl check - a binding of a module is listed and read through its qualified
     CHECK(reports_with(library, "use view\nfun f(x: float) -> float => view.exposed(x)\n").contains("binding-not-listed"));
     CHECK(reports_with(library, "use view\ntest {view.frame}:\n    view.frame.exposure == 0.0\n") == "");
 
-    // CHK-350: two bindings of one name in one list would be one name twice in the target text
+    // CHK-351: two bindings of one name from different modules are two bindings, which one list may name
     cc::string_view const two[] = {k_view, "module post\nbinding frame:\n    gain: float\n"};
-    CHECK(reports_with(two, "use view\nuse post\nfun f(x: float){view.frame, post.frame} -> float => x\n")
-          == "unsupported-yet user:[post.frame] two bindings named frame in one list, from different modules\n");
+    CHECK(reports_with(two, "use view\nuse post\nfun f(x: float){view.frame, post.frame} -> float => x\n") == "");
 
     // CHK-351: one binding listed twice, by its name or through two aliases of its module
     CHECK(reports_with(library, "use view\nuse view as v\nfun f(x: float){view.frame, v.frame} -> float => x\n")
