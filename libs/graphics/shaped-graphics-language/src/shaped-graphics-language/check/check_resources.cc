@@ -699,12 +699,13 @@ void checker::judge_constant_arguments(i32 file, ast::expr_id id)
     }
 }
 
-void checker::index_builtin_symbols()
+void checker::index_builtin_symbols(isize first)
 {
     if (out.builtins == nullptr)
         return;
-    symbol_of_builtin.resize_to_filled(out.builtins->functions.size(), symbol_id::none);
-    for (auto i = isize(0); i < out.symbols.size(); ++i)
+    if (symbol_of_builtin.size() != out.builtins->functions.size())
+        symbol_of_builtin.resize_to_filled(out.builtins->functions.size(), symbol_id::none);
+    for (auto i = first; i < out.symbols.size(); ++i)
         if (auto const intrinsic = out.symbols[i].intrinsic; out.builtins->is_known(intrinsic))
             symbol_of_builtin[index_of(intrinsic)] = symbol_id(i);
 }

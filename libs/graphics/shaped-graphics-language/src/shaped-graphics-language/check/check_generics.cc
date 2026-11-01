@@ -75,14 +75,21 @@ type_id bound_to(cc::span<type_id const> bindings, type_id parameter)
 }
 } // namespace
 
+namespace
+{
+/// The key of the instance of `generic` for `argument` in `checker::instances`.
+u64 instance_key(type_id generic, type_id argument)
+{
+    return (u64(u32(index_of(generic))) << 32) | u64(u32(index_of(argument)));
+}
+} // namespace
+
 type_id checker::existing_instance(type_id generic, type_id argument) const
 {
     if (argument == out.at(generic).element)
         return generic;
-    for (auto i = isize(0); i < out.types.size(); ++i)
-        if (out.types[i].generic == generic && out.types[i].element == argument)
-            return type_id(i);
-    return type_id::none;
+    auto const* const found = instances.get_ptr(instance_key(generic, argument));
+    return found != nullptr ? *found : type_id::none;
 }
 
 type_id checker::instance_of(type_id generic, type_id argument)
@@ -107,6 +114,7 @@ type_id checker::instance_of(type_id generic, type_id argument)
         .spelled = cc::format("{}[{}]", out.at(templated.symbol).name, out.name_of(argument)),
         .generic = generic,
     });
+    instances[instance_key(generic, argument)] = id;
     out.members.push_back_range(members);
     return id;
 }

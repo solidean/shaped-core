@@ -70,14 +70,14 @@ void checker::run(resume_point from)
         check_test(i32(i));
 
     judge_wide_literals(from.wide_literals);
-    find_recursion();
+    find_recursion(from.symbols);
 
     // Every binding and body is checked by now, so what each entry point needs and declares is known.
     for (auto i = from.symbols; i < out.symbols.size(); ++i)
         if (out.symbols[i].kind == symbol_kind::function && out.symbols[i].state == symbol_state::checked)
             judge_entry_features(symbol_id(i));
 
-    index_builtin_symbols();
+    index_builtin_symbols(from.symbols);
     instantiate_generics();
     // CHK-350: the entry points are the program's; a module the program uses is a library, whose own are not built
     for (auto i = from.symbols; i < out.symbols.size(); ++i)

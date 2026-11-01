@@ -399,6 +399,8 @@ struct checker
     /// The type being resolved is a pixel entry point's result, whose attributes are its target's settings (CHK-418).
     bool allows_type_attributes = false;
     layered_map<cc::string, cc::vector<type_id>> interned_types;
+    /// Every instance of a generic struct, by its generic and its argument: what `existing_instance` finds.
+    layered_map<u64, type_id> instances;
     cc::vector<pending_extension> pending_extensions;
     /// Integer literals that do not fit an `int`, judged once every literal has met the type it converts to (CHK-61).
     cc::vector<wide_literal> wide_literals;
@@ -783,7 +785,8 @@ struct checker
                                           cc::span<symbol_id const> candidates,
                                           ast::range_of<ast::argument> arguments);
     void judge_offset_range(i32 file, ast::expr_id expr);
-    void index_builtin_symbols();
+    /// Indexes the symbols from `first`, the ones before it indexed when their layer was checked.
+    void index_builtin_symbols(isize first);
     /// CHK-282: every barrier and every call that takes derivatives stands where all invocations of its group arrive.
     void judge_uniformity(flat_entry_point const& structured);
     /// CHK-300, CHK-401: every index into a binding array, judged over the copies the entry points inlined of it.
@@ -960,8 +963,19 @@ struct checker
     [[nodiscard]] const_evaluation evaluate_const(symbol_id scope, i32 file, ast::expr_id expr, type_id type);
     /// Every module-level name as `out.symbols` now holds them, the last of `out.module_names`, made anew only when a
     /// symbol joined since `module_names_for`.
-    [[nodiscard]] cc::set<cc::string> const* module_names();
+    /// The lower layer's set, shared, and this layer's own, each a flat tree's mint takes.
+    struct taken_names
+    {
+        cc::set<cc::string> const* below = nullptr;
+        cc::set<cc::string> const* own = nullptr;
+    };
+    [[nodiscard]] taken_names module_names();
     isize module_names_for = -1;
+    cc::set<cc::string> const* own_module_names = nullptr;
+    /// The prelude's every module-level name, made once with it and shared by every program's check behind it, and how
+    /// many symbols it covers.
+    cc::shared_ptr<cc::set<cc::string>> module_names_below;
+    isize module_names_below_count = 0;
     /// True where the parser or the AST pass reported an error inside `extent` of `file`.
     [[nodiscard]] bool has_syntax_error_in(i32 file, source_span extent) const;
     /// The statement that is the last code line of `statements`, through the last branch of an `if`, a loop's body and
@@ -1067,7 +1081,9 @@ struct checker
                        bool& is_all_constant);
     void check_yield(function_scope& scope, source_span where, ast::expr_id value);
     /// Reports every loop of calls once, and marks the functions on it.
-    void find_recursion();
+    /// Walks the calls of the functions from symbol `first`: a lower layer's calls only its own, and were walked when
+    /// it was checked.
+    void find_recursion(isize first);
     /// True when `function` and every function it calls checked soundly and none is recursive, so all of it inlines.
     [[nodiscard]] bool inlines_whole(symbol_id function);
 

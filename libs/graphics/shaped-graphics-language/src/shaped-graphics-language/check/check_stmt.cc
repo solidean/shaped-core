@@ -674,16 +674,20 @@ void checker::check_return(function_scope& scope, source_span where, ast::expr_i
 
 // ---- recursion ------------------------------------------------------------------------------------------------------
 
-void checker::find_recursion()
+void checker::find_recursion(isize first)
 {
     // 0 is unvisited, 1 is on the path, 2 is done; one entry per function, as `notes`
+    // A lower layer's function is done: it calls only its own layer's, whose loops were found when it was checked.
     auto state = cc::vector<u8>::create_filled(notes.size(), 0);
+    for (auto i = isize(0); i < first; ++i)
+        if (auto const& s = out.symbols[i]; s.kind == symbol_kind::function && s.info >= 0)
+            state[s.info] = 2;
     auto path = cc::vector<symbol_id>();
 
     // Each function's calls, so a visit walks its own edges rather than every edge of the module.
     auto calls_of = cc::vector<cc::vector<isize>>::create_defaulted(notes.size());
     for (auto i = isize(0); i < calls.size(); ++i)
-        if (auto const info = out.at(calls[i].caller).info; info >= 0)
+        if (auto const info = out.at(calls[i].caller).info; info >= 0 && state[info] == 0)
             calls_of[info].push_back(i);
 
     auto const visit = [&](auto&& self, symbol_id f) -> void
@@ -718,7 +722,7 @@ void checker::find_recursion()
         state[out.at(f).info] = 2;
     };
 
-    for (auto i = isize(0); i < out.symbols.size(); ++i)
+    for (auto i = first; i < out.symbols.size(); ++i)
     {
         auto const& s = out.symbols[i];
         if (s.kind == symbol_kind::function && s.info >= 0 && state[s.info] == 0)

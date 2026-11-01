@@ -6,12 +6,14 @@
 bool sgl::check::name_mint::is_taken(cc::string_view name) const
 {
     return index.contains(name) || (parent != nullptr && parent->is_taken(name))
-        || (also_taken != nullptr && also_taken->contains(name));
+        || (also_taken != nullptr && also_taken->contains(name))
+        || (also_taken_below != nullptr && also_taken_below->contains(name));
 }
 
 bool sgl::check::name_mint::reserve(cc::string_view name)
 {
-    if ((parent != nullptr && parent->is_taken(name)) || (also_taken != nullptr && also_taken->contains(name)))
+    if ((parent != nullptr && parent->is_taken(name)) || (also_taken != nullptr && also_taken->contains(name))
+        || (also_taken_below != nullptr && also_taken_below->contains(name)))
         return false;
     if (!index.insert(name))
         return false;

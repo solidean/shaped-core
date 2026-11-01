@@ -156,7 +156,7 @@ Two places keep one:
 
 Each step stands on its own and is measured by the `sgl profile` tests.
 
-1. **The prelude as a shared layer.**
+1. **The prelude as a shared layer.** *Landed on 2026-11-01: a small program's check behind the prelude went from 0.61 to 0.10 ms.*
    Segmented tables and overlays for the prelude and the program.
    It needs no change to ids: with two layers, the program's ids continue after the prelude's as they do today.
    The prelude is still checked once per process; what goes is the copy.

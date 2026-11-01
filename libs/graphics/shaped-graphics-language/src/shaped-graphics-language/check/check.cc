@@ -133,6 +133,16 @@ cc::optional<checked_prelude> sgl::check::check_prelude(cc::span<module_file con
     c.type_scopes.freeze();
     c.interned_types.freeze();
     c.prelude_visible.freeze();
+    c.instances.freeze();
+    // the prelude's names, once, for every program behind it; a program's check makes a set of its own names alone
+    auto names = cc::make_shared<cc::set<cc::string>>();
+    for (auto const& s : c.out.symbols)
+        if (!s.name.empty())
+            (void)names->insert(s.name);
+    c.module_names_below = cc::move(names);
+    c.module_names_below_count = c.out.symbols.size();
+    c.own_module_names = nullptr;
+    c.out.module_names = {};
     result._resume = {
         .files = i32(prelude.size()),
         .symbols = c.out.symbols.size(),
