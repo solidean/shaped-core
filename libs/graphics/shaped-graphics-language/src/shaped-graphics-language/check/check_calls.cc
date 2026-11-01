@@ -431,10 +431,8 @@ type_id checker::check_call(function_scope& scope, ast::expr_id id, ast::call co
         if ((spelling == "==" || spelling == "!=") && arguments.types.size() == 2 && arguments.types[0] == void_type
             && arguments.types[1] == void_type)
             return type_of_builtin(builtins::k_bool, file, where);
-        auto const* const found = operators_seen_from(file).get_ptr(spelling);
-        auto const none = cc::span<symbol_id const>();
-        auto const result = resolve_overload(scope, id, ast::expr_id::none,
-                                             found != nullptr ? cc::span<symbol_id const>(*found) : none, arguments,
+        auto const found = operators_of(file, spelling);
+        auto const result = resolve_overload(scope, id, ast::expr_id::none, cc::span<symbol_id const>(found), arguments,
                                              cc::format("operator {}", spelling));
         // CHK-394: what the operator folds to is judged at the type it ends up with, as a literal written there is
         if (result != error_type && number_of(file, id).is_number)

@@ -390,10 +390,8 @@ void checker::check_texel_store(function_scope& scope, ast::expr_id value, type_
 symbol_id checker::conversion_of(i32 file, source_span where, type_id from, type_id to)
 {
     // Overloads of `as` differ in their result as well, so the one that matches both ends is the conversion.
-    auto const* const candidates = operators_seen_from(file).get_ptr("as");
-    if (candidates == nullptr)
-        return symbol_id::none;
-    for (auto const candidate : *candidates)
+    auto const candidates = operators_of(file, "as");
+    for (auto const candidate : candidates)
     {
         if (demand(candidate, file, where) != symbol_state::checked)
             continue;

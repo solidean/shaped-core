@@ -518,6 +518,25 @@ struct checker
     {
         return is_prelude_file(file) ? prelude_operators : operators;
     }
+    /// The `@operator` functions of `spelling` that `file` sees: the prelude's, its module's, and those of every module
+    /// it uses, since an operator has no qualified spelling (CHK-350).
+    [[nodiscard]] cc::vector<symbol_id> operators_of(i32 file, cc::string_view spelling) const
+    {
+        auto result = cc::vector<symbol_id>();
+        auto const* const found = operators_seen_from(file).get_ptr(spelling);
+        if (found == nullptr)
+            return result;
+        for (auto const candidate : *found)
+        {
+            auto const from = out.at(candidate).file;
+            auto is_seen = is_prelude_file(from) || file_module[from] == file_module[file];
+            for (auto const& u : uses[file])
+                is_seen = is_seen || u.module == file_module[from];
+            if (is_seen)
+                result.push_back(candidate);
+        }
+        return result;
+    }
     [[nodiscard]] source_span span_of(i32 file, form_id form) const;
     [[nodiscard]] source_span span_of(i32 file, ast::expr_id expr) const;
     [[nodiscard]] source_span span_of(i32 file, ast::decl_id decl) const;

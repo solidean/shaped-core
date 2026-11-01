@@ -1025,11 +1025,8 @@ bool checker::is_out_of_the_running(i32 file, symbol_id candidate, call_argument
 
 symbol_id checker::find_operator(i32 file, cc::string_view spelling, cc::span<type_id const> types) const
 {
-    auto const* const found = operators_seen_from(file).get_ptr(spelling);
-    if (found == nullptr)
-        return symbol_id::none;
     auto result = symbol_id::none;
-    for (auto const candidate : *found)
+    for (auto const candidate : operators_of(file, spelling))
     {
         if (out.at(candidate).state != symbol_state::checked)
             continue;
@@ -1060,19 +1057,18 @@ symbol_id checker::resolve_operator(i32 file,
 
     auto is_silent = false;
     auto matches = cc::vector<candidate_match>();
-    if (auto const* const found = operators_seen_from(file).get_ptr(spelling))
-        for (auto const candidate : *found)
+    for (auto const candidate : operators_of(file, spelling))
+    {
+        if (is_out_of_the_running(file, candidate, arguments))
+            continue;
+        if (demand(candidate, file, where) != symbol_state::checked)
         {
-            if (is_out_of_the_running(file, candidate, arguments))
-                continue;
-            if (demand(candidate, file, where) != symbol_state::checked)
-            {
-                is_silent = true;
-                continue;
-            }
-            if (auto m = match(file, candidate, arguments); m.has_value())
-                matches.push_back(cc::move(m.value()));
+            is_silent = true;
+            continue;
         }
+        if (auto m = match(file, candidate, arguments); m.has_value())
+            matches.push_back(cc::move(m.value()));
+    }
 
     auto const text = call_text(file, cc::format("operator {}", spelling), arguments);
     if (matches.empty())

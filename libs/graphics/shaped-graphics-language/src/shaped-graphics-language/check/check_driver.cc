@@ -637,15 +637,10 @@ void checker::declare(i32 file, ast::decl_id decl)
                 else
                     spelling = {};
 
-                // CHK-350: an operator is never qualified, so one of a module the program uses has no spelling to reach it
-                auto const is_foreign = !is_prelude_file(file) && file_module[file] != 0;
-                if (spelling.empty() || is_foreign)
+                if (spelling.empty())
                 {
-                    if (is_foreign)
-                        unsupported(file, a->name, "an @operator function in a module the program uses");
-                    else
-                        report(diagnostic_kind::invalid_attribute_arguments, file, a->name,
-                               "@operator takes one quoted operator, as in @operator(\"*\")");
+                    report(diagnostic_kind::invalid_attribute_arguments, file, a->name,
+                           "@operator takes one quoted operator, as in @operator(\"*\")");
                     // Neither its name nor an operator finds it: the attribute says its name is hidden.
                     s.state = symbol_state::failed;
                     out.symbols.push_back(cc::move(s));
