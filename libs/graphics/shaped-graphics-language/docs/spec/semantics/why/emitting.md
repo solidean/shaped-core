@@ -146,6 +146,13 @@ HLSL's constant buffers start each array element on a row, WGSL's uniform rule r
 An array of 4-vectors is the one declaration every target places alike, and reading `.x` of it is what a hand-written port of such a shader does.
 The attribute stands on the array, so its cost, three unused lanes per element, is visible where the array is declared.
 
+## EMIT-173
+
+The text writer once worked out how to spell a member from where it was writing it, through flags it set while writing a place or indexing an array.
+A flag set a node too early or too late wrote the wrong text silently, and the read conversion that landed on an assignment's left side in MSL was exactly that.
+A table filled before writing has no such window: each expression carries what it is held as and whether it is read as a value, and the writer looks both up.
+New flat nodes for loads and stores would say the same, at the cost of a case in every pass over the flat tree for nodes that only an emitter sees.
+
 ## EMIT-168
 
 HLSL places a `float3x3` differently in each memory: 44 bytes in a constant buffer, each column on a row but the last short, and 36 in a structured buffer.

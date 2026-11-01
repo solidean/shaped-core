@@ -97,6 +97,7 @@ add_library(shaped-graphics-language
     src/shaped-graphics-language/emit/impl/hlsl.cc
     src/shaped-graphics-language/emit/impl/layout.cc
     src/shaped-graphics-language/emit/impl/memory_form.cc
+    src/shaped-graphics-language/emit/impl/memory_access.cc
     src/shaped-graphics-language/emit/impl/msl.cc
     src/shaped-graphics-language/emit/impl/plan.cc
     src/shaped-graphics-language/emit/impl/text_writer.cc

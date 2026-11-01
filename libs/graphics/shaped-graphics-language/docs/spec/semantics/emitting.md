@@ -563,6 +563,9 @@ The C++ struct a package generates is that layout byte for byte, padding include
   Every target declares it as an array of 4-vectors of the element's scalar.
   An element reads as its own lanes, `a[i].x` or `a[i].xy`, and a read of the whole array rebuilds it into a local element by element.
   The host writes each element as `slib::gpu_padded<T, 16>`.
+* **EMIT-173** How each expression that reaches GPU memory is spelled is decided once per entry point and target, before any text is written ([why](why/emitting.md#emit-173)).
+  What the target holds is the value itself, a widened `mat3` (EMIT-168), a widened array (EMIT-169, EMIT-172), or a packed tail (EMIT-170).
+  An assignment's place, the objects a write through it reaches, and an array indexed in place are spelled as held; every other read converts back.
 * **EMIT-171** An array in GPU memory waits, `unsupported` alike on every target, where it is multi-dimensional, where `@padding(.none)` places it, or where its element is a `mat3`.
   A packed block's array of whole rows is the exception, which EMIT-154 places.
 * **EMIT-168** HLSL holds a `mat3` in GPU memory as a `column_major float4x3`, three whole rows of a constant buffer and 48 bytes of a buffer ([why](why/emitting.md#emit-168)).

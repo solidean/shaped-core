@@ -123,8 +123,6 @@ public:
         return "";
     }
 
-    [[nodiscard]] bool packs_shared_tails() const override { return true; }
-
     void write_member(cc::string& out,
                       planned_struct const* owner,
                       planned_member const& member,

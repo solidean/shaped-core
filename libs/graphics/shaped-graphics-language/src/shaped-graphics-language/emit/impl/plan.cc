@@ -1236,6 +1236,7 @@ sgl::emit::impl::plan sgl::emit::impl::make_plan(check::checked_module const& m,
     for (auto i = isize(0); i < result.local_flags.size(); ++i)
         if (!flags_known[i])
             result.local_flags[i] = cc::nullopt;
+    plan_memory_accesses(result);
     return result;
 }
 

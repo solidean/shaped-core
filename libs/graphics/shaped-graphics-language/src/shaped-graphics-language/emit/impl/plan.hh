@@ -87,6 +87,30 @@ struct planned_enum
     cc::vector<cc::string> case_names;
 };
 
+/// What a target holds in GPU memory where SGL's value is, which a read converts back and a write converts into (EMIT-173).
+enum class held_as : u8
+{
+    itself,
+    /// HLSL's `float4x3` of a `mat3` (EMIT-168): a read narrows it, a write widens into it.
+    widened_mat3,
+    /// MSL's `packed_` 3-vector (EMIT-170): a read converts it, and a write converts into it implicitly.
+    packed_tail,
+    /// An array of 4-vectors (EMIT-169, EMIT-172): an element reads through `lanes`, a whole read or write goes element by
+    /// element.
+    widened_array,
+};
+
+/// How one expression reaching GPU memory is spelled, which `plan_memory_accesses` decides before any text is written.
+struct memory_access
+{
+    held_as held = held_as::itself;
+    /// The lanes an element of a widened array is read and written through: `.x`, `.xy` or `.xyz`.
+    cc::string_view lanes;
+    /// Spelled as held, never converted: an assignment's place, the objects a write through it reaches, or an array
+    /// indexed in place.
+    bool is_raw = false;
+};
+
 /// A block of constants: the one `@inline binding` of the entry point, or the plain members of one of its groups.
 struct planned_constants
 {
@@ -229,6 +253,8 @@ struct plan
     /// Parallel to `locals`: the constant flags every call with a `flags_argument` hands the local, which its type takes.
     /// Empty where no call does, where one hands it flags that are no constant, or where two hand it different ones.
     cc::vector<cc::optional<u32>> local_flags;
+    /// Parallel to `e.exprs`: how each expression reaching GPU memory is spelled (EMIT-173).
+    cc::vector<memory_access> accesses;
     /// Holds every name above and every reserved word of the target, and goes on from the tree's names and the builtins'.
     /// A writer mints what it still needs from here.
     check::name_mint names;
@@ -319,6 +345,15 @@ struct block_placement
 [[nodiscard]] bool shares_tail(plan const& p, planned_struct const& s, isize member);
 /// The same of `members` placed in natural memory, a block's or a struct's.
 [[nodiscard]] bool shares_tail(plan const& p, cc::span<planned_member const> members, isize member);
+
+/// EMIT-173: fills `p.accesses` from the target, its blocks and its structs in memory, and from where each expression
+/// stands: a place, or an array indexed in place, is spelled as held, and every other read is converted back.
+void plan_memory_accesses(plan& p);
+
+/// Whether member `member` of `object_type` is a mat3 its target holds as a `float4x3`, where the struct is in memory.
+[[nodiscard]] bool holds_widened_mat3(plan const& p, check::type_id object_type, isize member);
+/// Whether member `member` of `object_type` is an array of 3-vectors its target holds as 4-vectors (EMIT-169).
+[[nodiscard]] bool holds_widened_array(plan const& p, check::type_id object_type, isize member);
 
 /// The prelude's 4-vector of the scalar of `element`, `float4` for a `float2`, which holds one element per row.
 [[nodiscard]] cc::string_view row_vector_of(plan const& p, check::type_id element);
