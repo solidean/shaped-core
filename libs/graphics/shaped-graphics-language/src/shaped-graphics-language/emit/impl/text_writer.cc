@@ -383,6 +383,8 @@ struct writer
             return {.text = narrowed_array(p.e.at(id), text.text, access.lanes)};
         case held_as::pieces:
             return {.text = rebuilt_from_pieces(p.e.at(id).type, text.text)};
+        case held_as::vector_mat2:
+            return {.text = cc::format("sgl_narrow_mat2({})", text.text)};
         }
         return text;
     }

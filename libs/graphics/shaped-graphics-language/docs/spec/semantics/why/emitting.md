@@ -146,6 +146,13 @@ HLSL's constant buffers start each array element on a row, WGSL's uniform rule r
 An array of 4-vectors is the one declaration every target places alike, and reading `.x` of it is what a hand-written port of such a shader does.
 The attribute stands on the array, so its cost, three unused lanes per element, is visible where the array is declared.
 
+## EMIT-175
+
+A `mat2` is 16 bytes in every buffer layout WGSL, MSL and a structured buffer agree on, and C++'s `tg::mat2f` is the same bytes.
+Only HLSL's constant buffer disagrees, taking a row per column, so a block holds the two columns in one `float4`, as a hand-written port does.
+Aligning it to a row in a constant block keeps that `float4` inside one row, which HLSL requires of every vector there.
+A struct holding one then has one size in a block and another in a buffer, which EMIT-114 already reports as two layouts.
+
 ## EMIT-174
 
 A location holds one vector of up to four lanes on every target, so a member per column or element is the declaration that means the same thing everywhere.

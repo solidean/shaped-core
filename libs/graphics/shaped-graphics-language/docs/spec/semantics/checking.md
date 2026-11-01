@@ -129,7 +129,7 @@ use view
   `m.column(i)` and `m.row(i)` read one column and one row (CHK-407); none has another function yet, and no `==`.
   A local, a parameter, a result and a field of a struct a body holds may be one.
   **A `mat3` also stands in GPU memory**: a constant block, a buffer's element and workgroup memory, at its layout of EMIT-110 and EMIT-168.
-  A `mat2` there is `unsupported-yet`, at any depth of the structs and arrays holding it, and the detail says its layout in GPU memory is not decided.
+  **A `mat2` stands there too**, its two columns back to back in 16 bytes, at its layout of EMIT-175.
   A member of a vertex input or a stage link may be either, as CHK-422 has it; any other struct that crosses a stage edge holding one is `unsupported-yet`.
   That is a pixel output, and a struct or an array in a vertex input or a stage link that holds the matrix.
   So are the ray data of CHK-326: a ray set's payload, a stage's payload, the attributes a hit carries or an intersection reports, and a callable's parameter.

@@ -771,6 +771,66 @@ TEST("sgl emit layout - a packed array, and a multi-dimensional one HLSL would w
           == "unsupported an array in @padding(.none) memory: 'work.items'.rows\n");
 }
 
+TEST("sgl emit layout - a mat2 is 16 bytes, which a constant block starts on a row and HLSL holds there as a float4")
+{
+    constexpr auto source = "struct twisted:\n"
+                            "    turn: mat2\n"
+                            "    tag: float\n"
+                            "\n"
+                            "binding spin:\n"
+                            "    lead: float\n"
+                            "    turn: mat2\n"
+                            "    after: float\n"
+                            "    twists: mut buffer[twisted]\n"
+                            "\n"
+                            "@compute(64) fun main(@thread_id id: int3){spin}:\n"
+                            "    let t = spin.twists[id.x]\n"
+                            "    spin.twists[id.x] = twisted(spin.turn * t.turn, t.tag + spin.lead + spin.after)\n";
+    auto const d = described(source);
+    CHECK(d.bindings[0].members[1].offset == 16);
+    CHECK(d.bindings[0].members[2].offset == 32);
+    CHECK(d.bindings[0].block_size == 36);
+    CHECK(d.memory_structs[0].size == 24); // a buffer's element aligns it to its column
+
+    // EMIT-175: HLSL's constant buffer starts each matrix column on a row, so the block holds the two as one float4
+    auto const hlsl = text_of(source, target::hlsl_dx12);
+    CHECK(hlsl.contains("    float4 turn;\n"));
+    CHECK(hlsl.contains("    float2x2 turn;\n    float tag;\n"));
+    CHECK(hlsl.contains("mul(sgl_narrow_mat2(spin.turn), t.turn)"));
+    CHECK(hlsl.contains("float2x2 sgl_narrow_mat2(float4 m)\n{\n    return float2x2(m.x, m.z, m.y, m.w);\n}\n"));
+    // MSL aligns a float2x2 to 8, so a padding field keeps it on its row
+    CHECK(text_of(source, target::msl)
+              .contains("    float lead;\n    uint sgl_pad0;\n    uint sgl_pad1;\n    uint sgl_pad2;\n    float2x2 "
+                        "turn;\n"));
+
+    // a packed one would take a memory form, which no target writes for a matrix of four scalars yet
+    CHECK(errors_of("binding work:\n    @padding(.none) items: buffer[mat2]\n\n"
+                    "@compute(64) fun main(@thread_id id: int3){work}:\n    let x = work.items[id.x]\n")
+          == "unsupported a mat2 in @padding(.none) memory: 'work.items'\n");
+}
+
+TEST("sgl emit layout - MSL starts a constant block's struct on a row, and strides an array of one by rows")
+{
+    constexpr auto source = "struct small:\n"
+                            "    x: float\n"
+                            "\n"
+                            "binding work:\n"
+                            "    lead: float\n"
+                            "    held: small\n"
+                            "    after: float\n"
+                            "    out_data: mut buffer[float4]\n"
+                            "\n"
+                            "@compute(64) fun main(@thread_id id: int3){work}:\n"
+                            "    work.out_data[id.x] = float4(work.lead, work.held.x, work.after, 0.0)\n";
+    auto const d = described(source);
+    CHECK(d.bindings[0].members[1].offset == 16);
+    CHECK(d.bindings[0].members[2].offset == 32);
+    // EMIT-176: MSL aligns the struct to its float alone, so it says the row itself, which also rounds its size up
+    auto const msl = text_of(source, target::msl);
+    CHECK(msl.contains("struct alignas(16) small\n"));
+    CHECK(msl.contains("    float lead;\n    small held;\n    float after;\n"));
+}
+
 TEST("sgl emit layout - HLSL holds an array of mat3 as one of float4x3, each element narrowed and widened as one is")
 {
     constexpr auto source = "struct posed:\n"

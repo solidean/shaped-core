@@ -71,6 +71,8 @@ struct planned_member
 
 struct planned_struct
 {
+    /// Placed in a constant block rather than in a buffer, which is where HLSL holds a `mat2` as a `float4` (EMIT-175).
+    bool is_constants = false;
     check::type_id type = check::type_id::none;
     cc::string name;
     struct_role role = struct_role::plain;
@@ -105,6 +107,8 @@ enum class held_as : u8
     /// An array of 4-vectors (EMIT-169, EMIT-172): an element reads through `lanes`, a whole read or write goes element by
     /// element.
     widened_array,
+    /// A `mat2` in an HLSL constant block, held as one `float4` of its two columns (EMIT-175): a read rebuilds it.
+    vector_mat2,
     /// An edge struct's array or matrix, held as one member per element or column (EMIT-174): a read rebuilds it, a write
     /// stores each piece.
     pieces,

@@ -79,6 +79,10 @@ struct placed_members
 /// a 2-vector, four times that for a 3- or a 4-vector, and a column's for a matrix.
 [[nodiscard]] i32 natural_alignment_of(builtins::type_record const& record);
 
+/// The alignment a builtin has in `space`: its scalar's under `@padding(.none)`, its natural one elsewhere, but a row for
+/// a `mat2` in a constant block, which HLSL could otherwise not hold in one row (EMIT-175).
+[[nodiscard]] i32 alignment_in(builtins::type_record const& record, address_space space);
+
 /// The bytes a builtin takes in `space`: its scalars' under `@padding(.none)`, and otherwise its natural size, which is
 /// 12 for a `float3` and 48 for a `mat3`, whose columns are 16 bytes apart.
 [[nodiscard]] i32 memory_size_of(builtins::type_record const& record, address_space space);
@@ -99,6 +103,9 @@ struct placed_members
 
 /// Whether `type` is a `mat3`, which HLSL holds in GPU memory as three whole rows (EMIT-168).
 [[nodiscard]] bool is_mat3(check::checked_module const& m, check::type_id type);
+
+/// Whether `type` is a `mat2`, which HLSL holds in a constant block as one `float4` (EMIT-175).
+[[nodiscard]] bool is_mat2(check::checked_module const& m, check::type_id type);
 
 /// The bytes one element of a `buffer[T]` of `element` takes in `space`: a builtin's size rounded up to its alignment,
 /// or the struct's size.

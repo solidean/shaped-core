@@ -91,6 +91,21 @@ binding pose:
     pose.turned[id.x] = float4(v.x, v.y, v.z, p.frames[0].column(1).y + p.tag)
     pose.poses[id.x] = posed(pose.bases, p.tag * 2.0)
 
+// A mat2's two columns stand back to back, 16 bytes, which a constant block starts on a row.
+struct twisted:
+    turn: mat2
+    tag: float
+
+binding twist:
+    lead: float
+    turn: mat2
+    after: float
+    twists: mut buffer[twisted]
+
+@compute(64) fun retwist(@thread_id id: int3){twist}:
+    let t = twist.twists[id.x]
+    twist.twists[id.x] = twisted(twist.turn * t.turn, t.tag + twist.lead + twist.after)
+
 // A multi-dimensional array nests the natural stride: an inner array strides by its own size rounded up to its alignment.
 struct tile:
     grid: float4[2, 2]

@@ -837,3 +837,47 @@ ASYNC_INVOCABLE_TEST("sg - a multi-dimensional array nests its natural stride in
         CHECK(got_tiles[i].tag == float(i + 1));
     }
 }
+
+ASYNC_INVOCABLE_TEST("sg - a mat2 is 16 bytes in a buffer's element, and starts a row of a block, on every backend",
+                     (sg::context_handle const& ctx))
+{
+    REQUIRE(ctx != nullptr);
+    if (!sg_test::shaders_reach(*ctx))
+        SKIP("no compiler builds this binary's shaders into a format this context accepts");
+
+    static_assert(sizeof(shaders::layout::twisted) == 24);
+    auto const pipeline = co_await shaders::layout::retwist.acquire_pipeline(*ctx);
+    auto const group_layout = ctx->cached.acquire_binding_group_layout<shaders::layout::twist>();
+
+    // neither matrix is symmetric, so a transposed read or write shows
+    auto const turn = tg::mat2f::make_from_cols(tg::vec2f(0, 1), tg::vec2f(-2, 0));
+    auto const own = [](int i) { return tg::mat2f::make_from_cols(tg::vec2f(1, float(i)), tg::vec2f(3, 1)); };
+    constexpr auto count = 64;
+    auto twists = cc::vector<shaders::layout::twisted>();
+    for (auto i = 0; i < count; ++i)
+        twists.push_back({.turn = own(i), .tag = float(i)});
+    auto const usage = sg::buffer_usage::readwrite_buffer | sg::buffer_usage::copy_src;
+    auto const twist_buffer = ctx->persistent.create_buffer_from_data(cc::move(twists), usage);
+
+    auto cmd = ctx->create_command_list();
+    auto const group = ctx->transient.create_binding_group(*cmd, group_layout,
+                                                           shaders::layout::twist{
+                                                               .lead = 0.5f,
+                                                               .turn = turn,
+                                                               .after = 0.25f,
+                                                               .twists = twist_buffer.as_readwrite_buffer(),
+                                                           });
+    cmd->compute.bind_pipeline(*pipeline);
+    cmd->compute.bind_group(0, *group);
+    cmd->compute.dispatch_threads(count);
+    auto const twists_back = cmd->download.data_from_buffer(twist_buffer);
+    ctx->submit_command_list(cc::move(cmd));
+
+    auto const got = co_await twists_back.data();
+    REQUIRE(got.size() == isize(count));
+    for (auto i = 0; i < count; ++i)
+    {
+        CHECK(got[i].turn == turn * own(i)).context(cc::format("element {}", i));
+        CHECK(got[i].tag == float(i) + 0.75f);
+    }
+}

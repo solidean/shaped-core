@@ -507,8 +507,7 @@ TEST("sgl check - a binding array is one dimension of resources, bounded, grante
 TEST("sgl check - a mat3 stands in GPU memory, and crosses a stage link alone")
 {
     // CHK-397: its layout in memory is three 16-byte columns (EMIT-110), and no stage edge carries one yet
-    constexpr auto why
-        = "which no stage edge carries yet, since its layout as ray data and across a stage edge is not decided yet";
+    constexpr auto why = "which no stage edge carries yet, since its layout as ray data is not decided yet";
     constexpr auto nested = "struct holder:\n    m: mat3\nstruct outer:\n    h: holder\n\n";
     auto const with_nested = [&](cc::string_view members) { return reports_for(cc::string(nested) + listing(members)); };
 
@@ -521,14 +520,11 @@ TEST("sgl check - a mat3 stands in GPU memory, and crosses a stage link alone")
     CHECK(reports_for(listing("    @padding(.none) raw: mut buffer[mat3]\n")) == "");
     CHECK(reports_for("@workgroup binding tile:\n    rows: mat3[4]\n") == "");
 
-    // an array of them takes whole rows, which the checker admits; HLSL's widening of each element is still to come
+    // an array of them takes whole rows, and HLSL widens each element as it widens one (EMIT-168)
     CHECK(reports_for(listing("    bases: mat3[2]\n")) == "");
 
-    // a mat2's layout is not decided, so memory refuses it at its line
-    CHECK(reports_for(listing("    turn: mat2\n"))
-              .contains("unsupported-yet user:[mat2] a mat2 in a constant block, as its member turn, which only a "
-                        "function "
-                        "body holds, since its layout in GPU memory is not decided yet"));
+    // a mat2 stands in memory too, its two columns back to back (EMIT-175)
+    CHECK(reports_for(listing("    turn: mat2\n")) == "");
 
     // a vertex input, a stage link in both directions, and a pixel output
     constexpr auto edges

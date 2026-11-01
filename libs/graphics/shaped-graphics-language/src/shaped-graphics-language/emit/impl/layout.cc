@@ -37,7 +37,7 @@ element_shape element_of(checked_module const& m, type_id type, address_space sp
 {
     if (auto const* const record = m.builtin_type_of(type))
     {
-        auto const alignment = is_packed(space) ? scalar_size_of(*record) : natural_alignment_of(*record);
+        auto const alignment = alignment_in(*record, space);
         return {.stride = round_up(memory_size_of(*record, space), alignment), .alignment = alignment};
     }
     if (m.at(type).kind == type_kind::array)
@@ -77,7 +77,7 @@ placed_members place_from(checked_module const& m,
         if (auto const* const record = m.builtin_type_of(type))
         {
             auto const size = memory_size_of(*record, space);
-            auto const alignment = is_packed(space) ? scalar_size_of(*record) : natural_alignment_of(*record);
+            auto const alignment = alignment_in(*record, space);
             at = round_up(at, alignment);
             result.alignment = alignment > result.alignment ? alignment : result.alignment;
             result.offsets.push_back(at);
@@ -144,6 +144,15 @@ sgl::i32 sgl::emit::impl::natural_alignment_of(builtins::type_record const& reco
     return record.wgsl_layout.alignment;
 }
 
+sgl::i32 sgl::emit::impl::alignment_in(builtins::type_record const& record, address_space space)
+{
+    if (is_packed(space))
+        return scalar_size_of(record);
+    if (space == address_space::constants && record.hlsl == "float2x2")
+        return 16;
+    return natural_alignment_of(record);
+}
+
 sgl::i32 sgl::emit::impl::memory_size_of(builtins::type_record const& record, address_space space)
 {
     return is_packed(space) ? record.leaf_count * scalar_size_of(record) : record.wgsl_layout.size;
@@ -153,6 +162,12 @@ bool sgl::emit::impl::is_mat3(check::checked_module const& m, check::type_id typ
 {
     auto const* const record = m.builtin_type_of(type);
     return record != nullptr && record->leaf_count == 9;
+}
+
+bool sgl::emit::impl::is_mat2(check::checked_module const& m, check::type_id type)
+{
+    auto const* const record = m.builtin_type_of(type);
+    return record != nullptr && record->hlsl == "float2x2";
 }
 
 bool sgl::emit::impl::is_storage(address_space space)
@@ -244,8 +259,7 @@ sgl::emit::impl::placed_members sgl::emit::impl::place_struct(check::checked_mod
 sgl::i32 sgl::emit::impl::element_stride(check::checked_module const& m, check::type_id element, address_space space)
 {
     if (auto const* const record = m.builtin_type_of(element))
-        return round_up(memory_size_of(*record, space),
-                        is_packed(space) ? scalar_size_of(*record) : natural_alignment_of(*record));
+        return round_up(memory_size_of(*record, space), alignment_in(*record, space));
     if (m.at(element).kind == check::type_kind::atomic)
         return element_stride(m, m.at(element).element, space);
     return place_struct(m, element, space).size;

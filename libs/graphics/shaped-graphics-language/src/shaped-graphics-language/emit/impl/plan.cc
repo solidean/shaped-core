@@ -641,6 +641,7 @@ struct planner
             auto const placed = place_struct(p.m, s, space);
             planned.memory_size = placed.size;
             planned.is_packed = is_packed(space);
+            planned.is_constants = !is_storage(space);
             planned.memory_alignment = placed.alignment;
             for (auto i = isize(0); i < planned.member_of.size(); ++i)
                 if (planned.member_of[i] >= 0)
@@ -918,6 +919,32 @@ void sgl::emit::impl::validate_binding(check::checked_module const& m, check::sy
                 report(error_kind::unsupported, cc::format("an array at byte {} of a @padding(.none) block, where C++ "
                                                            "places it and no target can: '{}.{}'",
                                                            placed.offsets[i], s.name, plain[i].name));
+    }
+
+    // EMIT-175: a packed mat2 would take a memory form, which reads four scalars as a vector rather than a matrix
+    auto const holds_mat2 = [&](auto const& self, check::type_id type) -> bool
+    {
+        if (type == check::checked_module::void_type || is_mat2(m, type))
+            return is_mat2(m, type);
+        if (m.builtin_type_of(type) != nullptr)
+            return false;
+        auto const& t = m.at(type);
+        if (t.kind == check::type_kind::array || t.kind == check::type_kind::buffer)
+            return self(self, t.element);
+        if (t.kind == check::type_kind::structure)
+            for (auto const& member : m.at(t.members))
+                if (member.type != type && self(self, member.type))
+                    return true;
+        return false;
+    };
+    for (auto const& member : m.at(b.members))
+    {
+        auto const& t = m.at(member.type);
+        auto const space = t.kind == check::type_kind::buffer ? element_space(b, member) : block_space(b);
+        if (!m.takes_slots(member.type) || t.kind == check::type_kind::buffer)
+            if (is_packed(space) && holds_mat2(holds_mat2, member.type))
+                report(error_kind::unsupported,
+                       cc::format("a mat2 in @padding(.none) memory: '{}.{}'", s.name, member.name));
     }
 
     // CHK-291's arrays that no target places yet, refused alike on every target

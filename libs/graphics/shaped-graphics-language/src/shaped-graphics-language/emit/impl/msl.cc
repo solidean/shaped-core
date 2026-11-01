@@ -142,8 +142,34 @@ public:
         out += ";\n";
     }
 
+    /// The alignment MSL gives a value of `type` in memory as this text declares it: a constant block's struct is
+    /// `alignas(16)`, and a struct with a packed tail says its own (EMIT-176).
+    [[nodiscard]] static i32 msl_alignment_of(plan const& p, type_id type)
+    {
+        if (auto const* const record = p.m.builtin_type_of(type))
+            return record->msl_layout.alignment > 0 ? record->msl_layout.alignment : 4;
+        auto const& t = p.m.at(type);
+        if (t.kind == type_kind::array)
+            return msl_alignment_of(p, t.element);
+        if (t.kind != type_kind::structure || p.struct_of_type[index_of(type)] < 0)
+            return 4;
+        auto const& s = p.structs[p.struct_of_type[index_of(type)]];
+        if (s.memory_size > 0 && s.is_constants && !s.is_packed)
+            return 16;
+        auto result = 4;
+        for (auto i = isize(0); i < s.members.size(); ++i)
+        {
+            if (shares_tail(p, s, i))
+                return s.memory_alignment;
+            auto const a = msl_alignment_of(p, s.members[i].type);
+            result = a > result ? a : result;
+        }
+        return result;
+    }
+
     /// EMIT-170: the members of a struct or a block in natural memory, a shared tail packed.
-    /// A packed 3-vector aligns to its scalar alone, so a padding field keeps it at its offset.
+    /// Wherever MSL would place a member short of its offset, a padding field keeps it there: a packed 3-vector aligns to
+    /// its scalar alone, and a constant block starts a struct, an array and a mat2 on a row MSL does not (EMIT-175).
     void write_memory_members(cc::string& out,
                               planned_struct const* owner,
                               cc::span<planned_member const> members,
@@ -155,7 +181,8 @@ public:
         {
             auto const& member = members[i];
             auto const is_packed_tail = shares_tail(p, members, i);
-            if (is_packed_tail)
+            auto const alignment = is_packed_tail ? 4 : msl_alignment_of(p, member.type);
+            if (member.offset >= 0 && (at + alignment - 1) / alignment * alignment < member.offset)
                 while (at < member.offset)
                 {
                     auto const width = member.offset - at >= 4 && at % 4 == 0 ? 4 : 2;
@@ -167,7 +194,13 @@ public:
             {
                 auto const* const record = p.m.builtin_type_of(member.type);
                 auto const is_full_3_vector = record != nullptr && record->leaf_count == 3 && !is_packed_tail;
-                at = member.offset + (is_full_3_vector ? record->msl_layout.size : member.size);
+                // a struct of a constant block is `alignas(16)`, so MSL rounds its size up to a row
+                auto const is_row_struct = record == nullptr && p.m.at(member.type).kind == type_kind::structure
+                                        && msl_alignment_of(p, member.type) == 16;
+                at = member.offset
+                   + (is_full_3_vector ? record->msl_layout.size
+                      : is_row_struct  ? (member.size + 15) / 16 * 16
+                                       : member.size);
             }
         }
     }
@@ -328,8 +361,10 @@ public:
             auto is_packing = false;
             for (auto i = isize(0); i < s.members.size(); ++i)
                 is_packing = is_packing || shares_tail(p, s, i);
-            if (is_packing)
-                out.appendf("struct alignas({}) {}\n{{\n", s.memory_alignment, s.name);
+            // a struct in a constant block strides by whole rows, and starts the row after it (EMIT-110)
+            auto const in_constants = s.memory_size > 0 && s.is_constants && !s.is_packed;
+            if (is_packing || in_constants)
+                out.appendf("struct alignas({}) {}\n{{\n", in_constants ? 16 : s.memory_alignment, s.name);
             else
                 out.appendf("struct {}\n{{\n", s.name);
             if (s.memory_size > 0 && !s.is_packed)

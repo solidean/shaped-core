@@ -572,6 +572,13 @@ The C++ struct a package generates is that layout byte for byte, padding include
   A read rebuilds the value: a matrix from its columns, an array into a local element by element, and an element at a literal index reads its piece alone.
   A write stores each piece of the value, evaluated once, and a write into one at a runtime index or through a column gathers it into a local, writes that, and stores it back.
   A struct that both crosses a stage edge this way and stands in GPU memory is `unsupported`, since the pieces are no layout that memory has.
+* **EMIT-175** A `mat2` in GPU memory is its two columns back to back: 16 bytes, aligned to 8, and to a row in a constant block ([why](why/emitting.md#emit-175)).
+  HLSL's constant buffer starts each column of a matrix on a row, so a constant block, and a struct that stands in one, holds a `mat2` there as one `float4`.
+  A read rebuilds it through `sgl_narrow_mat2`, which the text declares wherever it reads one; a constant block is never written.
+  Every other memory holds it as each target's own `mat2`, which MSL keeps on its row with a padding field.
+  Under `@padding(.none)` it is `unsupported`, alike on every target.
+* **EMIT-176** MSL places a member of a struct or a block in natural memory where SGL placed it, with padding fields wherever MSL would place it sooner.
+  A struct that stands in a constant block is declared `alignas(16)`, so it starts a row and an array of it strides by rows, as EMIT-110 has it.
 * **EMIT-171** An array in GPU memory that `@padding(.none)` places waits, `unsupported` alike on every target.
   So does a multi-dimensional one whose innermost element is a 3-vector or a `mat3`, which HLSL would widen at depth.
   A packed block's array of whole rows is the exception, which EMIT-154 places.
@@ -611,7 +618,7 @@ The C++ struct a package generates is that layout byte for byte, padding include
 * GLSL, which comes through the same seam.
 * The arrays EMIT-171 refuses: packed ones, and multi-dimensional ones of 3-vectors or of `mat3`, which HLSL would widen at depth.
 * `@padding(.every_column)`, which would name a `mat3`'s natural 48 bytes explicitly; `.none` gives the 36 of `tg::mat3f` already.
-* `mat2` in GPU memory, which HLSL's constant buffer would place a row per column.
+* A packed `mat2`, which a memory form would read as a vector of four scalars.
 * A struct member of a `@padding(.none)` block, which HLSL would read back by building the struct in a local field by field.
 * `@padding` on a struct, which would place it so wherever it stands.
 * Whether an emit error becomes a diagnostic with a span; today it names a symbol and carries a detail.

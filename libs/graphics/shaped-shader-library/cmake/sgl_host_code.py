@@ -35,6 +35,8 @@ HOST_TYPES: dict[str, tuple[str, int, str | None]] = {
     "mat4": ("tg::mat4f", 64, None),
     # packed, as `@padding(.none)` places it; at its natural 48 bytes it is slib::gpu_mat3 (sized_host_type)
     "mat3": ("tg::mat3f", 36, None),
+    # two columns back to back, as GPU memory holds one; a constant block starts it on a row
+    "mat2": ("tg::mat2f", 16, None),
     # an atomic is a plain integer to the host, which never updates it while the shader does
     "atomic[uint]": ("cc::u32", 4, None),
     "atomic[int]": ("cc::i32", 4, None),
@@ -401,7 +403,7 @@ def includes(entries: SglEntries) -> list[str]:
         out.append("<typed-geometry/linalg/pos.hh>")
     if "mat3" in types:
         out.append("<shaped-shader-library/gpu_mat3.hh>")
-    if "mat4" in types or "mat3" in types:
+    if "mat4" in types or "mat3" in types or "mat2" in types:
         out.append("<typed-geometry/linalg/mat.hh>")
     if "bool32" in types:
         out.append("<shaped-shader-library/gpu_bool.hh>")

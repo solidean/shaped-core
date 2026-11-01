@@ -40,7 +40,8 @@ planned_struct const* struct_in_memory(plan const& p, type_id type)
 }
 
 /// How the member at `index` of `members`, placed in natural memory, is held by the target.
-memory_access access_of(plan const& p, cc::span<planned_member const> members, isize index)
+/// `in_constants`: the members stand in a constant block, where HLSL holds a `mat2` as a `float4`.
+memory_access access_of(plan const& p, cc::span<planned_member const> members, isize index, bool in_constants)
 {
     constexpr cc::string_view lanes[] = {"", ".x", ".xy", ".xyz"};
     auto const& member = members[index];
@@ -50,6 +51,8 @@ memory_access access_of(plan const& p, cc::span<planned_member const> members, i
                 .lanes = lanes[p.m.builtin_type_of(p.m.at(member.type).element)->leaf_count]};
     if (is_hlsl(p.which) && is_mat3(p.m, member.type))
         return {.held = held_as::widened_mat3};
+    if (is_hlsl(p.which) && in_constants && is_mat2(p.m, member.type))
+        return {.held = held_as::vector_mat2};
     if (is_hlsl(p.which) && is_3_vector_array(p.m, member.type))
         return {.held = held_as::widened_array, .lanes = lanes[3]};
     if (is_hlsl(p.which) && is_mat3_array(p.m, member.type))
@@ -109,12 +112,12 @@ void sgl::emit::impl::plan_memory_accesses(plan& p)
             // a memory form addresses its fields itself (EMIT-113)
             auto const& block = *block_of(p, b->binding);
             if (!block.form.has_value())
-                p.accesses[i] = access_of(p, block.members, block.block_member_of[b->member]);
+                p.accesses[i] = access_of(p, block.members, block.block_member_of[b->member], true);
         }
         else if (auto const* const member = x.node.try_as<flat_member>(); member != nullptr && !member->is_swizzle())
         {
             if (auto const* const s = struct_in_memory(p, p.e.at(member->object).type))
-                p.accesses[i] = access_of(p, s->members, s->member_of[member->member]);
+                p.accesses[i] = access_of(p, s->members, s->member_of[member->member], s->is_constants);
             // EMIT-174: an edge struct holds an array or a matrix as one member per element or column
             else if (auto const object_type = p.e.at(member->object).type;
                      is_valid(object_type) && p.m.builtin_type_of(object_type) == nullptr
