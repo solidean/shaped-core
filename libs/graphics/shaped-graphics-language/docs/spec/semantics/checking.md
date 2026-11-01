@@ -455,7 +455,7 @@ fun shade(k: float) -> float:
 * **CHK-199** A texture's argument is `float`, `int` or `uint`, one to four wide, and a texture without its argument is `wrong-kind-of-name`.
   Another type as the argument is `wrong-kind-of-name` too, and a name that is no type is `unknown-name` by CHK-24, so `texture_2d[rgba8]` is the latter.
 * **CHK-200** An image's argument is exactly one enum case naming one of sg's image formats, `.rgba8_unorm`, or a `const` whose value is one, an option included (CHK-353).
-  It is the one value type argument SGL reads, until value type arguments exist in general.
+  In a generic it may be a `pixel_format` value parameter, `image_2d[f]`, which each instance replaces by its case and an image argument deduces (CHK-339).
   Every rule that judges the format judges the value the `const` has.
 * **CHK-201** A form some backend lacks is the normal error `needs-feature` on every target alike, unless a `require` grants its feature ([Features](#features)):
   `texture_2d_ms_array`, an image outside the portable image formats, and a `mut` image outside the three `r32` formats.

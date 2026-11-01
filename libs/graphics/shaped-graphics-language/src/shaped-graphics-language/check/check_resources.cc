@@ -53,6 +53,8 @@ cc::string spelling_of(check::type_info const& t, checked_module const& m)
     case type_kind::image:
         // A builtin's pattern names the texel it reads or writes where an image names its format (CHK-207),
         // and a bare one takes every image of the shape (CHK-194).
+        if (is_valid(t.count_parameter))
+            return cc::format("{}{}[{}]", access_prefix(t.access), shape.image, m.at(t.count_parameter).spelled);
         if (t.format < 0 && t.element == type_id::none)
             return cc::string(shape.image);
         return t.format < 0 ? cc::format("{}{}[{}]", access_prefix(t.access), shape.image, m.name_of(t.element))
@@ -223,6 +225,21 @@ type_id checker::resolve_resource_applied(i32 file, ast::expr_id expr, ast::inde
         return resource_type({.kind = type_kind::texture, .element = element, .shape = texture->shape});
     }
 
+    // CHK-339: a `pixel_format` value parameter in scope, which an instance replaces by its case
+    if (auto const* const n = ast_of(file).at(arguments[0].value).node.try_as<ast::name>())
+        for (auto i = type_parameter_names.size(); i > 0; --i)
+            if (type_parameter_names[i - 1].first == text_of(file, n->where))
+            {
+                auto const stands_for = type_parameter_names[i - 1].second;
+                auto const& s = out.at(stands_for);
+                if (!is_valid(s.element) || out.name_of(s.element) != "pixel_format")
+                    break;
+                if (s.kind == type_kind::constant)
+                    return resource_type({.kind = type_kind::image,
+                                          .shape = image->shape,
+                                          .format = find_image_format(out.at(out.at(s.element).cases)[s.count].name)});
+                return resource_type({.kind = type_kind::image, .shape = image->shape, .count_parameter = stands_for});
+            }
     auto const format = resolve_image_format(file, arguments[0].value);
     if (format == k_format_failed)
         return checked_module::error_type;
@@ -360,7 +377,8 @@ type_id checker::qualify_resource(i32 file, ast::expr_id expr, type_id inner, as
     {
         auto qualified = t;
         qualified.access = is_write_only ? access_mode::write : access_mode::read_write;
-        if (!is_write_only && !k_image_formats[t.format].is_readwrite_portable)
+        // a format a value parameter stands for is judged where the image handed over was declared, which it unifies with
+        if (!is_write_only && t.format >= 0 && !k_image_formats[t.format].is_readwrite_portable)
             judge_feature(file, where, cc::format("a `mut` image of .{}", k_image_formats[t.format].name),
                           feature::readwrite_image_formats);
         return resource_type(cc::move(qualified));
@@ -738,6 +756,9 @@ void checker::judge_offset_range(i32 file, ast::expr_id expr)
 
 cc::string sgl::check::texel_name_of(i32 format)
 {
+    // an image whose format is a value parameter has no texel until an instance says the format (CHK-339)
+    if (format < 0)
+        return {};
     auto const& f = k_image_formats[format];
     auto const stem = f.component == value_kind::scalar_float ? "float"
                     : f.component == value_kind::scalar_int   ? "int"

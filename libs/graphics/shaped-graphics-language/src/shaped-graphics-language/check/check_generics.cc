@@ -1,6 +1,7 @@
 #include <clean-core/sequence/sequence.hh>
 #include <clean-core/string/format.hh>
 #include <shaped-graphics-language/check/impl/checker.hh>
+#include <shaped-graphics-language/check/resources.hh>
 #include <shaped-graphics-language/interpret/scalar.hh>
 
 using namespace sgl;
@@ -42,6 +43,8 @@ bool checker::is_open(type_id type) const
     }
     case type_kind::array:
         return is_valid(t.count_parameter) || is_open(t.element);
+    case type_kind::image:
+        return is_valid(t.count_parameter);
     case type_kind::function:
     {
         if (is_open(t.element))
@@ -76,7 +79,7 @@ void checker::collect_type_parameters(type_id type, cc::vector<type_id>& into) c
             collect_type_parameters(a, into);
         return;
     }
-    if (t.kind == type_kind::array)
+    if (t.kind == type_kind::array || t.kind == type_kind::image)
         collect_type_parameters(t.count_parameter, into);
     collect_type_parameters(t.element, into);
 }
@@ -217,6 +220,17 @@ type_id checker::substitute(type_id type, cc::span<type_id const> bindings)
             return array_type(element, out.at(count).count);
         return symbolic_array_type(element, is_valid(count) ? count : t.count_parameter);
     }
+    case type_kind::image:
+    {
+        // CHK-339: `image_2d[f]` with `f` bound to a case is the image of that format
+        auto const format = bound_to(bindings, t.count_parameter);
+        if (!is_valid(format) || out.at(format).kind != type_kind::constant)
+            return type;
+        auto image = t;
+        image.count_parameter = type_id::none;
+        image.format = find_image_format(out.at(out.at(out.at(format).element).cases)[out.at(format).count].name);
+        return resource_type(cc::move(image));
+    }
     case type_kind::function:
     {
         auto parameters = cc::vector<type_id>();
@@ -323,6 +337,16 @@ bool checker::unify(type_id pattern, type_id actual, cc::vector<type_id>& bindin
         else if (p.count_parameter != a.count_parameter || a.count != p.count)
             return false;
         return unify(p.element, a.element, bindings);
+    }
+    case type_kind::image:
+    {
+        // CHK-339: an image's format binds the `pixel_format` value parameter a pattern's format is, as its case
+        if (a.kind != type_kind::image || a.format < 0 || a.shape != p.shape || a.access != p.access
+            || a.is_atomic != p.is_atomic)
+            return false;
+        auto const enumeration = out.at(p.count_parameter).element;
+        auto const index = case_index_of(enumeration, k_image_formats[a.format].name);
+        return index >= 0 && unify(p.count_parameter, constant_type(enumeration, u32(index)), bindings);
     }
     case type_kind::function:
     {

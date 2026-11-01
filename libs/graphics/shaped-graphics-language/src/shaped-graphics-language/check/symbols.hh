@@ -264,7 +264,8 @@ struct sgl::check::type_info
     type_id element = type_id::none;
     /// An `array`'s length; 0 for `T[]`, whose length the host binds (CHK-286).
     i32 count = 0;
-    /// An array whose length is a value parameter, `T[n]`, which an instance replaces by its constant (CHK-339).
+    /// The value parameter an array's length or an image's format is, `T[n]` or `image_2d[f]`, which an instance
+    /// replaces by its constant (CHK-339).
     type_id count_parameter = type_id::none;
     /// Whether a `buffer` may be written: `mut buffer[T]` against `buffer[T]`.
     bool is_mut = false;

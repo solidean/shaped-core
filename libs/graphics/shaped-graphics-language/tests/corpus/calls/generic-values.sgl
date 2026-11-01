@@ -62,3 +62,16 @@ test:
 @expect(error = "invalid-constant-argument")
 test:
     combined[.add](1.0, 2.0) == 3.0
+
+// an image's format may be a value parameter, which an image argument deduces and a call may state
+binding frames:
+    color: mut image_2d[.r32_uint]
+    depth: mut image_2d[.r32_float]
+
+fun copy_texel[f: pixel_format](img: mut image_2d[f], from: int2, to: int2):
+    img.store(to, img.load(from))
+
+@compute(8, 8) fun shuffle(@thread_id id: int3){frames}:
+    copy_texel(frames.color, id.xy, id.yx)
+    copy_texel(frames.depth, id.xy, id.yx)
+    copy_texel[pixel_format.r32_uint](frames.color, id.yx, id.xy)

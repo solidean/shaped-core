@@ -14,5 +14,7 @@ A call states one, `blur[3](c)`, a type position names one, `ring[4, float]` or 
 
 What is left:
 
-* `image_2d[.rgba8_unorm]` as an ordinary generic struct over a `format` value parameter, rather than the builtin type the registry declares.
+* An image is a resource with slots, so it stays a builtin type rather than a generic struct.
+  What a generic wants of it exists: `image_2d[f]` over a `pixel_format` value parameter, deduced from the image handed over (CHK-200).
+  A texture's element and an acceleration structure's geometry kind could take value parameters the same way, once a program asks.
 * A `float` or `bool` constant in a type position, where only an `int` and an enum case are read today.
