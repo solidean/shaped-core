@@ -207,6 +207,7 @@ uv run dev.py run sgl -- test <file>...              # the tests of each file, o
 uv run dev.py run sgl -- describe <file>             # what slib's generator reads: bindings, edge structs, entry points
 uv run dev.py run sgl -- prelude --check <path>      # exit 2, and where the texts part, when the file differs
 uv run dev.py run sgl -- prelude --write <path>      # what `uv run dev.py check sgl-prelude --fix` runs
+uv run dev.py run sgl -- bench <list> [--rounds N]   # compile speed in-process; shader-rosetta's sgl-benchmark.py drives it
 ```
 
 A further tool of the toolchain is one more file with one more `COMMAND`, and `sgl` alone lists what the binary holds.

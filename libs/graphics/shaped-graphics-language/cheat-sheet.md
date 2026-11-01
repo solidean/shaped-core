@@ -407,6 +407,7 @@ uv run dev.py run sgl -- emit shader.sgl --entry main_cs --option tile=16 # an o
 uv run dev.py run sgl -- test a.sgl b.sgl                                # the tests of each file; exit 2 when one fails
 #   emit, test and describe take --module-dir DIR, repeatable: the .sgl files directly in it are modules to `use`
 uv run dev.py run sgl -- describe --module view --module-dir shaders     # a module of the directories, as its package entry reads it
+uv run dev.py run sgl --preset release-clang -- bench list.txt           # `path<TAB>entry` lines: each one's fastest compile of 10, per target, in-process
 uv run dev.py run sgl -- prelude [--check <path> | --write <path>]       # the generated builtins.sgl; --check exits 2 on a difference
 uv run dev.py run sgl -- describe shader.sgl                             # sgl::describe as JSON: what slib's generator reads;
                                                                          # each entry point and pipeline carries its sg `features`

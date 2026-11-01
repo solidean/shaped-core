@@ -298,7 +298,7 @@ sc_target_pch(shaped-graphics-language SGL)
 # Enable conforming preprocessor for MSVC
 target_compile_options(shaped-graphics-language PUBLIC $<$<CXX_COMPILER_ID:MSVC>:/Zc:preprocessor>)
 
-# `sgl`, the command line of the toolchain: a nexus binary whose jobs are COMMANDs, `sgl prelude` and `sgl emit` so far.
+# `sgl`, the command line of the toolchain: a nexus binary whose jobs are COMMANDs, `sgl prelude`, `sgl emit` and `sgl bench` so far.
 # It lives with the library because it is nothing but the library behind an argument parser.
 # Run it through `uv run dev.py run sgl -- <command> …`; `dev.py check`'s `sgl-prelude` step does.
 # Gated like tools/: a dependent that adds shaped-core as a subdirectory wants the library and not our binaries.
@@ -333,6 +333,7 @@ if(SC_BUILD_TOOLS)
         tools/sgl/module_dirs.hh
         tools/sgl/module_dirs.cc
         tools/sgl/describe_command.cc
+        tools/sgl/bench_command.cc
         tools/sgl/emit_command.cc
         tools/sgl/prelude_command.cc
         tools/sgl/test_command.cc
