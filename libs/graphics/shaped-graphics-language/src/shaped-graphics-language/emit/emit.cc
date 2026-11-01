@@ -221,6 +221,20 @@ sgl::emit::emitted_text sgl::emit::emit_entry_point(check::checked_module const&
                                                               "ray-tracing stage on Metal "
                                                               "does not carry yet",
                                                               e.name, s.host_name)});
+    // EMIT-174: a link's array or matrix is declared as its pieces, which is no layout GPU memory has
+    for (auto const& s : plan.structs)
+        if (s.memory_size > 0)
+            for (auto const& member : s.members)
+                if (member.pieces > 0)
+                {
+                    result.errors.push_back({.kind = error_kind::unsupported,
+                                             .symbol = m.at(s.type).symbol,
+                                             .detail = cc::format("'{}' both crossing a stage edge and standing in GPU "
+                                                                  "memory, where "
+                                                                  "its '{}' crosses as its pieces",
+                                                                  m.name_of(s.type), member.source_name)});
+                    break;
+                }
     if (!result.errors.empty())
         return result;
     result.text = impl::write_text(plan, impl::dialect_of(t));

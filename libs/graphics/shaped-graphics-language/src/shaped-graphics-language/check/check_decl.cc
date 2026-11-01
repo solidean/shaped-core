@@ -136,7 +136,12 @@ cc::string checker::vertex_format_of(i32 file, ast::attribute const* a, type_id 
     {
         if (f.format != name)
             continue;
-        if (out.name_of(member_type) != f.type)
+        // an array's elements are read an attribute apiece (CHK-422), so the format states each one's
+        auto const* const t = member_type == checked_module::error_type || out.builtin_type_of(member_type) != nullptr
+                                ? nullptr
+                                : &out.at(member_type);
+        auto const read = t != nullptr && t->kind == type_kind::array && t->count > 0 ? t->element : member_type;
+        if (out.name_of(read) != f.type)
             report(diagnostic_kind::type_mismatch, file, a->name,
                    cc::format("@format(.{}) decodes into a {}, and the member is a {}", name, f.type,
                               out.name_of(member_type)));
@@ -240,30 +245,27 @@ sgl::i32 checker::preferred_subgroup_size_of(i32 file, ast::attribute const* a, 
     return 0;
 }
 
-/// CHK-369: `@layout(.hlsl)` or `@layout(.cpp)`, on a binding whose block a host fills.
-sgl::check::block_layout checker::layout_of(i32 file, ast::attribute const* a, bool is_workgroup)
+/// CHK-369: `@padding(.none)`, where GPU memory leaves no room but what C++ leaves.
+sgl::check::padding_kind checker::padding_of(i32 file, ast::attribute const* a)
 {
     if (a == nullptr)
-        return block_layout::unpromised;
+        return padding_kind::natural;
     auto const arguments = ast_of(file).at(a->arguments);
     auto const* const dot = arguments.size() == 1 && arguments[0].name.empty() && !arguments[0].is_splat
                                  && ast::is_valid(arguments[0].value)
                               ? ast_of(file).at(arguments[0].value).node.try_as<ast::leading_dot>()
                               : nullptr;
     auto const rule = dot != nullptr ? text_of(file, dot->name) : cc::string_view();
-    if (rule != "hlsl" && rule != "cpp")
-    {
+    if (rule == "none")
+        return padding_kind::none;
+    if (rule == "every_element")
+        return padding_kind::every_element;
+    if (rule == "every_column")
+        unsupported(file, a->name, "@padding(.every_column), since a mat3's columns stand 16 bytes apart already");
+    else
         report(diagnostic_kind::invalid_attribute_arguments, file, a->name,
-               "@layout takes the rule a constant block is placed by: `@layout(.hlsl)` or `@layout(.cpp)`");
-        return block_layout::unpromised;
-    }
-    if (is_workgroup)
-    {
-        report(diagnostic_kind::invalid_attribute_arguments, file, a->name,
-               "@layout promises a constant block's layout to the host, and @workgroup memory has none a host sees");
-        return block_layout::unpromised;
-    }
-    return rule == "hlsl" ? block_layout::hlsl : block_layout::cpp;
+               "@padding takes where GPU memory leaves room: `@padding(.none)` or `@padding(.every_element)`");
+    return padding_kind::natural;
 }
 
 /// `@stream(normals)`: one bare name, which is the buffer a vertex input member is read from.
@@ -633,7 +635,8 @@ ast::range_of<member_info> checker::compile_members(i32 file,
             = {"position", "per_instance", "stream", "interpolate", "depth", "sample_mask"};
         // CHK-275: on a `@vertex struct` member `@format` is the member's own bytes, never a pipeline setting
         cc::string_view const known_on_vertex_field[] = {"position", "per_instance", "stream", "interpolate", "format"};
-        cc::string_view const known_on_member[] = {"unfilterable", "non_filtering", "sampler", "coherent", "atomic"};
+        cc::string_view const known_on_member[]
+            = {"unfilterable", "non_filtering", "sampler", "coherent", "atomic", "padding"};
         judge_attributes(file, f.attributes,
                          !is_struct         ? cc::span<cc::string_view const>(known_on_member)
                          : is_vertex_struct ? cc::span<cc::string_view const>(known_on_vertex_field)
@@ -685,7 +688,7 @@ ast::range_of<member_info> checker::compile_members(i32 file,
         // CHK-397: a value of function bodies alone has no layout in any memory yet, workgroup memory included
         // It is judged before an array is, so the detail names it rather than the array holding it.
         if (!is_struct && type != checked_module::error_type)
-            if (auto const found = local_only_path(type); !found.path.empty())
+            if (auto const found = local_only_path(type, true); !found.path.empty())
             {
                 // the path is named from what a block or a buffer holds, as CHK-291 names an array's
                 auto root = type;
@@ -717,15 +720,27 @@ ast::range_of<member_info> checker::compile_members(i32 file,
             auto innermost = t.element;
             while (out.at(innermost).kind == type_kind::array)
                 innermost = out.at(innermost).element;
+            // EMIT-172: `@padding(.every_element)` starts each element of a one-dimensional array of values on a row
+            auto const* const rows = find_attribute(file, f.attributes, "padding");
+            auto const asks_rows
+                = rows != nullptr && ast_of(file).at(rows->arguments).size() == 1
+               && ast::is_valid(ast_of(file).at(rows->arguments)[0].value)
+               && text_of(file, span_of(file, ast_of(file).at(rows->arguments)[0].value)) == ".every_element"
+               && out.builtin_type_of(t.element) != nullptr;
             if (!is_resource(out.at(innermost).kind))
             {
-                if (!is_whole_row_array(type))
+                if (auto const path = asks_rows ? cc::string() : sub_row_array_path(type); !path.empty())
                 {
+                    auto const stride = out.builtin_type_of(t.element) != nullptr ? natural_stride_of(t.element) : 0;
                     unsupported(file, span_of(file, f.type),
-                                cc::format("an array of {} in a constant block, whose element takes no whole number of "
-                                           "16-byte rows: only `float4`, `int4`, `uint4` and `mat4` elements have a "
-                                           "layout yet",
-                                           out.name_of(t.element)));
+                                path.starts_with(":") && stride > 0
+                                    ? cc::format("an array of {} in a constant block, whose element strides by {} "
+                                                 "bytes, "
+                                                 "short of a 16-byte row, which a runtime index needs",
+                                                 out.name_of(t.element), stride)
+                                    : cc::format("an array in a constant block, {}{}, whose element strides by less "
+                                                 "than a 16-byte row, which a runtime index needs",
+                                                 out.name_of(type), path.starts_with(":") ? cc::string() : path));
                     type = checked_module::error_type;
                 }
             }
@@ -757,20 +772,26 @@ ast::range_of<member_info> checker::compile_members(i32 file,
             else
                 judge_feature(file, span_of(file, f.type), "a binding array", feature::binding_arrays);
         }
-        // CHK-291: an array deeper in a block's struct, or anywhere in a buffer's element, waits for its layout too
+        // CHK-291: an array deeper in a block's struct strides by whole rows, and a buffer's element is no array itself
         else if (!is_struct && !is_workgroup && type != checked_module::error_type)
         {
             auto const& t = out.at(type);
             auto const is_buffer = t.kind == type_kind::buffer;
             auto const root = is_buffer ? t.element : type;
-            if (auto const path = array_path(root); !path.empty())
+            if (is_buffer && out.builtin_type_of(root) == nullptr && out.at(root).kind == type_kind::array)
             {
-                // a path starting `: ` is the root itself
+                unsupported(
+                    file, span_of(file, f.type),
+                    cc::format("an array as a buffer's element, {}; a struct holding it is one", out.name_of(root)));
+                type = checked_module::error_type;
+            }
+            else if (auto const path = is_buffer ? cc::string() : sub_row_array_path(root); !path.empty())
+            {
                 unsupported(file, span_of(file, f.type),
-                            cc::format("an array in {}, {}, whose layout no rule places yet",
-                                       is_buffer ? "a buffer's element" : "a constant block",
-                                       path.starts_with(":") ? cc::string(out.name_of(root))
-                                                             : cc::format("{}{}", out.name_of(root), path)));
+                            cc::format("an array in a constant block, {}{}, whose element strides by less than a "
+                                       "16-byte "
+                                       "row, which a runtime index needs",
+                                       out.name_of(root), path));
                 type = checked_module::error_type;
             }
         }
@@ -856,6 +877,30 @@ ast::range_of<member_info> checker::compile_members(i32 file,
             }
         }
 
+        // CHK-369: a member's own padding is its buffer's elements', and a constant takes its block's
+        auto const* const padded = is_struct ? nullptr : find_attribute(file, f.attributes, "padding");
+        auto member_padding = padding_of(file, padded);
+        auto const is_value_array = type != checked_module::error_type && out.builtin_type_of(type) == nullptr
+                                 && out.at(type).kind == type_kind::array
+                                 && out.builtin_type_of(out.at(type).element) != nullptr;
+        if (padded != nullptr && type != checked_module::error_type && member_padding == padding_kind::every_element
+            && (is_workgroup || !is_value_array))
+        {
+            report(diagnostic_kind::wrong_kind_of_name, file, padded->name,
+                   "@padding(.every_element) starts each element of a constant block's array of values on a row, and "
+                   "this is none");
+            member_padding = padding_kind::natural;
+        }
+        else if (padded != nullptr && type != checked_module::error_type && member_padding == padding_kind::none
+                 && out.at(innermost).kind != type_kind::buffer)
+        {
+            report(diagnostic_kind::wrong_kind_of_name, file, padded->name,
+                   is_workgroup ? "@padding places memory a host fills, and @workgroup memory has none a host sees"
+                                : "only a buffer member places its own elements; a constant takes its block's "
+                                  "@padding, written on the binding");
+            member_padding = padding_kind::natural;
+        }
+
         // CHK-393: a value that is the same across a draw crosses flat, which interpolating could only round
         auto const* const interpolate = find_attribute(file, f.attributes, "interpolate");
         auto const is_per_draw = is_struct && find_attribute(file, f.attributes, "per_draw") != nullptr;
@@ -882,6 +927,7 @@ ast::range_of<member_info> checker::compile_members(i32 file,
             .is_unfilterable = unfilterable != nullptr,
             .is_non_filtering = non_filtering != nullptr,
             .is_coherent = is_coherent,
+            .padding = member_padding,
         });
         if (auto const* const named = is_struct ? nullptr : find_attribute(file, f.attributes, "sampler"))
             named_samplers.push_back(
@@ -1005,7 +1051,7 @@ void checker::compile_struct(symbol_id id)
             else if (auto const found = local_only_path(m.type);
                      m.type != checked_module::error_type && !found.path.empty())
                 unsupported(file, span_of(file, ast_of(file).at(m.field).type),
-                            cc::format("a {} in a ray payload, {}{}, which only a function body holds, since {}",
+                            cc::format("a {} in a ray payload, {}{}, which no ray payload carries yet, since {}",
                                        out.name_of(found.type), out.name_of(m.type), found.path, found.reason));
 
     // CHK-384: a swizzle names fields by their letters and is a vector of their one element type
@@ -1481,10 +1527,23 @@ void checker::compile_binding(symbol_id id)
     auto const& d = ast_of(file).at(decl);
     auto const& b = d.node.as<ast::binding_decl>();
 
-    cc::string_view const known[] = {"inline", "workgroup", "shadowable", "no_padding", "layout"};
+    cc::string_view const known[] = {"inline", "workgroup", "shadowable", "no_padding", "padding"};
     judge_attributes(file, d.attributes, known, "a binding");
     auto const is_workgroup = find_attribute(file, d.attributes, "workgroup") != nullptr;
-    auto const layout = layout_of(file, find_attribute(file, d.attributes, "layout"), is_workgroup);
+    auto const* const padded = find_attribute(file, d.attributes, "padding");
+    auto binding_padding = padding_of(file, padded);
+    if (padded != nullptr && binding_padding == padding_kind::every_element)
+    {
+        report(diagnostic_kind::invalid_attribute_arguments, file, padded->name,
+               "@padding(.every_element) starts each element of one array on a row, so it stands on the array member");
+        binding_padding = padding_kind::natural;
+    }
+    else if (padded != nullptr && is_workgroup)
+    {
+        report(diagnostic_kind::invalid_attribute_arguments, file, padded->name,
+               "@padding places memory a host fills, and @workgroup memory has none a host sees");
+        binding_padding = padding_kind::natural;
+    }
 
     if (ast::is_valid(b.composition))
     {
@@ -1551,7 +1610,7 @@ void checker::compile_binding(symbol_id id)
         .is_inline = is_inline,
         .is_workgroup = is_workgroup,
         .is_no_padding = find_attribute(file, d.attributes, "no_padding") != nullptr,
-        .layout = layout,
+        .padding = binding_padding,
         .members = members,
         .declared = declared,
         .required = declared | used,
@@ -2107,6 +2166,12 @@ void checker::judge_entry_point(symbol_id id)
     // A ray-tracing stage's hit, candidate or box is a prelude struct the flat tree builds from the stage's builtins,
     // so it crosses no edge and may hold what a body holds, an affine3 among it (CHK-408); a payload does cross.
     auto const ray_stages = stage_bit(stage::closest_hit) | stage_bit(stage::any_hit) | stage_bit(stage::intersection);
+    // CHK-422: every parameter and result of a shading stage carries matrices and arrays, but a pixel output; ray data never
+    auto const is_shading_stage = info.entry_stage == stage::vertex || info.entry_stage == stage::pixel
+                               || info.entry_stage == stage::geometry || info.entry_stage == stage::tessellation_control
+                               || info.entry_stage == stage::tessellation_evaluation;
+    auto const links_parameter = is_shading_stage;
+    auto const links_result = is_shading_stage && info.entry_stage != stage::pixel;
     auto const is_built_in_place = [&](type_id type)
     {
         return (stage_bit(info.entry_stage) & ray_stages) != 0 && type != type_id::none
@@ -2125,7 +2190,7 @@ void checker::judge_entry_point(symbol_id id)
                 if (auto const found = local_only_path(m.type); !found.path.empty())
                 {
                     unsupported(file, where,
-                                cc::format("a {} crossing a stage edge, in {}.{}{}, which only a function body holds, "
+                                cc::format("a {} crossing a stage edge, in {}.{}{}, which no stage edge carries yet, "
                                            "since {}",
                                            out.name_of(found.type), out.name_of(parameter.type), m.name, found.path,
                                            found.reason));
@@ -2138,12 +2203,12 @@ void checker::judge_entry_point(symbol_id id)
         }
         else if (parameter.input == stage_input::none)
         {
-            if (!judge_edge_local_only(file, where, parameter.type))
-                judge_edge_arrays(file, where, parameter.type);
+            if (!judge_edge_local_only(file, where, parameter.type, links_parameter))
+                judge_edge_arrays(file, where, parameter.type, links_parameter);
             judge_edge_16_bit(file, where, parameter.type);
         }
-    if (!judge_edge_local_only(file, where, info.result))
-        judge_edge_arrays(file, where, info.result);
+    if (!judge_edge_local_only(file, where, info.result, links_result))
+        judge_edge_arrays(file, where, info.result, links_result);
     judge_edge_16_bit(file, where, info.result);
 
     // CHK-301 to CHK-306: the geometry and the tessellation stages take arrays of vertices, and are judged apart
@@ -2225,7 +2290,12 @@ void checker::judge_entry_point(symbol_id id)
     {
         for (auto const& m : out.at(out.at(link).members))
         {
-            auto const* const record = out.builtin_type_of(m.type);
+            // an array crosses as its elements, which are what crosses flat or interpolated (CHK-422)
+            auto const crossing = m.type != checked_module::error_type && out.builtin_type_of(m.type) == nullptr
+                                       && out.at(m.type).kind == type_kind::array
+                                    ? out.at(m.type).element
+                                    : m.type;
+            auto const* const record = out.builtin_type_of(crossing);
             auto const is_integer
                 = record != nullptr
                && (record->leaf_kind == value_kind::scalar_int || record->leaf_kind == value_kind::scalar_uint);

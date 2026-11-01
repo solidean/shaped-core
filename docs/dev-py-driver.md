@@ -189,6 +189,10 @@ Otherwise the project's own `tools/` becomes a second portion of the `tools` nam
 
 ## Design principles, in one place
 
+- **Fail fast: frontload whatever can fail cheaply** — a command orders its steps so the quick ones that can stop it run before the slow ones.
+  A static gate, a dirty-tree question or a refused precondition goes ahead of a build and of the test tail, so its verdict costs seconds rather than a full run.
+  `ship` is the worked case: it asks whether the gate rewrote a file before it runs the tests, not after.
+
 - **Capture by default, diagnose from sidecars** — terse terminal, full record on disk.
   The live region repaints over that terse trace on a terminal and is absent everywhere else, so it changes what a human watches and never what a tool reads.
 - **Plain functions over plain data** — `lib/` returns values; printing and exit codes live

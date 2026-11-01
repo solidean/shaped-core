@@ -43,6 +43,8 @@ target_sources(shaped-shader-library
     FILES
     src/shaped-shader-library/fwd.hh
     src/shaped-shader-library/gpu_bool.hh
+    src/shaped-shader-library/gpu_mat3.hh
+    src/shaped-shader-library/gpu_padded.hh
     src/shaped-shader-library/compiler/block_layout.hh
     src/shaped-shader-library/all.hh
     src/shaped-shader-library/filesystem/filesystem.hh

@@ -129,10 +129,13 @@ def _bump(ctx: Context, subs: list[lib.Submodule]) -> None:
 
 
 def _gate(ctx: Context, *, tests: bool) -> None:
-    if _dev(ctx, "check", "--fix", *([] if tests else ["--no-test"])) != 0:
+    # The static gates first, then the question only they raise, so a fixer's rewrite stops ship before the test tail runs.
+    if _dev(ctx, "check", "--fix", "--no-test") != 0:
         ctx.die("ship: the gate failed; nothing was pushed (the bump commit, if any, stays local)")
     if dirty := _dirty(ctx.root):
         ctx.die(_changed_during_gate(dirty, "commit them and ship again"))
+    if tests and _dev(ctx, "check", "test") != 0:
+        ctx.die("ship: the tests failed; nothing was pushed (the bump commit, if any, stays local)")
 
 
 def run(args: argparse.Namespace, ctx: Context) -> None:
@@ -181,10 +184,12 @@ def run(args: argparse.Namespace, ctx: Context) -> None:
         if not (repo / "dev.py").is_file():
             continue
         _say(f"gating {s.path} with its own check")
-        if subprocess.run(["uv", "run", "dev.py", "check", "--fix"], cwd=str(repo)).returncode != 0:
+        if subprocess.run(["uv", "run", "dev.py", "check", "--fix", "--no-test"], cwd=str(repo)).returncode != 0:
             ctx.die(f"ship: {s.path}'s own gate failed; nothing was pushed")
         if dirty := _dirty(repo):
             ctx.die(_changed_during_gate(dirty, f"commit them in {s.path} and ship again", f"{s.path}'s "))
+        if subprocess.run(["uv", "run", "dev.py", "check", "test"], cwd=str(repo)).returncode != 0:
+            ctx.die(f"ship: {s.path}'s own tests failed; nothing was pushed")
 
     _bump(ctx, bumping)
     if args.closes:

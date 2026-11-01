@@ -172,25 +172,34 @@ void sgl::builtins::register_types(registry& r)
     r.add(type_record{
         .declaration = "struct mat3",
         .doc = "/// Column-major, and a vector stands to its right.\n"
-               "/// A value of function bodies alone, which no GPU memory holds yet.",
+               "/// In GPU memory its columns stand 16 bytes apart, as three float3 do; ray data and stage edges hold "
+               "none yet.",
         .hlsl = "float3x3",
         .wgsl = "mat3x3f",
         .msl = "float3x3",
+        // HLSL starts each column of a column-major matrix on a row of a constant buffer, and the last one takes 12.
+        .hlsl_layout = {.size = 44, .alignment = 16},
+        .wgsl_layout = {.size = 48, .alignment = 16},
+        .msl_layout = {.size = 48, .alignment = 16},
         .leaf_kind = value_kind::scalar_float,
         .leaf_count = 9,
-        .local_only_reason = "its layout in GPU memory is not decided yet",
+        .local_only_reason = "its layout as ray data is not decided yet",
     });
 
     r.add(type_record{
         .declaration = "struct mat2",
         .doc = "/// Column-major, and a vector stands to its right: a rotation or a shear of the plane.\n"
-               "/// A value of function bodies alone, which no GPU memory holds yet.",
+               "/// In GPU memory its two columns stand back to back, 16 bytes; a constant block starts it on a row.",
         .hlsl = "float2x2",
         .wgsl = "mat2x2f",
         .msl = "float2x2",
+        // HLSL starts each column of a column-major matrix on a row of a constant buffer
+        .hlsl_layout = {.size = 24, .alignment = 16},
+        .wgsl_layout = {.size = 16, .alignment = 8},
+        .msl_layout = {.size = 16, .alignment = 8},
         .leaf_kind = value_kind::scalar_float,
         .leaf_count = 4,
-        .local_only_reason = "its layout in GPU memory is not decided yet",
+        .local_only_reason = "its layout as ray data is not decided yet",
     });
 
     // CHK-408: held as its three rows, the shape every API hands a hit's transform in

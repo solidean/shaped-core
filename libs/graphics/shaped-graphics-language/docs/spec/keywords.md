@@ -35,6 +35,7 @@ Control flow and expressions:
 * `for` - looping; also names a hit group's ray set, `hit_group name for set:`
 * `while` - looping
 * `loop` - looping
+* `scope` - opens a block whose locals end with it, transparent to every jump ([AST-156](syntax/ast.md#statements))
 * `return` - leaves the nearest enclosing `fun`, named or anonymous ([AST-112](syntax/ast.md#jumps))
 * `yield` - **experimental**; gives a value block its value: `yield expression` ([AST-108](syntax/ast.md#value-blocks-and-yield))
 * `continue` - continue next loop iteration

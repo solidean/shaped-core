@@ -7,7 +7,7 @@
 #include <shaped-graphics-language/emit/emit.hh>
 #include <shaped-graphics-language/emit/impl/layout.hh>
 
-/// How WGSL and MSL, and HLSL for a `@layout(.cpp)` block, are made to follow SGL's layout where their own rules would place a member elsewhere.
+/// How WGSL and MSL, and HLSL for a `@padding(.none)` block or a buffer of 3-vectors, are made to follow SGL's layout where their own rules would place a member elsewhere.
 ///
 /// A memory root is a constant block or the element of a buffer.
 /// Where the target's own rule lands every value of a root at SGL's offset, the root is written as the program's structs
@@ -29,6 +29,8 @@ struct memory_field
     i32 offset = 0;
     /// The field is an array of `count` values of `type`, and 0 where it is one value.
     i32 count = 0;
+    /// The struct an array field holds, whose spelling the plan fills in; none for a builtin.
+    check::type_id struct_type = check::type_id::none;
 };
 
 /// One builtin value of the root and the fields that hold it.
@@ -44,6 +46,8 @@ struct memory_leaf
     bool is_split = false;
     /// The field is MSL's packed spelling of the value, which a read converts back.
     bool is_packed = false;
+    /// The field is HLSL's `float4x3` of a `mat3`, three whole rows, which a read narrows and a write widens (EMIT-168).
+    bool is_widened = false;
 };
 
 /// A root written as its memory form.
@@ -66,5 +70,8 @@ struct memory_form
                                                        target t);
 
 /// The memory form of one element of a `buffer[element]` for target `t`, or nothing where `t` places it as SGL does.
-[[nodiscard]] cc::optional<memory_form> element_form_of(check::checked_module const& m, check::type_id element, target t);
+[[nodiscard]] cc::optional<memory_form> element_form_of(check::checked_module const& m,
+                                                        check::type_id element,
+                                                        address_space space,
+                                                        target t);
 } // namespace sgl::emit::impl

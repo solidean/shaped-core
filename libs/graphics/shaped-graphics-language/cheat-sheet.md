@@ -708,15 +708,30 @@ ops[i](mut v)                                            // raygen, miss, closes
   Its resource at `slot` is `register(<class>slot, spaceN)` in dx12, `[[vk::binding(slot, N)]]` in vulkan, `@group(N) @binding(slot)` in WGSL.
   An entry point lists at most three groups besides its `@inline` binding, as sg binds; a fourth is `too-many-groups` on every target.
   MSL has no globals, so there it is the entry point's parameter `constant T& name [[buffer(4)]]`.
-- **GPU memory has one layout per address space, the same on every target** (the spec's emitting file, "Layout").
-  A constant block packs as an HLSL constant buffer does, and a buffer's element as a dx12 structured buffer: tight, like a `tg` struct.
-  WGSL and MSL are made to follow by a memory form, where a vector their own rule would place elsewhere is split or packed.
-  A struct in both a block and a buffer is `layout-conflict`; `@no_padding` turns a gap into `padding-forbidden`; `bool` has no layout, `bool32` does.
-  Only the generated struct is promised, unless `@layout(.hlsl)` (today's packing, never reordered) or `@layout(.cpp)` on the binding promises one (CHK-369).
-  `.cpp` places a block as C++ places a struct of `tg` types, so a host's own struct fills it; every target then reads it through a memory form.
+- **GPU memory is placed at natural alignment, the same on every target, because that is what loads fastest** (EMIT-110).
+  A vector aligns to its size and a 3-vector to 16, a scalar may fill a 3-vector's tail, and a struct nested in a constant block takes whole rows.
+  So `buffer[float3]` strides by 16, and the host writes it as `slib::gpu_padded<tg::vec3f, 16>`; the generated structs carry every padding field.
+  WGSL writes it natively, MSL packs a 3-vector whose tail holds a value, and HLSL writes padding fields into its structs (EMIT-112).
+  A struct placed by two rules is `layout-conflict`; `@no_padding` turns a gap into `padding-forbidden`; `bool` has no layout, `bool32` does.
+  **`@padding(.none)` packs as C++ does**, on a binding (its block and its buffers) or on one buffer member (CHK-369).
+  It is for a host's own hand-written struct, or memory something else reads too, such as a BLAS's vertices; WGSL and MSL then read through a memory form.
+  **An array in memory strides by its element rounded up to its alignment** (CHK-291): a `float3` by 16, a struct by its size.
+  A constant block admits only elements of whole rows, unless `@padding(.every_element) weights: float[8]` gives each element a row (EMIT-172).
+  HLSL holds a 3-vector array as 4-vectors (EMIT-169), and MSL packs a struct's or a block's shared tail (EMIT-170).
+  A multi-dimensional array nests the natural stride, and an array of `mat3` strides by 48; the host writes a 3-vector element as `slib::gpu_padded<T, 16>`.
+  Packed arrays, and multi-dimensional ones of 3-vectors or `mat3`, still wait (EMIT-171).
+  **A `mat3` in memory is three 16-byte columns, 48 bytes**: the host writes `slib::gpu_mat3`, and `tg::mat3f` under `@padding(.none)`.
+  HLSL holds it as a `float4x3`, which a read narrows and a write widens (EMIT-168); it rides in no ray payload yet.
+- **A `mat2` in memory is two columns back to back, 16 bytes** (EMIT-175), on a row in a constant block; the host writes `tg::mat2f`.
+  HLSL's constant buffer holds it as a `float4`, rebuilt on read; a packed one waits.
+- **A vertex input and a stage link carry a matrix or a 1-D array** (CHK-422), a location per column or element: `frame_0`, `frame_1`, … (EMIT-174).
+  A vertex input's host struct keeps the member whole, and its layout names an attribute per piece; a pixel output takes neither.
+- **`scope:` opens a block whose locals end with it** (AST-156), transparent to `break`, `yield` and `return`; it flattens into its parent.
+- **`floatN(…)`, `intN(…)` and `uintN(…)` convert a scalar of another of those kinds**, as `as` would (CHK-421); `vec3` and `pos3` never do.
 - **`half`, `short`, `ushort` and their vectors are the 16-bit families** (CHK-381): `require shader_f16` or `shader_int16`, and WGSL has no short.
   HLSL spells a half `float16_t`, never `half`, so slib's SGL edge hands DXC `-enable-16bit-types` on every compile; a 16-bit literal is a construction, `half(0.5)`.
-  A 16-bit value packs at 2 bytes, crosses no stage edge and sits in no `@inline` binding (CHK-387), and a buffer's element is whole 4-byte words: `buffer[half2]`, never `buffer[half]`.
+  A 16-bit value aligns to its size, a `half3` to 8, and crosses no stage edge and sits in no `@inline` binding (CHK-387).
+  A buffer's element is whole 4-byte words: `buffer[half2]`, never `buffer[half]`.
   **No layout is guaranteed without an annotation** (EMIT-116): the compiler may reorder members, so the host goes through the generated struct, never through offsets it assumed.
 - **A warning never fails `compile_to_text`, and only a text carries one.** A failed compile's error holds its errors alone.
   slib's SGL edge logs each warning under `slib`, and `sgl emit` prints them to stderr beside the text.

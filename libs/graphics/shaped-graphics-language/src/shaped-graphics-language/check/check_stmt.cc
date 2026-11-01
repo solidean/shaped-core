@@ -114,6 +114,8 @@ flow checker::check_stmt(function_scope& scope, ast::stmt_id stmt)
             (void)check_nested(scope, loop.body);
             scope.loops.remove_back();
         },
+        // CHK-420: its own scope, whose locals end with it; what it returns or leaves is what the statement does
+        [&](ast::scope_stmt const& block) { result = check_nested(scope, block.body); },
         [&](ast::print_stmt const& print) { (void)check_expr(scope, print.message); },
         [&](ast::expr_stmt const& e)
         {

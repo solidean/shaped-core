@@ -611,8 +611,8 @@ struct checker
     [[nodiscard]] cc::fixed_array<i32, 3> workgroup_of(i32 file, ast::attribute const* a);
     /// `@preferred_subgroup_size(n)`'s `n` (CHK-371); 0 without the attribute, and after a bad one, which it reports.
     [[nodiscard]] i32 preferred_subgroup_size_of(i32 file, ast::attribute const* a, bool is_compute);
-    /// `@layout(.hlsl)` or `@layout(.cpp)` on a binding; anything else reports and promises nothing.
-    [[nodiscard]] block_layout layout_of(i32 file, ast::attribute const* a, bool is_workgroup);
+    /// `@padding(.none)` on a binding or a buffer member; anything else reports and leaves the natural padding.
+    [[nodiscard]] padding_kind padding_of(i32 file, ast::attribute const* a);
     /// `@geometry(max_vertices = N)`'s `N`, from 1 to 256; 1 after a bad argument, which it reports (CHK-301).
     [[nodiscard]] i32 max_vertices_of(i32 file, ast::attribute const& a);
     struct tessellation_mode
@@ -666,11 +666,14 @@ struct checker
     /// CHK-291: the path from `type` down to the first array it holds, through struct members, as `.corners: float2[3]`.
     /// Empty when it holds none; a tessellation factor member is skipped, since it is an array by design (CHK-305).
     [[nodiscard]] cc::string array_path(type_id type) const;
-    /// CHK-291: whether `type` is a one-dimensional array of `count` > 0 elements that each take a whole number of 16-byte
-    /// rows on every target, which every target places alike in a constant block.
-    [[nodiscard]] bool is_whole_row_array(type_id type) const;
+    /// The bytes one element of an array of `type` strides by at natural alignment (EMIT-110), outside a constant block.
+    [[nodiscard]] i32 natural_stride_of(type_id type) const;
+    /// CHK-291: the path from `type` down to the first array in it whose element strides by less than whole 16-byte rows,
+    /// which a constant block cannot index without `@padding(.every_element)`; empty when there is none.
+    [[nodiscard]] cc::string sub_row_array_path(type_id type) const;
     /// CHK-291: refuses each array a struct crossing a stage edge holds, reported at `where` of `file`.
-    void judge_edge_arrays(i32 file, source_span where, type_id type);
+    /// `is_link`: the edge is a stage link, where a one-dimensional array of builtins crosses an element per location.
+    void judge_edge_arrays(i32 file, source_span where, type_id type, bool is_link = false);
     /// `atomic[uint]` and `atomic[int]` in a type position.
     [[nodiscard]] type_id resolve_atomic(i32 file, ast::expr_id expr, ast::index const& node, function_scope const* scope);
     /// CHK-297: an expression of an atomic's type, which only a builtin's argument may be.
@@ -822,9 +825,11 @@ struct checker
         cc::string_view reason;
         type_id type = type_id::none;
     };
-    [[nodiscard]] local_only_found local_only_path(type_id type) const;
+    /// `in_memory`: what GPU memory holds, where a builtin with a layout there is no value of function bodies alone.
+    [[nodiscard]] local_only_found local_only_path(type_id type, bool in_memory = false, bool in_link = false) const;
     /// CHK-397: refuses a value of function bodies alone a struct crossing a stage edge holds; true where it did.
-    bool judge_edge_local_only(i32 file, source_span where, type_id type);
+    /// `is_link`: the edge is a stage link, where a mat2 and a mat3 cross a column per location (CHK-422).
+    bool judge_edge_local_only(i32 file, source_span where, type_id type, bool is_link = false);
     /// Marks the first body `require` of each feature of `features` in each of `functions` as used (CHK-265).
     void mark_requires_used(cc::span<symbol_id const> functions, feature_set features);
     /// `unused-require` for every `require` of a body that nothing needed (CHK-265).
@@ -1089,6 +1094,12 @@ struct checker
     /// Nothing where the arguments do not bind or one does not convert.
     /// It reports nothing, so a literal can try every candidate.
     [[nodiscard]] cc::optional<candidate_match> match(i32 file, symbol_id candidate, call_arguments const& arguments);
+    /// CHK-421: `arguments` with each scalar of another kind converted to the kind of the plain vector `candidates`
+    /// construct, where that makes one of them match; nothing for any other call.
+    [[nodiscard]] cc::optional<call_arguments> converted_for_plain_vector(i32 file,
+                                                                          source_span where,
+                                                                          cc::span<symbol_id const> candidates,
+                                                                          call_arguments const& arguments);
     /// The length of the chain that converts written argument `i` to `parameter`; nothing where it does not convert.
     [[nodiscard]] cc::optional<i32> chain_of(i32 file, parameter const& taking, call_arguments const& arguments, isize i);
     /// Whether `expr`, already checked, names a place a body could assign, reporting why not; `what` names the use.

@@ -245,7 +245,9 @@ let lit = fun (n: vec3){frame} => dot(n, frame.sun_dir)
 * **AST-106** A block has no implicit value: its last expression is a statement like every other ([why](why/ast.md#ast-106)).
 * **AST-107** A **value block** is a block that is the body of a `case` arm, of an arrow lambda or of a property: `=>:` and a block.
 * **AST-108** `yield expression` gives its value to the nearest enclosing value block, and it leaves that block.
-* **AST-109** The blocks of `if`, `for` and `while` between a `yield` and its value block are transparent, as they are between a `break` and its loop.
+* **AST-109** The blocks of `if`, `for`, `while` and `scope` between a `yield` and its value block are transparent, as they are between a `break` and its loop.
+* **AST-156** `scope:` and a block is a statement whose block is a scope of its own ([why](why/ast.md#ast-156)).
+  It takes no argument and no arrow, and it is transparent to `break`, `continue`, `yield` and `return`, as an `if` block is.
 * **AST-118** A `yield` with a `loop` between it and its value block is the normal error `yield-in-loop`; it is written `break value` ([why](why/ast.md#ast-118)).
 * **AST-110** A `yield` that finds the body of a `fun`, named or anonymous, before any value block is the normal error `yield-in-function`; it is written `return`.
 * **AST-111** The right side of an `=>` that is an expression is the value of that body, and a `yield` that is this whole expression is the warning `redundant-yield` ([why](why/ast.md#ast-111)).

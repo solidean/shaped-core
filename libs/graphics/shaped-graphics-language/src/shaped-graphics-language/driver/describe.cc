@@ -128,6 +128,21 @@ described_binding_member describe_resource(check::checked_module const& m,
 }
 
 
+/// EMIT-174: the column of a matrix, or the element of a one-dimensional array of builtins, and how many cross.
+cc::pair<cc::string, i32> pieces_of(check::checked_module const& m, check::type_id type)
+{
+    auto const name = m.name_of(type);
+    if (name == "mat2" || name == "mat3" || name == "mat4")
+    {
+        auto const n = name == "mat2" ? 2 : name == "mat3" ? 3 : 4;
+        return {cc::format("float{}", n), n};
+    }
+    if (m.builtin_type_of(type) == nullptr && m.at(type).kind == check::type_kind::array && m.at(type).count > 0
+        && m.builtin_type_of(m.at(type).element) != nullptr)
+        return {cc::string(m.name_of(m.at(type).element)), i32(m.at(type).count)};
+    return {};
+}
+
 described_struct describe_struct(check::checked_module const& m, check::type_info const& t)
 {
     auto result = described_struct{.name = m.at(t.symbol).name,
@@ -137,19 +152,27 @@ described_struct describe_struct(check::checked_module const& m, check::type_inf
     auto const semantics = t.edge == check::stage::vertex ? emit_impl::vertex_semantics(m, t) : cc::vector<cc::string>();
     auto index = isize(0);
     for (auto const& member : m.at(t.members))
-        result.members.push_back(
-            {.name = member.name,
-             .type = cc::string(m.name_of(member.type)),
-             // the position, the layer, the depth and the sample mask take no location
-             .location
-             = member.is_position || member.is_layer || member.output != check::pixel_output::color ? -1 : location++,
-             .stream = t.edge == check::stage::vertex ? emit_impl::stream_of(member) : cc::string(),
-             .format = member.vertex_format,
-             .output = member.output == check::pixel_output::sample_mask ? cc::string("sample_mask")
-                     : member.output != check::pixel_output::color       ? cc::string("depth")
-                                                                         : cc::string(),
-             .semantic = t.edge == check::stage::vertex ? semantics[index++] : cc::string(),
-             .is_per_instance = member.is_per_instance});
+    {
+        auto [piece, pieces] = t.edge == check::stage::vertex ? pieces_of(m, member.type) : cc::pair<cc::string, i32>();
+        // the position, the layer, the depth and the sample mask take no location
+        auto const takes_location
+            = !member.is_position && !member.is_layer && member.output == check::pixel_output::color;
+        result.members.push_back({.name = member.name,
+                                  .type = cc::string(m.name_of(member.type)),
+                                  .location = takes_location ? location : -1,
+                                  .stream = t.edge == check::stage::vertex ? emit_impl::stream_of(member) : cc::string(),
+                                  .format = member.vertex_format,
+                                  .output = member.output == check::pixel_output::sample_mask ? cc::string("sample_"
+                                                                                                           "mask")
+                                          : member.output != check::pixel_output::color       ? cc::string("depth")
+                                                                                              : cc::string(),
+                                  .semantic = t.edge == check::stage::vertex ? semantics[index++] : cc::string(),
+                                  .is_per_instance = member.is_per_instance,
+                                  .pieces = pieces,
+                                  .piece = cc::move(piece)});
+        if (takes_location)
+            location += pieces > 0 ? pieces : 1;
+    }
     return result;
 }
 
@@ -179,11 +202,10 @@ described_memory_struct describe_memory_struct(check::checked_module const& m,
                                                emit_impl::address_space space)
 {
     auto const placed = emit_impl::place_struct(m, type, space);
-    auto result = described_memory_struct{
-        .name = cc::string(m.name_of(type)),
-        .module = foreign_module_of_type(m, type),
-        .space = cc::string(space == emit_impl::address_space::constants ? "constants" : "storage"),
-        .size = placed.size};
+    auto result = described_memory_struct{.name = cc::string(m.name_of(type)),
+                                          .module = foreign_module_of_type(m, type),
+                                          .space = cc::string(emit_impl::is_storage(space) ? "storage" : "constants"),
+                                          .size = placed.size};
     auto const members = m.at(m.at(type).members);
     for (auto i = isize(0); i < members.size(); ++i)
         if (members[i].type != check::checked_module::void_type)
@@ -653,14 +675,15 @@ sgl::described_binding sgl::driver::impl::describe_binding(check::checked_module
         auto const& t = m.at(member.type);
         if (t.kind == check::type_kind::buffer)
         {
-            result.members.push_back({.name = member.name,
-                                      .kind = described_member_kind::buffer,
-                                      .type = cc::string(m.name_of(t.element)),
-                                      .slot = slot,
-                                      .count = count,
-                                      .stride = sgl::emit::impl::element_stride(m, t.element),
-                                      .host_name = cc::format("{}.{}", s.name, member.name),
-                                      .access = cc::string(t.is_mut ? "read_write" : "read")});
+            result.members.push_back(
+                {.name = member.name,
+                 .kind = described_member_kind::buffer,
+                 .type = cc::string(m.name_of(t.element)),
+                 .slot = slot,
+                 .count = count,
+                 .stride = sgl::emit::impl::element_stride(m, t.element, sgl::emit::impl::element_space(b, member)),
+                 .host_name = cc::format("{}.{}", s.name, member.name),
+                 .access = cc::string(t.is_mut ? "read_write" : "read")});
             slot += count;
             continue;
         }
@@ -824,7 +847,8 @@ cc::result<sgl::module_description, cc::string> sgl::describe(describe_request c
     auto placed = cc::vector<check::type_id>();
     for (auto const id : described)
     {
-        for (auto const space : {emit_impl::address_space::constants, emit_impl::address_space::storage})
+        for (auto const space : {emit_impl::address_space::constants, emit_impl::address_space::storage,
+                                 emit_impl::address_space::packed_constants, emit_impl::address_space::packed_storage})
         {
             auto structs = cc::vector<check::type_id>();
             emit_impl::collect_placed_structs(m, id, space, structs);

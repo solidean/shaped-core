@@ -62,3 +62,65 @@ pipeline tinted_points:
     pixel = tinted_ps
     topology = .point_list
     format = .rgba32_float
+
+// The same points, each carrying a matrix, an array written at a runtime index, and a flat array across the link.
+// Every one crosses as its columns or its elements (CHK-422), so a piece a backend lost or swapped shows as a wrong number.
+struct linked_indices:
+    @position position: hpos4
+    frame: mat3
+    turn: mat2
+    weights: float[3]
+    @interpolate(.flat) ids: int[2]
+
+@vertex fun linked_vs(p: indexed_point, @vertex_index v: int, @instance_index i: int) -> linked_indices:
+    let mut link = linked_indices(
+        position = hpos4(p.column, p.row, 0.5, 1.0)
+        frame = mat3(float3(v as float, 0.0, 0.0), float3(0.0, i as float, 0.0), float3(1.0, 2.0, 3.0))
+        turn = mat2(float2(0.0, 1.0), float2(-1.0, 0.0))
+        weights = [v as float, i as float, 0.5]
+        ids = [v, i]
+    )
+    link.weights[v % 3] += 10.0
+    return link
+
+// (2c + 1, 2 + weights[1], weights[c % 3], c - r) for the point at column c of row r, the matrices undone by the arithmetic.
+@pixel fun linked_ps(p: linked_indices) -> index_target:
+    let lit = p.frame * float3(1.0)
+    let turned = p.turn * float2(p.ids[0] as float, p.ids[1] as float)
+    return {
+        indices = float4(lit.x + turned.y, lit.y + turned.x + p.weights[1], p.weights[p.ids[0] % 3], (p.ids[0] - p.ids[1]) as float)
+    }
+
+pipeline linked_points:
+    vertex = linked_vs
+    pixel = linked_ps
+    topology = .point_list
+    format = .rgba32_float
+
+// The same points, read from vertex buffers that hold an array per vertex and a matrix per instance.
+// Each is read as its elements or its columns, an attribute apiece (CHK-422, EMIT-174).
+@vertex struct framed_point:
+    column: float
+    tags: float[3]
+    @per_instance row: float
+    @per_instance frame: mat3
+
+struct framed_value:
+    @position position: hpos4
+    @interpolate(.flat) value: float4
+
+@vertex fun framed_vs(p: framed_point) -> framed_value:
+    let framed = p.frame * float3(p.tags[0], p.tags[1], p.tags[2])
+    return {
+        position = hpos4(p.column, p.row, 0.5, 1.0)
+        value = float4(framed.x, framed.y, framed.z, p.tags[2])
+    }
+
+@pixel fun framed_ps(p: framed_value) -> index_target:
+    return { indices = p.value }
+
+pipeline framed_points:
+    vertex = framed_vs
+    pixel = framed_ps
+    topology = .point_list
+    format = .rgba32_float

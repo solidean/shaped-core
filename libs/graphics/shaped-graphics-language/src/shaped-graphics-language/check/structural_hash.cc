@@ -42,6 +42,7 @@ void fold_members(cc::byte_stream_builder& b, checked_module const& m, cc::span<
         b.add_string(member.stream);
         b.add_bool(member.is_unfilterable);
         b.add_bool(member.is_non_filtering);
+        b.add_pod(u8(member.padding));
         b.add_bool(member.static_sampler >= 0);
         if (member.static_sampler >= 0)
             fold_sampler(b, m.samplers[member.static_sampler]);
@@ -130,7 +131,7 @@ cc::hash128 check::structural_hash(checked_module const& m, cc::span<member_info
 cc::hash128 check::structural_hash(checked_module const& m, binding_info const& binding)
 {
     auto b = cc::byte_stream_builder();
-    b.add_pod(u8(binding.layout));
+    b.add_pod(u8(binding.padding));
     b.add_bool(binding.is_inline);
     fold_members(b, m, m.at(binding.members));
     return cc::hash128::create(b.written_bytes(), 0);

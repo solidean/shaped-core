@@ -19,6 +19,8 @@ struct local_declaration
     /// HLSL's array lengths, `[3][5]`, which it writes after the name; empty wherever the type says them.
     cc::string_view dimensions;
     bool is_mut = false;
+    /// A local without a value whose type holds padding fields, which HLSL's validator refuses to store undefined.
+    bool is_zeroed = false;
 };
 
 /// What one target spells differently from the others.

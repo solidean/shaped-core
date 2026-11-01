@@ -800,6 +800,41 @@ constexpr auto k_layout_sources = {
                     "    if p.alive as bool:\n"
                     "        work.dirs[id.x] = work.dirs[id.x] + p.velocity * work.scale\n"
                     "        work.items[id.x] = p\n"),
+    // a struct, an array and a mat2 each start a row of a constant block, which MSL would place sooner (EMIT-176)
+    cc::string_view("struct small:\n"
+                    "    x: float\n"
+                    "\n"
+                    "struct holder:\n"
+                    "    turn: mat2\n"
+                    "\n"
+                    "binding spin:\n"
+                    "    lead: float\n"
+                    "    held: small\n"
+                    "    after: float\n"
+                    "    turn: mat2\n"
+                    "    h: holder\n"
+                    "    rows: float4[2, 2]\n"
+                    "    bases: mat3[2]\n"
+                    "    out_values: mut buffer[float]\n"
+                    "\n"
+                    "@compute(64) fun main(@thread_id id: int3){spin}:\n"
+                    "    let t = spin.turn * spin.h.turn * float2(1.0)\n"
+                    "    let b = spin.bases[id.x % 2] * float3(1.0)\n"
+                    "    spin.out_values[id.x] = spin.lead + spin.held.x + spin.after + t.y + spin.rows[1][id.x % 2].w "
+                    "+ "
+                    "b.z\n"),
+    cc::string_view("struct posed:\n"
+                    "    frames: mat3[2]\n"
+                    "    turn: mat2\n"
+                    "    weights: float[2, 3]\n"
+                    "    tag: float\n"
+                    "\n"
+                    "binding work:\n"
+                    "    items: mut buffer[posed]\n"
+                    "\n"
+                    "@compute(64) fun main(@thread_id id: int3){work}:\n"
+                    "    let p = work.items[id.x]\n"
+                    "    work.items[id.x] = posed(p.frames, p.turn, p.weights, p.tag + p.weights[1, 2])\n"),
 };
 } // namespace
 

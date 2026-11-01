@@ -256,6 +256,20 @@ TEST("sgl describe - a vertex input's members say which buffer they come from, a
     CHECK(crowded.structs[0].members[0].semantic == "UV1_");
     CHECK(crowded.structs[0].members[1].semantic == "UV1__");
 
+    // EMIT-174: a matrix or an array takes an attribute per column or element, so a member after it moves on as far
+    auto const pieced = described(
+        cc::string("@vertex struct pieced:\n    frame: mat3\n    weights: float[2]\n    uv: vec3\n\n") + edges);
+    REQUIRE(pieced.structs.size() == 2);
+    auto const& members = pieced.structs[0].members;
+    CHECK(members[0].pieces == 3);
+    CHECK(members[0].piece == "float3");
+    CHECK(members[0].semantic == "FRAME");
+    CHECK(members[1].location == 3);
+    CHECK(members[1].pieces == 2);
+    CHECK(members[1].piece == "float");
+    CHECK(members[2].location == 5);
+    CHECK(members[2].pieces == 0);
+
     // Where a stream means nothing, it is refused rather than ignored.
     CHECK(error_of(R"(@vertex struct v:
     position: pos3

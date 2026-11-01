@@ -60,6 +60,14 @@ struct sgl::ast::while_stmt
     constexpr bool operator==(while_stmt const&) const = default;
 };
 
+/// `scope:` and a block: its locals end with it, and it is transparent to every jump (AST-156).
+struct sgl::ast::scope_stmt
+{
+    sgl::ast::body body;
+
+    constexpr bool operator==(scope_stmt const&) const = default;
+};
+
 struct sgl::ast::assert_stmt
 {
     expr_id condition = expr_id::none;
@@ -100,7 +108,7 @@ struct sgl::ast::stmt
     form_id form = form_id::none;
     range_of<attribute> attributes;
 
-    cc::variant<invalid_stmt, let_stmt, assign_stmt, if_stmt, for_stmt, while_stmt, assert_stmt, print_stmt, decl_stmt, expr_stmt>
+    cc::variant<invalid_stmt, let_stmt, assign_stmt, if_stmt, for_stmt, while_stmt, scope_stmt, assert_stmt, print_stmt, decl_stmt, expr_stmt>
         node;
 
     bool operator==(stmt const&) const = default;

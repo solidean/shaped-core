@@ -697,8 +697,15 @@ WGSL has neither coherence nor ordering across workgroups, so a WebGPU build of 
 ## CHK-369
 
 A host that stages a whole C struct, as AMD's FSR host code does, needs the layout promised rather than generated.
-`.hlsl` promises what is emitted today, so it costs nothing but the freedom to reorder that block.
-`.cpp` is for a host struct written with no knowledge of HLSL's rows; it costs a memory form or offsets on every target, HLSL included.
+The natural rule is the fast one (EMIT-110), so packing is the exception a shader asks for, never the default.
+It costs a memory form on WGSL and MSL wherever a vector lands off its alignment, and the wide loads that alignment buys.
+The attribute names where padding goes rather than a rule's name, so the matrix and array cases it will grow are spelled alike.
+
+## CHK-421
+
+HLSL and GLSL convert a constructor's scalars implicitly, so `float3(a * 4u + b, c, 1.0)` is what every port writes, and SGL made it `float3(uint3(…))`.
+A plain vector is a layout of scalars, so converting into one is what it is for; the strong vectors keep their meaning and convert nothing.
+The rule runs only after an exact match fails, so no call that resolved before changes, and a literal keeps CHK-253's own conversions.
 
 ## CHK-371
 
@@ -763,9 +770,20 @@ Unrolling every small constant-range loop without the attribute was not chosen: 
 
 A rotation or a normal matrix is a `mat3`, and building one from three columns is the common case in a body.
 Its layout in GPU memory is a decision of its own: a constant block starts each column on a row of 16 bytes, a buffer's element may pack it into 36, and each target's memory form differs.
-Taking that decision with the first local `mat3` would fix it before any shader needed one in memory, so a `mat3` stays in function bodies until it is taken.
-Everywhere memory or a stage edge would hold one is refused at its line, the way an array is (CHK-291), rather than by the emitter with no line at all.
-A shader that wants one from memory reads its columns, which are `float3`s, and builds it in the body.
+The natural rule took it (EMIT-110): a `mat3` is three `float3` columns, each at 16, so it takes 48 bytes wherever it stands, and `@padding(.none)` packs it into 36.
+Ray data is a layout of its own, which no target agrees on yet, so it still refuses one at its line, the way an array is refused (CHK-291).
+A vertex input and a stage link take one as its columns (CHK-422), and a pixel output never does.
+A `mat2` waits for a shader that needs one in memory: HLSL starts each of its two columns on a row, which no other target does.
+
+## CHK-422
+
+A normal matrix or a tangent frame handed from the vertex to the pixel stage is common, and so is a small array of weights.
+No target carries either across a link the same way: WGSL takes neither, HLSL takes a matrix but spends a location per row, and MSL a column.
+A location per column or element is what each one can say, and it is what a hand-written port does with the members it splits.
+A vertex input is the same split on the host's side: the generated struct keeps the member whole, a `tg::mat3f` or a `cc::fixed_array`, and its layout names an attribute per piece.
+A matrix in a vertex buffer is the usual instanced transform, and four `float4` members are how a shader without one spells it.
+A pixel output is a render target per location, which an array would silently spread across.
+Nesting is refused because the text would need a name per path, and no shader in the corpus wants one yet.
 
 ## CHK-408
 

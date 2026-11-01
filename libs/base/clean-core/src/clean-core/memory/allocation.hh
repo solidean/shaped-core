@@ -45,6 +45,24 @@ namespace impl
 } // namespace impl
 } // namespace cc
 
+/// How much cc::trim_thread_memory gives back to the OS.
+enum class cc::memory_trim : cc::u8
+{
+    expired, // what the allocator already meant to give back: its delayed purges past their delay
+    all,     // everything it holds freed: the thread's empty pages, and every purge pending
+};
+
+namespace cc
+{
+/// Gives back to the OS what the default memory resource holds freed for the calling thread, and the purges pending process-wide.
+/// mimalloc keeps what a thread frees for that thread to reuse, and runs a delayed purge only when some thread collects:
+/// a pool thread that frees a large phase's memory and then idles, or allocates elsewhere, keeps it resident indefinitely.
+/// Only the owning thread can free its pages, so each thread that should give memory back calls this itself.
+/// mimalloc: mi_collect(how == memory_trim::all). The system resource: nothing.
+/// About as costly as walking the thread's pages: meant after a large phase, not per allocation.
+void trim_thread_memory(memory_trim how = memory_trim::all);
+} // namespace cc
+
 /// Polymorphic memory resource interface powering cc::allocation<T>.
 /// Custom allocators implement this interface to provide pluggable allocation strategies.
 /// The design favors explicit size/alignment tracking and non-movable in-place resize over realloc.

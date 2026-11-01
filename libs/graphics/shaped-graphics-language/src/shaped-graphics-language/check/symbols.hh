@@ -318,6 +318,17 @@ enum class sgl::check::pixel_output : sgl::u8
     sample_mask,
 };
 
+/// Where GPU memory leaves room between values, as `@padding` asks (CHK-369).
+enum class sgl::check::padding_kind : sgl::u8
+{
+    /// No annotation: every value at its natural alignment, so a vector loads whole on every target (EMIT-110).
+    natural,
+    /// `@padding(.none)`: as a C++ compiler places a struct of the generated host types (EMIT-154, EMIT-167).
+    none,
+    /// `@padding(.every_element)` on a constant block's array: each element starts a 16-byte row (EMIT-172).
+    every_element,
+};
+
 /// A field of a struct or a member of a binding.
 struct sgl::check::member_info
 {
@@ -354,6 +365,8 @@ struct sgl::check::member_info
     bool is_non_filtering = false;
     /// Carries `@coherent`: a `mut` buffer or image whose writes reach every workgroup of the dispatch (CHK-368).
     bool is_coherent = false;
+    /// A buffer member's `@padding(.none)`: its elements are placed as C++ places them (CHK-369).
+    padding_kind padding = padding_kind::natural;
     /// A `sampler name:` block of a binding, as a position in `checked_module::samplers`; -1 for any other member.
     i32 static_sampler = -1;
     /// `@sampler(name)` on a texture: the position among its binding's members of the sampler a sampling call without
@@ -571,17 +584,6 @@ struct sgl::check::function_info
     constexpr bool operator==(function_info const&) const = default;
 };
 
-/// What a binding's `@layout` promises its constant block (CHK-369).
-enum class sgl::check::block_layout : sgl::u8
-{
-    /// No annotation: the compiler places the block, and promises nothing but the generated struct (EMIT-116).
-    unpromised,
-    /// `@layout(.hlsl)`: HLSL's constant-buffer packing in declaration order, never reordered (EMIT-153).
-    hlsl,
-    /// `@layout(.cpp)`: as a C++ compiler places a struct of the generated host types (EMIT-154).
-    cpp,
-};
-
 struct sgl::check::binding_info
 {
     symbol_id symbol = symbol_id::none;
@@ -591,7 +593,8 @@ struct sgl::check::binding_info
     bool is_workgroup = false;
     /// `@no_padding`: a gap before any member of its constant block is an error.
     bool is_no_padding = false;
-    block_layout layout = block_layout::unpromised;
+    /// `@padding(.none)`: its constant block and its buffers' elements are placed as C++ places them (CHK-369).
+    padding_kind padding = padding_kind::natural;
     ast::range_of<member_info> members;
     /// What its own `require` lines name, which declares them for every entry point listing it (CHK-262).
     feature_set declared;
@@ -845,6 +848,8 @@ struct sgl::check::written_argument
     /// A function handed to a parameter of function type: a function's name, an arrow lambda, or such a parameter
     /// handed on (CHK-318); what it stands for is its expression's target.
     bool is_function = false;
+    /// The `as` a plain vector's constructor converts this scalar through to its own kind (CHK-421); none for most.
+    symbol_id conversion = symbol_id::none;
 
     constexpr bool operator==(written_argument const&) const = default;
 };

@@ -479,13 +479,9 @@ TEST("sgl options - a binding's shape follows its layout rule, which moves every
             return "";
         return described.value().bindings[0].shape;
     };
-    auto const cpp = shape_of("@layout(.cpp)\n");
-    auto const hlsl = shape_of("@layout(.hlsl)\n");
-    auto const none = shape_of("");
-    REQUIRE(!cpp.empty());
-    REQUIRE(!hlsl.empty());
-    REQUIRE(!none.empty());
-    CHECK(cpp != hlsl);
-    CHECK(cpp != none);
-    CHECK(hlsl != none);
+    auto const packed = shape_of("@padding(.none)\n");
+    auto const natural = shape_of("");
+    REQUIRE(!packed.empty());
+    REQUIRE(!natural.empty());
+    CHECK(packed != natural);
 }

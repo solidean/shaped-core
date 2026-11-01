@@ -10,7 +10,8 @@ use slug
 binding scene:
     world: acceleration_structure[.triangles]
     // the cube's triangles in object space, three corners each, and the em coordinate every corner carries
-    cube_positions: buffer[float3]
+    // packed, since the BLAS reads the same buffer as 12-byte vertices
+    @padding(.none) cube_positions: buffer[float3]
     cube_em: buffer[float2]
     // the scene's instance table: for each instance id, its label run's first record in `slug.shapes`, or -1 for none
     first_shapes: buffer[int]

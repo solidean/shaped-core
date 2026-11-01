@@ -587,6 +587,8 @@ It knows its own verdict, so there is no wrapper exit code to misread and no pus
    The tests do not rerun: they passed on this change, and what came in was gated by whoever pushed it.
 
 A gate that rewrites a file stops before any push with a request to commit it; nothing is committed on the tool's own initiative beyond the bump and the closes.
+That question is asked right after the static gates and before the test tail, so a formatter's rewrite costs a minute rather than the whole run.
+The gate is `check --fix --no-test`, then the dirty check, then `check test`.
 `--dry-run` says what would be bumped and pushed.
 
 `--closes <id>[,<id>] [--resolution fixed]` closes those issues in a commit of their own after the bump and ahead of the gate, so the push that resolves them is the one that closes them.

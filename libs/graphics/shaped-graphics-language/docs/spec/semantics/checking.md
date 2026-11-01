@@ -121,19 +121,19 @@ use view
 * **CHK-388** `bytes` and `mut bytes` are resources of their own kind, and `out bytes` is an error.
   The prelude's loads take either, its stores `mut bytes` alone, and `@coherent` applies to `mut bytes` as to a `mut buffer`.
 * **CHK-387** An `@inline` binding holds no 16-bit value: a member that is one, or holds one at any depth, is `unsupported-yet` ([why](why/checking.md#chk-387)).
-* **CHK-397** `mat3` and `mat2` are the prelude's 3x3 and 2x2 matrices of floats, column-major like `mat4`, and values of function bodies alone ([why](why/checking.md#chk-397)).
+* **CHK-397** `mat3` and `mat2` are the prelude's 3x3 and 2x2 matrices of floats, column-major like `mat4` ([why](why/checking.md#chk-397)).
   `mat3(c0, c1, c2)` makes one of three `float3` or three `vec3` columns, `c0` first, and `mat2(c0, c1)` one of two `float2` columns.
   `m * v` of a `mat3` and a `float3` or a `vec3` gives the same type, and of a `mat2` and a `float2` a `float2`.
   `m * n` of two of one size is their product, which applies `n` first.
   `transpose(m)` of any matrix is its rows as columns, which is how a row vector times a matrix, HLSL's `mul(v, m)`, is spelled.
   `m.column(i)` and `m.row(i)` read one column and one row (CHK-407); none has another function yet, and no `==`.
   A local, a parameter, a result and a field of a struct a body holds may be one.
-  Wherever a layout would place one it is `unsupported-yet`, at any depth of the structs and arrays holding it.
-  That is a constant block, an `@inline` one among them, a buffer's element, a binding array's buffer and workgroup memory.
-  It is also every struct that crosses a stage edge: a vertex input, a stage link, a control point, a factors struct, a stream's vertex and a pixel output.
+  **A `mat3` also stands in GPU memory**: a constant block, a buffer's element and workgroup memory, at its layout of EMIT-110 and EMIT-168.
+  **A `mat2` stands there too**, its two columns back to back in 16 bytes, at its layout of EMIT-175.
+  A member of a vertex input or a stage link may be either, as CHK-422 has it; any other struct that crosses a stage edge holding one is `unsupported-yet`.
+  That is a pixel output, and a struct or an array in a vertex input or a stage link that holds the matrix.
   So are the ray data of CHK-326: a ray set's payload, a stage's payload, the attributes a hit carries or an intersection reports, and a callable's parameter.
-  It is judged before an array holding it is (CHK-291), so the detail names the matrix.
-  The detail names the path down to it and says that its layout in GPU memory is not decided.
+  It is judged before an array holding it is (CHK-291), so the detail names the matrix and the path down to it.
 
 ## Members and constructors
 
@@ -413,7 +413,7 @@ fun shade(k: float) -> float:
 | an enum | `@builtin`, `@shadowable`, `@bitflags`, `@internal` |
 | a const | `@shadowable`, `@option` |
 | a test | `@expect` |
-| a binding | `@inline`, `@workgroup`, `@shadowable`, `@no_padding`, `@layout` |
+| a binding | `@inline`, `@workgroup`, `@shadowable`, `@no_padding`, `@padding` |
 | a binding member | `@unfilterable`, `@non_filtering`, `@sampler`, `@coherent`, `@atomic` |
 | a struct field | `@position`, `@per_instance`, `@stream`, `@interpolate`, `@format` on a `@vertex struct`, `@depth` and `@sample_mask` on a `@pixel struct`, `@per_draw`, `@edge_factors` and `@inside_factors` on any other |
 | a parameter | the stage inputs of CHK-271 |
@@ -519,9 +519,13 @@ fun shade(k: float) -> float:
   A write to it that its workgroup follows with a barrier, `storage_barrier` for a buffer and `texture_barrier` for an image, is visible to every invocation of the dispatch.
   That holds for every invocation that has read the result of an atomic update made after that barrier by an invocation of the writer's workgroup.
   On any other member it is `wrong-kind-of-name`, and it needs `device_coherence`, a form CHK-201 judges.
-* **CHK-369** `@layout(.hlsl)` and `@layout(.cpp)` on a binding promise its constant block's layout to the host ([why](why/checking.md#chk-369)).
-  The members stand in declaration order, placed by the rule the argument names.
-  `.hlsl` is HLSL's constant-buffer packing, and `.cpp` places them as a C++ compiler places a struct of the generated host types ([emitting](emitting.md#layout)).
+* **CHK-369** `@padding(.none)` places GPU memory as a C++ compiler places a struct of the generated host types, and promises that layout to the host ([why](why/checking.md#chk-369)).
+  On a binding it places the binding's constant block (EMIT-154) and every buffer's element (EMIT-167); on a buffer member, that buffer's element.
+  Without it, memory is placed at its natural alignment (EMIT-110).
+  On any other member it is `wrong-kind-of-name`, since a constant takes its block's padding.
+  `@padding(.every_element)` on a constant block's member that is an array of values starts each element on a row (EMIT-172).
+  On any other member it is `wrong-kind-of-name`, and on a binding `invalid-attribute-arguments`, since it stands on the array it pads.
+  `.every_column` is `unsupported-yet`, since a `mat3`'s columns stand 16 bytes apart already.
   Any other argument, and the attribute on a `@workgroup` binding, is `invalid-attribute-arguments`.
 
 ```sgl
@@ -550,6 +554,8 @@ fun shade(k: float) -> float:
 * **CHK-53** A local **shadows** every earlier local and parameter of its name, in its own block or an enclosing one, from the statement after its `let`, as in Rust ([why](why/checking.md#chk-53)).
   The value it is given still sees the one it hides, and its type may differ.
 * **CHK-54** A local or a parameter may have the name of a module-level symbol, and shadows it as it shadows a local ([why](why/checking.md#chk-54)).
+* **CHK-420** A `scope:` block (AST-156) is a scope of its own: a local declared in it ends with it, and one of the enclosing block stays visible and may be shadowed.
+  What the block does to the flow is what the statement does, so a `return` in it makes what follows unreachable as an `if` that returns on every path would.
   Types and values share one namespace, so behind it the name is the local wherever it stands: a call of it is CHK-78, and a type position holding it is the normal error `wrong-kind-of-name`.
   A parameter's type is resolved before any parameter is in scope, so `light: light` is fine.
 * **CHK-220** A symbol that carries `@shadowable(false)` is hidden by nothing, and it stays what its name means.
@@ -692,6 +698,10 @@ fun shade(k: float) -> float:
   `as` binds looser than every one of them (OP-5), so `x as float - y` converts to the type `float - y`.
   It is reported once, over the whole run of operators and `as`, with the fix that gives each `as` the operand before it: `(x as float) - y`.
 * **CHK-197** The prelude converts between `float`, `int` and `uint` of one width, and nothing else ([why](why/checking.md#chk-197)).
+* **CHK-421** The constructor of a plain vector, `floatN`, `intN` or `uintN`, converts each scalar argument of another of those kinds to its own, as `as` converts it ([why](why/checking.md#chk-421)).
+  It is tried only where no candidate matches the arguments as written, and a literal converts by CHK-253 instead.
+  A strong vector, `vec3`, `pos3` or `hpos4`, converts nothing, and no width changes: a `half` is no `float` component.
+  Every target writes the conversion, so the text never leans on a target's implicit rules.
   Each family also converts between its widths: `half` and `float`, `short` and `int`, `ushort` and `uint` (CHK-381).
   A `bool` and its vectors convert to `float`, `int` and `uint` of their width as 1 where true and 0 where not; nothing converts to a `bool` but a comparison.
   A float whose truncation the integer holds becomes that integer, truncated toward zero.
@@ -971,12 +981,19 @@ A `require` in a test's body that nothing in it uses is `unused-require`, and a 
 * **CHK-290** A square literal converts to the array type expected where it stands, with exactly as many elements, each converting to the element type.
   Where no array is expected it is an array of its first element's type, and every other element converts to that.
   It holds at least one element, and no name and no splat.
-* **CHK-291** An array in a constant block, in a buffer's element or in a struct that crosses a stage edge is `unsupported-yet`, at any depth of the structs holding it.
-  The detail names the path down to it.
-  The one exception is a constant block's member that is a one-dimensional array of `float4`, `int4`, `uint4` or `mat4`.
-  Each takes whole 16-byte rows, which every target places alike (EMIT-164).
-  An array of any other element there is `unsupported-yet`, and the detail names the element.
+* **CHK-291** An array stands in GPU memory at its natural stride (EMIT-110): in a buffer's element, at any depth of its structs, and in a constant block.
+  In a constant block every element must stride by whole 16-byte rows, at any depth, since a runtime index into a shorter one needs component arithmetic.
+  A `float3`, a 4-vector, a `mat3`, a `mat4` and every struct do; a scalar, a 2-vector or a 16-bit vector shorter than a row is `unsupported-yet`, and the detail names it.
+  `@padding(.every_element)` on a block member that is such an array starts each element on a row instead (CHK-369).
+  A buffer's element is never an array itself, which is `unsupported-yet`: a struct holding the array is the element.
+  An array in a struct that crosses a stage edge is `unsupported-yet`, and the detail names the path down to it, but where CHK-422 lets one carry it.
   A tessellation factor is an array by design (CHK-305), and workgroup memory has no host side, so neither counts.
+* **CHK-422** A member of a vertex input or a stage link may be a matrix, or a one-dimensional array of a value that crosses an edge itself ([why](why/checking.md#chk-422)).
+  A stage link is every struct one shading stage hands the next: a vertex or an evaluation stage's result, a pixel stage's parameter, a control point, a factors struct and a stream's vertex.
+  It crosses a location per column or per element (EMIT-174), and an `@interpolate` on the member applies to every one.
+  An array of integers is `@interpolate(.flat)`, as an integer is (CHK-273).
+  A vertex input reads it an attribute per column or element, and an array's `@format` states each element's (CHK-275).
+  A pixel output takes neither: its locations are render targets.
 * **CHK-299** A binding member `T[N]` of a texture, an image or a buffer is a **binding array**, which needs `binding_arrays`.
   Its `N` is at least 2, or it is `invalid-constant-argument`: one resource is a plain member.
   It is read by element alone, `name[i]`, and naming it whole is `wrong-kind-of-name`; an element is the resource, which only a builtin takes.

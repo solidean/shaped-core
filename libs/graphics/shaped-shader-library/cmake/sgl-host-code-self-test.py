@@ -286,6 +286,32 @@ def a_packed_vertex_member_is_its_bytes_on_the_host_and_its_format_in_the_layout
     expect_in(".format = sg::vertex_attribute_format::vec3f", source, "a float member's format, from its type")
 
 
+SPLIT = {
+    "name": "split_vertex",
+    "edge": "vertex",
+    "members": [
+        {"name": "frame", "type": "mat3", "location": 0, "stream": "per_vertex", "per_instance": False,
+         "semantic": "FRAME", "pieces": 3, "piece": "float3"},
+        {"name": "tints", "type": "float4[2]", "location": 3, "stream": "per_vertex", "per_instance": False,
+         "format": "rgba8_unorm", "semantic": "TINTS", "pieces": 2, "piece": "float4"},
+    ],
+}
+
+
+@test
+def a_vertex_matrix_or_array_is_one_host_field_and_an_attribute_per_piece():
+    header = sgl_host_code.emit_vertex_input("pkg", "ns", FILE, SPLIT)
+    expect_in("tg::mat3f frame;", header, "a matrix is the host's own matrix")
+    expect_in("cc::fixed_array<cc::u32, 2> tints;", header, "a packed array holds each element's bytes")
+    source = sgl_host_code.emit_vertex_input_impl("pkg", "ns", FILE, SPLIT)
+    expect_in('{.semantic = "FRAME", .semantic_index = 2, .format = sg::vertex_attribute_format::vec3f, '
+              ".offset = cc::isize(offsetof(::ns::split_vertex, frame)) + 2 * cc::isize(sizeof(tg::vec3f))",
+              source, "a column at its semantic index and its offset")
+    expect_in('{.semantic = "TINTS", .semantic_index = 1, .format = sg::vertex_attribute_format::rgba8_unorm, '
+              ".offset = cc::isize(offsetof(::ns::split_vertex, tints)) + 1 * cc::isize(sizeof(cc::u32))",
+              source, "a packed element at its format and its offset")
+
+
 # ---- a pipeline -------------------------------------------------------------------------------------------------------
 
 # Every stage filled, and a vertex stage that draws from no vertex buffer.
@@ -635,6 +661,38 @@ def a_16_bit_value_is_its_host_type_and_a_2_byte_gap_a_u16():
     expect_in("cc::u16 _pad0 = {}; ///< 2 bytes SGL's layout leaves free\n", fields, "a 2-byte gap")
     expect_in("cc::u16 count;", fields, "a ushort is clean-core's")
     expect_in("cc::u16 _pad1 = {}; ///< 2 bytes", fields, "a gap of 2 after a ushort")
+
+
+@test
+def a_struct_pads_its_tail_up_to_its_size():
+    members = [
+        {"name": "origin", "type": "float3", "offset": 0, "size": 12},
+        {"name": "direction", "type": "float3", "offset": 16, "size": 12},
+    ]
+    fields = sgl_host_code.padded_fields("p", {}, "here", members, "", 32)
+    expect_in("tg::vec3f origin; ///< `float3`, at byte 0\ncc::u32 _pad0 = {};", fields, "the gap after origin")
+    expect_in("tg::vec3f direction; ///< `float3`, at byte 16\ncc::u32 _pad1 = {};", fields, "the tail after direction")
+
+
+@test
+def a_buffer_of_3_vectors_strides_by_16_through_gpu_padded():
+    group = {"name": "points", "inline": False, "members": [
+        resource("buffer", name="dirs", type="float3", slot=0, stride=16, access="read"),
+        resource("buffer", name="flat", type="float3", slot=1, stride=12, access="read"),
+    ]}
+    entries = sgl_description.SglEntries(bindings=[(FILE, group)])
+    header = sgl_host_code.emit_group("pkg", {}, "ns", FILE, group)
+    expect_in("sg::readonly_buffer_view<slib::gpu_padded<tg::vec3f, 16>> dirs;", header, "a natural float3 buffer")
+    expect_in("sg::readonly_buffer_view<tg::vec3f> flat;", header, "a packed float3 buffer")
+    expect_in("<shaped-shader-library/gpu_padded.hh>", "\n".join(sgl_host_code.includes(entries)), "its header")
+
+
+@test
+def a_mat3_is_gpu_mat3_at_48_bytes_and_tg_mat3f_packed():
+    natural = [{"name": "basis", "type": "mat3", "offset": 0, "size": 48}]
+    packed = [{"name": "basis", "type": "mat3", "offset": 0, "size": 36}]
+    expect_in("slib::gpu_mat3 basis;", sgl_host_code.padded_fields("p", {}, "here", natural, ""), "a natural mat3")
+    expect_in("tg::mat3f basis;", sgl_host_code.padded_fields("p", {}, "here", packed, ""), "a packed mat3")
 
 
 def main() -> int:

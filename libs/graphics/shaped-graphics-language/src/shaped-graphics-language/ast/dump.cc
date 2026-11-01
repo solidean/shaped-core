@@ -480,6 +480,12 @@ struct dumper
                 dump_body(n.body, depth);
                 out += ")";
             },
+            [&](scope_stmt const& n)
+            {
+                open("scope");
+                dump_body(n.body, depth);
+                out += ")";
+            },
             [&](assert_stmt const& n)
             {
                 open("assert");

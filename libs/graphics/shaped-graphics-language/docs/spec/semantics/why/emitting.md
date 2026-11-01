@@ -90,25 +90,103 @@ Refusing the block, as this rule once did, refused the most common struct in GPU
 SPIRV-Cross writes the same for the same reason.
 The layout of a vertex input is not the struct's: `[[attribute(i)]]` reads through the vertex descriptor, so EMIT-62 is about GPU memory only.
 
+## EMIT-110
+
+The rule is chosen for what a GPU reads fastest, so a shader that names no layout is fast on every target.
+Three rules were weighed: C's, where every value aligns to its scalar; std430's, where a vector aligns to its size; and HLSL's rows everywhere.
+
+**In a buffer, a vector's alignment decides how it loads.**
+NVIDIA loads 16 bytes in one instruction only from a 16-byte boundary, so a `float4` the compiler cannot prove aligned is four 4-byte loads.
+In a kernel bound by bandwidth that is four times the load instructions: the threads still coalesce into the same cache lines, so it costs issue and latency rather than DRAM traffic.
+Apple's wide loads want natural alignment too; AMD's buffer loads need only 4 bytes, so they barely care.
+WGSL aligns a `vec4f` to 16 in storage and cannot lower an alignment, so under C's rule a `float4` at byte 4 would be four scalars in its memory form, slow even where the data happened to be aligned.
+That is why std430, WGSL's storage rule and MSL all align a vector to its size, and a 3-vector to 16.
+
+**In a constant block, a vector crossing a 16-byte row costs a read.**
+HLSL reads a constant buffer by rows, so under C's rule a `float4` at byte 4 is two row loads and a shuffle.
+NVIDIA reads constants per scalar operand, so it barely matters there, but it is not free on every target.
+Under the natural rule no vector crosses a row, so HLSL's constant buffers, std140 and WGSL's uniform rule all read every scalar and vector natively.
+
+**C's rule packs tightest, and rows everywhere packs loosest.**
+HLSL's rows in a buffer would stride a `float[N]` by 16, four times the memory and the bandwidth, which is no default to want.
+The natural rule costs a few padding bytes before a vector, which the generated host struct spells out as named fields.
+
+So SGL is fast by default, and the cases where the natural rule and a C++ programmer's intuition disagree are the ones `@padding` names explicitly.
+`@padding(.none)` is C's rule, for a host struct written by hand or memory something else reads, such as the vertices a BLAS is built from.
+A `mat3` (48 bytes, or 36 packed), an array of 3-vectors (a stride of 16, or 12 packed), and an array of scalars in a constant block are the others; they land with arrays and matrices in GPU memory.
+
 ## EMIT-112
 
 One C++ struct copied into what every target reads needs one layout, and the targets' own rules disagree on it.
-HLSL's is the one the rules take: dx12 then needs nothing, and every other target can be made to reach it.
-Rejecting what one target cannot place natively was the alternative, and it rejects a `{float; float3}` block and a buffer of `float3` everywhere because of one target.
-A rule of GPU alignment instead, as std430 and WGSL place, only moves the cost.
-A `float3` member then needs padding in the host struct that nobody wrote, and dx12 needs a `packoffset` on every member.
-MSL's 16-byte `float3` would still need a memory form.
-WGSL can only raise an alignment, never lower one, so a vector it would align further than SGL's offset becomes scalars; MSL has packed vectors for the same case.
-Vulkan's relaxed block layout refuses a few of these layouts: a member packed into a nested struct's last row, a vector across a row of a buffer's element, a 12-byte stride.
-`scalarBlockLayout` admits all of them, and nearly every Vulkan device has it, so sg's vulkan backend requires it rather than SGL narrowing its rules for devices without it.
-Only the root that needs it becomes a memory form: the rest reads in a capture as the source does (EMIT-46), and the form is invisible to the program.
+The natural rule is WGSL's own and nearly MSL's, so the rule costs those two least: WGSL writes every root as it is, and MSL writes a memory form only where a value sits in a 3-vector's tail.
+HLSL is the target that pays, with a padding field in each gap: a structured buffer packs as C++ does and a constant buffer packs within its rows, and both close every gap a value fits into.
+Filled gaps land every member at its offset, since no vector crosses a row and nothing else moves.
+The padding stands in the struct's declaration rather than in a flattened memory form, since HLSL builds a struct value member by member anyway.
+So the padding is invisible to the program, and every struct stays readable.
+A struct an HLSL text pads is therefore padded in function bodies too, and DXIL refuses to store a field it cannot prove defined, which is why such a local is zeroed first.
+A buffer of bare 3-vectors cannot carry padding in a struct of the program, so it is the one root HLSL writes as a memory form under the natural rule.
+`scalarBlockLayout`, which sg's vulkan backend requires, admits every offset the natural rule and `@padding(.none)` produce, and nearly every Vulkan device has it.
+
+## EMIT-169
+
+HLSL strides an array of `float3` by 12 in a structured buffer, where every other target strides it by 16, so one target needs the padding spelled.
+A wrapper struct per element would read as `a[i].value`, where a 4-vector reads as `a[i].xyz`, the swizzle any reader of HLSL expects.
+A constant buffer already starts each element on a row, so the 4-vector is its layout too, and one spelling serves both.
+
+## EMIT-170
+
+MSL's `float3` takes 16 bytes, so a scalar that SGL places in its tail would land 4 bytes later in MSL.
+A memory form flattens a root to fix that, which cannot reach a struct repeated in an array, and the array of lights is the common case.
+Declaring the vector packed fixes the struct itself instead, the way HLSL's padding fields do (EMIT-112), so it holds wherever the struct stands.
+A packed vector converts to its plain type on assignment, but MSL's builtin functions take only the plain one, which is why every read converts it.
+
+## EMIT-172
+
+HLSL's constant buffers start each array element on a row, WGSL's uniform rule requires a stride of 16, and MSL strides by the element alone.
+An array of 4-vectors is the one declaration every target places alike, and reading `.x` of it is what a hand-written port of such a shader does.
+The attribute stands on the array, so its cost, three unused lanes per element, is visible where the array is declared.
+
+## EMIT-177
+
+No machine that tests SGL runs Metal: the macOS runner has no Metal 4 device, so the metal backend's suite is skipped there.
+The Metal compiler does run there, on every shader a package builds, so a layout it can check at compile time is checked on every push.
+A wrong offset otherwise reads wrong values without an error, which is how a constant block's struct sat at the wrong byte unnoticed (EMIT-176).
+HLSL and WGSL need no such check: DXC's and WGSL's own reflection already confirm each offset in the cross-compiler layout tests.
+
+## EMIT-175
+
+A `mat2` is 16 bytes in every buffer layout WGSL, MSL and a structured buffer agree on, and C++'s `tg::mat2f` is the same bytes.
+Only HLSL's constant buffer disagrees, taking a row per column, so a block holds the two columns in one `float4`, as a hand-written port does.
+Aligning it to a row in a constant block keeps that `float4` inside one row, which HLSL requires of every vector there.
+A struct holding one then has one size in a block and another in a buffer, which EMIT-114 already reports as two layouts.
+
+## EMIT-174
+
+A location holds one vector of up to four lanes on every target, so a member per column or element is the declaration that means the same thing everywhere.
+Packing two short pieces into one location would save locations but change what `@interpolate` applies to, and the limit of 16 or more has not been reached by any shader yet.
+The rebuild costs nothing a compiler cannot fold, and a literal index reading its piece alone keeps the common case free of the local.
+
+## EMIT-173
+
+The text writer once worked out how to spell a member from where it was writing it, through flags it set while writing a place or indexing an array.
+A flag set a node too early or too late wrote the wrong text silently, and the read conversion that landed on an assignment's left side in MSL was exactly that.
+A table filled before writing has no such window: each expression carries what it is held as and whether it is read as a value, and the writer looks both up.
+New flat nodes for loads and stores would say the same, at the cost of a case in every pass over the flat tree for nodes that only an emitter sees.
+
+## EMIT-168
+
+HLSL places a `float3x3` differently in each memory: 44 bytes in a constant buffer, each column on a row but the last short, and 36 in a structured buffer.
+Neither is the natural 48, and a memory form would flatten every struct holding one, which HLSL cannot rebuild into a struct value.
+A `column_major float4x3` is exactly the natural layout in both: three columns of four floats.
+Its upper-left 3x3 is the matrix, which is what HLSL's cast to `float3x3` reads, and a constructor from the matrix's three rows and a zero row writes it.
+So the matrix stays a field of its struct, and the cost is a cast at each read and a call at each write.
 
 ## EMIT-116
 
 Reordering members is how a compiler packs a struct tighter, and it is planned: a `{float; float4; float}` block takes three rows where `{float4; float; float}` takes two.
 Promising declaration order now would make that a breaking change for every host that computed an offset by hand.
 The generated struct already follows whatever the compiler chose, so a host that uses it loses nothing.
-A host that needs a fixed layout, such as memory shared with a hand-written struct, will ask for one by annotation rather than by accident.
+A host that needs a fixed layout, such as memory shared with a hand-written struct, asks for one by annotation, `@padding(.none)`, rather than by accident.
 
 ## EMIT-63
 
@@ -221,9 +299,9 @@ Tint writes WGSL's own load for HLSL the same way.
 
 A host struct written with no knowledge of HLSL places a `float3` in 12 bytes and starts the next value right behind it.
 HLSL's constant buffers read in rows of 16 bytes, so a block laid out that way needs every member placed by hand there, and split where a vector crosses a row.
-That is the cost the `.cpp` layout asks for, and it is why `.hlsl` exists beside it.
+That is the cost `@padding(.none)` asks for, and why it is no default.
 Every rule places the same, ordinary C++ struct, since every generated host type aligns to its scalar: `tg::vec3f` is 12 bytes at 4, `tg::mat4f` 64 at 4.
-So the rule is EMIT-111's, and a struct a `.cpp` block holds would have the layout it has in a buffer.
+So the rule is EMIT-167's, and a struct a packed block holds would have the layout it has in a packed buffer.
 `packoffset` was the first plan for dx12, and it cannot carry the rule.
 It counts in 4-byte components, so a `half` at byte 2 has no spelling.
 It stands only in a `cbuffer`, whose members are globals rather than fields of the `ConstantBuffer` every other block is read through.

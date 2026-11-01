@@ -54,6 +54,7 @@ using namespace cc::primitive_defines;
 //
 
 struct memory_resource;
+enum class memory_trim : u8; // how much trim_thread_memory gives back (memory/allocation.hh)
 template <class T>
 struct allocation;
 

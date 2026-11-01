@@ -18,3 +18,5 @@ That is three sightings, each in a full run and none alone, which points at timi
 A fourth time the same day, in the next full `check`, with the load unchanged: under sustained load it now shows in nearly every full run.
 
 Seen again on 2026-10-31 in shelley's `ship` gate (`singlethreaded-clang`), under a commit that touched only babel's glTF reader; `--repeat 5` alone passed.
+
+Seen again on 2026-11-01 in the `ship` gate's `singlethreaded-clang` leg, under SGL stage-edge changes, after the same tree's `check` had passed it minutes before.

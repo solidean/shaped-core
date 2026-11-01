@@ -335,10 +335,12 @@ TEST("sgl check - a test that reaches a pipeline's trace is unsupported")
 TEST("sgl check - a mat3 is no ray payload, hit attribute or callable's parameter")
 {
     // CHK-397: what a ray, a hit or a callable carries is ray data a target lays out
-    constexpr auto why = "which only a function body holds, since its layout in GPU memory is not decided yet";
+    constexpr auto why = "which no stage edge carries yet, since its layout as ray data is not decided yet";
     constexpr auto framed = "struct framed:\n    m: mat3\n";
     CHECK(reports(cc::format("{}rays framed_rays:\n    primary: framed\n", framed))
-              .contains(cc::format("user:[framed] a mat3 in a ray payload, framed.m: mat3, {}", why)));
+              .contains(cc::format("user:[framed] a mat3 in a ray payload, framed.m: mat3, {}",
+                                   "which no ray payload carries yet, since its layout as ray data is not decided "
+                                   "yet")));
     CHECK(reports(cc::format("{}@miss fun gone(p: mut framed):\n    p.m = p.m\n", framed))
               .contains(cc::format("user:[gone] a mat3 crossing a stage edge, in framed.m: mat3, {}", why)));
     CHECK(reports(cc::format("{}@closest_hit fun hit(h: procedural_hit[framed], p: mut radiance):\n"
