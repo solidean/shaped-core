@@ -16,7 +16,8 @@ Seen from shelley (`libs/debug/shelley-render`, `sh::render::snapshot`), which c
 - 6% of the pixels differ, by up to 173 steps; a traced capture of the same scene shows the same first-time difference, smaller.
 - Across processes the result then depends on what was captured before (a texture already resident from an earlier capture comes with its chain), so a lit shot differs between runs.
 
-`capture_session::is_settled` refuses while `pending_work > 0`, and mip generation is queued as pending work when `collect_settled` reports a landed texture, so the window is somewhere between the acquire, the landing and the queuing.
+`capture_session::is_settled` refuses while `pending_work > 0`, and mip generation is queued as pending work once `collect_settled` reports a landed texture.
+So the window is somewhere between the acquire, the landing and the queuing.
 Not narrowed down further.
 
 shelley works around it with a small throwaway capture before each snapshot, which leaves the textures resident with their chains; every capture after it is identical, across runs too.
