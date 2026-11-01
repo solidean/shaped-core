@@ -23,6 +23,7 @@ add_library(babel-serializer
     src/babel-serializer/image/pfm.cc
     src/babel-serializer/image/png.cc
     src/babel-serializer/image/tga.cc
+    src/babel-serializer/image/webp.cc
     src/babel-serializer/image/impl/spng_backend.cc
     src/babel-serializer/image/impl/stb_backend.cc
 
@@ -58,6 +59,7 @@ target_sources(babel-serializer
     src/babel-serializer/image/ktx2.hh
     src/babel-serializer/image/pfm.hh
     src/babel-serializer/image/png.hh
+    src/babel-serializer/image/webp.hh
     src/babel-serializer/image/tga.hh
 
     src/babel-serializer/trace/chrome_trace.hh
@@ -96,6 +98,9 @@ endif()
 # Both are PRIVATE, and each third-party header lives in exactly one TU: spng.h in image/impl/spng_backend.cc, stb's in image/impl/stb_backend.cc.
 # libspng is the PNG codec; stb is what JPEG still decodes and encodes through.
 target_link_libraries(babel-serializer PRIVATE spng stb)
+
+# libwebp is committed in-source too (extern/libwebp), PRIVATE, and its headers live in image/webp.cc alone.
+target_link_libraries(babel-serializer PRIVATE webp)
 
 # ufbx is committed in-source too (extern/ufbx), and is the whole of the FBX reader.
 # PRIVATE, and ufbx.h is included by geometry/fbx.cc alone.
@@ -139,6 +144,7 @@ if(SC_BUILD_TESTS)
         tests/image/ktx2-test.cc
         tests/image/pfm-test.cc
         tests/image/tga-test.cc
+        tests/image/webp-test.cc
 
         tests/trace/chrome_trace-test.cc
     )

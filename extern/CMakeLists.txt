@@ -38,6 +38,11 @@ option(SC_USE_VENDORED_STB "Build the in-tree vendored stb (OFF expects an exter
 # Linked PRIVATE by babel, so spng.h never reaches a babel public header; it decodes over the vendored zlib above rather than a second bundled Deflate.
 option(SC_USE_VENDORED_SPNG "Build the in-tree vendored libspng (OFF expects an external `spng` target)" ON)
 
+# libwebp, committed in-source: the still-image codec (decode, encode, dsp, sharpyuv), and the WebP half of babel-serializer's image codecs.
+# Vendored rather than fetched because it is plain C with no generated config, so it builds unchanged on every target.
+# Linked PRIVATE by babel, so webp's headers never reach a babel public header.
+option(SC_USE_VENDORED_LIBWEBP "Build the in-tree vendored libwebp (OFF expects an external `webp` target)" ON)
+
 # ufbx, committed in-source: one C file and one header, and the whole of babel-serializer's FBX reader.
 # It sits in the libspng tier for the same reason: two files, no build machinery and no dependencies, not even a Deflate.
 # Linked PRIVATE by babel, so ufbx.h never reaches a babel public header.
@@ -156,6 +161,10 @@ endif()
 
 if(SC_USE_VENDORED_SPNG)
     add_subdirectory(libspng)
+endif()
+
+if(SC_USE_VENDORED_LIBWEBP)
+    add_subdirectory(libwebp)
 endif()
 
 if(SC_USE_VENDORED_UFBX)

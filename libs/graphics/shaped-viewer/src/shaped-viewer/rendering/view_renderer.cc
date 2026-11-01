@@ -1373,6 +1373,13 @@ sg::routine_outcome view_renderer::trace(sg::command_list& cmd,
         fc.write_guides = 1;
         fc.guide_frame = ds.normal->accum_frame;
         fc.write_specular_guides = 1;
+
+        // Where a partial coverage can cut out, the megakernel takes its guides from a guide ray per sample, as the
+        // wavefront does from one per pixel, which `wavefront_routine` decides for itself.
+        if (mode == render_mode::megakernel)
+            for (auto const* p : resolved.hit_groups)
+                if (p->opacity.can_cut_out())
+                    fc.wavefront_flags |= impl::wavefront_flag_guide_rays;
     }
 
     // Decided before the frame block is uploaded, so the tracer writes this frame's own samples and motion only on the

@@ -3,6 +3,8 @@ created: 2026-11-01
 refs:
   - file: libs/graphics/shaped-viewer/shaders/sgl/tracer_wavefront.sgl
   - file: libs/graphics/shaped-viewer/shaders/sgl/tracer_shade.sgl
+closed: 2026-11-01
+resolution: fixed
 ---
 
 # Denoiser guides follow the stochastic cutout, so a temporal denoiser keeps partial-coverage noise as detail

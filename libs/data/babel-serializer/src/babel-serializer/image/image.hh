@@ -16,12 +16,12 @@ struct write_options;
 //
 // Every image format decodes to the same shape, a packed pixel buffer, so this is babel's opinionated aggregator:
 // one `image` struct, format-detecting read, explicit-format write.
-// It sits ON TOP of the low-level per-format codecs (babel::png / babel::jpg / babel::hdr / babel::pfm / babel::dds /
-// babel::tga) and delegates to them.
+// It sits ON TOP of the low-level per-format codecs (babel::png / babel::jpg / babel::webp / babel::hdr / babel::pfm /
+// babel::dds / babel::tga) and delegates to them.
 // Reach for a low-level codec instead when you need a format's metadata (color profile, gamma, EXIF, the PFM scale, ...).
 //
 // THE SAMPLE TYPE FOLLOWS THE FORMAT, and a caller that mixes the two gets an error rather than reinterpreted bytes.
-// JPEG and TGA are `u8`, and HDR and PFM are `f32`.
+// JPEG, WebP and TGA are `u8`, and HDR and PFM are `f32`.
 // PNG spans two, `u16` for a 16-bit file and `u8` otherwise; DDS spans two as well, `f32` for BC6H and the float
 // formats and `u8` for every other one.
 // So `comp` is worth reading after any `read` that did not pick the format itself, and `encode` rejects an image
@@ -43,10 +43,11 @@ enum class babel::image::format : babel::u8
 {
     png,
     jpg,
-    hdr, // Radiance RGBE — f32 samples, 3 channels
-    pfm, // Portable FloatMap — f32 samples, 1 or 3 channels
-    dds, // DirectDraw Surface — read-only; u8, or f32 for a float format, always 4 channels
-    tga, // Truevision TARGA — read-only; u8 samples
+    hdr,  // Radiance RGBE — f32 samples, 3 channels
+    pfm,  // Portable FloatMap — f32 samples, 1 or 3 channels
+    dds,  // DirectDraw Surface — read-only; u8, or f32 for a float format, always 4 channels
+    tga,  // Truevision TARGA — read-only; u8 samples
+    webp, // WebP, a still image — u8 samples, 3 channels or 4 with alpha
 };
 
 /// Decoded sample type.
@@ -99,7 +100,8 @@ namespace babel::image
 
 /// Sniff the container format from its signature.
 /// Errors if it matches no supported format.
-/// Five formats open with a distinct magic, and those never guess: `\x89PNG`, `FF D8`, `#?`, `PF` / `Pf` and `DDS `.
+/// Six formats open with a distinct magic, and those never guess: `\x89PNG`, `FF D8`, `#?`, `PF` / `Pf`, `DDS ` and a
+/// RIFF chunk of form `WEBP`.
 /// TGA has none, so it is tried last: a TGA 2.0 footer identifies it, and failing that a header that reads as a
 /// TGA's is taken for one.
 /// That last test is a guess, so a caller that knows the format from elsewhere should pass it to `read`.
@@ -125,6 +127,11 @@ struct babel::image::write_options
 {
     int jpg_quality = 90; // 1..100, and ignored by every other format
 
+    /// 0..100 and lossy, or lossless, which also keeps the color under fully transparent pixels; ignored by every other format.
+    /// babel::webp's own write_options carry the rest (method, exact alpha).
+    int webp_quality = 75;
+    bool webp_lossless = false;
+
     /// zlib's Deflate level for a PNG, 0 (store) to 9 (smallest) or -1 for zlib's default, and ignored by every other format.
     /// 1080p RGB measured 304 ms at the default, 101 ms at 1 and 5 ms at 0 for a 5x larger file.
     int png_compression_level = -1;
@@ -134,7 +141,7 @@ namespace babel::image
 {
 
 /// Encode `img` to `fmt`'s file bytes, delegating to the matching low-level codec.
-/// `img.comp` must be what the format stores — `u8` for JPEG, `u8` or `u16` for PNG, `f32` for HDR / PFM — and the
+/// `img.comp` must be what the format stores — `u8` for JPEG and WebP, `u8` or `u16` for PNG, `f32` for HDR / PFM — and the
 /// channel count must be one the format has (3 for HDR; 1 or 3 for PFM).
 /// DDS and TGA cannot be encoded, and are an error.
 /// A `u16` PNG encode writes 16-bit samples, so `comp` is what picks the written depth.

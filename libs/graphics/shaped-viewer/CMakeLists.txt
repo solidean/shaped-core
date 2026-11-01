@@ -315,6 +315,7 @@ if(SC_BUILD_TESTS)
             tests/volumetric-furnace-test.cc
             tests/accumulated-mean-test.cc
             tests/cutout-trace-test.cc
+            tests/guide-ray-test.cc
             tests/emitter-trace-test.cc
             tests/wavefront-trace-test.cc
             tests/wavefront-view-test.cc
