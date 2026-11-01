@@ -1,8 +1,10 @@
+#include <clean-core/common/time.hh>
 #include <clean-core/container/pinned_data.hh>
 #include <clean-core/container/span.hh>
 #include <clean-core/container/vector.hh>
 #include <clean-core/fwd.hh> // cc::byte
 #include <clean-core/string/format.hh>
+#include <clean-core/thread/async_ambient.hh>
 #include <clean-core/thread/async_coroutine.hh>
 #include <nexus/async-test.hh>
 #include <nexus/test.hh>
@@ -41,7 +43,30 @@ cc::pinned_data<byte const> pinned_bytes(isize n, auto&& fn)
         data.push_back(byte(fn(i)));
     return cc::make_pinned_data(cc::move(data));
 }
+CC_ASYNC_AMBIENT_TAG(upload_owner_tag)
 } // namespace
+
+// An upload carries its enqueuer's context so draining it waits for the GPU to have the bytes.
+// Once the destination's last handle is gone and no list waits on the upload, nobody can read them: the context is let
+// go then, not when the copy actor next looks, which in an unthreaded build is a pump this test never gives it.
+ASYNC_INVOCABLE_TEST("sg - an async upload into a buffer dropped before any list reads it holds its enqueuer's context "
+                     "no longer",
+                     (sg::context_handle const& ctx))
+{
+    REQUIRE(ctx != nullptr);
+    auto const owner = cc::async_ambient_scope(upload_owner_tag(), nullptr);
+    {
+        auto const buf = make_transfer_buffer(ctx, 1 << 20);
+        ctx->upload.bytes_to_buffer(buf, pinned_bytes(1 << 20, [](isize i) { return int(i); }));
+    }
+    // an actor with a thread of its own may hold a borrowed reference for the instant it records the copy; nothing
+    // here drives one without
+    auto const deadline = cc::current_time_steady_secs() + 5.0;
+    while (owner.outstanding() > 0 && cc::current_time_steady_secs() < deadline)
+        cc::this_thread_yield();
+    CHECK(owner.outstanding() == 0);
+    co_return;
+}
 
 ASYNC_INVOCABLE_TEST("sg - async upload then download round-trips", (sg::context_handle const& ctx))
 {

@@ -104,6 +104,10 @@ Two rules keep that honest.
 - **Reset before settling.**
   The handle is dropped immediately before pushing anything the enqueuer awaits.
   That push resumes them, and a test ending right there would count the job's reference as async work it left running.
+- **Released once unobservable.**
+  An upload's context lives in its destination's upload group, and the job holds a ticket to it (`sg::impl::upload_contexts`).
+  When the destination's last handle goes and no submitted list waits on the upload, its destructor releases the context then and there.
+  Nobody can read those bytes any more, and waiting for the actor's next look would hold the context for nothing, as long as the next pump in an unthreaded build.
 
 The handle owns a reference rather than holding a bare pointer on purpose.
 A transfer whose future was dropped outlives the test that started it, and installing an unreferenced head then would walk a freed chain.

@@ -36,11 +36,13 @@ struct sg::backend::vulkan::vulkan_async_upload_job
     /// That is what makes ctx.idle_completion() true of the upload half as well; see sg::impl::transfer_drain.
     sg::impl::transfer_drain::token drain;
 
-    /// The context of whoever enqueued this, captured on their thread when the job is built.
+    /// The context of whoever enqueued this, captured on their thread when the job is handed over.
     /// Installed only around the work that is this job's alone: its source poll, and its copy's record and submit.
     /// Reset before anything it settles.
+    /// Held by the destination's upload group, which releases it with the destination's last handle where no list
+    /// waits on this job: see sg::impl::upload_contexts.
     /// See libs/graphics/shaped-graphics/docs/concepts/threading.md, "Whose work a transfer actor is doing".
-    cc::async_ambient_handle ambient;
+    sg::impl::upload_context_ticket<vulkan_completion_group_handle> ambient;
 
     // Exactly one destination is set.
     std::weak_ptr<vulkan_buffer const> buffer_target;

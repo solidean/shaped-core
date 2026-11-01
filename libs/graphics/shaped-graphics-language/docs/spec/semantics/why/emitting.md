@@ -146,6 +146,14 @@ HLSL's constant buffers start each array element on a row, WGSL's uniform rule r
 An array of 4-vectors is the one declaration every target places alike, and reading `.x` of it is what a hand-written port of such a shader does.
 The attribute stands on the array, so its cost, three unused lanes per element, is visible where the array is declared.
 
+## EMIT-178
+
+`@padding(.none)` promises the bytes of a C++ struct, and a C++ array of `tg::vec3f` strides by 12.
+HLSL's structured buffer already places every value at its scalar's alignment, so only WGSL and MSL need a form, and the form already existed for single values.
+An array of scalars is the one declaration both targets index at a runtime offset without imposing a stride of their own.
+So a split array keeps every element's scalars in one field, rather than one field per scalar a runtime index could not choose between.
+MSL's `packed_` vectors stride by their scalars, so it splits only matrices, which have no packed spelling.
+
 ## EMIT-177
 
 No machine that tests SGL runs Metal: the macOS runner has no Metal 4 device, so the metal backend's suite is skipped there.

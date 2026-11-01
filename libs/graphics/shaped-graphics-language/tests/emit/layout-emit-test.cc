@@ -748,7 +748,7 @@ TEST("sgl emit layout - an array strides by its element rounded to its alignment
     CHECK(msl.contains("    device track* scene_tracks [[id(1)]];\n"));
 }
 
-TEST("sgl emit layout - a packed array, and a multi-dimensional one HLSL would widen, wait alike on every target")
+TEST("sgl emit layout - a packed array of structs or of arrays, and a nested one of mat3, wait alike on every target")
 {
     auto const source_of = [](cc::string_view member, cc::string_view field)
     {
@@ -760,15 +760,50 @@ TEST("sgl emit layout - a packed array, and a multi-dimensional one HLSL would w
     auto const in_buffer
         = [&](cc::string_view member, cc::string_view field) { return errors_of(source_of(member, field)); };
     // EMIT-171: a multi-dimensional array nests its natural stride, and an array of mat3 is held as HLSL holds one
-    for (auto const field : {"grid: float4[2, 2]", "weights: float[2, 3]", "turns: mat3[2]"})
+    for (auto const field : {"grid: float4[2, 2]", "weights: float[2, 3]", "turns: mat3[2]", "dirs: float3[2, 3]"})
         for (auto const t : sgl::emit::all_targets())
             CHECK(sgl::emit::dump_errors(emit_source(source_of("items: buffer[holder]", field), 0, t)) == "").context(field);
-    CHECK(in_buffer("items: buffer[holder]", "grid: float3[2, 2]")
-          == "unsupported a multi-dimensional array of float3 in GPU memory: 'work.items'.grid\n");
+    // HLSL holds a 3-vector as a 4-vector at any depth
+    CHECK(text_of(source_of("items: buffer[holder]", "dirs: float3[2, 3]"), target::hlsl_dx12)
+              .contains("    float4 dirs[2][3];\n"));
     CHECK(in_buffer("items: buffer[holder]", "turns: mat3[2, 2]")
           == "unsupported a multi-dimensional array of mat3 in GPU memory: 'work.items'.turns\n");
-    CHECK(in_buffer("@padding(.none) items: buffer[holder]", "rows: float4[2]")
+    CHECK(in_buffer("@padding(.none) items: buffer[holder]", "rows: float4[2, 2]")
           == "unsupported an array in @padding(.none) memory: 'work.items'.rows\n");
+}
+
+TEST("sgl emit layout - a packed element's array strides by its element's scalars, split or packed where no array does")
+{
+    constexpr auto source = "struct tight:\n"
+                            "    lead: float\n"
+                            "    dirs: float3[3]\n"
+                            "    colors: float4[2]\n"
+                            "    turn: mat2\n"
+                            "\n"
+                            "binding work:\n"
+                            "    @padding(.none) items: mut buffer[tight]\n"
+                            "\n"
+                            "@compute(64) fun main(@thread_id id: int3){work}:\n"
+                            "    let t = work.items[id.x]\n"
+                            "    let d = work.items[id.x].dirs[id.x % 3]\n"
+                            "    work.items[id.x] = tight(t.lead + d.x, t.dirs, t.colors, t.turn)\n";
+    auto const d = described(source);
+    CHECK(d.memory_structs[0].members[2].offset == 40);
+    CHECK(d.memory_structs[0].size == 88);
+
+    // EMIT-178: WGSL's vec3f strides by 16 and its vec4f wants 16-byte offsets, so both arrays are their scalars
+    auto const wgsl = text_of(source, target::wgsl);
+    CHECK(wgsl.contains("    dirs: array<f32, 9>,\n    colors: array<f32, 8>,\n    turn: mat2x2f,\n"));
+    CHECK(wgsl.contains("let at: i32 = id.x % 3;\n"));
+    CHECK(wgsl.contains("vec3f(work_items[id.x].dirs[3 * at + 0], work_items[id.x].dirs[3 * at + 1], "
+                        "work_items[id.x].dirs[3 * at + 2])"));
+    CHECK(wgsl.contains("work_items[id.x].colors[4 * 1 + 3] = stored_5.w;\n"));
+    // MSL's packed vectors stride by their scalars, so an array of them is the array itself
+    auto const msl = text_of(source, target::msl);
+    CHECK(msl.contains("    array<packed_float3, 3> dirs;\n    array<packed_float4, 2> colors;\n"));
+    CHECK(msl.contains("float3(work_items[id.x].dirs[id.x % 3])"));
+    // a structured buffer is tight already
+    CHECK(text_of(source, target::hlsl_dx12).contains("    float3 dirs[3];\n    float4 colors[2];\n    float2x2 turn;\n"));
 }
 
 TEST("sgl emit layout - a mat2 is 16 bytes, which a constant block starts on a row and HLSL holds there as a float4")
@@ -803,10 +838,10 @@ TEST("sgl emit layout - a mat2 is 16 bytes, which a constant block starts on a r
               .contains("    float lead;\n    uint sgl_pad0;\n    uint sgl_pad1;\n    uint sgl_pad2;\n    float2x2 "
                         "turn;\n"));
 
-    // a packed one would take a memory form, which no target writes for a matrix of four scalars yet
-    CHECK(errors_of("binding work:\n    @padding(.none) items: buffer[mat2]\n\n"
-                    "@compute(64) fun main(@thread_id id: int3){work}:\n    let x = work.items[id.x]\n")
-          == "unsupported a mat2 in @padding(.none) memory: 'work.items'\n");
+    // a packed block's would be columns a row apart in HLSL's constant buffer, where C++ packs them
+    CHECK(errors_of("@padding(.none)\nbinding work:\n    turn: mat2\n\n"
+                    "@compute(64) fun main(@thread_id id: int3){work}:\n    let x = work.turn\n")
+          == "unsupported a mat2 in @padding(.none) memory: 'work.turn'\n");
 }
 
 TEST("sgl emit layout - MSL starts a constant block's struct on a row, and strides an array of one by rows")

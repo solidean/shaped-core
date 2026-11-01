@@ -60,12 +60,14 @@ struct sg::backend::dx12::dx12_async_upload_job
     // completion node it must settle exactly once — including on every cancellation path.
     std::shared_ptr<sg::impl::stream_control> stream;
 
-    /// The context of whoever enqueued this, captured on their thread when the job is built.
+    /// The context of whoever enqueued this, captured on their thread when the job is handed over.
     /// Installed only around the work that is this job's alone: polling its source, recording its chunk.
     /// Reset before anything it settles.
+    /// Held by the destination's upload group, which releases it with the destination's last handle where no list
+    /// waits on this job: see sg::impl::upload_contexts.
     /// See libs/graphics/shaped-graphics/docs/concepts/threading.md, "Whose work a transfer actor is doing".
     /// A window packs several jobs, so what the window's submit raises is attributed to none of them.
-    cc::async_ambient_handle ambient;
+    sg::impl::upload_context_ticket<dx12_completion_group_handle> ambient;
 };
 
 /// A message carrying nothing: its only job is to wake the copy actor so it re-polls sources that said `not_yet`.

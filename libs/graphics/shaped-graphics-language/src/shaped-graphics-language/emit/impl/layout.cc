@@ -164,6 +164,13 @@ bool sgl::emit::impl::is_mat3(check::checked_module const& m, check::type_id typ
     return record != nullptr && record->leaf_count == 9;
 }
 
+sgl::check::type_id sgl::emit::impl::innermost_of(check::checked_module const& m, check::type_id type)
+{
+    while (is_valid(type) && m.builtin_type_of(type) == nullptr && m.at(type).kind == type_kind::array)
+        type = m.at(type).element;
+    return type;
+}
+
 bool sgl::emit::impl::is_mat2(check::checked_module const& m, check::type_id type)
 {
     auto const* const record = m.builtin_type_of(type);
