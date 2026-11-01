@@ -592,7 +592,8 @@ private:
         // Only the poll: finishing or failing the job below settles what the caller may await.
         sg::stream_poll poll = [&]
         {
-            cc::async_ambient_install_scope const installed(a.job.ambient);
+            auto const job_context = a.job.ambient.get();
+            cc::async_ambient_install_scope const installed(job_context);
             return a.source->try_next_chunk();
         }();
         switch (poll.status)
@@ -675,7 +676,9 @@ private:
         isize const base = isize(_current_window % u64(num_staging_windows)) * _sys._window_bytes;
         dx12_upload_allocation const alloc = {_sys._staging.Get(), _sys._mapped, base + _window_used, avail};
 
-        cc::async_ambient_install_scope const installed(a.job.ambient); // recording this chunk is this job's alone
+        auto const job_context = a.job.ambient.get();
+
+        cc::async_ambient_install_scope const installed(job_context); // recording this chunk is this job's alone
         isize const consumed = a.packer->execute_next_job(*_list.Get(), alloc);
         if (consumed == 0)
             return false;
@@ -950,6 +953,7 @@ void dx12_upload_async_system::upload_buffer(sg::raw_buffer_handle buffer, cc::p
     // Reverse sync: defer this copy behind the last direct-queue list that used the buffer, so it never overwrites bytes an earlier-submitted list still reads.
     job.wait_token = sg::submission_token(dst->_last_used_submission_token.load(std::memory_order_acquire));
     job.drain = _drain.start();
+    job.ambient = {job.completion.group, job.completion.value};
     _actor->enqueue_message(cc::move(job));
 }
 
@@ -993,6 +997,7 @@ void dx12_upload_async_system::upload_texture(sg::raw_texture_handle texture,
     // Reverse sync: defer the copy behind the last direct-queue list that used this texture.
     job.wait_token = sg::submission_token(dst->_last_used_submission_token.load(std::memory_order_acquire));
     job.drain = _drain.start();
+    job.ambient = {job.completion.group, job.completion.value};
     _actor->enqueue_message(cc::move(job));
 }
 
@@ -1073,6 +1078,7 @@ sg::stream_upload_handle dx12_upload_async_system::stream_source_buffer(sg::raw_
     job.stream = control;
     job.source = cc::move(source);
     job.drain = _drain.start();
+    job.ambient = {job.completion.group, job.completion.value};
     _actor->enqueue_message(cc::move(job));
 
     return sg::stream_upload_handle(cc::move(control));
@@ -1119,6 +1125,7 @@ sg::stream_upload_handle dx12_upload_async_system::stream_source_texture(sg::raw
     job.stream = control;
     job.source = cc::move(source);
     job.drain = _drain.start();
+    job.ambient = {job.completion.group, job.completion.value};
     _actor->enqueue_message(cc::move(job));
 
     return sg::stream_upload_handle(cc::move(control));

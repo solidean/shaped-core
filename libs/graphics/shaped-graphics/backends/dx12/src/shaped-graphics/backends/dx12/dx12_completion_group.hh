@@ -5,6 +5,7 @@
 #include <shaped-graphics/backends/dx12/dx12_common.hh>
 #include <shaped-graphics/backends/dx12/fwd.hh>
 #include <shaped-graphics/fwd.hh>
+#include <shaped-graphics/transfer/impl/upload_contexts.hh>
 
 #include <atomic>
 
@@ -41,6 +42,10 @@ struct sg::backend::dx12::dx12_completion_group
     /// Exact rather than conservative: a list needs a handle to touch the resource, so once the last one is gone no
     /// new reader can appear, and every reader there is has stamped this already.
     std::atomic<u64> awaited_value = 0;
+
+    /// The context of each pending async upload on this timeline, which the resource releases with its last handle
+    /// where no list waits on the upload; see sg::impl::upload_contexts.
+    sg::impl::upload_contexts contexts;
 
     [[nodiscard]] u64 reserve() { return next_value.fetch_add(1, std::memory_order_relaxed) + 1; }
 
