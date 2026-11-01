@@ -93,9 +93,10 @@ placed_members place_from(checked_module const& m,
         {
             auto const& array = m.at(type);
             // EMIT-172: each element of a `@padding(.every_element)` array starts a row of its own
-            auto const element = members[i].padding == check::padding_kind::every_element && space == address_space::constants
-                                   ? element_shape{.stride = 16, .alignment = 16}
-                                   : element_of(m, array.element, space);
+            auto const element
+                = members[i].padding == check::padding_kind::every_element && space == address_space::constants
+                    ? element_shape{.stride = 16, .alignment = 16}
+                    : element_of(m, array.element, space);
             auto const alignment
                 = space == address_space::constants ? round_up(element.alignment, 16) : element.alignment;
             at = round_up(at, alignment);
@@ -188,8 +189,9 @@ sgl::emit::impl::address_space sgl::emit::impl::block_space(check::binding_info 
 sgl::emit::impl::address_space sgl::emit::impl::element_space(check::binding_info const& b,
                                                               check::member_info const& member)
 {
-    return b.padding == check::padding_kind::none || member.padding == check::padding_kind::none ? address_space::packed_storage
-                                                                                       : address_space::storage;
+    return b.padding == check::padding_kind::none || member.padding == check::padding_kind::none
+             ? address_space::packed_storage
+             : address_space::storage;
 }
 
 bool sgl::emit::impl::is_placeable(check::checked_module const& m, check::type_id type)
