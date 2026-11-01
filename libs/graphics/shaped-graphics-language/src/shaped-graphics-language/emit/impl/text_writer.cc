@@ -534,6 +534,8 @@ struct writer
         /// Member positions from the root down, as `memory_leaf::path` holds them.
         cc::vector<i32> path;
         type_id type = type_id::none;
+        /// EMIT-178: the element of an array leaf this addresses, as text; empty for the leaf itself or any other.
+        cc::string index;
     };
 
     /// Where `id` reads or writes inside a root written as its memory form; nothing for every other expression.
@@ -575,6 +577,32 @@ struct writer
             inner.value().type = x.type;
             return inner;
         }
+        // EMIT-178: an element of a packed array leaf is read and written through the leaf's own field
+        if (auto const* const element = x.node.try_as<flat_element>(); element != nullptr && is_builtin_type(p.m, x.type))
+        {
+            auto inner = memory_of(element->object);
+            if (!inner.has_value() || !inner.value().index.empty() || is_builtin_type(p.m, inner.value().type)
+                || p.m.at(inner.value().type).kind != type_kind::array)
+                return {};
+            auto const& leaf = leaf_at(inner.value());
+            if (leaf.count == 0)
+                return {};
+            auto index = expr(element->index).text;
+            // a split element names its index once per scalar, so anything but a name or a literal is evaluated once
+            if (leaf.is_split && !is_name(index))
+            {
+                auto const name = p.names.mint("at");
+                auto declaration = cc::string();
+                d.write_local(
+                    declaration,
+                    {.name = name, .type = type_text(p, d, p.e.at(element->index).type), .value = cc::move(index)});
+                line(declaration);
+                index = name;
+            }
+            inner.value().index = cc::move(index);
+            inner.value().type = x.type;
+            return inner;
+        }
         return {};
     }
 
@@ -598,7 +626,50 @@ struct writer
 
     cc::string field_text(memory_ref const& r, memory_leaf const& leaf, isize i) const
     {
-        return cc::format("{}.{}", r.root, r.form->fields[leaf.fields[i]].name);
+        if (r.index.empty())
+            return cc::format("{}.{}", r.root, r.form->fields[leaf.fields[i]].name);
+        // EMIT-178: every element of a split array is its scalars back to back in one array
+        auto const& field = r.form->fields[leaf.fields[0]];
+        if (leaf.is_split)
+            return cc::format("{}.{}[{} * {} + {}]", r.root, field.name, p.m.builtin_type_of(leaf.type)->leaf_count,
+                              r.index, i);
+        return cc::format("{}.{}[{}]", r.root, field.name, r.index);
+    }
+
+    /// How many fields hold the value `leaf` is, or each element of it: a split array's scalars live in one field.
+    [[nodiscard]] isize pieces_of(memory_leaf const& leaf) const
+    {
+        return leaf.count > 0 && leaf.is_split ? isize(p.m.builtin_type_of(leaf.type)->leaf_count) : leaf.fields.size();
+    }
+
+    /// The text of a matrix of `record`'s size: its columns' count, which is also each column's.
+    [[nodiscard]] static i32 matrix_size_of(builtins::type_record const& record)
+    {
+        return record.leaf_count == 16 ? 4 : record.leaf_count == 9 ? 3 : 2;
+    }
+
+    [[nodiscard]] static bool is_matrix_record(builtins::type_record const& record)
+    {
+        return record.leaf_count > 4 || record.hlsl == "float2x2";
+    }
+
+    /// EMIT-178: the whole array a packed array leaf `r` holds, rebuilt into a local element by element.
+    cc::string read_packed_array(memory_ref const& r, memory_leaf const& leaf)
+    {
+        auto const name = p.names.mint("unpacked");
+        auto declaration = cc::string();
+        d.write_local(
+            declaration,
+            {.name = name, .type = type_text(p, d, r.type), .dimensions = array_dimensions(p, r.type), .is_mut = true});
+        line(declaration);
+        for (auto i = 0; i < leaf.count; ++i)
+        {
+            auto element = r;
+            element.index = cc::to_string(i);
+            element.type = leaf.type;
+            line(cc::format("{}[{}] = {};", name, i, read_memory(element)));
+        }
+        return name;
     }
 
     /// The value `r` addresses, rebuilt from the fields that hold it.
@@ -607,7 +678,12 @@ struct writer
         auto const type = cc::string(type_text(p, d, r.type));
         // an array's whole-row elements are never split, so its one field is the array itself
         if (!is_builtin_type(p.m, r.type) && p.m.at(r.type).kind == type_kind::array)
-            return field_text(r, leaf_at(r), 0);
+        {
+            auto const& leaf = leaf_at(r);
+            if (leaf.count > 0 && (leaf.is_split || leaf.is_packed))
+                return read_packed_array(r, leaf);
+            return field_text(r, leaf, 0);
+        }
         if (is_builtin_type(p.m, r.type))
         {
             auto const& leaf = leaf_at(r);
@@ -619,19 +695,21 @@ struct writer
                 return field_text(r, leaf, 0);
             auto const& record = *p.m.builtin_type_of(r.type);
             auto pieces = cc::vector<cc::string>();
-            // a square matrix, 3 or 4 columns of as many rows
-            auto const n = record.leaf_count == 9 ? 3 : 4;
-            if (record.leaf_count > 4 && d.language() == builtins::language::hlsl)
+            // a square matrix, 2, 3 or 4 columns of as many rows
+            auto const n = matrix_size_of(record);
+            if (is_matrix_record(record) && d.language() == builtins::language::hlsl)
             {
                 // HLSL fills a matrix row by row from its scalars, and the fields hold it column by column.
                 for (auto row = 0; row < n; ++row)
                     for (auto column = 0; column < n; ++column)
                         pieces.push_back(field_text(r, leaf, column * n + row));
             }
-            else if (record.leaf_count > 4 && !d.has_struct_constructor())
+            else if (is_matrix_record(record) && !d.has_struct_constructor())
             {
                 // MSL builds a matrix from its columns, not from its scalars.
-                auto const column_type = cc::string(builtin_spelling(p, n == 3 ? "float3" : "float4"));
+                auto const column_type = cc::string(builtin_spelling(p, n == 2   ? "float2"
+                                                                        : n == 3 ? "float3"
+                                                                                 : "float4"));
                 for (auto c = 0; c < n; ++c)
                 {
                     auto column = cc::format("{}(", column_type);
@@ -641,7 +719,7 @@ struct writer
                 }
             }
             else
-                for (auto i = isize(0); i < leaf.fields.size(); ++i)
+                for (auto i = isize(0); i < pieces_of(leaf); ++i)
                     pieces.push_back(field_text(r, leaf, i));
             auto text = cc::format("{}(", type);
             for (auto i = isize(0); i < pieces.size(); ++i)
@@ -687,6 +765,18 @@ struct writer
         {
             auto const& leaf = leaf_at(r);
             auto const& record = *p.m.builtin_type_of(r.type);
+            // EMIT-178: a whole packed array is stored element by element; it is only ever a member of a struct being
+            // stored, so `value` already names one evaluation of it
+            if (leaf.count > 0 && r.index.empty() && (leaf.is_split || leaf.is_packed))
+            {
+                for (auto i = 0; i < leaf.count; ++i)
+                {
+                    auto element = r;
+                    element.index = cc::to_string(i);
+                    write_memory(element, -1, cc::format("{}[{}]", value, i), r.type);
+                }
+                return;
+            }
             if (leaf.is_widened)
             {
                 line(cc::format("{} = sgl_widen_mat3({});", field_text(r, leaf, 0), value));
@@ -709,12 +799,12 @@ struct writer
             auto declaration = cc::string();
             d.write_local(declaration, {.name = name, .type = type_text(p, d, value_type), .value = value});
             line(declaration);
-            auto const n = record.leaf_count == 9 ? 3 : 4;
+            auto const n = matrix_size_of(record);
             for (auto i = 0; i < record.leaf_count; ++i)
             {
                 // field i is row i % n of column i / n, and only HLSL indexes a matrix by its row first
                 auto const is_hlsl = d.language() == builtins::language::hlsl;
-                auto const piece = record.leaf_count > 4
+                auto const piece = is_matrix_record(record)
                                      ? cc::format("{}[{}][{}]", name, is_hlsl ? i % n : i / n, is_hlsl ? i / n : i % n)
                                      : cc::format("{}.{}", name, p.m.at(p.m.at(r.type).members)[i].name);
                 line(cc::format("{} = {};", field_text(r, leaf, i), piece));

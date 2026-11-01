@@ -835,6 +835,22 @@ constexpr auto k_layout_sources = {
                     "@compute(64) fun main(@thread_id id: int3){work}:\n"
                     "    let p = work.items[id.x]\n"
                     "    work.items[id.x] = posed(p.frames, p.turn, p.weights, p.tag + p.weights[1, 2])\n"),
+    // a packed element's arrays stride by their scalars, packed or split where a target's own array would not (EMIT-178)
+    cc::string_view("struct tight:\n"
+                    "    lead: float\n"
+                    "    dirs: float3[3]\n"
+                    "    colors: float4[2]\n"
+                    "    weights: float[2]\n"
+                    "    turn: mat2\n"
+                    "    frames: mat3[2]\n"
+                    "\n"
+                    "binding work:\n"
+                    "    @padding(.none) items: mut buffer[tight]\n"
+                    "\n"
+                    "@compute(64) fun main(@thread_id id: int3){work}:\n"
+                    "    let t = work.items[id.x]\n"
+                    "    let d = work.items[id.x].dirs[id.x % 3]\n"
+                    "    work.items[id.x] = tight(t.lead + d.x, t.dirs, t.colors, t.weights, t.turn, t.frames)\n"),
 };
 } // namespace
 

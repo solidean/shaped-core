@@ -27,7 +27,8 @@ A block's sub-row array has landed behind `@padding(.every_element)` (EMIT-172).
 Arrays of `mat3` have landed (EMIT-168), and multi-dimensional arrays whose innermost element HLSL need not widen (EMIT-171).
 `mat2` in memory has landed (EMIT-175), and with it MSL's placement of a constant block's structs (EMIT-176).
 Multi-dimensional arrays of 3-vectors have landed, HLSL widening them at any depth.
-What waits is the rest of EMIT-171 (packed arrays, and multi-dimensional ones of `mat3`, bug-nested-mat3-array-spirv), a packed `mat2`, and `.every_column`.
+A packed buffer element's arrays of builtins and its `mat2` have landed (EMIT-178).
+What waits is the rest of EMIT-171 (packed arrays of structs or of arrays, and multi-dimensional ones of `mat3`, bug-nested-mat3-array-spirv), a packed block's `mat2`, and `.every_column`.
 
 **Matrices and arrays across a stage edge have landed** (CHK-422, EMIT-174): a location per column or element, between any two shading stages and from a vertex buffer.
 A pixel output takes neither, since each of its locations is a render target.

@@ -142,6 +142,27 @@ binding fielding:
     fielding.sensed[id.x] = float4(v.x, v.y, row[0].y, f.dirs[0, 1].z)
     fielding.fields[id.x] = field(f.dirs, f.turn, f.tag + 1.0)
 
+// Under @padding(.none) a buffer element's arrays stride by their elements' scalars, as a C++ struct's do.
+struct tight:
+    lead: float
+    dirs: float3[3]
+    colors: float4[2]
+    weights: float[2]
+    turn: mat2
+    frames: mat3[2]
+
+binding tightening:
+    @padding(.none) tights: mut buffer[tight]
+    gathered: mut buffer[float4]
+
+@compute(64) fun tighten(@thread_id id: int3){tightening}:
+    let t = tightening.tights[id.x]
+    let d = tightening.tights[id.x].dirs[id.x % 3]
+    let c = tightening.tights[id.x].colors[1]
+    let v = tightening.tights[id.x].frames[id.x % 2] * (d * (tightening.tights[id.x].turn * float2(1.0, 2.0)).y)
+    tightening.gathered[id.x] = float4(v.x + c.w, t.weights[1], t.dirs[2].z, v.z)
+    tightening.tights[id.x] = tight(t.lead + 1.0, t.dirs, t.colors, t.weights, t.turn, t.frames)
+
 // An array strides by its element rounded up to the element's alignment: a float3 by 16, a float by 4, a struct by its
 // size, here 32 with `radius` in `color`'s tail.
 struct lamp:

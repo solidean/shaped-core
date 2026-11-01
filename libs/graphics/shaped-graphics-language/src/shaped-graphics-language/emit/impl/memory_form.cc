@@ -23,7 +23,7 @@ i32 max_of(i32 a, i32 b)
 
 bool is_matrix(builtins::type_record const& record)
 {
-    return record.leaf_count > 4;
+    return record.leaf_count > 4 || record.hlsl == "float2x2";
 }
 
 bool is_hlsl(emit::target t)
@@ -279,6 +279,31 @@ struct form_builder
         {
             result.is_widened = true;
             result.fields.push_back(add_field(stem, "float4x3", 48));
+        }
+        // EMIT-178: a packed buffer element's array strides by its element's scalars, which only some arrays of a
+        // target's own do; one that does not is packed (MSL) or split into one array of every element's scalars
+        else if (leaf.count > 0 && space == address_space::packed_storage && !is_hlsl(t))
+        {
+            result.count = leaf.count;
+            auto const element_size = record.leaf_count * scalar_size;
+            auto const is_native
+                = record.leaf_count == 1
+               || (!is_forced && !is_matrix(record) && round_up(l.size, l.alignment) == element_size
+                   && leaf.offset % l.alignment == 0 && !(t == emit::target::msl && record.leaf_count == 3));
+            if (is_native)
+                result.fields.push_back(
+                    add_field(stem, cc::string(record.spelled_in(language_of(t))), leaf.size, leaf.count));
+            else if (t == emit::target::msl && !is_matrix(record))
+            {
+                result.is_packed = true;
+                result.fields.push_back(
+                    add_field(stem, cc::format("packed_{}", record.spelled_in(language_of(t))), leaf.size, leaf.count));
+            }
+            else
+            {
+                result.is_split = true;
+                result.fields.push_back(add_field(stem, cc::string(scalar), leaf.size, leaf.count * record.leaf_count));
+            }
         }
         else if (leaf.count > 0)
             result.fields.push_back(add_field(stem, cc::string(record.spelled_in(language_of(t))), leaf.size, leaf.count));

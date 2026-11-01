@@ -923,7 +923,7 @@ void sgl::emit::impl::validate_binding(check::checked_module const& m, check::sy
                                                            placed.offsets[i], s.name, plain[i].name));
     }
 
-    // EMIT-175: a packed mat2 would take a memory form, which reads four scalars as a vector rather than a matrix
+    // EMIT-175: HLSL's constant buffer starts each column of a packed block's mat2 on a row, where C++ packs it
     auto const holds_mat2 = [&](auto const& self, check::type_id type) -> bool
     {
         if (type == check::checked_module::void_type || is_mat2(m, type))
@@ -944,7 +944,7 @@ void sgl::emit::impl::validate_binding(check::checked_module const& m, check::sy
         auto const& t = m.at(member.type);
         auto const space = t.kind == check::type_kind::buffer ? element_space(b, member) : block_space(b);
         if (!m.takes_slots(member.type) || t.kind == check::type_kind::buffer)
-            if (is_packed(space) && holds_mat2(holds_mat2, member.type))
+            if (space == address_space::packed_constants && holds_mat2(holds_mat2, member.type))
                 report(error_kind::unsupported,
                        cc::format("a mat2 in @padding(.none) memory: '{}.{}'", s.name, member.name));
     }
@@ -964,8 +964,10 @@ void sgl::emit::impl::validate_binding(check::checked_module const& m, check::sy
             if (m.builtin_type_of(element) == nullptr && m.at(element).kind == check::type_kind::array
                 && is_mat3(m, innermost_of(m, element)))
                 report(error_kind::unsupported, cc::format("a multi-dimensional array of mat3 in GPU memory: {}", where));
-            // EMIT-154 places a packed block's array of whole rows; any other packed array waits
-            else if (is_packed(space) && !(is_block_member && m.builtin_type_of(element) != nullptr))
+            // EMIT-154 places a packed block's array of whole rows, and EMIT-178 a buffer element's array of builtins
+            else if (is_packed(space) && m.builtin_type_of(element) == nullptr)
+                report(error_kind::unsupported, cc::format("an array in @padding(.none) memory: {}", where));
+            else if (space == address_space::packed_constants && !is_block_member)
                 report(error_kind::unsupported, cc::format("an array in @padding(.none) memory: {}", where));
             else
                 self(self, element, space, where, false);

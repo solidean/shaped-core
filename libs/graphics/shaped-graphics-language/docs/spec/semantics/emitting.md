@@ -576,13 +576,19 @@ The C++ struct a package generates is that layout byte for byte, padding include
   HLSL's constant buffer starts each column of a matrix on a row, so a constant block, and a struct that stands in one, holds a `mat2` there as one `float4`.
   A read rebuilds it through `sgl_narrow_mat2`, which the text declares wherever it reads one; a constant block is never written.
   Every other memory holds it as each target's own `mat2`, which MSL keeps on its row with a padding field.
-  Under `@padding(.none)` it is `unsupported`, alike on every target.
+  Under `@padding(.none)` it is 16 bytes aligned to 4, as `tg::mat2f` is: HLSL's own `float2x2` in a structured buffer, and split where another target's would not sit (EMIT-178).
+  A packed constant block's `mat2` is `unsupported`, alike on every target, since HLSL's constant buffer would start each column on a row.
 * **EMIT-176** MSL places a member of a struct or a block in natural memory where SGL placed it, with padding fields wherever MSL would place it sooner.
   A struct that stands in a constant block is declared `alignas(16)`, so it starts a row and an array of it strides by rows, as EMIT-110 has it.
 * **EMIT-177** MSL states every layout SGL placed as `static_assert`s the Metal compiler checks ([why](why/emitting.md#emit-177)).
   One per member of a struct, a block and a memory form in GPU memory, `__builtin_offsetof(T, m) == offset`, and one per struct, `sizeof(T) == size`.
   A struct of a constant block is asserted at its size rounded up to a row, and a block at its members alone.
-* **EMIT-171** An array in GPU memory that `@padding(.none)` places waits, `unsupported` alike on every target.
+* **EMIT-178** A buffer element's array of builtins under `@padding(.none)` strides by its element's scalars, as C++ places it ([why](why/emitting.md#emit-178)).
+  HLSL's structured buffer places it so already; WGSL and MSL declare it in the element's memory form as one field.
+  That field is the target's own array where its stride and alignment match, MSL's array of `packed_` vectors where they do not, and otherwise one array of every element's scalars, back to back.
+  An element of a split array reads its scalars at `k * i + c`, its index evaluated once, and a whole array reads and writes element by element.
+  A packed matrix is split column by column, a `mat2` too.
+* **EMIT-171** A packed array of structs or of arrays waits, `unsupported` alike on every target, as does a packed block's array other than EMIT-154's.
   So does a multi-dimensional array of `mat3`, whose last column DXC's SPIR-V loses (bug-nested-mat3-array-spirv).
   A packed block's array of whole rows is the exception, which EMIT-154 places.
   Any other multi-dimensional array nests the natural stride: each inner array strides by its size rounded up to its alignment, and every target declares it as nested arrays.
@@ -620,9 +626,9 @@ The C++ struct a package generates is that layout byte for byte, padding include
 ## Open
 
 * GLSL, which comes through the same seam.
-* The arrays EMIT-171 refuses: packed ones, and multi-dimensional ones of `mat3`.
+* The arrays EMIT-171 refuses: packed ones of structs or of arrays, and multi-dimensional ones of `mat3`.
 * `@padding(.every_column)`, which would name a `mat3`'s natural 48 bytes explicitly; `.none` gives the 36 of `tg::mat3f` already.
-* A packed `mat2`, which a memory form would read as a vector of four scalars.
+* A packed constant block's `mat2`, which HLSL would split into its scalars across rows.
 * A struct member of a `@padding(.none)` block, which HLSL would read back by building the struct in a local field by field.
 * `@padding` on a struct, which would place it so wherever it stands.
 * Whether an emit error becomes a diagnostic with a span; today it names a symbol and carries a detail.

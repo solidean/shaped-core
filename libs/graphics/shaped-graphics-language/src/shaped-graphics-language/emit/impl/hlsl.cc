@@ -426,7 +426,8 @@ public:
             out += k_indent;
             if (_is_vulkan)
                 out.appendf("[[vk::offset({})]] ", f.offset);
-            auto const is_matrix = f.type == "float4x4" || f.type == "float4x3" || f.type == "float3x3";
+            auto const is_matrix
+                = f.type == "float4x4" || f.type == "float4x3" || f.type == "float3x3" || f.type == "float2x2";
             out.appendf("{}{} {}{};\n", is_matrix ? "column_major " : "", f.type, f.name,
                         f.count > 0 ? cc::format("[{}]", f.count) : cc::string());
         }
