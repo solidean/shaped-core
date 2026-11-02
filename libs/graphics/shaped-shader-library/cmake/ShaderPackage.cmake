@@ -254,6 +254,9 @@ function(sc_add_shader_package)
     # A module's header is the one generated header another target may include, which linking this target gives it.
     if(PKG_LANGUAGE STREQUAL "sgl")
         target_include_directories(${PKG_TARGET} PUBLIC "$<BUILD_INTERFACE:${_gen_dir}/modules>")
+        # A consumer compiles against those headers, and orders after this target's dependencies, not after its sources:
+        # the package as a dependency of the target is what makes a consumer's objects wait for their generation.
+        add_dependencies(${PKG_TARGET} ${PKG_TARGET}-${PKG_NAME}-shader-package)
     endif()
 
     if(NOT PKG_TARGET STREQUAL "shaped-shader-library")
