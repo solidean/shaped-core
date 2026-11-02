@@ -663,7 +663,10 @@ flat_entry_point sgl::check::legalize(checked_module const& m,
 
     // Compacted even when it is core already: what legalize returns has nothing unreachable in it and nothing shared,
     // which is what lets a pass over its arrays stand for the tree.
-    if (is_core(m, e))
+    auto prints = false;
+    for (auto const& s : e.stmts)
+        prints = prints || s.node.is<flat_print>();
+    if (is_core(m, e) && !(options.erases_prints && prints))
     {
         auto out = flat_builder::extend(m, e);
         auto const body = ids_of(out.e, out.e.body);
@@ -674,7 +677,7 @@ flat_entry_point sgl::check::legalize(checked_module const& m,
         return compacted(m, out.e, simplified);
     }
     auto out = flat_builder::extend(m, e);
-    out.set_body(erase_checks(out, ids_of(out.e, out.e.body)));
+    out.set_body(erase_checks(out, ids_of(out.e, out.e.body), options.erases_prints));
     out.set_body(lower_expressions(out, options));
     out.set_body(lower_cases(out));
     // Again, for the conditions the chain form of C1 wrote; on a tree that holds no block it changes nothing.

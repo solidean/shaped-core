@@ -39,7 +39,7 @@ Back to the [semantics](_index.md); the reasons are in [why/emitting.md](why/emi
   `ray_query` is none of them: WGSL writes a trace's emulated form (EMIT-135).
   The shader chose it by `require`, so a portable shader still meets EMIT-13's promise.
 * **EMIT-66** A tree that is not core is the error `not-core`, and its detail names the first node that offends.
-* **EMIT-67** A `print` is `unsupported`: no target writes one yet.
+* **EMIT-67** A `print` is `unsupported`: no target writes one yet, so the driver legalizes every entry point without them (LEGAL-63).
 
 ## Names
 

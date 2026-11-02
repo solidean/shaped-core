@@ -17,6 +17,8 @@ struct void_eraser
     flat_builder& out;
     /// False for rule V0, which drops the checks and changes nothing else.
     bool erases_void = true;
+    /// LEGAL-63: V0 drops the prints too.
+    bool erases_prints = false;
 
     [[nodiscard]] bool is_void(flat_expr_id id) const
     {
@@ -162,7 +164,7 @@ struct void_eraser
             }
             auto copy = out.e.at(id);
             // V0: a check and its body are gone, whatever they compute
-            if (copy.node.is<flat_check>())
+            if (copy.node.is<flat_check>() || (erases_prints && copy.node.is<flat_print>()))
                 continue;
             if (erases_void && erase_void_statement(copy, result))
                 continue;
@@ -221,9 +223,9 @@ struct void_eraser
 };
 } // namespace
 
-stmt_list sgl::check::impl::erase_checks(flat_builder& out, stmt_list const& body)
+stmt_list sgl::check::impl::erase_checks(flat_builder& out, stmt_list const& body, bool erases_prints)
 {
-    return void_eraser{.out = out, .erases_void = false}.erase(body, 0);
+    return void_eraser{.out = out, .erases_void = false, .erases_prints = erases_prints}.erase(body, 0);
 }
 
 stmt_list sgl::check::impl::erase_void(flat_builder& out, stmt_list const& body)

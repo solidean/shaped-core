@@ -25,6 +25,8 @@ The worked examples are WGSL, since it is the strictest target: no `do … while
 * **LEGAL-8** A tree that is core already is left as it is, but for the let rules L1 and L2.
 * **LEGAL-9** An emitter refuses a tree that is not core with the error `not-core`, whose detail names the first violation; it never asserts.
 * **LEGAL-53** (V0) A core tree holds no `check`: each goes with its body, first, since no target writes a check or an `assert` (EVAL-75).
+* **LEGAL-63** (V0) Asked to, legalization drops every `print` with its values too, which is how a text is written without diagnostics.
+  The tree then prints nothing; it is the one way it may behave otherwise than its input, and only when the caller asked.
 * **LEGAL-52** (V1) A core tree holds no `void` local, and no `let`, `var`, assignment, `return` or read of a `void` value: what evaluating one does stays as an `eval`, and the value itself is gone.
   It follows every rule that introduces a local for a result, since a `void` result is one of them; only the let rules come after it.
 

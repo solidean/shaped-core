@@ -109,7 +109,8 @@ cc::result<emitted_source, cc::string> emit_text(driver::impl::front_end const& 
     auto const source_name = front.source_name;
     // The check pass writes the structured form, and a target prints the core form.
     // WebGPU traces through the emulated form of a trace, and every other target through its native query.
-    auto const legal = check::legalize(m, e, {.is_emulated = target == emit::target::wgsl});
+    // LEGAL-63: no target writes a print yet, so the text holds none
+    auto const legal = check::legalize(m, e, {.is_emulated = target == emit::target::wgsl, .erases_prints = true});
     auto const files = driver::impl::module_files_of(front);
     auto names = cc::vector<cc::string_view>();
     for (auto i = isize(0); i < files.size(); ++i)

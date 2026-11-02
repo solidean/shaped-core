@@ -117,8 +117,9 @@ sgl::emit::emitted_text sgl::emit::emit(check::checked_module const& m,
     }
 
     // WebGPU traces through the emulated form of a trace, and every other target through its native query
-    return emit_entry_point(m, check::legalize(m, m.entry_points[entry_point], {.is_emulated = t == target::wgsl}), t,
-                            sources);
+    return emit_entry_point(
+        m, check::legalize(m, m.entry_points[entry_point], {.is_emulated = t == target::wgsl, .erases_prints = true}),
+        t, sources);
 }
 
 sgl::emit::emitted_text sgl::emit::emit_entry_point(check::checked_module const& m,

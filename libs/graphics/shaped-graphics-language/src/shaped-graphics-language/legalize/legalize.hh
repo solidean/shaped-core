@@ -13,6 +13,9 @@ struct sgl::check::legalize_options
     bool skip_flag_tests = false;
     /// Keeps the emulated form of every `flat_by_target` rather than the native one: the target has no native form.
     bool is_emulated = false;
+    /// Drops every print with its values, as every check is dropped: for a text compiled without diagnostics (LEGAL-63).
+    /// The tree then prints nothing, which is the one way it may differ from the input's behaviour.
+    bool erases_prints = false;
 };
 
 namespace sgl::check
