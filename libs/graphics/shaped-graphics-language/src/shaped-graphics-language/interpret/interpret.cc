@@ -1072,6 +1072,14 @@ struct machine
                         return f;
                     failure.loop_values.push_back(cc::move(v));
                 }
+            if (is_known(e, site.message_values))
+                for (auto const id : e.at(site.message_values))
+                {
+                    auto v = value();
+                    if (auto const f = eval(id, v); !f.is_normal())
+                        return f;
+                    failure.message_values.push_back(cc::move(v));
+                }
             out.failures.push_back(cc::move(failure));
         }
         else
@@ -1131,10 +1139,16 @@ struct machine
         }
         if (auto const* const p = s.node.try_as<flat_print>())
         {
-            auto v = value();
-            if (auto const f = eval(p->value, v); !f.is_normal())
-                return f;
-            out.trace.push_back(cc::move(v));
+            auto printed = printed_message{.message = p->message};
+            for (auto const id : e.at(p->values))
+            {
+                auto v = value();
+                if (auto const f = eval(id, v); !f.is_normal())
+                    return f;
+                out.trace.push_back(v);
+                printed.values.push_back(cc::move(v));
+            }
+            out.printed.push_back(cc::move(printed));
             return {};
         }
         if (auto const* const dropped = s.node.try_as<flat_eval>())

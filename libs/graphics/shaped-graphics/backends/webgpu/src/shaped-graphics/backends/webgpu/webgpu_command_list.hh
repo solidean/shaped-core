@@ -141,6 +141,9 @@ public:
 
         // Set when anything changed, or a pass opened, since the state was last applied: everything is bound again.
         bool needs_full_apply = true;
+
+        // The bound pipeline's code writes print and assert records, so the epoch's window is read back.
+        bool writes_debug = false;
     };
     bound_state _compute;
     bound_state _raster;

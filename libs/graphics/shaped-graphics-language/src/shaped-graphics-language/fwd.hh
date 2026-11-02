@@ -283,6 +283,7 @@ struct flat_expr;
 struct flat_let;
 struct flat_var;
 struct flat_assign;
+struct flat_message;
 struct flat_print;
 struct flat_eval;
 struct flat_if;
@@ -318,6 +319,7 @@ struct bound_group;
 struct driver_bindings;
 struct run_limits;
 struct check_failure;
+struct printed_message;
 struct site_tally;
 struct outcome;
 
@@ -359,4 +361,9 @@ struct emitted_text;
 struct bound_name;
 struct emitted_field;
 struct emitted_layout;
+struct source_line;
+struct line_origin;
+struct debug_value;
+struct debug_site;
+struct options;
 } // namespace sgl::emit

@@ -48,6 +48,41 @@ public:
     bool has_struct_constructor() const override { return false; }
 
     bool is_c_like() const override { return true; }
+    bool has_line_directives() const override { return true; }
+
+    // a ray-tracing stage is a visible function, which takes no buffer of its own
+    bool writes_debug_in(check::stage s) const override { return s < check::stage::raygen; }
+    void write_debug_buffer(cc::string& out) const override
+    {
+        out += "struct sg_debug_buffer\n{\n    atomic_uint cursor;\n    uint capacity;\n    atomic_uint dropped;\n"
+               "    uint words[1];\n};\n\n";
+    }
+    cc::string debug_reserve(cc::string_view at, isize count) const override
+    {
+        return cc::format("uint {} = atomic_fetch_add_explicit(&sg_debug.cursor, {}u, memory_order_relaxed);", at, count);
+    }
+    cc::string debug_fits(cc::string_view at, isize count) const override
+    {
+        return cc::format("{} + {}u <= sg_debug.capacity", at, count);
+    }
+    cc::string debug_store(cc::string_view at, isize i, cc::string_view word) const override
+    {
+        return cc::format("sg_debug.words[{} + {}u] = {};", at, i, word);
+    }
+    cc::string debug_drop() const override
+    {
+        return "atomic_fetch_add_explicit(&sg_debug.dropped, 1u, memory_order_relaxed);";
+    }
+    cc::string debug_word(cc::string_view value, cc::string_view family) const override
+    {
+        if (family == "uint")
+            return cc::string(value);
+        if (family == "bool")
+            return cc::format("({} ? 1u : 0u)", value);
+        if (family == "half")
+            return cc::format("as_type<uint>(float({}))", value);
+        return cc::format("as_type<uint>({})", value);
+    }
     /// MSL's is a function; whether it terminates or demotes the pixel is for the metal backend's tests to pin.
     [[nodiscard]] cc::string_view discard_statement() const override { return "discard_fragment();"; }
     [[nodiscard]] bool fences_image_stores() const override { return true; }
@@ -638,6 +673,9 @@ public:
         // EMIT-133: a static sampler's slot of the argument table is its index, and MSL has one sampler type
         for (auto const& s : p.samplers)
             parameters.push_back(cc::format("sampler {} [[sampler({})]]", s.name, s.index));
+        // EMIT-183: sg's debug buffer
+        if (p.writes_debug)
+            parameters.push_back("device sg_debug_buffer& sg_debug [[buffer(30)]]");
         auto list = cc::string();
         for (auto const& parameter : parameters)
             list += cc::format("{}{}", list.empty() ? "" : ", ", parameter);

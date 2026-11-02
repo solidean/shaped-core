@@ -542,7 +542,11 @@ struct flattener
 
     /// A check of a test or an `assert`: every node of `condition` is materialized into a `var` of its own, in the order
     /// and under the conditions the plain expression would run them, and the report reads those `var`s (CHK-229).
-    void flatten_check(origin from, ast::expr_id condition, bool stops);
+    void flatten_check(origin from, ast::expr_id condition, bool stops, ast::expr_id message = ast::expr_id::none);
+    /// CHK-424: the text of quoted literal `message` around its interpolations, added to `entry.messages`; its position.
+    [[nodiscard]] i32 add_message(ast::expr_id message);
+    /// Each interpolation of quoted literal `message`, flattened where it stands, in source order.
+    [[nodiscard]] ast::range_of<flat_expr_id> flatten_message_values(ast::expr_id message);
 
     /// A `var` for node `node` of a check, declared without a value where the node's statements begin.
     local_id check_var(ast::expr_id id);

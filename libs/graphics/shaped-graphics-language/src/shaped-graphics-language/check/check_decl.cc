@@ -2170,6 +2170,20 @@ bool checker::is_color_value(type_id type) const
     return false;
 }
 
+bool checker::is_printable(type_id type) const
+{
+    if (out.at(type).kind == type_kind::enumeration)
+        return true;
+    auto const* const record = out.builtin_type_of(type);
+    if (record == nullptr)
+        return false;
+    for (auto const family : {"float", "half", "int", "uint", "bool"})
+        for (auto const width : {"", "2", "3", "4"})
+            if (record->name == cc::format("{}{}", family, width))
+                return true;
+    return false;
+}
+
 type_id checker::pixel_targets_of(symbol_id entry, type_id color)
 {
     // a name no symbol of the module has, so the struct the emitter writes clashes with nothing

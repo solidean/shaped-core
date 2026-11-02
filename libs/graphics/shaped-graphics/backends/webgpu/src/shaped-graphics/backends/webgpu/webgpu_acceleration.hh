@@ -17,6 +17,8 @@ inline constexpr isize acceleration_unit_bytes = 16;
 /// Where group 3 carries the pool and the roots, past the inline constants and the 16 register-bound samplers.
 inline constexpr u32 acceleration_pool_binding = 17;
 inline constexpr u32 acceleration_roots_binding = 18;
+/// Where group 3 holds the context's debug window, which a print or an assert writes (EMIT-183).
+inline constexpr u32 debug_window_binding = 19;
 
 /// The roots uniform, `array<vec4u, 4>`: one u32 per acceleration member, so at most 16 of them.
 inline constexpr isize acceleration_roots_bytes = 64;

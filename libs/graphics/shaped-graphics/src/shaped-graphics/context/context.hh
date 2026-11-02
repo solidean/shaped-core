@@ -23,6 +23,7 @@
 #include <shaped-graphics/context/device_error.hh>
 #include <shaped-graphics/context/download.hh>
 #include <shaped-graphics/context/gpu_metrics.hh>
+#include <shaped-graphics/context/impl/debug_windows.hh>
 #include <shaped-graphics/context/impl/device_lifecycle.hh>
 #include <shaped-graphics/context/metrics.hh>
 #include <shaped-graphics/context/persistent.hh>
@@ -295,6 +296,9 @@ public:
     /// Safe to call at any time and from any thread, but not concurrently with advance_epoch; also runs implicitly after the waits below.
     void process_completed_epochs();
 
+    /// What a pipeline's shaders write their print and assert records into; a backend's bind binds the recording epoch's window.
+    [[nodiscard]] impl::debug_windows& debug_windows() { return _debug_windows; }
+
     /// Runs `fn` once the GPU has finished every epoch up to and including the current one.
     /// Runs on sg's retire sweep (`process_completed_epochs`, or the drain at shutdown), never inline in this call,
     /// except on a context already shut down, where nothing retires again and `fn` runs immediately.
@@ -463,6 +467,7 @@ protected:
     friend class context_transient_scope;
     friend class context_upload_scope;
     friend class context_download_scope;
+    friend class impl::debug_windows;
     friend class context_stream_scope;
     friend class context_uncached_scope;
     friend class context_cached_scope;
@@ -470,6 +475,10 @@ protected:
 
     /// The backend's half of advance_epoch; the public one then counts the epoch and records the stats it closed.
     virtual void do_advance_epoch() = 0;
+
+    /// Decodes the records still in flight and releases the windows.
+    /// A backend calls it in its shutdown once the final epoch has retired, while its download path still runs.
+    void release_debug_windows();
 
     // GPU metrics, reached through ctx.metrics.
     // Non-pure with a refusing default, so a backend that cannot answer needs no code at all and a caller gets a clean
@@ -811,6 +820,9 @@ protected:
     // What take_pending_errors hands out.
     // Guarded: a backend may report from its own threads.
     cc::mutex<cc::vector<device_error>> _pending_errors;
+
+    // What shaders write print and assert records into, which advance_epoch and the retire sweep drain.
+    impl::debug_windows _debug_windows = impl::debug_windows(*this);
 
     // Sticky device-loss state (see is_device_lost), set once via mark_device_lost and never cleared.
     // Atomic because metal reports loss from a dispatch queue Apple owns.

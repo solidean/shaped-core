@@ -46,6 +46,38 @@ public:
     bool is_c_like() const override { return false; }
     bool assigns_through_swizzles() const override { return false; }
 
+    // WebGPU's vertex stage has no writable storage
+    bool writes_debug_in(check::stage s) const override { return s != check::stage::vertex; }
+    void write_debug_buffer(cc::string& out) const override
+    {
+        out += "struct sg_debug_buffer {\n    cursor: atomic<u32>,\n    capacity: u32,\n    dropped: atomic<u32>,\n"
+               "    words: array<u32>,\n}\n\n";
+        out += "@group(3) @binding(19) var<storage, read_write> sg_debug: sg_debug_buffer;\n\n";
+    }
+    cc::string debug_reserve(cc::string_view at, isize count) const override
+    {
+        return cc::format("let {}: u32 = atomicAdd(&sg_debug.cursor, {}u);", at, count);
+    }
+    cc::string debug_fits(cc::string_view at, isize count) const override
+    {
+        return cc::format("{} + {}u <= sg_debug.capacity", at, count);
+    }
+    cc::string debug_store(cc::string_view at, isize i, cc::string_view word) const override
+    {
+        return cc::format("sg_debug.words[{} + {}u] = {};", at, i, word);
+    }
+    cc::string debug_drop() const override { return "_ = atomicAdd(&sg_debug.dropped, 1u);"; }
+    cc::string debug_word(cc::string_view value, cc::string_view family) const override
+    {
+        if (family == "uint")
+            return cc::string(value);
+        if (family == "bool")
+            return cc::format("select(0u, 1u, {})", value);
+        if (family == "half")
+            return cc::format("bitcast<u32>(f32({}))", value);
+        return cc::format("bitcast<u32>({})", value);
+    }
+
     void write_for_head(cc::string& out, cc::string_view index, cc::string_view first, cc::string_view end) const override
     {
         out.appendf("for (var {}: i32 = {}; {} < {}; {}++)", index, first, index, end, index);

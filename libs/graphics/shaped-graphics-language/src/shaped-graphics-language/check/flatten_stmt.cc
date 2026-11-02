@@ -692,7 +692,16 @@ void sgl::check::impl::flattener::flatten_stmt(ast::stmt_id id)
         return;
     }
     if (auto const* const print = s.node.try_as<ast::print_stmt>())
-        return add_stmt(from, flat_print{.value = flatten_expr(print->message)});
+    {
+        auto const* const literal = ast().at(print->message).node.try_as<ast::literal>();
+        if (literal == nullptr || literal->kind != ast::literal_kind::quoted)
+        {
+            auto const value = flatten_expr(print->message);
+            return add_stmt(from, flat_print{.values = add_list(cc::span<flat_expr_id const>(&value, 1))});
+        }
+        auto const message = add_message(print->message);
+        return add_stmt(from, flat_print{.message = message, .values = flatten_message_values(print->message)});
+    }
     // A test in a function body never runs where it stands (CHK-224), and a `require` and a `const` are no code.
     if (auto const* const d = s.node.try_as<ast::decl_stmt>();
         d != nullptr && ast::is_valid(d->declaration)
@@ -700,7 +709,7 @@ void sgl::check::impl::flattener::flatten_stmt(ast::stmt_id id)
             || ast().at(d->declaration).node.is<ast::const_decl>()))
         return;
     if (auto const* const a = s.node.try_as<ast::assert_stmt>())
-        return flatten_check(from, a->condition, true);
+        return flatten_check(from, a->condition, true, a->message);
 
     auto const* const e = s.node.try_as<ast::expr_stmt>();
     if (e == nullptr || !ast::is_valid(e->value))

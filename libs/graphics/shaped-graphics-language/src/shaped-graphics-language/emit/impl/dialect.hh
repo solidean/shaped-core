@@ -53,6 +53,28 @@ public:
     /// False for WGSL: `if c {`, `loop {`, and a `once` that is `loop { … break; }`.
     [[nodiscard]] virtual bool is_c_like() const = 0;
 
+    /// True where the target's compiler reads `#line 12 "file.sgl"` (EMIT-182).
+    [[nodiscard]] virtual bool has_line_directives() const { return false; }
+
+    // ---- EMIT-183: sg's debug buffer, a header of a cursor, a capacity and a dropped count, then 32-bit words ----
+
+    /// False where a stage cannot write the buffer, which drops its prints: WGSL's vertex stage, MSL's ray-tracing stages.
+    [[nodiscard]] virtual bool writes_debug_in(check::stage) const { return true; }
+    /// The buffer's declaration at file scope, followed by an empty line.
+    virtual void write_debug_buffer(cc::string& out) const = 0;
+    /// The declaration of `at` on a line of its own, where the reservation cannot declare it; empty where it can.
+    [[nodiscard]] virtual cc::string debug_declare(cc::string_view) const { return {}; }
+    /// The statement that reserves `count` words and leaves the first one's index in `at`.
+    [[nodiscard]] virtual cc::string debug_reserve(cc::string_view at, isize count) const = 0;
+    /// The condition under which `count` words from `at` fit.
+    [[nodiscard]] virtual cc::string debug_fits(cc::string_view at, isize count) const = 0;
+    /// The statement that stores `word` at word `at + i`.
+    [[nodiscard]] virtual cc::string debug_store(cc::string_view at, isize i, cc::string_view word) const = 0;
+    /// The statement that counts a record the buffer had no room for.
+    [[nodiscard]] virtual cc::string debug_drop() const = 0;
+    /// `value`, a scalar of `family` (`float`, `half`, `int`, `uint`, `bool`), as one 32-bit word.
+    [[nodiscard]] virtual cc::string debug_word(cc::string_view value, cc::string_view family) const = 0;
+
     /// True where `v.zy = value;` assigns through a swizzle; WGSL assigns one component at a time (EMIT-143).
     [[nodiscard]] virtual bool assigns_through_swizzles() const { return true; }
 
@@ -116,9 +138,18 @@ void write_helpers(cc::string& out, plan const& p, dialect const& d);
 /// Every resource of the entry point, handed to the dialect one binding at a time, and then its file-scope samplers.
 void write_buffers(cc::string& out, plan const& p, dialect const& d);
 
+/// The text of an entry point, and where each line of its function body came from.
+struct written_text
+{
+    cc::string text;
+    cc::vector<line_origin> lines;
+    cc::vector<debug_site> debug_sites;
+};
+
 /// The whole text of the planned entry point: a header comment, the declarations, and the function.
 /// Mints what the body still needs from `p.names`.
-[[nodiscard]] cc::string write_text(plan& p, dialect const& d);
+/// The line table is empty unless `sources` names the files.
+[[nodiscard]] written_text write_text(plan& p, dialect const& d, options const& sources);
 
 // Each defined by its target's file.
 [[nodiscard]] dialect const& hlsl_dx12_dialect();

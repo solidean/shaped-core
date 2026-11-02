@@ -86,6 +86,7 @@ void finish_creation(webgpu_context& ctx)
                                .shader_f16 = has(WGPUFeatureName_ShaderF16),
                                .subgroups = has(WGPUFeatureName_Subgroups),
                                .texture_compression_bc = has(WGPUFeatureName_TextureCompressionBC)});
+    ctx.debug_windows().create();
 }
 
 struct request_state

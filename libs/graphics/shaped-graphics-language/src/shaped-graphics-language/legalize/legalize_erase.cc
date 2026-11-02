@@ -17,6 +17,53 @@ struct void_eraser
     flat_builder& out;
     /// False for rule V0, which drops the checks and changes nothing else.
     bool erases_void = true;
+    /// LEGAL-63: V0 drops the prints too.
+    bool erases_prints = false;
+    /// LEGAL-64: V0 lowers each assert instead of dropping it.
+    bool lowers_asserts = false;
+
+    /// LEGAL-64: assert `k`'s body, then its message printed and the invocation ended where the condition is false.
+    void lower_assert(flat_stmt const& s, flat_check const& k, stmt_list& into, int depth)
+    {
+        for (auto const id : erase(ids_of_range(k.body), depth + 1))
+            into.push_back(id);
+        auto const site = out.e.check_sites[k.site];
+        auto const nodes = out.e.at(site.nodes);
+        if (nodes.empty())
+            return;
+        out.from = s.from;
+        out.inlined_through = s.inlined_through;
+        auto message = site.message;
+        if (message < 0)
+        {
+            out.e.messages.push_back({.pieces = {cc::string()}});
+            message = i32(out.e.messages.size() - 1);
+        }
+        out.e.messages[message].is_assert = true;
+        auto values = cc::vector<flat_expr_id>();
+        if (is_known(out.e, site.message_values))
+            for (auto const v : out.e.at(site.message_values))
+                values.push_back(expr(v, 0));
+        auto failed = cc::vector<flat_stmt_id>();
+        failed.push_back(out.print(message, values));
+        // what ends an invocation: a stage that returns nothing returns, and a pixel stage discards
+        auto const stage = out.e.entry_stage;
+        if (stage == check::stage::pixel)
+            failed.push_back(out.discard());
+        else if (stage == check::stage::compute || stage == check::stage::raygen || stage == check::stage::miss
+                 || stage == check::stage::closest_hit || stage == check::stage::callable)
+            failed.push_back(out.return_(flat_expr_id::none));
+        into.push_back(out.if_(out.not_(out.local(nodes[0].value)), failed));
+    }
+
+    [[nodiscard]] stmt_list ids_of_range(ast::range_of<flat_stmt_id> range) const
+    {
+        auto list = stmt_list();
+        if (is_known(out.e, range))
+            for (auto const id : out.e.at(range))
+                list.push_back(id);
+        return list;
+    }
 
     [[nodiscard]] bool is_void(flat_expr_id id) const
     {
@@ -162,7 +209,14 @@ struct void_eraser
             }
             auto copy = out.e.at(id);
             // V0: a check and its body are gone, whatever they compute
-            if (copy.node.is<flat_check>())
+            if (auto const* const k = copy.node.try_as<flat_check>(); k != nullptr && lowers_asserts && k->site >= 0
+                                                                      && k->site < out.e.check_sites.size()
+                                                                      && out.e.check_sites[k->site].stops)
+            {
+                lower_assert(copy, *k, result, depth);
+                continue;
+            }
+            if (copy.node.is<flat_check>() || (erases_prints && copy.node.is<flat_print>()))
                 continue;
             if (erases_void && erase_void_statement(copy, result))
                 continue;
@@ -174,7 +228,7 @@ struct void_eraser
                                 n.place = expr(n.place, 0);
                                 n.value = expr(n.value, 0);
                             },
-                            [&](flat_print& n) { n.value = expr(n.value, 0); }, //
+                            [&](flat_print& n) { n.values = exprs(n.values, 0); }, //
                             [&](flat_eval& n) { n.value = expr(n.value, 0); },
                             [&](flat_if& n)
                             {
@@ -221,9 +275,10 @@ struct void_eraser
 };
 } // namespace
 
-stmt_list sgl::check::impl::erase_checks(flat_builder& out, stmt_list const& body)
+stmt_list sgl::check::impl::erase_checks(flat_builder& out, stmt_list const& body, bool erases_prints, bool lowers_asserts)
 {
-    return void_eraser{.out = out, .erases_void = false}.erase(body, 0);
+    return void_eraser{.out = out, .erases_void = false, .erases_prints = erases_prints, .lowers_asserts = lowers_asserts}
+        .erase(body, 0);
 }
 
 stmt_list sgl::check::impl::erase_void(flat_builder& out, stmt_list const& body)

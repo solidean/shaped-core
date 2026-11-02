@@ -210,7 +210,12 @@ flat_stmt_id flat_builder::assign(flat_expr_id place, flat_expr_id value)
 
 flat_stmt_id flat_builder::print(flat_expr_id value)
 {
-    return add_stmt(flat_print{.value = value});
+    return print(-1, cc::span<flat_expr_id const>(&value, 1));
+}
+
+flat_stmt_id flat_builder::print(i32 message, cc::span<flat_expr_id const> values)
+{
+    return add_stmt(flat_print{.message = message, .values = expr_list(values)});
 }
 
 flat_stmt_id flat_builder::eval(flat_expr_id value)

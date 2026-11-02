@@ -175,3 +175,38 @@ TEST("sg access_state - reset_keep_layout clears timelines")
     CHECK(!s.has_any_inflight_access());
     CHECK(s.curr_layout == sg::texture_layout::general);
 }
+
+TEST("sg access_state - appends order against no other append, and against everything else as a write")
+{
+    constexpr auto append = access_flag::shader_append;
+    sg::resource_access_state s;
+    s.declare(compute, append);
+    CHECK(!s.flush().needed); // the first write takes ownership
+    s.declare(compute, append);
+    CHECK(!s.flush().needed); // a second dispatch's records need no barrier against the first's
+    s.declare(fragment, append);
+    CHECK(!s.flush().needed);
+
+    // what reads the records back waits for every append in flight
+    s.declare(copy, copy_read);
+    auto const read_back = s.flush();
+    REQUIRE(read_back.needed);
+    CHECK(read_back.src_access.has(append));
+    CHECK(read_back.src_stages.has(compute));
+    CHECK(read_back.src_stages.has(fragment));
+
+    // and an append after the reset waits for it
+    s.declare(copy, copy_write);
+    CHECK(s.flush().needed);
+    s.declare(compute, append);
+    CHECK(s.flush().needed);
+}
+
+TEST("sg access_state - an append after an ordinary write still waits for it")
+{
+    sg::resource_access_state s;
+    s.declare(compute, shader_write);
+    (void)s.flush();
+    s.declare(compute, access_flag::shader_append);
+    CHECK(s.flush().needed);
+}

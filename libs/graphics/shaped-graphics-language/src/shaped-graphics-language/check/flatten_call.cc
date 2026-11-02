@@ -4,7 +4,74 @@ using namespace sgl;
 using namespace sgl::check;
 using namespace sgl::check::impl;
 
-void sgl::check::impl::flattener::flatten_check(origin from, ast::expr_id condition, bool stops)
+namespace
+{
+/// `body`, a one-line string's piece, with its escapes resolved (STR-3, STR-4, STR-44) and `$$` a dollar (STR-27).
+/// The tokenizer has reported every malformed escape, which stands for the character after its backslash.
+void append_unescaped(cc::string& out, cc::string_view body)
+{
+    for (auto i = isize(0); i < body.size(); ++i)
+    {
+        auto const c = body[i];
+        if (c == '$' && i + 1 < body.size() && body[i + 1] == '$')
+        {
+            out += '$';
+            ++i;
+            continue;
+        }
+        if (c != '\\' || i + 1 >= body.size())
+        {
+            out += c;
+            continue;
+        }
+        auto const e = body[++i];
+        if (e == 'n')
+            out += '\n';
+        else if (e == 'r')
+            out += '\r';
+        else if (e == 't')
+            out += '\t';
+        else if (e == '0')
+            out += '\0';
+        else if (e == 'u' && i + 1 < body.size() && body[i + 1] == '{')
+        {
+            auto code = u32(0);
+            auto j = i + 2;
+            for (; j < body.size() && body[j] != '}'; ++j)
+            {
+                auto const h = body[j];
+                code = code * 16 + u32(h <= '9' ? h - '0' : (h | 0x20) - 'a' + 10);
+            }
+            i = j;
+            // as UTF-8
+            if (code < 0x80)
+                out += char(code);
+            else if (code < 0x800)
+            {
+                out += char(0xC0 | (code >> 6));
+                out += char(0x80 | (code & 0x3F));
+            }
+            else if (code < 0x10000)
+            {
+                out += char(0xE0 | (code >> 12));
+                out += char(0x80 | ((code >> 6) & 0x3F));
+                out += char(0x80 | (code & 0x3F));
+            }
+            else
+            {
+                out += char(0xF0 | (code >> 18));
+                out += char(0x80 | ((code >> 12) & 0x3F));
+                out += char(0x80 | ((code >> 6) & 0x3F));
+                out += char(0x80 | (code & 0x3F));
+            }
+        }
+        else
+            out += e;
+    }
+}
+} // namespace
+
+void sgl::check::impl::flattener::flatten_check(origin from, ast::expr_id condition, bool stops, ast::expr_id message)
 {
     auto const site = i32(entry.check_sites.size());
     entry.check_sites.push_back({.from = from, .stops = stops});
@@ -12,6 +79,12 @@ void sgl::check::impl::flattener::flatten_check(origin from, ast::expr_id condit
     block = {};
     auto nodes = cc::vector<flat_check_node>();
     (void)materialize(condition, -1, nodes);
+    // a message's values are the check's body too, computed beside the condition and read where it fails
+    if (ast::is_valid(message))
+    {
+        entry.check_sites[site].message = add_message(message);
+        entry.check_sites[site].message_values = flatten_message_values(message);
+    }
     auto const body = add_list(block);
     block = cc::move(outer);
 
@@ -30,6 +103,57 @@ void sgl::check::impl::flattener::flatten_check(origin from, ast::expr_id condit
     entry.check_nodes.push_back_range(nodes);
     entry.check_sites[site].loop_variables = add_list(loop_variables);
     add_stmt(from, flat_check{.site = site, .body = body});
+}
+
+auto sgl::check::impl::flattener::add_message(ast::expr_id message) -> i32
+{
+    auto const& source = c.file_of(file());
+    auto result = flat_message{.pieces = {cc::string()}};
+    auto const& tokens = source.tokens;
+    auto const open = index_of(source.at(ast().at(message).form).token);
+    for (auto i = open + 1; i < tokens.size() && tokens[i].kind != token_kind::quote_close; ++i)
+    {
+        auto const& t = tokens[i];
+        if (t.kind == token_kind::string_body)
+            append_unescaped(result.pieces.back(), source.text_of(t.where));
+        else if (t.kind == token_kind::dollar && i + 1 < tokens.size())
+        {
+            // past the interpolation: its parenthesized code, or its name and each `.name` fused after it
+            if (tokens[i + 1].kind == token_kind::round_open)
+            {
+                auto depth = 0;
+                for (++i; i < tokens.size(); ++i)
+                {
+                    depth += tokens[i].kind == token_kind::round_open  ? 1
+                           : tokens[i].kind == token_kind::round_close ? -1
+                                                                       : 0;
+                    if (depth == 0)
+                        break;
+                }
+            }
+            else if (tokens[i + 1].kind == token_kind::symbol)
+            {
+                ++i;
+                while (i + 2 < tokens.size() && tokens[i + 1].kind == token_kind::dot
+                       && tokens[i + 2].kind == token_kind::symbol)
+                    i += 2;
+            }
+            else
+                continue;
+            result.pieces.push_back(cc::string());
+        }
+    }
+    entry.messages.push_back(cc::move(result));
+    return i32(entry.messages.size() - 1);
+}
+
+auto sgl::check::impl::flattener::flatten_message_values(ast::expr_id message) -> ast::range_of<flat_expr_id>
+{
+    auto values = cc::vector<flat_expr_id>();
+    if (auto const* const literal = ast().at(message).node.try_as<ast::literal>())
+        for (auto const part : ast().at(literal->interpolations))
+            values.push_back(flatten_expr(part));
+    return add_list(values);
 }
 
 auto sgl::check::impl::flattener::check_var(ast::expr_id id) -> local_id
@@ -621,7 +745,7 @@ void sgl::check::impl::flattener::substitute_single_use(local_id local)
             return;
         auto const& s = entry.at(id);
         auto const inner = loops + (s.node.is<flat_loop>() || s.node.is<flat_while>() || s.node.is<flat_for>() ? 1 : 0);
-        for_each_expr_of(s, [&](flat_expr_id x) { expr(expr, x, inner, depth + 1); });
+        for_each_expr_of(entry, s, [&](flat_expr_id x) { expr(expr, x, inner, depth + 1); });
         for_each_pattern_of(entry, s,
                             [&](ast::range_of<flat_expr_id> patterns)
                             {
@@ -649,7 +773,7 @@ auto sgl::check::impl::flattener::reads_in(flat_stmt_id id, local_id local) cons
     // a read inside a block expression: counted as one that may repeat, which keeps the let
     auto found = false;
     auto const& s = entry.at(id);
-    for_each_expr_of(s,
+    for_each_expr_of(entry, s,
                      [&](flat_expr_id x)
                      {
                          if (auto const* const ref = entry.at(x).node.try_as<flat_local_ref>())

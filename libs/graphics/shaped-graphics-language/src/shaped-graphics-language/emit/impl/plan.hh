@@ -224,6 +224,8 @@ struct plan
     check::checked_module const& m;
     check::flat_entry_point const& e;
     target which;
+    /// EMIT-183: the text writes a print into sg's debug buffer, which it declares.
+    bool writes_debug = false;
 
     /// The program's structs the entry point needs, each after every struct it holds.
     cc::vector<planned_struct> structs;
@@ -307,7 +309,11 @@ struct plan
 [[nodiscard]] bool is_builtin_type(check::checked_module const& m, check::type_id type);
 
 /// Appends what keeps `e` from being written, which is the same for every target.
-void validate(check::checked_module const& m, check::flat_entry_point const& e, cc::vector<error>& errors);
+/// `writes_prints` accepts a print, which only a text with diagnostics writes (EMIT-183).
+void validate(check::checked_module const& m,
+              check::flat_entry_point const& e,
+              cc::vector<error>& errors,
+              bool writes_prints = false);
 
 /// How each target hands a stage input to an entry point (EMIT-127): its type there, and what marks it.
 struct stage_input_spelling

@@ -94,7 +94,7 @@ void for_each_operand(flat_entry_point const& e, flat_expr const& x, Fn&& fn)
 
 /// Calls `fn(flat_expr_id)` for every expression `s` holds directly, in evaluation order; an absent one is skipped.
 template <class Fn>
-void for_each_expr_of(flat_stmt const& s, Fn&& fn)
+void for_each_expr_of(flat_entry_point const& e, flat_stmt const& s, Fn&& fn)
 {
     auto const visit = [&](flat_expr_id id)
     {
@@ -108,7 +108,12 @@ void for_each_expr_of(flat_stmt const& s, Fn&& fn)
                      visit(n.place);
                      visit(n.value);
                  },
-                 [&](flat_print const& n) { visit(n.value); },  //
+                 [&](flat_print const& n)
+                 {
+                     if (is_known(e, n.values))
+                         for (auto const value : e.at(n.values))
+                             visit(value);
+                 },
                  [&](flat_eval const& n) { visit(n.value); },   //
                  [&](flat_if const& n) { visit(n.condition); }, //
                  [&](flat_block const&) {},                     //
@@ -220,7 +225,7 @@ struct depth_probe
                 found = s.from;
                 return;
             }
-            for_each_expr_of(s, [&](flat_expr_id x) { expr(x, depth + 1); });
+            for_each_expr_of(e, s, [&](flat_expr_id x) { expr(x, depth + 1); });
             for_each_pattern_of(e, s,
                                 [&](ast::range_of<flat_expr_id> patterns)
                                 {
