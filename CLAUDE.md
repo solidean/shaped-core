@@ -330,6 +330,9 @@ The loop is **run `dev.py`, then diagnose with `repo_tools`** — `build_diag` a
 * `SC_FROZEN_SHADERS` (default OFF) is the shipping mode for shaders: no shader file read, no hot reload, and recorded bytecode embedded where an executable asks with `sc_embed_shader_bundle`.
   A miss still compiles from the embedded sources, so DXC still ships; the `frozen-clang` preset sets it.
   See [frozen-shaders](libs/graphics/shaped-shader-library/docs/frozen-shaders.md).
+* `SC_SHADER_DIAGNOSTICS` (default: on unless `SC_FROZEN_SHADERS`) is whether a shader's `print` and `assert` reach the log → `SG_SHADER_DIAGNOSTICS`.
+  SGL writes them as records into a debug window sg binds, reads back after the epoch and logs, so a failed GPU assert fails a test.
+  See [docs/platforms.md](docs/platforms.md#shader-diagnostics-sc_shader_diagnostics).
 * `SC_CHECK_WIDE_ARITH` (default OFF) checks typed-geometry's `fixed_int` claims — a result width, a shift amount — at runtime → `TG_CHECK_WIDE_ARITH`.
   Off by default because they sit in predicate hot loops; the `debug-nopch` presets turn it on, so `check` exercises it.
   See [docs/platforms.md](docs/platforms.md#wide-arithmetic-checks-sc_check_wide_arith).

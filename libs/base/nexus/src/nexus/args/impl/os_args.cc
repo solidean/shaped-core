@@ -23,10 +23,8 @@ cc::vector<cc::string> query_os_args()
     auto out = cc::vector<cc::string>();
 
 #if defined(CC_OS_WINDOWS)
-    // The CRT's own copy of what main() was given, already split.
-    // GetCommandLineW plus CommandLineToArgvW would preserve characters outside the active code page, at
-    // the cost of a shell32 dependency — and nx::run captures the same narrow argv anyway, so the wide
-    // route would only make the FALLBACK better than the primary path.
+    // The CRT's own copy of what main() was given, already split, in the active code page.
+    // sc_nexus_binary's manifest makes that UTF-8, so the narrow argv loses nothing and nx::run's copy agrees.
     if (__argv == nullptr)
         return out;
 

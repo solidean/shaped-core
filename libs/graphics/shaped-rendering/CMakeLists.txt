@@ -411,6 +411,7 @@ if(SC_BUILD_TESTS)
             tests/shader_fixtures.cc
             tests/compression/bc-compress-test.cc
             tests/blit-routine-test.cc
+            tests/debug-output-test.cc
             tests/imgui-routine-test.cc
             tests/raster-box-filter-mipmap-test.cc
             tests/nn-resample-test.cc
@@ -449,7 +450,6 @@ if(SC_BUILD_TESTS)
             tests/denoise-test.cc
             tests/denoise-reference-test.cc
             tests/fsr-clear-test.cc
-            tests/debug-output-test.cc
             tests/fsr-test.cc
             tests/mix-test.cc
             tests/exposure-meter-test.cc

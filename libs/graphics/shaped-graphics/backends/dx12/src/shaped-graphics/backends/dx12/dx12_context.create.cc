@@ -642,6 +642,7 @@ cc::result<context_handle> create_dx12_context(backend::dx12::dx12_config const&
     CC_RETURN_IF_ERROR(dsv_heap);
     ctx->_dsv_heap = cc::move(dsv_heap.value());
 
+    ctx->debug_windows().create();
     return context_handle(cc::move(ctx));
 }
 } // namespace sg

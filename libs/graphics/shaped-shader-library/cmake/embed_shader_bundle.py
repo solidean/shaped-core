@@ -40,7 +40,7 @@ def render(data: bytes) -> str:
         "{",
         "    bundle_registration()",
         "    {",
-        f"        slib::register_shader_bundle(cc::span<cc::byte const>(reinterpret_cast<cc::byte const*>(k_bundle), {len(data)}));",
+        f"        slib::register_shader_bundle(cc::span<cc::byte const>(reinterpret_cast<cc::byte const*>(k_bundle), cc::isize({len(data)})));",
         "    }",
         "};",
         "",

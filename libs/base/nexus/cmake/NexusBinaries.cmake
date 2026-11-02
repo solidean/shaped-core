@@ -10,6 +10,7 @@
 #       `stub` marks a stand-in that only says why its example is not built here: no nexus runner, so no test run starts it.
 #       TIMEOUT is how long a test run of it may take, when that is more than dev.py's default.
 #       It is for a binary whose cost the machine sets rather than the code, such as one that runs WARP on a GPU-less host.
+#       On Windows the binary's manifest makes UTF-8 its code page, so argv arrives as UTF-8 and a test name outside ASCII matches.
 #
 #   sc_write_nexus_binary_manifest()
 #       Writes <build>/nexus-binaries.json at generate time, the end of configure.
@@ -33,6 +34,10 @@ function(sc_nexus_binary target)
 
     list(JOIN NB_KINDS "," _joined)
     set_property(GLOBAL APPEND PROPERTY SC_NEXUS_BINARIES "${target}=${_joined}")
+
+    if(WIN32)
+        target_sources(${target} PRIVATE "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/utf8-code-page.manifest")
+    endif()
 
     if(DEFINED NB_TIMEOUT)
         if(NOT NB_TIMEOUT MATCHES "^[0-9]+$" OR NB_TIMEOUT EQUAL 0)

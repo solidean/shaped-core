@@ -79,18 +79,42 @@ void impl::debug_windows::ensure_windows()
             {
                 _windows[i].buffer = _ctx.persistent.create_raw_buffer(
                     k_window_bytes, buffer_usage::readwrite_buffer | buffer_usage::copy_src | buffer_usage::copy_dst);
-                reset(i);
+                _windows[i].needs_reset.store(true);
             }
+            _sink = _ctx.persistent.create_raw_buffer(
+                k_header_words * 4, buffer_usage::readwrite_buffer | buffer_usage::copy_src | buffer_usage::copy_dst);
+            _sink_needs_reset.store(true);
             _created.store(true);
         });
+}
+
+void impl::debug_windows::create()
+{
+    if (k_enabled)
+        ensure_windows();
 }
 
 raw_buffer_handle impl::debug_windows::window_for_recording(bool writes)
 {
     ensure_windows();
-    auto& w = _windows[index_of(_ctx.current_epoch())];
+    auto const index = index_of(_ctx.current_epoch());
+    auto& w = _windows[index];
+    if (w.is_busy.load())
+    {
+        if (writes && _sink_needs_reset.exchange(false))
+        {
+            u32 const empty[k_header_words] = {0, 0, 0};
+            _ctx.upload.bytes_to_buffer(_sink, cc::make_pinned_data(cc::span<u32 const>(empty).as_bytes()));
+        }
+        return _sink;
+    }
     if (writes)
+    {
+        // a list that binds the window waits on this copy, so the reset lands before the first record
+        if (w.needs_reset.exchange(false))
+            reset(index);
         w.is_written.store(true);
+    }
     return w.buffer;
 }
 
@@ -121,6 +145,7 @@ void impl::debug_windows::on_closing(epoch closing)
     auto& w = _windows[index];
     if (!w.is_written.exchange(false))
         return;
+    w.is_busy.store(true);
     w.written_in = closing;
     w.is_requested = false;
     // asked for once the epoch has retired, so the copy reads what every list of the epoch wrote
@@ -143,6 +168,12 @@ void impl::debug_windows::on_opened(epoch opened)
     auto& w = _windows[index];
     if (!w.pending.has_value())
         return;
+    if (_ctx.execution() == execution_model::never_block)
+    {
+        CC_LOG_WARNING("the shader debug drain fell more than an epoch behind, so epoch {}'s records are dropped",
+                       u64(opened));
+        return;
+    }
     // only a drain more than a whole epoch late waits here
     if (!w.is_requested)
     {
@@ -174,6 +205,11 @@ void impl::debug_windows::drain()
 {
     if (!has_windows())
         return;
+    if (_ctx.execution() == execution_model::never_block)
+    {
+        poll();
+        return;
+    }
     for (auto i = isize(0); i < k_window_count; ++i)
         if (_windows[i].pending.has_value())
             on_opened(_windows[i].written_in);
@@ -187,7 +223,9 @@ void impl::debug_windows::release()
     {
         w.pending = {};
         w.buffer = {};
+        w.is_busy.store(false);
     }
+    _sink = {};
     _created.store(false);
 }
 
@@ -196,7 +234,9 @@ void impl::debug_windows::finish(isize index, cc::span<byte const> bytes)
     auto& w = _windows[index];
     w.pending = {};
     w.is_requested = false;
-    reset(index);
+    // reset by the next bind that writes it, which a list waits on before its first record
+    w.needs_reset.store(true);
+    w.is_busy.store(false);
 
     auto const word_count = bytes.size() / 4;
     if (word_count < k_header_words)

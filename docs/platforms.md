@@ -293,6 +293,16 @@ An executable that calls `sc_embed_shader_bundle` also serves the bytecode a rec
 It is whole-build, set by the `frozen-*` presets, which is how `dev.py install shaped-view` builds the copy it installs.
 [frozen-shaders](../libs/graphics/shaped-shader-library/docs/frozen-shaders.md) is the design.
 
+## Shader diagnostics (`SC_SHADER_DIAGNOSTICS`)
+
+`SC_SHADER_DIAGNOSTICS` decides whether a shader's `print` and `assert` reach the log, and reaches sg as `SG_SHADER_DIAGNOSTICS`, 0 or 1.
+Its default follows `SC_FROZEN_SHADERS`: on in a dev build, off in a frozen one, and either can be set alone.
+On, slib asks SGL to write each print and failed assert as a record, and sg binds a debug window every pipeline may write.
+sg reads each window back once its epoch completes and logs what it decodes, a failed assert as an error, so nexus's log rule fails a test that trips one.
+Off, SGL writes neither, and sg creates no window and binds no slot for one.
+A dx12 and a webgpu context bind it so far; vulkan and metal shaders write no records yet.
+[feat-sgl-gpu-print-and-assert](../libs/graphics/shaped-graphics-language/docs/issues/feat-sgl-gpu-print-and-assert.md) is the design.
+
 ## Example backend (`SC_EXAMPLE_BACKEND`)
 
 `SC_EXAMPLE_BACKEND` (default `auto`) picks which graphics backend the `*-example` binaries are built and linked against: `auto`, `dx12`, `vulkan`, `metal` or `webgpu`.

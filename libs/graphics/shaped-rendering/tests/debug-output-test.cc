@@ -3,6 +3,9 @@
 #include <shaped-graphics/all.hh>
 #include <shaped-shader-library/compiler/dxc_compiler.hh>
 #include <shaped-shader-library/compiler/sgl_compiler.hh>
+#include <shaped-shader-library/compiler/wgsl_compiler.hh>
+
+#include <memory>
 
 // A shader's print and assert, end to end: SGL writes the records, sg binds the window, reads it back once the epoch
 // completes, and logs what it decoded.
@@ -13,6 +16,22 @@ namespace
 constexpr cc::string_view k_source = "@compute(4) fun cs(@thread_id id: int3):\n"
                                      "    print \"thread $(id.x)\"\n"
                                      "    assert id.x != 3, \"thread $(id.x) of $(id.xy) is the odd one\"\n";
+
+/// The compiler that builds SGL's text for `ctx`, where sg binds the debug window on its backend; null elsewhere.
+std::unique_ptr<slib::shader_compiler> inner_compiler_for(sg::context const& ctx)
+{
+    if (ctx.backend() == sg::backend_kind::webgpu)
+        return slib::create_wgsl_compiler();
+#if SLIB_HAS_DXC
+    if (ctx.backend() == sg::backend_kind::dx12)
+    {
+        auto dxc = slib::create_dxc_compiler();
+        if (dxc.has_value())
+            return cc::move(dxc.value());
+    }
+#endif
+    return nullptr;
+}
 } // namespace
 
 ASYNC_INVOCABLE_TEST("sr - a shader's failed assert reaches the log with its values, once its epoch completes",
@@ -20,17 +39,12 @@ ASYNC_INVOCABLE_TEST("sr - a shader's failed assert reaches the log with its val
 {
     REQUIRE(ctx_h != nullptr);
     auto& ctx = *ctx_h;
-#if !SLIB_HAS_DXC
-    SKIP("this build has no DXC");
-#else
-    if (ctx.backend() != sg::backend_kind::dx12)
-        SKIP("sg binds the debug window on dx12 alone so far");
+    auto inner = inner_compiler_for(ctx);
+    if (inner == nullptr)
+        SKIP("sg binds the debug window on dx12 and webgpu alone so far");
     nx::expect_error("debug.sgl:3: assert failed: thread 3 of int2(3, 0) is the odd one", nx::exactly(1));
 
-    auto dxc = slib::create_dxc_compiler();
-    REQUIRE(dxc.has_value());
-    auto const compiler
-        = slib::create_sgl_compiler(cc::move(dxc.value()), {.persistent_cache = nullptr, .diagnostics = true});
+    auto const compiler = slib::create_sgl_compiler(cc::move(inner), {.persistent_cache = nullptr, .diagnostics = true});
 
     auto desc = slib::shader_source_description{.source = cc::string(k_source),
                                                 .entry_point = "cs",
@@ -64,5 +78,4 @@ ASYNC_INVOCABLE_TEST("sr - a shader's failed assert reaches the log with its val
     ctx.process_completed_epochs();
     // and the window's reset, which decoding it queued, lands before the test ends
     co_await ctx.idle_completion();
-#endif
 }

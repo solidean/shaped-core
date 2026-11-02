@@ -419,7 +419,6 @@ TEST("slib - a push-constant block is the same size on SPIR-V as the mirror a ca
     CHECK(constants->block_size.value() == cc::isize(sizeof(slib_test::shaders::shade_constants)));
 }
 
-#endif
 
 TEST("slib - DXC compiles SGL's debug records for dx12 and vulkan", exclusive("slib-shader-library"))
 {
@@ -455,3 +454,4 @@ TEST("slib - DXC compiles SGL's debug records for dx12 and vulkan", exclusive("s
         (void)await(shader);
     }
 }
+#endif

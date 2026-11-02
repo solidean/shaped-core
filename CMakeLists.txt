@@ -117,6 +117,16 @@ option(SC_SIMD_EXHAUSTIVE_TESTS "Test clean-simd at every lane width, not one pe
 # A whole-build switch, set by the frozen-* presets; libs/graphics/shaped-shader-library/docs/frozen-shaders.md is the design.
 option(SC_FROZEN_SHADERS "Serve shaders from the binary alone: embedded sources and recorded bytecode, no disk, no reload" OFF)
 
+# A shader's print and assert write records the host reads back and logs; off, SGL writes neither and sg binds nothing for them.
+# Its own switch, whose default follows SC_FROZEN_SHADERS: a dev build has them, a shipping one does not.
+# libs/graphics/shaped-graphics-language/docs/issues/feat-sgl-gpu-print-and-assert.md is the design.
+if(SC_FROZEN_SHADERS)
+    set(_sc_shader_diagnostics_default OFF)
+else()
+    set(_sc_shader_diagnostics_default ON)
+endif()
+option(SC_SHADER_DIAGNOSTICS "Shaders write print and assert records, which sg reads back and logs" ${_sc_shader_diagnostics_default})
+
 # Keep a frame pointer in every frame, so cc::capture_stack can walk the chain by chasing it — a few nanoseconds a
 # frame, against a microsecond for the table-driven unwind that is the only alternative.
 #
