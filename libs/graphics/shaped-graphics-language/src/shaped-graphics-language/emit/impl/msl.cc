@@ -473,12 +473,14 @@ public:
         // sg's reserved group: ray type 0's intersection table at id 0, then miss, closest hit and callable, then the
         // other ray types' intersection tables from id 4
         out += "struct sgl_tables\n{\n"
-               "    intersection_function_table<triangle_data, instancing> hit_0 [[id(0)]];\n"
+               "    intersection_function_table<triangle_data, instancing, world_space_data> hit_0 [[id(0)]];\n"
                "    visible_function_table<sgl_hit_function> miss [[id(1)]];\n"
                "    visible_function_table<sgl_hit_function> closest_hit [[id(2)]];\n"
                "    visible_function_table<sgl_callable_function> callable [[id(3)]];\n";
         for (auto r = isize(1); r < ray_count; ++r)
-            out.appendf("    intersection_function_table<triangle_data, instancing> hit_{} [[id({})]];\n", r, 3 + r);
+            out.appendf("    intersection_function_table<triangle_data, instancing, world_space_data> hit_{} "
+                        "[[id({})]];\n",
+                        r, 3 + r);
         out += "};\n\n";
         out += "template <typename T>\nvoid sgl_store(thread uint4* words, T value)\n{\n"
                "    *reinterpret_cast<thread T*>(words) = value;\n}\n\n"
@@ -559,7 +561,8 @@ public:
         {
             // an any hit decides a triangle, and a procedural group's traversal reports a box's primitive
             auto const is_triangle = stage_of == stage::any_hit;
-            out.appendf("[[intersection({}, triangle_data, instancing)]]\n", is_triangle ? "triangle" : "bounding_box");
+            out.appendf("[[intersection({}, triangle_data, instancing, world_space_data)]]\n",
+                        is_triangle ? "triangle" : "bounding_box");
             out.appendf("{} {}(", is_triangle ? "bool" : "sgl_box_result", p.entry_name);
             if (is_triangle)
                 out += "float sgl_distance [[distance]], float2 sgl_barycentrics [[barycentric_coord]], "
@@ -568,11 +571,12 @@ public:
                    "float sgl_min [[min_distance]], float sgl_max [[max_distance]], uint sgl_primitive "
                    "[[primitive_id]], "
                    "uint sgl_geometry [[geometry_id]], uint sgl_instance [[instance_id]], "
-                   "uint sgl_user_instance [[user_instance_id]], ray_data sgl_ray_data& sgl_data [[payload]])\n{\n";
+                   "uint sgl_user_instance [[user_instance_id]], "
+                   "float4x3 sgl_object_to_world [[object_to_world_transform]], "
+                   "float4x3 sgl_world_to_object [[world_to_object_transform]], "
+                   "ray_data sgl_ray_data& sgl_data [[payload]])\n{\n";
             out += "    sgl_context const sgl_ctx = sgl_data.context;\n";
             write_context_bindings(out, p);
-            // A hit's transforms are the identity here: metal hands a traversal function its instance's transforms
-            // only under intersection tags sg's tables do not declare (issue: feat-sgl-metal-hit-instance-transforms).
             out.appendf("    sgl_hit_record sgl_hit;\n"
                         "    sgl_hit.t = {};\n"
                         "    sgl_hit.t_min = sgl_min;\n"
@@ -586,9 +590,8 @@ public:
                         "    sgl_hit.primitive_index = sgl_primitive;\n"
                         "    sgl_hit.barycentrics = {};\n"
                         "    sgl_hit.front_face = {};\n"
-                        "    sgl_hit.object_to_world = float4x3(float3(1, 0, 0), float3(0, 1, 0), float3(0, 0, 1), "
-                        "float3(0));\n"
-                        "    sgl_hit.world_to_object = sgl_hit.object_to_world;\n",
+                        "    sgl_hit.object_to_world = sgl_object_to_world;\n"
+                        "    sgl_hit.world_to_object = sgl_world_to_object;\n",
                         is_triangle ? "sgl_distance" : "sgl_max", is_triangle ? "sgl_barycentrics" : "float2(0)",
                         is_triangle ? "sgl_front ? 1u : 0u" : "0u");
             if (!payload.empty())

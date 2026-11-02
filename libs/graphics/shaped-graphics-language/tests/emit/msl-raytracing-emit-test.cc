@@ -72,9 +72,10 @@ TEST("sgl emit msl - every stage of sg's ray-tracing pipeline writes, and all ag
     CHECK(text_of(stages, "sky")
               .contains("[[visible]] void sky(thread uint4* sgl_payload, thread sgl_hit_record const& "
                         "sgl_hit, thread sgl_context const& sgl_ctx)\n"));
-    CHECK(text_of(stages, "cutout").contains("[[intersection(triangle, triangle_data, instancing)]]\nbool cutout("));
+    CHECK(text_of(stages, "cutout")
+              .contains("[[intersection(triangle, triangle_data, instancing, world_space_data)]]\nbool cutout("));
     CHECK(text_of(stages, "sgl_spheres_surface")
-              .contains("[[intersection(bounding_box, triangle_data, instancing)]]\nsgl_box_result "
+              .contains("[[intersection(bounding_box, triangle_data, instancing, world_space_data)]]\nsgl_box_result "
                         "sgl_spheres_surface("));
     // a traversal's payload is the ray set's, which only the ray data carries into it
     CHECK(text_of(stages, "sgl_spheres_occlusion").contains("ray_data sgl_ray_data& sgl_data [[payload]]"));
@@ -187,7 +188,7 @@ binding frame:
     auto const msl = emit_source(source, 0, target::msl);
     CHECK(msl.text.contains("struct instancing_\n"));
     // the tag itself is still Metal's own, in the tables every stage declares
-    CHECK(msl.text.contains("intersection_function_table<triangle_data, instancing>"));
+    CHECK(msl.text.contains("intersection_function_table<triangle_data, instancing, world_space_data>"));
 }
 
 TEST("sgl emit msl - an any hit two hit groups of differently sized ray sets hold is ray-data-conflict")

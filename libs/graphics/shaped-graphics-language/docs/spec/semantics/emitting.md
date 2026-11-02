@@ -455,15 +455,16 @@ So `{float3; float}` is written with `packed_float3`: the `float` is at byte 12 
   * The raygen is a `kernel`, which takes the argument buffers, sg's tables at `[[buffer(3)]]` and each instance's hit-group offset at `[[buffer(5)]]`.
   * A miss, a closest hit and a callable are `[[visible]]` functions of one signature: the payload as `uint4` words, a hit record but for a callable, and an `sgl_context`.
     The context carries the argument buffers, the inline constants, the tables and the launch, and the function binds each to a local.
-  * An any hit is an `[[intersection(triangle, triangle_data, instancing)]]` function that answers whether it accepts, and writes the payload back into the ray data.
+  * An any hit is an `[[intersection(triangle, triangle_data, instancing, world_space_data)]]` function that answers whether it accepts, and writes the payload back into the ray data.
     `accept_and_end_search` is `accept` there.
-  * A procedural record is its traversal entry point (CHK-345), an `[[intersection(bounding_box, triangle_data, instancing)]]` function.
+  * A procedural record is its traversal entry point (CHK-345), an `[[intersection(bounding_box, triangle_data, instancing, world_space_data)]]` function.
   * A trace is the kernel's own `intersector`, configured from the ray flags, then the miss or the closest hit through the tables.
     The closest hit's record is the instance's offset plus the geometry index times the multiplier plus the contribution, as DXR finds it.
   * The ray data holds as many words as the largest payload of the set, so every shader of a pipeline agrees on it.
     The set is the one of the pipeline or the hit group holding the shader, and one it traces only where none holds it.
     A shader that traces or stands in traversal, held by two whose sets' payloads differ, is `ray-data-conflict`, since one text cannot agree with both.
-  * A hit's instance transforms are the identity, since Metal hands them only under intersection tags sg's tables do not declare.
+  * Every table, intersection function and intersector carries `world_space_data`, the tag under which Metal hands over the instance's transforms.
+    A closest hit's object ray is the world ray through the world-to-object transform.
 
 ## Subgroups, coherence and image atomics
 

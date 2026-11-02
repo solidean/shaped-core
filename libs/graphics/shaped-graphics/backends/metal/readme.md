@@ -323,8 +323,10 @@ The pipeline path maps as follows.
 - **An sg hit group splits across both kinds of table** at the same index.
   `intersection` and `any_hit` run *during* traversal and belong in the intersection function table.
   `closest_hit` runs after it and is called by the kernel, so it is a visible function like a miss shader.
-  A triangle group with neither gets `setOpaqueTriangleIntersectionFunction`, asked for with `Instancing | TriangleData`.
-  The signature must match the table's own MSL declaration, so **a kernel whose intersection table holds any triangle group declares it `intersection_function_table<instancing, triangle_data>`**.
+  A triangle group with neither gets `setOpaqueTriangleIntersectionFunction`, asked for with `Instancing | TriangleData | WorldSpaceData`.
+  The signature must match the table's own MSL declaration.
+  So **a kernel whose intersection table holds any triangle group declares it `intersection_function_table<instancing, triangle_data, world_space_data>`**.
+  `world_space_data` is the tag under which Metal hands a traversal and its result the instance's transforms.
 - **A procedural hit group may not carry an any-hit, and metal refuses the pair.**
   Traversal runs exactly one function per group here, and for a procedural group that is its intersection function — there is nowhere to put an any-hit beside it.
   DXR runs both, so this is a real gap rather than a spelling: fold the any-hit's decision into the intersection function, which is already deciding what the ray hit.

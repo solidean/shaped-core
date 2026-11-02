@@ -5,6 +5,8 @@ tags: [metal]
 refs:
   - file: libs/graphics/shaped-graphics-language/src/shaped-graphics-language/emit/impl/msl.cc
   - file: libs/graphics/shaped-graphics-language/docs/spec/raytracing.md
+closed: 2026-11-02
+resolution: fixed
 ---
 
 # metal: a pipeline hit's instance transforms, and a closest hit's object ray

@@ -892,3 +892,70 @@ ASYNC_INVOCABLE_TEST("sg - an SGL ray-tracing pipeline traces host groups of bot
             }
         }
 }
+
+ASYNC_INVOCABLE_TEST("sg - an SGL ray-tracing pipeline's closest hit and any hit see their instance's transforms",
+                     (sg::context_handle const& ctx))
+{
+    REQUIRE(ctx != nullptr);
+    if (!sg_test::shaders_reach(*ctx))
+        SKIP("no compiler builds this binary's shaders into a format this context accepts");
+    if (!ctx->supports(sg::feature::raytracing_pipeline))
+        SKIP("this device has no ray-tracing pipelines");
+
+    using placed_t = shaders::raytracing_transforms::placed_path_t;
+    auto const pipeline = co_await ctx->cached.acquire_raytracing_pipeline(
+        co_await shaders::raytracing_transforms::placed_path.description(*ctx));
+    REQUIRE(pipeline != nullptr);
+    auto table_desc = placed_t::table_description(pipeline);
+    auto const row = placed_t::add_row(table_desc, placed_t::hit_groups_t::placed);
+    auto const table = ctx->uncached.create_raytracing_shader_table(table_desc);
+    REQUIRE(table != nullptr);
+
+    float const vertices[] = {0, 0, 0, 4, 0, 0, 0, 4, 0, 4, 0, 0, 4, 4, 0, 0, 4, 0};
+    auto const input = ctx->persistent.create_buffer_from_data(vertices, sg::buffer_usage::accel_structure_build_input);
+    auto const seen
+        = ctx->persistent.create_buffer_from_data(cc::vector<tg::vec4f>::create_defaulted(grid * grid * 3),
+                                                  sg::buffer_usage::readwrite_buffer | sg::buffer_usage::copy_src);
+
+    auto cmd = ctx->create_command_list();
+    auto const triangles = sg::blas_triangles{.vertices = input.raw(), .vertex_count = 6, .is_opaque = false};
+    auto const blas = cmd->raytracing.build_blas(cc::span<sg::blas_triangles const>(&triangles, 1),
+                                                 sg::accel_build_flag::fast_trace, placed_t::ray_count);
+    auto const offset = table->offset_of(row);
+    sg::tlas_instance const instances[] = {
+        {.blas = blas, .instance_id = 10, .hit_group_offset = offset},
+        {.blas = blas, .transform = {1, 0, 0, 4, 0, 1, 0, 0, 0, 0, 1, 2}, .instance_id = 20, .hit_group_offset = offset},
+    };
+    auto const tlas = cmd->raytracing.build_tlas(instances);
+
+    auto const layout = ctx->cached.acquire_binding_group_layout<shaders::raytracing_transforms::placements>();
+    auto const group = ctx->transient.create_binding_group(
+        *cmd, layout,
+        shaders::raytracing_transforms::placements{.world = tlas->as_view(), .seen = seen.as_readwrite_buffer()});
+    cmd->raytracing.bind_pipeline(*pipeline);
+    cmd->raytracing.bind_group(0, *group);
+    cmd->raytracing.dispatch_rays(*table, sg::raygen_index(0), grid, grid);
+    auto const seen_back = cmd->download.data_from_buffer(seen);
+    ctx->submit_command_list(cc::move(cmd));
+
+    auto const got = co_await seen_back.data();
+    REQUIRE(got.size() == grid * grid * 3);
+    auto const near = [](tg::vec4f a, tg::vec4f b)
+    { return tg::abs(a[0] - b[0]) < 1e-4f && tg::abs(a[1] - b[1]) < 1e-4f && tg::abs(a[2] - b[2]) < 1e-4f; };
+    for (auto y = 0; y < grid; ++y)
+        for (auto x = 0; x < grid; ++x)
+        {
+            auto const at = (y * grid + x) * 3;
+            auto const where = cc::format("cell ({}, {})", x, y);
+            auto const px = float(x) + 0.25f;
+            auto const py = float(y) + 0.5f;
+            CHECK(got[at][3] == (py < 4 ? 1.0f : 0.0f)).context(where);
+            if (py >= 4)
+                continue;
+            // instance 1 stands at (4, 0, 2), so its origin is there and the hit is 4 back along x in its object space
+            auto const origin = px < 4 ? tg::vec4f(0, 0, 0, 0) : tg::vec4f(4, 0, 2, 0);
+            CHECK(near(got[at], origin)).context(where).dump("got", got[at]);
+            CHECK(near(got[at + 1], tg::vec4f(px - origin[0], py, 0, 0))).context(where).dump("got", got[at + 1]);
+            CHECK(near(got[at + 2], origin)).context(where).dump("got", got[at + 2]);
+        }
+}
