@@ -108,6 +108,8 @@ ASYNC_INVOCABLE_TEST("sv - switching renderers and denoisers never shows black b
     auto& ctx = *ctx_h;
     if (!sv_test::can_run(ctx) || !ctx.supports(sg::feature::ray_query))
         SKIP("no inline ray tracing or no SGL compiler, so the hybrid does not build");
+    // The dlss_rr phase falls back where the SDK was not fetched or the adapter is no RTX, and says so once.
+    nx::allow_warnings("denoiser 'dlss_rr' did not run");
 
     auto resources = sv::gpu_resource_manager::create(ctx);
     // The lamp a mesh of its own, so it is the light the trace samples rather than the whole box's area.
