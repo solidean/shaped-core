@@ -22,6 +22,7 @@ struct sv::material_type_description
     cc::string base_color_attribute = {};
     cc::string roughness_attribute = {};
     cc::string metalness_attribute = {};
+    cc::string specular_weight_attribute = {};
     cc::string transmission_attribute = {};
     cc::string thin_walled_attribute = {};
     cc::string tangent_frame_attribute = {};
@@ -97,6 +98,10 @@ struct sv::material_type
     /// A secondary hit reads them beside the base color; one without a roughness stays matte, and one without a metalness is a dielectric.
     cc::string roughness_attribute;
     cc::string metalness_attribute;
+
+    /// Which declared float attribute weighs this type's dielectric specular layer, or empty where it always has one.
+    /// A secondary hit lights the layer at this weight, so a matte material does not gain a specular coat past the first bounce.
+    cc::string specular_weight_attribute;
 
     /// Which declared float attributes are this type's transmission weight and its thin-wall switch, or empty for none.
     /// An instance with both, the weight above 0 and the switch on, is a pane the hybrid's rays pass through.

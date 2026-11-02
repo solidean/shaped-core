@@ -103,11 +103,12 @@ struct bounce:
     wi: float3
     /// the met instance's base color, `tracer.instance_base_color`; mid-gray on a quadric, which has no triangle context to read it through
     albedo: float3
-    /// its specular roughness, or -1 for none, which leaves it matte; and its metalness
+    /// its specular roughness, or -1 for none, which leaves it matte; its metalness; and its specular layer's weight
     roughness: float
     metalness: float
+    specular_weight: float
     /// whether it refracted on the way, through the primary hit's own glass or any solid glass after it, which spends no bounce
-    /// `secondary_of` then lights what it met as a primary hit is lit, and a caller follows it with `bounce_plain`
+    /// What it met is then followed by a bounce of its own, `is_followed`.
     through_glass: bool
 
 /// One bounce from `p`: a direction drawn from the closure `b`, traced inline to what it meets.
@@ -137,11 +138,11 @@ fun bounce_from(b: openpbr.bsdf, f: openpbr.frame, n: float3, wo_local: float3, 
 
 /// A bounce that has not happened: nothing carried, nothing met.
 fun no_bounce() -> bounce:
-    return bounce(float3(0.0), float3(0.0), float3(0.0), false, float3(0.0), float3(0.0, 1.0, 0.0), float3(0.0, 0.0, 1.0), float3(0.5), -1.0, 0.0, false)
+    return bounce(float3(0.0), float3(0.0), float3(0.0), false, float3(0.0), float3(0.0, 1.0, 0.0), float3(0.0, 0.0, 1.0), float3(0.5), -1.0, 0.0, 1.0, false)
 
 /// `bounce_from` for a closure that refracts nowhere: one direction reflected off it, and one trace, with no glass to pass.
-/// It is the bounce a surface met past glass leaves, whose closure `secondary_of` makes with no transmission, so a second `bounce_from` would only inline code nothing runs.
-/// Nothing where the viewer is below the frame, which `beyond_glass` leaves where no glass was crossed.
+/// It is the second bounce, from the surface the first met, whose closure `secondary_of` makes with no transmission, so a second `bounce_from` would only inline code nothing runs.
+/// Nothing where the viewer is below the frame, which `if_followed` leaves where that surface is followed by none.
 fun bounce_plain(b: openpbr.bsdf, f: openpbr.frame, n: float3, wo_local: float3, p: float3, rng: mut uint){tracer.traced, tracer.bindless} -> bounce:
     let mut result = no_bounce()
     if wo_local.z <= 0.0 => return result
@@ -180,6 +181,7 @@ fun landed(so_far: bounce, h: tracer.hit_record, origin: float3, wi: float3, pdf
         result.albedo = tracer.instance_base_color(inst, ctx)
         result.roughness = tracer.instance_roughness(inst, ctx)
         result.metalness = tracer.instance_metalness(inst, ctx)
+        result.specular_weight = tracer.instance_specular_weight(inst, ctx)
         result.lights += emitter_light(inst, ctx, w1 - w0, w2 - w0, wi, h.t, pdf)
     else:
         result.n = normalize(raster.to_world_vector(inst, h.normal))
@@ -319,34 +321,40 @@ struct secondary:
 const secondary_roughness_floor = 0.4
 
 /// What `direct` lights where `bounced` landed.
-/// Past glass it is lit as a primary hit is: no roughness floor, since `bounce_plain` follows it and `direct` there weighs against it.
+/// Where `followed`, it is lit as a primary hit is: no roughness floor, since `bounce_plain` follows it and `direct` there weighs against it.
 ///
 /// A caller lights the primary hit and this side by side, `direct` for each, rather than one inside the other.
 /// Every call is inlined and the nesting has a limit, which a generated pixel stage around them sits close to.
-fun secondary_of(bounced: bounce) -> secondary:
+fun secondary_of(bounced: bounce, followed: bool) -> secondary:
     let mut surface = openpbr.default_surface()
     surface.base_color = bounced.albedo
     surface.base_metalness = bounced.metalness
     // A type that names no roughness keeps the matte secondary it always had.
-    surface.specular_weight = if bounced.roughness < 0.0 => 0.0 else 1.0
+    surface.specular_weight = if bounced.roughness < 0.0 => 0.0 else bounced.specular_weight
     // Regularized: `direct` lights this side by its light samples alone, with no BSDF sample to weigh them against,
     // so a near-mirror here turns the rare sample inside its lobe into a firefly; a roughness floor trades that for a softer caustic.
-    surface.specular_roughness = if bounced.through_glass => bounced.roughness else max(bounced.roughness, secondary_roughness_floor)
+    surface.specular_roughness = if followed => bounced.roughness else max(bounced.roughness, secondary_roughness_floor)
     let f = openpbr.make_frame(bounced.n)
     let wo_local = if bounced.hit => openpbr.to_local(f, -bounced.wi) else float3(0.0, 0.0, -1.0)
     return { b = openpbr.bsdf_prepare(surface, false, 3u), f = f, wo_local = wo_local }
 
-/// `wo_local` where `bounced` passed through glass, and below the frame elsewhere, which leaves a `bounce_plain` from it nothing to do.
-/// Glass spends no bounce, as it spends none of the tracer's, so a room seen through a window keeps its indirect light.
-fun beyond_glass(bounced: bounce, wo_local: float3) -> float3:
-    let beyond = if bounced.through_glass => wo_local else float3(0.0, 0.0, -1.0)
-    return beyond
+/// Whether the surface `bounced` met is followed by a bounce of its own, `bounce_plain`, and so lit as a primary hit is.
+/// Where the layer asks for two bounces, `render_settings::hybrid_bounces`, which `frame_constants::max_bounces` carries.
+/// And past glass, which spends no bounce as it spends none of the tracer's, so a room seen through a window keeps its indirect light.
+/// With two bounces, glass spends one after all: what lies beyond it gets one bounce where what is seen directly gets two.
+fun is_followed(bounced: bounce){tracer.traced} -> bool:
+    return bounced.through_glass or tracer.traced.frame[0].max_bounces >= 2
 
-/// `wo_local` where `bounced` passed through no glass, and below the frame elsewhere: what `secondary_environment` lights.
-/// Past glass the environment is `direct`'s own sample instead, weighed against the bounce that follows.
-fun short_of_glass(bounced: bounce, wo_local: float3) -> float3:
-    let unglazed = if bounced.through_glass => float3(0.0, 0.0, -1.0) else wo_local
-    return unglazed
+/// `wo_local` where `followed`, and below the frame elsewhere, which leaves a `bounce_plain` from it nothing to do.
+fun if_followed(followed: bool, wo_local: float3) -> float3:
+    let kept = if followed => wo_local else float3(0.0, 0.0, -1.0)
+    return kept
+
+/// `wo_local` where not `followed`, and below the frame elsewhere: what `secondary_environment` lights.
+/// A followed surface takes `direct`'s own environment sample instead, weighed against the bounce after it.
+fun unless_followed(followed: bool, wo_local: float3) -> float3:
+    let kept = if followed => float3(0.0, 0.0, -1.0) else wo_local
+    return kept
 
 /// `raster.vertex_of`, reading the frame and the instance table of `tracer.traced`, and the image's size from `pass`.
 fun vertex_of(vertex: int, instance: uint){tracer.traced, tracer.bindless, pass} -> raster.varyings:
@@ -394,10 +402,11 @@ fun shade(p: raster.varyings, ctx: material.shading_context, surface_in: openpbr
     let mut rng = pixel_rng(uint2(pixel.x as uint, pixel.y as uint), pass.size.x as uint)
     let lit = direct(b, shading, face.n, wo_local, p.world, true, mut rng)
     let bounced = bounce_from(b, shading, face.n, wo_local, p.world, mut rng)
-    let s2 = secondary_of(bounced)
-    let bounce_lit = direct(s2.b, s2.f, bounced.n, s2.wo_local, bounced.at, bounced.through_glass, mut rng) + secondary_environment(s2.b, s2.f, bounced.n, short_of_glass(bounced, s2.wo_local), bounced.at, mut rng)
-    let next = bounce_plain(s2.b, s2.f, bounced.n, beyond_glass(bounced, s2.wo_local), bounced.at, mut rng)
-    let s3 = secondary_of(next)
+    let followed = is_followed(bounced)
+    let s2 = secondary_of(bounced, followed)
+    let bounce_lit = direct(s2.b, s2.f, bounced.n, s2.wo_local, bounced.at, followed, mut rng) + secondary_environment(s2.b, s2.f, bounced.n, unless_followed(followed, s2.wo_local), bounced.at, mut rng)
+    let next = bounce_plain(s2.b, s2.f, bounced.n, if_followed(followed, s2.wo_local), bounced.at, mut rng)
+    let s3 = secondary_of(next, false)
     let next_lit = direct(s3.b, s3.f, next.n, s3.wo_local, next.at, false, mut rng) + secondary_environment(s3.b, s3.f, next.n, s3.wo_local, next.at, mut rng)
     let beyond = next.throughput * (next.escaped + next.lights + next_lit)
     let color = finite(b.emission + lit + bounced.throughput * (bounced.escaped + bounced.lights + bounce_lit + beyond))

@@ -42,6 +42,8 @@ struct phase
     u32 temporal_frames;
     bool moving;
     int frames;
+    /// `render_settings::hybrid_bounces`
+    int bounces = 1;
 };
 
 constexpr u32 forever = u32(-1);
@@ -70,6 +72,10 @@ constexpr phase k_script[] = {
      false, 64},
     {"stopped, handed over", sv::render_mode::hybrid, sv::hybrid_lighting::deferred, sr::denoise_method::automatic, 16,
      false, 64},
+    {"deferred, two bounces", sv::render_mode::hybrid, sv::hybrid_lighting::deferred, sr::denoise_method::automatic, 16,
+     false, 64, 2},
+    {"forward, two bounces", sv::render_mode::hybrid, sv::hybrid_lighting::forward, sr::denoise_method::automatic, 16,
+     false, 400, 2},
 };
 
 [[nodiscard]] frame_stats stats_of(cc::span<u32 const> pixels, cc::span<u32 const> previous)
@@ -163,6 +169,7 @@ ASYNC_INVOCABLE_TEST("sv - switching renderers and denoisers never shows black b
         settings.hybrid_lighting = p.lighting;
         settings.reconstruct.denoiser = p.denoiser;
         settings.temporal_denoise_frames = p.temporal_frames;
+        settings.hybrid_bounces = p.bounces;
 
         auto stats = cc::vector<frame_stats>();
         // Only frames that executed settle: one that declined shows an image held over, or one drawn through stand-ins.

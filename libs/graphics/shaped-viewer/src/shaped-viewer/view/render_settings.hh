@@ -125,6 +125,11 @@ struct sv::render_settings
     /// and it is the faster of the two with many materials (3.9 against 4.5 ms on Bistro; Sponza's few favor forward).
     hybrid_lighting hybrid_lighting = hybrid_lighting::deferred;
 
+    /// How many bounces a `hybrid` layer lights past its primary hit, 1 or 2; `max_bounces` is the tracers' and not read there.
+    /// The second lights the surface the first met as a primary hit is lit, by direct light weighed against a bounce of its own,
+    /// which reaches indirect light a room lit through a door or a window otherwise misses.
+    i32 hybrid_bounces = 1;
+
     /// How many rounds a still frame of the wavefront tracer runs, each moving every live path one segment.
     ///
     /// The wavefront's counterpart to `samples_per_pixel`, which it does not read: this is what a still frame costs, and a path still alive after it carries on next frame.

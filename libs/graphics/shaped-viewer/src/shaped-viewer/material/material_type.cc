@@ -187,6 +187,7 @@ material_type material_type::create(material_type_description description)
     b.add_string(description.base_color_attribute);
     b.add_string(description.roughness_attribute);
     b.add_string(description.metalness_attribute);
+    b.add_string(description.specular_weight_attribute);
     b.add_string(description.transmission_attribute);
     b.add_string(description.thin_walled_attribute);
     b.add_string(description.tangent_frame_attribute);
@@ -211,6 +212,7 @@ material_type material_type::create(material_type_description description)
                               .base_color_attribute = cc::move(description.base_color_attribute),
                               .roughness_attribute = cc::move(description.roughness_attribute),
                               .metalness_attribute = cc::move(description.metalness_attribute),
+                              .specular_weight_attribute = cc::move(description.specular_weight_attribute),
                               .transmission_attribute = cc::move(description.transmission_attribute),
                               .thin_walled_attribute = cc::move(description.thin_walled_attribute),
                               .tangent_frame_attribute = cc::move(description.tangent_frame_attribute),
@@ -281,8 +283,8 @@ material_type material_type::create(material_type_description description)
     CC_ASSERT(type.base_color_attribute.empty()
                   || (base_color != nullptr && base_color->format == attribute_format::of_vector(scalar_type::f32, 3)),
               "a material type's base_color_attribute must name a float3 attribute its signature declares");
-    for (auto const* const name : {&type.roughness_attribute, &type.metalness_attribute, &type.transmission_attribute,
-                                   &type.thin_walled_attribute})
+    for (auto const* const name : {&type.roughness_attribute, &type.metalness_attribute, &type.specular_weight_attribute,
+                                   &type.transmission_attribute, &type.thin_walled_attribute})
     {
         auto const* const attribute = name->empty() ? nullptr : type.find(*name);
         CC_ASSERT(name->empty() || (attribute != nullptr && attribute->format == scalar_float),

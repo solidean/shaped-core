@@ -886,6 +886,7 @@ generated_material_shader generate_material_shader(resolved_material const& r, m
     auto const secondary = material_secondary{.base_color = factor_of(r.type->base_color_attribute),
                                               .roughness = factor_of(r.type->roughness_attribute),
                                               .metalness = factor_of(r.type->metalness_attribute),
+                                              .specular_weight = factor_of(r.type->specular_weight_attribute),
                                               .transmission = factor_of(r.type->transmission_attribute),
                                               .thin_walled = factor_of(r.type->thin_walled_attribute),
                                               .tangent_frame = factor_of(r.type->tangent_frame_attribute)};

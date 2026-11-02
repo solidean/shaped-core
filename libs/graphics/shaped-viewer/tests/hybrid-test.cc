@@ -64,7 +64,8 @@ cc::shared_async<hybrid_readback> draw_hybrid(sg::context& ctx,
                                               tg::vec2i size,
                                               sv::hybrid_lighting lighting,
                                               int frames,
-                                              sv::background const& background = {})
+                                              sv::background const& background = {},
+                                              int bounces = 1)
 {
     auto const* const mesh_rec = resources.meshes.get_ptr(item.mesh);
     REQUIRE(mesh_rec != nullptr);
@@ -113,6 +114,8 @@ cc::shared_async<hybrid_readback> draw_hybrid(sg::context& ctx,
         fc.near_plane = f32(cam.projection.near_plane);
         fc.pixel_spread = 2.0f * record.up_scaled.length() / f32(size[1]);
         fc.rng_seed = u32(f) + 1u;
+        // what a hybrid frame reads as its bounce count, `render_settings::hybrid_bounces`
+        fc.max_bounces = bounces;
 
         auto const background_buffer = ctx.transient.create_buffer_from_pod(*cmd, sv::background_gpu::from(background),
                                                                             sg::buffer_usage::readonly_buffer);
@@ -233,18 +236,26 @@ ASYNC_INVOCABLE_TEST("sv::hybrid_routine - forward and deferred light the Cornel
 
     constexpr auto size = tg::vec2i(64, 64);
     constexpr int block = 8;
-    auto const traced = co_await sv_test::trace_direct(ctx, resources, item, cam, lights, size, 16, 2);
+    // The tracer's path length counts the primary hit, so a hybrid of n bounces is held to the tracer's n + 1.
+    // The box is matte throughout, so the secondary material the bounces light is the material itself, and only noise is left between them.
+    auto const traced_one = co_await sv_test::trace_direct(ctx, resources, item, cam, lights, size, 16, 2);
+    auto const traced_two = co_await sv_test::trace_direct(ctx, resources, item, cam, lights, size, 16, 3);
 
     struct contender
     {
         cc::string_view name;
         sv::hybrid_lighting lighting = sv::hybrid_lighting::forward;
+        int bounces = 1;
     };
-    contender const contenders[] = {{.name = "forward", .lighting = sv::hybrid_lighting::forward},
-                                    {.name = "deferred", .lighting = sv::hybrid_lighting::deferred}};
+    contender const contenders[]
+        = {{.name = "forward", .lighting = sv::hybrid_lighting::forward},
+           {.name = "deferred", .lighting = sv::hybrid_lighting::deferred},
+           {.name = "forward, two bounces", .lighting = sv::hybrid_lighting::forward, .bounces = 2},
+           {.name = "deferred, two bounces", .lighting = sv::hybrid_lighting::deferred, .bounces = 2}};
     for (auto const& c : contenders)
     {
-        auto const hybrid = co_await draw_hybrid(ctx, resources, item, cam, lights, size, c.lighting, 128);
+        auto const& traced = c.bounces == 2 ? traced_two : traced_one;
+        auto const hybrid = co_await draw_hybrid(ctx, resources, item, cam, lights, size, c.lighting, 128, {}, c.bounces);
         REQUIRE(hybrid.color.size() == traced.size());
 
         // Every block, every channel, over the pixels inside one face, since an edge is antialiased in the tracer's image and not here.
@@ -266,8 +277,8 @@ ASYNC_INVOCABLE_TEST("sv::hybrid_routine - forward and deferred light the Cornel
                                                         bx, by, ch, h.value(), t.value()));
                 }
         CHECK(compared > 3 * 32);
-        CC_LOG_INFO("{} hybrid against the tracer's two bounces on the Cornell box: worst block {} over {}", c.name,
-                    worst, compared);
+        CC_LOG_INFO("{} hybrid against the tracer at one bounce more on the Cornell box: worst block {} over {}",
+                    c.name, worst, compared);
 
         // The back wall straight ahead: white, facing the camera, 4.4 in front of it; the deferred kernel writes the albedo.
         auto const center = isize(size[1] / 2) * isize(size[0]) + isize(size[0] / 2);
@@ -421,6 +432,78 @@ ASYNC_INVOCABLE_TEST("sv::hybrid_routine - a glass pane thinner than a millimete
         CHECK(center > 0.85f * sky).context(name).dump("center", center);
         CHECK(center < 1.02f * sky).context(name).dump("center", center);
     }
+    co_await cc::async_settled(sv::background_work(ctx));
+}
+
+// A mirror floor near y = 0, seen from a camera tens of units from the origin, reflects the sky the same forward and deferred.
+// The deferred kernel rebuilds its point from the camera, rounded to the camera's distance from the origin rather than to the point's coordinates.
+// Offset only as an interpolated point is, rows of it started under the floor, and their reflections hit the floor in dark stripes.
+ASYNC_INVOCABLE_TEST("sv::hybrid_routine - a mirror floor near the origin, seen from far off it, reflects the sky the "
+                     "same forward and deferred",
+                     (sg::context_handle const& ctx_h))
+{
+#if defined(CC_ARCH_ARM64) && defined(_WIN32)
+    SKIP("known broken on Windows on ARM — the inline readback path fastfails; "
+         "issue: bug-sv-woa-inline-readback-fastfail");
+#endif
+    auto& ctx = *ctx_h;
+    if (!sv_test::can_run(ctx) || !ctx.supports(sg::feature::ray_query))
+        SKIP("no inline ray tracing or no SGL compiler, so the hybrid does not build");
+
+    using binding = sv::material_attribute_binding;
+    auto& lib = sv_test::shared_material_library();
+    auto const openpbr = lib.acquire_type(sv::builtin_material::openpbr).value();
+    auto bindings = cc::vector<binding>();
+    bindings.push_back(binding::of("base_color", tg::vec3f(0, 0, 0)));
+    bindings.push_back(binding::of("specular_ior", 1.5f));
+    bindings.push_back(binding::of("specular_roughness", 0.0f));
+
+    auto const y = 0.11f;
+    tg::pos3f const corners[] = {tg::pos3f(0, y, -10), tg::pos3f(0, y, 40), tg::pos3f(60, y, 40), tg::pos3f(60, y, -10)};
+    auto positions = cc::vector<tg::pos3f>();
+    for (auto const i : {0, 1, 2, 0, 2, 3})
+        positions.push_back(corners[i]);
+
+    auto resources = sv::gpu_resource_manager::create(ctx);
+    auto const item = resources.acquire_scene_item(
+        sv::mesh{.name = "hybrid mirror floor",
+                 .geometry = sv::triangle_geometry::create_from_positions(positions),
+                 .material = lib.acquire(sv::material::create("hybrid mirror floor", openpbr, cc::move(bindings)))});
+    resources.wait_for_pending_uploads();
+
+    auto cam = sv::camera::looking_at(tg::pos3d(30, 15, -30), tg::pos3d(30, 0.11, 10));
+    cam.projection.vertical_fov = tg::angle_d::make_from_degree(60.0);
+    auto const lights = sv_test::light_table_of(
+        {.center = tg::vec3f(0, 50, 0), .half_x = 0.1f, .half_z = 0.1f, .emission = tg::vec3f(0, 0, 0)});
+    auto const sky = sv::background::uniform(tg::vec3f(0.5f, 0.5f, 0.5f));
+
+    constexpr auto size = tg::vec2i(96, 96);
+    auto const forward
+        = co_await draw_hybrid(ctx, resources, item, cam, lights, size, sv::hybrid_lighting::forward, 4, sky);
+    auto const deferred
+        = co_await draw_hybrid(ctx, resources, item, cam, lights, size, sv::hybrid_lighting::deferred, 4, sky);
+
+    auto floor = 0;
+    auto off = 0;
+    auto worst = 0.0f;
+    for (auto i = isize(0); i < forward.color.size(); ++i)
+    {
+        auto const n = forward.normal[i];
+        if (f32(n.r) == 0.0f && f32(n.g) == 0.0f && f32(n.b) == 0.0f)
+            continue;
+        ++floor;
+        auto const lum = [](tg::vec4f c) { return 0.2126f * c[0] + 0.7152f * c[1] + 0.0722f * c[2]; };
+        auto const f = lum(forward.color[i]);
+        auto const d = lum(deferred.color[i]);
+        auto const miss = tg::abs(d - f) / cc::max(f, 1e-3f);
+        worst = cc::max(worst, miss);
+        if (miss > 0.05f)
+            ++off;
+    }
+    CC_LOG_INFO("a mirror floor near the origin: {} of {} pixels off by more than 5% deferred, the worst by {}", off,
+                floor, worst);
+    REQUIRE(floor > size[0] * size[1] / 4);
+    CHECK(off == 0).dump("floor pixels", floor).dump("worst relative miss", worst);
     co_await cc::async_settled(sv::background_work(ctx));
 }
 

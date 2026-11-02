@@ -57,11 +57,16 @@ binding thin_io:
     // Where the raster sampled the pixel, which is off its center on a frame drawn for an upscaler.
     let pixel = float2((id.x as float) + 0.5, (id.y as float) + 0.5) + hybrid.jitter_of(f)
     let ray = scene.camera_ray_offset(cam, pixel, hybrid.pass.size)
-    let p = cam.position + ray * (thin_io.depth.load(px) / dot(ray, normalize(cam.forward)))
+    let t = thin_io.depth.load(px) / dot(ray, normalize(cam.forward))
 
     let normals = thin_io.normals.load(px)
     let shading_n = raster.oct_decode(float2(normals.x, normals.y))
     let n = raster.oct_decode(float2(normals.z, normals.w))
+    // The point is rounded as `cam.position + ray * t` is, to a scale of the camera's distance from the origin plus the ray's length.
+    // `pt.offset_ray` sizes its offset from the point's own coordinates, as an interpolated point is rounded, which is far less on a floor near y = 0.
+    // So the point is lifted off the surface by that rounding first, or a row of it starts under the floor and its bounce rays hit the floor.
+    let reach = max(abs(cam.position.x), max(abs(cam.position.y), abs(cam.position.z))) + length(ray) * t
+    let p = cam.position + ray * t + n * (reach * (1.0 / 1048576.0))
     let surface = raster.thin_surface(thin_io.base.load(px), thin_io.specular.load(px), thin_io.extra.load(px))
     let shading = openpbr.make_frame(shading_n)
     let v = normalize(cam.position - p)
@@ -72,11 +77,12 @@ binding thin_io:
     let mut rng = hybrid.pixel_rng(uint2(id.x as uint, id.y as uint), size.x as uint)
     let lit = hybrid.direct(b, shading, n, wo_local, p, true, mut rng)
     let bounced = hybrid.bounce_from(b, shading, n, wo_local, p, mut rng)
-    let s2 = hybrid.secondary_of(bounced)
-    let bounce_lit = hybrid.direct(s2.b, s2.f, bounced.n, s2.wo_local, bounced.at, bounced.through_glass, mut rng)
-        + hybrid.secondary_environment(s2.b, s2.f, bounced.n, hybrid.short_of_glass(bounced, s2.wo_local), bounced.at, mut rng)
-    let next = hybrid.bounce_plain(s2.b, s2.f, bounced.n, hybrid.beyond_glass(bounced, s2.wo_local), bounced.at, mut rng)
-    let s3 = hybrid.secondary_of(next)
+    let followed = hybrid.is_followed(bounced)
+    let s2 = hybrid.secondary_of(bounced, followed)
+    let bounce_lit = hybrid.direct(s2.b, s2.f, bounced.n, s2.wo_local, bounced.at, followed, mut rng)
+        + hybrid.secondary_environment(s2.b, s2.f, bounced.n, hybrid.unless_followed(followed, s2.wo_local), bounced.at, mut rng)
+    let next = hybrid.bounce_plain(s2.b, s2.f, bounced.n, hybrid.if_followed(followed, s2.wo_local), bounced.at, mut rng)
+    let s3 = hybrid.secondary_of(next, false)
     let next_lit = hybrid.direct(s3.b, s3.f, next.n, s3.wo_local, next.at, false, mut rng)
         + hybrid.secondary_environment(s3.b, s3.f, next.n, s3.wo_local, next.at, mut rng)
     let beyond = next.throughput * (next.escaped + next.lights + next_lit)

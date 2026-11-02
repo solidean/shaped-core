@@ -213,6 +213,7 @@ surface.emission_color = color
                                   .base_color_attribute = "base_color",
                                   .roughness_attribute = "specular_roughness",
                                   .metalness_attribute = "base_metalness",
+                                  .specular_weight_attribute = "specular_weight",
                                   .transmission_attribute = "transmission_weight",
                                   .thin_walled_attribute = "thin_walled",
                                   .tangent_frame_attribute = "tangent_frame"});

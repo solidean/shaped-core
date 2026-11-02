@@ -519,7 +519,9 @@ shaders::tracer::frame_constants make_frame_constants(view_data const& v,
     lights.describe_in(fc);
 
     fc.samples_per_pixel = l.settings.samples_per_pixel;
-    fc.max_bounces = l.settings.max_bounces;
+    // A hybrid layer lights its own count of bounces, which its shaders read from the same field.
+    fc.max_bounces
+        = l.settings.mode == render_mode::hybrid ? cc::clamp(l.settings.hybrid_bounces, 1, 2) : l.settings.max_bounces;
 
     // `seed` and `accum_frame` are stamped by execute from the view's persistent record, once it knows whether this frame restarts.
     return fc;
@@ -1725,7 +1727,9 @@ sg::routine_outcome view_renderer::trace(sg::command_list& cmd,
     auto previous_jitter = slot->last_jitter;
     if (!scaled && mode == render_mode::hybrid)
     {
-        jitter = still_jitter(slot->accum_frame);
+        // Counted across restarts: a move restarts the mean every frame, and the temporal member reconstructs
+        // sub-pixel detail only from an offset that changes from frame to frame.
+        jitter = still_jitter(slot->restarts + slot->accum_frame);
         fc.fixed_jitter = 1;
         fc.jitter = jitter + tg::vec2f(0.5f, 0.5f);
         slot->last_jitter = jitter;
