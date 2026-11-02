@@ -271,7 +271,7 @@ const ray_mask_hybrid_shadow = 2
 /// The nearest hit the segment from `origin` along `direction` meets, traced inline, the cutouts it crosses drawing from `seed`.
 /// It meets only the instances whose mask shares a bit with `mask`.
 fun trace_hit(origin: float3, direction: float3, seed: uint, mask: int){traced, bindless} -> hit_record:
-    let r = ray(origin = pos3(origin.x, origin.y, origin.z), direction = vec3(direction.x, direction.y, direction.z), t_min = 1e-3, t_max = 1e4)
+    let r = ray(origin = pos3(origin.x, origin.y, origin.z), direction = vec3(direction.x, direction.y, direction.z), t_min = 0.0, t_max = 1e4)
     let h = traced.world.trace(r, any_hit = c => cutout(c, seed, candidate_opacity(c)), intersection = intersect_quadric, procedural_any_hit = c => hit_decision.accept, mask = mask)
     if h.kind == hit_kind.triangle:
         return hit_record(h.instance_id as uint, h.primitive_index as uint, hit_triangle, h.t, float2(h.barycentrics.y, h.barycentrics.z), float3(0.0))
@@ -633,8 +633,8 @@ fun shade_stored(slot: uint, inst: scene.instance, n_obj: float3, surface: openp
             st.flags = (st.flags & ~path_free_mask) | ((free + 1u) << path_free_shift)
 
         // The offset follows the direction rather than the normal: a refracted continuation leaves on the far side.
-        let side = if dot(p.direction, p.normal) < 0.0 => -1e-3 else 1e-3
-        traced.path_rays[s] = path_ray(ray_origin + ray_dir * hit.t + p.normal * side, p.direction)
+        let leaving = if dot(p.direction, p.normal) < 0.0 => -p.normal else p.normal
+        traced.path_rays[s] = path_ray(pt.offset_ray(ray_origin + ray_dir * hit.t, leaving), p.direction)
         traced.path_media[s] = path_medium(p.medium_sigma_t, p.medium_albedo, p.medium_g, p.channel)
 
         let spent = spent_bounces(st)
@@ -663,7 +663,7 @@ fun shade_stored(slot: uint, inst: scene.instance, n_obj: float3, surface: openp
 /// Whether anything blocks the segment from `origin` along `direction` for `distance`, traced inline here and now.
 /// The inline counterpart of `occluded`, which traces through the pipeline's shadow miss; `seed` is what the cutouts it crosses draw from.
 fun blocked(origin: float3, direction: float3, distance: float, seed: uint, mask: int){traced, bindless} -> bool:
-    let r = ray(origin = pos3(origin.x, origin.y, origin.z), direction = vec3(direction.x, direction.y, direction.z), t_min = 1e-3, t_max = distance)
+    let r = ray(origin = pos3(origin.x, origin.y, origin.z), direction = vec3(direction.x, direction.y, direction.z), t_min = 0.0, t_max = distance)
     let h = traced.world.trace(r, any_hit = c => cutout(c, seed, candidate_opacity(c)), intersection = intersect_quadric, procedural_any_hit = c => hit_decision.accept, flags = ray_flags.accept_first_hit_and_end_search, mask = mask)
     return h.kind != hit_kind.none
 

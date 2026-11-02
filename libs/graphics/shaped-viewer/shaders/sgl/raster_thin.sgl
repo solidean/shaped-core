@@ -119,6 +119,19 @@ fun thin_surface(base: float4, specular: float4, extra: float4) -> openpbr.surfa
     s.geometry_thin_walled = if thin_walled => 1.0 else 0.0
     return s
 
+/// The view depth at which `cam`'s ray through `pixel` meets the plane through `to_point` (from the camera) with normal `n`.
+///
+/// What the deferred lighting rebuilds its point from, along that same ray, so the point lands on the surface rather than beside it.
+/// The interpolated point itself sits off that ray by however far the raster snapped the triangle's corners, a fraction of a pixel,
+/// which on a surface seen at a grazing angle puts the rebuilt point measurably off the surface, and its shadow rays inside it.
+/// The interpolated point's own depth where the ray runs along the plane.
+fun plane_depth(cam: scene.camera, pixel: float2, size: float2, to_point: float3, n: float3) -> float:
+    let forward = normalize(cam.forward)
+    let ray = scene.camera_ray_offset(cam, pixel, size)
+    let facing = dot(ray, n)
+    if abs(facing) < 1e-6 => return dot(to_point, forward)
+    return dot(to_point, n) / facing * dot(ray, forward)
+
 /// The thin G-buffer of the pixel `p` covers, whose material evaluated to `surface_in` through `ctx`, as `shade` describes the surface.
 fun thin(p: varyings, ctx: material.shading_context, surface_in: openpbr.surface, supplied_tangent_frame: bool){drawn, tracer.bindless, slug.tables} -> thin_targets:
     let f = drawn.frame[0]
@@ -127,7 +140,7 @@ fun thin(p: varyings, ctx: material.shading_context, surface_in: openpbr.surface
     let face = face_of(inst, ctx, p.world, cam.position, surface_in, supplied_tangent_frame)
     let v = normalize(cam.position - p.world)
     let to_point = p.world - cam.position
-    let view_depth = dot(to_point, normalize(cam.forward))
+    let view_depth = plane_depth(cam, float2(p.position.x, p.position.y) + f.jitter, f.size, to_point, face.n)
 
     let mut surface = surface_in
     apply_decals(mut surface, p.world, face.n, f.pixel_spread * length(to_point))

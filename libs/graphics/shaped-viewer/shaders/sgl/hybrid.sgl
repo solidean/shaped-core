@@ -75,7 +75,7 @@ fun secondary_environment(b: openpbr.bsdf, f: openpbr.frame, n: float3, wo_local
     let pdf = 0.5 * scene.environment_pdf(env, wi) + 0.5 * openpbr.bsdf_pdf(b, wo_local, wi_local)
     if pdf <= 0.0 => return float3(0.0)
     let scale = scene.environment_radiance(env, wi) * (wi_local.z / pdf)
-    let e = tracer.light_sample(f_diffuse * scale, f_specular * scale, p + n * 1e-3, wi, 1e4, 1u)
+    let e = tracer.light_sample(f_diffuse * scale, f_specular * scale, pt.offset_ray(p, n), wi, 1e4, 1u)
     if not tracer.reaches(e, seed, tracer.ray_mask_hybrid_shadow) => return float3(0.0)
     return e.diffuse + e.specular
 
@@ -126,7 +126,7 @@ fun bounce_from(b: openpbr.bsdf, f: openpbr.frame, n: float3, wo_local: float3, 
     // the shading normal bent the direction to the other side of the face than it was drawn for
     if (dot(sampled, n) < 0.0) != refracts => return result
 
-    let origin = if refracts => p - n * 1e-3 else p + n * 1e-3
+    let origin = pt.offset_ray(p, if refracts => -n else n)
     let weight_pdf = if refracts => 1e30 else s.pdf
     let solid = refracts and s.medium == openpbr.medium_transmission
     let way = passage_of(origin, sampled, if solid => b.trans_eta else 0.0, b.medium_sigma_t, rng)
@@ -151,7 +151,7 @@ fun bounce_plain(b: openpbr.bsdf, f: openpbr.frame, n: float3, wo_local: float3,
     let wi = openpbr.to_world(f, s.direction)
     if dot(wi, n) <= 0.0 => return result
     result.throughput = s.value * (s.direction.z / s.pdf)
-    let origin = p + n * 1e-3
+    let origin = pt.offset_ray(p, n)
     let h = tracer.trace_hit(origin, wi, tracer.cutout_seed(rng, tracer.cutout_ray_surface), tracer.ray_mask_hybrid)
     return landed(result, h, origin, wi, s.pdf)
 
@@ -249,7 +249,7 @@ fun passage_step(p: passage){tracer.traced, tracer.bindless} -> passage:
     let transmitted = 1.0 - openpbr.fresnel_dielectric(dot(-q.wi, facing), 1.0 / ratio)
     let leaving = if inside => exp(-q.sigma_t * q.h.t) * q.restore else float3(1.0)
     q.weight *= leaving * transmitted
-    q.at = q.at + q.wi * q.h.t - facing * 1e-3
+    q.at = pt.offset_ray(q.at + q.wi * q.h.t, -facing)
     q.wi = normalize(bent)
     q.crossings += if inside => 1u else 0u
     q.eta = if inside => 0.0 else glass_eta

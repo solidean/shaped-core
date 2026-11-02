@@ -99,7 +99,7 @@ rays path_rays:
         while b - free < f.max_bounces:
             let last_bounce = if b - free + 1 >= f.max_bounces => 1u else 0u
             let mut p = tracer.surface_payload_for(rng, medium_sigma_t, medium_albedo, medium_g, channel, last_bounce)
-            let r = ray(origin = pos3(origin.x, origin.y, origin.z), direction = vec3(dir.x, dir.y, dir.z), t_min = 1e-3, t_max = 1e4)
+            let r = ray(origin = pos3(origin.x, origin.y, origin.z), direction = vec3(dir.x, dir.y, dir.z), t_min = 0.0, t_max = 1e4)
             trace(tracer.traced.world, r, path_rays.surface, mut p)
 
             // The random state comes back advanced by whatever the hit drew from it.
@@ -315,8 +315,7 @@ rays path_rays:
             prev_nee_reachable = reachable
 
             // The offset follows the direction rather than the normal: a refracted continuation leaves on the far side.
-            let side = if dot(next_dir, n) < 0.0 => -1e-3 else 1e-3
-            origin = origin + dir * hit_t + n * side
+            origin = pt.offset_ray(origin + dir * hit_t, if dot(next_dir, n) < 0.0 => -n else n)
             dir = next_dir
             medium_sigma_t = next_sigma_t
             medium_albedo = next_albedo

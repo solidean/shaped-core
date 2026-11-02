@@ -355,6 +355,75 @@ ASYNC_INVOCABLE_TEST("sv::hybrid_routine - a glass sphere under a uniform sky sh
     co_await cc::async_settled(sv::background_work(ctx));
 }
 
+// A closed pane half a millimeter thick, facing the camera under a uniform sky, shows the sky through it, losing only its two faces' reflections.
+// Thinner than any fixed distance a continuing ray could be offset by: a crossing that stepped over the far face found no way out, and the pane went black.
+ASYNC_INVOCABLE_TEST("sv::hybrid_routine - a glass pane thinner than a millimeter shows the sky through it",
+                     (sg::context_handle const& ctx_h))
+{
+#if defined(CC_ARCH_ARM64) && defined(_WIN32)
+    SKIP("known broken on Windows on ARM — the inline readback path fastfails; "
+         "issue: bug-sv-woa-inline-readback-fastfail");
+#endif
+    auto& ctx = *ctx_h;
+    if (!sv_test::can_run(ctx) || !ctx.supports(sg::feature::ray_query))
+        SKIP("no inline ray tracing or no SGL compiler, so the hybrid does not build");
+
+    using binding = sv::material_attribute_binding;
+    auto& lib = sv_test::shared_material_library();
+    auto const openpbr = lib.acquire_type(sv::builtin_material::openpbr).value();
+    auto bindings = cc::vector<binding>();
+    bindings.push_back(binding::of("specular_ior", 1.5f));
+    bindings.push_back(binding::of("specular_roughness", 0.0f));
+    bindings.push_back(binding::of("transmission_weight", 1.0f));
+
+    // Closed and wound outward, so it is a solid the bounce crosses rather than a thin wall.
+    auto const hx = 0.6f;
+    auto const hz = 0.00025f;
+    tg::pos3f const corners[]
+        = {tg::pos3f(-hx, -hx, -hz), tg::pos3f(+hx, -hx, -hz), tg::pos3f(+hx, +hx, -hz), tg::pos3f(-hx, +hx, -hz),
+           tg::pos3f(-hx, -hx, +hz), tg::pos3f(+hx, -hx, +hz), tg::pos3f(+hx, +hx, +hz), tg::pos3f(-hx, +hx, +hz)};
+    int const faces[]
+        = {0, 2, 1, 0, 3, 2, 4, 5, 6, 4, 6, 7, 0, 1, 5, 0, 5, 4, 3, 7, 6, 3, 6, 2, 0, 4, 7, 0, 7, 3, 1, 2, 6, 1, 6, 5};
+    auto positions = cc::vector<tg::pos3f>();
+    for (auto const i : faces)
+        positions.push_back(corners[i]);
+
+    auto resources = sv::gpu_resource_manager::create(ctx);
+    auto const item = resources.acquire_scene_item(
+        sv::mesh{.name = "hybrid thin pane",
+                 .geometry = sv::triangle_geometry::create_from_positions(positions),
+                 .material = lib.acquire(sv::material::create("hybrid thin pane", openpbr, cc::move(bindings)))});
+    resources.wait_for_pending_uploads();
+
+    auto cam = sv::camera{.position = tg::pos3d(0, 0, -1.9)};
+    cam.projection.vertical_fov = tg::angle_d::make_from_degree(60.0);
+    auto const lights = sv_test::light_table_of(
+        {.center = tg::vec3f(0, 50, 0), .half_x = 0.1f, .half_z = 0.1f, .emission = tg::vec3f(0, 0, 0)});
+    auto const sky = 0.5f;
+
+    constexpr auto size = tg::vec2i(48, 48);
+    for (auto const lighting : {sv::hybrid_lighting::forward, sv::hybrid_lighting::deferred})
+    {
+        auto const name = lighting == sv::hybrid_lighting::forward ? "forward" : "deferred";
+        auto const hybrid = co_await draw_hybrid(ctx, resources, item, cam, lights, size, lighting, 16,
+                                                 sv::background::uniform(tg::vec3f(sky, sky, sky)));
+        auto center = 0.0f;
+        auto count = 0;
+        for (auto y = size[1] / 2 - 6; y < size[1] / 2 + 6; ++y)
+            for (auto x = size[0] / 2 - 6; x < size[0] / 2 + 6; ++x)
+            {
+                auto const c = hybrid.color[isize(y) * isize(size[0]) + isize(x)];
+                center += 0.2126f * c[0] + 0.7152f * c[1] + 0.0722f * c[2];
+                ++count;
+            }
+        center /= f32(count);
+        CC_LOG_INFO("{} hybrid thin pane under a sky of {}: {} at its center", name, sky, center);
+        CHECK(center > 0.85f * sky).context(name).dump("center", center);
+        CHECK(center < 1.02f * sky).context(name).dump("center", center);
+    }
+    co_await cc::async_settled(sv::background_work(ctx));
+}
+
 // The hybrid as a view's layer: each lighting accumulates its frames until a capture's sample target, as a traced layer does.
 // The last case denoises too, through the guides the hybrid's G-buffer writes.
 ASYNC_INVOCABLE_TEST("sv - a hybrid layer accumulates to a capture's target, forward and deferred",

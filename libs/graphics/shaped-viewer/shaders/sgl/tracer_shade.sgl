@@ -20,7 +20,7 @@ use slug
 fun occluded(origin: float3, dir: float3, dist: float, seed: uint){traced} -> bool:
     // assume occluded; only the shadow miss flips this
     let mut sp = shadow_payload(0.0, seed)
-    let r = ray(origin = pos3(origin.x, origin.y, origin.z), direction = vec3(dir.x, dir.y, dir.z), t_min = 1e-3, t_max = dist)
+    let r = ray(origin = pos3(origin.x, origin.y, origin.z), direction = vec3(dir.x, dir.y, dir.z), t_min = 0.0, t_max = dist)
     trace(traced.world, r, path_rays.occlusion, mut sp, flags = ray_flags.accept_first_hit_and_end_search | ray_flags.skip_closest_hit)
     return sp.visible < 0.5
 
@@ -161,7 +161,7 @@ fun sample_light(b: openpbr.bsdf, f: openpbr.frame, wo_local: float3, p: float3,
 
     let scale = incoming * (wi_local.z / pdf) * w
     let tested = if scene.light_casts_shadows(l) => 1u else 0u
-    return light_sample(f_diffuse * scale, f_specular * scale, p + n_geom * 1e-3, wi, shadow_dist, tested)
+    return light_sample(f_diffuse * scale, f_specular * scale, pt.offset_ray(p, n_geom), wi, shadow_dist, tested)
 
 /// Direct light from the SH environment, with the BSDF folded in and weighted against the BSDF sampler.
 ///
@@ -415,7 +415,7 @@ fun sample_environment(b: openpbr.bsdf, f: openpbr.frame, wo_local: float3, p: f
     let w = if last_bounce => 1.0 else pt.mis_weight(drawn.pdf, openpbr.bsdf_pdf(b, wo_local, wi_local))
 
     let scale = scene.environment_radiance(env, wi) * (wi_local.z / drawn.pdf) * w
-    return light_sample(f_diffuse * scale, f_specular * scale, p + n_geom * 1e-3, wi, 1e4, 1u)
+    return light_sample(f_diffuse * scale, f_specular * scale, pt.offset_ray(p, n_geom), wi, 1e4, 1u)
 
 // ---- Decals ---------------------------------------------------------------------------------------------------------
 
