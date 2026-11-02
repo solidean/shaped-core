@@ -458,7 +458,7 @@ So the set is held still across each commit, as it already was across each chang
 
 The metal binary passes under GPU validation.
 In `shaped-graphics-test`, the two sampler tests in `tests/pipeline/sampler-test.cc` read zeroes under it and pass without it.
-That is open as [bug-metal-sampler-tests-read-zeroes-under-validation](../../docs/issues/bug-metal-sampler-tests-read-zeroes-under-validation.md).
+That is open as [bug-metal-sampler-tests-read-zeroes-under-validation](../../docs/issues/.closed/2026/11/bug-metal-sampler-tests-read-zeroes-under-validation.md).
 
 ### Commit feedback is the one programmatic channel
 
