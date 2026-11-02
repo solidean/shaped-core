@@ -97,8 +97,9 @@ Recorded so they are not re-derived:
 
 * **Generating the LSP types** from the specification's `metaModel.json`, once the hand-written subset in `protocol/types.hh` becomes a chore.
 * **Module directories** come from the `sgl.moduleDirs` setting, which the extension resolves against the workspace folder and hands over at initialization.
-  An analysis reads and parses every file of them anew each time; snapshots still hold open documents only, so an unsaved edit to a module is not seen by a file that uses it.
-  Saving a module does not re-analyze the documents that use it either; their next edit does.
+  Changing the setting restarts the server, which the extension does, so the directories are read anew.
+  An analysis reads and parses every file of them anew each time, and a module file open in the editor is read as its open text, unsaved edits and all.
+  An edit to an open module file, and its opening and closing, checks every other open document again.
   A relative directory is resolved against the first workspace folder only, which leaves a multi-root workspace and per-folder settings open.
   An error in a module a document reaches is shown once, on the document's `use` of that module, with the module's own location beside it.
 * **Reusing a checked prelude and checked modules** across analyses, which waits for the compilation model's interfaces.

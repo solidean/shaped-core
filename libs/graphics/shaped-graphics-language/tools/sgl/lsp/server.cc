@@ -160,8 +160,17 @@ void sgl_lsp::language_server::impl_stop_test_runs()
         stop->is_raised.store(true);
 }
 
-void sgl_lsp::language_server::impl_on_document(cc::string_view uri)
+void sgl_lsp::language_server::impl_on_document(cc::string_view uri, bool refreshes)
 {
+    // an edit to a module file, its opening or its closing, changes what every document using it is checked against
+    if (refreshes && is_module_document(uri))
+    {
+        _analyses.refresh_modules();
+        for (auto const& other : _server.workspace().snapshot().uris())
+            if (other != uri)
+                impl_on_document(other, false);
+    }
+
     // whatever still runs for the version before is worthless now
     if (auto* const previous = _test_runs.get_ptr(uri))
         (*previous)->is_raised.store(true);

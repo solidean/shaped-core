@@ -104,7 +104,18 @@ cc::string sgl_lsp::analysis::uri_of(i32 f) const
                                                  : document->uri;
 }
 
-cc::shared_ptr<sgl_lsp::analysis> sgl_lsp::analyze(cc::shared_ptr<lsp::document> document)
+bool sgl_lsp::is_module_document(cc::string_view uri)
+{
+    auto const read = sgl_tool::read_module_dirs(module_dirs());
+    if (!read.has_value())
+        return false;
+    for (auto const& name : read.value().names)
+        if (sgl::is_same_path(name, uri))
+            return true;
+    return false;
+}
+
+cc::shared_ptr<sgl_lsp::analysis> sgl_lsp::analyze(cc::shared_ptr<lsp::document> document, cc::span<open_text const> open)
 {
     auto const& p = the_prelude();
     auto a = cc::make_shared<analysis>();
@@ -124,6 +135,11 @@ cc::shared_ptr<sgl_lsp::analysis> sgl_lsp::analyze(cc::shared_ptr<lsp::document>
     {
         if (auto read = sgl_tool::read_module_dirs(module_dirs()); read.has_value())
             a->library = cc::move(read.value());
+        // a module file open in the client is what the client shows, saved or not
+        for (auto i = isize(0); i < a->library.names.size(); ++i)
+            for (auto const& o : open)
+                if (sgl::is_same_path(a->library.names[i], o.uri))
+                    a->library.sources[i] = o.text;
         for (auto i = isize(0); i < a->library.files.size(); ++i)
         {
             if (sgl::is_same_path(a->library.names[i], a->document->uri))
@@ -187,10 +203,17 @@ sgl_lsp::analysis_cache::handle sgl_lsp::analysis_cache::of(lsp::snapshot const&
     if (!document)
         return {};
     auto& e = _entries[cc::string(uri)];
-    if (e.document.get() != document.get() || !e.analysis)
+    if (e.document.get() != document.get() || !e.analysis || e.module_generation != _module_generation)
     {
+        // every other open document as it stands now, which a module file among them is read as
+        auto open = cc::vector<open_text>();
+        for (auto const& other : snap.uris())
+            if (other != uri)
+                if (auto const* const d = snap.find(other))
+                    open.push_back({.uri = d->uri, .text = d->text});
         e.document = document;
-        e.analysis = cc::make_async_lazy([document] { return analyze(document); });
+        e.module_generation = _module_generation;
+        e.analysis = cc::make_async_lazy([document, open = cc::move(open)] { return analyze(document, open); });
     }
     return e.analysis;
 }

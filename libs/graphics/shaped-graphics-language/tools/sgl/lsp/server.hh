@@ -33,7 +33,8 @@ public:
     ~language_server();
 
 private:
-    void impl_on_document(cc::string_view uri);
+    /// `refreshes` false for a document re-checked because a module file changed, which changes nothing itself.
+    void impl_on_document(cc::string_view uri, bool refreshes = true);
     /// Raises the flag of every test run in flight.
     void impl_stop_test_runs();
 

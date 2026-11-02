@@ -71,10 +71,22 @@ struct sgl_lsp::analysis
     [[nodiscard]] cc::string uri_of(i32 file) const;
 };
 
+/// The text an open document has, which a module file the client edits is read as in place of the one on disk.
+struct sgl_lsp::open_text
+{
+    cc::string uri;
+    cc::string text;
+};
+
 namespace sgl_lsp
 {
 /// Parses and checks `document`; runs wherever it is called, which is compute.
-[[nodiscard]] cc::shared_ptr<analysis> analyze(cc::shared_ptr<lsp::document> document);
+/// A module file that is one of `open` is read as its open text, unsaved edits and all.
+[[nodiscard]] cc::shared_ptr<analysis> analyze(cc::shared_ptr<lsp::document> document,
+                                               cc::span<open_text const> open = {});
+
+/// Whether `uri` is a file of the configured module directories, which the documents that use it are checked against.
+[[nodiscard]] bool is_module_document(cc::string_view uri);
 } // namespace sgl_lsp
 
 /// One analysis per open document as one change left it, shared by every request that asks for it.
@@ -90,12 +102,18 @@ public:
 
     void forget(cc::string_view uri) { _entries.erase(uri); }
 
+    /// A module file was edited, opened or closed, so every analysis read a module as it no longer is.
+    void refresh_modules() { ++_module_generation; }
+
 private:
     /// Keyed on the document itself, which every change makes anew: a version is the client's to repeat, as a reopen does.
+    /// And on the modules as the analysis read them, which an edit to an open module file changes.
     struct entry
     {
         cc::shared_ptr<lsp::document> document;
         handle analysis;
+        u64 module_generation = 0;
     };
     cc::map<cc::string, entry> _entries;
+    u64 _module_generation = 0;
 };

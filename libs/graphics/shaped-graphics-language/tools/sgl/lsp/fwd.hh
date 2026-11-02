@@ -13,6 +13,7 @@ using namespace cc::primitive_defines;
 
 struct prelude;
 struct analysis;
+struct open_text;
 class analysis_cache;
 struct test_run;
 struct check_mark;
