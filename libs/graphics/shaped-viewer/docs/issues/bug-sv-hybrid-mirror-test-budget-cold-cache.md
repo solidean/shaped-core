@@ -9,7 +9,8 @@ refs:
 
 Measured on Windows, debug-nopch-clang, a dx12 hardware adapter, at 5b4ca3604:
 
-- "sv::hybrid_routine - a mirror floor near the origin, seen from far off it, reflects the sky the same forward and deferred" failed its `current_time_steady_secs() - start < 45.0` check at 60.6 s, in a gate run with `SC_BLOB_CACHE=off`.
+- The test is "sv::hybrid_routine - a mirror floor near the origin, seen from far off it, reflects the sky the same forward and deferred".
+  It failed its `current_time_steady_secs() - start < 45.0` check at 60.6 s, in a gate run with `SC_BLOB_CACHE=off`.
 - Run alone right after, with the default cache, it failed again at 62.4 s; the merge before had changed what a shader's key holds.
 - Every run after that passed in 1.2 to 2.2 s.
 
