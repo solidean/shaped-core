@@ -9,8 +9,10 @@ refs:
 
 The Windows MSVC (VS2026) job's clean-core-test tripped nexus's 30 s no-progress watchdog twice on main, two days apart.
 
-- run 40483658126 (306628d0b, 2026-10-27): running "symbolize - the same address answers the same way, from the cache", beside "stacktrace - current() reports frames wherever the toolchain can render them" and "symbolize - a module table with no usable binaries still names the module".
-- run 40850074084 (fdbefff67, 2026-10-29): running the stacktrace test, beside "symbolize - a module table with no usable binaries still names the module" and "symbolize - a recorded module table resolves addresses this process did not produce".
+- run 40483658126 (306628d0b, 2026-10-27): running "symbolize - the same address answers the same way, from the cache".
+  Beside it ran "stacktrace - current() reports frames wherever the toolchain can render them" and "symbolize - a module table with no usable binaries still names the module".
+- run 40850074084 (fdbefff67, 2026-10-29): running the stacktrace test.
+  Beside it ran "symbolize - a module table with no usable binaries still names the module" and "symbolize - a recorded module table resolves addresses this process did not produce".
 
 Both reports say another thread was inside DbgHelp, so the minidump and the other threads' stacks were skipped.
 `symbolize - a module table with no usable binaries still names the module` is in both.
