@@ -13,6 +13,7 @@
 #include <shaped-viewer/resources/quadric_data.hh>
 #include <shaped-viewer/scene/quadric.hh>
 #include <sv_test_shaders.hh>
+#include <typed-geometry/linalg/cross.hh>
 #include <typed-geometry/linalg/vec_ops.hh> // tg::normalize
 #include <typed-geometry/scalar/scalar.hh>  // tg::abs
 
@@ -69,6 +70,24 @@ void push_desc(cc::vector<u32>& words, u32 offset, u32 stride)
     words.push_back(stride);
 }
 
+/// The rotation stream at element `i`: unit, every third one negated, and every other one twisted half a turn about its own +z.
+/// The twist leaves the normal where it was and points the tangent the other way, as a tangent picked as any perpendicular does across a closed surface.
+[[nodiscard]] tg::vec4f rotation_element(u32 i)
+{
+    auto const sign = i % 3 == 1 ? -1.0f : 1.0f;
+    auto const q = tg::normalize(tg::vec4f(0.02f * float(i), 0.1f, -0.03f * float(i), 1.0f)) * sign;
+    // q times a half turn about z, (0, 0, 1, 0)
+    return i % 2 == 1 ? tg::vec4f(q[1], -q[0], q[3], -q[2]) : q;
+}
+
+/// `v` turned by the unit quaternion `q`, stored (x, y, z, w).
+[[nodiscard]] tg::vec3f rotate_by(tg::vec4f q, tg::vec3f v)
+{
+    auto const u = tg::vec3f(q[0], q[1], q[2]);
+    auto const c = tg::dual(tg::cross(u, v)) * 2.0f;
+    return v + c * q[3] + tg::dual(tg::cross(u, c));
+}
+
 /// The attribute elements, twelve of each, so that four triangles read per vertex or per corner stay in range.
 /// Two descriptor blocks: at byte 0 the rotations are real, at byte 48 they are all zero, which is the no-rotation fallback.
 cc::vector<u32> make_attributes()
@@ -108,11 +127,10 @@ cc::vector<u32> make_attributes()
         push_float(2.0f + 0.01f * float(i));
         push_float(0.0f);
     }
-    // Unit quaternions near one another, every third one negated: the same rotation, antipodal in 4D.
+    // Unit quaternions near one another, `rotation_element`'s.
     for (auto i = 0; i < element_count; ++i)
     {
-        auto const sign = i % 3 == 1 ? -1.0f : 1.0f;
-        auto const q = tg::normalize(tg::vec4f(0.02f * float(i), 0.1f, -0.03f * float(i), 1.0f)) * sign;
+        auto const q = rotation_element(u32(i));
         for (auto lane = 0; lane < 4; ++lane)
             push_float(q[lane]);
     }
@@ -325,11 +343,10 @@ namespace
     return tg::vec2f(float(i) * 0.1f, 1.0f - float(i) * 0.07f);
 }
 
-/// The rotation stream at element `i`: unit, every third one negated.
+/// The rotation stream at element `i`, which `interpolate_f4` blends as four plain numbers.
 [[nodiscard]] tg::vec4f f4_element(u32 i)
 {
-    auto const sign = i % 3 == 1 ? -1.0f : 1.0f;
-    return tg::normalize(tg::vec4f(0.02f * float(i), 0.1f, -0.03f * float(i), 1.0f)) * sign;
+    return rotation_element(i);
 }
 
 /// `quadric.roots_of` in double: the surface's roots along the ray, re-expressed about its closest approach.
@@ -536,13 +553,22 @@ ASYNC_INVOCABLE_TEST("sv - the quadric and material runtimes compute what their 
                                     r[5][2], r[5][3]));
         }
 
-        // The rotation blend aligns the corners into one hemisphere before it sums, so a blend of unit quaternions stays a
-        // rotation even where every third one is stored negated.
+        // The rotation blend is a unit quaternion whose +z is the corners' normals blended as vertex normals are.
+        // Every other corner is twisted half a turn and every third stored negated, and neither may move the normal:
+        // blending the quaternions themselves put it off by up to half the corners' spread.
         if (c.desc_offset == 0)
         {
             auto const q = tg::vec4f(r[5][0], r[5][1], r[5][2], r[5][3]);
             auto const length = tg::sqrt(q[0] * q[0] + q[1] * q[1] + q[2] * q[2] + q[3] * q[3]);
             CHECK(near(length, 1.0f, 1e-4f)).context(cc::format("case {}: the blended rotation has length {}", i, length));
+            auto blended = tg::vec3f(0, 0, 0);
+            for (auto k = 0; k < 3; ++k)
+                blended = blended + rotate_by(rotation_element(corner[k]), tg::vec3f(0, 0, 1)) * w[k];
+            auto const normal = rotate_by(q / length, tg::vec3f(0, 0, 1));
+            auto const alignment = tg::dot(normal, tg::normalize(blended));
+            CHECK(alignment > 1.0f - 2e-6f)
+                .context(cc::format(
+                    "case {}: the blended rotation's normal meets the blended normals at a cosine of {}", i, alignment));
         }
     }
 }
