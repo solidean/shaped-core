@@ -128,6 +128,29 @@ It needs integers of a chosen width, and arithmetic whose result width the calle
 - **A `fixed_int` is a scalar**, so `vec<3, fi64>` exists — and its operations wrap at the element width, so a dot product over `fi64` is computed in `fi64`.
   Width-aware `dot` and `cross` belong to a predicate layer on top of this one.
 
+### `bigfloat_sbo` is exact ring arithmetic, sized for the values it holds
+
+`tg::bigfloat_sbo<K>` is a sign, a mantissa of 64-bit limbs and an `i32` exponent in bits, for exact predicates past any bound a `fixed_int` width could claim.
+`+ - *` and comparison never round, so every double is one exactly and every result is the exact value.
+
+- **Each value holds the limbs it uses, not a worst-case capacity.**
+  K limbs live inline and a longer mantissa spills to cc's node allocator, whose free needs only the class index the value stores.
+  K is the template parameter, at 16, 24 and 32 bytes for K = 1, 2 and 3; `tg::bigfloat` is K = 2 until the sweep in `tests/benchmarks/bigfloat-benchmark.cc` decides.
+- **The kernels are not templates.** They work over a view of the mantissa, so K sizes the storage and nothing else.
+  The small cases are inline and branch-free: a sum of operands of at most two limbs within 64 bits of each other, and a product of at most 2 × 2 limbs.
+  They cover every difference of two doubles of similar magnitude and every product of two such differences.
+- **The mantissa is trimmed at both ends, not normalized to odd.**
+  A predicate reads only signs, so a canonical form buys nothing for the shift it costs per operation.
+  A double's trailing zeros do move into the exponent on the way in, so a product of two doubles stays within two limbs.
+- **An exponent gap costs limbs.** A sum is computed in one dense window from the lower value's bottom bit to the higher value's top bit, so 2^1000 + 2^-1000 takes 32 limbs.
+- **`msum` accumulates a sum of products in one two's-complement window**, with at most one allocation, which pays off once values spill.
+  On small values the operators are faster for now: an orient2d retires ~1,000 instructions through them and ~1,500 through msum, on a Zen 5.
+- **A value type is not the fastest shape for a generated predicate.** The benchmark carries a prototype that allocates from a bump arena per call, with no destructor and no copy of a result.
+  It retires 20–30% fewer instructions than the operators; `tests/benchmarks/bigfloat-benchmark.cc` has the counters.
+- **`to_f64` rounds to nearest with ties to even**, correctly unless the result is subnormal, where ldexp may round a second time; every double converts back exactly.
+  The tests use that as their oracle: an exact sum, product or fma rounded once must equal the hardware's.
+- **Rounding is not supported yet.** When it comes, it is a set of operations that take a precision, over this representation.
+
 ### `half_float` is binary16, correctly rounded
 
 `tg::half_float`, spelled `tg::f16`, is IEEE 754 binary16: a struct over its 16 bits, the same type on every compiler.

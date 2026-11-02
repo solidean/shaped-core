@@ -16,3 +16,8 @@ rules:
     value: <immintrin.h>
     reason: the F16C conversion intrinsics, compiled in only where the build target guarantees F16C
     files: src/typed-geometry/scalar/impl/half_float_convert.hh
+
+  - kind: allow-include
+    value: <cmath>
+    reason: std::fma is the correctly rounded oracle the exact bigfloat msum is held against, and neither tg nor clean-core has a fused multiply-add
+    files: tests/scalar/bigfloat-test.cc
