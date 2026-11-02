@@ -211,6 +211,8 @@ bcache::cache_key pipeline_cache::persistent_key(context& ctx, cc::hash128 pipel
     b.add_pod(adapter.device_id);
     b.add_string(adapter.driver_version);
     b.add_bool(adapter.is_software);
+    // a build with diagnostics binds a root parameter one without them lacks, and both share the user's store
+    b.add_bool(impl::debug_windows::k_enabled);
 
     return {.space = bcache::cache_namespace(cc::format("sg.{}.{}", kind, name_of(ctx.backend()))),
             .key = bcache::logical_key::create_from_hash(cc::hash256::create(b.written_bytes())),
