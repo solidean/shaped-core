@@ -32,3 +32,18 @@ The readme lists "assertions, logging, per expression traces" among what SGL off
 - **Layering.** sgl stays on clean-core alone; sg gains the site-table vocabulary on `compiled_shader`; slib translates `describe` into it, as it does the footprint.
 - **Not in v1.** Per-site hit counters, struct and matrix payloads, and the incubator's implicit asserts for program errors.
   webgpu's vertex stage has no writable storage, so a `print` or `assert` there drops with one warning.
+
+## Stages (2026-11-02)
+
+1. Done: interpolated messages on the interpreter (CHK-424, EVAL-103).
+2. Done: the compiler writes records with diagnostics on (LEGAL-63, LEGAL-64, EMIT-183); without them the text holds neither.
+   MSL takes the buffer at `[[buffer(30)]]`, since `[[buffer(6)]]` is a vertex buffer's slot.
+   A failed assert in a vertex, geometry or tessellation stage, an any hit or an intersection records and goes on, since ending one means writing a result.
+3. sg, decided: every pipeline layout gets the debug slot when diagnostics are on, and layout-fit and slib's WGSL reader accept `sg_debug` by name, as they do the acceleration pool.
+   dx12 binds it as a root UAV after the inline constants, set where each of the three root signatures is set.
+   webgpu adds group 3's binding 19, its bind group keyed by the ring slot as it is by the pool's generation.
+   vulkan's set 3 is an embedded-sampler set, which holds samplers only.
+   With diagnostics it becomes a descriptor-buffer set of the samplers and binding 19, one copy per ring slot, bound with `cmd_set_descriptor_offsets`.
+   metal is Julius's: `[[buffer(30)]]`.
+   Each epoch writes its own slice of a per-context ring, read back once the epoch completes and logged in the `sg` domain.
+4. slib and the build: the site table translated onto `sg::compiled_shader`, `SC_SHADER_DIAGNOSTICS`, and GPU tests.

@@ -414,7 +414,7 @@ fn main_ps(p: pixel_input) -> target_ {
   A record is the site's id, its word count, then each value's lanes in order, one word each: a float's bits, an int's, a bool as 0 or 1, and a `half` widened to a float first.
   It reserves its words with one atomic add on the cursor, writes them where they fit under the capacity, and otherwise adds one to the dropped count.
   The buffer stands in sg's reserved group: `register(u0, space11)` in `hlsl-dx12` and `[[vk::binding(19, 3)]]` in `hlsl-vulkan`.
-  It is `@group(3) @binding(19)` in WGSL, and the entry point's parameter `[[buffer(6)]]` in MSL.
+  It is `@group(3) @binding(19)` in WGSL, and the entry point's parameter `[[buffer(30)]]` in MSL, the argument table's last slot, clear of the vertex buffers from `[[buffer(5)]]` up.
   A text declares it only where it writes a record.
   WebGPU's vertex stage has no writable storage and MSL's ray-tracing stages take no buffer, so there a print is dropped and the text declares none.
   A site's id hashes the entry point's name, the message and the line it stands on, so one site has one id on every target.

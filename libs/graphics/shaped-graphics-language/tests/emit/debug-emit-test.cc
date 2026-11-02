@@ -91,3 +91,10 @@ TEST("sgl emit - a stage that cannot write the buffer drops its prints and decla
     CHECK(wgsl.debug_sites.empty());
     CHECK(compile(vertex, target::hlsl_dx12, "vs").text.contains("sg_debug"));
 }
+
+TEST("sgl emit - MSL takes sg's debug buffer at the argument table's last slot, clear of the vertex buffers")
+{
+    // a vertex stage's buffers start at buffer(5), so a slot just above them would be a vertex buffer's
+    auto const msl = compile(k_compute, target::msl).text;
+    CHECK(msl.contains("device sg_debug_buffer& sg_debug [[buffer(30)]]")).dump("text", msl);
+}
