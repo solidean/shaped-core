@@ -116,8 +116,9 @@ TEST("sgl emit - each texture shape and depth is its target's own type, and 1D i
     CHECK(hlsl.contains("SamplerComparisonState set_f : register(s5, space0);\n"));
 
     // MSL's texture takes the scalar it holds, an image states its access, and a comparison sampler is a sampler.
+    // A 1D texture is 2D one texel high, as sg's metal backend creates it (EMIT-100).
     auto const msl = text_of(shapes, target::msl);
-    CHECK(msl.contains("    texture1d<float> set_a [[id(0)]];\n"));
+    CHECK(msl.contains("    texture2d<float> set_a [[id(0)]];\n"));
     CHECK(msl.contains("    texture2d_array<uint> set_b [[id(1)]];\n"));
     CHECK(msl.contains("    texturecube<float> set_c [[id(2)]];\n"));
     CHECK(msl.contains("    depth2d<float> set_d [[id(3)]];\n"));

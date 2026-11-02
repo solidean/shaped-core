@@ -232,7 +232,7 @@ A binding that is not `@inline` is a group.
   `hlsl-dx12` states none, since dx12 takes the format from the view, and neither does `bgra8_unorm` on vulkan, which SPIR-V has no name for.
 * **EMIT-99** A static sampler of a group is its `SamplerState`, or `SamplerComparisonState` where it has a `compare`, with its address and nothing else.
   Its settings reach the layout from `sgl describe`, never from the text, so every target writes it as it writes a sampler the host binds.
-* **EMIT-100** WGSL writes a 1D texture or image as a 2D one and a 1D array as a 2D array, since sg's webgpu backend creates every 1D texture that way (the bindings file, "Shapes").
+* **EMIT-100** WGSL and MSL write a 1D texture or image as a 2D one and a 1D array as a 2D array, since sg's webgpu and metal backends create every 1D texture that way (the bindings file, "Shapes").
 * **EMIT-101** A call of a builtin that gives nothing is a statement as it stands, with no `_ =` in WGSL.
 * **EMIT-102** A builtin a target cannot write as one expression declares a helper function ahead of the entry point, once per text, and the call names it.
   HLSL's `GetDimensions` writes through out parameters, so `size` is an overload of `sgl_size` per texture type the entry point passes.

@@ -22,8 +22,9 @@ constexpr auto k_reserved_group = 3;
 constexpr auto k_hit_offsets_buffer = 5;
 
 /// MSL's texture types, parallel to `texture_shape`, and the depth ones where a shape has one.
+/// A 1D texture is a 2D one on metal, which sg creates every 1D texture as (EMIT-100).
 constexpr cc::string_view k_texture_names[]
-    = {"texture1d",          "texture1d_array", "texture2d",   "texture2d_array",  "texture2d_ms",
+    = {"texture2d",          "texture2d_array", "texture2d",   "texture2d_array",  "texture2d_ms",
        "texture2d_ms_array", "texture3d",       "texturecube", "texturecube_array"};
 constexpr cc::string_view k_depth_names[]
     = {"", "", "depth2d", "depth2d_array", "depth2d_ms", "depth2d_ms_array", "", "depthcube", "depthcube_array"};
