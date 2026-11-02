@@ -1,0 +1,76 @@
+#include "../shaders/shader_fixtures.hh"
+
+#include <clean-core/container/vector.hh>
+#include <clean-core/math/bit.hh>
+#include <clean-core/math/float.hh>
+#include <clean-core/thread/async_coroutine.hh>
+#include <nexus/async-test.hh>
+#include <sg_test_sgl_shaders.hh>
+#include <shaped-graphics/command_list/command_list.hh>
+#include <shaped-graphics/compute/compute_pipeline.hh>
+#include <shaped-graphics/context/context.hh>
+#include <shaped-shader-library/binding/binding_groups.hh>
+
+using namespace cc::primitive_defines;
+
+namespace shaders = sg::test::sgl_shaders;
+
+// The SGL fixture in tests/shaders/sgl/float_specials.sgl: what a float is on the GPU, against EVAL-6's IEEE number.
+
+ASYNC_INVOCABLE_TEST("sg - an SGL float keeps NaNs, infinities, signed zeros and the order of a sum on the GPU",
+                     (sg::context_handle const& ctx))
+{
+    REQUIRE(ctx != nullptr);
+    if (!sg_test::shaders_reach(*ctx))
+        SKIP("no compiler builds this binary's shaders into a format this context accepts");
+    // question-sgl-float-semantics-on-every-target: no other target's compile asks for IEEE behaviour yet
+    if (ctx->backend() != sg::backend_kind::metal)
+        SKIP("only metal compiles SGL with IEEE float semantics so far");
+
+    auto const pipeline = co_await shaders::float_specials::probe.acquire_pipeline(*ctx);
+    auto const layout = ctx->cached.acquire_binding_group_layout<shaders::float_specials::float_specials>();
+
+    auto const usage = sg::buffer_usage::readwrite_buffer | sg::buffer_usage::copy_src;
+    auto const inputs = ctx->persistent.create_buffer_from_data(cc::vector<float>{0.0f, 1.0f, 1.0e30f},
+                                                                sg::buffer_usage::readonly_buffer);
+    auto const results = ctx->persistent.create_buffer_from_data(cc::vector<float>::create_defaulted(7), usage);
+    auto const comparisons = ctx->persistent.create_buffer_from_data(cc::vector<u32>::create_defaulted(4), usage);
+
+    auto cmd = ctx->create_command_list();
+    auto const group = ctx->transient.create_binding_group(
+        *cmd, layout,
+        shaders::float_specials::float_specials{.inputs = inputs.as_readonly_buffer(),
+                                                .results = results.as_readwrite_buffer(),
+                                                .comparisons = comparisons.as_readwrite_buffer()});
+    cmd->compute.bind_pipeline(*pipeline);
+    cmd->compute.bind_group(0, *group);
+    cmd->compute.dispatch_threads(1);
+    auto const results_back = cmd->download.data_from_buffer(results);
+    auto const comparisons_back = cmd->download.data_from_buffer(comparisons);
+    ctx->submit_command_list(cc::move(cmd));
+
+    auto const got = co_await results_back.data();
+    REQUIRE(got.size() == 7);
+    auto const bits = [&](isize i) { return cc::bit_cast<u32>(got[i]); };
+    CHECK(bits(0) == 0x7f800000u);
+    CHECK(cc::is_nan(got[1]));
+    // an infinity times zero
+    CHECK(cc::is_nan(got[2]));
+    // -0 + 0 is +0
+    CHECK(bits(3) == 0x00000000u);
+    CHECK(bits(4) == 0x80000000u);
+    // (1e30 + 1) - 1e30 rounds the 1 away
+    CHECK(got[5] == 0.0f);
+    CHECK(bits(6) == 0xff800000u);
+
+    auto const compared = co_await comparisons_back.data();
+    REQUIRE(compared.size() == 4);
+    // nan != nan
+    CHECK(compared[0] == 1u);
+    // nan == nan
+    CHECK(compared[1] == 0u);
+    // nan < 1 or nan >= 1
+    CHECK(compared[2] == 0u);
+    // inf > 1e30
+    CHECK(compared[3] == 1u);
+}

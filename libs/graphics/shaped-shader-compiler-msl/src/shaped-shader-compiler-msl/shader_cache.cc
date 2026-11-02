@@ -101,7 +101,6 @@ void shader_cache::apply_bookkeeping()
 cc::hash128 shader_cache::compute_key(shader_description const& desc, compile_options const& options) const
 {
     auto const* const comp = shared_compiler();
-    auto const has_toolchain = comp != nullptr && comp->toolchain().is_available;
 
     auto& b = cc::byte_stream_builder::thread_local_scratch();
     b.add_string(desc.source);
@@ -126,9 +125,8 @@ cc::hash128 shader_cache::compute_key(shader_description const& desc, compile_op
     for (auto const& a : options.extra_args)
         b.add_string(a);
 
-    // Which arm runs is known before the compile, and a metallib and a source blob of one shader are different entries.
-    b.add_bool(options.artifact == artifact_kind::metallib
-               || (options.artifact == artifact_kind::automatic && has_toolchain));
+    // The arm and the flags the compiler always passes, which `options` alone does not show.
+    b.add_string(comp != nullptr ? comp->signature(options) : cc::string());
 
     // Apple ships the toolchain as an updatable component, so an upgrade must not keep serving the old one's metallib.
     b.add_string(comp != nullptr ? cc::string_view(comp->toolchain().version) : cc::string_view());

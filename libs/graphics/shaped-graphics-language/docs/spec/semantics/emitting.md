@@ -313,7 +313,8 @@ binding affine:
   HLSL's `sign`, `countbits`, `firstbithigh` and `firstbitlow` give an int or a uint whatever they take, so the writer converts back, and `reversebits` of an int goes through a uint.
   `is_nan` and `is_inf` are a test of the float's bits on every target: `(bits & 0x7fffffff)` above `0x7f800000` is a NaN, and equal to it an infinity.
   No target may be handed the value, since a test of it could fold to false where a test of its bits cannot.
-  Vulkan may assume neither arises unless a module declares `SignedZeroInfNanPreserve`, which DXC's SPIR-V does not; WGSL may assume it outright; and Metal compiles fast-math by default.
+  Vulkan may assume neither arises unless a module declares `SignedZeroInfNanPreserve`, which DXC's SPIR-V does not; and WGSL may assume it outright.
+  Metal's own default is fast math, so sg and `ssc::msl` compile MSL in its safe mode, which keeps both.
   A half is tested as the float it widens to, which keeps a NaN and an infinity exactly, since WGSL bitcasts no lone `f16`.
   WGSL writes a reinterpretation as `bitcast<T>`, MSL as `as_type<T>` and HLSL as `asuint`, `asint` or `asfloat`.
   MSL's `first_bit_*` and HLSL's packing functions are helpers the text declares (EMIT-102).

@@ -6,6 +6,8 @@ refs:
   - file: libs/graphics/shaped-graphics/backends/metal/src/shaped-graphics/backends/metal/metal_common.cc
   - file: libs/graphics/shaped-shader-compiler-msl/src/shaped-shader-compiler-msl/compiler.cc
   - file: libs/graphics/shaped-graphics-language/docs/spec/semantics/evaluation.md
+closed: 2026-11-02
+resolution: fixed
 ---
 
 # metal compiles SGL's MSL with fast math on

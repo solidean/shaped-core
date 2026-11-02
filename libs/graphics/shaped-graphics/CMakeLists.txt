@@ -416,6 +416,7 @@ if(SC_BUILD_TESTS)
             tests/compute/compute-sync-test.cc
             tests/barrier/sticky-array-test.cc
             tests/compute/compute-coherence-test.cc
+            tests/compute/compute-float-specials-test.cc
             tests/compute/compute-sixteen-bit-test.cc
             tests/compute/compute-texture-test.cc
             tests/raster/raster-test.cc
@@ -470,6 +471,7 @@ if(SC_BUILD_TESTS)
                 stages.sgl:*
                 subgroups.sgl:*
                 coherence.sgl:*
+                float_specials.sgl:*
                 sixteen_bit.sgl:*
                 option_formats.sgl:*
         )
