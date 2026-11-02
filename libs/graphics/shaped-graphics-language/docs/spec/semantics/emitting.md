@@ -406,7 +406,19 @@ fn main_ps(p: pixel_input) -> target_ {
   The file name is a string literal, so a backslash or a quote in it is escaped.
   WGSL has no such directive, and its messages map back through the table (EMIT-181).
 
-## MSL
+## Diagnostics
+
+* **EMIT-183** Asked for diagnostics, a text writes each `print` into sg's debug buffer as one record, and describes its site to the host.
+  The tree must keep its prints and lower its asserts (LEGAL-64); without diagnostics the driver drops both (LEGAL-63).
+  The buffer is a header of three words, a cursor, a capacity and a dropped count, then 32-bit words.
+  A record is the site's id, its word count, then each value's lanes in order, one word each: a float's bits, an int's, a bool as 0 or 1, and a `half` widened to a float first.
+  It reserves its words with one atomic add on the cursor, writes them where they fit under the capacity, and otherwise adds one to the dropped count.
+  The buffer stands in sg's reserved group: `register(u0, space11)` in `hlsl-dx12` and `[[vk::binding(19, 3)]]` in `hlsl-vulkan`.
+  It is `@group(3) @binding(19)` in WGSL, and the entry point's parameter `[[buffer(6)]]` in MSL.
+  A text declares it only where it writes a record.
+  WebGPU's vertex stage has no writable storage and MSL's ray-tracing stages take no buffer, so there a print is dropped and the text declares none.
+  A site's id hashes the entry point's name, the message and the line it stands on, so one site has one id on every target.
+
 
 The rules above say HLSL and WGSL by name; these say what `msl` writes in the same places.
 

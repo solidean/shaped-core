@@ -26,6 +26,7 @@ COMMAND("emit")
     auto target_name = cc::string("hlsl-dx12");
     auto run_tests = false;
     auto line_directives = false;
+    auto diagnostics = false;
     auto option_arguments = cc::vector<cc::string>();
     auto module_dirs = cc::vector<cc::string>();
     auto args = nx::args({.name = "sgl emit",
@@ -38,6 +39,8 @@ COMMAND("emit")
     args.arg({"line-directives"}, line_directives,
              {.desc = "write `#line` into HLSL and MSL, as a host's compile does, naming the SGL line of each "
                       "statement"});
+    args.arg({"diagnostics"}, diagnostics,
+             {.desc = "write print and assert into sg's debug buffer, as a dev build does"});
     args.arg(
         {"option"}, option_arguments,
         {.desc = "give an option of the source a value, `--option tile=16`; repeat for each", .metavar = "NAME=VALUE"});
@@ -87,7 +90,8 @@ COMMAND("emit")
                                             .target = target,
                                             .options = options.value(),
                                             .run_tests = run_tests,
-                                            .line_directives = line_directives});
+                                            .line_directives = line_directives,
+                                            .diagnostics = diagnostics});
     if (text.has_error())
     {
         cc::eprint(text.error());

@@ -39,6 +39,38 @@ public:
 
     bool is_c_like() const override { return true; }
     bool has_line_directives() const override { return true; }
+
+    void write_debug_buffer(cc::string& out) const override
+    {
+        if (_is_vulkan)
+            out += "[[vk::binding(19, 3)]] RWByteAddressBuffer sg_debug;\n\n";
+        else
+            out += "RWByteAddressBuffer sg_debug : register(u0, space11);\n\n";
+    }
+    cc::string debug_reserve(cc::string_view at, isize count) const override
+    {
+        return cc::format("sg_debug.InterlockedAdd(0, {}, {});", count, at);
+    }
+    cc::string debug_declare(cc::string_view at) const override { return cc::format("uint {};", at); }
+    cc::string debug_fits(cc::string_view at, isize count) const override
+    {
+        return cc::format("{} + {} <= sg_debug.Load(4)", at, count);
+    }
+    cc::string debug_store(cc::string_view at, isize i, cc::string_view word) const override
+    {
+        return cc::format("sg_debug.Store(12 + ({} + {}) * 4, {});", at, i, word);
+    }
+    cc::string debug_drop() const override { return "sg_debug.InterlockedAdd(8, 1);"; }
+    cc::string debug_word(cc::string_view value, cc::string_view family) const override
+    {
+        if (family == "uint")
+            return cc::string(value);
+        if (family == "bool")
+            return cc::format("({} ? 1u : 0u)", value);
+        if (family == "half")
+            return cc::format("asuint(float({}))", value);
+        return cc::format("asuint({})", value);
+    }
     cc::string_view rolled_loop_hint() const override { return "[loop]"; }
 
     void write_for_head(cc::string& out, cc::string_view index, cc::string_view first, cc::string_view end) const override

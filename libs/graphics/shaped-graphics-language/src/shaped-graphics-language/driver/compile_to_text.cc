@@ -103,20 +103,24 @@ cc::vector<interface_binding> interface_of(check::checked_module const& m,
 cc::result<emitted_source, cc::string> emit_text(driver::impl::front_end const& front,
                                                  check::flat_entry_point const& e,
                                                  emit::target target,
-                                                 bool line_directives)
+                                                 bool line_directives,
+                                                 bool diagnostics)
 {
     auto const& m = front.module;
     auto const source_name = front.source_name;
     // The check pass writes the structured form, and a target prints the core form.
     // WebGPU traces through the emulated form of a trace, and every other target through its native query.
-    // LEGAL-63: no target writes a print yet, so the text holds none
-    auto const legal = check::legalize(m, e, {.is_emulated = target == emit::target::wgsl, .erases_prints = true});
+    // LEGAL-63, LEGAL-64: without diagnostics the text holds no print and no assert, and with them both write a record
+    auto const legal = check::legalize(
+        m, e,
+        {.is_emulated = target == emit::target::wgsl, .erases_prints = !diagnostics, .lowers_asserts = diagnostics});
     auto const files = driver::impl::module_files_of(front);
     auto names = cc::vector<cc::string_view>();
     for (auto i = isize(0); i < files.size(); ++i)
         names.push_back(front.name_of(i));
-    auto emitted = emit::emit_entry_point(m, legal, target,
-                                          {.files = files, .names = names, .write_directives = line_directives});
+    auto emitted = emit::emit_entry_point(
+        m, legal, target,
+        {.files = files, .names = names, .write_directives = line_directives, .diagnostics = diagnostics});
     if (!emitted.has_text())
     {
         auto text = cc::string();
@@ -133,7 +137,8 @@ cc::result<emitted_source, cc::string> emit_text(driver::impl::front_end const& 
                                       .options = driver::impl::option_names_of(m, e),
                                       .footprint = check::footprint_of(m, legal),
                                       .layouts = cc::move(emitted.layouts),
-                                      .lines = cc::move(emitted.lines)};
+                                      .lines = cc::move(emitted.lines),
+                                      .debug_sites = cc::move(emitted.debug_sites)};
     for (auto const name : names)
         result.line_files.push_back(cc::string(name));
     // A module's `@pixel struct` is named as the program names it, `m.target`, which tells the host it is that module's.
@@ -206,7 +211,7 @@ cc::result<sgl::emitted_source, cc::string> sgl::compile_to_text(text_request co
     // CHK-402: what was judged of another entry point's body is no error of this one
     if (auto own = front.errors_of(e.function); !own.empty())
         return cc::error(cc::move(own));
-    auto result = emit_text(front, e, request.target, request.line_directives);
+    auto result = emit_text(front, e, request.target, request.line_directives, request.diagnostics);
     add_source_facts(result, front, e);
     return result;
 }
@@ -223,8 +228,8 @@ cc::result<cc::vector<sgl::entry_text>, cc::string> sgl::compile_all_to_text(all
         auto own = front.errors_of(e.function);
         for (auto const t : request.targets)
         {
-            auto text
-                = own.empty() ? emit_text(front, e, t, false) : cc::result<emitted_source, cc::string>(cc::error(own));
+            auto text = own.empty() ? emit_text(front, e, t, false, false)
+                                    : cc::result<emitted_source, cc::string>(cc::error(own));
             add_source_facts(text, front, e);
             result.push_back({.entry_point = e.name, .target = t, .text = cc::move(text)});
         }

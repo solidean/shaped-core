@@ -1,5 +1,8 @@
 #include "../check/check-test-support.hh"
 
+#include <shaped-graphics-language/check/dump.hh>
+#include <shaped-graphics-language/legalize/core.hh>
+#include <shaped-graphics-language/legalize/legalize.hh>
 #include <shaped-graphics-language/test/run_tests.hh>
 
 using namespace sgl_test;
@@ -112,4 +115,33 @@ TEST("sgl messages - an interpolation is a scalar, a plain vector or an enum")
                                                                   "    print \"p is $p\"\n"));
     CHECK(reports.contains("type-mismatch user:[p] a message interpolates a scalar, a plain vector or an enum, and "
                            "this is pair"));
+}
+
+TEST("sgl messages - with diagnostics an assert is a print where its condition is false, and its stage then ends "
+     "(LEGAL-64)")
+{
+    constexpr auto compute = "binding work:\n"
+                             "    values: mut buffer[float]\n"
+                             "\n"
+                             "@compute(64) fun cs(@thread_id id: int3){work}:\n"
+                             "    let v = work.values[id.x]\n"
+                             "    assert v >= 0.0, \"negative $v\"\n"
+                             "    work.values[id.x] = v * 2.0\n";
+    auto const checked = check_sources(read_prelude(), compute);
+    REQUIRE(reports_of(checked) == "");
+    REQUIRE(checked.module.entry_points.size() == 1);
+    auto const& e = checked.module.entry_points[0];
+
+    auto const dropped = sgl::check::legalize(checked.module, e, {.erases_prints = true});
+    CHECK(!sgl::check::dump_entry_point(checked.module, dropped).contains("(print"));
+
+    auto const lowered = sgl::check::legalize(checked.module, e, {.lowers_asserts = true});
+    CHECK(!sgl::check::find_core_violation(checked.module, lowered).has_value());
+    auto const dump = sgl::check::dump_entry_point(checked.module, lowered);
+    CHECK(dump.contains("(print")).dump("tree", dump);
+    CHECK(dump.contains("return")).dump("tree", dump);
+    REQUIRE(lowered.messages.size() == 1);
+    CHECK(lowered.messages[0].is_assert);
+    CHECK(lowered.messages[0].pieces.size() == 2);
+    CHECK(lowered.messages[0].pieces[0] == "negative ");
 }

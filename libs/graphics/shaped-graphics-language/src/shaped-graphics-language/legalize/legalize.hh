@@ -16,6 +16,8 @@ struct sgl::check::legalize_options
     /// Drops every print with its values, as every check is dropped: for a text compiled without diagnostics (LEGAL-63).
     /// The tree then prints nothing, which is the one way it may differ from the input's behaviour.
     bool erases_prints = false;
+    /// Keeps every `assert` as `if (!condition) { print; end }` rather than dropping it, for a text with diagnostics (LEGAL-64).
+    bool lowers_asserts = false;
 };
 
 namespace sgl::check

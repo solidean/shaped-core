@@ -443,8 +443,13 @@ struct sgl::check::flat_message
 {
     /// One more than the interpolations: the text before each, then the text after the last, its escapes resolved.
     cc::vector<cc::string> pieces;
+    /// An `assert`'s, which a print reports only where its condition was false (LEGAL-64).
+    bool is_assert = false;
 
-    bool operator==(flat_message const& rhs) const { return ast::impl::is_equal(pieces, rhs.pieces); }
+    bool operator==(flat_message const& rhs) const
+    {
+        return ast::impl::is_equal(pieces, rhs.pieces) && is_assert == rhs.is_assert;
+    }
 };
 
 /// Records `values`, which are the one effect a program has besides its result.

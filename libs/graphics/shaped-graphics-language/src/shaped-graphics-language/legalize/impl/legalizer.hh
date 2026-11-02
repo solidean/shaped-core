@@ -33,7 +33,7 @@ using stmt_list = cc::vector<flat_stmt_id>;
 [[nodiscard]] stmt_list lower_exits(flat_builder& out, stmt_list const& body, legalize_options const& options);
 
 /// Rule V0, first: no check and no `assert` is left, since no target writes one, and neither is what computed its condition.
-[[nodiscard]] stmt_list erase_checks(flat_builder& out, stmt_list const& body, bool erases_prints);
+[[nodiscard]] stmt_list erase_checks(flat_builder& out, stmt_list const& body, bool erases_prints, bool lowers_asserts);
 
 /// Rule V1: no local, assignment or result of type void is left, and what evaluating one did stays as an `eval`.
 [[nodiscard]] stmt_list erase_void(flat_builder& out, stmt_list const& body);

@@ -453,6 +453,7 @@ if(SC_BUILD_TESTS)
         tests/emit/vector-emit-test.cc
         tests/emit/sixteen-bit-emit-test.cc
         tests/emit/line-mapping-emit-test.cc
+        tests/emit/debug-emit-test.cc
 
         tests/driver/classify-test.cc
         tests/driver/compile-to-text-test.cc

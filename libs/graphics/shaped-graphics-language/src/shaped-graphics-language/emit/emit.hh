@@ -133,8 +133,41 @@ struct sgl::emit::line_origin
     }
 };
 
-/// The files a line table and `#line` read their lines from; the default writes neither.
-struct sgl::emit::line_sources
+/// One value a debug record holds: its scalar family and its lanes, each lane one 32-bit word.
+struct sgl::emit::debug_value
+{
+    /// `float`, `half`, `int`, `uint` or `bool`; an enum is `int`, and `type` names it.
+    cc::string family;
+    i32 lanes = 1;
+    /// The value's type as the program names it: `float3`, `material_kind`.
+    cc::string type;
+
+    bool operator==(debug_value const&) const = default;
+};
+
+/// One print or assert the text writes into sg's debug buffer (EMIT-183).
+/// Its record is `id`, the record's word count, then each value's lanes in order, one word each.
+struct sgl::emit::debug_site
+{
+    /// What the record starts with, stable for one source line and message wherever the text is written.
+    u32 id = 0;
+    /// An assert's, which writes only where its condition was false.
+    bool is_assert = false;
+    /// The message around its values, one piece more than `values`; empty for a print of one bare value.
+    cc::vector<cc::string> pieces;
+    cc::vector<debug_value> values;
+    /// Where the print or assert stands; empty without the source files (EMIT-181).
+    line_origin origin;
+
+    bool operator==(debug_site const& rhs) const
+    {
+        return id == rhs.id && is_assert == rhs.is_assert && ast::impl::is_equal(pieces, rhs.pieces)
+            && ast::impl::is_equal(values, rhs.values) && origin == rhs.origin;
+    }
+};
+
+/// What an emit writes beside the text itself; the default writes no line table, no `#line` and no diagnostics.
+struct sgl::emit::options
 {
     /// Parallel to `checked_module::files`, as the check pass took them.
     cc::span<check::module_file const> files;
@@ -142,6 +175,9 @@ struct sgl::emit::line_sources
     cc::span<cc::string_view const> names;
     /// Writes `#line` where the target has it, and a comment where the inlined calls change (EMIT-182).
     bool write_directives = false;
+    /// Writes each print into sg's debug buffer, and describes its site (EMIT-183).
+    /// The tree must have been legalized to keep its prints and lower its asserts (LEGAL-64); otherwise a print is `unsupported`.
+    bool diagnostics = false;
 };
 
 /// Either the text or the reasons there is none.
@@ -160,8 +196,10 @@ struct sgl::emit::emitted_text
     cc::string target_struct;
     /// Every constant block and buffer element the text declares, as it declares them.
     cc::vector<emitted_layout> layouts;
-    /// A line of the function body per entry, in text order; empty unless the emit was given its `line_sources`.
+    /// A line of the function body per entry, in text order; empty unless the emit was given its `options`.
     cc::vector<line_origin> lines;
+    /// Every print and assert the text writes into sg's debug buffer, which it declares when this is not empty (EMIT-183).
+    cc::vector<debug_site> debug_sites;
     cc::vector<error> errors;
 
     [[nodiscard]] bool has_text() const { return errors.empty(); }
@@ -171,7 +209,7 @@ struct sgl::emit::emitted_text
         return text == rhs.text && entry_point == rhs.entry_point && ast::impl::is_equal(bound_names, rhs.bound_names)
             && color_targets == rhs.color_targets && target_struct == rhs.target_struct
             && ast::impl::is_equal(layouts, rhs.layouts) && ast::impl::is_equal(lines, rhs.lines)
-            && ast::impl::is_equal(errors, rhs.errors);
+            && ast::impl::is_equal(debug_sites, rhs.debug_sites) && ast::impl::is_equal(errors, rhs.errors);
     }
 };
 
@@ -202,17 +240,14 @@ namespace sgl::emit
 /// And `wgsl` refuses an entry point needing a feature WebGPU never has, which is portability the shader opted out of.
 /// Deterministic: equal arguments give equal text.
 /// `sources` adds the line table, and the `#line` directives where it asks for them.
-[[nodiscard]] emitted_text emit(check::checked_module const& m,
-                                isize entry_point,
-                                target t,
-                                line_sources const& sources = {});
+[[nodiscard]] emitted_text emit(check::checked_module const& m, isize entry_point, target t, options const& sources = {});
 
 /// The same for a flat tree that stands in `m` without being one of its entry points, such as a legalized one.
 /// `e` must be in the core form, or the result is the error `not-core`.
 [[nodiscard]] emitted_text emit_entry_point(check::checked_module const& m,
                                             check::flat_entry_point const& e,
                                             target t,
-                                            line_sources const& sources = {});
+                                            options const& sources = {});
 
 /// One line per error, for tests and for reading by eye: `unsupported a print, which no target writes yet`.
 [[nodiscard]] cc::string dump_errors(emitted_text const& e);

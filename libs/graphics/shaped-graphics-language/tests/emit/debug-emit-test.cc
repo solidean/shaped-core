@@ -1,0 +1,93 @@
+#include "emit-test-support.hh"
+
+#include <shaped-graphics-language/driver/compile_to_text.hh>
+
+using namespace sgl_test;
+using sgl::emit::target;
+
+namespace
+{
+constexpr cc::string_view k_compute = "binding work:\n"
+                                      "    values: mut buffer[float]\n"
+                                      "\n"
+                                      "@compute(64) fun cs(@thread_id id: int3){work}:\n"
+                                      "    let v = work.values[id.x]\n"
+                                      "    print \"v = $v at $(id.xy)\"\n"
+                                      "    assert v >= 0.0, \"negative $v\"\n"
+                                      "    work.values[id.x] = v * 2.0\n";
+
+sgl::emitted_source compile(cc::string_view source, target t, cc::string_view entry = "cs")
+{
+    auto r = sgl::compile_to_text(
+        {.source = source, .source_name = "debug.sgl", .entry_point = entry, .target = t, .diagnostics = true});
+    REQUIRE(r.has_value());
+    return cc::move(r.value());
+}
+} // namespace
+
+TEST("sgl emit - with diagnostics each target declares sg's debug buffer where sg binds it (EMIT-183)")
+{
+    CHECK(compile(k_compute, target::hlsl_dx12).text.contains("RWByteAddressBuffer sg_debug : register(u0, space11);\n"));
+    CHECK(compile(k_compute, target::hlsl_vulkan).text.contains("[[vk::binding(19, 3)]] RWByteAddressBuffer sg_debug;\n"));
+    CHECK(compile(k_compute, target::wgsl)
+              .text.contains("@group(3) @binding(19) var<storage, read_write> sg_debug: sg_debug_buffer;\n"));
+}
+
+TEST("sgl emit - a print is one record: reserved at once, written whole where it fits, and counted where it does not")
+{
+    auto const hlsl = compile(k_compute, target::hlsl_dx12).text;
+    CHECK(hlsl.contains("sg_debug.InterlockedAdd(0, 5, debug_at);\n"));
+    CHECK(hlsl.contains("if (debug_at + 5 <= sg_debug.Load(4))\n"));
+    CHECK(hlsl.contains("sg_debug.Store(12 + (debug_at + 1) * 4, 5u);\n"));
+    CHECK(hlsl.contains("sg_debug.InterlockedAdd(8, 1);\n"));
+
+    auto const wgsl = compile(k_compute, target::wgsl).text;
+    CHECK(wgsl.contains("let debug_at: u32 = atomicAdd(&sg_debug.cursor, 5u);\n"));
+    CHECK(wgsl.contains("sg_debug.words[debug_at + 2u] = bitcast<u32>(printed);\n"));
+    CHECK(wgsl.contains("_ = atomicAdd(&sg_debug.dropped, 1u);\n"));
+}
+
+TEST("sgl emit - a failed assert writes its record and ends a compute invocation")
+{
+    auto const hlsl = compile(k_compute, target::hlsl_dx12).text;
+    auto const failed = hlsl.find("if (!check");
+    REQUIRE(failed >= 0);
+    CHECK(hlsl.subview({.offset = failed, .size = hlsl.size() - failed}).contains("return;"));
+}
+
+TEST("sgl emit - each site is described: an id, its pieces, its values' shapes and its line")
+{
+    auto const e = compile(k_compute, target::hlsl_dx12);
+    REQUIRE(e.debug_sites.size() == 2);
+    auto const& print = e.debug_sites[0];
+    CHECK(!print.is_assert);
+    REQUIRE(print.pieces.size() == 3);
+    CHECK(print.pieces[0] == "v = ");
+    CHECK(print.pieces[1] == " at ");
+    REQUIRE(print.values.size() == 2);
+    CHECK(print.values[0].family == "float");
+    CHECK(print.values[1].family == "int");
+    CHECK(print.values[1].lanes == 2);
+    CHECK(print.origin.at.line == 6);
+
+    auto const& assert_site = e.debug_sites[1];
+    CHECK(assert_site.is_assert);
+    CHECK(assert_site.origin.at.line == 7);
+    CHECK(assert_site.id != print.id);
+    // the id is the site's wherever the text is written
+    CHECK(compile(k_compute, target::wgsl).debug_sites[0].id == print.id);
+}
+
+TEST("sgl emit - a stage that cannot write the buffer drops its prints and declares none")
+{
+    constexpr auto vertex = "struct varyings:\n"
+                            "    @position position: hpos4\n"
+                            "\n"
+                            "@vertex fun vs(@vertex_index v: int) -> varyings:\n"
+                            "    print \"vertex $v\"\n"
+                            "    return { position = hpos4(v as float, 0.0, 0.0, 1.0) }\n";
+    auto const wgsl = compile(vertex, target::wgsl, "vs");
+    CHECK(!wgsl.text.contains("sg_debug"));
+    CHECK(wgsl.debug_sites.empty());
+    CHECK(compile(vertex, target::hlsl_dx12, "vs").text.contains("sg_debug"));
+}

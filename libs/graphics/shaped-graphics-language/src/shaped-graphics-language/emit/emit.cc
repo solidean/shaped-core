@@ -96,7 +96,7 @@ sgl::emit::impl::dialect const& sgl::emit::impl::dialect_of(target t)
 sgl::emit::emitted_text sgl::emit::emit(check::checked_module const& m,
                                         sgl::isize entry_point,
                                         target t,
-                                        line_sources const& sources)
+                                        options const& sources)
 {
     auto result = emitted_text();
 
@@ -125,10 +125,10 @@ sgl::emit::emitted_text sgl::emit::emit(check::checked_module const& m,
 sgl::emit::emitted_text sgl::emit::emit_entry_point(check::checked_module const& m,
                                                     check::flat_entry_point const& e,
                                                     target t,
-                                                    line_sources const& sources)
+                                                    options const& sources)
 {
     auto result = emitted_text();
-    impl::validate(m, e, result.errors);
+    impl::validate(m, e, result.errors, sources.diagnostics);
     if (!result.errors.empty())
         return result;
 
@@ -246,6 +246,7 @@ sgl::emit::emitted_text sgl::emit::emit_entry_point(check::checked_module const&
     auto written = impl::write_text(plan, impl::dialect_of(t), sources);
     result.text = cc::move(written.text);
     result.lines = cc::move(written.lines);
+    result.debug_sites = cc::move(written.debug_sites);
     result.entry_point = plan.entry_name;
     if (plan.constants.has_value())
         result.bound_names.push_back({.emitted = plan.constants.value().name, .host = plan.constants.value().host_name});

@@ -1,3 +1,4 @@
+#include <shaped-graphics-language/driver/compile_to_text.hh>
 #include <shaped-shader-library/compiler/dxc_compiler.hh>
 
 #if SLIB_HAS_DXC
@@ -419,3 +420,38 @@ TEST("slib - a push-constant block is the same size on SPIR-V as the mirror a ca
 }
 
 #endif
+
+TEST("slib - DXC compiles SGL's debug records for dx12 and vulkan", exclusive("slib-shader-library"))
+{
+    // EMIT-183: what a dev build writes for a print and an assert, which no compile through the library asks for yet
+    constexpr auto source = "binding work:\n"
+                            "    values: mut buffer[float]\n"
+                            "\n"
+                            "@compute(64) fun cs(@thread_id id: int3){work}:\n"
+                            "    let v = work.values[id.x]\n"
+                            "    print \"v = $v at $(id.xy), $(v > 1.0)\"\n"
+                            "    assert v >= 0.0, \"negative $v\"\n"
+                            "    work.values[id.x] = v * 2.0\n";
+    struct leg
+    {
+        sgl::emit::target target;
+        bool is_spirv;
+    };
+    for (auto const l : {leg{sgl::emit::target::hlsl_dx12, false}, leg{sgl::emit::target::hlsl_vulkan, true}})
+    {
+        auto const text = sgl::compile_to_text(
+            {.source = source, .entry_point = "cs", .target = l.target, .line_directives = true, .diagnostics = true});
+        REQUIRE(text.has_value());
+        REQUIRE(text.value().debug_sites.size() == 2);
+        CHECK(!text.value().debug_sites[0].is_assert);
+        CHECK(text.value().debug_sites[1].is_assert);
+        REQUIRE(text.value().debug_sites[0].values.size() == 3);
+        CHECK(text.value().debug_sites[0].values[2].family == "bool")
+            .dump("type", text.value().debug_sites[0].values[2].type);
+        auto compiler = l.is_spirv ? slib::create_dxc_spirv_compiler() : slib::create_dxc_compiler();
+        REQUIRE(compiler.has_value());
+        auto const shader = compiler.value()->compile(
+            {.source = text.value().text, .entry_point = text.value().entry_point, .stage = sg::shader_stage::compute});
+        (void)await(shader);
+    }
+}

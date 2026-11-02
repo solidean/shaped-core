@@ -363,5 +363,7 @@ struct emitted_field;
 struct emitted_layout;
 struct source_line;
 struct line_origin;
-struct line_sources;
+struct debug_value;
+struct debug_site;
+struct options;
 } // namespace sgl::emit
