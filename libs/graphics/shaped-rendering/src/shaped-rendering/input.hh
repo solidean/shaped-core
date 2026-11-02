@@ -12,6 +12,7 @@
 ///
 /// Names describe the US-QWERTY legend, which is only a naming convention — the value is the position.
 /// Our own vocabulary of positions, not a platform scancode number: the underlying values mean nothing outside sr.
+/// It deliberately stops at F12 and skips the media, `AC_*` and `INTERNATIONAL*` keys; they read as `scancode::unknown`.
 enum class sr::scancode : sr::u16
 {
     unknown = 0,
@@ -162,6 +163,12 @@ enum class sr::key_modifiers : sr::u8
 namespace sr
 {
 
+/// The bit `mouse_move_event::held_buttons` sets for `b`.
+[[nodiscard]] constexpr u8 mouse_button_bit(mouse_button b)
+{
+    return u8(1u << u8(b));
+}
+
 [[nodiscard]] constexpr key_modifiers operator|(key_modifiers a, key_modifiers b)
 {
     return key_modifiers(u8(a) | u8(b));
@@ -222,11 +229,27 @@ struct sr::text_event
 struct sr::mouse_move_event
 {
     /// Cursor position in pixels, relative to the window's client area.
+    /// The pixels of window::width()/height(), so on a Retina display it is twice the logical position — divide by window::pixel_density for that.
     tg::pos2f cursor_pos;
 
     /// Motion since the previous event, in pixels.
-    /// This is the value to drive a camera with: it stays correct when the cursor is captured or hits the screen edge.
+    /// Scaled by pixel_density like cursor_pos, so the same hand motion reports twice the delta on a Retina display.
+    /// It stays correct when the cursor is captured or hits the screen edge, which is why a camera is driven by it —
+    /// through logical_delta, so a drag turns it as far on every display.
     tg::vec2f delta;
+
+    /// The window's pixels per logical unit when this event was read, which cursor_pos and delta were scaled by.
+    /// The event's own rather than the window's current one: motion queued before a move to another display keeps it.
+    float pixel_density = 1.0f;
+
+    /// The buttons held during this motion, one `mouse_button_bit` each.
+    /// A drag should end on it as well as on the button's release: a release outside an uncaptured window never arrives.
+    u8 held_buttons = 0;
+
+    [[nodiscard]] bool is_held(mouse_button b) const { return (held_buttons & mouse_button_bit(b)) != 0; }
+
+    /// delta in logical units: the same hand motion gives the same value at every pixel density.
+    [[nodiscard]] tg::vec2f logical_delta() const { return delta / pixel_density; }
 };
 
 struct sr::mouse_button_event
@@ -241,6 +264,11 @@ struct sr::mouse_button_event
 
     bool is_down = false;
 
+    /// How many presses in quick succession this one completes: 1 for a single click, 2 for a double-click, and so on.
+    /// The platform decides what counts as quick and close enough, so a double-click honors the user's system setting.
+    /// A release carries the count of the press it ends.
+    int clicks = 1;
+
     /// Cursor position when the button changed, in pixels relative to the window's client area.
     tg::pos2f cursor_pos;
 };
@@ -254,6 +282,16 @@ struct sr::mouse_wheel_event
 
     /// Cursor position when the scroll happened, in pixels relative to the window's client area.
     /// Where the pointer was, not any position of the wheel itself.
+    tg::pos2f cursor_pos;
+};
+
+/// A file dropped onto a window, one event per file: dropping three files yields three.
+struct sr::file_drop_event
+{
+    /// The dropped file's path, as the platform spells it.
+    cc::string path;
+
+    /// Where it was dropped, in pixels relative to the window's client area.
     tg::pos2f cursor_pos;
 };
 
@@ -276,13 +314,17 @@ struct sr::input_event
     /// Never dangles within one frame: a window destroyed mid-frame drops its events from this span.
     sr::window* window = nullptr;
 
-    /// What happened, as one of the five event payloads.
+    /// The pixel density the event's positions and deltas were converted at: the window's as of the event's place in the stream, 1 for an event naming no window.
+    /// Divide by it, not by window::pixel_density, to get logical units — the window's own changes mid-poll when it moves to another display.
+    float pixel_density = 1.0f;
+
+    /// What happened, as one of the six event payloads.
     ///
     /// Visiting it is the way to consume an event: each handler receives its payload named and typed, with no probe first.
     /// Handlers are combined into one overload set, so a trailing `[](auto const&) {}` absorbs the kinds a handler does not care about
-    /// — spell all five instead, and a sixth event kind becomes a compile error here rather than silence.
+    /// — spell all six instead, and a seventh event kind becomes a compile error here rather than silence.
     /// The `is_*` / `as_*` accessors below are for what a visit cannot express: a predicate, or a loop body that must `continue`.
-    cc::variant<key_event, text_event, mouse_move_event, mouse_button_event, mouse_wheel_event> payload;
+    cc::variant<key_event, text_event, mouse_move_event, mouse_button_event, mouse_wheel_event, file_drop_event> payload;
 
     /// Which kind the payload holds.
     /// For a predicate — code that then wants the payload is usually a visit instead.
@@ -291,6 +333,7 @@ struct sr::input_event
     [[nodiscard]] bool is_mouse_move() const { return payload.is<mouse_move_event>(); }
     [[nodiscard]] bool is_mouse_button() const { return payload.is<mouse_button_event>(); }
     [[nodiscard]] bool is_mouse_wheel() const { return payload.is<mouse_wheel_event>(); }
+    [[nodiscard]] bool is_file_drop() const { return payload.is<file_drop_event>(); }
 
     /// The payload as one specific kind, which the event must hold.
     /// Ask the matching is_* first unless the kind is already known.
@@ -299,4 +342,5 @@ struct sr::input_event
     [[nodiscard]] mouse_move_event const& as_mouse_move() const { return payload.as<mouse_move_event>(); }
     [[nodiscard]] mouse_button_event const& as_mouse_button() const { return payload.as<mouse_button_event>(); }
     [[nodiscard]] mouse_wheel_event const& as_mouse_wheel() const { return payload.as<mouse_wheel_event>(); }
+    [[nodiscard]] file_drop_event const& as_file_drop() const { return payload.as<file_drop_event>(); }
 };

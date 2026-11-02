@@ -4,6 +4,7 @@
 #include <clean-core/container/vector.hh>
 #include <clean-core/error/optional.hh>
 #include <shaped-graphics/bytes_future.hh>
+#include <shaped-graphics/command_list/array_access_declaration.hh>
 #include <shaped-graphics/command_list/compute.hh>
 #include <shaped-graphics/command_list/copy.hh>
 #include <shaped-graphics/command_list/download.hh>
@@ -119,22 +120,39 @@ protected:
                                     isize dst_offset_in_bytes,
                                     isize size_in_bytes) = 0;
 
+    // The facade has resolved the region and checked the subresource, the alignments and the buffer's extent.
+    virtual void copy_buffer_to_texture(raw_buffer_handle src,
+                                        isize src_offset_in_bytes,
+                                        isize src_row_pitch_in_bytes,
+                                        raw_texture_handle dst,
+                                        subresource_index const& subresource,
+                                        texture_region const& region) = 0;
+
     virtual void compute_bind_pipeline(compute_pipeline const& pipeline) = 0;
     virtual void compute_bind_group(int group_index, binding_group const& group) = 0;
     virtual void compute_dispatch(int x, int y, int z) = 0;
+    // The facade has checked the usage, the alignment and the bounds; the backend declares `args` as an indirect read.
+    virtual void compute_dispatch_indirect(raw_buffer_handle const& args, isize offset_in_bytes) = 0;
     virtual void compute_set_inline_constants(cc::span<byte const> data, cc::optional<isize> offset) = 0;
 
-    // Records explicit per-element access for an array/bindless binding (reached through cmd.compute).
+    // Records explicit per-element access for an array/bindless binding (reached through cmd.compute and cmd.raytracing).
     // Split by resource family: buffers carry no layout, textures do.
-    virtual void compute_declare_array_buffer_access(cc::string_view binding_name,
-                                                     cc::span<array_buffer_access const> elements) = 0;
-    virtual void compute_declare_array_texture_access(cc::string_view binding_name,
-                                                      cc::span<array_texture_access const> elements) = 0;
+    // Each returns the id of a declaration in force until withdraw_array_declaration ends it.
+    [[nodiscard]] virtual u32 compute_declare_array_buffer_access(cc::string_view binding_name,
+                                                                  cc::span<array_buffer_access const> elements) = 0;
+    [[nodiscard]] virtual u32 compute_declare_array_texture_access(cc::string_view binding_name,
+                                                                   cc::span<array_texture_access const> elements) = 0;
+
+    // Ends declaration `id`, which is live: the token guarantees it.
+    virtual void withdraw_array_declaration(u32 id) = 0;
+
+    // The id a backend's next array declaration takes, unique within this list.
+    [[nodiscard]] u32 next_array_declaration_id() { return ++_last_array_declaration_id; }
 
     // Raster rendering scope (reached through cmd.raster).
     // begin_rendering transitions each target to its render-target / depth-stencil layout, binds the
     // color/depth targets to the output-merger, and applies each target's clear / discard.
-    // end_rendering closes the scope and releases its RTV/DSV descriptors.
+    // end_rendering closes the scope.
     // Calls must be balanced.
     virtual void raster_begin_rendering(rendering_info const& info) = 0;
     virtual void raster_end_rendering() = 0;
@@ -150,11 +168,13 @@ protected:
     void bind_compute_pipeline(compute_pipeline const& pipeline);
     void bind_compute_group(int group_index, binding_group const& group);
     void dispatch(int x, int y, int z);
+    void dispatch_indirect(raw_buffer_handle const& args, isize offset_in_bytes);
     void bind_raster_group(int group_index, binding_group const& group);
     void bind_raster_vertex_buffers(int first_slot, cc::span<vertex_buffer_view const> views);
     void bind_raster_index_buffer(index_buffer_view const& view);
     void draw(draw_config const& config);
     void draw_indexed(draw_indexed_config const& config);
+    void draw_indexed_indirect(raw_buffer_handle const& args, isize offset_in_bytes, isize count);
     void bind_raytracing_pipeline(raytracing_pipeline const& pipeline);
     void bind_raytracing_group(int group_index, binding_group const& group);
     void dispatch_rays(raytracing_shader_table const& table, raygen_index raygen, int width, int height, int depth);
@@ -168,12 +188,12 @@ protected:
     virtual void raster_bind_vertex_buffers(int first_slot, cc::span<vertex_buffer_view const> views) = 0;
     virtual void raster_bind_index_buffer(index_buffer_view const& view) = 0;
 
-    // The raster twin of the compute pair above, held for the next draw rather than the next dispatch.
-    // The graphics bind point keeps its own pending declarations, since its bound groups are its own.
-    virtual void raster_declare_array_buffer_access(cc::string_view binding_name,
-                                                    cc::span<array_buffer_access const> elements) = 0;
-    virtual void raster_declare_array_texture_access(cc::string_view binding_name,
-                                                     cc::span<array_texture_access const> elements) = 0;
+    // The raster twin of the compute pair above, in force for every draw rather than every dispatch.
+    // The graphics bind point keeps its own declarations, since its bound groups are its own, and they end with the rendering scope.
+    [[nodiscard]] virtual u32 raster_declare_array_buffer_access(cc::string_view binding_name,
+                                                                 cc::span<array_buffer_access const> elements) = 0;
+    [[nodiscard]] virtual u32 raster_declare_array_texture_access(cc::string_view binding_name,
+                                                                  cc::span<array_texture_access const> elements) = 0;
     virtual void raster_set_viewport(viewport const& vp) = 0;
     virtual void raster_set_scissor(tg::aabb2i const& rect) = 0;
     virtual void raster_set_stencil_reference(u32 reference) = 0;
@@ -181,6 +201,9 @@ protected:
     virtual void raster_set_inline_constants(cc::span<byte const> data, cc::optional<isize> offset) = 0;
     virtual void raster_draw(draw_config const& config) = 0;
     virtual void raster_draw_indexed(draw_indexed_config const& config) = 0;
+    // `count` draws of `sg::draw_indexed_args` records from `offset_in_bytes` on; count > 0.
+    // The facade has checked the usage, the alignment and the bounds; the backend declares `args` as an indirect read.
+    virtual void raster_draw_indexed_indirect(raw_buffer_handle const& args, isize offset_in_bytes, isize count) = 0;
 
     // Ray-tracing acceleration-structure builds (reached through cmd.raytracing).
     // Split by geometry family, since a BLAS is triangles or AABBs and span-element overloads cannot
@@ -192,6 +215,8 @@ protected:
     [[nodiscard]] virtual blas_handle raytracing_build_blas_triangles(cc::span<blas_triangles const> geometries,
                                                                       accel_build_flags flags,
                                                                       int hit_record_stride) = 0;
+    // Reached only where the context reports sg::feature::opacity_micromap; the scope checks that first.
+    [[nodiscard]] virtual micromap_handle raytracing_build_micromap(micromap_triangles const& triangles) = 0;
     [[nodiscard]] virtual blas_handle raytracing_build_blas_aabbs(cc::span<blas_aabbs const> geometries,
                                                                   accel_build_flags flags,
                                                                   int hit_record_stride) = 0;
@@ -237,10 +262,34 @@ protected:
     void note_render_pass_split(cc::string_view cause, split_remedy remedy = split_remedy::record_outside_scope);
 
     friend impl::stat_counts const& impl::recorded_stats(command_list const& cmd);
+    friend void impl::end_array_declarations_at_submit(command_list& cmd);
+
+    /// Wraps declaration `id`, just made on the compute or the raster bind point, in the value that keeps it in force.
+    [[nodiscard]] array_access_declaration adopt_array_declaration(u32 id, bool raster);
+
+    /// The array a by-name declaration names, which must be a buffer array of some layout the context holds.
+    /// Where a misspelled name is caught, at the declare, whatever the ops after it bind.
+    [[nodiscard]] buffer_array_binding named_buffer_array(cc::string_view name);
+
+    /// The texture form: `name` must be a texture array of some layout the context holds.
+    [[nodiscard]] texture_array_binding named_texture_array(cc::string_view name);
 
 private:
+    friend class array_access_declaration;
+
+    /// Ends `link`'s declaration from its value's side: withdrawn, or destroyed.
+    void end_array_declaration(impl::array_declaration_link& link);
+
+    /// Ends every live declaration from this list's side: the raster ones at a rendering scope's end, or all at a submit or a drop.
+    void end_array_declarations(bool raster_only);
+
+    // Every declaration made on this list and still in force, each shared with its value.
+    cc::vector<impl::array_declaration_token> _live_array_declarations;
+    u32 _last_array_declaration_id = 0;
+
     void check_raster_aliasing(bool indexed);
-    void check_hit_records(raytracing_shader_table const& table);
+    // Whether any bound tlas reaches a hit record past the end of `table`, which dispatch_rays must not submit.
+    bool check_hit_records(raytracing_shader_table const& table);
 
     cc::string _rendering_target_set;                       // of the open rendering, or empty
     cc::optional<raster_target_formats> _rendering_formats; // of the open rendering, or empty when none is open
@@ -277,10 +326,12 @@ private:
 
     // Each shader table and tlas dispatch_rays has checked against each other in this list, so a list logs a mismatch once.
     // Held rather than pointed at, so neither address can be reused by another table or tlas while the list records.
+    // The verdict is kept too, so a second dispatch of a pair that reaches past the table is skipped as the first was.
     struct checked_trace
     {
         raytracing_shader_table_handle table;
         tlas_handle tlas;
+        bool past_table_end = false;
     };
     cc::vector<checked_trace> _checked_traces;
 };

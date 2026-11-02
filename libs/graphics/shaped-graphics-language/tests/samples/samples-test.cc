@@ -164,9 +164,10 @@ TEST("sgl samples - the AST pass is total: every truncation of a sample builds, 
     {
         auto const source = read_sample(name);
         // A prime stride cuts through every kind of token over the length of a file.
-        // Each length parses the whole prefix, so a long file takes about 64 lengths by default, whatever its size.
-        // The generated builtins are most of the bytes and grow with every builtin, and they repeat one declaration's shape.
-        auto const stride = nx::is_thorough() || source.size() < 8'000 ? 13 : (source.size() / 64) | 1;
+        // Each length parses the whole prefix, so by default a long file takes about 64 lengths, whatever its size.
+        // The generated builtins take 16: they are most of the bytes, and repeat one declaration's shape.
+        auto const lengths = source.size() < 64'000 ? isize(64) : isize(16);
+        auto const stride = nx::is_thorough() || source.size() < 4'000 ? isize(13) : (source.size() / lengths) | 1;
         for (auto length = isize(0); length < source.size(); length += stride)
         {
             auto const file = sgl::parse(cc::string(cc::string_view(source).subview({.offset = 0, .size = length})));

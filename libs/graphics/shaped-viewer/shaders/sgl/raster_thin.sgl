@@ -1,0 +1,165 @@
+// The THIN G-BUFFER the hybrid's deferred lighting reads: the material reduced to a closure a compute kernel rebuilds.
+//
+// A material's `sv_gbuffer` pixel stage writes it over the vertex stage and the bindings `shade` uses, and nothing here traces.
+// The reduced closure is an OpenPBR surface with every lobe but the base, the specular, the coat and the transmission's weight at its default.
+// libs/graphics/shaped-viewer/docs/plans/hybrid-renderer.md is the design.
+module raster
+
+use material
+use openpbr
+use scene
+use slug
+use tracer
+
+/// What a deferred pixel writes: eight targets, D3D12's limit.
+///
+/// The colors are square-rooted into eight bits, which keeps the darks a linear eight bits would band.
+/// A pixel no surface covers holds the environment in `emission`, 1 in `primary_depth`, its reprojection in `motion`, and zero elsewhere.
+@pixel struct thin_targets:
+    /// the surface's own emission, alpha 1
+    @format(.rgba16_float) emission: float4
+    /// the shading normal and the geometric normal turned toward the viewer, both octahedral, in the world
+    @format(.rgba16_float) normals: float4
+    /// the base color times its weight, square-rooted, and the metalness
+    @format(.rgba8_unorm) base: float4
+    /// the specular color times its weight, square-rooted, and the specular roughness
+    @format(.rgba8_unorm) specular: float4
+    /// the coat's weight and roughness, the specular IOR as `(ior - 1) / 3`, and the transmission as `pack_transmission` folds it
+    @format(.rgba8_unorm) extra: float4
+    /// the linear view depth along the camera's forward axis, which places the point; `primary_depth` cannot at a distance
+    @format(.r32_float) depth: float
+    /// this pixel minus where its surface sat on the previous frame's image, in pixels
+    @format(.rg32_float) motion: float2
+    /// the clip depth, `1 - near_plane / depth`, which a layer's drawings are occluded by
+    @format(.r32_float) primary_depth: float
+
+// ---- tests: run when this file is compiled on its own ----
+
+// Both halves of the channel round-trip through eight bits, the weight to within a step of 1/127.
+test:
+    let mut thin = false
+    let w = unpack_transmission(round(pack_transmission(1.0, true) * 255.0) / 255.0, mut thin)
+    thin and abs(w - 1.0) < 0.01
+test:
+    let mut thin = true
+    let w = unpack_transmission(round(pack_transmission(1.0, false) * 255.0) / 255.0, mut thin)
+    abs(w - 1.0) < 0.01 and not thin
+test:
+    let mut thin = true
+    let w = unpack_transmission(round(pack_transmission(0.0, false) * 255.0) / 255.0, mut thin)
+    w == 0.0 and not thin
+test:
+    let mut thin = false
+    let w = unpack_transmission(round(pack_transmission(0.0, true) * 255.0) / 255.0, mut thin)
+    thin and abs(w) < 0.01
+
+/// A unit vector as the two coordinates of the octahedron it folds onto, each in [-1, 1].
+fun oct_encode(n: float3) -> float2:
+    let a = n / (abs(n.x) + abs(n.y) + abs(n.z))
+    if a.z >= 0.0 => return float2(a.x, a.y)
+    let sx = if a.x >= 0.0 => 1.0 else -1.0
+    let sy = if a.y >= 0.0 => 1.0 else -1.0
+    return float2((1.0 - abs(a.y)) * sx, (1.0 - abs(a.x)) * sy)
+
+/// The unit vector `oct_encode` folded to `e`.
+fun oct_decode(e: float2) -> float3:
+    let z = 1.0 - abs(e.x) - abs(e.y)
+    let t = max(-z, 0.0)
+    let x = if e.x >= 0.0 => e.x - t else e.x + t
+    let y = if e.y >= 0.0 => e.y - t else e.y + t
+    return normalize(float3(x, y, z))
+
+/// The transmission's weight and whether its wall is thin, in one eight-bit channel: the lower half for a solid, the upper for a thin wall.
+/// A pane read back as a solid would send its bounce looking for a far side, which a single sheet does not have.
+fun pack_transmission(weight: float, thin_walled: bool) -> float:
+    let w = saturate(weight) * (127.0 / 255.0)
+    let packed = if thin_walled => w + 128.0 / 255.0 else w
+    return packed
+
+/// `pack_transmission`'s weight, and through `thin_walled` its wall.
+fun unpack_transmission(packed: float, thin_walled: mut bool) -> float:
+    thin_walled = packed >= 127.5 / 255.0
+    let w = if thin_walled => packed - 128.0 / 255.0 else packed
+    return saturate(w * (255.0 / 127.0))
+
+/// `surface`'s reduced closure, its turned normals and its depth as a deferred pixel writes them.
+///
+/// The base takes the subsurface's color by its weight, so a subsurface material keeps its albedo.
+/// The transmission keeps its weight and its thin wall, so the glass a bounce refracts through is clear.
+/// Lost are anisotropy, the fuzz, the thin film, the coat's color and IOR, the diffuse roughness and the medium.
+fun thin_of(surface: openpbr.surface, shading_n: float3, n: float3, view_depth: float, motion: float2, near: float) -> thin_targets:
+    let base = saturate(surface.base_weight * mix(surface.base_color, surface.subsurface_color, saturate(surface.subsurface_weight)))
+    let specular = saturate(surface.specular_weight * surface.specular_color)
+    let emission = max(float3(0.0), surface.emission_luminance * surface.emission_color)
+    return {
+        emission = float4(..emission, 1.0)
+        normals = float4(..oct_encode(shading_n), ..oct_encode(n))
+        base = float4(..sqrt(base), saturate(surface.base_metalness))
+        specular = float4(..sqrt(specular), saturate(surface.specular_roughness))
+        extra = float4(saturate(surface.coat_weight), saturate(surface.coat_roughness), saturate((surface.specular_ior - 1.0) / 3.0), pack_transmission(surface.transmission_weight, surface.geometry_thin_walled != 0.0))
+        depth = view_depth
+        motion = motion
+        primary_depth = max(1.0 - near / view_depth, 0.0)
+    }
+
+/// The reduced closure `thin_of` wrote as `base`, `specular` and `extra`, as a surface `bsdf_prepare` takes.
+fun thin_surface(base: float4, specular: float4, extra: float4) -> openpbr.surface:
+    let mut s = openpbr.default_surface()
+    s.base_weight = 1.0
+    s.base_color = float3(base.x, base.y, base.z) * float3(base.x, base.y, base.z)
+    s.base_metalness = base.w
+    s.specular_weight = 1.0
+    s.specular_color = float3(specular.x, specular.y, specular.z) * float3(specular.x, specular.y, specular.z)
+    s.specular_roughness = specular.w
+    s.coat_weight = extra.x
+    s.coat_roughness = extra.y
+    s.specular_ior = 1.0 + 3.0 * extra.z
+    let mut thin_walled = false
+    s.transmission_weight = unpack_transmission(extra.w, mut thin_walled)
+    s.geometry_thin_walled = if thin_walled => 1.0 else 0.0
+    return s
+
+/// The view depth at which `cam`'s ray through `pixel` meets the plane through `to_point` (from the camera) with normal `n`.
+///
+/// What the deferred lighting rebuilds its point from, along that same ray, so the point lands on the surface rather than beside it.
+/// The interpolated point itself sits off that ray by however far the raster snapped the triangle's corners, a fraction of a pixel,
+/// which on a surface seen at a grazing angle puts the rebuilt point measurably off the surface, and its shadow rays inside it.
+/// The interpolated point's own depth where the ray runs along the plane.
+fun plane_depth(cam: scene.camera, pixel: float2, size: float2, to_point: float3, n: float3) -> float:
+    let forward = normalize(cam.forward)
+    let ray = scene.camera_ray_offset(cam, pixel, size)
+    let facing = dot(ray, n)
+    if abs(facing) < 1e-6 => return dot(to_point, forward)
+    return dot(to_point, n) / facing * dot(ray, forward)
+
+/// The thin G-buffer of the pixel `p` covers, whose material evaluated to `surface_in` through `ctx`, as `shade` describes the surface.
+fun thin(p: varyings, ctx: material.shading_context, surface_in: openpbr.surface, supplied_tangent_frame: bool){drawn, tracer.bindless, slug.tables} -> thin_targets:
+    let f = drawn.frame[0]
+    let cam = scene.camera(..f.camera)
+    let inst = scene.instance(..drawn.instances[p.instance as int])
+    let face = face_of(inst, ctx, p.world, cam.position, surface_in, supplied_tangent_frame)
+    let v = normalize(cam.position - p.world)
+    let to_point = p.world - cam.position
+    let view_depth = plane_depth(cam, float2(p.position.x, p.position.y) + f.jitter, f.size, to_point, face.n)
+
+    let mut surface = surface_in
+    apply_decals(mut surface, p.world, face.n, f.pixel_spread * length(to_point))
+    let shading = openpbr.shading_frame(mut surface, face.n, v, face.authored, supplied_tangent_frame)
+
+    let prev = scene.camera(..f.previous_camera)
+    let motion = float2(p.position.x, p.position.y) + f.jitter - scene.camera_project(prev, p.world - prev.position, f.size)
+    return thin_of(surface, shading.n, face.n, view_depth, motion, f.near_plane)
+
+/// What a pixel no surface covers holds in the thin G-buffer, as `environment` fills the lit targets.
+fun environment_thin(pixel: float2){drawn} -> thin_targets:
+    let lit = environment(pixel)
+    return {
+        emission = lit.color
+        normals = float4(0.0)
+        base = float4(0.0)
+        specular = float4(0.0)
+        extra = float4(0.0)
+        depth = 0.0
+        motion = lit.motion
+        primary_depth = 1.0
+    }

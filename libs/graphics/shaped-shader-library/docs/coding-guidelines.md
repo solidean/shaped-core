@@ -6,7 +6,7 @@ This document only captures what is **slib-specific**: the rules the code cannot
 Each one exists to keep a promise [shaders.md](../../shaped-graphics/docs/shaders.md) makes to a consumer, so that is the other half to read.
 
 It is intentionally short.
-**Extend it** whenever you catch yourself breaking something load-bearing that nothing in the compiler would have stopped.
+**Extend it** whenever you catch yourself breaking something that nothing in the compiler would have stopped.
 
 ---
 
@@ -65,5 +65,12 @@ Promotion happens in `acquire()`, on the consuming thread, and only once the com
 A consumer never waits on the compiler, a shader that no longer compiles leaves the running one alone, and a compile still in flight is invisible rather than a stall.
 Any shortcut that has the watcher assign `current` directly gives up all three.
 The corollary is that the watcher must also *drive* the compile it stages: a `cc::async` node is cold until someone runs it, and nobody else ever will.
+
+A compile records each file's revision as it reads it, taken just before the read.
+A first compile whose files have moved by the time its `acquire()` installs flags the asset.
+The edit staged either a reload that skipped the format, which had no shader yet, or none at all, since nothing watched the file.
+The watcher meeting a file for the first time compares it against the revision its compile read rather than seeding the current one, so an edit landing after the install is still owed.
+It never compiles a second time itself: its thread is a consumer's, which may neither run other work nor leave a compile cold.
+The watcher's next scan stages every flagged asset again, driving the compile as it drives any other.
 
 Where each half lives in code: `impl::reload_watcher` only ever stages, `shader_asset::acquire` promotes, and `shader_asset::last_error` is what a broken edit leaves behind.

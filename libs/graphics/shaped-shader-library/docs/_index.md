@@ -16,9 +16,10 @@ It is the front door — sg's vocabulary, this library's packages and reload, an
   The answer to the binding half of portable HLSL; every phase has landed, and the doc is the design behind it.
 - [raytracing-pipelines](raytracing-pipelines.md) — the type an SGL `@raytracing pipeline` generates, the order it registers shaders in, and hit groups and callables the host compiles at run time.
   Also what metal needs of a pipeline, which slib supplies.
+- [frozen-shaders](frozen-shaders.md) — the shipping mode: no disk, no reload, and recorded bytecode embedded in the executable.
 - [coding-guidelines](coding-guidelines.md) — the rules this library rests on that the code cannot enforce itself.
   Short, and worth reading before changing anything here.
-- [TODO](TODO.md) — known follow-ups that are open, as against `structure.md`'s roadmap of what has landed.
+- [issues](issues/) — known follow-ups that are open, one file each, as against `structure.md`'s roadmap of what has landed.
 
 ## Conventions
 

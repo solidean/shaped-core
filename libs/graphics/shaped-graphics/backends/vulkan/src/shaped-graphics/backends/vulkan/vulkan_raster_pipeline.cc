@@ -143,9 +143,9 @@ cc::result<vulkan_raster_pipeline_handle> vulkan_raster_pipeline::create(vulkan_
     // WORKAROUND: an attribute's SPIR-V location is its index in `attributes`, because sg identifies a vertex input by
     // an HLSL `semantic` string and SPIR-V has no such thing.
     // So a Vulkan-targeted shader must annotate `[[vk::location(N)]]` to match the layout's attribute order.
-    // The replacement is the backend-neutral numeric `location` on sg::vertex_attribute that the TODO list already
-    // names — with it, this line reads the field instead of counting.
-    // See libs/graphics/shaped-graphics/docs/TODO.md.
+    // The replacement is the backend-neutral numeric `location` on sg::vertex_attribute.
+    // With it, this line reads the field instead of counting.
+    // issue: feat-sg-vertex-attribute-location
     cc::vector<VkVertexInputBindingDescription> vk_slots;
     for (isize i = 0; i < desc.vertex_input.slots.size(); ++i)
     {

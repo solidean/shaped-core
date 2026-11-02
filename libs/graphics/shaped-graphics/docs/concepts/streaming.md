@@ -13,7 +13,7 @@ It trades the automatic synchronization for a **handle**: dynamic priority, prog
 It is not a separate system.
 There is one job queue, one window packer and one copy queue per direction; a streaming transfer is a **job flavor**, and only the public API is separate.
 
-## The contract (the load-bearing decision)
+## The contract
 
 > The streamed extent is **yours alone** between the call and the moment the handle reports complete.
 > Any command list touching it must be **submitted** after you observed that.
@@ -80,7 +80,7 @@ A low-priority transfer never running while higher-priority work exists is usual
 All of this is [`sg::impl::transfer_scheduler`](../../src/shaped-graphics/transfer/impl/transfer_scheduler.hh), which knows no backend type and is tested without a GPU.
 That is where nearly all of the system's risk lives.
 
-## Load-bearing invariants
+## Invariants
 
 Preserve these; the rest is tuning:
 

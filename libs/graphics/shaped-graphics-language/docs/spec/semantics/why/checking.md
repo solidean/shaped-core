@@ -219,6 +219,15 @@ A pattern with the top bit set belongs in a `uint`, or is built with `int.from_b
 Folding literals, which the [literal-types](../../incubator/literal-types.md) incubator sketches, makes that expression an error rather than a silent `0`.
 Refusing it now means nothing written today changes meaning when folding lands, which is CHK-257's reason carried over to the day `int` gained a `/`.
 
+## CHK-394
+
+`1 + 2` was the `int` sum of two literals, so it did not take a `float` parameter that `3` takes, and `(1 + 2) * 0.5` had no overload.
+Folding makes "what is the type of `1 + 2`" stop being a question: it is the literal `3`, which converts as `3` does.
+The value is the language's, not a target's: an integer is held in 64 bits as a written literal is, and is judged where its type settles, so an overflow is an error rather than a silent wrap.
+A float folds in 64 bits and rounds once to the type it settles at; a target that computed the same expression in 32 bits could round twice, which this rounding never does.
+Only the prelude's operators fold, since a program's own operator is a function whose body the literals are handed to.
+The incubator's open questions stay open: whether a literal type survives inside a tuple, and what a generic function sees.
+
 ## CHK-81
 
 A literal converting by a call of the type's name gets defaults, named arguments, named-only parameters and the evaluation order from the call rules.
@@ -314,6 +323,13 @@ Defining saturation and a NaN of 0 would mean a clamp and a compare around every
 A program that needs a defined result clamps before it converts, and pays for it only where it asks.
 The interpreter still has to give some value, and saturation is the choice that is right on the most hardware.
 
+## CHK-396
+
+A shader ported from HLSL, GLSL or MSL writes `float(i)`, and every one of those languages reads it as a conversion.
+Refusing it would only send the author to `as`, and a second meaning would be worse than none.
+So the call is exactly the conversion `as` is, with the same overloads and the same unspecified values, and never a reinterpretation of bits, which `from_bits` is.
+A type `as` does not reach stays unreachable this way too, so `bool` keeps its one explicit spelling.
+
 ## CHK-225
 
 A `bool` line is a check rather than a line under a `check` keyword, because the keyword would sit on every line of every test.
@@ -392,6 +408,14 @@ It may come later as sugar over these parameters, and the [stage-interfaces](../
 The two axes and their names are WGSL's, which are exactly what every target has: HLSL's qualifiers and MSL's attributes spell the same combinations.
 An integer member must say `.flat` rather than being flat by default, because which vertex's value wins is part of what it means: a primitive id is right only because the first vertex's is taken.
 
+## CHK-393
+
+Every stage input is non-uniform by CHK-283, which is right for what varies per pixel and wrong for a value one draw hands every pixel.
+A renderer that pulls its instance through a flat varying then marks every bindless index `nonuniform`, and some hardware pays a loop per marked access.
+The mark is an explicit claim that the vertex stage proves, rather than an inference across the stages of a pipeline, so the source says why an index is unmarked.
+Uniform across a draw is enough: Vulkan defines dynamic uniformity over the invocations of one draw command, a quad never spans two primitives, and so never two draws.
+The rule is strict and relaxable: inferring the claim from what a vertex stage writes would accept every program it accepts now.
+
 ## CHK-275
 
 A format is not a type, which the vector-and-format incubator settled for render targets: a member has the type the shader computes with, and the format is an attribute.
@@ -411,6 +435,19 @@ A call is no jump, so a path that discarded would still have had to produce a va
 The portable meaning is that the pixel has no effect after it — no target, no depth, no stencil, no store — which every target keeps.
 Whether the pixel keeps running as a helper for its quad's derivatives is where the targets differ, and the writers demote wherever a target offers the choice.
 
+## CHK-284
+
+WGSL holds a divergent `break` against everything after its loop.
+That refuses a pixel stage that traces a shadow ray and then samples, since the trace is a loop each pixel leaves when its own ray is done.
+Every invocation that enters a loop with no `return` in it reaches the statement after it, and every target's structured control flow reconverges there.
+SPIR-V states it for the core: control flow uniform on entry to a structured loop, which every invocation leaves through its merge block, is uniform again after that block.
+That needs no `SubgroupUniformControlFlowKHR`, which only extends the same promise to flow uniform within a subgroup and not the whole workgroup, and SGL never counts that as uniform (CHK-377).
+DXC emits neither that mode nor maximal reconvergence for vulkan, and nothing here needs it to.
+A `return` is the exit that does not come back, so a loop some invocations leave by one keeps WGSL's rule.
+SGL runs its own analysis, so inheriting Tint's pessimism would buy nothing but refusals, and the WGSL text switches Tint's verdict off (EMIT-103).
+A barrier is where that switch does not exist: WGSL refuses one in what Tint judges non-uniform, whatever the directive.
+So a barrier keeps WGSL's rule on every target, and one shader means the same on all of them.
+
 ## CHK-285
 
 `T[N]` reads the way a C, HLSL or GLSL reader writes an array, and `texture_2d[float4][64]` is a binding array by the same rule, with no second spelling.
@@ -426,6 +463,34 @@ The author writes it instead, because it keeps the cost visible in the source.
 On hardware that needs the mark, a marked access becomes a loop over the distinct indices in the wave.
 A refactor that makes an index non-uniform then fails loudly, where an inserted mark would slow it silently.
 The strict rule is also additively relaxable: making the mark optional later breaks no program, while hiding the cost now and asking for it back later would.
+
+What the pass proves uniform needs no word, since the plain index is what every target writes for it anyway.
+Not everything uniform is provable: a count one thread wrote to a buffer, or a value a subgroup broadcast, may be the same in every invocation by the author's design.
+For those the author says which it is, and `uniform i` is the word that asserts it.
+It is checked against what the pass does prove, so it can never contradict a proven difference, and it costs nothing where it is right.
+`uniform` and `nonuniform` are functions of the prelude rather than keywords, so they are spelled and placed alike, and no program loses the name.
+
+## CHK-401
+
+A helper is inlined once per call, so its index has as many values as it has calls.
+Judging the access once, by the first copy the pass met, made a helper called with a uniform index and a varying one impossible to write.
+Unmarked, the varying call was refused; marked, the uniform call called the mark needless, and nothing satisfied both.
+Judging each copy by its own call lets the helper stay unmarked wherever every call proves its index uniform, which is the common case.
+Where calls disagree, the compiler cannot pick for the author: writing the mark pays on every call, and leaving it out is wrong on some.
+So it names both calls and asks, and the explicit `nonuniform` is an answer, not a mistake to warn about.
+A `nonuniform` that wraps only the copies the pass cannot prove uniform would let one helper serve both calls with no split.
+It is not taken while the pass has known holes (the checking file's "Open"): the author's explicit mark would then be overridden by a proof that can be wrong.
+Once those close, it is the natural relaxation, and breaks no program.
+A needless mark is judged over every entry point of the program, since one shared helper must not warn in the compile of a shader whose sibling needs the mark.
+
+## CHK-402
+
+Each entry point is a separate shader, compiled on its own by a host that may never build its siblings.
+A diagnostic judged of one entry point's inlined body, whichever pass judged it, says nothing of another's, so failing the other's compile for it would refuse a correct shader.
+A whole-file check still shows every one, since an editor and a test run speak for the file.
+A function no entry point reaches is left alone, though a check could judge it with its parameters unproven.
+That would demand a mark on every library helper that derives an index from a parameter, which is exactly the index CHK-401 lets the callers prove.
+A module's function is judged where it is used, in the program whose entry points inline it.
 
 ## CHK-320
 
@@ -588,6 +653,24 @@ That is why the footprint follows the member through the call as it follows it t
 A subscript is the spelling every port writes for a texel, and the one an `@atomic` image needs for its texel to have methods (CHK-373).
 It is sugar over `load` and `store`, so a texel can never mean anything those calls do not.
 
+## CHK-390
+
+One source that writes whatever format its host picks needs to name the value it stores, and that value's width follows the format.
+A type named after the format says so where the code reads it, and an option makes it one type per compile as it makes the format one.
+
+## CHK-391
+
+Every target already stores a four-wide value into a narrower format by dropping the channels it lacks: HLSL through a typed view, WGSL's `textureStore`, MSL's `write`.
+Letting a store do that silently would take away the one check a strictly typed image gives, that what is stored is what the format holds.
+A store that names nothing, a `store4`, would keep the check but hide the narrowing inside a method name.
+A conversion keeps the check and states the narrowing at the value, in the spelling SGL already gives every explicit conversion.
+(0, 0, 0, 1) is the fill a sampled texture's load uses for a missing channel, so widening and loading agree.
+
+The checker recognizes the conversion by its spelling, an `as` whose type is written `texel[...]` (`is_texel_type_expr` in `check_expr.cc`), and not by the type it resolves to.
+Once type aliases land, `type t = texel[F]` followed by `v as t` loses the width conversion and is checked as a plain `as`.
+And a user generic named `texel` is shadowed there: `v as texel[X]` takes the texel conversion whatever `texel` names in scope.
+Resolving the type first and asking whether it came from the builtin is the fix either case wants.
+
 ## CHK-368
 
 `globallycoherent` is the attribute every port of a cross-workgroup handoff already has, one to one, and a per-member fact sg can carry.
@@ -646,3 +729,38 @@ HLSL forms a compute stage's quads from its threads' ids, as it forms the quads 
 DXC writes them for vulkan in the same derivative groups, which is why sg's vulkan grants `subgroups` only with linear compute derivatives.
 WGSL and MSL form quads of four consecutive invocations of a subgroup, which agree with the row and with no square.
 One row whose length is a multiple of 4 is the one shape every target forms alike, and it is the shape a single-pass reduction already takes.
+
+## CHK-389
+
+A loop worth unrolling is one whose index picks an element of a local array, a channel, or a branch, and what pays is the index becoming a constant.
+An array indexed by a constant stays in registers, where one indexed at run time is memory on every GPU.
+The target's own hints cannot promise that the same way everywhere.
+HLSL's `[unroll]` is the one a compiler must obey, MSL has only clang's `#pragma unroll`, which is advisory, and WGSL has none at all.
+So the compiler writes the copies itself, and every target compiles the same straight-line text.
+A hint over the loop would leave WebGPU the slow path on the very shaders that asked.
+Copying is also where the index can be a constant to SGL's own rules, which folds a branch on it as CHK-356 folds any other.
+The limit of 256 copies bounds the text a mistyped bound can write, and nesting is where one multiplies, so a nest's copies count together.
+A loop that long wants a loop, and it means what it meant without the attribute, so it compiles as one and the warning tells its author the copies were not written.
+Unrolling every small constant-range loop without the attribute was not chosen: register pressure and text size would change behind the author's back, with no way to keep a loop a loop.
+
+## CHK-397
+
+A rotation or a normal matrix is a `mat3`, and building one from three columns is the common case in a body.
+Its layout in GPU memory is a decision of its own: a constant block starts each column on a row of 16 bytes, a buffer's element may pack it into 36, and each target's memory form differs.
+Taking that decision with the first local `mat3` would fix it before any shader needed one in memory, so a `mat3` stays in function bodies until it is taken.
+Everywhere memory or a stage edge would hold one is refused at its line, the way an array is (CHK-291), rather than by the emitter with no line at all.
+A shader that wants one from memory reads its columns, which are `float3`s, and builds it in the body.
+
+## CHK-404
+
+An atomic counts the invocations that reach it, so it means something only where the program can say how many there are.
+A raygen runs once per launch index, a miss once per ray that leaves the scene, a closest hit once per trace that hit, and a callable once per call.
+An any hit runs for each candidate the traversal asks about, including candidates a nearer hit later replaces, in an order the device picks.
+DXR and Vulkan may run it more than once for one candidate, unless the geometry sets `NO_DUPLICATE_ANYHIT_INVOCATION`, and Metal has no such flag.
+An intersection runs as often as the traversal reaches its box, which the acceleration structure's build decides.
+So a counter in either holds a number no spec defines, and one that differs between devices and between builds of one structure.
+A plain store is worse: the same undefined count, and a read-modify-write that races with itself besides, so the rule is one for every write through a binding rather than one for atomics.
+Every target compiles the atomic itself in all six stages, so the refusal is SGL's, and its detail says why rather than only that the stage is left out.
+An inline trace runs the same two decisions inside a loop of its own stage, as often as the same traversal asks, so the rule follows the decision rather than the entry point.
+What it gives up is every write whose count the program tolerates: a traversal-cost heat map, and multi-hit collection appending each candidate through an atomic counter.
+Both would come back as a relaxation that breaks no program, the second better served by a decision that answers through its payload.

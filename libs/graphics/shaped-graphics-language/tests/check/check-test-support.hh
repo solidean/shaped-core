@@ -1,6 +1,7 @@
 #pragma once
 
 #include <clean-core/memory/unique_ptr.hh>
+#include <clean-core/platform/file_path.hh>
 #include <clean-core/streams/file_stream.hh>
 #include <clean-core/string/format.hh>
 #include <clean-core/string/string.hh>
@@ -40,6 +41,58 @@ inline cc::string shadowable_builtins_text()
     auto text = builtins_text();
     text.replace_all("@shadowable(false)\n", "");
     return text;
+}
+
+/// `text` as the C++ string literals a golden is written in, one per line, each behind `indent`.
+inline cc::string golden_literals(cc::string_view text, cc::string_view indent)
+{
+    auto out = cc::string();
+    auto line = cc::string();
+    auto const flush = [&]
+    {
+        out.appendf("{}{}\"{}\\n\"", out.empty() ? "" : "\n", out.empty() ? "" : indent, line);
+        line.clear();
+    };
+    for (auto const c : text)
+    {
+        if (c == '\n')
+            flush();
+        else if (c == '"' || c == '\\')
+            line.appendf("\\{}", c);
+        else
+            line += c;
+    }
+    if (!line.empty())
+        out.appendf("{}{}\"{}\"", out.empty() ? "" : "\n", out.empty() ? "" : indent, line);
+    return out;
+}
+
+/// Checks `actual == expected` for a long golden text, whose failure no log shows whole.
+/// Where they differ, `actual` is written to the temp directory twice, as text and as the literals that replace
+/// `expected`, and the failure names both files; `label` names them, so it must be unique among the goldens of a run.
+inline void check_golden(cc::string_view actual, cc::string_view expected, cc::string_view label)
+{
+    if (actual == expected)
+    {
+        CHECK(true);
+        return;
+    }
+    auto const write = [](cc::string const& path, cc::string_view text)
+    {
+        auto opened = cc::file_write_stream_adapter::create(path);
+        if (!opened.has_value())
+            return;
+        auto stream = opened.value().stream();
+        (void)stream.write(text.as_bytes());
+        (void)stream.flush();
+    };
+    auto const text_path = cc::format("{}/sgl-golden-{}.txt", cc::temp_directory_path(), label);
+    auto const literal_path = cc::format("{}/sgl-golden-{}.literals.txt", cc::temp_directory_path(), label);
+    write(text_path, actual);
+    write(literal_path, golden_literals(actual, "             "));
+    CHECK(actual == expected)
+        .context(cc::format("golden {}: what it is now is {}, and as the literals that replace it {}", label, text_path,
+                            literal_path));
 }
 
 } // namespace sgl_test

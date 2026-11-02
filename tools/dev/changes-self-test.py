@@ -31,7 +31,13 @@ from tools.dev.lib.quality.changes import (  # noqa: E402
     changed_line_ranges,
     format_changed_line_spec,
     resolve_range,
+    touched_paths,
 )
+from tools.dev.lib.quality.checks import Check, CheckRegistryError  # noqa: E402
+from tools.dev.lib.quality.memo import CheckMemo, file_ids  # noqa: E402
+from tools.dev.lib.quality.test_selection import select_test_binaries_for_change  # noqa: E402
+from tools.dev.lib.quality.watch import Watch  # noqa: E402
+from tools.dev.lib.project.graph import TargetGraph  # noqa: E402
 
 VERBOSE = "-v" in sys.argv
 
@@ -187,6 +193,140 @@ def test_working_tree_scope_still_covers_dirty_and_untracked(root: Path) -> None
         (root / "fresh.md").unlink()
 
 
+def test_touched_paths_keep_deletions_and_both_names_of_a_rename(root: Path) -> None:
+    # Runs after the rename-and-delete commit: selection must see what a linter drops, since a deleted file under a
+    # watched tree is a reason to run the gate.
+    touched = set(touched_paths(root, ChangeScope("HEAD")))
+    assert {"renamed.md", "b.md"} <= touched, touched
+    assert "a.md" in touched or "renamed.md" in touched, touched
+
+
+def test_touched_paths_in_the_working_tree_include_a_deletion(root: Path) -> None:
+    write(root, "fresh.md", "brand new\n")
+    (root / "root.md").unlink()
+    try:
+        touched = set(touched_paths(root, ChangeScope()))
+        assert {"fresh.md", "root.md"} <= touched, touched
+    finally:
+        git(root, "checkout", "--", "root.md")
+        (root / "fresh.md").unlink()
+
+
+def test_watch_globs_are_gitignore_shaped(root: Path) -> None:
+    w = Watch.of(["**/*.cc", "tools/review/**", "docs/guides/prose.md", "libs/*/x/*.hh"])
+    assert w.matches("a.cc") and w.matches("libs/base/clean-core/src/a.cc")
+    assert not w.matches("a.cch") and not w.matches("a.cc/b")
+    assert w.matches("tools/review/x/y.py") and not w.matches("tools/reviewer/x.py")
+    assert w.matches("docs/guides/prose.md") and not w.matches("docs/guides/prose.md.bak")
+    assert w.matches("libs/base/x/a.hh") and not w.matches("libs/base/y/x/a.hh")
+    bare = Watch.of(["tools/review"])
+    assert bare.matches("tools/review") and bare.matches("tools/review/a.py") and not bare.matches("tools/reviewer")
+    assert w.dead_patterns(["a.cc", "tools/review/x"]) == ["docs/guides/prose.md", "libs/*/x/*.hh"]
+    assert w.touched_by(["a.cc", "b.md"]) == ["a.cc"]
+
+
+def test_a_check_declares_watches_or_always_and_never_both(root: Path) -> None:
+    run = lambda **kw: True  # noqa: E731
+    Check("w", "", False, run, watches=("x/**",))
+    Check("a", "", False, run, always=True)
+    for kwargs in ({}, {"watches": ("x",), "always": True}, {"watches": ()}):
+        try:
+            Check("bad", "", False, run, **kwargs)
+        except CheckRegistryError:
+            continue
+        raise AssertionError(f"Check(**{kwargs}) should have raised CheckRegistryError")
+    assert Check("a", "", False, run, always=True).touched_by(["p"]) == ["p"]
+    assert Check("w", "", False, run, watches=("x/**",)).touched_by(["x/p", "y/p"]) == ["x/p"]
+
+
+def _graph() -> TargetGraph:
+    # core <- geo <- render <- render-test; core-test on core; a shader file under render's directory, no target lists it.
+    g = TargetGraph()
+    g.owners = {"libs/core/src/a.cc": {"core"}, "libs/geo/src/g.cc": {"geo"}, "libs/render/src/r.cc": {"render"},
+                "libs/render/tests/t.cc": {"render-test"}, "libs/core/tests/t.cc": {"core-test"}}
+    g.defined_in = {"libs/core": {"core"}, "libs/core/tests": {"core-test"}, "libs/geo": {"geo"},
+                    "libs/render": {"render", "render-test"}}
+    g.dependents = {"core": {"geo", "core-test"}, "geo": {"render"}, "render": {"render-test"},
+                    "render-test": set(), "core-test": set()}
+    return g
+
+
+def test_target_graph_attributes_by_source_then_by_deepest_directory(root: Path) -> None:
+    g = _graph()
+    assert g.owners_of("libs/core/src/a.cc") == {"core"}
+    assert g.owners_of("libs/render/shaders/x.sgl") == {"render", "render-test"}
+    assert g.owners_of("libs/core/tests/data.bin") == {"core-test"}, "the deepest directory wins"
+    assert g.owners_of("tools/x.py") is None
+    assert g.affected({"core"}) == {"core", "geo", "render", "render-test", "core-test"}
+    assert g.affected({"geo"}) == {"geo", "render", "render-test"}
+
+
+def test_test_selection_narrows_and_never_guesses(root: Path) -> None:
+    g = _graph()
+    cands = ["core-test", "render-test"]
+    inputs = Watch.of(["**/CMakeLists.txt"])
+    prose = Watch.of(["**/*.md", "tools/dev/**"])
+    sel = select_test_binaries_for_change(g, ["libs/geo/src/g.cc"], cands, build_inputs=inputs, prose=prose)
+    assert sel.binaries == ["render-test"] and sel.skipped == ["core-test"] and not sel.everything
+    sel = select_test_binaries_for_change(g, ["docs/a.md", "tools/dev/x.py"], cands, build_inputs=inputs, prose=prose)
+    assert sel.binaries == [] and not sel.everything, "prose selects nothing"
+    sel = select_test_binaries_for_change(g, ["libs/geo/CMakeLists.txt"], cands, build_inputs=inputs, prose=prose)
+    assert sel.everything and sel.binaries == cands and "build input" in sel.reasons[0]
+    sel = select_test_binaries_for_change(g, ["mystery.bin"], cands, build_inputs=inputs, prose=prose)
+    assert sel.everything and "no target owns mystery.bin" in sel.reasons
+    both = Watch.of(["tools/dev/run.py"])
+    sel = select_test_binaries_for_change(g, ["tools/dev/run.py"], cands, build_inputs=both, prose=prose)
+    assert sel.everything, "a build input wins over prose"
+
+
+def test_memo_keys_a_gate_on_what_it_watches_and_nothing_else(root: Path) -> None:
+    memo = CheckMemo(root, root / "build" / "memo.json")
+    w = Watch.of(["a.md"])
+    key = memo.gate_key("g", w, None)
+    assert key is not None and memo.gate_key("g", w, None) == key, "stable across calls"
+    assert memo.gate_key("h", w, None) != key, "the gate's name is part of the key"
+    assert memo.gate_key("g", w, lambda: "tool 2") != key, "and so is the tool stamp"
+    assert not memo.gate_passed_before("g", key)
+    memo.record_gate("g", key)
+    assert memo.gate_passed_before("g", key)
+    assert CheckMemo(root, root / "build" / "memo.json").gate_passed_before("g", key), "it survives a reload"
+    assert not CheckMemo(root, root / "build" / "memo.json", read=False).gate_passed_before("g", key), "unless reads are off"
+
+    write(root, "root.md", "one\ntwo\nthree\nchanged\n")
+    try:
+        memo.invalidate_files()
+        assert memo.gate_key("g", w, None) == key, "an unwatched edit changes nothing"
+        write(root, "a.md", "alpha\nbeta\nedited\n")
+        memo.invalidate_files()
+        edited = memo.gate_key("g", w, None)
+        assert edited != key, "a watched edit changes the key"
+        assert not memo.gate_passed_before("g", edited)
+        ids = file_ids(root)
+        assert ids is not None and ids["a.md"].startswith("disk:"), "a dirty file is hashed from disk"
+    finally:
+        git(root, "checkout", "--", "root.md", "a.md")
+    memo.invalidate_files()
+    assert memo.gate_key("g", w, None) == key, "and reverting restores it"
+    memo.forget_gate("g")
+    assert not memo.gate_passed_before("g", key)
+
+
+def test_memo_keys_a_test_binary_on_its_artifact(root: Path) -> None:
+    memo = CheckMemo(root, root / "build" / "memo2.json")
+    exe = root / "build" / "fake-test.exe"
+    exe.parent.mkdir(exist_ok=True)
+    exe.write_bytes(b"v1")
+    assert memo.tests_passed_before("p", [("fake-test", exe)]) == set()
+    memo.record_tests("p", [("fake-test", exe)], [])
+    assert memo.tests_passed_before("p", [("fake-test", exe)]) == {"fake-test"}
+    assert memo.tests_passed_before("q", [("fake-test", exe)]) == set(), "per preset"
+    exe.write_bytes(b"v2")
+    assert memo.tests_passed_before("p", [("fake-test", exe)]) == set(), "a rebuilt artifact is a new key"
+    memo.record_tests("p", [("fake-test", exe)], [])
+    memo.record_tests("p", [], ["fake-test"])
+    assert memo.tests_passed_before("p", [("fake-test", exe)]) == set(), "a failure forgets the pass"
+
+
 def test_resolve_range_expands_a_single_commit_to_its_first_parent(root: Path) -> None:
     head = git(root, "rev-parse", "HEAD")
     parent = git(root, "rev-parse", "HEAD^")
@@ -206,6 +346,7 @@ def main() -> int:
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     # The history-mutating tests run last, so the shared fixture stays the documented shape for the rest.
     order = ["test_deletions_are_dropped_and_renames_yield_the_new_path",
+             "test_touched_paths_keep_deletions_and_both_names_of_a_rename",
              "test_line_ranges_are_numbered_against_the_head_commit",
              "test_pure_deletion_marks_the_surviving_line_above"]
     tests.sort(key=lambda t: order.index(t.__name__) + 1 if t.__name__ in order else 0)

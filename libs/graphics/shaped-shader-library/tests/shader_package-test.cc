@@ -73,7 +73,7 @@ TEST("slib - the generated package embeds its include closure", exclusive("slib-
 
     // Four shader files, plus the two .hlsli they include -- one of which is also registered on its own as
     // a binding entry, and is embedded once either way.
-    // The include is the point: ssc::dxc has no filesystem fallback, so a shipped build that embedded only the entry points could not resolve it.
+    // The include has to be embedded: ssc::dxc has no filesystem fallback, so a shipped build that embedded only the entry points could not resolve it.
     REQUIRE(pkg.embedded_files.size() == 6);
 
     bool has_invert = false;

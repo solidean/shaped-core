@@ -116,6 +116,7 @@ public:
 
     [[nodiscard]] sg::execution_model execution() const override { return sg::execution_model::never_block; }
 
+    /// Free-threaded, so every case reads what creation recorded: `device()` asserts the device thread.
     [[nodiscard]] bool supports(sg::feature f) const override
     {
         switch (f)
@@ -153,11 +154,19 @@ public:
         case sg::feature::shader_int16:
         case sg::feature::device_coherence:
         case sg::feature::image_atomics:
-            // WGSL has no 16-bit integers, no coherence qualifier and no atomic texel, on any device.
+        case sg::feature::first_instance:
+        case sg::feature::helper_lane_query:
+            // WGSL has no 16-bit integers, no coherence qualifier, no atomic texel, no first-instance builtin and no test
+            // for a helper invocation, on any device.
+            return false;
+        case sg::feature::opacity_micromap:
+            // The ray-query polyfill traverses its own boxes and knows no micromap.
             return false;
         case sg::feature::unaligned_block_compression:
             // Lifted by `texture-compression-unaligned`, which the emdawnwebgpu this builds against does not offer.
             return false;
+        case sg::feature::texture_compression_bc:
+            return _texture_compression_bc;
         }
         return false;
     }
@@ -223,9 +232,13 @@ public:
     {
         return cc::result<sg::raw_texture_handle>(create_webgpu_texture(desc, alloc));
     }
-    [[nodiscard]] cc::result<sg::memory_heap_handle> try_create_memory_heap(isize size_in_bytes) override
+    [[nodiscard]] cc::result<sg::memory_heap_handle> try_create_memory_heap(isize size_in_bytes,
+                                                                            sg::memory_heap_contents contents) override
     {
         CC_ASSERT(size_in_bytes >= 0, "heap size must be non-negative");
+        // WebGPU has no memory to place a texture into, only textures it allocates itself.
+        if (contents == sg::memory_heap_contents::textures)
+            return cc::error("webgpu places no textures");
         return sg::memory_heap_handle(std::make_shared<webgpu_memory_heap>(size_in_bytes));
     }
     [[nodiscard]] cc::result<sg::swapchain_handle> try_create_swapchain(sg::swapchain_description const& desc) override
@@ -472,6 +485,7 @@ public:
         bool extended_image_formats = false;  ///< texture-formats-tier1 and bgra8unorm-storage
         bool shader_f16 = false;              ///< shader-f16
         bool subgroups = false;               ///< subgroups
+        bool texture_compression_bc = false;  ///< texture-compression-bc
     };
 
     // Set once at creation.
@@ -493,6 +507,7 @@ private:
     bool _extended_image_formats = false;
     bool _shader_f16 = false; // shader-f16 was granted
     bool _subgroups = false;  // subgroups was granted
+    bool _texture_compression_bc = false;
 
     sg::epoch _current_epoch = sg::epoch::first;
     u64 _next_submission = u64(sg::submission_token::first);

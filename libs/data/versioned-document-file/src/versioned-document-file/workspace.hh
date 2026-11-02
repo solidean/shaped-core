@@ -6,7 +6,7 @@
 
 /// The workspace: disposable UI state, in its own table so it can be deleted wholesale without a second thought.
 ///
-/// **Nothing here is load-bearing.** Discarding every row leaves a fully valid document.
+/// **Nothing here is part of the document.** Discarding every row leaves a fully valid document.
 /// **A workspace write creates no op and moves no ref**, so moving a camera does not become edit history and does not make a document look unsaved.
 ///
 /// Keys are slash-namespaced and coarse: one per cohesive settings struct, never one per field.

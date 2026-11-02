@@ -33,7 +33,10 @@ dlss_rr_routine::~dlss_rr_routine()
 cc::shared_async<cc::unit> dlss_rr_routine::init(sg::routine_init_scope scope)
 {
     _ctx = &scope.context();
-    _instance = impl::dlss_open(*_ctx);
+    // Init runs again on every reload, on the same routine, and the instance outlives it.
+    // Every open must be balanced by one close, so a reload keeps the instance it has.
+    if (_instance == nullptr)
+        _instance = impl::dlss_open(*_ctx);
     co_return;
 }
 

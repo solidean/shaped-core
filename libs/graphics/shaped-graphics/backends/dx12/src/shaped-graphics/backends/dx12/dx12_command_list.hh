@@ -9,24 +9,11 @@
 #include <shaped-graphics/backends/dx12/dx12_download_inline.hh>
 #include <shaped-graphics/backends/dx12/dx12_query.hh>
 #include <shaped-graphics/backends/dx12/fwd.hh>
+#include <shaped-graphics/barrier/array_declarations.hh>
 #include <shaped-graphics/barrier/command_list_slot.hh>
 #include <shaped-graphics/command_list/command_list.hh>
 #include <shaped-graphics/fwd.hh>
 #include <shaped-graphics/resource/subresource.hh>
-
-/// One declare_array_buffer_access call, held until the next dispatch or draw resolves it against the bound groups.
-struct sg::backend::dx12::dx12_array_buffer_declare
-{
-    cc::string name;
-    cc::vector<sg::array_buffer_access> elements;
-};
-
-/// One declare_array_texture_access call, the texture analogue of dx12_array_buffer_declare.
-struct sg::backend::dx12::dx12_array_texture_declare
-{
-    cc::string name;
-    cc::vector<sg::array_texture_access> elements;
-};
 
 /// DirectX 12 implementation of sg::command_list.
 /// Owns its allocator and graphics command list, and is handed out already recording.
@@ -125,6 +112,14 @@ public:
     // Buffers this list has touched: their slots are finalized at submit/drop, and each gets the reverse async-upload stamp at submit.
     cc::vector<dx12_buffer_handle> _touched_buffers;
 
+    // The buffers this list writes, a subset of the touched ones, which alone owe a download wait.
+    // Only a write conflicts with a buffer's readback still in flight; a touched texture owes one whatever this list does to it.
+    cc::vector<dx12_buffer_handle> _written_buffers;
+
+    /// Folds every transfer this list must wait for into _required_copy_waits and _required_download_waits.
+    /// Called at submit, before the submission lock: a transfer enqueued after an access was recorded is still waited on.
+    void fold_transfer_waits();
+
     // Compute bind state, both reset on compute_bind_pipeline.
     // The bound pipeline layout supplies each slot's root-parameter indices.
     // One bound group per slot, indexed by `set` and sized to the layout's group count, whose views are declared at dispatch.
@@ -144,10 +139,18 @@ public:
             _bound_keep_alive.push_back(cc::move(object));
     }
 
-    // Array-access declarations for the *next* dispatch (compute + ray tracing share them); cleared after it.
-    // Resolved against the bound groups' array_bindings; an array the code indexes and none names is logged and covered whole.
-    cc::vector<dx12_array_buffer_declare> _pending_array_buffer_declares;
-    cc::vector<dx12_array_texture_declare> _pending_array_texture_declares;
+    // The live array declarations of the compute bind point, which ray tracing shares, in force until withdrawn.
+    // Met at every dispatch and trace by the bound groups' array_bindings; an array the code indexes and none names is logged and covered whole.
+    sg::impl::array_declaration_book _compute_arrays;
+
+    // How many accesses this list tracked into the write bucket of an array member, which ends every current application.
+    u64 _member_writes = 0;
+
+    // Armed by an op whose arrays were skipped, and checked by the next flush_barriers.
+    sg::impl::array_skip_guard _skip_guard;
+
+    // The bound arrays of the op being recorded, kept to reuse their storage.
+    cc::vector<sg::impl::array_site<dx12_array_binding>> _array_sites;
 
     // Textures this list has touched, so their per-list subresource slots are finalized at submit/drop.
     // A texture finalize can return revert barriers — transitions back to its entry layout on a non-final submit — emitted before Close.
@@ -155,11 +158,15 @@ public:
     cc::vector<dx12_texture_handle> _touched_textures;
 
     // Raster rendering-scope state; at most one scope is open at a time, since begin/end are balanced.
-    // begin_rendering sets _in_render_pass and records the RTV/DSV descriptor slots it created for the pass.
-    // end_rendering schedules their epoch-deferred free — they must outlive the list's GPU execution — and clears these.
     bool _in_render_pass = false;
-    cc::fixed_vector<cpu_descriptor_slot, sg::max_color_targets> _rendering_rtv_slots;
-    cpu_descriptor_slot _rendering_dsv_slot = cpu_descriptor_slot::invalid;
+
+    /// The RTV / DSV slots this list owns, grown to the most targets any of its scopes bound and freed with the list.
+    ///
+    /// **Every scope overwrites them, and nothing waits for the GPU before they are freed.**
+    /// D3D12 reads a CPU descriptor when OMSetRenderTargets or Clear*View records it, so a slot is free for reuse as
+    /// soon as the call that took it returns — tests/backends/dx12-rtv-record-time-test.cc pins that on the device.
+    cc::fixed_vector<cpu_descriptor_slot, sg::max_color_targets> _rtv_slots;
+    cpu_descriptor_slot _dsv_slot = cpu_descriptor_slot::invalid;
 
     // Raster (graphics) bind state, separate from the compute/RT state above: graphics binds through a distinct root-signature bind point.
     // That is SetGraphicsRootSignature / SetGraphicsRootDescriptorTable.
@@ -170,9 +177,8 @@ public:
     sg::impl::pipeline_footprint const* _bound_raster_footprint = nullptr;
     void const* _bound_raster_footprint_owner = nullptr;
 
-    // Array-access declarations for the *next* draw, resolved against _bound_raster_groups; cleared after it.
-    cc::vector<dx12_array_buffer_declare> _pending_raster_array_buffer_declares;
-    cc::vector<dx12_array_texture_declare> _pending_raster_array_texture_declares;
+    // The live array declarations of the raster bind point, met at every draw by _bound_raster_groups; ended with the scope.
+    sg::impl::array_declaration_book _raster_arrays;
 
     // Vertex / index buffers currently bound to the IA, slot-indexed; a null entry is an unbound slot.
     // Kept so their vertex_read / index_read accesses can be declared for hazard barriers at draw time, the point the GPU reads them.
@@ -190,12 +196,13 @@ public:
     // A LIST rather than a single value because completion timelines are per resource — collapsing them to one max
     // would be comparing values from unrelated fences, which is exactly the bug out-of-order selection introduced.
     // At submit the direct queue issues one Wait per entry, so the list sees every async write it touches.
-    // Maintained by track_buffer_access / track_texture_access.
+    // Filled by fold_transfer_waits at submit, from the touched set.
     // The reverse stamp — defer a later async upload behind this list — is applied to the touched sets at submit.
     cc::vector<dx12_group_value> _required_copy_waits;
 
-    // The async-download completions any resource this list WRITES must observe, same shape and same reason.
-    // Only writes fold in, since two reads never conflict.
+    // The async-download completions this list must observe, same shape and same reason.
+    // A buffer folds in only when this list writes it, since two reads never conflict.
+    // A texture folds in whatever the access, since its entry barrier can change the layout the copy queue is reading.
     cc::vector<dx12_group_value> _required_download_waits;
 
 protected:
@@ -225,14 +232,23 @@ protected:
                             isize dst_offset_in_bytes,
                             isize size_in_bytes) override;
 
+    void copy_buffer_to_texture(sg::raw_buffer_handle src,
+                                isize src_offset_in_bytes,
+                                isize src_row_pitch_in_bytes,
+                                sg::raw_texture_handle dst,
+                                sg::subresource_index const& subresource,
+                                sg::texture_region const& region) override;
+
     // Compute recording (reached through cmd.compute). Bodies in dx12_command_list.cc.
     void compute_bind_pipeline(sg::compute_pipeline const& pipeline) override;
     void compute_bind_group(int group_index, sg::binding_group const& group) override;
     void compute_dispatch(int x, int y, int z) override;
-    void compute_declare_array_buffer_access(cc::string_view binding_name,
-                                             cc::span<sg::array_buffer_access const> elements) override;
-    void compute_declare_array_texture_access(cc::string_view binding_name,
-                                              cc::span<sg::array_texture_access const> elements) override;
+    void compute_dispatch_indirect(sg::raw_buffer_handle const& args, isize offset_in_bytes) override;
+    [[nodiscard]] u32 compute_declare_array_buffer_access(cc::string_view binding_name,
+                                                          cc::span<sg::array_buffer_access const> elements) override;
+    [[nodiscard]] u32 compute_declare_array_texture_access(cc::string_view binding_name,
+                                                           cc::span<sg::array_texture_access const> elements) override;
+    void withdraw_array_declaration(u32 id) override;
     void compute_set_inline_constants(cc::span<byte const> data, cc::optional<isize> offset) override;
 
     // Raster rendering scope (reached through cmd.raster). Bodies in dx12_command_list.raster.cc.
@@ -247,10 +263,10 @@ protected:
     void raster_bind_group(int group_index, sg::binding_group const& group) override;
     void raster_bind_vertex_buffers(int first_slot, cc::span<sg::vertex_buffer_view const> views) override;
     void raster_bind_index_buffer(sg::index_buffer_view const& view) override;
-    void raster_declare_array_buffer_access(cc::string_view binding_name,
-                                            cc::span<sg::array_buffer_access const> elements) override;
-    void raster_declare_array_texture_access(cc::string_view binding_name,
-                                             cc::span<sg::array_texture_access const> elements) override;
+    [[nodiscard]] u32 raster_declare_array_buffer_access(cc::string_view binding_name,
+                                                         cc::span<sg::array_buffer_access const> elements) override;
+    [[nodiscard]] u32 raster_declare_array_texture_access(cc::string_view binding_name,
+                                                          cc::span<sg::array_texture_access const> elements) override;
     void raster_set_viewport(sg::viewport const& vp) override;
     void raster_set_scissor(tg::aabb2i const& rect) override;
     void raster_set_stencil_reference(u32 reference) override;
@@ -258,12 +274,14 @@ protected:
     void raster_set_inline_constants(cc::span<byte const> data, cc::optional<isize> offset) override;
     void raster_draw(sg::draw_config const& config) override;
     void raster_draw_indexed(sg::draw_indexed_config const& config) override;
+    void raster_draw_indexed_indirect(sg::raw_buffer_handle const& args, isize offset_in_bytes, isize count) override;
 
     // Ray-tracing acceleration-structure builds (reached through cmd.raytracing). Bodies in dx12_raytracing.cc.
     [[nodiscard]] bool raytracing_is_supported() const override;
     [[nodiscard]] sg::blas_handle raytracing_build_blas_triangles(cc::span<sg::blas_triangles const> geometries,
                                                                   sg::accel_build_flags flags,
                                                                   int hit_record_stride) override;
+    [[nodiscard]] sg::micromap_handle raytracing_build_micromap(sg::micromap_triangles const& triangles) override;
     [[nodiscard]] sg::blas_handle raytracing_build_blas_aabbs(cc::span<sg::blas_aabbs const> geometries,
                                                               sg::accel_build_flags flags,
                                                               int hit_record_stride) override;
@@ -291,8 +309,13 @@ private:
     // Declare `stages`/`access` on `buffer` for this list's slot, emit the intra-list barrier the tracker asks for, and record the buffer so its slot is finalized at submit/drop.
     // The barrier is precise (COPY_DEST→COPY_SOURCE and the like), with no bounce through COMMON.
     // Cross-list ordering rides on D3D12's decay of buffers to COMMON at ExecuteCommandLists, so no trailing barrier is needed.
-    // Also folds the buffer's pending async-upload value into _required_copy_wait, the forward cross-queue sync for ctx.upload.
-    void track_buffer_access(dx12_buffer_handle const& buffer, sg::pipeline_stage_flags stages, sg::access_flags access);
+    // An access landing in the write bucket of an array member counts toward _member_writes.
+    // `from_array_application` makes the buffer one, and the result says whether the op already held a write of it.
+    // Also files the buffer into the touched set, and into the written one for a write, which fold_transfer_waits reads at submit.
+    sg::impl::member_track track_buffer_access(dx12_buffer_handle const& buffer,
+                                               sg::pipeline_stage_flags stages,
+                                               sg::access_flags access,
+                                               bool from_array_application = false);
 
     // Shared BLAS build for both geometry families.
     // Prebuild-query the translated geometry descs, allocate the persistent result + transient scratch, barrier + record the build, and wrap it in a dx12_blas.
@@ -305,26 +328,27 @@ private:
     // Declare `stages`/`access`/`layout` over `range` on `texture` for this list's slot.
     // Emit the per-box layout-transition barriers the tracker asks for, and record the texture so its slot is finalized at submit/drop.
     // Called before every op that reads or writes a texture: transfers, copies, compute and ray-tracing dispatches, draws, and the rendering scope's target transitions.
-    void track_texture_access(dx12_texture_handle const& texture,
-                              sg::subresource_range range,
-                              sg::pipeline_stage_flags stages,
-                              sg::access_flags access,
-                              sg::texture_layout layout);
+    // Counts toward _member_writes as the buffer form does.
+    sg::impl::member_track track_texture_access(dx12_texture_handle const& texture,
+                                                sg::subresource_range range,
+                                                sg::pipeline_stage_flags stages,
+                                                sg::access_flags access,
+                                                sg::texture_layout layout,
+                                                bool from_array_application = false);
 
     // Declare the hazard accesses a draw consumes before flushing: each bound group's buffer/texture views, the bound vertex buffers, and when `indexed` the index buffer.
     // Called by raster_draw / raster_draw_indexed just before flush_barriers and the draw.
     void declare_raster_draw_barriers(bool indexed);
 
-    // Resolve one bind point's pending array-access declarations against its bound groups' array bindings and
-    // `footprint`, track what sg::impl::plan_array_declarations decides, then clear both pending sets.
-    // A declaration naming no bound array, or an element out of range or vacant, asserts.
+    // Meet one bind point's live array declarations with its bound groups' array bindings and `footprint`, and track
+    // what sg::impl::array_declaration_book::apply decides.
+    // An element out of range or vacant asserts the first time it meets a group.
     // `pipeline` is the bound pipeline, which names what a mismatch is logged against, and `op_stages` the op's stages.
     void declare_array_accesses(cc::span<dx12_binding_group const* const> groups,
                                 sg::impl::pipeline_footprint const* footprint,
                                 void const* pipeline,
                                 sg::pipeline_stage_flags op_stages,
-                                cc::vector<dx12_array_buffer_declare>& buffer_declares,
-                                cc::vector<dx12_array_texture_declare>& texture_declares);
+                                sg::impl::array_declaration_book& book);
 
     /// Declares every bound group's views at an op of `op_stages`, as `footprint` says the code touches them.
     void declare_group_accesses(cc::span<dx12_binding_group const* const> groups,

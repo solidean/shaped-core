@@ -56,7 +56,7 @@ TEST("sgl emit msl - every stage of sg's ray-tracing pipeline writes, and all ag
         names.appendf("{} ", entry);
     CHECK(names
           == "primary sky open_sky shade cutout shadow_cutout sphere shade_sphere pictured_primary pictured_sky "
-             "sgl_spheres_surface "
+             "counted_primary counted_shade counted_sky sgl_spheres_surface "
              "sgl_spheres_occlusion sgl_empty_closest_hit ");
 
     auto const expected = cc::string("struct sgl_ray_data\n{\n"
@@ -169,7 +169,8 @@ binding frame:
     output: mut buffer[float]
 
 @raygen fun start(@launch_id id: int3){frame}:
-    let sgl_data = instancing((id.x as float) + 1.0)
+    let mut sgl_data = instancing((id.x as float) + 1.0)
+    if id.x == 0 => sgl_data.v = 0.5
     frame.output[id.x] = sgl_data.v * 2.0
 )");
     auto unrenamed = cc::string();
@@ -223,4 +224,23 @@ hit_group wide_group for wide_rays:
              "Metal's ray data differently\n");
     // DXR sizes nothing in the text, so the other targets write it
     CHECK(sgl::emit::emit(checked.module, 0, target::hlsl_dx12).has_text());
+}
+
+TEST("sgl emit msl - an inline trace outside a ray-tracing stage reaches metal::raytracing, and no member hides its "
+     "type")
+{
+    // compute and pixel stages, each tracing inline: none of them is a ray-tracing stage, and each names the
+    // namespace's types, so each must include it
+    auto const stages = msl_stages_of(read_text(cc::string(SGL_SG_SHADERS_DIR) + "/raytracing.sgl"));
+    CHECK(!stages.empty());
+    for (auto const& [entry, text] : stages)
+    {
+        if (!text.contains("instance_acceleration_structure"))
+            continue;
+        CHECK(text.contains("#include <metal_raytracing>\nusing namespace raytracing;\n")).dump("entry", entry);
+
+        // `ray` is reserved on msl, so the prelude's struct and its members of that name both escape; a member
+        // spelled like the struct it holds hides that struct from every member after it (EMIT-138)
+        CHECK(!text.contains("ray_ ray_;")).dump("entry", entry);
+    }
 }

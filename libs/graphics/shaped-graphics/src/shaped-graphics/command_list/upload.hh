@@ -68,7 +68,7 @@ public:
 
     /// Uploads tightly-packed `pixels` into one `subresource` of `texture`.
     /// `region` selects a box within the subresource; none fills the **whole subresource**, empty = no-op.
-    /// Texture must have texture_usage::copy_dst.
+    /// Texture must have texture_usage::copy_dst, and must not have a depth or depth-stencil format.
     /// The source bytes are copied immediately, and the write is visible to later commands in the list.
     /// Preconditions: the subresource exists, and `region` is in bounds and block-aligned for a block-compressed format.
     /// `pixels.size()` equals the box's tightly-packed byte size — rows = height-in-blocks, row bytes = width-in-blocks × block-bytes.

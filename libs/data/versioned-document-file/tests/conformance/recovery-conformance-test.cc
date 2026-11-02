@@ -151,7 +151,7 @@ INVOCABLE_TEST("vdoc::file - a required snapshot is demoted once its ancestry is
         CHECK(recovered.value().snapshots_demoted == 1);
         CHECK(!replica->snapshots().get_ptr(boundary)->required);
 
-        // No longer load-bearing, so it is an ordinary cache entry again — and dropping it changes nothing but speed.
+        // No longer required, so it is an ordinary cache entry again — and dropping it changes nothing but speed.
         CHECK(!replica->snapshot_cache().is_pinned(boundary));
         replica->snapshot_cache().clear_unpinned();
         CHECK(materialize_to_text(replica->ops(), history.head()) == expected);

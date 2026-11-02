@@ -13,17 +13,23 @@
 /// silently corrupt cached shaders.
 ///
 /// Fixed little-endian widths and length prefixes throughout, so the encoding does not depend on the compiler that
-/// wrote it — a blob is read back by a different build than made it, which is the whole point.
+/// wrote it, because a blob is read back by a different build than made it.
 
 namespace sg::impl
 {
 /// The layout revision this build writes.
 /// Bump it whenever a field is added, removed or reordered; older blobs then decode to nothing, and a cache reads that as a miss.
-inline constexpr u32 k_shader_codec_version = 7;
+inline constexpr u32 k_shader_codec_version = 8;
 
 [[nodiscard]] cc::vector<byte> encode_compiled_shader(compiled_shader const& shader);
 
 /// Nothing when `bytes` is truncated, internally inconsistent, or a version this build does not know.
 /// Every doubtful input decodes to nothing rather than to a guess: a cache is allowed to miss, never to lie.
 [[nodiscard]] cc::optional<compiled_shader> decode_compiled_shader(cc::span<byte const> bytes);
+
+/// A list of bindings alone, in the same encoding and under the same version as a shader's own.
+[[nodiscard]] cc::vector<byte> encode_bindings(cc::span<binding const> bindings);
+
+/// Nothing on any input `decode_compiled_shader` would refuse.
+[[nodiscard]] cc::optional<cc::vector<binding>> decode_bindings(cc::span<byte const> bytes);
 } // namespace sg::impl

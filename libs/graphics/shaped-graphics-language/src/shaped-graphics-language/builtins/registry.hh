@@ -1,14 +1,17 @@
 #pragma once
 
 #include <clean-core/container/map.hh>
+#include <clean-core/container/set.hh>
 #include <clean-core/container/span.hh>
 #include <clean-core/container/vector.hh>
 #include <clean-core/function/function_ref.hh>
 #include <clean-core/string/string.hh>
 #include <clean-core/string/string_view.hh>
+#include <shaped-graphics-language/ast/file_ast.hh>
 #include <shaped-graphics-language/builtins/ids.hh>
 #include <shaped-graphics-language/check/features.hh>
 #include <shaped-graphics-language/interpret/scalar.hh>
+#include <shaped-graphics-language/syntax/parsed_file.hh>
 
 /// Everything the compiler knows about a builtin, in ONE record per builtin.
 ///
@@ -63,10 +66,12 @@ struct sgl::builtins::call_context
     /// A fresh name of the text, for a local that `written::lines` declares; none where no text is being written.
     cc::function_ref<cc::string(cc::string_view)> mint = {};
     /// The call's result type as the target spells it, for such a local; empty where no text is being written, and
-    /// for a result of no builtin type.
+    /// for a result of no builtin type but the prelude struct of `function_record::gives_prelude_struct`.
     cc::string_view result_type;
     /// The entry point holds a `@coherent` member, whose writes a barrier publishes to the whole dispatch (EMIT-150).
     bool is_device_coherent = false;
+    /// The entry point is a pixel stage, whose helper invocations run its atomics without effect (EMIT-162).
+    bool is_pixel_stage = false;
 };
 
 /// What a helper writer is given: the target, and each argument's type as the target spells it.
@@ -133,6 +138,27 @@ enum class sgl::builtins::judged_operand : sgl::u8
     divisor,
 };
 
+/// The argument a call writes through, a local of the caller, whose value then differs between invocations as the call
+/// says (CHK-283).
+enum class sgl::builtins::written_argument : sgl::u8
+{
+    none,
+    /// The first, a ray query, which a trace or a step advances: it holds what its arguments and the control flow made.
+    first,
+    /// The one past its signature (`takes_element`), a payload or a callable's parameter: other shaders write it back.
+    element,
+};
+
+/// What a mark on an index into a binding array says of it (CHK-300).
+enum class sgl::builtins::index_mark : sgl::u8
+{
+    none,
+    /// `uniform i`: the author says the index is the same in every invocation, where the compiler cannot prove it.
+    uniform,
+    /// `nonuniform i`: the index may differ between invocations, which the hardware is told and pays for.
+    nonuniform,
+};
+
 /// How every target writes a call of one builtin function.
 struct sgl::builtins::spelling
 {
@@ -178,6 +204,8 @@ struct sgl::builtins::type_record
     cc::string hlsl;
     cc::string wgsl;
     cc::string msl;
+    /// The HLSL spelling of a local whose flags are known constants, as `RayQuery<RAY_FLAG_FORCE_OPAQUE>`; none where its type takes none.
+    cc::string (*hlsl_flagged)(u32 flags) = nullptr;
 
     /// HLSL packs by rows of 16: a value starts a fresh row when its alignment is 16, or when it does not fit the rest of this one.
     block_layout hlsl_layout;
@@ -194,6 +222,10 @@ struct sgl::builtins::type_record
 
     /// What a device needs for a value of it, which an entry point holding one needs too (CHK-382).
     check::feature_set features;
+
+    /// A value of function bodies alone, which no GPU memory and no stage edge holds yet (CHK-397).
+    /// The detail of what refuses one says why: `mat3`'s layout in memory is not decided.
+    cc::string_view local_only_reason;
 
     /// Read back from the declaration by `finalize`.
     cc::string name;
@@ -230,6 +262,13 @@ struct sgl::builtins::function_record
     /// Updates its first argument, an atomic, in one step (EVAL-93): the evaluator is given the atomic's value and then
     /// the other arguments, and gives what the atomic holds after; the call gives what it held before, or nothing.
     bool is_atomic = false;
+    /// Gives a struct the registry declares as prelude text, which no registry type names: the check pass resolves it as
+    /// it resolves the prelude, and the interpreter builds the value itself, which only an atomic's weak
+    /// compare-exchange does so far.
+    bool gives_prelude_struct = false;
+    /// Takes a number literal only at its default type, as `as` does, so `T(x)` never reaches a conversion `x as T`
+    /// has not (CHK-396).
+    bool takes_literal_at_default = false;
     /// Stores a texel of its first argument, an image, which MSL fences before the same thread reads it (EMIT-151).
     bool is_image_store = false;
     /// Loads or stores this many 32-bit words of its first argument, `bytes`, at its second, a byte offset; 0 for any
@@ -241,26 +280,43 @@ struct sgl::builtins::function_record
     /// Exchanges values between the invocations of a subgroup, so every one of them reaches the call or none does, and
     /// what it gives differs within a workgroup (CHK-377).
     bool is_subgroup_operation = false;
+    /// Of those, one whose result is the same in every invocation of the subgroup, a vote, a reduction or a broadcast,
+    /// so its value is unproven rather than varying whatever its argument is (CHK-399).
+    bool agrees_in_subgroup = false;
     /// A subgroup operation within a quad, which a compute stage forms along one axis (CHK-380).
     bool is_quad_operation = false;
     /// `workgroup_uniform_load`: a barrier whose argument is workgroup memory and whose result is uniform (CHK-374).
     bool is_uniform_load = false;
+    /// Gives what differs between the invocations of a stage whatever its arguments are: a ray-tracing stage's launch
+    /// index, its ray and its hit (CHK-283).
+    /// The size of the launch is the same in all of them, and gives no such thing.
+    bool differs_between_invocations = false;
+    written_argument writes_through = written_argument::none;
     /// The second argument is a lane, a mask or a delta, a constant `int` from 0 to below this (CHK-378); 0 for a call
     /// without one.
     i32 constant_lane_below = 0;
-    /// `nonuniform i`: its argument, marked as an index into a binding array that differs between invocations (CHK-300).
-    bool is_nonuniform_mark = false;
+    /// `uniform i` and `nonuniform i`: its argument, marked as an index into a binding array (CHK-300).
+    index_mark mark = index_mark::none;
     /// Takes one argument more than its signature names, of a struct of the program: a stream's `emit` its vertex, of
     /// the type the stream holds (CHK-303), and a trace its payload, which the call writes through (CHK-329).
     bool takes_element = false;
     /// What a device needs to run a call of it: an entry point that reaches one needs it too, and declares it (CHK-322).
     check::feature_set features;
+    /// What a pixel stage that reaches it needs beside `features`: the strong compare-exchange's `helper_lane_query`
+    /// (EMIT-163).
+    check::feature_set pixel_features;
     /// Takes, past its signature, the position of its acceleration-structure argument among the acceleration members
     /// of the entry point's binding list, which flatten appends as an int: the emulated trace's root (CHK-325).
     bool takes_acceleration_index = false;
     /// Gives a value only a local may hold, which a target declares without an initializer: `RayQuery<…> q;`.
     /// The call itself writes nothing, and a local it initializes is never copied.
     bool declares_only = false;
+    /// Where its argument at this position is a constant, the local its first argument names takes it into its type
+    /// (`type_record::hlsl_flagged`); -1 for none.
+    i32 flags_argument = -1;
+    /// Impure only for what its value depends on, with no effect: a call of it whose value nothing reads may go.
+    /// It stays impure, since moving it would read state that may have changed in between.
+    bool reads_only = false;
 
     /// Read back from the signature by `finalize`.
     cc::string name;
@@ -296,10 +352,14 @@ struct sgl::builtins::registry_item
         comment,
         type,
         function,
+        /// Plain SGL the generated file holds as it is, such as a struct with fields that a builtin's signature names.
+        /// It is no builtin: the check pass and every emitter take it as they take a program's own.
+        declaration,
     };
     kind_t kind = kind_t::comment;
-    /// A position in `types` or `functions`; -1 for a comment.
+    /// A position in `types` or `functions`; -1 for a comment and a declaration.
     i32 index = -1;
+    /// A comment's text, or a declaration's.
     cc::string comment;
 };
 
@@ -313,11 +373,20 @@ struct sgl::builtins::registry
     cc::map<cc::string, cc::vector<builtin_id>> functions_by_name;
     /// The overloads whose name, parameters and named-only names hash alike (`signature_hash`); filled by `finalize` too.
     cc::map<u64, cc::vector<builtin_id>> functions_by_signature;
+    /// Per language, every name a function writes there, which `function_record::writes_name` takes one record at a time.
+    /// Filled by `finalize` too.
+    cc::set<cc::string> written_names[u8(language::msl) + 1];
 
     builtin_type_id add(type_record record);
     builtin_id add(function_record record);
     /// A `//` comment block of the generated file, behind an empty line; `text` is whole lines without the last line break.
     void add_comment(cc::string_view text);
+    /// One plain declaration of the generated file, behind an empty line; `text` is SGL source, doc comments included.
+    void add_declaration(cc::string_view text);
+
+    /// What `finalize` parsed `prelude_text()` into, kept so the driver's prelude takes it rather than parsing it twice.
+    parsed_file parsed;
+    ast::file_ast parsed_ast;
 
     /// Parses `prelude_text()` with the normal parser and fills what every record reads back from it.
     /// Every record must parse to exactly one declaration without a diagnostic, and every type a signature names must be registered.
@@ -336,6 +405,8 @@ struct sgl::builtins::registry
                                            cc::span<cc::string_view const> parameters,
                                            cc::span<cc::string_view const> named_only) const;
     [[nodiscard]] bool has_function_named(cc::string_view name) const;
+    /// The names some function writes in `l`, which a name of the program written there must not be.
+    [[nodiscard]] cc::set<cc::string> const& names_written_in(language l) const { return written_names[u8(l)]; }
 
     /// The whole of `prelude/builtins.sgl`, byte for byte, in registration order.
     [[nodiscard]] cc::string prelude_text() const;

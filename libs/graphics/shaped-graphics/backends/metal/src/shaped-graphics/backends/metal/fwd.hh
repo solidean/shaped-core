@@ -18,6 +18,9 @@ class metal_context;
 /// For code already committed to metal, the backend's own tests above all; a caller drives the abstract sg::context_handle.
 using metal_context_handle = std::shared_ptr<metal_context>;
 class metal_command_list;
+class metal_native_scope;     // foreign code encoding onto an sg list (see metal_native_scope.hh)
+struct native_texture_access; // what a native scope declares (see metal_native_scope.hh)
+struct native_buffer_access;
 class metal_epoch_system;
 class metal_swapchain;
 class metal_transfer_system;

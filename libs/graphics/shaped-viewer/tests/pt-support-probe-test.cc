@@ -13,7 +13,8 @@
 #include <shaped-viewer/scene/light.hh>
 #include <sv_test_shaders.hh>
 #include <typed-geometry/linalg/vec_ops.hh> // tg::dot, tg::normalize
-#include <typed-geometry/scalar/scalar.hh>  // tg::abs, tg::sqrt
+#include <typed-geometry/scalar/angle.hh>
+#include <typed-geometry/scalar/scalar.hh> // tg::abs, tg::sqrt
 
 using namespace cc::primitive_defines;
 
@@ -22,13 +23,13 @@ using namespace cc::primitive_defines;
 // What is checked is what each helper promises: the random stream is PCG's to the bit, a sampled direction is
 // unit and lies where its sampler says, a ray aimed at a rect lands at the distance it was aimed from, and the
 // environment is the SH sum it is written as.
-// `tests/shaders/pt_support_probe.sgl` writes eight float4s per item, in the order the checks below read them.
+// `tests/shaders/pt_support_probe.sgl` writes `results_per_item` float4s per item, in the order the checks below read them.
 //
 // The lights travel as `sv::shaders::tracer::light_record` itself, so this is also where `scene.light`'s layout meets the C++ struct.
 
 namespace
 {
-static_assert(sizeof(sv_test::shaders::probe_light) == sizeof(sv::shaders::tracer::light_record),
+static_assert(sizeof(sv_test::shaders::pt_support_probe::probe_light) == sizeof(sv::shaders::tracer::light_record),
               "probe_light in tests/shaders/pt_support_probe.sgl must match sv::shaders::tracer::light_record");
 
 constexpr isize results_per_item = 9;
@@ -141,14 +142,14 @@ cc::vector<tg::vec4f> make_sh()
 ASYNC_INVOCABLE_TEST("sv - the SGL path tracer helpers keep what each promises", (sg::context_handle const& ctx_h))
 {
 #if defined(CC_ARCH_ARM64) && defined(_WIN32)
-    SKIP("known broken on Windows on ARM — the inline readback path fastfails; see "
-         "libs/graphics/shaped-viewer/docs/TODO.md");
+    SKIP("known broken on Windows on ARM — the inline readback path fastfails; "
+         "issue: bug-sv-woa-inline-readback-fastfail");
 #endif
     auto& ctx = *ctx_h;
     if (!sv_test::shared_env().has_compiler)
-        SKIP("no SGL compiler that reaches DXIL to build the probe shader");
+        SKIP("no SGL compiler for this backend to build the probe shader");
 
-    auto const& entry = sv_test::shaders::pt_support_probe.pt_support_measure;
+    auto const& entry = sv_test::shaders::pt_support_probe::pt_support_measure;
     auto const compiled_shader = entry->acquire(ctx);
     co_await cc::async_settled(compiled_shader);
     if (compiled_shader->has_error())
@@ -157,7 +158,8 @@ ASYNC_INVOCABLE_TEST("sv - the SGL path tracer helpers keep what each promises",
     auto const* const compiled = compiled_shader->try_value();
     REQUIRE(compiled != nullptr);
 
-    auto const group_layout = ctx.cached.acquire_binding_group_layout<sv_test::shaders::pt_support_io>();
+    auto const group_layout
+        = ctx.cached.acquire_binding_group_layout<sv_test::shaders::pt_support_probe::pt_support_io>();
     auto pipeline = ctx.cached.acquire_compute_pipeline({.shader = *compiled, .layout = entry.acquire_layout(ctx)});
     auto const built = co_await pipeline;
     REQUIRE(built != nullptr);
@@ -179,8 +181,8 @@ ASYNC_INVOCABLE_TEST("sv - the SGL path tracer helpers keep what each promises",
 
     auto const group = ctx.transient.create_binding_group(
         *cmd, group_layout,
-        sv_test::shaders::pt_support_io{
-            .lights = light_buffer.reinterpret_as<sv_test::shaders::probe_light>().as_readonly_buffer(),
+        sv_test::shaders::pt_support_probe::pt_support_io{
+            .lights = light_buffer.reinterpret_as<sv_test::shaders::pt_support_probe::probe_light>().as_readonly_buffer(),
             .sh = sh_buffer.as_readonly_buffer(),
             .results = result_buffer.as_readwrite_buffer(),
             .item_count = u32(item_count),
@@ -298,4 +300,101 @@ ASYNC_INVOCABLE_TEST("sv - the SGL path tracer helpers keep what each promises",
     // Both branches of the rect test were taken, so neither set of checks above was vacuous.
     CHECK(landed_count > 0);
     CHECK(missed_count > 0);
+}
+
+namespace
+{
+/// A dome shaped as the studio spec's: a gradient from 1 to 1.6 rising from 25 degrees, and three lobes of the spec's strengths.
+sv::dome studio_like_dome()
+{
+    auto d = sv::dome{.horizon = tg::vec3f(1.0f, 1.0f, 1.0f),
+                      .zenith = tg::vec3f(1.6f, 1.6f, 1.6f),
+                      .rise_start = 0.4226183f, // sin(25 degrees)
+                      .backdrop_scale = 2.4f};
+    d.lobes[0] = {.direction = tg::vec3f(-0.5f, 0.7f, -0.5f), .radiance = tg::vec3f(40.0f, 40.0f, 40.0f)};
+    d.lobes[1] = {.direction = tg::vec3f(0.8f, 0.3f, -0.5f), .radiance = tg::vec3f(8.0f, 8.0f, 8.0f)};
+    d.lobes[2] = {.direction = tg::vec3f(0.0f, 0.8f, 0.6f), .radiance = tg::vec3f(10.0f, 10.0f, 10.0f)};
+    d.lobe_count = 3;
+    return d;
+}
+
+/// The dome's integral over the sphere by quadrature: the reference a sampled estimate is held to.
+f32 integral_of(sv::dome const& d)
+{
+    constexpr int rows = 512;
+    constexpr int columns = 1024;
+    auto sum = 0.0;
+    for (auto r = 0; r < rows; ++r)
+    {
+        auto const theta = tg::angle_f::make_from_radians((f32(r) + 0.5f) / f32(rows) * pi);
+        auto const weight = theta.sin() * (pi / f32(rows)) * (2.0f * pi / f32(columns));
+        for (auto c = 0; c < columns; ++c)
+        {
+            auto const phi = tg::angle_f::make_from_radians((f32(c) + 0.5f) / f32(columns) * 2.0f * pi);
+            auto const dir = tg::vec3f(theta.sin() * phi.cos(), theta.cos(), theta.sin() * phi.sin());
+            sum += f64(d.radiance(dir)[0] * weight);
+        }
+    }
+    return f32(sum);
+}
+} // namespace
+
+ASYNC_INVOCABLE_TEST("sv - a dome's sampler integrates the dome, and its density is the one environment_pdf gives",
+                     (sg::context_handle const& ctx_h))
+{
+#if defined(CC_ARCH_ARM64) && defined(_WIN32)
+    SKIP("known broken on Windows on ARM — the inline readback path fastfails; "
+         "issue: bug-sv-woa-inline-readback-fastfail");
+#endif
+    auto& ctx = *ctx_h;
+    if (!sv_test::shared_env().has_compiler)
+        SKIP("no SGL compiler for this backend to build the probe shader");
+
+    auto const& entry = sv_test::shaders::pt_support_probe::environment_measure;
+    auto const compiled_shader = entry->acquire(ctx);
+    co_await cc::async_settled(compiled_shader);
+    if (compiled_shader->has_error())
+        FAIL(cc::format("the environment probe did not compile:\n{}",
+                        compiled_shader->try_error()->underlying().to_string()));
+    auto const* const compiled = compiled_shader->try_value();
+    REQUIRE(compiled != nullptr);
+    auto pipeline = ctx.cached.acquire_compute_pipeline({.shader = *compiled, .layout = entry.acquire_layout(ctx)});
+    auto const built = co_await pipeline;
+    REQUIRE(built != nullptr);
+
+    auto const dome = studio_like_dome();
+    auto const lanes = sv::background_gpu::from(sv::background::of_dome(dome));
+    auto const item_count = isize(1) << 18;
+
+    auto cmd = ctx.create_command_list();
+    auto const environment = ctx.transient.create_buffer_from_pod(*cmd, lanes, sg::buffer_usage::readonly_buffer);
+    auto const results = ctx.transient.create_buffer<tg::vec4f>(
+        item_count, sg::buffer_usage::readwrite_buffer | sg::buffer_usage::copy_src);
+    auto const group = ctx.transient.create_binding_group(
+        *cmd, ctx.cached.acquire_binding_group_layout<sv_test::shaders::pt_support_probe::environment_io>(),
+        sv_test::shaders::pt_support_probe::environment_io{
+            .environment = environment.reinterpret_as<tg::vec4f>().as_readonly_buffer(),
+            .results = results.as_readwrite_buffer(),
+            .item_count = u32(item_count)});
+    cmd->compute.bind_pipeline(*built);
+    cmd->compute.bind_group(0, *group);
+    cmd->compute.dispatch_threads(item_count);
+    auto readback = cmd->download.data_from_buffer(results);
+    ctx.submit_command_list(cc::move(cmd));
+    ctx.advance_epoch();
+
+    auto const r = co_await readback.data();
+    REQUIRE(r.size() == item_count);
+    auto sum = 0.0;
+    auto agree = isize(0);
+    for (auto const& w : r)
+    {
+        sum += f64(w[0]);
+        agree += w[3] > 0.5f ? 1 : 0;
+    }
+    auto const estimate = f32(sum / f64(item_count));
+    auto const reference = integral_of(dome);
+    CHECK(agree == item_count);
+    CHECK(tg::abs(estimate - reference) < 0.01f * reference)
+        .context(cc::format("sampled {} against {} by quadrature", estimate, reference));
 }

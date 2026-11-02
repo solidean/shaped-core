@@ -101,6 +101,7 @@ cc::result<std::unique_ptr<vulkan_command_list>> vulkan_context::create_vulkan_c
 sg::submission_token vulkan_context::submit_vulkan_command_list(std::unique_ptr<vulkan_command_list> cmd)
 {
     CC_ASSERT(cmd != nullptr, "cannot submit a null command list");
+    sg::impl::end_array_declarations_at_submit(*cmd);
     CC_ASSERT(cmd->created_in_epoch() == current_epoch(), "a command list must be submitted in the epoch it was opened "
                                                           "in (it cannot span epochs)");
 
@@ -297,6 +298,7 @@ sg::submission_token vulkan_context::submit_vulkan_command_list(std::unique_ptr<
                 // A wait dst stage creates an execution dependency for that stage and later ones only, and the back
                 // buffer's entry transition runs ahead of every stage in the prepended buffer — so the narrower mask
                 // leaves it unordered against the acquire.
+                // issue: bug-sg-pure-layout-transition-empty-scope
                 wait_stages.push_back(VK_PIPELINE_STAGE_ALL_COMMANDS_BIT);
             }
             u32 const wait_count = u32(waits.size());
@@ -352,6 +354,7 @@ sg::submission_token vulkan_context::submit_vulkan_command_list(std::unique_ptr<
 
             _stats.fold(sg::impl::recorded_stats(*cmd));
             _stats.add(sg::stat::command_lists_submitted);
+            _stats.add(sg::stat::queue_waits, async_waits.size());
             return t;
         });
 
@@ -359,6 +362,7 @@ sg::submission_token vulkan_context::submit_vulkan_command_list(std::unique_ptr<
     cmd->_touched_buffers.clear();
     cmd->_touched_textures.clear();
     cmd->_tentative_initial_transitions.clear();
+    retire_attachment_views(*cmd);
 
     // The pool is in flight until this epoch retires, so hand it to the current epoch.
     // Null the list's handles so its destructor cannot destroy the pool just handed off.
@@ -405,6 +409,7 @@ void vulkan_context::reclaim_unsubmitted_command_list(vulkan_command_list& cmd)
         texture->discard_slot(cmd.slot());
     cmd._touched_textures.clear();
     cmd._tentative_initial_transitions.clear();
+    retire_attachment_views(cmd);
 
     // The recorded readbacks never run, so their futures are cancelled rather than left unsettled.
     // A future nobody ever settles parks its dependents for the life of the process.
@@ -420,15 +425,27 @@ void vulkan_context::reclaim_unsubmitted_command_list(vulkan_command_list& cmd)
     _open_command_lists.fetch_sub(1, std::memory_order_relaxed);
 }
 
-void vulkan_command_list::track_buffer_access(vulkan_buffer const& buffer,
-                                              sg::pipeline_stage_flags stages,
-                                              sg::access_flags access)
+void vulkan_context::retire_attachment_views(vulkan_command_list& cmd)
+{
+    if (cmd._created_attachment_views.empty())
+        return;
+    auto expiring = vulkan_expiring_resource();
+    expiring.image_views = cc::move(cmd._created_attachment_views);
+    schedule_deferred_deletion(cc::move(expiring));
+}
+
+sg::impl::member_track vulkan_command_list::track_buffer_access(vulkan_buffer const& buffer,
+                                                                sg::pipeline_stage_flags stages,
+                                                                sg::access_flags access,
+                                                                bool from_array_application)
 {
     // An empty buffer owns no VkBuffer, so there is nothing to synchronize on.
     if (buffer._buffer == VK_NULL_HANDLE)
-        return;
+        return {};
 
-    buffer.declare_access(_slot, stages, access);
+    auto const found = buffer.declare_access(_slot, stages, access, from_array_application);
+    if (found.member_write)
+        ++_member_writes;
 
     // Once per op, however many times this buffer is bound to it.
     if (buffer.mark_pending_barrier(_slot))
@@ -437,6 +454,7 @@ void vulkan_command_list::track_buffer_access(vulkan_buffer const& buffer,
     // Once per list, so submit can finalize the slot and drop can discard it.
     if (buffer.mark_recorded(_slot))
         _touched_buffers.push_back(std::static_pointer_cast<vulkan_buffer const>(buffer.shared_from_this()));
+    return found;
 }
 
 sg::texture_layout vulkan_command_list::track_texture_access(vulkan_texture const& texture,
@@ -445,8 +463,18 @@ sg::texture_layout vulkan_command_list::track_texture_access(vulkan_texture cons
                                                              sg::access_flags access,
                                                              sg::texture_layout layout)
 {
+    return track_texture(texture, range, stages, access, layout, false).layout;
+}
+
+vulkan_command_list::texture_track vulkan_command_list::track_texture(vulkan_texture const& texture,
+                                                                      sg::subresource_range range,
+                                                                      sg::pipeline_stage_flags stages,
+                                                                      sg::access_flags access,
+                                                                      sg::texture_layout layout,
+                                                                      bool from_array_application)
+{
     if (texture._image == VK_NULL_HANDLE)
-        return layout;
+        return {.layout = layout, .found = {}};
 
     // A texture with a transfer in flight stays in the layout that transfer needs.
     // This list waits for the transfer and therefore runs after it, but the layer reads submit-call order and this
@@ -455,7 +483,9 @@ sg::texture_layout vulkan_command_list::track_texture_access(vulkan_texture cons
     if (texture.has_pending_transfer())
         layout = sg::texture_layout::general;
 
-    texture.declare_access(_slot, range, stages, access, layout);
+    auto const found = texture.declare_access(_slot, range, stages, access, layout, from_array_application);
+    if (found.member_write)
+        ++_member_writes;
 
     if (texture.mark_pending_barrier(_slot))
         _pending_barrier_textures.push_back(&texture);
@@ -470,7 +500,7 @@ sg::texture_layout vulkan_command_list::track_texture_access(vulkan_texture cons
             _tentative_initial_transitions.push_back(_touched_textures.back());
     }
 
-    return layout;
+    return {.layout = layout, .found = found};
 }
 
 void vulkan_command_list::transition_texture_layout(sg::raw_texture_handle texture,
@@ -490,6 +520,8 @@ void vulkan_command_list::transition_texture_layout(sg::raw_texture_handle textu
 
 void vulkan_command_list::flush_barriers()
 {
+    _skip_guard.check(_member_writes);
+
     auto global = make_empty_memory_barrier();
     auto has_global = false;
     for (auto const* buffer : _pending_barrier_buffers)
@@ -793,6 +825,40 @@ void vulkan_command_list::copy_buffer_region(sg::raw_buffer_handle src,
         .size = VkDeviceSize(size_in_bytes),
     };
     vkCmdCopyBuffer(_buffer, s->_buffer, d->_buffer, 1, &region);
+}
+
+void vulkan_command_list::copy_buffer_to_texture(sg::raw_buffer_handle src,
+                                                 isize src_offset_in_bytes,
+                                                 isize src_row_pitch_in_bytes,
+                                                 sg::raw_texture_handle dst,
+                                                 sg::subresource_index const& subresource,
+                                                 sg::texture_region const& region)
+{
+    auto const s = std::dynamic_pointer_cast<vulkan_buffer const>(src);
+    auto const d = std::dynamic_pointer_cast<vulkan_texture const>(dst);
+    CC_ASSERT(s != nullptr && d != nullptr, "copy resources are not vulkan resources");
+    CC_ASSERT(!s->is_expired(), "copy source is a transient buffer used past its epoch (expired)");
+    CC_ASSERT(!d->is_expired(), "copy target is a transient texture used past its epoch (expired)");
+
+    track_buffer_access(*s, sg::pipeline_stage_flag::copy, sg::access_flag::copy_read);
+    auto const dst_layout = track_texture_access(*d, sg::subresource_range(subresource), sg::pipeline_stage_flag::copy,
+                                                 sg::access_flag::copy_write, sg::texture_layout::copy_dst);
+    suspend_rendering("a copy");
+    flush_barriers();
+
+    // Vulkan counts a buffer row in texels rather than bytes, so the pitch becomes the texels its whole blocks cover.
+    auto const format = d->description().format;
+    auto const extent = isize(sg::format_block_extent(format));
+    auto const row_texels = src_row_pitch_in_bytes / isize(sg::format_block_size(format)) * extent;
+    auto const copy = VkBufferImageCopy{
+        .bufferOffset = VkDeviceSize(src_offset_in_bytes),
+        .bufferRowLength = u32(row_texels),
+        .bufferImageHeight = 0, // the region's own height, rounded up to whole blocks
+        .imageSubresource = image_subresource_of(subresource, format),
+        .imageOffset = {region.offset[0], region.offset[1], region.offset[2]},
+        .imageExtent = {u32(region.size[0]), u32(region.size[1]), u32(region.size[2])},
+    };
+    vkCmdCopyBufferToImage(_buffer, s->_buffer, d->_image, vk_layout_from(dst_layout), 1, &copy);
 }
 
 // Now the device's own answer, since every build and dispatch seam is real.

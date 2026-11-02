@@ -40,6 +40,22 @@ Anything `dev.py` does not recognize is forwarded to the example, so `dev.py exa
 There is deliberately **no `--all`**: executing the whole corpus would open every window it has, and nobody wants that.
 The capture sweep below is the one exception, and it is allowed because it cannot do that: it runs only what a sidecar declares capturable, and every such example runs headless.
 
+### `--window`, and why a run without a terminal is refused
+
+`dev.py example <match>` opens whatever windows the example opens, on the desktop of whoever runs it.
+At a terminal someone ran it to see that window; in a batch job, CI or an agent session nobody asked for one, and it lands on someone's screen anyway.
+So without an interactive terminal a run is refused before anything builds, unless it asks for windows explicitly:
+
+```bash
+uv run dev.py example <match> --window    # open it anyway
+uv run dev.py example <match> --capture   # render headless instead, if the example declares a capture
+```
+
+Interactive means stdout and stderr are both TTYs and no CI variable is set, the test console colors and the progress region use.
+`SC_EXAMPLE_WINDOW=1` stands in for `--window`, for an interactive terminal that hides its TTY from Python, such as Git Bash's mintty on Windows.
+Listing the examples, a capture and the capture sweep open no window and are never refused.
+An example that only prints is refused the same way, since dev.py cannot tell it from one that opens a window before it runs.
+
 ### `--background`, for a run that should not take over the screen
 
 `dev.py example <match> --background` asks a graphical example to appear without stealing the foreground.
@@ -77,8 +93,11 @@ The mechanism is environment variables, the same convention `--background` uses,
 An example needs **no code for any of this** — `sv::interactive` reads the variables, waits for the image to settle, writes it, and ends the loop.
 
 A capture waits for three things together, because each hides something the others cannot see.
-Every traced view must have accumulated enough frames, no resource may still owe post-load work, and a trace must actually have dispatched.
-That last one is what stops a routine whose shaders never compiled from writing out a black image at full frame count.
+Every traced view must hold enough samples per pixel, no resource may still owe post-load work, and a trace must actually have dispatched.
+That last one is what stops a routine whose shaders never compiled from writing out a black image at full sample count.
+`accumulate` is in the program's own unit: for `sv` it is samples per pixel, so a capture holds the same sample count whatever GPU takes it and however fast.
+The image is identical only when the run restarted the same number of times, which cold compiles and drains can change (`feat-sv-deterministic-seed`).
+A program answering the protocol itself counts what it likes, and a raster one counts frames drawn.
 `--capture-accumulate` and `--capture-timeout` move the thresholds when a scene needs longer.
 
 A run that spends its whole timeout writes what it has to `<out>.partial.<ext>` and **nothing to the path it was asked for**.
@@ -178,6 +197,15 @@ Without that, renaming a callback would go on producing the default view under t
 Any change to what the image depends on restarts the accumulation, so a callback writing a slightly different value every frame never converges: the run spends its whole timeout and then fails.
 `capture_context::first_frame` is where one-shot setup goes.
 
+### Animations and frame sequences
+
+**A capture runs on the request's clock, not the wall's**, and `frame::seconds` reports it.
+A still shows `SC_CAPTURE_TIME` (default 0), so an animated example captures the same instant on any machine.
+`SC_CAPTURE_FRAMES` asks for a sequence instead: frame `i` shows `SC_CAPTURE_TIME + i / SC_CAPTURE_FPS`.
+Each frame finishes by the same `accumulate` rule a still does before the clock moves, so an example animating off `frame::seconds` needs no capture code for a video.
+`SC_CAPTURE_OUT` is then a pattern, `%05d` as ffmpeg reads it, and `SC_CAPTURE_STRIDE` writes only every n-th frame while still rendering all of them.
+`dev.py example` does not drive sequences yet; a consumer's own tool sets the variables and encodes the frames.
+
 ### Refreshing the reference images
 
 ```bash
@@ -230,6 +258,9 @@ What follows from the bucket:
 
 * **A sweep never selects it.** Not `dev.py test`, not `--manual`, not a bulk "run disabled too" request.
   Only `--examples` or its exact name.
+* **It runs as a program rather than as a suite**, whether it was named exactly or swept by `--examples`.
+  It prints no `nexus: run seed` line and no CPU and RAM summary, so its transcript reads the same on every run.
+  No hang watchdog watches it either, so it may sit idle in its window.
 * **No CHECK is required.** A `CHECK` that fails still fails, so assert where asserting is part of the demonstration — but an example with none is a passing example.
 * **`main_thread` and `exclusive()` are baked in**, so the body runs on the thread `nx::run` was entered on, alone — which is what a window or a device context needs.
 * **The run installs an ambient async scheduler**, so an example may use `cc::async` without standing up a pool of its own.
@@ -241,7 +272,7 @@ The main thread's loop also sweeps the thread pumps, which is what lets an unthr
 [libs/base/clean-net/examples/download.cc](../../libs/base/clean-net/examples/download.cc) is the worked case.
 `no_scheduler` is refused on it, as on every async test.
 
-**The name is a slash path**, and it is load-bearing.
+**The name is a slash path**, and three things key off it.
 It is the CLI argument, the gallery entry and the capture slug, so it is written as its own identifier rather than as a sentence.
 As the slug it names both `build/<preset>/captures/` and the committed reference image.
 By convention the first segment is the library the example is about.
@@ -297,6 +328,7 @@ A binary with several is exactly right when related examples want to share setup
 Such a binary may also carry ordinary `TEST`s, for the machinery it grew along the way.
 `dev.py test` runs them: an example binary joins the sweep exactly when it reports tests of its own, and is skipped when it has none.
 Its `EXAMPLE`s are in another bucket and never run there.
+An example binary that is not built, such as one a consumer excludes from `all`, is skipped too; a test binary that is not built fails its run, and the rest still run.
 
 ## What binds an example, and what does not
 

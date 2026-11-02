@@ -18,9 +18,23 @@ struct sv::viewer_definition
     layout_tree nodes;
     view_index root_view = view_index(0);
 
-    /// Texture pixels per logical pixel, which a canvas's 2D instances are placed in: the window's content scale.
+    /// Texture pixels per logical pixel, which a canvas's 2D instances are placed in: the window's display_scale.
     /// 1 for a headless frame, which has no window to ask.
-    f32 content_scale = 1.0f;
+    f32 display_scale = 1.0f;
+
+    /// The GPU milliseconds this frame's still wavefront layers share, which the viewer sets from `viewer_config::frame_budget_ms`.
+    /// 0, the default for a definition built by hand, runs each layer's `render_settings::rounds_per_frame`.
+    f32 wavefront_budget_ms = 0.0f;
+
+    /// The samples per pixel a traced layer stops at this frame, or 0 for only `sv::accumulation_sample_cap`.
+    /// A capture sets it to what it waits for, so a traced layer spends nothing past the image it takes.
+    /// Never part of a trace's hash: raising it carries on from the samples the image holds.
+    u32 sample_target = 0;
+
+    /// Whether a traced layer's spatial denoiser runs only on the image at `sample_target`, every frame before it presenting the raw mean.
+    /// A capture sets it with the target: nothing sees the frames in between, and a spatial member such as OIDN costs several frames' traces.
+    /// A temporal member runs on regardless, since its history is built frame by frame.
+    bool denoise_at_target_only = false;
 
     [[nodiscard]] view_data& operator[](view_index i) { return views[u32(i)]; }
     [[nodiscard]] view_data const& operator[](view_index i) const { return views[u32(i)]; }

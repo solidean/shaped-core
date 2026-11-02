@@ -164,7 +164,9 @@ public:
     /// Allocates a GPU memory heap of `size_in_bytes` that placed resources sub-allocate into.
     /// Query a resource's requirements from the heap, pick an offset, then create_* with that placement.
     /// Size must be >= 0, and 0 is a valid empty heap; throws sg::allocation_exception on allocation failure.
-    [[nodiscard]] memory_heap_handle create_memory_heap(isize size_in_bytes);
+    /// A heap holds one kind of resource, buffers unless `contents` says textures, which not every backend places.
+    [[nodiscard]] memory_heap_handle create_memory_heap(isize size_in_bytes,
+                                                        memory_heap_contents contents = memory_heap_contents::buffers);
 
     // bind path
     // binding_group_layout / pipeline_layout / compute_pipeline creation is not here — those are schemas / PSOs, not lifetime-scoped GPU resources.
@@ -237,7 +239,8 @@ private:
     [[nodiscard]] cc::result<raw_texture_handle> try_create_raw_texture(texture_description const& desc,
                                                                         allocation_info const& alloc = {});
 
-    [[nodiscard]] cc::result<memory_heap_handle> try_create_memory_heap(isize size_in_bytes);
+    [[nodiscard]] cc::result<memory_heap_handle> try_create_memory_heap(isize size_in_bytes,
+                                                                        memory_heap_contents contents);
 
     // The one core the create_buffer_from_* factories share: a copy_dst buffer of bytes.size(), filled through ctx.upload.
     [[nodiscard]] raw_buffer_handle create_raw_buffer_from_pin(cc::pinned_data<byte const> bytes,

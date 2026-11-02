@@ -160,6 +160,9 @@ TEST("vdoc - op decoder fuzz")
                                 CHECK(std::is_lt(eager.value()[i - 1].path.compare_bytes(eager.value()[i].path)));
                         });
 
+    if (!nx::is_thorough())
+        test->cap_seed_count(48);
+
     SECTION("fuzz")
     {
         CHECK(test->execute_fuzz_test());

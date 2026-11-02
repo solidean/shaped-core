@@ -8,13 +8,13 @@
 
 /// Running Apple's `metal` driver as a child process, which is the only way to obtain a metallib.
 ///
-/// TEMPORARY, and deliberately so: process execution belongs in clean-core next to `platform/environment.hh`, as a
+/// TEMPORARY(debt-ssc-msl-hand-rolled-process), and deliberately so: process execution belongs in clean-core next to `platform/environment.hh`, as a
 /// `cc::run_process` taking an argv, stdin bytes and giving back stdout bytes, stderr text and an exit code.
 /// Nothing in shaped-core has one today — `tools/instruction-tracer`'s `mca_runner.cc` hand-rolled a Windows-only,
 /// text-only version for the same reason — so this file is the second hand-rolled copy and should be the last.
 /// It is POSIX-only and does exactly what this library needs; replace it with the clean-core API when that exists.
 ///
-/// Known defects, left here on purpose and recorded as requirements in libs/base/clean-core/docs/TODO.md:
+/// Known defects, left here on purpose and recorded as requirements by issue: feat-cc-subprocess-api, are:
 ///   - SIGPIPE is not ignored, so a child that exits before reading all of stdin kills this process on the next write
 ///   - `pipe` then `fcntl(FD_CLOEXEC)` races another thread's `posix_spawn`, which can inherit the ends in between
 ///   - a failed second or third `pipe` leaks the ends already made, and `drain` takes `EINTR` for end-of-stream

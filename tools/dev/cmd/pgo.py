@@ -20,6 +20,12 @@ def _add_timeout(p: argparse.ArgumentParser) -> None:
                    help="Per-binary timeout in seconds (default: 0 = disabled; benchmarks run long)")
 
 
+def _add_target(p: argparse.ArgumentParser) -> None:
+    p.add_argument("--target", "-t", action="append",
+                   help="Narrow the builds and the training to these test binaries: comma-list, repeatable, wildcards "
+                        "(default: every *-test)")
+
+
 def add_parser(sub: argparse._SubParsersAction) -> argparse.ArgumentParser:
     p = sub.add_parser(NAME, help="Profile-guided optimization (instrument/train/optimize/measure)")
     pgo_sub = p.add_subparsers(dest="pgo_cmd", required=True)
@@ -28,26 +34,31 @@ def add_parser(sub: argparse._SubParsersAction) -> argparse.ArgumentParser:
     a.preset(run_p)
     a.profile(run_p)
     _add_timeout(run_p)
+    _add_target(run_p)
     run_p.add_argument("--no-measure", action="store_true",
                        help="Stop after the optimized build; skip the baseline-vs-PGO measurement")
 
     inst_p = pgo_sub.add_parser("instrument", help="Build the instrumented (-fprofile-generate) preset")
     a.preset(inst_p)
     a.profile(inst_p)
+    _add_target(inst_p)
 
     train_p = pgo_sub.add_parser("train", help="Run PGO benchmarks on the instrumented build, merge profile")
     a.preset(train_p)
     a.profile(train_p)
     _add_timeout(train_p)
+    _add_target(train_p)
 
     opt_p = pgo_sub.add_parser("optimize", help="Build the optimized (-fprofile-use) preset from the profile")
     a.preset(opt_p)
     a.profile(opt_p)
+    _add_target(opt_p)
 
     meas_p = pgo_sub.add_parser("measure", help="Run PGO benchmarks on baseline + PGO and diff metrics")
     a.preset(meas_p)
     a.profile(meas_p)
     _add_timeout(meas_p)
+    _add_target(meas_p)
     return p
 
 
@@ -71,9 +82,14 @@ def _presets(args: argparse.Namespace, ctx: Context) -> tuple[dev.Preset, dev.Pr
     return gen, use, baseline
 
 
-def _binary_names(ctx: Context, preset: dev.Preset) -> list[str]:
-    """Test binaries to drive (every *-test); pgo-benchmark-less ones simply no-op."""
-    return [t.name for t in ctx.discover(preset) if ctx.is_test_target(t)]
+def _targets(args: argparse.Namespace, ctx: Context, preset: dev.Preset) -> list[str] | None:
+    """The --target names resolved against `preset`, or None for every target."""
+    return ctx.resolve_target_names(preset, args.target)
+
+
+def _binary_names(ctx: Context, preset: dev.Preset, targets: list[str] | None) -> list[str]:
+    """Test binaries to drive: every *-test, or those of `targets`; pgo-benchmark-less ones simply no-op."""
+    return [t.name for t in ctx.discover(preset) if ctx.is_test_target(t) and (targets is None or t.name in targets)]
 
 
 def run(args: argparse.Namespace, ctx: Context) -> None:
@@ -95,7 +111,8 @@ def run(args: argparse.Namespace, ctx: Context) -> None:
 
 def _instrument(args: argparse.Namespace, ctx: Context) -> None:
     gen, _use, _base = _presets(args, ctx)
-    results = dev.pgo_instrument(gen, root=ctx.root, mirror=args.mirror_output, verbose=args.verbose)
+    results = dev.pgo_instrument(gen, root=ctx.root, targets=_targets(args, ctx, gen),
+                                 mirror=args.mirror_output, verbose=args.verbose)
     if not all(r.ok for r in results):
         ctx.fail_build(results, [gen])
     print(console.green(f"Instrumented build ready: {gen.name}"), file=sys.stderr)
@@ -104,7 +121,7 @@ def _instrument(args: argparse.Namespace, ctx: Context) -> None:
 
 def _train(args: argparse.Namespace, ctx: Context) -> None:
     gen, _use, _base = _presets(args, ctx)
-    binaries = _binary_names(ctx, gen)
+    binaries = _binary_names(ctx, gen, _targets(args, ctx, gen))
     try:
         result = dev.pgo_train(
             gen, binaries, root=ctx.root, timeout=args.timeout if args.timeout else None,
@@ -118,7 +135,8 @@ def _train(args: argparse.Namespace, ctx: Context) -> None:
 def _optimize(args: argparse.Namespace, ctx: Context) -> None:
     _gen, use, _base = _presets(args, ctx)
     try:
-        results = dev.pgo_optimize(use, root=ctx.root, mirror=args.mirror_output, verbose=args.verbose)
+        results = dev.pgo_optimize(use, root=ctx.root, targets=_targets(args, ctx, use),
+                                   mirror=args.mirror_output, verbose=args.verbose)
     except dev.PgoError as e:
         ctx.die(str(e))
     if not all(r.ok for r in results):
@@ -129,10 +147,11 @@ def _optimize(args: argparse.Namespace, ctx: Context) -> None:
 
 def _measure(args: argparse.Namespace, ctx: Context) -> None:
     _gen, use, baseline = _presets(args, ctx)
-    binaries = _binary_names(ctx, use)
+    targets = _targets(args, ctx, use)
+    binaries = _binary_names(ctx, use, targets)
     try:
         result = dev.pgo_measure(
-            baseline, use, binaries, root=ctx.root, timeout=args.timeout if args.timeout else None,
+            baseline, use, binaries, root=ctx.root, targets=targets, timeout=args.timeout if args.timeout else None,
             mirror=args.mirror_output, verbose=args.verbose,
         )
     except dev.PgoError as e:
@@ -142,10 +161,11 @@ def _measure(args: argparse.Namespace, ctx: Context) -> None:
 
 def _run(args: argparse.Namespace, ctx: Context) -> None:
     gen, use, baseline = _presets(args, ctx)
-    binaries = _binary_names(ctx, gen)
+    targets = _targets(args, ctx, gen)
+    binaries = _binary_names(ctx, gen, targets)
     try:
         result = dev.pgo_run(
-            gen, use, baseline, binaries, root=ctx.root, measure=not args.no_measure,
+            gen, use, baseline, binaries, root=ctx.root, measure=not args.no_measure, targets=targets,
             timeout=args.timeout if args.timeout else None,
             mirror=args.mirror_output, verbose=args.verbose,
         )

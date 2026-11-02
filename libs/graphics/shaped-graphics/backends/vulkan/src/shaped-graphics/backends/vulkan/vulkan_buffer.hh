@@ -74,9 +74,13 @@ public:
     /// Accumulate one declared access for `slot`'s next op, starting a fresh slot empty.
     /// Call once per binding; several declares for one op merge into a single barrier at flush.
     /// Thread-safe.
-    void declare_access(sg::command_list_slot slot, sg::pipeline_stage_flags stages, sg::access_flags access) const
+    sg::impl::member_track declare_access(sg::command_list_slot slot,
+                                          sg::pipeline_stage_flags stages,
+                                          sg::access_flags access,
+                                          bool from_array_application = false) const
     {
-        _access.lock([&](vulkan_buffer_access& a) { a.declare(slot, stages, access); });
+        return _access.lock([&](vulkan_buffer_access& a)
+                            { return a.declare(slot, stages, access, from_array_application); });
     }
 
     /// Test-and-set the per-op pending flag; true only the first time since the last flush.

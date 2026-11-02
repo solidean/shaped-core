@@ -7,7 +7,8 @@ using namespace scl;
 
 namespace
 {
-/// Build the rewrite the plan describes over `original`. Both parses must succeed.
+/// Build the rewrite the plan describes over `original`.
+/// Both parses must succeed.
 planned_rewrite build(cc::string_view plan_text, cc::string_view original)
 {
     auto plan = parse_prose_plan(plan_text);

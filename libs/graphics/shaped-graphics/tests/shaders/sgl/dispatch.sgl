@@ -61,3 +61,36 @@ binding product:
 // The same three groups as `multiply_three`, so the two share one pipeline layout.
 @compute(64) fun square_product(@thread_id id: int3){first_factor, second_factor, product}:
     product.values[id.x] = product.values[id.x] * product.values[id.x]
+
+// A count only the GPU knows, sizing the dispatch after it: an append, the arguments made from its count, and the indirect dispatch.
+binding queue:
+    items: buffer[int]
+    kept: mut buffer[int]
+    count: mut buffer[atomic[uint]]
+
+@compute(64) fun keep_positive(@thread_id id: int3){queue}:
+    let v = queue.items[id.x]
+    if v > 0:
+        let at = queue.count[0].add(1u)
+        queue.kept[at as int] = v
+
+/// The workgroup counts an indirect dispatch reads, as `sg::dispatch_args` lays them out.
+struct dispatch_args:
+    x: uint
+    y: uint
+    z: uint
+
+binding sizing:
+    count: buffer[uint]
+    args: mut buffer[dispatch_args]
+
+// Element 0 covers the queue in workgroups of 64; element 1 is empty, which dispatches nothing.
+@compute(1) fun size_dispatch(@thread_id id: int3){sizing}:
+    sizing.args[0] = dispatch_args(x = (sizing.count[0] + 63u) / 64u, y = 1u, z = 1u)
+    sizing.args[1] = dispatch_args(x = 0u, y = 1u, z = 1u)
+
+binding marked:
+    marks: mut buffer[int]
+
+@compute(64) fun mark_ran(@thread_id id: int3){marked}:
+    marked.marks[id.x] = marked.marks[id.x] + 1

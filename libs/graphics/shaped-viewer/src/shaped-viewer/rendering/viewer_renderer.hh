@@ -46,6 +46,7 @@ protected:
     cc::shared_async<cc::unit> init(sg::routine_init_scope scope) override;
 
 private:
-    /// Declared rather than prewarmed, so one readiness check covers view_renderer and the pathtracer under it.
+    /// Declared rather than prewarmed, so a frame waits on view_renderer alone.
+    /// The tracers are not in that chain: view_renderer prewarms them, and a traced layer declines while they come up.
     sg::routine_dependency<view_renderer, sg::routine_no_params> _view_renderer;
 };

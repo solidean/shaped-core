@@ -38,6 +38,16 @@ option(SC_USE_VENDORED_STB "Build the in-tree vendored stb (OFF expects an exter
 # Linked PRIVATE by babel, so spng.h never reaches a babel public header; it decodes over the vendored zlib above rather than a second bundled Deflate.
 option(SC_USE_VENDORED_SPNG "Build the in-tree vendored libspng (OFF expects an external `spng` target)" ON)
 
+# ufbx, committed in-source: one C file and one header, and the whole of babel-serializer's FBX reader.
+# It sits in the libspng tier for the same reason: two files, no build machinery and no dependencies, not even a Deflate.
+# Linked PRIVATE by babel, so ufbx.h never reaches a babel public header.
+option(SC_USE_VENDORED_UFBX "Build the in-tree vendored ufbx (OFF expects an external `ufbx` target)" ON)
+
+# meshoptimizer's decoders, committed in-source: the vertex and index codecs and the vertex filters, three files and one header.
+# They are babel-serializer's EXT_meshopt_compression, the glTF extension that packs vertex and index buffers.
+# The libspng tier again: a few files with no build machinery and no dependencies; linked PRIVATE by babel.
+option(SC_USE_VENDORED_MESHOPTIMIZER "Build the in-tree vendored meshoptimizer decoders (OFF expects an external `meshoptimizer` target)" ON)
+
 # Mbed TLS, committed in-source: the TLS handshake and record layer behind clean-net's TLS connections.
 # Vendored rather than fetched because a build that cannot do HTTPS is not a working build of clean-net -- the same
 # always-present argument zstd and zlib make, and the reason there is no configuration in which this may be absent.
@@ -96,6 +106,10 @@ option(SC_USE_VENDORED_DLSS "Wrap the fetched NVIDIA DLSS SDK in extern/dlss/.in
 # Unlike DLSS it is SOURCE, and its build compiles its own shaders with the dxc.exe extern/dxc pins.
 option(SC_USE_VENDORED_NRD "Build the fetched NRD in extern/nrd/.install (OFF expects an external `NRD` target)" ON)
 
+# WARP from NuGet is fetched ON REQUEST like DLSS: its terms are testing-only and forbid redistributing it.
+# Nothing links it; the directory only publishes where the DLL is, for shaped-graphics to stage beside its WARP test binaries.
+option(SC_USE_VENDORED_WARP "Stage the fetched WARP in extern/warp/.install beside the dx12 test binaries" ON)
+
 # The OIDN library is only the reference shaped-rendering-test's oracle compares sr::denoise_method::oidn against, and nothing we ship links it.
 # So it is fetched ON REQUEST — `uv run extern/oidn/fetch-oidn.py` — rather than on every configure, and the oracle tests SKIP without the `oidn` target.
 option(SC_USE_VENDORED_OIDN "Wrap the fetched Open Image Denoise in extern/oidn/.install (OFF expects an external `oidn` target)" ON)
@@ -142,6 +156,14 @@ endif()
 
 if(SC_USE_VENDORED_SPNG)
     add_subdirectory(libspng)
+endif()
+
+if(SC_USE_VENDORED_UFBX)
+    add_subdirectory(ufbx)
+endif()
+
+if(SC_USE_VENDORED_MESHOPTIMIZER)
+    add_subdirectory(meshoptimizer)
 endif()
 
 if(SC_USE_VENDORED_MBEDTLS)
@@ -220,4 +242,10 @@ endif()
 
 if(_sc_host_side_deps AND SC_USE_VENDORED_DLSS AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/dlss/.install/pin.txt")
     add_subdirectory(dlss)
+endif()
+
+# Reset first, so uninstalling it takes effect at the next configure rather than leaving the old path cached.
+set(SC_PINNED_WARP_DLL "" CACHE INTERNAL "The pinned WARP the dx12 test binaries load")
+if(WIN32 AND SC_USE_VENDORED_WARP AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/warp/.install/pin.txt")
+    add_subdirectory(warp)
 endif()

@@ -153,8 +153,8 @@ public:
 
     /// Where `routine` stands, folding in everything it depends on.
     ///
-    /// A routine whose dependency is not up is not usable either, which is the whole point of a token: the holder is
-    /// refused until its subtree is ready, so redeeming one inside the holder cannot fail.
+    /// A routine whose dependency is not up is not usable either, so a token's holder is refused until its subtree is
+    /// ready, and redeeming one inside the holder cannot fail.
     /// `failed` absorbs and `pending` dominates `ready`, so one broken dependency anywhere makes the holder failed.
     [[nodiscard]] routine_readiness readiness_of(render_routine_base& routine);
 

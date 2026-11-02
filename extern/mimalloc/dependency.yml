@@ -8,9 +8,9 @@ upstreams:
     source: git
     repo: https://github.com/microsoft/mimalloc
     track: tags
-    tag: v3.3.2
+    tag: v3.5.3
     digest_algo: git-commit
-    pin_hash: 30b2d9d89099bee08e9f67a1ffb3e12e7ba45227
+    pin_hash: d4881d338125e1cb7c47ba4cfb398d6f7c0c8d45
     license: MIT
     license_files: [LICENSE]
     used_by: clean-core — the default general memory resource

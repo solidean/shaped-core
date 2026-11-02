@@ -4,6 +4,7 @@
 #include <clean-core/common/log.hh>
 #include <clean-core/container/small_vector.hh>
 #include <clean-core/string/print.hh>
+#include <shaped-graphics/backends/dx12/dx12_track_result.hh>
 #include <shaped-graphics/backends/dx12/fwd.hh>
 #include <shaped-graphics/barrier/command_list_slot.hh>
 #include <shaped-graphics/barrier/resource_access.hh>
@@ -104,7 +105,28 @@ namespace sg::backend::dx12
 class sg::backend::dx12::dx12_texture_access
 {
 public:
-    explicit dx12_texture_access(sg::subresource_extent extent) : _current(extent) {}
+    /// What one declare found over the boxes it touched.
+    struct declare_report
+    {
+        /// Some box's access landed in the write bucket: an unordered write, or a layout change.
+        bool writes = false;
+
+        /// Some box already held a write or a pending layout change of the current op.
+        bool held_write = false;
+    };
+
+    /// Every subresource starts in `resting`: `general` for a committed texture, which D3D12 creates in COMMON.
+    /// A placed one starts `undefined`, so its first transition discards, which is how D3D12 requires a placed texture to be initialized.
+    explicit dx12_texture_access(sg::subresource_extent extent, sg::texture_layout resting = sg::texture_layout::general)
+      : _current(extent)
+    {
+        _current.for_each_in(sg::subresource_range::whole(extent),
+                             [&](sg::resource_access_state& state)
+                             {
+                                 state.curr_layout = resting;
+                                 state.prev_layout = resting;
+                             });
+    }
 
     /// The layout `range`'s first subresource is in as of the last submitted list.
     /// For the async transfer path, which records on the copy queue and so cannot go through declare/flush at all.
@@ -130,20 +152,24 @@ public:
     ///
     /// If a box is already declared for this op with a *different* layout — the texture bound as more than one view — the two are combined via `combine_layouts`.
     /// They may fall back to COMMON (`general`) with a one-time perf warning, and a genuine conflict such as copy-dest plus sampled asserts.
-    void declare(sg::command_list_slot slot,
-                 sg::subresource_range range,
-                 sg::pipeline_stage_flags stages,
-                 sg::access_flags access,
-                 sg::texture_layout layout)
+    ///
+    /// Returns what it found over the boxes it touched, which `track` reports for array members.
+    declare_report declare(sg::command_list_slot slot,
+                           sg::subresource_range range,
+                           sg::pipeline_stage_flags stages,
+                           sg::access_flags access,
+                           sg::texture_layout layout)
     {
         auto& s = slot_for(slot);
         bool warned = false;
+        auto report = declare_report{};
         s.partition.for_each_box_in(
             range,
             [&](sg::subresource_range const&, sg::resource_access_state& state)
             {
                 if (!state.entry_begun)
                     state.begin_entry(layout);
+                report.held_write = report.held_write || state.has_curr_writes() || state.has_pending_layout_change();
 
                 sg::texture_layout target = layout;
                 // Already declared for this op with a different layout? One layout must serve both accesses.
@@ -162,23 +188,32 @@ public:
                     }
                     target = c.layout;
                 }
+                report.writes = report.writes || sg::is_unordered_write(access) || target != state.prev_layout;
                 state.declare(stages, access, target);
             });
+        return report;
     }
 
-    /// Test-and-set `slot`'s pending-barrier flag: true the first time it is called for `slot` since the last flush, false after.
-    /// Only valid on a slot that was declared (active), which is why it is only ever called right after declare.
-    /// `flush` clears it.
-    [[nodiscard]] bool mark_pending_barrier(sg::command_list_slot slot)
+    /// `declare`, then the two test-and-sets the command list files the texture by, under the one lock the caller holds.
+    /// Returns which firsts this access was, of this op and of this list; a texture is never filed as written.
+    /// `from_array_application` marks the texture an array member of `slot`'s list.
+    [[nodiscard]] dx12_track_result track(sg::command_list_slot slot,
+                                          sg::subresource_range range,
+                                          sg::pipeline_stage_flags stages,
+                                          sg::access_flags access,
+                                          sg::texture_layout layout,
+                                          bool from_array_application = false)
     {
-        // Only ever called right after declare, so the slot exists and is active.
-        int const i = int(slot);
-        CC_ASSERT(i < _slots.size() && _slots[i].active, "mark_pending_barrier before declare");
-        auto& s = _slots[i];
-        if (s.pending_barrier)
-            return false;
+        auto const report = declare(slot, range, stages, access, layout);
+        auto& s = _slots[int(slot)];
+        auto const result = dx12_track_result{.first_this_op = !s.pending_barrier,
+                                              .first_this_list = !s.recorded,
+                                              .member_write = report.writes && s.array_member,
+                                              .held_write = report.held_write};
         s.pending_barrier = true;
-        return true;
+        s.recorded = true;
+        s.array_member = s.array_member || from_array_application;
+        return result;
     }
 
     /// Flush the accesses declared for `slot` since the last flush: for every subresource box with pending work, roll it forward and collect the per-box barrier; empty means all freebies.
@@ -260,21 +295,6 @@ public:
         _slots[i] = slot_state{};
     }
 
-    /// Test-and-set `slot`'s finalize-recorded flag: true the first time it is called for `slot`, false after, until the slot is cleared by finalize/discard.
-    /// The command list uses it to add the texture to its touched set exactly once, in O(1), replacing a linear scan.
-    [[nodiscard]] bool mark_recorded(sg::command_list_slot slot)
-    {
-        int const i = int(slot);
-        CC_ASSERT(i >= 0, "mark_recorded with an invalid command_list_slot");
-        while (_slots.size() <= i)
-            _slots.push_back(slot_state{});
-        auto& s = _slots[i];
-        if (s.recorded)
-            return false;
-        s.recorded = true;
-        return true;
-    }
-
 private:
     struct slot_state
     {
@@ -284,6 +304,7 @@ private:
         bool active = false;
         bool recorded = false;        // this slot's command list has added the texture to its finalize set (dedup)
         bool pending_barrier = false; // declared for the current op, awaiting the pre-op flush (per-op dedup)
+        bool array_member = false;    // an array application of this slot's command list has tracked the texture
     };
 
     slot_state& slot_for(sg::command_list_slot slot)
@@ -333,6 +354,6 @@ private:
     }
 
     cc::small_vector<slot_state, 4> _slots; // indexed by command_list_slot
-    sg::subresource_partition _current;     // between-lists state, as of the last submitted list (initially general)
-    int _active_slot_count = 0;             // open command lists currently using this texture (active slots)
+    sg::subresource_partition _current; // between-lists state, as of the last submitted list (initially the resting layout)
+    int _active_slot_count = 0;         // open command lists currently using this texture (active slots)
 };

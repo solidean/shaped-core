@@ -18,7 +18,7 @@ uv run dev.py compile-time pch     "libs/graphics/shaped-graphics/src/**/*.cc"
 This measures the header's **transitive closure**, deliberately: a small header that pulls in the world is exactly what it is meant to expose.
 
 **`tu`** compiles each real TU twice — as-is, and reduced to its preprocessor directives — so the two wall clocks bracket how much of the file is its includes.
-Both halves run back to back on the same machine state, which is the point.
+Both halves run back to back on the same machine state.
 Runs vary by ~8 % (see [Runs vary](../notes/build-times.md#runs-vary-by-8)), so a ratio taken across two separate invocations would be swamped by it.
 
 The `incl%` column is the answer:

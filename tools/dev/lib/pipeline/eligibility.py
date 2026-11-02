@@ -48,6 +48,14 @@ def _launcher(preset: Preset, artifact: Path, launcher: jsr.LazyLauncher) -> lis
     return launcher.prefix()
 
 
+def nexus_filter(name: str) -> str:
+    """`name` as one nexus filter argument: its commas escaped, since nexus splits a filter at a bare comma.
+
+    A dev.py pattern is one name or substring; unescaped, a test named "x, y" became the filters "x" and " y", and " y" can select a whole binary.
+    """
+    return name.replace(",", "\\,")
+
+
 def query_listing(
     preset: Preset,
     target: Target,
@@ -70,7 +78,7 @@ def query_listing(
         # run it is "could not determine" like any other launch failure, not a crash for the caller to handle.
         cmd = [*_launcher(preset, target.artifact, launcher), str(target.artifact)]
         if test_name:
-            cmd.append(test_name)
+            cmd.append(nexus_filter(test_name))
         cmd += ["--list-tests-json", "-", *extra_args]
         with profile.span(target.name, type="probe", extra={"query": "--list-tests-json"}):
             proc = subprocess.run(

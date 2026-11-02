@@ -113,7 +113,7 @@ struct fly_camera
                 auto const limit = tg::angle_f::make_from_radians(1.5f); // keep just shy of straight up/down
                 pitch = pitch < -limit ? -limit : (pitch > limit ? limit : pitch);
             },
-            [](sr::mouse_wheel_event const&) {}, [](sr::text_event const&) {});
+            [](sr::mouse_wheel_event const&) {}, [](sr::text_event const&) {}, [](sr::file_drop_event const&) {});
     }
 
     /// Returns whether the camera moved this step, which is what restarts the accumulation.
@@ -184,7 +184,7 @@ ASYNC_TEST("sv - path-traced window (manual)", nx::config::manual, main_thread)
 
     auto const& env = sv_test::shared_env();
     if (!env.has_compiler)
-        SKIP("no SGL compiler that reaches DXIL to build the path-tracing shaders");
+        SKIP("no SGL compiler for this backend to build the path-tracing shaders");
 
     auto sc_r = ctx.try_create_swapchain(
         {.window = win->native_window(), .buffer_count = 3, .format = sg::pixel_format::bgra8_unorm});
@@ -201,7 +201,8 @@ ASYNC_TEST("sv - path-traced window (manual)", nx::config::manual, main_thread)
     CC_ASSERT(mesh_rec != nullptr && permutation != nullptr, "cornell box resources failed to resolve");
 
     auto instances = cc::vector<sg::tlas_instance>();
-    instances.push_back(sg::tlas_instance{.blas = mesh_rec->blas, .instance_id = 0, .hit_group_offset = 0});
+    instances.push_back(
+        sg::tlas_instance{.blas = sv_test::blas_of(resources, item.mesh), .instance_id = 0, .hit_group_offset = 0});
 
     auto hit_groups = cc::vector<sv::material_permutation const*>();
     hit_groups.push_back(permutation);

@@ -6,7 +6,7 @@
 
 // The 2D helpers Slug's outline code shares.
 // tg has no equivalent yet: no 2D wedge product, no perpendicular with a promised turn, no midpoint or lerp of positions.
-// libs/graphics/shaped-rendering/docs/lower-library-gaps.md records them, and they leave here when tg gains them.
+// issue: feat-tg-2d-vector-helpers
 
 namespace sr::impl
 {

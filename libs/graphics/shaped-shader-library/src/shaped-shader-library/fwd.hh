@@ -15,6 +15,7 @@ using namespace cc::primitive_defines;
 
 // virtual filesystem
 enum class file_revision : u64;
+struct file_dependency;
 struct embedded_file;
 class filesystem;
 class memory_filesystem;
@@ -48,6 +49,7 @@ struct block_layout;
 struct shader_definition;
 struct shader_package;
 class shader_compiler;
+struct sgl_compiler_options;
 class shader_asset;
 class shader_library;
 

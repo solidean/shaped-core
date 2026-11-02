@@ -56,8 +56,8 @@ struct tree_builder
 
         while (!path.empty() && file.at(path.back()).indent_columns >= l.indent_columns)
         {
-            path.pop_back();
-            last_child.pop_back();
+            path.remove_back();
+            last_child.remove_back();
         }
 
         flush_blank();

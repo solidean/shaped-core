@@ -185,7 +185,7 @@ void warn_unservable_once(cc::string_view name, attribute_frequency f, geometry_
 
         // `final` stops the walk whether or not the sample itself was usable.
         // A binding the mesh carries no uv set for still refuses the mesh's texture, and what stands is the coarser rank that
-        // had won — which is the whole point of refusing a texture we know to be bad.
+        // had won, rather than a texture we know to be bad.
         if (binding->is_final)
             return winner;
     }
@@ -266,6 +266,7 @@ resolved_material resolve_material(material_type const& type, material const& ma
             // The geometric frequency picks the load code, so it is shape; which buffer it lands in is value.
             shape.add_pod(a.attribute->frequency);
             values.add_pod(a.attribute->hash);
+            values.add_pod(a.attribute->attribute);
             break;
 
         case material_frequency::material_texture:
@@ -275,8 +276,10 @@ resolved_material resolve_material(material_type const& type, material const& ma
             shape.add_pod(a.uv->frequency);
             // The generated text names a palette sampler, so that name is the shape; what else the state says is not read.
             shape.add_string(sgl_palette_sampler(a.sample->sampler));
-            // The swizzle is generated code rather than a value, so it belongs in the shape — and only as far as it is read.
+            // The swizzle is generated code, so it belongs in the shape — and only as far as it is read.
+            // It is a value too: the placeholder a slot shows until its texture lands sits in the channel the swizzle reads.
             impl::add_swizzle(shape, a.sample->swizzle, a.format.component_count());
+            impl::add_swizzle(values, a.sample->swizzle, a.format.component_count());
 
             // The transform splits the other way: whether there is one at all decides the generated code, and what it
             // scales by is a value the block carries — so a normal map's scale never forks a permutation.
@@ -285,6 +288,7 @@ resolved_material resolve_material(material_type const& type, material const& ma
             values.add_pod(a.sample->transform.bias);
             values.add_pod(a.sample->texture);
             values.add_pod(a.uv->hash);
+            values.add_pod(a.uv->attribute);
             // The seed is a value like any other: two materials whose maps have not landed show different placeholders
             // and therefore fill their blocks differently, so they cannot share one.
             values.add_pod_span_sized(a.fallback_constant);

@@ -68,7 +68,7 @@ TEST("sg transfer_scheduler - an ineligible head blocks only its own family")
     s.begin_window();
 
     // Family 1's head is waiting on something; family 2 must be filled around it rather than queueing behind it.
-    // This is the whole point of out-of-order selection — head-of-line blocking is what it exists to remove.
+    // Out-of-order selection exists to remove this head-of-line blocking.
     auto const jobs = cc::vector<transfer_candidate>{async_job(0, 1, false), async_job(1, 1), async_job(2, 2)};
     auto const pick = s.pick_next(jobs);
     REQUIRE(pick.has_value());

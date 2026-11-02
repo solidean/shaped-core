@@ -3,12 +3,12 @@
 #include <clean-core/thread/async.hh>
 #include <clean-core/thread/async_coroutine.hh>
 #include <clean-core/thread/atomic.hh>
+#include <clean-core/thread/native_thread.hh>
 #include <clean-core/thread/thread.hh>
 #include <nexus/test.hh>
 #include <shaped-graphics/all.hh>
 #include <shaped-shader-library/shader_asset.hh>
 
-#include <thread>
 #include <type_traits>
 #include <utility>
 
@@ -332,7 +332,7 @@ ASYNC_INVOCABLE_TEST("sg - a routine compiles a shader and dispatches it end to 
 
 // Gated on CC_HAS_THREADS: a single-threaded build (SC_THREADS=OFF, the WASM/no-threads mode) compiles cc::mutex with no mutex member and no locking at all,
 // because nothing in such a build is supposed to contend.
-// Spawning std::threads there would race by construction and prove nothing about the guard.
+// Threads started there run one after another on the calling thread, so they would prove nothing about the guard.
 #if CC_HAS_THREADS
 
 // Registration races; initialization does not.
@@ -355,23 +355,23 @@ ASYNC_INVOCABLE_TEST("sg - concurrent first acquires register one instance, and 
     racing_routine::evict(*ctx);
 
     constexpr auto thread_count = 8;
-    auto threads = cc::vector<std::thread>::create_with_capacity(thread_count);
+    auto threads = cc::vector<cc::native_thread>::create_with_capacity(thread_count);
 
     cc::atomic<int> ready = 0;
     for (auto i = 0; i < thread_count; ++i)
-        threads.emplace_back(
+        threads.push_back(cc::native_thread::start(
             [&]
             {
                 // Line the threads up so they reach the registry together, not one after another.
                 auto cmd = ctx->create_command_list();
                 ++ready;
                 while (ready.load() < thread_count)
-                    std::this_thread::yield();
+                    cc::this_thread_yield();
                 // No CHECK here: a check on a spawned thread is not attributed to the running test, and what is being
                 // proven is the aggregate below rather than anything one thread sees.
                 (void)racing_routine::try_acquire(*cmd);
                 ctx->drop_command_list(cc::move(cmd));
-            });
+            }));
 
     for (auto& t : threads)
         t.join();
@@ -406,11 +406,11 @@ ASYNC_INVOCABLE_TEST("sg - try_acquire_exclusive serializes concurrent access to
     auto const before = racing_counter_routine::count_of(*probe);
     ctx->drop_command_list(cc::move(probe));
 
-    auto threads = cc::vector<std::thread>::create_with_capacity(thread_count);
+    auto threads = cc::vector<cc::native_thread>::create_with_capacity(thread_count);
     cc::atomic<int> ready = 0;
 
     for (auto i = 0; i < thread_count; ++i)
-        threads.emplace_back(
+        threads.push_back(cc::native_thread::start(
             [&]
             {
                 // Each thread records against its own command list, which is the situation the guard is for.
@@ -418,13 +418,13 @@ ASYNC_INVOCABLE_TEST("sg - try_acquire_exclusive serializes concurrent access to
 
                 ++ready;
                 while (ready.load() < thread_count)
-                    std::this_thread::yield();
+                    cc::this_thread_yield();
 
                 for (auto n = 0; n < bumps_per_thread; ++n)
                     racing_counter_routine::bump(*cmd);
 
                 ctx->drop_command_list(cc::move(cmd));
-            });
+            }));
 
     for (auto& t : threads)
         t.join();

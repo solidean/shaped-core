@@ -1,4 +1,5 @@
 #include <clean-core/container/vector.hh>
+#include <clean-core/string/format.hh>
 #include <nexus/test.hh>
 #include <shaped-viewer/scene/quadric.hh>
 #include <shaped-viewer/scene/quadric_set.hh>
@@ -373,6 +374,38 @@ TEST("sv::intersect handles a hyperboloid of one sheet")
 
     // Outside the slab there is nothing, though the surface itself continues.
     CHECK(!sv::intersect(p, ray_from(tg::pos3f(-9, 3, 0), tg::vec3f(1, 0, 0))).has_value());
+}
+
+TEST("sv::intersect hits a hyperboloid along its asymptotic directions")
+{
+    // A hyperboloid's quadratic part is indefinite, so along a direction of its asymptotic cone, here 45 degrees from the
+    // axis, the ray's quadratic coefficient vanishes, and every solve that divides by it loses the hit.
+    // The quadric gallery's hyperboloid, seen from above at that angle, showed it as a black arc near its base.
+    constexpr float waist = 0.45f;
+    auto p = sv::quadric_primitive();
+    p.surface = {.diag = tg::vec3f(1.0f, -1.0f, 1.0f), .constant = -waist * waist};
+    p.clip = sv::quadric3::slab_about_origin(tg::vec3f(0, 1, 0), 0.9f);
+
+    // A point near the base, approached from outside and above at every angle from 30 to 60 degrees off the axis.
+    constexpr float y = -0.7f;
+    auto const target = tg::pos3f(tg::sqrt(waist * waist + y * y), y, 0.0f);
+    constexpr float distance = 3.0f;
+    auto missed = 0;
+    auto first_missed_degrees = -1.0f;
+    for (auto step = 0; step <= 600; ++step)
+    {
+        auto const degrees = 30.0f + 0.05f * float(step);
+        auto const angle = tg::angle_f::make_from_degree(degrees);
+        auto const toward = tg::vec3f(-tg::sin(angle), -tg::cos(angle), 0.0f);
+        auto const hit = sv::intersect(p, tg::ray3f(target - toward * distance, toward));
+        if (!hit.has_value() || !near(hit.value().t, distance, 1e-3f))
+        {
+            if (first_missed_degrees < 0.0f)
+                first_missed_degrees = degrees;
+            ++missed;
+        }
+    }
+    CHECK(missed == 0).context(cc::format("{} of 601 rays missed, the first at {} degrees", missed, first_missed_degrees));
 }
 
 TEST("sv::quadric_primitive::create_cone builds the frustum's limiting case")

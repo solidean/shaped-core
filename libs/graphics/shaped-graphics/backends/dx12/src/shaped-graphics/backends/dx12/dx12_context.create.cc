@@ -2,6 +2,7 @@
 
 #include <clean-core/common/log.hh>
 #include <clean-core/common/profiling.hh>
+#include <clean-core/error/optional.hh>
 #include <clean-core/platform/environment.hh>
 #include <clean-core/string/conversion.hh> // utf16_to_utf8 — DXGI_ADAPTER_DESC1::Description is wide
 #include <clean-core/string/format.hh>
@@ -41,6 +42,17 @@ struct adapter_search_result
     HRESULT device_loss_hr = S_OK;
 };
 
+constexpr UINT k_microsoft_vendor_id = 0x1414;
+
+/// Whether an adapter is WARP rather than a GPU — which DXGI's software flag alone does not say.
+/// Microsoft ships no GPU, and a GPU-less Windows on ARM host enumerates the Basic Render Driver (0x1414:0x008c)
+/// twice, once WITHOUT the flag: taken for hardware, it runs every "hardware" test on a WARP that fastfails there.
+/// docs/bugs-external/warp-arm64-pac-fastfail/readme.md has the evidence.
+[[nodiscard]] bool is_software_adapter(DXGI_ADAPTER_DESC1 const& desc)
+{
+    return (desc.Flags & DXGI_ADAPTER_FLAG_SOFTWARE) != 0 || desc.VendorId == k_microsoft_vendor_id;
+}
+
 /// The first hardware adapter that supports D3D12, into `out`.
 /// WARP is skipped here, so falling back to it is always the caller's explicit choice.
 ///
@@ -54,7 +66,7 @@ adapter_search_result find_hardware_adapter(IDXGIFactory4* factory, ComPtr<IDXGI
     {
         DXGI_ADAPTER_DESC1 ad = {};
         out->GetDesc1(&ad);
-        if (ad.Flags & DXGI_ADAPTER_FLAG_SOFTWARE)
+        if (is_software_adapter(ad))
             continue;
 
         // A null out-param probes D3D12 support (FL 11_0) without creating a device.
@@ -103,11 +115,52 @@ adapter_pin read_adapter_pin()
     return adapter_pin::none;
 }
 
+/// The identity of the WARP this process loaded: its file version and its last-write time, or empty when none is loaded yet.
+///
+/// A d3d10warp.dll beside the executable replaces the system one, which DXGI does not see: it reports the same adapter
+/// either way, so this is what tells the two apart.
+/// The write time is in it because WARP 1.0.21 rejects a pipeline blob written through a copy of itself with another
+/// write time, byte-identical or not, and the creation time does not matter; measured with copies staged beside two binaries.
+cc::string loaded_warp_identity()
+{
+    auto const module = GetModuleHandleW(L"d3d10warp.dll");
+    if (module == nullptr)
+        return {};
+
+    wchar_t path[MAX_PATH] = {};
+    if (GetModuleFileNameW(module, path, MAX_PATH) == 0)
+        return {};
+
+    DWORD ignored = 0;
+    auto const size = GetFileVersionInfoSizeW(path, &ignored);
+    if (size == 0)
+        return {};
+    auto data = cc::vector<byte>::create_defaulted(isize(size));
+    if (!GetFileVersionInfoW(path, 0, size, data.data()))
+        return {};
+
+    VS_FIXEDFILEINFO* fixed = nullptr;
+    UINT fixed_size = 0;
+    if (!VerQueryValueW(data.data(), L"\\", reinterpret_cast<void**>(&fixed), &fixed_size) || fixed == nullptr)
+        return {};
+
+    WIN32_FILE_ATTRIBUTE_DATA attributes = {};
+    if (!GetFileAttributesExW(path, GetFileExInfoStandard, &attributes))
+        return {};
+    auto const written
+        = (u64(attributes.ftLastWriteTime.dwHighDateTime) << 32) | attributes.ftLastWriteTime.dwLowDateTime;
+
+    return cc::format("{}.{}.{}.{} written {}", u16(fixed->dwFileVersionMS >> 16), u16(fixed->dwFileVersionMS & 0xFFFF),
+                      u16(fixed->dwFileVersionLS >> 16), u16(fixed->dwFileVersionLS & 0xFFFF), written);
+}
+
 /// What DXGI says about the adapter that was picked.
 ///
 /// The driver version comes from CheckInterfaceSupport, which is the only place d3d12 exposes one at all.
 /// It fails on WARP and on some drivers, and the empty string it then leaves correctly reads as "unknown" rather than
 /// as a version anyone should compare.
+/// On WARP, once a device exists, the loaded module's identity replaces it: pipeline blobs are keyed on it, and
+/// one WARP rejects the blobs another wrote, which the debug layer reports on every pipeline.
 sg::adapter_info describe_adapter(IDXGIAdapter1* adapter)
 {
     auto info = sg::adapter_info();
@@ -125,7 +178,7 @@ sg::adapter_info describe_adapter(IDXGIAdapter1* adapter)
 
     info.vendor_id = u32(desc.VendorId);
     info.device_id = u32(desc.DeviceId);
-    info.is_software = (desc.Flags & DXGI_ADAPTER_FLAG_SOFTWARE) != 0;
+    info.is_software = is_software_adapter(desc);
 
     // What the board has, which is NOT the budget this process gets — see adapter_info.
     // Zero is a real answer for an integrated GPU, so it is reported rather than treated as absent.
@@ -135,8 +188,35 @@ sg::adapter_info describe_adapter(IDXGIAdapter1* adapter)
     if (SUCCEEDED(adapter->CheckInterfaceSupport(__uuidof(IDXGIDevice), &umd)))
         info.driver_version = cc::format("{}.{}.{}.{}", u16(umd.HighPart >> 16), u16(umd.HighPart & 0xFFFF),
                                          u16(umd.LowPart >> 16), u16(umd.LowPart & 0xFFFF));
+    if (info.is_software)
+        if (auto warp = loaded_warp_identity(); !warp.empty())
+            info.driver_version = cc::move(warp);
 
     return info;
+}
+
+/// The shader model every shader sg runs is compiled for, which is DXC's default profile and what SGL's HLSL relies on.
+constexpr auto k_required_shader_model = D3D_SHADER_MODEL_6_8;
+
+/// An error naming the adapter and its driver when the device cannot run shaders of `k_required_shader_model`.
+///
+/// Checked at creation because the driver otherwise refuses each pipeline with a bare E_INVALIDARG.
+/// A runtime that does not know the model fails the query itself, which is the same answer.
+cc::optional<cc::string> check_shader_model(ID3D12Device* device, IDXGIAdapter1* adapter)
+{
+    auto data = D3D12_FEATURE_DATA_SHADER_MODEL{.HighestShaderModel = k_required_shader_model};
+    auto const queried = SUCCEEDED(device->CheckFeatureSupport(D3D12_FEATURE_SHADER_MODEL, &data, sizeof(data)));
+    if (queried && data.HighestShaderModel >= k_required_shader_model)
+        return {};
+
+    auto const info = describe_adapter(adapter);
+    auto const driver = info.driver_version.empty() ? cc::string("unknown") : info.driver_version;
+    auto const reached = queried ? cc::format("supports shader model {}.{} at most", int(data.HighestShaderModel) >> 4,
+                                              int(data.HighestShaderModel) & 0xF)
+                                 : cc::string("does not report shader model support");
+    return cc::format("the dx12 adapter '{}' (driver {}) {}, and sg compiles every shader for shader model {}.{}; "
+                      "updating the GPU driver usually raises it",
+                      info.name, driver, reached, int(k_required_shader_model) >> 4, int(k_required_shader_model) & 0xF);
 }
 
 dx12_message_severity to_sg_severity(D3D12_MESSAGE_SEVERITY severity)
@@ -415,6 +495,9 @@ cc::result<context_handle> create_dx12_context(backend::dx12::dx12_config const&
         return dx12_error(hr, "D3D12CreateDevice failed");
     process_has_device() = true;
 
+    if (auto const refusal = check_shader_model(device.Get(), adapter.Get()); refusal.has_value())
+        return cc::error(refusal.value());
+
     D3D12_COMMAND_QUEUE_DESC queue_desc = {};
     queue_desc.Type = D3D12_COMMAND_LIST_TYPE_DIRECT;
     ComPtr<ID3D12CommandQueue> queue;
@@ -435,7 +518,8 @@ cc::result<context_handle> create_dx12_context(backend::dx12::dx12_config const&
     // failed query leaves the tier at NOT_SUPPORTED, which is the correct "no ray tracing" answer.
     D3D12_RAYTRACING_TIER raytracing_tier = D3D12_RAYTRACING_TIER_NOT_SUPPORTED;
     D3D12_FEATURE_DATA_D3D12_OPTIONS5 options5 = {};
-    if (SUCCEEDED(device->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS5, &options5, sizeof(options5))))
+    if (!config.withhold_raytracing
+        && SUCCEEDED(device->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS5, &options5, sizeof(options5))))
         raytracing_tier = options5.RaytracingTier;
 
     // A failed query is an older runtime, which requires block-aligned sizes.
@@ -473,6 +557,29 @@ cc::result<context_handle> create_dx12_context(backend::dx12::dx12_config const&
     ctx->_extended_image_formats = extended_image_formats;
     ctx->_native_16bit_shader_ops = native_16bit_shader_ops;
     ctx->_wave_ops = wave_ops;
+
+    // One dispatch per argument record, no root-signature changes, so the signature takes no root signature.
+    {
+        auto const argument = D3D12_INDIRECT_ARGUMENT_DESC{.Type = D3D12_INDIRECT_ARGUMENT_TYPE_DISPATCH};
+        auto const desc = D3D12_COMMAND_SIGNATURE_DESC{.ByteStride = UINT(sizeof(D3D12_DISPATCH_ARGUMENTS)),
+                                                       .NumArgumentDescs = 1,
+                                                       .pArgumentDescs = &argument};
+        auto const hr = ctx->_device->CreateCommandSignature(&desc, nullptr, IID_PPV_ARGS(&ctx->_dispatch_signature));
+        if (FAILED(hr))
+            return dx12_error(hr, "ID3D12Device::CreateCommandSignature failed (indirect dispatch)");
+    }
+    // The same for an indexed draw: `sg::draw_indexed_args` is `D3D12_DRAW_INDEXED_ARGUMENTS` field for field.
+    {
+        static_assert(sizeof(sg::draw_indexed_args) == sizeof(D3D12_DRAW_INDEXED_ARGUMENTS));
+        auto const argument = D3D12_INDIRECT_ARGUMENT_DESC{.Type = D3D12_INDIRECT_ARGUMENT_TYPE_DRAW_INDEXED};
+        auto const desc = D3D12_COMMAND_SIGNATURE_DESC{.ByteStride = UINT(sizeof(D3D12_DRAW_INDEXED_ARGUMENTS)),
+                                                       .NumArgumentDescs = 1,
+                                                       .pArgumentDescs = &argument};
+        auto const hr = ctx->_device->CreateCommandSignature(&desc, nullptr, IID_PPV_ARGS(&ctx->_draw_indexed_signature));
+        if (FAILED(hr))
+            return dx12_error(hr, "ID3D12Device::CreateCommandSignature failed (indirect indexed draw)");
+    }
+
     ctx->_epoch_fence = cc::move(epoch_fence);
     ctx->_submission_fence = cc::move(submission_fence);
 

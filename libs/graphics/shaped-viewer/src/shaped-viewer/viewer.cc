@@ -6,11 +6,15 @@
 #include <clean-core/common/utility.hh> // cc::move
 #include <clean-core/container/map.hh>
 #include <clean-core/container/vector.hh>
+#include <clean-core/record/stat.hh>
 #include <clean-core/thread/async.hh> // cc::ambient_async_scheduler
 #include <clean-core/thread/async_coroutine.hh>
 #include <clean-core/thread/thread_pump.hh> // cc::thread_pump_all
+#include <imgui/imgui.h>
 #include <shaped-graphics/all.hh>
 #include <shaped-graphics/context/context.hh>
+#include <shaped-rendering/imgui_context.hh>
+#include <shaped-rendering/imgui_routine.hh>
 #include <shaped-rendering/input.hh>
 #include <shaped-rendering/shaders.hh> // sr::add_shader_packages (blit)
 #include <shaped-rendering/window.hh>
@@ -26,6 +30,7 @@
 #include <shaped-viewer/rendering/viewer_renderer.hh>
 #include <shaped-viewer/resources/resource_managers.hh>
 #include <shaped-viewer/shader_library.hh>
+#include <shaped-viewer/view/render_settings.hh>
 #include <shaped-viewer/view/view_store.hh>
 #include <shaped-viewer/view/viewer_definition.hh>
 #include <shaped-viewer/viewer.hh>
@@ -47,6 +52,7 @@ constexpr tg::vec4f clear_color = tg::vec4f(0.02f, 0.02f, 0.03f, 1.0f);
         [](sr::mouse_move_event const& m) { return result_t(m.cursor_pos); },   //
         [](sr::mouse_button_event const& b) { return result_t(b.cursor_pos); }, //
         [](sr::mouse_wheel_event const& w) { return result_t(w.cursor_pos); },  //
+        [](sr::file_drop_event const& d) { return result_t(d.cursor_pos); },    //
         [](sr::key_event const&) { return result_t(); },                        //
         [](sr::text_event const&) { return result_t(); });
 }
@@ -174,6 +180,11 @@ struct viewer::impl
     // Closed between the two, and unused by frames(), whose frame belongs to the loop variable.
     frame current_frame;
 
+    // Whether begin_frame opened the `sv.frame` scope that end_frame closes.
+    // A frames() loop and a destructor with no frame open must close nothing: an unmatched end would pop whatever scope
+    // the caller has open on this thread.
+    bool frame_scope_open = false;
+
     // Everything this viewer's views keep across frames: cameras, controllers, placements and textures alike.
     // Handed to the renderers rather than reached out of them — see view/view_store.hh.
     sv::view_store views;
@@ -195,6 +206,43 @@ struct viewer::impl
     // Last frame's leaves, in window space and with the links that order them.
     // Routing runs before the next frame is authored, so last frame's answer is the only one there is.
     cc::vector<hit_region> last_hit_regions;
+
+    /// Whether a layer left `render_mode::automatic` has been said to fall back to raster, which is said once per viewer.
+    bool raster_fallback_reported = false;
+
+    /// A double-click waiting for its view's next trace, at a point of that view's image in [0, 1).
+    struct pick_request
+    {
+        view_id view;
+        tg::pos2f uv = tg::pos2f(0, 0);
+    };
+    cc::optional<pick_request> pending_pick;
+
+    /// The primary depth under a pick on its way back from the GPU, with the camera and pixel it was traced at.
+    /// Its own camera rather than the view's, since the view may have moved on by the time the texel lands.
+    struct pick_readback
+    {
+        view_id view;
+        sg::data_future<f32> depth;
+        shaders::tracer::camera_record camera = {};
+        f32 near_plane = 0;
+        tg::vec2i pixel = tg::vec2i(0, 0);
+        tg::vec2i resolution = tg::vec2i(0, 0);
+    };
+    cc::optional<pick_readback> pick_in_flight;
+
+    /// Dear ImGui, brought up by the first `frame::imgui` and null until then, so a viewer without a UI pays nothing.
+    cc::unique_ptr<sr::imgui_context> imgui;
+
+    /// Whether this frame's imgui frame is open, between its begin and the record in finish_frame.
+    bool imgui_frame_open = false;
+
+    /// What the last imgui frame wanted, read by route_input before this frame's imgui frame begins.
+    bool imgui_wants_keyboard = false;
+    bool imgui_wants_mouse = false;
+
+    /// The last drawn frame's delta, for the imgui frame a first `frame::imgui` call opens late.
+    double last_delta = 0.0;
 
     /// The views the previous frame authored, so a per-frame controller update can reach each of them exactly once.
     /// `last_hit_regions` cannot serve: one view may own several regions, and a fly controller integrated twice over the
@@ -237,15 +285,6 @@ cc::result<viewer> viewer::try_create(sg::context& ctx, cc::string_view id_str, 
         if (win_r.has_error())
             return cc::error("shaped-viewer: could not create a window");
         win = cc::move(win_r.value());
-    }
-
-    // Ray tracing must be supported to build the meshes' BLAS; fail cleanly rather than asserting later.
-    {
-        auto probe = ctx.create_command_list();
-        auto const rt_supported = probe->raytracing.is_supported();
-        ctx.drop_command_list(cc::move(probe));
-        if (!rt_supported)
-            return cc::error("shaped-viewer: the rendering context reports no ray-tracing support");
     }
 
     // The frame's output: a back buffer when there is a window, an offscreen texture when there is not.
@@ -370,6 +409,13 @@ isize viewer::streaming_resources() const
     return _impl->resources.settling_count();
 }
 
+cc::span<sr::input_event const> viewer::input_events() const
+{
+    if (_impl->window_system == nullptr)
+        return {};
+    return _impl->window_system->events();
+}
+
 cc::shared_async<cc::unit> viewer::background_work()
 {
     return sv::background_work(*_impl->ctx);
@@ -394,6 +440,74 @@ void viewer::apply_capture(cc::string_view name, cc::function_ref<void(capture_c
 
     body({.first_frame = session->is_first_application(), .name = name, .size = f.viewport_size()});
     session->mark_applied();
+}
+
+void viewer::hold_capture(cc::string_view reason)
+{
+    if (auto* const session = _impl->capture.get(); session != nullptr)
+        session->hold(reason);
+}
+
+bool viewer::open_imgui()
+{
+    auto& im = *_impl;
+    if (im.imgui == nullptr)
+    {
+        // imgui keeps one global context, so a second viewer, or an application with its own, cannot have another.
+        if (ImGui::GetCurrentContext() != nullptr)
+        {
+            CC_LOG_ERROR("frame::imgui: an imgui context exists already, and imgui allows one per process");
+            return false;
+        }
+        im.imgui = cc::make_unique<sr::imgui_context>(sr::imgui_context::create());
+    }
+    if (!im.imgui_frame_open)
+        begin_imgui_frame(im.last_delta);
+    return true;
+}
+
+bool viewer::imgui_wants_keyboard() const
+{
+    return _impl->imgui_wants_keyboard;
+}
+
+bool viewer::imgui_wants_mouse() const
+{
+    return _impl->imgui_wants_mouse;
+}
+
+void viewer::begin_imgui_frame(double delta)
+{
+    auto& im = *_impl;
+
+    // A frame that never reached its record, a device loss in between, still holds imgui's frame open.
+    if (im.imgui_frame_open)
+        im.imgui->end_frame();
+
+    // imgui divides by the step, and the first frame and a converging capture frame have none.
+    auto const dt = float(delta > 0.0 ? delta : 1.0 / 60.0);
+    if (im.config.headless)
+        im.imgui->begin_frame({.display_size = tg::vec2i(im.config.width, im.config.height), .delta_time = dt});
+    else
+        im.imgui->begin_frame(*im.window, dt);
+    im.imgui_frame_open = true;
+}
+
+void viewer::record_imgui(sg::render_target_view const& output)
+{
+    auto& im = *_impl;
+    im.imgui->end_frame();
+    im.imgui_frame_open = false;
+    im.imgui_wants_keyboard = im.imgui->wants_keyboard();
+    im.imgui_wants_mouse = im.imgui->wants_mouse();
+
+    // Its uploads go before the scope opens, as imgui_routine asks.
+    auto const prepared = sr::imgui_routine::prepare(*im.current_cmd, ImGui::GetDrawData());
+    auto pass = im.current_cmd->raster.render_to({.color_targets = {output.preserved()}});
+
+    // The pipeline builds over the first frames, and a capture must not settle on an image the UI is missing from.
+    if (sr::imgui_routine::execute(pass, prepared) != sg::routine_outcome::executed)
+        hold_capture("the imgui pipeline is building");
 }
 
 sv::impl::view_state& viewer::state_of(view_id id)
@@ -475,6 +589,104 @@ void viewer::zoom_at(tg::pos2f window_point, float ticks)
                                 cc::clamp(texel_y / f32(resolution[1]), 0.0f, 1.0f));
 }
 
+void viewer::request_pick(tg::pos2f window_point)
+{
+    auto& im = *_impl;
+
+    auto const hit = pick_hit_region(im.last_hit_regions, window_point);
+    if (hit == invalid_hit_region)
+        return;
+
+    auto const& region = im.last_hit_regions[hit];
+    auto const* const st = im.views.get_ptr(region.id);
+    if (st == nullptr || st->composite.raw() == nullptr)
+        return; // a view with no image yet has nothing to pick
+
+    auto const resolution = tg::vec2i(st->composite.width(), st->composite.height());
+    if (resolution[0] <= 0 || resolution[1] <= 0)
+        return;
+
+    // The same inversion zoom_at makes, so a magnified view picks the texel the cursor is actually over.
+    auto const texel_x = (window_point[0] - region.offset[0]) / (region.scale[0] != 0 ? region.scale[0] : 1.0f);
+    auto const texel_y = (window_point[1] - region.offset[1]) / (region.scale[1] != 0 ? region.scale[1] : 1.0f);
+    auto const uv = tg::pos2f(texel_x / f32(resolution[0]), texel_y / f32(resolution[1]));
+    if (uv[0] < 0 || uv[0] >= 1 || uv[1] < 0 || uv[1] >= 1)
+        return; // a letterbox bar around a fitted image shows no surface
+
+    im.pending_pick = impl::pick_request{.view = region.id, .uv = uv};
+}
+
+void viewer::read_back_pick(viewer_definition const& def, render_plan const& plan)
+{
+    auto& im = *_impl;
+    if (!im.pending_pick.has_value())
+        return;
+    auto const request = im.pending_pick.value();
+
+    // Traced layers replace what lies below them, so the one on top is what the click landed on.
+    plan_trace const* trace = nullptr;
+    for (auto const& t : plan.traces)
+        if (t.id == request.view && t.refresh && (trace == nullptr || t.layer > trace->layer))
+            trace = &t;
+    if (trace == nullptr)
+        return; // the view did not trace this frame, and the request waits for one that does
+
+    auto const* const st = im.views.get_ptr(request.view);
+    auto const* const accumulation
+        = st != nullptr ? st->temporal.get_ptr(temporal_id::accumulation(trace->layer)) : nullptr;
+    auto const* const depth = st != nullptr ? st->temporal.get_ptr(temporal_id::primary_depth(trace->layer)) : nullptr;
+
+    // A trace that declined since its last restart wrote no depth, and a fresh texture holds nothing worth reading.
+    if (accumulation == nullptr || accumulation->accum_frame == 0 || depth == nullptr || depth->texture.raw() == nullptr)
+        return;
+
+    auto const resolution = tg::vec2i(depth->texture.width(), depth->texture.height());
+    auto const pixel = tg::vec2i(cc::clamp(i32(request.uv[0] * f32(resolution[0])), 0, resolution[0] - 1),
+                                 cc::clamp(i32(request.uv[1] * f32(resolution[1])), 0, resolution[1] - 1));
+
+    // The camera this frame traced the view from, with the aspect the trace gave it.
+    auto cam = def[trace->view].camera;
+    cam.projection.aspect_ratio = f64(resolution[0]) / f64(resolution[1]);
+
+    auto const region = sg::texture_region{.offset = tg::pos3i(pixel[0], pixel[1], 0), .size = tg::vec3i(1, 1, 1)};
+    im.pick_in_flight = impl::pick_readback{
+        .view = request.view,
+        .depth = sg::data_future<f32>(im.current_cmd->download.bytes_from_texture(depth->texture.raw(), {}, region)),
+        .camera = camera_record_of(cam),
+        .near_plane = f32(cam.projection.near_plane),
+        .pixel = pixel,
+        .resolution = resolution,
+    };
+    im.pending_pick = {};
+}
+
+void viewer::apply_pick()
+{
+    auto& im = *_impl;
+    if (!im.pick_in_flight.has_value() || !im.pick_in_flight.value().depth.is_ready())
+        return;
+
+    auto const readback = im.pick_in_flight.value();
+    im.pick_in_flight = {};
+
+    auto const depth = readback.depth.try_get_data();
+    if (!depth.has_value() || depth.value().size() != 1)
+        return; // cancelled with its command list, which leaves nothing to centre on
+
+    auto const point = primary_hit_position(readback.camera, readback.pixel, readback.resolution, depth.value()[0],
+                                            readback.near_plane);
+    if (!point.has_value())
+        return; // the background
+
+    // Checked again on landing: the caller may have taken the camera, or switched controllers, since the click.
+    auto* const st = im.views.get_ptr(readback.view);
+    if (st == nullptr || st->camera_owned_last_frame || st->style_last_frame != camera_style::orbit)
+        return;
+
+    // Only starts the glide: the per-frame update in acquire_frame moves the camera, beginning this same frame.
+    (void)st->controller.focus_on(point.value());
+}
+
 void viewer::route_input()
 {
     auto& im = *_impl;
@@ -491,6 +703,14 @@ void viewer::route_input()
             im.last_modifiers = e.as_key().modifiers;
         if (e.is_mouse_button())
             im.last_modifiers = e.as_mouse_button().modifiers;
+
+        // What imgui wants, the views leave alone: a wheel over an imgui window scrolls it, a key typed into a field flies nothing.
+        // A drag a view already holds keeps going, since imgui wants no mouse it did not press itself.
+        auto const is_mouse = e.is_mouse_move() || e.is_mouse_button() || e.is_mouse_wheel();
+        if (!im.active_view.has_value() && !im.moving_view.has_value() && im.imgui_wants_mouse && is_mouse)
+            continue;
+        if (im.imgui_wants_keyboard && (e.is_key() || e.is_text()))
+            continue;
 
         // Ctrl+wheel magnifies the image under the cursor instead of moving a camera, and is consumed here so the
         // controller never also zooms.
@@ -553,6 +773,14 @@ void viewer::route_input()
         }
         else
         {
+            // A double-click re-centres the orbit on the surface under the cursor, which only the trace's depth knows.
+            if (e.is_mouse_button())
+            {
+                auto const& b = e.as_mouse_button();
+                if (b.is_down && b.button == sr::mouse_button::left && b.clicks == 2)
+                    request_pick(im.last_cursor_pos);
+            }
+
             if (st->controller.handle(e))
                 st->camera = st->controller.camera();
 
@@ -586,6 +814,11 @@ frame viewer::acquire_frame()
     // Advanced before authoring, because seeding and the hit-test below read it — and still before anything resolves a
     // texture, which is all its reclaim needs.
     im.views.begin_frame(u64(im.ctx->current_epoch()));
+    apply_pick();
+
+    // imgui sees this poll's input before its frame opens below; routing reads the last frame's wants, the only answer there is yet.
+    if (im.imgui != nullptr && im.window_system != nullptr)
+        im.imgui->process_events(*im.window_system);
     route_input();
 
     if (im.config.headless)
@@ -616,9 +849,11 @@ frame viewer::acquire_frame()
     // Sampled once, here, so every view in the frame sees the same instant.
     // The first drawn frame has no predecessor, so its delta is 0 rather than the loop's start-up cost, and it is also
     // where the elapsed clock starts — a hand-driven loop opens with begin_frame and nothing else.
-    auto const now = cc::current_time_steady_secs();
+    // A capture shows its request's instant instead of the wall clock's, so it renders the same image on any machine.
+    auto const capturing = im.capture != nullptr;
+    auto const now = capturing ? im.capture->seconds() : cc::current_time_steady_secs();
     if (im.frame_index == 0)
-        im.start_time = now;
+        im.start_time = capturing ? 0.0 : now;
     auto const delta = im.frame_index == 0 ? 0.0 : now - im.last_frame_time;
     im.last_frame_time = now;
     ++im.frame_index;
@@ -630,7 +865,20 @@ frame viewer::acquire_frame()
     for (auto const id : im.last_frame_views)
     {
         auto* const st = im.views.get_ptr(id);
-        if (st == nullptr || st->style_last_frame != camera_style::fly)
+        if (st == nullptr)
+            continue;
+
+        // The orbit controller's one motion over time is a double-click's glide to its new centre.
+        // A caller who took the camera mid-glide owns it from then on, so the glide is dropped rather than resumed later.
+        if (st->style_last_frame == camera_style::orbit)
+        {
+            if (st->camera_owned_last_frame)
+                st->controller.cancel_focus();
+            else if (st->controller.update(delta))
+                st->camera = st->controller.camera();
+            continue;
+        }
+        if (st->style_last_frame != camera_style::fly)
             continue;
 
         // Headless counts as focused: there is no window to lose focus, and a hand-driven loop stepping `delta` forward
@@ -651,6 +899,11 @@ frame viewer::acquire_frame()
     f._delta_seconds = delta;
     f._id = im.frame_index;
     f._open = true;
+
+    // Once a body has asked for imgui, every drawn frame opens one, so a UI drawn only some frames still gets its input.
+    im.last_delta = delta;
+    if (im.imgui != nullptr)
+        begin_imgui_frame(delta);
     return f;
 }
 
@@ -663,6 +916,7 @@ frame& viewer::begin_frame()
     // The outer frame bracket, closed in end_frame — everything a frame does nests under this one span.
     // After the assert above, so the misuse it catches does not also open a second span.
     CC_RECORD_SCOPE_BEGIN("sv.frame");
+    im.frame_scope_open = true;
 
     // A closed frame holds no backbuffer and no command list, so overwriting one strands nothing.
     im.current_frame = acquire_frame();
@@ -677,7 +931,11 @@ void viewer::end_frame()
     _impl->current_frame = frame{};
 
     // Closed LAST, so the present is inside the frame it belongs to rather than after it.
-    CC_RECORD_SCOPE_END("sv.frame");
+    if (_impl->frame_scope_open)
+    {
+        CC_RECORD_SCOPE_END("sv.frame");
+        _impl->frame_scope_open = false;
+    }
 }
 
 frame_range viewer::frames()
@@ -710,8 +968,10 @@ void viewer::finish_frame(frame& f)
     if (!f._open)
         return;
 
-    // Whatever the immediate quadric calls accumulated becomes a scene item now, before anything reads the views.
+    // Whatever the immediate calls accumulated becomes scene items now, before anything reads the views.
     // It has to be here rather than in the sugar: a batch is one item, and it is not placeable until it is complete.
+    // Shapes first, since their vertices and edges land in the quadric batches.
+    f._flush_immediate_shapes();
     f._flush_immediate_quadrics();
 
     // The frame's authored views become the definition verbatim, and the frame's layout tree becomes the one layer of
@@ -721,16 +981,18 @@ void viewer::finish_frame(frame& f)
     def.views = f._views;
     def.nodes = f._nodes;
 
-    // A canvas places its drawings in logical pixels, so it takes the content scale of the display the window is on —
-    // the one whose rectangle holds the window's top-left corner, which is also where a new window opens.
-    if (im.window != nullptr && im.window_system != nullptr)
-        for (auto const& d : im.window_system->displays())
-        {
-            auto const p = im.window->position();
-            if (p[0] >= d.position[0] && p[1] >= d.position[1] && p[0] < d.position[0] + d.size[0]
-                && p[1] < d.position[1] + d.size[1] && d.content_scale > 0.0f)
-                def.content_scale = d.content_scale;
-        }
+    // A capture asks every traced view for its samples and no more, so a traced layer stops where the image is taken.
+    // Also while work is owed: what the views hold then is thrown away once it drains, so tracing on past the target buys nothing.
+    // Nor does it denoise an image it will not take: only the one at the target.
+    if (im.capture != nullptr && !im.capture->is_done())
+    {
+        def.sample_target = im.capture->request().accumulate;
+        def.denoise_at_target_only = true;
+    }
+
+    // A canvas places its drawings in logical pixels, and the window's display scale is how many back-buffer pixels one of those covers.
+    if (im.window != nullptr)
+        def.display_scale = im.window->display_scale();
 
     im.last_frame_views.clear();
     for (auto& v : def.views)
@@ -756,7 +1018,11 @@ void viewer::finish_frame(frame& f)
             if (st.style_this_frame == camera_style::fly)
                 st.fly.pose = fps_state::from_camera(st.camera);
             else
+            {
+                // A glide begun before the switch belongs to the pose the switch threw away.
                 st.controller.orbit = orbit_state::from_camera(st.camera);
+                st.controller.cancel_focus();
+            }
             st.style_seeded = true;
         }
         st.style_last_frame = st.style_this_frame;
@@ -875,6 +1141,27 @@ void viewer::finish_frame(frame& f)
             p.at = p.at + down;
     }
 
+    def.wavefront_budget_ms = sv::impl::wavefront_budget_of(im.config);
+
+    // `automatic` is resolved here, where the plan is built, so the plan declares what the resolved mode writes.
+    for (auto& v : def.views)
+        for (auto& l : v.layers)
+        {
+            if (l.kind != layer_kind::scene_3d || l.settings.mode != render_mode::automatic)
+                continue;
+            l.settings.mode = resolve_render_mode(*im.ctx, l.settings.mode);
+            // A hybrid frame is one sample per pixel, too noisy to show undenoised while the camera moves.
+            if (l.settings.mode == render_mode::hybrid && l.settings.reconstruct.denoiser == sr::denoise_method::none)
+                l.settings.reconstruct.denoiser = sr::denoise_method::automatic;
+            if (l.settings.mode == render_mode::raster && !im.raster_fallback_reported)
+            {
+                CC_LOG_WARNING("the device has no ray tracing, so every layer left render_mode::automatic is "
+                               "rasterized: "
+                               "lit directly, unshadowed and without bounces");
+                im.raster_fallback_reported = true;
+            }
+        }
+
     // What the store already holds for each view, so the plan can decide what refreshes.
     // Read off the composite texture rather than a field stamped beside it, so "the plan believes this can be
     // re-presented" and "there is something to re-present" cannot drift apart.
@@ -932,6 +1219,13 @@ void viewer::finish_frame(frame& f)
         // what a capture actually needs: a frame where any pass declined is one that would be saved incomplete.
         // A frame with no trace and nothing declined has nothing to be wrong about.
         traces_ran = recorded == sg::routine_outcome::executed;
+
+        // After the traces, so the depth read back is the one this frame wrote.
+        read_back_pick(def, plan);
+
+        // Over everything the views composited, so the UI is never hidden behind a pane.
+        if (im.imgui_frame_open)
+            record_imgui(output);
 
         if (im.config.headless)
         {
@@ -1003,27 +1297,87 @@ void viewer::advance_capture(render_plan const& plan, bool traces_ran)
     auto any_traced = false;
     auto views_converged = true;
     auto lowest = u32(0);
+    auto short_pixels = u32(0);
     for (auto const& tr : plan.traces)
     {
         if (!tr.refresh)
             continue;
 
         if (!any_traced)
-            lowest = im.views.min_accumulated_frames(tr.id);
+            lowest = im.views.min_accumulated_samples(tr.id);
         else
-            lowest = cc::min(lowest, im.views.min_accumulated_frames(tr.id));
+            lowest = cc::min(lowest, im.views.min_accumulated_samples(tr.id));
+        short_pixels += im.views.pixels_short_of_target(tr.id);
 
         any_traced = true;
-        views_converged &= im.views.is_accumulation_converged(tr.id, session.request().accumulate_frames);
+        views_converged &= im.views.is_accumulation_converged(tr.id, session.request().accumulate);
     }
 
     // Payloads still streaming count as owed work too: until they land their meshes are traced as placeholder boxes, and
     // an image converged over those is a picture of the stand-ins.
     // Landing does restart the accumulation, but a stream slower than the convergence lets the stand-ins finish first.
-    auto const owed = im.resources.pending_work_count() + im.resources.settling_count();
+    // A frame whose body says its image is not the finished one owes work the viewer cannot see, such as a load of its own.
+    auto const held = session.take_hold();
+    auto const owed = im.resources.pending_work_count() + im.resources.settling_count() + (held.empty() ? 0 : 1);
+
+    // Owed work that drains restarts every traced view, so the image is traced against the final resources and nothing before them.
+    // Work landing in place keeps a texture's id, and pixels that had already stopped at the target would otherwise keep
+    // samples of what it replaced.
+    // A frame tracing nothing has no samples to throw away, so it settles at once.
+    // Nor does a run out of time: it writes what it has on this frame, where a restart would defer the write and leave it a frame's samples.
+    if (session.note_owed_work(owed) && !plan.traces.empty() && !session.is_out_of_time())
+    {
+        for (auto const& tr : plan.traces)
+            im.views.restart_accumulation(tr.id);
+        return;
+    }
+
     auto const settled = session.is_settled(views_converged, any_traced, owed, traces_ran);
     if (!settled && !session.is_out_of_time())
         return;
+
+    auto const write = [&](cc::string const& path)
+    {
+        // The floor the image was written at, which a test reads to see a target was kept to rather than overshot.
+        CC_RECORD_STAT("sv.capture.samples_per_pixel", cc::rec::unit_count, lowest);
+
+        auto const failure
+            = block_on(*im.ctx, capture_failure(sr::write_capture_image_async(*im.ctx, im.offscreen, path)));
+        if (failure.has_error())
+            CC_LOG_ERROR("capture: {}", failure.error().underlying().to_string());
+        else if (!failure.value().empty())
+            CC_LOG_ERROR("capture: {}", failure.value());
+    };
+
+    // A sequence writes every frame to its own path, settled or not, since a sequence with a hole cannot be encoded.
+    // A frame that ran out of time is warned about as it is written, and counted again once the run ends.
+    if (session.request().is_sequence())
+    {
+        if (session.writes_frame())
+        {
+            if (!settled)
+            {
+                session.note_unsettled_frame();
+                CC_LOG_WARNING("capture: frame {} gave up after {}s at {}/{} samples per pixel{}",
+                               session.frame_index(), session.elapsed_seconds(), lowest, session.request().accumulate,
+                               held.empty() ? cc::string() : cc::format(", held for {}", held));
+            }
+            write(sr::capture_frame_path(session.request().output_path, session.frame_index()));
+        }
+
+        if (!session.is_last_frame())
+        {
+            session.advance_frame();
+            return;
+        }
+
+        if (session.unsettled_frames() > 0)
+            CC_LOG_WARNING("capture: {} of the sequence's written frames ran out of time before they settled",
+                           session.unsettled_frames());
+        session.mark_done();
+        request_close();
+        return;
+    }
 
     if (settled)
         session.mark_settled_before_writing();
@@ -1032,17 +1386,16 @@ void viewer::advance_capture(render_plan const& plan, bool traces_ran)
     // succeeded, so an unsettled image left at that path would be refreshed over the committed reference.
     auto const path = session.settled_before_writing() ? cc::string(session.request().output_path)
                                                        : sv::impl::partial_capture_path(session.request().output_path);
+    // A wavefront layer names how many pixels hold its floor down, since one stalled pixel stalls the whole capture.
     if (!session.settled_before_writing())
-        CC_LOG_WARNING("capture: giving up after {}s at {}/{} accumulated frames — writing what it has to {}, and "
+        CC_LOG_WARNING("capture: giving up after {}s at {}/{} samples per pixel{}{} — writing what it has to {}, and "
                        "nothing to {}",
-                       session.elapsed_seconds(), lowest, session.request().accumulate_frames, path,
+                       session.elapsed_seconds(), lowest, session.request().accumulate,
+                       short_pixels == 0 ? cc::string() : cc::format(", {} pixels short of it", short_pixels),
+                       held.empty() ? cc::string() : cc::format(", held for {}", held), path,
                        session.request().output_path);
 
-    auto const failure = block_on(*im.ctx, capture_failure(sr::write_capture_image_async(*im.ctx, im.offscreen, path)));
-    if (failure.has_error())
-        CC_LOG_ERROR("capture: {}", failure.error().underlying().to_string());
-    else if (!failure.value().empty())
-        CC_LOG_ERROR("capture: {}", failure.value());
+    write(path);
 
     session.mark_done();
     request_close();

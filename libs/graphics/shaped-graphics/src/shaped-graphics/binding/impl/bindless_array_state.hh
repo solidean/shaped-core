@@ -24,6 +24,9 @@ public:
     /// The slot for `view` this epoch, writing its descriptor on a mint.
     [[nodiscard]] u32 acquire(raw_view const& view) { return _acquire(view, false); }
 
+    /// Frees `view`'s slot, which its owner will not acquire again (see slot_table::release).
+    void release(raw_view const& view);
+
     /// The same, with the slot pinned so no reclaim may take it until it is unpinned.
     [[nodiscard]] u32 acquire_pinned(raw_view const& view) { return _acquire(view, true); }
 

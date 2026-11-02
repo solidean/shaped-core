@@ -298,7 +298,8 @@ shaders::tracer::light_record light_record_of(light const& l)
                                              .cone_offset = 1,
                                              .one_minus_cos_angular_radius = 0,
                                              .link_mask = ~0u,
-                                             .pad0 = {}};
+                                             .select_pdf = 0,
+                                             .select_cdf = 0};
 
     auto const origin = l.placement.transform(tg::pos3f::zero);
     out.position = tg::vec3f(origin[0], origin[1], origin[2]);

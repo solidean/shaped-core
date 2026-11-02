@@ -49,6 +49,12 @@ int dlss_released_stream_count()
     return 0;
 }
 
+int dlss_open_count(sg::context const& ctx)
+{
+    (void)ctx;
+    return 0;
+}
+
 bool dlss_evaluate(sg::command_list& cmd, dlss_stream& stream, dlss_eval_desc const& desc)
 {
     (void)cmd;

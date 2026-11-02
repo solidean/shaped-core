@@ -238,8 +238,7 @@ public:
     // Ranges are in elements of `T`, and each asserts the matching `buffer_usage` — vertex_buffer or index_buffer.
     // `as_vertex_buffer` conveys only the per-vertex stride (`sizeof(T)`) today, and does not tie `T` to the pipeline's `vertex_input_layout` — its attribute offsets and formats.
     // A `vertex_layout<T>` trait that lets binding cross-check the layout, and build it from `T`, lands with the raster-pipeline vertex-input work.
-    // TODO: validate a bound vertex buffer's element type against the `vertex_input_layout` the pipeline expects.
-    // Carrying a `std::type_index` of `T` on the view and the expected type on the layout would let binding cross-check them at runtime, ahead of the compile-time trait.
+    // issue: feat-sg-vertex-buffer-layout-check
 
     /// The whole buffer as a vertex buffer with per-vertex stride `sizeof(T)`.
     [[nodiscard]] vertex_buffer_view as_vertex_buffer() const

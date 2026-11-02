@@ -14,6 +14,8 @@ cc::string where_of(Use const& u)
         return cc::format("binding '{}' of group {}", u.binding, u.group);
     if (u.vertex_slot >= 0)
         return cc::format("vertex buffer slot {}", u.vertex_slot);
+    if (u.indirect_args)
+        return cc::string("the indirect dispatch arguments");
     return cc::string("the index buffer");
 }
 } // namespace
@@ -31,6 +33,11 @@ void aliasing_scope::add(cc::span<binding_group const* const> groups,
             add({.buffer = vertex_buffers[s], .vertex_slot = int(s)});
     if (index_buffer != nullptr)
         add({.buffer = index_buffer});
+}
+
+void aliasing_scope::add_indirect_args(raw_buffer const* args)
+{
+    add({.buffer = args, .indirect_args = true});
 }
 
 void aliasing_scope::add(use const& u)

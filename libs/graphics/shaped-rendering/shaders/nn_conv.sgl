@@ -1,0 +1,147 @@
+// One 3x3 convolution with a bias and a ReLU: the whole of the arithmetic the denoise network is made of.
+//
+// Sixteen of these, four max pools and four nearest upsamples are the entire U-Net, so this shader is where the member's cost and its correctness both live.
+//
+// FEATURE MAPS ARE HWC: index (y * width + x) * channels + c, channels innermost, and `channels` is padded to a multiple of four so this shader can read four of them in one load.
+// That is what OIDN's own GPU kernels use, for the reason their comments give: adjacent threads want adjacent memory, and a thread per output CHANNEL is what makes a write coalesce.
+//
+// WEIGHTS ARE [ky][kx][i][o], which is `oihw` turned inside out so the OUTPUT channel is innermost.
+// That is the layout the wave wants rather than the one a thread wants.
+// A lane's output channel is what varies across the wave.
+// So putting `o` innermost makes one weight load touch one or two cache lines instead of sixty-four rows scattered `9 * in_channels` floats apart.
+// `sr::impl::oidn_network` does that transpose once when it uploads them.
+// It is worth about 1.1x at the same blocking, and 1.25x once the run of texels per thread is re-tuned for it.
+//
+// Padding is ZERO and the output keeps the input's width and height, which is what OIDN's convolutions do.
+// Its descriptor gives the destination the source's H and W, and the skip connections could not concatenate otherwise.
+
+// How many texels along x one thread produces.
+//
+// This is what makes the shader worth its name rather than a definition of the arithmetic.
+// A thread reads a layer's weights once and spends them on `conv_texels` outputs, so the weight traffic per texel falls by that factor.
+// The weights are what dominate: every thread in a wave reads a DIFFERENT output channel's row.
+// So those reads are strided where the input reads are a broadcast, and there is no reuse of them across texels otherwise.
+//
+// 8 was swept rather than picked, over a whole 256x256 tile: 4 is 5.8 ms, 8 is 5.3, 12 is 6.3, 16 is 7.2 and 24 is 9.1.
+// Those times are the HLSL kernel's before the SGL port, which computes the same arithmetic, and have not been re-taken.
+// Re-sweep it whenever the reads change width, since the window a thread holds in registers grows with them.
+// Blocking the output channels as well does not pay; reconstruction.md has the measurement.
+//
+// `sr::impl::oidn_network` dispatches against this, and the two must agree; a mismatch is a wrong image.
+// nn-conv-test.cc dispatches with its own copy, so moving this one fails it on every run; the network's copy is checked only by the OIDN oracle test, which skips where OIDN was not fetched.
+const conv_texels = 8
+
+// The columns of the input window one thread reads: its texels and one more on either side.
+const window = 10
+
+test window == conv_texels + 2
+
+@inline binding nn_conv_constants:
+    width: uint
+    height: uint
+    in_channels: uint
+    out_channels: uint
+    // Where this layer's weights and bias start, in elements.
+    // One buffer holds the whole network, so a layer is a pair of offsets rather than a binding of its own.
+    weight_offset: uint
+    bias_offset: uint
+    // Whether the source is two feature maps to be read as one.
+    //
+    // A decoder layer takes the upsampled features CONCATENATED with an encoder skip, and doing that as a copy would move more memory than the convolution reads.
+    // So the concat is addressing: channels below `in_channels_a` come from the first buffer and the rest from the second, which is why `source_b` is always bound even when nothing reads it.
+    in_channels_a: uint
+
+binding nn_conv_buffers:
+    source_a: buffer[float4]
+    source_b: buffer[float4]
+    weights: buffer[float]
+    target: mut buffer[float]
+
+// Component `d` of `v`, for a `d` an unrolled loop makes a constant, so only one side of the branches is left.
+fun lane(v: float4, d: int) -> float:
+    if d == 0 => return v.x
+    if d == 1 => return v.y
+    if d == 2 => return v.z
+    return v.w
+
+// One thread per output channel, for a run of `conv_texels` texels along x.
+//
+// The channel is still the FASTEST dimension so that a wave writes one contiguous run per texel, which is the whole reason the feature maps are HWC.
+@compute(64) fun main_cs(@thread_id id: int3){nn_conv_buffers, nn_conv_constants}:
+    let width = nn_conv_constants.width as int
+    let height = nn_conv_constants.height as int
+    let in_channels = nn_conv_constants.in_channels as int
+    let out_channels = nn_conv_constants.out_channels as int
+
+    let o = id.x
+    let x0 = id.y * conv_texels
+    let y = id.z
+    if o >= out_channels or x0 >= width or y >= height => return
+
+    // The bias sits after every weight of the layer, so one buffer carries both.
+    let bias = nn_conv_buffers.weights[(nn_conv_constants.bias_offset as int) + o]
+
+    let mut sums = float[conv_texels].filled(bias)
+
+    // One kernel column's worth of weights, which is the stride between kx blocks in the layout above.
+    let column = in_channels * out_channels
+
+    for ky in -1 ..< 2:
+        let sy = y + ky
+        // the row is entirely padding, and padding is zero
+        if sy < 0 or sy >= height => continue
+
+        let row = (nn_conv_constants.weight_offset as int) + (ky + 1) * 3 * column
+
+        // Where each column of the window sits, worked out ONCE for the row rather than per input channel.
+        //
+        // The bounds test and the concat split do not depend on the channel, so the inner loop would repeat them for every input channel it reads.
+        let mut texels = int[window].filled(0)
+        let mut inside = bool[window].filled(false)
+        @unroll
+        for j in 0 ..< window:
+            let sx = x0 + j - 1
+            inside[j] = sx >= 0 and sx < width
+            texels[j] = if inside[j] => sy * width + sx else 0
+
+        let a = nn_conv_constants.in_channels_a as int
+        let b = in_channels - a
+
+        // Which half of the concatenation a channel comes from is decided once per channel, not once per element.
+        // FOUR input channels at a time, which is the whole reason every tensor's channel count is padded to four.
+        //
+        // A channel is contiguous within a texel, so one float4 fetches four of them.
+        // The input reads were two thirds of this shader's time before they were batched.
+        for i4 in 0 ..< (in_channels + 3) / 4:
+            let i = i4 * 4
+            let from_a = i < a
+            let stride4 = (if from_a => a else b) >> 2
+            let c4 = (if from_a => i else i - a) >> 2
+
+            // One row of the window, read once and spent on all three kernel columns and all four channels.
+            let mut v = float4[window].filled(float4(0.0))
+            @unroll
+            for j in 0 ..< window:
+                let at = texels[j] * stride4 + c4
+                if inside[j]:
+                    v[j] = if from_a => nn_conv_buffers.source_a[at] else nn_conv_buffers.source_b[at]
+
+            // The weights cannot come four at a time with them: `o` is innermost, so consecutive input channels are `out_channels` apart.
+            // That is the right trade, because a weight load serves `conv_texels` texels and an input load serves one.
+            @unroll
+            for d in 0 ..< 4:
+                let at_w = row + (i + d) * out_channels + o
+                let w0 = nn_conv_buffers.weights[at_w]
+                let w1 = nn_conv_buffers.weights[at_w + column]
+                let w2 = nn_conv_buffers.weights[at_w + 2 * column]
+
+                @unroll
+                for t in 0 ..< conv_texels:
+                    sums[t] += w0 * lane(v[t], d) + w1 * lane(v[t + 1], d) + w2 * lane(v[t + 2], d)
+
+    // ReLU on every layer, the last one included, which is why the network's output is never negative, and why the radiance it produces needs no clamp of its own.
+    let base = (y * width + x0) * out_channels + o
+    @unroll
+    for t in 0 ..< conv_texels:
+        if x0 + t < width:
+            nn_conv_buffers.target[base + t * out_channels] = max(sums[t], 0.0)

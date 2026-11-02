@@ -1,11 +1,73 @@
 #include <clean-core/memory/node_allocation.hh>
 #include <clean-core/thread/async_ambient.hh>
+#include <clean-core/thread/thread.hh>
 
 using namespace cc::primitive_defines;
 
 namespace
 {
 constexpr auto ambient_class = cc::node_class_index_for<cc::async_ambient_link>();
+
+#if CC_ASYNC_AMBIENT_TRACE
+// The armed watch's hook and its argument, written before the link is published and read after it is seen.
+cc::atomic<cc::async_ambient_release_hook> g_watch_hook = nullptr;
+cc::atomic<void*> g_watch_user = nullptr;
+// Set by whoever arms a watch, so two cannot interleave their writes; cleared by the unwatch, last.
+cc::atomic<bool> g_watch_claimed = false;
+// Drops of the watched link inside their hook check, which the unwatch waits out.
+cc::atomic<i32> g_watch_in_flight = 0;
+#endif
+} // namespace
+
+#if CC_ASYNC_AMBIENT_TRACE
+constinit cc::atomic<cc::async_ambient_link const*> cc::impl::async_ambient_watched = nullptr;
+
+bool cc::impl::async_ambient_drop_watched(async_ambient_link* l)
+{
+    // Counted in before the count goes down, so a watcher that saw the drop also sees this in flight.
+    // Seq_cst against the unwatch's store and load: either it waits for this drop, or this drop sees it gone.
+    g_watch_in_flight.fetch_add(1, cc::memory_order_seq_cst);
+    auto const watched = async_ambient_watched.load(cc::memory_order_seq_cst) == l;
+    auto const left = l->refs.fetch_sub(1, cc::memory_order_acq_rel) - 1;
+    if (watched)
+        if (auto const hook = g_watch_hook.load(cc::memory_order_acquire); hook != nullptr)
+            hook(l, left, g_watch_user.load(cc::memory_order_acquire));
+    g_watch_in_flight.fetch_sub(1, cc::memory_order_seq_cst);
+    return left == 0;
+}
+#endif
+
+bool cc::async_ambient_watch_releases(void const* head, async_ambient_release_hook hook, void* user)
+{
+#if CC_ASYNC_AMBIENT_TRACE
+    CC_ASSERT(head != nullptr && hook != nullptr, "a watch needs a link and a hook");
+    if (g_watch_claimed.exchange(true, cc::memory_order_acquire))
+        return false;
+    g_watch_hook.store(hook, cc::memory_order_relaxed);
+    g_watch_user.store(user, cc::memory_order_relaxed);
+    impl::async_ambient_watched.store(static_cast<async_ambient_link const*>(head), cc::memory_order_seq_cst);
+    return true;
+#else
+    (void)head, (void)hook, (void)user;
+    return false;
+#endif
+}
+
+void cc::async_ambient_unwatch_releases(void const* head)
+{
+#if CC_ASYNC_AMBIENT_TRACE
+    auto expected = static_cast<async_ambient_link const*>(head);
+    if (head == nullptr
+        || !impl::async_ambient_watched.compare_exchange_strong(expected, nullptr, cc::memory_order_seq_cst))
+        return;
+    while (g_watch_in_flight.load(cc::memory_order_seq_cst) != 0)
+        cc::this_thread_yield();
+    g_watch_hook.store(nullptr, cc::memory_order_relaxed);
+    g_watch_user.store(nullptr, cc::memory_order_relaxed);
+    g_watch_claimed.store(false, cc::memory_order_release);
+#else
+    (void)head;
+#endif
 }
 
 void cc::impl::async_ambient_free(async_ambient_link* l)
@@ -17,7 +79,7 @@ void cc::impl::async_ambient_free(async_ambient_link* l)
         l->~async_ambient_link();
         cc::node_allocation_free(reinterpret_cast<byte*>(l), ambient_class);
 
-        if (parent == nullptr || parent->refs.fetch_sub(1, cc::memory_order_acq_rel) != 1)
+        if (parent == nullptr || !async_ambient_drop(parent))
             return;
         l = parent;
     }

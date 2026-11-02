@@ -142,7 +142,7 @@ struct quadric_roots
         return out;
     }
 
-    // Re-expressed about the ray's closest approach before the roots are formed.
+    // Re-expressed about the ray's closest approach to the primitive's origin before the roots are formed.
     //
     // **This is a precision requirement rather than a simplification.**
     // `qc` is Q at whatever origin the solve is expressed about, so for a small primitive seen from far away it is
@@ -155,8 +155,10 @@ struct quadric_roots
     // two are independent.
     // Exact for any quadric, because shifting the origin along the ray is a reparameterization: the roots come back by
     // adding `t_closest` to each.
-    float const qb_in = 2.0f * (tg::dot(d, a_of(o_in)) + tg::dot(q.linear, d));
-    float const t_closest = -qb_in / (2.0f * qa);
+    //
+    // The closest approach to the ORIGIN, never the extremum of Q along the ray, -qb / 2qa: that divides by `qa`, which
+    // vanishes along an indefinite quadric's asymptotic directions, and a hyperboloid then lost every hit seen at 45 degrees.
+    float const t_closest = -tg::dot(o_in, d) / tg::dot(d, d);
     auto const o = o_in + d * t_closest;
 
     float const qb = 2.0f * (tg::dot(d, a_of(o)) + tg::dot(q.linear, d));

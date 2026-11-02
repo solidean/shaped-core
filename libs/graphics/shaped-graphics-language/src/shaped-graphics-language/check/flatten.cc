@@ -63,6 +63,12 @@ struct stage_violation
     symbol_id callee = symbol_id::none;
     /// The call written in the tree's own body that reaches it, the call itself where it stands there.
     call_site written = {};
+    /// `any_hit` or `intersection` for a write through a binding in a traversal's decision (CHK-404); `none` otherwise.
+    stage decision = stage::none;
+    /// The decision is one an inline trace calls, rather than the entry point itself.
+    bool is_inlined_decision = false;
+    /// The write is an assignment to a buffer's element, `call` its place; `callee` is then none.
+    bool is_buffer_store = false;
 };
 
 /// Reads the checked ASTs through the side tables and writes the STRUCTURED form of one entry point's flat tree.
@@ -78,6 +84,8 @@ struct flattener
 {
     checker const& c;
     cc::vector<stage_violation> stage_violations;
+    /// The decision an inline trace's loop is calling while its body is inlined: `any_hit` or `intersection` (CHK-404).
+    stage inlined_decision = stage::none;
     /// A test's calls of a builtin only the ray-tracing stages reach, which a test cannot run yet.
     cc::vector<stage_violation> ray_stage_calls;
     /// A test's calls of a subgroup operation, which a run of one invocation has no subgroup for (CHK-379).
@@ -88,6 +96,31 @@ struct flattener
     cc::vector<origin> effectful_asserts;
     /// Every `discard` the tree reaches, which only a pixel entry point may (CHK-277).
     cc::vector<origin> discards;
+    /// An unrolled `for` the tree did not unroll, which its caller reports once (CHK-389).
+    /// One whose bound is no constant is an error, and one that would write too many copies is a loop instead, and a warning.
+    struct unroll_report
+    {
+        diagnostic_kind kind = diagnostic_kind::invalid_constant_argument;
+        i32 file = 0;
+        source_span where;
+        cc::string detail;
+        /// The call the loop's function was inlined through, the innermost one; none for a loop of the tree's own body.
+        call_site site = {};
+    };
+    cc::vector<unroll_report> unroll_reports;
+    /// How many times the statement being written is written: the product of the copies of every unrolled `for` around it.
+    /// It is what bounds a nest of them as a whole (CHK-389).
+    i64 unrolled_copies = 1;
+    /// How many copies of unrolled `for`s the statement being written stands in.
+    i32 unrolled_depth = 0;
+    /// The innermost unrolled `for` around the statement being written that is written as a loop, by its range.
+    /// Inside it, an inner unrolled `for` whose bound reads its index has no constant bound, and is a loop too (CHK-389).
+    struct looped_unroll
+    {
+        i32 file = 0;
+        source_span where;
+    };
+    cc::optional<looped_unroll> looped_around;
     /// A call of a builtin that needs a feature of the device, which the entry point then needs too (CHK-322).
     /// A value of a type that needs one, such as a `half`, counts alike (CHK-382).
     struct feature_use
@@ -158,13 +191,69 @@ struct flattener
         }
         if (entry.entry_stage == stage::none)
             return;
-        if (auto const* const record = c.out.builtin_function(c.out.at(callee).intrinsic);
-            record != nullptr && record->is_quad_operation && entry.entry_stage == stage::compute)
+        auto const* const record = c.out.builtin_function(c.out.at(callee).intrinsic);
+        if (record != nullptr && record->is_quad_operation && entry.entry_stage == stage::compute)
             quad_calls.push_back({.file = file(), .call = call, .callee = callee});
+        // CHK-404: a decision runs as often as the traversal asks it, whichever stage's loop asks
+        if (auto const decision = decision_stage();
+            decision != stage::none && record != nullptr
+            && (record->is_atomic || record->is_image_store || record->is_bytes_store))
+        {
+            stage_violations.push_back({.file = file(),
+                                        .call = call,
+                                        .callee = callee,
+                                        .decision = decision,
+                                        .is_inlined_decision = inlined_decision != stage::none});
+            return;
+        }
+        // EMIT-163: what only a pixel stage needs of the device, which every target then judges alike
+        if (record != nullptr && entry.entry_stage == stage::pixel && !record->pixel_features.is_empty())
+        {
+            auto within = cc::vector<symbol_id>();
+            for (auto const& fr : frames)
+                within.push_back(fr.function);
+            feature_uses.push_back(
+                {.file = file(), .call = call, .features = record->pixel_features, .within = cc::move(within)});
+        }
         auto const& s = c.out.at(callee);
         if (s.info >= 0 && (c.out.functions[s.info].stages & stage_bit(entry.entry_stage)) == 0)
             stage_violations.push_back({.file = file(), .call = call, .callee = callee});
     }
+    /// What a traversal decides how often to run, which then writes no memory through a binding (CHK-404): an
+    /// `@any_hit` or `@intersection` entry point, or the decision an inline trace's loop is calling.
+    [[nodiscard]] stage decision_stage() const
+    {
+        if (inlined_decision != stage::none)
+            return inlined_decision;
+        auto const is_decision = entry.entry_stage == stage::any_hit || entry.entry_stage == stage::intersection;
+        return is_decision ? entry.entry_stage : stage::none;
+    }
+
+    /// CHK-404: an assignment to a buffer's element, or to a part of one, from a decision.
+    void judge_decision_store(flat_expr_id place, ast::expr_id target)
+    {
+        auto const decision = decision_stage();
+        for (auto depth = 0; decision != stage::none && is_valid(place) && depth < k_max_inline_depth; ++depth)
+        {
+            auto const& node = entry.at(place).node;
+            if (node.is<flat_buffer_element>())
+            {
+                stage_violations.push_back({.file = file(),
+                                            .call = target,
+                                            .decision = decision,
+                                            .is_inlined_decision = inlined_decision != stage::none,
+                                            .is_buffer_store = true});
+                return;
+            }
+            if (auto const* const member = node.try_as<flat_member>())
+                place = member->object;
+            else if (auto const* const element = node.try_as<flat_element>())
+                place = element->object;
+            else
+                return;
+        }
+    }
+
     flat_entry_point entry;
     /// The tree is a test, whose own lines of type bool are checks (CHK-225); a function it calls has none.
     bool is_test = false;
@@ -223,6 +312,8 @@ struct flattener
         label_id loop = label_id::none;
         /// The block around a `loop:` that is a value, which a `break value` leaves.
         label_id value_block = label_id::none;
+        /// The copy of an unrolled `for`'s body being written, which a `continue` leaves rather than naming `loop`.
+        label_id continue_block = label_id::none;
     };
 
     /// One function being written: the entry point at the bottom, then every call being inlined.
@@ -319,19 +410,12 @@ struct flattener
         return local_id(entry.locals.size() - 1);
     }
 
+    /// The names of `entry.labels`, which are unique among the labels alone.
+    name_mint label_names;
+
     label_id add_label(cc::string_view desired)
     {
-        auto name = cc::string(desired);
-        auto const is_taken = [&]
-        {
-            for (auto const& l : entry.labels)
-                if (l.name == name)
-                    return true;
-            return false;
-        };
-        for (auto i = 1; is_taken(); ++i)
-            name = cc::format("{}_{}", desired, i);
-        entry.labels.push_back({.name = cc::move(name)});
+        entry.labels.push_back({.name = label_names.mint(desired)});
         return label_id(entry.labels.size() - 1);
     }
 
@@ -402,18 +486,19 @@ struct flattener
         return ref != nullptr && !entry.at(ref->local).is_mut;
     }
 
-    /// What `nonuniform i` marks, `i`; none for anything else.
-    [[nodiscard]] flat_expr_id marked_by_nonuniform(flat_expr_id id) const
+    /// What `nonuniform i` or `uniform i` marks, `i`; none for anything else.
+    [[nodiscard]] flat_expr_id marked_index(flat_expr_id id) const
     {
         auto const* const call = is_valid(id) ? entry.at(id).node.try_as<flat_call>() : nullptr;
         auto const* const record = call != nullptr ? c.out.builtin_function(call->intrinsic) : nullptr;
-        return record != nullptr && record->is_nonuniform_mark ? entry.at(call->arguments)[0] : flat_expr_id::none;
+        return record != nullptr && record->mark != builtins::index_mark::none ? entry.at(call->arguments)[0]
+                                                                               : flat_expr_id::none;
     }
 
-    /// An index that may stand in several places: a substitutable one, or `nonuniform i` of one, the mark kept on it.
+    /// An index that may stand in several places: a substitutable one, or a mark of one, the mark kept on it.
     [[nodiscard]] bool is_substitutable_index(flat_expr_id id) const
     {
-        return is_substitutable(id) || is_substitutable(marked_by_nonuniform(id));
+        return is_substitutable(id) || is_substitutable(marked_index(id));
     }
 
     /// A construction of literals alone, such as a texel offset, which a target may take only as it is written.
@@ -472,7 +557,7 @@ struct flattener
             return add_expr(x.type, from, flat_buffer_element{.buffer = buffer, .index = index});
         }
         // the mark stays where it was written, which is what a diagnostic about it points at
-        if (auto const marked = marked_by_nonuniform(id); is_valid(marked))
+        if (auto const marked = marked_index(id); is_valid(marked))
         {
             flat_expr_id const arguments[] = {again(marked, from)};
             auto copy = x;
@@ -495,12 +580,12 @@ struct flattener
 
     /// `index` as it may stand in several places: itself where it is substitutable, and otherwise a local of `kind`
     /// bound at `from`.
-    /// `nonuniform i` binds `i` and marks the bound local, since a mark is read only where it indexes (CHK-300).
+    /// A marked `i` binds `i` and marks the bound local, since a mark is read only where it indexes (CHK-300).
     flat_expr_id bound_index(flat_expr_id index, local_kind kind, cc::string_view name, origin from)
     {
         if (is_substitutable_index(index))
             return index;
-        auto const marked = marked_by_nonuniform(index);
+        auto const marked = marked_index(index);
         auto const value = is_valid(marked) ? marked : index;
         auto const local = add_local(kind, name, entry.at(value).type);
         add_stmt(from, flat_let{.local = local, .value = value});
@@ -521,7 +606,7 @@ struct flattener
             return again(index, from);
         // by value: the copy of a mark's argument appends to the arrays
         auto copy = entry.at(index);
-        if (auto const marked = marked_by_nonuniform(index); is_valid(marked))
+        if (auto const marked = marked_index(index); is_valid(marked))
         {
             flat_expr_id const arguments[] = {again_as_written(marked, from)};
             copy.node.as<flat_call>().arguments = add_list(arguments);
@@ -668,6 +753,54 @@ struct flattener
         return add_expr(type, id, flat_construct{.arguments = add_list(arguments)});
     }
 
+    /// CHK-391: `value as texel[F]` of the texel type `type` and of another width: its leading components, or
+    /// all of them and the rest of (0, 0, 0, 1), from an operand that is evaluated once.
+    flat_expr_id texel_conversion(flat_expr_id value, type_id type, ast::expr_id id)
+    {
+        if (!is_valid(value))
+            return fail();
+        auto const value_type = entry.at(value).type;
+        auto const* const source = c.out.builtin_type_of(value_type);
+        auto const* const texel = c.out.builtin_type_of(type);
+        if (source == nullptr || texel == nullptr)
+            return fail();
+        auto const from_width = source->leaf_count;
+        auto const to_width = texel->leaf_count;
+        if (to_width < from_width)
+        {
+            auto letters = swizzle{.count = i8(to_width)};
+            for (auto i = 0; i < to_width; ++i)
+                letters.fields[i] = i8(i);
+            return swizzle_of(value, letters, type, id);
+        }
+
+        // a widened texel is a vector, whose fields are its component
+        auto const component = field_type(type, 0);
+        auto arguments = cc::vector<flat_expr_id>();
+        if (from_width == 1)
+            arguments.push_back(value);
+        else
+        {
+            auto const once = evaluate_once(value, "texel", id);
+            for (auto i = 0; i < from_width; ++i)
+            {
+                auto const operand = i == 0 ? once.first : again(once.later, id);
+                arguments.push_back(add_expr(component, id, flat_member{.object = operand, .member = i}));
+            }
+        }
+        for (auto i = from_width; i < to_width; ++i)
+        {
+            auto const fill = i == 3 ? 1 : 0;
+            if (texel->leaf_kind == value_kind::scalar_float)
+                arguments.push_back(add_expr(component, id, flat_literal{.value = f64(fill)}));
+            else
+                arguments.push_back(add_expr(
+                    component, id,
+                    flat_int_literal{.value = fill, .is_unsigned = texel->leaf_kind == value_kind::scalar_uint}));
+        }
+        return add_expr(type, id, flat_construct{.arguments = add_list(arguments)});
+    }
+
     flat_expr_id read_swizzle(swizzled const& s, type_id type, ast::expr_id id)
     {
         return swizzle_of(flatten_expr(s.operand), s.letters, type, id);
@@ -685,6 +818,7 @@ struct flattener
             is_failed = true;
             return;
         }
+        judge_decision_store(operand, assign.target);
         auto const operand_type = entry.at(operand).type;
         if (op != "=")
         {
@@ -734,6 +868,14 @@ struct flattener
 
         if (e.node.is<ast::literal>())
             return flatten_number(id, type);
+        // CHK-394: an operator over number literals alone is the literal it folds to
+        if (e.node.is<ast::call>())
+        {
+            if (auto const n = c.number_of(file(), id); n.is_number)
+                return flatten_folded(id, type, n);
+            if (auto const b = c.comparison_of(file(), id); b.has_value())
+                return add_expr(type, id, flat_bool_literal{.value = b.value()});
+        }
         // a tuple or an object literal is the call it converts by (CHK-81)
         if ((e.node.is<ast::tuple>() || e.node.is<ast::object>()) && tables().call_at(id) >= 0)
             return flatten_bound_call(id, type, c.out.call_records[tables().call_at(id)]);
@@ -802,6 +944,12 @@ struct flattener
                 return tables().call_at(id) >= 0 && !c.out.at(object_type).is_atomic
                          ? flatten_bound_call(id, type, c.out.call_records[tables().call_at(id)])
                          : fail();
+            // CHK-395: a lane of a vector is an element of it, which every target subscripts as it does an array
+            if (auto const lane = is_valid(object_type) ? c.lane_type_of(object_type) : type_id::none;
+                is_valid(lane) && arguments.size() == 1)
+                return add_expr(
+                    lane, id,
+                    flat_element{.object = flatten_expr(indexed->object), .index = flatten_expr(arguments[0].value)});
             // CHK-287: one element per index, `grid[i, j]` being `grid[i][j]`
             if (is_valid(object_type) && c.out.at(object_type).kind == type_kind::array)
             {
@@ -829,6 +977,8 @@ struct flattener
         if (auto const* const cast = e.node.try_as<ast::cast>())
         {
             auto const value = flatten_expr(cast->value);
+            if (where.kind == target_kind::texel_conversion)
+                return texel_conversion(value, type, id);
             // A cast to the type the value already has is the value itself.
             if (where.kind != target_kind::overload)
                 return value;
@@ -872,7 +1022,9 @@ struct flattener
         switch (info.kind)
         {
         case constant_kind::integer:
-            return add_expr(type, from, flat_int_literal{.value = info.integer, .is_unsigned = info.is_unsigned});
+            return add_expr(
+                type, from,
+                flat_int_literal{.value = info.integer, .is_unsigned = info.is_unsigned, .is_hex = info.is_hex});
         case constant_kind::real:
             return add_expr(type, from, flat_literal{.value = info.real});
         case constant_kind::enum_case:
@@ -906,10 +1058,32 @@ struct flattener
             auto const v = value.value();
             if (is_unsigned ? v < 0 || v > 4294967295ll : v < -2147483647 - 1 || v > 2147483647)
                 return fail();
-            return add_expr(type, id, flat_int_literal{.value = i32(u32(v)), .is_unsigned = is_unsigned});
+            return add_expr(
+                type, id,
+                flat_int_literal{.value = i32(u32(v)), .is_unsigned = is_unsigned, .is_hex = is_hex_literal(text)});
         }
         auto const value = parse_plain_float(text);
         return value.has_value() ? literal(value.value()) : fail();
+    }
+
+    /// What an operator over number literals folded to, as the type it was checked as.
+    flat_expr_id flatten_folded(ast::expr_id id, type_id type, number_literal const& n)
+    {
+        auto const is_half = type == c.prelude_type(builtins::k_half);
+        auto const is_float = is_half || type == c.prelude_type(builtins::k_float);
+        if (n.is_integer && !is_float)
+        {
+            auto const is_unsigned
+                = type == c.prelude_type(builtins::k_uint) || type == c.prelude_type(builtins::k_ushort);
+            auto const v = n.integer;
+            if (is_unsigned ? v < 0 || v > 4294967295ll : v < -2147483647 - 1 || v > 2147483647)
+                return fail();
+            return add_expr(type, id, flat_int_literal{.value = i32(u32(v)), .is_unsigned = is_unsigned});
+        }
+        if (!is_float)
+            return fail();
+        auto const v = n.is_integer ? f64(n.integer) : n.real;
+        return add_expr(type, id, flat_literal{.value = is_half ? f64(scalar::of_half(v).widened().as_float()) : v});
     }
 
     /// `[a, b, c]` of an array type, its elements in the order written (EVAL-91).
@@ -1095,7 +1269,7 @@ struct flattener
             payload,
         };
         auto const traced_ray = flat_traced_ray{.set = t.set, .ray = t.ray};
-        if (!cc::sequence{entry.traced_rays}.any([&](flat_traced_ray const& r) { return r == traced_ray; }))
+        if (!entry.traced_rays.values().any([&](flat_traced_ray const& r) { return r == traced_ray; }))
             entry.traced_rays.push_back(traced_ray);
         auto const traced = builtin_call(id, callee, values);
         if (is_local)
@@ -1701,9 +1875,17 @@ struct flattener
     {
         // by value: flattening below may push closures, and the vector moves
         auto const f = closures[handed];
+        // CHK-404: a function handed a candidate or a box is a decision the traversal calls in its loop
+        auto const outer_decision = inlined_decision;
+        auto decision = outer_decision;
+        if (!values.empty() && is_valid(values[0]))
+            if (auto const d = decision_of(entry.at(values[0]).type); d != stage::none)
+                decision = d;
         if (is_valid(f.function))
         {
+            inlined_decision = decision;
             auto const inlined = inline_bound(id, f.function, values, slots, argument_closures);
+            inlined_decision = outer_decision;
             return add_expr(type, id, flat_block{.label = inlined.label, .body = inlined.body});
         }
         auto const& lambda_ast = c.ast_of(f.file);
@@ -1745,9 +1927,24 @@ struct flattener
                           .chain = f.chain,
                           .bound = cc::move(bound),
                           .bindings = f.bindings});
+        inlined_decision = decision;
         auto const value = flatten_expr(l.body.value);
+        inlined_decision = outer_decision;
         frames.remove_back();
         return value;
+    }
+
+    /// `any_hit` for a candidate, `intersection` for a box: what a decision of that parameter is to the traversal.
+    [[nodiscard]] stage decision_of(type_id type) const
+    {
+        if (!is_valid(type) || type == checked_module::error_type || c.out.at(type).kind != type_kind::structure)
+            return stage::none;
+        auto const& s = c.out.at(c.out.at(type).symbol);
+        if (!c.is_prelude_file(s.file))
+            return stage::none;
+        if (s.name == "triangle_candidate" || s.name == "procedural_candidate")
+            return stage::any_hit;
+        return s.name == "procedural_box" ? stage::intersection : stage::none;
     }
 
     /// `a < b <= c` is `a < b and b <= c` with `b` evaluated once, and the `and` keeps `c` unevaluated where it must.
@@ -2458,7 +2655,12 @@ struct flattener
         auto const outer = cc::move(block);
         block = {};
         for (auto const stmt : ast().at(body.statements))
+        {
+            // CHK-389: in a copy, what follows a constant exit is never written, so no rule judges it
+            if (unrolled_depth > 0 && !block.empty() && certain_exit(block.back()).has_value())
+                break;
             flatten_stmt(stmt);
+        }
         auto const range = add_list(block);
         block = cc::move(outer);
         return range;
@@ -2546,6 +2748,7 @@ struct flattener
             flat_expr_id const arguments[] = {read_of_place(place, assign.target), value};
             value = builtin_call(assign.value, callee, arguments);
         }
+        judge_decision_store(place, assign.target);
         add_stmt(from, flat_assign{.place = place, .value = value});
     }
 
@@ -2673,16 +2876,177 @@ struct flattener
         return fail();
     }
 
-    void flatten_for(origin from, ast::stmt_id id, ast::for_stmt const& loop)
+    /// The most copies of its body an unrolled `for` writes, each counted once per copy of the unrolled loops around it (CHK-389).
+    static constexpr i64 k_max_unrolled = 256;
+
+    /// The value of constant `bound`, an int, where it is one; nothing for anything else.
+    /// The innermost call the statement being written was inlined through, none in the tree's own body.
+    [[nodiscard]] call_site innermost_call() const
     {
-        auto const* const r = ast::is_valid(loop.iterable) ? ast().at(loop.iterable).node.try_as<ast::range>() : nullptr;
-        if (r == nullptr)
+        auto const chain = entry.at(frames.back().chain);
+        return chain.empty() ? call_site{} : chain[chain.size() - 1];
+    }
+
+    [[nodiscard]] cc::optional<i32> constant_int(flat_expr_id bound) const
+    {
+        if (!is_valid(bound) || !is_constant(c.out, entry, bound))
+            return {};
+        auto const o = evaluate_constant(c.out, entry, bound);
+        if (o.status != run_status::ok || o.result.leaves.size() != 1 || o.result.leaves[0].kind != value_kind::scalar_int)
+            return {};
+        return o.result.leaves[0].as_int();
+    }
+
+    /// The label a run of `id` certainly leaves to, `none` for a return, where no run of it reaches its end.
+    /// Nothing where a run may reach its end, or where two of them leave to different places.
+    [[nodiscard]] cc::optional<label_id> certain_exit(flat_stmt_id id) const
+    {
+        auto const& node = entry.at(id).node;
+        if (auto const* const leave = node.try_as<flat_leave>())
+            return leave->target;
+        if (auto const* const next = node.try_as<flat_continue>())
+            return next->target;
+        if (node.is<flat_return>())
+            return label_id::none;
+        if (auto const* const b = node.try_as<flat_block>())
+        {
+            auto const exit = certain_exit(b->body);
+            if (exit.has_value() && exit.value() == b->label)
+                return {};
+            return exit;
+        }
+        if (auto const* const branch = node.try_as<flat_if>())
+        {
+            auto const then_exit = certain_exit(branch->then_body);
+            if (then_exit.has_value() && then_exit == certain_exit(branch->else_body))
+                return then_exit;
+        }
+        return {};
+    }
+
+    [[nodiscard]] cc::optional<label_id> certain_exit(ast::range_of<flat_stmt_id> body) const
+    {
+        for (auto const stmt : entry.at(body))
+            if (auto const exit = certain_exit(stmt); exit.has_value())
+                return exit;
+        return {};
+    }
+
+    /// CHK-389: `@unroll for i in a ..< b`, as one block holding a block per index, each a copy of the body in which
+    /// `i` is that index's literal.
+    /// A `break` leaves the outer block and a `continue` the copy it stands in, which is what they do in the loop.
+    /// A range whose copies would pass the limit is the loop it would be without the attribute, and a warning says so.
+    void flatten_unrolled_for(origin from, ast::stmt_id id, ast::for_stmt const& loop, flat_expr_id first, flat_expr_id end)
+    {
+        if (!is_valid(first) || !is_valid(end))
         {
             is_failed = true;
             return;
         }
-        auto const first = flatten_expr(r->first);
-        auto const end = flatten_expr(r->last);
+        auto const low = constant_int(first);
+        auto const high = constant_int(end);
+        auto const range_file = file();
+        auto const range_where = c.span_of(range_file, loop.iterable);
+        if ((!low.has_value() || !high.has_value()) && looped_around.has_value())
+        {
+            auto const& around = looped_around.value();
+            unroll_reports.push_back(
+                {.kind = diagnostic_kind::unroll_too_long,
+                 .file = range_file,
+                 .where = range_where,
+                 .detail = cc::format("an unrolled for runs over a constant range, and this one is no constant inside "
+                                      "the unrolled for over `{}`, which is written as a loop, so this one is written "
+                                      "as a loop too",
+                                      c.text_of(around.file, around.where)),
+                 .site = innermost_call()});
+            return flatten_fallen_back_for(from, id, loop, first, end);
+        }
+        if (!low.has_value() || !high.has_value())
+        {
+            unroll_reports.push_back({.file = range_file,
+                                      .where = range_where,
+                                      .detail = "an unrolled for runs over a constant range: both bounds are int "
+                                                "constants once the function is inlined, such as `0 ..< taps` with "
+                                                "`taps` a const",
+                                      .site = innermost_call()});
+            is_failed = true;
+            meets_error = true;
+            return;
+        }
+        // in 64 bits, since a range may hold more values than an int counts
+        auto const count = cc::max(i64(0), i64(high.value()) - i64(low.value()));
+        // the copies around it are at most k_max_unrolled, so this cannot overflow either
+        auto const copies = count * unrolled_copies;
+        if (copies > k_max_unrolled)
+        {
+            auto const detail
+                = unrolled_copies == 1
+                    ? cc::format("an unrolled for writes its body at most {} times, and this range holds {}, so it is "
+                                 "written as a loop",
+                                 k_max_unrolled, count)
+                    : cc::format("an unrolled for writes its body at most {} times, counted once per copy of the "
+                                 "unrolled loops around it, and this range of {} inside {} copies would write {}, so "
+                                 "it is written as a loop",
+                                 k_max_unrolled, count, unrolled_copies, copies);
+            unroll_reports.push_back({.kind = diagnostic_kind::unroll_too_long,
+                                      .file = range_file,
+                                      .where = range_where,
+                                      .detail = detail,
+                                      .site = innermost_call()});
+            return flatten_fallen_back_for(from, id, loop, first, end);
+        }
+
+        auto const type = entry.at(first).type;
+        auto const* const n = ast::is_valid(loop.variable) ? ast().at(loop.variable).node.try_as<ast::name>() : nullptr;
+        auto const index_from = ast::is_valid(loop.variable) ? loop.variable : loop.iterable;
+        // every read of the variable is the literal of the copy being written, which a copy rebinds
+        auto const slot = current()->bound.size();
+        if (n != nullptr)
+            current()->bound.push_back({.where = {.kind = target_kind::local, .index = i32(id)}});
+        // what a copy binds is its own: a lookup takes the first binding of a name, so the next copy must not see it
+        auto const bound_before_body = current()->bound.size();
+
+        auto const label = add_label("unrolled");
+        auto const outer = cc::move(block);
+        block = {};
+        auto const copies_around = unrolled_copies;
+        unrolled_copies = copies;
+        for (auto i = i64(0); i < count; ++i)
+        {
+            if (n != nullptr)
+                current()->bound[slot].literal
+                    = add_expr(type, index_from, flat_int_literal{.value = i32(i64(low.value()) + i)});
+            auto const copy = add_label("unrolled_index");
+            current()->loops.push_back({.loop = label, .continue_block = copy});
+            ++unrolled_depth;
+            auto const body = flatten_body(loop.body);
+            --unrolled_depth;
+            current()->loops.remove_back();
+            current()->bound.resize_down_to(bound_before_body);
+            add_stmt(from, flat_block{.label = copy, .body = body});
+            // a copy that leaves the loop whatever runs, such as one a constant `break` ends, has no copy after it
+            auto const exit = certain_exit(body);
+            if (exit.has_value() && exit.value() != copy)
+                break;
+        }
+        unrolled_copies = copies_around;
+        auto const written = add_list(block);
+        block = cc::move(outer);
+        add_stmt(from, flat_block{.label = label, .body = written});
+    }
+
+    /// An unrolled `for` written as a loop, which the unrolled `for`s inside it see.
+    void flatten_fallen_back_for(origin from, ast::stmt_id id, ast::for_stmt const& loop, flat_expr_id first, flat_expr_id end)
+    {
+        auto const around = looped_around;
+        looped_around = looped_unroll{.file = file(), .where = c.span_of(file(), loop.iterable)};
+        flatten_looped_for(from, id, loop, first, end);
+        looped_around = around;
+    }
+
+    /// `for i in a ..< b` as a loop of the flat tree, whose bounds `first` and `end` are flattened already.
+    void flatten_looped_for(origin from, ast::stmt_id id, ast::for_stmt const& loop, flat_expr_id first, flat_expr_id end)
+    {
         auto const* const n = ast::is_valid(loop.variable) ? ast().at(loop.variable).node.try_as<ast::name>() : nullptr;
         auto const int_type = is_valid(first) ? entry.at(first).type : type_id::none;
         auto const index
@@ -2701,6 +3065,21 @@ struct flattener
         add_stmt(from, flat_for{.label = label, .index = index, .first = first, .end = end, .body = body});
     }
 
+    void flatten_for(origin from, ast::stmt_id id, ast::for_stmt const& loop)
+    {
+        auto const* const r = ast::is_valid(loop.iterable) ? ast().at(loop.iterable).node.try_as<ast::range>() : nullptr;
+        if (r == nullptr)
+        {
+            is_failed = true;
+            return;
+        }
+        auto const first = flatten_expr(r->first);
+        auto const end = flatten_expr(r->last);
+        if (c.find_attribute(file(), ast().at(id).attributes, "unroll") != nullptr)
+            return flatten_unrolled_for(from, id, loop, first, end);
+        flatten_looped_for(from, id, loop, first, end);
+    }
+
     void flatten_stmt(ast::stmt_id id)
     {
         auto const& s = ast().at(id);
@@ -2714,9 +3093,10 @@ struct flattener
                 is_failed = true;
                 return;
             }
-            auto const value = flatten_expr(let->value);
+            // minted ahead of its value, so the name the program wrote is its own and a callee inlined there mints past it
             auto const local = add_local(let->is_mut ? local_kind::var : local_kind::let,
                                          c.text_of(file(), name->where), tables().type_at(let->pattern));
+            auto const value = flatten_expr(let->value);
             current()->bound.push_back({.where = {.kind = target_kind::local, .index = i32(id)}, .local = local});
             if (let->is_mut)
                 add_stmt(from, flat_var{.local = local, .value = value});
@@ -2792,6 +3172,8 @@ struct flattener
                 is_failed = true;
                 return;
             }
+            if (is_valid(loops.back().continue_block))
+                return add_stmt(from, flat_leave{.target = loops.back().continue_block});
             return add_stmt(from, flat_continue{.target = loops.back().loop});
         }
         if (auto const* const loop = x.node.try_as<ast::loop_expr>())
@@ -2847,7 +3229,35 @@ struct flattener
     static constexpr isize k_max_inline_depth = 256;
 };
 
+/// CHK-389: once, however many trees inline the function the loop stands in.
+/// A loop of an inlined function names the call it was reached through, whose arguments may be what its bounds read.
+located_diagnostic& report_unroll(checker& c, flattener::unroll_report const& u)
+{
+    for (auto& d : c.out.diagnostics)
+        if (d.what.kind == u.kind && d.file == u.file && d.what.where == u.where)
+            return d;
+    auto& d = c.report(u.kind, u.file, u.where, u.detail);
+    if (ast::is_valid(u.site.call))
+        d.notes.push_back({.file = u.site.file,
+                           .where = c.span_of(u.site.file, u.site.call),
+                           .message = "reached through this call, whose arguments stand in for its parameters"});
+    return d;
+}
 } // namespace
+
+cc::set<cc::string> const* checker::module_names()
+{
+    if (out.module_names.empty() || module_names_for != out.symbols.size())
+    {
+        auto names = cc::make_shared<cc::set<cc::string>>();
+        for (auto const& s : out.symbols)
+            if (!s.name.empty())
+                (void)names->insert(s.name);
+        out.module_names.push_back(cc::move(names));
+        module_names_for = out.symbols.size();
+    }
+    return out.module_names.back().get();
+}
 
 void checker::flatten_test(i32 index)
 {
@@ -2868,9 +3278,7 @@ void checker::flatten_test(i32 index)
     // CHK-333: what the test lists, which its driver binds
     for (auto const binding : out.at(out.functions[out.at(test.symbol).info].bindings))
         f.entry.bindings.push_back(binding);
-    for (auto const& other : out.symbols)
-        if (!other.name.empty())
-            f.entry.names.reserve(other.name);
+    f.entry.names.also_taken = module_names();
     f.frames.push_back({.function = test.symbol, .file = test.file, .result = checked_module::void_type});
 
     auto const& body = ast_of(test.file).at(test.declaration).node.as<ast::test_decl>().body;
@@ -2895,6 +3303,10 @@ void checker::flatten_test(i32 index)
     for (auto const& v : f.subgroup_calls)
         report_reached(v, ": a run is one invocation, and has no subgroup");
 
+    // what a test reaches is of every compile, even where an entry point's tree judged it first
+    for (auto const& u : f.unroll_reports)
+        report_unroll(*this, u).entry_points.clear();
+
     // A test that expects a diagnostic is never run (CHK-232), so its tree is judged for its constants alone.
     // Nothing else of the tree is reported: what it expects stands in its text, where the check pass found it already.
     if (test.expects_diagnostics())
@@ -2910,7 +3322,8 @@ void checker::flatten_test(i32 index)
     // CHK-227: once, however many trees inline the function the assert stands in
     for (auto const& a : f.effectful_asserts)
         report_once(diagnostic_kind::unsupported_yet, a.file, span_of(a.file, a.expr),
-                    "an assert whose condition writes a buffer, prints, or calls a builtin with an effect");
+                    "an assert whose condition writes a buffer, prints, or calls a builtin with an effect")
+            .entry_points.clear();
     for (auto const& v : f.stage_violations)
         report(diagnostic_kind::stage_not_allowed, v.file, span_of(v.file, v.call),
                cc::format("{} takes derivatives across a quad of pixels, and a test runs one invocation",
@@ -2969,10 +3382,8 @@ void checker::flatten_entry_point(symbol_id id, traversal_request const* travers
         f.entry.bindings.push_back(binding);
 
     // Every module-level name is taken, so no local can hide a type, a binding or a builtin an emitter writes.
+    f.entry.names.also_taken = module_names();
     f.entry.names.reserve(s.name);
-    for (auto const& other : out.symbols)
-        if (!other.name.empty())
-            f.entry.names.reserve(other.name);
 
     f.frames.push_back({.function = id, .file = s.file, .result = info.result});
     // CHK-326: a ray-tracing stage's one parameter of the target is its payload, `locals[0]`, which the stage writes
@@ -3079,6 +3490,30 @@ void checker::flatten_entry_point(symbol_id id, traversal_request const* travers
         f.flatten_stmt(stmt);
 
     // CHK-322: what the body calls needs a device's feature, which the entry point declares like one of its signature
+    // CHK-402: what is judged of this entry point's inlined body is its own, which a compile of a sibling leaves out.
+    // One that another tree judged first without an entry point, a test's, stays of every compile.
+    auto const of_entry = [&](auto&& make) -> located_diagnostic&
+    {
+        auto const before = out.diagnostics.size();
+        auto& d = make();
+        if ((out.diagnostics.size() > before || !d.entry_points.empty()) && !d.entry_points.values().contains(id))
+            d.entry_points.push_back(id);
+        return d;
+    };
+    // once, however many entry points inline the function it stands in, the same detail naming every one of them
+    auto const report_of_entry
+        = [&](diagnostic_kind kind, i32 file, source_span where, cc::string detail) -> located_diagnostic&
+    {
+        return of_entry(
+            [&]() -> located_diagnostic&
+            {
+                for (auto& d : out.diagnostics)
+                    if (d.what.kind == kind && d.file == file && d.what.where == where && d.detail == detail)
+                        return d;
+                return report(kind, file, where, cc::move(detail));
+            });
+    };
+
     auto used = feature_set();
     for (auto const& u : f.feature_uses)
         used |= u.features;
@@ -3090,10 +3525,11 @@ void checker::flatten_entry_point(symbol_id id, traversal_request const* travers
             continue;
         if (!declared.has(needed))
         {
-            auto& d = report(diagnostic_kind::feature_not_declared, s.file,
-                             ast_of(s.file).at(s.declaration).node.as<ast::fun_decl>().name,
-                             cc::format("{} needs {}, which neither its file, a binding it lists nor its body requires",
-                                        s.name, name_of(needed)));
+            auto& d = report_of_entry(diagnostic_kind::feature_not_declared, s.file,
+                                      ast_of(s.file).at(s.declaration).node.as<ast::fun_decl>().name,
+                                      cc::format("{} needs {}, which neither its file, a binding it lists nor its body "
+                                                 "requires",
+                                                 s.name, name_of(needed)));
             for (auto const& u : f.feature_uses)
                 if (u.features.has(needed))
                 {
@@ -3109,30 +3545,80 @@ void checker::flatten_entry_point(symbol_id id, traversal_request const* travers
         mark_requires_used(u.within, u.features);
     out.functions[s.info].features |= used;
     f.entry.features |= used;
+    for (auto const& u : f.unroll_reports)
+        of_entry([&]() -> located_diagnostic& { return report_unroll(*this, u); });
     // CHK-227: once, however many trees inline the function the assert stands in
     for (auto const& a : f.effectful_asserts)
-        report_once(diagnostic_kind::unsupported_yet, a.file, span_of(a.file, a.expr),
-                    "an assert whose condition writes a buffer, prints, or calls a builtin with an effect");
+        of_entry(
+            [&]() -> located_diagnostic&
+            {
+                return report_once(diagnostic_kind::unsupported_yet, a.file, span_of(a.file, a.expr),
+                                   "an assert whose condition writes a buffer, prints, or calls a builtin with an "
+                                   "effect");
+            });
     for (auto const& v : f.stage_violations)
-        report(diagnostic_kind::stage_not_allowed, v.file, span_of(v.file, v.call),
-               cc::format("{} is a {} entry point, and {} is @stages without it", s.name,
-                          check::stage_name(info.entry_stage), out.at(v.callee).name));
+    {
+        auto const where = span_of(v.file, v.call);
+        if (v.decision == stage::none)
+        {
+            report_of_entry(diagnostic_kind::stage_not_allowed, v.file, where,
+                            cc::format("a {} entry point reaches this, and {} is @stages without it",
+                                       check::stage_name(info.entry_stage), out.at(v.callee).name));
+            continue;
+        }
+        // CHK-345: a traversal fuses an intersection and an any hit whose own trees reported it already
+        if (traversal != nullptr)
+            continue;
+        // CHK-404: a write runs as often as its function, which traversal decides for a decision
+        auto const* const record = v.is_buffer_store ? nullptr : out.builtin_function(out.at(v.callee).intrinsic);
+        auto const is_any_hit = v.decision == stage::any_hit;
+        auto const what
+            = v.is_inlined_decision
+                ? cc::format("an inline trace calls this as its {} decision", is_any_hit ? "any-hit" : "intersection")
+                : cc::format("this is reached from an {} entry point", check::stage_name(v.decision));
+        auto const how_often
+            = is_any_hit
+                ? cc::string("which runs an implementation-defined number of times: for candidates the traversal "
+                             "later rejects, and more than once per candidate unless the geometry sets "
+                             "NO_DUPLICATE_ANYHIT_INVOCATION, which Metal has no equivalent of")
+                : cc::string("which runs as often as the traversal reaches its box, an implementation-defined "
+                             "number of times");
+        auto written = cc::string();
+        if (v.is_buffer_store)
+            written = "this store to a buffer would write a number of times no spec defines, and race with itself";
+        else if (record != nullptr && record->is_atomic)
+        {
+            // an image's texel atomic is the prelude's internal `texel_max`, which the program wrote as `.max`
+            auto name = cc::string_view(out.at(v.callee).name);
+            if (name.starts_with("texel_"))
+                name = name.subview(6);
+            written = cc::format("the atomic {} would run a number of times no spec defines", name);
+        }
+        else
+            written = cc::format("the {} would write a number of times no spec defines", out.at(v.callee).name);
+        report_of_entry(
+            diagnostic_kind::stage_not_allowed, v.file, where,
+            cc::format("{}, {}; a decision writes no memory through a binding, so {}", what, how_often, written));
+    }
     // CHK-380: HLSL forms a compute stage's quads from its threads' ids, which only one axis keeps consecutive
     auto const is_linear = info.workgroup[0] % 4 == 0 && info.workgroup[1] == 1 && info.workgroup[2] == 1;
     for (auto const& q : is_linear ? cc::span<stage_violation const>() : cc::span<stage_violation const>(f.quad_calls))
-        report(diagnostic_kind::invalid_entry_point, q.file, span_of(q.file, q.call),
-               cc::format("{} forms quads along one axis, so a compute entry point that reaches it has a workgroup of "
-                          "(x, 1, 1) whose x is a multiple of 4, and {}'s is ({}, {}, {})",
-                          out.at(q.callee).name, s.name, info.workgroup[0], info.workgroup[1], info.workgroup[2]));
+        report_of_entry(diagnostic_kind::invalid_entry_point, q.file, span_of(q.file, q.call),
+                        cc::format("{} forms quads along one axis, so a compute entry point that reaches it has a "
+                                   "workgroup of (x, 1, 1) whose x is a multiple of 4, and one reaching it has ({}, "
+                                   "{}, "
+                                   "{})",
+                                   out.at(q.callee).name, info.workgroup[0], info.workgroup[1], info.workgroup[2]));
     auto const reaches_discard = info.entry_stage != stage::pixel && !f.discards.empty();
     for (auto const& d : info.entry_stage != stage::pixel ? cc::span<origin const>(f.discards) : cc::span<origin const>())
-        report(diagnostic_kind::stage_not_allowed, d.file, span_of(d.file, d.expr),
-               cc::format("{} is a {} entry point, and only a pixel stage discards", s.name,
-                          check::stage_name(info.entry_stage)));
+        report_of_entry(diagnostic_kind::stage_not_allowed, d.file, span_of(d.file, d.expr),
+                        cc::format("a {} entry point reaches this, and only a pixel stage discards",
+                                   check::stage_name(info.entry_stage)));
     if ((info.stages & stage_bit(info.entry_stage)) == 0)
-        report(diagnostic_kind::stage_not_allowed, s.file, ast_of(s.file).at(s.declaration).node.as<ast::fun_decl>().name,
-               cc::format("{} is a {} entry point, and its own @stages leaves that out", s.name,
-                          check::stage_name(info.entry_stage)));
+        report_of_entry(diagnostic_kind::stage_not_allowed, s.file,
+                        ast_of(s.file).at(s.declaration).node.as<ast::fun_decl>().name,
+                        cc::format("{} is a {} entry point, and its own @stages leaves that out", s.name,
+                                   check::stage_name(info.entry_stage)));
     // CHK-213: a gap of this pass is reported, so an entry point never vanishes without a word.
     if (f.is_failed && !f.meets_error)
         unsupported(s.file, ast_of(s.file).at(s.declaration).node.as<ast::fun_decl>().name,

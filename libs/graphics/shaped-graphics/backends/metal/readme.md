@@ -73,6 +73,8 @@ Each of these is a fact about Metal rather than a gap in the backend.
   A buffer holds a GPU address, a texture or sampler an `MTLResourceID`, and an array binding takes `count` consecutive slots.
   That is what SPIRV-Cross emits for a descriptor set, which is the whole reason the layout was chosen.
   A group holds every resource it names: an argument buffer is raw addresses, so nothing else keeps the target alive.
+  **A command list retains every group it binds** until it is consumed, and reads a bound group's resources and arrays through it at each op rather than copying them at the bind.
+  A copy of a bindless array would cost its whole capacity at every bind, and a retained group's address is what an array declaration's application is keyed on.
   A staging group is the CPU-side image of one such buffer, and a snapshot is a fresh buffer copied from it — which is what makes snapshots independent of the builder and of each other.
   It needs **one** descriptor array where dx12 needs two: an argument buffer has no view/sampler heap split, so both of the base's offsets are `binding.index`.
   **An array binding consumes `count` indices, and nothing checks that.**
@@ -83,7 +85,7 @@ Each of these is a fact about Metal rather than a gap in the backend.
   `cached_pipeline_data()` returns empty and `used_cached_pipeline()` is always false, so every pipeline build is cold.
   Metal 4's `MTL4Archive` is one store per *compiler* where sg's surface is one blob per *pipeline*, so the mapping
   vulkan found — a `VkPipelineCache` per pipeline — has no counterpart here.
-  Recorded as open in [docs/TODO.md](../../docs/TODO.md), and pinned by a test so it reads as deliberate.
+  Recorded as open in [question-sg-metal-pipeline-blob](../../docs/issues/question-sg-metal-pipeline-blob.md), and pinned by a test so it reads as deliberate.
 - **Vertex buffers and inline constants are argument-table addresses, because Metal has neither of the usual forms.**
   MTL4's render encoder has no `setVertexBuffer`, and Metal has no root constants and no push constants — so both arrive the way a binding group does, as an address in the one `MTL4ArgumentTable`.
   That fixes a buffer-index convention the shader has to agree with, and `metal_common.hh` is where it is stated.
@@ -123,7 +125,8 @@ Each of these is a fact about Metal rather than a gap in the backend.
   That is also what makes a mask clamping to nothing in `flush_barriers` harmless rather than a dropped dependency.
 - **An array binding's elements are declared one at a time, and an undeclared one is an error.**
   Which elements a shader indexes is decided by data no backend sees, so a group keeps its array bindings apart from its scalar ones.
-  The scalar bindings are declared automatically at the dispatch or draw, and the arrays only by the `declare_array_*_access` pair on the scope recording the op.
+  The scalar bindings are declared automatically at the dispatch or draw, and the arrays only by a live declaration from the `declare_array_*_access` pair of the op's bind point.
+  A texture has no layout here, so a layout another declaration asks for writes nothing, and leaves an applied declaration current.
   An array the code indexes with no declare is logged and covered whole, and an empty span is how a caller says one is unused — the same accounting dx12 and vulkan keep.
   An acceleration-structure array is the exception and stays automatic.
   A trace reads every structure its table can reach, and sg's two declare calls are split by buffer and texture with no third for that kind to arrive through.
@@ -241,6 +244,11 @@ Each of these is a fact about Metal rather than a gap in the backend.
   So every pipeline build is taken under `pipeline_compilation_lock()`, process-wide rather than per context.
   The state being corrupted is the device's, and a Mac hands the same device to everyone who asks.
   `sg metal - pipelines build concurrently from several contexts` is the gate, and it is probabilistic: without the lock it takes the binary down within a run or two.
+- **A bounding-box intersection function linked after several triangle ones never runs.**
+  Its boxes are missed, and in sv's path tracer traversal hung until the command buffer timed out.
+  Where it sits in the table does not matter, only its place among the pipeline's linked functions: two triangle groups with any hits ahead of it are enough, on an M4 under macOS 26.
+  So a pipeline links every procedural group's intersection function first.
+  `sg - an SGL ray-tracing pipeline traces host groups of both kinds in one scene` is the gate.
 - **Off-frame transfer needs three queues, and each one is correctness rather than tuning.**
   A wait blocks everything committed after it on that queue.
   So an async transfer ordering behind an in-flight stream blocks the stream's own copies too when they share a queue, and the stream never finishes and the wait never clears.
@@ -265,7 +273,7 @@ Each of these is a fact about Metal rather than a gap in the backend.
 - **Metal orders the async tier against in-flight streams, where dx12 does not.**
   The per-resource streaming timeline is what makes it cheap: an async transfer waits on the same value a command list would.
   `promote_to_async` is then purely the statement of intent it is documented to be — it suppresses the warning, and adds no wait, because the wait is already there.
-  docs/TODO.md records the gap on the backend that still has it.
+  [bug-sg-dx12-async-transfer-ignores-stream](../../docs/issues/bug-sg-dx12-async-transfer-ignores-stream.md) records the gap on the backend that still has it.
 - **An acceleration structure is not a buffer.**
   DXR names one by the GPU virtual address of the buffer the driver built it into, and Vulkan wraps an object around such a buffer.
   `MTL::AccelerationStructure` derives from `MTL::Resource` and there is no `MTLBuffer` in the caller's hands at any point.
@@ -367,7 +375,7 @@ A hit reports its distance, a miss reports −1, and a payload nothing wrote sta
 
 The any-hit test is the pair of the one above it rather than a standalone assertion.
 Opaque geometry reports a hit and the identical non-opaque geometry with a rejecting any-hit reports a miss, so nothing but the function could have changed the answer.
-That matters because traversal consults no any-hit function on opaque geometry at all.
+Traversal consults no any-hit function on opaque geometry at all.
 
 Writing them found real defects that compiled cleanly.
 `dispatch_rays` never set the argument table on its encoder, and its threadgroup shape ignored the grid — which Metal rejects rather than trims.
@@ -426,12 +434,45 @@ Run it by name and read the abort as the pass; a run that finishes means the lay
 It would mean deriving a correctness signal from message text nobody controls, and redirecting a descriptor Metal writes to from its own threads.
 A miss would then be silent, which is the same failure as having no oracle at all — and the abort's whole value is that it cannot be missed.
 
+### Running under Metal's GPU validation
+
+The API layer above is armed in every test run; **GPU validation is not, and is a run of its own.**
+It instruments every shader with bounds and residency checks, which costs a few times the suite's runtime.
+Metal reads it from the environment, and dev.py passes the environment through:
+
+```bash
+MTL_SHADER_VALIDATION=1 uv run dev.py test shaped-graphics-metal-test
+MTL_SHADER_VALIDATION=1 uv run dev.py test shaped-graphics-test
+```
+
+`MTL_DEBUG_LAYER` need not be set, since `arm_validation_layer()` already sets it; an application sets both.
+
+**Every commit goes through `metal_residency_set::commit`, which is what lets this run at all.**
+With GPU validation on, a commit walks the allocations of the residency sets attached to its queue.
+A transfer's feedback handler removes its staging buffer from the context's set and releases it, on a queue Apple owns.
+A commit racing that walk reached the freed buffer and trapped in `-[MTL4GPUDebugCommandBuffer applyResidencySets:]`.
+So the set is held still across each commit, as it already was across each change to it.
+`sg metal - async uploads commit while earlier ones settle` is the race: it crashed on its first run under validation before, and passes thirty in a row since.
+
+The metal binary passes under GPU validation.
+In `shaped-graphics-test`, the two sampler tests in `tests/pipeline/sampler-test.cc` read zeroes under it and pass without it.
+That is open as [bug-metal-sampler-tests-read-zeroes-under-validation](../../docs/issues/bug-metal-sampler-tests-read-zeroes-under-validation.md).
+
 ### Commit feedback is the one programmatic channel
 
 `MTL4CommitFeedback` reports a failure that arrives after the call that caused it, which is exactly what sg's deferred error channel is for.
 So every commit carries a handler, and an error reaches `ctx.take_pending_errors()`.
 
-Metal's timeout, device-removed and access-revoked codes mean the device itself is gone and mark the context lost; everything else is one command buffer failing.
+A code is read in its domain, and an MTL4 commit reports in `MTL4CommandQueueErrorDomain`, whose numbers are not the classic `MTLCommandBufferError` ones.
+Timeout, not-permitted, device-removed and access-revoked mean the device itself is gone, and mark the context lost.
+Everything else is one command buffer failing.
+
+**A GPU page fault arrives as that timeout**, and the system then refuses every later submission of the process.
+No queued `signalEvent` runs again, so every timeline stops where it was.
+So a loss also abandons both timelines: `metal_epoch_system::abandon_timelines` signals them to their maximum from the host, as dx12 does to a removed fence.
+Every wait returns and every listener fires, and the portable layer, which checks the loss first, fails a pending completion rather than settling it.
+Without that, `epochs_in_flight_completion`, `idle_completion` and shutdown's drain each parked forever on a value nothing would signal.
+`sg metal - a lost device settles the waits its stopped queue strands` is that sequence, with a queue stopped by a wait instead of by a fault.
 
 The handler runs on a dispatch queue at a time nothing here controls, which can be after `shutdown` has returned.
 So it captures a [`metal_feedback_sink`](src/shaped-graphics/backends/metal/metal_feedback.hh) rather than the context, and shutdown detaches it.
@@ -455,7 +496,7 @@ It is what makes the two execution tests the only thing anywhere that traces a r
 The agreed shape is HLSL run through SPIRV-Cross with all three artifacts checked in.
 The argument-buffer layout this backend encodes was chosen to match what SPIRV-Cross emits, so a hand-written kernel can agree with the backend and still disagree with every real shader.
 Neither DXC nor SPIRV-Cross is available on an arm64 macOS host today, which is why it exists in the meantime.
-`raytrace.metal`'s own comment says so, and [docs/TODO.md](../../docs/TODO.md) carries the gap.
+`raytrace.metal`'s own comment says so, and [debt-sg-metal-hand-written-fixtures](../../docs/issues/debt-sg-metal-hand-written-fixtures.md) carries the gap.
 So the fixture is reproducible by hand, and the binary needs neither the shader library nor the Metal toolchain.
 Its reflection is written out by hand next to it, so the test states the binding shape it means rather than inheriting whatever a reflector produced.
 Every test builds its own context, because the context is its subject.

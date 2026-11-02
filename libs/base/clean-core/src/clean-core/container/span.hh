@@ -4,6 +4,7 @@
 #include <clean-core/common/hash.hh>
 #include <clean-core/common/utility.hh>
 #include <clean-core/fwd.hh>
+#include <clean-core/sequence/source.hh>
 
 #include <initializer_list>
 #include <type_traits>
@@ -110,6 +111,21 @@ public:
     [[nodiscard]] constexpr T* begin() const { return _data; }
     /// Returns a pointer to one past the last element.
     [[nodiscard]] constexpr T* end() const { return _data + _size; }
+
+    // sequences
+public:
+    /// The viewed elements as a cc::sequence; it references the storage, not this span.
+    [[nodiscard]] constexpr auto values() const
+    {
+        return cc::sequence<cc::impl::span_source<T>>(cc::impl::span_source<T>(_data, _data + _size));
+    }
+
+    /// The index sequence 0 .. size(), whose contains(i) is a bounds check.
+    [[nodiscard]] constexpr auto indices() const
+    {
+        using source = typename cc::impl::seq_dependent<T, cc::impl::iota_source>::type;
+        return cc::sequence<source>(source(0, _size));
+    }
 
     // queries
 public:
@@ -417,6 +433,29 @@ public:
     /// Returns a pointer to one past the last element.
     [[nodiscard]] constexpr T* end() const { return _data + N; }
 
+    // sequences
+public:
+    /// The viewed elements as a cc::sequence, non-empty at compile time when N > 0.
+    [[nodiscard]] constexpr auto values() const
+    {
+        using source = cc::impl::span_source<T>;
+        if constexpr (N > 0)
+            return cc::sequence<cc::impl::non_empty_source<source>>(
+                cc::impl::non_empty_source<source>(source(_data, _data + N)));
+        else
+            return cc::sequence<source>(source(_data, _data + N));
+    }
+
+    /// The index sequence 0 .. N, non-empty at compile time when N > 0.
+    [[nodiscard]] constexpr auto indices() const
+    {
+        using source = typename cc::impl::seq_dependent<T, cc::impl::iota_source>::type;
+        if constexpr (N > 0)
+            return cc::sequence<cc::impl::non_empty_source<source>>(cc::impl::non_empty_source<source>(source(0, N)));
+        else
+            return cc::sequence<source>(source(0, N));
+    }
+
     // queries
 public:
     /// Returns the compile-time size N.
@@ -473,3 +512,6 @@ inline constexpr bool enable_borrowed_range<fixed_span<T, N>> = true;
 // cc::optional<span<U>>. optional.hh includes span.hh, so we pull it in only after span
 // is fully defined; the dependent return type is not instantiated until first use.
 #include <clean-core/error/optional.hh>
+
+// Deferred for the same reason: values() and indices() return a cc::sequence, which needs optional.
+#include <clean-core/sequence/sequence.hh>

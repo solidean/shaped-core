@@ -99,7 +99,7 @@ TEST("shaped-linter - fix round-trip - normalizes spacing before the brace")
 
 TEST("shaped-linter - fix round-trip - an array bound survives the rewrite")
 {
-    // The whole point of the applied round-trip: a corpus `fix=` only pins the replacement TEXT, so it
+    // Applied as a round-trip because a corpus `fix=` only pins the replacement TEXT, so it
     // cannot see that the edit started too far left and ate the `[N]`.
     CHECK(lint_and_fix("struct S { T a[N]{1, 2}; };") == "struct S { T a[N] = {1, 2}; };");
     CHECK(lint_and_fix("struct S { int a[3]{0}; };") == "struct S { int a[3] = {0}; };");

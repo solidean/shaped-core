@@ -74,6 +74,21 @@ enum class sv::asset_format : sv::u8
     obj,
     /// STL, either container — `read` decides by size, not by the leading `solid`
     stl,
+    /// Autodesk FBX, either encoding
+    fbx,
+};
+
+/// How an FBX material's properties are read, since FBX's Phong and Lambert properties mean whatever the exporting pipeline made them mean and the file never says which.
+enum class sv::fbx_material_convention : sv::u8
+{
+    /// FBX's own semantics: DiffuseColor is the base color, ShininessExponent the specular exponent, the surface a dielectric.
+    /// A specular color map has no OpenPBR parameter to land on and is reported rather than bound.
+    phong,
+
+    /// NVIDIA's ORCA scenes (Amazon Lumberyard Bistro among them) as Falcor reads them, as a metal-rough material.
+    /// Its SpecularColor map packs occlusion in red, roughness in green and metalness in blue, and its normal maps are DirectX-convention.
+    /// Nothing in the file distinguishes this from Phong, which is why it is asked for rather than detected.
+    orca_metal_rough,
 };
 
 /// What a loader does to every file it reads.
@@ -82,7 +97,7 @@ enum class sv::asset_format : sv::u8
 /// Everything else — picking meshes out, renaming, replacing a material after the fact — is ordinary code over
 /// `asset_data`, which is why there is so little here.
 ///
-/// The two hooks own their callables, since a loader outlives the expression that built it.
+/// Its hooks own their callables, since a loader outlives the expression that built it.
 ///
 /// **Every hook here is called from a WORKER**, and from several at once when several `load_async` loads are in
 /// flight — they are the only caller-supplied code an import runs, and the import is what moved off the main thread.
@@ -98,7 +113,7 @@ struct sv::asset_loader_config
     uri_resolver_provider resolve;
 
     /// Called per candidate mesh, with the name it would carry.
-    /// Returning false skips it before its payloads are read, which is the point of doing this during the parse.
+    /// Returning false skips it before its payloads are read, since this runs during the parse.
     /// Unset means every mesh is imported.
     cc::unique_function<bool(cc::string_view name)> include_mesh;
 
@@ -121,7 +136,17 @@ struct sv::asset_loader_config
     /// node's `first_mesh` and `first_light` runs say which are its.
     bool flatten_hierarchy = true;
 
+    /// glTF says a transmissive material without KHR_materials_volume is a thin wall, which is what a pane is.
+    /// Exporters routinely leave the volume off solid glass too, a teapot or an ice cube, which as a thin wall turns into a soap bubble.
+    /// Set, a transmissive mesh with no volume is solid where it is closed, every edge shared by exactly two triangles once its
+    /// vertices are welded by position, and stays a thin wall where it is open; the material's own value is overridden per mesh.
+    /// Unset, the spec's reading stands for every mesh.
+    bool closed_transmission_is_solid = false;
+
     sv::tangent_frame_options frames = {};
+
+    /// how an FBX file's materials are read; the other formats ignore it
+    sv::fbx_material_convention fbx_materials = fbx_material_convention::phong;
 };
 
 namespace sv::impl
@@ -180,6 +205,12 @@ public:
     [[nodiscard]] cc::result<asset_data> load(babel::gltf::data const& doc, cc::string_view name = {}) const;
     [[nodiscard]] cc::result<asset_data> load(babel::obj::data const& doc, cc::string_view name = {}) const;
     [[nodiscard]] cc::result<asset_data> load(babel::stl::data const& doc, cc::string_view name = {}) const;
+
+    /// An FBX document, ideally read with `read_options::triangulate`.
+    /// Its texture file names are joined against `base_uri`, and resolved as written when that is empty.
+    [[nodiscard]] cc::result<asset_data> load(babel::fbx::data const& doc,
+                                              cc::string_view name = {},
+                                              cc::string_view base_uri = {}) const;
 
     /// Loads `uri` off the calling thread, handing back a handle that fills in.
     ///

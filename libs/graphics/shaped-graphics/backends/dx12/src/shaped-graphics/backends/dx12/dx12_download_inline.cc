@@ -4,7 +4,7 @@
 // The actor blocks on the submission fence, memcpys the readback bytes into the destination, settles the future's completion async, and releases the epoch's outstanding-copy count.
 // It skips the memcpy when the future was already dropped.
 // Ring space is reclaimed at EPOCH granularity, never per submission: each epoch carries an outstanding-copy counter, and its whole span frees only once that counter hits zero.
-// Why that coarsening is load-bearing under concurrent recording: libs/graphics/shaped-graphics/docs/concepts/download.inline.md.
+// Why that coarsening is required under concurrent recording: libs/graphics/shaped-graphics/docs/concepts/download.inline.md.
 
 #include <clean-core/container/pinned_data.hh>
 #include <clean-core/error/optional.hh>

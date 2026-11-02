@@ -1,7 +1,9 @@
 #pragma once
 
+#include <clean-core/container/set.hh>
 #include <clean-core/container/span.hh>
 #include <clean-core/container/vector.hh>
+#include <clean-core/memory/shared_ptr.hh>
 #include <clean-core/string/string.hh>
 #include <shaped-graphics-language/builtins/registry.hh>
 #include <shaped-graphics-language/check/flat.hh>
@@ -31,10 +33,15 @@ struct sgl::check::located_diagnostic
     cc::string detail;
     /// In the order they should be read, each printed as a `note:` line after the diagnostic.
     cc::vector<related_note> notes;
+    /// The entry points whose inlined body it was judged of, by function, which a compile of another one leaves out
+    /// (CHK-402).
+    /// Empty for a diagnostic of the program, which every compile of it reports.
+    cc::vector<symbol_id> entry_points;
 
     [[nodiscard]] bool operator==(located_diagnostic const& rhs) const
     {
-        return what == rhs.what && file == rhs.file && detail == rhs.detail && ast::impl::is_equal(notes, rhs.notes);
+        return what == rhs.what && file == rhs.file && detail == rhs.detail && ast::impl::is_equal(notes, rhs.notes)
+            && ast::impl::is_equal(entry_points, rhs.entry_points);
     }
 };
 
@@ -62,6 +69,18 @@ struct sgl::check::test_expectation
     source_span where;
 
     bool operator==(test_expectation const&) const = default;
+};
+
+/// An entry point's `@expect(error = "kind")` or `@expect(warning = "kind")`, which takes the diagnostics judged of its
+/// inlined body (CHK-403).
+struct sgl::check::entry_expectation
+{
+    /// The entry point's function.
+    symbol_id function = symbol_id::none;
+    i32 file = 0;
+    test_expectation expectation;
+
+    bool operator==(entry_expectation const&) const = default;
 };
 
 /// One `test` of the module, wherever it stands.
@@ -161,9 +180,16 @@ struct sgl::check::checked_module
     cc::vector<test_info> tests;
     /// The flat trees of the tests that checked without an error, each of stage `none` and without a parameter.
     cc::vector<flat_entry_point> test_units;
+    /// Every entry point's expectation of a diagnostic; such an entry point is judged by them, and has no flat tree.
+    cc::vector<entry_expectation> entry_expectations;
 
     /// In the order the demand-driven pass found them, which is deterministic and not source order.
     cc::vector<located_diagnostic> diagnostics;
+
+    /// Every module-level name, as each flat tree's mint takes it through `name_mint::also_taken` rather than a copy.
+    /// A tree keeps pointing at the set it was made with, so a set is never changed and a copy of the module shares it;
+    /// a symbol added later makes a new one, the last.
+    cc::vector<cc::shared_ptr<cc::set<cc::string>>> module_names;
 
     /// The registry every `builtin_id` and `builtin_type_id` in here is a position in.
     /// It must outlive the module; `builtins::default_registry()` lives as long as the process.
@@ -301,7 +327,7 @@ struct sgl::check::checked_module
             && is_equal(near_misses, rhs.near_misses) && is_equal(ray_traces, rhs.ray_traces)
             && is_equal(callable_calls, rhs.callable_calls) && is_equal(texel_stores, rhs.texel_stores)
             && is_equal(files, rhs.files) && is_equal(entry_points, rhs.entry_points) && is_equal(tests, rhs.tests)
-            && is_equal(test_units, rhs.test_units) && is_equal(diagnostics, rhs.diagnostics)
-            && builtins == rhs.builtins;
+            && is_equal(test_units, rhs.test_units) && is_equal(entry_expectations, rhs.entry_expectations)
+            && is_equal(diagnostics, rhs.diagnostics) && builtins == rhs.builtins;
     }
 };

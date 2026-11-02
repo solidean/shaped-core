@@ -20,7 +20,8 @@ struct probe_light:
     cone_offset: float
     one_minus_cos_angular_radius: float
     link_mask: uint
-    pad0: float2
+    select_pdf: float
+    select_cdf: float
 
 binding pt_support_io:
     /// The lights, which item `i` reads as `lights[i % light_count]`.
@@ -29,7 +30,7 @@ binding pt_support_io:
     /// The 16 SH coefficients of the environment, as `sv::background_gpu` lays them out, as `tracer.traced.background` declares it.
     sh: buffer[float4]
 
-    /// Eight per item, in the order `pt_support_measure` writes them.
+    /// `results_per_item` of pt-support-probe-test.cc per item, in the order `pt_support_measure` writes them.
     results: mut buffer[float4]
 
     item_count: uint
@@ -59,7 +60,7 @@ fun probe_direction(u: float3) -> float3:
 
     // x: a uniform, y: the two MIS weights of one pair summed, z: the environment pdf, w: the selection pdf over the lights
     let weights = pt.mis_weight(u1, u2) + pt.mis_weight(u2, u1)
-    let w0 = float4(u1, weights, pt.env_pdf(), pt.light_select_pdf(pt_support_io.light_count))
+    let w0 = float4(u1, weights, pt.env_pdf(), pt.light_select_pdf(l, pt_support_io.light_count))
 
     // a cosine-weighted direction about `n`, and whether it is finite
     let cosine = pt.sample_cosine_hemisphere(n, u4, u5)
@@ -114,3 +115,32 @@ fun probe_direction(u: float3) -> float3:
     pt_support_io.results[base + 6] = w6
     pt_support_io.results[base + 7] = w7
     pt_support_io.results[base + 8] = w8
+
+// ---- The environment's sampler --------------------------------------------------------------------------------------
+
+binding environment_io:
+    /// The environment, `sv::background_gpu` byte for byte.
+    environment: buffer[float4]
+
+    /// Per item: the sampled radiance over its density, and whether `environment_pdf` agrees with the density it was drawn with.
+    results: mut buffer[float4]
+
+    item_count: uint
+
+/// One direction per item from the environment, as `tracer.sample_environment` draws it.
+/// The mean of `radiance / pdf` over the items estimates the environment's integral over the sphere.
+@compute(64) fun environment_measure(@thread_id id: int3){environment_io}:
+    let item = id.x as uint
+    if item >= environment_io.item_count => return
+
+    let mut env = float4[28].filled(float4(0.0))
+    for k in 0 ..< 28:
+        env[k] = environment_io.environment[k]
+
+    let mut rng = pt.hash(item * 7919 + 3)
+    let u = float3(pt.rand(mut rng), pt.rand(mut rng), pt.rand(mut rng))
+    let drawn = scene.sample_environment_direction(env, float3(0.0, 1.0, 0.0), u)
+    let radiance = scene.environment_radiance(env, drawn.wi)
+    let agrees = if abs(scene.environment_pdf(env, drawn.wi) - drawn.pdf) <= 1e-4 * drawn.pdf => 1.0 else 0.0
+    let weighed = radiance / drawn.pdf
+    environment_io.results[id.x] = float4(weighed.x, weighed.y, weighed.z, agrees)

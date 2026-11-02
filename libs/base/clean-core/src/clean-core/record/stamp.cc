@@ -77,7 +77,7 @@ cc::string const& system_section()
     return encoded;
 }
 
-/// The levels at this instant, encoded fresh — that is the point of taking one at open and again at close.
+/// The levels at this instant, encoded fresh, so the one taken at open and the one at close can differ.
 cc::string resources_section()
 {
     auto const snapshot = cc::take_resource_snapshot();

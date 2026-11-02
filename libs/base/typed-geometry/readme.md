@@ -21,7 +21,7 @@ This library is at an **early stage**: `scalar/`, the whole `linalg/` core, the 
 ## Design at a glance
 
 - **Semantic types.** `vec` is a displacement or direction, `pos` is a point, `comp` is the neutral component container.
-  Their arithmetic reflects affine geometry: `pos - pos -> vec`, `pos + vec -> pos`, and the deliberate `pos + pos -> pos`.
+  Their arithmetic reflects affine geometry: `pos - pos -> vec`, `pos + vec -> pos`, and the deliberate `pos + pos -> pos` and `pos * T -> pos`.
 - **One generic type per family.** `vec<int D, class T>`, and likewise `pos`/`comp`, with typedefs for D = 2/3/4 (`vec3f`, `vec2d`, `vec4i`) and no per-dimension specializations.
 - **Raw storage, indexed access only.** Components live in a public C array member `data`, reached through `data` or `operator[]` — there are **no `.x/.y/.z`** members.
 - **Extensible scalars.** Scalar capabilities route through `tg::scalar_traits<T>` rather than `std::`, so an expression tree, a double-double or a bigint can opt in.

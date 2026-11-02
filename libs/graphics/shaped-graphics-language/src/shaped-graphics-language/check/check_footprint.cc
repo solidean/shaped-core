@@ -11,8 +11,9 @@ using namespace sgl::check::impl;
 
 namespace
 {
-constexpr auto k_pin_usage = cc::string_view("on a function, @expect names its entry point's footprint: "
-                                             "footprint = \"binding.member: read, binding: read\"");
+constexpr auto k_pin_usage = cc::string_view("on a function, @expect names what its entry point has: "
+                                             "footprint = \"binding.member: read, binding: read\", error = \"kind\" "
+                                             "or warning = \"kind\"");
 
 /// `text` as its `slot: access` items sorted and spaced one way, so a pin compares whatever order it is written in.
 cc::string normalized(cc::string_view text)
@@ -59,6 +60,10 @@ cc::string normalized(cc::string_view text)
 void checker::read_footprint_pin(symbol_id id, i32 file, ast::range_of<ast::attribute> attributes, bool is_entry_point)
 {
     auto const& ast = ast_of(file);
+    // a ray-tracing stage has no footprint, and has diagnostics of its own body as every entry point does (CHK-403)
+    auto is_any_entry = is_entry_point;
+    for (auto const stage : {"raygen", "closest_hit", "any_hit", "miss", "intersection", "callable"})
+        is_any_entry = is_any_entry || find_attribute(file, attributes, stage) != nullptr;
     for (auto const& a : ast.at(attributes))
     {
         if (text_of(file, a.name) != "expect")
@@ -71,7 +76,26 @@ void checker::read_footprint_pin(symbol_id id, i32 file, ast::range_of<ast::attr
             auto const* const literal
                 = ast::is_valid(argument.value) ? ast.at(argument.value).node.try_as<ast::literal>() : nullptr;
             auto const name = argument.name.empty() ? cc::string_view() : text_of(file, argument.name);
-            if (name != "footprint" || literal == nullptr || literal->kind != ast::literal_kind::quoted)
+            auto const is_quoted = literal != nullptr && literal->kind == ast::literal_kind::quoted;
+            // CHK-403: a diagnostic judged of the entry point's inlined body, wherever in the program it stands
+            if ((name == "error" || name == "warning") && is_quoted && text_of(file, where).size() > 2)
+            {
+                if (!is_any_entry)
+                {
+                    report(diagnostic_kind::invalid_attribute_arguments, file, where,
+                           "only a test and an entry point expect a diagnostic");
+                    continue;
+                }
+                auto const quoted = text_of(file, where);
+                out.entry_expectations.push_back(
+                    {.function = id,
+                     .file = file,
+                     .expectation = {.kind = name == "error" ? expectation_kind::error : expectation_kind::warning,
+                                     .pattern = cc::string(quoted.subview({.offset = 1, .size = quoted.size() - 2})),
+                                     .where = where}});
+                continue;
+            }
+            if (name != "footprint" || !is_quoted)
             {
                 report(diagnostic_kind::invalid_attribute_arguments, file, where, cc::string(k_pin_usage));
                 continue;

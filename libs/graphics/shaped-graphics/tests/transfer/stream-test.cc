@@ -5,6 +5,7 @@
 #include <clean-core/fwd.hh> // cc::byte
 #include <clean-core/thread/async.hh>
 #include <clean-core/thread/async_coroutine.hh>
+#include <clean-core/thread/mutex.hh>
 #include <nexus/async-test.hh>
 #include <nexus/test.hh>
 #include <shaped-graphics/command_list/command_list.hh>
@@ -311,16 +312,34 @@ private:
     isize _done = 0;
 };
 
-/// A source that withholds its payload until release() is called, then wakes the actor.
+/// Opened from the test's thread, and outliving the source: once opened, the actor may finish and destroy the source before release() has returned.
+struct gate
+{
+    std::atomic<bool> open = false;
+    cc::mutex<cc::unique_function<void()>> waker; // installed on the actor thread
+
+    void release()
+    {
+        open.store(true, std::memory_order_release);
+        waker.lock(
+            [](cc::unique_function<void()>& w)
+            {
+                if (w)
+                    w();
+            });
+    }
+};
+
+/// A source that withholds its payload until its gate opens, which then wakes the actor.
 /// This is the shape a real loader has, and what the waker exists for.
 class gated_source final : public sg::stream_source
 {
 public:
-    explicit gated_source(cc::span<byte const> bytes) : _bytes(bytes) {}
+    gated_source(cc::span<byte const> bytes, std::shared_ptr<gate> g) : _bytes(bytes), _gate(cc::move(g)) {}
 
     [[nodiscard]] sg::stream_poll try_next_chunk() override
     {
-        if (!_open.load(std::memory_order_acquire))
+        if (!_gate->open.load(std::memory_order_acquire))
             return {.status = sg::stream_source_status::not_yet};
         if (_handed_over)
             return {.status = sg::stream_source_status::done};
@@ -330,20 +349,15 @@ public:
     }
 
     [[nodiscard]] i64 total_size_hint() const override { return i64(_bytes.size()); }
-    void set_waker(cc::unique_function<void()> waker) override { _waker = cc::move(waker); }
 
-    /// Called from the test thread, exactly as a loader would call it from its own.
-    void release()
+    void set_waker(cc::unique_function<void()> waker) override
     {
-        _open.store(true, std::memory_order_release);
-        if (_waker)
-            _waker();
+        _gate->waker.lock([&](cc::unique_function<void()>& w) { w = cc::move(waker); });
     }
 
 private:
     cc::span<byte const> _bytes;
-    std::atomic<bool> _open = false;
-    cc::unique_function<void()> _waker;
+    std::shared_ptr<gate> _gate;
     bool _handed_over = false;
 };
 
@@ -391,9 +405,9 @@ ASYNC_INVOCABLE_TEST("sg stream - a stalled source does not block other transfer
     REQUIRE(gated_buf != nullptr);
     REQUIRE(ready_buf != nullptr);
 
-    auto source = std::make_unique<gated_source>(cc::span<byte const>(gated_bytes));
-    auto* const source_ptr = source.get();
-    auto blocked = c.stream.from_source_to_buffer(gated_buf, cc::move(source));
+    auto const opener = std::make_shared<gate>();
+    auto blocked = c.stream.from_source_to_buffer(
+        gated_buf, std::make_unique<gated_source>(cc::span<byte const>(gated_bytes), opener));
 
     // The stalled transfer must be passed over rather than queueing everything behind it.
     // That is the whole reason not_yet is a distinct answer instead of a blocking read.
@@ -401,7 +415,7 @@ ASYNC_INVOCABLE_TEST("sg stream - a stalled source does not block other transfer
     REQUIRE((co_await cc::async_as_result(ready.completion())).has_value());
     CHECK(!blocked.is_settled());
 
-    source_ptr->release(); // the waker is what turns this into progress rather than an indefinite wait
+    opener->release(); // the waker is what turns this into progress rather than an indefinite wait
     REQUIRE((co_await cc::async_as_result(blocked.completion())).has_value());
     CHECK(blocked.is_complete());
 
@@ -425,9 +439,9 @@ ASYNC_INVOCABLE_TEST("sg stream - an async transfer behind a stalled stream is o
     auto buf = c.persistent.create_raw_buffer(2048, sg::buffer_usage::copy_src | sg::buffer_usage::copy_dst);
     REQUIRE(buf != nullptr);
 
-    auto source = std::make_unique<gated_source>(cc::span<byte const>(streamed));
-    auto* const source_ptr = source.get();
-    auto blocked = c.stream.from_source_to_buffer(buf, cc::move(source));
+    auto const opener = std::make_shared<gate>();
+    auto blocked
+        = c.stream.from_source_to_buffer(buf, std::make_unique<gated_source>(cc::span<byte const>(streamed), opener));
 
     c.upload.bytes_to_buffer(buf, cc::make_pinned_data(overwrite));
 
@@ -441,7 +455,7 @@ ASYNC_INVOCABLE_TEST("sg stream - an async transfer behind a stalled stream is o
     // Nothing may be observable yet: the stream has no bytes, and the upload is behind it.
     CHECK(!blocked.is_settled());
 
-    source_ptr->release();
+    opener->release();
     REQUIRE((co_await cc::async_as_result(blocked.completion())).has_value());
     CHECK(blocked.is_complete());
 
@@ -502,6 +516,43 @@ ASYNC_INVOCABLE_TEST("sg stream - a chunked source fills a texture region", (sg:
     CHECK(bytes[src.size() - 1] == src[src.size() - 1]);
 }
 
+// One stream per mip level, all into one texture and all in flight at once: each lands in its own level.
+ASYNC_INVOCABLE_TEST("sg stream - every mip of a texture streams as its own transfer", (sg::context_handle const& handle))
+{
+    REQUIRE(handle != nullptr);
+    auto& c = *handle;
+
+    sg::texture_description desc;
+    desc.format = sg::pixel_format::rgba8_unorm;
+    desc.dimension = sg::texture_dimension::d2;
+    desc.width = 8;
+    desc.height = 8;
+    desc.mip_levels = 4;
+    desc.usage = sg::texture_usage::copy_src | sg::texture_usage::copy_dst;
+    auto tex = c.persistent.create_raw_texture(desc);
+    REQUIRE(tex != nullptr);
+
+    auto levels = cc::vector<cc::vector<byte>>();
+    auto streams = cc::vector<sg::stream_upload_handle>();
+    for (auto mip = 0; mip < 4; ++mip)
+    {
+        auto const side = 8 >> mip;
+        levels.push_back(pattern(side * side * 4, 11 * (mip + 1)));
+        streams.push_back(c.stream.bytes_to_texture(tex, cc::make_pinned_data(levels.back()), {.mip_level = mip}));
+    }
+    for (auto& s : streams)
+        REQUIRE((co_await cc::async_as_result(s.completion())).has_value());
+
+    for (auto mip = 0; mip < 4; ++mip)
+    {
+        auto const back = c.download.bytes_from_texture(tex, {.mip_level = mip});
+        auto const bytes = co_await back.bytes();
+        REQUIRE(bytes.size() == levels[mip].size());
+        CHECK(bytes[0] == levels[mip][0]);
+        CHECK(bytes[bytes.size() - 1] == levels[mip][levels[mip].size() - 1]);
+    }
+}
+
 // A streamed texture's rows are rows of BLOCKS, and its extent is slice-major.
 //
 // Both of those are invisible on an uncompressed 2D texture, where a block is one texel and there is one slice — so
@@ -512,6 +563,8 @@ ASYNC_INVOCABLE_TEST("sg stream - a compressed texture streams whole block rows"
 {
     REQUIRE(handle != nullptr);
     auto& c = *handle;
+    if (!c.supports(sg::feature::texture_compression_bc))
+        SKIP("this device has no BC textures");
 
     // 16x16 BC1 is 4x4 blocks of 8 bytes: 32 bytes per block row, four block rows, one slice.
     sg::texture_description desc;
@@ -701,6 +754,8 @@ ASYNC_INVOCABLE_TEST("sg stream - a compressed texture with a partial last block
 {
     REQUIRE(handle != nullptr);
     auto& c = *handle;
+    if (!c.supports(sg::feature::texture_compression_bc))
+        SKIP("this device has no BC textures");
 
     // 16x10 BC1 is 4x3 blocks of 8 bytes: 32 bytes per block row, three block rows, the last one half outside.
     sg::texture_description desc;
@@ -802,10 +857,10 @@ ASYNC_INVOCABLE_TEST("sg stream - a list recorded before a fresh texture's uploa
     REQUIRE(handle != nullptr);
     auto& c = *handle;
 
-    // dx12 decides a list's transfer waits and its texture layouts while it records, so a list recorded before the
-    // upload was enqueued neither waits nor keeps the layout the copy needs — see libs/graphics/shaped-graphics/docs/TODO.md.
+    // dx12 picks a texture's layout from `has_pending_transfer` while the list records.
+    // So a list recorded before the upload was enqueued does not keep the layout the copy needs — issue: bug-sg-dx12-list-strands-transfer-layout.
     if (c.backend() == sg::backend_kind::dx12)
-        SKIP("dx12 reads pending transfers at record time rather than at submit");
+        SKIP("dx12 reads has_pending_transfer at record time to pick a texture's layout");
 
     sg::texture_description desc;
     desc.format = sg::pixel_format::rgba8_unorm;

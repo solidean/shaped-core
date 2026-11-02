@@ -55,13 +55,13 @@ struct imgui_fixture
         // Naming it up front is what lets a test assert on its first call, and it couples the test to a choice the
         // code under test makes.
         // It goes away once a routine's readiness is an async, where this becomes a co_await on it — see
-        // libs/graphics/shaped-graphics/docs/TODO.md, "Readiness as an async".
+        // issue: feat-sg-routine-readiness-async.
         sr::imgui_routine::prewarm(*ctx, sg::pixel_format::rgba8_unorm);
         (void)co_await ctx->routines.idle_completion();
 
         // prepare() records every copy before the scope, and what is left is the barrier the first draw needs for the
         // geometry and any atlas update it uploaded: vulkan closes the scope for it.
-        // Nothing states a buffer's access before a scope yet; libs/graphics/shaped-graphics/docs/TODO.md, "Barriers + access tracking".
+        // Nothing states a buffer's access before a scope yet; issue: feat-sg-declare-scope-accesses-up-front.
         nx::allow_warnings("was closed and reopened around a barrier", "sg");
 
         auto cmd = ctx->create_command_list();

@@ -6,7 +6,7 @@
 //
 // Hand-written and temporary, for the reason raytrace.metal's own comment gives: the agreed shape is HLSL through
 // SPIRV-Cross with all three artifacts checked in, and neither tool runs on an arm64 macOS host today.
-// See libs/graphics/shaped-graphics/docs/TODO.md.
+// TEMPORARY(debt-sg-metal-hand-written-fixtures)
 //
 // The binding convention it is written against, which the backend encodes:
 //

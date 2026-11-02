@@ -194,6 +194,14 @@ void checker::judge_primitive_stage(symbol_id id, cc::function_ref<void(cc::stri
             invalid(cc::format("{} has at most one @position field", what));
         return positions;
     };
+    // CHK-393: the pass that proves a @per_draw value the same across a draw judges what a vertex stage returns alone
+    auto const refuse_per_draw = [&](type_id link, cc::string_view what)
+    {
+        for (auto const& m : out.at(out.at(link).members))
+            if (m.is_per_draw)
+                invalid(cc::format("{} has the @per_draw member '{}', and only a vertex stage writes one yet", what,
+                                   m.name));
+    };
 
     if (info.entry_stage == stage::geometry)
     {
@@ -225,6 +233,8 @@ void checker::judge_primitive_stage(symbol_id id, cc::function_ref<void(cc::stri
                                "scalars: `max_vertices` is at most {} for {}",
                                info.max_vertices, scalars, info.max_vertices * scalars, k_max_geometry_scalars,
                                k_max_geometry_scalars / scalars, out.name_of(stream.element)));
+        if (stream.kind == type_kind::stream)
+            refuse_per_draw(stream.element, "what a geometry stage appends");
         return;
     }
 
@@ -306,7 +316,10 @@ void checker::judge_primitive_stage(symbol_id id, cc::function_ref<void(cc::stri
     if (out.at(info.result).kind != type_kind::structure)
         invalid("a @tessellation_evaluation fun returns the struct the stage after it takes");
     else
+    {
         (void)judge_position(info.result, "what a tessellation evaluation stage returns");
+        refuse_per_draw(info.result, "what a tessellation evaluation stage returns");
+    }
 }
 
 type_id checker::check_stream_call(function_scope& scope, ast::expr_id id, ast::call const& call, type_id stream)

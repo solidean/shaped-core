@@ -9,7 +9,7 @@
 # MSVC needs no flag: /fp:precise, its default, does not contract unless /fp:contract is given.
 
 if(CMAKE_CXX_COMPILER_ID MATCHES "Clang" AND MSVC)
-    add_compile_options("/clang:-ffp-contract=off")
+    sc_build_options(COMPILE "/clang:-ffp-contract=off")
 elseif(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
-    add_compile_options(-ffp-contract=off)
+    sc_build_options(COMPILE -ffp-contract=off)
 endif()

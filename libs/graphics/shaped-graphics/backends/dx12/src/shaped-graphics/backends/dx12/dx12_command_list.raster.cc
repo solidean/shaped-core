@@ -16,6 +16,7 @@
 #include <shaped-graphics/backends/dx12/dx12_raster_pipeline.hh>
 #include <shaped-graphics/backends/dx12/dx12_texture.hh>
 #include <shaped-graphics/backends/dx12/dx12_texture_access.hh> // subresource_extent_of
+#include <shaped-graphics/backends/dx12/dx12_view_desc.hh>      // create_render_target_view / create_depth_stencil_view
 #include <shaped-graphics/barrier/access_inference.hh>          // shader_access_of / shader_layout_of
 #include <shaped-graphics/command_list/raster.hh>
 #include <shaped-graphics/resource/pixel_format.hh>
@@ -88,23 +89,31 @@ void dx12_command_list::raster_begin_rendering(sg::rendering_info const& info)
     }
     flush_barriers();
 
-    // 2) Create the RTV/DSV descriptors and collect the CPU handles the clears / OM bind use.
-    //    The slots outlive recording and are freed against this list's epoch in end_rendering.
+    // 2) Write the RTV/DSV descriptors into this list's own slots and collect the CPU handles the clears / OM bind use.
+    //    Overwriting what the previous scope wrote there is safe, since D3D12 read those when it recorded them.
     cc::fixed_vector<D3D12_CPU_DESCRIPTOR_HANDLE, sg::max_color_targets> rtv_handles;
-    for (auto const& ct : info.color_targets)
+    for (auto i = 0; i < int(info.color_targets.size()); ++i)
     {
-        auto rtv = _ctx.create_dx12_render_target_view(ct.view);
-        CC_ASSERT(rtv.has_value(), "failed to create a render-target view (RTV heap exhausted?)");
-        rtv_handles.push_back(rtv.value().handle);
-        _rendering_rtv_slots.push_back(rtv.value().slot);
+        if (i == int(_rtv_slots.size()))
+        {
+            auto const slot = _ctx._rtv_heap->allocate();
+            CC_ASSERT(slot != cpu_descriptor_slot::invalid, "RTV descriptor heap exhausted");
+            _rtv_slots.push_back(slot);
+        }
+        auto const handle = _ctx._rtv_heap->cpu_at(_rtv_slots[i]);
+        create_render_target_view(_ctx._device.Get(), info.color_targets[i].view, handle);
+        rtv_handles.push_back(handle);
     }
     D3D12_CPU_DESCRIPTOR_HANDLE dsv_handle = {};
     if (info.depth_stencil_target.has_value())
     {
-        auto dsv = _ctx.create_dx12_depth_stencil_view(info.depth_stencil_target.value().view);
-        CC_ASSERT(dsv.has_value(), "failed to create a depth-stencil view (DSV heap exhausted?)");
-        dsv_handle = dsv.value().handle;
-        _rendering_dsv_slot = dsv.value().slot;
+        if (_dsv_slot == cpu_descriptor_slot::invalid)
+        {
+            _dsv_slot = _ctx._dsv_heap->allocate();
+            CC_ASSERT(_dsv_slot != cpu_descriptor_slot::invalid, "DSV descriptor heap exhausted");
+        }
+        dsv_handle = _ctx._dsv_heap->cpu_at(_dsv_slot);
+        create_depth_stencil_view(_ctx._device.Get(), info.depth_stencil_target.value().view, dsv_handle);
     }
 
     // 3) Apply each target's begin-op: clear to a value, discard (contents undefined), or preserve (nothing).
@@ -182,22 +191,6 @@ void dx12_command_list::raster_end_rendering()
     // Unbind the targets from the output-merger: a later copy / dispatch in this list transitions them to another layout, which D3D12 forbids while they are bound as render / depth targets.
     _list->OMSetRenderTargets(0, nullptr, FALSE, nullptr);
 
-    // The RTV/DSV descriptor slots must outlive the list's GPU execution, since the recorded commands read them when they run.
-    // Free them against the recording epoch — this list's submit epoch — so the finalizer runs only once that epoch retires, i.e. after the GPU finishes.
-    // RTV/DSV slots own no ID3D12Resource, so the expiring resource carries only finalizers.
-    if (!_rendering_rtv_slots.empty() || _rendering_dsv_slot != cpu_descriptor_slot::invalid)
-    {
-        dx12_expiring_resource expiring;
-        for (auto const slot : _rendering_rtv_slots)
-            expiring.finalizers.push_back([ctx = &_ctx, slot]() { ctx->free_dx12_render_target_view(slot); });
-        if (_rendering_dsv_slot != cpu_descriptor_slot::invalid)
-            expiring.finalizers.push_back([ctx = &_ctx, slot = _rendering_dsv_slot]()
-                                          { ctx->free_dx12_depth_stencil_view(slot); });
-        _ctx.schedule_deferred_deletion(cc::move(expiring));
-    }
-
-    _rendering_rtv_slots.clear();
-    _rendering_dsv_slot = cpu_descriptor_slot::invalid;
     _in_render_pass = false;
 
     // The graphics bind + IA state is scoped to the pass it was set up in.
@@ -205,10 +198,11 @@ void dx12_command_list::raster_end_rendering()
     _bound_raster_groups.clear();
     _bound_raster_footprint = nullptr;
     _bound_raster_footprint_owner = nullptr;
-    _pending_raster_array_buffer_declares.clear();
-    _pending_raster_array_texture_declares.clear();
     _bound_vertex_buffers.clear();
     _bound_index_buffer = nullptr;
+
+    // The core ended the values' half already; this is the list's.
+    _raster_arrays.end_all();
 }
 
 // --- draw recording (reached through cmd.raster / cmd.raster.manual) -----------------------------------
@@ -311,24 +305,24 @@ void dx12_command_list::raster_bind_index_buffer(sg::index_buffer_view const& vi
     _index_view_offset_in_bytes = view.offset_in_bytes;
 }
 
-void dx12_command_list::raster_declare_array_buffer_access(cc::string_view binding_name,
-                                                           cc::span<sg::array_buffer_access const> elements)
+u32 dx12_command_list::raster_declare_array_buffer_access(cc::string_view binding_name,
+                                                          cc::span<sg::array_buffer_access const> elements)
 {
     CC_ASSERT(_in_render_pass, "declare_array_buffer_access requires an open rendering scope");
     CC_ASSERT(!binding_name.empty(), "declare_array_buffer_access requires a binding name");
-    auto declare = dx12_array_buffer_declare{.name = cc::string(binding_name), .elements = {}};
-    declare.elements.push_back_range(elements);
-    _pending_raster_array_buffer_declares.push_back(cc::move(declare));
+    auto const id = next_array_declaration_id();
+    _raster_arrays.declare_buffers(id, binding_name, elements);
+    return id;
 }
 
-void dx12_command_list::raster_declare_array_texture_access(cc::string_view binding_name,
-                                                            cc::span<sg::array_texture_access const> elements)
+u32 dx12_command_list::raster_declare_array_texture_access(cc::string_view binding_name,
+                                                           cc::span<sg::array_texture_access const> elements)
 {
     CC_ASSERT(_in_render_pass, "declare_array_texture_access requires an open rendering scope");
     CC_ASSERT(!binding_name.empty(), "declare_array_texture_access requires a binding name");
-    auto declare = dx12_array_texture_declare{.name = cc::string(binding_name), .elements = {}};
-    declare.elements.push_back_range(elements);
-    _pending_raster_array_texture_declares.push_back(cc::move(declare));
+    auto const id = next_array_declaration_id();
+    _raster_arrays.declare_textures(id, binding_name, elements);
+    return id;
 }
 
 void dx12_command_list::raster_set_viewport(sg::viewport const& vp)
@@ -379,8 +373,8 @@ void dx12_command_list::declare_raster_draw_barriers(bool indexed)
     // Array bindings are tracked as the caller declared them, at the stages the code touches each in.
     auto const graphics_stages = sg::pipeline_stage_flag::vertex | sg::pipeline_stage_flag::fragment;
     declare_group_accesses(_bound_raster_groups, _bound_raster_footprint, graphics_stages);
-    declare_array_accesses(_bound_raster_groups, _bound_raster_footprint, _bound_raster_footprint_owner, graphics_stages,
-                           _pending_raster_array_buffer_declares, _pending_raster_array_texture_declares);
+    declare_array_accesses(_bound_raster_groups, _bound_raster_footprint, _bound_raster_footprint_owner,
+                           graphics_stages, _raster_arrays);
 
     // The IA vertex fetch reads the bound vertex buffers; an indexed draw also fetches the index buffer.
     for (auto const& vb : _bound_vertex_buffers)
@@ -426,5 +420,22 @@ void dx12_command_list::raster_draw_indexed(sg::draw_indexed_config const& confi
     _list->DrawIndexedInstanced(UINT(config.index_range.size), UINT(config.instance_range.size),
                                 UINT(config.index_range.offset), config.vertex_offset,
                                 UINT(config.instance_range.offset));
+}
+
+void dx12_command_list::raster_draw_indexed_indirect(sg::raw_buffer_handle const& args, isize offset_in_bytes, isize count)
+{
+    CC_ASSERT(_in_render_pass, "an indirect draw requires an open rendering scope");
+    CC_ASSERT(_bound_raster_layout != nullptr, "bind a raster pipeline before drawing");
+    CC_ASSERT(_bound_index_buffer != nullptr, "an indirect indexed draw requires a bound index buffer");
+    auto const buffer = std::dynamic_pointer_cast<dx12_buffer const>(args);
+    CC_ASSERT(buffer != nullptr, "indirect draw arguments are not a dx12 buffer");
+    CC_ASSERT(!buffer->is_expired(), "indirect draw arguments are a transient buffer used past its epoch");
+
+    // The arguments are read by the command processor, a stage of their own, before any vertex is fetched.
+    track_buffer_access(buffer, sg::pipeline_stage_flag::draw_indirect, sg::access_flag::indirect_read);
+    declare_raster_draw_barriers(true);
+    flush_barriers();
+    _list->ExecuteIndirect(_ctx._draw_indexed_signature.Get(), UINT(count), buffer->_resource.Get(),
+                           UINT64(offset_in_bytes), nullptr, 0);
 }
 } // namespace sg::backend::dx12

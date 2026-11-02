@@ -10,7 +10,7 @@ using namespace bcache::test;
 // A cache hit must not cost a write.
 //
 // Access times are therefore deferred, deduplicated per entry, quantized to an epoch, and batched — approximate
-// recency rather than exact LRU, which is the whole point: exact would put every reader in contention with every other process's writer for a number nobody reads until a collection runs.
+// recency rather than exact LRU, because exact would put every reader in contention with every other process's writer for a number nobody reads until a collection runs.
 
 ASYNC_TEST("bcache writes at most one access row per entry per epoch")
 {

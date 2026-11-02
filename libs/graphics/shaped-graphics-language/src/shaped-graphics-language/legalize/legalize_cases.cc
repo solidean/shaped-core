@@ -39,9 +39,11 @@ struct case_lowering
         return out.stmt_list(lower(ids_of(out.e, range), depth + 1));
     }
 
-    /// `scrutinee == pattern`, as the record the check pass resolved.
+    /// `scrutinee == pattern`, as the record the check pass resolved; a bool pattern is the scrutinee or its `not`.
     [[nodiscard]] flat_expr_id equals(flat_case const& c, flat_expr_id lhs, flat_expr_id rhs)
     {
+        if (auto const* const b = out.e.at(rhs).node.try_as<flat_bool_literal>())
+            return b->value ? lhs : negated(out, lhs);
         flat_expr_id const arguments[] = {lhs, rhs};
         return out.add_expr(bool_type, flat_call{.callee = c.equality,
                                                  .intrinsic = c.equality_intrinsic,
@@ -95,8 +97,17 @@ struct case_lowering
             into.push_back(out.add_stmt(c));
             return;
         }
-        auto const bound = out.let("case_value", c.scrutinee);
-        into.push_back(bound.stmt);
+        // an immutable local is read again where each arm tests it, and anything else is bound once
+        auto scrutinee = local_id::none;
+        if (auto const* const ref = out.e.at(c.scrutinee).node.try_as<flat_local_ref>();
+            ref != nullptr && is_known(out.e, ref->local) && !out.e.at(ref->local).is_mut)
+            scrutinee = ref->local;
+        else
+        {
+            auto const bound = out.let("case_value", c.scrutinee);
+            into.push_back(bound.stmt);
+            scrutinee = bound.local;
+        }
 
         auto chain = ids_of(out.e, default_body);
         for (auto i = arms.size() - 1; i >= 0; --i)
@@ -109,7 +120,7 @@ struct case_lowering
             for (auto const p : patterns)
             {
                 out.from = s.from;
-                auto const one = equals(c, out.local(bound.local), p);
+                auto const one = equals(c, out.local(scrutinee), p);
                 condition = is_valid(condition) ? out.or_(condition, one) : one;
             }
             out.from = s.from;

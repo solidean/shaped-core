@@ -81,7 +81,7 @@ A body running as a node on the phase's pool inherits it as a bound worker scope
 `singlethreaded` is for a test whose subject is the ORDER things run in, which a pool is free to change.
 
 `no_scheduler` is what a test needs when it stands up its own `cc` scheduler, or nests an `nx::execute_tests` run of its own.
-Touching an async under it asserts, which is the point: the test has taken that decision over.
+Touching an async under it asserts, because the test has taken that decision over.
 `execute_tests` asserts when a scheduler is already bound rather than nesting one, and names the fix.
 `nx::invoke_tests` is unaffected — a dispatched child runs inside its driver's body and creates no scheduler.
 So a child declaring either mode asserts at dispatch unless its driver declares the same — [invocable-tests](invocable-tests.md#scheduling-asks-belong-to-the-driver) has the rule.
@@ -157,7 +157,7 @@ Asking for more is an assert, never a silent drop.
 A test node **always resolves to a value**, never to an error.
 A failure is data on the `test_execution`; the async failure channel is not used at all.
 
-That is load-bearing rather than tidiness: the phase's join requires every test node, so an error would propagate into the join and turn one red test into a red phase.
+That is for correctness, not tidiness: the phase's join requires every test node, so an error would propagate into the join and turn one red test into a red phase.
 
 ## `ASYNC_TEST`
 

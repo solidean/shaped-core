@@ -79,12 +79,15 @@ struct oidn_tile_plan
 
 /// The five pipelines the network dispatches, with the binding layouts they are built against.
 ///
-/// Separate from the network because they depend on nothing an image does: every stream, at every extent, dispatches
-/// these same five.
+/// Separate from the network because they depend on nothing an image does but the output's format.
+/// Every stream of one format, at every extent, dispatches these same five.
 /// That is what lets the member build them once in `init` rather than on a first frame — `ctx.cached` hands back the
 /// same pipeline either way, so a network created later finds them already built.
 struct oidn_programs
 {
+    /// What the output pass writes, which its shader names: a float or normalized format.
+    sg::pixel_format output_format = sg::pixel_format::rgba32_float;
+
     sg::binding_group_layout_handle conv_layout = nullptr;
     sg::binding_group_layout_handle input_layout = nullptr;
     sg::binding_group_layout_handle output_layout = nullptr;
@@ -111,7 +114,7 @@ struct oidn_programs
 /// Building them lazily instead would leave a caller that advances an epoch every frame — which is every real frame
 /// loop — waiting on a compile it never pumps.
 /// False when a shader failed to compile, which is logged.
-[[nodiscard]] cc::shared_async<bool> oidn_prewarm_pipelines(sg::context& ctx);
+[[nodiscard]] cc::shared_async<bool> oidn_prewarm_pipelines(sg::context& ctx, sg::pixel_format output_format);
 
 /// One image stream's network: the weights on the device, and the feature maps they are run through.
 ///
@@ -153,15 +156,19 @@ public:
     ///
     /// `overlap` is how much of each tile is discarded per side; it is a parameter so a test can price it rather than
     /// trust it, and `k_tile_overlap` is the figure that pricing settled on.
+    ///
+    /// `output_format` is the format of the image `execute` writes, which the output pass is compiled for.
     [[nodiscard]] bool create(sg::context& ctx,
                               tg::vec2i image_extent,
                               int max_tile = k_default_tile,
                               int overlap = k_tile_overlap,
-                              oidn_network_size size = oidn_network_size::base);
+                              oidn_network_size size = oidn_network_size::base,
+                              sg::pixel_format output_format = sg::pixel_format::rgba32_float);
 
     /// What `create` was asked for, which is what a caller compares against to know whether to create again.
     [[nodiscard]] oidn_network_size size() const { return _size; }
     [[nodiscard]] int max_tile() const { return _max_tile; }
+    [[nodiscard]] sg::pixel_format output_format() const { return _programs.output_format; }
 
     /// Builds whichever pipelines have finished compiling since the last call.
     ///
@@ -207,6 +214,7 @@ public:
     ///
     /// `input_scale` multiplies the radiance before the transfer curve and divides it back out afterwards, which is
     /// how a scene is brought into the range the network was trained over.
+    /// `output` has the format the network was created for.
     /// False when a pipeline is still building.
     [[nodiscard]] bool execute(sg::command_list& cmd,
                                sg::texture_2d const& color,

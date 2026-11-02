@@ -716,8 +716,9 @@ cc::result<sgl::module_description, cc::string> sgl::describe(describe_request c
     auto const front
         = is_module ? driver::impl::run_front_end(joining, program_name, request.library, request.options)
                     : driver::impl::run_front_end(request.source, request.source_name, request.library, request.options);
-    if (!front.errors.empty())
-        return cc::error(front.errors);
+    // a description serves every entry point, so an error judged of any one of them fails it
+    if (auto errors = front.errors_of(check::symbol_id::none); !errors.empty())
+        return cc::error(cc::move(errors));
 
     auto const& m = front.module;
     // the options named within `span` of `file`, each once

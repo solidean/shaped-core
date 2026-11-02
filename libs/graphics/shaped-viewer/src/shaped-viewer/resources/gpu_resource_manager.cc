@@ -2,10 +2,12 @@
 
 #include <clean-core/common/assert.hh>
 #include <clean-core/common/utility.hh> // cc::memcmp
+#include <sgl_modules/tracer.hh>        // the manager's group is module tracer's `binding bindless`
 #include <shaped-graphics/binding/staging_binding_group.hh>
 #include <shaped-graphics/command_list/command_list.hh>
 #include <shaped-graphics/context/context.hh>
 #include <shaped-rendering/box_filter_mipmap_routine.hh>
+#include <shaped-rendering/compression/bc_compress_routine.hh>
 #include <shaped-rendering/raster_box_filter_mipmap_routine.hh>
 #include <shaped-viewer/material/impl/material_hash.hh> // impl::add_sampler, which skips the sampler's padding
 #include <shaped-viewer/material/material_library.hh>
@@ -112,21 +114,23 @@ sg::binding_group_layout_handle const& bound_resources::layout() const
     return _manager->bindless_layout();
 }
 
-void bound_resources::declare_raytracing_access(sg::command_list& cmd) const
+namespace
 {
-    CC_ASSERT(_manager != nullptr, "a moved-from bound_resources names no manager");
-
+/// Declares every table's elements of this epoch as shader reads, through whichever scope's pair of calls `scope` is.
+template <class Scope, class Tables>
+void declare_tables(Scope& scope, Tables const& tables, cc::vector<sg::array_access_declaration>& declared)
+{
     auto buffers = cc::vector<sg::array_buffer_access>();
     auto textures = cc::vector<sg::array_texture_access>();
 
-    for (auto const& t : _manager->_tables)
+    for (auto const& t : tables)
     {
         if (t.table == bindless_table::buffers)
         {
             buffers.clear();
             for (auto const e : t.acquired)
                 buffers.push_back({.index = i32(e), .access = sg::access_flag::shader_read});
-            cmd.raytracing.declare_array_buffer_access(name_of(t.table), buffers);
+            declared.push_back(scope.declare_array_buffer_access(buffer_array(), buffers));
             continue;
         }
 
@@ -134,8 +138,33 @@ void bound_resources::declare_raytracing_access(sg::command_list& cmd) const
         for (auto const e : t.acquired)
             textures.push_back(
                 {.index = i32(e), .access = sg::access_flag::shader_read, .layout = sg::texture_layout::shader_texture});
-        cmd.raytracing.declare_array_texture_access(name_of(t.table), textures);
+        declared.push_back(scope.declare_array_texture_access(texture_array_of(t.table), textures));
     }
+}
+} // namespace
+
+declared_tables bound_resources::declare_raytracing_access(sg::command_list& cmd) const
+{
+    CC_ASSERT(_manager != nullptr, "a moved-from bound_resources names no manager");
+    auto declared = declared_tables();
+    declare_tables(cmd.raytracing, _manager->_tables, declared._declarations);
+    return declared;
+}
+
+declared_tables bound_resources::declare_compute_access(sg::command_list& cmd) const
+{
+    CC_ASSERT(_manager != nullptr, "a moved-from bound_resources names no manager");
+    auto declared = declared_tables();
+    declare_tables(cmd.compute, _manager->_tables, declared._declarations);
+    return declared;
+}
+
+declared_tables bound_resources::declare_raster_access(sg::command_list& cmd) const
+{
+    CC_ASSERT(_manager != nullptr, "a moved-from bound_resources names no manager");
+    auto declared = declared_tables();
+    declare_tables(cmd.raster, _manager->_tables, declared._declarations);
+    return declared;
 }
 
 cc::span<u32 const> bound_resources::elements(bindless_table table) const
@@ -171,8 +200,9 @@ gpu_resource_manager::gpu_resource_manager(sg::context& ctx,
 gpu_resource_manager gpu_resource_manager::create(sg::context& ctx, gpu_resource_manager_config const& cfg)
 {
     // The tracer's own layout, so the group a trace binds fits its pipeline and sg resolves its footprint by name.
-    auto group
-        = ctx.persistent.create_staging_binding_group(ctx.cached.acquire_binding_group_layout(bindless_bindings()));
+    // It carries the material sampler palette too, as static samplers nothing sets.
+    auto group = ctx.persistent.create_staging_binding_group(
+        ctx.cached.acquire_binding_group_layout<shaders::tracer::bindless>());
 
     // One array per binding, owned here: an array cannot refuse an acquire on behalf of its siblings, so nothing
     // else may hold one over a binding of this group.
@@ -229,6 +259,33 @@ void append_pod(cc::vector<byte>& out, T const& value)
 }
 } // namespace
 
+u32 gpu_resource_manager::_slot_index(instance_slot const& slot)
+{
+    if (slot.kind == material_slot_kind::attribute_descriptor)
+        return u32(acquire_buffer(attributes.get(slot.attribute).data.as_readonly_buffer()));
+
+    CC_ASSERT(slot.kind == material_slot_kind::texture_index, "only a descriptor or a texture slot names an index");
+    auto const& record = textures.get(slot.texture);
+
+    // Substituted at the SLOT rather than by letting the sample lose to a coarser rank.
+    // Losing would be no new code, but it flips the permutation when the texture lands — so every affected
+    // mesh would recompile and restart its accumulation mid-load, which is the opposite of what a placeholder
+    // is for.
+    // Pointing the slot elsewhere keeps the permutation stable across the whole load.
+    //
+    // `failed` substitutes too, and deliberately not with the same texel: its texture was created and never
+    // written, so sampling it reads whatever that allocation happened to hold.
+    // Magenta, because the two states are not the same news — `pending` is "not yet" and wants the material's
+    // own factor, `failed` is "never" and wants to be seen.
+    // `base_resident` is left alone: it is sampleable by definition, just at fewer mips than it will have.
+    auto const& texture
+        = record.state == residency::pending
+            ? _placeholder_texture(slot.placeholder_texel, record.texture.format())
+            : (record.state == residency::failed ? _placeholder_texture(k_failed_texel, record.texture.format())
+                                                 : record.texture);
+    return u32(acquire_texture(bindless_table::textures_2d, texture.as_texture_view()));
+}
+
 cc::vector<byte> gpu_resource_manager::build_instance_parameters(instance_record const& r)
 {
     // Zero-filled rather than uninitialized: a layout may leave alignment padding between slots, and a block whose padding
@@ -254,41 +311,16 @@ cc::vector<byte> gpu_resource_manager::build_instance_parameters(instance_record
 
         case material_slot_kind::attribute_descriptor:
         {
-            auto const& record = attributes.get(slot.attribute);
-
             // Tightly packed from offset 0 within its own buffer, so the stride is just the element size.
-            auto desc = cc::vector<byte>();
-            append_pod(desc, u32(acquire_buffer(record.data.as_readonly_buffer())));
-            append_pod(desc, u32(0));
-            append_pod(desc, slot.element_stride);
-            write(slot.offset, desc);
+            u32 const desc[attribute_desc_size / sizeof(u32)] = {_slot_index(slot), 0u, slot.element_stride};
+            write(slot.offset, cc::span<u32 const>(desc).as_bytes());
             break;
         }
 
         case material_slot_kind::texture_index:
         {
-            auto const& record = textures.get(slot.texture);
-
-            // Substituted at the SLOT rather than by letting the sample lose to a coarser rank.
-            // Losing would be no new code, but it flips the permutation when the texture lands — so every affected
-            // mesh would recompile and restart its accumulation mid-load, which is the opposite of what a placeholder
-            // is for.
-            // Pointing the slot elsewhere keeps the permutation stable across the whole load.
-            //
-            // `failed` substitutes too, and deliberately not with the same texel: its texture was created and never
-            // written, so sampling it reads whatever that allocation happened to hold.
-            // Magenta, because the two states are not the same news — `pending` is "not yet" and wants the material's
-            // own factor, `failed` is "never" and wants to be seen.
-            // `base_resident` is left alone: it is sampleable by definition, just at fewer mips than it will have.
-            auto const& texture
-                = record.state == residency::pending
-                    ? _placeholder_texture(slot.placeholder_texel, record.texture.format())
-                    : (record.state == residency::failed ? _placeholder_texture(k_failed_texel, record.texture.format())
-                                                         : record.texture);
-
-            auto index = cc::vector<byte>();
-            append_pod(index, u32(acquire_texture(bindless_table::textures_2d, texture.as_texture_view())));
-            write(slot.offset, index);
+            auto const index = _slot_index(slot);
+            write(slot.offset, cc::span<u32 const>(&index, 1).as_bytes());
             break;
         }
         }
@@ -299,6 +331,33 @@ cc::vector<byte> gpu_resource_manager::build_instance_parameters(instance_record
 
 void gpu_resource_manager::_upload_parameters(sg::command_list& cmd, instance_record& r)
 {
+    if (r.built_in == _record_stamp)
+        return;
+    r.built_in = _record_stamp;
+
+    // Once a block is uploaded, only its indices can move from one epoch to the next: its constants are the record's own.
+    // So a later epoch re-acquires each index, as the access declaration needs, and patches and uploads only those that moved.
+    if (!r.uploaded.empty())
+    {
+        auto moved = false;
+        for (auto const& slot : r.slots)
+        {
+            if (slot.kind != material_slot_kind::attribute_descriptor && slot.kind != material_slot_kind::texture_index)
+                continue;
+            auto const index = _slot_index(slot);
+            CC_ASSERT(slot.offset + 4 <= r.uploaded.size(), "an index slot does not fit the block its layout sized");
+            auto stored = u32(0);
+            cc::memcpy(&stored, r.uploaded.data() + slot.offset, 4);
+            if (stored == index)
+                continue;
+            cc::memcpy(r.uploaded.data() + slot.offset, &index, 4);
+            moved = true;
+        }
+        if (moved)
+            cmd.upload.data_to_buffer(r.parameters, r.uploaded);
+        return;
+    }
+
     auto bytes = build_instance_parameters(r);
 
     // A material whose every attribute is sourced from somewhere needing no parameter has an empty block, and a zero-sized
@@ -310,7 +369,7 @@ void gpu_resource_manager::_upload_parameters(sg::command_list& cmd, instance_re
 
     // The bytes are the epoch's, the buffer is not.
     // In the steady state they come out identical, and skipping the copy is what keeps the upload path quiet — the buffer's
-    // own descriptor never moves either way, which is the part that matters for the group's snapshot.
+    // own descriptor never moves either way, so the group's snapshot stays valid.
     auto const unchanged = bytes.size() == r.uploaded.size()
                         && (bytes.empty() || cc::memcmp(bytes.data(), r.uploaded.data(), size_t(bytes.size())) == 0);
     if (!bytes.empty() && !unchanged)
@@ -332,28 +391,28 @@ shaders::tracer::instance_record gpu_resource_manager::describe_instance(sg::com
     _upload_parameters(cmd, r);
 
     // A pending batch is traced as the placeholder CUBE through the triangle fallback, so its record has to name the
-    // cube's positions — exactly as the mesh overload below does, and for the same reason: the triangle closest hit reads the hit
+    // cube's range of the pools — exactly as the mesh overload below does, and for the same reason: the triangle closest hit reads the hit
     // triangle's three corners back out of `inst.vertices` to recompute the geometric normal.
     // The batch's own primitive buffer would be wrong there twice over, since it holds nothing yet AND is not positions.
     //
     // Naming the real buffer while it streams would also stall: a command list that touches a resource a stream is
     // still filling waits for the whole transfer to land, and the first frames would pay that for bytes the placeholder
     // never reads.
-    // `placeholder_vertices` is filled by a direct upload rather than a stream, so it is never the thing being waited on.
+    // The cube is uploaded directly rather than streamed, so it is never the thing being waited on.
     auto const pending = q.state != residency::complete;
-    auto const vertices
-        = pending ? meshes.placeholder_vertices().raw()->as_raw_readonly() : q.primitives.raw()->as_raw_readonly();
+    auto const vertices = pending ? meshes.vertex_pool().raw()->as_raw_readonly() : q.primitives.raw()->as_raw_readonly();
+    auto const& cube = meshes.placeholder_geometry();
 
-    // A quadric indexes nothing, but the field still has to name something the bound snapshot covers.
-    auto const stand_in = meshes.index_stand_in().raw()->as_raw_readonly();
-
+    // A landed quadric indexes nothing, but the field still has to name something the bound snapshot covers.
     return {.param_buffer = u32(acquire_buffer(r.parameters.as_readonly_buffer())),
             .param_offset = 0,
             .vertices = u32(acquire_buffer(vertices)),
-            .indices = u32(acquire_buffer(stand_in)),
-            .is_indexed = 0u,
+            .indices = u32(acquire_buffer(meshes.index_pool().raw()->as_raw_readonly())),
+            .base_vertex = pending ? u32(cube.base_vertex) : 0u,
+            .first_index = pending ? u32(cube.first_index) : 0u,
             .link_mask = ~0u,
-            .padding = {}};
+            .shade_group = 0,
+            .emitter = 0xffffffffu}; // lights nothing until a trace's light table names it
 }
 
 shaders::tracer::instance_record gpu_resource_manager::describe_instance(sg::command_list& cmd,
@@ -365,44 +424,53 @@ shaders::tracer::instance_record gpu_resource_manager::describe_instance(sg::com
     CC_ASSERT(contains_instance(instance), "no such instance_id");
     auto& r = _instances[isize(u32(instance))];
 
-    // A pending mesh is traced as the placeholder cube, so its record has to name the CUBE's geometry: a hit reads
-    // positions back out of the instance to recompute the geometric normal, and the real buffer holds nothing yet.
+    // A pending mesh is traced as the placeholder cube, so its record has to name the CUBE's range: a hit reads
+    // positions back out of the instance to recompute the geometric normal, and the mesh's own range holds nothing yet.
     auto const pending = m.state != residency::complete;
-    auto const& vertices = pending ? meshes.placeholder_vertices() : m.vertices;
-    auto const& indices = pending ? meshes.index_stand_in() : m.indices;
+    auto const& geometry = pending ? meshes.placeholder_geometry() : m.geometry;
+    auto const vertices = u32(acquire_buffer(meshes.vertex_pool().raw()->as_raw_readonly()));
+    auto const indices = u32(acquire_buffer(meshes.index_pool().raw()->as_raw_readonly()));
 
     // Shaded through the fallback, which reads no parameter block, so the block is neither built nor bound — building it
     // is what would bind a still-streaming attribute buffer.
-    // The index stand-in fills the slot, since a record has to name some buffer there.
+    // The index pool fills the slot, since a record has to name some buffer there.
     if (pending || !attributes_resident(instance))
-        return {.param_buffer = u32(acquire_buffer(meshes.index_stand_in().raw()->as_raw_readonly())),
+        return {.param_buffer = indices,
                 .param_offset = 0,
-                .vertices = u32(acquire_buffer(vertices.raw()->as_raw_readonly())),
-                .indices = u32(acquire_buffer(indices.raw()->as_raw_readonly())),
-                .is_indexed = (!pending && m.is_indexed) ? 1u : 0u,
+                .vertices = vertices,
+                .indices = indices,
+                .base_vertex = u32(geometry.base_vertex),
+                .first_index = u32(geometry.first_index),
                 .link_mask = ~0u,
-                .padding = {}};
+                .shade_group = 0,
+                .emitter = 0xffffffffu}; // lights nothing until a trace's light table names it
 
     _upload_parameters(cmd, r);
 
-    // Every index here is this epoch's, minted right where it is written — which is what puts all four into the access
+    // Every index here is this epoch's, minted right where it is written — which is what puts all of them into the access
     // declaration `freeze()` hands the trace.
     return {.param_buffer = u32(acquire_buffer(r.parameters.as_readonly_buffer())),
             .param_offset = 0, // one block per buffer today; the shader reads through the offset regardless
-            .vertices = u32(acquire_buffer(vertices.raw()->as_raw_readonly())),
-            .indices = u32(acquire_buffer(indices.raw()->as_raw_readonly())),
-            .is_indexed = m.is_indexed ? 1u : 0u,
+            .vertices = vertices,
+            .indices = indices,
+            .base_vertex = u32(geometry.base_vertex),
+            .first_index = u32(geometry.first_index),
             .link_mask = ~0u,
-            .padding = {}};
+            .shade_group = 0,
+            .emitter = 0xffffffffu}; // lights nothing until a trace's light table names it
 }
 
 bool gpu_resource_manager::attributes_resident(instance_id instance)
 {
     CC_ASSERT(contains_instance(instance), "no such instance_id");
-    for (auto const& slot : _instances[isize(u32(instance))].slots)
+    auto& r = _instances[isize(u32(instance))];
+    if (r.resident_in == _record_stamp)
+        return true;
+    for (auto const& slot : r.slots)
         if (slot.kind == material_slot_kind::attribute_descriptor
             && attributes.get(slot.attribute).state != residency::complete)
             return false;
+    r.resident_in = _record_stamp;
     return true;
 }
 
@@ -604,7 +672,8 @@ sv::resident_mesh const& gpu_resource_manager::create_mesh(sv::mesh const& data)
                                 .bounds = box,
                                 .triangle_count = data.geometry.triangle_count(),
                                 .vertex_count = data.geometry.vertex_count()},
-                  .content = content};
+                  .content = content,
+                  .item = {}};
 
     data.cache.ready = _is_resident(data.cache.resources);
     return data.cache.resources;
@@ -629,7 +698,22 @@ scene_item gpu_resource_manager::acquire_scene_item(sv::resident_mesh const& mes
 
 scene_item gpu_resource_manager::acquire_scene_item(sv::mesh const& mesh)
 {
-    return acquire_scene_item(create_mesh(mesh));
+    auto const& resident = create_mesh(mesh);
+
+    // `create_mesh` mints the slot anew when an id it names or the content behind one changes, which drops the item with it.
+    // It re-reads the material in place, so the material is the one key checked here.
+    auto& slot = mesh.cache;
+    if (slot.item.has_value() && slot.item_material == resident.material)
+    {
+        auto item = slot.item.value();
+        item.transform = resident.transform;
+        return item;
+    }
+
+    auto const item = acquire_scene_item(resident);
+    slot.item = item;
+    slot.item_material = resident.material;
+    return item;
 }
 
 scene_item gpu_resource_manager::acquire_scene_item(sv::resident_quadric_set const& set)
@@ -859,7 +943,7 @@ sg::texture_2d const& gpu_resource_manager::_placeholder_texture(tg::vec4f texel
     // Every format the importer produces is that shape, and a caller reaching `acquire_texture` with another one gets
     // an assert rather than a subresource filled with the wrong number of bytes — which neither the upload scope nor
     // the backend checks.
-    // Encoding per format is the real fix and is deferred; see libs/graphics/shaped-viewer/docs/TODO.md.
+    // Encoding per format is the real fix and is deferred: TEMPORARY(debt-sv-placeholder-texture-format).
     CC_ASSERT(sg::format_block_extent(format) == 1 && sg::format_block_size(format) == 4,
               "a 1x1 placeholder is written as four 8-bit channels");
 
@@ -912,13 +996,19 @@ void gpu_resource_manager::_collect_textures()
 
 void gpu_resource_manager::_queue_mip_work(cc::span<texture_id const> landed)
 {
-    if (!_texture_policy.generate_mips)
-        return;
-
     for (auto const id : landed)
     {
         auto const* const record = textures.get_ptr(id);
-        if (record == nullptr || record->state != residency::base_resident || _is_pending(id))
+        if (record == nullptr || _is_pending(id))
+            continue;
+
+        // A texture that arrived with its whole chain has nothing left but the encode.
+        if (record->state == residency::complete)
+        {
+            _queue_compression(id);
+            continue;
+        }
+        if (!_texture_policy.generate_mips || record->state != residency::base_resident)
             continue;
 
         // Queued rather than done here: generating a full chain inline is exactly the stall the budget spreads out.
@@ -926,8 +1016,70 @@ void gpu_resource_manager::_queue_mip_work(cc::span<texture_id const> landed)
         // beyond what it was given — so this is zero for it and it is never queued.
         auto const dispatches = sr::box_filter_mipmap_routine::level_count(record->texture, record->uploaded_mips);
         if (dispatches > 0)
-            _pending.push_back({.texture = id, .dispatches = dispatches});
+            _pending.push_back({.texture = id, .kind = work_kind::mips, .dispatches = dispatches});
     }
+}
+
+namespace
+{
+/// What an RGBA8 texture is compressed to: BC7, which keeps every channel, since one texture may be bound through
+/// any swizzle of its four and the sampling code is the same whatever it holds.
+sg::pixel_format compressed_format_of(sg::pixel_format source)
+{
+    return sr::bc_compress_routine::target_for(source, sg::pixel_format::bc7_rgba_unorm);
+}
+} // namespace
+
+void gpu_resource_manager::_queue_compression(texture_id id)
+{
+    auto const* const record = textures.get_ptr(id);
+    if (!_texture_policy.compress || record == nullptr || record->compressed)
+        return;
+
+    auto const& t = record->texture;
+    if (t.format() != sg::pixel_format::rgba8_unorm && t.format() != sg::pixel_format::rgba8_unorm_srgb)
+        return;
+    if (!sr::bc_compress_routine::can_compress(*_ctx, t.format(), compressed_format_of(t.format())))
+        return;
+    if (t.width() < _texture_policy.compress_min_extent || t.height() < _texture_policy.compress_min_extent)
+        return;
+    // A BC texture whose extent is no multiple of its block needs the device to say so.
+    if ((t.width() % 4 != 0 || t.height() % 4 != 0) && !_ctx->supports(sg::feature::unaligned_block_compression))
+        return;
+
+    // One encode and one copy per level.
+    _pending.push_back({.texture = id, .kind = work_kind::compress, .dispatches = record->total_mips});
+}
+
+bool gpu_resource_manager::_compress(sg::command_list& cmd, texture_id id)
+{
+    auto const* const record = textures.get_ptr(id);
+    auto const& source = record->texture;
+
+    // Asked first, so a declined encoder leaves nothing recorded and no texture half filled.
+    auto const target = compressed_format_of(source.format());
+    if (!sr::bc_compress_routine::try_acquire(
+             cmd, sr::bc_compress_routine::target_for(sg::pixel_format::rgba8_unorm, target))
+             .is_ready())
+        return false;
+
+    auto compressed
+        = _ctx->persistent.create_texture_2d({.format = target,
+                                              .width = source.width(),
+                                              .height = source.height(),
+                                              .mip_levels = record->total_mips,
+                                              .usage = sg::texture_usage::texture | sg::texture_usage::copy_dst});
+    for (auto level = i32(0); level < record->total_mips; ++level)
+    {
+        auto const outcome = sr::bc_compress_routine::execute(cmd, source, compressed, level);
+        CC_ASSERT(outcome == sg::routine_outcome::executed, "a ready encoder executes every level it is given");
+    }
+    // The element the uploaded texture was sampled through would otherwise hold it resident until the table fills,
+    // and the swap would cost memory rather than save it.
+    auto const replaced = sg::raw_view(source.as_texture_view());
+    textures.replace_with_compressed(id, cc::move(compressed));
+    _tables[u32(bindless_table::textures_2d)].array.transient.release(replaced);
+    return true;
 }
 
 void gpu_resource_manager::wait_for_pending_uploads()
@@ -948,8 +1100,8 @@ i32 gpu_resource_manager::record_pending_work(sg::command_list& cmd)
     // What ORDER the transfers themselves ran in is the streaming actor's business, decided by the priority each
     // acquire set — this only collects the results.
     (void)attributes.collect_settled();
-    (void)meshes.record_settled(cmd);
-    (void)quadrics.record_settled(cmd);
+    (void)meshes.collect_settled();
+    (void)quadrics.collect_settled();
     _collect_textures();
 
     if (_work_budget.max_dispatches_per_epoch <= 0 || _pending.empty())
@@ -957,6 +1109,7 @@ i32 gpu_resource_manager::record_pending_work(sg::command_list& cmd)
 
     auto spent = i32(0);
     auto keep = cc::vector<pending_work>();
+    auto keep_compression = cc::vector<texture_id>();
     for (auto const& w : _pending)
     {
         auto const* const record = textures.get_ptr(w.texture);
@@ -968,6 +1121,18 @@ i32 gpu_resource_manager::record_pending_work(sg::command_list& cmd)
         if (spent + w.dispatches > _work_budget.max_dispatches_per_epoch && spent > 0)
         {
             keep.push_back(w);
+            continue;
+        }
+
+        if (w.kind == work_kind::compress)
+        {
+            // Still compiling: kept, as a declined mip pass is, since nothing else would ever ask again.
+            if (!_compress(cmd, w.texture))
+            {
+                keep.push_back(w);
+                continue;
+            }
+            spent += w.dispatches;
             continue;
         }
 
@@ -987,8 +1152,13 @@ i32 gpu_resource_manager::record_pending_work(sg::command_list& cmd)
         }
         spent += w.dispatches;
         textures.mark_mips_complete(w.texture);
+
+        // Its chain is complete now, which is what the encode needs; it waits its turn behind what is already queued.
+        keep_compression.push_back(w.texture);
     }
     _pending = cc::move(keep);
+    for (auto const id : keep_compression)
+        _queue_compression(id);
     return spent;
 }
 
@@ -1016,6 +1186,16 @@ bound_resources gpu_resource_manager::freeze()
 {
     lock();
     return bound_resources(*this, _group->snapshot());
+}
+
+cc::result<bound_resources> gpu_resource_manager::try_freeze()
+{
+    lock();
+    auto group = _group->try_snapshot();
+    if (group.has_error())
+        unlock();
+    CC_RETURN_IF_ERROR(group);
+    return bound_resources(*this, cc::move(group.value()));
 }
 
 sg::binding_group_layout_handle const& gpu_resource_manager::bindless_layout() const

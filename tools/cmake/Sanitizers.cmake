@@ -8,25 +8,25 @@ if(SANITIZE)
     if(NOT CMAKE_CXX_COMPILER_ID MATCHES "Clang")
         message(FATAL_ERROR "SANITIZE requires a Clang/LLVM toolchain (got ${CMAKE_CXX_COMPILER_ID})")
     endif()
-    add_compile_options(-fsanitize=${SANITIZE})
+    sc_build_options(COMPILE -fsanitize=${SANITIZE})
 
     if(NOT MSVC)
         # Unix clang/AppleClang: the compiler driver also links, so it wires the
         # sanitizer runtime itself. -fno-omit-frame-pointer keeps traces readable.
-        add_compile_options(-fno-omit-frame-pointer)
-        add_link_options(-fsanitize=${SANITIZE})
+        sc_build_options(COMPILE -fno-omit-frame-pointer)
+        sc_build_options(LINK -fsanitize=${SANITIZE})
 
         # Excludes vendored code from the checks; the list itself says what and why.
         # Not wired for clang-cl below: the flag needs a different spelling there and no Windows host has been available
         # to verify it, so the Windows sanitize preset still reports extern/ findings.
-        add_compile_options(-fsanitize-ignorelist=${CMAKE_CURRENT_LIST_DIR}/sanitizer-ignorelist.txt)
+        sc_build_options(COMPILE -fsanitize-ignorelist=${CMAKE_CURRENT_LIST_DIR}/sanitizer-ignorelist.txt)
     else()
         # clang-cl. ASan is incompatible with the debug CRT (/MDd) the Debug build
         # type selects; force the non-debug dynamic CRT — also the only one the
         # Windows LLVM toolchain ships an ASan runtime for. /Oy- keeps frame
         # pointers (clang-cl rejects -fno-omit-frame-pointer).
         set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreadedDLL" CACHE STRING "" FORCE)
-        add_compile_options(/Oy-)
+        sc_build_options(COMPILE /Oy-)
 
         # CMake links clang-cl targets with lld-link directly, bypassing the driver
         # that would add the sanitizer runtime — so add it ourselves, mirroring
@@ -38,7 +38,7 @@ if(SANITIZE)
         execute_process(COMMAND ${CMAKE_CXX_COMPILER} -print-resource-dir
                         OUTPUT_VARIABLE _sc_resource_dir OUTPUT_STRIP_TRAILING_WHITESPACE)
         set(SC_ASAN_RUNTIME_DIR "${_sc_resource_dir}/lib/windows" CACHE INTERNAL "clang_rt dir")
-        add_link_options(
+        sc_build_options(LINK
             "-libpath:${SC_ASAN_RUNTIME_DIR}"
             "${SC_ASAN_RUNTIME_DIR}/clang_rt.asan_dynamic-x86_64.lib"
             "-wholearchive:${SC_ASAN_RUNTIME_DIR}/clang_rt.asan_dynamic_runtime_thunk-x86_64.lib"

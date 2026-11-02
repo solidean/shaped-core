@@ -13,13 +13,12 @@
 
 namespace sg::backend::dx12
 {
-/// The D3D12_RESOURCE_DESC for a texture of this shape.
-/// The create path is its only caller today: placed textures and heap requirement queries need a texture-capable memory_heap, which dx12 does not have.
+/// The D3D12_RESOURCE_DESC for a texture of this shape, for its creation and for a heap's requirement query.
 [[nodiscard]] D3D12_RESOURCE_DESC texture_resource_desc(sg::texture_description const& desc);
 
 } // namespace sg::backend::dx12
 
-/// DirectX 12 implementation of sg::raw_texture, holding the ID3D12Resource (GPU-resident, default heap).
+/// DirectX 12 implementation of sg::raw_texture, holding the ID3D12Resource (GPU-resident, default heap), committed or placed.
 /// Also owns the per-command-list subresource access tracking that drives layout-transition barriers — see dx12_texture_access.
 class sg::backend::dx12::dx12_texture final : public sg::raw_texture
 {
@@ -37,7 +36,8 @@ public:
         _resource(cc::move(resource)),
         _heap(cc::move(heap)),
         _borrowed(borrowed),
-        _access(subresource_extent_of(desc))
+        _access(subresource_extent_of(desc),
+                _heap != nullptr ? sg::texture_layout::undefined : sg::texture_layout::general)
     {
         acquire_completion_groups();
     }
@@ -97,22 +97,17 @@ public:
 
     /// Accumulate one declared `stages`/`access`/`layout` over `range` for `slot` into the next-op state, emitting no barrier.
     /// Call once per binding; `flush_texture_access` merges them.
+    /// Also reports whether this was the op's and the list's first access, under the same lock — see dx12_texture_access::track.
     /// Thread-safe.
-    void declare_texture_access(sg::command_list_slot slot,
-                                sg::subresource_range range,
-                                sg::pipeline_stage_flags stages,
-                                sg::access_flags access,
-                                sg::texture_layout layout) const
+    [[nodiscard]] dx12_track_result track_texture_access(sg::command_list_slot slot,
+                                                         sg::subresource_range range,
+                                                         sg::pipeline_stage_flags stages,
+                                                         sg::access_flags access,
+                                                         sg::texture_layout layout,
+                                                         bool from_array_application = false) const
     {
-        _access.lock([&](dx12_texture_access& t) { t.declare(slot, range, stages, access, layout); });
-    }
-
-    /// Test-and-set `slot`'s pending-barrier flag — see dx12_texture_access::mark_pending_barrier.
-    /// True on the first binding this op, false after; `flush_texture_access` clears it.
-    /// Thread-safe.
-    [[nodiscard]] bool mark_pending_barrier(sg::command_list_slot slot) const
-    {
-        return _access.lock([&](dx12_texture_access& t) { return t.mark_pending_barrier(slot); });
+        return _access.lock([&](dx12_texture_access& t)
+                            { return t.track(slot, range, stages, access, layout, from_array_application); });
     }
 
     /// Flush the accesses declared for `slot` since the last flush and return the per-box barriers to emit before the op; empty means all freebies.
@@ -162,13 +157,6 @@ public:
         _access.lock([&](dx12_texture_access& t) { t.discard(slot); });
     }
 
-    /// Test-and-set `slot`'s finalize-recorded flag — see dx12_texture_access::mark_recorded.
-    /// True the first time per slot, false after, so the command list records the texture for finalization once.
-    /// Thread-safe.
-    [[nodiscard]] bool mark_recorded(sg::command_list_slot slot) const
-    {
-        return _access.lock([&](dx12_texture_access& t) { return t.mark_recorded(slot); });
-    }
 
 protected:
     // Release the GPU storage, deferred to epoch retire, when the texture is expired — see sg::raw_texture.

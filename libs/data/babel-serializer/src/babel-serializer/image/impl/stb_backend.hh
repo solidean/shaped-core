@@ -12,7 +12,7 @@
 // A future hand-rolled decoder replaces the body of one of these — the signatures stay put.
 //
 // PNG went that way already and now runs on libspng, through the spng_backend.hh seam next door.
-// stb_decode still decodes any stb-supported format, which is what the planned bmp / tga / gif containers will reach for.
+// stb_decode still decodes any stb-supported format, which is what the planned bmp / gif containers will reach for.
 //
 // Internal to babel — this header is NOT part of the public FILE_SET.
 

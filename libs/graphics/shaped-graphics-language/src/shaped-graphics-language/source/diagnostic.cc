@@ -234,6 +234,8 @@ cc::string_view sgl::to_string(diagnostic_kind kind)
         return "constant-not-representable";
     case diagnostic_kind::invalid_option:
         return "invalid-option";
+    case diagnostic_kind::unroll_too_long:
+        return "unroll-too-long";
     case diagnostic_kind::missing_sampler:
         return "missing-sampler";
     case diagnostic_kind::invalid_constant_argument:
@@ -244,6 +246,14 @@ cc::string_view sgl::to_string(diagnostic_kind kind)
         return "non-uniform-index";
     case diagnostic_kind::needless_nonuniform:
         return "needless-nonuniform";
+    case diagnostic_kind::unproven_index:
+        return "unproven-index";
+    case diagnostic_kind::mixed_index:
+        return "mixed-index";
+    case diagnostic_kind::uniform_index_varies:
+        return "uniform-index-varies";
+    case diagnostic_kind::non_uniform_per_draw:
+        return "non-uniform-per-draw";
     }
     CC_UNREACHABLE("unknown diagnostic_kind");
 }
@@ -480,10 +490,20 @@ cc::string_view sgl::summary_of(diagnostic_kind kind)
         return "an index into a binding array that may differ between invocations, without `nonuniform`";
     case diagnostic_kind::needless_nonuniform:
         return "a `nonuniform` mark on an index that is the same in every invocation";
+    case diagnostic_kind::unproven_index:
+        return "an index into a binding array that is neither proven uniform nor marked `uniform` or `nonuniform`";
+    case diagnostic_kind::mixed_index:
+        return "an index into a binding array that some calls give a uniform value and others one that may differ";
+    case diagnostic_kind::uniform_index_varies:
+        return "a `uniform` mark on an index that differs between invocations";
+    case diagnostic_kind::non_uniform_per_draw:
+        return "a `@per_draw` value a vertex stage writes that may differ within a draw";
     case diagnostic_kind::nesting_too_deep:
         return "an entry point that nests deeper than the compiler walks, once every call is inlined";
     case diagnostic_kind::invalid_option:
         return "a value for a name no option has, of another type than the option's, or for a name given twice";
+    case diagnostic_kind::unroll_too_long:
+        return "an unrolled for that would write more copies of its body than the compiler writes, and stays a loop";
     case diagnostic_kind::unknown_feature:
         return "a `require` of a name that is no feature a shader can use";
     case diagnostic_kind::feature_not_declared:
@@ -610,6 +630,10 @@ sgl::severity sgl::default_severity_of(diagnostic_kind kind)
     case diagnostic_kind::invalid_constant_argument:
     case diagnostic_kind::non_uniform_control_flow:
     case diagnostic_kind::non_uniform_index:
+    case diagnostic_kind::unproven_index:
+    case diagnostic_kind::mixed_index:
+    case diagnostic_kind::uniform_index_varies:
+    case diagnostic_kind::non_uniform_per_draw:
     case diagnostic_kind::invalid_option:
         return severity::normal_error;
     case diagnostic_kind::spaced_attribute_arguments:
@@ -618,6 +642,7 @@ sgl::severity sgl::default_severity_of(diagnostic_kind kind)
     case diagnostic_kind::redundant_yield:
     case diagnostic_kind::unreachable_code:
     case diagnostic_kind::unused_require:
+    case diagnostic_kind::unroll_too_long:
         return severity::warning;
     }
     CC_UNREACHABLE("unknown diagnostic_kind");

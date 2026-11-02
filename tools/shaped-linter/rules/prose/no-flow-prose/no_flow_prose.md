@@ -70,6 +70,12 @@ A sentence long enough that it plainly had to wrap.
 // and it carries no interior full stop to give it away
 ```
 
+A section banner whose title ends in a stop, with only decoration after it.
+
+```cpp ~[no-flow-prose]
+// ─── Reduced group — fixed shape. ───
+```
+
 A line with no sentence end at all.
 
 ```cpp ~[no-flow-prose]
@@ -122,10 +128,16 @@ Inline code is skipped: an odd number of backticks before the dot means we are i
 a call like `f(x). g(y)` in the middle of a line
 ````
 
-A stop *after* a code span still fires, which is the point of counting rather than ignoring backticks.
+A stop *after* a code span still fires, because the backticks are counted rather than ignored.
 
 ````md [no-flow-prose] path="x.md"
 this is `cc::vector`, done. And here is the next point.
+````
+
+A stop right after a code span ends a sentence just as one after a word does.
+
+````md [no-flow-prose] path="x.md"
+the sum is `a + b`. The two operands are exact
 ````
 
 ## Markdown
@@ -140,6 +152,13 @@ A heading is too.
 
 ````md [no-flow-prose] path="x.md"
 ## One point. And a second one.
+````
+
+A numbered label opening a heading is not a sentence end either.
+
+````md ~[no-flow-prose] path="x.md"
+## R1. The first requirement
+### 1b. A per-step instrument
 ````
 
 An ordered-list marker is not a sentence end — its word is all digits.

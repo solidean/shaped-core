@@ -91,6 +91,11 @@ void window::set_size(tg::vec2i)
     unreachable_without_backend();
 }
 
+void window::refresh_scale()
+{
+    unreachable_without_backend();
+}
+
 void window::set_relative_mouse_mode(bool)
 {
     unreachable_without_backend();

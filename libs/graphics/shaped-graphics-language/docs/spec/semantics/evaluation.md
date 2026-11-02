@@ -35,6 +35,10 @@ A listing here is the dump of a flat tree, shortened: a label is `$name`, and a 
   `step(edge, x)` is 1 where `x >= edge` and 0 elsewhere, as HLSL and WGSL define it, so a NaN on either side gives 0.
   A byte of `pack_unorm4x8` and `pack_snorm4x8` is `floor(v + 0.5)` of the scaled value, WGSL's formula, which HLSL's text writes too.
   Metal does not promise that rounding of a value exactly midway between two bytes, so MSL may take it to the even one.
+* **EVAL-99** `mat4(c0, c1, c2, c3)` is the matrix whose column `i` is `ci`, so its leaves are the four columns one behind the other, as a binding's bytes are.
+* **EVAL-98** `determinant(m)` is the determinant of the 4x4 matrix `m`, which its transpose shares, so it does not depend on the layout being column-major.
+  It is defined for every argument: a matrix two of whose columns are equal gives 0, and an element that is a NaN or an infinity gives what float arithmetic makes of it.
+  A target rounds each of its products and sums, and the interpreter computes in f64 and rounds to float at the end, so the two agree exactly where every step is exact, as with small integers.
 * **EVAL-89** A `discard` ends the run with no result, as the status `discarded`: nothing after it runs, and nothing it would have printed or stored after it happens.
 * **EVAL-84** An integer `/` or `%` by zero, and the most negative `int` divided by `-1`, have no value: a run that reaches one has no behaviour past it ([why](why/evaluation.md#eval-84)).
 * **EVAL-7** A struct value is one value per field, in field order.
@@ -218,6 +222,11 @@ fun graded(a: float) -> float:
   A run is one invocation, so a barrier waits for nobody and what it stored is all the memory holds.
 * **EVAL-93** An atomic's update names its place first, then evaluates its other arguments, then reads, updates and writes the atomic in one step, giving the value it read.
   A run is one invocation, so no other update ever falls between.
+  A strong compare-exchange stores `desired` exactly where the value it read is `expected`.
+* **EVAL-100** A weak compare-exchange that reads `expected` fails spuriously every other time, the first time first: it stores nothing, and gives `exchanged` false.
+  Each call of the source counts on its own, wherever it was inlined, and one that reads anything else fails as a strong one does ([why](why/evaluation.md#eval-100)).
+  `run_limits::fails_weak_exchanges` false makes every one strong, for a driver that wants none.
+  A texel's, whose image a run holds no texels of, reads zero, and stores where zero is `expected`.
 * **EVAL-94** The bindings of a run are what its driver binds by name, a binding by its name and a member by its own.
   A value is its scalars in field order, 4 bytes each and never padded, and a buffer its elements one after another, each laid out so.
   A member the driver leaves out is zero, a buffer it leaves out is empty, and an acceleration member it leaves out is the empty TLAS.

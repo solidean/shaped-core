@@ -28,6 +28,18 @@ struct sg::access_barrier
     texture_layout dst_layout = texture_layout::general;
 };
 
+/// What tracking one access found about array membership, which a backend's tracker reports to its command list.
+/// See barrier/array_declarations.hh for what the list does with it.
+struct sg::impl::member_track
+{
+    /// The resource is an array member of the list — an array application tracked it — and this access landed in the
+    /// write bucket: an unordered write, or a layout change.
+    bool member_write = false;
+
+    /// Before this access, the resource's state for the current op already held a write or a pending layout change.
+    bool held_write = false;
+};
+
 struct sg::resource_access_state
 {
     // curr — accumulated for the next op
@@ -135,8 +147,8 @@ struct sg::resource_access_state
                 inflight_write_access = curr_write_access;
                 // A real write leaves no reads barriered against the *new* write; a pure layout change
                 // keeps the current reads (they were synced by this transition).
-                barriered_read_stages = curr_read_stages;
-                barriered_read_access = curr_read_access;
+                barriered_read_stages = has_curr_writes() ? pipeline_stage_flags() : curr_read_stages;
+                barriered_read_access = has_curr_writes() ? access_flags() : curr_read_access;
             }
             prev_layout = curr_layout;
         }

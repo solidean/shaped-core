@@ -24,12 +24,15 @@ constexpr cc::string_view k_rationale
 // A long sentence that had to wrap is fine too, because it carries no interior full stop.
 // A `.` mid-line with more text behind it means two points were packed onto one line.
 //
-// Hence the whole detector: `<word>. <more text>`. Everything below is the exclusions that keep it usable,
+// Hence the whole detector: `<word>. <more text>`.
+// Everything below is the exclusions that keep it usable,
 // each earned on this tree:
 //
 //   - a word of one letter          `e.g. foo`, `i.e. bar` — by far the commonest false positive
 //   - a word of only digits         `12. list item` — an ordered-list marker, not a sentence
-//   - a known abbreviation          `etc.`, `incl.`, `vs.`, `cf.`, `resp.`, `al.`
+//   - a numbered label at line start `## R1. Name`, `### 1b. Name` — a section number
+//   - decoration after the stop      `// ─── A banner. ───` — no word follows
+//   - a known abbreviation          `etc.`, `incl.`, `vs.`, `cf.`, `resp.`, `al.`, `wrt.`, German `USt-IdNr.`
 //   - an odd number of backticks    inside inline code, where `f(x). y` is a code sample, not prose
 //
 // Known to survive, and accepted: an abbreviation outside the list, and a sentence ending on a quoted or
@@ -46,7 +49,7 @@ bool is_abbreviation(cc::string_view word)
 {
     // Earned one at a time from a real false positive on this tree — `incl.` alone accounted for 13.
     static constexpr cc::string_view known[]
-        = {"etc", "vs", "cf", "al", "resp", "approx", "fig", "vol", "incl", "excl"};
+        = {"etc", "vs", "cf", "al", "resp", "approx", "fig", "vol", "incl", "excl", "wrt", "IdNr"};
     for (auto const w : known)
         if (word == w)
             return true;
@@ -65,22 +68,30 @@ isize interior_sentence_end(cc::string_view line)
             ++backticks;
             continue;
         }
-        if (line[i] != '.' || i == 0 || !is_alnum(line[i - 1]))
+        if (line[i] != '.' || i == 0)
             continue;
         if (backticks % 2 != 0)
             continue; // inside inline code
+
+        // A stop right after a closed code span ends a sentence just as one after a word does.
+        auto const after_code = line[i - 1] == '`';
+        if (!after_code && !is_alnum(line[i - 1]))
+            continue;
 
         // A sentence end is a `.` followed by a space.
         // `1.5`, `foo.bar` and `…` are not.
         if (i + 1 >= line.size() || line[i + 1] != ' ')
             continue;
 
-        // Something has to follow on this line, or the point genuinely ended it.
-        auto rest = i + 2;
-        while (rest < line.size() && (line[rest] == ' ' || line[rest] == '\t'))
-            ++rest;
-        if (rest >= line.size())
+        // A word has to follow on this line, or the point genuinely ended it: a banner's `. ───` closes no sentence.
+        auto words_follow = false;
+        for (auto rest = i + 2; rest < line.size() && !words_follow; ++rest)
+            words_follow = is_alnum(line[rest]);
+        if (!words_follow)
             continue;
+
+        if (after_code)
+            return i;
 
         auto word_begin = i;
         while (word_begin > 0 && is_alnum(line[word_begin - 1]))
@@ -92,12 +103,23 @@ isize interior_sentence_end(cc::string_view line)
         if (is_abbreviation(word))
             continue;
 
+        auto has_digit = false;
         auto all_digits = true;
         for (auto const c : word)
-            if (c < '0' || c > '9')
-                all_digits = false;
+        {
+            auto const digit = c >= '0' && c <= '9';
+            has_digit = has_digit || digit;
+            all_digits = all_digits && digit;
+        }
         if (all_digits)
             continue; // an ordered-list marker
+
+        // A numbered label opening the line, as in `## R1. Name` or `### 1b. Name`, is no sentence.
+        auto label_start = isize(0);
+        while (label_start < word_begin && (line[label_start] == '#' || line[label_start] == ' '))
+            ++label_start;
+        if (has_digit && label_start == word_begin)
+            continue;
 
         return i;
     }

@@ -595,7 +595,7 @@ Build and coexist as many pools as you like; only one may be the installed compu
 A node is a **16 B header** followed by a payload slot; `async<int>` is **64 B — one cache line**, cacheline-aligned so unrelated nodes never share a line.
 
 The `async<T const, E>` layer in between adds nothing: single, non-virtual, member-less inheritance, so the base subobject stays at offset 0 and `sizeof(async<T const, E>) == sizeof(async<T, E>)`.
-That equality is load-bearing rather than incidental: the ops descriptor's size class is computed off the typed node, while `make_shared` allocates the derived one.
+That equality is required, not incidental: the ops descriptor's size class is computed off the typed node, while `make_shared` allocates the derived one.
 So it is pinned by a `static_assert` in `async<T, E>` and by the 64 B guards in the tests.
 
 * **16 B header** — one `atomic<u64>` intrusive refcount plus one `atomic<u64>` control word.
@@ -845,6 +845,10 @@ co_await cc::async_settled(cc::async_backlog::settled(all)); // several backlogs
 
 - **Entries are weak.** A backlog never keeps work alive, and a node that is gone or settled counts for nothing.
   Tracking compacts dead entries away once the backlog doubles past what last survived, so one nobody settles stays bounded by its live entries.
+- **Gone means torn down.** A node dropped before it resolved fails a weak lock at once, yet its teardown runs after: its frame's captures and its context go only then.
+  So such an entry counts until that teardown ends, which marks the node `torn_down`, and `settled()` polls until it has.
+  The teardown runs on the thread that dropped the last handle, or on the node's home when its options ask for that; a waiter on that home's thread runs the home meanwhile.
+  A node that resolved needs none of this: it let go of both as it resolved, so only the dropped-unresolved branch writes the mark.
 - **Cold nodes are not waited for**, since nothing may ever start them, and `settled()` never starts one.
   A node tracked cold counts once something starts it, which is how a component can track what it hands out before knowing who drives it.
 - **`settled()` waits in rounds.** Each round pins what is pending, waits for it, and sweeps again, so work a settling node tracks on its way out is still waited for.
@@ -861,6 +865,12 @@ co_await cc::async_settled(cc::async_backlog::settled(all)); // several backlogs
   Detaching is the explicit spelling, on a backlog the component owns.
 
 A backlog answers "is it done", not "whose is it": work it tracks still carries the context of whatever started it, which is what attributes its logging and profiling.
+
+**`cc::async_abandoned_work()` is the one backlog the runtime fills itself**, with work an awaiter stopped waiting for.
+`cc::async_all` returns on its first failed member, and the members still running go there.
+So do the scheduled or running deps of a parked node torn down because its last handle dropped.
+Both are cold paths: a successful `async_all`, a completion and a poll never touch it.
+A component whose teardown must know that nothing it started still runs settles it after its own backlog, since abandoned work is otherwise awaited by nobody.
 
 ## Ambient context
 
@@ -888,7 +898,7 @@ auto const id = cc::async_ambient_lookup(other_tag());
 
 A node stores the context only as a **resume token**, so a suspended computation resumes under the context it suspended in.
 The token is written **once**, by a thread executing or creating the node — never by one merely waking it.
-That exclusion is load-bearing rather than an optimization.
+That exclusion is for correctness, not an optimization.
 Without it a shared dependency completing under B would stamp B onto A's private continuation, and propagate through A's whole remaining subgraph.
 
 There are exactly three write sites, all inside the per-node spinlock those paths already take:
@@ -910,7 +920,7 @@ That is `cc::impl::async_poll_work_item`, which every dequeue site goes through 
 The three write sites above are what earn that: a node reaching a queue always carries its own token.
 So a null one there means "no context" rather than "inherit whoever dequeued me".
 
-That distinction is invisible on a worker, whose ambient is null anyway, and load-bearing for `participate_until_ready`.
+That distinction is invisible on a worker, whose ambient is null anyway, and required by `participate_until_ready`.
 A participant parks INSIDE the logical task it is blocked on and steals while parked.
 Without the root, every unrelated item it picks up is billed to that task — which a consumer keying off the chain reads as real nesting.
 nexus is the one that shows it: its invocation-cycle guard walks the chain, so a stolen test node chained under a blocked test reports a cycle that does not exist.
@@ -924,6 +934,11 @@ That is what makes **prewarming legal**: work started under a scope that ends be
 cc deliberately does not assert on it.
 A consumer wanting the stricter rule reads `async_ambient_scope::outstanding()` and decides for itself what a leak means.
 A test runner in particular wants a reported failure naming the test, not the abort a cc-side assert would give it.
+
+A count says how much still carries a context, not who.
+A build with `SC_ASYNC_AMBIENT_TRACE` can watch one link's releases, `cc::async_ambient_watch_releases`, with a hook called on the releasing thread.
+Every drop of a link, a child freeing its parent included, goes through `impl::async_ambient_drop`, so the watch misses none.
+The hook may run under a node's lock, which is why it should only record; nexus captures a stack there and renders it after the unwatch.
 
 `cc::async_is_polling()` sits alongside, on the same per-thread block.
 It answers whether a **throw from here has somewhere to land**: inside a poll it becomes the node's error, outside one it escapes a worker's thread function and terminates.
@@ -970,5 +985,5 @@ Down a chain past the inline depth cap that becomes a re-poll storm — measured
 * **Plain (non-async) arguments** in the variadic dependency form.
 * **Immovable `T` through `co_return`** — the coroutine layer moves its result through the promise, so an immovable result stays on the raw-frame emplace API.
 * **`async<void>`** — you spell `async<cc::unit>` today.
-  That is one corner of a wider question about `void` in the vocabulary types, tracked in [TODO](../TODO.md).
+  That is one corner of a wider question about `void` in the vocabulary types, tracked in [question-cc-regular-void-in-vocabulary-types](../issues/question-cc-regular-void-in-vocabulary-types.md).
 * **Deferred teardown** as a built-in — handing a handle to a reclaim thread already works at the user level.

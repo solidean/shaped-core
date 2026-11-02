@@ -688,7 +688,8 @@ enum class cc::async_node_state : cc::u8
     external_pending, // 4  awaiting external completion (a manual/promise node, no compute frame)
     ready_value,      // 5  terminal: completed with a value
     ready_error,      // 6  terminal: completed on the failure channel
-    // 7 states -> fits 3 bits (see async_node_base's packed control word).
+    torn_down,        // 7  terminal: dropped before it resolved, and its payload gone; only a weak ref sees it
+    // 8 states -> fits 3 bits (see async_node_base's packed control word).
     // is-error is encoded in the state itself (ready_value vs ready_error), not as a separate flag.
 };
 
@@ -697,7 +698,7 @@ enum class cc::async_node_state : cc::u8
 /// It recovers what a base-typed pointer cannot: how to destroy the typed value or error, and how to run and destroy the inline frame.
 /// It also carries the size class, which the intrusive free path needs long after the concrete type is erased.
 ///
-/// alignas(64) is load-bearing: the node packs the 6 low bits of this pointer with the lifecycle state, wake, lock and homed bits, so every instance must be 64-aligned to keep those bits free.
+/// alignas(64) is required: the node packs the 6 low bits of this pointer with the lifecycle state, wake, lock and homed bits, so every instance must be 64-aligned to keep those bits free.
 /// The price is 16 B of rodata per descriptor (48 -> 64), one descriptor per frame type and never per node.
 struct alignas(64) cc::async_type_ops
 {
@@ -777,6 +778,11 @@ inline constexpr isize async_home_word_bytes = 8;
 /// Run the teardown a scheduler took over through async_scheduler::try_defer_teardown, then drop the weak count that kept the node's storage alive.
 /// Call on the thread the teardown was deferred to.
 void async_run_deferred_teardown(async_node_base* node);
+
+/// Whether `node`, which no strong handle reaches any more, still has a teardown to finish: it was dropped before it resolved.
+/// Its frame's captures and its context go only as that teardown ends, which may be deferred to its home or to an outer teardown.
+/// A backlog asks this of an entry it can no longer lock, so that settled() does not return while such a teardown is still running.
+[[nodiscard]] bool async_teardown_unfinished(async_node_weak const& node);
 
 /// Creates and binds the main thread's home; called once, by cc::mark_current_thread_as_main.
 void async_bind_main_thread_home();
@@ -1081,7 +1087,8 @@ protected:
     void teardown_payload();
 
     /// The strong-0 entry: teardown_payload, except that a homed node's teardown goes to its home when its options ask for at_home and the home accepts it.
-    /// Returns true when deferred, which transfers the strong owners' collective weak count to the home.
+    /// A node released by another node's teardown on the same thread is queued, and the outermost teardown runs it before returning: a chain of parked frames tears down in a loop, not a recursion.
+    /// Returns true when deferred, which transfers the strong owners' collective weak count to the home or the queue.
     bool destroy_payload();
 
     // shared helpers for the typed node
@@ -1117,6 +1124,7 @@ protected:
     // internal
 private:
     void unsubscribe_all_slow(); // non-empty walk behind unsubscribe_all's inline empty-guard
+    void abandon_running_deps(); // a parked node torn down: the deps it leaves running go to cc::async_abandoned_work
     /// 0 when this thread may not run the node; 1 when it may and the node is unhomed; otherwise the node's home word.
     /// A home word is never 0 or 1, since the scheduler pointer is 64-aligned and non-null.
     u64 try_begin_running();
@@ -1231,6 +1239,7 @@ private:
     friend void impl::async_frame_resolve_current_exception(async_node_base*); // reaches finish_error_emplace
     friend struct impl::async_node_traits; // reaches the intrusive counts / ops / teardown_payload
     friend void impl::async_run_deferred_teardown(async_node_base*);
+    friend bool impl::async_teardown_unfinished(async_node_weak const&); // reads the state a teardown ends on
 
     /// Intrusive refcount (async_node_traits): strong owners in the high half, weak in the low half — continuation cells plus the strong owners' collective one.
     /// Born 1/1 by init_control.

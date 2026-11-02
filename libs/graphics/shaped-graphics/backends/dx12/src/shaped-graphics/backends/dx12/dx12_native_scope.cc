@@ -66,7 +66,7 @@ dx12_native_scope dx12_native_scope::open(sg::command_list& cmd,
         scope._buffers.push_back(b.buffer);
     }
 
-    // The barriers land before the foreign code runs, which is the whole point of declaring at all.
+    // The barriers land before the foreign code runs, which is what declaring is for.
     list.flush_barriers();
     return scope;
 }

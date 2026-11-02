@@ -8,18 +8,21 @@ Our own license is in [shaped-core.txt](shaped-core.txt), so this directory is a
 
 | Dependency | Version | License | Used by | Text |
 |---|---|---|---|---|
+| [Amazon Lumberyard Bistro](https://developer.nvidia.com/orca/amazon-lumberyard-bistro) | v5.2 | `CC-BY-4.0` | shaped-viewer — the bistro example; and tests that skip without it (babel's FBX reader and DDS / TGA decode, sv's FBX importer) | [amazon-lumberyard-bistro.txt](amazon-lumberyard-bistro.txt) |
 | [BLAKE3](https://github.com/BLAKE3-team/BLAKE3) | 1.8.6 | `CC0-1.0 OR Apache-2.0 OR Apache-2.0 WITH LLVM-exception` | clean-core — cc::blake3 / cc::hash256 (the cryptographic hash) | [blake3-cc0.txt](blake3-cc0.txt), [blake3-a2.txt](blake3-a2.txt), [blake3-a2llvm.txt](blake3-a2llvm.txt) |
 | [DLSS](https://github.com/NVIDIA/DLSS) | v310.9.1 | `LicenseRef-NVIDIA-RTX-SDK` | shaped-rendering — sr::dlss_rr_routine (the DLSS Ray Reconstruction denoise member) | [dlss.txt](dlss.txt) |
 | [DXC](https://github.com/microsoft/DirectXShaderCompiler) | v1.9.2602.24 | `LicenseRef-Microsoft-DXC-Binary` | shaped-shader-compiler-dxc — HLSL to sg::compiled_shader | [dxc.txt](dxc.txt), [dxc-llvm.txt](dxc-llvm.txt), [dxc-mit.txt](dxc-mit.txt) |
 | [FidelityFX-SDK](https://gpuopen.com/amd-fsr-sdk/) | 60f4ea81909200d8542eca14dccb2628b763a9a3 | `MIT` | shaped-rendering — sr::fsr_upscale_routine, AMD FSR 3.1's upscaler run through sg | [fidelityfx-sdk.txt](fidelityfx-sdk.txt) |
+| [glTF Research Scenes](https://github.com/ErfanMo77/gltf-research-scenes) | v1.1.0 | `CC0-1.0 AND CC-BY-3.0` | shaped-viewer — the research-scenes example | [gltf-research-scenes.txt](gltf-research-scenes.txt) |
 | [Dear ImGui](https://github.com/ocornut/imgui) | v1.92.8-docking | `MIT` | shaped-rendering — sr::imgui_context and sr::imgui_routine | [dear-imgui.txt](dear-imgui.txt) |
 | [ImPlot](https://github.com/epezent/implot) | d65a2bef53d3 | `MIT` | shaped-rendering — plotting inside the imgui bundle | [implot.txt](implot.txt) |
 | [ImGuizmo](https://github.com/cedricguillemet/ImGuizmo) | dc25afb98bc3 | `MIT` | shaped-rendering — manipulation gizmos inside the imgui bundle | [imguizmo.txt](imguizmo.txt) |
 | [libspng](https://libspng.org) | v0.7.4 | `BSD-2-Clause AND libpng-2.0` | babel-serializer — the PNG codec behind babel::png | [libspng.txt](libspng.txt), [libspng-libpng.txt](libspng-libpng.txt) |
 | [LZ4](https://github.com/lz4/lz4) | v1.10.0 | `BSD-2-Clause` | clean-core — cc::compress / cc::decompress, the LZ4 algorithm | [lz4.txt](lz4.txt) |
 | [mbedtls](https://www.trustedfirmware.org/projects/mbed-tls) | v3.6.7 | `Apache-2.0` | clean-net — the TLS handshake and record layer behind cnet's TLS connections | [mbedtls.txt](mbedtls.txt) |
-| [metal-cpp](https://developer.apple.com/metal/cpp/) | release/metal-cpp_macOS26.4_iOS26.4 | `Apache-2.0` | shaped-graphics-metal — the whole backend, which speaks Metal through this rather than through Objective-C++ | [metal-cpp.txt](metal-cpp.txt) |
-| [mimalloc](https://github.com/microsoft/mimalloc) | v3.3.2 | `MIT` | clean-core — the default general memory resource | [mimalloc.txt](mimalloc.txt) |
+| [meshoptimizer](https://github.com/zeux/meshoptimizer) | v1.3 | `MIT` | babel-serializer — the decoders behind babel::gltf's EXT_meshopt_compression | [meshoptimizer.txt](meshoptimizer.txt) |
+| [metal-cpp](https://developer.apple.com/metal/cpp/) | release/metal-cpp_macOS26.4_iOS26.4 | `Apache-2.0` | shaped-graphics-metal — the whole backend, which speaks Metal through this rather than through Objective-C++; shaped-rendering's MetalFX members, through metal-cpp-metalfx | [metal-cpp.txt](metal-cpp.txt) |
+| [mimalloc](https://github.com/microsoft/mimalloc) | v3.5.3 | `MIT` | clean-core — the default general memory resource | [mimalloc.txt](mimalloc.txt) |
 | [NRD](https://github.com/NVIDIA-RTX/NRD) | v4.17.3 | `LicenseRef-NVIDIA-RTX-SDK` | shaped-rendering — sr::nrd_denoise_routine (the vendor-neutral split-signal member) | [nrd.txt](nrd.txt) |
 | [ShaderMake](https://github.com/NVIDIA-RTX/ShaderMake) | 18f5a344e7ca8fa65daaf079d07bc8ce38453e05 | `MIT` | extern/nrd — the tool NRD's build compiles its shaders with | [shadermake.txt](shadermake.txt) |
 | [MathLib](https://github.com/NVIDIA-RTX/MathLib) | v11 | `MIT` | extern/nrd — the header-only math NRD's sources are written against | [mathlib.txt](mathlib.txt) |
@@ -29,6 +32,8 @@ Our own license is in [shaped-core.txt](shaped-core.txt), so this directory is a
 | [SPIRV-Reflect](https://github.com/KhronosGroup/SPIRV-Reflect) | vulkan-sdk-1.4.321.0 | `Apache-2.0` | shaped-shader-compiler-dxc — reflecting the bindings out of an emitted SPIR-V module | [spirv-reflect.txt](spirv-reflect.txt) |
 | [SQLite](https://sqlite.org) | 3.53.3 | `blessing` | babel-serializer — the babel::sqlite engine wrapper | [sqlite.txt](sqlite.txt) |
 | [stb](https://github.com/nothings/stb) | 31c1ad374564 | `MIT OR Unlicense` | babel-serializer — the JPEG codec behind babel::jpg | [stb.txt](stb.txt) |
+| [ufbx](https://github.com/ufbx/ufbx) | v0.23.1 | `MIT OR Unlicense` | babel-serializer — the FBX reader behind babel::fbx | [ufbx.txt](ufbx.txt) |
+| [WARP](https://www.nuget.org/packages/Microsoft.Direct3D.WARP) | 1.0.21 | `LicenseRef-Microsoft-WARP-Testing` | the dx12 test binaries' WARP driver, staged beside them by sg_warp_test_binary | [warp.txt](warp.txt) |
 | [xxHash](https://github.com/Cyan4973/xxHash) | v0.8.3 | `BSD-2-Clause` | clean-core — cc::hash128 (the XXH3 128-bit hash) | [xxhash.txt](xxhash.txt) |
 | [zlib](https://zlib.net) | v1.3.1 | `Zlib` | clean-core — cc::compress / cc::decompress, the Deflate algorithm | [zlib.txt](zlib.txt) |
 | [Zstandard](https://github.com/facebook/zstd) | v1.5.7 | `BSD-3-Clause` | clean-core — cc::compress / cc::decompress, the Zstandard algorithm | [zstandard.txt](zstandard.txt) |

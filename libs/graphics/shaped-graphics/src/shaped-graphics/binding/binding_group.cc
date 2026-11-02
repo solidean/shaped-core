@@ -33,10 +33,7 @@ void impl::record_buffer_uses(binding_group const& group, cc::span<named_view co
 {
     auto uses = cc::vector<buffer_use>();
     for (auto const& v : views)
-    {
         add_use(uses, v.name, v.view);
-        add_tlases(group._tlases, v.view);
-    }
     set_buffer_uses(group, cc::move(uses));
 }
 
@@ -47,12 +44,21 @@ void impl::record_buffer_uses(binding_group const& group,
     auto const bindings = layout.bindings();
     auto uses = cc::vector<buffer_use>();
     for (auto const& v : views)
-    {
         if (auto const slot = isize(u32(v.slot)); slot < bindings.size())
             add_use(uses, bindings[slot].name, v.view);
-        add_tlases(group._tlases, v.view);
-    }
     set_buffer_uses(group, cc::move(uses));
+}
+
+void impl::record_tlases(binding_group const& group, cc::span<named_view const> views)
+{
+    for (auto const& v : views)
+        add_tlases(group._tlases, v.view);
+}
+
+void impl::record_tlases(binding_group const& group, cc::span<slotted_view const> views)
+{
+    for (auto const& v : views)
+        add_tlases(group._tlases, v.view);
 }
 
 void impl::set_buffer_uses(binding_group const& group, cc::vector<buffer_use> uses)

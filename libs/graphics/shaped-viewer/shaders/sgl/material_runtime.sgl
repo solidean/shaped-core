@@ -73,44 +73,92 @@ fun interpolate_f3(b: bytes, d: attribute_desc, e: uint3, w: float3) -> float3:
 fun interpolate_f4(b: bytes, d: attribute_desc, e: uint3, w: float3) -> float4:
     return load_element_f4(b, d, e.x) * w.x + load_element_f4(b, d, e.y) * w.y + load_element_f4(b, d, e.z) * w.z
 
-/// Barycentric blend of three unit quaternions, as a rotation rather than as four numbers.
+/// Barycentric blend of three unit quaternions, as a tangent frame: the corners' +z blended as normals are, and their +x as tangents.
 ///
-/// The alignment is what makes the sum mean anything.
-/// `q` and `-q` are the same rotation, so two corners can describe neighboring frames and still sit nearly antipodal in 4D.
-/// Summing those cancels toward zero, and the normalized result is a frame belonging to neither, which reads as a swirl across the triangle.
-/// Aligning both corners into the first's hemisphere first is the fix, and it is why a rotation cannot go through `interpolate_f4`.
-///
-/// This is a normalized linear blend rather than a spherical one.
-/// Over one triangle the corners are close enough that the angular error is far below what a shading normal resolves, and nlerp costs no trigonometry.
+/// Blending the quaternions themselves ties the normal to the tangent.
+/// Corners whose tangents twist far apart around nearly equal normals blend into a normal off their blend by up to half the angle between them,
+/// and a tangent picked as any perpendicular to the normal has to twist that far somewhere on every closed surface.
+/// A turned glass drew it as a stripe down its side.
+/// So each axis is blended on its own, and the frame rebuilt around the normal, which is then exactly what blending vertex normals gives.
+/// The tangent keeps whatever twist the corners agree on, and a sign stored negated changes neither axis.
 fun interpolate_rotation(b: bytes, d: attribute_desc, e: uint3, w: float3) -> float4:
     let q0 = load_element_f4(b, d, e.x)
-    let q1_loaded = load_element_f4(b, d, e.y)
-    let q2_loaded = load_element_f4(b, d, e.z)
+    let q1 = load_element_f4(b, d, e.y)
+    let q2 = load_element_f4(b, d, e.z)
+    let z = float3(0.0, 0.0, 1.0)
+    let x = float3(1.0, 0.0, 0.0)
+    let n = rotate_by(q0, z) * w.x + rotate_by(q1, z) * w.y + rotate_by(q2, z) * w.z
+    let t = rotate_by(q0, x) * w.x + rotate_by(q1, x) * w.y + rotate_by(q2, x) * w.z
+    return frame_rotation(n, t)
 
-    let q1 = if dot(q1_loaded, q0) < 0.0 => -q1_loaded else q1_loaded
-    let q2 = if dot(q2_loaded, q0) < 0.0 => -q2_loaded else q2_loaded
+/// `v` turned by the quaternion `q`, unit or not: a zero `q` is no rotation at all, which leaves `v` as it is.
+fun rotate_by(q: float4, v: float3) -> float3:
+    let u = float3(q.x, q.y, q.z)
+    let c = 2.0 * cross(u, v)
+    return v + q.w * c + cross(u, c)
 
-    let q = q0 * w.x + q1 * w.y + q2 * w.z
-    let len = length(q)
+/// The unit quaternion turning +z onto `n` and +x onto `t` made perpendicular to it.
+/// A `t` along `n` keeps no direction to turn +x onto, so any perpendicular stands in.
+fun frame_rotation(n_in: float3, t_in: float3) -> float4:
+    let n = if dot(n_in, n_in) > 1e-16 => normalize(n_in) else float3(0.0, 0.0, 1.0)
+    let projected = t_in - n * dot(n, t_in)
+    let axis = if abs(n.z) < 0.9 => float3(0.0, 0.0, 1.0) else float3(1.0, 0.0, 0.0)
+    let t = if dot(projected, projected) > 1e-12 => normalize(projected) else normalize(cross(axis, n))
+    return quaternion_of_basis(t, cross(n, t), n)
 
-    // Three corners cannot cancel once aligned, so a zero length means the attribute held no rotation at all.
-    let rotation = if len > 1e-8 => q / len else float4(0.0, 0.0, 0.0, 1.0)
-    return rotation
+/// The unit quaternion of the rotation whose matrix has the orthonormal columns `x`, `y` and `z`.
+fun quaternion_of_basis(x: float3, y: float3, z: float3) -> float4:
+    let trace = x.x + y.y + z.z
+    if trace > 0.0:
+        let s = 0.5 / sqrt(trace + 1.0)
+        return float4((y.z - z.y) * s, (z.x - x.z) * s, (x.y - y.x) * s, 0.25 / s)
+    if x.x > y.y and x.x > z.z:
+        let s = 2.0 * sqrt(1.0 + x.x - y.y - z.z)
+        return float4(0.25 * s, (y.x + x.y) / s, (z.x + x.z) / s, (y.z - z.y) / s)
+    if y.y > z.z:
+        let s = 2.0 * sqrt(1.0 + y.y - x.x - z.z)
+        return float4((y.x + x.y) / s, 0.25 * s, (z.y + y.z) / s, (z.x - x.z) / s)
+    let s = 2.0 * sqrt(1.0 + z.z - x.x - y.y)
+    return float4((z.x + x.z) / s, (z.y + y.z) / s, 0.25 * s, (x.y - y.x) / s)
 
 /// The three element indices a per_corner attribute reads, in the order `barycentrics` weighs them.
 fun corner_elements(ctx: shading_context) -> uint3:
     let base = ctx.primitive * 3
     return uint3(base, base + 1, base + 2)
 
-/// The three vertex indices of triangle `primitive` on `inst`.
-///
-/// The guard is load-bearing on the non-indexed path: a non-indexed mesh hands in a stand-in for `index_buffer` that has no elements to read.
-/// So the loads sit inside an `if` statement and are never selected between.
+// A mesh attribute's frequency as data, for the one reader that is not generated per permutation: the cutout's.
+// `sv::material_opacity::frequency` writes these.
+const frequency_per_triangle = 0u
+const frequency_per_vertex = 1u
+const frequency_per_corner = 2u
+
+/// One float of a mesh attribute at the hit, numbered at `frequency`.
+fun load_f1_at(b: bytes, d: attribute_desc, frequency: uint, ctx: shading_context) -> float:
+    if frequency == frequency_per_triangle => return load_element_f1(b, d, ctx.primitive)
+    let e = if frequency == frequency_per_corner => corner_elements(ctx) else ctx.corner
+    return interpolate_f1(b, d, e, ctx.barycentrics)
+
+/// Two floats of a mesh attribute at the hit, numbered at `frequency` — a uv.
+fun load_f2_at(b: bytes, d: attribute_desc, frequency: uint, ctx: shading_context) -> float2:
+    if frequency == frequency_per_triangle => return load_element_f2(b, d, ctx.primitive)
+    let e = if frequency == frequency_per_corner => corner_elements(ctx) else ctx.corner
+    return interpolate_f2(b, d, e, ctx.barycentrics)
+
+/// Three floats of a mesh attribute at the hit, numbered at `frequency` — an emission color.
+fun load_f3_at(b: bytes, d: attribute_desc, frequency: uint, ctx: shading_context) -> float3:
+    if frequency == frequency_per_triangle => return load_element_f3(b, d, ctx.primitive)
+    let e = if frequency == frequency_per_corner => corner_elements(ctx) else ctx.corner
+    return interpolate_f3(b, d, e, ctx.barycentrics)
+
+/// The three vertex indices of triangle `primitive` on `inst`, relative to its base vertex, as its per-vertex attributes are numbered.
+/// `index_buffer` is the central index pool; every mesh is indexed there.
 fun triangle_corners(inst: scene.instance, index_buffer: bytes, primitive: uint) -> uint3:
-    let base = primitive * 3
-    if inst.is_indexed != 0:
-        return uint3(index_buffer.load(4 * base), index_buffer.load(4 * (base + 1)), index_buffer.load(4 * (base + 2)))
-    return uint3(base, base + 1, base + 2)
+    let base = inst.first_index + primitive * 3
+    return uint3(index_buffer.load(4 * base), index_buffer.load(4 * (base + 1)), index_buffer.load(4 * (base + 2)))
+
+/// Vertex `v` of `inst`'s mesh, relative to its base vertex, out of the central vertex pool.
+fun position_of(inst: scene.instance, vertex_buffer: bytes, v: uint) -> float3:
+    return reinterpret_as_float(vertex_buffer.load3((inst.base_vertex + v) * 12))
 
 /// The shading context for a hit on `inst`, which is all a generated material needs to know about where it is.
 /// `bary` is the two barycentrics a hit attribute carries; the third is what is left of one.

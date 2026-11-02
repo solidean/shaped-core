@@ -3,6 +3,7 @@
 
 #include <shaped-graphics/backends/vulkan/vulkan_context.hh>
 #include <shaped-graphics/backends/vulkan/vulkan_format.hh>
+#include <shaped-graphics/backends/vulkan/vulkan_memory_heap.hh>
 #include <shaped-graphics/backends/vulkan/vulkan_texture.hh>
 
 namespace sg::backend::vulkan
@@ -67,16 +68,8 @@ vulkan_texture::~vulkan_texture()
     release_storage();
 } // no-op if expire() already released the storage
 
-cc::result<vulkan_texture_handle> vulkan_context::create_vulkan_texture(sg::texture_description const& desc,
-                                                                        sg::allocation_info const& alloc)
+cc::result<VkImage> vulkan_context::create_vk_image(sg::texture_description const& desc)
 {
-    // Validate the shape contract before any fallible GPU work, so a bad desc asserts at the entry point rather than surfacing as a driver error.
-    desc.assert_valid();
-
-    // TEMPORARY: dedicated allocations only.
-    // Placement into a memory_heap needs vkBindImageMemory at an offset into a shared VkDeviceMemory, same status as vulkan_buffer.
-    CC_ASSERT(alloc.is_dedicated(), "placed textures (non-null memory_heap) not implemented yet");
-
     // Extent + layer count derived from the shape: depth only for 3D; a cube is 6 layers per cube.
     u32 const height = desc.dimension == sg::texture_dimension::d1 ? 1u : u32(desc.height);
     u32 const depth = desc.dimension == sg::texture_dimension::d3 ? u32(desc.depth) : 1u;
@@ -114,6 +107,37 @@ cc::result<vulkan_texture_handle> vulkan_context::create_vulkan_texture(sg::text
     VkImage image = VK_NULL_HANDLE;
     if (VkResult r = vkCreateImage(_device, &image_info, nullptr, &image); r != VK_SUCCESS)
         return vulkan_error(r, "vkCreateImage failed");
+    return image;
+}
+
+cc::result<vulkan_texture_handle> vulkan_context::create_vulkan_texture(sg::texture_description const& desc,
+                                                                        sg::allocation_info const& alloc)
+{
+    // Validate the shape contract before any fallible GPU work, so a bad desc asserts at the entry point rather than surfacing as a driver error.
+    desc.assert_valid();
+
+    auto created = create_vk_image(desc);
+    CC_RETURN_IF_ERROR(created);
+    VkImage const image = created.value();
+
+    // A placed image binds into its heap's memory and owns none.
+    // It is created UNDEFINED, and the initial transition its tracker owes discards whatever an earlier placement left there.
+    if (alloc.is_placed())
+    {
+        auto const heap = std::dynamic_pointer_cast<vulkan_memory_heap const>(alloc.heap);
+        CC_ASSERT(heap != nullptr, "placement heap is not a vulkan heap");
+        CC_ASSERT(heap->contents() == sg::memory_heap_contents::textures, "a texture is placed in a textures heap");
+        CC_ASSERT(alloc.offset >= 0 && alloc.offset + alloc.size_in_bytes <= heap->size_in_bytes(), "placement exceeds "
+                                                                                                    "the heap");
+        if (VkResult r = vkBindImageMemory(_device, image, heap->_memory, VkDeviceSize(alloc.offset)); r != VK_SUCCESS)
+        {
+            vkDestroyImage(_device, image, nullptr);
+            return vulkan_error(r, "vkBindImageMemory (placed) failed");
+        }
+        auto texture = std::make_shared<vulkan_texture>(*this, current_epoch(), desc, image, VK_NULL_HANDLE);
+        texture->_heap = alloc.heap;
+        return vulkan_texture_handle(register_if_transient(cc::move(texture), alloc.scope));
+    }
 
     VkMemoryRequirements req = {};
     vkGetImageMemoryRequirements(_device, image, &req);

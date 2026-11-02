@@ -54,11 +54,22 @@ private:
 
 namespace sg::backend::metal
 {
-/// How an MTLCommandBufferError maps onto sg's coarse deferred-error vocabulary.
+/// How a failed commit's NSError maps onto sg's coarse deferred-error vocabulary.
 ///
-/// Most of Metal's codes describe one command buffer failing, which is `validation`'s bucket — "something already
-/// recorded or submitted went wrong".
-/// The three that mean the device itself is gone map to `device_lost`, which is sticky and which a caller recovers
-/// from only by tearing the context down.
-[[nodiscard]] sg::device_error_kind device_error_kind_of(NS::UInteger command_buffer_error_code);
+/// Most failures describe one command buffer failing, which is `validation`'s bucket — "something already recorded or
+/// submitted went wrong".
+/// The codes that mean the device itself is gone map to `device_lost`, which is sticky and which a caller recovers from
+/// only by tearing the context down.
+///
+/// **The code means nothing without its domain.**
+/// An MTL4 commit reports in `MTL4CommandQueueErrorDomain`, where 1 is a timeout.
+/// The classic `MTLCommandBufferErrorDomain` numbers the same failures differently, and its 1 is an internal error.
+/// A GPU page fault arrives as that MTL4 timeout, and the system then refuses every later submission of the process.
+[[nodiscard]] sg::device_error_kind device_error_kind_of(NS::Error const* error);
+
+/// The MTL4 domain's codes, which are what this backend's commits report.
+[[nodiscard]] sg::device_error_kind device_error_kind_of_queue_error(NS::Integer queue_error_code);
+
+/// The classic domain's codes, which nothing in this backend commits into but a Metal object may still report.
+[[nodiscard]] sg::device_error_kind device_error_kind_of_command_buffer_error(NS::UInteger command_buffer_error_code);
 } // namespace sg::backend::metal

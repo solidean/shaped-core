@@ -139,8 +139,39 @@ sr::mouse_button mouse_button_from_sdl(u8 sdl_button)
     }
 }
 
+u8 held_buttons_from_sdl(SDL_MouseButtonFlags state)
+{
+    auto held = u8(0);
+    if ((state & SDL_BUTTON_LMASK) != 0)
+        held |= mouse_button_bit(mouse_button::left);
+    if ((state & SDL_BUTTON_MMASK) != 0)
+        held |= mouse_button_bit(mouse_button::middle);
+    if ((state & SDL_BUTTON_RMASK) != 0)
+        held |= mouse_button_bit(mouse_button::right);
+    if ((state & SDL_BUTTON_X1MASK) != 0)
+        held |= mouse_button_bit(mouse_button::x1);
+    if ((state & SDL_BUTTON_X2MASK) != 0)
+        held |= mouse_button_bit(mouse_button::x2);
+    return held;
+}
+
 float wheel_amount(float raw, SDL_MouseWheelDirection direction)
 {
     return direction == SDL_MOUSEWHEEL_FLIPPED ? -raw : raw;
+}
+
+float pixel_density_from_sdl(float density)
+{
+    return density > 0.0f ? density : 1.0f;
+}
+
+tg::pos2f pixels_from_logical(float x, float y, float density)
+{
+    return tg::pos2f(x * density, y * density);
+}
+
+tg::vec2f pixels_from_logical_delta(float dx, float dy, float density)
+{
+    return tg::vec2f(dx * density, dy * density);
 }
 } // namespace sr::impl

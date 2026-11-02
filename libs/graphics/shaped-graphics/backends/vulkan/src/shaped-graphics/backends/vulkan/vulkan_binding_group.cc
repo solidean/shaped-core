@@ -311,7 +311,7 @@ cc::result<vulkan_binding_group_handle> vulkan_binding_group::create_from_image(
         group->range = cc::move(r.value());
     }
 
-    // The whole point of the descriptor-buffer model: a snapshot of an arbitrarily large group is one copy, rather
+    // With the descriptor-buffer model, a snapshot of an arbitrarily large group is one copy, rather
     // than one descriptor write per element.
     if (!image.empty())
         cc::memcpy(ctx._descriptor_heap.mapped_at(group->range), image.data(), size_t(image.size()));

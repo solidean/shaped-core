@@ -18,6 +18,10 @@ using namespace cc::primitive_defines;
 
 namespace
 {
+/// The fixtures' buffer array, `inputs`, as an array declaration takes it.
+/// Spelled by hand: these layouts come from create_metal_binding_group_layout, which the by-name lookup does not see.
+constexpr auto k_inputs_array = sg::buffer_array_binding{.name = "inputs"};
+
 constexpr auto k_copy_both = sg::buffer_usage::copy_src | sg::buffer_usage::copy_dst;
 
 /// The reflection, written by hand next to the shader rather than produced by a reflector.
@@ -316,8 +320,7 @@ ASYNC_TEST("sg metal - an array binding's elements are declared one by one")
     auto declares = cc::vector<sg::array_buffer_access>();
     for (auto e = 0; e < k_inputs; ++e)
         declares.push_back({.index = e, .access = sg::access_flag::shader_read});
-    cmd->compute.declare_array_buffer_access("inputs", declares);
-
+    auto const declared = cmd->compute.declare_array_buffer_access(k_inputs_array, declares);
     cmd->compute.dispatch_groups(k_count, 1, 1);
 
     auto future = cmd->download.bytes_from_buffer(output, 0, output->size_in_bytes());
@@ -337,4 +340,84 @@ ASYNC_TEST("sg metal - an array binding's elements are declared one by one")
     CHECK(mismatches == 0)
         .context(cc::format("{} of {} sums wrong; first read back as {}, expected {}", mismatches, k_count, values[0],
                             10u * 1u));
+}
+
+TEST("sg metal - a transient group freed after its bind is retained, and its successor is a group of its own")
+{
+    auto const ctx = mtl::test::make_context();
+    if (ctx == nullptr)
+        SKIP("no metal 4 device on this host");
+
+    // **A bound group's address is what an array declaration's application is keyed on**, so the list retains every
+    // group it binds: a transient one the caller drops cannot be freed, and a new one allocated at its address, while
+    // the list records.
+    // The successor is then a group of its own, resolved and checked again at its first op.
+    auto shader = mtl::test::mesh_kernel("array_sum_main");
+    shader.bindings.push_back({.name = "inputs", .space = 0, .index = 0, .count = 4, .type = sg::binding_type::buffer});
+    shader.bindings.push_back({.name = "output",
+                               .space = 0,
+                               .index = 4,
+                               .count = 1,
+                               .type = sg::binding_type::buffer,
+                               .access = sg::access_mode::read_write});
+
+    auto group_layout = ctx->create_metal_binding_group_layout(shader.bindings, {}, sg::lifetime_scope::persistent);
+    REQUIRE(group_layout.has_value());
+    auto layout_desc = sg::pipeline_layout_description{};
+    layout_desc.groups.push_back(group_layout.value());
+    auto pipeline_layout = ctx->create_metal_pipeline_layout(layout_desc, sg::lifetime_scope::persistent);
+    REQUIRE(pipeline_layout.has_value());
+    auto pipeline = ctx->create_metal_compute_pipeline({.shader = shader, .layout = pipeline_layout.value()},
+                                                       sg::lifetime_scope::persistent);
+    REQUIRE(pipeline.has_value()).context(pipeline.has_error() ? pipeline.error().to_string() : cc::string());
+
+    constexpr auto k_count = 8;
+    auto const input = ctx->persistent.create_raw_buffer(k_count * isize(sizeof(u32)),
+                                                         k_copy_both | sg::buffer_usage::readonly_buffer);
+    auto const output = ctx->persistent.create_raw_buffer(k_count * isize(sizeof(u32)),
+                                                          k_copy_both | sg::buffer_usage::readwrite_buffer);
+
+    // Element 3 holds the input in the first group and nothing in the second.
+    auto const group_of = [&](bool last_filled)
+    {
+        auto elements = cc::vector<sg::raw_view>();
+        for (auto e = 0; e < 4; ++e)
+        {
+            if (e == 3 && !last_filled)
+                elements.push_back(sg::vacant_view{});
+            else
+                elements.push_back(
+                    input->as_raw_readonly({.offset = 0, .size = input->size_in_bytes()}, isize(sizeof(u32))));
+        }
+        auto views = cc::vector<sg::named_view>();
+        views.push_back({.name = "inputs", .view = sg::bound_view(cc::move(elements))});
+        views.push_back(
+            {.name = "output",
+             .view = output->as_raw_readwrite({.offset = 0, .size = output->size_in_bytes()}, isize(sizeof(u32)))});
+        auto group = ctx->create_metal_binding_group(group_layout.value(), views, {}, sg::lifetime_scope::transient);
+        REQUIRE(group.has_value()).context(group.has_error() ? group.error().to_string() : cc::string());
+        return sg::binding_group_handle(group.value());
+    };
+
+    auto declares = cc::vector<sg::array_buffer_access>();
+    for (auto e = 0; e < 4; ++e)
+        declares.push_back({.index = e, .access = sg::access_flag::shader_read});
+
+    auto cmd = ctx->create_command_list();
+    {
+        auto const declared = cmd->compute.declare_array_buffer_access(k_inputs_array, declares);
+        cmd->compute.bind_pipeline(*pipeline.value());
+
+        auto first = group_of(true);
+        auto const first_seen = std::weak_ptr<sg::binding_group const>(first);
+        cmd->compute.bind_group(0, *first);
+        cmd->compute.dispatch_groups(k_count, 1, 1);
+        first = nullptr;
+        CHECK(first_seen.lock() != nullptr); // the list holds it
+
+        auto const second = group_of(false);
+        cmd->compute.bind_group(0, *second);
+        CHECK_ASSERTS(cmd->compute.dispatch_groups(k_count, 1, 1));
+    }
+    ctx->drop_command_list(cc::move(cmd));
 }

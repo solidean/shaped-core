@@ -9,6 +9,7 @@
 #include <shaped-viewer/scene/mesh_attribute.hh>
 #include <shaped-viewer/scene/quadric.hh>
 #include <shaped-viewer/scene/resident_mesh.hh> // mesh_attribute_binding, which the resident form reuses
+#include <shaped-viewer/scene/tg_objects.hh>
 #include <typed-geometry/geometry/primitives/aabb.hh>
 #include <typed-geometry/transform/transform.hh>
 
@@ -153,6 +154,40 @@ struct sv::quadric_set
     /// A capsule's surface is not degree 2, which is why it cannot be one.
     /// The same as `add_line` at `line_ends::round`, named because a capsule is a shape a caller asks for by name.
     void add_capsule(tg::segment3f const& s, float radius);
+
+    /// Appends a sphere on each of `obj`'s vertices — any tg object with `vertices()`, in any scalar.
+    /// Returns how many primitives that appended, so a per-primitive attribute can follow in step.
+    template <class Obj>
+        requires has_tg_vertices<Obj>
+    isize add_vertices(Obj const& obj, vertex_style const& style = {})
+    {
+        auto const v = impl::vertices_f32(obj);
+        return add_vertices(cc::span<tg::pos3f const>(v.data(), v.size()), style);
+    }
+
+    /// Appends a tube along each of `obj`'s edges, and a sphere on each of its vertices to join them — see `sv::edge_style`.
+    /// Any tg object with `edges()`, in any scalar; returns how many primitives that appended.
+    template <class Obj>
+        requires has_tg_edges<Obj>
+    isize add_edges(Obj const& obj, edge_style const& style = {})
+    {
+        auto const e = impl::edges_f32(obj);
+        auto const edges = cc::span<tg::segment3f const>(e.data(), e.size());
+        if constexpr (has_tg_vertices<Obj>)
+        {
+            auto const v = impl::vertices_f32(obj);
+            return add_edges(edges, cc::span<tg::pos3f const>(v.data(), v.size()), style);
+        }
+        else
+            return add_edges(edges, {}, style);
+    }
+
+    /// The same for points already in f32: a sphere on each.
+    isize add_vertices(cc::span<tg::pos3f const> points, vertex_style const& style = {});
+
+    /// The same for edges already in f32, joined by spheres on `vertices`, which should be the points the edges meet at.
+    /// With no vertices, or `style.vertices` off, each tube is closed by `style.ends` instead.
+    isize add_edges(cc::span<tg::segment3f const> edges, cc::span<tg::pos3f const> vertices, edge_style const& style = {});
 
     /// Appends an already-built primitive, for a shape the named factories do not cover.
     void add(quadric_primitive const& p);

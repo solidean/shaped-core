@@ -293,7 +293,7 @@ INVOCABLE_TEST("vdoc::file - a pruned op is unverifiable and a corrupt one is a 
 
     auto const reopened = open_or_fail(*medium);
 
-    // Both outcomes appear, and they are DIFFERENT outcomes — which is the whole point of asserting them together.
+    // Both outcomes appear, and they are DIFFERENT outcomes, so they are asserted together.
     CHECK(reopened->report().contains(load_issue_kind::op_hash_mismatch));
     CHECK(reopened->report().count_of(load_issue_kind::op_hash_mismatch) == 1);
 
@@ -392,7 +392,7 @@ INVOCABLE_TEST("vdoc::file - two replicas pruned to different depths agree", (st
     CHECK(materialize_through_store(*a, history.head()) == materialize_through_store(*b, history.head()));
 }
 
-INVOCABLE_TEST("vdoc::file - a required snapshot is load-bearing, and replaying without it is lossy",
+INVOCABLE_TEST("vdoc::file - a required snapshot is the only copy, and replaying without it is lossy",
                (store_impl const& impl))
 {
     auto const medium = impl.make_medium();

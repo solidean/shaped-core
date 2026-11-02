@@ -3,20 +3,18 @@
 #include <clean-core/container/impl/allocating_container.hh>
 
 
-// TODO:
-// - sequence entry points
-// - retyping APIs
-// - resize APIs? -> would be totally fine I think
-// - equality, order, hashing
+// issue: feat-cc-container-equality-and-order
+// issue: feat-cc-container-retyping
+// Also not yet: resize APIs, which would be totally fine.
 
 
 template <class T>
-struct cc::unique_array : private cc::allocating_container<T, array<T>>
+struct cc::unique_array : private cc::allocating_container<T, unique_array<T>>
 {
     static_assert(std::is_object_v<T> && !std::is_const_v<T>,
                   "allocations need to refer to non-const objects, not references/functions/void");
 
-    using base = cc::allocating_container<T, array<T>>;
+    using base = cc::allocating_container<T, unique_array<T>>;
 
     // element access
 public:
@@ -29,6 +27,11 @@ public:
 public:
     using base::begin; // get pointer to first element
     using base::end;   // get pointer to one past last element
+
+    // sequences
+public:
+    using base::indices; // index sequence 0 .. size()
+    using base::values;  // the elements as a cc::sequence (owns the array when called on a temporary)
 
     // queries
 public:

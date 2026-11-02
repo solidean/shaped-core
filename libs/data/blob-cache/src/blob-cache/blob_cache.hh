@@ -199,7 +199,7 @@ public:
     /// Opens or creates the cache at config.path, and hands back a usable handle IMMEDIATELY, having touched no disk.
     ///
     /// Never fails.
-    /// An absent backend, a missing directory, an unwritable or damaged file all leave a handle that misses on every get and drops every put — which is the whole point of the type.
+    /// An absent backend, a missing directory, an unwritable or damaged file all leave a handle that misses on every get and drops every put, so a caller has no failure to handle.
     [[nodiscard]] static cc::unique_ptr<blob_cache> create(cache_config config);
 
     /// A cache with no storage at all: every get misses, every put is dropped, and acquire still singleflights.

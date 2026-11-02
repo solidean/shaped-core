@@ -19,7 +19,12 @@ from .lib.changeset.ingest import (
     IngestResult,
     bulk_candidate,
     candidates_for,
+    inside_bulk,
+    interdiff,
+    interdiffs,
+    link_successors,
     register,
+    returned_by_move,
     superseded_by_move,
 )
 from .lib.changeset.ledger import Change, Ledger
@@ -92,6 +97,8 @@ from .lib.git.diffparse import FileDiff, Hunk
 from .lib.git.diffparse import parse as parse_diff
 from .lib.git.run import Commit, Git, GitError
 from .lib.space.intervals import IntervalList
+from .lib.space.linemap import TreeMap
+from .lib.space.linemap import build as build_line_map
 from .lib.space.netspace import ADDED, REMOVED, FileAtom, LineSpace
 from .lib.space.netspace import build as build_net_space
 from .lib.goals.finalize import ARTIFACTS
@@ -165,7 +172,13 @@ __all__ = [
     "collect_commit_candidates",
     "commit_atoms",
     "candidates_for",
+    "interdiff",
+    "interdiffs",
+    "link_successors",
+    "returned_by_move",
     "superseded_by_move",
+    "TreeMap",
+    "build_line_map",
     "check_immutable",
     "check_supersedes",
     "compose",
@@ -201,6 +214,7 @@ __all__ = [
     "read_json",
     "read_jsonl",
     "heads_at_finalize",
+    "inside_bulk",
     "record",
     "register",
     "render_entry",

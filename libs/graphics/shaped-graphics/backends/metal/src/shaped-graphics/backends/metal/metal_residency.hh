@@ -37,11 +37,21 @@ public:
     /// Null is ignored.
     void remove(MTL::Allocation const* allocation);
 
+    /// Commits `buffer` to `queue` while no other thread can change the set.
+    ///
+    /// **Every commit in this backend goes through here, because Metal's GPU validation reads the set during the commit.**
+    /// With `MTL_SHADER_VALIDATION=1` the commit walks the allocations of every set attached to the queue, without the
+    /// lock the writers here take.
+    /// A transfer's feedback handler meanwhile removes its staging buffer from the set and releases it, on Apple's queue.
+    /// The walk then reaches a freed object and traps in `-[MTL4GPUDebugCommandBuffer applyResidencySets:]`.
+    /// So a commit and a change to the set are made exclusive, which costs an uncontended lock per commit.
+    void commit(MTL4::CommandQueue* queue, MTL4::CommandBuffer const* buffer, MTL4::CommitOptions const* options);
+
     /// Releases the set; it is unusable afterwards.
     void shutdown();
 
 private:
-    // A callback mutex rather than cc::mutex: every commit handler removes its staging allocation from here, and
-    // that handler runs on a Metal thread even in a build with SC_THREADS off.
+    // Every commit handler removes its staging allocation from here, on a Metal thread.
+    // cc::mutex is a real lock there only because SC_THREADS=OFF is refused on Apple.
     cc::mutex<MTL::ResidencySet*> _set;
 };

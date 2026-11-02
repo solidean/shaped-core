@@ -1,5 +1,6 @@
 #pragma once
 
+#include <clean-core/common/assert.hh>
 #include <typed-geometry/geometry/query/closest_points.hh>
 #include <typed-geometry/geometry/query/impl/kernels.hh>
 #include <typed-geometry/scalar/scalar.hh>
@@ -15,6 +16,7 @@ template <class A, class B>
 [[nodiscard]] constexpr auto distance_sqr_to(A const& a, B const& b)
 {
     static_assert(written_once<distance_sqr_op, A, B>, "tg: a distance_sqr kernel is written in both orders");
+    CC_ASSERT(!impl::is_empty_set(a) && !impl::is_empty_set(b), "the empty set has no distance to anything");
 
     if constexpr (has_op<distance_sqr_op, A, B>)
         return distance_sqr_op<A, B>::apply(a, b);

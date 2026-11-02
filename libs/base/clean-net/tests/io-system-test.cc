@@ -69,7 +69,7 @@ struct socket_guard
 
 /// Wait for `done` without ever asking cnet to pump.
 ///
-/// `cc::thread_pump_all()` is the whole point: it is what a threads-off application already calls for the rest of
+/// It relies on `cc::thread_pump_all()` alone: it is what a threads-off application already calls for the rest of
 /// shaped-core, and it drives the reactor with no cnet-specific call anywhere.
 /// With a real reactor thread it sweeps an empty registry and costs one atomic load.
 ///

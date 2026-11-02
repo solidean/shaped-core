@@ -359,14 +359,14 @@ TEST("sgl check - a call is a block named after its callee: arguments bound in o
                           "let limit = 0.5\n"
                           "let x = grade(p.a * 2.0, limit, 4.0)\n")
           == "  (let limit : float = (lit 0.5 : float))\n"
-             "  (let x_1 : float = (block $grade\n"
-             "      (let x : float = (call multiply (member (local p : frag) a : float) (lit 2.0 : float) : float))\n"
-             "      (if (call less (local x : float) (local limit : float) : bool)\n"
+             "  (let x : float = (block $grade\n"
+             "      (let x_1 : float = (call multiply (member (local p : frag) a : float) (lit 2.0 : float) : float))\n"
+             "      (if (call less (local x_1 : float) (local limit : float) : bool)\n"
              "        (then\n"
              "          (leave $grade (lit 0.0 : float))))\n"
-             "      (leave $grade (call multiply (local x : float) (lit 4.0 : float) : float)) : float))\n"
+             "      (leave $grade (call multiply (local x_1 : float) (lit 4.0 : float) : float)) : float))\n"
              "  (return (construct\n"
-             "    (construct (local x_1 : float) (local x_1 : float) (local x_1 : float) (lit 1.0 : float) : float4) : "
+             "    (construct (local x : float) (local x : float) (local x : float) (lit 1.0 : float) : float4) : "
              "target))\n");
 }
 
@@ -394,21 +394,21 @@ TEST("sgl check - a function inlined twice gets distinct names, and an arrow bod
                           "    let h = half x\n"
                           "    return half h\n",
                           "let x = quarter(p.a + 1.0) + quarter(p.b + 1.0)\n")
-          == "  (let x_2 : float = (call add (block $quarter\n"
-             "      (let x : float = (call add (member (local p : frag) a : float) (lit 1.0 : float) : float))\n"
+          == "  (let x : float = (call add (block $quarter\n"
+             "      (let x_1 : float = (call add (member (local p : frag) a : float) (lit 1.0 : float) : float))\n"
              "      (let h : float = (block $half\n"
-             "          (leave $half (call multiply (local x : float) (lit 0.5 : float) : float)) : float))\n"
+             "          (leave $half (call multiply (local x_1 : float) (lit 0.5 : float) : float)) : float))\n"
              "      (leave $quarter (block $half_1\n"
              "          (leave $half_1 (call multiply (local h : float) (lit 0.5 : float) : float)) : float)) : float) "
              "(block $quarter_1\n"
-             "      (let x_1 : float = (call add (member (local p : frag) b : float) (lit 1.0 : float) : float))\n"
+             "      (let x_2 : float = (call add (member (local p : frag) b : float) (lit 1.0 : float) : float))\n"
              "      (let h_1 : float = (block $half_2\n"
-             "          (leave $half_2 (call multiply (local x_1 : float) (lit 0.5 : float) : float)) : float))\n"
+             "          (leave $half_2 (call multiply (local x_2 : float) (lit 0.5 : float) : float)) : float))\n"
              "      (leave $quarter_1 (block $half_3\n"
              "          (leave $half_3 (call multiply (local h_1 : float) (lit 0.5 : float) : float)) : float)) : "
              "float) : float))\n"
              "  (return (construct\n"
-             "    (construct (local x_2 : float) (local x_2 : float) (local x_2 : float) (lit 1.0 : float) : float4) : "
+             "    (construct (local x : float) (local x : float) (local x : float) (lit 1.0 : float) : float4) : "
              "target))\n");
 }
 

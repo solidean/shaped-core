@@ -52,7 +52,7 @@ enum class cc::seek_dir : cc::u8
     dry_end,      // like end (dry_end, 0 == total size)
 
     // NOT a seek: bytes still to come after `curr`, or -1 when unknown.
-    // `offset` is ignored, and a non-seekable source may answer — which is the whole point of it being separate from the dry_* probes.
+    // `offset` is ignored, and unlike the dry_* probes a non-seekable source may answer.
     remaining_size_hint,
 };
 

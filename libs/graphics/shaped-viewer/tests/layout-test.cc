@@ -438,10 +438,10 @@ TEST("sv - a leaf with title text gives the top of its rect to the strip, and on
     CHECK(leaves[0].rect == rect_of(0, 22, 100, 100));
     // the leaf with no text keeps all of its rect: the `title` flag alone reserves nothing
     CHECK(leaves[1].rect == rect_of(100, 0, 200, 100));
-    CHECK(leaves[1].title == tg::aabb2i());
+    CHECK(leaves[1].title.is_empty());
 
     // a leaf no taller than the strip keeps its rect rather than vanish under it
     auto const short_leaves = leaves_of(sv::resolve_layout(tree, root, rect_of(0, 0, 200, 22), 22));
     CHECK(short_leaves[0].rect == rect_of(0, 0, 100, 22));
-    CHECK(short_leaves[0].title == tg::aabb2i());
+    CHECK(short_leaves[0].title.is_empty());
 }

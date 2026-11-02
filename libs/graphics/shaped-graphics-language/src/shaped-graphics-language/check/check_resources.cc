@@ -180,6 +180,8 @@ type_id checker::resolve_resource_applied(i32 file, ast::expr_id expr, ast::inde
     auto const text = text_of(file, n->where);
     if (text == "acceleration_structure")
         return resolve_acceleration_structure(file, expr, node);
+    if (text == "texel")
+        return resolve_texel(file, expr, node);
 
     shape_info const* texture = nullptr;
     shape_info const* image = nullptr;
@@ -221,28 +223,9 @@ type_id checker::resolve_resource_applied(i32 file, ast::expr_id expr, ast::inde
         return resource_type({.kind = type_kind::texture, .element = element, .shape = texture->shape});
     }
 
-    // CHK-200 (temporary): the argument is read as exactly an enum case of sg's formats, or a const of one.
-    // Values as type arguments in general are in libs/graphics/shaped-graphics-language/docs/TODO.md.
-    auto const argument = arguments[0].value;
-    auto const* const dot = ast_of(file).at(argument).node.try_as<ast::leading_dot>();
-    auto format = dot != nullptr ? find_image_format(text_of(file, dot->name)) : -1;
-    if (auto const* const n = ast_of(file).at(argument).node.try_as<ast::name>())
-    {
-        auto const* const found = names_seen_from(file).get_ptr(text_of(file, n->where));
-        auto const id = found != nullptr && !found->empty() ? found->front() : symbol_id::none;
-        if (is_valid(id) && out.at(id).kind == symbol_kind::constant)
-        {
-            set_target(file, argument, {.kind = target_kind::symbol, .symbol = id});
-            if (demand(id, file, n->where) != symbol_state::checked)
-                return checked_module::error_type;
-            auto const& c = out.constants[out.at(id).info];
-            if (c.kind == constant_kind::enum_case && out.name_of(c.type) == "pixel_format")
-            {
-                format = find_image_format(out.at(out.at(c.type).cases)[c.case_index].name);
-                note_option(file, n->where, c);
-            }
-        }
-    }
+    auto const format = resolve_image_format(file, arguments[0].value);
+    if (format == k_format_failed)
+        return checked_module::error_type;
     if (format < 0)
     {
         report(diagnostic_kind::wrong_kind_of_name, file, span_of(file, arguments[0].value),
@@ -253,6 +236,59 @@ type_id checker::resolve_resource_applied(i32 file, ast::expr_id expr, ast::inde
         judge_feature(file, where, cc::format("an image of .{}", k_image_formats[format].name),
                       feature::extended_image_formats);
     return resource_type({.kind = type_kind::image, .shape = image->shape, .format = format});
+}
+
+i32 checker::resolve_image_format(i32 file, ast::expr_id argument)
+{
+    // CHK-200 (temporary): the argument is read as exactly an enum case of sg's formats, or a const of one.
+    // Any value as a type argument is the general form, issue: feat-sgl-values-as-type-arguments
+    auto const* const dot = ast_of(file).at(argument).node.try_as<ast::leading_dot>();
+    auto format = dot != nullptr ? find_image_format(text_of(file, dot->name)) : -1;
+    if (auto const* const n = ast_of(file).at(argument).node.try_as<ast::name>())
+    {
+        auto const* const found = names_seen_from(file).get_ptr(text_of(file, n->where));
+        auto const id = found != nullptr && !found->empty() ? found->front() : symbol_id::none;
+        if (is_valid(id) && out.at(id).kind == symbol_kind::constant)
+        {
+            set_target(file, argument, {.kind = target_kind::symbol, .symbol = id});
+            if (demand(id, file, n->where) != symbol_state::checked)
+                return k_format_failed;
+            auto const& c = out.constants[out.at(id).info];
+            if (c.kind == constant_kind::enum_case && out.name_of(c.type) == "pixel_format")
+            {
+                format = find_image_format(out.at(out.at(c.type).cases)[c.case_index].name);
+                note_option(file, n->where, c);
+            }
+        }
+    }
+    return format;
+}
+
+type_id checker::resolve_texel(i32 file, ast::expr_id expr, ast::index const& node)
+{
+    auto const where = span_of(file, expr);
+    auto const arguments = ast_of(file).at(node.arguments);
+    if (arguments.size() != 1 || !arguments[0].name.empty() || arguments[0].is_splat)
+    {
+        report(diagnostic_kind::wrong_kind_of_name, file, where, "a texel takes one image format: `texel[.rgba8_unorm]`");
+        return checked_module::error_type;
+    }
+    // CHK-390: the format is judged as an image's is, so an option makes the type one per compile
+    auto const format = resolve_image_format(file, arguments[0].value);
+    if (format == k_format_failed)
+        return checked_module::error_type;
+    if (format < 0)
+    {
+        report(diagnostic_kind::wrong_kind_of_name, file, span_of(file, arguments[0].value),
+               "a texel takes one of sg's image formats, as an enum case or a const of one: `.rgba8_unorm`");
+        return checked_module::error_type;
+    }
+    auto const name = texel_name_of(format);
+    auto const* const found = prelude_names.get_ptr(name);
+    if (found == nullptr || found->empty() || out.at(found->front()).kind != symbol_kind::structure
+        || demand(found->front(), file, where) != symbol_state::checked)
+        return checked_module::error_type;
+    return out.at(found->front()).type;
 }
 
 type_id checker::resolve_acceleration_structure(i32 file, ast::expr_id expr, ast::index const& node)

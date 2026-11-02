@@ -10,6 +10,7 @@ sv will grow into Shaped Code's visualization renderer — the top of the graphi
 A **view is the definition of one texture**, and one of a view's layers may be a whole layout tree — so views nest, at any depth.
 A frame is authored through fluent handles, flattened into a `render_plan`, and replayed by `viewer_renderer`.
 Raytracing-first: the path tracer and every shader are SGL, traced on dx12 and vulkan, and a material type is an SGL fragment.
+A layer may be rasterized instead, through the same material code ([docs/raster.md](docs/raster.md)).
 
 ```cpp
 for (auto f : sv::interactive("my viewer"))
@@ -58,6 +59,18 @@ uv run dev.py example shaped-viewer/hello-cube
 ```
 
 See [examples](../../../docs/guides/examples.md) for what an example is and how one is declared.
+
+## shaped-view, the standalone viewer
+
+[tools/shaped-view/](tools/shaped-view/shaped_view.cc) is a program rather than an example.
+It opens the model files on its command line, and every file dropped onto its window is placed beside the rest.
+On Windows `uv run dev.py install shaped-view` builds it frozen, copies it to `~/tools/shaped-view` and registers it for `.obj`, `.stl`, `.gltf` and `.glb`, so a double-click opens it.
+The copy reads no shader file, and the shaders the models in [corpus/](tools/shaped-view/corpus/) need are precompiled into it ([frozen-shaders](../shaped-shader-library/docs/frozen-shaders.md)).
+Installing again is the update, and `--uninstall` removes both the copy and the associations.
+
+```bash
+uv run dev.py run shaped-view model.obj other.glb   # straight from the build, without installing
+```
 
 ## More
 

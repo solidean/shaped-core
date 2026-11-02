@@ -3,7 +3,7 @@
 #include <nexus/test.hh>
 
 // Nothing here asserts a value: a hostname is whatever this machine is called.
-// What it pins is that a field is gathered only when it was asked for, which is the whole point of the type.
+// What it pins is that a field is gathered only when it was asked for, as the type promises.
 
 TEST("cc system_identifier - an empty request gathers nothing")
 {

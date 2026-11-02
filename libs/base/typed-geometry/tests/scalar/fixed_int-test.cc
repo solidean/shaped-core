@@ -724,3 +724,90 @@ TEST("tg fixed_int - same-width operations against _BitInt")
 
 #pragma clang diagnostic pop
 #endif
+
+// =========================================================================================================
+// ratio_to_f64 / ratio_to_f32: x / w correctly rounded
+// =========================================================================================================
+
+namespace
+{
+using fi576 = tg::fixed_int<576>;
+
+/// Whether r is x / w rounded to nearest with ties to even, checked exactly in integers; x, w > 0.
+/// With r = m * 2^e and m an integer of `bits` bits: 2 |x - m w 2^e| <= w 2^e, and m even where it is equal.
+bool is_correctly_rounded(fi256 const& x, fi192 const& w, f64 r, int bits)
+{
+    auto const split = tg::split_pow2(r); // significand in [1, 2)
+    auto const m = fi576(i64(tg::scale_by_pow2(split.significand, bits - 1)));
+    auto const e = split.exponent - (bits - 1);
+    auto const wx = fi576(x);
+    auto const ww = fi576(w);
+    // scale both sides so every term is an integer: 2^-e on x when e < 0, 2^e on m w otherwise
+    auto const lhs = e < 0 ? wx << -e : wx;
+    auto const mw = e < 0 ? m * ww : (m * ww) << e;
+    auto const unit = e < 0 ? ww : ww << e; // one ulp, in the same scale
+    auto d = lhs - mw;
+    if (d.is_negative())
+        d = -d;
+    auto const twice = d + d;
+    if (unit < twice)
+        return false;
+    return !(twice == unit) || (limb(m, 0) & 1) == 0;
+}
+} // namespace
+
+TEST("tg - fixed_int ratio_to_f64 equals IEEE division where the operands are exact", nx::config::seed(0x7a71))
+{
+    auto rng = nx::test_random();
+    for (auto i = 0; i < 20000; ++i)
+    {
+        auto const x = i64(rng.next_u64() >> (11 + rng.next_u64() % 40)) - (i64(1) << 20);
+        auto w = i64(rng.next_u64() >> (11 + rng.next_u64() % 50));
+        if (w == 0)
+            w = 1;
+        if (rng.next_u64() % 2 == 0)
+            w = -w;
+        CHECK(tg::ratio_to_f64(fi64(x), fi64(w)) == f64(x) / f64(w));
+
+        auto const xs = i32(x % (i64(1) << 24));
+        auto const ws = i32(w % (i64(1) << 24)) == 0 ? 1 : i32(w % (i64(1) << 24));
+        CHECK(tg::ratio_to_f32(fi64(xs), fi64(ws)) == f32(xs) / f32(ws));
+    }
+}
+
+TEST("tg - fixed_int ratio_to_f64 and ratio_to_f32 round wide quotients correctly", nx::config::seed(0x7a72))
+{
+    auto rng = nx::test_random();
+    for (auto i = 0; i < 4000; ++i)
+    {
+        auto x = random_value<fi256>(rng) >> int(1 + rng.next_u64() % 254);
+        auto w = random_value<fi192>(rng) >> int(1 + rng.next_u64() % 190);
+        if (x.is_negative())
+            x = -x;
+        if (w.is_negative())
+            w = -w;
+        if (x == fi256() || w == fi192())
+            continue;
+        CHECK(is_correctly_rounded(x, w, tg::ratio_to_f64(x, w), 53));
+        // an f32 quotient stays normal while |x / w| is within 2^-126 .. 2^127
+        auto const spread = x.magnitude_bit_width() - w.magnitude_bit_width();
+        if (spread > -120 && spread < 120)
+            CHECK(is_correctly_rounded(x, w, f64(tg::ratio_to_f32(x, w)), 24));
+        // signs: the magnitude's rounding, mirrored
+        CHECK(tg::ratio_to_f64(-x, w) == -tg::ratio_to_f64(x, w));
+        CHECK(tg::ratio_to_f64(x, -w) == -tg::ratio_to_f64(x, w));
+    }
+}
+
+TEST("tg - fixed_int ratio_to_f64: exact quotients, ties and zero")
+{
+    CHECK(tg::ratio_to_f64(fi192(0), fi128(5)) == 0.0);
+    CHECK(tg::ratio_to_f64(fi192(21), fi128(7)) == 3.0);
+    CHECK(tg::ratio_to_f64(fi192(-3), fi128(2)) == -1.5);
+    // (2^53 + 1) / 1 is a tie between 2^53 and 2^53 + 2: even wins, 2^53; (2^53 + 3) rounds up to 2^53 + 4
+    CHECK(tg::ratio_to_f64(fi192(i64((i64(1) << 53) + 1)), fi128(1)) == 9007199254740992.0);
+    CHECK(tg::ratio_to_f64(fi192(i64((i64(1) << 53) + 3)), fi128(1)) == 9007199254740996.0);
+    // one third of a 190-bit power of two: no f64 is exact, the nearest is
+    auto const big = fi192(1) << 189;
+    CHECK(tg::ratio_to_f64(big, fi128(3)) == tg::scale_by_pow2(1.0 / 3.0, 189));
+}

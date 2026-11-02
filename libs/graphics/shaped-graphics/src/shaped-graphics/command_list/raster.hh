@@ -6,6 +6,7 @@
 #include <clean-core/error/optional.hh>
 #include <clean-core/string/string_view.hh>
 #include <shaped-graphics/binding/binding_group.hh> // sg::declared_binding_group, for bind<G>
+#include <shaped-graphics/command_list/array_access_declaration.hh>
 #include <shaped-graphics/fwd.hh>
 #include <shaped-graphics/resource/index_buffer_view.hh>
 #include <shaped-graphics/resource/vertex_buffer_view.hh>
@@ -96,6 +97,19 @@ struct sg::draw_indexed_config
     int vertex_offset = 0; ///< added to each index before the vertex fetch (sub-mesh base vertex)
 };
 
+/// One indexed draw's parameters as an indirect draw reads them from a GPU buffer, in the layout every backend shares:
+/// D3D12's `D3D12_DRAW_INDEXED_ARGUMENTS`, vulkan's `VkDrawIndexedIndirectCommand`, Metal's and WebGPU's, field for field.
+/// A shader that writes them declares a struct of five 4-byte members in this order; a buffer of it re-types with `reinterpret_as`.
+/// `first_instance` is where `@instance_index` starts, which is how one draw of many learns which it is.
+struct sg::draw_indexed_args
+{
+    u32 index_count = 0;
+    u32 instance_count = 1;
+    u32 first_index = 0;
+    i32 vertex_offset = 0;
+    u32 first_instance = 0;
+};
+
 /// RAII handle for an open rendering scope, returned by cmd.raster.render_to.
 /// Opens the scope on construction (begin_rendering) and closes it at end of scope (end_rendering).
 ///
@@ -155,16 +169,21 @@ public:
     void bind_vertex_buffer(vertex_buffer_view const& view, int slot = 0);
     /// Binds the index buffer read by draw_indexed.
     void bind_index_buffer(index_buffer_view const& view);
-    /// Declares per-element access for a *buffer* array / bindless binding, applied to the **next draw only**.
-    /// Every array the pipeline's code indexes must be declared before each draw.
-    /// An undeclared one logs and is covered whole, and an empty `elements` span declares it unused.
-    /// A scalar binding has its access inferred from the shader and the bound view.
-    /// Array element usage cannot be, since a shader may index only some elements, or use them differently.
+    /// Declares per-element access for a *buffer* array / bindless binding, for every draw while the result lives.
+    /// It also ends when this rendering scope closes, so declare it after the scope opens and let it die first.
+    /// An array the pipeline's code indexes with no live declaration logs and is covered whole, and an empty `elements` declares it unused.
+    /// Array element usage cannot be inferred, since a shader may index only some elements, or use them differently.
     /// Each element is tracked at the stages the pipeline's code touches the array in, as a scalar binding is.
-    void declare_array_buffer_access(cc::string_view binding_name, cc::span<array_buffer_access const> elements);
-    /// Declares per-element access for a *texture* array / bindless binding.
-    /// Like the buffer form it applies to the next draw only, but each element also names the layout it must be in.
-    void declare_array_texture_access(cc::string_view binding_name, cc::span<array_texture_access const> elements);
+    /// `array` is what the shader package generates for the binding, and the by-name overload checks the name as the compute one does.
+    [[nodiscard]] array_access_declaration declare_array_buffer_access(buffer_array_binding array,
+                                                                       cc::span<array_buffer_access const> elements);
+    [[nodiscard]] array_access_declaration declare_array_buffer_access(cc::string_view binding_name,
+                                                                       cc::span<array_buffer_access const> elements);
+    /// The texture form: each element also names the layout it must be in.
+    [[nodiscard]] array_access_declaration declare_array_texture_access(texture_array_binding array,
+                                                                        cc::span<array_texture_access const> elements);
+    [[nodiscard]] array_access_declaration declare_array_texture_access(cc::string_view binding_name,
+                                                                        cc::span<array_texture_access const> elements);
     /// Overrides the rendering scope's viewport / scissor for subsequent draws.
     void set_viewport(viewport const& vp);
     void set_scissor(tg::aabb2i const& rect);
@@ -175,7 +194,8 @@ public:
     void set_blend_constants(tg::vec4f constants);
     /// Writes inline constants into the bound pipeline layout's inline_constants block.
     void set_inline_constants(cc::span<byte const> data, cc::optional<isize> offset = {});
-    /// POD convenience: bit-copies `value`. `T` must be trivially copyable, size a multiple of 4 bytes.
+    /// POD convenience: bit-copies `value`.
+    /// `T` must be trivially copyable, size a multiple of 4 bytes.
     template <class T>
     void set_inline_constants(T const& value, cc::optional<isize> offset = {})
     {
@@ -187,6 +207,13 @@ public:
     void draw(draw_config const& config = {});
     /// Records an indexed draw of the active pipeline (an index buffer must be bound).
     void draw_indexed(draw_indexed_config const& config = {});
+    /// Records `count` indexed draws of the active pipeline, whose parameters the GPU reads from `args[first, first + count)` when they run.
+    ///
+    /// This is how a pass that only the GPU decides — culling — chooses what draws, with no readback: a draw it rejects holds an `instance_count` of 0, which draws nothing.
+    /// The count is the caller's; a GPU-written count is not supported yet.
+    /// `args` needs `buffer_usage::indirect_command_buffer`, and a shader writing it needs `readwrite_buffer` too; it must not be bound writable to the same draw.
+    /// An index buffer must be bound, and a 16-bit one needs every `first_index` even, which nothing can check on the CPU.
+    void draw_indexed_indirect(buffer<draw_indexed_args> const& args, isize first = 0, isize count = 1);
 
 private:
     friend class command_list_raster_scope;
@@ -225,8 +252,14 @@ public:
     void bind_vertex_buffers(std::initializer_list<vertex_buffer_view> views, int first_slot = 0);
     void bind_vertex_buffer(vertex_buffer_view const& view, int slot = 0);
     void bind_index_buffer(index_buffer_view const& view);
-    void declare_array_buffer_access(cc::string_view binding_name, cc::span<array_buffer_access const> elements);
-    void declare_array_texture_access(cc::string_view binding_name, cc::span<array_texture_access const> elements);
+    [[nodiscard]] array_access_declaration declare_array_buffer_access(buffer_array_binding array,
+                                                                       cc::span<array_buffer_access const> elements);
+    [[nodiscard]] array_access_declaration declare_array_buffer_access(cc::string_view binding_name,
+                                                                       cc::span<array_buffer_access const> elements);
+    [[nodiscard]] array_access_declaration declare_array_texture_access(texture_array_binding array,
+                                                                        cc::span<array_texture_access const> elements);
+    [[nodiscard]] array_access_declaration declare_array_texture_access(cc::string_view binding_name,
+                                                                        cc::span<array_texture_access const> elements);
     void set_viewport(viewport const& vp);
     void set_scissor(tg::aabb2i const& rect);
     void set_stencil_reference(u32 reference);
@@ -241,6 +274,7 @@ public:
     }
     void draw(draw_config const& config = {});
     void draw_indexed(draw_indexed_config const& config = {});
+    void draw_indexed_indirect(buffer<draw_indexed_args> const& args, isize first = 0, isize count = 1);
 
     // Pinned to its owning command list: neither copyable nor movable.
     command_list_raster_manual_scope(command_list_raster_manual_scope const&) = delete;
@@ -286,8 +320,14 @@ public:
     void bind_vertex_buffers(std::initializer_list<vertex_buffer_view> views, int first_slot = 0);
     void bind_vertex_buffer(vertex_buffer_view const& view, int slot = 0);
     void bind_index_buffer(index_buffer_view const& view);
-    void declare_array_buffer_access(cc::string_view binding_name, cc::span<array_buffer_access const> elements);
-    void declare_array_texture_access(cc::string_view binding_name, cc::span<array_texture_access const> elements);
+    [[nodiscard]] array_access_declaration declare_array_buffer_access(buffer_array_binding array,
+                                                                       cc::span<array_buffer_access const> elements);
+    [[nodiscard]] array_access_declaration declare_array_buffer_access(cc::string_view binding_name,
+                                                                       cc::span<array_buffer_access const> elements);
+    [[nodiscard]] array_access_declaration declare_array_texture_access(texture_array_binding array,
+                                                                        cc::span<array_texture_access const> elements);
+    [[nodiscard]] array_access_declaration declare_array_texture_access(cc::string_view binding_name,
+                                                                        cc::span<array_texture_access const> elements);
     void set_viewport(viewport const& vp);
     void set_scissor(tg::aabb2i const& rect);
     void set_stencil_reference(u32 reference);
@@ -302,6 +342,7 @@ public:
     }
     void draw(draw_config const& config = {});
     void draw_indexed(draw_indexed_config const& config = {});
+    void draw_indexed_indirect(buffer<draw_indexed_args> const& args, isize first = 0, isize count = 1);
 
     // Pinned to its owning command list: neither copyable nor movable.
     command_list_raster_scope(command_list_raster_scope const&) = delete;

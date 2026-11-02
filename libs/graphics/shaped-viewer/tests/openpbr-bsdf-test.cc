@@ -152,7 +152,7 @@ struct probe_result
     float samples = 0.0f;
 };
 
-static_assert(sizeof(sv_test::shaders::probe_case) == sizeof(probe_case),
+static_assert(sizeof(sv_test::shaders::bsdf_probe::probe_case) == sizeof(probe_case),
               "probe_case must match probe_case in tests/shaders/bsdf_probe.sgl");
 
 /// Dispatches `cases` through the probe and returns one mean per case.
@@ -161,7 +161,7 @@ static_assert(sizeof(sv_test::shaders::probe_case) == sizeof(probe_case),
 /// would put test-only machinery in the library.
 cc::shared_async<cc::vector<probe_result>> run_probe_chunk(sg::context& ctx, cc::span<probe_case const> cases)
 {
-    auto const& entry = sv_test::shaders::bsdf_probe.measure;
+    auto const& entry = sv_test::shaders::bsdf_probe::measure;
     auto const compiled_shader = entry->acquire(ctx);
     co_await cc::async_settled(compiled_shader);
     if (compiled_shader->has_error())
@@ -171,7 +171,7 @@ cc::shared_async<cc::vector<probe_result>> run_probe_chunk(sg::context& ctx, cc:
     auto const* const compiled = compiled_shader->try_value();
     REQUIRE(compiled != nullptr); // the probe shader must build; without it every check below is vacuous
 
-    auto const group_layout = ctx.cached.acquire_binding_group_layout<sv_test::shaders::probe>();
+    auto const group_layout = ctx.cached.acquire_binding_group_layout<sv_test::shaders::bsdf_probe::probe>();
     auto pipeline = ctx.cached.acquire_compute_pipeline({.shader = *compiled, .layout = entry.acquire_layout(ctx)});
     auto const built = co_await pipeline;
     REQUIRE(built != nullptr);
@@ -189,10 +189,11 @@ cc::shared_async<cc::vector<probe_result>> run_probe_chunk(sg::context& ctx, cc:
     // SGL reads no buffer's length, so the probe is told both counts.
     auto const group = ctx.transient.create_binding_group(
         *cmd, group_layout,
-        sv_test::shaders::probe{.cases = case_buffer.reinterpret_as<sv_test::shaders::probe_case>().as_readonly_buffer(),
-                                .results = result_buffer.as_readwrite_buffer(),
-                                .item_count = u32(item_count),
-                                .case_count = u32(cases.size())});
+        sv_test::shaders::bsdf_probe::probe{
+            .cases = case_buffer.reinterpret_as<sv_test::shaders::bsdf_probe::probe_case>().as_readonly_buffer(),
+            .results = result_buffer.as_readwrite_buffer(),
+            .item_count = u32(item_count),
+            .case_count = u32(cases.size())});
     cmd->compute.bind_group(0, *group);
     cmd->compute.dispatch_threads(item_count);
 
@@ -429,7 +430,7 @@ constexpr tg::vec3f probe_directions[] = {
 
 ASYNC_INVOCABLE_TEST("sv - OpenPBR closure, measured", (sg::context_handle const& ctx_h))
 {
-    // KNOWN BROKEN on Windows on ARM, and skipped rather than worked around — see the viewer TODO for the evidence.
+    // KNOWN BROKEN on Windows on ARM, and skipped rather than worked around — bug-sv-woa-inline-readback-fastfail carries the evidence.
     //
     // The binary dies through `__fastfail` inside the wait for idle, after a trivial dispatch whose
     // command list also recorded an inline readback.
@@ -438,14 +439,14 @@ ASYNC_INVOCABLE_TEST("sv - OpenPBR closure, measured", (sg::context_handle const
     // These two are the only tests in sv that use `cmd.download`, and sv's own ../docs/structure.md already noted that path had
     // never been exercised here.
 #if defined(CC_ARCH_ARM64) && defined(_WIN32)
-    SKIP("known broken on Windows on ARM — the inline readback path fastfails; see "
-         "libs/graphics/shaped-viewer/docs/TODO.md");
+    SKIP("known broken on Windows on ARM — the inline readback path fastfails; "
+         "issue: bug-sv-woa-inline-readback-fastfail");
 #endif
     auto& ctx = *ctx_h;
 
     auto const& env = sv_test::shared_env();
     if (!env.has_compiler)
-        SKIP("no SGL compiler that reaches DXIL to build the probe shader");
+        SKIP("no SGL compiler for this backend to build the probe shader");
 
     auto const surfaces = surfaces_under_test();
 
@@ -505,7 +506,7 @@ ASYNC_INVOCABLE_TEST("sv - OpenPBR closure, measured", (sg::context_handle const
             // under a percent.
             // Turquin's analytic energy compensation overshoots a white metal by about 3%, and the Conty-Estevez sheen
             // reflects about 6% more at grazing than `sheen_albedo` charges the layers below it for.
-            // Both are the fits the viewer TODO names tabulated albedos as the replacement for, so this bound is what
+            // Both are the fits tabulated albedos replace (issue: feat-sv-openpbr-tabulated-albedo), so this bound is what
             // will tighten when they land.
             // Measured from INSIDE, the bound is in different units, and that is the closure's convention rather than a
             // concession.
@@ -641,14 +642,14 @@ ASYNC_INVOCABLE_TEST("sv - the denoiser guides describe the surface they are rea
                      (sg::context_handle const& ctx_h))
 {
 #if defined(CC_ARCH_ARM64) && defined(_WIN32)
-    SKIP("known broken on Windows on ARM — the inline readback path fastfails; see "
-         "libs/graphics/shaped-viewer/docs/TODO.md");
+    SKIP("known broken on Windows on ARM — the inline readback path fastfails; "
+         "issue: bug-sv-woa-inline-readback-fastfail");
 #endif
     auto& ctx = *ctx_h;
 
     auto const& env = sv_test::shared_env();
     if (!env.has_compiler)
-        SKIP("no SGL compiler that reaches DXIL to build the probe shader");
+        SKIP("no SGL compiler for this backend to build the probe shader");
 
     // One case per (surface, guide), so a surface's three guides come back from one dispatch.
     auto const guide_of = [&](probe_surface const& s, probe_mode mode)
@@ -731,14 +732,14 @@ ASYNC_INVOCABLE_TEST("sv - the diffuse and specular halves each reflect what the
                      (sg::context_handle const& ctx_h))
 {
 #if defined(CC_ARCH_ARM64) && defined(_WIN32)
-    SKIP("known broken on Windows on ARM — the inline readback path fastfails; see "
-         "libs/graphics/shaped-viewer/docs/TODO.md");
+    SKIP("known broken on Windows on ARM — the inline readback path fastfails; "
+         "issue: bug-sv-woa-inline-readback-fastfail");
 #endif
     auto& ctx = *ctx_h;
 
     auto const& env = sv_test::shared_env();
     if (!env.has_compiler)
-        SKIP("no SGL compiler that reaches DXIL to build the probe shader");
+        SKIP("no SGL compiler for this backend to build the probe shader");
 
     // A white Lambertian with its specular layer off: everything it reflects is diffuse, and being lossless it
     // reflects all of it.

@@ -1,0 +1,256 @@
+// A tiny path tracer, here to produce the one thing a denoiser needs and a raster pass cannot give it: real Monte Carlo noise, with exact guide buffers beside it.
+//
+// Analytic geometry, a ground plane and three spheres, so there is no acceleration structure, no mesh and no asset in the way.
+// What matters for the example is that the noise is the genuine article.
+// A few samples per pixel of cosine-sampled indirect light and a stochastically sampled area light, which is exactly the signal sr's denoisers are built for.
+// Turning `spp` down makes it worse in the way a real tracer gets worse.
+//
+// It writes seven images in one dispatch:
+//   color            the noisy radiance, and the running mean when the caller is accumulating
+//   albedo           the primary hit's diffuse reflectance, so the denoiser can filter lighting and keep texture
+//   normal           the primary hit's world normal
+//   depth            linear view depth, 0 where the ray escaped
+//   motion           this pixel minus where the same surface was last frame, in pixels
+//   specular_albedo  the primary hit's specular reflectance, which this scene has none of
+//   roughness        the primary hit's roughness, which this scene is fully rough
+//
+// The last two exist because the vendor members require them, and a member that cannot have them cannot be shown.
+// They are not padding: this scene really is Lambertian.
+// So zero specular reflectance and maximal roughness is what it has, and a denoiser told so correctly does nothing to a specular lobe that is not there.
+
+require readwrite_image_formats
+
+@inline binding scene_constants:
+    // The previous frame's view-projection, one ROW per float4, so nothing here depends on how a matrix would be packed into a constant block.
+    prev_vp_row0: float4
+    prev_vp_row1: float4
+    prev_vp_row2: float4
+    prev_vp_row3: float4
+    // xyz eye, w tan(vertical fov / 2)
+    origin: float4
+    // xyz, w aspect ratio
+    forward: float4
+    // xyz, w unused
+    right: float4
+    // xyz, w unused
+    up: float4
+    // drives the per-frame random sequence
+    frame: uint
+    // 0 restarts the running mean, >0 folds this frame into it
+    accum_frame: uint
+    // samples per pixel this frame
+    spp: int
+    // area light radius: bigger is softer and noisier
+    light_size: float
+    // While an upscaler runs, every sample of the frame lands at this one offset from the pixel's center, in [-0.5, 0.5], rather than at a random spot inside the pixel.
+    // The upscaler reconstructs from where they landed.
+    frame_jitter: float2
+    use_frame_jitter: int
+
+binding scene_images:
+    color: mut image_2d[.rgba32_float]
+    albedo: out image_2d[.rgba32_float]
+    normal: out image_2d[.rgba32_float]
+    depth: out image_2d[.rgba32_float]
+    motion: out image_2d[.rgba32_float]
+    specular_albedo: out image_2d[.rgba32_float]
+    roughness: out image_2d[.rgba32_float]
+
+// a const holds no vector yet, so these two are functions
+fun light_center() => float3(2.5, 6.0, 1.5)
+fun light_power() => float3(320.0, 296.0, 250.0)
+
+fun hash_u32(v: uint) -> uint:
+    let mut x = v
+    x ^= x >> 16u
+    x *= 0x7feb352du
+    x ^= x >> 15u
+    x *= 0x846ca68bu
+    x ^= x >> 16u
+    return x
+
+fun rand_next(state: mut uint) -> float:
+    state = state * 1664525u + 1013904223u
+    return ((hash_u32(state) >> 8u) as float) * (1.0 / 16777216.0)
+
+// The ground's two-tone check, which is what makes albedo demodulation visible: the denoiser must keep this crisp while smoothing the light falling on it.
+fun ground_albedo(p: float3) -> float3:
+    let cell = floor(p.xz * 0.5)
+    let odd = (((cell.x as int) + (cell.y as int)) & 1) != 0
+    let albedo = if odd => float3(0.62, 0.62, 0.64) else float3(0.30, 0.31, 0.34)
+    return albedo
+
+struct hit:
+    t: float
+    position: float3
+    normal: float3
+    albedo: float3
+
+// Nearest intersection along `o + t * d` for t in (t_min, t_max), or t < 0 for a miss.
+fun trace(o: float3, d: float3, t_min: float, t_max: float) -> hit:
+    // A sphere: xyz center, w radius; the albedo table is parallel to it.
+    let spheres = [float4(-1.6, 1.0, 0.0, 1.0), float4(1.1, 0.75, 0.6, 0.75), float4(0.2, 0.45, -1.8, 0.45)]
+    let sphere_albedo = [float3(0.85, 0.28, 0.22), float3(0.24, 0.52, 0.86), float3(0.88, 0.76, 0.22)]
+
+    let mut h = hit(-1.0, float3(0.0), float3(0.0), float3(0.0))
+    let mut best = t_max
+
+    // The ground plane, y = 0, kept finite so the horizon is sky rather than an infinite floor.
+    if abs(d.y) > 0.000001:
+        let t = -o.y / d.y
+        if t > t_min and t < best:
+            let p = o + t * d
+            if dot(p.xz, p.xz) < 400.0:
+                best = t
+                h = hit(t, p, float3(0.0, 1.0, 0.0), ground_albedo(p))
+
+    for i in 0 ..< 3:
+        let c = spheres[i].xyz
+        let r = spheres[i].w
+
+        // Solved at the ray's closest approach rather than from the origin, which keeps the discriminant's sign meaningful when the eye is far from a small sphere.
+        let oc = o - c
+        let b = dot(oc, d)
+        let closest = oc - b * d
+        let disc = r * r - dot(closest, closest)
+        if disc < 0.0 => continue
+
+        let sq = sqrt(disc)
+        let mut t = -b - sq
+        if t <= t_min:
+            t = -b + sq
+        if t <= t_min or t >= best => continue
+
+        best = t
+        let position = o + t * d
+        h = hit(t, position, normalize(position - c), sphere_albedo[i])
+    return h
+
+fun sky(d: float3) -> float3:
+    let up = saturate(d.y * 0.5 + 0.5)
+    return mix(float3(0.10, 0.12, 0.16), float3(0.26, 0.38, 0.62), up)
+
+// A cosine-weighted direction about `n`, which is what makes the diffuse estimator unbiased without a pdf term.
+fun cosine_hemisphere(n: float3, rng: mut uint) -> float3:
+    let u1 = rand_next(mut rng)
+    let u2 = rand_next(mut rng)
+    let r = sqrt(u1)
+    let phi = 6.2831853 * u2
+
+    let up = if abs(n.y) < 0.95 => float3(0.0, 1.0, 0.0) else float3(1.0, 0.0, 0.0)
+    let tx = normalize(cross(up, n))
+    let ty = cross(n, tx)
+    return normalize(tx * (r * cos(phi)) + ty * (r * sin(phi)) + n * sqrt(max(0.0, 1.0 - u1)))
+
+// Direct light from the area light, sampled at one point on it: the soft shadow, and most of the noise.
+fun direct_light(p: float3, n: float3, rng: mut uint){scene_constants} -> float3:
+    let jx = rand_next(mut rng)
+    let jy = rand_next(mut rng)
+    let jz = rand_next(mut rng)
+    let jitter = float3(jx, jy, jz) * 2.0 - 1.0
+    let lp = light_center() + jitter * scene_constants.light_size
+
+    let to_light = lp - p
+    let dist2 = max(dot(to_light, to_light), 0.0001)
+    let dist = sqrt(dist2)
+    let l = to_light / dist
+
+    let ndotl = dot(n, l)
+    if ndotl <= 0.0 => return float3(0.0)
+
+    let shadow = trace(p + n * 0.001, l, 0.001, dist - 0.001)
+    if shadow.t > 0.0 => return float3(0.0)
+
+    return light_power() * (ndotl / dist2)
+
+fun as_float2(v: int2) => float2(v.x as float, v.y as float)
+
+@compute(8, 8) fun main_cs(@thread_id id: int3){scene_images, scene_constants}:
+    let size = scene_images.color.size()
+    if id.x >= size.x or id.y >= size.y => return
+
+    let px = id.xy
+    let mut rng = hash_u32((id.x as uint) + (id.y as uint) * (size.x as uint) + scene_constants.frame * 9781u)
+
+    let o = scene_constants.origin.xyz
+    let tan_half = scene_constants.origin.w
+    let aspect = scene_constants.forward.w
+
+    let mut radiance = float3(0.0)
+    let mut primary_albedo = float3(0.0)
+    let mut primary_normal = float3(0.0)
+    let mut primary_depth = 0.0
+    let mut primary_position = float3(0.0)
+    let mut primary_sample = float2(0.0)
+    let mut primary_hit = false
+
+    let spp = max(1, scene_constants.spp)
+    for s in 0 ..< spp:
+        // Jittered inside the pixel, so more samples anti-alias as well as converge, or, while an upscaler runs, all at the frame's one offset, which the upscaler turns into resolution instead.
+        let jitter_x = rand_next(mut rng)
+        let jitter_y = rand_next(mut rng)
+        let mut jitter = float2(jitter_x, jitter_y)
+        if scene_constants.use_frame_jitter != 0:
+            jitter = 0.5 + scene_constants.frame_jitter
+        let ndc = (as_float2(px) + jitter) / as_float2(size) * 2.0 - 1.0
+        let d = normalize(scene_constants.forward.xyz + scene_constants.right.xyz * (ndc.x * tan_half * aspect) - scene_constants.up.xyz * (ndc.y * tan_half))
+
+        let h = trace(o, d, 0.001, 10000.0)
+        if h.t < 0.0:
+            radiance += sky(d)
+            continue
+
+        // The guides describe the surface rather than the estimate, so one sample's worth of them is exact.
+        // Taken from the first sample only: every sample of a pixel sees essentially the same primary surface.
+        // And averaging normals across a silhouette would soften the very edge the denoiser leans on.
+        if not primary_hit:
+            primary_hit = true
+            primary_albedo = h.albedo
+            primary_normal = h.normal
+            primary_position = h.position
+            primary_sample = as_float2(px) + jitter
+            primary_depth = dot(h.position - o, scene_constants.forward.xyz)
+
+        // Direct, then one cosine-sampled diffuse bounce.
+        // Two terms is enough to look like global illumination and to be visibly noisy at low sample counts, which is the whole point of the scene. 0.03183 is 1/pi.
+        let mut sample_radiance = h.albedo * direct_light(h.position, h.normal, mut rng) * 0.03183
+
+        let bounce_dir = cosine_hemisphere(h.normal, mut rng)
+        let b = trace(h.position + h.normal * 0.001, bounce_dir, 0.001, 10000.0)
+        let mut incoming = sky(bounce_dir)
+        if b.t >= 0.0:
+            incoming = b.albedo * direct_light(b.position, b.normal, mut rng) * 0.03183
+        sample_radiance += h.albedo * incoming
+
+        radiance += sample_radiance
+    radiance /= spp as float
+
+    // Progressive accumulation, read-modify-write at this dispatch's own pixel, so no second image is needed.
+    // The caller restarts it by sending accum_frame 0, which is what a camera move or a settings change does.
+    if scene_constants.accum_frame > 0u:
+        let n = scene_constants.accum_frame as float
+        radiance = (scene_images.color[id.xy].xyz * n + radiance) / (n + 1.0)
+
+    // Where this pixel's surface was last frame, in pixels: what a temporal denoiser reprojects along.
+    // A pixel that hit nothing has no surface to follow, so it carries no motion.
+    // Measured from where the primary sample was traced rather than the pixel center, so the motion carries no jitter.
+    // A still camera reports zero, which is what an upscaler reading the jitter separately requires.
+    let mut motion = float2(0.0)
+    if primary_hit:
+        let p4 = float4(..primary_position, 1.0)
+        let prev_clip = float4(dot(scene_constants.prev_vp_row0, p4), dot(scene_constants.prev_vp_row1, p4), dot(scene_constants.prev_vp_row2, p4), dot(scene_constants.prev_vp_row3, p4))
+        if prev_clip.w > 0.000001:
+            let prev_ndc = prev_clip.xy / prev_clip.w
+            let prev_px = (float2(prev_ndc.x, -prev_ndc.y) * 0.5 + 0.5) * as_float2(size)
+            motion = primary_sample - prev_px
+
+    scene_images.color[id.xy] = float4(..radiance, 1.0)
+    scene_images.albedo[id.xy] = float4(..(if primary_hit => primary_albedo else float3(1.0)), 1.0)
+    scene_images.normal[id.xy] = float4(..primary_normal, 0.0)
+    scene_images.depth[id.xy] = float4(primary_depth, 0.0, 0.0, 0.0)
+    scene_images.motion[id.xy] = float4(..motion, 0.0, 0.0)
+
+    // A Lambertian scene: nothing reflects specularly, and every surface is maximally rough.
+    // A ray that escaped is the sky, which is not a surface at all; the same answer serves, since there is no specular lobe to preserve either way.
+    scene_images.specular_albedo[id.xy] = float4(0.0, 0.0, 0.0, 1.0)
+    scene_images.roughness[id.xy] = float4(1.0, 0.0, 0.0, 0.0)

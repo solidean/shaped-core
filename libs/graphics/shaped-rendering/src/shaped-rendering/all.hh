@@ -9,6 +9,7 @@
 #include <shaped-rendering/blit_routine.hh>
 #include <shaped-rendering/box_filter_mipmap_routine.hh>
 #include <shaped-rendering/capture.hh>
+#include <shaped-rendering/display.hh>
 #include <shaped-rendering/dlss_rr_routine.hh>
 #include <shaped-rendering/fsr_upscale_routine.hh>
 #include <shaped-rendering/fwd.hh>
@@ -16,6 +17,8 @@
 #include <shaped-rendering/imgui_routine.hh>
 #include <shaped-rendering/imgui_style.hh>
 #include <shaped-rendering/input.hh>
+#include <shaped-rendering/metalfx_rr_routine.hh>
+#include <shaped-rendering/metalfx_upscale_routine.hh>
 #include <shaped-rendering/mix_routine.hh>
 #include <shaped-rendering/raster_box_filter_mipmap_routine.hh>
 #include <shaped-rendering/reconstruct.hh>

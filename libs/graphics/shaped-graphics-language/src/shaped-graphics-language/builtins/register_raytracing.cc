@@ -320,9 +320,9 @@ written write_query(call_context const& ctx)
     case query_op::proceed:
         return {.text = is_hlsl ? cc::format("{}.Proceed()", q) : cc::format("{}.next()", q)};
     case query_op::candidate_is_triangle:
-        return {.text = is_hlsl ? cc::format("({}.CandidateType() == CANDIDATE_NON_OPAQUE_TRIANGLE)", q)
-                                : cc::format("({}.get_candidate_intersection_type() == intersection_type::triangle)", q),
-                .binds = precedence::primary};
+        return {.text = is_hlsl ? cc::format("{}.CandidateType() == CANDIDATE_NON_OPAQUE_TRIANGLE", q)
+                                : cc::format("{}.get_candidate_intersection_type() == intersection_type::triangle", q),
+                .binds = precedence::comparison};
     case query_op::commit_triangle:
         return {.text = is_hlsl ? cc::format("{}.CommitNonOpaqueTriangleHit()", q)
                                 : cc::format("{}.commit_triangle_intersection()", q)};
@@ -351,13 +351,15 @@ struct stage_read
     evaluator evaluate;
     /// A field of the hit record or of the context every metal function of a pipeline is handed (EMIT-139).
     cc::string_view msl = {};
+    /// The launch's size, which every invocation of the launch shares; every other read differs between them (CHK-283).
+    bool is_shared = false;
 };
 
 constexpr stage_read k_stage_reads[] = {
     {"@stages(.raygen, .miss, .closest_hit, .any_hit, .intersection, .callable) fun launch_index() -> int3",
      "int3(DispatchRaysIndex())", nothing, "int3(sgl_ctx.launch_id)"},
     {"@stages(.raygen, .miss, .closest_hit, .any_hit, .intersection, .callable) fun launch_dimensions() -> int3",
-     "int3(DispatchRaysDimensions())", nothing, "int3(sgl_ctx.launch_size)"},
+     "int3(DispatchRaysDimensions())", nothing, "int3(sgl_ctx.launch_size)", true},
     {"@stages(.miss, .closest_hit, .any_hit, .intersection) fun world_ray_origin() -> pos3", "WorldRayOrigin()",
      nothing, "sgl_hit.origin"},
     {"@stages(.miss, .closest_hit, .any_hit, .intersection) fun world_ray_direction() -> vec3", "WorldRayDirection()",
@@ -601,6 +603,29 @@ spelling query_spelling(query_op op)
             .hlsl_names = k_query_hlsl,
             .msl_names = k_query_msl};
 }
+
+/// `RayQuery<…>` around `flags`, each by DXR's name, which is `ray_flags`' own name in capitals behind `RAY_FLAG_`.
+cc::string hlsl_ray_query_type(u32 flags)
+{
+    constexpr cc::string_view names[] = {
+        "FORCE_OPAQUE",
+        "FORCE_NON_OPAQUE",
+        "ACCEPT_FIRST_HIT_AND_END_SEARCH",
+        "SKIP_CLOSEST_HIT_SHADER",
+        "CULL_BACK_FACING_TRIANGLES",
+        "CULL_FRONT_FACING_TRIANGLES",
+        "CULL_OPAQUE",
+        "CULL_NON_OPAQUE",
+        "SKIP_TRIANGLES",
+        "SKIP_PROCEDURAL_PRIMITIVES",
+    };
+    auto text = cc::string();
+    auto bit = 0;
+    for (auto const name : names)
+        if ((flags >> bit++) & 1u)
+            text.appendf("{}RAY_FLAG_{}", text.empty() ? "" : " | ", name);
+    return cc::format("RayQuery<{}>", text.empty() ? cc::string("RAY_FLAG_NONE") : text);
+}
 } // namespace
 
 void sgl::builtins::register_raytracing(registry& r)
@@ -650,17 +675,25 @@ void sgl::builtins::register_raytracing(registry& r)
         .doc = "/// One trace in flight, which only raytracing.sgl steps through.",
         .hlsl = "RayQuery<RAY_FLAG_NONE>",
         .msl = "intersection_query<triangle_data, instancing>",
+        // the template's flags are ORed with the trace's, and a driver may specialize on them
+        .hlsl_flagged = hlsl_ray_query_type,
     });
 
     auto const add = [&](cc::string signature, evaluator evaluate, query_op op, cc::string_view doc)
     {
+        // what a query finds depends on the ray it traced, and on what the shader committed and in which control flow
+        auto const advances = op == query_op::trace || op == query_op::proceed || op == query_op::commit_triangle
+                           || op == query_op::abort || op == query_op::commit_procedural;
         r.add(function_record{
             .signature = cc::format("@internal {}", signature),
             .doc = cc::string(doc),
             .evaluate = evaluate,
             .write = query_spelling(op),
+            .writes_through = advances ? written_argument::first : written_argument::none,
             .features = check::feature_set(check::feature::ray_query),
             .declares_only = op == query_op::begin,
+            .flags_argument = op == query_op::trace ? 6 : -1,
+            .reads_only = !advances && op != query_op::begin,
         });
     };
     add("fun ray_query_begin() -> ray_query", nothing, query_op::begin, "/// A query nothing traced yet.");
@@ -705,6 +738,7 @@ void sgl::builtins::register_raytracing(registry& r)
             .evaluate = k_stage_reads[i].evaluate,
             .write
             = {.kind = spelling_kind::custom, .custom = write_stage_read, .data = i, .hlsl_names = k_stage_reads_hlsl},
+            .differs_between_invocations = !k_stage_reads[i].is_shared,
             .features = check::feature_set(check::feature::raytracing_pipeline),
         });
 
@@ -724,6 +758,7 @@ void sgl::builtins::register_raytracing(registry& r)
                       .writes_lines = is_not_wgsl,
                       .hlsl_names = k_trace_ray_hlsl,
                       .msl_names = k_trace_ray_msl},
+            .writes_through = written_argument::element,
             .takes_element = true,
             .features = check::feature_set(check::feature::raytracing_pipeline),
         });
@@ -738,6 +773,7 @@ void sgl::builtins::register_raytracing(registry& r)
                "signature.",
         .evaluate = nothing,
         .write = {.kind = spelling_kind::custom, .custom = write_call_callable, .hlsl_names = k_call_callable_hlsl},
+        .writes_through = written_argument::element,
         .takes_element = true,
         .features = check::feature_set(check::feature::raytracing_pipeline),
     });

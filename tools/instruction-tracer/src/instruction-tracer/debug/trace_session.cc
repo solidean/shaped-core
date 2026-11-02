@@ -7,7 +7,8 @@ namespace itrace
 {
 namespace
 {
-/// Read up to `max_instruction_bytes` at `address`. Short reads are fine and expected at the end of
+/// Read up to `max_instruction_bytes` at `address`.
+/// Short reads are fine and expected at the end of
 /// a mapping, so we back off rather than fail: the decoder only needs the bytes of one instruction.
 u8 read_code(void* process, u64 address, cc::fixed_array<u8, max_instruction_bytes>& out)
 {

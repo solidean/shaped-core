@@ -2,7 +2,6 @@
 #include <babel-serializer/image/image.hh>
 #include <clean-core/common/utility.hh> // cc::move
 #include <clean-core/container/map.hh>
-#include <clean-core/container/set.hh>
 #include <clean-core/container/vector.hh>
 #include <clean-core/string/format.hh>
 #include <shaped-viewer/asset/asset_loader.hh>
@@ -21,8 +20,8 @@
 //
 // The mapping targets OPENPBR rather than pbr, because that is what makes the extensions worth having: transmission,
 // ior, clearcoat and sheen land on `transmission_*`, `coat_*` and `fuzz_*` natively where pbr would discard them.
-// babel does not interpret the KHR_materials_* extensions yet, so what actually crosses today is the core
-// metallic-roughness set plus emission — and an issue names what was left behind.
+// What crosses today is the core metallic-roughness set, emission with its strength, glass (transmission, ior and volume's attenuation), specular and clearcoat.
+// The other KHR_materials_* extensions do not yet, and an issue names them.
 //
 // Textures ride on the MESH rather than on the material, as `mesh_texture`.
 // That is what lets the importer stay CPU-side: a mesh texture travels as pixels, while a material binding would need
@@ -74,63 +73,6 @@ constexpr int max_node_depth = 256;
     default:
         return sg::sampler_filter::linear;
     }
-}
-
-/// One decoded image expanded to tightly packed rgba8.
-///
-/// Every decode lands on rgba8 whatever the file held, because that is the one shape `texture_data` and the bindless
-/// table agree on today.
-/// A 16-bit PNG keeps its high byte and an f32 image is clamped, both of which lose precision the importer has nowhere
-/// to put — block compression and wider formats are a `derived` recipe, not this.
-[[nodiscard]] cc::result<cc::vector<byte>> to_rgba8(babel::image::image const& img)
-{
-    if (img.is_empty() || img.channels < 1 || img.channels > 4)
-        return cc::error("gltf: image has no usable pixels");
-
-    auto const pixel_count = isize(img.width) * isize(img.height);
-    auto out = cc::vector<byte>::create_filled(pixel_count * 4, byte(255));
-
-    auto const sample = [&](isize index) -> byte
-    {
-        switch (img.comp)
-        {
-        case babel::image::component::u8:
-            return img.pixels[index];
-        case babel::image::component::u16:
-        {
-            // Host-endian u16 pairs; the high byte is the 8-bit value.
-            auto const lo = u32(img.pixels[index * 2]);
-            auto const hi = u32(img.pixels[index * 2 + 1]);
-            return byte((lo | (hi << 8)) >> 8);
-        }
-        case babel::image::component::f32:
-        {
-            auto const v = img.samples_f32()[index];
-            auto const clamped = v < 0.0f ? 0.0f : (v > 1.0f ? 1.0f : v);
-            return byte(u32(clamped * 255.0f + 0.5f));
-        }
-        }
-        return byte(0);
-    };
-
-    for (auto p = isize(0); p < pixel_count; ++p)
-        for (auto c = 0; c < img.channels; ++c)
-        {
-            auto const value = sample(p * isize(img.channels) + c);
-            // 1 channel is grey and 2 is grey+alpha, so the single value fills rgb rather than r alone.
-            if (img.channels <= 2 && c == 0)
-            {
-                out[p * 4 + 0] = value;
-                out[p * 4 + 1] = value;
-                out[p * 4 + 2] = value;
-            }
-            else if (img.channels <= 2)
-                out[p * 4 + 3] = value;
-            else
-                out[p * 4 + c] = value;
-        }
-
-    return cc::move(out);
 }
 
 /// Everything one import needs to carry between its passes.
@@ -186,7 +128,7 @@ struct gltf_importer
             return {};
         }
 
-        auto pixels = to_rgba8(decoded_image.value());
+        auto pixels = impl::to_rgba8(decoded_image.value());
         if (pixels.has_error())
         {
             note(cc::format("gltf: image {} decoded to no usable pixels", int(index)));
@@ -241,6 +183,41 @@ struct gltf_importer
             into.push_back({.name = cc::move(name), .source = cc::move(sample.value())});
     }
 
+    /// Whether the triangles `indices` draw over `positions` close a volume: every edge shared by exactly two of them.
+    /// Vertices are welded by exact position first, since a mesh split along its seams for normals or uvs is still closed.
+    [[nodiscard]] static bool is_closed(cc::span<tg::pos3f const> positions, cc::span<u32 const> indices)
+    {
+        auto welded = cc::map<u64, u32>();
+        auto canonical = cc::vector<u32>();
+        canonical.reserve(positions.size());
+        for (auto const& p : positions)
+        {
+            u32 bits[3] = {};
+            cc::memcpy(bits, &p, sizeof(bits));
+            auto const key = cc::make_hash(bits[0], bits[1], bits[2]);
+            auto e = welded.entry(key);
+            canonical.push_back(e.get_or_emplace(u32(canonical.size())));
+        }
+
+        auto edges = cc::map<u64, i32>();
+        for (auto t = isize(0); t + 2 < indices.size(); t += 3)
+            for (auto k = 0; k < 3; ++k)
+            {
+                auto const a = canonical[indices[t + k]];
+                auto const b = canonical[indices[t + (k + 1) % 3]];
+                if (a == b)
+                    continue;
+                auto const key = (u64(a < b ? a : b) << 32) | u64(a < b ? b : a);
+                edges[key] += 1;
+            }
+        if (edges.empty())
+            return false;
+        for (auto [key, count] : edges)
+            if (count != 2)
+                return false;
+        return true;
+    }
+
     /// The bindings and mesh textures one glTF material maps onto.
     void build_material(bg::material const& m, cc::string_view name)
     {
@@ -258,12 +235,40 @@ struct gltf_importer
         //
         // glTF gives `emissiveFactor` no physical unit, so the mapping is the format's own: factor times
         // KHR_materials_emissive_strength, read one-to-one as nits — the unit sv's area lights and OpenPBR share.
-        // The strength defaults to 1 and babel does not interpret the extension yet, so 1 is what it is until it does;
-        // reading it is the same babel extension KHR_lights_punctual needs.
         if (m.emissive_factor != tg::vec3f::zero)
         {
             bindings.push_back(binding::of("emission_color", m.emissive_factor));
-            bindings.push_back(binding::of("emission_luminance", 1.0f));
+            bindings.push_back(binding::of("emission_luminance", m.emissive_strength));
+        }
+
+        // Glass: KHR_materials_transmission and _ior are OpenPBR's transmission and specular IOR one to one.
+        // KHR_materials_volume's attenuation is the color at a distance, which is exactly `transmission_color` at `transmission_depth`.
+        // Without a volume's thickness the extension means a thin wall, a single sheet with no interior to cross.
+        // Left solid, a pane would be read as the surface of a body, and a path refracted into it would look for a far side that is not there.
+        if (m.transmission_factor > 0.0f)
+            bindings.push_back(binding::of("transmission_weight", m.transmission_factor));
+        if (m.transmission_factor > 0.0f && m.thickness_factor <= 0.0f)
+            bindings.push_back(binding::of("thin_walled", 1.0f));
+        if (m.ior != 1.5f)
+            bindings.push_back(binding::of("specular_ior", m.ior));
+        if (m.transmission_factor > 0.0f && m.attenuation_distance.has_value())
+        {
+            bindings.push_back(binding::of("transmission_color", m.attenuation_color));
+            bindings.push_back(binding::of("transmission_depth", m.attenuation_distance.value()));
+        }
+
+        // KHR_materials_specular scales and tints the dielectric reflection, as OpenPBR's specular weight and color do.
+        if (m.specular_factor != 1.0f)
+            bindings.push_back(binding::of("specular_weight", m.specular_factor));
+        if (m.specular_color_factor != tg::vec3f(1, 1, 1))
+            bindings.push_back(binding::of("specular_color", m.specular_color_factor));
+
+        // KHR_materials_clearcoat is OpenPBR's coat, at the extension's fixed IOR of 1.5.
+        if (m.clearcoat_factor > 0.0f)
+        {
+            bindings.push_back(binding::of("coat_weight", m.clearcoat_factor));
+            bindings.push_back(binding::of("coat_roughness", m.clearcoat_roughness_factor));
+            bindings.push_back(binding::of("coat_ior", 1.5f));
         }
 
         // OPAQUE binds nothing, leaving opacity at 1: baseColorFactor's alpha is not a transparency there.
@@ -421,8 +426,7 @@ struct gltf_importer
     /// The box a POSITION accessor states, which glTF requires of it — so this costs no payload byte.
     ///
     /// Empty when the file left it out, or stated it at the wrong arity, and `create_mesh` then scans the positions.
-    /// Taking the file's word matters more than it looks: it is what lets a placeholder be drawn at the right size
-    /// before the geometry has arrived at all.
+    /// Taking the file's word lets a placeholder be drawn at the right size before the geometry has arrived at all.
     [[nodiscard]] cc::optional<tg::aabb3f> bounds_of(bg::primitive const& p) const
     {
         auto const* const accessor = doc.find(doc.find_attribute(p, "POSITION"));
@@ -614,6 +618,14 @@ struct gltf_importer
             auto attributes = attributes_of(p, vertex_count, name);
             auto const slot = slot_of(p.material);
 
+            if (cfg.closed_transmission_is_solid)
+            {
+                auto const* const m = doc.find(p.material);
+                if (m != nullptr && m->transmission_factor > 0.0f && m->thickness_factor <= 0.0f
+                    && is_closed(positions, indices))
+                    attributes.push_back(mesh_attribute::create_value("thin_walled", 0.0f));
+            }
+
             auto textures = cc::vector<mesh_texture>();
             for (auto const& t : textures_of(slot))
                 textures.push_back(t);
@@ -641,6 +653,39 @@ struct gltf_importer
     /// a negative z scale flips it — both kept as they come out, which is what three.js does too.
     /// What the extension permits and sv cannot mean — a negative intensity or color, a cone out of order — is clamped
     /// and noted, and a light of a type sv does not know is skipped and noted.
+    /// The camera `index` names, as its node at `world` places it: looking down the node's -Z with +Y up.
+    /// sv's camera is perspective alone, so an orthographic one is skipped and noted.
+    void emit_camera(bg::camera_index index, tg::affine_transform3f const& world)
+    {
+        auto const* const found = doc.find(index);
+        if (found == nullptr)
+            return;
+        auto const& c = *found;
+        if (c.type != bg::camera_type::perspective)
+        {
+            note(cc::format("gltf: camera {} is not perspective, which sv's camera is, so it was not imported",
+                            int(index)));
+            return;
+        }
+        auto const eye = world.transform(tg::pos3f::zero);
+        auto const forward = world.transform(tg::vec3f(0, 0, -1));
+        auto const up = world.transform(tg::vec3f(0, 1, 0));
+        if (forward.length() <= 1e-12f || up.length() <= 1e-12f)
+        {
+            note(cc::format("gltf: camera {} is placed by a node that collapses its axes, so it was not imported",
+                            int(index)));
+            return;
+        }
+        auto const from = tg::pos3d(eye[0], eye[1], eye[2]);
+        auto const to = from + tg::vec3d(forward[0], forward[1], forward[2]);
+        auto cam = camera::looking_at(from, to, tg::vec3d(up[0], up[1], up[2]));
+        if (c.yfov > 0.0f)
+            cam.projection.vertical_fov = tg::angle_d::make_from_radians(f64(c.yfov));
+        if (c.znear > 0.0f)
+            cam.projection.near_plane = f64(c.znear);
+        out.cameras.push_back({.name = c.name, .camera = cam});
+    }
+
     void emit_light(bg::light_index index, tg::affine_transform3f const& placement)
     {
         auto const* const found = doc.find(index);
@@ -713,44 +758,6 @@ struct gltf_importer
         out.lights.push_back({.id = l.name, .light = light, .range = l.range});
     }
 
-    /// Makes every light id unique within the asset: a name that is empty or shared becomes `name##i`, or `light##i`
-    /// for an empty one, with `i` its index in `lights` — which keeps what a human reads while giving each its own
-    /// identity.
-    ///
-    /// Which names are shared is settled before any is renamed, since renaming the first of two would otherwise leave the
-    /// second looking unique.
-    /// A generated id can still meet a name the file already uses — `a##1` beside two `a`s — so every final id goes
-    /// into a set, and a taken one bumps its suffix until it is new.
-    void disambiguate_light_ids()
-    {
-        auto shared = cc::vector<u8>::create_filled(out.lights.size(), u8(0));
-        for (auto i = isize(0); i < out.lights.size(); ++i)
-            for (auto j = isize(0); j < out.lights.size(); ++j)
-                if (j != i && out.lights[j].id == out.lights[i].id)
-                    shared[i] = 1;
-
-        // The names that stay as they are claim their ids first, so a generated one never takes a name the file chose.
-        auto taken = cc::set<cc::string>();
-        for (auto i = isize(0); i < out.lights.size(); ++i)
-            if (!out.lights[i].id.empty() && shared[i] == 0)
-                taken.insert(out.lights[i].id);
-
-        for (auto i = isize(0); i < out.lights.size(); ++i)
-        {
-            auto& id = out.lights[i].id;
-            if (!id.empty() && shared[i] == 0)
-                continue;
-
-            auto const base = id.empty() ? cc::string("light") : cc::string(id);
-            auto suffix = i;
-            auto candidate = cc::format("{}##{}", base, suffix);
-            while (taken.contains(candidate))
-                candidate = cc::format("{}##{}", base, ++suffix);
-            taken.insert(candidate);
-            id = cc::move(candidate);
-        }
-    }
-
     void visit(bg::node_index index, i32 parent, tg::affine_transform3f const& parent_world, int depth)
     {
         auto const raw = isize(int(index));
@@ -787,6 +794,9 @@ struct gltf_importer
 
         if (n->light != bg::light_index::invalid)
             emit_light(n->light, cfg.flatten_hierarchy ? world : local);
+
+        if (n->camera != bg::camera_index::invalid)
+            emit_camera(n->camera, world);
 
         // Counted before the children run, since their meshes and lights belong to them and not to this node.
         out.nodes[slot].mesh_count = i32(out.meshes.size()) - out.nodes[slot].first_mesh;
@@ -850,7 +860,7 @@ cc::result<asset_data> impl::import_gltf(babel::gltf::data const& doc,
 
     importer.build_materials();
     importer.walk_nodes();
-    importer.disambiguate_light_ids();
+    impl::disambiguate_light_ids(importer.out.lights);
 
     if (importer.out.is_empty())
         return cc::error(cc::format("shaped-viewer: nothing to import from '{}'", importer.out.name));

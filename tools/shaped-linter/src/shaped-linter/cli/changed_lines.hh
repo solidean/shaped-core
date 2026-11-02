@@ -26,7 +26,8 @@ struct scl::changed_lines
     /// Whether any file was listed at all — an empty set means no filtering was requested.
     bool empty() const { return _files.empty(); }
 
-    /// Whether `line` (1-based) is in scope for `path`. Separators are normalized, so `/` and `\` match.
+    /// Whether `line` (1-based) is in scope for `path`.
+    /// Separators are normalized, so `/` and `\` match.
     bool covers(cc::string_view path, u32 line) const;
 
 private:

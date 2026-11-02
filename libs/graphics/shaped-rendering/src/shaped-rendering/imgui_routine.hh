@@ -55,7 +55,7 @@ private:
 /// So prepare() records them on the command list before the scope opens, and execute() only draws.
 /// On vulkan the first draw's barrier on that uploaded geometry still splits the scope once per frame, until sg can
 /// declare a buffer's access before a scope opens — libs/graphics/shaped-rendering/docs/imgui.md says it too, and
-/// libs/graphics/shaped-graphics/docs/TODO.md carries the declaration this waits on.
+/// issue: feat-sg-declare-scope-accesses-up-front is the declaration this waits on.
 ///
 /// This frame's geometry is deliberately *not* routine state:
 /// it is allocated from the transient scope and travels in the prepared_frame, so the pair is re-entrant across imgui's viewports.
@@ -107,7 +107,7 @@ public:
     /// Unlike prepare() and execute() this opens its own rendering scopes and submits its own command lists, so it must NOT be called inside one.
     /// Nor while the main window's list is open: submitting a viewport's list then makes the two concurrent.
     /// The font atlas both sample is reverted to its canonical layout at every viewport submit, which is a barrier per frame for nothing.
-    /// Record the main window's list after this returns — only the present order is load-bearing.
+    /// Record the main window's list after this returns — only the present order is constrained.
     ///
     /// A no-op while multi-viewport is off.
     /// Viewport swapchains use a bgra8_unorm target, independent of whatever format the caller's main swapchain has.

@@ -40,6 +40,7 @@ struct vulkan_descriptor_functions; // the VK_EXT_descriptor_buffer entry points
 struct vulkan_raytracing_functions; // the acceleration-structure + ray-tracing-pipeline entry points
 class vulkan_blas;
 class vulkan_tlas;
+class vulkan_micromap;
 struct vulkan_descriptor_range;    // one allocated range within the descriptor heap
 class vulkan_descriptor_heap;      // host-visible memory descriptors are written into
 struct vulkan_image_view_key;      // the identity one cached VkImageView is keyed on
@@ -56,8 +57,6 @@ class vulkan_staging_binding_group;
 using vulkan_staging_binding_group_handle = std::shared_ptr<vulkan_staging_binding_group>;
 class vulkan_binding_group_layout;
 using vulkan_binding_group_layout_handle = std::shared_ptr<vulkan_binding_group_layout const>;
-struct vulkan_array_buffer_declare;  // one declare_array_buffer_access, held until the next dispatch
-struct vulkan_array_texture_declare; // the texture analogue
 class vulkan_compute_pipeline;
 class vulkan_raster_pipeline;
 class vulkan_swapchain;

@@ -22,13 +22,17 @@ NAME = "changes"
 
 
 def add_parser(sub: argparse._SubParsersAction) -> argparse.ArgumentParser:
-    p = sub.add_parser(NAME, help="List the ledger: every change, and what accounts for it")
+    p = sub.add_parser(NAME, help="List the ledger: every change, and what accounts for it, narrowed by path or by commit")
     a.review_name(p)
     a.as_json(p)
     p.add_argument("--undischarged", action="store_true", help="only changes no entry accounts for")
     p.add_argument("--path", default="",
                    help="only changes under these paths: comma-OR'd prefixes or globs, a `!` term subtracts")
-    p.add_argument("--ids", action="store_true", help="bare ids, one per line, for pasting into `discharges:`")
+    p.add_argument("--commit", metavar="SHA", default="",
+                   help="only changes whose atoms this commit contributed; a change spanning several commits is listed under each")
+    p.add_argument("--ids", action="store_true", help="bare ids on one line, for pasting into `discharges:`")
+    p.add_argument("--interdiff", action="store_true",
+                   help="under a change that replaced an edited hunk at `sync`, the diff between the two hunk bodies")
     return p
 
 
@@ -58,7 +62,29 @@ def path_filter(selector: str):
     return keeps
 
 
-def _rows(ctx: Context, paths: review.ReviewPaths, args) -> list[tuple[review.Change, str]]:
+def commit_filter(ctx: Context, cfg: review.ReviewConfig, spec: str):
+    """What `--commit` keeps: a change claiming any atom that commit contributed and that still stands at head.
+
+    The commit's contribution is carried to net space the way `ingest --commits` carries it, then met with each claim.
+    A net hunk coalesces neighboring edits from several commits, so the change holding it is listed under each of them.
+    A merge counts as everything it brought in, as everywhere else in the tool.
+    """
+    try:
+        sha = ctx.git.require_rev(spec)
+        in_range = {c.sha for c in ctx.git.commits(cfg.base, cfg.head)}
+    except review.GitError as e:
+        ctx.die(str(e))
+    # An empty listing would read as "this commit changed nothing", which is not the same answer.
+    if sha not in in_range:
+        ctx.die(
+            f"{spec} is not one of the {len(in_range)} commits this review covers ({cfg.base_spec}..{cfg.head_spec}); "
+            "a commit that a merge brought in is named by that merge"
+        )
+    touched = review.commit_atoms(ctx.git, sha, base=cfg.base, head=cfg.head, net=ctx.net_space(cfg))
+    return lambda change: not change.claim.intersect(touched).is_empty
+
+
+def _rows(ctx: Context, paths: review.ReviewPaths, cfg: review.ReviewConfig, args) -> list[tuple[review.Change, str]]:
     """(change, what discharges it) for every live change, in ledger order."""
     ledger = ctx.ledger(paths)
     entries = ctx.entries(paths)
@@ -74,9 +100,12 @@ def _rows(ctx: Context, paths: review.ReviewPaths, args) -> list[tuple[review.Ch
                     by_change.setdefault(resolved.id, []).append(f"{entry.id}/{block.name}")
 
     keeps = path_filter(args.path)
+    touched_by_commit = commit_filter(ctx, cfg, args.commit) if args.commit else None
     out = []
     for change in ledger.live():
         if not keeps(change.path):
+            continue
+        if touched_by_commit is not None and not touched_by_commit(change):
             continue
         holders = by_change.get(change.id, [])
         if change.discharged_by_reason and not holders:
@@ -89,7 +118,7 @@ def _rows(ctx: Context, paths: review.ReviewPaths, args) -> list[tuple[review.Ch
 
 def run(args: argparse.Namespace, ctx: Context) -> None:
     paths, cfg = ctx.open_changeset(args.name)
-    rows = _rows(ctx, paths, args)
+    rows = _rows(ctx, paths, cfg, args)
 
     if args.ids:
         print(" ".join(change.id for change, _ in rows))
@@ -99,12 +128,12 @@ def run(args: argparse.Namespace, ctx: Context) -> None:
         print(json.dumps([{
             "id": change.id, "kind": change.kind, "path": change.path,
             "summary": change.summary, "reason": change.reason,
-            "atoms": len(change.claim), "discharged_by": holders,
+            "atoms": len(change.claim), "discharged_by": holders, "supersedes": change.supersedes,
         } for change, holders in rows], indent=2))
         return
 
     if not rows:
-        print("no changes match" if args.path or args.undischarged else f"{cfg.name} has no changes yet; `review ingest {args.name}`")
+        print("no changes match" if args.path or args.undischarged or args.commit else f"{cfg.name} has no changes yet; `review ingest {args.name}`")
         return
 
     for change, holders in rows:
@@ -112,6 +141,12 @@ def run(args: argparse.Namespace, ctx: Context) -> None:
         print(f"{mark} {change.id}  {change.kind:<11} {change.summary}")
         if holders:
             print(review.console.dim(f"    discharged by {holders}"))
+        if change.supersedes:
+            print(review.console.dim(f"    replaces {', '.join(change.supersedes)}"))
+        if args.interdiff:
+            for diff in review.interdiffs(change, paths):
+                print(f"    since {diff.replaced}:")
+                print("\n".join(f"      {line}" for line in diff.text.splitlines()))
 
     accounted = sum(1 for _, holders in rows if holders)
     print(f"\n{accounted}/{len(rows)} discharged")

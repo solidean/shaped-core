@@ -79,7 +79,7 @@ public:
 
     /// Streams tightly-packed pinned `data` into one region of `texture` — the async mirror of cmd.upload.bytes_to_texture.
     /// The pin keeps the source alive until the copy consumes it; a later command list that reads the texture waits on the copy automatically.
-    /// Needs texture_usage::copy_dst.
+    /// Needs texture_usage::copy_dst, and refuses a depth or depth-stencil format.
     void bytes_to_texture(raw_texture_handle texture,
                           cc::pinned_data<byte const> data,
                           subresource_index const& subresource = {},

@@ -9,7 +9,7 @@ This one mechanism covers what other frameworks split into several features:
 - **data-driven tests** — the arguments are a "case" loaded from a file / JSON / dir;
 - **generator tests** — a driver generates a matrix of configs/enums and feeds each.
 
-The point is to **separate the test from its data**: one body, driven by data from wherever you like.
+All three **separate the test from its data**: one body, driven by data from wherever you like.
 Namespace `nx`; include `<nexus/test.hh>`, which pulls in `nx::invoke_tests`.
 
 ## The two pieces

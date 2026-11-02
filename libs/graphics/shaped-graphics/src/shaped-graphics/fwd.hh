@@ -25,6 +25,7 @@ enum class command_list_slot : int; // a recorder's slot in the per-context pool
 // The vocabulary enums this header goes on to DEFINE rather than only declare, named here so each definition can be written qualified.
 enum class index_format : u8;
 enum class lifetime_scope;
+enum class memory_heap_contents;
 enum class epoch : u64;
 enum class submission_token : u64;
 
@@ -98,8 +99,11 @@ struct rendering_info;             // value type — what opens a rendering scop
 struct buffer_bytes_copy;
 template <class T>
 struct buffer_data_copy;
+struct buffer_texture_copy;
 struct array_buffer_access;
 struct array_texture_access;
+class array_access_declaration; // a live array declaration, ended when it dies (see command_list/array_access_declaration.hh)
+struct dispatch_args;
 
 class raw_buffer;
 class raw_texture;
@@ -111,6 +115,13 @@ struct tlas_instance;               // value type — one instance input to buil
 enum class accel_build_flag;        // one build-time trade-off; a set of them is accel_build_flags
 enum class instance_cull_mode : u8; // per-instance triangle cull selection
 enum class blas_geometry : u8;      // what a blas was built from: triangles or AABBs
+class micromap;                     // opacity micromap a blas_triangles names (see raytracing/micromap.hh)
+struct micromap_triangles;          // value type — the input to build_micromap
+struct micromap_usage;              // value type — how many maps of one level and format
+struct micromap_descriptor;         // the GPU record of one map: where its states start, its level and format
+enum class micromap_format : u16;   // 2-state or 4-state
+enum class micromap_state : u8;     // one micro-triangle's state in a 4-state map
+enum class micromap_special_index : i32; // a whole triangle's state, in place of a map index
 
 } // namespace sg
 
@@ -163,6 +174,16 @@ enum class sg::lifetime_scope
 {
     persistent,
     transient,
+};
+
+/// What a memory_heap places: buffers or textures, never both.
+/// One kind per heap is what every backend can give: D3D12 below resource heap tier 2 separates them, and Vulkan's
+/// buffer–image granularity would otherwise pad every boundary between the two.
+/// A backend that cannot place textures refuses a `textures` heap, and its callers keep textures dedicated.
+enum class sg::memory_heap_contents
+{
+    buffers,
+    textures,
 };
 
 namespace sg
@@ -230,6 +251,8 @@ enum class texture_sample_type;
 enum class sampler_binding_type;
 enum class access_mode;
 struct binding;
+struct buffer_array_binding; // a buffer array by its layout's name, as a shader package generates it (binding/binding.hh)
+struct texture_array_binding; // the texture form
 struct compiler_info;
 struct compute_dimensions;
 struct compiled_shader;
@@ -287,8 +310,17 @@ class pipeline_footprint;                       // a pipeline's footprint, resol
 struct view_access;                             // the access and stages a bound view is declared with at an op
 struct array_declarations;                      // what a dispatch's declarations say about one bound array
 struct array_plan;                              // how a dispatch tracks one bound array, given its declarations
+struct array_declaration_link; // what a live array declaration and its list share (command_list/array_access_declaration.hh)
+using array_declaration_token = std::shared_ptr<array_declaration_link>;
+class array_declaration_book; // one bind point's live array declarations (barrier/array_declarations.hh)
+class array_skip_guard; // what an op's skipped arrays leave its barrier flush to check (barrier/array_declarations.hh)
+struct member_track;    // what tracking one declared array element found
+template <class ArrayBinding>
+struct array_site; // one array binding of one bound group, as an op meets it
 // the counts `cmd` recorded, for its backend to fold in at submit; defined in command_list/command_list.cc
 stat_counts const& recorded_stats(command_list const& cmd);
+// ends every array declaration made on `cmd` that is alive, silently, which every backend's submit calls; command_list/command_list.cc
+void end_array_declarations_at_submit(command_list& cmd);
 void record_stats(sg::stats const& delta); // each non-zero counted stat as one CC_RECORD_ACCUM; context/metrics.cc
 } // namespace impl
 
@@ -333,6 +365,7 @@ struct vertex_buffer_view;
 struct index_buffer_view;
 struct draw_config;
 struct draw_indexed_config;
+struct draw_indexed_args;
 
 // Ray-tracing pipeline + shader table (see raytracing/raytracing_pipeline.hh / raytracing/raytracing_shader_table.hh). A
 // DXR state object plus a table of shader identifiers; dispatched via cmd.raytracing.dispatch_rays.
@@ -391,6 +424,11 @@ inline constexpr int max_color_targets = 8;
 /// 8 is WebGPU's `maxVertexBuffers`; DX12 allows 32 (`D3D12_IA_VERTEX_INPUT_RESOURCE_SLOT_COUNT`) and Vulkan at least 16.
 inline constexpr int max_vertex_buffers = 8;
 
+/// Hard cap on the workgroups one dispatch runs along each axis, direct or indirect.
+/// 65535 is DX12's `D3D12_CS_DISPATCH_MAX_THREAD_GROUPS_PER_DIMENSION`, Vulkan's guaranteed `maxComputeWorkGroupCount` and WebGPU's default `maxComputeWorkgroupsPerDimension`.
+/// A one-dimensional dispatch of more groups is two-dimensional instead.
+inline constexpr int max_dispatch_groups_per_dimension = 65535;
+
 } // namespace sg
 
 /// A binding's identity inside a staging_binding_group, resolved once from its name.
@@ -443,7 +481,8 @@ using context_handle = std::shared_ptr<context>;
 using raw_buffer_handle = std::shared_ptr<raw_buffer const>; // shared-immutable: a view/handle can't reshape the buffer
 using raw_texture_handle = std::shared_ptr<raw_texture const>; // shared-immutable: shape is fixed at creation
 using blas_handle = std::shared_ptr<blas const>;               // shared-immutable: an opaque, driver-built structure
-using tlas_handle = std::shared_ptr<tlas const>; // shared-immutable: indexes a set of instances of blas_handle
+using tlas_handle = std::shared_ptr<tlas const>;         // shared-immutable: indexes a set of instances of blas_handle
+using micromap_handle = std::shared_ptr<micromap const>; // shared-immutable: an opaque, driver-built micromap
 using memory_heap_handle = std::shared_ptr<memory_heap const>;         // immutable resource — it tracks no allocations
 using compiled_shader_handle = std::shared_ptr<compiled_shader const>; // immutable compiled shader + reflection
 using binding_group_layout_handle = std::shared_ptr<binding_group_layout const>; // immutable per-group schema

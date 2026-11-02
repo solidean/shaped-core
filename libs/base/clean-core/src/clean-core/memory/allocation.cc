@@ -3,6 +3,7 @@
 #include <clean-core/common/assertf.hh>
 #include <clean-core/common/macros.hh>
 #include <clean-core/common/utility.hh>
+#include <clean-core/thread/atomic.hh>
 
 #include <cstdlib>
 
@@ -52,8 +53,8 @@ isize system_try_allocate_bytes(byte** out_ptr, isize min_bytes, isize max_bytes
 isize system_allocate_bytes(byte** out_ptr, isize min_bytes, isize max_bytes, isize alignment, void* userdata)
 {
     auto const result = system_try_allocate_bytes(out_ptr, min_bytes, max_bytes, alignment, userdata);
-    CC_ASSERTF(min_bytes == 0 || result >= 0, "allocation failed: requested [{}, {}] bytes with alignment {}",
-               min_bytes, max_bytes, alignment);
+    if (min_bytes > 0 && result < 0)
+        cc::impl::allocation_failed(min_bytes, max_bytes, alignment);
     return result;
 }
 
@@ -113,3 +114,22 @@ constinit cc::memory_resource const cc::system_memory_resource = {
 /// So the opt-out and the default are the same object here, and code that compares the two must ask CC_HAS_MIMALLOC.
 constinit cc::memory_resource const* const cc::default_memory_resource = &cc::system_memory_resource;
 #endif
+
+namespace
+{
+constinit cc::atomic<cc::allocation_failure_handler> g_allocation_failure_handler = nullptr;
+}
+
+void cc::set_allocation_failure_handler(allocation_failure_handler handler)
+{
+    g_allocation_failure_handler.store(handler, cc::memory_order_release);
+}
+
+void cc::impl::allocation_failed(isize min_bytes, isize max_bytes, isize alignment)
+{
+    if (auto const handler = g_allocation_failure_handler.load(cc::memory_order_acquire))
+        handler(min_bytes, max_bytes, alignment);
+    CC_ASSERTF_ALWAYS(false, "allocation failed: requested [{}, {}] bytes with alignment {}", min_bytes, max_bytes,
+                      alignment);
+    CC_UNREACHABLE("allocation_failed never returns");
+}

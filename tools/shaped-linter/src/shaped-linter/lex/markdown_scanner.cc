@@ -42,21 +42,30 @@ bool is_blank(cc::string_view line)
     return true;
 }
 
-/// Whether `line` is a bare `---`, unindented, with nothing after it but whitespace.
-bool is_frontmatter_delimiter(cc::string_view line)
+/// Whether `line` is a bare `delimiter`, unindented, with nothing after it but whitespace.
+bool is_frontmatter_delimiter(cc::string_view line, cc::string_view delimiter)
 {
-    return line.starts_with("---") && is_blank(line.subview(3));
+    return line.starts_with(delimiter) && is_blank(line.subview(delimiter.size()));
 }
 
 /// The closing delimiter's line if the file opens with frontmatter, else 0.
+/// YAML frontmatter is fenced by `---`, TOML frontmatter by `+++`, and the closer repeats the opener.
 /// An opener without a closer is a thematic break, so the whole block only exists once both are seen.
 u32 frontmatter_end(source_buffer const& buffer)
 {
-    if (buffer.line_count() == 0 || !is_frontmatter_delimiter(buffer.span_text(buffer.line_span(1))))
+    if (buffer.line_count() == 0)
+        return 0;
+
+    auto const first = buffer.span_text(buffer.line_span(1));
+    auto delimiter = cc::string_view();
+    for (auto const candidate : {cc::string_view("---"), cc::string_view("+++")})
+        if (is_frontmatter_delimiter(first, candidate))
+            delimiter = candidate;
+    if (delimiter.empty())
         return 0;
 
     for (u32 line = 2; line <= buffer.line_count(); ++line)
-        if (is_frontmatter_delimiter(buffer.span_text(buffer.line_span(line))))
+        if (is_frontmatter_delimiter(buffer.span_text(buffer.line_span(line)), delimiter))
             return line;
 
     return 0;

@@ -126,7 +126,8 @@ cc::vector<cc::string_view> reexporting_namespaces(lint_context const& ctx)
             continue;
 
         // Only the namespace the directive sits DIRECTLY in gains the names, and of a nested-name form
-        // only its innermost component: a `using namespace` inside `a::b` does nothing for `a`. So this
+        // only its innermost component: a `using namespace` inside `a::b` does nothing for `a`.
+        // So this
         // follows the parent link rather than asking which bodies span the directive.
         auto const ns = enclosing_namespace(ctx.tree, d);
         if (ns < 0)
@@ -140,7 +141,8 @@ cc::vector<cc::string_view> reexporting_namespaces(lint_context const& ctx)
 }
 
 /// Is the declarator-id in front of the `(` at `paren` qualified by a namespace that reaches the aliases?
-/// `cc::async_thread_pool::try_get_work(` — yes, through `cc`. A bare `work(` is not, and neither is
+/// `cc::async_thread_pool::try_get_work(` — yes, through `cc`.
+/// A bare `work(` is not, and neither is
 /// `f(cc::u32 x)`: only what sits BEFORE the parameter list can name the scope the definition belongs to.
 bool declarator_is_reexporting(cc::span<token const> toks,
                                cc::span<isize const> sig,

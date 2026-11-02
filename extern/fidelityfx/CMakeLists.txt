@@ -43,7 +43,8 @@ target_compile_options(fidelityfx-fsr3 PRIVATE $<$<CXX_COMPILER_ID:Clang,AppleCl
 # includes are rewritten to bare file names, which is sound because every basename in the set is unique.
 # The gap this works around is "Package-level include paths" under Deferred in libs/graphics/shaped-shader-library/docs/structure.md.
 # The copy is gitignored, and configure refreshes it, so it can never be staler than the fetched sources.
-set(_fsr_shader_dir "${CMAKE_SOURCE_DIR}/libs/graphics/shaped-rendering/shaders/fsr3")
+# Relative to this file, not CMAKE_SOURCE_DIR: that is the consumer's root when shaped-core is a subdirectory.
+set(_fsr_shader_dir "${CMAKE_CURRENT_LIST_DIR}/../../libs/graphics/shaped-rendering/shaders/fsr3")
 file(GLOB _fsr_shader_sources
     "${FIDELITYFX_ROOT}/api/internal/gpu/*.h"
     "${FIDELITYFX_ROOT}/upscalers/fsr3/include/gpu/fsr1/*.h"

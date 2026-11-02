@@ -10,6 +10,7 @@
 #include <shaped-graphics/binding/compiled_shader.hh>
 #include <shaped-graphics/fwd.hh>
 #include <shaped-shader-library/compiler/shader_compiler.hh>
+#include <shaped-shader-library/filesystem/filesystem.hh> // slib::file_dependency
 #include <shaped-shader-library/fwd.hh>
 
 /// One shader, compiled on demand and kept current across reloads.
@@ -29,11 +30,13 @@ class slib::shader_asset
 public:
     /// `library` is weak on purpose — see the note on the members.
     /// `options` names the options of its SGL source the entry point reaches, which are all an acquire keys on.
+    /// `file_namespace` is `shader_definition::file_namespace`, empty for a source that is not SGL.
     shader_asset(std::weak_ptr<shader_library> library,
                  cc::string virtual_path,
                  sg::shader_stage stage,
                  cc::string entry_point,
-                 cc::vector<cc::string> options = {});
+                 cc::vector<cc::string> options = {},
+                 cc::string file_namespace = {});
 
     /// The compiled shader in a format `ctx` accepts, preferring the context's own order.
     /// The result carries an async error if no registered compiler connects this package's language to any format the context takes.
@@ -81,15 +84,22 @@ public:
     [[nodiscard]] sg::shader_stage stage() const { return _stage; }
     [[nodiscard]] cc::string_view entry_point() const { return _entry_point; }
 
-    /// Every virtual path this shader was built from — its source plus the includes that were resolved, across all formats compiled so far.
+    /// Every file this shader was built from — its source, the includes resolved and the modules reached — across all formats compiled so far.
+    /// Each at the revision its compile read, so a path read at two revisions appears twice.
     /// What the reload watcher polls.
     /// Empty before the first acquire, which is why a shader is only watched once someone has asked for it.
-    [[nodiscard]] cc::vector<cc::string> dependencies() const;
+    [[nodiscard]] cc::vector<file_dependency> dependencies() const;
 
     /// Stages a recompile of every format and option set compiled so far.
     /// Called by the reload watcher; the next acquire() picks the results up.
     /// A pair nobody ever acquired is skipped — recompiling it would burn the compiler on a shader that is never used.
+    /// One whose first compile is still running is skipped too, and that compile's acquire sets missed_reload() once it installs.
+    /// Clears missed_reload(), since every installed pair is restaged.
     void stage_reload();
+
+    /// Whether a first compile installed a shader built from a file that has moved since it was read, so the asset owes a reload.
+    /// The watcher's next scan calls stage_reload() for such an asset, on its own thread.
+    [[nodiscard]] bool missed_reload() const;
 
 private:
     /// One target format's state under one set of option values.
@@ -101,7 +111,7 @@ private:
         cc::vector<shader_option> options;
         sg::async_compiled_shader current;
         sg::async_compiled_shader pending;
-        cc::vector<cc::string> dependencies; ///< source, resolved includes and module files reached, as of the last compile
+        cc::vector<file_dependency> dependencies; ///< source, resolved includes and module files reached, as of the last compile
     };
 
     struct state
@@ -109,6 +119,8 @@ private:
         // Linear scan over a handful of entries — a shader is consumed by one or two backends, under a few option sets.
         cc::small_vector<format_entry, 2> formats;
         u64 generation = 0;
+        /// Set by a first compile that read a file since edited, cleared by the stage_reload that makes up for it.
+        bool reload_missed = false;
         cc::optional<cc::string> last_error;
     };
 
@@ -125,6 +137,7 @@ private:
     sg::shader_stage _stage;
     cc::string _entry_point;
     cc::vector<cc::string> _options;
+    cc::string _file_namespace;
 
     // The watcher stages compiles from its own thread while a consumer acquires.
     // Mutable so acquire() stays const: promoting a staged compile is not a change a caller can observe as one.

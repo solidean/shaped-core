@@ -40,7 +40,7 @@ Every operation is reached through one of seven scope members, so the call site 
 |---|---|---|
 | `cmd.upload` | host→device writes, visible to later commands in the same list | [inline upload](upload.inline.md) |
 | `cmd.download` | device→host reads, delivered after the list runs | [inline download](download.inline.md) |
-| `cmd.copy` | device→device buffer copies | — |
+| `cmd.copy` | device→device copies: buffer regions, and a buffer into a texture | — |
 | `cmd.compute` | bind a compute pipeline + groups, dispatch | [bindings](bindings.md), [caches](caches.md) |
 | `cmd.raster` | open a rendering scope over a set of targets, then draw | [raster pipeline](raster-pipeline.md) |
 | `cmd.raytracing` | build acceleration structures, trace rays | [acceleration structures](acceleration-structures.md), [raytracing pipeline](raytracing-pipeline.md) |
@@ -89,24 +89,24 @@ Both survive their command list: the future pins its own destination bytes.
 
 An epoch advance does **not** deliver a download — it drains the GPU, and the readback copy runs on a separate actor.
 
-## Load-bearing invariants
+## Invariants
 
 1. **A list is consumed exactly once**, by submit or by drop, both through the context.
 2. **A list cannot span epochs** — enforced per list, and in aggregate at `advance_epoch`.
 3. **Recording is single-threaded per list**; concurrent lists are fine and each takes its own access-tracking slot.
 4. **Access is inferred, not declared**, except where sg cannot see into the code and the caller says what it will do.
-   Array/bindless elements are declared per dispatch or draw via `declare_array_*_access` and accounted for, and foreign code declares what it touches when it opens a `dx12_native_scope`.
+   Array/bindless elements are declared per dispatch or draw via `declare_array_*_access` and accounted for.
+   Foreign code declares what it touches when it opens a `dx12_native_scope` or a `metal_native_scope`.
 5. **A scope is pinned to its list** — no copy, no move, no independent lifetime.
 6. **Draws require an open rendering scope**, and `begin_rendering` / `end_rendering` must balance.
 
 ## What is implemented today vs deferred
 
-**dx12** records all seven scopes.
-**vulkan** creates devices and resources, but its recording paths are stubs.
-Only `raytracing.is_supported()` and `query.is_supported()` answer honestly, returning false; every other recording call is a `CC_UNREACHABLE` that aborts rather than a no-op.
+**dx12**, **vulkan**, **webgpu** and **metal** all record the seven scopes.
+`raytracing.is_supported()` and `query.is_supported()` answer what the device offers, so a backend or device without ray tracing or timestamps says so there.
 
-One gap in the dx12 path is worth knowing before you rely on it:
-`cmd.copy` is buffer-only; texture copies land under the same `<resource>_<bytes|data>_region` naming.
+One gap is worth knowing before you rely on it:
+`cmd.copy` copies buffer regions, and a buffer into a texture region (`buffer_to_texture`); texture→buffer and texture→texture copies do not exist yet.
 
 ## See also
 

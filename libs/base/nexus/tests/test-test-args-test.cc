@@ -75,7 +75,7 @@ TEST("test args - the declared line is what nx::args parses", nx::config::args("
     args.arg({"j", "jobs"}, jobs, "how many");
     args.positional("REST", rest, {.desc = "whatever else"});
 
-    // The whole point: a test or example parses its own command line with the same machinery a tool does.
+    // A test or example parses its own command line with the same machinery a tool does.
     REQUIRE(args.parse(nx::test_args()).ok());
     CHECK(jobs == 12);
     REQUIRE(rest.size() == 1);

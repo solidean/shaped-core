@@ -7,7 +7,7 @@ Repo-wide docs are at [docs/_index.md](../../../../docs/_index.md).
 ## Source organization
 
 typed-geometry's headers live in `src/typed-geometry/`, grouped by module.
-`scalar/`, `linalg/`, `transform/` and the first `geometry/` primitives exist today; every other module in the roadmap is planned.
+`scalar/`, `linalg/`, `transform/`, the first `geometry/` primitives and `camera/` exist today; every other module in the roadmap is planned.
 
 ```text
 typed-geometry/
@@ -17,6 +17,7 @@ typed-geometry/
   linalg/       # vec, pos, comp, bivec, mat, quat (+ ops)
   transform/    # homogeneous_transform<DSource, DTarget, T, Flags> + composed/inverse + the object handshake
   geometry/     # object_traits seam + primitives (aabb/triangle/segment/ray/line/plane/sphere/ellipsoid); queries planned
+  camera/       # projections in every convention, look_at, and view_projection's project / unproject
 ```
 
 Forward declarations and the dimensional/typed aliases live in a per-module `fwd.hh` — `scalar/fwd.hh`, `linalg/fwd.hh`, `transform/fwd.hh`, `geometry/fwd.hh` — chained along the dependency order.
@@ -25,13 +26,14 @@ The top-level `fwd.hh` only aggregates them, so include a single module's when t
 ## Module docs
 
 One doc per module under [modules/](modules/), answering **"what belongs here?"** and **"why is it this way?"**.
-Motivation, scope, and the load-bearing decisions, in the spirit of an ADR — not a cheat sheet, and not the roadmap.
+Motivation, scope, and the decisions the design rests on, in the spirit of an ADR — not a cheat sheet, and not the roadmap.
 Add one when a module lands, and cover the big rationales there; the small ones stay in source comments.
 
 - [modules/scalar](modules/scalar.md) — the scalar seam, `angle`, which types count as scalars.
 - [modules/linalg](modules/linalg.md) — `vec`/`pos`/`comp`/`bivec`/`mat`/`quat`; the `pos + pos` translation rule and the `bivec != vec` decision.
 - [modules/transform](modules/transform.md) — one transform type over a capability lattice.
   Why containment is not a bit test, why widening is explicit, and how an object's `.transformed(t)` picks its return type.
+- [modules/camera](modules/camera.md) — projections and views; why the default is left-handed reverse-Z, and the project / unproject round trip as the contract.
 - [modules/geometry](modules/geometry.md) — the primitive types and the `object_traits` point-set seam (`intrinsic_dim`/`ambient_dim`/`is_finite`); representation vs. interpretation.
 
 ## Topics
@@ -43,7 +45,7 @@ Add one when a module lands, and cover the big rationales there; the small ones 
 - [plans/geometry-query-matrix](plans/geometry-query-matrix.md) — the `geometry/query/` layer: member verbs, the per-pair seam and its fallback ladder.
   Also the GJK / EPA floor and the special-case policy.
 - [plans/old-tg-carryover](plans/old-tg-carryover.md) — the object roster in waves, the unary verbs, measures, parameters and sampling, and what of the old tg was left out.
-- [TODO](TODO.md) — running list of known follow-ups.
+- [issues](issues/) — open issues: known bugs, gaps and follow-ups, one file each.
 - [cheat-sheet](../cheat-sheet.md) — the public API at a glance, one symbol per line.
 
 ## Conventions

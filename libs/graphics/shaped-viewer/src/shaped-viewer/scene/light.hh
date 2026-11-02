@@ -298,6 +298,9 @@ namespace sv
 inline constexpr u32 light_flag_two_sided = 1u << 0;
 inline constexpr u32 light_flag_visible_to_camera = 1u << 1;
 inline constexpr u32 light_flag_casts_no_shadow = 1u << 2;
+/// `light_path_mesh` only: the record's `emission` is a stand-in for an emission no read saw above zero.
+/// Selection alone reads it, giving a kind made only of such records a sliver of the choice rather than half of it.
+inline constexpr u32 light_flag_unseen_emission = 1u << 3;
 
 /// `l` as the path tracer reads it, module `tracer`'s `light_record`, its intensity converted to the canonical quantity of
 /// its path, and every byte written, pads included, since the trace hash covers these bytes.

@@ -115,8 +115,8 @@ struct scene_options
     REQUIRE(comp.has_value());
 
     // Everything the check reads is recorded only while the checks are on.
-    auto const was_on = ctx.portability_checks();
-    ctx.set_portability_checks(true);
+    auto const was_on = ctx.hit_record_checks();
+    ctx.set_hit_record_checks(true);
 
     float const verts[18] = {
         10, 10, 0, 11, 10, 0, 10, 11, 0, // geometry 0, out of every ray's path
@@ -195,13 +195,13 @@ struct scene_options
     auto group = ctx.persistent.create_binding_group(group_layout, cc::span<sg::named_view const>(views));
     REQUIRE(group != nullptr);
 
-    ctx.set_portability_checks(options.checks_at_dispatch);
+    ctx.set_hit_record_checks(options.checks_at_dispatch);
     auto disp = ctx.create_command_list();
     disp->raytracing.bind_pipeline(*pipeline);
     disp->raytracing.bind_group(0, *group);
     disp->raytracing.dispatch_rays(*table, raygen_idx, 3);
     ctx.submit_command_list(cc::move(disp));
-    ctx.set_portability_checks(was_on);
+    ctx.set_hit_record_checks(was_on);
 
     auto down = ctx.create_command_list();
     auto future = down->download.data_from_buffer<u32>(out_buf, 0, 3);
@@ -248,7 +248,7 @@ ASYNC_INVOCABLE_TEST("ssc::dxc + dx12 - dispatch_rays logs an instance whose BLA
     check_record_math(result);
 }
 
-ASYNC_INVOCABLE_TEST("ssc::dxc + dx12 - dispatch_rays checks no hit records while portability checks are off",
+ASYNC_INVOCABLE_TEST("ssc::dxc + dx12 - dispatch_rays checks no hit records while the hit-record checks are off",
                      (sg::context_handle const& handle))
 {
     REQUIRE(handle != nullptr);

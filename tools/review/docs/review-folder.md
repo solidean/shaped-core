@@ -56,7 +56,7 @@ An attachment does not: the run that produced it is gone, and `review run` re-ru
 
 **A review folder is scratch, and there is no migration promise.**
 It lives under `.tmp/`, the tool changes under it, and a format change may simply break one — starting a fresh review is the answer.
-Making a review durable is a separate thing the tool does not do yet; `TODO.md` carries it.
+Making a review durable is a separate thing the tool does not do yet; [feat-review-export](issues/feat-review-export.md) carries it.
 
 ## review.toml
 

@@ -143,6 +143,26 @@ TEST("sg access_state - write after read serializes (WAR)")
     CHECK(b.dst_access.has_all(shader_write));
 }
 
+TEST("sg access_state - a read after an op that read and wrote waits on that write")
+{
+    // One op reading and writing a resource through two bindings declares the two halves apart, so the read lands in the read bucket.
+    // That read was synced against the write before the op, never against the op's own write: marking it barriered let
+    // the next pure read through with no barrier, and it raced the write it reads.
+    sg::resource_access_state s;
+    s.declare(compute, shader_write);
+    (void)s.flush();
+
+    s.declare(compute, access_flag::storage_read);
+    s.declare(compute, shader_write);
+    REQUIRE(s.flush().needed); // WAW
+
+    s.declare(compute, access_flag::storage_read);
+    auto const b = s.flush();
+    REQUIRE(b.needed);
+    CHECK(b.src_access.has(shader_write));
+    CHECK(b.dst_access.has(access_flag::storage_read));
+}
+
 TEST("sg access_state - reset_keep_layout clears timelines")
 {
     sg::resource_access_state s;

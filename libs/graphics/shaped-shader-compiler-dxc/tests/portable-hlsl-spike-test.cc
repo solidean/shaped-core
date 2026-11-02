@@ -36,7 +36,7 @@
 //      indices.
 //   5. across the two targets an unnumbered binding keeps its name and type but not its index.
 //
-// Every compile runs with default compile_options, so warnings_as_errors is ON — that is the point of (1).
+// Every compile runs with default compile_options, so warnings_as_errors is ON, which is what makes (1) an error.
 
 namespace
 {

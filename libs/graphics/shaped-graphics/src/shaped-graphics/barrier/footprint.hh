@@ -123,6 +123,7 @@ namespace sg::impl
 [[nodiscard]] pipeline_stage_flags stages_of(shader_stage stage);
 
 /// Logs `message` as an error, once per pipeline, binding and message.
+/// `message` must be a string literal: its address, not its text, is what tells one message from another.
 ///
 /// For a declaration that disagrees with what a pipeline's code does.
 /// A hot-reloaded shader can cause one, so it degrades to a conservative barrier rather than asserting, and a frame loop

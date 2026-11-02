@@ -214,7 +214,7 @@ TEST("sgl check - a compute stage forms its quads along one axis, four invocatio
     CHECK(shaped("(64)", "quad_swap_y(li as float)") == "");
     CHECK(shaped("(8, 8)", "quad_swap_x(li as float)")
               .contains("invalid-entry-point user:[quad_swap_x(li as float)] quad_swap_x forms quads along one axis"));
-    CHECK(shaped("(6)", "quad_broadcast(li as float, 1)").contains("cs's is (6, 1, 1)"));
+    CHECK(shaped("(6)", "quad_broadcast(li as float, 1)").contains("one reaching it has (6, 1, 1)"));
     // the rest of the family takes the subgroup whole, whatever the workgroup's shape
     CHECK(shaped("(8, 8)", "subgroup_add(li as float)") == "");
 }

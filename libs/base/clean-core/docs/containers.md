@@ -44,7 +44,7 @@ Both are **not contiguous** once the content wraps, which is what separates them
 There is no `data()` and no pointer iterator: `segments()` hands out the up to two contiguous runs, and `linearize()` rearranges the content into one.
 
 `push_back_overwriting` / `push_front_overwriting` drop the element at the opposite end instead of growing, which is how a ring spells "keep the newest N".
-There is deliberately no `cc::deque`: the storage strategy is load-bearing enough that it splits into separate types, `ringbuffer` here and `devector` for a contiguous double-ended store.
+There is deliberately no `cc::deque`: the storage strategy shapes too much to hide, so it splits into separate types, `ringbuffer` here and `devector` for a contiguous double-ended store.
 
 Non-owning views — the viewed storage must outlive them, except where noted:
 

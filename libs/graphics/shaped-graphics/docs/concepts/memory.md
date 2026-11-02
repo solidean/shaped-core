@@ -47,29 +47,37 @@ The axes are independent, but in practice:
 
 - **Persistent** resources are where the placed-vs-dedicated choice matters most: long-lived resources
   are what you pack into shared heaps to control fragmentation and allocation count.
-- **Transient** *buffers* are backed by a **placed linear allocation** on top of a heap — a bump allocator reclaimed per epoch — rather than a dedicated allocation each frame.
-  A transient *texture* is dedicated, because the bump heap is buffers-only; it is auto-expired at the next epoch all the same.
+- **Transient** buffers and textures are backed by a **placed linear allocation** on top of a heap — a bump allocator reclaimed per epoch — rather than a dedicated allocation each frame.
+  Creating and freeing a texture every frame is what that avoids: on a laptop RTX 5070 each one blocked in the driver for 1 to 3 ms, and Sponza's hybrid frame created six.
 
 ## Transient allocation
 
 `ctx.transient.create_raw_buffer(size, usage)` sub-allocates from a **per-epoch bump allocator** over one DEFAULT heap the transient scope owns.
+`ctx.transient.create_texture_2d(...)` does the same over a second heap of its own, since a heap holds one kind of resource (`memory_heap_contents`).
 A monotonic head hands out placement offsets and **resets to 0 whenever the epoch changes**, so successive epochs alias the same storage — which is not only safe but desired.
 It is safe because a single direct queue executes each epoch's GPU work before the next's.
 Epoch N's transient memory is therefore finished before epoch N+1 resets to 0 and touches it: the epoch boundary is the barrier.
 It is desired because a one-epoch-sized heap serves any pipelining depth, which is smaller and kinder to caches than a ring sized for every in-flight frame.
 A request larger than the budget falls back to a dedicated (committed) allocation.
-The budget defaults to 128 MiB and covers everything the bump heap backs, set with `ctx.transient.set_budget`.
+The buffer budget defaults to 128 MiB, set with `ctx.transient.set_budget`, and the texture budget to 256 MiB, set with `ctx.transient.set_texture_budget`.
 That setter is deferred: it records a pending budget and returns without touching the GPU.
 The **next** `advance_epoch` applies it by dropping the heap, and the next transient allocation creates one at the new size, so the change is predictable and never mid-epoch.
 Nothing waits: every buffer placed in the old heap holds a handle to it, and its release is epoch-deferred, so the old heap lives exactly as long as the GPU work that reads it.
 For an epoch or two both heaps exist; a caller for whom that matters lets the in-flight epochs retire before setting the budget.
 
-> This bump-reset-and-alias scheme is specific to buffers, whose transient contents are only ever GPU-touched.
+> This bump-reset-and-alias scheme is specific to buffers and textures, whose transient contents are only ever GPU-touched.
 > Transient **descriptors** are different: they are written by the CPU at group creation, so a slot cannot be reused until the epoch that wrote it retires.
 > They therefore use a per-epoch ring rather than a bump-reset — see [bindings](bindings.md).
-> Transient **textures** are dedicated allocations tagged transient, which the backend auto-expires at the next epoch.
-> Placing them in the shared heap needs texture memory-requirement queries, plus a backend heap that allows buffers and textures together.
-> On dx12 that means Resource Heap Tier 2, dropping the current `ALLOW_ONLY_BUFFERS` flag.
+
+A placed transient texture **starts with undefined contents**: its memory held an earlier epoch's texture.
+Its first barrier is the one from `undefined`, which on dx12 carries the discard that D3D12 requires to initialize a placed render target, and on Vulkan is the image's own initial transition.
+**Keep the epochs in flight bounded**, as a swapchain does: with dozens queued, every new frame's textures overlap memory the queued ones still use.
+The NVIDIA driver then stalls when a placed render target is bound, for up to 2 s in a benchmark that queued 48 frames unthrottled.
+Throttled to 2 in flight, the same frames recorded in 5 ms where dedicated textures had taken 15.
+A texture falls back to a dedicated allocation where it cannot be placed:
+- **The backend places no textures**: metal (until [feat-sg-metal-texture-heap](../issues/feat-sg-metal-texture-heap.md)), webgpu, and dx12 below resource heap tier 2.
+- **The heap cannot hold this one**: a multisampled texture on dx12, which needs a 4 MiB placement alignment, or a Vulkan image whose memory types exclude the heap's.
+- **The epoch's window is full.**
 
 ## Expiry
 
@@ -81,17 +89,18 @@ expiry state, independent of how it was allocated:
 
 A **transient** buffer is auto-expired when its epoch advances (its bump storage is about to be reused).
 A **persistent** buffer can be expired **explicitly** to free memory early without hunting down every
-`shared_ptr`. Using an expired buffer in a transfer or a binding is a hard error (asserted). A transient
+`shared_ptr`.
+Using an expired buffer in a transfer or a binding is a hard error (asserted). A transient
 `binding_group` has the analogous rule — binding one past its epoch asserts, since the ring may have
 recycled its descriptor slots.
 
 ## Status
 
-Both **dedicated** and **placed** buffer backing work on dx12.
-`ctx.persistent.create_memory_heap(size)` mints a heap, and a placement's `allocation_info` routes `create_raw_buffer` through `CreatePlacedResource`.
-The buffer holds a handle to its heap, so the heap outlives the placement.
-`ctx.transient` exposes per-epoch buffers, textures and binding groups, though only the buffers are bump-suballocated.
-The vulkan backend stubs all of it — heaps, placed resources, transient — until its own milestone.
+Both **dedicated** and **placed** backing work for buffers on dx12, vulkan and metal, and for textures on dx12 and vulkan.
+`ctx.persistent.create_memory_heap(size, contents)` mints a heap of buffers or of textures.
+A placement's `allocation_info` routes the create through `CreatePlacedResource`, `vkBind*Memory` or the metal heap.
+The resource holds a handle to its heap, so the heap outlives the placement.
+`ctx.transient` bump-suballocates its buffers and textures, and exposes per-epoch binding groups.
 
 ## See also
 

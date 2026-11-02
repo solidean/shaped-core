@@ -31,7 +31,7 @@ Standard shared/weak counting, with one rule that the intrusive layout makes sha
 
 The counts must stay readable between those two points, so `destroy_object` must not destroy them.
 With trailing control that is automatic, since the control is separate storage; an intrusive Traits must run a payload-only teardown instead, which is what async's node does.
-`Traits::release_strong` reports what the caller must do next, and the order it reports is load-bearing.
+`Traits::release_strong` reports what the caller must do next, and the order it reports is fixed.
 [shared_ptr.hh](../../src/clean-core/memory/shared_ptr.hh)'s header block carries the case table and the reason, and is the single authority on it.
 
 ## The two escape hatches, and why they differ
@@ -49,6 +49,15 @@ Neither hatch adopts an arbitrary raw pointer.
 Upcasts to a base with the **same** Traits are allowed; aliasing or projecting to a subobject is deferred rather than planned.
 `weak_ptr` needs a Traits with `supports_weak`, and a strong-only Traits static-asserts.
 
+**A const element is a view, never a const object.**
+- `make_shared<T const>` constructs a plain `T`, so every payload is a non-const object, however a handle sees it.
+- A handle passes its Traits the pointer with const removed; that is defined only because of the line above, so a Traits never sees const.
+- So counts may be members of the payload, as an intrusive Traits has them, without `mutable`.
+- The default Traits are keyed on the element without const: `shared_ptr<T const>` uses `default_shared_traits<T>`, which static-asserts an unqualified `T`.
+  Adding const, `shared_ptr<T>` to `shared_ptr<T const>`, is then the same-Traits upcast; removing it does not compile.
+- A custom Traits is named explicitly, so it is already the same type for `T` and `T const`.
+- Were a second way to make a node ever added, it would have to keep this: a payload made const would turn a Traits' writes to member counts into undefined behaviour.
+
 ## Why the rest of the repo is still on std::shared_ptr
 
 Not an oversight, and worth knowing before "migrating" anything:
@@ -56,7 +65,7 @@ Not an oversight, and worth knowing before "migrating" anything:
 - shaped-graphics' resources are polymorphic — `dx12_buffer final : public sg::raw_buffer`.
   So `default_shared_traits`' `sizeof(T)`-derived control offset cannot find the counts through a base-typed handle.
   They also derive from `std::enable_shared_from_this`, with 30+ `shared_from_this()` call sites that `cc::shared_ptr` has no equivalent for.
-  See [sg's TODO](../../../../graphics/shaped-graphics/docs/TODO.md).
+  See [sg's issue](../../../../graphics/shaped-graphics/docs/issues/chore-sg-cc-shared-ptr-handles.md).
 - shaped-shader-library's filesystem handles are polymorphic, and `default_shared_traits` places the control block at an offset derived from `sizeof(T)`.
   So a base-typed handle to a derived object would look for the counts in the wrong place.
   That needs a base-keyed Traits, which is the same shape async had to write by hand.

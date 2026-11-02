@@ -5,10 +5,10 @@
 #include <clean-core/record/thread_scopes.hh>
 #include <clean-core/record/value.hh>
 #include <clean-core/thread/atomic.hh>
+#include <clean-core/thread/native_thread.hh>
 #include <clean-core/thread/thread.hh>
 #include <nexus/test.hh>
 
-#include <thread>
 
 using namespace cc_rec_test;
 
@@ -74,7 +74,7 @@ REC_TEST("record/scopes - an open scope is visible to a reader that is not the t
     auto release = cc::atomic<bool>(false);
     auto worker_id = cc::atomic<cc::thread_id>(cc::thread_id::invalid);
 
-    auto worker = std::thread(
+    auto worker = cc::native_thread::start(
         [&]
         {
             worker_id.store(cc::current_thread_id(), cc::memory_order_release);

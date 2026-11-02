@@ -34,7 +34,7 @@ struct open_request
 
 /// One lookup.
 ///
-/// **Its position in the mailbox is load-bearing.** Messages dispatch in send order, so a get enqueued after a put
+/// **Its position in the mailbox is part of the contract.** Messages dispatch in send order, so a get enqueued after a put
 /// sees that put's writes — and no get ever interleaves with one, which is what makes the blob handle a read streams through impossible for this actor to invalidate under itself.
 struct get_request
 {

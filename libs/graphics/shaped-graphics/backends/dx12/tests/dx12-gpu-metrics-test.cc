@@ -140,7 +140,7 @@ INVOCABLE_TEST("sg dx12 - the memory query answers coherently on any adapter", (
 
 TEST("sg dx12 - print the GPU metrics", nx::config::manual)
 {
-    // Never swept: the numbers are whatever this machine's GPU is doing, and the point is that a human reads them.
+    // Never swept: the numbers are whatever this machine's GPU is doing, and a human reads them.
     // A test can assert a budget is positive; only a person notices it is implausible.
     auto handle = dx12::make_fresh_context();
     if (handle == nullptr)
@@ -198,7 +198,7 @@ TEST("sg dx12 - a recording is stamped with the GPU", nx::config::exclusive(), n
         cc::rec::unregister_listener(registration);
     }
 
-    // The whole point of the contributor seam: cc has no idea GPUs exist, and the recording still says which one is in
+    // The contributor seam at work: cc has no idea GPUs exist, and the recording still says which one is in
     // the machine.
     auto section = cc::string();
     listener.result().for_each_event(

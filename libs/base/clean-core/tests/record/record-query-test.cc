@@ -6,10 +6,10 @@
 #include <clean-core/record/recording.hh>
 #include <clean-core/record/system.hh>
 #include <clean-core/string/string.hh>
+#include <clean-core/thread/native_thread.hh>
 #include <clean-core/thread/thread.hh>
 #include <nexus/test.hh>
 
-#include <thread>
 
 using namespace cc::primitive_defines;
 using namespace cc_rec_test;
@@ -103,7 +103,7 @@ REC_TEST("record/query - narrowing by thread keeps only what this thread wrote")
 
         CC_RECORD_MARK("from-here");
 
-        std::thread worker(
+        auto worker = cc::native_thread::start(
             []
             {
                 cc::rec::set_current_thread_record_name("worker");
@@ -337,7 +337,7 @@ REC_TEST("record/query - decimating says what it no longer knows")
     CHECK(thinned.count("old") == 0);
     CHECK(thinned.count("recent") == 1);
 
-    // The whole point: the result reports the span it threw away rather than pretending nothing happened there.
+    // The result reports the span it threw away rather than pretending nothing happened there.
     CHECK(thinned.count_of_kind(cc::rec::event_kind::dropped_span) == 1);
 
     isize reported = 0;

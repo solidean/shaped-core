@@ -152,7 +152,7 @@ nx::args_builder build_cli(nx::test_schedule_config& config, cli_state& state)
         .name = "nexus",
         .description = "Unified test, fuzz, benchmark, and app runner for modern C++",
 
-        // Load-bearing: C++ TestMate identifies a Catch2-compatible binary by running --help and scanning
+        // C++ TestMate identifies a Catch2-compatible binary by running --help and scanning
         // its output for this version string.
         // Changing or dropping it silently stops an IDE from discovering any test in this binary.
         // libs/base/nexus/docs/catch2-runner-compat.md is the contract.

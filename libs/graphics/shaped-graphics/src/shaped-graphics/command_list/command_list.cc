@@ -1,4 +1,5 @@
 #include <clean-core/common/assert.hh>
+#include <clean-core/common/assertf.hh>
 #include <clean-core/record/log.hh>
 #include <shaped-graphics/command_list/command_list.hh>
 #include <shaped-graphics/context/context.hh>
@@ -6,7 +7,55 @@
 
 namespace sg
 {
-command_list::~command_list() = default;
+command_list::~command_list()
+{
+    // A drop, or the list consumed: a value destroyed later must find its token dead rather than this list.
+    end_array_declarations(false);
+}
+
+array_access_declaration command_list::adopt_array_declaration(u32 id, bool raster)
+{
+    auto link = std::make_shared<impl::array_declaration_link>(impl::array_declaration_link{
+        .list = this,
+        .id = id,
+        .raster = raster,
+    });
+    _live_array_declarations.push_back(link);
+    return array_access_declaration(cc::move(link));
+}
+
+buffer_array_binding command_list::named_buffer_array(cc::string_view name)
+{
+    CC_ASSERTF(context().holds_array_binding(name, false),
+               "an array declaration names '{}', and no binding group layout this context holds has a buffer array of "
+               "that name. Is it misspelled, or an array of textures?",
+               name);
+    return {.name = name};
+}
+
+texture_array_binding command_list::named_texture_array(cc::string_view name)
+{
+    CC_ASSERTF(context().holds_array_binding(name, true),
+               "an array declaration names '{}', and no binding group layout this context holds has a texture array of "
+               "that name. Is it misspelled, or an array of buffers?",
+               name);
+    return {.name = name};
+}
+
+void command_list::end_array_declaration(impl::array_declaration_link& link)
+{
+    _live_array_declarations.remove_first_where([&](impl::array_declaration_token const& t) { return t.get() == &link; });
+    link.list = nullptr;
+    withdraw_array_declaration(link.id);
+}
+
+void command_list::end_array_declarations(bool raster_only)
+{
+    for (auto const& link : _live_array_declarations)
+        if (!raster_only || link->raster)
+            link->list = nullptr;
+    _live_array_declarations.remove_all_where([](impl::array_declaration_token const& t) { return t->list == nullptr; });
+}
 
 void command_list::ensure_layout(raw_texture_handle texture, texture_layout layout, cc::optional<subresource_range> range)
 {
@@ -57,4 +106,10 @@ void command_list::note_render_pass_split(cc::string_view cause, split_remedy re
 sg::impl::stat_counts const& sg::impl::recorded_stats(command_list const& cmd)
 {
     return cmd._stats;
+}
+
+void sg::impl::end_array_declarations_at_submit(command_list& cmd)
+{
+    // Silently, as a drop does: no op follows a submit on this list, so a value outliving it has nothing to leak into.
+    cmd.end_array_declarations(false);
 }

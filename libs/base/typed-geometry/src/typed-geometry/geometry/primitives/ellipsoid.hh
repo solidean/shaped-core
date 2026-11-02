@@ -32,6 +32,8 @@
 template <int D, int DAmbient, class T>
 struct tg::ellipsoid
 {
+    using scalar_t = T;
+
     static_assert(D > 0, "ellipsoid requires a positive dimension");
     static_assert(D <= DAmbient, "an ellipsoid cannot curve in more dimensions than the space it is embedded in");
 
@@ -193,6 +195,8 @@ public:
 template <int D, int DAmbient, class T>
 struct tg::ellipsoid_boundary
 {
+    using scalar_t = T;
+
     static_assert(D > 0, "ellipsoid_boundary requires a positive dimension");
     static_assert(D <= DAmbient, "an ellipsoid cannot curve in more dimensions than the space it is embedded in");
 

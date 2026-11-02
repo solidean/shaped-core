@@ -233,7 +233,8 @@ void cc::rec::console_listener::on_chunk(cc::rec::chunk_view const& view)
         if (e.is_truncated())
             line += cc::console::colorize(cc::console::color::dim, " ...(truncated)", _colored);
 
-        if (_options.show_site)
+        // below SC_SOURCE_SITES=FULL a descriptor keeps no site, so there is none to show
+        if (_options.show_site && e.site().file[0] != '\0')
         {
             auto const site = cc::format("  ({}:{})", short_file(e.site().file), e.site().line);
             line += cc::console::colorize(cc::console::color::dim, site, _colored);

@@ -30,7 +30,7 @@ ASYNC_INVOCABLE_TEST("sv - a canvas draws its drawings into the frame, from the 
     auto& ctx = *ctx_h;
     auto const& env = sv_test::shared_env();
     if (!env.has_compiler)
-        SKIP("no SGL compiler that reaches DXIL to build the layout shaders");
+        SKIP("no SGL compiler for this backend to build the layout shaders");
 
     auto resources = sv::gpu_resource_manager::create(ctx);
     auto red = sv::drawing();
@@ -107,7 +107,7 @@ ASYNC_INVOCABLE_TEST("sv - a canvas draws its drawings in the order they were ad
 {
     auto& ctx = *ctx_h;
     if (!sv_test::shared_env().has_compiler)
-        SKIP("no SGL compiler that reaches DXIL to build the layout shaders");
+        SKIP("no SGL compiler for this backend to build the layout shaders");
 
     auto resources = sv::gpu_resource_manager::create(ctx);
     resources.drawings = sv::drawing_manager(1, 4); // pages one row tall, so two sets of 500 squares need two
@@ -188,7 +188,7 @@ ASYNC_INVOCABLE_TEST("sv - a canvas draws drawings from two atlas pages in one j
     auto& ctx = *ctx_h;
     auto const& env = sv_test::shared_env();
     if (!env.has_compiler)
-        SKIP("no SGL compiler that reaches DXIL to build the layout shaders");
+        SKIP("no SGL compiler for this backend to build the layout shaders");
 
     auto resources = sv::gpu_resource_manager::create(ctx);
     resources.drawings = sv::drawing_manager(1, 4); // pages one row tall, so two sets of 500 squares need two
@@ -279,7 +279,7 @@ ASYNC_INVOCABLE_TEST("sv - a 3D drawing is hidden by traced geometry in front of
     }
     auto const& env = sv_test::shared_env();
     if (!env.has_compiler)
-        SKIP("no SGL compiler that reaches DXIL to build the shaders");
+        SKIP("no SGL compiler for this backend to build the shaders");
 
     auto resources = sv::gpu_resource_manager::create(ctx);
 
@@ -329,14 +329,16 @@ ASYNC_INVOCABLE_TEST("sv - a 3D drawing is hidden by traced geometry in front of
                                             .height = size[1],
                                             .usage = sg::texture_usage::render_target | sg::texture_usage::copy_src});
     auto store = sv::view_store{};
-    REQUIRE(sv_test::frames_until_executed(ctx,
-                                           [&](sg::command_list& cmd)
-                                           {
-                                               resources.advance_to(ctx.current_epoch());
-                                               return sv::viewer_renderer::execute(
-                                                   cmd, def, plan, resources, store,
-                                                   output.as_render_target_view().cleared(tg::vec4f(0, 0, 0, 1)));
-                                           }));
+    // A debug build compiling the traced scene's permutations cold takes longer than the default deadline.
+    REQUIRE(sv_test::frames_until_executed(
+        ctx,
+        [&](sg::command_list& cmd)
+        {
+            resources.advance_to(ctx.current_epoch());
+            return sv::viewer_renderer::execute(cmd, def, plan, resources, store,
+                                                output.as_render_target_view().cleared(tg::vec4f(0, 0, 0, 1)));
+        },
+        120.0));
     (void)co_await ctx.idle_completion();
 
     auto read = ctx.create_command_list();
@@ -369,7 +371,7 @@ ASYNC_INVOCABLE_TEST("sv - an annotation's marker is filled while its anchor sho
     }
     auto const& env = sv_test::shared_env();
     if (!env.has_compiler)
-        SKIP("no SGL compiler that reaches DXIL to build the shaders");
+        SKIP("no SGL compiler for this backend to build the shaders");
 
     auto resources = sv::gpu_resource_manager::create(ctx);
     tg::pos3f const quad[] = {tg::pos3f(-1, -1, 0), tg::pos3f(1, -1, 0), tg::pos3f(1, 1, 0),
@@ -476,7 +478,7 @@ ASYNC_INVOCABLE_TEST("sv - canvas text lands inside its laid-out box, from eithe
     auto& ctx = *ctx_h;
     auto const& env = sv_test::shared_env();
     if (!env.has_compiler)
-        SKIP("no SGL compiler that reaches DXIL to build the layout shaders");
+        SKIP("no SGL compiler for this backend to build the layout shaders");
     auto const* const f = sv::default_font();
     if (f == nullptr)
         SKIP("no system UI font to set text in");

@@ -1,6 +1,8 @@
 #pragma once
 
+#include <clean-core/common/assert.hh>
 #include <clean-core/container/pair.hh>
+#include <typed-geometry/linalg/cross.hh>
 #include <typed-geometry/linalg/vec.hh>
 #include <typed-geometry/scalar/scalar.hh>
 
@@ -53,5 +55,17 @@ template <class T>
     auto const b = n.data[0] * n.data[1] * a;
     return {vec<3, T>(T(1) + sign * n.data[0] * n.data[0] * a, sign * b, -sign * n.data[0]),
             vec<3, T>(b, sign + n.data[1] * n.data[1] * a, -n.data[1])};
+}
+
+/// The same basis with its roll fixed: w lies in the plane of n and `up`, on up's side, and u = w x n.
+/// n must be unit length; `up` need not be unit or perpendicular to n, but must not be parallel to it.
+/// A camera frame is this with n = forward (u right, w up), whichever handedness the camera uses.
+template <class T>
+[[nodiscard]] cc::pair<vec<3, T>, vec<3, T>> orthonormal_basis(vec<3, T> const& n, vec<3, T> const& up)
+    requires(tg::traits::has_sqrt<T>)
+{
+    auto const w = (up - n * dot(up, n)).normalized();
+    CC_ASSERT(!tg::traits::is_zero(w.length_sqr()), "orthonormal_basis needs an up vector that is not parallel to n");
+    return {tg::dual(tg::cross(w, n)), w};
 }
 } // namespace tg

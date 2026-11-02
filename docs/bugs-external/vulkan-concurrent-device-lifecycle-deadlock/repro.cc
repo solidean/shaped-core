@@ -2,7 +2,7 @@
 //
 // Standalone.
 // No shaped-core, no third-party headers: <vulkan/vulkan.h>, the C++ standard library, and nothing else.
-// The whole point is that nothing of ours is in the picture, so a hang here is the loader's or the driver's.
+// Nothing of ours is in the picture, so a hang here is the loader's or the driver's.
 //
 // Build and run it through run.py, or by hand:
 //   cl /O2 /std:c++20 /EHsc /I"%VULKAN_SDK%\Include" repro.cc /link /LIBPATH:"%VULKAN_SDK%\Lib" vulkan-1.lib

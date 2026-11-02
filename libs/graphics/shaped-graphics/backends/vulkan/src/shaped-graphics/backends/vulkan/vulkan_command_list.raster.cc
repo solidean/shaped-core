@@ -43,7 +43,7 @@ namespace
 }
 
 /// The attachment load operation a target's begin-op asks for.
-/// `discard` is DONT_CARE, which is the point of having it: the contents become undefined rather than being loaded.
+/// `discard` is DONT_CARE, so the contents become undefined rather than being loaded.
 [[nodiscard]] VkAttachmentLoadOp to_vk_load_op(sg::target_op op)
 {
     switch (op)
@@ -81,16 +81,20 @@ void vulkan_command_list::raster_begin_rendering(sg::rendering_info const& info)
     }
     flush_barriers();
 
-    // 2) One attachment per target, each naming a cached image view.
+    // 2) One attachment per target, each naming the image view its texture holds for this epoch.
     //    Kept on the list, because a mid-pass barrier has to close and reopen the instance from them.
+    auto const attachment_view = [&](auto const& view)
+    {
+        return acquire_attachment_view(_ctx, as_vulkan_texture(view.texture()), created_in_epoch(), view.dimension(),
+                                       view.format(), view.range(), _created_attachment_views);
+    };
     auto& color_attachments = _rendering_color_attachments;
     color_attachments.clear();
     for (auto const& ct : info.color_targets)
     {
         auto attachment = VkRenderingAttachmentInfo{
             .sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
-            .imageView = _ctx._image_views.acquire_attachment(ct.view.texture(), ct.view.dimension(), ct.view.format(),
-                                                              ct.view.range()),
+            .imageView = attachment_view(ct.view),
             .imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
             .loadOp = to_vk_load_op(ct.op),
             .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
@@ -112,8 +116,7 @@ void vulkan_command_list::raster_begin_rendering(sg::rendering_info const& info)
         auto const& dt = info.depth_stencil_target.value();
         depth_attachment = VkRenderingAttachmentInfo{
             .sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
-            .imageView = _ctx._image_views.acquire_attachment(dt.view.texture(), dt.view.dimension(), dt.view.format(),
-                                                              dt.view.range()),
+            .imageView = attachment_view(dt.view),
             .imageLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
             .loadOp = to_vk_load_op(dt.op),
             .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
@@ -231,10 +234,11 @@ void vulkan_command_list::raster_end_rendering()
     _bound_raster_groups.clear();
     _bound_raster_footprint = nullptr;
     _bound_raster_footprint_owner = nullptr;
-    _pending_raster_array_buffer_declares.clear();
-    _pending_raster_array_texture_declares.clear();
     _bound_vertex_buffers.clear();
     _bound_index_buffer = nullptr;
+
+    // The core ended the values' half already; this is the list's.
+    _raster_arrays.end_all();
 }
 
 // --- draw recording (reached through cmd.raster / cmd.raster.manual) -----------------------------------
@@ -330,24 +334,24 @@ void vulkan_command_list::raster_bind_index_buffer(sg::index_buffer_view const& 
     _index_view_offset_in_bytes = view.offset_in_bytes;
 }
 
-void vulkan_command_list::raster_declare_array_buffer_access(cc::string_view binding_name,
-                                                             cc::span<sg::array_buffer_access const> elements)
+u32 vulkan_command_list::raster_declare_array_buffer_access(cc::string_view binding_name,
+                                                            cc::span<sg::array_buffer_access const> elements)
 {
     CC_ASSERT(_in_render_pass, "declare_array_buffer_access requires an open rendering scope");
     CC_ASSERT(!binding_name.empty(), "declare_array_buffer_access requires a binding name");
-    auto declare = vulkan_array_buffer_declare{.name = cc::string(binding_name), .elements = {}};
-    declare.elements.push_back_range(elements);
-    _pending_raster_array_buffer_declares.push_back(cc::move(declare));
+    auto const id = next_array_declaration_id();
+    _raster_arrays.declare_buffers(id, binding_name, elements);
+    return id;
 }
 
-void vulkan_command_list::raster_declare_array_texture_access(cc::string_view binding_name,
-                                                              cc::span<sg::array_texture_access const> elements)
+u32 vulkan_command_list::raster_declare_array_texture_access(cc::string_view binding_name,
+                                                             cc::span<sg::array_texture_access const> elements)
 {
     CC_ASSERT(_in_render_pass, "declare_array_texture_access requires an open rendering scope");
     CC_ASSERT(!binding_name.empty(), "declare_array_texture_access requires a binding name");
-    auto declare = vulkan_array_texture_declare{.name = cc::string(binding_name), .elements = {}};
-    declare.elements.push_back_range(elements);
-    _pending_raster_array_texture_declares.push_back(cc::move(declare));
+    auto const id = next_array_declaration_id();
+    _raster_arrays.declare_textures(id, binding_name, elements);
+    return id;
 }
 
 void vulkan_command_list::raster_set_viewport(sg::viewport const& vp)
@@ -367,9 +371,14 @@ void vulkan_command_list::raster_set_viewport(sg::viewport const& vp)
 
 void vulkan_command_list::raster_set_scissor(tg::aabb2i const& rect)
 {
+    // Vulkan clips a scissor reaching past the target's far edges, and refuses one starting before its near ones.
+    auto const x0 = cc::max(rect.min[0], 0);
+    auto const y0 = cc::max(rect.min[1], 0);
+    auto const x1 = cc::max(rect.max[0], x0);
+    auto const y1 = cc::max(rect.max[1], y0);
     auto const r = VkRect2D{
-        .offset = {rect.min[0], rect.min[1]},
-        .extent = {u32(rect.max[0] - rect.min[0]), u32(rect.max[1] - rect.min[1])},
+        .offset = {x0, y0},
+        .extent = {u32(x1 - x0), u32(y1 - y0)},
     };
     vkCmdSetScissor(_buffer, 0, 1, &r);
 }
@@ -410,8 +419,8 @@ void vulkan_command_list::declare_raster_draw_barriers(bool indexed)
     // Array bindings are tracked as the caller declared them, at the stages the code touches each in.
     auto const graphics_stages = sg::pipeline_stage_flag::vertex | sg::pipeline_stage_flag::fragment;
     declare_group_accesses(_bound_raster_groups, _bound_raster_footprint, graphics_stages);
-    declare_array_accesses(_bound_raster_groups, _bound_raster_footprint, _bound_raster_footprint_owner, graphics_stages,
-                           _pending_raster_array_buffer_declares, _pending_raster_array_texture_declares);
+    declare_array_accesses(_bound_raster_groups, _bound_raster_footprint, _bound_raster_footprint_owner,
+                           graphics_stages, _raster_arrays);
 
     // The input assembler reads the bound vertex buffers; an indexed draw also fetches the index buffer.
     for (auto const* vb : _bound_vertex_buffers)
@@ -458,5 +467,27 @@ void vulkan_command_list::raster_draw_indexed(sg::draw_indexed_config const& con
     resume_rendering();
     vkCmdDrawIndexed(_buffer, u32(config.index_range.size), u32(config.instance_range.size),
                      u32(config.index_range.offset), config.vertex_offset, u32(config.instance_range.offset));
+}
+
+void vulkan_command_list::raster_draw_indexed_indirect(sg::raw_buffer_handle const& args, isize offset_in_bytes, isize count)
+{
+    CC_ASSERT(_in_render_pass, "an indirect draw requires an open rendering scope");
+    CC_ASSERT(_bound_raster_layout != nullptr, "bind a raster pipeline before drawing");
+    CC_ASSERT(_bound_index_buffer != nullptr, "an indirect indexed draw requires a bound index buffer");
+    auto const buffer = std::dynamic_pointer_cast<vulkan_buffer const>(args);
+    CC_ASSERT(buffer != nullptr, "indirect draw arguments are not a vulkan buffer");
+    CC_ASSERT(!buffer->is_expired(), "indirect draw arguments are a transient buffer used past its epoch");
+    static_assert(sizeof(sg::draw_indexed_args) == sizeof(VkDrawIndexedIndirectCommand));
+
+    // The arguments are fetched at DRAW_INDIRECT, before any vertex is.
+    track_buffer_access(*buffer, sg::pipeline_stage_flag::draw_indirect, sg::access_flag::indirect_read);
+    declare_raster_draw_barriers(true);
+    flush_barriers();
+    resume_rendering();
+
+    // One draw per call: several in one call need the `multiDrawIndirect` feature, which the device is not created with.
+    auto const stride = isize(sizeof(sg::draw_indexed_args));
+    for (auto i = isize(0); i < count; ++i)
+        vkCmdDrawIndexedIndirect(_buffer, buffer->_buffer, VkDeviceSize(offset_in_bytes + i * stride), 1, u32(stride));
 }
 } // namespace sg::backend::vulkan

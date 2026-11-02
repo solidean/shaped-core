@@ -8,14 +8,14 @@
 
 rules:
   - kind: allow-include
-    value: [<winsock2.h>, <ws2tcpip.h>, <mstcpip.h>]
-    reason: the Windows socket API, and mstcpip.h for SIO_TCP_INITIAL_RTO. winsock2.h must precede the other two, which are declared in terms of it, so the include block is clang-format-off.
+    value: [<winsock2.h>, <ws2tcpip.h>, <mstcpip.h>, <mswsock.h>]
+    reason: the Windows socket API, mstcpip.h for SIO_TCP_INITIAL_RTO, and mswsock.h for SIO_UDP_CONNRESET, which keeps an ICMP reply to an earlier send from failing a datagram receive. winsock2.h must precede the others, which are declared in terms of it, so the include block is clang-format-off.
     files:
       - src/clean-net/impl/native_socket.cc
 
   - kind: allow-include
-    value: [<sys/socket.h>, <netinet/in.h>, <netinet/tcp.h>, <arpa/inet.h>, <unistd.h>, <fcntl.h>, <errno.h>]
-    reason: the POSIX socket API, plus fcntl for the non-blocking flag and errno for the failure code.
+    value: [<sys/socket.h>, <sys/uio.h>, <netinet/in.h>, <netinet/tcp.h>, <arpa/inet.h>, <unistd.h>, <fcntl.h>, <errno.h>]
+    reason: the POSIX socket API, plus uio.h for the iovec a datagram receive scatters into, fcntl for the non-blocking flag and errno for the failure code.
     files:
       - src/clean-net/impl/native_socket.cc
 
@@ -69,10 +69,12 @@ rules:
 
   - kind: allow-include
     value: [<memory>]
-    reason: std::unique_ptr, to OWN a connection_backend through its interface. Neither cc smart pointer has a derived-to-base conversion, and cc::shared_ptr's default traits place the control block at an offset computed from sizeof(T), so an upcast would be unsound rather than merely absent. The same choice slib::impl::watch_backend, sg's backends and cc::threaded_actor's own impl make.
+    reason: std::unique_ptr, to OWN a connection_backend or datagram_backend through its interface. Neither cc smart pointer has a derived-to-base conversion, and cc::shared_ptr's default traits place the control block at an offset computed from sizeof(T), so an upcast would be unsound rather than merely absent. The same choice slib::impl::watch_backend, sg's backends and cc::threaded_actor's own impl make.
     files:
       - src/clean-net/transport/stream.hh
       - src/clean-net/transport/tcp.cc
+      - src/clean-net/transport/datagram.hh
+      - tests/datagram-test.cc
       - src/clean-net/transport/virtual_transport.cc
       - src/clean-net/transport/simulated_transport.cc
       - src/clean-net/tls/tls_mbedtls.cc

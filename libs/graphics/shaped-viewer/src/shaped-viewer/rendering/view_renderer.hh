@@ -1,10 +1,12 @@
 #pragma once
 
+#include <clean-core/error/optional.hh>
 #include <shaped-graphics/fwd.hh>
 #include <shaped-graphics/resource/texture.hh>
 #include <shaped-graphics/routine/render_routine.hh>
 #include <shaped-rendering/fwd.hh> // sr::reconstruct_status
 #include <shaped-viewer/fwd.hh>
+#include <shaped-viewer/rendering/impl/resolved_view.hh>
 #include <shaped-viewer/rendering/layout_routine.hh> // plan_textures
 #include <shaped-viewer/stable_id.hh>
 #include <shaped-viewer/view/camera.hh>
@@ -18,6 +20,9 @@ struct sv::plan_resources
     cc::vector<sg::texture_2d> targets;
     cc::vector<sg::texture_2d> traces;
 
+    /// Each trace's layer as `view_renderer::acquire_trace` resolved it, which `trace` takes rather than walking it again.
+    cc::vector<cc::optional<impl::resolved_view>> scenes;
+
     [[nodiscard]] plan_textures textures() const { return {.targets = targets, .traces = traces}; }
 };
 
@@ -28,7 +33,10 @@ struct sv::plan_resources
 /// It never records a trace itself — that rule stays in the leaf routine.
 /// This one only sequences it.
 ///
-/// It rasters nothing and opens no scope, and it never sees the frame's output target.
+/// **A raster layer needs no ray tracing.** It is drawn through sv::raster_routine, builds no acceleration structure, and never waits on the tracer.
+/// A traced layer on a device without `sg::feature::raytracing_pipeline` is declined, and says so once.
+///
+/// It opens no scope of its own, and it never sees the frame's output target.
 /// Getting these textures onto a target is sv::viewer_renderer, which is the one place a rect, a viewport or the output's format is known.
 ///
 /// **The persistent resources are the caller's**, held in the `sv::view_store` every call here takes.
@@ -67,6 +75,21 @@ public:
     /// Takes no guard: it reads nothing this routine initializes, only the store and the context's persistent allocator.
     [[nodiscard]] static plan_resources resolve(sg::command_list& cmd, render_plan const& plan, view_store& store);
 
+    /// Acquires every bindless index the trace at `trace_index` will read, without recording the trace, and keeps the
+    /// resolved layer in `res` for it.
+    ///
+    /// A frame runs it for each of its traces before the first one, so their resources all land in the tables before the
+    /// first `freeze`, and the frame mints one snapshot rather than one per view that brought something new.
+    /// Each snapshot is a copy of the whole table in the persistent descriptor heap, so a first frame of many views would
+    /// otherwise exhaust it.
+    /// Re-acquiring within an epoch touches no descriptor, so the trace's own acquires afterwards leave the snapshot clean.
+    static void acquire_trace(sg::command_list& cmd,
+                              viewer_definition const& def,
+                              render_plan const& plan,
+                              u32 trace_index,
+                              plan_resources& res,
+                              gpu_resource_manager& resources);
+
     /// Records the trace at `trace_index` into its own accumulation texture.
     /// Must be called with no rendering scope open, and before anything samples that texture.
     ///
@@ -93,7 +116,7 @@ public:
     [[nodiscard]] static f32 crossfade_weight(u32 accum_frame, u32 temporal_frames, u32 fade_frames);
 
 protected:
-    /// No shaders of its own; it warms the path tracer so its compiles start early.
+    /// No shaders of its own; it warms the path tracer where the device has one, and never waits on it.
     cc::shared_async<cc::unit> init(sg::routine_init_scope scope) override;
 
 private:
@@ -103,6 +126,9 @@ private:
     {
         camera_matrices current;
         camera_matrices previous;
+        /// The sub-pixel offset every pixel of this frame and the frame before was drawn through, in [-0.5, 0.5), or 0 where each sample drew its own.
+        tg::vec2f jitter = {};
+        tg::vec2f previous_jitter = {};
     };
 
     /// One traced layer's denoiser slots, all null when the layer does not denoise.
@@ -142,27 +168,36 @@ private:
         /// `crossfade_weight` at the mean's frame count after this frame's trace.
         f32 blend = 1.0f;
 
+        /// The temporal member runs on the mean rather than this frame's samples: `still_denoise::temporal_on_mean` past the hand-off.
+        bool temporal_on_mean = false;
+
+        /// The spatial member runs only when the mean's samples have doubled since its last run: `still_denoise::oidn`.
+        bool spatial_on_doubling = false;
+
         [[nodiscard]] bool runs_temporal() const { return blend < 1.0f; }
         [[nodiscard]] bool runs_spatial() const { return blend > 0.0f; }
     };
 
     /// The schedule for a layer whose mean will hold `accum_frame` frames once this frame's trace lands.
+    /// `display_scale` is what the layer's display multiplies its image by, which a denoiser judging noise on screen is told.
     [[nodiscard]] static denoise_schedule _schedule_denoise(sg::context const& ctx,
                                                             render_settings const& settings,
                                                             denoise_slots const& ds,
-                                                            u32 accum_frame);
+                                                            u32 accum_frame,
+                                                            f32 display_scale);
 
     /// Denoises a traced layer into its denoised slot — temporally while its mean is young, spatially after, and both
     /// at once across the hand-off — and points `presented` at what its parent should sample.
     ///
     /// `cameras` is this frame's view and projection and the previous frame's, which a member reprojecting in world
     /// space reads instead of the motion guide alone.
+    /// `sample_counts` is the mean's count per pixel where its pixels differ, and null where one count holds for the image.
     [[nodiscard]] static sr::reconstruct_status _denoise(sg::command_list& cmd,
-                                                         render_settings const& settings,
                                                          denoise_schedule const& schedule,
                                                          impl::temporal_slot const& accumulator,
                                                          denoise_slots const& ds,
                                                          denoise_cameras const& cameras,
+                                                         sg::texture_2d const& sample_counts,
                                                          sg::texture_2d& presented);
 
     /// Bumped every time the routine initializes, which is once per shader reload.
@@ -171,9 +206,5 @@ private:
     /// shaders produced.
     /// Back when the accumulation lived on this routine, `evict` gave that for free; a store the caller owns outlives
     /// the instance, so the invalidation has to be said out loud.
-    /// The routine every trace goes through.
-    /// Declared rather than prewarmed, so this renderer reports pending until the pathtracer is ready.
-    sg::routine_dependency<pathtrace_routine, sg::routine_no_params> _pathtrace;
-
     u64 _shader_generation = 0;
 };

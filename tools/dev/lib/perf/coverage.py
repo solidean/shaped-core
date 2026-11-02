@@ -27,6 +27,7 @@ import shutil
 from datetime import datetime
 from pathlib import Path
 
+from ..core.layout import Layout
 from ..core.logs import step_fields, write_sidecar
 from ..core.models import Preset, StepResult
 from ..core.process import run_step
@@ -167,15 +168,15 @@ def _generate_html(
 # Post-processing (distill the verbose export into compact totals)
 # ---------------------------------------------------------------------------
 
-def _library_key(filename: str) -> str | None:
-    """Map a source path to its library key 'libs/<category>/<lib>', or None."""
+def _library_key(filename: str, library_dir: str) -> str | None:
+    """Map a source path to its library key '<library_dir>/<category>/<lib>', or None."""
     parts = Path(filename).parts
     try:
-        i = len(parts) - 1 - list(reversed(parts)).index("libs")
+        i = len(parts) - 1 - list(reversed(parts)).index(library_dir)
     except ValueError:
         return None
     if i + 2 < len(parts):
-        return "/".join(("libs", parts[i + 1], parts[i + 2]))
+        return "/".join((library_dir, parts[i + 1], parts[i + 2]))
     return None
 
 
@@ -183,7 +184,7 @@ def _pct(covered: int, count: int) -> float:
     return round(100.0 * covered / count, 2) if count else 0.0
 
 
-def summarize(json_path: Path) -> dict:
+def summarize(json_path: Path, *, layout: Layout) -> dict:
     """Distill an llvm-cov export JSON into overall + per-library totals.
 
     Returns {"totals": {metric: {covered, count, percent}}, "libraries": {key: {metric: {...}}}}.
@@ -207,7 +208,7 @@ def summarize(json_path: Path) -> dict:
 
     libraries: dict[str, dict] = {}
     for f in export.get("files", []):
-        key = _library_key(f.get("filename", ""))
+        key = _library_key(f.get("filename", ""), layout.library_dir)
         if key is None:
             continue
         agg = libraries.setdefault(key, {m: {"covered": 0, "count": 0} for m in _METRICS})
@@ -256,7 +257,7 @@ def _write_meta(
 
 def _report_from_profdata(
     preset: Preset, binaries: list[Path], cov_tool: str, paths: _Paths,
-    *, root: Path, html: bool, ignore_regex: str, mirror: bool, verbose: bool,
+    *, root: Path, layout: Layout, html: bool, ignore_regex: str, mirror: bool, verbose: bool,
     prior_steps: list[StepResult],
 ) -> dict:
     """Export JSON (+ optional HTML) from an existing profdata and summarize."""
@@ -279,7 +280,7 @@ def _report_from_profdata(
         if html_step.ok:
             html_dir = paths.html
 
-    summary = summarize(paths.json) if export.ok else {}
+    summary = summarize(paths.json, layout=layout) if export.ok else {}
     _write_meta(
         preset.build_dir, preset=preset.name, paths_json=paths.json,
         profdata=paths.profdata, html_dir=html_dir, ignore_regex=ignore_regex,
@@ -298,7 +299,7 @@ def _report_from_profdata(
 
 
 def coverage_run(
-    presets: list[Preset], binary_names: list[str], *, root: Path,
+    presets: list[Preset], binary_names: list[str], *, root: Path, layout: Layout,
     test_name: str | None = None, html: bool = False,
     ignore_regex: str = DEFAULT_IGNORE_REGEX, timeout: float | None = None,
     mirror: bool = False, verbose: bool = False,
@@ -342,7 +343,7 @@ def coverage_run(
             continue
 
         results.append(_report_from_profdata(
-            preset, binaries, cov_tool, paths, root=root, html=html,
+            preset, binaries, cov_tool, paths, root=root, layout=layout, html=html,
             ignore_regex=ignore_regex, mirror=mirror, verbose=verbose,
             prior_steps=[merge],
         ))
@@ -350,7 +351,7 @@ def coverage_run(
 
 
 def coverage_report(
-    presets: list[Preset], binary_names: list[str], *, root: Path,
+    presets: list[Preset], binary_names: list[str], *, root: Path, layout: Layout,
     html: bool = False, ignore_regex: str = DEFAULT_IGNORE_REGEX,
     mirror: bool = False, verbose: bool = False,
 ) -> list[dict]:
@@ -371,7 +372,7 @@ def coverage_report(
             )
         binaries = _binary_artifacts(preset, binary_names)
         results.append(_report_from_profdata(
-            preset, binaries, cov_tool, paths, root=root, html=html,
+            preset, binaries, cov_tool, paths, root=root, layout=layout, html=html,
             ignore_regex=ignore_regex, mirror=mirror, verbose=verbose, prior_steps=[],
         ))
     return results
@@ -379,7 +380,7 @@ def coverage_report(
 
 def coverage_merge(
     presets: list[Preset], binary_names_by_preset: dict[str, list[str]], *,
-    root: Path, output_dir: Path, html: bool = False,
+    root: Path, layout: Layout, output_dir: Path, html: bool = False,
     ignore_regex: str = DEFAULT_IGNORE_REGEX, mirror: bool = False, verbose: bool = False,
 ) -> dict:
     """Merge several presets' profdata into one combined report under output_dir.
@@ -435,7 +436,7 @@ def coverage_merge(
             steps.append(html_step)
             if html_step.ok:
                 html_dir = output_dir / "html"
-        summary = summarize(out_json) if export.ok else {}
+        summary = summarize(out_json, layout=layout) if export.ok else {}
 
     _write_meta(
         output_dir, preset="+".join(p.name for p in presets), paths_json=out_json,

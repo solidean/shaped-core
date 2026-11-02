@@ -551,6 +551,8 @@ public:
         }
         for (auto i = isize(0); i < p.e.stage_inputs.size(); ++i)
         {
+            if (!p.stage_input_read[i])
+                continue;
             auto const local = p.e.stage_inputs[i].local;
             out.appendf("    const {} {} = {};\n", type_text(p, *this, p.e.at(local).type), p.locals[index_of(local)],
                         stage_input_value(p, i));
@@ -597,7 +599,13 @@ public:
             parameters.push_back(
                 cc::format("{} {} : {}", spelled.hlsl_type, p.stage_input_names[i], spelled.hlsl_semantic));
             // EMIT-128: HLSL counts from the draw's base, and shader model 6.8 says where the draw started
-            if (has_base(p, p.e.stage_inputs[i].input))
+            // An instance's base is `@first_instance` itself where the entry takes that, since a semantic is taken once.
+            auto takes_first_instance = false;
+            for (auto const& other : p.e.stage_inputs)
+                takes_first_instance = takes_first_instance || other.input == check::stage_input::first_instance;
+            auto const base_is_shared
+                = p.e.stage_inputs[i].input == check::stage_input::instance_index && takes_first_instance;
+            if (has_base(p, p.e.stage_inputs[i].input) && !base_is_shared)
                 parameters.push_back(cc::format("uint {} : {}", p.stage_input_bases[i],
                                                 p.e.stage_inputs[i].input == check::stage_input::vertex_index
                                                     ? "SV_StartVertexLocation"
@@ -642,6 +650,8 @@ public:
         // A target hands an index over unsigned and SGL counts in int, so each conversion stands at the top.
         for (auto i = isize(0); i < p.e.stage_inputs.size(); ++i)
         {
+            if (!p.stage_input_read[i])
+                continue;
             auto const local = p.e.stage_inputs[i].local;
             out.appendf("    const {} {} = {};\n", type_text(p, *this, p.e.at(local).type), p.locals[index_of(local)],
                         stage_input_value(p, i));

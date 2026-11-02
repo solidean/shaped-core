@@ -35,7 +35,8 @@ enum class scl::severity : scl::u8
     error,
 };
 
-/// Replace the bytes of `span` with `replacement`. The unit of an automatic fix.
+/// Replace the bytes of `span` with `replacement`.
+/// The unit of an automatic fix.
 /// An EMPTY span is an insertion at that offset — nothing is removed and `replacement` is spliced in.
 struct scl::text_edit
 {

@@ -7,7 +7,8 @@
 // CC_RECORD_ASYNC_SCOPE — attribution that follows the work, and the trace ids that ride it.
 //
 // A CC_RECORD_SCOPE is a stack frame: one thread, one nesting depth, and a hard rule that it must not cross a
-// `co_await`. That is right for a span of straight-line work and useless for a logical task.
+// `co_await`.
+// That is right for a span of straight-line work and useless for a logical task.
 //
 // An async scope is the other half.
 // It rides cc::async's ambient chain, so every node spawned under it carries it to whichever worker picks it up, across
@@ -35,8 +36,8 @@ CC_ASYNC_AMBIENT_TAG(async_scope_tag)
 /// The ambient tag a trace id installs under.
 ///
 /// The value is the id's BIT PATTERN stored in the pointer slot, not a pointer to it.
-/// A trace id is 64 bits and so is the slot, so this needs no allocation and no lifetime — which matters, because the
-/// link routinely outlives the scope object that pushed it.
+/// A trace id is 64 bits and so is the slot, so this needs no allocation and no lifetime, and the
+/// link may outlive the scope object that pushed it, as it routinely does.
 CC_ASYNC_AMBIENT_TAG(trace_tag)
 
 /// The ambient tag an owner id installs under; the value is the id's bit pattern, as for `trace_tag`.
@@ -70,7 +71,7 @@ private:
 
 /// Opens an async scope, writes its begin/end pair, and owns the links that carry it.
 ///
-/// Order is load-bearing: the links go on before the begin event and come off after the end event, so each event sits
+/// The order is fixed: the links go on before the begin event and come off after the end event, so each event sits
 /// beside an ambient delta that already names the full context.
 struct async_scope_guard
 {
@@ -140,7 +141,7 @@ namespace cc::rec
 ///   co_await load_meshes();                        // still attributed, on whichever worker runs it
 ///   auto const id = cc::rec::current_trace_id();   // to relate this operation to another
 ///
-/// Unlike CC_RECORD_SCOPE this may cross a suspend — that is the entire point.
+/// Unlike CC_RECORD_SCOPE this may cross a suspend.
 #define CC_RECORD_ASYNC_SCOPE(name_)                                                      \
     CC_REC_DEFINE_ASYNC_SCOPE_DESCS(cc_rec_async_desc_, cc_rec_async_end_desc_, (name_)); \
     auto const cc_rec_async_scope_                                                        \

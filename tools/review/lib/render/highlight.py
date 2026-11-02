@@ -168,18 +168,20 @@ def highlight_code(text: str, *, path: str = "", lang: str = "") -> str:
 _MARKER_CLASS = {"+": "add", "-": "del", " ": "ctx", "\\": "note"}
 
 
-def highlight_diff(text: str, *, path: str = "") -> str:
+def highlight_diff(text: str, *, path: str = "", anchored: bool = True) -> str:
     """A unified diff as a table of marked lines, each payload highlighted as its own language.
 
     Every row carries its offset into the diff body, which is what a comment on one line anchors on.
     That offset is stable for exactly as long as the change id is, so a `sync` that supersedes the change
     correctly leaves the comment on a hunk that no longer exists.
+    `anchored=False` leaves the offsets out, for a diff inside a card that is not that change's body.
     """
     rows = []
     old_no = new_no = 0
     for offset, raw in enumerate(text.splitlines()):
+        anchor = f' data-off="{offset}"' if anchored else ""
         if raw.startswith("@@"):
-            rows.append(f'<tr class="dl-hunk" data-off="{offset}"><td class="dl-no"></td><td class="dl-no"></td>'
+            rows.append(f'<tr class="dl-hunk"{anchor}><td class="dl-no"></td><td class="dl-no"></td>'
                         f'<td class="dl-src">{_escape(raw)}</td></tr>')
             header = raw.split("@@")[1].strip() if raw.count("@@") >= 2 else ""
             try:
@@ -205,7 +207,7 @@ def highlight_diff(text: str, *, path: str = "") -> str:
 
         body = highlight_code(payload, path=path) if payload.strip() else _escape(payload)
         rows.append(
-            f'<tr class="dl-{css_class}" data-off="{offset}"><td class="dl-no">{left}</td><td class="dl-no">{right}</td>'
+            f'<tr class="dl-{css_class}"{anchor}><td class="dl-no">{left}</td><td class="dl-no">{right}</td>'
             f'<td class="dl-src"><span class="dl-mark">{_escape(marker)}</span>{body}</td></tr>'
         )
     return '<table class="difflines pg">' + "".join(rows) + "</table>"

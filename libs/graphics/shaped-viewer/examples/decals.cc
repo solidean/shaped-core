@@ -66,8 +66,8 @@ EXAMPLE("shaped-viewer/decals")
     auto const floor
         = sv::mesh{.name = "floor",
                    .geometry = sv::triangle_geometry::create_from_positions(
-                       cc::vector<tg::pos3f>{tg::pos3f(-6, 0, -6), tg::pos3f(6, 0, -6), tg::pos3f(6, 0, 6),
-                                             tg::pos3f(-6, 0, -6), tg::pos3f(6, 0, 6), tg::pos3f(-6, 0, 6)}),
+                       cc::vector<tg::pos3f>{tg::pos3f(-6, 0, -6), tg::pos3f(6, 0, 6), tg::pos3f(6, 0, -6),
+                                             tg::pos3f(-6, 0, -6), tg::pos3f(-6, 0, 6), tg::pos3f(6, 0, 6)}),
                    .attributes = {sv::mesh_attribute::create_value("base_color", tg::vec3f(0.5f, 0.5f, 0.48f))}};
 
     // The face the camera sees is the plane z = -0.5.
@@ -99,7 +99,7 @@ EXAMPLE("shaped-viewer/decals")
         scene.add_mesh(floor);
         scene.add_mesh(cube);
         scene.add_quadrics(ball);
-        scene.add_rect_light("key", tg::pos3f(-2.5f, 4.5f, 3), tg::vec3f(0.6f, 0, 0), tg::vec3f(0, 0, 0.6f)).nits(30.0f);
+        scene.add_rect_light("key", tg::pos3f(-2.5f, 4.5f, 3), tg::vec3f(0.6f, 0, 0), tg::vec3f(0, 0, 0.6f)).nits(150.0f);
         scene.background(sv::background::gradient(tg::vec3f(0.30f, 0.40f, 0.60f), tg::vec3f(0.08f, 0.10f, 0.13f)));
 
         // Straight down from above the ball, 2.4 units square: x along +x and y along -z, read from above, so the

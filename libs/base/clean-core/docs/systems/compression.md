@@ -6,7 +6,7 @@ The ones that actually change what you get are the level, whether the blob is sm
 All three go the opposite way from the usual advice once the payload is a few hundred bytes rather than a few megabytes.
 
 Every number here comes from [tests/benchmarks/compression-benchmark.cc](../../tests/benchmarks/compression-benchmark.cc), run on payloads shaped-core actually stores.
-That matters: upstream publishes its numbers on Silesia, a corpus of tarred novels and executables, and nothing here looks like that.
+Upstream publishes its numbers on Silesia, a corpus of tarred novels and executables, and nothing here looks like that.
 
 Run it yourself with `uv run dev.py benchmark "bench-compress" --timeout 0`.
 
@@ -70,7 +70,7 @@ Reach for zstd otherwise.
 lz4's high-compression levels are the one configuration to avoid outright: level 12 compressed at 21.6 MB/s for 4.85x, where zstd 3 got 6.96x at 1087 MB/s.
 If lz4's ratio is not good enough, the answer is zstd, not lz4 HC.
 
-## deflate is dominated on every axis, and that is the point
+## deflate is dominated on every axis
 
 zstd 3 beats deflate 6 on all three measurements at once, on the same ~256 kB of JSON-ish records.
 This table is from a later run than the ones above, so read its throughputs against each other and not against theirs — the ratios are deterministic and do agree across both.

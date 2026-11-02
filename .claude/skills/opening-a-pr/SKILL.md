@@ -1,20 +1,24 @@
 ---
 name: opening-a-pr
-description: How to commit work and open a pull request in shaped-core — branch naming, commit attribution, and the PR description style guide. Use whenever you're asked to open/create a PR, push a branch for review, or write a PR description.
-when_to_use: "open a PR", "create a pull request", "push this for review", "raise a PR", "write the PR description", "make a PR"
+description: How to open a pull request in shaped-core — which changes get one at all, branch naming, commit attribution, and the PR description style guide. Use whenever you're asked to open/create a PR, push a branch for review, or write a PR description.
+when_to_use: '"open a PR", "create a pull request", "push this for review", "raise a PR", "write the PR description", "make a PR"'
 allowed-tools: Bash Read
 ---
 
+## Is this a PR at all?
+
+**Most work does not get one.** Fixes, internal improvements, tests, CI fixes, docs, and API that was basically expected to be there are committed to `main` directly.
+A PR is for big reworks and substantial new API — a public shape worth a review before it sets.
+[CLAUDE.md](../../../CLAUDE.md)'s "Git workflow" has the lanes; when a change sits between them, ask.
+
 ## The flow
 
-1. **Branch first — never commit to `main`.** Feature branches are mandatory and
-   namespaced by contributor initials: `u/<initials>/<feature>` (Philip Trettner
-   is `pt`, so `u/pt/<feature>`; use the actual author's initials).
+1. **Branch first.** A PR's work lives on a feature branch namespaced by contributor initials: `u/<initials>/<feature>`.
+   Philip Trettner is `pt`, so `u/pt/<feature>`; use the actual author's initials.
    ```bash
    git switch -c u/pt/<feature>
    ```
-   If you already committed on `main` by mistake, move the commits to a branch
-   and reset `main` — don't push to `main`.
+   If PR-sized work was already committed on `main` locally, move the commits to a branch and reset `main` before anything is pushed.
 
 2. **Review scope before committing.**
    `git status --short` and `git diff --stat HEAD` — confirm only the intended work is staged and nothing unrelated rode along.
@@ -25,6 +29,7 @@ allowed-tools: Bash Read
 
 3. **Commit in logical units.**
    Group related changes, and split genuinely separate threads into separate commits; prefer a new commit over amending an existing one.
+   A commit may be partially broken — topic beats compiling — since `check` gates the push, not each commit.
    Multi-line messages go through a heredoc with the **Bash** tool — never PowerShell here-string syntax (`@'...'@`), which Bash takes literally:
    ```bash
    git commit -F - <<'EOF'
@@ -65,6 +70,8 @@ allowed-tools: Bash Read
    ```
    Stop and surface the problem if push or `gh` needs auth you don't have — don't retry blindly or force anything.
    **Never force-push to `main`.**
+
+6. **Do not wait for CI.** The PR is done once it is open; a red run is fixed after the fact, during the review or on `main`.
 
 ## PR description style guide
 

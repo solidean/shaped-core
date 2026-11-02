@@ -40,6 +40,17 @@ namespace cc
 /// The calling thread must not already hold an id, and no other thread may have claimed main.
 void mark_current_thread_as_main();
 
+/// Runs `fn(userdata)` when the calling thread exits, in reverse order of registration.
+/// This is how a per-thread cache stays trivially destructible: under MSVC and clang-cl, a thread_local with a destructor checks a guard on every access.
+/// So the hot state is a plain thread_local, and the cleanup is registered once, from the cold path that first fills it.
+///
+/// Registering odr-uses a thread_local with a destructor itself, so never call this from per-access code.
+/// A callback may touch only trivially destructible thread_local state: the order among thread_local destructors is not ours to choose.
+/// A callback may register another, which still runs; registering once this thread's callbacks have all run is a precondition violation.
+/// On the main thread the callbacks run during exit(), and not at all where the process ends without one.
+/// Inside a Windows DLL they run under the loader lock, so a callback must not wait on another thread.
+void register_at_thread_exit(void (*fn)(void*), void* userdata);
+
 /// Offers the rest of this thread's time slice to whatever else is runnable.
 ///
 /// A SCHEDULING yield, unlike cc::spin_pause — the thread genuinely gives up the core, so this is what a wait long

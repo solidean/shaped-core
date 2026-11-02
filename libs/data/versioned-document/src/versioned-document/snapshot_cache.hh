@@ -54,7 +54,7 @@ public:
     /// [direct layer](direct_layer.hh)'s values are attributed to a synthetic writer id that names no op at all — so
     /// installing one would put a fabricated op id into a file.
     ///
-    /// `pinned` is what a persisted, load-bearing snapshot is: never evicted, and never counted against the budget.
+    /// `pinned` is what a persisted, required snapshot is: never evicted, and never counted against the budget.
     void install(op_id const& id, snapshot_document doc, bool pinned = false);
 
     /// Drops `id`, pinned or not — the in-memory half of deleting a persisted snapshot.
@@ -72,7 +72,7 @@ public:
     /// **Must be invisible**: this may change how long a materialization takes, and nothing else about it.
     /// Turns a pinned entry back into an ordinary one, keeping its bytes.
     ///
-    /// What a snapshot stops being load-bearing looks like from here: the materialization is still correct, so nothing
+    /// What a snapshot ceasing to be required looks like from here: the materialization is still correct, so nothing
     /// is recomputed — it simply becomes evictable again.
     /// False where the cache does not have the entry; unpinning one that is not pinned is a no-op and true.
     bool unpin(op_id const& id);

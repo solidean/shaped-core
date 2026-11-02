@@ -115,7 +115,7 @@ struct cc::cpu_load
 /// CPU load, differenced against the previous reading this sampler took.
 ///
 /// **Not thread-safe**, and cheap enough that a subsystem wanting its own cadence should hold its own.
-/// That is the point of the type: a free `current_cpu_load()` could only work by keeping one hidden previous reading
+/// A type, because a free `current_cpu_load()` could only work by keeping one hidden previous reading
 /// per process, and two subsystems sampling at different rates would then corrupt each other's numbers.
 class cc::cpu_load_sampler
 {

@@ -182,6 +182,27 @@ ASYNC_TEST("async - variadic dependency form short-circuits on a dependency erro
     CHECK(!ran);
 }
 
+ASYNC_TEST("async - an error reaches dependents as it was raised, however far it propagates")
+{
+    auto const site = cc::source_location::current();
+    auto bad
+        = cc::make_async_lazy<int>([&](async_context<int>& actx) -> cc::async_step_status
+                                   { return actx.error(cc::any_error("boom", site).with_context("while booming")); });
+    auto b = cc::make_async_lazy([](int x) { return x + 1; }, bad);
+    auto c = cc::make_async_lazy([](int x) { return x + 1; }, b);
+    auto d = cc::make_async_lazy([](int x) { return x + 1; }, c);
+
+    auto const outcome = co_await cc::async_as_result(d);
+    REQUIRE(outcome.has_error());
+    auto const& error = outcome.error().underlying();
+    // each hop used to wrap the text below it, nesting "error: " prefixes and source sites into the message
+    CHECK(error.message() == "boom");
+    CHECK(error.site().line() == site.line());
+    auto const text = error.to_string();
+    CHECK(text.contains("while booming"));
+    CHECK(text.find("error: ") == text.rfind("error: "));
+}
+
 ASYNC_TEST("async - frames may omit the async_context parameter")
 {
     // no context, no deps

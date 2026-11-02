@@ -1,7 +1,7 @@
 ---
 name: reworking-prose
 description: Rework the comments and documentation around a topic wholesale — decide what each level should say, then land every rewrite in one `prose apply` pass; use it when files violate the prose guidelines, when a guideline changes and the existing prose must follow, or when a surface is under-documented and needs more.
-when_to_use: "these files violate our doc policy", "fix the comments in", "rework the docs around", "no-flow-prose is firing all over", "the guideline changed, update the prose", "document this properly"
+when_to_use: '"these files violate our doc policy", "fix the comments in", "rework the docs around", "no-flow-prose is firing all over", "the guideline changed, update the prose", "document this properly"'
 allowed-tools: Read Edit Write Bash Glob Grep mcp__repo_tools__repo_search mcp__repo_tools__repo_structure mcp__repo_tools__file_structure
 ---
 
@@ -46,7 +46,8 @@ A gap is a scope candidate like any other — this skill grows documentation as 
 
 ### 2. Read the files
 
-Plain `Read`. A member doc is unrewritable without its signature, so there is no shortcut around reading the code the prose is attached to.
+Plain `Read`.
+A member doc is unrewritable without its signature, so there is no shortcut around reading the code the prose is attached to.
 
 ### 3. Write the documentation concept
 
@@ -62,7 +63,7 @@ Work it out in this order, before any new text is written:
   A **mini-hint** is a named symbol or a cited path that says where to look.
   An answer that lives at exactly one level and is unreachable from the others is not documented.
   **"Another level owns it" licenses a shorter line, not always no line** — deleting a whole section outright is the easy over-correction, and a landing page is where it hurts most;
-- a **word budget per surface**, which may be *higher* than today when the point is to document more.
+- a **word budget per surface**, which may be *higher* than today when a surface needs more documentation.
 
 Verbosity is the enemy and so is missing documentation — the concept is what lets you cut hard without stranding a reader.
 Every line has to pull its weight, and a fringe concept documented at three levels is the same defect as an undocumented central one.
@@ -77,7 +78,7 @@ If it exists but nothing in the reader's reach links to it, the fix is a cross-l
 
 **Compression is where a rework introduces its own errors, and the tell is a word doing double duty.**
 Collapsing a list that mixes "what exists" with "what is intended" — tiers, roadmaps, support levels — reads afterwards as an assertion that all of it exists.
-When a sentence you are shortening carries a hedge, decide whether the hedge was the load-bearing half before dropping it.
+When a sentence you are shortening carries a hedge, decide whether the sentence rests on the hedge before dropping it.
 
 
 **Backstory is the first thing to cut**, per [Code Comments](../../../docs/coding-guidelines.md#code-comments).

@@ -4,9 +4,9 @@
 #include <clean-core/string/string.hh>
 #include <clean-core/string/to_string.hh>
 #include <clean-core/thread/mutex.hh>
+#include <clean-core/thread/native_thread.hh>
 #include <nexus/test.hh>
 
-#include <thread>
 #include <type_traits>
 
 
@@ -360,7 +360,7 @@ TEST("mutex - wait_for returns whether the predicate held")
 #if CC_HAS_THREADS
     SECTION("another thread satisfying it ends the wait")
     {
-        auto setter = std::thread(
+        auto setter = cc::native_thread::start(
             [&]
             {
                 m.lock([](bool& b) { b = true; });

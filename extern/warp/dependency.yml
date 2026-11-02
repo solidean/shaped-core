@@ -1,0 +1,30 @@
+# Pin and license for the upstream fetched here.
+# fetch-warp.py reads its pin from this file.
+
+upstreams:
+  - name: WARP
+    homepage: https://www.nuget.org/packages/Microsoft.Direct3D.WARP
+    install: on-request
+    source: nuget
+    # The package id on nuget.org, which with `version` names the download.
+    repo: Microsoft.Direct3D.WARP
+    track: none
+    version: 1.0.21
+    asset: Microsoft.Direct3D.WARP.1.0.21.nupkg
+    digest_algo: sha256
+    pin_hash: ea44b77eb30eec14427193e20f40cdb2e4c31ed11ab39cb880538fdf4bac2681
+    # A D3D12 software adapter: there is nothing to run it on anywhere else.
+    unavailable_on: [linux, macos]
+    license: LicenseRef-Microsoft-WARP-Testing
+    license_files: [.install/LICENSE.txt]
+    used_by: the dx12 test binaries' WARP driver, staged beside them by sg_warp_test_binary
+    notes: |
+      Windows ships a WARP of its own, and the one on CI's image traces some scenes wrong.
+      docs/bugs-external/warp-raytracing-wrong-capture has the evidence, and this pin is the version that passed it.
+      The package's d3d10warp.dll, beside an executable, is loaded instead of the system one.
+
+      ON REQUEST rather than fetched: Microsoft's terms for it are testing-only, forbid redistributing it, and carry
+      data-collection and binding-arbitration clauses.
+      Accepting those is a person's or a CI job's decision rather than a build's, so `uv run extern/warp/fetch-warp.py` fetches it
+      and nothing in dev.py does; the Windows Clang workflow runs that step.
+      Re-read the terms on any bump, since the license allowlist names them individually.

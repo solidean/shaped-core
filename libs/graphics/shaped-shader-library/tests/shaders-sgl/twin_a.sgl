@@ -1,0 +1,22 @@
+// One of two files declaring the same names: each file's generated types stand in a namespace of its own.
+// twin_b.sgl declares every name here again, and a binding named after this file.
+
+binding source:
+    values: mut buffer[float]
+
+@inline binding constants:
+    scale: float
+
+@pixel struct target:
+    color: float4
+
+struct pixel_input:
+    @position position: hpos4
+
+@compute(64) fun fill(@thread_id id: int3){source, constants}:
+    source.values[id.x] = constants.scale
+
+@pixel fun paint(p: pixel_input){constants} -> target:
+    return {
+        color = float4(constants.scale, 0.0, 0.0, 1.0)
+    }

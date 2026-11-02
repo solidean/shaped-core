@@ -163,8 +163,8 @@ void write_events(babel::json::array_writer& events,
 
     // Sampled frames are emitted INSIDE the scopes that were open, on the same track.
     //
-    // That is the whole point of the combination: the scopes give the structure a human named, and the samples give
-    // what was happening inside them — so a viewer shows instrumentation depth with sampling stacked on top.
+    // The scopes give the structure a human named, and the samples give what was happening inside them —
+    // so a viewer shows instrumentation depth with sampling stacked on top.
     // Chrome builds one stack per tid from the time-ordered B/E, so the only rule is that a synthetic span opens and
     // closes strictly between the boundaries of the scope it sits in.
     cc::map<i32, cc::vector<u64>> open_sampled;

@@ -252,15 +252,24 @@ protected:
                             isize dst_offset_in_bytes,
                             isize size_in_bytes) override;
 
+    void copy_buffer_to_texture(sg::raw_buffer_handle src,
+                                isize src_offset_in_bytes,
+                                isize src_row_pitch_in_bytes,
+                                sg::raw_texture_handle dst,
+                                sg::subresource_index const& subresource,
+                                sg::texture_region const& region) override;
+
     // Bodies in webgpu_command_list.compute.cc.
     void compute_bind_pipeline(sg::compute_pipeline const& pipeline) override;
     void compute_bind_group(int group_index, sg::binding_group const& group) override;
     void compute_dispatch(int x, int y, int z) override;
+    void compute_dispatch_indirect(sg::raw_buffer_handle const& args, isize offset_in_bytes) override;
     void compute_set_inline_constants(cc::span<byte const> data, cc::optional<isize> offset) override;
-    void compute_declare_array_buffer_access(cc::string_view binding_name,
-                                             cc::span<sg::array_buffer_access const> elements) override;
-    void compute_declare_array_texture_access(cc::string_view binding_name,
-                                              cc::span<sg::array_texture_access const> elements) override;
+    [[nodiscard]] u32 compute_declare_array_buffer_access(cc::string_view binding_name,
+                                                          cc::span<sg::array_buffer_access const> elements) override;
+    [[nodiscard]] u32 compute_declare_array_texture_access(cc::string_view binding_name,
+                                                           cc::span<sg::array_texture_access const> elements) override;
+    void withdraw_array_declaration(u32 id) override;
 
     // Bodies in webgpu_command_list.raster.cc.
     void raster_begin_rendering(sg::rendering_info const& info) override;
@@ -269,10 +278,10 @@ protected:
     void raster_bind_group(int group_index, sg::binding_group const& group) override;
     void raster_bind_vertex_buffers(int first_slot, cc::span<sg::vertex_buffer_view const> views) override;
     void raster_bind_index_buffer(sg::index_buffer_view const& view) override;
-    void raster_declare_array_buffer_access(cc::string_view binding_name,
-                                            cc::span<sg::array_buffer_access const> elements) override;
-    void raster_declare_array_texture_access(cc::string_view binding_name,
-                                             cc::span<sg::array_texture_access const> elements) override;
+    [[nodiscard]] u32 raster_declare_array_buffer_access(cc::string_view binding_name,
+                                                         cc::span<sg::array_buffer_access const> elements) override;
+    [[nodiscard]] u32 raster_declare_array_texture_access(cc::string_view binding_name,
+                                                          cc::span<sg::array_texture_access const> elements) override;
     void raster_set_viewport(sg::viewport const& vp) override;
     void raster_set_scissor(tg::aabb2i const& rect) override;
     void raster_set_stencil_reference(u32 reference) override;
@@ -280,6 +289,7 @@ protected:
     void raster_set_inline_constants(cc::span<byte const> data, cc::optional<isize> offset) override;
     void raster_draw(sg::draw_config const& config) override;
     void raster_draw_indexed(sg::draw_indexed_config const& config) override;
+    void raster_draw_indexed_indirect(sg::raw_buffer_handle const& args, isize offset_in_bytes, isize count) override;
 
     // Bodies in webgpu_raytracing.cc.
     // The builds write the ray-query polyfill's pool; the ray-tracing pipeline has no webgpu form, so its seams assert.
@@ -287,6 +297,7 @@ protected:
     [[nodiscard]] sg::blas_handle raytracing_build_blas_triangles(cc::span<sg::blas_triangles const> geometries,
                                                                   sg::accel_build_flags flags,
                                                                   int hit_record_stride) override;
+    [[nodiscard]] sg::micromap_handle raytracing_build_micromap(sg::micromap_triangles const& triangles) override;
     [[nodiscard]] sg::blas_handle raytracing_build_blas_aabbs(cc::span<sg::blas_aabbs const> geometries,
                                                               sg::accel_build_flags flags,
                                                               int hit_record_stride) override;

@@ -1,11 +1,9 @@
 #include <clean-core/common/macros.hh> // CC_HAS_THREADS
 #include <clean-core/container/vector.hh>
 #include <clean-core/thread/impl/chase_lev_deque.hh>
+#include <clean-core/thread/native_thread.hh>
 #include <nexus/test.hh>
 
-#if CC_HAS_THREADS
-#include <thread>
-#endif
 
 // White-box tests for the Chase-Lev deque behind async_thread_pool's workers.
 //
@@ -190,10 +188,10 @@ TEST("chase_lev_deque - concurrent owner and thieves claim every value exactly o
         claimed_total.fetch_add(1, cc::memory_order_relaxed);
     };
 
-    cc::vector<std::thread> ts;
+    cc::vector<cc::native_thread> ts;
     ts.reserve(thieves);
     for (int i = 0; i < thieves; ++i)
-        ts.push_back(std::thread(
+        ts.push_back(cc::native_thread::start(
             [&]
             {
                 while (!done.load(cc::memory_order_acquire))
@@ -267,10 +265,10 @@ TEST("chase_lev_deque - thieves racing for a single element never double-claim i
     cc::atomic<bool> stop = {false};
     cc::atomic<int> round_gate = {0};
 
-    cc::vector<std::thread> ts;
+    cc::vector<cc::native_thread> ts;
     ts.reserve(thieves);
     for (int i = 0; i < thieves; ++i)
-        ts.push_back(std::thread(
+        ts.push_back(cc::native_thread::start(
             [&]
             {
                 while (!stop.load(cc::memory_order_acquire))

@@ -4,6 +4,7 @@
 #include <clean-core/container/vector.hh>
 #include <clean-core/error/optional.hh>
 #include <clean-core/string/string.hh>
+#include <clean-core/string/string_view.hh>
 #include <shaped-graphics/binding/shader_stage.hh>
 #include <shaped-graphics/fwd.hh>
 #include <shaped-graphics/resource/views.hh>
@@ -144,7 +145,7 @@ struct sg::binding
     cc::string name; ///< reflection name — the key a binding_group matches a bound view against
 
     /// The name the shader's compiler reflected, where a compiler edge renamed it to `name`; empty otherwise.
-    /// For diagnostics only: no backend and no layout reads it, and a cached shader never carries it.
+    /// For diagnostics only: no backend and no layout reads it.
     cc::string reflected_name;
 
     /// The descriptor set / @group this binding lives in — reflected by SPIR-V and other languages where the set is part of the hardware binding.
@@ -181,7 +182,7 @@ struct sg::binding
     ///
     /// **Empty means not known, not "no stage".** A hand-written binding that never says is treated as visible
     /// everywhere, which is what dx12 and vulkan did unconditionally before this field existed.
-    /// It matters because WebGPU cannot be permissive here: its default limits allow zero storage buffers in the
+    /// WebGPU cannot be that permissive: its default limits allow zero storage buffers in the
     /// vertex stage, so a storage binding wrongly marked vertex-visible fails validation on a conformant device.
     shader_stages visibility;
 
@@ -206,8 +207,35 @@ struct sg::binding
     [[nodiscard]] constexpr bool is_writable() const { return access != access_mode::read; }
 };
 
+/// An array binding of buffers or bytes, by the name its layout gives it: what `declare_array_buffer_access` takes.
+/// A shader package generates one per binding array, as `<group>::arrays::<member>`, so a misspelled name does not compile.
+/// A layout no package generates is declared through the by-name overload instead, which checks the name where it declares.
+struct sg::buffer_array_binding
+{
+    cc::string_view name;
+};
+
+/// An array binding of textures or images, by the name its layout gives it: what `declare_array_texture_access` takes.
+/// Generated and checked as `buffer_array_binding` is.
+struct sg::texture_array_binding
+{
+    cc::string_view name;
+};
+
 namespace sg
 {
+
+/// Whether `b` is an array a `buffer_array_binding` names: of buffers or bytes, with more than one element.
+[[nodiscard]] constexpr bool is_buffer_array(binding const& b)
+{
+    return b.is_array() && (b.type == binding_type::buffer || b.type == binding_type::bytes);
+}
+
+/// Whether `b` is an array a `texture_array_binding` names: of textures or images, with more than one element.
+[[nodiscard]] constexpr bool is_texture_array(binding const& b)
+{
+    return b.is_array() && (b.type == binding_type::texture || b.type == binding_type::image);
+}
 
 /// The view class a bound view must have to satisfy `b`.
 [[nodiscard]] constexpr view_class view_class_of(binding const& b)

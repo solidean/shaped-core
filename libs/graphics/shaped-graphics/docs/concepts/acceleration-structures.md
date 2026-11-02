@@ -53,6 +53,7 @@ It was computed against DXR and Vulkan RT first, and Metal — checked field by 
   `gl_InstanceCustomIndex`), an **8-bit** visibility `mask`, an optional per-instance opaque override, a
   cull mode (front/back/none), and a **24-bit** `hit_group_offset` (`InstanceContributionToHitGroupIndex`).
   The 24-bit fields assert on overflow.
+- **A triangle geometry may name an opacity micromap**, behind `sg::feature::opacity_micromap` — see [Opacity micromaps](#opacity-micromaps).
 - **A BLAS build takes a `hit_record_stride`**, the shader-table records one of its geometries spans.
   Metal bakes it into each geometry's offset, and dx12 and vulkan ignore it; [raytracing-pipeline](raytracing-pipeline.md#hit-rows-one-record-per-ray-type) says why.
 
@@ -87,12 +88,31 @@ Ordering is inferred, never hand-synchronized.
 A build declares [`accel_write`](../../src/shaped-graphics/barrier/resource_access.hh) on the `accel_build` stage over the structure it produces, and `accel_read` over each referenced BLAS.
 A later trace declares `accel_read` on the `raytracing` stage, and the [barriers](barriers.md) system turns those into the right GPU barriers.
 
-## Load-bearing invariants
+## Opacity micromaps
+
+**A micromap is its own structure, as in both APIs**: `cmd.raytracing.build_micromap` builds one, and a `blas_triangles` names it with one index per triangle.
+Each map subdivides its triangle into 4^level micro-triangles with a state each, and traversal decides an opaque or transparent micro-triangle with no candidate decision.
+An index may instead be a `micromap_special_index`, a whole triangle's state, so a uniform triangle needs no map.
+The BLAS holds every micromap it was built from, the edge a TLAS has with its BLASes.
+
+- **The build is sized on the CPU**: both APIs take how many maps there are of each level and format, so `micromap_usage` must be known before a GPU pass writes the maps.
+  A geometry names its own counts, which default to the micromap's.
+- **The records are the APIs' own**: `micromap_descriptor` is the 8-byte record D3D12 and Vulkan both read, and states pack lowest bits first.
+- **Strict where the feature is absent**: `build_micromap`, and a geometry naming a micromap, assert without `sg::feature::opacity_micromap`, so a caller checks before baking.
+- **A ray query needs nothing on vulkan**; a ray-tracing pipeline is created with the micromap flag wherever micromaps are enabled.
+
+**vulkan** builds them through `VK_EXT_opacity_micromap`, enabled wherever the device grants it.
+Vulkan builds micromaps in a pipeline stage sg's barrier vocabulary does not name, so each build is bracketed by two global barriers, one into that stage and one out of it.
+sg's own tracking meanwhile records the buffers as acceleration-structure accesses.
+**dx12** reports the feature absent until it runs the Agility SDK's DXR 1.2, and metal and webgpu have no equivalent — [feat-sg-opacity-micromaps](../issues/feat-sg-opacity-micromaps.md).
+
+## Invariants
 
 Preserve these; the rest is tuning:
 
 1. **Inputs stay within the DXR∩Vulkan common denominator** — `float3` vertices, 3×4 row-major transforms,
-   24-bit `instance_id`/`hit_group_offset`, 8-bit `mask`. Widen only behind a capability query.
+   24-bit `instance_id`/`hit_group_offset`, 8-bit `mask`.
+   Widen only behind a capability query.
 2. **A referenced BLAS is fully built before its TLAS**, and a `tlas` instance holds a `blas_handle` so the
    BLAS outlives every TLAS using it.
 3. **Scratch is transient** (single-epoch), never retained.
@@ -173,7 +193,7 @@ A `tlas` binds as a shader resource through the `acceleration_structure` binding
 The pipeline path is `raytracing_pipeline`, `raytracing_shader_table` and `cmd.raytracing.dispatch_rays`, on dx12 (WARP included), vulkan and metal.
 See [raytracing-pipeline](raytracing-pipeline.md), which also says which feature each backend reports.
 
-**Deferred** (see [TODO.md](../TODO.md)):
+**Deferred** (see [epic-sg-acceleration-structure-gaps](../issues/epic-sg-acceleration-structure-gaps.md) and [epic-sg-raytracing-pipeline-gaps](../issues/epic-sg-raytracing-pipeline-gaps.md)):
 
 - the **transient (single-epoch) variant**, and the **refit / update + compaction** runtime path;
 - the shader table's own storage abstraction — it is backed by a plain readable buffer today, and [types.hh](../../src/shaped-graphics/types.hh) rules an SBT out of `buffer_usage` deliberately;

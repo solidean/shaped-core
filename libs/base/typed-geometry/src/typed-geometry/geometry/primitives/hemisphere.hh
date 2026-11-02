@@ -40,6 +40,8 @@ template <class T>
 template <int D, class T>
 struct tg::hemisphere
 {
+    using scalar_t = T;
+
     static_assert(D == 3, "a hemisphere is 3D");
 
     pos<D, T> center;
@@ -156,6 +158,8 @@ public:
 template <int D, class T>
 struct tg::hemisphere_boundary
 {
+    using scalar_t = T;
+
     static_assert(D == 3, "a hemisphere is 3D");
 
     pos<D, T> center;
@@ -251,6 +255,8 @@ public:
 template <int D, class T>
 struct tg::hemisphere_mantle
 {
+    using scalar_t = T;
+
     static_assert(D == 3, "a hemisphere is 3D");
 
     pos<D, T> center;

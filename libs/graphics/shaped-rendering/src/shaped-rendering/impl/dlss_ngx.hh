@@ -118,6 +118,10 @@ void dlss_release_stream(dlss_stream* stream);
 /// How many streams `dlss_release_stream` has released, for a test to observe when that happens.
 [[nodiscard]] int dlss_released_stream_count();
 
+/// How many `dlss_open` calls the instance open for `ctx`'s device answers, or 0 when none is open.
+/// A test reads it to see that every open has its close: one left over keeps NGX open for the device until exit.
+[[nodiscard]] int dlss_open_count(sg::context const& ctx);
+
 /// Records one evaluation onto `cmd`, inside a native scope that barriers every resource it names.
 /// False when NGX refused it, which is logged.
 [[nodiscard]] bool dlss_evaluate(sg::command_list& cmd, dlss_stream& stream, dlss_eval_desc const& desc);

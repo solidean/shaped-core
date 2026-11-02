@@ -1,7 +1,8 @@
 # versioned-document-file — Cheat Sheet
 
 The `.vdoc` save format: one SQLite file holding a document's history, its embedded assets, and its workspace state.
-Namespace `vdoc::file`. Depends on versioned-document and babel-serializer.
+Namespace `vdoc::file`.
+Depends on versioned-document and babel-serializer.
 
 > The on-disk shape is fully specified in [docs/format.md](docs/format.md).
 
@@ -91,7 +92,7 @@ The fourteen kinds are [format.md](docs/format.md#loading)'s table.
 struct asset_record
 {
     cc::string             asset_id;      // the same string a document property holds
-    cc::string             kind;          // load-bearing
+    cc::string             kind;          // authoritative
     cc::vector<asset_part> parts;         // addressed by (name, index); stored order is kept verbatim
     vdoc::value            meta;          // informational
     cc::vector<cc::string> dependencies;  // DECLARED asset ids; uninterpreted, may name assets outside this file
@@ -195,6 +196,6 @@ That is what makes the in-memory arm an oracle rather than a shortcut, and it is
 - **A skeleton op is unverifiable, not corrupt.** A pruned parent has no bytes to hash, and must never be reported as a mismatch.
 - **`encoding` is a reserved seam.** `raw` is all v1 writes; an unknown encoding skips the blob with an issue rather than failing the open.
 - **Unknown tables and columns survive** an open-modify-save cycle, because every statement names its own columns and no rewrite exists.
-- **A required snapshot is load-bearing.** Materializing a pruned document *without* it is lossy by construction, which is why it is pinned in the cache and why an undecodable one fails the open.
+- **A required snapshot cannot be rebuilt.** Materializing a pruned document *without* it is lossy by construction, which is why it is pinned in the cache and why an undecodable one fails the open.
 - **Pruning is bounded.** It is refused unless every ref descends from the prune point, because a ref that forked earlier can still present writers the emptied ops superseded.
 - **Persisting a snapshot is explicit.** `publish` never writes one, or it would stop being idempotent.

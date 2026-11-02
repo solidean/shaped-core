@@ -30,7 +30,7 @@ struct cc::rec::pinnable_traits
     static constexpr bool is_pinnable = false;
 };
 
-/// Every `cc::pinned_data<T>` is pinnable, which is the whole point of the type.
+/// Every `cc::pinned_data<T>` is pinnable, since the type exists to make that promise.
 template <class T>
 struct cc::rec::pinnable_traits<cc::pinned_data<T>>
 {

@@ -15,6 +15,13 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 # clang jobs. Turn this back on with the first `import`, and make sure the scanner matches the compiler.
 set(CMAKE_CXX_SCAN_FOR_MODULES OFF)
 
+# Repo-wide build configuration helpers live in tools/cmake/.
+list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake")
+
+# Every repo-wide flag below goes through sc_build_options(), which also records it on shaped-core::build-config.
+# clean-core links that target PUBLIC, so a project consuming shaped-core via add_subdirectory gets the same flags — see the module.
+include(BuildConfig)
+
 # Build gating. Both default ON for a top-level build (the normal dev flow) and OFF when
 # shaped-core is consumed via add_subdirectory, where a dependent wants the libraries but not
 # our test and tool binaries. Must precede add_subdirectory(extern): the tools' externals gate
@@ -94,10 +101,21 @@ option(SC_CHECK_WIDE_ARITH "Check typed-geometry's fixed_int width claims and pr
 # Whole-build for the same ODR reason as SC_CHECK_WIDE_ARITH, and turned on by the same debug-nopch presets.
 option(SC_CHECK_GEOMETRY_SPECIAL_CASES "Log typed-geometry's geometric special-case assumptions at runtime" OFF)
 
+# Let a context link's releases be watched, so nexus names who still holds a test's context when it reports leftover async work.
+# Off, the release path is exactly what it is without the feature; on, every release of a context link pays one load and a compare.
+# Whole-build for the same ODR reason as SC_CHECK_WIDE_ARITH: the release is inline.
+option(SC_ASYNC_AMBIENT_TRACE "Let nexus name who holds a test's context when it reports leftover async work" OFF)
+
 # Test clean-simd at every lane width it generates flat, rather than at one 256-bit type per element.
 # Every width is every kernel instantiated four times over, which is most of clean-simd-test's compile time.
 # Only the test binary sees it, so unlike the checks above it is no ODR hazard; the debug-nopch presets turn it on.
 option(SC_SIMD_EXHAUSTIVE_TESTS "Test clean-simd at every lane width, not one per element type" OFF)
+
+# Shaders come from the binary alone: no source directory is mounted over a package's embedded copy, and nothing hot-reloads.
+# An executable that calls sc_embed_shader_bundle serves what its recorded bundle holds without compiling it, and compiles
+# the rest from the embedded sources at run time.
+# A whole-build switch, set by the frozen-* presets; libs/graphics/shaped-shader-library/docs/frozen-shaders.md is the design.
+option(SC_FROZEN_SHADERS "Serve shaders from the binary alone: embedded sources and recorded bytecode, no disk, no reload" OFF)
 
 # Keep a frame pointer in every frame, so cc::capture_stack can walk the chain by chasing it — a few nanoseconds a
 # frame, against a microsecond for the table-driven unwind that is the only alternative.
@@ -108,10 +126,22 @@ option(SC_SIMD_EXHAUSTIVE_TESTS "Test clean-simd at every lane width, not one pe
 option(SC_FRAME_POINTERS "Keep frame pointers, so stacks can be captured by chasing the chain" ON)
 if (SC_FRAME_POINTERS)
     if (CMAKE_CXX_COMPILER_ID MATCHES "Clang" AND MSVC)
-        add_compile_options(/Oy-) # clang-cl spells it the MSVC way and rejects -fno-omit-frame-pointer
+        sc_build_options(COMPILE /Oy-) # clang-cl spells it the MSVC way and rejects -fno-omit-frame-pointer
     elseif (CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
-        add_compile_options(-fno-omit-frame-pointer)
+        sc_build_options(COMPILE -fno-omit-frame-pointer)
     endif()
+endif()
+
+# What a binary says about its own source at each cc::source_location: FULL, OPAQUE or OFF → clean-core's CC_SOURCE_SITES.
+# FULL keeps file, line and function as strings, as std::source_location does, and is the default.
+# OPAQUE keeps only the site's code address, which the build's debug info resolves offline, so a shipped binary names
+# no source file and no function; checks drop their condition text too.
+# OFF keeps nothing.
+# A whole-build switch, never per-target: cc::source_location's layout changes with it.
+set(SC_SOURCE_SITES "FULL" CACHE STRING "What a cc::source_location keeps of its site: FULL, OPAQUE or OFF")
+set_property(CACHE SC_SOURCE_SITES PROPERTY STRINGS FULL OPAQUE OFF)
+if(NOT SC_SOURCE_SITES MATCHES "^(FULL|OPAQUE|OFF)$")
+    message(FATAL_ERROR "SC_SOURCE_SITES must be FULL, OPAQUE or OFF, got '${SC_SOURCE_SITES}'")
 endif()
 
 # Target CPU is x86-64.
@@ -143,8 +173,6 @@ set_property(CACHE SC_X64_LEVEL PROPERTY STRINGS v1 v2 v3 v4)
 # below it are instantiated in the dispatching target itself. See libs/base/clean-simd/src/clean-simd/dispatch.hh.
 set(SC_SIMD_KERNELS "auto" CACHE STRING "clean-simd kernels above SC_X64_LEVEL compiled for dispatch: auto, a list, or empty")
 
-# Repo-wide build configuration helpers live in tools/cmake/.
-list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake")
 
 # Apply repo-wide build configuration before add_subdirectory so every target is
 # instrumented. Each is a no-op unless its driving option/preset is active.
@@ -154,6 +182,8 @@ include(PGO)          # SC_PGO_*     — IR-based profile-guided optimization (c
 include(Emscripten)   # EMSCRIPTEN   — WASM feature + exception-mode knobs
 include(Simd)         # SC_X64_LEVEL — the x86-64 feature level every function may assume
 include(FloatingPoint) # no floating-point contraction, on every compiler
+include(LibcxxFloatH)  # Homebrew LLVM < 23 on Apple: libc++'s <float.h> against the macOS 27 SDK
+include(MacosSdk)      # macOS: the SDK on the command line, so it moves only with a reconfigure
 
 # Per-target precompiled headers.
 # Each library declares the tiers it owns with sc_declare_pch_tier() and applies them with sc_target_pch();
@@ -165,6 +195,7 @@ include(PrecompiledHeaders)
 # Staging an executable's DLLs beside it on Windows (sc_stage_runtime_dlls), which the example and shader-package
 # helpers below both call.
 include(RuntimeDlls)
+include(SourceFingerprint) # sc_add_source_fingerprint — a cache key that moves with a library's own sources
 
 # RelWithDebInfo = Release codegen + assertions + debug info. MSVC/clang-cl default this config to /Ob1
 # (inline only functions explicitly marked inline) — a misleading dev default: /O2 is otherwise identical to
@@ -172,7 +203,15 @@ include(RuntimeDlls)
 # short-key hash path was ~5-11x slower under /Ob1). Promote to /Ob2 so RelWithDebInfo matches Release's
 # inlining; /Zi debug info and our CC_ASSERTs are untouched. Applied to every target (C and C++) defined below.
 if (MSVC)
-    add_compile_options($<$<CONFIG:RelWithDebInfo>:/Ob2>)
+    sc_build_options(COMPILE $<$<CONFIG:RelWithDebInfo>:/Ob2>)
+endif()
+
+# Release on Windows carries debug info on the side: a PDB beside each binary, never inside it, so a release crash symbolizes.
+# /OPT:REF and /OPT:ICF restore what /DEBUG turns off, so the code is Release's own.
+# Not elsewhere: -g puts the debug info into the binary, which a consumer shipping it would have to split off first.
+if (MSVC)
+    sc_build_options(COMPILE $<$<CONFIG:Release>:/Z7> LINK $<$<CONFIG:Release>:/DEBUG> $<$<CONFIG:Release>:/OPT:REF>
+                     $<$<CONFIG:Release>:/OPT:ICF>)
 endif()
 
 # Vendored third-party dependencies (mimalloc, xxHash, ...). Defined before the
@@ -311,17 +350,29 @@ if(SC_BUILD_EXAMPLES AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/examples/CMakeLists
     add_subdirectory(examples)
 endif()
 
-# Generate the browser test-runner pages once every *-web module has been registered (Emscripten only):
-# one page per library plus the aggregate tests-web.html. See cmake/NexusWebRunner.cmake.
-sc_finalize_web_runners()
+# The end-of-configure registries: each collects what every target declared, so it runs once all of them exist.
+function(sc_finalize_build)
+    # Generate the browser test-runner pages once every *-web module has been registered (Emscripten only):
+    # one page per library plus the aggregate tests-web.html. See cmake/NexusWebRunner.cmake.
+    sc_finalize_web_runners()
 
-# Which executables are nexus binaries and what they carry, for dev.py. See libs/base/nexus/cmake/NexusBinaries.cmake.
-sc_write_nexus_binary_manifest()
+    # Which executables are nexus binaries and what they carry, for dev.py. See libs/base/nexus/cmake/NexusBinaries.cmake.
+    sc_write_nexus_binary_manifest()
 
-# Check that every declared shader package found the shaped-shader-library target. See
-# libs/graphics/shaped-shader-library/cmake/ShaderPackage.cmake.
-sc_finalize_shader_packages()
+    # Check that every declared shader package found the shaped-shader-library target. See
+    # libs/graphics/shaped-shader-library/cmake/ShaderPackage.cmake.
+    sc_finalize_shader_packages()
 
-# Apply the recorded sc_target_pch() requests, now that every library has declared the tiers it owns.
-# Deferred so a target may name a tier from a library added after its own — clean-core-test wants nexus'.
-sc_finalize_pch()
+    # Apply the recorded sc_target_pch() requests, now that every library has declared the tiers it owns.
+    # Deferred so a target may name a tier from a library added after its own — clean-core-test wants nexus'.
+    sc_finalize_pch()
+endfunction()
+
+# As a subdirectory of another project, "every target" includes the consumer's, which do not exist yet here.
+# So the finalizers run at the end of the top-level CMakeLists instead, and the consumer's tests, PCH requests and shader packages are seen with ours.
+# A consumer calls none of them itself: two writers of nexus-binaries.json would be a generate error.
+if(PROJECT_IS_TOP_LEVEL)
+    sc_finalize_build()
+else()
+    cmake_language(DEFER DIRECTORY "${CMAKE_SOURCE_DIR}" CALL sc_finalize_build)
+endif()

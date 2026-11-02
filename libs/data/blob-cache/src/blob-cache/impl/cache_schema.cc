@@ -79,7 +79,7 @@ cc::vector<known_table> known_tables()
     return tables;
 }
 
-/// The indexes, kept apart from the DDL because two of them are PARTIAL and that is the point of having them.
+/// The indexes, kept apart from the DDL because two of them are PARTIAL.
 /// Almost no entry expires and almost no object is orphaned, so these cost close to nothing and still turn the expiry and reclamation phases into index scans rather than table scans.
 cc::span<cc::string_view const> known_indexes()
 {

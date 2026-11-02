@@ -1,10 +1,9 @@
 #include <clean-core/common/macros.hh>
+#include <clean-core/container/vector.hh>
+#include <clean-core/thread/native_thread.hh>
 #include <clean-core/thread/thread.hh>
 #include <nexus/test.hh>
 
-#if CC_HAS_THREADS
-#include <thread>
-#endif
 
 using namespace cc::primitive_defines;
 
@@ -16,7 +15,7 @@ TEST("thread - set_current_thread_name is callable")
     cc::set_current_thread_name("nexus-main");
 
 #if CC_HAS_THREADS
-    std::thread t(
+    auto t = cc::native_thread::start(
         []
         {
             cc::set_current_thread_name("worker");
@@ -38,7 +37,7 @@ TEST("thread - current_thread_id is stable per thread and distinct across them")
 #if CC_HAS_THREADS
     auto other = cc::thread_id::invalid;
     auto other_again = cc::thread_id::invalid;
-    std::thread t(
+    auto t = cc::native_thread::start(
         [&]
         {
             other = cc::current_thread_id();
@@ -52,6 +51,44 @@ TEST("thread - current_thread_id is stable per thread and distinct across them")
     CHECK(other != mine);
 #endif
 }
+
+#if CC_HAS_THREADS
+TEST("thread - exit callbacks run when the thread exits, last registered first")
+{
+    struct probe
+    {
+        cc::vector<int> order;
+        bool ran_before_exit = false;
+        bool registered_while_exiting = false;
+    };
+    auto p = probe();
+
+    auto t = cc::native_thread::start(
+        [&]
+        {
+            cc::register_at_thread_exit([](void* u) { static_cast<probe*>(u)->order.push_back(1); }, &p);
+            cc::register_at_thread_exit(
+                [](void* u)
+                {
+                    auto& pr = *static_cast<probe*>(u);
+                    pr.order.push_back(2);
+                    // Registered while exiting, so it runs after everything already queued.
+                    cc::register_at_thread_exit([](void* v) { static_cast<probe*>(v)->order.push_back(3); }, &pr);
+                    pr.registered_while_exiting = true;
+                },
+                &p);
+            p.ran_before_exit = !p.order.empty();
+        });
+    t.join();
+
+    CHECK(!p.ran_before_exit);
+    CHECK(p.registered_while_exiting);
+    REQUIRE(p.order.size() == 3);
+    CHECK(p.order[0] == 2);
+    CHECK(p.order[1] == 3);
+    CHECK(p.order[2] == 1);
+}
+#endif
 
 TEST("thread - the scheduler tick can be asked to be finer")
 {

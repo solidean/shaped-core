@@ -20,8 +20,8 @@ The [readme](../readme.md#the-one-thing-to-know-first) says why: a browser has n
 | | wasm | Windows | Linux | macOS | iOS / Android |
 |---|---|---|---|---|---|
 | TCP | — | **done** | done, unverified | done, unverified | planned |
-| virtual + simulated transports | done | done | done | done | done |
-| UDP datagrams | — | planned | planned | planned | planned |
+| virtual + simulated transports (streams and datagrams) | done | done | done | done | done |
+| UDP datagrams | — | **done** | done, unverified (`recvmmsg` arm) | done, unverified | planned |
 | listeners | — | **done** | done, unverified | done, unverified | planned |
 | HTTP server (loopback) | — | **done** | done, unverified | done, unverified | planned |
 | HTTP client | planned (`fetch`) | **done** (native) | done, unverified | done, unverified | planned |
@@ -82,6 +82,10 @@ timeout.
 outcome arrives as `cc::async_error::is_cancelled()`.
 [cancellation.md](cancellation.md) is the design.
 
+**[done]** UDP datagrams, polled in batches over caller-owned records, with a level-triggered arrival callback.
+The same `cnet::datagram_socket` over the native, virtual and simulated transports; the simulated one impairs where a datagram is received.
+[datagrams.md](datagrams.md) is the design.
+
 **[done]** the transport seam and the two transports that stand in for a network:
 `cnet::virtual_network` answers in this process over no socket, and `cnet::simulated_transport` delays, drops and cuts
 on the way through to another one.
@@ -89,8 +93,7 @@ on the way through to another one.
 
 **[planned]**, roughly in the order it will be built:
 
-1. the `fetch` and browser-`WebSocket` backends for wasm, and a `dlopen`ed system libcurl where one is present;
-2. UDP datagrams, in the poll-and-batch shape [docs/todo/cnet-datagrams.md](../../../../docs/todo/cnet-datagrams.md) records.
+1. the `fetch` and browser-`WebSocket` backends for wasm, and a `dlopen`ed system libcurl where one is present.
 
 ## Teardown settles rather than abandons
 
@@ -114,7 +117,7 @@ A connect waiting on name resolution is sitting on the resolver's own worker thr
 stopping and that operation settles when the worker next looks — which is after `stop()` has returned.
 So a caller who wants to observe the answer has to let that thread run: `cc::thread_pump_all()` in a loop, not a read
 straight after the call.
-It matters under load more than it looks, because the worker competes with everything else the machine is doing.
+Under load the wait grows, because the worker competes with everything else the machine is doing.
 
 Two tests assumed otherwise and were flaky for it (`connect-test.cc`).
 **Open question, not settled here:** whether stopping twice in a row can genuinely lose an answer, or whether every

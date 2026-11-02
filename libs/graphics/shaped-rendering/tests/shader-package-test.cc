@@ -1,4 +1,7 @@
 #include <nexus/test.hh>
+
+// Only NRD's passes declare bindings the generator tables, so without NRD there is nothing to check.
+#if SR_HAS_NRD
 #include <sr_shaders.hh>
 
 // sr's shader package, checked against the shaders it was generated from.
@@ -16,3 +19,4 @@ TEST("sr - the generated shader tables still describe the shaders they came from
     if (!message.empty())
         FAIL(message);
 }
+#endif

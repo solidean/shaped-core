@@ -57,7 +57,7 @@ cc::unique_ptr<dx12_query_heap_lease> dx12_query_system::acquire_heap(dx12_query
             if (!list.empty())
             {
                 lease = cc::move(list.back());
-                list.pop_back();
+                list.remove_back();
             }
         });
 

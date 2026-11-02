@@ -36,7 +36,7 @@ TEST("slib - mount_table rebases a path onto the mount's own root")
 {
     slib::mount_table mounts;
     // The filesystem knows nothing of "common" — that prefix is where the table hangs it.
-    // This is the point of mounting: a shared library keeps a stable include path wherever its files actually live.
+    // So a shared library keeps a stable include path wherever its files actually live.
     mounts.mount("common", make_fs("brdf.hlsli", "brdf"));
 
     CHECK(mounts.read_text("common/brdf.hlsli").value() == "brdf");

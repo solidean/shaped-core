@@ -13,6 +13,12 @@ namespace tg::impl
 template <class A, class B>
 [[nodiscard]] constexpr bool contains(A const& a, B const& b)
 {
+    // every set holds the empty set, and the empty set holds nothing else
+    if (impl::is_empty_set(b))
+        return true;
+    if (impl::is_empty_set(a))
+        return false;
+
     if constexpr (has_op<contains_op, A, B>)
         return contains_op<A, B>::apply(a, b);
     else if constexpr (is_pos<B> && has_project_to<B, A>)

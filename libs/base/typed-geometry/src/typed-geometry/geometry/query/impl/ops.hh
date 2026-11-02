@@ -19,6 +19,18 @@
 
 namespace tg::impl
 {
+/// Whether obj is the empty set: an object with is_empty() that is empty, today the empty aabb and its boundary.
+/// Every verb's dispatcher asks it once, so no kernel has to: the slab test, the hot pairs and GJK never see an empty box.
+/// For a type without is_empty() it is a constant false that compiles away.
+template <class Obj>
+[[nodiscard]] constexpr bool is_empty_set(Obj const& obj)
+{
+    if constexpr (requires { obj.is_empty(); })
+        return obj.is_empty();
+    else
+        return false;
+}
+
 /// `a.project_to(b)`: a mapped onto b. Not symmetric.
 template <class A, class B>
 struct project_op;

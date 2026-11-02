@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Issues</title>
+<link rel="stylesheet" href="app.css">
+<script>window.ISSUES_TOKEN = "{{TOKEN}}";</script>
+<script src="https://cdn.jsdelivr.net/npm/marked@12.0.2/marked.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/dompurify@3.1.6/dist/purify.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/cytoscape@3.30.2/dist/cytoscape.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/dagre@0.8.5/dist/dagre.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/cytoscape-dagre@2.5.0/cytoscape-dagre.js"></script>
+</head>
+<body>
+<header>
+  <h1>Issues <span id="repo-name"></span></h1>
+  <input id="search" type="search" placeholder="Search ids, titles, text  ( / )" autocomplete="off">
+  <nav id="views">
+    <button data-view="list" class="active">List</button>
+    <button data-view="graph">Graph</button>
+    <button data-view="tags">Tags</button>
+  </nav>
+  <button id="pending-btn" class="pending-btn" hidden></button>
+</header>
+
+<div id="filters">
+  <label>Scope <select id="f-scope"></select></label>
+  <label>State <select id="f-state">
+    <option value="open">open</option><option value="closed">closed</option><option value="all">all</option>
+  </select></label>
+  <label>Priority <select id="f-priority">
+    <option value="">any</option><option value="next">next</option><option value="normal">normal</option><option value="someday">someday</option>
+  </select></label>
+  <label>Tag <select id="f-tag"></select></label>
+  <label>Claim <select id="f-claim">
+    <option value="">any</option><option value="claimed">claimed</option><option value="unclaimed">unclaimed</option><option value="mine">mine</option>
+  </select></label>
+  <label class="check"><input type="checkbox" id="f-blocked"> blocked only</label>
+  <span id="f-types"></span>
+  <span id="count"></span>
+</div>
+
+<main>
+  <section id="view-list" class="view"></section>
+  <section id="view-graph" class="view" hidden>
+    <div id="graph-tools">
+      <label class="check"><input type="checkbox" id="g-parent" checked> epic membership</label>
+      <label class="check"><input type="checkbox" id="g-outside" checked> related issues outside the filter</label>
+      <label class="check"><input type="checkbox" id="g-focus"> only the selected issue's cluster</label>
+      <span class="legend"><i class="edge-block"></i> blocks <i class="edge-parent"></i> contains</span>
+    </div>
+    <div id="graph"></div>
+  </section>
+  <section id="view-tags" class="view" hidden></section>
+  <div id="splitter" hidden></div>
+  <aside id="panel" hidden></aside>
+</main>
+
+<div id="bulk-bar" hidden>
+  <span id="bulk-count"></span>
+  <input id="bulk-tag" list="tag-list" placeholder="tag">
+  <button id="bulk-add">Add tag</button>
+  <button id="bulk-remove">Remove tag</button>
+  <select id="bulk-priority">
+    <option value="">set priority…</option><option value="next">next</option><option value="normal">normal</option><option value="someday">someday</option>
+  </select>
+  <button id="bulk-clear" class="quiet">Clear selection</button>
+</div>
+
+<dialog id="pending-dialog">
+  <form method="dialog" class="dialog-head">
+    <h2>Outstanding edits</h2>
+    <button class="quiet" value="close" aria-label="Close">✕</button>
+  </form>
+  <p class="hint">Only the checked issue files are committed, as one commit on top of the fetched remote branch, and pushed alone.
+    Other local commits and changes stay where they are.</p>
+  <div id="pending-list"></div>
+  <pre id="pending-diff"></pre>
+  <div class="dialog-foot">
+    <input id="commit-message" value="issues: triage">
+    <button id="publish-btn" class="primary">Commit &amp; push</button>
+  </div>
+  <pre id="publish-log" hidden></pre>
+</dialog>
+
+<datalist id="tag-list"></datalist>
+<datalist id="id-list"></datalist>
+<div id="toast" hidden></div>
+<script src="app.js"></script>
+</body>
+</html>

@@ -28,17 +28,25 @@ struct sv::viewer_config
     /// Runs with no window, no swapchain and no present: the frame is composited into an offscreen texture and left
     /// there, `width` x `height`.
     ///
-    /// It needs no display and no window backend, which is the point — this is what a capture run uses.
+    /// It needs no display and no window backend, so a capture run uses it.
     /// The frame API is unchanged either way: `frame::viewport_size` reports the offscreen size and nothing hands out
     /// a swapchain, so an authoring body cannot tell the difference.
     /// A headless loop is ended by `request_close` alone, since there is no window to close.
     bool headless = false;
 
+    /// How much GPU time a frame's still wavefront layers may take together, in milliseconds, split evenly among them; 0 runs each layer's `rounds_per_frame`.
+    ///
+    /// A still layer's rounds follow from what its last frames measured, so the image converges as fast per second as the GPU allows while the viewer stays responsive.
+    /// A frame whose image changed is not held to it, since it drains.
+    /// Needs `sg::feature::timestamp_query`; without it the rounds stay at `rounds_per_frame`.
+    /// A headless viewer, which is what a capture runs in, treats it as 0, so its image depends on no machine's speed.
+    f32 frame_budget_ms = 16.0f;
+
     /// Swapchain back buffers, and also the pipelining depth passed to advance_epoch.
     /// Must be >= 2.
     int buffer_count = 3;
 
-    /// Budgets for the viewer's own `gpu_resource_manager` — per-manager LRU limits and the bindless table sizes.
+    /// Budgets for the viewer's own `gpu_resource_manager` — per-manager LRU limits.
     /// The defaults suit a viewer-sized working set; a caller whose content says otherwise sets them here rather
     /// than reaching past the viewer.
     gpu_resource_manager_config resources = {};
@@ -145,8 +153,25 @@ private:
     /// The payloads still streaming in, as a const query — `frame::streaming_resources`'s answer.
     [[nodiscard]] isize streaming_resources() const;
 
+    /// The last poll's events, empty when headless — `frame::input_events`'s answer.
+    [[nodiscard]] cc::span<sr::input_event const> input_events() const;
+
     /// `frame::background_work`'s answer.
     [[nodiscard]] cc::shared_async<cc::unit> background_work();
+
+    /// `frame::imgui`'s answer: brings the imgui context up on first use, and opens this frame's imgui frame if it is not open yet.
+    [[nodiscard]] bool open_imgui();
+
+    /// Whether the last imgui frame wanted the keyboard or the mouse; false while no imgui frame ever ran.
+    [[nodiscard]] bool imgui_wants_keyboard() const;
+    [[nodiscard]] bool imgui_wants_mouse() const;
+
+    /// Opens this frame's imgui frame, sized to the window (or the offscreen target) and stepped by `delta`.
+    void begin_imgui_frame(double delta);
+
+    /// Ends the open imgui frame and records its draw data on the frame's command list, over `output`.
+    /// Called after the views are composited, so the UI lands on top of them.
+    void record_imgui(sg::render_target_view const& output);
 
     /// Installs the capture this run is taking; the viewer must have been created headless for it.
     ///
@@ -160,6 +185,9 @@ private:
     /// Called from `frame::register_capture`, so the callback runs exactly where it was declared in the frame body —
     /// which is what lets it override what the body already wrote.
     void apply_capture(cc::string_view name, cc::function_ref<void(capture_context const&)> body, frame& f);
+
+    /// Holds a capture for this frame, `reason` naming what it waits for; called from `frame::hold_capture`.
+    void hold_capture(cc::string_view reason);
 
     /// The persistent state of the view named `id`, created on first use.
     /// The frame reaches this on a caller's behalf; nothing outside authoring should hold the reference across frames,
@@ -202,6 +230,17 @@ private:
     /// Magnifies the view under `window_point` by `ticks` wheel steps, keeping the point under the cursor fixed.
     /// Writes only the view's persistent zoom — never a camera, and never anything a trace reads.
     void zoom_at(tg::pos2f window_point, float ticks);
+
+    /// Asks for the surface point under `window_point` to become its view's orbit centre.
+    /// Only the trace knows that point, so this records the request, and `read_back_pick` and `apply_pick` finish it frames later.
+    void request_pick(tg::pos2f window_point);
+
+    /// Reads the primary depth under a pending pick back, in this frame's command list, once its view traced in it.
+    void read_back_pick(viewer_definition const& def, render_plan const& plan);
+
+    /// Starts the picked view's glide to its new orbit centre once its depth has landed.
+    /// A click on the background reads an escaped ray, and moves nothing.
+    void apply_pick();
 
     friend class frame;
     friend class frame_iterator;

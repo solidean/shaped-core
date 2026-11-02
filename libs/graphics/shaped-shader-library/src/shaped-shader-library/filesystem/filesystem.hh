@@ -15,6 +15,14 @@ enum class slib::file_revision : slib::u64
     none = 0,
 };
 
+/// A file a compile read, at the revision it had just before the read.
+/// Taken before, so a text can be newer than its revision but never older: a revision that moved since may be a spurious reload, never a missed one.
+struct slib::file_dependency
+{
+    cc::string path;
+    file_revision revision = file_revision::none;
+};
+
 /// Read-only virtual filesystem — the only way slib reaches shader sources.
 ///
 /// Paths are '/'-separated and relative to this filesystem's own root.

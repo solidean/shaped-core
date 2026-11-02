@@ -36,7 +36,7 @@ ASYNC_EXAMPLE("blob-cache/persistent-cache")
     }
 
     // A fixed path, deliberately not cleaned up: run this example twice and the second run is a hit.
-    // That is the whole point of the library — the cache outlives the process, and other processes share it.
+    // The cache outlives the process, and other processes share it.
     auto const path = cc::format("{}/bcache-example.db", cc::temp_directory_path());
     cc::println("cache file: {}", path);
 

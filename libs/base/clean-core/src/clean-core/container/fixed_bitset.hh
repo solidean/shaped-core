@@ -43,7 +43,7 @@ struct cc::fixed_bitset : cc::bitset_container<fixed_bitset<N>, cc::impl::bitset
     /// Public because that is what makes fixed_bitset a structural type, so a bit set can serve as a non-type
     /// template parameter — the same trade cc::flags makes for its `bits`.
     ///
-    /// The initializer is load-bearing: it is what makes a default-constructed fixed_bitset all-zero rather than
+    /// The initializer is what makes a default-constructed fixed_bitset all-zero rather than
     /// indeterminate, and it keeps the type trivially copyable.
     ///
     /// N == 0 still holds one word, since a zero-length array would be UB; word_count() reports 0 and nothing reads it.

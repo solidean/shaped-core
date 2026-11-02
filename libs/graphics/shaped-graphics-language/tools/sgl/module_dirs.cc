@@ -5,7 +5,7 @@
 #include <clean-core/algorithm/sort.hh>
 #include <clean-core/string/format.hh>
 
-// TEMPORARY: clean-core has no directory listing yet, as libs/graphics/shaped-graphics-language/docs/TODO.md records.
+// TEMPORARY(debt-sgl-module-dirs-std-filesystem): clean-core has no directory listing yet.
 // Once it has one, this file lists through it and drops <filesystem>.
 #include <filesystem>
 

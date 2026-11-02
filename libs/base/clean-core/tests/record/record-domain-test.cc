@@ -7,9 +7,9 @@
 #include <clean-core/record/event_view.hh>
 #include <clean-core/record/recording.hh>
 #include <clean-core/string/string_view.hh>
+#include <clean-core/thread/native_thread.hh>
 #include <nexus/test.hh>
 
-#include <thread>
 
 using namespace cc::primitive_defines;
 using namespace cc_rec_test;
@@ -130,11 +130,11 @@ REC_TEST("record/assert - a failing assertion is recorded as an error")
         //   the process-wide fallback, for every other thread -> cleared here, which REC_TEST's exclusivity makes safe
         //
         // Nothing aborts: handle_assert_failure_sv only REPORTS, and the abort lives at the macro's call site.
-        // It does print an assertion block to stderr, which is the point of the change — the wording says so, since
+        // It does print an assertion block to stderr, on purpose — the wording says so, since
         // an unexplained one in a passing run reads like a failure.
         cc::impl::scoped_fallback_assertion_handler const no_fallback(nullptr);
 
-        std::thread worker(
+        auto worker = cc::native_thread::start(
             []
             {
                 cc::impl::handle_assert_failure_sv("expected_by_a_test",

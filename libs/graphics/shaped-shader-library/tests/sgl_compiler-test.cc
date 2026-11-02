@@ -188,8 +188,8 @@ TEST("slib sgl compiler - the cube becomes WGSL that slib's own reader reflects"
     add_sgl_compilers(lib);
     lib.add_package(slib_test::sgl_shaders::package());
 
-    auto const& vs = value_of(slib_test::sgl_shaders::cube.main_vs->acquire(sg::shader_format::wgsl));
-    auto const& ps = value_of(slib_test::sgl_shaders::cube.main_ps->acquire(sg::shader_format::wgsl));
+    auto const& vs = value_of(slib_test::sgl_shaders::cube::main_vs->acquire(sg::shader_format::wgsl));
+    auto const& ps = value_of(slib_test::sgl_shaders::cube::main_ps->acquire(sg::shader_format::wgsl));
 
     CHECK(vs.stage == sg::shader_stage::vertex);
     CHECK(vs.format == sg::shader_format::wgsl);
@@ -215,7 +215,7 @@ TEST("slib sgl compiler - a compute entry point reaches WGSL with its buffer ref
     add_sgl_compilers(lib);
     lib.add_package(slib_test::sgl_shaders::package());
 
-    auto const& cs = value_of(slib_test::sgl_shaders::double_values.main->acquire(sg::shader_format::wgsl));
+    auto const& cs = value_of(slib_test::sgl_shaders::double_values::main->acquire(sg::shader_format::wgsl));
 
     CHECK(cs.stage == sg::shader_stage::compute);
     CHECK(cs.entry_point == "main");
@@ -278,8 +278,8 @@ ASYNC_TEST("slib sgl compiler - the cube becomes SPIR-V with a push-constant blo
     add_sgl_compilers(lib);
     lib.add_package(slib_test::sgl_shaders::package());
 
-    auto const vs_node = slib_test::sgl_shaders::cube.main_vs->acquire(sg::shader_format::spirv);
-    auto const ps_node = slib_test::sgl_shaders::cube.main_ps->acquire(sg::shader_format::spirv);
+    auto const vs_node = slib_test::sgl_shaders::cube::main_vs->acquire(sg::shader_format::spirv);
+    auto const ps_node = slib_test::sgl_shaders::cube::main_ps->acquire(sg::shader_format::spirv);
     co_await cc::async_settled(vs_node);
     co_await cc::async_settled(ps_node);
     auto const& vs = value_of(vs_node);
@@ -306,8 +306,8 @@ ASYNC_TEST("slib sgl compiler - the cube becomes DXIL with its block at b0 of th
     add_sgl_compilers(lib);
     lib.add_package(slib_test::sgl_shaders::package());
 
-    auto const vs_node = slib_test::sgl_shaders::cube.main_vs->acquire(sg::shader_format::dxil);
-    auto const ps_node = slib_test::sgl_shaders::cube.main_ps->acquire(sg::shader_format::dxil);
+    auto const vs_node = slib_test::sgl_shaders::cube::main_vs->acquire(sg::shader_format::dxil);
+    auto const ps_node = slib_test::sgl_shaders::cube::main_ps->acquire(sg::shader_format::dxil);
     co_await cc::async_settled(vs_node);
     co_await cc::async_settled(ps_node);
     auto const& vs = value_of(vs_node);
@@ -1018,6 +1018,32 @@ TEST("slib sgl compiler - a broken source fails with the place, the kind and the
                                                    {.language = slib::shader_language::sgl, .label = "broken.sgl"}));
         CHECK(e.contains("preprocessing 'broken.sgl' failed"));
         CHECK(e.contains("broken.sgl:9:24: error: unknown-name: missing"));
+    }
+}
+
+TEST("slib sgl compiler - a warning is logged under slib once per library, the cache's answer included",
+     exclusive("slib-shader-library"))
+{
+    // the second compile is the in-memory tier's answer, which this library has already logged
+    nx::expect_warning("SGL warns of 'unrolled.sgl' main: unrolled.sgl:7:14: warning: unroll-too-long: ",
+                       nx::exactly(1, "slib"));
+
+    slib::shader_library lib;
+    lib.add_compiler(slib::create_sgl_compiler(slib::create_wgsl_compiler(), {.persistent_cache = nullptr}));
+    constexpr auto source = cc::string_view("binding work:\n"
+                                            "    values: mut buffer[int]\n"
+                                            "\n"
+                                            "@compute(64) fun main(@thread_id id: int3){work}:\n"
+                                            "    let mut t = 0\n"
+                                            "    @unroll\n"
+                                            "    for i in 0 ..< 257:\n"
+                                            "        t += i\n"
+                                            "    work.values[id.x] = t\n");
+    auto const options = slib::compile_source_options{.language = slib::shader_language::sgl, .label = "unrolled.sgl"};
+    for (auto i = 0; i < 2; ++i)
+    {
+        auto const node = lib.compile_source(source, sg::shader_stage::compute, "main", sg::shader_format::wgsl, options);
+        CHECK(value_of(node).entry_point == "main");
     }
 }
 

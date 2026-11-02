@@ -74,8 +74,7 @@ ASYNC_INVOCABLE_TEST("sg - a texture written while another list is open keeps it
     auto const pixels = co_await future.bytes();
     REQUIRE(pixels.size() == isize(k_pixels) * 4);
 
-    // The whole point: whatever layout the concurrent lists leave the texture in, it must still hold what the writer
-    // put in it.
+    // Whatever layout the concurrent lists leave the texture in, it must still hold what the writer put in it.
     // If any of those transitions targets `undefined`, every byte here is zero.
     int written = 0;
     int zeroed = 0;

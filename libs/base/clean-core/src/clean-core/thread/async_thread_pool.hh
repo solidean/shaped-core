@@ -12,13 +12,13 @@
 #include <clean-core/thread/atomic.hh>
 #include <clean-core/thread/impl/async_tls.hh>
 #include <clean-core/thread/mutex.hh>
+#include <clean-core/thread/native_thread.hh>
 
 #if CC_HAS_THREADS
 #include <clean-core/thread/impl/chase_lev_deque.hh>
 
 #include <condition_variable>
 #include <mutex>
-#include <thread>
 #endif
 
 // cc::async_thread_pool — a work-stealing scheduler that actually runs cc::async graphs concurrently.
@@ -125,7 +125,7 @@ private:
         // Randomizing matters: a linear scan points every idle worker at worker 0, which is both a contention hotspot and unfair.
         cc::random rng;
 
-        std::thread thread; // empty on an external slot: those are driven by whichever foreign thread claims them
+        cc::native_thread thread; // empty on an external slot: those are driven by whichever foreign thread claims them
 
         // External slots only (index >= _thread_count).
         // A foreign thread participating claims one for the duration of its drive; worker slots are never claimed.

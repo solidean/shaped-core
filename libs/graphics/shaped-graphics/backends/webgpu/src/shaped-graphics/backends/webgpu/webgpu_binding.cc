@@ -272,13 +272,14 @@ cc::result<webgpu_pipeline_layout_handle> webgpu_pipeline_layout::create(webgpu_
         CC_ASSERT(b.block_size.has_value() && b.block_size.value() > 0 && b.block_size.value() % 4 == 0,
                   "inline constants need a block_size that is a positive multiple of 4");
         layout->_inline_constants_bytes = b.block_size.value();
+        layout->_inline_constants_bound_bytes = align_up(b.block_size.value(), 16);
 
         auto entry = WGPUBindGroupLayoutEntry{};
         entry.binding = 0;
         entry.visibility = WGPUShaderStage_Vertex | WGPUShaderStage_Fragment | WGPUShaderStage_Compute;
         entry.buffer.type = WGPUBufferBindingType_Uniform;
         entry.buffer.hasDynamicOffset = WGPU_TRUE;
-        entry.buffer.minBindingSize = u64(layout->_inline_constants_bytes);
+        entry.buffer.minBindingSize = u64(layout->_inline_constants_bound_bytes);
         reserved.push_back(entry);
     }
     for (isize i = 0; i < desc.static_samplers.size(); ++i)
@@ -309,13 +310,14 @@ cc::result<webgpu_pipeline_layout_handle> webgpu_pipeline_layout::create(webgpu_
         roots.buffer.minBindingSize = u64(acceleration_roots_bytes);
         reserved.push_back(roots);
 
-        layout->_roots_offset_in_block = layout->_inline_constants_bytes == 0
-                                           ? 0
-                                           : align_up(layout->_inline_constants_bytes, ctx.uniform_offset_alignment());
+        layout->_roots_offset_in_block
+            = layout->_inline_constants_bound_bytes == 0
+                ? 0
+                : align_up(layout->_inline_constants_bound_bytes, ctx.uniform_offset_alignment());
         layout->_reserved_block_bytes = layout->_roots_offset_in_block + acceleration_roots_bytes;
     }
     else
-        layout->_reserved_block_bytes = layout->_inline_constants_bytes;
+        layout->_reserved_block_bytes = layout->_inline_constants_bound_bytes;
 
     layout->_slot_count = reserved.empty() ? int(layout->_groups.size()) : sg::reserved_binding_group + 1;
     return webgpu_pipeline_layout_handle(cc::move(layout));
@@ -399,7 +401,7 @@ WGPUBindGroup webgpu_pipeline_layout::reserved_group_for(webgpu_constant_page co
             entry.binding = 0;
             entry.buffer = page_buffer;
             entry.offset = 0;
-            entry.size = u64(_inline_constants_bytes);
+            entry.size = u64(_inline_constants_bound_bytes);
             entries.push_back(entry);
         }
         for (auto const& s : _reserved_samplers)

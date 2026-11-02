@@ -235,9 +235,11 @@ nx::bench::result nx::bench::impl::run_measured(cc::string_view name,
             count = cc::min(count * 2, max_batch_size);
         }
     }
-    else
+    else if (cfg.batch)
     {
         // No warmup was asked for, but the batch size still needs an estimate to be chosen from.
+        // Unbatched, nothing reads the estimate, so a run without warmup runs the body for its samples alone:
+        // 3 × 64 probes of a one-second body are minutes spent before the first sample.
         // Three probes and the cheapest of them, for the same reason the other two branches take a minimum: one
         // timing that happened to be interrupted would otherwise decide the batch size for the whole run.
         auto const probe = isize(64);

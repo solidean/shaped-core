@@ -32,7 +32,8 @@ template <class T>
 /// tables, plus the execution of a single recorded step against a mutable state.
 ///
 /// The machine is built once from the user's operations and is then immutable; all per-run data
-/// lives in `state`. Operations communicate only through slots, never through object identity,
+/// lives in `state`.
+/// Operations communicate only through slots, never through object identity,
 /// which is what makes runs reproducible, analyzable, and minimizable.
 struct nx::fuzz::fuzz_machine
 {

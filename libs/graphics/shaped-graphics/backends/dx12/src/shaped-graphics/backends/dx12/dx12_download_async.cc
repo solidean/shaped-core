@@ -1,6 +1,6 @@
 // dx12_download_async_system: the copy actor behind dx12_download_async.hh — window packing, submission, and the in-flight drain.
 // The shape and the two fences are on the class doc there.
-// Why the drain rule and the acyclicity guard are load-bearing: libs/graphics/shaped-graphics/docs/concepts/download.async.md.
+// Why the drain rule and the acyclicity guard are required: libs/graphics/shaped-graphics/docs/concepts/download.async.md.
 
 #include <clean-core/common/time.hh>
 #include <clean-core/container/vector.hh>

@@ -249,7 +249,7 @@ ASYNC_TEST("sg vulkan - transient binding groups and buffers recycle across epoc
 // still be reading it — so 50 iterations reuse the same few bytes.
 // A bump allocator would exhaust after the first handful, which is what this distinguishes.
 // The region is sized so that it does: holding the 50 groups instead of releasing them fails this test, which is what
-// makes the free list load-bearing here rather than merely present.
+// makes the free list exercised here rather than merely present.
 // Owns its context for the same reason: the tiny region is a vulkan_config knob.
 ASYNC_TEST("sg vulkan - persistent binding groups free and reuse their descriptor range", exclusive("vulkan-device"))
 {

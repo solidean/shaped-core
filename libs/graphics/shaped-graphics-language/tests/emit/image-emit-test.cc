@@ -1,9 +1,12 @@
 #include "emit-test-support.hh"
 
+#include <shaped-graphics-language/driver/compile_to_text.hh>
+
 using namespace sgl_test;
 using sgl::emit::target;
 
 // EMIT-150 and EMIT-151: a coherent member's declaration, an image's subscript, and an atomic image's update.
+// CHK-390 and CHK-391: a texel converted to another width, a swizzle where it narrows and a construction where it widens.
 
 namespace
 {
@@ -39,15 +42,49 @@ constexpr cc::string_view k_copy = "binding canvas:\n"
                                    "    canvas.weights[xy] += 0.5\n"
                                    "    canvas.layers[xy, layer = 2] = canvas.weights[xy]\n";
 
+/// A texel narrowed, and one widened from a buffer's element (CHK-391).
+constexpr cc::string_view k_texels = "binding io:\n"
+                                     "    source: texture_2d[float4]\n"
+                                     "    flags: buffer[uint2]\n"
+                                     "    narrow: out image_2d[.rg32_float]\n"
+                                     "    single: out image_2d[.r32_float]\n"
+                                     "    wide: out image_2d[.rgba32_uint]\n"
+                                     "\n"
+                                     "@compute(8, 8) fun convert(@thread_id id: int3){io}:\n"
+                                     "    let c = io.source.load(id.xy)\n"
+                                     "    io.narrow[id.xy] = c as texel[.rg32_float]\n"
+                                     "    io.single[id.xy] = c as texel[.r32_float]\n"
+                                     "    io.wide[id.xy] = io.flags[id.x] as texel[.rgba32_uint]\n";
+
+/// A store into the format the host picks, which is one texel per compile (CHK-390).
+constexpr cc::string_view k_picked = "@option const out_format: pixel_format = .rgba8_unorm\n"
+                                     "\n"
+                                     "binding io:\n"
+                                     "    source: texture_2d[float4]\n"
+                                     "    picked: out image_2d[out_format]\n"
+                                     "\n"
+                                     "@compute(8, 8) fun pick(@thread_id id: int3){io}:\n"
+                                     "    let c = io.source.load(id.xy)\n"
+                                     "    io.picked[id.xy] = c.xy as texel[out_format]\n";
+
 cc::string text_of(cc::string_view source, target t)
 {
     auto const e = emit_source(source, 0, t);
     CHECK(sgl::emit::dump_errors(e) == "");
     return e.text;
 }
+
+cc::string picked_text(cc::string_view format, target t)
+{
+    sgl::check::option_value const given[] = {{.name = "out_format", .value = cc::string(format)}};
+    auto const r = sgl::compile_to_text({.source = k_picked, .entry_point = "pick", .target = t, .options = given});
+    REQUIRE(r.has_value());
+    return r.value().text;
+}
 } // namespace
 
-TEST("sgl emit - a coherent member is globallycoherent in HLSL and coherent(device) in MSL")
+TEST("sgl emit - a coherent member is globallycoherent in HLSL, and device-coherent memory or a device-coherent "
+     "texture in MSL")
 {
     // EMIT-150
     auto const dx12 = text_of(k_reduce, target::hlsl_dx12);
@@ -62,7 +99,9 @@ TEST("sgl emit - a coherent member is globallycoherent in HLSL and coherent(devi
     CHECK(vulkan.contains("[[vk::binding(1, 0)]] globallycoherent RWStructuredBuffer<uint> set_counter;\n"));
 
     auto const msl = text_of(k_reduce, target::msl);
-    CHECK(msl.contains("    coherent(device) texture2d<float, access::read_write> set_mip [[id(0)]];\n"));
+    // an argument buffer's field takes no `coherent` qualifier, so a texture says it in its template arguments
+    CHECK(msl.contains("    texture2d<float, access::read_write, memory_coherence_device> set_mip [[id(0)]];\n"));
+    CHECK(!msl.contains("coherent(device) texture"));
     CHECK(msl.contains("    device coherent(device) atomic_uint* set_counter [[id(1)]];\n"));
     CHECK(msl.contains("    texture2d<uint, access::read_write> set_depth [[id(2)]];\n"));
     // the barrier that publishes an image's writes is the texture barrier, device-scoped in both
@@ -126,6 +165,40 @@ TEST("sgl emit - an atomic image's update is the target's own atomic on the texe
              "target-lacks-feature reduce needs image_atomics, which WebGPU does not have\n");
 }
 
+TEST("sgl emit - an atomic image's compare-exchange is HLSL's own, and a loop over MSL's weak one")
+{
+    // EMIT-161 on a texel: MSL's texture atomic hands back four wide, and the loop retries a failure that read `expected`
+    constexpr auto source = "require image_atomics\n"
+                            "\n"
+                            "binding set:\n"
+                            "    @atomic depth: mut image_2d[.r32_uint]\n"
+                            "    @atomic offsets: mut image_2d_array[.r32_sint]\n"
+                            "\n"
+                            "@compute(8, 8) fun claim(@thread_id id: int3){set}:\n"
+                            "    let a = set.depth[id.xy].compare_exchange_strong(0u, 7u)\n"
+                            "    let b = set.offsets[id.xy, layer = 2].compare_exchange_strong(0, id.x)\n"
+                            "    set.depth[id.xy].store(a + (b as uint))\n";
+    auto const dx12 = text_of(source, target::hlsl_dx12);
+    CHECK(dx12.contains("    InterlockedCompareExchange(set_depth[id.xy], 0u, 7u, atomic_before);\n"
+                        "    const uint a = atomic_before;\n"));
+    CHECK(dx12.contains("    InterlockedCompareExchange(set_offsets[int3(id.xy, 2)], 0, id.x, atomic_before_1);\n"));
+
+    auto const msl = text_of(source, target::msl);
+    CHECK(msl.contains("    const uint2 exchange_texel = uint2(id.xy);\n"
+                       "    const uint exchange_expected = 0u;\n"
+                       "    const uint exchange_desired = 7u;\n"
+                       "    uint4 exchange_before = uint4(exchange_expected);\n"
+                       "    while (!set_depth.atomic_compare_exchange_weak(exchange_texel, &exchange_before, "
+                       "uint4(exchange_desired)) && exchange_before.x == exchange_expected)\n"
+                       "    {\n"
+                       "    }\n"
+                       "    const uint a = exchange_before.x;\n"));
+    CHECK(msl.contains("    const uint exchange_layer = uint(2);\n"));
+    CHECK(msl.contains("    while (!set_offsets.atomic_compare_exchange_weak(exchange_texel_1, exchange_layer, "
+                       "&exchange_before_1, int4(exchange_desired_1)) && exchange_before_1.x == "
+                       "exchange_expected_1)\n"));
+}
+
 TEST("sgl emit - an image's subscript is the load or the store it stands for")
 {
     // EMIT-151: HLSL subscripts the image itself, and a compound assignment loads the texel into the expression
@@ -160,4 +233,39 @@ TEST("sgl emit - MSL fences a store to an image the entry point also reads, so t
     // HLSL and WGSL order one invocation's own accesses
     CHECK(!text_of(k_copy, target::hlsl_dx12).contains("fence"));
     CHECK(!text_of(k_copy, target::wgsl).contains("fence"));
+}
+
+TEST("sgl emit - a texel narrows by a swizzle and widens by the target's own vector, filled from (0, 0, 0, 1)")
+{
+    // CHK-391: the operand of a widening is bound once, and every component read from the local
+    auto const dx12 = text_of(k_texels, target::hlsl_dx12);
+    CHECK(dx12.contains("    io_narrow[id.xy] = c.xy;\n"));
+    CHECK(dx12.contains("    io_single[id.xy] = c.x;\n"));
+    CHECK(dx12.contains("    const uint2 texel = io_flags[id.x];\n"
+                        "    io_wide[id.xy] = uint4(texel, 0u, 1u);\n"));
+    CHECK(text_of(k_texels, target::hlsl_vulkan).contains("    io_wide[id.xy] = uint4(texel, 0u, 1u);\n"));
+
+    auto const wgsl = text_of(k_texels, target::wgsl);
+    CHECK(wgsl.contains("    textureStore(io_narrow, id.xy, vec4f(c.xy, 0.0, 0.0));\n"));
+    CHECK(wgsl.contains("    textureStore(io_single, id.xy, vec4f(c.x, 0.0, 0.0, 0.0));\n"));
+    CHECK(wgsl.contains("    let texel: vec2u = io_flags[id.x];\n"
+                        "    textureStore(io_wide, id.xy, vec4u(texel, 0u, 1u));\n"));
+
+    auto const msl = text_of(k_texels, target::msl);
+    CHECK(msl.contains("    io_narrow.write(float4(c.xy, 0.0, 0.0), uint2(id.xy));\n"));
+    CHECK(msl.contains("    io_single.write(float4(c.x, 0.0, 0.0, 0.0), uint2(id.xy));\n"));
+    CHECK(msl.contains("    io_wide.write(uint4(texel, 0u, 1u), uint2(id.xy));\n"));
+}
+
+TEST("sgl emit - a texel of an option's format is the texel of the format the compile gave")
+{
+    // CHK-390: widened for a four-channel format, on every target
+    CHECK(picked_text(".rgba8_unorm", target::hlsl_dx12).contains("    io_picked[id.xy] = float4(texel, 0.0, 1.0);\n"));
+    CHECK(picked_text(".rgba8_unorm", target::wgsl)
+              .contains("    textureStore(io_picked, id.xy, vec4f(texel, 0.0, 1.0));\n"));
+    // the value itself for a format of its own width, and its first component for a single channel
+    auto const same = picked_text(".rg32_float", target::hlsl_vulkan);
+    CHECK(same.contains("[[vk::image_format(\"rg32f\")]] RWTexture2D<float2> io_picked;\n"));
+    CHECK(same.contains("    io_picked[id.xy] = c.xy;\n"));
+    CHECK(picked_text(".r32_float", target::msl).contains("    io_picked.write(float4(c.xy.x, 0.0, 0.0, 0.0), "));
 }

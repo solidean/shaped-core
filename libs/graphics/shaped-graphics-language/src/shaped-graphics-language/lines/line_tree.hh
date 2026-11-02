@@ -14,8 +14,8 @@ namespace sgl
 ///         C
 ///       F
 ///
-/// No token is looked at, which is the point: comments and strings obey this tree rather than the other way round,
-/// so nothing a line contains can change where the lines after it belong.
+/// No token is looked at, so comments and strings obey this tree rather than the other way round,
+/// and nothing a line contains can change where the lines after it belong.
 ///
 /// A blank line takes the parent of the next non-blank line, so blank lines between two children stay inside their
 /// parent and blank lines after the last child sit outside it.

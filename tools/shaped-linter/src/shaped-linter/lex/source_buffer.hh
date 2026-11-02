@@ -19,7 +19,8 @@ struct scl::source_buffer
     cc::string_view path() const { return _path; }
     u32 file_id() const { return _file_id; }
 
-    /// The bytes covered by `s`. `s` must refer to this buffer's file and be within bounds.
+    /// The bytes covered by `s`.
+    /// `s` must refer to this buffer's file and be within bounds.
     cc::string_view span_text(source_span s) const;
 
     /// The 1-based line/column of a byte offset.

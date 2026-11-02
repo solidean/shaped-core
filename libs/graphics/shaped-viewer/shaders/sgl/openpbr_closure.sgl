@@ -492,7 +492,7 @@ fun coat_crossing(b: bsdf, wo: float3, wi: float3) -> float:
 ///
 /// Past the critical angle Schlick understates the internal reflection, since it has no critical angle and its tail never reaches 1.
 /// `interface_is_tir` is what states the difference: at such a microfacet there is no transmitted direction at all and the reflection is total.
-/// `bsdf_eval` returns the full lobe there rather than Schlick's share of it.
+/// `bsdf_eval` reflects the refracting share of the base whole there, rather than Schlick's share of it.
 fun interface_transmittance(b: bsdf, mu: float) -> float3:
     return saturate(float3(1.0) - b.spec_weight * fresnel_schlick(max(mu, 1e-6), b.spec_f0))
 

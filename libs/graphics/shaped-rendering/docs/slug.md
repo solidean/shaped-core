@@ -215,7 +215,8 @@ shaped-viewer reaches Slug through its canvas layer: [canvas.md](../../shaped-vi
   It rounds corners (SDF) or needs an offline generator (MSDF), loses thin features at small sizes, and is still an image with a precomputation step, so it serves glyphs better than arbitrary shapes.
   Slug is exact at every size and angle from the outline alone, at the price of the heaviest pixel shader of the three.
 - **FreeType, or the stb_truetype imgui vendors**, would read CFF today.
-  FreeType is a large C dependency with its own build; stb is what [TODO.md](TODO.md) means to get imgui off, being hobby-grade on exactly this path of user-supplied fonts.
+  FreeType is a large C dependency with its own build.
+  stb is what [debt-imgui-bundled-stb](issues/debt-imgui-bundled-stb.md) means to get imgui off, being hobby-grade on exactly this path of user-supplied fonts.
   So babel reads fonts itself and treats every file as untrusted, and CFF is a slot in the plan below rather than a reason to link either.
 
 ## Plan

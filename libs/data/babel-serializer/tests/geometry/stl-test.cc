@@ -148,7 +148,7 @@ TEST("babel::stl - a binary file cut in half is an error, not an empty solid")
     for (auto i = isize(0); i < full.size() / 2; ++i)
         bytes.push_back(full[i]);
 
-    // Not what the size test covers: the shortfall here is more than one record, which is the whole point.
+    // Not what the size test covers: the shortfall here is more than one record.
     CHECK(babel::stl::detect_container(bytes) == babel::stl::container::ascii);
 
     auto const r = babel::stl::read(cc::span<byte const>(bytes));

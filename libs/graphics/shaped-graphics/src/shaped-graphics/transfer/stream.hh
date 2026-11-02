@@ -59,6 +59,7 @@ public:
 
     /// Streams tightly-packed pinned `data` into one region of `texture`.
     /// Needs texture_usage::copy_dst, plus allow_subresource_stream / allow_region_stream for the narrower scopes.
+    /// A depth or depth-stencil format is refused, here and by `from_source_to_texture`.
     [[nodiscard]] stream_upload_handle bytes_to_texture(raw_texture_handle texture,
                                                         cc::pinned_data<byte const> data,
                                                         subresource_index const& subresource = {},
@@ -67,7 +68,7 @@ public:
 
     // Source-driven forms — the payload is produced as the transfer runs rather than handed over resident.
     // This is what makes streaming a gigabyte not require a gigabyte in memory; see transfer/stream_source.hh for
-    // the seam's contract, of which "polled on the copy actor thread, must not block" is the load-bearing half.
+    // the seam's contract, above all "polled on the copy actor thread, must not block".
 
     /// Streams into `buffer` from `source`, whose chunk offsets are relative to `offset_in_bytes`.
     /// A null source is a contract violation; an immediately-`done` one settles the handle with nothing transferred.
@@ -114,8 +115,7 @@ public:
                                                             stream_scope scope = stream_scope::resource);
 
     // Sink-driven downloads — the bytes are handed over as they arrive rather than accumulating in one buffer.
-    // See transfer/stream_sink.hh; "called on the copy actor thread, must not block, must not retain the span" is
-    // the load-bearing part.
+    // See transfer/stream_sink.hh, above all "called on the copy actor thread, must not block, must not retain the span".
     // The returned handle carries no `bytes_future`: the sink IS the delivery channel.
 
     /// Streams `size_in_bytes` from `buffer` into `sink`, chunk by chunk and in order.

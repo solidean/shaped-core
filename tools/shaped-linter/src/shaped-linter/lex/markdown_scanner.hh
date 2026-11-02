@@ -18,7 +18,7 @@ enum class scl::markdown_line_kind : scl::u8
     fence,       // an opening or closing ``` / ~~~ line
     code,        // inside a fenced code block
     table,       // a row of a pipe table, which is data laid out in columns rather than prose
-    frontmatter, // a leading --- ... --- block, delimiters included; metadata a tool consumes whole, not prose
+    frontmatter, // a leading --- ... --- or +++ ... +++ block, delimiters included; metadata a tool consumes whole, not prose
 };
 
 /// One line of the file, tagged.
@@ -43,8 +43,8 @@ namespace scl
 /// of the file.
 /// Indented code blocks are not recognized, matching babel::markdown.
 ///
-/// Frontmatter is recognized only in its one unambiguous shape: line 1 is exactly `---`, and a later line is
-/// exactly `---` again.
+/// Frontmatter is recognized only in its one unambiguous shape: line 1 is exactly `---` (YAML) or `+++` (TOML),
+/// and a later line is exactly the same delimiter again.
 /// Without that closer the opener is a thematic break and scans as text, and a `---` anywhere but line 1 is
 /// never an opener.
 cc::vector<markdown_line> scan_markdown(source_buffer const& buffer);

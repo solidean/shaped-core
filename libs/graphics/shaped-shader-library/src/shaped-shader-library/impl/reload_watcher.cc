@@ -150,17 +150,22 @@ void slib::impl::reload_watcher::on_thread_shutdown()
     _watched_dirs.clear();
 }
 
-bool slib::impl::reload_watcher::note_revision(cc::string_view path)
+bool slib::impl::reload_watcher::note_revision(file_dependency const& dependency, cc::set<cc::string>& met)
 {
-    auto const revision = _library->filesystem().revision(path);
+    auto* const known = _revisions.get_ptr(dependency.path);
 
-    auto* const known = _revisions.get_ptr(path);
+    // Met earlier in this scan, through a build that read it at another revision: that build is stale if the file has moved since.
+    if (known != nullptr && met.contains(dependency.path))
+        return *known != dependency.revision;
+
+    auto const revision = _library->filesystem().revision(dependency.path);
     if (known == nullptr)
     {
-        // First time we have seen this path — an include a compile just discovered.
-        // Seed it; treating it as changed would reload the shader that only now read it.
-        _revisions[path] = revision;
-        return false;
+        // First time we have seen this path, which a compile discovered.
+        // It changed if it moved since that compile read it, rather than since now: an edit between the read and this scan is still owed.
+        _revisions[dependency.path] = revision;
+        met.insert(dependency.path);
+        return revision != dependency.revision;
     }
 
     if (*known == revision)
@@ -170,49 +175,33 @@ bool slib::impl::reload_watcher::note_revision(cc::string_view path)
     return true;
 }
 
-void slib::impl::reload_watcher::seed_revision(cc::string_view path)
-{
-    if (_revisions.get_ptr(path) == nullptr)
-        _revisions[path] = _library->filesystem().revision(path);
-}
-
 void slib::impl::reload_watcher::scan()
 {
     auto const assets = _library->assets();
 
     // Collect every change first: staging one asset's reload rewrites its dependency list, which would otherwise hide a trigger for the asset scanned after it.
-    cc::set<cc::string> changed;
+    auto changed = cc::set<cc::string>();
+    auto met = cc::set<cc::string>();
     for (auto const& asset : assets)
         for (auto const& dependency : asset->dependencies())
-            if (note_revision(dependency))
-                changed.insert(dependency);
+            if (note_revision(dependency, met))
+                changed.insert(dependency.path);
 
-    bool staged = false;
-    if (!changed.empty())
+    for (auto const& asset : assets)
     {
-        for (auto const& asset : assets)
-        {
-            bool affected = false;
+        // A first compile that read a file since edited owes a reload whether or not anything changed since: the edit may already be marked seen.
+        auto affected = asset->missed_reload();
+        if (!changed.empty())
             for (auto const& dependency : asset->dependencies())
-                if (changed.contains(dependency))
+                if (changed.contains(dependency.path))
                     affected = true;
 
-            // Staging only: the watcher never touches the shader a consumer is currently using.
-            if (affected)
-            {
-                asset->stage_reload();
-                staged = true;
-            }
-        }
+        // Staging only: the watcher never touches the shader a consumer is currently using.
+        if (affected)
+            asset->stage_reload();
     }
 
-    // Staging resolved the includes afresh, so the dependency set has already moved — stage_reload records it before it returns.
-    // Seed whatever appeared: watching has no next tick to catch it on, so an include discovered here would otherwise read as changed the first time anything else woke us.
-    if (staged)
-        for (auto const& asset : assets)
-            for (auto const& dependency : asset->dependencies())
-                seed_revision(dependency);
-
+    // An include a staged compile discovered is met by the next scan, at the revision that compile read.
     // The directories we depend on can have moved — a newly discovered include, or a first acquire that only now gave an asset any dependencies at all.
     resubscribe();
 }
@@ -224,7 +213,7 @@ cc::vector<cc::string> slib::impl::reload_watcher::dependency_dirs() const
     {
         for (auto const& dependency : asset->dependencies())
         {
-            auto const dir = parent_path(dependency);
+            auto const dir = parent_path(dependency.path);
 
             // A handful of directories for any number of shaders, so a linear scan is the whole dedup.
             bool known = false;

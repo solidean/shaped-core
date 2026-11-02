@@ -23,14 +23,15 @@ enum class scl::include_verdict : scl::u8
     unblessed,
 };
 
-/// What an entry is about: an include spelling, or a blocking wait called from the files it names.
+/// What an entry is about: an include spelling, a blocking wait called from the files it names, or a reference bound to awaiting a call.
 enum class scl::directive_subject : scl::u8
 {
-    include,       // allow-include / deny-include: `values` are include spellings
-    blocking_wait, // allow-blocking-wait / deny-blocking-wait: `values` are the names of blocking calls
+    include,            // allow-include / deny-include: `values` are include spellings
+    blocking_wait,      // allow-blocking-wait / deny-blocking-wait: `values` are the names of blocking calls
+    co_await_temporary, // allow-co-await-temporary / deny-co-await-temporary: `values` are the names of awaited calls
 };
 
-/// One `allow-include` / `deny-include` / `allow-blocking-wait` / `deny-blocking-wait` entry, as the file spelled it.
+/// One entry of a `rules:` section, as the file spelled it: an include, blocking-wait or co-await-temporary allow or deny.
 ///
 /// `values` are lowercased include spellings (`<atomic>`), each a glob in its own right, so `<d3d12*.h>`
 /// covers a family.
@@ -77,6 +78,9 @@ struct scl::lint_config
     /// Whether any config above this file said something about blocking waits; the rule stays silent otherwise.
     bool checks_blocking_waits() const { return any_directive_about(directive_subject::blocking_wait); }
 
+    /// Whether any config above this file said something about awaiting temporaries; the rule stays silent otherwise.
+    bool checks_co_await_temporaries() const { return any_directive_about(directive_subject::co_await_temporary); }
+
     bool any_directive_about(directive_subject subject) const
     {
         for (auto const& d : include_directives)
@@ -94,6 +98,14 @@ struct scl::lint_config
     /// The last matching entry decides; with none matching the verdict is `unblessed`, which the rule treats as allowed —
     /// unlike an include, a call is only a finding where a config denied it.
     include_decision classify_blocking_wait(cc::string_view file_path, cc::string_view name) const;
+
+    /// Decide one reference bound to awaiting a call to `name` in one file, as classify_blocking_wait decides a call:
+    /// with no entry matching it is allowed.
+    include_decision classify_co_await_temporary(cc::string_view file_path, cc::string_view name) const;
+
+private:
+    /// The last entry about `subject` that matches the file and `name` decides; `name` is lowercased here.
+    include_decision classify_named(directive_subject subject, cc::string_view file_path, cc::string_view name) const;
 };
 
 namespace scl

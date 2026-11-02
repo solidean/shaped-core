@@ -2,6 +2,7 @@
 #include <clean-core/record/stat.hh>
 #include <clean-core/thread/async.hh>
 #include <clean-core/thread/async_thread_pool.hh>
+#include <clean-core/thread/native_thread.hh>
 #include <nexus/pgo.hh>
 #include <nexus/test.hh>
 #include <nexus/tests/execute.hh>
@@ -9,9 +10,6 @@
 #include <nexus/tests/schedule.hh>
 #include <nexus/tests/thread_scope.hh>
 
-#if CC_HAS_THREADS
-#include <thread>
-#endif
 
 using cc::async_context;
 
@@ -198,7 +196,7 @@ TEST("threaded check - a node of one test driven inside another is never billed 
                             sched.drain(); // runs producer's node here, on consumer's thread
                         });
 
-    // Serialized on purpose: the point is that consumer drives the node AFTER producer has finished.
+    // Serialized so that consumer drives the node AFTER producer has finished.
     // Run in parallel the two overlap, the node is billed to a still-live producer, and there is no orphan to observe.
     nx::test_schedule_config config;
     config.jobs = 1;
@@ -218,13 +216,14 @@ TEST("threaded check - a node of one test driven inside another is never billed 
 TEST("threaded check - a check on a bare thread is an orphan, and fails the run", no_scheduler)
 {
     nx::test_registry reg;
-    reg.add_declaration("bare_thread", {},
-                        []
-                        {
-                            CHECK(true);
-                            std::thread t([] { CHECK(true); }); // true, and still an error: nothing can attribute it
-                            t.join();
-                        });
+    reg.add_declaration(
+        "bare_thread", {},
+        []
+        {
+            CHECK(true);
+            auto t = cc::native_thread::start([] { CHECK(true); }); // true, and still an error: nothing can attribute it
+            t.join();
+        });
 
     auto schedule = nx::test_schedule::create({}, reg);
     auto exec = nx::execute_tests(schedule, {});
@@ -241,7 +240,7 @@ TEST("threaded check - attributed_to_current_test rescues a bare thread", no_sch
     reg.add_declaration("attributed_thread", {},
                         []
                         {
-                            std::thread t(nx::attributed_to_current_test([] { CHECK(1 == 2); }));
+                            auto t = cc::native_thread::start(nx::attributed_to_current_test([] { CHECK(1 == 2); }));
                             t.join();
                         });
 
@@ -262,7 +261,7 @@ TEST("threaded check - an attributed thread's checks are filed under the section
                         {
                             SECTION("threaded")
                             {
-                                std::thread t(nx::attributed_to_current_test(
+                                auto t = cc::native_thread::start(nx::attributed_to_current_test(
                                     []
                                     {
                                         CHECK(true);
@@ -294,16 +293,17 @@ TEST("threaded check - with_fallback_test bills a bare thread to the fallback an
     auto outer = nx::capture_current_test();
 
     nx::test_registry reg;
-    reg.add_declaration("installer", {},
-                        [&]
-                        {
-                            auto fallback = nx::capture_current_test();
+    reg.add_declaration(
+        "installer", {},
+        [&]
+        {
+            auto fallback = nx::capture_current_test();
 
-                            // A thread no test started: the report lands on the installer instead of on no test.
-                            std::thread t([&] { nx::with_fallback_test(fallback, [] { CHECK(1 == 2); }); });
-                            t.join();
-                            fallback.reset();
-                        });
+            // A thread no test started: the report lands on the installer instead of on no test.
+            auto t = cc::native_thread::start([&] { nx::with_fallback_test(fallback, [] { CHECK(1 == 2); }); });
+            t.join();
+            fallback.reset();
+        });
     reg.add_declaration("bystander", {},
                         [&]
                         {
@@ -341,7 +341,7 @@ TEST("threaded check - a REQUIRE on an attributed bare thread records instead of
     reg.add_declaration("attributed_require", {},
                         [&]
                         {
-                            std::thread t(nx::attributed_to_current_test(
+                            auto t = cc::native_thread::start(nx::attributed_to_current_test(
                                 [&]
                                 {
                                     REQUIRE(1 == 2);
@@ -360,3 +360,44 @@ TEST("threaded check - a REQUIRE on an attributed bare thread records instead of
 }
 
 #endif
+
+// A fuzz capture belongs to the test that installed it.
+// A thread blocked inside it polls other work, another test's body among it, whose checks are that test's and not the sink's.
+// Running an inner registry under the outer test's capture is that shape without the race.
+TEST("check capture - another test's checks under a capture reach their own test", no_scheduler)
+{
+    auto sink = nx::impl::check_capture_sink();
+    nx::test_registry reg;
+    reg.add_declaration("nested_body", {}, [] { CHECK(true); });
+    auto schedule = nx::test_schedule::create({}, reg);
+
+    auto total_checks = -1;
+    auto failed_tests = -1;
+    {
+        nx::impl::scoped_check_capture const capture(sink);
+        auto const exec = nx::execute_tests(schedule, {});
+        total_checks = int(exec.count_total_checks());
+        failed_tests = int(exec.count_failed_tests());
+    }
+
+    CHECK(sink.executed == 0); // the nested test's check was not the capturing test's to take
+    CHECK(total_checks == 1);  // it counted for the nested test, which therefore has a check
+    CHECK(failed_tests == 0);
+}
+
+TEST("check capture - a capture installed under another takes over until it ends, then gives the outer one back")
+{
+    auto outer = nx::impl::check_capture_sink();
+    auto inner = nx::impl::check_capture_sink();
+    {
+        nx::impl::scoped_check_capture const outer_capture(outer);
+        {
+            nx::impl::scoped_check_capture const inner_capture(inner);
+            CHECK(true);
+        }
+        CHECK(true);
+    }
+
+    CHECK(inner.executed == 1);
+    CHECK(outer.executed == 1);
+}

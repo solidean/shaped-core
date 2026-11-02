@@ -1,0 +1,27 @@
+// The other of two files declaring the same names, each of another shape than twin_a.sgl's.
+
+binding source:
+    values: mut buffer[int]
+
+// named like the other file, whose namespace stands beside this file's
+binding twin_a:
+    values: buffer[int]
+
+@inline binding constants:
+    offset: int
+
+@pixel struct target:
+    color: float4
+    mask: float4
+
+struct pixel_input:
+    @position position: hpos4
+
+@compute(64) fun fill(@thread_id id: int3){source, twin_a, constants}:
+    source.values[id.x] = twin_a.values[id.x] + constants.offset
+
+@pixel fun paint(p: pixel_input) -> target:
+    return {
+        color = float4(1.0, 0.0, 0.0, 1.0)
+        mask = float4(0.0, 1.0, 0.0, 1.0)
+    }

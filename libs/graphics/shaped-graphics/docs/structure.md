@@ -65,7 +65,7 @@ src/shaped-graphics/
     command_list.hh/.cc           [in progress] abstract, single-use recorder; owns the seven scopes below and the backend seams they call
     upload.hh/.cc                 [done]        cmd.upload: inline host→device buffer + texture writes (both backends real)
     download.hh/.cc               [done]        cmd.download: inline readback of buffers + textures -> bytes_future (both backends real)
-    copy.hh/.cc                   [in progress] cmd.copy: device→device buffer regions (both backends real); texture copies pending
+    copy.hh/.cc                   [in progress] cmd.copy: buffer regions, and a buffer into a texture region; texture→buffer and texture→texture pending
     compute.hh/.cc                [done]        cmd.compute: bind_pipeline / bind_group / dispatch (both backends real)
     raster.hh/.cc                 [done]        cmd.raster: rendering scope, bindings, viewport/scissor state, draws (both backends real)
     raytracing.hh/.cc             [done]        cmd.raytracing: build_blas / build_tlas / dispatch_rays (dx12, vulkan, metal; webgpu builds only)
@@ -109,7 +109,7 @@ src/shaped-graphics/
                                                 metal = a compute pipeline per raygen
     raytracing_shader_table.hh/.cc [in progress] shader-table description + abstract table, hit rows and ray_count; real on dx12, vulkan and metal;
                                                 its records still sit in a plain buffer
-    impl/hit_record_check.hh/.cc  [done]        what dispatch_rays checks under the portability checks: each record an instance reaches
+    impl/hit_record_check.hh/.cc  [done]        what dispatch_rays checks under the hit-record checks: each record an instance reaches
 
   resource/
     pixel_format.hh               [done]        restrictive texel-format enum + helpers (depth/compressed/block-size)
@@ -202,19 +202,18 @@ Every resource's backing memory is either **dedicated** (self-allocating) or **p
 `memory_heap` is an immutable factory for `allocation_info` — allocation tracking lives in the caller's own allocator on top.
 Lifetime modes and the placed-vs-dedicated system: [concepts/memory.md](concepts/memory.md).
 
-`context` exposes `try_create_memory_heap`, and placement is live for **dx12 buffers** — that is what `ctx.transient`'s bump allocator runs on.
-Still dedicated-only: **dx12 textures** and **all vulkan resources**, both of which assert on a placed `allocation_info`.
+`context` exposes `try_create_memory_heap` for a heap of buffers or of textures, which is what `ctx.transient`'s two bump allocators run on.
+Placement is live for buffers on dx12, vulkan and metal and for textures on dx12 and vulkan; webgpu places nothing.
 
 ## Planned surface (beyond the current stubs)
 
 ```text
-buffer transfer      [in progress]  command_list inline upload / download / copy (dx12 real, vulkan stub)
-texture transfer     [in progress]  inline + async host↔device texture copies, region- and subresource-scoped
-                                  (dx12 real, vulkan stub); device→device texture copy is the gap
+buffer transfer      [in progress]  command_list inline upload / download / copy
+texture transfer     [in progress]  inline + async host↔device texture copies, region- and subresource-scoped;
+                                  buffer→texture copy exists, texture→buffer and texture→texture are open
 barriers             [in progress]  inferred access + state tracking + concurrent-list slot model; dx12 enhanced
                                   barriers real for buffers + textures (subresource-range layout transitions,
-                                  entry-layout revert), driven by texture transfer and the rendering scope;
-                                  vulkan pending
+                                  entry-layout revert), driven by texture transfer and the rendering scope
 views                [in progress]  strongly-typed resource views; buffer + texture (SRV/UAV) views done (dx12 bindable
                                   in compute); render_target/depth_stencil views done and consumed by the rendering
                                   scope; texel buffers deferred

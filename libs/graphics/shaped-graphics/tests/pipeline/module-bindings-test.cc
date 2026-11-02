@@ -26,8 +26,8 @@ ASYNC_INVOCABLE_TEST("sg - one group of a module's binding serves pipelines of t
         SKIP("no compiler builds this binary's shaders into a format this context accepts");
 
     constexpr auto side = 4;
-    auto const writing = co_await ctx->cached.acquire_raster_pipeline(shaders::module_marking.writing);
-    auto const tinting = co_await ctx->cached.acquire_raster_pipeline(shaders::module_tinting.tinting);
+    auto const writing = co_await ctx->cached.acquire_raster_pipeline(shaders::module_marking::writing);
+    auto const tinting = co_await ctx->cached.acquire_raster_pipeline(shaders::module_tinting::tinting);
 
     auto const corners = ctx->persistent.create_buffer_from_data(
         cc::vector<sgl_modules::marking::corner>{{.position = tg::vec3f(-1, -1, 0)},

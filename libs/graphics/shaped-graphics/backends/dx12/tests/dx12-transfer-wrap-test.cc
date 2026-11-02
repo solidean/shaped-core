@@ -12,7 +12,7 @@ using namespace cc::primitive_defines;
 
 // Backend-internal test: an inline transfer that would straddle the ring seam is split into two contiguous copies, rather than wasting the tail and restarting at 0.
 // It peels the abstraction, the legitimate escape hatch — see libs/graphics/shaped-graphics/docs/testing.md.
-// Create a tiny ring, drain it, park the logical cursor a few bytes before the physical seam via debug_set_cursor, then run a transfer bigger than that gap.
+// Shrink the shared context's ring, drain it, park the logical cursor a few bytes before the physical seam via debug_set_cursor, then run a transfer bigger than that gap.
 // The cursor must have advanced by *exactly* the transfer size; a wasted tail would add the skipped gap on top.
 // A byte-exact round-trip proves the seam-straddling copy is correct.
 //
@@ -29,13 +29,11 @@ constexpr isize seam_gap = 64;    // bytes left before the seam when we park the
 constexpr isize xfer_bytes = 128; // > seam_gap, so the transfer must cross the seam
 } // namespace
 
-ASYNC_TEST("sg dx12 - inline upload splits across the ring seam")
+ASYNC_INVOCABLE_TEST("sg dx12 - inline upload splits across the ring seam", (dx12::dx12_context_handle const& ctx))
 {
-    auto ctx_r = dx12::make_test_context({.upload_ring_bytes = ring_bytes});
-    if (ctx_r.has_error())
-        SKIP("no dx12 adapter");
-    auto const ctx = ctx_r.value();
+    REQUIRE(ctx != nullptr);
     auto& c = *ctx;
+    auto const sizes = dx12::scoped_transfer_sizes(c, {.upload_ring_bytes = ring_bytes});
 
     auto buf = ctx->persistent.create_raw_buffer(xfer_bytes, sg::buffer_usage::copy_src | sg::buffer_usage::copy_dst);
     REQUIRE(buf != nullptr);
@@ -75,13 +73,11 @@ ASYNC_TEST("sg dx12 - inline upload splits across the ring seam")
         CHECK(bytes[i] == byte((i * 7 + 3) & 0xFF));
 }
 
-ASYNC_TEST("sg dx12 - inline download splits across the ring seam")
+ASYNC_INVOCABLE_TEST("sg dx12 - inline download splits across the ring seam", (dx12::dx12_context_handle const& ctx))
 {
-    auto ctx_r = dx12::make_test_context({.download_ring_bytes = ring_bytes});
-    if (ctx_r.has_error())
-        SKIP("no dx12 adapter");
-    auto const ctx = ctx_r.value();
+    REQUIRE(ctx != nullptr);
     auto& c = *ctx;
+    auto const sizes = dx12::scoped_transfer_sizes(c, {.download_ring_bytes = ring_bytes});
 
     auto buf = ctx->persistent.create_raw_buffer(xfer_bytes, sg::buffer_usage::copy_src | sg::buffer_usage::copy_dst);
     REQUIRE(buf != nullptr);

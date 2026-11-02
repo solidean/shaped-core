@@ -63,19 +63,21 @@ fun bsdf_eval_split(b: bsdf, wo: float3, wi: float3, diffuse: mut float3, specul
     let mut f_metal_fresnel = fresnel_f82(mu_h, b.metal_f0, b.metal_tint)
     let mut f_spec_fresnel = fresnel_schlick(mu_h, b.spec_f0)
 
-    // Past the critical angle the interface reflects ALL of it, and no approximation of the Fresnel says so on its own.
-    // This is the reflection a refraction could not be: `bsdf_sample_direction` turns a failed refraction into it, and `bsdf_pdf` carries the density that produced it.
-    // The three have to agree, or the sample is scored by a lobe that did not draw it.
-    // A thin wall encloses nothing and light passes straight through it, so it has no critical angle to be past.
-    // That is the same reason `bsdf_pdf` excludes it and `bsdf_sample_direction` never refracts through one.
-    let tir = b.thin_walled == 0.0 and interface_is_tir(b, mu_h)
-    if tir => f_spec_fresnel = float3(1.0)
-
-    if b.thin_film_weight > 0.0 and not tir:
+    if b.thin_film_weight > 0.0:
         let film_metal = thin_film_reflectance(mu_h, b.metal_f0, b.thin_film_ior, b.thin_film_thickness)
         f_metal_fresnel = mix(f_metal_fresnel, film_metal, b.thin_film_weight)
         let film_spec = thin_film_reflectance(mu_h, b.spec_f0, b.thin_film_ior, b.thin_film_thickness)
         f_spec_fresnel = mix(f_spec_fresnel, film_spec, b.thin_film_weight)
+
+    // Past the critical angle the share of the base that refracts reflects ALL of it, and no approximation of the Fresnel says so on its own.
+    // The rest of the base is opaque and has no interior, so a back face reflects there exactly as a front face does.
+    // This is the reflection a refraction could not be: `bsdf_sample_direction` turns a failed refraction into it, and `bsdf_pdf` carries the density that produced it.
+    // The three have to agree, or the sample is scored by a lobe that did not draw it.
+    // A thin wall encloses nothing and light passes straight through it, so it has no critical angle to be past.
+    // That is the same reason `bsdf_pdf` excludes it and `bsdf_sample_direction` never refracts through one.
+    let refracting = b.trans_weight + (1.0 - b.trans_weight) * b.sss_weight
+    if b.thin_walled == 0.0 and refracting > 0.0 and interface_is_tir(b, mu_h):
+        f_spec_fresnel = mix(f_spec_fresnel, float3(1.0), refracting)
 
     let f_metal = f_metal_fresnel * (d_spec * g_spec / denom) * ggx_energy_compensation(mu_o, b.metal_alpha, b.metal_f0)
 
@@ -302,7 +304,7 @@ fun bsdf_sample_direction(b: bsdf, wo: float3, u: float3) -> bsdf_sample:
             // Ending it would lose the light.
             // A walk inside a solid reaches the boundary outside the escape cone far more often than inside it — for an index of 1.5 that is most of the hemisphere.
             // So a subsurface or a thick-glass interior would go dark by attrition rather than by absorbing anything.
-            // `bsdf_eval` returns the full lobe at such a microfacet and `bsdf_pdf` carries this density, so the three agree about a direction the transmission lobe drew but did not transmit.
+            // `bsdf_eval` reflects the refracting share whole at such a microfacet and `bsdf_pdf` carries this density, so the three agree about a direction the transmission lobe drew but did not transmit.
             if dot(wi, wi) < 1e-6 or wi.z >= -1e-6:
                 let wi_reflected = reflect_about(-wo, h)
                 if wi_reflected.z <= 0.0 => return r

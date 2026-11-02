@@ -1,7 +1,8 @@
 # versioned-document
 
 Structured documents that are versioned, mergeable and verifiable.
-Namespace `vdoc`. Depends on **clean-core** and nothing else.
+Namespace `vdoc`.
+Depends on **clean-core** and nothing else.
 
 A document is entities holding components holding properties.
 The source of truth is not that document, but an immutable content-addressed DAG of **ops**; everything a reader sees is materialized from it.

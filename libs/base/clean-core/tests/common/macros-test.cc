@@ -12,7 +12,7 @@
 #endif
 
 #if defined(CC_ARCH_X64) + defined(CC_ARCH_X86) + defined(CC_ARCH_ARM64) + defined(CC_ARCH_ARM32) \
-        + defined(CC_ARCH_WASM32)                                                                 \
+        + defined(CC_ARCH_WASM32) + defined(CC_ARCH_WASM64)                                       \
     != 1
 #error "Expected exactly one architecture macro to be defined"
 #endif
@@ -64,9 +64,12 @@
 #error "Mobile OS detected but CC_PLATFORM_MOBILE not defined"
 #endif
 
-// Test: a wasm OS implies the wasm32 architecture.
-#if (defined(CC_OS_EMSCRIPTEN) || defined(CC_OS_WASI)) && !defined(CC_ARCH_WASM32)
-#error "wasm OS detected but CC_ARCH_WASM32 not defined"
+// Test: a wasm OS implies a wasm architecture, 32- or 64-bit, and its pointer width.
+#if (defined(CC_OS_EMSCRIPTEN) || defined(CC_OS_WASI)) && !defined(CC_ARCH_WASM32) && !defined(CC_ARCH_WASM64)
+#error "wasm OS detected but neither CC_ARCH_WASM32 nor CC_ARCH_WASM64 defined"
+#endif
+#if defined(CC_ARCH_WASM64) && !CC_HAS_64BIT_POINTERS
+#error "wasm64 has 64-bit pointers"
 #endif
 
 // Test: CC_HAS_THREADS is always defined and always 0 or 1 — it is #if-tested, not #ifdef-tested, so an
@@ -122,6 +125,9 @@ TEST("macros - architecture detection")
     arch_count++;
 #endif
 #ifdef CC_ARCH_WASM32
+    arch_count++;
+#endif
+#ifdef CC_ARCH_WASM64
     arch_count++;
 #endif
 

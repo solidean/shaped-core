@@ -29,6 +29,20 @@ extern cc::memory_resource const* const default_memory_resource;
 /// Passing &cc::system_memory_resource as a custom resource is always well defined; where mimalloc backs the default it
 /// is the explicit opt-out from it, and where it does not there is nothing to opt out of.
 extern cc::memory_resource const system_memory_resource;
+
+/// What a failed infallible allocation calls, in every build: the requested range and alignment.
+/// It may throw, e.g. an application's out-of-memory error that its computations report; if it returns, the allocation terminates.
+using allocation_failure_handler = cc::function_ptr<void(isize min_bytes, isize max_bytes, isize alignment)>;
+
+/// Installs the handler every resource of clean-core calls when `allocate_bytes` fails; nullptr restores the default, which terminates.
+/// Process-wide and thread-safe; install it before allocations may fail, a handler replaced while one runs still finishes.
+void set_allocation_failure_handler(allocation_failure_handler handler);
+
+namespace impl
+{
+/// Reports a failed infallible allocation: the installed handler, then termination with the request in the message.
+[[noreturn]] void allocation_failed(isize min_bytes, isize max_bytes, isize alignment);
+} // namespace impl
 } // namespace cc
 
 /// Polymorphic memory resource interface powering cc::allocation<T>.

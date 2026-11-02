@@ -138,14 +138,14 @@ extern "C" int raise(int);
 #endif
 
 // CC_ASSERT_ALWAYS implementation - always enabled regardless of build configuration
-#define CC_IMPL_ASSERT_ALWAYS(cond, msg)                                                     \
-    do                                                                                       \
-    {                                                                                        \
-        if (!(cond)) [[unlikely]]                                                            \
-        {                                                                                    \
-            ::cc::impl::handle_assert_failure(#cond, msg, ::cc::source_location::current()); \
-            CC_BREAK_AND_ABORT();                                                            \
-        }                                                                                    \
+#define CC_IMPL_ASSERT_ALWAYS(cond, msg)                                                                   \
+    do                                                                                                     \
+    {                                                                                                      \
+        if (!(cond)) [[unlikely]]                                                                          \
+        {                                                                                                  \
+            ::cc::impl::handle_assert_failure(CC_SITE_TEXT(#cond), msg, ::cc::source_location::current()); \
+            CC_BREAK_AND_ABORT();                                                                          \
+        }                                                                                                  \
     } while (false)
 
 // Assert implementation - enabled in debug/relwithdebinfo, optionally in release

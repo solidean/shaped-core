@@ -181,6 +181,8 @@ struct call_context;
 struct helper_context;
 enum class spelling_kind : u8;
 enum class judged_operand : u8;
+enum class written_argument : u8;
+enum class index_mark : u8;
 struct spelling;
 struct block_layout;
 struct type_record;
@@ -320,6 +322,7 @@ struct legalize_options;
 
 enum class expectation_kind : u8;
 struct test_expectation;
+struct entry_expectation;
 struct test_info;
 struct related_note;
 struct located_diagnostic;

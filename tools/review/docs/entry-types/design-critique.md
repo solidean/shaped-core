@@ -151,7 +151,7 @@ pr-164 moved every HLSL binding address from the shader author to a preprocessin
 grammar twice — once in C++ for the runtime rewriter, once in Python for the build-time generator.
 
 The critique named six alternatives.
-Three the branch had already recorded, and citing them was the point: DXC's `-fvk-*-shift` family, a macro prelude,
+Three the branch had already recorded, and the critique cited them as such: DXC's `-fvk-*-shift` family, a macro prelude,
 and a C++ host tool in place of the second parser.
 Three it had not.
 Doing nothing structural, which revealed that the 111-line conflict check delivers a distinct slice of the value and

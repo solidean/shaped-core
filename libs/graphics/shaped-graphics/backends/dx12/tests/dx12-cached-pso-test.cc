@@ -117,7 +117,7 @@ namespace
 {
 /// Builds the double-shader pipeline through ctx.cached, with `store` as the persistent tier, and drives it.
 ///
-/// One shape for both presets, which is the point: the build parks on the store either way, and blocking is what
+/// One shape for both presets, because the build parks on the store either way, and blocking is what
 /// resolves it either way.
 /// With threads the store answers on its own thread; without them it answers on this one, because a store with no
 /// thread registers a pump and cc::async_blocking_get sweeps the registry rather than sleeping.

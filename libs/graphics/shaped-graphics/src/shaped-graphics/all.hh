@@ -40,6 +40,7 @@
 #include <shaped-graphics/raster/rasterization_state.hh>
 #include <shaped-graphics/raster/vertex_input.hh>
 #include <shaped-graphics/raytracing/acceleration_structure.hh>
+#include <shaped-graphics/raytracing/micromap.hh>
 #include <shaped-graphics/raytracing/raytracing_pipeline.hh>
 #include <shaped-graphics/raytracing/raytracing_shader_table.hh>
 #include <shaped-graphics/resource/buffer.hh>

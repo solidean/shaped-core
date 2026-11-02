@@ -53,13 +53,13 @@ constexpr auto extent = 4;
 
     // WORKAROUND, and here to be found again: a tick drives only routines that are already REGISTERED, and `execute`
     // is what registers one — so a caller meeting a format for the first time declines that frame.
-    // It goes away once a routine's readiness is an async; see libs/graphics/shaped-graphics/docs/TODO.md, "Readiness as an async".
+    // It goes away once a routine's readiness is an async; issue: feat-sg-routine-readiness-async.
     sr::blit_routine::prewarm(ctx, format);
     (void)co_await ctx.routines.idle_completion();
 
     // The source is uploaded in this list and first sampled inside the scope, so its barrier is found only at the draw,
     // and a backend that cannot hold it inside a pass splits the scope for it.
-    // Nothing states a texture's first use before a scope yet; libs/graphics/shaped-graphics/docs/TODO.md, "Barriers + access tracking".
+    // Nothing states a texture's first use before a scope yet; issue: feat-sg-declare-scope-accesses-up-front.
     nx::allow_warnings("was closed and reopened around a barrier", "sg");
 
     auto cmd = ctx.create_command_list();

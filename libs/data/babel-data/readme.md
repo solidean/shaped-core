@@ -1,7 +1,8 @@
 # babel-data
 
 The externals-free base of babel: base64, JSON and markdown.
-Namespace `babel`. Depends on **clean-core** and nothing else.
+Namespace `babel`.
+Depends on **clean-core** and nothing else.
 
 ```cpp
 #include <babel-data/data/json.hh>

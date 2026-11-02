@@ -29,7 +29,7 @@ Four constraints hold across the files, and breaking any of them corrupts the nu
 **The compiler must not fold the baseline away.**
 `CC_DONT_INLINE` alone is not enough: clang infers a noinline helper is pure and propagates its return value, so a chain of `x+1` steps still collapses to `x+N`, or to a compile-time constant.
 Both files therefore route their baselines through an empty `volatile` inline-asm barrier (`opaque`), which makes its argument un-analyzable *and* gives the containing function side effects.
-The side effects are the load-bearing half for the mutation-free baselines.
+The mutation-free baselines rely on the side effects.
 The reduction and spawn-tree analogs are pure functions of unchanging inputs, and measured 0.00 ns until the barrier was added.
 The point is a baseline that is a genuine hand-written call-based analog, **not** maximally-optimized straight-line code: that is what makes the tax an honest per-node comparison.
 The single-thread cases add a second guard: every graph's leaf value is seeded from the runtime loop index.
@@ -131,7 +131,8 @@ For 64 B of storage plus an alloc *and* a dealloc, that is not alarming.
 ### Homes
 
 Homes were required to cost an unhomed node nothing measurable, so the same two probes were traced before and after they landed.
-Both runs are `relwithdebinfo-clang` on an AMD Ryzen 9 7950X3D, since the tracer needs a PDB; the absolute counts differ from the table above for that reason, and the delta is the point.
+Both runs are `relwithdebinfo-clang` on an AMD Ryzen 9 7950X3D, since the tracer needs a PDB.
+The absolute counts differ from the table above for that reason, so only the delta between the two columns carries over.
 
 | probe | before homes | after homes |
 |---|---|---|

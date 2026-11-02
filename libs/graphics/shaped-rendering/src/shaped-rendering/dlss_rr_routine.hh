@@ -70,7 +70,8 @@ public:
     ~dlss_rr_routine() override;
 
 protected:
-    /// Opens NGX for the context's device; nothing is compiled, since the networks are the runtime's.
+    /// Opens NGX for the context's device, once; nothing is compiled, since the networks are the runtime's.
+    /// A re-init after a reload keeps the instance it has, so every open has the one close the destructor makes.
     cc::shared_async<cc::unit> init(sg::routine_init_scope scope) override;
 
 private:

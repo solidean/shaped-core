@@ -20,6 +20,8 @@
 template <int D, class T>
 struct tg::bivec
 {
+    using scalar_t = T;
+
     static_assert(D >= 2, "bivec requires at least 2 dimensions");
 
     /// number of independent bivector components, C(D, 2).

@@ -77,7 +77,7 @@ struct close_request
 
 /// One blob fetch: which blob, which range of its decoded bytes, and where the answer goes.
 ///
-/// **Its position in the mailbox is load-bearing.** Messages dispatch in send order, so a fetch enqueued after a
+/// **Its position in the mailbox is part of the contract.** Messages dispatch in send order, so a fetch enqueued after a
 /// publish sees that publish's writes — and no fetch ever interleaves with one, which is what makes an open blob
 /// handle here impossible for this store to invalidate.
 struct blob_request

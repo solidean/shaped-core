@@ -1,0 +1,19 @@
+# Pin and license for the upstream vendored here.
+# vendor-meshoptimizer.py reads its pin from this file; the copy map and wipe list stay in the script.
+# Bump `tag` and `pin_hash` together, only after vetting the new commit.
+
+upstreams:
+  - name: meshoptimizer
+    homepage: https://github.com/zeux/meshoptimizer
+    source: git
+    repo: https://github.com/zeux/meshoptimizer
+    track: tags
+    tag: v1.3
+    digest_algo: git-commit
+    pin_hash: 9e1f07b159d3cb777f1c67ed31fc11fd117986f4
+    license: MIT
+    license_files: [LICENSE.md]
+    used_by: babel-serializer — the decoders behind babel::gltf's EXT_meshopt_compression
+    notes: |
+      The decoding half only: the vertex and index codecs and the vertex filters, three files and the one header.
+      Every encoder and optimizer of the library is left out, since babel reads meshes and never writes compressed ones.

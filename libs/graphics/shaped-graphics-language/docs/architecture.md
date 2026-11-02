@@ -55,7 +55,7 @@ A new keyword, operator, literal form or line-tree rule is not done until both d
 Both colour as control keywords the builtins whose names alone constrain control flow: `ddx`, `ddy`, `fwidth`, the barriers, `workgroup_uniform_load`, and the subgroup and quad operations.
 Those last two are listed by exact name, never by prefix, since `quad_count` is an ordinary name.
 The review tool's self-test holds the lexer's keywords to the form parser's `sgl_keywords`, and both highlighters' subgroup and quad names to the prelude's.
-Nothing else is checked yet ([TODO](TODO.md)).
+Nothing else is checked yet ([chore-sgl-highlighter-agreement-test](issues/chore-sgl-highlighter-agreement-test.md)).
 
 ## The check pass
 
@@ -80,6 +80,13 @@ Every driver continues from a copy of it with `check::check(checked, program)`, 
 A prelude that reports anything is never kept, and a custom prelude, or a source that stands in for a prelude file, takes the whole pass.
 It stays one pass because nothing the prelude checks depends on the program: a lookup from a prelude file, operators included, sees the prelude alone.
 `tests/check/checked-prelude-test.cc` compares the two paths over the corpus, the samples and sg's shaders.
+
+**A diagnostic judged of an inlined body belongs to the entry points it was judged of** (CHK-402).
+The flattener and the uniformity pass judge each entry point's flat tree, so their diagnostics carry `located_diagnostic::entry_points`, and identical ones merge into one that names them all.
+Their details name the stage rather than the entry point, which is what lets a helper two entry points share yield one.
+An index into a binding array is judged last, by `judge_indices`, over every copy the entry points inlined of it (CHK-401).
+The front end keeps those apart as `entry_diagnostics`, so `compile_to_text` reports the program's and its own entry point's, and `describe`, which serves them all, every one.
+A file-level reader, `sgl test`, the corpus and the language server, reports them all.
 
 **The check pass is a tracer.**
 It carries what its samples need, and every other construct is the one diagnostic `unsupported-yet`, never a guess.
@@ -148,6 +155,7 @@ The interpreter reads those `var`s when a check is false, and `sgl::test::run_te
 
 `sgl::test_source` is the driver of a whole file's tests, what `sgl test` and the corpus run; `text_request::run_tests` makes a failing test an error of `compile_to_text`.
 `@expect` is judged in the front end, once every phase's diagnostics are in one list.
+An entry point's `@expect(error = "kind")` takes every diagnostic judged of its inlined body, wherever it stands, and such an entry point is never built, nor named by a pipeline (CHK-403).
 
 ## Builtins and the prelude
 
@@ -210,8 +218,10 @@ Every `sgl` fence in the spec is a test, so the spec and the parser cannot drift
 A fence that holds a `test` runs it as well.
 
 **The corpus is how the language's semantics are tested**: one `.sgl` file per topic under `tests/corpus/`, found when the test binary runs, so a new file needs no C++ and no CMake.
-A file passes when it checks with no diagnostic at all, every test in it passes, and every entry point it declares is written for every target.
+A file passes when it checks with no diagnostic at all, every test in it passes, and every entry point it declares is written for every target that has what it requires (EMIT-109).
 A rule is best stated as a test of a corpus file; a C++ `TEST` is for what SGL cannot say, which today is bindings, resources and the emitted text.
+A C++ test that compares a whole emitted text or tree dump uses `sgl_test::check_golden(actual, expected, label)`, since no log shows a long one whole.
+Where it differs, the failure names a file of the text as it is now and one of the C++ literals that replace `expected`.
 A corpus file is written the way SGL is meant to be written, since it is also what a reader learns the language from.
 An arrow body leaves its return type to inference, and a written `-> T` stays only where the written type is what a test is about.
 Rules have stable ids and are never renumbered; a new rule is appended.

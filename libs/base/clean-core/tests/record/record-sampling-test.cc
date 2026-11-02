@@ -205,7 +205,7 @@ REC_THOROUGH_TEST("record/sampling - splicing moves a sample onto the thread it 
     CHECK(spliced.count("before-the-work") == 1);
     CHECK(spliced.count("after-the-work") == 1);
 
-    // At least some landed on a thread other than the sampler's, which is the whole point of the anchor.
+    // The anchor put at least some on a thread other than the sampler's.
     isize moved = 0;
     spliced.for_each_event(
         [&](cc::rec::chunk_view const& v, cc::rec::event_view const& e)

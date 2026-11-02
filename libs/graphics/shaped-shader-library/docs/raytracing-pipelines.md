@@ -31,9 +31,9 @@ hit_group textured for path_rays:
 ```
 
 ```cpp
-using path_t = shaders::raytracing_pipeline_path_t;          // <file stem>_<pipeline>_t
+using path_t = shaders::raytracing_pipeline::path_t;         // <file stem>::<pipeline>_t
 
-auto const desc = co_await shaders::raytracing_pipeline.path.description(ctx);
+auto const desc = co_await shaders::raytracing_pipeline::path.description(ctx);
 auto const pipeline = co_await ctx.cached.acquire_raytracing_pipeline(desc);
 
 auto table_desc = path_t::table_description(pipeline);        // raygen, a miss per ray type, every callable
@@ -67,7 +67,7 @@ cmd->raytracing.dispatch_rays(*table, sg::raygen_index(0), width, height);
 An instance of the type is the file symbol's member, `shaders::<stem>.<pipeline>`; the rest are static.
 **A group index is typed per pipeline**, so another pipeline's group, or a bare `int`, does not compile as an argument of `add_row`.
 **`hit_record_stride` is the caller's to pass**, since the BLAS is built before any table exists: metal bakes it into the structure, and a wrong one reaches the wrong record there.
-`dispatch_rays` logs that mismatch under `ctx.portability_checks()`.
+`dispatch_rays` logs that mismatch under `ctx.hit_record_checks()`, which is on wherever `CC_ASSERT` is.
 
 ## Everything is registered in one fixed order
 
@@ -87,9 +87,9 @@ A declaration may leave its hit groups open, `hit_groups = (.host)`, and a calla
 The host then supplies them through `slib::raytracing_host_parts {hit_groups, callables}`, which `description` takes.
 
 ```cpp
-using open_t = shaders::raytracing_open_open_path_t;
+using open_t = shaders::raytracing_open::open_path_t;
 auto const hits = co_await slib::compile_hit_group(ctx.get(), &library, &open_t::definition(), source, "material", "runtime.sgl");
-auto const desc = co_await shaders::raytracing_open.open_path.description(*ctx, {.hit_groups = hits});
+auto const desc = co_await shaders::raytracing_open::open_path.description(*ctx, {.hit_groups = hits});
 // …
 auto const row = open_t::add_row(table_desc, open_t::first_host_hit_group);
 ```

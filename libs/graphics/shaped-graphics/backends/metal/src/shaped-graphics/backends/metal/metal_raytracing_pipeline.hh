@@ -78,8 +78,8 @@ public:
     [[nodiscard]] sg::pipeline_layout_handle const& layout() const { return _layout; }
 
     /// Metal has no serialized state-object blob, the way it has none for a compute pipeline.
-    /// MTL4Archive is a per-compiler store where sg's surface is one blob per pipeline — see
-    /// libs/graphics/shaped-graphics/docs/TODO.md.
+    /// MTL4Archive is a per-compiler store where sg's surface is one blob per pipeline.
+    /// issue: question-sg-metal-pipeline-blob
     [[nodiscard]] cc::pinned_data<byte const> cached_pipeline_data() const override { return {}; }
 
 private:

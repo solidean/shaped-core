@@ -40,7 +40,7 @@ void vulkan_upload_actor::on_message(vulkan_async_upload_job job)
 
 void vulkan_upload_actor::on_message(vulkan_transfer_wake)
 {
-    // Nothing to do: arriving at all is the point, and on_process runs right after.
+    // Nothing to do: the wake only has to arrive, and on_process runs right after.
 }
 
 bool vulkan_upload_actor::on_process()
@@ -623,7 +623,7 @@ bool vulkan_upload_async_system::run_one_window()
             // No image barrier at all: the layout this copy needs was settled before the transfer was enqueued — by the
             // direct queue for a texture a list has used, by the enqueue's own submit for a fresh one — and the
             // semaphore waits that order this submit after those also make their writes visible here.
-            // That is the whole point of settling the layout up front: a window that moves no layout has none for the
+            // Settling the layout up front means a window that moves no layout has none for the
             // validation layer to disagree with, and it reads submit-call order rather than GPU order.
             auto const range = sg::subresource_range(job.subresource);
 

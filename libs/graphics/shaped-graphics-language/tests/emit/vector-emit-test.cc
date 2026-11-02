@@ -65,6 +65,23 @@ TEST("sgl emit - select takes its condition first in HLSL, and last in WGSL and 
     CHECK(msl.contains("const float2 mixed = select(w, v, v > w);\n"));
 }
 
+TEST("sgl emit - select of scalars takes a bool condition on every target, as MSL's own does")
+{
+    constexpr auto scalars = "binding work:\n"
+                             "    counts: mut buffer[uint]\n"
+                             "\n"
+                             "@compute(64) fun main_cs(@thread_id id: int3){work}:\n"
+                             "    let k = work.counts[id.x]\n"
+                             "    let c = k > 3u\n"
+                             "    let f = select(c, 1.0, 2.0)\n"
+                             "    work.counts[id.x] = select(c, k, 7u) + (f as uint)\n";
+    CHECK(text_of(scalars, target::hlsl_dx12).contains("work_counts[id.x] = select(c, k, 7u) + uint(f);\n"));
+    CHECK(text_of(scalars, target::hlsl_vulkan).contains("const float f = select(c, 1.0, 2.0);\n"));
+    CHECK(text_of(scalars, target::wgsl).contains("work_counts[id.x] = select(7u, k, c) + u32(f);\n"));
+    CHECK(text_of(scalars, target::msl).contains("work_counts[id.x] = select(7u, k, c) + uint(f);\n"));
+    CHECK(text_of(scalars, target::msl).contains("const float f = select(2.0, 1.0, c);\n"));
+}
+
 TEST("sgl emit - a one-value constructor and a scalar beside a vector are each target's own")
 {
     auto const hlsl = text_of(k_vectors, target::hlsl_dx12);
@@ -88,24 +105,24 @@ TEST("sgl emit - a one-value constructor and a scalar beside a vector are each t
 TEST("sgl emit - an if that is a value is a local each branch assigns, and only the taken branch runs")
 {
     auto const hlsl = text_of(k_vectors, target::hlsl_dx12);
-    CHECK(hlsl.contains("    float if_result;\n"
+    // the result is the let's own local, named after it (LEGAL-60)
+    CHECK(hlsl.contains("    float tone;\n"
                         "    if (v.x > 0.5)\n"
                         "    {\n"
-                        "        if_result = sqrt(v.x);\n"
+                        "        tone = sqrt(v.x);\n"
                         "    }\n"
                         "    else\n"
                         "    {\n"
-                        "        if_result = v.y;\n"
-                        "    }\n"
-                        "    const float tone = if_result;\n"));
+                        "        tone = v.y;\n"
+                        "    }\n"));
+    CHECK(!hlsl.contains("if_result"));
     auto const wgsl = text_of(k_vectors, target::wgsl);
-    CHECK(wgsl.contains("    var if_result: f32;\n"
+    CHECK(wgsl.contains("    var tone: f32;\n"
                         "    if v.x > 0.5 {\n"
-                        "        if_result = sqrt(v.x);\n"
+                        "        tone = sqrt(v.x);\n"
                         "    } else {\n"
-                        "        if_result = v.y;\n"
-                        "    }\n"
-                        "    let tone: f32 = if_result;\n"));
+                        "        tone = v.y;\n"
+                        "    }\n"));
 }
 
 TEST("sgl emit - an if value on a constant is the taken branch's expression, with no local")
@@ -199,4 +216,89 @@ TEST("sgl emit - an effect inside an inlined call is bound in SGL's order where 
     CHECK(apart.contains("    const uint a = atomic_fetch_add_explicit(&work_counts[0], 1u, memory_order_relaxed);\n"
                          "    const uint b = atomic_fetch_add_explicit(&work_counts[0], 1u, memory_order_relaxed);\n"
                          "    work_result[id.x] = a - b;\n"));
+}
+
+TEST("sgl emit - a bare literal shifted in HLSL is written as the int it is, which DXC otherwise refuses")
+{
+    constexpr cc::string_view source
+        = "struct pixel_input:\n"
+          "    @position position: hpos4\n"
+          "\n"
+          "@pixel struct target:\n"
+          "    color: float4\n"
+          "\n"
+          "@pixel fun main_ps(p: pixel_input) -> target:\n"
+          "    let n = (p.position.x as int) & 7\n"
+          "    let top = (1 << n) - 1\n"
+          "    let mut bottom = -1 << n\n"
+          "    @unroll\n"
+          "    for lowest in -2147483647 - 1 ..< -2147483647:\n"
+          "        bottom += lowest << n\n"
+          "    let unsigned_top = 1u << (n as uint)\n"
+          "    return { color = float4(top as float, unsigned_top as float, bottom as float, 1.0) }\n";
+    auto const hlsl = text_of(source, target::hlsl_dx12);
+    CHECK(hlsl.contains("int(1) << n")).dump("hlsl", hlsl);
+    // a negative literal is as ambiguous to DXC, and so is the lowest int, which no literal spells alone
+    CHECK(hlsl.contains("int(-1) << n")).dump("hlsl", hlsl);
+    CHECK(hlsl.contains("int((-2147483647 - 1)) << n")).dump("hlsl", hlsl);
+    // An unsigned literal says its type already.
+    CHECK(hlsl.contains("1u << ")).dump("hlsl", hlsl);
+    // The other targets type a literal by its context, and are left alone.
+    CHECK(text_of(source, target::wgsl).contains("int(1)") == false);
+}
+
+TEST("sgl emit - mix of vectors takes a vector t on every target, which HLSL calls lerp")
+{
+    constexpr auto blended = "struct pixel_input:\n"
+                             "    @position position: hpos4\n"
+                             "    uv: float3\n"
+                             "\n"
+                             "@pixel struct target:\n"
+                             "    color: float4\n"
+                             "\n"
+                             "@pixel fun main_ps(p: pixel_input) -> target:\n"
+                             "    let m = mix(p.uv, float3(1.0), p.uv)\n"
+                             "    return { color = float4(..m, 1.0) }\n";
+    CHECK(text_of(blended, target::hlsl_dx12).contains("const float3 m = lerp(p.uv, (float3)1.0, p.uv);\n"));
+    CHECK(text_of(blended, target::hlsl_vulkan).contains("const float3 m = lerp(p.uv, (float3)1.0, p.uv);\n"));
+    CHECK(text_of(blended, target::wgsl).contains("let m: vec3f = mix(p.uv, vec3f(1.0), p.uv);\n"));
+    CHECK(text_of(blended, target::msl).contains("const float3 m = mix(p.uv, float3(1.0), p.uv);\n"));
+}
+
+TEST("sgl emit - is_nan and is_inf are a test of the bits on every target")
+{
+    constexpr cc::string_view source
+        = "struct pixel_input:\n"
+          "    @position position: hpos4\n"
+          "\n"
+          "@pixel struct target:\n"
+          "    color: float4\n"
+          "\n"
+          "@pixel fun main_ps(p: pixel_input) -> target:\n"
+          "    let v = float3(p.position.x, p.position.y, p.position.z)\n"
+          "    let nan = is_nan(p.position.x)\n"
+          "    let inf = any(is_inf(v))\n"
+          "    return { color = float4(select(nan, 1.0, 0.0), select(inf, 1.0, 0.0), 0.0, 1.0) }\n";
+    // Vulkan may assume no NaN arises unless the module says otherwise, which DXC's SPIR-V does not, so dx12 and vulkan
+    // share one text that never hands `isnan` the value.
+    for (auto const t : {target::hlsl_dx12, target::hlsl_vulkan})
+    {
+        auto const hlsl = text_of(source, t);
+        CHECK(hlsl.contains("((asuint(p.position.x) & 0x7fffffffu) > 0x7f800000u)")).dump("hlsl", hlsl);
+        CHECK(hlsl.contains("((asuint(v) & 0x7fffffffu) == 0x7f800000u)")).dump("hlsl", hlsl);
+        // HLSL's vector constructors take one value per element, so a one-value splat would not compile.
+        CHECK(!hlsl.contains("uint3(0x")).dump("hlsl", hlsl);
+        CHECK(!hlsl.contains("isnan(")).dump("hlsl", hlsl);
+        CHECK(!hlsl.contains("isinf(")).dump("hlsl", hlsl);
+    }
+
+    // Both may assume no NaN arises, so neither is handed the value to test.
+    auto const wgsl = text_of(source, target::wgsl);
+    CHECK(wgsl.contains("bitcast<u32>(")).dump("wgsl", wgsl);
+    CHECK(wgsl.contains("bitcast<vec3<u32>>(")).dump("wgsl", wgsl);
+    CHECK(!wgsl.contains("isNan")).dump("wgsl", wgsl);
+    auto const msl = text_of(source, target::msl);
+    CHECK(msl.contains("as_type<uint>(")).dump("msl", msl);
+    CHECK(msl.contains("as_type<uint3>(")).dump("msl", msl);
+    CHECK(!msl.contains("isnan(")).dump("msl", msl);
 }

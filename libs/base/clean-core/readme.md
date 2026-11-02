@@ -1,7 +1,8 @@
 # clean-core
 
 Foundational C++23 building blocks: data structures, memory utilities, assertions, and low-level primitives.
-Namespace `cc`. **No dependencies** — this is the bottom of the shaped-core stack.
+Namespace `cc`.
+**No dependencies** — this is the bottom of the shaped-core stack.
 
 ```cpp
 #include <clean-core/container/vector.hh>
@@ -12,7 +13,8 @@ names.push_back("shaped");
 ```
 
 Headers are included by their full path from `src/`, e.g.
-`#include <clean-core/container/vector.hh>`. `fwd.hh` (at the root) forward-declares
+`#include <clean-core/container/vector.hh>`.
+`fwd.hh` (at the root) forward-declares
 the public types for headers that only need a declaration.
 
 ## File organization

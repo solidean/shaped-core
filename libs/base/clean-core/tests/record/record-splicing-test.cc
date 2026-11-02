@@ -137,8 +137,8 @@ REC_TEST("record/splicing - samples end up among the events of the thread they a
     auto const spliced = downstream.take();
     REQUIRE(samples_in(spliced) > 0);
 
-    // The whole point of doing this live: a sample sitting in the sampled thread's stream is one a consumer can read
-    // the scope stack and the ambient context of, and one in the sampler's stream is not.
+    // Done live so the samples sit in the sampled thread's stream, where a consumer can read their scope stack and
+    // ambient context; in the sampler's stream it could not.
     CHECK(samples_among_other_events(spliced) > 0);
     CHECK(splicer.spliced_count() > 0);
 }

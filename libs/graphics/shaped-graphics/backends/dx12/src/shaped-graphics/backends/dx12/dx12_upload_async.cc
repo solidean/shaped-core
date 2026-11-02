@@ -1,7 +1,7 @@
 // dx12_upload_async_system: the copy actor behind dx12_upload_async.hh — window packing, submission, and the staging memcpy.
 // The shape and the two fences are on the class doc there.
 // Source bytes are read only during the memcpy into staging, so a job and its pin die as soon as it is fully staged — on the actor thread, off the submission path.
-// Why the acyclicity guard is load-bearing: libs/graphics/shaped-graphics/docs/concepts/upload.async.md.
+// Why the acyclicity guard is required: libs/graphics/shaped-graphics/docs/concepts/upload.async.md.
 
 #include <clean-core/common/time.hh>
 #include <clean-core/container/vector.hh>
@@ -402,8 +402,8 @@ private:
     // promise a completion V and carry a reverse wait that could depend on V.
     // The hoisted Wait would then sit ahead of the very copy whose signal it needs — the copy-actor deadlock.
     //
-    // Two eligibility rules keep that true INDEPENDENT of the order jobs are packed in, which matters now that the
-    // order is no longer submission order:
+    // Two eligibility rules keep that true INDEPENDENT of the order jobs are packed in, since that order is no
+    // longer submission order:
     //  - a job whose reverse token is still pending may not join a window that has already finished an upload;
     //  - once such a job IS in the open window, no other job may join, so no other job's completion can land beside
     //    its wait.

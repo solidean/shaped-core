@@ -19,9 +19,19 @@ using namespace cc::primitive_defines;
 // the routine framework itself lives in shaped-graphics (sg::render_routine / ctx.routines).
 class blit_routine; // fullscreen-triangle blit of a source texture across an open raster scope (see blit_routine.hh)
 class box_filter_mipmap_routine;        // fills a texture's mip chain by 2x2 averaging (box_filter_mipmap_routine.hh)
+class bc_compress_routine;              // a texture to BC1/3/4/5/7 on the GPU, a mip level per call
+enum class bc1_alpha : u8;              // what BC1 does with alpha: opaque, or cut out under half
+enum class bc_source_range : u8;        // the range BC4 / BC5 read their source in: 0..1 or -1..1
+struct bc_compress_options;             // bc_compress_routine's knobs
 class raster_box_filter_mipmap_routine; // the same, through the raster pipeline, for formats no typed UAV covers
-enum class mipmap_variant : u8;         // which entry point a texture shape mips through (the routine's parameter)
-struct mipmap_program;                  // one mipmap variant's group layout + compute pipeline
+enum class mipmap_variant : u8;         // which entry point a texture shape mips through
+struct mipmap_key;                      // a shape and the format it writes: the routine's parameter
+struct mipmap_program;                  // one mipmap key's group layout + compute pipeline
+
+// The display transform (see display.hh): exposure and curve, as SGL module `display` applies them.
+enum class display_curve : u8; // none, the clamped sRGB encode, or the neutral roll-off before it
+struct display_transform;      // an exposure in stops and a curve
+class exposure_meter_routine;  // an image's mean log luminance, for an automatic exposure (exposure_meter_routine.hh)
 
 // Reconstruction (see reconstruct.hh): one front routine over denoise and upscale members.
 enum class denoise_method : u8;      // which member runs, or automatic
@@ -48,10 +58,13 @@ struct upscale_inputs;               // one upscale call's images
 struct upscale_outcome;              // status + whether history restarted
 class upscale_history;               // the caller-owned state of one upscaled stream
 class fsr_upscale_routine;           // AMD FSR 3.1's upscaler, run through sg (fsr_upscale_routine.hh)
+class metalfx_upscale_routine;       // Apple MetalFX's temporal upscaler, on Metal (metalfx_upscale_routine.hh)
 struct fsr_options;                  // its own options
 
 class dlss_rr_routine;     // the NVIDIA Ray Reconstruction member (dlss_rr_routine.hh)
 struct dlss_options;       // its own options
+class metalfx_rr_routine;  // the Apple MetalFX denoised scaler member (metalfx_rr_routine.hh)
+struct metalfx_rr_options; // its own options
 class nrd_denoise_routine; // the NRD split-signal member (nrd_denoise_routine.hh)
 struct nrd_options;        // its own options
 
@@ -105,6 +118,7 @@ struct text_event;
 struct mouse_move_event;
 struct mouse_button_event;
 struct mouse_wheel_event;
+struct file_drop_event;
 struct input_event;
 
 // Dear ImGui, drawn through sg.

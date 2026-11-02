@@ -11,7 +11,7 @@
 
 namespace sg_test
 {
-using rect = sg::test::sgl_shaders::rect_corner::per_instance;
+using rect = sg::test::sgl_shaders::rects::rect_corner::per_instance;
 struct rect_batch;
 
 /// A rect covering the pixels `[x0, x1) × [y0, y1)` of a `width` × `height` target.
@@ -24,7 +24,7 @@ struct rect_batch;
 /// The rects a test draws, uploaded once, and drawn a run at a time by their position in the list.
 struct sg_test::rect_batch
 {
-    sg::buffer<sg::test::sgl_shaders::rect_corner::per_vertex> corners;
+    sg::buffer<sg::test::sgl_shaders::rects::rect_corner::per_vertex> corners;
     sg::buffer<rect> instances;
 
     /// The unit square's two triangles, counter-clockwise in clip space, then `rects` as instances.
@@ -33,7 +33,7 @@ struct sg_test::rect_batch
     /// `rects` as instances over `points`, each a position in the unit square that a rect stretches over its pixels.
     rect_batch(sg::context& ctx, cc::span<rect const> rects, cc::span<tg::vec2f const> points)
     {
-        auto at = cc::vector<sg::test::sgl_shaders::rect_corner::per_vertex>();
+        auto at = cc::vector<sg::test::sgl_shaders::rects::rect_corner::per_vertex>();
         for (auto const p : points)
             at.push_back({.at = p});
         vertex_count = int(points.size());
@@ -49,7 +49,7 @@ struct sg_test::rect_batch
     void draw(Scope& scope, int first, int count = 1) const
     {
         scope.bind_vertex_buffers(
-            sg::test::sgl_shaders::rect_corner::buffers{.per_vertex = corners, .per_instance = instances}.views());
+            sg::test::sgl_shaders::rects::rect_corner::buffers{.per_vertex = corners, .per_instance = instances}.views());
         scope.draw(
             {.vertex_range = {.offset = 0, .size = vertex_count}, .instance_range = {.offset = first, .size = count}});
     }

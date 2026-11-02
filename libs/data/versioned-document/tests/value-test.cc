@@ -18,7 +18,7 @@ using vdoc::value_view;
 namespace
 {
 /// Assembles encodings BY HAND, without sorting and without validating.
-/// That is the whole point: a decoder is only worth anything if it refuses the bytes nothing in the library would produce.
+/// A decoder is only worth anything if it refuses the bytes nothing in the library would produce.
 struct raw_bytes
 {
     cc::vector<byte> data;

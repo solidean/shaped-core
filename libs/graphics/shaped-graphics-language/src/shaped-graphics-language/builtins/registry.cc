@@ -122,6 +122,11 @@ void registry::add_comment(cc::string_view text)
     items.push_back({.kind = registry_item::kind_t::comment, .comment = text});
 }
 
+void registry::add_declaration(cc::string_view text)
+{
+    items.push_back({.kind = registry_item::kind_t::declaration, .comment = text});
+}
+
 cc::string registry::prelude_text() const
 {
     auto out = cc::string(k_header);
@@ -138,6 +143,9 @@ cc::string registry::prelude_text() const
         case registry_item::kind_t::comment:
             out.appendf("\n{}\n", item.comment);
             break;
+        case registry_item::kind_t::declaration:
+            out.appendf("\n{}\n", item.comment);
+            break;
         case registry_item::kind_t::type:
             // a struct with a block needs the empty line, and one without reads better with it
             if (previous != registry_item::kind_t::comment)
@@ -146,7 +154,7 @@ cc::string registry::prelude_text() const
             out.appendf("@shadowable(false)\n@builtin {}\n", types[item.index].declaration);
             break;
         case registry_item::kind_t::function:
-            if (previous == registry_item::kind_t::type)
+            if (previous == registry_item::kind_t::type || previous == registry_item::kind_t::declaration)
                 out += "\n";
             doc(functions[item.index].doc);
             out.appendf("@builtin {}\n", functions[item.index].signature);
@@ -159,8 +167,10 @@ cc::string registry::prelude_text() const
 
 void registry::finalize()
 {
-    auto const file = parse(prelude_text());
-    auto const ast = ast::build(file);
+    parsed = parse(prelude_text());
+    parsed_ast = ast::build(parsed);
+    auto const& file = parsed;
+    auto const& ast = parsed_ast;
     CC_ASSERT(file.diagnostics.empty() && ast.diagnostics.empty(), "a builtin record whose SGL text does not parse");
 
     auto const declarations = ast.at(ast.declarations);
@@ -203,8 +213,8 @@ void registry::finalize()
             record.named_only.push_back(p.is_named_only ? cc::string(file.text_of(p.name)) : cc::string());
         }
         record.result = find_type(type_name_at(file, ast, f->return_type));
-        CC_ASSERT(is_valid(record.result) || !ast::is_valid(f->return_type), "a builtin signature whose result is no "
-                                                                             "registered type");
+        CC_ASSERT(is_valid(record.result) || !ast::is_valid(f->return_type) || record.gives_prelude_struct,
+                  "a builtin signature whose result is no registered type");
         CC_ASSERT(record.evaluate != nullptr, "a builtin function without an evaluator");
         CC_ASSERT(record.write.kind != spelling_kind::custom || record.write.custom != nullptr, "a custom spelling "
                                                                                                 "without a writer");
@@ -217,6 +227,20 @@ void registry::finalize()
         auto const& f = functions[i];
         functions_by_name[f.name].push_back(builtin_id(i));
         functions_by_signature[signature_hash<cc::string>(f.name, f.parameters, f.named_only)].push_back(builtin_id(i));
+    }
+
+    language const languages[] = {language::hlsl, language::wgsl, language::msl};
+    for (auto const l : languages)
+    {
+        auto& names = written_names[u8(l)];
+        names.clear();
+        for (auto const& f : functions)
+        {
+            if (f.write.kind == spelling_kind::call)
+                names.insert(f.called_in(l));
+            for (auto const n : f.names_in(l))
+                names.insert(n);
+        }
     }
 }
 

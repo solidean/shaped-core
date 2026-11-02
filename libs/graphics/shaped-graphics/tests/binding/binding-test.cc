@@ -291,8 +291,8 @@ TEST("sg::binding - visibility unions across stages")
     CHECK(merged[0].visibility.has(sg::shader_stage::vertex));
     CHECK(merged[0].visibility.has(sg::shader_stage::fragment));
 
-    // Declared by one stage only, so it stays narrow — which is the whole point: WebGPU rejects a storage binding
-    // marked visible to a stage that never declared it.
+    // Declared by one stage only, so it stays narrow, because WebGPU rejects a storage binding marked visible to a
+    // stage that never declared it.
     CHECK(merged[1].name == "albedo");
     CHECK(!merged[1].visibility.has(sg::shader_stage::vertex));
     CHECK(merged[1].visibility.has(sg::shader_stage::fragment));

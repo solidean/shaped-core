@@ -21,7 +21,7 @@ struct token_view
     isize next = 0;
 };
 
-/// cc::string_view has no whitespace split yet, so the header is walked token by token here.
+/// cc::string_view has no whitespace split yet, so the header is walked token by token here (issue: feat-cc-string-view-trim-split).
 token_view next_token(cc::span<byte const> bytes, isize pos)
 {
     auto const* const chars = reinterpret_cast<char const*>(bytes.data());

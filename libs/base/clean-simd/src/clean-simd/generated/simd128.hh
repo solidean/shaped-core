@@ -26,7 +26,7 @@ struct cimd::impl::mreg<8, cimd::simd128, 128>
     {
         return wasm_i8x16_ne(wasm_v128_and(wasm_i8x16_shuffle(wasm_i64x2_splat(i64(b)), wasm_i64x2_splat(i64(b)), 0, 0,
                                                               0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1),
-                                           wasm_i8x16_make(1, 2, 4, 8, 16, 32, 64, 128, 1, 2, 4, 8, 16, 32, 64, 128)),
+                                           wasm_u8x16_make(1, 2, 4, 8, 16, 32, 64, 128, 1, 2, 4, 8, 16, 32, 64, 128)),
                              wasm_i32x4_splat(0));
     }
 };

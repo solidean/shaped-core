@@ -5,6 +5,7 @@
 /// Include a single module's fwd directly when that is all you need.
 
 #include <clean-core/record/domain_fwd.hh>
+#include <typed-geometry/camera/fwd.hh>
 #include <typed-geometry/geometry/fwd.hh>
 #include <typed-geometry/linalg/fwd.hh>
 #include <typed-geometry/scalar/fwd.hh>

@@ -46,6 +46,8 @@ They are **Release** rather than RelWithDebInfo: PGO targets the shipping config
 
 `pgo run` with no `--preset` uses the platform defaults above.
 Training and measurement run **every `*-test` binary** with `--pgo-benchmarks`.
+`--target` (`-t`, comma-list, repeatable, wildcards) narrows every stage to those binaries: only they are built, trained and measured.
+When the PGO benchmarks live in one binary, that skips building the rest of the preset twice.
 A binary that contains no PGO benchmarks exits 0 and contributes nothing, so no per-library configuration is needed.
 During training each binary writes its counters to a distinct `LLVM_PROFILE_FILE` under `build/<gen>/pgo/profraw/`, which `llvm-profdata merge -sparse` folds into the single profile.
 
@@ -54,7 +56,8 @@ The **baseline for the speedup delta is the clean `release-clang` build**, a fai
 ## Output
 
 Like every dev.py step, each tool invocation is captured to
-`build/<preset>/run-logs/`. Sidecars:
+`build/<preset>/run-logs/`.
+Sidecars:
 
 | File                                    | What it is                                                        |
 |-----------------------------------------|-------------------------------------------------------------------|

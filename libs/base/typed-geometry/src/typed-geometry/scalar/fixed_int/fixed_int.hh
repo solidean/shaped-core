@@ -101,8 +101,11 @@ struct tg::scalar_traits<tg::impl::fixed_integer<Bits, Signed>>
     static constexpr bool has_rounding = false;
     static constexpr bool has_abs = true;
     static constexpr bool has_pow2 = false;
+    static constexpr bool has_non_finite = false;
 
     [[nodiscard]] static constexpr T one() { return T(1); }
+    [[nodiscard]] static constexpr T lowest() { return T::min(); }
+    [[nodiscard]] static constexpr T highest() { return T::max(); }
     [[nodiscard]] static constexpr bool is_zero(T const& x) { return x == T(); }
     [[nodiscard]] static constexpr bool is_one(T const& x) { return x == T(1); }
 

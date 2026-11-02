@@ -31,9 +31,9 @@ namespace
 /// what the content hash is over, so nothing else can collide with them.
 resolved_material fallback_resolution(geometry_kind kind)
 {
-    static auto const type = material_type::create("sv_fallback", {},
-                                                   "surface.base_color = float3(0.5, 0.5, 0.5)\n"
-                                                   "surface.specular_roughness = 1.0\n");
+    static auto const type = material_type::create({.name = "sv_fallback",
+                                                    .shader = "surface.base_color = float3(0.5, 0.5, 0.5)\n"
+                                                              "surface.specular_roughness = 1.0\n"});
     static auto const material = sv::material::create("sv_fallback", material_type_id::invalid, {});
 
     // Resolved against the kind it will be generated for, even though an empty signature asks the geometry for nothing:
@@ -88,8 +88,8 @@ material_permutation const& material_shader_cache::acquire(resolved_material con
     // A cutout on a quadric batch is not merely unimplemented, it is unreachable: the instance is submitted with
     // `opaque_override`, so the hardware skips any-hit entirely and the material's own coverage never runs.
     // Said out loud rather than dropped, because the image is simply wrong and nothing else would explain it.
-    if (procedural && generated.can_cut_out)
-        CC_LOG_WARNING("material '{}' writes geometry_opacity, which a quadric batch cannot cut out with — the batch "
+    if (procedural && generated.opacity.can_cut_out())
+        CC_LOG_WARNING("material '{}' has a cutout opacity, which a quadric batch cannot cut out with — the batch "
                        "is submitted opaque, so it will draw fully opaque",
                        r.type->name);
 
@@ -103,16 +103,21 @@ material_permutation const& material_shader_cache::acquire(resolved_material con
         hit_group = failed_hit_group(cc::format("no shader library to compile material '{}' through: {}", r.type->name,
                                                 lib.error().to_string()));
     else
-        hit_group = slib::compile_hit_group(_context, lib.value(), &sv::shaders::tracer_pipeline_path_t::definition(),
+        hit_group = slib::compile_hit_group(_context, lib.value(), &sv::shaders::tracer_pipeline::path_t::definition(),
                                             generated.source, "sv_material", label);
 
     auto entry = _by_key.entry(key);
     return entry.get_or_emplace(material_permutation{.key = generated.key,
                                                      .layout = cc::move(generated.layout),
                                                      .kind = kind,
-                                                     .can_cut_out = !procedural && generated.can_cut_out,
+                                                     .opacity = procedural ? material_opacity() : generated.opacity,
+                                                     .emission = generated.emission,
                                                      .hit_group = cc::move(hit_group),
                                                      .source = cc::move(generated.source),
+                                                     .shade_source = cc::move(generated.shade_source),
+                                                     .raster_source = cc::move(generated.raster_source),
+                                                     .hybrid_source = cc::move(generated.hybrid_source),
+                                                     .secondary = procedural ? material_secondary() : generated.secondary,
                                                      .label = cc::move(label)});
 }
 } // namespace sv

@@ -56,7 +56,7 @@ namespace nx::arg
 ///
 /// The default value is NOT here: it is whatever the bound variable already holds when the argument is
 /// declared, which is the one place it cannot disagree with itself.
-/// `make_default` covers the case where computing it is the point, and `default_text` overrides only how
+/// `make_default` covers a default that has to be computed, and `default_text` overrides only how
 /// the help spells it.
 template <class T>
 struct nx::arg_options

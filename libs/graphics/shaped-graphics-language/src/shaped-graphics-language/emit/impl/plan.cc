@@ -6,6 +6,7 @@
 #include <shaped-graphics-language/emit/impl/layout.hh>
 #include <shaped-graphics-language/emit/reserved_words.hh>
 #include <shaped-graphics-language/legalize/core.hh>
+#include <shaped-graphics-language/legalize/impl/walk.hh>
 
 namespace
 {
@@ -36,12 +37,7 @@ cc::string_view role_name(struct_role role)
 /// Read from the registry, so a new builtin needs no entry in a target's list of reserved words.
 bool is_called_by_a_builtin(checked_module const& m, emit::target t, cc::string_view name)
 {
-    if (m.builtins == nullptr)
-        return false;
-    for (auto const& f : m.builtins->functions)
-        if (f.writes_name(language_of(t), name))
-            return true;
-    return false;
+    return m.builtins != nullptr && m.builtins->names_written_in(language_of(t)).contains(name);
 }
 
 struct_role input_role(flat_entry_point const& e)
@@ -56,6 +52,9 @@ struct_role input_role(flat_entry_point const& e)
 
 struct_role result_role(flat_entry_point const& e)
 {
+    // an intersection's report is a value its traversal reads back, never a render target
+    if (e.entry_stage >= stage::raygen)
+        return struct_role::plain;
     if (e.entry_stage == stage::tessellation_control)
         return struct_role::patch_constants;
     return e.entry_stage == stage::vertex || e.entry_stage == stage::tessellation_evaluation
@@ -234,10 +233,17 @@ struct planner
         {
             if (is_reserved(p.which, result))
                 return false;
-            // EMIT-138: a member named like the struct type of another hides the type from it in HLSL and MSL
+            // EMIT-138: a member named like the struct type of another hides the type from it in HLSL and MSL.
+            // The type is compared as written, which a reserved name escapes: `ray` is `ray_` on msl, like the member.
             for (auto const& s : siblings)
-                if (is_valid(s.type) && p.m.at(s.type).kind == type_kind::structure && p.m.name_of(s.type) == result)
+            {
+                if (!is_valid(s.type) || p.m.at(s.type).kind != type_kind::structure)
+                    continue;
+                if (p.m.name_of(s.type) == result)
                     return false;
+                if (auto const k = p.struct_of_type[index_of(s.type)]; k >= 0 && p.structs[k].name == result)
+                    return false;
+            }
             if (result == name)
                 return true;
             for (auto const& s : siblings)
@@ -245,8 +251,9 @@ struct planner
                     return false;
             return true;
         };
-        while (!is_free())
-            result += "_";
+        // one trailing underscore, then a number after it: a second underscore would make a name C++ reserves
+        for (auto suffix = 0; !is_free(); ++suffix)
+            result = suffix == 0 ? cc::format("{}_", name) : cc::format("{}_{}", name, suffix);
         return result;
     }
 
@@ -919,20 +926,74 @@ void sgl::emit::impl::validate(check::checked_module const& m, check::flat_entry
     v.file_samplers();
 }
 
+namespace
+{
+/// What the body reaches, which is all a text writes: the legalizer leaves the nodes it replaced behind, unreachable.
+struct live_nodes
+{
+    check::flat_entry_point const& e;
+    cc::vector<bool> exprs;
+    cc::vector<bool> locals;
+
+    void local(check::local_id id)
+    {
+        if (check::impl::is_known(e, id))
+            locals[check::index_of(id)] = true;
+    }
+
+    void expr(check::flat_expr_id id, int depth)
+    {
+        if (!check::impl::is_known(e, id) || depth > check::impl::k_max_depth || exprs[check::index_of(id)])
+            return;
+        exprs[check::index_of(id)] = true;
+        auto const& x = e.at(id);
+        if (auto const* const ref = x.node.try_as<check::flat_local_ref>())
+            local(ref->local);
+        if (auto const* const b = x.node.try_as<check::flat_block>())
+            body(b->body, depth + 1);
+        check::impl::for_each_operand(e, x, [&](check::flat_expr_id operand) { expr(operand, depth + 1); });
+    }
+
+    void body(ast::range_of<check::flat_stmt_id> range, int depth)
+    {
+        if (!check::impl::is_known(e, range) || depth > check::impl::k_max_depth)
+            return;
+        for (auto const id : e.at(range))
+        {
+            if (!check::impl::is_known(e, id))
+                continue;
+            auto const& s = e.at(id);
+            if (auto const* const let = s.node.try_as<check::flat_let>())
+                local(let->local);
+            else if (auto const* const var = s.node.try_as<check::flat_var>())
+                local(var->local);
+            else if (auto const* const f = s.node.try_as<check::flat_for>())
+                local(f->index);
+            check::impl::for_each_expr_of(s, [&](check::flat_expr_id x) { expr(x, depth + 1); });
+            check::impl::for_each_pattern_of(e, s,
+                                             [&](ast::range_of<check::flat_expr_id> patterns)
+                                             {
+                                                 if (check::impl::is_known(e, patterns))
+                                                     for (auto const p : e.at(patterns))
+                                                         expr(p, depth + 1);
+                                             });
+            check::impl::for_each_body_of(e, s,
+                                          [&](ast::range_of<check::flat_stmt_id> inner) { body(inner, depth + 1); });
+        }
+    }
+};
+} // namespace
+
 sgl::emit::impl::plan sgl::emit::impl::make_plan(check::checked_module const& m, check::flat_entry_point const& e, target t)
 {
-    auto result = plan{.m = m, .e = e, .which = t, .names = e.names};
+    auto result = plan{.m = m, .e = e, .which = t};
+    // The tree's names and the builtins' go on being taken where they are, since both outlive the plan.
+    result.names.parent = &e.names;
+    if (m.builtins != nullptr)
+        result.names.also_taken = &m.builtins->names_written_in(language_of(t));
     // Reserved first, so nothing minted below can be one of them.
     for (auto const word : reserved_words(t))
         (void)result.names.reserve(word);
-    if (m.builtins != nullptr)
-        for (auto const& f : m.builtins->functions)
-        {
-            if (f.write.kind == builtins::spelling_kind::call)
-                (void)result.names.reserve(f.called_in(language_of(t)));
-            for (auto const name : f.names_in(language_of(t)))
-                (void)result.names.reserve(name);
-        }
     result.struct_of_type.resize_to_filled(m.types.size(), -1);
     result.enum_of_type.resize_to_filled(m.types.size(), -1);
     result.array_of_type.resize_to_filled(m.types.size(), -1);
@@ -956,15 +1017,25 @@ sgl::emit::impl::plan sgl::emit::impl::make_plan(check::checked_module const& m,
         if (e.entry_stage == stage::tessellation_evaluation && t.kind == type_kind::structure && local.type != e.input)
             p.need(local.type, struct_role::patch_constants);
     }
-    for (auto const& local : e.locals)
+    // Only what the body reaches: a struct the legalizer split into its fields is held by nothing the text writes.
+    auto live = live_nodes{.e = e,
+                           .exprs = cc::vector<bool>::create_filled(e.exprs.size(), false),
+                           .locals = cc::vector<bool>::create_filled(e.locals.size(), false)};
+    live.body(e.body, 0);
+    for (auto i = isize(0); i < e.locals.size(); ++i)
     {
+        auto const& local = e.locals[i];
+        if (!live.locals[i] && local.kind != check::local_kind::parameter)
+            continue;
         p.need(local.type, struct_role::plain);
         p.need_enum(local.type);
     }
-    for (auto const& x : e.exprs)
+    for (auto i = isize(0); i < e.exprs.size(); ++i)
     {
-        p.need(x.type, struct_role::plain);
-        p.need_enum(x.type);
+        if (!live.exprs[i])
+            continue;
+        p.need(e.exprs[i].type, struct_role::plain);
+        p.need_enum(e.exprs[i].type);
     }
     // EMIT-139: MSL sizes the ray data by every payload of the set, which each of its shaders must agree on
     if (t == target::msl)
@@ -1005,6 +1076,37 @@ sgl::emit::impl::plan sgl::emit::impl::make_plan(check::checked_module const& m,
         result.stage_input_names.push_back(result.names.mint(cc::format("{}_in", local)));
         result.stage_input_bases.push_back(result.names.mint(cc::format("{}_base", local)));
     }
+    // the parameter stays in the signature, and the line that converts it is written where the tree reads it
+    result.stage_input_read = cc::vector<bool>::create_filled(e.stage_inputs.size(), false);
+    for (auto const& x : e.exprs)
+        if (auto const* const ref = x.node.try_as<check::flat_local_ref>())
+            for (auto i = isize(0); i < e.stage_inputs.size(); ++i)
+                if (e.stage_inputs[i].local == ref->local)
+                    result.stage_input_read[i] = true;
+
+    result.local_flags = cc::vector<cc::optional<u32>>::create_defaulted(e.locals.size());
+    auto flags_known = cc::vector<bool>::create_filled(e.locals.size(), true);
+    for (auto const& x : e.exprs)
+    {
+        auto const* const call = x.node.try_as<check::flat_call>();
+        auto const* const record = call != nullptr ? m.builtin_function(call->intrinsic) : nullptr;
+        if (record == nullptr || record->flags_argument < 0)
+            continue;
+        auto const arguments = e.at(call->arguments);
+        auto const* const target = e.at(arguments[0]).node.try_as<check::flat_local_ref>();
+        if (target == nullptr)
+            continue;
+        auto const at = index_of(target->local);
+        auto const* const k = e.at(arguments[record->flags_argument]).node.try_as<check::flat_int_literal>();
+        auto& flags = result.local_flags[at];
+        if (k == nullptr || (flags.has_value() && flags.value() != u32(k->value)))
+            flags_known[at] = false;
+        else
+            flags = u32(k->value);
+    }
+    for (auto i = isize(0); i < result.local_flags.size(); ++i)
+        if (!flags_known[i])
+            result.local_flags[i] = cc::nullopt;
     return result;
 }
 
@@ -1048,6 +1150,9 @@ sgl::emit::impl::stage_input_spelling const& sgl::emit::impl::spelling_of(check:
         = {"uint", "SV_VertexID", "u32", "vertex_index", "uint", "vertex_id"};
     static constexpr stage_input_spelling k_instance_index
         = {"uint", "SV_InstanceID", "u32", "instance_index", "uint", "instance_id"};
+    // WGSL has no builtin for it, which the feature it needs keeps from ever reaching that target
+    static constexpr stage_input_spelling k_first_instance
+        = {"uint", "SV_StartInstanceLocation", "u32", "", "uint", "base_instance"};
     static constexpr stage_input_spelling k_front_facing
         = {"bool", "SV_IsFrontFace", "bool", "front_facing", "bool", "front_facing"};
     static constexpr stage_input_spelling k_sample_index
@@ -1077,6 +1182,8 @@ sgl::emit::impl::stage_input_spelling const& sgl::emit::impl::spelling_of(check:
         return k_vertex_index;
     case stage_input::instance_index:
         return k_instance_index;
+    case stage_input::first_instance:
+        return k_first_instance;
     case stage_input::is_front_facing:
         return k_front_facing;
     case stage_input::sample_index:
@@ -1119,8 +1226,13 @@ cc::string sgl::emit::impl::stage_input_value(plan const& p, isize index)
                        : cc::string_view(p.stage_input_names[index]);
     auto const type = check::info_of(input.input).type;
     // HLSL counts a vertex and an instance from the draw's base, and DXC keeps that meaning on vulkan (EMIT-128).
-    auto const value
-        = has_base(p, input.input) ? cc::format("{} + {}", raw, p.stage_input_bases[index]) : cc::string(raw);
+    // An entry taking `@first_instance` too has that base as a parameter already, and HLSL takes one semantic once.
+    auto base = cc::string(p.stage_input_bases[index]);
+    if (input.input == check::stage_input::instance_index)
+        for (auto j = isize(0); j < p.e.stage_inputs.size(); ++j)
+            if (p.e.stage_inputs[j].input == check::stage_input::first_instance)
+                base = cc::string(p.stage_input_names[j]);
+    auto const value = has_base(p, input.input) ? cc::format("{} + {}", raw, base) : cc::string(raw);
     if (type == "int")
         return cc::format("{}({})", is_wgsl ? "i32" : "int", value);
     if (type == "int3")

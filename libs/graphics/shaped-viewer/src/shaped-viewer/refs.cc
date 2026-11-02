@@ -10,6 +10,7 @@
 #include <shaped-viewer/resources/gpu_resource_manager.hh>
 #include <shaped-viewer/scene/mesh.hh>
 #include <shaped-viewer/scene/resident_mesh.hh>
+#include <shaped-viewer/scene/studio.hh>
 #include <typed-geometry/linalg/cross.hh>   // tg::cross, tg::dual
 #include <typed-geometry/linalg/vec_ops.hh> // tg::dot
 
@@ -270,6 +271,98 @@ void scene_ref::add_arrow(tg::segment3f const& segment, arrow_style const& style
     _frame->_immediate_batch_for(_view, _layer, material).add_arrow(segment, style);
 }
 
+vertices_ref scene_ref::_add_vertices(cc::span<tg::pos3f const> points, vertex_style const& style, material_id material)
+{
+    auto const shape = frame::immediate_shape{.view = _view,
+                                              .layer = _layer,
+                                              .kind = frame::shape_kind::vertices,
+                                              .material = material,
+                                              .vertex = style};
+    return vertices_ref(_frame, _frame->_add_immediate_shape(shape, points, {}, {}));
+}
+
+edges_ref scene_ref::_add_edges(cc::span<tg::segment3f const> edges,
+                                cc::span<tg::pos3f const> vertices,
+                                edge_style const& style,
+                                material_id material)
+{
+    auto const shape = frame::immediate_shape{.view = _view,
+                                              .layer = _layer,
+                                              .kind = frame::shape_kind::edges,
+                                              .material = material,
+                                              .edge = style};
+    return edges_ref(_frame, _frame->_add_immediate_shape(shape, vertices, edges, {}));
+}
+
+faces_ref scene_ref::_add_faces(cc::span<tg::triangle3f const> triangles, material_id material)
+{
+    auto const shape
+        = frame::immediate_shape{.view = _view, .layer = _layer, .kind = frame::shape_kind::faces, .material = material};
+    return faces_ref(_frame, _frame->_add_immediate_shape(shape, {}, {}, triangles));
+}
+
+// ---- vertices_ref / edges_ref / faces_ref ------------------------------------------------------------------
+
+vertices_ref& vertices_ref::style(vertex_style const& s)
+{
+    _frame->_immediate_shapes[_shape].vertex = s;
+    return *this;
+}
+
+vertices_ref& vertices_ref::radius(float r)
+{
+    _frame->_immediate_shapes[_shape].vertex.radius = r;
+    return *this;
+}
+
+vertices_ref& vertices_ref::material(material_id m)
+{
+    _frame->_immediate_shapes[_shape].material = m;
+    return *this;
+}
+
+edges_ref& edges_ref::style(edge_style const& s)
+{
+    _frame->_immediate_shapes[_shape].edge = s;
+    return *this;
+}
+
+edges_ref& edges_ref::radius(float r)
+{
+    _frame->_immediate_shapes[_shape].edge.radius = r;
+    return *this;
+}
+
+edges_ref& edges_ref::vertex_radius(float r)
+{
+    _frame->_immediate_shapes[_shape].edge.vertex_radius = r;
+    return *this;
+}
+
+edges_ref& edges_ref::vertices(bool joined)
+{
+    _frame->_immediate_shapes[_shape].edge.vertices = joined;
+    return *this;
+}
+
+edges_ref& edges_ref::ends(line_ends e)
+{
+    _frame->_immediate_shapes[_shape].edge.ends = e;
+    return *this;
+}
+
+edges_ref& edges_ref::material(material_id m)
+{
+    _frame->_immediate_shapes[_shape].material = m;
+    return *this;
+}
+
+faces_ref& faces_ref::material(material_id m)
+{
+    _frame->_immediate_shapes[_shape].material = m;
+    return *this;
+}
+
 void scene_ref::add_drawing(drawing_set const& set, drawing_id id, instance_3d const& instance)
 {
     CC_ASSERT(u32(id) < u32(set.size()), "a drawing_id names a drawing of the set that minted it");
@@ -437,6 +530,32 @@ void scene_ref::background(sv::background const& bg)
 void scene_ref::settings(render_settings const& s)
 {
     target().settings = s;
+}
+
+void scene_ref::studio(studio_options const& options)
+{
+    // The exposure is a quadrature over the dome, so the last one is kept: a scene calls this every frame with the same options.
+    thread_local auto last_setup = studio_setup::floor;
+    thread_local auto last_horizon = -1.0f;
+    thread_local auto last_exposure = 0.0f;
+
+    auto d = studio_dome(options.setup, options.horizon);
+    if (!options.exposure.has_value() && (last_setup != options.setup || last_horizon != options.horizon))
+    {
+        last_setup = options.setup;
+        last_horizon = options.horizon;
+        last_exposure = studio_exposure(d);
+    }
+    if (options.lights_from.has_value())
+        d = d.seen_from(options.lights_from.value());
+
+    auto& l = target();
+    l.background = sv::background::of_dome(d);
+    l.fallback_light = cc::nullopt;
+    l.settings.display = {.exposure = options.exposure.has_value() ? options.exposure.value() : last_exposure,
+                          .curve = sr::display_curve::neutral};
+    if (options.setup == studio_setup::floor && options.draw_floor)
+        add_mesh(studio_floor(options.floor_height, options.floor_half_extent));
 }
 
 // ---- leaf_ref --------------------------------------------------------------------------------------------
@@ -629,6 +748,15 @@ void view_ref::initial_orbit(orbit_state const& o)
     }
 }
 
+void view_ref::reset_orbit(orbit_state const& o)
+{
+    auto& st = _frame->state_of(_view);
+    st.camera_seeded = true;
+    st.controller.cancel_focus();
+    st.controller.orbit = o;
+    st.camera = o.to_camera();
+}
+
 void view_ref::initial_fps(fps_state const& pose)
 {
     auto& st = _frame->state_of(_view);
@@ -682,14 +810,19 @@ cc::string_view view_ref::display_name() const
     return _frame->state_of(_view).display_name;
 }
 
-u32 view_ref::accumulated_frames() const
+u32 view_ref::accumulated_samples() const
 {
-    return impl::min_accumulated_frames(_frame->state_of(_view));
+    return impl::min_accumulated_samples(_frame->state_of(_view));
 }
 
-bool view_ref::is_accumulation_converged(cc::optional<u32> frames) const
+bool view_ref::is_accumulation_converged(cc::optional<u32> samples) const
 {
-    return impl::is_accumulation_converged(_frame->state_of(_view), frames);
+    return impl::is_accumulation_converged(_frame->state_of(_view), samples);
+}
+
+void view_ref::restart_accumulation() const
+{
+    impl::restart_accumulation(_frame->state_of(_view));
 }
 
 // ---- window_ref ------------------------------------------------------------------------------------------

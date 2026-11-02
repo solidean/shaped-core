@@ -16,7 +16,7 @@
 
 /// A pipeline an SGL `pipeline` declaration states, as slib describes it.
 /// The generated symbol of each declaration hands one `pipeline_definition` to the functions below, and is itself an
-/// `sg::raster_pipeline_source`: a caller writes `ctx.cached.acquire_raster_pipeline(shaders::cube.pipeline, …)`.
+/// `sg::raster_pipeline_source`: a caller writes `ctx.cached.acquire_raster_pipeline(shaders::cube::pipeline, …)`.
 /// libs/graphics/shaped-graphics-language/docs/spec/pipelines.md is what the declaration means.
 
 /// What a reloaded setting's value is; the SGL compiler's `check::setting_kind`, which slib does not link publicly.

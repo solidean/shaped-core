@@ -32,12 +32,14 @@ slib::shader_asset::shader_asset(std::weak_ptr<shader_library> library,
                                  cc::string virtual_path,
                                  sg::shader_stage stage,
                                  cc::string entry_point,
-                                 cc::vector<cc::string> options)
+                                 cc::vector<cc::string> options,
+                                 cc::string file_namespace)
   : _library(cc::move(library)),
     _virtual_path(cc::move(virtual_path)),
     _stage(stage),
     _entry_point(cc::move(entry_point)),
-    _options(cc::move(options))
+    _options(cc::move(options)),
+    _file_namespace(cc::move(file_namespace))
 {
 }
 
@@ -98,37 +100,54 @@ sg::async_compiled_shader slib::shader_asset::acquire(sg::shader_format format, 
             }
     cc::sort(key, [](shader_option const& a, shader_option const& b) { return a.name < b.name; });
 
-    bool recorded_dependencies = false;
+    auto const entry_of = [&](state& s) -> format_entry&
+    {
+        for (auto& e : s.formats)
+            if (e.format == format && is_same(e.options, key))
+                return e;
+        s.formats.push_back(format_entry{.format = format, .options = key});
+        return s.formats.back();
+    };
+
     auto shader = _state.lock(
         [&](state& s) -> sg::async_compiled_shader
         {
-            format_entry* entry = nullptr;
-            for (auto& e : s.formats)
-                if (e.format == format && is_same(e.options, key))
-                    entry = &e;
+            auto& entry = entry_of(s);
+            promote_pending(*library, s, entry);
+            return entry.current;
+        });
+    if (shader != nullptr)
+        return shader;
 
-            if (entry == nullptr)
+    // A first acquire for this format and option set compiles off the lock, as a reload does.
+    // A compile runs the front end and may wait on a persistent cache, which no other acquire of this asset should queue behind.
+    auto outcome = library->compile_shader(_virtual_path, _stage, _entry_point, _file_namespace, format, key);
+
+    // Whoever installs first wins, and a compile that lost the race is dropped.
+    // A file edited since the compile read it staged either a reload that skipped this entry, which held no shader yet, or none at all, since nothing watched the file.
+    // Either way the winner flags the asset, and the watcher's next scan stages the reload on its own thread rather than this consumer's.
+    // The revisions are read under the lock: a reload staged after it sees the installed entry, so an edit landing after the check is that reload's.
+    auto installed = false;
+    shader = _state.lock(
+        [&](state& s) -> sg::async_compiled_shader
+        {
+            auto& entry = entry_of(s);
+            if (entry.current == nullptr)
             {
-                s.formats.push_back(format_entry{.format = format, .options = key});
-                entry = &s.formats.back();
+                for (auto const& dependency : outcome.dependencies)
+                    if (library->filesystem().revision(dependency.path) != dependency.revision)
+                        s.reload_missed = true;
+                entry.current = cc::move(outcome.shader);
+                entry.dependencies = cc::move(outcome.dependencies);
+                installed = true;
             }
-
-            promote_pending(*library, s, *entry);
-
-            if (entry->current == nullptr) // first acquire for this format and option set
-            {
-                auto outcome = library->compile_shader(_virtual_path, _stage, _entry_point, format, key);
-                entry->current = cc::move(outcome.shader);
-                entry->dependencies = cc::move(outcome.dependencies);
-                recorded_dependencies = true;
-            }
-
-            return entry->current;
+            return entry.current;
         });
 
     // A first compile is what resolves the includes, so the dependency set only becomes real here, on a consumer's thread.
+    // The same wake is what brings the watcher round to a reload the install owes.
     // Off the lock: what this wakes turns straight around and reads us back.
-    if (recorded_dependencies)
+    if (installed)
         library->note_dependencies_changed();
 
     return shader;
@@ -172,6 +191,11 @@ u64 slib::shader_asset::generation() const
     return _state.lock([](state const& s) { return s.generation; });
 }
 
+bool slib::shader_asset::missed_reload() const
+{
+    return _state.lock([](state const& s) { return s.reload_missed; });
+}
+
 cc::optional<cc::string> slib::shader_asset::read_source() const
 {
     auto const library = _library.lock();
@@ -191,19 +215,19 @@ cc::optional<cc::string> slib::shader_asset::last_error() const
     return _state.lock([](state const& s) { return s.last_error; });
 }
 
-cc::vector<cc::string> slib::shader_asset::dependencies() const
+cc::vector<slib::file_dependency> slib::shader_asset::dependencies() const
 {
     return _state.lock(
         [](state const& s)
         {
-            cc::vector<cc::string> all;
+            auto all = cc::vector<file_dependency>();
             for (auto const& entry : s.formats)
                 for (auto const& dependency : entry.dependencies)
                 {
-                    // A file included by several formats' builds only needs watching once.
-                    bool known = false;
+                    // A file included by several formats' builds is listed once, unless they read it at different revisions.
+                    auto known = false;
                     for (auto const& existing : all)
-                        if (existing == dependency)
+                        if (existing.path == dependency.path && existing.revision == dependency.revision)
                             known = true;
                     if (!known)
                         all.push_back(dependency);
@@ -227,8 +251,10 @@ void slib::shader_asset::stage_reload()
     };
     cc::small_vector<acquired, 2> pairs;
     _state.lock(
-        [&](state const& s)
+        [&](state& s)
         {
+            // Every installed entry is restaged below, so a reload a first compile missed is covered by this one.
+            s.reload_missed = false;
             for (auto const& entry : s.formats)
                 if (entry.current != nullptr)
                     pairs.push_back({.format = entry.format, .options = entry.options});
@@ -237,7 +263,7 @@ void slib::shader_asset::stage_reload()
     for (auto const& [format, options] : pairs)
     {
         // Read, preprocess and compile off the lock, so a consumer's acquire only ever waits for the swap below.
-        auto outcome = library->compile_shader(_virtual_path, _stage, _entry_point, format, options);
+        auto outcome = library->compile_shader(_virtual_path, _stage, _entry_point, _file_namespace, format, options);
 
         // Drive the compile here, on the watcher's own thread.
         // A cc::async node is cold until a scheduler runs it, and nothing else ever looks at this one — a consumer only sees it after promotion, and promotion needs it ready.

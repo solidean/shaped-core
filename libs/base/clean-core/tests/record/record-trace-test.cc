@@ -12,10 +12,10 @@
 #include <clean-core/string/string.hh>
 #include <clean-core/thread/async.hh>
 #include <clean-core/thread/async_coroutine.hh>
+#include <clean-core/thread/native_thread.hh>
 #include <clean-core/thread/thread.hh>
 #include <nexus/test.hh>
 
-#include <thread>
 
 using namespace cc::primitive_defines;
 using namespace cc_rec_test;
@@ -58,7 +58,7 @@ REC_TEST("record/trace - ids are unique, cheap and need no registry")
 
     // Two threads mint from disjoint ranges, because the thread's identity is in the high bits.
     cc::rec::trace_id from_worker = cc::rec::trace_id::none;
-    std::thread worker([&] { from_worker = cc::rec::new_trace_id(); });
+    auto worker = cc::native_thread::start([&] { from_worker = cc::rec::new_trace_id(); });
     worker.join();
 
     CHECK(from_worker != a);
@@ -80,7 +80,7 @@ REC_TEST("record/trace - a scope mints and names its trace, and restores what wa
         {
             CC_RECORD_MARK("before");
             {
-                // Naming it is the point: a bare id is an opaque number, useless in a viewer.
+                // Named, because a bare id is an opaque number, useless in a viewer.
                 CC_RECORD_ASYNC_SCOPE("handle-request");
                 outer_id = cc::rec::current_trace_id();
                 CHECK(outer_id != cc::rec::trace_id::none);
@@ -151,7 +151,7 @@ REC_TEST("record/trace - a trace spans threads, since an id is just a value")
 
             // Passing the id by hand is the synchronous way to carry a trace across a thread.
             // Carrying it automatically is what folding trace scopes into cc::async's ambient chain will add.
-            std::thread worker(
+            auto worker = cc::native_thread::start(
                 [&]
                 {
                     CC_RECORD_ASYNC_SCOPE_WITH_ID("job", id);

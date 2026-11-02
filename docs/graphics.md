@@ -25,7 +25,7 @@ It exposes a small, backend-agnostic surface — `context`, `command_list`, and 
   `backend_kind` is a coarse tag rather than a backend identity: a debug, CPU or remote backend is just as valid as dx12 or vulkan.
 
 Which backends exist, how far along each is, and sg's design at a glance: the [shaped-graphics readme](../libs/graphics/shaped-graphics/readme.md).
-The load-bearing conventions are handles, backend smurf naming and the duplication-over-abstraction stance.
+The conventions to know first are handles, backend smurf naming and the duplication-over-abstraction stance.
 They live in its [coding guidelines](../libs/graphics/shaped-graphics/docs/coding-guidelines.md).
 
 ### shaped-rendering — `sr::`

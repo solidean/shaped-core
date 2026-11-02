@@ -1,0 +1,100 @@
+// Downsamples one mip level into the next with a box filter: the plain average, and deliberately nothing more.
+// It is separable, cheap, and correct for the "fill the chain we did not upload" job.
+// Better filters (Kaiser, and a gamma-correct average for sRGB content) belong in routines of their own rather than behind a flag here, which is why this one is named for its filter.
+//
+// One entry point per view dimension, each over a binding of its own shape.
+// An array averages within a slice and never across slices, so its entry point halves x and y only.
+// A 3D texture is the one shape that halves in z too, which is why it averages 8 taps rather than 4.
+//
+// One dispatch per level, with the source bound as a single-mip view of level N and the target as the image of N+1, so no level is read and written by one dispatch.
+// The routine dispatches exactly one thread per slice, so only the halved axes are bounds-checked.
+//
+// A source extent that is odd on some axis is not exactly twice the target there, and clamping the second tap keeps it inside the level.
+
+require extended_image_formats
+
+// the target's format, which sr::box_filter_mipmap_routine sets to the texture it is handed: a float, unorm or snorm one
+@option const target_format: pixel_format = .rgba8_unorm
+
+binding mipmap_1d:
+    @unfilterable
+    source: texture_1d[float4]
+    target: out image_1d[target_format]
+
+binding mipmap_1d_array:
+    @unfilterable
+    source: texture_1d_array[float4]
+    target: out image_1d_array[target_format]
+
+binding mipmap_2d:
+    @unfilterable
+    source: texture_2d[float4]
+    target: out image_2d[target_format]
+
+// also every cube and cube array, whose image is a 2D array of faces
+binding mipmap_2d_array:
+    @unfilterable
+    source: texture_2d_array[float4]
+    target: out image_2d_array[target_format]
+
+binding mipmap_3d:
+    @unfilterable
+    source: texture_3d[float4]
+    target: out image_3d[target_format]
+
+// the second tap of each pair, kept inside a level of `size`
+fun second_tap(base: int2, size: int2) => min(base + int2(1, 1), size - int2(1, 1))
+
+// the sum of the four taps from `base` to `hi`, in the order every shape adds them
+fun sum_of_four(t: texture_2d[float4], base: int2, hi: int2) =>
+    t.load(base) + t.load(int2(hi.x, base.y)) + t.load(int2(base.x, hi.y)) + t.load(hi)
+
+fun sum_of_four(t: texture_2d_array[float4], base: int2, hi: int2, slice: int) -> float4:
+    return t.load(base, layer = slice) + t.load(int2(hi.x, base.y), layer = slice)
+        + t.load(int2(base.x, hi.y), layer = slice) + t.load(hi, layer = slice)
+
+fun sum_of_eight(t: texture_3d[float4], base: int3, hi: int3) -> float4:
+    return t.load(base) + t.load(int3(hi.x, base.y, base.z)) + t.load(int3(base.x, hi.y, base.z))
+        + t.load(int3(hi.x, hi.y, base.z)) + t.load(int3(base.x, base.y, hi.z)) + t.load(int3(hi.x, base.y, hi.z))
+        + t.load(int3(base.x, hi.y, hi.z)) + t.load(hi)
+
+@compute(64) fun main_1d_cs(@thread_id id: int3){mipmap_1d}:
+    if id.x >= mipmap_1d.target.size() => return
+
+    let base = id.x * 2
+    let hi = min(base + 1, mipmap_1d.source.size() - 1)
+    let sum = mipmap_1d.source.load(base) + mipmap_1d.source.load(hi)
+    mipmap_1d.target[id.x] = (sum * 0.5) as texel[target_format]
+
+// the slice is id.y
+@compute(64) fun main_1d_array_cs(@thread_id id: int3){mipmap_1d_array}:
+    if id.x >= mipmap_1d_array.target.size() => return
+
+    let base = id.x * 2
+    let hi = min(base + 1, mipmap_1d_array.source.size() - 1)
+    let sum = mipmap_1d_array.source.load(base, layer = id.y) + mipmap_1d_array.source.load(hi, layer = id.y)
+    mipmap_1d_array.target[id.x, layer = id.y] = (sum * 0.5) as texel[target_format]
+
+@compute(8, 8) fun main_2d_cs(@thread_id id: int3){mipmap_2d}:
+    if any(id.xy >= mipmap_2d.target.size()) => return
+
+    let base = id.xy * 2
+    let hi = second_tap(base, mipmap_2d.source.size())
+    mipmap_2d.target[id.xy] = (sum_of_four(mipmap_2d.source, base, hi) * 0.25) as texel[target_format]
+
+// the slice is id.z, and a cube face is a slice, so no face bleeds into its neighbor
+@compute(8, 8) fun main_2d_array_cs(@thread_id id: int3){mipmap_2d_array}:
+    if any(id.xy >= mipmap_2d_array.target.size()) => return
+
+    let base = id.xy * 2
+    let hi = second_tap(base, mipmap_2d_array.source.size())
+    let sum = sum_of_four(mipmap_2d_array.source, base, hi, id.z)
+    mipmap_2d_array.target[id.xy, layer = id.z] = (sum * 0.25) as texel[target_format]
+
+// the one shape whose z halves with the rest, so this is an 8-tap average over the whole voxel
+@compute(4, 4, 4) fun main_3d_cs(@thread_id id: int3){mipmap_3d}:
+    if any(id >= mipmap_3d.target.size()) => return
+
+    let base = id * 2
+    let hi = min(base + int3(1, 1, 1), mipmap_3d.source.size() - int3(1, 1, 1))
+    mipmap_3d.target[id] = (sum_of_eight(mipmap_3d.source, base, hi) * 0.125) as texel[target_format]

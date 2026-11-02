@@ -183,6 +183,7 @@ These apply to `search`/`show`; `trace` has its own list in its [readme](../../t
 `assembly` shells out to LLVM's `llvm-nm` (symbol enumeration, including MSVC-ABI
 demangling via `--demangle`) and `llvm-objdump` (`-d -r`), found beside the
 configured compiler (`C:\Program Files\LLVM\bin` on this setup) or on `PATH`;
-override with `LLVM_NM` / `LLVM_OBJDUMP`. The reusable logic lives in
+override with `LLVM_NM` / `LLVM_OBJDUMP`.
+The reusable logic lives in
 [tools/dev/lib/toolchain/disasm.py](../../tools/dev/lib/toolchain/disasm.py), the
 command in [tools/dev/cmd/assembly.py](../../tools/dev/cmd/assembly.py).

@@ -42,6 +42,9 @@ A container selects a non-default allocator by seeding an empty allocation that 
 
 - `allocate_bytes(out_ptr, min, max, align, ud)` — allocates in `[min, max]` and returns the actual size.
   `min == 0` yields `nullptr` and size 0; a `min > 0` failure is **fatal** (assert/terminate).
+  clean-core's resources fail through `cc::impl::allocation_failed` in every build, release included.
+  It calls the handler `cc::set_allocation_failure_handler` installed, which may throw, e.g. an application's out-of-memory error.
+  If it returns, or none is installed, the allocation terminates with the request in the message.
   A size-class allocator may return more than `min`, so containers claim the rounding for free.
 - `try_allocate_bytes(...)` — same, but returns `-1` on failure instead of terminating (optional).
 - `deallocate_bytes(p, bytes, align, ud)` — `bytes`/`align` must match the allocation.

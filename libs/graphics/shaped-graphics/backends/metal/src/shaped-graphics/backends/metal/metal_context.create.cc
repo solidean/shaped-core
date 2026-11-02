@@ -15,7 +15,7 @@ namespace
 {
 /// Whether the OS is new enough for the Metal 4 API at all.
 ///
-/// Checked before any MTL4 selector is touched, and that order is the point: this backend is compiled against the
+/// Checked before any MTL4 selector is touched, because this backend is compiled against the
 /// macOS 26 SDK, so on an older OS the selectors simply do not exist and calling one is a crash rather than a
 /// diagnosable failure.
 [[nodiscard]] bool os_supports_metal4()
@@ -122,8 +122,9 @@ cc::result<sg::context_handle> sg::create_metal_context(backend::metal::metal_co
     auto ctx = std::make_shared<metal_context>(device, queue, compiler, epoch_event, submission_event);
     ctx->set_adapter_info(describe(device));
     // An MTL4 barrier names stages, never a resource, so there is no per-resource barrier to count.
-    ctx->set_counted_stats(
-        sg::all_stats.without(sg::stat::buffer_barriers | sg::stat::texture_barriers | sg::stat::texture_transitions));
+    // Its transfer waits are events this backend does not count yet.
+    ctx->set_counted_stats(sg::all_stats.without(sg::stat::buffer_barriers | sg::stat::texture_barriers
+                                                 | sg::stat::texture_transitions | sg::stat::queue_waits));
 
     // A refusal here is the device declining an allocation, not a broken contract — so it reaches the caller as an
     // error, and the half-built context unwinds through its own shutdown as this handle drops.

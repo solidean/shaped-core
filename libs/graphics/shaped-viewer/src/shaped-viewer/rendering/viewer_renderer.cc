@@ -1,7 +1,9 @@
 #include <clean-core/common/asserts.hh>
+#include <clean-core/common/utility.hh> // cc::clamp
 #include <clean-core/container/vector.hh>
 #include <clean-core/thread/async_coroutine.hh>
 #include <shaped-graphics/all.hh>
+#include <shaped-rendering/exposure_meter_routine.hh>
 #include <shaped-rendering/slug_routine.hh>
 #include <shaped-viewer/drawing/drawing_manager.hh>
 #include <shaped-viewer/impl/view_state.hh>
@@ -27,6 +29,75 @@ struct page_job
 
 /// Uploads one layer's drawings as Slug jobs, one per run of placements sharing an atlas page: a frame per placement,
 /// and a quad per record under it.
+/// How far an automatic exposure moves toward a new reading, per reading: a few frames to settle, and no flicker from noise.
+constexpr f32 auto_exposure_rate = 0.2f;
+
+/// Meters trace `i`'s image for its layer's automatic exposure, and folds in the reading an earlier frame started.
+/// One reading is in flight per layer: a new meter starts only once the last one landed.
+void meter_auto_exposure(sg::command_list& cmd,
+                         viewer_definition const& def,
+                         render_plan const& plan,
+                         u32 i,
+                         sg::texture_2d const& image,
+                         view_store& store)
+{
+    auto const& tr = plan.traces[i];
+    auto const& v = def[tr.view];
+    if (!v.layers[tr.layer].settings.display.automatic || image.raw() == nullptr)
+        return;
+
+    auto& rec = store.get_or_create(v.id);
+    while (rec.auto_exposure.size() <= isize(tr.layer))
+        rec.auto_exposure.push_back({});
+    auto& state = rec.auto_exposure[tr.layer];
+
+    if (state.pending.is_valid())
+    {
+        if (!state.pending.is_ready())
+            return;
+        auto const partials = state.pending.try_get_data();
+        state.pending = {};
+        if (partials.has_value())
+        {
+            auto const average = sr::exposure_meter_routine::average_luminance(
+                cc::span<tg::vec2f const>(partials.value().data(), partials.value().size()));
+            if (average.has_value())
+            {
+                // Held to a range a real image needs, so a black frame while the shaders compile does not throw it to infinity.
+                auto const target = cc::clamp(sr::exposure_for_average(average.value()), -24.0f, 24.0f);
+                state.exposure = state.primed ? state.exposure + (target - state.exposure) * auto_exposure_rate : target;
+                state.primed = true;
+            }
+        }
+    }
+
+    auto const partials = sr::exposure_meter_routine::execute(cmd, image);
+    if (partials.has_value())
+        state.pending = cmd.download.data_from_buffer(partials.value());
+}
+
+/// `draws` with every automatic exposure resolved: the layer's adapted exposure plus its compensation.
+[[nodiscard]] cc::vector<layout_draw> with_auto_exposure(cc::span<layout_draw const> draws,
+                                                         viewer_definition const& def,
+                                                         render_plan const& plan,
+                                                         view_store& store)
+{
+    auto out = cc::vector<layout_draw>();
+    out.reserve(draws.size());
+    for (auto const& d : draws)
+        out.push_back(d);
+    for (auto& d : out)
+    {
+        if (d.kind != draw_kind::view || d.primary.kind != draw_source_kind::trace || !d.display.automatic)
+            continue;
+        auto const& tr = plan.traces[d.primary.index];
+        auto const* const rec = store.get_ptr(def[tr.view].id);
+        if (rec != nullptr && isize(tr.layer) < rec->auto_exposure.size() && rec->auto_exposure[tr.layer].primed)
+            d.display.exposure += rec->auto_exposure[tr.layer].exposure;
+    }
+    return out;
+}
+
 /// Runs keep the placements' order, so a drawing added later draws over an earlier one whichever pages they live in.
 /// Records copies, so it runs before any pass opens.
 [[nodiscard]] cc::vector<page_job> prepare_drawing_job(sg::command_list& cmd,
@@ -194,8 +265,8 @@ cc::shared_async<cc::unit> viewer_renderer::init(sg::routine_init_scope scope)
 {
     auto& ctx = scope.context();
 
-    // The frame runs through the view renderer, so the edge is declared: this routine reports pending until the whole
-    // chain below it -- view_renderer, and the pathtracer it traces through -- is ready.
+    // The frame runs through the view renderer, so the edge is declared: this routine reports pending until it is ready.
+    // The tracers are not in that chain, so a raster layer never waits on them; a traced layer declines while they come up.
     _view_renderer = depend_on<view_renderer>(ctx);
 
     // The layout routine is neither declared nor prewarmed here, and cannot be either: it is acquired per target
@@ -241,6 +312,12 @@ sg::routine_outcome viewer_renderer::execute(sg::command_list& cmd,
                         .probe = job.kind == drawing_job_kind::annotations ? depth : sg::texture_2d()});
     }
 
+    // Every trace's acquires before any trace freezes the tables, so the frame mints one snapshot of them, not one per
+    // view that brought something new — each is a whole-table copy in the persistent descriptor heap.
+    for (auto i = u32(0); i < plan.traces.size(); ++i)
+        if (plan.traces[i].refresh)
+            view_renderer::acquire_trace(cmd, def, plan, i, res, resources);
+
     // Every trace first.
     //
     // The builder proved this legal rather than the executor assuming it: no trace this frame reads a target this
@@ -251,6 +328,10 @@ sg::routine_outcome viewer_renderer::execute(sg::command_list& cmd,
         if (plan.traces[i].refresh)
             if (view_renderer::trace(cmd, def, plan, i, res, resources, store) == sg::routine_outcome::declined)
                 declined = true;
+
+    // Every layer showing at an automatic exposure is metered from the image it shows, finished or not.
+    for (auto i = u32(0); i < plan.traces.size(); ++i)
+        meter_auto_exposure(cmd, def, plan, i, textures.traces[i], store);
 
     // Then one pass per target, in dependency order, so a source is finished before anything samples it.
     // Each pass closes before the next begins, which is what releases the output-merger binding — a target still bound
@@ -264,7 +345,8 @@ sg::routine_outcome viewer_renderer::execute(sg::command_list& cmd,
         if (!target.refresh)
             continue;
 
-        auto const draws = plan.draws_of(ti);
+        auto const resolved = with_auto_exposure(plan.draws_of(ti), def, plan, store);
+        auto const draws = cc::span<layout_draw const>(resolved);
 
         if (target.is_output)
         {

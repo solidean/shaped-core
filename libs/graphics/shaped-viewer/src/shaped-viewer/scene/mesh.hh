@@ -8,6 +8,7 @@
 #include <shaped-viewer/scene/mesh_flags.hh>
 #include <shaped-viewer/scene/mesh_texture.hh>
 #include <shaped-viewer/scene/resident_mesh.hh>
+#include <shaped-viewer/scene/scene_item.hh>
 #include <shaped-viewer/scene/triangle_geometry.hh>
 #include <typed-geometry/geometry/primitives/aabb.hh>
 #include <typed-geometry/transform/transform.hh>
@@ -45,6 +46,13 @@ struct sv::impl::mesh_gpu_slot
 
     /// Whether those resources had all reached the GPU, as of that placement.
     bool ready = false;
+
+    /// The scene item those resources resolved to, and the material id it was resolved from.
+    /// Placing the mesh again with the same material reuses it, rather than resolving the material, its shader and its instance afresh.
+    /// A material id names immutable contents, so the id is the whole key beside the resources.
+    /// A slot minted anew starts without one, so resources that changed always resolve again.
+    cc::optional<sv::scene_item> item;
+    material_id item_material = material_id::invalid;
 };
 
 /// One renderable mesh: geometry placed by a transform, drawn by a material, with everything that material may need
@@ -101,7 +109,7 @@ struct sv::mesh
     /// What placing this mesh produced — see `impl::mesh_gpu_slot`.
     ///
     /// Mutable because placing a mesh READS it: `scene_ref::add_mesh` takes a `mesh const&`, and an asset hands out
-    /// `mesh const&`, while the whole point of the slot is to remember what that placement produced.
+    /// `mesh const&`, while the slot exists to remember what that placement produced.
     /// Not thread-safe, like the rest of the authoring API — a mesh is placed from the thread that owns the frame.
     mutable impl::mesh_gpu_slot cache;
 

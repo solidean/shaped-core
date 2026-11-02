@@ -127,7 +127,7 @@ def _header_filter_regex() -> str:
     Matches either path separator.
     """
     segments = []
-    for r in dev.source_roots(ROOT):
+    for r in dev.source_roots(ROOT, layout=dev.SHAPED_CORE_LAYOUT):
         rel = r.relative_to(ROOT).as_posix()
         segments.append(rel.replace("/", r"[/\\]"))
     return r".*[/\\](?:" + "|".join(segments) + r")[/\\].*"
@@ -220,7 +220,7 @@ def _sources_in_scope(build_dir: Path, *, scope, explicit: list[str]) -> list[Pa
     if explicit:
         files = [Path(f).resolve() for f in explicit]
     else:
-        files = [f for f in dev.discover_files(ROOT, scope=scope) if f.suffix == ".cc"]
+        files = [f for f in dev.discover_files(ROOT, scope=scope, layout=dev.SHAPED_CORE_LAYOUT) if f.suffix == ".cc"]
 
     try:
         entries = dev.load_entries(build_dir)

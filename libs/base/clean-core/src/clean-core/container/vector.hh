@@ -3,12 +3,9 @@
 #include <clean-core/container/impl/allocating_container.hh>
 
 
-// TODO:
-// - sequence entry points
-// - retyping APIs
-// - equality, order, hashing
-// - contains/contains_where/find/find_where/count/count_where
-// - sort
+// issue: feat-cc-container-equality-and-order
+// issue: feat-cc-container-search-family
+// issue: feat-cc-container-retyping
 
 
 /// Dynamically allocated vector of T elements with value semantics.
@@ -35,6 +32,11 @@ public:
 public:
     using base::begin; // get pointer to first element
     using base::end;   // get pointer to one past last element
+
+    // sequences
+public:
+    using base::indices; // index sequence 0 .. size()
+    using base::values;  // the elements as a cc::sequence (owns the container when called on a temporary)
 
     // queries
 public:

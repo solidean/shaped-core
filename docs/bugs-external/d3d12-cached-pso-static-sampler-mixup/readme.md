@@ -34,7 +34,7 @@ RTX 5070 Ti, 32.0.15.9186  after a repeating twin, fresh  WRONG: every clamped t
 WARP 10.0.26100.9278       every row above                correct
 ```
 
-The load-bearing parts:
+What the bug needs:
 - **Two processes.** A process that built the clamping pipeline fresh before restoring its blob restores it correctly, so a single-process test cannot show it.
 - **A static sampler.** Observed in sg rather than shown by this repro: a pipeline whose root signature carries none restored correctly under the same sequence there.
 - **The twin's shader is the same one.** Its root signature differs only in the sampler's address mode.

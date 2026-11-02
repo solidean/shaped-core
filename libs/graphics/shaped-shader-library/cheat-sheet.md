@@ -34,7 +34,7 @@ sc_add_shader_package(
 # stages are spelled as sg::shader_stage: compute vertex fragment tessellation_control
 #   tessellation_evaluation geometry raygen closest_hit any_hit miss intersection callable
 # an SGL package spells its stages as SGL does: `cube.sgl:vertex:main_vs`, `cube.sgl:pixel:main_ps`.
-#   `pixel` reaches sg as shader_stage::fragment; the symbol has no stage in it (cube.main_ps), since the entry point carries one.
+#   `pixel` reaches sg as shader_stage::fragment; the symbol has no stage in it (cube::main_ps), since the entry point carries one.
 #   ONE file holds both stages, and ONE package serves dx12, vulkan and webgpu.
 #   payload / constants entries are HLSL's alone, and a WGSL package names no generating entry at all.
 #   `binding` and `vertex_input` mean an SGL declaration in an SGL package, below.
@@ -111,7 +111,10 @@ lib.read_modules();                         // -> module_library { paths, texts,
                                             //    directory by directory as added, each sorted by name; files() views the two vectors
 // an SGL package adds its own module dirs; every SGL compile, compile_source and compile_hit_group included, sees all of them.
 // a module file a compile reached is a dependency like an include: editing it reloads the shader.
-lib.start_hot_reload(cfg = {});             // AFTER every add_package (adding later asserts)
+lib.start_hot_reload(cfg = {});             // AFTER every add_package (adding later asserts); does nothing in a frozen build
+// Frozen builds (SC_FROZEN_SHADERS): no source dir mounted, no reload — docs/frozen-shaders.md.
+// SC_SHADER_RECORD=<file> makes a run write a bundle of every shader it obtains; sc_embed_shader_bundle(TARGET exe) embeds
+// <build>/shader-bundles/<exe>.slibbundle, and a request it holds compiles nothing. slib::register_shader_bundle(bytes) is what that calls.
 lib.poll_hot_reload();                      // no-op unless started unthreaded; safe every frame
 lib.is_hot_reloading();                     // -> bool
 lib.generation();                           // -> u64; coarse "some shader changed" (prefer the asset's). Reads the global below
@@ -125,7 +128,8 @@ lib.backlog()                    // -> cc::async_backlog const&; every shader an
 slib::compile_source_options     // { shader_language language = hlsl; string_view include_dir; string_view label = "<generated>"; }
 // The door for GENERATED / downloaded / UI-authored shader text: compile_shader resolves the package owning a path, and such a
 // source is under none. Includes still resolve against the mount table, so generated code may pull in a package's .hlsli files.
-// NOTHING is cached — a caller generating a source already has a better key for it than a hash of the text would be.
+// slib adds no cache of the compiled shader here — a caller generating a source already has a better key for it.
+// A compiler's own cache still applies (DXC's and Metal's shader_cache), and an SGL source's preprocess is cached by its edge.
 
 slib::reload_config                         // { double interval_ms = 200; bool unthreaded = false;
                                             //   bool force_polling = false; }
@@ -195,7 +199,7 @@ slib::create_metal_compiler()      // -> std::unique_ptr<shader_compiler>; metal
                                    //   reflection reads the SOURCE (see shaped-shader-compiler-msl/cheat-sheet.md)
 
 #include <shaped-shader-library/compiler/sgl_compiler.hh>   // wherever the inner compiler exists
-slib::create_sgl_compiler(std::unique_ptr<shader_compiler> inner)
+slib::create_sgl_compiler(std::unique_ptr<shader_compiler> inner, sgl_compiler_options const& = {})
                                    // -> std::unique_ptr<shader_compiler>; sgl -> inner->target_format()
                                    //   dxil -> HLSL for dx12, spirv -> HLSL for vulkan, wgsl -> WGSL, metal_lib -> MSL
                                    //   preprocess IS SGL's pipeline, so the flattened source is the EMITTED TEXT;
@@ -203,7 +207,15 @@ slib::create_sgl_compiler(std::unique_ptr<shader_compiler> inner)
                                    //   each compile hands it what the text needs, so ANY inner compiler will do:
                                    //   -enable-16bit-types for DXC (float16_t), metal3.2 for a metallib (coherent(device))
                                    //   an SGL error is a preprocess error: `pkg/cube.sgl:12:5: error: unknown-name: foo`
-                                   //   the binding pass runs behind it: the HLSL names each group, the pass writes registers
+                                   //   an SGL warning is in preprocessed_source::warnings; a shader_library logs it under `slib`, once per (label, warning):
+                                   //   `SGL warns of 'pkg/cube.sgl' main: pkg/cube.sgl:7:14: warning: unroll-too-long: ...`
+                                   //   so a test compiling a shader that warns declares it: nx::expect_warning("unroll-too-long", ...)
+                                   //   every target's text carries its final addresses, so the binding pass never runs behind it
+                                   //   preprocess is cached under everything it reads: in memory, and in a persistent store
+slib::sgl_compiler_options         // { cc::optional<bcache::blob_cache*> persistent_cache; }
+                                   //   unset = bcache::default_cache(), looked up per compile, off under SC_SG_COLD=shaders
+                                   //   nullptr = memory only (a test off the user's cache); a store given must outlive the edge
+                                   //   no persistent tier on wasm or without threads, whatever is given
 lib.add_compiler(slib::create_sgl_compiler(slib::create_wgsl_compiler()));   // one edge per format you can build
 lib.add_compiler(slib::create_sgl_compiler(slib::create_metal_compiler()));  // ... and this is how a package reaches metal
 
@@ -341,68 +353,82 @@ auto const g = ctx.transient.create_binding_group(cmd, layout, shaders::frame_bi
                                     //   acquiring hashes the table and takes the pipeline cache's lock
                                     // a sampler the group gathers that `layout` declares static is dropped
 scope.bind<shaders::frame_bindings>(*g);   // binds at G::group_index, on raster / compute / raytracing
+auto const d = cmd.compute.declare_array_texture_access(shaders::frame_bindings::arrays::Textures, elements);
+                                    // G::arrays::<member> -> sg::texture_array_binding / sg::buffer_array_binding, one per
+                                    //   binding array (count > 1), so a misspelled array is a COMPILE error
+                                    //   a group with no binding array has no `arrays`; a member named `arrays` is refused
 ```
 
 ### an SGL package's generated types
 
 ```cpp
-// `binding work` -> shaders::work: one field per member, in the shader's order, plus declared_bindings(), declared_samplers(), gather().
+// every SGL file generates into a namespace of its own, the file's path folded into an identifier as for HLSL:
+//   compute.sgl -> shaders::compute::work, post/taa.sgl -> shaders::post_taa::reproject; the examples below are compute.sgl's,
+//   except where another file is named. Two files of one package may each declare a name, and one may be named like another file.
+//   a file named like a namespace the generated code names (cc, sg, slib, std, tg, sgl_modules), like an exported module,
+//   or `package` is a generator error.
+// `binding work` -> shaders::compute::work: one field per member, in the shader's order, plus declared_bindings(), declared_samplers(), gather().
 //   a buffer member is a TYPED view: `mut buffer[float]` -> sg::readwrite_buffer_view<float>, so a read-only view or
 //   a buffer<int> does not compile. A plain member is a plain field (`scale: float` -> float): the group's own
 //   constant buffer, which create_binding_group allocates with the scope's lifetime: a transient one is uploaded
 //   inline into the `cmd` it is given, a persistent one through ctx.upload.
 //   sg::declared_binding_set, NOT declared_binding_group: no group_index, because SGL numbers a group by its
 //   position in each entry point's list. Bind it at the index the pipeline has it at:
-auto const layout = ctx.cached.acquire_binding_group_layout<shaders::work>();
-auto const group = ctx.transient.create_binding_group(cmd, layout, shaders::work{.scale = 2.0f, .values = buf.as_readwrite_buffer()});
+auto const layout = ctx.cached.acquire_binding_group_layout<shaders::compute::work>();
+auto const group = ctx.transient.create_binding_group(cmd, layout, shaders::compute::work{.scale = 2.0f, .values = buf.as_readwrite_buffer()});
 cmd.compute.bind_group(0, *group);        // group 0 of `main`, group 1 of an entry point listing {factor, work}
 // a texture or image member is a typed view too, sg's typedef for its shape (`texture_view_2d`, `texture_view_cube`, `image_view_2d_array<F>`…):
 //   `albedo: texture_2d[float4]`        -> sg::texture_view_2d albedo
 //   `dst: out image_2d[.rgba8_unorm]`   -> sg::image_view_2d<sg::pixel_format::rgba8_unorm> dst   (any access: read, out, mut)
 //   `user_smp: sampler`                -> sg::sampler user_smp, which gather() hands sg by its host name (`work.user_smp`)
 //   `sampler albedo_smp:` block        -> NO field: an sg::named_sampler in declared_samplers(), which the layout carries
-// `@inline binding constants` -> shaders::constants: the block byte for byte, and to_block() its own bytes:
-pass.set_inline_constants(shaders::constants{.view_projection = vp}.to_block());
-// a struct a binding places in GPU memory -> shaders::particle: tg members at SGL's offsets, padding as `cc::u32 _padN = {}`,
-//   and static_asserts on sizeof and every offsetof. A buffer of it is sg::readwrite_buffer_view<shaders::particle>:
-auto const items = ctx.persistent.create_buffer_from_data(cc::vector<shaders::particle>{...}, sg::buffer_usage::readwrite_buffer);
+//   `images: texture_2d[float4][8]`     -> also shaders::compute::work::arrays::images, an sg::texture_array_binding of host name `work.images`
+//                                          what cmd.*.declare_array_texture_access takes (a buffer/bytes array: sg::buffer_array_binding)
+// `@inline binding constants` -> shaders::compute::constants: the block byte for byte, and to_block() its own bytes:
+pass.set_inline_constants(shaders::compute::constants{.view_projection = vp}.to_block());
+// a struct a binding places in GPU memory -> shaders::compute::particle: tg members at SGL's offsets, padding as `cc::u32 _padN = {}`,
+//   and static_asserts on sizeof and every offsetof. A buffer of it is sg::readwrite_buffer_view<shaders::compute::particle>:
+auto const items = ctx.persistent.create_buffer_from_data(cc::vector<shaders::compute::particle>{...}, sg::buffer_usage::readwrite_buffer);
 //   a constant block packs as an HLSL cbuffer, a buffer element tight like a tg struct (the SGL spec's layout rules).
 // SGL `bool32` -> slib::gpu_bool (gpu_bool.hh): a bool as one 32-bit lane; a plain bool assigns into it.
 // SGL `half` -> tg::f16, `short`/`ushort` -> cc::i16/cc::u16, their vectors tg::vec<N, T>; a 2-byte gap is `cc::u16 _padN`.
-// every name lives in the package namespace, so two files declaring one name is a generator error.
-// a module's types live in NS::<module> instead, reached as ::sgl_modules::<module>::<name> (SGL modules, above).
+// within one file a name is generated once, so a binding named like the file's entry point type (`main_t`) or options
+//   struct (`options`) is a generator error.
+// a module's types live in NS::<module> instead, whichever of its files declares them, reached as
+//   ::sgl_modules::<module>::<name> (SGL modules, above); two files of one module declaring one name is a generator error.
 // sg sees an SGL binding by its path, `work.values`, and a group's constant block by the binding's name:
 //   the identifier the target text spells it with stays on each binding as `reflected_name`, for diagnostics.
 // `@inline binding constants` also gives constants::inline_binding(): the pipeline layout's inline block, no reflection.
-// an entry point of a `*`-declared file is a small wrapper: `->acquire(ctx)` as before, plus the layout its list states:
-auto const layout = shaders::cube.main_vs.acquire_layout(ctx);                  // {constants}, nothing reflected
+// an entry point is a variable in its file's namespace: shaders::cube::main_vs, a slib::shader_asset_handle when listed alone.
+// one of a `*`-declared file is a small wrapper, type shaders::cube::main_vs_t: `->acquire(ctx)` as before, plus the layout its list states:
+auto const layout = shaders::cube::main_vs.acquire_layout(ctx);                 // {constants}, nothing reflected
 //   it also holds the file-scope samplers the entry point reaches, as sg::bound_samplers: s<i> of
 //   slib::bound_samplers_space (10) on dx12, binding i + 1 of sg's reserved group elsewhere, a `pipeline`'s the same.
-auto const pipeline = co_await shaders::double_values.main.acquire_pipeline(ctx); // compute: needs nothing else
-// a file with `@option const`s gets ONE struct, shaders::<file>_options: every option at the source's default,
+auto const pipeline = co_await shaders::double_values::main.acquire_pipeline(ctx); // compute: needs nothing else
+// a file with `@option const`s gets ONE struct, shaders::<file>::options: every option at the source's default,
 //   which every wrapper of the file takes (acquire, acquire_layout, acquire_pipeline, a group's declared_bindings)
 //   a module's options nest under its name: {.common = {.taps = 8}} sets `common.taps`, apart from the file's own `taps`
-auto const quality = shaders::taa_options{.tile = 16, .lowres = true};
-auto const tuned = co_await shaders::taa.reproject.acquire_pipeline(ctx, quality); // a compile per set it reaches
-shaders::taa.reproject.acquire(ctx, quality)       // the shader alone; .values() is the struct as an acquire's span takes it
-shaders::taa_reproject_t::reached_options          // span<string_view const>: the names it keys on; the rest multiply nothing
+auto const quality = shaders::taa::options{.tile = 16, .lowres = true};
+auto const tuned = co_await shaders::taa::reproject.acquire_pipeline(ctx, quality); // a compile per set it reaches
+shaders::taa::reproject.acquire(ctx, quality)      // the shader alone; .values() is the struct as an acquire's span takes it
+shaders::taa::reproject_t::reached_options         // span<string_view const>: the names it keys on; the rest multiply nothing
 //   an option of a type the generator has no C++ for (a program's own enum) is left out of the struct, and a wrapper
 //   reaching one is a generator error
 // an image whose format names an option is an sg::any_texture_view field, and the group's layout is per set of values:
-auto const values = shaders::upscale_options{.output_format = sg::pixel_format::rgba16_float};
-auto const upscale = co_await shaders::upscale.main.acquire_pipeline(ctx, values);   // its layout follows the values
-auto const group_layout = ctx.cached.acquire_binding_group_layout(shaders::outputs::declared_bindings(values),
-                                                                  shaders::outputs::declared_samplers());
+auto const values = shaders::upscale::options{.output_format = sg::pixel_format::rgba16_float};
+auto const upscale = co_await shaders::upscale::main.acquire_pipeline(ctx, values);   // its layout follows the values
+auto const group_layout = ctx.cached.acquire_binding_group_layout(shaders::upscale::outputs::declared_bindings(values),
+                                                                  shaders::upscale::outputs::declared_samplers());
 //   a binding array whose length names an option has no generated type yet: the group is refused outright
 //   a `pipeline` over a group whose image FORMAT names an option is refused: its layout takes no values yet
 // a raster pipeline whose stages list different groups takes their union instead: acquire_pipeline_layout<frame, work>().
 // a wrapper's layout holds only the samplers ITS entry point reaches, so a file used as a library never fills the sampler slots:
 //   a raster pipeline whose stages reach file samplers is built from the file's `pipeline`, whose layout holds every stage's.
-// a `pipeline` declaration -> shaders::<file>.<name> (an unnamed `pipeline:` is `.pipeline`), built from ITS stages,
+// a `pipeline` declaration -> shaders::<file>::<name> of type <name>_t (an unnamed `pipeline:` is `pipeline`), built from ITS stages,
 //   layout, vertex input, targets and settings; the host states only what the declaration left `.host`.
 //   It is an sg::raster_pipeline_source, so ctx.cached acquires it like a description:
-auto const p = co_await ctx.cached.acquire_raster_pipeline(shaders::cube.pipeline, {.color = swapchain_format}); // open: one field per `.host` part
-//   nothing `.host` -> acquire_raster_pipeline(shaders::cube.pipeline); a last argument customize(sg::raster_pipeline_description&) runs last
+auto const p = co_await ctx.cached.acquire_raster_pipeline(shaders::cube::pipeline, {.color = swapchain_format}); // open: one field per `.host` part
+//   nothing `.host` -> acquire_raster_pipeline(shaders::cube::pipeline); a last argument customize(sg::raster_pipeline_description&) runs last
 //   the file's options ride in the open parts: {.color = f, .options = {.tile = 16}}, every stage keying on its own
 //   .description(ctx, parts)          the description itself, to build or inspect
 //   .description_latest(ctx, parts)   the newest stages and settings even where the frozen part moved; acquire it yourself
@@ -410,13 +436,14 @@ auto const p = co_await ctx.cached.acquire_raster_pipeline(shaders::cube.pipelin
 //   the build's settings are generated field writes (slib::impl::fields, from impl/pipeline_fields.hh, which `sgl pipeline-fields` writes)
 //   hot reload: cull, depth, blend… follow the source; a moved frozen part (layout, vertex input, targets, features, formats, samples,
 //   each struct by name AND shape) keeps the stages and settings this context last built with THOSE option values, and logs what moved
-// `@vertex struct v` -> shaders::v and v::layout(): attributes in the shader's order, no semantic or offset by hand.
+// `@vertex struct v` -> shaders::<file>::v and v::layout(): attributes in the shader's order, no semantic or offset by hand.
 //   members marked `@per_instance` / `@stream(name)` split it over buffers: then v::<stream> per buffer, in slot order,
 //   and v::buffers{.per_vertex = verts, .per_instance = insts}.views() for bind_vertex_buffers — typed, so a
 //   buffer of the wrong stream does not compile.
-// `@pixel struct target` -> shaders::target: one sg::color_target per member, by name, plus an optional depth_stencil.
-cmd.raster.render_to(shaders::target{.color = rt.cleared(c), .depth_stencil = depth.cleared(1.0f)}); // -> rendering_info
-//   the pipeline side, for one built by hand: .color_targets = shaders::target::states{.color = {.format = f}}, .target_set = shaders::target::name
+// `@pixel struct target` -> shaders::cube::target: one sg::color_target per member, by name, plus an optional depth_stencil.
+cmd.raster.render_to(shaders::cube::target{.color = rt.cleared(c), .depth_stencil = depth.cleared(1.0f)}); // -> rendering_info
+//   the pipeline side, for one built by hand: .color_targets = shaders::cube::target::states{.color = {.format = f}},
+//   .target_set = shaders::cube::target::name, which is "shaders::cube::target" and what the compiled pixel shader states
 //   sg then refuses to bind that pipeline in a rendering of another target set, even one of the same shape.
 //   .target_set may be left out: a compiled SGL pixel shader states its own (and its target count), which sg takes.
 // an SGL shader's compiled_shader is SGL's own statement of it: bindings, workgroup, targets, features, footprint.
@@ -427,13 +454,13 @@ cmd.raster.render_to(shaders::target{.color = rt.cleared(c), .depth_stencil = de
 
 ```cpp
 // package entry: `rt.sgl:*`, or `rt.sgl:raytracing_pipeline:path` (its binding list's groups must be generated too)
-// `@raytracing pipeline path` of rt.sgl -> type shaders::rt_path_t, instance shaders::rt.path
-using path_t = shaders::rt_path_t;
+// `@raytracing pipeline path` of rt.sgl -> type shaders::rt::path_t, instance shaders::rt::path
+using path_t = shaders::rt::path_t;
 path_t::ray_count                              // constexpr int — ray types of its `rays` set; ALSO build_blas's hit_record_stride
 path_t::hit_groups_t::textured                 // constexpr path_t::hit_group {int index} — typed per pipeline, for add_row
 path_t::first_host_hit_group                   // only when `hit_groups = (…, .host)`: the host's first; the next is {.index + 1}
 path_t::first_host_callable                    // only when a callables list ends in `.host`: the index a shader calls it by
-auto const desc = co_await shaders::rt.path.description(ctx);         // shared_async<raytracing_pipeline_description>, cold
+auto const desc = co_await shaders::rt::path.description(ctx);        // shared_async<raytracing_pipeline_description>, cold
 auto const pipeline = co_await ctx.cached.acquire_raytracing_pipeline(desc);
 auto table_desc = path_t::table_description(pipeline);                // raygen, a miss per ray type, every callable
 auto const row = path_t::add_row(table_desc, path_t::hit_groups_t::textured);  // -> sg::hit_row, ray_count records
@@ -456,7 +483,7 @@ auto sq = co_await slib::compile_callable(&ctx, &library, &open_t::definition(),
 //   -> sg::compiled_shader; it must take the parameter of the pipeline's `.host` callables, by name and shape
 auto host = slib::raytracing_host_parts{.hit_groups = hits, .callables = {sq}};
 //   a pipeline of a file with options: .options = path_t::options{.bounces = 2}.values() (the file's struct), handed to every shader
-auto desc2 = co_await shaders::rt.open_path.description(ctx, host);
+auto desc2 = co_await shaders::rt::open_path.description(ctx, host);
 open_t::table_description(pipeline, host);     // the same host parts: a record for each of the host's callables
 open_t::add_row(table_desc, open_t::first_host_hit_group);
 // a part the declaration left closed must stay empty in `host` (asserts)

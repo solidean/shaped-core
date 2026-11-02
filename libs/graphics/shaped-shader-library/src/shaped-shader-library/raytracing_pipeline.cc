@@ -9,6 +9,7 @@
 #include <shaped-graphics/exceptions.hh>
 #include <shaped-shader-library/impl/frozen.hh>
 #include <shaped-shader-library/impl/kept_builds.hh>
+#include <shaped-shader-library/impl/sgl_emit_cache.hh>
 #include <shaped-shader-library/impl/sgl_library.hh>
 #include <shaped-shader-library/raytracing_pipeline.hh>
 #include <shaped-shader-library/shader_asset.hh>
@@ -114,7 +115,8 @@ cc::string slib::frozen_moved_of(raytracing_pipeline_definition const& d)
     auto const library = impl::sgl_library_of(modules.files());
     auto const described
         = source.has_value()
-            ? sgl::describe({.source = source.value(), .source_name = (*handles[0])->virtual_path(), .library = library})
+            ? slib::impl::cached_describe(
+                  {.source = source.value(), .source_name = (*handles[0])->virtual_path(), .library = library})
             : cc::result<sgl::module_description, cc::string>(cc::error(cc::string("the source is gone")));
     auto const* found = static_cast<sgl::described_raytracing_pipeline const*>(nullptr);
     if (described.has_value())
@@ -282,7 +284,7 @@ cc::shared_async<sg::compiled_shader> slib::compile_callable(sg::context* ctx,
         throw fail(cc::format("{}'s {} takes no callable of the host's", d.file, d.name));
     auto const modules = library->read_modules();
     auto const sgl_library = impl::sgl_library_of(modules.files());
-    auto const described = sgl::describe({.source = source, .source_name = label, .library = sgl_library});
+    auto const described = slib::impl::cached_describe({.source = source, .source_name = label, .library = sgl_library});
     if (described.has_error())
         throw fail(cc::format("{} does not compile, so it holds no callable:\n{}", label, described.error()));
     auto const* found = static_cast<sgl::described_entry_point const*>(nullptr);
@@ -319,7 +321,7 @@ cc::shared_async<cc::vector<sg::hit_shader>> slib::compile_hit_group(sg::context
         throw fail(cc::format("{}'s {} takes no hit group of the host's", d.file, d.name));
     auto const modules = library->read_modules();
     auto const sgl_library = impl::sgl_library_of(modules.files());
-    auto const described = sgl::describe({.source = source, .source_name = label, .library = sgl_library});
+    auto const described = slib::impl::cached_describe({.source = source, .source_name = label, .library = sgl_library});
     if (described.has_error())
         throw fail(cc::format("{} does not compile, so it holds no hit group:\n{}", label, described.error()));
     auto const& m = described.value();

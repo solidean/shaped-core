@@ -14,7 +14,7 @@
 /// A window signals "the highest value I finished", which is exact only where completion order matches reservation
 /// order.
 /// The transfer scheduler guarantees that within one *family* — jobs sharing a destination resource — and
-/// deliberately breaks it across families, since overtaking an unrelated blocked transfer is the whole point.
+/// deliberately breaks it across families, so a job can overtake an unrelated blocked transfer.
 /// A single shared timeline therefore reports a low-numbered job complete the moment any higher-numbered one
 /// finishes, which hands a reader bytes that have not been copied yet.
 /// So a group *is* a family: one per resource, per direction.

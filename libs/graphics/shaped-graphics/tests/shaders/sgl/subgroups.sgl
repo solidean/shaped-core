@@ -39,3 +39,17 @@ binding wave_halves:
 @compute(128) fun reduce_halves(@thread_id id: int3, @subgroup_size size: int){wave_halves}:
     let total = subgroup_add(wave_halves.values[id.x])
     wave_halves.sums[id.x] = float4(total.x as float, total.y as float, size as float, 0.0)
+
+// Each invocation leaves the loop at an iteration of its own, and every one of them is back for the sum after it.
+// A workgroup of 128 holds every subgroup a device has whole.
+binding wave_staggered:
+    sums: mut buffer[uint]
+    sizes: mut buffer[uint]
+
+@compute(128) fun reduce_after_loop(@thread_id id: int3, @subgroup_invocation_id lane: int, @subgroup_size size: int){wave_staggered}:
+    let mut n = 0u
+    for i in 0 ..< 128:
+        if i == lane => break
+        n += 1u
+    wave_staggered.sums[id.x] = subgroup_add(n)
+    wave_staggered.sizes[id.x] = size as uint

@@ -406,7 +406,7 @@ bool cc::rec::impl::dump_builder::add_block(rec::chunk_view const& view)
 
         // Whatever a payload names by POINTER has to make it into a table too, alongside the event's own descriptor.
         // A chunk's preamble names the scopes that were open, and those sites may have no event of their own anywhere
-        // in this dump — the whole point of the preamble is that their `scope_begin` is gone.
+        // in this dump — the preamble exists because their `scope_begin` is gone.
         for (isize f = 0; f < isize(e.desc->field_count); ++f)
         {
             auto const& field = e.desc->fields[f];

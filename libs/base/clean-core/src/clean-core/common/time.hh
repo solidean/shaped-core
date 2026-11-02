@@ -100,8 +100,8 @@ namespace cc
 
 /// current_cycles() plus the core the reading was taken on, or core 0 where the architecture does not report one.
 ///
-/// The core id is the point: without pinning, a thread migrates, and a migration is the usual explanation for a step in
-/// otherwise steady per-iteration timings.
+/// The core id exposes migration: without pinning, a thread migrates, and a migration is the usual explanation for a
+/// step in otherwise steady per-iteration timings.
 /// It costs about ten cycles over current_cycles(), so a caller taking one per event should mean it.
 ///
 /// **Only x86 reports one.** ARM64 has the counter and nothing beside it, so it always says core 0 — a reader must not

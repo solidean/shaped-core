@@ -51,7 +51,7 @@ They are the strict rule whose relaxation is additive, and deleting the legacy s
 
 A design review has no hunks, so a `code` block is the only way the reader sees what is actually proposed.
 Put the struct or the signature in, not a paragraph about it — the same rule the changeset reviews follow, and more
-load-bearing here because nothing else in the entry is code.
+binding here because nothing else in the entry is code.
 
 Two versions side by side is often the clearest form: the shape that is obviously wrong, then the one being proposed,
 so the reader sees what the decision buys.

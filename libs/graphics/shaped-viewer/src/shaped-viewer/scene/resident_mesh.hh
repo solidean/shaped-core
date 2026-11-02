@@ -21,8 +21,9 @@
 ///
 /// `attribute` is the uploaded buffer, and is `invalid` at `per_instance`: one element for the whole mesh is a constant folded
 /// into the parameter block, so it never becomes a resource at all and travels in `value` instead.
-/// `hash` is the content key the parameter block is keyed by, kept here so a mesh whose bytes never reached the CPU still has an
-/// identity to fold in.
+/// `hash` is the content key the parameter block folds in alongside the id.
+/// It is kept here so a mesh whose bytes never reached the CPU still has an identity to fold in.
+/// It is also what tells apart bindings that carry no real id.
 struct sv::mesh_attribute_binding
 {
     cc::string name;

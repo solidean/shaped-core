@@ -8,7 +8,7 @@
 //
 // A wasm frame has no return address in linear memory, so the only account of the call stack is the string a JS
 // engine formats for an Error.
-// Each of its lines names the module and — this is the part that matters — the **byte offset into the module**
+// Each of its lines names the module and the **byte offset into the module**
 // where the call is, which is an address in every sense that matters: it survives stripping the name section, and
 // llvm-symbolizer resolves it against the build's DWARF as it is.
 // It counts from the start of the file, not from the code section; a tool that adds the code section's start to it

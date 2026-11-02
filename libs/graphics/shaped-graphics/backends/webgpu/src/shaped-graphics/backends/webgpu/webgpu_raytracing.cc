@@ -444,6 +444,12 @@ sg::blas_handle webgpu_command_list::raytracing_build_blas_triangles(cc::span<sg
                                          int(geometries.size()));
 }
 
+sg::micromap_handle webgpu_command_list::raytracing_build_micromap(sg::micromap_triangles const& /*triangles*/)
+{
+    CC_UNREACHABLE("the ray-query polyfill has no opacity micromaps, and webgpu reports no "
+                   "sg::feature::opacity_micromap");
+}
+
 sg::blas_handle webgpu_command_list::raytracing_build_blas_aabbs(cc::span<sg::blas_aabbs const> geometries,
                                                                  sg::accel_build_flags flags,
                                                                  int /*hit_record_stride*/)

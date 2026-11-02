@@ -42,6 +42,27 @@ void impl::set_build_record(blas const& blas, blas_geometry geometry, int hit_re
     b._hit_record_stride = hit_record_stride;
 }
 
+void impl::set_micromaps(blas const& blas, cc::vector<micromap_handle> micromaps)
+{
+    // Only ever called on a structure nobody else holds yet, and never on one created const.
+    const_cast<sg::blas&>(blas)._micromaps = cc::move(micromaps);
+}
+
+micromap::~micromap() = default;
+
+micromap::micromap(isize size_in_bytes, isize build_scratch_size_in_bytes, cc::vector<micromap_usage> usage)
+  : _size_in_bytes(size_in_bytes), _build_scratch_size_in_bytes(build_scratch_size_in_bytes), _usage(cc::move(usage))
+{
+}
+
+isize micromap::map_count() const
+{
+    auto count = isize(0);
+    for (auto const& u : _usage)
+        count += isize(u.count);
+    return count;
+}
+
 void impl::set_instance_records(tlas const& tlas, cc::vector<tlas_instance_record> records)
 {
     // Only ever called on a structure nobody else holds yet, and never on one created const.

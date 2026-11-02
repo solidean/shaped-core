@@ -75,7 +75,12 @@ flow checker::check_stmt(function_scope& scope, ast::stmt_id stmt)
     auto const& ast = ast_of(file);
     auto const& s = ast.at(stmt);
     auto const where = span_of(file, stmt);
-    judge_attributes(file, s.attributes, {}, "a statement");
+    // CHK-389: a `for` may be unrolled, and no other statement takes an attribute
+    cc::string_view const loop_attributes[] = {"unroll"};
+    if (s.node.is<ast::for_stmt>())
+        judge_attributes(file, s.attributes, loop_attributes, "a for");
+    else
+        judge_attributes(file, s.attributes, {}, "a statement");
 
     auto result = flow::falls_through;
     s.node.visit([&](ast::let_stmt const& let) { check_let(scope, stmt, let); }, [&](ast::assign_stmt const& assign)
@@ -214,14 +219,17 @@ void checker::check_let(function_scope& scope, ast::stmt_id id, ast::let_stmt co
     declare_local(scope, {.name = text_of(file, n->where), .where = self, .type = type, .is_mut = let.is_mut});
 }
 
-bool checker::judge_place(function_scope& scope, ast::expr_id expr, cc::string_view what)
+bool checker::judge_place(function_scope& scope, ast::expr_id expr, cc::string_view what, cc::string* quiet_why)
 {
     auto const file = scope.file;
     auto const& ast = ast_of(file);
     auto const refuse = [&](source_span where, cc::string_view why)
     {
-        report(diagnostic_kind::not_assignable, file, where,
-               what.empty() ? cc::string(why) : cc::format("{}: {}", what, why));
+        if (quiet_why != nullptr)
+            *quiet_why = cc::string(why);
+        else
+            report(diagnostic_kind::not_assignable, file, where,
+                   what.empty() ? cc::string(why) : cc::format("{}: {}", what, why));
         return false;
     };
 
@@ -272,10 +280,13 @@ bool checker::judge_place(function_scope& scope, ast::expr_id expr, cc::string_v
     {
         if (!what.empty())
         {
-            unsupported(file, span_of(file, expr), cc::format("a swizzle as {}", what));
+            if (quiet_why != nullptr)
+                *quiet_why = cc::format("a swizzle as {} is not supported yet", what);
+            else
+                unsupported(file, span_of(file, expr), cc::format("a swizzle as {}", what));
             return false;
         }
-        return judge_place(scope, operand, what);
+        return judge_place(scope, operand, what, quiet_why);
     }
 
     // An array element is part of the local that holds it, and a buffer element is a place of its own.

@@ -150,7 +150,8 @@ struct parse_outcome
 constexpr isize k_max_message = 160;
 } // namespace
 
-TEST("cnet - the http/1.1 parser reads the same message however it is split")
+TEST("cnet - the http/1.1 parser reads the same message however it is split",
+     nx::config::rerun_on("libs/base/clean-net/src/clean-net/http/impl/http1.*"))
 {
     auto test = nx::fuzz::test::create();
 
@@ -199,6 +200,9 @@ TEST("cnet - the http/1.1 parser reads the same message however it is split")
                  });
 
     test->add_invariant("chunk-independent", [](cc::string const& s) { return parses_the_same_however_split(s); });
+
+    if (!nx::is_thorough())
+        test->cap_seed_count(48);
 
     SECTION("fuzz")
     {

@@ -34,3 +34,10 @@ target_compile_definitions(metal-cpp PUBLIC METALCPP_SYMBOL_VISIBILITY_HIDDEN)
 target_compile_options(metal-cpp PRIVATE -w -fvisibility=hidden)
 
 set_property(TARGET metal-cpp PROPERTY POSITION_INDEPENDENT_CODE ON)
+
+# MetalFX — Apple's upscalers, denoising upscaler and frame interpolator — as a target of its own.
+# A consumer that wants MetalFX links this beside metal-cpp; everything else never loads the framework.
+add_library(metal-cpp-metalfx STATIC ${METAL_CPP_DIR}/src/metalfx_impl.cc)
+target_link_libraries(metal-cpp-metalfx PUBLIC metal-cpp "-framework MetalFX")
+target_compile_options(metal-cpp-metalfx PRIVATE -w -fvisibility=hidden)
+set_property(TARGET metal-cpp-metalfx PROPERTY POSITION_INDEPENDENT_CODE ON)

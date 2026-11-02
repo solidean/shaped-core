@@ -33,6 +33,15 @@ namespace sgl::check
 /// - X3, X4: any other block is a `once`, and a leave of the innermost `once` or loop is `break`.
 /// - X5: a leave or a continue that crosses a `once` or a loop sets a flag and breaks; the flag is tested after each crossed construct.
 ///
+/// Last, constants and lets, on a tree that is core already too:
+/// - F1: a pure builtin's call, a `not`, an `and` or an `or` over literals is its literal, where it is an int, a uint
+///   or a bool.
+/// - F2: an `if` on a literal is the side it takes, and a `while` on false is nothing.
+/// - L1: a let whose value repeats the value of a let in scope reads that let instead, where the value reads something
+///   and is the same wherever the invocation evaluates it.
+/// - L2: a let nothing reads is gone, where its value has no effect and always has one.
+/// - L3: a let of a block's result `var` is that `var`, under the let's name.
+///
 /// Every name it introduces comes from the entry point's mint.
 /// A tree that is core already comes back meaning the same, and a `once` or a `break` of the input is read as a block and a leave.
 /// What comes back is compacted: every node is reachable from the body, and every expression has one parent.

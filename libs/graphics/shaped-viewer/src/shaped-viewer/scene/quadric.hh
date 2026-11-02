@@ -219,7 +219,7 @@ inline constexpr float unbounded_ray_t = 3.402823466e38f;
 ///
 /// Reports the nearest of up to FOUR candidates — two roots of each quadric — keeping each only where it lies inside the other
 /// quadric's interior and within [`t_min`, `t_max`]; the clipper's own two are candidates only where `emits_clip_surface`.
-/// The far-root fallback is load-bearing for ordinary geometry rather than only for interior views: a slab-clipped cylinder is an
+/// The far-root fallback is needed for ordinary geometry rather than only for interior views: a slab-clipped cylinder is an
 /// open tube, so seen near end-on its near root lies outside the slab and the visible surface is the inside of the far wall.
 ///
 /// `ray.dir` need not be normalized; `t` is in units of `ray.dir`, as `TraceRay` reports it.
@@ -257,6 +257,32 @@ struct sv::line_style
     line_ends ends = line_ends::open;
 
     [[nodiscard]] friend constexpr bool operator==(line_style const&, line_style const&) = default;
+};
+
+/// How `add_vertices` draws an object's corners: a sphere of `radius` on each, in the set's own units.
+struct sv::vertex_style
+{
+    float radius = 0.02f;
+
+    [[nodiscard]] friend constexpr bool operator==(vertex_style const&, vertex_style const&) = default;
+};
+
+/// How `add_edges` draws an object's edges: a tube of `radius` along each, in the set's own units.
+///
+/// With `vertices`, a sphere sits on each of the OBJECT's vertices — once per vertex, however many edges meet there — and the tubes are open.
+/// So the joints close as round caps with no sphere drawn twice.
+/// `vertex_radius` unset is `radius`, which makes those caps exactly round; a larger one makes the corners stand out.
+/// Without `vertices`, or for an object that has no vertices(), `ends` closes each tube on its own.
+struct sv::edge_style
+{
+    float radius = 0.01f;
+    cc::optional<float> vertex_radius;
+    bool vertices = true;
+    line_ends ends = line_ends::flat;
+
+    [[nodiscard]] float joint_radius() const { return vertex_radius.value_or(radius); }
+
+    [[nodiscard]] friend constexpr bool operator==(edge_style const&, edge_style const&) = default;
 };
 
 /// The three lengths an arrow is drawn from, in the set's own units — absolute, never relative to the arrow.

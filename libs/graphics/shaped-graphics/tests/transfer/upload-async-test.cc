@@ -65,6 +65,31 @@ ASYNC_INVOCABLE_TEST("sg - async upload then download round-trips", (sg::context
     CHECK(matches);
 }
 
+// A transfer enqueued before a submit happens before that list, even when the list recorded its access first.
+// The wait is folded at submit rather than when the access is recorded, so it sees an upload enqueued in between.
+ASYNC_INVOCABLE_TEST("sg - an async upload enqueued after a list recorded its read, and before its submit, is waited "
+                     "on",
+                     (sg::context_handle const& ctx))
+{
+    REQUIRE(ctx != nullptr);
+    auto const buf = make_transfer_buffer(ctx, 256);
+
+    auto down = ctx->create_command_list();
+    REQUIRE(down != nullptr);
+    auto future = down->download.bytes_from_buffer(buf, 0, 256);
+
+    ctx->upload.bytes_to_buffer(buf, pinned_bytes(256, [](isize i) { return int(i); }));
+    ctx->submit_command_list(cc::move(down));
+
+    auto const bytes = co_await future.bytes();
+    REQUIRE(bytes.size() == 256);
+    auto matches = true;
+    for (auto i = 0; i < 256; ++i)
+        if (bytes[i] != pattern(i))
+            matches = false;
+    CHECK(matches);
+}
+
 ASYNC_INVOCABLE_TEST("sg - async typed upload round-trips", (sg::context_handle const& ctx))
 {
     REQUIRE(ctx != nullptr);

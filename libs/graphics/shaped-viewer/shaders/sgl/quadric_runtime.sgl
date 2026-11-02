@@ -105,7 +105,7 @@ fun roots_of(q: quadric3, o_in: float3, d: float3) -> roots:
         if qb_linear == 0.0 => return roots(0, 0.0, 0.0, o_in, 0.0)
         return roots(1, -evaluate(q, o_in) / qb_linear, 0.0, o_in, 0.0)
 
-    // Re-expressed about the ray's closest approach before the roots are formed.
+    // Re-expressed about the ray's closest approach to the primitive's origin before the roots are formed.
     //
     // A PRECISION REQUIREMENT rather than a simplification, and the CPU reference does the same thing for the same reason.
     // `qc` is Q at whatever origin the solve is expressed about, so for a small primitive seen from far away it is dominated by the distance rather than by the radius.
@@ -114,8 +114,9 @@ fun roots_of(q: quadric3, o_in: float3, d: float3) -> roots:
     //
     // The per-primitive origin fixes distance from the WORLD origin; this fixes distance from the RAY origin.
     // Exact for any quadric, because shifting the origin along the ray is a reparameterization.
-    let qb_in = 2.0 * (dot(d, a_mul(q, o_in)) + dot(q.linear_term, d))
-    let t_closest = -qb_in / (2.0 * qa)
+    // The closest approach to the ORIGIN, never the extremum of Q along the ray, -qb / 2qa: that divides by `qa`, which vanishes
+    // along an indefinite quadric's asymptotic directions, and a hyperboloid then lost every hit seen at 45 degrees.
+    let t_closest = -dot(o_in, d) / dot(d, d)
     let o = o_in + d * t_closest
 
     let qb = 2.0 * (dot(d, a_mul(q, o)) + dot(q.linear_term, d))

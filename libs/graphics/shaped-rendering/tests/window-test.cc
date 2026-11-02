@@ -37,14 +37,16 @@ TEST("sr - window reports its requested size before any poll", main_thread, excl
 
 TEST("sr - window position and size read back without an intervening poll", main_thread, exclusive("sr-window-system"))
 {
-    // The write-through is the point: imgui's viewport backend sets a position and reads it again inside one frame, long before the next poll_events would refresh it.
+    // Written through, because imgui's viewport backend sets a position and reads it again inside one frame, long before the next poll_events would refresh it.
     auto const wsys = sr::window_system::create({.headless = true});
     auto const win = wsys->create_window({.title = "placed", .width = 640, .height = 480});
 
     win->set_position(tg::pos2i(120, -40));
     CHECK(win->position() == tg::pos2i(120, -40)); // a negative coordinate is a legal desktop position
 
+    // set_size takes logical units, and width()/height() read back the request at the window's density — 1 headless.
     win->set_size(tg::vec2i(800, 600));
+    CHECK(win->logical_size() == tg::vec2i(800, 600));
     CHECK(win->width() == 800);
     CHECK(win->height() == 600);
 }
@@ -65,6 +67,7 @@ TEST("sr - the display list is never empty and its work area fits inside its bou
         CHECK(d.size[0] > 0);
         CHECK(d.size[1] > 0);
         CHECK(d.content_scale > 0.0f);
+        CHECK(d.pixel_density > 0.0f);
 
         // The usable area is what a window should open into, so it can never be larger than the monitor.
         CHECK(d.work_position[0] >= d.position[0]);

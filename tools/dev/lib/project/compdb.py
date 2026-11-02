@@ -16,7 +16,8 @@ from pathlib import Path
 def load_entries(build_dir: Path) -> list[dict]:
     """Parse build/<preset>/compile_commands.json into its list of entries.
 
-    Each entry is `{directory, command, file, output}`. Raises FileNotFoundError
+    Each entry is `{directory, command, file, output}`.
+    Raises FileNotFoundError
     when the database is missing (the preset hasn't been configured).
     """
     path = build_dir / "compile_commands.json"

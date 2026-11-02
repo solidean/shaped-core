@@ -6,14 +6,47 @@
 
 namespace sv
 {
-asset::asset(cc::shared_async<impl::imported_asset> node, asset_loader const* loader)
-  : _node(cc::move(node)), _loader(loader)
+asset::asset(cc::shared_async<impl::imported_asset> node,
+             asset_loader const* loader,
+             cc::shared_ptr<cc::atomic<bool>> dropped)
+  : _node(cc::move(node)), _dropped(cc::move(dropped)), _loader(loader)
 {
 }
 
-asset::~asset() = default;
+asset::~asset()
+{
+    _drop();
+}
+
 asset::asset(asset&&) noexcept = default;
-asset& asset::operator=(asset&&) noexcept = default;
+
+asset& asset::operator=(asset&& rhs) noexcept
+{
+    // The load this one held is dropped here, so it owes the same wait the destructor does.
+    if (this != &rhs)
+    {
+        _drop();
+        _node = cc::move(rhs._node);
+        _dropped = cc::move(rhs._dropped);
+        _loader = rhs._loader;
+        _data = cc::move(rhs._data);
+        _error = cc::move(rhs._error);
+        _ready = rhs._ready;
+    }
+    return *this;
+}
+
+void asset::_drop()
+{
+    if (_node == nullptr)
+        return;
+
+    // Without the wait the worker would go on reading a loader the caller is free to destroy next.
+    if (_dropped != nullptr)
+        _dropped->store(true);
+    (void)cc::try_async_blocking_get(_node);
+    _node = nullptr;
+}
 
 bool asset::is_valid() const
 {

@@ -5,7 +5,8 @@
 #include <nexus/test.hh>
 #include <shaped-graphics/all.hh>
 #include <shaped-viewer/all.hh>
-#include <sv_shaders.hh> // sv::shaders::layout_sources, for the group-creation test at the bottom
+#include <sv_shaders.hh> // sv::shaders::layout::layout_sources, for the group-creation test at the bottom
+#include <typed-geometry/scalar/scalar.hh> // tg::pow, tg::exp, tg::abs
 
 // Headless: the layout routine records a whole target's draw list — border bands, placed views and a wipe — in one pass.
 //
@@ -42,7 +43,7 @@ ASYNC_INVOCABLE_TEST("sv - the layout routine builds its shaders and layouts", (
     // would pass while proving nothing.
     auto const& env = sv_test::shared_env();
     if (!env.has_compiler)
-        SKIP("no SGL compiler that reaches DXIL to build the shaders");
+        SKIP("no SGL compiler for this backend to build the shaders");
 
     // Prewarm names the format, because the routine is one instance per target format — and this is the case that
     // makes that worth it: an application that knows its swapchain format can have the pipelines built before the
@@ -63,7 +64,7 @@ ASYNC_INVOCABLE_TEST("sv - the layout routine records borders, views and a wipe 
 
     auto const& env = sv_test::shared_env();
     if (!env.has_compiler)
-        SKIP("no SGL compiler that reaches DXIL to build the shaders");
+        SKIP("no SGL compiler for this backend to build the shaders");
 
     auto const output_size = tg::vec2i(128, 64);
     auto const output = ctx.persistent.create_texture_2d({.format = sg::pixel_format::bgra8_unorm,
@@ -118,7 +119,7 @@ ASYNC_INVOCABLE_TEST("sv - the layout routine records borders, views and a wipe 
 
     // WORKAROUND: one instance per target format, and a tick drives only what is already registered — so the format is
     // named here exactly as the test above names it, which couples this test to the routine's parametrization.
-    // Goes away once a routine's readiness is an async; see libs/graphics/shaped-graphics/docs/TODO.md, "Readiness as an async".
+    // Goes away once a routine's readiness is an async; issue: feat-sg-routine-readiness-async.
     sv::layout_routine::prewarm(ctx, sg::pixel_format::bgra8_unorm);
     (void)co_await ctx.routines.idle_completion();
 
@@ -142,7 +143,7 @@ ASYNC_INVOCABLE_TEST("sv - a degenerate rect draws nothing rather than a bad vie
 
     auto const& env = sv_test::shared_env();
     if (!env.has_compiler)
-        SKIP("no SGL compiler that reaches DXIL to build the shaders");
+        SKIP("no SGL compiler for this backend to build the shaders");
 
     auto const output = ctx.persistent.create_texture_2d(
         {.format = sg::pixel_format::bgra8_unorm, .width = 32, .height = 32, .usage = sg::texture_usage::render_target});
@@ -161,7 +162,7 @@ ASYNC_INVOCABLE_TEST("sv - a degenerate rect draws nothing rather than a bad vie
 
     // WORKAROUND: one instance per target format, and a tick drives only what is already registered — so the format is
     // named here exactly as the test above names it, which couples this test to the routine's parametrization.
-    // Goes away once a routine's readiness is an async; see libs/graphics/shaped-graphics/docs/TODO.md, "Readiness as an async".
+    // Goes away once a routine's readiness is an async; issue: feat-sg-routine-readiness-async.
     sv::layout_routine::prewarm(ctx, sg::pixel_format::bgra8_unorm);
     (void)co_await ctx.routines.idle_completion();
 
@@ -190,7 +191,7 @@ ASYNC_INVOCABLE_TEST("sv - a group is created against a layout whose static samp
     // which is what makes the samplers overload unusable with the create rather than merely redundant.
     auto& ctx = *ctx_h;
 
-    using group = sv::shaders::layout_sources;
+    using group = sv::shaders::layout::layout_sources;
 
     sg::named_sampler const runtime[]
         = {{.name = "layout_sources.source_sampler", .sampler = {.min_filter = sg::sampler_filter::nearest}}};
@@ -226,11 +227,11 @@ ASYNC_INVOCABLE_TEST("sv - a group is created against a layout whose static samp
     if (!env.has_compiler)
     {
         ctx.drop_command_list(cc::move(cmd));
-        SKIP("no SGL compiler that reaches DXIL to build layout.sgl");
+        SKIP("no SGL compiler for this backend to build layout.sgl");
     }
 
-    auto const vs = sv::shaders::layout.main_vs->acquire(ctx);
-    auto const ps = sv::shaders::layout.border_ps->acquire(ctx);
+    auto const vs = sv::shaders::layout::main_vs->acquire(ctx);
+    auto const ps = sv::shaders::layout::border_ps->acquire(ctx);
     co_await cc::async_settled(vs);
     co_await cc::async_settled(ps);
 
@@ -240,7 +241,7 @@ ASYNC_INVOCABLE_TEST("sv - a group is created against a layout whose static samp
     REQUIRE(compiled_ps != nullptr);
 
     auto const pipeline_layout = ctx.cached.acquire_pipeline_layout(
-        {.groups = {layout}, .inline_constants = sv::shaders::layout_constants::inline_binding()});
+        {.groups = {layout}, .inline_constants = sv::shaders::layout::layout_constants::inline_binding()});
     auto pipeline = ctx.cached.acquire_raster_pipeline(
         sg::raster_pipeline_description{.layout = pipeline_layout,
                                         .vertex_shader = *compiled_vs,
@@ -262,4 +263,88 @@ ASYNC_INVOCABLE_TEST("sv - a group is created against a layout whose static samp
     ctx.submit_command_list(cc::move(cmd));
     ctx.advance_epoch();
     co_await ctx.idle_completion();
+}
+
+ASYNC_INVOCABLE_TEST("sv - a view is shown through its display transform", (sg::context_handle const& ctx_h))
+{
+    auto& ctx = *ctx_h;
+
+    auto const& env = sv_test::shared_env();
+    if (!env.has_compiler)
+        SKIP("no SGL compiler for this backend to build the shaders");
+
+    // One gray source, shown four times side by side under the transforms the 8-bit output is held to.
+    constexpr float gray = 0.18f;
+    auto const source
+        = ctx.persistent.create_texture_2d({.format = sg::pixel_format::rgba32_float,
+                                            .width = 4,
+                                            .height = 4,
+                                            .usage = sg::texture_usage::texture | sg::texture_usage::render_target});
+    auto const output
+        = ctx.persistent.create_texture_2d({.format = sg::pixel_format::bgra8_unorm,
+                                            .width = 64,
+                                            .height = 16,
+                                            .usage = sg::texture_usage::render_target | sg::texture_usage::copy_src});
+    auto const sources = cc::vector<sg::texture_2d>{source};
+
+    // The expected value is module `display`'s arithmetic on the CPU: the identity, the sRGB encode, and the neutral roll-off before it.
+    auto const encode = [](float v) { return v <= 0.0031308f ? v * 12.92f : 1.055f * tg::pow(v, 1.0f / 2.4f) - 0.055f; };
+    auto const neutral = [](float v) { return v <= 0.6f ? v : 0.6f + 0.4f * (1.0f - tg::exp(-(v - 0.6f) / 0.4f)); };
+    struct shown_case
+    {
+        sr::display_transform display;
+        float expected;
+    };
+    auto const cases = cc::vector<shown_case>{
+        {.display = {}, .expected = gray},
+        // The gray card: 118 of 255, under either curve.
+        {.display = {.curve = sr::display_curve::srgb}, .expected = encode(gray)},
+        {.display = {.curve = sr::display_curve::neutral}, .expected = encode(gray)},
+        // Three stops up, past the knee: `srgb` clips to white and `neutral` rolls off below it.
+        {.display = {.exposure = 3.0f, .curve = sr::display_curve::neutral}, .expected = encode(neutral(gray * 8.0f))},
+    };
+
+    auto draws = cc::vector<sv::layout_draw>();
+    for (auto i = 0; i < int(cases.size()); ++i)
+        draws.push_back({.kind = sv::draw_kind::view,
+                         .dst_rect = rect_of(16 * i, 0, 16 * (i + 1), 16),
+                         .primary = {.kind = sv::draw_source_kind::target, .index = 0},
+                         .sampler = sv::sampler_mode::nearest,
+                         .blend = sv::layer_blend::replace,
+                         .display = cases[i].display});
+
+    // WORKAROUND: one instance per target format, and a tick drives only what is already registered.
+    // Goes away once a routine's readiness is an async; issue: feat-sg-routine-readiness-async.
+    sv::layout_routine::prewarm(ctx, sg::pixel_format::bgra8_unorm);
+    (void)co_await ctx.routines.idle_completion();
+
+    auto cmd = ctx.create_command_list();
+    {
+        auto fill = cmd->raster.render_to(
+            {.color_targets = {source.as_render_target_view().cleared(tg::vec4f(gray, gray, gray, 1))}});
+    }
+    {
+        auto scope
+            = cmd->raster.render_to({.color_targets = {output.as_render_target_view().cleared(tg::vec4f(0, 0, 0, 1))}});
+        CHECK(sv::layout_routine::execute(scope, sv::window_id(0), draws, {.targets = sources, .traces = {}})
+              == sg::routine_outcome::executed);
+    }
+    auto readback = sg::data_future<u32>(cmd->download.bytes_from_texture(output.raw()));
+    ctx.submit_command_list(cc::move(cmd));
+    ctx.advance_epoch();
+    co_await ctx.idle_completion();
+
+    auto const pixels = readback.try_get_data();
+    REQUIRE(pixels.has_value());
+    for (auto i = 0; i < int(cases.size()); ++i)
+    {
+        // bgra8: blue in the low byte, then green, red and alpha.
+        auto const p = pixels.value()[8 * 64 + 16 * i + 8];
+        auto const red = int((p >> 16) & 0xff);
+        auto const green = int((p >> 8) & 0xff);
+        auto const expected = cases[i].expected * 255.0f;
+        CHECK(tg::abs(float(red) - expected) <= 1.0f).dump("case", i).dump("red", red).dump("expected", expected);
+        CHECK(red == green);
+    }
+    CHECK(int((pixels.value()[8 * 64 + 16 * 1 + 8] >> 16) & 0xff) == 118);
 }

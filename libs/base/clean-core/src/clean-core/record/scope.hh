@@ -118,8 +118,8 @@ namespace cc::rec
                        ::cc::rec::enable_bit_of(::cc::rec::category::profiling), (name_), nullptr,      \
                        ::cc::rec::impl::scope_fields, 1, 4)
 
-/// Picks the scope's name: the argument if there is one, the enclosing function otherwise.
-#define CC_REC_IMPL_SCOPE_NAME(...) CC_REC_IMPL_FIRST_OF(__VA_ARGS__ __VA_OPT__(, ) CC_PRETTY_FUNC)
+/// Picks the scope's name: the argument if there is one, the enclosing function otherwise, which only FULL keeps.
+#define CC_REC_IMPL_SCOPE_NAME(...) CC_REC_IMPL_FIRST_OF(__VA_ARGS__ __VA_OPT__(, ) CC_SITE_TEXT(CC_PRETTY_FUNC))
 #define CC_REC_IMPL_FIRST_OF(first_, ...) first_
 
 /// Times the enclosing block, named either explicitly or after the function it sits in.

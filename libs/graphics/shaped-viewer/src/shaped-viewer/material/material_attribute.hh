@@ -43,7 +43,7 @@ enum class sv::attribute_interpolation : sv::u8
 
     /// a unit quaternion, blended as a rotation: each corner aligned into the first's hemisphere, then summed and normalized
     ///
-    /// The alignment is the whole point.
+    /// Without the alignment the sum can cancel.
     /// `q` and `-q` are the same rotation, so two corners can describe neighbouring frames and still be antipodal as
     /// 4-vectors; summing those cancels toward zero and the normalized result belongs to neither.
     /// Requires a 4-component f32 format, which `material_type::create` checks.

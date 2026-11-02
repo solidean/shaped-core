@@ -91,7 +91,7 @@ template <class T>
     }
     else if constexpr (requires { cc::string_view(v); })
     {
-        // TODO: better capacity
+        // The capacity could be reserved up front.
         auto s = cc::string("\"");
         s += cc::string_view(v);
         s += '\"';
@@ -162,7 +162,7 @@ template <class T>
                        })
     {
         auto s = string("[");
-        // FIXME: could cause recursive instantiation?
+        // Unverified: a range whose element is itself may instantiate this recursively.
         for (auto&& e : v)
         {
             if (int(s.size()) >= cfg.max_length)

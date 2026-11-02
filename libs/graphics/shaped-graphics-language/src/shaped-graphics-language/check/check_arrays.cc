@@ -96,6 +96,27 @@ cc::optional<i32> checker::constant_index(i32 file, ast::expr_id expr) const
     return c.kind == constant_kind::integer && !c.is_unsigned ? cc::optional<i32>(c.integer) : cc::optional<i32>();
 }
 
+cc::optional<i64> checker::constant_unsigned_index(i32 file, ast::expr_id expr) const
+{
+    auto const& e = ast_of(file).at(expr);
+    if (e.node.is<ast::literal>())
+    {
+        auto const s = split_suffix(text_of(file, span_of(file, expr)));
+        if (!s.has_value() || s.value().letter != 'u' || classify_number(s.value().body) != number_class::plain_integer)
+            return {};
+        return parse_literal_integer(s.value().body);
+    }
+    if (!e.node.is<ast::name>())
+        return {};
+    auto const& where = out.files[file].target_at(expr);
+    if (where.kind != target_kind::symbol || out.at(where.symbol).kind != symbol_kind::constant
+        || out.at(where.symbol).state != symbol_state::checked)
+        return {};
+    auto const& c = out.constants[out.at(where.symbol).info];
+    return c.kind == constant_kind::integer && c.is_unsigned ? cc::optional<i64>(i64(u32(c.integer)))
+                                                             : cc::optional<i64>();
+}
+
 type_id checker::resolve_array(i32 file, ast::expr_id expr, ast::index const& node, function_scope const* scope)
 {
     auto const where = span_of(file, expr);

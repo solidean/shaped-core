@@ -3,6 +3,7 @@
 #include <clean-core/thread/async.hh>
 #include <clean-core/thread/atomic.hh>
 #include <clean-core/thread/mutex.hh>
+#include <clean-core/thread/native_thread.hh>
 #include <clean-core/thread/spin.hh>
 #include <clean-core/thread/thread.hh>
 #include <nexus/async-test.hh>
@@ -11,7 +12,6 @@
 #include <nexus/tests/registry.hh>
 #include <nexus/tests/schedule.hh>
 
-#include <thread>
 
 using namespace cc::primitive_defines;
 
@@ -467,7 +467,7 @@ TEST("parallel - a thread's running-test slot is freed when the thread ends", no
     auto const schedule = nx::test_schedule::create({}, reg);
     for (auto i = 0; i < 100; ++i)
     {
-        std::thread t([&] { (void)nx::execute_tests(schedule, with_jobs(1)); });
+        auto t = cc::native_thread::start([&] { (void)nx::execute_tests(schedule, with_jobs(1)); });
         t.join();
     }
 

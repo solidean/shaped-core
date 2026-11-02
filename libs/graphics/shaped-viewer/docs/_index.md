@@ -13,8 +13,13 @@ shaped-viewer is built on [shaped-rendering](../../shaped-rendering/readme.md), 
 - [lights](lights.md) — one light record tagged by the integrator's path: placement, units, shaping, identity, and the landing order for the GPU side.
 - [canvas](canvas.md) — drawings: 2D vector content built once like a mesh, instanced on a canvas in 2D and on a scene in 3D.
 - [quadrics](quadrics.md) — analytic quadric primitives as a second scene-item kind: the record, the procedural BLAS batching, and the material fork.
+- [raster](raster.md) — the raster path: the same materials drawn rather than traced, lit directly, and the G-buffer seam the hybrid mode grows from.
+- [wavefront](wavefront.md) — the wavefront path tracer: its stages, the decisions behind them, and what was rejected.
+  Built, and the default; the megakernel stays as the other integrator.
+- [plans/rendering-roadmap](plans/rendering-roadmap.md) — what is open after the wavefront tracer, across sv, sr, sg and SGL, and in what order.
+  A plan being built: G0 to G2, D0 and D1 have landed.
 - [coding-guidelines](coding-guidelines.md) — sv-specific conventions (thin for now) on top of the repo-wide ones.
-- [TODO](TODO.md) — running list of known follow-ups.
+- [issues](issues/) — what is broken, planned or open, one file each; `uv run dev.py issues list --in libs/graphics/shaped-viewer` lists them.
 
 ## Conventions
 

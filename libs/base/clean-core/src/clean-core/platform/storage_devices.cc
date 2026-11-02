@@ -228,7 +228,7 @@ cc::result<cc::vector<cc::mount_point>, cc::query_error> read_mounts()
         return cc::error(storage_failed("getfsstat"));
 
     // A mount can appear between the two calls; the second reports how many it actually wrote, which is what we read.
-    // `struct` is load-bearing: statfs names both a type and a function, and the bare tag resolves to the function.
+    // `struct` is required: statfs names both a type and a function, and the bare tag resolves to the function.
     auto buffer = cc::vector<struct statfs>::create_defaulted(capacity);
     auto const count = ::getfsstat(buffer.data(), int(buffer.size() * isize(sizeof(struct statfs))), MNT_NOWAIT);
     if (count <= 0)
@@ -319,7 +319,7 @@ cc::result<cc::vector<cc::mount_point>, cc::query_error> read_mounts()
 
         auto mount = cc::string(path);
 
-        // `struct` is load-bearing: statvfs names both a type and a function, and the bare tag resolves to the
+        // `struct` is required: statvfs names both a type and a function, and the bare tag resolves to the
         // function, which is what makes the almost-always-auto spelling fail to compile here.
         struct statvfs stats = {};
         if (::statvfs(mount.c_str_materialize(), &stats) != 0)

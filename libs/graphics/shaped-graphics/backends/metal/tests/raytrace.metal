@@ -13,7 +13,7 @@
 // because the argument-buffer layout this backend encodes was chosen to match what SPIRV-Cross emits, so a fixture
 // written by hand can agree with the backend and still disagree with every real shader.
 // Neither DXC nor SPIRV-Cross is available on an arm64 macOS host today, which is why this exists in the meantime.
-// Regenerate it from HLSL once they are; libs/graphics/shaped-graphics/docs/TODO.md carries the gap.
+// Regenerate it from HLSL once they are: TEMPORARY(debt-sg-metal-hand-written-fixtures).
 //
 // The binding shape is written by hand in the test beside it, so the test states what it means rather than inheriting
 // whatever a reflector produced.

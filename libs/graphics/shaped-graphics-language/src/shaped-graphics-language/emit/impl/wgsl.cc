@@ -211,6 +211,16 @@ public:
                     has_subgroups = has_subgroups || record->is_subgroup_operation;
         if (has_subgroups)
             out += "enable subgroups;\n\n";
+        // EMIT-103: SGL has judged them already, by rules that reconverge after a loop where Tint's do not (CHK-284)
+        auto has_derivatives = false;
+        for (auto const& x : p.e.exprs)
+            if (auto const* const call = x.node.try_as<flat_call>())
+                if (auto const* const record = p.m.builtin_function(call->intrinsic))
+                    has_derivatives = has_derivatives || record->uses_derivatives;
+        if (has_derivatives)
+            out += "diagnostic(off, derivative_uniformity);\n\n";
+        if (has_subgroups)
+            out += "diagnostic(off, subgroup_uniformity);\n\n";
         write_enum_constants(out, p, *this);
         write_buffers(out, p, *this);
         // EMIT-135: the emulated trace reads sg's acceleration pool and the roots of the dispatch's structures, which sg
@@ -266,6 +276,8 @@ public:
         // WebGPU hands an index over unsigned and SGL counts in int, so each conversion stands at the top.
         for (auto i = isize(0); i < p.e.stage_inputs.size(); ++i)
         {
+            if (!p.stage_input_read[i])
+                continue;
             auto const local = p.e.stage_inputs[i].local;
             out.appendf("    let {}: {} = {};\n", p.locals[index_of(local)], type_text(p, *this, p.e.at(local).type),
                         stage_input_value(p, i));

@@ -263,6 +263,11 @@ cc::optional<f64> impl::parse_plain_float(cc::string_view text)
     return cc::from_string<f64>(plain);
 }
 
+bool impl::is_hex_literal(cc::string_view text)
+{
+    return text.starts_with("0x");
+}
+
 cc::optional<i64> impl::parse_literal_integer(cc::string_view text)
 {
     auto at = isize(0);
@@ -372,12 +377,12 @@ void checker::unsupported(i32 file, source_span where, cc::string_view construct
     report(diagnostic_kind::unsupported_yet, file, where, construct);
 }
 
-void checker::report_once(diagnostic_kind kind, i32 file, source_span where, cc::string_view detail)
+located_diagnostic& checker::report_once(diagnostic_kind kind, i32 file, source_span where, cc::string_view detail)
 {
-    for (auto const& d : out.diagnostics)
+    for (auto& d : out.diagnostics)
         if (d.what.kind == kind && d.file == file && d.what.where == where)
-            return;
-    report(kind, file, where, cc::string(detail));
+            return d;
+    return report(kind, file, where, cc::string(detail));
 }
 
 isize checker::error_count() const
@@ -441,6 +446,9 @@ void checker::judge_attributes(i32 file,
                 report(diagnostic_kind::invalid_attribute_arguments, file, a.name,
                        "@shadowable takes `false` or `true`, as in @shadowable(false)");
         }
+        // CHK-389: a count asks for partial unrolling
+        else if (sgl::is_valid(a.list) && name == "unroll")
+            unsupported(file, span_of(file, a.list), "@unroll with arguments, which would unroll a loop in part");
         else if (sgl::is_valid(a.list) && name != "operator" && name != "compute" && name != "preferred_subgroup_size"
                  && name != "stream" && name != "stages" && name != "shadowable" && name != "expect"
                  && name != "interpolate" && name != "format" && name != "depth" && name != "sampler"
@@ -543,6 +551,10 @@ void checker::run(resume_point from)
     judge_footprint_pins();
     judge_trace_graphs();
     judge_callables();
+    judge_indices();
+    merge_entry_diagnostics();
+    judge_expecting_in_pipelines();
+    drop_expecting_entry_points();
 }
 
 void checker::declare_file(i32 file)

@@ -18,7 +18,7 @@ inline constexpr cc::string_view k_expected_validation_messages[] = {
     // A perf advisory: D3D12 wants an optimized clear value at texture creation, matching what the target is later cleared to.
     // sg::texture_description has no such field, and inventing one that disagrees with the actual clear is worse than none —
     // a mismatch is its own, louder message.
-    // See libs/graphics/shaped-graphics/docs/TODO.md for the optional field that would let a caller opt in.
+    // issue: perf-sg-optional-clear-value is the optional field that would let a caller opt in.
     "did not pass any clear value to resource creation",
 
     // A command list carrying only barriers is a legitimate sg shape — a list opened purely to transition resources.
@@ -29,6 +29,9 @@ inline constexpr cc::string_view k_expected_validation_messages[] = {
     // The debug layer then finds two resources over one address range and cannot tell which one a view or a build means.
     // The queue serializes their GPU use, so this is ambiguity rather than aliasing; see dx12_context::advance_epoch.
     // It shows only on a frame loop that does not wait for the GPU between epochs, which is what sv::viewer runs.
+    // The substring is wider than that case: two persistent placements overlapping through a caller's allocator bug are muted too.
+    // It stays unnarrowed on purpose — real applications raise it many times per frame, and its text differs between drivers.
+    // No sg test provokes it yet; only sv's frame loop does.
     "resources contain the GPU Virtual Address range",
 };
 

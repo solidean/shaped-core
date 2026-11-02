@@ -161,6 +161,9 @@ void add_log_declaration(log_declaration declaration);
 /// Flushes the recorder once first.
 /// The outermost run also claims the unattributed records, and drops whatever no pass claimed.
 void judge_logs(nx::test_schedule_execution& result, bool outermost);
+
+/// Where a check, test or alias is, for a report: `file:line` at SC_SOURCE_SITES=FULL, cc::describe_site below it.
+[[nodiscard]] cc::string site_text(cc::source_location const& location);
 } // namespace nx::impl
 
 struct nx::test_schedule_execution
@@ -302,7 +305,8 @@ nx::test_declaration const* current_slot_declaration();
 // itself). nx::invoke_tests uses this to break invocation cycles rather than recurse forever.
 bool is_declaration_active(nx::test_declaration const* decl);
 
-// Records an "invocation cycle" error on the currently running test (so it fails), naming `decl`. Called when
+// Records an "invocation cycle" error on the currently running test (so it fails), naming `decl`.
+// Called when
 // a driver/invocable would (transitively) invoke a test already running above it.
 void report_invocation_cycle(nx::test_declaration const* decl);
 } // namespace nx::impl

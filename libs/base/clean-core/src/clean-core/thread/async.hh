@@ -1101,7 +1101,8 @@ namespace impl
 /// The scheduler returning early means it cannot progress — an unpushed manual node — so this waits and asks again.
 void async_drive_until_ready(async_node_base& root);
 
-/// async_drive_until_ready, giving up after `timeout_ms`. True if `root` is ready.
+/// async_drive_until_ready, giving up after `timeout_ms`.
+/// True if `root` is ready.
 [[nodiscard]] bool async_drive_until_ready_for(async_node_base& root, i64 timeout_ms);
 } // namespace impl
 

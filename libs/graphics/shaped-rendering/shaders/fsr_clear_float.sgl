@@ -1,0 +1,19 @@
+// One mip of a float or normalized image set to a constant: FSR 3.1's clear job, for sr::fsr_upscale_routine.
+// fsr_clear_uint.sgl is the twin for the unsigned-integer images.
+// The routine compiles one variant per format FSR clears, and an image of fewer channels keeps the value's leading ones.
+
+require extended_image_formats
+
+// the cleared image's format, which the routine sets to each one FSR clears
+@option const target_format: pixel_format = .rgba16_float
+
+@inline binding fsr_clear_float_constants:
+    value: float4
+
+binding fsr_clear_float_target:
+    target: out image_2d[target_format]
+
+@compute(8, 8) fun main_cs(@thread_id id: int3){fsr_clear_float_target, fsr_clear_float_constants}:
+    if any(id.xy >= fsr_clear_float_target.target.size()) => return
+
+    fsr_clear_float_target.target[id.xy] = fsr_clear_float_constants.value as texel[target_format]

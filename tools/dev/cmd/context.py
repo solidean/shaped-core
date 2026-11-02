@@ -21,7 +21,7 @@ from tools.dev.lib.project.targets import carries_examples, carries_tests, is_st
 
 @dataclass(frozen=True)
 class Policy:
-    """Project policy: which presets each command uses, keyed by platform.system()."""
+    """Project policy: which presets each command uses, keyed by platform.system(), and where the project keeps its files."""
 
     default_build: dict[str, str]
     default_debug: dict[str, str]
@@ -34,6 +34,10 @@ class Policy:
     pgo_use: dict[str, str]
     pgo_baseline: dict[str, str]
     web_preset: str
+    # Where the project's first-party tree is — what format, lint, crossrefs and coverage walk (lib/core/layout.py).
+    layout: dev.Layout
+    # The integration branch; `check` scopes itself to everything since its merge base.
+    default_branch: str
 
 
 @dataclass

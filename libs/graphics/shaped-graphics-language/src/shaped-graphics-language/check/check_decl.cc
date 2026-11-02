@@ -625,7 +625,7 @@ ast::range_of<member_info> checker::compile_members(i32 file,
         auto const name = text_of(file, f.name);
 
         cc::string_view const known_on_field[]
-            = {"position", "per_instance", "stream", "interpolate", "edge_factors", "inside_factors"};
+            = {"position", "per_instance", "stream", "interpolate", "per_draw", "edge_factors", "inside_factors"};
         // CHK-276: a `@pixel struct` member may be the depth or the sample mask rather than a color target
         cc::string_view const known_on_pixel_field[]
             = {"position", "per_instance", "stream", "interpolate", "depth", "sample_mask"};
@@ -680,6 +680,32 @@ ast::range_of<member_info> checker::compile_members(i32 file,
                               out.name_of(type)));
             type = checked_module::error_type;
         }
+        // CHK-397: a value of function bodies alone has no layout in any memory yet, workgroup memory included
+        // It is judged before an array is, so the detail names it rather than the array holding it.
+        if (!is_struct && type != checked_module::error_type)
+            if (auto const found = local_only_path(type); !found.path.empty())
+            {
+                // the path is named from what a block or a buffer holds, as CHK-291 names an array's
+                auto root = type;
+                auto is_buffer = false;
+                while (out.at(root).kind == type_kind::array || out.at(root).kind == type_kind::buffer)
+                {
+                    is_buffer = is_buffer || out.at(root).kind == type_kind::buffer;
+                    root = out.at(root).element;
+                }
+                unsupported(
+                    file, span_of(file, f.type),
+                    cc::format("a {} in {}{}, which only a function body holds, since {}", out.name_of(found.type),
+                               is_workgroup ? "workgroup memory"
+                               : is_buffer  ? "a buffer's element"
+                                            : "a constant block",
+                               // a member that is one itself is named, as a deeper one is by its path
+                               found.path.starts_with(":") ? cc::format(", as its member {}", name)
+                                                           : cc::format(", {}{}", out.name_of(root), found.path),
+                               found.reason));
+                type = checked_module::error_type;
+            }
+
         // CHK-291: an array's layout in a block is the struct-buffer work's to settle
         if (!is_struct && !is_workgroup && type != checked_module::error_type && out.at(type).kind == type_kind::array)
         {
@@ -822,13 +848,20 @@ ast::range_of<member_info> checker::compile_members(i32 file,
             }
         }
 
+        // CHK-393: a value that is the same across a draw crosses flat, which interpolating could only round
+        auto const* const interpolate = find_attribute(file, f.attributes, "interpolate");
+        auto const is_per_draw = is_struct && find_attribute(file, f.attributes, "per_draw") != nullptr;
+        auto interpolated = interpolation_of(file, interpolate);
+        if (is_per_draw && interpolate == nullptr)
+            interpolated = {.kind = interpolation::kind_t::flat};
         collected.push_back({
             .name = name,
             .type = type,
             .field = line->field,
             .is_position = find_attribute(file, f.attributes, "position") != nullptr,
-            .interpolate = interpolation_of(file, find_attribute(file, f.attributes, "interpolate")),
-            .has_interpolate = find_attribute(file, f.attributes, "interpolate") != nullptr,
+            .interpolate = interpolated,
+            .has_interpolate = interpolate != nullptr,
+            .is_per_draw = is_per_draw,
             .output = is_target_struct ? pixel_output_of(file, f.attributes, type, name) : pixel_output::color,
             .factor = find_attribute(file, f.attributes, "edge_factors") != nullptr   ? tessellation_factor::edge
                     : find_attribute(file, f.attributes, "inside_factors") != nullptr ? tessellation_factor::inside
@@ -959,6 +992,12 @@ void checker::compile_struct(symbol_id id)
                 report(diagnostic_kind::invalid_pipeline, file, span_of(file, ast_of(file).at(m.field).type),
                        cc::format("{} is a ray type, whose payload is a struct, and this is {}", m.name,
                                   out.name_of(m.type)));
+            // CHK-397: a payload is ray data each target lays out, which a value of function bodies alone is not
+            else if (auto const found = local_only_path(m.type);
+                     m.type != checked_module::error_type && !found.path.empty())
+                unsupported(file, span_of(file, ast_of(file).at(m.field).type),
+                            cc::format("a {} in a ray payload, {}{}, which only a function body holds, since {}",
+                                       out.name_of(found.type), out.name_of(m.type), found.path, found.reason));
 
     // CHK-384: a swizzle names fields by their letters and is a vector of their one element type
     auto has_swizzles = false;
@@ -1172,6 +1211,8 @@ void checker::compile_const(symbol_id id)
     auto const is_uint = written == prelude_type(builtins::k_uint);
     auto const is_float = written == prelude_type(builtins::k_float);
     auto const converts = (is_int || is_uint || is_float) && converted.is_number && holds(converted, written);
+    if (ast::is_valid(literal) && ast.at(literal).node.is<ast::literal>())
+        info.is_hex = is_hex_literal(text_of(file, span_of(file, literal)));
 
     if (converts)
     {
@@ -1912,13 +1953,16 @@ void checker::judge_entry_point(symbol_id id)
                            workgroup_bytes, k_portable_workgroup_bytes));
 
     // CHK-291: what crosses a stage edge holds no array until a target gives it a location per element
+    // CHK-397 first: a value of function bodies alone is what the detail names, rather than an array holding it
     for (auto const& parameter : parameters)
         if (parameter.input == stage_input::none)
         {
-            judge_edge_arrays(file, where, parameter.type);
+            if (!judge_edge_local_only(file, where, parameter.type))
+                judge_edge_arrays(file, where, parameter.type);
             judge_edge_16_bit(file, where, parameter.type);
         }
-    judge_edge_arrays(file, where, info.result);
+    if (!judge_edge_local_only(file, where, info.result))
+        judge_edge_arrays(file, where, info.result);
     judge_edge_16_bit(file, where, info.result);
 
     // CHK-301 to CHK-306: the geometry and the tessellation stages take arrays of vertices, and are judged apart
@@ -2009,13 +2053,24 @@ void checker::judge_entry_point(symbol_id id)
                                    out.name_of(m.type), m.name));
             if (m.has_interpolate && m.is_position)
                 invalid(cc::format("the @position member '{}' is the rasterizer's, and is no interpolated value", m.name));
+            // CHK-393: what is the same across a draw crosses flat, which @per_draw says already
+            if (m.is_per_draw && m.is_position)
+                invalid(cc::format("the @position member '{}' differs between the vertices of a draw, so it is no "
+                                   "@per_draw value",
+                                   m.name));
+            else if (m.is_per_draw && m.interpolate.kind != interpolation::kind_t::flat)
+                invalid(cc::format("a @per_draw member crosses flat, so '{}' takes no other @interpolate", m.name));
         }
     };
     auto const judge_uninterpolated = [&](type_id edge)
     {
         for (auto const& m : out.at(out.at(edge).members))
+        {
             if (m.has_interpolate)
                 invalid(cc::format("'{}' crosses no stage edge, so @interpolate means nothing on it", m.name));
+            if (m.is_per_draw)
+                invalid(cc::format("'{}' crosses no stage edge, so @per_draw means nothing on it", m.name));
+        }
     };
     if (info.entry_stage == stage::vertex && stage_struct != nullptr)
         judge_uninterpolated(stage_struct->type);
@@ -2070,6 +2125,12 @@ cc::span<stage_input_info const> sgl::check::stage_inputs()
     static constexpr stage_input_info k_inputs[] = {
         {.input = stage_input::vertex_index, .name = "vertex_index", .in_stage = stage::vertex, .type = "int"},
         {.input = stage_input::instance_index, .name = "instance_index", .in_stage = stage::vertex, .type = "int"},
+        // CHK-272: WGSL has no builtin for it, so it is a feature WebGPU lacks
+        {.input = stage_input::first_instance,
+         .name = "first_instance",
+         .in_stage = stage::vertex,
+         .type = "int",
+         .feature = i32(feature::first_instance)},
         {.input = stage_input::is_front_facing, .name = "is_front_facing", .in_stage = stage::pixel, .type = "bool"},
         {.input = stage_input::sample_index,
          .name = "sample_index",

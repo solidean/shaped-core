@@ -130,7 +130,7 @@ cc::hash128 shader_cache::compute_key(shader_description const& desc, compile_op
         b.add_string(a);
 
     // The DXC version, so an upgrade does not keep serving the previous compiler's DXIL.
-    // Irrelevant to an in-memory tier that dies with the process, and load-bearing for one that does not.
+    // Irrelevant to an in-memory tier that dies with the process, and required for one that does not.
     b.add_string(compiler_version());
 
     return cc::hash128::create(b.written_bytes(), 0);

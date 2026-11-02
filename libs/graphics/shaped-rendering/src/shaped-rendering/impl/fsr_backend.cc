@@ -12,6 +12,7 @@
 #include <shaped-rendering/impl/denoise_images.hh>
 #include <shaped-rendering/impl/fsr_backend.hh>
 #include <shaped-shader-library/shader_asset.hh>
+#include <sr_sgl_shaders.hh>
 #include <sr_shaders.hh>
 #include <typed-geometry/scalar/half_float.hh>
 #include <typed-geometry/scalar/scalar.hh>
@@ -34,12 +35,12 @@ namespace sr::impl
 namespace
 {
 /// The flags every context is created with, which is what fixes the one permutation of each pass sr builds.
-/// Linear HDR radiance in, and the inverted, infinite-far depth fsr_prepare_depth.hlsl writes.
+/// Linear HDR radiance in, and the inverted, infinite-far depth fsr_prepare_depth.sgl writes.
 constexpr u32 k_context_flags = FFX_FSR3UPSCALER_ENABLE_HIGH_DYNAMIC_RANGE | FFX_FSR3UPSCALER_ENABLE_DEPTH_INVERTED
                               | FFX_FSR3UPSCALER_ENABLE_DEPTH_INFINITE;
 
-/// The near plane FSR is told, and the one fsr_prepare_depth.hlsl divides by: any positive value reads back as the
-/// same view depth, and FSR advises against one below 0.075.
+/// The near plane FSR is told, and the one fsr_prepare_depth.sgl divides by.
+/// Any positive value reads back as the same view depth, and FSR advises against one below 0.075.
 constexpr f32 k_near_plane = 0.1f;
 
 /// The far plane FSR is told; with an infinite depth it only has to lie past the near one.
@@ -364,8 +365,7 @@ FfxErrorCode get_device_capabilities(FfxInterface*, FfxDeviceCapabilities* out)
 {
     // The portable permutation, whatever the device: no 16-bit arithmetic, no forced wave64, and a wave width that
     // keeps the host code off the Lanczos lookup table.
-    // What each device could run faster is a follow-up once sg reports 16-bit support.
-    // libs/graphics/shaped-rendering/docs/TODO.md has it.
+    // What each device could run faster is issue: perf-fsr-fp16-wave64-permutations.
     *out = {};
     out->maximumSupportedShaderModel = FFX_SHADER_MODEL_6_2;
     out->waveLaneCountMin = 32;
@@ -739,26 +739,34 @@ bool fsr_stream::record_clear(sg::command_list& cmd, FfxClearFloatJobDescription
     if (r == nullptr || !is_set(r->texture))
         return true; // nothing there to clear, as for an optional input the caller left out
 
+    auto const format = r->texture.format();
+    auto const* const clear = programs->clear_for(format);
+    if (clear == nullptr)
+    {
+        CC_LOG_ERROR("fsr: a clear of an image of pixel_format {}, which sr builds no clear for", int(format));
+        return false;
+    }
+
     // Mip 0 only, as AMD's own backend clears through the view of the first mip.
     auto const target = r->texture.as_any_image_view({.mip = 0});
-    if (is_uint_format(r->texture.format()))
+    cmd.compute.bind_pipeline(*clear->program.pipeline);
+    if (is_uint_format(format))
     {
         auto bits = u32(0);
         cc::memcpy(&bits, &job.color[0], sizeof(bits));
-        auto const group = ctx->transient.create_binding_group(cmd, programs->clear_uint.layout,
-                                                               shaders::fsr_clear_uint_bindings{.gTarget = target});
-        cmd.compute.bind_pipeline(*programs->clear_uint.pipeline);
-        cmd.compute.bind<shaders::fsr_clear_uint_bindings>(*group);
-        cmd.compute.set_inline_constants(shaders::fsr_clear_uint_constants{.value = bits});
+        auto const group = ctx->transient.create_binding_group(
+            cmd, clear->program.layout, sgl_shaders::fsr_clear_uint::fsr_clear_uint_target{.target = target});
+        cmd.compute.bind_group(0, *group);
+        cmd.compute.set_inline_constants(sgl_shaders::fsr_clear_uint::fsr_clear_uint_constants{.value = bits}.to_block());
     }
     else
     {
-        auto const group = ctx->transient.create_binding_group(cmd, programs->clear_float.layout,
-                                                               shaders::fsr_clear_float_bindings{.gTarget = target});
-        cmd.compute.bind_pipeline(*programs->clear_float.pipeline);
-        cmd.compute.bind<shaders::fsr_clear_float_bindings>(*group);
-        cmd.compute.set_inline_constants(
-            shaders::fsr_clear_float_constants{.value = {job.color[0], job.color[1], job.color[2], job.color[3]}});
+        auto const group = ctx->transient.create_binding_group(
+            cmd, clear->program.layout, sgl_shaders::fsr_clear_float::fsr_clear_float_target{.target = target});
+        cmd.compute.bind_group(0, *group);
+        auto const value = sgl_shaders::fsr_clear_float::fsr_clear_float_constants{
+            .value = tg::vec4f(job.color[0], job.color[1], job.color[2], job.color[3])};
+        cmd.compute.set_inline_constants(value.to_block());
     }
     cmd.compute.dispatch_threads(r->texture.width(), r->texture.height(), 1);
     return true;
@@ -962,11 +970,13 @@ bool fsr_dispatch(fsr_stream& stream, sg::command_list& cmd, upscale_inputs cons
         auto const& pass = stream.programs->prepare_depth;
         auto const group = ctx.transient.create_binding_group(
             cmd, pass.layout,
-            shaders::fsr_prepare_depth_bindings{.gLinearDepth = in.depth.as_texture_view(),
-                                                .gDeviceDepth = stream.device_depth.as_any_image_view()});
+            sgl_shaders::fsr_prepare_depth::fsr_prepare_depth_io{
+                .linear_depth = in.depth.as_texture_view(),
+                .device_depth = stream.device_depth.as_image_view<sg::pixel_format::r32_float>()});
         cmd.compute.bind_pipeline(*pass.pipeline);
-        cmd.compute.bind<shaders::fsr_prepare_depth_bindings>(*group);
-        cmd.compute.set_inline_constants(shaders::fsr_prepare_depth_constants{.near_plane = k_near_plane});
+        cmd.compute.bind_group(0, *group);
+        cmd.compute.set_inline_constants(
+            sgl_shaders::fsr_prepare_depth::fsr_prepare_depth_constants{.near_plane = k_near_plane}.to_block());
         cmd.compute.dispatch_threads(stream.input_extent[0], stream.input_extent[1], 1);
     }
 

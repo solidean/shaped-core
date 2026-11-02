@@ -61,6 +61,10 @@
 # The third field is the SGL name exactly as the shader spells it, and one the file does not declare is a build error.
 # `*` generates nothing for what the file `use`s: an imported module is described by its own package entry.
 #
+# Each SGL file generates into a namespace of its own, named as the file folds into an identifier:
+# cube.sgl's types, entry points and pipelines are <NAMESPACE>::cube::target, <NAMESPACE>::cube::main_vs and so on.
+# So two files of one package may each declare a name.
+#
 # An SGL package's SOURCE_DIR is a module directory, and MODULE_DIRS names more, relative to the calling CMakeLists:
 # a file's `use view` finds module `view` among the `.sgl` files directly in any of them.
 # A module another package exports is reached by naming that package's directory here too.
@@ -278,6 +282,41 @@ function(sc_add_shader_package)
     # And the generated dir, so finalize can offer it to the sibling test. Recorded rather than acted on here
     # because a library declares its package before its own test target exists.
     set_property(GLOBAL APPEND PROPERTY SC_SHADER_PACKAGE_GEN_DIRS "${PKG_TARGET}|${PKG_NAME}|${_gen_dir}")
+endfunction()
+
+set(SC_SHADER_BUNDLE_SCRIPT "${CMAKE_CURRENT_LIST_DIR}/embed_shader_bundle.py"
+    CACHE INTERNAL "Generator script backing sc_embed_shader_bundle")
+
+# sc_embed_shader_bundle(TARGET <executable>)
+#
+# Under SC_FROZEN_SHADERS, embeds <build>/shader-bundles/<executable>.slibbundle into the executable, so the shaders a
+# recording run of it compiled are served without compiling them; elsewhere it does nothing.
+# A missing bundle embeds an empty one, so the build never depends on a recording having run.
+# libs/graphics/shaped-shader-library/docs/frozen-shaders.md is the flow that writes the file.
+function(sc_embed_shader_bundle)
+    cmake_parse_arguments(PARSE_ARGV 0 BUNDLE "" "TARGET" "")
+    if(NOT BUNDLE_TARGET)
+        message(FATAL_ERROR "sc_embed_shader_bundle: TARGET is required")
+    endif()
+    if(NOT SC_FROZEN_SHADERS)
+        return()
+    endif()
+
+    set(_bundle "${CMAKE_BINARY_DIR}/shader-bundles/${BUNDLE_TARGET}.slibbundle")
+    # Created empty when absent, since a DEPENDS on a file nothing makes is a build error.
+    if(NOT EXISTS "${_bundle}")
+        file(WRITE "${_bundle}" "")
+    endif()
+
+    set(_gen "${CMAKE_CURRENT_BINARY_DIR}/shader-bundles/${BUNDLE_TARGET}_bundle.cc")
+    add_custom_command(
+        OUTPUT "${_gen}"
+        COMMAND uv run "${SC_SHADER_BUNDLE_SCRIPT}" --bundle "${_bundle}" --out "${_gen}"
+        DEPENDS "${_bundle}" "${SC_SHADER_BUNDLE_SCRIPT}"
+        COMMENT "[slib] shader bundle (${BUNDLE_TARGET})"
+        VERBATIM
+    )
+    target_sources(${BUNDLE_TARGET} PRIVATE "${_gen}")
 endfunction()
 
 # Fails configure with an actionable message if a package was declared but slib is missing, and hands each

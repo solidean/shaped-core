@@ -5,6 +5,7 @@
 #include <clean-core/container/pinned_data.hh>
 #include <shaped-viewer/fwd.hh>
 #include <shaped-viewer/impl/content_hash.hh>
+#include <shaped-viewer/scene/tg_objects.hh>
 #include <typed-geometry/geometry/primitives/triangle.hh>
 #include <typed-geometry/linalg/pos.hh>
 
@@ -60,6 +61,20 @@ struct sv::triangle_geometry
         cc::pinned_data<tg::pos3f const> pinned = cc::make_pinned_data(cc::forward<Positions>(positions));
         auto const hash = cc::hash128::create(pinned.span().as_bytes(), impl::position_hash_seed);
         return {.positions = cc::move(pinned), .hash = hash};
+    }
+
+    /// The faces of `objects` as a raw triangle list, wound as tg winds them; a quad face becomes two triangles.
+    /// `objects` is one tg object with `faces()` (or a triangle or quad itself), or a range of them, in any scalar.
+    template <class Objects>
+    [[nodiscard]] static triangle_geometry create_from_faces(Objects const& objects)
+    {
+        auto triangles = cc::vector<tg::triangle3f>();
+        if constexpr (has_tg_faces<Objects>)
+            impl::append_faces(objects, triangles);
+        else
+            for (auto const& o : objects)
+                impl::append_faces(o, triangles);
+        return create_from_triangles(cc::move(triangles));
     }
 
     /// Pins both buffers and combines their digests into the content hash.

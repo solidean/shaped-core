@@ -35,7 +35,7 @@ string(SUBSTRING "${_sc_x64_level}" 1 1 _sc_x64_level_number)
 if(CMAKE_CXX_COMPILER_ID MATCHES "Clang" AND MSVC)
     # clang-cl's /arch: spellings imply a different feature set than the x86-64-vN levels, so pass the level itself.
     if(NOT _sc_x64_level STREQUAL "v1")
-        add_compile_options("/clang:-march=x86-64-${_sc_x64_level}")
+        sc_build_options(COMPILE "/clang:-march=x86-64-${_sc_x64_level}")
     endif()
 elseif(MSVC)
     # cl.exe has no v4 spelling that keeps its AVX2-tier code at AVX2 quality: with /arch:AVX512 it moves every vector
@@ -43,15 +43,15 @@ elseif(MSVC)
     # v4 therefore builds as /arch:AVX2, and the avx512 kernel stays a dispatched one: its TU alone gets /arch:AVX512,
     # which is what defines the __AVX512*__ macros clean-simd's kernel.hh requires.
     if(_sc_x64_level STREQUAL "v2")
-        add_compile_options(/arch:SSE4.2)
+        sc_build_options(COMPILE /arch:SSE4.2)
     elseif(_sc_x64_level STREQUAL "v3" OR _sc_x64_level STREQUAL "v4")
-        add_compile_options(/arch:AVX2)
+        sc_build_options(COMPILE /arch:AVX2)
     endif()
 elseif(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
-    add_compile_options(-march=x86-64-${_sc_x64_level})
+    sc_build_options(COMPILE -march=x86-64-${_sc_x64_level})
 endif()
 
-add_compile_definitions(CC_X64_LEVEL=${_sc_x64_level_number})
+sc_build_options(DEFINITIONS CC_X64_LEVEL=${_sc_x64_level_number})
 
 # The kernel the floor compiles everywhere: one per level, except that cl.exe builds v4 as AVX2 (above).
 set(_sc_kernel_order sse2 sse42 avx2 avx512)

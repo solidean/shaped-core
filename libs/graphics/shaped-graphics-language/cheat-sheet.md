@@ -27,7 +27,9 @@ r.value().bound_names                      // { emitted, host } per resource: `w
 r.value().color_targets  .target_struct    // a pixel entry point's target count and `@pixel struct`; -1 and empty otherwise
 r.value().footprint                        // check::slot_footprint per TOUCHED slot: host_name, view (constants/read_only/storage), reads, writes
                                            // a member never named is absent — sg skips its barrier; see spec/bindings.md "Footprint"
-r.error()                                  // one line per diagnostic: `cube.sgl:12:5: error: unknown-name: foo`
+r.value().warnings                         // cc::vector<cc::string>, one per warning: `cube.sgl:7:14: warning: unroll-too-long: ...`
+                                           // notes on the lines under it, no final line end; the whole source's, so every entry point's alike
+r.error()                                  // one line per diagnostic: `cube.sgl:12:5: error: unknown-name: foo`; errors alone, never a warning
 sgl::compile_all_to_text({.source = text, .source_name = "cube.sgl", .targets = sgl::emit::all_targets()});
                                            // -> cc::result<cc::vector<entry_text>, cc::string>: every entry point on every target
                                            // from ONE check; compile_to_text per entry point and target checks that many times
@@ -398,7 +400,7 @@ sgl::test::diagnostic_of(m, r)             // `test-failed` at the test, one rel
 ## The `sgl` tool (`tools/sgl/`, a nexus binary of COMMANDs; built under `SC_BUILD_TOOLS`)
 
 ```bash
-uv run dev.py run sgl -- emit shader.sgl --entry main_ps --target wgsl   # the text, or the diagnostics and exit 2
+uv run dev.py run sgl -- emit shader.sgl --entry main_ps --target wgsl   # the text and its warnings on stderr, or the diagnostics and exit 2
 uv run dev.py run sgl -- emit shader.sgl --entry main_cs --option tile=16 # an option set for this compile; `describe` takes it too
 uv run dev.py run sgl -- test a.sgl b.sgl                                # the tests of each file; exit 2 when one fails
 #   emit, test and describe take --module-dir DIR, repeatable: the .sgl files directly in it are modules to `use`
@@ -463,8 +465,16 @@ sgl::print_source(file)      // == file.source for EVERY input: the lossless inv
 @option const tile = 8                   // the host sets it per compile, and this is its default (CHK-353)
 @compute(tile, tile) fun blur(...)       // an option stands where a const stands: a workgroup size, an array length, an image format
                                          // a used module's option is set as `common.taps`, apart from the program's `taps` (CHK-354)
+texel[.rg16_float]                       // the type an image of that format loads and stores: float2; texel[out_format] per compile (CHK-390)
+img[xy] = v as texel[out_format]         // a store into a host-picked format: .x / .xy of a wider v, a narrower one filled from (0, 0, 0, 1)
+                                         // the ONLY width change: `float4 as float2` is no conversion, and no kind changes (CHK-391, CHK-392)
 if tile > 8: ...                         // a branch on a constant keeps the side it takes, in text, footprint and verdicts (CHK-356)
 fun f(x: float, .fast: bool)             // ...and a literal argument is a constant, so `f(x, fast = false)` sheds its fast side
+@unroll                                  // on a `for`: the body once per index, the index a literal in each copy, within 256 copies (CHK-389)
+for i in 0 ..< taps: ...                 // nothing of it runs as a loop, no text holds a hint, and the bounds are int constants
+                                         // past 256 copies, a nest's counted together, it stays a loop: WARNING unroll-too-long
+                                         // ...and so does an inner one whose bound reads its index, under the same warning
+                                         // a rule judging a constant judges each index: `1u << (i as uint)` past 31 is refused
 
 fun bump(c: mut counter, by: float):     // a mut parameter: the caller's place (CHK-315)
     c.total += by
@@ -595,10 +605,16 @@ ops[i](mut v)                                            // raygen, miss, closes
   Leaving its default type is one step of a literal's chain; candidates rank by dominance over those chains, then a type-scope function wins (CHK-254).
   `0xff`, `0b1010` are integer literals like decimal ones (CHK-269); `&`, `|`, `^`, `~`, `<<`, `>>` take int, uint and their vectors, a shift's count keeps its low five bits.
   `1 / 3` is `literal-needs-type` (CHK-313): `/` and `%` over integer literals alone say nothing of int or float; an integer literal is held in 64 bits and refused only in a type that cannot hold it.
-- **The maths builtins** are records of `register_math.cc`: trig, `exp`/`log`, `pow`, `sqrt`/`inverse_sqrt`, rounding, `sign`, `step`/`smoothstep`.
+  A prelude operator over literals alone folds into one (CHK-394): `(1 + 2) * 0.5` is `1.5`, `let x: float = 2 * 3` holds, and `2 < 3` is `true`.
+- **The maths builtins** are records of `register_math.cc`: trig, `exp`/`log`, `pow`, `sqrt`/`inverse_sqrt`, rounding, `sign`, `step`/`smoothstep`, `is_nan`/`is_inf`.
+  `is_nan` and `is_inf` are a bit test on every target, since Vulkan, WGSL and MSL may each assume neither arises.
+  They take a half too, tested as the float it widens to.
   Beside them `ddx`/`ddy`, `cross`, `distance`, `reflect`/`refract`, the integer bit functions and packing; `round` is ties to even.
   The interpreter computes them with `builtins/impl/soft_math.hh`, never a libm, so every host meets the same bits; a test compares them with `nearly_equal(a, b, within = …)`.
   `x.bits` and `float.from_bits(u)` are extensions in `core.sgl` over `reinterpret_as_*`, and a WGSL-indeterminate argument (`pow(-1.0, 0.5)`) is a `program-error`.
+- **`mat4` is the one matrix**, opaque and column-major, built from its columns: `mat4(c0, c1, c2, c3)` takes four `float4` (EVAL-99), `c3` being where the origin goes.
+  `register_transforms.cc` holds it, `m * p`, `m * v`, `m * float4`, `m * m` and `determinant(m) -> float` (EVAL-98), every target's own function.
+  A `driver_bindings` matrix is 16 floats column by column too; `sgl test` alone sees a binding's matrix as zero.
 - **Stage inputs are parameters** (CHK-271): the stage struct first, then `@vertex_index i: int`, `@is_front_facing f: bool`, `@thread_id id: int3`, ….
   `flat_entry_point::input` is `none` for a vertex stage without a vertex buffer, and `stage_inputs` holds each input's local; `run_inputs::stage_inputs` gives them values.
 - **Geometry and tessellation stages** (CHK-301 to CHK-307): `@geometry(max_vertices = N)` takes `tri: varyings[3]` first and `stream: mut triangle_stream[varyings]` last.
@@ -613,13 +629,24 @@ ops[i](mut v)                                            // raygen, miss, closes
 - **A `@workgroup binding` is memory one workgroup shares** (CHK-292 to CHK-295): listed like a binding, in no group, and left out of describe.
   Only a compute entry point lists one, all of it within 16 KiB; `workgroup_barrier()`, `storage_barrier()` and `texture_barrier()` sync it (EMIT-131).
 - **`atomic[uint]` and `atomic[int]` live only in a `mut buffer` or a `@workgroup` binding** (CHK-296), and an expression of one is only ever a builtin's argument (CHK-297).
+  `compare_exchange_strong(e, d)` gives the value before, and stored exactly where that is `e`; it is a loop in WGSL and MSL (EMIT-161).
+  `compare_exchange_weak(e, d)` gives `exchange_result[T]`: `old`, and `exchanged`, the only proof it stored; retry while `old == e and not exchanged`.
+  Both are relaxed: publishing what a claim guards needs a barrier.
+  Atomics stand in pixel, compute, raygen, miss, closest-hit and callable stages; in an any hit or an intersection, or a decision an inline trace calls, they are `stage-not-allowed` (CHK-404).
+  In a pixel stage a helper's atomics store nothing and read garbage; the strong loop skips one in MSL (EMIT-162).
+  A pixel stage's `compare_exchange_strong` needs `require helper_lane_query` (EMIT-163), which WebGPU lacks: there, write the weak one in a loop, or use compute.
+  A test fails a weak one spuriously every other time each call meets `e`, the first time first (EVAL-100), so a missing retry loop fails its test.
 - **`img[xy]` is the image's `load`, and `img[xy] = v` its `store`** (CHK-367): the check pass records the call at the subscript, and `m.texel_stores` holds each assignment's.
   `@atomic` on a `mut` image of `.r32_uint` or `.r32_sint` makes `img[xy]` an atomic, `img[xy].max(v)` (CHK-372), which the flat tree calls as the prelude's internal `texel_max`.
   `@coherent` on a `mut buffer` or image is `globallycoherent` in HLSL and `coherent(device)` in MSL (CHK-368); both features are WGSL's `target-lacks-feature`.
+- **`v[i]` is a vector's lane** (CHK-395): a `flat_element` whose object is a `@swizzle` struct, read and written as an array's element is; `checker::lane_type_of` says whether a type has lanes.
 - **`bytes` / `mut bytes` is raw memory a 32-bit word at a time** (CHK-388): `b.load(off)`, `load2..4`, `b.store(off, uintN)`; `off` a multiple of 4.
   HLSL `ByteAddressBuffer`, else an array of words (EMIT-155); the host binds a `*_buffer_view<cc::byte>`.
 - **A binding array, `texture_2d[float4][64]`, needs `binding_arrays`** and is read by element alone (CHK-299).
-  An index the uniformity pass cannot prove uniform is `nonuniform i`, or it is `non-uniform-index`; a needless mark is a warning (CHK-300).
+  An index the uniformity pass proves uniform needs no mark (CHK-300); `nonuniform i` is an index that may vary, and `uniform i` the author's word that it does not.
+  Unmarked, a proven varying index is `non-uniform-index` and an unproven one `unproven-index`; `uniform` on a proven varying one is `uniform-index-varies` (CHK-399, CHK-400).
+  A helper's index is judged per call: one it reaches both ways is `mixed-index`, split in two or marked `nonuniform` (CHK-401); a needless `nonuniform` is a warning.
+  A stage-link member marked `@per_draw` crosses flat and is uniform in the pixel stage; the vertex stage must return it uniform, or it is `non-uniform-per-draw` (CHK-393).
 - **The uniformity pass judges the inlined entry point** (CHK-282 to CHK-284) by WGSL's rules, so no target refuses what SGL accepts.
   A barrier, or a call that takes derivatives implicitly (`sample` without `level`, `ddx`), in non-uniform control flow is `non-uniform-control-flow`.
 - **`@sampler(name)` on a texture member names a sampler of the same binding, or a file-scope one** (CHK-279), which a method call then leaves out: `material.albedo.sample(uv)`.
@@ -688,7 +715,8 @@ ops[i](mut v)                                            // raygen, miss, closes
   HLSL spells a half `float16_t`, never `half`, so slib's SGL edge hands DXC `-enable-16bit-types` on every compile; a 16-bit literal is a construction, `half(0.5)`.
   A 16-bit value packs at 2 bytes, crosses no stage edge and sits in no `@inline` binding (CHK-387), and a buffer's element is whole 4-byte words: `buffer[half2]`, never `buffer[half]`.
   **No layout is guaranteed without an annotation** (EMIT-116): the compiler may reorder members, so the host goes through the generated struct, never through offsets it assumed.
-- **`compile_to_text` drops warnings.** It gives the text or the errors; a caller that wants warnings runs the phases itself.
+- **A warning never fails `compile_to_text`, and only a text carries one.** A failed compile's error holds its errors alone.
+  slib's SGL edge logs each warning under `slib`, and `sgl emit` prints them to stderr beside the text.
 - **`prelude/builtins.sgl` is GENERATED and committed; never edit it.** A hand edit fails `dev.py check` (`sgl-prelude`) and a library test.
   `prelude/core.sgl` is the hand-written half, embedded at CONFIGURE time: editing it re-runs CMake, and a test pins the embedded text to the file.
 - **`*.sgl` is `eol=lf` in `.gitattributes`.** The generated text is compared byte for byte, and a diagnostic is a byte offset.

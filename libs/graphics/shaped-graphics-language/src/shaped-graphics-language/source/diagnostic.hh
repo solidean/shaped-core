@@ -211,12 +211,24 @@ enum class sgl::diagnostic_kind : sgl::u8
     non_uniform_control_flow,
     /// An index into a binding array that may differ between invocations, and is not marked `nonuniform`.
     non_uniform_index,
-    /// A `nonuniform` mark on an index the check pass proves uniform, which pays for nothing; a warning.
+    /// A `nonuniform` mark on an index the check pass proves uniform wherever the program reaches it, which pays for
+    /// nothing; a warning.
     needless_nonuniform,
+    /// An unmarked index into a binding array the check pass can prove neither uniform nor varying.
+    unproven_index,
+    /// An unmarked index into a binding array of a function that some calls reach with a uniform value and some with
+    /// one that is not.
+    mixed_index,
+    /// A `uniform` mark on an index the check pass proves varying.
+    uniform_index_varies,
+    /// A `@per_draw` member that a vertex stage returns a value of which may differ between the invocations of a draw.
+    non_uniform_per_draw,
     /// An entry point whose flat tree, with every call inlined, nests deeper than the compiler walks.
     nesting_too_deep,
     /// A compile's value for a name no option has, of another type than the option's, or for a name given twice.
     invalid_option,
+    /// An unrolled `for` that would write more copies of its body than the compiler writes, which stays a loop; a warning.
+    unroll_too_long,
 };
 
 namespace sgl

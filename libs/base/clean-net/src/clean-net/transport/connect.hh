@@ -35,7 +35,7 @@ namespace cnet
 {
 /// Resolve `host` and connect to it, racing the addresses (RFC 8305, "happy eyeballs").
 ///
-/// **A machine with broken IPv6 routing loses milliseconds rather than a connect timeout**, which is the whole point:
+/// **A machine with broken IPv6 routing loses milliseconds rather than a connect timeout**, because
 /// no per-family preference can detect a route that is advertised and does not work, and only trying both can.
 /// Attempts start staggered by `attempt_delay_ms` and the first success wins; the losers are cancelled, including one
 /// that succeeded a moment too late, whose connection is closed rather than leaked.

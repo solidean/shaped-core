@@ -30,7 +30,7 @@ This guide is the seam between them: when to reach for which, and what bites.
 Its rules encode conventions the guidelines only summarize, and seeing them fire on *your* code is the fastest way to learn how they apply.
 `--fix` applies what is mechanically safe; a `hint:` is a judgement call left to you.
 
-`check` runs the same thing as the `shaped-lint` gate, dirty-only, before `format` — see [Pre-commit checks](building-and-testing.md#pre-commit-checks) for the gate order and why it is load-bearing.
+`check` runs the same thing as the `shaped-lint` gate, dirty-only, before `format` — see [Pre-commit checks](building-and-testing.md#pre-commit-checks) for the gate order and why it is fixed.
 
 ## Dirty-only is line-exact for prose
 

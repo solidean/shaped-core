@@ -194,40 +194,50 @@ public:
     ///
     /// A box already declared for this op with a different layout is combined via `combine_layouts`, which may fall
     /// back to GENERAL with a one-time warning, and asserts on a genuine conflict.
-    void declare(sg::command_list_slot slot,
-                 sg::subresource_range range,
-                 sg::pipeline_stage_flags stages,
-                 sg::access_flags access,
-                 sg::texture_layout layout)
+    ///
+    /// `from_array_application` marks the texture an array member of `slot`'s list.
+    sg::impl::member_track declare(sg::command_list_slot slot,
+                                   sg::subresource_range range,
+                                   sg::pipeline_stage_flags stages,
+                                   sg::access_flags access,
+                                   sg::texture_layout layout,
+                                   bool from_array_application = false)
     {
         auto& s = slot_for(slot);
         bool warned = false;
-        s.partition.for_each_box_in(range,
-                                    [&](sg::subresource_range const&, sg::resource_access_state& state)
-                                    {
-                                        if (!state.entry_begun)
-                                            state.begin_entry(layout);
+        auto writes = false;
+        auto found = sg::impl::member_track{};
+        s.partition.for_each_box_in(
+            range,
+            [&](sg::subresource_range const&, sg::resource_access_state& state)
+            {
+                if (!state.entry_begun)
+                    state.begin_entry(layout);
+                found.held_write = found.held_write || state.has_curr_writes() || state.has_pending_layout_change();
 
-                                        sg::texture_layout target = layout;
-                                        bool const touched
-                                            = state.has_pending_declares() || state.has_pending_layout_change();
-                                        if (touched && state.curr_layout != layout)
-                                        {
-                                            combined_layout const c = combine_layouts(state.curr_layout, layout);
-                                            CC_ASSERT(c.result != layout_combine::conflict,
-                                                      "a texture subresource is bound with conflicting layouts in one "
-                                                      "operation");
-                                            if (c.result == layout_combine::degraded && !warned)
-                                            {
-                                                CC_LOG_WARNING("a texture is bound as both a sampled and a storage "
-                                                               "view in one operation, so it is transitioned to "
-                                                               "GENERAL for both");
-                                                warned = true;
-                                            }
-                                            target = c.layout;
-                                        }
-                                        state.declare(stages, access, target);
-                                    });
+                sg::texture_layout target = layout;
+                bool const touched = state.has_pending_declares() || state.has_pending_layout_change();
+                if (touched && state.curr_layout != layout)
+                {
+                    combined_layout const c = combine_layouts(state.curr_layout, layout);
+                    CC_ASSERT(c.result != layout_combine::conflict,
+                              "a texture subresource is bound with conflicting layouts in one "
+                              "operation");
+                    if (c.result == layout_combine::degraded && !warned)
+                    {
+                        CC_LOG_WARNING("a texture is bound as both a sampled and a storage "
+                                       "view in one operation, so it is transitioned to "
+                                       "GENERAL for both");
+                        warned = true;
+                    }
+                    target = c.layout;
+                }
+                writes = writes || sg::is_unordered_write(access) || target != state.prev_layout;
+                state.declare(stages, access, target);
+            });
+        found.member_write = writes && s.array_member;
+        s.array_member = s.array_member || from_array_application;
+        return found;
     }
 
     /// Test-and-set the per-op pending flag; true only the first time since the last flush.
@@ -337,6 +347,7 @@ private:
         bool active = false;
         bool recorded = false;
         bool pending_barrier = false;
+        bool array_member = false; // an array application of this slot's list has tracked the texture
     };
 
     slot_state& slot_for(sg::command_list_slot slot)

@@ -43,6 +43,8 @@ struct slib::module_library
 {
     cc::vector<cc::string> paths;
     cc::vector<cc::string> texts;
+    /// Each file's revision just before its text was read.
+    cc::vector<file_revision> revisions;
 
     /// Each file as a view of `paths` and `texts`, which must outlive the result.
     [[nodiscard]] cc::vector<module_source> files() const
@@ -63,7 +65,7 @@ struct slib::preprocessed_source
     cc::string entry_point;
     /// The whole shader but its bytecode and compiler, where the source language states it, which only SGL does.
     /// The library then takes nothing from the compile but those two, and the compiler's reflection only confirms the rest.
-    /// `target_set` is the bare name of the target struct, which the library qualifies with the package's namespace.
+    /// `target_set` is the bare name of the target struct, which the library qualifies with the namespace of the file's generated types.
     /// nullopt for every other compiler, whose shader is what the compile reflects.
     cc::optional<sg::compiled_shader> stated;
     /// Every binding the text declares, used or not, which is what a compiler reflecting the text may report.
@@ -74,6 +76,9 @@ struct slib::preprocessed_source
     /// The module files the source reached through `use`, by virtual path: what it depends on beside itself.
     /// Only SGL fills it.
     cc::vector<cc::string> used_modules;
+    /// What the compiler warned of while writing the text, one diagnostic each, its notes on the lines under it.
+    /// Only SGL fills it, and a cached result keeps them; a shader_library logs each once.
+    cc::vector<cc::string> warnings;
 };
 
 /// A value one compile gives an option of an SGL source, by the option's name, spelled as SGL spells it: `16`, `true`, `.rgba16_float`.
@@ -129,7 +134,8 @@ public:
     [[nodiscard]] virtual shader_language source_language() const = 0;
     [[nodiscard]] virtual sg::shader_format target_format() const = 0;
 
-    /// Flattens `#include`s through `resolve`. The error carries the compiler's own diagnostics.
+    /// Flattens `#include`s through `resolve`.
+    /// The error carries the compiler's own diagnostics.
     ///
     /// Per target, not once for all of them: a compiler targeting SPIR-V flattens with its own macros defined, so a
     /// source may fork on the target it is being built for.

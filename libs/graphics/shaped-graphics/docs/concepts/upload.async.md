@@ -25,7 +25,7 @@ They are the preferred spelling over `create_buffer` followed by an upload, sinc
 The copy runs on the transfer queue, and nothing orders it against the epoch boundary that recycles a transient resource's storage.
 `ctx.upload`, `ctx.download` and `ctx.stream` assert on a transient target; a transient resource transfers inline instead.
 
-## Why sync is automatic in both directions (the load-bearing decision)
+## Why sync is automatic in both directions
 
 The staged copy runs **later**, asynchronously, on a queue the caller never sees.
 For the CPU timeline `submit → async upload → submit` to just work — no future to poll, no manual barrier — the system needs sync in **both directions**.
@@ -34,9 +34,9 @@ Each direction is a **cross-queue GPU wait**, never a CPU stall, and both ride o
 **Forward — a later reader waits on the copy.** A command list that reads the buffer after the upload must not execute until the copy has run, or it reads stale bytes.
 
 - The upload reserves a **completion value** on a monotonic counter and **stamps it onto the buffer** (atomic max) before the actor runs.
-  Any reader recorded afterwards therefore sees a value to wait on.
-- Every op that reads a buffer while recording folds that buffer's completion value into the list's required wait.
-  That covers uploads, downloads, buffer copies, and a buffer bound into a binding group.
+  Any list submitted afterwards therefore sees a value to wait on, whenever it recorded its read.
+- At submit, every buffer the list touched folds its completion value into the list's required waits.
+  Touching covers uploads, downloads, buffer copies, and a buffer bound into a binding group.
 - At **submit**, the main queue is told to **wait on each resource's completion timeline** for the value it owes, before executing the list.
   One wait per distinct timeline the list touches — see the completion section below for why they cannot collapse into one.
 
@@ -70,9 +70,9 @@ While staging was strictly submission-ordered the first rule alone covered both 
 Out-of-order selection removed that guarantee, and needed the rule made explicit rather than inherited from the order.
 
 Over-waiting on a higher (monotonic) value is always safe, and neither stamp is ever reset — a stale value only ever yields a cheap already-satisfied wait.
-sg has **no per-resource state / access-tracking layer yet**, so this pair of per-buffer stamps is a deliberately minimal stand-in that the in-progress access-tracking layer should subsume.
+A command list's access tracking reads these stamps at submit, which is how it orders itself against the transfers of the resources it touches — see [barriers](barriers.md).
 
-The **happens-before rule** the caller relies on: an upload is ordered against command lists whose *submit* (reverse) or *record* (forward) happens before or after the upload call on the same thread.
+The **happens-before rule** the caller relies on: an upload is ordered against command lists whose *submit* happens before it (reverse) or after it (forward), on the same thread.
 A buffer concurrently used by a list recording in parallel with the upload is a hazard the caller must avoid — v1 is persistent-buffer, single-writer.
 
 ## Why staging is triple-buffered (pipelining)
@@ -82,7 +82,7 @@ Only the actor thread fills them, so there is no concurrent-recording hazard and
 What remains is a per-window **staging fence** the transfer queue signals as each window's copy completes.
 A window's size is a backend config knob, and can also be changed at runtime — see the resize note in the dx12 section below.
 
-Three windows is the load-bearing count, because it lets **CPU memcpy and GPU copy overlap**:
+The count of three windows is what lets **CPU memcpy and GPU copy overlap**:
 
 - The actor fills the current window and **submits it as soon as it fills** — or as soon as the inbox drains, for low latency — then rolls to the next window.
 - It reuses a window's memory only **three submissions later**, so on coming back to a window that window's copy is almost always already done and the reuse wait is free.
@@ -99,7 +99,7 @@ Two kinds of fence on the transfer queue, both signaled per window:
 
 **Completion is per resource, not per system**, and that follows directly from out-of-order selection.
 "Signal the highest value I finished" is only exact where completion order matches reservation order.
-That is guaranteed inside a family and deliberately broken across families — overtaking an unrelated blocked upload is the point.
+That is guaranteed inside a family and deliberately broken across families, so an upload can overtake an unrelated blocked one.
 One shared counter therefore reports a low-numbered upload complete the moment any higher-numbered one finishes.
 A reader then stops waiting for a copy that has not run.
 So the **timeline is the family**: [`dx12_completion_group`](../../backends/dx12/src/shaped-graphics/backends/dx12/dx12_completion_group.hh), one per resource per direction.
@@ -109,7 +109,7 @@ A value is meaningless without the timeline it was reserved on, so every stamp a
 Finished upload jobs, and their pins, are destroyed on the actor thread.
 That is off the submission path, so releasing a large pin never stalls a latency-sensitive thread.
 
-## Load-bearing invariants
+## Invariants
 
 Preserve these; the rest is tuning:
 
@@ -149,9 +149,10 @@ Not invariants — v1 shortcuts:
   The system owns one `ID3D12GraphicsCommandList` (reused across windows) plus one `ID3D12CommandAllocator` per window slot, cycled on the window fence.
   Deliberately **not** the shared epoch-gated `dx12_command_allocator_pool`, which is for resources that observe epoch semantics.
 - The per-resource stamps live on `dx12_buffer`: `_pending_async_upload_value` (forward) and `_last_used_submission_token` (reverse), plus the `_upload_group` the forward value is counted on.
-  `track_buffer_access` in [`dx12_command_list.cc`](../../backends/dx12/src/shaped-graphics/backends/dx12/dx12_command_list.cc) folds the pair into `_required_copy_waits`.
+  `track_buffer_access` in [`dx12_command_list.cc`](../../backends/dx12/src/shaped-graphics/backends/dx12/dx12_command_list.cc) records the buffer in the list's touched set.
+  At submit, `fold_transfer_waits` folds each touched buffer's forward value into `_required_copy_waits`.
   That is a list rather than one value, since waits on different timelines cannot be merged into a single maximum.
-  It also records the buffer, so submit stamps the reverse one with the list's token.
+  Submit then stamps the reverse one with the list's token.
   The forward wait is one `_queue->Wait(group->fence, value)` per distinct timeline at command-list submit.
   The reverse wait is `_copy_queue->Wait(_submission_fence, ...)`, issued before a window's copies.
   `stage_job` in [`dx12_upload_async.cc`](../../backends/dx12/src/shaped-graphics/backends/dx12/dx12_upload_async.cc) enforces the window-level acyclicity rule.
@@ -160,7 +161,7 @@ Not invariants — v1 shortcuts:
 - **Async texture copies assume the texture is already in the COMMON layout** — the copy queue can't run layout barriers.
   A freshly-created texture qualifies.
   One left in a shader/attachment layout by a direct-queue list must be transitioned back first, or uploaded inline (`cmd.upload.bytes_to_texture` drives the barrier).
-  There is no way to ask for that transition today, which is what the prepare-for-async command in the [TODO](../TODO.md) adds.
+  `cmd.prepare_for_async` asks for that transition.
 - **Resource lifetime spans the copy queue.**
   The copy queue is decoupled from epochs, so a buffer whose last reference is dropped while an async upload to it is still in flight must not be freed when its epoch retires.
   Deferred deletion carries a second gate: each expiring resource is tagged with the buffer's `_pending_async_upload_value`.

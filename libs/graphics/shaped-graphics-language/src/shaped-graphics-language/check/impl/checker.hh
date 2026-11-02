@@ -51,6 +51,9 @@ struct suffixed_number
 /// until the type it meets is known (CHK-61).
 [[nodiscard]] cc::optional<i64> parse_literal_integer(cc::string_view text);
 
+/// Whether the number literal `text` is written in hex, suffixed or not.
+[[nodiscard]] bool is_hex_literal(cc::string_view text);
+
 /// A name of the function being checked: its parameters, then the locals in scope, in source order.
 struct local_name
 {
@@ -297,6 +300,26 @@ struct footprint_pin
     source_span where;
 };
 
+/// One access of a binding array by index in one entry point's inlined body, which `judge_indices` judges with every
+/// other access the same index text makes (CHK-300, CHK-401).
+struct index_use
+{
+    /// The entry point's function.
+    symbol_id entry = symbol_id::none;
+    /// The index as written, its mark included: what every inlined copy of one access shares.
+    origin index;
+    /// The marked argument where there is a mark, and the index itself where there is none.
+    origin written;
+    builtins::index_mark mark = {};
+    /// Proven the same in every invocation; proven to vary, by what each invocation is handed (CHK-399); or neither.
+    bool is_uniform = false;
+    bool varies = false;
+    /// What made it not uniform, for a note.
+    related_note why;
+    /// The calls this copy was inlined through, outermost first.
+    cc::vector<call_site> through;
+};
+
 /// One `use` line of a file: the name it binds, and the module that name stands for.
 struct module_use
 {
@@ -406,6 +429,8 @@ struct checker
     cc::vector<require_line> require_lines;
     /// Every entry point's footprint pin, judged once the entry points are flattened (CHK-267).
     cc::vector<footprint_pin> footprint_pins;
+    /// Every access of a binding array by index, in each entry point that reaches it.
+    cc::vector<index_use> index_uses;
 
     // ---- shared helpers (check.cc) ----------------------------------------------------------------------------------
 
@@ -459,7 +484,8 @@ struct checker
     void tell_apart(located_diagnostic& d, type_id expected, type_id got);
     void unsupported(i32 file, source_span where, cc::string_view construct);
     /// `report`, unless a diagnostic of that kind already stands there: for what every tree inlining one body finds.
-    void report_once(diagnostic_kind kind, i32 file, source_span where, cc::string_view detail);
+    /// Gives the one standing there or the one made.
+    located_diagnostic& report_once(diagnostic_kind kind, i32 file, source_span where, cc::string_view detail);
     [[nodiscard]] isize error_count() const;
 
     [[nodiscard]] ast::attribute const* find_attribute(i32 file,
@@ -657,6 +683,9 @@ struct checker
     [[nodiscard]] cc::string vector_name_of(type_id element, isize count) const;
     /// The swizzle `name` is of a value of `object`, a count of zero where it is none (CHK-385).
     [[nodiscard]] swizzle swizzle_of(type_id object, cc::string_view name) const;
+    /// The type of one lane of `object` where it is a vector a subscript reads a lane of: a swizzled struct whose every
+    /// field has one type (CHK-395); `none` for any other type.
+    [[nodiscard]] type_id lane_type_of(type_id object) const;
     /// What an unknown member of a `@swizzle` struct says about its letters; empty for any other type.
     [[nodiscard]] cc::string why_no_swizzle(type_id object, cc::string_view name) const;
     /// `buffer[element]`, or its `mut` form, interned: two mentions of one buffer type share an id.
@@ -676,6 +705,8 @@ struct checker
     [[nodiscard]] cc::optional<i32> constant_count(i32 file, ast::expr_id expr);
     /// A checked index's value when it is an int literal or names a `const`; none for anything else.
     [[nodiscard]] cc::optional<i32> constant_index(i32 file, ast::expr_id expr) const;
+    /// The same of a `uint` index: a literal with its `u` suffix, or a `const` of `uint`.
+    [[nodiscard]] cc::optional<i64> constant_unsigned_index(i32 file, ast::expr_id expr) const;
     /// A texture, image or sampler type, interned like `buffer_type`; `info` needs no `spelled`.
     [[nodiscard]] type_id resource_type(type_info info);
     /// `acceleration_structure[.geometry]` (CHK-320).
@@ -694,8 +725,16 @@ struct checker
     type_id check_function_call(function_scope& scope, ast::expr_id id, ast::call const& call, local_name const& local);
     /// The resource type a bare name in a type position names — a depth texture or a sampler — and `none` otherwise.
     [[nodiscard]] type_id resolve_resource_name(i32 file, ast::expr_id expr, cc::string_view text);
-    /// `texture_2d[float4]` or `image_2d[.rgba8_unorm]`; `none` where `node` heads with no texture or image name.
+    /// `texture_2d[float4]` or `image_2d[.rgba8_unorm]`, and the value type `texel[.rgba8_unorm]` (CHK-390); `none`
+    /// where `node` heads with none of those names.
     [[nodiscard]] type_id resolve_resource_applied(i32 file, ast::expr_id expr, ast::index const& node);
+    /// The position in `k_image_formats` an image's argument `argument` names, an enum case or a const of one
+    /// (CHK-200); -1 where it names none, which the caller reports, and `k_format_failed` where the const it names
+    /// failed, which was reported.
+    [[nodiscard]] i32 resolve_image_format(i32 file, ast::expr_id argument);
+    static constexpr i32 k_format_failed = -2;
+    /// `texel[F]`, the scalar or plain vector an image of format `F` loads and stores (CHK-390).
+    [[nodiscard]] type_id resolve_texel(i32 file, ast::expr_id expr, ast::index const& node);
     /// `mut` or `out` in front of `inner`, which only a buffer and an image take.
     [[nodiscard]] type_id qualify_resource(i32 file, ast::expr_id expr, type_id inner, ast::type_access access);
     /// The settings of a `sampler name:` block; a setting that is wrong is reported and left at its default.
@@ -716,6 +755,14 @@ struct checker
     void index_builtin_symbols();
     /// CHK-282: every barrier and every call that takes derivatives stands where all invocations of its group arrive.
     void judge_uniformity(flat_entry_point const& structured);
+    /// CHK-300, CHK-401: every index into a binding array, judged over the copies the entry points inlined of it.
+    void judge_indices();
+    /// CHK-402: one diagnostic for each that several entry points were judged to have alike, which names them all.
+    void merge_entry_diagnostics();
+    /// CHK-403: an entry point that expects a diagnostic is judged by it alone, and is never built.
+    void drop_expecting_entry_points();
+    /// CHK-403: so no pipeline, hit group or callables table names one.
+    void judge_expecting_in_pipelines();
     /// CHK-270, CHK-311 and CHK-312: every constant of the tree folded, and what WGSL would refuse of it reported.
     void judge_constants(flat_entry_point const& structured);
     /// The prelude symbol that declares `id`; `none` for a record no declaration names.
@@ -743,6 +790,19 @@ struct checker
     [[nodiscard]] cc::string sixteen_bit_path(type_id type) const;
     /// CHK-383: refuses each 16-bit value a struct crossing a stage edge holds, reported at `where` of `file`.
     void judge_edge_16_bit(i32 file, source_span where, type_id type);
+    /// The first value of function bodies alone that `type` holds, such as a `mat3`, through struct members, arrays and
+    /// a buffer's element; `path` is empty when it holds none (CHK-397).
+    struct local_only_found
+    {
+        /// `: mat3` for `type` itself, `.inner.basis: mat3` for a member.
+        cc::string path;
+        /// Why no memory holds it yet, from its record.
+        cc::string_view reason;
+        type_id type = type_id::none;
+    };
+    [[nodiscard]] local_only_found local_only_path(type_id type) const;
+    /// CHK-397: refuses a value of function bodies alone a struct crossing a stage edge holds; true where it did.
+    bool judge_edge_local_only(i32 file, source_span where, type_id type);
     /// Marks the first body `require` of each feature of `features` in each of `functions` as used (CHK-265).
     void mark_requires_used(cc::span<symbol_id const> functions, feature_set features);
     /// `unused-require` for every `require` of a body that nothing needed (CHK-265).
@@ -750,8 +810,8 @@ struct checker
 
     // ---- footprint pins (check_footprint.cc) ------------------------------------------------------------------------
 
-    /// Records the `@expect(footprint = "...")` among the attributes of function `id`; any other `@expect` there is
-    /// reported, since a function's only expectation is its footprint.
+    /// Records the `@expect(footprint = "...")` among the attributes of function `id`, and an entry point's expected
+    /// diagnostics (CHK-403); any other `@expect` there is reported.
     void read_footprint_pin(symbol_id id, i32 file, ast::range_of<ast::attribute> attributes, bool is_entry_point);
     /// `unmet-expectation` for every pin whose entry point's footprint says otherwise (CHK-267).
     void judge_footprint_pins();
@@ -851,6 +911,10 @@ struct checker
     void check_test(i32 index);
     /// The flat tree of test `index`, when it checked soundly and all it reaches inlines whole (flatten.cc).
     void flatten_test(i32 index);
+    /// Every module-level name as `out.symbols` now holds them, the last of `out.module_names`, made anew only when a
+    /// symbol joined since `module_names_for`.
+    [[nodiscard]] cc::set<cc::string> const* module_names();
+    isize module_names_for = -1;
     /// True where the parser or the AST pass reported an error inside `extent` of `file`.
     [[nodiscard]] bool has_syntax_error_in(i32 file, source_span extent) const;
     /// The statement that is the last code line of `statements`, through the last branch of an `if`, a loop's body and
@@ -867,10 +931,19 @@ struct checker
     /// `img[xy]`, a texel of `image`: the `load` it reads as, or the place an assignment stores to (CHK-367); or the
     /// atomic of an `@atomic` image's texel (CHK-373).
     [[nodiscard]] type_id check_texel(function_scope& scope, ast::expr_id id, ast::index const& node, type_id image);
+    /// `v[i]`, one lane of the vector `vector`, of type `lane` (CHK-395).
+    [[nodiscard]] type_id check_lane(function_scope& scope, ast::index const& node, type_id vector, type_id lane);
     /// The `store` of an assignment to the texel `check_texel` left in `texel_place`, with `value` of `type` stored.
     void check_texel_store(function_scope& scope, ast::expr_id value, type_id type);
     /// `x as T`, which is the operator function of `as` that takes `x` and gives `T`; the error type where none does.
     [[nodiscard]] type_id check_cast(function_scope& scope, ast::expr_id id, ast::cast const& node);
+    /// The `as` overload visible from `file` that converts `from` to `to`, or `none` where there is no such conversion
+    /// (CHK-197).
+    [[nodiscard]] symbol_id conversion_of(i32 file, source_span where, type_id from, type_id to);
+    /// True where the type `type` of a cast is written `texel[F]`, which alone may change a width (CHK-392).
+    [[nodiscard]] bool is_texel_type_expr(i32 file, ast::expr_id type) const;
+    /// `x as texel[F]` of another type than the texel, `written` being its `texel[F]` (CHK-391, CHK-392).
+    [[nodiscard]] type_id check_texel_conversion(i32 file, ast::expr_id id, type_id from, type_id to, ast::expr_id written);
 
     // ---- statements and control flow (check_stmt.cc) ----------------------------------------------------------------
 
@@ -967,7 +1040,8 @@ struct checker
     /// The length of the chain that converts written argument `i` to `parameter`; nothing where it does not convert.
     [[nodiscard]] cc::optional<i32> chain_of(i32 file, parameter const& taking, call_arguments const& arguments, isize i);
     /// Whether `expr`, already checked, names a place a body could assign, reporting why not; `what` names the use.
-    bool judge_place(function_scope& scope, ast::expr_id expr, cc::string_view what);
+    /// With `quiet_why`, nothing is reported, and why not is written there instead.
+    bool judge_place(function_scope& scope, ast::expr_id expr, cc::string_view what, cc::string* quiet_why = nullptr);
     /// The chain of tuple or object literal `literal` to `to`: one more than its call's longest (CHK-84).
     [[nodiscard]] cc::optional<i32> literal_chain(i32 file, type_id to, i32 literal);
     /// The functions of the name of the struct `to` visible from `file`, its synthesized constructor among them.
@@ -978,8 +1052,13 @@ struct checker
     [[nodiscard]] bool holds(number_literal const& n, type_id to) const;
     /// The prelude's `float`, `int` or `uint` by name, as a literal's conversion knows them; `none` for another name.
     [[nodiscard]] type_id prelude_type(cc::string_view name) const;
-    /// What a number literal `expr` holds; `is_number` is false for any other expression.
+    /// What a number literal `expr` holds, or an operator over number literals alone folds to (CHK-394); `is_number`
+    /// is false for any other expression.
     [[nodiscard]] number_literal number_of(i32 file, ast::expr_id expr) const;
+    /// Whether the operator call `expr` resolved to a builtin of the prelude, which alone CHK-394 folds.
+    [[nodiscard]] bool calls_prelude_operator(i32 file, ast::expr_id expr) const;
+    /// What a comparison of number literals alone folds to (CHK-394); none for any other expression.
+    [[nodiscard]] cc::optional<bool> comparison_of(i32 file, ast::expr_id expr) const;
     /// The elements of tuple or object literal `expr`, checked where they are no literal themselves, into `literals`.
     [[nodiscard]] i32 shape_literal(function_scope& scope, ast::expr_id expr);
     /// Converts literal `expr`, shaped as `literal`, to `to` by a call of `to`'s name (CHK-81, CHK-85).
@@ -1005,6 +1084,16 @@ struct checker
                           ast::expr_id call,
                           cc::span<symbol_id const> candidates,
                           call_arguments const& arguments);
+    /// What a call that matched none of `candidates` was one step from, as a clause its detail ends in; empty for none.
+    /// A candidate that a `mut` mark alone keeps from matching names the mark (CHK-316).
+    /// One whose first parameter is a condition, and that the arguments would match with the last one moved to the
+    /// front, says that the condition comes first, as WGSL's `select` does not have it (CHK-365).
+    /// A missing mark is named only where its argument is a place, and several marks or a dot call show the whole call.
+    [[nodiscard]] cc::string miss_hint(function_scope& scope,
+                                       ast::expr_id callee,
+                                       cc::span<symbol_id const> candidates,
+                                       call_arguments const& arguments,
+                                       cc::string_view spelling);
     /// Remembers how call `id` fills the parameters of `callee`, which is what the flat tree is written from.
     void record_call(i32 file,
                      ast::expr_id id,

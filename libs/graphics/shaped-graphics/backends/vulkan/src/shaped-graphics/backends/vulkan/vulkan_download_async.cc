@@ -144,7 +144,7 @@ void vulkan_download_async_system::admit(vulkan_async_download_job job)
     // The ordering family is the SOURCE resource.
     // Two readbacks of one source reserved their completion values in enqueue order, and a timeline only moves
     // forwards — so they have to run in that order.
-    // Two readbacks of different sources have no such constraint, and that freedom is the whole point of scheduling.
+    // Two readbacks of different sources have no such constraint, which leaves the scheduler free to reorder them.
     auto const* const family_key = job.is_texture ? static_cast<void const*>(job.texture_source.get())
                                                   : static_cast<void const*>(job.buffer_source.get());
     job.family = u64(reinterpret_cast<uintptr_t>(family_key));
@@ -327,7 +327,7 @@ bool vulkan_download_async_system::run_one_window()
                 // No image barrier at all: the layout this copy needs was settled before the transfer was enqueued —
                 // by the direct queue, or for a fresh texture by an upload's own transition submit — and the semaphore
                 // waits that order this submit after those also make their writes visible here.
-                // That is the whole point of settling the layout up front — a transfer that claims no layout has none
+                // Settling the layout up front means a transfer that claims no layout has none
                 // for the validation layer to disagree with, and it reads submit-call order rather than GPU order.
                 auto const range = sg::subresource_range(job.subresource);
 
@@ -504,7 +504,7 @@ bool vulkan_download_async_system::run_one_window()
 
     if (done >= job.size_in_bytes)
     {
-        // The future settles BEFORE the stream control, and the order is load-bearing.
+        // The future settles BEFORE the stream control, and the order is fixed.
         // A caller waits on the handle's completion and then reads its future, so settling the control first leaves a
         // window where the transfer says it is done and the bytes are not there yet — a race a test loses only
         // intermittently, which is the worst kind to ship.
@@ -673,8 +673,8 @@ sg::stream_download_handle vulkan_download_async_system::stream_to_sink_buffer(s
     auto control = make_stream_control(src, value);
     control->total_hint.store(i64(size_in_bytes), std::memory_order_relaxed);
 
-    // A sink-driven readback exposes no future: there is no resident destination, which is the whole point of
-    // having a sink, so handing back a future over an empty buffer would be a lie the caller could act on.
+    // A sink-driven readback exposes no future: with a sink there is no resident destination,
+    // so handing back a future over an empty buffer would be a lie the caller could act on.
     auto future = has_sink ? sg::bytes_future() : sg::bytes_future(cc::pinned_data<byte const>(dst), completion, nullptr);
 
     if (size_in_bytes == 0)

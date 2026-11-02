@@ -45,7 +45,7 @@ TEST("sgl check - a case that covers less than every case needs a _")
                                       "        .point => 1.0\n"
                                       "        .spot => 0.5\n"))
               .contains("non-exhaustive-case"));
-    // The detail names what nobody matched, which is the whole point of reporting it.
+    // The detail names what nobody matched, so the report says which case is missing.
     CHECK(reports_for(over_light_kind("    return case k:\n"
                                       "        .point => 1.0\n"
                                       "        .spot => 0.5\n"))

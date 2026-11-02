@@ -6,8 +6,7 @@
 #include <clean-core/container/set.hh>
 #include <clean-core/container/span.hh>
 #include <clean-core/streams/file_stream.hh>
-#include <shaped-linter/lex/lexer.hh>
-#include <shaped-linter/lex/python_lexer.hh>
+#include <shaped-linter/lex/comment_lexer.hh>
 #include <shaped-linter/lex/source_language.hh>
 #include <shaped-linter/parse/parser.hh>
 #include <shaped-linter/parse/syntax_tree.hh>
@@ -37,9 +36,9 @@ cc::vector<finding> run_rules(source_buffer const& buffer, cc::span<rule const> 
         return out;
 
     token_stream ts; // markdown has no lexer, and no rule asks it for tokens
-    if (language == source_language::cpp || language == source_language::python)
+    if (language != source_language::markdown)
     {
-        auto tokens = language == source_language::cpp ? lex(buffer) : lex_python(buffer);
+        auto tokens = lex_for(buffer, language);
         if (tokens.has_error())
             return out; // lexing is effectively infallible; nothing to lint if it somehow fails
         ts = cc::move(tokens.value());
@@ -131,7 +130,8 @@ cc::vector<text_edit> collect_fix_edits(cc::span<finding const> findings)
 
     for (auto const& f : findings)
     {
-        // Only `suggested_fix`. A finding's `suggested_hint` is never read here — that is the whole
+        // Only `suggested_fix`.
+        // A finding's `suggested_hint` is never read here — that is the whole
         // distinction between the two, so it is enforced by this loop and nothing else.
         if (!f.suggested_fix.has_value())
             continue;

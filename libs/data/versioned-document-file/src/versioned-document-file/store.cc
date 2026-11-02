@@ -98,7 +98,7 @@ struct pending_graph
 /// Would every op behind `head` have its payload once the batch lands?
 ///
 /// An ancestor that is MISSING counts as incomplete just as a skeleton does: replaying over a hole is lossy in exactly
-/// the same way, so a snapshot standing over one is still load-bearing.
+/// the same way, so a snapshot standing over one is still required.
 [[nodiscard]] bool ancestry_is_complete(pending_graph const& pending, vdoc::op_id const& head)
 {
     auto seen = cc::set<vdoc::op_id>();

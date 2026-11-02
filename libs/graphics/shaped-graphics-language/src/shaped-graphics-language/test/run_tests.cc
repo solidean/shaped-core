@@ -395,12 +395,14 @@ void sgl::test::contain_expected(checked_module const& m, cc::vector<located_dia
 
         // Every diagnostic inside the test is its own: one expected error usually brings others with it, and the test
         // exists to show the one it names is reported, whatever else is.
+        // Unless one it names is not: what it captured is then the likeliest reason, and is reported after all.
         auto captured = cc::vector<located_diagnostic>();
         for (auto const& d : diagnostics)
             if (is_inside(d))
                 captured.push_back(d);
         diagnostics.remove_all_where(is_inside);
 
+        auto any_unmet = false;
         for (auto const& e : test.expectations)
         {
             if (e.kind != expectation_kind::error && e.kind != expectation_kind::warning)
@@ -411,6 +413,7 @@ void sgl::test::contain_expected(checked_module const& m, cc::vector<located_dia
                 is_met = is_met
                       || ((d.what.level == severity::warning) == wants_warning
                           && cc::glob_matches(e.pattern, to_string(d.what.kind), cc::glob_option::text));
+            any_unmet = any_unmet || !is_met;
             if (!is_met)
                 diagnostics.push_back({
                     .what = {.kind = diagnostic_kind::unmet_expectation,
@@ -419,6 +422,48 @@ void sgl::test::contain_expected(checked_module const& m, cc::vector<located_dia
                     .file = test.file,
                     .detail
                     = cc::format("no {} of kind {} stands in this test", wants_warning ? "warning" : "error", e.pattern),
+                });
+        }
+        if (any_unmet)
+            for (auto& d : captured)
+                diagnostics.push_back(cc::move(d));
+    }
+
+    // CHK-403: an entry point takes the diagnostics judged of its inlined body, which a compile of it would report
+    auto expecting = cc::vector<symbol_id>();
+    for (auto const& x : m.entry_expectations)
+        if (!expecting.values().contains(x.function))
+            expecting.push_back(x.function);
+    for (auto const function : expecting)
+    {
+        auto captured = cc::vector<located_diagnostic>();
+        for (auto const& d : diagnostics)
+            if (d.entry_points.values().contains(function))
+                captured.push_back(d);
+        // one that another entry point has too stays that one's
+        diagnostics.remove_all_where([&](located_diagnostic const& d)
+                                     { return d.entry_points.size() == 1 && d.entry_points[0] == function; });
+        for (auto& d : diagnostics)
+            d.entry_points.remove_all_where([&](symbol_id e) { return e == function; });
+
+        for (auto const& x : m.entry_expectations)
+        {
+            if (x.function != function)
+                continue;
+            auto const wants_warning = x.expectation.kind == expectation_kind::warning;
+            auto is_met = false;
+            for (auto const& d : captured)
+                is_met = is_met
+                      || ((d.what.level == severity::warning) == wants_warning
+                          && cc::glob_matches(x.expectation.pattern, to_string(d.what.kind), cc::glob_option::text));
+            if (!is_met)
+                diagnostics.push_back({
+                    .what = {.kind = diagnostic_kind::unmet_expectation,
+                             .level = default_severity_of(diagnostic_kind::unmet_expectation),
+                             .where = x.expectation.where},
+                    .file = x.file,
+                    .detail = cc::format("no {} of kind {} is judged of this entry point",
+                                         wants_warning ? "warning" : "error", x.expectation.pattern),
                 });
         }
     }

@@ -14,6 +14,7 @@
 #include <clean-core/math/random.hh>
 #include <clean-core/memory/unique_ptr.hh>
 #include <clean-core/platform/resource_limits.hh>
+#include <clean-core/platform/stacktrace.hh> // the releases SC_ASYNC_AMBIENT_TRACE reports
 #include <clean-core/record/async_scope.hh>
 #include <clean-core/string/format.hh>
 #include <clean-core/string/print.hh>
@@ -502,6 +503,8 @@ cc::mutex<cc::vector<cc::unique_ptr<test_context>>> g_leaked_contexts;
 // When non-null, check results are tallied here instead of being recorded on the active test
 // (see nx::impl::scoped_check_capture). Only the innermost installed sink is active.
 thread_local nx::impl::check_capture_sink* g_check_capture = nullptr;
+// The test that installed g_check_capture, or null where none runs; only its checks are captured.
+thread_local void const* g_check_capture_owner = nullptr;
 
 // Does one scope (a single filter path) permit `section_name` opening at the current section path?
 bool scope_allows(cc::span<test_section* const> curr_section,
@@ -662,25 +665,121 @@ void begin_pass(test_context& ctx)
     return nx::impl::has_log_records(owners);
 }
 
+/// The async work still carrying a test's context as a pass ends, and what the build could learn about who holds it.
+struct leftover_work
+{
+    /// Holders beyond the test's own reference.
+    i32 outstanding = 0;
+    /// With CC_ASYNC_AMBIENT_TRACE, whether they let go within the wait, and the stack of each release from the count on.
+    cc::vector<cc::string> detail;
+};
+
+#if CC_ASYNC_AMBIENT_TRACE
+/// How long a pass with leftover work waits for it to let go, so the report names who held it.
+/// A straggler lets go within microseconds; a real leak waits it out, and nexus' own tests hold several on purpose.
+constexpr double leftover_watch_secs = 0.25;
+
+/// The releases of a test's link from its count on, each with the stack it came from.
+struct leftover_watch
+{
+    struct release
+    {
+        i32 left = 0;
+        cc::stacktrace stack;
+    };
+    cc::mutex<cc::vector<release>> releases;
+};
+
+/// The watch's hook: captures the stack and nothing else, since it may run under an async node's lock.
+/// Rendering waits for the unwatch, outside any release.
+void record_leftover_release(void const*, i32 left, void* user)
+{
+    auto stack = cc::stacktrace::current(1);
+    static_cast<leftover_watch*>(user)->releases.lock([&](cc::vector<leftover_watch::release>& r)
+                                                      { r.push_back({.left = left, .stack = cc::move(stack)}); });
+}
+#endif
+
+/// Counts the work still carrying `head` beyond its owner's reference.
+/// With CC_ASYNC_AMBIENT_TRACE, leftover work is watched for leftover_watch_secs, and each release it makes is reported with its stack.
+/// The wait does not change the verdict: work there at the count failed the pass, whether it let go a microsecond later or never.
+[[nodiscard]] leftover_work count_leftover_work(void const* head)
+{
+    auto result = leftover_work();
+#if CC_ASYNC_AMBIENT_TRACE
+    // Armed before the count, so a release right after it is seen; one just before it may be reported too.
+    auto watch = leftover_watch();
+    auto const watching = cc::async_ambient_watch_releases(head, record_leftover_release, &watch);
+    result.outstanding = cc::async_ambient_outstanding(head);
+    if (!watching)
+        return result;
+    if (result.outstanding == 0)
+    {
+        cc::async_ambient_unwatch_releases(head);
+        return result;
+    }
+
+    // Yielded rather than slept: what this catches mostly lets go within microseconds, and a sleep's tick is milliseconds.
+    // Work homed on this very thread cannot run while it waits, and reads as held after the full wait.
+    auto const started = cc::current_time_steady_secs();
+    while (cc::async_ambient_outstanding(head) > 0 && cc::current_time_steady_secs() - started < leftover_watch_secs)
+        cc::this_thread_yield();
+    auto const waited_ms = (cc::current_time_steady_secs() - started) * 1000.0;
+    auto const still_held = cc::async_ambient_outstanding(head);
+    cc::async_ambient_unwatch_releases(head);
+
+    if (still_held > 0)
+        result.detail.push_back(
+            cc::format("{} of them still held it after {:.0f} ms (SC_ASYNC_AMBIENT_TRACE)", still_held, waited_ms));
+    else
+        result.detail.push_back(cc::format("all of them let go within {:.3f} ms (SC_ASYNC_AMBIENT_TRACE)", waited_ms));
+    watch.releases.lock(
+        [&](cc::vector<leftover_watch::release>& releases)
+        {
+            for (auto const& r : releases)
+            {
+                result.detail.push_back(cc::format("released, {} holder(s) left, by:", r.left));
+#if CC_HAS_STACKTRACE
+                result.detail.push_back(cc::to_string(r.stack));
+#else
+                result.detail.push_back("  <no stack: this toolchain has no <stacktrace>>");
+#endif
+            }
+        });
+#else
+    result.outstanding = cc::async_ambient_outstanding(head);
+#endif
+    return result;
+}
+
 /// Record that a test ended a pass with async work still carrying its context.
 ///
 /// That work will run during a LATER pass or test and report there, so it is interference rather than cleanup someone else will do.
 /// Reported as a failure naming this test, which is the policy cc deliberately leaves to us.
-void note_leaked_async_work(test_context& ctx, nx::test_declaration const& decl, i32 outstanding)
+void note_leaked_async_work(test_context& ctx, nx::test_declaration const& decl, leftover_work const& leftover)
 {
+    auto const outstanding = leftover.outstanding;
     // Said on the console as well, as a failed check is: the run's summary names only the test, not why it failed.
+    // The detail too, since a failure's report shows its expanded line alone; SC_ASYNC_AMBIENT_TRACE's stacks are read here.
     if (is_outermost_execution())
+    {
         CC_LOG_ERROR("\"{}\" left async work running — {} async item(s) still carry its context; await or cancel them",
                      decl.name, outstanding);
+        for (auto const& line : leftover.detail)
+            CC_LOG_ERROR("  {}", line);
+    }
     ctx.off_thread_failed_checks.fetch_add(1, cc::memory_order_relaxed);
     ctx.off_thread_errors.lock(
         [&](cc::vector<test_error>& errors)
         {
+            auto lines = cc::vector<cc::string>{"the work carries this test's context and would report into its next "
+                                                "section or the next test's run — await or cancel it"};
+            for (auto const& line : leftover.detail)
+                lines.push_back(line);
             errors.push_back(test_error{
                 .expr = cc::format("\"{}\" left async work running", decl.name),
                 .location = decl.location,
-                .extra_lines = {"the work carries this test's context and would report into its next section or the "
-                                "next test's run — await or cancel it"},
+                .extra_lines = cc::move(lines),
                 .expanded = cc::format("{} async item(s) still carry this test's context", outstanding),
             });
         });
@@ -704,12 +803,15 @@ bool find_section_path(test_section const& at, test_section const& target, cc::v
 /// File the pass that just ended under its leaf, and say whether another one runs.
 ///
 /// Everything the pass reported belongs to it, whoever reported it: the body's own plain counters and the side path both.
-/// `outstanding` is how much async work still carries the test's link now that the pass's body is gone; any at all
+/// `leftover` is the async work still carrying the test's link now that the pass's body is gone; any at all
 /// fails this pass and ends the test, since that work would otherwise report into the next pass's leaf.
-[[nodiscard]] bool end_pass(test_context& ctx, nx::test_declaration const& decl, double pass_started_at, i32 outstanding)
+[[nodiscard]] bool end_pass(test_context& ctx,
+                            nx::test_declaration const& decl,
+                            double pass_started_at,
+                            leftover_work const& leftover)
 {
-    if (outstanding > 0)
-        note_leaked_async_work(ctx, decl, outstanding);
+    if (leftover.outstanding > 0)
+        note_leaked_async_work(ctx, decl, leftover);
 
     auto* const sec = ctx.leaf_section != nullptr ? ctx.leaf_section : ctx.root_section.get();
     sec->duration_seconds = cc::current_time_steady_secs() - pass_started_at;
@@ -739,7 +841,7 @@ bool find_section_path(test_section const& at, test_section const& target, cc::v
 
     // The cap and a section misuse end the TEST, not just the pass that hit them.
     // A bare throw would unwind this pass and the replay would go on to the next section.
-    auto const stopped = outstanding > 0 || ctx.aborted_by_failure_cap.load(cc::memory_order_acquire)
+    auto const stopped = leftover.outstanding > 0 || ctx.aborted_by_failure_cap.load(cc::memory_order_acquire)
                       || ctx.aborted_by_section_misuse.load(cc::memory_order_acquire);
     return !explored && !stopped;
 }
@@ -922,8 +1024,7 @@ void report_orphan_check(impl::check_result result, cc::string_view why)
     g_orphan_checks.fetch_add(1, cc::memory_order_relaxed);
 
     auto expanded = render_expanded(result);
-    cc::eprintln("nexus: unattributed check at {}:{}: {} ({})", result.location.file_name(), result.location.line(),
-                 expanded, why);
+    cc::eprintln("nexus: unattributed check at {}: {} ({})", nx::impl::site_text(result.location), expanded, why);
 
     g_orphan_errors.lock(
         [&](cc::vector<nx::test_error>& errors)
@@ -1214,9 +1315,9 @@ void start_async_pass(async_test_state& state)
     state.pass_ambient = {};
 
     // `ambient` holds exactly one reference; anything beyond it is work that outlived the pass still naming the test.
-    auto const outstanding = cc::async_ambient_outstanding(state.ambient.head());
-    state.leaked = outstanding > 0;
-    return end_pass(ctx, decl, state.pass_started_at, outstanding);
+    auto const leftover = count_leftover_work(state.ambient.head());
+    state.leaked = leftover.outstanding > 0;
+    return end_pass(ctx, decl, state.pass_started_at, leftover);
 }
 
 /// Fold an async test's outcome into its execution and drop its context.
@@ -1507,15 +1608,16 @@ nx::impl::raii_section_opener::~raii_section_opener()
 }
 
 nx::impl::scoped_check_capture::scoped_check_capture(check_capture_sink& sink)
+  : _previous_sink(g_check_capture), _previous_owner(g_check_capture_owner)
 {
-    // Nesting is not supported: a flat pointer keeps the hot path cheap, and the fuzz engine never nests captures.
-    CC_ASSERT(g_check_capture == nullptr, "nested check captures are not supported");
     g_check_capture = &sink;
+    g_check_capture_owner = current_context();
 }
 
 nx::impl::scoped_check_capture::~scoped_check_capture()
 {
-    g_check_capture = nullptr;
+    g_check_capture = _previous_sink;
+    g_check_capture_owner = _previous_owner;
 }
 
 nx::impl::scoped_test_check_divert::scoped_test_check_divert(async_check_capture_sink& sink) : _ctx(current_context())
@@ -1837,7 +1939,8 @@ void nx::impl::report_check_result(check_result result)
     // Capture mode: a tool such as the fuzz engine is driving user code that is expected to fail often.
     // Tally the outcome and suppress both the host-test side effects and the control-flow throws (REQUIRE/SKIP).
     // One failing operation then neither aborts nor pollutes the host test.
-    if (g_check_capture != nullptr)
+    // Only the capturing test's own checks: another test's body polled on this thread while it blocks is not its to swallow.
+    if (g_check_capture != nullptr && current_context() == g_check_capture_owner)
     {
         auto& sink = *g_check_capture;
         ++sink.executed;
@@ -1908,8 +2011,8 @@ void nx::impl::report_check_result(check_result result)
     {
         // Recorded before the divert, so an off-thread failure reaches the test's `.ccrec` like any other.
         if (!result.passed && result.op != cmp_op::skip && is_outermost_execution())
-            CC_LOG_ERROR("check failed off-thread: {} — {} at {}:{}", result.expr, render_expanded(result),
-                         result.location.file_name(), result.location.line());
+            CC_LOG_ERROR("check failed off-thread: {} — {} at {}", result.expr, render_expanded(result),
+                         nx::impl::site_text(result.location));
 
         report_off_thread_check_result(ctx, cc::move(result));
         return;
@@ -1937,11 +2040,10 @@ void nx::impl::report_check_result(check_result result)
         // under test recorded around it — which is what a failing run's .ccrec is for.
         //
         // Only FAILURES reach here: a passing check returns above, and the fuzz engine's capture sink diverts long
-        // before this, which matters when one fuzz test evaluates tens of millions of them.
+        // before this, so a fuzz test evaluating tens of millions of them never pays for it.
         // A nested run is excluded too — see g_execution_depth.
         if (is_outermost_execution())
-            CC_LOG_ERROR("check failed: {} — {} at {}:{}", result.expr, expanded, result.location.file_name(),
-                         result.location.line());
+            CC_LOG_ERROR("check failed: {} — {} at {}", result.expr, expanded, nx::impl::site_text(result.location));
 
         // Add test error
         ctx.errors.push_back(test_error{
@@ -2271,9 +2373,9 @@ void nx::impl::run_test_body(nx::test_execution& execution,
                 }
             }
 
-            auto const outstanding = test_ambient.outstanding();
-            leaked_async_work = outstanding > 0;
-            should_continue = end_pass(ctx, decl, t_section_start, outstanding);
+            auto const leftover = count_leftover_work(test_ambient.link());
+            leaked_async_work = leftover.outstanding > 0;
+            should_continue = end_pass(ctx, decl, t_section_start, leftover);
         }
     }
 
@@ -2537,6 +2639,8 @@ cc::shared_async<cc::unit> make_test_node(nx::test_execution* execution,
     auto const& test_config = execution->instance.declaration->test_config;
     CC_ASSERT(test_config.exclusion_tag_count <= nx::config::max_exclusion_tags,
               "a test asked for more exclusion tags than nx::config::max_exclusion_tags holds");
+    CC_ASSERT(test_config.rerun_on_count <= nx::config::max_rerun_on_globs, "a test asked for more rerun_on globs than "
+                                                                            "nx::config::max_rerun_on_globs holds");
 
     cc::vector<cc::async_mutex<cc::unit>*> tag_locks;
     {
@@ -3283,4 +3387,12 @@ u64 nx::test_seed()
 cc::random nx::test_random()
 {
     return cc::random(nx::test_seed());
+}
+
+cc::string nx::impl::site_text(cc::source_location const& location)
+{
+    if constexpr (CC_SOURCE_SITES == 2)
+        return cc::format("{}:{}", location.file_name(), location.line());
+    else
+        return cc::describe_site(location);
 }

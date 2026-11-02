@@ -1,0 +1,155 @@
+// One pass of edge-avoiding à-trous wavelet denoising (Dammertz et al. 2010).
+// Paired with sr::atrous_denoise_routine, which dispatches this once per pass with the tap spacing doubling each time.
+//
+// Every pass is a 5x5 B3-spline kernel whose taps sit `step` pixels apart, each weighted down by how much its normal, depth and luminance disagree with the center's.
+// A tap across an edge in any of the three counts for nothing, which keeps edges sharp while flat regions average wide.
+//
+// The luminance edge-stop is relative to the noise the input is expected to carry.
+// `luminance_scale` is the caller's sigma times 1/sqrt(sample count).
+// So a one-sample frame is smoothed hard and a deep mean is averaged only across differences a few of its own, much smaller, noise widths wide.
+// With `has_sample_counts` the count is per pixel instead, and the 1/sqrt is taken here at the center pixel.
+//
+// Guides are optional.
+// A missing one is bound to the color texture as a stand-in with its flag clear, so every slot of the binding is filled and the shader never reads what the flag says is not there.
+
+require extended_image_formats
+
+// the format of the image a pass writes: the routine's scratch between passes, the caller's output on the last
+@option const target_format: pixel_format = .rgba32_float
+
+const has_albedo = 1u
+const has_normal = 2u
+const has_depth = 4u
+// this pass reads raw color and divides the albedo out
+const demodulate_in = 8u
+// this pass multiplies the albedo back in before writing
+const remodulate_out = 16u
+const has_specular_albedo = 32u
+// `sample_counts` holds each pixel's sample count in red
+const has_sample_counts = 64u
+
+// A zero albedo would make demodulation divide by zero, and clamping both directions by the same floor keeps the round trip exact.
+const albedo_floor = 0.001
+
+@inline binding atrous_constants:
+    // tap spacing in pixels: 1, 2, 4, ...
+    step: int
+    // the bits above
+    flags: uint
+    // the luminance edge-stop's width, relative to the pixel's own luminance
+    luminance_scale: float
+    // exponent on dot(n_p, n_q)
+    normal_power: float
+    // allowed depth difference, as a fraction of the center's depth per pixel of tap distance
+    depth_sigma: float
+
+binding atrous_images:
+    @unfilterable
+    source: texture_2d[float4]
+    @unfilterable
+    albedo: texture_2d[float4]
+    @unfilterable
+    specular_albedo: texture_2d[float4]
+    @unfilterable
+    normal: texture_2d[float4]
+    @unfilterable
+    depth: texture_2d[float4]
+    @unfilterable
+    sample_counts: texture_2d[float4]
+    target: out image_2d[target_format]
+
+fun is_set(flag: uint){atrous_constants} => (atrous_constants.flags & flag) != 0u
+
+fun luminance(c: float3) => dot(c, float3(0.2126, 0.7152, 0.0722))
+
+// The surface's total reflectance: this filters unsplit radiance, so a metal's color is in the specular half.
+fun albedo_at(p: int2){atrous_images, atrous_constants} -> float3:
+    let mut a = atrous_images.albedo.load(p).xyz
+    if is_set(has_specular_albedo):
+        a += atrous_images.specular_albedo.load(p).xyz
+    return max(a, float3(albedo_floor))
+
+// The source's color at `p`, in the space this pass filters in: divided by the albedo on the first pass when asked.
+fun source_at(p: int2){atrous_images, atrous_constants} -> float4:
+    let c = atrous_images.source.load(p)
+    if is_set(demodulate_in):
+        return float4(..(c.xyz / albedo_at(p)), c.w)
+    return c
+
+@compute(8, 8) fun main_cs(@thread_id id: int3){atrous_images, atrous_constants}:
+    let size = atrous_images.target.size()
+    if id.x >= size.x or id.y >= size.y => return
+
+    let p = id.xy
+    let center = source_at(p)
+    let center_lum = luminance(center.xyz)
+
+    // A zero normal is a pixel with no surface (a missed ray): it averages only with other such pixels, as depth does.
+    let mut center_normal = float3(0.0)
+    let mut center_has_normal = false
+    if is_set(has_normal):
+        let n = atrous_images.normal.load(p).xyz
+        center_has_normal = dot(n, n) > 0.0
+        center_normal = if center_has_normal => normalize(n) else n
+
+    let mut center_depth = 0.0
+    if is_set(has_depth):
+        center_depth = atrous_images.depth.load(p).x
+
+    // Relative, so the edge-stop means the same thing for a dim corner and a bright highlight.
+    // The additive floor keeps a black pixel from refusing every neighbor.
+    let mut luminance_scale = atrous_constants.luminance_scale
+    if is_set(has_sample_counts):
+        luminance_scale /= sqrt(max(atrous_images.sample_counts.load(p).x, 1.0))
+    let lum_width = luminance_scale * (abs(center_lum) + 0.01) + 0.000001
+
+    let kernel = [1.0 / 16.0, 1.0 / 4.0, 3.0 / 8.0, 1.0 / 4.0, 1.0 / 16.0]
+
+    let mut sum = float3(0.0)
+    let mut weight_sum = 0.0
+    @unroll
+    for dy in -2 ..< 3:
+        @unroll
+        for dx in -2 ..< 3:
+            let offset = int2(dx, dy) * atrous_constants.step
+            let q = p + offset
+            if any(q < int2(0)) or any(q >= size) => continue
+
+            let c = source_at(q)
+            let mut w = kernel[dx + 2] * kernel[dy + 2]
+
+            // Gaussian rather than exponential in the difference.
+            // A tap several noise widths away must count for nothing, or a converged mean's detail is averaged away by the long tail of many such taps.
+            let lum_ratio = (luminance(c.xyz) - center_lum) / lum_width
+            w *= exp(-lum_ratio * lum_ratio)
+
+            if is_set(has_normal):
+                let n = atrous_images.normal.load(q).xyz
+                let tap_has_normal = dot(n, n) > 0.0
+                if center_has_normal != tap_has_normal:
+                    w = 0.0
+                else if center_has_normal:
+                    w *= pow(saturate(dot(center_normal, normalize(n))), atrous_constants.normal_power)
+
+            if is_set(has_depth):
+                let d = atrous_images.depth.load(q).x
+                let center_missed = center_depth <= 0.0
+                let tap_missed = d <= 0.0
+                if center_missed != tap_missed:
+                    // the sky and a surface never average into each other
+                    w = 0.0
+                else if not center_missed:
+                    let distance = length(float2(offset.x as float, offset.y as float))
+                    let allowed = atrous_constants.depth_sigma * center_depth * distance + 0.00001
+                    w *= exp(-abs(d - center_depth) / allowed)
+
+            sum += c.xyz * w
+            weight_sum += w
+
+    // The center always passes its own edge-stops, so it contributes at least kernel[2]^2 and weight_sum is never zero.
+    let mut result = sum / weight_sum
+
+    if is_set(remodulate_out):
+        result *= albedo_at(p)
+
+    atrous_images.target[id.xy] = float4(..result, center.w) as texel[target_format]

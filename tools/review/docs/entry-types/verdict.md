@@ -29,7 +29,7 @@ So the last entry says it plainly, and it is allowed to be long.
 
 Write it after the findings, because it should be informed by them — but it is not their sum.
 A change with six real bugs can still be the right shape, and a change with none can still be the wrong one.
-Saying both is the point.
+The verdict says which, alongside the findings.
 
 ## What to leave out
 

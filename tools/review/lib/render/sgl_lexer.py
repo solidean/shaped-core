@@ -51,7 +51,8 @@ _OPERATOR = re.compile(r"\.\.[!+\-*/%=<>?&^|~]*|[!+\-*/%=<>?&^|~]+")
 _SPACE = re.compile(r"[ \t]+")
 _ESCAPE = re.compile(r"\\.")
 # What may follow a digit-led symbol to keep it one number: a fraction (never the `..` of a range), and a
-# signed exponent once the part before it ends in `e` or `p`. The real tokenizer leaves these as separate fused
+# signed exponent once the part before it ends in `e` or `p`.
+# The real tokenizer leaves these as separate fused
 # tokens for the form phase to assemble; a highlighter has no later phase, so it assembles them here.
 _FRACTION = re.compile(r"[.](?![.])[0-9][0-9A-Za-z_']*")
 _EXPONENT = re.compile(r"(?<=[eEpP])[+-][0-9][0-9A-Za-z_']*")

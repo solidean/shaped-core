@@ -7,6 +7,7 @@ That is generator-agnostic and needs no project-specific knowledge — no `bin/`
 from __future__ import annotations
 
 import json
+import os
 from collections.abc import Callable
 from pathlib import Path
 
@@ -38,6 +39,19 @@ def _reply_dir(build_dir: Path) -> Path:
     return build_dir / _API_DIR / "reply"
 
 
+def _read_json(path: Path) -> dict:
+    """Parse one reply file, which may lie past Windows' 260-character path limit.
+
+    A reply names each file after its target, so a build dir nested in a worktree crosses the limit by itself.
+    The extended form of an absolute path, `\\\\?\\` in front, is exempt from the limit whether or not the machine enables long paths.
+    """
+    name = str(path.resolve())
+    if os.name == "nt" and not name.startswith("\\\\?\\"):
+        name = "\\\\?\\" + name
+    with open(name, encoding="utf-8") as f:
+        return json.load(f)
+
+
 def _load_index(build_dir: Path) -> dict:
     reply_dir = _reply_dir(build_dir)
     indices = sorted(reply_dir.glob("index-*.json"))
@@ -45,8 +59,7 @@ def _load_index(build_dir: Path) -> dict:
         raise NotConfiguredError(
             f"No CMake File API reply in {reply_dir}. Run configure first."
         )
-    with open(indices[-1], encoding="utf-8") as f:
-        return json.load(f)
+    return _read_json(indices[-1])
 
 
 def _codemodel_file(build_dir: Path, index: dict) -> Path:
@@ -92,16 +105,14 @@ def load_target_models(build_dir: Path, build_type: str) -> dict[str, dict]:
     """
     index = _load_index(build_dir)
     codemodel_path = _codemodel_file(build_dir, index)
-    with open(codemodel_path, encoding="utf-8") as f:
-        codemodel = json.load(f)
+    codemodel = _read_json(codemodel_path)
 
     config = _pick_configuration(codemodel, build_type)
     reply_dir = _reply_dir(build_dir)
 
     models: dict[str, dict] = {}
     for ref in config.get("targets", []):
-        with open(reply_dir / ref["jsonFile"], encoding="utf-8") as f:
-            target_data = json.load(f)
+        target_data = _read_json(reply_dir / ref["jsonFile"])
         name = target_data["name"]
         if name not in models:
             models[name] = target_data

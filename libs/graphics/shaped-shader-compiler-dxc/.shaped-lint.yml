@@ -27,7 +27,7 @@ rules:
 
   - kind: allow-include
     value: [<string>, <vector>]
-    reason: "TODO: DXC's C++ API takes std::wstring arguments and returns std::vector; migrate the parts that are ours to cc::"
+    reason: "DXC's C++ API takes std::wstring arguments and returns std::vector; migrate the parts that are ours to cc::"
     files: src/**
 
   - kind: allow-blocking-wait

@@ -70,7 +70,7 @@ TEST("babel/recording - a json parse is scoped only once it is big enough",
     cc::rec::recording_listener rl;
     auto const handle = cc::rec::register_listener(rl);
 
-    // Small: a value rather than a document, and gating it is the whole point of CC_RECORD_SCOPE_IF.
+    // Small: a value rather than a document, so CC_RECORD_SCOPE_IF gates it out.
     (void)babel::json::read(cc::string_view("{\"a\":1}"));
 
     // Big: comfortably past the threshold, so it earns a span.

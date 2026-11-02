@@ -13,6 +13,7 @@
 #include <shaped-viewer/resources/quadric_data.hh>
 #include <shaped-viewer/scene/quadric.hh>
 #include <sv_test_shaders.hh>
+#include <typed-geometry/linalg/cross.hh>
 #include <typed-geometry/linalg/vec_ops.hh> // tg::normalize
 #include <typed-geometry/scalar/scalar.hh>  // tg::abs
 
@@ -38,17 +39,20 @@ struct runtime_probe_case
     float t_min = 0.0f;
     float t_max = 1e30f;
     u32 primitive = 0;
-    u32 is_indexed = 0;
+    u32 first_index = 0;
     u32 desc_offset = 0;
     tg::vec2f bary;
     u32 pad[2] = {};
 };
 
-static_assert(sizeof(sv_test::shaders::runtime_probe_case) == sizeof(runtime_probe_case),
+static_assert(sizeof(sv_test::shaders::runtime_probe::runtime_probe_case) == sizeof(runtime_probe_case),
               "runtime_probe_case must match runtime_probe_case in tests/shaders/runtime_probe.sgl");
 
 /// How many float4s one case writes, in the order the probe writes them.
 constexpr isize results_per_case = 8;
+
+/// The indices of the raw-list mesh at the start of the probe's index memory: four triangles, three corners each.
+constexpr isize sequential_index_count = 12;
 
 /// The memory the probe reads: quadric records, attribute descriptors with their elements, and triangle indices.
 struct runtime_probe_memory
@@ -64,6 +68,24 @@ void push_desc(cc::vector<u32>& words, u32 offset, u32 stride)
     words.push_back(0);
     words.push_back(offset);
     words.push_back(stride);
+}
+
+/// The rotation stream at element `i`: unit, every third one negated, and every other one twisted half a turn about its own +z.
+/// The twist leaves the normal where it was and points the tangent the other way, as a tangent picked as any perpendicular does across a closed surface.
+[[nodiscard]] tg::vec4f rotation_element(u32 i)
+{
+    auto const sign = i % 3 == 1 ? -1.0f : 1.0f;
+    auto const q = tg::normalize(tg::vec4f(0.02f * float(i), 0.1f, -0.03f * float(i), 1.0f)) * sign;
+    // q times a half turn about z, (0, 0, 1, 0)
+    return i % 2 == 1 ? tg::vec4f(q[1], -q[0], q[3], -q[2]) : q;
+}
+
+/// `v` turned by the unit quaternion `q`, stored (x, y, z, w).
+[[nodiscard]] tg::vec3f rotate_by(tg::vec4f q, tg::vec3f v)
+{
+    auto const u = tg::vec3f(q[0], q[1], q[2]);
+    auto const c = tg::dual(tg::cross(u, v)) * 2.0f;
+    return v + c * q[3] + tg::dual(tg::cross(u, c));
 }
 
 /// The attribute elements, twelve of each, so that four triangles read per vertex or per corner stay in range.
@@ -105,11 +127,10 @@ cc::vector<u32> make_attributes()
         push_float(2.0f + 0.01f * float(i));
         push_float(0.0f);
     }
-    // Unit quaternions near one another, every third one negated: the same rotation, antipodal in 4D.
+    // Unit quaternions near one another, `rotation_element`'s.
     for (auto i = 0; i < element_count; ++i)
     {
-        auto const sign = i % 3 == 1 ? -1.0f : 1.0f;
-        auto const q = tg::normalize(tg::vec4f(0.02f * float(i), 0.1f, -0.03f * float(i), 1.0f)) * sign;
+        auto const q = rotation_element(u32(i));
         for (auto lane = 0; lane < 4; ++lane)
             push_float(q[lane]);
     }
@@ -211,7 +232,7 @@ cc::vector<runtime_probe_case> make_cases()
         auto& c = cases[i];
         auto const fi = float(i);
         c.primitive = u32(i % 4);
-        c.is_indexed = u32(i % 2);
+        c.first_index = i % 2 == 0 ? 0u : u32(sequential_index_count);
         c.desc_offset = i % 5 == 0 ? 48u : 0u;
         c.bary = tg::vec2f(0.05f + 0.03f * float(i % 7), 0.6f - 0.04f * float(i % 11)) * (0.9f + 0.001f * fi);
     }
@@ -224,8 +245,12 @@ runtime_probe_memory make_memory()
     for (auto const& p : make_primitives())
         memory.quadrics.push_back(sv::quadric_gpu::of(p));
     memory.attributes = make_attributes();
-    // Four triangles over twelve vertices, in an order no non-indexed reading would produce.
-    memory.indices = cc::vector<u32>{11, 3, 7, 0, 10, 5, 9, 2, 4, 8, 1, 6};
+    // Two meshes of four triangles over twelve vertices, as the central index pool holds them.
+    // The first is a raw list's sequential indices; the second an order no raw list would produce.
+    for (auto i = isize(0); i < sequential_index_count; ++i)
+        memory.indices.push_back(u32(i));
+    for (auto const index : {11u, 3u, 7u, 0u, 10u, 5u, 9u, 2u, 4u, 8u, 1u, 6u})
+        memory.indices.push_back(index);
     return memory;
 }
 
@@ -234,7 +259,7 @@ cc::shared_async<cc::vector<tg::vec4f>> run_probe(sg::context& ctx,
                                                   runtime_probe_memory const& memory,
                                                   cc::span<runtime_probe_case const> cases)
 {
-    auto const& entry = sv_test::shaders::runtime_probe.runtime_measure;
+    auto const& entry = sv_test::shaders::runtime_probe::runtime_measure;
     auto const compiled_shader = entry->acquire(ctx);
     co_await cc::async_settled(compiled_shader);
     if (compiled_shader->has_error())
@@ -244,7 +269,8 @@ cc::shared_async<cc::vector<tg::vec4f>> run_probe(sg::context& ctx,
     auto const* const compiled = compiled_shader->try_value();
     REQUIRE(compiled != nullptr); // without it every check below is vacuous
 
-    auto const group_layout = ctx.cached.acquire_binding_group_layout<sv_test::shaders::runtime_probe_io>();
+    auto const group_layout
+        = ctx.cached.acquire_binding_group_layout<sv_test::shaders::runtime_probe::runtime_probe_io>();
     auto pipeline = ctx.cached.acquire_compute_pipeline({.shader = *compiled, .layout = entry.acquire_layout(ctx)});
     auto const built = co_await pipeline;
     REQUIRE(built != nullptr);
@@ -272,8 +298,9 @@ cc::shared_async<cc::vector<tg::vec4f>> run_probe(sg::context& ctx,
     // SGL reads no buffer's length, so the probe is told the count.
     auto const group = ctx.transient.create_binding_group(
         *cmd, group_layout,
-        sv_test::shaders::runtime_probe_io{
-            .cases = case_buffer.reinterpret_as<sv_test::shaders::runtime_probe_case>().as_readonly_buffer(),
+        sv_test::shaders::runtime_probe::runtime_probe_io{
+            .cases
+            = case_buffer.reinterpret_as<sv_test::shaders::runtime_probe::runtime_probe_case>().as_readonly_buffer(),
             .quadrics = quadric_buffer.as_readonly_buffer(),
             .attributes = attribute_buffer.as_readonly_buffer(),
             .indices = index_buffer.as_readonly_buffer(),
@@ -316,11 +343,10 @@ namespace
     return tg::vec2f(float(i) * 0.1f, 1.0f - float(i) * 0.07f);
 }
 
-/// The rotation stream at element `i`: unit, every third one negated.
+/// The rotation stream at element `i`, which `interpolate_f4` blends as four plain numbers.
 [[nodiscard]] tg::vec4f f4_element(u32 i)
 {
-    auto const sign = i % 3 == 1 ? -1.0f : 1.0f;
-    return tg::normalize(tg::vec4f(0.02f * float(i), 0.1f, -0.03f * float(i), 1.0f)) * sign;
+    return rotation_element(i);
 }
 
 /// `quadric.roots_of` in double: the surface's roots along the ray, re-expressed about its closest approach.
@@ -364,7 +390,8 @@ struct reference_roots
         return {.count = 1, .t0 = -evaluate(o0) / qb, .shifted_origin = o0};
     }
 
-    auto const t_closest = -2.0 * (tg::dot(d, a_mul(o0)) + tg::dot(b, d)) / (2.0 * qa);
+    // The closest approach to the primitive's origin, as `quadric.roots_of` takes it.
+    auto const t_closest = -tg::dot(o0, d) / tg::dot(d, d);
     auto const o = o0 + d * t_closest;
     auto const qb = 2.0 * (tg::dot(d, a_mul(o)) + tg::dot(b, d));
     auto const qc = evaluate(o);
@@ -400,12 +427,12 @@ ASYNC_INVOCABLE_TEST("sv - the quadric and material runtimes compute what their 
                      (sg::context_handle const& ctx_h))
 {
 #if defined(CC_ARCH_ARM64) && defined(_WIN32)
-    SKIP("known broken on Windows on ARM — the inline readback path fastfails; see "
-         "libs/graphics/shaped-viewer/docs/TODO.md");
+    SKIP("known broken on Windows on ARM — the inline readback path fastfails; "
+         "issue: bug-sv-woa-inline-readback-fastfail");
 #endif
     auto& ctx = *ctx_h;
     if (!sv_test::shared_env().has_compiler)
-        SKIP("no SGL compiler that reaches DXIL to build the probe shader");
+        SKIP("no SGL compiler for this backend to build the probe shader");
 
     auto const memory = make_memory();
     auto const cases = make_cases();
@@ -478,10 +505,10 @@ ASYNC_INVOCABLE_TEST("sv - the quadric and material runtimes compute what their 
         auto const& c = cases[i];
         auto const* const r = &results[i * results_per_case];
 
-        // An indexed triangle reads its corners through the index buffer, a plain list numbers them three per primitive.
+        // A triangle reads its corners through the index pool, from its mesh's first index on.
         u32 corner[3] = {};
         for (auto k = 0; k < 3; ++k)
-            corner[k] = c.is_indexed != 0 ? memory.indices[c.primitive * 3 + u32(k)] : c.primitive * 3 + u32(k);
+            corner[k] = memory.indices[c.first_index + c.primitive * 3 + u32(k)];
         for (auto k = 0; k < 3; ++k)
             CHECK(r[6][k] == float(corner[k])).context(cc::format("case {}: corner {} is {}", i, k, r[6][k]));
 
@@ -526,13 +553,22 @@ ASYNC_INVOCABLE_TEST("sv - the quadric and material runtimes compute what their 
                                     r[5][2], r[5][3]));
         }
 
-        // The rotation blend aligns the corners into one hemisphere before it sums, so a blend of unit quaternions stays a
-        // rotation even where every third one is stored negated.
+        // The rotation blend is a unit quaternion whose +z is the corners' normals blended as vertex normals are.
+        // Every other corner is twisted half a turn and every third stored negated, and neither may move the normal:
+        // blending the quaternions themselves put it off by up to half the corners' spread.
         if (c.desc_offset == 0)
         {
             auto const q = tg::vec4f(r[5][0], r[5][1], r[5][2], r[5][3]);
             auto const length = tg::sqrt(q[0] * q[0] + q[1] * q[1] + q[2] * q[2] + q[3] * q[3]);
             CHECK(near(length, 1.0f, 1e-4f)).context(cc::format("case {}: the blended rotation has length {}", i, length));
+            auto blended = tg::vec3f(0, 0, 0);
+            for (auto k = 0; k < 3; ++k)
+                blended = blended + rotate_by(rotation_element(corner[k]), tg::vec3f(0, 0, 1)) * w[k];
+            auto const normal = rotate_by(q / length, tg::vec3f(0, 0, 1));
+            auto const alignment = tg::dot(normal, tg::normalize(blended));
+            CHECK(alignment > 1.0f - 2e-6f)
+                .context(cc::format(
+                    "case {}: the blended rotation's normal meets the blended normals at a cosine of {}", i, alignment));
         }
     }
 }

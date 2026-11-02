@@ -238,17 +238,21 @@ void webgpu_command_list::raster_bind_vertex_buffers(int first_slot, cc::span<sg
     }
 }
 
-void webgpu_command_list::raster_declare_array_buffer_access(cc::string_view,
-                                                             cc::span<sg::array_buffer_access const> elements)
+u32 webgpu_command_list::raster_declare_array_buffer_access(cc::string_view,
+                                                            cc::span<sg::array_buffer_access const> elements)
 {
+    CC_ASSERT(_in_rendering_scope, "declare_array_buffer_access requires an open rendering scope");
     // The compute pair's rule: no layout accepts an array binding here, so only the empty declaration can be right.
     CC_ASSERT(elements.empty(), "webgpu has no binding arrays, so there is no array element to declare");
+    return next_array_declaration_id();
 }
 
-void webgpu_command_list::raster_declare_array_texture_access(cc::string_view,
-                                                              cc::span<sg::array_texture_access const> elements)
+u32 webgpu_command_list::raster_declare_array_texture_access(cc::string_view,
+                                                             cc::span<sg::array_texture_access const> elements)
 {
+    CC_ASSERT(_in_rendering_scope, "declare_array_texture_access requires an open rendering scope");
     CC_ASSERT(elements.empty(), "webgpu has no binding arrays, so there is no array element to declare");
+    return next_array_declaration_id();
 }
 
 void webgpu_command_list::raster_bind_index_buffer(sg::index_buffer_view const& view)
@@ -389,5 +393,24 @@ void webgpu_command_list::raster_draw_indexed(sg::draw_indexed_config const& con
     wgpuRenderPassEncoderDrawIndexed(render_pass(), u32(config.index_range.size), u32(config.instance_range.size),
                                      u32(config.index_range.offset), config.vertex_offset,
                                      u32(config.instance_range.offset));
+}
+
+void webgpu_command_list::raster_draw_indexed_indirect(sg::raw_buffer_handle const& args, isize offset_in_bytes, isize count)
+{
+    CC_ASSERT(_in_rendering_scope, "an indirect draw is only valid inside a rendering scope");
+    CC_ASSERT(_index_buffer != nullptr, "an indirect indexed draw needs a bound index buffer");
+    auto const* buffer = dynamic_cast<webgpu_buffer const*>(args.get());
+    CC_ASSERT(buffer != nullptr, "indirect draw arguments are not a webgpu buffer");
+    CC_ASSERT(!buffer->is_expired(), "indirect draw arguments are a transient buffer used past its epoch");
+
+    // WebGPU orders the arguments' reads after earlier writes; the list only keeps the buffer alive.
+    touch(args);
+    order_draw_within_pass(true);
+    apply_raster_state();
+
+    // WebGPU has no multi-draw, so each record is a draw of its own.
+    auto const stride = isize(sizeof(sg::draw_indexed_args));
+    for (auto i = isize(0); i < count; ++i)
+        wgpuRenderPassEncoderDrawIndexedIndirect(render_pass(), buffer->raw(), u64(offset_in_bytes + i * stride));
 }
 } // namespace sg::backend::webgpu

@@ -183,3 +183,17 @@ TEST("sgl footprint - a subscript is the load or the store it stands for, and a 
                         "    let before = prepare.depth[id.xy].max(1u)\n")
           == "");
 }
+
+TEST("sgl check - a texel of another kind offers the conversion to write first only where that conversion exists")
+{
+    // CHK-392: a uint2 reaches a float texel through `as float2`, so the report spells the two steps
+    auto const from_uint = reports_for("fun f(u: uint2) => u as texel[.rg8_unorm]\n");
+    CHECK(from_uint.contains("type-mismatch")).dump("reports", from_uint);
+    CHECK(from_uint.contains("a kind converts first: `(v as float2) as texel[.rg8_unorm]`")).dump("reports", from_uint);
+
+    // a bool2 has no `as float2`, so the report suggests no step that would fail in turn
+    auto const from_bool = reports_for("fun f(b: bool2) => b as texel[.rg8_unorm]\n");
+    CHECK(from_bool.contains("type-mismatch")).dump("reports", from_bool);
+    CHECK(from_bool.contains("bool2 converts to no float2")).dump("reports", from_bool);
+    CHECK(!from_bool.contains("converts first")).dump("reports", from_bool);
+}

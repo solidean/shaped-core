@@ -267,7 +267,7 @@ namespace vdoc
                                                             cc::span<byte const> assignment_bytes);
 
 /// The skeleton form: an id and its parents, with no bytes to hash.
-/// Verification reports `unverifiable` on the result, which is the whole point of the type.
+/// Verification reports `unverifiable` on the result, so a skeleton never passes as verified.
 [[nodiscard]] cc::result<op, op_decode_error> try_decode_skeleton_op(op_id const& id, cc::span<op_id const> parents);
 
 /// Encodes assignments into the `sorted_v1` blob.

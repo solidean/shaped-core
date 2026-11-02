@@ -10,6 +10,7 @@ add_library(shaped-graphics
     src/shaped-graphics/resource/raw_texture.cc
     src/shaped-graphics/bytes_future.cc
     src/shaped-graphics/command_list/command_list.cc
+    src/shaped-graphics/command_list/array_access_declaration.cc
     src/shaped-graphics/command_list/upload.cc
     src/shaped-graphics/command_list/download.cc
     src/shaped-graphics/command_list/copy.cc
@@ -23,6 +24,7 @@ add_library(shaped-graphics
     src/shaped-graphics/raytracing/impl/hit_record_check.cc
     src/shaped-graphics/barrier/command_list_slot.cc
     src/shaped-graphics/barrier/footprint.cc
+    src/shaped-graphics/barrier/array_declarations.cc
     src/shaped-graphics/binding/binding.cc
     src/shaped-graphics/binding/impl/binding_conflicts.cc
     src/shaped-graphics/binding/impl/portability.cc
@@ -95,6 +97,7 @@ target_sources(shaped-graphics
     src/shaped-graphics/routine/routine_registry.hh
     src/shaped-graphics/context/pipeline_cache.hh
     src/shaped-graphics/command_list/command_list.hh
+    src/shaped-graphics/command_list/array_access_declaration.hh
     src/shaped-graphics/command_list/impl/aliasing_scope.hh
     src/shaped-graphics/command_list/upload.hh
     src/shaped-graphics/command_list/download.hh
@@ -128,6 +131,7 @@ target_sources(shaped-graphics
     src/shaped-graphics/barrier/resource_access_state.hh
     src/shaped-graphics/barrier/access_inference.hh
     src/shaped-graphics/barrier/footprint.hh
+    src/shaped-graphics/barrier/array_declarations.hh
     src/shaped-graphics/resource/subresource.hh
     src/shaped-graphics/barrier/subresource_state.hh
     src/shaped-graphics/resource/views.hh
@@ -202,6 +206,27 @@ else()
     set(SG_WARP_TEST_BINARY_ARGS "" CACHE INTERNAL "")
 endif()
 
+# Registers a test binary that carries a dx12 WARP driver: the timeout above, and the WARP it runs on.
+# Windows' own WARP traces some scenes wrong (docs/bugs-external/warp-raytracing-wrong-capture), so where
+# `uv run extern/warp/fetch-warp.py` fetched the pinned one, its DLL is staged beside the binary and loaded instead.
+# SG_HAS_PINNED_WARP tells the binary's tests which of the two they run on, for a skip that only the system one needs.
+# A function is global once defined, so the libraries above sg register theirs through it too.
+# TIMEOUT replaces the allowance above, for a binary that needs longer still.
+function(sg_warp_test_binary target)
+    cmake_parse_arguments(PARSE_ARGV 1 arg "" "TIMEOUT" "")
+    if(arg_TIMEOUT)
+        sc_nexus_binary(${target} KINDS tests TIMEOUT ${arg_TIMEOUT})
+    else()
+        sc_nexus_binary(${target} KINDS tests ${SG_WARP_TEST_BINARY_ARGS})
+    endif()
+    if(SC_PINNED_WARP_DLL)
+        sc_stage_runtime_dlls(${target} TAG ${target}-warp DLLS "${SC_PINNED_WARP_DLL}")
+        target_compile_definitions(${target} PRIVATE SG_HAS_PINNED_WARP=1)
+    else()
+        target_compile_definitions(${target} PRIVATE SG_HAS_PINNED_WARP=0)
+    endif()
+endfunction()
+
 if(WIN32)
     add_subdirectory(backends/dx12)
     list(APPEND _sg_backends shaped-graphics-dx12)
@@ -262,21 +287,19 @@ if(SC_BUILD_TESTS)
         tests/barrier/slot-test.cc
         tests/barrier/slot-recording-test.cc
         tests/barrier/array-plan-test.cc
+        tests/barrier/array-declaration-book-test.cc
         tests/context/stats-recording-test.cc
         tests/raytracing/hit-row-test.cc
     )
-    sc_nexus_binary(shaped-graphics-test KINDS tests ${SG_WARP_TEST_BINARY_ARGS})
+    sg_warp_test_binary(shaped-graphics-test)
 
     # Cross-backend API tests: run the sg API against each backend compiled into this binary. Each backend
     # contributes an entry-point driver under tests/backends/; the alias setup (tests/backends/backends.cc) makes
     # each invocable runnable by name across all backends. Only meaningful when some driver actually registers —
     # a compiled-but-unregistered backend leaves every invocable orphaned (100+ of them), which fails the binary.
     #
-    # TODO: introduce a CPU / validation backend (an always-available, in-process context — likely no shader
-    # support at all) so these backend-agnostic tests run everywhere, not just where a real GPU backend builds.
-    # It would make this `if(_sg_test_drivers)` guard unnecessary (a driver is always present), let large parts
-    # of the suite run on headless CI without a GPU, and double as a reference oracle to validate real backends
-    # against. Future work.
+    # A CPU / validation backend would make this guard unnecessary, since a driver would always be present.
+    # issue: feat-sg-cpu-validation-backend
     if(_sg_test_drivers)
         target_sources(shaped-graphics-test PRIVATE
             tests/backends/backends.cc
@@ -288,6 +311,7 @@ if(SC_BUILD_TESTS)
             tests/texture/texture-feature-test.cc
             tests/command_list/command_list-test.cc
             tests/command_list/index_buffer_alignment-test.cc
+            tests/command_list/parallel-rendering-test.cc
             tests/transfer/transfer-test.cc
             tests/transfer/transfer-fuzz-test.cc
             tests/transfer/upload-async-test.cc
@@ -298,6 +322,7 @@ if(SC_BUILD_TESTS)
             tests/barrier/concurrent-layout-test.cc
             tests/barrier/cross-list-ordering-test.cc
             tests/transfer/stream-test.cc
+            tests/copy/buffer-texture-copy-test.cc
             tests/copy/copy-test.cc
             tests/transient/transient-test.cc
             tests/binding/binding-group-array-test.cc
@@ -310,7 +335,7 @@ if(SC_BUILD_TESTS)
             tests/present/present-test.cc
         )
         if(WIN32)
-            target_sources(shaped-graphics-test PRIVATE tests/backends/dx12-entry.cc)
+            target_sources(shaped-graphics-test PRIVATE tests/backends/dx12-entry.cc tests/backends/dx12-rtv-record-time-test.cc)
         endif()
         if(Vulkan_FOUND)
             target_sources(shaped-graphics-test PRIVATE tests/backends/vulkan-entry.cc)
@@ -389,6 +414,7 @@ if(SC_BUILD_TESTS)
             tests/shaders/sgl-package-test.cc
             tests/compute/compute-test.cc
             tests/compute/compute-sync-test.cc
+            tests/barrier/sticky-array-test.cc
             tests/compute/compute-coherence-test.cc
             tests/compute/compute-sixteen-bit-test.cc
             tests/compute/compute-texture-test.cc
@@ -427,6 +453,8 @@ if(SC_BUILD_TESTS)
                 layout.sgl:*
                 sync.sgl:*
                 binding_arrays.sgl:*
+                sticky_arrays.sgl:*
+                sticky_arrays_traced.sgl:*
                 bytes.sgl:*
                 rects.sgl:*
                 draws.sgl:*

@@ -1,6 +1,7 @@
 #include <clean-core/common/utility.hh>
 #include <clean-core/sequence/sequence.hh>
 #include <clean-core/string/format.hh>
+#include <shaped-graphics-language/builtins/registry.hh>
 #include <shaped-graphics-language/check/impl/checker.hh>
 #include <shaped-graphics-language/check/resources.hh>
 
@@ -185,16 +186,18 @@ type_id checker::check_index(function_scope& scope, ast::expr_id id, ast::index 
     // CHK-367: an image is handed to the `load` or the `store` its subscript stands for
     handed.push_back(node.object);
     auto const object = check_expr(scope, node.object);
-    handed.pop_back();
+    handed.remove_back();
     subscripted = outer;
     if (object == error_type)
         return error_type;
     auto const kind = out.at(object).kind;
     if (kind == type_kind::image)
         return check_texel(scope, id, node, object);
+    if (auto const lane = lane_type_of(object); is_valid(lane))
+        return check_lane(scope, node, object, lane);
     if (kind != type_kind::buffer && kind != type_kind::array)
     {
-        unsupported(file, where, "a subscript on anything but a buffer, an image or an array");
+        unsupported(file, where, "a subscript on anything but a buffer, an image, an array or a vector");
         return error_type;
     }
 
@@ -217,6 +220,7 @@ type_id checker::check_index(function_scope& scope, ast::expr_id id, ast::index 
     }
 
     auto const int_type = type_of_builtin(builtins::k_int, file, where);
+    auto const uint_type = type_of_builtin(builtins::k_uint, file, where);
     auto result = object;
     for (auto const& a : arguments)
     {
@@ -226,14 +230,20 @@ type_id checker::check_index(function_scope& scope, ast::expr_id id, ast::index 
                           : ast::expr_id::none;
         auto const index = check_expr(scope, a.value);
         binding_index = outer_index;
-        if (index != error_type && index != int_type)
+        // CHK-287: an `int` or a `uint`, which every target indexes by alike
+        if (index != error_type && index != int_type && index != uint_type)
             report(diagnostic_kind::type_mismatch, file, span_of(file, a.value),
-                   cc::format("{} is indexed by an int, and this is a {}",
+                   cc::format("{} is indexed by an int or a uint, and this is a {}",
                               kind == type_kind::buffer ? "a buffer" : "an array", out.name_of(index)));
         // CHK-309: a constant index names one element, and one past the end is refused by every target
         auto const count = out.at(result).count;
-        if (auto const at = index == int_type ? constant_index(file, a.value) : cc::optional<i32>();
-            kind == type_kind::array && count > 0 && at.has_value() && (at.value() < 0 || at.value() >= count))
+        auto at = cc::optional<i64>();
+        if (index == int_type)
+            if (auto const signed_at = constant_index(file, a.value); signed_at.has_value())
+                at = signed_at.value();
+        if (index == uint_type)
+            at = constant_unsigned_index(file, a.value);
+        if (kind == type_kind::array && count > 0 && at.has_value() && (at.value() < 0 || at.value() >= count))
             report(diagnostic_kind::invalid_constant_argument, file, span_of(file, a.value),
                    cc::format("{} is no index into {}, whose elements are 0 ..< {}", at.value(), out.name_of(result),
                               count));
@@ -258,6 +268,31 @@ type_id checker::check_index(function_scope& scope, ast::expr_id id, ast::index 
         }
     }
     return result;
+}
+
+type_id checker::check_lane(function_scope& scope, ast::index const& node, type_id vector, type_id lane)
+{
+    // CHK-395: one int, which picks the lane `v[i]` is, and a constant one names a lane the vector has
+    auto const file = scope.file;
+    auto const arguments = ast_of(file).at(node.arguments);
+    if (arguments.size() != 1 || !arguments[0].name.empty() || arguments[0].is_splat)
+    {
+        report(diagnostic_kind::wrong_kind_of_name, file, span_of(file, node.object),
+               cc::format("{} takes one index, the lane: `v[i]`", out.name_of(vector)));
+        return error_type;
+    }
+    auto const& a = arguments[0];
+    auto const int_type = type_of_builtin(builtins::k_int, file, span_of(file, a.value));
+    auto const index = check_expr(scope, a.value);
+    if (index != error_type && index != int_type)
+        report(diagnostic_kind::type_mismatch, file, span_of(file, a.value),
+               cc::format("a vector is indexed by an int, and this is a {}", out.name_of(index)));
+    auto const lanes = i32(out.at(out.at(vector).members).size());
+    if (auto const at = index == int_type ? constant_index(file, a.value) : cc::optional<i32>();
+        at.has_value() && (at.value() < 0 || at.value() >= lanes))
+        report(diagnostic_kind::invalid_constant_argument, file, span_of(file, a.value),
+               cc::format("{} is no lane of {}, whose lanes are 0 ..< {}", at.value(), out.name_of(vector), lanes));
+    return lane;
 }
 
 type_id checker::check_texel(function_scope& scope, ast::expr_id id, ast::index const& node, type_id image)
@@ -332,6 +367,96 @@ void checker::check_texel_store(function_scope& scope, ast::expr_id value, type_
 
 // ---- expressions ----------------------------------------------------------------------------------------------------
 
+namespace
+{
+/// The name of the scalar family whose leaves are `kind`, which is the stem of its vectors' names; empty for none.
+cc::string_view family_of(value_kind kind)
+{
+    switch (kind)
+    {
+    case value_kind::scalar_float:
+        return "float";
+    case value_kind::scalar_int:
+        return "int";
+    case value_kind::scalar_uint:
+        return "uint";
+    case value_kind::scalar_half:
+        return "half";
+    case value_kind::scalar_short:
+        return "short";
+    case value_kind::scalar_ushort:
+        return "ushort";
+    case value_kind::boolean:
+        return "bool";
+    case value_kind::none:
+        return {};
+    }
+    return {};
+}
+} // namespace
+
+symbol_id checker::conversion_of(i32 file, source_span where, type_id from, type_id to)
+{
+    // Overloads of `as` differ in their result as well, so the one that matches both ends is the conversion.
+    auto const* const candidates = operators_seen_from(file).get_ptr("as");
+    if (candidates == nullptr)
+        return symbol_id::none;
+    for (auto const candidate : *candidates)
+    {
+        if (demand(candidate, file, where) != symbol_state::checked)
+            continue;
+        auto const& info = out.functions[out.at(candidate).info];
+        auto const parameters = out.at(info.parameters);
+        if (parameters.size() == 1 && parameters[0].type == from && info.result == to)
+            return candidate;
+    }
+    return symbol_id::none;
+}
+
+bool checker::is_texel_type_expr(i32 file, ast::expr_id type) const
+{
+    auto const* const applied = ast::is_valid(type) ? ast_of(file).at(type).node.try_as<ast::index>() : nullptr;
+    return applied != nullptr && is_named(file, applied->object, "texel");
+}
+
+type_id checker::check_texel_conversion(i32 file, ast::expr_id id, type_id from, type_id to, ast::expr_id written)
+{
+    auto const where = span_of(file, id);
+    auto const spelled = text_of(file, span_of(file, written));
+    auto const* const source = out.builtin_type_of(from);
+    auto const* const texel = out.builtin_type_of(to);
+    auto const family = source != nullptr ? family_of(source->leaf_kind) : cc::string_view();
+    auto const plain_name = source == nullptr || source->leaf_count == 1
+                              ? cc::string(family)
+                              : cc::format("{}{}", family, source->leaf_count);
+    // CHK-391: a scalar or a plain vector, which `vec3`, `pos3` and `hpos4` are not
+    if (texel == nullptr || family.empty() || source->leaf_count > 4 || out.name_of(from) != plain_name)
+    {
+        report(diagnostic_kind::no_matching_overload, file, where,
+               cc::format("{} as {}: only a scalar or a plain vector converts to a texel", out.name_of(from), spelled));
+        return error_type;
+    }
+    // CHK-392: a width changes here and a kind never does, which CHK-197's conversion does first
+    if (source->leaf_kind != texel->leaf_kind)
+    {
+        auto const converted = source->leaf_count == 1
+                                 ? cc::string(family_of(texel->leaf_kind))
+                                 : cc::format("{}{}", family_of(texel->leaf_kind), source->leaf_count);
+        auto const message = cc::format("{} as {}: the texel is {}", out.name_of(from), spelled, out.name_of(to));
+        // the two-step spelling is offered only where its first step is a conversion that exists
+        auto const intermediate = prelude_type(converted);
+        if (intermediate != type_id::none && is_valid(conversion_of(file, where, from, intermediate)))
+            report(diagnostic_kind::type_mismatch, file, where,
+                   cc::format("{}, and a kind converts first: `(v as {}) as {}`", message, converted, spelled));
+        else
+            report(diagnostic_kind::type_mismatch, file, where,
+                   cc::format("{}, and {} converts to no {}", message, out.name_of(from), converted));
+        return error_type;
+    }
+    set_target(file, id, {.kind = target_kind::texel_conversion});
+    return to;
+}
+
 type_id checker::check_cast(function_scope& scope, ast::expr_id id, ast::cast const& node)
 {
     auto const file = scope.file;
@@ -342,24 +467,17 @@ type_id checker::check_cast(function_scope& scope, ast::expr_id id, ast::cast co
         return error_type;
     if (from == to)
         return to;
+    if (is_texel_type_expr(file, node.type))
+        return check_texel_conversion(file, id, from, to, node.type);
 
-    // Overloads of `as` differ in their result as well, so the one that matches both ends is the conversion.
-    auto const* const candidates = operators_seen_from(file).get_ptr("as");
-    if (candidates != nullptr)
-        for (auto const candidate : *candidates)
-        {
-            if (demand(candidate, file, where) != symbol_state::checked)
-                continue;
-            auto const& info = out.functions[out.at(candidate).info];
-            auto const parameters = out.at(info.parameters);
-            if (parameters.size() != 1 || parameters[0].type != from || info.result != to)
-                continue;
-            set_target(file, id, {.kind = target_kind::overload, .symbol = candidate});
-            // A conversion the program declares is a call like any other, inlined where it stands.
-            if (!is_valid(out.at(candidate).intrinsic))
-                note_program_call(scope, candidate, where);
-            return to;
-        }
+    if (auto const candidate = conversion_of(file, where, from, to); is_valid(candidate))
+    {
+        set_target(file, id, {.kind = target_kind::overload, .symbol = candidate});
+        // A conversion the program declares is a call like any other, inlined where it stands.
+        if (!is_valid(out.at(candidate).intrinsic))
+            note_program_call(scope, candidate, where);
+        return to;
+    }
     report(diagnostic_kind::no_matching_overload, file, where,
            cc::format("{} as {}: no conversion", out.name_of(from), out.name_of(to)));
     return error_type;
@@ -849,6 +967,19 @@ swizzle checker::swizzle_of(type_id object, cc::string_view name) const
     return result;
 }
 
+type_id checker::lane_type_of(type_id object) const
+{
+    if (object == error_type || out.at(object).kind != type_kind::structure || !out.at(object).has_swizzles)
+        return type_id::none;
+    auto const fields = out.at(out.at(object).members);
+    if (fields.empty())
+        return type_id::none;
+    for (auto const& f : fields)
+        if (f.type != fields[0].type)
+            return type_id::none;
+    return fields[0].type;
+}
+
 cc::string checker::why_no_swizzle(type_id object, cc::string_view name) const
 {
     if (object == error_type || !out.at(object).has_swizzles || name.size() < 2)
@@ -939,7 +1070,7 @@ call_arguments checker::check_arguments(function_scope& scope, ast::range_of<ast
 
         handed.push_back(a.value);
         auto const type = check_expr(scope, a.value);
-        handed.pop_back();
+        handed.remove_back();
         if (type == error_type)
         {
             result.is_poisoned = true;
@@ -989,9 +1120,164 @@ call_arguments checker::check_arguments(function_scope& scope, ast::range_of<ast
     return result;
 }
 
+namespace
+{
+/// `a op b` over two folded number literals, in 64 bits: an integer where both are, and a float where either is.
+/// None where the language leaves it to a call: an integer `/` or `%` (CHK-313), a float `%`, a bit operator on a
+/// float, a shift by a count outside the bits of an int (CHK-270), and an integer result past 64 bits.
+number_literal folded(cc::string_view op, number_literal const& a, number_literal const& b)
+{
+    if (a.is_integer && b.is_integer)
+    {
+        auto result = i64(0);
+        auto const x = a.integer;
+        auto const y = b.integer;
+        // past 2^62 a sum may leave 64 bits, and the product's magnitude is judged in a double, which holds it to 2^-52
+        constexpr auto limit = i64(1) << 62;
+        auto const is_small = [&](i64 v) { return v > -limit && v < limit; };
+        auto overflows = false;
+        if (op == "+" || op == "-")
+        {
+            overflows = !is_small(x) || !is_small(y);
+            if (!overflows)
+                result = op == "+" ? x + y : x - y;
+        }
+        else if (op == "*")
+        {
+            auto const product = f64(x) * f64(y);
+            overflows = product >= f64(limit) || product <= -f64(limit);
+            if (!overflows)
+                result = x * y;
+        }
+        else if (op == "&")
+            result = x & y;
+        else if (op == "|")
+            result = x | y;
+        else if (op == "^")
+            result = x ^ y;
+        else if ((op == "<<" || op == ">>") && y >= 0 && y <= 31)
+            result = op == "<<" ? i64(u64(x) << y) : x >> y;
+        else
+            return {};
+        if (overflows || (op == "<<" && (result >> y) != x))
+            return {};
+        return {.is_number = true, .is_integer = true, .integer = result};
+    }
+    auto const x = a.is_integer ? f64(a.integer) : a.real;
+    auto const y = b.is_integer ? f64(b.integer) : b.real;
+    auto result = 0.0;
+    if (op == "+")
+        result = x + y;
+    else if (op == "-")
+        result = x - y;
+    else if (op == "*")
+        result = x * y;
+    else if (op == "/" && y != 0.0)
+        result = x / y;
+    else
+        return {};
+    return {.is_number = true, .real = result};
+}
+} // namespace
+
+bool checker::calls_prelude_operator(i32 file, ast::expr_id expr) const
+{
+    // a program's own operator is a function it calls, which folding would step past
+    auto const& t = out.files[file].target_at(expr);
+    return t.kind == target_kind::overload && is_valid(t.symbol) && is_valid(out.at(t.symbol).intrinsic)
+        && is_prelude_file(out.at(t.symbol).file);
+}
+
+cc::optional<bool> checker::comparison_of(i32 file, ast::expr_id expr) const
+{
+    if (!ast::is_valid(expr))
+        return cc::nullopt;
+    auto const* const call = ast_of(file).at(expr).node.try_as<ast::call>();
+    if (call == nullptr || call->spelling != ast::call_spelling::infix || !sgl::is_valid(call->op)
+        || call->is_short_circuit || call->arguments.count != 2 || !calls_prelude_operator(file, expr))
+        return cc::nullopt;
+    auto const op = text_of(file, file_of(file).at(call->op).where);
+    auto const arguments = ast_of(file).at(call->arguments);
+    for (auto const& argument : arguments)
+        if (!argument.name.empty() || argument.is_splat)
+            return cc::nullopt;
+    auto const a = number_of(file, arguments[0].value);
+    auto const b = number_of(file, arguments[1].value);
+    if (!a.is_number || !b.is_number)
+        return cc::nullopt;
+    if (a.is_integer && b.is_integer)
+    {
+        auto const x = a.integer;
+        auto const y = b.integer;
+        if (op == "==")
+            return x == y;
+        if (op == "!=")
+            return x != y;
+        if (op == "<")
+            return x < y;
+        if (op == "<=")
+            return x <= y;
+        if (op == ">")
+            return x > y;
+        if (op == ">=")
+            return x >= y;
+        return cc::nullopt;
+    }
+    auto const x = a.is_integer ? f64(a.integer) : a.real;
+    auto const y = b.is_integer ? f64(b.integer) : b.real;
+    if (op == "==")
+        return x == y;
+    if (op == "!=")
+        return x != y;
+    if (op == "<")
+        return x < y;
+    if (op == "<=")
+        return x <= y;
+    if (op == ">")
+        return x > y;
+    if (op == ">=")
+        return x >= y;
+    return cc::nullopt;
+}
+
 number_literal checker::number_of(i32 file, ast::expr_id expr) const
 {
-    if (!ast::is_valid(expr) || !ast_of(file).at(expr).node.is<ast::literal>())
+    if (!ast::is_valid(expr))
+        return {};
+    // CHK-394: an operator over number literals alone is a number literal itself
+    if (auto const* const call = ast_of(file).at(expr).node.try_as<ast::call>())
+    {
+        if (!sgl::is_valid(call->op) || call->is_short_circuit || !calls_prelude_operator(file, expr))
+            return {};
+        auto const op = text_of(file, file_of(file).at(call->op).where);
+        auto const arguments = ast_of(file).at(call->arguments);
+        for (auto const& a : arguments)
+            if (!a.name.empty() || a.is_splat)
+                return {};
+        if (call->spelling == ast::call_spelling::prefix && arguments.size() == 1)
+        {
+            auto const operand = number_of(file, arguments[0].value);
+            if (!operand.is_number)
+                return {};
+            if (op == "-" && operand.is_integer && operand.integer != i64(1ull << 63))
+                return {.is_number = true, .is_integer = true, .integer = -operand.integer};
+            if (op == "-" && !operand.is_integer)
+                return {.is_number = true, .real = -operand.real};
+            if (op == "~" && operand.is_integer)
+                return {.is_number = true, .is_integer = true, .integer = ~operand.integer};
+            return {};
+        }
+        if (call->spelling != ast::call_spelling::infix || arguments.size() != 2)
+            return {};
+        auto const a = number_of(file, arguments[0].value);
+        if (!a.is_number)
+            return {};
+        auto const b = number_of(file, arguments[1].value);
+        if (!b.is_number)
+            return {};
+        return folded(op, a, b);
+    }
+    if (!ast_of(file).at(expr).node.is<ast::literal>())
         return {};
     auto const text = text_of(file, span_of(file, expr));
     switch (classify_number(text))
@@ -1125,9 +1411,13 @@ type_id checker::check_call(function_scope& scope, ast::expr_id id, ast::call co
             return type_of_builtin(builtins::k_bool, file, where);
         auto const* const found = operators_seen_from(file).get_ptr(spelling);
         auto const none = cc::span<symbol_id const>();
-        return resolve_overload(scope, id, ast::expr_id::none,
-                                found != nullptr ? cc::span<symbol_id const>(*found) : none, arguments,
-                                cc::format("operator {}", spelling));
+        auto const result = resolve_overload(scope, id, ast::expr_id::none,
+                                             found != nullptr ? cc::span<symbol_id const>(*found) : none, arguments,
+                                             cc::format("operator {}", spelling));
+        // CHK-394: what the operator folds to is judged at the type it ends up with, as a literal written there is
+        if (result != error_type && number_of(file, id).is_number)
+            wide_literals.push_back({.file = file, .expr = id, .function = scope.function});
+        return result;
     }
 
     if (!ast::is_valid(call.callee))
@@ -1396,7 +1686,7 @@ type_id checker::check_dot_call(function_scope& scope, ast::expr_id id, ast::cal
     // `a.foo(…)` is `foo(a, …)`, and a field of `a` takes part in no call (CHK-249)
     handed.push_back(member.object);
     auto const receiver = check_expr(scope, member.object);
-    handed.pop_back();
+    handed.remove_back();
     if (receiver != error_type && out.at(receiver).kind == type_kind::stream)
         return check_stream_call(scope, id, call, receiver);
     auto arguments = check_arguments(scope, call.arguments, false);
@@ -1487,7 +1777,9 @@ type_id checker::resolve_overload(function_scope& scope,
                               signature_text(spelling, expected)));
         }
         else
-            report(diagnostic_kind::no_matching_overload, file, where, call_text(file, spelling, arguments));
+            report(diagnostic_kind::no_matching_overload, file, where,
+                   cc::format("{}{}", call_text(file, spelling, arguments),
+                              miss_hint(scope, callee, candidates, arguments, spelling)));
         return error_type;
     }
     auto const best = best_of(cc::move(matches));
@@ -1566,10 +1858,11 @@ type_id checker::resolve_overload(function_scope& scope,
     {
         // CHK-300: the mark is what an index into a binding array is written with, and on anything else it means nothing
         auto const* const record = out.builtin_function(out.at(chosen).intrinsic);
-        if (record != nullptr && record->is_nonuniform_mark && id != binding_index)
+        if (record != nullptr && record->mark != builtins::index_mark::none && id != binding_index)
         {
             report(diagnostic_kind::wrong_kind_of_name, file, where,
-                   "`nonuniform i` marks an index into a binding array, and stands only as one: `t[nonuniform i]`");
+                   cc::format("`{0} i` marks an index into a binding array, and stands only as one: `t[{0} i]`",
+                              record->name));
             return error_type;
         }
         return result;
@@ -1632,8 +1925,7 @@ type_id checker::check_lambda(function_scope& scope, ast::expr_id expr, type_id 
         collect_type_parameters(m.type, named);
         auto is_in_scope = true;
         for (auto const q : named)
-            is_in_scope
-                = is_in_scope && cc::sequence{type_parameter_names}.any([&](auto const& n) { return n.second == q; });
+            is_in_scope = is_in_scope && type_parameter_names.values().any([&](auto const& n) { return n.second == q; });
         if (!is_in_scope)
         {
             report(diagnostic_kind::no_matching_overload, file, where,
@@ -1760,6 +2052,154 @@ void checker::note_near_misses(i32 file,
     }
 }
 
+cc::string checker::miss_hint(function_scope& scope,
+                              ast::expr_id callee,
+                              cc::span<symbol_id const> candidates,
+                              call_arguments const& arguments,
+                              cc::string_view spelling)
+{
+    auto const file = scope.file;
+    auto const is_condition = [&](type_id type)
+    {
+        auto const* const record = out.builtin_type_of(type);
+        return record != nullptr && record->leaf_kind == value_kind::boolean;
+    };
+    // a dot call writes its receiver ahead of the name, where no mark can stand
+    auto const is_dot_call = ast::is_valid(callee) && ast_of(file).at(callee).node.is<ast::member>();
+    auto const argument_text = [&](isize i) { return text_of(file, span_of(file, arguments.written[i].expr)); };
+    auto rotated_chain = i32(-1);
+    auto rotated_types = cc::vector<type_id>();
+    for (auto const candidate : candidates)
+    {
+        if (out.at(candidate).state != symbol_state::checked)
+            continue;
+        auto const parameters
+            = cc::vector<parameter>::create_copy_of(out.at(out.functions[out.at(candidate).info].parameters));
+        auto is_generic = false;
+        for (auto const& p : parameters)
+            is_generic = is_generic || is_open(p.type);
+        if (is_generic)
+            continue;
+
+        // CHK-316: the marks alone are off, and each place is of its parameter's type exactly
+        auto const bound = bind_arguments(parameters, arguments);
+        if (bound.failure == miss_reason::none)
+        {
+            auto flipped = cc::vector<isize>();
+            auto is_marks_away = true;
+            for (auto p = isize(0); is_marks_away && p < parameters.size(); ++p)
+            {
+                auto const i = bound.slots[p];
+                if (i < 0)
+                    continue;
+                if (parameters[p].is_mut != arguments.written[i].is_mut)
+                {
+                    is_marks_away = arguments.types[i] == parameters[p].type;
+                    flipped.push_back(p);
+                }
+                else
+                    is_marks_away = chain_of(file, parameters[p], arguments, i).has_value();
+            }
+            if (is_marks_away && !flipped.empty())
+            {
+                // a missing mark is the fix only where what it would mark is a place a body could assign
+                for (auto const p : flipped)
+                {
+                    auto why = cc::string();
+                    if (parameters[p].is_mut
+                        && !judge_place(scope, arguments.written[bound.slots[p]].expr, "a mut argument", &why))
+                        return cc::format(": {} is a mut parameter, so its argument is a place marked `mut`, and `{}` "
+                                          "is none: {}",
+                                          parameters[p].name, argument_text(bound.slots[p]), why);
+                }
+                if (flipped.size() == 1 && !is_dot_call)
+                {
+                    auto const& p = parameters[flipped[0]];
+                    if (p.is_mut)
+                        return cc::format(": {} is a mut parameter, so its argument is a place marked `mut`, as in "
+                                          "`mut {}`",
+                                          p.name, argument_text(bound.slots[flipped[0]]));
+                    return cc::format(": {} is no mut parameter, so its argument takes no `mut`", p.name);
+                }
+
+                // several marks, or a dot call, are shown as the whole call written with every mark right
+                auto missing = cc::vector<cc::string_view>();
+                auto extra = cc::vector<cc::string_view>();
+                auto is_toggled = cc::vector<bool>::create_filled(arguments.written.size(), false);
+                for (auto const p : flipped)
+                {
+                    (parameters[p].is_mut ? missing : extra).push_back(parameters[p].name);
+                    is_toggled[bound.slots[p]] = true;
+                }
+                auto const listed = [](cc::span<cc::string_view const> names)
+                {
+                    auto text = cc::string();
+                    for (auto i = isize(0); i < names.size(); ++i)
+                    {
+                        if (i > 0)
+                            text += i + 1 == names.size() ? " and " : ", ";
+                        text += names[i];
+                    }
+                    return text;
+                };
+                auto call = cc::format("{}(", spelling);
+                for (auto i = isize(0); i < arguments.written.size(); ++i)
+                {
+                    if (i > 0)
+                        call += ", ";
+                    if (!arguments.names[i].empty())
+                        call += cc::format("{} = ", arguments.names[i]);
+                    if (arguments.written[i].is_mut != is_toggled[i])
+                        call += "mut ";
+                    call += argument_text(i);
+                }
+                call += ")";
+                auto said = cc::vector<cc::string>();
+                if (!missing.empty())
+                    said.push_back(
+                        missing.size() == 1
+                            ? cc::format("{} is a mut parameter, so its argument is a place marked `mut`", missing[0])
+                            : cc::format("{} are mut parameters, so their arguments are places marked `mut`",
+                                         listed(missing)));
+                if (!extra.empty())
+                    said.push_back(
+                        extra.size() == 1
+                            ? cc::format("{} is no mut parameter, so its argument takes no `mut`", extra[0])
+                            : cc::format("{} are no mut parameters, so their arguments take no `mut`", listed(extra)));
+                return cc::format(": {}, as in `{}`", said.size() == 1 ? said[0] : said[0] + "; " + said[1], call);
+            }
+        }
+
+        // CHK-365: `select(a, b, cond)` is WGSL's order, and SGL's condition stands first
+        auto const n = arguments.written.size();
+        if (n >= 2 && isize(parameters.size()) == n && is_condition(parameters[0].type) && arguments.names.size() == n
+            && arguments.types[n - 1] == parameters[0].type)
+        {
+            // the candidate the moved arguments convert to most directly is the one the call meant
+            auto is_rotated = true;
+            auto total = i32(0);
+            for (auto i = isize(0); is_rotated && i < n; ++i)
+            {
+                auto const chain = arguments.names[i].empty() && !arguments.written[i].is_mut && !parameters[i].is_mut
+                                     ? chain_of(file, parameters[i], arguments, i == 0 ? n - 1 : i - 1)
+                                     : cc::nullopt;
+                is_rotated = chain.has_value();
+                total += chain.has_value() ? chain.value() : 0;
+            }
+            if (is_rotated && (rotated_chain < 0 || total < rotated_chain))
+            {
+                rotated_chain = total;
+                rotated_types.clear();
+                for (auto const& p : parameters)
+                    rotated_types.push_back(p.type);
+            }
+        }
+    }
+    if (rotated_chain >= 0)
+        return cc::format(": its condition comes first, as in {}", signature_text(spelling, rotated_types));
+    return {};
+}
+
 cc::optional<candidate_match> checker::match(i32 file, symbol_id candidate, call_arguments const& arguments)
 {
     // Read in place, by position: a literal argument may compile another function, and `out.parameters` then moves.
@@ -1773,6 +2213,8 @@ cc::optional<candidate_match> checker::match(i32 file, symbol_id candidate, call
     // what `chain_of` reads of a parameter, copied without its name since a compile may move the original
     auto const shape_of
         = [&](isize p) { return parameter{.type = out.at(range)[p].type, .is_mut = out.at(range)[p].is_mut}; };
+    auto const* const record = out.builtin_function(out.at(candidate).intrinsic);
+    auto const takes_literal_at_default = record != nullptr && record->takes_literal_at_default;
     auto bound = bind_arguments(out.at(range), arguments);
     if (bound.failure != miss_reason::none)
         return cc::nullopt;
@@ -1799,6 +2241,9 @@ cc::optional<candidate_match> checker::match(i32 file, symbol_id candidate, call
         }
         auto const length = chain_of(file, shape_of(p), arguments, i);
         if (!length.has_value())
+            return cc::nullopt;
+        // CHK-396: `T(x)` of a literal is `x as T`, which takes the literal at its default type alone
+        if (length.value() > 0 && arguments.numbers[i].is_number && takes_literal_at_default)
             return cc::nullopt;
         result.chains[i] = length.value();
     }
@@ -2267,7 +2712,7 @@ type_id checker::deduce_result(function_scope const& scope, ast::expr_id id, sym
             auto is_bound = false;
             for (auto i = isize(0); i + 1 < bindings.size(); i += 2)
                 is_bound = is_bound || bindings[i] == q;
-            if (!is_bound && cc::sequence{expected}.any([&](type_id e) { return e == q; }))
+            if (!is_bound && expected.values().any([&](type_id e) { return e == q; }))
             {
                 bindings.push_back(q);
                 bindings.push_back(q);

@@ -25,6 +25,7 @@ src/typed-geometry/
   linalg/      [done for now]
   transform/   [done]
   geometry/    [in progress]
+  camera/      [done]
   curves/      [planned]
   color/       [planned]
   symbolic/    [planned]
@@ -41,6 +42,7 @@ scalar
   -> linalg
     -> transform
       -> geometry
+        -> camera
         -> curves
         -> spatial
         -> mesh
@@ -132,6 +134,7 @@ pos - pos -> vec          // [done]
 pos + vec -> pos          // [done]
 vec + vec -> vec          // [done]
 pos + pos -> pos          // [done]  translation of the singleton point set
+pos * T, pos / T -> pos   // [done]  scaling of the singleton point set about the origin
 
 cross(vec3, vec3) -> bivec3   // [done]
 dual(bivec3)      -> vec3     // [done]  explicit Euclidean 3D escape hatch
@@ -305,6 +308,21 @@ Every query is a member — `a.intersects(b)`, `p.distance_to(seg)`, `tri.area()
 Measures are per-type inline members rather than a `measure/` module.
 [plans/geometry-query-matrix.md](plans/geometry-query-matrix.md) is the query layer, and [plans/old-tg-carryover.md](plans/old-tg-carryover.md) the object roster and verb tables.
 
+## camera/ [done]
+
+Projections, views and the `view_projection` pair, above `geometry/` because unprojecting a pixel gives a `ray` and projecting a segment clips it.
+[modules/camera.md](modules/camera.md) is the convention and the contract.
+
+```txt
+camera/
+  fwd.hh               [done]  clip_depth, view_projection
+  projection.hh        [done]  perspective / orthographic (+ _off_center), default and the six-convention zoo
+  view.hh              [done]  look_at / look_to, left- and right-handed
+  view_projection.hh   [done]  project / unproject for points, segments, rays and lines; frustum()
+  viewport.hh          [done]  ndc_from_pixel / pixel_from_ndc
+  camera.hh, all.hh    [done]
+```
+
 ## curves/ [planned]
 
 Parametric curves and surfaces (`curve`, `surface`, `bezier`, `spline`, `nurbs`, `polycurve`; `evaluation`, `derivatives`, `fitting`, `subdivision`).
@@ -375,6 +393,7 @@ The top-level `<typed-geometry/all.hh>` pulls in everything.
 ```cpp
 #include <typed-geometry/linalg/linalg.hh>       // the common linalg types
 #include <typed-geometry/transform/transform.hh> // the transform type and its operations
+#include <typed-geometry/camera/camera.hh>       // projections, views, view_projection
 #include <typed-geometry/linalg/all.hh>          // everything in linalg
 #include <typed-geometry/all.hh>                 // everything (expensive)
 ```

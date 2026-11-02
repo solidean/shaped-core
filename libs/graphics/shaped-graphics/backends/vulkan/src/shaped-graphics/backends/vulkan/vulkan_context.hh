@@ -1,6 +1,7 @@
 #pragma once
 
 #include <clean-core/common/assert.hh>
+#include <clean-core/error/optional.hh>
 #include <clean-core/function/unique_function.hh>
 #include <clean-core/thread/mutex.hh>
 #include <shaped-graphics/backends/vulkan/fwd.hh>
@@ -67,7 +68,7 @@ struct sg::backend::vulkan::vulkan_config
     /// Test-only in intent.
     /// It changes nothing about how the backend waits internally.
     /// It makes sg's own internal waits assert, which is how the suite proves sg and its callers get by awaiting.
-    /// The inline rings' back-pressure still parks when a ring is full; libs/graphics/shaped-graphics/docs/TODO.md lists those waits.
+    /// The inline rings' back-pressure still parks when a ring is full; issue: feat-sg-never-block-backend-waits lists those waits.
     sg::execution_model execution = sg::execution_model::may_block;
 
     /// Capacity of the staging ring behind cmd.upload, in bytes.
@@ -88,7 +89,8 @@ struct sg::backend::vulkan::vulkan_config
 
     /// Capacity of the descriptor heap, in bytes, and the share of it reserved for transient binding groups.
     /// Sized in bytes rather than in descriptors because a descriptor's size is a device property.
-    isize descriptor_heap_bytes = 4 * 1024 * 1024;
+    /// A bindless group takes its whole table per snapshot, so this must hold several of the largest one.
+    isize descriptor_heap_bytes = isize(16) * 1024 * 1024;
     float descriptor_transient_fraction = 0.25f;
 };
 
@@ -141,6 +143,7 @@ public:
         _sample_rate_shading = features.sampleRateShading == VK_TRUE;
         _wireframe_fill = features.fillModeNonSolid == VK_TRUE;
         _sampler_anisotropy = features.samplerAnisotropy == VK_TRUE;
+        _texture_compression_bc = features.textureCompressionBC == VK_TRUE;
 
         // A device must have D24S8 or D32S8 as a depth-stencil attachment, and not necessarily the one sg names.
         auto d32s8 = VkFormatProperties{};
@@ -187,6 +190,19 @@ public:
 
     // Set once by create_vulkan_context, before the context is handed out; never changes afterwards.
     void set_raytracing_supported(bool supported) { _raytracing_supported = supported; }
+
+    /// Whether VK_EXT_opacity_micromap is enabled, with its entry points loaded: sg::feature::opacity_micromap.
+    [[nodiscard]] bool is_opacity_micromap_supported() const { return _opacity_micromap.has_value(); }
+
+    /// The deepest subdivision level the device takes in a 4-state and in a 2-state map; only where micromaps are supported.
+    [[nodiscard]] VkPhysicalDeviceOpacityMicromapPropertiesEXT const& opacity_micromap_properties() const
+    {
+        return _opacity_micromap.value();
+    }
+
+    /// The VkBufferUsageFlags a buffer of `usage` is created with, here and by every requirements probe alike.
+    /// Where micromaps are enabled, an acceleration-structure usage carries its micromap twin too, so one buffer serves either build.
+    [[nodiscard]] VkBufferUsageFlags vk_buffer_usage(sg::buffer_usages usage) const;
 
     /// Serializes every queue operation on this device.
     ///
@@ -265,6 +281,8 @@ public:
         case sg::feature::unaligned_block_compression:
         case sg::feature::multisampled_array_textures:
             return true;
+        case sg::feature::texture_compression_bc:
+            return _texture_compression_bc;
         case sg::feature::primitive_index:
             // SPIR-V's PrimitiveId in a fragment shader needs the Geometry capability, which the device feature grants.
             return _geometry_shader;
@@ -285,9 +303,15 @@ public:
         case sg::feature::subgroups:
             return _subgroups;
         // SPIR-V's `Coherent` decoration is core, and storage-image atomics on r32 integer formats are required.
+        // BaseInstance is the DrawParameters capability, which creation requires `shaderDrawParameters` for.
         case sg::feature::device_coherence:
         case sg::feature::image_atomics:
+        case sg::feature::first_instance:
+        // `HelperInvocation` is a core built-in; `OpAtomicCompareExchange` is strong, so no loop asks it
+        case sg::feature::helper_lane_query:
             return true;
+        case sg::feature::opacity_micromap:
+            return is_opacity_micromap_supported();
         }
         return false;
     }
@@ -397,12 +421,18 @@ public:
                                                                         VkBufferUsageFlags extra_usage = 0);
     [[nodiscard]] cc::result<vulkan_texture_handle> create_vulkan_texture(sg::texture_description const& desc,
                                                                           sg::allocation_info const& alloc);
+    /// The VkImage a texture of `desc` is, created with no memory bound: what create_vulkan_texture binds, and what a heap asks requirements of.
+    [[nodiscard]] cc::result<VkImage> create_vk_image(sg::texture_description const& desc);
     sg::submission_token submit_vulkan_command_list(std::unique_ptr<vulkan_command_list> cmd);
     void drop_vulkan_command_list(std::unique_ptr<vulkan_command_list> cmd);
 
     // The drop cleanup on an unsubmitted list: return its pool, release its slot, drop the open-list count.
     // Shared by drop_vulkan_command_list and the destructor's auto-drop — do not call directly, go through drop_vulkan_command_list.
     void reclaim_unsubmitted_command_list(vulkan_command_list& cmd);
+
+    // Hands the attachment views `cmd` created to the current epoch, which destroys them once it retires.
+    // Submit and drop both call it; see acquire_attachment_view.
+    void retire_attachment_views(vulkan_command_list& cmd);
 
     // sg::context overrides — forward to the backend-typed methods above.
     // The static_cast down is sound: backends never mix.
@@ -427,11 +457,13 @@ public:
 
     // Device-local memory a buffer can be placed into; textures are not placeable on either backend.
     // Returns an error rather than aborting, so the sg throwing façade turns a failure into a typed exception.
-    [[nodiscard]] cc::result<vulkan_memory_heap_handle> create_vulkan_memory_heap(isize size_in_bytes);
+    [[nodiscard]] cc::result<vulkan_memory_heap_handle> create_vulkan_memory_heap(isize size_in_bytes,
+                                                                                  sg::memory_heap_contents contents);
 
-    [[nodiscard]] cc::result<sg::memory_heap_handle> try_create_memory_heap(isize size_in_bytes) override
+    [[nodiscard]] cc::result<sg::memory_heap_handle> try_create_memory_heap(isize size_in_bytes,
+                                                                            sg::memory_heap_contents contents) override
     {
-        return cc::result<sg::memory_heap_handle>(create_vulkan_memory_heap(size_in_bytes));
+        return cc::result<sg::memory_heap_handle>(create_vulkan_memory_heap(size_in_bytes, contents));
     }
 
     [[nodiscard]] cc::result<vulkan_swapchain_handle> create_vulkan_swapchain(sg::swapchain_description const& desc);
@@ -778,6 +810,9 @@ public:
     // Set once at creation from the device's extension set; see is_raytracing_supported.
     bool _raytracing_supported = false;
 
+    // Set once at creation where VK_EXT_opacity_micromap is enabled; see is_opacity_micromap_supported.
+    cc::optional<VkPhysicalDeviceOpacityMicromapPropertiesEXT> _opacity_micromap;
+
     // See is_swapchain_supported / is_headless_present_supported.
     bool _swapchain_supported = false;
     bool _headless_surface_supported = false;
@@ -818,6 +853,7 @@ public:
     bool _extended_image_formats = false;
     /// The device features of the same names, enabled wherever the device has them.
     bool _geometry_shader = false;
+    bool _texture_compression_bc = false;
     bool _tessellation_shader = false;
     bool _sample_rate_shading = false;
     bool _wireframe_fill = false;

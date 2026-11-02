@@ -200,13 +200,13 @@ cc::result<binding_group_handle> staging_binding_group::try_snapshot()
 
 void staging_binding_group::record_use(binding_slot slot, int first_element, cc::span<raw_view const> views)
 {
-    if (!_records_buffer_uses)
+    if (!_records_buffer_uses && !_records_tlases)
         return;
     auto const& b = *info_of(slot).declared;
     auto const index = isize(u32(slot));
 
     // Every element that binds a tlas, arrays included, since a trace reaches each of them.
-    if (b.type == binding_type::acceleration_structure)
+    if (_records_tlases && b.type == binding_type::acceleration_structure)
     {
         if (_slot_tlases.size() <= index)
             _slot_tlases.resize_to_defaulted(index + 1);
@@ -220,7 +220,7 @@ void staging_binding_group::record_use(binding_slot slot, int first_element, cc:
         }
     }
 
-    if (b.count != 1 || views.size() != 1)
+    if (!_records_buffer_uses || b.count != 1 || views.size() != 1)
         return;
     if (_slot_uses.size() <= index)
         _slot_uses.resize_to_defaulted(index + 1);

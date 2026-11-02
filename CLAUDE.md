@@ -24,7 +24,8 @@ Cross-library examples — the ones belonging to no single library — live in `
 One-liner per library:
 
 * **`libs/base/clean-core`** — foundational data structures, memory utilities, assertions, and low-level primitives (`span`, `vector`, `string`, `optional`, `result`, fixed containers,
-  `function_ref`, …). Namespace `cc`. No dependencies.
+  `function_ref`, …). Namespace `cc`.
+  No dependencies.
   Also home to **`cc::rec`** (`record/`), the one event stream logging, profiling, values, stats and tracing all write into —
   a recording is a value type, which is what makes live observability, crash forensics and test assertions one mechanism.
   [docs/logging.md](libs/base/clean-core/docs/logging.md) and [docs/profiling.md](libs/base/clean-core/docs/profiling.md) are the user-facing halves;
@@ -37,7 +38,8 @@ One-liner per library:
 * **`libs/base/nexus`** — lightweight C++23 test framework, Catch2 v3 CLI–compatible (discovery, filtering, sections, JUnit XML) for out-of-the-box IDE integration.
   Carries invocable (parametrized) tests, an API-sequence fuzzer, PGO benchmarks and hardware counters too — its [readme](libs/base/nexus/readme.md) has the map.
   **A passing test logs no warning or error it did not declare** — [docs/log-rule.md](libs/base/nexus/docs/log-rule.md).
-  Namespace `nx`. Depends on clean-core, plus babel-data privately (`babel::json` writes its listing and perf sidecars).
+  Namespace `nx`.
+  Depends on clean-core, plus babel-data privately (`babel::json` writes its listing and perf sidecars).
   **nexus is a leaf**: nothing in shaped-core links it except test binaries, so it sits ON TOP of the libraries it tests despite living in `base/`, and it is added LAST in the root `CMakeLists.txt`.
   It takes `babel-data` rather than all of babel for a reason of its own: every `*-test` binary links nexus, so a nexus dependency is a repo-wide tax and only externals-free libraries belong there.
 * **`libs/base/typed-geometry`** — strongly-typed C++23 math & geometry.
@@ -47,10 +49,14 @@ One-liner per library:
   So is `tg::f16` (`half_float`): IEEE binary16 with explicit conversions, and arithmetic correctly rounded once per operation.
   Geometric queries are **members** (`a.intersects(b)`, `p.distance_to(seg)`), and an object type is **maximal** — `aabb3` is the solid box, its surface is `aabb3_surface`.
   [docs/plans/geometry-query-matrix.md](libs/base/typed-geometry/docs/plans/geometry-query-matrix.md) is that layer; curves, symbolic and mesh are planned.
-  Namespace `tg`. Depends on clean-core.
+  `camera/` is projections and views: `tg::perspective` is left-handed reverse-Z, and every other convention has an explicit name.
+  `tg::view_projection`'s `project` / `unproject` pair is specified by its round trip — [docs/modules/camera.md](libs/base/typed-geometry/docs/modules/camera.md).
+  Namespace `tg`.
+  Depends on clean-core.
   Early stage — see its [docs/structure.md](libs/base/typed-geometry/docs/structure.md) roadmap.
 * **`libs/base/clean-net`** — networking: TCP and datagrams, name resolution, TLS, HTTP and WebSocket clients, and a loopback dev server.
-  Namespace `cnet`. Depends on clean-core.
+  Namespace `cnet`.
+  Depends on clean-core.
   **The transport and the protocol clients are peers, not layers.**
   A browser has no sockets and does have `fetch`, and wasm is tier 1 — so HTTP is an interface with backends, and our transport is one of them.
   `cnet::http_level` is the capability ladder a caller checks once; the transport answers `is_supported()` instead.
@@ -61,20 +67,29 @@ One-liner per library:
   One layout on every kernel (`cimd::storage<T, N>` is what a data structure holds), and opaque masks so AVX-512 keeps them in k-registers.
   An operator exists only where AVX2, NEON and SIMD128 each need ≤ 3 instructions; every one has a named member twin.
   The types are committed codegen from `tools/gen-simd.py`.
-  Namespace `cimd`. Depends on clean-core.
+  Namespace `cimd`.
+  Depends on clean-core.
   [docs/design.md](libs/base/clean-simd/docs/design.md) has the decisions; early stage.
 * **`libs/data/babel-data`** — the externals-free base of babel: a base64 codec, a JSON reader and writer, and a block-level markdown reader (`data/`).
-  Namespace `babel`. Depends on clean-core and nothing else, which is the library's whole contract.
+  Namespace `babel`.
+  Depends on clean-core and nothing else, which is the library's whole contract.
   It also declares `namespace babel` itself — the vocabulary aliases and the fallback recording domain — so `fwd.hh` layers rather than forks.
   See its [readme](libs/data/babel-data/readme.md) and [cheat-sheet](libs/data/babel-data/cheat-sheet.md).
 * **`libs/data/babel-serializer`** — the rest of babel: everything that needs more than clean-core.
   Each format parses into an **unopinionated native structure** (read-once, query-friendly, not for insertion), with **opinionated aggregators** ("load an image", "load a mesh") on top.
   Readers take a `cc::read_stream` and parse against its buffered window.
-  The exception is one that must hand back zero-copy views of its input: `gltf` takes a `cc::pinned_data<byte const>`.
-  So far: a SQLite engine wrapper (`data/`), Wavefront OBJ, STL (both containers) and glTF 2.0/GLB readers (`geometry/`), and an OpenType reader (`font/`, TrueType outlines as stored).
+  The exception is one that must hand back zero-copy views of its input: `gltf`, `dds` and `ktx2` take a `cc::pinned_data<byte const>`.
+  So far: a SQLite engine wrapper (`data/`), Wavefront OBJ, STL (both containers), glTF 2.0/GLB and FBX readers (`geometry/`), and an OpenType reader (`font/`, TrueType outlines as stored).
+  FBX parses through the vendored ufbx and comes back as FBX's own object model, its axes and unit reported rather than applied.
   Also a PNG codec in `babel::png` over the vendored libspng and a JPEG one in `babel::jpg` over the vendored stb, plus fully native Radiance HDR and PFM in `babel::hdr` / `babel::pfm`,
   with the `babel::image` aggregator on top (`image/`) — `u8` samples for JPEG, `u8` or `u16` for PNG, `f32` for the last two.
-  Namespace `babel`. Depends on babel-data + typed-geometry.
+  Native read-only DDS and TGA too: `babel::dds` hands back every mip, layer and cube face as views of the input, and `babel::bcn` decodes BC1 - BC7.
+  `babel::ktx2` reads KTX 2.0 the same way, undoing zstd or zlib supercompression level by level, on a scheduler when given one.
+  glTF decodes EXT_meshopt_compression over the vendored meshoptimizer decoders, and a caller registers its own extensions with hooks that decode bufferViews and accessors.
+  `json_of` hands back any element's own JSON, for what an extension adds.
+  The aggregator keeps mip 0 of a DDS, as `u8`, or `f32` for BC6H and the float formats.
+  Namespace `babel`.
+  Depends on babel-data + typed-geometry.
   **One namespace, two libraries**, split by dependency rather than by topic — which is why `data/` spans both, `sqlite` living up here because of what it *needs*.
   `babel-serializer` is the target to link when in doubt; it links babel-data publicly.
   Its [docs/](libs/data/babel-serializer/docs/_index.md) are babel-wide: [docs/coding-guidelines.md](libs/data/babel-serializer/docs/coding-guidelines.md) owns the conventions both libraries follow,
@@ -83,7 +98,8 @@ One-liner per library:
 * **`libs/data/versioned-document`** — structured documents that are versioned, mergeable and verifiable.
   Entities → components → properties, materialized from an immutable content-addressed DAG of ops; property values are a canonical binary codec where equality is byte equality.
   Ships **zero components** — the component set belongs entirely to the application.
-  Namespace `vdoc`. Depends on clean-core.
+  Namespace `vdoc`.
+  Depends on clean-core.
   The in-memory library is complete; persistence is versioned-document-file — its [concept docs](libs/data/versioned-document/docs/_index.md#concepts) are the design, one file per concept.
   [docs/decisions.md](libs/data/versioned-document/docs/decisions.md) carries the settled choices and what would reopen each.
   **The edit path is incremental and realtime** — `build(graph, cache)`, `advance_snapshot`, `vdoc::apply` — so a one-entity edit is ~10 µs whatever the document's size.
@@ -94,13 +110,15 @@ One-liner per library:
   Property granularity is the requirement rather than a refinement, which is why it composes below the typed layer.
 * **`libs/data/versioned-document-file`** — the `.vdoc` save format.
   One SQLite file holding a document's op DAG, its refs and snapshots, its embedded assets over deduplicated blobs, and a disposable workspace.
-  Namespace `vdoc::file`. Depends on versioned-document + babel-serializer (`babel::sqlite`, linked privately).
+  Namespace `vdoc::file`.
+  Depends on versioned-document + babel-serializer (`babel::sqlite`, linked privately).
   Complete: the store and its loader, publishing, the workspace, the content store — assets, blobs, the encoding seam and reclamation — snapshots with pruning, and recovery from an untrusted peer.
   [docs/format.md](libs/data/versioned-document-file/docs/format.md) is the on-disk specification.
 * **`libs/data/blob-cache`** — a persistent, multi-process cache for expensive derived bytes: `(namespace, key, version)` → content-addressed blobs in one shared SQLite file.
   In-process singleflight over the whole acquire pipeline, TTLs, and cost-aware eviction; one `cc::threaded_actor` owns the connection.
   Everything follows from one invariant: **deleting all cache data can never affect correctness**, so a storage failure is a miss and never an error.
-  Namespace `bcache`. Depends on clean-core, plus babel-serializer privately for `babel::sqlite`.
+  Namespace `bcache`.
+  Depends on clean-core, plus babel-serializer privately for `babel::sqlite`.
   See its [docs/design.md](libs/data/blob-cache/docs/design.md).
 * **`libs/graphics/shaped-graphics`** — graphics-API wrapper: `context`, `command_list`, GPU resources, over per-backend static libs.
   dx12 and vulkan cover the whole surface; webgpu covers it but the ray-tracing pipeline, on wasm over emdawnwebgpu, and never blocks.
@@ -108,14 +126,17 @@ One-liner per library:
   **metal** covers it too, on Metal 4 (macOS / iOS 26 floor, Apple silicon): windowed and headless presentation, ray tracing, and GPU timestamps.
   opengl and webgl are intended tiers with no backend yet.
   Also home to the **render-routine framework** (`sg::render_routine`, per-context `ctx.routines`) — concrete routines live in shaped-rendering.
-  Namespace `sg`. Depends on clean-core + typed-geometry.
+  Namespace `sg`.
+  Depends on clean-core + typed-geometry.
   Early stage — see [docs/graphics.md](docs/graphics.md).
 * **`libs/graphics/shaped-shader-compiler-dxc`** — a lean DXC wrapper: HLSL → `sg::compiled_shader` (bytecode + reflection), plus an async content-keyed cache.
-  Namespace `ssc::dxc`. Depends on shaped-graphics.
+  Namespace `ssc::dxc`.
+  Depends on shaped-graphics.
   Windows-only, and built only once `extern/dxc` has fetched DXC.
 * **`libs/graphics/shaped-shader-compiler-msl`** — the Metal wrapper: MSL → `sg::compiled_shader` (a metallib, or MSL source where Apple's separately-installed Metal toolchain is absent).
   Reflection reads the source text, because a metallib carries none and Metal's own reflection needs a device and a built pipeline.
-  Namespace `ssc::msl`. Depends on shaped-graphics.
+  Namespace `ssc::msl`.
+  Depends on shaped-graphics.
   Apple-only, and built there **unconditionally** — the toolchain is a run-time lookup rather than a configure gate, since one arm needs no toolchain at all.
 * **`libs/graphics/shaped-shader-library`** — shader packages + hot reloading:
   any target declares its shaders via `sc_add_shader_package` and gets typed C++ symbols; `acquire(ctx)` returns bytecode in a format that context accepts.
@@ -123,10 +144,12 @@ One-liner per library:
   `slib::create_sgl_compiler(inner)` is that edge: sgl's pipeline as `preprocess`, then the DXC, WGSL or metal compiler that was there already.
   An SGL `@raytracing pipeline` generates its pipeline description and shader table, with no index written by hand.
   Hit groups or callables it leaves `.host` compile from SGL at run time — [docs/raytracing-pipelines.md](libs/graphics/shaped-shader-library/docs/raytracing-pipelines.md).
-  Namespace `slib`. Depends on shaped-graphics, plus shaped-graphics-language privately.
+  Namespace `slib`.
+  Depends on shaped-graphics, plus shaped-graphics-language privately.
   The compiler edges are optional: shaped-shader-compiler-dxc where DXC exists, shaped-shader-compiler-msl on Apple — **sg does not depend on it**.
 * **`libs/graphics/shaped-rendering`** — concrete render routines on top of sg's routine framework (mipmap gen, tonemapping, texture compression, …).
-  Namespace `sr`. Depends on shaped-graphics + shaped-shader-library (routines acquire their shaders through it), plus the vendored `imgui` bundle (Dear ImGui + ImPlot + ImGuizmo).
+  Namespace `sr`.
+  Depends on shaped-graphics + shaped-shader-library (routines acquire their shaders through it), plus the vendored `imgui` bundle (Dear ImGui + ImPlot + ImGuizmo).
   Also on babel-serializer, since Slug reads fonts through `babel::font`.
   Hosts the **Dear ImGui renderer** (`sr::imgui_context` + `sr::imgui_routine`), drawn entirely through sg — see [docs/imgui.md](libs/graphics/shaped-rendering/docs/imgui.md).
   Hosts **Slug**: shapes and text drawn on the GPU from their outlines — `sr::slug_routine` over a caller-owned `sr::slug_atlas`, depth-tested where the scope has depth.
@@ -153,25 +176,30 @@ One-liner per library:
   `prelude/builtins.sgl` is generated from the C++ builtin registry and checked by `dev.py check`, so never edit it by hand.
   **`sgl lsp` is the language server**, a shallow shim that translates what the library answers into LSP; the VS Code extension in `tools/vscode-extension/` is its client.
   [docs/lsp.md](libs/graphics/shaped-graphics-language/docs/lsp.md) is its design.
-  Namespace `sgl`. Depends on clean-core alone, which must stay so: an editor links it to parse.
+  Namespace `sgl`.
+  Depends on clean-core alone, which must stay so: an editor links it to parse.
   Early stage.
 * **`libs/graphics/shaped-viewer`** — professional, RTX-enabled visualization renderer with a dev-friendly API.
-  Namespace `sv`. Depends on shaped-rendering, plus babel-serializer for the asset importer.
+  Namespace `sv`.
+  Depends on shaped-rendering, plus babel-serializer for the asset importer.
   A first vertical slice today: path-traced views blitted into a window.
-  Every shader is SGL, so the trace runs on dx12 and vulkan; the default context and the examples are dx12's.
+  Every shader is SGL, so the trace runs on dx12, vulkan and metal; the default context and the examples are dx12's on Windows and metal's on Apple.
   **A material type is an SGL fragment** (`sv::material_type::shader`), generated into one hit group per permutation.
-  **`sv::asset_loader` reads glTF, OBJ and STL into a CPU-side `sv::asset_data`** — it holds no device, opens no file, and resolves every uri through a settable hook.
+  **`sv::asset_loader` reads glTF, OBJ, STL and FBX into a CPU-side `sv::asset_data`** — it holds no device, opens no file, and resolves every uri through a settable hook.
   A mesh exists in two forms: `sv::mesh` is what a caller holds — pinned payloads plus the resources minted for them, with `is_ready` — and `sv::resident_mesh` is that mesh as ids alone.
   **Drawings are Slug shapes**: flat on a canvas, over a scene, as annotations — and as decals, which the tracer paints into the surfaces they are projected onto.
   [docs/canvas.md](libs/graphics/shaped-viewer/docs/canvas.md) is the design.
   [docs/asset-loading.md](libs/graphics/shaped-viewer/docs/asset-loading.md) is the design and the phasing.
+  **`shaped-view` is the standalone viewer** over all of it: models from the command line or dropped onto the window, side by side.
+  `uv run dev.py install shaped-view` makes it what a double-click on `.obj`, `.stl`, `.gltf` or `.glb` opens.
 
 Supporting directories:
 
 * **`tools/`** — `dev/` (Python build/test machinery behind [dev.py](dev.py);
   see [docs/dev-py-driver.md](docs/dev-py-driver.md)), `bin/` (checked-in binaries, e.g. `diag-launcher.exe`), `cmake/` (repo-wide build config modules), `lint/` (the clang-tidy gate whitelist),
   `shaped-linter/` (our own C++ linter — own lexer + parser, no LLVM; see [its readme](tools/shaped-linter/readme.md) — run via `dev.py lint shaped`),
-  `review/` (the review tool behind [review.py](review.py) — see [its readme](tools/review/readme.md)), and `instruction-tracer/` (a C++ tool —
+  `review/` (the review tool behind [review.py](review.py) — see [its readme](tools/review/readme.md)),
+  `issues/` (the in-repo issue tracker behind `dev.py issues` — see [docs/guides/issue-tracking.md](docs/guides/issue-tracking.md)), and `instruction-tracer/` (a C++ tool —
   see [its readme](tools/instruction-tracer/readme.md) — that records what optimized code actually executed; drive it via `dev.py assembly trace`).
 * **`docs/`** — repo-wide docs; start at [docs/_index.md](docs/_index.md).
 * **`dev.py`**, **`CMakeLists.txt`**, **`CMakePresets.json`** — build entry points.
@@ -199,7 +227,8 @@ Each entry above names what it depends on, and the `CMakeLists.txt` files are th
   **Never introduce a new version of one of our file formats** (`.vdoc` above all) — that is a question, not a migration you write unprompted.
   When a change breaks something, **ask whether compatibility must be preserved**; most current work is on unreleased features, so the answer is usually no.
   See [Stability & Evolution](docs/coding-guidelines.md#stability--evolution).
-* **Feature branches are mandatory** (see Git workflow) — don't commit to `main`.
+* **Most work goes straight to `main`; a PR is for big reworks and substantial new API** (see Git workflow).
+* **Never wait for CI.** Push and move on; a red run is fixed after the fact, directly on `main`.
 * **No force-push to `main`.**
 * **Opening a PR requires the `opening-a-pr` skill.** Activate it before any `gh pr create` — do not hand-roll the PR.
 
@@ -246,7 +275,9 @@ Writing several `.md` files before linting any of them turns a habit into a swee
 Linting the first one calibrates the rest.
 [docs/guides/prose.md](docs/guides/prose.md) is the workflow around it, including what `--fix` will and won't do for you.
 
-**Before committing, run `uv run dev.py check --fix`** — the pre-commit gate, and manual rather than a git hook.
+**Before pushing, run `uv run dev.py check --fix`** — the pre-push gate, and manual rather than a git hook.
+`uv run dev.py ship` is that gate plus the pull and the push as one command, submodules with unpushed work and their bump included, and the way to end a piece of work;
+it refuses uncommitted work, reruns the static gates on top of a merge the remote forced, and gives up after three rounds.
 It runs the clang-tidy gates, shaped-linter, clang-format, a full-repo cross-reference check, then the test suite; `--no-test` skips that tail and `--list` shows the registry.
 The order is a correctness property rather than a listing convention, and [Pre-commit checks](docs/guides/building-and-testing.md#pre-commit-checks) says why.
 
@@ -292,6 +323,12 @@ The loop is **run `dev.py`, then diagnose with `repo_tools`** — `build_diag` a
   OFF points it at `cc::system_memory_resource` and links no mimalloc, which is what lets a sanitizer see through our allocations — so the `sanitize-*` presets set it OFF.
   Independent of `SANITIZE`, and no API or layout changes with it; only in-place resize does, since the system resource always declines.
   See [docs/platforms.md](docs/platforms.md#default-allocator-sc_mimalloc).
+* `SC_SOURCE_SITES` (default `FULL`; `OPAQUE`, `OFF`) is what a `cc::source_location` keeps → clean-core's `CC_SOURCE_SITES`: strings, the site's code address only, or nothing.
+  `OPAQUE` is for shipping: no source file or function in the binary, every site resolvable through the build's debug info; the `singlethreaded-*` presets build at it.
+  Whole-build, since it changes `cc::source_location`'s layout; see [docs/platforms.md](docs/platforms.md#source-sites-sc_source_sites).
+* `SC_FROZEN_SHADERS` (default OFF) is the shipping mode for shaders: no shader file read, no hot reload, and recorded bytecode embedded where an executable asks with `sc_embed_shader_bundle`.
+  A miss still compiles from the embedded sources, so DXC still ships; the `frozen-clang` preset sets it.
+  See [frozen-shaders](libs/graphics/shaped-shader-library/docs/frozen-shaders.md).
 * `SC_CHECK_WIDE_ARITH` (default OFF) checks typed-geometry's `fixed_int` claims — a result width, a shift amount — at runtime → `TG_CHECK_WIDE_ARITH`.
   Off by default because they sit in predicate hot loops; the `debug-nopch` presets turn it on, so `check` exercises it.
   See [docs/platforms.md](docs/platforms.md#wide-arithmetic-checks-sc_check_wide_arith).
@@ -300,6 +337,9 @@ The loop is **run `dev.py`, then diagnose with `repo_tools`** — `build_diag` a
 * `SC_CHECK_GEOMETRY_SPECIAL_CASES` (default OFF) logs each special case a typed-geometry query assumes away — collinear lines, a ray in a triangle's plane → `TG_CHECK_SPECIAL_CASES`.
   The `debug-nopch` presets turn it on, so a test that feeds one on purpose declares it with `nx::expect_warning`.
   See [docs/platforms.md](docs/platforms.md#geometry-special-case-checks-sc_check_geometry_special_cases).
+* `SC_ASYNC_AMBIENT_TRACE` (default OFF) lets nexus name who still holds a test's context when it reports leftover async work → `CC_ASYNC_AMBIENT_TRACE`.
+  Off, nothing is paid; on, every context release pays a load and a compare; the `debug-nopch` presets turn it on.
+  See [docs/platforms.md](docs/platforms.md#who-holds-a-tests-context-sc_async_ambient_trace).
 
 ---
 
@@ -402,6 +442,8 @@ Invokable session tooling lives in [.claude/skills/](.claude/skills/). Worth cal
 
 * **`/building-and-testing`** — drive `dev.py` and the `repo_tools` `build_diag` / `test_diag` diagnostics.
   See [docs/guides/building-and-testing.md](docs/guides/building-and-testing.md).
+* **`/issue-tracking`** — file, find, claim and close issues: markdown files in any `docs/issues/` folder, driven by `dev.py issues`.
+  See [docs/guides/issue-tracking.md](docs/guides/issue-tracking.md).
 * **`/reworking-prose`** — rework the comments and docs around a topic wholesale, landing every rewrite in one `dev.py lint prose-apply` pass.
   Use it whenever prose findings pile up, a guideline changes, or a surface needs more documentation than it has.
 
@@ -415,7 +457,8 @@ Use the `repo_tools` MCP server (`file_structure`, `repo_view`, `repo_search`, `
 `repo_view` for commit/diff content `Read` can't reach.
 
 Scope `repo_search` / `repo_structure` with a single gitignore-style `path` selector — subtree and filename globbing, comma-OR'd: `path=libs/`, `path=*.hh`,
-`path=libs/**/*.hh`. Subtract noise with `exclude=` (or a `!`-prefixed term).
+`path=libs/**/*.hh`.
+Subtract noise with `exclude=` (or a `!`-prefixed term).
 `matching=smart` by default (case- and separator-insensitive); `matching=exact` for verbatim.
 
 ---
@@ -437,10 +480,23 @@ A stale "no cc:: equivalent yet" reason sends the next author back to the old wa
 
 ## Git workflow
 
-* **`main` is the integration branch.** Feature branches are **mandatory**, namespaced per contributor: `u/<your-initials>/<feature>` (e.g. `u/pt/...` for Philip Trettner — use your own initials).
+* **`main` is the integration branch, and most changes are committed to it directly.**
+  That covers fixes, internal improvements, tests, CI fixes, docs, and API that was basically expected to be there — the missing overload, the accessor the type obviously lacked.
+* **A PR with a review is for big reworks and anything that adds substantial new API** — a new concept, type family or library, a public shape someone should weigh before it sets.
+  Those go on a feature branch namespaced per contributor, `u/<your-initials>/<feature>` (Philip Trettner is `u/pt/...`), through the `opening-a-pr` skill.
+  When a change could go either way, pick a lane and say which in one line, so the maintainer can redirect.
+* **CI is never waited on**, neither before a push to `main` nor before opening a PR.
+  Red CI is fixed after the fact and opportunistically, as its own commit on `main` — the `debugging-ci` skill reads the failing run.
+  It is usually small: an arm the local machine does not compile, a newer compiler's warning.
 * **`git pull` merges, not rebases** — merge commits preserve the order parallel work landed.
   On conflicts, resolve and commit the merge (default message fine).
-* **Before committing, run `uv run dev.py check --fix`.** Not a git hook — manual.
+  A push to `main` rejected as non-fast-forward is the same case: pull, resolve, push again.
+* **Commits are grouped by topic, and one may be partially broken.** A commit that does not compile on its own is fine.
+* **Before every push, `uv run dev.py check --fix` must pass.** Not a git hook — manual.
+  `uv run dev.py ship` runs it and pushes in one go, once the user has asked for the push.
+  It is the local gate that makes skipping CI cheap, so it is not skipped.
+  Its default scope is everything since the merge base with `origin/main`, so on `main` it covers exactly the unpushed commits.
+* **An agent never pushes on its own initiative.** A push needs the user's intent: ask, or wait until told to push.
 * **The review workflow is: open the PR, then review it in a fresh session, which lands changes or comments.**
   The review with the tool always comes after the PR is open, never before.
   So "anything to add before the PR?" asks what this session should still do; "a proper review with the tool" is never the answer.
@@ -494,9 +550,13 @@ A stale "no cc:: equivalent yet" reason sends the next author back to the old wa
 | See external dependency pins     | `uv run dev.py deps list` (`--offline` for no network; [dependencies](docs/guides/dependencies.md)) |
 | Collect third-party licenses     | `uv run dev.py deps licenses` (regenerates [docs/licenses/](docs/licenses/_index.md); `--check` is a `check` gate) |
 | Run pre-commit checks            | `uv run dev.py check --fix`                                       |
+| File, find or claim an issue     | `uv run dev.py issues new/list/known/claim` ([issue-tracking](docs/guides/issue-tracking.md); the `issue-tracking` skill) |
+| Close an issue with the push that resolves it | `uv run dev.py ship --closes <id>` ([issue-tracking](docs/guides/issue-tracking.md#closed)) |
+| Browse and triage issues in a browser | `uv run dev.py issues serve` — edits write files only; the page's Commit & push is a separate step |
 | Re-check an already-made commit  | `uv run dev.py check --commit <rev>` (a range works too; a single commit means its first-parent diff, so a merge yields all it brought in) |
 | Sanity-check the toolchain       | `uv run dev.py doctor`                                            |
-| Install a repo tool                  | `uv run dev.py install` (lists them; `install sgl-vscode` links the SGL extension, `install emsdk` the pinned Emscripten SDK) |
+| Update a consumer's submodules   | `uv run dev.py submodules sync [--tip \| --bump]` — to the recorded commits (or the branch heads), fast-forwards only, never touches local work ([consuming-shaped-core](docs/guides/consuming-shaped-core.md#keeping-the-submodules-current)) |
+| Install a repo tool                  | `uv run dev.py install` (lists them; `install sgl-vscode` links the SGL extension, `install emsdk` the pinned Emscripten SDK, `install deno` the pinned deno, `install sde --archive <file>` Intel's CPU emulator, `install shaped-view` the model viewer a double-click opens) |
 | List presets / targets           | `uv run dev.py list-presets` / `list-targets`                     |
 | Pin a compiler version           | `uv run dev.py build --toolset <ver>` (`list-toolsets` shows them) |
 | Review a PR, a branch or a design | `uv run review.py init <name> --range A..B --goal <goal>` ([readme](tools/review/readme.md); the `reviewing-a-pr` skill drives it) |

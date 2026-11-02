@@ -1,4 +1,4 @@
-#include <clean-core/common/utility.hh> // cc::move, cc::max
+#include <clean-core/common/utility.hh> // cc::move, cc::max, cc::exchange
 #include <clean-core/string/format.hh>
 #include <shaped-viewer/impl/capture_session.hh>
 
@@ -13,9 +13,27 @@ void capture_session::note_registered(cc::string_view name)
     _registered.push_back(cc::string(name));
 }
 
+void capture_session::hold(cc::string_view reason)
+{
+    if (_hold_reason.empty())
+        _hold_reason = reason.empty() ? cc::string("an unnamed hold") : cc::string(reason);
+}
+
+cc::string capture_session::take_hold()
+{
+    return cc::exchange(_hold_reason, cc::string());
+}
+
 void capture_session::begin()
 {
     _start_seconds = _request.clock_seconds();
+}
+
+void capture_session::advance_frame()
+{
+    ++_frame;
+    _settled_before_writing = false;
+    begin();
 }
 
 double capture_session::elapsed_seconds() const
@@ -38,6 +56,13 @@ cc::string partial_capture_path(cc::string_view path)
         return cc::format("{}.partial", path);
 
     return cc::format("{}.partial{}", path.subview({.offset = 0, .size = dot}), path.subview(dot));
+}
+
+bool capture_session::note_owed_work(isize owed)
+{
+    auto const drained = _owing && owed == 0;
+    _owing = owed > 0;
+    return drained;
 }
 
 bool capture_session::is_settled(bool views_converged, bool any_traced, isize pending_work, bool traces_ran) const

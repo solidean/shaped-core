@@ -78,12 +78,47 @@ TEST("sgl check - a require names a feature a shader can use, as sg names it")
              "extended_image_formats, readwrite_image_formats, multisampled_array_textures, ray_query, "
              "raytracing_pipeline, primitive_index, "
              "sample_rate_shading, geometry_shader, tessellation_shader, shader_f16, shader_int16, subgroups, "
-             "device_coherence, image_atomics\n");
+             "device_coherence, image_atomics, first_instance, helper_lane_query\n");
     CHECK(reports_for("require raytracing\n").contains("unknown-feature user:[raytracing]"));
     CHECK(reports_for("require ray_query, binding_arrays\n") == "");
 
     // The 16-bit types, the subgroup operations, coherent memory and image atomics are names too.
     CHECK(reports_for("require shader_f16, shader_int16, subgroups, device_coherence, image_atomics\n") == "");
+}
+
+TEST("sgl check - a pixel stage's strong compare-exchange needs helper_lane_query, on every target alike")
+{
+    // EMIT-163: its loop must keep a helper invocation out, which a target that cannot tell one cannot do
+    auto const claims = [](cc::string_view require, cc::string_view stage, cc::string_view call)
+    {
+        auto const is_pixel = stage == "pixel";
+        return reports_for(cc::format("{}"
+                                      "binding claims:\n"
+                                      "    owners: mut buffer[atomic[uint]]\n"
+                                      "\n"
+                                      "@pixel struct target:\n"
+                                      "    value: float4\n"
+                                      "\n"
+                                      "struct varyings:\n"
+                                      "    @position position: hpos4\n"
+                                      "\n"
+                                      "{}"
+                                      "    let before = claims.owners[0].{}(0u, 1u)\n"
+                                      "{}",
+                                      require,
+                                      is_pixel ? "@pixel fun ps(p: varyings){claims} -> target:\n"
+                                               : "@compute(64) fun cs(@thread_id id: int3){claims}:\n",
+                                      call, is_pixel ? "    return {value = float4(1.0, 0.0, 0.0, 1.0)}\n" : ""));
+    };
+    CHECK(claims("", "pixel", "compare_exchange_strong")
+          == "feature-not-declared user:[ps] ps needs helper_lane_query, which neither its file, a binding it lists "
+             "nor "
+             "its body requires\n"
+             "  note user:[claims.owners[0].compare_exchange_strong(0u, 1u)] the call that needs it\n");
+    CHECK(claims("require helper_lane_query\n\n", "pixel", "compare_exchange_strong") == "");
+    // a weak one is one call, and a compute stage has no helpers
+    CHECK(claims("", "pixel", "compare_exchange_weak") == "");
+    CHECK(claims("", "compute", "compare_exchange_strong") == "");
 }
 
 TEST("sgl check - a require in a body that nothing needs is unused, and one of a file or a binding never is")
@@ -190,6 +225,11 @@ TEST("sgl check - a stage input some device lacks needs its feature, as a bindin
                       + "@pixel fun ps(v: vout, @primitive_id id: int, @sample_index s: int) -> target:\n"
                         "    return { c = float4(id as float, s as float, 0.0, 1.0) }\n")
           == "");
+    // `@first_instance` is one WGSL has no builtin for
+    CHECK(reports_for(cc::string(edges)
+                      + "@vertex fun vs(@first_instance first: int) -> vout:\n"
+                        "    return { p = hpos4(first as float, 0.0, 0.0, 1.0) }\n")
+              .contains("feature-not-declared user:[vs] vs needs first_instance"));
     // one every device has needs nothing
     CHECK(reports_for(cc::string(edges)
                       + "@pixel fun ps(v: vout, @is_front_facing f: bool) -> target:\n"

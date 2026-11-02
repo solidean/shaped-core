@@ -378,7 +378,7 @@ ASYNC_INVOCABLE_TEST("sg vulkan - a draw declares its array elements and reads w
         pass.bind_pipeline(*pipeline);
         pass.bind_group(0, *group);
         pass.bind_vertex_buffers({{.buffer = vertex_buffer, .stride_in_bytes = isize(sizeof(vertex))}});
-        pass.declare_array_buffer_access("Table", declared);
+        auto const table = pass.declare_array_buffer_access("Table", declared);
         pass.draw({.vertex_range = {.offset = 0, .size = 3}});
     }
     ctx.submit_command_list(cc::move(cmd));
@@ -441,7 +441,7 @@ ASYNC_INVOCABLE_TEST("sg vulkan - a draw with an undeclared array binding logs o
         pass.bind_vertex_buffers({{.buffer = vertex_buffer, .stride_in_bytes = isize(sizeof(vertex))}});
         pass.draw({.vertex_range = {.offset = 0, .size = 3}});
         pass.draw({.vertex_range = {.offset = 0, .size = 3}});
-        pass.declare_array_buffer_access("Table", {});
+        auto const unused = pass.declare_array_buffer_access("Table", {});
         pass.draw({.vertex_range = {.offset = 0, .size = 3}});
     }
     ctx.submit_command_list(cc::move(cmd));

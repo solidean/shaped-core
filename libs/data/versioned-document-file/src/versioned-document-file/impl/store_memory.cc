@@ -581,7 +581,7 @@ protected:
 
     void on_close() override
     {
-        // Nothing to release: an image is owned by whoever made it, and outliving this store is the point.
+        // Nothing to release: an image is owned by whoever made it, and is meant to outlive this store.
     }
 
 private:

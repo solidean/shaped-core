@@ -24,7 +24,8 @@ enum class thread_model
   Its backend objects are made on first use, which is always a bound call.
 - **Dropping anything is free too.** A handle released off its device thread travels back there and is released at the next `advance_epoch`.
 
-Resource creation is bound today, and nothing forces that: the same laziness would make it free-threaded (see [TODO](../TODO.md)).
+Resource creation is bound today, and nothing forces that: the same laziness would make it free-threaded.
+[feat-sg-free-threaded-resource-creation](../issues/feat-sg-free-threaded-resource-creation.md) tracks it.
 Command lists, submission, presentation and epochs are bound by their nature — they are the device's queue.
 
 `ctx.is_on_device_thread()` says whether the caller may make a bound call, and `ctx.device_home()` is where sg's own asyncs move to.

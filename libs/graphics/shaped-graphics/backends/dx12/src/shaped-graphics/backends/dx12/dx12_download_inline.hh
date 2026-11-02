@@ -46,7 +46,7 @@ struct sg::backend::dx12::dx12_download_copy_job
 /// The GPU copy is recorded inline, and a cc::threaded_actor then blocks on the submission fence and performs the CPU memcpy.
 /// So a download completes without advancing the epoch.
 /// Ring space is reclaimed at **epoch granularity**, never per submission: each epoch carries an outstanding-copy counter, and its whole span frees when that counter hits zero.
-/// Why that coarsening is load-bearing under concurrent recording: libs/graphics/shaped-graphics/docs/concepts/download.inline.md.
+/// Why that coarsening is required under concurrent recording: libs/graphics/shaped-graphics/docs/concepts/download.inline.md.
 class sg::backend::dx12::dx12_download_inline_system
 {
 public:

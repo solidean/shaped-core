@@ -48,6 +48,8 @@ struct sphere_boundary;
 template <int D, class T>
 struct tg::sphere<D, D, T>
 {
+    using scalar_t = T;
+
     static_assert(D > 0, "sphere requires a positive dimension");
 
     pos<D, T> center;
@@ -187,6 +189,8 @@ public:
 template <class T>
 struct tg::sphere<2, 3, T>
 {
+    using scalar_t = T;
+
     pos<3, T> center;
     T radius = {};
     vec<3, T> normal;
@@ -314,6 +318,8 @@ public:
 template <int D, class T>
 struct tg::sphere_boundary<D, D, T>
 {
+    using scalar_t = T;
+
     static_assert(D > 0, "sphere_boundary requires a positive dimension");
 
     pos<D, T> center;
@@ -413,6 +419,8 @@ public:
 template <class T>
 struct tg::sphere_boundary<2, 3, T>
 {
+    using scalar_t = T;
+
     pos<3, T> center;
     T radius = {};
     vec<3, T> normal;

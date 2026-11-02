@@ -90,7 +90,32 @@ struct constant_pass
                                                                                           : judged::sound;
         if (auto const* const call = x.node.try_as<flat_call>())
             return judge_call(id, *call);
+        if (auto const* const element = x.node.try_as<flat_element>())
+            return judge_element(*element);
         return judged::sound;
+    }
+
+    /// CHK-309: an index that folds to a constant names one element, whatever expression spelled it.
+    /// WGSL refuses one past the end at shader creation, so every target refuses it alike.
+    judged judge_element(flat_element const& element)
+    {
+        if (judge(element.object) == judged::reported || judge(element.index) == judged::reported)
+            return judged::reported;
+        auto const array = e.at(element.object).type;
+        if (!is_valid(array) || array == checked_module::error_type || m.at(array).kind != type_kind::array
+            || m.at(array).count <= 0 || !is_constant(m, e, element.index))
+            return judged::sound;
+        auto const folded = value_of(element.index);
+        if (folded.status != run_status::ok || folded.result.leaves.size() != 1)
+            return judged::sound;
+        auto const& leaf = folded.result.leaves[0];
+        auto const at = leaf.kind == value_kind::scalar_uint ? i64(leaf.as_uint()) : i64(leaf.as_int());
+        if (at >= 0 && at < m.at(array).count)
+            return judged::sound;
+        report(element.index, diagnostic_kind::invalid_constant_argument,
+               cc::format("is {}, which is no index into {}, whose elements are 0 ..< {}", at, m.name_of(array),
+                          m.at(array).count));
+        return judged::reported;
     }
 
     judged judge_call(flat_expr_id id, flat_call const& call)

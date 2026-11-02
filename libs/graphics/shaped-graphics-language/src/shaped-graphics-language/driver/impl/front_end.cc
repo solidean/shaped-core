@@ -135,8 +135,17 @@ sgl::driver::impl::front_end sgl::driver::impl::run_front_end(cc::string_view so
 
     for (auto const& d : all)
     {
-        auto& into = d.what.level == severity::warning ? result.warnings : result.errors;
-        into += format_located(result, d);
+        auto text = format_located(result, d);
+        auto const is_warning = d.what.level == severity::warning;
+        if (is_warning)
+            text.resize_down_to(text.size() - 1);
+        if (!d.entry_points.empty())
+            result.entry_diagnostics.push_back(
+                {.entry_points = d.entry_points, .is_warning = is_warning, .text = cc::move(text)});
+        else if (is_warning)
+            result.warnings.push_back(cc::move(text));
+        else
+            result.errors += text;
     }
     return result;
 }

@@ -130,7 +130,7 @@ constexpr cc::string_view wasm_function_marker = "wasm-function[";
     rest = rest.subview(1);
 
     // Older V8 spelled the second number as a decimal offset WITHIN the function, which names no place in the module.
-    // Rejecting it is the point: it is a different quantity rather than a smaller version of this one.
+    // Rejected rather than read: it is a different quantity rather than a smaller version of this one.
     if (!read_hex_u32(rest, frame.module_offset))
         return false;
     if (!rest.empty())

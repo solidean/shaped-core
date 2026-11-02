@@ -119,6 +119,11 @@ Fixing CI before a review means fixing code the review may throw away, so the or
 - **wasm is one of those platforms on every box.** The emsdk carries its own node, and `dev.py test --preset emscripten-… --emsdk-path <emsdk>` builds and runs the suite with it.
   "No browser here" is not a reason to review wasm code by reading.
   Once actually built, a wasm threads preset reproduced a per-worker stack limit a review had until then only argued from a standalone probe.
+  **So is webgpu**: `emscripten-threads-webgpu-relwithdebinfo`, CI's preset, runs sg's webgpu backend under the emsdk's node.
+  Node has no WebGPU of its own: Dawn comes from the `webgpu` npm package pinned in [tools/dev/js/package.json](../../tools/dev/js/package.json).
+  dev.py installs it on first use, and without it those runs skip.
+  A review once reported its sg runs as covering every backend while the webgpu-only test it had asked for skipped on dx12 and vulkan, and got back "we should be able to run webgpu here too".
+  A test that skips on every native backend is a test nobody ran.
 - **Run what the author's machine could not run, not just compile it.**
   A Linux thread-stack reporter whose own header said it had never run turned up four defects on its first run that no reading had.
 - **Land the fixes rather than filing them.** A compile error is work, and it is yours; file the *pattern* if there is one worth naming.
@@ -442,8 +447,8 @@ The same file hand-rolled 34 lines of byte-order float load that `cc::load_bytes
 Sort each helper into one of three:
 
 - **It exists in `cc` (or `tg`)** — delete the copy.
-- **It does not exist and belongs there** — record it in the library's `docs/lower-library-gaps.md`, and leave the copy with a one-line comment saying `cc` has no equivalent yet.
-  That comment stops the next reviewer re-raising it and the next author writing a fifth copy.
+- **It does not exist and belongs there** — file a `feat` in the lower library's `docs/issues/`, and leave the copy with a one-line comment saying `cc` has no equivalent yet, ending `issue: <id>`.
+  That comment stops the next reviewer re-raising it and the next author writing a fifth copy, and closing the issue fails `issues check` until the copy goes.
 - **It is genuinely specific to this format** — leave it.
 
 **Grep the foundational library for what the helper does, not just its name.**
@@ -489,6 +494,29 @@ An async fuzz CHECK firing on any worker was first caught by a capture tag pushe
 It settled on one atomic pointer on `test_context`, read right after the `current_context()` lookup every check already makes: a relaxed load per check, nothing per step.
 The same review showed why **intercepting beats undoing**: a restore cannot take back the log line each failure writes, and a divert read before it happens has nothing to undo.
 
+### A per-resource cache is priced on how its parts are used, not on how long the resource lives
+
+A cache that lives as long as its resource is cheapest for a resource used the same way every frame, and that is the case a benchmark naturally measures.
+The resource's lifetime is the wrong axis when parts of it are used once and then never again.
+A review recommended that vulkan attachment views live as long as their texture.
+Its numbers had it equal for transient targets and 7× to 170× cheaper for persistent ones rendered every frame, and it got this back:
+
+```raw
+Many persistent textures get their lower mip levels as render targets but never use them again. Therefore they should not permanently hold views that they don't need.
+```
+
+The views stayed per epoch, at a create and a destroy per frame for a persistent target, and the reason went into the design doc.
+Before recommending a longer-lived cache, name the usage pattern each row of the benchmark stands for, and the one it leaves out.
+
+**A memo keyed on an object is priced on how often that object is rebuilt.**
+A review recommended remembering, on each TLAS, the shader tables it had already been checked against, so a steady frame would skip a per-list walk of every instance:
+
+```raw
+But usually the TLAS is rebuild every frame. Would once per command list not make more sense then?
+```
+
+A rebuild is a new object, so the memo would never hit, and the per-list walk was already the right granularity.
+
 ### Out-of-order execution invalidates every collapsed maximum
 
 When a change lets work complete out of submission order, find every place that folds a set of values into one number and waits on it.
@@ -516,7 +544,7 @@ A review that only ever offers "fix it" pushes toward a completeness nobody aske
 
 ### A finding the diff already documents is not a finding
 
-**Search the branch's own docs for your finding before you raise it** — `docs/TODO.md`, a "Not yet" section, the `///` on the function.
+**Search the branch's own docs for your finding before you raise it** — `dev.py issues known <path>`, a "Not yet" section, the `///` on the function.
 Raising a recorded gap as a discovery says the reviewer did not read the docs in the diff, and silently overrules a recorded decision to defer without arguing against it.
 **A test counts as recording it**, and so does a spec rule or a comment in a test generator.
 Three of one review's nine findings were already recorded — one TODO, one doc comment, one CHECK in a test nowhere near the code it pins.
@@ -617,6 +645,15 @@ sorry i dont understand anything the way this entry is written. please make a sg
 
 The rewrite was seven lines of `sg` — two draws sharing a read-write buffer — the contract sentence, and one bullet per backend; the same shape also made the fix clearer.
 
+**A finding about hostile input is shown the same way: as the input that triggers it.**
+An FBX finding explained in a mechanism and two ratios — babel's copy writes per material what ufbx stores once — got this back:
+
+```raw
+I need more details here. Give me sample code. Where is this happening?
+```
+
+The rewrite was each crafted file as an excerpt, the babel lines that multiply it, the ufbx line that shares it, and what a probe measured; the maintainer could then judge the fix against the file.
+
 ### A review of code nobody here can run says so, and hands verification to the author
 
 Everything such a review finds is read off the source, and the comment must say so rather than wear the register of a verified finding.
@@ -681,7 +718,7 @@ The item needed to say the templated version must keep passing the index.
 **The failure is counting from a grep's output rather than from the set the claim is about** — comments, files outside the population, the same file twice.
 One draft carried three wrong counts, and the argument each supported was correct all three times; the finding survives, the credibility does not.
 **Either enumerate the set in the comment, or drop the number.**
-A list of nine paths is checkable and self-correcting while you write it; where a count really is the point, produce it with a command whose output you paste.
+A list of nine paths is checkable and self-correcting while you write it; where the reader needs the count itself, produce it with a command whose output you paste.
 
 ### A number carried out of its source is restated as the quantity it measures
 

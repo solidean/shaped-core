@@ -410,7 +410,7 @@ bool vulkan_context::is_submission_complete(sg::submission_token token) const
 
 void vulkan_context::do_defer_until_retired(cc::unique_function<void()> fn)
 {
-    // An expiring resource that owns no handle, the way an RTV slot's release rides the epoch.
+    // An expiring resource that owns no handle, carrying only the finalizer.
     auto expiring = vulkan_expiring_resource{};
     expiring.finalizers.push_back(cc::move(fn));
     schedule_deferred_deletion(cc::move(expiring));

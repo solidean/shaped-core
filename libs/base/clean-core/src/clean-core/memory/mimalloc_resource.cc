@@ -42,8 +42,8 @@ isize mi_try_allocate_bytes(byte** out_ptr, isize min_bytes, isize max_bytes, is
 isize mi_allocate_bytes(byte** out_ptr, isize min_bytes, isize max_bytes, isize alignment, void* userdata)
 {
     auto const result = mi_try_allocate_bytes(out_ptr, min_bytes, max_bytes, alignment, userdata);
-    CC_ASSERTF(min_bytes == 0 || result >= 0, "allocation failed: requested [{}, {}] bytes with alignment {}",
-               min_bytes, max_bytes, alignment);
+    if (min_bytes > 0 && result < 0)
+        cc::impl::allocation_failed(min_bytes, max_bytes, alignment);
     return result;
 }
 

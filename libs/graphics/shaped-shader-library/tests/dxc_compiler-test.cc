@@ -349,7 +349,7 @@ TEST("slib - an inline-constants block reflects at b0 in the space it named", ex
     REQUIRE(constants != nullptr);
     CHECK(constants->type == sg::binding_type::constants_buffer);
 
-    // The two targets describe the same block differently, and the difference is the whole point of the feature.
+    // The two targets describe the same block differently, and the feature is built on that difference.
     //
     // DXIL gives it a root-constant register in a space, so there is an address to check.
     // SPIR-V makes it a push-constant block, which lives in no descriptor set and therefore carries neither a

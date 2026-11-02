@@ -28,6 +28,12 @@ def _build_extra(result: StepResult) -> str:
     return f" ({n} file{'s' if n != 1 else ''})" if n else " (up to date)"
 
 
+def _step_name(target: str | list[str] | None) -> str:
+    if isinstance(target, list):
+        return target[0] if len(target) == 1 else f"{len(target)} targets"
+    return target or "all"
+
+
 def build(
     presets: list[Preset],
     targets: list[str] | None,
@@ -38,7 +44,7 @@ def build(
     verbose: bool = False,
     emsdk_path: str | None = None,
     keep_going: bool = False,
-    one_step: bool = False,
+    one_step: bool = True,
 ) -> list[StepResult]:
     """Build `targets`, or everything when None or empty, across all presets.
 
@@ -46,8 +52,8 @@ def build(
     A failed step does not stop the remaining presets or targets, so the caller inspects the results for failures.
     `emsdk_path` points Emscripten presets at an emsdk install (see process.emsdk_env), and `keep_going` passes ninja -k 0.
 
-    One step per target by default, so each gets its own log and its own summary line.
-    `one_step` hands the whole list to a single invocation instead, which is what a large set of object targets needs: as separate steps they would build one at a time.
+    The whole list goes to one ninja invocation by default: a target per step builds them one at a time, each walking its own critical path with the rest of the machine idle.
+    `one_step=False` is the itemized mode, one step and one log per target, for a caller that wants a line per target more than a balanced build.
     """
     results: list[StepResult] = []
 
@@ -86,7 +92,7 @@ def build(
             result = run_step(
                 cmake.build_command(preset.build_dir, target, keep_going=keep_going),
                 step_type="build",
-                name=(f"{len(target)} files" if isinstance(target, list) else target) or "all",
+                name=_step_name(target),
                 build_dir=preset.build_dir,
                 cwd=root,
                 env=env,

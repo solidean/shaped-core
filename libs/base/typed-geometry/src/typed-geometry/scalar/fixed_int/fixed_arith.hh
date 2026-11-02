@@ -1,7 +1,9 @@
 #pragma once
 
 #include <clean-core/error/optional.hh>
+#include <clean-core/math/bit.hh>
 #include <typed-geometry/scalar/fixed_int/fixed_int.hh>
+#include <typed-geometry/scalar/scalar.hh>
 
 // Arithmetic across fixed_int widths, and division.
 //
@@ -17,6 +19,14 @@ struct tg::div_mod_result
 {
     T quotient;
     T remainder;
+};
+
+/// A quotient rounded to a float's significand: `|x / w| ~ significand * 2^exponent`, and its sign.
+struct tg::ratio_significand
+{
+    u64 significand;
+    int exponent;
+    bool negative;
 };
 
 /// floor(x / w) and ceil(x / w), from one estimate and one remainder.
@@ -315,5 +325,66 @@ template <class Q, int A, int B, bool S>
                                                             impl::fixed_integer<B, S> const& w)
 {
     return impl::floor_ceil<Q>(x, w);
+}
+
+// --- a quotient as a float -------------------------------------------------------------------------------------------
+
+namespace impl
+{
+/// x / w rounded to P significant bits, to nearest with ties to even: `|x / w| ~ m * 2^e` with `2^(P-1) <= m <= 2^P`.
+/// One long division of the magnitudes, shifted so the quotient has P + 2 or P + 3 bits; its remainder is the sticky bit.
+/// The shifted operands fit W bits exactly, so nothing is lost before the one rounding.
+template <int P, int A, int B, bool S>
+[[nodiscard]] constexpr ratio_significand ratio_round(fixed_integer<A, S> const& x, fixed_integer<B, S> const& w)
+{
+    constexpr int M = A > B ? A : B;
+    constexpr int W = (M + P + 3 + 63) / 64 * 64;
+    using wide = fixed_integer<W, false>;
+
+    auto const mx = wide(magnitude(x));
+    auto const mw = wide(magnitude(w));
+    // aim the quotient at P + 2 bits: shift x up, or w up when x is far wider
+    auto const s = P + 2 - (mx.bit_width() - mw.bit_width());
+    auto const num = s > 0 ? mx << s : mx;
+    auto const den = s < 0 ? mw << -s : mw;
+    auto const r = div_mod_trunc_generic(num, den);
+    auto const q = limb(r.quotient, 0); // P + 2 or P + 3 bits, so one word for P <= 53
+    auto const sticky = r.remainder != wide();
+
+    auto const k = cc::bit_width(q) - P;
+    auto m = q >> k;
+    auto const rest = q & ((u64(1) << k) - 1);
+    auto const half = u64(1) << (k - 1);
+    if (rest > half || (rest == half && (sticky || (m & 1) != 0)))
+        ++m; // may carry to 2^P, which is still exact
+    return {.significand = m, .exponent = k - s, .negative = is_negative(x) != is_negative(w)};
+}
+} // namespace impl
+
+/// x / w as an f64, correctly rounded: to nearest, ties to even; w must be non-zero.
+/// Exact when the quotient is an f64, an integer below 2^53 among them.
+/// Every fixed_int quotient is within f64's exponent range, so there is no overflow and no subnormal.
+template <int A, int B, bool S>
+[[nodiscard]] constexpr f64 ratio_to_f64(impl::fixed_integer<A, S> const& x, impl::fixed_integer<B, S> const& w)
+{
+    CC_ASSERT((w != impl::fixed_integer<B, S>()), "fixed_int division by zero");
+    if (x == impl::fixed_integer<A, S>())
+        return 0;
+    auto const r = impl::ratio_round<53>(x, w);
+    auto const v = tg::scale_by_pow2(f64(r.significand), r.exponent);
+    return r.negative ? -v : v;
+}
+
+/// x / w as an f32, correctly rounded where the quotient is a normal f32; w must be non-zero.
+/// Beyond f32's range it saturates to infinity, and a subnormal quotient may round twice.
+template <int A, int B, bool S>
+[[nodiscard]] constexpr f32 ratio_to_f32(impl::fixed_integer<A, S> const& x, impl::fixed_integer<B, S> const& w)
+{
+    CC_ASSERT((w != impl::fixed_integer<B, S>()), "fixed_int division by zero");
+    if (x == impl::fixed_integer<A, S>())
+        return 0;
+    auto const r = impl::ratio_round<24>(x, w);
+    auto const v = tg::scale_by_pow2(f32(r.significand), r.exponent);
+    return r.negative ? -v : v;
 }
 } // namespace tg

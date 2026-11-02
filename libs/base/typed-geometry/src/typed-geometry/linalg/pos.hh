@@ -17,6 +17,8 @@
 ///     pos - vec -> pos    (translate a point)
 ///     pos + pos -> pos    (translation of the singleton point set — a deliberate rule;
 ///                          adding a point translates by that point's coordinates)
+///     pos * T   -> pos    (scaling of the singleton point set about the origin, by the same rule;
+///     pos / T   -> pos     so the mean of points is their sum over the count)
 ///
 /// Components live in the public array member `data`, reached through `data` or operator[] — there are no .x/.y/.z members.
 /// Default construction zero-initializes every component, giving the origin.
@@ -29,6 +31,8 @@
 template <int D, class T>
 struct tg::pos
 {
+    using scalar_t = T;
+
     static_assert(D > 0, "pos requires a positive dimension");
 
     T data[D] = {};
@@ -176,6 +180,26 @@ public:
     {
         for (int i = 0; i < D; ++i)
             a.data[i] += b.data[i];
+        return a;
+    }
+
+    /// scaling of the singleton point set about the origin: pos * T -> pos (scales coordinates).
+    [[nodiscard]] friend constexpr pos operator*(pos a, T s)
+    {
+        for (int i = 0; i < D; ++i)
+            a.data[i] *= s;
+        return a;
+    }
+    [[nodiscard]] friend constexpr pos operator*(T s, pos a)
+    {
+        for (int i = 0; i < D; ++i)
+            a.data[i] *= s;
+        return a;
+    }
+    [[nodiscard]] friend constexpr pos operator/(pos a, T s)
+    {
+        for (int i = 0; i < D; ++i)
+            a.data[i] /= s;
         return a;
     }
 

@@ -1,4 +1,5 @@
 #include <clean-core/common/macros.hh>
+#include <clean-core/container/vector.hh>
 #include <nexus/bench/bench.hh>
 #include <nexus/test.hh>
 
@@ -134,7 +135,61 @@ TEST("nexus bench - measure_all gathers every available counter across passes", 
         {.measure_all = true});
 
     CHECK(call_count >= 1); // at least one pass (more when counters need several)
+    auto const in_default_set = [](hw_counter c)
+    {
+        for (auto const d : nx::bench::default_hw_counter_set())
+            if (d == c)
+                return true;
+        return false;
+    };
+    for (auto const& info : nx::bench::available_hw_counters())
+        if (info.available && in_default_set(info.id))
+            CHECK(m.value_of(info.id).has_value()); // every measurable counter of the set got a value
+}
+
+TEST("nexus bench - every available counter counts a workload that moves it", exclusive("nx-hw-counters"), thorough_only)
+{
+    // Pins that available means counting: a source that programs and runs but never counts is not offered.
+    // On a Zen 5 under Windows, DcacheMisses and CacheMisses read 0 through any workload, and were once reported as L1D and LLC misses.
+    // The workload misses every cache level and branches on random data, so every real counter moves.
+    auto constexpr words = isize(8) << 20; // 64 MiB
+    auto data = cc::vector<u64>::create_uninitialized(words);
+    auto x = u64(0x9E37'79B9'7F4A'7C15ull);
+    auto const next = [&]
+    {
+        x ^= x << 13;
+        x ^= x >> 7;
+        x ^= x << 17;
+        return x;
+    };
+    for (auto& w : data)
+        w = next(); // touched, so loads do not all hit the shared zero page
+
+    auto requested = cc::vector<nx::bench::hw_counter>();
     for (auto const& info : nx::bench::available_hw_counters())
         if (info.available)
-            CHECK(m.value_of(info.id).has_value()); // every measurable counter got a value
+            requested.push_back(info.id);
+
+    auto const m = nx::bench::measure_hw_counters(
+        [&]
+        {
+            auto sum = u64(0);
+            for (auto i = 0; i < (1 << 20); ++i)
+            {
+                auto const v = data[isize(next() % u64(words))];
+                if (v & 1)
+                    sum += v;
+                else
+                    sum ^= v >> 3;
+            }
+            s_bench_sink = sum;
+        },
+        {.counters = requested, .measure_all = true});
+
+    for (auto const c : requested)
+    {
+        auto const v = m.value_of(c);
+        REQUIRE(v.has_value());
+        CHECK(v.value() > 0);
+    }
 }

@@ -13,7 +13,10 @@
 namespace cc::impl
 {
 struct async_backlog_state;
-}
+
+/// Tracks `node` in cc::async_abandoned_work; it must be alive, which the caller's reference guarantees.
+void async_track_abandoned(async_node_base* node);
+} // namespace cc::impl
 
 namespace cc
 {
@@ -32,6 +35,12 @@ namespace cc
 /// Writes every live backlog and what it still owes to stderr.
 /// The rendering half, beside the query, so a crash and a hang print the same thing.
 void report_async_backlogs(char const* reason) noexcept;
+
+/// The work an awaiter stopped waiting for, which runs on awaited by nobody.
+/// That is cc::async_all's other members once one failed, and what a parked node was awaiting when its last handle dropped and it was torn down.
+/// Process-wide and never destroyed; a component's teardown settles it to know nothing it started is still running.
+/// Tracked only on those two cold paths, so a successful async_all and an ordinary completion pay nothing for it.
+[[nodiscard]] async_backlog& async_abandoned_work();
 } // namespace cc
 
 /// Work a component detached, tracked so a caller can wait for all of it to settle.
@@ -118,4 +127,5 @@ private:
     async_backlog* _registry_prev = nullptr;
 
     friend bool cc::try_for_each_async_backlog(cc::function_ref<void(async_backlog const&)>);
+    friend void impl::async_track_abandoned(async_node_base*);
 };

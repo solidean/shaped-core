@@ -51,7 +51,10 @@ flat_builder flat_builder::create(checked_module const& m, signature const& s)
 
 flat_builder flat_builder::extend(checked_module const& m, flat_entry_point e)
 {
-    return flat_builder{.m = m, .e = cc::move(e)};
+    auto result = flat_builder{.m = m, .e = cc::move(e)};
+    for (auto const& l : result.e.labels)
+        (void)result.label_names.reserve(l.name);
+    return result;
 }
 
 type_id flat_builder::type_named(cc::string_view name) const
@@ -71,17 +74,7 @@ local_id flat_builder::add_local(local_kind kind, cc::string_view desired, type_
 
 label_id flat_builder::add_label(cc::string_view desired)
 {
-    auto const is_taken = [&](cc::string_view name)
-    {
-        for (auto const& l : e.labels)
-            if (l.name == name)
-                return true;
-        return false;
-    };
-    auto name = cc::string(desired.empty() ? cc::string_view("block") : desired);
-    for (auto i = 1; is_taken(name); ++i)
-        name = cc::format("{}_{}", desired, i);
-    e.labels.push_back({.name = cc::move(name)});
+    e.labels.push_back({.name = label_names.mint(desired.empty() ? cc::string_view("block") : desired)});
     return label_id(e.labels.size() - 1);
 }
 

@@ -16,6 +16,8 @@
 template <int D, class T>
 struct tg::inf_cylinder
 {
+    using scalar_t = T;
+
     static_assert(D > 1, "an infinite cylinder needs at least two dimensions");
 
     line<D, T> axis;
@@ -90,6 +92,8 @@ public:
 template <int D, class T>
 struct tg::inf_cylinder_boundary
 {
+    using scalar_t = T;
+
     static_assert(D > 1, "an infinite cylinder needs at least two dimensions");
 
     line<D, T> axis;
@@ -158,6 +162,8 @@ public:
 template <int D, class T>
 struct tg::inf_cone
 {
+    using scalar_t = T;
+
     static_assert(D > 1, "an infinite cone needs at least two dimensions");
 
     pos<D, T> apex;
@@ -238,6 +244,8 @@ public:
 template <int D, class T>
 struct tg::inf_cone_boundary
 {
+    using scalar_t = T;
+
     static_assert(D > 1, "an infinite cone needs at least two dimensions");
 
     pos<D, T> apex;

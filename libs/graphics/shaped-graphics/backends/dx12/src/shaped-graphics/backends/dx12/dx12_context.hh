@@ -53,6 +53,7 @@ enum class sg::backend::dx12::dx12_message_severity : sg::u8
 enum class sg::backend::dx12::dx12_adapter : sg::u8
 {
     /// A hardware GPU, and an error where the host has none.
+    /// No adapter of Microsoft's vendor id counts, even one DXGI does not flag as software: that is WARP.
     hardware,
 
     /// The WARP software adapter, present on every Windows host, which is what makes a headless run possible.
@@ -107,8 +108,15 @@ struct sg::backend::dx12::dx12_config
     /// Test-only in intent.
     /// It changes nothing about how the backend waits internally.
     /// It makes sg's own internal waits assert, which is how the suite proves sg and its callers get by awaiting.
-    /// The inline rings' back-pressure still parks when a ring is full; libs/graphics/shaped-graphics/docs/TODO.md lists those waits.
+    /// The inline rings' back-pressure still parks when a ring is full; issue: feat-sg-never-block-backend-waits lists those waits.
     sg::execution_model execution = sg::execution_model::may_block;
+
+    /// Whether this context reports no ray tracing whatever the device has: neither `ray_query` nor `raytracing_pipeline`, and `cmd.raytracing.is_supported()` false.
+    ///
+    /// Test-only in intent, like `execution`.
+    /// It is how a suite proves that a caller draws on a device without ray tracing, on a host whose device has it.
+    /// Building an acceleration structure then breaks its precondition, exactly as it would on an adapter without DXR.
+    bool withhold_raytracing = false;
 
     /// Capacity of the inline UPLOAD ring buffer, in bytes.
     /// Bounds the per-epoch inline upload volume.
@@ -130,7 +138,8 @@ struct sg::backend::dx12::dx12_config
     isize async_download_window_bytes = isize(16) * 1024 * 1024;
 
     /// Total descriptors in the shader-visible CBV/SRV/UAV heap binding_groups allocate their tables from.
-    int descriptor_heap_capacity = 1 << 16;
+    /// A bindless group takes its whole table per snapshot, so this must hold several of the largest one; D3D12 allows 1,000,000.
+    int descriptor_heap_capacity = 1 << 18;
 
     /// Share (0..1) of the descriptor heap reserved for the per-epoch-reclaimed transient ring; the rest is the persistent bump region.
     float descriptor_transient_fraction = 0.25f;
@@ -141,6 +150,8 @@ struct sg::backend::dx12::dx12_config
     int sampler_heap_capacity = 512;
 
     /// Descriptors in the non-shader-visible RTV / DSV heaps render-target / depth-stencil views are created into.
+    /// An open command list holds as many RTVs as the most color targets one of its scopes bound, and one DSV.
+    /// So these bound how many command lists that render can be open at once — 32 lists of eight targets at the default.
     int rtv_heap_capacity = 256;
     int dsv_heap_capacity = 256;
 };
@@ -209,11 +220,17 @@ public:
         case sg::feature::sample_rate_shading:
         case sg::feature::wireframe_fill:
         case sg::feature::depth32_float_stencil8:
-        case sg::feature::device_coherence: // `globallycoherent` is core HLSL
-        case sg::feature::image_atomics:    // typed UAV atomics on r32 integer formats are required
+        case sg::feature::device_coherence:       // `globallycoherent` is core HLSL
+        case sg::feature::image_atomics:          // typed UAV atomics on r32 integer formats are required
+        case sg::feature::texture_compression_bc: // BC1-BC7 are required at feature level 11_0
+        case sg::feature::first_instance:         // SV_StartInstanceLocation, of the shader model 6.8 SGL emits
+        // `IsHelperLane()` needs SM 6.6 and SGL compiles at SM 6.8; `InterlockedCompareExchange` is strong, so no loop asks it
+        case sg::feature::helper_lane_query:
             return true;
         case sg::feature::extended_image_formats:
             return _extended_image_formats;
+        case sg::feature::opacity_micromap: // DXR 1.2, which only the Agility SDK carries — issue: feat-sg-opacity-micromaps
+            return false;
         case sg::feature::unaligned_block_compression:
             return _unaligned_block_textures;
         case sg::feature::shader_f16:
@@ -244,7 +261,8 @@ public:
                                                                     sg::allocation_info const& alloc);
     [[nodiscard]] cc::result<dx12_texture_handle> create_dx12_texture(sg::texture_description const& desc,
                                                                       sg::allocation_info const& alloc);
-    [[nodiscard]] cc::result<dx12_memory_heap_handle> create_dx12_memory_heap(isize size_in_bytes);
+    [[nodiscard]] cc::result<dx12_memory_heap_handle> create_dx12_memory_heap(isize size_in_bytes,
+                                                                              sg::memory_heap_contents contents);
     [[nodiscard]] cc::result<dx12_swapchain_handle> create_dx12_swapchain(sg::swapchain_description const& desc);
     sg::submission_token submit_dx12_command_list(std::unique_ptr<dx12_command_list> cmd);
     void drop_dx12_command_list(std::unique_ptr<dx12_command_list> cmd);
@@ -325,10 +343,11 @@ public:
                                          "create_raw_texture");
     }
 
-    [[nodiscard]] cc::result<sg::memory_heap_handle> try_create_memory_heap(isize size_in_bytes) override
+    [[nodiscard]] cc::result<sg::memory_heap_handle> try_create_memory_heap(isize size_in_bytes,
+                                                                            sg::memory_heap_contents contents) override
     {
-        return note_device_loss_on_error(cc::result<sg::memory_heap_handle>(create_dx12_memory_heap(size_in_bytes)),
-                                         "create_memory_heap");
+        return note_device_loss_on_error(
+            cc::result<sg::memory_heap_handle>(create_dx12_memory_heap(size_in_bytes, contents)), "create_memory_heap");
     }
 
     [[nodiscard]] cc::result<sg::swapchain_handle> try_create_swapchain(sg::swapchain_description const& desc) override
@@ -616,6 +635,11 @@ public:
     ComPtr<IDXGIFactory4> _factory;
     ComPtr<ID3D12Device> _device;
     ComPtr<ID3D12CommandQueue> _queue;
+
+    // What ExecuteIndirect reads a `sg::dispatch_args` record through; created with the device.
+    ComPtr<ID3D12CommandSignature> _dispatch_signature;
+    // What ExecuteIndirect reads a `sg::draw_indexed_args` record through; created with the device.
+    ComPtr<ID3D12CommandSignature> _draw_indexed_signature;
 
     // Kept for QueryVideoMemoryInfo, which is on IDXGIAdapter3 and has no route through the device.
     // Re-obtaining it per query via EnumAdapterByLuid would work and would cost a COM round trip on a call a dashboard

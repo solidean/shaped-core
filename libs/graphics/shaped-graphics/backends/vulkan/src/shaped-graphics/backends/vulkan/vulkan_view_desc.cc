@@ -86,33 +86,35 @@ void vulkan_image_view_cache::shutdown()
             });
     };
     destroy_all(_views);
-    destroy_all(_attachment_views);
 }
 
-VkImageView vulkan_image_view_cache::acquire_attachment(sg::raw_texture_handle const& texture,
-                                                        sg::texture_view_dimension dimension,
-                                                        sg::pixel_format format,
-                                                        sg::subresource_range const& range)
+VkImageView acquire_attachment_view(vulkan_context& ctx,
+                                    vulkan_texture const& texture,
+                                    sg::epoch epoch,
+                                    sg::texture_view_dimension dimension,
+                                    sg::pixel_format format,
+                                    sg::subresource_range const& range,
+                                    cc::vector<VkImageView>& created)
 {
-    CC_ASSERT(texture != nullptr, "an attachment view needs a texture");
-    auto const& vk_texture = static_cast<vulkan_texture const&>(*texture);
-
-    // The identity of an attachment view is its resource plus everything that reaches vkCreateImageView.
-    // An attachment is never a shader view, so the two view-class-carrying fields keep their defaults.
-    auto const key = vulkan_image_view_key{.texture_identity = vk_texture._identity,
-                                           .dimension = dimension,
-                                           .format = format,
-                                           .range = range};
-
-    return _attachment_views.lock(
-        [&](view_map& views) -> VkImageView
+    return texture._attachment_views.lock(
+        [&](cc::vector<vulkan_texture::attachment_view>& views) -> VkImageView
         {
-            if (auto const* existing = views.get_ptr(key); existing != nullptr)
-                return *existing;
+            vulkan_texture::attachment_view* stale = nullptr;
+            for (auto& entry : views)
+            {
+                if (entry.epoch != epoch)
+                {
+                    if (stale == nullptr)
+                        stale = &entry;
+                    continue;
+                }
+                if (entry.dimension == dimension && entry.format == format && entry.range == range)
+                    return entry.view;
+            }
 
             auto const info = VkImageViewCreateInfo{
                 .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
-                .image = vk_texture._image,
+                .image = texture._image,
                 .viewType = to_vk_image_view_type(dimension),
                 .format = to_vk_format(format),
                 .subresourceRange =
@@ -125,12 +127,22 @@ VkImageView vulkan_image_view_cache::acquire_attachment(sg::raw_texture_handle c
                     },
             };
 
-            VkImageView created = VK_NULL_HANDLE;
-            VkResult const r = vkCreateImageView(_ctx._device, &info, nullptr, &created);
+            VkImageView view = VK_NULL_HANDLE;
+            [[maybe_unused]] VkResult const r = vkCreateImageView(ctx._device, &info, nullptr, &view);
             CC_ASSERT(r == VK_SUCCESS, "vkCreateImageView failed for a rendering-scope attachment");
-            views[key] = created;
-            forget_with_texture(*texture, _attachment_views, key);
-            return created;
+
+            // A stale entry's view is not destroyed here: it is in the created list of whichever list made it.
+            auto const entry = vulkan_texture::attachment_view{.epoch = epoch,
+                                                               .dimension = dimension,
+                                                               .format = format,
+                                                               .range = range,
+                                                               .view = view};
+            if (stale != nullptr)
+                *stale = entry;
+            else
+                views.push_back(entry);
+            created.push_back(view);
+            return view;
         });
 }
 

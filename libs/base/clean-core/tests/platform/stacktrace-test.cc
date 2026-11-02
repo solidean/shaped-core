@@ -79,7 +79,7 @@ TEST("crash handler - the other-thread reporter says whether it is there")
     auto const available = cc::impl::posix_thread_stacks_available();
 
 #if defined(__linux__) && !defined(__EMSCRIPTEN__) && !CC_CRASH_HANDLER_SANITIZED
-    // The whole point on the platform this exists for.
+    // Linux is the platform this exists for, so here it must be up.
     // A false here means sigaction or sem_init failed at install time, which is exactly the silent failure that
     // would otherwise surface as "other threads: <not reached>" in a report somebody needed.
     CHECK(available);

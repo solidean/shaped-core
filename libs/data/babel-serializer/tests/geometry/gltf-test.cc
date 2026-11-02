@@ -458,6 +458,61 @@ TEST("gltf - node transforms keep the form the file used")
     CHECK(doc.nodes[2].scale == tg::vec3f(1, 1, 1)); // the spec's default scale is one, not zero
     CHECK(doc.nodes[2].rotation == tg::quat_f::identity);
     CHECK(doc.children_of(doc.nodes[2]).empty());
+
+    // local_transform reads whichever form the file used
+    CHECK(doc.nodes[0].local_transform()(tg::pos3f(1, 1, 1)) == tg::pos3f(6, 7, 8));
+    // scale 2, then half a turn about z, then the translation
+    auto const moved = doc.nodes[1].local_transform()(tg::pos3f(1, 0, 0));
+    CHECK((moved - tg::pos3f(-1, 2, 3)).length() < 1e-5f);
+    CHECK(doc.nodes[2].local_transform()(tg::pos3f(4, 5, 6)) == tg::pos3f(4, 5, 6));
+}
+
+TEST("gltf - local_transform takes a drifted rotation and a zero scale")
+{
+    auto const doc = babel::gltf::read(cc::string_view(R"({"asset": {"version": "2.0"},
+        "nodes": [
+            {"rotation": [0, 0, 1.02, 0]},
+            {"scale": [0, 1, 1], "translation": [3, 0, 0]}
+        ]})"))
+                         .value();
+
+    // a half turn about z, read as if the quaternion were unit length
+    auto const turned = doc.nodes[0].local_transform()(tg::pos3f(1, 0, 0));
+    CHECK((turned - tg::pos3f(-1, 0, 0)).length() < 1e-5f);
+    CHECK(doc.nodes[0].rotation == tg::quat_f(0, 0, 1.02f, 0)); // the stored value is the file's
+    // a zero scale flattens, which glTF uses to hide a node
+    CHECK(doc.nodes[1].local_transform()(tg::pos3f(7, 2, 0)) == tg::pos3f(3, 2, 0));
+}
+
+TEST("gltf - a node matrix that is not affine is malformed, and keeps its affine part")
+{
+    auto const doc = babel::gltf::read(cc::string_view(R"({"asset": {"version": "2.0"},
+        "nodes": [{"matrix": [1, 0, 0, 0.5, 0, 1, 0, 0, 0, 0, 1, 0, 5, 6, 7, 1]}]})"))
+                         .value();
+
+    CHECK(doc.has_issue_of(babel::gltf::issue_kind::malformed));
+    CHECK((doc.nodes[0].matrix[0, 3]) == 0);
+    CHECK(doc.nodes[0].local_transform()(tg::pos3f(0, 0, 0)) == tg::pos3f(5, 6, 7));
+}
+
+TEST("gltf - a vec3 accessor's stated bounds come back as a box")
+{
+    auto const doc = babel::gltf::read(cc::string_view(R"({"asset": {"version": "2.0"},
+        "accessors": [
+            {"componentType": 5126, "count": 3, "type": "VEC3", "min": [-1, 0, 2], "max": [3, 4, 5]},
+            {"componentType": 5126, "count": 3, "type": "VEC3"},
+            {"componentType": 5126, "count": 3, "type": "VEC2", "min": [0, 0], "max": [1, 1]},
+            {"componentType": 5122, "normalized": true, "count": 3, "type": "VEC3", "min": [-32767, 0, 0], "max": [32767, 100, 5]}
+        ]})"))
+                         .value();
+
+    REQUIRE(doc.accessors.size() == 4);
+    CHECK(!doc.bounds_of(doc.accessors[3]).has_value()); // stated in stored integers, not in positions
+    auto const b = doc.bounds_of(doc.accessors[0]);
+    REQUIRE(b.has_value());
+    CHECK(b.value() == tg::aabb3f(tg::pos3f(-1, 0, 2), tg::pos3f(3, 4, 5)));
+    CHECK(!doc.bounds_of(doc.accessors[1]).has_value()); // the file stated none
+    CHECK(!doc.bounds_of(doc.accessors[2]).has_value()); // not a vec3
 }
 
 TEST("gltf - materials, textures, samplers and images")
@@ -480,7 +535,14 @@ TEST("gltf - materials, textures, samplers and images")
              "occlusionTexture": {"index": 0, "strength": 0.5},
              "emissiveTexture": {"index": 0},
              "emissiveFactor": [1, 0, 0],
-             "alphaMode": "MASK", "alphaCutoff": 0.25, "doubleSided": true}
+             "alphaMode": "MASK", "alphaCutoff": 0.25, "doubleSided": true,
+             "extensions": {
+                 "KHR_materials_emissive_strength": {"emissiveStrength": 40},
+                 "KHR_materials_transmission": {"transmissionFactor": 0.9},
+                 "KHR_materials_ior": {"ior": 1.33},
+                 "KHR_materials_volume": {"thicknessFactor": 0.5, "attenuationDistance": 2, "attenuationColor": [0.5, 0.75, 1]},
+                 "KHR_materials_specular": {"specularFactor": 0.25, "specularColorFactor": [1, 0.5, 0]},
+                 "KHR_materials_clearcoat": {"clearcoatFactor": 1, "clearcoatRoughnessFactor": 0.3}}}
         ],
         "textures": [{"sampler": 0, "source": 0}],
         "samplers": [{"magFilter": 9729, "minFilter": 9987, "wrapS": 33071}],
@@ -502,6 +564,16 @@ TEST("gltf - materials, textures, samplers and images")
     CHECK(plain.base_color_texture.texture == babel::gltf::texture_index::invalid);
     CHECK(plain.normal_scale == 1);
     CHECK(plain.occlusion_strength == 1);
+    // Each extension absent, so each holds the extension's own default.
+    CHECK(plain.emissive_strength == 1);
+    CHECK(plain.transmission_factor == 0);
+    CHECK(plain.ior == 1.5f);
+    CHECK(plain.thickness_factor == 0);
+    CHECK(!plain.attenuation_distance.has_value());
+    CHECK(plain.attenuation_color == tg::vec3f(1, 1, 1));
+    CHECK(plain.specular_factor == 1);
+    CHECK(plain.specular_color_factor == tg::vec3f(1, 1, 1));
+    CHECK(plain.clearcoat_factor == 0);
 
     auto const& full = doc.materials[1];
     CHECK(full.base_color_factor == tg::vec4f(0.1f, 0.2f, 0.3f, 0.4f));
@@ -515,6 +587,16 @@ TEST("gltf - materials, textures, samplers and images")
     CHECK(full.alpha == babel::gltf::alpha_mode::mask);
     CHECK(full.alpha_cutoff == 0.25f);
     CHECK(full.double_sided);
+    CHECK(full.emissive_strength == 40);
+    CHECK(full.transmission_factor == 0.9f);
+    CHECK(full.ior == 1.33f);
+    CHECK(full.thickness_factor == 0.5f);
+    CHECK(full.attenuation_distance == 2.0f);
+    CHECK(full.attenuation_color == tg::vec3f(0.5f, 0.75f, 1));
+    CHECK(full.specular_factor == 0.25f);
+    CHECK(full.specular_color_factor == tg::vec3f(1, 0.5f, 0));
+    CHECK(full.clearcoat_factor == 1);
+    CHECK(full.clearcoat_roughness_factor == 0.3f);
 
     REQUIRE(doc.samplers.size() == 1);
     CHECK(doc.samplers[0].mag_filter == babel::gltf::filter::linear);
@@ -724,12 +806,50 @@ TEST("gltf - tolerated junk and skipped features")
 
     // Tolerated is not silent: every skip and every fallback above is on the record.
     CHECK(doc.has_issues());
-    // the used extension, plus skins / animations / cameras / morph targets
-    CHECK(count_issues(doc, babel::gltf::issue_kind::unsupported) == 5);
+    // the used extension, plus skins / animations / morph targets
+    CHECK(count_issues(doc, babel::gltf::issue_kind::unsupported) == 4);
     // the two unknown sampler enumerants and the unknown alphaMode
     CHECK(count_issues(doc, babel::gltf::issue_kind::malformed) == 3);
     CHECK(count_issues(doc, babel::gltf::issue_kind::unresolved) == 0);
     CHECK(!doc.has_issue_of(babel::gltf::issue_kind::unresolved));
+}
+
+TEST("gltf - cameras read with the spec's defaults, and a node places one")
+{
+    auto const doc = babel::gltf::read(cc::string_view(R"({"asset": {"version": "2.0"},
+        "nodes": [{"name": "eye", "camera": 1, "translation": [0, 1, 5]}, {"camera": 0}],
+        "cameras": [
+            {"name": "sheet", "type": "orthographic", "orthographic": {"xmag": 2, "ymag": 1.5, "znear": 0.1, "zfar": 50}},
+            {"type": "perspective", "perspective": {"yfov": 0.6, "znear": 0.05}},
+            {"type": "fisheye"}]})"))
+                         .value();
+
+    REQUIRE(doc.cameras.size() == 3);
+    auto const& sheet = doc.cameras[0];
+    CHECK(sheet.type == babel::gltf::camera_type::orthographic);
+    CHECK(sheet.name == "sheet");
+    CHECK(sheet.xmag == 2.0f);
+    CHECK(sheet.ymag == 1.5f);
+    CHECK(sheet.zfar == 50.0f);
+
+    // No aspect and no far plane: the perspective camera takes the viewport's, and an infinite far plane.
+    auto const& eye = doc.cameras[1];
+    CHECK(eye.type == babel::gltf::camera_type::perspective);
+    CHECK(eye.yfov == 0.6f);
+    CHECK(eye.znear == 0.05f);
+    CHECK(!eye.aspect_ratio.has_value());
+    CHECK(!eye.zfar.has_value());
+
+    // A type the spec does not define keeps its slot, so node indices stay the file's own, and is on the record.
+    CHECK(doc.cameras[2].type == babel::gltf::camera_type::unknown);
+    CHECK(count_issues(doc, babel::gltf::issue_kind::malformed) == 1);
+
+    REQUIRE(doc.nodes.size() == 2);
+    CHECK(doc.nodes[0].camera == babel::gltf::camera_index(1));
+    CHECK(doc.find(doc.nodes[0].camera) == &eye);
+
+    // A node naming a camera the file does not have fails the read, as one naming a missing mesh does.
+    CHECK(!babel::gltf::read(cc::string_view(R"({"asset": {"version": "2.0"}, "nodes": [{"camera": 0}]})")).has_value());
 }
 
 TEST("gltf - unresolved references are recorded, not errors")
@@ -866,4 +986,47 @@ TEST("gltf - KHR_lights_punctual lights and the nodes that place them")
         "extensions": {"KHR_lights_punctual": {"lights": [{"type": "point"}]}},
         "nodes": [{"extensions": {"KHR_lights_punctual": {"light": -2}}}]})"))
               .has_error());
+}
+
+// Extensions the reader does not model
+// -------------------------------------------------------------------------------------------------
+
+TEST("gltf - a vendor extension reads through json_of, on the element that carries it")
+{
+    auto const json = cc::string_view(R"({"asset": {"version": "2.0"},
+        "extensionsUsed": ["VENDOR_tint"],
+        "materials": [{"name": "plain"},
+                      {"name": "tinted", "extensions": {"VENDOR_tint": {"strength": 0.25}}, "extras": {"note": "x"}}],
+        "meshes": [{"primitives": [{"attributes": {}, "extensions": {"VENDOR_tint": {"strength": 0.5}}}]}]})");
+    // without the option the document is not kept, and no element reaches its JSON
+    auto const lean = REQUIRED_VALUE(babel::gltf::read(json));
+    CHECK(!lean.json_of(lean.materials[1]).is_valid());
+    CHECK(!lean.json_root().is_valid());
+
+    auto const doc = REQUIRED_VALUE(babel::gltf::read(json, {.keep_json_document = true}));
+    REQUIRE(doc.materials.size() == 2);
+
+    CHECK(!doc.json_of(doc.materials[0])["extensions"].is_valid());
+    auto const tint = doc.json_of(doc.materials[1])["extensions"]["VENDOR_tint"];
+    CHECK(tint["strength"].as_double() == 0.25);
+    CHECK(doc.json_of(doc.materials[1])["extras"]["note"].as_string() == "x");
+
+    auto const& prim = doc.primitives_of(doc.meshes[0])[0];
+    CHECK(doc.json_of(prim)["extensions"]["VENDOR_tint"]["strength"].as_double() == 0.5);
+    CHECK(doc.json_root()["extensionsUsed"][0].as_string() == "VENDOR_tint");
+
+    // an element built by hand has no object in the document
+    CHECK(!doc.json_of(babel::gltf::material()).is_valid());
+}
+
+TEST("gltf - a registered extension may be required, and its use is no issue")
+{
+    auto const json = cc::string_view(R"({"asset": {"version": "2.0"},
+        "extensionsUsed": ["VENDOR_tint"], "extensionsRequired": ["VENDOR_tint"]})");
+    CHECK(babel::gltf::read(json).has_error());
+
+    // no hook: an extension that only adds information, which the caller reads through json_of
+    babel::gltf::extension const mine[] = {{.name = "VENDOR_tint"}};
+    auto const doc = REQUIRED_VALUE(babel::gltf::read(json, {.extensions = mine}));
+    CHECK(!doc.has_issues()).dump("issues", doc.issue_report());
 }

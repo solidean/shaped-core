@@ -196,7 +196,8 @@ public:
     /// What a `declare_args` function calls first, since parse_args cannot know them before it asks.
     args_builder& info(app_info value);
 
-    /// Every argument declared after this joins `title`. A mode setter, not a per-argument property.
+    /// Every argument declared after this joins `title`.
+    /// A mode setter, not a per-argument property.
     args_builder& group(cc::string_view title);
 
     /// Free-form prose in the help, after the argument table.

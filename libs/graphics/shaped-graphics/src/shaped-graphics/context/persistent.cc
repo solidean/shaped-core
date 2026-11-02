@@ -6,6 +6,7 @@
 #include <shaped-graphics/context/context.hh>
 #include <shaped-graphics/context/persistent.hh>
 #include <shaped-graphics/exceptions.hh>
+#include <shaped-graphics/resource/pixel_format.hh>
 
 namespace sg
 {
@@ -61,6 +62,9 @@ cc::result<raw_texture_handle> context_persistent_scope::try_create_raw_texture(
     if (auto unsupported = impl::find_unsupported_texture(_ctx.supports(feature::extended_image_formats), desc);
         unsupported.has_value())
         return cc::error(cc::move(unsupported.value()));
+    if (is_compressed_format(desc.format) && !_ctx.supports(feature::texture_compression_bc))
+        return cc::error("a block-compressed texture needs sg::feature::texture_compression_bc, which this device "
+                         "lacks");
     if (auto error = desc.unaligned_block_error(_ctx.supports(feature::unaligned_block_compression)); !error.empty())
         return cc::error(cc::move(error));
     _ctx._stats.add(stat::textures_created);
@@ -69,9 +73,9 @@ cc::result<raw_texture_handle> context_persistent_scope::try_create_raw_texture(
 
 // memory heaps
 
-memory_heap_handle context_persistent_scope::create_memory_heap(isize size_in_bytes)
+memory_heap_handle context_persistent_scope::create_memory_heap(isize size_in_bytes, memory_heap_contents contents)
 {
-    auto r = try_create_memory_heap(size_in_bytes);
+    auto r = try_create_memory_heap(size_in_bytes, contents);
     if (r.has_value())
         return cc::move(r.value());
     if (_ctx.is_device_lost())
@@ -79,9 +83,10 @@ memory_heap_handle context_persistent_scope::create_memory_heap(isize size_in_by
     throw allocation_exception("memory heap allocation failed", size_in_bytes, r.error());
 }
 
-cc::result<memory_heap_handle> context_persistent_scope::try_create_memory_heap(isize size_in_bytes)
+cc::result<memory_heap_handle> context_persistent_scope::try_create_memory_heap(isize size_in_bytes,
+                                                                                memory_heap_contents contents)
 {
-    return _ctx.try_create_memory_heap(size_in_bytes);
+    return _ctx.try_create_memory_heap(size_in_bytes, contents);
 }
 
 // bind path
@@ -111,9 +116,12 @@ cc::result<binding_group_handle> context_persistent_scope::try_create_binding_gr
         return cc::error(cc::move(unsupported.value()));
     _ctx._stats.add(stat::binding_groups_created);
     auto const checked = _ctx.portability_checks();
+    auto const traced = _ctx.hit_record_checks();
     auto group = _ctx.try_create_binding_group(cc::move(layout), views, samplers, lifetime_scope::persistent);
     if (group.has_value() && checked)
         impl::record_buffer_uses(*group.value(), views);
+    if (group.has_value() && traced)
+        impl::record_tlases(*group.value(), views);
     return group;
 }
 
@@ -141,9 +149,12 @@ cc::result<binding_group_handle> context_persistent_scope::try_create_binding_gr
     _ctx._stats.add(stat::binding_groups_created);
     // Only a slot needs the layout to name its binding, and only where the checks are on.
     auto const checked = _ctx.portability_checks() ? layout : binding_group_layout_handle();
+    auto const traced = _ctx.hit_record_checks();
     auto group = _ctx.try_create_binding_group(cc::move(layout), views, samplers, lifetime_scope::persistent);
     if (group.has_value() && checked != nullptr)
         impl::record_buffer_uses(*group.value(), *checked, views);
+    if (group.has_value() && traced)
+        impl::record_tlases(*group.value(), views);
     return group;
 }
 
@@ -165,6 +176,7 @@ cc::result<staging_binding_group_handle> context_persistent_scope::try_create_st
     {
         created.value()->_float32_filtering = _ctx.supports(feature::float32_filtering);
         created.value()->_records_buffer_uses = _ctx.portability_checks();
+        created.value()->_records_tlases = _ctx.hit_record_checks();
     }
     return created;
 }

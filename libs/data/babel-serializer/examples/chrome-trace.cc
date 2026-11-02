@@ -12,10 +12,10 @@
 #include <clean-core/streams/file_stream.hh>
 #include <clean-core/string/format.hh>
 #include <clean-core/string/print.hh>
+#include <clean-core/thread/native_thread.hh>
 #include <clean-core/thread/thread.hh>
 #include <nexus/test.hh>
 
-#include <thread>
 
 // Recording a synthetic workload and writing it out as a Chrome trace.
 //
@@ -210,7 +210,7 @@ EXAMPLE("babel-serializer/chrome-trace", nx::config::owns_recorder)
         // how long the named things took, and the samples say where the time went in everything nobody named.
         cc::rec::sampling_scope const sampling({.rate_hz = 4000.0});
 
-        auto loader = std::thread(example_assets::load_assets);
+        auto loader = cc::native_thread::start([] { example_assets::load_assets(); });
         for (auto frame = 0; frame < 24; ++frame)
             example_render::render_frame(frame);
         loader.join();
@@ -263,8 +263,7 @@ EXAMPLE("babel-serializer/chrome-trace", nx::config::owns_recorder)
     cc::println("  {} event(s) from example.assets", captured.from_domain(&example_assets::g_rec_domain).event_count());
 
     // The same samples the trace shows, reduced to where the time actually went.
-    // That reduction is the point: a sampled recording is answerable without opening a viewer, which is what lets a
-    // test assert on it.
+    // With it a sampled recording is answerable without opening a viewer, so a test can assert on it.
     auto const hot = cc::rec::hot_functions(captured);
     if (hot.sample_count > 0)
     {

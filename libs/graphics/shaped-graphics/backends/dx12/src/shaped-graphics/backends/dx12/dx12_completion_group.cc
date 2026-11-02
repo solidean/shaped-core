@@ -34,7 +34,7 @@ dx12_completion_group_handle dx12_completion_group_pool::acquire()
             if (!groups.empty())
             {
                 reused = groups.back();
-                groups.pop_back();
+                groups.remove_back();
             }
         });
 

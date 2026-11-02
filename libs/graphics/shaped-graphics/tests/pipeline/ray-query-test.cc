@@ -86,10 +86,11 @@ cc::shared_async<cc::unit> trace_grid(sg::context_handle ctx, sg::compute_pipeli
     };
     auto const tlas = cmd->raytracing.build_tlas(instances);
 
-    auto const layout = ctx->cached.acquire_binding_group_layout<shaders::scene>();
-    auto const group = ctx->transient.create_binding_group(
-        *cmd, layout,
-        shaders::scene{.world = tlas->as_view(), .hits = hits.as_readwrite_buffer(), .ids = ids.as_readwrite_buffer()});
+    auto const layout = ctx->cached.acquire_binding_group_layout<shaders::raytracing::scene>();
+    auto const group = ctx->transient.create_binding_group(*cmd, layout,
+                                                           shaders::raytracing::scene{.world = tlas->as_view(),
+                                                                                      .hits = hits.as_readwrite_buffer(),
+                                                                                      .ids = ids.as_readwrite_buffer()});
     cmd->compute.bind_pipeline(*pipeline);
     cmd->compute.bind_group(0, *group);
     cmd->compute.dispatch_threads(grid, grid);
@@ -130,7 +131,7 @@ ASYNC_INVOCABLE_TEST("sg - an inline trace finds the nearest triangle, and the a
         SKIP("no compiler builds this binary's shaders into a format this context accepts");
     if (!ctx->supports(sg::feature::ray_query))
         SKIP("this device has no ray queries");
-    auto const pipeline = co_await shaders::raytracing.trace_cells.acquire_pipeline(*ctx);
+    auto const pipeline = co_await shaders::raytracing::trace_cells.acquire_pipeline(*ctx);
     co_await trace_grid(ctx, pipeline, true);
 }
 
@@ -145,13 +146,13 @@ ASYNC_INVOCABLE_TEST("sg - a pixel stage traces inline, one ray per pixel", (sg:
     // The scene above, drawn by one rect over an 8 × 8 target: pixel (x, y) traces the ray of cell (x, y).
     float const vertices[] = {0, 0, 0, 4, 0, 0, 0, 4, 0, 4, 0, 0, 4, 4, 0, 0, 4, 0};
     auto const input = ctx->persistent.create_buffer_from_data(vertices, sg::buffer_usage::accel_structure_build_input);
-    shaders::traced_corner const corners[] = {
+    shaders::raytracing::traced_corner const corners[] = {
         {.position = tg::vec2f(-1, -1)}, {.position = tg::vec2f(1, -1)}, {.position = tg::vec2f(1, 1)},
         {.position = tg::vec2f(-1, -1)}, {.position = tg::vec2f(1, 1)},  {.position = tg::vec2f(-1, 1)},
     };
     auto const quad = ctx->persistent.create_buffer_from_data(corners, sg::buffer_usage::vertex_buffer);
-    auto const pipeline = co_await ctx->cached.acquire_raster_pipeline(shaders::raytracing.traced_pixels);
-    auto const layout = ctx->cached.acquire_binding_group_layout<shaders::pixel_scene>();
+    auto const pipeline = co_await ctx->cached.acquire_raster_pipeline(shaders::raytracing::traced_pixels);
+    auto const layout = ctx->cached.acquire_binding_group_layout<shaders::raytracing::pixel_scene>();
 
     // Built in a list of its own, so the draw's list meets a finished TLAS at submit.
     // Built in the draw's list instead, its barrier would be found only at the draw, and vulkan would split the scope.
@@ -165,23 +166,23 @@ ASYNC_INVOCABLE_TEST("sg - a pixel stage traces inline, one ray per pixel", (sg:
     auto const tlas = build->raytracing.build_tlas(instances);
     ctx->submit_command_list(cc::move(build));
 
-    auto const pixels
-        = co_await sg_test::draw_offscreen_passes(*ctx,
-                                                  {.width = grid,
-                                                   .height = grid,
-                                                   .colors = {sg::pixel_format::rgba32_float},
-                                                   .target_set = shaders::traced_target::name,
-                                                   .clear_color = tg::vec4f(-2, -2, -2, -2)},
-                                                  [&](sg::command_list& cmd, sg_test::offscreen_targets const& targets)
-                                                  {
-                                                      auto const group = ctx->transient.create_binding_group(
-                                                          cmd, layout, shaders::pixel_scene{.world = tlas->as_view()});
-                                                      auto scope = cmd.raster.render_to(targets.cleared());
-                                                      scope.bind_pipeline(*pipeline);
-                                                      scope.bind_group(0, *group);
-                                                      scope.bind_vertex_buffer(quad.as_vertex_buffer());
-                                                      scope.draw({.vertex_range = {.offset = 0, .size = 6}});
-                                                  });
+    auto const pixels = co_await sg_test::draw_offscreen_passes(
+        *ctx,
+        {.width = grid,
+         .height = grid,
+         .colors = {sg::pixel_format::rgba32_float},
+         .target_set = shaders::raytracing::traced_target::name,
+         .clear_color = tg::vec4f(-2, -2, -2, -2)},
+        [&](sg::command_list& cmd, sg_test::offscreen_targets const& targets)
+        {
+            auto const group = ctx->transient.create_binding_group(
+                cmd, layout, shaders::raytracing::pixel_scene{.world = tlas->as_view()});
+            auto scope = cmd.raster.render_to(targets.cleared());
+            scope.bind_pipeline(*pipeline);
+            scope.bind_group(0, *group);
+            scope.bind_vertex_buffer(quad.as_vertex_buffer());
+            scope.draw({.vertex_range = {.offset = 0, .size = 6}});
+        });
 
     for (auto y = 0; y < grid; ++y)
         for (auto x = 0; x < grid; ++x)
@@ -208,8 +209,122 @@ ASYNC_INVOCABLE_TEST("sg - an inline trace forced opaque asks no any-hit decisio
         SKIP("no compiler builds this binary's shaders into a format this context accepts");
     if (!ctx->supports(sg::feature::ray_query))
         SKIP("this device has no ray queries");
-    auto const pipeline = co_await shaders::raytracing.trace_cells_opaque.acquire_pipeline(*ctx);
+    auto const pipeline = co_await shaders::raytracing::trace_cells_opaque.acquire_pipeline(*ctx);
     co_await trace_grid(ctx, pipeline, false);
+}
+
+// The same square, with an opacity micromap: map 0 subdivides its triangle once and marks all four micro-triangles
+// opaque, and map 1 leaves its triangle whole and transparent.
+// A trace that decides every candidate one way then shows where the micromap decided instead.
+
+namespace
+{
+/// Traces the square with `map_indices` naming each triangle's map, and checks that only triangle `standing` is hit.
+/// `geometry_usage` is how many maps of each level the triangles name, where that differs from the micromap's own.
+cc::shared_async<cc::unit> trace_micromapped(sg::context_handle ctx,
+                                             sg::compute_pipeline_handle pipeline,
+                                             cc::vector<i32> map_indices,
+                                             cc::vector<sg::micromap_usage> geometry_usage,
+                                             int standing)
+{
+    if (auto* const home = ctx->device_home())
+        co_await cc::async_resume_on(*home);
+
+    float const vertices[] = {0, 0, 0, 4, 0, 0, 0, 4, 0, 4, 0, 0, 4, 4, 0, 0, 4, 0};
+    auto const input = ctx->persistent.create_buffer_from_data(vertices, sg::buffer_usage::accel_structure_build_input);
+
+    // two bits a micro-triangle: 0x55 is four opaque ones, and 0 one transparent one
+    u8 const states[] = {0x55, 0, 0, 0, 0, 0, 0, 0};
+    sg::micromap_descriptor const descriptors[] = {
+        {.states_offset_in_bytes = 0, .subdivision_level = 1, .format = sg::micromap_format::four_state},
+        {.states_offset_in_bytes = 4, .subdivision_level = 0, .format = sg::micromap_format::four_state},
+    };
+    auto const states_buffer
+        = ctx->persistent.create_buffer_from_data(states, sg::buffer_usage::accel_structure_build_input);
+    auto const descriptor_buffer
+        = ctx->persistent.create_buffer_from_data(descriptors, sg::buffer_usage::accel_structure_build_input);
+    auto const index_buffer = ctx->persistent.create_buffer_from_data(cc::span<i32 const>(map_indices),
+                                                                      sg::buffer_usage::accel_structure_build_input);
+
+    auto const usage = sg::buffer_usage::readwrite_buffer | sg::buffer_usage::copy_src;
+    auto const hits
+        = ctx->persistent.create_buffer_from_data(cc::vector<tg::vec4f>::create_defaulted(grid * grid), usage);
+    auto const ids = ctx->persistent.create_buffer_from_data(cc::vector<tg::vec4i>::create_defaulted(grid * grid), usage);
+
+    auto cmd = ctx->create_command_list();
+    auto const micromap = cmd->raytracing.build_micromap({
+        .states = states_buffer.raw(),
+        .descriptors = descriptor_buffer.raw(),
+        .usage = {{.count = 1, .subdivision_level = 1, .format = sg::micromap_format::four_state},
+                  {.count = 1, .subdivision_level = 0, .format = sg::micromap_format::four_state}},
+    });
+    auto const triangles = sg::blas_triangles{.vertices = input.raw(),
+                                              .vertex_count = 6,
+                                              .is_opaque = false,
+                                              .micromap = micromap,
+                                              .micromap_indices = index_buffer.raw(),
+                                              .micromap_usage_counts = cc::move(geometry_usage)};
+    auto const blas = cmd->raytracing.build_blas(cc::span<sg::blas_triangles const>(&triangles, 1));
+    sg::tlas_instance const instances[] = {
+        {.blas = blas, .instance_id = 10},
+        {.blas = blas, .transform = {1, 0, 0, 4, 0, 1, 0, 0, 0, 0, 1, 2}, .instance_id = 20},
+    };
+    auto const tlas = cmd->raytracing.build_tlas(instances);
+
+    auto const layout = ctx->cached.acquire_binding_group_layout<shaders::raytracing::scene>();
+    auto const group = ctx->transient.create_binding_group(*cmd, layout,
+                                                           shaders::raytracing::scene{.world = tlas->as_view(),
+                                                                                      .hits = hits.as_readwrite_buffer(),
+                                                                                      .ids = ids.as_readwrite_buffer()});
+    cmd->compute.bind_pipeline(*pipeline);
+    cmd->compute.bind_group(0, *group);
+    cmd->compute.dispatch_threads(grid, grid);
+    auto const ids_back = cmd->download.data_from_buffer(ids);
+    ctx->submit_command_list(cc::move(cmd));
+
+    auto const got_ids = co_await ids_back.data();
+    REQUIRE(got_ids.size() == grid * grid);
+    for (auto y = 0; y < grid; ++y)
+        for (auto x = 0; x < grid; ++x)
+        {
+            auto const want = expected_at(x, y, false);
+            auto const is_hit = want.is_hit && want.primitive == standing;
+            auto const at = y * grid + x;
+            auto const where = cc::format("cell ({}, {})", x, y);
+            CHECK(got_ids[at][0] == (is_hit ? 1 : 0)).context(where);
+            if (is_hit)
+                CHECK(got_ids[at][2] == standing).context(where);
+        }
+    co_return;
+}
+} // namespace
+
+ASYNC_INVOCABLE_TEST("sg - an opacity micromap's opaque micro-triangles are hit without asking the any-hit decision",
+                     (sg::context_handle const& ctx))
+{
+    REQUIRE(ctx != nullptr);
+    if (!sg_test::shaders_reach(*ctx))
+        SKIP("no compiler builds this binary's shaders into a format this context accepts");
+    if (!ctx->supports(sg::feature::opacity_micromap))
+        SKIP("this device has no opacity micromaps");
+    // A decision that ignores everything hits nothing, unless the micromap marks a micro-triangle opaque.
+    auto const pipeline = co_await shaders::raytracing::trace_cells_rejecting.acquire_pipeline(*ctx);
+    co_await trace_micromapped(ctx, pipeline, {0, 1}, {}, 0);
+}
+
+ASYNC_INVOCABLE_TEST("sg - an opacity micromap's special index misses a whole triangle the any-hit decision would "
+                     "accept",
+                     (sg::context_handle const& ctx))
+{
+    REQUIRE(ctx != nullptr);
+    if (!sg_test::shaders_reach(*ctx))
+        SKIP("no compiler builds this binary's shaders into a format this context accepts");
+    if (!ctx->supports(sg::feature::opacity_micromap))
+        SKIP("this device has no opacity micromaps");
+    // Triangle 0 is transparent as a whole, and triangle 1 names the opaque map; the geometry names one map of level 1.
+    auto const pipeline = co_await shaders::raytracing::trace_cells_accepting.acquire_pipeline(*ctx);
+    co_await trace_micromapped(ctx, pipeline, {i32(sg::micromap_special_index::fully_transparent), 0},
+                               {{.count = 1, .subdivision_level = 1, .format = sg::micromap_format::four_state}}, 1);
 }
 
 // raytracing.sgl's sphere traces: a procedural BLAS of two boxes, each holding the unit sphere at its centre.
@@ -259,11 +374,12 @@ cc::shared_async<cc::unit> trace_sphere_grid(sg::context_handle ctx, sg::compute
     sg::tlas_instance const instances[] = {{.blas = blas, .instance_id = 30}};
     auto const tlas = cmd->raytracing.build_tlas(instances);
 
-    auto const layout = ctx->cached.acquire_binding_group_layout<shaders::sphere_scene>();
-    auto const group = ctx->transient.create_binding_group(*cmd, layout,
-                                                           shaders::sphere_scene{.world = tlas->as_view(),
-                                                                                 .hits = hits.as_readwrite_buffer(),
-                                                                                 .ids = ids.as_readwrite_buffer()});
+    auto const layout = ctx->cached.acquire_binding_group_layout<shaders::raytracing::sphere_scene>();
+    auto const group
+        = ctx->transient.create_binding_group(*cmd, layout,
+                                              shaders::raytracing::sphere_scene{.world = tlas->as_view(),
+                                                                                .hits = hits.as_readwrite_buffer(),
+                                                                                .ids = ids.as_readwrite_buffer()});
     cmd->compute.bind_pipeline(*pipeline);
     cmd->compute.bind_group(0, *group);
     cmd->compute.dispatch_threads(grid, grid);
@@ -305,7 +421,7 @@ ASYNC_INVOCABLE_TEST("sg - an inline trace asks the intersection of each box, an
         SKIP("no compiler builds this binary's shaders into a format this context accepts");
     if (!ctx->supports(sg::feature::ray_query))
         SKIP("this device has no ray queries");
-    auto const pipeline = co_await shaders::raytracing.trace_spheres.acquire_pipeline(*ctx);
+    auto const pipeline = co_await shaders::raytracing::trace_spheres.acquire_pipeline(*ctx);
     co_await trace_sphere_grid(ctx, pipeline, true);
 }
 
@@ -316,7 +432,7 @@ ASYNC_INVOCABLE_TEST("sg - an inline trace without a decision accepts every repo
         SKIP("no compiler builds this binary's shaders into a format this context accepts");
     if (!ctx->supports(sg::feature::ray_query))
         SKIP("this device has no ray queries");
-    auto const pipeline = co_await shaders::raytracing.trace_spheres_all.acquire_pipeline(*ctx);
+    auto const pipeline = co_await shaders::raytracing::trace_spheres_all.acquire_pipeline(*ctx);
     co_await trace_sphere_grid(ctx, pipeline, false);
 }
 
@@ -414,11 +530,12 @@ cc::shared_async<cc::unit> trace_mixed_grid(sg::context_handle ctx, sg::compute_
     };
     auto const tlas = cmd->raytracing.build_tlas(instances);
 
-    auto const layout = ctx->cached.acquire_binding_group_layout<shaders::mixed_scene>();
-    auto const group = ctx->transient.create_binding_group(*cmd, layout,
-                                                           shaders::mixed_scene{.world = tlas->as_view(),
-                                                                                .hits = hits.as_readwrite_buffer(),
-                                                                                .ids = ids.as_readwrite_buffer()});
+    auto const layout = ctx->cached.acquire_binding_group_layout<shaders::raytracing::mixed_scene>();
+    auto const group
+        = ctx->transient.create_binding_group(*cmd, layout,
+                                              shaders::raytracing::mixed_scene{.world = tlas->as_view(),
+                                                                               .hits = hits.as_readwrite_buffer(),
+                                                                               .ids = ids.as_readwrite_buffer()});
     cmd->compute.bind_pipeline(*pipeline);
     cmd->compute.bind_group(0, *group);
     cmd->compute.dispatch_threads(grid, grid);
@@ -460,7 +577,7 @@ ASYNC_INVOCABLE_TEST("sg - an inline trace of a mixed structure takes the neares
         SKIP("no compiler builds this binary's shaders into a format this context accepts");
     if (!ctx->supports(sg::feature::ray_query))
         SKIP("this device has no ray queries");
-    auto const pipeline = co_await shaders::raytracing.trace_mixed.acquire_pipeline(*ctx);
+    auto const pipeline = co_await shaders::raytracing::trace_mixed.acquire_pipeline(*ctx);
     co_await trace_mixed_grid(ctx, pipeline, true);
 }
 
@@ -472,6 +589,6 @@ ASYNC_INVOCABLE_TEST("sg - an inline trace of a mixed structure without decision
         SKIP("no compiler builds this binary's shaders into a format this context accepts");
     if (!ctx->supports(sg::feature::ray_query))
         SKIP("this device has no ray queries");
-    auto const pipeline = co_await shaders::raytracing.trace_mixed_all.acquire_pipeline(*ctx);
+    auto const pipeline = co_await shaders::raytracing::trace_mixed_all.acquire_pipeline(*ctx);
     co_await trace_mixed_grid(ctx, pipeline, false);
 }

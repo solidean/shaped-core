@@ -41,6 +41,8 @@ static_assert(f16::make_from_bits(0x3555).to_f32() == 0.333251953125f);
 static_assert(f16(1.0f) + f16(2.0f) == f16(3.0f));
 static_assert(tg::literals::operator""_f16(0.5L) == f16(0.5f));
 static_assert(f16::max.bits() == 0x7bff && f16::infinity.is_inf() && f16::quiet_nan.is_nan());
+// The free classification reaches f16 through the scalar seam, and agrees with its members.
+static_assert(tg::is_inf(f16::infinity) && tg::is_nan(f16::quiet_nan) && tg::is_finite(f16::max));
 
 static_assert(tg::traits::has_sqrt<f16> && tg::traits::has_trigonometry<f16> && tg::traits::has_exponential<f16>);
 static_assert(tg::traits::has_rounding<f16> && tg::traits::has_abs<f16> && tg::traits::has_pow2<f16>);
@@ -149,14 +151,24 @@ TEST("tg f16 - widening is exact for every value")
 
 TEST("tg f16 - narrowing rounds to nearest even at every midpoint")
 {
-    auto const check_f32 = [](f32 x)
+    auto mismatches = 0;
+    auto first_mismatch = cc::string();
+    auto const note = [&](bool matches, cc::string_view path, f64 x)
+    {
+        if (matches)
+            return;
+        if (mismatches == 0)
+            first_mismatch = cc::format("{} narrowing of {}", path, x);
+        ++mismatches;
+    };
+    auto const check_f32 = [&](f32 x)
     {
         auto const expected = reference_narrow(f64(x));
-        CHECK(f16(x).bits() == expected);
-        CHECK(tg::impl::f32_to_half_bits_portable(x) == expected);
-        CHECK(f16(f64(x)).bits() == expected);
+        note(f16(x).bits() == expected, "f32", f64(x));
+        note(tg::impl::f32_to_half_bits_portable(x) == expected, "portable f32", f64(x));
+        note(f16(f64(x)).bits() == expected, "f64 of an f32", f64(x));
     };
-    auto const check_f64 = [](f64 x) { CHECK(f16(x).bits() == reference_narrow(x)); };
+    auto const check_f64 = [&](f64 x) { note(f16(x).bits() == reference_narrow(x), "f64", x); };
 
     for (auto i = 0; i <= int(max_finite_bits); ++i)
     {
@@ -185,6 +197,7 @@ TEST("tg f16 - narrowing rounds to nearest even at every midpoint")
             }
         }
     }
+    CHECK(mismatches == 0).context(first_mismatch);
 }
 
 TEST("tg f16 - narrowing random floats")

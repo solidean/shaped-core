@@ -1,8 +1,10 @@
 #pragma once
 
 #include <clean-core/container/span.hh>
+#include <clean-core/memory/shared_ptr.hh>
 #include <clean-core/string/string.hh>
 #include <clean-core/thread/async.hh> // the node is held by value, so cc::shared_async must be complete
+#include <clean-core/thread/atomic.hh>
 #include <shaped-viewer/asset/asset_data.hh>
 #include <shaped-viewer/fwd.hh>
 
@@ -33,6 +35,8 @@
 /// managers already stream.
 ///
 /// Move-only: it owns the load, and dropping it drops the load.
+/// **Dropping one mid-load waits for the worker** to leave the loader, since the worker reads the loader's config.
+/// A load that has not reached the fetch, or has not reached the parse, stops there; one already parsing finishes the parse first.
 class sv::asset
 {
 public:
@@ -85,11 +89,20 @@ public:
 public:
     /// Wraps a load already in flight — `asset_loader::load_async` is what builds one.
     /// `loader` must outlive the load: its config is what the collecting step reads.
-    asset(cc::shared_async<impl::imported_asset> node, asset_loader const* loader);
+    /// `dropped` is the flag the node checks between its stages.
+    asset(cc::shared_async<impl::imported_asset> node,
+          asset_loader const* loader,
+          cc::shared_ptr<cc::atomic<bool>> dropped);
 
 private:
+    /// Ends a load still in flight: tells the worker to stop at its next stage, then waits for it.
+    void _drop();
+
     /// The worker half's result, released once collected.
     cc::shared_async<impl::imported_asset> _node;
+
+    /// Raised by `_drop`, read by the worker between its stages.
+    cc::shared_ptr<cc::atomic<bool>> _dropped;
 
     asset_loader const* _loader = nullptr;
 

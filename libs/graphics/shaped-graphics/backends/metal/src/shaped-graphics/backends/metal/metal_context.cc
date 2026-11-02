@@ -3,13 +3,12 @@
 #include <clean-core/common/assert.hh>
 #include <clean-core/common/utility.hh>
 #include <clean-core/record/log.hh>
+#include <clean-core/thread/thread.hh>
 #include <clean-core/thread/thread_pump.hh>
 #include <shaped-graphics/backends/metal/metal_acceleration_structure.hh>
 #include <shaped-graphics/backends/metal/metal_buffer.hh>
 #include <shaped-graphics/context/impl/completion_waiter.hh>
 #include <shaped-graphics/exceptions.hh>
-
-#include <thread>
 
 namespace sg::backend::metal
 {
@@ -31,7 +30,7 @@ metal_context::metal_context(MTL::Device* device,
     _feedback = std::make_shared<metal_feedback_sink>(*this);
 
     // The listener the completion-signal waiter arms its notifications on.
-    // Its default queue is Apple's, which is the point: a handler must run even in a build with no threads of ours.
+    // Its default queue is Apple's, so a handler runs even in a build with no threads of ours.
     _completion.listener = MTL::SharedEventListener::alloc()->init();
 }
 
@@ -44,7 +43,7 @@ cc::result<cc::unit> metal_context::create_systems(isize upload_bytes, isize dow
     CC_RETURN_IF_ERROR(_queries.create(*this));
 
     CC_RETURN_IF_ERROR(_upload_ring.create(_device, upload_bytes, "sg inline upload ring", "upload"));
-    CC_RETURN_IF_ERROR(_download_ring.create(_device, download_bytes, "sg inline download ring", "download"));
+    CC_RETURN_IF_ERROR(_download_ring.create(_device, download_bytes, "sg inline download ring", "readback"));
     _upload_ring.count_overflow_into(&_stats);
     _download_ring.count_overflow_into(&_stats);
     _epochs.count_waits_into(&_stats);
@@ -60,6 +59,10 @@ cc::result<cc::unit> metal_context::create_systems(isize upload_bytes, isize dow
         return cc::error("the metal device refused the zeroed hit-group offsets buffer");
     cc::memset(_zero_hit_group_offsets->contents(), 0, size_t(zero_offsets_bytes));
     _residency.add(_zero_hit_group_offsets);
+
+    _native_scope_fence = _device->newFence();
+    if (_native_scope_fence == nullptr)
+        return cc::error("the metal device refused the native scope's fence");
     return cc::unit{};
 }
 
@@ -96,13 +99,18 @@ void metal_context::set_inline_upload_budget(isize bytes)
 
 void metal_context::set_inline_download_budget(isize bytes)
 {
-    resize_ring(_download_ring, bytes, "sg inline download ring", "download");
+    resize_ring(_download_ring, bytes, "sg inline download ring", "readback");
 }
 
 void metal_context::report_feedback_error(sg::device_error_kind kind, cc::string_view message)
 {
     if (kind == sg::device_error_kind::device_lost)
+    {
         mark_device_lost(cc::string(message));
+
+        // After the mark, so whatever this wakes finds the loss and settles as an error rather than as success.
+        _epochs.abandon_timelines();
+    }
     else
         report_device_error({.kind = kind, .message = cc::string(message)});
 }
@@ -149,6 +157,12 @@ bool metal_context::supports(sg::feature f) const
     case sg::feature::wireframe_fill:
         // `MTLTriangleFillModeLines` is on every Apple GPU.
         return true;
+    case sg::feature::first_instance:
+        // `[[base_instance]]` is on every Apple GPU this backend's Metal 4 floor admits.
+        return true;
+    case sg::feature::opacity_micromap:
+        // Metal 4 has no opacity micromaps.
+        return false;
     case sg::feature::depth32_float_stencil8:
         // `MTLPixelFormatDepth32Float_Stencil8` is on every Apple GPU.
         return true;
@@ -159,6 +173,9 @@ bool metal_context::supports(sg::feature f) const
     case sg::feature::unaligned_block_compression:
         // Not yet checked against a Metal device, so the portable answer: sg refuses rather than a driver.
         return false;
+    case sg::feature::texture_compression_bc:
+        // Every Apple-silicon Mac answers yes; elsewhere it is the device's own answer.
+        return _device != nullptr && _device->supportsBCTextureCompression();
     case sg::feature::shader_f16:
     case sg::feature::shader_int16:
     case sg::feature::subgroups:
@@ -169,6 +186,9 @@ bool metal_context::supports(sg::feature f) const
         return true;
     case sg::feature::device_coherence:
         // Inferred from the floor rather than probed: `coherent(device)` is MSL 3.2, older than the macOS / iOS 26 floor.
+        return true;
+    case sg::feature::helper_lane_query:
+        // `simd_is_helper_thread()` is in every MSL the macOS / iOS 26 floor compiles, so nothing is probed.
         return true;
     }
     return false;
@@ -231,6 +251,7 @@ void metal_context::do_advance_epoch()
 sg::submission_token metal_context::submit_command_list(std::unique_ptr<sg::command_list> cmd)
 {
     CC_ASSERT(cmd != nullptr, "cannot submit a null command list");
+    sg::impl::end_array_declarations_at_submit(*cmd);
     auto& list = static_cast<metal_command_list&>(*cmd);
     CC_ASSERT(list.created_in_epoch() == current_epoch(), "a command list must be submitted in the epoch it was opened "
                                                           "in");
@@ -308,8 +329,7 @@ sg::submission_token metal_context::submit_command_list(std::unique_ptr<sg::comm
             options->addFeedbackHandler(^void(MTL4::CommitFeedback* feedback) {
               auto* const error = feedback->error();
               if (error != nullptr)
-                  sink->report(device_error_kind_of(NS::UInteger(error->code())),
-                               describe_error(error, "a metal command buffer failed"));
+                  sink->report(device_error_kind_of(error), describe_error(error, "a metal command buffer failed"));
 
               for (auto& download : *downloads)
               {
@@ -324,8 +344,7 @@ sg::submission_token metal_context::submit_command_list(std::unique_ptr<sg::comm
                   sink->notify_drained();
             });
 
-            MTL4::CommandBuffer const* const buffers[] = {buffer};
-            _queue->commit(buffers, 1, options);
+            _residency.commit(_queue, buffer, options);
             options->release();
 
             _epochs.signal_submission(claimed);
@@ -543,6 +562,12 @@ void metal_context::shutdown()
         _zero_hit_group_offsets = nullptr;
     }
 
+    if (_native_scope_fence != nullptr)
+    {
+        _native_scope_fence->release();
+        _native_scope_fence = nullptr;
+    }
+
     if (_compiler != nullptr)
     {
         _compiler->release();
@@ -596,7 +621,7 @@ void metal_context::block_until_transfers_drained()
         while (still_pending())
         {
             if (!cc::thread_pump_all())
-                std::this_thread::yield();
+                cc::this_thread_yield();
         }
     };
 
@@ -634,6 +659,8 @@ void metal_context::arm_completion_signal(u64 submission, u64 epoch)
 
 void metal_context::park_for_completion_signal(u64 submission, u64 epoch, u64 wake_generation)
 {
+    _completion.park_count.fetch_add(1, cc::memory_order_relaxed);
+
     // **Two GPU timelines and a host wake, and Metal cannot wait on several at once.**
     // Vulkan parks one `vkWaitSemaphores` with WAIT_ANY over all three; `MTL::SharedEvent::waitUntilSignaledValue`
     // takes a single event, so a waiter built on it would miss whichever of the others fired first.
@@ -711,8 +738,12 @@ void metal_context::wake_completion_signal(u64 generation)
     // The host source, kept apart from the GPU one so neither masks the other.
     // Raised rather than assigned: generations are handed out strictly increasing, and a later wake may already have
     // raised it further.
+    //
+    // **The generation itself, not one past it.**
+    // A park that read this generation is not owed a wake by it, and storing one past it released that park forever.
+    // The waiter then spun at a full core for the rest of the context's life, from the first lowered target on.
     auto const guard = std::lock_guard(_completion.mutex);
-    _completion.host_generation = cc::max(_completion.host_generation, generation + 1);
+    _completion.host_generation = cc::max(_completion.host_generation, generation);
     _completion.condition.notify_all();
 }
 
@@ -946,8 +977,12 @@ cc::result<sg::raw_texture_handle> metal_context::try_create_raw_texture(texture
     return cc::result<sg::raw_texture_handle>(create_metal_texture(desc, alloc));
 }
 
-cc::result<sg::memory_heap_handle> metal_context::try_create_memory_heap(isize size_in_bytes)
+cc::result<sg::memory_heap_handle> metal_context::try_create_memory_heap(isize size_in_bytes,
+                                                                         memory_heap_contents contents)
 {
+    // issue: feat-sg-metal-texture-heap
+    if (contents == memory_heap_contents::textures)
+        return cc::error("metal places textures, but its heap answers no texture requirements yet");
     return cc::result<sg::memory_heap_handle>(create_metal_memory_heap(size_in_bytes));
 }
 

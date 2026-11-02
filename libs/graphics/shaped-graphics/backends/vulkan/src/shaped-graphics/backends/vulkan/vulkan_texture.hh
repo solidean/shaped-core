@@ -1,5 +1,6 @@
 #pragma once
 
+#include <clean-core/container/vector.hh>
 #include <clean-core/thread/atomic.hh>
 #include <clean-core/thread/mutex.hh>
 #include <shaped-graphics/backends/vulkan/fwd.hh>
@@ -18,7 +19,7 @@ namespace sg::backend::vulkan
 } // namespace sg::backend::vulkan
 
 /// Vulkan implementation of sg::raw_texture.
-/// Holds the VkImage and its backing device-local VkDeviceMemory, always a dedicated allocation.
+/// Holds the VkImage and either its own device-local VkDeviceMemory or the heap it is placed in.
 /// There is no layout tracking yet, so a texture is creatable but unusable in a command list until layout transitions land.
 class sg::backend::vulkan::vulkan_texture final : public sg::raw_texture
 {
@@ -61,13 +62,15 @@ protected:
 public:
     /// Accumulate one declared access over `range`, entering an untouched box at `layout`.
     /// Thread-safe.
-    void declare_access(sg::command_list_slot slot,
-                        sg::subresource_range range,
-                        sg::pipeline_stage_flags stages,
-                        sg::access_flags access,
-                        sg::texture_layout layout) const
+    sg::impl::member_track declare_access(sg::command_list_slot slot,
+                                          sg::subresource_range range,
+                                          sg::pipeline_stage_flags stages,
+                                          sg::access_flags access,
+                                          sg::texture_layout layout,
+                                          bool from_array_application = false) const
     {
-        _access.lock([&](vulkan_texture_access& a) { a.declare(slot, range, stages, access, layout); });
+        return _access.lock([&](vulkan_texture_access& a)
+                            { return a.declare(slot, range, stages, access, layout, from_array_application); });
     }
 
     /// Whether any async or streaming transfer of this texture has been enqueued and not yet completed.
@@ -204,6 +207,8 @@ public:
     // Mutable because release_storage() is const: expiry is a lifetime event on a const handle.
     mutable VkImage _image = VK_NULL_HANDLE;
     mutable VkDeviceMemory _memory = VK_NULL_HANDLE;
+    /// The heap a placed texture is bound into, which _memory then is not; null for a dedicated one.
+    sg::memory_heap_handle _heap;
 
     /// The completion timelines and cross-queue stamps, exactly as on vulkan_buffer — see the notes there.
     vulkan_completion_group_handle _upload_group;
@@ -223,4 +228,23 @@ public:
     // Guarded because concurrent command lists may record against the same texture.
     // Mutable so a const handle can still track access: tracking is bookkeeping about the texture, not a change to it.
     mutable cc::mutex<vulkan_texture_access> _access;
+
+    /// An attachment view a rendering scope used, and the epoch that created it.
+    struct attachment_view
+    {
+        sg::epoch epoch = sg::epoch::invalid;
+        sg::texture_view_dimension dimension = sg::texture_view_dimension::tex_2d;
+        sg::pixel_format format = sg::pixel_format::undefined;
+        sg::subresource_range range;
+        VkImageView view = VK_NULL_HANDLE;
+    };
+
+    /// The attachment views rendering scopes used, matched on the whole view description and appended on a miss.
+    ///
+    /// **An entry is valid only in the epoch it names.**
+    /// Its view is destroyed when that epoch retires, so an entry from an earlier epoch holds a handle that may already
+    /// be gone, and acquire_attachment_view reuses the entry rather than reading it.
+    /// So the vector holds as many entries as the busiest epoch used distinct views.
+    /// Guarded on its own, apart from `_access`, since concurrent lists rendering to one texture take it per scope.
+    mutable cc::mutex<cc::vector<attachment_view>> _attachment_views;
 };

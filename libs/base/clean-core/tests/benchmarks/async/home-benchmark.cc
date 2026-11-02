@@ -6,12 +6,13 @@
 #include <clean-core/thread/async.hh>
 #include <clean-core/thread/async_thread_pool.hh>
 #include <clean-core/thread/atomic.hh>
+#include <clean-core/thread/native_thread.hh>
+#include <clean-core/thread/thread.hh>
 #include <clean-core/thread/thread_bound_scheduler.hh>
 #include <nexus/bench/run.hh>
 #include <nexus/test.hh>
 
 #if CC_HAS_THREADS
-#include <thread>
 
 using cc::i64;
 
@@ -23,12 +24,12 @@ struct bench_home
 {
     cc::thread_bound_scheduler* home = nullptr;
     cc::atomic<bool> stop = {false};
-    std::thread thread;
+    cc::native_thread thread;
 
     bench_home()
     {
         cc::atomic<bool> ready = {false};
-        thread = std::thread(
+        thread = cc::native_thread::start(
             [this, &ready]
             {
                 cc::thread_bound_scheduler h;
@@ -43,7 +44,7 @@ struct bench_home
                 }
             });
         while (!ready.load())
-            std::this_thread::yield();
+            cc::this_thread_yield();
     }
 
     ~bench_home()
@@ -56,7 +57,7 @@ struct bench_home
 void wait_ready(cc::async_node_base const& n)
 {
     while (!n.is_ready())
-        std::this_thread::yield();
+        cc::this_thread_yield();
 }
 } // namespace
 

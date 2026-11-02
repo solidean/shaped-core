@@ -13,6 +13,7 @@ namespace scl
 struct options;
 struct prose_apply_options;
 struct prose_stats_options;
+struct prose_verify_options;
 struct bless_includes_options;
 } // namespace scl
 
@@ -31,6 +32,10 @@ struct scl::options
     /// Empty means report everywhere.
     /// Code findings ignore it entirely.
     cc::string changed_lines_path;
+
+    /// --prose-only: run the prose rules alone, over comments, docstrings and markdown.
+    /// For code that follows someone else's style, whose sentences are still ours.
+    bool prose_only = false;
 
     /// --color auto|always|never (`--no-color` is the old spelling of `never`).
     /// `auto` colors only when both stdout and stderr are terminals — see cc::console.
@@ -110,6 +115,36 @@ cc::result<prose_stats_options, cc::string> parse_prose_stats_options(cc::span<c
 
 /// The `prose stats` usage text.
 cc::string_view prose_stats_usage_text();
+} // namespace scl
+
+/// Parsed command line for `shaped-linter prose verify`.
+struct scl::prose_verify_options
+{
+    /// The files as they are now, each judged against its copy at the same relative path under `baseline`.
+    /// At least one is required (unless --help).
+    cc::vector<cc::string> files;
+
+    /// --baseline <dir>: the tree holding each file's earlier version; a file with no copy there is new and skipped.
+    cc::string baseline;
+
+    /// --allow-words <file>: paths, one per line, whose prose words may change, as in a deliberate rewrite; their code is still judged.
+    cc::string allow_words_path;
+
+    /// --color auto|always|never, as for the lint command.
+    cc::console::color_mode color = cc::console::color_mode::automatic;
+
+    /// -h / --help: main prints usage and exits 0.
+    bool help = false;
+};
+
+namespace scl
+{
+/// Parse the arguments AFTER the `prose verify` verb — `args` holds nothing to skip.
+/// Fails on an unknown flag, a missing --baseline, or no input files.
+cc::result<prose_verify_options, cc::string> parse_prose_verify_options(cc::span<char const* const> args);
+
+/// The `prose verify` usage text.
+cc::string_view prose_verify_usage_text();
 } // namespace scl
 
 /// Parsed command line for `shaped-linter bless-includes`.

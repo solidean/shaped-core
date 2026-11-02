@@ -21,7 +21,7 @@ cc::result<cc::unit> check(sql::statement const& stmt)
 
 /// Drops a set of entries and decrements what they referenced, in one transaction.
 ///
-/// The order is load-bearing: the refcounts come down while the entries can still be joined to their objects.
+/// The order is fixed: the refcounts come down while the entries can still be joined to their objects.
 /// Reversed, every decrement would find nothing and every object would leak until a full rebuild.
 cc::result<i64> delete_entries(sql::database& db, cc::span<i64 const> ids)
 {

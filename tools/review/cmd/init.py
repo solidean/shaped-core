@@ -4,8 +4,8 @@ The base is resolved to the merge base and stored as a sha.
 Re-resolving a three-dot range on every run would let the integration branch move the review's obligation underneath ids already handed out.
 
 `init` is the one command that takes a `--repo`.
-It writes what it resolved into `review.toml`, so every later command finds the checkout without being told —
-which matters most for the usual shape, a branch checked out as a worktree somewhere else entirely.
+It writes what it resolved into `review.toml`, so every later command finds the checkout without being told,
+even in the usual shape, a branch checked out as a worktree somewhere else entirely.
 
 A goal is mandatory because it decides what the review is *for* — a comment for someone else, changes landed in this session, or agreement on a design.
 Those produce different entries and different end artifacts, so guessing one would be worse than asking.

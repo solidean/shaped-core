@@ -906,7 +906,7 @@ void add_sizes(registry& r, shape_traits const& s, cc::string_view type_name_tex
 namespace
 {
 /// Its argument unchanged: what the mark changes is how the index into a binding array is written.
-written write_nonuniform(call_context const& ctx)
+written write_mark(call_context const& ctx)
 {
     return ctx.arguments[0];
 }
@@ -940,14 +940,24 @@ void sgl::builtins::register_textures(registry& r)
         .leaf_count = 1,
     });
 
-    r.add_comment("// `nonuniform i` marks an index into a binding array that differs between invocations (CHK-300).");
+    r.add_comment("// `nonuniform i` and `uniform i` mark an index into a binding array the compiler cannot prove the "
+                  "same in "
+                  "every invocation (CHK-300).");
     for (auto const index : {"int", "uint"})
         r.add(function_record{
             .signature = cc::format("@pure fun nonuniform(i: {0}) -> {0}", index),
             .doc = "/// `i`, which the hardware is told may differ between the invocations that index with it.",
             .evaluate = identity,
-            .write = {.kind = spelling_kind::custom, .custom = write_nonuniform},
-            .is_nonuniform_mark = true,
+            .write = {.kind = spelling_kind::custom, .custom = write_mark},
+            .mark = index_mark::nonuniform,
+        });
+    for (auto const index : {"int", "uint"})
+        r.add(function_record{
+            .signature = cc::format("@pure fun uniform(i: {0}) -> {0}", index),
+            .doc = "/// `i`, which the author says is the same in every invocation that indexes with it.",
+            .evaluate = identity,
+            .write = {.kind = spelling_kind::custom, .custom = write_mark},
+            .mark = index_mark::uniform,
         });
 
     for (auto const& entry : check::k_shapes)

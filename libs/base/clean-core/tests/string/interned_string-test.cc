@@ -12,8 +12,8 @@
 
 #if CC_HAS_THREADS
 #include <clean-core/thread/atomic.hh>
+#include <clean-core/thread/native_thread.hh>
 
-#include <thread>
 #endif
 
 using namespace cc::primitive_defines;
@@ -206,9 +206,9 @@ TEST("interned_string - concurrent interning yields one entry per distinct strin
     results.resize_to_defaulted(thread_count);
 
     cc::atomic<bool> go = {false};
-    cc::vector<std::thread> threads;
+    cc::vector<cc::native_thread> threads;
     for (isize t = 0; t < thread_count; ++t)
-        threads.emplace_back(
+        threads.push_back(cc::native_thread::start(
             [&, t]
             {
                 while (!go.load(cc::memory_order_acquire))
@@ -216,7 +216,7 @@ TEST("interned_string - concurrent interning yields one entry per distinct strin
                 }
                 for (auto const& s : strings)
                     results[t].push_back(table.intern(s));
-            });
+            }));
 
     go.store(true, cc::memory_order_release);
     for (auto& t : threads)

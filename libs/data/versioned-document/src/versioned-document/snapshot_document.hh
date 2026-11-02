@@ -64,7 +64,7 @@ public:
 
     /// Removes every writer of `path`, and then the component and entity it leaves empty.
     ///
-    /// **Pruning the empty parents is the load-bearing half.** A component entry with zero properties is not what a
+    /// **Pruning the empty parents is required too.** A component entry with zero properties is not what a
     /// fresh materialization would ever produce, and a parse would *select* it — schema found, `$alive` absent so alive,
     /// version 0 — and construct an all-defaults component out of nothing.
     ///

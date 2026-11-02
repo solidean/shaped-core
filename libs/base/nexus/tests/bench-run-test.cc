@@ -265,6 +265,21 @@ TEST("bench - warmup iterations contribute no items and no quantities",
     CHECK(r.items == r.measured_iterations); // the seven warmup iterations declared items and were ignored
 }
 
+TEST("bench - an unbatched run without warmup runs the body for its samples alone", nx::config::exclusive("bench"))
+{
+    auto cfg = nx::bench::run_config::single_shot();
+    cfg.warmup_iterations = 0;
+    cfg.min_samples = 3;
+    cfg.max_samples = 3;
+
+    // no batch-size probes: unbatched, their estimate would be read by nothing
+    auto calls = 0;
+    auto const r = nx::bench::run("unbatched", cfg, [&] { ++calls; });
+
+    CHECK(r.warmup_iterations == 0);
+    CHECK(calls == 3);
+}
+
 TEST("bench - a run that cannot converge says so rather than pretending",
      nx::config::exclusive("bench"),
      nx::config::thorough_only)

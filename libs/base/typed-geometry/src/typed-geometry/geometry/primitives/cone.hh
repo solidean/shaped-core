@@ -24,6 +24,8 @@
 template <int D, class T>
 struct tg::cone
 {
+    using scalar_t = T;
+
     static_assert(D == 3, "a cone is 3D");
 
     pos<D, T> apex;
@@ -148,6 +150,8 @@ public:
 template <int D, class T>
 struct tg::cone_boundary
 {
+    using scalar_t = T;
+
     static_assert(D == 3, "a cone is 3D");
 
     pos<D, T> apex;
@@ -243,6 +247,8 @@ public:
 template <int D, class T>
 struct tg::cone_mantle
 {
+    using scalar_t = T;
+
     static_assert(D == 3, "a cone is 3D");
 
     pos<D, T> apex;

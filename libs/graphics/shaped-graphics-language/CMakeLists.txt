@@ -78,6 +78,8 @@ add_library(shaped-graphics-language
     src/shaped-graphics-language/legalize/legalize_exits.cc
     src/shaped-graphics-language/legalize/legalize_exprs.cc
     src/shaped-graphics-language/legalize/legalize_erase.cc
+    src/shaped-graphics-language/legalize/legalize_lets.cc
+    src/shaped-graphics-language/legalize/legalize_onces.cc
 
     src/shaped-graphics-language/interpret/interpret.cc
 
@@ -173,6 +175,16 @@ if(NOT _sgl_prelude_existing STREQUAL _sgl_prelude_cc)
     file(WRITE "${_sgl_prelude_generated}" "${_sgl_prelude_cc}")
 endif()
 target_sources(shaped-graphics-language PRIVATE "${_sgl_prelude_generated}")
+
+# What a persistent cache of the compiler's output keys on: every source the compiler is built from, prelude included.
+file(GLOB_RECURSE _sgl_fingerprinted CONFIGURE_DEPENDS
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/*.cc"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/*.hh"
+    "${CMAKE_CURRENT_SOURCE_DIR}/prelude/*.sgl")
+sc_add_source_fingerprint(shaped-graphics-language
+    FUNCTION sgl::compiler_fingerprint
+    HEADER shaped-graphics-language/driver/compile_to_text.hh
+    FILES ${_sgl_fingerprinted})
 
 # Public headers live co-located in src/ for better editor experience.
 # FILE_SET models the public API explicitly (install/export, IDEs, etc.).
@@ -327,7 +339,13 @@ if(SC_BUILD_TOOLS)
         tools/sgl/lsp/tests/language-server-test.cc
         tools/sgl/lsp/tests/language-server-benchmark.cc
     )
-    sc_nexus_binary(sgl KINDS tool tests)
+    # The language server's tests are compiled in either way, but run only where this build runs ours:
+    # as a subdirectory of another project (SC_BUILD_TESTS off) `sgl` is a tool, and that project's test runs must not reach it.
+    if(SC_BUILD_TESTS)
+        sc_nexus_binary(sgl KINDS tool tests)
+    else()
+        sc_nexus_binary(sgl KINDS tool)
+    endif()
     # babel-data writes `describe`'s JSON; the tool may take it, and the library must not.
     target_link_libraries(sgl PRIVATE shaped-graphics-language sgl-lsp-protocol babel-data nexus)
     target_compile_definitions(sgl PRIVATE SGL_SAMPLES_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/samples"
@@ -400,6 +418,7 @@ if(SC_BUILD_TESTS)
         tests/emit/cube-emit-test.cc
         tests/emit/emit-test.cc
         tests/emit/array-emit-test.cc
+        tests/emit/unroll-emit-test.cc
         tests/emit/primitive-stage-emit-test.cc
         tests/emit/buffer-emit-test.cc
         tests/emit/bytes-emit-test.cc
@@ -418,6 +437,7 @@ if(SC_BUILD_TESTS)
 
         tests/driver/classify-test.cc
         tests/driver/compile-to-text-test.cc
+        tests/driver/compile-profile-test.cc
         tests/driver/options-test.cc
         tests/driver/describe-test.cc
         tests/driver/source-differential-test.cc

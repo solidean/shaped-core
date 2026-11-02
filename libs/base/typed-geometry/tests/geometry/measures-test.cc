@@ -101,6 +101,60 @@ TEST("tg measures - decomposition")
     CHECK(tg::segment3f(tg::pos3f(0, 0, 0), tg::pos3f(2, 0, 0)).unbounded().dir == tg::vec3f(2, 0, 0));
 }
 
+namespace
+{
+// Whether every face of `faces` turns its front, (pos10 - pos00) × (pos01 - pos00), away from `inside`.
+template <class T, class Faces>
+bool faces_point_out(Faces const& faces, tg::pos<3, T> const& inside)
+{
+    for (auto const& f : faces)
+    {
+        auto const n = tg::dual(tg::cross(f.pos10 - f.pos00, f.pos01 - f.pos00));
+        if (!(tg::dot(n, f.pos00 - inside) > T(0)))
+            return false;
+    }
+    return true;
+}
+} // namespace
+
+TEST("tg measures - hexahedron edges and faces")
+{
+    // integer boxes: the winding is exact, and face 2a + s lies at max on axis a iff s is 1
+    auto const a = tg::aabb3i(tg::pos3i(0, 0, 0), tg::pos3i(2, 4, 6));
+    auto const af = a.faces();
+    CHECK(faces_point_out(af, tg::pos3i(1, 2, 3)));
+    for (auto i = 0; i < 6; ++i)
+        for (auto const& p : af[i].vertices())
+            CHECK(p[i / 2] == (i % 2 == 1 ? a.max[i / 2] : a.min[i / 2]));
+
+    // a mirrored box still winds outward, because the faces follow the half-axes' handedness
+    auto const h = tg::mat3f::make_from_cols(tg::vec3f(1, 0, 0), tg::vec3f(0, 0, 2), tg::vec3f(0, 3, 0));
+    REQUIRE(h.determinant() < 0.0f);
+    auto const b = tg::box3f(tg::pos3f(5, 5, 5), h);
+    CHECK(faces_point_out(b.faces(), b.center));
+    CHECK(b.edges().size() == 12);
+    auto total = 0.0f;
+    for (auto const& e : b.edges())
+        total += e.length();
+    CHECK(tgtest::approx(total, 8.0f * (1 + 2 + 3)));
+
+    // a frustum's corner bits run right, top, far: right-handed looking down +z, left-handed looking down -z
+    auto const plane = [](tg::vec3d n, double d) { return tg::plane3d(n, d); };
+    for (auto const far_z : {10.0, -10.0})
+    {
+        auto const s = far_z > 0 ? 1.0 : -1.0;
+        auto const fr = tg::frustum3d(plane(tg::vec3d(-1, 0, 0), 1), plane(tg::vec3d(1, 0, 0), 1),
+                                      plane(tg::vec3d(0, -1, 0), 1), plane(tg::vec3d(0, 1, 0), 1),
+                                      plane(tg::vec3d(0, 0, -s), -1), plane(tg::vec3d(0, 0, s), 10));
+        auto const ff = fr.faces();
+        CHECK(faces_point_out(ff, fr.centroid()));
+        for (auto i = 0; i < 6; ++i)
+            for (auto const& p : ff[i].vertices())
+                CHECK(tgtest::approx(tg::dot(fr.planes[i].normal, p - tg::pos3d::zero), fr.planes[i].dist, 1e-9));
+        CHECK(fr.edges().size() == 12);
+    }
+}
+
 TEST("tg measures - parameters invert evaluation")
 {
     auto const s = tg::segment3f(tg::pos3f(0, 0, 0), tg::pos3f(4, 0, 0));

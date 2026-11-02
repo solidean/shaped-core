@@ -11,7 +11,7 @@
 using namespace cc::primitive_defines;
 
 // Runtime resizing of the transfer resources: ctx.upload.set_async_window_size / set_inline_budget and ctx.download.set_budget.
-// Each ring is created tiny, then grown, and a transfer that would not fit the original capacity proves the resize took effect.
+// Each ring is shrunk on the shared context, then grown, and a transfer that would not fit the small capacity proves the resize took effect.
 // A round-trip either side of the change proves correctness is preserved.
 // See the upload.async / upload.inline / download.inline concept docs.
 
@@ -76,48 +76,52 @@ cc::shared_async<bool> async_round_trip(sg::context_handle const& ctx, isize n, 
 }
 } // namespace
 
-ASYNC_TEST("sg dx12 - async upload window resize preserves uploads")
+ASYNC_INVOCABLE_TEST("sg dx12 - async upload window resize preserves uploads", (dx12::dx12_context_handle const& handle))
 {
+    REQUIRE(handle != nullptr);
     // A 1 KiB window (packs a larger upload across windows). Resizing changes only staging memory.
-    auto ctx = dx12::make_test_context({.async_upload_window_bytes = 1024});
-    if (ctx.has_error())
-        SKIP("no dx12 adapter");
+    auto const sizes = dx12::scoped_transfer_sizes(*handle, {.async_upload_window_bytes = 1024});
 
-    CHECK(co_await async_round_trip(ctx.value(), 4096, 1)); // spans several 1 KiB windows
+    CHECK(co_await async_round_trip(handle, 4096, 1)); // spans several 1 KiB windows
+    dx12::require_async_upload_window(*handle, 1024);  // the guard's size applied, so it really spanned them
 
-    ctx.value()->upload.set_async_window_size(isize(64) * 1024);        // grow; actor adopts it before next upload
-    CHECK(co_await async_round_trip(ctx.value(), isize(32) * 1024, 2)); // now fits one window
+    handle->upload.set_async_window_size(isize(64) * 1024);        // grow; actor adopts it before next upload
+    CHECK(co_await async_round_trip(handle, isize(32) * 1024, 2)); // now fits one window
 
-    ctx.value()->upload.set_async_window_size(2048);        // shrink again
-    CHECK(co_await async_round_trip(ctx.value(), 8192, 3)); // packs across the smaller windows
+    handle->upload.set_async_window_size(2048);        // shrink again
+    CHECK(co_await async_round_trip(handle, 8192, 3)); // packs across the smaller windows
 }
 
-ASYNC_TEST("sg dx12 - inline upload ring grows to fit a larger upload")
+ASYNC_INVOCABLE_TEST("sg dx12 - inline upload ring grows to fit a larger upload",
+                     (dx12::dx12_context_handle const& handle))
 {
+    REQUIRE(handle != nullptr);
     // A 4 KiB upload ring: an upload larger than this asserts (a single upload cannot exceed capacity).
-    auto ctx = dx12::make_test_context({.upload_ring_bytes = 4096});
-    if (ctx.has_error())
-        SKIP("no dx12 adapter");
+    auto const sizes = dx12::scoped_transfer_sizes(*handle, {.upload_ring_bytes = 4096});
+    REQUIRE(handle->_upload_inline.debug_cursor().capacity == 4096);
 
-    CHECK(co_await inline_round_trip(ctx.value(), 2048, 1)); // fits the small ring
+    CHECK(co_await inline_round_trip(handle, 2048, 1)); // fits the small ring
 
-    ctx.value()->upload.set_inline_budget(isize(128) * 1024); // grow the ring
-    ctx.value()->advance_epoch();                             // applies the pending budget
+    handle->upload.set_inline_budget(isize(128) * 1024); // grow the ring
+    handle->advance_epoch();                             // applies the pending budget
+    CHECK(handle->_upload_inline.debug_cursor().capacity == isize(128) * 1024);
 
-    CHECK(co_await inline_round_trip(ctx.value(), isize(64) * 1024, 2)); // would not fit the original 4 KiB ring
+    CHECK(co_await inline_round_trip(handle, isize(64) * 1024, 2)); // would not fit the 4 KiB ring
 }
 
-ASYNC_TEST("sg dx12 - inline download ring grows to fit a larger readback")
+ASYNC_INVOCABLE_TEST("sg dx12 - inline download ring grows to fit a larger readback",
+                     (dx12::dx12_context_handle const& handle))
 {
+    REQUIRE(handle != nullptr);
     // A 4 KiB readback ring: a download larger than this asserts before the resize.
-    auto ctx = dx12::make_test_context({.download_ring_bytes = 4096});
-    if (ctx.has_error())
-        SKIP("no dx12 adapter");
+    auto const sizes = dx12::scoped_transfer_sizes(*handle, {.download_ring_bytes = 4096});
+    REQUIRE(handle->_download_inline.debug_cursor().capacity == 4096);
 
-    CHECK(co_await inline_round_trip(ctx.value(), 2048, 1)); // fits the small ring
+    CHECK(co_await inline_round_trip(handle, 2048, 1)); // fits the small ring
 
-    ctx.value()->download.set_budget(isize(128) * 1024); // grow the readback ring
-    ctx.value()->advance_epoch();                        // applies the pending budget (drains the actor)
+    handle->download.set_budget(isize(128) * 1024); // grow the readback ring
+    handle->advance_epoch();                        // applies the pending budget (drains the actor)
+    CHECK(handle->_download_inline.debug_cursor().capacity == isize(128) * 1024);
 
-    CHECK(co_await inline_round_trip(ctx.value(), isize(64) * 1024, 2)); // would not fit the original 4 KiB ring
+    CHECK(co_await inline_round_trip(handle, isize(64) * 1024, 2)); // would not fit the 4 KiB ring
 }

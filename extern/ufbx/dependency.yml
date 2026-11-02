@@ -1,0 +1,20 @@
+# Pin and license for the upstream vendored here.
+# vendor-ufbx.py reads its pin from this file; the copy map and wipe list stay in the script.
+# Bump `tag` and `pin_hash` together, only after vetting the new commit.
+
+upstreams:
+  - name: ufbx
+    homepage: https://github.com/ufbx/ufbx
+    source: git
+    repo: https://github.com/ufbx/ufbx
+    track: tags
+    tag: v0.23.1
+    digest_algo: git-commit
+    pin_hash: 26a482ae66871d7de36eb722aa060bce95bce274
+    license: MIT OR Unlicense
+    license_files: [LICENSE]
+    used_by: babel-serializer — the FBX reader behind babel::fbx
+    notes: |
+      One C file and one header with no dependencies of its own: it carries its own Deflate for FBX's compressed arrays.
+      Both encodings (binary and ASCII) and every FBX version from 6100 on are read.
+      Upstream's LICENSE offers MIT or public domain (the Unlicense) at the user's choice, which is why the expression is `OR`.
