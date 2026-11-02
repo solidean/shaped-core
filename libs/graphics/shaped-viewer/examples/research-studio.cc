@@ -23,7 +23,8 @@ using namespace cc::primitive_defines;
 //   the panel picks the scene, one of the six sheet views, and the renderer
 //
 // A capture takes its scene from SV_STUDIO_SCENE (an index), its renderer from SV_STUDIO_MODE (0 deferred, 1 forward, 2 traced)
-// its sheet view from SV_STUDIO_VIEW (0 front to 5 top, as the panel lists them), and its still-image denoise from SV_STUDIO_STILL (an index into k_stills).
+// its sheet view from SV_STUDIO_VIEW (0 front to 5 top, as the panel lists them), its still-image denoise from SV_STUDIO_STILL (an index into k_stills),
+// and the hybrid's bounces from SV_STUDIO_BOUNCES (1 or 2).
 //
 // Run it:
 //   uv run dev.py example shaped-viewer/research-studio
@@ -223,9 +224,12 @@ EXAMPLE("shaped-viewer/research-studio")
     auto scene_index = from_environment("SV_STUDIO_SCENE", 0, k_scene_count);
     auto view_index = from_environment("SV_STUDIO_VIEW", 0, 6);
     auto reframe = true;
-    auto mode = from_environment("SV_STUDIO_MODE", 0, 3); // 0 hybrid deferred, 1 hybrid forward, 2 path traced
-    auto denoiser = 0;                                    // into k_denoisers
-    auto temporal_frames = 16;                            // render_settings::temporal_denoise_frames
+    auto mode = from_environment("SV_STUDIO_MODE", 0, 3);       // 0 hybrid deferred, 1 hybrid forward, 2 path traced
+    auto bounces = from_environment("SV_STUDIO_BOUNCES", 0, 3); // render_settings::hybrid_bounces, 0 for its default
+    if (bounces == 0)
+        bounces = sv::render_settings{}.hybrid_bounces;
+    auto denoiser = 0;         // into k_denoisers
+    auto temporal_frames = 16; // render_settings::temporal_denoise_frames
     // On unless asked otherwise: the spatial member a still image is otherwise handed to is far noisier than DLSS.
     auto still = from_environment("SV_STUDIO_STILL", 0, k_still_count); // into k_stills
     auto scale = 0;                                                     // into k_scales
@@ -267,6 +271,8 @@ EXAMPLE("shaped-viewer/research-studio")
             ImGui::RadioButton("hybrid, deferred", &mode, 0);
             ImGui::RadioButton("hybrid, forward", &mode, 1);
             ImGui::RadioButton("path traced", &mode, 2);
+            if (mode != 2)
+                ImGui::SliderInt("hybrid bounces", &bounces, 1, 2);
             if (ImGui::BeginCombo("denoiser", sr::to_string(k_denoisers[denoiser]).data()))
             {
                 // Asked while the list is open rather than once up front: sr's shaders answer only once a viewer has
@@ -386,6 +392,7 @@ EXAMPLE("shaped-viewer/research-studio")
         auto const scene_settings = sv::render_settings{
             .mode = mode == 2 ? sv::render_mode::wavefront : sv::render_mode::hybrid,
             .hybrid_lighting = mode == 1 ? sv::hybrid_lighting::forward : sv::hybrid_lighting::deferred,
+            .hybrid_bounces = bounces,
             .reconstruct = reconstruct,
             .temporal_denoise_frames = temporal,
             .temporal_denoise_fade_frames = u32(fade_frames),

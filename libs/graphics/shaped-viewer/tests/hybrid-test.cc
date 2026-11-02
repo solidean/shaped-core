@@ -64,7 +64,8 @@ cc::shared_async<hybrid_readback> draw_hybrid(sg::context& ctx,
                                               tg::vec2i size,
                                               sv::hybrid_lighting lighting,
                                               int frames,
-                                              sv::background const& background = {})
+                                              sv::background const& background = {},
+                                              int bounces = 1)
 {
     auto const* const mesh_rec = resources.meshes.get_ptr(item.mesh);
     REQUIRE(mesh_rec != nullptr);
@@ -113,6 +114,8 @@ cc::shared_async<hybrid_readback> draw_hybrid(sg::context& ctx,
         fc.near_plane = f32(cam.projection.near_plane);
         fc.pixel_spread = 2.0f * record.up_scaled.length() / f32(size[1]);
         fc.rng_seed = u32(f) + 1u;
+        // what a hybrid frame reads as its bounce count, `render_settings::hybrid_bounces`
+        fc.max_bounces = bounces;
 
         auto const background_buffer = ctx.transient.create_buffer_from_pod(*cmd, sv::background_gpu::from(background),
                                                                             sg::buffer_usage::readonly_buffer);
@@ -233,18 +236,26 @@ ASYNC_INVOCABLE_TEST("sv::hybrid_routine - forward and deferred light the Cornel
 
     constexpr auto size = tg::vec2i(64, 64);
     constexpr int block = 8;
-    auto const traced = co_await sv_test::trace_direct(ctx, resources, item, cam, lights, size, 16, 2);
+    // The tracer's path length counts the primary hit, so a hybrid of n bounces is held to the tracer's n + 1.
+    // The box is matte throughout, so the secondary material the bounces light is the material itself, and only noise is left between them.
+    auto const traced_one = co_await sv_test::trace_direct(ctx, resources, item, cam, lights, size, 16, 2);
+    auto const traced_two = co_await sv_test::trace_direct(ctx, resources, item, cam, lights, size, 16, 3);
 
     struct contender
     {
         cc::string_view name;
         sv::hybrid_lighting lighting = sv::hybrid_lighting::forward;
+        int bounces = 1;
     };
-    contender const contenders[] = {{.name = "forward", .lighting = sv::hybrid_lighting::forward},
-                                    {.name = "deferred", .lighting = sv::hybrid_lighting::deferred}};
+    contender const contenders[]
+        = {{.name = "forward", .lighting = sv::hybrid_lighting::forward},
+           {.name = "deferred", .lighting = sv::hybrid_lighting::deferred},
+           {.name = "forward, two bounces", .lighting = sv::hybrid_lighting::forward, .bounces = 2},
+           {.name = "deferred, two bounces", .lighting = sv::hybrid_lighting::deferred, .bounces = 2}};
     for (auto const& c : contenders)
     {
-        auto const hybrid = co_await draw_hybrid(ctx, resources, item, cam, lights, size, c.lighting, 128);
+        auto const& traced = c.bounces == 2 ? traced_two : traced_one;
+        auto const hybrid = co_await draw_hybrid(ctx, resources, item, cam, lights, size, c.lighting, 128, {}, c.bounces);
         REQUIRE(hybrid.color.size() == traced.size());
 
         // Every block, every channel, over the pixels inside one face, since an edge is antialiased in the tracer's image and not here.
@@ -266,8 +277,8 @@ ASYNC_INVOCABLE_TEST("sv::hybrid_routine - forward and deferred light the Cornel
                                                         bx, by, ch, h.value(), t.value()));
                 }
         CHECK(compared > 3 * 32);
-        CC_LOG_INFO("{} hybrid against the tracer's two bounces on the Cornell box: worst block {} over {}", c.name,
-                    worst, compared);
+        CC_LOG_INFO("{} hybrid against the tracer at one bounce more on the Cornell box: worst block {} over {}",
+                    c.name, worst, compared);
 
         // The back wall straight ahead: white, facing the camera, 4.4 in front of it; the deferred kernel writes the albedo.
         auto const center = isize(size[1] / 2) * isize(size[0]) + isize(size[0] / 2);
