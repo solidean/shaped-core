@@ -739,6 +739,21 @@ void mark_unwritten(impl::temporal_slot* slot)
         slot->accum_frame = 0;
 }
 
+/// Whether `a` and `b` are one camera, exactly: an image made from one is an image of the other.
+[[nodiscard]] bool same_camera(shaders::tracer::camera_record const& a, shaders::tracer::camera_record const& b)
+{
+    return a.position == b.position && a.forward == b.forward && a.right_scaled == b.right_scaled
+        && a.up_scaled == b.up_scaled;
+}
+
+/// Marks a denoised slot as holding this frame's image, made from `camera`, which an incomplete frame may present in its place.
+void mark_denoised(impl::temporal_slot& slot, shaders::tracer::camera_record const& camera)
+{
+    slot.accum_frame = 1;
+    slot.last_camera = camera;
+    slot.has_last_camera = true;
+}
+
 /// What a still frame runs under `budget_ms`, its layer's share of the frame's: `rounds_per_frame` at full fill, or what fits the budget once a frame is measured.
 ///
 /// Folds in every frame whose timestamps have landed first, so the plan is as fresh as the GPU allows.
@@ -1802,6 +1817,21 @@ sg::routine_outcome view_renderer::trace(sg::command_list& cmd,
         ds.motion->has_last_camera = true;
     }
 
+    // A frame drawn through a stand-in still compiling, or short of an emitter still loading, is an image of another scene:
+    // the lamp it waits on may be the scene's only light, which leaves it black.
+    // It declines, since it is not the image asked for.
+    // The image presented before it stays up instead, as `resolve` already chose it, while it was made from this camera:
+    // a compile can outlast a move, and an image that does not follow the camera is worse than a stand-in's that does.
+    auto const incomplete = traces && (stand_ins.pending || resolved.emitters_pending);
+    auto const held = has_guides && ds.denoised->accum_frame > 0 && ds.denoised->has_last_camera
+                   && same_camera(ds.denoised->last_camera, fc.camera);
+    if (incomplete && held)
+    {
+        if (!scaled && ds.normal->accum_frame < frame_count_cap)
+            ++ds.normal->accum_frame;
+        return sg::routine_outcome::declined;
+    }
+
     if (has_guides)
     {
         if (traces && !scaled && ds.normal->accum_frame < frame_count_cap)
@@ -1846,9 +1876,9 @@ sg::routine_outcome view_renderer::trace(sg::command_list& cmd,
 
             // The mean is not this frame's image, so a frame the upscale did not land presents the last one that did.
             if (outcome.is_denoised())
-                ds.denoised->accum_frame = 1;
+                mark_denoised(*ds.denoised, fc.camera);
             res.traces[trace_index] = ds.denoised->texture;
-            if (outcome.status == sr::reconstruct_status::pending)
+            if (outcome.status == sr::reconstruct_status::pending || incomplete)
                 return sg::routine_outcome::declined;
             return sg::routine_outcome::executed;
         }
@@ -1872,11 +1902,13 @@ sg::routine_outcome view_renderer::trace(sg::command_list& cmd,
             return sg::routine_outcome::executed;
         }
 
-        if (_denoise(cmd, schedule, *slot, ds, cameras, sample_counts, res.traces[trace_index])
-            == sr::reconstruct_status::pending)
+        auto const denoised = _denoise(cmd, schedule, *slot, ds, cameras, sample_counts, res.traces[trace_index]);
+        if (ds.denoised->accum_frame > 0)
+            mark_denoised(*ds.denoised, fc.camera);
+        if (denoised == sr::reconstruct_status::pending)
             return sg::routine_outcome::declined;
     }
-    return sg::routine_outcome::executed;
+    return incomplete ? sg::routine_outcome::declined : sg::routine_outcome::executed;
 }
 
 f32 view_renderer::crossfade_weight(u32 accum_frame, u32 temporal_frames, u32 fade_frames)

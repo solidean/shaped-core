@@ -97,8 +97,9 @@ struct temporal_slot
     /// switch between moving and still.
     sr::reconstruct_history scaled_denoise;
 
-    /// The camera this slot's layer was last traced from, held only by a `temporal_id::motion_guide` slot.
+    /// The camera this slot's layer was last traced from, held by a `temporal_id::motion_guide` slot.
     /// The next frame's motion vectors reproject into it.
+    /// A `temporal_id::denoised` slot holds the camera its image was made from, which a frame still loading may present only from the same one.
     shaders::tracer::camera_record last_camera = {};
     bool has_last_camera = false;
 
