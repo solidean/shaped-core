@@ -40,7 +40,7 @@ bool checker::is_type_name(i32 file, ast::expr_id expr) const
     if (n != nullptr)
     {
         auto const text = text_of(file, n->where);
-        if (text == "sampler" || text == "comparison_sampler" || text == "bytes")
+        if (text == "sampler" || text == "comparison_sampler" || text == "bytes" || is_type_parameter_name(text))
             return true;
         for (auto const& shape : k_shapes)
             if (shape.depth == text)
@@ -54,7 +54,18 @@ bool checker::is_type_name(i32 file, ast::expr_id expr) const
     return kind == symbol_kind::structure || kind == symbol_kind::enumeration;
 }
 
-cc::optional<i32> checker::constant_count(i32 file, ast::expr_id expr)
+i32 checker::case_index_of(type_id type, cc::string_view name) const
+{
+    if (!is_valid(type) || type == checked_module::error_type || out.at(type).kind != type_kind::enumeration)
+        return -1;
+    auto const cases = out.at(out.at(type).cases);
+    for (auto i = isize(0); i < cases.size(); ++i)
+        if (cases[i].name == name)
+            return i32(i);
+    return -1;
+}
+
+cc::optional<i32> checker::constant_count(i32 file, ast::expr_id expr, function_scope const* scope)
 {
     auto const& e = ast_of(file).at(expr);
     auto const text = text_of(file, span_of(file, expr));
@@ -63,10 +74,21 @@ cc::optional<i32> checker::constant_count(i32 file, ast::expr_id expr)
     auto const* const n = e.node.try_as<ast::name>();
     if (n == nullptr)
         return {};
-    auto const* const found = names_seen_from(file).get_ptr(text);
-    if (found == nullptr || found->empty() || out.at(found->front()).kind != symbol_kind::constant)
-        return {};
-    auto const id = found->front();
+    // a local hides a file-scope const of its name, unless it is a function's own `const` (CHK-413)
+    auto id = symbol_id::none;
+    if (auto const* const local = scope != nullptr ? scope->find_local(text) : nullptr)
+    {
+        if (local->where.kind != target_kind::symbol)
+            return {};
+        id = local->where.symbol;
+    }
+    else
+    {
+        auto const* const found = seen_from(file, text);
+        if (found == nullptr || found->empty() || out.at(found->front()).kind != symbol_kind::constant)
+            return {};
+        id = found->front();
+    }
     set_target(file, expr, {.kind = target_kind::symbol, .symbol = id});
     if (demand(id, file, span_of(file, expr)) != symbol_state::checked)
         return {};
@@ -88,7 +110,7 @@ cc::optional<i32> checker::constant_index(i32 file, ast::expr_id expr) const
     // the name already checked, so what it names is known, and a local that hides a `const` is no constant
     if (!e.node.is<ast::name>())
         return {};
-    auto const& where = out.files[file].target_at(expr);
+    auto const& where = tables_of(file).target_at(expr);
     if (where.kind != target_kind::symbol || out.at(where.symbol).kind != symbol_kind::constant
         || out.at(where.symbol).state != symbol_state::checked)
         return {};
@@ -108,7 +130,7 @@ cc::optional<i64> checker::constant_unsigned_index(i32 file, ast::expr_id expr) 
     }
     if (!e.node.is<ast::name>())
         return {};
-    auto const& where = out.files[file].target_at(expr);
+    auto const& where = tables_of(file).target_at(expr);
     if (where.kind != target_kind::symbol || out.at(where.symbol).kind != symbol_kind::constant
         || out.at(where.symbol).state != symbol_state::checked)
         return {};
@@ -146,11 +168,28 @@ type_id checker::resolve_array(i32 file, ast::expr_id expr, ast::index const& no
     if (arguments.empty())
         return array_type(element, 0);
 
+    // CHK-339: `T[n]` over a value parameter is an array whose length an instance says, and in one it is that constant
+    if (arguments.size() == 1 && arguments[0].name.empty() && !arguments[0].is_splat && ast::is_valid(arguments[0].value))
+        if (auto const* const n = ast.at(arguments[0].value).node.try_as<ast::name>(); n != nullptr)
+            for (auto i = type_parameter_names.size(); i > 0; --i)
+                if (type_parameter_names[i - 1].first == text_of(file, n->where))
+                {
+                    auto const stands_for = type_parameter_names[i - 1].second;
+                    auto const& s = out.at(stands_for);
+                    if (s.kind == type_kind::constant && out.name_of(s.element) == "int" && s.count >= 1)
+                        return array_type(element, s.count);
+                    if (s.kind == type_kind::type_parameter && is_valid(s.element) && out.name_of(s.element) == "int")
+                        return symbolic_array_type(element, stands_for);
+                    report(diagnostic_kind::invalid_constant_argument, file, span_of(file, arguments[0].value),
+                           "an array's length is an int constant of at least 1, or an int value parameter");
+                    return checked_module::error_type;
+                }
     auto counts = cc::vector<i32>();
     for (auto const& a : arguments)
     {
-        auto const count = !a.name.empty() || a.is_splat || !ast::is_valid(a.value) ? cc::optional<i32>()
-                                                                                    : constant_count(file, a.value);
+        auto const count = !a.name.empty() || a.is_splat || !ast::is_valid(a.value)
+                             ? cc::optional<i32>()
+                             : constant_count(file, a.value, scope);
         if (!count.has_value() || count.value() < 1)
         {
             report(diagnostic_kind::invalid_constant_argument, file,
@@ -251,9 +290,35 @@ type_id checker::check_filled(function_scope& scope, ast::expr_id id, ast::call 
                cc::format("{}.filled takes the one value every element holds", out.name_of(type)));
         return error_type;
     }
-    if (check_expected(scope, arguments[0].value, out.at(type).element, "the value it is filled with")
-        != out.at(type).element)
+    auto const element = out.at(type).element;
+    auto const value = arguments[0].value;
+    if (out.at(element).kind != type_kind::array || ast.at(value).node.is<ast::array>())
+    {
+        if (check_expected(scope, value, element, "the value it is filled with") != element)
+            return error_type;
+        set_target(file, id, {.kind = target_kind::array_filled});
+        return type;
+    }
+
+    // CHK-289: a nested array is filled with a row, or with the innermost element, which then stands in every scalar
+    auto innermost = element;
+    while (out.at(innermost).kind == type_kind::array)
+        innermost = out.at(innermost).element;
+    auto const got = check_expr(scope, value);
+    if (got == error_type)
         return error_type;
+    if (got != element && got != innermost)
+    {
+        auto const number = number_of(file, value);
+        if (!number.is_number || !holds(number, innermost))
+        {
+            report(diagnostic_kind::type_mismatch, file, span_of(file, value),
+                   cc::format("the value it is filled with is {} or {}, got {}", out.name_of(element),
+                              out.name_of(innermost), out.name_of(got)));
+            return error_type;
+        }
+        set_type(file, value, innermost);
+    }
     set_target(file, id, {.kind = target_kind::array_filled});
     return type;
 }
@@ -290,7 +355,42 @@ cc::string checker::array_path(type_id type) const
     return {};
 }
 
-void checker::judge_edge_arrays(i32 file, source_span where, type_id type)
+sgl::i32 checker::natural_stride_of(type_id type) const
+{
+    auto const round_up = [](i32 n, i32 to) { return (n + to - 1) / to * to; };
+    if (auto const* const record = out.builtin_type_of(type))
+        return round_up(record->wgsl_layout.size, record->wgsl_layout.alignment > 0 ? record->wgsl_layout.alignment : 4);
+    // a struct and an array are sized to their alignment already, which is how workgroup memory measures them
+    return workgroup_size_of(type);
+}
+
+cc::string checker::sub_row_array_path(type_id type) const
+{
+    if (type == checked_module::error_type || out.builtin_type_of(type) != nullptr)
+        return {};
+    auto const& t = out.at(type);
+    if (t.kind == type_kind::array)
+    {
+        // a struct nested in a constant block takes whole rows (EMIT-110), so only a builtin element can fall short
+        if (auto const* const record = out.builtin_type_of(t.element);
+            record != nullptr && natural_stride_of(t.element) % 16 != 0)
+            return cc::format(": {}", out.name_of(type));
+        auto inner = sub_row_array_path(t.element);
+        return inner.starts_with(":") ? cc::format(": {}", out.name_of(type)) : inner;
+    }
+    if (t.kind != type_kind::structure)
+        return {};
+    for (auto const& m : out.at(t.members))
+    {
+        if (m.type == type || m.factor != tessellation_factor::none)
+            continue;
+        if (auto inner = sub_row_array_path(m.type); !inner.empty())
+            return cc::format(".{}{}", m.name, inner);
+    }
+    return {};
+}
+
+void checker::judge_edge_arrays(i32 file, source_span where, type_id type, bool is_link)
 {
     // a patch and a geometry stage's vertices are arrays of the struct that crosses, and a stream holds it
     while (type != checked_module::error_type && out.builtin_type_of(type) == nullptr
@@ -299,11 +399,28 @@ void checker::judge_edge_arrays(i32 file, source_span where, type_id type)
     if (type == checked_module::error_type || out.builtin_type_of(type) != nullptr
         || out.at(type).kind != type_kind::structure)
         return;
-    if (auto const path = array_path(type); !path.empty())
+    // CHK-422: a stage link carries a member that is a one-dimensional array of builtins, an element per location
+    auto refused = cc::string();
+    for (auto const& m : out.at(out.at(type).members))
+    {
+        if (m.factor != tessellation_factor::none || m.type == checked_module::error_type || !refused.empty())
+            continue;
+        auto const& t = out.at(m.type);
+        auto const is_carried = is_link && out.builtin_type_of(m.type) == nullptr && t.kind == type_kind::array
+                             && t.count > 0 && out.builtin_type_of(t.element) != nullptr
+                             && out.builtin_type_of(t.element)->crosses_edges;
+        if (is_carried)
+            continue;
+        if (auto inner = array_path(m.type); !inner.empty())
+            refused = cc::format(".{}{}", m.name, inner);
+        else if (out.builtin_type_of(m.type) == nullptr && t.kind == type_kind::array)
+            refused = cc::format(".{}: {}", m.name, out.name_of(m.type));
+    }
+    if (!refused.empty())
         unsupported(file, where,
                     cc::format("an array crossing a stage edge, in {}{}, which takes a location per element no target "
                                "gives yet",
-                               out.name_of(type), path));
+                               out.name_of(type), refused));
 }
 
 i32 checker::workgroup_size_of(type_id type) const

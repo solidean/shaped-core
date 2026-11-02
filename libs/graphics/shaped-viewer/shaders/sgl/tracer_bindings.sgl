@@ -43,13 +43,14 @@ struct light_record:
     select_pdf: float
     select_cdf: float
 
-/// `scene.instance` as `traced.instances` holds it, 112 bytes; `scene.instance` says who fills what.
+/// `scene.instance` as `traced.instances` holds it, 256 bytes; `scene.instance` says who fills what.
 struct instance_record:
     param_buffer: uint
     param_offset: uint
     vertices: uint
     indices: uint
-    is_indexed: uint
+    base_vertex: uint
+    first_index: uint
     link_mask: uint
     opacity_kind: uint
     opacity_offset: uint
@@ -61,6 +62,37 @@ struct instance_record:
     opacity_cutoff: uint
     shade_group: uint
     emitter: uint
+    base_kind: uint
+    base_offset: uint
+    base_uv_offset: uint
+    base_frequency: uint
+    base_channels: uint
+    base_sampler: uint
+    base_transform: uint
+    rough_kind: uint
+    rough_offset: uint
+    rough_uv_offset: uint
+    rough_frequency: uint
+    rough_channels: uint
+    rough_sampler: uint
+    rough_transform: uint
+    metal_kind: uint
+    metal_offset: uint
+    metal_uv_offset: uint
+    metal_frequency: uint
+    metal_channels: uint
+    metal_sampler: uint
+    metal_transform: uint
+    spec_kind: uint
+    spec_offset: uint
+    spec_uv_offset: uint
+    spec_frequency: uint
+    spec_channels: uint
+    spec_sampler: uint
+    spec_transform: uint
+    frame_offset: uint
+    frame_frequency: uint
+    glass: uint
     to_world_x: float4
     to_world_y: float4
     to_world_z: float4
@@ -151,6 +183,7 @@ struct frame_constants:
 
     /// The wavefront tracer's frame: the camera generation a path must have started under to count,
     /// `wavefront_flag_*`, how many shading permutations the trace has, and the bounce Russian roulette starts after (0 for never).
+    /// The megakernel reads `wavefront_flag_guide_rays` of the flags too, and nothing else of these four.
     generation: uint
     wavefront_flags: uint
     permutation_count: uint
@@ -296,7 +329,7 @@ binding traced:
     /// The per-item table, indexed by a hit's instance id.
     instances: buffer[instance_record]
 
-    /// The environment's 16 SH coefficients, `sv::background_gpu` byte for byte.
+    /// The environment, `sv::background_gpu` byte for byte: its 16 SH lanes, then a dome's.
     background: buffer[float4]
 
     /// The primary hit's facing normal, linear view depth and diffuse albedo, as running means, written while `frame.write_guides` is set.
@@ -476,6 +509,8 @@ struct surface_payload:
 
     /// whether this is the path's last surface hit, so no bounce ray follows it — written by the caller only
     last_bounce: uint
+    /// whether the ray is a pixel's guide ray: only a full coverage stops it, and its hit is shaded for the guides alone, without visibility tests — written by the caller only
+    guide: uint
 
     /// the next-event estimate at this hit, BSDF folded in, split the way `bsdf_eval_split` splits the closure
     direct_diffuse: float3
@@ -542,7 +577,7 @@ rays path_rays:
 /// The payload the caller hands a surface ray, with every result zeroed until the miss or the closest hit writes it.
 fun surface_payload_for(rng: uint, sigma_t: float3, albedo: float3, g: float, channel: uint, last_bounce: uint) -> surface_payload:
     let zero = float3(0.0)
-    return surface_payload(rng, sigma_t, albedo, g, channel, last_bounce, zero, zero, zero, zero, zero, zero, zero, zero, 0.0, 0u, 0.0, 0.0, 0u, -1.0)
+    return surface_payload(rng, sigma_t, albedo, g, channel, last_bounce, 0u, zero, zero, zero, zero, zero, zero, zero, zero, 0.0, 0u, 0.0, 0.0, 0u, -1.0)
 
 /// The 16 SH coefficients of the environment, copied out of their buffer into the array `scene.background_radiance` takes.
 fun background_sh(){traced} -> float4[16]:
@@ -550,3 +585,10 @@ fun background_sh(){traced} -> float4[16]:
     for k in 0 ..< 16:
         sh[k] = traced.background[k]
     return sh
+
+/// The whole environment, copied out of its buffer into the array `scene.environment_*` take.
+fun background_lanes(){traced} -> float4[28]:
+    let mut env = float4[28].filled(float4(0.0))
+    for k in 0 ..< 28:
+        env[k] = traced.background[k]
+    return env

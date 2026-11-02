@@ -15,6 +15,7 @@ add_library(shaped-viewer
     src/shaped-viewer/shader_library.cc
     src/shaped-viewer/scene/light.cc
     src/shaped-viewer/scene/background.cc
+    src/shaped-viewer/scene/studio.cc
     src/shaped-viewer/scene/quadric.cc
     src/shaped-viewer/scene/quadric_set.cc
     src/shaped-viewer/drawing/annotation.cc
@@ -42,12 +43,14 @@ add_library(shaped-viewer
     src/shaped-viewer/viewer.cc
     src/shaped-viewer/impl/wavefront_pacing.cc
     src/shaped-viewer/resources/resource_managers.cc
+    src/shaped-viewer/resources/impl/range_allocator.cc
     src/shaped-viewer/resources/value_summary.cc
     src/shaped-viewer/resources/bindless_tables.cc
     src/shaped-viewer/resources/gpu_resource_manager.cc
     src/shaped-viewer/rendering/pathtrace_routine.cc
     src/shaped-viewer/rendering/traced_group.cc
     src/shaped-viewer/rendering/wavefront_routine.cc
+    src/shaped-viewer/rendering/hybrid_routine.cc
     src/shaped-viewer/rendering/raster_routine.cc
     src/shaped-viewer/rendering/render_plan.cc
     src/shaped-viewer/rendering/layout_routine.cc
@@ -87,6 +90,7 @@ target_sources(shaped-viewer
     src/shaped-viewer/stable_id.hh
     src/shaped-viewer/scene/light.hh
     src/shaped-viewer/scene/background.hh
+    src/shaped-viewer/scene/studio.hh
     src/shaped-viewer/scene/triangle_geometry.hh
     src/shaped-viewer/scene/resident_mesh.hh
     src/shaped-viewer/scene/mesh.hh
@@ -124,14 +128,17 @@ target_sources(shaped-viewer
     src/shaped-viewer/resources/instance_data.hh
     src/shaped-viewer/impl/content_hash.hh
     src/shaped-viewer/impl/keyed_cache.hh
+    src/shaped-viewer/impl/gpu_marks.hh
     src/shaped-viewer/impl/view_state.hh
     src/shaped-viewer/impl/wavefront_pacing.hh
     src/shaped-viewer/resources/resource_managers.hh
     src/shaped-viewer/resources/bindless_tables.hh
     src/shaped-viewer/resources/gpu_resource_manager.hh
     src/shaped-viewer/resources/impl/lru_pool.hh
+    src/shaped-viewer/resources/impl/range_allocator.hh
     src/shaped-viewer/rendering/pathtrace_routine.hh
     src/shaped-viewer/rendering/stand_in_report.hh
+    src/shaped-viewer/rendering/hybrid_routine.hh
     src/shaped-viewer/rendering/raster_routine.hh
     src/shaped-viewer/rendering/render_plan.hh
     src/shaped-viewer/rendering/layout_routine.hh
@@ -179,6 +186,7 @@ target_compile_options(shaped-viewer
 # emitter_cdf.sgl builds an emissive mesh's area CDF, which the tracer's light sampler reads.
 # Module `tracer` is exported because a material's hit group, generated and compiled at run time, lists its bindings and traces its rays.
 # Module `raster` is exported for the same reason: a material's pixel shader is generated too, and lists its bindings and writes its targets.
+# Module `hybrid` is exported because the forward hybrid's pixel shader is generated too, and lists its inline constants.
 # The fullscreen blit lives in shaped-rendering (sr::blit_routine).
 # Must be declared here, in the CMakeLists that defines the target — the generated sources are added as
 # PRIVATE sources and add_custom_command(OUTPUT) is directory-scoped. Deliberately not gated on a compiler:
@@ -193,9 +201,12 @@ sc_add_shader_package(
     SHADERS
         module:tracer
         module:raster
+        module:hybrid
         tracer_pipeline.sgl:*
         wavefront.sgl:*
         raster_pass.sgl:*
+        raster_cull.sgl:*
+        hybrid_pass.sgl:*
         layout.sgl:*
         depth_fill.sgl:*
         emitter_cdf.sgl:*
@@ -241,6 +252,8 @@ if(SC_BUILD_TESTS)
         tests/smoke-test.cc
         tests/vocabulary-test.cc
         tests/lru-pool-test.cc
+        tests/range-allocator-test.cc
+        tests/geometry-pool-test.cc
         tests/keyed-cache-test.cc
         tests/quadric-test.cc
         tests/quadric-set-test.cc
@@ -315,11 +328,20 @@ if(SC_BUILD_TESTS)
             tests/volumetric-furnace-test.cc
             tests/accumulated-mean-test.cc
             tests/cutout-trace-test.cc
+            tests/guide-ray-test.cc
             tests/emitter-trace-test.cc
             tests/wavefront-trace-test.cc
             tests/wavefront-view-test.cc
             tests/raster-test.cc
+            tests/hybrid-test.cc
+            tests/studio-test.cc
+            tests/auto-exposure-test.cc
+            tests/mode-switch-test.cc
+            tests/restart-energy-test.cc
+            tests/jitter-accumulation-test.cc
+            tests/glowing-sphere-test.cc
             tests/view-renderer-test.cc
+            tests/frame-mesh-test.cc
             tests/view-accumulation-test.cc
             tests/viewer-renderer-test.cc
             tests/drawing-render-test.cc
@@ -357,6 +379,8 @@ if(SC_BUILD_TESTS)
             tests/dx12-entry.cc
             tests/raster-without-raytracing-test.cc
             tests/wavefront-benchmark.cc
+            tests/raster-benchmark.cc
+            tests/hybrid-benchmark.cc
             tests/viewer-window-manual-test.cc
             tests/pathtraced-window-manual-test.cc
         )
@@ -368,6 +392,9 @@ if(SC_BUILD_TESTS)
             target_link_libraries(shaped-viewer-test PRIVATE shaped-graphics-vulkan)
             target_compile_definitions(shaped-viewer-test PRIVATE SV_TEST_HAS_VULKAN=1)
         endif()
+
+        # Where the on-request Sponza fetch installs, which the raster and hybrid benchmarks draw when it is there.
+        target_compile_definitions(shaped-viewer-test PRIVATE SV_TEST_SPONZA_DIR="${CMAKE_SOURCE_DIR}/extern/sponza/.install")
 
         # Stage the runtime DLLs (DXC's dxcompiler/dxil, the dx12 backend, SDL3 for the window) next to the
         # binary so it starts. $<TARGET_RUNTIME_DLLS> reaches them through the link chain; empty off Windows.

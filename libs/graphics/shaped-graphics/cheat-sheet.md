@@ -105,8 +105,12 @@ ctx.supports(sg::feature::ray_query)               // bool — THE capability qu
                                                    //   | subgroups (wave / SIMD-group ops in compute and pixel; dx12 WaveOps, webgpu needs subgroups)
                                                    //   | device_coherence (globallycoherent / coherent(device); false on webgpu)
                                                    //   | image_atomics (atomics on r32 integer images; false on webgpu)
+                                                   //   | first_instance (SGL's @first_instance, draw-uniform; false on webgpu, which has no builtin)
+                                                   //   | opacity_micromap (a blas_triangles may name a micromap; vulkan with VK_EXT_opacity_micromap; host-only, no `require`)
                                                    //   | helper_lane_query (a pixel stage can tell a helper; SGL's strong
                                                    //     compare-exchange in a pixel stage needs it; false on webgpu)
+                                                   //   | vertex_layer_output (a vertex stage picks the layer of an array target,
+                                                   //     SGL's @layer; dx12 and vulkan ask the device, true on metal, false on webgpu)
                                                    //   vulkan's geometry, tessellation, sample-rate and wireframe answers are the device features creation enabled
                                                    //   binding_arrays false (webgpu) = no count > 1 bindings, no staging_binding_group, no bindless_array
                                                    //   the per-scope bools (cmd.raytracing.is_supported(), cmd.query.is_supported(),
@@ -153,9 +157,11 @@ ctx.try_create_swapchain(swapchain_description = {})  // -> cc::result<swapchain
 ctx.persistent.create_raw_buffer(size, usage, alloc={})     // -> raw_buffer_handle  (throws sg::allocation_exception; size>=0, 0 = empty, no alloc)
                                                    //   resource creation lives on the lifetime scope (sg::context_persistent_scope)
                                                    //   alloc defaults to dedicated; pass a placed allocation_info (from a heap) to sub-allocate
-ctx.persistent.create_memory_heap(size)            // -> memory_heap_handle  (heap placed resources sub-allocate into)
+ctx.persistent.create_memory_heap(size, contents=buffers)  // -> memory_heap_handle  (heap of buffers OR textures placed resources sub-allocate into)
+heap->memory_requirements_for_texture(desc)        // -> memory_requirements  (.placeable false: create it dedicated); + acquire_allocation_for_texture(desc, offset)
 ctx.transient.create_raw_buffer(size, usage)       // -> raw_buffer_handle  per-epoch scratch (bump-reset heap); expires at advance_epoch (+ try_ twin)
-ctx.transient.set_budget(size)                     // void — shared transient heap budget (buffers + future textures); the next advance_epoch drops the heap, never waits; default 128 MiB
+ctx.transient.set_budget(size)                     // void — transient BUFFER heap budget; the next advance_epoch drops the heap, never waits; default 128 MiB
+ctx.transient.set_texture_budget(size)             // void — the same for the transient TEXTURE heap; default 256 MiB (a placed transient texture starts undefined)
 sg::context_transient_scope::default_budget_bytes  // isize — that 128 MiB default, e.g. for a test putting it back
 ctx.transient.create_binding_group(layout, views)  // -> binding_group_handle  transient (ring-allocated) group; expires with its epoch (+ try_ twin)
                                                    //   using any transient resource past its epoch is a hard error (asserts)
@@ -360,6 +366,10 @@ cmd.raster.draw({.vertex_range={.offset=0,.size=3}, .instance_range={.offset=0,.
 cmd.raster.draw_indexed({.index_range={.offset=0,.size=N}, .instance_range={.offset=0,.size=1}, .vertex_offset=0})  // void
 //   GOTCHA: view.offset_in_bytes + index_range.offset*index_size must be 4-byte aligned (sg::index_buffer_offset_alignment).
 //   So an ODD first index into a uint16 buffer asserts — metal draws only part of the mesh, silently, and dx12/vulkan do not mind.
+cmd.raster.draw_indexed_indirect(args, first = 0, count = 1)  // void — `count` indexed draws, each record of buffer<sg::draw_indexed_args> read by the GPU
+//   sg::draw_indexed_args { u32 index_count, instance_count = 1, first_index; i32 vertex_offset; u32 first_instance } — D3D12/Vk/Metal/WebGPU layout
+//   args need buffer_usage::indirect_command_buffer; instance_count 0 draws nothing, and first_instance is where @instance_index starts
+//   the count is the CPU's: no GPU-written count yet (feat-sg-indirect-draws); one ExecuteIndirect on dx12, a draw per record elsewhere
 //   sg::is_aligned_index_fetch(format, view_offset, first_index) -> bool   // ask instead of asserting
 ```
 
@@ -841,6 +851,16 @@ sg::index_size_in_bytes(format)          // -> 2 | 4
 sg::index_buffer_offset_alignment        // 4 — portable floor an index fetch must start on
 sg::is_aligned_index_fetch(fmt, off, i)  // -> bool; the rule over (view offset + first index)
 sg::instance_cull_mode  // back(default) | front | none
+// opacity micromaps — sg::feature::opacity_micromap only (raytracing/micromap.hh):
+sg::micromap_handle     // std::shared_ptr<sg::micromap const> — persistent; a blas built from it holds it
+sg::micromap_triangles  { states buffer+offset (2 bits a micro-triangle, lowest first); descriptors buffer+offset;
+                          vector<micromap_usage> usage }  // both buffers accel_structure_build_input, 256-byte aligned at the offset
+sg::micromap_descriptor { u32 states_offset_in_bytes; u16 subdivision_level; micromap_format format }  // 8 bytes, both APIs' record
+sg::micromap_usage      { u32 count; u32 subdivision_level; micromap_format format }  // CPU-side counts both APIs size the build from
+sg::micromap_format     // two_state = 1 | four_state = 2
+sg::micromap_state      // transparent 0 | opaque 1 | unknown_transparent 2 | unknown_opaque 3
+sg::micromap_special_index  // fully_transparent -1 | fully_opaque -2 | fully_unknown_transparent -3 | fully_unknown_opaque -4
+// blas_triangles gains: micromap, micromap_indices (+offset, micromap_index_type), micromap_usage_counts (empty = the micromap's own)
 
 // recording (on a command_list, via the cmd.raytracing scope). Sizes+allocates the persistent result from a
 // prebuild query, records the build with transient scratch, returns a persistent handle. Throws sg::allocation_exception.
@@ -850,6 +870,7 @@ cmd.raytracing.build_blas(span<blas_aabbs const>,     flags=fast_trace, int hit_
 //   hit_record_stride = shader-table records per geometry = the ray count of the pipelines that trace it;
 //   metal bakes it (geometry g's offset = g*stride), dx12/vulkan take the multiplier per TraceRay and ignore it
 cmd.raytracing.build_tlas(span<tlas_instance const>,  flags=fast_trace)  // -> tlas_handle  (each blas must be built first)
+cmd.raytracing.build_micromap(micromap_triangles)  // -> micromap_handle; ASSERTS without sg::feature::opacity_micromap, as does a blas naming one
 // blas/tlas: size_in_bytes(); build_scratch_size_in_bytes()/update_scratch_size_in_bytes();
 //   geometry_count()/instance_count(); build_flags(); allows_update(); is_expired()/is_valid()/expire()/add_finalizer().
 // blas.geometry()           // -> sg::blas_geometry — triangles | aabbs

@@ -73,9 +73,9 @@ cc::result<raw_texture_handle> context_persistent_scope::try_create_raw_texture(
 
 // memory heaps
 
-memory_heap_handle context_persistent_scope::create_memory_heap(isize size_in_bytes)
+memory_heap_handle context_persistent_scope::create_memory_heap(isize size_in_bytes, memory_heap_contents contents)
 {
-    auto r = try_create_memory_heap(size_in_bytes);
+    auto r = try_create_memory_heap(size_in_bytes, contents);
     if (r.has_value())
         return cc::move(r.value());
     if (_ctx.is_device_lost())
@@ -83,9 +83,10 @@ memory_heap_handle context_persistent_scope::create_memory_heap(isize size_in_by
     throw allocation_exception("memory heap allocation failed", size_in_bytes, r.error());
 }
 
-cc::result<memory_heap_handle> context_persistent_scope::try_create_memory_heap(isize size_in_bytes)
+cc::result<memory_heap_handle> context_persistent_scope::try_create_memory_heap(isize size_in_bytes,
+                                                                                memory_heap_contents contents)
 {
-    return _ctx.try_create_memory_heap(size_in_bytes);
+    return _ctx.try_create_memory_heap(size_in_bytes, contents);
 }
 
 // bind path

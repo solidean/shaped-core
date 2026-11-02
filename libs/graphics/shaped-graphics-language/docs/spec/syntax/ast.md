@@ -111,7 +111,7 @@ let k = x in 0..<1
 ### Lists
 
 * **AST-23** An element of a paren group reads as an **argument**: an optional name, a value, and whether it is a splat.
-* **AST-24** An assignment directly inside a paren group is a named argument, and its left side, an identifier or a leading-dot form, is the name.
+* **AST-24** An assignment directly inside a paren group or a square list is a named argument, and its left side, an identifier or a leading-dot form, is the name.
 * **AST-25** A paren literal reads as `tuple` when it is round, `array` when it is square and `object` when it is curly.
 * **AST-26** `(x)` is `x` and no tuple, `()` is the empty tuple, and `(x,)`, `(a = 1)` and `(..v)` are each a tuple of one element.
 * **AST-27** An element of an `object` that is one bare identifier is the **object shorthand** for `a = a`, and the AST records the shorthand without expanding it.
@@ -245,7 +245,9 @@ let lit = fun (n: vec3){frame} => dot(n, frame.sun_dir)
 * **AST-106** A block has no implicit value: its last expression is a statement like every other ([why](why/ast.md#ast-106)).
 * **AST-107** A **value block** is a block that is the body of a `case` arm, of an arrow lambda or of a property: `=>:` and a block.
 * **AST-108** `yield expression` gives its value to the nearest enclosing value block, and it leaves that block.
-* **AST-109** The blocks of `if`, `for` and `while` between a `yield` and its value block are transparent, as they are between a `break` and its loop.
+* **AST-109** The blocks of `if`, `for`, `while` and `scope` between a `yield` and its value block are transparent, as they are between a `break` and its loop.
+* **AST-156** `scope:` and a block is a statement whose block is a scope of its own ([why](why/ast.md#ast-156)).
+  It takes no argument and no arrow, and it is transparent to `break`, `continue`, `yield` and `return`, as an `if` block is.
 * **AST-118** A `yield` with a `loop` between it and its value block is the normal error `yield-in-loop`; it is written `break value` ([why](why/ast.md#ast-118)).
 * **AST-110** A `yield` that finds the body of a `fun`, named or anonymous, before any value block is the normal error `yield-in-function`; it is written `return`.
 * **AST-111** The right side of an `=>` that is an expression is the value of that body, and a `yield` that is this whole expression is the warning `redundant-yield` ([why](why/ast.md#ast-111)).
@@ -428,6 +430,8 @@ fun blend(base: vec3, top: vec3, mask: float) -> vec3:
 * **AST-154** An `if` with an `else` where a value is expected reads as an `if` expression, the chain of AST-50 with a body per branch: `let y = if c => a else b`.
   An `if` without an `else` there is still `statement-in-expression`, since it has no value where its condition is false.
   The `else` joins the `if` on its own line, so a statement written that way is the same chain, and it gives no value.
+* **AST-155** `return`, `yield` or `break` in front of such an `if` takes the whole `if` as its value: `return if c => a else b` returns `a` or `b`.
+  `=>` is looser than a keyword form, so the jump arrives in the first condition's keyword form, and the AST puts it back together as it does a lambda's.
 
 ```sgl
 if count > 0:

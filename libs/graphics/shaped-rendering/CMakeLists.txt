@@ -11,10 +11,12 @@ add_library(shaped-rendering
     src/shaped-rendering/window.cc
     src/shaped-rendering/blit_routine.cc
     src/shaped-rendering/box_filter_mipmap_routine.cc
+    src/shaped-rendering/display.cc
     src/shaped-rendering/reconstruct.cc
     src/shaped-rendering/atrous_denoise_routine.cc
     src/shaped-rendering/svgf_denoise_routine.cc
     src/shaped-rendering/mix_routine.cc
+    src/shaped-rendering/exposure_meter_routine.cc
     src/shaped-rendering/dlss_rr_routine.cc
     src/shaped-rendering/nrd_denoise_routine.cc
     src/shaped-rendering/oidn_denoise_routine.cc
@@ -54,10 +56,12 @@ target_sources(shaped-rendering
     src/shaped-rendering/input.hh
     src/shaped-rendering/blit_routine.hh
     src/shaped-rendering/box_filter_mipmap_routine.hh
+    src/shaped-rendering/display.hh
     src/shaped-rendering/reconstruct.hh
     src/shaped-rendering/atrous_denoise_routine.hh
     src/shaped-rendering/svgf_denoise_routine.hh
     src/shaped-rendering/mix_routine.hh
+    src/shaped-rendering/exposure_meter_routine.hh
     src/shaped-rendering/dlss_rr_routine.hh
     src/shaped-rendering/nrd_denoise_routine.hh
     src/shaped-rendering/oidn_denoise_routine.hh
@@ -289,6 +293,7 @@ sc_add_shader_package(
         nn_io.sgl:*
         slug_quads.sgl:*
         mix.sgl:*
+        exposure_meter.sgl:*
         atrous_denoise.sgl:*
         svgf.sgl:*
         fsr_prepare_depth.sgl:*
@@ -338,6 +343,7 @@ if(SC_BUILD_TESTS)
         tests/shader-package-test.cc
         tests/slug-font-test.cc
         tests/slug-module-test.cc
+        tests/display-module-test.cc
         tests/slug-path-test.cc
         tests/text-layout-test.cc
         tests/slug-shape-test.cc
@@ -445,6 +451,7 @@ if(SC_BUILD_TESTS)
             tests/fsr-clear-test.cc
             tests/fsr-test.cc
             tests/mix-test.cc
+            tests/exposure-meter-test.cc
             tests/nrd-test.cc
             tests/svgf-reference-test.cc
             tests/oidn-test.cc

@@ -20,6 +20,69 @@ const false = bool.false
 @shadowable(false)
 const true = bool.true
 
+// ---- constants --------------------------------------------------------------------------------------------------------
+//
+// A program that declares its own `pi` hides this one, which is what the many shaders that already do need.
+
+/// The ratio of a circle's circumference to its diameter.
+const pi = 3.14159265358979323846
+
+/// An angle in degrees, in radians.
+fun radians(degrees: float) => degrees * (pi / 180.0)
+fun radians(degrees: float2) => degrees * (pi / 180.0)
+fun radians(degrees: float3) => degrees * (pi / 180.0)
+fun radians(degrees: float4) => degrees * (pi / 180.0)
+/// An angle in radians, in degrees.
+fun degrees(radians: float) => radians * (180.0 / pi)
+fun degrees(radians: float2) => radians * (180.0 / pi)
+fun degrees(radians: float3) => radians * (180.0 / pi)
+fun degrees(radians: float4) => radians * (180.0 / pi)
+
+// ---- a floored remainder ---------------------------------------------------------------------------------------------
+//
+// `%` of floats truncates, as HLSL's `fmod` and MSL's `fmod` do; `mod` floors, as GLSL's does, so it never turns negative
+// for a positive `b`.
+
+fun mod(a: float, b: float) => a - b * floor(a / b)
+fun mod(a: float2, b: float2) => a - b * floor(a / b)
+fun mod(a: float3, b: float3) => a - b * floor(a / b)
+fun mod(a: float4, b: float4) => a - b * floor(a / b)
+fun mod(a: float2, b: float) => a - b * floor(a / b)
+fun mod(a: float3, b: float) => a - b * floor(a / b)
+fun mod(a: float4, b: float) => a - b * floor(a / b)
+
+// ---- scalar bounds --------------------------------------------------------------------------------------------------
+//
+// CHK-406: a bound of min, max, clamp and smoothstep may be one scalar of a vector's element type, which stands for the
+// vector of it; every vector of the prelude takes them, through its one-value constructor (CHK-360).
+
+/// `min` of each component of `a` and the one bound `b`.
+fun min[V](a: V, b: scalar_of[V]) -> V => min(a, V(b))
+
+/// `max` of each component of `a` and the one bound `b`.
+fun max[V](a: V, b: scalar_of[V]) -> V => max(a, V(b))
+
+/// Each component of `x` clamped to the one range from `low` to `high`.
+fun clamp[V](x: V, low: scalar_of[V], high: scalar_of[V]) -> V => clamp(x, V(low), V(high))
+
+/// `smoothstep` of each component of `x` over the one pair of edges.
+fun smoothstep[V](low: scalar_of[V], high: scalar_of[V], x: V) -> V => smoothstep(V(low), V(high), x)
+
+// ---- the parts of a matrix ------------------------------------------------------------------------------------------
+//
+// A column or a row by name, never `m[i]`: HLSL's subscript is a row where WGSL's and MSL's is a column (CHK-407).
+
+fun mat4.column(self, i: int) => matrix_column(self, i)
+fun mat4.row(self, i: int) => matrix_row(self, i)
+fun mat3.column(self, i: int) => matrix_column(self, i)
+fun mat3.row(self, i: int) => matrix_row(self, i)
+fun mat2.column(self, i: int) => matrix_column(self, i)
+fun mat2.row(self, i: int) => matrix_row(self, i)
+
+// an affine3 is built from its rows and read by them, the shape a hit's transform is handed in (CHK-408)
+fun affine3.from_rows(r0: float4, r1: float4, r2: float4) => affine3_of_rows(r0, r1, r2)
+fun affine3.row(self, i: int) => affine3_row(self, i)
+
 // ---- the bits of a value --------------------------------------------------------------------------------------------
 //
 // `x.bits` reads a float's bits as a uint, and `float.from_bits(u)` builds one from them; `as` stays a numeric conversion.
@@ -34,6 +97,10 @@ fun float.from_bits(u: uint) => reinterpret_as_float(u)
 fun float2.from_bits(u: uint2) => reinterpret_as_float(u)
 fun float3.from_bits(u: uint3) => reinterpret_as_float(u)
 fun float4.from_bits(u: uint4) => reinterpret_as_float(u)
+
+// a half's bits are the low 16 bits of a uint, since no target but HLSL and MSL has a 16-bit integer to hold them (CHK-417)
+fun half.bits => reinterpret_as_uint(self)
+fun half.from_bits(u: uint) => reinterpret_as_half(u)
 
 fun int.from_bits(u: uint) => reinterpret_as_int(u)
 fun int2.from_bits(u: uint2) => reinterpret_as_int(u)

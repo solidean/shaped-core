@@ -105,7 +105,7 @@ TEST("sv::generate_material_shader - constants come out of the parameter block")
 
     // No texture, so no palette sampler is named, and nothing cuts out, so there is no any hit.
     CHECK(!g.source.contains("palette_"));
-    CHECK(g.source.contains("hit_group sv_material for path_rays:"));
+    CHECK(g.source.contains("hit_group sv_material for tracer.path_rays:"));
     CHECK(!g.source.contains("any_hit"));
 
     // The layout the CPU fills is the one the source reads.
@@ -132,7 +132,7 @@ TEST("sv::generate_material_shader - an attribute-less type reads no parameter b
     CHECK(g.layout.slots.empty());
     CHECK(!g.source.contains("sv_attribute_"));
     CHECK(g.source.contains("    surface.base_color = float3(1.0, 0.0, 1.0)\n"));
-    CHECK(g.source.contains("hit_group sv_material for path_rays:"));
+    CHECK(g.source.contains("hit_group sv_material for tracer.path_rays:"));
 }
 
 TEST("sv::generate_material_shader - a mesh attribute is loaded through its descriptor")
@@ -389,8 +389,11 @@ TEST("sv::generate_material_shader - the raster pixel stage evaluates the same m
     CHECK(!g.raster_source.contains("require raytracing_pipeline"));
 
     // The cut reads the instance's opacity record through the any-hit's reader, ahead of the evaluation, rather than the material's loads.
-    CHECK(g.raster_source.contains("@pixel fun sv_raster(p: raster.varyings){raster.drawn, tracer.bindless, "
-                                   "slug.tables} -> raster.targets:"));
+    // The draw is indexed, so the pixel takes its triangle from `@primitive_id`, which the device must have.
+    CHECK(g.raster_source.contains("require primitive_index\n"));
+    CHECK(g.raster_source.contains("@pixel fun sv_raster(p: raster.varyings, @primitive_id primitive: "
+                                   "int){raster.drawn, "
+                                   "tracer.bindless, slug.tables} -> raster.targets:"));
     CHECK(g.raster_source.contains("    if raster.is_cut(p, ctx) => discard\n"));
     CHECK(g.raster_source.find("raster.is_cut") < g.raster_source.find("raster.shade("));
 

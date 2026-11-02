@@ -326,3 +326,60 @@ TEST("sgl driver - a file-scope sampler the code reaches is an interface binding
     for (auto const& slot : r.value().footprint)
         CHECK(slot.host_name != "edge");
 }
+
+TEST("sgl driver - two bindings of one name from two modules are bound by names of their own")
+{
+    // CHK-350: the program's `frame` keeps its name, and the module's second one is minted another
+    sgl::library_file const library[]
+        = {{.name = "post.sgl", .source = "module post\nbinding frame:\n    exposure: float\n"}};
+    constexpr auto source = "use post\n"
+                            "binding frame:\n"
+                            "    gain: float\n"
+                            "    values: mut buffer[float]\n"
+                            "@compute(64) fun cs(@thread_id id: int3){frame, post.frame}:\n"
+                            "    frame.values[id.x] = frame.gain * post.frame.exposure\n";
+    auto const r
+        = sgl::compile_to_text({.source = source, .library = library, .entry_point = "cs", .target = target::wgsl});
+    REQUIRE(r.has_value());
+    auto const& bindings = r.value().bindings;
+    REQUIRE(bindings.size() == 3);
+    CHECK(bindings[0].emitted == "frame");
+    CHECK(bindings[1].emitted == "frame_values");
+    CHECK(bindings[2].emitted == "frame_1");
+    CHECK(r.value().text.contains("var<uniform> frame_1: frame_data_1;"));
+}
+
+TEST("sgl driver - a module's file-scope sampler takes an index after the program's, and a name of its own")
+{
+    // EMIT-133: one index space for every sampler the program and the modules it uses declare, the library's first
+    sgl::library_file const library[]
+        = {{.name = "post.sgl", .source = "module post\nsampler edge:\n    filter = .linear\n"}};
+    constexpr auto source = "use post\n"
+                            "sampler edge:\n"
+                            "    filter = .nearest\n"
+                            "binding set:\n"
+                            "    src: texture_2d[float4]\n"
+                            "    dst: out image_2d[.rgba8_unorm]\n"
+                            "@compute(8, 8) fun cs(@thread_id id: int3){set}:\n"
+                            "    let a = set.src.sample(float2(0.5, 0.5), edge, level = 0.0)\n"
+                            "    let b = set.src.sample(float2(0.5, 0.5), post.edge, level = 0.0)\n"
+                            "    set.dst.store(int2(id.x, id.y), a + b)\n";
+    auto const r
+        = sgl::compile_to_text({.source = source, .library = library, .entry_point = "cs", .target = target::wgsl});
+    REQUIRE(r.has_value());
+    auto const& bindings = r.value().bindings;
+    REQUIRE(bindings.size() == 4);
+    CHECK(bindings[2].name == "post.edge");
+    CHECK(bindings[2].slot == 0);
+    CHECK(bindings[3].name == "edge");
+    CHECK(bindings[3].slot == 1);
+    CHECK(bindings[2].emitted != bindings[3].emitted);
+
+    auto const d = sgl::describe({.source = source, .library = library});
+    REQUIRE(d.has_value());
+    REQUIRE(d.value().samplers.size() == 2);
+    CHECK(d.value().samplers[0].name == "post.edge");
+    CHECK(d.value().samplers[0].index == 0);
+    CHECK(d.value().samplers[1].name == "edge");
+    CHECK(d.value().samplers[1].index == 1);
+}

@@ -132,23 +132,28 @@ void vulkan_command_list::raster_begin_rendering(sg::rendering_info const& info)
     // 3) The render area, and the viewport / scissor defaults, both from the target extent.
     int extent_w = 1;
     int extent_h = 1;
+    // a view over several layers of an array is a layered target, whose layer a vertex stage picks
+    auto layers = cc::start_end{.start = 0, .end = 1};
     if (!info.color_targets.empty())
     {
         extent_w = info.color_targets[0].view.width();
         extent_h = info.color_targets[0].view.height();
+        layers = info.color_targets[0].view.range().array_range;
     }
     else
     {
         extent_w = info.depth_stencil_target.value().view.width();
         extent_h = info.depth_stencil_target.value().view.height();
+        layers = info.depth_stencil_target.value().view.range().array_range;
     }
+    _rendering_layer_count = u32(layers.end - layers.start);
 
     _rendering_area = {.offset = {0, 0}, .extent = {u32(extent_w), u32(extent_h)}};
 
     auto const rendering = VkRenderingInfo{
         .sType = VK_STRUCTURE_TYPE_RENDERING_INFO,
         .renderArea = _rendering_area,
-        .layerCount = 1,
+        .layerCount = _rendering_layer_count,
         .colorAttachmentCount = u32(color_attachments.size()),
         .pColorAttachments = color_attachments.empty() ? nullptr : color_attachments.data(),
         .pDepthAttachment = _rendering_has_depth ? &depth_attachment : nullptr,
@@ -186,7 +191,7 @@ void vulkan_command_list::reopen_rendering()
     auto const rendering = VkRenderingInfo{
         .sType = VK_STRUCTURE_TYPE_RENDERING_INFO,
         .renderArea = _rendering_area,
-        .layerCount = 1,
+        .layerCount = _rendering_layer_count,
         .colorAttachmentCount = u32(_rendering_color_attachments.size()),
         .pColorAttachments = _rendering_color_attachments.empty() ? nullptr : _rendering_color_attachments.data(),
         .pDepthAttachment = _rendering_has_depth ? &_rendering_depth_attachment : nullptr,
@@ -371,9 +376,14 @@ void vulkan_command_list::raster_set_viewport(sg::viewport const& vp)
 
 void vulkan_command_list::raster_set_scissor(tg::aabb2i const& rect)
 {
+    // Vulkan's validation refuses a negative offset, though it clips an extent past the target, and sg allows both.
+    auto const x0 = cc::max(rect.min[0], 0);
+    auto const y0 = cc::max(rect.min[1], 0);
+    auto const x1 = cc::max(rect.max[0], x0);
+    auto const y1 = cc::max(rect.max[1], y0);
     auto const r = VkRect2D{
-        .offset = {rect.min[0], rect.min[1]},
-        .extent = {u32(rect.max[0] - rect.min[0]), u32(rect.max[1] - rect.min[1])},
+        .offset = {x0, y0},
+        .extent = {u32(x1 - x0), u32(y1 - y0)},
     };
     vkCmdSetScissor(_buffer, 0, 1, &r);
 }
@@ -462,5 +472,27 @@ void vulkan_command_list::raster_draw_indexed(sg::draw_indexed_config const& con
     resume_rendering();
     vkCmdDrawIndexed(_buffer, u32(config.index_range.size), u32(config.instance_range.size),
                      u32(config.index_range.offset), config.vertex_offset, u32(config.instance_range.offset));
+}
+
+void vulkan_command_list::raster_draw_indexed_indirect(sg::raw_buffer_handle const& args, isize offset_in_bytes, isize count)
+{
+    CC_ASSERT(_in_render_pass, "an indirect draw requires an open rendering scope");
+    CC_ASSERT(_bound_raster_layout != nullptr, "bind a raster pipeline before drawing");
+    CC_ASSERT(_bound_index_buffer != nullptr, "an indirect indexed draw requires a bound index buffer");
+    auto const buffer = std::dynamic_pointer_cast<vulkan_buffer const>(args);
+    CC_ASSERT(buffer != nullptr, "indirect draw arguments are not a vulkan buffer");
+    CC_ASSERT(!buffer->is_expired(), "indirect draw arguments are a transient buffer used past its epoch");
+    static_assert(sizeof(sg::draw_indexed_args) == sizeof(VkDrawIndexedIndirectCommand));
+
+    // The arguments are fetched at DRAW_INDIRECT, before any vertex is.
+    track_buffer_access(*buffer, sg::pipeline_stage_flag::draw_indirect, sg::access_flag::indirect_read);
+    declare_raster_draw_barriers(true);
+    flush_barriers();
+    resume_rendering();
+
+    // One draw per call: several in one call need the `multiDrawIndirect` feature, which the device is not created with.
+    auto const stride = isize(sizeof(sg::draw_indexed_args));
+    for (auto i = isize(0); i < count; ++i)
+        vkCmdDrawIndexedIndirect(_buffer, buffer->_buffer, VkDeviceSize(offset_in_bytes + i * stride), 1, u32(stride));
 }
 } // namespace sg::backend::vulkan

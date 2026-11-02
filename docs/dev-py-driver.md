@@ -147,6 +147,9 @@ extra_roots=(dev.ExtraRoot("extern/api", submodule=True, checks=("crossrefs", "p
 
 `Policy.default_branch` is the branch `check` scopes itself against.
 
+`Policy.companions` is the opt-in repositories `dev.py companions` clones into gitignored paths, and defaults to none.
+Each is a `Companion`: a name, a clone url, a path, and the branch it follows; `init` refuses a path the project does not ignore.
+
 The driver's *own* files are the other kind of path, and they are not policy: the pinned clang-format and its fetcher, the emsdk pin, the vendored TLS stack doctor reports on.
 They belong to shaped-core whichever project runs the driver, so lib/ finds them relative to itself (`DRIVER_ROOT`), never relative to the project root.
 
@@ -185,6 +188,10 @@ The driver is importable only as the package `tools.dev`, so the consuming `dev.
 Otherwise the project's own `tools/` becomes a second portion of the `tools` namespace package.
 
 ## Design principles, in one place
+
+- **Fail fast: frontload whatever can fail cheaply** — a command orders its steps so the quick ones that can stop it run before the slow ones.
+  A static gate, a dirty-tree question or a refused precondition goes ahead of a build and of the test tail, so its verdict costs seconds rather than a full run.
+  `ship` is the worked case: it asks whether the gate rewrote a file before it runs the tests, not after.
 
 - **Capture by default, diagnose from sidecars** — terse terminal, full record on disk.
   The live region repaints over that terse trace on a terminal and is absent everywhere else, so it changes what a human watches and never what a tool reads.

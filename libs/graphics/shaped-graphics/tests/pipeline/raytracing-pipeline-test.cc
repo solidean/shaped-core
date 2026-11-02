@@ -229,9 +229,9 @@ ASYNC_INVOCABLE_TEST("sg - an SGL ray-tracing pipeline's raygen and miss store i
     float const vertices[] = {0, 0, 0, 4, 0, 0, 0, 4, 0, 4, 0, 0, 4, 4, 0, 0, 4, 0};
     auto const input = ctx->persistent.create_buffer_from_data(vertices, sg::buffer_usage::accel_structure_build_input);
     auto const usage = sg::buffer_usage::readwrite_buffer | sg::buffer_usage::copy_src;
-    auto const hits
-        = ctx->persistent.create_buffer_from_data(cc::vector<tg::vec4f>::create_defaulted(grid * grid), usage);
-    auto const ids = ctx->persistent.create_buffer_from_data(cc::vector<tg::vec4i>::create_defaulted(grid * grid), usage);
+    // the traced group is bound but this raygen never reads it, so no command list waits for an upload into these
+    auto const hits = ctx->persistent.create_buffer<tg::vec4f>(grid * grid, usage);
+    auto const ids = ctx->persistent.create_buffer<tg::vec4i>(grid * grid, usage);
     auto const image_usage = sg::texture_usage::image | sg::texture_usage::copy_src;
     auto const picture = ctx->persistent.create_texture_2d(
         {.format = sg::pixel_format::rgba32_float, .width = grid, .height = grid, .usage = image_usage});

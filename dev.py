@@ -32,6 +32,7 @@ from tools.dev.cmd import (  # noqa: E402
     build,
     check,
     clean,
+    companions,
     compile_time,
     configure,
     coverage,
@@ -84,6 +85,7 @@ COMMANDS = [
     deps,
     install,
     submodules,
+    companions,
     doctor,
     list_presets,
     list_targets,
@@ -178,6 +180,16 @@ LAYOUT: dev.Layout = dev.SHAPED_CORE_LAYOUT
 # The integration branch `check` scopes itself against.
 DEFAULT_BRANCH = "main"
 
+# Opt-in repositories `companions init` clones into this tree; each path must be gitignored, and nothing records which commit it is at.
+COMPANIONS: tuple[dev.Companion, ...] = (
+    dev.Companion(
+        name="shader-rosetta",
+        url="git@github.com:solidean/shader-rosetta.git",
+        path="libs/graphics/shaped-graphics-language/extern/shader-rosetta",
+        purpose="real-world shaders in every input language; SGL's coverage and compile-speed corpus",
+    ),
+)
+
 
 def build_policy() -> cmd.Policy:
     """Bundle the preset tables and the layout above into the Policy commands read through the Context."""
@@ -195,6 +207,7 @@ def build_policy() -> cmd.Policy:
         web_preset=DEFAULT_WEB_PRESET,
         layout=LAYOUT,
         default_branch=DEFAULT_BRANCH,
+        companions=COMPANIONS,
     )
 
 

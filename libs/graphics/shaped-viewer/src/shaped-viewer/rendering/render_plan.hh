@@ -90,6 +90,9 @@ struct sv::layout_draw
     float opacity = 1.0f;
     post_process post = {};
 
+    /// view only: what maps the sampled radiance to display values; the default passes it through.
+    sr::display_transform display = {};
+
     /// The layout node this came from; `invalid_node` for a draw a layer emitted directly.
     layout_node_id node = invalid_node;
 

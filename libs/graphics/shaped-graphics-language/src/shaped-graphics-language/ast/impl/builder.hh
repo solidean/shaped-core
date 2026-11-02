@@ -1,5 +1,6 @@
 #pragma once
 
+#include <clean-core/container/small_vector.hh>
 #include <clean-core/container/span.hh>
 #include <clean-core/container/vector.hh>
 #include <clean-core/string/string_view.hh>
@@ -87,18 +88,20 @@ struct fun_signature
 };
 
 /// A keyword form taken apart.
+/// Inline up to a handful of parts: taking a form apart is how the builder looks at nearly every form, often only at
+/// its first part, so a heap allocation per look cost more than the look.
 struct keyword_parts
 {
-    cc::vector<form_id> keywords;
-    cc::vector<form_id> arguments;
+    cc::small_vector<form_id, 4> keywords;
+    cc::small_vector<form_id, 8> arguments;
     form_id block = form_id::none;
 };
 
 /// An operator run taken apart; `operators` is one shorter than `operands`.
 struct run_parts
 {
-    cc::vector<form_id> operands;
-    cc::vector<form_id> operators;
+    cc::small_vector<form_id, 8> operands;
+    cc::small_vector<form_id, 8> operators;
 };
 
 /// A statement form seen from its keyword form.
@@ -138,6 +141,9 @@ struct builder
     /// `place = value`, for every assignment operator.
     [[nodiscard]] bool is_assignment_run(run_parts const& parts) const;
     [[nodiscard]] operator_level level_of(form_id op) const;
+    [[nodiscard]] operator_level read_level_of(form_id op) const;
+    /// Per form, the level `level_of` read off its operator's spelling, -1 before it was asked.
+    mutable cc::vector<i8> operator_levels;
     /// True for a keyword form that has at least one keyword; one without is an expression that owns a block.
     [[nodiscard]] bool is_keyword_led(form_id id) const;
     [[nodiscard]] bool is_keyword_led(form_id id, cc::string_view keyword) const;
@@ -265,6 +271,7 @@ struct builder
     stmt_id let_statement(statement_head const& head, keyword_parts const& parts);
     stmt_id for_statement(statement_head const& head, keyword_parts const& parts);
     stmt_id while_statement(statement_head const& head, keyword_parts const& parts);
+    stmt_id scope_statement(statement_head const& head, keyword_parts const& parts);
     stmt_id assert_statement(statement_head const& head, keyword_parts const& parts);
     stmt_id print_statement(statement_head const& head, keyword_parts const& parts);
     stmt_id expression_statement(form_id form);

@@ -239,6 +239,7 @@ void gpu_resource_manager::advance_to(sg::epoch e)
     drawings.begin_frame(e);
     for (auto& t : _tables)
         t.acquired.clear();
+    _frame_meshes.clear(); // their transient buffers died with the epoch left
     ++_record_stamp;
     _epoch = e;
 }
@@ -258,6 +259,33 @@ void append_pod(cc::vector<byte>& out, T const& value)
         out.push_back(b);
 }
 } // namespace
+
+u32 gpu_resource_manager::_slot_index(instance_slot const& slot)
+{
+    if (slot.kind == material_slot_kind::attribute_descriptor)
+        return u32(acquire_buffer(attributes.get(slot.attribute).data.as_readonly_buffer()));
+
+    CC_ASSERT(slot.kind == material_slot_kind::texture_index, "only a descriptor or a texture slot names an index");
+    auto const& record = textures.get(slot.texture);
+
+    // Substituted at the SLOT rather than by letting the sample lose to a coarser rank.
+    // Losing would be no new code, but it flips the permutation when the texture lands — so every affected
+    // mesh would recompile and restart its accumulation mid-load, which is the opposite of what a placeholder
+    // is for.
+    // Pointing the slot elsewhere keeps the permutation stable across the whole load.
+    //
+    // `failed` substitutes too, and deliberately not with the same texel: its texture was created and never
+    // written, so sampling it reads whatever that allocation happened to hold.
+    // Magenta, because the two states are not the same news — `pending` is "not yet" and wants the material's
+    // own factor, `failed` is "never" and wants to be seen.
+    // `base_resident` is left alone: it is sampleable by definition, just at fewer mips than it will have.
+    auto const& texture
+        = record.state == residency::pending
+            ? _placeholder_texture(slot.placeholder_texel, record.texture.format())
+            : (record.state == residency::failed ? _placeholder_texture(k_failed_texel, record.texture.format())
+                                                 : record.texture);
+    return u32(acquire_texture(bindless_table::textures_2d, texture.as_texture_view()));
+}
 
 cc::vector<byte> gpu_resource_manager::build_instance_parameters(instance_record const& r)
 {
@@ -284,41 +312,16 @@ cc::vector<byte> gpu_resource_manager::build_instance_parameters(instance_record
 
         case material_slot_kind::attribute_descriptor:
         {
-            auto const& record = attributes.get(slot.attribute);
-
             // Tightly packed from offset 0 within its own buffer, so the stride is just the element size.
-            auto desc = cc::vector<byte>();
-            append_pod(desc, u32(acquire_buffer(record.data.as_readonly_buffer())));
-            append_pod(desc, u32(0));
-            append_pod(desc, slot.element_stride);
-            write(slot.offset, desc);
+            u32 const desc[attribute_desc_size / sizeof(u32)] = {_slot_index(slot), 0u, slot.element_stride};
+            write(slot.offset, cc::span<u32 const>(desc).as_bytes());
             break;
         }
 
         case material_slot_kind::texture_index:
         {
-            auto const& record = textures.get(slot.texture);
-
-            // Substituted at the SLOT rather than by letting the sample lose to a coarser rank.
-            // Losing would be no new code, but it flips the permutation when the texture lands — so every affected
-            // mesh would recompile and restart its accumulation mid-load, which is the opposite of what a placeholder
-            // is for.
-            // Pointing the slot elsewhere keeps the permutation stable across the whole load.
-            //
-            // `failed` substitutes too, and deliberately not with the same texel: its texture was created and never
-            // written, so sampling it reads whatever that allocation happened to hold.
-            // Magenta, because the two states are not the same news — `pending` is "not yet" and wants the material's
-            // own factor, `failed` is "never" and wants to be seen.
-            // `base_resident` is left alone: it is sampleable by definition, just at fewer mips than it will have.
-            auto const& texture
-                = record.state == residency::pending
-                    ? _placeholder_texture(slot.placeholder_texel, record.texture.format())
-                    : (record.state == residency::failed ? _placeholder_texture(k_failed_texel, record.texture.format())
-                                                         : record.texture);
-
-            auto index = cc::vector<byte>();
-            append_pod(index, u32(acquire_texture(bindless_table::textures_2d, texture.as_texture_view())));
-            write(slot.offset, index);
+            auto const index = _slot_index(slot);
+            write(slot.offset, cc::span<u32 const>(&index, 1).as_bytes());
             break;
         }
         }
@@ -329,6 +332,33 @@ cc::vector<byte> gpu_resource_manager::build_instance_parameters(instance_record
 
 void gpu_resource_manager::_upload_parameters(sg::command_list& cmd, instance_record& r)
 {
+    if (r.built_in == _record_stamp)
+        return;
+    r.built_in = _record_stamp;
+
+    // Once a block is uploaded, only its indices can move from one epoch to the next: its constants are the record's own.
+    // So a later epoch re-acquires each index, as the access declaration needs, and patches and uploads only those that moved.
+    if (!r.uploaded.empty())
+    {
+        auto moved = false;
+        for (auto const& slot : r.slots)
+        {
+            if (slot.kind != material_slot_kind::attribute_descriptor && slot.kind != material_slot_kind::texture_index)
+                continue;
+            auto const index = _slot_index(slot);
+            CC_ASSERT(slot.offset + 4 <= r.uploaded.size(), "an index slot does not fit the block its layout sized");
+            auto stored = u32(0);
+            cc::memcpy(&stored, r.uploaded.data() + slot.offset, 4);
+            if (stored == index)
+                continue;
+            cc::memcpy(r.uploaded.data() + slot.offset, &index, 4);
+            moved = true;
+        }
+        if (moved)
+            cmd.upload.data_to_buffer(r.parameters, r.uploaded);
+        return;
+    }
+
     auto bytes = build_instance_parameters(r);
 
     // A material whose every attribute is sourced from somewhere needing no parameter has an empty block, and a zero-sized
@@ -362,26 +392,25 @@ shaders::tracer::instance_record gpu_resource_manager::describe_instance(sg::com
     _upload_parameters(cmd, r);
 
     // A pending batch is traced as the placeholder CUBE through the triangle fallback, so its record has to name the
-    // cube's positions — exactly as the mesh overload below does, and for the same reason: the triangle closest hit reads the hit
+    // cube's range of the pools — exactly as the mesh overload below does, and for the same reason: the triangle closest hit reads the hit
     // triangle's three corners back out of `inst.vertices` to recompute the geometric normal.
     // The batch's own primitive buffer would be wrong there twice over, since it holds nothing yet AND is not positions.
     //
     // Naming the real buffer while it streams would also stall: a command list that touches a resource a stream is
     // still filling waits for the whole transfer to land, and the first frames would pay that for bytes the placeholder
     // never reads.
-    // `placeholder_vertices` is filled by a direct upload rather than a stream, so it is never the thing being waited on.
+    // The cube is uploaded directly rather than streamed, so it is never the thing being waited on.
     auto const pending = q.state != residency::complete;
-    auto const vertices
-        = pending ? meshes.placeholder_vertices().raw()->as_raw_readonly() : q.primitives.raw()->as_raw_readonly();
+    auto const vertices = pending ? meshes.vertex_pool().raw()->as_raw_readonly() : q.primitives.raw()->as_raw_readonly();
+    auto const& cube = meshes.placeholder_geometry();
 
-    // A quadric indexes nothing, but the field still has to name something the bound snapshot covers.
-    auto const stand_in = meshes.index_stand_in().raw()->as_raw_readonly();
-
+    // A landed quadric indexes nothing, but the field still has to name something the bound snapshot covers.
     return {.param_buffer = u32(acquire_buffer(r.parameters.as_readonly_buffer())),
             .param_offset = 0,
             .vertices = u32(acquire_buffer(vertices)),
-            .indices = u32(acquire_buffer(stand_in)),
-            .is_indexed = 0u,
+            .indices = u32(acquire_buffer(meshes.index_pool().raw()->as_raw_readonly())),
+            .base_vertex = pending ? u32(cube.base_vertex) : 0u,
+            .first_index = pending ? u32(cube.first_index) : 0u,
             .link_mask = ~0u,
             .shade_group = 0,
             .emitter = 0xffffffffu}; // lights nothing until a trace's light table names it
@@ -396,46 +425,89 @@ shaders::tracer::instance_record gpu_resource_manager::describe_instance(sg::com
     CC_ASSERT(contains_instance(instance), "no such instance_id");
     auto& r = _instances[isize(u32(instance))];
 
-    // A pending mesh is traced as the placeholder cube, so its record has to name the CUBE's geometry: a hit reads
-    // positions back out of the instance to recompute the geometric normal, and the real buffer holds nothing yet.
+    // A pending mesh is traced as the placeholder cube, so its record has to name the CUBE's range: a hit reads
+    // positions back out of the instance to recompute the geometric normal, and the mesh's own range holds nothing yet.
     auto const pending = m.state != residency::complete;
-    auto const& vertices = pending ? meshes.placeholder_vertices() : m.vertices;
-    auto const& indices = pending ? meshes.index_stand_in() : m.indices;
+    auto const& geometry = pending ? meshes.placeholder_geometry() : m.geometry;
+    auto const vertices = u32(acquire_buffer(meshes.vertex_pool().raw()->as_raw_readonly()));
+    auto const indices = u32(acquire_buffer(meshes.index_pool().raw()->as_raw_readonly()));
 
     // Shaded through the fallback, which reads no parameter block, so the block is neither built nor bound — building it
     // is what would bind a still-streaming attribute buffer.
-    // The index stand-in fills the slot, since a record has to name some buffer there.
+    // The index pool fills the slot, since a record has to name some buffer there.
     if (pending || !attributes_resident(instance))
-        return {.param_buffer = u32(acquire_buffer(meshes.index_stand_in().raw()->as_raw_readonly())),
+        return {.param_buffer = indices,
                 .param_offset = 0,
-                .vertices = u32(acquire_buffer(vertices.raw()->as_raw_readonly())),
-                .indices = u32(acquire_buffer(indices.raw()->as_raw_readonly())),
-                .is_indexed = (!pending && m.is_indexed) ? 1u : 0u,
+                .vertices = vertices,
+                .indices = indices,
+                .base_vertex = u32(geometry.base_vertex),
+                .first_index = u32(geometry.first_index),
                 .link_mask = ~0u,
                 .shade_group = 0,
                 .emitter = 0xffffffffu}; // lights nothing until a trace's light table names it
 
     _upload_parameters(cmd, r);
 
-    // Every index here is this epoch's, minted right where it is written — which is what puts all four into the access
+    // Every index here is this epoch's, minted right where it is written — which is what puts all of them into the access
     // declaration `freeze()` hands the trace.
     return {.param_buffer = u32(acquire_buffer(r.parameters.as_readonly_buffer())),
             .param_offset = 0, // one block per buffer today; the shader reads through the offset regardless
-            .vertices = u32(acquire_buffer(vertices.raw()->as_raw_readonly())),
-            .indices = u32(acquire_buffer(indices.raw()->as_raw_readonly())),
-            .is_indexed = m.is_indexed ? 1u : 0u,
+            .vertices = vertices,
+            .indices = indices,
+            .base_vertex = u32(geometry.base_vertex),
+            .first_index = u32(geometry.first_index),
             .link_mask = ~0u,
             .shade_group = 0,
             .emitter = 0xffffffffu}; // lights nothing until a trace's light table names it
 }
 
+shaders::tracer::instance_record gpu_resource_manager::describe_instance(sg::command_list& cmd,
+                                                                         frame_mesh const& mesh,
+                                                                         instance_id instance)
+{
+    CC_ASSERT(contains_instance(instance), "no such instance_id");
+    auto& r = _instances[isize(u32(instance))];
+
+    // The mesh's own buffers, from their first element: a frame mesh is a range of nothing but itself.
+    auto const vertices = u32(acquire_buffer(mesh.vertices.raw()->as_raw_readonly()));
+    auto const indices = u32(acquire_buffer(mesh.indices.raw()->as_raw_readonly()));
+
+    // Attributes still streaming shade the real geometry through the fallback, which reads no parameter block, as describe_instance does for a resident mesh.
+    // The index buffer fills the slot, since a record has to name some buffer there.
+    if (!attributes_resident(instance))
+        return {.param_buffer = indices,
+                .param_offset = 0,
+                .vertices = vertices,
+                .indices = indices,
+                .base_vertex = 0,
+                .first_index = 0,
+                .link_mask = ~0u,
+                .shade_group = 0,
+                .emitter = 0xffffffffu};
+
+    _upload_parameters(cmd, r);
+    return {.param_buffer = u32(acquire_buffer(r.parameters.as_readonly_buffer())),
+            .param_offset = 0,
+            .vertices = vertices,
+            .indices = indices,
+            .base_vertex = 0,
+            .first_index = 0,
+            .link_mask = ~0u,
+            .shade_group = 0,
+            .emitter = 0xffffffffu};
+}
+
 bool gpu_resource_manager::attributes_resident(instance_id instance)
 {
     CC_ASSERT(contains_instance(instance), "no such instance_id");
-    for (auto const& slot : _instances[isize(u32(instance))].slots)
+    auto& r = _instances[isize(u32(instance))];
+    if (r.resident_in == _record_stamp)
+        return true;
+    for (auto const& slot : r.slots)
         if (slot.kind == material_slot_kind::attribute_descriptor
             && attributes.get(slot.attribute).state != residency::complete)
             return false;
+    r.resident_in = _record_stamp;
     return true;
 }
 
@@ -679,6 +751,85 @@ scene_item gpu_resource_manager::acquire_scene_item(sv::mesh const& mesh)
     slot.item = item;
     slot.item_material = resident.material;
     return item;
+}
+
+scene_item gpu_resource_manager::acquire_frame_scene_item(sv::mesh const& mesh)
+{
+    CC_ASSERT(!mesh.geometry.is_empty(), "a mesh needs geometry to be placed in a scene");
+
+    // Resolution reads the attributes and textures, never the geometry, so a resident_mesh without geometry is what it is resolved against.
+    // The attributes are written inline by the command list that draws the mesh, not streamed, so it is never shaded by the fallback for them.
+    auto bindings = cc::vector<mesh_attribute_binding>();
+    bindings.reserve(mesh.attributes.size());
+    for (auto const& a : mesh.attributes)
+    {
+        auto const uploads = a.frequency != attribute_frequency::per_instance;
+        bindings.push_back(mesh_attribute_binding::of(a, uploads ? attributes.acquire_inline(a) : attribute_id::invalid));
+    }
+    auto bound_textures = cc::vector<mesh_texture_binding>();
+    bound_textures.reserve(mesh.textures.size());
+    for (auto const& t : mesh.textures)
+        bound_textures.push_back({.name = t.name,
+                                  .source = {.texture = textures.acquire(t.source.texture),
+                                             .uv_attribute = t.source.uv_attribute,
+                                             .sampler = t.source.sampler,
+                                             .swizzle = t.source.swizzle,
+                                             .transform = t.source.transform}});
+    auto const resident = sv::resident_mesh{.name = mesh.name,
+                                            .attributes = cc::move(bindings),
+                                            .transform = mesh.transform,
+                                            .material = mesh.material,
+                                            .flags = mesh.flags,
+                                            .textures = cc::move(bound_textures),
+                                            .triangle_count = mesh.geometry.triangle_count(),
+                                            .vertex_count = mesh.geometry.vertex_count()};
+
+    auto const lib = acquire_material_library();
+    CC_ASSERT(lib.has_value(), "shaped-viewer: no material library to resolve a mesh's material through");
+    auto const material = mesh.material == material_id::invalid ? default_material(*lib.value()) : mesh.material;
+    auto const resolved = resolve_material(*lib.value(), material, resident);
+    auto const& permutation = shaders.acquire(resolved);
+
+    return {.instance = acquire_instance(resolved, permutation.layout),
+            .shader_key = permutation.key,
+            .lifetime = mesh_lifetime::frame,
+            .frame_geometry = mesh.geometry,
+            .transform = mesh.transform};
+}
+
+sv::frame_mesh const& gpu_resource_manager::acquire_frame_mesh(sg::command_list& cmd,
+                                                               triangle_geometry const& geometry,
+                                                               bool build_blas)
+{
+    auto* found = _frame_meshes.get_ptr(geometry.hash);
+    if (found == nullptr)
+    {
+        // Build input only where the context builds acceleration structures, which a raster-only device refuses;
+        // readonly so a hit, or a raster vertex stage, reads the geometry back.
+        auto const builds = _ctx->supports(sg::feature::ray_query) || _ctx->supports(sg::feature::raytracing_pipeline);
+        auto usage = sg::buffer_usages(sg::buffer_usage::readonly_buffer);
+        if (builds)
+            usage = usage | sg::buffer_usage::accel_structure_build_input;
+
+        // Every shader reads a triangle's corners through its indices, so a raw triangle list gets 0, 1, 2, … of its own.
+        auto sequential = cc::vector<u32>();
+        if (!geometry.is_indexed())
+            for (auto i = isize(0); i < geometry.positions.size(); ++i)
+                sequential.push_back(u32(i));
+        auto const index_span = geometry.is_indexed() ? geometry.indices.span() : cc::span<u32 const>(sequential);
+        auto m = frame_mesh{.hash = geometry.hash,
+                            .vertices = _ctx->transient.create_buffer_from_data(cmd, geometry.positions.span(), usage),
+                            .indices = _ctx->transient.create_buffer_from_data(cmd, index_span, usage),
+                            .triangle_count = geometry.triangle_count()};
+        found = &_frame_meshes.entry(geometry.hash).get_or_emplace(cc::move(m));
+    }
+
+    if (build_blas && found->blas == nullptr)
+        found->blas = cmd.raytracing.build_blas({{.vertices = found->vertices.raw(),
+                                                  .vertex_count = found->vertices.element_count(),
+                                                  .indices = found->indices.raw(),
+                                                  .index_count = found->indices.element_count()}});
+    return *found;
 }
 
 scene_item gpu_resource_manager::acquire_scene_item(sv::resident_quadric_set const& set)

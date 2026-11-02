@@ -39,7 +39,12 @@ constexpr scalar_family k_ushort_family
 /// Its swizzles are the target's own too (EMIT-142).
 type_record vector_of(scalar_family const& family, cc::string_view name, i32 width, cc::string_view doc)
 {
-    auto declaration = cc::format("@swizzle struct {}:", name);
+    // CHK-409: a plain vector holds numbers, so its components may be colors; a position or a direction has no red
+    auto const is_plain = name == cc::format("{}{}", family.name, width);
+    auto declaration
+        = is_plain
+            ? cc::format("@swizzle({}) struct {}:", cc::string_view("rgba").subview({.offset = 0, .size = width}), name)
+            : cc::format("@swizzle struct {}:", name);
     cc::string_view const fields[] = {"x", "y", "z", "w"};
     for (auto i = 0; i < width; ++i)
         declaration.appendf("\n    {}: {}", fields[i], family.name);
@@ -167,12 +172,47 @@ void sgl::builtins::register_types(registry& r)
     r.add(type_record{
         .declaration = "struct mat3",
         .doc = "/// Column-major, and a vector stands to its right.\n"
-               "/// A value of function bodies alone, which no GPU memory holds yet.",
+               "/// In GPU memory its columns stand 16 bytes apart, as three float3 do; ray data and stage edges hold "
+               "none yet.",
         .hlsl = "float3x3",
         .wgsl = "mat3x3f",
         .msl = "float3x3",
+        // HLSL starts each column of a column-major matrix on a row of a constant buffer, and the last one takes 12.
+        .hlsl_layout = {.size = 44, .alignment = 16},
+        .wgsl_layout = {.size = 48, .alignment = 16},
+        .msl_layout = {.size = 48, .alignment = 16},
         .leaf_kind = value_kind::scalar_float,
         .leaf_count = 9,
+        .local_only_reason = "its layout as ray data is not decided yet",
+    });
+
+    r.add(type_record{
+        .declaration = "struct mat2",
+        .doc = "/// Column-major, and a vector stands to its right: a rotation or a shear of the plane.\n"
+               "/// In GPU memory its two columns stand back to back, 16 bytes; a constant block starts it on a row.",
+        .hlsl = "float2x2",
+        .wgsl = "mat2x2f",
+        .msl = "float2x2",
+        // HLSL starts each column of a column-major matrix on a row of a constant buffer
+        .hlsl_layout = {.size = 24, .alignment = 16},
+        .wgsl_layout = {.size = 16, .alignment = 8},
+        .msl_layout = {.size = 16, .alignment = 8},
+        .leaf_kind = value_kind::scalar_float,
+        .leaf_count = 4,
+        .local_only_reason = "its layout as ray data is not decided yet",
+    });
+
+    // CHK-408: held as its three rows, the shape every API hands a hit's transform in
+    r.add(type_record{
+        .declaration = "struct affine3",
+        .doc = "/// An affine map of space: a linear part and a translation, as three rows of four.\n"
+               "/// It translates a `pos3` and leaves a `vec3` untranslated, so the type decides the w.\n"
+               "/// A value of function bodies alone, which no GPU memory holds yet.",
+        .hlsl = "float3x4",
+        .wgsl = "mat3x4f",
+        .msl = "float3x4",
+        .leaf_kind = value_kind::scalar_float,
+        .leaf_count = 12,
         .local_only_reason = "its layout in GPU memory is not decided yet",
     });
 

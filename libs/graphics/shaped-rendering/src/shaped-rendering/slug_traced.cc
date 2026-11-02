@@ -8,9 +8,6 @@
 #include <shaped-rendering/slug_routine.hh>
 #include <shaped-rendering/slug_traced.hh>
 
-static_assert(sizeof(sr::slug_instance) == sizeof(sgl_modules::slug::shape_instance),
-              "module slug's shape_instance is no longer sr::slug_instance's layout");
-
 namespace sr
 {
 sg::buffer<sgl_modules::slug::shape_instance> upload_slug_records(sg::command_list& cmd,

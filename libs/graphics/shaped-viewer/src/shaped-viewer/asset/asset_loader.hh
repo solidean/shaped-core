@@ -136,6 +136,13 @@ struct sv::asset_loader_config
     /// node's `first_mesh` and `first_light` runs say which are its.
     bool flatten_hierarchy = true;
 
+    /// glTF says a transmissive material without KHR_materials_volume is a thin wall, which is what a pane is.
+    /// Exporters routinely leave the volume off solid glass too, a teapot or an ice cube, which as a thin wall turns into a soap bubble.
+    /// Set, a transmissive mesh with no volume is solid where it is closed, every edge shared by exactly two triangles once its
+    /// vertices are welded by position, and stays a thin wall where it is open; the material's own value is overridden per mesh.
+    /// Unset, the spec's reading stands for every mesh.
+    bool closed_transmission_is_solid = false;
+
     sv::tangent_frame_options frames = {};
 
     /// how an FBX file's materials are read; the other formats ignore it

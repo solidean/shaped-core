@@ -205,7 +205,7 @@ TEST("sgl builtins - a local may not hide a function a custom writer calls or a 
     REQUIRE(msl.has_text());
 
     // a custom writer's `asuint`, and the helper `sgl_pack_half2x16`
-    CHECK(hlsl.text.contains("const uint asuint_ = asuint(self);"));
+    CHECK(hlsl.text.contains("const uint asuint_ = asuint(p.a);"));
     CHECK(hlsl.text.contains("const uint sgl_pack_half2x16_ = sgl_pack_half2x16(float2(p.a, p.b));"));
     CHECK(hlsl.text.contains("const uint countOneBits = countbits(asuint_);"));
     // WGSL has no helpers: its custom writers' `countOneBits` and `bitcast`

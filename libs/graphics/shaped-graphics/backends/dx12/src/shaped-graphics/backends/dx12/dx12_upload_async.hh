@@ -39,11 +39,15 @@ struct sg::backend::dx12::dx12_async_upload_job
     // Both are weak refs, locked at stage time — see stage_job.
     std::weak_ptr<dx12_buffer const> buffer_target;   // destination buffer, or empty for a texture copy
     std::weak_ptr<dx12_texture const> texture_target; // destination texture, or empty for a buffer copy
-    dx12_texture_footprint footprint;                 // the texture region's copy footprint (texture copies)
-    bool is_texture = false;                          // discriminant: texture copy vs buffer copy
-    isize dst_offset = 0;                             // destination byte offset (buffer copies)
-    cc::pinned_data<byte const> src;                  // source bytes + their pin
-    dx12_group_value completion; // this upload's completion value, on the destination's upload timeline
+    // The destination's storage, held strong: what the copy still writes when every handle is gone and a submitted
+    // list waits on this job's value anyway — see dx12_completion_group::awaited_value.
+    // Holding it costs no lifetime: the deferred-deletion gate keeps the storage until this value is signaled anyway.
+    ComPtr<ID3D12Resource> storage;
+    dx12_texture_footprint footprint; // the texture region's copy footprint (texture copies)
+    bool is_texture = false;          // discriminant: texture copy vs buffer copy
+    isize dst_offset = 0;             // destination byte offset (buffer copies)
+    cc::pinned_data<byte const> src;  // source bytes + their pin
+    dx12_group_value completion;      // this upload's completion value, on the destination's upload timeline
     sg::submission_token wait_token
         = sg::submission_token::invalid; // defer the copy until this direct-queue token completes
 
@@ -56,12 +60,14 @@ struct sg::backend::dx12::dx12_async_upload_job
     // completion node it must settle exactly once — including on every cancellation path.
     std::shared_ptr<sg::impl::stream_control> stream;
 
-    /// The context of whoever enqueued this, captured on their thread when the job is built.
+    /// The context of whoever enqueued this, captured on their thread when the job is handed over.
     /// Installed only around the work that is this job's alone: polling its source, recording its chunk.
     /// Reset before anything it settles.
+    /// Held by the destination's upload group, which releases it with the destination's last handle where no list
+    /// waits on this job: see sg::impl::upload_contexts.
     /// See libs/graphics/shaped-graphics/docs/concepts/threading.md, "Whose work a transfer actor is doing".
     /// A window packs several jobs, so what the window's submit raises is attributed to none of them.
-    cc::async_ambient_handle ambient;
+    sg::impl::upload_context_ticket<dx12_completion_group_handle> ambient;
 };
 
 /// A message carrying nothing: its only job is to wake the copy actor so it re-polls sources that said `not_yet`.

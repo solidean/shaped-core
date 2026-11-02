@@ -250,6 +250,29 @@ TEST("sgl lsp - an inferred return type is a hint before the arrow, which insert
     CHECK(!hints[1].has("textEdits"));
 }
 
+TEST("sgl lsp - a diagnostic the checker knows a fix for offers it as a preferred quick fix", main_thread)
+{
+    auto s = session("fun f(a: int, b: int) -> float:\n    let d = a as float - b as float\n    return d\n");
+    auto const r = s.ask(
+        5, "textDocument/codeAction",
+        R"({"textDocument":{"uri":"file:///t.sgl"},"range":{"start":{"line":1,"character":12},"end":{"line":1,"character":12}},"context":{"diagnostics":[]}})");
+    auto const actions = r["result"];
+    REQUIRE(actions.size() == 1);
+    CHECK(actions[0]["kind"].as_string() == "quickfix");
+    CHECK(actions[0]["isPreferred"].as_bool());
+    CHECK(actions[0]["diagnostics"][0]["code"].as_string() == "as-precedence");
+    auto const edit = actions[0]["edit"]["changes"]["file:///t.sgl"][0];
+    CHECK(edit["newText"].as_string() == "(a as float) - (b as float)");
+    CHECK(edit["range"]["start"]["character"].as_double() == 12);
+    CHECK(edit["range"]["end"]["character"].as_double() == 35);
+
+    // a range that touches no diagnostic offers nothing
+    auto const elsewhere = s.ask(
+        6, "textDocument/codeAction",
+        R"({"textDocument":{"uri":"file:///t.sgl"},"range":{"start":{"line":2,"character":4},"end":{"line":2,"character":4}},"context":{"diagnostics":[]}})");
+    CHECK(elsewhere["result"].size() == 0);
+}
+
 TEST("sgl lsp - positions count UTF-16 units unless the client offers UTF-8", main_thread)
 {
     // `é` is two bytes and one UTF-16 unit, so the unknown name after it on its line sits one character further left
@@ -373,4 +396,27 @@ TEST("sgl lsp - an error in a module the document uses is shown on its `use`, po
     auto const related = p["diagnostics"][0]["relatedInformation"][0];
     CHECK(related["location"]["uri"].as_string().ends_with("/tests/modules/broken.sgl"));
     CHECK(related["location"]["range"]["start"]["line"].as_double() == 3);
+}
+
+TEST("sgl lsp - a module file open in the editor is what the documents using it are checked against", main_thread)
+{
+    sgl_lsp::set_module_dirs({cc::string(SGL_LSP_TEST_MODULES_DIR)});
+    auto s = session("use broken\nfun g() -> float => broken.f()\n");
+    auto const last_of_document = [&]
+    {
+        auto result = cc::string();
+        for (auto const& p : notifications_of(s.messages, "textDocument/publishDiagnostics"))
+            if (p["uri"].as_string() == "file:///t.sgl")
+                result = diagnostics_text(p);
+        return result;
+    };
+    CHECK(last_of_document() == "0:0 unknown-name module broken does not check: nope\n");
+
+    // the module opened with an unsaved fix: the document that uses it is checked again, against the fix
+    auto const dir = cc::string(SGL_LSP_TEST_MODULES_DIR);
+    auto const module_uri = dir.starts_with("/") ? "file://" + dir + "/broken.sgl" : "file:///" + dir + "/broken.sgl";
+    s.send_open("module broken\n\nfun f() -> float => 1.0\n", module_uri);
+    s.settle();
+    sgl_lsp::set_module_dirs({});
+    CHECK(last_of_document() == "");
 }

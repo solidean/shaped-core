@@ -1,0 +1,12 @@
+// a program's binding may share its name with a module's, and one list names both: each is minted a name of its own
+use shading
+
+binding frame:
+    gain: float
+    values: mut buffer[float]
+
+@compute(64) fun apply(@thread_id id: int3){frame, shading.frame}:
+    frame.values[id.x] = frame.gain * shading.frame.exposure
+
+test {frame, shading.frame}:
+    frame.gain * shading.frame.exposure == 0.0

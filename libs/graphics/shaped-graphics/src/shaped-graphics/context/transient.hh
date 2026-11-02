@@ -3,6 +3,7 @@
 #include <clean-core/container/span.hh>
 #include <clean-core/container/vector.hh>
 #include <clean-core/error/result.hh>
+#include <clean-core/function/function_ref.hh>
 #include <clean-core/thread/mutex.hh>
 #include <shaped-graphics/binding/binding_group.hh> // sg::declared_binding_set, sg::slotted_view
 #include <shaped-graphics/context/upload.hh>        // sg::upload_range, what the create_buffer_from_* factories take
@@ -15,9 +16,9 @@
 /// Transient resources are tied to the current epoch and recycled when it retires (see lifetime_scope) — per-frame scratch that never needs to outlive the work that produced it.
 /// Using one past its epoch is a hard error.
 ///
-/// Buffers are sub-allocated by a per-epoch bump allocator over one persistent memory_heap the scope owns.
+/// Buffers and textures are sub-allocated by per-epoch bump allocators, each over one persistent memory_heap the scope owns.
 /// The head resets to 0 whenever the epoch changes, so successive epochs alias the same storage — safe because a direct queue executes each epoch's GPU work before the next's.
-/// Requests larger than the budget fall back to a dedicated (committed) allocation.
+/// Requests larger than the budget fall back to a dedicated (committed) allocation, as does a texture on a backend that places none.
 ///
 /// One spelling per create, and it throws, as on context_persistent_scope — see docs/error-handling.md.
 class sg::context_transient_scope
@@ -76,8 +77,7 @@ public:
 public:
     /// Allocates a transient texture, recycled once this epoch retires.
     /// Throws sg::allocation_exception on allocation failure.
-    /// The transient bump-heap is buffers-only today, so a transient texture is a *dedicated* allocation auto-expired at the next epoch, not bump-suballocated.
-    /// Placed transient textures wait on a texture-capable transient memory_heap.
+    /// **Its contents start undefined**, since its memory held another epoch's texture: write it before reading it.
     [[nodiscard]] raw_texture_handle create_raw_texture(texture_description const& desc);
 
     // Typed texture factories — take a shape-specific description (see texture_descriptions.hh), expand it to a full texture_description, and return the wrapped `texture<Traits>`.
@@ -182,7 +182,7 @@ public:
         return create_binding_group(layout, views, samplers);
     }
 
-    /// Sets the shared transient memory budget in bytes — the one heap backs all transient resources (buffers today, textures in future).
+    /// Sets the transient buffers' memory budget in bytes.
     /// May be called any time, repeatedly: it records a *pending* budget and returns immediately without touching the GPU.
     /// The change takes effect at the next advance_epoch, which drops the current heap and allocates the next one lazily at the new size; nothing waits.
     ///
@@ -194,6 +194,13 @@ public:
 
     /// The transient budget a context starts with.
     static constexpr isize default_budget_bytes = isize(128) * 1024 * 1024;
+
+    /// Sets the transient textures' memory budget in bytes, which their own heap is sized to, with the same deferral and overlap as set_budget.
+    /// Starts at default_texture_budget_bytes.
+    void set_texture_budget(isize size_in_bytes);
+
+    /// The transient texture budget a context starts with: a frame's scratch images at a few million pixels each.
+    static constexpr isize default_texture_budget_bytes = isize(256) * 1024 * 1024;
 
     // Pinned to its owning context: neither copyable nor movable.
     context_transient_scope(context_transient_scope const&) = delete;
@@ -225,14 +232,17 @@ private:
                                                                             cc::span<named_sampler const> samplers = {});
 
     friend class context;
-    explicit context_transient_scope(context& ctx) : _ctx(ctx) {}
+    explicit context_transient_scope(context& ctx) : _ctx(ctx)
+    {
+        _texture_bump.lock([](bump_state& s) { s.budget = default_texture_budget_bytes; });
+    }
 
-    // Applies a pending set_budget() at an epoch boundary: drops the heap and adopts the new budget, without waiting.
+    // Applies a pending set_budget() or set_texture_budget() at an epoch boundary: drops the heap and adopts the new budget, without waiting.
     // The heap is lazily recreated at the new size on the next transient allocation.
     // No-op if nothing is pending; reached via context::apply_pending_transient_budget from a backend's advance_epoch.
     void apply_pending_budget_at_epoch_boundary();
 
-    // Drops the transient heap, called from context::shutdown before a backend tears its device down.
+    // Drops the transient heaps, called from context::shutdown before a backend tears its device down.
     //
     // The heap is GPU memory allocated from the device, so it must not outlive it — the same rule routines.clear()
     // above is there for.
@@ -247,15 +257,24 @@ private:
 
     context& _ctx;
 
-    // The bump allocator state: the heap (lazy), its budget, the current head, the epoch the head was last reset for, and a budget change awaiting the next epoch boundary.
-    // Guarded — create_raw_buffer may run on any thread.
+    // One bump allocator's state: the heap (lazy), its budget, the current head, the epoch the head was last reset for, and a budget change awaiting the next epoch boundary.
+    // Guarded — a create may run on any thread.
     struct bump_state
     {
         memory_heap_handle heap = nullptr;
         isize budget = default_budget_bytes;
         isize head = 0;
         u64 last_epoch = 0;       // sg::epoch value the head was last reset for (0 = never)
-        isize pending_budget = 0; // a set_budget() awaiting the next epoch boundary (0 = none pending)
+        isize pending_budget = 0; // a set_*budget() awaiting the next epoch boundary (0 = none pending)
+        bool refused = false;     // the backend refused this kind of heap, so everything is dedicated
     };
+
+    // Reserves `size` bytes at `alignment` in `s`'s current epoch window, creating its heap of `contents` on first use.
+    // Returns the offset, or -1 where the window is full or the backend refused the heap, which falls back to dedicated.
+    [[nodiscard]] cc::result<isize> reserve(bump_state& s,
+                                            memory_heap_contents contents,
+                                            cc::function_ref<memory_requirements(memory_heap const&)> requirements_of);
+
     cc::mutex<bump_state> _bump;
+    cc::mutex<bump_state> _texture_bump;
 };

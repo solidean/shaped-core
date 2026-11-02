@@ -122,11 +122,28 @@ enum class sg::feature
     /// WebGPU has no image atomics.
     image_atomics,
 
+    /// A vertex shader may read the draw's first instance on its own (SGL's `@first_instance`), the same for the whole draw.
+    /// It is how one draw of an indirect batch learns which it is, uniformly.
+    /// D3D12 has it from shader model 6.8, Vulkan from `shaderDrawParameters`, which creation requires, and Metal always.
+    /// WGSL has no builtin for it.
+    first_instance,
+
     /// A pixel shader may tell a helper invocation from a real one, which SGL's strong compare-exchange needs there (EMIT-163).
     /// D3D12 has HLSL's `IsHelperLane()` from SM 6.6, Vulkan has the core `HelperInvocation` built-in, Metal has `simd_is_helper_thread()`.
     /// D3D12's and Vulkan's compare-exchange is strong already, so their strong form needs no loop and asks no test.
     /// WGSL has no such test.
     helper_lane_query,
+
+    /// A triangle geometry may carry an opacity micromap (`cmd.raytracing.build_micromap`), which traversal decides most candidates by.
+    /// Vulkan grants it with `VK_EXT_opacity_micromap`, D3D12 from DXR 1.2 in the Agility SDK; metal and WebGPU have no equivalent.
+    /// The host's alone: a shader traces the same way either way, so no `require` names it.
+    opacity_micromap,
+
+    /// A vertex shader may send its primitive to one layer of a layered render target (SGL's `@layer`), so one draw
+    /// fills every layer of an array, such as both eyes of a stereo frame.
+    /// D3D12 grants it with `VPAndRTArrayIndexFromAnyShaderFeedingRasterizerSupportedWithoutGSEmulation`, Vulkan with
+    /// `shaderOutputLayer`, and Metal on every Apple GPU its Metal 4 floor admits; WebGPU has no such output.
+    vertex_layer_output,
 };
 
 CC_FLAG_ENUM_INDEXED(sg, feature, cc::u32);
@@ -160,9 +177,12 @@ inline constexpr feature k_all_features[] = {
     feature::subgroups,
     feature::device_coherence,
     feature::image_atomics,
+    feature::first_instance,
     feature::helper_lane_query,
+    feature::opacity_micromap,
+    feature::vertex_layer_output,
 };
-static_assert(isize(sizeof(k_all_features) / sizeof(k_all_features[0])) == isize(feature::helper_lane_query) + 1,
+static_assert(isize(sizeof(k_all_features) / sizeof(k_all_features[0])) == isize(feature::vertex_layer_output) + 1,
               "k_all_features lists every feature");
 
 /// The enumerator's name, `ray_query`, which is also what SGL's `require` spells it as.
@@ -214,8 +234,14 @@ static_assert(isize(sizeof(k_all_features) / sizeof(k_all_features[0])) == isize
         return "device_coherence";
     case feature::image_atomics:
         return "image_atomics";
+    case feature::first_instance:
+        return "first_instance";
     case feature::helper_lane_query:
         return "helper_lane_query";
+    case feature::opacity_micromap:
+        return "opacity_micromap";
+    case feature::vertex_layer_output:
+        return "vertex_layer_output";
     }
     return "";
 }

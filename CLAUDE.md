@@ -83,6 +83,7 @@ One-liner per library:
   FBX parses through the vendored ufbx and comes back as FBX's own object model, its axes and unit reported rather than applied.
   Also a PNG codec in `babel::png` over the vendored libspng and a JPEG one in `babel::jpg` over the vendored stb, plus fully native Radiance HDR and PFM in `babel::hdr` / `babel::pfm`,
   with the `babel::image` aggregator on top (`image/`) — `u8` samples for JPEG, `u8` or `u16` for PNG, `f32` for the last two.
+  `babel::webp` reads and writes still WebP, lossy or lossless, over the vendored libwebp, `u8` like JPEG.
   Native read-only DDS and TGA too: `babel::dds` hands back every mip, layer and cube face as views of the input, and `babel::bcn` decodes BC1 - BC7.
   `babel::ktx2` reads KTX 2.0 the same way, undoing zstd or zlib supercompression level by level, on a scheduler when given one.
   glTF decodes EXT_meshopt_compression over the vendored meshoptimizer decoders, and a caller registers its own extensions with hooks that decode bufferViews and accessors.
@@ -162,7 +163,7 @@ One-liner per library:
   `SR_HAS_WINDOW` (1/0) says whether a backend was compiled in.
   sr also hosts the **denoise members**, the vendor ones included: `SR_HAS_DLSS` (1/0) says whether NVIDIA's SDK was fetched.
   **That fetch is on request and nothing performs it for you** — `uv run extern/dlss/fetch-dlss.py` — because its license is NVIDIA's rather than one a build accepts on anyone's behalf.
-* **`libs/graphics/shaped-graphics-language`** — SGL, our own shading language, and its whole toolchain in one library: compiler, linter, formatter, language server.
+* **`libs/graphics/shaped-graphics-language`** — SGL, our own shading language, and its whole toolchain in one library: compiler, linter, language server.
   One `.sgl` source compiles to readable shader text for dx12, vulkan, webgpu and metal, and slib's SGL compiler edge is what calls it.
   [examples/graphics/sgl-cube](examples/graphics/sgl-cube/shaders/cube.sgl) draws one on dx12, vulkan, webgpu and metal, from that one source.
   SGL has generics and ray tracing: inline traces on all four backends (emulated on webgpu), and ray-tracing pipelines on the other three.
@@ -556,6 +557,7 @@ A stale "no cc:: equivalent yet" reason sends the next author back to the old wa
 | Re-check an already-made commit  | `uv run dev.py check --commit <rev>` (a range works too; a single commit means its first-parent diff, so a merge yields all it brought in) |
 | Sanity-check the toolchain       | `uv run dev.py doctor`                                            |
 | Update a consumer's submodules   | `uv run dev.py submodules sync [--tip \| --bump]` — to the recorded commits (or the branch heads), fast-forwards only, never touches local work ([consuming-shaped-core](docs/guides/consuming-shaped-core.md#keeping-the-submodules-current)) |
+| Clone an opt-in companion repo   | `uv run dev.py companions init shader-rosetta` (`list` shows them, `sync` fast-forwards; [building-and-testing](docs/guides/building-and-testing.md#companion-repositories-companions)) |
 | Install a repo tool                  | `uv run dev.py install` (lists them; `install sgl-vscode` links the SGL extension, `install emsdk` the pinned Emscripten SDK, `install deno` the pinned deno, `install sde --archive <file>` Intel's CPU emulator, `install shaped-view` the model viewer a double-click opens) |
 | List presets / targets           | `uv run dev.py list-presets` / `list-targets`                     |
 | Pin a compiler version           | `uv run dev.py build --toolset <ver>` (`list-toolsets` shows them) |

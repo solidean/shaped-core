@@ -78,6 +78,8 @@ public:
     {
         if (member.is_position)
             return "position";
+        if (member.is_layer)
+            return "render_target_array_index";
         switch (s.role)
         {
         case struct_role::vertex_input:
@@ -121,13 +123,86 @@ public:
         return "";
     }
 
-    void write_member(cc::string& out, planned_struct const* owner, planned_member const& member, plan const& p) const
+    void write_member(cc::string& out,
+                      planned_struct const* owner,
+                      planned_member const& member,
+                      plan const& p,
+                      bool is_packed_tail = false) const
     {
-        out.appendf("{}{} {}", k_indent, type_text(p, *this, member.type), member.name);
+        // EMIT-172: an array of one value per row is one of 4-vectors
+        auto const type
+            = member.is_row_per_element
+                ? cc::format("array<{}, {}>", builtin_spelling(p, row_vector_of(p, p.m.at(member.type).element)),
+                             p.m.at(member.type).count)
+                : cc::string(type_text(p, *this, member.type));
+        out.appendf("{}{}{} {}", k_indent, is_packed_tail ? "packed_" : "", type, member.name);
         if (owner != nullptr)
             if (auto const attribute = attribute_of(*owner, member); !attribute.empty())
                 out.appendf(" [[{}]]", attribute);
         out += ";\n";
+    }
+
+    /// The alignment MSL gives a value of `type` in memory as this text declares it: a constant block's struct is
+    /// `alignas(16)`, and a struct with a packed tail says its own (EMIT-176).
+    [[nodiscard]] static i32 msl_alignment_of(plan const& p, type_id type)
+    {
+        if (auto const* const record = p.m.builtin_type_of(type))
+            return record->msl_layout.alignment > 0 ? record->msl_layout.alignment : 4;
+        auto const& t = p.m.at(type);
+        if (t.kind == type_kind::array)
+            return msl_alignment_of(p, t.element);
+        if (t.kind != type_kind::structure || p.struct_of_type[index_of(type)] < 0)
+            return 4;
+        auto const& s = p.structs[p.struct_of_type[index_of(type)]];
+        if (s.memory_size > 0 && s.is_constants && !s.is_packed)
+            return 16;
+        auto result = 4;
+        for (auto i = isize(0); i < s.members.size(); ++i)
+        {
+            if (shares_tail(p, s, i))
+                return s.memory_alignment;
+            auto const a = msl_alignment_of(p, s.members[i].type);
+            result = a > result ? a : result;
+        }
+        return result;
+    }
+
+    /// EMIT-170: the members of a struct or a block in natural memory, a shared tail packed.
+    /// Wherever MSL would place a member short of its offset, a padding field keeps it there: a packed 3-vector aligns to
+    /// its scalar alone, and a constant block starts a struct, an array and a mat2 on a row MSL does not (EMIT-175).
+    void write_memory_members(cc::string& out,
+                              planned_struct const* owner,
+                              cc::span<planned_member const> members,
+                              plan const& p) const
+    {
+        auto at = 0;
+        auto padding = 0;
+        for (auto i = isize(0); i < members.size(); ++i)
+        {
+            auto const& member = members[i];
+            auto const is_packed_tail = shares_tail(p, members, i);
+            auto const alignment = is_packed_tail ? 4 : msl_alignment_of(p, member.type);
+            if (member.offset >= 0 && (at + alignment - 1) / alignment * alignment < member.offset)
+                while (at < member.offset)
+                {
+                    auto const width = member.offset - at >= 4 && at % 4 == 0 ? 4 : 2;
+                    out.appendf("{}{} sgl_pad{};\n", k_indent, width == 4 ? "uint" : "ushort", padding++);
+                    at += width;
+                }
+            write_member(out, owner, member, p, is_packed_tail);
+            if (member.offset >= 0)
+            {
+                auto const* const record = p.m.builtin_type_of(member.type);
+                auto const is_full_3_vector = record != nullptr && record->leaf_count == 3 && !is_packed_tail;
+                // a struct of a constant block is `alignas(16)`, so MSL rounds its size up to a row
+                auto const is_row_struct = record == nullptr && p.m.at(member.type).kind == type_kind::structure
+                                        && msl_alignment_of(p, member.type) == 16;
+                at = member.offset
+                   + (is_full_3_vector ? record->msl_layout.size
+                      : is_row_struct  ? (member.size + 15) / 16 * 16
+                                       : member.size);
+            }
+        }
     }
 
     void write_enum_constant(cc::string& out, cc::string_view name, i32 value) const override
@@ -204,13 +279,35 @@ public:
         CC_UNREACHABLE("every group MSL writes was given an argument buffer by the plan");
     }
 
+    /// EMIT-177: Metal's compiler checks that `name` holds `field` at byte `offset`, as SGL placed it.
+    static void write_offset_assert(cc::string& out, cc::string_view name, cc::string_view field, i32 offset)
+    {
+        out.appendf("static_assert(__builtin_offsetof({}, {}) == {}, \"SGL places {}.{} at byte {}\");\n", name, field,
+                    offset, name, field, offset);
+    }
+
+    /// EMIT-177: the offset of every member SGL placed, and the struct's size where it is `size` > 0.
+    static void write_layout_asserts(cc::string& out, cc::string_view name, cc::span<planned_member const> members, i32 size)
+    {
+        for (auto const& member : members)
+            if (member.offset >= 0)
+                write_offset_assert(out, name, member.name, member.offset);
+        if (size > 0)
+            out.appendf("static_assert(sizeof({}) == {}, \"SGL makes {} {} bytes\");\n", name, size, name, size);
+        out += "\n";
+    }
+
     /// A root's memory form: its pieces as fields, each where SGL's layout puts it (memory_form.hh).
     static void write_form(cc::string& out, memory_form const& form)
     {
         out.appendf("struct {}\n{{\n", form.name);
         for (auto const& f : form.fields)
-            out.appendf("{}{} {};\n", k_indent, f.type, f.name);
+            out.appendf("{}{} {};\n", k_indent,
+                        f.count > 0 ? cc::format("array<{}, {}>", f.type, f.count) : cc::string(f.type), f.name);
         out += "};\n\n";
+        for (auto const& f : form.fields)
+            write_offset_assert(out, form.name, f.name, f.offset);
+        out += "\n";
     }
 
     void write_block_struct(cc::string& out, plan const& p, planned_constants const& block) const
@@ -218,9 +315,10 @@ public:
         if (block.form.has_value())
             return write_form(out, block.form.value());
         out.appendf("struct {}\n{{\n", block.block_name);
-        for (auto const& member : block.members)
-            write_member(out, nullptr, member, p);
+        write_memory_members(out, nullptr, block.members, p);
         out += "};\n\n";
+        // a block's own size is MSL's to round, since the host writes it member by member
+        write_layout_asserts(out, block.block_name, block.members, 0);
     }
 
     /// A Metal sampler is a parameter of a raster or compute entry point, which `write_function_head` writes.
@@ -282,10 +380,26 @@ public:
         // A struct stands ahead of the groups, whose blocks and buffers may hold it.
         for (auto const& s : p.structs)
         {
-            out.appendf("struct {}\n{{\n", s.name);
-            for (auto const& member : s.members)
-                write_member(out, &s, member, p);
+            // EMIT-170: a packed member lowers the struct's own alignment, which `alignas` restores
+            auto is_packing = false;
+            for (auto i = isize(0); i < s.members.size(); ++i)
+                is_packing = is_packing || shares_tail(p, s, i);
+            // a struct in a constant block strides by whole rows, and starts the row after it (EMIT-110)
+            auto const in_constants = s.memory_size > 0 && s.is_constants && !s.is_packed;
+            if (is_packing || in_constants)
+                out.appendf("struct alignas({}) {}\n{{\n", in_constants ? 16 : s.memory_alignment, s.name);
+            else
+                out.appendf("struct {}\n{{\n", s.name);
+            if (s.memory_size > 0 && !s.is_packed)
+                write_memory_members(out, &s, s.members, p);
+            else
+                for (auto const& member : declared_members(s))
+                    write_member(out, &s, member, p);
             out += "};\n\n";
+            // a struct of a constant block is a whole number of rows, which its `alignas(16)` gives it
+            if (s.memory_size > 0 && !s.is_packed)
+                write_layout_asserts(out, s.name, s.members,
+                                     in_constants ? (s.memory_size + 15) / 16 * 16 : s.memory_size);
         }
         if (p.e.entry_stage >= stage::raygen)
             write_ray_tracing_types(out, p);
@@ -458,7 +572,7 @@ public:
             out += "    sgl_context const sgl_ctx = sgl_data.context;\n";
             write_context_bindings(out, p);
             // A hit's transforms are the identity here: metal hands a traversal function its instance's transforms
-            // only under intersection tags sg's tables do not declare (issue: feat-sgl-metal-raytracing-pipeline-dxr-parity).
+            // only under intersection tags sg's tables do not declare (issue: feat-sgl-metal-hit-instance-transforms).
             out.appendf("    sgl_hit_record sgl_hit;\n"
                         "    sgl_hit.t = {};\n"
                         "    sgl_hit.t_min = sgl_min;\n"

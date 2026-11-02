@@ -29,6 +29,9 @@ namespace sgl_lsp
 /// Each inserts itself when accepted, except where the type may not be written.
 [[nodiscard]] cc::vector<lsp::inlay_hint> inlay_hints_of(analysis const& a, lsp::range visible, lsp::position_encoding e);
 
+/// A quick fix per fix the checker suggests for a diagnostic of the document that touches `around`.
+[[nodiscard]] cc::vector<lsp::code_action> code_actions_of(analysis const& a, lsp::range around, lsp::position_encoding e);
+
 } // namespace sgl_lsp
 
 /// One test run of one analysis, and whether it was stopped before its end.

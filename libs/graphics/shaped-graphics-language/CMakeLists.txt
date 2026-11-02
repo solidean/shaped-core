@@ -49,12 +49,16 @@ add_library(shaped-graphics-language
     src/shaped-graphics-language/builtins/registry.cc
 
     src/shaped-graphics-language/check/check.cc
+    src/shaped-graphics-language/check/check_driver.cc
     src/shaped-graphics-language/check/check_arrays.cc
     src/shaped-graphics-language/check/check_case.cc
+    src/shaped-graphics-language/check/check_assignments.cc
     src/shaped-graphics-language/check/check_constants.cc
     src/shaped-graphics-language/check/check_decl.cc
     src/shaped-graphics-language/check/check_pipeline.cc
     src/shaped-graphics-language/check/check_expr.cc
+    src/shaped-graphics-language/check/check_calls.cc
+    src/shaped-graphics-language/check/check_overloads.cc
     src/shaped-graphics-language/check/check_features.cc
     src/shaped-graphics-language/check/check_options.cc
     src/shaped-graphics-language/check/check_footprint.cc
@@ -71,6 +75,9 @@ add_library(shaped-graphics-language
     src/shaped-graphics-language/check/flat_builder.cc
     src/shaped-graphics-language/check/structural_hash.cc
     src/shaped-graphics-language/check/flatten.cc
+    src/shaped-graphics-language/check/flatten_expr.cc
+    src/shaped-graphics-language/check/flatten_call.cc
+    src/shaped-graphics-language/check/flatten_stmt.cc
     src/shaped-graphics-language/check/footprint.cc
 
     src/shaped-graphics-language/legalize/core.cc
@@ -90,6 +97,7 @@ add_library(shaped-graphics-language
     src/shaped-graphics-language/emit/impl/hlsl.cc
     src/shaped-graphics-language/emit/impl/layout.cc
     src/shaped-graphics-language/emit/impl/memory_form.cc
+    src/shaped-graphics-language/emit/impl/memory_access.cc
     src/shaped-graphics-language/emit/impl/msl.cc
     src/shaped-graphics-language/emit/impl/plan.cc
     src/shaped-graphics-language/emit/impl/text_writer.cc
@@ -280,11 +288,17 @@ target_compile_features(shaped-graphics-language PUBLIC cxx_std_23)
 target_include_directories(shaped-graphics-language PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src")
 
 target_link_libraries(shaped-graphics-language PUBLIC clean-core)
+sc_declare_pch_tier(SGL EXTENDS CC_STD HEADERS
+    <shaped-graphics-language/check/checked_module.hh>
+    <shaped-graphics-language/check/check.hh>
+    <shaped-graphics-language/syntax/parsed_file.hh>
+    <shaped-graphics-language/emit/emit.hh>)
+sc_target_pch(shaped-graphics-language SGL)
 
 # Enable conforming preprocessor for MSVC
 target_compile_options(shaped-graphics-language PUBLIC $<$<CXX_COMPILER_ID:MSVC>:/Zc:preprocessor>)
 
-# `sgl`, the command line of the toolchain: a nexus binary whose jobs are COMMANDs, `sgl prelude` and `sgl emit` so far.
+# `sgl`, the command line of the toolchain: a nexus binary whose jobs are COMMANDs, `sgl prelude`, `sgl emit` and `sgl bench` so far.
 # It lives with the library because it is nothing but the library behind an argument parser.
 # Run it through `uv run dev.py run sgl -- <command> …`; `dev.py check`'s `sgl-prelude` step does.
 # Gated like tools/: a dependent that adds shaped-core as a subdirectory wants the library and not our binaries.
@@ -311,6 +325,7 @@ if(SC_BUILD_TOOLS)
         tools/sgl/lsp/protocol/stdio_host.cc
     )
     target_link_libraries(sgl-lsp-protocol PUBLIC clean-core babel-data)
+    sc_target_pch(sgl-lsp-protocol CC_ALL) # babel-data's tier, since no SGL header may reach it
 
     add_executable(sgl
         tools/sgl/main.cc
@@ -318,6 +333,7 @@ if(SC_BUILD_TOOLS)
         tools/sgl/module_dirs.hh
         tools/sgl/module_dirs.cc
         tools/sgl/describe_command.cc
+        tools/sgl/bench_command.cc
         tools/sgl/emit_command.cc
         tools/sgl/prelude_command.cc
         tools/sgl/test_command.cc
@@ -348,6 +364,7 @@ if(SC_BUILD_TOOLS)
     endif()
     # babel-data writes `describe`'s JSON; the tool may take it, and the library must not.
     target_link_libraries(sgl PRIVATE shaped-graphics-language sgl-lsp-protocol babel-data nexus)
+    sc_target_pch(sgl SGL NEXUS)
     target_compile_definitions(sgl PRIVATE SGL_SAMPLES_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/samples"
         SGL_LSP_TEST_MODULES_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tools/sgl/lsp/tests/modules")
 endif()
@@ -469,6 +486,7 @@ if(SC_BUILD_TESTS)
         # what a test loads or writes beside SGL: a Chrome trace today, textures later
         babel-serializer
     )
+    sc_target_pch(shaped-graphics-language-test SGL NEXUS)
 
     # Browser test runner (Emscripten only); no-op natively.
     sc_add_nexus_web_runner(shaped-graphics-language-test)

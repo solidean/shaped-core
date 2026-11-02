@@ -49,35 +49,14 @@ let larger = fun [T](a: T, b: T) => max(a, b)
 **`mut self` is the caller's place**, as a mut parameter is: `x.dim 0.5` changes `x`, with the index expressions of the place evaluated once.
 It is the one form of a place parameter that is not built.
 
-**Type arguments may be stated.**
-`[]` after a name signals arguments that a caller may omit and have deduced; deducing them is built, and stating them is `unsupported-yet`.
-
-```sgl sketch
-fun sum[T](values: span[T]) -> T
-
-let total = sum(weights)          // T deduced
-let exact = sum[float](weights)   // T given
-```
-
 Compile-time functions exist as well, and a type may be passed through `()` like any value.
-The difference is only deduction: a `()` parameter is never deduced, a `[]` parameter may be.
-[types-as-values.md](types-as-values.md) is what makes a type an ordinary value there.
-
-**A type parameter may be bounded**, `fun f[A: number](…)`, so a body may do more with a value of it than hand it on.
-Today a bound is `unsupported-yet`, and an opaque parameter has been enough for the prelude's traces.
-
-**A program may declare a generic struct**, `struct pair[A]:`, as the prelude does.
-Three questions stand in front of it:
-
-* A method of the template cannot name the type parameter today, so `mixed_hit.procedural()` returns through a generic helper; a program's methods would need it in scope.
-* A struct of several type parameters, and one whose argument is a value, which [types-as-values.md](types-as-values.md) makes one question.
-* What a host sees of an instance in GPU memory: `slib` generates one C++ struct per SGL struct, and an instance would be a template or one struct per instance.
+**Generics** are [generics.md](generics.md): a `[]` parameter is a `()` parameter that must be constant and may be deduced, and a body is checked per instantiation.
 
 ## What it touches
 
 * Name resolution: a nested function sees its enclosing scope.
 * The transpiler: inlining is mandatory, not an optimization, wherever a target cannot express the construct.
-* The check pass: a type parameter's bound, stated type arguments, and a generic struct's type parameter in its methods.
+* The check pass: what [generics.md](generics.md) lists.
 
 ## Already fixed by the syntax
 
@@ -91,4 +70,3 @@ Three questions stand in front of it:
 
 * Whether `mut self` is marked by the dot alone.
 * Whether a function value may be stored in a local or returned, which [inferred-comptime.md](inferred-comptime.md) would allow where the choice is static.
-* Whether compile-time functions and `[]` parameters are one mechanism or two.

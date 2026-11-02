@@ -97,7 +97,7 @@ void checker::check_pattern(function_scope& scope,
         return;
     }
     // `light_kind.point` written out is the same constant the leading dot is, and it counts for exhaustiveness too.
-    auto const& target = out.files[file].target_at(pattern);
+    auto const& target = tables_of(file).target_at(pattern);
     if (target.kind == target_kind::enum_case)
         named_cases.push_back(target.index);
     // CHK-221: a const whose value is a case names that case, which is what makes `true` and `false` exhaustive.

@@ -59,6 +59,25 @@ flow checker::check_nested(function_scope& scope, ast::body const& body)
     return result;
 }
 
+symbol_id checker::local_constant_of(function_scope const& scope, ast::decl_id decl)
+{
+    for (auto const& c : local_constants)
+        if (c.file == scope.file && c.declaration == decl)
+            return c.symbol;
+    auto const& node = ast_of(scope.file).at(decl).node.as<ast::const_decl>();
+    auto const symbol = symbol_id(out.symbols.size());
+    out.symbols.push_back({.file = scope.file,
+                           .declaration = decl,
+                           .kind = symbol_kind::constant,
+                           .name = cc::string(text_of(scope.file, node.name))});
+    auto visible = cc::vector<local_name>();
+    for (auto const& l : scope.locals)
+        if (l.where.kind == target_kind::symbol)
+            visible.push_back(l);
+    local_constants.push_back({.file = scope.file, .declaration = decl, .symbol = symbol, .visible = cc::move(visible)});
+    return symbol;
+}
+
 void checker::declare_local(function_scope& scope, local_name local)
 {
     // CHK-53: a later local shadows every earlier local and parameter of its name, and lookup finds the newest.
@@ -83,102 +102,118 @@ flow checker::check_stmt(function_scope& scope, ast::stmt_id stmt)
         judge_attributes(file, s.attributes, {}, "a statement");
 
     auto result = flow::falls_through;
-    s.node.visit([&](ast::let_stmt const& let) { check_let(scope, stmt, let); }, [&](ast::assign_stmt const& assign)
-                 { check_assign(scope, stmt, assign); }, [&](ast::if_stmt const& chain)
-                 { result = check_if(scope, chain); }, [&](ast::for_stmt const& loop) { check_for(scope, stmt, loop); },
-                 [&](ast::while_stmt const& loop)
-                 {
-                     check_condition(scope, loop.condition);
-                     scope.loops.push_back({});
-                     // A `while` ends when its condition says so, whatever the condition is, so what follows it is reachable.
-                     (void)check_nested(scope, loop.body);
-                     scope.loops.remove_back();
-                 },
-                 [&](ast::print_stmt const& print) { (void)check_expr(scope, print.message); },
-                 [&](ast::expr_stmt const& e)
-                 {
-                     if (!ast::is_valid(e.value))
-                         return;
-                     auto const& value = ast.at(e.value);
-                     if (auto const* const r = value.node.try_as<ast::return_expr>())
-                     {
-                         check_return(scope, where, r->value);
-                         result = flow::exits;
-                     }
-                     else if (auto const* const b = value.node.try_as<ast::break_expr>())
-                     {
-                         check_break(scope, where, b->value);
-                         result = flow::exits;
-                     }
-                     else if (value.node.is<ast::continue_expr>() || value.node.is<ast::discard_expr>())
-                         result = flow::exits;
-                     else if (auto const* const y = value.node.try_as<ast::yield_expr>())
-                     {
-                         check_yield(scope, where, y->value);
-                         result = flow::exits;
-                     }
-                     else if (auto const* const c = value.node.try_as<ast::case_expr>())
-                         set_type(file, e.value, check_case(scope, e.value, *c, false, &result));
-                     else if (auto const* const i = value.node.try_as<ast::if_expr>())
-                         set_type(file, e.value, check_if_value(scope, *i, false, &result));
-                     else if (auto const* const loop = value.node.try_as<ast::loop_expr>())
-                     {
-                         auto has_break = false;
-                         set_type(file, e.value, check_loop(scope, e.value, *loop, false, has_break));
-                         result = has_break ? flow::falls_through : flow::exits;
-                     }
-                     else
-                     {
-                         // A call is evaluated and its value dropped: it may have been written for its effect.
-                         // Whether a PURE one is worth a statement is the AST pass's `no-effect` warning, and no business of this pass.
-                         auto const type = check_expr(scope, e.value);
-                         auto const* const call = value.node.try_as<ast::call>();
-                         auto const is_application = call != nullptr
-                                                  && (call->spelling == ast::call_spelling::paren
-                                                      || call->spelling == ast::call_spelling::juxtaposition);
-                         // CHK-225: in a test a line of type bool is a check; the AST pass left every other line to this one.
-                         if (scope.is_test && type == type_of_builtin(builtins::k_bool, file, where))
-                             return;
-                         if (scope.is_test && !is_application && type != error_type && type != void_type)
-                             report(diagnostic_kind::no_effect, file, where, "");
-                         else if (type != error_type && type != void_type && call == nullptr)
-                             unsupported(file, where, "an expression statement");
-                     }
-                 },
-                 [&](ast::assert_stmt const& a)
-                 {
-                     // CHK-227: a bool condition; the run stops where it is false, and a target writes nothing of it
-                     check_condition(scope, a.condition);
-                     if (ast::is_valid(a.message))
-                         unsupported(file, span_of(file, a.message), "an assert message");
-                 },
-                 [&](ast::decl_stmt const& d)
-                 {
-                     // CHK-224: a test in a function body is checked on its own, with the function's names visible and unusable
-                     if (ast::is_valid(d.declaration) && ast.at(d.declaration).node.is<ast::test_decl>())
-                     {
-                         // one inside another test was reported by the AST pass
-                         if (!scope.is_test)
-                             add_test(file, d.declaration, cc::format("fun {}", out.at(scope.function).name), &scope);
-                         return;
-                     }
-                     // CHK-262: a body's `require` stands among its own lines; a block of its own is not carried yet
-                     if (auto const* const r = ast::is_valid(d.declaration)
-                                                 ? ast.at(d.declaration).node.try_as<ast::require_decl>()
-                                                 : nullptr)
-                     {
-                         judge_attributes(file, ast.at(d.declaration).attributes, {}, "a require");
-                         if (scope.depth > 0)
-                             unsupported(file, where, "a `require` inside a block");
-                         else
-                             read_require(file, *r, require_scope::body, scope.function);
-                         return;
-                     }
-                     // CHK-347: a `use` binds its name for the whole file, and a body is not where a file's lines go
-                     auto const is_use = ast::is_valid(d.declaration) && ast.at(d.declaration).node.is<ast::use_decl>();
-                     unsupported(file, where, is_use ? "`use` inside a function" : "a declaration inside a function");
-                 },
-                 [&](ast::invalid_stmt const&) { result = flow::unknown; });
+    s.node.visit(
+        [&](ast::let_stmt const& let) { check_let(scope, stmt, let); }, [&](ast::assign_stmt const& assign)
+        { check_assign(scope, stmt, assign); }, [&](ast::if_stmt const& chain) { result = check_if(scope, chain); },
+        [&](ast::for_stmt const& loop) { check_for(scope, stmt, loop); },
+        [&](ast::while_stmt const& loop)
+        {
+            check_condition(scope, loop.condition);
+            scope.loops.push_back({});
+            // A `while` ends when its condition says so, whatever the condition is, so what follows it is reachable.
+            (void)check_nested(scope, loop.body);
+            scope.loops.remove_back();
+        },
+        // CHK-420: its own scope, whose locals end with it; what it returns or leaves is what the statement does
+        [&](ast::scope_stmt const& block) { result = check_nested(scope, block.body); },
+        [&](ast::print_stmt const& print) { (void)check_expr(scope, print.message); },
+        [&](ast::expr_stmt const& e)
+        {
+            if (!ast::is_valid(e.value))
+                return;
+            auto const& value = ast.at(e.value);
+            if (auto const* const r = value.node.try_as<ast::return_expr>())
+            {
+                check_return(scope, where, r->value);
+                result = flow::exits;
+            }
+            else if (auto const* const b = value.node.try_as<ast::break_expr>())
+            {
+                check_break(scope, where, b->value);
+                result = flow::exits;
+            }
+            else if (value.node.is<ast::continue_expr>() || value.node.is<ast::discard_expr>())
+                result = flow::exits;
+            else if (auto const* const y = value.node.try_as<ast::yield_expr>())
+            {
+                check_yield(scope, where, y->value);
+                result = flow::exits;
+            }
+            else if (auto const* const c = value.node.try_as<ast::case_expr>())
+                set_type(file, e.value, check_case(scope, e.value, *c, false, &result));
+            else if (auto const* const i = value.node.try_as<ast::if_expr>())
+                set_type(file, e.value, check_if_value(scope, *i, false, &result));
+            else if (auto const* const loop = value.node.try_as<ast::loop_expr>())
+            {
+                auto has_break = false;
+                set_type(file, e.value, check_loop(scope, e.value, *loop, false, has_break));
+                result = has_break ? flow::falls_through : flow::exits;
+            }
+            else
+            {
+                // A call is evaluated and its value dropped: it may have been written for its effect.
+                // Whether a PURE one is worth a statement is the AST pass's `no-effect` warning, and no business of this pass.
+                auto const type = check_expr(scope, e.value);
+                auto const* const call = value.node.try_as<ast::call>();
+                auto const is_application = call != nullptr
+                                         && (call->spelling == ast::call_spelling::paren
+                                             || call->spelling == ast::call_spelling::juxtaposition);
+                // CHK-225: in a test a line of type bool is a check; the AST pass left every other line to this one.
+                if (scope.is_test && type == type_of_builtin(builtins::k_bool, file, where))
+                    return;
+                if (scope.is_test && !is_application && type != error_type && type != void_type)
+                    report(diagnostic_kind::no_effect, file, where, "");
+                else if (type != error_type && type != void_type && call == nullptr)
+                    unsupported(file, where, "an expression statement");
+            }
+        },
+        [&](ast::assert_stmt const& a)
+        {
+            // CHK-227: a bool condition; the run stops where it is false, and a target writes nothing of it
+            check_condition(scope, a.condition);
+            if (ast::is_valid(a.message))
+                unsupported(file, span_of(file, a.message), "an assert message");
+        },
+        [&](ast::decl_stmt const& d)
+        {
+            // CHK-224: a test in a function body is checked on its own, with the function's names visible and unusable
+            if (ast::is_valid(d.declaration) && ast.at(d.declaration).node.is<ast::test_decl>())
+            {
+                // one inside another test was reported by the AST pass
+                if (!scope.is_test)
+                    add_test(file, d.declaration, cc::format("fun {}", out.at(scope.function).name), &scope);
+                return;
+            }
+            // CHK-262: a body's `require` stands among its own lines; a block of its own is not carried yet
+            if (auto const* const r
+                = ast::is_valid(d.declaration) ? ast.at(d.declaration).node.try_as<ast::require_decl>() : nullptr)
+            {
+                judge_attributes(file, ast.at(d.declaration).attributes, {}, "a require");
+                if (scope.depth > 0)
+                    unsupported(file, where, "a `require` inside a block");
+                else
+                    read_require(file, *r, require_scope::body, scope.function);
+                return;
+            }
+            // CHK-413: a function's own `const` is computed as a file-scope one is, and named from its line on
+            if (auto const* const c
+                = ast::is_valid(d.declaration) ? ast.at(d.declaration).node.try_as<ast::const_decl>() : nullptr)
+            {
+                judge_attributes(file, ast.at(d.declaration).attributes, {}, "a const in a function");
+                if (c->name.empty())
+                    return;
+                auto const symbol = local_constant_of(scope, d.declaration);
+                auto const state = demand(symbol, file, c->name);
+                declare_local(scope, {.name = text_of(file, c->name),
+                                      .where = {.kind = target_kind::symbol, .symbol = symbol},
+                                      .type = state == symbol_state::checked ? out.at(symbol).type : error_type});
+                return;
+            }
+            // CHK-347: a `use` binds its name for the whole file, and a body is not where a file's lines go
+            auto const is_use = ast::is_valid(d.declaration) && ast.at(d.declaration).node.is<ast::use_decl>();
+            unsupported(file, where, is_use ? "`use` inside a function" : "a declaration inside a function");
+        },
+        [&](ast::invalid_stmt const&) { result = flow::unknown; });
     return result;
 }
 
@@ -189,8 +224,11 @@ void checker::check_let(function_scope& scope, ast::stmt_id id, ast::let_stmt co
     auto const where = span_of(file, id);
 
     auto type = error_type;
-    if (!ast::is_valid(let.value))
-        unsupported(file, where, "a let without a value");
+    // CHK-55: a value assigned later needs a local that may be assigned, and a type nothing else would give it
+    if (!ast::is_valid(let.value) && !let.is_mut)
+        unsupported(file, where, "a let without a value that is no `let mut`, which nothing could assign");
+    else if (!ast::is_valid(let.value) && !ast::is_valid(let.type))
+        unsupported(file, where, "a let without a value or a written type: `let mut x: float`");
     // CHK-82: a written type is expected of the value, which a literal converts to
     if (ast::is_valid(let.type))
     {
@@ -235,7 +273,7 @@ bool checker::judge_place(function_scope& scope, ast::expr_id expr, cc::string_v
 
     auto const is_image_texel = [&](ast::index const& indexed)
     {
-        auto const object = out.files[file].type_at(indexed.object);
+        auto const object = tables_of(file).type_at(indexed.object);
         return object != type_id::none && out.at(object).kind == type_kind::image;
     };
     // CHK-367: a texel is stored whole by an assignment, so neither a member of one nor a call writes through it
@@ -265,11 +303,11 @@ bool checker::judge_place(function_scope& scope, ast::expr_id expr, cc::string_v
         auto const* const m = ast.at(operand).node.try_as<ast::member>();
         if (m == nullptr)
             break;
-        auto const& t = out.files[file].target_at(operand);
+        auto const& t = tables_of(file).target_at(operand);
         auto const is_swizzle = t.kind == target_kind::swizzle;
         if (!is_swizzle
             && (t.kind != target_kind::field || !ast::is_valid(m->object)
-                || out.files[file].target_at(m->object).kind != target_kind::swizzle))
+                || tables_of(file).target_at(m->object).kind != target_kind::swizzle))
             break;
         if (is_swizzle && swizzle::unpacked(t.index).has_repeats())
             return refuse(span_of(file, expr), cc::format("{} names a field twice, and a swizzle that does is no place",
@@ -292,7 +330,7 @@ bool checker::judge_place(function_scope& scope, ast::expr_id expr, cc::string_v
     // An array element is part of the local that holds it, and a buffer element is a place of its own.
     auto const kind_of_object = [&](ast::index const& indexed)
     {
-        auto const object = out.files[file].type_at(indexed.object);
+        auto const object = tables_of(file).type_at(indexed.object);
         return object != type_id::none ? out.at(object).kind : type_kind::error;
     };
 
@@ -302,7 +340,7 @@ bool checker::judge_place(function_scope& scope, ast::expr_id expr, cc::string_v
         indexed = nullptr;
     if (indexed != nullptr)
     {
-        auto const object = out.files[file].type_at(indexed->object);
+        auto const object = tables_of(file).type_at(indexed->object);
         // What it is when it is no buffer at all was reported by `check_index`.
         if (object != type_id::none && out.at(object).kind == type_kind::buffer && !out.at(object).is_mut)
             return refuse(span_of(file, expr), "this buffer is read-only; `mut buffer[T]` declares one a shader "
@@ -325,13 +363,13 @@ bool checker::judge_place(function_scope& scope, ast::expr_id expr, cc::string_v
         }
         if (!node.is<ast::member>())
             break;
-        auto const kind = out.files[file].target_at(root).kind;
+        auto const kind = tables_of(file).target_at(root).kind;
         if ((kind == target_kind::overload || kind == target_kind::array_length) && !ast::is_valid(property))
             property = root;
         root = node.as<ast::member>().object;
     }
     if (ast::is_valid(property))
-        return refuse(span_of(file, expr), out.files[file].target_at(property).kind == target_kind::array_length
+        return refuse(span_of(file, expr), tables_of(file).target_at(property).kind == target_kind::array_length
                                                ? cc::string("an array's length is part of its type, and never assigned")
                                                : cc::format("{} is a property, which is read-only",
                                                             text_of(file, ast.at(property).node.as<ast::member>().name)));
@@ -339,7 +377,7 @@ bool checker::judge_place(function_scope& scope, ast::expr_id expr, cc::string_v
         return true;
 
     auto const* const n = ast.at(root).node.try_as<ast::name>();
-    auto const& named = out.files[file].target_at(root);
+    auto const& named = tables_of(file).target_at(root);
     auto const* local = static_cast<local_name const*>(nullptr);
     for (auto const& l : scope.locals)
         if (n != nullptr && l.where == named)
@@ -444,13 +482,60 @@ flow checker::check_if(function_scope& scope, ast::if_stmt const& chain)
     return has_else ? result : flow::falls_through;
 }
 
+checker::range_walk checker::range_walk_of(i32 file, ast::expr_id iterable) const
+{
+    auto const& ast = ast_of(file);
+    auto result = range_walk();
+    auto e = iterable;
+    while (ast::is_valid(e))
+    {
+        auto const& node = ast.at(e).node;
+        if (auto const* const r = node.try_as<ast::range>())
+        {
+            result.range = r;
+            break;
+        }
+        if (auto const* const m = node.try_as<ast::member>(); m != nullptr && text_of(file, m->name) == "reversed")
+        {
+            result.steps.insert_at(0, ast::expr_id::none);
+            e = m->object;
+            continue;
+        }
+        auto const* const call = node.try_as<ast::call>();
+        auto const* const callee
+            = call != nullptr && ast::is_valid(call->callee) ? ast.at(call->callee).node.try_as<ast::member>() : nullptr;
+        if (callee == nullptr || text_of(file, callee->name) != "by" || ast.at(call->arguments).size() != 1
+            || !ast.at(call->arguments)[0].name.empty() || ast.at(call->arguments)[0].is_splat)
+            return {};
+        result.steps.insert_at(0, ast.at(call->arguments)[0].value);
+        e = callee->object;
+    }
+    return result.range != nullptr ? result : range_walk();
+}
+
 void checker::check_for(function_scope& scope, ast::stmt_id id, ast::for_stmt const& loop)
 {
     auto const file = scope.file;
     auto const& ast = ast_of(file);
     auto const int_type = type_of_builtin(builtins::k_int, file, span_of(file, id));
 
-    auto const* const r = ast::is_valid(loop.iterable) ? ast.at(loop.iterable).node.try_as<ast::range>() : nullptr;
+    auto const walk = ast::is_valid(loop.iterable) ? range_walk_of(file, loop.iterable) : range_walk();
+    auto const* const r = walk.range;
+    // CHK-415: a step is an int constant of at least 1, so the walk's length is known from its bounds alone
+    for (auto const step : walk.steps)
+    {
+        if (!ast::is_valid(step))
+            continue;
+        auto const value = constant_count(file, step, &scope);
+        if (value.has_value() && value.value() >= 1)
+            set_type(file, step, int_type);
+        else
+        {
+            (void)check_expr(scope, step);
+            report(diagnostic_kind::invalid_constant_argument, file, span_of(file, step),
+                   "a range's step is an int constant of at least 1: a literal or a `const`");
+        }
+    }
     if (r == nullptr)
     {
         if (check_expr(scope, loop.iterable) != error_type)
@@ -467,9 +552,10 @@ void checker::check_for(function_scope& scope, ast::stmt_id id, ast::for_stmt co
         };
         bound(r->first);
         bound(r->last);
-        // `..=` has no flat form: `end + 1` wraps where the last int is the end
-        if (sgl::is_valid(r->op) && text_of(file, file_of(file).at(r->op).where) != "..<")
-            unsupported(file, span_of(file, loop.iterable), "a for over a range that is not `..<`");
+        // `..<` and `..=` are the two ranges (OP-8); anything else the AST reports
+        if (sgl::is_valid(r->op) && text_of(file, file_of(file).at(r->op).where) != "..<"
+            && text_of(file, file_of(file).at(r->op).where) != "..=")
+            unsupported(file, span_of(file, loop.iterable), "a for over a range that is neither `..<` nor `..=`");
     }
 
     if (ast::is_valid(loop.type))
@@ -588,16 +674,20 @@ void checker::check_return(function_scope& scope, source_span where, ast::expr_i
 
 // ---- recursion ------------------------------------------------------------------------------------------------------
 
-void checker::find_recursion()
+void checker::find_recursion(isize first)
 {
     // 0 is unvisited, 1 is on the path, 2 is done; one entry per function, as `notes`
+    // A lower layer's function is done: it calls only its own layer's, whose loops were found when it was checked.
     auto state = cc::vector<u8>::create_filled(notes.size(), 0);
+    for (auto i = isize(0); i < first; ++i)
+        if (auto const& s = out.symbols[i]; s.kind == symbol_kind::function && s.info >= 0)
+            state[s.info] = 2;
     auto path = cc::vector<symbol_id>();
 
     // Each function's calls, so a visit walks its own edges rather than every edge of the module.
     auto calls_of = cc::vector<cc::vector<isize>>::create_defaulted(notes.size());
     for (auto i = isize(0); i < calls.size(); ++i)
-        if (auto const info = out.at(calls[i].caller).info; info >= 0)
+        if (auto const info = out.at(calls[i].caller).info; info >= 0 && state[info] == 0)
             calls_of[info].push_back(i);
 
     auto const visit = [&](auto&& self, symbol_id f) -> void
@@ -632,7 +722,7 @@ void checker::find_recursion()
         state[out.at(f).info] = 2;
     };
 
-    for (auto i = isize(0); i < out.symbols.size(); ++i)
+    for (auto i = first; i < out.symbols.size(); ++i)
     {
         auto const& s = out.symbols[i];
         if (s.kind == symbol_kind::function && s.info >= 0 && state[s.info] == 0)

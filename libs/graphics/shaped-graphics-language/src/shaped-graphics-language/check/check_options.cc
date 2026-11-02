@@ -129,6 +129,8 @@ void checker::note_option(i32 file, source_span where, constant_info const& c)
 {
     if (is_valid(c.option))
         out.option_uses.push_back({.option = c.option, .file = file, .where = where});
+    for (auto const option : c.computed_options)
+        out.option_uses.push_back({.option = option, .file = file, .where = where});
 }
 
 cc::vector<symbol_id> checker::options_reached(symbol_id function, symbol_id also)

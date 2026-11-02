@@ -59,6 +59,7 @@ struct sv::wavefront_trace_desc
     wavefront_state* state = nullptr;
 
     /// How many segments every live path may take this frame.
+    /// A frame that writes guides of a trace holding a partial coverage runs one more, for the guide rays its samples follow.
     i32 rounds = 1;
 
     /// Whether every path and every tally starts over, since the image describes something else now.
@@ -82,7 +83,7 @@ struct sv::wavefront_trace_desc
     /// Never restarts anything, so raising it carries on from the samples the pixels hold.
     u32 sample_target = 0;
 
-    /// Where set, receives how many paths entered each of the frame's rounds, `rounds` values once the list has run.
+    /// Where set, receives how many paths entered each of the frame's rounds, a value per round run once the list has run.
     /// A diagnostic: it costs a copy per round and a readback, so nothing sets it on an ordinary frame.
     sg::data_future<u32>* live_paths = nullptr;
 
@@ -122,11 +123,14 @@ public:
     /// How many medium scatters a walk takes before its Russian roulette may end it: `pt.roulette_after` in shaders/sgl/pt_sampling.sgl.
     static constexpr i32 medium_roulette_after = 16;
 
-    /// The rounds a draining frame runs under `max_bounces`: the primary segment and one per surface bounce, then a medium walk up to where its roulette starts.
+    /// How many refractions through smooth glass a path takes without spending a bounce: `free_refraction_cap` in shaders/sgl/tracer_shade.sgl.
+    static constexpr i32 free_refractions = 8;
+
+    /// The rounds a draining frame runs under `max_bounces`: the primary segment, one per surface bounce and free refraction, then a medium walk up to where its roulette starts.
     /// A walk deeper than that is still alive when the frame ends.
     [[nodiscard]] static constexpr i32 drain_rounds(i32 max_bounces)
     {
-        return (max_bounces > 0 ? max_bounces : 0) + 1 + medium_roulette_after;
+        return (max_bounces > 0 ? max_bounces : 0) + free_refractions + 1 + medium_roulette_after;
     }
 
 protected:
@@ -188,4 +192,5 @@ namespace sv::impl
 {
 /// `frame_constants::wavefront_flags`, as `wavefront_flag_*` in shaders/sgl/tracer_wavefront.sgl name them.
 inline constexpr u32 wavefront_flag_restart = 1;
+inline constexpr u32 wavefront_flag_guide_rays = 2;
 } // namespace sv::impl

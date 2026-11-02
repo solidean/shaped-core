@@ -1,0 +1,30 @@
+// a plain vector's constructor converts each scalar of another kind of one width, as `as` would (CHK-421)
+
+fun spread(a: uint, b: uint, c: uint) -> float3 => float3(a * 4u + b, c, 1.0)
+
+test spread(1u, 2u, 3u) == float3(6.0, 3.0, 1.0)
+
+fun rounded(x: float, y: float) -> int2 => int2(x, y)
+
+// a float converts toward zero, as `as int` does
+test rounded(2.7, -1.5) == int2(2, -1)
+
+test:
+    let i = -3
+    let u = 7u
+    uint3(i, u, 5) == uint3(i as uint, 7u, 5u)
+    float4(i, u, 0.5, 1) == float4(-3.0, 7.0, 0.5, 1.0)
+
+// a strong vector keeps its kind: `vec3` and `pos3` convert nothing
+@expect(error = "no-matching-overload")
+test:
+    let n = 1u
+    vec3(n, n, n) == vec3(1.0, 1.0, 1.0)
+
+// a width never changes on its own: a half is no float component
+require shader_f16
+
+@expect(error = "no-matching-overload")
+test:
+    let h = half(0.5)
+    float2(h, h) == float2(0.5, 0.5)

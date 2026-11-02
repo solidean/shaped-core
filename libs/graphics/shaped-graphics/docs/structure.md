@@ -202,8 +202,8 @@ Every resource's backing memory is either **dedicated** (self-allocating) or **p
 `memory_heap` is an immutable factory for `allocation_info` — allocation tracking lives in the caller's own allocator on top.
 Lifetime modes and the placed-vs-dedicated system: [concepts/memory.md](concepts/memory.md).
 
-`context` exposes `try_create_memory_heap`, and placement is live for **dx12 buffers** — that is what `ctx.transient`'s bump allocator runs on.
-Still dedicated-only: **dx12 textures** and **all vulkan resources**, both of which assert on a placed `allocation_info`.
+`context` exposes `try_create_memory_heap` for a heap of buffers or of textures, which is what `ctx.transient`'s two bump allocators run on.
+Placement is live for buffers on dx12, vulkan and metal and for textures on dx12 and vulkan; webgpu places nothing.
 
 ## Planned surface (beyond the current stubs)
 

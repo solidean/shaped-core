@@ -16,6 +16,7 @@ from pathlib import Path
 
 from tools import dev
 from tools.dev import console
+from tools.dev.lib.core import memory_guard
 from tools.dev.lib.project.targets import carries_examples, carries_tests, is_stub, is_tool
 
 
@@ -38,6 +39,8 @@ class Policy:
     layout: dev.Layout
     # The integration branch; `check` scopes itself to everything since its merge base.
     default_branch: str
+    # The opt-in repositories `companions` clones into gitignored paths (lib/project/companions.py).
+    companions: tuple[dev.Companion, ...] = ()
 
 
 @dataclass
@@ -46,6 +49,10 @@ class Context:
 
     root: Path
     policy: Policy
+
+    def __post_init__(self) -> None:
+        # every consumer's dev.py builds one before running a command, so the guard is everyone's default (lib/core/memory_guard.py)
+        memory_guard.install()
 
     def die(self, msg: str) -> None:
         print(console.red(f"ERROR: {msg}"), file=sys.stderr)

@@ -6,6 +6,8 @@
 //
 // Every sv view target holds PREMULTIPLIED alpha: straight alpha is not associative across a nesting chain, and a three-level composite would visibly darken edges.
 
+use display
+
 /// Rewritten per draw.
 @inline binding layout_constants:
     /// xy scale, zw bias — the primary source's sub-rect
@@ -18,6 +20,8 @@
     wipe: float4
     /// the wipe's seam band
     separator_color: float4
+    /// view only: x the exposure scale, y the `display.curve_*` the sample is mapped through
+    display: float4
 
 /// The sampler is dynamic rather than static: a draw picks nearest or linear, so its state is the caller's.
 binding layout_sources:
@@ -52,10 +56,11 @@ struct layout_varyings:
 @pixel fun border_ps(v: layout_varyings){layout_constants} -> layout_target:
     return { color = layout_constants.tint }
 
-// One view across its rect.
+// One view across its rect, through its display transform.
 @pixel fun view_ps(v: layout_varyings){layout_sources, layout_constants} -> layout_target:
     let sample = layout_sources.source_0.sample(v.uv0, layout_sources.source_sampler, level = 0.0)
-    return { color = sample * layout_constants.tint }
+    let shown = display.transform_premultiplied(sample, layout_constants.display.x, layout_constants.display.y as uint)
+    return { color = shown * layout_constants.tint }
 
 // Two views split along an axis, with an optional separator band on the split itself.
 @pixel fun wipe_ps(v: layout_varyings){layout_sources, layout_constants} -> layout_target:

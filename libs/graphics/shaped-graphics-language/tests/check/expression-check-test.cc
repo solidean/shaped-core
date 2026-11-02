@@ -274,7 +274,9 @@ TEST("sgl check - let introduces an immutable local, in order")
     CHECK(body_reports("let k = 1.0\nreturn k\n") == "");
     CHECK(body_reports("let x : vec3 = k\nreturn k\n") == "type-mismatch user:[k] expected vec3, got float\n");
     CHECK(body_reports("let mut a = k\nreturn a\n") == "");
-    CHECK(body_reports("let a : float\nreturn k\n") == "unsupported-yet user:[let a : float] a let without a value\n");
+    CHECK(body_reports("let a : float\nreturn k\n")
+          == "unsupported-yet user:[let a : float] a let without a value that is no `let mut`, which nothing could "
+             "assign\n");
     CHECK(body_reports("let (a, b) = k\nreturn k\n") == "unsupported-yet user:[(a, b)] a pattern in let\n");
 }
 
@@ -284,7 +286,14 @@ TEST("sgl check - a local or a parameter shadows a module-level name, and hides 
     CHECK(body_reports("let dot = k\nreturn dot\n") == "");
     CHECK(body_reports("let length = length v\nreturn length\n") == "");
     // one namespace: behind the local, the name is no function and no type
-    CHECK(body_reports("let dot = k\nreturn dot v v\n") == "unsupported-yet user:[dot] a call of a local value\n");
+    // and the error says which name it hides, since a port meets this as a parameter named like a builtin
+    CHECK(body_reports("let dot = k\nreturn dot v v\n")
+          == "unsupported-yet user:[dot] a call of a local value: the local dot hides the prelude's dot, so rename the "
+             "local\n");
+    CHECK(reports_for("fun f(pow: float) -> float => pow(2.0, pow)\n")
+          == "unsupported-yet user:[pow] a call of a local value: the parameter pow hides the prelude's pow, so rename "
+             "the parameter\n");
+    CHECK(body_reports("let h = k\nreturn h(k)\n") == "unsupported-yet user:[h] a call of a local value\n");
     // a builtin type is @shadowable(false), so these two need a prelude whose types may be hidden
     auto const shadowable = shadowable_builtins_text();
     CHECK(reports_of(check_sources(shadowable, body_source("let float = k\nlet a : float = k\nreturn k\n")))
@@ -307,8 +316,8 @@ TEST("sgl check - statements and expressions the tracer does not carry")
 {
     CHECK(body_reports("for i in v:\n    return k\nreturn k\n")
           == "unsupported-yet user:[v] a for over anything but an int range\n");
-    CHECK(body_reports("for i in 0 ..= 3:\n    return k\nreturn k\n")
-          == "unsupported-yet user:[0 ..= 3] a for over a range that is not `..<`\n");
+    // EVAL-101: `..=` is a range a for runs over, its last value included
+    CHECK(body_reports("for i in 0 ..= 3:\n    return k\nreturn k\n") == "");
     CHECK(body_reports("assert k > 0.0, \"positive\"\nreturn k\n")
               .contains("unsupported-yet user:[\"positive\"] an assert message"));
     // a call may be written for its effect, so its value may be dropped; any other expression has none to be written for
@@ -366,9 +375,10 @@ TEST("sgl check - a call one `mut` mark away from a candidate says which paramet
                       "fun f() -> float:\n    let mut a = 1.0\n    let mut b = 2.0\n    both(a, b)\n    return a\n")
               .contains("x and y are mut parameters, so their arguments are places marked `mut`, as in "
                         "`both(mut a, mut b)`"));
-    // a dot call has no place for the mark, so the fix is the free call
-    CHECK(reports_for(cc::format("{}fun f() -> float:\n    let mut v = 1.0\n    v.twice()\n    return v\n", twice))
-              .contains("x is a mut parameter, so its argument is a place marked `mut`, as in `twice(mut v)`"));
+    // CHK-416: a dot call's receiver that is a place needs no mark, and one that is none says why
+    CHECK(reports_for(cc::format("{}fun f() -> float:\n    let mut v = 1.0\n    v.twice()\n    return v\n", twice)) == "");
+    CHECK(reports_for(cc::format("{}fun f() -> float:\n    let k = 1.0\n    k.twice()\n    return k\n", twice))
+              .contains("and `k` is none: k is immutable; `let mut` declares a local an assignment may name"));
 }
 
 TEST("sgl check - a select written with its condition last says the condition comes first")
@@ -592,4 +602,65 @@ TEST("sgl check - a constant count or divisor is judged alone, whatever stands b
               .contains("constant-without-value"));
     // a float divided by a constant zero at run time is an infinity every target gives alike
     CHECK(reports_for(cc::format("{}    res.floats[0] = (id.x as float) / 0.0\n", head)) == "");
+}
+
+TEST("sgl check - a let mut without a value is read only after every path assigned it")
+{
+    // CHK-55: an if with an else assigns on both paths, and a loop: on the path through its break
+    CHECK(reports_for("fun pick(c: bool, a: float) -> float:\n    let mut v: float\n    if c:\n        let s = a * "
+                      "2.0\n"
+                      "        v = s\n    else:\n        v = -a\n    return v\n"
+                      "binding o:\n    out_v: mut buffer[float]\n"
+                      "@compute(1) fun main(@thread_id id: int3){o}:\n    o.out_v[0] = pick(id.x > 0, 1.0)\n")
+          == "");
+    // an if without an else, and a for whose body may never run, leave a path that assigns nothing
+    auto const half = reports_for("binding o:\n    out_v: mut buffer[float]\n"
+                                  "@compute(1) fun main(@thread_id id: int3){o}:\n    let mut x: float\n"
+                                  "    if id.x > 0:\n        x = 1.0\n    o.out_v[0] = x\n");
+    CHECK(half.contains("read-before-assignment user:[x] x is read here, and a path to here assigns it nothing"));
+    auto const looped = reports_for("binding o:\n    out_v: mut buffer[float]\n"
+                                    "@compute(1) fun main(@thread_id id: int3){o}:\n    let mut x: float\n"
+                                    "    for i in 0 ..< id.x:\n        x = 1.0\n    o.out_v[0] = x\n");
+    CHECK(looped.contains("read-before-assignment"));
+    // a member assigned is part of it, which needs the rest assigned first
+    CHECK(reports_for("binding o:\n    out_v: mut buffer[float2]\n"
+                      "@compute(1) fun main(@thread_id id: int3){o}:\n    let mut p: float2\n    p.x = 1.0\n"
+                      "    o.out_v[0] = p\n")
+              .contains("read-before-assignment"));
+    // without mut nothing could assign it, and without a type nothing says what it holds
+    CHECK(body_reports("let v: float\nreturn k\n").contains("a let without a value that is no `let mut`"));
+    CHECK(body_reports("let mut v\nreturn k\n").contains("a let without a value or a written type"));
+}
+
+TEST("sgl check - an as whose type is arithmetic names the precedence, and its fix converts each operand")
+{
+    // CHK-411: reported once over the run, whose fix gives each `as` the operand before it
+    auto const prefix = cc::string("fun f(xx: int, center: int) -> float:\n    let d = ");
+    auto const slip_in = [&](cc::string_view line) -> cc::optional<sgl::check::located_diagnostic>
+    {
+        auto const s = check_sources(read_prelude(), prefix + line + "\n    return d\n");
+        auto found = cc::optional<sgl::check::located_diagnostic>();
+        for (auto const& d : s.module.diagnostics)
+            if (d.what.kind == sgl::diagnostic_kind::as_precedence)
+            {
+                CHECK(!found.has_value()).dump("reports", reports_of(s));
+                found = d;
+            }
+        return found;
+    };
+
+    auto const slip = slip_in("xx as float - center as float");
+    REQUIRE(slip.has_value());
+    CHECK(slip.value().detail.contains("`as` binds looser than `-`, so this converts to the type `float - center`"))
+        .dump("detail", slip.value().detail);
+    REQUIRE(slip.value().fixes.size() == 1);
+    REQUIRE(slip.value().fixes[0].edits.size() == 1);
+    CHECK(slip.value().fixes[0].edits[0].text == "(xx as float) - (center as float)");
+    CHECK(slip.value().fixes[0].edits[0].where.offset == prefix.size());
+
+    // a parenthesized operand stays whole, and `a + b as float` converts the sum, as written
+    auto const grouped = slip_in("(xx + 1) as float * 2.0 + center as float");
+    REQUIRE(grouped.has_value());
+    CHECK(grouped.value().fixes[0].edits[0].text == "((xx + 1) as float) * 2.0 + (center as float)");
+    CHECK(reports_for(prefix + "(xx + center) as float\n    return d\n") == "");
 }

@@ -82,6 +82,8 @@ enum class sgl::diagnostic_kind : sgl::u8
     statement_in_expression,
     /// Keywords that head nothing together, such as `mut` without `let`.
     unexpected_keyword,
+    /// A keyword followed by `:` or `=`, where a name stands: a member or a parameter called `type`.
+    keyword_as_name,
     /// A keyword form holding more expressions than it takes: `return a, b`, `continue x`.
     too_many_arguments,
     for_takes_name_in_range,
@@ -120,6 +122,8 @@ enum class sgl::diagnostic_kind : sgl::u8
     /// Two candidates take exactly these argument types.
     ambiguous_overload,
     type_mismatch,
+    /// An `as` whose type is an arithmetic run, `x as float - y`: `as` binds looser than arithmetic (CHK-411).
+    as_precedence,
     /// A symbol that needs itself to be compiled.
     dependency_cycle,
     /// A `use` that names a module no file of the library declares.
@@ -154,6 +158,8 @@ enum class sgl::diagnostic_kind : sgl::u8
     recursive_call,
     /// An assignment to what is no mutable local and no member of one.
     not_assignable,
+    /// A read of a `let mut` declared without a value, on a path where nothing has assigned it yet.
+    read_before_assignment,
     /// A statement after a jump in its list, which never runs; a warning.
     unreachable_code,
     /// A `case` that neither names every case of its enum nor carries a `_`.
@@ -170,6 +176,8 @@ enum class sgl::diagnostic_kind : sgl::u8
     feature_not_declared,
     /// A `require` in a body that nothing needed; a warning.
     unused_require,
+    /// A generic function nothing instantiates, so only its names were checked; a warning.
+    generic_not_instantiated,
     /// A function reached from an entry point of a stage its `@stages` leaves out, `sample` in a compute shader.
     stage_not_allowed,
     /// A `pipeline` whose stages do not fit together, or a setting that names no field or has a value it cannot.

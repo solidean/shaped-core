@@ -69,8 +69,26 @@ void vulkan_buffer::on_expired() const
 
 vulkan_buffer::~vulkan_buffer()
 {
+    // a pending upload no list waits on can never be read now, so its context waits on nothing (upload_contexts.hh)
+    if (_upload_group != nullptr)
+        _upload_group->contexts.release_unawaited(_upload_group->awaited_value.load(cc::memory_order_acquire));
     release_storage();
 } // no-op if expire() already released the storage
+
+VkBufferUsageFlags vulkan_context::vk_buffer_usage(sg::buffer_usages usage) const
+{
+    auto flags = to_vk_buffer_usage(usage);
+    // A micromap's storage and inputs are acceleration-structure buffers to sg, so they carry Vulkan's micromap bits as well.
+    // Only where the extension is enabled: naming its bits otherwise is invalid.
+    if (is_opacity_micromap_supported())
+    {
+        if (usage.has(sg::buffer_usage::accel_structure_storage))
+            flags |= VK_BUFFER_USAGE_MICROMAP_STORAGE_BIT_EXT;
+        if (usage.has(sg::buffer_usage::accel_structure_build_input))
+            flags |= VK_BUFFER_USAGE_MICROMAP_BUILD_INPUT_READ_ONLY_BIT_EXT;
+    }
+    return flags;
+}
 
 cc::result<vulkan_buffer_handle> vulkan_context::create_vulkan_buffer(isize size_in_bytes,
                                                                       sg::buffer_usages usage,
@@ -101,7 +119,7 @@ cc::result<vulkan_buffer_handle> vulkan_context::create_vulkan_buffer(isize size
         auto const buffer_info = VkBufferCreateInfo{
             .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
             .size = VkDeviceSize(size_in_bytes),
-            .usage = to_vk_buffer_usage(usage) | extra_usage,
+            .usage = vk_buffer_usage(usage) | extra_usage,
             .sharingMode = shared ? VK_SHARING_MODE_CONCURRENT : VK_SHARING_MODE_EXCLUSIVE,
             .queueFamilyIndexCount = shared ? 2u : 0u,
             .pQueueFamilyIndices = shared ? families : nullptr,

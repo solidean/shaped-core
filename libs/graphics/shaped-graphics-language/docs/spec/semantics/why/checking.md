@@ -139,8 +139,9 @@ A rule that looked at the condition would make a program's validity depend on wh
 ## CHK-129
 
 The language's model was that a body is checked where it is inlined, since a generic has no types before that.
-Generics arrived the other way: a type parameter is opaque, so a generic body means the same at every call too, and is checked once (CHK-338).
+A function that is not generic means the same at every call, so its body is checked once.
 Checking once is what reports an error in a function nobody calls, and what reports it one time where three calls would report it three times.
+A generic body is checked per instance (CHK-338), and keeps both properties as far as it can: its names are checked where it is written, and an error is reported once.
 
 ## CHK-131
 
@@ -329,6 +330,14 @@ A shader ported from HLSL, GLSL or MSL writes `float(i)`, and every one of those
 Refusing it would only send the author to `as`, and a second meaning would be worse than none.
 So the call is exactly the conversion `as` is, with the same overloads and the same unspecified values, and never a reinterpretation of bits, which `from_bits` is.
 A type `as` does not reach stays unreachable this way too, so `bool` keeps its one explicit spelling.
+
+## CHK-219
+
+A shader builds tables from constants: weights normalized by their sum, sizes derived from a radius, a basis from its axes.
+A shader language carries no API to keep stable here, so the rule is the widest one that stays sound: whatever is computable before the program runs.
+The abstract machine is what decides it, since it is what a test runs on already, and what it computes is exactly what a run of the same expression gives.
+That is why the arithmetic is `f32` and not `f64`: a const and the same expression in a body agree to the bit, on every target, because every target reads the literal.
+Whether a const may ask for more precision is `question-sgl-const-f64-evaluation`.
 
 ## CHK-225
 
@@ -520,16 +529,20 @@ True recursion is the [incubator's](../../incubator/raytracing-futures.md).
 
 ## CHK-338
 
-A type parameter is opaque, so a generic body is checked once, over it, and an error in it is reported where it is written, whatever the calls.
-The alternative, checking the body per instantiation as C++ does, reports an error at a call its author may not own, and reports it once per call.
-Bounds would let a body ask more of `A`; nothing needed them yet, so a body may only hand a value of it on.
-The first users are the prelude's traces, which carry an intersection's attributes of whatever type the program reports.
+Every call inlines, so an instance costs a check and nothing at run time, and a shader holds no data structure complex enough to repay type classes or bounds.
+So a generic body is checked per instance, and may do with a value of `A` whatever the arguments allow.
+What C++ templates get wrong with that is kept out by two rules.
+A name resolves where the body is written, so what is visible at a call never changes what the body means.
+An error is reported at its line in the body, under the instantiations that reached it, and once however many instances repeat it.
+A generic that nothing instantiates would otherwise go unchecked, which the warning says; a `test` that calls it is how its author checks it with chosen arguments.
+The checked once, opaque rule this replaces let a body only hand a value of `A` on, which was enough for the prelude's traces and for nothing a program would write.
 
 ## CHK-339
 
-A generic struct is the prelude's alone because the traces need exactly one shape of it, a hit or a report that carries the program's attributes.
-A user-declared one raises questions nothing has answered yet: methods that name the type parameter, several of them, and what a host sees of an instance.
-The [incubator](../../incubator/function-model.md) holds them.
+A generic struct takes the parameters a function does, so one rule says what a type parameter and a value parameter are.
+Its constructor mirrors its parameters rather than taking them, since its fields say them: an array field's length is how a value parameter is deduced.
+An instance is a struct of its own after flattening, so nothing about it reaches a target that a plain struct does not.
+What a host sees of an instance in GPU memory is still open, in the [incubator](../../incubator/generics.md).
 
 ## CHK-341
 
@@ -565,7 +578,15 @@ So the element is `half2`, or a struct that fills its words, until a packed buff
 The rule is the same for any struct, since SGL's vectors are prelude structs of one-character fields and not a type the checker knows apart.
 The annotation keeps it opt-in: a struct of `a` and `b` fields does not grow `e.ba` and `e.aa` by accident.
 Adding swizzles to such a struct later breaks nothing, where removing them would.
-`rgba` is not a second alphabet: the letters are the field names, so a port writes `.xyz` for `.rgb`, one spelling per read.
+A second alphabet is the struct's own to name (CHK-409), so the rule here stays one about fields.
+
+## CHK-409
+
+Color code reads as color: `albedo.rgb * light.a` says what it means, and ports from every shading language write it so.
+One spelling per read was the earlier rule, and the corpus showed what it cost: every color swizzle rewritten to `xyzw`, and reviewed in that form.
+The alphabet is the struct's to name rather than a list the language knows, so a program's own struct may take `st` or `uv`.
+It stays off the types that are no plain numbers: a `pos3` is a position and a `vec3` a direction, and neither has a red.
+Mixing alphabets in one swizzle is refused, as GLSL refuses it, since `c.xg` reads as two things at once.
 
 ## CHK-385
 
@@ -681,8 +702,15 @@ WGSL has neither coherence nor ordering across workgroups, so a WebGPU build of 
 ## CHK-369
 
 A host that stages a whole C struct, as AMD's FSR host code does, needs the layout promised rather than generated.
-`.hlsl` promises what is emitted today, so it costs nothing but the freedom to reorder that block.
-`.cpp` is for a host struct written with no knowledge of HLSL's rows; it costs a memory form or offsets on every target, HLSL included.
+The natural rule is the fast one (EMIT-110), so packing is the exception a shader asks for, never the default.
+It costs a memory form on WGSL and MSL wherever a vector lands off its alignment, and the wide loads that alignment buys.
+The attribute names where padding goes rather than a rule's name, so the matrix and array cases it will grow are spelled alike.
+
+## CHK-421
+
+HLSL and GLSL convert a constructor's scalars implicitly, so `float3(a * 4u + b, c, 1.0)` is what every port writes, and SGL made it `float3(uint3(…))`.
+A plain vector is a layout of scalars, so converting into one is what it is for; the strong vectors keep their meaning and convert nothing.
+The rule runs only after an exact match fails, so no call that resolved before changes, and a literal keeps CHK-253's own conversions.
 
 ## CHK-371
 
@@ -747,9 +775,27 @@ Unrolling every small constant-range loop without the attribute was not chosen: 
 
 A rotation or a normal matrix is a `mat3`, and building one from three columns is the common case in a body.
 Its layout in GPU memory is a decision of its own: a constant block starts each column on a row of 16 bytes, a buffer's element may pack it into 36, and each target's memory form differs.
-Taking that decision with the first local `mat3` would fix it before any shader needed one in memory, so a `mat3` stays in function bodies until it is taken.
-Everywhere memory or a stage edge would hold one is refused at its line, the way an array is (CHK-291), rather than by the emitter with no line at all.
-A shader that wants one from memory reads its columns, which are `float3`s, and builds it in the body.
+The natural rule took it (EMIT-110): a `mat3` is three `float3` columns, each at 16, so it takes 48 bytes wherever it stands, and `@padding(.none)` packs it into 36.
+Ray data is a layout of its own, which no target agrees on yet, so it still refuses one at its line, the way an array is refused (CHK-291).
+A vertex input and a stage link take one as its columns (CHK-422), and a pixel output never does.
+A `mat2` waits for a shader that needs one in memory: HLSL starts each of its two columns on a row, which no other target does.
+
+## CHK-422
+
+A normal matrix or a tangent frame handed from the vertex to the pixel stage is common, and so is a small array of weights.
+No target carries either across a link the same way: WGSL takes neither, HLSL takes a matrix but spends a location per row, and MSL a column.
+A location per column or element is what each one can say, and it is what a hand-written port does with the members it splits.
+A vertex input is the same split on the host's side: the generated struct keeps the member whole, a `tg::mat3f` or a `cc::fixed_array`, and its layout names an attribute per piece.
+A matrix in a vertex buffer is the usual instanced transform, and four `float4` members are how a shader without one spells it.
+A pixel output is a render target per location, which an array would silently spread across.
+Nesting is refused because the text would need a name per path, and no shader in the corpus wants one yet.
+
+## CHK-408
+
+An affine map is named by what it is rather than by its shape, as `pos3` and `vec3` are.
+A generic `mat3x4` would carry the shape's two names along, since GLSL calls the same matrix `mat4x3`, and the corpus already shows bgfx mixing them up.
+The type decides the `w` instead: a position is translated and a direction is not, so no caller writes the `1.0` or the `0.0`.
+Three rows of four is how DXR, Vulkan and Metal hand a hit's transform over, so a hit's placement needs no conversion to become one.
 
 ## CHK-404
 

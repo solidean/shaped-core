@@ -56,6 +56,11 @@ bool lsp::read(json::ref in, inlay_hint_params& out)
     return json::read(in["textDocument"]["uri"], out.uri) && read(in["range"], out.range);
 }
 
+bool lsp::read(json::ref in, code_action_params& out)
+{
+    return json::read(in["textDocument"]["uri"], out.uri) && read(in["range"], out.range);
+}
+
 void lsp::write_fields(json::writer& w, position const& v)
 {
     w.write("line", v.line);
@@ -135,6 +140,21 @@ void lsp::write_fields(json::writer& w, inlay_hint const& v)
         w.write("paddingRight", true);
     if (!v.text_edits.empty())
         json::put(w, "textEdits", v.text_edits);
+}
+
+void lsp::write_fields(json::writer& w, code_action const& v)
+{
+    json::put(w, "title", v.title);
+    json::put(w, "kind", cc::string_view("quickfix"));
+    if (!v.diagnostics.empty())
+        json::put(w, "diagnostics", v.diagnostics);
+    if (v.is_preferred)
+        w.write("isPreferred", true);
+    w.begin_object("edit");
+    w.begin_object("changes");
+    json::put(w, v.uri, v.edits);
+    w.end_object();
+    w.end_object();
 }
 
 void lsp::write_fields(json::writer& w, log_message_params const& v)

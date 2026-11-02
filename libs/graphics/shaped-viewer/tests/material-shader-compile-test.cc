@@ -70,7 +70,7 @@ void check_compiles(sv::resolved_material const& r, sv::geometry_kind kind = sv:
 {
     auto const g = sv::generate_material_shader(r, {.kind = kind});
     REQUIRE(!g.source.empty());
-    CHECK(g.source.contains("hit_group sv_material for path_rays"));
+    CHECK(g.source.contains("hit_group sv_material for tracer.path_rays"));
     check_entry_compiles(g.source, sg::shader_stage::closest_hit, "sv_closest_hit");
     if (kind == sv::geometry_kind::quadrics)
         check_entry_compiles(g.source, sg::shader_stage::intersection, "sv_intersection");

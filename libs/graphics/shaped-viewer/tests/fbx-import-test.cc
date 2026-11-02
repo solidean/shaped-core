@@ -1142,7 +1142,7 @@ TEST("sv::asset_loader - on Windows the filesystem default refuses a device by i
     }
 
     // A name merely starting like one is an ordinary file.
-    auto const console = cc::format("{}/console-sv-fbx.bin", dir);
+    auto const console = cc::temp_file_path("console-sv-fbx", ".bin"); // still starts like CON, and unique per process
     {
         auto file = REQUIRED_VALUE(cc::file_write_stream_adapter::create(console));
         auto stream = file.stream();

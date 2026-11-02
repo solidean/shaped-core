@@ -62,6 +62,7 @@ Writing every path in full would make `rasterization.cull` the common spelling, 
 * **A name found twice is an error that names both paths**, and the setting is then written in full.
 * **A setting under `color_targets` means every target**: `format = .rgba8_unorm` is each target's format.
 * **One target is set by its full path**, `color_targets.albedo.blend`, where `albedo` is a member of the pixel stage's `@pixel struct`.
+  A pixel stage returning one color value has the one target `color`, set by its path or by attributes on its result type ([CHK-418](semantics/checking.md#entry-points)).
   A target's name never stands for its path, so renaming a target cannot make another line ambiguous.
 
 ```sgl sketch

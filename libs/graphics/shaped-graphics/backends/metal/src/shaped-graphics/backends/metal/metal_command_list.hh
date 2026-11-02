@@ -189,11 +189,13 @@ private:
     void raster_set_inline_constants(cc::span<byte const> data, cc::optional<isize> offset) override;
     void raster_draw(draw_config const& config) override;
     void raster_draw_indexed(draw_indexed_config const& config) override;
+    void raster_draw_indexed_indirect(raw_buffer_handle const& args, isize offset_in_bytes, isize count) override;
 
     [[nodiscard]] bool raytracing_is_supported() const override;
     [[nodiscard]] blas_handle raytracing_build_blas_triangles(cc::span<blas_triangles const> geometries,
                                                               accel_build_flags flags,
                                                               int hit_record_stride) override;
+    [[nodiscard]] micromap_handle raytracing_build_micromap(micromap_triangles const& triangles) override;
     [[nodiscard]] blas_handle raytracing_build_blas_aabbs(cc::span<blas_aabbs const> geometries,
                                                           accel_build_flags flags,
                                                           int hit_record_stride) override;

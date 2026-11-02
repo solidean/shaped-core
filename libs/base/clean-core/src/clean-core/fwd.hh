@@ -54,6 +54,7 @@ using namespace cc::primitive_defines;
 //
 
 struct memory_resource;
+enum class memory_trim : u8; // how much trim_thread_memory gives back (memory/allocation.hh)
 template <class T>
 struct allocation;
 
@@ -360,6 +361,8 @@ struct async_scheduler;
 enum class async_teardown : u8;    // where a homed node's never-resolved frame is destroyed (thread/async_node.hh)
 enum class async_inline_deps : u8; // whether a homed node drives its dependencies inline
 struct async_home_options;
+struct async_broadcast_job;    // a job every idle thread of a scheduler joins (thread/async_node.hh)
+struct parallel_for_options;   // grain of cc::async_parallel_for (thread/async_parallel_for.hh)
 struct thread_bound_scheduler; // a home one owner thread drains (thread/thread_bound_scheduler.hh)
 struct async_worker_scope;
 struct async_no_worker_scope;

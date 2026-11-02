@@ -2,7 +2,7 @@
 
 **Built, and the default for now.**
 The megakernel in [tracer_pipeline.sgl](../shaders/tracer_pipeline.sgl), one ray-tracing pipeline whose raygen walks every path to its end in registers, stays as `render_mode::megakernel`.
-The intended direction is a hybrid default — rasterized primaries, lit by the megakernel — with the wavefront as the best-quality mode.
+The intended direction is a hybrid default — rasterized primaries, lit by inline traces and a radiance cache — with the wavefront as the best-quality mode.
 [Which tracer is the default](#which-tracer-is-the-default) says why.
 This document is the wavefront's shape, the decisions behind it, the alternatives that were weighed and rejected, and what it measured.
 
@@ -209,6 +209,16 @@ The depth and the hit-distance guides carry over a still frame, since few of its
 The depth is kept as view depth and made clip depth at resolve, since a drawing that starts needing it sets the near plane without a restart.
 `sv.wavefront.still_rounds` and `sv.wavefront.still_fill` record what each still frame ran.
 
+### Guides behind a partial coverage come from guide rays
+
+A partial coverage is a stochastic cutout: each camera ray takes or skips the surface.
+Guides of the samples' own hits would flicker with that draw, and a temporal denoiser keeps what its guides explain, so it kept the noise.
+Where a frame writes guides and a hit group can cut out, each pixel's first sample of the frame follows a guide ray: a primary segment that only a full coverage stops.
+Its hit is shaded for the guides and the motion alone and gathers nothing; finalize then starts the sample in its place, from the slot's untouched stream.
+So the image is the same as without it, bit for bit, the frame runs one more round, and the samples' own camera rays write no guide.
+The megakernel does the same with a guide ray per sample, its payload's `guide` set, on the flag the view sets for it.
+`tests/guide-ray-test.cc` pins both.
+
 ### A pixel's samples do not depend on how the frames split them
 
 A capture waits for samples per pixel rather than frames, since how many samples a frame finishes is the GPU's and the budget's.
@@ -344,13 +354,13 @@ The GPU tests' physical expectations, and `wavefront-trace-test.cc`'s comparison
 ### Which tracer is the default
 
 The wavefront is the default today, and very likely not for good.
-The intended default is the hybrid: rasterized primaries, lit by the megakernel, the cheaper tracer on the shallow paths that lighting needs.
+The intended default is the hybrid: rasterized primaries, lit by inline traces over few bounces and a radiance cache ([hybrid-renderer.md](plans/hybrid-renderer.md)).
 The wavefront is meant to become the best-quality mode, the one an image converges in where quality matters more than the frame rate.
 Neither change has landed; [the roadmap](plans/rendering-roadmap.md) orders the work toward them.
 
 ### Where it stands
 
-Every step of the landing order has landed: `render_mode::automatic` traces a layer with the wavefront unless the device cannot trace, or `render_settings::mode` asks for another.
+Every step of the landing order has landed, and `render_mode::automatic` traced a layer with the wavefront until the hybrid took the default over: a layer that wants the wavefront now names it.
 The path state lives on the layer's accumulator slot, so the two restart together and the store's budget counts both.
 A layer that stops tracing with the wavefront releases it, and one that can never scale releases its scaled state.
 A frame whose image changed restarts and drains, and a still one carries for what its share of `frame_budget_ms` holds, or for `rounds_per_frame` at full fill where that is 0.
@@ -362,7 +372,8 @@ Parity is pinned twice: `wavefront-trace-test.cc` against the megakernel on the 
 What is still open:
 
 - **A draining frame is bounded rather than empty.**
-  It runs `wavefront_routine::drain_rounds(max_bounces)`, `max_bounces + 17` rounds, enough for every surface bounce and for a medium walk up to where its roulette starts.
+  It runs `wavefront_routine::drain_rounds(max_bounces)`, `max_bounces + 25` rounds.
+  That is enough for every surface bounce, eight free refractions through smooth glass, and a medium walk up to where its roulette starts.
   A deeper walk finishes on the next still frame, or is dropped by the next restart.
 - **A moving frame is one sample per pixel**, where the megakernel's is `samples_per_pixel`; starting several per pixel on a draining frame is the fix, if a moving image turns out too noisy.
 - **A still image is an exact mean only once its pixels stop.**

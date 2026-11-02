@@ -170,6 +170,8 @@ public:
     bool _rendering_has_depth = false;
     bool _rendering_has_stencil = false;
     VkRect2D _rendering_area = {};
+    /// The layers every target of the scope spans, which a vertex stage's `@layer` picks among.
+    u32 _rendering_layer_count = 1;
 
     // Opens the rendering instance from the stored attachments, forcing every load op to LOAD.
     // Body in vulkan_command_list.raster.cc.
@@ -322,6 +324,7 @@ protected:
     void raster_set_inline_constants(cc::span<byte const> data, cc::optional<isize> offset) override;
     void raster_draw(sg::draw_config const& config) override;
     void raster_draw_indexed(sg::draw_indexed_config const& config) override;
+    void raster_draw_indexed_indirect(sg::raw_buffer_handle const& args, isize offset_in_bytes, isize count) override;
 
     // Ray tracing (reached through cmd.raytracing).
     // is_supported()'s body is in vulkan_command_list.cc, which has vulkan_context complete.
@@ -329,6 +332,7 @@ protected:
     [[nodiscard]] sg::blas_handle raytracing_build_blas_triangles(cc::span<sg::blas_triangles const> geometries,
                                                                   sg::accel_build_flags flags,
                                                                   int hit_record_stride) override;
+    [[nodiscard]] sg::micromap_handle raytracing_build_micromap(sg::micromap_triangles const& triangles) override;
     [[nodiscard]] sg::blas_handle raytracing_build_blas_aabbs(cc::span<sg::blas_aabbs const> geometries,
                                                               sg::accel_build_flags flags,
                                                               int hit_record_stride) override;

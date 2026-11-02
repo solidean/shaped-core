@@ -17,10 +17,10 @@ namespace shaders = sg::test::sgl_shaders;
 // The SGL fixture in tests/shaders/sgl/sixteen_bit.sgl: half arithmetic over a constant block and buffers of halves,
 // and short arithmetic that wraps at 16 bits.
 
-// The generated structs are the layout: a half3 packs at 2 bytes in a buffer's element.
-static_assert(sizeof(shaders::sixteen_bit::weighted) == 12);
-static_assert(offsetof(shaders::sixteen_bit::weighted, tint) == 4);
-static_assert(offsetof(shaders::sixteen_bit::weighted, scale) == 10);
+// The generated structs are the layout: a half3 aligns to 8 bytes in a buffer's element, and `scale` sits in its tail.
+static_assert(sizeof(shaders::sixteen_bit::weighted) == 16);
+static_assert(offsetof(shaders::sixteen_bit::weighted, tint) == 8);
+static_assert(offsetof(shaders::sixteen_bit::weighted, scale) == 14);
 
 ASYNC_INVOCABLE_TEST("sg - an SGL compute shader computes in halves over a block and buffers of them",
                      (sg::context_handle const& ctx))

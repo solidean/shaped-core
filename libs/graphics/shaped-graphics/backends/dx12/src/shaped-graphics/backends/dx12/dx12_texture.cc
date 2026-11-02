@@ -1,9 +1,10 @@
-// dx12_texture: GPU texture creation, committed and dedicated, plus the deferred-deletion destructor.
+// dx12_texture: GPU texture creation, committed or placed, plus the deferred-deletion destructor.
 // The type is otherwise header-only (ctor + fields).
 
 #include <clean-core/common/profiling.hh>
 #include <shaped-graphics/backends/dx12/dx12_context.hh>
 #include <shaped-graphics/backends/dx12/dx12_format.hh>
+#include <shaped-graphics/backends/dx12/dx12_memory_heap.hh>
 #include <shaped-graphics/backends/dx12/dx12_texture.hh>
 
 namespace sg::backend::dx12
@@ -113,6 +114,9 @@ void dx12_texture::on_expired() const
 
 dx12_texture::~dx12_texture()
 {
+    // a pending upload no list waits on can never be read now, so its context waits on nothing (upload_contexts.hh)
+    if (_upload_group != nullptr)
+        _upload_group->contexts.release_unawaited(_upload_group->awaited_value.load(std::memory_order_acquire));
     release_storage();
 } // no-op if expire() already released the storage
 
@@ -125,23 +129,35 @@ cc::result<dx12_texture_handle> dx12_context::create_dx12_texture(sg::texture_de
     // rather than surfacing as a CreateCommittedResource driver error.
     desc.assert_valid();
 
-    // Dedicated committed resources only for now — placed textures need a texture-capable memory_heap
-    // (the current heap is buffers-only). The transient scope also routes here with a dedicated alloc.
-    CC_ASSERT(alloc.is_dedicated(), "placed textures are not supported yet (texture-capable heap is future work)");
-
     D3D12_RESOURCE_DESC const rdesc = texture_resource_desc(desc);
 
-    // Created in COMMON, the layout dx12_texture_access seeds its current state with.
-    // A recording list transitions out of it only when its first access needs another layout, so no initial transition is recorded here.
+    // Created in COMMON.
+    // A committed texture's tracker rests it there, and a recording list transitions out of it only when its first access needs another layout.
+    // A placed one's tracker rests it in `undefined` instead, whatever D3D12 created it in: its first barrier then discards, which initializes it.
     ComPtr<ID3D12Resource> resource;
-    D3D12_HEAP_PROPERTIES heap = {};
-    heap.Type = D3D12_HEAP_TYPE_DEFAULT; // GPU-resident; sg exposes no host-visible textures
-    if (HRESULT hr = _device->CreateCommittedResource(&heap, D3D12_HEAP_FLAG_NONE, &rdesc, D3D12_RESOURCE_STATE_COMMON,
-                                                      nullptr, IID_PPV_ARGS(&resource));
-        FAILED(hr))
-        return dx12_error(hr, "ID3D12Device::CreateCommittedResource (texture) failed");
+    if (alloc.is_placed())
+    {
+        auto const dx_heap = std::dynamic_pointer_cast<dx12_memory_heap const>(alloc.heap);
+        CC_ASSERT(dx_heap != nullptr, "placement heap is not a dx12 heap");
+        CC_ASSERT(dx_heap->contents() == sg::memory_heap_contents::textures, "a texture is placed in a textures heap");
+        CC_ASSERT(alloc.offset >= 0 && alloc.offset + alloc.size_in_bytes <= dx_heap->size_in_bytes(),
+                  "placement exceeds the heap");
+        if (HRESULT hr = _device->CreatePlacedResource(dx_heap->_heap.Get(), UINT64(alloc.offset), &rdesc,
+                                                       D3D12_RESOURCE_STATE_COMMON, nullptr, IID_PPV_ARGS(&resource));
+            FAILED(hr))
+            return dx12_error(hr, "ID3D12Device::CreatePlacedResource (texture) failed");
+    }
+    else
+    {
+        D3D12_HEAP_PROPERTIES heap = {};
+        heap.Type = D3D12_HEAP_TYPE_DEFAULT; // GPU-resident; sg exposes no host-visible textures
+        if (HRESULT hr = _device->CreateCommittedResource(
+                &heap, D3D12_HEAP_FLAG_NONE, &rdesc, D3D12_RESOURCE_STATE_COMMON, nullptr, IID_PPV_ARGS(&resource));
+            FAILED(hr))
+            return dx12_error(hr, "ID3D12Device::CreateCommittedResource (texture) failed");
+    }
 
-    auto texture = std::make_shared<dx12_texture>(*this, current_epoch(), desc, cc::move(resource));
+    auto texture = std::make_shared<dx12_texture>(*this, current_epoch(), desc, cc::move(resource), alloc.heap);
 
     // A transient texture is auto-expired when its epoch advances: register it so advance_epoch can flip
     // it (see dx12_epoch.cc). Weak, so holding the registration never keeps the texture alive.

@@ -400,29 +400,44 @@ TEST("sgl check - a @workgroup binding holds values a compute stage shares, with
     CHECK(raster.contains("tile is @workgroup memory, which only a compute stage has"));
 }
 
-TEST("sgl check - @layout names the rule a binding's constant block is placed by (CHK-369)")
+TEST("sgl check - @padding(.none) on a binding or a buffer member packs GPU memory as C++ does (CHK-369)")
 {
-    CHECK(reports_for(cc::string("@layout(.hlsl)\n") + listing("    scale: float\n")) == "");
-    CHECK(reports_for(cc::string("@layout(.cpp)\n") + listing("    scale: float\n    dst: mut buffer[float]\n")) == "");
-    CHECK(reports_for("@layout(.cpp) @inline binding look:\n    scale: float\n") == "");
+    CHECK(reports_for(cc::string("@padding(.none)\n") + listing("    scale: float\n    dst: mut buffer[float]\n")) == "");
+    CHECK(reports_for("@padding(.none) @inline binding look:\n    scale: float\n") == "");
+    CHECK(reports_for(listing("    scale: float\n    @padding(.none) dst: mut buffer[float3]\n")) == "");
 
     constexpr auto expected
-        = "@layout takes the rule a constant block is placed by: `@layout(.hlsl)` or `@layout(.cpp)`";
-    for (auto const attribute :
-         {"@layout", "@layout(.std140)", "@layout(hlsl)", "@layout(.hlsl, .cpp)", "@layout(rule = .cpp)"})
+        = "@padding takes where GPU memory leaves room: `@padding(.none)` or `@padding(.every_element)`";
+    for (auto const attribute : {"@padding", "@padding(.std430)", "@padding(none)", "@padding(.none, .none)"})
     {
         auto const reported = reports_for(cc::format("{}\n{}", attribute, listing("    scale: float\n")));
         CHECK(reported.contains("invalid-attribute-arguments"));
         CHECK(reported.contains(expected));
     }
+    // a mat3's columns stand 16 bytes apart already, so the matrix form is spelled and waits
+    CHECK(
+        reports_for(cc::format("@padding(.every_column)\n{}", listing("    scale: float\n"))).contains("unsupported-yet"));
 
-    auto const workgroup = reports_for("@layout(.cpp) @workgroup binding tile:\n    x: float\n");
+    // EMIT-172: a row per element stands on a constant block's array of values, and nowhere else
+    CHECK(reports_for(listing("    @padding(.every_element) weights: float[4]\n")) == "");
+    CHECK(reports_for(cc::format("@padding(.every_element)\n{}", listing("    weights: float4[4]\n")))
+              .contains("@padding(.every_element) starts each element of one array on a row, so it stands on the array "
+                        "member"));
+    CHECK(reports_for(listing("    @padding(.every_element) scale: float\n"))
+              .contains("@padding(.every_element) starts each element of a constant block's array of values on a row, "
+                        "and this is none"));
+
+    auto const workgroup = reports_for("@padding(.none) @workgroup binding tile:\n    x: float\n");
     CHECK(workgroup.contains("invalid-attribute-arguments"));
-    CHECK(workgroup.contains("@layout promises a constant block's layout to the host, and @workgroup memory has none a "
-                             "host sees"));
+    CHECK(workgroup.contains("@padding places memory a host fills, and @workgroup memory has none a host sees"));
 
-    // a binding's attribute, and no other declaration's
-    CHECK(reports_for("@layout(.cpp)\nstruct look:\n    scale: float\n").contains("the attribute @layout on a struct"));
+    // a constant takes its block's padding, which only the binding names
+    CHECK(reports_for(listing("    @padding(.none) scale: float\n"))
+              .contains("only a buffer member places its own elements; a constant takes its block's @padding, written "
+                        "on the binding"));
+
+    // a binding's attribute and a binding member's, and no other declaration's
+    CHECK(reports_for("@padding(.none)\nstruct look:\n    scale: float\n").contains("the attribute @padding on a struct"));
 }
 
 TEST("sgl check - an atomic is memory a builtin updates, in a mut buffer or in workgroup memory, and never a value")
@@ -489,41 +504,27 @@ TEST("sgl check - a binding array is one dimension of resources, bounded, grante
     CHECK(whole.contains("b.t is a binding array, read by element: `b.t[i]`"));
 }
 
-TEST("sgl check - a mat3 is a value of function bodies, and no binding or stage edge holds one yet")
+TEST("sgl check - a mat3 stands in GPU memory, and crosses a stage link alone")
 {
-    // CHK-397: its layout in memory is not decided, so every place that would need one refuses it at its line
-    constexpr auto why = "which only a function body holds, since its layout in GPU memory is not decided yet";
+    // CHK-397: its layout in memory is three 16-byte columns (EMIT-110), and no stage edge carries one yet
+    constexpr auto why = "which no stage edge carries yet, since its layout as ray data is not decided yet";
     constexpr auto nested = "struct holder:\n    m: mat3\nstruct outer:\n    h: holder\n\n";
     auto const with_nested = [&](cc::string_view members) { return reports_for(cc::string(nested) + listing(members)); };
 
-    // a plain member of a group's constant block, directly, in an array, and nested in structs
-    CHECK(reports_for(listing("    basis: mat3\n"))
-              .contains(
-                  cc::format("unsupported-yet user:[mat3] a mat3 in a constant block, as its member basis, {}", why)));
-    CHECK(reports_for(listing("    bases: mat3[2]\n"))
-              .contains(cc::format("a mat3 in a constant block, as its member bases, {}", why)));
-    CHECK(with_nested("    o: outer\n").contains(cc::format("a mat3 in a constant block, outer.h.m: mat3, {}", why)));
-    CHECK(with_nested("    os: outer[2]\n").contains(cc::format("a mat3 in a constant block, outer.h.m: mat3, {}", why)));
+    // a constant block, an @inline one, a buffer's element and workgroup memory hold one, directly or nested
+    CHECK(reports_for(listing("    basis: mat3\n")) == "");
+    CHECK(with_nested("    o: outer\n") == "");
+    CHECK(reports_for(cc::format("{}@inline binding pushed:\n    o: outer\n", nested)) == "");
+    CHECK(reports_for(listing("    raw: mut buffer[mat3]\n")) == "");
+    CHECK(with_nested("    items: buffer[outer]\n") == "");
+    CHECK(reports_for(listing("    @padding(.none) raw: mut buffer[mat3]\n")) == "");
+    CHECK(reports_for("@workgroup binding tile:\n    rows: mat3[4]\n") == "");
 
-    // an @inline block is a constant block too
-    CHECK(reports_for(cc::format("{}@inline binding pushed:\n    o: outer\n", nested))
-              .contains(cc::format("a mat3 in a constant block, outer.h.m: mat3, {}", why)));
+    // an array of them takes whole rows, and HLSL widens each element as it widens one (EMIT-168)
+    CHECK(reports_for(listing("    bases: mat3[2]\n")) == "");
 
-    // a buffer's element, directly, as an array, nested, and in a binding array of buffers
-    CHECK(reports_for(listing("    raw: mut buffer[mat3]\n"))
-              .contains(cc::format("a mat3 in a buffer's element, as its member raw, {}", why)));
-    CHECK(reports_for(listing("    rows: buffer[mat3[2]]\n"))
-              .contains(cc::format("a mat3 in a buffer's element, as its member rows, {}", why)));
-    CHECK(with_nested("    items: buffer[outer]\n")
-              .contains(cc::format("a mat3 in a buffer's element, outer.h.m: mat3, {}", why)));
-    CHECK(reports_for(cc::format("require binding_arrays\n{}{}", nested, listing("    sets: buffer[outer][2]\n")))
-              .contains(cc::format("a mat3 in a buffer's element, outer.h.m: mat3, {}", why)));
-
-    // workgroup memory, which has no host side, is GPU memory all the same
-    CHECK(reports_for("@workgroup binding tile:\n    rows: mat3[4]\n")
-              .contains(cc::format("a mat3 in workgroup memory, as its member rows, {}", why)));
-    CHECK(reports_for(cc::format("{}@workgroup binding tile:\n    o: outer\n", nested))
-              .contains(cc::format("a mat3 in workgroup memory, outer.h.m: mat3, {}", why)));
+    // a mat2 stands in memory too, its two columns back to back (EMIT-175)
+    CHECK(reports_for(listing("    turn: mat2\n")) == "");
 
     // a vertex input, a stage link in both directions, and a pixel output
     constexpr auto edges
@@ -546,10 +547,20 @@ TEST("sgl check - a mat3 is a value of function bodies, and no binding or stage 
           "@pixel fun shade(p: plain) -> target:\n"
           "    return {color = float4(1.0), h = holder(mat3(float3(1.0), float3(1.0), float3(1.0)))}\n";
     auto const crossing = reports_for(cc::string(nested) + edges);
-    CHECK(crossing.contains(cc::format("user:[vs] a mat3 crossing a stage edge, in vin.m: mat3, {}", why)));
+    CHECK(!crossing.contains("in vin.m"));
     CHECK(crossing.contains(cc::format("user:[vs] a mat3 crossing a stage edge, in varyings.o.h.m: mat3, {}", why)));
     CHECK(crossing.contains(cc::format("user:[ps] a mat3 crossing a stage edge, in varyings.o.h.m: mat3, {}", why)));
     CHECK(crossing.contains(cc::format("user:[shade] a mat3 crossing a stage edge, in target.h.m: mat3, {}", why)));
+
+    // CHK-422: a link carries a matrix it holds itself, a column per location, and none a struct in it holds
+    CHECK(reports_for("struct varyings:\n"
+                      "    @position position: hpos4\n"
+                      "    m: mat3\n"
+                      "@pixel struct target:\n"
+                      "    color: float4\n"
+                      "@pixel fun ps(p: varyings) -> target:\n"
+                      "    return {color = float4((p.m * float3(1.0)).x)}\n")
+          == "");
 
     // an array of them is judged as the mat3 it holds, once, and keeps its length in the path
     auto const arrayed = reports_for("struct varyings:\n"

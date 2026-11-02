@@ -49,7 +49,7 @@ feature_set checker::read_require(i32 file, ast::require_decl const& r, require_
 void checker::judge_entry_features(symbol_id id)
 {
     auto const& s = out.at(id);
-    auto& info = out.functions[s.info];
+    auto& info = out.functions.own(s.info);
     if (info.entry_stage == stage::none)
         return;
 
@@ -76,6 +76,22 @@ void checker::judge_entry_features(symbol_id id)
     // CHK-326: the ray-tracing stages are the pipeline's, which a device grants
     if (info.entry_stage >= stage::raygen)
         needed.set(feature::raytracing_pipeline);
+    // CHK-419: the stage that writes a layer, and the one that reads it, need the device to send a primitive to it
+    auto const has_layer = [&](type_id type)
+    {
+        if (!is_valid(type) || out.at(type).kind != type_kind::structure)
+            return false;
+        for (auto const& m : out.at(out.at(type).members))
+            if (m.is_layer)
+                return true;
+        return false;
+    };
+    if (info.entry_stage == stage::vertex && has_layer(info.result))
+        needed.set(feature::vertex_layer_output);
+    if (info.entry_stage == stage::pixel)
+        for (auto const& parameter : out.at(info.parameters))
+            if (parameter.input == stage_input::none && has_layer(parameter.type))
+                needed.set(feature::vertex_layer_output);
     // CHK-274: a pixel stage that takes a member per sample runs per sample, which vulkan gives only with a feature
     if (info.entry_stage == stage::pixel)
         for (auto const& parameter : out.at(info.parameters))
@@ -174,20 +190,23 @@ void checker::judge_edge_16_bit(i32 file, source_span where, type_id type)
         unsupported(file, where, cc::format("a 16-bit value crossing a stage edge, in {}{}", out.name_of(type), found));
 }
 
-checker::local_only_found checker::local_only_path(type_id type) const
+checker::local_only_found checker::local_only_path(type_id type, bool in_memory, bool in_link) const
 {
     if (type == checked_module::error_type)
         return {};
+    // CHK-422: a stage link carries a matrix as its columns, a location apiece
+    auto const is_link_matrix = in_link && (out.name_of(type) == "mat2" || out.name_of(type) == "mat3");
     if (auto const* const record = out.builtin_type_of(type))
-        return record->local_only_reason.empty() ? local_only_found()
-                                                 : local_only_found{.path = cc::format(": {}", out.name_of(type)),
-                                                                    .reason = record->local_only_reason,
-                                                                    .type = type};
+        return record->local_only_reason.empty() || (in_memory && record->wgsl_layout.size != 0) || is_link_matrix
+                 ? local_only_found()
+                 : local_only_found{.path = cc::format(": {}", out.name_of(type)),
+                                    .reason = record->local_only_reason,
+                                    .type = type};
     auto const& t = out.at(type);
     if (t.kind == type_kind::array || t.kind == type_kind::buffer)
     {
         // an array of one is named whole, `ms: mat3[2]`, so the path keeps the length the member was declared with
-        auto inner = local_only_path(t.element);
+        auto inner = local_only_path(t.element, in_memory);
         if (t.kind == type_kind::array && inner.path.starts_with(":"))
             inner.path = cc::format(": {}", out.name_of(type));
         return inner;
@@ -198,13 +217,15 @@ checker::local_only_found checker::local_only_path(type_id type) const
     {
         if (m.type == type)
             continue;
-        if (auto inner = local_only_path(m.type); !inner.path.empty())
+        // a link carries the matrices it holds itself, and none a struct or an array in it holds
+        if (auto inner = local_only_path(m.type, in_memory, in_link && out.builtin_type_of(m.type) != nullptr);
+            !inner.path.empty())
             return {.path = cc::format(".{}{}", m.name, inner.path), .reason = inner.reason, .type = inner.type};
     }
     return {};
 }
 
-bool checker::judge_edge_local_only(i32 file, source_span where, type_id type)
+bool checker::judge_edge_local_only(i32 file, source_span where, type_id type, bool is_link)
 {
     // a patch and a geometry stage's vertices are arrays of the struct that crosses, and a stream holds it
     while (type != checked_module::error_type && out.builtin_type_of(type) == nullptr
@@ -213,11 +234,11 @@ bool checker::judge_edge_local_only(i32 file, source_span where, type_id type)
     if (type == checked_module::error_type || out.builtin_type_of(type) != nullptr
         || out.at(type).kind != type_kind::structure)
         return false;
-    auto const found = local_only_path(type);
+    auto const found = local_only_path(type, false, is_link);
     if (found.path.empty())
         return false;
     unsupported(file, where,
-                cc::format("a {} crossing a stage edge, in {}{}, which only a function body holds, since {}",
+                cc::format("a {} crossing a stage edge, in {}{}, which no stage edge carries yet, since {}",
                            out.name_of(found.type), out.name_of(type), found.path, found.reason));
     return true;
 }

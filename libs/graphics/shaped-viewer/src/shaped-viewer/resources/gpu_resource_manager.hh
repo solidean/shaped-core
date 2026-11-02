@@ -172,6 +172,18 @@ private:
 /// the lock *prohibits* where a mint-generation stamp recorded in `bound_resources` would *verify* (issue: debt-sv-bindless-lock-generation-stamp);
 /// and it is global where the hazard is per-recording, so a routine acquiring mid-recording is refused rather
 /// than told to re-snapshot and rebind (issue: debt-sv-bindless-lock-per-recording).
+/// Geometry uploaded for one epoch, for a mesh placed with `mesh_lifetime::frame`.
+/// Its buffers are transient, so nothing here outlives the epoch it was made in.
+/// Always indexed, as a pooled mesh is: a raw triangle list gets the indices 0, 1, 2, … of its own.
+struct sv::frame_mesh
+{
+    cc::hash128 hash;
+    sg::buffer<tg::pos3f> vertices;
+    sg::buffer<u32> indices;
+    isize triangle_count = 0;
+    sg::blas_handle blas; // null until a trace asks for it
+};
+
 class sv::gpu_resource_manager
 {
 public:
@@ -355,6 +367,24 @@ public:
     /// This is what the simple path costs, and every step of it is a lookup once the payloads are resident.
     [[nodiscard]] scene_item acquire_scene_item(sv::mesh const& mesh);
 
+    /// The same for a mesh placed with `mesh_lifetime::frame`: the material resolved, attributes and textures acquired as resident,
+    /// and the geometry carried on the item rather than acquired, for the renderer to upload with `acquire_frame_mesh`.
+    [[nodiscard]] scene_item acquire_frame_scene_item(sv::mesh const& mesh);
+
+    /// `geometry` uploaded for this epoch: into transient buffers on `cmd`, with its BLAS built there when `build_blas` says so.
+    ///
+    /// Deduplicated by content within the epoch, so a mesh placed in several views, or resolved twice for one trace, uploads once.
+    /// The cache empties when the epoch advances, which is when the transient buffers die.
+    /// The reference holds until the next call.
+    [[nodiscard]] frame_mesh const& acquire_frame_mesh(sg::command_list& cmd,
+                                                       triangle_geometry const& geometry,
+                                                       bool build_blas);
+
+    /// The instance record for a frame mesh: its own buffers, never a placeholder's, since it never streams.
+    [[nodiscard]] shaders::tracer::instance_record describe_instance(sg::command_list& cmd,
+                                                                     frame_mesh const& mesh,
+                                                                     instance_id instance);
+
     /// `data`'s primitives and attributes named by id, as the `sv::resident_quadric_set` a scene item is placed from.
     ///
     /// `data` must hold at least one primitive: an empty batch has no BLAS to build, and `scene_ref::add_quadrics`
@@ -458,6 +488,9 @@ private:
     /// geometry reads it.
     void _upload_parameters(sg::command_list& cmd, instance_record& r);
 
+    /// The bindless index a descriptor or texture slot names this epoch, acquired: a texture still arriving names its placeholder.
+    [[nodiscard]] u32 _slot_index(instance_slot const& slot);
+
     /// Whether every id `set` names still resolves, and whether all of it has landed — the quadric counterparts of the
     /// mesh forms, and the same reason they exist: a cached slot is verified rather than believed.
     [[nodiscard]] bool _is_live(sv::resident_quadric_set const& set);
@@ -516,6 +549,10 @@ private:
     /// a path that has no command list of its own to reach one through.
     /// A pointer rather than a reference so the type stays movable, which `create` returns by value.
     sg::context* _ctx = nullptr;
+
+    /// This epoch's frame meshes by their geometry's content hash, cleared by `advance_to`.
+    /// A mesh every view acquires again is found in O(1), however many frame meshes the epoch holds.
+    cc::map<cc::hash128, frame_mesh> _frame_meshes;
 
     /// keyed on the packed texel and the format it is stored in; never evicted, since one 1x1 costs nothing to keep
     cc::map<u64, sg::texture_2d> _placeholder_textures;

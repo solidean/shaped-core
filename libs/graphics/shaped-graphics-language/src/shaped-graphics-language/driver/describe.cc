@@ -17,6 +17,20 @@ namespace
 {
 namespace emit_impl = sgl::emit::impl;
 
+/// How the host spells a type: as SGL does, but an instance of a generic struct as the target text names it,
+/// `pair_float_int` for `pair[float, int]`, since a C++ struct is named by an identifier (CHK-339).
+cc::string host_spelling(check::checked_module const& m, check::type_id type)
+{
+    auto const& t = m.at(type);
+    if (t.kind != check::type_kind::structure || !check::is_valid(t.generic))
+        return cc::string(m.name_of(type));
+    auto result = cc::string();
+    for (auto const c : m.name_of(type))
+        if (c != ']' && c != ' ')
+            result += (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_' ? c : '_';
+    return result;
+}
+
 /// What kind of sampler `member` is to a layout: a static one says so by its settings, a bound one by its declaration.
 cc::string_view sampler_type_of(check::checked_module const& m, check::member_info const& member)
 {
@@ -94,29 +108,29 @@ described_binding_member describe_resource(check::checked_module const& m,
     {
     case check::type_kind::texture:
         result.kind = described_member_kind::texture;
-        result.type = cc::string(m.name_of(member.type));
+        result.type = host_spelling(m, member.type);
         result.texture_dimension = cc::string(check::info_of(t.shape).sg_name);
         result.sample_type = cc::string(sample_type_of(m, member));
         break;
     case check::type_kind::image:
         result.kind = described_member_kind::image;
-        result.type = cc::string(m.name_of(member.type));
+        result.type = host_spelling(m, member.type);
         result.texture_dimension = cc::string(check::info_of(t.shape).sg_name);
         result.image_format = cc::string(check::k_image_formats[t.format].name);
         result.access = cc::string(access_name(t.access));
         break;
     case check::type_kind::acceleration_structure:
         result.kind = described_member_kind::acceleration_structure;
-        result.type = cc::string(m.name_of(member.type));
+        result.type = host_spelling(m, member.type);
         break;
     case check::type_kind::bytes:
         result.kind = described_member_kind::bytes;
-        result.type = cc::string(m.name_of(member.type));
+        result.type = host_spelling(m, member.type);
         result.access = cc::string(t.is_mut ? "read_write" : "read");
         break;
     case check::type_kind::sampler:
         result.kind = described_member_kind::sampler;
-        result.type = cc::string(m.name_of(member.type));
+        result.type = host_spelling(m, member.type);
         result.sampler_type = cc::string(sampler_type_of(m, member));
         if (member.static_sampler >= 0)
             result.static_sampler = describe_settings(m.samplers[member.static_sampler]);
@@ -128,6 +142,21 @@ described_binding_member describe_resource(check::checked_module const& m,
 }
 
 
+/// EMIT-174: the column of a matrix, or the element of a one-dimensional array of builtins, and how many cross.
+cc::pair<cc::string, i32> pieces_of(check::checked_module const& m, check::type_id type)
+{
+    auto const name = m.name_of(type);
+    if (name == "mat2" || name == "mat3" || name == "mat4")
+    {
+        auto const n = name == "mat2" ? 2 : name == "mat3" ? 3 : 4;
+        return {cc::format("float{}", n), n};
+    }
+    if (m.builtin_type_of(type) == nullptr && m.at(type).kind == check::type_kind::array && m.at(type).count > 0
+        && m.builtin_type_of(m.at(type).element) != nullptr)
+        return {cc::string(m.name_of(m.at(type).element)), i32(m.at(type).count)};
+    return {};
+}
+
 described_struct describe_struct(check::checked_module const& m, check::type_info const& t)
 {
     auto result = described_struct{.name = m.at(t.symbol).name,
@@ -137,18 +166,27 @@ described_struct describe_struct(check::checked_module const& m, check::type_inf
     auto const semantics = t.edge == check::stage::vertex ? emit_impl::vertex_semantics(m, t) : cc::vector<cc::string>();
     auto index = isize(0);
     for (auto const& member : m.at(t.members))
-        result.members.push_back(
-            {.name = member.name,
-             .type = cc::string(m.name_of(member.type)),
-             // the position, the depth and the sample mask take no location
-             .location = member.is_position || member.output != check::pixel_output::color ? -1 : location++,
-             .stream = t.edge == check::stage::vertex ? emit_impl::stream_of(member) : cc::string(),
-             .format = member.vertex_format,
-             .output = member.output == check::pixel_output::sample_mask ? cc::string("sample_mask")
-                     : member.output != check::pixel_output::color       ? cc::string("depth")
-                                                                         : cc::string(),
-             .semantic = t.edge == check::stage::vertex ? semantics[index++] : cc::string(),
-             .is_per_instance = member.is_per_instance});
+    {
+        auto [piece, pieces] = t.edge == check::stage::vertex ? pieces_of(m, member.type) : cc::pair<cc::string, i32>();
+        // the position, the layer, the depth and the sample mask take no location
+        auto const takes_location
+            = !member.is_position && !member.is_layer && member.output == check::pixel_output::color;
+        result.members.push_back({.name = member.name,
+                                  .type = host_spelling(m, member.type),
+                                  .location = takes_location ? location : -1,
+                                  .stream = t.edge == check::stage::vertex ? emit_impl::stream_of(member) : cc::string(),
+                                  .format = member.vertex_format,
+                                  .output = member.output == check::pixel_output::sample_mask ? cc::string("sample_"
+                                                                                                           "mask")
+                                          : member.output != check::pixel_output::color       ? cc::string("depth")
+                                                                                              : cc::string(),
+                                  .semantic = t.edge == check::stage::vertex ? semantics[index++] : cc::string(),
+                                  .is_per_instance = member.is_per_instance,
+                                  .pieces = pieces,
+                                  .piece = cc::move(piece)});
+        if (takes_location)
+            location += pieces > 0 ? pieces : 1;
+    }
     return result;
 }
 
@@ -163,7 +201,7 @@ cc::string host_name_of(check::checked_module const& m, check::symbol_id id)
 cc::string host_type_name_of(check::checked_module const& m, check::type_id type)
 {
     auto const symbol = m.at(type).symbol;
-    return check::is_valid(symbol) ? host_name_of(m, symbol) : cc::string(m.name_of(type));
+    return check::is_valid(symbol) ? host_name_of(m, symbol) : host_spelling(m, type);
 }
 
 /// The module of `type`'s declaration where it is not the source's own; empty otherwise.
@@ -178,16 +216,15 @@ described_memory_struct describe_memory_struct(check::checked_module const& m,
                                                emit_impl::address_space space)
 {
     auto const placed = emit_impl::place_struct(m, type, space);
-    auto result = described_memory_struct{
-        .name = cc::string(m.name_of(type)),
-        .module = foreign_module_of_type(m, type),
-        .space = cc::string(space == emit_impl::address_space::constants ? "constants" : "storage"),
-        .size = placed.size};
+    auto result = described_memory_struct{.name = host_spelling(m, type),
+                                          .module = foreign_module_of_type(m, type),
+                                          .space = cc::string(emit_impl::is_storage(space) ? "storage" : "constants"),
+                                          .size = placed.size};
     auto const members = m.at(m.at(type).members);
     for (auto i = isize(0); i < members.size(); ++i)
         if (members[i].type != check::checked_module::void_type)
             result.members.push_back({.name = members[i].name,
-                                      .type = cc::string(m.name_of(members[i].type)),
+                                      .type = host_spelling(m, members[i].type),
                                       .offset = placed.offsets[i],
                                       .size = placed.sizes[i]});
     return result;
@@ -254,7 +291,7 @@ described_entry_point describe_entry_point(check::checked_module const& m,
     result.options = option_names(m, e.options);
     result.footprint = check::footprint_of(m, legal);
     for (auto const id : driver::impl::file_samplers_of(legal))
-        result.samplers.push_back(m.at(id).name);
+        result.samplers.push_back(m.qualified_name_of(id));
     if (e.entry_stage >= check::stage::raygen && check::is_valid(e.input))
     {
         result.payload = m.name_of(e.input);
@@ -287,8 +324,8 @@ cc::string baked_samplers(check::checked_module const& m, cc::span<u8 const> is_
     for (auto i = isize(0); i < m.symbols.size(); ++i)
     {
         if (is_reached[i] != 0)
-            result += cc::format("{}{}#{}@{}", result.empty() ? "" : ", ", m.symbols[i].name, sampler_index,
-                                 check::hex_of(check::structural_hash(m.samplers[m.symbols[i].info])));
+            result += cc::format("{}{}#{}@{}", result.empty() ? "" : ", ", m.qualified_name_of(check::symbol_id(i)),
+                                 sampler_index, check::hex_of(check::structural_hash(m.samplers[m.symbols[i].info])));
         sampler_index += m.symbols[i].kind == check::symbol_kind::sampler ? 1 : 0;
     }
     return result;
@@ -327,7 +364,7 @@ cc::string name_or_empty(check::checked_module const& m, check::symbol_id id)
 described_hit_group describe_hit_group(check::checked_module const& m, check::pipeline_info const& p)
 {
     auto result = described_hit_group{.name = m.at(p.symbol).name,
-                                      .ray_set = m.at(p.ray_set).name,
+                                      .ray_set = m.qualified_name_of(p.ray_set),
                                       .is_procedural = p.is_procedural,
                                       .intersection = name_or_empty(m, p.intersection)};
     auto const records = m.at(p.records);
@@ -348,7 +385,7 @@ described_raytracing_pipeline describe_raytracing_pipeline(check::checked_module
                                                            cc::span<check::flat_entry_point const> legal)
 {
     auto result = described_raytracing_pipeline{.name = m.at(p.symbol).name,
-                                                .ray_set = m.at(p.ray_set).name,
+                                                .ray_set = m.qualified_name_of(p.ray_set),
                                                 .raygen = m.at(p.raygen).name,
                                                 .has_host_hit_groups = p.has_host_hit_groups,
                                                 .max_recursion_depth = p.max_recursion_depth,
@@ -439,7 +476,7 @@ described_raytracing_pipeline describe_raytracing_pipeline(check::checked_module
             mark_samplers(m, entry, legal, is_reached);
     for (auto i = isize(0); i < m.symbols.size(); ++i)
         if (is_reached[i] != 0)
-            result.samplers.push_back(m.symbols[i].name);
+            result.samplers.push_back(m.qualified_name_of(check::symbol_id(i)));
 
     // The frozen part: what the generated definition fixes, so a reload that moves it cannot follow.
     auto rays = cc::string();
@@ -525,7 +562,7 @@ described_pipeline describe_pipeline(check::checked_module const& m,
     // One layout serves every stage, so it carries what any of them reaches, in index order.
     for (auto i = isize(0); i < m.symbols.size(); ++i)
         if (is_reached[i] != 0)
-            result.samplers.push_back(m.symbols[i].name);
+            result.samplers.push_back(m.qualified_name_of(check::symbol_id(i)));
     for (auto const b : m.at(p.layout))
         result.layout.push_back(host_name_of(m, b));
     if (check::is_valid(p.inline_constants))
@@ -619,7 +656,7 @@ sgl::described_binding sgl::driver::impl::describe_binding(check::checked_module
         for (auto i = isize(0); i < members.size(); ++i)
             result.members.push_back({.name = members[i].name,
                                       .kind = described_member_kind::constant,
-                                      .type = cc::string(m.name_of(members[i].type)),
+                                      .type = host_spelling(m, members[i].type),
                                       .offset = placed.offsets[i],
                                       .size = placed.sizes[i]});
         result.block_size = placed.size;
@@ -652,14 +689,15 @@ sgl::described_binding sgl::driver::impl::describe_binding(check::checked_module
         auto const& t = m.at(member.type);
         if (t.kind == check::type_kind::buffer)
         {
-            result.members.push_back({.name = member.name,
-                                      .kind = described_member_kind::buffer,
-                                      .type = cc::string(m.name_of(t.element)),
-                                      .slot = slot,
-                                      .count = count,
-                                      .stride = sgl::emit::impl::element_stride(m, t.element),
-                                      .host_name = cc::format("{}.{}", s.name, member.name),
-                                      .access = cc::string(t.is_mut ? "read_write" : "read")});
+            result.members.push_back(
+                {.name = member.name,
+                 .kind = described_member_kind::buffer,
+                 .type = host_spelling(m, t.element),
+                 .slot = slot,
+                 .count = count,
+                 .stride = sgl::emit::impl::element_stride(m, t.element, sgl::emit::impl::element_space(b, member)),
+                 .host_name = cc::format("{}.{}", s.name, member.name),
+                 .access = cc::string(t.is_mut ? "read_write" : "read")});
             slot += count;
             continue;
         }
@@ -673,7 +711,7 @@ sgl::described_binding sgl::driver::impl::describe_binding(check::checked_module
         }
         result.members.push_back({.name = member.name,
                                   .kind = described_member_kind::constant,
-                                  .type = cc::string(m.name_of(member.type)),
+                                  .type = host_spelling(m, member.type),
                                   .offset = placed.offsets[next_constant],
                                   .size = placed.sizes[next_constant]});
         ++next_constant;
@@ -685,7 +723,7 @@ sgl::described_file_sampler sgl::driver::impl::describe_file_sampler(check::chec
 {
     auto const& s = m.at(id);
     auto const& state = m.samplers[s.info];
-    return {.name = s.name,
+    return {.name = m.qualified_name_of(id),
             .index = emit_impl::file_sampler_index(m, id),
             .sampler_type = cc::string(sampler_type_of(m, {.type = s.type, .static_sampler = s.info})),
             .settings = describe_settings(state),
@@ -785,6 +823,12 @@ cc::result<sgl::module_description, cc::string> sgl::describe(describe_request c
         auto const is_option = s.kind == check::symbol_kind::constant && m.constants[s.info].option == id;
         if (is_option && s.file >= m.prelude_file_count())
             result.options.push_back(describe_option(m, id));
+        // a module's sampler shares the program's index space, so the host binds it too (EMIT-133)
+        if (s.kind == check::symbol_kind::sampler && !is_own(s.file) && s.file >= m.prelude_file_count())
+        {
+            result.samplers.push_back(driver::impl::describe_file_sampler(m, id));
+            continue;
+        }
         if (!is_own(s.file) || is_option)
             continue;
 
@@ -823,7 +867,8 @@ cc::result<sgl::module_description, cc::string> sgl::describe(describe_request c
     auto placed = cc::vector<check::type_id>();
     for (auto const id : described)
     {
-        for (auto const space : {emit_impl::address_space::constants, emit_impl::address_space::storage})
+        for (auto const space : {emit_impl::address_space::constants, emit_impl::address_space::storage,
+                                 emit_impl::address_space::packed_constants, emit_impl::address_space::packed_storage})
         {
             auto structs = cc::vector<check::type_id>();
             emit_impl::collect_placed_structs(m, id, space, structs);
@@ -865,15 +910,23 @@ cc::result<sgl::module_description, cc::string> sgl::describe(describe_request c
         else
             result.pipelines.push_back(describe_pipeline(m, p, legal));
     }
-    // every ray set of the program, a pipeline naming it or not
-    for (auto const& s : m.symbols)
-        if (s.kind == check::symbol_kind::structure && !is_module && s.file == front.program_file()
+    // every ray set of the program, a pipeline naming it or not, and every module's a pipeline or a hit group of the
+    // program names, as `m.set` (CHK-329)
+    auto named_sets = cc::vector<check::symbol_id>();
+    for (auto const& p : m.pipelines)
+        if (!is_module && m.at(p.symbol).file == front.program_file() && check::is_valid(p.ray_set))
+            named_sets.push_back(p.ray_set);
+    for (auto i = isize(0); i < m.symbols.size(); ++i)
+    {
+        auto const& s = m.symbols[i];
+        auto const is_named = named_sets.values().any([&](check::symbol_id n) { return n == check::symbol_id(i); });
+        if (s.kind == check::symbol_kind::structure && !is_module && (s.file == front.program_file() || is_named)
             && s.state == check::symbol_state::checked && ast::is_valid(s.declaration))
         {
             auto const* const d = front.asts[s.file]->at(s.declaration).node.try_as<ast::struct_decl>();
             if (d == nullptr || !d->is_ray_set)
                 continue;
-            auto set = described_ray_set{.name = s.name};
+            auto set = described_ray_set{.name = m.qualified_name_of(check::symbol_id(i))};
             for (auto const& ray : m.at(m.at(s.type).members))
             {
                 set.rays.push_back(ray.name);
@@ -883,6 +936,7 @@ cc::result<sgl::module_description, cc::string> sgl::describe(describe_request c
             }
             result.ray_sets.push_back(cc::move(set));
         }
+    }
 
     if (!errors.empty())
     {

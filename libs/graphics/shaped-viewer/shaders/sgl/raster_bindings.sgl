@@ -24,7 +24,11 @@ struct frame_constants:
     pixel_spread: float
     /// the image's size in pixels
     size: float2
-    pad0: float2
+    /// How far this frame's samples sit from the pixels' centers, in pixels: 0 but where a frame is drawn for an upscaler.
+    /// The tracer's `jitter` minus one half, so pixel `px` sees the image at `px + 0.5 + jitter`, where its ray would.
+    jitter: float2
+    /// 0 cuts coverage below one half; anything else seeds a cut drawn per pixel and frame, which frames accumulated converge to the partial surface.
+    coverage_seed: uint
 
 /// The scene a raster frame draws — group 0, before the manager's bindless tables at 1 and `slug.tables` at 2.
 ///
@@ -33,34 +37,29 @@ binding drawn:
     /// One element, the frame constants.
     frame: buffer[frame_constants]
 
-    /// The per-item table; one draw is one row of it, `draw.instance`.
+    /// The per-item table; one draw is one row of it, its first instance.
     instances: buffer[tracer.instance_record]
 
     /// Every light of the layer, `light_count` of them.
     lights: buffer[tracer.light_record]
 
-    /// The environment's 16 SH coefficients, `sv::background_gpu` byte for byte.
+    /// The environment, `sv::background_gpu` byte for byte: its 16 SH lanes, then a dome's.
     background: buffer[float4]
 
     /// The decals every pixel is painted with, `decal_count` of them, and the shapes they cover in the atlas bound as `slug.tables`.
     decals: buffer[tracer.decal_record]
     decal_shapes: buffer[tracer.decal_shape]
 
-/// Which row of `drawn.instances` one draw is, the only thing that changes between the draws of a frame.
-@inline binding draw:
-    instance: uint
-    pad0: uint3
-
-/// What the vertex stage hands the pixel stage: which triangle, where in it, and where in the world.
+/// What the vertex stage hands the pixel stage: which instance, and where on it, in its own space and in the world.
 ///
-/// The triangle and its barycentrics are what a traced hit reports, so a pixel builds the same `material.shading_context` a hit does.
+/// The draw is indexed, so a corner is shared by the triangles meeting there and cannot say which triangle it is.
+/// The pixel stage takes its triangle from `@primitive_id` and finds the barycentrics of `object` in it, which is what a traced hit reports.
 struct varyings:
     @position position: hpos4
-    /// the row of `drawn.instances`, which the vertex stage reads from `draw`, so a pixel indexes by it unmarked
+    /// the row of `drawn.instances`, which the vertex stage takes from `@first_instance`, so a pixel indexes by it unmarked
     @per_draw instance: uint
-    @interpolate(.flat) primitive: uint
-    /// `(1 - b.x - b.y, b.x, b.y)` of a traced hit at the same point: the weight of each corner, in order
-    barycentrics: float3
+    /// the point in the mesh's own space, where the barycentrics are found: the corners are stored there, and it is near the origin
+    object: float3
     world: float3
 
 /// What a raster frame writes per pixel: the lit image and the primary hit's G-buffer.

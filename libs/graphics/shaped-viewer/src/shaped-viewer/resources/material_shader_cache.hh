@@ -55,6 +55,12 @@ struct sv::material_permutation
     /// Compiled by `raster_routine` the first time a raster frame draws the permutation, and cached there.
     cc::string raster_source;
 
+    /// The hybrid's forward pixel stage, `generated_material_shader::hybrid_source`, compiled and cached like `raster_source`.
+    cc::string hybrid_source;
+
+    /// Where this permutation's base color lives, which every instance shading with it copies into its record for a secondary hit to read.
+    material_secondary secondary;
+
     /// What a compile error calls this permutation: the material type's name, and whether it is the quadric form.
     cc::string label;
 

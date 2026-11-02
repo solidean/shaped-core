@@ -10,6 +10,7 @@
 #include <shaped-viewer/layout/box_style.hh>
 #include <shaped-viewer/layout/layout_tree.hh>
 #include <shaped-viewer/scene/quadric.hh>
+#include <shaped-viewer/scene/studio.hh>
 #include <shaped-viewer/scene/tg_objects.hh>
 #include <shaped-viewer/view/view_data.hh>
 #include <typed-geometry/scalar/angle.hh>
@@ -172,6 +173,9 @@ public:
     /// and its declared default applies only where neither supplies one.
     mesh_ref add_mesh(sv::mesh const& mesh);
 
+    /// The same, with the geometry's lifetime chosen: `mesh_lifetime::frame` uploads it inline for this frame alone (see `sv::mesh_lifetime`).
+    mesh_ref add_mesh(sv::mesh const& mesh, mesh_lifetime lifetime);
+
     /// The same for a mesh already made of resources — nothing to look up, since its ids are minted.
     /// This is the path a compute-produced geometry takes, and the one to prefer when the same mesh is placed many times.
     mesh_ref add_mesh(sv::resident_mesh const& mesh);
@@ -296,6 +300,13 @@ public:
 
     /// Sample counts and bounce limits for this layer's trace.
     void settings(render_settings const& s);
+
+    /// Lights this layer as the studio spec does: the dome as its background and no fallback light, its display exposed
+    /// and neutral, and the floor placed unless the setup hangs the asset — see `sv::studio_options`.
+    ///
+    /// Call it after `settings`, which replaces the display it sets; call it every frame, like the rest of the scene.
+    /// The lobes turn with the view's camera, unless `options.lights_from` holds them still.
+    void studio(studio_options const& options = {});
 
     /// Instances drawing `id` of `set` in this scene, in world units — see `sv::instance_3d`.
     ///
@@ -517,6 +528,10 @@ public:
     /// What it does NOT see is post-load work a resource still owes, which changes a texture's contents rather than
     /// its id — `frame::pending_resource_work` and `frame::streaming_resources` are the rest.
     [[nodiscard]] bool is_accumulation_converged(cc::optional<u32> samples = {}) const;
+
+    /// Starts every traced layer of this view over, as a different image would: its mean, and the denoiser's history with it.
+    /// For a person asking to see the image converge again, or a change the trace's hash cannot see.
+    void restart_accumulation() const;
 
     [[nodiscard]] view_id id() const;
     [[nodiscard]] view_index index() const { return _view; }

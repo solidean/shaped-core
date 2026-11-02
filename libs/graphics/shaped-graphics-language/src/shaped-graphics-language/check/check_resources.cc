@@ -53,6 +53,8 @@ cc::string spelling_of(check::type_info const& t, checked_module const& m)
     case type_kind::image:
         // A builtin's pattern names the texel it reads or writes where an image names its format (CHK-207),
         // and a bare one takes every image of the shape (CHK-194).
+        if (is_valid(t.count_parameter))
+            return cc::format("{}{}[{}]", access_prefix(t.access), shape.image, m.at(t.count_parameter).spelled);
         if (t.format < 0 && t.element == type_id::none)
             return cc::string(shape.image);
         return t.format < 0 ? cc::format("{}{}[{}]", access_prefix(t.access), shape.image, m.name_of(t.element))
@@ -223,6 +225,21 @@ type_id checker::resolve_resource_applied(i32 file, ast::expr_id expr, ast::inde
         return resource_type({.kind = type_kind::texture, .element = element, .shape = texture->shape});
     }
 
+    // CHK-339: a `pixel_format` value parameter in scope, which an instance replaces by its case
+    if (auto const* const n = ast_of(file).at(arguments[0].value).node.try_as<ast::name>())
+        for (auto i = type_parameter_names.size(); i > 0; --i)
+            if (type_parameter_names[i - 1].first == text_of(file, n->where))
+            {
+                auto const stands_for = type_parameter_names[i - 1].second;
+                auto const& s = out.at(stands_for);
+                if (!is_valid(s.element) || out.name_of(s.element) != "pixel_format")
+                    break;
+                if (s.kind == type_kind::constant)
+                    return resource_type({.kind = type_kind::image,
+                                          .shape = image->shape,
+                                          .format = find_image_format(out.at(out.at(s.element).cases)[s.count].name)});
+                return resource_type({.kind = type_kind::image, .shape = image->shape, .count_parameter = stands_for});
+            }
     auto const format = resolve_image_format(file, arguments[0].value);
     if (format == k_format_failed)
         return checked_module::error_type;
@@ -240,13 +257,12 @@ type_id checker::resolve_resource_applied(i32 file, ast::expr_id expr, ast::inde
 
 i32 checker::resolve_image_format(i32 file, ast::expr_id argument)
 {
-    // CHK-200 (temporary): the argument is read as exactly an enum case of sg's formats, or a const of one.
-    // Any value as a type argument is the general form, issue: feat-sgl-values-as-type-arguments
+    // CHK-200: the argument is exactly an enum case of sg's formats, or a const of one; a value parameter is read above
     auto const* const dot = ast_of(file).at(argument).node.try_as<ast::leading_dot>();
     auto format = dot != nullptr ? find_image_format(text_of(file, dot->name)) : -1;
     if (auto const* const n = ast_of(file).at(argument).node.try_as<ast::name>())
     {
-        auto const* const found = names_seen_from(file).get_ptr(text_of(file, n->where));
+        auto const* const found = seen_from(file, text_of(file, n->where));
         auto const id = found != nullptr && !found->empty() ? found->front() : symbol_id::none;
         if (is_valid(id) && out.at(id).kind == symbol_kind::constant)
         {
@@ -360,7 +376,8 @@ type_id checker::qualify_resource(i32 file, ast::expr_id expr, type_id inner, as
     {
         auto qualified = t;
         qualified.access = is_write_only ? access_mode::write : access_mode::read_write;
-        if (!is_write_only && !k_image_formats[t.format].is_readwrite_portable)
+        // a format a value parameter stands for is judged where the image handed over was declared, which it unifies with
+        if (!is_write_only && t.format >= 0 && !k_image_formats[t.format].is_readwrite_portable)
             judge_feature(file, where, cc::format("a `mut` image of .{}", k_image_formats[t.format].name),
                           feature::readwrite_image_formats);
         return resource_type(cc::move(qualified));
@@ -506,7 +523,7 @@ void checker::compile_file_sampler(symbol_id id)
     auto const& d = ast_of(file).at(out.at(id).declaration);
     judge_attributes(file, d.attributes, {}, "a sampler");
     auto const state = compile_sampler(file, d.node.as<ast::sampler_decl>());
-    auto& s = out.symbols[index_of(id)];
+    auto& s = out.symbols.own(index_of(id));
     s.type = resource_type({.kind = type_kind::sampler, .is_comparison = state.compare >= 0});
     s.info = i32(out.samplers.size());
     out.samplers.push_back(state);
@@ -514,7 +531,7 @@ void checker::compile_file_sampler(symbol_id id)
 
 void checker::judge_filtering(i32 file, ast::expr_id id, source_span call, cc::span<written_argument const> arguments)
 {
-    auto const record = out.files[file].call_at(id);
+    auto const record = tables_of(file).call_at(id);
     auto const* const callee
         = record >= 0 ? out.builtin_function(out.at(out.call_records[record].callee).intrinsic) : nullptr;
 
@@ -533,7 +550,7 @@ void checker::judge_filtering(i32 file, ast::expr_id id, source_span call, cc::s
         auto named = a.expr;
         if (auto const* const element = ast_of(file).at(named).node.try_as<ast::index>())
             named = element->object;
-        auto const& where = out.files[file].target_at(named);
+        auto const& where = tables_of(file).target_at(named);
         // CHK-314: a file-scope sampler filters as a binding's static sampler does
         if (where.kind == target_kind::symbol && out.at(where.symbol).kind == symbol_kind::sampler
             && out.at(where.symbol).state == symbol_state::checked)
@@ -621,7 +638,7 @@ bool checker::is_constant_argument(i32 file, ast::expr_id expr) const
     auto const& node = ast_of(file).at(expr).node;
     if (node.is<ast::literal>() || node.is<ast::leading_dot>())
         return true;
-    auto const& tables = out.files[file];
+    auto const tables = tables_of(file);
     auto const& where = tables.target_at(expr);
     if (where.kind == target_kind::enum_case)
         return true;
@@ -644,7 +661,7 @@ bool checker::is_constant_argument(i32 file, ast::expr_id expr) const
 
 void checker::judge_constant_arguments(i32 file, ast::expr_id id)
 {
-    auto const record = out.files[file].call_at(id);
+    auto const record = tables_of(file).call_at(id);
     if (record < 0)
         return;
     auto const& r = out.call_records[record];
@@ -699,12 +716,13 @@ void checker::judge_constant_arguments(i32 file, ast::expr_id id)
     }
 }
 
-void checker::index_builtin_symbols()
+void checker::index_builtin_symbols(isize first)
 {
     if (out.builtins == nullptr)
         return;
-    symbol_of_builtin.resize_to_filled(out.builtins->functions.size(), symbol_id::none);
-    for (auto i = isize(0); i < out.symbols.size(); ++i)
+    if (symbol_of_builtin.size() != out.builtins->functions.size())
+        symbol_of_builtin.resize_to_filled(out.builtins->functions.size(), symbol_id::none);
+    for (auto i = first; i < out.symbols.size(); ++i)
         if (auto const intrinsic = out.symbols[i].intrinsic; out.builtins->is_known(intrinsic))
             symbol_of_builtin[index_of(intrinsic)] = symbol_id(i);
 }
@@ -728,7 +746,7 @@ void checker::judge_offset_range(i32 file, ast::expr_id expr)
                    "an offset reaches from -8 to 7 texels on every target");
         return;
     }
-    auto const record = out.files[file].call_at(expr);
+    auto const record = tables_of(file).call_at(expr);
     if (record < 0)
         return;
     for (auto const& w : out.at(out.call_records[record].written))
@@ -737,6 +755,9 @@ void checker::judge_offset_range(i32 file, ast::expr_id expr)
 
 cc::string sgl::check::texel_name_of(i32 format)
 {
+    // an image whose format is a value parameter has no texel until an instance says the format (CHK-339)
+    if (format < 0)
+        return {};
     auto const& f = k_image_formats[format];
     auto const stem = f.component == value_kind::scalar_float ? "float"
                     : f.component == value_kind::scalar_int   ? "int"

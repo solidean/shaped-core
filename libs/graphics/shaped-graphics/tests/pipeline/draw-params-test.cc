@@ -140,6 +140,48 @@ ASYNC_INVOCABLE_TEST("sg - an indexed draw adds its vertex offset to 16- and 32-
         }
 }
 
+ASYNC_INVOCABLE_TEST("sg - indirect indexed draws read every field from the GPU, and an instance count of 0 draws "
+                     "nothing",
+                     (sg::context_handle const& ctx))
+{
+    REQUIRE(ctx != nullptr);
+    if (!sg_test::shaders_reach(*ctx))
+        SKIP("no compiler builds this binary's shaders into a format this context accepts");
+
+    auto const pipeline = co_await ctx->cached.acquire_raster_pipeline(shaders::draws::indexed_points);
+    auto const grid = point_grid(*ctx);
+
+    u32 const indices[] = {15, 1, 3, 6};
+    auto const index_buffer = ctx->persistent.create_buffer_from_data(indices, sg::buffer_usage::index_buffer);
+
+    // Record 0: indices 1, 3, 6 offset by 2, as instance 1, reach columns 3, 5 and 8 of row 1.
+    // Record 1: the same as instance 2, with no instances, which is how culling rejects a draw: row 2 stays empty there.
+    // Record 2: index 15 offset by -10, as instances 2 and 3, reaches column 5 of rows 2 and 3.
+    sg::draw_indexed_args const records[] = {
+        {.index_count = 3, .instance_count = 1, .first_index = 1, .vertex_offset = 2, .first_instance = 1},
+        {.index_count = 3, .instance_count = 0, .first_index = 1, .vertex_offset = 2, .first_instance = 2},
+        {.index_count = 1, .instance_count = 2, .first_index = 0, .vertex_offset = -10, .first_instance = 2},
+    };
+    auto const args = ctx->persistent.create_buffer_from_data(records, sg::buffer_usage::indirect_command_buffer);
+
+    auto const pixels = co_await sg_test::draw_offscreen(*ctx, grid_target(),
+                                                         [&](sg::rendering_scope& scope)
+                                                         {
+                                                             scope.bind_pipeline(*pipeline);
+                                                             grid.bind(scope);
+                                                             scope.bind_index_buffer(index_buffer.as_index_buffer());
+                                                             scope.draw_indexed_indirect(args, 0, 3);
+                                                         });
+
+    for (auto r = 0; r < rows; ++r)
+        for (auto c = 0; c < columns; ++c)
+        {
+            auto const drawn = (r == 1 && (c == 3 || c == 5 || c == 8)) || (c == 5 && (r == 2 || r == 3));
+            auto const expected = drawn ? tg::vec2f(float(c), float(r)) : tg::vec2f(-1, -1);
+            CHECK(indices_at(pixels, c, r) == expected).context(cc::format("pixel ({}, {})", c, r));
+        }
+}
+
 ASYNC_INVOCABLE_TEST("sg - vertex buffers bound from a first slot other than 0 feed the slots they name",
                      (sg::context_handle const& ctx))
 {
@@ -224,4 +266,74 @@ ASYNC_INVOCABLE_TEST("sg - an inline constants block that ends short of its alig
         });
 
     CHECK(pixels[0].rgba_float(2, 0) == tg::vec4f(2, 0, 7, 4));
+}
+
+ASYNC_INVOCABLE_TEST("sg - a matrix and an array cross from the vertex to the pixel stage, piece by piece",
+                     (sg::context_handle const& ctx))
+{
+    REQUIRE(ctx != nullptr);
+    if (!sg_test::shaders_reach(*ctx))
+        SKIP("no compiler builds this binary's shaders into a format this context accepts");
+
+    auto const pipeline = co_await ctx->cached.acquire_raster_pipeline(shaders::draws::linked_points);
+    auto const grid = point_grid(*ctx);
+    auto const pixels = co_await sg_test::draw_offscreen(
+        *ctx, grid_target(),
+        [&](sg::rendering_scope& scope)
+        {
+            scope.bind_pipeline(*pipeline);
+            grid.bind(scope);
+            scope.draw({.vertex_range = {.offset = 0, .size = columns}, .instance_range = {.offset = 0, .size = rows}});
+        });
+
+    for (auto r = 0; r < rows; ++r)
+        for (auto c = 0; c < columns; ++c)
+        {
+            // the vertex stage adds 10 to the weight its vertex index picks, at a runtime index
+            float weights[] = {float(c), float(r), 0.5f};
+            weights[c % 3] += 10.0f;
+            auto const expected = tg::vec4f(float(2 * c + 1), 2.0f + weights[1], weights[c % 3], float(c - r));
+            CHECK(pixels[0].rgba_float(c, r) == expected).context(cc::format("pixel ({}, {})", c, r));
+        }
+}
+
+ASYNC_INVOCABLE_TEST("sg - a vertex buffer feeds an array per vertex and a matrix per instance, an attribute per piece",
+                     (sg::context_handle const& ctx))
+{
+    REQUIRE(ctx != nullptr);
+    if (!sg_test::shaders_reach(*ctx))
+        SKIP("no compiler builds this binary's shaders into a format this context accepts");
+
+    using framed = shaders::draws::framed_point;
+    auto const pipeline = co_await ctx->cached.acquire_raster_pipeline(shaders::draws::framed_points);
+
+    // tags (c + 1, 10, c / 2) per column, and per row r a frame whose first column (1, r, 0) is no row of it
+    auto v = cc::vector<framed::per_vertex>();
+    for (auto c = 0; c < columns; ++c)
+        v.push_back({.column = -1.0f + (2.0f * float(c) + 1.0f) / float(columns),
+                     .tags = {float(c + 1), 10.0f, 0.5f * float(c)}});
+    auto i = cc::vector<framed::per_instance>();
+    for (auto r = 0; r < rows; ++r)
+        i.push_back(
+            {.row = 1.0f - (2.0f * float(r) + 1.0f) / float(rows),
+             .frame = tg::mat3f::make_from_cols(tg::vec3f(1, float(r), 0), tg::vec3f(0, 1, 0), tg::vec3f(0, 0, 2))});
+    auto const vertices = ctx->persistent.create_buffer_from_data(cc::move(v), sg::buffer_usage::vertex_buffer);
+    auto const instances = ctx->persistent.create_buffer_from_data(cc::move(i), sg::buffer_usage::vertex_buffer);
+
+    auto const pixels = co_await sg_test::draw_offscreen(
+        *ctx, grid_target(),
+        [&](sg::rendering_scope& scope)
+        {
+            scope.bind_pipeline(*pipeline);
+            scope.bind_vertex_buffers(framed::buffers{.per_vertex = vertices, .per_instance = instances}.views());
+            scope.draw({.vertex_range = {.offset = 0, .size = columns}, .instance_range = {.offset = 0, .size = rows}});
+        });
+
+    for (auto r = 0; r < rows; ++r)
+        for (auto c = 0; c < columns; ++c)
+        {
+            auto const a = float(c + 1);
+            auto const expected = tg::vec4f(a, a * float(r) + 10.0f, float(c), 0.5f * float(c));
+            CHECK(pixels[0].rgba_float(c, r) == expected).context(cc::format("pixel ({}, {})", c, r));
+        }
 }

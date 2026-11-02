@@ -13,3 +13,6 @@ test:
 test:
     for true in 0 ..< 2:
         true < 2
+
+// `pi` is a const of the prelude, and a file that declares its own, as most ported shaders do, hides it
+test pi > 3.14159 and pi < 3.1416

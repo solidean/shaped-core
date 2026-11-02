@@ -137,12 +137,12 @@ void checker::check_test(i32 index)
                                        out.at(binding).name, member.name));
             }
         }
-    out.functions[info].bindings = {.first = u32(out.binding_lists.size()), .count = u32(bindings.size())};
+    out.functions.own(info).bindings = {.first = u32(out.binding_lists.size()), .count = u32(bindings.size())};
     out.binding_lists.push_back_range(bindings);
 
     cc::string_view const known[] = {"expect"};
     judge_attributes(file, d.attributes, known, "a test");
-    out.tests[index].expectations = expectations_of(file, d.attributes);
+    out.tests.own(index).expectations = expectations_of(file, d.attributes);
     notes[info].is_body_checked = true;
     auto scope = function_scope{
         .function = test.symbol,
@@ -166,7 +166,7 @@ void checker::check_test(i32 index)
         auto const& result = arms.empty() ? ast::body() : arms[arms.size() - 1].result;
         value = result.kind == ast::body_kind::arrow ? result.value : ast::expr_id::none;
     }
-    auto const type = ast::is_valid(value) ? out.files[file].type_at(value) : type_id::none;
+    auto const type = ast::is_valid(value) ? tables_of(file).type_at(value) : type_id::none;
     auto const bool_type = type_of_builtin(builtins::k_bool, file, test.where);
     // A test that is to fail or to stop at an assert cannot pass vacuously, so it needs no last check; and a test with
     // no statement was reported where it was parsed.
@@ -266,6 +266,8 @@ ast::stmt_id checker::last_code_line(i32 file, ast::range_of<ast::stmt_id> state
         return deeper(loop->body.statements);
     if (auto const* const loop = s.node.try_as<ast::while_stmt>())
         return deeper(loop->body.statements);
+    if (auto const* const block = s.node.try_as<ast::scope_stmt>())
+        return deeper(block->body.statements);
     if (auto const* const e = s.node.try_as<ast::expr_stmt>(); e != nullptr && ast::is_valid(e->value))
     {
         auto const& value = ast.at(e->value);

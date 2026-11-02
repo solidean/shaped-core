@@ -176,10 +176,11 @@ TEST("sgl emit - a resource parameter is the member it was handed, written where
 {
     auto const hlsl = text_of(k_resources, target::hlsl_dx12);
     CHECK(hlsl.contains("post_source.SampleLevel(post_bilinear, "));
-    CHECK(hlsl.contains("post_level[xy] = post_level[xy] + v;\n"));
+    // `v` is read once, so the argument stands there (EMIT-180), and `xy` twice, so it is bound once
+    CHECK(hlsl.contains("post_level[xy] = post_level[xy] + c.x;\n"));
     auto const wgsl = text_of(k_resources, target::wgsl);
     CHECK(wgsl.contains("textureSampleLevel(post_source, post_bilinear, "));
-    CHECK(wgsl.contains("textureStore(post_level, xy, vec4f(textureLoad(post_level, xy).x + v, 0.0, 0.0, 0.0));\n"));
+    CHECK(wgsl.contains("textureStore(post_level, xy, vec4f(textureLoad(post_level, xy).x + c.x, 0.0, 0.0, 0.0));\n"));
 }
 
 namespace
@@ -284,8 +285,10 @@ TEST("sgl emit - is_nan and is_inf are a test of the bits on every target")
     for (auto const t : {target::hlsl_dx12, target::hlsl_vulkan})
     {
         auto const hlsl = text_of(source, t);
-        CHECK(hlsl.contains("((asuint(p.position.x) & uint(0x7fffffffu)) > uint(0x7f800000u))")).dump("hlsl", hlsl);
-        CHECK(hlsl.contains("((asuint(v) & uint3(0x7fffffffu)) == uint3(0x7f800000u))")).dump("hlsl", hlsl);
+        CHECK(hlsl.contains("((asuint(p.position.x) & 0x7fffffffu) > 0x7f800000u)")).dump("hlsl", hlsl);
+        CHECK(hlsl.contains("((asuint(v) & 0x7fffffffu) == 0x7f800000u)")).dump("hlsl", hlsl);
+        // HLSL's vector constructors take one value per element, so a one-value splat would not compile.
+        CHECK(!hlsl.contains("uint3(0x")).dump("hlsl", hlsl);
         CHECK(!hlsl.contains("isnan(")).dump("hlsl", hlsl);
         CHECK(!hlsl.contains("isinf(")).dump("hlsl", hlsl);
     }

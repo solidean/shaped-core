@@ -25,6 +25,7 @@ enum class command_list_slot : int; // a recorder's slot in the per-context pool
 // The vocabulary enums this header goes on to DEFINE rather than only declare, named here so each definition can be written qualified.
 enum class index_format : u8;
 enum class lifetime_scope;
+enum class memory_heap_contents;
 enum class epoch : u64;
 enum class submission_token : u64;
 
@@ -114,6 +115,13 @@ struct tlas_instance;               // value type — one instance input to buil
 enum class accel_build_flag;        // one build-time trade-off; a set of them is accel_build_flags
 enum class instance_cull_mode : u8; // per-instance triangle cull selection
 enum class blas_geometry : u8;      // what a blas was built from: triangles or AABBs
+class micromap;                     // opacity micromap a blas_triangles names (see raytracing/micromap.hh)
+struct micromap_triangles;          // value type — the input to build_micromap
+struct micromap_usage;              // value type — how many maps of one level and format
+struct micromap_descriptor;         // the GPU record of one map: where its states start, its level and format
+enum class micromap_format : u16;   // 2-state or 4-state
+enum class micromap_state : u8;     // one micro-triangle's state in a 4-state map
+enum class micromap_special_index : i32; // a whole triangle's state, in place of a map index
 
 } // namespace sg
 
@@ -166,6 +174,16 @@ enum class sg::lifetime_scope
 {
     persistent,
     transient,
+};
+
+/// What a memory_heap places: buffers or textures, never both.
+/// One kind per heap is what every backend can give: D3D12 below resource heap tier 2 separates them, and Vulkan's
+/// buffer–image granularity would otherwise pad every boundary between the two.
+/// A backend that cannot place textures refuses a `textures` heap, and its callers keep textures dedicated.
+enum class sg::memory_heap_contents
+{
+    buffers,
+    textures,
 };
 
 namespace sg
@@ -347,6 +365,7 @@ struct vertex_buffer_view;
 struct index_buffer_view;
 struct draw_config;
 struct draw_indexed_config;
+struct draw_indexed_args;
 
 // Ray-tracing pipeline + shader table (see raytracing/raytracing_pipeline.hh / raytracing/raytracing_shader_table.hh). A
 // DXR state object plus a table of shader identifiers; dispatched via cmd.raytracing.dispatch_rays.
@@ -462,7 +481,8 @@ using context_handle = std::shared_ptr<context>;
 using raw_buffer_handle = std::shared_ptr<raw_buffer const>; // shared-immutable: a view/handle can't reshape the buffer
 using raw_texture_handle = std::shared_ptr<raw_texture const>; // shared-immutable: shape is fixed at creation
 using blas_handle = std::shared_ptr<blas const>;               // shared-immutable: an opaque, driver-built structure
-using tlas_handle = std::shared_ptr<tlas const>; // shared-immutable: indexes a set of instances of blas_handle
+using tlas_handle = std::shared_ptr<tlas const>;         // shared-immutable: indexes a set of instances of blas_handle
+using micromap_handle = std::shared_ptr<micromap const>; // shared-immutable: an opaque, driver-built micromap
 using memory_heap_handle = std::shared_ptr<memory_heap const>;         // immutable resource — it tracks no allocations
 using compiled_shader_handle = std::shared_ptr<compiled_shader const>; // immutable compiled shader + reflection
 using binding_group_layout_handle = std::shared_ptr<binding_group_layout const>; // immutable per-group schema

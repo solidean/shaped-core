@@ -169,12 +169,22 @@ Not invariants — v1 shortcuts:
   See [`dx12_epoch.hh`](../../backends/dx12/src/shaped-graphics/backends/dx12/dx12_epoch.hh)
   / [`dx12_epoch.cc`](../../backends/dx12/src/shaped-graphics/backends/dx12/dx12_epoch.cc).
 - **A dropped upload still signals its value.**
-  The job holds only a `std::weak_ptr<dx12_buffer const>`, locked at stage time.
-  If every handle was dropped, or the storage expired, before the actor got there, `stage_job` skips the copy — a large upload to a released buffer never stages or blocks.
-  It still folds the job's completion value into the window, so `submit_window` signals the copy fence up to it.
+  The job holds only a `std::weak_ptr<dx12_buffer const>`, locked at admission.
+  If every handle was dropped, or the storage expired, before the actor got there, `admit_pending` skips the copy — a large upload to a released buffer never stages or blocks.
+  It still folds the job's completion value into a window, so `submit_window` signals the copy fence up to it.
   That is mandatory: the fence is monotonic, and both the lifetime gate above and any forward reader stamped with the value wait on it, so a hole would hang them.
   A window whose jobs were all dropped still submits an empty list and signals.
   Only the `CopyBufferRegion` and the reverse `wait_token` fold are skipped, since no copy means no reverse hazard.
+- **A dropped handle is not a dropped upload when a submitted list waits on it.**
+  A list folds its waits at submit and drops its handles on the way out, so the GPU may still read a buffer nobody holds.
+  Skipping that copy would satisfy the list's wait on bytes never written.
+  So every list stamps the values it waits on into the timeline's `awaited_value`, and the actor copies an awaited job whatever its handles say.
+  It writes through the job's own reference to the storage, captured at enqueue; the lifetime gate keeps that storage until the value is signaled anyway.
+  The reading is exact: a list needs a handle to touch the resource, so once the last one is gone no new reader can appear.
+- **A skipped job keeps its family's order.**
+  A window signals the highest value it finished, so a skipped job folded into the open window ahead of an earlier job of its family that is packed later would mark that copy done before it ran.
+  So a skipped job with earlier work of its family still active waits behind it as an empty entry, and folds only when the scheduler reaches it.
+  vulkan has the same rule in its retire pass, where only a family head retires.
 - **The staging window resizes at runtime.**
   `ctx.upload.set_async_window_size(bytes)` records a new window size, which the copy actor adopts at the top of its next process cycle, between windows.
   It submits any open window, fully drains the copy queue so no in-flight window still reads the old buffer, then rebuilds the triple-buffered staging buffer at `bytes * 3`.

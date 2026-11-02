@@ -39,6 +39,7 @@ class Benchmark:
     target: str
     file: str
     line: int
+    manual: bool = False  # declared `manual`: runs only when named exactly, so a substring never selects it
 
 
 def _artifact_stamp(artifact: Path | None) -> list | None:
@@ -112,6 +113,7 @@ def collect_benchmarks(
                     target=target.name,
                     file=str(record.get("file", "")),
                     line=int(record.get("line", 0)),
+                    manual=bool(record.get("manual", False)),
                 )
             )
 
@@ -128,6 +130,7 @@ def select_benchmarks(benchmarks: list[Benchmark], match: str) -> tuple[list[Ben
     reachable.
     Otherwise the match is a case-insensitive substring and every hit is selected — unlike `dev.py example`, where
     ambiguity is an error because running "the first one that matched" would run the wrong thing.
+    A `manual` benchmark is selected by its exact name only, as nexus runs it: a substring passes it over.
     """
     if not benchmarks:
         return [], "no benchmarks found. Has anything declared a BENCHMARK?"
@@ -137,11 +140,13 @@ def select_benchmarks(benchmarks: list[Benchmark], match: str) -> tuple[list[Ben
         return exact, None
 
     needle = match.lower()
-    hits = [b for b in benchmarks if needle in b.name.lower()]
+    hits = [b for b in benchmarks if needle in b.name.lower() and not b.manual]
     if hits:
         return hits, None
 
     message = f"no benchmark matches {match!r}"
+    if manual := [b.name for b in benchmarks if needle in b.name.lower() and b.manual]:
+        return [], message + ". Manual benchmarks run only by their exact name: " + ", ".join(repr(n) for n in manual)
     if suggestions := _suggest(match, [b.name for b in benchmarks]):
         message += ". Did you mean: " + ", ".join(suggestions)
     return [], message
@@ -153,11 +158,12 @@ def unselected_overreach(selected: list[Benchmark], benchmarks: list[Benchmark])
     A binary filters `--benchmarks <name>` by substring, and nexus has no exact-name spelling.
     So an exact name that is a substring of a sibling's runs both, which is the sweep `dev.py example` avoids by sending a bare name.
     A bare name does not work here: it leaves the bucket open to every normal test containing it, which `benchmarks` cannot see.
+    A manual sibling is no overreach: nexus runs it only when named exactly, never on a substring.
     """
     chosen = {(b.target, b.name) for b in selected}
     return [
         (s.name, b.name)
         for s in selected
         for b in benchmarks
-        if b.target == s.target and (b.target, b.name) not in chosen and s.name in b.name
+        if b.target == s.target and (b.target, b.name) not in chosen and s.name in b.name and not b.manual
     ]

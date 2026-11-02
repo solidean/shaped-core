@@ -11,3 +11,9 @@ fun toned(x: float, t: tone) -> float:
 
 test toned(2.0, tone.clamped) == 1.0
 test strength(light(3.0)) == 3.0
+
+// an operator of the module, which every file that uses the module sees, since an operator has no qualified spelling
+@operator("*")
+fun scaled_light(l: light, k: float) -> light => light(l.power * k)
+
+test (light(2.0) * 3.0).power == 6.0

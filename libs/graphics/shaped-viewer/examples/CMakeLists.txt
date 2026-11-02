@@ -19,7 +19,7 @@ if(NOT SC_BUILD_EXAMPLES)
 endif()
 
 # Every example here, by stem: each is <stem>.cc and the target shaped-viewer-<stem>-example.
-set(_sv_example_stems hello-cube load-asset openpbr-spheres mesh-structure mesh-structure-dense quadric-gallery quadric-arrows lights light-stage drawings decals bistro raster tg-objects)
+set(_sv_example_stems hello-cube load-asset openpbr-spheres mesh-structure mesh-structure-dense quadric-gallery quadric-arrows lights light-stage drawings decals bistro raster hybrid-sponza research-studio tg-objects)
 
 # Its own gate passed, so the question left is which backend the build was ASKED for.
 # The viewer's default context is dx12's or metal's, so a build set to vulkan gets targets that say so, though the tracer itself runs there.
@@ -41,6 +41,13 @@ sc_add_single_file_examples(shaped-viewer
     LINK shaped-viewer
     PCH SG NEXUS
 )
+
+# Sponza is fetched on request (extern/sponza/fetch-sponza.py), and the example says so when it is missing.
+target_compile_definitions(shaped-viewer-hybrid-sponza-example PRIVATE SV_SPONZA_DIR="${CMAKE_SOURCE_DIR}/extern/sponza/.install")
+
+# The research scenes are fetched on request (extern/gltf-research-scenes/fetch-research-scenes.py), and the example says so when one is missing.
+target_compile_definitions(shaped-viewer-research-studio-example
+    PRIVATE SV_RESEARCH_SCENES_DIR="${CMAKE_SOURCE_DIR}/extern/gltf-research-scenes/.install")
 
 # NGX loads Ray Reconstruction from a DLL beside the executable, so without it staged `automatic` falls back to a lesser denoiser.
 if(SC_DLSS_RUNTIME)

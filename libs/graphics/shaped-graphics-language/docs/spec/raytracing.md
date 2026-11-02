@@ -67,6 +67,7 @@ HLSL writes `RaytracingAccelerationStructure`, MSL `instance_acceleration_struct
 | `h.to_world(p: pos3) -> pos3`, `h.to_world(v: vec3) -> vec3` | every hit and `triangle_candidate`; `procedural_candidate` and `procedural_box` take the point alone | object space to world space |
 | `h.normal_to_world(n: vec3) -> vec3` | every hit | by the inverse transpose, so a normal stays perpendicular to its surface |
 | `h.to_object(p: pos3) -> pos3`, `h.to_object(v: vec3) -> vec3` | every hit | world space to object space |
+| `h.object_to_world`, `h.world_to_object` | every hit, candidate and box | the instance's placement and its inverse, each an `affine3` (CHK-408) |
 
 The fields whose names start with `_` hold the rows of both matrices; they are the prelude's, and no program reads them.
 
@@ -379,7 +380,7 @@ A pipeline there waits for a polyfill, which the [incubator](incubator/raytracin
 * A record without a closest hit calls `sgl_empty_closest_hit`, since an empty table slot is no function.
 * The closest hit's record is found from each instance's hit-group offset, which sg keeps in a buffer of its own at buffer 5.
 
-Metal falls short of DXR in four places, which [feat-sgl-metal-raytracing-pipeline-dxr-parity](../issues/feat-sgl-metal-raytracing-pipeline-dxr-parity.md) tracks:
+Metal falls short of DXR in four places, which [epic-sgl-metal-raytracing-dxr-parity](../issues/epic-sgl-metal-raytracing-dxr-parity.md) tracks:
 
 * **A hit's instance transforms are the identity** in a pipeline: Metal hands them only under intersection tags sg's tables do not declare.
 * **A closest hit's `object_ray` is the world ray**, for the same reason, while an intersection's is in object space.

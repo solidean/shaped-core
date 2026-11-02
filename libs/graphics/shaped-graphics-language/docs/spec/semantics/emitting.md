@@ -35,7 +35,7 @@ Back to the [semantics](_index.md); the reasons are in [why/emitting.md](why/emi
 * **EMIT-13** No error depends on the target but EMIT-109's and EMIT-122's: an entry point is written for every target or for none ([why](why/emitting.md#emit-13)).
 * **EMIT-109** An entry point that needs a feature no device of the target has is `target-lacks-feature`, and its detail names the feature.
   Today that is `wgsl` against `binding_arrays`, `multisampled_array_textures`, `raytracing_pipeline`, `geometry_shader` and `tessellation_shader`.
-  It is also `wgsl` against `shader_int16`, `device_coherence`, `image_atomics` and `helper_lane_query`, which core WebGPU has none of.
+  It is also `wgsl` against `shader_int16`, `device_coherence`, `image_atomics`, `first_instance` and `helper_lane_query`, which core WebGPU has none of.
   `ray_query` is none of them: WGSL writes a trace's emulated form (EMIT-135).
   The shader chose it by `require`, so a portable shader still meets EMIT-13's promise.
 * **EMIT-66** A tree that is not core is the error `not-core`, and its detail names the first node that offends.
@@ -68,6 +68,8 @@ struct target_ {
 ## Types
 
 * **EMIT-22** A struct of the program keeps its name, and a builtin type is spelled as its record says, which today is the table below.
+* **EMIT-179** An instance of a generic struct is named after its template and its arguments, `pair_float_int` for `pair[float, int]`, with every character no identifier holds written `_` (CHK-339).
+  Instances of one template whose members came out alike are one struct, named after the first a tree needs: after the front end nothing tells them apart.
 * **EMIT-23** A struct is declared after every struct it holds.
   It is declared where something the body reaches holds one, or where a binding or the stage edge does: a struct LEGAL-61 split into its fields is declared nowhere.
 * **EMIT-106** A field of type `void` holds nothing, so no target declares it, and a construction writes no argument for it.
@@ -215,6 +217,7 @@ A binding that is not `@inline` is a group.
 * **EMIT-83** A group's plain members are a struct of their own and one constant buffer of it, named after the binding, at slot 0.
 * **EMIT-84** A group's plain members are placed by EMIT-39 and EMIT-40, as the members of an `@inline` binding are.
 * **EMIT-85** A buffer member is one global whose name is minted from `<binding>_<member>`, and a group's constant buffer is named after the binding, as any declaration is.
+  A second binding of that name in the list, another module's, is minted a name of its own, `frame_1`.
 * **EMIT-86** HLSL writes each declaration of a group at file scope, under the name EMIT-85 minted for it, and each carries its address by EMIT-104 ([why](why/emitting.md#emit-86)).
 * **EMIT-87** The struct of a group's constant buffer stands ahead of the group's declarations ([why](why/emitting.md#emit-87)).
   `hlsl-vulkan` states every member's offset on it, as EMIT-40 says.
@@ -241,7 +244,8 @@ A binding that is not `@inline` is a group.
 * **EMIT-105** An entry point that lists more than three groups is `too-many-groups` on every target, since sg binds three besides the inline constants.
   Only the entry point's list counts: a function that is no entry point takes the groups its caller hands it, which are no addresses of their own.
 * **EMIT-133** A file-scope sampler the entry point's code reaches is one global named as the sampler is, and one the code does not reach is not declared.
-  Its index i is its position among the module's file-scope samplers in declaration order, so every entry point and every stage states the same one.
+  Its index i is its position among every file-scope sampler the program and the modules it uses declare, in declaration order with the modules' files first.
+  So every entry point and every stage states the same one, and a module's is described to the host beside the program's, by its qualified name.
   It stands where sg binds a pipeline layout's static sampler of index i: `register(s<i>, space10)` in `hlsl-dx12`, and `[[vk::binding(i + 1, 3)]]` in `hlsl-vulkan`.
   WGSL writes it as `@group(3) @binding(i + 1)`, since binding 0 of sg's own group is the inline constants', and MSL as the entry point's parameter `sampler name [[sampler(i)]]`.
   A ray-tracing stage's is a `constexpr sampler` of its settings in MSL instead, since a visible or an intersection function has no sampler slot to read.
@@ -283,6 +287,7 @@ binding affine:
 * **EMIT-43** HLSL declares every matrix member `column_major` and writes a product `mul(a, b)`; WGSL writes `a * b`, for a matrix times a vector and for a matrix times a matrix.
 * **EMIT-44** `transform_position(m, p)` is the product of `m` and the four-vector `(p, 1.0)`.
 * **EMIT-45** `transform_direction(m, v)` is the `xyz` of the product of `m` and `(v, 0.0)`.
+* **EMIT-166** `m * h` of a `mat4` and an `hpos4` is their product, an `hpos4`, so a chain of projective matrices keeps the type a position took on its first.
 * **EMIT-156** `mat4(c0, c1, c2, c3)` is the matrix of those columns: WGSL's and MSL's constructor of columns, and HLSL's constructor of rows under a `transpose`.
 * **EMIT-160** `mat3(c0, c1, c2)` is `transpose(float3x3(c0, c1, c2))` in HLSL, whose constructor takes rows, and the target's own constructor of three columns in WGSL and MSL.
   A product of a `mat3` is written as EMIT-43 writes a `mat4`'s, and no memory holds one, so no declaration of a block or a buffer names it (CHK-397).
@@ -292,6 +297,9 @@ binding affine:
 * **EMIT-46** The text is meant to be read: real names, one statement per line, four spaces per level ([why](why/emitting.md#emit-46)).
 * **EMIT-47** The text starts with a comment that names the stage, the entry point and the target.
 * **EMIT-48** An immutable local is a named constant: `const T name = value;` in HLSL and `let name: T = value;` in WGSL.
+* **EMIT-180** An inlined call's argument is bound to a local unless it is a literal or an immutable local, and that local is written into its one read where the body reads it once.
+  Only where the read stands outside every loop, and the argument is stable: literals, immutable locals and pure operations over them, which nothing the body writes can change.
+  So `max(v, 0.0)` of a generic reads as the vector call it inlines to, `max(a * b, float3(0.0))`, rather than binding `a * b` first.
 * **EMIT-49** A float literal is the shortest decimal text that reads back as its value, always with a decimal point, and without a suffix.
 * **EMIT-50** A literal that is infinite or not a number is `non-finite-literal`.
 * **EMIT-51** An `@operator` builtin is its operator: `+`, `-`, `*`, `/`, `%`, the six comparisons, and the prefix `-`; the products of a matrix are EMIT-43.
@@ -501,42 +509,105 @@ So `{float3; float}` is written with `packed_float3`: the `float` is at byte 12 
 
 ## Layout
 
-Every value in GPU memory — a constant block or a buffer's element — is placed by one rule per address space, the same on every target.
+Every value in GPU memory — a constant block or a buffer's element — is placed by one rule, the same on every target.
+**The rule is the one that loads fastest**: every vector aligned to its size, so every target reads it whole ([why](why/emitting.md#emit-110)).
+Where a host struct needs what C++ would place instead, `@padding(.none)` asks for it (CHK-369), and nothing else does.
 The C++ struct a package generates is that layout byte for byte, padding included, so the host copies it in as it is.
 **That struct is the only thing the host may rely on**: without an annotation, where a member lands is the compiler's choice (EMIT-116).
-EMIT-110 and EMIT-111 describe today's choice, not a promise; `@layout` (CHK-369) is the annotation that makes a constant block's layout one.
 
-* **EMIT-110** A constant block, a group's plain members or an `@inline` binding, is placed by HLSL's constant-buffer packing.
-  It is read in rows of 16 bytes, and a value that would cross a row starts the next one.
-  A `float4`, a matrix and a nested struct start a row, and what follows a nested struct packs against its last member.
-  A 16-bit value is aligned to 2 bytes within its row, and every other value to 4.
-* **EMIT-111** A buffer's element is placed by dx12's structured-buffer packing: each value right behind the one before, aligned to its scalar's size.
-  That is 4 bytes, and 2 for a 16-bit value.
-  A struct is aligned to its largest scalar's size, and its size is where its last value ends, rounded up to that.
-  A buffer strides by its element's size, which CHK-381 holds to whole 4-byte words.
-* **EMIT-112** Each target is made to follow the two rules ([why](why/emitting.md#emit-112)).
-  `hlsl-dx12` writes nothing, since they are its own rules.
-  `hlsl-vulkan` states every offset, which sg's vulkan backend admits by requiring `scalarBlockLayout`.
-  WGSL and MSL write a root as its memory form wherever their own rule would place one of its values elsewhere.
+* **EMIT-110** A value in GPU memory stands at its **natural alignment**: a scalar at its size, a 2-vector at twice that, a 3- or a 4-vector at four times that, and a matrix at its column's.
+  So a `float3` starts at a multiple of 16 and takes 12 bytes, and a scalar that follows it fills its tail.
+  A 16-bit value is aligned likewise, at 2, and a `half3` at 8.
+  A struct aligns to its most aligned member, and its size is where its last member ends, rounded up to that alignment.
+  In a constant block a nested struct also starts a 16-byte row, and what follows it starts the next one.
+  A constant block's own size is where its last member ends.
+  No vector crosses a 16-byte row, so a constant buffer read by rows reads each one from one.
+* **EMIT-111** A buffer's element is placed by EMIT-110, and the buffer strides by the element's size.
+  A builtin element's size is rounded up to its alignment too, so `buffer[float3]` strides by 16, and CHK-381 holds every stride to whole 4-byte words.
+  The host writes such an element as `slib::gpu_padded<tg::vec3f, 16>`.
+* **EMIT-112** Each target is made to follow the rule ([why](why/emitting.md#emit-112)).
+  WGSL's storage rule is this one, and its uniform rule too, so WGSL writes every root as it is.
+  MSL's is this one but for a 3-vector, which takes 16 bytes there: a 3-vector whose tail holds a value is its `packed_` type in the root's memory form (EMIT-62).
+  HLSL packs a structured buffer as C++ does and a constant buffer within its rows, so it writes a padding field into each gap the rule leaves, a struct's tail included.
+  A struct written so is declared with its padding wherever it stands, and a local of it is zeroed before its members are assigned, since DXIL refuses to store an undefined value.
+  A buffer of 3-vectors is a one-field memory form in HLSL, its padding a second field.
+  `hlsl-vulkan` also states every offset, which sg's vulkan backend admits by requiring `scalarBlockLayout`.
 * **EMIT-113** A memory form is one struct of the root's builtin values in memory order, with padding fields where the layout leaves room.
   A value the target places at its offset natively is a field of its own type.
   A vector that it does not is split into scalar fields in WGSL, and is its `packed_` type in MSL; a matrix is split into its scalars.
   A read of a value rebuilds it from its fields, and a write stores each field; a whole struct is stored once into a local, then field by field.
-* **EMIT-114** A struct placed both in a constant block and in a buffer's element would have two layouts, and is `layout-conflict`.
+* **EMIT-114** A struct has one layout, so every binding places it by one rule: in a constant block, in a buffer's element, packed in either, never two of them.
+  A struct placed by two is `layout-conflict`.
 * **EMIT-115** `@no_padding` on a struct or on a binding makes a gap before any of its members `padding-forbidden`, and the detail says where.
   The rest of a block's last row follows no member, so it is no gap.
 * **EMIT-116** A layout carries no guarantee without an annotation that asks for one ([why](why/emitting.md#emit-116)).
   The compiler may place members in another order than they are declared, to pack them tighter.
   Host code reaches GPU memory through the generated struct, never through offsets or an order it assumed.
-* **EMIT-153** A binding marked `@layout(.hlsl)` has its constant block placed by EMIT-110, in declaration order, and that layout is promised: the compiler never reorders it.
-  Every target writes it as EMIT-112 writes any block, so the promise is today's output kept.
-* **EMIT-154** A binding marked `@layout(.cpp)` has its constant block placed as a C++ compiler places a struct of the generated host types ([why](why/emitting.md#emit-154)).
-  Each value stands at the next multiple of its alignment, which is its scalar's size.
+* **EMIT-153** *Retired:* `@layout(.hlsl)` promised HLSL's constant-buffer packing, which no rule places by any more.
+* **EMIT-154** A binding marked `@padding(.none)` has its constant block placed as a C++ compiler places a struct of the generated host types ([why](why/emitting.md#emit-154)).
+  Each value stands at the next multiple of its scalar's size, in declaration order, and that layout is promised: the compiler never reorders it.
   A struct's size is rounded up to its alignment, a `float3` takes 12 bytes, and no row rule applies.
   Every target writes the block as its memory form (EMIT-113), and in every target a vector the layout lets cross a 16-byte row is split into scalars.
   `hlsl-vulkan` states every field's offset.
   `hlsl-dx12` states none: each field fits its row and padding fills each gap, so its own packing lands every field there ([why](why/emitting.md#emit-154)).
-  A struct member of such a block is `unsupported` for now.
+  A struct member of such a block is `unsupported` for now, and so is an array C++ places anywhere but at a multiple of 16 bytes.
+* **EMIT-164** An array in a constant block, whose element takes whole 16-byte rows (CHK-291), starts a row and holds its elements back to back.
+  Every target places it so natively, so a memory form holds it as one field of the array type, and a read takes it in place: a runtime index needs no copy.
+  The host holds it as a `cc::fixed_array` of the element's host type.
+* **EMIT-165** A computed `const` array (CHK-219) is bound once per tree to a local of its name, at the start of the tree's body, and every read of it indexes that local.
+  A target writes a constructed array whole wherever it stands, so read in place it would be written once per index: S2H's 192-word font table reached 1.5 MB of text.
+  A vector, a matrix or a struct const is written where it is read, since it is no larger than the expression that reads it.
+* **EMIT-169** HLSL holds an array of 3-vectors in GPU memory as one of 4-vectors, which a structured buffer strides by 16 as a constant buffer does ([why](why/emitting.md#emit-169)).
+  An element reads as its first three lanes, `a[i].xyz`, and is written through them.
+  A read of the whole array rebuilds it into a local element by element, and a write of it stores each element so.
+  A struct that stands in memory declares the 4-vectors as its field, so this holds wherever the struct is.
+* **EMIT-170** MSL declares a 3-vector of a struct in GPU memory as its `packed_` type where the next member sits in its tail ([why](why/emitting.md#emit-170)).
+  A padding field keeps it at its offset, since a packed vector aligns to its scalar alone, and `alignas` keeps the struct's own alignment.
+  A read converts it back, `float3(s.color)`, and a write converts into it implicitly.
+  So the struct is placed as SGL places it wherever it stands, in an array too, and a buffer of it needs no memory form.
+  A constant block's own members are declared the same way, so MSL writes a memory form only for `@padding(.none)`.
+* **EMIT-172** A constant block's array marked `@padding(.every_element)` takes a 16-byte row per element ([why](why/emitting.md#emit-172)).
+  Every target declares it as an array of 4-vectors of the element's scalar.
+  An element reads as its own lanes, `a[i].x` or `a[i].xy`, and a read of the whole array rebuilds it into a local element by element.
+  The host writes each element as `slib::gpu_padded<T, 16>`.
+* **EMIT-173** How each expression that reaches GPU memory is spelled is decided once per entry point and target, before any text is written ([why](why/emitting.md#emit-173)).
+  What the target holds is the value itself, a widened `mat3` (EMIT-168), a widened array (EMIT-169, EMIT-172), or a packed tail (EMIT-170).
+  An assignment's place, the objects a write through it reaches, and an array indexed in place are spelled as held; every other read converts back.
+* **EMIT-174** A vertex input and a stage link declare a matrix member as a member per column, and an array member as a member per element ([why](why/emitting.md#emit-174)).
+  A vertex input's piece `i` has its member's semantic at index `i`, `FRAME0`, and the host's layout names it the same way: one attribute per piece, at the member's offset plus `i` pieces.
+  The pieces are named `<member>_<i>` at consecutive locations, every member after them moves on by as many, and the member's interpolation is every piece's.
+  A read rebuilds the value: a matrix from its columns, an array into a local element by element, and an element at a literal index reads its piece alone.
+  A write stores each piece of the value, evaluated once, and a write into one at a runtime index or through a column gathers it into a local, writes that, and stores it back.
+  A struct that both crosses a stage edge this way and stands in GPU memory is `unsupported`, since the pieces are no layout that memory has.
+* **EMIT-175** A `mat2` in GPU memory is its two columns back to back: 16 bytes, aligned to 8, and to a row in a constant block ([why](why/emitting.md#emit-175)).
+  HLSL's constant buffer starts each column of a matrix on a row, so a constant block, and a struct that stands in one, holds a `mat2` there as one `float4`.
+  A read rebuilds it through `sgl_narrow_mat2`, which the text declares wherever it reads one; a constant block is never written.
+  Every other memory holds it as each target's own `mat2`, which MSL keeps on its row with a padding field.
+  Under `@padding(.none)` it is 16 bytes aligned to 4, as `tg::mat2f` is: HLSL's own `float2x2` in a structured buffer, and split where another target's would not sit (EMIT-178).
+  A packed constant block's `mat2` is `unsupported`, alike on every target, since HLSL's constant buffer would start each column on a row.
+* **EMIT-176** MSL places a member of a struct or a block in natural memory where SGL placed it, with padding fields wherever MSL would place it sooner.
+  A struct that stands in a constant block is declared `alignas(16)`, so it starts a row and an array of it strides by rows, as EMIT-110 has it.
+* **EMIT-177** MSL states every layout SGL placed as `static_assert`s the Metal compiler checks ([why](why/emitting.md#emit-177)).
+  One per member of a struct, a block and a memory form in GPU memory, `__builtin_offsetof(T, m) == offset`, and one per struct, `sizeof(T) == size`.
+  A struct of a constant block is asserted at its size rounded up to a row, and a block at its members alone.
+* **EMIT-178** A buffer element's array of builtins under `@padding(.none)` strides by its element's scalars, as C++ places it ([why](why/emitting.md#emit-178)).
+  HLSL's structured buffer places it so already; WGSL and MSL declare it in the element's memory form as one field.
+  That field is the target's own array where its stride and alignment match, MSL's array of `packed_` vectors where they do not, and otherwise one array of every element's scalars, back to back.
+  An element of a split array reads its scalars at `k * i + c`, its index evaluated once, and a whole array reads and writes element by element.
+  A packed matrix is split column by column, a `mat2` too.
+* **EMIT-171** A packed array of structs or of arrays waits, `unsupported` alike on every target, as does a packed block's array other than EMIT-154's.
+  So does a multi-dimensional array of `mat3`, whose last column DXC's SPIR-V loses (bug-nested-mat3-array-spirv).
+  A packed block's array of whole rows is the exception, which EMIT-154 places.
+  Any other multi-dimensional array nests the natural stride: each inner array strides by its size rounded up to its alignment, and every target declares it as nested arrays.
+  HLSL widens a 3-vector at any depth, `float4 dirs[2][3]`, and only the innermost element reads through its lanes.
+* **EMIT-168** HLSL holds a `mat3` in GPU memory as a `column_major float4x3`, three whole rows of a constant buffer and 48 bytes of a buffer ([why](why/emitting.md#emit-168)).
+  A read narrows it, `((float3x3)m)`, and a write widens a value through `sgl_widen_mat3`, which the text declares wherever it holds one.
+  A struct that stands in memory declares the `float4x3` as its field, so a read of the field narrows wherever the struct is.
+  An array of `mat3` is one of `float4x3`: an element narrows and widens as one `mat3` does, and a whole read or write goes element by element.
+  Under `@padding(.none)` a `mat3` is HLSL's own `float3x3`, 36 bytes in a buffer; WGSL and MSL split that one into its scalars in a memory form.
+* **EMIT-167** A buffer whose binding or member is marked `@padding(.none)` has its element placed as a C++ compiler places it, in declaration order, and promised.
+  Each value stands at the next multiple of its scalar's size, a struct's size is rounded up to its largest scalar, and `buffer[float3]` strides by 12.
+  HLSL's structured buffer packs so natively; WGSL and MSL write the element as its memory form wherever their own rule would not.
 
 ## Error kinds
 
@@ -562,13 +633,11 @@ EMIT-110 and EMIT-111 describe today's choice, not a promise; `@layout` (CHK-369
 ## Open
 
 * GLSL, which comes through the same seam.
-* Arrays in GPU memory, which the checker refuses today (CHK-291).
-  In a constant block every element starts a row, as HLSL places it: an element shorter than a row is `array<vec4f, N>` read through `.x` in WGSL, and `slib::row<T>` on the host.
-* Whether `@layout` also promises a buffer element's layout, which EMIT-111 places today without a promise.
-* A struct member of a `@layout(.cpp)` block, which HLSL would read back by building the struct in a local field by field.
-* `mat3` in GPU memory, which the checker refuses today (CHK-397).
-  Its three columns each start a row in a constant block (44 bytes), it is 36 bytes in a buffer's element, and its columns split in a memory form.
-  The host holds a block's as `slib::gpu_mat3` and a buffer's as `tg::mat3f`, which is those 36 bytes.
+* The arrays EMIT-171 refuses: packed ones of structs or of arrays, and multi-dimensional ones of `mat3`.
+* `@padding(.every_column)`, which would name a `mat3`'s natural 48 bytes explicitly; `.none` gives the 36 of `tg::mat3f` already.
+* A packed constant block's `mat2`, which HLSL would split into its scalars across rows.
+* A struct member of a `@padding(.none)` block, which HLSL would read back by building the struct in a local field by field.
+* `@padding` on a struct, which would place it so wherever it stands.
 * Whether an emit error becomes a diagnostic with a span; today it names a symbol and carries a detail.
 * Whether the size of an inline block has to agree between targets as its offsets do; WGSL rounds it up to 16 bytes.
 * How a vertex input's dx12 semantic is chosen once a member wants one that is not its name.

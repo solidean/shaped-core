@@ -11,6 +11,8 @@ It carries no group index, because SGL numbers a group by its position in each e
 
 from __future__ import annotations
 
+import re
+
 from sgl_description import SglEntries, SglFile
 
 # An SGL type as the host holds it: the C++ type, its size in bytes, and the vertex format it is read as (None where it is none).
@@ -31,6 +33,10 @@ HOST_TYPES: dict[str, tuple[str, int, str | None]] = {
     "float4": ("tg::vec4f", 16, "vec4f"),
     "int3": ("tg::vec3i", 12, "vec3i"),
     "mat4": ("tg::mat4f", 64, None),
+    # packed, as `@padding(.none)` places it; at its natural 48 bytes it is slib::gpu_mat3 (sized_host_type)
+    "mat3": ("tg::mat3f", 36, None),
+    # two columns back to back, as GPU memory holds one; a constant block starts it on a row
+    "mat2": ("tg::mat2f", 16, None),
     # an atomic is a plain integer to the host, which never updates it while the shader does
     "atomic[uint]": ("cc::u32", 4, None),
     "atomic[int]": ("cc::i32", 4, None),
@@ -234,7 +240,23 @@ def memory_structs_of(entries: SglEntries, path: str) -> dict[str, tuple[str, in
     return out
 
 
+def array_of(sgl_type: str) -> tuple[str, int] | None:
+    """`float4[4]` as its element and its count, or None for a type that is no array.
+
+    `float4[2, 3]` is 2 elements of `float4[3]`, the outer length first.
+    An element strides by its size rounded up to its alignment, which `sized_host_type` turns into a padded element.
+    """
+    match = re.fullmatch(r"(.+)\[(\d+)((?:, \d+)*)\]", sgl_type)
+    if not match:
+        return None
+    inner = match.group(3)
+    element = f"{match.group(1)}[{inner[2:]}]" if inner else match.group(1)
+    return (element, int(match.group(2)))
+
+
 def host_size(memory: dict[str, tuple[str, int]], sgl_type: str) -> int:
+    if (array := array_of(sgl_type)) is not None:
+        return host_size(memory, array[0]) * array[1]
     return memory[sgl_type][1] if sgl_type in memory else HOST_TYPES[sgl_type][1]
 
 
@@ -246,12 +268,32 @@ def host_type(package: str, memory: dict[str, tuple[str, int]], where: str, sgl_
     """The C++ spelling of `sgl_type`: one of `memory`, the package's structs in GPU memory, or a builtin's."""
     if sgl_type in memory:
         return memory[sgl_type][0]
+    if (array := array_of(sgl_type)) is not None:
+        return f"cc::fixed_array<{host_type(package, memory, where, array[0])}, {array[1]}>"
     known = HOST_TYPES.get(sgl_type)
     if known is None:
         raise HostCodeError(
             f"shader package '{package}': {where} has type '{sgl_type}', which has no C++ type in the generator yet "
             f"(sgl_host_code.py knows: {', '.join(HOST_TYPES)})")
     return known[0]
+
+
+def sized_host_type(package: str, memory: dict[str, tuple[str, int]], where: str, sgl_type: str, size: int) -> str:
+    """`host_type` of a value that takes `size` bytes in GPU memory: a `mat3` at its natural 48 is slib::gpu_mat3.
+
+    An array's element strides by `size` over its count, and one that strides past its own bytes, as a 3-vector does, is
+    a slib::gpu_padded of it.
+    """
+    if sgl_type == "mat3" and size == 48:
+        return "slib::gpu_mat3"
+    if (array := array_of(sgl_type)) is not None and array[1] > 0:
+        element, count = array
+        stride = size // count
+        cpp = sized_host_type(package, memory, where, element, stride)
+        if element in HOST_TYPES and element != "mat3" and stride > HOST_TYPES[element][1]:
+            cpp = f"slib::gpu_padded<{cpp}, {stride}>"
+        return f"cc::fixed_array<{cpp}, {count}>"
+    return host_type(package, memory, where, sgl_type)
 
 
 def generated_names(entries: SglEntries, path: str) -> dict[str, str]:
@@ -344,6 +386,11 @@ def includes(entries: SglEntries) -> list[str]:
     types = {m["type"] for _, b in entries.bindings for m in b["members"]}
     types |= {m["type"] for _, v in entries.vertex_inputs for m in v["members"]}
     types |= {m["type"] for _, s in entries.memory_structs for m in s["members"]}
+    # an array is a fixed array of its element, which needs its own header too
+    arrays = {array_of(t) for t in types} - {None}
+    if arrays:
+        out.append("<clean-core/container/fixed_array.hh>")
+    types |= {element for element, _ in arrays}
     if types & {"int", "uint", "atomic[int]", "atomic[uint]", "short", "ushort"}:
         out.append("<clean-core/fwd.hh>")
     if types & HALF_TYPES:
@@ -354,10 +401,14 @@ def includes(entries: SglEntries) -> list[str]:
         out.append("<shaped-graphics/binding/sampler.hh>")
     if "pos3" in types:
         out.append("<typed-geometry/linalg/pos.hh>")
-    if "mat4" in types:
+    if "mat3" in types:
+        out.append("<shaped-shader-library/gpu_mat3.hh>")
+    if "mat4" in types or "mat3" in types or "mat2" in types:
         out.append("<typed-geometry/linalg/mat.hh>")
     if "bool32" in types:
         out.append("<shaped-shader-library/gpu_bool.hh>")
+    if any(padded_element(m) for _, b in entries.bindings for m in b["members"]) or any("[" in t for t in types):
+        out.append("<shaped-shader-library/gpu_padded.hh>")
     return list(dict.fromkeys(out))
 
 
@@ -431,7 +482,8 @@ def emit_group(package: str, memory: dict[str, int], namespace: str, file: SglFi
         count = member.get("count", 1)
         array = (lambda view: f"cc::fixed_array<{view}, {count}>") if count > 1 else (lambda view: view)
         if member["kind"] == "constant":
-            out.append(f"    {host_type(package, memory, where, member['type'])} {member['name']}; ///< `{member['type']}`, "
+            cpp = sized_host_type(package, memory, where, member["type"], member["size"])
+            out.append(f"    {cpp} {member['name']}; ///< `{member['type']}`, "
                        f"at byte {member['offset']} of the group's constant buffer\n")
             continue
         if member["kind"] == "texture":
@@ -459,7 +511,9 @@ def emit_group(package: str, memory: dict[str, int], namespace: str, file: SglFi
             access = "readwrite" if member["access"] == "read_write" else "readonly"
             out.append(f"    {array(f'sg::{access}_buffer_view<cc::byte>')} {member['name']}; ///< `{member['type']}`\n")
             continue
-        element = host_type(package, memory, where, member["type"])
+        element = sized_host_type(package, memory, where, member["type"], member.get("stride", 0))
+        if padded_element(member):
+            element = f"slib::gpu_padded<{element}, {member['stride']}>"
         is_written = member["access"] == "read_write"
         access = "readwrite" if is_written else "readonly"
         sgl_type = f"mut buffer[{member['type']}]" if is_written else f"buffer[{member['type']}]"
@@ -681,8 +735,10 @@ def pack_members(package: str, memory: dict[str, int], file: SglFile, name: str,
     for member in binding["members"]:
         if member["kind"] != "constant":
             continue
-        cpp = host_type(package, memory, f"'{file.path}' `binding {name}` member '{member['name']}'", member["type"])
-        size = host_size(memory, member["type"])
+        cpp = sized_host_type(package, memory, f"'{file.path}' `binding {name}` member '{member['name']}'",
+                              member["type"], member["size"])
+        # a padded host type is the size the shader gives it, which its own static_assert below pins
+        size = member["size"] if "gpu_mat3" in cpp or "gpu_padded" in cpp else host_size(memory, member["type"])
         if size != member["size"]:
             raise HostCodeError(
                 f"shader package '{package}': '{file.path}' `binding {name}` member '{member['name']}' is "
@@ -695,8 +751,15 @@ def pack_members(package: str, memory: dict[str, int], file: SglFile, name: str,
 # ---- a struct in GPU memory ---------------------------------------------------------------------------------------
 
 
-def padded_fields(package: str, memory: dict[str, int], where: str, members: list[dict], indent: str) -> str:
-    """Each member as a field, with a named padding field wherever SGL's layout leaves a gap before one.
+def padded_element(member: dict) -> bool:
+    """Whether a buffer member's builtin element strides past its own bytes, as a 3-vector does."""
+    return (member["kind"] == "buffer" and member["type"] in HOST_TYPES and member["type"] != "mat3"
+            and member.get("stride", 0) > HOST_TYPES[member["type"]][1])
+
+
+def padded_fields(package: str, memory: dict[str, int], where: str, members: list[dict], indent: str,
+                  size: int = 0) -> str:
+    """Each member as a field, with a named padding field wherever SGL's layout leaves a gap before one, or before `size`.
 
     Padding is visible rather than implied, and `= {}`, so a designated initializer never has to name it.
     A gap is a whole number of 4-byte words, or of 2-byte ones where a 16-bit value leaves room of 2.
@@ -704,17 +767,24 @@ def padded_fields(package: str, memory: dict[str, int], where: str, members: lis
     out = []
     end = 0
     padding = 0
+
+    def pad_to(offset: int) -> None:
+        nonlocal padding
+        gap = offset - end
+        if gap <= 0:
+            return
+        word, size = ("cc::u32", 4) if gap % 4 == 0 else ("cc::u16", 2)
+        words = gap // size
+        extent = "" if words == 1 else f"[{words}]"
+        out.append(f"{indent}{word} _pad{padding}{extent} = {{}}; ///< {gap} bytes SGL's layout leaves free\n")
+        padding += 1
+
     for member in members:
-        gap = member["offset"] - end
-        if gap > 0:
-            word, size = ("cc::u32", 4) if gap % 4 == 0 else ("cc::u16", 2)
-            words = gap // size
-            extent = "" if words == 1 else f"[{words}]"
-            out.append(f"{indent}{word} _pad{padding}{extent} = {{}}; ///< {gap} bytes SGL's layout leaves free\n")
-            padding += 1
-        cpp = host_type(package, memory, f"{where} member '{member['name']}'", member["type"])
+        pad_to(member["offset"])
+        cpp = sized_host_type(package, memory, f"{where} member '{member['name']}'", member["type"], member["size"])
         out.append(f"{indent}{cpp} {member['name']}; ///< `{member['type']}`, at byte {member['offset']}\n")
         end = member["offset"] + member["size"]
+    pad_to(size)
     return "".join(out)
 
 
@@ -733,7 +803,8 @@ def emit_memory_struct(package: str, memory: dict[str, int], namespace: str, fil
     out.append(f"/// `struct {name}` of {file.path}, byte for byte as {space} holds it. Generated; do not edit.\n")
     out.append("/// Copy it into GPU memory as it is: every member sits where the shader reads it on every backend.\n")
     out.append(f"struct {name}\n{{\n")
-    out.append(padded_fields(package, memory, f"'{file.path}' `struct {name}`", struct["members"], "    "))
+    out.append(padded_fields(package, memory, f"'{file.path}' `struct {name}`", struct["members"], "    ",
+                             struct["size"]))
     out.append("};\n")
     out.append(f"}} // namespace {namespace}\n")
     return "".join(out)
@@ -755,7 +826,8 @@ def emit_inline(package: str, memory: dict[str, int], namespace: str, file: SglF
     out.append("///\n")
     out.append(f"///     pass.set_inline_constants({namespace}::{name}{{...}}.to_block());\n")
     out.append(f"struct {name}\n{{\n")
-    out.append(padded_fields(package, memory, f"'{file.path}' `@inline binding {name}`", binding["members"], "    "))
+    out.append(padded_fields(package, memory, f"'{file.path}' `@inline binding {name}`", binding["members"], "    ",
+                             binding["block_size"]))
     out.append("\n")
     out.append("    /// The block's size in bytes, as the shader lays it out.\n")
     out.append(f"    static constexpr cc::isize block_size = {binding['block_size']};\n")
@@ -1036,6 +1108,9 @@ PACKED_HOST_TYPES = {"rgba8_unorm": "cc::u32", "rgba8_uint": "cc::u32"}
 def vertex_member_host_type(package: str, where: str, member: dict) -> str:
     fmt = member.get("format", "")
     if fmt in PACKED_HOST_TYPES:
+        # an array's `@format` is each element's (EMIT-174)
+        if member.get("pieces", 0) > 0:
+            return f"cc::fixed_array<{PACKED_HOST_TYPES[fmt]}, {member['pieces']}>"
         return PACKED_HOST_TYPES[fmt]
     return host_type(package, {}, where, member["type"])
 
@@ -1043,9 +1118,10 @@ def vertex_member_host_type(package: str, where: str, member: dict) -> str:
 def vertex_format(package: str, file: SglFile, struct: str, member: dict) -> str:
     if member.get("format"):
         return member["format"]
-    # A vertex attribute is a builtin, never a struct in GPU memory.
-    host_type(package, {}, f"'{file.path}' `@vertex struct {struct}` member '{member['name']}'", member["type"])
-    fmt = HOST_TYPES[member["type"]][2]
+    # A vertex attribute is a builtin, never a struct in GPU memory; a matrix or an array is read piece by piece (EMIT-174).
+    attribute = member.get("piece") or member["type"]
+    host_type(package, {}, f"'{file.path}' `@vertex struct {struct}` member '{member['name']}'", attribute)
+    fmt = HOST_TYPES[attribute][2]
     if fmt is None:
         raise HostCodeError(f"shader package '{package}': '{file.path}' `@vertex struct {struct}` member '{member['name']}' "
                             f"has type '{member['type']}', which no vertex format reads")
@@ -1066,7 +1142,13 @@ def emit_vertex_input(package: str, namespace: str, file: SglFile, struct: dict)
         out = []
         for m in members:
             cpp = vertex_member_host_type(package, f"'{file.path}' `@vertex struct {name}` member '{m['name']}'", m)
-            out.append(f"{indent}{cpp} {m['name']}; ///< location {m['location']}, `{dx12_semantic(m)}` on dx12\n")
+            if m.get("pieces", 0) > 0:
+                last = m["location"] + m["pieces"] - 1
+                where = (f"locations {m['location']} to {last}, "
+                         f"`{dx12_semantic(m)}0` to `{dx12_semantic(m)}{m['pieces'] - 1}` on dx12")
+            else:
+                where = f"location {m['location']}, `{dx12_semantic(m)}` on dx12"
+            out.append(f"{indent}{cpp} {m['name']}; ///< {where}\n")
         return "".join(out)
 
     out = [f"\nnamespace {namespace}\n{{\n"]
@@ -1121,10 +1203,22 @@ def emit_vertex_input_impl(package: str, namespace: str, file: SglFile, struct: 
     out.append("            .attributes = {\n")
     for member in struct["members"]:
         fmt = vertex_format(package, file, name, member)
-        out.append(f'                {{.semantic = "{dx12_semantic(member)}", '
-                   f".format = sg::vertex_attribute_format::{fmt}, "
-                   f".offset = cc::isize(offsetof({owner(member['stream'])}, {member['name']})), "
-                   f".slot = {slot_of[member['stream']]}}},\n")
+        offset = f"cc::isize(offsetof({owner(member['stream'])}, {member['name']}))"
+        if member.get("pieces", 0) == 0:
+            out.append(f'                {{.semantic = "{dx12_semantic(member)}", '
+                       f".format = sg::vertex_attribute_format::{fmt}, "
+                       f".offset = {offset}, "
+                       f".slot = {slot_of[member['stream']]}}},\n")
+            continue
+        # EMIT-174: a matrix's columns or an array's elements, back to back, at one semantic and an index apiece
+        piece = PACKED_HOST_TYPES.get(member.get("format", "")) or host_type(
+            package, {}, f"'{file.path}' `@vertex struct {name}` member '{member['name']}'", member["piece"])
+        for i in range(member["pieces"]):
+            out.append(f'                {{.semantic = "{dx12_semantic(member)}", '
+                       f".semantic_index = {i}, "
+                       f".format = sg::vertex_attribute_format::{fmt}, "
+                       f".offset = {offset}{f' + {i} * cc::isize(sizeof({piece}))' if i > 0 else ''}, "
+                       f".slot = {slot_of[member['stream']]}}},\n")
     out.append("            }};\n}\n")
 
     if not single:

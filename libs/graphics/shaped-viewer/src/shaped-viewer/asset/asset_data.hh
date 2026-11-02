@@ -8,6 +8,7 @@
 #include <shaped-viewer/fwd.hh>
 #include <shaped-viewer/scene/light.hh>
 #include <shaped-viewer/scene/mesh.hh>
+#include <shaped-viewer/view/camera.hh>
 #include <typed-geometry/geometry/primitives/aabb.hh>
 #include <typed-geometry/transform/transform.hh>
 
@@ -74,6 +75,19 @@ struct sv::asset_light
     cc::optional<f32> range;
 };
 
+/// One camera a file placed — what `view.camera(c.camera)` or `view.initial_camera(c.camera)` takes.
+///
+/// Always in the world, whatever the loader's `flatten_hierarchy`: a camera looks at the scene rather than being placed into one.
+/// Its position and orientation come from its node, its vertical field of view and near plane from the file.
+/// The aspect ratio is left to the view, since a file's is the image it was authored for.
+struct sv::asset_camera
+{
+    /// the file's own name for it, which may be empty
+    cc::string name;
+
+    sv::camera camera;
+};
+
 /// Everything one loaded file describes, as plain data made of the types the scene API already takes.
 ///
 /// That is the whole reason there is almost no API here: filtering and overriding are ordinary code over these vectors
@@ -113,6 +127,9 @@ struct sv::asset_data
     /// The ids are unique within one asset, not across placements: two lights with one id in one layer assert, so
     /// placing the same asset twice takes a scope around each.
     cc::vector<sv::asset_light> lights;
+
+    /// Every perspective camera the file places, in the order its nodes were walked; a view frames the scene as its author did with the first.
+    cc::vector<sv::asset_camera> cameras;
 
     /// babel's issues plus the importer's own, forwarded verbatim
     ///

@@ -100,6 +100,9 @@ struct sgl::check::checked_prelude
     checked_prelude& operator=(checked_prelude&&) noexcept;
     ~checked_prelude();
 
+    /// The prelude's own tables, the part of every table a program's check behind it starts with.
+    [[nodiscard]] checked_module const& module() const;
+
 private:
     checked_prelude();
 

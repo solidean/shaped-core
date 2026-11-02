@@ -539,6 +539,11 @@ cc::result<context_handle> create_dx12_context(backend::dx12::dx12_config const&
     auto const native_16bit_shader_ops
         = SUCCEEDED(device->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS4, &options4, sizeof(options4)))
        && options4.Native16BitShaderOpsSupported;
+    // A failed query is an older runtime, which sends a primitive to a layer from the geometry stage alone.
+    D3D12_FEATURE_DATA_D3D12_OPTIONS options = {};
+    auto const vertex_layer_output
+        = SUCCEEDED(device->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS, &options, sizeof(options)))
+       && options.VPAndRTArrayIndexFromAnyShaderFeedingRasterizerSupportedWithoutGSEmulation;
     D3D12_FEATURE_DATA_D3D12_OPTIONS1 options1 = {};
     auto const wave_ops
         = SUCCEEDED(device->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS1, &options1, sizeof(options1)))
@@ -557,6 +562,7 @@ cc::result<context_handle> create_dx12_context(backend::dx12::dx12_config const&
     ctx->_extended_image_formats = extended_image_formats;
     ctx->_native_16bit_shader_ops = native_16bit_shader_ops;
     ctx->_wave_ops = wave_ops;
+    ctx->_vertex_layer_output = vertex_layer_output;
 
     // One dispatch per argument record, no root-signature changes, so the signature takes no root signature.
     {
@@ -567,6 +573,17 @@ cc::result<context_handle> create_dx12_context(backend::dx12::dx12_config const&
         auto const hr = ctx->_device->CreateCommandSignature(&desc, nullptr, IID_PPV_ARGS(&ctx->_dispatch_signature));
         if (FAILED(hr))
             return dx12_error(hr, "ID3D12Device::CreateCommandSignature failed (indirect dispatch)");
+    }
+    // The same for an indexed draw: `sg::draw_indexed_args` is `D3D12_DRAW_INDEXED_ARGUMENTS` field for field.
+    {
+        static_assert(sizeof(sg::draw_indexed_args) == sizeof(D3D12_DRAW_INDEXED_ARGUMENTS));
+        auto const argument = D3D12_INDIRECT_ARGUMENT_DESC{.Type = D3D12_INDIRECT_ARGUMENT_TYPE_DRAW_INDEXED};
+        auto const desc = D3D12_COMMAND_SIGNATURE_DESC{.ByteStride = UINT(sizeof(D3D12_DRAW_INDEXED_ARGUMENTS)),
+                                                       .NumArgumentDescs = 1,
+                                                       .pArgumentDescs = &argument};
+        auto const hr = ctx->_device->CreateCommandSignature(&desc, nullptr, IID_PPV_ARGS(&ctx->_draw_indexed_signature));
+        if (FAILED(hr))
+            return dx12_error(hr, "ID3D12Device::CreateCommandSignature failed (indirect indexed draw)");
     }
 
     ctx->_epoch_fence = cc::move(epoch_fence);

@@ -150,6 +150,25 @@ TEST("sgl check - a const is a literal, an enum case or another const, and stand
           == "");
 }
 
+TEST("sgl check - a computed const reads no binding, and one without a value says why")
+{
+    // CHK-219: its value is checked in a scope that lists no binding, as a test's is
+    constexpr auto cells = "binding cells:\n    scale: float\n\nfun scaled(){cells} -> float => cells.scale\n";
+    CHECK(reports_for(cc::format("{}const k = scaled()\n", cells))
+              .contains("binding-not-listed user:[scaled()] scaled needs cells, which is not in the binding list of "
+                        "const k"));
+    // CHK-311: a run that has no value is the const's error, at its value
+    CHECK(reports_for("const z = 0\nconst k = 7 / z\n")
+              .contains("constant-without-value user:[7 / z] k has no value: an integer divided by zero"));
+    CHECK(reports_for("fun spin() -> int:\n    let mut i = 0\n    while i >= 0:\n        i = (i + 1) % 7\n    "
+                      "return i\nconst k = spin()\n")
+              .contains("constant-without-value user:[spin()] k takes more than 100000 steps to compute"));
+    // CHK-353: an option is a bool, an int or an enum case, which a computed value of another type is not
+    CHECK(reports_for("@option const v = float2(1.0, 2.0)\n").contains("an option of float or uint"));
+    // a computed int is the same constant a literal is, so an array length and a workgroup size take it
+    CHECK(reports_for("const n = 2 * 4\nfun f() -> float[n] => float[n].filled(0.0)\n") == "");
+}
+
 TEST("sgl check - a @shadowable(false) symbol is hidden by nothing")
 {
     // CHK-220: not by a declaration of the program, a local, a parameter or a for variable
@@ -178,13 +197,8 @@ TEST("sgl check - a @shadowable(false) symbol is hidden by nothing")
 
 TEST("sgl check - what the tracer does not carry is unsupported-yet, and names the construct")
 {
-    CHECK(reports_for("const k = 2.0 * 1.0\n")
-          == "unsupported-yet user:[2.0 * 1.0] a const whose value is no literal, no enum case and no const\n");
     CHECK(reports_for("type color = float3\n") == "unsupported-yet user:[type color = float3] type alias\n");
 
-    // CHK-339: a generic struct is the prelude's
-    CHECK(reports_for("struct box[T]:\n    value: T\n")
-          == "unsupported-yet user:[box] a generic struct outside the prelude\n");
     CHECK(reports_for("struct a:\n    x: float\n    fun reset(mut self):\n        self.x = 0.0\n")
           == "unsupported-yet user:[reset] mut self\n");
     CHECK(reports_for("binding b = constants\n") == "unsupported-yet user:[constants] a binding composition\n");
@@ -205,11 +219,27 @@ TEST("sgl check - a function needs a body unless it is @builtin")
     CHECK(reports_for("fun f(x: float) -> float\n") == "expected-body user:[f] f\n");
 }
 
-TEST("sgl check - a type parameter is opaque, and a call says what it stands for")
+TEST("sgl check - a generic body is checked per instantiation, and its names where it is written")
 {
-    // CHK-338: what a body does with a value of a type parameter is hand it on, store it and return it
-    CHECK(reports_for("fun id[T](x: T) -> T => x\n") == "");
-    CHECK(reports_for("fun twice[T](x: T) -> T => x + x\n").starts_with("no-matching-overload user:[x + x]"));
+    // CHK-338: a body may do with a value of a type parameter whatever each instantiation's arguments allow
+    CHECK(reports_for("fun twice[T](x: T) -> T => x + x\nfun f() -> int => twice(2)\nfun g() -> float => twice(1.5)\n")
+          == "");
+    CHECK(reports_for("fun twice[T](x: T) => x + x\nfun f() -> int => twice(2)\n") == "");
+    // nothing instantiates it, so only its names are checked, and a warning says so
+    CHECK(reports_for("fun twice[T](x: T) -> T => x + x\n")
+          == "generic-not-instantiated user:[twice] nothing instantiates twice, so only its names are checked\n");
+    CHECK(reports_for("fun twice[T](x: T) -> T => x + nope\nfun f() -> int => twice(2)\n")
+              .starts_with("unknown-name user:[nope]"));
+    // an error is reported where the body says it, under the instantiation that reached it
+    auto const negated = reports_for("fun negated[T](x: T) -> T => not x\nfun f() -> int => negated(2)\n");
+    CHECK(negated.starts_with("no-matching-overload user:[not x]"));
+    CHECK(negated.contains("  note user:[negated(2)] in negated[int], instantiated here\n"));
+    // the same error from two instantiations is reported once
+    auto const twice_wrong
+        = reports_for("fun wrong[T](x: T) -> T:\n    let k: int = 1.5\n    return x\nfun f() -> int => wrong(1)\n"
+                      "fun g() -> float => wrong(1.5)\n");
+    CHECK(twice_wrong.starts_with("literal-not-representable user:[1.5]"));
+    CHECK(!cc::string_view(twice_wrong).subview(1).contains("literal-not-representable"));
     // CHK-340: a type parameter the arguments leave open is said by where the call stands, or the call is an error.
     // Only the prelude has a value of an open type to give, `undefined()`, so `pick` stands in a prelude file.
     auto const builtins = builtins_text();
@@ -224,23 +254,46 @@ TEST("sgl check - a type parameter is opaque, and a call says what it stands for
           == "wrong-kind-of-name user:[main] an entry point is no generic function: the GPU hands it values of known "
              "types\n");
     // CHK-338: a type parameter hides every symbol of its name, and names no value
-    CHECK(reports_for("struct A:\n    x: float\nfun f[A](v: A) -> float => A(1.0).x\n")
-          == "wrong-kind-of-name user:[A] A is a type parameter, and a call needs a function or a struct\n");
+    auto const not_instantiated
+        = cc::string("generic-not-instantiated user:[f] nothing instantiates f, so only its names are checked\n");
+    // a call of one is a call of what it stands for in each instance, here `float(1.0).x`
+    CHECK(reports_for("struct A:\n    x: float\nfun f[A](v: A) -> float => A(1.0).x\n") == not_instantiated);
+    CHECK(reports_for("struct A:\n    x: float\nfun f[A](v: A) -> float => A(1.0).x\nfun g() -> float => f(2.0)\n")
+              .contains("note user:[f(2.0)] in f[float], instantiated here"));
     CHECK(reports_for("fun f[A](v: A) -> A:\n    let k = A\n    return v\n")
-          == "wrong-kind-of-name user:[A] A is a type parameter, which names a type and no value\n");
+          == "wrong-kind-of-name user:[A] A is a type parameter, which names a type and no value\n" + not_instantiated);
+    // `n: float` is a value parameter, which names a value and no type; `T: type` is a type parameter spelled out
     CHECK(reports_for("fun f[T: float](x: T) => x\n")
-          == "unsupported-yet user:[T: float] a type parameter with a bound, a default or an attribute\n");
-    CHECK(reports_for("fun f[T = float](x: T) => x\n")
-          == "unsupported-yet user:[T = float] a type parameter with a bound, a default or an attribute\n");
+              .starts_with("wrong-kind-of-name user:[T] T is a value parameter, which names a value and no type\n"));
+    CHECK(reports_for("fun f[T: type](x: T) -> T => x\nfun g() -> int => f(1)\n") == "");
+    CHECK(reports_for("fun f[n: float3](x: float) => x\n")
+              .starts_with("unsupported-yet user:[float3] a value parameter of float3, where int, uint, bool, float "
+                           "and "
+                           "enums are"));
+    // a default is of the parameter's kind; an attribute on a parameter waits
+    CHECK(reports_for("fun f[T = float](x: int) -> T => T(x)\nfun g() -> float => f(1)\n") == "");
+    CHECK(reports_for("fun f[n: int = float](x: float) => x\n")
+              .starts_with("invalid-constant-argument user:[float] n is a value parameter of int"));
+    CHECK(reports_for("fun f[@x T](x: T) => x\n")
+              .starts_with("unsupported-yet user:[T] a type parameter with an attribute\n"));
 }
 
-TEST("sgl check - a generic struct is the prelude's, and an instance names one type argument")
+TEST("sgl check - a generic struct takes one argument per parameter, each of its kind")
 {
     // CHK-339
-    CHECK(reports_for("struct box[A]:\n    v: A\n")
-          == "unsupported-yet user:[box] a generic struct outside the prelude\n");
+    CHECK(reports_for("struct box[A]:\n    v: A\n") == "");
     CHECK(reports_for("fun f(r: report[float, float]) => 1.0\n")
-          == "wrong-kind-of-name user:[report[float, float]] report takes one type argument\n");
+          == "wrong-kind-of-name user:[report[float, float]] report takes 1 argument\n");
+    // a value parameter takes an int constant, and a type parameter a type
+    CHECK(reports_for("struct ring[n: int, T]:\n    items: T[n]\nfun f(r: ring[float, float]) => 1.0\n")
+              .starts_with("invalid-constant-argument user:[float] n is a value parameter of int"));
+    CHECK(reports_for("struct ring[n: int, T]:\n    items: T[n]\nfun f(r: ring[2, 3]) => 1.0\n")
+              .starts_with("wrong-kind-of-name user:[3]"));
+    // an array's length names an int value parameter, and nothing else of the parameters
+    CHECK(reports_for("struct bad[n: float]:\n    items: float[n]\n")
+              .starts_with("invalid-constant-argument user:[n] an array's length is an int constant of at least 1, or "
+                           "an "
+                           "int value parameter"));
 }
 
 TEST("sgl check - a mut parameter is spelled on its type, takes no default, and no entry point has one")
@@ -353,7 +406,17 @@ TEST("sgl check - an entry point's signature follows the rules of its stage")
 
     CHECK(entry_reports("@pixel fun ps(v: vout) -> target:\n    return { c = float4(..v.p) }\n") == "");
     CHECK(entry_reports("@pixel fun ps(v: vout) -> plain:\n    return { p = pos3(1.0, 1.0, 1.0) }\n")
-          == "invalid-entry-point user:[ps] a @pixel fun returns a @pixel struct\n");
+          == "invalid-entry-point user:[ps] a @pixel fun returns a @pixel struct, one color value or nothing\n");
+    // CHK-418: one color value is a target of its own, and nothing is no target; a strong vector or a bool is neither
+    CHECK(entry_reports("@pixel fun ps(v: vout) -> float4 => float4(..v.p)\n") == "");
+    CHECK(entry_reports("@pixel fun ps(v: vout) -> uint2 => uint2(1u, 2u)\n") == "");
+    CHECK(entry_reports("@pixel fun ps(v: vout):\n    let unused = v.p\n") == "");
+    CHECK(entry_reports("@pixel fun ps(v: vout) -> bool => true\n")
+          == "invalid-entry-point user:[ps] a @pixel fun returns a @pixel struct, one color value or nothing\n");
+    CHECK(entry_reports("@pixel fun ps(v: vout) -> vec3 => vec3(1.0, 0.0, 0.0)\n")
+          == "invalid-entry-point user:[ps] a @pixel fun returns a @pixel struct, one color value or nothing\n");
+    // the attributes of its result are its target's settings, and no other function's result takes one
+    CHECK(entry_reports("fun f() -> @blend(.none) float4 => float4(1.0)\n").contains("an attribute on a type"));
     CHECK(entry_reports("@pixel fun ps(v: float) -> target:\n    return { c = float4(v, v, v, v) }\n")
           == "invalid-entry-point user:[ps] the struct parameter of an entry point is a struct with fields\n");
     CHECK(entry_reports("@pixel fun ps(v: vout, @is_front_facing f: bool, @sample_mask m: uint) -> target:\n"
@@ -529,4 +592,25 @@ TEST("sgl check - only a pixel entry point may reach discard")
                       + "struct vout:\n    @position p: hpos4\n@pixel struct target:\n    c: float4\n"
                         "@pixel fun ps(v: vout) -> target:\n    return { c = float4(cut(v.p.x), 0.0, 0.0, 1.0) }\n")
           == "");
+}
+
+TEST("sgl check - a vertex stage's @layer is one uint the rasterizer reads, and needs vertex_layer_output")
+{
+    // CHK-419
+    auto const layered = [](cc::string_view fields, cc::string_view require = "require vertex_layer_output\n\n")
+    {
+        return reports_for(cc::format("{}struct layered_out:\n    @position p: hpos4\n{}\n"
+                                      "@vertex fun vs(@instance_index i: int) -> layered_out:\n"
+                                      "    return {{ p = hpos4(0.0, 0.0, 0.0, 1.0), layer = i as uint }}\n",
+                                      require, fields));
+    };
+    CHECK(layered("    @layer layer: uint\n") == "");
+    CHECK(layered("    @layer layer: uint\n", "").contains("feature-not-declared user:[vs] vs needs vertex_layer_output"));
+    CHECK(layered("    @layer layer: int\n").contains("the @layer field 'layer' of a @vertex fun is a uint"));
+    CHECK(layered("    @layer @interpolate(.flat) layer: uint\n")
+              .contains("the @layer member 'layer' is the rasterizer's, and is no interpolated value"));
+    // a struct no rasterizer reads has no layer to pick
+    CHECK(reports_for("@vertex struct vin:\n    @layer layer: uint\n\nstruct layered_out:\n    @position p: hpos4\n\n"
+                      "@vertex fun vs(v: vin) -> layered_out:\n    return { p = hpos4(0.0, 0.0, 0.0, 1.0) }\n")
+              .contains("reaches no rasterizer, so @layer means nothing on it"));
 }

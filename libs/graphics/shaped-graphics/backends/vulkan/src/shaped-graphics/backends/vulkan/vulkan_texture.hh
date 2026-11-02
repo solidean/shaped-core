@@ -19,7 +19,7 @@ namespace sg::backend::vulkan
 } // namespace sg::backend::vulkan
 
 /// Vulkan implementation of sg::raw_texture.
-/// Holds the VkImage and its backing device-local VkDeviceMemory, always a dedicated allocation.
+/// Holds the VkImage and either its own device-local VkDeviceMemory or the heap it is placed in.
 /// There is no layout tracking yet, so a texture is creatable but unusable in a command list until layout transitions land.
 class sg::backend::vulkan::vulkan_texture final : public sg::raw_texture
 {
@@ -207,6 +207,8 @@ public:
     // Mutable because release_storage() is const: expiry is a lifetime event on a const handle.
     mutable VkImage _image = VK_NULL_HANDLE;
     mutable VkDeviceMemory _memory = VK_NULL_HANDLE;
+    /// The heap a placed texture is bound into, which _memory then is not; null for a dedicated one.
+    sg::memory_heap_handle _heap;
 
     /// The completion timelines and cross-queue stamps, exactly as on vulkan_buffer — see the notes there.
     vulkan_completion_group_handle _upload_group;

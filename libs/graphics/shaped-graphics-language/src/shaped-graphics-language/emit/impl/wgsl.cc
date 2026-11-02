@@ -92,7 +92,13 @@ public:
                             i.sampling == sampling::centroid ? ", centroid"
                             : i.sampling == sampling::sample ? ", sample"
                                                              : "");
-            out.appendf("{}: {},\n", member.name, type_text(p, *this, member.type));
+            // EMIT-172: an array of one value per row is one of 4-vectors, which WGSL's uniform rule admits
+            if (member.is_row_per_element)
+                out.appendf("{}: array<{}, {}>,\n", member.name,
+                            builtin_spelling(p, row_vector_of(p, p.m.at(member.type).element)),
+                            p.m.at(member.type).count);
+            else
+                out.appendf("{}: {},\n", member.name, type_text(p, *this, member.type));
         }
     }
 
@@ -106,7 +112,8 @@ public:
     {
         out.appendf("struct {} {{\n", form.name);
         for (auto const& f : form.fields)
-            out.appendf("{}{}: {},\n", k_indent, f.name, f.type);
+            out.appendf("{}{}: {},\n", k_indent, f.name,
+                        f.count > 0 ? cc::format("array<{}, {}>", f.type, f.count) : cc::string(f.type));
         out += "}\n\n";
     }
 
@@ -237,7 +244,7 @@ public:
         for (auto const& s : p.structs)
         {
             out.appendf("struct {} {{\n", s.name);
-            write_members(out, s.members, p);
+            write_members(out, declared_members(s), p);
             out += "}\n\n";
         }
         for (auto const& w : p.workgroup)
@@ -270,6 +277,9 @@ public:
             out.appendf("@compute @workgroup_size({}, {}, {})\n", p.e.workgroup[0], p.e.workgroup[1], p.e.workgroup[2]);
             out.appendf("fn {}({}) {{\n", p.entry_name, list);
         }
+        // a pixel stage that writes images alone returns nothing, which WGSL spells with no result at all (CHK-418)
+        else if (p.e.result == check::checked_module::void_type)
+            out.appendf("@fragment\nfn {}({}) {{\n", p.entry_name, list);
         else
             out.appendf("@{}\nfn {}({}) -> {} {{\n", p.e.entry_stage == stage::vertex ? "vertex" : "fragment",
                         p.entry_name, list, type_text(p, *this, p.e.result));

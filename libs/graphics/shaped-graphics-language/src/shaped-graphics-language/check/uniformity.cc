@@ -649,7 +649,7 @@ void checker::judge_uniformity(flat_entry_point const& structured)
                                     .reconverges = reconverges,
                                     .judges_per_draw = judges_per_draw};
 
-        // CHK-283: what differs between invocations from the start, which is every parameter but the workgroup's id
+        // CHK-283: what differs between invocations from the start, which is every parameter but the workgroup's id and the draw's first instance
         for (auto i = isize(0); i < e.locals.size(); ++i)
             if (e.locals[i].kind == local_kind::parameter)
                 pass.locals[i] = {.is = true,
@@ -659,7 +659,7 @@ void checker::judge_uniformity(flat_entry_point const& structured)
             pass.locals[0] = {.is = true, .varies = true, .why = cc::string("comes from the stage's input struct")};
         for (auto const& input : e.stage_inputs)
             pass.locals[index_of(input.local)]
-                = input.input == stage_input::workgroup_id
+                = input.input == stage_input::workgroup_id || input.input == stage_input::first_instance
                     ? divergence::none()
                     : divergence{.is = true,
                                  .varies = true,
@@ -1020,7 +1020,7 @@ void checker::judge_expecting_in_pipelines()
             // `.host` and an enum's case name no entry point
             if (first > 0 && text[first - 1] == '.')
                 continue;
-            auto const* const found = names_seen_from(file).get_ptr(text.subview({.offset = first, .size = at - first}));
+            auto const* const found = seen_from(file, text.subview({.offset = first, .size = at - first}));
             if (found == nullptr)
                 continue;
             for (auto const candidate : *found)

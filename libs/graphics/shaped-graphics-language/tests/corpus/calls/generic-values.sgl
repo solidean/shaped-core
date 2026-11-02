@@ -1,0 +1,96 @@
+// a generic parameter may be a value, `[n: int]`, which a call states and the body reads as a constant
+
+fun scaled_by[n: int](x: float) -> float => x * float(n)
+
+fun repeated[n: int](x: float) -> float:
+    let mut sum = 0.0
+    for i in 0 ..< n:
+        sum += x
+    return sum
+
+fun chosen[b: bool](x: float) -> float:
+    if b:
+        return x
+    return -x
+
+const three = 3
+
+// each value is its own instance
+test:
+    scaled_by[3](2.0) == 6.0
+    scaled_by[2](2.0) == 4.0
+    repeated[4](0.5) == 2.0
+    chosen[true](1.0) == 1.0
+    chosen[false](1.0) == -1.0
+
+// by name, and from a const
+test:
+    scaled_by[.n = 2](1.5) == 3.0
+    scaled_by[three](1.0) == 3.0
+
+// a type where a value is asked fits no candidate
+@expect(error = "no-matching-overload")
+test:
+    scaled_by[float](1.0) == 1.0
+
+enum mode:
+    add
+    multiply
+
+fun combined[m: mode](a: float, b: float) -> float:
+    if m == mode.add:
+        return a + b
+    return a * b
+
+struct op[m: mode]:
+    scale: float
+
+fun op.apply(self, a: float, b: float) -> float => combined[m](a, b) * self.scale
+
+const doubling = mode.multiply
+
+// an enum case is a value parameter's argument: stated as `E.case` or a const, and as `.case` in a type position
+test:
+    combined[mode.add](2.0, 3.0) == 5.0
+    combined[doubling](2.0, 3.0) == 6.0
+    combined[.m = mode.multiply](2.0, 4.0) == 8.0
+    let o: op[.add] = op(1.0)
+    o.apply(1.0, 2.0) == 3.0
+    op[mode.multiply](2.0).apply(1.0, 2.0) == 4.0
+
+// a stated argument names its enum, since the call has not chosen the parameter that would say it
+@expect(error = "invalid-constant-argument")
+test:
+    combined[.add](1.0, 2.0) == 3.0
+
+// an image's format may be a value parameter, which an image argument deduces and a call may state
+binding frames:
+    color: mut image_2d[.r32_uint]
+    depth: mut image_2d[.r32_float]
+
+fun copy_texel[f: pixel_format](img: mut image_2d[f], from: int2, to: int2):
+    img.store(to, img.load(from))
+
+@compute(8, 8) fun shuffle(@thread_id id: int3){frames}:
+    copy_texel(frames.color, id.xy, id.yx)
+    copy_texel(frames.depth, id.xy, id.yx)
+    copy_texel[pixel_format.r32_uint](frames.color, id.yx, id.xy)
+
+struct tagged[w: float, on: bool, k: uint]:
+    v: float
+
+fun tagged.weighted(self) -> float:
+    if on:
+        return self.v * w * float(k)
+    return 0.0
+
+const half_weight = 0.5
+
+// a type position takes a float, bool or uint constant: a literal, a folded one, or a const
+test:
+    let a: tagged[1.5, true, 2u] = tagged(2.0)
+    a.weighted() == 6.0
+    let b: tagged[half_weight, false, 1u] = tagged(2.0)
+    b.weighted() == 0.0
+    let c: tagged[-2.0, true, 1u] = tagged(1.0)
+    c.weighted() == -2.0

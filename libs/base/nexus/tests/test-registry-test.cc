@@ -757,3 +757,46 @@ TEST("test registry - example bucket is swept only when selected", no_scheduler)
         CHECK(exec.count_total_tests() == 0);
     }
 }
+
+TEST("test registry - a manual benchmark stays a benchmark and runs only when named exactly", no_scheduler)
+{
+    nx::test_registry reg;
+    int runs = 0;
+    int other = 0;
+
+    // as BENCHMARK(name, manual) declares it: the benchmark bucket, narrowed by the manual flag
+    auto cfg = nx::config::cfg{};
+    nx::config::benchmark.apply(cfg);
+    nx::config::manual.apply(cfg);
+    CHECK(cfg.bucket == nx::config::test_bucket::benchmark);
+    CHECK(cfg.manual);
+    reg.add_declaration("bench - slow sweep", cfg, [&] { ++runs; });
+    auto plain = nx::config::cfg{};
+    nx::config::benchmark.apply(plain);
+    reg.add_declaration("bench - quick", plain, [&] { ++other; });
+
+    auto const sweep = [&](cc::vector<cc::string> filters)
+    {
+        runs = other = 0;
+        auto config = nx::test_schedule_config{.selected_bucket = nx::config::test_bucket::benchmark};
+        config.filters = cc::move(filters);
+        (void)nx::execute_tests(nx::test_schedule::create(config, reg), {});
+    };
+
+    sweep({}); // the full benchmark sweep leaves it out
+    CHECK(runs == 0);
+    CHECK(other == 1);
+    sweep({cc::string("bench")}); // a substring does too
+    CHECK(runs == 0);
+    CHECK(other == 1);
+    sweep({cc::string("bench - slow sweep")}); // its exact name runs it
+    CHECK(runs == 1);
+    CHECK(other == 0);
+
+    // the order does not matter: manual first, then the bucket
+    auto reversed = nx::config::cfg{};
+    nx::config::manual.apply(reversed);
+    nx::config::benchmark.apply(reversed);
+    CHECK(reversed.bucket == nx::config::test_bucket::benchmark);
+    CHECK(reversed.manual);
+}

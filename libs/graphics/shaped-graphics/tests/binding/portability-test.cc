@@ -135,8 +135,8 @@ TEST("sg - every feature has a name, and the name finds it")
     CHECK(!sg::feature_from_string("raytracing").has_value());
 
     // More features than 16 bits hold, so a set keeps the last one apart from the first.
-    auto const last = sg::feature_set(sg::feature::helper_lane_query);
-    CHECK(last.has(sg::feature::helper_lane_query));
+    auto const last = sg::feature_set(sg::feature::vertex_layer_output);
+    CHECK(last.has(sg::feature::vertex_layer_output));
     CHECK(!last.has(sg::feature::ray_query));
-    CHECK(sg::feature_from_string("helper_lane_query") == cc::optional<sg::feature>(sg::feature::helper_lane_query));
+    CHECK(sg::feature_from_string("vertex_layer_output") == cc::optional<sg::feature>(sg::feature::vertex_layer_output));
 }

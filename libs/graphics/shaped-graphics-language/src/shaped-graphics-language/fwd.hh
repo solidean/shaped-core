@@ -143,6 +143,7 @@ struct assign_stmt;
 struct if_stmt;
 struct for_stmt;
 struct while_stmt;
+struct scope_stmt;
 struct assert_stmt;
 struct print_stmt;
 struct decl_stmt;
@@ -229,7 +230,7 @@ struct option_use;
 struct option_value;
 struct parameter;
 struct function_info;
-enum class block_layout : u8;
+enum class padding_kind : u8;
 struct binding_info;
 enum class setting_kind : u8;
 enum class setting_source : u8;
@@ -245,6 +246,8 @@ struct callable_call;
 struct texel_store;
 struct flat_traced_ray;
 struct call_record;
+struct function_instance;
+struct table_view;
 enum class miss_reason : u8;
 struct near_miss;
 struct file_tables;
@@ -325,10 +328,16 @@ struct test_expectation;
 struct entry_expectation;
 struct test_info;
 struct related_note;
+struct fix_edit;
+struct suggested_fix;
 struct located_diagnostic;
 struct checked_module;
 struct module_file;
 struct checked_prelude;
+template <class T>
+class layered;
+template <class K, class V>
+class layered_map;
 } // namespace sgl::check
 
 namespace sgl::test

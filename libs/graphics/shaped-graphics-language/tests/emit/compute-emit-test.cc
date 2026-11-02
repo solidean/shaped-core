@@ -161,6 +161,38 @@ TEST("sgl emit - HLSL counts a vertex and an instance from the draw's base, so t
     CHECK(msl.contains("vertex varyings vs(uint v_in [[vertex_id]], uint i_in [[instance_id]])\n"));
 }
 
+TEST("sgl emit - @first_instance is the draw's first instance on its own")
+{
+    constexpr auto source = "require first_instance\n"
+                            "struct varyings:\n"
+                            "    @position position: hpos4\n"
+                            "\n"
+                            "@vertex fun vs(@first_instance f: int) -> varyings:\n"
+                            "    return { position = hpos4(f as float, 0.0, 0.0, 1.0) }\n";
+    for (auto const t : {target::hlsl_dx12, target::hlsl_vulkan})
+    {
+        auto const hlsl = text_of(source, t);
+        CHECK(hlsl.contains("varyings vs(uint f_in : SV_StartInstanceLocation)\n"));
+        CHECK(hlsl.contains("    const int f = int(f_in);\n"));
+    }
+    auto const msl = text_of(source, target::msl);
+    CHECK(msl.contains("vertex varyings vs(uint f_in [[base_instance]])\n"));
+    // EMIT-109: WGSL has no builtin for it on any device
+    CHECK(sgl::emit::dump_errors(emit_source(source, 0, target::wgsl))
+          == "target-lacks-feature vs needs first_instance, which WebGPU does not have\n");
+
+    // Beside `@instance_index`, HLSL's one SV_StartInstanceLocation is both, since a semantic is taken once.
+    constexpr auto both = "require first_instance\n"
+                          "struct varyings:\n"
+                          "    @position position: hpos4\n"
+                          "\n"
+                          "@vertex fun vs(@instance_index i: int, @first_instance f: int) -> varyings:\n"
+                          "    return { position = hpos4(i as float, f as float, 0.0, 1.0) }\n";
+    auto const hlsl = text_of(both, target::hlsl_dx12);
+    CHECK(hlsl.contains("varyings vs(uint i_in : SV_InstanceID, uint f_in : SV_StartInstanceLocation)\n"));
+    CHECK(hlsl.contains("    const int i = int(i_in + f_in);\n"));
+}
+
 TEST("sgl emit - WGSL enables primitive_index before it reads one")
 {
     constexpr auto source = "require primitive_index\n"
@@ -494,4 +526,27 @@ TEST("sgl emit - a WebGPU trace of the 17th acceleration member is too-many-acce
     CHECK(text_of(source_tracing(15), target::wgsl).contains("sg_acceleration_roots[15 / 4][15 % 4]"));
     // a native trace names its member, and takes no root
     CHECK(sgl::emit::dump_errors(emit_source(source_tracing(16), 0, target::hlsl_dx12)) == "");
+}
+
+TEST("sgl emit - a library calls back into its shader, whose callback reads bindings the library never names")
+{
+    // CHK-319: a callback is inlined where it is called, so its bindings are its own, and one that gives void is a
+    // statement, called from a statement
+    auto const source = cc::string("binding io:\n"
+                                   "    scatter: mut buffer[uint]\n"
+                                   "    scale: uint\n"
+                                   "\n"
+                                   "fun print_char(c: uint, on_char: (uint) -> void):\n"
+                                   "    on_char(c * 2u)\n"
+                                   "\n"
+                                   "fun mine(c: uint){io}:\n"
+                                   "    io.scatter[0] = c * io.scale\n"
+                                   "\n"
+                                   "@compute(4) fun main(@thread_id id: int3){io}:\n"
+                                   "    print_char(id.x as uint, mine)\n");
+    for (auto const t : {target::hlsl_dx12, target::wgsl, target::msl})
+    {
+        auto const text = text_of(source, t);
+        CHECK(text.contains("io_scatter[0] = ")).dump("text", text);
+    }
 }

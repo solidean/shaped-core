@@ -6,7 +6,7 @@
 
 using namespace cc::primitive_defines;
 
-// `@layout(.cpp)` blocks of host_layout.sgl: placed as C++ places a struct of the generated host types, so what the
+// `@padding(.none)` blocks of host_layout.sgl: placed as C++ places a struct of the generated host types, so what the
 // package generates is the struct a host writes by hand, byte for byte.
 
 namespace
@@ -47,7 +47,7 @@ static_assert(shaders::host_layout::host_push::block_size == sizeof(plain_push))
 // The group's constant buffer is the plain struct of its plain members.
 static_assert(shaders::host_layout::host_group::constants_size == sizeof(plain_group_constants));
 
-TEST("slib sgl layout - a @layout(.cpp) inline block is the bytes of the host's own struct")
+TEST("slib sgl layout - a @padding(.none) inline block is the bytes of the host's own struct")
 {
     auto const plain = plain_push{.scale = 1.0f,
                                   .tint = tg::vec3f(2, 3, 4),
@@ -65,7 +65,7 @@ TEST("slib sgl layout - a @layout(.cpp) inline block is the bytes of the host's 
     CHECK(cc::memcmp(block.data(), &plain, sizeof(plain)) == 0);
 }
 
-TEST("slib sgl layout - a @layout(.cpp) group writes its constants as the host's own struct holds them")
+TEST("slib sgl layout - a @padding(.none) group writes its constants as the host's own struct holds them")
 {
     auto const plain = plain_group_constants{.gain = 1.0f, .dir = tg::vec3f(2, 3, 4), .after = 5.0f};
     auto const group

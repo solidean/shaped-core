@@ -24,10 +24,26 @@ constexpr u32 glb_magic = 0x46546C67;      // 'g','l','T','F' little-endian
 constexpr u32 glb_chunk_json = 0x4E4F534A; // 'J','S','O','N'
 constexpr u32 glb_chunk_bin = 0x004E4942;  // 'B','I','N',0
 
+/// The material extensions whose factors `gltf::material` carries; a texture one of them names is recorded as an issue.
+constexpr cc::string_view material_extensions[] = {
+    "KHR_materials_emissive_strength", "KHR_materials_transmission", "KHR_materials_ior", "KHR_materials_volume",
+    "KHR_materials_specular",          "KHR_materials_clearcoat",
+};
+
+/// The textures those extensions may name, which this reader does not read yet.
+constexpr cc::string_view material_extension_textures[] = {
+    "transmissionTexture", "thicknessTexture",          "specularTexture",        "specularColorTexture",
+    "clearcoatTexture",    "clearcoatRoughnessTexture", "clearcoatNormalTexture",
+};
+
 /// Whether this reader interprets `name` — the extensions a file may require of it.
+/// KHR_mesh_quantization only widens which component types an attribute may use, and accessors are read whatever theirs.
 [[nodiscard]] bool is_implemented_extension(cc::string_view name)
 {
-    return name == "KHR_lights_punctual" || name == "EXT_meshopt_compression";
+    for (auto const material : material_extensions)
+        if (name == material)
+            return true;
+    return name == "KHR_lights_punctual" || name == "EXT_meshopt_compression" || name == "KHR_mesh_quantization";
 }
 
 /// EXT_meshopt_compression's packed bytes, decoded and unfiltered: `m.count` elements of `m.byte_stride` bytes.
@@ -584,13 +600,13 @@ public:
 
         note_unmodelled_array(root, "skins", "skins");
         note_unmodelled_array(root, "animations", "animations");
-        note_unmodelled_array(root, "cameras", "cameras");
 
         CC_RETURN_IF_ERROR(parse_buffers(root));
         CC_RETURN_IF_ERROR(parse_buffer_views(root));
         CC_RETURN_IF_ERROR(parse_accessors(root));
         CC_RETURN_IF_ERROR(parse_meshes(root));
         parse_lights(root);
+        parse_cameras(root);
         parse_nodes(root);
         parse_scenes(root);
         parse_materials(root);
@@ -1034,6 +1050,48 @@ public:
         }
     }
 
+    void parse_cameras(json::ref root)
+    {
+        auto const cameras = root["cameras"];
+        if (!cameras.is_array())
+            return;
+
+        for (auto i = isize(0); i < cameras.size(); ++i)
+        {
+            auto const entry = cameras[i];
+            auto c = gltf::camera();
+            c.json_node = entry.node_index();
+
+            auto const type = entry["type"].as_string();
+            if (type == "perspective")
+            {
+                c.type = gltf::camera_type::perspective;
+                auto const p = entry["perspective"];
+                c.yfov = float_member(p, "yfov", 0.0f);
+                if (p["aspectRatio"].is_number())
+                    c.aspect_ratio = f32(p["aspectRatio"].as_double());
+                c.znear = float_member(p, "znear", 0.0f);
+                if (p["zfar"].is_number())
+                    c.zfar = f32(p["zfar"].as_double());
+            }
+            else if (type == "orthographic")
+            {
+                c.type = gltf::camera_type::orthographic;
+                auto const o = entry["orthographic"];
+                c.xmag = float_member(o, "xmag", 0.0f);
+                c.ymag = float_member(o, "ymag", 0.0f);
+                c.znear = float_member(o, "znear", 0.0f);
+                if (o["zfar"].is_number())
+                    c.zfar = f32(o["zfar"].as_double());
+            }
+            else
+                add_issue(gltf::issue_kind::malformed, cc::format("camera {}: unknown type '{}'", i, type));
+
+            c.name = string_member(entry, "name");
+            result.cameras.push_back(cc::move(c));
+        }
+    }
+
     void parse_nodes(json::ref root)
     {
         auto const nodes = root["nodes"];
@@ -1055,6 +1113,7 @@ public:
 
             nod.mesh = index_member<gltf::mesh_index>(entry, "mesh");
             nod.light = index_member<gltf::light_index>(entry["extensions"]["KHR_lights_punctual"], "light");
+            nod.camera = index_member<gltf::camera_index>(entry, "camera");
 
             // `matrix` and TRS are mutually exclusive in the spec; whichever the file used is what we keep.
             auto const matrix = entry["matrix"];
@@ -1147,6 +1206,29 @@ public:
             mat.alpha = alpha_mode_member(entry, i);
             mat.alpha_cutoff = float_member(entry, "alphaCutoff", 0.5f);
             mat.double_sided = bool_member(entry, "doubleSided");
+
+            auto const extensions = entry["extensions"];
+            mat.emissive_strength = float_member(extensions["KHR_materials_emissive_strength"], "emissiveStrength", 1);
+            mat.transmission_factor = float_member(extensions["KHR_materials_transmission"], "transmissionFactor", 0);
+            mat.ior = float_member(extensions["KHR_materials_ior"], "ior", 1.5f);
+            auto const volume = extensions["KHR_materials_volume"];
+            mat.thickness_factor = float_member(volume, "thicknessFactor", 0);
+            if (volume["attenuationDistance"].is_number())
+                mat.attenuation_distance = f32(volume["attenuationDistance"].as_double());
+            mat.attenuation_color = vec3_member(volume, "attenuationColor", tg::vec3f(1, 1, 1));
+            auto const specular = extensions["KHR_materials_specular"];
+            mat.specular_factor = float_member(specular, "specularFactor", 1);
+            mat.specular_color_factor = vec3_member(specular, "specularColorFactor", tg::vec3f(1, 1, 1));
+            auto const clearcoat = extensions["KHR_materials_clearcoat"];
+            mat.clearcoat_factor = float_member(clearcoat, "clearcoatFactor", 0);
+            mat.clearcoat_roughness_factor = float_member(clearcoat, "clearcoatRoughnessFactor", 0);
+
+            for (auto const extension : material_extensions)
+                for (auto const texture : material_extension_textures)
+                    if (extensions[extension][texture].is_object())
+                        add_issue(gltf::issue_kind::unsupported, cc::format("material {}: {}.{} not read, so its "
+                                                                            "factor applies alone",
+                                                                            i, extension, texture));
 
             mat.name = string_member(entry, "name");
             result.materials.push_back(cc::move(mat));
@@ -1294,6 +1376,9 @@ public:
             if (is_outside(isize(int(nod.light)), result.lights.size()))
                 return cc::error(cc::format("glTF parse error: node {} references light {}, but the file has {}", i,
                                             isize(int(nod.light)), result.lights.size()));
+            if (is_outside(isize(int(nod.camera)), result.cameras.size()))
+                return cc::error(cc::format("glTF parse error: node {} references camera {}, but the file has {}", i,
+                                            isize(int(nod.camera)), result.cameras.size()));
         }
 
         for (auto const child : result.node_children)

@@ -31,6 +31,11 @@ allowed:
     why: Apache-2.0 minus the notice requirement for compiled output, which is what makes it linkable into a binary.
   - identifier: CC0-1.0
     why: Public-domain dedication.
+  - identifier: CC-BY-3.0
+    why: >-
+      Attribution only, for content rather than code — ten of the glTF Research Scenes, Benedikt Bitterli's rendering resources converted to glTF.
+      Read by shaped-viewer's research-scenes example alone, fetched on request by the person who accepts the terms.
+      Its one condition is crediting each scene's author wherever it is shown, which CREDITS.txt and the example do.
   - identifier: CC-BY-4.0
     why: >-
       Attribution only, for content rather than code — NVIDIA's ORCA release of Amazon Lumberyard Bistro.

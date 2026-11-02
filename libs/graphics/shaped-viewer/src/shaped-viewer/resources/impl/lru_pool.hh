@@ -31,6 +31,11 @@ template <class Id, class Record>
 class lru_pool
 {
 public:
+    lru_pool() = default;
+    lru_pool(lru_pool&&) = default;
+    lru_pool& operator=(lru_pool&&) = default;
+    virtual ~lru_pool() = default;
+
     /// `max_bytes` <= 0 disables the byte budget; `max_idle_epochs` < 0 disables the idle timeout.
     void set_limits(isize max_bytes, isize max_idle_epochs)
     {
@@ -77,6 +82,15 @@ public:
     bool evict(Id id) { return _remove(id); }
 
 protected:
+    /// Called with every record as it leaves the pool, by eviction or by `evict`, just before it is destroyed.
+    /// For a record whose resources are not all sg handles: a range of a buffer the manager shares must be handed back.
+    /// Not called when the pool itself is destroyed.
+    virtual void on_remove(Id id, Record& record)
+    {
+        (void)id;
+        (void)record;
+    }
+
     /// The mutable record for `id`, or null if absent; does NOT count as a use.
     ///
     /// For a manager updating its own bookkeeping — residency, say — rather than for a caller reading one.
@@ -147,6 +161,7 @@ private:
         auto* const e = _entries.get_ptr(id);
         if (e == nullptr)
             return false;
+        on_remove(id, e->record);
         _total_bytes -= e->size_in_bytes;
         _by_hash.erase(e->hash);
         _entries.erase(id);

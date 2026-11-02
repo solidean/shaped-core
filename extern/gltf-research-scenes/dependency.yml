@@ -1,0 +1,30 @@
+# Pin and license for the upstream fetched here.
+# fetch-research-scenes.py reads its pin from this file; which scenes of the archive it extracts stays in the script.
+# It is `on-request`, so no configure step fetches it; `dev.py deps list` reports whether .install/ is current.
+
+upstreams:
+  - name: glTF Research Scenes
+    homepage: https://github.com/ErfanMo77/gltf-research-scenes
+    install: on-request
+    source: github-release
+    repo: https://github.com/ErfanMo77/gltf-research-scenes
+    track: github-releases
+    version: 1.1.0
+    tag: v1.1.0
+    asset: gltf_research_scenes_glb.zip
+    digest_algo: sha256
+    pin_hash: f79af71247eacf6d9c41f3e546f9fa78dc7a458477cd19d2d2cfbe1f058de795
+    license: CC0-1.0 AND CC-BY-3.0
+    license_files: [.install/CREDITS.txt]
+    used_by: shaped-viewer — the research-scenes example
+    notes: |
+      Benedikt Bitterli's rendering resources and a few PBRT v4 scenes, converted to glTF by Erfan Mohammadi, as one archive of GLB files.
+
+      FETCHED ON REQUEST, because they are scenes to look at rather than anything a build or a default test run needs.
+      The archive is about 720 MiB; the script verifies it, extracts the 23 scenes it may, and deletes the archive.
+
+      ONLY THE CC0 AND CC-BY-3.0 SCENES are extracted; the four whose licenses are mixed (material-testball, teapot,
+      teapot-full, vintage-car) are left in the archive.
+      THE PERSON FETCHING THEM ACCEPTS THE TERMS: the script prints them and asks, or takes --accept-license.
+      CC-BY-3.0 asks that each such scene credit its author wherever it is shown; CREDITS.txt gathers every scene's
+      license text, and the example shows the credit of the scene on screen.

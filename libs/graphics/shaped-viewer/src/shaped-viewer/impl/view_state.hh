@@ -5,6 +5,7 @@
 #include <clean-core/error/optional.hh>
 #include <clean-core/string/string.hh>
 #include <shaped-graphics/bytes_future.hh>
+#include <shaped-graphics/resource/buffer.hh>
 #include <shaped-graphics/resource/texture.hh>
 #include <shaped-rendering/reconstruct.hh>
 #include <shaped-viewer/fwd.hh>
@@ -20,6 +21,19 @@
 
 namespace sv::impl
 {
+/// The automatic exposure of one traced layer: where it has adapted to, and the meter reading still on its way back.
+struct auto_exposure_state
+{
+    /// Whether a reading has landed; until one does, a layer shows at its compensation alone.
+    bool primed = false;
+
+    /// In stops, before the layer's compensation.
+    f32 exposure = 0.0f;
+
+    /// The partials of the meter last started, which a later frame polls; invalid once read.
+    sg::data_future<tg::vec2f> pending;
+};
+
 /// One temporal resource a view keeps across frames, and how far whatever writes it has run.
 ///
 /// `reset_hash` is the declaration's, carried over from the frame that allocated this: a mismatch against the frame
@@ -63,6 +77,10 @@ struct temporal_slot
     /// The smaller of `sv::accumulation_sample_cap` and `viewer_definition::sample_target` where that is set; `is_accumulation_converged` takes reaching it as stopped.
     u32 sample_target = accumulation_sample_cap;
 
+    /// The frames this layer stops at, as the frame that last decided whether to trace took it; 0 for no such count.
+    /// `viewer_definition::frame_target`, counted as frames are recorded, so reaching it waits on nothing the GPU reads back.
+    u32 frame_target = 0;
+
     /// How many pixels held fewer samples than the trace's target as of the last wavefront floor that landed, and 0 for any other layer.
     /// What a capture that gives up names, since one stalled pixel holds the whole floor down.
     u32 pixels_short = 0;
@@ -70,6 +88,13 @@ struct temporal_slot
     /// The wavefront frames' sample floors still in flight, oldest first, all of the paths' current generation.
     /// A restart drops them, since they count samples of the image it threw away.
     cc::vector<sg::data_future<u32>> sample_floors;
+
+    /// Whether the mean holds what this layer stops at: `sample_target` samples, or `frame_target` frames where one is set.
+    /// Never true of a mean that restarts, whose counts are both 0.
+    [[nodiscard]] bool is_at_target() const
+    {
+        return accum_frame > 0 && (samples >= sample_target || (frame_target > 0 && accum_frame >= frame_target));
+    }
 
     /// The denoiser's own state, held only by a `temporal_id::denoised` slot.
     ///
@@ -83,8 +108,9 @@ struct temporal_slot
     /// switch between moving and still.
     sr::reconstruct_history scaled_denoise;
 
-    /// The camera this slot's layer was last traced from, held only by a `temporal_id::motion_guide` slot.
+    /// The camera this slot's layer was last traced from, held by a `temporal_id::motion_guide` slot.
     /// The next frame's motion vectors reproject into it.
+    /// A `temporal_id::denoised` slot holds the camera its image was made from, which a frame still loading may present only from the same one.
     shaders::tracer::camera_record last_camera = {};
     bool has_last_camera = false;
 
@@ -127,6 +153,9 @@ struct temporal_slot
 
     /// Whether this accumulation slot's raster layer has said that it skips the quadric batches it holds, which it says once.
     bool raster_skip_reported = false;
+
+    /// What each draw of this slot's raster layer was last frame, which its occlusion culling starts from; `raster_frame_desc::visibility`.
+    sg::buffer<u32> raster_visibility;
 
     /// Whether this accumulation slot's traced layer has said that the device cannot trace it, which it says once.
     bool untraceable_reported = false;
@@ -223,6 +252,9 @@ struct view_state
     /// else a view declares, have to survive a layer being inserted above them.
     cc::map<u64, temporal_slot> temporal;
 
+    /// The automatic exposure of each traced layer, indexed by layer, grown as layers ask for one.
+    cc::vector<auto_exposure_state> auto_exposure;
+
     /// The frame this view last re-recorded, which is what its refresh rate is measured against.
     /// The one piece of history with no texture to read it off, so the frame stamps it.
     u64 last_refresh_frame = 0;
@@ -230,6 +262,9 @@ struct view_state
 
 /// Starts `slot`'s mean over: no frames, no samples, and no sample floor of the old image still to land.
 void restart_accumulation(temporal_slot& slot);
+
+/// Starts every traced layer of `state` over, as a different image would: its mean, and the denoiser's history with it.
+void restart_accumulation(view_state& state);
 
 // -- Folding over a view's traced layers.
 //

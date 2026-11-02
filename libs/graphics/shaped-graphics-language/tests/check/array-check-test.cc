@@ -94,39 +94,69 @@ TEST("sgl check - an element of a mutable array is assigned, and its length neve
               .contains("an array's length is part of its type, and never assigned"));
 }
 
-TEST("sgl check - an array in a constant block waits for a layout rule, and a binding array for its feature")
+TEST("sgl check - a constant block holds an array whose element takes whole rows, and a binding array waits for its "
+     "feature")
 {
+    // CHK-291: an element striding by whole 16-byte rows is indexed in place on every target
+    CHECK(reports_for("binding work:\n    lights: float4[4]\n    ids: int4[2]\n    bones: mat4[8]\n") == "");
+    // a 3-vector strides by 16 at its natural alignment, and a struct nested in a block takes whole rows
+    CHECK(reports_for("struct lamp:\n    pos: float4\n    radius: float\nbinding work:\n    tints: float3[2]\n"
+                      "    lamps: lamp[4]\n")
+          == "");
     CHECK(reports_for("binding work:\n    weights: float[4]\n")
-              .contains("unsupported-yet user:[float[4]] an array in a constant block, whose layout no rule settles "
-                        "yet"));
+              .contains("unsupported-yet user:[float[4]] an array of float in a constant block, whose element strides "
+                        "by 4 bytes, short of a 16-byte row, which a runtime index needs"));
+    CHECK(reports_for("binding work:\n    offsets: float2[4]\n").contains("an array of float2 in a constant block"));
     // an array of arrays of values is values still, and no binding array
-    CHECK(reports_for("binding work:\n    grid: float[2, 3]\n")
-              .contains("unsupported-yet user:[float[2, 3]] an array in a constant block, whose layout no rule "
-                        "settles yet"));
+    CHECK(reports_for("binding work:\n    grid: float[2, 3]\n").contains("an array in a constant block, float[2, 3]"));
     // a binding array is a feature a device grants (CHK-299)
     CHECK(reports_for("binding work:\n    maps: texture_2d[float4][4]\n").contains("needs binding_arrays"));
 }
 
-TEST("sgl check - an array anywhere in GPU memory or across a stage edge is refused at its line")
+TEST("sgl check - an array in a struct stands in a buffer, and in a block where it takes whole rows")
 {
-    // CHK-291: the checker says it where the author wrote it, rather than the emitter with no line at all
+    // CHK-291: a buffer's element strides any array at natural alignment, and a block refuses a sub-row one at its line
     constexpr auto poly = "struct poly:\n    count: int\n    corners: float2[3]\n\n";
+    CHECK(reports_for(cc::format("{}binding work:\n    ps: buffer[poly]\n", poly)) == "");
     CHECK(reports_for(cc::format("{}binding work:\n    p: poly\n", poly))
               .contains("unsupported-yet user:[poly] an array in a constant block, poly.corners: float2[3], whose "
-                        "layout no rule places yet"));
-    CHECK(reports_for(cc::format("{}binding work:\n    ps: buffer[poly]\n", poly))
-              .contains("an array in a buffer's element, poly.corners: float2[3], whose layout no rule places yet"));
+                        "element strides by less than a 16-byte row, which a runtime index needs"));
+    // a buffer's element is a struct holding the array, never the array itself
     CHECK(reports_for("binding work:\n    rows: mut buffer[float[4]]\n")
-              .contains("an array in a buffer's element, float[4], whose layout no rule places yet"));
+              .contains("an array as a buffer's element, float[4]; a struct holding it is one"));
 
-    // a stage link, and the struct a patch or a stream carries, cross an edge too
-    auto const linked = reports_for("struct varyings:\n"
-                                    "    @position position: hpos4\n"
-                                    "    weights: float[2]\n"
-                                    "\n"
-                                    "@vertex fun vs() -> varyings:\n"
-                                    "    return {position = hpos4(0.0, 0.0, 0.0, 1.0), weights = [1.0, 2.0]}\n");
-    CHECK(linked.contains("an array crossing a stage edge, in varyings.weights: float[2]"));
+    // CHK-422: a stage link carries a one-dimensional array of what crosses, an element per location, and no deeper one
+    constexpr auto linked = "struct varyings:\n"
+                            "    @position position: hpos4\n"
+                            "    weights: {}\n"
+                            "\n"
+                            "@vertex fun vs() -> varyings:\n"
+                            "    return {{position = hpos4(0.0, 0.0, 0.0, 1.0), weights = {}}}\n";
+    CHECK(reports_for(cc::format(linked, "float[2]", "[1.0, 2.0]")) == "");
+    CHECK(reports_for(cc::format(linked, "float[2, 2]", "[[1.0, 2.0], [3.0, 4.0]]"))
+              .contains("an array crossing a stage edge, in varyings.weights"));
+    CHECK(reports_for(cc::format(linked, "bool[2]", "[true, false]"))
+              .contains("an array crossing a stage edge, in varyings.weights: bool[2]"));
+    // a vertex input takes one too, an attribute per element, and `@format` states each element's
+    constexpr auto vin = "@vertex struct vin:\n"
+                         "    {}\n"
+                         "struct varyings:\n"
+                         "    @position position: hpos4\n"
+                         "\n"
+                         "@vertex fun vs(v: vin) -> varyings:\n"
+                         "    return {{position = hpos4(v.weights[0].x, 0.0, 0.0, 1.0)}}\n";
+    CHECK(reports_for(cc::format(vin, "weights: float4[2]")) == "");
+    CHECK(reports_for(cc::format(vin, "@format(.rgba8_unorm) weights: float4[2]")) == "");
+    CHECK(reports_for(cc::format(vin, "@format(.rgba8_unorm) weights: float2[2]"))
+              .contains("@format(.rgba8_unorm) decodes into a float4, and the member is a float2[2]"));
+    // a pixel output is a render target per location, which an array would spread over
+    CHECK(reports_for("@pixel struct target:\n"
+                      "    colors: float4[2]\n"
+                      "struct varyings:\n"
+                      "    @position position: hpos4\n"
+                      "@pixel fun ps(p: varyings) -> target:\n"
+                      "    return {colors = [float4(1.0), float4(0.0)]}\n")
+              .contains("an array crossing a stage edge, in target.colors: float4[2]"));
 
     // workgroup memory is laid out by each target alone, so an array there stays fine
     CHECK(reports_for("@workgroup binding tile:\n    rows: poly[4]\nstruct poly:\n    corners: float2[3]\n") == "");

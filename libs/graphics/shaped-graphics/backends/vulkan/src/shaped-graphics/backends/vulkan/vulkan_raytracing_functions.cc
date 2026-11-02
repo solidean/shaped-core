@@ -22,4 +22,17 @@ bool vulkan_raytracing_functions::load(VkDevice device)
         && get_build_sizes != nullptr && get_device_address != nullptr && cmd_build_acceleration_structures != nullptr
         && create_raytracing_pipelines != nullptr && get_shader_group_handles != nullptr && cmd_trace_rays != nullptr;
 }
+
+bool vulkan_raytracing_functions::load_micromaps(VkDevice device)
+{
+    auto const fetch = [device](char const* name) { return vkGetDeviceProcAddr(device, name); };
+
+    create_micromap = PFN_vkCreateMicromapEXT(fetch("vkCreateMicromapEXT"));
+    destroy_micromap = PFN_vkDestroyMicromapEXT(fetch("vkDestroyMicromapEXT"));
+    get_micromap_build_sizes = PFN_vkGetMicromapBuildSizesEXT(fetch("vkGetMicromapBuildSizesEXT"));
+    cmd_build_micromaps = PFN_vkCmdBuildMicromapsEXT(fetch("vkCmdBuildMicromapsEXT"));
+
+    return create_micromap != nullptr && destroy_micromap != nullptr && get_micromap_build_sizes != nullptr
+        && cmd_build_micromaps != nullptr;
+}
 } // namespace sg::backend::vulkan

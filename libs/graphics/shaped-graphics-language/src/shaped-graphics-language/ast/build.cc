@@ -53,6 +53,16 @@ run_parts builder::run_parts_of(form_id run) const
 
 operator_level builder::level_of(form_id op) const
 {
+    if (operator_levels.empty())
+        operator_levels.resize_to_filled(file.forms.size(), i8(-1));
+    auto& known = operator_levels[index_of(op)];
+    if (known < 0)
+        known = i8(read_level_of(op));
+    return operator_level(known);
+}
+
+operator_level builder::read_level_of(form_id op) const
+{
     auto const text = token_text_of(op);
     switch (file.at(at(op).token).kind)
     {

@@ -35,7 +35,7 @@ A call of a function of the program is inlined into the structured form, so no l
 ## What is not here yet
 
 * Modules beyond the one unnamed module, interfaces, and `use`.
-* Generic structs of the program, lambdas beyond an arrow body, nested functions and `mut self`, each of which the inliner has yet to carry.
+* Lambdas beyond an arrow body, nested functions and `mut self`, each of which the inliner has yet to carry.
 * A `for` over anything but an `int` range, and a `let` without a value.
 * Literal types, implicit conversions, `as` beyond the numeric families of CHK-197, and `true` and `false`.
 * Resources, samplers, constants and type aliases.

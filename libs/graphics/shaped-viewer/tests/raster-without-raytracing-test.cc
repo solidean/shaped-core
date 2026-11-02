@@ -75,7 +75,7 @@ ASYNC_TEST("sv dx12 - a raster layer draws on a device without ray tracing", nx:
     REQUIRE(!ctx.supports(sg::feature::ray_query));
 
     constexpr auto size = tg::vec2i(96, 64);
-    auto const path = cc::format("{}/sv-raster-without-raytracing.png", cc::temp_directory_path());
+    auto const path = cc::temp_file_path("sv-raster-without-raytracing", ".png");
     auto const on = cc::scoped_environment_variable(sr::capture_request_env_var, "1");
     auto const out = cc::scoped_environment_variable(sr::capture_output_env_var, path);
     auto const which = cc::scoped_environment_variable(sr::capture_name_env_var, "front");

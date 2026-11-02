@@ -20,6 +20,8 @@ struct corner;
 struct face;
 struct group;
 struct data;
+struct texture_map;
+struct material;
 
 /// The domain every recording site in babel::obj is attributed to.
 CC_REC_DECLARE_DOMAIN(g_rec_domain);
@@ -64,6 +66,7 @@ enum class texture_index : int;
 enum class image_index : int;
 enum class sampler_index : int;
 enum class light_index : int;
+enum class camera_index : int;
 
 enum class container : u8;
 enum class issue_kind : u8;
@@ -75,6 +78,7 @@ enum class alpha_mode : u8;
 enum class filter : u16;
 enum class wrap_mode : u16;
 enum class light_type : u8;
+enum class camera_type : u8;
 enum class meshopt_mode : u8;
 enum class meshopt_filter : u8;
 
@@ -98,6 +102,7 @@ struct texture;
 struct image;
 struct sampler;
 struct light;
+struct camera;
 struct accessor_view;
 struct read_options;
 struct data;
@@ -243,6 +248,14 @@ struct read_options;
 /// The domain every recording site in babel::ktx2 is attributed to.
 CC_REC_DECLARE_DOMAIN(g_rec_domain);
 } // namespace babel::ktx2
+
+namespace babel::webp
+{
+struct data;
+
+/// The domain every recording site in babel::webp is attributed to.
+CC_REC_DECLARE_DOMAIN(g_rec_domain);
+} // namespace babel::webp
 
 namespace babel::tga
 {

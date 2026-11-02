@@ -1,0 +1,39 @@
+// a scalar bound of min, max, clamp and smoothstep stands for the vector of it, for every vector of the prelude,
+// through generics over `scalar_of[V]`, the scalar of a vector type
+
+// a float or half vector, as the registry once wrote them one by one
+test:
+    max(float3(-1.0, 0.5, 2.0), 0.0).x == 0.0
+    min(float2(3.0, -2.0), 1.0).x == 1.0
+    clamp(float4(-1.0, 0.5, 2.0, 0.25), 0.0, 1.0).z == 1.0
+    smoothstep(0.0, 1.0, float3(0.5, 0.0, 1.0)).x == 0.5
+    max(half3(half(-1.0), half(0.0), half(1.0)), half(0.5)).x == half(0.5)
+
+// an integer vector takes them too now, which no registry loop wrote
+test:
+    max(int3(-4, 2, 7), 0).x == 0
+    clamp(int2(-4, 9), 0, 5).y == 5
+    min(uint2(3u, 9u), 4u).y == 4u
+
+// two vectors and two scalars still choose the overloads of their own types
+test:
+    max(float2(1.0, 4.0), float2(3.0, 2.0)).x == 3.0
+    max(1.0, 2.0) == 2.0
+
+// `scalar_of[V]` is a type, the scalar of a vector type
+fun first_component[V](v: V) -> scalar_of[V] => v.x
+
+test:
+    let s: scalar_of[float3] = 1.5
+    s == 1.5
+    first_component(int2(7, 8)) == 7
+    first_component(half4(half(2.0))) == half(2.0)
+
+// a scalar has no scalar_of, so it is no vector a generic over one takes
+fun scaled_all[V](v: V, k: scalar_of[V]) -> V => v * V(k)
+
+test scaled_all(float2(1.0, 2.0), 3.0).y == 6.0
+
+@expect(error = "no-matching-overload")
+test:
+    scaled_all(2.0, 3.0) == 6.0

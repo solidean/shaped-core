@@ -1,0 +1,56 @@
+// a call may state generic arguments, by position or by name, and deduces the rest
+
+fun zero_of[T]() -> T => T(0)
+
+fun converted[To, From](x: From) -> To => To(x)
+
+fun pick[A, B](a: A, b: B) -> B => b
+
+// a generic argument no value argument says is stated
+test:
+    zero_of[float]() == 0.0
+    zero_of[int]() == 0
+
+// the first is stated, and the second deduced from the argument
+test:
+    converted[int](2.75) == 2
+    converted[float](3) == 3.0
+
+// by name, in any order, with the rest deduced
+test:
+    pick[.B = float](1, 2) == 2.0
+    pick[int, float](1, 2) == 2.0
+
+// a stated argument a number must fit is no deduction left to it
+@expect(error = "no-matching-overload")
+test:
+    converted[int, bool](1) == 1
+
+// a name no generic parameter has fits no candidate
+@expect(error = "no-matching-overload")
+test:
+    pick[.C = float](1, 2) == 2.0
+
+fun filled_with[T = float](x: int) -> T => T(x)
+
+fun scaled_default[n: int = 2](x: float) -> float => x * float(n)
+
+fun same_as[T, U = T](a: T) -> U => U(a)
+
+struct box[T = float, n: int = 2]:
+    items: T[n]
+
+// a default binds what no stated argument, argument or expected type said, and may name a parameter before it
+test:
+    filled_with(3) == 3.0
+    filled_with[int](3) == 3
+    scaled_default(1.5) == 3.0
+    scaled_default[4](1.5) == 6.0
+    same_as(2) == 2
+
+// a type position leaves trailing defaulted arguments out
+test:
+    let b: box[int] = box(int[2].filled(1))
+    b.items[1] == 1
+    let c: box[float] = box(float[2].filled(0.5))
+    c.items[0] == 0.5

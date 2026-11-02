@@ -142,8 +142,8 @@ ASYNC_INVOCABLE_TEST("sv - the wavefront traces the megakernel's quadrics and de
     if (!ctx.supports(sg::feature::ray_query) || !ctx.supports(sg::feature::raytracing_pipeline))
         SKIP("the wavefront tracer needs inline ray queries");
 
-    auto const reference_path = cc::format("{}/sv-parity-megakernel.png", cc::temp_directory_path());
-    auto const traced_path = cc::format("{}/sv-parity-wavefront.png", cc::temp_directory_path());
+    auto const reference_path = cc::temp_file_path("sv-parity-megakernel", ".png");
+    auto const traced_path = cc::temp_file_path("sv-parity-wavefront", ".png");
 
     // The same samples per pixel for both, so the noise left between them is the same: 48 megakernel frames of 4.
     co_await capture_scene(ctx, sv::render_mode::megakernel, reference_path, 192);

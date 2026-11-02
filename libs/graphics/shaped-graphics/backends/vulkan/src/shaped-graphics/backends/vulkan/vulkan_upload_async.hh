@@ -36,16 +36,26 @@ struct sg::backend::vulkan::vulkan_async_upload_job
     /// That is what makes ctx.idle_completion() true of the upload half as well; see sg::impl::transfer_drain.
     sg::impl::transfer_drain::token drain;
 
-    /// The context of whoever enqueued this, captured on their thread when the job is built.
+    /// The context of whoever enqueued this, captured on their thread when the job is handed over.
     /// Installed only around the work that is this job's alone: its source poll, and its copy's record and submit.
     /// Reset before anything it settles.
+    /// Held by the destination's upload group, which releases it with the destination's last handle where no list
+    /// waits on this job: see sg::impl::upload_contexts.
     /// See libs/graphics/shaped-graphics/docs/concepts/threading.md, "Whose work a transfer actor is doing".
-    cc::async_ambient_handle ambient;
+    sg::impl::upload_context_ticket<vulkan_completion_group_handle> ambient;
 
     // Exactly one destination is set.
     std::weak_ptr<vulkan_buffer const> buffer_target;
     std::weak_ptr<vulkan_texture const> texture_target;
     bool is_texture = false;
+
+    // The destination's GPU handles and format, captured at enqueue.
+    // What the copy still writes when every handle is gone and a submitted list waits on this job's value anyway —
+    // see vulkan_completion_group::awaited_value.
+    // Valid until then without owning them: the deferred-deletion gate keeps them until this value is signaled.
+    VkBuffer dst_buffer = VK_NULL_HANDLE;
+    VkImage dst_image = VK_NULL_HANDLE;
+    sg::pixel_format dst_format = {};
 
     isize dst_offset = 0;              // buffer copies
     sg::subresource_index subresource; // texture copies
