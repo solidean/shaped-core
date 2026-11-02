@@ -443,6 +443,7 @@ Each phase lands with its tests, and its measurement on Sponza and on one large 
    The design is settled and waits on counsel; the glowing-sphere test comes first, since it tells a bug in the feed from a weakness of the design.
 6. **Reconstruction**: `dlss_rr` on the scaled stream, the MetalFX member.
    Begun: a moving hybrid frame is drawn at the upscaler's input extent, jittered as a traced one is, and upscaled through the traced layer's own reconstruct path.
+   A still one is jittered too, one Halton (2, 3) offset per sample of its mean, so the mean converges to each pixel's coverage rather than to an aliased image.
    `raster.frame_constants::jitter` moves the image in clip space so a pixel's center lands where its jittered ray would.
    `dlss_rr` takes that stream as it is, upscaling by itself at its own ratio and jitter, and a test runs it beside svgf with FSR.
    Left: the MetalFX member.

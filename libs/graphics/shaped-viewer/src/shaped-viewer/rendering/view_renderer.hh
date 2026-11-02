@@ -126,6 +126,9 @@ private:
     {
         camera_matrices current;
         camera_matrices previous;
+        /// The sub-pixel offset every pixel of this frame and the frame before was drawn through, in [-0.5, 0.5), or 0 where each sample drew its own.
+        tg::vec2f jitter = {};
+        tg::vec2f previous_jitter = {};
     };
 
     /// One traced layer's denoiser slots, all null when the layer does not denoise.

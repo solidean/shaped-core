@@ -583,6 +583,26 @@ shaders::tracer::frame_constants make_frame_constants(view_data const& v,
     return seed != 0 ? seed : 1;
 }
 
+/// Element `index` of the Halton sequence in `base`, in [0, 1).
+[[nodiscard]] f32 halton(u32 index, u32 base)
+{
+    auto fraction = 1.0f;
+    auto value = 0.0f;
+    for (auto i = index; i > 0; i /= base)
+    {
+        fraction /= f32(base);
+        value += fraction * f32(i % base);
+    }
+    return value;
+}
+
+/// The sub-pixel offset, in [-0.5, 0.5), that sample `index` of a full-size hybrid mean draws every pixel through.
+/// Halton (2, 3), so the first few already spread over the pixel, and the mean of many is its coverage of whatever an edge crosses.
+[[nodiscard]] tg::vec2f still_jitter(u32 index)
+{
+    return tg::vec2f(halton(index + 1, 2) - 0.5f, halton(index + 1, 3) - 0.5f);
+}
+
 /// Restarts `slot`'s mean for an image whose hash is now `hash`, moving on to the next random sequence where the last one drew samples.
 /// Not where it drew none, as after frames that declined to trace, nor where only the last frame traced through
 /// something still loading and `hash` is unchanged.
@@ -1650,6 +1670,18 @@ sg::routine_outcome view_renderer::trace(sg::command_list& cmd,
         ds.frame->denoise.reset();
     }
 
+    // A raster samples each pixel where the projection puts its center, so a full-size hybrid frame shifts the whole
+    // projection by a sub-pixel offset of its own, as a traced frame's rays each draw one, or its mean would converge
+    // to an aliased image: every edge a staircase, however long the view stands still.
+    auto previous_jitter = slot->last_jitter;
+    if (!scaled && mode == render_mode::hybrid)
+    {
+        jitter = still_jitter(slot->accum_frame);
+        fc.fixed_jitter = 1;
+        fc.jitter = jitter + tg::vec2f(0.5f, 0.5f);
+        slot->last_jitter = jitter;
+    }
+
     // How many samples each pixel averages, where the wavefront traces a layer the spatial denoiser reads: its pixels
     // finish different numbers of paths, so one count for the image would misjudge every one of them.
     // Transient, since the tallies hold the counts and the resolve rewrites every pixel each frame.
@@ -1846,11 +1878,12 @@ sg::routine_outcome view_renderer::trace(sg::command_list& cmd,
             .current = matrices_of(fc.camera, near_plane),
             .previous
             = matrices_of(has_temporal && ds.motion->has_last_camera ? ds.motion->last_camera : fc.camera, near_plane),
+            .jitter = jitter,
+            .previous_jitter = previous_jitter,
         };
 
         if (scaled)
         {
-            auto const previous_jitter = slot->last_jitter;
             slot->last_jitter = jitter;
             auto const inputs = sr::reconstruct_inputs{
                 .color = has_split ? frame_diffuse : frame_output,
@@ -2003,11 +2036,11 @@ sr::reconstruct_status view_renderer::_denoise(sg::command_list& cmd,
         .roughness = ds.roughness->texture,
         .depth = ds.depth->texture,
 
-        // No jitter to declare, which is not the same as no jitter.
-        // The raygen offsets every primary ray by a fresh random amount within its pixel, so the samples are spread
-        // over the pixel and their mean is its centre — which is exactly what a zero here says.
-        // What `jitter` is for is the per-frame offset shared by every pixel that a temporal upscaler reconstructs
-        // sub-pixel detail from, which only a frame traced at the upscaler's extent has, and `trace` passes there.
+        // The per-frame offset every pixel shares, which a temporal member reconstructs sub-pixel detail from: a hybrid frame's.
+        // A traced frame's is zero, which is not the same as no jitter: each of its primary rays draws its own within the
+        // pixel, so the samples spread over it and their mean is its center, which is what a zero says.
+        .jitter = cameras.jitter,
+        .previous_jitter = cameras.previous_jitter,
         .view_to_clip = cameras.current.view_to_clip,
         .previous_view_to_clip = cameras.previous.view_to_clip,
         .world_to_view = cameras.current.world_to_view,

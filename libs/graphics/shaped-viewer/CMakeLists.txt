@@ -337,6 +337,7 @@ if(SC_BUILD_TESTS)
             tests/auto-exposure-test.cc
             tests/mode-switch-test.cc
             tests/restart-energy-test.cc
+            tests/jitter-accumulation-test.cc
             tests/view-renderer-test.cc
             tests/view-accumulation-test.cc
             tests/viewer-renderer-test.cc

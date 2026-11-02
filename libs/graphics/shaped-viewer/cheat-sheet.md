@@ -947,7 +947,8 @@ A layer with no lights falls back to `layer::fallback_light` — `sv::default_fa
 - **`sv::matrices_of(camera_record, near_plane)`** turns the raygen's pinhole basis into the `world_to_view` / `view_to_clip` pair `sr::reconstruct_guides` asks for.
   They exist for a denoiser or an upscaler that reprojects in world space, whether the layer was traced or rasterized.
   `right_scaled` and `up_scaled` carry `tan(fov / 2)` in their lengths, which is the projection's diagonal.
-  `reconstruct_guides::jitter` stays zero at full size: the raygen offsets every primary ray randomly WITHIN its pixel, so the samples' mean is the centre.
+  `reconstruct_guides::jitter` stays zero at full size for a traced layer: the raygen offsets every primary ray randomly WITHIN its pixel, so the samples' mean is the centre.
+  A full-size hybrid frame shifts its whole raster by one Halton (2, 3) offset per sample of the mean, and declares it, since a raster samples only where the projection puts the centers.
   The per-frame offset a temporal upscaler reconstructs from is the other kind: a frame traced at the upscaler's extent takes one, and passes it as `.jitter` beside `.previous_jitter`.
 - **The temporal history restarts on a scene change, never on camera motion** — its signal is the trace hash with the camera left out.
   The raygen blends the guides beside the mean on a count of their own, so turning denoising on mid-estimate restarts nothing.
