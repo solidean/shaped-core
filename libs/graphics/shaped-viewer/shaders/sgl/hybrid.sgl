@@ -103,9 +103,10 @@ struct bounce:
     wi: float3
     /// the met instance's base color, `tracer.instance_base_color`; mid-gray on a quadric, which has no triangle context to read it through
     albedo: float3
-    /// its specular roughness, or -1 for none, which leaves it matte; and its metalness
+    /// its specular roughness, or -1 for none, which leaves it matte; its metalness; and its specular layer's weight
     roughness: float
     metalness: float
+    specular_weight: float
     /// whether it refracted on the way, through the primary hit's own glass or any solid glass after it, which spends no bounce
     /// What it met is then followed by a bounce of its own, `is_followed`.
     through_glass: bool
@@ -137,7 +138,7 @@ fun bounce_from(b: openpbr.bsdf, f: openpbr.frame, n: float3, wo_local: float3, 
 
 /// A bounce that has not happened: nothing carried, nothing met.
 fun no_bounce() -> bounce:
-    return bounce(float3(0.0), float3(0.0), float3(0.0), false, float3(0.0), float3(0.0, 1.0, 0.0), float3(0.0, 0.0, 1.0), float3(0.5), -1.0, 0.0, false)
+    return bounce(float3(0.0), float3(0.0), float3(0.0), false, float3(0.0), float3(0.0, 1.0, 0.0), float3(0.0, 0.0, 1.0), float3(0.5), -1.0, 0.0, 1.0, false)
 
 /// `bounce_from` for a closure that refracts nowhere: one direction reflected off it, and one trace, with no glass to pass.
 /// It is the second bounce, from the surface the first met, whose closure `secondary_of` makes with no transmission, so a second `bounce_from` would only inline code nothing runs.
@@ -180,6 +181,7 @@ fun landed(so_far: bounce, h: tracer.hit_record, origin: float3, wi: float3, pdf
         result.albedo = tracer.instance_base_color(inst, ctx)
         result.roughness = tracer.instance_roughness(inst, ctx)
         result.metalness = tracer.instance_metalness(inst, ctx)
+        result.specular_weight = tracer.instance_specular_weight(inst, ctx)
         result.lights += emitter_light(inst, ctx, w1 - w0, w2 - w0, wi, h.t, pdf)
     else:
         result.n = normalize(raster.to_world_vector(inst, h.normal))
@@ -328,7 +330,7 @@ fun secondary_of(bounced: bounce, followed: bool) -> secondary:
     surface.base_color = bounced.albedo
     surface.base_metalness = bounced.metalness
     // A type that names no roughness keeps the matte secondary it always had.
-    surface.specular_weight = if bounced.roughness < 0.0 => 0.0 else 1.0
+    surface.specular_weight = if bounced.roughness < 0.0 => 0.0 else bounced.specular_weight
     // Regularized: `direct` lights this side by its light samples alone, with no BSDF sample to weigh them against,
     // so a near-mirror here turns the rare sample inside its lobe into a firefly; a roughness floor trades that for a softer caustic.
     surface.specular_roughness = if followed => bounced.roughness else max(bounced.roughness, secondary_roughness_floor)

@@ -350,6 +350,12 @@ fun instance_metalness(inst: scene.instance, ctx: material.shading_context){trac
     let m = emission_factor(inst.metal_kind, inst.metal_offset, inst.metal_uv_offset, inst.metal_frequency, inst.metal_channels, inst.metal_sampler, inst.metal_transform, 1u, ctx)
     return saturate(m.x)
 
+/// The weight of `inst`'s dielectric specular layer where `ctx` sits, read as `instance_base_color` reads its color; 1 for a type that declares none.
+fun instance_specular_weight(inst: scene.instance, ctx: material.shading_context){traced, bindless} -> float:
+    if inst.spec_kind == scene.value_none => return 1.0
+    let w = emission_factor(inst.spec_kind, inst.spec_offset, inst.spec_uv_offset, inst.spec_frequency, inst.spec_channels, inst.spec_sampler, inst.spec_transform, 1u, ctx)
+    return saturate(w.x)
+
 /// One factor of an emission at `ctx`, `lanes` wide: a constant of the parameter block, a mesh attribute, or a texture, as `kind` says.
 /// `channels` holds up to three swizzle selectors a byte each, and a one-lane factor comes back in `.x`, its other lanes meaning nothing.
 /// `scene.value_none` is a factor of 1.

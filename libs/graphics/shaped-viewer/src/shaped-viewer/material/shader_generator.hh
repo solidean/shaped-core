@@ -133,6 +133,8 @@ struct sv::material_secondary
     material_emission_factor base_color;
     material_emission_factor roughness;
     material_emission_factor metalness;
+    /// The dielectric specular layer's weight; a type that names none has the layer whole.
+    material_emission_factor specular_weight;
 
     /// The type's transmission weight and thin-wall switch, which the host reads to let the hybrid's rays pass a pane.
     material_emission_factor transmission;

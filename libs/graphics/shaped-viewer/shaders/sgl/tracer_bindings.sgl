@@ -43,7 +43,7 @@ struct light_record:
     select_pdf: float
     select_cdf: float
 
-/// `scene.instance` as `traced.instances` holds it, 224 bytes; `scene.instance` says who fills what.
+/// `scene.instance` as `traced.instances` holds it, 256 bytes; `scene.instance` says who fills what.
 struct instance_record:
     param_buffer: uint
     param_offset: uint
@@ -83,6 +83,13 @@ struct instance_record:
     metal_channels: uint
     metal_sampler: uint
     metal_transform: uint
+    spec_kind: uint
+    spec_offset: uint
+    spec_uv_offset: uint
+    spec_frequency: uint
+    spec_channels: uint
+    spec_sampler: uint
+    spec_transform: uint
     frame_offset: uint
     frame_frequency: uint
     glass: uint

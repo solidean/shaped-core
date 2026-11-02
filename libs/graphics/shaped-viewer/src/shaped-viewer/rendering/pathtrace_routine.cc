@@ -213,6 +213,14 @@ void place_instance_record(shaders::tracer::instance_record& record,
                           | (secondary.metalness.channels[2] << 16);
     record.metal_sampler = secondary.metalness.sampler;
     record.metal_transform = secondary.metalness.transform;
+    record.spec_kind = u32(secondary.specular_weight.kind);
+    record.spec_offset = secondary.specular_weight.offset;
+    record.spec_uv_offset = secondary.specular_weight.uv_offset;
+    record.spec_frequency = secondary.specular_weight.frequency;
+    record.spec_channels = secondary.specular_weight.channels[0] | (secondary.specular_weight.channels[1] << 8)
+                         | (secondary.specular_weight.channels[2] << 16);
+    record.spec_sampler = secondary.specular_weight.sampler;
+    record.spec_transform = secondary.specular_weight.transform;
     auto const per_element = secondary.tangent_frame.kind == material_value_kind::attribute;
     record.frame_offset = per_element ? secondary.tangent_frame.offset : material_opacity::no_offset;
     record.frame_frequency = secondary.tangent_frame.frequency;

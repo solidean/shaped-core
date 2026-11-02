@@ -108,8 +108,12 @@ fun thin_surface(base: float4, specular: float4, extra: float4) -> openpbr.surfa
     s.base_weight = 1.0
     s.base_color = float3(base.x, base.y, base.z) * float3(base.x, base.y, base.z)
     s.base_metalness = base.w
-    s.specular_weight = 1.0
-    s.specular_color = float3(specular.x, specular.y, specular.z) * float3(specular.x, specular.y, specular.z)
+    // `thin_of` stored weight times color; the weight comes back as their largest channel, exactly so for a white color.
+    // OpenPBR dims the base by the layer's weight and not by its color, so a layer rebuilt at weight 1 dims a matte base it never had.
+    let weighted = float3(specular.x, specular.y, specular.z) * float3(specular.x, specular.y, specular.z)
+    let weight = max(weighted.x, max(weighted.y, weighted.z))
+    s.specular_weight = weight
+    s.specular_color = if weight > 0.0 => weighted / weight else float3(1.0)
     s.specular_roughness = specular.w
     s.coat_weight = extra.x
     s.coat_roughness = extra.y
