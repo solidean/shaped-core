@@ -140,7 +140,7 @@ TEST("lint - a clean file exits 0", main_thread, exclusive())   // run_command r
 ```bash
 tool lint a.cc          # an app or command named first runs with the rest of the line
 tool --tests "lint -"   # --tests (or --examples, --benchmarks, --manual, --apps, --commands, --list-tests-json,
-                        #   --reporter) hands the line to nexus; an exact test name does too
+                        #   --list-hw-counters, --reporter) hands the line to nexus; an exact test name does too
 tool a.cc --fix         # otherwise the default_entry takes the WHOLE line — nexus parses none of it
 tool                    # no default: an overview of what the binary holds, exit 0
 ```
@@ -422,6 +422,8 @@ uv run dev.py test                       # build + run the whole suite
 //   filter_matches, eligible) plus an "aliases" array, the resolved config (filters, filter_mode, selected_bucket,
 //   allow_cross_bucket_naming, run_disabled_tests) and eligible_count / eligible_alias_count, under the rest of
 //   the args, then exit 0. Used by `dev.py test` to pre-select binaries. "-" means stdout.
+// --list-hw-counters : print the hardware counters this machine can read, then exit 0; `dev.py profiling counters`.
+// On Windows every sc_nexus_binary runs in the UTF-8 code page (a manifest), so a test name outside ASCII matches.
 ```
 
 ## Command-line arguments (`nx::args`)

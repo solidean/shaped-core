@@ -169,6 +169,10 @@ struct nx::test_schedule_config
     // The listing reports every registered test plus whether it would_run() under the rest of the parsed args, so a caller can pre-select binaries.
     cc::string list_tests_json_file;
 
+    // When set, run() prints the hardware counters this machine can read and exits without running anything.
+    // Set via --list-hw-counters; any nexus binary answers it, so a tool needs no particular test.
+    bool list_hw_counters = false;
+
     // True if the test passes the filters alone: filters empty, or some non-empty filter matches.
     // A filter matches as a substring of the test name, or — once resolve_filter_mode selected files — as a glob over its source file.
     // Bucket and disabled status are ignored, which is what distinguishes "filter didn't match" from "matched but excluded".
