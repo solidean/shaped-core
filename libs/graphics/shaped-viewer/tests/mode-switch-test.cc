@@ -226,13 +226,13 @@ ASYNC_INVOCABLE_TEST("sv - switching renderers and denoisers never shows black b
                     "{:.1f} -> {:.1f}",
                     p.name, stats.size(), skipped, worst_dark, worst_at, tail_change, first_mean, last_mean);
 
-        CHECK(worst_dark < dark_ceiling).dump("phase", p.name).dump("darkest", worst_dark).dump("at", worst_at);
+        CHECK(worst_dark < dark_ceiling).dump("phase", cc::string_view(p.name)).dump("darkest", worst_dark).dump("at", worst_at);
         // A phase too short to finish its compile has nothing executed to settle, which the next phase then covers.
         if (!p.moving && executed.size() >= 8)
         {
-            CHECK(tail_change < 4.0f).dump("phase", p.name).dump("change", tail_change);
+            CHECK(tail_change < 4.0f).dump("phase", cc::string_view(p.name)).dump("change", tail_change);
             CHECK(tg::abs(last_mean - first_mean) < 0.1f * first_mean + 2.0f)
-                .dump("phase", p.name)
+                .dump("phase", cc::string_view(p.name))
                 .dump("from", first_mean)
                 .dump("to", last_mean);
         }
