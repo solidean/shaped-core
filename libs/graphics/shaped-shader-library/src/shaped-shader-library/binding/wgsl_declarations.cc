@@ -217,6 +217,10 @@ public:
             CC_RETURN_IF_ERROR(polyfill);
             if (polyfill.value())
                 continue;
+            auto debug_window = is_debug_window(b);
+            CC_RETURN_IF_ERROR(debug_window);
+            if (debug_window.value())
+                continue;
 
             auto binding = sg::binding{};
             CC_RETURN_IF_ERROR(to_binding(b, binding));
@@ -697,6 +701,22 @@ private:
         return true;
     }
 
+    /// Whether `p` is sg's debug window, which the webgpu backend binds itself rather than a group (EMIT-183).
+    cc::result<bool> is_debug_window(pending_binding const& p) const
+    {
+        auto group = integer_of(p.group, p.line);
+        CC_RETURN_IF_ERROR(group);
+        auto index = integer_of(p.index, p.line);
+        CC_RETURN_IF_ERROR(index);
+        if (group.value() != sg::reserved_binding_group || index.value() != 19)
+            return false;
+        if (p.name != "sg_debug" || p.address_space != "storage" || p.access != "read_write")
+            return cc::error(cc::format("line {}: @group({}) @binding(19) is sg's debug window, which must be "
+                                        "'var<storage, read_write> sg_debug'",
+                                        p.line, group.value()));
+        return true;
+    }
+
     /// The layout of a host-shareable type, under WGSL's alignment and size rules.
     cc::result<type_layout> layout_of(parsed_type const& type_in, int line) const
     {
@@ -1040,8 +1060,9 @@ private:
                 b.index = index - 1;
             else
                 return cc::error(cc::format("line {}: @group({}) is sg's reserved group, which holds only the "
-                                            "inline-constants block at binding 0, static samplers after it, and the "
-                                            "ray-query polyfill's pool and roots at 17 and 18",
+                                            "inline-constants block at binding 0, static samplers after it, the "
+                                            "ray-query polyfill's pool and roots at 17 and 18, and the debug window at "
+                                            "19",
                                             p.line, group));
         }
         return cc::unit{};

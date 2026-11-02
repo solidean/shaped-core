@@ -14,6 +14,7 @@
 /// A context has one window per epoch in flight and one more, and epoch `e` writes window `e % count`.
 /// A window is read back once its epoch completes, decoded against the sites its pipelines stated, logged, and reset.
 /// Opening the epoch that writes a window again waits for that, which only a drain more than a whole epoch late makes it do.
+/// A context that never blocks cannot wait, so that epoch writes a sink instead, whose every record counts as dropped.
 /// Nothing here orders two epochs against each other on the GPU: their overlap is what a dev build must still show.
 /// libs/graphics/shaped-graphics-language/docs/issues/feat-sgl-gpu-print-and-assert.md has the design.
 class sg::impl::debug_windows
@@ -52,6 +53,8 @@ private:
         raw_buffer_handle buffer;
         /// A pipeline that writes records was bound in the epoch being recorded, so the window will be read back.
         cc::atomic<bool> is_written = false;
+        /// Written in an epoch that has not been read back and reset yet, which a recording thread may ask from.
+        cc::atomic<bool> is_busy = false;
         /// Read back after its epoch, and not decoded yet; nullopt where nothing is pending.
         cc::optional<bytes_future> pending;
         /// Its download has been asked for, which only happens once its epoch has retired.
@@ -68,6 +71,8 @@ private:
 
     context& _ctx;
     window _windows[k_window_count];
+    /// Where an epoch whose window is still busy writes, on a context that cannot wait for it: room for nothing.
+    raw_buffer_handle _sink;
     cc::atomic<bool> _created = false;
     cc::mutex<int> _creation;
     cc::mutex<cc::map<u32, shader_debug_site>> _sites;

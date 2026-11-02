@@ -124,9 +124,12 @@ void webgpu_command_list::apply_compute_state()
             wgpuComputePassEncoderSetBindGroup(pass, u32(i), s.layout->empty_group(), 0, nullptr);
         u32 offsets[2] = {};
         auto const offset_count = s.layout->reserved_dynamic_offsets(s.constants_offset, offsets);
-        wgpuComputePassEncoderSetBindGroup(pass, u32(sg::reserved_binding_group),
-                                           s.layout->reserved_group_for(s.constants_page), size_t(offset_count),
-                                           offset_count > 0 ? offsets : nullptr);
+        auto const window = _ctx.debug_windows().window_for_recording(s.writes_debug);
+        touch(window);
+        wgpuComputePassEncoderSetBindGroup(
+            pass, u32(sg::reserved_binding_group),
+            s.layout->reserved_group_for(s.constants_page, static_cast<webgpu_buffer const&>(*window).raw()),
+            size_t(offset_count), offset_count > 0 ? offsets : nullptr);
     }
     s.needs_full_apply = false;
 }
@@ -137,6 +140,7 @@ void webgpu_command_list::compute_bind_pipeline(sg::compute_pipeline const& pipe
     CC_ASSERT(wp != nullptr, "compute_pipeline is not a webgpu compute_pipeline");
     rebind_layout(_compute, wp->layout.get());
     _compute.compute_pipeline = wp->pipeline;
+    _compute.writes_debug = !pipeline.footprint().debug_stages().is_empty();
     _keep_alive.push_back(wp->layout);
 }
 
@@ -243,5 +247,6 @@ void webgpu_command_list::raster_bind_pipeline(sg::raster_pipeline const& pipeli
     _keep_alive.push_back(wp->layout);
     _keep_alive.push_back(pipeline.weak_from_this().lock());
     _raster_footprint = &pipeline.footprint();
+    _raster.writes_debug = !pipeline.footprint().debug_stages().is_empty();
 }
 } // namespace sg::backend::webgpu
