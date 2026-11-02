@@ -350,7 +350,7 @@ Neither change has landed; [the roadmap](plans/rendering-roadmap.md) orders the 
 
 ### Where it stands
 
-Every step of the landing order has landed: `render_mode::automatic` traces a layer with the wavefront unless the device cannot trace, or `render_settings::mode` asks for another.
+Every step of the landing order has landed, and `render_mode::automatic` traced a layer with the wavefront until the hybrid took the default over: a layer that wants the wavefront now names it.
 The path state lives on the layer's accumulator slot, so the two restart together and the store's budget counts both.
 A layer that stops tracing with the wavefront releases it, and one that can never scale releases its scaled state.
 A frame whose image changed restarts and drains, and a still one carries for what its share of `frame_budget_ms` holds, or for `rounds_per_frame` at full fill where that is 0.

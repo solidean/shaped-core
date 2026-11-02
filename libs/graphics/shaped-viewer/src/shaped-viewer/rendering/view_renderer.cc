@@ -1229,7 +1229,7 @@ render_mode resolve_render_mode(sg::context const& ctx, render_mode mode)
     if (mode != render_mode::automatic)
         return mode;
     auto const traces = ctx.supports(sg::feature::raytracing_pipeline) && ctx.supports(sg::feature::ray_query);
-    return traces ? render_mode::wavefront : render_mode::raster;
+    return traces ? render_mode::hybrid : render_mode::raster;
 }
 
 // NOLINTNEXTLINE(performance-unnecessary-value-param) — by value because it is a coroutine, see sg's init_once

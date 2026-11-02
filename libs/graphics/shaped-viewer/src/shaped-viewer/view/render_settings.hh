@@ -37,11 +37,13 @@ inline constexpr u32 accumulation_sample_cap = 16384;
 /// On a Radeon 780M the wavefront wins the shallow scene too; libs/graphics/shaped-viewer/docs/wavefront.md has the measurements.
 enum class sv::render_mode : sv::u8
 {
-    /// The wavefront where the device has `sg::feature::raytracing_pipeline` and `ray_query` both, and `raster` where it has not, which the viewer warns of once.
+    /// The hybrid where the device has `sg::feature::raytracing_pipeline` and `ray_query` both, and `raster` where it has not, which the viewer warns of once.
+    /// A layer left here that names no denoiser is denoised by `automatic`'s, since a hybrid frame is one sample per pixel.
     ///
+    /// The hybrid rather than a path tracer because it holds a frame rate: about 8 to 16 ms a moving frame at 1920x1200 where the wavefront takes 15 to 39, on Bistro and Sponza.
+    /// It lights one bounce, though, so a room lit only indirectly is darker and noisier than the wavefront converges to; a caller who wants that names `wavefront`.
     /// Resolved where the viewer builds the frame's plan, so the plan declares what the mode it resolved to writes.
     /// A plan built by hand from a layer still `automatic` traces it with the wavefront.
-    /// It is also where the default can move, to the hybrid once there is one, without a caller changing anything.
     automatic,
 
     /// One ray-tracing dispatch per frame, every path traced to its end inside it.
@@ -63,11 +65,12 @@ enum class sv::render_mode : sv::u8
     /// libs/graphics/shaped-viewer/docs/raster.md is the design.
     raster,
 
-    /// Rasterized primary hits, lit by the tracer's next-event estimate with shadow rays traced inline: direct light only, so nothing bounces yet.
+    /// Rasterized primary hits, lit by the tracer's next-event estimate with shadow rays traced inline, and one bounce.
     ///
-    /// One light sample per pixel and frame, so a still image accumulates toward the tracer's direct light, as a traced layer accumulates its paths.
+    /// One light sample and one bounce per pixel and frame, so a still image accumulates, as a traced layer accumulates its paths.
+    /// Glass spends no bounce: a bounce refracts through it, and what it meets beyond is lit as a primary hit is.
     /// It writes the primary hit's G-buffer every frame, as `raster` does; `render_settings::hybrid_lighting` says where the lighting runs.
-    /// It needs `ray_query` and `raytracing_pipeline` both, and does not denoise yet.
+    /// It needs `ray_query` and `raytracing_pipeline` both.
     /// libs/graphics/shaped-viewer/docs/plans/hybrid-renderer.md is the design.
     hybrid,
 };
@@ -113,11 +116,13 @@ struct sv::render_settings
     /// Up to eight refractions through smooth glass spend none, so a hollow glass vessel still leaves the path its bounces for what lies behind.
     i32 max_bounces = 5;
 
-    /// Which path tracer traces this layer, or `raster` to draw it instead; switching restarts its image.
+    /// What draws this layer, `automatic`'s hybrid unless named; switching restarts its image.
     render_mode mode = render_mode::automatic;
 
     /// Where a `hybrid` layer lights its primary hits, which no other mode reads.
     /// Switching restarts its image, since the deferred lighting reduces the material and so converges elsewhere.
+    /// Deferred by default: its one lighting kernel serves every material, where forward compiles the lighting into each material's own stage,
+    /// and it is the faster of the two with many materials (3.9 against 4.5 ms on Bistro; Sponza's few favor forward).
     hybrid_lighting hybrid_lighting = hybrid_lighting::deferred;
 
     /// How many rounds a still frame of the wavefront tracer runs, each moving every live path one segment.

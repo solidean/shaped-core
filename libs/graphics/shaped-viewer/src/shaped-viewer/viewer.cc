@@ -1150,6 +1150,9 @@ void viewer::finish_frame(frame& f)
             if (l.kind != layer_kind::scene_3d || l.settings.mode != render_mode::automatic)
                 continue;
             l.settings.mode = resolve_render_mode(*im.ctx, l.settings.mode);
+            // A hybrid frame is one sample per pixel, too noisy to show undenoised while the camera moves.
+            if (l.settings.mode == render_mode::hybrid && l.settings.reconstruct.denoiser == sr::denoise_method::none)
+                l.settings.reconstruct.denoiser = sr::denoise_method::automatic;
             if (l.settings.mode == render_mode::raster && !im.raster_fallback_reported)
             {
                 CC_LOG_WARNING("the device has no ray tracing, so every layer left render_mode::automatic is "

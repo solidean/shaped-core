@@ -144,3 +144,16 @@ ASYNC_INVOCABLE_TEST("sv - view renderer renders indexed geometry (headless)", (
     CHECK(again == item.mesh);
     CHECK(resources.meshes.count() == 1);
 }
+
+// `automatic` is the hybrid wherever the device traces, and raster where it cannot; a mode named is itself.
+ASYNC_INVOCABLE_TEST("sv - render_mode::automatic resolves to the hybrid where the device traces",
+                     (sg::context_handle const& ctx_h))
+{
+    auto& ctx = *ctx_h;
+    auto const traces = ctx.supports(sg::feature::raytracing_pipeline) && ctx.supports(sg::feature::ray_query);
+    CHECK(sv::resolve_render_mode(ctx, sv::render_mode::automatic)
+          == (traces ? sv::render_mode::hybrid : sv::render_mode::raster));
+    CHECK(sv::resolve_render_mode(ctx, sv::render_mode::wavefront) == sv::render_mode::wavefront);
+    CHECK(sv::resolve_render_mode(ctx, sv::render_mode::hybrid) == sv::render_mode::hybrid);
+    co_return;
+}
