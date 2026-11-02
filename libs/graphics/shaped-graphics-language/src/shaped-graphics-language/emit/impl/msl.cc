@@ -666,7 +666,7 @@ public:
             parameters.push_back(cc::format("sampler {} [[sampler({})]]", s.name, s.index));
         // EMIT-183: sg's debug buffer
         if (p.writes_debug)
-            parameters.push_back("device sg_debug_buffer& sg_debug [[buffer(6)]]");
+            parameters.push_back("device sg_debug_buffer& sg_debug [[buffer(30)]]");
         auto list = cc::string();
         for (auto const& parameter : parameters)
             list += cc::format("{}{}", list.empty() ? "" : ", ", parameter);

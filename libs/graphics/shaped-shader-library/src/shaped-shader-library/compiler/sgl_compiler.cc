@@ -170,8 +170,13 @@ static_assert(
 class sgl_shader_compiler final : public slib::shader_compiler
 {
 public:
-    sgl_shader_compiler(std::unique_ptr<slib::shader_compiler> inner, cc::optional<bcache::blob_cache*> persistent_cache)
-      : _inner(cc::move(inner)), _target(target_of(_inner->target_format())), _persistent_cache(persistent_cache)
+    sgl_shader_compiler(std::unique_ptr<slib::shader_compiler> inner,
+                        cc::optional<bcache::blob_cache*> persistent_cache,
+                        bool diagnostics)
+      : _inner(cc::move(inner)),
+        _target(target_of(_inner->target_format())),
+        _persistent_cache(persistent_cache),
+        _diagnostics(diagnostics)
     {
     }
 
@@ -215,6 +220,7 @@ private:
         b.add_pod(desc.stage);
         b.add_string(desc.label);
         b.add_pod(_target);
+        b.add_pod(_diagnostics);
         b.add_pod(i64(desc.options.size()));
         for (auto const& o : desc.options)
         {
@@ -289,7 +295,8 @@ private:
              .target = _target,
              .options = options,
              // EMIT-182: DXC's and Metal's messages, and PIX's and Xcode's source view, name the SGL line
-             .line_directives = true});
+             .line_directives = true,
+             .diagnostics = _diagnostics});
         if (text.has_error())
             return cc::error(cc::format("SGL reported errors:\n{}", text.error()));
         auto const& emitted = text.value();
@@ -336,6 +343,28 @@ private:
                 access |= sg::access_flag::shader_write;
             shader.footprint.slots.push_back({.name = slot.host_name, .access = access, .dynamic_index = false});
         }
+        // EMIT-183: each print and assert as sg reads its records back
+        auto const file_of = [&](sgl::emit::source_line const& l)
+        { return l.file >= 0 && l.file < emitted.line_files.size() ? emitted.line_files[l.file] : cc::string(); };
+        for (auto const& site : emitted.debug_sites)
+        {
+            auto described = sg::shader_debug_site{.id = site.id,
+                                                   .is_assert = site.is_assert,
+                                                   .pieces = site.pieces,
+                                                   .at = {.file = file_of(site.origin.at), .line = site.origin.at.line}};
+            for (auto const& value : site.values)
+            {
+                auto const scalar = value.family == "float" ? sg::debug_scalar::float32
+                                  : value.family == "half"  ? sg::debug_scalar::float16
+                                  : value.family == "uint"  ? sg::debug_scalar::uint32
+                                  : value.family == "bool"  ? sg::debug_scalar::boolean
+                                                            : sg::debug_scalar::int32;
+                described.values.push_back({.scalar = scalar, .lanes = value.lanes, .type = value.type});
+            }
+            for (auto const& line : site.origin.inlined_from)
+                described.inlined_from.push_back({.file = file_of(line), .line = line.line});
+            shader.debug_sites.push_back(cc::move(described));
+        }
         result.stated = cc::move(shader);
         for (auto const& l : emitted.layouts)
         {
@@ -351,6 +380,7 @@ private:
     sgl::emit::target _target;
     /// As `sgl_compiler_options` holds it, resolved at each compile so the default follows whatever is installed then.
     cc::optional<bcache::blob_cache*> _persistent_cache = {};
+    bool _diagnostics = false;
 };
 } // namespace
 
@@ -376,5 +406,5 @@ std::unique_ptr<slib::shader_compiler> slib::create_sgl_compiler(std::unique_ptr
                                                                  sgl_compiler_options const& options)
 {
     CC_ASSERT(inner != nullptr, "an SGL compiler needs the compiler that builds its text");
-    return std::make_unique<sgl_shader_compiler>(cc::move(inner), options.persistent_cache);
+    return std::make_unique<sgl_shader_compiler>(cc::move(inner), options.persistent_cache, options.diagnostics);
 }

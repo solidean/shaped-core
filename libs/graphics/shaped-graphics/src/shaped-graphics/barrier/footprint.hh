@@ -78,6 +78,8 @@ public:
     {
         shader_footprint const* footprint = nullptr;
         pipeline_stage_flags stages;
+        /// The shader writes print and assert records into the context's debug window.
+        bool writes_debug = false;
     };
 
     /// Unknown: every dispatch falls back to the bound views' classes.
@@ -86,6 +88,10 @@ public:
     [[nodiscard]] static pipeline_footprint resolve(pipeline_layout const& layout, cc::span<stage_input const> stages);
 
     [[nodiscard]] bool is_known() const { return _known; }
+
+    /// The stages whose code appends records to the context's debug window, whether or not the rest is known; empty
+    /// for a pipeline that writes none, which binds the window without declaring it.
+    [[nodiscard]] pipeline_stage_flags debug_stages() const { return _debug_stages; }
 
     /// The layout this footprint was resolved against, whether or not it is known; null for a default-constructed one.
     /// Compared by address only, to tell whether two pipelines share one layout.
@@ -106,6 +112,7 @@ private:
 
     bool _known = false;
     pipeline_layout const* _layout = nullptr;
+    pipeline_stage_flags _debug_stages;
     cc::vector<group_uses> _groups;
 };
 

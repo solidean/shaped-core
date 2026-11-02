@@ -99,6 +99,18 @@ cc::result<dx12_pipeline_layout_handle> dx12_pipeline_layout::create(ID3D12Devic
         params.push_back(param);
     }
 
+    // The context's debug window, a root UAV at u0 in space 11, last again so nothing above moves.
+    // Every layout carries it: a shader that prints or asserts writes it, and any other leaves it unread.
+    {
+        D3D12_ROOT_PARAMETER param = {};
+        param.ParameterType = D3D12_ROOT_PARAMETER_TYPE_UAV;
+        param.ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
+        param.Descriptor.ShaderRegister = 0;
+        param.Descriptor.RegisterSpace = 11;
+        pl->debug_root_param = int(params.size());
+        params.push_back(param);
+    }
+
     pl->has_static_samplers = !static_sampler_descs.empty();
 
     D3D12_ROOT_SIGNATURE_DESC desc = {};

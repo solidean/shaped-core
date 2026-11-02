@@ -449,6 +449,7 @@ if(SC_BUILD_TESTS)
             tests/denoise-test.cc
             tests/denoise-reference-test.cc
             tests/fsr-clear-test.cc
+            tests/debug-output-test.cc
             tests/fsr-test.cc
             tests/mix-test.cc
             tests/exposure-meter-test.cc

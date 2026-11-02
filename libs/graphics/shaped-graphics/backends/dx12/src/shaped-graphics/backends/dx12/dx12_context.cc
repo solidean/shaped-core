@@ -26,6 +26,8 @@ void dx12_context::shutdown()
     {
         advance_epoch();
         drain_at_shutdown();
+        // the final epoch's records are decoded while the download path still runs
+        release_debug_windows();
     }
 
     // Drain + join the download actor and release the ring buffers while the submission fence is still

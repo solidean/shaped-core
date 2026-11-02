@@ -26,7 +26,8 @@ namespace
 {
 /// Bumped when what goes into a persistent pipeline entry changes shape.
 /// The adapter and driver live in the key itself; this is only ever about OUR encoding.
-constexpr auto k_pipeline_blob_version = bcache::version(1);
+/// That includes what a backend derives from a layout: a root signature that grew a parameter makes every blob stale.
+constexpr auto k_pipeline_blob_version = bcache::version(2);
 
 /// The namespace fragment naming a backend, so two backends' blobs can never answer each other's lookups.
 /// backend_kind is explicitly not a closed set, so an unnamed one shares the "unknown" partition rather than silently

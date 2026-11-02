@@ -130,8 +130,36 @@ sg::impl::pipeline_footprint footprint_of(sg::pipeline_layout const& layout,
     cc::vector<sg::impl::pipeline_footprint::stage_input> stages;
     for (auto const* shader : shaders)
         if (shader != nullptr)
-            stages.push_back({.footprint = &shader->footprint, .stages = sg::impl::stages_of(shader->stage)});
+            stages.push_back({.footprint = &shader->footprint,
+                              .stages = sg::impl::stages_of(shader->stage),
+                              .writes_debug = !shader->debug_sites.empty()});
     return sg::impl::pipeline_footprint::resolve(layout, stages);
+}
+
+/// Makes every print and assert of `shaders` known to the context that decodes their records.
+void add_debug_sites(sg::impl::debug_windows& windows, cc::span<sg::compiled_shader const* const> shaders)
+{
+    for (auto const* shader : shaders)
+        if (shader != nullptr)
+            windows.add_sites(shader->debug_sites);
+}
+
+void add_debug_sites(sg::impl::debug_windows& windows, sg::compute_pipeline_description const& desc)
+{
+    sg::compiled_shader const* const stages[] = {&desc.shader};
+    add_debug_sites(windows, stages);
+}
+
+void add_debug_sites(sg::impl::debug_windows& windows, sg::raster_pipeline_description const& desc)
+{
+    sg::compiled_shader const* const stages[] = {
+        &desc.vertex_shader,
+        desc.fragment_shader.has_value() ? &desc.fragment_shader.value() : nullptr,
+        desc.tessellation_control_shader.has_value() ? &desc.tessellation_control_shader.value() : nullptr,
+        desc.tessellation_evaluation_shader.has_value() ? &desc.tessellation_evaluation_shader.value() : nullptr,
+        desc.geometry_shader.has_value() ? &desc.geometry_shader.value() : nullptr,
+    };
+    add_debug_sites(windows, stages);
 }
 
 sg::impl::pipeline_footprint footprint_of(sg::compute_pipeline_description const& desc)
@@ -266,7 +294,10 @@ cc::result<compute_pipeline_handle> context_uncached_scope::try_create_compute_p
     _ctx._stats.add(stat::pipelines_created);
     auto r = _ctx.try_create_compute_pipeline(desc, lifetime_scope::persistent);
     if (r.has_value())
+    {
+        add_debug_sites(_ctx._debug_windows, desc);
         impl::set_footprint(*r.value(), footprint_of(desc));
+    }
     return r;
 }
 
@@ -290,6 +321,7 @@ cc::result<raster_pipeline_handle> context_uncached_scope::try_create_raster_pip
     if (r.has_value())
     {
         impl::set_targets(*r.value(), target_set_of(desc), target_formats_of(desc));
+        add_debug_sites(_ctx._debug_windows, desc);
         impl::set_footprint(*r.value(), footprint_of(desc));
     }
     return r;
@@ -302,6 +334,7 @@ cc::shared_async<compute_pipeline_handle> context_uncached_scope::create_compute
         return cc::make_async_from_error<compute_pipeline_handle>(
             cc::async_error::make_error(cc::any_error(cc::move(refusal.value()))));
     _ctx._stats.add(stat::pipelines_created);
+    add_debug_sites(_ctx._debug_windows, desc);
     return with_footprint(_ctx.create_compute_pipeline_async(desc, lifetime_scope::persistent), footprint_of(desc));
 }
 
@@ -315,6 +348,7 @@ cc::shared_async<raster_pipeline_handle> context_uncached_scope::create_raster_p
     // A backend may settle the build from a callback of its own, so the name is set once it has.
     _ctx._stats.add(stat::pipelines_created);
     auto built = _ctx.create_raster_pipeline_async(desc, lifetime_scope::persistent);
+    add_debug_sites(_ctx._debug_windows, desc);
     return named(cc::move(built), cc::string(target_set_of(desc)), target_formats_of(desc), footprint_of(desc));
 }
 
@@ -359,6 +393,7 @@ cc::result<raytracing_pipeline_handle> context_uncached_scope::try_create_raytra
     auto r = _ctx.try_create_raytracing_pipeline(desc, lifetime_scope::persistent);
     if (r.has_value())
     {
+        add_debug_sites(_ctx._debug_windows, stages);
         impl::set_footprint(*r.value(), footprint_of(*desc.layout, stages));
         impl::set_hit_groups(*r.value(), desc.hit_shaders);
     }

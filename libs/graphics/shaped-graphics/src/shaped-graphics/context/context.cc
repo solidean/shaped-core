@@ -264,6 +264,13 @@ void context::process_completed_epochs()
 {
     retire_completed_epochs();
     settle_due_completions();
+    _debug_windows.poll();
+}
+
+void context::release_debug_windows()
+{
+    _debug_windows.drain();
+    _debug_windows.release();
 }
 
 void context::defer_until_retired(cc::unique_function<void()> fn)
@@ -279,7 +286,9 @@ void context::defer_until_retired(cc::unique_function<void()> fn)
 
 void context::advance_epoch()
 {
+    _debug_windows.on_closing(current_epoch());
     do_advance_epoch();
+    _debug_windows.on_opened(current_epoch());
     _stats.add(stat::epochs_advanced);
 
     // Each stat's change over the epoch just closed, as one accumulate per stat.
