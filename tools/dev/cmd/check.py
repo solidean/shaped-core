@@ -172,6 +172,7 @@ def _build_checks(ctx: Context, *, memo: dev.CheckMemo | None = None) -> list[de
         runners = (
             (Path("tools") / "dev" / "profile-self-test.py", []),
             (Path("tools") / "dev" / "changes-self-test.py", []),
+            (Path("tools") / "dev" / "checks-self-test.py", []),
             (Path("tools") / "dev" / "roots-self-test.py", []),
             (Path("tools") / "dev" / "jsruntime-self-test.py", []),
             (Path("tools") / "dev" / "ui-self-test.py", []),
