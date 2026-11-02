@@ -176,10 +176,11 @@ TEST("sgl emit - a resource parameter is the member it was handed, written where
 {
     auto const hlsl = text_of(k_resources, target::hlsl_dx12);
     CHECK(hlsl.contains("post_source.SampleLevel(post_bilinear, "));
-    CHECK(hlsl.contains("post_level[xy] = post_level[xy] + v;\n"));
+    // `v` is read once, so the argument stands there (EMIT-180), and `xy` twice, so it is bound once
+    CHECK(hlsl.contains("post_level[xy] = post_level[xy] + c.x;\n"));
     auto const wgsl = text_of(k_resources, target::wgsl);
     CHECK(wgsl.contains("textureSampleLevel(post_source, post_bilinear, "));
-    CHECK(wgsl.contains("textureStore(post_level, xy, vec4f(textureLoad(post_level, xy).x + v, 0.0, 0.0, 0.0));\n"));
+    CHECK(wgsl.contains("textureStore(post_level, xy, vec4f(textureLoad(post_level, xy).x + c.x, 0.0, 0.0, 0.0));\n"));
 }
 
 namespace

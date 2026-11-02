@@ -701,3 +701,33 @@ TEST("sgl emit - two instances of one template whose members came out alike are 
         CHECK(!e.text.contains("op_mode_multiply"));
     }
 }
+
+TEST("sgl emit - an argument the inlined body reads once is written where it is read, and only a stable one")
+{
+    // EMIT-180: once, outside a loop, and reading nothing the body could write between
+    auto const user = cc::string_view("binding data:\n"
+                                      "    values: mut buffer[float]\n"
+                                      "fun once(x: float) -> float => x * 2.0\n"
+                                      "fun twice(x: float) -> float => x * x\n"
+                                      "fun looped(x: float) -> float:\n"
+                                      "    let mut sum = 0.0\n"
+                                      "    for i in 0 ..< 3:\n"
+                                      "        sum += x\n"
+                                      "    return sum\n"
+                                      "fun after_store(x: float){data} -> float:\n"
+                                      "    data.values[0] = 1.0\n"
+                                      "    return x\n"
+                                      "@compute(64) fun main(@thread_id id: int3){data}:\n"
+                                      "    let f = float(id.x)\n"
+                                      "    data.values[1] = once(f + 1.0)\n"
+                                      "    data.values[2] = twice(f + 2.0)\n"
+                                      "    data.values[3] = looped(f + 3.0)\n"
+                                      "    data.values[4] = after_store(data.values[0])\n");
+    auto const e = emit_source(user, 0, target::wgsl);
+    // read once: the argument stands where the parameter was
+    CHECK(e.text.contains("data_values[1] = (f + 1.0) * 2.0;"));
+    // read twice, read in a loop, and read after the body wrote what it reads: each bound once
+    CHECK(e.text.contains("let x_1: f32 = f + 2.0;"));
+    CHECK(e.text.contains("let x_2: f32 = f + 3.0;"));
+    CHECK(e.text.contains("let x_3: f32 = data_values[0];\n    data_values[0] = 1.0;"));
+}

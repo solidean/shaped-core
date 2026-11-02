@@ -323,6 +323,14 @@ struct flattener
 
     /// True for what may stand in several places and be evaluated in any of them: a literal, or an immutable local.
     [[nodiscard]] bool is_substitutable(flat_expr_id id) const;
+    /// True where evaluating `id` reads nothing a body could write, so it gives one value wherever it is evaluated:
+    /// literals, immutable locals and pure operations over them.
+    [[nodiscard]] bool is_stable(flat_expr_id id, int depth = 0) const;
+    /// EMIT-180: the let of `local` in the block being written, if the block reads it once outside a loop and its value
+    /// is stable, folded into that one read.
+    void substitute_single_use(local_id local);
+    /// Conservatively true where statement `id` of a block expression may read `local`.
+    [[nodiscard]] bool reads_in(flat_stmt_id id, local_id local) const;
 
     /// What `nonuniform i` or `uniform i` marks, `i`; none for anything else.
     [[nodiscard]] flat_expr_id marked_index(flat_expr_id id) const;

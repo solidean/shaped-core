@@ -468,6 +468,7 @@ auto sgl::check::impl::flattener::inline_bound(ast::expr_id call,
 
     // A parameter is a value: a literal or an immutable local stands for it, and anything else is bound once.
     auto bound = cc::vector<bound_name>();
+    auto argument_lets = cc::vector<local_id>();
     for (auto k = isize(0); k < values.size(); ++k)
     {
         auto const i = filled[k];
@@ -510,6 +511,7 @@ auto sgl::check::impl::flattener::inline_bound(ast::expr_id call,
             auto const local = add_local(local_kind::let, parameters[i].name, x.type);
             add_stmt(x.from, flat_let{.local = local, .value = argument});
             bound.push_back({.where = where, .local = local});
+            argument_lets.push_back(local);
         }
     }
 
@@ -553,7 +555,105 @@ auto sgl::check::impl::flattener::inline_bound(ast::expr_id call,
         flatten_stmt(stmt);
     frames.remove_back();
 
+    // EMIT-180: an argument the body reads once, outside a loop, is written where it is read, as a builtin's would be;
+    // only one that reads nothing the body could write between, so moving it changes no value
+    for (auto const local : argument_lets)
+        substitute_single_use(local);
+
     auto const body = add_list(block);
     block = cc::move(outer);
     return {.label = label, .body = body};
+}
+
+auto sgl::check::impl::flattener::is_stable(flat_expr_id id, int depth) const -> bool
+{
+    if (!is_valid(id) || depth > k_max_inline_depth)
+        return false;
+    auto const& x = entry.at(id).node;
+    if (x.is<flat_literal>() || x.is<flat_int_literal>() || x.is<flat_bool_literal>() || x.is<flat_enum_value>())
+        return true;
+    if (auto const* const ref = x.try_as<flat_local_ref>())
+        return !entry.at(ref->local).is_mut;
+    if (auto const* const call = x.try_as<flat_call>(); call != nullptr && !call->is_pure)
+        return false;
+    if (!x.is<flat_construct>() && !x.is<flat_call>() && !x.is<flat_member>() && !x.is<flat_element>()
+        && !x.is<flat_not>())
+        return false;
+    auto result = true;
+    for_each_operand(entry, entry.at(id),
+                     [&](flat_expr_id operand) { result = result && is_stable(operand, depth + 1); });
+    return result;
+}
+
+void sgl::check::impl::flattener::substitute_single_use(local_id local)
+{
+    auto at = isize(-1);
+    for (auto i = isize(0); i < block.size() && at < 0; ++i)
+        if (auto const* const let = entry.at(block[i]).node.try_as<flat_let>(); let != nullptr && let->local == local)
+            at = i;
+    if (at < 0)
+        return;
+    auto const value = entry.at(block[at]).node.as<flat_let>().value;
+    if (!is_stable(value))
+        return;
+
+    // every read of the local, and whether one stands where it may run more than once
+    auto uses = cc::vector<flat_expr_id>();
+    auto is_repeated = false;
+    auto const expr = [&](auto const& self, flat_expr_id id, int loops, int depth) -> void
+    {
+        if (!is_valid(id) || depth > k_max_inline_depth)
+            return;
+        auto const& x = entry.at(id);
+        if (auto const* const ref = x.node.try_as<flat_local_ref>(); ref != nullptr && ref->local == local)
+        {
+            uses.push_back(id);
+            is_repeated = is_repeated || loops > 0;
+        }
+        for_each_operand(entry, x, [&](flat_expr_id operand) { self(self, operand, loops, depth + 1); });
+        if (auto const* const b = x.node.try_as<flat_block>())
+            for (auto const s : entry.at(b->body))
+                is_repeated = is_repeated || reads_in(s, local);
+    };
+    auto const stmt = [&](auto const& self, flat_stmt_id id, int loops, int depth) -> void
+    {
+        if (depth > k_max_inline_depth)
+            return;
+        auto const& s = entry.at(id);
+        auto const inner = loops + (s.node.is<flat_loop>() || s.node.is<flat_while>() || s.node.is<flat_for>() ? 1 : 0);
+        for_each_expr_of(s, [&](flat_expr_id x) { expr(expr, x, inner, depth + 1); });
+        for_each_pattern_of(entry, s,
+                            [&](ast::range_of<flat_expr_id> patterns)
+                            {
+                                for (auto const p : entry.at(patterns))
+                                    expr(expr, p, inner, depth + 1);
+                            });
+        for_each_body_of(entry, s,
+                         [&](ast::range_of<flat_stmt_id> body)
+                         {
+                             for (auto const b : entry.at(body))
+                                 self(self, b, inner, depth + 1);
+                         });
+    };
+    for (auto i = at + 1; i < block.size(); ++i)
+        stmt(stmt, block[i], 0, 0);
+    if (uses.size() != 1 || is_repeated)
+        return;
+
+    entry.exprs[index_of(uses[0])].node = entry.at(value).node;
+    block.remove_at(at);
+}
+
+auto sgl::check::impl::flattener::reads_in(flat_stmt_id id, local_id local) const -> bool
+{
+    // a read inside a block expression: counted as one that may repeat, which keeps the let
+    auto found = false;
+    auto const& s = entry.at(id);
+    for_each_expr_of(s,
+                     [&](flat_expr_id x)
+                     {
+                         if (auto const* const ref = entry.at(x).node.try_as<flat_local_ref>())
+                             found = found || ref->local == local;
+                     });
+    return found || !entry.at(id).node.is<flat_let>();
 }

@@ -297,6 +297,9 @@ binding affine:
 * **EMIT-46** The text is meant to be read: real names, one statement per line, four spaces per level ([why](why/emitting.md#emit-46)).
 * **EMIT-47** The text starts with a comment that names the stage, the entry point and the target.
 * **EMIT-48** An immutable local is a named constant: `const T name = value;` in HLSL and `let name: T = value;` in WGSL.
+* **EMIT-180** An inlined call's argument is bound to a local unless it is a literal or an immutable local, and that local is written into its one read where the body reads it once.
+  Only where the read stands outside every loop, and the argument is stable: literals, immutable locals and pure operations over them, which nothing the body writes can change.
+  So `max(v, 0.0)` of a generic reads as the vector call it inlines to, `max(a * b, float3(0.0))`, rather than binding `a * b` first.
 * **EMIT-49** A float literal is the shortest decimal text that reads back as its value, always with a decimal point, and without a suffix.
 * **EMIT-50** A literal that is infinite or not a number is `non-finite-literal`.
 * **EMIT-51** An `@operator` builtin is its operator: `+`, `-`, `*`, `/`, `%`, the six comparisons, and the prefix `-`; the products of a matrix are EMIT-43.
