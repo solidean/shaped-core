@@ -3,6 +3,8 @@ created: 2026-10-30
 refs:
   - file: libs/graphics/shaped-graphics-language/prelude/builtins.sgl
   - file: libs/graphics/shaped-graphics-language/src/shaped-graphics-language/builtins/register_vector_math.cc
+closed: 2026-11-02
+resolution: fixed
 ---
 
 # Scalar-broadcast overloads written once, generically, instead of per type
