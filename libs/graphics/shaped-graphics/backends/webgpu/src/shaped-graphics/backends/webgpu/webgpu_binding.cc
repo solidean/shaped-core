@@ -6,6 +6,7 @@
 #include <shaped-graphics/backends/webgpu/webgpu_context.hh>
 #include <shaped-graphics/backends/webgpu/webgpu_format.hh>
 #include <shaped-graphics/binding/impl/layout_hash.hh>
+#include <shaped-graphics/context/impl/debug_windows.hh>
 
 namespace sg::backend::webgpu
 {
@@ -319,6 +320,16 @@ cc::result<webgpu_pipeline_layout_handle> webgpu_pipeline_layout::create(webgpu_
     else
         layout->_reserved_block_bytes = layout->_inline_constants_bound_bytes;
 
+    // The context's debug window, which a print or an assert writes (EMIT-183); WebGPU's vertex stage writes no storage.
+    if (sg::impl::debug_windows::k_enabled)
+    {
+        auto debug = WGPUBindGroupLayoutEntry{};
+        debug.binding = debug_window_binding;
+        debug.visibility = WGPUShaderStage_Fragment | WGPUShaderStage_Compute;
+        debug.buffer.type = WGPUBufferBindingType_Storage;
+        reserved.push_back(debug);
+    }
+
     layout->_slot_count = reserved.empty() ? int(layout->_groups.size()) : sg::reserved_binding_group + 1;
     return webgpu_pipeline_layout_handle(cc::move(layout));
 }
@@ -375,7 +386,7 @@ WGPUBindGroup webgpu_pipeline_layout::empty_group() const
     return _empty_group.get();
 }
 
-WGPUBindGroup webgpu_pipeline_layout::reserved_group_for(webgpu_constant_page const* page) const
+WGPUBindGroup webgpu_pipeline_layout::reserved_group_for(webgpu_constant_page const* page, WGPUBuffer debug_window) const
 {
     CC_ASSERT(has_reserved_group(), "this pipeline layout has no reserved group");
     materialize();
@@ -387,7 +398,7 @@ WGPUBindGroup webgpu_pipeline_layout::reserved_group_for(webgpu_constant_page co
         if (_reserved_groups_pool_generation != _ctx._acceleration.generation())
         {
             _reserved_groups.clear();
-            _reserved_group_without_page = {};
+            _reserved_groups_without_page.clear();
             _reserved_groups_pool_generation = _ctx._acceleration.generation();
         }
     }
@@ -427,6 +438,15 @@ WGPUBindGroup webgpu_pipeline_layout::reserved_group_for(webgpu_constant_page co
             roots.size = u64(acceleration_roots_bytes);
             entries.push_back(roots);
         }
+        if (debug_window != nullptr)
+        {
+            auto debug = WGPUBindGroupEntry{};
+            debug.binding = debug_window_binding;
+            debug.buffer = debug_window;
+            debug.offset = 0;
+            debug.size = WGPU_WHOLE_SIZE;
+            entries.push_back(debug);
+        }
         auto const desc = WGPUBindGroupDescriptor{
             .nextInChain = nullptr,
             .label = to_wgpu("sg reserved group"),
@@ -437,17 +457,29 @@ WGPUBindGroup webgpu_pipeline_layout::reserved_group_for(webgpu_constant_page co
         return wgpu_bind_group(wgpuDeviceCreateBindGroup(_ctx.device(), &desc));
     };
 
+    // a window's position among the windows this layout has met, which are the context's few
+    auto slot = isize(0);
+    while (slot < _debug_windows.size() && _debug_windows[slot] != debug_window)
+        ++slot;
+    if (slot == _debug_windows.size())
+        _debug_windows.push_back(debug_window);
+    CC_ASSERT(slot < k_debug_slots, "a layout met more debug windows than a context has");
+
     if (_reserved_block_bytes == 0)
     {
-        if (!_reserved_group_without_page)
-            _reserved_group_without_page = build(nullptr);
-        return _reserved_group_without_page.get();
+        while (_reserved_groups_without_page.size() <= slot)
+            _reserved_groups_without_page.push_back({});
+        auto& group = _reserved_groups_without_page[slot];
+        if (!group)
+            group = build(nullptr);
+        return group.get();
     }
 
     CC_ASSERT(page != nullptr, "the reserved block needs a page to bind");
-    while (_reserved_groups.size() <= page->index)
+    auto const index = isize(page->index) * k_debug_slots + slot;
+    while (_reserved_groups.size() <= index)
         _reserved_groups.push_back({});
-    auto& group = _reserved_groups[page->index];
+    auto& group = _reserved_groups[index];
     if (!group)
         group = build(page->buffer.get());
     return group.get();

@@ -12,10 +12,18 @@
 #include <shaped-shader-library/compiler/metal_compiler.hh>
 #endif
 
+namespace
+{
+// SC_SHADER_DIAGNOSTICS: SGL writes print and assert records exactly where sg binds a window for them.
+// vulkan's set 3 and metal's buffer(30) bind none yet, so their edges write none (issue: feat-sgl-gpu-print-and-assert).
+constexpr auto k_sgl_options = slib::sgl_compiler_options{.diagnostics = SG_SHADER_DIAGNOSTICS != 0};
+constexpr auto k_sgl_options_without_window = slib::sgl_compiler_options{};
+} // namespace
+
 void slib::add_available_compilers(shader_library& lib)
 {
     lib.add_compiler(create_wgsl_compiler());
-    lib.add_compiler(create_sgl_compiler(create_wgsl_compiler()));
+    lib.add_compiler(create_sgl_compiler(create_wgsl_compiler(), k_sgl_options));
 
 #if SLIB_HAS_DXC
     // This build fetched DXC, so a DXC that does not create is a broken install, and its reason is the one diagnostic.
@@ -31,19 +39,19 @@ void slib::add_available_compilers(shader_library& lib)
     {
         lib.add_compiler(cc::move(dxil.value()));
         if (auto sgl_dxil = create_dxc_compiler(); sgl_dxil.has_value())
-            lib.add_compiler(create_sgl_compiler(cc::move(sgl_dxil.value())));
+            lib.add_compiler(create_sgl_compiler(cc::move(sgl_dxil.value()), k_sgl_options));
     }
 
     if (spirv.has_value())
     {
         lib.add_compiler(cc::move(spirv.value()));
         if (auto sgl_spirv = create_dxc_spirv_compiler(); sgl_spirv.has_value())
-            lib.add_compiler(create_sgl_compiler(cc::move(sgl_spirv.value())));
+            lib.add_compiler(create_sgl_compiler(cc::move(sgl_spirv.value()), k_sgl_options_without_window));
     }
 #endif
 
 #if SLIB_HAS_METAL
     lib.add_compiler(create_metal_compiler());
-    lib.add_compiler(create_sgl_compiler(create_metal_compiler()));
+    lib.add_compiler(create_sgl_compiler(create_metal_compiler(), k_sgl_options_without_window));
 #endif
 }
