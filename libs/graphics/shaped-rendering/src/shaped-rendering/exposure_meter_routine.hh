@@ -9,7 +9,8 @@
 #include <shaped-rendering/fwd.hh>
 #include <typed-geometry/linalg/vec.hh>
 
-/// Meters an image for an automatic exposure: the mean log2 luminance over a 64x64 grid of its pixels.
+/// Meters an image for an automatic exposure: the mean log2 luminance over a 64x64 grid of its cells, each the linear mean of the pixels spread over it.
+/// The log of a cell rather than of a pixel, so an image of few samples meters as its converged self would rather than darker.
 ///
 /// The GPU writes 256 partial sums and the caller finishes the mean on the host, after reading them back.
 /// So a meter is a frame or two behind the image it measured, which an exposure that adapts smoothly never shows.

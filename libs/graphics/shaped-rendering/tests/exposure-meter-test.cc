@@ -15,11 +15,18 @@ using namespace cc::primitive_defines;
 //
 // The mean is geometric, so a few bright pixels pull an exposure down less than an arithmetic mean would.
 // An image half at 0.1 and half at 0.4 therefore meters 0.2 rather than 0.25.
+// The log is taken of each cell's linear mean, though, so pixel noise finer than a cell meters as its mean rather than darker.
 
 namespace
 {
 /// Meters a `width` x `height` image whose left half is `left` and right half `right`, in luminance, and returns the luminance it metered.
-cc::shared_async<cc::optional<f32>> meter_once(sg::context& ctx, int width, int height, f32 left, f32 right)
+/// With `checker`, the two alternate pixel by pixel instead.
+cc::shared_async<cc::optional<f32>> meter_once(sg::context& ctx,
+                                               int width,
+                                               int height,
+                                               f32 left,
+                                               f32 right,
+                                               bool checker = false)
 {
     sr::exposure_meter_routine::prewarm(ctx);
     (void)co_await ctx.routines.idle_completion();
@@ -33,7 +40,8 @@ cc::shared_async<cc::optional<f32>> meter_once(sg::context& ctx, int width, int 
     for (auto y = 0; y < height; ++y)
         for (auto x = 0; x < width; ++x)
         {
-            auto const v = x < width / 2 ? left : right;
+            auto const first = checker ? (x + y) % 2 == 0 : x < width / 2;
+            auto const v = first ? left : right;
             texels.push_back(tg::vec4f(v, v, v, 1));
         }
 
@@ -72,6 +80,12 @@ ASYNC_INVOCABLE_TEST("sr - the exposure meter reads an image's geometric mean lu
     REQUIRE(halves.has_value());
     CHECK(tg::abs(halves.value() - 0.2f) < 1e-4f).dump("metered", halves.value());
     CHECK(tg::abs(sr::exposure_for_average(halves.value()) - tg::log(0.9f) / tg::log(2.0f)) < 1e-3f);
+
+    // Pixels alternating black and 0.8 are an image of few samples, and meter their mean, 0.4, as the converged image would.
+    // A mean of single pixels' logs would read them near black.
+    auto const noisy = co_await meter_once(ctx, 512, 512, 0.0f, 0.8f, true);
+    REQUIRE(noisy.has_value());
+    CHECK(tg::abs(noisy.value() - 0.4f) < 1e-3f).dump("metered", noisy.value());
 }
 
 TEST("sr - the exposure meter's mean ignores partials that summed nothing, and has none without samples")
