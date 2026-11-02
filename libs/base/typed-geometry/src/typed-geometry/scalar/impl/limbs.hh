@@ -50,19 +50,87 @@ namespace tg::impl
     return limbs_cmp(a, b, an);
 }
 
-/// r[0, an) = a[0, an) + b[0, bn) with an >= bn, returning the carry out.
-/// r may be a or b: limb i is read before it is written.
-/// Inline, since at the sizes a predicate meets a call costs as much as the loop.
-CC_FORCE_INLINE u64 limbs_add(u64* r, u64 const* a, i32 an, u64 const* b, i32 bn)
+#if (defined(CC_COMPILER_CLANG) || defined(CC_COMPILER_GCC)) && defined(__x86_64__)
+#define TG_LIMBS_X64_ASM 1
+#else
+#define TG_LIMBS_X64_ASM 0
+#endif
+
+/// r[0, n) = a[0, n) + b[0, n), returning the carry out; r may be a or b.
+/// On x64 one adc per limb, its index counting up to zero by inc, which leaves the carry flag alone:
+/// as C++ the loop's own compare clobbers it, and each limb pays to save and restore it.
+CC_FORCE_INLINE u64 limbs_add_n(u64* r, u64 const* a, u64 const* b, i32 n)
 {
+#if TG_LIMBS_X64_ASM
+    if (n <= 0)
+        return 0;
+    auto i = -i64(n);
+    u64 t;
+    u64 carry;
+    asm volatile("clc\n\t"
+                 "1:\n\t"
+                 "mov (%[a],%[i],8), %[t]\n\t"
+                 "adc (%[b],%[i],8), %[t]\n\t"
+                 "mov %[t], (%[r],%[i],8)\n\t"
+                 "inc %[i]\n\t"
+                 "jnz 1b\n\t"
+                 "sbb %[c], %[c]"
+                 : [i] "+r"(i), [t] "=&r"(t), [c] "=r"(carry)
+                 : [a] "r"(a + n), [b] "r"(b + n), [r] "r"(r + n)
+                 : "cc", "memory");
+    return carry & 1;
+#else
     u64 carry = 0;
-    auto i = 0;
-    for (; i < bn; ++i)
+    for (auto i = 0; i < n; ++i)
     {
         auto const s = cc::add_with_carry(a[i], b[i], carry);
         r[i] = s.value;
         carry = s.carry;
     }
+    return carry;
+#endif
+}
+
+/// r[0, n) = a[0, n) - b[0, n), returning the borrow out; r may be a or b.
+CC_FORCE_INLINE u64 limbs_sub_n(u64* r, u64 const* a, u64 const* b, i32 n)
+{
+#if TG_LIMBS_X64_ASM
+    if (n <= 0)
+        return 0;
+    auto i = -i64(n);
+    u64 t;
+    u64 borrow;
+    asm volatile("clc\n\t"
+                 "1:\n\t"
+                 "mov (%[a],%[i],8), %[t]\n\t"
+                 "sbb (%[b],%[i],8), %[t]\n\t"
+                 "mov %[t], (%[r],%[i],8)\n\t"
+                 "inc %[i]\n\t"
+                 "jnz 1b\n\t"
+                 "sbb %[c], %[c]"
+                 : [i] "+r"(i), [t] "=&r"(t), [c] "=r"(borrow)
+                 : [a] "r"(a + n), [b] "r"(b + n), [r] "r"(r + n)
+                 : "cc", "memory");
+    return borrow & 1;
+#else
+    u64 borrow = 0;
+    for (auto i = 0; i < n; ++i)
+    {
+        auto const s = cc::sub_with_borrow(a[i], b[i], borrow);
+        r[i] = s.value;
+        borrow = s.borrow;
+    }
+    return borrow;
+#endif
+}
+
+/// r[0, an) = a[0, an) + b[0, bn) with an >= bn, returning the carry out.
+/// r may be a or b: limb i is read before it is written.
+/// Inline, since at the sizes a predicate meets a call costs as much as the loop.
+CC_FORCE_INLINE u64 limbs_add(u64* r, u64 const* a, i32 an, u64 const* b, i32 bn)
+{
+    u64 carry = limbs_add_n(r, a, b, bn);
+    auto i = bn;
     for (; i < an && carry != 0; ++i)
     {
         auto const s = cc::add_with_carry(a[i], 0, carry);
@@ -79,14 +147,8 @@ CC_FORCE_INLINE u64 limbs_add(u64* r, u64 const* a, i32 an, u64 const* b, i32 bn
 /// r may be a or b.
 CC_FORCE_INLINE u64 limbs_sub(u64* r, u64 const* a, i32 an, u64 const* b, i32 bn)
 {
-    u64 borrow = 0;
-    auto i = 0;
-    for (; i < bn; ++i)
-    {
-        auto const s = cc::sub_with_borrow(a[i], b[i], borrow);
-        r[i] = s.value;
-        borrow = s.borrow;
-    }
+    u64 borrow = limbs_sub_n(r, a, b, bn);
+    auto i = bn;
     for (; i < an && borrow != 0; ++i)
     {
         auto const s = cc::sub_with_borrow(a[i], 0, borrow);
@@ -117,6 +179,9 @@ CC_FORCE_INLINE u64 limbs_mul_1(u64* r, u64 const* a, i32 n, u64 b)
 
 /// r[0, n) += a[0, n) * b, returning the limb above; r overlaps a only if it is a.
 u64 limbs_addmul_1(u64* r, u64 const* a, i32 n, u64 b);
+
+/// r[0, n) -= a[0, n) * b, returning the limb to subtract above; r overlaps a only if it is a.
+u64 limbs_submul_1(u64* r, u64 const* a, i32 n, u64 b);
 
 /// q[0, n) = a[0, n) / d, returning the remainder; d != 0, and q may be a.
 u64 limbs_divrem_1(u64* q, u64 const* a, i32 n, u64 d);

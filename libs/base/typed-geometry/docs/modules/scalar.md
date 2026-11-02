@@ -165,13 +165,22 @@ It is the base a rational type will build on.
 - **A node is reused while it holds the result.** Every `assign_*` writes into the target's node when it is large enough, and an operand may be the target.
   The limbs past the size are left as they are, so a smaller result costs nothing to shrink to.
   The operators take an rvalue operand's node for their result, so `a * b - c * d` allocates once per product.
-- **One-limb `+ - *` are inline, and everything else is one call.** At one limb the call and its register saves cost more than the arithmetic.
-  The kernels under the call are inline in it, apart from the multiply, whose operands up to 4 × 4 limbs take fully unrolled column products.
+- **`+ - *` of one- and two-limb operands are inline, and everything else is one call.** At that size the call and its register saves cost more than the arithmetic.
+  The out-of-line operations have a lean path for a target that holds the result, and a separate slow one for allocation and aliasing, so the common case needs few registers.
 - **The limb kernels are shared with `bigfloat`.** `scalar/impl/limbs.hh` holds natural numbers as limb arrays; `bigfloat` keeps its own sum, since its operands are aligned at an exponent first.
+- **On x64 with clang or gcc, the carry chains are inline assembly**, with portable C++ beside them for every other target.
+  As C++, clang cannot keep a carry in the flag across a loop's compare, nor in a third accumulator word: it saves and restores it through `setb` and `movzx`, about twice the instructions.
+  Sums run one `adc` per limb on an index that counts up to zero by `inc`, which leaves the carry alone; products accumulate `mulx` into three words by `add`, `adc`, `adc`.
+- **A product picks its algorithm by shape.**
+  Up to 4 × 4 limbs and squares up to 16 × 16 are fully unrolled column products, five instructions per limb product.
+  From 17 limbs squares split by Karatsuba down onto those, its middle recombined in place as GMP's toom22 does; an unbalanced product takes the longer operand in chunks of the shorter.
+  Other shapes run in rows of `addmul_1`.
 - **Division is Knuth's Algorithm D**, ported from `fixed_int`'s, truncating like the builtins; `>>` floors, like an arithmetic shift.
+  `div_mod(q, r, a, b)` writes into kept results, and `gcd` reuses its three values from step to step.
 - **Measured against GMP 6.3, its generic C build, in instructions retired on a Zen 5.**
-  An orient3d over 50-bit integers retires about 1,600 with results reused against GMP's 2,400; a one-limb add about 50 against 115.
-  From two limbs up, a call retires 20–50% more than GMP's, and past 256 bytes an operator's fresh result takes the slow large-allocation path.
+  An orient3d over 50-bit integers retires about 1,640 with results reused, GMP 2,390; over 120-bit integers about 2,520, GMP 3,200.
+  A 16 × 16 limb product retires about 1,520, GMP 1,750; a division of 32 limbs by 16 about 3,300, GMP 4,600.
+  From three limbs up, a sum still retires 40–80 more than GMP's; `perf-bigint-past-one-limb` has the open items.
 
 ### `half_float` is binary16, correctly rounded
 
