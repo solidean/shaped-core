@@ -4,6 +4,8 @@ parent: epic-sgl-modules-beyond-a-tracer
 refs:
   - file: libs/graphics/shaped-graphics-language/src/shaped-graphics-language/check/check.cc
   - file: libs/graphics/shaped-graphics-language/tests/corpus/modules
+closed: 2026-11-02
+resolution: fixed
 ---
 
 # What a module the program uses cannot hold yet
