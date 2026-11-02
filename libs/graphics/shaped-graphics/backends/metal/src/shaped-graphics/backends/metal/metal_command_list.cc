@@ -1128,6 +1128,31 @@ void metal_command_list::raster_draw_indexed(draw_indexed_config const& config)
     ++_draws_in_render_encoder;
 }
 
+void metal_command_list::raster_draw_indexed_indirect(raw_buffer_handle const& args, isize offset_in_bytes, isize count)
+{
+    CC_ASSERT(in_rendering_scope(), "an indirect draw needs an open rendering scope");
+    CC_ASSERT(_bound_raster != nullptr, "an indirect draw needs a bound raster pipeline");
+    CC_ASSERT(_bound_index_buffer != nullptr, "an indirect indexed draw needs a bound index buffer");
+    static_assert(sizeof(sg::draw_indexed_args) == sizeof(MTL::DrawIndexedPrimitivesIndirectArguments));
+
+    // Metal fetches the arguments in the vertex stage's own front end, which `draw_indirect` maps to.
+    declare_buffer(args, sg::pipeline_stage_flag::draw_indirect, sg::access_flag::indirect_read);
+    declare_raster_draw(true);
+    resume_render_encoder();
+
+    // MTL4 draws one record per call; a record's first index counts from the bound view, as `indexStart` does.
+    auto const& mtl_buffer = static_cast<metal_buffer const&>(*args);
+    auto const stride = u64(sizeof(sg::draw_indexed_args));
+    for (auto i = isize(0); i < count; ++i)
+    {
+        _render_encoder->drawIndexedPrimitives(
+            primitive_type_of(_bound_raster->topology()), index_type_of(_index_format), MTL::GPUAddress(_index_address),
+            NS::UInteger(_index_size_in_bytes),
+            MTL::GPUAddress(mtl_buffer.gpu_address() + u64(offset_in_bytes) + u64(i) * stride));
+        ++_draws_in_render_encoder;
+    }
+}
+
 void metal_command_list::declare_bound_groups(pipeline_stage_flags stages, sg::impl::pipeline_footprint const* footprint)
 {
     // **Each binding is declared with what the code does to it**, which is what makes a read after a read free and

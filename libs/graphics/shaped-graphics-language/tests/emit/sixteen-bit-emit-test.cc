@@ -177,8 +177,8 @@ TEST("sgl emit - is_nan and is_inf of a half test the bits of the float it widen
     for (auto const t : {target::hlsl_dx12, target::hlsl_vulkan})
     {
         auto const hlsl = text_of(source, t);
-        CHECK(hlsl.contains("((asuint(float(v.x)) & uint(0x7fffffffu)) > uint(0x7f800000u))")).dump("hlsl", hlsl);
-        CHECK(hlsl.contains("((asuint(float3(v)) & uint3(0x7fffffffu)) == uint3(0x7f800000u))")).dump("hlsl", hlsl);
+        CHECK(hlsl.contains("((asuint(float(v.x)) & 0x7fffffffu) > 0x7f800000u)")).dump("hlsl", hlsl);
+        CHECK(hlsl.contains("((asuint(float3(v)) & 0x7fffffffu) == 0x7f800000u)")).dump("hlsl", hlsl);
     }
 
     // WGSL bitcasts no lone f16, which is why every target widens first.

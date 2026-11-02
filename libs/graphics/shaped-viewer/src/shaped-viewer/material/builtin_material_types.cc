@@ -209,7 +209,13 @@ surface.emission_color = color
                                   .opacity_cutoff_attribute = "alpha_cutoff",
                                   .occlusion_attribute = "occlusion",
                                   .emission_color_attribute = "emission_color",
-                                  .emission_scale_attribute = "emission_luminance"});
+                                  .emission_scale_attribute = "emission_luminance",
+                                  .base_color_attribute = "base_color",
+                                  .roughness_attribute = "specular_roughness",
+                                  .metalness_attribute = "base_metalness",
+                                  .transmission_attribute = "transmission_weight",
+                                  .thin_walled_attribute = "thin_walled",
+                                  .tangent_frame_attribute = "tangent_frame"});
 }
 
 [[nodiscard]] material_type make_pbr()
@@ -232,7 +238,11 @@ surface.emission_color = color
     return material_type::create({.name = cc::string(builtin_material::pbr),
                                   .signature = cc::move(signature),
                                   .shader = cc::string(pbr_shader),
-                                  .emission_color_attribute = "emissive"});
+                                  .emission_color_attribute = "emissive",
+                                  .base_color_attribute = "base_color",
+                                  .roughness_attribute = "roughness",
+                                  .metalness_attribute = "metallic",
+                                  .tangent_frame_attribute = "tangent_frame"});
 }
 
 [[nodiscard]] material_type make_unlit()

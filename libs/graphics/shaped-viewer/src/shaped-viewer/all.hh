@@ -23,6 +23,7 @@
 #include <shaped-viewer/scene/mesh_texture.hh>
 #include <shaped-viewer/scene/resident_mesh.hh>
 #include <shaped-viewer/scene/scene_item.hh>
+#include <shaped-viewer/scene/studio.hh>
 #include <shaped-viewer/scene/triangle_geometry.hh>
 
 // drawings
@@ -69,6 +70,7 @@
 #include <shaped-viewer/resources/resource_managers.hh>
 
 // rendering
+#include <shaped-viewer/rendering/hybrid_routine.hh>
 #include <shaped-viewer/rendering/layout_routine.hh>
 #include <shaped-viewer/rendering/pathtrace_routine.hh>
 #include <shaped-viewer/rendering/render_plan.hh>

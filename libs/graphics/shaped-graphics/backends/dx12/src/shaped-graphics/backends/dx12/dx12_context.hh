@@ -223,11 +223,14 @@ public:
         case sg::feature::device_coherence:       // `globallycoherent` is core HLSL
         case sg::feature::image_atomics:          // typed UAV atomics on r32 integer formats are required
         case sg::feature::texture_compression_bc: // BC1-BC7 are required at feature level 11_0
+        case sg::feature::first_instance:         // SV_StartInstanceLocation, of the shader model 6.8 SGL emits
         // `IsHelperLane()` needs SM 6.6 and SGL compiles at SM 6.8; `InterlockedCompareExchange` is strong, so no loop asks it
         case sg::feature::helper_lane_query:
             return true;
         case sg::feature::extended_image_formats:
             return _extended_image_formats;
+        case sg::feature::opacity_micromap: // DXR 1.2, which only the Agility SDK carries — issue: feat-sg-opacity-micromaps
+            return false;
         case sg::feature::unaligned_block_compression:
             return _unaligned_block_textures;
         case sg::feature::shader_f16:
@@ -260,7 +263,8 @@ public:
                                                                     sg::allocation_info const& alloc);
     [[nodiscard]] cc::result<dx12_texture_handle> create_dx12_texture(sg::texture_description const& desc,
                                                                       sg::allocation_info const& alloc);
-    [[nodiscard]] cc::result<dx12_memory_heap_handle> create_dx12_memory_heap(isize size_in_bytes);
+    [[nodiscard]] cc::result<dx12_memory_heap_handle> create_dx12_memory_heap(isize size_in_bytes,
+                                                                              sg::memory_heap_contents contents);
     [[nodiscard]] cc::result<dx12_swapchain_handle> create_dx12_swapchain(sg::swapchain_description const& desc);
     sg::submission_token submit_dx12_command_list(std::unique_ptr<dx12_command_list> cmd);
     void drop_dx12_command_list(std::unique_ptr<dx12_command_list> cmd);
@@ -341,10 +345,11 @@ public:
                                          "create_raw_texture");
     }
 
-    [[nodiscard]] cc::result<sg::memory_heap_handle> try_create_memory_heap(isize size_in_bytes) override
+    [[nodiscard]] cc::result<sg::memory_heap_handle> try_create_memory_heap(isize size_in_bytes,
+                                                                            sg::memory_heap_contents contents) override
     {
-        return note_device_loss_on_error(cc::result<sg::memory_heap_handle>(create_dx12_memory_heap(size_in_bytes)),
-                                         "create_memory_heap");
+        return note_device_loss_on_error(
+            cc::result<sg::memory_heap_handle>(create_dx12_memory_heap(size_in_bytes, contents)), "create_memory_heap");
     }
 
     [[nodiscard]] cc::result<sg::swapchain_handle> try_create_swapchain(sg::swapchain_description const& desc) override
@@ -635,6 +640,8 @@ public:
 
     // What ExecuteIndirect reads a `sg::dispatch_args` record through; created with the device.
     ComPtr<ID3D12CommandSignature> _dispatch_signature;
+    // What ExecuteIndirect reads a `sg::draw_indexed_args` record through; created with the device.
+    ComPtr<ID3D12CommandSignature> _draw_indexed_signature;
 
     // Kept for QueryVideoMemoryInfo, which is on IDXGIAdapter3 and has no route through the device.
     // Re-obtaining it per query via EnumAdapterByLuid would work and would cost a COM round trip on a call a dashboard

@@ -20,7 +20,7 @@ use slug
 fun occluded(origin: float3, dir: float3, dist: float, seed: uint){traced} -> bool:
     // assume occluded; only the shadow miss flips this
     let mut sp = shadow_payload(0.0, seed)
-    let r = ray(origin = pos3(origin.x, origin.y, origin.z), direction = vec3(dir.x, dir.y, dir.z), t_min = 1e-3, t_max = dist)
+    let r = ray(origin = pos3(origin.x, origin.y, origin.z), direction = vec3(dir.x, dir.y, dir.z), t_min = 0.0, t_max = dist)
     trace(traced.world, r, path_rays.occlusion, mut sp, flags = ray_flags.accept_first_hit_and_end_search | ray_flags.skip_closest_hit)
     return sp.visible < 0.5
 
@@ -161,7 +161,7 @@ fun sample_light(b: openpbr.bsdf, f: openpbr.frame, wo_local: float3, p: float3,
 
     let scale = incoming * (wi_local.z / pdf) * w
     let tested = if scene.light_casts_shadows(l) => 1u else 0u
-    return light_sample(f_diffuse * scale, f_specular * scale, p + n_geom * 1e-3, wi, shadow_dist, tested)
+    return light_sample(f_diffuse * scale, f_specular * scale, pt.offset_ray(p, n_geom), wi, shadow_dist, tested)
 
 /// Direct light from the SH environment, with the BSDF folded in and weighted against the BSDF sampler.
 ///
@@ -310,6 +310,46 @@ fun emitter_radiance(e: emitter_record, ctx: material.shading_context){traced, b
     let scale = emission_factor(e.scale_kind, e.scale_offset, e.scale_uv_offset, e.scale_frequency, e.scale_channel, e.scale_sampler, e.scale_transform, 1u, ctx)
     return max(0.0, scale.x) * max(float3(0.0), color)
 
+/// The base color of `inst` where `ctx` sits, read through the instance's base color record rather than its material's code.
+/// What a hybrid's secondary hit is lit as, a diffuse surface of this color; mid-gray for a type that declares none.
+fun instance_base_color(inst: scene.instance, ctx: material.shading_context){traced, bindless} -> float3:
+    if inst.base_kind == scene.value_none => return float3(0.5)
+    let c = emission_factor(inst.base_kind, inst.base_offset, inst.base_uv_offset, inst.base_frequency, inst.base_channels, inst.base_sampler, inst.base_transform, 3u, ctx)
+    return saturate(c)
+
+/// How many refractions through smooth glass a path takes without spending a bounce; past them, each spends one again.
+/// A hollow vessel is four interfaces deep, which would otherwise leave nothing of `max_bounces` for what lies behind it.
+/// `wavefront_routine::free_refractions` is the same number, for the rounds a draining frame runs.
+const free_refraction_cap = 8u
+
+/// Whether a continuation drawn from `lobe` on a surface of `roughness` is a refraction through smooth glass, which `free_refraction_cap` lets spend no bounce.
+/// A total internal reflection is the transmission lobe's too, and is free alike.
+fun is_free_refraction(lobe: uint, roughness: float) -> bool => lobe == openpbr.bsdf_lobe_transmission and roughness < 0.1
+
+/// The smooth normal of `inst` where `ctx` sits, turned to `geometric`'s side: its tangent frame's +z in the world, or `geometric` where it has none per vertex or corner.
+fun instance_shading_normal(inst: scene.instance, ctx: material.shading_context, geometric: float3){traced, bindless} -> float3:
+    if inst.frame_offset == scene.no_offset or inst.frame_frequency == material.frequency_per_triangle => return geometric
+    let block = ctx.param_buffer as int
+    let desc = material.load_attribute_desc(bindless.buffers[nonuniform block], ctx.param_offset + inst.frame_offset)
+    let desc_buffer = desc.buffer as int
+    let corners = if inst.frame_frequency == material.frequency_per_corner => material.corner_elements(ctx) else ctx.corner
+    let q = material.interpolate_rotation(bindless.buffers[nonuniform desc_buffer], desc, corners, ctx.barycentrics)
+    let n = normalize(instance_normal_to_world(inst, openpbr.quat_rotate(q, float3(0.0, 0.0, 1.0))))
+    if dot(n, geometric) < 0.0 => return -n
+    return n
+
+/// The specular roughness of `inst` where `ctx` sits, read as `instance_base_color` reads its color; -1 for a type that declares none, whose secondary hit stays matte.
+fun instance_roughness(inst: scene.instance, ctx: material.shading_context){traced, bindless} -> float:
+    if inst.rough_kind == scene.value_none => return -1.0
+    let r = emission_factor(inst.rough_kind, inst.rough_offset, inst.rough_uv_offset, inst.rough_frequency, inst.rough_channels, inst.rough_sampler, inst.rough_transform, 1u, ctx)
+    return saturate(r.x)
+
+/// The metalness of `inst` where `ctx` sits, read as `instance_base_color` reads its color; 0 for a type that declares none.
+fun instance_metalness(inst: scene.instance, ctx: material.shading_context){traced, bindless} -> float:
+    if inst.metal_kind == scene.value_none => return 0.0
+    let m = emission_factor(inst.metal_kind, inst.metal_offset, inst.metal_uv_offset, inst.metal_frequency, inst.metal_channels, inst.metal_sampler, inst.metal_transform, 1u, ctx)
+    return saturate(m.x)
+
 /// One factor of an emission at `ctx`, `lanes` wide: a constant of the parameter block, a mesh attribute, or a texture, as `kind` says.
 /// `channels` holds up to three swizzle selectors a byte each, and a one-lane factor comes back in `.x`, its other lanes meaning nothing.
 /// `scene.value_none` is a factor of 1.
@@ -350,16 +390,21 @@ fun instance_point_to_world(inst: scene.instance, p: float3) -> float3:
 
 /// `estimate_environment` without its visibility test.
 fun sample_environment(b: openpbr.bsdf, f: openpbr.frame, wo_local: float3, p: float3, n_geom: float3, last_bounce: bool, rng: mut uint){traced} -> light_sample:
-    // cos(theta) = u1 uniform in [0, 1] gives a uniform solid-angle pick about the normal.
+    let env = background_lanes()
     let u1 = pt.rand(mut rng)
     let u2 = pt.rand(mut rng)
-    let r = sqrt(max(0.0, 1.0 - u1 * u1))
-    let phi = 2.0 * pt.pi * u2
-
-    let wi_local = float3(r * cos(phi), r * sin(phi), u1)
-    let wi = openpbr.to_world(f, wi_local)
-    // On the face's own side only, as a light's sample is.
-    if dot(wi, n_geom) <= 0.0 => return no_light_sample()
+    // A probe draws as it always has, uniformly over the shading frame's upper half from two numbers, so its scenes keep their random stream.
+    let mut drawn = scene.environment_direction(float3(0.0), 1.0 / (2.0 * pt.pi))
+    if scene.environment_is_dome(env):
+        drawn = scene.sample_environment_direction(env, float3(0.0, 1.0, 0.0), float3(u1, u2, pt.rand(mut rng)))
+    else:
+        let r = sqrt(max(0.0, 1.0 - u1 * u1))
+        let phi = 2.0 * pt.pi * u2
+        drawn.wi = openpbr.to_world(f, float3(r * cos(phi), r * sin(phi), u1))
+    let wi = drawn.wi
+    let wi_local = openpbr.to_local(f, wi)
+    // On the face's own side and the shading frame's upper half only, as a light's sample is.
+    if dot(wi, n_geom) <= 0.0 or wi_local.z <= 0.0 => return no_light_sample()
 
     let mut f_diffuse = float3(0.0)
     let mut f_specular = float3(0.0)
@@ -367,10 +412,10 @@ fun sample_environment(b: openpbr.bsdf, f: openpbr.frame, wo_local: float3, p: f
     if all(f_diffuse + f_specular <= float3(0.0)) => return no_light_sample()
 
     // No bounce ray follows the last hit, so there is nothing to balance against there.
-    let w = if last_bounce => 1.0 else pt.mis_weight(pt.env_pdf(), openpbr.bsdf_pdf(b, wo_local, wi_local))
+    let w = if last_bounce => 1.0 else pt.mis_weight(drawn.pdf, openpbr.bsdf_pdf(b, wo_local, wi_local))
 
-    let scale = scene.background_radiance(background_sh(), wi) * (wi_local.z / pt.env_pdf()) * w
-    return light_sample(f_diffuse * scale, f_specular * scale, p + n_geom * 1e-3, wi, 1e4, 1u)
+    let scale = scene.environment_radiance(env, wi) * (wi_local.z / drawn.pdf) * w
+    return light_sample(f_diffuse * scale, f_specular * scale, pt.offset_ray(p, n_geom), wi, 1e4, 1u)
 
 // ---- Decals ---------------------------------------------------------------------------------------------------------
 
@@ -582,10 +627,10 @@ fun shade_sampled(payload: mut surface_payload, surface_in: openpbr.surface, n: 
 
 // ---- Triangles ------------------------------------------------------------------------------------------------------
 
-/// One object-space position out of the instance's own vertex buffer: `float3`s, tightly packed, as `sv::mesh_manager` uploads them.
+/// One object-space position of the instance's mesh, `vertex` relative to its base vertex in the central vertex pool.
 fun instance_position(inst: scene.instance, vertex: uint){bindless} -> float3:
     let buffer = inst.vertices as int
-    return reinterpret_as_float(bindless.buffers[nonuniform buffer].load3(vertex * 12u))
+    return material.position_of(inst, bindless.buffers[nonuniform buffer], vertex)
 
 /// The shading context of a triangle hit, which is all a material needs to know about where it is.
 fun triangle_context(h: triangle_hit){traced, bindless} -> material.shading_context:

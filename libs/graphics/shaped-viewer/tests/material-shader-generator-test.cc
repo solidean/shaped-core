@@ -389,8 +389,11 @@ TEST("sv::generate_material_shader - the raster pixel stage evaluates the same m
     CHECK(!g.raster_source.contains("require raytracing_pipeline"));
 
     // The cut reads the instance's opacity record through the any-hit's reader, ahead of the evaluation, rather than the material's loads.
-    CHECK(g.raster_source.contains("@pixel fun sv_raster(p: raster.varyings){raster.drawn, tracer.bindless, "
-                                   "slug.tables} -> raster.targets:"));
+    // The draw is indexed, so the pixel takes its triangle from `@primitive_id`, which the device must have.
+    CHECK(g.raster_source.contains("require primitive_index\n"));
+    CHECK(g.raster_source.contains("@pixel fun sv_raster(p: raster.varyings, @primitive_id primitive: "
+                                   "int){raster.drawn, "
+                                   "tracer.bindless, slug.tables} -> raster.targets:"));
     CHECK(g.raster_source.contains("    if raster.is_cut(p, ctx) => discard\n"));
     CHECK(g.raster_source.find("raster.is_cut") < g.raster_source.find("raster.shade("));
 

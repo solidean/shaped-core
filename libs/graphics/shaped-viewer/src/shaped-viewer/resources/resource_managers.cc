@@ -70,6 +70,37 @@ constexpr i32 geometry_stream_priority = 10;
 constexpr i32 texture_stream_priority = 0;
 } // namespace impl
 
+namespace
+{
+// Room for a small scene before the first growth: 768 KB of positions and as many bytes of indices.
+constexpr isize initial_pool_vertices = isize(1) << 16;
+constexpr isize initial_pool_indices = isize(3) << 16;
+
+// A pool is also the source of the copy that grows it.
+[[nodiscard]] sg::buffer_usages pool_usage(sg::context const& ctx)
+{
+    return geometry_usage(ctx) | sg::buffer_usage::copy_src;
+}
+
+// The index pool is also what an indexed raster draw binds.
+[[nodiscard]] sg::buffer_usages index_pool_usage(sg::context const& ctx)
+{
+    return pool_usage(ctx) | sg::buffer_usage::index_buffer;
+}
+
+// A mesh's payload streams into buffers of its own, and is copied into the pools once it landed.
+constexpr auto staging_usage = sg::buffer_usage::copy_dst | sg::buffer_usage::copy_src;
+
+/// At least twice `capacity`, doubled further until it holds `min_capacity`.
+[[nodiscard]] isize grown_capacity(isize capacity, isize min_capacity)
+{
+    auto grown = capacity > 0 ? 2 * capacity : isize(1);
+    while (grown < min_capacity)
+        grown *= 2;
+    return grown;
+}
+} // namespace
+
 mesh_id mesh_manager::acquire(triangle_data const& mesh)
 {
     if (auto const id = find_by_hash(mesh.hash); id.has_value())
@@ -79,84 +110,18 @@ mesh_id mesh_manager::acquire(triangle_data const& mesh)
     CC_ASSERT(!positions.empty() && positions.size() % 3 == 0, "mesh_manager::acquire expects a triangle list (vertex "
                                                                "count a non-zero multiple of 3)");
 
-    // The BUFFER is created here and the bytes are not: the payload goes to `ctx.stream`, which carries it on the
-    // copy queue rather than making the next command list that touches this buffer wait on it.
-    // That is the whole difference from `ctx.upload`, and the reason a big asset does not stall the frame that asked
-    // for it — see shaped-graphics/transfer/stream.hh.
-    auto vertices = _ctx.persistent.create_buffer<tg::pos3f>(positions.size(), geometry_usage(_ctx));
-
-    auto up = _ctx.create_command_list();
-    auto stand_in = _acquire_index_stand_in(*up);
-    _ctx.submit_command_list(cc::move(up));
-
-    // The BLAS is not charged yet, since it is not built: `acquire_blas` adds its size once it is.
-    auto const size_in_bytes = vertices.size_in_bytes();
-    auto transfer = _ctx.stream.data_to_buffer(vertices, mesh.positions);
-    transfer.set_priority(impl::geometry_stream_priority);
+    // Each corner is its own vertex, so the indices are the numbering its per-vertex attributes already use.
+    auto sequential = cc::vector<u32>();
+    sequential.reserve(positions.size());
+    for (auto i = isize(0); i < positions.size(); ++i)
+        sequential.push_back(u32(i));
 
     // Summed while the positions are at hand, since the payload is the stream's from here on.
     auto area = 0.0;
     for (auto i = isize(0); i + 2 < positions.size(); i += 3)
         area += triangle_area(positions[i], positions[i + 1], positions[i + 2]);
 
-    auto const id = insert(mesh.hash,
-                           {.state = residency::pending,
-                            .vertices = cc::move(vertices),
-                            .indices = cc::move(stand_in),
-                            .is_indexed = false,
-                            .triangle_count = positions.size() / 3,
-                            .surface_area = f32(area),
-                            .bounds = mesh.bounds},
-                           size_in_bytes);
-
-    _settling[id] = {.vertices = cc::move(transfer), .bytes = size_in_bytes};
-    return id;
-}
-
-sg::buffer<tg::pos3f> const& mesh_manager::placeholder_vertices()
-{
-    if (_placeholder_vertices.raw() != nullptr)
-        return _placeholder_vertices;
-
-    // The unit cube as a raw triangle list: 12 triangles over the corners of [0,1]^3, wound outward.
-    // Spelled out rather than generated, because it is read once and a loop over face tables would be longer.
-    constexpr tg::pos3f c[8] = {tg::pos3f(0, 0, 0), tg::pos3f(1, 0, 0), tg::pos3f(1, 1, 0), tg::pos3f(0, 1, 0),
-                                tg::pos3f(0, 0, 1), tg::pos3f(1, 0, 1), tg::pos3f(1, 1, 1), tg::pos3f(0, 1, 1)};
-    constexpr int quads[6][4] = {{0, 3, 2, 1}, {4, 5, 6, 7}, {0, 1, 5, 4}, {2, 3, 7, 6}, {1, 2, 6, 5}, {0, 4, 7, 3}};
-
-    auto positions = cc::vector<tg::pos3f>();
-    positions.reserve(36);
-    for (auto const& q : quads)
-        for (auto const i : {0, 1, 2, 0, 2, 3})
-            positions.push_back(c[q[i]]);
-
-    _placeholder_vertices = _ctx.persistent.create_buffer<tg::pos3f>(positions.size(), geometry_usage(_ctx));
-
-    auto up = _ctx.create_command_list();
-    up->upload.data_to_buffer(_placeholder_vertices, positions);
-    (void)_acquire_index_stand_in(*up); // the placeholder is non-indexed, and still has to bind something
-    _ctx.submit_command_list(cc::move(up));
-    return _placeholder_vertices;
-}
-
-sg::blas_handle const& mesh_manager::placeholder_blas()
-{
-    if (_placeholder_blas != nullptr)
-        return _placeholder_blas;
-
-    // A list of its own after the upload's, so the build sees the upload finished, for the reason an acquire uses two.
-    auto const& vertices = placeholder_vertices();
-    auto build = _ctx.create_command_list();
-    _placeholder_blas
-        = build->raytracing.build_blas({{.vertices = vertices.raw(), .vertex_count = vertices.element_count()}});
-    _ctx.submit_command_list(cc::move(build));
-    return _placeholder_blas;
-}
-
-sg::buffer<u32> const& mesh_manager::index_stand_in()
-{
-    (void)placeholder_vertices();
-    return _index_stand_in;
+    return _insert(mesh.hash, mesh.positions, cc::make_pinned_data(cc::move(sequential)), f32(area), mesh.bounds);
 }
 
 mesh_id mesh_manager::acquire(indexed_triangle_data const& mesh)
@@ -170,17 +135,6 @@ mesh_id mesh_manager::acquire(indexed_triangle_data const& mesh)
                                                            "non-zero multiple of 3");
     CC_ASSERT(!positions.empty(), "mesh_manager::acquire needs at least one vertex");
 
-    auto vertices = _ctx.persistent.create_buffer<tg::pos3f>(positions.size(), geometry_usage(_ctx));
-    auto index_buffer = _ctx.persistent.create_buffer<u32>(indices.size(), geometry_usage(_ctx));
-
-    auto const size_in_bytes = vertices.size_in_bytes() + index_buffer.size_in_bytes();
-
-    auto vertex_transfer = _ctx.stream.data_to_buffer(vertices, mesh.positions);
-    auto index_transfer = _ctx.stream.data_to_buffer(index_buffer, mesh.indices);
-    vertex_transfer.set_priority(impl::geometry_stream_priority);
-    index_transfer.set_priority(impl::geometry_stream_priority);
-
-    // Summed while the payload is at hand, since it is the stream's from here on.
     // An index past the positions adds nothing here; the trace would read garbage there anyway.
     auto area = 0.0;
     auto const vertex_count = u32(positions.size());
@@ -188,39 +142,222 @@ mesh_id mesh_manager::acquire(indexed_triangle_data const& mesh)
         if (indices[i] < vertex_count && indices[i + 1] < vertex_count && indices[i + 2] < vertex_count)
             area += triangle_area(positions[indices[i]], positions[indices[i + 1]], positions[indices[i + 2]]);
 
-    auto const id = insert(mesh.hash,
-                           {.state = residency::pending,
-                            .vertices = cc::move(vertices),
-                            .indices = cc::move(index_buffer),
-                            .is_indexed = true,
-                            .triangle_count = indices.size() / 3,
-                            .surface_area = f32(area),
-                            .bounds = mesh.bounds},
-                           size_in_bytes);
+    return _insert(mesh.hash, mesh.positions, mesh.indices, f32(area), mesh.bounds);
+}
 
-    _settling[id] = {.vertices = cc::move(vertex_transfer), .indices = cc::move(index_transfer), .bytes = size_in_bytes};
+mesh_id mesh_manager::_insert(cc::hash128 hash,
+                              cc::pinned_data<tg::pos3f const> positions,
+                              cc::pinned_data<u32 const> indices,
+                              f32 surface_area,
+                              cc::optional<tg::aabb3f> bounds)
+{
+    _ensure_pools();
+    auto const geometry = _allocate(positions.size(), indices.size() / 3);
+
+    // The BLAS is not charged yet, since it is not built: `acquire_blas` adds its size once it is.
+    auto const size_in_bytes = positions.size() * isize(sizeof(tg::pos3f)) + indices.size() * isize(sizeof(u32));
+
+    // Streamed into staging rather than into the pools: a list touching a buffer a stream still fills waits for it,
+    // and every frame touches the pools.
+    auto pending = pending_mesh{
+        .staged_vertices = _ctx.persistent.create_buffer<tg::pos3f>(positions.size(), staging_usage),
+        .staged_indices = _ctx.persistent.create_buffer<u32>(indices.size(), staging_usage),
+        .bytes = size_in_bytes,
+    };
+    pending.vertices = _ctx.stream.data_to_buffer(pending.staged_vertices, cc::move(positions));
+    pending.indices = _ctx.stream.data_to_buffer(pending.staged_indices, cc::move(indices));
+    pending.vertices.set_priority(impl::geometry_stream_priority);
+    pending.indices.set_priority(impl::geometry_stream_priority);
+
+    auto const id = insert(
+        hash, {.state = residency::pending, .geometry = geometry, .surface_area = surface_area, .bounds = bounds},
+        size_in_bytes);
+    _settling[id] = cc::move(pending);
     return id;
 }
 
-bool mesh_manager::_try_settle(mesh_id id, pending_mesh& p)
+void mesh_manager::_ensure_pools()
 {
-    auto const vertices_done = p.vertices.is_settled();
-    auto const indices_done = !p.indices.is_valid() || p.indices.is_settled();
-    if (!vertices_done || !indices_done)
+    if (_vertex_pool.raw() != nullptr)
+        return;
+
+    _vertex_pool = _ctx.persistent.create_buffer<tg::pos3f>(initial_pool_vertices, pool_usage(_ctx));
+    _index_pool = _ctx.persistent.create_buffer<u32>(initial_pool_indices, index_pool_usage(_ctx));
+    _vertex_ranges.grow(initial_pool_vertices);
+    _index_ranges.grow(initial_pool_indices);
+
+    // The unit cube as a raw triangle list: 12 triangles over the corners of [0,1]^3, wound outward.
+    // Spelled out rather than generated, because it is read once and a loop over face tables would be longer.
+    constexpr tg::pos3f c[8] = {tg::pos3f(0, 0, 0), tg::pos3f(1, 0, 0), tg::pos3f(1, 1, 0), tg::pos3f(0, 1, 0),
+                                tg::pos3f(0, 0, 1), tg::pos3f(1, 0, 1), tg::pos3f(1, 1, 1), tg::pos3f(0, 1, 1)};
+    constexpr int quads[6][4] = {{0, 3, 2, 1}, {4, 5, 6, 7}, {0, 1, 5, 4}, {2, 3, 7, 6}, {1, 2, 6, 5}, {0, 4, 7, 3}};
+
+    auto positions = cc::vector<tg::pos3f>();
+    auto indices = cc::vector<u32>();
+    positions.reserve(36);
+    indices.reserve(36);
+    for (auto const& q : quads)
+        for (auto const i : {0, 1, 2, 0, 2, 3})
+        {
+            indices.push_back(u32(positions.size()));
+            positions.push_back(c[q[i]]);
+        }
+
+    _placeholder = _allocate(positions.size(), indices.size() / 3);
+
+    // Uploaded rather than streamed: every pending mesh names these ranges, so nothing may wait on them.
+    auto up = _ctx.create_command_list();
+    up->upload.bytes_to_buffer(_vertex_pool.raw(), cc::make_pinned_data(cc::move(positions)).as_bytes(),
+                               _placeholder.base_vertex * isize(sizeof(tg::pos3f)));
+    up->upload.bytes_to_buffer(_index_pool.raw(), cc::make_pinned_data(cc::move(indices)).as_bytes(),
+                               _placeholder.first_index * isize(sizeof(u32)));
+    _ctx.submit_command_list(cc::move(up));
+}
+
+geometry_range mesh_manager::_allocate(isize vertex_count, isize triangle_count)
+{
+    _reclaim();
+
+    auto base_vertex = _vertex_ranges.allocate(vertex_count);
+    if (!base_vertex.has_value())
+    {
+        _grow_vertex_pool(_vertex_ranges.capacity() + vertex_count);
+        base_vertex = _vertex_ranges.allocate(vertex_count);
+    }
+    auto first_index = _index_ranges.allocate(3 * triangle_count);
+    if (!first_index.has_value())
+    {
+        _grow_index_pool(_index_ranges.capacity() + 3 * triangle_count);
+        first_index = _index_ranges.allocate(3 * triangle_count);
+    }
+    CC_ASSERT(base_vertex.has_value() && first_index.has_value(), "a grown pool always fits the range it grew for");
+
+    return {.base_vertex = base_vertex.value(),
+            .vertex_count = vertex_count,
+            .first_index = first_index.value(),
+            .triangle_count = triangle_count};
+}
+
+void mesh_manager::_grow_vertex_pool(isize min_capacity)
+{
+    auto const old_capacity = _vertex_ranges.capacity();
+    auto const capacity = grown_capacity(old_capacity, min_capacity);
+    auto grown = _ctx.persistent.create_buffer<tg::pos3f>(capacity, pool_usage(_ctx));
+
+    // Nothing streams into a pool, so all of it copies over; a mesh still streaming is copied in once it lands.
+    auto cmd = _ctx.create_command_list();
+    cmd->copy.buffer_data_region<tg::pos3f>({.src = _vertex_pool.raw(), .dst = grown.raw(), .count = old_capacity});
+    _ctx.submit_command_list(cc::move(cmd));
+
+    // The old buffer stays alive for the lists in flight that read it, as every dropped sg handle does.
+    _vertex_pool = cc::move(grown);
+    _vertex_ranges.grow(capacity);
+    CC_LOG_INFO("grew the vertex pool to {} vertices", capacity);
+}
+
+void mesh_manager::_grow_index_pool(isize min_capacity)
+{
+    auto const old_capacity = _index_ranges.capacity();
+    auto const capacity = grown_capacity(old_capacity, min_capacity);
+    auto grown = _ctx.persistent.create_buffer<u32>(capacity, index_pool_usage(_ctx));
+
+    // As `_grow_vertex_pool`, for the indices.
+    auto cmd = _ctx.create_command_list();
+    cmd->copy.buffer_data_region<u32>({.src = _index_pool.raw(), .dst = grown.raw(), .count = old_capacity});
+    _ctx.submit_command_list(cc::move(cmd));
+
+    _index_pool = cc::move(grown);
+    _index_ranges.grow(capacity);
+    CC_LOG_INFO("grew the index pool to {} indices", capacity);
+}
+
+void mesh_manager::on_remove(mesh_id id, mesh_record& record)
+{
+    // A still-streaming mesh never reached its ranges; dropping its entry cancels the transfers into its staging.
+    _settling.erase(id);
+    _retiring.push_back({.geometry = record.geometry, .evicted_in = _ctx.current_epoch()});
+}
+
+void mesh_manager::_reclaim()
+{
+    if (_retiring.empty())
+        return;
+
+    auto const completed = u64(_ctx.completed_epoch());
+    for (auto i = _retiring.size() - 1; i >= 0; --i)
+    {
+        auto const& r = _retiring[i];
+        if (u64(r.evicted_in) > completed)
+            continue;
+        _vertex_ranges.free(r.geometry.base_vertex, r.geometry.vertex_count);
+        _index_ranges.free(r.geometry.first_index, r.geometry.index_count());
+        _retiring.remove_at_unordered(i);
+    }
+}
+
+geometry_range const& mesh_manager::placeholder_geometry()
+{
+    _ensure_pools();
+    return _placeholder;
+}
+
+sg::buffer<tg::pos3f> const& mesh_manager::vertex_pool()
+{
+    _ensure_pools();
+    return _vertex_pool;
+}
+
+sg::buffer<u32> const& mesh_manager::index_pool()
+{
+    _ensure_pools();
+    return _index_pool;
+}
+
+sg::blas_handle const& mesh_manager::placeholder_blas()
+{
+    if (_placeholder_blas != nullptr)
+        return _placeholder_blas;
+
+    // A list of its own after the upload's, so the build sees the upload finished.
+    _ensure_pools();
+    auto build = _ctx.create_command_list();
+    _placeholder_blas
+        = build->raytracing.build_blas({{.vertices = _vertex_pool.raw(),
+                                         .vertex_count = _placeholder.vertex_count,
+                                         .vertex_offset_in_bytes = _placeholder.base_vertex * isize(sizeof(tg::pos3f)),
+                                         .indices = _index_pool.raw(),
+                                         .index_count = _placeholder.index_count(),
+                                         .index_offset_in_bytes = _placeholder.first_index * isize(sizeof(u32))}});
+    _ctx.submit_command_list(cc::move(build));
+    return _placeholder_blas;
+}
+
+bool mesh_manager::_try_settle(mesh_id id, pending_mesh& p, std::unique_ptr<sg::command_list>& copies)
+{
+    if (!p.vertices.is_settled() || !p.indices.is_settled())
         return false;
 
     auto* const record = mutable_record(id);
     if (record == nullptr)
-        return true; // evicted while streaming; dropping the entry cancels whatever is left
+        return true; // evicted while streaming; `on_remove` normally takes the entry first
 
     // Settled without delivering — cancelled, or the transfer failed.
     // `failed` rather than leaving it pending, so nothing waits on it forever and the placeholder is known to be final.
-    if (!p.vertices.is_complete() || (p.indices.is_valid() && !p.indices.is_complete()))
+    if (!p.vertices.is_complete() || !p.indices.is_complete())
     {
         record->state = residency::failed;
         return true;
     }
 
+    // The staging is touched only now that its streams are observed settled, which is what the streaming contract asks.
+    // Every later list reading the pools is submitted after this copy, so it is `complete` from here on.
+    if (copies == nullptr)
+        copies = _ctx.create_command_list();
+    auto const& g = record->geometry;
+    copies->copy.buffer_data_region<tg::pos3f>(
+        {.src = p.staged_vertices.raw(), .dst = _vertex_pool.raw(), .count = g.vertex_count, .dst_offset = g.base_vertex});
+    copies->copy.buffer_data_region<u32>(
+        {.src = p.staged_indices.raw(), .dst = _index_pool.raw(), .count = g.index_count(), .dst_offset = g.first_index});
     record->state = residency::complete;
     return true;
 }
@@ -233,20 +370,19 @@ sg::blas_handle const& mesh_manager::acquire_blas(sg::command_list& cmd, mesh_id
     if (record->blas != nullptr)
         return record->blas;
 
-    // `complete` was observed before this call, which is what the streaming contract asks of a list touching a
-    // streamed extent: it is SUBMITTED after that observation, and `cmd` is the caller's to submit after this.
-    record->blas = record->is_indexed ? cmd.raytracing.build_blas({{.vertices = record->vertices.raw(),
-                                                                    .vertex_count = record->vertices.element_count(),
-                                                                    .indices = record->indices.raw(),
-                                                                    .index_count = record->indices.element_count()}})
-                                      : cmd.raytracing.build_blas({{.vertices = record->vertices.raw(),
-                                                                    .vertex_count = record->vertices.element_count()}});
+    // `complete` means the copy into the pools was submitted, and `cmd` is the caller's to submit after this.
+    auto const& g = record->geometry;
+    record->blas = cmd.raytracing.build_blas({{.vertices = _vertex_pool.raw(),
+                                               .vertex_count = g.vertex_count,
+                                               .vertex_offset_in_bytes = g.base_vertex * isize(sizeof(tg::pos3f)),
+                                               .indices = _index_pool.raw(),
+                                               .index_count = g.index_count(),
+                                               .index_offset_in_bytes = g.first_index * isize(sizeof(u32))}});
 
     // Only now is the acceleration structure's own cost known, which is the one thing a record cannot size at insert.
     add_bytes(id, record->blas->size_in_bytes());
     return record->blas;
 }
-
 bool mesh_manager::_emitter_cdf_kernels_ready()
 {
     if (_cdf_failed)
@@ -294,20 +430,22 @@ sg::buffer<f32> const* mesh_manager::acquire_emitter_cdf(sg::command_list& cmd, 
     if (!_emitter_cdf_kernels_ready())
         return nullptr;
 
-    auto const triangles = u32(record->triangle_count);
-    auto const blocks = emitter_cdf_block_count(record->triangle_count);
+    auto const& g = record->geometry;
+    auto const triangles = u32(g.triangle_count);
+    auto const blocks = emitter_cdf_block_count(g.triangle_count);
     auto cdf = _ctx.persistent.create_buffer<f32>(
         isize(triangles) + isize(blocks) + 1,
         sg::buffer_usage::readwrite_buffer | sg::buffer_usage::readonly_buffer | sg::buffer_usage::copy_src);
 
     auto const group = _ctx.transient.create_binding_group(
         cmd, _ctx.cached.acquire_binding_group_layout<shaders::emitter_cdf::emitter_cdf_io>(),
-        shaders::emitter_cdf::emitter_cdf_io{.vertices = record->vertices.reinterpret_as<byte>().as_readonly_buffer(),
-                                             .indices = record->indices.reinterpret_as<byte>().as_readonly_buffer(),
+        shaders::emitter_cdf::emitter_cdf_io{.vertices = _vertex_pool.reinterpret_as<byte>().as_readonly_buffer(),
+                                             .indices = _index_pool.reinterpret_as<byte>().as_readonly_buffer(),
                                              .cdf = cdf.as_readwrite_buffer()});
     auto const shape = shaders::emitter_cdf::emitter_cdf_shape{.triangle_count = triangles,
                                                                .block_count = blocks,
-                                                               .is_indexed = record->is_indexed ? 1u : 0u}
+                                                               .base_vertex = u32(g.base_vertex),
+                                                               .first_index = u32(g.first_index)}
                            .to_block();
 
     // Two dispatches over one buffer, the second reading what the first wrote: the blocks, then the mesh over them.
@@ -355,14 +493,15 @@ cc::optional<f32> mesh_manager::acquire_world_area(sg::command_list& cmd, mesh_i
     if (!_emitter_cdf_kernels_ready())
         return {};
 
-    auto const triangles = u32(record->triangle_count);
-    auto const blocks = emitter_cdf_block_count(record->triangle_count);
+    auto const& g = record->geometry;
+    auto const triangles = u32(g.triangle_count);
+    auto const blocks = emitter_cdf_block_count(g.triangle_count);
     auto sums = _ctx.persistent.create_buffer<f32>(isize(blocks) + 1,
                                                    sg::buffer_usage::readwrite_buffer | sg::buffer_usage::copy_src);
     auto const group = _ctx.transient.create_binding_group(
         cmd, _ctx.cached.acquire_binding_group_layout<shaders::emitter_cdf::emitter_cdf_io>(),
-        shaders::emitter_cdf::emitter_cdf_io{.vertices = record->vertices.reinterpret_as<byte>().as_readonly_buffer(),
-                                             .indices = record->indices.reinterpret_as<byte>().as_readonly_buffer(),
+        shaders::emitter_cdf::emitter_cdf_io{.vertices = _vertex_pool.reinterpret_as<byte>().as_readonly_buffer(),
+                                             .indices = _index_pool.reinterpret_as<byte>().as_readonly_buffer(),
                                              .cdf = sums.as_readwrite_buffer()});
     auto const column = [&](tg::vec3f axis)
     {
@@ -374,7 +513,8 @@ cc::optional<f32> mesh_manager::acquire_world_area(sg::command_list& cmd, mesh_i
                                                                .column_z = column(tg::vec3f(0, 0, 1)),
                                                                .triangle_count = triangles,
                                                                .block_count = blocks,
-                                                               .is_indexed = record->is_indexed ? 1u : 0u}
+                                                               .base_vertex = u32(g.base_vertex),
+                                                               .first_index = u32(g.first_index)}
                            .to_block();
 
     // The blocks, then the instance over them, as the CDF's build runs.
@@ -395,18 +535,22 @@ cc::optional<f32> mesh_manager::acquire_world_area(sg::command_list& cmd, mesh_i
 
 isize mesh_manager::collect_settled()
 {
+    _reclaim();
     if (_settling.empty())
         return 0;
 
     auto finished = isize(0);
     auto keep = cc::map<mesh_id, pending_mesh>();
+    auto copies = std::unique_ptr<sg::command_list>();
     for (auto&& [id, p] : _settling)
     {
-        if (_try_settle(id, p))
+        if (_try_settle(id, p, copies))
             ++finished;
         else
             keep[id] = cc::move(p);
     }
+    if (copies != nullptr)
+        _ctx.submit_command_list(cc::move(copies));
 
     _settling = cc::move(keep);
     return finished;
@@ -422,26 +566,11 @@ void mesh_manager::wait_for_settled()
     {
         (void)id;
         p.vertices.promote_to_async();
-        if (p.indices.is_valid())
-            p.indices.promote_to_async();
+        p.indices.promote_to_async();
         (void)cc::try_async_blocking_get(p.vertices.completion());
-        if (p.indices.is_valid())
-            (void)cc::try_async_blocking_get(p.indices.completion());
+        (void)cc::try_async_blocking_get(p.indices.completion());
     }
     (void)collect_settled();
-}
-
-sg::buffer<u32> mesh_manager::_acquire_index_stand_in(sg::command_list& cmd)
-{
-    if (_index_stand_in.raw() == nullptr)
-    {
-        // One triangle's worth, zero-filled so the resource is defined rather than merely allocated.
-        u32 const zeros[] = {0, 0, 0};
-        _index_stand_in
-            = _ctx.persistent.create_buffer<u32>(3, sg::buffer_usage::readonly_buffer | sg::buffer_usage::copy_dst);
-        cmd.upload.data_to_buffer(_index_stand_in, zeros);
-    }
-    return _index_stand_in;
 }
 
 quadric_manager quadric_manager::create(sg::context& ctx, manager_config const& cfg)

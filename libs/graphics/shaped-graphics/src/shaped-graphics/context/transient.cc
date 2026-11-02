@@ -9,6 +9,7 @@
 #include <shaped-graphics/memory/allocation_info.hh>
 #include <shaped-graphics/memory/memory_heap.hh>
 #include <shaped-graphics/resource/pixel_format.hh>
+#include <shaped-graphics/resource/raw_texture.hh>
 
 namespace sg
 {
@@ -19,21 +20,68 @@ void context_transient_scope::set_budget(isize size_in_bytes)
     _bump.lock([&](bump_state& s) { s.pending_budget = size_in_bytes; });
 }
 
+void context_transient_scope::set_texture_budget(isize size_in_bytes)
+{
+    CC_ASSERT(size_in_bytes > 0, "transient texture budget must be positive");
+    _texture_bump.lock([&](bump_state& s) { s.pending_budget = size_in_bytes; });
+}
+
 void context_transient_scope::apply_pending_budget_at_epoch_boundary()
 {
     // Never waits: the heap is only dropped here, and the next allocation creates one at the new budget.
     // Every transient resource placed in the old heap holds a handle to it, and its release is epoch-deferred.
     // So the old heap lives exactly as long as the GPU work that still reads it.
-    _bump.lock(
-        [&](bump_state& s)
+    auto const apply = [](bump_state& s)
+    {
+        if (s.pending_budget == 0)
+            return;
+        s.heap = nullptr;
+        s.budget = s.pending_budget;
+        s.head = 0;
+        s.pending_budget = 0;
+    };
+    _bump.lock(apply);
+    _texture_bump.lock(apply);
+}
+
+cc::result<isize> context_transient_scope::reserve(bump_state& s,
+                                                   memory_heap_contents contents,
+                                                   cc::function_ref<memory_requirements(memory_heap const&)> requirements_of)
+{
+    if (s.refused)
+        return isize(-1);
+    if (!s.heap) // lazily create the backing heap on first use
+    {
+        auto heap = _ctx.try_create_memory_heap(s.budget, contents);
+        if (heap.has_error())
         {
-            if (s.pending_budget == 0)
-                return;
-            s.heap = nullptr;
-            s.budget = s.pending_budget;
-            s.head = 0;
-            s.pending_budget = 0;
-        });
+            // Buffers have no other home, but a backend that places no textures still creates them dedicated.
+            if (contents == memory_heap_contents::buffers)
+                return cc::error(cc::move(heap.error()));
+            s.refused = true;
+            return isize(-1);
+        }
+        s.heap = heap.value();
+        s.budget = s.heap->size_in_bytes();
+    }
+
+    u64 const epoch_now = u64(_ctx.current_epoch());
+    if (epoch_now != s.last_epoch) // new epoch: reset the head (aliases prior epochs' storage)
+    {
+        s.head = 0;
+        s.last_epoch = epoch_now;
+    }
+
+    // The head sits wherever the previous allocation ended, which a resource with a stricter alignment may not accept.
+    // So each allocation starts at the head rounded up to its own alignment, never at the head itself.
+    memory_requirements const reqs = requirements_of(*s.heap);
+    if (!reqs.placeable)
+        return isize(-1);
+    auto const offset = cc::int_round_up_to_multiple(s.head, reqs.alignment_in_bytes);
+    if (offset + reqs.size_in_bytes > s.budget)
+        return isize(-1); // over budget: dedicated fallback
+    s.head = offset + reqs.size_in_bytes;
+    return offset;
 }
 
 raw_buffer_handle context_transient_scope::create_raw_buffer(isize size_in_bytes, buffer_usages usage)
@@ -69,31 +117,13 @@ cc::result<raw_buffer_handle> context_transient_scope::try_create_raw_buffer(isi
         auto reserved = _bump.lock(
             [&](bump_state& s) -> cc::result<allocation_info>
             {
-                if (!s.heap) // lazily create the backing heap on first use
-                {
-                    auto heap = _ctx.try_create_memory_heap(s.budget);
-                    CC_RETURN_IF_ERROR(heap);
-                    s.heap = heap.value();
-                    s.budget = s.heap->size_in_bytes();
-                }
-
-                u64 const epoch_now = u64(_ctx.current_epoch());
-                if (epoch_now != s.last_epoch) // new epoch: reset the head (aliases prior epochs' storage)
-                {
-                    s.head = 0;
-                    s.last_epoch = epoch_now;
-                }
-
-                // The head sits wherever the previous allocation ended, which a usage with a stricter alignment may not accept.
-                // So each allocation starts at the head rounded up to its own alignment, never at the head itself.
-                memory_requirements const reqs = s.heap->memory_requirements_for_buffer(size_in_bytes, usage);
-                auto const offset = cc::int_round_up_to_multiple(s.head, reqs.alignment_in_bytes);
-                if (offset + reqs.size_in_bytes > s.budget)
+                auto offset = reserve(s, memory_heap_contents::buffers, [&](memory_heap const& heap)
+                                      { return heap.memory_requirements_for_buffer(size_in_bytes, usage); });
+                CC_RETURN_IF_ERROR(offset);
+                if (offset.value() < 0)
                     return allocation_info{.scope = lifetime_scope::transient}; // over budget: committed fallback
-
-                allocation_info a = s.heap->acquire_allocation_for_buffer(size_in_bytes, usage, offset);
+                allocation_info a = s.heap->acquire_allocation_for_buffer(size_in_bytes, usage, offset.value());
                 a.scope = lifetime_scope::transient;
-                s.head = offset + reqs.size_in_bytes;
                 return a;
             });
         CC_RETURN_IF_ERROR(reserved);
@@ -119,8 +149,6 @@ raw_texture_handle context_transient_scope::create_raw_texture(texture_descripti
 
 cc::result<raw_texture_handle> context_transient_scope::try_create_raw_texture(texture_description const& desc)
 {
-    // WORKAROUND: the transient bump-heap is buffers-only, so a transient texture is a dedicated allocation tagged transient, which the backend auto-expires at the next epoch.
-    // Placed/bump-allocated transient textures wait on a texture-capable transient memory_heap; see the header note.
     if (auto unsupported = impl::find_unsupported_texture(_ctx.supports(feature::extended_image_formats), desc);
         unsupported.has_value())
         return cc::error(cc::move(unsupported.value()));
@@ -129,7 +157,19 @@ cc::result<raw_texture_handle> context_transient_scope::try_create_raw_texture(t
                          "lacks");
     if (auto error = desc.unaligned_block_error(_ctx.supports(feature::unaligned_block_compression)); !error.empty())
         return cc::error(cc::move(error));
-    auto const alloc = allocation_info{.scope = lifetime_scope::transient};
+    // Placed in this epoch's window of the textures heap where it fits, and dedicated where it does not.
+    // Either way the backend expires it at the next epoch.
+    auto const alloc = _texture_bump.lock(
+        [&](bump_state& s)
+        {
+            auto const offset = reserve(s, memory_heap_contents::textures, [&](memory_heap const& heap)
+                                        { return heap.memory_requirements_for_texture(desc); });
+            if (!offset.has_value() || offset.value() < 0)
+                return allocation_info{.scope = lifetime_scope::transient};
+            allocation_info a = s.heap->acquire_allocation_for_texture(desc, offset.value());
+            a.scope = lifetime_scope::transient;
+            return a;
+        });
     _ctx._stats.add(stat::textures_created);
     auto created = _ctx.try_create_raw_texture(desc, alloc);
     if (created.has_value())
@@ -209,13 +249,14 @@ void context_transient_scope::release_heap_at_shutdown()
 {
     // Nothing is drained here: shutdown has already waited the device idle, and a backend that has not is broken in
     // ways this cannot fix.
-    _bump.lock(
-        [](bump_state& s)
-        {
-            s.heap = nullptr;
-            s.head = 0;
-            s.last_epoch = 0;
-        });
+    auto const release = [](bump_state& s)
+    {
+        s.heap = nullptr;
+        s.head = 0;
+        s.last_epoch = 0;
+    };
+    _bump.lock(release);
+    _texture_bump.lock(release);
 }
 } // namespace sg
 

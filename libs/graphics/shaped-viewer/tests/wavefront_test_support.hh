@@ -84,7 +84,7 @@ namespace sv_test::wavefront
             ready = false;
             continue;
         }
-        auto const triangles = isize(resources.meshes.get_ptr(item.mesh)->triangle_count);
+        auto const triangles = isize(resources.meshes.get_ptr(item.mesh)->geometry.triangle_count);
         auto const cdf_index = u32(resources.acquire_buffer(cdf->raw()->as_raw_readonly()));
         emitters.push_back(sv::emitter_record_of(u32(records.size() - 1), cdf_index, u32(triangles),
                                                  sv::emitter_cdf_block_count(triangles), permutation->emission));

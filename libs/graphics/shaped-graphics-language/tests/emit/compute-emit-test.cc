@@ -161,6 +161,38 @@ TEST("sgl emit - HLSL counts a vertex and an instance from the draw's base, so t
     CHECK(msl.contains("vertex varyings vs(uint v_in [[vertex_id]], uint i_in [[instance_id]])\n"));
 }
 
+TEST("sgl emit - @first_instance is the draw's first instance on its own")
+{
+    constexpr auto source = "require first_instance\n"
+                            "struct varyings:\n"
+                            "    @position position: hpos4\n"
+                            "\n"
+                            "@vertex fun vs(@first_instance f: int) -> varyings:\n"
+                            "    return { position = hpos4(f as float, 0.0, 0.0, 1.0) }\n";
+    for (auto const t : {target::hlsl_dx12, target::hlsl_vulkan})
+    {
+        auto const hlsl = text_of(source, t);
+        CHECK(hlsl.contains("varyings vs(uint f_in : SV_StartInstanceLocation)\n"));
+        CHECK(hlsl.contains("    const int f = int(f_in);\n"));
+    }
+    auto const msl = text_of(source, target::msl);
+    CHECK(msl.contains("vertex varyings vs(uint f_in [[base_instance]])\n"));
+    // EMIT-109: WGSL has no builtin for it on any device
+    CHECK(sgl::emit::dump_errors(emit_source(source, 0, target::wgsl))
+          == "target-lacks-feature vs needs first_instance, which WebGPU does not have\n");
+
+    // Beside `@instance_index`, HLSL's one SV_StartInstanceLocation is both, since a semantic is taken once.
+    constexpr auto both = "require first_instance\n"
+                          "struct varyings:\n"
+                          "    @position position: hpos4\n"
+                          "\n"
+                          "@vertex fun vs(@instance_index i: int, @first_instance f: int) -> varyings:\n"
+                          "    return { position = hpos4(i as float, f as float, 0.0, 1.0) }\n";
+    auto const hlsl = text_of(both, target::hlsl_dx12);
+    CHECK(hlsl.contains("varyings vs(uint i_in : SV_InstanceID, uint f_in : SV_StartInstanceLocation)\n"));
+    CHECK(hlsl.contains("    const int i = int(i_in + f_in);\n"));
+}
+
 TEST("sgl emit - WGSL enables primitive_index before it reads one")
 {
     constexpr auto source = "require primitive_index\n"

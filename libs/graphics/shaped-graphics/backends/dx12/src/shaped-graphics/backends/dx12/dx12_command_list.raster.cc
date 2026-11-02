@@ -421,4 +421,21 @@ void dx12_command_list::raster_draw_indexed(sg::draw_indexed_config const& confi
                                 UINT(config.index_range.offset), config.vertex_offset,
                                 UINT(config.instance_range.offset));
 }
+
+void dx12_command_list::raster_draw_indexed_indirect(sg::raw_buffer_handle const& args, isize offset_in_bytes, isize count)
+{
+    CC_ASSERT(_in_render_pass, "an indirect draw requires an open rendering scope");
+    CC_ASSERT(_bound_raster_layout != nullptr, "bind a raster pipeline before drawing");
+    CC_ASSERT(_bound_index_buffer != nullptr, "an indirect indexed draw requires a bound index buffer");
+    auto const buffer = std::dynamic_pointer_cast<dx12_buffer const>(args);
+    CC_ASSERT(buffer != nullptr, "indirect draw arguments are not a dx12 buffer");
+    CC_ASSERT(!buffer->is_expired(), "indirect draw arguments are a transient buffer used past its epoch");
+
+    // The arguments are read by the command processor, a stage of their own, before any vertex is fetched.
+    track_buffer_access(buffer, sg::pipeline_stage_flag::draw_indirect, sg::access_flag::indirect_read);
+    declare_raster_draw_barriers(true);
+    flush_barriers();
+    _list->ExecuteIndirect(_ctx._draw_indexed_signature.Get(), UINT(count), buffer->_resource.Get(),
+                           UINT64(offset_in_bytes), nullptr, 0);
+}
 } // namespace sg::backend::dx12

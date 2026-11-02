@@ -84,16 +84,19 @@ const value_texture = 3u
 /// What `instance.opacity_offset` and `opacity_uv_offset` name when they are not a parameter-block offset.
 const no_offset = 0xffffffffu
 
-/// One scene item, as a hit reads it by its instance id — `tracer.instance_record`, 112 bytes.
-/// `gpu_resource_manager::describe_instance` fills the first six fields, and `view_renderer` the opacity and the placement.
+/// One scene item, as a hit reads it by its instance id — `tracer.instance_record`, 224 bytes.
+/// `gpu_resource_manager::describe_instance` fills the first seven fields, and `view_renderer` the opacity and the placement.
 ///
 /// Keep the two in lockstep: this is a byte layout, not a description of one.
 struct instance:
     param_buffer: uint
     param_offset: uint
+    /// The central vertex pool for a mesh, its positions at `base_vertex`; a quadric batch's primitives instead.
     vertices: uint
+    /// The central index pool, the mesh's indices at `first_index` and relative to `base_vertex`.
     indices: uint
-    is_indexed: uint
+    base_vertex: uint
+    first_index: uint
     /// RESERVED for light linking, read by nothing yet
     link_mask: uint
 
@@ -113,6 +116,38 @@ struct instance:
     /// A bounce ray that meets an instance with one weighs its emission against next-event estimation.
     emitter: uint
 
+    /// Where the secondary material lives in the parameter block and how each value is read, as an emitter record reads its color.
+    /// `sv::material_emission_factor` says per field, and `sv::material_secondary` is the whole.
+    /// A hybrid's secondary hit is lit through it, `tracer.instance_base_color` and its neighbors; `value_none` reads each value's default.
+    base_kind: uint
+    base_offset: uint
+    base_uv_offset: uint
+    base_frequency: uint
+    base_channels: uint
+    base_sampler: uint
+    base_transform: uint
+    rough_kind: uint
+    rough_offset: uint
+    rough_uv_offset: uint
+    rough_frequency: uint
+    rough_channels: uint
+    rough_sampler: uint
+    rough_transform: uint
+    metal_kind: uint
+    metal_offset: uint
+    metal_uv_offset: uint
+    metal_frequency: uint
+    metal_channels: uint
+    metal_sampler: uint
+    metal_transform: uint
+    /// Where the tangent frame's attribute descriptor sits in the parameter block, or `no_offset` where nothing supplied one per vertex or corner, and its frequency.
+    /// A bounce reads its +z as the smooth normal, `tracer.instance_shading_normal`.
+    frame_offset: uint
+    frame_frequency: uint
+    /// 1 where the instance is solid glass, which a hybrid bounce refracts through on its way to what lies beyond, `hybrid.passage_of`; 0 elsewhere.
+    /// A pane is never met by a hybrid ray at all, so it is 0.
+    glass: uint
+
     /// The rows of the object-to-world transform the instance is placed by, which a hit stored for later shading needs.
     to_world_x: float4
     to_world_y: float4
@@ -126,6 +161,110 @@ struct instance:
 // The coefficients are a PARAMETER, `sh: float4[16]`, because a binding belongs to one group and several pipelines evaluate them.
 // SGL places no array in a constant block yet, so the tracer declares a `buffer[float4]` of 16 elements, which is `sv::background_gpu` byte for byte.
 // A caller copies it into the array before it calls these; every call is inlined, so the copy costs what an array argument would.
+
+// ---- The environment's kinds ----------------------------------------------------------------------------------------
+//
+// The whole environment, `sv::background_gpu` byte for byte, as the array `env: float4[28]`: the 16 SH lanes, then the dome.
+// Lane 16 is the header (x: 1 for a dome, 0 for a probe; y: the lobe count; z: the sine of the elevation the rise starts at;
+// w: the backdrop scale), 17 the horizon, 18 the zenith, 19 to 22 each lobe's direction and concentration, 23 to 26 each lobe's
+// peak radiance and its share of the samples, and 27's x the gradient's share.
+// Every miss, environment sample and MIS weight against the environment goes through the four functions below, whatever its kind.
+
+const two_pi = 6.28318530717958647692
+const four_pi = 12.56637061435917295384
+
+/// Whether `env` is an analytic dome rather than an SH probe.
+fun environment_is_dome(env: float4[28]) -> bool:
+    return env[16].x > 0.5
+
+/// The 16 SH lanes of `env`, as `background_radiance` takes them.
+fun environment_sh(env: float4[28]) -> float4[16]:
+    let mut sh = float4[16].filled(float4(0.0))
+    for k in 0 ..< 16:
+        sh[k] = env[k]
+    return sh
+
+/// A dome's gradient alone along unit direction `d`: the horizon up to the rise's start, then a smoothstep to the zenith.
+fun dome_gradient(env: float4[28], d: float3) -> float3:
+    let rise = env[16].z
+    let t = saturate((d.y - rise) / max(1.0 - rise, 1e-6))
+    return mix(env[17].xyz, env[18].xyz, t * t * (3.0 - 2.0 * t))
+
+/// The density over solid angle of the von Mises-Fisher lobe of concentration `k` about `axis`, at unit direction `d`.
+fun vmf_pdf(axis: float3, k: float, d: float3) -> float:
+    return k / (two_pi * (1.0 - exp(-2.0 * k))) * exp(k * (dot(d, axis) - 1.0))
+
+/// The radiance `env` sends along unit direction `d`, toward the point it lights.
+fun environment_radiance(env: float4[28], d: float3) -> float3:
+    if not environment_is_dome(env) => return background_radiance(environment_sh(env), d)
+    let count = env[16].y as int
+    let mut radiance = dome_gradient(env, d)
+    for i in 0 ..< 4:
+        if i < count:
+            let lobe = env[19 + i]
+            radiance += env[23 + i].xyz * exp(lobe.w * (dot(d, lobe.xyz) - 1.0))
+    return radiance
+
+/// What a ray that left the camera sees where it meets nothing: a dome's gradient times its backdrop scale, without its lobes, and a probe as it is.
+fun environment_backdrop(env: float4[28], d: float3) -> float3:
+    if not environment_is_dome(env) => return background_radiance(environment_sh(env), d)
+    return dome_gradient(env, d) * env[16].w
+
+/// The density over solid angle `sample_environment_direction` draws unit direction `d` with.
+/// A dome's is its mixture's over the whole sphere; a probe's is the uniform hemisphere's, which holds for a direction on the side it was drawn on.
+fun environment_pdf(env: float4[28], d: float3) -> float:
+    if not environment_is_dome(env) => return 1.0 / two_pi
+    let count = env[16].y as int
+    let mut pdf = env[27].x / four_pi
+    for i in 0 ..< 4:
+        if i < count:
+            let lobe = env[19 + i]
+            pdf += env[23 + i].w * vmf_pdf(lobe.xyz, lobe.w, d)
+    return pdf
+
+/// A unit direction drawn from an environment, and the density it was drawn with.
+struct environment_direction:
+    wi: float3
+    pdf: float
+
+/// `local` in the orthonormal frame about the unit normal `n`, `local.z` along it.
+fun around(n: float3, local: float3) -> float3:
+    let s = if n.z < 0.0 => -1.0 else 1.0
+    let a = -1.0 / (s + n.z)
+    let b = n.x * n.y * a
+    let t = float3(1.0 + s * n.x * n.x * a, s * b, -s * n.x)
+    let bt = float3(b, s + n.y * n.y * a, -n.y)
+    return t * local.x + bt * local.y + n * local.z
+
+/// A direction drawn from `env` with the three uniform numbers `u`, and its density.
+/// A probe draws uniformly over the hemisphere about `n`.
+/// A dome picks a lobe or its gradient by their shares, `u.z` choosing, and draws from it: a lobe by its vMF, the gradient uniformly over the sphere.
+fun sample_environment_direction(env: float4[28], n: float3, u: float3) -> environment_direction:
+    if not environment_is_dome(env):
+        let r = sqrt(max(0.0, 1.0 - u.x * u.x))
+        let phi = two_pi * u.y
+        return environment_direction(around(n, float3(r * cos(phi), r * sin(phi), u.x)), 1.0 / two_pi)
+
+    let count = env[16].y as int
+    // The gradient's draw, which a pick of no lobe keeps: uniform over the sphere.
+    let z = 1.0 - 2.0 * u.x
+    let rz = sqrt(max(0.0, 1.0 - z * z))
+    let mut wi = float3(rz * cos(two_pi * u.y), rz * sin(two_pi * u.y), z)
+    let mut pick = u.z
+    let mut chosen = false
+    for i in 0 ..< 4:
+        if i < count and not chosen:
+            let share = env[23 + i].w
+            if pick < share:
+                let lobe = env[19 + i]
+                let k = lobe.w
+                let w = 1.0 + log(u.x + (1.0 - u.x) * exp(-2.0 * k)) / k
+                let rw = sqrt(max(0.0, 1.0 - w * w))
+                wi = around(lobe.xyz, float3(rw * cos(two_pi * u.y), rw * sin(two_pi * u.y), w))
+                chosen = true
+            else:
+                pick -= share
+    return environment_direction(wi, environment_pdf(env, wi))
 
 /// Radiance L(d) = sum_i sh[i] * Y_i(d) from the standard real-SH basis up to order 3.
 /// `d` must be a unit direction.

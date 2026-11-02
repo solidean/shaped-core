@@ -1,0 +1,5 @@
+# The scenes are fetched on request (fetch-research-scenes.py), never committed.
+.install/
+.install.staging/
+*.zip.part
+*.zip

@@ -72,6 +72,18 @@ vulkan_blas::~vulkan_blas()
     _ctx.schedule_deferred_deletion(cc::move(expiring));
 }
 
+vulkan_micromap::~vulkan_micromap()
+{
+    if (_micromap == VK_NULL_HANDLE)
+        return;
+
+    vulkan_expiring_resource expiring;
+    auto* const ctx = &_ctx;
+    expiring.finalizers.push_back([ctx, micromap = _micromap]
+                                  { ctx->_raytracing_functions.destroy_micromap(ctx->_device, micromap, nullptr); });
+    _ctx.schedule_deferred_deletion(cc::move(expiring));
+}
+
 vulkan_tlas::~vulkan_tlas()
 {
     if (_accel == VK_NULL_HANDLE)
@@ -185,6 +197,13 @@ sg::blas_handle vulkan_command_list::raytracing_build_blas_triangles(cc::span<sg
     cc::vector<u32> primitive_counts;
     cc::vector<VkAccelerationStructureBuildRangeInfoKHR> ranges;
     cc::vector<vulkan_buffer_handle> inputs;
+    cc::vector<vulkan_buffer_handle> micromap_storage;
+
+    // A geometry's micromap rides its triangles' pNext, so each link and its usage counts stay put until the build is recorded.
+    cc::vector<VkAccelerationStructureTrianglesOpacityMicromapEXT> micromap_links;
+    cc::vector<cc::vector<VkMicromapUsageEXT>> micromap_link_usage;
+    micromap_links.reserve(geometries.size());
+    micromap_link_usage.reserve(geometries.size());
 
     for (auto const& g : geometries)
     {
@@ -227,6 +246,36 @@ sg::blas_handle vulkan_command_list::raytracing_build_blas_triangles(cc::span<sg
             triangles.transformData.deviceAddress = tf->_device_address + VkDeviceAddress(g.transform_offset_in_bytes);
         }
 
+        if (g.micromap != nullptr)
+        {
+            auto const* const mm = dynamic_cast<vulkan_micromap const*>(g.micromap.get());
+            CC_ASSERT(mm != nullptr, "blas_triangles.micromap is not a vulkan micromap");
+            auto const indices = require_build_input(g.micromap_indices);
+            inputs.push_back(indices);
+            micromap_storage.push_back(mm->_vulkan_storage);
+
+            auto usage = cc::vector<VkMicromapUsageEXT>();
+            auto const counts = g.micromap_usage_counts.empty()
+                                  ? g.micromap->usage()
+                                  : cc::span<sg::micromap_usage const>(g.micromap_usage_counts);
+            for (auto const& u : counts)
+                usage.push_back({.count = u.count, .subdivisionLevel = u.subdivision_level, .format = u32(u.format)});
+            micromap_link_usage.push_back(cc::move(usage));
+
+            auto const wide = g.micromap_index_type == sg::index_format::uint32;
+            micromap_links.push_back(VkAccelerationStructureTrianglesOpacityMicromapEXT{
+                .sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_TRIANGLES_OPACITY_MICROMAP_EXT,
+                .indexType = wide ? VK_INDEX_TYPE_UINT32 : VK_INDEX_TYPE_UINT16,
+                .indexBuffer
+                = {.deviceAddress = indices->_device_address + VkDeviceAddress(g.micromap_indices_offset_in_bytes)},
+                .indexStride = VkDeviceSize(wide ? 4 : 2),
+                .usageCountsCount = u32(micromap_link_usage.back().size()),
+                .pUsageCounts = micromap_link_usage.back().data(),
+                .micromap = mm->_micromap,
+            });
+            triangles.pNext = &micromap_links.back();
+        }
+
         descs.push_back(VkAccelerationStructureGeometryKHR{
             .sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR,
             .geometryType = VK_GEOMETRY_TYPE_TRIANGLES_KHR,
@@ -241,11 +290,117 @@ sg::blas_handle vulkan_command_list::raytracing_build_blas_triangles(cc::span<sg
                                               ranges, flags);
     for (auto const& in : inputs)
         track_buffer_access(*in, sg::pipeline_stage_flag::accel_build, sg::access_flag::shader_read);
+    for (auto const& storage : micromap_storage)
+        track_buffer_access(*storage, sg::pipeline_stage_flag::accel_build, sg::access_flag::accel_read);
     record_acceleration_structure_build(built);
 
     return std::make_shared<vulkan_blas>(_ctx, built.result, built.accel, built.address, built.size_in_bytes,
                                          built.build_scratch_size_in_bytes, built.update_scratch_size_in_bytes, flags,
                                          int(geometries.size()));
+}
+
+sg::micromap_handle vulkan_command_list::raytracing_build_micromap(sg::micromap_triangles const& triangles)
+{
+    CC_ASSERT(_ctx.is_opacity_micromap_supported(), "opacity micromaps are not supported on this device");
+    auto const& rt = _ctx._raytracing_functions;
+    auto const& props = _ctx.opacity_micromap_properties();
+
+    auto usage = cc::vector<VkMicromapUsageEXT>();
+    for (auto const& u : triangles.usage)
+    {
+        auto const max_level = u.format == sg::micromap_format::four_state ? props.maxOpacity4StateSubdivisionLevel
+                                                                           : props.maxOpacity2StateSubdivisionLevel;
+        CC_ASSERTF(u.subdivision_level <= max_level, "micromap subdivision level {} exceeds the device's limit of {}",
+                   u.subdivision_level, max_level);
+        usage.push_back({.count = u.count, .subdivisionLevel = u.subdivision_level, .format = u32(u.format)});
+    }
+
+    auto const states = require_build_input(triangles.states);
+    auto const descriptors = require_build_input(triangles.descriptors);
+    auto const states_address = states->_device_address + VkDeviceAddress(triangles.states_offset_in_bytes);
+    auto const descriptors_address
+        = descriptors->_device_address + VkDeviceAddress(triangles.descriptors_offset_in_bytes);
+    CC_ASSERT(states_address % 256 == 0, "micromap states must start 256-byte aligned");
+    CC_ASSERT(descriptors_address % 256 == 0, "micromap descriptors must start 256-byte aligned");
+
+    auto info = VkMicromapBuildInfoEXT{
+        .sType = VK_STRUCTURE_TYPE_MICROMAP_BUILD_INFO_EXT,
+        .type = VK_MICROMAP_TYPE_OPACITY_MICROMAP_EXT,
+        .flags = VK_BUILD_MICROMAP_PREFER_FAST_TRACE_BIT_EXT,
+        .mode = VK_BUILD_MICROMAP_MODE_BUILD_EXT,
+        .usageCountsCount = u32(usage.size()),
+        .pUsageCounts = usage.data(),
+        .data = {.deviceAddress = states_address},
+        .triangleArray = {.deviceAddress = descriptors_address},
+        .triangleArrayStride = VkDeviceSize(sizeof(sg::micromap_descriptor)),
+    };
+    auto sizes = VkMicromapBuildSizesInfoEXT{.sType = VK_STRUCTURE_TYPE_MICROMAP_BUILD_SIZES_INFO_EXT};
+    rt.get_micromap_build_sizes(_ctx._device, VK_ACCELERATION_STRUCTURE_BUILD_TYPE_DEVICE_KHR, &info, &sizes);
+    CC_ASSERT(sizes.micromapSize > 0, "the micromap build-size query reported a zero-size result");
+
+    // The same split as an acceleration structure: a persistent result and a transient scratch, aligned up by hand.
+    auto const scratch_alignment = cc::max(
+        isize(256), isize(_ctx.acceleration_structure_properties().minAccelerationStructureScratchOffsetAlignment));
+    auto const result_raw
+        = _ctx.persistent.create_raw_buffer(isize(sizes.micromapSize), sg::buffer_usage::accel_structure_storage);
+    auto const scratch_raw = _ctx.transient.create_raw_buffer(isize(sizes.buildScratchSize) + scratch_alignment,
+                                                              sg::buffer_usage::readwrite_buffer);
+    auto const result = std::dynamic_pointer_cast<vulkan_buffer const>(result_raw);
+    auto const scratch = std::dynamic_pointer_cast<vulkan_buffer const>(scratch_raw);
+    CC_ASSERT(result != nullptr && scratch != nullptr, "micromap buffers are not vulkan buffers");
+
+    auto const create_info = VkMicromapCreateInfoEXT{
+        .sType = VK_STRUCTURE_TYPE_MICROMAP_CREATE_INFO_EXT,
+        .buffer = result->_buffer,
+        .offset = 0,
+        .size = sizes.micromapSize,
+        .type = VK_MICROMAP_TYPE_OPACITY_MICROMAP_EXT,
+    };
+    VkMicromapEXT micromap = VK_NULL_HANDLE;
+    VkResult const r = rt.create_micromap(_ctx._device, &create_info, nullptr, &micromap);
+    CC_ASSERT(r == VK_SUCCESS, "vkCreateMicromapEXT failed");
+
+    auto const mask = VkDeviceAddress(scratch_alignment) - 1;
+    info.dstMicromap = micromap;
+    info.scratchData.deviceAddress = (scratch->_device_address + mask) & ~mask;
+
+    // sg's barrier vocabulary has no micromap stage, and Vulkan builds micromaps in one of its own.
+    // The tracking keeps sg's own state right, and two global barriers order the build against whatever wrote its
+    // inputs and whatever reads its result; a micromap is built once per mesh, not per frame.
+    track_buffer_access(*states, sg::pipeline_stage_flag::accel_build, sg::access_flag::shader_read);
+    track_buffer_access(*descriptors, sg::pipeline_stage_flag::accel_build, sg::access_flag::shader_read);
+    track_buffer_access(*result, sg::pipeline_stage_flag::accel_build, sg::access_flag::accel_write);
+    track_buffer_access(*scratch, sg::pipeline_stage_flag::accel_build, sg::access_flag::shader_write);
+    flush_barriers();
+
+    auto const before = VkMemoryBarrier2{
+        .sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER_2,
+        .srcStageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
+        .srcAccessMask = VK_ACCESS_2_MEMORY_WRITE_BIT,
+        .dstStageMask = VK_PIPELINE_STAGE_2_MICROMAP_BUILD_BIT_EXT,
+        .dstAccessMask = VK_ACCESS_2_MEMORY_READ_BIT | VK_ACCESS_2_MEMORY_WRITE_BIT,
+    };
+    auto const before_dependency = VkDependencyInfo{.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
+                                                    .memoryBarrierCount = 1,
+                                                    .pMemoryBarriers = &before};
+    vkCmdPipelineBarrier2(_buffer, &before_dependency);
+
+    rt.cmd_build_micromaps(_buffer, 1, &info);
+
+    auto const after = VkMemoryBarrier2{
+        .sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER_2,
+        .srcStageMask = VK_PIPELINE_STAGE_2_MICROMAP_BUILD_BIT_EXT,
+        .srcAccessMask = VK_ACCESS_2_MEMORY_WRITE_BIT,
+        .dstStageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
+        .dstAccessMask = VK_ACCESS_2_MEMORY_READ_BIT | VK_ACCESS_2_MEMORY_WRITE_BIT,
+    };
+    auto const after_dependency
+        = VkDependencyInfo{.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO, .memoryBarrierCount = 1, .pMemoryBarriers = &after};
+    vkCmdPipelineBarrier2(_buffer, &after_dependency);
+
+    return std::make_shared<vulkan_micromap>(_ctx, result, micromap, isize(sizes.micromapSize),
+                                             isize(sizes.buildScratchSize),
+                                             cc::vector<sg::micromap_usage>::create_copy_of(triangles.usage));
 }
 
 sg::blas_handle vulkan_command_list::raytracing_build_blas_aabbs(cc::span<sg::blas_aabbs const> geometries,

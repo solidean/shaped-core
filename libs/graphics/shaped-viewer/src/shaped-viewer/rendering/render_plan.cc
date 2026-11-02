@@ -295,7 +295,8 @@ struct builder
                                      .dst_rect = tg::aabb2i(tg::pos2i(0, 0), tg::pos2i(res[0], res[1])),
                                      .primary = {.kind = draw_source_kind::trace, .index = trace, .uv = full_uv},
                                      .blend = l.blend,
-                                     .opacity = l.opacity});
+                                     .opacity = l.opacity,
+                                     .display = l.settings.display});
                 }
                 emit_drawings(view, layer_index, l, res, trace, local);
                 emit_annotations(view, layer_index, l, res, trace, local);

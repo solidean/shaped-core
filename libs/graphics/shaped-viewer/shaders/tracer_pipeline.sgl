@@ -68,7 +68,7 @@ use tracer
         let mut guide_hit = tracer.surface_payload_for(rng, float3(0.0), float3(0.0), 0.0, 3u, 0u)
         if guided:
             guide_hit.guide = 1u
-            let gr = ray(origin = pos3(origin.x, origin.y, origin.z), direction = vec3(dir.x, dir.y, dir.z), t_min = 1e-3, t_max = 1e4)
+            let gr = ray(origin = pos3(origin.x, origin.y, origin.z), direction = vec3(dir.x, dir.y, dir.z), t_min = 0.0, t_max = 1e4)
             trace(tracer.traced.world, gr, tracer.path_rays.surface, mut guide_hit)
 
         let mut throughput = float3(1.0)
@@ -98,11 +98,13 @@ use tracer
         // Scattering events do not count against `max_bounces`: Russian roulette ends a long walk, and `pt.scatter_cap` guards it.
         let mut scatters = 0
 
+        // `b` counts every surface the path continued from, and `free` those that were free refractions, which `max_bounces` does not count.
         let mut b = 0
-        while b < f.max_bounces:
-            let last_bounce = if b + 1 >= f.max_bounces => 1u else 0u
+        let mut free = 0
+        while b - free < f.max_bounces:
+            let last_bounce = if b - free + 1 >= f.max_bounces => 1u else 0u
             let mut p = tracer.surface_payload_for(rng, medium_sigma_t, medium_albedo, medium_g, channel, last_bounce)
-            let r = ray(origin = pos3(origin.x, origin.y, origin.z), direction = vec3(dir.x, dir.y, dir.z), t_min = 1e-3, t_max = 1e4)
+            let r = ray(origin = pos3(origin.x, origin.y, origin.z), direction = vec3(dir.x, dir.y, dir.z), t_min = 0.0, t_max = 1e4)
             trace(tracer.traced.world, r, tracer.path_rays.surface, mut p)
 
             // The random state comes back advanced by whatever the hit drew from it.
@@ -284,8 +286,11 @@ use tracer
                 // Escaped to the SH environment, whose radiance the miss wrote back in `emission`.
                 // The primary ray sees the sky at full weight; a bounce ray is the BSDF strategy of the hit's own environment estimate.
                 // The environment's sample reaches only the shading frame's upper hemisphere on the face's own side, and a medium scatter takes none.
-                let w = if b == 0 or not prev_nee_reachable => 1.0 else pt.mis_weight(prev_pdf, pt.env_pdf())
-                let c = throughput * emission * w
+                // A ray that left the camera sees the backdrop, which a dome draws apart from what it lights with.
+                let env = tracer.background_lanes()
+                let seen = if b == 0 => scene.environment_backdrop(env, dir) else emission
+                let w = if b == 0 or not prev_nee_reachable => 1.0 else pt.mis_weight(prev_pdf, scene.environment_pdf(env, dir))
+                let c = throughput * seen * w
                 radiance += c
 
                 // The sky seen by the PRIMARY ray belongs to neither lobe, so it goes to the diffuse signal.
@@ -319,14 +324,14 @@ use tracer
             prev_nee_reachable = reachable
 
             // The offset follows the direction rather than the normal: a refracted continuation leaves on the far side.
-            let side = if dot(next_dir, n) < 0.0 => -1e-3 else 1e-3
-            origin = origin + dir * hit_t + n * side
+            origin = pt.offset_ray(origin + dir * hit_t, if dot(next_dir, n) < 0.0 => -n else n)
             dir = next_dir
             medium_sigma_t = next_sigma_t
             medium_albedo = next_albedo
             medium_g = next_g
             channel = next_channel
             b += 1
+            if tracer.is_free_refraction(lobe, roughness) and free < (tracer.free_refraction_cap as int) => free += 1
 
         // One non-finite path would poison this pixel forever, since the mean is blended in place.
         // It counts as a sample of zero instead: the sum is still divided by `spp`, as the wavefront counts one.
@@ -403,7 +408,7 @@ fun component_of(v: float3, i: uint) -> float:
 @miss fun path_miss(p: mut tracer.surface_payload, r: ray){tracer.traced, tracer.bindless, slug.tables}:
     p.direct_diffuse = float3(0.0)
     p.direct_specular = float3(0.0)
-    p.emission = scene.background_radiance(tracer.background_sh(), normalize(float3(r.direction.x, r.direction.y, r.direction.z)))
+    p.emission = scene.environment_radiance(tracer.background_lanes(), normalize(float3(r.direction.x, r.direction.y, r.direction.z)))
     p.throughput = float3(0.0)
     p.direction = float3(0.0)
     p.normal = float3(0.0)

@@ -51,18 +51,21 @@ sv::camera::look_rotation(eye, target, up=+y)  // -> quat_d aiming from eye at t
 cam.basis()                      // -> camera_basis { vec3d right, up, forward } — the world axes a screen-space drag is expressed in
 sv::perspective_projection       // { angle_d vertical_fov; f64 aspect_ratio; f64 near_plane; } — the only projection kind for now
 sv::camera_record_of(cam)        // -> shaders::tracer::camera_record (the GPU basis: forward/right_scaled/up_scaled); aspect from projection.aspect_ratio
-sv::render_settings              // { int samples_per_pixel, max_bounces; render_mode mode; int rounds_per_frame; f32 motion_hold_ms; sr::reconstruct_settings reconstruct; } — per-layer integration controls (no light/sky: those are on the view)
+sv::render_settings              // { int samples_per_pixel, max_bounces; render_mode mode; int rounds_per_frame; f32 motion_hold_ms; sr::reconstruct_settings reconstruct; sr::display_transform display; } — per-layer integration controls (no light/sky: those are on the view)
                                  //   samples_per_pixel is the megakernel's alone; the wavefront's still frame runs rounds_per_frame (8), a moving one drains
 sv::viewer_config::frame_budget_ms // (16) the GPU ms a frame's still wavefront layers share, split evenly; each fits its share with whole rounds, then with a partial fill
                                  //   0 runs rounds_per_frame at full fill; a headless viewer forces 0; a plan built by hand takes viewer_definition::wavefront_budget_ms (0)
-sv::wavefront_routine::drain_rounds(max_bounces) // -> i32: a moving frame's rounds, max_bounces + 1 + medium_roulette_after (16, pt.roulette_after)
-sv::render_mode              // automatic (default) | megakernel | wavefront | raster — switching restarts the layer; the wavefront reads rounds_per_frame instead of samples_per_pixel
-                                 //   automatic: the wavefront where the device has raytracing_pipeline and ray_query, raster with one warning where not;
+sv::wavefront_routine::drain_rounds(max_bounces) // -> i32: a moving frame's rounds, max_bounces + free_refractions (8) + 1 + medium_roulette_after (16, pt.roulette_after)
+sv::render_mode              // automatic (default) | megakernel | wavefront | raster | hybrid — switching restarts the layer; the wavefront reads rounds_per_frame instead of samples_per_pixel
+                                 //   automatic: the hybrid (deferred) where the device has raytracing_pipeline and ray_query, raster with one warning where not;
+                                 //   a layer left automatic that names no denoiser gets automatic's; name `wavefront` for full global illumination
                                  //   the viewer resolves it before planning, and a plan built by hand traces it with the wavefront
 sv::resolve_render_mode(ctx, m)  // -> render_mode: m itself unless automatic
                                  //   raster: the same materials drawn, lit directly and unshadowed, final every frame, never denoised (docs/raster.md)
                                  //   reconstruct defaults to denoiser none; NOTHING in it restarts accumulation (see "Denoising" below)
                                  //   sv owns reconstruct.fresh_samples and reconstruct.upscaler (none), and overwrites whatever a caller set: each half of the hand-off runs with its own value
+                                 //   display: exposure (stops) and curve, applied where the parent composites the layer; never restarts; the default curve none passes radiance through unencoded
+                                 //   display.automatic: the viewer meters the layer's image and adapts toward middle gray, a fifth per reading; exposure is then the compensation
 sv::scene_item                   // { scene_item_kind kind; mesh_id mesh; instance_id instance; hash128 permutation; tg::affine_transform3f transform; } — triangle_mesh only for now
                                  //   mint one with resources.acquire_scene_item(mesh); the three ids have to come from ONE material resolution
                                  //   build the placement with tg's factories (make_rotation(quat), make_translation(vec), make_from_linear_mat(mat3)) and tg::compose
@@ -81,7 +84,12 @@ sv::light_problem(l)             // -> string_view, empty when valid; what the s
 sv::light_unit                   // candela | lux | nit | lumen; ONE NIT IS ONE UNIT OF TRACER RADIANCE, the same as OpenPBR emission_luminance
 sv::scene_light                  // { light_id id; light light; } — one light as a layer holds it
 sv::light_record_of(light)       // -> shaders::tracer::light_record, 96 bytes, tagged by path; emission is point intensity / rect radiance / parallel irradiance / sun radiance; the cone is glTF's scale + offset
-sv::background                   // { vec3f sh[16]; } — order-3 RGB SH environment a missed ray sees (the flat and pt misses both reconstruct radiance from it)
+sv::background                   // { vec3f sh[16]; bool is_dome; dome analytic; } — order-3 RGB SH environment a missed ray sees, or an analytic dome every renderer evaluates and samples exactly
+sv::background::of_dome(d)       // -> background — the dome, its SH projected in closed form; seen_from(camera) turns a following dome to the camera
+sv::dome                         // { horizon, zenith, rise_start, backdrop_scale, lobes[4], lobe_count, follows_camera } — a gradient plus vMF lobes; a missed camera ray sees the gradient alone, times backdrop_scale
+sv::camera_relative_direction(azimuth, elevation) // -> vec3f in a following dome's frame: azimuth toward the camera's left, 0 behind the camera
+scene.studio({...})              // the studio spec on a layer: dome, no fallback light, neutral display at the derived exposure, the floor (scene/studio.hh)
+sv::studio_dome(setup, H) / sv::studio_exposure(dome) / sv::studio_floor(height, half_extent) / sv::studio_camera(bounds, view, aspect, front_azimuth)
 sv::background::uniform(radiance)              // -> background — the same radiance in every direction (band 0 alone)
 sv::background::gradient(zenith, nadir)        // -> background — vertical (+y) gradient, exact: zenith straight up, nadir straight down, their average on the horizon
 sv::background::lobe(direction, radiance)      // -> background — soft lobe peaking at exactly `radiance` along `direction` (normalized for you); a fill, NEVER a sun: no shadow, a smeared reflection
@@ -166,7 +174,7 @@ m.attributes.acquire(mesh_attribute)   // -> attribute_id; uploads the bytes int
 m.attributes.get(id)                   // -> attribute_record {buffer<byte> data; attribute_format format; attribute_frequency frequency; element_count; optional<value_summary> summary;}
 
 m.acquire_instance(resolved, layout)   // -> instance_id, content-keyed on resolved.parameter_key; layout from generate_material_shader over `resolved`
-m.get_instance(id)                     // -> instance_record {i32 size_bytes; vector<instance_slot> slots; buffer<byte> parameters; vector<byte> uploaded;}
+m.get_instance(id)                     // -> instance_record {i32 size_bytes; vector<instance_slot> slots; buffer<byte> parameters; vector<byte> uploaded; u64 built_in, resident_in;}
 m.contains_instance(id) / m.instance_count()
 sv::instance_slot                      // { material_slot_kind kind; i32 offset, size_bytes; vector<byte> constant; attribute_id attribute; u32 element_stride; texture_id texture; }
 m.build_instance_parameters(record)    // -> vector<byte> for THIS epoch; acquires every descriptor and texture index it writes
@@ -180,9 +188,9 @@ m.acquire_scene_item(sv::resident_mesh)  // -> scene_item; the material resolved
 m.acquire_scene_item(sv::mesh)         // -> the same, from CPU bytes: create_mesh followed by the resolution above
                                        //   cached on the mesh: placing it again reuses the item until its content, a resident id or the material changes
 m.describe_instance(cmd, mesh_id, instance_id)  // -> shaders::tracer::instance_record, the per-item record a hit reads by its instance id
-                                       //   rebuilds the block for THIS epoch, uploads it on cmd only if it changed, and mints all four indices
+                                       //   builds the block once per epoch, uploads it on cmd only if it changed, and mints all four indices
 m.attributes_resident(instance_id)              // -> bool; until true the item shades through the fallback, binding no still-streaming attribute
-sv::shaders::tracer::instance_record   // { param_buffer, param_offset, vertices, indices, is_indexed, link_mask, padding } — generated from scene.instance, 32 bytes
+sv::shaders::tracer::instance_record   // { param_buffer, param_offset, vertices, indices, base_vertex, first_index, link_mask, opacity…, placement } — generated from scene.instance, 116 bytes
 ```
 
 A block holds, at the offsets `material_parameter_layout` names: a constant inline, an `sv::attribute_desc`
@@ -193,6 +201,7 @@ Gotchas:
 - **The bindless tables are module `tracer`'s binding `bindless`**, so their sizes are changed there and nowhere else.
   A sampled texture is acquired into `textures_2d`; geometry, attributes and parameter blocks into `buffers`.
 - **Every index in a block is THIS EPOCH's**, never a pinned one — which is why a block is rebuilt per frame rather than cached across frames.
+  Within an epoch it is built once, so a texture landing mid-epoch shows from the next one.
   That is what makes the access declaration correct by construction: nothing a hit reads reached the GPU without an acquire.
 - **`describe_instance` must be called on the list that traces with it, and before `freeze()`** — it is where those indices are minted.
 - **The block's bytes are the epoch's; its buffer is not.** The record owns a persistent buffer and re-uploads only when the bytes actually differ.
@@ -201,7 +210,8 @@ Gotchas:
 - **The layout and shader key must come from ONE `generate_material_shader`** over that same resolved material, or the block is filled at offsets the shader does not read.
 - **A sampled texture must already be resident** — a `texture_id` on a mesh is one the caller acquired.
 - **The block is zero-filled first**, so alignment padding is stable and one material does not upload as two different blobs.
-- **`is_indexed` rides on the instance, not the frame.** Geometry layout is a property of the mesh, and a view may hold an indexed and a non-indexed one at once.
+- **`vertices` and `indices` name the central pools, and `base_vertex` / `first_index` the mesh's range of them.**
+  The indices are relative to `base_vertex`, so `material.triangle_corners` hands back the numbering per-vertex attributes use, and `material.position_of` adds the base.
 - **The instance, light, camera and frame records are generated from module `tracer`**, so there is no C++ copy to keep in lockstep; fill them field by field, since they have no defaults.
 
 ## Materials — a type, an instance, and the frequency chain
@@ -646,7 +656,8 @@ sv::tangent_frame_options        // { bool prefer_file = true; frame_generation 
 sv::frame_generation             // none (let the geometric fallback answer) | smooth | crease  — only `none` is implemented
 
 sv::asset_data                   // { string name; vector<mesh> meshes; vector<asset_material> materials;
-                                 //   vector<asset_node> nodes; vector<asset_light> lights; vector<string> issues; }
+                                 //   vector<asset_node> nodes; vector<asset_light> lights; vector<asset_camera> cameras; vector<string> issues; }
+sv::asset_camera                 // { string name; camera camera; } — always world-placed; fov and near from the file, the aspect left to the view; perspective only
 a.find_mesh(name) / a.meshes_with_material(name) / a.material(name)   // -> mesh const* / vector<mesh const*> / material_id
 a.override_material(name, id)    // -> isize, how many meshes moved; rewrites the SLOT's meshes
 a.bounds()                       // -> optional<aabb3f> in world space — what a camera frames
@@ -767,11 +778,14 @@ sv::indexed_triangle_data  // { pinned_data<pos3f const> positions; pinned_data<
 T::create(range…)          // pins (moving an owning rvalue in, deep-copying a borrow) + hashes now (XXH3-128); call once at authoring time, not per frame
 sv::hash_bytes_of(span) / sv::combine_hashes(a, b)  // the hashing primitives, if you key content yourself
 
-mesh_manager::acquire(triangle_data) -> mesh_id          // O(1) if resident; else uploads, and builds nothing — needs no ray tracing
-mesh_manager::acquire(indexed_triangle_data) -> mesh_id  // same, indexed: a BLAS built later follows the index buffer's primitive order
-mesh_manager::acquire_blas(cmd, id) -> blas_handle const& // built onto cmd the first time, held after; id complete, ray tracing required
+mesh_manager::acquire(triangle_data) -> mesh_id          // O(1) if resident; else streams into the pools with indices 0, 1, 2, ..., and builds nothing — needs no ray tracing
+mesh_manager::acquire(indexed_triangle_data) -> mesh_id  // same, with the caller's indices: a BLAS built later follows their primitive order
+mesh_manager::acquire_blas(cmd, id) -> blas_handle const& // built onto cmd from the mesh's range of the pools the first time, held after; id complete, ray tracing required
 quadric_manager::acquire_blas(cmd, id)                    // the same, a procedural BLAS over the batch's boxes
-sv::mesh_record          // { buffer<pos3f> vertices; buffer<u32> indices; bool is_indexed; isize triangle_count; blas_handle blas (null until a trace);
+mesh_manager::vertex_pool() / index_pool()                // -> sg::buffer<pos3f> / <u32> const& — EVERY mesh's geometry; replaced when it grows, so read it per frame
+mesh_manager::vertex_pool_capacity() / index_pool_capacity() // -> isize — grows by doubling, never shrinks
+sv::geometry_range       // { isize base_vertex, vertex_count, first_index, triangle_count; index_count() } — indices relative to base_vertex
+sv::mesh_record          // { residency state; geometry_range geometry; blas_handle blas (null until a trace);
                          //   f32 surface_area (object space, summed at acquire); buffer<f32> emitter_cdf (null until an emissive instance is traced); }
 mesh_manager::acquire_emitter_cdf(cmd, id) -> buffer<f32> const*  // the two-level area CDF, built on the GPU onto cmd once and held; null while its kernels compile
 mesh_manager::acquire_world_area(cmd, id, linear) -> optional<f32> // id's exact world area under a non-similarity placement, summed on the GPU; none until it lands
@@ -831,7 +845,7 @@ m.wait_for_pending_uploads()       // blocks until every transfer lands, then fi
 m.settling_count()                 // -> isize, payloads still in flight across the managers
 sv::residency                      // pending | base_resident | complete | failed — on EVERY record, not just textures
 m.meshes.placeholder_blas()        // -> the shared unit cube every pending mesh is traced as; ray tracing required
-m.meshes.placeholder_vertices()    // -> its vertices, which a pending mesh's instance record names instead of its own; no ray tracing needed
+m.meshes.placeholder_geometry()    // -> geometry_range const& — the cube's range of the pools, which a pending mesh's instance record names instead of its own; no ray tracing needed
 m.context()                        // -> sg::context& every manager records into
 m.pending_work_count()              // -> isize — resources still waiting for their follow-up
 // config: { texture_policy textures_policy = {.generate_mips = true, .compress = true, .compress_min_extent = 64}; work_budget work = {.max_dispatches_per_epoch = 16} }
@@ -890,7 +904,7 @@ sv::emitter_record_of(instance, cdf, triangles, blocks, emission) // -> emitter_
 sv::impl::emitter_estimate_of(emission, block, sources)          // -> optional<emitter_estimate>: selection's mean radiance, `unseen` where it rests on a stand-in for black; empty, so camera-only, where the emission is proven dark or not finite (rendering/impl/emitters.hh)
 sv::raster_routine::execute(cmd, raster_frame_desc)  // one draw per raster_draw through its permutation's raster pixel stage, into a raster_gbuffer; declines while the vertex stage builds
 sv::raster_frame_desc                                // { raster frame constants; background, instance_table, lights, decals; draws; permutations; fallback; bindless; targets }
-sv::raster_draw                                      // { u32 instance, triangle_count, permutation } — three vertices per triangle, no vertex buffer
+sv::raster_draw                                      // { u32 instance, triangle_count, permutation, first_index, base_vertex } — indexed through raster_frame_desc::index_pool, no vertex buffer
 sv::raster_gbuffer                                   // { color rgba32f; normal, albedo, specular_albedo rgba16f; depth r32f; roughness r16f; motion rg32f; primary_depth r32f }
                                                      //   the layer's slots, every one render_target-capable; THE seam a hybrid lighting pass reads
 sv::default_frame_constants()                        // -> shaders::tracer::frame_constants: 16 spp, 5 bounces, rng_seed 1, all else 0 — the generated 256-byte block
@@ -934,7 +948,8 @@ A layer with no lights falls back to `layer::fallback_light` — `sv::default_fa
 - **`sv::matrices_of(camera_record, near_plane)`** turns the raygen's pinhole basis into the `world_to_view` / `view_to_clip` pair `sr::reconstruct_guides` asks for.
   They exist for a denoiser or an upscaler that reprojects in world space, whether the layer was traced or rasterized.
   `right_scaled` and `up_scaled` carry `tan(fov / 2)` in their lengths, which is the projection's diagonal.
-  `reconstruct_guides::jitter` stays zero at full size: the raygen offsets every primary ray randomly WITHIN its pixel, so the samples' mean is the centre.
+  `reconstruct_guides::jitter` stays zero at full size for a traced layer: the raygen offsets every primary ray randomly WITHIN its pixel, so the samples' mean is the centre.
+  A full-size hybrid frame shifts its whole raster by one Halton (2, 3) offset per sample of the mean, and declares it, since a raster samples only where the projection puts the centers.
   The per-frame offset a temporal upscaler reconstructs from is the other kind: a frame traced at the upscaler's extent takes one, and passes it as `.jitter` beside `.previous_jitter`.
 - **The temporal history restarts on a scene change, never on camera motion** — its signal is the trace hash with the camera left out.
   The raygen blends the guides beside the mean on a count of their own, so turning denoising on mid-estimate restarts nothing.
@@ -1049,6 +1064,7 @@ frame.background_work() -> cc::shared_async<cc::unit>          // settles once t
                                                                //   0 does NOT mean settled, and it never restarts accumulation: that work
                                                                //   changes a texture's contents, not its id, so accumulated_samples cannot see it
 view.accumulated_samples() -> u32                               // the SLOWEST traced layer's samples per pixel; 0 for a view with none
+view.restart_accumulation()                                     // every traced layer starts over, its denoiser's history too: a reset button, or a change the hash cannot see
                                                                //   never layer 0 by fiat: a layout or ui layer below the scene puts the trace at 1
                                                                //   a wavefront layer's reads back from the GPU, so it trails the image by a frame or more
 view.is_accumulation_converged(samples = {}) -> bool            // ASK THIS, not the counter: a layer stops at sv::accumulation_sample_cap (16384),
@@ -1225,9 +1241,10 @@ sv::layout_routine::execute(scope, window_id, draws, textures)    // borders + p
 - **A shadow ray carries its own minimal payload** (`tracer.shadow_payload`, visibility alone) and its own miss, so a cutout needs an any-hit per payload.
 - **A too-small budget thrashes** — a resource whose id a live scene still names must stay resident; if the
   byte budget can't hold a frame's working set, `get_ptr` returns null and the renderer asserts.
-- **Indexed and non-indexed are separate paths end to end** — nothing is de-indexed and no index buffer is synthesized.
-  `mesh_record::is_indexed` says which a record is, and it reaches the path tracer's hit through the instance record's `is_indexed`, per instance.
-  A non-indexed record binds the manager's stand-in there, which no shader reads.
+- **Every mesh is indexed on the GPU**: a raw triangle list is uploaded with the indices 0, 1, 2, ..., one vertex per corner, so its per-vertex attributes keep their numbering.
+  Nothing is de-indexed, and an indexed mesh keeps its shared vertices.
+- **An evicted mesh's ranges of the pools are reused only once its frames have retired.**
+- **A mesh streams into staging of its own and is copied into its ranges once it landed**, so no stream ever targets a pool, which every frame touches.
 - **Calling `view.camera(...)` every frame restarts the accumulation every frame** — by design, since an animated view has no history worth blending.
   Seed with `initial_camera` / `initial_orbit` / `initial_fps` instead for a view that should converge.
 - **Nothing about placement may reach a trace.** A `view_data` has no position at all, and a leaf's fit, sampler, zoom and post-process

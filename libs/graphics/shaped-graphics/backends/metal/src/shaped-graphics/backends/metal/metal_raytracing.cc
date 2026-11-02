@@ -192,6 +192,11 @@ sg::blas_handle metal_command_list::raytracing_build_blas_triangles(cc::span<bla
     return result;
 }
 
+sg::micromap_handle metal_command_list::raytracing_build_micromap(micromap_triangles const& /*triangles*/)
+{
+    CC_UNREACHABLE("metal has no opacity micromaps, and reports no sg::feature::opacity_micromap");
+}
+
 sg::blas_handle metal_command_list::raytracing_build_blas_aabbs(cc::span<blas_aabbs const> geometries,
                                                                 accel_build_flags flags,
                                                                 int hit_record_stride)

@@ -174,12 +174,12 @@ private:
 /// than told to re-snapshot and rebind (issue: debt-sv-bindless-lock-per-recording).
 /// Geometry uploaded for one epoch, for a mesh placed with `mesh_lifetime::frame`.
 /// Its buffers are transient, so nothing here outlives the epoch it was made in.
+/// Always indexed, as a pooled mesh is: a raw triangle list gets the indices 0, 1, 2, … of its own.
 struct sv::frame_mesh
 {
     cc::hash128 hash;
     sg::buffer<tg::pos3f> vertices;
-    sg::buffer<u32> indices; // empty for a raw triangle list
-    bool is_indexed = false;
+    sg::buffer<u32> indices;
     isize triangle_count = 0;
     sg::blas_handle blas; // null until a trace asks for it
 };
@@ -487,6 +487,9 @@ private:
     /// Shared by both `describe_instance` overloads, because the block is the material's and has nothing to do with which
     /// geometry reads it.
     void _upload_parameters(sg::command_list& cmd, instance_record& r);
+
+    /// The bindless index a descriptor or texture slot names this epoch, acquired: a texture still arriving names its placeholder.
+    [[nodiscard]] u32 _slot_index(instance_slot const& slot);
 
     /// Whether every id `set` names still resolves, and whether all of it has landed — the quadric counterparts of the
     /// mesh forms, and the same reason they exist: a cached slot is verified rather than believed.

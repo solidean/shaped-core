@@ -91,11 +91,39 @@ blas_handle command_list_raytracing_scope::build_blas(cc::span<blas_triangles co
                                                       int hit_record_stride)
 {
     CC_ASSERT(hit_record_stride >= 1, "build_blas: hit_record_stride must be >= 1");
+    auto micromaps = cc::vector<micromap_handle>();
+    for (auto const& g : geometries)
+    {
+        if (g.micromap == nullptr)
+            continue;
+        CC_ASSERT(_cmd.context().supports(feature::opacity_micromap),
+                  "build_blas: a geometry names a micromap, and this context has no sg::feature::opacity_micromap");
+        CC_ASSERT(!g.micromap->is_expired(), "build_blas: a geometry names an expired micromap");
+        CC_ASSERT(g.micromap_indices != nullptr, "build_blas: a geometry with a micromap needs its micromap_indices");
+        micromaps.push_back(g.micromap);
+    }
     _cmd._stats.add(stat::blas_builds);
     auto blas = _cmd.raytracing_build_blas_triangles(geometries, flags, hit_record_stride);
     if (blas != nullptr)
+    {
         impl::set_build_record(*blas, blas_geometry::triangles, hit_record_stride);
+        if (!micromaps.empty())
+            impl::set_micromaps(*blas, cc::move(micromaps));
+    }
     return blas;
+}
+
+micromap_handle command_list_raytracing_scope::build_micromap(micromap_triangles const& triangles)
+{
+    CC_ASSERT(_cmd.context().supports(feature::opacity_micromap),
+              "build_micromap: this context has no sg::feature::opacity_micromap (check ctx.supports first)");
+    CC_ASSERT(triangles.states != nullptr && triangles.descriptors != nullptr, "build_micromap: the states and the "
+                                                                               "descriptors are both required");
+    auto maps = isize(0);
+    for (auto const& u : triangles.usage)
+        maps += isize(u.count);
+    CC_ASSERT(maps > 0, "build_micromap: the usage names no map");
+    return _cmd.raytracing_build_micromap(triangles);
 }
 
 blas_handle command_list_raytracing_scope::build_blas(cc::span<blas_aabbs const> geometries,

@@ -1,10 +1,12 @@
 #pragma once
 
+#include <clean-core/error/optional.hh>
 #include <shaped-graphics/fwd.hh>
 #include <shaped-graphics/resource/texture.hh>
 #include <shaped-graphics/routine/render_routine.hh>
 #include <shaped-rendering/fwd.hh> // sr::reconstruct_status
 #include <shaped-viewer/fwd.hh>
+#include <shaped-viewer/rendering/impl/resolved_view.hh>
 #include <shaped-viewer/rendering/layout_routine.hh> // plan_textures
 #include <shaped-viewer/stable_id.hh>
 #include <shaped-viewer/view/camera.hh>
@@ -17,6 +19,9 @@ struct sv::plan_resources
 {
     cc::vector<sg::texture_2d> targets;
     cc::vector<sg::texture_2d> traces;
+
+    /// Each trace's layer as `view_renderer::acquire_trace` resolved it, which `trace` takes rather than walking it again.
+    cc::vector<cc::optional<impl::resolved_view>> scenes;
 
     [[nodiscard]] plan_textures textures() const { return {.targets = targets, .traces = traces}; }
 };
@@ -70,7 +75,8 @@ public:
     /// Takes no guard: it reads nothing this routine initializes, only the store and the context's persistent allocator.
     [[nodiscard]] static plan_resources resolve(sg::command_list& cmd, render_plan const& plan, view_store& store);
 
-    /// Acquires every bindless index the trace at `trace_index` will read, without recording the trace.
+    /// Acquires every bindless index the trace at `trace_index` will read, without recording the trace, and keeps the
+    /// resolved layer in `res` for it.
     ///
     /// A frame runs it for each of its traces before the first one, so their resources all land in the tables before the
     /// first `freeze`, and the frame mints one snapshot rather than one per view that brought something new.
@@ -81,7 +87,7 @@ public:
                               viewer_definition const& def,
                               render_plan const& plan,
                               u32 trace_index,
-                              plan_resources const& res,
+                              plan_resources& res,
                               gpu_resource_manager& resources);
 
     /// Records the trace at `trace_index` into its own accumulation texture.
@@ -120,6 +126,9 @@ private:
     {
         camera_matrices current;
         camera_matrices previous;
+        /// The sub-pixel offset every pixel of this frame and the frame before was drawn through, in [-0.5, 0.5), or 0 where each sample drew its own.
+        tg::vec2f jitter = {};
+        tg::vec2f previous_jitter = {};
     };
 
     /// One traced layer's denoiser slots, all null when the layer does not denoise.
@@ -159,15 +168,23 @@ private:
         /// `crossfade_weight` at the mean's frame count after this frame's trace.
         f32 blend = 1.0f;
 
+        /// The temporal member runs on the mean rather than this frame's samples: `still_denoise::temporal_on_mean` past the hand-off.
+        bool temporal_on_mean = false;
+
+        /// The spatial member runs only when the mean's samples have doubled since its last run: `still_denoise::oidn`.
+        bool spatial_on_doubling = false;
+
         [[nodiscard]] bool runs_temporal() const { return blend < 1.0f; }
         [[nodiscard]] bool runs_spatial() const { return blend > 0.0f; }
     };
 
     /// The schedule for a layer whose mean will hold `accum_frame` frames once this frame's trace lands.
+    /// `display_scale` is what the layer's display multiplies its image by, which a denoiser judging noise on screen is told.
     [[nodiscard]] static denoise_schedule _schedule_denoise(sg::context const& ctx,
                                                             render_settings const& settings,
                                                             denoise_slots const& ds,
-                                                            u32 accum_frame);
+                                                            u32 accum_frame,
+                                                            f32 display_scale);
 
     /// Denoises a traced layer into its denoised slot — temporally while its mean is young, spatially after, and both
     /// at once across the hand-off — and points `presented` at what its parent should sample.

@@ -134,9 +134,10 @@ ASYNC_INVOCABLE_TEST("sv - path-traced Cornell box (headless)", (sg::context_han
         }));
 
     // Reaching here means the whole GI pipeline ran (BLAS + TLAS build, ray dispatch) without a device error.
-    CHECK(mesh_rec->triangle_count == box.materials.size());
-    CHECK(!mesh_rec->is_indexed); // the non-indexed path: the corner indices come from the primitive, not a buffer
-    CHECK(records[0].is_indexed == 0u);
+    CHECK(mesh_rec->geometry.triangle_count == box.materials.size());
+    // A raw list is indexed in the pool too: one vertex per corner.
+    CHECK(mesh_rec->geometry.vertex_count == mesh_rec->geometry.index_count());
+    CHECK(records[0].first_index == u32(mesh_rec->geometry.first_index));
 
     co_await cc::async_settled(sv::background_work(ctx));
 }

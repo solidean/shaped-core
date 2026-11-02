@@ -35,7 +35,7 @@ Back to the [semantics](_index.md); the reasons are in [why/emitting.md](why/emi
 * **EMIT-13** No error depends on the target but EMIT-109's and EMIT-122's: an entry point is written for every target or for none ([why](why/emitting.md#emit-13)).
 * **EMIT-109** An entry point that needs a feature no device of the target has is `target-lacks-feature`, and its detail names the feature.
   Today that is `wgsl` against `binding_arrays`, `multisampled_array_textures`, `raytracing_pipeline`, `geometry_shader` and `tessellation_shader`.
-  It is also `wgsl` against `shader_int16`, `device_coherence`, `image_atomics` and `helper_lane_query`, which core WebGPU has none of.
+  It is also `wgsl` against `shader_int16`, `device_coherence`, `image_atomics`, `first_instance` and `helper_lane_query`, which core WebGPU has none of.
   `ray_query` is none of them: WGSL writes a trace's emulated form (EMIT-135).
   The shader chose it by `require`, so a portable shader still meets EMIT-13's promise.
 * **EMIT-66** A tree that is not core is the error `not-core`, and its detail names the first node that offends.

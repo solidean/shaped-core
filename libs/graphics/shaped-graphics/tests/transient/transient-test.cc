@@ -2,9 +2,11 @@
 #include <clean-core/container/span.hh>
 #include <clean-core/container/vector.hh>
 #include <clean-core/fwd.hh> // cc::byte
+#include <clean-core/string/format.hh>
 #include <clean-core/thread/async_coroutine.hh>
 #include <nexus/async-test.hh>
 #include <nexus/test.hh>
+#include <shaped-graphics/all.hh>
 #include <shaped-graphics/binding/binding.hh>
 #include <shaped-graphics/binding/binding_group.hh> // sg::named_view
 #include <shaped-graphics/command_list/command_list.hh>
@@ -320,4 +322,96 @@ ASYNC_INVOCABLE_TEST("sg - transient create_buffer_from_* fill the buffer inline
     CHECK(typed_data[2] == 3);
     CHECK(raw_data[1] == 2);
     CHECK(one_data[0] == 42);
+}
+
+namespace
+{
+constexpr int k_texture_extent = 16;
+
+/// A transient rgba8 texture uploaded with `pattern(seed + i)` and read back in one list: whether every byte came back.
+cc::shared_async<bool> transient_texture_round_trip(sg::context_handle const& ctx, int seed)
+{
+    if (auto* const home = ctx->device_home())
+        co_await cc::async_resume_on(*home);
+
+    auto bytes = cc::vector<byte>();
+    for (int i = 0; i < k_texture_extent * k_texture_extent * 4; ++i)
+        bytes.push_back(pattern(seed + i));
+
+    auto cmd = ctx->create_command_list();
+    if (!cmd)
+        co_return false;
+    auto const texture
+        = ctx->transient.create_texture_2d({.format = sg::pixel_format::rgba8_unorm,
+                                            .width = k_texture_extent,
+                                            .height = k_texture_extent,
+                                            .usage = sg::texture_usage::copy_src | sg::texture_usage::copy_dst});
+    cmd->upload.bytes_to_texture(texture.raw(), bytes);
+    auto future = cmd->download.bytes_from_texture(texture.raw());
+    ctx->submit_command_list(cc::move(cmd));
+
+    auto const back = co_await future.bytes();
+    if (back.size() != bytes.size())
+        co_return false;
+    for (auto i = isize(0); i < bytes.size(); ++i)
+        if (back[i] != bytes[i])
+            co_return false;
+    co_return true;
+}
+} // namespace
+
+// Transient textures are placed in a per-epoch window of their own heap, as buffers are, so two in one epoch must not
+// overlap and each epoch's must survive the next epoch reusing the same memory while it is still in flight.
+ASYNC_INVOCABLE_TEST("sg - transient textures are independent within an epoch and reused across epochs",
+                     (sg::context_handle const& ctx))
+{
+    REQUIRE(ctx != nullptr);
+
+    for (int e = 0; e < 6; ++e)
+    {
+        CHECK(co_await transient_texture_round_trip(ctx, e * 31 + 1));
+        CHECK(co_await transient_texture_round_trip(ctx, e * 31 + 17));
+        ctx->advance_epoch();
+        co_await ctx->epochs_in_flight_completion(2);
+    }
+}
+
+// A render target placed where an earlier epoch's texture lived must be initialized before it is drawn: D3D12 requires
+// a placed render target's first use to discard, clear or copy it.
+// So each epoch clears a fresh one to its own color over the last one's memory, and reads back exactly that color.
+ASYNC_INVOCABLE_TEST("sg - a transient render target clears to its color over an earlier epoch's",
+                     (sg::context_handle const& ctx))
+{
+    REQUIRE(ctx != nullptr);
+
+    for (int e = 0; e < 4; ++e)
+    {
+        auto const value = u8(0x30 + 0x20 * e);
+        auto cmd = ctx->create_command_list();
+        REQUIRE(cmd != nullptr);
+        auto const target
+            = ctx->transient.create_texture_2d({.format = sg::pixel_format::rgba8_unorm,
+                                                .width = k_texture_extent,
+                                                .height = k_texture_extent,
+                                                .usage = sg::texture_usage::render_target | sg::texture_usage::copy_src});
+        {
+            auto const c = float(value) / 255.0f;
+            auto pass = cmd->raster.render_to(
+                {.color_targets = {target.as_render_target_view().cleared(tg::vec4f(c, c, c, 1))}});
+        }
+        auto future = cmd->download.bytes_from_texture(target.raw());
+        ctx->submit_command_list(cc::move(cmd));
+
+        auto const pixels = co_await future.bytes();
+        REQUIRE(pixels.size() == isize(k_texture_extent) * k_texture_extent * 4);
+        auto wrong = 0;
+        auto const* const p = reinterpret_cast<u8 const*>(pixels.data());
+        for (auto i = isize(0); i < pixels.size(); i += 4)
+            if (p[i] != value || p[i + 1] != value || p[i + 2] != value || p[i + 3] != 255)
+                ++wrong;
+        CHECK(wrong == 0).context(cc::format("epoch {}", e));
+
+        ctx->advance_epoch();
+        co_await ctx->epochs_in_flight_completion(1);
+    }
 }

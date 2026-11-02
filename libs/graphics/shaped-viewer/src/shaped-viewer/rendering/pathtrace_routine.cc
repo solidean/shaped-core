@@ -167,7 +167,8 @@ pathtrace_routine::pipeline_variant const* pathtrace_routine::_variant_for(sg::c
 
 void place_instance_record(shaders::tracer::instance_record& record,
                            sg::tlas_instance const& instance,
-                           material_opacity const& opacity)
+                           material_opacity const& opacity,
+                           material_secondary const& secondary)
 {
     // The TLAS wire layout is already row-major 3x4, translation in column 3 — exactly the record's rows.
     auto const row = [&](int r)
@@ -187,6 +188,34 @@ void place_instance_record(shaders::tracer::instance_record& record,
     record.opacity_sampler = opacity.sampler;
     record.opacity_transform = opacity.transform;
     record.opacity_cutoff = opacity.cutoff;
+
+    record.base_kind = u32(secondary.base_color.kind);
+    record.base_offset = secondary.base_color.offset;
+    record.base_uv_offset = secondary.base_color.uv_offset;
+    record.base_frequency = secondary.base_color.frequency;
+    record.base_channels = secondary.base_color.channels[0] | (secondary.base_color.channels[1] << 8)
+                         | (secondary.base_color.channels[2] << 16);
+    record.base_sampler = secondary.base_color.sampler;
+    record.base_transform = secondary.base_color.transform;
+    record.rough_kind = u32(secondary.roughness.kind);
+    record.rough_offset = secondary.roughness.offset;
+    record.rough_uv_offset = secondary.roughness.uv_offset;
+    record.rough_frequency = secondary.roughness.frequency;
+    record.rough_channels = secondary.roughness.channels[0] | (secondary.roughness.channels[1] << 8)
+                          | (secondary.roughness.channels[2] << 16);
+    record.rough_sampler = secondary.roughness.sampler;
+    record.rough_transform = secondary.roughness.transform;
+    record.metal_kind = u32(secondary.metalness.kind);
+    record.metal_offset = secondary.metalness.offset;
+    record.metal_uv_offset = secondary.metalness.uv_offset;
+    record.metal_frequency = secondary.metalness.frequency;
+    record.metal_channels = secondary.metalness.channels[0] | (secondary.metalness.channels[1] << 8)
+                          | (secondary.metalness.channels[2] << 16);
+    record.metal_sampler = secondary.metalness.sampler;
+    record.metal_transform = secondary.metalness.transform;
+    auto const per_element = secondary.tangent_frame.kind == material_value_kind::attribute;
+    record.frame_offset = per_element ? secondary.tangent_frame.offset : material_opacity::no_offset;
+    record.frame_frequency = secondary.tangent_frame.frequency;
 
     // A caller's offset counts two records per permutation, so it names the permutation the instance shades with.
     // An odd one would shade the instance through its neighbor's material, reading its parameter block in another layout.
