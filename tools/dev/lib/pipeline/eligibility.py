@@ -82,7 +82,7 @@ def query_listing(
         cmd += ["--list-tests-json", "-", *extra_args]
         with profile.span(target.name, type="probe", extra={"query": "--list-tests-json"}):
             proc = subprocess.run(
-                cmd, cwd=root, env=env, capture_output=True, text=True, timeout=timeout
+                cmd, cwd=root, env=env, capture_output=True, encoding="utf-8", errors="replace", timeout=timeout
             )
     except (OSError, subprocess.SubprocessError, jsr.NotFound):
         return None
