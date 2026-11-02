@@ -4,6 +4,8 @@ refs:
   - file: libs/graphics/shaped-graphics-language/src/shaped-graphics-language/builtins/register_sync.cc
   - file: libs/graphics/shaped-graphics-language/src/shaped-graphics-language/emit/impl/msl.cc
   - test: compute-coherence*
+closed: 2026-11-02
+resolution: fixed
 ---
 
 # Run MSL's two memory-ordering spellings on a Mac

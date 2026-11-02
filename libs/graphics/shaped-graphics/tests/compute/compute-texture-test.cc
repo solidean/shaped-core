@@ -509,3 +509,36 @@ ASYNC_INVOCABLE_TEST("sg - an image whose format is an option is written in whic
     }
     CHECK(wrong == 0);
 }
+
+ASYNC_INVOCABLE_TEST("sg - an SGL invocation reads back the texel it just stored to an image",
+                     (sg::context_handle const& ctx))
+{
+    REQUIRE(ctx != nullptr);
+    if (!sg_test::shaders_reach(*ctx))
+        SKIP("no compiler builds this binary's shaders into a format this context accepts");
+
+    auto const pipeline = co_await shaders::textures::store_then_load.acquire_pipeline(*ctx);
+    auto const layout = ctx->cached.acquire_binding_group_layout<shaders::textures::own_texels>();
+
+    constexpr auto count = k_extent * k_extent;
+    auto const texels = make_texture(ctx, sg::pixel_format::r32_uint, sg::texture_usage::image);
+    auto const seen = ctx->persistent.create_buffer_from_data(
+        cc::vector<u32>::create_defaulted(count), sg::buffer_usage::readwrite_buffer | sg::buffer_usage::copy_src);
+
+    auto cmd = ctx->create_command_list();
+    cmd->upload.bytes_to_texture(texels.raw(), cc::as_bytes(cc::vector<u32>::create_defaulted(count)));
+    auto const group = ctx->transient.create_binding_group(
+        *cmd, layout,
+        shaders::textures::own_texels{.texels = texels.as_image_view<sg::pixel_format::r32_uint>(),
+                                      .seen = seen.as_readwrite_buffer()});
+    cmd->compute.bind_pipeline(*pipeline);
+    cmd->compute.bind_group(0, *group);
+    cmd->compute.dispatch_threads(count);
+    auto const seen_back = cmd->download.data_from_buffer(seen);
+    ctx->submit_command_list(cc::move(cmd));
+
+    auto const got = co_await seen_back.data();
+    REQUIRE(got.size() == isize(count));
+    for (auto i = 0; i < count; ++i)
+        CHECK(got[i] == u32(i) * 7u + 5u).dump("i", i);
+}

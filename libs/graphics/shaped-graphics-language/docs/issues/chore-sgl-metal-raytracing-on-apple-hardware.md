@@ -17,5 +17,3 @@ What a run should cover:
 - every pipeline and inline-trace GPU test, on at least one M-series GPU with hardware ray tracing and one without
 - sv's path tracer on a scene with instances, against the dx12 image
 - the cost of the pipeline's kernel-then-call shape against inline traces, since metal has no native pipeline object
-
-[chore-sgl-msl-memory-ordering-on-a-mac](chore-sgl-msl-memory-ordering-on-a-mac.md) is the same kind of run for memory ordering, and can share the setup.
