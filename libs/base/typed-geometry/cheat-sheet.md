@@ -530,6 +530,24 @@ x.to_string(); cc::format("{:'x}", x);                     // decimal; the full 
 // vec<3, fi64> exists, and its dot product is computed (and wraps) in fi64.
 ```
 
+## bigfloat (exact binary float)
+
+```cpp
+#include <typed-geometry/scalar/bigfloat/bigfloat.hh>
+tg::bigfloat_sbo<K>; tg::bigfloat;                 // K limbs inline (8K + 8 bytes); tg::bigfloat is K = 2 until the K sweep decides
+tg::bigfloat x = 0.1; tg::bigfloat(7); tg::bigfloat(i64(-3));   // exact from any finite double or integer, implicit
+tg::bigfloat::from_fixed_int(fi256(v), e);         // v * 2^e, exactly
+a + b; a - b; a * b; -a; a += b;                   // exact, never rounds; a spilled mantissa comes from cc's node allocator
+r.assign_mul(a, b); r.assign_add(a, b);            // into r, reusing its capacity; a or b may be r
+tg::bigfloat::msum({{a, b}, {c, d, true}, {e}});   // a*b - c*d + e in one accumulator, at most one allocation
+x.sign(); compare(a, b); a < b; a == b;            // -1/0/+1; compare is the sign of a - b without computing it
+x.to_f64();                                        // nearest, ties to even; correct unless subnormal, exact for any double
+x.limbs(); x.exponent(); x.is_inline(); x.capacity();  // the trimmed mantissa, least significant first, times 2^exponent
+// The exponent is an i32 in bits: products of doubles leave the double range and stay exact.
+// An exponent gap costs limbs: 2^1000 + 2^-1000 is 32 limbs, dense from the bottom bit to the top one.
+// A msum summand refers to its operands: build it in the msum's own full expression.
+```
+
 ## half_float (binary16)
 
 ```cpp
