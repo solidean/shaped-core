@@ -4,6 +4,7 @@
 #include <shaped-graphics/backends/dx12/dx12_sampler.hh>
 #include <shaped-graphics/binding/binding.hh> // sg::is_sampler
 #include <shaped-graphics/binding/impl/layout_hash.hh>
+#include <shaped-graphics/context/impl/debug_windows.hh>
 
 namespace sg::backend::dx12
 {

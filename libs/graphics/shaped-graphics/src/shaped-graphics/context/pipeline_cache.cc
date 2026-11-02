@@ -16,6 +16,7 @@
 #include <shaped-graphics/compute/compute_pipeline.hh>
 #include <shaped-graphics/context/cold_caches.hh>
 #include <shaped-graphics/context/context.hh>
+#include <shaped-graphics/context/impl/debug_windows.hh>
 #include <shaped-graphics/context/pipeline_cache.hh>
 #include <shaped-graphics/raster/raster_pipeline.hh>
 #include <shaped-graphics/raytracing/raytracing_pipeline.hh>

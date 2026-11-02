@@ -6,6 +6,7 @@
 #include <shaped-graphics/backends/webgpu/webgpu_context.hh>
 #include <shaped-graphics/backends/webgpu/webgpu_format.hh>
 #include <shaped-graphics/binding/impl/layout_hash.hh>
+#include <shaped-graphics/context/impl/debug_windows.hh>
 
 namespace sg::backend::webgpu
 {
