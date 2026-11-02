@@ -2,6 +2,8 @@
 created: 2026-11-02
 refs:
   - file: libs/graphics/shaped-graphics-language/docs/spec/semantics/emitting.md
+claimed-by: Claude (for Philip Trettner)
+claimed-at: 2026-11-02T15:48Z
 ---
 
 # The emitted text maps back to the SGL source
