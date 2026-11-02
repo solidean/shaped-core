@@ -572,7 +572,7 @@ public:
             out += "    sgl_context const sgl_ctx = sgl_data.context;\n";
             write_context_bindings(out, p);
             // A hit's transforms are the identity here: metal hands a traversal function its instance's transforms
-            // only under intersection tags sg's tables do not declare (issue: feat-sgl-metal-raytracing-pipeline-dxr-parity).
+            // only under intersection tags sg's tables do not declare (issue: feat-sgl-metal-hit-instance-transforms).
             out.appendf("    sgl_hit_record sgl_hit;\n"
                         "    sgl_hit.t = {};\n"
                         "    sgl_hit.t_min = sgl_min;\n"
