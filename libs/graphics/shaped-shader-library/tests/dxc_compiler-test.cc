@@ -447,6 +447,9 @@ TEST("slib - DXC compiles SGL's debug records for dx12 and vulkan", exclusive("s
         REQUIRE(text.value().debug_sites[0].values.size() == 3);
         CHECK(text.value().debug_sites[0].values[2].family == "bool")
             .dump("type", text.value().debug_sites[0].values[2].type);
+        // DXIL needs the reflection the Linux DXC lacks (see make_dxc_compiler); the dx12 text is still checked above
+        if (!l.is_spirv && k_target_format != sg::shader_format::dxil)
+            continue;
         auto compiler = l.is_spirv ? slib::create_dxc_spirv_compiler() : slib::create_dxc_compiler();
         REQUIRE(compiler.has_value());
         auto const shader = compiler.value()->compile(
