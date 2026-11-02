@@ -138,6 +138,12 @@ enum class sg::feature
     /// Vulkan grants it with `VK_EXT_opacity_micromap`, D3D12 from DXR 1.2 in the Agility SDK; metal and WebGPU have no equivalent.
     /// The host's alone: a shader traces the same way either way, so no `require` names it.
     opacity_micromap,
+
+    /// A vertex shader may send its primitive to one layer of a layered render target (SGL's `@layer`), so one draw
+    /// fills every layer of an array, such as both eyes of a stereo frame.
+    /// D3D12 grants it with `VPAndRTArrayIndexFromAnyShaderFeedingRasterizerSupportedWithoutGSEmulation`, Vulkan with
+    /// `shaderOutputLayer`, and Metal on every Apple GPU its Metal 4 floor admits; WebGPU has no such output.
+    vertex_layer_output,
 };
 
 CC_FLAG_ENUM_INDEXED(sg, feature, cc::u32);
@@ -174,8 +180,9 @@ inline constexpr feature k_all_features[] = {
     feature::first_instance,
     feature::helper_lane_query,
     feature::opacity_micromap,
+    feature::vertex_layer_output,
 };
-static_assert(isize(sizeof(k_all_features) / sizeof(k_all_features[0])) == isize(feature::opacity_micromap) + 1,
+static_assert(isize(sizeof(k_all_features) / sizeof(k_all_features[0])) == isize(feature::vertex_layer_output) + 1,
               "k_all_features lists every feature");
 
 /// The enumerator's name, `ray_query`, which is also what SGL's `require` spells it as.
@@ -233,6 +240,8 @@ static_assert(isize(sizeof(k_all_features) / sizeof(k_all_features[0])) == isize
         return "helper_lane_query";
     case feature::opacity_micromap:
         return "opacity_micromap";
+    case feature::vertex_layer_output:
+        return "vertex_layer_output";
     }
     return "";
 }

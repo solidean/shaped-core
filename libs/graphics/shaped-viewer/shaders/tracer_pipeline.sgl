@@ -14,11 +14,6 @@ use scene
 use slug
 use tracer
 
-/// The tracer's two rays, restated from module `tracer`, whose shading traces the shadow ray through its own.
-rays path_rays:
-    surface: tracer.surface_payload
-    occlusion: tracer.shadow_payload
-
 /// One sample's path, walked until it escapes, runs out of bounces or is absorbed — what `path_trace` does per sample.
 @raygen fun path_trace(@launch_id id: int3, @launch_size size: int3){tracer.traced, tracer.bindless, slug.tables}:
     let f = tracer.traced.frame[0]
@@ -66,6 +61,16 @@ rays path_rays:
         let mut origin = cam.position
         let mut dir = normalize(scene.camera_ray_offset(cam, px_f + jitter, dim_f))
 
+        // Where a partial coverage can cut out, the guides and the motion come from a guide ray through the same point,
+        // since the path's camera ray takes or skips a partial coverage at random and guides of its hit would flicker with it.
+        // Its stream comes back advanced and is dropped, so the path traces as it would without it.
+        let guided = tracer.guide_rays()
+        let mut guide_hit = tracer.surface_payload_for(rng, float3(0.0), float3(0.0), 0.0, 3u, 0u)
+        if guided:
+            guide_hit.guide = 1u
+            let gr = ray(origin = pos3(origin.x, origin.y, origin.z), direction = vec3(dir.x, dir.y, dir.z), t_min = 0.0, t_max = 1e4)
+            trace(tracer.traced.world, gr, tracer.path_rays.surface, mut guide_hit)
+
         let mut throughput = float3(1.0)
         let mut radiance = float3(0.0)
 
@@ -100,7 +105,7 @@ rays path_rays:
             let last_bounce = if b - free + 1 >= f.max_bounces => 1u else 0u
             let mut p = tracer.surface_payload_for(rng, medium_sigma_t, medium_albedo, medium_g, channel, last_bounce)
             let r = ray(origin = pos3(origin.x, origin.y, origin.z), direction = vec3(dir.x, dir.y, dir.z), t_min = 0.0, t_max = 1e4)
-            trace(tracer.traced.world, r, path_rays.surface, mut p)
+            trace(tracer.traced.world, r, tracer.path_rays.surface, mut p)
 
             // The random state comes back advanced by whatever the hit drew from it.
             rng = p.rng
@@ -124,28 +129,32 @@ rays path_rays:
             let roughness = p.roughness
 
             if primary:
+                // The surface the guides describe: the guide ray's where there is one, the camera ray's otherwise.
+                let g_t = if guided => guide_hit.hit_t else hit_t
+                let g_n = if guided => guide_hit.normal else n
+
                 // Linear view depth rather than the distance along the ray, which grows toward the image's edges.
                 // An escaped primary ray leaves both at zero, which is what the denoiser reads as "no surface".
-                if hit_t >= 0.0:
-                    guide_normal += n
-                    guide_depth += hit_t * dot(dir, normalize(cam.forward))
-                    guide_albedo += albedo
-                    guide_specular_albedo += specular_albedo
-                    guide_roughness += roughness
+                if g_t >= 0.0:
+                    guide_normal += g_n
+                    guide_depth += g_t * dot(dir, normalize(cam.forward))
+                    guide_albedo += if guided => guide_hit.albedo else albedo
+                    guide_specular_albedo += if guided => guide_hit.specular_albedo else specular_albedo
+                    guide_roughness += if guided => guide_hit.roughness else roughness
 
                     // The depth raster sees at the pixel CENTER: the center ray met with the plane the sample hit.
                     // The projection sv::matrices_of builds has w as the view depth, so z / w is 1 - near / depth.
                     if s == 0:
                         let center = normalize(scene.camera_ray_offset(cam, px_f + 0.5, dim_f))
-                        let facing = dot(n, center)
-                        let t = if abs(facing) > 1e-6 => dot(n, dir * hit_t) / facing else hit_t
-                        let t_forward = if t > 0.0 => t else hit_t
+                        let facing = dot(g_n, center)
+                        let t = if abs(facing) > 1e-6 => dot(g_n, dir * g_t) / facing else g_t
+                        let t_forward = if t > 0.0 => t else g_t
                         let view_depth = t_forward * dot(center, normalize(cam.forward))
                         primary_depth = max(1.0 - f.near_plane / view_depth, 0.0)
 
                 // An escaped ray reprojects as a point at infinity, so the sky moves with rotation and not with translation.
                 let prev = scene.camera(..f.previous_camera)
-                let offset = if hit_t >= 0.0 => origin + dir * hit_t - prev.position else dir
+                let offset = if g_t >= 0.0 => origin + dir * g_t - prev.position else dir
                 motion += (px_f + jitter) - scene.camera_project(prev, offset, dim_f)
 
                 // The lobe the continuation was drawn from is what this path IS, for the denoiser's purposes.
@@ -416,10 +425,10 @@ fun component_of(v: float3, i: uint) -> float:
 @miss fun shadow_miss(p: mut tracer.shadow_payload){tracer.traced, tracer.bindless, slug.tables}:
     p.visible = 1.0
 
-/// The tracer: the raygen above, a miss per ray type in the order `path_rays` names them, and the host's hit groups.
+/// The tracer: the raygen above, a miss per ray type in the order `tracer.path_rays` names them, and the host's hit groups.
 /// Depth 2: the raygen's surface ray, and the shadow rays its closest hits trace for next-event estimation.
 @raytracing pipeline path:
-    rays = path_rays
+    rays = tracer.path_rays
     raygen = path_trace
     miss.surface = path_miss
     miss.occlusion = shadow_miss

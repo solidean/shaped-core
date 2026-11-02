@@ -6,6 +6,7 @@
 #include <shaped-graphics-language/builtins/ids.hh>
 #include <shaped-graphics-language/check/features.hh>
 #include <shaped-graphics-language/check/ids.hh>
+#include <shaped-graphics-language/interpret/scalar.hh>
 
 /// What the check pass knows about the declarations of a module: its types, its symbols and the per-file side tables.
 /// Every name is kept as text, so a reader of these needs no `parsed_file`.
@@ -52,6 +53,11 @@ enum class sgl::check::type_kind : sgl::u8
     /// stored and returned, and nothing else (CHK-338).
     /// A call deduces what it stands for, and inlining writes that in its place.
     type_parameter,
+    /// What a value parameter `[n: int]` stands for in an instance: `element` is its type, and `count` its 32 bits, a
+    /// case index for an enum, with every NaN one (CHK-338).
+    constant,
+    /// `scalar_of[V]` of an open `V`, which is its `element`: an instance makes it `V`'s scalar (CHK-423).
+    scalar_of,
     // Tuples and anonymous struct types come later, each as a kind that is deduplicated by structure.
 };
 
@@ -256,10 +262,15 @@ struct sgl::check::type_info
     bool is_no_padding = false;
     /// `@swizzle`: every two to four of its one-letter fields read at once, `v.zyx`, as a plain vector (CHK-384).
     bool has_swizzles = false;
+    /// `@swizzle(rgba)`: a second letter per field in order, which a swizzle may use instead of the fields' own (CHK-409).
+    cc::string swizzle_alias;
     /// The element of a `buffer` or an `array`; `none` for every other kind.
     type_id element = type_id::none;
     /// An `array`'s length; 0 for `T[]`, whose length the host binds (CHK-286).
     i32 count = 0;
+    /// The value parameter an array's length or an image's format is, `T[n]` or `image_2d[f]`, which an instance
+    /// replaces by its constant (CHK-339).
+    type_id count_parameter = type_id::none;
     /// Whether a `buffer` may be written: `mut buffer[T]` against `buffer[T]`.
     bool is_mut = false;
     /// The shape of a `texture` or an `image`.
@@ -278,7 +289,11 @@ struct sgl::check::type_info
     /// A generic struct of the prelude, `struct report[A]:`, whose `element` is its type parameter (CHK-339).
     bool is_template = false;
     /// An instance of one, `report[hit_attributes]`: the template, whose `element` this instance's argument replaces.
+    /// For a type parameter, its default, `[T = float]`, which may name a parameter before it (CHK-338).
     type_id generic = type_id::none;
+    /// A template's parameters in order, and what each stands for in an instance of it; a range of
+    /// `checked_module::type_lists` (CHK-339).
+    ast::range_of<type_id> arguments;
 
     bool operator==(type_info const&) const = default;
 };
@@ -317,6 +332,17 @@ enum class sgl::check::pixel_output : sgl::u8
     sample_mask,
 };
 
+/// Where GPU memory leaves room between values, as `@padding` asks (CHK-369).
+enum class sgl::check::padding_kind : sgl::u8
+{
+    /// No annotation: every value at its natural alignment, so a vector loads whole on every target (EMIT-110).
+    natural,
+    /// `@padding(.none)`: as a C++ compiler places a struct of the generated host types (EMIT-154, EMIT-167).
+    none,
+    /// `@padding(.every_element)` on a constant block's array: each element starts a 16-byte row (EMIT-172).
+    every_element,
+};
+
 /// A field of a struct or a member of a binding.
 struct sgl::check::member_info
 {
@@ -327,6 +353,8 @@ struct sgl::check::member_info
     ast::field_id field = ast::field_id::none;
     /// Carries `@position`.
     bool is_position = false;
+    /// Carries `@layer`: the layer of a layered render target the vertex stage sends its primitive to (CHK-419).
+    bool is_layer = false;
     /// `@interpolate(…)`, or the default: perspective at the pixel centre.
     interpolation interpolate;
     /// Carries `@interpolate` at all, which a member that is no stage link must not.
@@ -351,6 +379,8 @@ struct sgl::check::member_info
     bool is_non_filtering = false;
     /// Carries `@coherent`: a `mut` buffer or image whose writes reach every workgroup of the dispatch (CHK-368).
     bool is_coherent = false;
+    /// A buffer member's `@padding(.none)`: its elements are placed as C++ places them (CHK-369).
+    padding_kind padding = padding_kind::natural;
     /// A `sampler name:` block of a binding, as a position in `checked_module::samplers`; -1 for any other member.
     i32 static_sampler = -1;
     /// `@sampler(name)` on a texture: the position among its binding's members of the sampler a sampling call without
@@ -458,6 +488,8 @@ enum class sgl::check::constant_kind : sgl::u8
     real,
     /// A case of an enum; for `bool`, whose cases are its two values, the case is the value.
     enum_case,
+    /// Any other value a const computes (CHK-219): a vector, a matrix, a struct or an array, as its scalars.
+    composite,
 };
 
 /// The value of a `const`, which is known before anything runs.
@@ -477,8 +509,19 @@ struct sgl::check::constant_info
     i32 case_index = -1;
     /// The `@option const` the value comes from, through any chain of consts naming it (CHK-353); `none` for a plain one.
     symbol_id option = symbol_id::none;
+    /// A `composite`'s scalars in field order, nested values included, as the abstract machine holds a value.
+    cc::vector<scalar> leaves;
+    /// Every option a computed value reaches, through its own names and the functions it calls; each place the const
+    /// is named reaches them all.
+    cc::vector<symbol_id> computed_options;
 
-    bool operator==(constant_info const&) const = default;
+    [[nodiscard]] bool operator==(constant_info const& rhs) const
+    {
+        return symbol == rhs.symbol && type == rhs.type && kind == rhs.kind && integer == rhs.integer
+            && is_unsigned == rhs.is_unsigned && is_hex == rhs.is_hex && real == rhs.real
+            && case_index == rhs.case_index && option == rhs.option && ast::impl::is_equal(leaves, rhs.leaves)
+            && ast::impl::is_equal(computed_options, rhs.computed_options);
+    }
 };
 
 /// Where the source names an option, through a const naming it or directly: what an entry point's options are read from.
@@ -536,6 +579,9 @@ struct sgl::check::function_info
     /// Carries `@pure`: a call of it has no effect, so nobody can tell whether or when it ran.
     /// A `@builtin` without it is assumed to have one.
     bool is_pure = false;
+    /// A pixel entry point that returns one color value (CHK-418): the `@pixel struct` of one member, `color`, which
+    /// the checker mints and every return builds; none for one that returns its `@pixel struct`, or nothing.
+    type_id pixel_targets = type_id::none;
     /// `@geometry(max_vertices = N)`'s `N`; 0 for every other stage.
     i32 max_vertices = 0;
     /// `@tessellation_control(partitioning = …, winding = …)`; the first of each for every other stage.
@@ -552,17 +598,6 @@ struct sgl::check::function_info
     constexpr bool operator==(function_info const&) const = default;
 };
 
-/// What a binding's `@layout` promises its constant block (CHK-369).
-enum class sgl::check::block_layout : sgl::u8
-{
-    /// No annotation: the compiler places the block, and promises nothing but the generated struct (EMIT-116).
-    unpromised,
-    /// `@layout(.hlsl)`: HLSL's constant-buffer packing in declaration order, never reordered (EMIT-153).
-    hlsl,
-    /// `@layout(.cpp)`: as a C++ compiler places a struct of the generated host types (EMIT-154).
-    cpp,
-};
-
 struct sgl::check::binding_info
 {
     symbol_id symbol = symbol_id::none;
@@ -572,7 +607,8 @@ struct sgl::check::binding_info
     bool is_workgroup = false;
     /// `@no_padding`: a gap before any member of its constant block is an error.
     bool is_no_padding = false;
-    block_layout layout = block_layout::unpromised;
+    /// `@padding(.none)`: its constant block and its buffers' elements are placed as C++ places them (CHK-369).
+    padding_kind padding = padding_kind::natural;
     ast::range_of<member_info> members;
     /// What its own `require` lines name, which declares them for every entry point listing it (CHK-262).
     feature_set declared;
@@ -716,6 +752,9 @@ enum class sgl::check::target_kind : sgl::u8
     undefined_value,
     /// On a cast: `x as texel[F]` to a texel of another width than `x`'s (CHK-391).
     texel_conversion,
+    /// A value parameter's name in an instance: `index` is the constant it stands for, in `checked_module::types`
+    /// (CHK-338).
+    generic_value,
 };
 
 /// What an expression refers to, for an editor: go to definition, hover, rename.
@@ -820,9 +859,14 @@ struct sgl::check::written_argument
     i32 splat_member = -1;
     /// `mut x`: the caller's place, for a `mut` parameter (AST-149, CHK-316).
     bool is_mut = false;
+    /// A dot call's receiver that is a place a body could assign: it meets a `mut` parameter as `mut x` would, and
+    /// any other as a value (CHK-416); a call that binds it to a `mut` parameter records it `is_mut`.
+    bool may_be_mut = false;
     /// A function handed to a parameter of function type: a function's name, an arrow lambda, or such a parameter
     /// handed on (CHK-318); what it stands for is its expression's target.
     bool is_function = false;
+    /// The `as` a plain vector's constructor converts this scalar through to its own kind (CHK-421); none for most.
+    symbol_id conversion = symbol_id::none;
 
     constexpr bool operator==(written_argument const&) const = default;
 };
@@ -889,4 +933,23 @@ struct sgl::check::file_tables
         return ast::impl::is_equal(type_of, rhs.type_of) && ast::impl::is_equal(target_of, rhs.target_of)
             && ast::impl::is_equal(call_of, rhs.call_of);
     }
+};
+
+/// One instantiation of a generic function, whose body is checked with what its type parameters stand for (CHK-338).
+/// Its tables overlay its file's for the body's expressions, which the generic check wrote with the parameters open.
+struct sgl::check::function_instance
+{
+    symbol_id function = symbol_id::none;
+    /// Two by two: a type parameter, then the closed type it stands for; a range of `checked_module::type_lists`.
+    ast::range_of<type_id> bindings;
+    /// The expression the tables' first entries are; they grow to cover every expression the instance wrote.
+    i32 first = 0;
+    /// An entry the instance did not write is `none`, a target of kind `none` or a call of -2, and reads the file's.
+    file_tables tables;
+    /// What an arrow body without `-> T` returns in this instance.
+    type_id result = type_id::none;
+    /// The body checked without an error.
+    bool is_body_sound = false;
+
+    bool operator==(function_instance const&) const = default;
 };

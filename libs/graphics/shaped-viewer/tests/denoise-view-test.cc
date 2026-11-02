@@ -263,11 +263,11 @@ ASYNC_INVOCABLE_TEST("sv - the wavefront tracer traces and denoises the viewer's
     if (!ctx.supports(sg::feature::ray_query) || !ctx.supports(sg::feature::raytracing_pipeline))
         SKIP("the wavefront tracer needs inline ray queries");
 
-    auto const reference_path = cc::format("{}/sv-wavefront-megakernel.png", cc::temp_directory_path());
-    auto const raw_path = cc::format("{}/sv-wavefront-raw.png", cc::temp_directory_path());
-    auto const spatial_path = cc::format("{}/sv-wavefront-atrous.png", cc::temp_directory_path());
-    auto const young_raw_path = cc::format("{}/sv-wavefront-young-raw.png", cc::temp_directory_path());
-    auto const temporal_path = cc::format("{}/sv-wavefront-automatic.png", cc::temp_directory_path());
+    auto const reference_path = cc::temp_file_path("sv-wavefront-megakernel", ".png");
+    auto const raw_path = cc::temp_file_path("sv-wavefront-raw", ".png");
+    auto const spatial_path = cc::temp_file_path("sv-wavefront-atrous", ".png");
+    auto const young_raw_path = cc::temp_file_path("sv-wavefront-young-raw", ".png");
+    auto const temporal_path = cc::temp_file_path("sv-wavefront-automatic", ".png");
 
     auto const wavefront = sv::render_mode::wavefront;
     co_await capture_box(ctx, sr::denoise_method::none, reference_path, 16);
@@ -318,9 +318,9 @@ ASYNC_INVOCABLE_TEST("sv - a denoised capture is smoother than the raw one", (sg
     if (!sv_test::shared_env().has_compiler)
         SKIP("no SGL compiler for this backend to build the path-tracing shaders");
 
-    auto const raw_path = cc::format("{}/sv-denoise-raw.png", cc::temp_directory_path());
-    auto const spatial_path = cc::format("{}/sv-denoise-atrous.png", cc::temp_directory_path());
-    auto const temporal_path = cc::format("{}/sv-denoise-automatic.png", cc::temp_directory_path());
+    auto const raw_path = cc::temp_file_path("sv-denoise-raw", ".png");
+    auto const spatial_path = cc::temp_file_path("sv-denoise-atrous", ".png");
+    auto const temporal_path = cc::temp_file_path("sv-denoise-automatic", ".png");
 
     co_await capture_box(ctx, sr::denoise_method::none, raw_path);
     co_await capture_box(ctx, sr::denoise_method::atrous, spatial_path);
@@ -361,8 +361,8 @@ ASYNC_INVOCABLE_TEST("sv - the viewer drives the split-signal denoiser", (sg::co
     if (!sr::query_reconstruct_support(ctx).nrd)
         SKIP("NRD was not fetched into this build (extern/nrd/fetch-nrd.py)");
 
-    auto const raw_path = cc::format("{}/sv-denoise-split-raw.png", cc::temp_directory_path());
-    auto const nrd_path = cc::format("{}/sv-denoise-nrd.png", cc::temp_directory_path());
+    auto const raw_path = cc::temp_file_path("sv-denoise-split-raw", ".png");
+    auto const nrd_path = cc::temp_file_path("sv-denoise-nrd", ".png");
 
     co_await capture_box(ctx, sr::denoise_method::none, raw_path);
     co_await capture_box(ctx, sr::denoise_method::nrd, nrd_path);
@@ -400,7 +400,7 @@ ASYNC_INVOCABLE_TEST("sv - a named temporal member still denoises past the hand-
     if (!sv_test::shared_env().has_compiler)
         SKIP("no SGL compiler for this backend to build the path-tracing shaders");
 
-    auto const raw_path = cc::format("{}/sv-handoff-raw.png", cc::temp_directory_path());
+    auto const raw_path = cc::temp_file_path("sv-handoff-raw", ".png");
 
     // Both members that `is_temporal` names and this build can run: svgf always, nrd where its SDK was fetched.
     // svgf is the one that shows this predates the NRD member.
@@ -416,7 +416,7 @@ ASYNC_INVOCABLE_TEST("sv - a named temporal member still denoises past the hand-
 
     for (auto const method : methods)
     {
-        auto const path = cc::format("{}/sv-handoff-{}.png", cc::temp_directory_path(), sr::to_string(method));
+        auto const path = cc::temp_file_path(cc::format("sv-handoff-{}", sr::to_string(method)), ".png");
         co_await capture_box(ctx, method, path, k_past_handoff);
         auto const denoised = roughness_of(path);
 
@@ -507,7 +507,7 @@ ASYNC_INVOCABLE_TEST("sv - a capture settles mid-crossfade", (sg::context_handle
     constexpr u32 window = 2;
     constexpr u32 fade = u32(1) << 24;
 
-    auto const path = cc::format("{}/sv-crossfade.png", cc::temp_directory_path());
+    auto const path = cc::temp_file_path("sv-crossfade", ".png");
     auto const partial = sv::impl::partial_capture_path(path);
     cc::remove_file(path);
     cc::remove_file(partial); // a leftover from an earlier run would make both checks below vacuous

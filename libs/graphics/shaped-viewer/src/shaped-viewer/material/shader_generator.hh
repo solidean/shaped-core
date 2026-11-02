@@ -145,7 +145,7 @@ struct sv::material_secondary
 /// A material permutation as an SGL hit group, plus the parameter layout it reads.
 struct sv::generated_material_shader
 {
-    /// `hit_group sv_material for path_rays`, one file the host compiles through `slib::compile_hit_group`.
+    /// `hit_group sv_material for tracer.path_rays`, one file the host compiles through `slib::compile_hit_group`.
     /// `generate_material_shader` says what it holds.
     cc::string source;
 

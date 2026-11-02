@@ -539,6 +539,11 @@ cc::result<context_handle> create_dx12_context(backend::dx12::dx12_config const&
     auto const native_16bit_shader_ops
         = SUCCEEDED(device->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS4, &options4, sizeof(options4)))
        && options4.Native16BitShaderOpsSupported;
+    // A failed query is an older runtime, which sends a primitive to a layer from the geometry stage alone.
+    D3D12_FEATURE_DATA_D3D12_OPTIONS options = {};
+    auto const vertex_layer_output
+        = SUCCEEDED(device->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS, &options, sizeof(options)))
+       && options.VPAndRTArrayIndexFromAnyShaderFeedingRasterizerSupportedWithoutGSEmulation;
     D3D12_FEATURE_DATA_D3D12_OPTIONS1 options1 = {};
     auto const wave_ops
         = SUCCEEDED(device->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS1, &options1, sizeof(options1)))
@@ -557,6 +562,7 @@ cc::result<context_handle> create_dx12_context(backend::dx12::dx12_config const&
     ctx->_extended_image_formats = extended_image_formats;
     ctx->_native_16bit_shader_ops = native_16bit_shader_ops;
     ctx->_wave_ops = wave_ops;
+    ctx->_vertex_layer_output = vertex_layer_output;
 
     // One dispatch per argument record, no root-signature changes, so the signature takes no root signature.
     {

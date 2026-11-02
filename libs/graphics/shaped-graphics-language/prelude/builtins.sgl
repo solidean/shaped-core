@@ -20,18 +20,18 @@
 @builtin struct float
 
 @shadowable(false)
-@builtin @swizzle struct float2:
+@builtin @swizzle(rg) struct float2:
     x: float
     y: float
 
 @shadowable(false)
-@builtin @swizzle struct float3:
+@builtin @swizzle(rgb) struct float3:
     x: float
     y: float
     z: float
 
 @shadowable(false)
-@builtin @swizzle struct float4:
+@builtin @swizzle(rgba) struct float4:
     x: float
     y: float
     z: float
@@ -64,9 +64,20 @@
 @builtin struct mat4
 
 /// Column-major, and a vector stands to its right.
-/// A value of function bodies alone, which no GPU memory holds yet.
+/// In GPU memory its columns stand 16 bytes apart, as three float3 do; ray data and stage edges hold none yet.
 @shadowable(false)
 @builtin struct mat3
+
+/// Column-major, and a vector stands to its right: a rotation or a shear of the plane.
+/// In GPU memory its two columns stand back to back, 16 bytes; a constant block starts it on a row.
+@shadowable(false)
+@builtin struct mat2
+
+/// An affine map of space: a linear part and a translation, as three rows of four.
+/// It translates a `pos3` and leaves a `vec3` untranslated, so the type decides the w.
+/// A value of function bodies alone, which no GPU memory holds yet.
+@shadowable(false)
+@builtin struct affine3
 
 /// A bool as GPU memory holds one: four bytes, 0 for false and anything else for true.
 /// `x as bool32` and `x as bool` convert; a bool itself has no layout.
@@ -78,18 +89,18 @@
 @builtin struct int
 
 @shadowable(false)
-@builtin @swizzle struct int2:
+@builtin @swizzle(rg) struct int2:
     x: int
     y: int
 
 @shadowable(false)
-@builtin @swizzle struct int3:
+@builtin @swizzle(rgb) struct int3:
     x: int
     y: int
     z: int
 
 @shadowable(false)
-@builtin @swizzle struct int4:
+@builtin @swizzle(rgba) struct int4:
     x: int
     y: int
     z: int
@@ -100,18 +111,18 @@
 @builtin struct uint
 
 @shadowable(false)
-@builtin @swizzle struct uint2:
+@builtin @swizzle(rg) struct uint2:
     x: uint
     y: uint
 
 @shadowable(false)
-@builtin @swizzle struct uint3:
+@builtin @swizzle(rgb) struct uint3:
     x: uint
     y: uint
     z: uint
 
 @shadowable(false)
-@builtin @swizzle struct uint4:
+@builtin @swizzle(rgba) struct uint4:
     x: uint
     y: uint
     z: uint
@@ -123,18 +134,18 @@
     true
 
 @shadowable(false)
-@builtin @swizzle struct bool2:
+@builtin @swizzle(rg) struct bool2:
     x: bool
     y: bool
 
 @shadowable(false)
-@builtin @swizzle struct bool3:
+@builtin @swizzle(rgb) struct bool3:
     x: bool
     y: bool
     z: bool
 
 @shadowable(false)
-@builtin @swizzle struct bool4:
+@builtin @swizzle(rgba) struct bool4:
     x: bool
     y: bool
     z: bool
@@ -147,18 +158,18 @@
 @builtin struct half
 
 @shadowable(false)
-@builtin @swizzle struct half2:
+@builtin @swizzle(rg) struct half2:
     x: half
     y: half
 
 @shadowable(false)
-@builtin @swizzle struct half3:
+@builtin @swizzle(rgb) struct half3:
     x: half
     y: half
     z: half
 
 @shadowable(false)
-@builtin @swizzle struct half4:
+@builtin @swizzle(rgba) struct half4:
     x: half
     y: half
     z: half
@@ -169,18 +180,18 @@
 @builtin struct short
 
 @shadowable(false)
-@builtin @swizzle struct short2:
+@builtin @swizzle(rg) struct short2:
     x: short
     y: short
 
 @shadowable(false)
-@builtin @swizzle struct short3:
+@builtin @swizzle(rgb) struct short3:
     x: short
     y: short
     z: short
 
 @shadowable(false)
-@builtin @swizzle struct short4:
+@builtin @swizzle(rgba) struct short4:
     x: short
     y: short
     z: short
@@ -191,18 +202,18 @@
 @builtin struct ushort
 
 @shadowable(false)
-@builtin @swizzle struct ushort2:
+@builtin @swizzle(rg) struct ushort2:
     x: ushort
     y: ushort
 
 @shadowable(false)
-@builtin @swizzle struct ushort3:
+@builtin @swizzle(rgb) struct ushort3:
     x: ushort
     y: ushort
     z: ushort
 
 @shadowable(false)
-@builtin @swizzle struct ushort4:
+@builtin @swizzle(rgba) struct ushort4:
     x: ushort
     y: ushort
     z: ushort
@@ -747,6 +758,33 @@
 @builtin @pure fun max(a: ushort4, b: ushort4) -> ushort4
 @builtin @pure fun clamp(x: ushort4, low: ushort4, high: ushort4) -> ushort4
 
+// a prefix `+` of every number and vector is the value itself, as every target writes it (CHK-410)
+@builtin @pure @operator("+") fun identity(x: float) -> float
+@builtin @pure @operator("+") fun identity_half(x: half) -> half
+@builtin @pure @operator("+") fun identity_int(x: int) -> int
+@builtin @pure @operator("+") fun identity_uint(x: uint) -> uint
+@builtin @pure @operator("+") fun identity_short(x: short) -> short
+@builtin @pure @operator("+") fun identity_ushort(x: ushort) -> ushort
+@builtin @pure @operator("+") fun identity_float2(x: float2) -> float2
+@builtin @pure @operator("+") fun identity_color(x: float3) -> float3
+@builtin @pure @operator("+") fun identity_float4(x: float4) -> float4
+@builtin @pure @operator("+") fun identity_half2(x: half2) -> half2
+@builtin @pure @operator("+") fun identity_half3(x: half3) -> half3
+@builtin @pure @operator("+") fun identity_half4(x: half4) -> half4
+@builtin @pure @operator("+") fun identity_int2(x: int2) -> int2
+@builtin @pure @operator("+") fun identity_int3(x: int3) -> int3
+@builtin @pure @operator("+") fun identity_int4(x: int4) -> int4
+@builtin @pure @operator("+") fun identity_uint2(x: uint2) -> uint2
+@builtin @pure @operator("+") fun identity_uint3(x: uint3) -> uint3
+@builtin @pure @operator("+") fun identity_uint4(x: uint4) -> uint4
+@builtin @pure @operator("+") fun identity_short2(x: short2) -> short2
+@builtin @pure @operator("+") fun identity_short3(x: short3) -> short3
+@builtin @pure @operator("+") fun identity_short4(x: short4) -> short4
+@builtin @pure @operator("+") fun identity_ushort2(x: ushort2) -> ushort2
+@builtin @pure @operator("+") fun identity_ushort3(x: ushort3) -> ushort3
+@builtin @pure @operator("+") fun identity_ushort4(x: ushort4) -> ushort4
+@builtin @pure @operator("+") fun identity_vec3(x: vec3) -> vec3
+
 // two vectors compared: an ordering per component (CHK-362), and `==` and `!=` of the whole value,
 // which `equal` and `not_equal` are per component (CHK-363)
 @builtin @pure @operator("<") fun less_float2(a: float2, b: float2) -> bool2
@@ -1052,6 +1090,7 @@
 @builtin @pure @operator("*") fun transform_position(m: mat4, p: pos3) -> hpos4
 @builtin @pure @operator("*") fun transform_direction(m: mat4, v: vec3) -> vec3
 @builtin @pure @operator("*") fun transform_float4(m: mat4, v: float4) -> float4
+@builtin @pure @operator("*") fun transform_hpos4(m: mat4, v: hpos4) -> hpos4
 @builtin @pure @operator("*") fun multiply_mat4(m: mat4, b: mat4) -> mat4
 
 // a matrix of its four columns
@@ -1061,13 +1100,42 @@
 // what a matrix is on its own; every target has it under this name
 /// The factor `m` scales a volume by, negative where it mirrors and 0 where it flattens one.
 @builtin @pure fun determinant(m: mat4) -> float
+/// `m` mirrored across its diagonal: its rows as columns, which is its inverse where it only rotates.
+@builtin @pure fun transpose(m: mat4) -> mat4
 
-// a mat3 is a value of function bodies alone (CHK-397): made of its columns, times a three-vector
+// a mat3 is a value of function bodies alone (CHK-397): made of its columns, times a three-vector, and transposed
 /// The matrix of three columns, `c0` first.
 @builtin @pure fun mat3(c0: float3, c1: float3, c2: float3) -> mat3
+/// A basis of three directions, `c0` first: where x, y and z go, as a tangent frame is built.
+@builtin @pure fun mat3(c0: vec3, c1: vec3, c2: vec3) -> mat3
 @builtin @pure @operator("*") fun transform_float3(m: mat3, v: float3) -> float3
 @builtin @pure @operator("*") fun transform_direction3(m: mat3, v: vec3) -> vec3
 @builtin @pure @operator("*") fun multiply_mat3(m: mat3, b: mat3) -> mat3
+/// `m` mirrored across its diagonal: its rows as columns, which is its inverse where it only rotates.
+@builtin @pure fun transpose(m: mat3) -> mat3
+
+// one column or one row of a matrix, which core.sgl gives every matrix as `m.column(i)` and `m.row(i)`
+@builtin @internal @pure fun matrix_column(m: mat4, i: int) -> float4
+@builtin @internal @pure fun matrix_row(m: mat4, i: int) -> float4
+@builtin @internal @pure fun matrix_column(m: mat3, i: int) -> float3
+@builtin @internal @pure fun matrix_row(m: mat3, i: int) -> float3
+@builtin @internal @pure fun matrix_column(m: mat2, i: int) -> float2
+@builtin @internal @pure fun matrix_row(m: mat2, i: int) -> float2
+
+// an affine3 translates a position and leaves a direction alone (CHK-408); core.sgl names its parts
+@builtin @internal @pure fun affine3_of_rows(r0: float4, r1: float4, r2: float4) -> affine3
+@builtin @internal @pure fun affine3_row(a: affine3, i: int) -> float4
+@builtin @pure @operator("*") fun transform_position_affine(m: affine3, p: pos3) -> pos3
+@builtin @pure @operator("*") fun transform_direction_affine(m: affine3, v: vec3) -> vec3
+@builtin @pure @operator("*") fun transform_float4_affine(m: affine3, v: float4) -> float3
+
+// a mat2 is a mat3 of the plane: a value of function bodies alone, made of its columns, times a float2
+/// The matrix of two columns, `c0` first.
+@builtin @pure fun mat2(c0: float2, c1: float2) -> mat2
+@builtin @pure @operator("*") fun transform_float2(m: mat2, v: float2) -> float2
+@builtin @pure @operator("*") fun multiply_mat2(m: mat2, b: mat2) -> mat2
+/// `m` mirrored across its diagonal: its rows as columns, which is its inverse where it only rotates.
+@builtin @pure fun transpose(m: mat2) -> mat2
 
 // `x as T` between the numeric families of one width, and between the widths of one family,
 // component for component; each target writes a conversion to `T`
@@ -1242,9 +1310,29 @@
 @builtin @pure fun ushort4(x: short4) -> ushort4
 @builtin @pure fun ushort4(x: ushort4) -> ushort4
 
+// `b as T` of a bool and its vectors, to a float, an int or a uint: 1 where true and 0 where not
+@builtin @pure @operator("as") fun convert_bool_to_float(x: bool) -> float
+@builtin @pure @operator("as") fun convert_bool_to_int(x: bool) -> int
+@builtin @pure @operator("as") fun convert_bool_to_uint(x: bool) -> uint
+@builtin @pure @operator("as") fun convert_bool2_to_float2(x: bool2) -> float2
+@builtin @pure @operator("as") fun convert_bool2_to_int2(x: bool2) -> int2
+@builtin @pure @operator("as") fun convert_bool2_to_uint2(x: bool2) -> uint2
+@builtin @pure @operator("as") fun convert_bool3_to_float3(x: bool3) -> float3
+@builtin @pure @operator("as") fun convert_bool3_to_int3(x: bool3) -> int3
+@builtin @pure @operator("as") fun convert_bool3_to_uint3(x: bool3) -> uint3
+@builtin @pure @operator("as") fun convert_bool4_to_float4(x: bool4) -> float4
+@builtin @pure @operator("as") fun convert_bool4_to_int4(x: bool4) -> int4
+@builtin @pure @operator("as") fun convert_bool4_to_uint4(x: bool4) -> uint4
+
 // A bool32 is a bool as GPU memory holds one, and `as` is how either becomes the other
 @builtin @pure @operator("as") fun convert_bool_to_bool32(x: bool) -> bool32
 @builtin @pure @operator("as") fun convert_bool32_to_bool(x: bool32) -> bool
+
+// a direction or a position as the plain vector of its width, which every target writes it as already;
+// the way back is a constructor, which says what the numbers become (CHK-412)
+@builtin @pure @operator("as") fun convert_vec3_to_float3(x: vec3) -> float3
+@builtin @pure @operator("as") fun convert_pos3_to_float3(x: pos3) -> float3
+@builtin @pure @operator("as") fun convert_hpos4_to_float4(x: hpos4) -> float4
 
 // bits of int, uint and their vectors, componentwise; a shift counts in the left side's own type,
 // and only its low five bits count, so `x << 33` of a runtime 33 is `x << 1`
@@ -1721,6 +1809,10 @@
 @builtin @pure fun reinterpret_as_int(x: uint2) -> int2
 @builtin @pure fun reinterpret_as_int(x: uint3) -> int3
 @builtin @pure fun reinterpret_as_int(x: uint4) -> int4
+
+// a half's bits travel as the low 16 bits of a uint, on every target (CHK-417)
+@builtin @pure fun reinterpret_as_uint(x: half) -> uint
+@builtin @pure fun reinterpret_as_half(x: uint) -> half
 
 // packing into a uint and back: bytes rounded half up, as floor(x + 0.5), and halves rounded to even
 @builtin @pure fun pack_unorm4x8(v: float4) -> uint

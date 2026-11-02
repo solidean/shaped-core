@@ -1,10 +1,12 @@
 #pragma once
 
+#include <babel-serializer/image/image.hh> // babel::image::write_options, taken by value
 #include <clean-core/common/time.hh>
 #include <clean-core/error/result.hh>
 #include <clean-core/string/string.hh>
 #include <clean-core/string/string_view.hh>
 #include <clean-core/thread/async.hh>
+#include <shaped-graphics/bytes_future.hh>
 #include <shaped-graphics/resource/texture.hh> // sg::texture_2d, which sg's fwd.hh does not name
 #include <shaped-rendering/fwd.hh>
 #include <typed-geometry/linalg/vec.hh>
@@ -45,6 +47,12 @@ inline constexpr cc::string_view capture_size_env_var = "SC_CAPTURE_SIZE";
 /// What the unit is belongs to the program: a path tracer may count samples per pixel, a raster app frames drawn.
 /// Either way it is the knob a scene needing longer reaches for.
 inline constexpr cc::string_view capture_accumulate_env_var = "SC_CAPTURE_ACCUMULATE";
+
+/// How many frames the program renders into each image, in place of `SC_CAPTURE_ACCUMULATE`'s quality bar.
+///
+/// A count the program keeps as it records, so an image settles without waiting on anything the GPU reports back.
+/// The image is then a function of this count alone, on any machine; unset or 0 keeps the `accumulate` rule.
+inline constexpr cc::string_view capture_iterations_env_var = "SC_CAPTURE_ITERATIONS";
 
 /// How long a capture may take before it gives up, in seconds; for a sequence, how long each of its frames may take.
 inline constexpr cc::string_view capture_timeout_env_var = "SC_CAPTURE_TIMEOUT";
@@ -91,6 +99,9 @@ struct sr::capture_request
 
     /// What to accumulate before capturing, in the program's own unit; see `capture_accumulate_env_var`.
     u32 accumulate = 60;
+
+    /// Frames rendered into each image, replacing `accumulate` when above 0; see `capture_iterations_env_var`.
+    u32 iterations = 0;
 
     /// The time a capture may spend before it gives up and writes what it has, measured on `clock_seconds`.
     /// A sequence spends it per frame, starting over at each.
@@ -139,7 +150,23 @@ namespace sr
 /// Awaits the download rather than blocking for it, so it serves a context that never blocks as well.
 /// The texture must carry `copy_src` usage and must be `bgra8_unorm`: the channel swap is written for it.
 /// `texture` must outlive the returned async: it is read once the list is recorded, which may be after a hop to the device's home.
+/// A loop that renders into `texture` again before awaiting this wants `submit_capture_readback` instead, which reads it at once.
 [[nodiscard]] cc::shared_async<cc::result<cc::unit>> write_capture_image_async(sg::context& ctx,
                                                                                sg::texture_2d const& texture,
                                                                                cc::string path);
+
+/// Records and submits the readback of `texture` now, so a frame rendered into it after this call cannot reach the image.
+///
+/// The caller must be on the thread that records `ctx`'s command lists, as a frame loop is between its frames.
+/// The texture must carry `copy_src` usage and must be `bgra8_unorm`: `encode_capture_image_async` swaps channels for it.
+[[nodiscard]] sg::bytes_future submit_capture_readback(sg::context& ctx, sg::texture_2d const& texture);
+
+/// Awaits `readback` of an image of `size`, then converts and writes it to `path` on the compute pool.
+///
+/// Nothing in it touches the device, so several may be in flight while the loop renders on.
+/// `opts` is handed to the encoder; the format still comes from the extension.
+[[nodiscard]] cc::shared_async<cc::result<cc::unit>> encode_capture_image_async(sg::bytes_future readback,
+                                                                                tg::vec2i size,
+                                                                                cc::string path,
+                                                                                babel::image::write_options opts);
 } // namespace sr

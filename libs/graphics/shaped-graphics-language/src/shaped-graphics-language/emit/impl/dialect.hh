@@ -19,6 +19,8 @@ struct local_declaration
     /// HLSL's array lengths, `[3][5]`, which it writes after the name; empty wherever the type says them.
     cc::string_view dimensions;
     bool is_mut = false;
+    /// A local without a value whose type holds padding fields, which HLSL's validator refuses to store undefined.
+    bool is_zeroed = false;
 };
 
 /// What one target spells differently from the others.
@@ -59,6 +61,9 @@ public:
 
     /// True where a thread sees its own earlier store to an image only after `img.fence();`, which is MSL (EMIT-151).
     [[nodiscard]] virtual bool fences_image_stores() const { return false; }
+
+    /// The line ahead of a loop that asks the target to keep it a loop, `[loop]`; empty where the target has none.
+    [[nodiscard]] virtual cc::string_view rolled_loop_hint() const { return {}; }
 
     /// The head of a `for` over an int range, without the brace: `for (int i = 0; i < n; ++i)`.
     virtual void write_for_head(cc::string& out, cc::string_view index, cc::string_view first, cc::string_view end) const

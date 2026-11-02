@@ -156,6 +156,7 @@ Full guide: [docs/guides/benchmarking.md](../../../docs/guides/benchmarking.md).
 ```cpp
 BENCHMARK("sort - cc::sort vs std::sort")  // a test in the `benchmark` bucket; always exclusive_global + main_thread,
 {                                          //   swept only via `--benchmarks`, or run by exact name
+                                           // BENCHMARK(name, manual) stays a benchmark, run only by its exact name: never in a sweep
     auto data = make_input();
 
     nx::bench::run("cc::sort", [&] { cc::sort(data); });   // first loop declared is the table's baseline

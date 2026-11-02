@@ -137,6 +137,18 @@ sg::impl::member_track dx12_command_list::track_texture_access(dx12_texture_hand
     return {.held_write = tracked.held_write};
 }
 
+namespace
+{
+/// Tells an upload's timeline that this list waits on `wait`, so the actor copies it even if every handle to the
+/// destination is gone by the time it gets there — see dx12_completion_group::awaited_value.
+/// Stamped while this list still holds the resource, which is what makes the actor's reading of it exact.
+void note_awaited(sg::backend::dx12::dx12_group_value const& wait)
+{
+    if (wait.is_pending() && !wait.group->has_reached(wait.value))
+        sg::backend::dx12::stamp_max(wait.group->awaited_value, wait.value);
+}
+} // namespace
+
 void dx12_command_list::fold_transfer_waits()
 {
     // Every touched resource owes the upload a transfer is still making.
@@ -144,11 +156,14 @@ void dx12_command_list::fold_transfer_waits()
     // A texture owes it whatever this list does: its entry barrier can change the layout the copy queue is still reading.
     for (auto const& buffer : _touched_buffers)
     {
-        fold_group_wait(_required_copy_waits,
-                        {buffer->_upload_group, buffer->_pending_async_upload_value.load(std::memory_order_acquire)});
-        fold_stream_wait(_required_copy_waits,
-                         {buffer->_upload_group, buffer->_pending_stream_copy_value.load(std::memory_order_acquire)},
-                         buffer);
+        auto const upload = dx12_group_value{buffer->_upload_group,
+                                             buffer->_pending_async_upload_value.load(std::memory_order_acquire)};
+        auto const stream = dx12_group_value{buffer->_upload_group,
+                                             buffer->_pending_stream_copy_value.load(std::memory_order_acquire)};
+        note_awaited(upload);
+        note_awaited(stream);
+        fold_group_wait(_required_copy_waits, upload);
+        fold_stream_wait(_required_copy_waits, stream, buffer);
     }
     for (auto const& buffer : _written_buffers)
     {
@@ -160,11 +175,14 @@ void dx12_command_list::fold_transfer_waits()
     }
     for (auto const& texture : _touched_textures)
     {
-        fold_group_wait(_required_copy_waits,
-                        {texture->_upload_group, texture->_pending_async_upload_value.load(std::memory_order_acquire)});
-        fold_stream_wait(_required_copy_waits,
-                         {texture->_upload_group, texture->_pending_stream_copy_value.load(std::memory_order_acquire)},
-                         texture);
+        auto const upload = dx12_group_value{texture->_upload_group,
+                                             texture->_pending_async_upload_value.load(std::memory_order_acquire)};
+        auto const stream = dx12_group_value{texture->_upload_group,
+                                             texture->_pending_stream_copy_value.load(std::memory_order_acquire)};
+        note_awaited(upload);
+        note_awaited(stream);
+        fold_group_wait(_required_copy_waits, upload);
+        fold_stream_wait(_required_copy_waits, stream, texture);
         fold_group_wait(
             _required_download_waits,
             {texture->_download_group, texture->_pending_async_download_value.load(std::memory_order_acquire)});

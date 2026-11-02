@@ -5,6 +5,7 @@
 #include <shaped-graphics/backends/dx12/dx12_common.hh>
 #include <shaped-graphics/backends/dx12/fwd.hh>
 #include <shaped-graphics/fwd.hh>
+#include <shaped-graphics/transfer/impl/upload_contexts.hh>
 
 #include <atomic>
 
@@ -35,6 +36,17 @@ struct sg::backend::dx12::dx12_completion_group
     /// Touched only by the actor that owns this direction, so it needs no synchronization.
     u64 last_signaled = 0;
 
+    /// Highest value a submitted command list waits on, stamped at its submit.
+    /// What the upload actor asks before skipping the copy of a target nobody holds a handle to any more:
+    /// a value some list waits on must be copied, since that list reads the storage once the wait is satisfied.
+    /// Exact rather than conservative: a list needs a handle to touch the resource, so once the last one is gone no
+    /// new reader can appear, and every reader there is has stamped this already.
+    std::atomic<u64> awaited_value = 0;
+
+    /// The context of each pending async upload on this timeline, which the resource releases with its last handle
+    /// where no list waits on the upload; see sg::impl::upload_contexts.
+    sg::impl::upload_contexts contexts;
+
     [[nodiscard]] u64 reserve() { return next_value.fetch_add(1, std::memory_order_relaxed) + 1; }
 
     /// Whether the copy carrying `value` has run; `0` means nothing was ever reserved, so trivially yes.
@@ -53,6 +65,12 @@ struct sg::backend::dx12::dx12_group_value
 
     [[nodiscard]] bool is_pending() const { return group != nullptr && value != 0; }
     [[nodiscard]] bool has_reached() const { return !is_pending() || group->has_reached(value); }
+
+    /// Whether a submitted command list waits on this value — see dx12_completion_group::awaited_value.
+    [[nodiscard]] bool is_awaited() const
+    {
+        return is_pending() && group->awaited_value.load(std::memory_order_acquire) >= value;
+    }
 
     /// Raises this to `other` when the two name the same timeline, and reports whether it could.
     /// False means they are unrelated values that a caller has to keep side by side — merging them into one maximum

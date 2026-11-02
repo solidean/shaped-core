@@ -55,7 +55,7 @@ cc::vector<interface_binding> interface_of(check::checked_module const& m,
         auto const described = driver::impl::describe_binding(m, s);
         if (is_inline || described.block_slot == 0)
             result.push_back({.name = s.name,
-                              .emitted = emitted_of(s.name),
+                              .emitted = emitted_of(m.qualified_name_of(id)),
                               .kind = described_member_kind::constant,
                               .is_inline = is_inline,
                               .group = is_inline ? -1 : group,
@@ -70,7 +70,7 @@ cc::vector<interface_binding> interface_of(check::checked_module const& m,
             if (member.kind == described_member_kind::constant)
                 continue;
             result.push_back({.name = member.host_name,
-                              .emitted = emitted_of(member.host_name),
+                              .emitted = emitted_of(cc::format("{}.{}", m.qualified_name_of(id), member.name)),
                               .kind = member.kind,
                               .group = group,
                               .slot = member.slot,

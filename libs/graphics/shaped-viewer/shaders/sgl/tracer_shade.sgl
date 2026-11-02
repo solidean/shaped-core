@@ -494,6 +494,8 @@ fun shade(payload: mut surface_payload, surface_in: openpbr.surface, n: float3, 
     let mut light = no_light_sample()
     let mut env = no_light_sample()
     shade_sampled(mut payload, surface_in, n, v, exiting, ray_origin, ray_dir, hit_t, authored, has_authored, mut light, mut env)
+    // A guide ray reads the surface alone, so it spends no shadow ray.
+    if payload.guide != 0u => return
     let light_arrives = visible(light, cutout_seed(payload.rng, cutout_ray_light))
     let env_arrives = visible(env, cutout_seed(payload.rng, cutout_ray_environment))
     payload.direct_diffuse = (if light_arrives => light.diffuse else float3(0.0)) + (if env_arrives => env.diffuse else float3(0.0))
@@ -762,6 +764,17 @@ fun cutout(c: triangle_candidate, seed: uint, opacity: float) -> hit_decision:
     let u = (h as float) * (1.0 / 4294967296.0)
     if opacity < u => return hit_decision.ignore
     return hit_decision.accept
+
+/// The cutout test of a guide ray: only a full coverage stops it, so its hit is the first surface every sample sees, the same on every frame.
+/// A cutoff above 0 already thresholded the opacity to 0 or 1, so a masked surface cuts out exactly as a sample's ray sees it.
+fun guide_cutout(opacity: float) -> hit_decision:
+    if opacity >= 1.0 => return hit_decision.accept
+    return hit_decision.ignore
+
+/// The cutout test of the megakernel's surface rays, which its generated any-hit calls: a guide ray's, or the stochastic one drawn from the path's stream.
+fun surface_cutout(c: triangle_candidate, p: surface_payload){traced, bindless} -> hit_decision:
+    if p.guide != 0u => return guide_cutout(candidate_opacity(c))
+    return cutout(c, cutout_seed(p.rng, cutout_ray_surface), candidate_opacity(c))
 
 /// `cutout_seed`'s ray kinds: a path's own segment, its light sample's shadow ray, and its environment sample's.
 const cutout_ray_surface = 1u

@@ -65,6 +65,114 @@ A very good reason looks like the transformation matrix of a ray tracing instanc
 **The prelude is a file on disk**, written in SGL, that the compiler reads and places in front of the program.
 That needs no multi-file compilation.
 
+## Separate compilation: checked layers
+
+*Proposed, for review; nothing here is built yet.*
+
+### What it costs today
+
+Measured on 2026-11-01, release build, Windows, a Ryzen 9 5900X:
+
+| | cost |
+|---|---|
+| a program's own check behind an already-checked prelude, in-process | 0.3 ms empty, 0.6 ms for a small program |
+| of that, copying the checked prelude's state (perf-sgl-compile-copies-checked-prelude) | about two thirds, 1.9 of 2.9 ms in a debug build |
+| parsing and checking the prelude, once per process | about 30 ms |
+| a module, in every compile that reaches it | its whole check, every time (epic-sgl-modules-beyond-a-tracer) |
+| a trivial `sgl emit`, all of it but the OS's process start | about 47 ms |
+
+So a compile in a long-lived process is already cheap, and what is not is the work no program owns.
+The prelude is checked again by every process: the CLI per file, slib per application, every test binary.
+A module is checked again by every compile that reaches it, which slib pays per shader and per permutation.
+And a compile copies the whole checked prelude to continue from it, because the checker writes to the state it continues.
+
+### The idea
+
+**A checked module is an immutable layer, and a compile is a stack of them with the program on top.**
+
+* The prelude is the bottom layer.
+* Each module is a layer over the layers of the modules it uses, and over the prelude.
+* The program's check writes only to its own layer, and reads the ones below it.
+* A layer, once checked, is never written again, so any number of compiles on any number of threads share it.
+
+This answers "what an interface holds" from the list of open questions: everything the layer's check produced.
+Inlining is mandatory and a generic is checked where it is instantiated, so a user needs a module's checked bodies, not only its signatures.
+A cheap interface-only pass stays possible later, as an optimization of building a layer, not as a different thing crossing between modules.
+
+### What a layer is
+
+The checker's state is flat tables indexed by ids, `checked_module::symbols`, `types`, `functions` and the rest, plus side tables of its own.
+A layer is a contiguous part of each flat table, and the side tables split the same way.
+
+* **A flat table becomes segmented.**
+  A layer owns its segment, and a lookup by id reaches the segment of the layer the id belongs to.
+* **A scope or a cache a program extends gets an overlay.**
+  The program's layer holds what it adds, and a lookup reads its own overlay, then the layer below.
+  That covers the module and type scopes, the operator sets, and the interning of generic instances: `interned_types`, where a program's `buffer[foo]` instantiates a prelude template.
+* **What a program's check may not do is write into a lower layer.**
+  It already does not, into `checked_module`'s tables: a program's check only appends to them.
+  `checked-prelude-test.cc` holds that across the corpus, the samples, sg's shaders and the programs written to report.
+  What it does extend is four of the checker's own tables: the merged module scopes, the operator sets, the type scopes an extension adds to, and the interned instances.
+  Those are the overlays, and the rest of the checker's lists are appended to like `checked_module`'s.
+
+### Ids
+
+The decision the rest follows from: **an id names its layer.**
+
+A module's layer has to be the same bytes whichever program uses it, and whichever other modules sit beside it in that compile.
+An id that is a global index cannot do that: the base of `view`'s ids would move with the modules checked before it.
+So an id carries a layer number and an index within the layer, and the layer number is the process's, assigned when the layer is made or loaded.
+A lookup is then a load of the layer's segment and an index into it, with no search.
+
+Two alternatives were considered:
+
+* **Rebase on use:** give a module's layer a base per compile and rewrite its ids.
+  That is a pass over the whole layer per compile, which is the copy this design removes.
+* **One global order of all modules:** possible in a closed world, and slib's module directories are not one.
+
+### Saving a layer
+
+A layer can be written as bytes and read back: a **checked-module artifact**.
+
+* It is keyed by its sources, the keys of the layers below it, and the compiler's own build, so a different compiler never reads it.
+* It is a cache, never a file anyone keeps: a miss checks the module again, and an artifact that fails to read is a miss.
+  So it has no format version and no migration.
+* Loading it maps its dependencies' layer numbers to this process's, the one rewrite it needs, once per process rather than per compile.
+
+Two places keep one:
+
+* **The prelude's**, so a process starts without checking it.
+  First in the persistent cache slib already uses, which needs no build step; later perhaps embedded, which needs the compiler to run at build time to produce the bytes it then links in.
+* **A module's**, in the same persistent cache, so slib checks a module once per machine rather than once per process.
+
+### What it buys
+
+* A compile behind the prelude stops copying it: about two thirds of a small program's in-process compile.
+* A module is checked once per process, then once per machine with artifacts.
+* A process stops checking the prelude: the ~30 ms that every CLI call, application and test binary pays.
+* Modules with no dependency between them can be checked in parallel, since each is its own layer.
+
+### Steps
+
+Each step stands on its own and is measured by the `sgl profile` tests.
+
+1. **The prelude as a shared layer.** *Landed on 2026-11-01: a small program's check behind the prelude went from 0.61 to 0.10 ms.*
+   Segmented tables and overlays for the prelude and the program.
+   It needs no change to ids: with two layers, the program's ids continue after the prelude's as they do today.
+   The prelude is still checked once per process; what goes is the copy.
+2. **A module is a layer**, checked once per process and kept, reused by every compile that reaches it.
+   This is where ids start to name their layer, since a module's layer then sits at different heights in different compiles.
+3. **Artifacts**: saving and loading a layer, first for the prelude, then for modules, through slib's persistent cache.
+4. **Parallel layers**, and then perhaps an interface-only pass.
+
+### Open in this design
+
+* How wide an id is: 8 bits of layer and 24 of index fit today's 32, and limit a process to 256 layers alive at once.
+  A process that checks hundreds of modules would need wider ids, or layers that are dropped and their numbers reused.
+* Whether a segmented lookup's extra load shows in the emitters, which read the checked module more than the checker writes it.
+* Which of the checker's writes into the prelude's state today are real dependencies on the program, rather than caches that belong in an overlay.
+* Whether the language server, which keeps its own parse of the prelude, moves onto the same layer.
+
 ## What it touches
 
 * The toolchain: module discovery, the interface format, and the parallel driver.
@@ -84,7 +192,9 @@ That needs no multi-file compilation.
 ## Open
 
 * What an interface holds when a signature's type needs a function body evaluated.
+  Proposed: the whole checked layer, bodies included (see "Separate compilation: checked layers").
 * Whether an interface is a file on disk, and whether it is SGL text.
+  Proposed: a cache entry of the checked layer's bytes, never a kept file and never SGL text.
 * Whether on-demand compilation is recursive or asynchronous.
 * How a dependency cycle is reported when its loop passes through a type expression.
 * How the files of a module are found beyond a list of directories.

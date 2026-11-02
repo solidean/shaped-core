@@ -96,7 +96,8 @@ struct probe_case:
 
 binding probe:
     /// The cases to run, one per block of work items.
-    cases: buffer[probe_case]
+    /// Packed as C++ packs them, since the test fills them from a hand-written struct with defaults.
+    @padding(.none) cases: buffer[probe_case]
 
     /// One accumulator per work item, summed across a case's blocks by the CPU; what the lanes mean is per mode.
     ///

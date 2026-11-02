@@ -122,6 +122,8 @@ struct sgl::check::name_mint
     /// What they hold is in neither `taken` nor `index`, so a mint that goes on from another copies none of its names.
     name_mint const* parent = nullptr;
     cc::set<cc::string> const* also_taken = nullptr;
+    /// A lower layer's names, such as the prelude's every module-level name, which every program behind it shares.
+    cc::set<cc::string> const* also_taken_below = nullptr;
     /// For each name `mint` found taken, the suffix it tries first the next time it is asked for that name.
     /// A name once taken stays taken, so the first free suffix only grows, and minting a name a thousand times is linear.
     cc::map<cc::string, i32> next_suffix;
@@ -191,6 +193,9 @@ struct sgl::check::flat_local
 struct sgl::check::flat_label
 {
     cc::string name;
+    /// A loop written `@unroll(false)`, which the target is asked to keep a loop; a hint, which HLSL writes as `[loop]`
+    /// and the other targets cannot spell (CHK-414).
+    bool is_rolled = false;
 
     bool operator==(flat_label const&) const = default;
 };

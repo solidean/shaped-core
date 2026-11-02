@@ -21,6 +21,10 @@ struct sv::impl::resolved_view
 
     /// the parameter block each item shades with, parallel to `records` — its CONTENT identity, for the trace hash
     cc::vector<instance_id> parameter_blocks;
+
+    /// Per instance, the geometry's content key when it is a frame mesh, and zero when a manager holds it.
+    /// A frame mesh's BLAS and buffers are new every frame, so the trace hash reads this in their place.
+    cc::vector<cc::hash128> frame_contents;
     cc::vector<material_permutation const*> hit_groups;
 
     /// the shader key of `hit_groups[i]`, kept for the trace hash rather than for the pipeline

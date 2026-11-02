@@ -176,6 +176,7 @@ struct frame_constants:
 
     /// The wavefront tracer's frame: the camera generation a path must have started under to count,
     /// `wavefront_flag_*`, how many shading permutations the trace has, and the bounce Russian roulette starts after (0 for never).
+    /// The megakernel reads `wavefront_flag_guide_rays` of the flags too, and nothing else of these four.
     generation: uint
     wavefront_flags: uint
     permutation_count: uint
@@ -501,6 +502,8 @@ struct surface_payload:
 
     /// whether this is the path's last surface hit, so no bounce ray follows it — written by the caller only
     last_bounce: uint
+    /// whether the ray is a pixel's guide ray: only a full coverage stops it, and its hit is shaded for the guides alone, without visibility tests — written by the caller only
+    guide: uint
 
     /// the next-event estimate at this hit, BSDF folded in, split the way `bsdf_eval_split` splits the closure
     direct_diffuse: float3
@@ -567,7 +570,7 @@ rays path_rays:
 /// The payload the caller hands a surface ray, with every result zeroed until the miss or the closest hit writes it.
 fun surface_payload_for(rng: uint, sigma_t: float3, albedo: float3, g: float, channel: uint, last_bounce: uint) -> surface_payload:
     let zero = float3(0.0)
-    return surface_payload(rng, sigma_t, albedo, g, channel, last_bounce, zero, zero, zero, zero, zero, zero, zero, zero, 0.0, 0u, 0.0, 0.0, 0u, -1.0)
+    return surface_payload(rng, sigma_t, albedo, g, channel, last_bounce, 0u, zero, zero, zero, zero, zero, zero, zero, zero, 0.0, 0u, 0.0, 0.0, 0u, -1.0)
 
 /// The 16 SH coefficients of the environment, copied out of their buffer into the array `scene.background_radiance` takes.
 fun background_sh(){traced} -> float4[16]:

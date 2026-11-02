@@ -37,12 +37,13 @@ constexpr cc::string_view material_extension_textures[] = {
 };
 
 /// Whether this reader interprets `name` — the extensions a file may require of it.
+/// KHR_mesh_quantization only widens which component types an attribute may use, and accessors are read whatever theirs.
 [[nodiscard]] bool is_implemented_extension(cc::string_view name)
 {
     for (auto const material : material_extensions)
         if (name == material)
             return true;
-    return name == "KHR_lights_punctual" || name == "EXT_meshopt_compression";
+    return name == "KHR_lights_punctual" || name == "EXT_meshopt_compression" || name == "KHR_mesh_quantization";
 }
 
 /// EXT_meshopt_compression's packed bytes, decoded and unfiltered: `m.count` elements of `m.byte_stride` bytes.

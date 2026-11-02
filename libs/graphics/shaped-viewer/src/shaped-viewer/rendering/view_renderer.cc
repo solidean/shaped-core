@@ -166,6 +166,9 @@ resolved_view resolve_scene(sg::command_list& cmd, layer const& l, gpu_resource_
     auto const traced = mode != render_mode::raster;
     auto out = resolved_view{};
 
+    // A frame mesh's attributes are written here, ahead of every read this command list records, so they are resident this frame.
+    resources.attributes.record_inline_uploads(cmd);
+
     // Acquired once rather than per item: it is a resolve walk plus a key hash plus a lookup, and every placeholder in
     // the layer shades through the same one.
     auto const& fallback = resources.shaders.acquire_fallback();
@@ -206,6 +209,7 @@ resolved_view resolve_scene(sg::command_list& cmd, layer const& l, gpu_resource_
             place_instance_record(out.records.back(), out.instances.back(), out.hit_groups[permutation]->opacity,
                                   out.hit_groups[permutation]->secondary);
             out.parameter_blocks.push_back(item.instance);
+            out.frame_contents.push_back({});
             // A pending batch is the cube a raster frame draws too; a landed one has no triangles to draw.
             out.triangle_counts.push_back(pending ? u32(resources.meshes.placeholder_geometry().triangle_count) : 0);
             out.bounds.push_back(pending ? cc::optional<tg::aabb3f>(tg::aabb3f(tg::pos3f(0, 0, 0), tg::pos3f(1, 1, 1)))
@@ -219,6 +223,30 @@ resolved_view resolve_scene(sg::command_list& cmd, layer const& l, gpu_resource_
 
         if (item.kind != scene_item_kind::triangle_mesh)
             continue;
+
+        // A frame mesh is uploaded right here, so it is never pending and never a placeholder; it lights nothing (see `mesh_lifetime::frame`).
+        if (item.lifetime == mesh_lifetime::frame)
+        {
+            CC_ASSERT(resources.contains_instance(item.instance), "scene_item references an unknown instance_id");
+            auto const& m = resources.acquire_frame_mesh(cmd, item.frame_geometry, traced);
+            auto const shade_fallback = !resources.attributes_resident(item.instance);
+            auto const permutation = hit_group_of(out, shade_fallback ? fallback.key : item.shader_key, resources);
+            auto inst = sg::tlas_instance{.blas = traced ? m.blas : sg::blas_handle(),
+                                          .instance_id = u32(out.instances.size()),
+                                          .hit_group_offset = permutation * 2,
+                                          .opaque_override = !out.hit_groups[permutation]->opacity.can_cut_out()};
+            pack_transform(inst, item.transform);
+            out.instances.push_back(cc::move(inst));
+            out.records.push_back(resources.describe_instance(cmd, m, item.instance));
+            place_instance_record(out.records.back(), out.instances.back(), out.hit_groups[permutation]->opacity,
+                                  out.hit_groups[permutation]->secondary);
+            out.parameter_blocks.push_back(item.instance);
+            out.frame_contents.push_back(item.frame_geometry.hash);
+            out.triangle_counts.push_back(u32(m.triangle_count));
+            // No box: a frame mesh's geometry is new each frame, so a raster frame draws it always rather than measure it.
+            out.bounds.push_back(cc::optional<tg::aabb3f>());
+            continue;
+        }
 
         auto const* const mesh = resources.meshes.get_ptr(item.mesh);
         CC_ASSERT(mesh != nullptr, "scene_item references an unknown mesh_id");
@@ -272,6 +300,7 @@ resolved_view resolve_scene(sg::command_list& cmd, layer const& l, gpu_resource_
         place_instance_record(out.records.back(), out.instances.back(), out.hit_groups[permutation]->opacity,
                               out.hit_groups[permutation]->secondary);
         out.parameter_blocks.push_back(item.instance);
+        out.frame_contents.push_back({});
         out.triangle_counts.push_back(triangle_count);
         out.bounds.push_back(object_bounds);
 
@@ -542,10 +571,16 @@ shaders::tracer::frame_constants make_frame_constants(view_data const& v,
     h = cc::combine_hash(h, cc::make_hash(resolution[0], resolution[1], shader_generation));
 
     // tlas_instance holds a handle and an optional, so its padding is not hashable — take the fields the build reads.
-    for (auto const& inst : r.instances)
+    // A frame mesh's BLAS is new every frame, so its geometry's content key stands in for it: an unchanged mesh keeps the image.
+    for (auto i = isize(0); i < r.instances.size(); ++i)
     {
+        auto const& inst = r.instances[i];
+        auto const content = r.frame_contents[i];
         h = cc::combine_hash(h, cc::make_hash_of_bytes(cc::span<float const>(inst.transform, 12).as_bytes()));
-        h = cc::combine_hash(h, cc::make_hash(inst.instance_id, inst.hit_group_offset, inst.blas.get()));
+        if (content == cc::hash128())
+            h = cc::combine_hash(h, cc::make_hash(inst.instance_id, inst.hit_group_offset, inst.blas.get()));
+        else
+            h = cc::combine_hash(h, cc::make_hash(inst.instance_id, inst.hit_group_offset, content.low, content.high));
     }
 
     // The instance table is the whole of what a hit reads, geometry and material parameters alike, so hashing the
@@ -555,10 +590,16 @@ shaders::tracer::frame_constants make_frame_constants(view_data const& v,
     // The index is epoch-scoped by contract even where the slot table happens to hand back the same one, so it says
     // nothing about the image and leaving it in would risk restarting the estimator for nothing.
     // The `instance_id` beside it is the content identity that field stood for, since one is minted per `parameter_key`.
-    for (auto const& rec : r.records)
+    // A frame mesh's buffers are new every frame as well, so their indices are taken out with it; its content key above covers them.
+    for (auto i = isize(0); i < r.records.size(); ++i)
     {
-        auto anonymized = rec;
+        auto anonymized = r.records[i];
         anonymized.param_buffer = 0;
+        if (r.frame_contents[i] != cc::hash128())
+        {
+            anonymized.vertices = 0;
+            anonymized.indices = 0;
+        }
         h = cc::combine_hash(
             h, cc::make_hash_of_bytes(cc::span<shaders::tracer::instance_record const>(&anonymized, 1).as_bytes()));
     }
@@ -737,18 +778,18 @@ void land_sample_floors(impl::temporal_slot& slot)
         slot.sample_floors.remove_at(0);
 }
 
-/// Whether this frame of `slot`'s layer traces at all: not a full-size one whose pixels all hold `target` already.
+/// Whether this frame of `slot`'s layer traces at all: not a full-size one whose mean is at its target already.
 ///
-/// Neither integrator has anything to add there.
+/// Neither integrator has anything to add there, whether the target is `slot.sample_target` or `slot.frame_target`.
 /// A megakernel frame would blend more samples into a mean that is to stop, and the wavefront starts no sample past the target,
 /// so its floor at the target means no path is in flight.
 /// A frame that does not trace counts nothing, which keeps the megakernel's `samples` at `accum_frame` frames of `samples_per_pixel`:
 /// the shader's blend weight relies on that once a raised target lets it go on.
 /// Lands the wavefront's sample floors first, so the answer is as fresh as the GPU allows.
-[[nodiscard]] bool frame_samples(impl::temporal_slot& slot, u32 target, bool scaled)
+[[nodiscard]] bool frame_samples(impl::temporal_slot& slot, bool scaled)
 {
     land_sample_floors(slot);
-    return scaled || slot.accum_frame == 0 || slot.samples < target;
+    return scaled || !slot.is_at_target();
 }
 
 /// Marks a guide or primary-depth `slot` as holding nothing, where there is one.
@@ -1205,7 +1246,7 @@ struct raster_batch
                                                gpu_resource_manager& resources)
 {
     slot.sample_target = target;
-    if (!frame_samples(slot, target, false))
+    if (!frame_samples(slot, false))
         return sg::routine_outcome::executed;
     auto seeded = fc;
     seeded.rng_seed = seed_of(slot);
@@ -1557,9 +1598,10 @@ sg::routine_outcome view_renderer::trace(sg::command_list& cmd,
     // At the target no frame traces, so the mean starts over instead: a denoiser would read blank guides, and a drawing test or a pick blank depth.
     auto const target = effective_sample_target(def.sample_target);
     slot->sample_target = target;
+    slot->frame_target = def.frame_target;
     auto const guides_unwritten = has_guides && slot->accum_frame > 0 && ds.normal->accum_frame == 0;
     auto const depth_unwritten = depth_slot != nullptr && slot->accum_frame > 0 && depth_slot->accum_frame == 0;
-    auto const at_target = !frame_samples(*slot, target, false);
+    auto const at_target = !frame_samples(*slot, false);
     if (at_target && (guides_unwritten || depth_unwritten))
         impl::restart_accumulation(*slot);
     auto const samples = !at_target || slot->accum_frame == 0;
@@ -1577,6 +1619,13 @@ sg::routine_outcome view_renderer::trace(sg::command_list& cmd,
         fc.write_guides = 1;
         fc.guide_frame = ds.normal->accum_frame;
         fc.write_specular_guides = 1;
+
+        // Where a partial coverage can cut out, the megakernel takes its guides from a guide ray per sample, as the
+        // wavefront does from one per pixel, which `wavefront_routine` decides for itself.
+        if (mode == render_mode::megakernel)
+            for (auto const* p : resolved.hit_groups)
+                if (p->opacity.can_cut_out())
+                    fc.wavefront_flags |= impl::wavefront_flag_guide_rays;
     }
 
     // Decided before the frame block is uploaded, so the tracer writes this frame's own samples and motion only on the
@@ -1928,7 +1977,8 @@ sg::routine_outcome view_renderer::trace(sg::command_list& cmd,
         // The denoised slot is marked as holding nothing, so the frame at the target denoises, and no stale image from an earlier mean shows.
         // That is the frame reaching it for a megakernel, whose samples count as it traces, and the first frame tracing nothing for a wavefront,
         // whose samples land a frame or more later; convergence reads that same count, so a capture never settles before the denoise.
-        if (def.denoise_at_target_only && traces && slot->samples < target && !schedule.runs_temporal())
+        // A frame target is reached by the frame that traces it, under either integrator.
+        if (def.denoise_at_target_only && traces && !slot->is_at_target() && !schedule.runs_temporal())
         {
             ds.denoised->accum_frame = 0;
             res.traces[trace_index] = slot->texture;
@@ -2228,7 +2278,7 @@ sg::texture_2d view_renderer::execute(sg::command_list& cmd,
 
     // As `trace`: a mean whose pixels all hold the cap is the image, and a frame there traces nothing.
     slot.sample_target = effective_sample_target(0);
-    if (!frame_samples(slot, slot.sample_target, false))
+    if (!frame_samples(slot, false))
         return slot.texture;
 
     // The shader reads accum_frame == 0 as "overwrite", anything above it as "blend in place".

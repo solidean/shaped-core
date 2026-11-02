@@ -443,6 +443,7 @@ al.obj_span();  al.resource();  al.is_valid();  al.alloc_size_bytes();
 cc::memory_resource;  cc::default_memory_resource;        // pluggable allocator interface (default backed by mimalloc)
 cc::set_allocation_failure_handler(fn);  // void fn(isize min, isize max, isize align): a failed allocate_bytes calls it, every build; it may throw
 cc::system_memory_resource;                               // malloc/free opt-out; pass &it as `res` to bypass mimalloc
+cc::trim_thread_memory();                                 // freed memory back to the OS: this thread's pages, every pending purge
 // CC_HAS_MIMALLOC is 0 under SC_MIMALLOC=OFF (the sanitize presets), and the default IS the system resource there.
 // Only mimalloc resizes in place; the system resource always returns -1, so never assume the default can.
 
@@ -937,6 +938,11 @@ auto s = cc::make_async_scheduled<int>([](cc::async_context<int>&){ ... });  // 
 auto c = cc::make_async_lazy([](int x, int y){ return x + y; }, a, s);      // depends on a,s; f gets plain ints
 auto d = cc::make_async_lazy([](int x){ return x + 2; }, a);   // single-dep transform (one-arg variadic form)
 auto m = cc::make_async_manual<int>();               // promise-style: external_pending until pushed
+
+#include <clean-core/thread/async_parallel_for.hh>   // body over [0, n) on every thread of the pool, as one async
+co_await cc::async_parallel_for(n, [&](isize i) { ... });                 // or (isize begin, isize end) per chunk
+co_await cc::async_parallel_for(n, body, {.grain = 1024});                // grain only matters for bodies of a few ns
+pool.set_idle_linger_us(50);   // idle threads scan 50 us before sleeping: for parallel phases between short serial ones
 auto p = cc::make_async_lazy_emplace<int, cc::async_error, PinnedFrame>(7); // builds the FRAME in place: immovable f
                                                      // ok. T explicit, no dep args (capture + require instead)
 // born already ready (no frame, no scheduling); _emplace builds in place (immovable T ok):

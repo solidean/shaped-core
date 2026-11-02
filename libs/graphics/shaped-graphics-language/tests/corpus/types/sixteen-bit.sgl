@@ -80,3 +80,15 @@ binding scales:
 
 @compute(64) fun scale(@thread_id id: int3){scales}:
     scales.values[id.x] = scales.values[id.x] * scales.factor + 0.25f16
+
+// a half's bits travel as the low 16 bits of a uint, and come back from them (CHK-417)
+test:
+    let one: half = 1.0
+    let two: half = 2.0
+    one.bits == 0x3c00u and half.from_bits(0x4000u) == two and half.from_bits(0xffff'3c00u) == one
+
+// what FSR's approximate reciprocal does with them, which is plain uint arithmetic
+test:
+    let x: half = 4.0
+    let approx = half.from_bits(0x7784u - x.bits)
+    approx > 0.2 and approx < 0.3

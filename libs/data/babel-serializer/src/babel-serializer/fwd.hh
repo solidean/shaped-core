@@ -20,6 +20,8 @@ struct corner;
 struct face;
 struct group;
 struct data;
+struct texture_map;
+struct material;
 
 /// The domain every recording site in babel::obj is attributed to.
 CC_REC_DECLARE_DOMAIN(g_rec_domain);
@@ -246,6 +248,14 @@ struct read_options;
 /// The domain every recording site in babel::ktx2 is attributed to.
 CC_REC_DECLARE_DOMAIN(g_rec_domain);
 } // namespace babel::ktx2
+
+namespace babel::webp
+{
+struct data;
+
+/// The domain every recording site in babel::webp is attributed to.
+CC_REC_DECLARE_DOMAIN(g_rec_domain);
+} // namespace babel::webp
 
 namespace babel::tga
 {

@@ -292,6 +292,8 @@ m.entry_points                             // flat_entry_point per SOUND entry p
                                            // sound means: its body and the body of every function it reaches reported no error
 m.diagnostics                              // located_diagnostic { what, file, detail, notes }, in the order they were found; a related_note
                                            // { file, where, message } is a second place a diagnostic points at
+d.fixes                                    // suggested_fix { title, edits }: edits of the diagnostic's own file that fix it,
+                                           // which `sgl lsp` offers as quick fixes; empty where the checker knows none
 m.at(symbol_id)  m.at(type_id)  m.at(range)  m.name_of(type_id)   // name_of gives "<error>" for the error type
 
 #include <shaped-graphics-language/check/flat.hh>
@@ -405,6 +407,7 @@ uv run dev.py run sgl -- emit shader.sgl --entry main_cs --option tile=16 # an o
 uv run dev.py run sgl -- test a.sgl b.sgl                                # the tests of each file; exit 2 when one fails
 #   emit, test and describe take --module-dir DIR, repeatable: the .sgl files directly in it are modules to `use`
 uv run dev.py run sgl -- describe --module view --module-dir shaders     # a module of the directories, as its package entry reads it
+uv run dev.py run sgl --preset release-clang -- bench list.txt           # `path<TAB>entry` lines: each one's fastest compile of 10, per target, in-process
 uv run dev.py run sgl -- prelude [--check <path> | --write <path>]       # the generated builtins.sgl; --check exits 2 on a difference
 uv run dev.py run sgl -- describe shader.sgl                             # sgl::describe as JSON: what slib's generator reads;
                                                                          # each entry point and pipeline carries its sg `features`
@@ -484,8 +487,16 @@ fun apply(f: (float) -> float, x: float) -> float => f(x)   // a function type: 
 apply(halve, 3.0)                        // a function's name, whose signature is the type's exactly
 apply(x => x * k, 2.0)                   // an arrow lambda, seeing `k`; inlined where `f` is called (CHK-319)
 
-fun twice[A](x: A, f: (A) -> A) -> A => f(f(x))   // A is opaque: handed on, stored, returned (CHK-338)
+fun twice[A](x: A, f: (A) -> A) -> A => f(f(x))   // the body is checked per instance, its names where written (CHK-338)
+fun sum[T](a: T, b: T) => a + b          // so a body may use what each argument type has; a test that calls it checks it
 twice(3, x => x + 1)                     // A deduced from arguments, a lambda's result, or where the call stands (CHK-340)
+converted[int](2.75)                     // generic arguments stated by position or `[.To = int]`, the rest deduced (CHK-340)
+fun zero_of[T]() -> T => T(0)             // a call of T is a call of what it stands for in each instance
+fun scaled_by[n: int](x: float) => x * float(n)   // a value parameter, a constant in each instance; call scaled_by[3](x)
+fun combined[m: mode](a: float) => …    // an enum one: combined[mode.add](x); a type position takes `op[.add]`
+fun copy_texel[f: pixel_format](img: mut image_2d[f], a: int2, b: int2)   // an image's format, deduced from the image handed over
+struct box[T = float, n: int = 2]:      // defaults bind what nothing else says; box[int] is box[int, 2]
+fun max[V](a: V, b: scalar_of[V]) -> V  // scalar_of[V]: the scalar of a vector or matrix type (CHK-423)
 ```
 
 ## The language: ray tracing ([docs/spec/raytracing.md](docs/spec/raytracing.md))
@@ -502,6 +513,7 @@ let p = spheres.trace(r, sphere, cutout_sphere)          // .procedural: (proced
 let m = both.trace(r, any_hit = a, intersection = s, procedural_any_hit = b)   // .mixed -> mixed_hit[A]: m.kind, m.triangle(), m.procedural()
 is_occluded(scene.world, r)                              // the shadow ray
 h.to_world(p: pos3)  h.to_world(v: vec3)  h.normal_to_world(n)  h.to_object(p)  // typed transforms
+h.object_to_world  h.world_to_object                                        // affine3: a * p translates, a * v does not
 report(t = t, attributes = a)  report.none()             // what an intersection returns: at most one per box
 
 rays path_rays:                                          // a ray set: position = contribution and miss index
@@ -613,7 +625,7 @@ ops[i](mut v)                                            // raygen, miss, closes
   The interpreter computes them with `builtins/impl/soft_math.hh`, never a libm, so every host meets the same bits; a test compares them with `nearly_equal(a, b, within = …)`.
   `x.bits` and `float.from_bits(u)` are extensions in `core.sgl` over `reinterpret_as_*`, and a WGSL-indeterminate argument (`pow(-1.0, 0.5)`) is a `program-error`.
 - **`mat4` is the one matrix**, opaque and column-major, built from its columns: `mat4(c0, c1, c2, c3)` takes four `float4` (EVAL-99), `c3` being where the origin goes.
-  `register_transforms.cc` holds it, `m * p`, `m * v`, `m * float4`, `m * m` and `determinant(m) -> float` (EVAL-98), every target's own function.
+  `register_transforms.cc` holds it, `m * p`, `m * v`, `m * float4`, `m * m`, `determinant(m) -> float` (EVAL-98) and `transpose(m)` of a `mat4`, a `mat3` or a `mat2`, every target's own function.
   A `driver_bindings` matrix is 16 floats column by column too; `sgl test` alone sees a binding's matrix as zero.
 - **Stage inputs are parameters** (CHK-271): the stage struct first, then `@vertex_index i: int`, `@is_front_facing f: bool`, `@thread_id id: int3`, ….
   `flat_entry_point::input` is `none` for a vertex stage without a vertex buffer, and `stage_inputs` holds each input's local; `run_inputs::stage_inputs` gives them values.
@@ -655,15 +667,17 @@ ops[i](mut v)                                            // raygen, miss, closes
 - **A `sampler name:` at file scope is a static sampler of the pipeline layout** (CHK-314), handed to a builtin by its name: `tex.sample(uv, name)`.
   It joins the layout of every entry point whose inlined code reaches it, at its position among the file's samplers (EMIT-133).
   An entry point reaching one at position 16 or later is `too-many-samplers`, and unreached samplers declared above it count.
-- **Still `unsupported-yet`:** generic structs of the program, stated type arguments `f[float](x)`, `mut self`, lambdas beyond `x => value`, nested functions, `use`,
+- **Still `unsupported-yet`:** `mut self`, lambdas beyond `x => value`, nested functions, `use`,
   a `const` whose value is no literal, enum case or const, a `for` over anything but `a ..< b`, a `let` without a value,
   an expression statement that is no call outside a `test`, an `assert` message, and an `assert` whose condition writes.
 - **A function value is never a value of any target.** A function type is a parameter's whole type alone, and a call through it inlines what was handed.
   A `let f = halve` is `unsupported-yet`, and a function type under `mut`, as an element or as a type argument is `wrong-kind-of-name`.
 - **A mut parameter takes no default** (`default-not-allowed-here`), and a function with one is never a function value.
-- **A type parameter is opaque, and a generic body is checked ONCE over it.** No field, operator or call of `A` but one that takes `A` itself; an entry point is never generic.
-  Its name hides every symbol of that name, so `A(1.0)` inside `fun f[A]` is `wrong-kind-of-name` even where a struct `A` exists.
-  Only the prelude declares a generic struct (`report[A]`, `procedural_hit[A]`, `mixed_hit[A]`), and its methods cannot name `A` yet.
+- **A generic body is checked PER INSTANCE, its names where it is written.** Its own pass judges names alone; an entry point is never generic.
+  A type parameter's name hides every symbol of that name, so `A(1.0)` inside `fun f[A]` is what `A` stands for, even where a struct `A` exists.
+  A generic nothing instantiates warns `generic-not-instantiated`: a `test` that calls it is how it is checked.
+- **Generic structs take type and value parameters**, `struct ring[n: int, T]:` with `items: T[n]`; `ring[4, float]` names an instance.
+  The constructor mirrors the parameters, `ring(float[4].filled(0.0), 0)`, and a method names them, `fun ring.capacity(self) -> int => n`.
 - **Two `trace`s**: with a ray type third, `trace(world, r, set.ray, mut p)`, it is the pipeline's; otherwise it is the prelude's inline trace.
   The inline one needs `ray_query` where the entry point REACHES it (CHK-322), so a stage that never traces runs on a device without it.
 - **A trace graph with a cycle is `recursive-trace`** (CHK-332): a miss or closest hit tracing its own ray type, directly or through others, is refused, never bounded.
@@ -705,15 +719,30 @@ ops[i](mut v)                                            // raygen, miss, closes
   Its resource at `slot` is `register(<class>slot, spaceN)` in dx12, `[[vk::binding(slot, N)]]` in vulkan, `@group(N) @binding(slot)` in WGSL.
   An entry point lists at most three groups besides its `@inline` binding, as sg binds; a fourth is `too-many-groups` on every target.
   MSL has no globals, so there it is the entry point's parameter `constant T& name [[buffer(4)]]`.
-- **GPU memory has one layout per address space, the same on every target** (the spec's emitting file, "Layout").
-  A constant block packs as an HLSL constant buffer does, and a buffer's element as a dx12 structured buffer: tight, like a `tg` struct.
-  WGSL and MSL are made to follow by a memory form, where a vector their own rule would place elsewhere is split or packed.
-  A struct in both a block and a buffer is `layout-conflict`; `@no_padding` turns a gap into `padding-forbidden`; `bool` has no layout, `bool32` does.
-  Only the generated struct is promised, unless `@layout(.hlsl)` (today's packing, never reordered) or `@layout(.cpp)` on the binding promises one (CHK-369).
-  `.cpp` places a block as C++ places a struct of `tg` types, so a host's own struct fills it; every target then reads it through a memory form.
+- **GPU memory is placed at natural alignment, the same on every target, because that is what loads fastest** (EMIT-110).
+  A vector aligns to its size and a 3-vector to 16, a scalar may fill a 3-vector's tail, and a struct nested in a constant block takes whole rows.
+  So `buffer[float3]` strides by 16, and the host writes it as `slib::gpu_padded<tg::vec3f, 16>`; the generated structs carry every padding field.
+  WGSL writes it natively, MSL packs a 3-vector whose tail holds a value, and HLSL writes padding fields into its structs (EMIT-112).
+  A struct placed by two rules is `layout-conflict`; `@no_padding` turns a gap into `padding-forbidden`; `bool` has no layout, `bool32` does.
+  **`@padding(.none)` packs as C++ does**, on a binding (its block and its buffers) or on one buffer member (CHK-369).
+  It is for a host's own hand-written struct, or memory something else reads too, such as a BLAS's vertices; WGSL and MSL then read through a memory form.
+  **An array in memory strides by its element rounded up to its alignment** (CHK-291): a `float3` by 16, a struct by its size.
+  A constant block admits only elements of whole rows, unless `@padding(.every_element) weights: float[8]` gives each element a row (EMIT-172).
+  HLSL holds a 3-vector array as 4-vectors (EMIT-169), and MSL packs a struct's or a block's shared tail (EMIT-170).
+  A multi-dimensional array nests the natural stride, and an array of `mat3` strides by 48; the host writes a 3-vector element as `slib::gpu_padded<T, 16>`.
+  A packed buffer element's array of builtins strides by its scalars, as C++ does (EMIT-178); packed arrays of structs or arrays, and nested ones of `mat3`, still wait (EMIT-171).
+  **A `mat3` in memory is three 16-byte columns, 48 bytes**: the host writes `slib::gpu_mat3`, and `tg::mat3f` under `@padding(.none)`.
+  HLSL holds it as a `float4x3`, which a read narrows and a write widens (EMIT-168); it rides in no ray payload yet.
+- **A `mat2` in memory is two columns back to back, 16 bytes** (EMIT-175), on a row in a constant block; the host writes `tg::mat2f`.
+  HLSL's constant buffer holds it as a `float4`, rebuilt on read; a packed buffer element's is 16 bytes at 4, a packed block's waits.
+- **A vertex input and a stage link carry a matrix or a 1-D array** (CHK-422), a location per column or element: `frame_0`, `frame_1`, … (EMIT-174).
+  A vertex input's host struct keeps the member whole, and its layout names an attribute per piece; a pixel output takes neither.
+- **`scope:` opens a block whose locals end with it** (AST-156), transparent to `break`, `yield` and `return`; it flattens into its parent.
+- **`floatN(…)`, `intN(…)` and `uintN(…)` convert a scalar of another of those kinds**, as `as` would (CHK-421); `vec3` and `pos3` never do.
 - **`half`, `short`, `ushort` and their vectors are the 16-bit families** (CHK-381): `require shader_f16` or `shader_int16`, and WGSL has no short.
   HLSL spells a half `float16_t`, never `half`, so slib's SGL edge hands DXC `-enable-16bit-types` on every compile; a 16-bit literal is a construction, `half(0.5)`.
-  A 16-bit value packs at 2 bytes, crosses no stage edge and sits in no `@inline` binding (CHK-387), and a buffer's element is whole 4-byte words: `buffer[half2]`, never `buffer[half]`.
+  A 16-bit value aligns to its size, a `half3` to 8, and crosses no stage edge and sits in no `@inline` binding (CHK-387).
+  A buffer's element is whole 4-byte words: `buffer[half2]`, never `buffer[half]`.
   **No layout is guaranteed without an annotation** (EMIT-116): the compiler may reorder members, so the host goes through the generated struct, never through offsets it assumed.
 - **A warning never fails `compile_to_text`, and only a text carries one.** A failed compile's error holds its errors alone.
   slib's SGL edge logs each warning under `slib`, and `sgl emit` prints them to stderr beside the text.

@@ -1,14 +1,15 @@
 // Every value in GPU memory is placed by SGL's own rule, and each target is made to follow it (the spec's layout rules).
 // The host fills these through the structs the package generates, byte for byte, and reads them back the same way.
 
-// A buffer's element packs tight, as a tg struct does: `velocity` sits at 4 and `alive` at 32, 36 bytes in all.
+// A buffer's element aligns every vector to its size, a float3 to 16: `velocity` sits at 16, `color` at 32 and `alive`
+// at 48, 64 bytes in all.
 struct particle:
     mass: float
     velocity: float3
     color: float4
     alive: bool32
 
-// In a constant block a nested struct starts a row, and what follows packs against its last member.
+// In a constant block a nested struct starts a row, and what follows it starts the next one.
 struct glow:
     color: float3
 
@@ -26,24 +27,190 @@ binding step:
         let color = p.color * step.shade.color.x
         step.items[id.x] = particle(p.mass + step.after, velocity, color, false as bool32)
 
-// Tight packing puts `b` at 8, across a 16-byte row, and a buffer of float3 strides by 12.
+// The natural rule puts `b` at 16, and a buffer of float3 strides by 16.
 struct pair:
+    a: float2
+    b: float3
+
+// `@padding(.none)` packs as C++ does: `b` at 8, across a 16-byte row, and a buffer of float3 strides by 12.
+struct flat_pair:
     a: float2
     b: float3
 
 binding stretch:
     pairs: mut buffer[pair]
     dirs: mut buffer[float3]
+    @padding(.none) flat_pairs: mut buffer[flat_pair]
+    @padding(.none) flat_dirs: mut buffer[float3]
 
 @compute(64) fun spread(@thread_id id: int3){stretch}:
     let p = stretch.pairs[id.x]
     let d = stretch.dirs[id.x]
     stretch.pairs[id.x] = pair(p.a * 2.0, p.b + d)
     stretch.dirs[id.x] = d * 3.0
+    let f = stretch.flat_pairs[id.x]
+    let g = stretch.flat_dirs[id.x]
+    stretch.flat_pairs[id.x] = flat_pair(f.a * 2.0, f.b + g)
+    stretch.flat_dirs[id.x] = g * 3.0
 
-// `@layout(.cpp)` places a block as C++ places a struct of tg types, so a host fills it from a struct of its own.
+// A mat3's columns stand 16 bytes apart, 48 bytes in all, in a block, a struct and a buffer alike.
+// `@padding(.none)` packs them into the 36 bytes of a tg::mat3f.
+struct framed:
+    basis: mat3
+    scale: float
+
+binding turn:
+    xf: mat3
+    after: float
+    frames: mut buffer[framed]
+    mats: mut buffer[mat3]
+    @padding(.none) flat: mut buffer[mat3]
+    dirs: mut buffer[float4]
+
+@compute(64) fun rotate(@thread_id id: int3){turn}:
+    let f = turn.frames[id.x]
+    let v = turn.xf * (f.basis * float3(1.0, 2.0, 3.0))
+    turn.dirs[id.x] = float4(v.x, v.y, v.z, f.scale + turn.after)
+    turn.frames[id.x] = framed(turn.mats[id.x], f.scale * 2.0)
+    turn.mats[id.x] = turn.flat[id.x]
+    turn.flat[id.x] = f.basis
+
+// An array of mat3 strides by 48, each element three 16-byte columns, in a block and a buffer's element alike.
+struct posed:
+    frames: mat3[2]
+    tag: float
+
+binding pose:
+    bases: mat3[2]
+    poses: mut buffer[posed]
+    turned: mut buffer[float4]
+
+@compute(64) fun repose(@thread_id id: int3){pose}:
+    let p = pose.poses[id.x]
+    let v = pose.bases[1] * (pose.poses[id.x].frames[id.x % 2] * float3(1.0, 2.0, 3.0))
+    pose.turned[id.x] = float4(v.x, v.y, v.z, p.frames[0].column(1).y + p.tag)
+    pose.poses[id.x] = posed(pose.bases, p.tag * 2.0)
+
+// A mat2's two columns stand back to back, 16 bytes, which a constant block starts on a row.
+struct twisted:
+    turn: mat2
+    tag: float
+
+binding twist:
+    lead: float
+    turn: mat2
+    after: float
+    twists: mut buffer[twisted]
+
+@compute(64) fun retwist(@thread_id id: int3){twist}:
+    let t = twist.twists[id.x]
+    twist.twists[id.x] = twisted(twist.turn * t.turn, t.tag + twist.lead + twist.after)
+
+// A multi-dimensional array nests the natural stride: an inner array strides by its own size rounded up to its alignment.
+struct tile:
+    grid: float4[2, 2]
+    weights: float[2, 3]
+    tag: float
+
+binding tiling:
+    rows: float4[2, 2]
+    tiles: mut buffer[tile]
+    picked: mut buffer[float4]
+
+@compute(64) fun retile(@thread_id id: int3){tiling}:
+    let t = tiling.tiles[id.x]
+    let g = tiling.tiles[id.x].grid[id.x % 2, 1] + tiling.rows[1][id.x % 2]
+    tiling.picked[id.x] = float4(g.x, t.weights[1, 2], t.weights[id.x % 2, 0], g.w)
+    tiling.tiles[id.x] = tile(tiling.rows, t.weights, t.tag + 1.0)
+
+// A multi-dimensional array of float3 strides its innermost element by 16, which HLSL widens at depth.
+struct field:
+    dirs: float3[2, 3]
+    turn: mat3
+    tag: float
+
+binding fielding:
+    grid: float3[2, 2]
+    fields: mut buffer[field]
+    sensed: mut buffer[float4]
+
+@compute(64) fun sense(@thread_id id: int3){fielding}:
+    let f = fielding.fields[id.x]
+    let d = fielding.fields[id.x].dirs[id.x % 2, 2] + fielding.grid[1][id.x % 2]
+    let row = fielding.fields[id.x].dirs[1]
+    let v = fielding.fields[id.x].turn * d
+    fielding.sensed[id.x] = float4(v.x, v.y, row[0].y, f.dirs[0, 1].z)
+    fielding.fields[id.x] = field(f.dirs, f.turn, f.tag + 1.0)
+
+// Under @padding(.none) a buffer element's arrays stride by their elements' scalars, as a C++ struct's do.
+struct tight:
+    lead: float
+    dirs: float3[3]
+    colors: float4[2]
+    weights: float[2]
+    turn: mat2
+    frames: mat3[2]
+
+binding tightening:
+    @padding(.none) tights: mut buffer[tight]
+    gathered: mut buffer[float4]
+
+@compute(64) fun tighten(@thread_id id: int3){tightening}:
+    let t = tightening.tights[id.x]
+    let d = tightening.tights[id.x].dirs[id.x % 3]
+    let c = tightening.tights[id.x].colors[1]
+    let v = tightening.tights[id.x].frames[id.x % 2] * (d * (tightening.tights[id.x].turn * float2(1.0, 2.0)).y)
+    tightening.gathered[id.x] = float4(v.x + c.w, t.weights[1], t.dirs[2].z, v.z)
+    tightening.tights[id.x] = tight(t.lead + 1.0, t.dirs, t.colors, t.weights, t.turn, t.frames)
+
+// An array strides by its element rounded up to the element's alignment: a float3 by 16, a float by 4, a struct by its
+// size, here 32 with `radius` in `color`'s tail.
+struct lamp:
+    pos: float4
+    color: float3
+    radius: float
+
+// a constant block places its own struct, since one struct has one layout (EMIT-114)
+struct beacon:
+    pos: float4
+    color: float3
+    radius: float
+
+struct track:
+    corners: float3[3]
+    weights: float[4]
+    lamps: lamp[2]
+
+binding lit:
+    lamps: beacon[2]
+    tints: float3[2]
+    tracks: mut buffer[track]
+    sums: mut buffer[float4]
+
+@compute(64) fun light_up(@thread_id id: int3){lit}:
+    let t = lit.tracks[id.x]
+    let l = lit.lamps[id.x % 2]
+    let s = t.corners[0] + t.corners[2] * t.weights[3] + lit.tints[1] * l.radius + t.lamps[1].color
+    lit.sums[id.x] = float4(s.x, s.y, s.z, l.color.y + t.lamps[0].radius)
+    let mut u = t
+    u.corners[1] = l.color
+    u.weights[0] = l.radius
+    lit.tracks[id.x] = u
+
+// `@padding(.every_element)` starts each element of a block's array of values on a row, 16 bytes apart.
+binding taps:
+    @padding(.every_element) weights: float[4]
+    @padding(.every_element) offsets: float2[3]
+    sums: mut buffer[float4]
+
+@compute(64) fun gather(@thread_id id: int3){taps}:
+    let o = taps.offsets[id.x % 3]
+    let w = taps.weights
+    taps.sums[id.x] = float4(taps.weights[id.x % 4], o.x, o.y, w[0] + w[1] + w[2] + w[3])
+
+// `@padding(.none)` places a block as C++ places a struct of tg types, so a host fills it from a struct of its own.
 // `tint` sits at 4 and `bias` right behind it at 16, and `weights` crosses a row from 28: 48 bytes in all.
-@layout(.cpp) @inline binding host_params:
+@padding(.none) @inline binding host_params:
     scale: float
     tint: float3
     bias: float
@@ -52,7 +219,7 @@ binding stretch:
     count: uint
 
 // A group's block follows the same rule: `dir` at 4, `after` at 16 and `to_world` at 20, column by column as tg holds it.
-@layout(.cpp)
+@padding(.none)
 binding host_echo:
     gain: float
     dir: float3
@@ -103,7 +270,7 @@ binding host_echo:
 
 // 16-bit members pack at 2 bytes, as tg's do: `h` at 4, `tint` at 6, `count` at 12 and `after` at 16, 20 bytes in all.
 // A group's block, since an @inline binding holds no 16-bit value.
-@layout(.cpp)
+@padding(.none)
 binding host_halves:
     require shader_f16, shader_int16
     gain: float
@@ -121,3 +288,36 @@ binding host_halves:
     host_halves.values[4] = host_halves.tint.z as float
     host_halves.values[5] = (host_halves.count as uint) as float
     host_halves.values[6] = host_halves.after
+
+const last_values = [22.0, 23.0, 24.0]
+
+// An array of whole rows starts a row and strides by its element: `rows` at 16, `xf` at 64 and `ids` at 192.
+// `shift` aligns to its size, at 8, so every target reads the block as it is.
+binding rows_echo:
+    scale: float
+    shift: float2
+    rows: float4[3]
+    xf: mat4[2]
+    ids: int4[2]
+    values: mut buffer[float]
+
+@compute(1) fun echo_rows(){rows_echo}:
+    rows_echo.values[0] = rows_echo.scale
+    rows_echo.values[1] = rows_echo.shift.x
+    rows_echo.values[2] = rows_echo.shift.y
+    // a runtime index walks into the block in place
+    for i in 0 ..< rows_echo.ids[0].x:
+        let r = rows_echo.rows[i]
+        rows_echo.values[3 + 4 * i] = r.x
+        rows_echo.values[4 + 4 * i] = r.y
+        rows_echo.values[5 + 4 * i] = r.z
+        rows_echo.values[6 + 4 * i] = r.w
+    // column 3 of each matrix, its translation, at an index the shader reads from the block (CHK-407)
+    for m in 0 ..< 2:
+        let t = rows_echo.xf[m].column(rows_echo.ids[0].x)
+        rows_echo.values[15 + 4 * m] = t.x
+        rows_echo.values[16 + 4 * m] = t.y
+        rows_echo.values[17 + 4 * m] = t.z
+        rows_echo.values[18 + 4 * m] = t.w
+    // a const array is bound once and indexed where it is read, here at an index the block holds (EMIT-165)
+    rows_echo.values[23] = last_values[rows_echo.ids[0].x - 1] + (rows_echo.ids[1].w as float) - 24.0

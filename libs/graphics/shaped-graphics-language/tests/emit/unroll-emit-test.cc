@@ -200,3 +200,33 @@ TEST("sgl emit - an unrolled index's arithmetic shifted in HLSL is written as an
     CHECK(hlsl.contains("m = m | (int(3) << n);\n")).dump("hlsl", hlsl);
     CHECK(!hlsl.contains("(1 << n)")).dump("hlsl", hlsl);
 }
+
+TEST("sgl emit - @unroll(false) keeps a loop and writes HLSL's [loop], a hint no other target spells")
+{
+    // CHK-414, on an exclusive range and on an inclusive one whose last bound is no constant
+    auto const source = cc::string("binding io:\n"
+                                   "    source: buffer[float]\n"
+                                   "    target: mut buffer[float]\n"
+                                   "\n"
+                                   "@compute(64) fun sum(@thread_id id: int3){io}:\n"
+                                   "    let mut total = 0.0\n"
+                                   "    @unroll(false)\n"
+                                   "    for i in 0 ..< 8:\n"
+                                   "        total += io.source[i]\n"
+                                   "    @unroll(false)\n"
+                                   "    for j in 0 ..= id.x:\n"
+                                   "        total += io.source[j]\n"
+                                   "    for k in 0 ..< 2:\n"
+                                   "        total += io.source[k]\n"
+                                   "    io.target[id.x] = total\n");
+    auto const hlsl = text_of(source, target::hlsl_dx12);
+    auto hints = cc::string(hlsl);
+    CHECK(hints.replace_all("[loop]", "") == 2).dump("hlsl", hlsl);
+    CHECK(hlsl.contains("[loop]\n    for (int i = 0; i < 8; ++i)")).dump("hlsl", hlsl);
+    for (auto const t : {target::wgsl, target::msl})
+    {
+        auto const text = text_of(source, t);
+        CHECK(!text.contains("[loop]")).dump("text", text);
+        CHECK(text.contains("for")).dump("text", text);
+    }
+}

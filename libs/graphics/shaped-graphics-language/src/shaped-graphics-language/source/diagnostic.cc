@@ -108,6 +108,8 @@ cc::string_view sgl::to_string(diagnostic_kind kind)
         return "statement-in-expression";
     case diagnostic_kind::unexpected_keyword:
         return "unexpected-keyword";
+    case diagnostic_kind::keyword_as_name:
+        return "keyword-as-name";
     case diagnostic_kind::too_many_arguments:
         return "too-many-arguments";
     case diagnostic_kind::for_takes_name_in_range:
@@ -146,6 +148,8 @@ cc::string_view sgl::to_string(diagnostic_kind kind)
         return "ambiguous-overload";
     case diagnostic_kind::type_mismatch:
         return "type-mismatch";
+    case diagnostic_kind::as_precedence:
+        return "as-precedence";
     case diagnostic_kind::dependency_cycle:
         return "dependency-cycle";
     case diagnostic_kind::unknown_module:
@@ -182,6 +186,8 @@ cc::string_view sgl::to_string(diagnostic_kind kind)
         return "recursive-call";
     case diagnostic_kind::not_assignable:
         return "not-assignable";
+    case diagnostic_kind::read_before_assignment:
+        return "read-before-assignment";
     case diagnostic_kind::unreachable_code:
         return "unreachable-code";
     case diagnostic_kind::non_exhaustive_case:
@@ -198,6 +204,8 @@ cc::string_view sgl::to_string(diagnostic_kind kind)
         return "feature-not-declared";
     case diagnostic_kind::unused_require:
         return "unused-require";
+    case diagnostic_kind::generic_not_instantiated:
+        return "generic-not-instantiated";
     case diagnostic_kind::stage_not_allowed:
         return "stage-not-allowed";
     case diagnostic_kind::invalid_pipeline:
@@ -364,6 +372,8 @@ cc::string_view sgl::summary_of(diagnostic_kind kind)
         return "a statement where a value is expected";
     case diagnostic_kind::unexpected_keyword:
         return "keywords that head nothing together, such as `mut` without `let`";
+    case diagnostic_kind::keyword_as_name:
+        return "a keyword where a name stands, such as a member called `type`; name it something else";
     case diagnostic_kind::too_many_arguments:
         return "a keyword that holds more expressions than it takes";
     case diagnostic_kind::for_takes_name_in_range:
@@ -402,6 +412,8 @@ cc::string_view sgl::summary_of(diagnostic_kind kind)
         return "two functions of this name take exactly these arguments";
     case diagnostic_kind::type_mismatch:
         return "a value of another type than the one expected here";
+    case diagnostic_kind::as_precedence:
+        return "an `as` whose type is arithmetic: `as` binds looser, so parenthesize the conversion";
     case diagnostic_kind::dependency_cycle:
         return "a declaration that needs itself to be compiled";
     case diagnostic_kind::unknown_module:
@@ -438,6 +450,8 @@ cc::string_view sgl::summary_of(diagnostic_kind kind)
         return "a function that calls itself, directly or through others";
     case diagnostic_kind::not_assignable:
         return "an assignment to something that is not a mutable local or a member of one";
+    case diagnostic_kind::read_before_assignment:
+        return "a read of a local declared without a value, on a path where nothing assigned it";
     case diagnostic_kind::unreachable_code:
         return "a statement after a jump, which never runs";
     case diagnostic_kind::non_exhaustive_case:
@@ -510,6 +524,8 @@ cc::string_view sgl::summary_of(diagnostic_kind kind)
         return "an entry point that uses a feature its file, its bindings and its body never `require`";
     case diagnostic_kind::unused_require:
         return "a `require` in a body that nothing there needed";
+    case diagnostic_kind::generic_not_instantiated:
+        return "a generic function that nothing instantiates, whose body is checked for its names alone";
     }
     CC_UNREACHABLE("unknown diagnostic_kind");
 }
@@ -568,6 +584,7 @@ sgl::severity sgl::default_severity_of(diagnostic_kind kind)
     case diagnostic_kind::misplaced_attribute_on_expression:
     case diagnostic_kind::statement_in_expression:
     case diagnostic_kind::unexpected_keyword:
+    case diagnostic_kind::keyword_as_name:
     case diagnostic_kind::too_many_arguments:
     case diagnostic_kind::for_takes_name_in_range:
     case diagnostic_kind::assert_takes_condition_and_message:
@@ -585,6 +602,7 @@ sgl::severity sgl::default_severity_of(diagnostic_kind kind)
     case diagnostic_kind::no_matching_overload:
     case diagnostic_kind::ambiguous_overload:
     case diagnostic_kind::type_mismatch:
+    case diagnostic_kind::as_precedence:
     case diagnostic_kind::dependency_cycle:
     case diagnostic_kind::unknown_module:
     case diagnostic_kind::module_cycle:
@@ -603,6 +621,7 @@ sgl::severity sgl::default_severity_of(diagnostic_kind kind)
     case diagnostic_kind::missing_return:
     case diagnostic_kind::recursive_call:
     case diagnostic_kind::not_assignable:
+    case diagnostic_kind::read_before_assignment:
     case diagnostic_kind::non_exhaustive_case:
     case diagnostic_kind::duplicate_case_pattern:
     case diagnostic_kind::missing_value_in_arm:
@@ -642,6 +661,7 @@ sgl::severity sgl::default_severity_of(diagnostic_kind kind)
     case diagnostic_kind::redundant_yield:
     case diagnostic_kind::unreachable_code:
     case diagnostic_kind::unused_require:
+    case diagnostic_kind::generic_not_instantiated:
     case diagnostic_kind::unroll_too_long:
         return severity::warning;
     }

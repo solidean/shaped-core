@@ -194,7 +194,7 @@ def _print_listing(ctx: Context, benchmarks: list, preset) -> None:
     for target in sorted(by_target):
         print(console.dim(target))
         for b in by_target[target]:
-            print(f"  {b.name}")
+            print(f"  {b.name}" + (console.dim("  (manual: by exact name only)") if b.manual else ""))
             print(console.dim(f"      {ctx.rel(Path(b.file))}:{b.line}"))
 
     print(console.dim(f"\n{len(benchmarks)} benchmark(s), preset {preset.name}."

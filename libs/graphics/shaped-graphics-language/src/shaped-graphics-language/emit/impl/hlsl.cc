@@ -38,6 +38,7 @@ public:
     bool has_struct_constructor() const override { return false; }
 
     bool is_c_like() const override { return true; }
+    cc::string_view rolled_loop_hint() const override { return "[loop]"; }
 
     void write_for_head(cc::string& out, cc::string_view index, cc::string_view first, cc::string_view end) const override
     {
@@ -46,7 +47,9 @@ public:
 
     void write_local(cc::string& out, local_declaration const& local) const override
     {
-        if (local.value.empty())
+        if (local.value.empty() && local.is_zeroed)
+            out.appendf("{} {} = ({})0;", local.type, local.name, local.type);
+        else if (local.value.empty())
             out.appendf("{} {}{};", local.type, local.name, local.dimensions);
         else
             out.appendf("{}{} {}{} = {};", local.is_mut ? "" : "const ", local.type, local.name, local.dimensions,
@@ -65,15 +68,18 @@ public:
     {
         if (member.is_position)
             return "SV_Position";
+        if (member.is_layer)
+            return "SV_RenderTargetArrayIndex";
         switch (s.role)
         {
         case struct_role::vertex_input:
         {
-            auto const at = &member - s.members.data();
+            // EMIT-174: a piece is its member's semantic at its own index, `FRAME0`, which is how dx12 reads one
+            auto const at = member.whole >= 0 ? member.whole : &member - s.members.data();
             auto const semantics = vertex_semantics(p.m, p.m.at(s.type));
             for (auto i = isize(0); i < s.member_of.size(); ++i)
                 if (s.member_of[i] == at)
-                    return semantics[i];
+                    return member.piece_index >= 0 ? cc::format("{}{}", semantics[i], member.piece_index) : semantics[i];
             return "";
         }
         case struct_role::stage_link:
@@ -292,8 +298,23 @@ public:
             out.appendf("[[vk::location({})]] ", member.location);
         if (_is_vulkan && member.offset >= 0)
             out.appendf("[[vk::offset({})]] ", member.offset);
+        // EMIT-168: a mat3 in memory is three whole rows, which no packed layout and no function body holds
+        auto const in_memory = member.offset >= 0 && (owner == nullptr || (owner->memory_size > 0 && !owner->is_packed));
+        auto const is_widened = in_memory && is_mat3(p.m, innermost_of(p.m, member.type));
+        // EMIT-169: an array of 3-vectors in memory is one of 4-vectors, which a structured buffer strides by 16 too
+        auto const widened_vector = member.is_row_per_element
+                                      ? cc::string(builtin_spelling(p, row_vector_of(p, p.m.at(member.type).element)))
+                                  : in_memory ? widened_vector_of(p, member.type)
+                                              : cc::string();
+        // EMIT-175: a mat2 in a constant block is its two columns in one row, which no HLSL matrix there is
+        auto const in_constants = owner == nullptr || owner->is_constants;
+        auto const is_vector_mat2 = in_memory && in_constants && is_mat2(p.m, member.type);
+        auto const type = is_widened              ? cc::string("float4x3")
+                        : is_vector_mat2          ? cc::string("float4")
+                        : !widened_vector.empty() ? widened_vector
+                                                  : cc::string(type_text(p, *this, member.type));
         // Stated on every matrix, so no `-Zpr` and no `#pragma pack_matrix` can turn one around.
-        if (type_text(p, *this, member.type) == "float4x4")
+        if (type == "float4x4" || type == "float4x3" || type == "float3x3")
             out += "column_major ";
         // EMIT-129: a stage link's interpolation, as HLSL's qualifiers spell it
         if (owner != nullptr && owner->role == struct_role::stage_link)
@@ -309,7 +330,7 @@ public:
             else if (member.interpolate.sampling == sampling::sample)
                 out += "sample ";
         }
-        out.appendf("{} {}{}", type_text(p, *this, member.type), member.name, array_dimensions(p, member.type));
+        out.appendf("{} {}{}", type, member.name, array_dimensions(p, member.type));
         if (owner != nullptr)
             if (auto const semantic = semantic_of(*owner, member, p); !semantic.empty())
                 out.appendf(" : {}", semantic);
@@ -319,29 +340,107 @@ public:
         out += ";\n";
     }
 
+    /// EMIT-112: padding fields from `at` up to `offset`, in words, and one 16-bit field where 2 bytes are left.
+    /// HLSL's own packing closes every gap a value fits into, so filled gaps land every member at its offset.
+    void write_padding(cc::string& out, i32& at, i32 offset, i32& count) const
+    {
+        while (at < offset)
+        {
+            auto const width = offset - at >= 4 && at % 4 == 0 ? 4 : 2;
+            out += k_indent;
+            if (_is_vulkan)
+                out.appendf("[[vk::offset({})]] ", at);
+            out.appendf("{} sgl_pad{};\n", width == 4 ? "uint" : "uint16_t", count++);
+            at += width;
+        }
+    }
+
+    /// The members of a struct or a block, padded where they stand in GPU memory and as declared everywhere else.
+    void write_members(cc::string& out,
+                       planned_struct const* owner,
+                       cc::span<planned_member const> members,
+                       i32 memory_size,
+                       plan const& p) const
+    {
+        auto at = 0;
+        auto count = 0;
+        for (auto const& member : members)
+        {
+            if (member.offset >= 0)
+            {
+                write_padding(out, at, member.offset, count);
+                at = member.offset + member.size;
+            }
+            write_member(out, owner, member, p);
+        }
+        if (memory_size > 0)
+            write_padding(out, at, memory_size, count);
+    }
+
+    /// The 4-vector HLSL holds an array of 3-vectors as in GPU memory (EMIT-169), or empty for any other type.
+    [[nodiscard]] cc::string widened_vector_of(plan const& p, type_id type) const
+    {
+        if (p.m.builtin_type_of(type) != nullptr || p.m.at(type).kind != type_kind::array)
+            return {};
+        auto const* const record = p.m.builtin_type_of(innermost_of(p.m, type));
+        if (record == nullptr || record->leaf_count != 3)
+            return {};
+        auto const family = record->leaf_kind == check::value_kind::scalar_int    ? "int4"
+                          : record->leaf_kind == check::value_kind::scalar_uint   ? "uint4"
+                          : record->leaf_kind == check::value_kind::scalar_half   ? "half4"
+                          : record->leaf_kind == check::value_kind::scalar_short  ? "short4"
+                          : record->leaf_kind == check::value_kind::scalar_ushort ? "ushort4"
+                                                                                  : "float4";
+        return cc::string(builtin_spelling(p, family));
+    }
+
+    /// Whether any root holds a mat3 as three whole rows, which a write widens through `sgl_widen_mat3`.
+    [[nodiscard]] static bool holds_widened_mat3(plan const& p)
+    {
+        auto result = false;
+        for (auto const& s : p.structs)
+            if (s.memory_size > 0 && !s.is_packed)
+                for (auto const& member : s.members)
+                    result = result || is_mat3(p.m, innermost_of(p.m, member.type));
+        for (auto const& r : p.resources)
+            if (r.element_form.has_value())
+                for (auto const& leaf : r.element_form.value().leaves)
+                    result = result || leaf.is_widened;
+        return result;
+    }
+
     void write_enum_constant(cc::string& out, cc::string_view name, i32 value) const override
     {
         out.appendf("static const int {} = {};\n", name, value);
     }
 
-    /// A block's struct: its members, or its memory form where it has one (EMIT-154).
+    /// A memory form's fields in memory order.
     /// Every field states its offset on vulkan, as the push-constant block's do, so no compiler flag decides the layout.
     /// dx12 states none: each field of a form fits its row and padding fills every gap, so its own packing lands each
     /// at its offset.
+    void write_form(cc::string& out, memory_form const& form) const
+    {
+        out.appendf("struct {}\n{{\n", form.name);
+        for (auto const& f : form.fields)
+        {
+            out += k_indent;
+            if (_is_vulkan)
+                out.appendf("[[vk::offset({})]] ", f.offset);
+            auto const is_matrix
+                = f.type == "float4x4" || f.type == "float4x3" || f.type == "float3x3" || f.type == "float2x2";
+            out.appendf("{}{} {}{};\n", is_matrix ? "column_major " : "", f.type, f.name,
+                        f.count > 0 ? cc::format("[{}]", f.count) : cc::string());
+        }
+        out += "};\n\n";
+    }
+
+    /// A block's struct: its members with their padding, or its memory form where it has one (EMIT-154).
     void write_block_struct(cc::string& out, plan const& p, planned_constants const& block) const
     {
+        if (block.form.has_value())
+            return write_form(out, block.form.value());
         out.appendf("struct {}\n{{\n", block.block_name);
-        if (!block.form.has_value())
-            for (auto const& member : block.members)
-                write_member(out, nullptr, member, p);
-        else
-            for (auto const& f : block.form.value().fields)
-            {
-                out += k_indent;
-                if (_is_vulkan)
-                    out.appendf("[[vk::offset({})]] ", f.offset);
-                out.appendf("{}{} {};\n", f.type == "float4x4" ? "column_major " : "", f.type, f.name);
-            }
+        write_members(out, nullptr, block.members, 0, p);
         out += "};\n\n";
     }
 
@@ -355,6 +454,9 @@ public:
     {
         if (block != nullptr)
             write_block_struct(out, p, *block);
+        for (auto const& b : buffers)
+            if (b.element_form.has_value())
+                write_form(out, b.element_form.value());
         if (block != nullptr)
             write_addressed(out, cc::format("ConstantBuffer<{}>", block->block_name), block->name, 'b', block->group,
                             block->slot, {});
@@ -370,8 +472,10 @@ public:
         // a binding array takes `count` consecutive registers from its first
         auto const name = b.count > 1 ? cc::format("{}[{}]", b.name, b.count) : cc::string(b.name);
         // EMIT-150: DXC writes it as SPIR-V's `Coherent` for vulkan
-        auto const type
-            = b.is_coherent ? cc::format("globallycoherent {}", resource_text(p, b.type)) : resource_text(p, b.type);
+        auto const resource = b.element_form.has_value()
+                                ? cc::format("{}StructuredBuffer<{}>", t.is_mut ? "RW" : "", b.element_form.value().name)
+                                : resource_text(p, b.type);
+        auto const type = b.is_coherent ? cc::format("globallycoherent {}", resource) : resource;
         write_addressed(out, type, name, register_class_of(t), b.group, b.slot, format);
     }
 
@@ -447,12 +551,20 @@ public:
         if (p.e.entry_stage >= stage::raygen)
             out += "#pragma dxc diagnostic ignored \"-Wpayload-access-perf\"\n\n";
         write_enum_constants(out, p, *this);
+        for (auto const& access : p.accesses)
+            if (access.held == held_as::vector_mat2)
+            {
+                out += "float2x2 sgl_narrow_mat2(float4 m)\n{\n    return float2x2(m.x, m.z, m.y, m.w);\n}\n\n";
+                break;
+            }
+        if (holds_widened_mat3(p))
+            out += "float4x3 sgl_widen_mat3(float3x3 m)\n{\n    return float4x3(m[0], m[1], m[2], float3(0.0, 0.0, "
+                   "0.0));\n}\n\n";
         // A struct stands ahead of the groups, whose blocks and buffers may hold it.
         for (auto const& s : p.structs)
         {
             out.appendf("struct {}{}\n{{\n", is_payload(p, s.type) ? "[raypayload] " : "", s.name);
-            for (auto const& member : s.members)
-                write_member(out, &s, member, p);
+            write_members(out, &s, declared_members(s), s.memory_size, p);
             out += "};\n\n";
         }
         write_buffers(out, p, *this);

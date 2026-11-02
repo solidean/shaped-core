@@ -741,7 +741,7 @@ struct babel::gltf::data
     cc::vector<issue> issues;
 
     /// `extensionsUsed` / `extensionsRequired`, recorded verbatim.
-    /// KHR_lights_punctual, EXT_meshopt_compression and the KHR_materials_* extensions `material` carries are the ones this reader interprets.
+    /// KHR_lights_punctual, EXT_meshopt_compression, KHR_mesh_quantization and the KHR_materials_* extensions `material` carries are the ones this reader interprets.
     /// Any other required one never reaches a caller unless it is one of `read_options::extensions`: read fails
     /// on it, because the spec says a client that cannot support a required extension must refuse the file.
     cc::vector<cc::string> extensions_used;

@@ -563,6 +563,9 @@ expr_id builder::if_expression(form_id form)
 {
     auto collected = cc::vector<if_branch>();
     auto rest = form;
+    // `=>` is looser than a keyword form, so `return if c => a else b` arrives with the jump in the first condition's
+    // keyword form, `(return if c) => a`: the jumps take the whole `if` as their value, as they take a lambda.
+    auto jumps = cc::vector<form_id>();
     // each `if c => a else rest`, until `rest` is the value of the closing `else`
     while (is_kind(rest, form_kind::operator_run)
            && level_of(run_parts_of(rest).operators[0]) == operator_level::alternative)
@@ -571,8 +574,12 @@ expr_id builder::if_expression(form_id form)
         auto const arrow = run_parts_of(parts.operands[0]);
         auto const keyword = keyword_parts_of(arrow.operands[0]);
         auto branch = if_branch{.form = parts.operands[0]};
-        if (keyword.keywords.size() > 1)
-            report(diagnostic_kind::unexpected_keyword, keyword.keywords[1]);
+        auto first = isize(0);
+        if (collected.empty())
+            while (first + 1 < keyword.keywords.size() && is_value_jump(token_text_of(keyword.keywords[first])))
+                jumps.push_back(keyword.keywords[first++]);
+        if (keyword.keywords.size() > first + 1)
+            report(diagnostic_kind::unexpected_keyword, keyword.keywords[first + 1]);
         if (keyword.arguments.empty())
             branch.condition = invalid_expression(arrow.operands[0], diagnostic_kind::expected_expression);
         else
@@ -592,7 +599,10 @@ expr_id builder::if_expression(form_id form)
     collected.push_back({.form = rest, .then = value_body(rest, body_owner::value_block)});
 
     auto const branches = append(ast.if_branches, cc::span<if_branch const>(collected));
-    return make_expr(form, if_expr{.branches = branches});
+    auto result = make_expr(form, if_expr{.branches = branches});
+    for (auto i = jumps.size() - 1; i >= 0; --i)
+        result = make_jump(form, token_text_of(jumps[i]), result);
+    return result;
 }
 
 expr_id builder::jump_expression(form_id form, keyword_parts const& parts, cc::string_view keyword)

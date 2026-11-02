@@ -1,0 +1,51 @@
+// a program declares generic structs over types and values, and a constructor mirrors their parameters
+
+struct pair[A, B]:
+    first: A
+    second: B
+
+fun pair.swapped(self) -> pair[B, A] => pair(self.second, self.first)
+
+struct ring[n: int, T]:
+    items: T[n]
+    head: int
+
+fun ring.capacity(self) -> int => n
+
+fun ring.at(self, i: int) -> T => self.items[(self.head + i) % n]
+
+fun sum_of[n: int](values: float[n]) -> float:
+    let mut total = 0.0
+    for i in 0 ..< n:
+        total += values[i]
+    return total
+
+// the constructor deduces each parameter from the field it fills
+test:
+    let p = pair(1, 2.5)
+    p.second == 2.5
+    p.swapped().first == 2.5
+    p.swapped().second == 1
+
+// an array's length deduces a value parameter, and a method reads it as a constant
+test:
+    let r = ring(float[4].filled(1.5), 1)
+    r.capacity() == 4
+    r.at(2) == 1.5
+    sum_of(float[3].filled(2.0)) == 6.0
+
+// an instance is named in a type position, and its constructor called by that name
+test:
+    let q: pair[int, float] = pair(3, 4.0)
+    q.first == 3
+    let s = ring[2, int](int[2].filled(7), 0)
+    s.capacity() == 2
+
+// every target writes an instance as a struct of its own, named after its arguments
+binding sums:
+    totals: mut buffer[float]
+
+@compute(64) fun total(@thread_id id: int3){sums}:
+    let r = ring(float[3].filled(float(id.x)), 0)
+    let p = pair(r.at(1), r.capacity())
+    sums.totals[id.x] = p.first * float(p.second) + sum_of(r.items)

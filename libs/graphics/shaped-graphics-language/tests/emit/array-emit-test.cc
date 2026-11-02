@@ -57,3 +57,28 @@ TEST("sgl emit - an array is WGSL's and MSL's array type, and HLSL's lengths aft
     auto const msl = text_of(k_arrays, target::msl);
     CHECK(msl.contains("    array<array<float, 3>, 2> stops;\n"));
 }
+
+TEST("sgl emit array - a const array is bound once per tree, however often and however deep it is read")
+{
+    // EMIT-165: a target would otherwise write the whole literal at every index
+    constexpr auto source = "const table = [1u, 2u, 3u, 4u, 5u, 6u, 7u, 8u]\n"
+                            "\n"
+                            "fun at(i: int) -> uint => table[i % 8]\n"
+                            "\n"
+                            "binding data:\n"
+                            "    out_v: mut buffer[uint]\n"
+                            "\n"
+                            "@compute(1) fun main(@thread_id id: int3){data}:\n"
+                            "    data.out_v[0] = at(id.x) + at(id.y) + table[id.z % 8]\n";
+    for (auto const t : sgl::emit::all_targets())
+    {
+        auto const e = emit_source(source, 0, t);
+        REQUIRE(sgl::emit::dump_errors(e) == "");
+        // the literal's last element stands once, in the one binding every read takes
+        auto const text = cc::string_view(e.text);
+        auto count = 0;
+        for (auto i = isize(0); i + 1 < text.size(); ++i)
+            count += text[i] == '8' && text[i + 1] == 'u' ? 1 : 0;
+        CHECK(count == 1).context(e.text);
+    }
+}

@@ -240,6 +240,17 @@ Pointing the slot at a placeholder keeps the permutation stable across the whole
 obtained without touching a payload byte.
 *Landed*: `sv::mesh::bounds` carries it, and `create_mesh` falls back to scanning the positions only when nothing declared one.
 
+### Geometry for one frame
+
+A mesh whose geometry changes every frame never lands under this model: each placement is new content, streamed and drawn as its placeholder until the next one replaces it.
+`scene_ref::add_mesh(mesh, sv::mesh_lifetime::frame)` takes the other route.
+The geometry rides on the scene item, and the renderer uploads it inline on the frame's own command list into transient buffers, building its BLAS there too.
+Nothing enters the mesh manager, nothing streams, and nothing is ever a placeholder; topology may change between frames for free.
+Within an epoch it is deduplicated by content, so a mesh in several views, or resolved twice for one trace, uploads once.
+The trace hash keys it by its geometry's content rather than by its buffers, so an unchanged frame mesh keeps the accumulated image.
+Attributes and textures stay resident and stream as usual, and the mesh lights nothing: its emission shades itself, but no light record samples it.
+It is meant for small meshes, a simulation's above all, since every frame pays the upload and the BLAS build.
+
 ## Materials: the definition is permanent, the materialization is not
 
 [material_library](../src/shaped-viewer/material/material_library.hh) is CPU-side and never evicts, and that is exactly what makes

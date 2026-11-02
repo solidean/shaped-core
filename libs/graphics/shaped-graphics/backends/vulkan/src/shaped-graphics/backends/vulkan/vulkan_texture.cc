@@ -65,6 +65,9 @@ void vulkan_texture::on_expired() const
 
 vulkan_texture::~vulkan_texture()
 {
+    // a pending upload no list waits on can never be read now, so its context waits on nothing (upload_contexts.hh)
+    if (_upload_group != nullptr)
+        _upload_group->contexts.release_unawaited(_upload_group->awaited_value.load(cc::memory_order_acquire));
     release_storage();
 } // no-op if expire() already released the storage
 

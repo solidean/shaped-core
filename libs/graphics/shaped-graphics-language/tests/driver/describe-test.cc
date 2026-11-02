@@ -256,6 +256,20 @@ TEST("sgl describe - a vertex input's members say which buffer they come from, a
     CHECK(crowded.structs[0].members[0].semantic == "UV1_");
     CHECK(crowded.structs[0].members[1].semantic == "UV1__");
 
+    // EMIT-174: a matrix or an array takes an attribute per column or element, so a member after it moves on as far
+    auto const pieced = described(
+        cc::string("@vertex struct pieced:\n    frame: mat3\n    weights: float[2]\n    uv: vec3\n\n") + edges);
+    REQUIRE(pieced.structs.size() == 2);
+    auto const& members = pieced.structs[0].members;
+    CHECK(members[0].pieces == 3);
+    CHECK(members[0].piece == "float3");
+    CHECK(members[0].semantic == "FRAME");
+    CHECK(members[1].location == 3);
+    CHECK(members[1].pieces == 2);
+    CHECK(members[1].piece == "float");
+    CHECK(members[2].location == 5);
+    CHECK(members[2].pieces == 0);
+
     // Where a stream means nothing, it is refused rather than ignored.
     CHECK(error_of(R"(@vertex struct v:
     position: pos3
@@ -828,4 +842,54 @@ TEST("sgl describe - a module file saved with a byte-order mark is still a modul
     auto const r = sgl::describe({.library = library, .module = "view"});
     REQUIRE(r.has_value());
     CHECK(r.value().bindings.size() == 1);
+}
+
+TEST("sgl describe - an instance of a generic struct in GPU memory is named as the target text names it")
+{
+    // CHK-339: the host's C++ struct is named by an identifier, so `pair[float, int]` is `pair_float_int` throughout
+    auto const r = sgl::describe({.source = "struct pair[A, B]:\n"
+                                            "    first: A\n"
+                                            "    second: B\n"
+                                            "binding data:\n"
+                                            "    items: mut buffer[pair[float, int]]\n"
+                                            "@compute(64) fun main(@thread_id id: int3){data}:\n"
+                                            "    data.items[id.x] = pair(1.0, 2)\n"});
+    REQUIRE(r.has_value());
+    auto const& d = r.value();
+    REQUIRE(d.bindings.size() == 1);
+    REQUIRE(d.bindings[0].members.size() == 1);
+    CHECK(d.bindings[0].members[0].type == "pair_float_int");
+    REQUIRE(d.memory_structs.size() == 1);
+    CHECK(d.memory_structs[0].name == "pair_float_int");
+    CHECK(d.memory_structs[0].size == 8);
+}
+
+TEST("sgl describe - a module's ray set a pipeline names is described with the program's, as the module names it")
+{
+    // CHK-329: the host matches a pipeline's set to its description by name, so `rt.path_rays` is listed under it
+    sgl::library_file const library[] = {{.name = "rt.sgl",
+                                          .source = "module rt\n"
+                                                    "struct radiance:\n    color: float3\n"
+                                                    "rays path_rays:\n    surface: radiance\n"}};
+    constexpr auto source
+        = "require raytracing_pipeline\n"
+          "use rt\n"
+          "binding frame:\n    world: acceleration_structure[.triangles]\n    output: mut buffer[float4]\n"
+          "@raygen fun primary(@launch_id id: int3){frame}:\n"
+          "    let mut p = rt.radiance(float3(0.0, 0.0, 0.0))\n"
+          "    trace(frame.world, ray(origin = pos3(0.0, 0.0, 0.0), direction = vec3(0.0, 0.0, 1.0), t_min = 0.0, "
+          "t_max = 1.0), rt.path_rays.surface, mut p)\n"
+          "    frame.output[id.x] = float4(..p.color, 1.0)\n"
+          "@miss fun sky(p: mut rt.radiance):\n    p.color = float3(1.0, 1.0, 1.0)\n"
+          "@raytracing pipeline path:\n    rays = rt.path_rays\n    raygen = primary\n    miss.surface = sky\n"
+          "    hit_groups = (.host)\n    max_recursion_depth = 1\n";
+    auto const r = sgl::describe({.source = source, .library = library});
+    REQUIRE(r.has_value());
+    auto const& d = r.value();
+    REQUIRE(d.raytracing_pipelines.size() == 1);
+    CHECK(d.raytracing_pipelines[0].ray_set == "rt.path_rays");
+    REQUIRE(d.ray_sets.size() == 1);
+    CHECK(d.ray_sets[0].name == "rt.path_rays");
+    REQUIRE(d.ray_sets[0].rays.size() == 1);
+    CHECK(d.ray_sets[0].rays[0] == "surface");
 }

@@ -144,10 +144,18 @@ cc::optional<ray_trace> checker::ray_type_of(i32 file, ast::expr_id expr)
     auto const* const member = ast_of(file).at(expr).node.try_as<ast::member>();
     if (member == nullptr || !ast::is_valid(member->object))
         return cc::nullopt;
-    auto const* const n = ast_of(file).at(member->object).node.try_as<ast::name>();
-    if (n == nullptr)
+    // `set.ray`, or `m.set.ray` for a set of a module the file uses
+    auto const& object = ast_of(file).at(member->object).node;
+    auto const* const n = object.try_as<ast::name>();
+    auto const* const qualified = object.try_as<ast::member>();
+    auto const* const module_name = qualified != nullptr && ast::is_valid(qualified->object)
+                                      ? ast_of(file).at(qualified->object).node.try_as<ast::name>()
+                                      : nullptr;
+    if (n == nullptr && module_name == nullptr)
         return cc::nullopt;
-    auto const* const found = names_seen_from(file).get_ptr(text_of(file, n->where));
+    if (module_name != nullptr && used_module(file, text_of(file, module_name->where)) < 0)
+        return cc::nullopt;
+    auto const* const found = ray_set_candidates(file, text_of(file, span_of(file, member->object)));
     if (found == nullptr || found->empty() || !is_ray_set(found->front()))
         return cc::nullopt;
     auto const set = found->front();
@@ -244,10 +252,21 @@ type_id checker::payload_of(symbol_id entry) const
     return type_id::none;
 }
 
+cc::vector<symbol_id> const* checker::ray_set_candidates(i32 file, cc::string_view text) const
+{
+    // CHK-329: `m.set` names a set module `m` declares, as any of its names is reached
+    if (auto const dot = text.find('.'); dot > 0)
+    {
+        auto const module = used_module(file, text.subview({.offset = 0, .size = dot}));
+        return module < 0 ? nullptr : module_scopes[module].get_ptr(text.subview(dot + 1));
+    }
+    return seen_from(file, text);
+}
+
 symbol_id checker::ray_set_named(i32 file, source_span name)
 {
     auto const text = text_of(file, name);
-    auto const* const found = names_seen_from(file).get_ptr(text);
+    auto const* const found = ray_set_candidates(file, text);
     if (found == nullptr || found->empty())
     {
         report(diagnostic_kind::unknown_name, file, name, text);
@@ -271,7 +290,7 @@ symbol_id checker::ray_entry_named(i32 file, ast::expr_id value, stage wanted)
         return symbol_id::none;
     }
     auto const text = text_of(file, n->where);
-    auto const* const found = names_seen_from(file).get_ptr(text);
+    auto const* const found = seen_from(file, text);
     if (found == nullptr || found->empty())
     {
         report(diagnostic_kind::unknown_name, file, n->where, text);
@@ -306,7 +325,7 @@ void checker::compile_hit_group(symbol_id id)
     auto const file = out.at(id).file;
     auto const& ast = ast_of(file);
     auto const& p = ast.at(out.at(id).declaration).node.as<ast::pipeline_decl>();
-    auto const fail_symbol = [&] { out.symbols[index_of(id)].state = symbol_state::failed; };
+    auto const fail_symbol = [&] { out.symbols.own(index_of(id)).state = symbol_state::failed; };
     auto is_failed = false;
     auto const fail = [&](source_span where, cc::string detail)
     {
@@ -435,7 +454,7 @@ void checker::compile_hit_group(symbol_id id)
     if (is_failed)
         return fail_symbol();
 
-    out.symbols[index_of(id)].info = i32(out.pipelines.size());
+    out.symbols.own(index_of(id)).info = i32(out.pipelines.size());
     out.pipelines.push_back({
         .symbol = id,
         .kind = pipeline_kind::hit_group,
@@ -453,7 +472,7 @@ void checker::compile_raytracing_pipeline(symbol_id id)
     auto const& ast = ast_of(file);
     auto const decl = out.at(id).declaration;
     auto const& p = ast.at(decl).node.as<ast::pipeline_decl>();
-    auto const fail_symbol = [&] { out.symbols[index_of(id)].state = symbol_state::failed; };
+    auto const fail_symbol = [&] { out.symbols.own(index_of(id)).state = symbol_state::failed; };
     auto is_failed = false;
     auto const fail = [&](source_span where, cc::string detail)
     {
@@ -485,13 +504,14 @@ void checker::compile_raytracing_pipeline(symbol_id id)
         if (auto const* const n = ast::is_valid(s.path) ? ast.at(s.path).node.try_as<ast::name>() : nullptr;
             n != nullptr && text_of(file, n->where) == "rays")
         {
-            auto const* const value = ast.at(s.value).node.try_as<ast::name>();
+            auto const& value = ast.at(s.value).node;
             if (!is_first("rays", span_of(file, s.form)))
                 continue;
-            if (value == nullptr)
+            // a set of the file, or `m.set` of a module it uses
+            if (!value.is<ast::name>() && !value.is<ast::member>())
                 fail(span_of(file, s.form), "`rays` names a ray set");
             else
-                set = ray_set_named(file, value->where);
+                set = ray_set_named(file, span_of(file, s.value));
         }
     if (!is_valid(set))
     {
@@ -590,7 +610,7 @@ void checker::compile_raytracing_pipeline(symbol_id id)
                 }
                 auto const* const g = e.try_as<ast::name>();
                 auto const text = g == nullptr ? cc::string_view() : text_of(file, g->where);
-                auto const* const found = g == nullptr ? nullptr : names_seen_from(file).get_ptr(text);
+                auto const* const found = g == nullptr ? nullptr : seen_from(file, text);
                 auto group = symbol_id::none;
                 if (found != nullptr)
                     for (auto const candidate : *found)
@@ -704,7 +724,7 @@ void checker::compile_raytracing_pipeline(symbol_id id)
     if (is_failed)
         return fail_symbol();
 
-    out.symbols[index_of(id)].info = i32(out.pipelines.size());
+    out.symbols.own(index_of(id)).info = i32(out.pipelines.size());
     auto const first = u32(out.binding_lists.size());
     out.binding_lists.push_back_range(misses);
     out.binding_lists.push_back_range(groups);
@@ -732,8 +752,10 @@ void checker::judge_trace_graphs()
                 return e.traced_rays;
         return {};
     };
-    for (auto& pipeline : out.pipelines)
+    // a lower layer's pipelines were judged when it was checked, and are shared
+    for (auto i = out.pipelines.shared_size(); i < out.pipelines.size(); ++i)
     {
+        auto& pipeline = out.pipelines.own(i);
         if (pipeline.kind != pipeline_kind::raytracing)
             continue;
         auto const file = out.at(pipeline.symbol).file;
@@ -764,7 +786,7 @@ void checker::judge_trace_graphs()
                 judge_sets(out.at(out.pipelines[out.at(group).info].records)[r * 2]);
         if (is_foreign)
         {
-            out.symbols[index_of(pipeline.symbol)].state = symbol_state::failed;
+            out.symbols.own(index_of(pipeline.symbol)).state = symbol_state::failed;
             continue;
         }
 
@@ -822,7 +844,7 @@ void checker::judge_trace_graphs()
             visit(visit, r);
         if (is_cyclic)
         {
-            out.symbols[index_of(pipeline.symbol)].state = symbol_state::failed;
+            out.symbols.own(index_of(pipeline.symbol)).state = symbol_state::failed;
             continue;
         }
         auto depth = 0;
@@ -842,7 +864,7 @@ void checker::compile_callables(symbol_id id)
     auto const file = out.at(id).file;
     auto const& ast = ast_of(file);
     auto const& p = ast.at(out.at(id).declaration).node.as<ast::pipeline_decl>();
-    auto const fail_symbol = [&] { out.symbols[index_of(id)].state = symbol_state::failed; };
+    auto const fail_symbol = [&] { out.symbols.own(index_of(id)).state = symbol_state::failed; };
     auto is_failed = false;
     if (!p.is_short_form)
     {
@@ -896,7 +918,7 @@ void checker::compile_callables(symbol_id id)
     }
     if (is_failed)
         return fail_symbol();
-    out.symbols[index_of(id)].info = i32(out.pipelines.size());
+    out.symbols.own(index_of(id)).info = i32(out.pipelines.size());
     out.pipelines.push_back({
         .symbol = id,
         .kind = pipeline_kind::callables,
@@ -912,7 +934,7 @@ symbol_id checker::callables_named(i32 file, ast::expr_id expr)
     auto const* const n = ast::is_valid(expr) ? ast_of(file).at(expr).node.try_as<ast::name>() : nullptr;
     if (n == nullptr)
         return symbol_id::none;
-    auto const* const found = names_seen_from(file).get_ptr(text_of(file, n->where));
+    auto const* const found = seen_from(file, text_of(file, n->where));
     if (found == nullptr || found->empty() || out.at(found->front()).kind != symbol_kind::pipeline)
         return symbol_id::none;
     auto const table = found->front();

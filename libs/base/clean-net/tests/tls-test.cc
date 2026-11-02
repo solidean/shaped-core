@@ -4,10 +4,14 @@
 #include <clean-core/function/function_ref.hh>
 #include <clean-core/thread/thread.hh>
 #include <clean-core/thread/thread_pump.hh>
+#include <clean-net/impl/async_glue.hh>
 #include <clean-net/impl/trust_store.hh>
 #include <clean-net/tls/tls.hh>
+#include <clean-net/transport/backend.hh>
 #include <clean-net/transport/virtual_transport.hh>
 #include <nexus/test.hh>
+
+#include <memory> // std::unique_ptr, to own a backend through its interface -- see .shaped-lint.yml
 
 using namespace cc::primitive_defines;
 
@@ -69,6 +73,67 @@ struct tls_fixture
         return pump_until([&] { return accepted->is_ready() && connected->is_ready(); })
             && accepted->try_error() == nullptr && connected->try_error() == nullptr;
     }
+};
+
+/// A connection that holds its sends while closed, so a test decides when the bytes reach "the OS".
+struct send_gate
+{
+    bool open = true;
+    cc::span<byte const> held_bytes;
+    cc::shared_async<cc::unit> held_promise;
+};
+
+class gated_connection final : public connection_backend
+{
+public:
+    gated_connection(cc::shared_ptr<stream_connection> inner, cc::shared_ptr<send_gate> gate)
+      : _inner(cc::move(inner)), _gate(cc::move(gate))
+    {
+    }
+
+    [[nodiscard]] cc::shared_async<isize> receive(cc::span<byte> buffer, deadline d, cancel_token const& token) override
+    {
+        return _inner->receive(buffer, d, token);
+    }
+
+    [[nodiscard]] cc::shared_async<cc::unit> send(cc::span<byte const> bytes, deadline d, cancel_token const& token) override
+    {
+        if (_gate->open)
+            return _inner->send(bytes, d, token);
+        _gate->held_bytes = bytes;
+        _gate->held_promise = cc::make_async_manual<cc::unit>();
+        return _gate->held_promise;
+    }
+
+    /// Lets the held send through, completing it once the connection underneath has.
+    void release()
+    {
+        _gate->open = true;
+        if (!_gate->held_promise.is_valid())
+            return;
+        auto promise = cc::move(_gate->held_promise);
+        _gate->held_promise = {};
+        impl::when_ready(_inner->send(_gate->held_bytes),
+                         [promise](cc::shared_async<cc::unit> const& sent)
+                         {
+                             if (sent->try_error() != nullptr)
+                                 promise->push_error(to_async_error({.code = error_code::connection_reset,
+                                                                     .native_code = 0,
+                                                                     .message = cc::string("the held send failed")}));
+                             else
+                                 promise->push_value(cc::unit{});
+                         });
+    }
+
+    cc::result<cc::unit, error> shutdown_send() override { return _inner->shutdown_send(); }
+    [[nodiscard]] endpoint local() const override { return _inner->local(); }
+    [[nodiscard]] endpoint peer() const override { return _inner->peer(); }
+    [[nodiscard]] bool is_open() const override { return _inner->is_open(); }
+    void close() override { _inner->close(); }
+
+private:
+    cc::shared_ptr<stream_connection> _inner;
+    cc::shared_ptr<send_gate> _gate;
 };
 } // namespace
 
@@ -142,6 +207,45 @@ CNET_IO_TEST("cnet - a handshake over a virtual network carries bytes both ways"
     CHECK(pump_until([&] { return client_received->is_ready(); }));
     CHECK(client_received->try_error() == nullptr);
     CHECK(cc::string_view(reinterpret_cast<char const*>(client_inbox), client_received->value()) == answer);
+}
+
+CNET_IO_TEST("cnet - a TLS send completes once its records are handed on, not once they are encrypted")
+{
+    if (!tls_is_supported())
+        SKIP("this build has no TLS backend");
+
+    auto const identity = tls_make_self_signed("localhost").value();
+    auto fixture = tls_fixture();
+    REQUIRE(fixture.ready());
+
+    auto gate = cc::make_shared<send_gate>();
+    auto backend = std::make_unique<gated_connection>(fixture.connected->value(), gate);
+    auto* const gated = backend.get();
+    auto const under = cc::make_shared<stream_connection>(cc::move(backend));
+
+    auto server_side = tls_accept(fixture.accepted->value(), {.identity = identity});
+    auto client_side
+        = tls_connect(under, "localhost",
+                      {.trust = {.use_system_roots = false, .additional_roots_pem = {identity.certificate_chain_pem}}});
+    REQUIRE(pump_until([&] { return server_side->is_ready() && client_side->is_ready(); }));
+    REQUIRE(client_side->try_error() == nullptr);
+
+    // with the socket send held, the bytes are encrypted at once and still not with the OS
+    gate->open = false;
+    auto const request = cc::string_view("GET / HTTP/1.1");
+    auto sent = client_side->value()->send(bytes_of(request));
+    CHECK(!pump_until([&] { return sent->is_ready(); }, 200));
+    CHECK(gate->held_promise.is_valid());
+
+    gated->release();
+    CHECK(pump_until([&] { return sent->is_ready(); }));
+    CHECK(sent->try_error() == nullptr);
+
+    byte inbox[128] = {};
+    auto received = server_side->value()->receive(cc::span<byte>(inbox, isize(sizeof(inbox))));
+    CHECK(pump_until([&] { return received->is_ready(); }));
+    REQUIRE(received->try_error() == nullptr);
+    CHECK(cc::string_view(reinterpret_cast<char const*>(inbox), received->value()) == request);
 }
 
 CNET_IO_TEST("cnet - an untrusted certificate is refused")

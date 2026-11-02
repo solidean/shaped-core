@@ -10,6 +10,7 @@
 #include <babel-serializer/image/pfm.hh>
 #include <babel-serializer/image/png.hh>
 #include <babel-serializer/image/tga.hh>
+#include <babel-serializer/image/webp.hh>
 
 namespace babel::image
 {
@@ -34,6 +35,8 @@ bool format_accepts(format fmt, component comp)
     case format::dds:
         return comp == component::u8 || comp == component::f32;
     case format::tga:
+        return comp == component::u8;
+    case format::webp:
         return comp == component::u8;
     }
     return false;
@@ -75,6 +78,8 @@ cc::string_view name_of(format fmt)
         return "dds";
     case format::tga:
         return "tga";
+    case format::webp:
+        return "webp";
     }
     return "?";
 }
@@ -108,6 +113,8 @@ cc::string_view accepted_of(format fmt)
     case format::dds:
         return "u8 or f32";
     case format::tga:
+        return "u8";
+    case format::webp:
         return "u8";
     }
     return "?";
@@ -209,12 +216,19 @@ cc::result<format> detect_format(cc::span<byte const> bytes)
         && bytes[3] == byte(' '))
         return format::dds;
 
+    // WebP is a RIFF file whose form type, after the chunk size, is "WEBP".
+    if (bytes.size() >= 12 && bytes[0] == byte('R') && bytes[1] == byte('I') && bytes[2] == byte('F')
+        && bytes[3] == byte('F') && bytes[8] == byte('W') && bytes[9] == byte('E') && bytes[10] == byte('B')
+        && bytes[11] == byte('P'))
+        return format::webp;
+
     // TGA has no leading magic, so it comes after every format that has one.
     // The 2.0 footer is a real signature; a header that merely parses is a guess, and the last resort.
     if (babel::tga::has_footer(bytes) || babel::tga::has_plausible_header(bytes))
         return format::tga;
 
-    return cc::error("image: unrecognized format (the bytes match none of PNG, JPEG, Radiance HDR, PFM, DDS and TGA)");
+    return cc::error("image: unrecognized format (the bytes match none of PNG, JPEG, WebP, Radiance HDR, PFM, DDS and "
+                     "TGA)");
 }
 
 cc::result<image> read(cc::span<byte const> bytes, read_options opts)
@@ -286,6 +300,15 @@ cc::result<image> read(cc::span<byte const> bytes, format fmt, read_options opts
         result.pixels = cc::move(d.pixels);
         return cc::move(result);
     }
+    case format::webp:
+    {
+        auto decoded = babel::webp::read(bytes);
+        CC_RETURN_IF_ERROR(decoded);
+        auto& d = decoded.value();
+        auto result = image{.width = d.width, .height = d.height, .channels = d.channels, .comp = component::u8};
+        result.pixels = cc::move(d.pixels);
+        return cc::move(result);
+    }
     }
 
     return cc::error("image: unhandled format");
@@ -329,7 +352,7 @@ cc::result<cc::vector<byte>> encode(image const& img, format fmt, write_options 
             // PNG is the format that accepts two sample types, so `comp` is what picks the written depth.
             .decoded = img.comp == component::u16 ? babel::png::component::u16 : babel::png::component::u8};
         pd.pixels = img.pixels; // aggregator owns only the packed buffer; hand it to the codec
-        return babel::png::encode(pd);
+        return babel::png::encode(pd, {.compression_level = opts.png_compression_level});
     }
     case format::jpg:
     {
@@ -348,6 +371,13 @@ cc::result<cc::vector<byte>> encode(image const& img, format fmt, write_options 
         auto pd = babel::pfm::data{.width = img.width, .height = img.height, .channels = img.channels};
         pd.pixels = img.pixels;
         return babel::pfm::encode(pd);
+    }
+    case format::webp:
+    {
+        auto wd = babel::webp::data{.width = img.width, .height = img.height, .channels = img.channels};
+        wd.pixels = img.pixels;
+        return babel::webp::encode(
+            wd, {.quality = opts.webp_quality, .lossless = opts.webp_lossless, .exact = opts.webp_lossless});
     }
     case format::dds:
     case format::tga:

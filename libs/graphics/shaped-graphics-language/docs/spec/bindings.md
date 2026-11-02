@@ -26,7 +26,7 @@ What kind of resource it is follows from that type, and nothing else marks it.
 **A member of a plain value type is a constant**, and the group's plain members together are one constant buffer the compiler builds.
 So `texel_size: float2` above costs no declaration of its own: the group has an implicit constant buffer, and `texel_size` is a field of it.
 That is the common case, and it is why `constants[T]` below is rarer than it looks.
-Where its members land is the compiler's choice, unless `@layout(.hlsl)` or `@layout(.cpp)` on the binding promises a layout ([CHK-369](semantics/checking.md#bindings)).
+Where its members land is the compiler's choice, at each value's natural alignment, unless `@padding(.none)` on the binding promises C++'s layout ([CHK-369](semantics/checking.md#bindings)).
 The host can then fill the block from its own struct.
 
 **A member of a resource type is that resource.**
@@ -317,6 +317,7 @@ An entry point must declare each of those itself: by its file, by a binding it l
 | `@coherent` on a member ([Coherent memory](#coherent-memory)) | `sg::feature::device_coherence`, which WebGPU lacks |
 | `@atomic` on an image member ([Atomics](#atomics)) | `sg::feature::image_atomics`, which core WebGPU lacks |
 | `compare_exchange_strong` in a pixel stage ([Atomics](#atomics)) | `sg::feature::helper_lane_query`, which WebGPU lacks |
+| a `@layer` field of a vertex stage's result ([CHK-419](semantics/checking.md#entry-points)) | `sg::feature::vertex_layer_output`, which WebGPU lacks |
 
 `ray_query` and `raytracing_pipeline` are the two halves of ray tracing, and [raytracing.md](raytracing.md) says what each grants.
 A device may have either without the other, which is why they are two features.
@@ -635,7 +636,7 @@ A pin in a source states it, which [CHK-267](semantics/checking.md#entry-points)
 The syntax above is what the AST builds; the check pass is what limits it.
 Everything not named here is the diagnostic `unsupported-yet`, never a guess.
 
-* `buffer[T]` and `mut buffer[T]`, for a `T` that is a scalar, a vector or a struct of the program, laid out as dx12's structured buffers (EMIT-111).
+* `buffer[T]` and `mut buffer[T]`, for a `T` that is a scalar, a vector or a struct of the program, laid out at natural alignment (EMIT-111), or as C++ lays it out under `@padding(.none)` (EMIT-167).
 * `bytes` and `mut bytes`, loaded and stored a word at a time ([Bytes](#bytes)), alone or as a binding array.
 * A subscript on a buffer, as a value and as the place of an assignment.
 * A subscript on an image, as its `load` and as the place its `store` writes ([CHK-367](semantics/checking.md#bindings)); a texture's is not built.

@@ -1020,7 +1020,7 @@ void checker::judge_expecting_in_pipelines()
             // `.host` and an enum's case name no entry point
             if (first > 0 && text[first - 1] == '.')
                 continue;
-            auto const* const found = names_seen_from(file).get_ptr(text.subview({.offset = first, .size = at - first}));
+            auto const* const found = seen_from(file, text.subview({.offset = first, .size = at - first}));
             if (found == nullptr)
                 continue;
             for (auto const candidate : *found)

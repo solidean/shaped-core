@@ -74,10 +74,9 @@ TEST("sgl check - a binding of a module is listed and read through its qualified
     CHECK(reports_with(library, "use view\nfun f(x: float) -> float => view.exposed(x)\n").contains("binding-not-listed"));
     CHECK(reports_with(library, "use view\ntest {view.frame}:\n    view.frame.exposure == 0.0\n") == "");
 
-    // CHK-350: two bindings of one name in one list would be one name twice in the target text
+    // CHK-351: two bindings of one name from different modules are two bindings, which one list may name
     cc::string_view const two[] = {k_view, "module post\nbinding frame:\n    gain: float\n"};
-    CHECK(reports_with(two, "use view\nuse post\nfun f(x: float){view.frame, post.frame} -> float => x\n")
-          == "unsupported-yet user:[post.frame] two bindings named frame in one list, from different modules\n");
+    CHECK(reports_with(two, "use view\nuse post\nfun f(x: float){view.frame, post.frame} -> float => x\n") == "");
 
     // CHK-351: one binding listed twice, by its name or through two aliases of its module
     CHECK(reports_with(library, "use view\nuse view as v\nfun f(x: float){view.frame, v.frame} -> float => x\n")
@@ -135,12 +134,17 @@ TEST("sgl check - a program whose module line names a library module joins it")
     CHECK(reports_with(library, "module view\nfun f(x: float) -> float => brighten(sample(x))\n") == "");
 }
 
-TEST("sgl check - a module the program uses is a library: no operator and no file sampler of its own yet")
+TEST("sgl check - a module's operator applies where the module is used, and its file sampler too")
 {
-    cc::string_view const library[] = {"module ops\n@operator(\"-\") fun minus(a: float, b: float) -> float => a\n",
-                                       "module samplers\nsampler bilinear:\n    filter = .linear\n"};
-    CHECK(reports_with(library, "use ops\n")
-          == "unsupported-yet lib.0:[operator] an @operator function in a module the program uses\n");
-    CHECK(reports_with(library, "use samplers\n")
-              .contains("unsupported-yet lib.1:[sampler bilinear:] a file-scope sampler in a module the program uses"));
+    cc::string_view const library[] = {"module ops\nstruct v:\n    x: float\n"
+                                       "@operator(\"+\") fun plus(a: v, b: v) -> v => v(a.x + b.x)\n",
+                                       "module samplers\nsampler bilinear:\n    filter = .linear\n",
+                                       "module maker\nuse ops\nfun make() -> ops.v => ops.v(1.0)\n"};
+    // CHK-350: an operator has no qualified spelling, so a `use` brings it with the module
+    CHECK(reports_with(library, "use ops\nfun f(a: ops.v) -> ops.v => a + a\n") == "");
+    // a file that does not use the module sees none of its operators, as it sees none of its names
+    CHECK(reports_with(library, "use maker\nfun f() => maker.make() + maker.make()\n")
+              .starts_with("no-matching-overload user:[maker.make() + maker.make()]"));
+    // EMIT-133: a module's file-scope sampler shares the program's index space
+    CHECK(reports_with(library, "use samplers\n") == "");
 }

@@ -163,6 +163,11 @@ struct form_parser
     int list_depth = 0;
     /// Groups whose attributes a form has already taken, so hoisting leaves them alone.
     cc::vector<group_id> claimed;
+    /// Per group, read off its spelling once: the level of the infix operator it is, -1 for none, and whether it is a
+    /// keyword; -2 before it was asked.
+    /// Every operand of a run descends through each level, which asked both again per level and per operand.
+    mutable cc::vector<i8> infix_levels;
+    mutable cc::vector<i8> keyword_flags;
 
     // ---- groups -------------------------------------------------------------------------------------------------
 
@@ -197,11 +202,42 @@ struct form_parser
     {
         if (!is_token(g, token_kind::symbol))
             return false;
-        auto const text = text_of(g);
-        for (auto const k : keywords)
-            if (text == k)
-                return true;
-        return false;
+        if (keyword_flags.empty())
+            keyword_flags.resize_to_filled(file.groups.size(), i8(-2));
+        auto& known = keyword_flags[index_of(g)];
+        if (known == -2)
+        {
+            known = 0;
+            auto const text = text_of(g);
+            for (auto const k : keywords)
+                if (text == k)
+                    known = 1;
+        }
+        return known == 1;
+    }
+
+    /// FORM-43: no keyword form has a keyword followed by an ascription, or by an assignment right after another
+    /// keyword, so that keyword is a name, which the tree holds as an identifier once it is reported.
+    /// `rays = set` in a pipeline is a keyword followed by an assignment, which is why the second needs a keyword before.
+    [[nodiscard]] bool is_keyword_as_name(group_id g) const
+    {
+        if (!is_keyword(g))
+            return false;
+        auto const n = next_of(g);
+        if (!is_valid(n))
+            return false;
+        if (is_token(n, token_kind::colon))
+            return true;
+        return is_valid(c.previous) && c.previous != g && is_keyword(c.previous) && is_token(n, token_kind::op)
+            && !is_prefix_shaped(n) && !is_postfix_shaped(n) && classify(text_of(n)) == operator_class::assignment;
+    }
+
+    form_id keyword_as_name()
+    {
+        report(diagnostic_kind::keyword_as_name, span_of_group(c.at));
+        auto const result = leaf(form_kind::identifier, c.at);
+        advance();
+        return result;
     }
 
     [[nodiscard]] bool is_word_operator(group_id g) const
@@ -524,20 +560,31 @@ struct form_parser
         return binary(result, else_group, otherwise);
     }
 
-    /// A keyword form whose first keyword is `if`.
+    /// A keyword form whose first keyword is `if`, or whose jumps `return`, `yield` or `break` stand before an `if`:
+    /// `return if c => a else b` returns the `if`'s value (AST-155).
     [[nodiscard]] bool is_if_led(form_id f) const
     {
         auto const& form = file.at(f);
-        if (form.kind != form_kind::keyword_form || !is_valid(form.first_child))
+        if (form.kind != form_kind::keyword_form)
             return false;
-        auto const& first = file.at(form.first_child);
-        return first.kind == form_kind::keyword && file.text_of(file.at(first.token).where) == "if";
+        for (auto child = form.first_child; is_valid(child); child = file.at(child).next_sibling)
+        {
+            auto const& k = file.at(child);
+            if (k.kind != form_kind::keyword)
+                return false;
+            auto const text = file.text_of(file.at(k.token).where);
+            if (text == "if")
+                return true;
+            if (text != "return" && text != "yield" && text != "break")
+                return false;
+        }
+        return false;
     }
 
     /// A keyword form, or an expression — which becomes a keyword form without keywords when a block hangs off it.
     form_id parse_head()
     {
-        if (!at_end() && is_keyword(c.at))
+        if (!at_end() && is_keyword(c.at) && !is_keyword_as_name(c.at))
             return parse_keyword_form();
 
         auto const expression = parse_level(level::connective);
@@ -564,7 +611,7 @@ struct form_parser
     {
         auto const result = make({.kind = form_kind::keyword_form});
         auto last = form_id::none;
-        while (!at_end() && is_keyword(c.at))
+        while (!at_end() && is_keyword(c.at) && !is_keyword_as_name(c.at))
         {
             add_child(result, leaf(form_kind::keyword, c.at), last);
             advance();
@@ -586,44 +633,56 @@ struct form_parser
         return result;
     }
 
-    /// The level an infix operator at the cursor belongs to, or nothing if the cursor is not on one.
-    [[nodiscard]] bool infix_at(level wanted) const
+    /// The level of the infix operator `g` is, -1 if it is none.
+    [[nodiscard]] i8 infix_level_of(group_id g) const
     {
-        if (at_end() || here().kind != group_kind::token)
-            return false;
-
-        switch (file.at(here().token).kind)
+        if (file.at(g).kind != group_kind::token)
+            return -1;
+        switch (file.at(file.at(g).token).kind)
         {
         case token_kind::colon:
-            return wanted == level::ascription;
+            return i8(level::ascription);
         case token_kind::arrow:
-            return wanted == level::arrow;
+            return i8(level::arrow);
         case token_kind::symbol:
-            if (is_word(c.at, "and") || is_word(c.at, "or"))
-                return wanted == level::connective;
-            return wanted == level::ascription && (is_word(c.at, "as") || is_word(c.at, "in"));
+            if (is_word(g, "and") || is_word(g, "or"))
+                return i8(level::connective);
+            return is_word(g, "as") || is_word(g, "in") ? i8(level::ascription) : i8(-1);
         case token_kind::op:
-            if (is_prefix_shaped(c.at) || is_postfix_shaped(c.at))
-                return false;
-            switch (classify(text_of(c.at)))
+            if (is_prefix_shaped(g) || is_postfix_shaped(g))
+                return -1;
+            switch (classify(text_of(g)))
             {
             case operator_class::assignment:
-                return false;
+                return -1;
             case operator_class::comparison:
-                return wanted == level::comparison;
+                return i8(level::comparison);
             case operator_class::range:
-                return wanted == level::range;
+                return i8(level::range);
             case operator_class::bit_like:
-                return wanted == level::bit_like;
+                return i8(level::bit_like);
             case operator_class::add_like:
-                return wanted == level::add_like;
+                return i8(level::add_like);
             case operator_class::mul_like:
-                return wanted == level::mul_like;
+                return i8(level::mul_like);
             }
-            return false;
+            return -1;
         default:
-            return false;
+            return -1;
         }
+    }
+
+    /// Whether the cursor is on an infix operator of level `wanted`.
+    [[nodiscard]] bool infix_at(level wanted) const
+    {
+        if (at_end())
+            return false;
+        if (infix_levels.empty())
+            infix_levels.resize_to_filled(file.groups.size(), i8(-2));
+        auto& known = infix_levels[index_of(c.at)];
+        if (known == -2)
+            known = infix_level_of(c.at);
+        return known == i8(wanted);
     }
 
     /// What an operator token owes beyond its place in the ladder: a known spelling, and spaces around it.
@@ -982,6 +1041,8 @@ struct form_parser
 
         case token_kind::symbol:
         {
+            if (is_keyword_as_name(g))
+                return keyword_as_name();
             if (is_keyword(g))
                 return parse_keyword_form();
             auto const text = text_of(g);
@@ -1013,10 +1074,10 @@ struct form_parser
 };
 
 constexpr cc::string_view sgl_keywords[] = {
-    "fun",      "let",    "mut",       "out",       "struct", "enum",   "binding",  "sampler",
-    "pipeline", "rays",   "hit_group", "callables", "const",  "use",    "module",   "type",
-    "if",       "else",   "for",       "while",     "loop",   "return", "continue", "break",
-    "case",     "assert", "print",     "notation",  "yield",  "test",   "require",  "discard",
+    "fun",      "let",       "mut",       "out",     "struct",   "enum",   "binding", "sampler", "pipeline",
+    "rays",     "hit_group", "callables", "const",   "use",      "module", "type",    "if",      "else",
+    "for",      "while",     "loop",      "return",  "continue", "break",  "case",    "assert",  "print",
+    "notation", "yield",     "test",      "require", "discard",  "scope",
 };
 } // namespace
 

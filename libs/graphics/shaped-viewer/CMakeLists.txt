@@ -328,6 +328,7 @@ if(SC_BUILD_TESTS)
             tests/volumetric-furnace-test.cc
             tests/accumulated-mean-test.cc
             tests/cutout-trace-test.cc
+            tests/guide-ray-test.cc
             tests/emitter-trace-test.cc
             tests/wavefront-trace-test.cc
             tests/wavefront-view-test.cc
@@ -339,6 +340,7 @@ if(SC_BUILD_TESTS)
             tests/restart-energy-test.cc
             tests/jitter-accumulation-test.cc
             tests/view-renderer-test.cc
+            tests/frame-mesh-test.cc
             tests/view-accumulation-test.cc
             tests/viewer-renderer-test.cc
             tests/drawing-render-test.cc

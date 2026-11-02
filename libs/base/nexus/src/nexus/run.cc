@@ -201,14 +201,19 @@ int report_run(nx::test_schedule_config const& config,
     auto const benchmark_pinned = reporting.benchmark_pinned;
     auto& cpu_sampler = *reporting.cpu_sampler;
 
+    // Measured only where something reports it: the process query counts the machine's threads on Windows, which
+    // costs as much as an `sgl emit` compile itself, for an app or a command that prints no resources
     auto resources = nx::test_run_resources{};
-    if (auto const load = cpu_sampler.sample(); load.has_value())
+    if (reports_resources || !config.junit_xml_file.empty())
     {
-        resources.cpu_machine_fraction = load.value().machine_fraction;
-        resources.cpu_cores_used = load.value().cores_used;
+        if (auto const load = cpu_sampler.sample(); load.has_value())
+        {
+            resources.cpu_machine_fraction = load.value().machine_fraction;
+            resources.cpu_cores_used = load.value().cores_used;
+        }
+        if (auto const usage = cc::query_process_usage(); usage.has_value())
+            resources.peak_resident_bytes = usage.value().peak_resident_bytes;
     }
-    if (auto const usage = cc::query_process_usage(); usage.has_value())
-        resources.peak_resident_bytes = usage.value().peak_resident_bytes;
 
     // A failing test's recording is written beside the run's other artifacts, which is why this follows the JUnit
     // file's directory rather than inventing a location of its own.

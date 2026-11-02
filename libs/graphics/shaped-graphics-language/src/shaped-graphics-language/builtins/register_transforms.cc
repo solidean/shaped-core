@@ -81,11 +81,116 @@ void determinant(leaves in, result& out)
     out.push_back(scalar::of(f32(sum)));
 }
 
-/// The columns, one behind the other, are the matrix's leaves already, for a `mat4` and a `mat3` alike.
+/// The columns, one behind the other, are the matrix's leaves already, for every matrix alike.
 void from_columns(leaves in, result& out)
 {
     for (auto const& leaf : in)
         out.push_back(leaf);
+}
+
+/// Leaf c * n + r of an n by n matrix becomes leaf r * n + c: column c of the result is row c of `in`.
+template <isize N>
+void transpose(leaves in, result& out)
+{
+    for (auto column = isize(0); column < N; ++column)
+        for (auto row = isize(0); row < N; ++row)
+            out.push_back(in[row * N + column]);
+}
+
+/// Column `i` of an n by n matrix is its leaves from n * i on; row `i` takes one from each column.
+template <isize N, bool IsRow>
+void matrix_part(leaves in, result& out)
+{
+    auto const i = isize(in[N * N].as_int());
+    for (auto k = isize(0); k < N; ++k)
+        out.push_back(IsRow ? in[k * N + i] : in[i * N + k]);
+}
+
+/// A column or a row exists for an index from 0 below the matrix's size, and no target defines another.
+template <isize N>
+cc::string_view matrix_part_undefined(leaves in)
+{
+    auto const i = in[N * N].as_int();
+    return i < 0 || i >= N ? "a matrix index outside the matrix" : cc::string_view();
+}
+
+/// WGSL's and MSL's `m[i]` is column `i`, and HLSL's is row `i`, since HLSL holds an SGL matrix as its transpose.
+template <bool IsRow>
+written write_matrix_part(call_context const& c)
+{
+    auto const is_native = (c.target == language::hlsl) == IsRow;
+    auto const matrix
+        = is_native ? wrapped(c.arguments[0], precedence::primary) : cc::format("transpose({})", c.arguments[0].text);
+    return {.text = cc::format("{}[{}]", matrix, c.arguments[1].text)};
+}
+
+// An affine3's leaves are its three rows, one after the other; HLSL holds it as `float3x4`, its rows as rows, and
+// WGSL and MSL as a `mat3x4f` / `float3x4` whose columns are those rows, so `v * a` there is `mul(a, v)` in HLSL.
+
+/// Row `row` of an affine3 dotted with `(x, y, z, w)`.
+f32 affine_row(leaves a, isize row, f32 x, f32 y, f32 z, f32 w)
+{
+    return a[row * 4].as_float() * x + a[row * 4 + 1].as_float() * y + a[row * 4 + 2].as_float() * z
+         + a[row * 4 + 3].as_float() * w;
+}
+
+template <int W>
+void affine_apply(leaves in, result& out)
+{
+    for (auto row = isize(0); row < 3; ++row)
+        out.push_back(scalar::of(affine_row(in, row, in[12].as_float(), in[13].as_float(), in[14].as_float(),
+                                            W < 0 ? in[15].as_float() : f32(W))));
+}
+
+void affine_row_at(leaves in, result& out)
+{
+    auto const i = isize(in[12].as_int());
+    for (auto k = isize(0); k < 4; ++k)
+        out.push_back(in[i * 4 + k]);
+}
+
+cc::string_view affine_row_undefined(leaves in)
+{
+    auto const i = in[12].as_int();
+    return i < 0 || i >= 3 ? "a matrix index outside the matrix" : cc::string_view();
+}
+
+/// `a` times `(v, w)`, or times `v` itself where `w` is empty: HLSL's `mul`, and the row vector on the left elsewhere.
+written write_affine_apply(call_context const& c, cc::string_view w)
+{
+    auto const float4 = c.builtins.at(c.builtins.find_type("float4")).spelled_in(c.target);
+    auto const v = w.empty() ? c.arguments[1].text : cc::format("{}({}, {})", float4, c.arguments[1].text, w);
+    if (c.target == language::hlsl)
+        return {.text = cc::format("mul({}, {})", c.arguments[0].text, v)};
+    return {.text = cc::format("({} * {})", v, wrapped(c.arguments[0], precedence::primary))};
+}
+
+written write_affine_point(call_context const& c)
+{
+    return write_affine_apply(c, "1.0");
+}
+
+written write_affine_direction(call_context const& c)
+{
+    return write_affine_apply(c, "0.0");
+}
+
+written write_affine_float4(call_context const& c)
+{
+    return write_affine_apply(c, "");
+}
+
+/// Every target's constructor of `float3x4` / `mat3x4f` takes the rows as they are held.
+written write_affine_of_rows(call_context const& c)
+{
+    auto const spelled = c.builtins.at(c.builtins.find_type("affine3")).spelled_in(c.target);
+    return {.text = cc::format("{}({}, {}, {})", spelled, c.arguments[0].text, c.arguments[1].text, c.arguments[2].text)};
+}
+
+/// Every target's `a[i]` is row `i`, as the affine3 is held.
+written write_affine_row(call_context const& c)
+{
+    return {.text = cc::format("{}[{}]", wrapped(c.arguments[0], precedence::primary), c.arguments[1].text)};
 }
 
 /// WGSL's and MSL's constructor takes columns, and HLSL's takes rows.
@@ -123,13 +228,47 @@ void multiply_mat3(leaves in, result& out)
 }
 
 /// HLSL's constructor takes rows, so the columns it is handed are transposed back.
+written write_of_columns(call_context const& c, cc::string_view matrix)
+{
+    auto columns = cc::string();
+    for (auto i = isize(0); i < c.arguments.size(); ++i)
+        columns.appendf("{}{}", i == 0 ? "" : ", ", c.arguments[i].text);
+    auto const spelled = c.builtins.at(c.builtins.find_type(matrix)).spelled_in(c.target);
+    if (c.target == language::hlsl)
+        return {.text = cc::format("transpose({}({}))", spelled, columns)};
+    return {.text = cc::format("{}({})", spelled, columns)};
+}
+
 written write_mat3_of_columns(call_context const& c)
 {
-    auto const columns = cc::format("{}, {}, {}", c.arguments[0].text, c.arguments[1].text, c.arguments[2].text);
-    auto const mat3 = c.builtins.at(c.builtins.find_type("mat3")).spelled_in(c.target);
-    if (c.target == language::hlsl)
-        return {.text = cc::format("transpose({}({}))", mat3, columns)};
-    return {.text = cc::format("{}({})", mat3, columns)};
+    return write_of_columns(c, "mat3");
+}
+
+written write_mat2_of_columns(call_context const& c)
+{
+    return write_of_columns(c, "mat2");
+}
+
+/// Row `row` of `matrix * (x, y)`, for a `mat2`, whose element (row r, column c) is leaf c * 2 + r.
+f32 transformed2(leaves matrix, isize row, f32 x, f32 y)
+{
+    return matrix[row].as_float() * x + matrix[2 + row].as_float() * y;
+}
+
+void transform_float2(leaves in, result& out)
+{
+    for (auto row = isize(0); row < 2; ++row)
+        out.push_back(scalar::of(transformed2(in, row, in[4].as_float(), in[5].as_float())));
+}
+
+void multiply_mat2(leaves in, result& out)
+{
+    for (auto column = isize(0); column < 2; ++column)
+    {
+        auto const at = 4 + column * 2;
+        for (auto row = isize(0); row < 2; ++row)
+            out.push_back(scalar::of(transformed2(in, row, in[at].as_float(), in[at + 1].as_float())));
+    }
 }
 
 /// A matrix times what stands to its right: HLSL has a function for it, and every other target the operator.
@@ -192,6 +331,8 @@ void sgl::builtins::register_transforms(registry& r)
     add_product(r, "transform_position", "mat4", "p", "pos3", "hpos4", transform_position, write_position);
     add_product(r, "transform_direction", "mat4", "v", "vec3", "vec3", transform_direction, write_direction);
     add_product(r, "transform_float4", "mat4", "v", "float4", "float4", transform_float4, write_product);
+    // a clip-space position stays one through a further projective matrix, as a model-then-view-projection chain is
+    add_product(r, "transform_hpos4", "mat4", "v", "hpos4", "hpos4", transform_float4, write_product);
     add_product(r, "multiply_mat4", "mat4", "b", "mat4", "mat4", multiply_mat4, write_product);
 
     r.add_comment("// a matrix of its four columns");
@@ -205,15 +346,88 @@ void sgl::builtins::register_transforms(registry& r)
     r.add_comment("// what a matrix is on its own; every target has it under this name");
     impl::add_function(r, "determinant", {"m", "mat4"}, "float", determinant, {},
                        "/// The factor `m` scales a volume by, negative where it mirrors and 0 where it flattens one.");
+    impl::add_function(r, "transpose", {"m", "mat4"}, "mat4", transpose<4>, {},
+                       "/// `m` mirrored across its diagonal: its rows as columns, which is its inverse where it only "
+                       "rotates.");
 
-    r.add_comment("// a mat3 is a value of function bodies alone (CHK-397): made of its columns, times a three-vector");
+    r.add_comment("// a mat3 is a value of function bodies alone (CHK-397): made of its columns, times a three-vector, "
+                  "and transposed");
     r.add(function_record{
         .signature = "@pure fun mat3(c0: float3, c1: float3, c2: float3) -> mat3",
         .doc = "/// The matrix of three columns, `c0` first.",
         .evaluate = from_columns,
         .write = {.kind = spelling_kind::custom, .custom = write_mat3_of_columns, .hlsl_names = k_transpose},
     });
+    r.add(function_record{
+        .signature = "@pure fun mat3(c0: vec3, c1: vec3, c2: vec3) -> mat3",
+        .doc = "/// A basis of three directions, `c0` first: where x, y and z go, as a tangent frame is built.",
+        .evaluate = from_columns,
+        .write = {.kind = spelling_kind::custom, .custom = write_mat3_of_columns, .hlsl_names = k_transpose},
+    });
     add_product(r, "transform_float3", "mat3", "v", "float3", "float3", transform_float3, write_product);
     add_product(r, "transform_direction3", "mat3", "v", "vec3", "vec3", transform_float3, write_product);
     add_product(r, "multiply_mat3", "mat3", "b", "mat3", "mat3", multiply_mat3, write_product);
+    impl::add_function(r, "transpose", {"m", "mat3"}, "mat3", transpose<3>, {},
+                       "/// `m` mirrored across its diagonal: its rows as columns, which is its inverse where it only "
+                       "rotates.");
+
+    r.add_comment("// one column or one row of a matrix, which core.sgl gives every matrix as `m.column(i)` and "
+                  "`m.row(i)`");
+    struct matrix_shape
+    {
+        cc::string_view matrix;
+        cc::string_view vector;
+        evaluator column;
+        evaluator row;
+        undefined_check undefined;
+    };
+    matrix_shape const shapes[] = {
+        {"mat4", "float4", matrix_part<4, false>, matrix_part<4, true>, matrix_part_undefined<4>},
+        {"mat3", "float3", matrix_part<3, false>, matrix_part<3, true>, matrix_part_undefined<3>},
+        {"mat2", "float2", matrix_part<2, false>, matrix_part<2, true>, matrix_part_undefined<2>},
+    };
+    for (auto const& shape : shapes)
+        for (auto const is_row : {false, true})
+            r.add(function_record{
+                .signature = cc::format("@internal @pure fun matrix_{}(m: {}, i: int) -> {}", is_row ? "row" : "column",
+                                        shape.matrix, shape.vector),
+                .evaluate = is_row ? shape.row : shape.column,
+                .undefined_when = shape.undefined,
+                .write = {.kind = spelling_kind::custom,
+                          .custom = is_row ? write_matrix_part<true> : write_matrix_part<false>,
+                          .hlsl_names = k_transpose,
+                          .wgsl_names = k_transpose,
+                          .msl_names = k_transpose},
+            });
+
+    r.add_comment("// an affine3 translates a position and leaves a direction alone (CHK-408); core.sgl names its "
+                  "parts");
+    r.add(function_record{
+        .signature = "@internal @pure fun affine3_of_rows(r0: float4, r1: float4, r2: float4) -> affine3",
+        .evaluate = from_columns,
+        .write = {.kind = spelling_kind::custom, .custom = write_affine_of_rows},
+    });
+    r.add(function_record{
+        .signature = "@internal @pure fun affine3_row(a: affine3, i: int) -> float4",
+        .evaluate = affine_row_at,
+        .undefined_when = affine_row_undefined,
+        .write = {.kind = spelling_kind::custom, .custom = write_affine_row},
+    });
+    add_product(r, "transform_position_affine", "affine3", "p", "pos3", "pos3", affine_apply<1>, write_affine_point);
+    add_product(r, "transform_direction_affine", "affine3", "v", "vec3", "vec3", affine_apply<0>, write_affine_direction);
+    add_product(r, "transform_float4_affine", "affine3", "v", "float4", "float3", affine_apply<-1>, write_affine_float4);
+
+    r.add_comment("// a mat2 is a mat3 of the plane: a value of function bodies alone, made of its columns, times a "
+                  "float2");
+    r.add(function_record{
+        .signature = "@pure fun mat2(c0: float2, c1: float2) -> mat2",
+        .doc = "/// The matrix of two columns, `c0` first.",
+        .evaluate = from_columns,
+        .write = {.kind = spelling_kind::custom, .custom = write_mat2_of_columns, .hlsl_names = k_transpose},
+    });
+    add_product(r, "transform_float2", "mat2", "v", "float2", "float2", transform_float2, write_product);
+    add_product(r, "multiply_mat2", "mat2", "b", "mat2", "mat2", multiply_mat2, write_product);
+    impl::add_function(r, "transpose", {"m", "mat2"}, "mat2", transpose<2>, {},
+                       "/// `m` mirrored across its diagonal: its rows as columns, which is its inverse where it only "
+                       "rotates.");
 }

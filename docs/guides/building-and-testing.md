@@ -298,6 +298,18 @@ The implementation is nexus'.
 The page itself is the shared renderer [nexus-web-driver.js](../../libs/base/nexus/web/nexus-web-driver.js).
 Its template is [nexus-web-page.html.in](../../libs/base/nexus/web/nexus-web-page.html.in).
 
+## The memory guard
+
+Everything dev.py starts runs under a memory guard, so a runaway process or a pile of parallel links fails instead of swapping the machine to a halt.
+- **No process past 30 GB**, committed, and **all of them together at most half of physical RAM**: a Windows Job Object dev.py puts itself into, which every child inherits.
+  An allocation past either fails in the process that asked, which then fails as it would on any out-of-memory.
+- **Below 5 GB of free RAM, dev.py ends itself and everything it started**, saying so, whoever took the memory: a run that would swap is worth less than one that stops.
+- Override each in GB through the environment, 0 turning it off: `SC_DEV_MEMORY_PROCESS_GB`, `SC_DEV_MEMORY_TOTAL_GB`, `SC_DEV_MEMORY_FREE_GB`.
+- On Linux and macOS only the free-RAM floor applies: a per-process address-space limit would refuse the sanitizers' shadow reservations.
+- A gate that fails on the guard is a setup to fix, or a wait for memory to free up, never a reason to raise the limits by default.
+
+[memory_guard.py](../../tools/dev/lib/core/memory_guard.py) has the details, and [its self-test](../../tools/dev/memory-guard-self-test.py) runs with `check`.
+
 ## Quiet by default, and how to diagnose
 
 dev.py never streams child output into your scrollback.
@@ -571,10 +583,14 @@ It knows its own verdict, so there is no wrapper exit code to misread and no pus
    `--bump <path>` adds a submodule whose work is pushed already but whose pointer is not.
 6. It runs the project's own `dev.py check --fix`, whatever registry the project wired, so the extra roots cover the submodules' prose and links.
 7. It pushes the submodules first, so every pointer names a commit its remote has, then this repository.
+   Before that push it checks every submodule pointer the new commits record, merges included, and refuses one no remote branch of its submodule holds:
+   pushed, it would break every pull and clone that recurses into submodules, for everyone.
    A rejected push means `origin/<branch>` moved during the gate, so it merges again and reruns the static gates on top of what came in; three rounds, then it stops and says the branch is busy.
    The tests do not rerun: they passed on this change, and what came in was gated by whoever pushed it.
 
 A gate that rewrites a file stops before any push with a request to commit it; nothing is committed on the tool's own initiative beyond the bump and the closes.
+That question is asked right after the static gates and before the test tail, so a formatter's rewrite costs a minute rather than the whole run.
+The gate is `check --fix --no-test`, then the dirty check, then `check test`.
 `--dry-run` says what would be bumped and pushed.
 
 `--closes <id>[,<id>] [--resolution fixed]` closes those issues in a commit of their own after the bump and ahead of the gate, so the push that resolves them is the one that closes them.
@@ -876,6 +892,25 @@ Each dependency's pin lives in its own `extern/<dep>/dependency.yml`, which is w
 
 Worth knowing about `list`: its second block reports each fetched dependency as **current**, **stale** or **not fetched**.
 A `.install/` at the wrong pin is otherwise invisible, and is the thing that makes a build quietly use a version nobody chose.
+
+## Companion repositories (`companions`)
+
+A companion is a repository of our own that most people never need, so it is neither a submodule nor a dependency: a corpus, a large data set.
+`dev.py companions` clones one into a gitignored path inside this tree, where nothing records which commit it is at.
+The `COMPANIONS` table in [dev.py](../../dev.py) declares them.
+
+```bash
+uv run dev.py companions list                   # every companion, its path, and where its clone stands
+uv run dev.py companions init shader-rosetta    # clone it on its branch
+uv run dev.py companions sync                   # fast-forward every cloned one to its branch head
+```
+
+- **The clone is an ordinary repository.** Commit and push in it with plain git; this repository's status never shows it.
+- **`sync` moves it by a fast-forward only**, under the rules of `submodules sync --tip`: uncommitted changes, another branch or unpushed commits are reported and left alone.
+- **Code that reads a companion must run without it**, saying how to clone it rather than failing, since most checkouts will not have one.
+- `init --url <https-url>` clones over https where no SSH key is set up.
+
+Its path sits under a directory named `extern/`, which keeps clang-format and shaped-linter out of it: the companion keeps its own rules.
 
 ## Sanitizers
 

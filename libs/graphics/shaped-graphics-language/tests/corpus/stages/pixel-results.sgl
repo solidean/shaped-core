@@ -1,0 +1,41 @@
+// a pixel stage returns its @pixel struct, one color value that is its one target, or nothing at all (CHK-418)
+
+struct varyings:
+    @position position: hpos4
+    uv: float2
+
+fun corner_of(v: int) -> float2 => float2(((v << 1) & 2) as float, (v & 2) as float)
+
+test corner_of(1).x == 2.0 and corner_of(2).y == 2.0
+
+@vertex fun fullscreen_vs(@vertex_index v: int) -> varyings:
+    let uv = corner_of(v)
+    return { position = hpos4(uv.x * 2.0 - 1.0, 1.0 - uv.y * 2.0, 0.0, 1.0), uv = uv }
+
+// one color value needs no struct: it is the pixel stage's one target, named `color`
+@pixel fun uv_ps(p: varyings) -> float4 => float4(..p.uv, 0.0, 1.0)
+
+pipeline uv_view:
+    vertex = fullscreen_vs
+    pixel = uv_ps
+    format = .rgba8_unorm
+
+// the attributes of its result type are its target's settings, as a member's are in a @pixel struct
+@pixel fun blended_ps(p: varyings) -> @format(.rgba16_float) @blend(.none) float4:
+    if p.uv.x > 1.0 => return float4(0.0)
+    return float4(..p.uv, 0.0, 0.5)
+
+pipeline blended:
+    vertex = fullscreen_vs
+    pixel = blended_ps
+
+// a stage that writes images alone returns nothing, and its pipeline has no color target
+binding gbuffer:
+    light: out image_2d[.rgba8_unorm]
+
+@pixel fun clear_ps(p: varyings){gbuffer}:
+    gbuffer.light[p.position.xy as int2] = float4(0.0)
+
+pipeline cleared:
+    vertex = fullscreen_vs
+    pixel = clear_ps

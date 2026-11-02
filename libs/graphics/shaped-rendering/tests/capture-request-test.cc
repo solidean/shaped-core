@@ -17,6 +17,15 @@ TEST("sr - a capture request reads the accumulate target as given", nx::config::
     CHECK(req.size == tg::vec2i(96, 64));
 }
 
+TEST("sr - a capture request reads an iteration count, and none when unset", nx::config::exclusive("env"))
+{
+    auto const on = cc::scoped_environment_variable(sr::capture_request_env_var, "1");
+    CHECK(sr::capture_request::from_environment().iterations == 0);
+
+    auto const iterations = cc::scoped_environment_variable(sr::capture_iterations_env_var, "3");
+    CHECK(sr::capture_request::from_environment().iterations == 3);
+}
+
 TEST("sr - a capture request keeps its default accumulate target for a value it cannot use", nx::config::exclusive("env"))
 {
     nx::expect_warning("capture: ignoring unparseable", nx::exactly(2));

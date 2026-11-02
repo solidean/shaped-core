@@ -302,6 +302,8 @@ public:
             return _shader_int16;
         case sg::feature::subgroups:
             return _subgroups;
+        case sg::feature::vertex_layer_output:
+            return _vertex_layer_output;
         // SPIR-V's `Coherent` decoration is core, and storage-image atomics on r32 integer formats are required.
         // BaseInstance is the DrawParameters capability, which creation requires `shaderDrawParameters` for.
         case sg::feature::device_coherence:
@@ -863,6 +865,7 @@ public:
     bool _shader_f16 = false;
     bool _shader_int16 = false;
     bool _subgroups = false;
+    bool _vertex_layer_output = false;
     /// What a pipeline may require of its subgroups' size: all zero where `subgroupSizeControl` was not enabled.
     struct subgroup_size_control
     {

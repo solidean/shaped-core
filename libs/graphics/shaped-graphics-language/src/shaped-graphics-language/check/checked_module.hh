@@ -7,6 +7,7 @@
 #include <clean-core/string/string.hh>
 #include <shaped-graphics-language/builtins/registry.hh>
 #include <shaped-graphics-language/check/flat.hh>
+#include <shaped-graphics-language/check/layered.hh>
 #include <shaped-graphics-language/check/symbols.hh>
 #include <shaped-graphics-language/source/diagnostic.hh>
 
@@ -19,6 +20,29 @@ struct sgl::check::related_note
     cc::string message;
 
     bool operator==(related_note const&) const = default;
+};
+
+/// One replacement of source text, in the file of the diagnostic that suggests it.
+struct sgl::check::fix_edit
+{
+    source_span where;
+    cc::string text;
+
+    bool operator==(fix_edit const&) const = default;
+};
+
+/// An edit that makes a diagnostic go away, which an editor offers as a quick fix.
+/// Its edits never overlap, and applying them all is the fix.
+struct sgl::check::suggested_fix
+{
+    /// What the fix does, as a menu shows it: "Convert each operand first".
+    cc::string title;
+    cc::vector<fix_edit> edits;
+
+    [[nodiscard]] bool operator==(suggested_fix const& rhs) const
+    {
+        return title == rhs.title && ast::impl::is_equal(edits, rhs.edits);
+    }
 };
 
 /// A diagnostic of the check pass.
@@ -37,11 +61,13 @@ struct sgl::check::located_diagnostic
     /// (CHK-402).
     /// Empty for a diagnostic of the program, which every compile of it reports.
     cc::vector<symbol_id> entry_points;
+    /// The edits that would fix it, where the checker knows them.
+    cc::vector<suggested_fix> fixes;
 
     [[nodiscard]] bool operator==(located_diagnostic const& rhs) const
     {
         return what == rhs.what && file == rhs.file && detail == rhs.detail && ast::impl::is_equal(notes, rhs.notes)
-            && ast::impl::is_equal(entry_points, rhs.entry_points);
+            && ast::impl::is_equal(entry_points, rhs.entry_points) && ast::impl::is_equal(fixes, rhs.fixes);
     }
 };
 
@@ -127,44 +153,46 @@ struct sgl::check::test_info
 struct sgl::check::checked_module
 {
     /// The module-level declarations of every file, in file order and then in source order.
-    cc::vector<symbol> symbols;
+    layered<symbol> symbols;
     /// Canonical and deduplicated; `types[0]` is the error type and `types[1]` is `void`.
-    cc::vector<type_info> types;
+    layered<type_info> types;
     /// The fields of every struct and the members of every binding.
-    cc::vector<member_info> members;
+    layered<member_info> members;
     /// The cases of every enum.
-    cc::vector<enum_case_info> enum_cases;
-    cc::vector<function_info> functions;
-    cc::vector<parameter> parameters;
-    cc::vector<binding_info> bindings;
+    layered<enum_case_info> enum_cases;
+    layered<function_info> functions;
+    layered<parameter> parameters;
+    layered<binding_info> bindings;
     /// The binding lists of the functions, the layouts of the pipelines, and the shaders of the ray-tracing ones.
-    cc::vector<symbol_id> binding_lists;
+    layered<symbol_id> binding_lists;
     /// The type parameters of the generic functions, and what each generic call deduced them as.
-    cc::vector<type_id> type_lists;
+    layered<type_id> type_lists;
     /// The static samplers a binding declares, which its members name by `member_info::static_sampler`.
-    cc::vector<sampler_state> samplers;
+    layered<sampler_state> samplers;
     /// Only the pipelines that checked without an error.
-    cc::vector<pipeline_info> pipelines;
-    cc::vector<pipeline_setting> pipeline_settings;
+    layered<pipeline_info> pipelines;
+    layered<pipeline_setting> pipeline_settings;
     /// The value of every `const` that checked.
-    cc::vector<constant_info> constants;
+    layered<constant_info> constants;
     /// Every place the program names an option, in the order the pass met them (CHK-355).
-    cc::vector<option_use> option_uses;
+    layered<option_use> option_uses;
     /// How each resolved call fills its callee's parameters; `file_tables::call_of` points in here.
-    cc::vector<call_record> call_records;
-    cc::vector<written_argument> written_arguments;
-    cc::vector<i32> call_slots;
+    layered<call_record> call_records;
+    layered<written_argument> written_arguments;
+    layered<i32> call_slots;
+    /// Every instantiation of a generic function the check met (CHK-338).
+    layered<function_instance> function_instances;
     /// Every candidate of every call that reported `no-matching-overload`, with the reason it did not match.
-    cc::vector<near_miss> near_misses;
+    layered<near_miss> near_misses;
     /// Every trace of a ray-tracing pipeline's ray type: the call, and which ray of which set (CHK-329).
-    cc::vector<ray_trace> ray_traces;
+    layered<ray_trace> ray_traces;
     /// Every call of a callable by its table's index (CHK-344).
-    cc::vector<callable_call> callable_calls;
+    layered<callable_call> callable_calls;
     /// Every assignment to an image's texel (CHK-367).
-    cc::vector<texel_store> texel_stores;
+    layered<texel_store> texel_stores;
 
     /// One entry per file checked: the prelude's, then the library files the program reaches, then the program's.
-    cc::vector<file_tables> files;
+    layered<file_tables> files;
     /// How many of `files` are the prelude's.
     i32 prelude_files = 0;
     /// Parallel to the files between the prelude and the program: each one's position in the library `check` was given.
@@ -177,9 +205,9 @@ struct sgl::check::checked_module
     cc::vector<flat_entry_point> entry_points;
 
     /// Every test, in the order the pass found them: file scope and type bodies first, then the tests of function bodies.
-    cc::vector<test_info> tests;
+    layered<test_info> tests;
     /// The flat trees of the tests that checked without an error, each of stage `none` and without a parameter.
-    cc::vector<flat_entry_point> test_units;
+    layered<flat_entry_point> test_units;
     /// Every entry point's expectation of a diagnostic; such an entry point is judged by them, and has no flat tree.
     cc::vector<entry_expectation> entry_expectations;
 
@@ -313,6 +341,36 @@ struct sgl::check::checked_module
         return "<error>";
     }
 
+    /// Makes every table's entries the shared lower layer a program's check starts from and never writes.
+    void freeze_tables()
+    {
+        symbols.freeze();
+        types.freeze();
+        members.freeze();
+        enum_cases.freeze();
+        functions.freeze();
+        parameters.freeze();
+        bindings.freeze();
+        binding_lists.freeze();
+        type_lists.freeze();
+        samplers.freeze();
+        pipelines.freeze();
+        pipeline_settings.freeze();
+        constants.freeze();
+        option_uses.freeze();
+        call_records.freeze();
+        written_arguments.freeze();
+        call_slots.freeze();
+        function_instances.freeze();
+        near_misses.freeze();
+        ray_traces.freeze();
+        callable_calls.freeze();
+        texel_stores.freeze();
+        files.freeze();
+        tests.freeze();
+        test_units.freeze();
+    }
+
     [[nodiscard]] bool operator==(checked_module const& rhs) const
     {
         using ast::impl::is_equal;
@@ -323,11 +381,59 @@ struct sgl::check::checked_module
             && is_equal(samplers, rhs.samplers) && is_equal(pipelines, rhs.pipelines)
             && is_equal(pipeline_settings, rhs.pipeline_settings) && is_equal(constants, rhs.constants)
             && is_equal(option_uses, rhs.option_uses) && is_equal(call_records, rhs.call_records)
+            && is_equal(function_instances, rhs.function_instances)
             && is_equal(written_arguments, rhs.written_arguments) && is_equal(call_slots, rhs.call_slots)
             && is_equal(near_misses, rhs.near_misses) && is_equal(ray_traces, rhs.ray_traces)
             && is_equal(callable_calls, rhs.callable_calls) && is_equal(texel_stores, rhs.texel_stores)
             && is_equal(files, rhs.files) && is_equal(entry_points, rhs.entry_points) && is_equal(tests, rhs.tests)
             && is_equal(test_units, rhs.test_units) && is_equal(entry_expectations, rhs.entry_expectations)
             && is_equal(diagnostics, rhs.diagnostics) && builtins == rhs.builtins;
+    }
+};
+
+/// One file's side tables as a body reads them: an instance's own entries over the file's (CHK-338).
+/// It holds positions, not references, since checking may add instances while it is read.
+struct sgl::check::table_view
+{
+    checked_module const* module = nullptr;
+    i32 file = 0;
+    /// A position in `checked_module::function_instances`, -1 for the file's tables alone.
+    i32 instance = -1;
+
+    [[nodiscard]] type_id type_at(ast::expr_id id) const
+    {
+        if (auto const* const own = own_tables(id); own != nullptr)
+            if (auto const t = own->type_of[slot_of(id)]; is_valid(t))
+                return t;
+        return module->files[file].type_at(id);
+    }
+    /// By value: an instance's tables move when the check adds another instance.
+    [[nodiscard]] target target_at(ast::expr_id id) const
+    {
+        if (auto const* const own = own_tables(id); own != nullptr)
+            if (auto const& t = own->target_of[slot_of(id)]; t.kind != target_kind::none)
+                return t;
+        return module->files[file].target_at(id);
+    }
+    [[nodiscard]] i32 call_at(ast::expr_id id) const
+    {
+        if (auto const* const own = own_tables(id); own != nullptr)
+            if (auto const c = own->call_of[slot_of(id)]; c != -2)
+                return c;
+        return module->files[file].call_at(id);
+    }
+
+private:
+    [[nodiscard]] isize slot_of(ast::expr_id id) const
+    {
+        return isize(ast::index_of(id)) - module->function_instances[instance].first;
+    }
+    [[nodiscard]] file_tables const* own_tables(ast::expr_id id) const
+    {
+        if (instance < 0)
+            return nullptr;
+        auto const& tables = module->function_instances[instance].tables;
+        auto const slot = slot_of(id);
+        return slot >= 0 && slot < tables.type_of.size() ? &tables : nullptr;
     }
 };

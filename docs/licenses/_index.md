@@ -18,6 +18,7 @@ Our own license is in [shaped-core.txt](shaped-core.txt), so this directory is a
 | [ImPlot](https://github.com/epezent/implot) | d65a2bef53d3 | `MIT` | shaped-rendering — plotting inside the imgui bundle | [implot.txt](implot.txt) |
 | [ImGuizmo](https://github.com/cedricguillemet/ImGuizmo) | dc25afb98bc3 | `MIT` | shaped-rendering — manipulation gizmos inside the imgui bundle | [imguizmo.txt](imguizmo.txt) |
 | [libspng](https://libspng.org) | v0.7.4 | `BSD-2-Clause AND libpng-2.0` | babel-serializer — the PNG codec behind babel::png | [libspng.txt](libspng.txt), [libspng-libpng.txt](libspng-libpng.txt) |
+| [libwebp](https://chromium.googlesource.com/webm/libwebp) | v1.6.0 | `BSD-3-Clause` | babel-serializer — the WebP codec behind babel::image's webp format | [libwebp-copying.txt](libwebp-copying.txt), [libwebp-patents.txt](libwebp-patents.txt) |
 | [LZ4](https://github.com/lz4/lz4) | v1.10.0 | `BSD-2-Clause` | clean-core — cc::compress / cc::decompress, the LZ4 algorithm | [lz4.txt](lz4.txt) |
 | [mbedtls](https://www.trustedfirmware.org/projects/mbed-tls) | v3.6.7 | `Apache-2.0` | clean-net — the TLS handshake and record layer behind cnet's TLS connections | [mbedtls.txt](mbedtls.txt) |
 | [meshoptimizer](https://github.com/zeux/meshoptimizer) | v1.3 | `MIT` | babel-serializer — the decoders behind babel::gltf's EXT_meshopt_compression | [meshoptimizer.txt](meshoptimizer.txt) |

@@ -90,6 +90,7 @@ cc::string nx::write_test_listing_json(cc::string_view suite_name,
                 t.write("file", decl.location.file_name());
                 t.write("line", decl.location.line());
                 t.write("bucket", bucket_name(tc.bucket));
+                t.write("manual", tc.manual); // runs only when named exactly, even within its bucket
                 t.write("enabled", tc.enabled);
                 t.write("seed", tc.seed);
                 t.write("invocable", invocable);

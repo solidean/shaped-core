@@ -389,7 +389,12 @@ pass.set_inline_constants(shaders::compute::constants{.view_projection = vp}.to_
 // a struct a binding places in GPU memory -> shaders::compute::particle: tg members at SGL's offsets, padding as `cc::u32 _padN = {}`,
 //   and static_asserts on sizeof and every offsetof. A buffer of it is sg::readwrite_buffer_view<shaders::compute::particle>:
 auto const items = ctx.persistent.create_buffer_from_data(cc::vector<shaders::compute::particle>{...}, sg::buffer_usage::readwrite_buffer);
-//   a constant block packs as an HLSL cbuffer, a buffer element tight like a tg struct (the SGL spec's layout rules).
+//   every vector at its natural alignment, a 3-vector at 16, so the padding fields are real (the SGL spec's layout rules);
+//   `@padding(.none)` in the shader packs it as C++ does instead.
+// SGL `buffer[float3]` -> sg::readonly_buffer_view<slib::gpu_padded<tg::vec3f, 16>> (gpu_padded.hh): a value and its padding,
+//   which a tg::vec3f converts to and from; under `@padding(.none)` it is plain tg::vec3f at a 12-byte stride.
+// SGL `mat3` -> slib::gpu_mat3 (gpu_mat3.hh): three 16-byte columns, which a tg::mat3f converts to and from;
+//   under `@padding(.none)` it is plain tg::mat3f, 36 bytes.
 // SGL `bool32` -> slib::gpu_bool (gpu_bool.hh): a bool as one 32-bit lane; a plain bool assigns into it.
 // SGL `half` -> tg::f16, `short`/`ushort` -> cc::i16/cc::u16, their vectors tg::vec<N, T>; a 2-byte gap is `cc::u16 _padN`.
 // within one file a name is generated once, so a binding named like the file's entry point type (`main_t`) or options
@@ -440,6 +445,8 @@ auto const p = co_await ctx.cached.acquire_raster_pipeline(shaders::cube::pipeli
 //   members marked `@per_instance` / `@stream(name)` split it over buffers: then v::<stream> per buffer, in slot order,
 //   and v::buffers{.per_vertex = verts, .per_instance = insts}.views() for bind_vertex_buffers — typed, so a
 //   buffer of the wrong stream does not compile.
+//   a matrix or an array member stays one field (tg::mat3f, cc::fixed_array<float, 3>) and is an attribute per
+//   column or element in layout(): the member's semantic at index i, at its offset plus i pieces (EMIT-174).
 // `@pixel struct target` -> shaders::cube::target: one sg::color_target per member, by name, plus an optional depth_stencil.
 cmd.raster.render_to(shaders::cube::target{.color = rt.cleared(c), .depth_stencil = depth.cleared(1.0f)}); // -> rendering_info
 //   the pipeline side, for one built by hand: .color_targets = shaders::cube::target::states{.color = {.format = f}},

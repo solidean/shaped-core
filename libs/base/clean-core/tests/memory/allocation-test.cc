@@ -1,6 +1,8 @@
 #include <clean-core/common/utility.hh>
 #include <clean-core/container/span.hh>
+#include <clean-core/container/vector.hh>
 #include <clean-core/memory/allocation.hh>
+#include <clean-core/platform/process_metrics.hh>
 #include <nexus/test.hh>
 
 #include <vector>
@@ -443,5 +445,23 @@ TEST("allocation - a failed allocate_bytes calls the installed handler, which ma
         CHECK(p == nullptr);
     }
     cc::set_allocation_failure_handler(nullptr);
+}
+#endif
+
+#if CC_HAS_MIMALLOC && (defined(CC_OS_WINDOWS) || defined(CC_OS_LINUX))
+// Exclusive: it reads the process's resident size, which another test allocating beside it would move.
+TEST("allocation - trim_thread_memory gives a freed phase's pages back to the OS", nx::config::exclusive())
+{
+    constexpr auto block_bytes = isize(256) << 10;
+    constexpr auto block_count = 256; // 64 MiB in blocks mimalloc keeps in pages of its own, not one huge block
+    auto blocks = cc::vector<cc::vector<byte>>();
+    for (auto i = 0; i < block_count; ++i)
+        blocks.push_back(cc::vector<byte>::create_filled(block_bytes, byte(1))); // touched, so resident
+    blocks = {};
+    auto const kept = cc::query_process_usage().value().resident_bytes;
+    cc::trim_thread_memory();
+    auto const trimmed = cc::query_process_usage().value().resident_bytes;
+    // most of the 64 MiB goes; what mimalloc holds of its own and what others allocated meanwhile may stay
+    CHECK(kept - trimmed >= block_count * block_bytes / 2);
 }
 #endif

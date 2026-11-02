@@ -44,6 +44,8 @@ struct planned_member
     cc::string source_name;
     check::type_id type = check::type_id::none;
     bool is_position = false;
+    /// `@layer`, which the target names by an attribute of its own and no location (CHK-419).
+    bool is_layer = false;
     /// How a stage link's member is interpolated; the default everywhere else.
     check::interpolation interpolate;
     /// A render target struct's depth or sample mask, which takes no location; `color` everywhere else.
@@ -52,12 +54,25 @@ struct planned_member
     check::tessellation_factor factor = {};
     /// The position among the members without `@position`; -1 on a `plain` struct and on the position itself.
     i32 location = -1;
-    /// The byte offset in a constant block; -1 everywhere else.
+    /// The byte offset in a constant block or a buffer's element; -1 everywhere else.
     i32 offset = -1;
+    /// The bytes it takes there, where `offset` is one.
+    i32 size = 0;
+    /// `@padding(.every_element)`: a constant block's array of values, each element on a row, held as 4-vectors (EMIT-172).
+    bool is_row_per_element = false;
+    /// An edge struct's array or matrix, which crosses as `pieces` members of `piece`, its elements or its columns, at
+    /// consecutive locations from `location` (EMIT-174); 0 for any other member.
+    i32 pieces = 0;
+    check::type_id piece = check::type_id::none;
+    /// In `declared_members`: where the member stands in its struct's `members`, and which of its pieces this is, or -1.
+    isize whole = -1;
+    i32 piece_index = -1;
 };
 
 struct planned_struct
 {
+    /// Placed in a constant block rather than in a buffer, which is where HLSL holds a `mat2` as a `float4` (EMIT-175).
+    bool is_constants = false;
     check::type_id type = check::type_id::none;
     cc::string name;
     struct_role role = struct_role::plain;
@@ -65,6 +80,12 @@ struct planned_struct
     cc::vector<planned_member> members;
     /// Parallel to the type's members: the position in `members`, or -1 for a void member.
     cc::vector<i32> member_of;
+    /// Its size in GPU memory, its tail padding included; -1 where it stands in none.
+    i32 memory_size = -1;
+    /// It stands in GPU memory under `@padding(.none)`.
+    bool is_packed = false;
+    /// Its alignment in GPU memory, where it stands there.
+    i32 memory_alignment = 0;
 };
 
 /// An enum the entry point mentions, whose every case is declared whether or not an arm names it (EMIT-77).
@@ -73,6 +94,35 @@ struct planned_enum
     check::type_id type = check::type_id::none;
     /// Parallel to the type's cases: the constant each is written as, minted from `<enum>_<case>`.
     cc::vector<cc::string> case_names;
+};
+
+/// What a target holds in GPU memory where SGL's value is, which a read converts back and a write converts into (EMIT-173).
+enum class held_as : u8
+{
+    itself,
+    /// HLSL's `float4x3` of a `mat3` (EMIT-168): a read narrows it, a write widens into it.
+    widened_mat3,
+    /// MSL's `packed_` 3-vector (EMIT-170): a read converts it, and a write converts into it implicitly.
+    packed_tail,
+    /// An array of 4-vectors (EMIT-169, EMIT-172): an element reads through `lanes`, a whole read or write goes element by
+    /// element.
+    widened_array,
+    /// A `mat2` in an HLSL constant block, held as one `float4` of its two columns (EMIT-175): a read rebuilds it.
+    vector_mat2,
+    /// An edge struct's array or matrix, held as one member per element or column (EMIT-174): a read rebuilds it, a write
+    /// stores each piece.
+    pieces,
+};
+
+/// How one expression reaching GPU memory is spelled, which `plan_memory_accesses` decides before any text is written.
+struct memory_access
+{
+    held_as held = held_as::itself;
+    /// The lanes an element of a widened array is read and written through: `.x`, `.xy` or `.xyz`.
+    cc::string_view lanes;
+    /// Spelled as held, never converted: an assignment's place, the objects a write through it reaches, or an array
+    /// indexed in place.
+    bool is_raw = false;
 };
 
 /// A block of constants: the one `@inline binding` of the entry point, or the plain members of one of its groups.
@@ -112,6 +162,8 @@ struct planned_resource
     check::type_id type = check::type_id::none;
     /// The element of a buffer; `none` for every other kind.
     check::type_id element = check::type_id::none;
+    /// The rule a buffer's elements are placed by, which `@padding(.none)` makes the packed one.
+    address_space space = address_space::storage;
     bool is_mut = false;
     /// `@coherent`: HLSL declares it `globallycoherent`, and MSL `coherent(device)` (EMIT-150).
     bool is_coherent = false;
@@ -215,6 +267,8 @@ struct plan
     /// Parallel to `locals`: the constant flags every call with a `flags_argument` hands the local, which its type takes.
     /// Empty where no call does, where one hands it flags that are no constant, or where two hand it different ones.
     cc::vector<cc::optional<u32>> local_flags;
+    /// Parallel to `e.exprs`: how each expression reaching GPU memory is spelled (EMIT-173).
+    cc::vector<memory_access> accesses;
     /// Holds every name above and every reserved word of the target, and goes on from the tree's names and the builtins'.
     /// A writer mints what it still needs from here.
     check::name_mint names;
@@ -289,7 +343,7 @@ void validate_edge_struct(check::checked_module const& m, check::type_id type, s
 /// What only a list can get wrong, an `@inline` binding that does not stand last, is `validate`'s.
 void validate_binding(check::checked_module const& m, check::symbol_id id, cc::vector<error>& errors);
 
-/// Where the members of a constant block land, by the rule its binding's `@layout` names (layout.hh).
+/// Where the members of a constant block land, by the rule its binding's `@padding` names (layout.hh).
 struct block_placement
 {
     /// Parallel to the members.
@@ -299,6 +353,32 @@ struct block_placement
     /// Where the last member ends.
     i32 size = 0;
 };
+
+/// EMIT-170: whether member `member` of `s`, a struct in natural GPU memory, is a 3-vector the next member sits in the
+/// tail of, which MSL's 16-byte 3-vector would push past, so MSL declares it packed.
+[[nodiscard]] bool shares_tail(plan const& p, planned_struct const& s, isize member);
+/// The same of `members` placed in natural memory, a block's or a struct's.
+[[nodiscard]] bool shares_tail(plan const& p, cc::span<planned_member const> members, isize member);
+
+/// EMIT-174: the members of `s` as its target declares them, an array or a matrix of an edge struct as one member per
+/// element or column, named `<member>_<i>` at consecutive locations.
+[[nodiscard]] cc::vector<planned_member> declared_members(planned_struct const& s);
+
+/// EMIT-174: whether `element` names one piece of an array held as pieces, by a literal index.
+/// `p.accesses` must hold the element's object already.
+[[nodiscard]] bool is_piece(plan const& p, check::flat_element const& element);
+
+/// EMIT-173: fills `p.accesses` from the target, its blocks and its structs in memory, and from where each expression
+/// stands: a place, or an array indexed in place, is spelled as held, and every other read is converted back.
+void plan_memory_accesses(plan& p);
+
+/// Whether member `member` of `object_type` is a mat3 its target holds as a `float4x3`, where the struct is in memory.
+[[nodiscard]] bool holds_widened_mat3(plan const& p, check::type_id object_type, isize member);
+/// Whether member `member` of `object_type` is an array of 3-vectors its target holds as 4-vectors (EMIT-169).
+[[nodiscard]] bool holds_widened_array(plan const& p, check::type_id object_type, isize member);
+
+/// The prelude's 4-vector of the scalar of `element`, `float4` for a `float2`, which holds one element per row.
+[[nodiscard]] cc::string_view row_vector_of(plan const& p, check::type_id element);
 
 /// `members` must belong to a binding that passed `validate_binding`.
 [[nodiscard]] block_placement place_block(check::checked_module const& m,

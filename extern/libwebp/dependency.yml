@@ -1,0 +1,20 @@
+# Pin and license for the upstream vendored here.
+# vendor-libwebp.py reads its pin from this file; the copy map and wipe list stay in the script.
+# Bump `tag` and `pin_hash` together, only after vetting the new commit.
+
+upstreams:
+  - name: libwebp
+    homepage: https://chromium.googlesource.com/webm/libwebp
+    source: git
+    repo: https://github.com/webmproject/libwebp
+    track: tags
+    tag: v1.6.0
+    digest_algo: git-commit
+    pin_hash: 4fa21912338357f89e4fd51cf2368325b59e9bd9
+    license: BSD-3-Clause
+    license_files: [COPYING, PATENTS]
+    used_by: babel-serializer — the WebP codec behind babel::image's webp format
+    notes: |
+      The GitHub repository is the official mirror of the googlesource one; the tag is annotated, so pin_hash is the commit it peels to.
+      PATENTS is Google's royalty-free patent grant for the VP8 / VP8L formats, shipped beside the BSD-3-Clause COPYING and redistributed with it.
+      Only the codec is vendored: decode, encode, dsp, utils and sharpyuv; mux, demux (animation and metadata containers) and every tool are dropped.

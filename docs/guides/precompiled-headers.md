@@ -35,6 +35,7 @@ Applying several tiers composes them left to right, which is how an orthogonal t
 | `SG` | shaped-graphics | `TG` + `<shaped-graphics/all.hh>` |
 | `DX12` | the dx12 backend | `SG` + `<shaped-graphics/backends/dx12/dx12_common.hh>` |
 | `DXC` | shaped-shader-compiler-dxc | `SG` + `<shaped-shader-compiler-dxc/impl/dxc_common.hh>` |
+| `SGL` | shaped-graphics-language | `CC_STD` + its module, check, parse and emit surfaces: 0.80 for the library, 0.71 for its tests |
 
 Two rules the mechanism enforces or relies on:
 

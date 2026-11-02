@@ -68,7 +68,7 @@ TEST("sgl driver - a const that did not check fails what reads it silently, and 
 {
     // CHK-19: a failed symbol is the error type where it is named, and the one diagnostic is its own
     cc::string_view const broken[] = {
-        "const a = nope\n",       "const a: int = 1.5\n",       "const a = 1 + 2\n",
+        "const a = nope\n",       "const a: int = 1.5\n",       "const a = 7 / (0 as int)\n",
         "const a = 2147483648\n", "const a = b\nconst b = a\n",
     };
     for (auto const b : broken)
@@ -82,10 +82,11 @@ TEST("sgl driver - a const that did not check fails what reads it silently, and 
     }
 
     // reached through a callee and as a case pattern, and from an entry point
-    CHECK(sgl::test_source("enum m:\n    a\n    b\nconst bad = 1 + 2\nfun f(x: m) -> int:\n    return case x:\n"
+    CHECK(sgl::test_source("enum m:\n    a\n    b\nconst bad = 7 / (0 as int)\nfun f(x: m) -> int:\n    return case "
+                           "x:\n"
                            "        bad => 1\n        _ => 0\ntest f(m.a) == 0\n",
                            "p.sgl")
-              .errors.contains("unsupported-yet"));
+              .errors.contains("constant-without-value"));
     auto const entry = sgl::compile_to_text({.source = "const a = nope\nstruct frag:\n    x: float\n@pixel struct "
                                                        "target:\n    color: float4\n"
                                                        "@pixel fun main_ps(p: frag) -> target:\n    let w = a\n    "
@@ -150,4 +151,14 @@ TEST("sgl driver - a pipeline names no entry point that expects a diagnostic, si
                                               "    format = .rgba8_unorm\n",
                                         "e.sgl");
     CHECK(named.errors == "e.sgl:20:13: error: invalid-pipeline: bad_ps expects a diagnostic, so it is never built\n");
+}
+
+TEST("sgl driver - a matrix column or row outside the matrix has no value, which fails the run")
+{
+    // CHK-407: no target defines one, so the abstract machine stops there
+    auto const tested = sgl::test_source("fun at(i: int) -> float => mat2(float2(1.0, 2.0), float2(3.0, "
+                                         "4.0)).column(i).x\ntest at(2) == 0.0\n",
+                                         "m.sgl");
+    CHECK(tested.errors.contains("test-failed"));
+    CHECK(tested.errors.contains("a matrix index outside the matrix, in a call of 'matrix_column'"));
 }
