@@ -79,12 +79,11 @@ void impl::debug_windows::ensure_windows()
             {
                 _windows[i].buffer = _ctx.persistent.create_raw_buffer(
                     k_window_bytes, buffer_usage::readwrite_buffer | buffer_usage::copy_src | buffer_usage::copy_dst);
-                reset(i);
+                _windows[i].needs_reset.store(true);
             }
             _sink = _ctx.persistent.create_raw_buffer(
                 k_header_words * 4, buffer_usage::readwrite_buffer | buffer_usage::copy_src | buffer_usage::copy_dst);
-            u32 const empty[k_header_words] = {0, 0, 0};
-            _ctx.upload.bytes_to_buffer(_sink, cc::make_pinned_data(cc::span<u32 const>(empty).as_bytes()));
+            _sink_needs_reset.store(true);
             _created.store(true);
         });
 }
@@ -98,11 +97,24 @@ void impl::debug_windows::create()
 raw_buffer_handle impl::debug_windows::window_for_recording(bool writes)
 {
     ensure_windows();
-    auto& w = _windows[index_of(_ctx.current_epoch())];
+    auto const index = index_of(_ctx.current_epoch());
+    auto& w = _windows[index];
     if (w.is_busy.load())
+    {
+        if (writes && _sink_needs_reset.exchange(false))
+        {
+            u32 const empty[k_header_words] = {0, 0, 0};
+            _ctx.upload.bytes_to_buffer(_sink, cc::make_pinned_data(cc::span<u32 const>(empty).as_bytes()));
+        }
         return _sink;
+    }
     if (writes)
+    {
+        // a list that binds the window waits on this copy, so the reset lands before the first record
+        if (w.needs_reset.exchange(false))
+            reset(index);
         w.is_written.store(true);
+    }
     return w.buffer;
 }
 
@@ -222,8 +234,8 @@ void impl::debug_windows::finish(isize index, cc::span<byte const> bytes)
     auto& w = _windows[index];
     w.pending = {};
     w.is_requested = false;
-    reset(index);
-    // the reset is ordered before any later list that binds the window, so the window is free from here
+    // reset by the next bind that writes it, which a list waits on before its first record
+    w.needs_reset.store(true);
     w.is_busy.store(false);
 
     auto const word_count = bytes.size() / 4;

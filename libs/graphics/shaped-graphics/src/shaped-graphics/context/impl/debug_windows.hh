@@ -37,8 +37,8 @@ public:
     /// `writes` says the bound pipeline's code writes records, which has the window read back once the epoch completes.
     [[nodiscard]] raw_buffer_handle window_for_recording(bool writes);
 
-    /// Creates the windows, where diagnostics are on; a backend calls it once the context can upload.
-    /// Created with the context rather than at a first bind, so their first reset belongs to no test or frame that binds.
+    /// Creates the windows, where diagnostics are on; a backend calls it once the context exists.
+    /// Creating them uploads nothing: a window's header is reset by the first bind that writes it.
     void create();
 
     /// Makes `sites` known, so a record that starts with one of their ids decodes; a pipeline's creation calls it.
@@ -66,6 +66,9 @@ private:
         cc::atomic<bool> is_written = false;
         /// Written in an epoch that has not been read back and reset yet, which a recording thread may ask from.
         cc::atomic<bool> is_busy = false;
+        /// Its header has to be reset before a pipeline writes it: at creation, and once its records were read.
+        /// Reset by the first bind that writes, so a context that never prints uploads nothing for it.
+        cc::atomic<bool> needs_reset = true;
         /// Read back after its epoch, and not decoded yet; nullopt where nothing is pending.
         cc::optional<bytes_future> pending;
         /// Its download has been asked for, which only happens once its epoch has retired.
@@ -84,6 +87,7 @@ private:
     window _windows[k_window_count];
     /// Where an epoch whose window is still busy writes, on a context that cannot wait for it: room for nothing.
     raw_buffer_handle _sink;
+    cc::atomic<bool> _sink_needs_reset = true;
     cc::atomic<bool> _created = false;
     cc::mutex<int> _creation;
     cc::mutex<cc::map<u32, shader_debug_site>> _sites;
