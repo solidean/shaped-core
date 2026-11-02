@@ -252,6 +252,9 @@ struct view_state
 /// Starts `slot`'s mean over: no frames, no samples, and no sample floor of the old image still to land.
 void restart_accumulation(temporal_slot& slot);
 
+/// Starts every traced layer of `state` over, as a different image would: its mean, and the denoiser's history with it.
+void restart_accumulation(view_state& state);
+
 // -- Folding over a view's traced layers.
 //
 // One rule in one place, because the alternative already went wrong: `view_ref::accumulated_frames` read

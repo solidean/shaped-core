@@ -232,6 +232,8 @@ EXAMPLE("shaped-viewer/research-studio")
     auto fade_frames = 8;                                               // render_settings::temporal_denoise_fade_frames
     auto ceiling = false;
     auto exposure_offset = 0.0f;
+    auto restart = false; // the panel asked for the image to converge again
+    auto samples = u32(0);
     // Each a quadrature over the dome, so taken once rather than every frame.
     auto const floor_exposure = sv::studio_exposure(sv::studio_dome(sv::studio_setup::floor));
     auto const ceiling_exposure = sv::studio_exposure(sv::studio_dome(sv::studio_setup::ceiling));
@@ -307,6 +309,9 @@ EXAMPLE("shaped-viewer/research-studio")
             }
             ImGui::Checkbox("ceiling setup", &ceiling);
             ImGui::SliderFloat("exposure offset", &exposure_offset, -3.0f, 3.0f, "%.1f stops");
+            restart = ImGui::Button("reset accumulation");
+            ImGui::SameLine();
+            ImGui::Text("%u samples", samples);
             ImGui::Text("%.1f ms / frame", 1000.0f / ImGui::GetIO().Framerate);
             if (k_scenes[scene_index].credit[0] != '\0')
                 ImGui::TextWrapped("%s%s", k_scenes[scene_index].credit, k_cc_by);
@@ -344,6 +349,9 @@ EXAMPLE("shaped-viewer/research-studio")
         }
 
         auto view = f.window().view();
+        if (restart)
+            view.restart_accumulation();
+        samples = view.accumulated_samples();
         auto const& cameras = asset.data().cameras;
         if (reframe)
         {

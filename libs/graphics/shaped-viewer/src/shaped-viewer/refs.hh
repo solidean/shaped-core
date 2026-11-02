@@ -526,6 +526,10 @@ public:
     /// its id — `frame::pending_resource_work` and `frame::streaming_resources` are the rest.
     [[nodiscard]] bool is_accumulation_converged(cc::optional<u32> samples = {}) const;
 
+    /// Starts every traced layer of this view over, as a different image would: its mean, and the denoiser's history with it.
+    /// For a person asking to see the image converge again, or a change the trace's hash cannot see.
+    void restart_accumulation() const;
+
     [[nodiscard]] view_id id() const;
     [[nodiscard]] view_index index() const { return _view; }
 

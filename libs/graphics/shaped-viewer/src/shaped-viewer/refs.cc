@@ -820,6 +820,11 @@ bool view_ref::is_accumulation_converged(cc::optional<u32> samples) const
     return impl::is_accumulation_converged(_frame->state_of(_view), samples);
 }
 
+void view_ref::restart_accumulation() const
+{
+    impl::restart_accumulation(_frame->state_of(_view));
+}
+
 // ---- window_ref ------------------------------------------------------------------------------------------
 
 view_ref window_ref::default_view() const

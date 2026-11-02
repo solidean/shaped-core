@@ -120,16 +120,8 @@ bool view_store::is_accumulation_converged(view_id id, cc::optional<u32> samples
 void view_store::restart_accumulation(view_id id)
 {
     auto* const st = _entries.get_ptr(id);
-    if (st == nullptr)
-        return;
-
-    // cc::map yields a proxy by value; its members are the live references
-    for (auto [slot_id, slot] : st->temporal)
-        if (temporal_id::is_accumulation(slot_id))
-            impl::restart_accumulation(slot);
-
-    // A cut is what throws the rest away on the view's next trace: the temporal histories and the reprojection camera.
-    st->camera_cut_pending = true;
+    if (st != nullptr)
+        impl::restart_accumulation(*st);
 }
 
 namespace impl
@@ -143,6 +135,17 @@ void restart_accumulation(temporal_slot& slot)
     slot.samples = 0;
     slot.pixels_short = 0;
     slot.sample_floors.clear();
+}
+
+void restart_accumulation(view_state& state)
+{
+    // cc::map yields a proxy by value; its members are the live references
+    for (auto [slot_id, slot] : state.temporal)
+        if (temporal_id::is_accumulation(slot_id))
+            restart_accumulation(slot);
+
+    // A cut is what throws the rest away on the view's next trace: the temporal histories and the reprojection camera.
+    state.camera_cut_pending = true;
 }
 
 namespace

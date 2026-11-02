@@ -1062,6 +1062,7 @@ frame.background_work() -> cc::shared_async<cc::unit>          // settles once t
                                                                //   0 does NOT mean settled, and it never restarts accumulation: that work
                                                                //   changes a texture's contents, not its id, so accumulated_samples cannot see it
 view.accumulated_samples() -> u32                               // the SLOWEST traced layer's samples per pixel; 0 for a view with none
+view.restart_accumulation()                                     // every traced layer starts over, its denoiser's history too: a reset button, or a change the hash cannot see
                                                                //   never layer 0 by fiat: a layout or ui layer below the scene puts the trace at 1
                                                                //   a wavefront layer's reads back from the GPU, so it trails the image by a frame or more
 view.is_accumulation_converged(samples = {}) -> bool            // ASK THIS, not the counter: a layer stops at sv::accumulation_sample_cap (16384),
