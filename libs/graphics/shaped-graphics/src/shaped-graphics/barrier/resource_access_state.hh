@@ -119,8 +119,17 @@ struct sg::resource_access_state
             // It can only infer ONE, so an op that both reads and writes the same resource — a copy whose source and destination are the same buffer — must be spelled out.
             // Skipping the barrier there leaves D3D12 assuming COPY_DEST and rejecting the source read.
             // A read through the same writable view as the write is that one access already, and needs nothing spelled out.
-            if (!has_any_inflight_access() && !layout_change
-                && !has_read_access(all_curr_access().without(storage_accesses)))
+            // An append after appends alone orders against none of them, and joins them in flight.
+            auto const only_appends
+                = [](access_flags a) { return !a.is_empty() && a.without(access_flag::shader_append).is_empty(); };
+            if (!layout_change && curr_read_access.is_empty() && only_appends(curr_write_access)
+                && inflight_read_access.is_empty() && only_appends(inflight_write_access))
+            {
+                inflight_write_stages |= curr_write_stages;
+                inflight_write_access |= curr_write_access;
+            }
+            else if (!has_any_inflight_access() && !layout_change
+                     && !has_read_access(all_curr_access().without(storage_accesses)))
             {
                 // First write with no prior access: take ownership, no barrier.
                 inflight_read_stages = curr_read_stages;
