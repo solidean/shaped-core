@@ -45,5 +45,9 @@ The readme lists "assertions, logging, per expression traces" among what SGL off
    vulkan's set 3 is an embedded-sampler set, which holds samplers only.
    With diagnostics it becomes a descriptor-buffer set of the samplers and binding 19, one copy per ring slot, bound with `cmd_set_descriptor_offsets`.
    metal is Julius's: `[[buffer(30)]]`.
-   Each epoch writes its own slice of a per-context ring, read back once the epoch completes and logged in the `sg` domain.
+   Each context has four windows by default, one more than triple buffering keeps in flight, and epoch `e` writes window `e % 4`.
+   A window is downloaded through `ctx.download` once its epoch completes, decoded and logged in the `sg` domain, and its header reset after.
+   Opening epoch `e + 4` waits for window `e % 4` to be back, which only a drain more than a whole epoch late makes it do.
+   The count is the context's to set, for an app that keeps more epochs in flight.
+   No step puts a sync point between two epochs on the GPU: overlapping them is what a dev build must still show.
 4. slib and the build: the site table translated onto `sg::compiled_shader`, `SC_SHADER_DIAGNOSTICS`, and GPU tests.
