@@ -496,6 +496,7 @@ fun scaled_by[n: int](x: float) => x * float(n)   // a value parameter, a consta
 fun combined[m: mode](a: float) => …    // an enum one: combined[mode.add](x); a type position takes `op[.add]`
 fun copy_texel[f: pixel_format](img: mut image_2d[f], a: int2, b: int2)   // an image's format, deduced from the image handed over
 struct box[T = float, n: int = 2]:      // defaults bind what nothing else says; box[int] is box[int, 2]
+fun max[V](a: V, b: scalar_of[V]) -> V  // scalar_of[V]: the scalar of a vector or matrix type (CHK-423)
 ```
 
 ## The language: ray tracing ([docs/spec/raytracing.md](docs/spec/raytracing.md))

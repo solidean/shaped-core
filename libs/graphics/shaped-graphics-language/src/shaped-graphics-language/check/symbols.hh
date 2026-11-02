@@ -56,6 +56,8 @@ enum class sgl::check::type_kind : sgl::u8
     /// What a value parameter `[n: int]` stands for in an instance: `element` is its type, and `count` its 32 bits, a
     /// case index for an enum, with every NaN one (CHK-338).
     constant,
+    /// `scalar_of[V]` of an open `V`, which is its `element`: an instance makes it `V`'s scalar (CHK-423).
+    scalar_of,
     // Tuples and anonymous struct types come later, each as a kind that is deduplicated by structure.
 };
 

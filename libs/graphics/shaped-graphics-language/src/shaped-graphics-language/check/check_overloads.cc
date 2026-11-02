@@ -318,7 +318,9 @@ cc::optional<candidate_match> checker::match(i32 file, symbol_id candidate, call
             // a leading dot names a case of the enum it meets, which a type parameter does not say
             if (!arguments.leading_dots[i].empty())
                 return cc::nullopt;
-            if (arguments.functions[i] >= 0 || arguments.literals[i] >= 0 || arguments.numbers[i].is_number)
+            // CHK-423: `scalar_of[V]` says nothing of `V`, so its argument waits until the rest have bound it
+            if (arguments.functions[i] >= 0 || arguments.literals[i] >= 0 || arguments.numbers[i].is_number
+                || out.at(out.at(range)[p].type).kind == type_kind::scalar_of)
                 deferred.push_back(p);
             else if (out.at(range)[p].is_mut
                          != (arguments.written[i].is_mut || (arguments.written[i].may_be_mut && out.at(range)[p].is_mut))
@@ -430,7 +432,8 @@ cc::optional<candidate_match> checker::match(i32 file, symbol_id candidate, call
         }
         auto taking = shape_of(p);
         taking.type = substitute(taking.type, result.bindings);
-        if (is_open(taking.type))
+        // a signature its bindings make no type of, `scalar_of[float]`, is no candidate (CHK-423)
+        if (is_open(taking.type) || taking.type == error_type)
             return cc::nullopt;
         auto const length = chain_of(file, taking, arguments, i);
         if (!length.has_value())

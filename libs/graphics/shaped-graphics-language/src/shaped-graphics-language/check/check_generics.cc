@@ -45,6 +45,8 @@ bool checker::is_open(type_id type) const
         return is_valid(t.count_parameter) || is_open(t.element);
     case type_kind::image:
         return is_valid(t.count_parameter);
+    case type_kind::scalar_of:
+        return is_open(t.element);
     case type_kind::function:
     {
         if (is_open(t.element))
@@ -81,6 +83,7 @@ void checker::collect_type_parameters(type_id type, cc::vector<type_id>& into) c
     }
     if (t.kind == type_kind::array || t.kind == type_kind::image)
         collect_type_parameters(t.count_parameter, into);
+    // `scalar_of[V]` names `V`, whose element is how it is collected below
     collect_type_parameters(t.element, into);
 }
 
@@ -220,6 +223,9 @@ type_id checker::substitute(type_id type, cc::span<type_id const> bindings)
             return array_type(element, out.at(count).count);
         return symbolic_array_type(element, is_valid(count) ? count : t.count_parameter);
     }
+    case type_kind::scalar_of:
+        // CHK-423: the scalar of what `V` stands for, or the error type where that is no vector
+        return scalar_of_type(substitute(t.element, bindings));
     case type_kind::image:
     {
         // CHK-339: `image_2d[f]` with `f` bound to a case is the image of that format
@@ -267,6 +273,11 @@ type_id checker::substitute_existing(type_id type, cc::span<type_id const> bindi
                 return type_id::none;
         }
         return existing_instance(t.is_template ? type : t.generic, arguments);
+    }
+    case type_kind::scalar_of:
+    {
+        auto const of = substitute_existing(t.element, bindings);
+        return !is_valid(of) || is_open(of) ? type_id::none : scalar_of_closed(of);
     }
     case type_kind::array:
     {
@@ -707,4 +718,58 @@ i32 checker::enum_case_argument(i32 file, ast::expr_id expr, type_id enumeration
         return -1;
     auto const& c = out.constants[out.at(found->front()).info];
     return c.kind == constant_kind::enum_case && c.type == enumeration ? c.case_index : -1;
+}
+
+type_id checker::scalar_of_closed(type_id of) const
+{
+    if (!is_valid(of) || of == checked_module::error_type)
+        return checked_module::error_type;
+    // a builtin of more than one leaf is a vector or a matrix, whose leaves are its scalar
+    if (auto const* const record = out.builtin_type_of(of))
+    {
+        if (record->leaf_count <= 1)
+            return checked_module::error_type;
+        switch (record->leaf_kind)
+        {
+        case value_kind::scalar_float:
+            return prelude_type("float");
+        case value_kind::scalar_half:
+            return prelude_type("half");
+        case value_kind::scalar_int:
+            return prelude_type("int");
+        case value_kind::scalar_uint:
+            return prelude_type("uint");
+        case value_kind::scalar_short:
+            return prelude_type("short");
+        case value_kind::scalar_ushort:
+            return prelude_type("ushort");
+        case value_kind::boolean:
+            return prelude_type("bool");
+        default:
+            return checked_module::error_type;
+        }
+    }
+    // a `@swizzle` struct of one scalar, `vec3` among them, is a vector of it
+    auto const& t = out.at(of);
+    if (t.kind != type_kind::structure || !t.has_swizzles || t.members.count == 0)
+        return checked_module::error_type;
+    auto const members = out.at(t.members);
+    for (auto const& m : members)
+        if (m.type != members[0].type)
+            return checked_module::error_type;
+    auto const* const scalar = out.builtin_type_of(members[0].type);
+    return scalar != nullptr && scalar->leaf_count == 1 ? members[0].type : checked_module::error_type;
+}
+
+type_id checker::scalar_of_type(type_id of)
+{
+    if (!is_open(of))
+        return scalar_of_closed(of);
+    for (auto i = isize(0); i < out.types.size(); ++i)
+        if (out.types[i].kind == type_kind::scalar_of && out.types[i].element == of)
+            return type_id(i);
+    auto const id = type_id(out.types.size());
+    out.types.push_back(
+        {.kind = type_kind::scalar_of, .element = of, .spelled = cc::format("scalar_of[{}]", out.name_of(of))});
+    return id;
 }

@@ -928,6 +928,11 @@ struct checker
     [[nodiscard]] i32 existing_function_instance(symbol_id function, cc::span<type_id const> bindings) const;
     /// The constant `bits` of `element`, interned, which a value parameter stands for in an instance (CHK-338).
     [[nodiscard]] type_id constant_type(type_id element, u32 bits);
+    /// CHK-423: `scalar_of[of]`, the scalar of a vector or a matrix type: open while `of` is, interned; the error type
+    /// for a type that has none, which nothing reports here.
+    [[nodiscard]] type_id scalar_of_type(type_id of);
+    /// `scalar_of_type` of a closed `of`, which interns nothing.
+    [[nodiscard]] type_id scalar_of_closed(type_id of) const;
     /// One of a generic function's or struct's parameters: a type parameter, or a value parameter `n: int` (CHK-338).
     [[nodiscard]] type_id declare_type_parameter(i32 file, ast::field const& p, symbol_id owner, bool& is_failed);
     /// A generic argument a call states: a type, or the constant a value expression evaluates to (CHK-340).
