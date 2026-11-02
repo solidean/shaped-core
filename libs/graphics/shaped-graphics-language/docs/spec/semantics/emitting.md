@@ -455,9 +455,11 @@ So `{float3; float}` is written with `packed_float3`: the `float` is at byte 12 
   * The raygen is a `kernel`, which takes the argument buffers, sg's tables at `[[buffer(3)]]` and each instance's hit-group offset at `[[buffer(5)]]`.
   * A miss, a closest hit and a callable are `[[visible]]` functions of one signature: the payload as `uint4` words, a hit record but for a callable, and an `sgl_context`.
     The context carries the argument buffers, the inline constants, the tables and the launch, and the function binds each to a local.
-  * An any hit is an `[[intersection(triangle, triangle_data, instancing, world_space_data)]]` function that answers whether it accepts, and writes the payload back into the ray data.
-    `accept_and_end_search` is `accept` there.
+  * An any hit is an `[[intersection(triangle, triangle_data, instancing, world_space_data)]]` function.
+    It answers whether it accepts and whether the search goes on, and writes the payload back into the ray data.
+    `accept_and_end_search` accepts and ends the search through `[[continue_search]]`.
   * A procedural record is its traversal entry point (CHK-345), an `[[intersection(bounding_box, triangle_data, instancing, world_space_data)]]` function.
+    Where its fused any hit decides `accept_and_end_search`, its result ends the search the same way.
   * A trace is the kernel's own `intersector`, configured from the ray flags, then the miss or the closest hit through the tables.
     The closest hit's record is the instance's offset plus the geometry index times the multiplier plus the contribution, as DXR finds it.
   * The ray data holds as many words as the largest payload of the set, so every shader of a pipeline agrees on it.

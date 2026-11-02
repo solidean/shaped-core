@@ -1320,7 +1320,7 @@ struct writer
                     auto const decision = p.names.mint("decision");
                     line(cc::format("const int {} = {};", decision, expr(r.value, true).text));
                     write_back();
-                    line(cc::format("return {} != 1;", decision));
+                    line(cc::format("return {{{0} != 1, {0} != 2}};", decision));
                     return;
                 }
                 if (is_msl && p.e.entry_stage == check::stage::intersection)
@@ -1333,9 +1333,12 @@ struct writer
                     line("{");
                     line(cc::format("    *reinterpret_cast<ray_data {}*>(sgl_data.attributes) = {}.{};",
                                     type_text(p, d, p.m.at(type).element), reported, member_of(type, "attributes")));
-                    line(cc::format("    return {{true, {}.{}}};", reported, member_of(type, "t")));
+                    auto const continues = check::is_valid(p.e.ends_search)
+                                             ? cc::format("!{}", p.locals[index_of(p.e.ends_search)])
+                                             : cc::string("true");
+                    line(cc::format("    return {{true, {}.{}, {}}};", reported, member_of(type, "t"), continues));
                     line("}");
-                    line("return {false, 0.0f};");
+                    line("return {false, 0.0f, true};");
                     return;
                 }
                 // EMIT-136: an any hit's decision is the target's call that ends the stage, and a plain return

@@ -717,6 +717,9 @@ struct sgl::check::flat_entry_point
     /// A procedural hit's attributes, which the target hands a closest or any hit as a parameter of its own; `none`
     /// for every other entry point.
     local_id attributes = local_id::none;
+    /// Set where a metal traversal's fused any hit decided `accept_and_end_search`, which the traversal's result then
+    /// says (CHK-345); `none` for every other entry point.
+    local_id ends_search = local_id::none;
 
     cc::vector<flat_local> locals;
     cc::vector<flat_label> labels;

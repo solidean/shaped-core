@@ -463,9 +463,14 @@ public:
                     "    sgl_context context;\n"
                     "}};\n\n",
                     payload_size);
+        out += "struct sgl_triangle_result\n{\n"
+               "    bool accept [[accept_intersection]];\n"
+               "    bool continue_search [[continue_search]];\n"
+               "};\n\n";
         out += "struct sgl_box_result\n{\n"
                "    bool accept [[accept_intersection]];\n"
                "    float distance [[distance]];\n"
+               "    bool continue_search [[continue_search]];\n"
                "};\n\n";
         out += "using sgl_hit_function = void(thread uint4*, thread sgl_hit_record const&, thread sgl_context "
                "const&);\n"
@@ -563,7 +568,7 @@ public:
             auto const is_triangle = stage_of == stage::any_hit;
             out.appendf("[[intersection({}, triangle_data, instancing, world_space_data)]]\n",
                         is_triangle ? "triangle" : "bounding_box");
-            out.appendf("{} {}(", is_triangle ? "bool" : "sgl_box_result", p.entry_name);
+            out.appendf("{} {}(", is_triangle ? "sgl_triangle_result" : "sgl_box_result", p.entry_name);
             if (is_triangle)
                 out += "float sgl_distance [[distance]], float2 sgl_barycentrics [[barycentric_coord]], "
                        "bool sgl_front [[front_facing]], ";

@@ -73,7 +73,8 @@ TEST("sgl emit msl - every stage of sg's ray-tracing pipeline writes, and all ag
               .contains("[[visible]] void sky(thread uint4* sgl_payload, thread sgl_hit_record const& "
                         "sgl_hit, thread sgl_context const& sgl_ctx)\n"));
     CHECK(text_of(stages, "cutout")
-              .contains("[[intersection(triangle, triangle_data, instancing, world_space_data)]]\nbool cutout("));
+              .contains("[[intersection(triangle, triangle_data, instancing, world_space_data)]]\nsgl_triangle_result "
+                        "cutout("));
     CHECK(text_of(stages, "sgl_spheres_surface")
               .contains("[[intersection(bounding_box, triangle_data, instancing, world_space_data)]]\nsgl_box_result "
                         "sgl_spheres_surface("));

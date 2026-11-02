@@ -959,3 +959,75 @@ ASYNC_INVOCABLE_TEST("sg - an SGL ray-tracing pipeline's closest hit and any hit
             CHECK(near(got[at + 2], origin)).context(where).dump("got", got[at + 2]);
         }
 }
+
+ASYNC_INVOCABLE_TEST("sg - an SGL any hit's accept_and_end_search stops the traversal at that candidate",
+                     (sg::context_handle const& ctx))
+{
+    REQUIRE(ctx != nullptr);
+    if (!sg_test::shaders_reach(*ctx))
+        SKIP("no compiler builds this binary's shaders into a format this context accepts");
+    if (!ctx->supports(sg::feature::raytracing_pipeline))
+        SKIP("this device has no ray-tracing pipelines");
+
+    using layered_t = shaders::raytracing_end_search::layered_path_t;
+    auto const pipeline = co_await ctx->cached.acquire_raytracing_pipeline(
+        co_await shaders::raytracing_end_search::layered_path.description(*ctx));
+    REQUIRE(pipeline != nullptr);
+    auto table_desc = layered_t::table_description(pipeline);
+    auto const triangle_row = layered_t::add_row(table_desc, layered_t::hit_groups_t::layered_triangles);
+    auto const slab_row = layered_t::add_row(table_desc, layered_t::hit_groups_t::layered_slabs);
+    auto const table = ctx->uncached.create_raytracing_shader_table(table_desc);
+    REQUIRE(table != nullptr);
+
+    // eight non-opaque layers on each ray, stored far to near, so a search that goes on meets more than one
+    constexpr auto layer_count = 8;
+    auto vertices = cc::vector<float>();
+    auto boxes = cc::vector<float>();
+    for (auto k = 0; k < layer_count; ++k)
+    {
+        auto const z = float(layer_count - 1 - k);
+        for (auto const v : {0.f, 0.f, z, 4.f, 0.f, z, 0.f, 4.f, z})
+            vertices.push_back(v);
+        auto const near = 14.f - 2.f * float(k);
+        for (auto const v : {4.f, 0.f, near, 8.f, 2.f, near + 1})
+            boxes.push_back(v);
+    }
+    auto const triangle_input
+        = ctx->persistent.create_buffer_from_data(cc::move(vertices), sg::buffer_usage::accel_structure_build_input);
+    auto const box_input
+        = ctx->persistent.create_buffer_from_data(cc::move(boxes), sg::buffer_usage::accel_structure_build_input);
+    auto const seen = ctx->persistent.create_buffer_from_data(
+        cc::vector<tg::vec4i>::create_defaulted(2), sg::buffer_usage::readwrite_buffer | sg::buffer_usage::copy_src);
+
+    auto cmd = ctx->create_command_list();
+    auto const triangles
+        = sg::blas_triangles{.vertices = triangle_input.raw(), .vertex_count = 3 * layer_count, .is_opaque = false};
+    auto const triangle_blas = cmd->raytracing.build_blas(cc::span<sg::blas_triangles const>(&triangles, 1),
+                                                          sg::accel_build_flag::fast_trace, layered_t::ray_count);
+    auto const aabbs = sg::blas_aabbs{.aabbs = box_input.raw(), .aabb_count = layer_count, .is_opaque = false};
+    auto const box_blas = cmd->raytracing.build_blas(cc::span<sg::blas_aabbs const>(&aabbs, 1),
+                                                     sg::accel_build_flag::fast_trace, layered_t::ray_count);
+    sg::tlas_instance const instances[] = {
+        {.blas = triangle_blas, .instance_id = 1, .hit_group_offset = table->offset_of(triangle_row)},
+        {.blas = box_blas, .instance_id = 2, .hit_group_offset = table->offset_of(slab_row)},
+    };
+    auto const tlas = cmd->raytracing.build_tlas(instances);
+
+    auto const layout = ctx->cached.acquire_binding_group_layout<shaders::raytracing_end_search::layered>();
+    auto const group = ctx->transient.create_binding_group(
+        *cmd, layout,
+        shaders::raytracing_end_search::layered{.world = tlas->as_view(), .seen = seen.as_readwrite_buffer()});
+    cmd->raytracing.bind_pipeline(*pipeline);
+    cmd->raytracing.bind_group(0, *group);
+    cmd->raytracing.dispatch_rays(*table, sg::raygen_index(0), 2, 1);
+    auto const seen_back = cmd->download.data_from_buffer(seen);
+    ctx->submit_command_list(cc::move(cmd));
+
+    auto const got = co_await seen_back.data();
+    REQUIRE(got.size() == 2);
+    // one any hit, and the closest hit of what it accepted
+    CHECK(got[0][0] == 1).context("triangles");
+    CHECK(got[0][1] == 1).context("triangles");
+    CHECK(got[1][0] == 1).context("boxes");
+    CHECK(got[1][1] == 2).context("boxes");
+}
