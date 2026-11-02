@@ -311,6 +311,7 @@ class stat_totals;                              // a context's running stat tota
 class gpu_wait_scope;                           // times a CPU wait on the GPU into gpu_wait_nanoseconds
 struct slot_use;                                // how a pipeline's code touches one binding slot (barrier/footprint.hh)
 class pipeline_footprint;                       // a pipeline's footprint, resolved against its layout
+class debug_windows;                            // what shaders write print and assert records into
 struct view_access;                             // the access and stages a bound view is declared with at an op
 struct array_declarations;                      // what a dispatch's declarations say about one bound array
 struct array_plan;                              // how a dispatch tracks one bound array, given its declarations

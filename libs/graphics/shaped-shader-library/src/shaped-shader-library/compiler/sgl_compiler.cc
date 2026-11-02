@@ -170,8 +170,13 @@ static_assert(
 class sgl_shader_compiler final : public slib::shader_compiler
 {
 public:
-    sgl_shader_compiler(std::unique_ptr<slib::shader_compiler> inner, cc::optional<bcache::blob_cache*> persistent_cache)
-      : _inner(cc::move(inner)), _target(target_of(_inner->target_format())), _persistent_cache(persistent_cache)
+    sgl_shader_compiler(std::unique_ptr<slib::shader_compiler> inner,
+                        cc::optional<bcache::blob_cache*> persistent_cache,
+                        bool diagnostics)
+      : _inner(cc::move(inner)),
+        _target(target_of(_inner->target_format())),
+        _persistent_cache(persistent_cache),
+        _diagnostics(diagnostics)
     {
     }
 
@@ -215,6 +220,7 @@ private:
         b.add_pod(desc.stage);
         b.add_string(desc.label);
         b.add_pod(_target);
+        b.add_pod(_diagnostics);
         b.add_pod(i64(desc.options.size()));
         for (auto const& o : desc.options)
         {
@@ -289,7 +295,8 @@ private:
              .target = _target,
              .options = options,
              // EMIT-182: DXC's and Metal's messages, and PIX's and Xcode's source view, name the SGL line
-             .line_directives = true});
+             .line_directives = true,
+             .diagnostics = _diagnostics});
         if (text.has_error())
             return cc::error(cc::format("SGL reported errors:\n{}", text.error()));
         auto const& emitted = text.value();
@@ -373,6 +380,7 @@ private:
     sgl::emit::target _target;
     /// As `sgl_compiler_options` holds it, resolved at each compile so the default follows whatever is installed then.
     cc::optional<bcache::blob_cache*> _persistent_cache = {};
+    bool _diagnostics = false;
 };
 } // namespace
 
@@ -398,5 +406,5 @@ std::unique_ptr<slib::shader_compiler> slib::create_sgl_compiler(std::unique_ptr
                                                                  sgl_compiler_options const& options)
 {
     CC_ASSERT(inner != nullptr, "an SGL compiler needs the compiler that builds its text");
-    return std::make_unique<sgl_shader_compiler>(cc::move(inner), options.persistent_cache);
+    return std::make_unique<sgl_shader_compiler>(cc::move(inner), options.persistent_cache, options.diagnostics);
 }
