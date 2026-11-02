@@ -435,6 +435,78 @@ ASYNC_INVOCABLE_TEST("sv::hybrid_routine - a glass pane thinner than a millimete
     co_await cc::async_settled(sv::background_work(ctx));
 }
 
+// A mirror floor near y = 0, seen from a camera tens of units from the origin, reflects the sky the same forward and deferred.
+// The deferred kernel rebuilds its point from the camera, rounded to the camera's distance from the origin rather than to the point's coordinates.
+// Offset only as an interpolated point is, rows of it started under the floor, and their reflections hit the floor in dark stripes.
+ASYNC_INVOCABLE_TEST("sv::hybrid_routine - a mirror floor near the origin, seen from far off it, reflects the sky the "
+                     "same forward and deferred",
+                     (sg::context_handle const& ctx_h))
+{
+#if defined(CC_ARCH_ARM64) && defined(_WIN32)
+    SKIP("known broken on Windows on ARM — the inline readback path fastfails; "
+         "issue: bug-sv-woa-inline-readback-fastfail");
+#endif
+    auto& ctx = *ctx_h;
+    if (!sv_test::can_run(ctx) || !ctx.supports(sg::feature::ray_query))
+        SKIP("no inline ray tracing or no SGL compiler, so the hybrid does not build");
+
+    using binding = sv::material_attribute_binding;
+    auto& lib = sv_test::shared_material_library();
+    auto const openpbr = lib.acquire_type(sv::builtin_material::openpbr).value();
+    auto bindings = cc::vector<binding>();
+    bindings.push_back(binding::of("base_color", tg::vec3f(0, 0, 0)));
+    bindings.push_back(binding::of("specular_ior", 1.5f));
+    bindings.push_back(binding::of("specular_roughness", 0.0f));
+
+    auto const y = 0.11f;
+    tg::pos3f const corners[] = {tg::pos3f(0, y, -10), tg::pos3f(0, y, 40), tg::pos3f(60, y, 40), tg::pos3f(60, y, -10)};
+    auto positions = cc::vector<tg::pos3f>();
+    for (auto const i : {0, 1, 2, 0, 2, 3})
+        positions.push_back(corners[i]);
+
+    auto resources = sv::gpu_resource_manager::create(ctx);
+    auto const item = resources.acquire_scene_item(
+        sv::mesh{.name = "hybrid mirror floor",
+                 .geometry = sv::triangle_geometry::create_from_positions(positions),
+                 .material = lib.acquire(sv::material::create("hybrid mirror floor", openpbr, cc::move(bindings)))});
+    resources.wait_for_pending_uploads();
+
+    auto cam = sv::camera::looking_at(tg::pos3d(30, 15, -30), tg::pos3d(30, 0.11, 10));
+    cam.projection.vertical_fov = tg::angle_d::make_from_degree(60.0);
+    auto const lights = sv_test::light_table_of(
+        {.center = tg::vec3f(0, 50, 0), .half_x = 0.1f, .half_z = 0.1f, .emission = tg::vec3f(0, 0, 0)});
+    auto const sky = sv::background::uniform(tg::vec3f(0.5f, 0.5f, 0.5f));
+
+    constexpr auto size = tg::vec2i(96, 96);
+    auto const forward
+        = co_await draw_hybrid(ctx, resources, item, cam, lights, size, sv::hybrid_lighting::forward, 4, sky);
+    auto const deferred
+        = co_await draw_hybrid(ctx, resources, item, cam, lights, size, sv::hybrid_lighting::deferred, 4, sky);
+
+    auto floor = 0;
+    auto off = 0;
+    auto worst = 0.0f;
+    for (auto i = isize(0); i < forward.color.size(); ++i)
+    {
+        auto const n = forward.normal[i];
+        if (f32(n.r) == 0.0f && f32(n.g) == 0.0f && f32(n.b) == 0.0f)
+            continue;
+        ++floor;
+        auto const lum = [](tg::vec4f c) { return 0.2126f * c[0] + 0.7152f * c[1] + 0.0722f * c[2]; };
+        auto const f = lum(forward.color[i]);
+        auto const d = lum(deferred.color[i]);
+        auto const miss = tg::abs(d - f) / cc::max(f, 1e-3f);
+        worst = cc::max(worst, miss);
+        if (miss > 0.05f)
+            ++off;
+    }
+    CC_LOG_INFO("a mirror floor near the origin: {} of {} pixels off by more than 5% deferred, the worst by {}", off,
+                floor, worst);
+    REQUIRE(floor > size[0] * size[1] / 4);
+    CHECK(off == 0).dump("floor pixels", floor).dump("worst relative miss", worst);
+    co_await cc::async_settled(sv::background_work(ctx));
+}
+
 // The hybrid as a view's layer: each lighting accumulates its frames until a capture's sample target, as a traced layer does.
 // The last case denoises too, through the guides the hybrid's G-buffer writes.
 ASYNC_INVOCABLE_TEST("sv - a hybrid layer accumulates to a capture's target, forward and deferred",
