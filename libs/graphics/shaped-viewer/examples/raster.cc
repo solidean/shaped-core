@@ -198,16 +198,16 @@ EXAMPLE("shaped-viewer/raster")
             scene.add_directional_light("sun", sun_direction).lux(1.5f);
             scene.settings(settings);
 
-            // Seen from above, the floor's normal is +y, so the marking projects down: y_axis x x_axis is -y.
+            // Seen from above, the floor's normal is +y, so the marking projects down: x_axis x y_axis is -y.
             scene.add_decal(marking, {.at = tg::pos3f(0, 0, -1.0f),
                                       .x_axis = tg::vec3f(1, 0, 0),
-                                      .y_axis = tg::vec3f(0, 0, -1),
+                                      .y_axis = tg::vec3f(0, 0, 1),
                                       .scale = 1,
                                       .depth = 0.3f});
 
             // A label lying on the crate's lid: a drawing over the image, occluded by the image's own primary depth.
             scene.add_text(
-                id, {.at = tg::pos3f(1.92f, 1.005f, 1.95f), .x_axis = tg::vec3f(1, 0, 0), .y_axis = tg::vec3f(0, 0, -1)},
+                id, {.at = tg::pos3f(1.92f, 1.005f, 1.65f), .x_axis = tg::vec3f(1, 0, 0), .y_axis = tg::vec3f(0, 0, 1)},
                 {.size = 0.24f, .color = tg::vec4f(1, 1, 1, 1)});
         };
 

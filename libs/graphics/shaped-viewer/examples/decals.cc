@@ -102,18 +102,18 @@ EXAMPLE("shaped-viewer/decals")
         scene.add_rect_light("key", tg::pos3f(-2.5f, 4.5f, 3), tg::vec3f(0.6f, 0, 0), tg::vec3f(0, 0, 0.6f)).nits(150.0f);
         scene.background(sv::background::gradient(tg::vec3f(0.30f, 0.40f, 0.60f), tg::vec3f(0.08f, 0.10f, 0.13f)));
 
-        // Straight down from above the ball, 2.4 units square: x along +x and y along -z, read from above, so the
-        // projection runs along y cross x, -y; its reach takes in the whole ball and the floor under it.
-        scene.add_decal(plate, {.at = tg::pos3f(-1.1f - 1.2f, 2, 0.2f + 1.2f),
+        // Straight down from above the ball, 2.4 units square: x along +x and y along +z, read from above, so the
+        // projection runs along x cross y, -y; its reach takes in the whole ball and the floor under it.
+        scene.add_decal(plate, {.at = tg::pos3f(-1.1f - 1.2f, 2, 0.2f - 1.2f),
                                 .x_axis = tg::vec3f(1, 0, 0),
-                                .y_axis = tg::vec3f(0, 0, -1),
+                                .y_axis = tg::vec3f(0, 0, 1),
                                 .scale = 2.4f,
                                 .depth = 2.2f});
 
-        // Onto the cube's near face, overhanging it: x along +x and y down, read from the camera's side, so the projection
-        // runs along +z.
-        scene.add_decal(rings, {.at = tg::pos3f(1.1f - 0.8f, 0.7f + 0.8f, -0.5f),
-                                .x_axis = tg::vec3f(1, 0, 0),
+        // Onto the cube's near face, overhanging it: x along -x, the camera's right as it looks along +z, and y down,
+        // read from the camera's side, so the projection runs along +z.
+        scene.add_decal(rings, {.at = tg::pos3f(1.1f + 0.8f, 0.7f + 0.8f, -0.5f),
+                                .x_axis = tg::vec3f(-1, 0, 0),
                                 .y_axis = tg::vec3f(0, -1, 0),
                                 .scale = 1.6f,
                                 .depth = 0.3f});
