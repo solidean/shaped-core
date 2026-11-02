@@ -48,8 +48,9 @@ ASYNC_INVOCABLE_TEST("sv - a view stepping sideways in front of a wall reports t
     constexpr auto depth = 5.0;
     constexpr auto step = 0.01;
     auto const fov = tg::angle_d::make_from_degree(60.0);
-    // The previous camera stood to the LEFT, so the wall sat further right on its image, and this pixel minus that one is negative.
-    auto const expected = -step * (0.5 * f64(size[1]) / tg::tan(fov * 0.5)) / depth;
+    // The camera looks along +z, so a step toward +x is a step to its left.
+    // The previous camera stood to the RIGHT, so the wall sat further left on its image, and this pixel minus that one is positive.
+    auto const expected = step * (0.5 * f64(size[1]) / tg::tan(fov * 0.5)) / depth;
 
     auto const output
         = ctx.persistent.create_texture_2d({.format = sg::pixel_format::bgra8_unorm,
