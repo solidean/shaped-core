@@ -71,6 +71,9 @@ using bigfloat = bigfloat_sbo<2>;
 /// one summand of bigfloat_sbo<K>::msum, a or a * b (see scalar/bigfloat/bigfloat.hh).
 struct bigfloat_summand;
 
+/// an arbitrary-precision integer, sign and magnitude, one pointer wide (see scalar/bigint/bigint.hh).
+struct bigint;
+
 /// a quotient with its remainder, from one long division (see scalar/fixed_int/fixed_arith.hh).
 template <class T>
 struct div_mod_result;

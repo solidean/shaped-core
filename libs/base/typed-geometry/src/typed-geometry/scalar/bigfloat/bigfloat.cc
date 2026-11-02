@@ -2,6 +2,7 @@
 #include <clean-core/math/wide_arith.hh>
 #include <typed-geometry/scalar/bigfloat/bigfloat.hh>
 #include <typed-geometry/scalar/fixed_int/fixed_int.hh>
+#include <typed-geometry/scalar/impl/limbs.hh>
 #include <typed-geometry/scalar/scalar.hh>
 
 namespace
@@ -47,23 +48,10 @@ struct shifted
     return i32(e);
 }
 
-/// out[0, a.size + b.size) = |a| * |b|, untrimmed; out overlaps neither operand.
+/// out[0, a.size + b.size) = |a| * |b|, untrimmed; both nonzero, and out overlaps neither.
 void mul_limbs(u64* out, bigfloat_view a, bigfloat_view b)
 {
-    for (auto i = 0; i < a.size + b.size; ++i)
-        out[i] = 0;
-    for (auto i = 0; i < a.size; ++i)
-    {
-        u64 carry = 0;
-        auto const ai = a.limbs[i];
-        for (auto j = 0; j < b.size; ++j)
-        {
-            auto const p = tg::impl::mul_add(out[i + j], ai, b.limbs[j], carry);
-            out[i + j] = p.lo;
-            carry = p.hi;
-        }
-        out[i + b.size] = carry;
-    }
+    tg::impl::limbs_mul(out, a.limbs, a.size, b.limbs, b.size);
 }
 
 /// limbs[0, n) negated in two's complement.

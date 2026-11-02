@@ -7,6 +7,8 @@ add_library(typed-geometry
     src/typed-geometry/typed-geometry.cc
     src/typed-geometry/scalar/half_float.cc
     src/typed-geometry/scalar/bigfloat/bigfloat.cc
+    src/typed-geometry/scalar/bigint/bigint.cc
+    src/typed-geometry/scalar/limbs.cc
 )
 
 # Public headers live co-located in src/ for better editor experience.
@@ -40,6 +42,8 @@ target_sources(typed-geometry
     src/typed-geometry/scalar/fixed_int/fixed_arith.hh
     src/typed-geometry/scalar/bigfloat/impl/kernels.hh
     src/typed-geometry/scalar/bigfloat/bigfloat.hh
+    src/typed-geometry/scalar/impl/limbs.hh
+    src/typed-geometry/scalar/bigint/bigint.hh
 
     src/typed-geometry/linalg/fwd.hh
     src/typed-geometry/linalg/comp.hh
@@ -186,6 +190,7 @@ if(SC_BUILD_TESTS)
         tests/scalar/fixed_int-test.cc
         tests/scalar/fixed_int-golden.gen.cc
         tests/scalar/bigfloat-test.cc
+        tests/scalar/bigint-test.cc
 
         tests/benchmarks/fixed_int-benchmark.cc
         tests/benchmarks/bigfloat-benchmark.cc

@@ -151,6 +151,28 @@ It needs integers of a chosen width, and arithmetic whose result width the calle
   The tests use that as their oracle: an exact sum, product or fma rounded once must equal the hardware's.
 - **Rounding is not supported yet.** When it comes, it is a set of operations that take a precision, over this representation.
 
+### `bigint` is an integer one pointer wide
+
+`tg::bigint` is an arbitrary-precision integer, in sign and magnitude, for values of a few hundred bits that no width can be claimed for in advance.
+It is the base a rational type will build on.
+
+- **Sign and magnitude, not two's complement.** A product multiplies magnitudes and XORs signs, where two's complement needs corrections or a sign-extended double width.
+  Sign, negation and absolute value read or flip the header alone, and a varying length needs no sign extension.
+  The cost is a magnitude comparison when a sum's signs differ, which the sizes or the top limbs almost always decide.
+- **One pointer, to a node of cc's node allocator.** The node starts with a header word: the limbs in use, the node class, the sign, and 16 bits held back.
+  The limbs follow, so the classes of 16 to 256 bytes hold 1, 3, 7, 15 and 31 limbs, and a 64-byte node is a cache line holding 448 bits.
+  Zero is the null pointer, so it allocates nothing, and a moved-from value is zero.
+- **A node is reused while it holds the result.** Every `assign_*` writes into the target's node when it is large enough, and an operand may be the target.
+  The limbs past the size are left as they are, so a smaller result costs nothing to shrink to.
+  The operators take an rvalue operand's node for their result, so `a * b - c * d` allocates once per product.
+- **One-limb `+ - *` are inline, and everything else is one call.** At one limb the call and its register saves cost more than the arithmetic.
+  The kernels under the call are inline in it, apart from the multiply, whose operands up to 4 × 4 limbs take fully unrolled column products.
+- **The limb kernels are shared with `bigfloat`.** `scalar/impl/limbs.hh` holds natural numbers as limb arrays; `bigfloat` keeps its own sum, since its operands are aligned at an exponent first.
+- **Division is Knuth's Algorithm D**, ported from `fixed_int`'s, truncating like the builtins; `>>` floors, like an arithmetic shift.
+- **Measured against GMP 6.3, its generic C build, in instructions retired on a Zen 5.**
+  An orient3d over 50-bit integers retires about 1,600 with results reused against GMP's 2,400; a one-limb add about 50 against 115.
+  From two limbs up, a call retires 20–50% more than GMP's, and past 256 bytes an operator's fresh result takes the slow large-allocation path.
+
 ### `half_float` is binary16, correctly rounded
 
 `tg::half_float`, spelled `tg::f16`, is IEEE 754 binary16: a struct over its 16 bits, the same type on every compiler.
