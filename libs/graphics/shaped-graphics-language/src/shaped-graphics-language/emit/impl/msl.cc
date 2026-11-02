@@ -47,6 +47,7 @@ public:
     bool has_struct_constructor() const override { return false; }
 
     bool is_c_like() const override { return true; }
+    bool has_line_directives() const override { return true; }
     /// MSL's is a function; whether it terminates or demotes the pixel is for the metal backend's tests to pin.
     [[nodiscard]] cc::string_view discard_statement() const override { return "discard_fragment();"; }
     [[nodiscard]] bool fences_image_stores() const override { return true; }

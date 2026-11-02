@@ -4,6 +4,7 @@
 #include <clean-core/container/vector.hh>
 #include <clean-core/string/string.hh>
 #include <clean-core/string/string_view.hh>
+#include <shaped-graphics-language/check/check.hh>
 #include <shaped-graphics-language/check/checked_module.hh>
 
 /// The text a graphics API compiles, written from one flat entry point of a checked module.
@@ -106,6 +107,43 @@ struct sgl::emit::emitted_layout
     }
 };
 
+/// A line of an SGL source: a position in `checked_module::files`, and the line there, counted from 1.
+struct sgl::emit::source_line
+{
+    /// -1 for no line at all.
+    i32 file = -1;
+    i32 line = 0;
+
+    constexpr bool operator==(source_line const&) const = default;
+};
+
+/// Where one line of the text came from (EMIT-181).
+struct sgl::emit::line_origin
+{
+    /// The line of the text, counted from 1.
+    i32 emitted = 0;
+    /// The innermost source line outside the prelude: a prelude function's body maps to the line that called it.
+    source_line at;
+    /// The calls `at` was inlined through, innermost first, the prelude's left out; empty for the entry point's own body.
+    cc::vector<source_line> inlined_from;
+
+    bool operator==(line_origin const& rhs) const
+    {
+        return emitted == rhs.emitted && at == rhs.at && ast::impl::is_equal(inlined_from, rhs.inlined_from);
+    }
+};
+
+/// The files a line table and `#line` read their lines from; the default writes neither.
+struct sgl::emit::line_sources
+{
+    /// Parallel to `checked_module::files`, as the check pass took them.
+    cc::span<check::module_file const> files;
+    /// Parallel to `files`: what a `#line` calls each one.
+    cc::span<cc::string_view const> names;
+    /// Writes `#line` where the target has it, and a comment where the inlined calls change (EMIT-182).
+    bool write_directives = false;
+};
+
 /// Either the text or the reasons there is none.
 struct sgl::emit::emitted_text
 {
@@ -122,6 +160,8 @@ struct sgl::emit::emitted_text
     cc::string target_struct;
     /// Every constant block and buffer element the text declares, as it declares them.
     cc::vector<emitted_layout> layouts;
+    /// A line of the function body per entry, in text order; empty unless the emit was given its `line_sources`.
+    cc::vector<line_origin> lines;
     cc::vector<error> errors;
 
     [[nodiscard]] bool has_text() const { return errors.empty(); }
@@ -130,7 +170,8 @@ struct sgl::emit::emitted_text
     {
         return text == rhs.text && entry_point == rhs.entry_point && ast::impl::is_equal(bound_names, rhs.bound_names)
             && color_targets == rhs.color_targets && target_struct == rhs.target_struct
-            && ast::impl::is_equal(layouts, rhs.layouts) && ast::impl::is_equal(errors, rhs.errors);
+            && ast::impl::is_equal(layouts, rhs.layouts) && ast::impl::is_equal(lines, rhs.lines)
+            && ast::impl::is_equal(errors, rhs.errors);
     }
 };
 
@@ -160,11 +201,18 @@ namespace sgl::emit
 /// of differently.
 /// And `wgsl` refuses an entry point needing a feature WebGPU never has, which is portability the shader opted out of.
 /// Deterministic: equal arguments give equal text.
-[[nodiscard]] emitted_text emit(check::checked_module const& m, isize entry_point, target t);
+/// `sources` adds the line table, and the `#line` directives where it asks for them.
+[[nodiscard]] emitted_text emit(check::checked_module const& m,
+                                isize entry_point,
+                                target t,
+                                line_sources const& sources = {});
 
 /// The same for a flat tree that stands in `m` without being one of its entry points, such as a legalized one.
 /// `e` must be in the core form, or the result is the error `not-core`.
-[[nodiscard]] emitted_text emit_entry_point(check::checked_module const& m, check::flat_entry_point const& e, target t);
+[[nodiscard]] emitted_text emit_entry_point(check::checked_module const& m,
+                                            check::flat_entry_point const& e,
+                                            target t,
+                                            line_sources const& sources = {});
 
 /// One line per error, for tests and for reading by eye: `unsupported a print, which no target writes yet`.
 [[nodiscard]] cc::string dump_errors(emitted_text const& e);

@@ -287,7 +287,9 @@ private:
              .entry_point = desc.entry_point,
              .stage = stage,
              .target = _target,
-             .options = options});
+             .options = options,
+             // EMIT-182: DXC's and Metal's messages, and PIX's and Xcode's source view, name the SGL line
+             .line_directives = true});
         if (text.has_error())
             return cc::error(cc::format("SGL reported errors:\n{}", text.error()));
         auto const& emitted = text.value();

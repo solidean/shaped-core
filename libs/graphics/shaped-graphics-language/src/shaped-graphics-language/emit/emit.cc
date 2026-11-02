@@ -93,7 +93,10 @@ sgl::emit::impl::dialect const& sgl::emit::impl::dialect_of(target t)
     return hlsl_dx12_dialect();
 }
 
-sgl::emit::emitted_text sgl::emit::emit(check::checked_module const& m, sgl::isize entry_point, target t)
+sgl::emit::emitted_text sgl::emit::emit(check::checked_module const& m,
+                                        sgl::isize entry_point,
+                                        target t,
+                                        line_sources const& sources)
 {
     auto result = emitted_text();
 
@@ -114,12 +117,14 @@ sgl::emit::emitted_text sgl::emit::emit(check::checked_module const& m, sgl::isi
     }
 
     // WebGPU traces through the emulated form of a trace, and every other target through its native query
-    return emit_entry_point(m, check::legalize(m, m.entry_points[entry_point], {.is_emulated = t == target::wgsl}), t);
+    return emit_entry_point(m, check::legalize(m, m.entry_points[entry_point], {.is_emulated = t == target::wgsl}), t,
+                            sources);
 }
 
 sgl::emit::emitted_text sgl::emit::emit_entry_point(check::checked_module const& m,
                                                     check::flat_entry_point const& e,
-                                                    target t)
+                                                    target t,
+                                                    line_sources const& sources)
 {
     auto result = emitted_text();
     impl::validate(m, e, result.errors);
@@ -237,7 +242,9 @@ sgl::emit::emitted_text sgl::emit::emit_entry_point(check::checked_module const&
                 }
     if (!result.errors.empty())
         return result;
-    result.text = impl::write_text(plan, impl::dialect_of(t));
+    auto written = impl::write_text(plan, impl::dialect_of(t), sources);
+    result.text = cc::move(written.text);
+    result.lines = cc::move(written.lines);
     result.entry_point = plan.entry_name;
     if (plan.constants.has_value())
         result.bound_names.push_back({.emitted = plan.constants.value().name, .host = plan.constants.value().host_name});

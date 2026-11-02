@@ -30,6 +30,9 @@ struct sgl::text_request
     /// Runs the source's own tests after it checked, and makes a test that does not pass an error like any other.
     /// The tests run with every option at its default, whatever `options` says.
     bool run_tests = false;
+    /// Writes `#line` into HLSL and MSL, so their compilers and debuggers name the SGL line (EMIT-182).
+    /// The line table is written either way.
+    bool line_directives = false;
 };
 
 /// Every entry point of one SGL source, asked for as the text of each of `targets`.
@@ -100,6 +103,10 @@ struct sgl::emitted_source
     cc::vector<check::slot_footprint> footprint;
     /// Every constant block and buffer element as the text declares it, which a compiler reflecting the text reports.
     cc::vector<emit::emitted_layout> layouts;
+    /// Where each line of the function body came from, in text order (EMIT-181).
+    cc::vector<emit::line_origin> lines;
+    /// What each file a `line_origin` names is called, by its position.
+    cc::vector<cc::string> line_files;
     /// The names of the library files the source reached through `use`, which an edit of any of them changes the text of.
     cc::vector<cc::string> library_files;
     /// One entry per warning, `cube.sgl:12:5: warning: no-effect: ...` and its notes on the lines under it.

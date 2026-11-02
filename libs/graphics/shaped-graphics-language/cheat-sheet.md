@@ -29,13 +29,16 @@ r.value().footprint                        // check::slot_footprint per TOUCHED 
                                            // a member never named is absent — sg skips its barrier; see spec/bindings.md "Footprint"
 r.value().warnings                         // cc::vector<cc::string>, one per warning: `cube.sgl:7:14: warning: unroll-too-long: ...`
                                            // notes on the lines under it, no final line end; the whole source's, so every entry point's alike
+r.value().lines  .line_files               // emit::line_origin per body line: emitted (1-based), at {file, line}, inlined_from
+                                           // innermost first; the prelude's frames left out, so a builtin maps to its caller (EMIT-181)
 r.error()                                  // one line per diagnostic: `cube.sgl:12:5: error: unknown-name: foo`; errors alone, never a warning
 sgl::compile_all_to_text({.source = text, .source_name = "cube.sgl", .targets = sgl::emit::all_targets()});
                                            // -> cc::result<cc::vector<entry_text>, cc::string>: every entry point on every target
                                            // from ONE check; compile_to_text per entry point and target checks that many times
                                            // one inside the prelude names `builtins.sgl` or `core.sgl`
                                            // a missing entry point names the ones the source holds; a wrong stage says both
-sgl::text_request                          // source, source_name ("<sgl>"), library, entry_point, stage (none = any), target, options, run_tests
+sgl::text_request                          // source, source_name ("<sgl>"), library, entry_point, stage (none = any), target, options, run_tests,
+                                           // line_directives: `#line n "file"` in HLSL and MSL (EMIT-182); slib asks for them, `sgl emit` only with --line-directives
                                            // the entry point is found by NAME; source_name is never opened
                                            // run_tests: the source's own tests run, and one that fails is an error
                                            // options: check::option_value{name, value} per `@option const` set, value as SGL spells it:

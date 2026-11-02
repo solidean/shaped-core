@@ -53,6 +53,9 @@ public:
     /// False for WGSL: `if c {`, `loop {`, and a `once` that is `loop { … break; }`.
     [[nodiscard]] virtual bool is_c_like() const = 0;
 
+    /// True where the target's compiler reads `#line 12 "file.sgl"` (EMIT-182).
+    [[nodiscard]] virtual bool has_line_directives() const { return false; }
+
     /// True where `v.zy = value;` assigns through a swizzle; WGSL assigns one component at a time (EMIT-143).
     [[nodiscard]] virtual bool assigns_through_swizzles() const { return true; }
 
@@ -116,9 +119,17 @@ void write_helpers(cc::string& out, plan const& p, dialect const& d);
 /// Every resource of the entry point, handed to the dialect one binding at a time, and then its file-scope samplers.
 void write_buffers(cc::string& out, plan const& p, dialect const& d);
 
+/// The text of an entry point, and where each line of its function body came from.
+struct written_text
+{
+    cc::string text;
+    cc::vector<line_origin> lines;
+};
+
 /// The whole text of the planned entry point: a header comment, the declarations, and the function.
 /// Mints what the body still needs from `p.names`.
-[[nodiscard]] cc::string write_text(plan& p, dialect const& d);
+/// The line table is empty unless `sources` names the files.
+[[nodiscard]] written_text write_text(plan& p, dialect const& d, line_sources const& sources);
 
 // Each defined by its target's file.
 [[nodiscard]] dialect const& hlsl_dx12_dialect();

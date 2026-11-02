@@ -394,6 +394,18 @@ fn main_ps(p: pixel_input) -> target_ {
 }
 ```
 
+## Lines
+
+* **EMIT-181** Each line of the function body maps to the source line it writes, and to every call it was inlined through, innermost first.
+  A line belongs to the statement being written, so a brace, an `else` and a let the emitter hoisted map to their statement's line.
+  The prelude's frames are left out wherever another frame remains: a builtin written in SGL maps to the line that called it, which is a line its author wrote.
+  The table is the emitter's result, written when the caller hands it the source files; a line is counted as the text holds it, directives included.
+* **EMIT-182** Asked for directives, HLSL and MSL write `#line n "file"` before a statement's first line wherever the compiler would otherwise take it for another line.
+  So the target's compiler and debugger name the SGL line themselves, and a run of statements on consecutive lines takes one directive.
+  Where the inlined calls change, a comment names them first, `// inlined from shade.sgl:12 > main.sgl:40`, each file by its name alone.
+  The file name is a string literal, so a backslash or a quote in it is escaped.
+  WGSL has no such directive, and its messages map back through the table (EMIT-181).
+
 ## MSL
 
 The rules above say HLSL and WGSL by name; these say what `msl` writes in the same places.

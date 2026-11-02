@@ -359,4 +359,7 @@ struct emitted_text;
 struct bound_name;
 struct emitted_field;
 struct emitted_layout;
+struct source_line;
+struct line_origin;
+struct line_sources;
 } // namespace sgl::emit
