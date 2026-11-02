@@ -183,6 +183,28 @@ cc::string_view sgl::test::to_string(test_status s)
     return "";
 }
 
+cc::string sgl::test::text_of_message(checked_module const& m,
+                                      flat_entry_point const& e,
+                                      i32 message,
+                                      cc::span<value const> values)
+{
+    auto out = cc::string();
+    if (message < 0 || message >= e.messages.size())
+    {
+        for (auto const& v : values)
+            out.appendf("{}{}", out.empty() ? "" : " ", text_of_value(m, v));
+        return out;
+    }
+    auto const& pieces = e.messages[message].pieces;
+    for (auto i = isize(0); i < pieces.size(); ++i)
+    {
+        out += pieces[i];
+        if (i < values.size())
+            out += text_of_value(m, values[i]);
+    }
+    return out;
+}
+
 cc::string sgl::test::text_of_value(checked_module const& m, value const& v)
 {
     auto const scalar_text = [](scalar const& leaf) -> cc::string
@@ -278,6 +300,8 @@ test_result sgl::test::run_test(checked_module const& m,
     result.asserts_run = o.asserts_run;
     result.failures_dropped = o.failures_dropped;
     result.detail = o.detail;
+    for (auto const& p : o.printed)
+        result.printed.push_back(text_of_message(m, unit, p.message, p.values));
     for (auto const& f : o.failures)
     {
         if (f.site < 0 || f.site >= unit.check_sites.size())
@@ -298,6 +322,8 @@ test_result sgl::test::run_test(checked_module const& m,
                 auto const name = ref != nullptr ? cc::string_view(unit.at(ref->local).name) : cc::string_view("?");
                 report.loop_values.push_back(cc::format("{} = {}", name, text_of_value(m, f.loop_values[i])));
             }
+        if (site.message >= 0)
+            report.message = text_of_message(m, unit, site.message, f.message_values);
         result.failures.push_back(cc::move(report));
     }
 
@@ -533,6 +559,8 @@ located_diagnostic sgl::test::diagnostic_of(checked_module const& m, test_result
         for (auto const& p : f.parts)
             d.notes.push_back(
                 {.file = p.file, .where = p.where, .message = cc::format("`{}` is {}{}", p.text, p.values, loops)});
+        if (!f.message.empty())
+            d.notes.push_back({.file = f.file, .where = f.where, .message = cc::format("it says: {}", f.message)});
     }
     if (r.failures_dropped > 0)
         d.notes.push_back({.file = test.file,

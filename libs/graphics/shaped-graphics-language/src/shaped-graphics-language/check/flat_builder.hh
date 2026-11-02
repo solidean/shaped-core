@@ -101,6 +101,8 @@ struct sgl::check::flat_builder
     flat_stmt_id var(local_id local, flat_expr_id value = flat_expr_id::none);
     flat_stmt_id assign(flat_expr_id place, flat_expr_id value);
     flat_stmt_id print(flat_expr_id value);
+    /// A print of message `message`, a position in `e.messages`, interpolating `values`.
+    flat_stmt_id print(i32 message, cc::span<flat_expr_id const> values);
     /// Evaluates `value` and drops it.
     flat_stmt_id eval(flat_expr_id value);
     flat_stmt_id if_(flat_expr_id condition,

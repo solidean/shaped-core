@@ -283,6 +283,7 @@ struct flat_expr;
 struct flat_let;
 struct flat_var;
 struct flat_assign;
+struct flat_message;
 struct flat_print;
 struct flat_eval;
 struct flat_if;
@@ -318,6 +319,7 @@ struct bound_group;
 struct driver_bindings;
 struct run_limits;
 struct check_failure;
+struct printed_message;
 struct site_tally;
 struct outcome;
 

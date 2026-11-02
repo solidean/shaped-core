@@ -206,6 +206,9 @@ fun graded(a: float) -> float:
 * **EVAL-75** `check` runs its body, then reads its condition: a false one is recorded with the value of every node that ran, and the run goes on.
   A node that did not run, the right side of an `and` whose left side was false, is recorded as not evaluated.
 * **EVAL-76** An `assert` is a `check` that stops the run where it is false.
+* **EVAL-103** A message's interpolations are evaluated where it stands, left to right, an `assert`'s beside its condition whether or not it fails.
+  Its text is its pieces with each value written between them as a failed check writes it, `float3(1.0, 2.5, -3.0)`, its escapes resolved and `$$` a dollar.
+  A `print` records its values and its text; a failed `assert` reports its text with the check.
 * **EVAL-77** A run that reaches the end of a function returning `void` ends with `void`'s value, which is how a test and a compute entry point end.
 * **EVAL-78** A test passes when its run ends normally, having run at least one check and found none false.
   A false check or `assert`, a run out of fuel, a read of a `var` nothing assigned, and a run that ran no check each fail it.

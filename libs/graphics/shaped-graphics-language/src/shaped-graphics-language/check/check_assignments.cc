@@ -207,11 +207,11 @@ struct assignment_pass
         else if (s.node.is<flat_return>() || s.node.is<flat_discard>() || s.node.is<flat_continue>()
                  || s.node.is<flat_break>())
         {
-            for_each_expr_of(s, [&](flat_expr_id x) { read(x, state, depth); });
+            for_each_expr_of(e, s, [&](flat_expr_id x) { read(x, state, depth); });
             state = unreachable();
         }
         else
-            for_each_expr_of(s, [&](flat_expr_id x) { read(x, state, depth); });
+            for_each_expr_of(e, s, [&](flat_expr_id x) { read(x, state, depth); });
     }
 };
 } // namespace

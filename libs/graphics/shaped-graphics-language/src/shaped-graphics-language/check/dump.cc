@@ -311,8 +311,12 @@ struct dumper
                      },
                      [&](flat_print const& p)
                      {
-                         out += "(print ";
-                         dump_expr(e, p.value, indent);
+                         out += "(print";
+                         for (auto const value : e.at(p.values))
+                         {
+                             out += " ";
+                             dump_expr(e, value, indent);
+                         }
                          out += ")";
                      },
                      [&](flat_eval const& v)

@@ -576,7 +576,7 @@ struct compactor
                                 n.place = expr(n.place, 0);
                                 n.value = expr(n.value, 0);
                             },
-                            [&](flat_print& n) { n.value = expr(n.value, 0); }, //
+                            [&](flat_print& n) { n.values = exprs(n.values, 0); }, //
                             [&](flat_eval& n) { n.value = expr(n.value, 0); },
                             [&](flat_if& n)
                             {

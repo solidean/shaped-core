@@ -1248,7 +1248,7 @@ struct live_nodes
                 local(var->local);
             else if (auto const* const f = s.node.try_as<check::flat_for>())
                 local(f->index);
-            check::impl::for_each_expr_of(s, [&](check::flat_expr_id x) { expr(x, depth + 1); });
+            check::impl::for_each_expr_of(e, s, [&](check::flat_expr_id x) { expr(x, depth + 1); });
             check::impl::for_each_pattern_of(e, s,
                                              [&](ast::range_of<check::flat_expr_id> patterns)
                                              {

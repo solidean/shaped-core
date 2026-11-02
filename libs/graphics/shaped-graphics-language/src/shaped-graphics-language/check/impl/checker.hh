@@ -1120,6 +1120,11 @@ struct checker
     [[nodiscard]] symbol_id local_constant_of(function_scope const& scope, ast::decl_id decl);
     /// A numeric scalar or a plain vector of `float`, `half`, `int` or `uint`, which a color target holds (CHK-418).
     [[nodiscard]] bool is_color_value(type_id type) const;
+    /// CHK-424: a scalar, a plain vector of one, or an enum, which a message interpolates.
+    [[nodiscard]] bool is_printable(type_id type) const;
+    /// CHK-424: the message of a `print` or an `assert`, a quoted literal whose interpolations each check printable.
+    /// A `print`, which `takes_value`, may print one value of any type instead.
+    void check_message(function_scope& scope, ast::expr_id message, bool takes_value);
     /// The `@pixel struct` a pixel entry point returning one `color` stands in for, minted under a name nothing has.
     [[nodiscard]] type_id pixel_targets_of(symbol_id entry, type_id color);
     /// A `loop:`; the result is the type its breaks carry, and `nothing` for one that is a statement.

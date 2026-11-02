@@ -423,6 +423,7 @@ if(SC_BUILD_TESTS)
         tests/interpret/expect-test.cc
         tests/interpret/interpret-test.cc
         tests/interpret/run-tests-test.cc
+        tests/interpret/message-test.cc
 
         tests/legalize/flat-test-support.hh
         tests/legalize/random-program.hh
