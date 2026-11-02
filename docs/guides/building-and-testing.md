@@ -468,8 +468,10 @@ The budget is a ceiling a run must not cross rather than a target it should hit:
 
 ### Concurrent by default, ordered where a gate writes
 
-The static gates are independent, so the read-only ones run at the same time.
-Under `--fix` the gates that write run after them, serially and in registry order: a fixer's rewrite is what the later ones must see.
+The static gates are independent, so the read-only ones run at the same time, in two batches.
+The ones that build nothing go first, and **one of them failing stops the run there**: the build, the gates that need it and the fixers are skipped, and the verdict lists them.
+A cheap gate's red verdict then costs seconds rather than a build; the price is that on a green run the build waits for the slowest build-free gate.
+Under `--fix` the gates that write run after the read-only ones, serially and in registry order: a fixer's rewrite is what the later ones must see.
 Without `--fix` nothing writes, so every static gate is read-only and they all run together.
 A gate that must not overlap another declares an `exclusive` tag, `"gpu"` for anything that opens a device, and gates sharing a tag take turns.
 Mirrored or verbose output would interleave into noise, so `--mirror-output` and `--verbose` runs stay serial.
@@ -481,7 +483,7 @@ Running `format` after both fixers is what makes `check --fix` one finished pass
 Naming checks explicitly does not change it: `check format lint --fix` runs `lint` first, same as the full gate.
 
 **A gate never builds for itself.**
-A gate that needs a target declares it in `builds`, and the runner builds every selected gate's targets in one invocation before any gate runs.
+A gate that needs a target declares it in `builds`, and the runner builds every selected gate's targets in one invocation once the build-free gates have passed.
 Two ninja processes in one build directory fight over the cores and over ninja's own bookkeeping, so one balanced build stands ahead of the gates instead.
 A failed build fails the gates that declared it and no other.
 
