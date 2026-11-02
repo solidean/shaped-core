@@ -1727,7 +1727,9 @@ sg::routine_outcome view_renderer::trace(sg::command_list& cmd,
     auto previous_jitter = slot->last_jitter;
     if (!scaled && mode == render_mode::hybrid)
     {
-        jitter = still_jitter(slot->accum_frame);
+        // Counted across restarts: a move restarts the mean every frame, and the temporal member reconstructs
+        // sub-pixel detail only from an offset that changes from frame to frame.
+        jitter = still_jitter(slot->restarts + slot->accum_frame);
         fc.fixed_jitter = 1;
         fc.jitter = jitter + tg::vec2f(0.5f, 0.5f);
         slot->last_jitter = jitter;
