@@ -336,6 +336,28 @@ private:
                 access |= sg::access_flag::shader_write;
             shader.footprint.slots.push_back({.name = slot.host_name, .access = access, .dynamic_index = false});
         }
+        // EMIT-183: each print and assert as sg reads its records back
+        auto const file_of = [&](sgl::emit::source_line const& l)
+        { return l.file >= 0 && l.file < emitted.line_files.size() ? emitted.line_files[l.file] : cc::string(); };
+        for (auto const& site : emitted.debug_sites)
+        {
+            auto described = sg::shader_debug_site{.id = site.id,
+                                                   .is_assert = site.is_assert,
+                                                   .pieces = site.pieces,
+                                                   .at = {.file = file_of(site.origin.at), .line = site.origin.at.line}};
+            for (auto const& value : site.values)
+            {
+                auto const scalar = value.family == "float" ? sg::debug_scalar::float32
+                                  : value.family == "half"  ? sg::debug_scalar::float16
+                                  : value.family == "uint"  ? sg::debug_scalar::uint32
+                                  : value.family == "bool"  ? sg::debug_scalar::boolean
+                                                            : sg::debug_scalar::int32;
+                described.values.push_back({.scalar = scalar, .lanes = value.lanes, .type = value.type});
+            }
+            for (auto const& line : site.origin.inlined_from)
+                described.inlined_from.push_back({.file = file_of(line), .line = line.line});
+            shader.debug_sites.push_back(cc::move(described));
+        }
         result.stated = cc::move(shader);
         for (auto const& l : emitted.layouts)
         {

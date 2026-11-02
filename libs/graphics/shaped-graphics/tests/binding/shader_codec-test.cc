@@ -69,6 +69,16 @@ sg::compiled_shader make_shader()
     return shader;
 }
 
+bool same_sites(cc::span<sg::shader_debug_site const> a, cc::span<sg::shader_debug_site const> b)
+{
+    if (a.size() != b.size())
+        return false;
+    for (auto i = isize(0); i < a.size(); ++i)
+        if (!(a[i] == b[i]))
+            return false;
+    return true;
+}
+
 bool same(sg::compiled_shader const& a, sg::compiled_shader const& b)
 {
     if (a.stage != b.stage || a.format != b.format || a.entry_point != b.entry_point)
@@ -102,6 +112,8 @@ bool same(sg::compiled_shader const& a, sg::compiled_shader const& b)
         return false;
     if (a.footprint != b.footprint)
         return false;
+    if (!same_sites(a.debug_sites, b.debug_sites))
+        return false;
     if (a.workgroup_size.has_value() != b.workgroup_size.has_value())
         return false;
     if (a.workgroup_size.has_value())
@@ -123,6 +135,21 @@ TEST("sg shader codec round-trips every field")
     REQUIRE(!encoded.empty());
 
     auto const decoded = sg::impl::decode_compiled_shader(encoded);
+    REQUIRE(decoded.has_value());
+    CHECK(same(original, decoded.value()));
+}
+
+TEST("sg shader codec round-trips a shader's debug sites")
+{
+    auto original = make_shader();
+    original.debug_sites.push_back({.id = 0xC0FFEEu,
+                                    .is_assert = true,
+                                    .pieces = {"v = ", " at ", ""},
+                                    .values = {{.scalar = sg::debug_scalar::float32, .lanes = 1, .type = "float"},
+                                               {.scalar = sg::debug_scalar::int32, .lanes = 2, .type = "int2"}},
+                                    .at = {.file = "shade.sgl", .line = 12},
+                                    .inlined_from = {{.file = "main.sgl", .line = 40}}});
+    auto const decoded = sg::impl::decode_compiled_shader(sg::impl::encode_compiled_shader(original));
     REQUIRE(decoded.has_value());
     CHECK(same(original, decoded.value()));
 }

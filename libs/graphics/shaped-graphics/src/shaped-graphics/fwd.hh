@@ -256,6 +256,10 @@ struct texture_array_binding; // the texture form
 struct compiler_info;
 struct compute_dimensions;
 struct compiled_shader;
+enum class debug_scalar : u8;
+struct debug_value;
+struct debug_source_line;
+struct shader_debug_site;
 enum class footprint_source : u8; // how far a shader's footprint can be trusted (see barrier/footprint.hh)
 struct slot_footprint;            // how one shader's code touches one binding
 struct shader_footprint;          // every binding a shader's code touches, and how
