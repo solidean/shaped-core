@@ -100,7 +100,8 @@ cc::result<dx12_pipeline_layout_handle> dx12_pipeline_layout::create(ID3D12Devic
     }
 
     // The context's debug window, a root UAV at u0 in space 11, last again so nothing above moves.
-    // Every layout carries it: a shader that prints or asserts writes it, and any other leaves it unread.
+    // Every layout carries it where diagnostics are on: a shader that prints or asserts writes it, and any other leaves it unread.
+    if (sg::impl::debug_windows::k_enabled)
     {
         D3D12_ROOT_PARAMETER param = {};
         param.ParameterType = D3D12_ROOT_PARAMETER_TYPE_UAV;

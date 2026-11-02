@@ -172,6 +172,17 @@ target_include_directories(shaped-graphics
 # It links babel/SQLite privately, so the cost here is one forward-declared type, not the storage engine.
 target_link_libraries(shaped-graphics PUBLIC clean-core typed-geometry blob-cache)
 
+# SC_SHADER_DIAGNOSTICS is the root CMakeLists' switch; an add_subdirectory consumer that never set it follows its frozen state.
+if(NOT DEFINED SC_SHADER_DIAGNOSTICS)
+    if(SC_FROZEN_SHADERS)
+        set(SC_SHADER_DIAGNOSTICS OFF)
+    else()
+        set(SC_SHADER_DIAGNOSTICS ON)
+    endif()
+endif()
+# Public: a backend binds the debug window by it, and slib asks SGL for records by it.
+target_compile_definitions(shaped-graphics PUBLIC SG_SHADER_DIAGNOSTICS=$<BOOL:${SC_SHADER_DIAGNOSTICS}>)
+
 sc_declare_pch_tier(SG EXTENDS TG HEADERS <shaped-graphics/all.hh>)
 
 # The most include-bound target in the repo at 90 %, and the one a PCH helps most: 0.26 of the no-PCH compile time.

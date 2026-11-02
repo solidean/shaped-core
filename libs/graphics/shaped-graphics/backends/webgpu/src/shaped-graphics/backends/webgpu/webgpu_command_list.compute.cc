@@ -124,11 +124,16 @@ void webgpu_command_list::apply_compute_state()
             wgpuComputePassEncoderSetBindGroup(pass, u32(i), s.layout->empty_group(), 0, nullptr);
         u32 offsets[2] = {};
         auto const offset_count = s.layout->reserved_dynamic_offsets(s.constants_offset, offsets);
-        auto const window = _ctx.debug_windows().window_for_recording(s.writes_debug);
-        touch(window);
+        auto window = sg::raw_buffer_handle();
+        if (sg::impl::debug_windows::k_enabled)
+        {
+            window = _ctx.debug_windows().window_for_recording(s.writes_debug);
+            touch(window);
+        }
         wgpuComputePassEncoderSetBindGroup(
             pass, u32(sg::reserved_binding_group),
-            s.layout->reserved_group_for(s.constants_page, static_cast<webgpu_buffer const&>(*window).raw()),
+            s.layout->reserved_group_for(
+                s.constants_page, window != nullptr ? static_cast<webgpu_buffer const&>(*window).raw() : nullptr),
             size_t(offset_count), offset_count > 0 ? offsets : nullptr);
     }
     s.needs_full_apply = false;

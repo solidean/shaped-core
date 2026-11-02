@@ -320,6 +320,7 @@ cc::result<webgpu_pipeline_layout_handle> webgpu_pipeline_layout::create(webgpu_
         layout->_reserved_block_bytes = layout->_inline_constants_bound_bytes;
 
     // The context's debug window, which a print or an assert writes (EMIT-183); WebGPU's vertex stage writes no storage.
+    if (sg::impl::debug_windows::k_enabled)
     {
         auto debug = WGPUBindGroupLayoutEntry{};
         debug.binding = debug_window_binding;
@@ -436,12 +437,15 @@ WGPUBindGroup webgpu_pipeline_layout::reserved_group_for(webgpu_constant_page co
             roots.size = u64(acceleration_roots_bytes);
             entries.push_back(roots);
         }
-        auto debug = WGPUBindGroupEntry{};
-        debug.binding = debug_window_binding;
-        debug.buffer = debug_window;
-        debug.offset = 0;
-        debug.size = WGPU_WHOLE_SIZE;
-        entries.push_back(debug);
+        if (debug_window != nullptr)
+        {
+            auto debug = WGPUBindGroupEntry{};
+            debug.binding = debug_window_binding;
+            debug.buffer = debug_window;
+            debug.offset = 0;
+            debug.size = WGPU_WHOLE_SIZE;
+            entries.push_back(debug);
+        }
         auto const desc = WGPUBindGroupDescriptor{
             .nextInChain = nullptr,
             .label = to_wgpu("sg reserved group"),

@@ -9,6 +9,11 @@
 #include <shaped-graphics/bytes_future.hh>
 #include <shaped-graphics/fwd.hh>
 
+// SC_SHADER_DIAGNOSTICS, which a build without the root CMakeLists has not set.
+#ifndef SG_SHADER_DIAGNOSTICS
+#define SG_SHADER_DIAGNOSTICS 1
+#endif
+
 /// What shaders write their print and assert records into, and how they come back to the host.
 ///
 /// A context has one window per epoch in flight and one more, and epoch `e` writes window `e % count`.
@@ -23,12 +28,18 @@ public:
     /// The bytes one window holds, its three header words included.
     static constexpr isize k_window_bytes = 64 * 1024;
     static constexpr isize k_window_count = 4;
+    /// SC_SHADER_DIAGNOSTICS: whether a backend binds a window at all, and slib asks SGL for records.
+    static constexpr bool k_enabled = SG_SHADER_DIAGNOSTICS != 0;
 
     explicit debug_windows(context& ctx) : _ctx(ctx) {}
 
     /// The window the epoch being recorded writes, created on first use; safe from any recording thread.
     /// `writes` says the bound pipeline's code writes records, which has the window read back once the epoch completes.
     [[nodiscard]] raw_buffer_handle window_for_recording(bool writes);
+
+    /// Creates the windows, where diagnostics are on; a backend calls it once the context can upload.
+    /// Created with the context rather than at a first bind, so their first reset belongs to no test or frame that binds.
+    void create();
 
     /// Makes `sites` known, so a record that starts with one of their ids decodes; a pipeline's creation calls it.
     void add_sites(cc::span<shader_debug_site const> sites);

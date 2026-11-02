@@ -89,6 +89,12 @@ void impl::debug_windows::ensure_windows()
         });
 }
 
+void impl::debug_windows::create()
+{
+    if (k_enabled)
+        ensure_windows();
+}
+
 raw_buffer_handle impl::debug_windows::window_for_recording(bool writes)
 {
     ensure_windows();
