@@ -124,11 +124,87 @@ CC_FORCE_INLINE u64 limbs_sub_n(u64* r, u64 const* a, u64 const* b, i32 n)
 #endif
 }
 
+#if TG_LIMBS_X64_ASM
+// One limb of the first loop of TG_LIMBS_SUM_ASM, at byte offset OFF from index i.
+#define TG_LIMBS_SUM_STEP(OP, OFF)                                            \
+    "mov " OFF "(%[a],%[i],8), %[t]\n\t" OP " " OFF "(%[b],%[i],8), %[t]\n\t" \
+    "mov %[t], " OFF "(%[r],%[i],8)\n\t"
+
+// The body of limbs_add and limbs_sub as one asm block of six registers, with OP adc or sbb and OP1 add or sub.
+// adc over the bn limbs both have: one if bn is odd, two if a pair is left, then four per round,
+// closed by lea and inc, which leave the carry alone; between the parts t holds it as 0 or -1.
+// Then the rest of a with the carry: copied with it when r is not a,
+// and in place stopped as soon as the carry dies, which makes adding one limb into a long number cheap.
+// Past the first loop b is scratch, so a caller keeps one more value without a save.
+// As C++ the tail's copy loop is vectorized, which costs the caller its registers, spills and a vzeroupper.
+#define TG_LIMBS_SUM_ASM(OP, OP1)                                                                                      \
+    "test $1, %k[i]\n\t"                                                                                               \
+    "jz 1f\n\t" TG_LIMBS_SUM_STEP(                                                                                     \
+        OP, "") "inc %[i]\n\t"                                                                                         \
+                "1:\n\t"                                                                                               \
+                "sbb %[t], %[t]\n\t"                                                                                   \
+                "test $2, %k[i]\n\t"                                                                                   \
+                "jz 2f\n\t"                                                                                            \
+                "neg %[t]\n\t" TG_LIMBS_SUM_STEP(OP, "") TG_LIMBS_SUM_STEP(                                            \
+                    OP, "8") "lea 2(%[i]), %[i]\n\t"                                                                   \
+                             "sbb %[t], %[t]\n\t"                                                                      \
+                             "2:\n\t"                                                                                  \
+                             "test %[i], %[i]\n\t"                                                                     \
+                             "jz 4f\n\t"                                                                               \
+                             "neg %[t]\n\t"                                                                            \
+                             "3:\n\t" TG_LIMBS_SUM_STEP(OP, "") TG_LIMBS_SUM_STEP(OP, "8") TG_LIMBS_SUM_STEP(OP, "16") \
+                                 TG_LIMBS_SUM_STEP(OP, "24") "lea 3(%[i]), %[i]\n\t"                                   \
+                                                             "inc %[i]\n\t"                                            \
+                                                             "jnz 3b\n\t"                                              \
+                                                             "sbb %[t], %[t]\n\t"                                      \
+                                                             "4:\n\t"                                                  \
+                                                             "test %[k], %[k]\n\t"                                     \
+                                                             "jz 9f\n\t"                                               \
+                                                             "mov %[k], %[b]\n\t"                                      \
+                                                             "shl $3, %[b]\n\t"                                        \
+                                                             "sub %[b], %[a]\n\t"                                      \
+                                                             "sub %[b], %[r]\n\t"                                      \
+                                                             "cmp %[a], %[r]\n\t"                                      \
+                                                             "jne 5f\n\t"                                              \
+                                                             "test %[t], %[t]\n\t"                                     \
+                                                             "jz 9f\n\t"                                               \
+                                                             "6:\n\t" OP1 "q $1, (%[r],%[k],8)\n\t"                    \
+                                                             "jnc 7f\n\t"                                              \
+                                                             "inc %[k]\n\t"                                            \
+                                                             "jnz 6b\n\t"                                              \
+                                                             "jmp 9f\n\t"                                              \
+                                                             "7:\n\t"                                                  \
+                                                             "xor %k[t], %k[t]\n\t"                                    \
+                                                             "jmp 9f\n\t"                                              \
+                                                             "5:\n\t"                                                  \
+                                                             "neg %[t]\n\t"                                            \
+                                                             "8:\n\t"                                                  \
+                                                             "mov (%[a],%[k],8), %[b]\n\t" OP " $0, %[b]\n\t"          \
+                                                             "mov %[b], (%[r],%[k],8)\n\t"                             \
+                                                             "inc %[k]\n\t"                                            \
+                                                             "jnz 8b\n\t"                                              \
+                                                             "sbb %[t], %[t]\n\t"                                      \
+                                                             "9:"
+#endif
+
 /// r[0, an) = a[0, an) + b[0, bn) with an >= bn, returning the carry out.
 /// r may be a or b: limb i is read before it is written.
 /// Inline, since at the sizes a predicate meets a call costs as much as the loop.
 CC_FORCE_INLINE u64 limbs_add(u64* r, u64 const* a, i32 an, u64 const* b, i32 bn)
 {
+#if TG_LIMBS_X64_ASM
+    auto i = -i64(bn);
+    auto k = i64(bn) - an;
+    auto* ap = a + bn;
+    auto* rp = r + bn;
+    auto* bp = b + bn;
+    u64 t;
+    asm volatile(TG_LIMBS_SUM_ASM("adc", "add")
+                 : [i] "+r"(i), [k] "+r"(k), [a] "+r"(ap), [b] "+r"(bp), [r] "+r"(rp), [t] "=&r"(t)
+                 :
+                 : "cc", "memory");
+    return t & 1;
+#else
     u64 carry = limbs_add_n(r, a, b, bn);
     auto i = bn;
     for (; i < an && carry != 0; ++i)
@@ -141,12 +217,26 @@ CC_FORCE_INLINE u64 limbs_add(u64* r, u64 const* a, i32 an, u64 const* b, i32 bn
         for (; i < an; ++i)
             r[i] = a[i];
     return carry;
+#endif
 }
 
 /// r[0, an) = a[0, an) - b[0, bn) with an >= bn, returning the borrow out, which is 0 exactly when a >= b.
 /// r may be a or b.
 CC_FORCE_INLINE u64 limbs_sub(u64* r, u64 const* a, i32 an, u64 const* b, i32 bn)
 {
+#if TG_LIMBS_X64_ASM
+    auto i = -i64(bn);
+    auto k = i64(bn) - an;
+    auto* ap = a + bn;
+    auto* rp = r + bn;
+    auto* bp = b + bn;
+    u64 t;
+    asm volatile(TG_LIMBS_SUM_ASM("sbb", "sub")
+                 : [i] "+r"(i), [k] "+r"(k), [a] "+r"(ap), [b] "+r"(bp), [r] "+r"(rp), [t] "=&r"(t)
+                 :
+                 : "cc", "memory");
+    return t & 1;
+#else
     u64 borrow = limbs_sub_n(r, a, b, bn);
     auto i = bn;
     for (; i < an && borrow != 0; ++i)
@@ -159,6 +249,7 @@ CC_FORCE_INLINE u64 limbs_sub(u64* r, u64 const* a, i32 an, u64 const* b, i32 bn
         for (; i < an; ++i)
             r[i] = a[i];
     return borrow;
+#endif
 }
 
 /// r[0, an + bn) = a[0, an) * b[0, bn), with an, bn >= 1; r overlaps neither operand.
@@ -186,6 +277,10 @@ u64 limbs_submul_1(u64* r, u64 const* a, i32 n, u64 b);
 /// q[0, n) = a[0, n) / d, returning the remainder; d != 0, and q may be a.
 u64 limbs_divrem_1(u64* q, u64 const* a, i32 n, u64 d);
 
+/// q[0, an - 1) = a / b and r[0, 2) = a % b, for a normalized a with an >= 2 and a divisor of two limbs, b[1] != 0.
+/// Each digit a 3/2 division with the window in registers, so it needs no scratch; q overlaps nothing.
+void limbs_divrem_2(u64* q, u64* r, u64 const* a, i32 an, u64 const* b);
+
 /// The scratch limbs limbs_divrem needs: the normalized dividend with a limb on top, and the normalized divisor.
 [[nodiscard]] constexpr i32 limbs_divrem_scratch(i32 an, i32 bn)
 {
@@ -193,7 +288,7 @@ u64 limbs_divrem_1(u64* q, u64 const* a, i32 n, u64 d);
 }
 
 /// q[0, an - bn + 1) = a / b and r[0, bn) = a % b, for normalized a and b with an >= bn >= 2.
-/// Knuth's Algorithm D, each digit estimated by cc::udiv128 and corrected at most twice.
+/// Knuth's Algorithm D, each digit from a 3/2 division by the divisor's precomputed reciprocal, corrected at most once.
 /// scratch holds limbs_divrem_scratch(an, bn) limbs; q and r overlap nothing, a and b included.
 void limbs_divrem(u64* q, u64* r, u64 const* a, i32 an, u64 const* b, i32 bn, u64* scratch);
 

@@ -2,6 +2,8 @@
 created: 2026-11-03
 refs:
   - file: libs/base/typed-geometry/tests/scalar/bigint-test.cc
+closed: 2026-11-03
+resolution: fixed
 ---
 
 # bigint-test's size assertion fails on wasm32

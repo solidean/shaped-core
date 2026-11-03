@@ -27,8 +27,9 @@ struct bigint_header
     u8 node_class = 0;
     /// Never set on zero.
     bool negative = false;
-    /// Unused; held back for a rational's flags.
-    u16 reserved = 0;
+    /// The limbs the node holds, saturated at 65535, so that a lean path's room check is one compare.
+    /// Past that a node is still sized by its class, and only the lean paths, which test against this, step aside.
+    u16 capacity = 0;
 };
 static_assert(sizeof(bigint_header) == 8);
 
@@ -53,7 +54,8 @@ static_assert(sizeof(bigint_header) == 8);
     auto const idx = cc::node_class_index_from_size_and_align(isize(limbs + 1) * 8, 8);
     auto* const h = reinterpret_cast<bigint_header*>( // NOLINT
         cc::default_node_allocator().allocate_node_bytes(idx, isize(1) << int(idx), 8));
-    *h = {.node_class = u8(idx)};
+    // saturated by wrapping: from the 512 KiB class on, the limb count is a multiple of 2^16, so its u16 is 0, less one 65535
+    *h = {.node_class = u8(idx), .capacity = u16(u16((u64(1) << int(idx)) / 8) - 1)};
     return h;
 }
 
@@ -195,12 +197,14 @@ struct tg::bigint
     CC_FORCE_INLINE void assign_add(bigint const& a, bigint const& b)
     {
         if (!_try_sum_small(a, b, false)) [[unlikely]]
-            _assign_sum(a, b, false);
+            if (!_try_sum(a, b, false)) [[unlikely]]
+                _assign_sum_slow(a, b, false);
     }
     CC_FORCE_INLINE void assign_sub(bigint const& a, bigint const& b)
     {
         if (!_try_sum_small(a, b, true)) [[unlikely]]
-            _assign_sum(a, b, true);
+            if (!_try_sum(a, b, true)) [[unlikely]]
+                _assign_sum_slow(a, b, true);
     }
     CC_FORCE_INLINE void assign_mul(bigint const& a, bigint const& b)
     {
@@ -510,10 +514,14 @@ private:
 
     void _copy_new(bigint const& o);
     void _assign_copy(bigint const& o);
-    void _assign_sum(bigint const& a, bigint const& b, bool subtract);
+    /// a ± b for nonzero operands into a node that holds the result; false leaves *this untouched, for _assign_sum_slow.
+    /// It never calls the slow path itself, so a, b and subtract need not outlive its first decisions.
+    [[nodiscard]] bool _try_sum(bigint const& a, bigint const& b, bool subtract);
     void _assign_mul(bigint const& a, bigint const& b);
     void _assign_mul_slow(bigint const& a, bigint const& b);
     void _assign_sum_slow(bigint const& a, bigint const& b, bool subtract);
+    /// The sum of two terms of opposite signs, the first of ah's magnitude and sign, the second of bh's magnitude; false leaves *this untouched.
+    [[nodiscard]] bool _try_difference(impl::bigint_header const* ah, impl::bigint_header const* bh);
     void _assign_sum_with_zero(bigint const& a, bigint const& b, bool subtract);
     void _assign_mul_aliased(u64 const* x, i32 xn, u64 const* y, i32 yn, bool negative);
 
@@ -523,7 +531,8 @@ private:
     [[nodiscard]] CC_FORCE_INLINE u64* _room(i32 n, impl::bigint_header*& replaced)
     {
         replaced = nullptr;
-        if (_node != nullptr && impl::bigint_class_capacity(_node->node_class) >= n)
+        // the header's capacity is one compare; the class decides only past its saturation
+        if (_node != nullptr && (i32(_node->capacity) >= n || impl::bigint_class_capacity(_node->node_class) >= n))
             return impl::bigint_limbs(_node);
         replaced = _node;
         _node = impl::bigint_allocate_out_of_line(n);

@@ -159,7 +159,7 @@ It is the base a rational type will build on.
 - **Sign and magnitude, not two's complement.** A product multiplies magnitudes and XORs signs, where two's complement needs corrections or a sign-extended double width.
   Sign, negation and absolute value read or flip the header alone, and a varying length needs no sign extension.
   The cost is a magnitude comparison when a sum's signs differ, which the sizes or the top limbs almost always decide.
-- **One pointer, to a node of cc's node allocator.** The node starts with a header word: the limbs in use, the node class, the sign, and 16 bits held back.
+- **One pointer, to a node of cc's node allocator.** The node starts with a header word: the limbs in use, the node class, the sign, and the limbs the node holds, for a room check of one compare.
   The limbs follow, so the classes of 16 to 256 bytes hold 1, 3, 7, 15 and 31 limbs, and a 64-byte node is a cache line holding 448 bits.
   Zero is the null pointer, so it allocates nothing, and a moved-from value is zero.
 - **A node is reused while it holds the result.** Every `assign_*` writes into the target's node when it is large enough, and an operand may be the target.
@@ -167,20 +167,31 @@ It is the base a rational type will build on.
   The operators take an rvalue operand's node for their result, so `a * b - c * d` allocates once per product.
 - **`+ - *` of one- and two-limb operands are inline, and everything else is one call.** At that size the call and its register saves cost more than the arithmetic.
   The out-of-line operations have a lean path for a target that holds the result, and a separate slow one for allocation and aliasing, so the common case needs few registers.
+  A lean path returns false rather than calling the slow one, which the inline caller does: the operands then need not outlive its first decisions.
+  Its decisions all come before the kernel, and a difference splits off at the signs, before anything else is live; every register save avoided is a push and a pop less per call.
+- **No unsigned `bignat` beside it.** The sign is one header bit, so an unsigned sum would save a sign compare, about 5 of 115 to 220 instructions.
+  An unsigned difference still compares the magnitudes, to refuse `a < b`, which is the work the signed one does to pick its sign.
+  Natural-number code already exists one level down: `scalar/impl/limbs.hh` is unsigned, and gcd or a rational's reduction work on magnitudes there.
+  A second public type would repeat the operators, parsing, printing, division and conversions, with their tests, for close to no speed.
+  It pays only to have "never negative" checked by the type, say for a count or a denominator in an API; then it is a thin wrapper over the same header, its conversions handing over the node.
 - **The limb kernels are shared with `bigfloat`.** `scalar/impl/limbs.hh` holds natural numbers as limb arrays; `bigfloat` keeps its own sum, since its operands are aligned at an exponent first.
 - **On x64 with clang or gcc, the carry chains are inline assembly**, with portable C++ beside them for every other target.
   As C++, clang cannot keep a carry in the flag across a loop's compare, nor in a third accumulator word: it saves and restores it through `setb` and `movzx`, about twice the instructions.
-  Sums run one `adc` per limb on an index that counts up to zero by `inc`, which leaves the carry alone; products accumulate `mulx` into three words by `add`, `adc`, `adc`.
+  Sums run `adc` on an index that counts up to zero, four limbs a round closed by `lea` and `inc`, which leave the carry alone; products accumulate `mulx` into three words by `add`, `adc`, `adc`.
+  A sum's carry through the longer operand's rest is in the same asm block, six registers: as C++ that copy loop is vectorized and costs the caller its registers and a `vzeroupper`.
+  `addmul_1` and `submul_1` take limbs in pairs, the first product's high limb folded into the second's low off the carry's path, two cycles a limb where one at a time takes three.
 - **A product picks its algorithm by shape.**
   Up to 4 × 4 limbs and squares up to 16 × 16 are fully unrolled column products, five instructions per limb product.
   From 17 limbs squares split by Karatsuba down onto those, its middle recombined in place as GMP's toom22 does; an unbalanced product takes the longer operand in chunks of the shorter.
   Other shapes run in rows of `addmul_1`.
-- **Division is Knuth's Algorithm D**, ported from `fixed_int`'s, truncating like the builtins; `>>` floors, like an arithmetic shift.
+- **Division is Knuth's Algorithm D with Möller and Granlund's 3/2 digit**, truncating like the builtins; `>>` floors, like an arithmetic shift.
+  Each digit divides the window's top three limbs by the divisor's top two through a reciprocal computed once, two products and at most one correction, where a hardware `div` costs tens of cycles.
+  A divisor of two limbs keeps the whole window in registers and needs no scratch.
   `div_mod(q, r, a, b)` writes into kept results, and `gcd` reuses its three values from step to step.
 - **Measured against GMP 6.3, its generic C build, in instructions retired on a Zen 5.**
-  An orient3d over 50-bit integers retires about 1,640 with results reused, GMP 2,390; over 120-bit integers about 2,520, GMP 3,200.
-  A 16 × 16 limb product retires about 1,520, GMP 1,750; a division of 32 limbs by 16 about 3,300, GMP 4,600.
-  From three limbs up, a sum still retires 40–80 more than GMP's; `perf-bigint-past-one-limb` has the open items.
+  An orient3d over 50-bit integers retires about 1,580 with results reused, GMP 2,390; over 120-bit integers about 2,300, GMP 3,200.
+  A 16 × 16 limb product retires about 1,520, GMP 1,750; a division of 32 limbs by 16 about 3,350, GMP 4,600, and fewer cycles at every size.
+  A sum retires fewer at every size, a difference within 8 below 12 limbs; `perf-bigint-past-one-limb` has the open items.
 
 ### `half_float` is binary16, correctly rounded
 
