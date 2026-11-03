@@ -16,6 +16,8 @@ from __future__ import annotations
 
 import os
 import platform
+import signal
+import subprocess
 import sys
 import threading
 import time
@@ -43,6 +45,9 @@ def _limit(name: str, default: float) -> float:
 def _report(message: str) -> None:
     try:
         print(f"\ndev.py memory guard: {message}", file=sys.stderr, flush=True)
+        # on GitHub Actions also an annotation, so the run's summary names it beside the failed step
+        if os.environ.get("GITHUB_ACTIONS") == "true":
+            print(f"::error title=dev.py memory guard::{message}", flush=True)
     except OSError:
         pass
 
@@ -154,12 +159,32 @@ else:
     def _job(process_bytes: int, total_bytes: int):
         return None
 
-    def _end_everything(job) -> None:
-        # dev.py's children share its process group unless they made their own; signal it, then go
+    def _descendants() -> list[int]:
+        """Every process below this one, from `ps`; a child in a process group or session of its own included."""
         try:
-            os.killpg(os.getpgrp(), 9)
-        except OSError:
-            pass
+            out = subprocess.run(["ps", "-A", "-o", "pid=,ppid="], capture_output=True, text=True, timeout=10).stdout
+        except (OSError, subprocess.SubprocessError):
+            return []
+        children: dict[int, list[int]] = {}
+        for line in out.splitlines():
+            fields = line.split()
+            if len(fields) == 2 and fields[0].isdigit() and fields[1].isdigit():
+                children.setdefault(int(fields[1]), []).append(int(fields[0]))
+        found = []
+        pending = [os.getpid()]
+        while pending:
+            for pid in children.get(pending.pop(), []):
+                found.append(pid)
+                pending.append(pid)
+        return found
+
+    def _end_everything(job) -> None:
+        # only what dev.py started: its process group can hold its callers, a CI runner's worker among them
+        for pid in _descendants():
+            try:
+                os.kill(pid, signal.SIGKILL)
+            except OSError:
+                pass
         os._exit(3)
 
 
