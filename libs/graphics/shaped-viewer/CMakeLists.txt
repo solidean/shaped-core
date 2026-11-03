@@ -253,7 +253,6 @@ if(SC_BUILD_TESTS)
         tests/vocabulary-test.cc
         tests/lru-pool-test.cc
         tests/range-allocator-test.cc
-        tests/geometry-pool-test.cc
         tests/keyed-cache-test.cc
         tests/quadric-test.cc
         tests/quadric-set-test.cc
@@ -318,6 +317,7 @@ if(SC_BUILD_TESTS)
     if(_sv_test_dx12 OR _sv_test_metal)
         target_sources(shaped-viewer-test PRIVATE
             tests/headless-viewer-test.cc
+            tests/geometry-pool-test.cc
             tests/denoise-view-test.cc
             tests/pathtraced-view-test.cc
             tests/openpbr-bsdf-test.cc

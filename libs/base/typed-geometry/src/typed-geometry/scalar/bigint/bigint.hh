@@ -189,22 +189,22 @@ struct tg::bigint
             _node->negative = !_node->negative;
     }
 
-    // One-limb operands into a node that holds the result are forced inline, and everything else is one call:
+    // Operands of one or two limbs are forced inline, and everything else is one call:
     // at that size the call and its register saves cost more than the arithmetic.
 
     CC_FORCE_INLINE void assign_add(bigint const& a, bigint const& b)
     {
-        if (!_try_sum_1(a, b, false)) [[unlikely]]
+        if (!_try_sum_small(a, b, false)) [[unlikely]]
             _assign_sum(a, b, false);
     }
     CC_FORCE_INLINE void assign_sub(bigint const& a, bigint const& b)
     {
-        if (!_try_sum_1(a, b, true)) [[unlikely]]
+        if (!_try_sum_small(a, b, true)) [[unlikely]]
             _assign_sum(a, b, true);
     }
     CC_FORCE_INLINE void assign_mul(bigint const& a, bigint const& b)
     {
-        if (!_try_mul_1(a, b)) [[unlikely]]
+        if (!_try_mul_small(a, b)) [[unlikely]]
             _assign_mul(a, b);
     }
     /// *this = a << n, n >= 0.
@@ -214,6 +214,8 @@ struct tg::bigint
 
     /// a / b truncated toward zero, and a - b * quotient, which has a's sign; b != 0.
     friend div_mod_result<bigint> div_mod(bigint const& a, bigint const& b);
+    /// The same into q and r, reusing their nodes as an assign_* does; q and r are two values, and either may be a or b.
+    friend void div_mod(bigint& q, bigint& r, bigint const& a, bigint const& b);
     /// The greatest common divisor of |a| and |b|; gcd(0, 0) is 0.
     friend bigint gcd(bigint const& a, bigint const& b);
     [[nodiscard]] friend bigint abs(bigint a)
@@ -384,78 +386,134 @@ private:
         _set(1, negative);
     }
 
-    /// The node class from which a node holds two limbs: 32 bytes.
-    static constexpr u8 _two_limb_class = 5;
-
-    /// *this's node for a result of one-limb operands: its own, or a fresh one of two limbs, as the operators' results start without one.
-    [[nodiscard]] CC_FORCE_INLINE impl::bigint_header* _node_for_1()
+    /// Whether a node holds one or two limbs, the sizes the inline paths take.
+    [[nodiscard]] CC_FORCE_INLINE static bool _is_small(impl::bigint_header const* h)
     {
-        if (_node == nullptr)
-            _node = impl::bigint_allocate_out_of_line(2);
-        return _node;
+        return h != nullptr && h->size - 1u < 2u;
     }
 
-    /// a ± b for one-limb operands, when *this's node holds the result; false leaves *this's value untouched.
+    /// The limb above the lowest of a small node, 0 for a one-limb one; a one-limb node may have no room above.
+    [[nodiscard]] CC_FORCE_INLINE static u64 _high_of_small(impl::bigint_header const* h)
+    {
+        return h->size == 2 ? impl::bigint_limbs(h)[1] : u64(0);
+    }
+
+    /// Writes a result of up to four limbs into *this's node, a fresh one when it has none; false when the node is too small.
+    /// The class decides the room: 16 bytes hold 1 limb, 32 hold 3, 64 and up hold 7 or more.
+    /// A fixed prefix is written by class rather than by size, since the limbs past the size are free to hold anything.
+    [[nodiscard]] CC_FORCE_INLINE bool _store_small(u64 r0, u64 r1, u64 r2, u64 r3, i32 size, bool negative)
+    {
+        auto* h = _node;
+        if (h == nullptr) [[unlikely]]
+            h = _node = impl::bigint_allocate_out_of_line(size < 1 ? 1 : size);
+        auto const node_class = h->node_class;
+        auto* const d = impl::bigint_limbs(h);
+        if (node_class >= 6) [[likely]]
+        {
+            d[0] = r0;
+            d[1] = r1;
+            d[2] = r2;
+            d[3] = r3;
+        }
+        else if (node_class == 5)
+        {
+            if (size > 3)
+                return false;
+            d[0] = r0;
+            d[1] = r1;
+            d[2] = r2;
+        }
+        else
+        {
+            if (size > 1)
+                return false;
+            d[0] = r0;
+        }
+        h->size = u32(size);
+        h->negative = size != 0 && negative;
+        return true;
+    }
+
+    /// a ± b for operands of one or two limbs; false leaves *this's value untouched.
     /// The operands are read before *this is written, so either may be *this.
-    [[nodiscard]] CC_FORCE_INLINE bool _try_sum_1(bigint const& a, bigint const& b, bool subtract)
+    [[nodiscard]] CC_FORCE_INLINE bool _try_sum_small(bigint const& a, bigint const& b, bool subtract)
     {
         auto* const ah = a._node;
         auto* const bh = b._node;
-        if (ah == nullptr || bh == nullptr || ah->size != 1 || bh->size != 1)
+        if (!_is_small(ah) || !_is_small(bh))
             return false;
-        auto* const h = _node_for_1();
-        auto const x = impl::bigint_limbs(ah)[0];
-        auto const y = impl::bigint_limbs(bh)[0];
+        auto const x0 = impl::bigint_limbs(ah)[0];
+        auto const y0 = impl::bigint_limbs(bh)[0];
         auto const a_negative = ah->negative;
         auto const b_negative = bh->negative != subtract;
-        auto* const d = impl::bigint_limbs(h);
+        if ((ah->size | bh->size) == 1)
+        {
+            // one limb each, the most common case, without the second limb's reads and carries
+            if (a_negative == b_negative)
+            {
+                auto const s = cc::add_with_carry(x0, y0);
+                return _store_small(s.value, s.carry, 0, 0, 1 + i32(s.carry), a_negative);
+            }
+            auto const y_larger = x0 < y0;
+            auto const m = y_larger ? y0 - x0 : x0 - y0;
+            return _store_small(m, 0, 0, 0, i32(m != 0), y_larger ? b_negative : a_negative);
+        }
+        auto const x1 = _high_of_small(ah);
+        auto const y1 = _high_of_small(bh);
         if (a_negative == b_negative)
         {
-            auto const s = cc::add_with_carry(x, y);
-            if (s.carry != 0)
-            {
-                if (h->node_class < _two_limb_class)
-                    return false;
-                d[1] = 1;
-            }
-            d[0] = s.value;
-            h->size = u32(1 + s.carry);
-            h->negative = a_negative;
-            return true;
+            auto const s0 = cc::add_with_carry(x0, y0);
+            auto const s1 = cc::add_with_carry(x1, y1, s0.carry);
+            auto const size = s1.carry != 0 ? 3 : (s1.value != 0 ? 2 : 1);
+            return _store_small(s0.value, s1.value, s1.carry, 0, size, a_negative);
         }
-        // the larger magnitude's sign; equal magnitudes give zero
-        auto const y_larger = x < y;
-        auto const m = y_larger ? y - x : x - y;
-        d[0] = m;
-        h->size = u32(m != 0);
-        h->negative = m != 0 && (y_larger ? b_negative : a_negative);
-        return true;
+        // x - y, negated back when it borrows: the larger magnitude's sign, and zero for equal ones
+        auto const d0 = cc::sub_with_borrow(x0, y0);
+        auto const d1 = cc::sub_with_borrow(x1, y1, d0.borrow);
+        auto const mask = u64(0) - d1.borrow;
+        auto const n0 = cc::add_with_carry(d0.value ^ mask, 0, d1.borrow);
+        auto const r1 = (d1.value ^ mask) + n0.carry;
+        auto const size = r1 != 0 ? 2 : (n0.value != 0 ? 1 : 0);
+        return _store_small(n0.value, r1, 0, 0, size, d1.borrow != 0 ? b_negative : a_negative);
     }
 
-    /// a * b for one-limb operands, when *this's node holds two limbs or more; false leaves *this's value untouched.
-    [[nodiscard]] CC_FORCE_INLINE bool _try_mul_1(bigint const& a, bigint const& b)
+    /// a * b for operands of one or two limbs; false leaves *this's value untouched.
+    [[nodiscard]] CC_FORCE_INLINE bool _try_mul_small(bigint const& a, bigint const& b)
     {
         auto* const ah = a._node;
         auto* const bh = b._node;
-        if (ah == nullptr || bh == nullptr || ah->size != 1 || bh->size != 1)
+        if (!_is_small(ah) || !_is_small(bh))
             return false;
-        auto* const h = _node_for_1();
-        if (h->node_class < _two_limb_class)
-            return false;
-        auto const p = cc::umul128(impl::bigint_limbs(ah)[0], impl::bigint_limbs(bh)[0]);
         auto const negative = ah->negative != bh->negative;
-        auto* const d = impl::bigint_limbs(h);
-        d[0] = p.lo;
-        d[1] = p.hi;
-        h->size = u32(1 + (p.hi != 0));
-        h->negative = negative;
-        return true;
+        auto const x0 = impl::bigint_limbs(ah)[0];
+        auto const y0 = impl::bigint_limbs(bh)[0];
+        if ((ah->size | bh->size) == 1)
+        {
+            auto const p = cc::umul128(x0, y0);
+            return _store_small(p.lo, p.hi, 0, 0, p.hi != 0 ? 2 : 1, negative);
+        }
+        auto const x1 = _high_of_small(ah);
+        auto const y1 = _high_of_small(bh);
+        auto const p00 = cc::umul128(x0, y0);
+        auto const p01 = cc::umul128(x0, y1);
+        auto const p10 = cc::umul128(x1, y0);
+        auto const p11 = cc::umul128(x1, y1);
+        auto const s1 = cc::add_with_carry(p00.hi, p01.lo);
+        auto const t1 = cc::add_with_carry(s1.value, p10.lo);
+        auto const s2 = cc::add_with_carry(p01.hi, p10.hi, s1.carry);
+        auto const t2 = cc::add_with_carry(s2.value, p11.lo, t1.carry);
+        auto const r3 = p11.hi + s2.carry + t2.carry;
+        // one operand has two limbs, so the product reaches 2^64
+        auto const size = r3 != 0 ? 4 : (t2.value != 0 ? 3 : 2);
+        return _store_small(p00.lo, t1.value, t2.value, r3, size, negative);
     }
 
     void _copy_new(bigint const& o);
     void _assign_copy(bigint const& o);
     void _assign_sum(bigint const& a, bigint const& b, bool subtract);
     void _assign_mul(bigint const& a, bigint const& b);
+    void _assign_mul_slow(bigint const& a, bigint const& b);
+    void _assign_sum_slow(bigint const& a, bigint const& b, bool subtract);
     void _assign_sum_with_zero(bigint const& a, bigint const& b, bool subtract);
     void _assign_mul_aliased(u64 const* x, i32 xn, u64 const* y, i32 yn, bool negative);
 
@@ -476,5 +534,6 @@ private:
 namespace tg
 {
 [[nodiscard]] div_mod_result<bigint> div_mod(bigint const& a, bigint const& b);
+void div_mod(bigint& q, bigint& r, bigint const& a, bigint const& b);
 [[nodiscard]] bigint gcd(bigint const& a, bigint const& b);
 } // namespace tg

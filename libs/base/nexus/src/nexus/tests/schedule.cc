@@ -265,6 +265,7 @@ nx::args_builder build_cli(nx::test_schedule_config& config, cli_state& state)
     args.arg({"benchmark-pin"}, config.benchmark_pin, "pin the run to one core before benchmarking");
     args.arg({"list-tests-json"}, config.list_tests_json_file,
              {.desc = "write a JSON listing of every test here (- for stdout) and exit", .metavar = "FILE"});
+    args.arg({"list-hw-counters"}, config.list_hw_counters, "print the hardware counters this machine can read and exit");
 
     args.group("arguments for the test itself");
     args.arg(

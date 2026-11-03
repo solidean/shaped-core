@@ -44,7 +44,7 @@ struct entry_route
 ///
 /// An app or command named by the first token runs with the rest.
 /// A nexus selector anywhere (--tests, --examples, --benchmarks, --pgo-benchmarks, --manual, --apps, --commands,
-/// --list-tests, --list-tests-json, --reporter) hands the line to nexus, as does a test named exactly, or a bare
+/// --list-tests, --list-tests-json, --list-hw-counters, --reporter) hands the line to nexus, as does a test named exactly, or a bare
 /// --help when there is no default.
 /// Otherwise the default app or command takes the whole line, and with none an empty line is the overview and
 /// anything else is an error.
