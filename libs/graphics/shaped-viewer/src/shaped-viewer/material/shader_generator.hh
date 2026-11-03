@@ -57,6 +57,7 @@ enum class sv::material_value_kind : sv::u32
     constant = 1,  ///< a value of the parameter block
     attribute = 2, ///< a mesh attribute, through the block's descriptor of it
     texture = 3,   ///< a texture channel, sampled through the block's uv descriptor
+    zero = 4,      ///< not read: 0, whatever the consumer's identity value is
 };
 
 /// Where a permutation's cutout opacity lives in its parameter block, and how `tracer.instance_opacity` reads it.

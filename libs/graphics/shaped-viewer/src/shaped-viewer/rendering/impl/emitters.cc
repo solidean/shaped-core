@@ -93,6 +93,9 @@ constexpr auto dark_margin = 1e-3f;
     case material_value_kind::none:
         return {.mean = tg::vec3f(1, 1, 1), .bound = tg::vec3f(1, 1, 1), .has_bound = true};
 
+    case material_value_kind::zero:
+        return {.mean = tg::vec3f(0, 0, 0), .bound = tg::vec3f(0, 0, 0), .has_bound = true, .dark = true};
+
     case material_value_kind::constant:
     {
         auto value = tg::vec3f(0, 0, 0);

@@ -76,10 +76,12 @@ fun light_cone(l: light, cos_axis: float) -> float:
 
 /// How a value of a material is read, the cutout opacity's `instance.opacity_kind` and each emission factor's kind; `sv::material_value_kind` mirrors these.
 /// `value_none` reads nothing: the consumer takes its identity value.
+/// `value_zero` reads nothing either, and is 0 whatever that identity is.
 const value_none = 0u
 const value_constant = 1u
 const value_attribute = 2u
 const value_texture = 3u
+const value_zero = 4u
 
 /// What `instance.opacity_offset` and `opacity_uv_offset` name when they are not a parameter-block offset.
 const no_offset = 0xffffffffu

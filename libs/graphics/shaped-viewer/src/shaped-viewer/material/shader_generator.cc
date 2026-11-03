@@ -942,10 +942,13 @@ generated_material_shader generate_material_shader(resolved_material const& r, m
     // Read off the layout before it is moved into the result.
     auto const factor_of = [&](cc::string const& attribute)
     { return attribute.empty() ? material_emission_factor{} : emission_factor_of(r, layout, attribute); };
-    auto const secondary = material_secondary{.base_color = factor_of(r.type->base_color_attribute),
+    // A display material reflects nothing, so what a secondary hit reads of it is black.
+    auto const reflected = [&](cc::string const& attribute)
+    { return r.type->display_only ? material_emission_factor{.kind = material_value_kind::zero} : factor_of(attribute); };
+    auto const secondary = material_secondary{.base_color = reflected(r.type->base_color_attribute),
                                               .roughness = factor_of(r.type->roughness_attribute),
                                               .metalness = factor_of(r.type->metalness_attribute),
-                                              .specular_weight = factor_of(r.type->specular_weight_attribute),
+                                              .specular_weight = reflected(r.type->specular_weight_attribute),
                                               .transmission = factor_of(r.type->transmission_attribute),
                                               .thin_walled = factor_of(r.type->thin_walled_attribute),
                                               .tangent_frame = factor_of(r.type->tangent_frame_attribute)};

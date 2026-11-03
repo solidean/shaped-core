@@ -365,6 +365,7 @@ fun instance_specular_weight(inst: scene.instance, ctx: material.shading_context
 /// So the sample here and the hit's are one value: a level picked by a footprint on one side alone would weigh two different integrands against each other.
 fun emission_factor(kind: uint, offset: uint, uv_offset: uint, frequency: uint, channels: uint, palette: uint, transform_offset: uint, lanes: uint, ctx: material.shading_context){traced, bindless} -> float3:
     if kind == scene.value_none => return float3(1.0)
+    if kind == scene.value_zero => return float3(0.0)
     let block = ctx.param_buffer as int
 
     if kind == scene.value_constant:
