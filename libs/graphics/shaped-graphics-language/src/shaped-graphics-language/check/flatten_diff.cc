@@ -644,8 +644,18 @@ struct differentiator
             return {id, flat_expr_id::none};
         if (auto const* const r = x.node.try_as<flat_local_ref>())
             return {id, tangent_leaf(r->local)};
-        if (x.node.is<flat_literal>() || x.node.is<flat_binding_member>() || x.node.is<flat_buffer_element>())
+        if (x.node.is<flat_literal>())
             return {id, flat_expr_id::none};
+        // a constant block's member is a constant: a camera, a setting, what the host hands every invocation alike
+        if (auto const* const member = x.node.try_as<flat_binding_member>(); member != nullptr && !member->is_workgroup)
+            return {id, flat_expr_id::none};
+        // a buffer holds what a gradient would have to be written back into, which a derivative never does silently
+        if (x.node.is<flat_buffer_element>() || x.node.is<flat_binding_member>())
+        {
+            failed("a read of a buffer, whose gradient it cannot write back; read it as `no_diff(…)` to hold it "
+                   "constant, or give the function that reads it a @backward that writes the gradient");
+            return {id, flat_expr_id::none};
+        }
         if (auto const* const n = x.node.try_as<flat_member>())
         {
             auto const object = derive(n->object);
@@ -1649,16 +1659,22 @@ struct differentiator
     {
         auto const own = parameters_of(custom.function);
         auto const theirs = parameters_of(derivative);
-        auto const expected = 2 * own.size() + (is_reverse ? 1 : 0);
-        if (theirs.size() != expected)
-            return false;
+        auto k = isize(0);
         for (auto i = isize(0); i < own.size(); ++i)
-            if (theirs[2 * i].type != own[i].type || theirs[2 * i + 1].type != own[i].type
-                || theirs[2 * i + 1].is_mut != is_reverse)
+        {
+            if (k >= theirs.size() || theirs[k++].type != own[i].type)
                 return false;
+            if (!f.c.takes_tangent(custom.function, i))
+                continue;
+            if (k >= theirs.size() || theirs[k].type != tangent(own[i].type) || theirs[k].is_mut != is_reverse)
+                return false;
+            ++k;
+        }
         auto const& info = m().functions[m().at(derivative).info];
-        return is_reverse ? theirs.back().type == result && info.result == checked_module::void_type
-                          : info.result == result;
+        if (is_reverse)
+            return k + 1 == theirs.size() && theirs[k].type == tangent(result)
+                && info.result == checked_module::void_type;
+        return k == theirs.size() && info.result == tangent(result);
     }
 
     /// The function `derivative`, inlined over `arguments`, as the block it becomes.
@@ -1677,6 +1693,9 @@ struct differentiator
     void forward_custom(flat_stmt_id id, flattener::custom_call const& custom, label_id label)
     {
         f.block.push_back(id);
+        // `no_diff(x)`: the value as it is, and its tangent zero
+        if (custom.is_detached)
+            return;
         auto const* const result = lifted.get_ptr(i32(label));
         auto const* const result_tangent = result != nullptr ? tangent_of.get_ptr(i32(*result)) : nullptr;
         if (result_tangent == nullptr)
@@ -1689,9 +1708,12 @@ struct differentiator
             return (void)failed(cc::format("@forward({}) takes each parameter and its tangent, and gives the result",
                                            m().at(custom.function).name));
         auto arguments = cc::vector<flat_expr_id>();
-        for (auto const a : custom.arguments)
+        for (auto i = isize(0); i < custom.arguments.size(); ++i)
         {
+            auto const a = custom.arguments[i];
             arguments.push_back(ref(a));
+            if (!f.c.takes_tangent(custom.function, i))
+                continue;
             auto const* const t = tangent_of.get_ptr(i32(a));
             arguments.push_back(t != nullptr ? ref(*t) : zero(tangent(f.entry.at(a).type)));
         }
@@ -1703,7 +1725,7 @@ struct differentiator
     void backward_custom(flattener::custom_call const& custom, label_id label)
     {
         auto const* const result = lifted.get_ptr(i32(label));
-        if (result == nullptr || !tracked.contains(i32(*result)))
+        if (custom.is_detached || result == nullptr || !tracked.contains(i32(*result)))
             return;
         auto const result_local = *result;
         auto const result_type = f.entry.at(result_local).type;
@@ -1717,9 +1739,12 @@ struct differentiator
         auto const g = share(ref(adjoint), "g");
         emit(flat_assign{.place = ref(adjoint), .value = zero(tangent(result_type))});
         auto arguments = cc::vector<flat_expr_id>();
-        for (auto const a : custom.arguments)
+        for (auto i = isize(0); i < custom.arguments.size(); ++i)
         {
+            auto const a = custom.arguments[i];
             arguments.push_back(ref(a));
+            if (!f.c.takes_tangent(custom.function, i))
+                continue;
             // what is not followed takes its adjoint into a local nobody reads
             auto const place = tracked.contains(i32(a))
                                  ? adjoint_of_local(a)
@@ -1797,6 +1822,12 @@ auto sgl::check::impl::flattener::flatten_custom_call(ast::expr_id id,
     custom_calls[i32(inlined.label)]
         = {.function = record.callee, .derivatives = d, .arguments = cc::move(arguments), .call = id};
     return add_expr(type, id, flat_block{.label = inlined.label, .body = inlined.body});
+}
+
+auto sgl::check::impl::flattener::is_detach_call(symbol_id callee) const -> bool
+{
+    auto const& s = c.out.at(callee);
+    return s.name == "no_diff" && c.is_prelude_file(s.file);
 }
 
 auto sgl::check::impl::flattener::is_diff_call(symbol_id callee) const -> bool

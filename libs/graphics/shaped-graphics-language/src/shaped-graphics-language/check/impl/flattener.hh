@@ -506,6 +506,8 @@ struct flattener
 
     /// PROTOTYPE: `fwd_diff` or `bwd_diff` of core.sgl, whose derivative flatten_diff.cc writes in place of its body.
     [[nodiscard]] bool is_diff_call(symbol_id callee) const;
+    /// PROTOTYPE: `no_diff` of core.sgl, a value a derivative holds constant.
+    [[nodiscard]] bool is_detach_call(symbol_id callee) const;
 
     flat_expr_id flatten_diff(ast::expr_id id, type_id type, call_record const& record);
 
@@ -535,6 +537,8 @@ struct flattener
         custom_derivatives derivatives;
         cc::vector<local_id> arguments;
         ast::expr_id call = ast::expr_id::none;
+        /// `no_diff(x)`, whose derivative is zero: its argument is bound inside it, so nothing it reads is followed.
+        bool is_detached = false;
     };
     cc::map<i32, custom_call> custom_calls;
 

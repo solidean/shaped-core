@@ -83,6 +83,30 @@ They hold both modes to central differences, among them the whole gradient of on
 * **A position's tangent is its direction**: a `pos3`'s is a `vec3`, an `hpos4`'s a `float4`, and `mat4 * pos3` moves a change of the position without the translation.
   A struct's tangent is the struct itself for now, so a position in one holds its direction, which every target writes alike.
 
+## Buffers and textures
+
+A trainer's parameters and a renderer's scene live in buffers and textures, so what a derivative does with a read decides whether a gradient arrives at all.
+A read whose gradient went nowhere would be a silent wrong answer, the one failure a derivative must not have.
+
+What the prototype does, in [buffers.sgl](../../../tests/corpus/derivatives/buffers.sgl):
+
+* A constant block's member is a constant: a camera, a setting, what the host hands every invocation alike.
+* A buffer's element read inside a function being differentiated is `unsupported-yet`, and the diagnostic says what to do instead.
+* `no_diff(x)` reads anything as a constant, which is the opt-out at an expression where `@no_diff` is the one at a parameter.
+* A function that reads an element can carry its own derivatives: `@forward` reads the element's tangent from a tangent buffer, and `@backward` adds its adjoint into a gradient buffer.
+  That is a differentiable buffer written by hand, and it works today.
+
+What a differentiable buffer would be, once it is the language's:
+
+* **A binding member says it is one**, as `weights: diff_buffer[float]`, and sg binds it as three buffers: the values, their tangents and their gradients.
+  A read of it then is what the hand-written pair above writes, with no function around it.
+* **An adjoint from many invocations is a float atomic add**, which [atomics.md](atomics.md) has behind an sg feature.
+  dx12 and WebGPU lack one, and a compare-exchange loop on the bits is the polyfill.
+* **An index every invocation of a subgroup shares is reduced first**, one subgroup sum and one atomic in place of thirty-two.
+  A tiled splat rasterizer is that case: every pixel of a tile walks the same splats at once, which is the optimization 3DGS's CUDA backward relies on.
+* **A texture's sample scatters its adjoint to the texels it filtered**, four atomic adds at the bilinear weights, one level for a sample at a level.
+  A texture that is trained is an image with a gradient image beside it.
+
 What it found in SGL itself:
 
 * **The prelude's matrices have no `+`, `-` nor scale by a scalar.**
@@ -104,8 +128,7 @@ What it found in SGL itself:
   A loop with a constant bound is unrolled or keeps a local tape sized by the bound.
   Any other loop is refused unless its function has a `@backward`.
 * **The builtin registry**: a derivative rule per differentiable record, and `prelude/builtins.sgl` regenerated with them.
-* **Atomics**: a reverse pass over a kernel that reads one parameter from many invocations writes its adjoint from many invocations.
-  That is a float atomic add, which [atomics.md](atomics.md) has behind an sg feature, and which dx12 and WebGPU lack.
+* **Atomics**: an adjoint added from many invocations, which [Buffers and textures](#buffers-and-textures) describes.
 * **Testing**: `central_difference` or its like in the prelude, and an approximate comparison a `test` can state.
 
 ## Already fixed by the syntax
@@ -122,7 +145,7 @@ The prototype has done forward mode, reverse mode, loops of constant bounds, der
 
 1. A struct's tangent type, a struct of its fields' tangents, so a struct holding a position says what it holds.
 2. The rules as registry records, and the matrix arithmetic in the registry.
-3. Adjoints accumulated across invocations, once float atomics or a reduction pattern exist.
+3. Differentiable buffers as binding members, once float atomics or a subgroup reduction exist.
 
 ## Open
 

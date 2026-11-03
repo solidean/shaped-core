@@ -124,6 +124,10 @@ fun nearly_equal(a: float, b: float, .within: float) => abs(a - b) <= within
 // after each parameter its tangent, of the parameter's tangent type, `vec3` for a `pos3`.
 // A parameter of no differentiable type takes none, and neither does one marked `@no_diff`.
 
+/// `x` as it is, which a derivative holds constant: its tangent is zero, and nothing it reads is followed.
+/// A buffer is read so inside a function being differentiated, which refuses a plain read.
+fun no_diff[T](x: T) -> T => x
+
 fun fwd_diff[A, R](f: (A) -> R, a: A, da: A) -> R => f(a)
 fun fwd_diff[A, B, R](f: (A, B) -> R, a: A, da: A, b: B, db: B) -> R => f(a, b)
 fun fwd_diff[A, B, C, R](f: (A, B, C) -> R, a: A, da: A, b: B, db: B, c: C, dc: C) -> R => f(a, b, c)

@@ -1,0 +1,69 @@
+// PROTOTYPE (docs/spec/incubator/autodiff.md): what a derivative does with what a shader reads from a binding.
+// A constant block's member is a constant: a camera, a setting, what every invocation is handed alike.
+// A buffer's element is refused: its gradient would have to be written back, and a derivative never drops one silently.
+// `no_diff(x)` reads it as a constant, and a @backward on the function that reads it writes its gradient back.
+
+// `no_diff` holds a value constant: d/dx of x * (3 x), with the second factor held, is 3 x
+fun half_held(x: float) => x * no_diff(x * 3.0)
+
+test fwd_diff(half_held, 2.0, 1.0) == 6.0
+test:
+    let mut dx = 0.0
+    bwd_diff(half_held, 2.0, mut dx, 1.0)
+    dx == 6.0
+
+binding scene:
+    exposure: float
+    weights: buffer[float]
+
+binding training:
+    gradients: mut buffer[float]
+    tangents: buffer[float]
+    losses: mut buffer[float]
+
+// a constant block's member is read as a constant
+fun exposed(x: float){scene} => x * exp(scene.exposure)
+
+@compute(64) fun constant_member(@thread_id id: int3){scene, training}:
+    let mut dx = 0.0
+    bwd_diff(exposed, training.tangents[id.x], mut dx, 1.0)
+    training.losses[id.x] = dx
+
+// a plain read of a buffer is refused
+fun weighted(x: float, i: int){scene} => x * scene.weights[i]
+
+@expect(error = "unsupported-yet")
+@compute(64) fun refuses_a_buffer_read(@thread_id id: int3){scene, training}:
+    let mut dx = 0.0
+    bwd_diff(weighted, 1.0, mut dx, id.x, 1.0)
+    training.losses[id.x] = dx
+
+// read as no_diff, it is a constant
+fun weighted_held(x: float, i: int){scene} => x * no_diff(scene.weights[i])
+
+@compute(64) fun held_buffer_read(@thread_id id: int3){scene, training}:
+    let mut dx = 0.0
+    bwd_diff(weighted_held, 1.0, mut dx, id.x, 1.0)
+    training.losses[id.x] = dx
+
+// A differentiable buffer, written by hand: the function that reads an element says where the element's change comes
+// from going forward, and where its gradient goes going backward.
+// One thread per element here; where several add to one, the add is what float atomics are for.
+fun weight(i: int){scene} => no_diff(scene.weights[i])
+
+@forward(weight)
+fun weight_forward(i: int){training} => training.tangents[i]
+
+@backward(weight)
+fun weight_backward(i: int, dr: float){training}:
+    training.gradients[i] += dr
+
+fun loss(i: int){scene} -> float:
+    let w = weight(i)
+    return (w - 1.0) * (w - 1.0)
+
+@compute(64) fun loss_backward(@thread_id id: int3){scene, training}:
+    bwd_diff(loss, id.x, 1.0)
+
+@compute(64) fun loss_forward(@thread_id id: int3){scene, training}:
+    training.losses[id.x] = fwd_diff(loss, id.x)

@@ -1298,6 +1298,8 @@ struct checker
 
     /// PROTOTYPE (autodiff): a value of `type` has a derivative: a float, a half, or what holds one.
     [[nodiscard]] bool is_differentiable_type(type_id type) const;
+    /// Parameter `parameter` of `function` takes a tangent: it is of a differentiable type, no `mut`, and no `@no_diff`.
+    [[nodiscard]] bool takes_tangent(symbol_id function, isize parameter) const;
     /// The type of a change of a value of `type`: a position's is its direction, and any other type is its own.
     [[nodiscard]] type_id tangent_type(type_id type) const;
     /// For a call of the prelude's `fwd_diff` or `bwd_diff`: one overload per function the first argument names, each

@@ -37,6 +37,19 @@ type_id checker::tangent_type(type_id type) const
     return type;
 }
 
+bool checker::takes_tangent(symbol_id function, isize parameter) const
+{
+    auto const& s = out.at(function);
+    auto const own = out.at(out.functions[s.info].parameters);
+    if (parameter >= own.size() || own[parameter].is_mut || !is_differentiable_type(own[parameter].type))
+        return false;
+    auto const* const fun = ast_of(s.file).at(s.declaration).node.try_as<ast::fun_decl>();
+    if (fun == nullptr)
+        return true;
+    auto const fields = ast_of(s.file).at(fun->parameters);
+    return parameter >= fields.size() || find_attribute(s.file, fields[parameter].attributes, "no_diff") == nullptr;
+}
+
 cc::vector<symbol_id> checker::derivative_candidates(cc::span<symbol_id const> generic,
                                                      call_arguments const& arguments,
                                                      i32 file,
@@ -64,10 +77,8 @@ cc::vector<symbol_id> checker::derivative_candidates(cc::span<symbol_id const> g
         if (info.type_parameters.count > 0 || info.result == checked_module::void_type)
             continue;
         auto const own = cc::vector<parameter>::create_copy_of(out.at(info.parameters));
-        auto const* const fun = ast_of(s.file).at(s.declaration).node.try_as<ast::fun_decl>();
-        if (fun == nullptr)
+        if (!ast_of(s.file).at(s.declaration).node.is<ast::fun_decl>())
             continue;
-        auto const fields = ast_of(s.file).at(fun->parameters);
 
         auto types = cc::vector<type_id>();
         for (auto const& p : own)
@@ -79,9 +90,7 @@ cc::vector<symbol_id> checker::derivative_candidates(cc::span<symbol_id const> g
         {
             signature.value_slots.push_back(i32(parameters.size()));
             parameters.push_back({.name = own[i].name, .type = own[i].type});
-            auto const is_marked
-                = i < fields.size() && find_attribute(s.file, fields[i].attributes, "no_diff") != nullptr;
-            if (!is_differentiable_type(own[i].type) || is_marked || own[i].is_mut)
+            if (!takes_tangent(function, i))
             {
                 signature.tangent_slots.push_back(-1);
                 continue;
