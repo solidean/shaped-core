@@ -20,7 +20,7 @@ sgl::emitted_source compile(cc::string_view source, target t, cc::string_view en
 {
     auto r = sgl::compile_to_text(
         {.source = source, .source_name = "debug.sgl", .entry_point = entry, .target = t, .diagnostics = true});
-    REQUIRE(r.has_value());
+    REQUIRE(r.has_value()).dump("errors", r.has_value() ? cc::string() : r.error());
     return cc::move(r.value());
 }
 } // namespace
@@ -116,4 +116,35 @@ TEST("sgl emit - a vertex stage's failed assert returns its vertex at a NaN posi
         CHECK(text.contains("2143289344")).dump("target", sgl::emit::to_string(t)).dump("text", text);
         CHECK(text.contains("culled"));
     }
+}
+
+TEST("sgl emit - a failed assert ends a patch, a candidate and a box as each stage ends: no factors, ignore, no hit")
+{
+    constexpr auto patch = "require tessellation_shader\n"
+                           "struct control_point:\n    position: float3\n"
+                           "struct tri_factors:\n"
+                           "    @edge_factors edges: float[3]\n"
+                           "    @inside_factors inside: float\n"
+                           "@tessellation_control(partitioning = .integer, winding = .counter_clockwise)\n"
+                           "fun tc(patch: control_point[3]) -> tri_factors:\n"
+                           "    assert patch[0].position.x >= 0.0, \"patch at $(patch[0].position.x)\"\n"
+                           "    return { edges = [1.0, 1.0, 1.0], inside = 1.0 }\n";
+    auto const control = compile(patch, target::hlsl_dx12, "tc").text;
+    CHECK(control.contains("culled.edges[2] = 0.0;")).dump("text", control);
+
+    constexpr auto candidate = "require raytracing_pipeline\n"
+                               "struct radiance:\n    color: float3\n"
+                               "@any_hit fun keep(c: triangle_candidate, p: mut radiance) -> hit_decision:\n"
+                               "    assert p.color.x >= 0.0, \"negative $(p.color.x)\"\n"
+                               "    return hit_decision.accept\n";
+    auto const any_hit = compile(candidate, target::hlsl_dx12, "keep").text;
+    CHECK(any_hit.contains("IgnoreHit()")).dump("text", any_hit);
+
+    constexpr auto box = "require raytracing_pipeline\n"
+                         "struct sphere_hit:\n    normal: float3\n"
+                         "@intersection fun sphere(b: procedural_box) -> report[sphere_hit]:\n"
+                         "    assert b.primitive_index >= 0, \"box $(b.primitive_index)\"\n"
+                         "    return report(1.0, sphere_hit(float3(0.0, 1.0, 0.0)))\n";
+    auto const intersection = compile(box, target::hlsl_dx12, "sphere").text;
+    CHECK(intersection.contains("is_hit = false")).dump("text", intersection);
 }

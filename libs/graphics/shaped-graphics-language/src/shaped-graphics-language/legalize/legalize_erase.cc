@@ -56,9 +56,29 @@ struct void_eraser
                  || stage == check::stage::geometry)
             failed.push_back(out.return_(flat_expr_id::none));
         else if (stage == check::stage::vertex || stage == check::stage::tessellation_evaluation)
+        {
             // a vertex at a NaN position, which culls every primitive it is part of
             if (auto const culled = culled_vertex(failed); is_valid(culled))
                 failed.push_back(out.return_(culled));
+        }
+        else if (stage == check::stage::tessellation_control)
+        {
+            // a patch whose edge factors are zero, which the tessellator culls
+            if (auto const culled = culled_patch(failed); is_valid(culled))
+                failed.push_back(out.return_(culled));
+        }
+        else if (stage == check::stage::any_hit)
+        {
+            // the candidate is no hit
+            if (auto const ignore = case_of(out.e.result, "ignore"); is_valid(ignore))
+                failed.push_back(out.return_(ignore));
+        }
+        else if (stage == check::stage::intersection)
+        {
+            // the box reports no hit
+            if (auto const none = no_report(failed); is_valid(none))
+                failed.push_back(out.return_(none));
+        }
         into.push_back(out.if_(out.not_(out.local(nodes[0].value)), failed));
     }
 
@@ -87,6 +107,67 @@ struct void_eraser
         auto const local = out.add_local(local_kind::var, "culled", result);
         into.push_back(out.var(local));
         into.push_back(out.assign(out.member(out.local(local), i32(position)), value));
+        return out.local(local);
+    }
+
+    /// Case `name` of enum `type`; none where it has no such case.
+    [[nodiscard]] flat_expr_id case_of(type_id type, cc::string_view name)
+    {
+        if (!is_valid(type) || out.m.at(type).kind != check::type_kind::enumeration)
+            return flat_expr_id::none;
+        auto const cases = out.m.at(out.m.at(type).cases);
+        for (auto i = isize(0); i < cases.size(); ++i)
+            if (cases[i].name == name)
+                return out.add_expr(type, flat_enum_value{.case_index = i32(i)});
+        return flat_expr_id::none;
+    }
+
+    /// LEGAL-64: the stage's factors struct with every edge factor 0, its other members unset.
+    [[nodiscard]] flat_expr_id culled_patch(stmt_list& into)
+    {
+        auto const result = out.e.result;
+        if (!is_valid(result) || out.m.at(result).kind != check::type_kind::structure)
+            return flat_expr_id::none;
+        auto const members = out.m.at(out.m.at(result).members);
+        auto edges = isize(-1);
+        for (auto i = isize(0); i < members.size(); ++i)
+            if (members[i].factor == check::tessellation_factor::edge)
+                edges = i;
+        if (edges < 0)
+            return flat_expr_id::none;
+        auto const& array = out.m.at(members[edges].type);
+        if (array.kind != check::type_kind::array)
+            return flat_expr_id::none;
+
+        auto const local = out.add_local(local_kind::var, "culled", result);
+        into.push_back(out.var(local));
+        for (auto k = 0; k < array.count; ++k)
+        {
+            auto const factors = out.member(out.local(local), i32(edges));
+            auto const element
+                = out.add_expr(array.element, flat_element{.object = factors, .index = out.int_literal(k)});
+            into.push_back(out.assign(element, out.literal(0.0)));
+        }
+        return out.local(local);
+    }
+
+    /// LEGAL-64: the stage's report with `is_hit` false, its other members unset.
+    [[nodiscard]] flat_expr_id no_report(stmt_list& into)
+    {
+        auto const result = out.e.result;
+        if (!is_valid(result) || out.m.at(result).kind != check::type_kind::structure)
+            return flat_expr_id::none;
+        auto const members = out.m.at(out.m.at(result).members);
+        auto is_hit = isize(-1);
+        for (auto i = isize(0); i < members.size(); ++i)
+            if (members[i].name == "is_hit")
+                is_hit = i;
+        if (is_hit < 0)
+            return flat_expr_id::none;
+
+        auto const local = out.add_local(local_kind::var, "culled", result);
+        into.push_back(out.var(local));
+        into.push_back(out.assign(out.member(out.local(local), i32(is_hit)), out.bool_literal(false)));
         return out.local(local);
     }
 
