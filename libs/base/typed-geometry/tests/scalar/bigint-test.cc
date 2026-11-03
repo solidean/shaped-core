@@ -277,6 +277,60 @@ TEST("tg bigint - assign_add_mul and assign_sub_mul agree with the product and t
     CHECK(z.is_zero());
 }
 
+TEST("tg bigint - an accumulator's sum of products agrees with the bigint sum")
+{
+    auto rng = nx::test_random();
+    auto const n = nx::is_thorough() ? 20000 : 3000;
+    auto const check_width = [&]<int W>()
+    {
+        for (auto i = 0; i < n; ++i)
+        {
+            tg::bigint_accumulator<W> acc;
+            bigint expected;
+            auto const terms = 1 + int(rng.next_u64() % 12);
+            for (auto t = 0; t < terms; ++t)
+            {
+                auto const a = random_bigint(rng, tg::bigint_accumulator<W>::factor_limbs);
+                auto const b = random_bigint(rng, tg::bigint_accumulator<W>::factor_limbs);
+                acc.add_mul(a, b);
+                expected.assign_add_mul(a, b);
+                // now and then the negated product too, so sums cancel back through zero
+                if (rng.next_u64() % 5 == 0)
+                {
+                    acc.add_mul(-a, b);
+                    expected.assign_sub_mul(a, b);
+                }
+            }
+            CHECK(acc.to_bigint() == expected);
+            CHECK(acc.is_zero() == expected.is_zero());
+            acc.clear();
+            CHECK(acc.is_zero());
+        }
+    };
+    check_width.template operator()<3>();
+    check_width.template operator()<5>();
+
+    // the signed word accumulator, over factors that fit an i64, its extremes included
+    auto const extremes = cc::fixed_array<i64, 6>{
+        {i64(1) << 62, -(i64(1) << 62), i64(0x7fffffffffffffff), i64(-0x7fffffffffffffff) - 1, -1, 0}};
+    for (auto i = 0; i < n; ++i)
+    {
+        tg::bigint_word_accumulator acc;
+        bigint expected;
+        auto const terms = 1 + int(rng.next_u64() % 12);
+        for (auto t = 0; t < terms; ++t)
+        {
+            auto const pick
+                = [&] { return rng.next_u64() % 3 == 0 ? extremes[rng.next_u64() % 6] : i64(rng.next_u64()); };
+            auto const a = bigint(pick());
+            auto const b = bigint(pick());
+            acc.add_mul(tg::bigint_word_accumulator::make_factor(a), tg::bigint_word_accumulator::make_factor(b));
+            expected.assign_add_mul(a, b);
+        }
+        CHECK(acc.to_bigint() == expected);
+    }
+}
+
 TEST("tg bigint - division recovers a known quotient and remainder")
 {
     // divisors of all ones or a lone top bit, quotient limbs of all ones: windows whose top two limbs equal the divisor's,

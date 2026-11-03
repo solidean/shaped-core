@@ -217,6 +217,13 @@ struct tg::bigint
         if (!_try_mul_small(a, b)) [[unlikely]]
             _assign_mul(a, b);
     }
+    /// The fixed-width accumulator for sums of products of factors of at most (W - 1) / 2 limbs, which a sum of products picks
+    /// over a bigint per slot when every factor is that small: a polynomial product's coefficients, a dot product.
+    template <int W>
+    using accumulator = bigint_accumulator<W>;
+    /// The accumulator for factors that all fit an i64, the commonest polynomial coefficients: one signed multiply a product.
+    using word_accumulator = bigint_word_accumulator;
+
     /// *this += a * b, without a temporary: the inner step of a polynomial product or a dot product.
     /// One-limb factors into an accumulator of up to two limbs stay inline; the rest multiplies into a thread-local scratch.
     CC_FORCE_INLINE void assign_add_mul(bigint const& a, bigint const& b)
@@ -633,5 +640,207 @@ struct tg::scalar_traits<tg::bigint>
         if (x.is_negative())
             x.negate();
         return x;
+    }
+};
+
+/// A sum of products of bigints of at most (W - 1) / 2 limbs each, held in W limbs of two's complement:
+/// add_mul is a few multiplies and an add with carries, with no node and no branch on the accumulator's size,
+/// and to_bigint converts once at the end, which is how a polynomial product over small coefficients keeps up with FLINT's.
+/// W - 1 limbs hold one product, so the spare limb absorbs 2^63 of them before the sum could overflow.
+template <int W>
+struct tg::bigint_accumulator
+{
+    static_assert(W >= 3 && W % 2 == 1, "tg::bigint_accumulator: W is 2L + 1 for factors of up to L limbs");
+    static constexpr int factor_limbs = (W - 1) / 2;
+
+    u64 limbs[W] = {};
+
+    /// A factor in word form: its magnitude zero-padded to factor_limbs limbs, and all ones in the mask when it is negative.
+    /// A product's factors read once into this form keep its inner loop off the bigints' scattered nodes.
+    struct factor
+    {
+        u64 magnitude[(W - 1) / 2] = {};
+        u64 negative_mask = 0;
+    };
+
+    [[nodiscard]] static factor make_factor(bigint const& v)
+    {
+        factor f;
+        auto const l = v.limbs();
+        CC_ASSERT(l.size() <= factor_limbs, "tg::bigint_accumulator: a factor wider than the accumulator takes");
+        for (isize i = 0; i < l.size(); ++i)
+            f.magnitude[i] = l[i];
+        f.negative_mask = v.is_negative() ? ~u64(0) : 0;
+        return f;
+    }
+
+    /// += a * b, without a branch: the product's two's complement is its magnitude XOR the sign mask, plus the mask's low bit.
+    CC_FORCE_INLINE void add_mul(factor const& a, factor const& b)
+    {
+        u64 p[W - 1] = {};
+        if constexpr (W == 3)
+        {
+            auto const m = cc::umul128(a.magnitude[0], b.magnitude[0]);
+            p[0] = m.lo;
+            p[1] = m.hi;
+        }
+        else
+        {
+            for (auto i = 0; i < factor_limbs; ++i)
+            {
+                u64 carry = 0;
+                for (auto j = 0; j < factor_limbs; ++j)
+                {
+                    auto const m = cc::umul128(a.magnitude[i], b.magnitude[j]);
+                    auto const s = cc::add_with_carry(p[i + j], m.lo);
+                    auto const t = cc::add_with_carry(s.value, carry);
+                    p[i + j] = t.value;
+                    carry = m.hi + s.carry + t.carry;
+                }
+                p[i + factor_limbs] = carry;
+            }
+        }
+        auto const mask = a.negative_mask ^ b.negative_mask;
+        u64 c = mask & 1;
+        for (auto k = 0; k < W - 1; ++k)
+        {
+            auto const s = cc::add_with_carry(limbs[k], p[k] ^ mask, c);
+            limbs[k] = s.value;
+            c = s.carry;
+        }
+        limbs[W - 1] += mask + c;
+    }
+
+    /// += a * b; a and b have at most factor_limbs limbs each.
+    CC_FORCE_INLINE void add_mul(bigint const& a, bigint const& b)
+    {
+        auto const x = a.limbs();
+        auto const y = b.limbs();
+        if (x.empty() || y.empty())
+            return;
+        CC_ASSERT(x.size() <= factor_limbs && y.size() <= factor_limbs, "tg::bigint_accumulator: a factor wider than "
+                                                                        "the accumulator takes");
+        auto const negative = a.is_negative() != b.is_negative();
+        if constexpr (W == 3)
+        {
+            auto const p = cc::umul128(x[0], y[0]);
+            _add_or_subtract(p.lo, p.hi, negative);
+        }
+        else
+        {
+            // the product's magnitude by schoolbook, W - 1 limbs at most
+            u64 p[W] = {};
+            for (isize i = 0; i < x.size(); ++i)
+            {
+                u64 carry = 0;
+                for (isize j = 0; j < y.size(); ++j)
+                {
+                    auto const m = cc::umul128(x[i], y[j]);
+                    auto const s = cc::add_with_carry(p[i + j], m.lo);
+                    auto const t = cc::add_with_carry(s.value, carry);
+                    p[i + j] = t.value;
+                    carry = m.hi + s.carry + t.carry;
+                }
+                p[i + y.size()] = carry;
+            }
+            u64 c = 0;
+            for (auto k = 0; k < W; ++k)
+            {
+                if (negative)
+                {
+                    auto const d = cc::sub_with_borrow(limbs[k], p[k], c);
+                    limbs[k] = d.value;
+                    c = d.borrow;
+                }
+                else
+                {
+                    auto const s = cc::add_with_carry(limbs[k], p[k], c);
+                    limbs[k] = s.value;
+                    c = s.carry;
+                }
+            }
+        }
+    }
+
+    [[nodiscard]] bool is_zero() const
+    {
+        u64 any = 0;
+        for (auto const l : limbs)
+            any |= l;
+        return any == 0;
+    }
+
+    void clear()
+    {
+        for (auto& l : limbs)
+            l = 0;
+    }
+
+    /// The sum as a bigint, its magnitude from the two's complement.
+    [[nodiscard]] bigint to_bigint() const
+    {
+        auto const negative = (limbs[W - 1] >> 63) != 0;
+        u64 m[W];
+        u64 c = 1;
+        for (auto k = 0; k < W; ++k)
+        {
+            if (negative)
+            {
+                auto const s = cc::add_with_carry(~limbs[k], 0, c);
+                m[k] = s.value;
+                c = s.carry;
+            }
+            else
+                m[k] = limbs[k];
+        }
+        auto n = W;
+        while (n > 0 && m[n - 1] == 0)
+            --n;
+        return bigint::from_limbs(cc::span<u64 const>(m, isize(n)), negative);
+    }
+
+private:
+    CC_FORCE_INLINE void _add_or_subtract(u64 lo, u64 hi, bool negative)
+    {
+        if (negative)
+        {
+            auto const d0 = cc::sub_with_borrow(limbs[0], lo);
+            auto const d1 = cc::sub_with_borrow(limbs[1], hi, d0.borrow);
+            limbs[0] = d0.value;
+            limbs[1] = d1.value;
+            for (auto k = 2; k < W; ++k)
+                limbs[k] -= d1.borrow;
+        }
+        else
+        {
+            auto const s0 = cc::add_with_carry(limbs[0], lo);
+            auto const s1 = cc::add_with_carry(limbs[1], hi, s0.carry);
+            limbs[0] = s0.value;
+            limbs[1] = s1.value;
+            for (auto k = 2; k < W; ++k)
+                limbs[k] += s1.carry;
+        }
+    }
+};
+
+/// A sum of products of bigints that fit an i64: three limbs of two's complement like bigint_accumulator<3>,
+/// but each product one signed 64 x 64 multiply, added with its sign extended, and no masks.
+struct tg::bigint_word_accumulator : tg::bigint_accumulator<3>
+{
+    using factor = i64;
+
+    /// v, which fits an i64.
+    [[nodiscard]] static i64 make_factor(bigint const& v) { return v.to_i64(); }
+
+    using bigint_accumulator<3>::add_mul;
+
+    CC_FORCE_INLINE void add_mul(i64 a, i64 b)
+    {
+        auto const p = cc::imul128(a, b);
+        auto const s0 = cc::add_with_carry(limbs[0], p.lo);
+        auto const s1 = cc::add_with_carry(limbs[1], u64(p.hi), s0.carry);
+        limbs[0] = s0.value;
+        limbs[1] = s1.value;
+        limbs[2] += u64(p.hi >> 63) + s1.carry;
     }
 };
