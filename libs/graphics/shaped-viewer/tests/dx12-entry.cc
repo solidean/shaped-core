@@ -34,6 +34,10 @@ NX_ALLOW_LOGS(cc::rec::level::warning, "sg.dx12", sg::backend::dx12::k_expected_
 
 ASYNC_TEST("sv dx12 - warp", nx::config::exclusive("capture-environment"))
 {
+    // WARP is a low tier target, and it hangs inside its own driver once a hybrid frame first runs: one of its threads walks a linked list with a cycle in it.
+    // Off until that is understood; issue: bug-sv-ci-windows-clang-warp-hang
+    SKIP("WARP hangs in its driver on the hybrid's first full frame; issue: bug-sv-ci-windows-clang-warp-hang");
+
     // Beside a GPU, WARP is a second adapter the default run need not pay for; on a GPU-less host it is the only one.
     if (!nx::is_thorough() && sg::backend::dx12::has_hardware_adapter())
         SKIP("the hardware adapter covers the default run; WARP runs under --thorough");

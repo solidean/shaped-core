@@ -213,9 +213,16 @@ struct nx::impl::test_context
     // Per pass: cleared before each body runs.
     cc::atomic<bool> aborted_by_check_throw = {false};
 
-    // Why a SKIP ended the body; the first one wins, since a skip from either path ends the test.
+    // Why a SKIP ended the body; the first one wins.
     // Behind a mutex because an async body may skip on any worker.
     cc::mutex<cc::string> skip_reason;
+
+    // Whether this pass ended in a SKIP; per pass, cleared before each body runs.
+    cc::atomic<bool> pass_skipped = {false};
+
+    // The passes that ran a leaf without skipping, which decide whether the test as a whole is reported skipped.
+    // A pass that only re-ran the root with every section done does not count: it is the replay looking for siblings.
+    int unskipped_passes = 0;
 
     // The exclusion locks of the phase this test runs in, which an async invocation takes a child's tags from.
     // Null outside a phase that has them: a directly driven phase runs its bodies one at a time, so nothing contends.
@@ -626,7 +633,9 @@ void test_execute_end(cc::unique_ptr<test_context> owned, bool keep_alive)
     bool const require_checks = ctx.execution->instance.declaration->test_config.bucket == config::test_bucket::normal
                              && ctx.execution->nested.empty();
     ctx.root_section->finalize_section_to(ctx.execution->root, require_checks);
-    ctx.execution->skip_reason = ctx.skip_reason.lock([](cc::string& r) { return cc::move(r); });
+    // A test is skipped when nothing in it ran but skips; one whose other sections ran passes or fails on them.
+    auto reason = ctx.skip_reason.lock([](cc::string& r) { return cc::move(r); });
+    ctx.execution->skip_reason = ctx.unskipped_passes == 0 ? cc::move(reason) : cc::string();
 
     ctx.is_finished.store(true, cc::memory_order_release);
     if (ctx.in_flight_slot >= 0)
@@ -647,6 +656,7 @@ void begin_pass(test_context& ctx)
     ctx.leaf_section = nullptr;
     ctx.root_section->next_open_section = nullptr;
     ctx.aborted_by_check_throw.store(false, cc::memory_order_release);
+    ctx.pass_skipped.store(false, cc::memory_order_release);
 }
 
 /// Whether a passing test's recording must wait for the log rule, which may still fail it at the end of the run.
@@ -838,8 +848,17 @@ bool find_section_path(test_section const& at, test_section const& target, cc::v
         = ctx.log_declarations.lock([](cc::vector<impl::log_declaration>& d) { return cc::exchange(d, {}); });
     ctx.execution->log_passes.push_back(cc::move(pass));
 
+    // A SKIP inside a section ends that section alone, and it closed as done on the way out.
+    // The sections after it were never reached, so nothing knows of them yet: one more pass runs past it to find them.
+    // That pass ends the replay itself if it finds none, since its leaf is then the root.
+    auto const skipped = ctx.pass_skipped.load(cc::memory_order_acquire);
+    auto const in_section = sec != ctx.root_section.get();
+    auto const only_replayed_root = !in_section && !ctx.root_section->subsections_ordered.empty();
+    if (!skipped && !only_replayed_root)
+        ++ctx.unskipped_passes;
+
     // no new sections to execute? then the root is done, which is also what keeps it from reporting itself unreachable
-    auto const explored = ctx.root_section->next_open_section == nullptr;
+    auto const explored = ctx.root_section->next_open_section == nullptr && !(skipped && in_section);
     if (explored)
         ctx.root_section->is_done = true;
 
@@ -962,6 +981,7 @@ void record_skip_reason(test_context& ctx, impl::check_result const& result)
             if (r.empty())
                 r = cc::move(reason);
         });
+    ctx.pass_skipped.store(true, cc::memory_order_release);
 }
 
 /// Tally a check that did not come from `ctx`'s own test body, and decide whether it may abort by throwing.

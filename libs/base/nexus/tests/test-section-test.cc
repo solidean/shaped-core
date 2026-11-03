@@ -51,6 +51,82 @@ TEST("test sections - basics", no_scheduler)
     CHECK(exec.count_failed_checks() == 0);
 }
 
+// A SKIP ends its section, not the test: the sections after it were never reached, and one more pass runs them.
+TEST("test sections - a skip in one section leaves its siblings to run", no_scheduler)
+{
+    int sec_a = 0;
+    int sec_b = 0;
+    int sec_c = 0;
+
+    nx::test_registry reg;
+    reg.add_declaration( //
+        "testA", {},
+        [&]
+        {
+            SECTION("sec A")
+            {
+                sec_a++;
+                SKIP("not here");
+            }
+            SECTION("sec B")
+            {
+                sec_b++;
+                CHECK(true);
+            }
+            SECTION("sec C")
+            {
+                sec_c++;
+                CHECK(true);
+            }
+        });
+
+    auto schedule = nx::test_schedule::create({}, reg);
+    auto exec = nx::execute_tests(schedule, {});
+
+    CHECK(sec_a == 1);
+    CHECK(sec_b == 1);
+    CHECK(sec_c == 1);
+    CHECK(exec.count_failed_tests() == 0);
+    // sections ran beside the skipped one, so the test passed rather than skipped
+    CHECK(exec.skipped_tests().empty());
+}
+
+TEST("test sections - a test whose every section skips is skipped", no_scheduler)
+{
+    nx::test_registry reg;
+    reg.add_declaration( //
+        "only", {},
+        []
+        {
+            SECTION("the one")
+            {
+                SKIP("nothing to do here");
+            }
+        });
+    reg.add_declaration( //
+        "both", {},
+        []
+        {
+            SECTION("first")
+            {
+                SKIP("first skipped");
+            }
+            SECTION("second")
+            {
+                SKIP("second skipped");
+            }
+        });
+
+    auto schedule = nx::test_schedule::create({}, reg);
+    auto exec = nx::execute_tests(schedule, {});
+
+    CHECK(exec.count_failed_tests() == 0);
+    auto const skipped = exec.skipped_tests();
+    REQUIRE(skipped.size() == 2);
+    for (auto const& s : skipped)
+        CHECK((s.reason == "nothing to do here" || s.reason == "first skipped")).dump("reason", s.reason);
+}
+
 TEST("test sections - basics nested", no_scheduler)
 {
     int counter_a = 0;

@@ -3,6 +3,8 @@ created: 2026-10-29
 refs:
   - file: tools/dev/lib/pipeline/eligibility.py
   - file: tools/dev/lib/core/process.py
+closed: 2026-11-03
+resolution: fixed
 ---
 
 # dev.py test crashes on a test name outside the console's code page: the listing is decoded in it, not in UTF-8
@@ -24,3 +26,7 @@ What it needs:
 - `encoding="utf-8"` on the listing's `subprocess.run`, the encoding nexus writes;
 - `None` output treated as any other unreadable listing;
 - the other `text=True` runs in `tools/dev/lib` checked for the same: `core/process.py` decodes captured output the same way.
+
+Done 2026-11-03: the listing decodes as UTF-8 with replacement, and nexus binaries carry a UTF-8 code-page manifest, so a name with `²` selects its test.
+A listing with no output at all is "could not determine" now too.
+`core/process.py`'s remaining text runs read vswhere and `cmd`'s `set`, which write in the console's code page, so the locale is right there; they replace what does not decode.
