@@ -141,15 +141,15 @@ template <class C, class S>
     else
         return s.is_zero();
 }
-/// The slot's sum as a C, the slot left zero: a moved-from bigint is zero already, a coefficient that keeps its value is reset.
+/// The slot's sum as a C, the slot left zero.
+/// The reset is unconditional: a moved-from coefficient need not be a valid zero, a rational polynomial's denominator being empty.
 template <class C, class S>
 [[nodiscard]] C slot_take(S& s)
 {
     if constexpr (std::is_same_v<S, C>)
     {
         C c = cc::move(s);
-        if (!coefficient_is_zero(s))
-            s = C(0);
+        s = C(0);
         return c;
     }
     else

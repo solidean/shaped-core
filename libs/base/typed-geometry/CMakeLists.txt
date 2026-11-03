@@ -54,6 +54,7 @@ target_sources(typed-geometry
     src/typed-geometry/symbolic/polynomial_roots.hh
     src/typed-geometry/symbolic/symbol.hh
     src/typed-geometry/symbolic/dynamic_polynomial.hh
+    src/typed-geometry/symbolic/rational_polynomial.hh
 
     src/typed-geometry/linalg/fwd.hh
     src/typed-geometry/linalg/comp.hh
@@ -207,6 +208,7 @@ if(SC_BUILD_TESTS)
         tests/symbolic/multi_polynomial-test.cc
         tests/symbolic/polynomial_roots-test.cc
         tests/symbolic/dynamic_polynomial-test.cc
+        tests/symbolic/rational_polynomial-test.cc
 
         tests/benchmarks/fixed_int-benchmark.cc
         tests/benchmarks/bigfloat-benchmark.cc

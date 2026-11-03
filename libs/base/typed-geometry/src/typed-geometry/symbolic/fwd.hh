@@ -45,6 +45,10 @@ struct multi_polynomial;
 /// an interval holding exactly one real root of a polynomial, or the root itself (see symbolic/polynomial_roots.hh).
 struct root_interval;
 
+/// a quotient of two polynomials of type P, a field (see symbolic/rational_polynomial.hh).
+template <class P>
+struct rational_polynomial;
+
 /// a quotient and a remainder, as tg::divrem of polynomials returns them.
 template <class Q, class R = Q>
 struct quotient_remainder;

@@ -4,7 +4,7 @@
 
 ## What this module is
 
-`symbolic/` is exact algebra over the scalars: polynomials today, rational polynomials next.
+`symbolic/` is exact algebra over the scalars: polynomials and rational polynomials.
 It sits above `scalar/` and knows nothing of geometry; geometry may instantiate over its types, never the other way around.
 
 ## What belongs here
@@ -12,7 +12,8 @@ It sits above `scalar/` and knows nothing of geometry; geometry may instantiate 
 - `tg::polynomial<C, Degree>`: one variable, dense, the degree bounded inline or grown in a vector.
 - `tg::multi_polynomial<C, Vars>`: several variables, sparse, the exponents packed into machine words.
 - The monomial orders and variable sets `multi_polynomial` is generic over: `tg::vars<N, Order, Bits>`, and `tg::dynamic_vars<Order>` over `tg::symbol`s.
-- Algorithms on them: arithmetic, evaluation, composition, derivatives, division, gcds, resultants and real roots; rational polynomials next.
+- `tg::rational_polynomial<P>`: a quotient of either, and a field.
+- Algorithms on them: arithmetic, evaluation, composition, derivatives, division, gcds, resultants and real roots.
 
 ## What does NOT belong here
 
@@ -116,3 +117,12 @@ Operands over different lists are repacked onto their union first; a variable wi
 The list is sorted by the names' bytes, not by the interned identity, so the variable order and the printed form are the same every run.
 The width stays fixed and checked, as `vars<>`'s does, rather than growing: one representation to test, and 32767 is a large exponent.
 Products go through the heap, there being no static box for the dense path; `parse` reads the printed form back.
+
+### Rational polynomials reduce where a gcd exists
+
+`rational_polynomial<P>` is a field, so a polynomial over it has `divrem`, which is what the trait seam was for.
+Where `P` has a gcd, a univariate polynomial over `bigint` or an exact field, every operation reduces by it and the denominator leads positively,
+monic over a field: the representation is canonical, and equality compares parts.
+Where it has none, the multivariate types for now, the parts are kept as they come but for the sign, and equality cross-multiplies.
+Symbolic perturbation needs no more there: the sign of a quotient of infinitesimal polynomials is the product of its parts' signs.
+Evaluating needs the point in a field, so a rational polynomial over `bigint` is refused a `bigint` point at compile time instead of dividing with truncation.

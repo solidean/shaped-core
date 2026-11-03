@@ -636,6 +636,18 @@ derivative(p, x); substitute(p, x, q);                      // q a polynomial or
 // The infinitesimal order is local (1 is the largest monomial): it ranks for signs, not for division.
 ```
 
+## rational_polynomial (a field of polynomial quotients)
+
+```cpp
+#include <typed-geometry/symbolic/rational_polynomial.hh>
+using R = tg::rational_polynomial<tg::polynomial<tg::bigint>>;  // or over any multi_polynomial
+R r(num, den); r.numerator(); r.denominator(); r.is_zero(); R::is_reduced; // reduced by gcd where P has one
+a + b; a - b; a * b; a / b; a == b;                         // canonical parts where reduced, cross products otherwise
+r(tg::bigrat(1, 3));                                        // evaluation needs a field's value
+r.sign();                                                   // over infinitesimal variables: the parts' signs multiplied
+tg::polynomial<R> p; divrem(p, q);                          // a field, so polynomials over it divide
+```
+
 ## half_float (binary16)
 
 ```cpp

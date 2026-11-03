@@ -7,4 +7,5 @@
 #include <typed-geometry/symbolic/multi_polynomial.hh>
 #include <typed-geometry/symbolic/polynomial.hh>
 #include <typed-geometry/symbolic/polynomial_roots.hh>
+#include <typed-geometry/symbolic/rational_polynomial.hh>
 #include <typed-geometry/symbolic/symbol.hh>
