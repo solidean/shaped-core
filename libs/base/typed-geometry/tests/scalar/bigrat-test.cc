@@ -1,7 +1,7 @@
 #include <clean-core/math/bit.hh>
+#include <clean-core/math/float.hh>
 #include <clean-core/math/random.hh>
 #include <nexus/test.hh>
-#include <clean-core/math/float.hh>
 #include <typed-geometry/scalar/bigrat/bigrat.hh>
 
 using namespace cc::primitive_defines;
