@@ -450,9 +450,14 @@ struct tg::polynomial
         trim();
         return *this;
     }
+    // defined here: an out-of-class definition must restate the constraint, and GCC and MSVC match no spelling of it but this one
     template <int D>
         requires is_dynamic
-    polynomial& operator*=(polynomial<C, D> const& b);
+    polynomial& operator*=(polynomial<C, D> const& b)
+    {
+        *this = *this * b;
+        return *this;
+    }
 
 private:
     template <int D>
@@ -587,15 +592,6 @@ template <class C, int A, int B>
         });
     r.trim();
     return r;
-}
-
-template <class C, int D>
-template <int B>
-    requires polynomial<C, D>::is_dynamic
-polynomial<C, D>& polynomial<C, D>::operator*=(polynomial<C, B> const& b)
-{
-    *this = *this * b;
-    return *this;
 }
 
 template <class C, int D, class S>
