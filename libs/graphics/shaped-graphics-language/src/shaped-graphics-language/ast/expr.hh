@@ -11,7 +11,7 @@
 enum class sgl::ast::literal_kind : sgl::u8
 {
     number,
-    /// The pieces and interpolations of a quoted literal stay reachable through the node's form.
+    /// The pieces of a quoted literal stay reachable through the node's form, and its interpolations are `interpolations`.
     quoted,
     hash,
 };
@@ -19,6 +19,8 @@ enum class sgl::ast::literal_kind : sgl::u8
 struct sgl::ast::literal
 {
     literal_kind kind = literal_kind::number;
+    /// A quoted literal's interpolations in source order, `$p.x` and `$(expr)` alike; empty for every other kind.
+    range_of<expr_id> interpolations;
 
     constexpr bool operator==(literal const&) const = default;
 };

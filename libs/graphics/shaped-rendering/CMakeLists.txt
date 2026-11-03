@@ -411,6 +411,7 @@ if(SC_BUILD_TESTS)
             tests/shader_fixtures.cc
             tests/compression/bc-compress-test.cc
             tests/blit-routine-test.cc
+            tests/debug-output-test.cc
             tests/imgui-routine-test.cc
             tests/raster-box-filter-mipmap-test.cc
             tests/nn-resample-test.cc

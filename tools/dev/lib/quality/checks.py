@@ -2,7 +2,9 @@
 
 A `Check` is a named gate the CLI can run, and the registry of which gates exist is cmd/check.py's.
 This module only knows how to *run* a selected set, with a colored verdict at the end.
-Select by what the change touched, build what the gates need once, run the read-only gates concurrently, then the fixers in order, then the slow `requires_green` tail.
+Select by what the change touched, run the build-free read-only gates concurrently, build what the rest need once, run those read-only gates,
+then the fixers in order, then the slow `requires_green` tail.
+A build-free gate that fails stops the run before the build: its verdict costs seconds, not a build.
 """
 
 from __future__ import annotations
@@ -119,8 +121,10 @@ def run_checks(
 ) -> bool:
     """Run the selected checks and print a verdict; return True if all passed.
 
-    Every target the selected gates declare is built first, in one invocation, through `build`; a failed build fails those gates and no other.
-    The read-only gates then run concurrently, bounded by their `exclusive` tags.
+    The read-only gates that build nothing run first, concurrently, bounded by their `exclusive` tags.
+    If one fails, the run stops there: the build, the gates that need it and the fixers are skipped and reported as skipped.
+    Otherwise every target the remaining gates declare is built, in one invocation, through `build`; a failed build fails those gates and no other.
+    The read-only gates that needed it run next, concurrently.
     The gates that write under `--fix` run after them in registry order, since a fixer's rewrite is what the later ones must see.
     Without `--fix` nothing writes, so every static gate is read-only.
     A `requires_green` check runs last, only if no static gate failed and `no_test` is False: there is no point building and testing a tree that already fails a cheap lint.
@@ -151,11 +155,19 @@ def run_checks(
     writers = [c for c in static if fix and c.supports_fix]
     readers = [c for c in static if c not in writers]
 
-    # One build for every static gate that needs one, ahead of them all: two ninja processes in one build directory
-    # fight over the cores and over ninja's own bookkeeping, so a gate never builds for itself.
+    # The build-free readers go first: most gates are, and one that fails makes the build and everything after it moot.
+    cheap = [c for c in readers if not c.builds]
+    after_build = [c for c in readers if c.builds]
+
+    # One build for every static gate that needs one: two ninja processes in one build directory fight over the cores
+    # and over ninja's own bookkeeping, so a gate never builds for itself.
     unbuilt: set[str] = set()
     targets = sorted({t for c in static for t in c.builds})
-    if targets and build is not None:
+
+    def build_targets() -> None:
+        nonlocal unbuilt
+        if not targets or build is None:
+            return
         ui.write_line(console.dim(f"\n--- building for {', '.join(c.name for c in static if c.builds)} ---"))
         started = time.monotonic()
         with profile.span("gate builds", type="check-gate"):
@@ -213,9 +225,17 @@ def run_checks(
         # Mirrored output from several gates at once would interleave into noise, so those runs stay serial.
         workers = 1 if (mirror or verbose) else max(1, len(readers))
         with ThreadPoolExecutor(max_workers=workers) as pool:
-            list(pool.map(run_one, readers))
-        for c in writers:
-            run_one(c)
+            list(pool.map(run_one, cheap))
+        if failed:
+            for c in after_build + writers:
+                ui.write_line(console.yellow(f"\n--- skipped {c.name} (a build-free gate failed) ---"))
+                gates.advance(c.name)
+        else:
+            build_targets()
+            with ThreadPoolExecutor(max_workers=workers) as pool:
+                list(pool.map(run_one, after_build))
+            for c in writers:
+                run_one(c)
 
         for c in selected:
             if not c.requires_green:

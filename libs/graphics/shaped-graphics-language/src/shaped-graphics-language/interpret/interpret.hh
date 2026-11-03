@@ -138,11 +138,26 @@ struct sgl::check::check_failure
     cc::vector<bool> is_evaluated;
     /// Parallel to the site's `loop_variables`.
     cc::vector<value> loop_values;
+    /// Parallel to the site's `message_values`: what an `assert`'s message interpolates.
+    cc::vector<value> message_values;
 
     [[nodiscard]] bool operator==(check_failure const& rhs) const
     {
         return site == rhs.site && ast::impl::is_equal(values, rhs.values)
-            && ast::impl::is_equal(is_evaluated, rhs.is_evaluated) && ast::impl::is_equal(loop_values, rhs.loop_values);
+            && ast::impl::is_equal(is_evaluated, rhs.is_evaluated) && ast::impl::is_equal(loop_values, rhs.loop_values)
+            && ast::impl::is_equal(message_values, rhs.message_values);
+    }
+};
+
+/// One `print` that ran: its message, a position in the tree's `messages` or -1, and the values it interpolated.
+struct sgl::check::printed_message
+{
+    i32 message = -1;
+    cc::vector<value> values;
+
+    [[nodiscard]] bool operator==(printed_message const& rhs) const
+    {
+        return message == rhs.message && ast::impl::is_equal(values, rhs.values);
     }
 };
 
@@ -163,6 +178,8 @@ struct sgl::check::outcome
     value result;
     /// Every printed value, in the order the prints ran; kept up to the point a failed run stopped.
     cc::vector<value> trace;
+    /// Every `print` that ran, in order; its values are in `trace` too.
+    cc::vector<printed_message> printed;
     /// Every buffer the run stored to, as the run left it: a store is an effect, so two runs are compared by these too.
     cc::vector<buffer_contents> buffers;
     /// For a reader, and no part of what two runs are compared by.

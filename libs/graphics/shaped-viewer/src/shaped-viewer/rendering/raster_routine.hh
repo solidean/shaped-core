@@ -88,7 +88,8 @@ enum class sv::raster_shading : sv::u8
 
 /// One draw of a raster frame: every triangle of one row of the instance table, through one permutation's pixel stage.
 ///
-/// An indexed draw over `raster_frame_desc::index_pool`: the row's geometry range, as its instance record names it.
+/// An indexed draw over `raster_frame_desc::index_pool`: the row's geometry range, as its instance record names it;
+/// or over a frame mesh's own index buffer, `indices`.
 struct sv::raster_draw
 {
     /// The row of `raster_frame_desc::instance_table` the draw is.
@@ -109,6 +110,10 @@ struct sv::raster_draw
 
     /// The row's geometry's box in its own space, which the GPU culls the draw by through the row's placement; none draws it always.
     cc::optional<tg::aabb3f> bounds;
+
+    /// A frame mesh's own index buffer, which the draw binds in place of the pool, from its first index; null draws through the pool.
+    /// Such a draw is never culled and is drawn directly, once, in the frame's first pass.
+    sg::buffer<u32> indices;
 };
 
 /// How far a raster frame culls: `occlusion` where it has a visibility record, else `view`; `none` draws every item.

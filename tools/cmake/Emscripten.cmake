@@ -52,6 +52,16 @@ if(EMSCRIPTEN)
         sc_build_options(LINK "SHELL:--use-port=emdawnwebgpu")
     endif()
 
+    # RelWithDebInfo links at -O1 without DWARF: the objects keep -O2, and only the post-link Binaryen pass is skipped.
+    # Measured on clean-core-test against the -O2 -g the build type passes to the link: 17.8 s to 1.1 s, a 2.7 GB peak
+    # to 0.4 GB, a 69 MB module to 13 MB, and the same test time.
+    # DWARF at link is what costs most: wasm-opt carries it through, and runs only limited optimizations beside it.
+    # Release, the deploy build, keeps the full -O2.
+    # Ahead of --profiling-funcs and the sidecars below, since a later -g0 would drop the names they keep.
+    if(CMAKE_BUILD_TYPE STREQUAL "RelWithDebInfo")
+        sc_build_options(LINK -O1 -g0)
+    endif()
+
     # Keep the wasm name section, so a captured stack reads as function names rather than as bare indices.
     # cc::stacktrace's Emscripten backend renders whatever emscripten_get_callstack can see, and without this it can
     # see only numbers -- which is the difference between a usable assert and a useless one.
@@ -61,8 +71,8 @@ if(EMSCRIPTEN)
     # A Release wasm build collapses calls that the source keeps apart: two functions marked CC_DONT_INLINE, neither
     # tail-calling, still arrive as one frame in the engine's stack trace, while the same source at RelWithDebInfo
     # reports both.
-    # Which stage does it -- LLVM, or the Binaryen pass that runs after and never saw the C++ attribute -- is not
-    # pinned down here, so this says only what is measured.
+    # It is Binaryen's -O2 at link, which never saw the C++ attribute: measured on clean-core-test, objects at -O2 linked
+    # at -O2 fail the frame tests, linked at -O1 pass them.
     # Nothing but a test should care: a walk reports the frames that exist, and these are the frames that exist.
     if(NOT CMAKE_BUILD_TYPE STREQUAL "Release")
         sc_build_options(COMPILE --profiling-funcs)
@@ -134,7 +144,7 @@ if(EMSCRIPTEN)
     # they no-op on the static libraries and apply to the linked test binaries.
     sc_build_options(LINK "SHELL:-s NODERAWFS=1" "SHELL:-s EXIT_RUNTIME=1" "SHELL:-s ALLOW_MEMORY_GROWTH=1")
 
-    # A link runs wasm-opt, which takes about 2 GB per process, so a full test build links more binaries at once
+    # A full -O2 link runs wasm-opt, which takes about 2 GB per process with DWARF, so a full test build links more binaries at once
     # than a developer machine has memory for; compiles stay at full parallelism.
     # A Ninja job pool, so another generator ignores it.
     set(SC_WASM_LINK_JOBS 4 CACHE STRING "How many wasm links (each running wasm-opt) may run at once")

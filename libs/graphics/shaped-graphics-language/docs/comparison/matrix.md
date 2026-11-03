@@ -3,7 +3,7 @@
 How SGL compares with the other ways to write one set of shaders for DX12, Vulkan, WebGPU and Metal.
 Every row is judged for a renderer that targets all four, WebGPU in a browser included, and wants hardware ray tracing wherever a platform has it.
 
-**As of 2026-11-02.**
+**As of 2026-11-02**; SGL's E3 and E4 as of 2026-11-03.
 The other columns move fast, Slang's Metal and WGSL support above all, so each cell carries a source and the date it was checked; see [Sources](#sources).
 
 ## Columns
@@ -84,8 +84,8 @@ A per-target cell reads `dx12 / vulkan / metal / webgpu`.
 |---|---|---|---|---|---|
 | **E1** Shader unit tests without a GPU | ❌ | ✅ CPU target and an interpreter, documented as incomplete | ❌ (WESL tests run on a GPU) | ❌ | ✅ `test` blocks run on the spec's interpreter; no textures, subgroups or derivatives yet 🗺️ [feat](../issues/feat-sgl-test-texture-bindings.md) |
 | **E2** Diagnostics | ⚠️ later hops report against IR, once per hop | ⚠️ once against the source; downstream errors per target | ✅ once against the source | ⚠️ SPIRV-Cross errors per target, against SPIR-V | ✅ once against the source, for every target |
-| **E3** Debugging the output | ⚠️ PIX at source level on DXIL; mapping lost after a hop | ⚠️ debug info and line directives | ⚠️ readable output, no source stepping | ⚠️ readable output, mapping lost | ⚠️ readable text with SGL's names, but no line mapping to the source 🗺️ [feat](../issues/feat-sgl-emitted-line-mapping.md) |
-| **E4** printf and assert on a GPU | ⚠️ printf on Vulkan only | ⚠️ printf except on WGSL; no assert | ⚠️ Naga printf on Metal and Vulkan | ⚠️ printf on Vulkan only | ❌ `print` and `assert` on the interpreter only 🗺️ [feat](../issues/feat-sgl-gpu-print-and-assert.md) |
+| **E3** Debugging the output | ⚠️ PIX at source level on DXIL; mapping lost after a hop | ⚠️ debug info and line directives | ⚠️ readable output, no source stepping | ⚠️ readable output, mapping lost | ✅ readable text with SGL's names; `#line` in HLSL and MSL, so DXC, Metal and PIX name the `.sgl` line; webgpu logs Tint's messages at the `.sgl` line and its inlined calls |
+| **E4** printf and assert on a GPU | ⚠️ printf on Vulkan only | ⚠️ printf except on WGSL; no assert | ⚠️ Naga printf on Metal and Vulkan | ⚠️ printf on Vulkan only | ⚠️ `print` and `assert` with interpolated values on dx12, vulkan and webgpu, logged once the epoch completes; a failed assert ends its invocation and fails a test; metal not yet, and no vertex-stage `print` on vulkan or webgpu 🗺️ [feat](../issues/feat-sgl-gpu-print-and-assert.md) |
 | **E5** Normative specification | ⚠️ an Ecma working draft; DXC is the de facto spec | ⚠️ a spec, self-described incomplete | ✅ W3C Candidate Recommendation | ✅ GLSL 4.60 | ✅ normative, with stable rule ids; every example in it is a test |
 
 ## F. Workflow and production
@@ -319,13 +319,13 @@ Per row and column:
 - **E3**
   - HLSL + chain: DXC 1.9.2602 notes, MSC changelog v2
   - Slang: SLANG `slangc` `-g`, `-line-directive-mode`
-  - SGL: EMIT-47
+  - SGL: EMIT-47, EMIT-181, EMIT-182 (2026-11-03)
 - **E4**
   - HLSL + chain: DXC `SPIR-V.rst`
   - Slang: SLANG capdef `printf`
   - WGSL: NAGA `debug_printf.rs`
   - GLSL + chain: Khronos registry
-  - SGL: [incubator/shader-logging.md](../spec/incubator/shader-logging.md)
+  - SGL: CHK-424, EVAL-103, LEGAL-63, LEGAL-64, EMIT-183 (2026-11-03)
 - **E5**
   - HLSL + chain: HLSLSPEC, <https://ecma-international.org/technical-committees/tc57/>
   - Slang: SLANGSPEC

@@ -383,3 +383,22 @@ TEST("sgl driver - a module's file-scope sampler takes an index after the progra
     CHECK(d.value().samplers[1].name == "edge");
     CHECK(d.value().samplers[1].index == 1);
 }
+
+TEST("sgl driver - a print and an assert's message leave no trace in the text, on every target (LEGAL-63)")
+{
+    constexpr auto source = "binding work:\n"
+                            "    values: mut buffer[float]\n"
+                            "\n"
+                            "@compute(64) fun cs(@thread_id id: int3){work}:\n"
+                            "    let v = work.values[id.x]\n"
+                            "    print \"v = $v at $(id.x)\"\n"
+                            "    assert v >= 0.0, \"negative $v\"\n"
+                            "    work.values[id.x] = v * 2.0\n";
+    for (auto const t : sgl::emit::all_targets())
+    {
+        auto const r = sgl::compile_to_text({.source = source, .entry_point = "cs", .target = t});
+        REQUIRE(r.has_value()).dump("target", sgl::emit::to_string(t));
+        CHECK(r.value().text.contains("* 2.0"));
+        CHECK(!r.value().text.contains("negative"));
+    }
+}

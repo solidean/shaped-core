@@ -5,6 +5,7 @@
 #include <clean-core/error/optional.hh>
 #include <sgl_modules/tracer.hh>                                // the instance, light and emitter records
 #include <shaped-graphics/raytracing/acceleration_structure.hh> // sg::tlas_instance
+#include <shaped-graphics/resource/buffer.hh>
 #include <shaped-viewer/fwd.hh>
 #include <typed-geometry/geometry/primitives/aabb.hh>
 
@@ -25,6 +26,9 @@ struct sv::impl::resolved_view
     /// Per instance, the geometry's content key when it is a frame mesh, and zero when a manager holds it.
     /// A frame mesh's BLAS and buffers are new every frame, so the trace hash reads this in their place.
     cc::vector<cc::hash128> frame_contents;
+
+    /// Per instance, a frame mesh's own index buffer, which a raster frame binds to draw its row; null where the row's indices are in the mesh manager's pool.
+    cc::vector<sg::buffer<u32>> own_indices;
     cc::vector<material_permutation const*> hit_groups;
 
     /// the shader key of `hit_groups[i]`, kept for the trace hash rather than for the pipeline

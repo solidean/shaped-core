@@ -67,6 +67,7 @@ struct validator
     checked_module const& m;
     flat_entry_point const& e;
     cc::vector<error>& errors;
+    bool writes_prints = false;
 
     void report(error_kind kind, symbol_id symbol, cc::string detail)
     {
@@ -140,7 +141,7 @@ struct validator
         if (auto const violation = find_core_violation(m, e); violation.has_value())
             report(error_kind::not_core, e.function, violation.value().reason);
         for (auto const& s : e.stmts)
-            if (s.node.is<flat_print>())
+            if (s.node.is<flat_print>() && !writes_prints)
             {
                 report(error_kind::unsupported, e.function, "a print, which no target writes yet");
                 break;
@@ -1172,9 +1173,12 @@ sgl::emit::impl::block_placement sgl::emit::impl::place_block(check::checked_mod
     return {.offsets = cc::move(placed.offsets), .sizes = cc::move(placed.sizes), .size = placed.end};
 }
 
-void sgl::emit::impl::validate(check::checked_module const& m, check::flat_entry_point const& e, cc::vector<error>& errors)
+void sgl::emit::impl::validate(check::checked_module const& m,
+                               check::flat_entry_point const& e,
+                               cc::vector<error>& errors,
+                               bool writes_prints)
 {
-    auto v = validator{.m = m, .e = e, .errors = errors};
+    auto v = validator{.m = m, .e = e, .errors = errors, .writes_prints = writes_prints};
     if (e.input == e.result && e.entry_stage != stage::compute)
         v.report(error_kind::unsupported, e.function,
                  cc::format("one struct as both the parameter and the result: '{}'", m.name_of(e.input)));
@@ -1248,7 +1252,7 @@ struct live_nodes
                 local(var->local);
             else if (auto const* const f = s.node.try_as<check::flat_for>())
                 local(f->index);
-            check::impl::for_each_expr_of(s, [&](check::flat_expr_id x) { expr(x, depth + 1); });
+            check::impl::for_each_expr_of(e, s, [&](check::flat_expr_id x) { expr(x, depth + 1); });
             check::impl::for_each_pattern_of(e, s,
                                              [&](ast::range_of<check::flat_expr_id> patterns)
                                              {

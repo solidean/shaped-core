@@ -65,6 +65,8 @@ struct sgl::test::check_report
     cc::vector<narrowed_part> parts;
     /// `i = 3`, one per `for` of the test around the check, outermost first.
     cc::vector<cc::string> loop_values;
+    /// An `assert`'s message with its values written in; empty for one without a message.
+    cc::string message;
 };
 
 /// One check or `assert` the test's tree holds, and how often it held and failed in the run.
@@ -93,6 +95,8 @@ struct sgl::test::test_result
     cc::string detail;
     /// Every check and `assert` of the run's tree, in tree order; empty for a test that did not run.
     cc::vector<site_mark> sites;
+    /// What each `print` of the run wrote, its values in its message, in the order they ran.
+    cc::vector<cc::string> printed;
 
     [[nodiscard]] bool is_passed() const { return status == test_status::passed; }
 };
@@ -139,4 +143,11 @@ void contain_expected(check::checked_module const& m, cc::vector<check::located_
 
 /// A value as a report writes it: `0.5`, `3`, `true`, `vec3(1, 2, 3)`, `light_kind.sun`, `void`.
 [[nodiscard]] cc::string text_of_value(check::checked_module const& m, check::value const& v);
+
+/// Message `message` of `e` with `values` written where it interpolates them (CHK-424).
+/// A message of -1 is the values alone, a space apart, as a built tree prints them.
+[[nodiscard]] cc::string text_of_message(check::checked_module const& m,
+                                         check::flat_entry_point const& e,
+                                         i32 message,
+                                         cc::span<check::value const> values);
 } // namespace sgl::test

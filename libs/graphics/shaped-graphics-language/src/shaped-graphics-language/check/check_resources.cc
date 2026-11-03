@@ -238,7 +238,7 @@ type_id checker::resolve_resource_applied(i32 file, ast::expr_id expr, ast::inde
                     return resource_type({.kind = type_kind::image,
                                           .shape = image->shape,
                                           .format = find_image_format(out.at(out.at(s.element).cases)[s.count].name)});
-                return resource_type({.kind = type_kind::image, .shape = image->shape, .count_parameter = stands_for});
+                return resource_type({.kind = type_kind::image, .count_parameter = stands_for, .shape = image->shape});
             }
     auto const format = resolve_image_format(file, arguments[0].value);
     if (format == k_format_failed)

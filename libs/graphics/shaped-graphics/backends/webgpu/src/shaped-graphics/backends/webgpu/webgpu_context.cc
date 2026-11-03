@@ -101,6 +101,8 @@ void webgpu_context::shutdown()
     if (_open_command_lists == 0 && _device)
         advance_epoch();
     retire_completed_epochs();
+    // what was read back already is decoded; a never-block context waits for nothing still in flight
+    release_debug_windows();
 
     // No callback reaches this context from here on, whatever the queue still reports.
     _anchor->ctx = nullptr;

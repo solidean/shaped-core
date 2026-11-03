@@ -447,6 +447,52 @@ struct form_parser
         return result;
     }
 
+    /// Each interpolation of quoted group `g` as a child of `quoted`, in source order (STR-24 - STR-26).
+    void add_interpolations(form_id quoted, group_id g)
+    {
+        auto last = form_id::none;
+        for (auto child = file.at(g).first_child; is_valid(child); child = file.at(child).next_sibling)
+        {
+            auto const next = file.at(child).next_sibling;
+            if (!is_token(child, token_kind::dollar) || !is_valid(next))
+                continue;
+            if (file.at(next).kind == group_kind::round)
+            {
+                // parentheses that never closed already said so, and their code is no interpolation to read
+                if (!is_valid(file.at(next).close_token))
+                {
+                    child = next;
+                    continue;
+                }
+                // the parentheses hold one expression, and anything else is the list the builder refuses
+                auto const list = parse_list(next);
+                auto const first = file.at(list).first_child;
+                add_child(quoted, is_valid(first) && !is_valid(file.at(first).next_sibling) ? first : list, last);
+                child = next;
+                continue;
+            }
+            if (!is_token(next, token_kind::symbol))
+                continue;
+            auto part = leaf(form_kind::identifier, next);
+            child = next;
+            // each `.name` fused after it
+            for (auto dot = file.at(child).next_sibling;
+                 is_token(dot, token_kind::dot) && is_token(file.at(dot).next_sibling, token_kind::symbol);
+                 dot = file.at(child).next_sibling)
+            {
+                auto const name = file.at(dot).next_sibling;
+                auto const member
+                    = make({.kind = form_kind::member, .where = span_of_group(name), .token = file.at(name).token});
+                auto member_last = form_id::none;
+                add_child(member, part, member_last);
+                part = member;
+                child = name;
+            }
+            add_child(quoted, part, last);
+        }
+        file.at(quoted).where = span_of_group(g);
+    }
+
     form_id parse_list(group_id list_group)
     {
         auto const& g = file.at(list_group);
@@ -1025,7 +1071,9 @@ struct form_parser
         if (kind == group_kind::quoted)
         {
             advance();
-            return make({.kind = form_kind::quoted, .where = span_of_group(g), .token = file.at(g).token});
+            auto const result = make({.kind = form_kind::quoted, .where = span_of_group(g), .token = file.at(g).token});
+            add_interpolations(result, g);
+            return result;
         }
         if (kind != group_kind::token)
             return missing(span_of_group(g));

@@ -210,6 +210,7 @@ resolved_view resolve_scene(sg::command_list& cmd, layer const& l, gpu_resource_
                                   out.hit_groups[permutation]->secondary);
             out.parameter_blocks.push_back(item.instance);
             out.frame_contents.push_back({});
+            out.own_indices.push_back({});
             // A pending batch is the cube a raster frame draws too; a landed one has no triangles to draw.
             out.triangle_counts.push_back(pending ? u32(resources.meshes.placeholder_geometry().triangle_count) : 0);
             out.primitive_counts.push_back(pending ? 0 : u32(set->primitive_count));
@@ -243,6 +244,7 @@ resolved_view resolve_scene(sg::command_list& cmd, layer const& l, gpu_resource_
                                   out.hit_groups[permutation]->secondary);
             out.parameter_blocks.push_back(item.instance);
             out.frame_contents.push_back(item.frame_geometry.hash);
+            out.own_indices.push_back(m.draw_indices);
             out.triangle_counts.push_back(u32(m.triangle_count));
             out.primitive_counts.push_back(0);
             // No box: a frame mesh's geometry is new each frame, so a raster frame draws it always rather than measure it.
@@ -303,6 +305,7 @@ resolved_view resolve_scene(sg::command_list& cmd, layer const& l, gpu_resource_
                               out.hit_groups[permutation]->secondary);
         out.parameter_blocks.push_back(item.instance);
         out.frame_contents.push_back({});
+        out.own_indices.push_back({});
         out.triangle_counts.push_back(triangle_count);
         out.primitive_counts.push_back(0);
         out.bounds.push_back(object_bounds);
@@ -997,7 +1000,8 @@ struct raster_batch
                                .permutation = resolved.instances[i].hit_group_offset / 2,
                                .first_index = resolved.records[i].first_index,
                                .base_vertex = resolved.records[i].base_vertex,
-                               .bounds = resolved.bounds[i]});
+                               .bounds = resolved.bounds[i],
+                               .indices = resolved.own_indices[i]});
     return batch;
 }
 

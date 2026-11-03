@@ -177,6 +177,13 @@ void vulkan_context::shutdown()
     // looks at it.
     if (_device != VK_NULL_HANDLE)
     {
+        // the open epoch's shader records, read back while the download path still runs, and the windows released so
+        // the drain below reclaims them
+        if (_epoch_timeline != VK_NULL_HANDLE)
+        {
+            advance_epoch();
+            release_debug_windows();
+        }
         _upload_async.shutdown();
         _download_async.shutdown();
     }

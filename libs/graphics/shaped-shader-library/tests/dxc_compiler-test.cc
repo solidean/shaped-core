@@ -1,3 +1,4 @@
+#include <shaped-graphics-language/driver/compile_to_text.hh>
 #include <shaped-shader-library/compiler/dxc_compiler.hh>
 
 #if SLIB_HAS_DXC
@@ -418,4 +419,107 @@ TEST("slib - a push-constant block is the same size on SPIR-V as the mirror a ca
     CHECK(constants->block_size.value() == cc::isize(sizeof(slib_test::shaders::shade_constants)));
 }
 
+
+TEST("slib - DXC compiles SGL's debug records for dx12 and vulkan", exclusive("slib-shader-library"))
+{
+    // EMIT-183: what a dev build writes for a print and an assert, which no compile through the library asks for yet
+    constexpr auto source = "binding work:\n"
+                            "    values: mut buffer[float]\n"
+                            "\n"
+                            "@compute(64) fun cs(@thread_id id: int3){work}:\n"
+                            "    let v = work.values[id.x]\n"
+                            "    print \"v = $v at $(id.xy), $(v > 1.0)\"\n"
+                            "    assert v >= 0.0, \"negative $v\"\n"
+                            "    work.values[id.x] = v * 2.0\n";
+    struct leg
+    {
+        sgl::emit::target target;
+        bool is_spirv;
+    };
+    for (auto const l : {leg{sgl::emit::target::hlsl_dx12, false}, leg{sgl::emit::target::hlsl_vulkan, true}})
+    {
+        auto const text = sgl::compile_to_text(
+            {.source = source, .entry_point = "cs", .target = l.target, .line_directives = true, .diagnostics = true});
+        REQUIRE(text.has_value());
+        REQUIRE(text.value().debug_sites.size() == 2);
+        CHECK(!text.value().debug_sites[0].is_assert);
+        CHECK(text.value().debug_sites[1].is_assert);
+        REQUIRE(text.value().debug_sites[0].values.size() == 3);
+        CHECK(text.value().debug_sites[0].values[2].family == "bool")
+            .dump("type", text.value().debug_sites[0].values[2].type);
+        // DXIL needs the reflection the Linux DXC lacks (see make_dxc_compiler); the dx12 text is still checked above
+        if (!l.is_spirv && k_target_format != sg::shader_format::dxil)
+            continue;
+        auto compiler = l.is_spirv ? slib::create_dxc_spirv_compiler() : slib::create_dxc_compiler();
+        REQUIRE(compiler.has_value());
+        auto const shader = compiler.value()->compile(
+            {.source = text.value().text, .entry_point = text.value().entry_point, .stage = sg::shader_stage::compute});
+        (void)await(shader);
+    }
+}
+
+TEST("slib - DXC compiles a vertex stage's culled vertex for dx12 and vulkan", exclusive("slib-shader-library"))
+{
+    // LEGAL-64: a failed assert in a vertex stage returns the vertex at a NaN position
+    constexpr auto source = "struct varyings:\n"
+                            "    @position position: hpos4\n"
+                            "    uv: float2\n"
+                            "\n"
+                            "@vertex fun vs(@vertex_index v: int) -> varyings:\n"
+                            "    assert v < 3, \"vertex $v\"\n"
+                            "    return { position = hpos4(v as float, 0.0, 0.0, 1.0), uv = float2(0.0, 1.0) }\n";
+    for (auto const t : {sgl::emit::target::hlsl_dx12, sgl::emit::target::hlsl_vulkan})
+    {
+        auto const text = sgl::compile_to_text({.source = source, .entry_point = "vs", .target = t, .diagnostics = true});
+        REQUIRE(text.has_value());
+        auto compiler
+            = t == sgl::emit::target::hlsl_vulkan ? slib::create_dxc_spirv_compiler() : slib::create_dxc_compiler();
+        REQUIRE(compiler.has_value());
+        (void)await(compiler.value()->compile(
+            {.source = text.value().text, .entry_point = text.value().entry_point, .stage = sg::shader_stage::vertex}));
+    }
+}
+
+TEST("slib - DXC compiles how a failed assert ends a patch, a candidate and a box", exclusive("slib-shader-library"))
+{
+    // LEGAL-64: zero edge factors, `ignore`, and a report of no hit
+    struct entry
+    {
+        cc::string_view source;
+        cc::string_view name;
+        sg::shader_stage stage;
+    };
+    entry const entries[] = {
+        {"require tessellation_shader\n"
+         "struct control_point:\n    position: float3\n"
+         "struct tri_factors:\n    @edge_factors edges: float[3]\n    @inside_factors inside: float\n"
+         "@tessellation_control(partitioning = .integer, winding = .counter_clockwise)\n"
+         "fun tc(patch: control_point[3]) -> tri_factors:\n"
+         "    assert patch[0].position.x >= 0.0, \"patch at $(patch[0].position.x)\"\n"
+         "    return { edges = [1.0, 1.0, 1.0], inside = 1.0 }\n",
+         "tc", sg::shader_stage::tessellation_control},
+        {"require raytracing_pipeline\n"
+         "struct radiance:\n    color: float3\n"
+         "@any_hit fun keep(c: triangle_candidate, p: mut radiance) -> hit_decision:\n"
+         "    assert p.color.x >= 0.0, \"negative $(p.color.x)\"\n"
+         "    return hit_decision.accept\n",
+         "keep", sg::shader_stage::any_hit},
+        {"require raytracing_pipeline\n"
+         "struct sphere_hit:\n    normal: float3\n"
+         "@intersection fun sphere(b: procedural_box) -> report[sphere_hit]:\n"
+         "    assert b.primitive_index >= 0, \"box $(b.primitive_index)\"\n"
+         "    return report(1.0, sphere_hit(float3(0.0, 1.0, 0.0)))\n",
+         "sphere", sg::shader_stage::intersection},
+    };
+    for (auto const& e : entries)
+    {
+        auto const text = sgl::compile_to_text(
+            {.source = e.source, .entry_point = e.name, .target = sgl::emit::target::hlsl_dx12, .diagnostics = true});
+        REQUIRE(text.has_value());
+        auto compiler = slib::create_dxc_compiler();
+        REQUIRE(compiler.has_value());
+        (void)await(compiler.value()->compile(
+            {.source = text.value().text, .entry_point = text.value().entry_point, .stage = e.stage}));
+    }
+}
 #endif

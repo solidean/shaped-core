@@ -1,4 +1,5 @@
 #include <clean-core/common/utility.hh>
+#include <shaped-graphics-language/builtins/registry.hh>
 #include <shaped-graphics-language/legalize/core.hh>
 #include <shaped-graphics-language/legalize/impl/legalizer.hh>
 #include <shaped-graphics-language/legalize/impl/walk.hh>
@@ -17,6 +18,167 @@ struct void_eraser
     flat_builder& out;
     /// False for rule V0, which drops the checks and changes nothing else.
     bool erases_void = true;
+    /// LEGAL-63: V0 drops the prints too.
+    bool erases_prints = false;
+    /// LEGAL-64: V0 lowers each assert instead of dropping it.
+    bool lowers_asserts = false;
+
+    /// LEGAL-64: assert `k`'s body, then its message printed and the invocation ended where the condition is false.
+    void lower_assert(flat_stmt const& s, flat_check const& k, stmt_list& into, int depth)
+    {
+        for (auto const id : erase(ids_of_range(k.body), depth + 1))
+            into.push_back(id);
+        auto const site = out.e.check_sites[k.site];
+        auto const nodes = out.e.at(site.nodes);
+        if (nodes.empty())
+            return;
+        out.from = s.from;
+        out.inlined_through = s.inlined_through;
+        auto message = site.message;
+        if (message < 0)
+        {
+            out.e.messages.push_back({.pieces = {cc::string()}});
+            message = i32(out.e.messages.size() - 1);
+        }
+        out.e.messages[message].is_assert = true;
+        auto values = cc::vector<flat_expr_id>();
+        if (is_known(out.e, site.message_values))
+            for (auto const v : out.e.at(site.message_values))
+                values.push_back(expr(v, 0));
+        auto failed = cc::vector<flat_stmt_id>();
+        failed.push_back(out.print(message, values));
+        // what ends an invocation: a stage that returns nothing returns, and a pixel stage discards
+        auto const stage = out.e.entry_stage;
+        if (stage == check::stage::pixel)
+            failed.push_back(out.discard());
+        else if (stage == check::stage::compute || stage == check::stage::raygen || stage == check::stage::miss
+                 || stage == check::stage::closest_hit || stage == check::stage::callable
+                 || stage == check::stage::geometry)
+            failed.push_back(out.return_(flat_expr_id::none));
+        else if (stage == check::stage::vertex || stage == check::stage::tessellation_evaluation)
+        {
+            // a vertex at a NaN position, which culls every primitive it is part of
+            if (auto const culled = culled_vertex(failed); is_valid(culled))
+                failed.push_back(out.return_(culled));
+        }
+        else if (stage == check::stage::tessellation_control)
+        {
+            // a patch whose edge factors are zero, which the tessellator culls
+            if (auto const culled = culled_patch(failed); is_valid(culled))
+                failed.push_back(out.return_(culled));
+        }
+        else if (stage == check::stage::any_hit)
+        {
+            // the candidate is no hit
+            if (auto const ignore = case_of(out.e.result, "ignore"); is_valid(ignore))
+                failed.push_back(out.return_(ignore));
+        }
+        else if (stage == check::stage::intersection)
+        {
+            // the box reports no hit
+            if (auto const none = no_report(failed); is_valid(none))
+                failed.push_back(out.return_(none));
+        }
+        into.push_back(out.if_(out.not_(out.local(nodes[0].value)), failed));
+    }
+
+    /// LEGAL-64: the stage's result with its `@position` at NaN, its other members unset; none without a position.
+    /// The statements that build it go into `into`.
+    [[nodiscard]] flat_expr_id culled_vertex(stmt_list& into)
+    {
+        auto const result = out.e.result;
+        if (!is_valid(result) || out.m.at(result).kind != check::type_kind::structure)
+            return flat_expr_id::none;
+        auto const members = out.m.at(out.m.at(result).members);
+        auto position = isize(-1);
+        for (auto i = isize(0); i < members.size(); ++i)
+            if (members[i].is_position)
+                position = i;
+        if (position < 0)
+            return flat_expr_id::none;
+
+        // no target spells a NaN literal, so it is a quiet NaN's bits
+        auto const bits = out.add_expr(out.type_named(builtins::k_uint), flat_int_literal{.value = 0x7fc00000});
+        auto const nan = out.call("reinterpret_as_float", cc::span<flat_expr_id const>(&bits, 1));
+        auto const value = out.call(out.m.name_of(members[position].type), cc::span<flat_expr_id const>(&nan, 1));
+        if (out.e.at(value).type != members[position].type)
+            return flat_expr_id::none;
+
+        auto const local = out.add_local(local_kind::var, "culled", result);
+        into.push_back(out.var(local));
+        into.push_back(out.assign(out.member(out.local(local), i32(position)), value));
+        return out.local(local);
+    }
+
+    /// Case `name` of enum `type`; none where it has no such case.
+    [[nodiscard]] flat_expr_id case_of(type_id type, cc::string_view name)
+    {
+        if (!is_valid(type) || out.m.at(type).kind != check::type_kind::enumeration)
+            return flat_expr_id::none;
+        auto const cases = out.m.at(out.m.at(type).cases);
+        for (auto i = isize(0); i < cases.size(); ++i)
+            if (cases[i].name == name)
+                return out.add_expr(type, flat_enum_value{.case_index = i32(i)});
+        return flat_expr_id::none;
+    }
+
+    /// LEGAL-64: the stage's factors struct with every edge factor 0, its other members unset.
+    [[nodiscard]] flat_expr_id culled_patch(stmt_list& into)
+    {
+        auto const result = out.e.result;
+        if (!is_valid(result) || out.m.at(result).kind != check::type_kind::structure)
+            return flat_expr_id::none;
+        auto const members = out.m.at(out.m.at(result).members);
+        auto edges = isize(-1);
+        for (auto i = isize(0); i < members.size(); ++i)
+            if (members[i].factor == check::tessellation_factor::edge)
+                edges = i;
+        if (edges < 0)
+            return flat_expr_id::none;
+        auto const& array = out.m.at(members[edges].type);
+        if (array.kind != check::type_kind::array)
+            return flat_expr_id::none;
+
+        auto const local = out.add_local(local_kind::var, "culled", result);
+        into.push_back(out.var(local));
+        for (auto k = 0; k < array.count; ++k)
+        {
+            auto const factors = out.member(out.local(local), i32(edges));
+            auto const element
+                = out.add_expr(array.element, flat_element{.object = factors, .index = out.int_literal(k)});
+            into.push_back(out.assign(element, out.literal(0.0)));
+        }
+        return out.local(local);
+    }
+
+    /// LEGAL-64: the stage's report with `is_hit` false, its other members unset.
+    [[nodiscard]] flat_expr_id no_report(stmt_list& into)
+    {
+        auto const result = out.e.result;
+        if (!is_valid(result) || out.m.at(result).kind != check::type_kind::structure)
+            return flat_expr_id::none;
+        auto const members = out.m.at(out.m.at(result).members);
+        auto is_hit = isize(-1);
+        for (auto i = isize(0); i < members.size(); ++i)
+            if (members[i].name == "is_hit")
+                is_hit = i;
+        if (is_hit < 0)
+            return flat_expr_id::none;
+
+        auto const local = out.add_local(local_kind::var, "culled", result);
+        into.push_back(out.var(local));
+        into.push_back(out.assign(out.member(out.local(local), i32(is_hit)), out.bool_literal(false)));
+        return out.local(local);
+    }
+
+    [[nodiscard]] stmt_list ids_of_range(ast::range_of<flat_stmt_id> range) const
+    {
+        auto list = stmt_list();
+        if (is_known(out.e, range))
+            for (auto const id : out.e.at(range))
+                list.push_back(id);
+        return list;
+    }
 
     [[nodiscard]] bool is_void(flat_expr_id id) const
     {
@@ -162,7 +324,14 @@ struct void_eraser
             }
             auto copy = out.e.at(id);
             // V0: a check and its body are gone, whatever they compute
-            if (copy.node.is<flat_check>())
+            if (auto const* const k = copy.node.try_as<flat_check>(); k != nullptr && lowers_asserts && k->site >= 0
+                                                                      && k->site < out.e.check_sites.size()
+                                                                      && out.e.check_sites[k->site].stops)
+            {
+                lower_assert(copy, *k, result, depth);
+                continue;
+            }
+            if (copy.node.is<flat_check>() || (erases_prints && copy.node.is<flat_print>()))
                 continue;
             if (erases_void && erase_void_statement(copy, result))
                 continue;
@@ -174,7 +343,7 @@ struct void_eraser
                                 n.place = expr(n.place, 0);
                                 n.value = expr(n.value, 0);
                             },
-                            [&](flat_print& n) { n.value = expr(n.value, 0); }, //
+                            [&](flat_print& n) { n.values = exprs(n.values, 0); }, //
                             [&](flat_eval& n) { n.value = expr(n.value, 0); },
                             [&](flat_if& n)
                             {
@@ -221,9 +390,10 @@ struct void_eraser
 };
 } // namespace
 
-stmt_list sgl::check::impl::erase_checks(flat_builder& out, stmt_list const& body)
+stmt_list sgl::check::impl::erase_checks(flat_builder& out, stmt_list const& body, bool erases_prints, bool lowers_asserts)
 {
-    return void_eraser{.out = out, .erases_void = false}.erase(body, 0);
+    return void_eraser{.out = out, .erases_void = false, .erases_prints = erases_prints, .lowers_asserts = lowers_asserts}
+        .erase(body, 0);
 }
 
 stmt_list sgl::check::impl::erase_void(flat_builder& out, stmt_list const& body)

@@ -530,6 +530,43 @@ x.to_string(); cc::format("{:'x}", x);                     // decimal; the full 
 // vec<3, fi64> exists, and its dot product is computed (and wraps) in fi64.
 ```
 
+## bigfloat (exact binary float)
+
+```cpp
+#include <typed-geometry/scalar/bigfloat/bigfloat.hh>
+tg::bigfloat_sbo<K>; tg::bigfloat;                 // K limbs inline (8K + 8 bytes); tg::bigfloat is K = 2 until the K sweep decides
+tg::bigfloat x = 0.1; tg::bigfloat(7); tg::bigfloat(i64(-3));   // exact from any finite double or integer, implicit
+tg::bigfloat::from_fixed_int(fi256(v), e);         // v * 2^e, exactly
+a + b; a - b; a * b; -a; a += b;                   // exact, never rounds; a spilled mantissa comes from cc's node allocator
+r.assign_mul(a, b); r.assign_add(a, b);            // into r, reusing its capacity; a or b may be r
+tg::bigfloat::msum({{a, b}, {c, d, true}, {e}});   // a*b - c*d + e in one accumulator, at most one allocation
+x.sign(); compare(a, b); a < b; a == b;            // -1/0/+1; compare is the sign of a - b without computing it
+x.to_f64();                                        // nearest, ties to even; correct unless subnormal, exact for any double
+x.limbs(); x.exponent(); x.is_inline(); x.capacity();  // the trimmed mantissa, least significant first, times 2^exponent
+// The exponent is an i32 in bits: products of doubles leave the double range and stay exact.
+// An exponent gap costs limbs: 2^1000 + 2^-1000 is 32 limbs, dense from the bottom bit to the top one.
+// A msum summand refers to its operands: build it in the msum's own full expression.
+```
+
+## bigint (arbitrary-precision integer)
+
+```cpp
+#include <typed-geometry/scalar/bigint/bigint.hh>
+tg::bigint x = 7; tg::bigint(i64(-3)); tg::bigint(u64(-1)); // exact from any integer, implicit; sizeof is 8, zero holds no node
+tg::bigint::from_fixed_int(fi256(v)); tg::bigint::from_limbs(limbs, negative);
+tg::bigint::parse("-123456789012345678901234567890");     // -> cc::optional<bigint>; decimal, optional sign
+a + b; a - b; a * b; a / b; a % b; -a; a << n; a >> n;     // exact; / and % truncate, >> floors
+r.assign_add(a, b); r.assign_sub(a, b); r.assign_mul(a, b); // into r's node when it holds the result; a or b may be r
+auto [q, rem] = div_mod(a, b); div_mod(q, rem, a, b);     // the second into kept values, reusing their nodes
+gcd(a, b); abs(a);
+x.sign(); compare(a, b); a < b; a == b;                    // -1/0/+1; compare without computing a - b
+x.to_f64(); x.to_i64(); x.fits_i64(); x.to_string();       // nearest, ties to even; to_i64 asserts it fits
+x.limbs(); x.size(); x.capacity(); x.bit_width();           // the magnitude, least significant limb first
+// One pointer to a node of cc's node allocator: a header word, then the limbs; 1, 3, 7, 15, 31 limbs from 16 to 256 bytes.
+// Reuse results (assign_* into kept values) in hot loops: an operator's result allocates a node.
+// + - * of one- and two-limb operands are inline; products up to 16 x 16 limbs are unrolled, Karatsuba above.
+```
+
 ## half_float (binary16)
 
 ```cpp

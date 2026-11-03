@@ -277,7 +277,7 @@ The `=` is needed, since a value starting with `--` would otherwise read as the 
 
 The same flags are on `run`, `example` and `benchmark`.
 
-**Browser test runner.** Under Emscripten each `*-test` target also builds a MODULARIZE wasm module (`*-test-web.js` + `.wasm`).
+**Browser test runner.** Under Emscripten each `*-test` target also has a MODULARIZE wasm module (`*-test-web.js` + `.wasm`), outside `all`.
 CMake generates HTML pages at the build root: one per library (`<library>-web.html`), plus an aggregate **`tests-web.html`**.
 The aggregate loads every library's module and shows them grouped, with a grand total.
 Each page runs its tests **one per animation frame**, rendering a live table of per-test timing, assertion counts, and pass/fail.
@@ -292,7 +292,8 @@ uv run dev.py test-web clean-core      # just one library
 It defaults to the `emscripten-relwithdebinfo` preset and takes the same `--emsdk-path` as the other commands.
 The pages are plain static files, so hosting them means serving the build root over HTTP from any static server rather than `file://` — emrun is not needed in deployment.
 
-The pages are built by the normal `dev.py build` too, since they are regular targets, and they are not run by `dev.py test`: only `*-test`, not `*-test-web`, is a node test.
+The normal `dev.py build` leaves the modules out, since each compiles and links its tests a second time; `nexus-web-runners` builds them all.
+They are not run by `dev.py test`: only `*-test`, not `*-test-web`, is a node test.
 The implementation is nexus'.
 [web_runner.cc](../../libs/base/nexus/src/nexus/web/web_runner.cc) exposes the `nx_web_*` C ABI and [NexusWebRunner.cmake](../../libs/base/nexus/cmake/NexusWebRunner.cmake) is the build glue.
 The page itself is the shared renderer [nexus-web-driver.js](../../libs/base/nexus/web/nexus-web-driver.js).
@@ -468,8 +469,10 @@ The budget is a ceiling a run must not cross rather than a target it should hit:
 
 ### Concurrent by default, ordered where a gate writes
 
-The static gates are independent, so the read-only ones run at the same time.
-Under `--fix` the gates that write run after them, serially and in registry order: a fixer's rewrite is what the later ones must see.
+The static gates are independent, so the read-only ones run at the same time, in two batches.
+The ones that build nothing go first, and **one of them failing stops the run there**: the build, the gates that need it and the fixers are skipped, and the verdict lists them.
+A cheap gate's red verdict then costs seconds rather than a build; the price is that on a green run the build waits for the slowest build-free gate.
+Under `--fix` the gates that write run after the read-only ones, serially and in registry order: a fixer's rewrite is what the later ones must see.
 Without `--fix` nothing writes, so every static gate is read-only and they all run together.
 A gate that must not overlap another declares an `exclusive` tag, `"gpu"` for anything that opens a device, and gates sharing a tag take turns.
 Mirrored or verbose output would interleave into noise, so `--mirror-output` and `--verbose` runs stay serial.
@@ -481,7 +484,7 @@ Running `format` after both fixers is what makes `check --fix` one finished pass
 Naming checks explicitly does not change it: `check format lint --fix` runs `lint` first, same as the full gate.
 
 **A gate never builds for itself.**
-A gate that needs a target declares it in `builds`, and the runner builds every selected gate's targets in one invocation before any gate runs.
+A gate that needs a target declares it in `builds`, and the runner builds every selected gate's targets in one invocation once the build-free gates have passed.
 Two ninja processes in one build directory fight over the cores and over ninja's own bookkeeping, so one balanced build stands ahead of the gates instead.
 A failed build fails the gates that declared it and no other.
 

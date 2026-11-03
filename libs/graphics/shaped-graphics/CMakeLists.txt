@@ -48,6 +48,7 @@ add_library(shaped-graphics
     src/shaped-graphics/routine/routine_registry.cc
     src/shaped-graphics/context/context.cc
     src/shaped-graphics/context/impl/completion_waiter.cc
+    src/shaped-graphics/context/impl/debug_windows.cc
     src/shaped-graphics/context/impl/device_lifecycle.cc
     src/shaped-graphics/context/gpu_load_sampler.cc
     src/shaped-graphics/context/metrics.cc
@@ -78,6 +79,7 @@ target_sources(shaped-graphics
     src/shaped-graphics/exceptions.hh
     src/shaped-graphics/context/context.hh
     src/shaped-graphics/context/impl/completion_waiter.hh
+    src/shaped-graphics/context/impl/debug_windows.hh
     src/shaped-graphics/context/impl/device_lifecycle.hh
     src/shaped-graphics/context/persistent.hh
     src/shaped-graphics/context/transient.hh
@@ -169,6 +171,17 @@ target_include_directories(shaped-graphics
 # blob-cache is PUBLIC because pipeline_cache's persistence seam names bcache::blob_cache in a public header.
 # It links babel/SQLite privately, so the cost here is one forward-declared type, not the storage engine.
 target_link_libraries(shaped-graphics PUBLIC clean-core typed-geometry blob-cache)
+
+# SC_SHADER_DIAGNOSTICS is the root CMakeLists' switch; an add_subdirectory consumer that never set it follows its frozen state.
+if(NOT DEFINED SC_SHADER_DIAGNOSTICS)
+    if(SC_FROZEN_SHADERS)
+        set(SC_SHADER_DIAGNOSTICS OFF)
+    else()
+        set(SC_SHADER_DIAGNOSTICS ON)
+    endif()
+endif()
+# Public: a backend binds the debug window by it, and slib asks SGL for records by it.
+target_compile_definitions(shaped-graphics PUBLIC SG_SHADER_DIAGNOSTICS=$<BOOL:${SC_SHADER_DIAGNOSTICS}>)
 
 sc_declare_pch_tier(SG EXTENDS TG HEADERS <shaped-graphics/all.hh>)
 

@@ -60,6 +60,20 @@ using fu128 = fixed_uint<128>;
 using fu192 = fixed_uint<192>;
 using fu256 = fixed_uint<256>;
 
+/// an exact binary float, an arbitrary-precision mantissa times 2^exponent, with K limbs of it inline
+/// (see scalar/bigfloat/bigfloat.hh).
+template <int K>
+struct bigfloat_sbo;
+
+/// the inline size used until the sweep over K is measured.
+using bigfloat = bigfloat_sbo<2>;
+
+/// one summand of bigfloat_sbo<K>::msum, a or a * b (see scalar/bigfloat/bigfloat.hh).
+struct bigfloat_summand;
+
+/// an arbitrary-precision integer, sign and magnitude, one pointer wide (see scalar/bigint/bigint.hh).
+struct bigint;
+
 /// a quotient with its remainder, from one long division (see scalar/fixed_int/fixed_arith.hh).
 template <class T>
 struct div_mod_result;

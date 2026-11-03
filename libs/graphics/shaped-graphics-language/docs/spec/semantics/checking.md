@@ -338,7 +338,11 @@ enum light_kind:
   The last code line is the last statement of its body, through the last branch of an `if`, the body of a loop and the last arm of a `case`.
   A test whose asserts are what it checks ends in `true // why`.
   A test that expects `.fail`, `.assert` or `.discard` is exempt, since it cannot pass without its run ending so, and so is a test with no statement, which the AST pass reported.
-* **CHK-227** `assert condition` takes a `bool`, in a test or anywhere else; a message is `unsupported-yet`.
+* **CHK-227** `assert condition` takes a `bool`, in a test or anywhere else, and `assert condition, message` a message too (CHK-424).
+* **CHK-424** A message is a one-line quoted literal, and it is no value: a string has no type, and a quoted literal anywhere else is `unsupported-yet`.
+  Each interpolation is checked where the message stands, and is a scalar, a plain vector of one, or an enum; anything else is `type-mismatch`.
+  A multi-line message is `unsupported-yet`, and so is an `assert` message that is no quoted literal.
+  `print value` with no quotes prints the one value, of any type.
   A condition that writes a buffer, prints, or calls a builtin with an effect is `unsupported-yet`, since no target writes an `assert` (LEGAL-53) and its effect would happen on the interpreter alone.
 * **CHK-228** A test reads nothing of the function it stands in: a parameter, a local or a binding member of it is `test-captures-runtime-value`, since the test runs on its own.
   Those names are still visible, so they hide what the module has of the name; a `const` is no value of a run and may be read.

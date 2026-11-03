@@ -423,6 +423,7 @@ if(SC_BUILD_TESTS)
         tests/interpret/expect-test.cc
         tests/interpret/interpret-test.cc
         tests/interpret/run-tests-test.cc
+        tests/interpret/message-test.cc
 
         tests/legalize/flat-test-support.hh
         tests/legalize/random-program.hh
@@ -451,6 +452,8 @@ if(SC_BUILD_TESTS)
         tests/emit/swizzle-emit-test.cc
         tests/emit/vector-emit-test.cc
         tests/emit/sixteen-bit-emit-test.cc
+        tests/emit/line-mapping-emit-test.cc
+        tests/emit/debug-emit-test.cc
 
         tests/driver/classify-test.cc
         tests/driver/compile-to-text-test.cc

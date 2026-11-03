@@ -256,6 +256,11 @@ struct texture_array_binding; // the texture form
 struct compiler_info;
 struct compute_dimensions;
 struct compiled_shader;
+enum class debug_scalar : u8;
+struct debug_value;
+struct debug_source_line;
+struct shader_debug_site;
+struct shader_source_line;
 enum class footprint_source : u8; // how far a shader's footprint can be trusted (see barrier/footprint.hh)
 struct slot_footprint;            // how one shader's code touches one binding
 struct shader_footprint;          // every binding a shader's code touches, and how
@@ -307,6 +312,7 @@ class stat_totals;                              // a context's running stat tota
 class gpu_wait_scope;                           // times a CPU wait on the GPU into gpu_wait_nanoseconds
 struct slot_use;                                // how a pipeline's code touches one binding slot (barrier/footprint.hh)
 class pipeline_footprint;                       // a pipeline's footprint, resolved against its layout
+class debug_windows;                            // what shaders write print and assert records into
 struct view_access;                             // the access and stages a bound view is declared with at an op
 struct array_declarations;                      // what a dispatch's declarations say about one bound array
 struct array_plan;                              // how a dispatch tracks one bound array, given its declarations

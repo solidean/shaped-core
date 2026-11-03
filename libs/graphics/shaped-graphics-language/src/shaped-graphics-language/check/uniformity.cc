@@ -531,7 +531,11 @@ struct uniformity_pass
                 }
             },
             [&](flat_eval const& v) { (void)value(v.value, flow); },
-            [&](flat_print const& p) { (void)value(p.value, flow); },
+            [&](flat_print const& p)
+            {
+                for (auto const v : e.at(p.values))
+                    (void)value(v, flow);
+            },
             [&](flat_if const& i)
             {
                 auto const inside = first_of(flow, as_branch(value(i.condition, flow), s.from, s.inlined_through));

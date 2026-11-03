@@ -219,6 +219,7 @@ void dx12_command_list::raster_bind_pipeline(sg::raster_pipeline const& pipeline
     _list->SetDescriptorHeaps(2, heaps);
     _list->SetGraphicsRootSignature(rp->layout->root_signature.Get());
     _list->SetPipelineState(rp->pipeline_state.Get());
+    bind_debug_window(*rp->layout, pipeline.footprint(), true);
     _list->IASetPrimitiveTopology(rp->topology);
 
     _bound_raster_layout = rp->layout.get();

@@ -274,6 +274,45 @@ cc::vector<byte> encode_compiled_shader(compiled_shader const& shader)
         put_bool(out, slot.dynamic_index);
     }
 
+    put_u64(out, u64(shader.debug_sites.size()));
+    for (auto const& site : shader.debug_sites)
+    {
+        put_u32(out, site.id);
+        put_bool(out, site.is_assert);
+        put_u64(out, u64(site.pieces.size()));
+        for (auto const& piece : site.pieces)
+            put_string(out, piece);
+        put_u64(out, u64(site.values.size()));
+        for (auto const& value : site.values)
+        {
+            put_u32(out, u32(value.scalar));
+            put_u32(out, u32(value.lanes));
+            put_string(out, value.type);
+        }
+        put_string(out, site.at.file);
+        put_u32(out, u32(site.at.line));
+        put_u64(out, u64(site.inlined_from.size()));
+        for (auto const& line : site.inlined_from)
+        {
+            put_string(out, line.file);
+            put_u32(out, u32(line.line));
+        }
+    }
+
+    put_u64(out, u64(shader.source_map.size()));
+    for (auto const& line : shader.source_map)
+    {
+        put_u32(out, u32(line.emitted));
+        put_string(out, line.at.file);
+        put_u32(out, u32(line.at.line));
+        put_u64(out, u64(line.inlined_from.size()));
+        for (auto const& call : line.inlined_from)
+        {
+            put_string(out, call.file);
+            put_u32(out, u32(call.line));
+        }
+    }
+
     return out;
 }
 
@@ -340,6 +379,60 @@ cc::optional<compiled_shader> decode_compiled_shader(cc::span<byte const> bytes)
         slot.access = access_flags::create_from_bits(r.get_u32());
         slot.dynamic_index = r.get_bool();
         shader.footprint.slots.push_back(cc::move(slot));
+    }
+
+    // A site is at least its id, its flag and three length prefixes, and each part at least its own prefix.
+    auto const site_count = r.get_count(4 + 1 + 3 * 8 + 4);
+    for (auto i = isize(0); r.ok && i < site_count; ++i)
+    {
+        auto site = shader_debug_site();
+        site.id = r.get_u32();
+        site.is_assert = r.get_bool();
+        auto const piece_count = r.get_count(8);
+        for (auto p = isize(0); r.ok && p < piece_count; ++p)
+            site.pieces.push_back(r.get_string());
+        auto const value_count = r.get_count(4 + 4 + 8);
+        for (auto v = isize(0); r.ok && v < value_count; ++v)
+        {
+            auto value = debug_value();
+            auto const scalar = r.get_u32();
+            if (scalar > u32(debug_scalar::boolean))
+                return {};
+            value.scalar = debug_scalar(scalar);
+            value.lanes = i32(r.get_u32());
+            value.type = r.get_string();
+            site.values.push_back(cc::move(value));
+        }
+        site.at.file = r.get_string();
+        site.at.line = i32(r.get_u32());
+        auto const inlined_count = r.get_count(8 + 4);
+        for (auto l = isize(0); r.ok && l < inlined_count; ++l)
+        {
+            auto line = debug_source_line();
+            line.file = r.get_string();
+            line.line = i32(r.get_u32());
+            site.inlined_from.push_back(cc::move(line));
+        }
+        shader.debug_sites.push_back(cc::move(site));
+    }
+
+    // A line is at least its number, a file's length prefix, its line and a call count.
+    auto const line_count = r.get_count(4 + 8 + 4 + 8);
+    for (auto i = isize(0); r.ok && i < line_count; ++i)
+    {
+        auto line = shader_source_line();
+        line.emitted = i32(r.get_u32());
+        line.at.file = r.get_string();
+        line.at.line = i32(r.get_u32());
+        auto const call_count = r.get_count(8 + 4);
+        for (auto k = isize(0); r.ok && k < call_count; ++k)
+        {
+            auto call = debug_source_line();
+            call.file = r.get_string();
+            call.line = i32(r.get_u32());
+            line.inlined_from.push_back(cc::move(call));
+        }
+        shader.source_map.push_back(cc::move(line));
     }
 
     // Trailing bytes mean this is not the blob we think it is, so it is refused like any other inconsistency.

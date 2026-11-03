@@ -543,10 +543,20 @@ sg::routine_outcome raster_routine::execute(sg::command_list& cmd, raster_frame_
             .bands = (has_atlas ? d.decal_atlas->band_texture() : self->_stand_ins.decal_bands).as_texture_view()});
 
     static_assert(sizeof(shaders::raster_cull::draw_args) == sizeof(sg::draw_indexed_args));
+    // A frame mesh's draw binds its own index buffer, so it cannot join a bin's indirect run: it is drawn directly, never culled.
+    auto own = cc::vector<raster_draw const*>();
+    auto own_opaque = false;
     for (auto const& draw : d.draws)
     {
         CC_ASSERT(isize(draw.permutation) < bins.size(), "a raster draw names a permutation the frame holds");
-        if (draw.triangle_count != 0)
+        if (draw.triangle_count == 0)
+            continue;
+        if (draw.indices.raw() != nullptr)
+        {
+            own.push_back(&draw);
+            own_opaque = own_opaque || !bins[draw.permutation].cutout;
+        }
+        else
             ++bins[draw.permutation].count;
     }
     auto total = isize(0);
@@ -571,7 +581,7 @@ sg::routine_outcome raster_routine::execute(sg::command_list& cmd, raster_frame_
     auto items = cc::vector<shaders::raster_cull::cull_item>::create_defaulted(total);
     for (auto const& draw : d.draws)
     {
-        if (draw.triangle_count == 0)
+        if (draw.triangle_count == 0 || draw.indices.raw() != nullptr)
             continue;
         auto const slot = next[draw.permutation]++;
         templates[slot] = {.index_count = draw.triangle_count * 3,
@@ -632,36 +642,58 @@ sg::routine_outcome raster_routine::execute(sg::command_list& cmd, raster_frame_
             pass.set_inline_constants(pass_block);
     };
 
-    // Every draw of every bin, from `args`, into the scope open on `pass`.
-    auto const draw_bins = [&](sg::rendering_scope& pass, sg::buffer<sg::draw_indexed_args> const& args)
+    // A frame mesh's draw over its own index buffer, through `pipeline`, into the scope open on `pass`.
+    auto const draw_own = [&](sg::rendering_scope& pass, raster_draw const& draw, sg::raster_pipeline const& pipeline)
     {
-        if (total == 0)
-            return;
-        CC_ASSERT(d.index_pool.raw() != nullptr, "raster_routine: a frame with draws binds the index pool");
-        pass.bind_index_buffer(d.index_pool.as_index_buffer());
-        for (auto const& b : bins)
-        {
-            if (b.count == 0)
-                continue;
-            pass.bind_pipeline(*b.pipeline);
-            bind_groups(pass);
-            // The base vertex reaches the vertex stage in `@vertex_index`, so it reads the vertex pool at the index as it stands.
-            pass.draw_indexed_indirect(args, b.first, b.count);
-        }
+        pass.bind_index_buffer(draw.indices.as_index_buffer());
+        pass.bind_pipeline(pipeline);
+        bind_groups(pass);
+        pass.draw_indexed({.index_range = {.offset = 0, .size = isize(draw.triangle_count) * 3},
+                           .instance_range = {.offset = isize(draw.instance), .size = 1}});
     };
 
-    // The depth of every opaque draw in `args`, into `depth` as `target` opens it.
-    auto const draw_depth = [&](sg::buffer<sg::draw_indexed_args> const& args, sg::depth_stencil_target target)
+    // Every draw of every bin, from `args`, into the scope open on `pass`; with `with_own` the frame meshes' draws too.
+    auto const draw_bins = [&](sg::rendering_scope& pass, sg::buffer<sg::draw_indexed_args> const& args, bool with_own)
+    {
+        if (total > 0)
+        {
+            CC_ASSERT(d.index_pool.raw() != nullptr, "raster_routine: a frame with draws binds the index pool");
+            pass.bind_index_buffer(d.index_pool.as_index_buffer());
+            for (auto const& b : bins)
+            {
+                if (b.count == 0)
+                    continue;
+                pass.bind_pipeline(*b.pipeline);
+                bind_groups(pass);
+                // The base vertex reaches the vertex stage in `@vertex_index`, so it reads the vertex pool at the index as it stands.
+                pass.draw_indexed_indirect(args, b.first, b.count);
+            }
+        }
+        if (with_own)
+            for (auto const* draw : own)
+                draw_own(pass, *draw, *bins[draw->permutation].pipeline);
+    };
+
+    // The depth of every opaque draw in `args`, into `depth` as `target` opens it; with `with_own` the opaque frame meshes' too.
+    auto const draw_depth
+        = [&](sg::buffer<sg::draw_indexed_args> const& args, sg::depth_stencil_target target, bool with_own)
     {
         auto pass = cmd.raster.render_to({.depth_stencil_target = cc::move(target)});
-        if (opaque_total == 0)
+        if (opaque_total == 0 && !(with_own && own_opaque))
             return;
         // The vertex stage reads the vertex pool through the bindless tables.
         auto const declared = d.bindless->declare_raster_access(cmd);
-        pass.bind_index_buffer(d.index_pool.as_index_buffer());
-        pass.bind_pipeline(*depth_only);
-        bind_groups(pass);
-        pass.draw_indexed_indirect(args, 0, opaque_total);
+        if (opaque_total > 0)
+        {
+            pass.bind_index_buffer(d.index_pool.as_index_buffer());
+            pass.bind_pipeline(*depth_only);
+            bind_groups(pass);
+            pass.draw_indexed_indirect(args, 0, opaque_total);
+        }
+        if (with_own)
+            for (auto const* draw : own)
+                if (!bins[draw->permutation].cutout)
+                    draw_own(pass, *draw, *depth_only);
     };
 
     // The scope the shading draws run in: every target, the depth as `depth_target` opens it.
@@ -759,7 +791,9 @@ sg::routine_outcome raster_routine::execute(sg::command_list& cmd, raster_frame_
     auto drawn_args = sg::buffer<sg::draw_indexed_args>();
     if (!occlusion)
     {
-        drawn_args = template_buffer.reinterpret_as<sg::draw_indexed_args>();
+        // none where every draw is a frame mesh's, drawn directly
+        if (total > 0)
+            drawn_args = template_buffer.reinterpret_as<sg::draw_indexed_args>();
         if (total > 0 && self->_cull != nullptr && d.culling != raster_culling::none)
         {
             auto const args = args_buffer();
@@ -778,7 +812,7 @@ sg::routine_outcome raster_routine::execute(sg::command_list& cmd, raster_frame_
         }
 
         if (prepass)
-            draw_depth(drawn_args, depth.as_depth_stencil_view().cleared(0.0f));
+            draw_depth(drawn_args, depth.as_depth_stencil_view().cleared(0.0f), true);
 
         // Without a prepass the depth is cleared here, to the far plane the environment tests against.
         auto pass = open_shading(
@@ -788,7 +822,7 @@ sg::routine_outcome raster_routine::execute(sg::command_list& cmd, raster_frame_
         // The first draw applies them, and a later one finds them current unless its pipeline touches them at new stages.
         // The environment draw binds no table, so it leaves them dormant, and a pass with nothing else to draw ends them silently.
         auto const declared = d.bindless->declare_raster_access(cmd);
-        draw_bins(pass, drawn_args);
+        draw_bins(pass, drawn_args, true);
         draw_environment(pass);
     }
     else
@@ -822,13 +856,14 @@ sg::routine_outcome raster_routine::execute(sg::command_list& cmd, raster_frame_
             cmd.compute.dispatch_threads(int(total));
         }
         auto const first_drawn = first_args.reinterpret_as<sg::draw_indexed_args>();
+        // The frame meshes are drawn with the first pass, so they occlude in the pyramid and are drawn once.
         if (prepass)
-            draw_depth(first_drawn, depth.as_depth_stencil_view().cleared(0.0f));
+            draw_depth(first_drawn, depth.as_depth_stencil_view().cleared(0.0f), true);
         else
         {
             auto pass = open_shading(depth.as_depth_stencil_view().cleared(0.0f), false, true);
             auto const declared = d.bindless->declare_raster_access(cmd);
-            draw_bins(pass, first_drawn);
+            draw_bins(pass, first_drawn, true);
         }
 
         // The pyramid: the farthest primary depth under each texel, level by level.
@@ -902,11 +937,11 @@ sg::routine_outcome raster_routine::execute(sg::command_list& cmd, raster_frame_
         if (prepass)
         {
             // Every surface is shaded once, both passes' draws against the depth they laid down together.
-            draw_depth(drawn_args, depth.as_depth_stencil_view().preserved());
+            draw_depth(drawn_args, depth.as_depth_stencil_view().preserved(), false);
             auto pass = open_shading(depth.as_depth_stencil_view().preserved(), false, false);
             auto const declared = d.bindless->declare_raster_access(cmd);
-            draw_bins(pass, first_drawn);
-            draw_bins(pass, drawn_args);
+            draw_bins(pass, first_drawn, true);
+            draw_bins(pass, drawn_args, false);
             draw_environment(pass);
         }
         else
@@ -914,7 +949,7 @@ sg::routine_outcome raster_routine::execute(sg::command_list& cmd, raster_frame_
             // The first pass's surfaces stay, and the environment fills what neither pass covered.
             auto pass = open_shading(depth.as_depth_stencil_view().preserved(), true, false);
             auto const declared = d.bindless->declare_raster_access(cmd);
-            draw_bins(pass, drawn_args);
+            draw_bins(pass, drawn_args, false);
             draw_environment(pass);
         }
     }

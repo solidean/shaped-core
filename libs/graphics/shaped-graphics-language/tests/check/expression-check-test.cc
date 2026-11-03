@@ -318,8 +318,8 @@ TEST("sgl check - statements and expressions the tracer does not carry")
           == "unsupported-yet user:[v] a for over anything but an int range\n");
     // EVAL-101: `..=` is a range a for runs over, its last value included
     CHECK(body_reports("for i in 0 ..= 3:\n    return k\nreturn k\n") == "");
-    CHECK(body_reports("assert k > 0.0, \"positive\"\nreturn k\n")
-              .contains("unsupported-yet user:[\"positive\"] an assert message"));
+    // an assert's message is a quoted literal, checked as its interpolations are (CHK-424)
+    CHECK(body_reports("assert k > 0.0, \"k is $k\"\nreturn k\n") == "");
     // a call may be written for its effect, so its value may be dropped; any other expression has none to be written for
     CHECK(body_reports("saturate k\nreturn k\n") == "");
     CHECK(body_reports("k\nreturn k\n") == "unsupported-yet user:[k] an expression statement\n");
