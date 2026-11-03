@@ -70,7 +70,24 @@ struct differentiator
     /// Reverse: the locals the pass adds to steer the sweeps (saves, flags, conditions), which have no adjoint.
     cc::set<i32> bookkeeping;
     /// Reverse: the save a statement that overwrites a local made of it first.
-    cc::map<i32, local_id> save_of;
+    cc::map<i32, flat_expr_id> save_of;
+    /// Reverse: a loop of constant bounds kept as a loop, around the statement being straightened, innermost last.
+    /// What a statement inside saves or records is a tape with one slot per iteration of all of them.
+    struct kept_loop
+    {
+        local_id index = local_id::none;
+        i32 first = 0;
+        i32 count = 0;
+        /// The blocks inside its body, which a leave inside it may target; any other leave would leave the loop.
+        cc::set<i32> labels;
+    };
+    cc::vector<kept_loop> kept_loops;
+    /// Reverse: how many loops the declarations being hoisted stand in; a `let` in one is assigned once per iteration.
+    i32 loop_depth = 0;
+    /// Reverse: a local a clone reads in place of another: a loop's index, going backward, its reversed twin.
+    cc::map<i32, local_id> substitution;
+    /// The most slots a tape holds, which bounds what a kept loop keeps per value it overwrites.
+    static constexpr i32 k_max_tape = 1024;
     /// Reverse: the flag a leave of a label sets.
     cc::map<i32, local_id> left_flag;
     /// Reverse: every declaration hoisted to the top of the body.
@@ -284,6 +301,9 @@ struct differentiator
         if (!is_valid(id))
             return id;
         auto x = node(id);
+        if (auto const* const r = x.node.try_as<flat_local_ref>())
+            if (auto const* const twin = substitution.get_ptr(i32(r->local)))
+                return ref(*twin);
         if (x.node.is<flat_block>() || x.node.is<flat_by_target>())
             return failed("a value that still holds a block");
         if (auto* const n = x.node.try_as<flat_member>())
@@ -652,7 +672,7 @@ struct differentiator
         // a buffer holds what a gradient would have to be written back into, which a derivative never does silently
         if (x.node.is<flat_buffer_element>() || x.node.is<flat_binding_member>())
         {
-            failed("a read of a buffer, whose gradient it cannot write back; read it as `no_diff(…)` to hold it "
+            failed("a read of a buffer, whose gradient it cannot write back; read it as `no_diff(â€¦)` to hold it "
                    "constant, or give the function that reads it a @backward that writes the gradient");
             return {id, flat_expr_id::none};
         }
@@ -987,6 +1007,12 @@ struct differentiator
         return false;
     }
 
+    /// What indexing a value of `t` reads: an array's element, or a vector's component.
+    [[nodiscard]] type_id element_type(type_id t) const
+    {
+        return m().at(t).kind == type_kind::array ? m().at(t).element : f.field_type(t, 0);
+    }
+
     /// `steps` below a fresh read of `root`.
     flat_expr_id place_of(flat_expr_id root, cc::span<place_step const> steps)
     {
@@ -994,7 +1020,7 @@ struct differentiator
         for (auto const& s : steps)
         {
             if (is_valid(s.index))
-                x = add(m().at(type_of(x)).element, flat_element{.object = x, .index = use(s.index)});
+                x = add(element_type(type_of(x)), flat_element{.object = x, .index = use(s.index)});
             else
                 x = add(f.field_type(type_of(x), s.member), flat_member{.object = x, .member = s.member});
         }
@@ -1163,7 +1189,7 @@ struct differentiator
                         hoisted.push_back(f.make_stmt(where, flat_var{.local = local, .value = zero(l.type)}));
                         if (is_differentiable(l.type))
                             tracked.insert(i32(local));
-                        if (is_let)
+                        if (is_let && loop_depth == 0)
                             single_assigned.insert(i32(local));
                         if (is_valid(value))
                             restate(id, flat_assign{.place = ref(local), .value = value});
@@ -1185,8 +1211,18 @@ struct differentiator
                     else if (auto const* const n = s.node.try_as<flat_block>())
                         restate(id,
                                 flat_block{.label = n->label, .body = f.add_list(hoist_declarations(copy_of(n->body)))});
+                    else if (auto const* const n = s.node.try_as<flat_for>();
+                             n != nullptr && constant_bounds(*n).has_value())
+                    {
+                        ++loop_depth;
+                        auto const body = f.add_list(hoist_declarations(copy_of(n->body)));
+                        --loop_depth;
+                        restate(
+                            id,
+                            flat_for{.label = n->label, .index = n->index, .first = n->first, .end = n->end, .body = body});
+                    }
                     else if (s.node.is<flat_loop>() || s.node.is<flat_while>() || s.node.is<flat_for>())
-                        failed("a loop whose bounds are no constants, which a reverse pass would need a tape for");
+                        failed("a loop whose bounds are no constants, which only a @backward can walk back");
                     else if (s.node.is<flat_case>())
                         failed("a case");
                     else if (s.node.is<flat_continue>() || s.node.is<flat_break>() || s.node.is<flat_discard>())
@@ -1233,13 +1269,62 @@ struct differentiator
         return flag;
     }
 
+    /// The constant bounds of `n`, as its first index and how many it runs; none for a loop of other bounds.
+    struct loop_bounds
+    {
+        i32 first = 0;
+        i32 count = 0;
+    };
+    [[nodiscard]] cc::optional<loop_bounds> constant_bounds(flat_for const& n) const
+    {
+        auto const first = f.constant_int(n.first);
+        auto const end = f.constant_int(n.end);
+        if (!first.has_value() || !end.has_value())
+            return {};
+        return loop_bounds{.first = first.value(),
+                           .count = end.value() > first.value() ? end.value() - first.value() : 0};
+    }
+
+    /// A value the forward sweep keeps for the backward one: one slot, or one per iteration of the kept loops around.
+    local_id tape(cc::string_view name, type_id type, flat_expr_id initial)
+    {
+        if (kept_loops.empty())
+            return hoist(name, type, initial);
+        auto size = 1;
+        for (auto const& l : kept_loops)
+            size *= l.count > 0 ? l.count : 1;
+        if (size > k_max_tape)
+        {
+            failed(cc::format("loops that run {} times between them, more than a tape holds ({})", size, k_max_tape));
+            return hoist(name, type, initial);
+        }
+        // PROTOTYPE: the flattener is always made from a checker it may change, and an array type is interned there
+        auto const array = const_cast<checker&>(f.c).array_type(type, size);
+        return hoist(name, array, zero(array));
+    }
+
+    /// Where the current iteration's value of `tape` stands.
+    flat_expr_id slot(local_id tape)
+    {
+        if (kept_loops.empty())
+            return ref(tape);
+        auto index = flat_expr_id::none;
+        for (auto const& l : kept_loops)
+        {
+            auto const offset = l.first == 0 ? ref(l.index) : call("-", ref(l.index), integer(l.first));
+            index = is_valid(index) ? call("+", call("*", index, integer(l.count)), offset) : offset;
+        }
+        auto const element = m().at(f.entry.at(tape).type).element;
+        return add(element, flat_element{.object = ref(tape), .index = index});
+    }
+
     /// `condition`, recorded where it is evaluated, for the backward sweep to branch on alike.
     flat_expr_id record(flat_expr_id condition)
     {
-        auto const k = hoist("taken", f.bool_type(), boolean(false));
+        auto const k = tape("taken", f.bool_type(), boolean(false));
         bookkeeping.insert(i32(k));
-        emit(flat_assign{.place = ref(k), .value = condition});
-        return ref(k);
+        emit(flat_assign{.place = slot(k), .value = condition});
+        return slot(k);
     }
 
     /// `statements` with every leave a flag, what follows a leave guarded by it, every condition recorded, and every
@@ -1263,15 +1348,19 @@ struct differentiator
                     return (void)failed("an assignment to a part of a local it cannot follow yet");
                 if (is_valid(root) && !single_assigned.contains(i32(root)) && !bookkeeping.contains(i32(root)))
                 {
-                    auto const save = hoist("saved", type_of(n->place), zero(type_of(n->place)));
+                    auto const save = tape("saved", type_of(n->place), zero(type_of(n->place)));
                     bookkeeping.insert(i32(save));
-                    emit(flat_assign{.place = ref(save), .value = clone(n->place)});
-                    save_of[i32(id)] = save;
+                    emit(flat_assign{.place = slot(save), .value = clone(n->place)});
+                    save_of[i32(id)] = slot(save);
                 }
                 f.block.push_back(id);
             }
             else if (auto const* const n = s.node.try_as<flat_leave>())
+            {
+                if (!kept_loops.empty() && !kept_loops.back().labels.contains(i32(n->target)))
+                    return (void)failed("a leave out of a loop it keeps: a break, or a return from inside the loop");
                 emit(flat_assign{.place = ref(flag_of(n->target)), .value = boolean(true)});
+            }
             else if (auto const* const n = s.node.try_as<flat_if>())
             {
                 auto const condition = record(n->condition);
@@ -1281,7 +1370,27 @@ struct differentiator
             }
             else if (auto const* const n = s.node.try_as<flat_block>();
                      n != nullptr && !f.custom_calls.contains(i32(n->label)))
-                restate(id, flat_block{.label = n->label, .body = f.add_list(straighten(copy_of(n->body)))});
+            {
+                if (!kept_loops.empty())
+                    kept_loops.back().labels.insert(i32(n->label));
+                auto body = straighten(copy_of(n->body));
+                // a block in a loop runs again, and its leave of the last run must not guard this one
+                if (auto const* const flag = left_flag.get_ptr(i32(n->label)))
+                    body.insert_at(0, f.make_stmt(where, flat_assign{.place = ref(*flag), .value = boolean(false)}));
+                restate(id, flat_block{.label = n->label, .body = f.add_list(body)});
+            }
+            else if (auto const* const n = s.node.try_as<flat_for>())
+            {
+                auto const bounds = constant_bounds(*n).value();
+                kept_loops.push_back({.index = n->index, .first = bounds.first, .count = bounds.count});
+                auto const body = straighten(copy_of(n->body));
+                kept_loops.remove_back();
+                restate(id, flat_for{.label = n->label,
+                                     .index = n->index,
+                                     .first = n->first,
+                                     .end = n->end,
+                                     .body = f.add_list(body)});
+            }
             else
                 f.block.push_back(id);
 
@@ -1606,11 +1715,11 @@ struct differentiator
         if (auto const* const n = s.node.try_as<flat_assign>())
         {
             auto steps = cc::vector<place_step>();
-            auto const root = root_of(n->place, &steps);
+            auto const root = root_of(clone(n->place), &steps);
             if (!is_valid(root) || bookkeeping.contains(i32(root)))
                 return;
             if (auto const* const save = save_of.get_ptr(i32(id)))
-                emit(flat_assign{.place = clone(n->place), .value = ref(*save)});
+                emit(flat_assign{.place = clone(n->place), .value = clone(*save)});
             if (!tracked.contains(i32(root)) || !is_differentiable(type_of(n->place)))
                 return;
             auto const adjoint = adjoint_of_local(root);
@@ -1624,7 +1733,12 @@ struct differentiator
             {
                 auto const l = linear_lets[k];
                 if (auto const* const a = adjoint_of.get_ptr(i32(l)))
-                    transpose(linear_definition.get(i32(l)), ref(*a));
+                {
+                    auto const adjoint = *a;
+                    transpose(linear_definition.get(i32(l)), ref(adjoint));
+                    // a statement in a kept loop runs again, and this adjoint is its alone
+                    emit(flat_assign{.place = ref(adjoint), .value = zero(f.entry.at(adjoint).type)});
+                }
             }
             return;
         }
@@ -1632,9 +1746,32 @@ struct differentiator
         {
             auto const then_body = collect([&] { backward(copy_of(n->then_body)); });
             auto const else_body = collect([&] { backward(copy_of(n->else_body)); });
-            return emit(flat_if{.condition = f.again(n->condition, at),
+            return emit(flat_if{.condition = clone(n->condition),
                                 .then_body = f.add_list(then_body),
                                 .else_body = f.add_list(else_body)});
+        }
+        // a kept loop is walked back from its last iteration, its index read reversed by every clone of its body
+        if (auto const* const n = s.node.try_as<flat_for>())
+        {
+            auto const bounds = constant_bounds(*n).value();
+            auto const back = f.add_local(local_kind::index, "back", f.int_type());
+            auto const index = n->index;
+            auto const body = copy_of(n->body);
+            auto const reversed_body = collect(
+                [&]
+                {
+                    auto const reversed = f.add_local(local_kind::let, f.entry.at(index).name, f.int_type());
+                    emit(flat_let{.local = reversed,
+                                  .value = call("-", integer(bounds.first + bounds.count - 1), ref(back))});
+                    substitution[i32(index)] = reversed;
+                    backward(body);
+                    substitution.erase(i32(index));
+                });
+            return emit(flat_for{.label = f.add_label("back"),
+                                 .index = back,
+                                 .first = integer(0),
+                                 .end = integer(bounds.count),
+                                 .body = f.add_list(reversed_body)});
         }
         if (auto const* const n = s.node.try_as<flat_block>())
         {
@@ -1907,12 +2044,9 @@ auto sgl::check::impl::flattener::flatten_diff(ast::expr_id id, type_id type, ca
         no_closures.push_back(-1);
     }
     auto const result_type = c.out.functions[c.out.at(signature->function).info].result;
-    auto const outer_unroll = unrolls_constant_loops;
-    unrolls_constant_loops = d.is_reverse;
     ++diff_depth;
     auto const inlined = call_closure(id, result_type, handed[function_slot], references, identity, no_closures);
     --diff_depth;
-    unrolls_constant_loops = outer_unroll;
     if (!is_valid(inlined))
         return give_up("the function, which did not inline");
     auto const result = add_local(local_kind::let, "result", result_type);

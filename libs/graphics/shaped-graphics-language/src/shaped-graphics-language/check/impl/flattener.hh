@@ -511,10 +511,6 @@ struct flattener
 
     flat_expr_id flatten_diff(ast::expr_id id, type_id type, call_record const& record);
 
-    /// Set while `bwd_diff` inlines its function: every `for` with constant bounds is unrolled, since a reverse pass
-    /// visits each statement at most once.
-    bool unrolls_constant_loops = false;
-
     /// Why the tree failed, where a pass knows better than CHK-213's words; empty otherwise.
     cc::string failure_detail;
 

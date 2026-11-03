@@ -456,7 +456,7 @@ void sgl::check::impl::flattener::flatten_inclusive_for(origin from,
         return;
     }
     auto const int_type = entry.at(first).type;
-    auto const unrolls = is_unrolled(id) || (unrolls_constant_loops && constant_int(first).has_value());
+    auto const unrolls = is_unrolled(id);
     if (auto const high = constant_int(last); high.has_value() && high.value() < 2147483647)
     {
         auto const end = add_expr(int_type, loop.iterable, flat_int_literal{.value = high.value() + 1});
@@ -635,7 +635,7 @@ void sgl::check::impl::flattener::flatten_for(origin from, ast::stmt_id id, ast:
     auto const end = flatten_expr(r->last);
     if (sgl::is_valid(r->op) && c.text_of(file(), c.file_of(file()).at(r->op).where) == "..=")
         return flatten_inclusive_for(from, id, loop, first, end);
-    if (is_unrolled(id) || (unrolls_constant_loops && constant_int(first).has_value() && constant_int(end).has_value()))
+    if (is_unrolled(id))
         return flatten_unrolled_for(from, id, loop, first, end);
     flatten_looped_for(from, id, loop, first, end);
 }
