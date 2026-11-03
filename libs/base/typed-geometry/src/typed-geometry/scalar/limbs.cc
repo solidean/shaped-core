@@ -5,26 +5,50 @@
 
 using namespace cc::primitive_defines;
 
+#if TG_LIMBS_X64_ASM && defined(__BMI2__)
+// The pair loop of limbs_addmul_1 and limbs_submul_1, with OP add or sub and OPC adc or sbb, on an even n.
+// Two limbs per round: the first product's high limb is added into the second's low off the carry's path,
+// which leaves add, adc, OPC, adc on it, two cycles a limb where a limb at a time takes three.
+// The high limb cannot overflow: a product's is at most 2^64 - 2, and a carry or borrow out of the pair leaves room for it.
+#define TG_LIMBS_MUL_1_PAIRS_ASM(OP, OPC)                                               \
+    "1:\n\t"                                                                            \
+    "mulx (%[a],%[i],8), %[l0], %[h0]\n\t"                                              \
+    "mulx 8(%[a],%[i],8), %[l1], %[h1]\n\t"                                             \
+    "add %[h0], %[l1]\n\t"                                                              \
+    "adc $0, %[h1]\n\t"                                                                 \
+    "add %[c], %[l0]\n\t"                                                               \
+    "adc $0, %[l1]\n\t"                                                                 \
+    "adc $0, %[h1]\n\t" OP " %[l0], (%[r],%[i],8)\n\t" OPC " %[l1], 8(%[r],%[i],8)\n\t" \
+    "adc $0, %[h1]\n\t"                                                                 \
+    "mov %[h1], %[c]\n\t"                                                               \
+    "add $2, %[i]\n\t"                                                                  \
+    "jnz 1b"
+#endif
+
 u64 tg::impl::limbs_addmul_1(u64* r, u64 const* a, i32 n, u64 b)
 {
 #if TG_LIMBS_X64_ASM && defined(__BMI2__)
-    // each limb's carries are taken up by its own adc, so none has to survive the loop's inc
     if (n <= 0)
         return 0;
-    auto i = -i64(n);
     u64 carry = 0;
-    u64 lo;
-    u64 hi;
-    asm volatile("1:\n\t"
-                 "mulx (%[a],%[i],8), %[lo], %[hi]\n\t"
-                 "add %[c], %[lo]\n\t"
-                 "adc $0, %[hi]\n\t"
-                 "add %[lo], (%[r],%[i],8)\n\t"
-                 "adc $0, %[hi]\n\t"
-                 "mov %[hi], %[c]\n\t"
-                 "inc %[i]\n\t"
-                 "jnz 1b"
-                 : [i] "+r"(i), [c] "+r"(carry), [lo] "=&r"(lo), [hi] "=&r"(hi)
+    if ((n & 1) != 0)
+    {
+        auto const p = limb_mul_add(r[0], a[0], b, 0);
+        r[0] = p.lo;
+        carry = p.hi;
+        ++r;
+        ++a;
+        --n;
+        if (n == 0)
+            return carry;
+    }
+    auto i = -i64(n);
+    u64 l0;
+    u64 h0;
+    u64 l1;
+    u64 h1;
+    asm volatile(TG_LIMBS_MUL_1_PAIRS_ASM("add", "adc")
+                 : [i] "+r"(i), [c] "+r"(carry), [l0] "=&r"(l0), [h0] "=&r"(h0), [l1] "=&r"(l1), [h1] "=&r"(h1)
                  : [a] "r"(a + n), [r] "r"(r + n), "d"(b)
                  : "cc", "memory");
     return carry;
@@ -43,23 +67,28 @@ u64 tg::impl::limbs_addmul_1(u64* r, u64 const* a, i32 n, u64 b)
 u64 tg::impl::limbs_submul_1(u64* r, u64 const* a, i32 n, u64 b)
 {
 #if TG_LIMBS_X64_ASM && defined(__BMI2__)
-    // as limbs_addmul_1; the high limb cannot overflow, since a carry out of the low add leaves 0 to subtract
     if (n <= 0)
         return 0;
-    auto i = -i64(n);
     u64 carry = 0;
-    u64 lo;
-    u64 hi;
-    asm volatile("1:\n\t"
-                 "mulx (%[a],%[i],8), %[lo], %[hi]\n\t"
-                 "add %[c], %[lo]\n\t"
-                 "adc $0, %[hi]\n\t"
-                 "sub %[lo], (%[r],%[i],8)\n\t"
-                 "adc $0, %[hi]\n\t"
-                 "mov %[hi], %[c]\n\t"
-                 "inc %[i]\n\t"
-                 "jnz 1b"
-                 : [i] "+r"(i), [c] "+r"(carry), [lo] "=&r"(lo), [hi] "=&r"(hi)
+    if ((n & 1) != 0)
+    {
+        auto const p = cc::umul128(a[0], b);
+        auto const d = cc::sub_with_borrow(r[0], p.lo);
+        r[0] = d.value;
+        carry = p.hi + d.borrow;
+        ++r;
+        ++a;
+        --n;
+        if (n == 0)
+            return carry;
+    }
+    auto i = -i64(n);
+    u64 l0;
+    u64 h0;
+    u64 l1;
+    u64 h1;
+    asm volatile(TG_LIMBS_MUL_1_PAIRS_ASM("sub", "sbb")
+                 : [i] "+r"(i), [c] "+r"(carry), [l0] "=&r"(l0), [h0] "=&r"(h0), [l1] "=&r"(l1), [h1] "=&r"(h1)
                  : [a] "r"(a + n), [r] "r"(r + n), "d"(b)
                  : "cc", "memory");
     return carry;
@@ -361,6 +390,103 @@ u64 tg::impl::limbs_rshift(u64* r, u64 const* a, i32 n, int s)
     return out;
 }
 
+namespace
+{
+/// floor((2^192 - 1) / d) - 2^64 for d = d1 * 2^64 + d0 with d1's top bit set: the reciprocal of a 3/2 division.
+/// From Möller and Granlund, "Improved division by invariant integers" (IEEE Transactions on Computers, 2011), algorithms 2 and 6.
+u64 reciprocal_3by2(u64 d1, u64 d0)
+{
+    // floor((2^128 - 1) / d1) - 2^64, then corrected for d0
+    auto v = cc::udiv128({~u64(0), ~d1}, d1).quotient;
+    auto p = d1 * v + d0;
+    if (p < d0)
+    {
+        --v;
+        if (p >= d1)
+        {
+            --v;
+            p -= d1;
+        }
+        p -= d1;
+    }
+    auto const t = cc::umul128(d0, v);
+    p += t.hi;
+    if (p < t.hi)
+    {
+        --v;
+        if (p >= d1 && (p > d1 || t.lo >= d0))
+            --v;
+    }
+    return v;
+}
+
+struct div_3by2_result
+{
+    u64 quotient;
+    u64 r1;
+    u64 r0;
+};
+
+/// (n2, n1, n0) / (d1, d0) for (n2, n1) < (d1, d0) and v = reciprocal_3by2(d1, d0), by the same paper's algorithm 5.
+/// Two products and at most one correction, where a hardware division costs tens of cycles.
+CC_FORCE_INLINE div_3by2_result div_3by2(u64 n2, u64 n1, u64 n0, u64 d1, u64 d0, u64 v)
+{
+    auto const p = cc::umul128(n2, v);
+    auto const s = cc::add_with_carry(p.lo, n1);
+    auto q = p.hi + n2 + s.carry;
+    auto const q0 = s.value;
+    // the top two limbs of n - q * d, less d once more
+    auto const e = cc::sub_with_borrow(n0, d0);
+    auto r1 = n1 - d1 * q - d1 - e.borrow;
+    auto const t = cc::umul128(d0, q);
+    auto const f = cc::sub_with_borrow(e.value, t.lo);
+    auto r0 = f.value;
+    r1 = r1 - t.hi - f.borrow;
+    ++q;
+    // r1 >= q0 means q is one too large; branch-free, since it is taken about half the time
+    auto const mask = u64(0) - u64(r1 >= q0);
+    q += mask;
+    auto const g = cc::add_with_carry(r0, mask & d0);
+    r0 = g.value;
+    r1 = r1 + (mask & d1) + g.carry;
+    if (r1 >= d1) [[unlikely]]
+    {
+        if (r1 > d1 || r0 >= d0)
+        {
+            ++q;
+            auto const h = cc::sub_with_borrow(r0, d0);
+            r0 = h.value;
+            r1 = r1 - d1 - h.borrow;
+        }
+    }
+    return {.quotient = q, .r1 = r1, .r0 = r0};
+}
+} // namespace
+
+void tg::impl::limbs_divrem_2(u64* q, u64* r, u64 const* a, i32 an, u64 const* b)
+{
+    CC_ASSERT(an >= 2 && b[1] != 0, "limbs_divrem_2 takes a normalized dividend of two limbs or more and a divisor of "
+                                    "two");
+    // the window is two limbs, kept in registers: no scratch, no submul, and the remainder is the last division's
+    // a is shifted as it is read, each shift split in two so that s = 0 needs no branch
+    auto const s = cc::count_leading_zeroes(b[1]);
+    auto const d1 = (b[1] << s) | ((b[0] >> 1) >> (63 - s));
+    auto const d0 = b[0] << s;
+    auto const v = reciprocal_3by2(d1, d0);
+    auto n1 = (a[an - 1] >> 1) >> (63 - s);
+    auto n0 = (a[an - 1] << s) | ((a[an - 2] >> 1) >> (63 - s));
+    for (auto j = an - 2; j >= 0; --j)
+    {
+        auto const below = j > 0 ? a[j - 1] : u64(0);
+        auto const d = div_3by2(n1, n0, (a[j] << s) | ((below >> 1) >> (63 - s)), d1, d0, v);
+        q[j] = d.quotient;
+        n1 = d.r1;
+        n0 = d.r0;
+    }
+    r[0] = (n0 >> s) | ((n1 << 1) << (63 - s));
+    r[1] = n1 >> s;
+}
+
 void tg::impl::limbs_divrem(u64* q, u64* r, u64 const* a, i32 an, u64 const* b, i32 bn, u64* scratch)
 {
     CC_ASSERT(bn >= 2 && an >= bn && b[bn - 1] != 0, "limbs_divrem takes normalized operands, the divisor of two limbs "
@@ -384,49 +510,45 @@ void tg::impl::limbs_divrem(u64* q, u64* r, u64 const* a, i32 an, u64 const* b, 
         un[an] = limbs_lshift(un, a, an, s);
     }
 
-    auto const vtop = vn[bn - 1];
-    auto const vnext = vn[bn - 2];
+    // each digit from the window's top three limbs over the divisor's top two, exact or one too large,
+    // so a digit costs two products where Knuth's estimate costs a hardware division and up to two corrections
+    auto const d1 = vn[bn - 1];
+    auto const d0 = vn[bn - 2];
+    auto const v = reciprocal_3by2(d1, d0);
+    // the window un[j, j + bn] with its top limb held here rather than in un[j + bn]
+    // the top starts below d1: it holds the bits a's shift moved out, fewer than the divisor's leading zeroes
+    auto n1 = un[an];
     for (auto j = an - bn; j >= 0; --j)
     {
-        // estimate the digit from the top two limbs of the running remainder over the top divisor limb
-        // un[j + bn] <= vtop holds, and equality is the one case udiv128 cannot take
-        u64 qhat = 0;
-        u64 rhat = 0;
-        auto rhat_overflow = false;
-        if (un[j + bn] >= vtop)
+        u64 qhat;
+        if (n1 == d1 && un[j + bn - 1] == d0) [[unlikely]]
         {
+            // the one top the 3/2 division cannot take; then the digit is 2^64 - 1, exactly,
+            // and the subtraction clears the top limb
             qhat = ~u64(0);
-            auto const s1 = cc::add_with_carry(un[j + bn - 1], vtop);
-            rhat = s1.value;
-            rhat_overflow = s1.carry != 0;
+            (void)limbs_submul_1(un + j, vn, bn, qhat);
+            n1 = un[j + bn - 1];
         }
         else
         {
-            auto const d = cc::udiv128({un[j + bn - 1], un[j + bn]}, vtop);
+            auto const d = div_3by2(n1, un[j + bn - 1], un[j + bn - 2], d1, d0, v);
             qhat = d.quotient;
-            rhat = d.remainder;
-        }
-        while (!rhat_overflow)
-        {
-            auto const p = cc::umul128(qhat, vnext);
-            if (p.hi < rhat || (p.hi == rhat && p.lo <= un[j + bn - 2]))
-                break;
-            --qhat;
-            auto const s1 = cc::add_with_carry(rhat, vtop);
-            rhat = s1.value;
-            rhat_overflow = s1.carry != 0;
-        }
-
-        // multiply and subtract; a final borrow means the estimate was one too large, so the divisor is added back
-        auto const top = cc::sub_with_borrow(un[j + bn], limbs_submul_1(un + j, vn, bn, qhat));
-        un[j + bn] = top.value;
-        if (top.borrow != 0)
-        {
-            --qhat;
-            un[j + bn] += limbs_add(un + j, un + j, bn, vn, bn);
+            // the rest of the divisor times the digit, from the window below its top two, which the division left in r1 and r0
+            auto const c = limbs_submul_1(un + j, vn, bn - 2, qhat);
+            auto const s0 = cc::sub_with_borrow(d.r0, c);
+            auto const s1 = cc::sub_with_borrow(d.r1, 0, s0.borrow);
+            un[j + bn - 2] = s0.value;
+            n1 = s1.value;
+            if (s1.borrow != 0) [[unlikely]]
+            {
+                // one too large after all: the divisor added back, its top limb with the carry into n1
+                --qhat;
+                n1 += d1 + limbs_add(un + j, un + j, bn - 1, vn, bn - 1);
+            }
         }
         q[j] = qhat;
     }
+    un[bn - 1] = n1;
 
     if (s == 0)
         for (auto i = 0; i < bn; ++i)
