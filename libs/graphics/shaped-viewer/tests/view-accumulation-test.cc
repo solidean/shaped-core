@@ -82,9 +82,20 @@ ASYNC_INVOCABLE_TEST("sv - a view accumulates across frames under its id", (sg::
     };
 
     // A frame shaded through a stand-in for a permutation still compiling restarts the mean, which `trace` counts as moved.
-    // So a throwaway view is traced until two frames accumulate, and every section below starts with the shaders built.
+    // So a throwaway view per mode a section traces is traced until two frames accumulate with no stand-in bound,
+    // and every section below starts with the shaders built.
+    // The megakernel compiles permutations of its own: warming only the default mode left its first trace on a stand-in
+    // in 3 of 6 full runs (measured), and a restart after the count reached 2 is what the section once failed on.
+    auto const stand_in_hash = [&](sv::view_id id)
     {
-        auto const warm = view_named("warm-up");
+        auto const* const rec = store.peek_ptr(id);
+        auto const* const slot = rec != nullptr ? rec->temporal.get_ptr(sv::temporal_id::accumulation(0)) : nullptr;
+        return slot != nullptr ? slot->stand_in_hash : u64(1);
+    };
+    for (auto const mode : {sv::render_mode::automatic, sv::render_mode::megakernel})
+    {
+        auto warm = view_named(mode == sv::render_mode::automatic ? "warm-up" : "warm-up megakernel");
+        sv::ensure_scene_3d(warm).settings.mode = mode;
         auto const warmed = sv_test::frames_until_executed(
             ctx,
             [&](sg::command_list& cmd)
@@ -92,7 +103,8 @@ ASYNC_INVOCABLE_TEST("sv - a view accumulates across frames under its id", (sg::
                 resources.advance_to(ctx.current_epoch());
                 store.begin_frame(u64(ctx.current_epoch()));
                 (void)sv::view_renderer::execute(cmd, warm, resources, store);
-                return accumulated(warm.id) >= 2 ? sg::routine_outcome::executed : sg::routine_outcome::declined;
+                return accumulated(warm.id) >= 2 && stand_in_hash(warm.id) == 0 ? sg::routine_outcome::executed
+                                                                                 : sg::routine_outcome::declined;
             });
         REQUIRE(warmed);
     }
