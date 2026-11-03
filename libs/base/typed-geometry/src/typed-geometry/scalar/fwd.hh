@@ -73,6 +73,12 @@ struct bigfloat_summand;
 
 /// an arbitrary-precision integer, sign and magnitude, one pointer wide (see scalar/bigint/bigint.hh).
 struct bigint;
+/// a fixed-width two's-complement accumulator of bigint products, W limbs wide, for sums of products of small bigints
+/// (see scalar/bigint/bigint.hh).
+template <int W>
+struct bigint_accumulator;
+/// the accumulator for factors that fit an i64, multiplied signed (see scalar/bigint/bigint.hh).
+struct bigint_word_accumulator;
 /// an exact rational over two bigints, always reduced (see scalar/bigrat/bigrat.hh).
 struct bigrat;
 /// a rational whose reduction is deferred, for hot loops (see scalar/bigrat/bigrat.hh).

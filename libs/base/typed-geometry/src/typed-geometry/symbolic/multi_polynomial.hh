@@ -702,15 +702,22 @@ private:
             return r;
         }
 
-        if (_product_dense(a, b, r))
-            return r;
-        return _product_heap(a, b);
+        // each coefficient summed in one slot: a word accumulator where every factor is small enough, a C otherwise
+        return impl::with_slot<C>(impl::widest_limbs<C>(a._coeffs, b._coeffs),
+                                  [&]<class S>() -> multi_polynomial
+                                  {
+                                      multi_polynomial p;
+                                      if (_product_dense<S>(a, b, p))
+                                          return p;
+                                      return _product_heap<S>(a, b);
+                                  });
     }
 
     /// The product by Kronecker substitution, when the box of its exponents is small against the pairs it sums:
     /// each term's exponents become one index into a dense accumulator, a pair's product lands at the sum of its factors' indices,
     /// and the slots it touched are read out in the order.
     /// False, with r untouched, when the box is too large or an exponent would overflow.
+    template <class S>
     [[nodiscard]] static bool _product_dense(multi_polynomial const& a, multi_polynomial const& b, multi_polynomial& r)
     {
         constexpr auto n = variable_count;
@@ -729,8 +736,10 @@ private:
         cc::fixed_array<i64, Vars::count> stride;
         cc::fixed_array<int, Vars::count> extent;
         i64 size = 1;
-        for (auto v = 0; v < n; ++v)
+        for (auto q = 0; q < n; ++q)
         {
+            // the least significant variable first, x0 under a reversed layout and x(N-1) otherwise, so index order is the order's
+            auto const v = Vars::order::variables_reversed ? q : n - 1 - q;
             if (da[v] + db[v] > Vars::max_exponent)
                 return false;
             stride[v] = size;
@@ -744,11 +753,15 @@ private:
                 return false;
 
         // the accumulator is all zeros between calls: every slot read out is reset
-        thread_local cc::vector<C> dense;
+        thread_local cc::vector<S> dense;
+        thread_local cc::vector<u8> seen;
         thread_local cc::vector<i64> index_a;
         thread_local cc::vector<i64> index_b;
         if (dense.size() < size)
-            dense.resize_to_filled(size, C(0));
+        {
+            dense.resize_to_filled(size, impl::zero_slot<C, S>());
+            seen.resize_to_filled(size, u8(0));
+        }
         auto const index_of = [&](key_t const& k)
         {
             i64 i = 0;
@@ -763,8 +776,83 @@ private:
         for (auto t = 0; t < b.term_count(); ++t)
             index_b[t] = index_of(b._keys[t]);
 
-        // a slot going from zero to non-zero records its monomial; a slot that cancels and comes back is recorded twice,
-        // and the second record reads a zero, since the first moved the coefficient out
+        auto const fa = impl::slot_factors<C, S>(a._coeffs);
+        auto const fb = impl::slot_factors<C, S>(b._coeffs);
+        // raw pointers and counts in locals: the slots' stores could alias the vectors' headers, which would be reloaded every pair
+        auto const nb = b.term_count();
+        auto const* const ib = index_b.data();
+        auto const* const fbp = fb.data();
+        auto const* const kb = b._keys.data();
+        auto* const dense_base = dense.data();
+        auto* const seen_base = seen.data();
+
+        if (size <= pairs)
+        {
+            // A box no larger than the pairs: accumulate untracked, then walk every slot once.
+            // The walk is an odometer, least significant variable fastest, carrying the packed key along:
+            // a key is linear in the exponents, so a step adds a variable's unit and a carry takes its wrap back off.
+            // A larger index is a greater monomial unless the order compares its fields reversed, which walks upwards;
+            // a graded order sorts the result afterwards.
+            for (auto i = 0; i < a.term_count(); ++i)
+            {
+                auto* const row = dense_base + index_a[i];
+                auto const ca = fa[i];
+                for (auto j = 0; j < nb; ++j)
+                    impl::slot_add_mul_factors<C>(row[ib[j]], ca, fbp[j]);
+            }
+            constexpr auto upwards = Vars::order::compare_reversed;
+            cc::fixed_array<key_t, Vars::count> unit;
+            cc::fixed_array<key_t, Vars::count> wrap;
+            exponents_t e = {};
+            for (auto v = 0; v < n; ++v)
+            {
+                exponents_t u = {};
+                u[v] = 1;
+                unit[v] = Vars::pack(u);
+                u[v] = extent[v] - 1;
+                wrap[v] = Vars::pack(u);
+                if constexpr (!upwards)
+                    e[v] = extent[v] - 1;
+            }
+            auto key = Vars::pack(e);
+            auto slot = upwards ? i64(0) : size - 1;
+            for (i64 left = size; left > 0; --left)
+            {
+                if (!impl::slot_is_zero<C>(dense_base[slot]))
+                    r._push(key, impl::slot_take<C>(dense_base[slot]));
+                slot += upwards ? 1 : -1;
+                for (auto q = 0; q < n; ++q)
+                {
+                    auto const v = Vars::order::variables_reversed ? q : n - 1 - q;
+                    if constexpr (upwards)
+                    {
+                        if (++e[v] < extent[v])
+                        {
+                            key = key + unit[v];
+                            break;
+                        }
+                        e[v] = 0;
+                        key = key - wrap[v];
+                    }
+                    else
+                    {
+                        if (e[v] > 0)
+                        {
+                            --e[v];
+                            key = key - unit[v];
+                            break;
+                        }
+                        e[v] = extent[v] - 1;
+                        key = key + wrap[v];
+                    }
+                }
+            }
+            if constexpr (Vars::order::graded)
+                r._sort_terms();
+            return true;
+        }
+
+        // A sparser box: a slot's first product records its monomial, marked in seen until the read-out clears it.
         struct touched_slot
         {
             key_t key;
@@ -774,15 +862,20 @@ private:
         touched.clear();
         for (auto i = 0; i < a.term_count(); ++i)
         {
-            auto* const row = dense.data() + index_a[i];
-            auto const& ca = a._coeffs[i];
-            auto const& ka = a._keys[i];
-            for (auto j = 0; j < b.term_count(); ++j)
+            auto const ia = index_a[i];
+            auto* const row = dense_base + ia;
+            auto* const row_seen = seen_base + ia;
+            auto const ca = fa[i];
+            auto const ka = a._keys[i];
+            for (auto j = 0; j < nb; ++j)
             {
-                auto& c = row[index_b[j]];
-                if (impl::coefficient_is_zero(c))
-                    touched.push_back({.key = ka + b._keys[j], .slot = index_a[i] + index_b[j]});
-                impl::add_mul(c, ca, b._coeffs[j]);
+                auto const at = ib[j];
+                if (!row_seen[at]) [[unlikely]]
+                {
+                    row_seen[at] = 1;
+                    touched.push_back({.key = ka + kb[j], .slot = ia + at});
+                }
+                impl::slot_add_mul_factors<C>(row[at], ca, fbp[j]);
             }
         }
 
@@ -805,19 +898,18 @@ private:
         r._coeffs.reserve(touched.size());
         for (auto const& t : touched)
         {
+            seen[t.slot] = 0;
             auto& c = dense[t.slot];
-            if (impl::coefficient_is_zero(c))
+            if (impl::slot_is_zero<C>(c))
                 continue;
-            r._push(t.key, cc::move(c));
-            // a moved-from bigint is zero already; a coefficient that keeps its value when moved is reset
-            if (!impl::coefficient_is_zero(c))
-                c = C(0);
+            r._push(t.key, impl::slot_take<C>(c));
         }
         return true;
     }
 
     /// The product by Monagan and Pearce's heap: one row per term of the smaller factor, each walking the larger,
     /// so the pairs' monomials come out greatest first and each run of equal ones is accumulated in place, sorted without a sort.
+    template <class S>
     [[nodiscard]] static multi_polynomial _product_heap(multi_polynomial const& a, multi_polynomial const& b)
     {
         auto const& rows = a.term_count() <= b.term_count() ? a : b;
@@ -854,15 +946,17 @@ private:
             }
         };
 
+        auto const fr = impl::slot_factors<C, S>(rows._coeffs);
+        auto const fc = impl::slot_factors<C, S>(cols._coeffs);
         multi_polynomial r;
         while (!heap.empty())
         {
             auto const k = heap[0].key;
-            auto acc = C(0);
+            auto acc = impl::zero_slot<C, S>();
             do
             {
                 auto& top = heap[0];
-                impl::add_mul(acc, rows._coeffs[top.i], cols._coeffs[top.j]);
+                impl::slot_add_mul_factors<C>(acc, fr[top.i], fc[top.j]);
                 if (++top.j < width)
                 {
                     top.key = Vars::multiply(rows._keys[top.i], cols._keys[top.j]);
@@ -874,12 +968,31 @@ private:
                 }
                 sift_down();
             } while (!heap.empty() && heap[0].key == k);
-            if (!impl::coefficient_is_zero(acc))
-                r._push(k, cc::move(acc));
+            if (!impl::slot_is_zero<C>(acc))
+                r._push(k, impl::slot_take<C>(acc));
         }
         return r;
     }
 
+    /// Sorts the terms by the order, their monomials distinct already.
+    void _sort_terms()
+    {
+        cc::vector<int> order;
+        for (auto t = 0; t < term_count(); ++t)
+            order.push_back(t);
+        cc::sort(order, [&](int x, int y) { return Vars::greater(_keys[x], _keys[y]); });
+        cc::vector<key_t> keys;
+        cc::vector<C> coeffs;
+        keys.reserve(term_count());
+        coeffs.reserve(term_count());
+        for (auto const t : order)
+        {
+            keys.push_back(_keys[t]);
+            coeffs.push_back(cc::move(_coeffs[t]));
+        }
+        _keys = cc::move(keys);
+        _coeffs = cc::move(coeffs);
+    }
 
     /// Terms in any order, possibly repeated, made sorted and combined.
     [[nodiscard]] static multi_polynomial _from_unsorted(cc::vector<key_t> keys, cc::vector<C> coeffs)

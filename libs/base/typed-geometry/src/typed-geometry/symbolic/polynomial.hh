@@ -10,6 +10,7 @@
 #include <typed-geometry/scalar/traits.hh>
 #include <typed-geometry/symbolic/fwd.hh>
 
+#include <concepts>
 #include <initializer_list>
 #include <type_traits>
 
@@ -77,6 +78,139 @@ void sub_mul(C& acc, C const& a, C const& b)
         acc.assign_sub_mul(a, b);
     else
         acc -= a * b;
+}
+
+/// C has a fixed-width accumulator for sums of products of small values, as bigint has, and a size in limbs to choose it by.
+template <class C>
+concept has_word_accumulator = requires(C const& c) {
+    typename C::template accumulator<3>;
+    { c.size() } -> std::convertible_to<int>;
+};
+
+/// The widest coefficient among ranges of them, in limbs, and 0 when every one fits an i64 and C has a word accumulator for them;
+/// a large number for a C with no accumulator at all, which then never takes one.
+template <class C, class... Ranges>
+[[nodiscard]] int widest_limbs(Ranges const&... ranges)
+{
+    if constexpr (!has_word_accumulator<C>)
+        return 1 << 30;
+    else
+    {
+        auto w = 0;
+        auto words = true;
+        (
+            [&]
+            {
+                for (auto const& c : ranges)
+                {
+                    w = c.size() > w ? int(c.size()) : w;
+                    if constexpr (requires { typename C::word_accumulator; })
+                        words = words && c.fits_i64();
+                }
+            }(),
+            ...);
+        if constexpr (requires { typename C::word_accumulator; })
+            if (words)
+                return 0;
+        return w == 0 ? 1 : w;
+    }
+}
+
+/// A slot that sums products of coefficients: C itself, or C's word accumulator when every factor fits it.
+template <class C, class S>
+[[nodiscard]] S zero_slot()
+{
+    if constexpr (std::is_same_v<S, C>)
+        return C(0);
+    else
+        return S{};
+}
+template <class C, class S>
+CC_FORCE_INLINE void slot_add_mul(S& s, C const& a, C const& b)
+{
+    if constexpr (std::is_same_v<S, C>)
+        add_mul(s, a, b);
+    else
+        s.add_mul(a, b);
+}
+template <class C, class S>
+[[nodiscard]] bool slot_is_zero(S const& s)
+{
+    if constexpr (std::is_same_v<S, C>)
+        return coefficient_is_zero(s);
+    else
+        return s.is_zero();
+}
+/// The slot's sum as a C, the slot left zero: a moved-from bigint is zero already, a coefficient that keeps its value is reset.
+template <class C, class S>
+[[nodiscard]] C slot_take(S& s)
+{
+    if constexpr (std::is_same_v<S, C>)
+    {
+        C c = cc::move(s);
+        if (!coefficient_is_zero(s))
+            s = C(0);
+        return c;
+    }
+    else
+    {
+        C c = s.to_bigint();
+        s.clear();
+        return c;
+    }
+}
+
+/// A factor as a slot reads it: the slot's word form where it has one, a pointer to the coefficient otherwise.
+template <class C, class S>
+struct slot_factor
+{
+    using type = C const*;
+    [[nodiscard]] static type make(C const& c) { return &c; }
+};
+template <class C, class S>
+    requires requires { typename S::factor; }
+struct slot_factor<C, S>
+{
+    using type = typename S::factor;
+    [[nodiscard]] static type make(C const& c) { return S::make_factor(c); }
+};
+
+/// A range of coefficients read once into the slot's factors, contiguous, for an inner loop that touches each many times.
+template <class C, class S, class Range>
+[[nodiscard]] cc::vector<typename slot_factor<C, S>::type> slot_factors(Range const& coefficients)
+{
+    cc::vector<typename slot_factor<C, S>::type> f;
+    f.reserve(isize(coefficients.size()));
+    for (auto const& c : coefficients)
+        f.push_back(slot_factor<C, S>::make(c));
+    return f;
+}
+
+template <class C, class S, class F>
+CC_FORCE_INLINE void slot_add_mul_factors(S& s, F const& a, F const& b)
+{
+    if constexpr (std::is_same_v<S, C>)
+        add_mul(s, *a, *b);
+    else
+        s.add_mul(a, b);
+}
+
+/// f.template operator()<S>() with the narrowest slot S the coefficients allow:
+/// C's signed word accumulator where every factor fits an i64, its limb accumulators for one or two limbs, C itself beyond.
+template <class C, class F>
+decltype(auto) with_slot(int widest, F&& f)
+{
+    if constexpr (has_word_accumulator<C>)
+    {
+        if constexpr (requires { typename C::word_accumulator; })
+            if (widest == 0)
+                return f.template operator()<typename C::word_accumulator>();
+        if (widest <= 1)
+            return f.template operator()<typename C::template accumulator<3>>();
+        if (widest <= 2)
+            return f.template operator()<typename C::template accumulator<5>>();
+    }
+    return f.template operator()<C>();
 }
 
 /// a / b where b divides a: a field's division, a ring's exact division where it has one, its truncating one otherwise.
@@ -437,13 +571,25 @@ template <class C, int A, int B>
     if (da < 0 || db < 0)
         return R();
     auto r = R::zeroed(da + db + 1);
-    for (auto i = 0; i <= da; ++i)
-    {
-        if (impl::coefficient_is_zero(a[i]))
-            continue;
-        for (auto j = 0; j <= db; ++j)
-            impl::add_mul(r[i + j], a[i], b[j]);
-    }
+    // each coefficient a convolution summed in one slot, a word accumulator where the coefficients are small enough
+    impl::with_slot<C>(
+        impl::widest_limbs<C>(a.coefficients(), b.coefficients()),
+        [&]<class S>
+        {
+            auto const fa
+                = impl::slot_factors<C, S>(a.coefficients().subspan(cc::offset_size{.offset = 0, .size = da + 1}));
+            auto const fb
+                = impl::slot_factors<C, S>(b.coefficients().subspan(cc::offset_size{.offset = 0, .size = db + 1}));
+            auto acc = impl::zero_slot<C, S>();
+            for (auto k = 0; k <= da + db; ++k)
+            {
+                auto const lo = k > db ? k - db : 0;
+                auto const hi = k < da ? k : da;
+                for (auto i = lo; i <= hi; ++i)
+                    impl::slot_add_mul_factors<C>(acc, fa[i], fb[k - i]);
+                r[k] = impl::slot_take<C>(acc);
+            }
+        });
     r.trim();
     return r;
 }
