@@ -343,16 +343,17 @@ srgb_color c;
 linear_rgb_color l = convert<linear_rgb_color>(c);
 ```
 
-## symbolic/ [planned]
+## symbolic/
 
-Basic CAS and exact symbolic algebra (`bigint`, `bigrat`, `monomial`, `polynomial`, `rational_polynomial`, `expr`; `simplify`, `factor`, `substitute`, `derivative`, `evaluate`).
+Basic CAS and exact symbolic algebra: `polynomial` and `multi_polynomial` today; `rational_polynomial`, `expr`, `simplify`, `factor` planned.
+[modules/symbolic.md](modules/symbolic.md) has the design.
 
 Notes:
 
 - Some symbolic types are also valid scalar types.
 - Keep symbolic independent from geometry where possible.
   Geometry may instantiate over symbolic scalars, but symbolic must not know geometry.
-- `bigint`/`bigrat` likely belong to `scalar/`, since they are useful as scalars outside symbolic algebra.
+- `bigint`/`bigrat` belong to `scalar/`, since they are useful as scalars outside symbolic algebra.
 
 ## calculus/ [planned]
 

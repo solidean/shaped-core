@@ -232,3 +232,28 @@ namespace tg
 {
 [[nodiscard]] int compare(bigrat const& a, bigrat const& b);
 } // namespace tg
+
+/// A bigrat is an exact scalar and a field.
+template <>
+struct tg::scalar_traits<tg::bigrat>
+{
+    static constexpr bool has_sqrt = false;
+    static constexpr bool has_trigonometry = false;
+    static constexpr bool has_exponential = false;
+    static constexpr bool has_rounding = false;
+    static constexpr bool has_abs = true;
+    static constexpr bool has_pow2 = false;
+    static constexpr bool has_non_finite = false;
+    static constexpr bool is_exact = true;
+    static constexpr bool is_field = true;
+
+    [[nodiscard]] static bigrat one() { return bigrat(1); }
+    [[nodiscard]] static bool is_zero(bigrat const& x) { return x.is_zero(); }
+    [[nodiscard]] static bool is_one(bigrat const& x) { return x.is_integer() && x.numerator().is_one(); }
+    [[nodiscard]] static bigrat abs(bigrat x)
+    {
+        if (x.is_negative())
+            x.negate();
+        return x;
+    }
+};
