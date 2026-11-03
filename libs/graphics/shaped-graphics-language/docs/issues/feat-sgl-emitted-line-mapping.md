@@ -28,3 +28,9 @@ The line table (EMIT-181) and HLSL's and MSL's `#line` (EMIT-182) landed, and sl
 WGSL is left: slib never compiles it, since Dawn does at `wgpuDeviceCreateShaderModule` and reports through the device's error callback.
 So the table goes into sg as a source map on `sg::compiled_shader`, beside the site table of [feat-sgl-gpu-print-and-assert](feat-sgl-gpu-print-and-assert.md).
 The webgpu backend then asks Dawn for the module's compilation info and logs each message at its `.sgl` line.
+
+## Closed (2026-11-03)
+
+`sg::compiled_shader::source_map` carries the line table for a text format, and slib's SGL edge fills it for WGSL.
+The webgpu backend asks Dawn for each module's compilation info, never waiting, and logs every error and warning at its `.sgl` line and inlined calls.
+The request is held in the context's backlog, and the messages go to the test or task that created the shader.

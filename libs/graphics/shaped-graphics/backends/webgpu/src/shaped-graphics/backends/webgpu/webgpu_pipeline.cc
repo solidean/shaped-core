@@ -1,11 +1,79 @@
 // Compute and raster pipelines, built synchronously for the uncached tier and asynchronously for the cached one.
 
 #include <clean-core/common/assert.hh>
+#include <clean-core/record/log.hh>
 #include <clean-core/string/format.hh>
 #include <clean-core/thread/async.hh>
+#include <clean-core/thread/async_ambient.hh>
 #include <clean-core/thread/async_coroutine.hh>
 #include <shaped-graphics/backends/webgpu/webgpu_context.hh>
 #include <shaped-graphics/backends/webgpu/webgpu_format.hh>
+
+namespace sg::backend::webgpu
+{
+namespace
+{
+/// The source line `line` of the text came from, and the calls it was inlined through; the text's own line where the
+/// map holds none.
+cc::string place_of(cc::span<sg::shader_source_line const> map, cc::string_view entry, u64 line)
+{
+    for (auto const& l : map)
+        if (u64(l.emitted) == line)
+        {
+            auto text = cc::format("{}:{}", l.at.file, l.at.line);
+            for (auto const& call : l.inlined_from)
+                text.appendf(", inlined from {}:{}", call.file, call.line);
+            return text;
+        }
+    return cc::format("{}'s WGSL line {}", entry, line);
+}
+
+/// Asks the module for what its compiler said, and logs each message at the source line it is about (EMIT-181).
+/// Never waits: the messages are logged whenever the device delivers them.
+void report_messages_at_source(webgpu_context& ctx, WGPUShaderModule module, sg::compiled_shader const& shader)
+{
+    struct request
+    {
+        cc::vector<sg::shader_source_line> map;
+        cc::string entry;
+        /// Whoever created the shader, so a message lands on that test or task rather than on no one.
+        cc::async_ambient_handle ambient;
+        /// Settles once the messages are logged; the context's backlog holds it, so awaiting the backlog waits for them.
+        cc::shared_async<cc::unit> done = cc::make_async_manual<cc::unit>();
+    };
+    // the handle captures the calling thread's context as it is made
+    auto* const held = new request{.map = shader.source_map, .entry = shader.entry_point};
+    ctx.backlog.track(held->done);
+    auto const info = WGPUCompilationInfoCallbackInfo{
+        .nextInChain = nullptr,
+        .mode = WGPUCallbackMode_AllowSpontaneous,
+        .callback =
+            [](WGPUCompilationInfoRequestStatus status, WGPUCompilationInfo const* compilation, void* userdata, void*)
+        {
+            auto* const r = static_cast<request*>(userdata);
+            cc::async_ambient_install_scope const ambient(r->ambient);
+            if (status == WGPUCompilationInfoRequestStatus_Success && compilation != nullptr)
+                for (auto i = size_t(0); i < compilation->messageCount; ++i)
+                {
+                    auto const& m = compilation->messages[i];
+                    auto const text = cc::string_view(m.message.data, isize(m.message.length));
+                    auto const place = place_of(r->map, r->entry, m.lineNum);
+                    if (m.type == WGPUCompilationMessageType_Error)
+                        CC_LOG_ERROR("{}: {}", place, text);
+                    else if (m.type == WGPUCompilationMessageType_Warning)
+                        CC_LOG_WARNING("{}: {}", place, text);
+                }
+            auto const done = r->done;
+            delete r;
+            done->push_value(cc::unit{});
+        },
+        .userdata1 = held,
+        .userdata2 = nullptr,
+    };
+    (void)wgpuShaderModuleGetCompilationInfo(module, info);
+}
+} // namespace
+} // namespace sg::backend::webgpu
 
 namespace sg::backend::webgpu
 {
@@ -36,6 +104,8 @@ namespace
     auto module = wgpu_shader_module(wgpuDeviceCreateShaderModule(ctx.device(), &desc));
     if (!module)
         return cc::error("wgpuDeviceCreateShaderModule returned no module");
+    if (!shader.source_map.empty())
+        report_messages_at_source(ctx, module.get(), shader);
     return module;
 }
 

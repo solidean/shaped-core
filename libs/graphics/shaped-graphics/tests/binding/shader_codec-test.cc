@@ -154,6 +154,19 @@ TEST("sg shader codec round-trips a shader's debug sites")
     CHECK(same(original, decoded.value()));
 }
 
+TEST("sg shader codec round-trips a shader's source map")
+{
+    auto original = make_shader();
+    original.source_map.push_back({.emitted = 14, .at = {.file = "shade.sgl", .line = 7}});
+    original.source_map.push_back(
+        {.emitted = 15, .at = {.file = "shade.sgl", .line = 3}, .inlined_from = {{.file = "main.sgl", .line = 40}}});
+    auto const decoded = sg::impl::decode_compiled_shader(sg::impl::encode_compiled_shader(original));
+    REQUIRE(decoded.has_value());
+    REQUIRE(decoded.value().source_map.size() == 2);
+    CHECK(decoded.value().source_map[0] == original.source_map[0]);
+    CHECK(decoded.value().source_map[1] == original.source_map[1]);
+}
+
 TEST("sg shader codec round-trips the absent optionals")
 {
     auto original = make_shader();
