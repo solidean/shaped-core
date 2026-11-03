@@ -51,3 +51,7 @@ The readme lists "assertions, logging, per expression traces" among what SGL off
    The count is the context's to set, for an app that keeps more epochs in flight.
    No step puts a sync point between two epochs on the GPU: overlapping them is what a dev build must still show.
 4. slib and the build: the site table translated onto `sg::compiled_shader`, `SC_SHADER_DIAGNOSTICS`, and GPU tests.
+
+Landed by 2026-11-03: stages 1 to 4 on dx12, vulkan and webgpu, with sr's end-to-end test on each.
+Left: metal (Julius), whose SGL edge asks for no records until its backend binds `[[buffer(30)]]`.
+And an assert in a vertex, geometry or tessellation stage, an any hit or an intersection, which records and goes on.

@@ -90,6 +90,8 @@ TEST("sgl emit - a stage that cannot write the buffer drops its prints and decla
     CHECK(!wgsl.text.contains("sg_debug"));
     CHECK(wgsl.debug_sites.empty());
     CHECK(compile(vertex, target::hlsl_dx12, "vs").text.contains("sg_debug"));
+    // vulkan writes no storage from a vertex stage without a feature sg does not ask for
+    CHECK(!compile(vertex, target::hlsl_vulkan, "vs").text.contains("sg_debug"));
 }
 
 TEST("sgl emit - MSL takes sg's debug buffer at the argument table's last slot, clear of the vertex buffers")

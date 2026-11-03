@@ -45,6 +45,12 @@ public:
     /// Declaring is separate from flushing so a buffer bound several times to one op produces a single merged barrier.
     /// An access landing in the write bucket of an array member counts toward _member_writes.
     /// `from_array_application` makes the buffer one, and the result says whether the op already held a write of it.
+    /// The context's debug window for the epoch being recorded, where diagnostics are on; null where they are off.
+    /// Every op that runs with it bound declares it as an append (declare_debug_window), as a bound group is declared.
+    [[nodiscard]] sg::raw_buffer_handle bind_debug_window(sg::impl::pipeline_footprint const& footprint);
+    void declare_debug_window(sg::impl::pipeline_footprint const* footprint, sg::pipeline_stage_flags op_stages);
+    sg::raw_buffer_handle _bound_debug_window;
+
     sg::impl::member_track track_buffer_access(vulkan_buffer const& buffer,
                                                sg::pipeline_stage_flags stages,
                                                sg::access_flags access,

@@ -23,9 +23,10 @@ std::unique_ptr<slib::shader_compiler> inner_compiler_for(sg::context const& ctx
     if (ctx.backend() == sg::backend_kind::webgpu)
         return slib::create_wgsl_compiler();
 #if SLIB_HAS_DXC
-    if (ctx.backend() == sg::backend_kind::dx12)
+    if (ctx.backend() == sg::backend_kind::dx12 || ctx.backend() == sg::backend_kind::vulkan)
     {
-        auto dxc = slib::create_dxc_compiler();
+        auto dxc
+            = ctx.backend() == sg::backend_kind::dx12 ? slib::create_dxc_compiler() : slib::create_dxc_spirv_compiler();
         if (dxc.has_value())
             return cc::move(dxc.value());
     }
@@ -41,7 +42,7 @@ ASYNC_INVOCABLE_TEST("sr - a shader's failed assert reaches the log with its val
     auto& ctx = *ctx_h;
     auto inner = inner_compiler_for(ctx);
     if (inner == nullptr)
-        SKIP("sg binds the debug window on dx12 and webgpu alone so far");
+        SKIP("sg binds no debug window on this backend yet");
     nx::expect_error("debug.sgl:3: assert failed: thread 3 of int2(3, 0) is the odd one", nx::exactly(1));
 
     auto const compiler = slib::create_sgl_compiler(cc::move(inner), {.persistent_cache = nullptr, .diagnostics = true});
