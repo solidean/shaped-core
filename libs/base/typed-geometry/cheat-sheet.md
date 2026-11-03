@@ -601,6 +601,12 @@ auto [q, r] = divrem(a, b);                                 // a = q b + r; requ
 auto pd = pseudo_divrem(a, b);                              // lc(b)^pd.power * a = pd.quotient * b + pd.remainder, any ring
 div_exact(a, b);                                            // b divides a: bigint coefficients divide exactly
 p.to_string("t");                                           // "3*t^2 + 1"
+content(p); primitive_part(p);                              // gcd of the coefficients, signed so the primitive part leads positively
+gcd(a, b); resultant(a, b); squarefree_part(p);             // exact fields (bigrat) and gcd rings (bigint, polynomials over them)
+#include <typed-geometry/symbolic/polynomial_roots.hh>
+auto rs = isolate_real_roots(p);                            // bigint p: cc::vector<tg::root_interval>{lo, hi}, ascending, one root each
+refine_root(p, rs[0], width);                               // bisect until hi - lo <= width; r.is_exact() when lo == hi
+real_roots(c, 0.0, 1.0);                                    // float p: roots in [lo, hi], ascending; fixed degree -> cc::fixed_vector
 tg::polynomial<tg::polynomial<tg::bigint>> xy;              // a polynomial is a coefficient: nesting gives more variables
 ```
 

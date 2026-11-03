@@ -742,7 +742,7 @@ limb_pair pair_gcd(limb_pair a, limb_pair b)
 }
 
 /// The bits [shift, shift + 62) of x[0, n), limbs past n read as zero.
-CC_FORCE_INLINE u64 top_bits(u64 const* x, i32 n, i64 shift)
+CC_FORCE_INLINE u64 limbs_top_bits(u64 const* x, i32 n, i64 shift)
 {
     auto const k = i32(shift / 64);
     auto const o = int(shift % 64);
@@ -839,8 +839,8 @@ i32 tg::impl::limbs_gcd(u64* g, u64 const* a, i32 an, u64 const* b, i32 bn)
 
         // Euclid on the top 62 bits, for as long as the quotients agree with those of the whole (Knuth's Algorithm L)
         auto const shift = x_bits - 62;
-        auto xt = i64(top_bits(x, xn, shift));
-        auto yt = i64(top_bits(y, yn, shift));
+        auto xt = i64(limbs_top_bits(x, xn, shift));
+        auto yt = i64(limbs_top_bits(y, yn, shift));
         i64 m00 = 1;
         i64 m01 = 0;
         i64 m10 = 0;
