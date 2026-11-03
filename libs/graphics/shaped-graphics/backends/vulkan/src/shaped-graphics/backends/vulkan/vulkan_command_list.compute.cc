@@ -10,6 +10,7 @@
 #include <shaped-graphics/backends/vulkan/vulkan_context.hh>
 #include <shaped-graphics/backends/vulkan/vulkan_texture.hh>
 #include <shaped-graphics/barrier/access_inference.hh>
+#include <shaped-graphics/context/impl/debug_windows.hh>
 
 namespace sg::backend::vulkan
 {
@@ -32,7 +33,8 @@ void vulkan_command_list::compute_bind_pipeline(sg::compute_pipeline const& pipe
 
     // A new pipeline may declare a different number of slots, so the bound groups reset to one null per slot.
     _bound_pipeline_layout = vp->layout.get();
-    _bound_pipeline_layout->bind_embedded_samplers(_buffer, VK_PIPELINE_BIND_POINT_COMPUTE);
+    _bound_pipeline_layout->bind_reserved(_buffer, VK_PIPELINE_BIND_POINT_COMPUTE,
+                                          bind_debug_window(pipeline.footprint()));
     _bound_groups.clear_resize_to_filled(_bound_pipeline_layout->_groups.size(), nullptr);
     _bound_footprint = &pipeline.footprint();
     _bound_footprint_owner = &pipeline;
@@ -123,10 +125,31 @@ void vulkan_command_list::withdraw_array_declaration(u32 id)
         (void)_raster_arrays.withdraw(id);
 }
 
+sg::raw_buffer_handle vulkan_command_list::bind_debug_window(sg::impl::pipeline_footprint const& footprint)
+{
+    if (!sg::impl::debug_windows::k_enabled)
+        return {};
+    _bound_debug_window = _ctx.debug_windows().window_for_recording(!footprint.debug_stages().is_empty());
+    return _bound_debug_window;
+}
+
+void vulkan_command_list::declare_debug_window(sg::impl::pipeline_footprint const* footprint,
+                                               sg::pipeline_stage_flags op_stages)
+{
+    if (_bound_debug_window == nullptr)
+        return;
+    // every op declares it, so no list starts while a reset copy is still in flight, and appends never wait on each other
+    auto const stages
+        = footprint != nullptr && !footprint->debug_stages().is_empty() ? footprint->debug_stages() : op_stages;
+    (void)track_buffer_access(static_cast<vulkan_buffer const&>(*_bound_debug_window), stages,
+                              sg::access_flag::shader_append);
+}
+
 void vulkan_command_list::declare_group_accesses(cc::span<vulkan_binding_group const* const> groups,
                                                  sg::impl::pipeline_footprint const* footprint,
                                                  sg::pipeline_stage_flags op_stages)
 {
+    declare_debug_window(footprint, op_stages);
     for (auto group = 0; group < int(groups.size()); ++group)
     {
         auto const* bound_group = groups[group];

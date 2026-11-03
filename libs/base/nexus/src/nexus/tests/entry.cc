@@ -19,7 +19,7 @@ using bucket = nx::config::test_bucket;
 [[nodiscard]] bool is_nexus_selector(cc::string_view token)
 {
     for (auto const selector : {"--tests", "--examples", "--benchmarks", "--pgo-benchmarks", "--manual", "--apps",
-                                "--commands", "--list-tests", "--list-tests-json", "--reporter"})
+                                "--commands", "--list-tests", "--list-tests-json", "--list-hw-counters", "--reporter"})
     {
         auto const s = cc::string_view(selector);
         if (token == s || (token.starts_with(s) && token.size() > s.size() && token[s.size()] == '='))

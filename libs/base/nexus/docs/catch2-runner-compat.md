@@ -53,6 +53,7 @@ This compatibility layer rests on two properties of the declaration:
 | `--record` | Buckets every test's `cc::rec` events and writes a recording for each failing one, whatever the tests' own configs say (see [recording.md](recording.md)). Not a Catch2 flag |
 | `--no-recording` | Leaves `cc::rec` down for the whole run: no per-test buckets, no console logger, no failure dumps (see [recording.md](recording.md)). Not a Catch2 flag |
 | `--list-tests-json <file>` | Writes a JSON listing of every registered test (with eligibility under the other args) to `<file>` — `-` means stdout — then exits 0 without running anything. Used by `dev.py test` to pre-select binaries. Not a Catch2 flag |
+| `--list-hw-counters` | Prints the hardware counters this machine can read, then exits 0 without running anything. Any nexus binary answers it, which is what `dev.py profiling counters` runs. Not a Catch2 flag |
 | `--match-files` | Reads the filters as globs over the tests' source files, skipping name matching. Not a Catch2 flag |
 | `--match-names` | Reads the filters as test names only, without the file fallback. Not a Catch2 flag |
 | `--test-args <line>` | A command line for the selected test, tokenized by the [nx::args rules](args.md#the-tokenizer). Not a Catch2 flag |

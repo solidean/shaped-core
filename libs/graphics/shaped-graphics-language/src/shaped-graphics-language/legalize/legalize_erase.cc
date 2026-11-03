@@ -1,4 +1,5 @@
 #include <clean-core/common/utility.hh>
+#include <shaped-graphics-language/builtins/registry.hh>
 #include <shaped-graphics-language/legalize/core.hh>
 #include <shaped-graphics-language/legalize/impl/legalizer.hh>
 #include <shaped-graphics-language/legalize/impl/walk.hh>
@@ -51,9 +52,42 @@ struct void_eraser
         if (stage == check::stage::pixel)
             failed.push_back(out.discard());
         else if (stage == check::stage::compute || stage == check::stage::raygen || stage == check::stage::miss
-                 || stage == check::stage::closest_hit || stage == check::stage::callable)
+                 || stage == check::stage::closest_hit || stage == check::stage::callable
+                 || stage == check::stage::geometry)
             failed.push_back(out.return_(flat_expr_id::none));
+        else if (stage == check::stage::vertex || stage == check::stage::tessellation_evaluation)
+            // a vertex at a NaN position, which culls every primitive it is part of
+            if (auto const culled = culled_vertex(failed); is_valid(culled))
+                failed.push_back(out.return_(culled));
         into.push_back(out.if_(out.not_(out.local(nodes[0].value)), failed));
+    }
+
+    /// LEGAL-64: the stage's result with its `@position` at NaN, its other members unset; none without a position.
+    /// The statements that build it go into `into`.
+    [[nodiscard]] flat_expr_id culled_vertex(stmt_list& into)
+    {
+        auto const result = out.e.result;
+        if (!is_valid(result) || out.m.at(result).kind != check::type_kind::structure)
+            return flat_expr_id::none;
+        auto const members = out.m.at(out.m.at(result).members);
+        auto position = isize(-1);
+        for (auto i = isize(0); i < members.size(); ++i)
+            if (members[i].is_position)
+                position = i;
+        if (position < 0)
+            return flat_expr_id::none;
+
+        // no target spells a NaN literal, so it is a quiet NaN's bits
+        auto const bits = out.add_expr(out.type_named(builtins::k_uint), flat_int_literal{.value = 0x7fc00000});
+        auto const nan = out.call("reinterpret_as_float", cc::span<flat_expr_id const>(&bits, 1));
+        auto const value = out.call(out.m.name_of(members[position].type), cc::span<flat_expr_id const>(&nan, 1));
+        if (out.e.at(value).type != members[position].type)
+            return flat_expr_id::none;
+
+        auto const local = out.add_local(local_kind::var, "culled", result);
+        into.push_back(out.var(local));
+        into.push_back(out.assign(out.member(out.local(local), i32(position)), value));
+        return out.local(local);
     }
 
     [[nodiscard]] stmt_list ids_of_range(ast::range_of<flat_stmt_id> range) const

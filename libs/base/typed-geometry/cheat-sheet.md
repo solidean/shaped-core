@@ -557,13 +557,14 @@ tg::bigint::from_fixed_int(fi256(v)); tg::bigint::from_limbs(limbs, negative);
 tg::bigint::parse("-123456789012345678901234567890");     // -> cc::optional<bigint>; decimal, optional sign
 a + b; a - b; a * b; a / b; a % b; -a; a << n; a >> n;     // exact; / and % truncate, >> floors
 r.assign_add(a, b); r.assign_sub(a, b); r.assign_mul(a, b); // into r's node when it holds the result; a or b may be r
-auto [q, rem] = div_mod(a, b); gcd(a, b); abs(a);
+auto [q, rem] = div_mod(a, b); div_mod(q, rem, a, b);     // the second into kept values, reusing their nodes
+gcd(a, b); abs(a);
 x.sign(); compare(a, b); a < b; a == b;                    // -1/0/+1; compare without computing a - b
 x.to_f64(); x.to_i64(); x.fits_i64(); x.to_string();       // nearest, ties to even; to_i64 asserts it fits
 x.limbs(); x.size(); x.capacity(); x.bit_width();           // the magnitude, least significant limb first
 // One pointer to a node of cc's node allocator: a header word, then the limbs; 1, 3, 7, 15, 31 limbs from 16 to 256 bytes.
 // Reuse results (assign_* into kept values) in hot loops: an operator's result allocates a node.
-// One-limb + - * into a node that holds the result are inline; past 256 bytes a node takes the slow large-allocation path.
+// + - * of one- and two-limb operands are inline; products up to 16 x 16 limbs are unrolled, Karatsuba above.
 ```
 
 ## half_float (binary16)

@@ -90,6 +90,8 @@ TEST("sgl emit - a stage that cannot write the buffer drops its prints and decla
     CHECK(!wgsl.text.contains("sg_debug"));
     CHECK(wgsl.debug_sites.empty());
     CHECK(compile(vertex, target::hlsl_dx12, "vs").text.contains("sg_debug"));
+    // vulkan writes no storage from a vertex stage without a feature sg does not ask for
+    CHECK(!compile(vertex, target::hlsl_vulkan, "vs").text.contains("sg_debug"));
 }
 
 TEST("sgl emit - MSL takes sg's debug buffer at the argument table's last slot, clear of the vertex buffers")
@@ -97,4 +99,21 @@ TEST("sgl emit - MSL takes sg's debug buffer at the argument table's last slot, 
     // a vertex stage's buffers start at buffer(5), so a slot just above them would be a vertex buffer's
     auto const msl = compile(k_compute, target::msl).text;
     CHECK(msl.contains("device sg_debug_buffer& sg_debug [[buffer(30)]]")).dump("text", msl);
+}
+
+TEST("sgl emit - a vertex stage's failed assert returns its vertex at a NaN position, which culls its primitives")
+{
+    constexpr auto vertex = "struct varyings:\n"
+                            "    @position position: hpos4\n"
+                            "\n"
+                            "@vertex fun vs(@vertex_index v: int) -> varyings:\n"
+                            "    assert v < 3, \"vertex $v\"\n"
+                            "    return { position = hpos4(v as float, 0.0, 0.0, 1.0) }\n";
+    for (auto const t : {target::hlsl_dx12, target::wgsl})
+    {
+        auto const text = compile(vertex, t, "vs").text;
+        // a quiet NaN's bits, the one way every target spells a NaN
+        CHECK(text.contains("2143289344")).dump("target", sgl::emit::to_string(t)).dump("text", text);
+        CHECK(text.contains("culled"));
+    }
 }

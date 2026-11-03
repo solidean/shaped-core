@@ -22,12 +22,14 @@ CC_FORCE_INLINE void free_if(bigint_header* h)
 }
 } // namespace
 
-tg::impl::bigint_header* tg::impl::bigint_allocate_out_of_line(i32 limbs)
+// Kept out of line even here, where the compiler could inline them: the allocator inlined into an operation costs it registers.
+
+CC_DONT_INLINE tg::impl::bigint_header* tg::impl::bigint_allocate_out_of_line(i32 limbs)
 {
     return bigint_allocate(limbs);
 }
 
-void tg::impl::bigint_free_out_of_line(bigint_header* h)
+CC_DONT_INLINE void tg::impl::bigint_free_out_of_line(bigint_header* h)
 {
     bigint_free(h);
 }
@@ -199,6 +201,66 @@ void tg::bigint::_assign_sum_with_zero(bigint const& a, bigint const& b, bool su
 
 void tg::bigint::_assign_sum(bigint const& a, bigint const& b, bool subtract)
 {
+    // the common case, kept lean so it needs few registers: nonzero operands into a node that holds the result,
+    // or into a fresh one when *this has none, as an operator's result starts out
+    // the kernels read limb i before they write it, so *this may be either operand
+    auto* const ah = a._node;
+    auto* const bh = b._node;
+    if (ah != nullptr && bh != nullptr) [[likely]]
+    {
+        auto const an = i32(ah->size);
+        auto const bn = i32(bh->size);
+        if (an != 0 && bn != 0) [[likely]]
+        {
+            auto const a_negative = ah->negative;
+            auto const b_negative = bh->negative != subtract;
+            auto const a_longer = an >= bn;
+            auto const* const x = bigint_limbs(a_longer ? ah : bh);
+            auto const* const y = bigint_limbs(a_longer ? bh : ah);
+            auto const xn = a_longer ? an : bn;
+            auto const yn = a_longer ? bn : an;
+            auto const same_sign = a_negative == b_negative;
+            // a carry out of the top limb needs x's top plus y's limb there to reach 2^64 - 1, so most sums need no extra limb
+            auto const y_top = yn == xn ? y[xn - 1] : u64(0);
+            auto const need = xn + i32(same_sign && x[xn - 1] >= ~y_top);
+            auto* h = _node;
+            if (h == nullptr)
+                h = _node = impl::bigint_allocate_out_of_line(need);
+            if (impl::bigint_class_capacity(h->node_class) >= need) [[likely]]
+            {
+                auto* const out = bigint_limbs(h);
+                if (same_sign)
+                {
+                    auto const carry = impl::limbs_add(out, x, xn, y, yn);
+                    if (carry != 0)
+                        out[xn] = carry;
+                    h->size = u32(xn + i32(carry));
+                    h->negative = a_negative;
+                    return;
+                }
+                // the smaller magnitude from the larger, with the larger one's sign
+                auto const c = xn != yn ? 1 : impl::limbs_cmp(x, y, xn);
+                if (c == 0)
+                {
+                    h->size = 0;
+                    h->negative = false;
+                    return;
+                }
+                auto const* const big = c > 0 ? x : y;
+                auto const* const small = c > 0 ? y : x;
+                (void)impl::limbs_sub(out, big, xn, small, c > 0 ? yn : xn);
+                auto const size = impl::limbs_normalized_size(out, xn);
+                h->size = u32(size);
+                h->negative = size != 0 && ((c > 0) == a_longer ? a_negative : b_negative);
+                return;
+            }
+        }
+    }
+    _assign_sum_slow(a, b, subtract);
+}
+
+CC_DONT_INLINE void tg::bigint::_assign_sum_slow(bigint const& a, bigint const& b, bool subtract)
+{
     auto const an = a.size();
     auto const bn = b.size();
     if (an == 0 || bn == 0) [[unlikely]]
@@ -252,6 +314,32 @@ void tg::bigint::_assign_sum(bigint const& a, bigint const& b, bool subtract)
 }
 
 void tg::bigint::_assign_mul(bigint const& a, bigint const& b)
+{
+    // the common case, kept lean so it needs few registers: nonzero operands, and a target that is neither and holds the product,
+    // or has no node yet, as an operator's result starts out
+    auto* const ah = a._node;
+    auto* const bh = b._node;
+    auto* h = _node;
+    if (ah != nullptr && bh != nullptr && h != ah && h != bh) [[likely]]
+    {
+        auto const an = i32(ah->size);
+        auto const bn = i32(bh->size);
+        auto const n = an + bn;
+        if (h == nullptr && an != 0 && bn != 0)
+            h = _node = impl::bigint_allocate_out_of_line(n);
+        if (h != nullptr && an != 0 && bn != 0 && impl::bigint_class_capacity(h->node_class) >= n) [[likely]]
+        {
+            auto* const out = bigint_limbs(h);
+            impl::limbs_mul(out, bigint_limbs(ah), an, bigint_limbs(bh), bn);
+            h->size = u32(n - i32(out[n - 1] == 0));
+            h->negative = ah->negative != bh->negative;
+            return;
+        }
+    }
+    _assign_mul_slow(a, b);
+}
+
+CC_DONT_INLINE void tg::bigint::_assign_mul_slow(bigint const& a, bigint const& b)
 {
     auto const an = a.size();
     auto const bn = b.size();
@@ -401,61 +489,86 @@ void tg::bigint::assign_shr(bigint const& a, i64 n)
     free_if(replaced);
 }
 
-tg::div_mod_result<tg::bigint> tg::div_mod(bigint const& a, bigint const& b)
+void tg::div_mod(bigint& q, bigint& r, bigint const& a, bigint const& b)
 {
     CC_ASSERT(!b.is_zero(), "division by zero");
+    CC_ASSERT(&q != &r, "the quotient and the remainder are two values");
+    if (&q == &a || &q == &b || &r == &a || &r == &b) [[unlikely]]
+    {
+        // the results overwrite what the division still reads, so they are computed apart
+        bigint tq;
+        bigint tr;
+        div_mod(tq, tr, a, b);
+        q = cc::move(tq);
+        r = cc::move(tr);
+        return;
+    }
+
     auto const an = a.size();
     auto const bn = b.size();
     auto const* const ap = an == 0 ? nullptr : impl::bigint_limbs(a._node);
     auto const* const bp = impl::bigint_limbs(b._node);
     if (an == 0 || impl::limbs_cmp(ap, an, bp, bn) < 0)
-        return {.quotient = bigint(), .remainder = a};
+    {
+        if (q._node != nullptr)
+            q._set(0, false);
+        r = a;
+        return;
+    }
 
     auto const q_negative = a._node->negative != b._node->negative;
     auto const r_negative = a._node->negative;
     auto const qn = an - bn + 1;
-    div_mod_result<bigint> r;
-    r.quotient._node = impl::bigint_allocate(qn);
-    auto* const q = impl::bigint_limbs(r.quotient._node);
+    // neither result is an operand, so a replaced node is free to go at once
+    impl::bigint_header* replaced = nullptr;
+    auto* const qd = q._room(qn, replaced);
+    free_if(replaced);
+    auto* const rd = r._room(bn, replaced);
+    free_if(replaced);
 
     if (bn == 1)
     {
-        auto const rem = impl::limbs_divrem_1(q, ap, an, bp[0]);
-        r.quotient._set(impl::limbs_normalized_size(q, qn), q_negative);
-        r.remainder = bigint(rem);
-        if (r_negative)
-            r.remainder.negate();
-        return r;
+        rd[0] = impl::limbs_divrem_1(qd, ap, an, bp[0]);
+        q._set(impl::limbs_normalized_size(qd, qn), q_negative);
+        r._set(rd[0] != 0 ? 1 : 0, r_negative);
+        return;
     }
 
-    r.remainder._node = impl::bigint_allocate(bn);
-    auto* const rem = impl::bigint_limbs(r.remainder._node);
     auto const scratch_n = impl::limbs_divrem_scratch(an, bn);
     if (scratch_n <= 2 * stack_limbs)
     {
         u64 scratch[2 * stack_limbs];
-        impl::limbs_divrem(q, rem, ap, an, bp, bn, scratch);
+        impl::limbs_divrem(qd, rd, ap, an, bp, bn, scratch);
     }
     else
     {
         auto scratch = cc::vector<u64>();
-        scratch.resize_to_filled(scratch_n, u64(0));
-        impl::limbs_divrem(q, rem, ap, an, bp, bn, scratch.data());
+        scratch.resize_to_uninitialized(scratch_n);
+        impl::limbs_divrem(qd, rd, ap, an, bp, bn, scratch.data());
     }
-    r.quotient._set(impl::limbs_normalized_size(q, qn), q_negative);
-    r.remainder._set(impl::limbs_normalized_size(rem, bn), r_negative);
-    return r;
+    q._set(impl::limbs_normalized_size(qd, qn), q_negative);
+    r._set(impl::limbs_normalized_size(rd, bn), r_negative);
+}
+
+tg::div_mod_result<tg::bigint> tg::div_mod(bigint const& a, bigint const& b)
+{
+    div_mod_result<bigint> res;
+    div_mod(res.quotient, res.remainder, a, b);
+    return res;
 }
 
 tg::bigint tg::gcd(bigint const& a, bigint const& b)
 {
+    // Euclid, its three values reusing their nodes from step to step
     auto x = abs(a);
     auto y = abs(b);
+    bigint q;
+    bigint r;
     while (!y.is_zero())
     {
-        auto r = div_mod(x, y).remainder;
-        x = cc::move(y);
-        y = abs(cc::move(r));
+        div_mod(q, r, x, y); // x and y are nonnegative, so r is too
+        cc::swap(x, y);
+        cc::swap(y, r);
     }
     return x;
 }

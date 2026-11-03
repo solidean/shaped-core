@@ -146,6 +146,40 @@ TEST("tg bigint - ring and division identities hold exactly")
     }
 }
 
+TEST("tg bigint - every product shape agrees with the one-limb rows")
+{
+    // up to 70 limbs, past the fixed kernels, Karatsuba's threshold, its odd splits and the chunks of an unbalanced product
+    auto rng = nx::test_random();
+    for (auto n = 1; n <= 70; ++n)
+        for (auto m = 1; m <= n; m += (m < 20 ? 1 : 7))
+        {
+            // all ones: (2^64n - 1)(2^64m - 1), where every carry runs as far as it can
+            auto const ones_n = (bigint(1) << (64 * n)) - bigint(1);
+            auto const ones_m = (bigint(1) << (64 * m)) - bigint(1);
+            CHECK(ones_n * ones_m
+                  == (bigint(1) << (64 * (n + m))) - (bigint(1) << (64 * n)) - (bigint(1) << (64 * m)) + bigint(1));
+
+            // random: the sum of a times each limb of b, shifted, never takes a path past one limb
+            u64 a_limbs[70];
+            for (auto i = 0; i < n; ++i)
+                a_limbs[i] = random_limb(rng);
+            a_limbs[n - 1] |= 1;
+            auto const a = bigint::from_limbs(cc::span<u64 const>(a_limbs, isize(n)), (rng.next_u64() & 1) != 0);
+            u64 limbs[70];
+            for (auto i = 0; i < m; ++i)
+                limbs[i] = random_limb(rng);
+            limbs[m - 1] |= 1;
+            auto const b = bigint::from_limbs(cc::span<u64 const>(limbs, isize(m)));
+            auto expected = bigint();
+            for (auto i = 0; i < m; ++i)
+                expected += (abs(a) * bigint(limbs[i])) << (64 * i);
+            if (a.is_negative())
+                expected.negate();
+            CHECK(a * b == expected);
+            CHECK(b * a == expected);
+        }
+}
+
 TEST("tg bigint - gcd")
 {
     CHECK(gcd(bigint(12), bigint(18)) == bigint(6));
@@ -282,6 +316,24 @@ TEST("tg bigint - operands may alias the result")
     CHECK(t == big + bigint(3));
     t.assign_sub(big, t);
     CHECK(t == bigint(-3));
+
+    // a division into kept results, and into results that are its operands
+    auto const big_q = div_mod(big * big + bigint(7), big);
+    bigint dq;
+    bigint dr;
+    div_mod(dq, dr, big * big + bigint(7), big);
+    CHECK(dq == big_q.quotient);
+    CHECK(dr == big_q.remainder);
+    auto const* const dq_node = dq.limbs().data();
+    div_mod(dq, dr, big * bigint(3) + bigint(1), big);
+    CHECK(dq == bigint(3));
+    CHECK(dr == bigint(1));
+    CHECK(dq.limbs().data() == dq_node);
+    auto x = big * big + bigint(7);
+    auto y = big;
+    div_mod(x, y, x, y);
+    CHECK(x == big_q.quotient);
+    CHECK(y == big_q.remainder);
 
     // an rvalue operand lends its node to the result
     auto u = big;

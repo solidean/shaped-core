@@ -1027,6 +1027,7 @@ cc::result<context_handle> create_vulkan_context(backend::vulkan::vulkan_config 
             ctx->set_debug_messenger(messenger);
     }
 
+    ctx->debug_windows().create();
     return context_handle(cc::move(ctx));
 }
 } // namespace sg

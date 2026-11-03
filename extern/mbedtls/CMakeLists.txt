@@ -37,3 +37,8 @@ else()
 endif()
 
 set_property(TARGET mbedtls PROPERTY POSITION_INDEPENDENT_CODE ON)
+
+# entropy_poll.c draws from BCryptGenRandom on Windows; without mimalloc, which links bcrypt too, nothing else brings it.
+if (WIN32)
+    target_link_libraries(mbedtls PRIVATE bcrypt)
+endif()

@@ -17,6 +17,7 @@
 #include <clean-core/thread/thread.hh>
 #include <nexus/args/ambient.hh>
 #include <nexus/bench/environment.hh>
+#include <nexus/bench/hardware_counters.hh>
 #include <nexus/bench/report.hh>
 #include <nexus/impl/host_loop.hh>
 #include <nexus/impl/rec_session.hh>
@@ -547,6 +548,12 @@ int nx::run(int argc, char** argv)
                          written.error().to_string());
             return 1;
         }
+        return 0;
+    }
+
+    if (config.list_hw_counters)
+    {
+        bench::print_hw_counters();
         return 0;
     }
 
