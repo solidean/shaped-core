@@ -29,6 +29,8 @@ struct converged;
 struct tile_report;
 struct firefly;
 struct lit_box;
+struct denoised_frame;
+class denoise_view;
 enum class enforce : u8;
 
 /// What a comparison is drawn at, small enough that a hybrid's thousand frames stay cheap.
@@ -135,6 +137,44 @@ namespace sv_test::agreement
     // Narrow enough that the box fills the view, so no tile is half background.
     out.camera.projection.vertical_fov = tg::angle_d::make_from_degree(30.0);
     return out;
+}
+
+[[nodiscard]] inline bool is_finite(tg::vec4f const& c)
+{
+    for (auto ch = 0; ch < 4; ++ch)
+        if (!(tg::abs(c[ch]) < 1e30f))
+            return false;
+    return true;
+}
+
+[[nodiscard]] inline bool is_finite(rgba16 const& c)
+{
+    return is_finite(tg::vec4f(f32(c.r), f32(c.g), f32(c.b), f32(c.a)));
+}
+
+/// Fails the test where any pixel of `image`, frame `frame` of the stream `stream` reads back, is not a finite number.
+///
+/// Every frame a test reads is checked, not only the one it measures.
+/// A non-finite sample shows black, spreads through a denoiser into a block, and in an accumulated mean stays forever;
+/// one that flashes up on a single frame of a moving image is exactly what a check of the final image misses.
+template <class Texel>
+void check_finite(cc::string_view stream, cc::string_view image, u64 frame, cc::span<Texel const> pixels)
+{
+    auto count = 0;
+    auto first = isize(-1);
+    for (auto i = isize(0); i < pixels.size(); ++i)
+        if (!is_finite(pixels[i]))
+        {
+            first = count == 0 ? i : first;
+            ++count;
+        }
+    CHECK(count == 0)
+        .dump("stream", stream)
+        .dump("image", image)
+        .dump("frame", frame)
+        .dump("non-finite pixels", count)
+        .dump("first at x", first < 0 ? -1 : int(first % k_size[0]))
+        .dump("first at y", first < 0 ? -1 : int(first / k_size[0]));
 }
 
 /// One view of `items` through `camera`, drawn the `config` way, inside a root layout that shows it alone.
@@ -249,6 +289,9 @@ inline cc::shared_async<converged> converge(sg::context& ctx,
             take(normals, out.normals);
             take(albedo, out.albedo);
         }
+        check_finite(config.name, "mean", index, cc::span<tg::vec4f const>(out.mean));
+        check_finite(config.name, "normal guide", index, cc::span<rgba16 const>(out.normals));
+        check_finite(config.name, "albedo guide", index, cc::span<rgba16 const>(out.albedo));
         co_return out;
     };
 
@@ -305,6 +348,107 @@ inline cc::shared_async<converged> converge(sg::context& ctx,
     co_return out;
 }
 
+} // namespace sv_test::agreement
+
+/// A layer's raw mean and its denoised image after one frame, and whether the denoiser produced the image shown.
+struct sv_test::agreement::denoised_frame
+{
+    cc::vector<tg::vec4f> raw;
+    cc::vector<tg::vec4f> denoised;
+    bool ran = false;
+    u32 samples = 0;
+};
+
+/// One denoised view through the viewer, stepped a frame at a time; the view is `def.views[0]`, which a caller may move.
+/// Every frame's raw mean and denoised image are checked for non-finite pixels as they are read.
+class sv_test::agreement::denoise_view
+{
+public:
+    denoise_view(sg::context& ctx,
+                 sv::gpu_resource_manager& resources,
+                 cc::span<sv::scene_item const> items,
+                 sv::camera const& camera,
+                 mode_config const& config)
+      : def(definition_of(items, camera, config)),
+        _ctx(ctx),
+        _resources(resources),
+        _name(config.name),
+        _output(
+            ctx.persistent.create_texture_2d({.format = sg::pixel_format::bgra8_unorm,
+                                              .width = k_size[0],
+                                              .height = k_size[1],
+                                              .usage = sg::texture_usage::render_target | sg::texture_usage::copy_src}))
+    {
+    }
+
+    /// One frame, and what the view holds after it.
+    cc::shared_async<denoised_frame> frame()
+    {
+        (void)_ctx.routines.tick();
+        auto cmd = _ctx.create_command_list();
+        _resources.advance_to(_ctx.current_epoch());
+        _store.begin_frame(u64(_ctx.current_epoch()));
+        auto const index = _index++;
+        auto const plan = sv::build_render_plan(def, k_size, index, _history);
+        (void)sv::viewer_renderer::execute(*cmd, def, plan, _resources, _store,
+                                           _output.as_render_target_view().cleared(tg::vec4f(0, 0, 0, 1)));
+        auto const id = def.views[0].id;
+        auto const* const state = _store.peek_ptr(id);
+        auto const slot_of = [&](u64 temporal) { return state != nullptr ? state->temporal.get_ptr(temporal) : nullptr; };
+        auto const* const mean_slot = slot_of(sv::temporal_id::accumulation(0));
+        auto const* const denoised_slot = slot_of(sv::temporal_id::denoised(0));
+        auto mean = sg::data_future<tg::vec4f>();
+        auto denoised = sg::data_future<rgba16>();
+        if (mean_slot != nullptr && mean_slot->texture.raw() != nullptr)
+            mean = sg::data_future<tg::vec4f>(cmd->download.bytes_from_texture(mean_slot->texture.raw()));
+        if (denoised_slot != nullptr && denoised_slot->texture.raw() != nullptr)
+            denoised = sg::data_future<rgba16>(cmd->download.bytes_from_texture(denoised_slot->texture.raw()));
+        // The slot holds a current image only on a frame the denoiser produced it, and the raw mean is presented otherwise.
+        auto const ran = denoised_slot != nullptr && denoised_slot->accum_frame != 0 && mean_slot != nullptr
+                      && mean_slot->stand_in_hash == 0;
+        _ctx.submit_command_list(cc::move(cmd));
+        _ctx.advance_epoch();
+        co_await _ctx.idle_completion();
+        sv_test::drive_ambient_work();
+
+        auto out = denoised_frame{.ran = ran, .samples = _store.min_accumulated_samples(id)};
+        if (auto const m = mean.try_get_data(); mean.is_valid() && m.has_value())
+            for (auto const& v : m.value())
+                out.raw.push_back(v);
+        if (auto const d = denoised.try_get_data(); denoised.is_valid() && d.has_value())
+            for (auto const& v : d.value())
+                out.denoised.push_back(tg::vec4f(f32(v.r), f32(v.g), f32(v.b), f32(v.a)));
+        check_finite(_name, "mean", index, cc::span<tg::vec4f const>(out.raw));
+        // A denoised image the member did not produce this frame is an older one, which its own frame already checked.
+        if (ran)
+            check_finite(_name, "denoised", index, cc::span<tg::vec4f const>(out.denoised));
+        co_return out;
+    }
+
+    /// Frames until the member has denoised once, so every compile is behind it; false if it never did.
+    /// A frame declined while a compile runs is cheap, and a cold denoiser plus a forward stage is some thousands of them.
+    cc::shared_async<bool> warm_up()
+    {
+        for (auto f = 0; f < 16384; ++f)
+            if ((co_await frame()).ran)
+                co_return true;
+        co_return false;
+    }
+
+    sv::viewer_definition def;
+
+private:
+    sg::context& _ctx;
+    sv::gpu_resource_manager& _resources;
+    cc::string _name;
+    sg::texture_2d _output;
+    sv::view_store _store;
+    sv::view_history _history;
+    u64 _index = 0;
+};
+
+namespace sv_test::agreement
+{
 /// Whether the pixel at (`x`, `y`) and its eight neighbors see one smooth surface of one material: where a tracer's jittered
 /// samples and a raster's pixel center agree, and an edge, where they do not, is left out.
 /// Neighbors' normals may differ by some 18 degrees, which a curved surface's do and a crease's do not.
@@ -330,14 +474,6 @@ inline cc::shared_async<converged> converge(sg::context& ctx,
                 || tg::abs(f32(a.b) - f32(b.b)) > 0.01f)
                 return false;
         }
-    return true;
-}
-
-[[nodiscard]] inline bool is_finite(tg::vec4f const& c)
-{
-    for (auto ch = 0; ch < 4; ++ch)
-        if (!(tg::abs(c[ch]) < 1e30f))
-            return false;
     return true;
 }
 
