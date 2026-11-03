@@ -820,6 +820,8 @@ sv::frame_mesh const& gpu_resource_manager::acquire_frame_mesh(sg::command_list&
         auto m = frame_mesh{.hash = geometry.hash,
                             .vertices = _ctx->transient.create_buffer_from_data(cmd, geometry.positions.span(), usage),
                             .indices = _ctx->transient.create_buffer_from_data(cmd, index_span, usage),
+                            .draw_indices = _ctx->transient.create_buffer_from_data(
+                                cmd, index_span, sg::buffer_usages(sg::buffer_usage::index_buffer)),
                             .triangle_count = geometry.triangle_count()};
         found = &_frame_meshes.entry(geometry.hash).get_or_emplace(cc::move(m));
     }
