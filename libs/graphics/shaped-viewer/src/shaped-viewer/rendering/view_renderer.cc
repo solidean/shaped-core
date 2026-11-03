@@ -1546,6 +1546,17 @@ sg::routine_outcome view_renderer::trace(sg::command_list& cmd,
         return sr::required_guides(sr::resolve_denoise_method(ctx, fresh, traceable_guides()))
             .has(sr::reconstruct_guide::split_diffuse_specular);
     }();
+    // A hybrid frame writes no split signal, but its deferred kernel writes the hit distance, which dlss_rr reads beside the whole radiance.
+    // Resolved against the device for the reason `splitting` is.
+    auto const hybrid_hit_distance = [&]
+    {
+        if (!denoising || mode != render_mode::hybrid || l.settings.hybrid_lighting != hybrid_lighting::deferred)
+            return false;
+        auto fresh = l.settings.reconstruct;
+        fresh.fresh_samples = true;
+        auto const member = sr::resolve_denoise_method(ctx, fresh, traceable_guides());
+        return (sr::required_guides(member) | sr::optional_guides(member)).has(sr::reconstruct_guide::hit_distance);
+    }();
     auto const split_slot_of = [&](u64 id) { return splitting ? rec.temporal.get_ptr(id) : nullptr; };
     auto const ds = denoise_slots{
         .normal = slot_of(temporal_id::normal_guide(tr.layer)),
@@ -1559,7 +1570,8 @@ sg::routine_outcome view_renderer::trace(sg::command_list& cmd,
         .crossfade = slot_of(temporal_id::denoised_crossfade(tr.layer)),
         .frame_diffuse = split_slot_of(temporal_id::frame_diffuse(tr.layer)),
         .frame_specular = split_slot_of(temporal_id::frame_specular(tr.layer)),
-        .hit_distance = split_slot_of(temporal_id::hit_distance_guide(tr.layer)),
+        .hit_distance
+        = splitting || hybrid_hit_distance ? rec.temporal.get_ptr(temporal_id::hit_distance_guide(tr.layer)) : nullptr,
     };
     // The guides are declared together, so they are all present or all absent.
     auto const has_guides = ds.normal != nullptr && ds.depth != nullptr && ds.albedo != nullptr
@@ -1634,6 +1646,8 @@ sg::routine_outcome view_renderer::trace(sg::command_list& cmd,
     // not pay to split its radiance.
     auto const has_split
         = writes_temporal && ds.frame_diffuse != nullptr && ds.frame_specular != nullptr && ds.hit_distance != nullptr;
+    // The hit distance alone, which a deferred hybrid frame writes for a member that reads it beside the whole radiance.
+    auto const has_hit_distance = writes_temporal && hybrid_hit_distance && ds.hit_distance != nullptr;
 
     if (has_temporal)
     {
@@ -1652,6 +1666,7 @@ sg::routine_outcome view_renderer::trace(sg::command_list& cmd,
         fc.write_temporal = 1;
         fc.previous_camera = ds.motion->has_last_camera ? ds.motion->last_camera : fc.camera;
         fc.write_split = has_split ? 1 : 0;
+        fc.write_hit_distance = has_hit_distance ? 1 : 0;
     }
 
     // A frame of a move traces at the upscaler's input extent, every primary ray at one jitter, and the temporal member
@@ -1756,7 +1771,8 @@ sg::routine_outcome view_renderer::trace(sg::command_list& cmd,
     auto const guide_motion = image_of(ds.motion, writes_temporal, sg::pixel_format::rg32_float);
     auto const frame_diffuse = image_of(ds.frame_diffuse, has_split, sg::pixel_format::rgba16_float);
     auto const frame_specular = image_of(ds.frame_specular, has_split, sg::pixel_format::rgba16_float);
-    auto const guide_hit_distance = image_of(ds.hit_distance, has_split, sg::pixel_format::rg32_float);
+    auto const guide_hit_distance
+        = image_of(ds.hit_distance, has_split || has_hit_distance, sg::pixel_format::rg32_float);
 
     // Everything the dispatch reads beside those, uploaded only by a frame that traces.
     // The scene's resolve and the hash above run on every frame: the hash is what notices a change that restarts the mean,
@@ -1776,8 +1792,14 @@ sg::routine_outcome view_renderer::trace(sg::command_list& cmd,
                                         .albedo = guide_albedo,
                                         .specular_albedo = guide_specular_albedo,
                                         .roughness = guide_roughness,
-                                        .motion = guide_motion}
-                       : gbuffer_slots_of(rec, tr.layer),
+                                        .motion = guide_motion,
+                                        .hit_distance = guide_hit_distance}
+                       : [&]
+                {
+                    auto slots = gbuffer_slots_of(rec, tr.layer);
+                    slots.hit_distance = guide_hit_distance;
+                    return slots;
+                }(),
                 !scaled, frame_output, stand_ins);
 
         auto const frame = ctx.transient.create_buffer<shaders::tracer::frame_constants>(
@@ -1878,6 +1900,10 @@ sg::routine_outcome view_renderer::trace(sg::command_list& cmd,
     // Every frame that traces writes the whole primary depth, the wavefront's from what its tallies kept since the restart.
     if (traces && depth_slot != nullptr)
         depth_slot->accum_frame = 1;
+
+    // Whether this frame wrote the hit distance on its own, which the denoise reads it only where it did: a traced frame's goes with the split.
+    if (ds.hit_distance != nullptr)
+        ds.hit_distance->accum_frame = traces && has_hit_distance ? 1u : 0u;
 
     // Every frame, the temporal member's or not: the first one it runs after a still period reprojects from here.
     if (has_temporal)
@@ -2102,6 +2128,8 @@ sr::reconstruct_status view_renderer::_denoise(sg::command_list& cmd,
         auto const split = !schedule.temporal_on_mean && ds.frame_diffuse != nullptr && ds.frame_specular != nullptr
                         && ds.hit_distance != nullptr;
         if (split)
+            temporal_guides.hit_distance = ds.hit_distance->texture;
+        else if (!schedule.temporal_on_mean && ds.hit_distance != nullptr && ds.hit_distance->accum_frame != 0)
             temporal_guides.hit_distance = ds.hit_distance->texture;
 
         auto const inputs = sr::reconstruct_inputs{

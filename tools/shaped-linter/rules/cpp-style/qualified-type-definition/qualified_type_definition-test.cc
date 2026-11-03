@@ -2,6 +2,7 @@
 #include <clean-core/container/vector.hh>
 #include <clean-core/string/string.hh>
 #include <nexus/test.hh>
+#include <shaped-linter/lex/source_manager.hh>
 #include <shaped-linter/rules/engine.hh>
 
 // Smoke tests for `qualified-type-definition` — the scratchpad the rule was built in, and where an interesting regression gets pinned.
@@ -12,17 +13,49 @@ using namespace scl;
 
 namespace
 {
-/// The rewritten source, requiring exactly `count` findings and that all of them carry a fix.
-cc::string fixed(cc::string_view source, isize count = 1, cc::string_view path = "a.hh")
+/// A header and its library's fwd.hh, both rewritten by the fix.
+struct fixed_files
 {
-    auto const found = run_rules_on_text(source, path);
+    cc::string header;
+    cc::string fwd;
+};
+
+/// The header `source`, in a library whose fwd.hh holds `fwd_text`, rewritten by its findings' fixes.
+/// The header includes that fwd.hh ahead of `source`, which the returned header leaves out again.
+/// Requires exactly `count` findings and that all of them carry a fix.
+fixed_files fix_both(cc::string_view source, isize count = 1, cc::string_view fwd_text = "#pragma once\n")
+{
+    constexpr cc::string_view include = "#include <cc/fwd.hh>\n";
+    auto sm = source_manager();
+    auto const& fwd = sm.add_from_text(cc::string(fwd_text), "lib/src/cc/fwd.hh");
+    auto const& header = sm.add_from_text(cc::string(include) + source, "lib/src/cc/a.hh");
+    auto const found = run_rules(header, all_rules(), empty_lint_config(), &sm);
     REQUIRE(found.size() == count);
     for (auto const& f : found)
     {
         CHECK(f.rule_id == "qualified-type-definition");
         REQUIRE(f.suggested_fix.has_value());
     }
-    return apply_edits(source, collect_fix_edits(found));
+    auto header_edits = cc::vector<text_edit>();
+    auto fwd_edits = cc::vector<text_edit>();
+    for (auto const& e : collect_fix_edits(found))
+        (e.span.file_id == fwd.file_id() ? fwd_edits : header_edits).push_back(e);
+    auto rewritten = apply_edits(header.text(), header_edits);
+    REQUIRE(cc::string_view(rewritten).starts_with(include));
+    return {.header = cc::string(cc::string_view(rewritten).subview(include.size())),
+            .fwd = apply_edits(fwd.text(), fwd_edits)};
+}
+
+/// The rewritten header alone.
+cc::string fixed(cc::string_view source, isize count = 1)
+{
+    return fix_both(source, count).header;
+}
+
+/// The rewritten fwd.hh alone.
+cc::string fixed_fwd(cc::string_view source, cc::string_view fwd_text, isize count = 1)
+{
+    return fix_both(source, count, fwd_text).fwd;
 }
 
 /// The one finding on `source`, requiring that it offers a hint rather than a fix.
@@ -254,6 +287,94 @@ TEST("shaped-linter - qualified-type-definition - what it leaves alone")
     SECTION("a record already defined qualified")
     {
         expect_none("struct cc::span\n{\n};\n");
+    }
+}
+
+TEST("shaped-linter - qualified-type-definition - the fix declares the type in the library's fwd.hh")
+{
+    SECTION("inside its namespace block, before the block closes")
+    {
+        CHECK(fixed_fwd("namespace cc\n{\nstruct span\n{\n};\n}\n", "#pragma once\n\nnamespace cc\n{\nstruct "
+                                                                    "other;\n}\n")
+              == "#pragma once\n\nnamespace cc\n{\nstruct other;\nstruct span;\n}\n");
+    }
+    SECTION("in a block of its own where fwd.hh opens none")
+    {
+        CHECK(fixed_fwd("namespace cc\n{\nstruct span\n{\n};\n}\n", "#pragma once\n")
+              == "#pragma once\n\nnamespace cc\n{\nstruct span;\n} // namespace cc\n");
+    }
+    SECTION("a nested namespace is a block of its own, not its parent's")
+    {
+        CHECK(fixed_fwd("namespace cc::console\n{\nstruct style\n{\n};\n}\n", "namespace cc\n{\n}\n")
+              == "namespace cc\n{\n}\n\nnamespace cc::console\n{\nstruct style;\n} // namespace cc::console\n");
+    }
+    SECTION("nothing is added where fwd.hh declares it already")
+    {
+        constexpr cc::string_view fwd = "namespace cc\n{\nstruct span;\n}\n";
+        CHECK(fixed_fwd("namespace cc\n{\nstruct span\n{\n};\n}\n", fwd) == fwd);
+    }
+    SECTION("an enum keeps its enum-base, a template its head")
+    {
+        CHECK(fixed_fwd("namespace cc\n{\nenum class mode : u8\n{\n};\n}\n", "namespace cc\n{\n}\n")
+              == "namespace cc\n{\nenum class mode : u8;\n}\n");
+        CHECK(fixed_fwd("namespace cc\n{\nenum class mode : unsigned char\n{\n};\n}\n", "namespace cc\n{\n}\n")
+              == "namespace cc\n{\nenum class mode : unsigned char;\n}\n");
+        CHECK(fixed_fwd("namespace cc\n{\ntemplate <class T>\nstruct box\n{\n};\n}\n", "namespace cc\n{\n}\n")
+              == "namespace cc\n{\ntemplate <class T>\nstruct box;\n}\n");
+    }
+    SECTION("a specialization needs no declaration: its primary template has one")
+    {
+        constexpr cc::string_view fwd = "namespace tg\n{\n}\n";
+        CHECK(fix_both("namespace tg\n{\ntemplate <class T>\nstruct traits<box<T>>\n{\n};\n}\n", 1, "namespace tg\n{\n}\n")
+                  .fwd
+              == fwd);
+    }
+    SECTION("a header that does not include its fwd.hh gains the include")
+    {
+        auto sm = source_manager();
+        (void)sm.add_from_text("namespace cc\n{\n}\n", "lib/src/cc/fwd.hh");
+        auto const& header
+            = sm.add_from_text("#pragma once\n\nnamespace cc\n{\nstruct span\n{\n};\n}\n", "lib/src/cc/sub/a.hh");
+        auto const found = run_rules(header, all_rules(), empty_lint_config(), &sm);
+        REQUIRE(found.size() == 1);
+        REQUIRE(found[0].suggested_fix.has_value());
+        auto edits = cc::vector<text_edit>();
+        for (auto const& e : found[0].suggested_fix.value().edits)
+            if (e.span.file_id == header.file_id())
+                edits.push_back(e);
+        CHECK(apply_edits(header.text(), edits) == "#pragma once\n#include <cc/fwd.hh>\n\nstruct cc::span\n{\n};\n");
+    }
+}
+
+TEST("shaped-linter - qualified-type-definition - without a fwd.hh the finding says what to do, and fixes nothing")
+{
+    SECTION("no fwd.hh below the header's src/ folder")
+    {
+        auto sm = source_manager();
+        auto const& header = sm.add_from_text("namespace cc\n{\nstruct span\n{\n};\n}\n", "lib/src/cc/a.hh");
+        auto const found = run_rules(header, all_rules(), empty_lint_config(), &sm);
+        REQUIRE(found.size() == 1);
+        CHECK(!found[0].suggested_fix.has_value());
+        CHECK(found[0].message.contains("no fwd.hh"));
+        CHECK(found[0].message.contains("namespace cc"));
+    }
+    SECTION("a snippet linted alone, with no files to look in")
+    {
+        auto const found = run_rules_on_text("namespace cc\n{\nstruct span\n{\n};\n}\n", "a.hh");
+        REQUIRE(found.size() == 1);
+        CHECK(!found[0].suggested_fix.has_value());
+    }
+    SECTION("a template whose parameters have default arguments")
+    {
+        auto sm = source_manager();
+        (void)sm.add_from_text("namespace cc\n{\n}\n", "lib/src/cc/fwd.hh");
+        auto const& header = sm.add_from_text("#include <cc/fwd.hh>\nnamespace cc\n{\ntemplate <class T = int>\nstruct "
+                                              "box\n{\n};\n}\n",
+                                              "lib/src/cc/a.hh");
+        auto const found = run_rules(header, all_rules(), empty_lint_config(), &sm);
+        REQUIRE(found.size() == 1);
+        CHECK(!found[0].suggested_fix.has_value());
+        CHECK(found[0].message.contains("default argument"));
     }
 }
 

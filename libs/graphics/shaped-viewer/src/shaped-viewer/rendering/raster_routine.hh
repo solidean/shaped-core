@@ -47,6 +47,10 @@ struct sv::raster_gbuffer
 
     /// The clip depth `1 - near / depth` a layer's drawings are occluded by, r32_float, or null where nothing reads it.
     sg::texture_2d primary_depth;
+
+    /// How far each pixel's bounce went, the diffuse half in r and the specular in g, rg32_float, or null where nothing reads it.
+    /// Only a deferred hybrid frame writes it, from its lighting kernel; a raster pass never does.
+    sg::texture_2d hit_distance;
 };
 
 /// The hybrid's thin G-buffer, which a deferred frame's raster pass writes beside the depth, motion and primary depth of `raster_gbuffer`.

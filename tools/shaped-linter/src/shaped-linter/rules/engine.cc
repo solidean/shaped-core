@@ -20,7 +20,10 @@ lint_config const& empty_lint_config()
     return empty;
 }
 
-cc::vector<finding> run_rules(source_buffer const& buffer, cc::span<rule const> rules, lint_config const& config)
+cc::vector<finding> run_rules(source_buffer const& buffer,
+                              cc::span<rule const> rules,
+                              lint_config const& config,
+                              source_manager* files)
 {
     cc::vector<finding> out;
 
@@ -56,8 +59,14 @@ cc::vector<finding> run_rules(source_buffer const& buffer, cc::span<rule const> 
     if (any_needs_prose(active))
         prose = extract_prose(buffer, language, ts);
 
-    lint_context ctx
-        = {.source = buffer, .language = language, .tokens = ts, .tree = tree, .prose = prose, .config = config, .out = out};
+    lint_context ctx = {.source = buffer,
+                        .language = language,
+                        .tokens = ts,
+                        .tree = tree,
+                        .prose = prose,
+                        .config = config,
+                        .out = out,
+                        .files = files};
     for (auto const& r : active)
         r.check(ctx);
 

@@ -5,6 +5,7 @@
 #include <shaped-rendering/dlss_rr_routine.hh>
 #include <shaped-rendering/impl/denoise_images.hh>
 #include <shaped-rendering/impl/dlss_ngx.hh>
+#include <sr_sgl_shaders.hh>
 
 #include <memory> // std::shared_ptr, which is what reconstruct_history::_member_state is
 
@@ -37,7 +38,17 @@ cc::shared_async<cc::unit> dlss_rr_routine::init(sg::routine_init_scope scope)
     // Every open must be balanced by one close, so a reload keeps the instance it has.
     if (_instance == nullptr)
         _instance = impl::dlss_open(*_ctx);
-    co_return;
+    if (_instance == nullptr)
+        co_return;
+
+    // Without it a call still runs, and reflections reproject as if they lay on the surface.
+    auto const copy = sgl_shaders::dlss_specular_hit_distance::main_cs.acquire_pipeline(*_ctx);
+    co_await cc::async_settled(copy);
+    auto const* const built = copy->try_value();
+    if (built != nullptr)
+        _specular_hit_distance = *built;
+    else
+        CC_LOG_ERROR("dlss: the specular hit distance copy did not build, so reflections reproject at the surface");
 }
 
 reconstruct_outcome dlss_rr_routine::execute(sg::command_list& cmd,
@@ -104,6 +115,27 @@ reconstruct_outcome dlss_rr_routine::execute(sg::command_list& cmd,
             { ctx->defer_until_retired([s] { impl::dlss_release_stream(static_cast<impl::dlss_stream*>(s)); }); });
     }
 
+    // NGX takes the specular distance alone, in r, where sr's guide holds both lobes'.
+    auto specular_hit_distance = sg::texture_2d();
+    if (is_set(in.guides.hit_distance) && self->_specular_hit_distance != nullptr)
+    {
+        auto& ctx = cmd.context();
+        specular_hit_distance
+            = ctx.transient.create_texture_2d({.format = sg::pixel_format::r32_float,
+                                               .width = input_extent[0],
+                                               .height = input_extent[1],
+                                               .usage = sg::texture_usage::image | sg::texture_usage::texture});
+        auto const group = ctx.transient.create_binding_group(
+            cmd,
+            ctx.cached.acquire_binding_group_layout<sgl_shaders::dlss_specular_hit_distance::dlss_specular_hit_distance_io>(),
+            sgl_shaders::dlss_specular_hit_distance::dlss_specular_hit_distance_io{
+                .source = in.guides.hit_distance.as_texture_view(),
+                .target = specular_hit_distance.as_image_view<sg::pixel_format::r32_float>()});
+        cmd.compute.bind_pipeline(*self->_specular_hit_distance);
+        cmd.compute.bind_group(0, *group);
+        cmd.compute.dispatch_threads(input_extent[0], input_extent[1]);
+    }
+
     auto const evaluated = impl::dlss_evaluate(cmd, *static_cast<impl::dlss_stream*>(history._member_state.get()),
                                                {.color = in.color,
                                                 .albedo = in.guides.albedo,
@@ -113,6 +145,9 @@ reconstruct_outcome dlss_rr_routine::execute(sg::command_list& cmd,
                                                 .depth = in.guides.depth,
                                                 .motion = in.guides.motion,
                                                 .output = in.output,
+                                                .specular_hit_distance = specular_hit_distance,
+                                                .world_to_view = in.guides.world_to_view,
+                                                .view_to_clip = in.guides.view_to_clip,
                                                 .jitter = in.guides.jitter,
                                                 .reset = restarted,
                                                 .exposure = options.exposure});

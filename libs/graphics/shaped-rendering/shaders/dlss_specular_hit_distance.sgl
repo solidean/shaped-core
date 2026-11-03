@@ -1,0 +1,11 @@
+// The specular half of sr's hit-distance guide, copied into the one-channel texture DLSS Ray Reconstruction reads it from.
+// sr's guide holds the diffuse distance in r and the specular one in g, as NRD reads it; NGX takes the specular one alone, in r.
+
+binding dlss_specular_hit_distance_io:
+    @unfilterable
+    source: texture_2d[float4]
+    target: out image_2d[.r32_float]
+
+@compute(8, 8) fun main_cs(@thread_id id: int3){dlss_specular_hit_distance_io}:
+    if any(id.xy >= dlss_specular_hit_distance_io.target.size()) => return
+    dlss_specular_hit_distance_io.target[id.xy] = dlss_specular_hit_distance_io.source.load(id.xy).y

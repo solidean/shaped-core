@@ -5,6 +5,7 @@ So a `class`, `struct` or `enum` **definition** inside an open namespace is the 
 
 The blocks below are the boundary: what fires, how much of the namespace the fix moves, and what the rule deliberately never touches.
 A block with no `path=` is linted as `<memory>`, which has no implementation extension and is therefore a header — the default this rule cares about.
+A block is linted alone, with no `fwd.hh` to declare a moved type in, so these blocks pin what fires and never a fix; the fix and its `fwd.hh` edit are pinned in qualified_type_definition-test.cc.
 
 ## a struct in an open namespace
 
