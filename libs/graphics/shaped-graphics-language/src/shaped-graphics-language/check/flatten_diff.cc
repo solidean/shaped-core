@@ -3,7 +3,8 @@
 #include <clean-core/string/format.hh>
 #include <shaped-graphics-language/check/impl/flattener.hh>
 
-// PROTOTYPE of docs/spec/incubator/autodiff.md: `fwd_diff` and `bwd_diff`, written as a transform of the flat tree.
+// PROTOTYPE of libs/graphics/shaped-graphics-language/docs/spec/incubator/autodiff.md.
+// `fwd_diff` and `bwd_diff`, written as a transform of the flat tree.
 //
 // Both modes start alike.
 // The function is inlined over locals that hold its arguments, and the body is LOWERED: every block that stands in an

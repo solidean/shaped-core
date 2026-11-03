@@ -58,7 +58,7 @@ So `@derivative` is part of the first design, not an extension of it, and nothin
 
 ## The prototype
 
-A prototype is built: [flatten_diff.cc](../../../src/shaped-graphics-language/check/flatten_diff.cc), and its tests are [corpus/derivatives/](../../../tests/corpus/derivatives).
+A prototype is built: [flatten_diff.cc](../../../src/shaped-graphics-language/check/flatten_diff.cc), and its tests are [corpus/derivatives/](../../../tests/corpus/derivatives/).
 They hold both modes to central differences, among them the whole gradient of one Gaussian splat's opacity at a pixel, whose backward kernel every target writes.
 
 * **The surface is generic prelude functions**, so the check pass is untouched.
