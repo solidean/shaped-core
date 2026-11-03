@@ -43,8 +43,8 @@ TEST("sv::decal - the projector's rows take a placed point back to the drawing, 
                                                .tint = 0x80ff00ffu};
     auto const g = sv::impl::decal_record_of(placement, 7);
 
-    // The projection runs along y cross x, here (0, -6, 0) normalized.
-    CHECK(g.direction == tg::vec3f(0, -1, 0));
+    // The projection runs along x cross y, here (0, 6, 0) normalized.
+    CHECK(g.direction == tg::vec3f(0, 1, 0));
 
     for (auto const c : {tg::vec3f(0, 0, 0), tg::vec3f(1.5f, -2, 0.5f), tg::vec3f(-1, 4, -1)})
     {

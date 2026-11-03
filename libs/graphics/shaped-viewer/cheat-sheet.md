@@ -605,7 +605,7 @@ auto set = sv::drawing_set();                    // the value you keep, like sv:
 auto const arrow = set.add(d);                   // sv::drawing_id, its index in the set
 scene.add_drawing(set, arrow, {.at = p, .x_axis = e, .y_axis = n, .scale = 1, .tint = c});   // 3D, world units; drawn AFTER the trace
 scene.add_decal(set, logo, {.at = p, .x_axis = r, .y_axis = down, .scale = 2, .depth = 0.5f});   // TRACED: paints base color at hits
-// projected along y_axis × x_axis (away from its reader) to `depth` each side; only the side facing the projector, any winding
+// projected along x_axis × y_axis (away from its reader) to `depth` each side; only the side facing the projector, any winding
 auto canvas = f.add_canvas();                    // appends a 2D layer each call — keep the handle
 canvas.add_drawing(set, arrow, {.at = tg::pos2f(16, 16), .scale = 48, .from = sv::corner::bottom_right});   // logical pixels
 canvas.add_drawing(d, {...});                    // a lone drawing: an implicit one-element set

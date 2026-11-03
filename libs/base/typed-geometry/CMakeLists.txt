@@ -47,6 +47,11 @@ target_sources(typed-geometry
     src/typed-geometry/scalar/bigint/bigint.hh
     src/typed-geometry/scalar/bigrat/bigrat.hh
 
+    src/typed-geometry/symbolic/fwd.hh
+    src/typed-geometry/symbolic/all.hh
+    src/typed-geometry/symbolic/polynomial.hh
+    src/typed-geometry/symbolic/multi_polynomial.hh
+
     src/typed-geometry/linalg/fwd.hh
     src/typed-geometry/linalg/comp.hh
     src/typed-geometry/linalg/comp_ops.hh
@@ -194,6 +199,9 @@ if(SC_BUILD_TESTS)
         tests/scalar/bigfloat-test.cc
         tests/scalar/bigint-test.cc
         tests/scalar/bigrat-test.cc
+
+        tests/symbolic/polynomial-test.cc
+        tests/symbolic/multi_polynomial-test.cc
 
         tests/benchmarks/fixed_int-benchmark.cc
         tests/benchmarks/bigfloat-benchmark.cc

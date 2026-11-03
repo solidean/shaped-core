@@ -123,10 +123,9 @@ Nothing bounces, and nothing refracts: a glass sphere shows its reflection and n
   It reads level 0 as a hit does: a box-filtered mip averages opacity, so a minified cutout would thin and vanish.
   A cutoff above 0 thresholds, as glTF's MASK, and there a pixel is cut exactly where a hit is.
   **Coverage is the one exception**: a cutoff of 0, which a tracer converges to a partial surface and one raster frame cannot, so coverage below one half is cut.
-- **Quadric batches are not drawn once they land.** The layer logs a warning once and draws its meshes.
+- **A quadric batch draws each primitive as its box**, and the pixel solves `quadric.intersect` along its camera ray and writes the surface's depth.
   A batch still streaming is drawn as its placeholder box through the fallback, as a pending mesh is and as a trace draws it.
-  The plan is a pixel stage that ray-casts `quadric.intersect` over each primitive's box and writes its own depth.
-  The intersection and the shading context already exist as functions of module `quadric`.
+  [quadrics.md](quadrics.md#the-raster-path) is the design: the boxes, the far faces, the conservative depth and the pass of their own.
 - **Decals are painted** through the same functions the tracer paints with.
 - **Drawings and annotations work**: the raster writes the primary hit's clip depth into the same slot a trace does, which the drawings' depth test reads.
 
@@ -176,7 +175,6 @@ The records in `raster.drawn` are the tracer's own types, so a layer switching b
 ## Not done yet
 
 - **Shadows.** Deliberately not ray-query shadows: that is the hybrid's lighting pass, not raster's.
-- **Quadric batches**, above.
 - **Antialiasing.** Every pixel is shaded at its center, so edges alias where the tracer's jitter antialiases them.
 - **Blended transparency**: coverage is cut at one half, and transmission shows no refraction.
 - **Coverage-preserving mips.** A cutout reads level 0, so a minified one keeps its coverage but aliases.

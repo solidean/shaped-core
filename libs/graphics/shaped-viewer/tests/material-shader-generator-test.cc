@@ -405,10 +405,13 @@ TEST("sv::generate_material_shader - the raster pixel stage evaluates the same m
     REQUIRE(!opaque.opacity.can_cut_out());
     CHECK(!opaque.raster_source.contains("raster.is_cut"));
 
-    // A quadric batch has no raster stage yet.
+    // A quadric batch's stages solve the surface along the pixel's ray over its box, and write its depth.
     auto const quadric = sv::generate_material_shader(sv::resolve_material(type, material, make_mesh()),
                                                       {.kind = sv::geometry_kind::quadrics});
-    CHECK(quadric.raster_source.empty());
+    CHECK(quadric.raster_source.contains("raster.quadric_pixel_of(p)"));
+    CHECK(quadric.raster_source.contains("raster.quadric_targets"));
+    CHECK(quadric.raster_source.contains("raster.quadric_thin_targets"));
+    CHECK(quadric.hybrid_source.contains("hybrid.quadric_pixel_of(p)"));
 }
 
 TEST("sv::generate_material_shader - the raster pixel stage hands shade the type's occlusion, or 1")

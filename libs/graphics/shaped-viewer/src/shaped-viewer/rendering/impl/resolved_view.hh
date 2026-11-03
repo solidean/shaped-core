@@ -37,6 +37,8 @@ struct sv::impl::resolved_view
     /// How many triangles `instances[i]`'s geometry holds — a placeholder's cube included — and 0 for a landed quadric batch.
     /// What a raster frame draws per row; no trace reads it.
     cc::vector<u32> triangle_counts;
+    /// How many primitives each row's landed quadric batch holds, which a raster frame draws a box for each of; 0 for any other row.
+    cc::vector<u32> primitive_counts;
 
     /// The box of `instances[i]`'s geometry in its own space, which a raster frame culls the row by; none where nothing declared one.
     cc::vector<cc::optional<tg::aabb3f>> bounds;

@@ -183,7 +183,8 @@ resolved_view resolve_scene(sg::command_list& cmd, layer const& l, gpu_resource_
 
             // A batch still streaming keeps its place as a box, exactly as a mesh does, and one that declared no extent is
             // skipped for the same reason: there is no honest place to draw it.
-            auto const pending = set->state != residency::complete;
+            // So does one whose attributes still stream: its parameter block would bind them, stalling the frame until they land.
+            auto const pending = set->state != residency::complete || !resources.attributes_resident(item.instance);
             if (pending && !set->bounds.has_value())
                 continue;
 
@@ -213,6 +214,7 @@ resolved_view resolve_scene(sg::command_list& cmd, layer const& l, gpu_resource_
             out.own_indices.push_back({});
             // A pending batch is the cube a raster frame draws too; a landed one has no triangles to draw.
             out.triangle_counts.push_back(pending ? u32(resources.meshes.placeholder_geometry().triangle_count) : 0);
+            out.primitive_counts.push_back(pending ? 0 : u32(set->primitive_count));
             out.bounds.push_back(pending ? cc::optional<tg::aabb3f>(tg::aabb3f(tg::pos3f(0, 0, 0), tg::pos3f(1, 1, 1)))
                                          : cc::optional<tg::aabb3f>());
 
@@ -245,6 +247,7 @@ resolved_view resolve_scene(sg::command_list& cmd, layer const& l, gpu_resource_
             out.frame_contents.push_back(item.frame_geometry.hash);
             out.own_indices.push_back(m.draw_indices);
             out.triangle_counts.push_back(u32(m.triangle_count));
+            out.primitive_counts.push_back(0);
             // No box: a frame mesh's geometry is new each frame, so a raster frame draws it always rather than measure it.
             out.bounds.push_back(cc::optional<tg::aabb3f>());
             continue;
@@ -305,6 +308,7 @@ resolved_view resolve_scene(sg::command_list& cmd, layer const& l, gpu_resource_
         out.frame_contents.push_back({});
         out.own_indices.push_back({});
         out.triangle_counts.push_back(triangle_count);
+        out.primitive_counts.push_back(0);
         out.bounds.push_back(object_bounds);
 
         // An instance lights the scene where its own permutation declares an emission that is not dark throughout.
@@ -975,54 +979,30 @@ struct raster_scene
     u64 hash = 0;
 };
 
-/// A layer's raster draws: its triangle permutations, each once, and one draw per triangle row of `resolved`.
+/// A layer's raster draws: its permutations, each once, and one draw per row of `resolved`.
 struct raster_batch
 {
     cc::vector<material_permutation const*> permutations;
     cc::vector<raster_draw> draws;
 };
 
-/// The draws of `resolved` a raster pass makes, warning once per `slot` of the quadric batches it skips.
-[[nodiscard]] raster_batch raster_batch_of(resolved_view const& resolved,
-                                           impl::view_state const& rec,
-                                           impl::temporal_slot& slot)
+/// The draws of `resolved` a raster pass makes.
+[[nodiscard]] raster_batch raster_batch_of(resolved_view const& resolved)
 {
     auto batch = raster_batch{};
-    auto permutation_of = cc::vector<u32>();
-    permutation_of.resize_to_defaulted(resolved.hit_groups.size());
-    for (auto i = isize(0); i < resolved.hit_groups.size(); ++i)
-    {
-        if (resolved.hit_groups[i]->kind != geometry_kind::triangles)
-            continue;
-        permutation_of[i] = u32(batch.permutations.size());
-        batch.permutations.push_back(resolved.hit_groups[i]);
-    }
+    batch.permutations.reserve(resolved.hit_groups.size());
+    for (auto const* const group : resolved.hit_groups)
+        batch.permutations.push_back(group);
 
-    auto skipped_quadrics = false;
     for (auto i = isize(0); i < resolved.instances.size(); ++i)
-    {
-        auto const group = resolved.instances[i].hit_group_offset / 2;
-        if (resolved.hit_groups[group]->kind != geometry_kind::triangles)
-        {
-            skipped_quadrics = true;
-            continue;
-        }
         batch.draws.push_back({.instance = u32(i),
                                .triangle_count = resolved.triangle_counts[i],
-                               .permutation = permutation_of[group],
+                               .primitive_count = resolved.primitive_counts[i],
+                               .permutation = resolved.instances[i].hit_group_offset / 2,
                                .first_index = resolved.records[i].first_index,
                                .base_vertex = resolved.records[i].base_vertex,
                                .bounds = resolved.bounds[i],
                                .indices = resolved.own_indices[i]});
-    }
-
-    // Quadric batches are not drawn yet; issue: feat-sv-raster-quadric-batches
-    if (skipped_quadrics && !slot.raster_skip_reported)
-    {
-        CC_LOG_WARNING("a raster layer of view '{}' holds quadric batches, which the raster path does not draw yet",
-                       rec.display_name);
-        slot.raster_skip_reported = true;
-    }
     return batch;
 }
 
@@ -1050,7 +1030,7 @@ struct raster_batch
         return s;
     };
     auto* const motion = slot_of(temporal_id::motion_guide(layer));
-    auto const batch = raster_batch_of(resolved, rec, slot);
+    auto const batch = raster_batch_of(resolved);
 
     // The camera, with the aspect of the resolution the frame settled on, as a trace would describe it.
     auto const fc = make_frame_constants(v, l, *scene.lights, resolution);
@@ -1175,7 +1155,7 @@ struct raster_batch
         return s;
     };
     auto* const motion = slot_of(temporal_id::motion_guide(layer));
-    auto const batch = raster_batch_of(resolved, rec, slot);
+    auto const batch = raster_batch_of(resolved);
 
     fc.previous_camera = motion->has_last_camera ? motion->last_camera : fc.camera;
     fc.near_plane = f32(v.camera.projection.near_plane);
