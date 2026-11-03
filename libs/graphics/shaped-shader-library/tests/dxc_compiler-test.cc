@@ -479,4 +479,47 @@ TEST("slib - DXC compiles a vertex stage's culled vertex for dx12 and vulkan", e
             {.source = text.value().text, .entry_point = text.value().entry_point, .stage = sg::shader_stage::vertex}));
     }
 }
+
+TEST("slib - DXC compiles how a failed assert ends a patch, a candidate and a box", exclusive("slib-shader-library"))
+{
+    // LEGAL-64: zero edge factors, `ignore`, and a report of no hit
+    struct entry
+    {
+        cc::string_view source;
+        cc::string_view name;
+        sg::shader_stage stage;
+    };
+    entry const entries[] = {
+        {"require tessellation_shader\n"
+         "struct control_point:\n    position: float3\n"
+         "struct tri_factors:\n    @edge_factors edges: float[3]\n    @inside_factors inside: float\n"
+         "@tessellation_control(partitioning = .integer, winding = .counter_clockwise)\n"
+         "fun tc(patch: control_point[3]) -> tri_factors:\n"
+         "    assert patch[0].position.x >= 0.0, \"patch at $(patch[0].position.x)\"\n"
+         "    return { edges = [1.0, 1.0, 1.0], inside = 1.0 }\n",
+         "tc", sg::shader_stage::tessellation_control},
+        {"require raytracing_pipeline\n"
+         "struct radiance:\n    color: float3\n"
+         "@any_hit fun keep(c: triangle_candidate, p: mut radiance) -> hit_decision:\n"
+         "    assert p.color.x >= 0.0, \"negative $(p.color.x)\"\n"
+         "    return hit_decision.accept\n",
+         "keep", sg::shader_stage::any_hit},
+        {"require raytracing_pipeline\n"
+         "struct sphere_hit:\n    normal: float3\n"
+         "@intersection fun sphere(b: procedural_box) -> report[sphere_hit]:\n"
+         "    assert b.primitive_index >= 0, \"box $(b.primitive_index)\"\n"
+         "    return report(1.0, sphere_hit(float3(0.0, 1.0, 0.0)))\n",
+         "sphere", sg::shader_stage::intersection},
+    };
+    for (auto const& e : entries)
+    {
+        auto const text = sgl::compile_to_text(
+            {.source = e.source, .entry_point = e.name, .target = sgl::emit::target::hlsl_dx12, .diagnostics = true});
+        REQUIRE(text.has_value());
+        auto compiler = slib::create_dxc_compiler();
+        REQUIRE(compiler.has_value());
+        (void)await(compiler.value()->compile(
+            {.source = text.value().text, .entry_point = text.value().entry_point, .stage = e.stage}));
+    }
+}
 #endif
