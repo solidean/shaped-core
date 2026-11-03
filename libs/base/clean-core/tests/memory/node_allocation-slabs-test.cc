@@ -130,6 +130,36 @@ TEST("node_allocation - multi-slab ring reuse")
     }
 }
 
+TEST("node_allocation - a slot freed behind the walk is reused within one lap")
+{
+    cc::node_allocator alloc(cc::default_node_memory_resource);
+    auto const idx = cc::node_class_index_for<T8B>();
+    int const usable = usable_slots<T8B>();
+
+    // a bulk phase: every slab but the head full, one slab per exhaustion, no walk ever finds room
+    constexpr int slabs = 40;
+    cc::vector<cc::node_allocation<T8B>> nodes;
+    for (int i = 0; i < usable * slabs; ++i)
+        nodes.push_back(cc::node_allocation<T8B>::create_from(alloc, u64(i)));
+    REQUIRE(ring_len(alloc, idx) == slabs);
+
+    // one owner free in the oldest slab, wherever the walk's hand is
+    auto* const freed = nodes[0].ptr;
+    nodes[0] = {};
+
+    // a walk visits 8 slabs and leaves the hand there, so a lap takes slabs / 8 exhaustions plus the one in progress.
+    // each exhaustion that finds nothing adds one slab: that is the memory a free slot can cost while it waits.
+    int const lap_exhaustions = slabs / 8 + 2;
+    bool reused = false;
+    for (int i = 0; i < lap_exhaustions * usable && !reused; ++i)
+    {
+        nodes.push_back(cc::node_allocation<T8B>::create_from(alloc, u64(i)));
+        reused = nodes.back().ptr == freed;
+    }
+    CHECK(reused);
+    CHECK(ring_len(alloc, idx) <= slabs + lap_exhaustions);
+}
+
 TEST("node_allocation - slab trim returns surplus fully-free slabs to backing")
 {
     cc::node_allocator alloc(cc::default_node_memory_resource);

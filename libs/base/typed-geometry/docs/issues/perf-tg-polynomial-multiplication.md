@@ -28,7 +28,7 @@ Against FLINT 3.3.1, built with MSVC without its assembly, GMP being CGAL's gene
 |---|---|---|---|
 | orient3d over four infinitesimally perturbed points | 64 | 83,000 | 99,000 |
 | Fateman, n = 10 | 10,626 | 24.6 M | 12.6 M |
-| sparse five variables, n = 6 | 114,000 | 147 M | 62 M |
+| sparse five variables, n = 6 | 114,000 | 94.5 M | 62 M |
 | univariate degree 30, two-limb coefficients | 61 | 91,000 | 138,000 |
 | univariate degree 100 | 201 | 734,000 | 341,000 |
 
@@ -39,6 +39,7 @@ What got there:
 - A dense box no larger than the pairs is accumulated untracked and walked once; a sparser one records touched slots.
 
 Left, in the order they pay:
-- The sparse product is bound by node allocation, perf-cc-node-alloc-ring-walk, not by the product.
+- The sparse product: 1.5 times FLINT's instructions, where the rest goes not measured yet.
+  It was bound by node allocation at 147 M; clean-core's bounded slab walk took it to 94.5 M, and its cycles from 185 M to 41 M.
 - Fateman's box, 4.6 MB of accumulators at n = 10, leaves L2: chunking by the leading variable's degree, as FLINT's array method does.
 - Univariate products past degree 100: Kronecker substitution into one integer product, which wants a subquadratic bigint product.

@@ -3,8 +3,8 @@ created: 2026-11-03
 priority: next
 refs:
   - file: libs/base/clean-core/src/clean-core/memory/node_allocation.cc
-claimed-by: Claude (for Philip Trettner)
-claimed-at: 2026-11-03T20:05Z
+closed: 2026-11-03
+resolution: fixed
 ---
 
 # Node allocation walks the whole slab ring on every exhaustion, so allocating many live nodes is quadratic
@@ -27,3 +27,17 @@ Fix options, to be decided:
   and an exhausted head pops from it before walking.
 - Remote frees can do the same through a lock-free per-class stack, or keep the walk but bound it and run it only every so many refills.
 - The trim's walk shares the cost model and should follow.
+
+## Resolved: a bounded walk, a clock hand over the ring
+
+An exhaustion visits at most 8 slabs, resuming where the last walk stopped; a walk that finds nothing refills at the hand.
+A remote bitmap is read with a plain load before its exchange, so a full slab costs no locked instruction.
+The price is documented in docs/systems/node-allocation.md: a slot freed behind the hand waits a lap, and the ring grows up to 12.5% meanwhile.
+
+Measured on the 9950X3D2, release, the sparse 114,000-term product in labs/bignum's polynomial counters:
+| | instructions | cycles | L1D misses |
+|---|---|---|---|
+| full lap per exhaustion | 147.2 M | 184.8 M | 10.35 M |
+| at most 8 slabs | 94.5 M | 41.3 M | 0.099 M |
+
+Exact reuse, the owner's frees listing a full slab again, stays a follow-up in the same doc.

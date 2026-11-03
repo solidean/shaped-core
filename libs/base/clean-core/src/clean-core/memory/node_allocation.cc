@@ -59,6 +59,11 @@ void node_free_slab_to_backing(byte* base, cc::node_class_index idx)
 // a long-lived thread with a stable working set never produces a fully-free slab, so it never actually frees anything however often the sweep runs.
 constexpr u16 node_trim_period = 64;
 
+// how many slabs one exhaustion visits before it refills: the walk is a clock hand, resuming where the last one stopped.
+// so an exhaustion costs O(1) however long the ring, and a slot freed behind the hand waits for the next lap.
+// a lap takes ring / limit exhaustions, each adding at most one slab, so the slabs added while a free slot waits stay under 1 / limit of the ring: 12.5% at 8.
+constexpr int node_walk_limit = 8;
+
 /// Reclaim surplus fully-free slabs of a class back to the backing resource, keeping the ring non-empty and
 /// retaining exactly one fully-free slab as a spare (so steady churn never re-mallocs). Cold path only.
 void node_trim_ring(cc::node_allocator::slab_info& slabs, cc::node_class_index idx)
@@ -422,11 +427,13 @@ byte* cc::node_allocator::allocate_node_bytes_non_fast(node_class_index idx)
     if (start_base == nullptr) [[unlikely]]
         return this->refill_slabs_and_allocate_node_bytes(idx);
 
-    // The head's local just emptied, which is why the fast path fell through, but any slab in the ring — including the head — may have cross-thread frees waiting in its remote bitmap.
-    // Walk the whole ring from the head; on each slab with an empty local, drain remote into local with an atomic exchange, and retry.
-    // Still O(ring) per exhaustion for alloc-heavy workloads — some bookkeeping could keep this cheaper.
+    // The head's local just emptied, which is why the fast path fell through.
+    // But any slab in the ring, the head included, may have free slots: owner frees in local, cross-thread frees in remote.
+    // Walk at most node_walk_limit slabs from the head; on each slab with an empty local, drain remote into local, and retry.
+    // A walk that finds nothing leaves the head on the last slab it visited, so the refill splices the new slab in there and the next walk carries on past it.
     auto base = start_base;
-    do
+    auto last = start_base;
+    for (int visited = 0; visited < node_walk_limit; ++visited)
     {
         CC_ASSERT(base != nullptr, "the slab ring must be a cycling single-linked-list. indicates a "
                                    "node_memory_resource bug.");
@@ -434,9 +441,14 @@ byte* cc::node_allocator::allocate_node_bytes_non_fast(node_class_index idx)
         auto const local = cc::node_slab_freemap_for_base(base);
         u64 freemap = *local;
 #if CC_HAS_THREADS
-        if (freemap == 0) // reclaim cross-thread frees into local
-            freemap
-                = cc::atomic_ref<u64>(*cc::node_slab_remote_for_base(base, idx)).exchange(0, cc::memory_order_acquire);
+        // reclaim cross-thread frees into local; the plain load first keeps a full slab free of a locked instruction.
+        // a free that lands after the load waits for the next lap.
+        if (freemap == 0)
+        {
+            auto remote = cc::atomic_ref<u64>(*cc::node_slab_remote_for_base(base, idx));
+            if (remote.load(cc::memory_order_relaxed) != 0)
+                freemap = remote.exchange(0, cc::memory_order_acquire);
+        }
 #endif
 
         if (freemap != 0) [[likely]]
@@ -447,10 +459,14 @@ byte* cc::node_allocator::allocate_node_bytes_non_fast(node_class_index idx)
             return cc::node_slot_ptr_for(base, idx, slot_idx);
         }
 
+        last = base;
         base = cc::node_slab_next_for_base(base);
-    } while (base != start_base);
+        if (base == start_base)
+            break;
+    }
 
-    // whole ring exhausted (local + remote) => request a new slab
+    // the walk found nothing (local + remote) => request a new slab, spliced in where the walk stopped
+    _slabs.slab_base[isize(idx)] = last;
     return this->refill_slabs_and_allocate_node_bytes(idx);
 }
 

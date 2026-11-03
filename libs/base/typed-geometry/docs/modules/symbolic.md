@@ -82,7 +82,7 @@ A product of bigints whose coefficients all fit an i64, or one or two limbs, sum
 three or five limbs of two's complement, one signed multiply and three adds a pair for i64s, no node until the sum is read out.
 The polynomials find it by duck typing, `C::word_accumulator` and `C::template accumulator<W>`, and read the factors into word form once.
 Against FLINT 3.3.1, built with MSVC, the univariate products of two-limb coefficients are level with it and the infinitesimal orient3d ahead,
-Fateman's product is twice its instructions, and the sparse product is bound by node allocation (perf-cc-node-alloc-ring-walk).
+Fateman's product is twice its instructions, and the sparse product 1.5 times.
 
 ### The gcd is the subresultant sequence, and the resultant shares its step
 

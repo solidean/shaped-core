@@ -105,8 +105,12 @@ There is deliberately **no mid-life slab migration** between live threads: that 
   Frees keep landing in `remote` and are only reclaimed once the slab is adopted.
   Bounded at one bin per class, so not a leak in the grow-unbounded sense — but worth knowing.
 
-- **Alloc-heavy workloads re-walk the ring on each exhaustion** ([node_allocation.cc](../../src/clean-core/memory/node_allocation.cc)).
-  No bookkeeping caches the last-known-full point, so exhaustion is O(ring) every time.
+- **An exhaustion visits at most 8 slabs, so a free slot can wait a lap, and the ring can grow up to 12.5% while it waits** ([node_allocation.cc](../../src/clean-core/memory/node_allocation.cc)).
+  The walk is a clock hand: it resumes where the last one stopped, and a walk that finds nothing refills, splicing the new slab in at the hand.
+  So an exhaustion is O(1) however long the ring, and a bulk phase is linear in its nodes; a full lap per exhaustion made it quadratic.
+  The price: a slot freed behind the hand is found only on the next lap, ring / 8 exhaustions later, each adding a slab.
+  The slabs added while free slots wait stay under 1/8 of the ring, 12.5%; that lap then reuses the slots.
+  `node_walk_limit` is the knob, and the test "a slot freed behind the walk is reused within one lap" pins the bound.
 
 - **Allocation is single-threaded per allocator.** A `node_allocator` is a thread-local cache and must not allocate from two threads; only *free* is concurrency-safe.
   A `node_memory_resource` that serves many threads does so by handing out different allocators, e.g. via TLS, which is what the default does.
@@ -116,7 +120,8 @@ There is deliberately **no mid-life slab migration** between live threads: that 
 
 Still open:
 
-- **Cheaper ring re-walk** — cache the last-known-full point instead of an O(ring) scan per exhaustion.
+- **Exact reuse instead of the clock hand** — find a freed slot at once, so the ring never grows past its live nodes while one waits.
+  The owner's own frees could do it cheaply: a full slab leaves the walk, and the first free into it lists it again, one compare on the free path.
   A candidate that removes the walk entirely: a **per-owner pending stack** of slabs with remote frees.
   The remote free that takes a slab's `remote` bitmap from empty to non-empty also pushes the slab onto its owner's lock-free stack.
   The stack is linked through the slab metadata, and a `listed` flag keeps a slab from being pushed twice.
