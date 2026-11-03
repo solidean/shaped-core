@@ -104,7 +104,7 @@ ASYNC_INVOCABLE_TEST("sv - a view accumulates across frames under its id", (sg::
                 store.begin_frame(u64(ctx.current_epoch()));
                 (void)sv::view_renderer::execute(cmd, warm, resources, store);
                 return accumulated(warm.id) >= 2 && stand_in_hash(warm.id) == 0 ? sg::routine_outcome::executed
-                                                                                 : sg::routine_outcome::declined;
+                                                                                : sg::routine_outcome::declined;
             });
         REQUIRE(warmed);
     }
