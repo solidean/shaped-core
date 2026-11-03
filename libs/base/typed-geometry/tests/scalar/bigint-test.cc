@@ -1,3 +1,4 @@
+#include <clean-core/container/fixed_array.hh>
 #include <clean-core/math/random.hh>
 #include <nexus/test.hh>
 #include <typed-geometry/scalar/bigint/bigint.hh>
