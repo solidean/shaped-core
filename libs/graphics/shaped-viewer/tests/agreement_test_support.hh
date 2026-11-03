@@ -28,11 +28,31 @@ struct mode_config;
 struct converged;
 struct tile_report;
 struct firefly;
+struct lit_box;
+enum class enforce : sv::u8;
 
 /// What a comparison is drawn at, small enough that a hybrid's thousand frames stay cheap.
 inline constexpr auto k_size = tg::vec2i(64, 64);
 inline constexpr int k_tile = 8;
+
+/// How many restarts a reference runs before its first half, so its seeds are none the contender draws.
+inline constexpr int k_reference_restarts = 3;
 } // namespace sv_test::agreement
+
+/// Whether a comparison's tiles fail the test, or only its log and its picture tell where they stand.
+/// A mode that approximates on purpose is measured all the same, so the size of what it gives up stays visible.
+enum class sv_test::agreement::enforce : sv::u8
+{
+    tiles,
+    report_only,
+};
+
+/// The Cornell box lit by its lamp alone, as the view-level tests place it, and the camera it fills.
+struct sv_test::agreement::lit_box
+{
+    cc::vector<sv::scene_item> items;
+    sv::camera camera;
+};
 
 /// One way of drawing a layer: the settings its mode reads.
 struct sv_test::agreement::mode_config
@@ -93,6 +113,29 @@ struct sv_test::agreement::firefly
 
 namespace sv_test::agreement
 {
+/// Whether the device traces and rasterizes both, which every mode compared here needs.
+[[nodiscard]] inline bool can_trace(sg::context& ctx)
+{
+    return sv_test::can_run(ctx) && ctx.supports(sg::feature::ray_query);
+}
+
+/// The Cornell box under its 15-nit lamp; `lamp_drop` lowers the lamp from its 2 mm under the ceiling.
+[[nodiscard]] inline lit_box make_lit_box(sv::gpu_resource_manager& resources, f32 lamp_drop = 0.0f)
+{
+    auto box = sv_test::make_cornell_box();
+    auto const lamp_vertices = 3 * sv_test::cornell_lamp_triangles;
+    for (auto i = box.positions.size() - lamp_vertices; i < box.positions.size(); ++i)
+        box.positions[i] = box.positions[i] - tg::vec3f(0, lamp_drop, 0);
+    auto const lit = sv_test::as_lit_meshes(box, 15.0f);
+    auto out = lit_box{.camera = sv_test::cornell_camera()};
+    out.items.push_back(resources.acquire_scene_item(lit.enclosure));
+    out.items.push_back(resources.acquire_scene_item(lit.lamp));
+    resources.wait_for_pending_uploads();
+    // Narrow enough that the box fills the view, so no tile is half background.
+    out.camera.projection.vertical_fov = tg::angle_d::make_from_degree(30.0);
+    return out;
+}
+
 /// `items` drawn the `config` way, its mean converged to `samples` per pixel twice over.
 /// The second half starts after a restart, so it draws from other seeds than the first.
 inline cc::shared_async<converged> converge(sg::context& ctx,
@@ -253,21 +296,29 @@ inline cc::shared_async<converged> converge(sg::context& ctx,
     co_return out;
 }
 
-/// Whether the pixel at (`x`, `y`) and its eight neighbors see one surface of one material: where a tracer's jittered
+/// Whether the pixel at (`x`, `y`) and its eight neighbors see one smooth surface of one material: where a tracer's jittered
 /// samples and a raster's pixel center agree, and an edge, where they do not, is left out.
+/// Neighbors' normals may differ by some 18 degrees, which a curved surface's do and a crease's do not.
 /// The albedo tells apart what the normal cannot, such as a lamp set into a ceiling.
 [[nodiscard]] inline bool is_interior(converged const& c, tg::vec2i size, int x, int y)
 {
     if (c.normals.empty())
         return true;
-    if (!sv_test::is_interior(c.normals, size, x, y))
+    if (x == 0 || y == 0 || x == size[0] - 1 || y == size[1] - 1)
         return false;
-    auto const& a = c.albedo[y * size[0] + x];
+    auto const& n = c.normals[isize(y) * size[0] + x];
+    auto const& a = c.albedo[isize(y) * size[0] + x];
     for (auto dy = -1; dy <= 1; ++dy)
         for (auto dx = -1; dx <= 1; ++dx)
         {
-            auto const& b = c.albedo[(y + dy) * size[0] + (x + dx)];
-            if (f32(a.r) != f32(b.r) || f32(a.g) != f32(b.g) || f32(a.b) != f32(b.b))
+            auto const i = isize(y + dy) * size[0] + (x + dx);
+            auto const& m = c.normals[i];
+            auto const& b = c.albedo[i];
+            auto const facing = f32(n.r) * f32(m.r) + f32(n.g) * f32(m.g) + f32(n.b) * f32(m.b);
+            if (facing < 0.95f)
+                return false;
+            if (tg::abs(f32(a.r) - f32(b.r)) > 0.01f || tg::abs(f32(a.g) - f32(b.g)) > 0.01f
+                || tg::abs(f32(a.b) - f32(b.b)) > 0.01f)
                 return false;
         }
     return true;
@@ -516,18 +567,21 @@ inline void write_panels(cc::string_view name,
 }
 
 /// Holds `contender` to `reference`, logs and writes what it found, and fails the tiles past `z_limit`.
+/// Under `enforce::report_only` it fails only on a non-finite pixel.
 inline void check_agreement(cc::string_view name,
                             converged const& contender,
                             converged const& reference,
                             f64 relative_floor,
+                            enforce how = enforce::tiles,
                             f64 z_limit = 5.0)
 {
     auto const report = compare_tiles(contender, reference, relative_floor, z_limit);
-    CC_LOG_INFO("{}: {} of {} tiles past {} standard errors; worst {:.2f} ({:.1f}% off) at tile ({}, {}); {} samples "
+    CC_LOG_INFO("{}{}: {} of {} tiles past {} standard errors; worst {:.2f} ({:.1f}% off) at tile ({}, {}); {} samples "
                 "against {}; calibration {:.2f} / {:.2f}; sees a bias of {:.1f}% in the median tile",
-                name, report.failed, report.compared, z_limit, report.worst_z, 100.0 * report.worst_relative,
-                report.worst_tile[0], report.worst_tile[1], contender.samples, reference.samples,
-                report.calibration_test, report.calibration_reference, 100.0 * report.resolution);
+                name, how == enforce::report_only ? " (reported only)" : "", report.failed, report.compared, z_limit,
+                report.worst_z, 100.0 * report.worst_relative, report.worst_tile[0], report.worst_tile[1],
+                contender.samples, reference.samples, report.calibration_test, report.calibration_reference,
+                100.0 * report.resolution);
 
     auto reference_mean = cc::vector<tg::vec4f>();
     auto contender_mean = cc::vector<tg::vec4f>();
@@ -542,6 +596,8 @@ inline void check_agreement(cc::string_view name,
     write_panels(name, panels);
 
     CHECK(report.non_finite == 0).dump("test", name).dump("non-finite pixels", report.non_finite);
+    if (how == enforce::report_only)
+        return;
     // A comparison that left most of the image out has said nothing about it.
     CHECK(report.compared * 2 > isize(report.z.size())).dump("test", name).dump("compared", report.compared);
     CHECK(report.failed == 0)

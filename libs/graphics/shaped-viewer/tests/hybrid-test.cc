@@ -191,32 +191,6 @@ cc::shared_async<hybrid_readback> draw_hybrid(sg::context& ctx,
         out.color.push_back(s / f32(frames));
     co_return out;
 }
-/// An indexed UV sphere of `radius` around `center`, faceted, wound so every face points outward.
-///
-/// TEMPORARY(debt-sv-examples-hand-rolled-primitive-meshes): one more hand-rolled sphere; a `tg::` sphere tessellation replaces it.
-[[nodiscard]] sv::triangle_geometry sphere_geometry(f32 radius, int rings, int segments, tg::vec3f center = {})
-{
-    auto positions = cc::vector<tg::pos3f>();
-    for (auto r = 0; r <= rings; ++r)
-    {
-        auto const theta = tg::angle_f::make_from_radians(f32(r) / f32(rings) * tg::pi<f32>);
-        for (auto s = 0; s <= segments; ++s)
-        {
-            auto const phi = tg::angle_f::make_from_radians(f32(s) / f32(segments) * 2.0f * tg::pi<f32>);
-            positions.push_back(tg::pos3f(radius * tg::sin(theta) * tg::cos(phi), radius * tg::cos(theta),
-                                          radius * tg::sin(theta) * tg::sin(phi))
-                                + center);
-        }
-    }
-    auto indices = cc::vector<u32>();
-    auto const index_of = [segments](int r, int s) { return u32(r * (segments + 1) + s); };
-    for (auto r = 0; r < rings; ++r)
-        for (auto s = 0; s < segments; ++s)
-            for (auto const i : {index_of(r, s), index_of(r + 1, s + 1), index_of(r + 1, s), index_of(r, s),
-                                 index_of(r, s + 1), index_of(r + 1, s + 1)})
-                indices.push_back(i);
-    return sv::triangle_geometry::create_from_indexed_triangles(positions, indices);
-}
 } // namespace
 
 ASYNC_INVOCABLE_TEST("sv::hybrid_routine - forward and deferred light the Cornell box as the tracer's first bounce "
@@ -360,7 +334,7 @@ ASYNC_INVOCABLE_TEST("sv::hybrid_routine - a glass sphere under a uniform sky sh
     constexpr auto size = tg::vec2i(48, 48);
 
     auto const item = resources.acquire_scene_item(
-        sv::mesh{.name = "hybrid glass sphere", .geometry = sphere_geometry(0.6f, 24, 32), .material = material});
+        sv::mesh{.name = "hybrid glass sphere", .geometry = sv_test::sphere_geometry(0.6f, 24, 32), .material = material});
     resources.wait_for_pending_uploads();
     // a light that adds nothing, since the sky is the whole of the lighting
     auto const lights = sv_test::light_table_of(

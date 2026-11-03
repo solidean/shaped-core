@@ -15,38 +15,9 @@ namespace
 {
 using namespace cc::primitive_defines;
 namespace agreement = sv_test::agreement;
-
-/// How many restarts a reference runs before its first half, so its seeds are none the contender draws.
-constexpr int k_reference_restarts = 3;
-
-/// The Cornell box lit by its lamp alone, as the view-level tests place it, and the camera it fills.
-struct lit_box
-{
-    cc::vector<sv::scene_item> items;
-    sv::camera camera;
-};
-
-/// `lamp_drop` lowers the lamp from its 2 mm under the ceiling.
-[[nodiscard]] lit_box make_lit_box(sv::gpu_resource_manager& resources, f32 lamp_drop = 0.0f)
-{
-    auto box = sv_test::make_cornell_box();
-    auto const lamp_vertices = 3 * sv_test::cornell_lamp_triangles;
-    for (auto i = box.positions.size() - lamp_vertices; i < box.positions.size(); ++i)
-        box.positions[i] = box.positions[i] - tg::vec3f(0, lamp_drop, 0);
-    auto const lit = sv_test::as_lit_meshes(box, 15.0f);
-    auto out = lit_box{.camera = sv_test::cornell_camera()};
-    out.items.push_back(resources.acquire_scene_item(lit.enclosure));
-    out.items.push_back(resources.acquire_scene_item(lit.lamp));
-    resources.wait_for_pending_uploads();
-    // Narrow enough that the box fills the view, so no tile is half background.
-    out.camera.projection.vertical_fov = tg::angle_d::make_from_degree(30.0);
-    return out;
-}
-
-[[nodiscard]] bool can_trace(sg::context& ctx)
-{
-    return sv_test::can_run(ctx) && ctx.supports(sg::feature::ray_query);
-}
+using agreement::can_trace;
+using agreement::k_reference_restarts;
+using agreement::make_lit_box;
 } // namespace
 
 // The comparison's own control: a megakernel cut short at its direct light differs from the full one exactly by the
@@ -97,7 +68,7 @@ ASYNC_INVOCABLE_TEST("sv agreement - the wavefront converges to the megakernel's
 // The lamp hangs 5 cm below the ceiling, so bounces reach the ceiling above it, which its two-sided face lights from up close;
 // where MIS hands that light to the BSDF sample the path is quiet, and where a last vertex samples the light alone it is not.
 // Besides how it looks, it is what blunts the comparisons: one firefly in a tile widens its tolerance past a 15% bias.
-ASYNC_INVOCABLE_TEST("sv agreement - no mode draws fireflies under a lamp hanging below the ceiling",
+ASYNC_INVOCABLE_TEST("sv agreement - no mode draws more than a stray firefly under a lamp hanging below the ceiling",
                      (sg::context_handle const& ctx_h))
 {
     auto& ctx = *ctx_h;
@@ -123,7 +94,9 @@ ASYNC_INVOCABLE_TEST("sv agreement - no mode draws fireflies under a lamp hangin
             mean.push_back(image.mean_at(i));
         // At a thousand samples a half, halves five neighborhoods apart hold one sample worth five thousand of theirs.
         // The ceiling right above the lamp is lit some hundred times brighter than the walls, so a bounce landing there is
-        // worth up to some three thousand honestly; a light sample left unbalanced near the lamp was worth 14000 to 28000.
+        // honestly worth up to some five thousand, rarely: one such pixel an image, at most.
+        // A light sample left unbalanced near the lamp made 85 to 118 of them an image, worth 14000 to 28000.
+        // So a few are the tail of a sound estimator, and many, or one past twelve thousand, are not.
         // The lamp is 15 nits and no wall reaches 2, so a neighborhood above that is the lamp's edge.
         auto const found = agreement::fireflies_of(image, 5.0, 2.0);
 
@@ -145,7 +118,12 @@ ASYNC_INVOCABLE_TEST("sv agreement - no mode draws fireflies under a lamp hangin
         cc::vector<tg::vec3f> const panels[] = {shown, marked};
         agreement::write_panels(m.name, panels);
 
-        CHECK(found.empty())
+        CHECK(found.size() <= 3)
+            .dump("mode", m.name)
+            .dump("fireflies", found.size())
+            .dump("worst ratio", worst.ratio)
+            .dump("worst sample weight", worst.sample_weight);
+        CHECK(worst.ratio < 12.0)
             .dump("mode", m.name)
             .dump("fireflies", found.size())
             .dump("worst ratio", worst.ratio)
