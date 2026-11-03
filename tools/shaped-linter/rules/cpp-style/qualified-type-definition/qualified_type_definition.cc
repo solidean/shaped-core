@@ -4,6 +4,7 @@
 #include <clean-core/container/vector.hh>
 #include <clean-core/string/char_predicates.hh>
 #include <clean-core/string/string.hh>
+#include <shaped-linter/lex/source_manager.hh>
 
 namespace scl
 {
@@ -223,12 +224,183 @@ cc::vector<isize> direct_definitions(syntax_tree const& tree, isize ns)
     return out;
 }
 
+/// The library's fwd.hh a moved type is declared in, and how a header includes it.
+struct fwd_header
+{
+    source_buffer const* buffer = nullptr;
+    cc::string include; // `<lib/fwd.hh>`'s inner text, the path below `src/`
+};
+
+/// Where a header's types are declared: the nearest `fwd.hh` in its folder or above, below its `src/` folder, as each library keeps one.
+/// Absent without a run's source manager, without a `src/` folder above the header, without such a file, or when the header is that fwd.hh.
+cc::optional<fwd_header> find_fwd_header(lint_context const& ctx)
+{
+    if (ctx.files == nullptr)
+        return {};
+    cc::vector<cc::string_view> parts;
+    auto const path = ctx.source.path();
+    isize start = 0;
+    for (auto i = isize(0); i <= path.size(); ++i)
+        if (i == path.size() || path[i] == '/' || path[i] == '\\')
+        {
+            parts.push_back(path.subview({.start = start, .end = i}));
+            start = i + 1;
+        }
+    auto src = isize(-1);
+    for (auto i = isize(0); i + 1 < parts.size(); ++i)
+        if (parts[i] == "src")
+            src = i;
+    if (src < 0)
+        return {};
+    auto const joined = [&](isize from, isize to)
+    {
+        auto s = cc::string();
+        for (auto i = from; i < to; ++i)
+        {
+            if (i > from)
+                s += '/';
+            s += parts[i];
+        }
+        return s;
+    };
+    // the folder the header is in, then each folder above it down to just below src/
+    if (parts.back() == "fwd.hh")
+        return {}; // the header is its library's fwd.hh: nowhere to declare its types but here
+    for (auto last = parts.size() - 1; last > src; --last)
+    {
+        auto const candidate = joined(0, last) + "/fwd.hh";
+        auto const found = ctx.files->find_or_add_file(candidate);
+        if (found.has_value())
+            return fwd_header{.buffer = found.value(), .include = joined(src + 1, last) + "/fwd.hh"};
+    }
+    return {};
+}
+
+bool is_identifier_char(char c)
+{
+    return cc::is_alphanumeric(c) || c == '_';
+}
+
+/// Does `line` hold `word` as a whole identifier?
+bool has_word(cc::string_view line, cc::string_view word)
+{
+    for (auto i = isize(0); i + word.size() <= line.size(); ++i)
+        if (line.subview({.start = i, .end = i + word.size()}) == word && (i == 0 || !is_identifier_char(line[i - 1]))
+            && (i + word.size() == line.size() || !is_identifier_char(line[i + word.size()])))
+            return true;
+    return false;
+}
+
+/// Does `text` already declare a type `name`: a line opening with its class-key, or a template head, naming it and ending in `;`?
+/// A textual test: the namespace it sits in is not checked, which a fwd.hh holding one name twice would make wrong.
+bool declares_type(cc::string_view text, cc::string_view name)
+{
+    isize begin = 0;
+    for (auto i = isize(0); i <= text.size(); ++i)
+    {
+        if (i < text.size() && text[i] != '\n')
+            continue;
+        auto const line = trimmed(text.subview({.start = begin, .end = i}));
+        begin = i + 1;
+        auto const keyed = line.starts_with("struct ") || line.starts_with("class ") || line.starts_with("union ")
+                        || line.starts_with("enum ") || line.starts_with("template");
+        if (keyed && line.ends_with(";") && !line.contains('{') && has_word(line, name))
+            return true;
+    }
+    return false;
+}
+
+/// Where a declaration goes in `text`: the start of the line closing its `namespace ns` block, or -1 when it has none.
+isize namespace_insertion(cc::string_view text, cc::string_view ns)
+{
+    auto const head = cc::string("namespace ") + ns;
+    for (auto at = isize(0); at + head.size() <= text.size(); ++at)
+    {
+        if (text.subview({.start = at, .end = at + head.size()}) != head || (at > 0 && text[at - 1] != '\n'))
+            continue;
+        auto i = at + head.size();
+        if (i < text.size() && (is_identifier_char(text[i]) || text[i] == ':'))
+            continue; // `namespace cc::impl` when looking for `namespace cc`
+        while (i < text.size() && cc::is_space(text[i]))
+            ++i;
+        if (i >= text.size() || text[i] != '{')
+            continue;
+        auto depth = 0;
+        for (; i < text.size(); ++i)
+        {
+            if (text[i] == '/' && i + 1 < text.size() && text[i + 1] == '/')
+                while (i < text.size() && text[i] != '\n')
+                    ++i;
+            if (i >= text.size())
+                break;
+            if (text[i] == '{')
+                ++depth;
+            else if (text[i] == '}' && --depth == 0)
+            {
+                auto line_begin = i;
+                while (line_begin > 0 && text[line_begin - 1] != '\n')
+                    --line_begin;
+                return line_begin;
+            }
+        }
+        return -1;
+    }
+    return -1;
+}
+
+/// Where an include goes in `text`: after its last `#include` line, else after `#pragma once`, else at the top.
+u32 include_insertion(cc::string_view text)
+{
+    auto after = u32(0);
+    isize begin = 0;
+    for (auto i = isize(0); i < text.size(); ++i)
+    {
+        if (text[i] != '\n')
+            continue;
+        auto const line = trimmed(text.subview({.start = begin, .end = i}));
+        if (line.starts_with("#include") || (after == 0 && line.starts_with("#pragma once")))
+            after = u32(i + 1);
+        begin = i + 1;
+    }
+    return after;
+}
+
+/// What fwd.hh declares `def` with — its head up to the name, the enum-base included — or empty when it needs no declaration there.
+/// A specialization needs none: its primary template is what fwd.hh declares.
+/// `blocked` is set where no declaration can be written: a template parameter's default argument belongs on the declaration alone,
+/// so moving it there is a rewrite of the definition this fix does not make.
+cc::string declaration_of(lint_context const& ctx, isize def, bool& blocked)
+{
+    auto const& n = ctx.tree[def];
+    auto const text = ctx.source.text();
+    auto const after_name = n.name.byte_end;
+    auto i = isize(after_name);
+    while (i < text.size() && cc::is_space(text[i]))
+        ++i;
+    if (i < text.size() && text[i] == '<')
+        return {};
+    // an enum's head runs to its brace, so a base of builtin words (`unsigned char`), which has no enum_base_name, comes along
+    auto end = isize(after_name);
+    if (n.kind == node_kind::enum_definition)
+        while (end < text.size() && text[end] != '{')
+            ++end;
+    auto const head = trimmed(text.subview({.start = isize(n.span.byte_begin), .end = end}));
+    if (head.starts_with("template") && head.contains('='))
+    {
+        blocked = true;
+        return {};
+    }
+    return cc::string(head) + ";";
+}
+
 void check(lint_context& ctx)
 {
     if (is_implementation_file(ctx.source.path()))
         return;
 
     auto const text = ctx.source.text();
+    auto fwd = cc::optional<fwd_header>();
+    auto fwd_looked_up = false;
 
     for (auto ns = isize(0); ns < ctx.tree.nodes.size(); ++ns)
     {
@@ -306,19 +478,76 @@ void check(lint_context& ctx)
                     edits.push_back(insertion(base.byte_begin, cc::string(name_components(ns_name)[0]) + "::"));
             }
 
+            // A qualified definition needs its type declared in the namespace first, which is the library's fwd.hh's job.
+            // The fix declares there what it does not yet, and includes it where the header does not; without a fwd.hh there is no fix.
+            if (!fwd_looked_up)
+            {
+                fwd = find_fwd_header(ctx);
+                fwd_looked_up = true;
+            }
+            auto why_no_fix = cc::string();
+            if (!fwd.has_value())
+                why_no_fix = cc::string("no fix: no fwd.hh was found in this header's folder or above it, below its "
+                                        "src/ folder. ")
+                           + "Declare the type in its library's fwd.hh, inside `namespace " + ns_name
+                           + "`, include that fwd.hh here, and then define it qualified";
+            else
+            {
+                auto const fwd_text = fwd.value().buffer->text();
+                auto const fwd_id = fwd.value().buffer->file_id();
+                auto declarations = cc::string();
+                for (auto k = i; k <= last; ++k)
+                {
+                    auto blocked = false;
+                    auto const declaration = declaration_of(ctx, defs[k], blocked);
+                    if (blocked)
+                        why_no_fix = cc::string("no fix: a template parameter's default argument belongs on the "
+                                                "declaration in ")
+                                   + fwd.value().include
+                                   + " alone; declare the template there with its defaults, drop them here, and define "
+                                     "it qualified";
+                    else if (!declaration.empty()
+                             && !declares_type(fwd_text, ctx.source.span_text(ctx.tree[defs[k]].name)))
+                        declarations += declaration + "\n";
+                }
+                if (!declarations.empty())
+                {
+                    auto const at = namespace_insertion(fwd_text, ns_name);
+                    auto const edit_at = [&](u32 offset, cc::string replacement)
+                    {
+                        return text_edit{.span = {.file_id = fwd_id, .byte_begin = offset, .byte_end = offset},
+                                         .replacement = cc::move(replacement)};
+                    };
+                    if (at >= 0)
+                        edits.push_back(edit_at(u32(at), declarations));
+                    else
+                        edits.push_back(edit_at(u32(fwd_text.size()),
+                                                cc::string(fwd_text.ends_with("\n") ? "" : "\n") + "\nnamespace " + ns_name
+                                                    + "\n{\n" + declarations + "} // namespace " + ns_name + "\n"));
+                }
+                auto const included
+                    = text.contains(cc::string("<") + fwd.value().include + ">") || text.contains("\"fwd.hh\"");
+                if (!included)
+                    edits.push_back(insertion(include_insertion(text), "#include <" + fwd.value().include + ">\n"));
+            }
+
             for (auto k = i; k <= last; ++k)
             {
                 auto const& def = ctx.tree[defs[k]];
                 auto const def_name = ctx.source.span_text(def.name);
 
-                ctx.report({
+                auto f = finding{
                     .rule_id = k_id,
                     .span = def.name,
                     .message = cc::string("`") + def_name + "` should be defined as `" + ns_name + "::" + def_name
                              + "`, not inside an open `namespace " + ns_name + "`",
                     .sev = severity::warning,
-                    .suggested_fix = fix{.edits = edits},
-                });
+                };
+                if (why_no_fix.empty())
+                    f.suggested_fix = fix{.edits = edits};
+                else
+                    f.message += "; " + why_no_fix;
+                ctx.report(cc::move(f));
             }
 
             i = last;
