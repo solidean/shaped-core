@@ -66,7 +66,7 @@ namespace
 [[nodiscard]] decal_placement place_decal(drawing_manager& drawings, drawing_set_id set, u32 index, sv::decal const& d)
 {
     CC_ASSERT(d.depth > 0.0f, "a decal's projection must reach some depth");
-    auto const normal = tg::dual(cross(d.y_axis, d.x_axis));
+    auto const normal = tg::dual(cross(d.x_axis, d.y_axis));
     CC_ASSERT(tg::dot(normal, normal) > 0.0f, "a decal's axes must span a plane, which they do not by default");
     return {.first_record = drawings.first_record(set, index),
             .record_count = drawings.record_count(set, index),

@@ -304,6 +304,7 @@ ASYNC_INVOCABLE_TEST("sv - a 3D drawing is hidden by traced geometry in front of
     };
 
     // Right of center and in front of the quad; left of center and behind it.
+    // The camera looks along +z, so its right is -x.
     auto const size = tg::vec2i(96, 96);
     auto v = sv::view_data{};
     v.id = sv::view_id::from_string("occluded");
@@ -312,8 +313,8 @@ ASYNC_INVOCABLE_TEST("sv - a 3D drawing is hidden by traced geometry in front of
     v.camera = sv::camera::looking_at(tg::pos3d(0, 0, -3), tg::pos3d(0, 0, 0));
     auto& scene = sv::ensure_scene_3d(v);
     scene.items.push_back(item);
-    scene.drawings.push_back(half_unit(tg::pos3f(0.2f, -0.25f, -0.5f)));
-    scene.drawings.push_back(half_unit(tg::pos3f(-0.7f, -0.25f, 0.5f)));
+    scene.drawings.push_back(half_unit(tg::pos3f(-0.7f, -0.25f, -0.5f)));
+    scene.drawings.push_back(half_unit(tg::pos3f(0.2f, -0.25f, 0.5f)));
 
     auto def = sv::viewer_definition{};
     def.views.push_back(cc::move(v));
@@ -348,10 +349,10 @@ ASYNC_INVOCABLE_TEST("sv - a 3D drawing is hidden by traced geometry in front of
     REQUIRE(pixels.size() == isize(size[0]) * size[1] * 4);
     auto const channel = [&](int x, int y, int c) { return int(u8(pixels[(isize(y) * size[0] + x) * 4 + c])); };
 
-    // The front square's center, (0.45, 0, -0.5) at depth 2.5, lands right of the image's center: red, over the quad.
+    // The front square's center, (-0.45, 0, -0.5) at depth 2.5, lands right of the image's center: red, over the quad.
     CHECK(channel(63, 48, 0) > 200);
     CHECK(channel(63, 48, 1) < 60);
-    // The back square's center, (-0.45, 0, 0.5) at depth 3.5, is behind the quad: the quad's own gray shows.
+    // The back square's center, (0.45, 0, 0.5) at depth 3.5, is behind the quad: the quad's own gray shows.
     CHECK(tg::abs(channel(37, 48, 0) - channel(37, 48, 1)) < 30);
 
     co_await cc::async_settled(sv::background_work(ctx));
@@ -405,6 +406,7 @@ ASYNC_INVOCABLE_TEST("sv - an annotation's marker is filled while its anchor sho
     };
 
     // Right of center and in front of the quad; left of center and behind it.
+    // The camera looks along +z, so its right is -x.
     auto const size = tg::vec2i(128, 128);
     auto v = sv::view_data{};
     v.id = sv::view_id::from_string("annotated");
@@ -413,8 +415,8 @@ ASYNC_INVOCABLE_TEST("sv - an annotation's marker is filled while its anchor sho
     v.camera = sv::camera::looking_at(tg::pos3d(0, 0, -3), tg::pos3d(0, 0, 0));
     auto& scene = sv::ensure_scene_3d(v);
     scene.items.push_back(item);
-    scene.annotations.push_back(annotation(tg::pos3f(0.4f, -0.4f, -0.5f)));
-    scene.annotations.push_back(annotation(tg::pos3f(-0.4f, -0.4f, 0.5f)));
+    scene.annotations.push_back(annotation(tg::pos3f(-0.4f, -0.4f, -0.5f)));
+    scene.annotations.push_back(annotation(tg::pos3f(0.4f, -0.4f, 0.5f)));
 
     auto def = sv::viewer_definition{};
     def.views.push_back(cc::move(v));

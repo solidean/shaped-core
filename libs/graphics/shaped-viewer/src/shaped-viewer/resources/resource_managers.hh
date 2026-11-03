@@ -313,8 +313,7 @@ private:
 /// One uploaded quadric batch: its two buffers, and the procedural BLAS built over them once something traces it.
 ///
 /// Two buffers rather than one, because the hardware and the shader want different things.
-/// `aabbs` is the acceleration structure's build input and nothing reads it afterwards — an intersection shader cannot reach the
-/// boxes the BLAS was built from.
+/// `aabbs` is the acceleration structure's build input, and what the raster path draws each primitive as, read by the vertex stage.
 /// `primitives` is what the intersection shader reads by the primitive index, through the bindless table.
 ///
 /// The BLAS is built once, by the first trace that reaches the batch, exactly as a mesh's is: from then on only the (cheap) TLAS is

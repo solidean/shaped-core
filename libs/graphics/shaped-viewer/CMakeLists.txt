@@ -340,6 +340,8 @@ if(SC_BUILD_TESTS)
             tests/restart-energy-test.cc
             tests/jitter-accumulation-test.cc
             tests/glowing-sphere-test.cc
+            tests/moving-view-motion-test.cc
+            tests/quadric-raster-test.cc
             tests/view-renderer-test.cc
             tests/frame-mesh-test.cc
             tests/view-accumulation-test.cc

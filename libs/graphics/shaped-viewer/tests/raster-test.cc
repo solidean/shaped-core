@@ -912,16 +912,16 @@ ASYNC_INVOCABLE_TEST("sv - a frame mesh rasters as the same mesh held resident d
                                                              cc::vector<tg::vec3f>{color, color}));
         return mesh;
     };
-    auto const far = square(3.0f, 10.0f, tg::vec3f(0, 1, 0));
-    auto const near = square(0.5f, 3.0f, tg::vec3f(1, 0, 0));
+    auto const far_square = square(3.0f, 10.0f, tg::vec3f(0, 1, 0));
+    auto const near_square = square(0.5f, 3.0f, tg::vec3f(1, 0, 0));
 
     auto resources = sv::gpu_resource_manager::create(ctx);
     auto resident = cc::vector<sv::scene_item>();
-    resident.push_back(resources.acquire_scene_item(far));
-    resident.push_back(resources.acquire_scene_item(near));
+    resident.push_back(resources.acquire_scene_item(far_square));
+    resident.push_back(resources.acquire_scene_item(near_square));
     auto framed = cc::vector<sv::scene_item>();
-    framed.push_back(resources.acquire_frame_scene_item(far));
-    framed.push_back(resources.acquire_frame_scene_item(near));
+    framed.push_back(resources.acquire_frame_scene_item(far_square));
+    framed.push_back(resources.acquire_frame_scene_item(near_square));
     resources.wait_for_pending_uploads();
 
     constexpr auto size = tg::vec2i(32, 32);

@@ -27,7 +27,7 @@ shaders::tracer::decal_record impl::decal_record_of(decal_placement const& d, u3
     // The inverse of the matrix with columns X, Y, N has the cross products of the other two columns as its rows.
     auto const x = d.x_axis;
     auto const y = d.y_axis;
-    auto const direction = cross(y, x).normalized();
+    auto const direction = cross(x, y).normalized();
     auto const n = direction * d.depth;
     auto const det = tg::dot(x, cross(y, n));
     CC_ASSERT(det != 0.0f, "a decal's axes must span a plane");

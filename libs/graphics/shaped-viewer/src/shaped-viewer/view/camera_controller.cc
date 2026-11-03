@@ -250,7 +250,8 @@ bool fps_camera_controller::handle(sr::input_event const& e)
                 return false;
 
             auto const delta = m.logical_delta();
-            pose.yaw += tg::angle_d::make_from_degree(f64(delta[0]) * config.look_degrees_per_logical_pixel);
+            // A positive yaw turns from +z toward +x, which is to the left in a right-handed world, so moving right lowers it.
+            pose.yaw -= tg::angle_d::make_from_degree(f64(delta[0]) * config.look_degrees_per_logical_pixel);
             // Screen y grows downward, so moving the mouse down looks down.
             pose.pitch -= tg::angle_d::make_from_degree(f64(delta[1]) * config.look_degrees_per_logical_pixel);
 
@@ -281,7 +282,7 @@ bool fps_camera_controller::update(f64 dt)
 
     auto const f = pose.forward();
     // Level with the horizon by construction, since it comes from world up rather than from the camera's own up.
-    auto const right = tg::dual(tg::cross(tg::vec3d(0, 1, 0), f)).normalized();
+    auto const right = tg::dual(tg::cross(f, tg::vec3d(0, 1, 0))).normalized();
 
     auto direction = tg::vec3d::zero;
     if (_key_forward)

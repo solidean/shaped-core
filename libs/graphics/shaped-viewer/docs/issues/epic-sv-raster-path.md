@@ -9,7 +9,7 @@ refs:
 
 [raster.md](../raster.md) is the design; what is left of the first slice:
 
-- **Quadric batches are not drawn**, and the layer warns once: [feat-sv-raster-quadric-batches](feat-sv-raster-quadric-batches.md).
+- **Quadric batches are not drawn**, and the layer warns once: [feat-sv-raster-quadric-batches](.closed/2026/11/feat-sv-raster-quadric-batches.md).
 - **No antialiasing**: every pixel shades at its center, so edges alias where the tracer's jitter antialiases them.
 - **Coverage is cut at one half**, with no transparency, and transmission refracts nothing.
   Decided: depth peeling for glass and alpha clipping for cutouts ([the roadmap](../plans/rendering-roadmap.md#decided-for-the-raster-path-and-the-hybrid)).

@@ -13,8 +13,8 @@
 /// Keep this and `quadric.load_primitive` (shaders/sgl/quadric_runtime.sgl) in lockstep: it is a byte layout, not a description of one.
 ///
 /// It is the CPU `sv::quadric_primitive` MINUS its box, because the two travel to the GPU in different buffers.
-/// The boxes are the procedural BLAS's own build input and are never read by a shader — an intersection shader cannot reach the
-/// acceleration structure's boxes anyway — so carrying them here would upload every one of them twice.
+/// The boxes have a buffer of their own, the procedural BLAS's build input and the box the raster path draws each primitive as.
+/// An intersection shader never needs one, so carrying them here would upload every one of them twice.
 struct sv::quadric_gpu
 {
     tg::pos3f origin;

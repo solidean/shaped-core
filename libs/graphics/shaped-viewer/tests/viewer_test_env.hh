@@ -498,10 +498,11 @@ inline cornell_box make_cornell_box()
     cb_push_quad(cb, tg::pos3f(-1, -1, -1), tg::pos3f(1, -1, -1), tg::pos3f(1, -1, 1), tg::pos3f(-1, -1, 1), white); // floor
     cb_push_quad(cb, tg::pos3f(-1, 1, -1), tg::pos3f(-1, 1, 1), tg::pos3f(1, 1, 1), tg::pos3f(1, 1, -1), white); // ceiling
     cb_push_quad(cb, tg::pos3f(-1, -1, 1), tg::pos3f(1, -1, 1), tg::pos3f(1, 1, 1), tg::pos3f(-1, 1, 1), white); // back
+    // Seen from -z looking along +z, +x is on the left, as sv's world is right-handed.
     cb_push_quad(cb, tg::pos3f(-1, -1, -1), tg::pos3f(-1, -1, 1), tg::pos3f(-1, 1, 1), tg::pos3f(-1, 1, -1),
-                 red); // left wall
-    cb_push_quad(cb, tg::pos3f(1, -1, -1), tg::pos3f(1, 1, -1), tg::pos3f(1, 1, 1), tg::pos3f(1, -1, 1),
                  green); // right wall
+    cb_push_quad(cb, tg::pos3f(1, -1, -1), tg::pos3f(1, 1, -1), tg::pos3f(1, 1, 1), tg::pos3f(1, -1, 1),
+                 red); // left wall
 
     // two white blocks standing on the floor
     cb_push_box(cb, tg::pos3f(-0.55f, -1.0f, -0.15f), tg::pos3f(-0.05f, -0.35f, 0.4f), white); // short box

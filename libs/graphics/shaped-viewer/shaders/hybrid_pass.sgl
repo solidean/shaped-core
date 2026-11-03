@@ -16,6 +16,10 @@ use tracer
 @vertex fun hybrid_vs(@vertex_index vertex: int, @first_instance row: int){tracer.traced, tracer.bindless, hybrid.pass} -> raster.varyings:
     return hybrid.vertex_of(vertex, row as uint)
 
+/// `quadric_vs` of raster_pass.sgl, reading `tracer.traced`.
+@vertex fun hybrid_quadric_vs(@vertex_index vertex: int, @instance_index index: int, @first_instance row: int){tracer.traced, tracer.bindless, hybrid.pass} -> raster.quadric_varyings:
+    return hybrid.quadric_vertex_of(vertex, row as uint, (index - row) as uint)
+
 /// The thin G-buffer a deferred frame's raster pass wrote, `raster.thin_targets` but the guide slots it wrote in place.
 binding thin_io:
     @unfilterable
