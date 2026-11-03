@@ -70,7 +70,10 @@ binding thin_io:
     // `pt.offset_ray` sizes its offset from the point's own coordinates, as an interpolated point is rounded, which is far less on a floor near y = 0.
     // So the point is lifted off the surface by that rounding first, or a row of it starts under the floor and its bounce rays hit the floor.
     let reach = max(abs(cam.position.x), max(abs(cam.position.y), abs(cam.position.z))) + length(ray) * t
-    let p = cam.position + ray * t + n * (reach * (1.0 / 1048576.0))
+    let lift = reach * (1.0 / 1048576.0)
+    let surface_p = cam.position + ray * t
+    // Reflections and light samples leave on the viewer's side; a refraction leaves through the surface, which `bounce_from` lifts toward itself.
+    let p = surface_p + n * lift
     let surface = raster.thin_surface(thin_io.base.load(px), thin_io.specular.load(px), thin_io.extra.load(px))
     let shading = openpbr.make_frame(shading_n)
     let v = normalize(cam.position - p)
@@ -80,7 +83,7 @@ binding thin_io:
 
     let mut rng = hybrid.pixel_rng(uint2(id.x as uint, id.y as uint), size.x as uint)
     let lit = hybrid.direct(b, shading, n, wo_local, p, true, mut rng)
-    let bounced = hybrid.bounce_from(b, shading, n, wo_local, p, mut rng)
+    let bounced = hybrid.bounce_from(b, shading, n, wo_local, surface_p, lift, mut rng)
     let followed = hybrid.is_followed(bounced)
     let s2 = hybrid.secondary_of(bounced, followed)
     let bounce_lit = hybrid.direct(s2.b, s2.f, bounced.n, s2.wo_local, bounced.at, followed, mut rng)
