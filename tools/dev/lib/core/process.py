@@ -72,7 +72,7 @@ def _find_vsdevcmd(toolset: str | None = None) -> str | None:
     if vswhere.is_file():
         result = subprocess.run(
             [str(vswhere), "-latest", "-property", "installationPath"],
-            capture_output=True, text=True,
+            capture_output=True, text=True, errors="replace",  # vswhere writes in the console's code page
         )
         if result.returncode == 0:
             candidate = Path(result.stdout.strip()) / "Common7" / "Tools" / "VsDevCmd.bat"
@@ -116,7 +116,7 @@ def msvc_env(toolset: str | None = None, arch: str = "x64") -> dict[str, str] | 
     vcvars_ver = f" -vcvars_ver={toolset}" if toolset and not ("/" in toolset or "\\" in toolset) else ""
     result = subprocess.run(
         f'cmd /c "call \"{vsdevcmd}\" -arch={arch}{vcvars_ver} >nul 2>&1 && set"',
-        capture_output=True, text=True, shell=True,
+        capture_output=True, text=True, errors="replace", shell=True,  # `set` writes in the console's code page
     )
     if result.returncode != 0:
         return None

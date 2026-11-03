@@ -598,7 +598,7 @@ NX_ALLOW_LOGS(cc::rec::level::warning, "sg.dx12", patterns);        // ... or ea
 - **`CHECK_ASSERTS` / `REQUIRE_ASSERTS` report success — and skip executing the expression — when assertions are compiled out** (`CC_ASSERT_ENABLED == 0`, the release presets).
   Run an assert-enabled preset (debug / relwithdebinfo) to actually exercise them.
 - **The `_AS` exception checks match subclasses too**: a `std::runtime_error` satisfies `..._THROWS_AS(expr, std::exception)`.
-- **`SKIP` does not yet interact cleanly with `SECTION`** (known limitation).
+- **`SKIP` inside a `SECTION` skips that section alone**: the sections after it still run, and the test is reported skipped only when nothing in it ran but skips.
 - **Data-driven / generators / matrices:** use `INVOCABLE_TEST` + `nx::invoke_tests` above, not Catch2 generators.
 - **Not supported yet:** Catch2 `INFO`/`CAPTURE`, tags, and type-parametrized (templated) tests.
   Use `.context()` / `.note()` / `.dump()` for messages, and `BENCHMARK` + `nx::bench` for benchmarks.
