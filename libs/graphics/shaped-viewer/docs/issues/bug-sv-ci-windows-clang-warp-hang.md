@@ -34,3 +34,19 @@ The local runs hung in "sv - a decal coming, changing or going restarts the view
   Raising that cap, or naming the waiter thread and listing named threads first, would show whether it is parked, on which targets, or gone.
 - **Hypotheses, unverified:** a completion that needs a pool thread to run (a readback actor's copy) while workers block in synchronous waits inside async tests.
   Or a lost wake in the waiter's arm/park, which a fence WARP signals with different timing would expose.
+
+## The hang is inside WARP (2026-11-03)
+
+A trace of every completion, arm, park and wake showed both hypotheses above wrong: the waiter is parked on the right submission's fence, and the GPU never reaches it.
+- **Measured:** the stuck submission waits on no copy or download fence, so no cross-queue cycle; WARP simply never finishes it.
+- **Measured:** "sv - a view stepping sideways in front of a wall reports the step as every pixel's motion" alone, `--thorough`, hangs every time on the first frame that runs the full hybrid deferred pass, within 30 s.
+  With that frame's `light_thin` dispatch removed, the hang moves to the first full hybrid forward frame.
+  With `light_thin` cut to a constant store, it moves to the first wavefront frame.
+  A single constant ray in `light_thin`, opaque and skipping procedurals, still hangs, and so does `light_thin` without any trace; a smaller wall changes nothing.
+- **Measured:** at the hang one thread runs at 100 % on one instruction, `d3d10warp.dll+0x6796b` (WARP 10.0.26100.9711).
+  Its bytes are a singly linked list walk, `next` at offset 0x10, that stops only at null or at the node it looks for; it never stops, so the list holds a cycle.
+  A cycle in a driver's list is corruption: a node inserted twice or used after it was freed.
+  An application causes that by calling into the driver concurrently where D3D12 asks for external synchronization.
+- **Next:** name the function with Microsoft's public PDB for that build, and walk the thread's stack to the call of ours that enters it.
+  The background pipeline builds that run while a frame is submitted are the first suspect.
+- **For now:** the WARP leg of shaped-viewer-test is skipped (tests/dx12-entry.cc); undo that skip to reproduce.
