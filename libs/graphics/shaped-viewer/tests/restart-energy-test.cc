@@ -25,6 +25,10 @@ constexpr f32 energy_tolerance = 0.10f;
 /// How far the exposure may stray from where it settled, in stops.
 constexpr f32 exposure_tolerance = 0.3f;
 
+/// How many frames a view may take to converge, compiles included, before the test gives up on it.
+/// A count rather than a time, since how long a frame takes is the GPU's and the load's.
+constexpr i32 max_frames = 1024;
+
 struct reading
 {
     /// the accumulated image's mean luminance, linear
@@ -41,15 +45,10 @@ struct reading
         sum += 0.2126 * p[0] + 0.7152 * p[1] + 0.0722 * p[2];
     return pixels.empty() ? 0.0f : f32(sum / f64(pixels.size()));
 }
-} // namespace
 
-ASYNC_INVOCABLE_TEST("sv - restarting the accumulation keeps the image's mean and its automatic exposure",
-                     (sg::context_handle const& ctx_h))
+/// Converges one view drawn in `mode`, restarts its accumulation, and checks the frames after the restart.
+cc::shared_async<cc::unit> check_restart(sg::context& ctx, sv::render_mode mode)
 {
-    auto& ctx = *ctx_h;
-    if (!sv_test::can_run(ctx) || !ctx.supports(sg::feature::ray_query))
-        SKIP("no inline ray tracing or no SGL compiler, so the hybrid does not build");
-
     auto resources = sv::gpu_resource_manager::create(ctx);
     // The lamp a mesh of its own, so it is the light the trace samples rather than the whole box's area.
     auto const lit = sv_test::as_lit_meshes(sv_test::make_cornell_box(), 15.0f);
@@ -66,126 +65,151 @@ ASYNC_INVOCABLE_TEST("sv - restarting the accumulation keeps the image's mean an
                                             .usage = sg::texture_usage::render_target | sg::texture_usage::copy_src});
     auto index = u64(0);
 
-    for (auto const mode : {sv::render_mode::hybrid, sv::render_mode::wavefront, sv::render_mode::megakernel})
+    auto def = sv::viewer_definition{};
     {
-        auto def = sv::viewer_definition{};
-        {
-            auto v = sv::view_data{};
-            v.id = sv::view_id::from_string("restarted");
-            // Narrow enough that the box fills the view.
-            v.camera = sv_test::cornell_camera();
-            v.camera.projection.vertical_fov = tg::angle_d::make_from_degree(30.0);
-            auto& scene = sv::ensure_scene_3d(v);
-            scene.items.push_back(enclosure);
-            scene.items.push_back(lamp);
-            scene.settings.mode = mode;
-            scene.settings.motion_hold_ms = 0.0f;
-            scene.settings.reconstruct.denoiser = sr::denoise_method::none;
-            scene.settings.display.automatic = true;
-            def.views.push_back(cc::move(v));
+        auto v = sv::view_data{};
+        v.id = sv::view_id::from_string("restarted");
+        // Narrow enough that the box fills the view.
+        v.camera = sv_test::cornell_camera();
+        v.camera.projection.vertical_fov = tg::angle_d::make_from_degree(30.0);
+        auto& scene = sv::ensure_scene_3d(v);
+        scene.items.push_back(enclosure);
+        scene.items.push_back(lamp);
+        scene.settings.mode = mode;
+        scene.settings.motion_hold_ms = 0.0f;
+        // One sample a frame is the noisiest restart, and a megakernel frame of more costs what the test does not need.
+        scene.settings.samples_per_pixel = 1;
+        scene.settings.reconstruct.denoiser = sr::denoise_method::none;
+        scene.settings.display.automatic = true;
+        def.views.push_back(cc::move(v));
 
-            auto const root_node = def.nodes.add_container(sv::invalid_node);
-            auto leaf = sv::layout_leaf{};
-            leaf.views.push_back(sv::view_index(0));
-            def.nodes.add_leaf(root_node, cc::move(leaf));
-            auto root = sv::view_data{};
-            root.id = sv::view_id::from_string("root");
-            root.layers.push_back(
-                {.kind = sv::layer_kind::layout, .blend = sv::layer_blend::replace, .root_node = root_node});
-            def.root_view = sv::view_index(def.views.size());
-            def.views.push_back(cc::move(root));
-        }
-        auto store = sv::view_store{};
-        auto const history = sv::view_history{};
-        auto const id = def.views[0].id;
-        auto const camera = def.views[0].camera;
-
-        // One frame, and what the view holds after it.
-        auto const frame = [&]() -> cc::shared_async<reading>
-        {
-            (void)ctx.routines.tick();
-            auto cmd = ctx.create_command_list();
-            resources.advance_to(ctx.current_epoch());
-            store.begin_frame(u64(ctx.current_epoch()));
-            auto const plan = sv::build_render_plan(def, output_size, index++, history);
-            (void)sv::viewer_renderer::execute(*cmd, def, plan, resources, store,
-                                               output.as_render_target_view().cleared(tg::vec4f(0, 0, 0, 1)));
-            auto const* const state = store.peek_ptr(id);
-            auto const* const slot
-                = state != nullptr ? state->temporal.get_ptr(sv::temporal_id::accumulation(0)) : nullptr;
-            auto accumulated = sg::data_future<tg::vec4f>();
-            if (slot != nullptr && slot->texture.raw() != nullptr)
-                accumulated = sg::data_future<tg::vec4f>(cmd->download.bytes_from_texture(slot->texture.raw()));
-            ctx.submit_command_list(cc::move(cmd));
-            ctx.advance_epoch();
-            co_await ctx.idle_completion();
-            sv_test::drive_ambient_work();
-
-            auto out = reading{.samples = store.min_accumulated_samples(id)};
-            if (accumulated.is_valid())
-            {
-                auto const& pixels = co_await accumulated.data();
-                out.mean = mean_luminance(cc::span<tg::vec4f const>(pixels.data(), pixels.size()));
-            }
-            if (state != nullptr && !state->auto_exposure.empty() && state->auto_exposure[0].primed)
-                out.exposure = state->auto_exposure[0].exposure;
-            co_return out;
-        };
-
-        // Converged: every compile landed, the mean holds enough samples, and the exposure has had time to settle.
-        // Counted from the first frame that drew anything, since a compile may take most of the frames otherwise, and
-        // the exposure moves a fifth of the way per reading.
-        auto converged = reading{};
-        auto drawn = 0;
-        auto const start = cc::current_time_steady_secs();
-        while (drawn < 128 || converged.samples < 64)
-        {
-            converged = co_await frame();
-            if (converged.samples > 0)
-                ++drawn;
-            REQUIRE(cc::current_time_steady_secs() - start < 60.0);
-        }
-        REQUIRE(converged.mean > 0.0f);
-
-        // One frame a hair to the side restarts the mean, and the camera's return restarts it once more, for good.
-        def.views[0].camera.position = camera.position + tg::vec3d(1e-3, 0, 0);
-        (void)co_await frame();
-        def.views[0].camera = camera;
-
-        auto worst_energy = 0.0f;
-        auto worst_energy_at = -1;
-        auto worst_exposure = 0.0f;
-        auto worst_exposure_at = -1;
-        for (auto f = 0; f < 48; ++f)
-        {
-            auto const r = co_await frame();
-            // A wavefront pixel holds nothing until its first path finishes, which is no sample of the mean yet.
-            if (r.samples > 0)
-            {
-                auto const energy = tg::abs(r.mean - converged.mean) / converged.mean;
-                if (energy > worst_energy)
-                {
-                    worst_energy = energy;
-                    worst_energy_at = f;
-                }
-            }
-            auto const exposure = tg::abs(r.exposure - converged.exposure);
-            if (exposure > worst_exposure)
-            {
-                worst_exposure = exposure;
-                worst_exposure_at = f;
-            }
-        }
-        CC_LOG_INFO("mode {}: converged mean {:.4f} at exposure {:.2f}; after a restart, worst mean off by {:.1f}% at "
-                    "frame "
-                    "{}, worst exposure off by {:.2f} stops at frame {}",
-                    int(mode), converged.mean, converged.exposure, 100.0f * worst_energy, worst_energy_at,
-                    worst_exposure, worst_exposure_at);
-        CHECK(worst_energy < energy_tolerance).dump("mode", int(mode)).dump("off by", worst_energy).dump("at", worst_energy_at);
-        CHECK(worst_exposure < exposure_tolerance)
-            .dump("mode", int(mode))
-            .dump("off by", worst_exposure)
-            .dump("at", worst_exposure_at);
+        auto const root_node = def.nodes.add_container(sv::invalid_node);
+        auto leaf = sv::layout_leaf{};
+        leaf.views.push_back(sv::view_index(0));
+        def.nodes.add_leaf(root_node, cc::move(leaf));
+        auto root = sv::view_data{};
+        root.id = sv::view_id::from_string("root");
+        root.layers.push_back({.kind = sv::layer_kind::layout, .blend = sv::layer_blend::replace, .root_node = root_node});
+        def.root_view = sv::view_index(def.views.size());
+        def.views.push_back(cc::move(root));
     }
+    auto store = sv::view_store{};
+    auto const history = sv::view_history{};
+    auto const id = def.views[0].id;
+    auto const camera = def.views[0].camera;
+
+    // One frame, and what the view holds after it.
+    auto const frame = [&]() -> cc::shared_async<reading>
+    {
+        (void)ctx.routines.tick();
+        auto cmd = ctx.create_command_list();
+        resources.advance_to(ctx.current_epoch());
+        store.begin_frame(u64(ctx.current_epoch()));
+        auto const plan = sv::build_render_plan(def, output_size, index++, history);
+        (void)sv::viewer_renderer::execute(*cmd, def, plan, resources, store,
+                                           output.as_render_target_view().cleared(tg::vec4f(0, 0, 0, 1)));
+        auto const* const state = store.peek_ptr(id);
+        auto const* const slot = state != nullptr ? state->temporal.get_ptr(sv::temporal_id::accumulation(0)) : nullptr;
+        auto accumulated = sg::data_future<tg::vec4f>();
+        if (slot != nullptr && slot->texture.raw() != nullptr)
+            accumulated = sg::data_future<tg::vec4f>(cmd->download.bytes_from_texture(slot->texture.raw()));
+        ctx.submit_command_list(cc::move(cmd));
+        ctx.advance_epoch();
+        co_await ctx.idle_completion();
+        sv_test::drive_ambient_work();
+
+        auto out = reading{.samples = store.min_accumulated_samples(id)};
+        if (accumulated.is_valid())
+        {
+            auto const& pixels = co_await accumulated.data();
+            out.mean = mean_luminance(cc::span<tg::vec4f const>(pixels.data(), pixels.size()));
+        }
+        if (state != nullptr && !state->auto_exposure.empty() && state->auto_exposure[0].primed)
+            out.exposure = state->auto_exposure[0].exposure;
+        co_return out;
+    };
+
+    // Converged: every compile landed, the mean holds enough samples, and the exposure has had time to settle.
+    // Counted from the first frame that drew anything, since a compile may take most of the frames otherwise, and
+    // the exposure moves a fifth of the way per reading.
+    auto converged = reading{};
+    auto drawn = 0;
+    auto frames = 0;
+    while (drawn < 128 || converged.samples < 64)
+    {
+        converged = co_await frame();
+        if (converged.samples > 0)
+            ++drawn;
+        REQUIRE(++frames < max_frames);
+    }
+    REQUIRE(converged.mean > 0.0f);
+
+    // One frame a hair to the side restarts the mean, and the camera's return restarts it once more, for good.
+    def.views[0].camera.position = camera.position + tg::vec3d(1e-3, 0, 0);
+    (void)co_await frame();
+    def.views[0].camera = camera;
+
+    auto worst_energy = 0.0f;
+    auto worst_energy_at = -1;
+    auto worst_exposure = 0.0f;
+    auto worst_exposure_at = -1;
+    for (auto f = 0; f < 48; ++f)
+    {
+        auto const r = co_await frame();
+        // A wavefront pixel holds nothing until its first path finishes, which is no sample of the mean yet.
+        if (r.samples > 0)
+        {
+            auto const energy = tg::abs(r.mean - converged.mean) / converged.mean;
+            if (energy > worst_energy)
+            {
+                worst_energy = energy;
+                worst_energy_at = f;
+            }
+        }
+        auto const exposure = tg::abs(r.exposure - converged.exposure);
+        if (exposure > worst_exposure)
+        {
+            worst_exposure = exposure;
+            worst_exposure_at = f;
+        }
+    }
+    CC_LOG_INFO("mode {}: converged mean {:.4f} at exposure {:.2f}; after a restart, worst mean off by {:.1f}% at "
+                "frame "
+                "{}, worst exposure off by {:.2f} stops at frame {}",
+                int(mode), converged.mean, converged.exposure, 100.0f * worst_energy, worst_energy_at, worst_exposure,
+                worst_exposure_at);
+    CHECK(worst_energy < energy_tolerance).dump("mode", int(mode)).dump("off by", worst_energy).dump("at", worst_energy_at);
+    CHECK(worst_exposure < exposure_tolerance)
+        .dump("mode", int(mode))
+        .dump("off by", worst_exposure)
+        .dump("at", worst_exposure_at);
     co_await cc::async_settled(sv::background_work(ctx));
+}
+} // namespace
+
+ASYNC_INVOCABLE_TEST("sv - restarting the accumulation keeps the image's mean and its automatic exposure, in the "
+                     "hybrid",
+                     (sg::context_handle const& ctx_h))
+{
+    if (!sv_test::can_run(*ctx_h) || !ctx_h->supports(sg::feature::ray_query))
+        SKIP("no inline ray tracing or no SGL compiler, so the view does not build");
+    co_await check_restart(*ctx_h, sv::render_mode::hybrid);
+}
+
+ASYNC_INVOCABLE_TEST("sv - restarting the accumulation keeps the image's mean and its automatic exposure, in the "
+                     "wavefront tracer",
+                     (sg::context_handle const& ctx_h))
+{
+    if (!sv_test::can_run(*ctx_h) || !ctx_h->supports(sg::feature::ray_query))
+        SKIP("no inline ray tracing or no SGL compiler, so the view does not build");
+    co_await check_restart(*ctx_h, sv::render_mode::wavefront);
+}
+
+ASYNC_INVOCABLE_TEST("sv - restarting the accumulation keeps the image's mean and its automatic exposure, in the "
+                     "megakernel",
+                     (sg::context_handle const& ctx_h))
+{
+    if (!sv_test::can_run(*ctx_h) || !ctx_h->supports(sg::feature::ray_query))
+        SKIP("no inline ray tracing or no SGL compiler, so the view does not build");
+    co_await check_restart(*ctx_h, sv::render_mode::megakernel);
 }

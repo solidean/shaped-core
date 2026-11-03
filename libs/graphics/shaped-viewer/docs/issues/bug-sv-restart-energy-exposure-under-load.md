@@ -1,7 +1,7 @@
 ---
 created: 2026-11-02
 refs:
-  - test: "sv - restarting the accumulation keeps the image's mean and its automatic exposure"
+  - test: "sv - restarting the accumulation keeps the image's mean and its automatic exposure*"
   - file: libs/graphics/shaped-viewer/tests/restart-energy-test.cc
 ---
 
