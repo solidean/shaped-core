@@ -169,6 +169,11 @@ It is the base a rational type will build on.
   The out-of-line operations have a lean path for a target that holds the result, and a separate slow one for allocation and aliasing, so the common case needs few registers.
   A lean path returns false rather than calling the slow one, which the inline caller does: the operands then need not outlive its first decisions.
   Its decisions all come before the kernel, and a difference splits off at the signs, before anything else is live; every register save avoided is a push and a pop less per call.
+- **No unsigned `bignat` beside it.** The sign is one header bit, so an unsigned sum would save a sign compare, about 5 of 115 to 220 instructions.
+  An unsigned difference still compares the magnitudes, to refuse `a < b`, which is the work the signed one does to pick its sign.
+  Natural-number code already exists one level down: `scalar/impl/limbs.hh` is unsigned, and gcd or a rational's reduction work on magnitudes there.
+  A second public type would repeat the operators, parsing, printing, division and conversions, with their tests, for close to no speed.
+  It pays only to have "never negative" checked by the type, say for a count or a denominator in an API; then it is a thin wrapper over the same header, its conversions handing over the node.
 - **The limb kernels are shared with `bigfloat`.** `scalar/impl/limbs.hh` holds natural numbers as limb arrays; `bigfloat` keeps its own sum, since its operands are aligned at an exponent first.
 - **On x64 with clang or gcc, the carry chains are inline assembly**, with portable C++ beside them for every other target.
   As C++, clang cannot keep a carry in the flag across a loop's compare, nor in a third accumulator word: it saves and restores it through `setb` and `movzx`, about twice the instructions.
