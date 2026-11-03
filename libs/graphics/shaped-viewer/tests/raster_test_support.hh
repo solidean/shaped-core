@@ -40,7 +40,8 @@ inline cc::shared_async<cc::vector<tg::vec4f>> trace_direct(sg::context& ctx,
                                                             sv::pt_light_table const& lights,
                                                             tg::vec2i size,
                                                             int frames,
-                                                            int bounces = 1)
+                                                            int bounces = 1,
+                                                            sv::background const& sky = {})
 {
     auto const* const mesh_rec = resources.meshes.get_ptr(item.mesh);
     REQUIRE(mesh_rec != nullptr);
@@ -79,7 +80,7 @@ inline cc::shared_async<cc::vector<tg::vec4f>> trace_direct(sg::context& ctx,
         sv::place_instance_record(records.back(), instances[0], permutation->opacity);
 
         auto const frame = ctx.transient.create_buffer_from_pod(*cmd, fc, sg::buffer_usage::readonly_buffer);
-        auto const background = ctx.transient.create_buffer_from_pod(*cmd, sv::background_gpu::from(sv::background{}),
+        auto const background = ctx.transient.create_buffer_from_pod(*cmd, sv::background_gpu::from(sky),
                                                                      sg::buffer_usage::readonly_buffer);
         auto const instance_table
             = ctx.transient.create_buffer_from_data(*cmd, records, sg::buffer_usage::readonly_buffer);

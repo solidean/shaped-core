@@ -324,7 +324,7 @@ use tracer
             prev_nee_reachable = reachable
 
             // The offset follows the direction rather than the normal: a refracted continuation leaves on the far side.
-            origin = pt.offset_ray(origin + dir * hit_t, if dot(next_dir, n) < 0.0 => -n else n)
+            origin = pt.offset_hit(origin + dir * hit_t, if dot(next_dir, n) < 0.0 => -n else n, p.rounding)
             dir = next_dir
             medium_sigma_t = next_sigma_t
             medium_albedo = next_albedo
@@ -418,6 +418,7 @@ fun component_of(v: float3, i: uint) -> float:
     p.lobe = openpbr.bsdf_lobe_diffuse
     p.bsdf_pdf = 0.0
     p.hit_t = -1.0
+    p.rounding = 0.0
     p.nee_reachable = 0u
     p.light_pdf = -1.0
 

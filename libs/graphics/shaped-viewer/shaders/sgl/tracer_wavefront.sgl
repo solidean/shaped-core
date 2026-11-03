@@ -567,13 +567,14 @@ fun shade_stored_triangle(slot: uint, ctx: material.shading_context, surface: op
     // The density next-event estimation draws this point with, which the emission of an emitter the ray reached is weighed by.
     let r = traced.path_rays[slot as int]
     let light_pdf = emitter_pdf(inst, hit.primitive, instance_to_world(inst, v1 - v0), instance_to_world(inst, v2 - v0), normalize(r.direction), hit.t * length(r.direction))
-    shade_stored(slot, inst, normalize(cross(v1 - v0, v2 - v0)), surface, supplied_tangent_frame, light_pdf)
+    let reach = pt.corner_reach(r.origin, instance_point_to_world(inst, v0), instance_point_to_world(inst, v1), instance_point_to_world(inst, v2))
+    shade_stored(slot, inst, normalize(cross(v1 - v0, v2 - v0)), reach, surface, supplied_tangent_frame, light_pdf)
 
 /// Shades the quadric hit of `slot` from the normal its intersection reported — the wavefront's `shade_quadric`.
 fun shade_stored_quadric(slot: uint, surface: openpbr.surface, supplied_tangent_frame: bool){traced, bindless, slug.tables, wavefront_step}:
     let hit = stored_hit(slot)
     let inst = scene.instance(..traced.instances[hit.instance as int])
-    shade_stored(slot, inst, hit.normal, surface, supplied_tangent_frame, -1.0)
+    shade_stored(slot, inst, hit.normal, 0.0, surface, supplied_tangent_frame, -1.0)
 
 /// Writes one next-event sample of `slot`: a shadowless one counts now, one with a shadow ray waits for connect.
 /// `j` is which of the slot's two shadow rays it is.
@@ -592,7 +593,7 @@ fun defer_light(slot: uint, j: uint, sample: light_sample, throughput: float3, b
 
 /// The tail both geometry kinds share: the hit faced toward its ray, shaded, and the path moved on.
 /// `light_pdf` is what `emitter_pdf` made of the hit, negative where the instance is no light of the trace.
-fun shade_stored(slot: uint, inst: scene.instance, n_obj: float3, surface: openpbr.surface, supplied_tangent_frame: bool, light_pdf: float){traced, bindless, slug.tables, wavefront_step}:
+fun shade_stored(slot: uint, inst: scene.instance, n_obj: float3, reach: float, surface: openpbr.surface, supplied_tangent_frame: bool, light_pdf: float){traced, bindless, slug.tables, wavefront_step}:
     let s = slot as int
     let f = traced.frame[0]
     let hit = traced.hits[s]
@@ -618,7 +619,7 @@ fun shade_stored(slot: uint, inst: scene.instance, n_obj: float3, surface: openp
     let mut p = surface_payload_for(st.rng, md.sigma_t, md.albedo, md.g, md.channel, last_bounce)
     let mut light_s = no_light_sample()
     let mut env_s = no_light_sample()
-    shade_sampled(mut p, surface, n, v, exiting, ray_origin, ray_dir, hit.t, authored, supplied_tangent_frame, mut light_s, mut env_s)
+    shade_sampled(mut p, surface, n, v, exiting, ray_origin, ray_dir, hit.t, reach, authored, supplied_tangent_frame, mut light_s, mut env_s)
 
     let b = st.bounce
     let throughput = st.throughput
@@ -693,7 +694,7 @@ fun shade_stored(slot: uint, inst: scene.instance, n_obj: float3, surface: openp
 
         // The offset follows the direction rather than the normal: a refracted continuation leaves on the far side.
         let leaving = if dot(p.direction, p.normal) < 0.0 => -p.normal else p.normal
-        traced.path_rays[s] = path_ray(pt.offset_ray(ray_origin + ray_dir * hit.t, leaving), p.direction)
+        traced.path_rays[s] = path_ray(pt.offset_hit(ray_origin + ray_dir * hit.t, leaving, p.rounding), p.direction)
         traced.path_media[s] = path_medium(p.medium_sigma_t, p.medium_albedo, p.medium_g, p.channel)
 
         let spent = spent_bounces(st)

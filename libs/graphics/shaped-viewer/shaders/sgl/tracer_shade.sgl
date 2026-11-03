@@ -496,10 +496,10 @@ fun paint_decal_shape(surface: mut openpbr.surface, d: decal_record, s: decal_sh
 /// `exiting` says the ray arrived from inside the surface, which a refraction needs, since the index ratio inverts between going in and coming back out.
 /// `ray_origin`, `ray_dir` and `hit_t` are the ray as the hit received it.
 /// `authored` is the material's tangent frame in world space, and means something only where `has_authored` holds.
-fun shade(payload: mut surface_payload, surface_in: openpbr.surface, n: float3, v: float3, exiting: bool, ray_origin: float3, ray_dir: float3, hit_t: float, authored: openpbr.frame, has_authored: bool){traced, bindless, slug.tables}:
+fun shade(payload: mut surface_payload, surface_in: openpbr.surface, n: float3, v: float3, exiting: bool, ray_origin: float3, ray_dir: float3, hit_t: float, reach: float, authored: openpbr.frame, has_authored: bool){traced, bindless, slug.tables}:
     let mut light = no_light_sample()
     let mut env = no_light_sample()
-    shade_sampled(mut payload, surface_in, n, v, exiting, ray_origin, ray_dir, hit_t, authored, has_authored, mut light, mut env)
+    shade_sampled(mut payload, surface_in, n, v, exiting, ray_origin, ray_dir, hit_t, reach, authored, has_authored, mut light, mut env)
     // A guide ray reads the surface alone, so it spends no shadow ray.
     if payload.guide != 0u => return
     let light_arrives = visible(light, cutout_seed(payload.rng, cutout_ray_light))
@@ -508,7 +508,7 @@ fun shade(payload: mut surface_payload, surface_in: openpbr.surface, n: float3, 
     payload.direct_specular = (if light_arrives => light.specular else float3(0.0)) + (if env_arrives => env.specular else float3(0.0))
 
 /// `shade` without its two visibility tests: the light and environment samples come back untested, and `direct_*` are left zero.
-fun shade_sampled(payload: mut surface_payload, surface_in: openpbr.surface, n: float3, v: float3, exiting: bool, ray_origin: float3, ray_dir: float3, hit_t: float, authored: openpbr.frame, has_authored: bool, light: mut light_sample, env: mut light_sample){traced, bindless, slug.tables}:
+fun shade_sampled(payload: mut surface_payload, surface_in: openpbr.surface, n: float3, v: float3, exiting: bool, ray_origin: float3, ray_dir: float3, hit_t: float, reach: float, authored: openpbr.frame, has_authored: bool, light: mut light_sample, env: mut light_sample){traced, bindless, slug.tables}:
     light = no_light_sample()
     env = no_light_sample()
     payload.direct_diffuse = float3(0.0)
@@ -517,6 +517,7 @@ fun shade_sampled(payload: mut surface_payload, surface_in: openpbr.surface, n: 
     payload.light_pdf = -1.0
     payload.normal = n
     payload.hit_t = hit_t
+    payload.rounding = pt.hit_rounding(ray_origin, ray_dir, hit_t, reach)
 
     // The random state round-trips through every path out of here, so a stream is never left half-advanced.
     let mut rng = payload.rng
@@ -544,7 +545,8 @@ fun shade_sampled(payload: mut surface_payload, surface_in: openpbr.surface, n: 
     let b = openpbr.bsdf_prepare(surface, exiting, channel)
 
     let wo_local = openpbr.to_local(f, v)
-    let p = ray_origin + ray_dir * hit_t
+    // Lifted toward the viewer by its rounding, since the light samples from it leave on that side.
+    let p = ray_origin + ray_dir * hit_t + n * payload.rounding
 
     payload.emission = b.emission
 
@@ -677,7 +679,8 @@ fun shade_triangle(h: triangle_hit, payload: mut surface_payload, ctx: material.
         authored = openpbr.frame(normalize(float3(t.x, t.y, t.z)), normalize(float3(bt.x, bt.y, bt.z)), normalize(float3(nt.x, nt.y, nt.z)))
 
     let ray_origin = float3(h.ray.origin.x, h.ray.origin.y, h.ray.origin.z)
-    shade(mut payload, surface, n, v, exiting, ray_origin, ray_dir, h.t, authored, supplied_tangent_frame)
+    let reach = pt.corner_reach(ray_origin, instance_point_to_world(inst, v0), instance_point_to_world(inst, v1), instance_point_to_world(inst, v2))
+    shade(mut payload, surface, n, v, exiting, ray_origin, ray_dir, h.t, reach, authored, supplied_tangent_frame)
     payload.light_pdf = emitter_pdf(inst, ctx.primitive, instance_to_world(inst, v1 - v0), instance_to_world(inst, v2 - v0), -v, h.t * length(ray_dir))
 
 /// The shading context of a triangle the traversal could not decide alone, as `triangle_context` makes one for a hit.
@@ -842,4 +845,4 @@ fun shade_quadric(h: procedural_hit[quadric_attributes], payload: mut surface_pa
         authored = openpbr.frame(normalize(float3(t.x, t.y, t.z)), normalize(float3(bt.x, bt.y, bt.z)), normalize(float3(nt.x, nt.y, nt.z)))
 
     let ray_origin = float3(h.ray.origin.x, h.ray.origin.y, h.ray.origin.z)
-    shade(mut payload, surface, n, v, exiting, ray_origin, ray_dir, h.t, authored, supplied_tangent_frame)
+    shade(mut payload, surface, n, v, exiting, ray_origin, ray_dir, h.t, 0.0, authored, supplied_tangent_frame)

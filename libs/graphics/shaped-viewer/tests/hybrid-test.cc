@@ -10,6 +10,7 @@
 #include <clean-core/string/format.hh>
 #include <shaped-rendering/reconstruct.hh>
 #include <shaped-viewer/rendering/hybrid_routine.hh>
+#include <shaped-viewer/scene/studio.hh>
 #include <typed-geometry/scalar/scalar.hh> // tg::abs
 
 // The hybrid: rasterized primary hits, lit by the tracer's next-event estimate with inline shadow rays.
@@ -557,6 +558,106 @@ ASYNC_INVOCABLE_TEST("sv::hybrid_routine - a mirror floor near the origin, seen 
                 floor, worst);
     REQUIRE(floor > size[0] * size[1] / 4);
     CHECK(off == 0).dump("floor pixels", floor).dump("worst relative miss", worst);
+
+    // The megakernel finds its hit along the ray as well, and continues from it the same way.
+    // A sample leaving from under the floor meets its back, which darkens a quarter of the floor by 5 to 20%.
+    // Its samples differ from the hybrid's, which leaves a few pixels 5% off either way, so only darker ones count.
+    // It antialiases the floor's outline where the hybrid does not, so the pixels next to the sky are left out.
+    auto const traced = co_await sv_test::trace_direct(ctx, resources, item, cam, lights, size, 4, 2, sky);
+    auto const on_floor = [&](int x, int y)
+    {
+        if (x < 0 || y < 0 || x >= size[0] || y >= size[1])
+            return false;
+        auto const n = forward.normal[y * size[0] + x];
+        return f32(n.r) != 0.0f || f32(n.g) != 0.0f || f32(n.b) != 0.0f;
+    };
+    auto inside = 0;
+    auto traced_off = 0;
+    for (auto y = 0; y < size[1]; ++y)
+        for (auto x = 0; x < size[0]; ++x)
+        {
+            if (!on_floor(x, y) || !on_floor(x - 1, y) || !on_floor(x + 1, y) || !on_floor(x, y - 1)
+                || !on_floor(x, y + 1))
+                continue;
+            ++inside;
+            auto const lum = [](tg::vec4f c) { return 0.2126f * c[0] + 0.7152f * c[1] + 0.0722f * c[2]; };
+            auto const i = y * size[0] + x;
+            if (lum(traced[i]) < 0.95f * lum(forward.color[i]))
+                ++traced_off;
+        }
+    CC_LOG_INFO("a mirror floor near the origin: {} of {} inner pixels traced more than 5% darker", traced_off, inside);
+    REQUIRE(inside > floor / 2);
+    CHECK(traced_off < inside / 50).dump("inner floor pixels", inside).dump("darker", traced_off);
+    co_await cc::async_settled(sv::background_work(ctx));
+}
+
+// The studio floor, two triangles a thousand units across, seen from a camera a unit above it, is its albedo times a uniform sky everywhere.
+// A traversal's `t` is rounded to the triangle's corners' distance from the ray's origin, far more than the short ray's own length.
+// Lifted only by the ray's rounding, a share of each bounce started under the floor, and the floor shadowed itself in streaks.
+ASYNC_INVOCABLE_TEST("sv::hybrid_routine - a short ray onto the thousand-unit studio floor leaves it from above, "
+                     "traced, "
+                     "forward and deferred",
+                     (sg::context_handle const& ctx_h))
+{
+#if defined(CC_ARCH_ARM64) && defined(_WIN32)
+    SKIP("known broken on Windows on ARM — the inline readback path fastfails; "
+         "issue: bug-sv-woa-inline-readback-fastfail");
+#endif
+    auto& ctx = *ctx_h;
+    if (!sv_test::can_run(ctx) || !ctx.supports(sg::feature::ray_query))
+        SKIP("no inline ray tracing or no SGL compiler, so the hybrid does not build");
+
+    sv_test::shared_material_library();
+    auto resources = sv::gpu_resource_manager::create(ctx);
+    auto const item = resources.acquire_scene_item(sv::studio_floor());
+    resources.wait_for_pending_uploads();
+
+    auto cam = sv::camera::looking_at(tg::pos3d(0, 1, 0), tg::pos3d(0, 0, 4));
+    cam.projection.vertical_fov = tg::angle_d::make_from_degree(60.0);
+    auto const lights = sv_test::light_table_of(
+        {.center = tg::vec3f(0, 50, 0), .half_x = 0.1f, .half_z = 0.1f, .emission = tg::vec3f(0, 0, 0)});
+    auto const sky = 0.5f;
+    auto const background = sv::background::uniform(tg::vec3f(sky, sky, sky));
+    auto const expected = sv::studio_floor_albedo * sky;
+
+    constexpr auto size = tg::vec2i(96, 96);
+    // The bottom third is floor wherever the camera looks, well short of the horizon.
+    auto const first_row = size[1] * 2 / 3;
+    auto const pixels = size[0] * (size[1] - first_row);
+    auto const lum = [](tg::vec4f c) { return 0.2126f * c[0] + 0.7152f * c[1] + 0.0722f * c[2]; };
+
+    // The megakernel's four frames leave a pixel within a few percent, so every pixel is held to 10% as well as the mean.
+    auto const traced = co_await sv_test::trace_direct(ctx, resources, item, cam, lights, size, 4, 2, background);
+    auto darker = 0;
+    auto traced_sum = 0.0f;
+    for (auto y = first_row; y < size[1]; ++y)
+        for (auto x = 0; x < size[0]; ++x)
+        {
+            auto const l = lum(traced[y * size[0] + x]);
+            traced_sum += l;
+            if (l < 0.9f * expected)
+                ++darker;
+        }
+    auto const traced_mean = traced_sum / f32(pixels);
+    CC_LOG_INFO("a short ray onto the studio floor: traced {} against {}, {} of {} pixels more than 10% darker",
+                traced_mean, expected, darker, pixels);
+    CHECK(darker == 0);
+    CHECK(traced_mean > 0.98f * expected).dump("mean", traced_mean);
+
+    // The hybrid's one light sample a frame leaves its pixels noisy, so it is held to its mean, which the streaks took 8% off.
+    for (auto const lighting : {sv::hybrid_lighting::forward, sv::hybrid_lighting::deferred})
+    {
+        auto const name = lighting == sv::hybrid_lighting::forward ? "forward" : "deferred";
+        auto const hybrid = co_await draw_hybrid(ctx, resources, item, cam, lights, size, lighting, 4, background);
+        auto sum = 0.0f;
+        for (auto y = first_row; y < size[1]; ++y)
+            for (auto x = 0; x < size[0]; ++x)
+                sum += lum(hybrid.color[y * size[0] + x]);
+        auto const mean = sum / f32(pixels);
+        CC_LOG_INFO("a short ray onto the studio floor: {} {} against {}", name, mean, expected);
+        CHECK(mean > 0.98f * expected).context(name).dump("mean", mean);
+        CHECK(mean < 1.02f * expected).context(name).dump("mean", mean);
+    }
     co_await cc::async_settled(sv::background_work(ctx));
 }
 

@@ -306,6 +306,8 @@ struct pixel_face:
     exiting: bool
     /// the material's authored frame in the world, where the material supplies one
     authored: openpbr.frame
+    /// `pt.corner_reach` of the triangle from the point, which a ray leaving it is lifted by; 0 for a quadric
+    reach: float
 
 /// The face of `ctx`'s triangle of `inst` seen from `eye`, at the world point `world` on it, with the authored frame `surface` carries.
 /// `supplied_tangent_frame` is whether that frame was authored rather than defaulted, which the generated material knows.
@@ -324,7 +326,7 @@ fun face_of(inst: scene.instance, ctx: material.shading_context, world: float3, 
     if supplied_tangent_frame:
         let local = openpbr.frame_from_quaternion(surface.geometry_tangent_frame, surface.geometry_handedness)
         authored = openpbr.frame(normalize(to_world_vector(inst, local.t)), normalize(to_world_vector(inst, local.b)), normalize(to_world_vector(inst, local.n)))
-    return { n = n, exiting = exiting, authored = authored }
+    return { n = n, exiting = exiting, authored = authored, reach = pt.corner_reach(world, w0, w1, w2) }
 
 /// The face of a quadric whose object-space outward normal at the world point `world` is `object_normal`, as `face_of` describes a triangle's.
 fun quadric_face_of(inst: scene.instance, object_normal: float3, world: float3, eye: float3, surface: openpbr.surface, supplied_tangent_frame: bool) -> pixel_face:
@@ -336,7 +338,7 @@ fun quadric_face_of(inst: scene.instance, object_normal: float3, world: float3, 
     if supplied_tangent_frame:
         let local = openpbr.frame_from_quaternion(surface.geometry_tangent_frame, surface.geometry_handedness)
         authored = openpbr.frame(normalize(to_world_vector(inst, local.t)), normalize(to_world_vector(inst, local.b)), normalize(to_world_vector(inst, local.n)))
-    return { n = n, exiting = exiting, authored = authored }
+    return { n = n, exiting = exiting, authored = authored, reach = 0.0 }
 
 /// Shades the pixel `p` covers, whose material evaluated to `surface_in` through `ctx` as `pixel_context` made it, and writes every target.
 ///

@@ -69,7 +69,8 @@ binding thin_io:
     // The point is rounded as `cam.position + ray * t` is, to a scale of the camera's distance from the origin plus the ray's length.
     // `pt.offset_ray` sizes its offset from the point's own coordinates, as an interpolated point is rounded, which is far less on a floor near y = 0.
     // So the point is lifted off the surface by that rounding first, or a row of it starts under the floor and its bounce rays hit the floor.
-    let reach = max(abs(cam.position.x), max(abs(cam.position.y), abs(cam.position.z))) + length(ray) * t
+    // The face's own reach, which the G-buffer holds in emission's alpha, adds the rounding a ray leaving it meets on its far corners.
+    let reach = max(abs(cam.position.x), max(abs(cam.position.y), abs(cam.position.z))) + length(ray) * t + emission.w
     let lift = reach * (1.0 / 1048576.0)
     let surface_p = cam.position + ray * t
     // Reflections and light samples leave on the viewer's side; a refraction leaves through the surface, which `bounce_from` lifts toward itself.

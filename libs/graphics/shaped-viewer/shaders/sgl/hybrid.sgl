@@ -178,12 +178,14 @@ fun landed(so_far: bounce, h: tracer.hit_record, origin: float3, wi: float3, pdf
     let inst = scene.instance(..tracer.traced.instances[h.instance as int])
     result.hit = true
     result.at = origin + wi * h.t
+    let mut reach = 0.0
     if h.kind == tracer.hit_triangle:
         let indices = inst.indices as int
         let ctx = material.make_context(inst, tracer.bindless.buffers[nonuniform indices], h.primitive, h.barycentrics)
         let w0 = raster.to_world_point(inst, tracer.instance_position(inst, ctx.corner.x))
         let w1 = raster.to_world_point(inst, tracer.instance_position(inst, ctx.corner.y))
         let w2 = raster.to_world_point(inst, tracer.instance_position(inst, ctx.corner.z))
+        reach = pt.corner_reach(origin, w0, w1, w2)
         let geometric = normalize(cross(w1 - w0, w2 - w0))
         result.n = tracer.instance_shading_normal(inst, ctx, if dot(geometric, wi) > 0.0 => -geometric else geometric)
         result.albedo = tracer.instance_base_color(inst, ctx)
@@ -194,6 +196,8 @@ fun landed(so_far: bounce, h: tracer.hit_record, origin: float3, wi: float3, pdf
     else:
         result.n = normalize(raster.to_world_vector(inst, h.normal))
     if dot(result.n, wi) > 0.0 => result.n = -result.n
+    // Lifted toward where the bounce came from by its rounding, since everything leaving it, light samples and a reflection, leaves on that side.
+    result.at = result.at + result.n * pt.hit_rounding(origin, wi, h.t, reach)
     return result
 
 /// A bounce on its way through solid glass: the segment it is on, what met it there, what the glass has cost so far, and whether it is inside a solid now.
@@ -259,13 +263,24 @@ fun passage_step(p: passage){tracer.traced, tracer.bindless} -> passage:
     let transmitted = 1.0 - openpbr.fresnel_dielectric(dot(-q.wi, facing), 1.0 / ratio)
     let leaving = if inside => exp(-q.sigma_t * q.h.t) * q.restore else float3(1.0)
     q.weight *= leaving * transmitted
-    q.at = pt.offset_ray(q.at + q.wi * q.h.t, -facing)
+    q.at = pt.offset_hit(q.at + q.wi * q.h.t, -facing, pt.hit_rounding(q.at, q.wi, q.h.t, hit_reach(q.h, q.at)))
     q.wi = normalize(bent)
     q.crossings += if inside => 1u else 0u
     q.eta = if inside => 0.0 else glass_eta
     q.sigma_t = float3(0.0)
     q.restore = 1.0
     return q
+
+/// `pt.corner_reach` of the triangle `h` met, seen from `origin`, or 0 for a quadric.
+fun hit_reach(h: tracer.hit_record, origin: float3){tracer.traced, tracer.bindless} -> float:
+    if h.kind != tracer.hit_triangle => return 0.0
+    let inst = scene.instance(..tracer.traced.instances[h.instance as int])
+    let indices = inst.indices as int
+    let ctx = material.make_context(inst, tracer.bindless.buffers[nonuniform indices], h.primitive, h.barycentrics)
+    let w0 = raster.to_world_point(inst, tracer.instance_position(inst, ctx.corner.x))
+    let w1 = raster.to_world_point(inst, tracer.instance_position(inst, ctx.corner.y))
+    let w2 = raster.to_world_point(inst, tracer.instance_position(inst, ctx.corner.z))
+    return pt.corner_reach(origin, w0, w1, w2)
 
 /// Whether `h` met an instance of solid glass, `scene.instance::glass`.
 fun is_glass(h: tracer.hit_record){tracer.traced} -> bool:
@@ -449,8 +464,10 @@ fun shade_face(pixel: float2, world: float3, face: raster.pixel_face, surface_in
 
     // One sample, whatever the frame asks for: a loop around this nests a level deeper than the inlining limit allows.
     let mut rng = pixel_rng(uint2(pixel.x as uint, pixel.y as uint), pass.size.x as uint)
-    let lit = direct(b, shading, face.n, wo_local, world, true, mut rng)
-    let bounced = bounce_from(b, shading, face.n, wo_local, world, 0.0, mut rng)
+    // Lifted by the triangle's rounding, as the deferred kernel lifts its point: interpolated from far corners, the point is rounded to them.
+    let lift = face.reach * (1.0 / 1048576.0)
+    let lit = direct(b, shading, face.n, wo_local, world + face.n * lift, true, mut rng)
+    let bounced = bounce_from(b, shading, face.n, wo_local, world, lift, mut rng)
     let followed = is_followed(bounced)
     let s2 = secondary_of(bounced, followed)
     let bounce_lit = direct(s2.b, s2.f, bounced.n, s2.wo_local, bounced.at, followed, mut rng) + secondary_environment(s2.b, s2.f, bounced.n, unless_followed(followed, s2.wo_local), bounced.at, mut rng)
