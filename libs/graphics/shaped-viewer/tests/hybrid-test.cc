@@ -243,8 +243,9 @@ ASYNC_INVOCABLE_TEST("sv::hybrid_routine - forward and deferred light the Cornel
     constexpr int block = 8;
     // The tracer's path length counts the primary hit, so a hybrid of n bounces is held to the tracer's n + 1.
     // The box is matte throughout, so the secondary material the bounces light is the material itself, and only noise is left between them.
-    auto const traced_one = co_await sv_test::trace_direct(ctx, resources, item, cam, lights, size, 16, 2);
-    auto const traced_two = co_await sv_test::trace_direct(ctx, resources, item, cam, lights, size, 16, 3);
+    // That noise is what the tolerance below holds: at a quarter of these samples the worst block sat at 0.10, at the limit itself.
+    auto const traced_one = co_await sv_test::trace_direct(ctx, resources, item, cam, lights, size, 64, 2);
+    auto const traced_two = co_await sv_test::trace_direct(ctx, resources, item, cam, lights, size, 64, 3);
 
     struct contender
     {
@@ -260,7 +261,7 @@ ASYNC_INVOCABLE_TEST("sv::hybrid_routine - forward and deferred light the Cornel
     for (auto const& c : contenders)
     {
         auto const& traced = c.bounces == 2 ? traced_two : traced_one;
-        auto const hybrid = co_await draw_hybrid(ctx, resources, item, cam, lights, size, c.lighting, 128, {}, c.bounces);
+        auto const hybrid = co_await draw_hybrid(ctx, resources, item, cam, lights, size, c.lighting, 512, {}, c.bounces);
         REQUIRE(hybrid.color.size() == traced.size());
 
         // Every block, every channel, over the pixels inside one face, since an edge is antialiased in the tracer's image and not here.

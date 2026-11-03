@@ -395,7 +395,8 @@ ASYNC_INVOCABLE_TEST("sv::wavefront_routine - a carrying frame keeps every slot 
     CHECK(drain.value()[0] == slots);
     for (auto r = 1; r < drain_rounds; ++r)
         CHECK(drain.value()[r] <= drain.value()[r - 1]).context(cc::format("draining round {}", r));
-    for (auto r = k_max_bounces; r < drain_rounds; ++r)
+    // Past every bounce and the segment after the last.
+    for (auto r = k_max_bounces + 1; r < drain_rounds; ++r)
         CHECK(drain.value()[r] == 0u).context(cc::format("draining round {}, past every bounce", r));
 
     co_await cc::async_settled(sv::background_work(ctx));

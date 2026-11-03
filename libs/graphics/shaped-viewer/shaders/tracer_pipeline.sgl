@@ -99,11 +99,12 @@ use tracer
         let mut scatters = 0
 
         // `b` counts every surface the path continued from, and `free` those that were free refractions, which `max_bounces` does not count.
+        // Past the last bounce the path traces one segment more, which only gathers the lights it reaches: the BSDF half of the last hit's light sample.
         let mut b = 0
         let mut free = 0
-        while b - free < f.max_bounces:
-            let last_bounce = if b - free + 1 >= f.max_bounces => 1u else 0u
-            let mut p = tracer.surface_payload_for(rng, medium_sigma_t, medium_albedo, medium_g, channel, last_bounce)
+        while b - free <= f.max_bounces:
+            let emission_only = b - free == f.max_bounces
+            let mut p = tracer.surface_payload_for(rng, medium_sigma_t, medium_albedo, medium_g, channel, if emission_only => 1u else 0u)
             let r = ray(origin = pos3(origin.x, origin.y, origin.z), direction = vec3(dir.x, dir.y, dir.z), t_min = 0.0, t_max = 1e4)
             trace(tracer.traced.world, r, tracer.path_rays.surface, mut p)
 
@@ -307,6 +308,8 @@ use tracer
                 let c = throughput * emission * w
                 radiance += c
                 if path_is_specular => radiance_specular += c
+
+            if emission_only => break
 
             // What the hit already estimated toward its picked light and the environment, through its own BSDF.
             radiance += throughput * (direct_diffuse + direct_specular)

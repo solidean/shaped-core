@@ -615,8 +615,9 @@ fun shade_stored(slot: uint, inst: scene.instance, n_obj: float3, reach: float, 
         let local = openpbr.frame_from_quaternion(surface.geometry_tangent_frame, surface.geometry_handedness)
         authored = openpbr.frame(normalize(instance_to_world(inst, local.t)), normalize(instance_to_world(inst, local.b)), normalize(instance_to_world(inst, local.n)))
 
-    let last_bounce = if spent_bounces(st) + 1u >= (f.max_bounces as uint) => 1u else 0u
-    let mut p = surface_payload_for(st.rng, md.sigma_t, md.albedo, md.g, md.channel, last_bounce)
+    // Past the last bounce a path traces one segment more, which only gathers the lights it reaches: the BSDF half of the last hit's light sample.
+    let emission_only = spent_bounces(st) >= (f.max_bounces as uint)
+    let mut p = surface_payload_for(st.rng, md.sigma_t, md.albedo, md.g, md.channel, if emission_only => 1u else 0u)
     let mut light_s = no_light_sample()
     let mut env_s = no_light_sample()
     shade_sampled(mut p, surface, n, v, exiting, ray_origin, ray_dir, hit.t, reach, authored, supplied_tangent_frame, mut light_s, mut env_s)
@@ -678,7 +679,7 @@ fun shade_stored(slot: uint, inst: scene.instance, n_obj: float3, reach: float, 
         if light_waits or env_waits => push_shadow(slot)
 
     let mut rng = if gathers => p.rng else st.rng
-    let mut continues = gathers and not all(p.throughput <= float3(0.0))
+    let mut continues = gathers and not (emission_only or all(p.throughput <= float3(0.0)))
     if continues:
         let mut next_throughput = throughput * p.throughput
         st.prev_pdf = p.bsdf_pdf
@@ -698,7 +699,7 @@ fun shade_stored(slot: uint, inst: scene.instance, n_obj: float3, reach: float, 
         traced.path_media[s] = path_medium(p.medium_sigma_t, p.medium_albedo, p.medium_g, p.channel)
 
         let spent = spent_bounces(st)
-        if spent >= (f.max_bounces as uint):
+        if spent > (f.max_bounces as uint):
             continues = false
         else if f.roulette_after > 0u and spent > f.roulette_after:
             // Russian roulette ends a path that carries little, without taking its energy with it.

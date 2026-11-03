@@ -8,6 +8,7 @@ require raytracing_pipeline
 
 use hybrid
 use openpbr
+use pt
 use raster
 use scene
 use tracer
@@ -88,17 +89,23 @@ binding thin_io:
     let mut sum = float3(0.0)
     let mut hit_distance = float2(0.0)
     for sample in 0 ..< count:
-        let lit = hybrid.direct(b, shading, n, wo_local, p, true, mut rng)
+        let lit = hybrid.direct(b, shading, n, wo_local, p, true, true, mut rng)
         let bounced = hybrid.bounce_from(b, shading, n, wo_local, surface_p, lift, mut rng)
         let followed = hybrid.is_followed(bounced)
         let s2 = hybrid.secondary_of(bounced, followed)
-        let bounce_lit = hybrid.direct(s2.b, s2.f, bounced.n, s2.wo_local, bounced.at, followed, mut rng)
+        // Where no bounce follows the surface the bounce met, its lights are one of two halves: `direct`'s, or the lights `next` reaches.
+        let light_taken = pt.rand(mut rng) < 0.5
+        let bounce_lit = hybrid.direct(s2.b, s2.f, bounced.n, s2.wo_local, bounced.at, followed, light_taken, mut rng)
             + hybrid.secondary_environment(s2.b, s2.f, bounced.n, hybrid.unless_followed(followed, s2.wo_local), bounced.at, mut rng)
-        let next = hybrid.bounce_plain(s2.b, s2.f, bounced.n, hybrid.if_followed(followed, s2.wo_local), bounced.at, mut rng)
+        let next = hybrid.bounce_plain(s2.b, s2.f, bounced.n, hybrid.kept_if(followed or not light_taken, s2.wo_local), bounced.at, mut rng)
+        // The surface after a followed one is followed by none, so its lights are halved the same way, `last` the BSDF's half.
         let s3 = hybrid.secondary_of(next, false)
-        let next_lit = hybrid.direct(s3.b, s3.f, next.n, s3.wo_local, next.at, false, mut rng)
-            + hybrid.secondary_environment(s3.b, s3.f, next.n, s3.wo_local, next.at, mut rng)
-        let beyond = next.throughput * (next.escaped + next.lights + next_lit)
+        let s3_wo = hybrid.kept_if(followed, s3.wo_local)
+        let last_taken = pt.rand(mut rng) < 0.5
+        let last = hybrid.bounce_plain(s3.b, s3.f, next.n, hybrid.kept_if(not last_taken, s3_wo), next.at, mut rng)
+        let next_lit = hybrid.direct(s3.b, s3.f, next.n, s3_wo, next.at, false, last_taken, mut rng) + 2.0 * last.throughput * last.lights
+            + hybrid.secondary_environment(s3.b, s3.f, next.n, s3_wo, next.at, mut rng)
+        let beyond = if followed => next.throughput * (next.escaped + next.lights + next_lit) else 2.0 * next.throughput * next.lights
         sum += hybrid.finite(lit + bounced.throughput * (bounced.escaped + bounced.lights + bounce_lit + beyond))
         // Where the first sample's bounce went, in its lobe's half, as the tracer writes it: 1e4 for an escape, and 0 for the half no direction was drawn from.
         if sample == 0:

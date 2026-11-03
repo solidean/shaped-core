@@ -50,15 +50,16 @@ fun visible(s: light_sample, seed: uint){traced} -> bool:
 /// One light is picked by the probabilities the table carries, or uniformly where it carries none, and its choice is part of the density.
 /// That keeps one shadow ray per hit an unbiased estimate of every light at once.
 /// A point or a parallel light is a delta no sampled ray can reach, so it takes no weighting and is divided by the probability of picking it alone.
-/// A rect, a disc and an emissive instance are reachable by the raygen's continuation ray too, and weight against it.
-fun estimate_light(b: openpbr.bsdf, f: openpbr.frame, wo_local: float3, p: float3, n_geom: float3, last_bounce: bool, rng: mut uint, out_diffuse: mut float3, out_specular: mut float3){traced, bindless}:
-    let s = sample_light(b, f, wo_local, p, n_geom, last_bounce, mut rng)
+/// A rect, a disc and an emissive instance are reachable by a BSDF sample too, and weight against it.
+/// So a caller must follow every surface it lights with a BSDF sample that gathers what those reach, even past its last bounce.
+fun estimate_light(b: openpbr.bsdf, f: openpbr.frame, wo_local: float3, p: float3, n_geom: float3, rng: mut uint, out_diffuse: mut float3, out_specular: mut float3){traced, bindless}:
+    let s = sample_light(b, f, wo_local, p, n_geom, mut rng)
     let arrives = visible(s, cutout_seed(rng, cutout_ray_light))
     out_diffuse = if arrives => s.diffuse else float3(0.0)
     out_specular = if arrives => s.specular else float3(0.0)
 
 /// `estimate_light` without its visibility test: the sample, and the shadow ray it still owes.
-fun sample_light(b: openpbr.bsdf, f: openpbr.frame, wo_local: float3, p: float3, n_geom: float3, last_bounce: bool, rng: mut uint){traced, bindless} -> light_sample:
+fun sample_light(b: openpbr.bsdf, f: openpbr.frame, wo_local: float3, p: float3, n_geom: float3, rng: mut uint){traced, bindless} -> light_sample:
     let count = traced.frame[0].light_count
     if count == 0u => return no_light_sample()
 
@@ -155,9 +156,9 @@ fun sample_light(b: openpbr.bsdf, f: openpbr.frame, wo_local: float3, p: float3,
     let f_sum = f_diffuse + f_specular
     if all(f_sum <= float3(0.0)) => return no_light_sample()
 
-    // The other strategy for this direction is the BSDF sample the raygen may take, so balance the two.
-    // A delta light is the exception, which that sample can never reach, and so is the last bounce, where the raygen takes none.
-    let w = if delta or last_bounce => 1.0 else pt.mis_weight(pdf, openpbr.bsdf_pdf(b, wo_local, wi_local))
+    // The other strategy for this direction is the BSDF sample, so balance the two; a delta light is the one no BSDF sample reaches.
+    // Unbalanced, a light sample near a large emitter is unbounded: its density over solid angle falls toward 0 as the emitter fills the view.
+    let w = if delta => 1.0 else pt.mis_weight(pdf, openpbr.bsdf_pdf(b, wo_local, wi_local))
 
     let scale = incoming * (wi_local.z / pdf) * w
     let tested = if scene.light_casts_shadows(l) => 1u else 0u
@@ -568,10 +569,10 @@ fun shade_sampled(payload: mut surface_payload, surface_in: openpbr.surface, n: 
         payload.medium_g = in_g
         return
 
-    let last_bounce = payload.last_bounce != 0u
-
-    light = sample_light(b, f, wo_local, p, n, last_bounce, mut rng)
-    env = sample_environment(b, f, wo_local, p, n, last_bounce, mut rng)
+    // A hit past the path's bounces adds only the emission the bounce reached, which the caller weighs, so it samples no light.
+    if payload.emission_only == 0u:
+        light = sample_light(b, f, wo_local, p, n, mut rng)
+        env = sample_environment(b, f, wo_local, p, n, false, mut rng)
 
     // The continuation, importance-sampled from the closure the material just described.
     let u1 = pt.rand(mut rng)
