@@ -4,6 +4,7 @@
 #include <clean-core/common/utility.hh>
 #include <clean-core/container/span.hh>
 #include <clean-core/container/vector.hh>
+#include <clean-core/error/optional.hh>
 #include <clean-core/string/format.hh>
 #include <clean-core/string/string.hh>
 #include <clean-core/string/string_view.hh>
@@ -223,6 +224,39 @@ template <class C>
         return div_exact(a, b);
     else
         return a / b;
+}
+
+/// a / b where b divides a, and false where it does not, never asserting: a field's division,
+/// an integer's by its remainder, a polynomial's by its own try_div_exact.
+template <class C>
+[[nodiscard]] bool try_exact_quotient(C const& a, C const& b, C& q)
+{
+    if constexpr (tg::traits::is_field<C>)
+    {
+        q = a / b;
+        return true;
+    }
+    else if constexpr (requires { try_div_exact(a, b); })
+    {
+        auto r = try_div_exact(a, b);
+        if (!r.has_value())
+            return false;
+        q = cc::move(r.value());
+        return true;
+    }
+    else if constexpr (requires { div_mod(a, b).remainder; })
+    {
+        auto r = div_mod(a, b);
+        if (!r.remainder.is_zero())
+            return false;
+        q = cc::move(r.quotient);
+        return true;
+    }
+    else
+    {
+        q = a / b;
+        return q * b == a;
+    }
 }
 
 template <class C>
@@ -806,13 +840,13 @@ namespace impl
 template <class C>
 concept has_gcd = requires(C const& a) { gcd(a, a); };
 
-/// -1, 0 or +1 for a coefficient: its own sign() where it has one, a polynomial's leading coefficient's, its comparison with 0 otherwise.
+/// -1, 0 or +1 for a coefficient: its own sign() where it has one, any polynomial's leading coefficient's, its comparison with 0 otherwise.
 template <class C>
 [[nodiscard]] int leading_sign(C const& c)
 {
     if constexpr (requires { c.sign(); })
         return c.sign();
-    else if constexpr (is_polynomial<C>)
+    else if constexpr (requires { c.leading_coefficient(); })
         return c.is_zero() ? 0 : leading_sign(c.leading_coefficient());
     else
         return int(C(0) < c) - int(c < C(0));

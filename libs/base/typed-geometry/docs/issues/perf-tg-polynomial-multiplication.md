@@ -43,3 +43,8 @@ Left, in the order they pay:
   It was bound by node allocation at 147 M; clean-core's bounded slab walk took it to 94.5 M, and its cycles from 185 M to 41 M.
 - Fateman's box, 4.6 MB of accumulators at n = 10, leaves L2: chunking by the leading variable's degree, as FLINT's array method does.
 - Univariate products past degree 100: Kronecker substitution into one integer product, which wants a subquadratic bigint product.
+
+Since, with clean-core's slab walk bounded (perf-cc-node-alloc-ring-walk), in instructions retired, tg / FLINT:
+- sparse five variables, n = 6: 89 M / 62 M; lazy heap rows and hole sifts; chaining measured slower and dropped.
+- Fateman n = 10: 19.9 M / 12.4 M; the scan runs a slab of the leading variable at a time, and an upward walk prunes past the total degree.
+- The inner loops are about 12 instructions a pair, FLINT's level; what remains is the graded sort and a bigint node per output term.

@@ -623,6 +623,7 @@ p + q; p - q; p * q; p * s; p == q;                         // terms stay sorted
 p({2, 3, 4}); p(cc::fixed_array<tg::bigrat, 3>{...});       // evaluation, in X when X is built from C
 derivative(p, v); substitute(p, v, value);                  // the result no longer in x(v)
 to_univariate(p, v); from_univariate(u, v);                 // polynomial<multi_polynomial<...>> in x(v), and back
+gcd(p, q); div_exact(p, q); try_div_exact(p, q);            // heuristic gcd over bigint, proved by division; optional when not exact
 p.to_string(names);                                         // "3*x0^2*x1 - x1 + 1"; names a span of string_view
 using E = tg::multi_polynomial<tg::bigint, tg::vars<3, tg::infinitesimal_order>>;
 e.sign();                                                   // 1 >> e0 >> e0^2 >> e1 >> ...: the leading coefficient's sign

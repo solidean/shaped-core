@@ -348,3 +348,77 @@ TEST("tg multi_polynomial - nesting, and coefficients other than bigint")
     static_assert(tg::traits::is_exact<Q>);
     static_assert(!tg::traits::is_field<Q>);
 }
+
+TEST("tg multi_polynomial - exact division, and its refusal")
+{
+    auto rng = nx::test_random();
+    using P = multi_polynomial<bigint, vars<3>>;
+    for (auto i = 0; i < 300; ++i)
+    {
+        auto const a = random_poly<P>(rng, 6, 3);
+        auto b = random_poly<P>(rng, 4, 2);
+        if (b.is_zero())
+            b = P(1) + P::variable(0);
+        CHECK(div_exact(a * b, b) == a);
+    }
+    auto const g = P::generators();
+    CHECK(!try_div_exact(g[0], g[1]).has_value());
+    CHECK(!try_div_exact(g[0] * g[0] + 1, g[0] + 1).has_value());
+    CHECK(!try_div_exact(P(3), P(2)).has_value());
+
+    // under the local order 1 / (1 - x) is a series, never exact: the degree bound ends it
+    using E = multi_polynomial<bigint, vars<2, tg::infinitesimal_order>>;
+    auto const e = E::generators();
+    CHECK(!try_div_exact(E(1), E(1) - e[0]).has_value());
+    CHECK(div_exact((E(1) - e[0]) * (e[1] + 2), E(1) - e[0]) == e[1] + 2);
+}
+
+namespace
+{
+template <class P>
+void check_gcd(cc::random& rng, int rounds)
+{
+    for (auto i = 0; i < rounds; ++i)
+    {
+        auto const a = random_poly<P>(rng, 4, 2);
+        auto const b = random_poly<P>(rng, 4, 2);
+        auto c = random_poly<P>(rng, 3, 2);
+        if (c.is_zero())
+            c = P(1) + P::variable(1);
+        auto const ac = a * c;
+        auto const bc = b * c;
+        auto const g = gcd(ac, bc);
+        if (ac.is_zero() && bc.is_zero())
+        {
+            CHECK(g.is_zero());
+            continue;
+        }
+        // c divides the gcd, the gcd divides both, and what is left of them shares no factor
+        CHECK(try_div_exact(g, c).has_value());
+        auto const qa = try_div_exact(ac, g);
+        auto const qb = try_div_exact(bc, g);
+        REQUIRE(qa.has_value());
+        REQUIRE(qb.has_value());
+        CHECK(gcd(qa.value(), qb.value()).total_degree() == 0);
+        CHECK(gcd(bc, ac) == g);
+        CHECK(g.leading_coefficient().sign() > 0);
+    }
+}
+} // namespace
+
+TEST("tg multi_polynomial - gcd by recursion over the variables, under every order")
+{
+    auto rng = nx::test_random();
+    auto const n = nx::is_thorough() ? 300 : 60;
+    check_gcd<multi_polynomial<bigint, vars<3>>>(rng, n);
+    check_gcd<multi_polynomial<bigint, vars<3, tg::lex_order>>>(rng, n);
+    check_gcd<multi_polynomial<bigint, vars<3, tg::infinitesimal_order>>>(rng, n);
+
+    using P = multi_polynomial<bigint, vars<2, tg::lex_order>>;
+    auto const x = P::variable(0);
+    auto const y = P::variable(1);
+    CHECK(gcd(x * x - y * y, x * x + 2 * x * y + y * y) == x + y);
+    CHECK(gcd(x * y * 6, y * y * 4) == y * 2);
+    CHECK(gcd(P(12), P(-18)) == P(6));
+    CHECK(gcd(P(), -x) == x);
+}
