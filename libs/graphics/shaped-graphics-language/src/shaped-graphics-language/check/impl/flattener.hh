@@ -519,7 +519,7 @@ struct flattener
     /// How many `fwd_diff` and `bwd_diff` are inlining the function they differentiate right now.
     i32 diff_depth = 0;
 
-    /// The derivatives written by hand for a function: `@forward(f)` and `@backward(f)` (autodiff.md).
+    /// The derivatives written by hand for a function: `@forward(f)` and `@backward(f)`.
     struct custom_derivatives
     {
         symbol_id forward = symbol_id::none;
