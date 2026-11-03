@@ -340,6 +340,7 @@ if(SC_BUILD_TESTS)
             tests/restart-energy-test.cc
             tests/mode-agreement-test.cc
             tests/material-agreement-test.cc
+            tests/denoiser-agreement-test.cc
             tests/jitter-accumulation-test.cc
             tests/glowing-sphere-test.cc
             tests/moving-view-motion-test.cc

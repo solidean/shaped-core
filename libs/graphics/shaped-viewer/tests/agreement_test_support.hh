@@ -29,7 +29,7 @@ struct converged;
 struct tile_report;
 struct firefly;
 struct lit_box;
-enum class enforce : sv::u8;
+enum class enforce : u8;
 
 /// What a comparison is drawn at, small enough that a hybrid's thousand frames stay cheap.
 inline constexpr auto k_size = tg::vec2i(64, 64);
@@ -65,6 +65,7 @@ struct sv_test::agreement::mode_config
     i32 max_bounces = 5;
     /// what one megakernel frame traces
     i32 samples_per_pixel = 16;
+    sr::denoise_method denoiser = sr::denoise_method::none;
 };
 
 /// A layer's mean converged twice, from seeds that share nothing, with the G-buffer a rasterizing mode writes beside it.
@@ -136,6 +137,40 @@ namespace sv_test::agreement
     return out;
 }
 
+/// One view of `items` through `camera`, drawn the `config` way, inside a root layout that shows it alone.
+/// The view is `views[0]`, its layer the scene's.
+[[nodiscard]] inline sv::viewer_definition definition_of(cc::span<sv::scene_item const> items,
+                                                         sv::camera const& camera,
+                                                         mode_config const& config)
+{
+    auto def = sv::viewer_definition{};
+    auto v = sv::view_data{};
+    v.id = sv::view_id::from_string("agreement");
+    v.camera = camera;
+    auto& scene = sv::ensure_scene_3d(v);
+    for (auto const& item : items)
+        scene.items.push_back(item);
+    scene.settings.mode = config.mode;
+    scene.settings.hybrid_lighting = config.lighting;
+    scene.settings.hybrid_bounces = config.hybrid_bounces;
+    scene.settings.max_bounces = config.max_bounces;
+    scene.settings.samples_per_pixel = config.samples_per_pixel;
+    scene.settings.motion_hold_ms = 0.0f;
+    scene.settings.reconstruct.denoiser = config.denoiser;
+    def.views.push_back(cc::move(v));
+
+    auto const root_node = def.nodes.add_container(sv::invalid_node);
+    auto leaf = sv::layout_leaf{};
+    leaf.views.push_back(sv::view_index(0));
+    def.nodes.add_leaf(root_node, cc::move(leaf));
+    auto root = sv::view_data{};
+    root.id = sv::view_id::from_string("root");
+    root.layers.push_back({.kind = sv::layer_kind::layout, .blend = sv::layer_blend::replace, .root_node = root_node});
+    def.root_view = sv::view_index(def.views.size());
+    def.views.push_back(cc::move(root));
+    return def;
+}
+
 /// `items` drawn the `config` way, its mean converged to `samples` per pixel twice over.
 /// The second half starts after a restart, so it draws from other seeds than the first.
 inline cc::shared_async<converged> converge(sg::context& ctx,
@@ -153,33 +188,7 @@ inline cc::shared_async<converged> converge(sg::context& ctx,
                                             .height = size[1],
                                             .usage = sg::texture_usage::render_target | sg::texture_usage::copy_src});
 
-    auto def = sv::viewer_definition{};
-    {
-        auto v = sv::view_data{};
-        v.id = sv::view_id::from_string("agreement");
-        v.camera = camera;
-        auto& scene = sv::ensure_scene_3d(v);
-        for (auto const& item : items)
-            scene.items.push_back(item);
-        scene.settings.mode = config.mode;
-        scene.settings.hybrid_lighting = config.lighting;
-        scene.settings.hybrid_bounces = config.hybrid_bounces;
-        scene.settings.max_bounces = config.max_bounces;
-        scene.settings.samples_per_pixel = config.samples_per_pixel;
-        scene.settings.motion_hold_ms = 0.0f;
-        scene.settings.reconstruct.denoiser = sr::denoise_method::none;
-        def.views.push_back(cc::move(v));
-
-        auto const root_node = def.nodes.add_container(sv::invalid_node);
-        auto leaf = sv::layout_leaf{};
-        leaf.views.push_back(sv::view_index(0));
-        def.nodes.add_leaf(root_node, cc::move(leaf));
-        auto root = sv::view_data{};
-        root.id = sv::view_id::from_string("root");
-        root.layers.push_back({.kind = sv::layer_kind::layout, .blend = sv::layer_blend::replace, .root_node = root_node});
-        def.root_view = sv::view_index(def.views.size());
-        def.views.push_back(cc::move(root));
-    }
+    auto def = definition_of(items, camera, config);
     auto store = sv::view_store{};
     auto const history = sv::view_history{};
     auto const id = def.views[0].id;
