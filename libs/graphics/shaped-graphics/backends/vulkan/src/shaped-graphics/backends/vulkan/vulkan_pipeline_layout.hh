@@ -1,8 +1,10 @@
 #pragma once
 
 #include <clean-core/container/vector.hh>
+#include <clean-core/thread/mutex.hh>
 #include <shaped-graphics/backends/vulkan/fwd.hh>
 #include <shaped-graphics/backends/vulkan/vulkan_common.hh>
+#include <shaped-graphics/backends/vulkan/vulkan_descriptor_heap.hh>
 #include <shaped-graphics/binding/pipeline_layout.hh>
 #include <shaped-graphics/fwd.hh>
 
@@ -17,7 +19,11 @@
 /// **Each `bound_sampler` is set `sg::reserved_binding_group`, binding `index + 1`**, the address webgpu gives it too.
 /// That set holds embedded immutable samplers, which live in the set layout rather than in the descriptor buffer.
 /// The samplers themselves are the context's sampler cache's, not the layout's.
-/// So nothing allocates or writes a descriptor for them, and `bind_embedded_samplers` is the whole of binding them.
+/// So nothing allocates or writes a descriptor for them, and binding the embedded samplers is the whole of binding set 3.
+///
+/// With shader diagnostics on, set 3 also holds the context's debug window at binding 19, which an embedded-sampler set
+/// cannot: it is then an ordinary descriptor-buffer set, its samplers written as descriptors beside the window's.
+/// One region per window the layout has met, written on first use and bound with the window of the recording epoch.
 /// Set slots between the caller's groups and the reserved one are empty layouts, since a pipeline layout numbers its sets contiguously.
 class sg::backend::vulkan::vulkan_pipeline_layout final : public sg::pipeline_layout
 {
@@ -39,9 +45,11 @@ public:
     {
     }
 
-    /// Binds the reserved set's embedded samplers, where the layout has any.
-    /// Called after every pipeline bind, since binding another layout's sets may disturb set 3.
-    void bind_embedded_samplers(VkCommandBuffer buffer, VkPipelineBindPoint bind_point) const;
+    /// Binds set 3: its embedded samplers, or with diagnostics the region of its samplers and `debug_window`.
+    /// Called after every pipeline bind, since binding another layout's sets may disturb set 3; safe from any recording thread.
+    void bind_reserved(VkCommandBuffer buffer,
+                       VkPipelineBindPoint bind_point,
+                       sg::raw_buffer_handle const& debug_window) const;
 
     ~vulkan_pipeline_layout() override;
 
@@ -61,4 +69,19 @@ public:
     /// The reserved set's layout, and the empty ones filling the slots below it; null and empty without bound samplers.
     VkDescriptorSetLayout _reserved_set_layout = VK_NULL_HANDLE;
     VkDescriptorSetLayout _empty_set_layout = VK_NULL_HANDLE;
+
+    /// With diagnostics, set 3 as a descriptor-buffer set: its size, each sampler and where its descriptor goes, and
+    /// where the debug window's goes.
+    bool _reserved_has_regions = false;
+    isize _reserved_size = 0;
+    cc::vector<VkSampler> _reserved_samplers;
+    cc::vector<isize> _reserved_sampler_offsets;
+    isize _debug_window_offset = 0;
+
+    struct reserved_region
+    {
+        sg::raw_buffer const* window = nullptr;
+        vulkan_descriptor_range range;
+    };
+    mutable cc::mutex<cc::vector<reserved_region>> _reserved_regions;
 };

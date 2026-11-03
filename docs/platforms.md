@@ -300,7 +300,7 @@ Its default follows `SC_FROZEN_SHADERS`: on in a dev build, off in a frozen one,
 On, slib asks SGL to write each print and failed assert as a record, and sg binds a debug window every pipeline may write.
 sg reads each window back once its epoch completes and logs what it decodes, a failed assert as an error, so nexus's log rule fails a test that trips one.
 Off, SGL writes neither, and sg creates no window and binds no slot for one.
-A dx12 and a webgpu context bind it so far; vulkan and metal shaders write no records yet.
+A dx12, a vulkan and a webgpu context bind it so far; metal shaders write no records yet.
 [feat-sgl-gpu-print-and-assert](../libs/graphics/shaped-graphics-language/docs/issues/feat-sgl-gpu-print-and-assert.md) is the design.
 
 ## Example backend (`SC_EXAMPLE_BACKEND`)

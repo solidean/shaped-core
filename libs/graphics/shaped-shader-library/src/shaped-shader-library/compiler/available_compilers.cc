@@ -15,7 +15,7 @@
 namespace
 {
 // SC_SHADER_DIAGNOSTICS: SGL writes print and assert records exactly where sg binds a window for them.
-// vulkan's set 3 and metal's buffer(30) bind none yet, so their edges write none (issue: feat-sgl-gpu-print-and-assert).
+// metal's buffer(30) binds none yet, so its edge writes none (issue: feat-sgl-gpu-print-and-assert).
 constexpr auto k_sgl_options = slib::sgl_compiler_options{.diagnostics = SG_SHADER_DIAGNOSTICS != 0};
 constexpr auto k_sgl_options_without_window = slib::sgl_compiler_options{};
 } // namespace
@@ -46,7 +46,7 @@ void slib::add_available_compilers(shader_library& lib)
     {
         lib.add_compiler(cc::move(spirv.value()));
         if (auto sgl_spirv = create_dxc_spirv_compiler(); sgl_spirv.has_value())
-            lib.add_compiler(create_sgl_compiler(cc::move(sgl_spirv.value()), k_sgl_options_without_window));
+            lib.add_compiler(create_sgl_compiler(cc::move(sgl_spirv.value()), k_sgl_options));
     }
 #endif
 

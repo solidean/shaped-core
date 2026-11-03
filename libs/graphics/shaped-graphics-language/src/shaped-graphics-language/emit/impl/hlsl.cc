@@ -40,6 +40,14 @@ public:
     bool is_c_like() const override { return true; }
     bool has_line_directives() const override { return true; }
 
+    // vulkan writes no storage from a vertex, geometry or tessellation stage without vertexPipelineStoresAndAtomics,
+    // which sg does not ask a device for
+    bool writes_debug_in(check::stage s) const override
+    {
+        return !_is_vulkan
+            || (s != check::stage::vertex && s != check::stage::geometry && s != check::stage::tessellation_control
+                && s != check::stage::tessellation_evaluation);
+    }
     void write_debug_buffer(cc::string& out) const override
     {
         if (_is_vulkan)
