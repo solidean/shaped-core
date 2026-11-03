@@ -473,6 +473,7 @@ tg::traits::has_sqrt<T>;  tg::traits::has_trigonometry<T>;   // inline constexpr
 tg::traits::has_abs<T>;  tg::traits::has_exponential<T>;  tg::traits::has_rounding<T>;
 tg::traits::has_pow2<T>;                  // the exact base-two family; f32/f64 only
 tg::traits::is_zero(x);  tg::traits::is_one(x);   // bool — routed through the trait (symbolic-friendly)
+tg::traits::is_exact<T>; tg::traits::is_field<T>; // exact arithmetic; a division that inverts multiplication (floats, bigrat; not integers)
 tg::traits::lowest<T>();  tg::traits::highest<T>(); // the extremes of T's order: +-inf for floats and f16, the limits for ints / fixed_int
 tg::one<T>();                             // T   — multiplicative identity (always)
 tg::sqrt(x);                              // T   — requires has_sqrt<T>
@@ -583,6 +584,44 @@ tg::bigrat_unreduced u = a; u += b; u *= c; u.sign(); u.reduced(); // no gcd per
 // An integer-valued bigrat costs a bigint: its denominator is held as zero, meaning 1.
 // A sum reduces by the denominators' gcd, a product by the two cross gcds: the smallest gcds there are.
 // For a predicate's sign alone, bigrat_unreduced skips every gcd: about 5x cheaper on orient3d over rational points.
+```
+
+## polynomial (univariate, dense)
+
+```cpp
+#include <typed-geometry/symbolic/polynomial.hh>
+tg::polynomial<tg::bigint> p = {1, 0, 3};                   // 1 + 3x^2: coefficients lowest first; any C with + - * and C(int)
+tg::polynomial<f64, 3> c = {1.0, -3.0, 0.0, 2.0};           // a fixed bound: inline, no allocation; degree() may be lower
+P::x(); P::monomial(c, k); P::zeroed(n); p[i]; p.trim();    // building blocks: n stored zeros, set, then trim
+p.degree(); p.is_zero(); p.leading_coefficient(); p.coefficient(i); p.coefficients(); // degree -1 for zero
+p + q; p - q; p * q; p * s; -p; pow(p, e);                  // fixed bounds propagate: cubic * quadratic is polynomial<f64, 5>
+p(x);                                                       // Horner, in X when X is built from C: a bigint polynomial at a bigrat is a bigrat
+compose(p, q); derivative(p);                               // p(q); d/dx
+auto [q, r] = divrem(a, b);                                 // a = q b + r; requires tg::traits::is_field<C>: floats, bigrat
+auto pd = pseudo_divrem(a, b);                              // lc(b)^pd.power * a = pd.quotient * b + pd.remainder, any ring
+div_exact(a, b);                                            // b divides a: bigint coefficients divide exactly
+p.to_string("t");                                           // "3*t^2 + 1"
+tg::polynomial<tg::polynomial<tg::bigint>> xy;              // a polynomial is a coefficient: nesting gives more variables
+```
+
+## multi_polynomial (sparse, packed exponents)
+
+```cpp
+#include <typed-geometry/symbolic/multi_polynomial.hh>
+using P = tg::multi_polynomial<tg::bigint, tg::vars<3>>;     // 3 variables, grevlex, 16-bit exponent fields
+tg::vars<N, tg::lex_order | tg::grlex_order | tg::grevlex_order | tg::infinitesimal_order, Bits = 16>;
+auto g = P::generators(); auto p = 3 * g[0] * g[0] * g[1] - g[1] + 1;  // also P::variable(v), P::monomial(c, {e0, e1, e2})
+p.term_count(); p.coefficient(t); p.exponents(t); p.leading_coefficient(); p.coefficient_of({2, 1, 0});
+p.degree(v); p.total_degree();                              // -1 for zero
+p + q; p - q; p * q; p * s; p == q;                         // terms stay sorted, combined, never zero
+p({2, 3, 4}); p(cc::fixed_array<tg::bigrat, 3>{...});       // evaluation, in X when X is built from C
+derivative(p, v); substitute(p, v, value);                  // the result no longer in x(v)
+to_univariate(p, v); from_univariate(u, v);                 // polynomial<multi_polynomial<...>> in x(v), and back
+p.to_string(names);                                         // "3*x0^2*x1 - x1 + 1"; names a span of string_view
+using E = tg::multi_polynomial<tg::bigint, tg::vars<3, tg::infinitesimal_order>>;
+e.sign();                                                   // 1 >> e0 >> e0^2 >> e1 >> ...: the leading coefficient's sign
+// An exponent or a graded total degree is at most 2^(Bits-1) - 1; overflow fails in every build, not only with assertions.
+// The infinitesimal order is local (1 is the largest monomial): it ranks for signs, not for division.
 ```
 
 ## half_float (binary16)

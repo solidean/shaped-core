@@ -9,6 +9,7 @@
 #include <clean-core/string/string_view.hh>
 #include <typed-geometry/scalar/fixed_int/fixed_arith.hh>
 #include <typed-geometry/scalar/impl/limbs.hh>
+#include <typed-geometry/scalar/traits.hh>
 
 #include <compare>
 #include <type_traits>
@@ -560,3 +561,28 @@ void gcd(bigint& g, bigint const& a, bigint const& b);
 [[nodiscard]] bigint div_exact(bigint const& a, bigint const& d);
 void div_exact(bigint& q, bigint const& a, bigint const& d);
 } // namespace tg
+
+/// A bigint is an exact scalar with the integer capabilities, and a ring, not a field: its / truncates.
+template <>
+struct tg::scalar_traits<tg::bigint>
+{
+    static constexpr bool has_sqrt = false;
+    static constexpr bool has_trigonometry = false;
+    static constexpr bool has_exponential = false;
+    static constexpr bool has_rounding = false;
+    static constexpr bool has_abs = true;
+    static constexpr bool has_pow2 = false;
+    static constexpr bool has_non_finite = false;
+    static constexpr bool is_exact = true;
+    static constexpr bool is_field = false;
+
+    [[nodiscard]] static bigint one() { return bigint(1); }
+    [[nodiscard]] static bool is_zero(bigint const& x) { return x.is_zero(); }
+    [[nodiscard]] static bool is_one(bigint const& x) { return x.is_one(); }
+    [[nodiscard]] static bigint abs(bigint x)
+    {
+        if (x.is_negative())
+            x.negate();
+        return x;
+    }
+};
