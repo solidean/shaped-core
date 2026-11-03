@@ -57,15 +57,17 @@ fun kind_of(n: float3, depth: float) -> uint:
 fun is_surface(n: float3, depth: float) => kind_of(n, depth) == kind_surface
 
 // Whether a neighbor at `offset` pixels shows the same surface as the center, as a weight in [0, 1].
-// Two missed pixels match each other and nothing else, so the sky never averages into geometry, and two emitters likewise.
+// Two missed pixels match each other and nothing else, so the sky never averages into geometry.
+// Two emitters match where their depths do, which is all that is known of them: a black vase and a lamp behind it do not.
 fun geometry_weight(n_p: float3, d_p: float, n_q: float3, d_q: float, offset: float2, normal_power: float, depth_sigma: float) -> float:
     let kind_p = kind_of(n_p, d_p)
     if kind_p != kind_of(n_q, d_q) => return 0.0
-    if kind_p != kind_surface => return 1.0
+    if kind_p == kind_missed => return 1.0
 
-    let w_n = pow(saturate(dot(normalize(n_p), normalize(n_q))), normal_power)
     let allowed = depth_sigma * d_p * max(length(offset), 1.0) + 0.00001
-    return w_n * exp(-abs(d_q - d_p) / allowed)
+    let w_d = exp(-abs(d_q - d_p) / allowed)
+    if kind_p == kind_emitter => return w_d
+    return pow(saturate(dot(normalize(n_p), normalize(n_q))), normal_power) * w_d
 
 fun as_float2(v: int2) => float2(v.x as float, v.y as float)
 
@@ -128,7 +130,10 @@ binding svgf_temporal_images:
     let p = id.xy
     let flags = svgf_temporal_constants.flags
 
-    let mut color = svgf_temporal_images.color.load(p).xyz
+    // A channel that is not a finite number reads as black: a half-float frame holds nothing past 65504, so a bright enough
+    // sample arrives as infinity, and folded into the history it would turn every pixel the filter reaches into NaN, for good.
+    let raw = svgf_temporal_images.color.load(p).xyz
+    let mut color = if any(is_nan(raw)) or any(is_inf(raw)) => float3(0.0) else raw
     let albedo = svgf_temporal_images.albedo.load(p).xyz
     let specular_albedo = svgf_temporal_images.specular_albedo.load(p).xyz
     if (flags & has_albedo) != 0u:
@@ -137,7 +142,8 @@ binding svgf_temporal_images:
     // An emitter's pixel carries a zero normal from here on, so every later test keeps it apart from the surfaces it lights.
     let d = svgf_temporal_images.depth.load(p).x
     let n = if reflects_nothing(albedo, specular_albedo, flags) and d > 0.0 => float3(0.0) else svgf_temporal_images.normal.load(p).xyz
-    let lum = luminance(color)
+    // Capped where its square still fits a float: past it the second moment is infinite, and the variance infinity less infinity.
+    let lum = min(luminance(color), 1e18)
     let moments = float2(lum, lum * lum)
 
     // Where this pixel's surface was last frame: the pixel's center moved back by its motion.

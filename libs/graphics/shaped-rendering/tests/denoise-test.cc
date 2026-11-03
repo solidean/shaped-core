@@ -779,6 +779,95 @@ cc::shared_async<denoise_run> stream_frame(sg::context& ctx,
 }
 } // namespace
 
+namespace
+{
+/// Not NaN and not infinite; a sample near the float range is finite, and the extreme-sample test hands one in.
+[[nodiscard]] bool finite(tg::vec4f const& p)
+{
+    constexpr auto largest = 3.4028234e38f;
+    return tg::abs(p[0]) <= largest && tg::abs(p[1]) <= largest && tg::abs(p[2]) <= largest;
+}
+
+[[nodiscard]] int non_finite_count(cc::span<tg::vec4f const> pixels)
+{
+    auto count = 0;
+    for (auto const& p : pixels)
+        count += finite(p) ? 0 : 1;
+    return count;
+}
+
+/// The noisy halves, with one pixel near the middle of the bright half set to `value`.
+[[nodiscard]] cc::vector<tg::vec4f> with_one_pixel(f32 value)
+{
+    auto pixels = noisy_halves(0.1f);
+    pixels[(k_size / 2) * k_size + 3 * k_size / 4] = tg::vec4f(value, value, value, 1);
+    return pixels;
+}
+} // namespace
+
+// A one-sample frame's brightest sample can be thousands of times its neighbors', and a viewer shows that frame.
+// An edge-stop that takes such a sample in spreads it over the pass's whole footprint, a square that jumps to wherever
+// the next frame's brightest sample lands.
+// Taken in at a weight near one, a sample near the float range also overflows the pass's sum, and the next pass turns
+// that infinity into NaN, a block that shows black.
+// So the sample stays where it fell, and every other pixel stays near the image it sits in.
+ASYNC_INVOCABLE_TEST("sr - atrous keeps a single extreme sample where it fell",
+                     (sg::context_handle const& ctx_h),
+                     exclusive("sg-reload-generation"))
+{
+    REQUIRE(ctx_h != nullptr);
+    sg::context& ctx = *ctx_h;
+    (void)sr_test::shader_fixtures();
+    co_await prewarm(ctx);
+
+    for (auto const value : {1e6f, 1e38f})
+    {
+        auto history = sr::reconstruct_history();
+        auto const run = co_await run_once(ctx, with_one_pixel(value), split_normals(), atrous_settings, 1, history);
+        REQUIRE(run.outcome.status == sr::reconstruct_status::denoised);
+        auto spread = 0;
+        for (auto i = isize(0); i < run.output.size(); ++i)
+            spread += finite(run.output[i]) && run.output[i][0] > 8.0f ? 1 : 0;
+        CHECK(non_finite_count(run.output) == 0).dump("value", value);
+        // The sample's own pixel keeps it; ten times the image's brightest elsewhere is the sample spread.
+        CHECK(spread <= 1).dump("value", value).dump("pixels past ten times the image", spread);
+    }
+}
+
+// A half-float target holds nothing past 65504, so a bright enough sample arrives as infinity, and a NaN is one bad
+// division away: one such pixel must not take its neighbors with it, on its own frame or on any after it.
+ASYNC_INVOCABLE_TEST("sr - a non-finite pixel spreads through neither atrous nor svgf, on any frame",
+                     (sg::context_handle const& ctx_h),
+                     exclusive("sg-reload-generation"))
+{
+    REQUIRE(ctx_h != nullptr);
+    sg::context& ctx = *ctx_h;
+    (void)sr_test::shader_fixtures();
+    co_await prewarm(ctx);
+
+    auto const inf = 1.0f / tg::abs(noise_at(0, 0) * 0.0f);
+    auto const nan = inf * 0.0f;
+    for (auto const bad : {inf, nan})
+    {
+        auto history = sr::reconstruct_history();
+        auto const run = co_await run_once(ctx, with_one_pixel(bad), split_normals(), atrous_settings, 1, history);
+        REQUIRE(run.outcome.status == sr::reconstruct_status::denoised);
+        CHECK(non_finite_count(run.output) == 0).dump("atrous, input", bad);
+
+        // SVGF keeps a history, so a bad pixel on one frame could poison every frame after it.
+        auto stream = make_stream(ctx);
+        for (auto frame = 0; frame < 6; ++frame)
+        {
+            auto color = noisy_frame(frame, 0.1f);
+            if (frame == 1)
+                color[(k_size / 2) * k_size + 3 * k_size / 4] = tg::vec4f(bad, bad, bad, 1);
+            auto const s = co_await stream_frame(ctx, stream, color, 1.0f);
+            REQUIRE(s.outcome.status == sr::reconstruct_status::denoised);
+            CHECK(non_finite_count(s.output) == 0).dump("svgf, input", bad).dump("frame", frame);
+        }
+    }
+}
+
 ASYNC_INVOCABLE_TEST("sr - svgf converges a static noisy stream",
                      (sg::context_handle const& ctx_h),
                      exclusive("sg-reload-generation"))

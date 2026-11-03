@@ -85,8 +85,11 @@ fun albedo_at(p: int2){atrous_images, atrous_constants} -> float3:
     return max(total_reflectance_at(p), float3(albedo_floor))
 
 // The source's color at `p`, in the space this pass filters in: divided by the albedo on the first pass when asked.
+// A channel that is not a finite number reads as black: a half-float target holds nothing past 65504, so a bright enough
+// sample arrives as infinity, and taken in by any tap it would turn the whole footprint into NaN.
 fun source_at(p: int2){atrous_images, atrous_constants} -> float4:
-    let c = atrous_images.source.load(p)
+    let raw = atrous_images.source.load(p)
+    let c = if any(is_nan(raw.xyz)) or any(is_inf(raw.xyz)) => float4(0.0, 0.0, 0.0, raw.w) else raw
     if is_set(demodulate_in):
         return float4(..(c.xyz / albedo_at(p)), c.w)
     return c
@@ -111,10 +114,14 @@ fun source_at(p: int2){atrous_images, atrous_constants} -> float4:
     if is_set(has_depth):
         center_depth = atrous_images.depth.load(p).x
 
-    // Relative, so the edge-stop means the same thing for a dim corner and a bright highlight.
+    // Relative to the center, so the edge-stop means the same thing for a dim corner and a bright highlight.
+    // The additive floor keeps a black pixel from refusing every neighbor.
+    // A window sized by the brighter of the two would weigh a pair alike from either end, but it can never refuse a tap
+    // brighter than the center: a one-sample frame's brightest sample spread over half the image, issue: bug-sr-atrous-flattens-young-contrast.
     let mut luminance_scale = atrous_constants.luminance_scale
     if is_set(has_sample_counts):
         luminance_scale /= sqrt(max(atrous_images.sample_counts.load(p).x, 1.0))
+    let lum_width = luminance_scale * (abs(center_lum) + 0.01) + 0.000001
     let center_emits = reflects_nothing_at(p)
 
     let kernel = [1.0 / 16.0, 1.0 / 4.0, 3.0 / 8.0, 1.0 / 4.0, 1.0 / 16.0]
@@ -134,13 +141,7 @@ fun source_at(p: int2){atrous_images, atrous_constants} -> float4:
 
             // Gaussian rather than exponential in the difference.
             // A tap several noise widths away must count for nothing, or a converged mean's detail is averaged away by the long tail of many such taps.
-            // The width is the brighter pixel's of the two, so a pair weighs alike from either end.
-            // Sized by the center alone, a dark pixel refused the bright samples beside it while a bright one took the dark ones in,
-            // which drained a young image's energy downward: 8% to 15% of it at four samples a pixel.
-            // The additive floor keeps two black pixels from refusing each other.
-            let tap_lum = luminance(c.xyz)
-            let lum_width = luminance_scale * (max(abs(center_lum), abs(tap_lum)) + 0.01) + 0.000001
-            let lum_ratio = (tap_lum - center_lum) / lum_width
+            let lum_ratio = (luminance(c.xyz) - center_lum) / lum_width
             w *= exp(-lum_ratio * lum_ratio)
 
             // An emitter and a surface it lights never average into each other, as the sky and geometry do not.

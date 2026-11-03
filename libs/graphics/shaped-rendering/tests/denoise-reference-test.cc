@@ -115,6 +115,7 @@ struct atrous_inputs
             auto scale = k.luminance_scale;
             if (is(64u))
                 scale /= tg::sqrt(cc::max(f64(in.counts[p][0]), 1.0));
+            auto const lum_width = scale * (tg::abs(center_lum) + 1e-2) + 1e-6;
             auto const center_emits = reflects_nothing_at(p);
 
             auto sum = vec3(0, 0, 0);
@@ -128,9 +129,7 @@ struct atrous_inputs
                         continue;
                     auto const q = qy * k_w + qx;
                     auto const c = source_at(q);
-                    auto const tap_lum = luminance(c);
-                    auto const lum_width = scale * (cc::max(tg::abs(center_lum), tg::abs(tap_lum)) + 1e-2) + 1e-6;
-                    auto const ratio = (tap_lum - center_lum) / lum_width;
+                    auto const ratio = (luminance(c) - center_lum) / lum_width;
                     auto w = k_kernel[dx + 2] * k_kernel[dy + 2] * tg::exp(-ratio * ratio);
                     if (reflects_nothing_at(q) != center_emits)
                         w = 0.0;
