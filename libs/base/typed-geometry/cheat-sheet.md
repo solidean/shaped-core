@@ -558,13 +558,31 @@ tg::bigint::parse("-123456789012345678901234567890");     // -> cc::optional<big
 a + b; a - b; a * b; a / b; a % b; -a; a << n; a >> n;     // exact; / and % truncate, >> floors
 r.assign_add(a, b); r.assign_sub(a, b); r.assign_mul(a, b); // into r's node when it holds the result; a or b may be r
 auto [q, rem] = div_mod(a, b); div_mod(q, rem, a, b);     // the second into kept values, reusing their nodes
-gcd(a, b); abs(a);
+gcd(a, b); gcd(g, a, b); abs(a);                          // binary gcd to two limbs, Lehmer above; the second into g
+div_exact(a, d); div_exact(q, a, d);                       // a / d for a d that divides a: no remainder sought
 x.sign(); compare(a, b); a < b; a == b;                    // -1/0/+1; compare without computing a - b
 x.to_f64(); x.to_i64(); x.fits_i64(); x.to_string();       // nearest, ties to even; to_i64 asserts it fits
 x.limbs(); x.size(); x.capacity(); x.bit_width();           // the magnitude, least significant limb first
 // One pointer to a node of cc's node allocator: a header word, then the limbs; 1, 3, 7, 15, 31 limbs from 16 to 256 bytes.
 // Reuse results (assign_* into kept values) in hot loops: an operator's result allocates a node.
 // + - * of one- and two-limb operands are inline; products up to 16 x 16 limbs are unrolled, Karatsuba above.
+```
+
+## bigrat (exact rational)
+
+```cpp
+#include <typed-geometry/scalar/bigrat/bigrat.hh>
+tg::bigrat q = 3; tg::bigrat(tg::bigint(6), tg::bigint(-4)); // -> -3/2: reduced, denominator positive
+tg::bigrat::from_f64(0.1);                                   // exact: 3602879701896397/36028797018963968
+a + b; a - b; a * b; a / b; -a; abs(a);                      // exact, reduced after every operation
+r.assign_add(a, b); r.assign_sub(a, b); r.assign_mul(a, b); r.assign_div(a, b); // into r's nodes; a or b may be r
+x.numerator(); x.denominator(); x.is_integer();              // the denominator by value: an integer holds none
+x.sign(); compare(a, b); a < b; a == b;                      // signs, then bit widths, then cross products
+x.to_f64(); x.to_string();                                   // nearest, ties to even; "-3/2", or "3" for an integer
+tg::bigrat_unreduced u = a; u += b; u *= c; u.sign(); u.reduced(); // no gcd per operation; reduce once at the end
+// An integer-valued bigrat costs a bigint: its denominator is held as zero, meaning 1.
+// A sum reduces by the denominators' gcd, a product by the two cross gcds: the smallest gcds there are.
+// For a predicate's sign alone, bigrat_unreduced skips every gcd: about 5x cheaper on orient3d over rational points.
 ```
 
 ## half_float (binary16)

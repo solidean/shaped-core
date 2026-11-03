@@ -358,16 +358,87 @@ void tg::impl::limbs_mul(u64* r, u64 const* a, i32 an, u64 const* b, i32 bn)
     }
 }
 
+namespace
+{
+/// floor((2^128 - 1) / d) - 2^64 for d's top bit set: the reciprocal of a 2/1 division.
+/// From Möller and Granlund, "Improved division by invariant integers" (IEEE Transactions on Computers, 2011), algorithm 2.
+CC_FORCE_INLINE u64 reciprocal_2by1(u64 d)
+{
+    return cc::udiv128({~u64(0), ~d}, d).quotient;
+}
+
+struct div_2by1_result
+{
+    u64 quotient;
+    u64 remainder;
+};
+
+/// (u1, u0) / d for u1 < d, d's top bit set and v = reciprocal_2by1(d), by the same paper's algorithm 4.
+/// Two products and at most two corrections, where a hardware division costs tens of cycles.
+CC_FORCE_INLINE div_2by1_result div_2by1(u64 u1, u64 u0, u64 d, u64 v)
+{
+    auto const p = cc::umul128(v, u1);
+    auto const s = cc::add_with_carry(p.lo, u0);
+    auto q1 = p.hi + u1 + s.carry + 1;
+    auto r = u0 - q1 * d;
+    if (r > s.value)
+    {
+        --q1;
+        r += d;
+    }
+    if (r >= d) [[unlikely]]
+    {
+        ++q1;
+        r -= d;
+    }
+    return {.quotient = q1, .remainder = r};
+}
+} // namespace
+
 u64 tg::impl::limbs_divrem_1(u64* q, u64 const* a, i32 n, u64 d)
 {
-    u64 rem = 0;
+    CC_ASSERT(d != 0, "division by zero");
+    if (n <= 0)
+        return 0;
+    if (n == 1)
+    {
+        // one limb is one hardware division, cheaper than a reciprocal's
+        auto const x = a[0];
+        q[0] = x / d;
+        return x % d;
+    }
+    // d shifted to its top bit and a shifted as it is read, each shift split in two so that s = 0 needs no branch
+    auto const s = cc::count_leading_zeroes(d);
+    auto const dn = d << s;
+    auto const v = reciprocal_2by1(dn);
+    auto r = (a[n - 1] >> 1) >> (63 - s);
     for (auto i = n - 1; i >= 0; --i)
     {
-        auto const x = cc::udiv128({a[i], rem}, d);
+        auto const below = i > 0 ? a[i - 1] : u64(0);
+        auto const x = div_2by1(r, (a[i] << s) | ((below >> 1) >> (63 - s)), dn, v);
         q[i] = x.quotient;
-        rem = x.remainder;
+        r = x.remainder;
     }
-    return rem;
+    return r >> s;
+}
+
+u64 tg::impl::limbs_mod_1(u64 const* a, i32 n, u64 d)
+{
+    CC_ASSERT(d != 0, "division by zero");
+    if (n <= 0)
+        return 0;
+    if (n == 1)
+        return a[0] % d;
+    auto const s = cc::count_leading_zeroes(d);
+    auto const dn = d << s;
+    auto const v = reciprocal_2by1(dn);
+    auto r = (a[n - 1] >> 1) >> (63 - s);
+    for (auto i = n - 1; i >= 0; --i)
+    {
+        auto const below = i > 0 ? a[i - 1] : u64(0);
+        r = div_2by1(r, (a[i] << s) | ((below >> 1) >> (63 - s)), dn, v).remainder;
+    }
+    return r >> s;
 }
 
 u64 tg::impl::limbs_lshift(u64* r, u64 const* a, i32 n, int s)
@@ -555,4 +626,314 @@ void tg::impl::limbs_divrem(u64* q, u64* r, u64 const* a, i32 an, u64 const* b, 
             r[i] = un[i];
     else
         limbs_rshift(r, un, bn, s);
+}
+
+u64 tg::impl::limb_gcd(u64 a, u64 b)
+{
+    if (a == 0)
+        return b;
+    if (b == 0)
+        return a;
+    // far apart, the binary gcd takes a step per bit of the gap; one division closes it
+    if ((a >> 16) > b)
+    {
+        a %= b;
+        if (a == 0)
+            return b;
+    }
+    else if ((b >> 16) > a)
+    {
+        b %= a;
+        if (b == 0)
+            return a;
+    }
+    // the common twos aside, b is kept odd and a is the difference to it, counted from the raw difference:
+    // its trailing zeroes are those of the absolute one, so the count runs beside the min and the abs, not after them
+    auto az = cc::count_trailing_zeroes(a);
+    auto const bz = cc::count_trailing_zeroes(b);
+    auto const twos = az < bz ? az : bz;
+    b >>= bz;
+#if TG_LIMBS_X64_ASM && defined(__BMI2__)
+    // ten instructions a step, where clang's own take thirteen: tzcnt's carry says the difference is zero and ends the loop
+    u64 count = u64(az);
+    u64 d;
+    u64 t;
+    asm("1:\n\t"
+        "shrx %[z], %[a], %[a]\n\t"
+        "mov %[b], %[d]\n\t"
+        "sub %[a], %[d]\n\t"
+        "mov %[a], %[t]\n\t"
+        "sub %[b], %[t]\n\t"
+        "cmovb %[a], %[b]\n\t"
+        "cmovb %[d], %[t]\n\t"
+        "tzcnt %[t], %[z]\n\t"
+        "mov %[t], %[a]\n\t"
+        "jnc 1b"
+        : [a] "+r"(a), [b] "+r"(b), [z] "+r"(count), [d] "=&r"(d), [t] "=&r"(t)
+        :
+        : "cc");
+#else
+    while (a != 0)
+    {
+        a >>= az;
+        auto const d = b - a;
+        az = cc::count_trailing_zeroes(d);
+        auto const lo = a < b ? a : b;
+        a = a < b ? d : a - b;
+        b = lo;
+    }
+#endif
+    return b << twos;
+}
+
+namespace
+{
+/// Two limbs, low first, for the binary gcd of two-limb values.
+struct limb_pair
+{
+    u64 lo;
+    u64 hi;
+};
+
+CC_FORCE_INLINE bool pair_less(limb_pair x, limb_pair y)
+{
+    return x.hi < y.hi || (x.hi == y.hi && x.lo < y.lo);
+}
+
+CC_FORCE_INLINE int pair_trailing_zeroes(limb_pair x)
+{
+    return x.lo != 0 ? cc::count_trailing_zeroes(x.lo) : 64 + cc::count_trailing_zeroes(x.hi);
+}
+
+/// x >> s for 0 <= s < 128, each shift split in two so that s = 0 and s = 64 need no branch.
+CC_FORCE_INLINE limb_pair pair_shr(limb_pair x, int s)
+{
+    if (s >= 64)
+        return {.lo = x.hi >> (s - 64), .hi = 0};
+    return {.lo = (x.lo >> s) | ((x.hi << 1) << (63 - s)), .hi = x.hi >> s};
+}
+
+CC_FORCE_INLINE limb_pair pair_shl(limb_pair x, int s)
+{
+    if (s >= 64)
+        return {.lo = 0, .hi = x.lo << (s - 64)};
+    return {.lo = x.lo << s, .hi = (x.hi << s) | ((x.lo >> 1) >> (63 - s))};
+}
+
+/// gcd of two nonzero two-limb values, binary like limb_gcd; once both fit a limb, limb_gcd finishes.
+limb_pair pair_gcd(limb_pair a, limb_pair b)
+{
+    auto const twos_a = pair_trailing_zeroes(a);
+    auto const twos_b = pair_trailing_zeroes(b);
+    auto const twos = twos_a < twos_b ? twos_a : twos_b;
+    a = pair_shr(a, twos_a);
+    b = pair_shr(b, twos_b);
+    while (a.hi != 0 || b.hi != 0)
+    {
+        if (pair_less(b, a))
+            cc::swap(a, b);
+        auto const d = cc::sub_with_borrow(b.lo, a.lo);
+        b = {.lo = d.value, .hi = b.hi - a.hi - d.borrow};
+        if (b.lo == 0 && b.hi == 0)
+            return pair_shl(a, twos);
+        b = pair_shr(b, pair_trailing_zeroes(b));
+    }
+    return pair_shl({.lo = tg::impl::limb_gcd(a.lo, b.lo), .hi = 0}, twos);
+}
+
+/// The bits [shift, shift + 62) of x[0, n), limbs past n read as zero.
+CC_FORCE_INLINE u64 top_bits(u64 const* x, i32 n, i64 shift)
+{
+    auto const k = i32(shift / 64);
+    auto const o = int(shift % 64);
+    auto const lo = k < n ? x[k] : u64(0);
+    auto const hi = k + 1 < n ? x[k + 1] : u64(0);
+    return ((lo >> o) | ((hi << 1) << (63 - o))) & ((u64(1) << 62) - 1);
+}
+
+/// r[0, n] = u * x - v * y for x, y of n limbs, where the caller knows the result is nonnegative; returns its size.
+CC_FORCE_INLINE i32 combine(u64* r, u64 const* x, u64 const* y, i32 n, u64 u, u64 v)
+{
+    auto const hi = tg::impl::limbs_mul_1(r, x, n, u);
+    auto const borrow = tg::impl::limbs_submul_1(r, y, n, v);
+    r[n] = hi - borrow;
+    return tg::impl::limbs_normalized_size(r, n + 1);
+}
+
+/// The bit width of x[0, n), normalized and n >= 1.
+CC_FORCE_INLINE i64 limbs_bit_width(u64 const* x, i32 n)
+{
+    return i64(n - 1) * 64 + (64 - cc::count_leading_zeroes(x[n - 1]));
+}
+} // namespace
+
+i32 tg::impl::limbs_gcd(u64* g, u64 const* a, i32 an, u64 const* b, i32 bn)
+{
+    CC_ASSERT(an >= 1 && bn >= 1 && a[an - 1] != 0 && b[bn - 1] != 0, "limbs_gcd takes normalized nonzero operands");
+    if (an < bn || (an == bn && limbs_cmp(a, b, an) < 0))
+    {
+        cc::swap(a, b);
+        cc::swap(an, bn);
+    }
+
+    // x >= y throughout, each with room for one limb more and zeros past its size, as the cofactors' sums need
+    // five values of `room` limbs, then a division's scratch of up to two more
+    constexpr i32 stack_limbs = 64;
+    u64 stack[7 * (stack_limbs + 2)];
+    auto heap = cc::vector<u64>();
+    auto const room = an + 2;
+    u64* base = stack;
+    if (room > stack_limbs + 2)
+    {
+        heap.resize_to_uninitialized(7 * isize(room));
+        base = heap.data();
+    }
+    auto* x = base;
+    auto* y = base + room;
+    auto* t = base + 2 * room;
+    auto* u = base + 3 * room;
+    auto* scratch = base + 4 * room; // a quotient, at most an limbs
+    auto* div_scratch = base + 5 * room;
+    for (auto i = 0; i < room; ++i)
+    {
+        x[i] = i < an ? a[i] : 0;
+        y[i] = i < bn ? b[i] : 0;
+    }
+    auto xn = an;
+    auto yn = bn;
+
+    // x = x mod y, then the two swapped: Euclid's own step, for when Lehmer's makes no progress
+    auto const euclid_step = [&]
+    {
+        if (yn == 1)
+        {
+            x[0] = limbs_divrem_1(scratch, x, xn, y[0]);
+            for (auto i = 1; i < xn; ++i)
+                x[i] = 0;
+            xn = x[0] != 0 ? 1 : 0;
+        }
+        else if (xn >= yn)
+        {
+            // the remainder lands in t
+            if (yn == 2)
+                limbs_divrem_2(scratch, t, x, xn, y);
+            else
+                limbs_divrem(scratch, t, x, xn, y, yn, div_scratch);
+            for (auto i = 0; i < room; ++i)
+                x[i] = i < yn ? t[i] : 0;
+            xn = limbs_normalized_size(x, yn);
+        }
+        cc::swap(x, y);
+        cc::swap(xn, yn);
+    };
+
+    while (yn > 2)
+    {
+        // Lehmer's step needs tops of comparable size; far apart, a division gains more
+        auto const x_bits = limbs_bit_width(x, xn);
+        if (x_bits - limbs_bit_width(y, yn) > 32)
+        {
+            euclid_step();
+            continue;
+        }
+
+        // Euclid on the top 62 bits, for as long as the quotients agree with those of the whole (Knuth's Algorithm L)
+        auto const shift = x_bits - 62;
+        auto xt = i64(top_bits(x, xn, shift));
+        auto yt = i64(top_bits(y, yn, shift));
+        i64 m00 = 1;
+        i64 m01 = 0;
+        i64 m10 = 0;
+        i64 m11 = 1;
+        while (yt + m10 != 0 && yt + m11 != 0)
+        {
+            // one division at most: a quotient of 1, Euclid's most common, by a subtraction,
+            // and the second quotient only checked against the first, by a product
+            auto const num0 = u64(xt + m00);
+            auto const den0 = u64(yt + m10);
+            auto const num1 = u64(xt + m01);
+            auto const den1 = u64(yt + m11);
+            auto const q = num0 - den0 < den0 ? u64(1) : num0 / den0;
+            auto const p = cc::umul128(q, den1);
+            if (p.hi != 0 || p.lo > num1 || num1 - p.lo >= den1)
+                break;
+            auto const na = i64(u64(m00) - u64(q) * u64(m10));
+            auto const nb = i64(u64(m01) - u64(q) * u64(m11));
+            auto const ny = i64(u64(xt) - u64(q) * u64(yt));
+            m00 = m10;
+            m01 = m11;
+            m10 = na;
+            m11 = nb;
+            xt = yt;
+            yt = ny;
+        }
+        if (m01 == 0)
+        {
+            euclid_step();
+            continue;
+        }
+
+        // x' = m00 x + m01 y and y' = m10 x + m11 y; each row's cofactors have opposite signs or one is zero,
+        // and both results are nonnegative, so each row is one product less another
+        auto const n = xn;
+        auto const tn = m01 <= 0 ? combine(t, x, y, n, u64(m00), u64(-m01)) : combine(t, y, x, n, u64(m01), u64(-m00));
+        auto const un = m11 <= 0 ? combine(u, x, y, n, u64(m10), u64(-m11)) : combine(u, y, x, n, u64(m11), u64(-m10));
+        // the results take the place of x and y without a copy: combine wrote all n + 1 limbs,
+        // so past each normalized size lie zeros, up to n, and the sizes only shrink
+        cc::swap(x, t);
+        cc::swap(y, u);
+        xn = tn;
+        yn = un;
+        if (xn < yn || (xn == yn && limbs_cmp(x, y, xn) < 0))
+        {
+            cc::swap(x, y);
+            cc::swap(xn, yn);
+        }
+    }
+
+    // two limbs or fewer left in y: one division brings x down to them, then the binary gcd
+    if (yn == 0)
+    {
+        for (auto i = 0; i < xn; ++i)
+            g[i] = x[i];
+        return xn;
+    }
+    if (xn > 2)
+        euclid_step();
+    if (yn == 0)
+    {
+        for (auto i = 0; i < xn; ++i)
+            g[i] = x[i];
+        return xn;
+    }
+    auto const r = pair_gcd({.lo = x[0], .hi = xn > 1 ? x[1] : u64(0)}, {.lo = y[0], .hi = yn > 1 ? y[1] : u64(0)});
+    g[0] = r.lo;
+    if (r.hi != 0)
+    {
+        g[1] = r.hi;
+        return 2;
+    }
+    return 1;
+}
+
+void tg::impl::limbs_divexact_1(u64* q, u64 const* a, i32 n, u64 d)
+{
+    CC_ASSERT(d != 0, "division by zero");
+    // d = d' 2^s with d' odd: a shifted down by s as it is read, then each limb times the inverse of d' modulo 2^64
+    auto const s = cc::count_trailing_zeroes(d);
+    d >>= s;
+    // Newton's iteration doubles the correct low bits each round: 3 * d ^ 2 is right in 5, so four rounds give 64
+    auto inv = (3 * d) ^ 2;
+    for (auto i = 0; i < 4; ++i)
+        inv *= 2 - d * inv;
+    u64 carry = 0;
+    for (auto i = 0; i < n; ++i)
+    {
+        auto const above = i + 1 < n ? a[i + 1] : u64(0);
+        auto const limb = (a[i] >> s) | ((above << 1) << (63 - s));
+        auto const x = cc::sub_with_borrow(limb, carry);
+        auto const qi = x.value * inv;
+        q[i] = qi;
+        carry = cc::umul128(qi, d).hi + x.borrow;
+    }
 }

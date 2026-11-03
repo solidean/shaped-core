@@ -277,6 +277,9 @@ u64 limbs_submul_1(u64* r, u64 const* a, i32 n, u64 b);
 /// q[0, n) = a[0, n) / d, returning the remainder; d != 0, and q may be a.
 u64 limbs_divrem_1(u64* q, u64 const* a, i32 n, u64 d);
 
+/// a[0, n) mod d, d != 0; limbs_divrem_1 without the quotient.
+[[nodiscard]] u64 limbs_mod_1(u64 const* a, i32 n, u64 d);
+
 /// q[0, an - 1) = a / b and r[0, 2) = a % b, for a normalized a with an >= 2 and a divisor of two limbs, b[1] != 0.
 /// Each digit a 3/2 division with the window in registers, so it needs no scratch; q overlaps nothing.
 void limbs_divrem_2(u64* q, u64* r, u64 const* a, i32 an, u64 const* b);
@@ -299,4 +302,15 @@ u64 limbs_lshift(u64* r, u64 const* a, i32 n, int s);
 /// r[0, n) = a[0, n) >> s for 0 < s < 64, returning the bits shifted out at the bottom, in the high bits of the limb.
 /// Runs from the bottom up, so r may be a or lie below it.
 u64 limbs_rshift(u64* r, u64 const* a, i32 n, int s);
+
+/// gcd(a, b) of two limbs, gcd(0, b) = b: Stein's binary gcd, shifts and subtractions without a division.
+[[nodiscard]] u64 limb_gcd(u64 a, u64 b);
+
+/// g = gcd(a, b) for normalized nonzero a and b, returning g's size; g holds min(an, bn) limbs and overlaps neither.
+/// Binary for two limbs, Lehmer's above: each pass runs Euclid on the top 62 bits in a register and applies its cofactors to the whole.
+[[nodiscard]] i32 limbs_gcd(u64* g, u64 const* a, i32 an, u64 const* b, i32 bn);
+
+/// q[0, n) = a[0, n) / d for a d that divides a exactly, d != 0; q may be a.
+/// One product per limb by d's inverse modulo 2^64, where a division by d takes a hardware division per limb.
+void limbs_divexact_1(u64* q, u64 const* a, i32 n, u64 d);
 } // namespace tg::impl
