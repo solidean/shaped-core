@@ -123,7 +123,7 @@ struct sv::render_settings
     /// Switching restarts its image, since the deferred lighting reduces the material and so converges elsewhere.
     /// Deferred by default: its one lighting kernel serves every material, where forward compiles the lighting into each material's own stage,
     /// and it is the faster of the two with many materials (3.9 against 4.5 ms on Bistro; Sponza's few favor forward).
-    hybrid_lighting hybrid_lighting = hybrid_lighting::deferred;
+    sv::hybrid_lighting hybrid_lighting = sv::hybrid_lighting::deferred;
 
     /// How many bounces a `hybrid` layer lights past its primary hit, 1 or 2; `max_bounces` is the tracers' and not read there.
     /// The second lights the surface the first met as a primary hit is lit, by direct light weighed against a bounce of its own,
