@@ -10,6 +10,7 @@ module hybrid
 use material
 use openpbr
 use pt
+use quadric
 use raster
 use scene
 use slug
@@ -362,6 +363,40 @@ fun vertex_of(vertex: int, instance: uint){tracer.traced, tracer.bindless, pass}
     let inst = scene.instance(..tracer.traced.instances[instance as int])
     return raster.vertex_from(inst, instance, vertex, scene.camera(..f.camera), f.near_plane, raster.jitter_shift(jitter_of(f), pass.size))
 
+/// `raster.quadric_vertex_of`, reading the frame and the instance table of `tracer.traced`, and the image's size from `pass`.
+fun quadric_vertex_of(vertex: int, instance: uint, primitive: uint){tracer.traced, tracer.bindless, pass} -> raster.quadric_varyings:
+    let f = tracer.traced.frame[0]
+    let inst = scene.instance(..tracer.traced.instances[instance as int])
+    return raster.quadric_vertex_from(inst, instance, primitive, vertex, scene.camera(..f.camera), f.near_plane, raster.jitter_shift(jitter_of(f), pass.size))
+
+/// `raster.quadric_pixel_of`, reading `tracer.traced` and the image's size from `pass`.
+fun quadric_pixel_of(p: raster.quadric_varyings){tracer.traced, tracer.bindless, pass} -> raster.quadric_pixel:
+    let f = tracer.traced.frame[0]
+    let inst = scene.instance(..tracer.traced.instances[p.instance as int])
+    return raster.quadric_pixel_from(inst, p.primitive, scene.camera(..f.camera), float2(p.position.x, p.position.y) + jitter_of(f), pass.size)
+
+/// The face of the triangle pixel `p` covers, as `raster.face_of` makes it, reading `tracer.traced`.
+fun pixel_face(p: raster.varyings, ctx: material.shading_context, surface: openpbr.surface, supplied_tangent_frame: bool){tracer.traced, tracer.bindless} -> raster.pixel_face:
+    let cam = scene.camera(..tracer.traced.frame[0].camera)
+    let inst = scene.instance(..tracer.traced.instances[p.instance as int])
+    return raster.face_of(inst, ctx, p.world, cam.position, surface, supplied_tangent_frame)
+
+/// The face of the quadric pixel `p` found at `hit`, as `raster.quadric_face_of` makes it, reading `tracer.traced`.
+fun quadric_face(p: raster.quadric_varyings, hit: raster.quadric_pixel, surface: openpbr.surface, supplied_tangent_frame: bool){tracer.traced} -> raster.pixel_face:
+    let cam = scene.camera(..tracer.traced.frame[0].camera)
+    let inst = scene.instance(..tracer.traced.instances[p.instance as int])
+    return raster.quadric_face_of(inst, hit.object_normal, hit.world, cam.position, surface, supplied_tangent_frame)
+
+/// The raster pass's reversed depth at `hit`, which a quadric's pixel writes.
+fun quadric_depth(hit: raster.quadric_pixel){tracer.traced} -> float:
+    let f = tracer.traced.frame[0]
+    let cam = scene.camera(..f.camera)
+    return f.near_plane / dot(hit.world - cam.position, normalize(cam.forward))
+
+/// `raster.quadric_context_of`, reading the instance table of `tracer.traced`.
+fun quadric_context_of(p: raster.quadric_varyings){tracer.traced} -> material.shading_context:
+    return quadric.make_context(scene.instance(..tracer.traced.instances[p.instance as int]), p.primitive)
+
 /// `c`, or black where any channel is not a finite number.
 /// One such sample spreads through the accumulated mean into every later frame, and a denoiser smears it across a block, so it is dropped here, where both lightings write.
 fun finite(c: float3) -> float3:
@@ -379,29 +414,29 @@ fun is_cut(p: raster.varyings, ctx: material.shading_context){tracer.traced, tra
     let px = uint2(p.position.x as uint, p.position.y as uint)
     return raster.coverage_cut(opacity, px, pass.size.x as uint, tracer.traced.frame[0].rng_seed + 1u)
 
-/// The forward lighting: the pixel `p` covers, whose material evaluated to `surface_in`, lit through its full closure by `direct` and one bounce.
+/// The forward lighting: the surface at world point `world` that pixel `pixel` covers, described by `face`, whose material evaluated to `surface_in`, lit through its full closure by `direct` and one bounce.
 ///
-/// The surface is described as `raster.shade` describes it, and the targets are the same.
+/// The targets are `raster.shade`'s.
 /// Baked occlusion is not applied, since the environment's light is shadowed by its own ray here.
-fun shade(p: raster.varyings, ctx: material.shading_context, surface_in: openpbr.surface, supplied_tangent_frame: bool){tracer.traced, tracer.bindless, slug.tables, pass} -> raster.targets:
+///
+/// A generated stage calls `pixel_face` and then this itself, rather than through one more function around both.
+/// Every call is inlined, and a forward stage sits at the limit of how deep that may nest.
+fun shade_face(pixel: float2, world: float3, face: raster.pixel_face, surface_in: openpbr.surface, supplied_tangent_frame: bool){tracer.traced, tracer.bindless, slug.tables, pass} -> raster.targets:
     let f = tracer.traced.frame[0]
     let cam = scene.camera(..f.camera)
-    let inst = scene.instance(..tracer.traced.instances[p.instance as int])
-    let face = raster.face_of(inst, ctx, p.world, cam.position, surface_in, supplied_tangent_frame)
-    let v = normalize(cam.position - p.world)
-    let to_point = p.world - cam.position
+    let v = normalize(cam.position - world)
+    let to_point = world - cam.position
     let view_depth = dot(to_point, normalize(cam.forward))
 
     let mut surface = surface_in
-    tracer.apply_decals(mut surface, p.world, face.n, f.pixel_spread * length(to_point))
+    tracer.apply_decals(mut surface, world, face.n, f.pixel_spread * length(to_point))
     let shading = openpbr.shading_frame(mut surface, face.n, v, face.authored, supplied_tangent_frame)
     let b = openpbr.bsdf_prepare(surface, face.exiting, 3u)
     let wo_local = openpbr.to_local(shading, v)
 
-    let pixel = float2(p.position.x, p.position.y)
     let mut rng = pixel_rng(uint2(pixel.x as uint, pixel.y as uint), pass.size.x as uint)
-    let lit = direct(b, shading, face.n, wo_local, p.world, true, mut rng)
-    let bounced = bounce_from(b, shading, face.n, wo_local, p.world, mut rng)
+    let lit = direct(b, shading, face.n, wo_local, world, true, mut rng)
+    let bounced = bounce_from(b, shading, face.n, wo_local, world, mut rng)
     let followed = is_followed(bounced)
     let s2 = secondary_of(bounced, followed)
     let bounce_lit = direct(s2.b, s2.f, bounced.n, s2.wo_local, bounced.at, followed, mut rng) + secondary_environment(s2.b, s2.f, bounced.n, unless_followed(followed, s2.wo_local), bounced.at, mut rng)
@@ -412,5 +447,5 @@ fun shade(p: raster.varyings, ctx: material.shading_context, surface_in: openpbr
     let color = finite(b.emission + lit + bounced.throughput * (bounced.escaped + bounced.lights + bounce_lit + beyond))
 
     let prev = scene.camera(..f.previous_camera)
-    let motion = pixel + jitter_of(f) - scene.camera_project(prev, p.world - prev.position, pass.size)
+    let motion = pixel + jitter_of(f) - scene.camera_project(prev, world - prev.position, pass.size)
     return raster.lit_targets(color, face.n, view_depth, surface, motion, f.near_plane)

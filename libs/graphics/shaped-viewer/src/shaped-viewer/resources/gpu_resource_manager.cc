@@ -404,11 +404,12 @@ shaders::tracer::instance_record gpu_resource_manager::describe_instance(sg::com
     auto const vertices = pending ? meshes.vertex_pool().raw()->as_raw_readonly() : q.primitives.raw()->as_raw_readonly();
     auto const& cube = meshes.placeholder_geometry();
 
-    // A landed quadric indexes nothing, but the field still has to name something the bound snapshot covers.
+    // A landed quadric indexes nothing, so the field names its boxes, which the raster path draws each primitive as.
+    auto const indices = pending ? meshes.index_pool().raw()->as_raw_readonly() : q.aabbs.raw()->as_raw_readonly();
     return {.param_buffer = u32(acquire_buffer(r.parameters.as_readonly_buffer())),
             .param_offset = 0,
             .vertices = u32(acquire_buffer(vertices)),
-            .indices = u32(acquire_buffer(meshes.index_pool().raw()->as_raw_readonly())),
+            .indices = u32(acquire_buffer(indices)),
             .base_vertex = pending ? u32(cube.base_vertex) : 0u,
             .first_index = pending ? u32(cube.first_index) : 0u,
             .link_mask = ~0u,

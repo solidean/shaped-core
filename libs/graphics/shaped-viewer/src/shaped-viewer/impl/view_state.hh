@@ -151,9 +151,6 @@ struct temporal_slot
     /// What a round of those paths costs, as the frames' own timestamps measured it; a frame budget picks rounds from it.
     wavefront_pacing pacing;
 
-    /// Whether this accumulation slot's raster layer has said that it skips the quadric batches it holds, which it says once.
-    bool raster_skip_reported = false;
-
     /// What each draw of this slot's raster layer was last frame, which its occlusion culling starts from; `raster_frame_desc::visibility`.
     sg::buffer<u32> raster_visibility;
 

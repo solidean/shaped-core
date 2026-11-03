@@ -94,8 +94,11 @@ struct sv::raster_draw
     /// The row of `raster_frame_desc::instance_table` the draw is.
     u32 instance = 0;
 
-    /// How many triangles the row's geometry holds.
+    /// How many triangles the row's geometry holds; 0 for a quadric batch's row.
     u32 triangle_count = 0;
+
+    /// How many primitives the row's quadric batch holds, each drawn as its box; 0 for a mesh's row.
+    u32 primitive_count = 0;
 
     /// Which of `raster_frame_desc::permutations` shades it.
     u32 permutation = 0;
@@ -232,9 +235,12 @@ private:
 
     /// `raster_pass.sgl`'s vertex stage, which every material's pipeline shares.
     sg::compiled_shader _surface_vs;
+    /// The vertex stage of a quadric batch's boxes, beside `_surface_vs`.
+    sg::compiled_shader _quadric_vs;
 
     /// `hybrid_pass.sgl`'s vertex stage, over `tracer.traced`; none where the device does not trace, which declines a `traced` frame.
     cc::optional<sg::compiled_shader> _hybrid_vs;
+    cc::optional<sg::compiled_shader> _hybrid_quadric_vs;
 
     /// The environment pass of `raster_pass.sgl`, into the lit targets and into the thin ones.
     sg::raster_pipeline_handle _environment;

@@ -36,12 +36,11 @@ namespace
 }
 
 // A quadric batch splits what a mesh keeps in one kind of buffer, so the two usages are narrower than geometry_usage.
-// The boxes are build input only — no shader reads them, because an intersection shader cannot reach the boxes its own
-// acceleration structure was built from.
-// The primitives are the opposite: read through the bindless table by the primitive index, and never seen by the hardware.
+// The boxes are the acceleration structure's build input, and the raster path's too: it draws each primitive as its box.
+// The primitives are read through the bindless table by the primitive index, and never seen by the hardware.
 [[nodiscard]] sg::buffer_usages quadric_aabb_usage(sg::context const& ctx)
 {
-    return build_input_usage(ctx) | sg::buffer_usage::copy_dst;
+    return build_input_usage(ctx) | sg::buffer_usage::readonly_buffer | sg::buffer_usage::copy_dst;
 }
 constexpr auto quadric_primitive_usage = sg::buffer_usage::readonly_buffer | sg::buffer_usage::copy_dst;
 
