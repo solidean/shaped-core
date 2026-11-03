@@ -77,6 +77,7 @@ struct material_case
                                 material_attribute_binding::of("specular_roughness", 0.0f)},
                    .forward = enforce::report_only,
                    .deferred = enforce::report_only});
+    // issue: feat-sv-hybrid-subsurface
     out.push_back({.name = "openpbr-subsurface",
                    .type = sv::builtin_material::openpbr,
                    .bindings = {material_attribute_binding::of("subsurface_weight", 1.0f),
