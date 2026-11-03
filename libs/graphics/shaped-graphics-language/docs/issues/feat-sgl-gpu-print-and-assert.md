@@ -55,4 +55,4 @@ The readme lists "assertions, logging, per expression traces" among what SGL off
 Landed by 2026-11-03: stages 1 to 4 on dx12, vulkan and webgpu, with sr's end-to-end test on each.
 Left: metal (Julius), whose SGL edge asks for no records until its backend binds `[[buffer(30)]]`.
 A vertex and a tessellation evaluation stage end a failed assert at a NaN position, and a geometry stage returns (2026-11-03).
-An assert in a tessellation control stage, an any hit or an intersection still records and goes on: zero factors, `ignore` and no report would end them.
+A tessellation control stage ends one at zero edge factors, an any hit at `ignore`, and an intersection with no report.
