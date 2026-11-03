@@ -11,7 +11,7 @@ It sits above `scalar/` and knows nothing of geometry; geometry may instantiate 
 
 - `tg::polynomial<C, Degree>`: one variable, dense, the degree bounded inline or grown in a vector.
 - `tg::multi_polynomial<C, Vars>`: several variables, sparse, the exponents packed into machine words.
-- The monomial orders and variable sets `multi_polynomial` is generic over: `tg::vars<N, Order, Bits>` today, interned symbols next.
+- The monomial orders and variable sets `multi_polynomial` is generic over: `tg::vars<N, Order, Bits>`, and `tg::dynamic_vars<Order>` over `tg::symbol`s.
 - Algorithms on them: arithmetic, evaluation, composition, derivatives, division, gcds, resultants and real roots; rational polynomials next.
 
 ## What does NOT belong here
@@ -107,3 +107,12 @@ The derivative's roots, found the same way, cut [lo, hi] into pieces on which p 
 found by Newton's steps kept inside the bracket by bisection.
 A fixed degree returns a `cc::fixed_vector`, so it never allocates.
 A root of even multiplicity has no sign change; it is found only where p is exactly zero at a critical point.
+
+### Named variables carry their own list
+
+`multi_polynomial<C, dynamic_vars<Order>>` is the computer-algebra mode: variables are `tg::symbol`s, interned names compared by identity.
+Each polynomial carries the sorted list of variables its terms are packed over, in the same 16-bit fields and under the same orders as `vars<>`.
+Operands over different lists are repacked onto their union first; a variable with exponent zero everywhere ranks nothing, so no term moves.
+The list is sorted by the names' bytes, not by the interned identity, so the variable order and the printed form are the same every run.
+The width stays fixed and checked, as `vars<>`'s does, rather than growing: one representation to test, and 32767 is a large exponent.
+Products go through the heap, there being no static box for the dense path; `parse` reads the printed form back.
