@@ -93,3 +93,13 @@ pipeline clamped_draw:
     pixel = clamped_ps
     cull = .none
     format = .rgba8_unorm
+
+binding own_texels:
+    texels: mut image_2d[.r32_uint]
+    seen: mut buffer[uint]
+
+// Each invocation reads back the texel it just stored, which MSL sees only behind a fence (EMIT-151).
+@compute(64) fun store_then_load(@thread_id id: int3){own_texels}:
+    let xy = int2(id.x % 16, id.x / 16)
+    own_texels.texels[xy] = (id.x as uint) * 7u + 5u
+    own_texels.seen[id.x] = own_texels.texels[xy]

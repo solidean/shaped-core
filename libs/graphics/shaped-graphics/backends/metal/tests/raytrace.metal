@@ -38,7 +38,7 @@ struct scene_bindings
 /// what it holds and miss / closest-hit / callable signatures differ.
 struct rt_tables
 {
-    intersection_function_table<instancing, triangle_data> hit [[id(0)]];
+    intersection_function_table<instancing, triangle_data, world_space_data> hit [[id(0)]];
     visible_function_table<void(thread float&)> miss [[id(1)]];
     visible_function_table<void(thread float&, float)> closest_hit [[id(2)]];
     visible_function_table<void(thread float&)> callable [[id(3)]];
@@ -60,7 +60,7 @@ static ray probe_ray(uint tid)
 /// This is the portable trace shape — the one dx12, vulkan and metal all have.
 kernel void trace_inline(device scene_bindings& b [[buffer(0)]], uint tid [[thread_position_in_grid]])
 {
-    intersector<instancing, triangle_data> isect;
+    intersector<instancing, triangle_data, world_space_data> isect;
     auto const hit = isect.intersect(probe_ray(tid), b.scene, 0xFF);
     b.out[tid] = hit.type == intersection_type::none ? -1.0f : hit.distance;
 }
@@ -71,7 +71,7 @@ kernel void trace_inline(device scene_bindings& b [[buffer(0)]], uint tid [[thre
 /// An any-hit function: runs *during* traversal, on non-opaque geometry only, and decides whether a hit counts.
 /// This one rejects every hit, so a scene it is attached to reports a miss where the same geometry marked opaque
 /// reports a hit — which is what makes "the function ran" observable rather than assumed.
-[[intersection(triangle, instancing, triangle_data)]]
+[[intersection(triangle, instancing, triangle_data, world_space_data)]]
 bool any_hit_reject(float distance [[distance]])
 {
     return false;
@@ -102,7 +102,7 @@ kernel void raygen(device scene_bindings& b [[buffer(0)]],
                    device rt_tables& t [[buffer(3)]],
                    uint tid [[thread_position_in_grid]])
 {
-    intersector<instancing, triangle_data> isect;
+    intersector<instancing, triangle_data, world_space_data> isect;
     auto const hit = isect.intersect(probe_ray(tid), b.scene, 0xFF, t.hit);
 
     float payload = 0.0f;
@@ -150,7 +150,7 @@ using recursive_shade = void(thread float&, device recursive_tables*, float);
 
 struct recursive_tables
 {
-    intersection_function_table<instancing, triangle_data> hit [[id(0)]];
+    intersection_function_table<instancing, triangle_data, world_space_data> hit [[id(0)]];
     visible_function_table<void(thread float&)> miss [[id(1)]];
     visible_function_table<recursive_shade> closest_hit [[id(2)]];
     visible_function_table<void(thread float&)> callable [[id(3)]];
@@ -169,7 +169,7 @@ kernel void raygen_recursive(device scene_bindings& b [[buffer(0)]],
                              device recursive_tables& t [[buffer(3)]],
                              uint tid [[thread_position_in_grid]])
 {
-    intersector<instancing, triangle_data> isect;
+    intersector<instancing, triangle_data, world_space_data> isect;
     auto const hit = isect.intersect(probe_ray(tid), b.scene, 0xFF, t.hit);
 
     float payload = 0.0f;

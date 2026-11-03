@@ -27,3 +27,25 @@ binding handoff:
     storage_barrier()
     texture_barrier()
     if li == 0 => handoff.counter[0].add(1u)
+
+binding last_arrival:
+    @coherent values: mut buffer[uint]
+    @coherent arrivals: mut buffer[atomic[uint]]
+    sums: mut buffer[uint]
+    groups: uint
+
+@workgroup binding arrival:
+    order: uint
+
+// Every workgroup publishes its values and counts itself in, and the last to arrive sums what all of them published.
+// So a write another workgroup's barrier failed to publish is a sum that comes out short.
+@compute(64) fun sum_on_last_arrival(@thread_id id: int3, @local_thread_index li: int){last_arrival, arrival}:
+    last_arrival.values[id.x] = (id.x as uint) * 3u + 1u
+    storage_barrier()
+    if li == 0 => arrival.order = last_arrival.arrivals[0].add(1u)
+    if workgroup_uniform_load(arrival.order) == last_arrival.groups - 1u:
+        storage_barrier()
+        let mut total = 0u
+        for g in 0 ..< (last_arrival.groups as int):
+            total += last_arrival.values[g * 64 + li]
+        last_arrival.sums[li] = total

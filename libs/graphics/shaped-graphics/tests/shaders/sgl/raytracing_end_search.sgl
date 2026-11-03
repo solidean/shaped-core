@@ -1,0 +1,64 @@
+// An any hit that ends the search: one ray through eight stacked triangles, and one through eight stacked boxes.
+// Every any hit counts itself into the payload, so a search that went on past the first is a count above one.
+require raytracing_pipeline
+
+binding layered:
+    world: acceleration_structure[.mixed]
+    seen: mut buffer[int4]
+
+struct layers:
+    any_hits: int
+    kind: int
+
+struct slab_attributes:
+    depth: float
+
+rays layer_rays:
+    through: layers
+
+// x = 0 goes through the triangles, x = 1 through the boxes; each cell keeps its count and what it hit
+@raygen fun through_layers(@launch_id id: int3){layered}:
+    let mut p = layers(0, 0)
+    let r = ray(
+        origin = pos3((id.x as float) * 4.0 + 1.0, 1.0, -1.0)
+        direction = vec3(0.0, 0.0, 1.0)
+    )
+    trace(layered.world, r, layer_rays.through, mut p)
+    layered.seen[id.x] = int4(p.any_hits, p.kind, 0, 0)
+
+@miss fun past_layers(p: mut layers):
+    p.kind = 0
+
+@closest_hit fun stop_at_triangle(h: triangle_hit, p: mut layers):
+    p.kind = 1
+
+@any_hit fun end_at_triangle(c: triangle_candidate, p: mut layers) -> hit_decision:
+    p.any_hits += 1
+    return hit_decision.accept_and_end_search
+
+// box k spans z from 14 - 2k to 15 - 2k, so they are stored far to near, and the ray enters each at its near face
+@intersection fun slab(b: procedural_box) -> report[slab_attributes]:
+    let near = 14.0 - 2.0 * (b.primitive_index as float)
+    let t = (near - b.object_ray.origin.z) / b.object_ray.direction.z
+    return report(t = t, attributes = slab_attributes(near))
+
+@any_hit fun end_at_slab(c: procedural_candidate[slab_attributes], p: mut layers) -> hit_decision:
+    p.any_hits += 1
+    return hit_decision.accept_and_end_search
+
+@closest_hit fun stop_at_slab(h: procedural_hit[slab_attributes], p: mut layers):
+    p.kind = 2
+
+hit_group layered_triangles for layer_rays:
+    through = (closest_hit = stop_at_triangle, any_hit = end_at_triangle)
+
+hit_group layered_slabs for layer_rays:
+    geometry = .procedural
+    intersection = slab
+    through = (closest_hit = stop_at_slab, any_hit = end_at_slab)
+
+@raytracing pipeline layered_path:
+    rays = layer_rays
+    raygen = through_layers
+    miss.through = past_layers
+    hit_groups = (layered_triangles, layered_slabs)
