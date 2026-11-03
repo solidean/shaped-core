@@ -627,6 +627,12 @@ p.to_string(names);                                         // "3*x0^2*x1 - x1 +
 using E = tg::multi_polynomial<tg::bigint, tg::vars<3, tg::infinitesimal_order>>;
 e.sign();                                                   // 1 >> e0 >> e0^2 >> e1 >> ...: the leading coefficient's sign
 // An exponent or a graded total degree is at most 2^(Bits-1) - 1; overflow fails in every build, not only with assertions.
+#include <typed-geometry/symbolic/dynamic_polynomial.hh>
+using Q = tg::multi_polynomial<tg::bigint, tg::dynamic_vars<>>;  // variables by name, each polynomial its own list; grevlex
+auto x = tg::symbol("x"); Q::variable(x); Q::parse("3*x^2*y - y + 1"); // parse -> cc::optional<Q>; p.to_string() prints it back
+p + q; p * q; p == q;                                       // over different variables: both repacked onto the union first
+p.degree(x); p.exponent(t, x); p.variables(); p({{x, 2}, {y, 3}}); p.evaluate(span_of_assignments);
+derivative(p, x); substitute(p, x, q);                      // q a polynomial or a constant
 // The infinitesimal order is local (1 is the largest monomial): it ranks for signs, not for division.
 ```
 

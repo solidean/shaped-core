@@ -27,6 +27,17 @@ struct infinitesimal_order;
 template <int N, class Order = grevlex_order, int Bits = 16>
 struct vars;
 
+/// a named variable of a computer-algebra polynomial, interned (see symbolic/symbol.hh).
+struct symbol;
+
+/// a value for a variable, to evaluate or substitute by (see symbolic/symbol.hh).
+template <class X>
+struct assignment;
+
+/// variables known only at run time, as symbols, each polynomial carrying its own (see symbolic/dynamic_polynomial.hh).
+template <class Order = grevlex_order>
+struct dynamic_vars;
+
 /// a sparse polynomial over coefficients C in the variables Vars (see symbolic/multi_polynomial.hh).
 template <class C, class Vars>
 struct multi_polynomial;
