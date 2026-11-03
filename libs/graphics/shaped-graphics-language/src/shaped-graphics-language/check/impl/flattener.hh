@@ -504,6 +504,18 @@ struct flattener
     /// `f(args)` where `f` is a parameter of function type: the function it was handed, inlined here (CHK-319).
     flat_expr_id flatten_closure_call(ast::expr_id id, type_id type, i32 handed, call_record const& record);
 
+    /// PROTOTYPE: `fwd_diff` or `bwd_diff` of core.sgl, whose derivative flatten_diff.cc writes in place of its body.
+    [[nodiscard]] bool is_diff_call(symbol_id callee) const;
+
+    flat_expr_id flatten_diff(ast::expr_id id, type_id type, call_record const& record);
+
+    /// Set while `bwd_diff` inlines its function: every `for` with constant bounds is unrolled, since a reverse pass
+    /// visits each statement at most once.
+    bool unrolls_constant_loops = false;
+
+    /// Why the tree failed, where a pass knows better than CHK-213's words; empty otherwise.
+    cc::string failure_detail;
+
     /// `by_target(native, emulated)` of raytracing.sgl: both lambdas written out, each a block, and one node holding both.
     [[nodiscard]] bool is_by_target(symbol_id callee) const;
 

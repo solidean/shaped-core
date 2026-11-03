@@ -709,7 +709,10 @@ void checker::flatten_test(i32 index)
                cc::format("{} takes derivatives across a quad of pixels, and a test runs one invocation",
                           out.at(v.callee).name));
     if (f.is_failed && !f.meets_error)
-        unsupported(test.file, test.where, "a test whose body reaches a construct the flat tree cannot hold yet");
+        unsupported(test.file, test.where,
+                    f.failure_detail.empty() ? cc::string("a test whose body reaches a construct the flat tree cannot "
+                                                          "hold yet")
+                                             : f.failure_detail);
     if (f.is_failed || !f.stage_violations.empty() || !f.ray_stage_calls.empty() || !f.subgroup_calls.empty())
         return;
     f.entry.body = f.root_body();
@@ -1088,8 +1091,10 @@ void checker::flatten_entry_point(symbol_id id, traversal_request const* travers
             // the construct itself, and the entry point it was reached from, however many calls deep
             auto const at = f.first_failure.value();
             auto const where = ast::is_valid(at.expr) ? span_of(at.file, at.expr) : span_of(at.file, at.stmt);
-            auto& d = report(diagnostic_kind::unsupported_yet, at.file, where,
-                             "a construct the flat tree cannot hold yet, here");
+            auto& d = report_of_entry(diagnostic_kind::unsupported_yet, at.file, where,
+                                      f.failure_detail.empty()
+                                          ? cc::string("a construct the flat tree cannot hold yet, here")
+                                          : f.failure_detail);
             d.notes.push_back({.file = s.file,
                                .where = name,
                                .message = cc::format("reached from the {} entry point {}",

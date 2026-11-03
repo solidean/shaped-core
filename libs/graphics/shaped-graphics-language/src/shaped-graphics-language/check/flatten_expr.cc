@@ -716,6 +716,8 @@ auto sgl::check::impl::flattener::flatten_bound_call(ast::expr_id id, type_id ty
 {
     if (is_by_target(record.callee))
         return flatten_by_target(id, type, record);
+    if (is_diff_call(record.callee))
+        return flatten_diff(id, type, record);
     if (auto const texel = atomic_texel_of(record); ast::is_valid(texel))
         return flatten_texel_atomic(id, type, record, texel);
     auto const values = flatten_written(c.out.at(record.written));

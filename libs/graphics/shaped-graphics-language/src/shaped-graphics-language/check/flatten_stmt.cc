@@ -456,7 +456,7 @@ void sgl::check::impl::flattener::flatten_inclusive_for(origin from,
         return;
     }
     auto const int_type = entry.at(first).type;
-    auto const unrolls = is_unrolled(id);
+    auto const unrolls = is_unrolled(id) || (unrolls_constant_loops && constant_int(first).has_value());
     if (auto const high = constant_int(last); high.has_value() && high.value() < 2147483647)
     {
         auto const end = add_expr(int_type, loop.iterable, flat_int_literal{.value = high.value() + 1});
@@ -635,7 +635,7 @@ void sgl::check::impl::flattener::flatten_for(origin from, ast::stmt_id id, ast:
     auto const end = flatten_expr(r->last);
     if (sgl::is_valid(r->op) && c.text_of(file(), c.file_of(file()).at(r->op).where) == "..=")
         return flatten_inclusive_for(from, id, loop, first, end);
-    if (is_unrolled(id))
+    if (is_unrolled(id) || (unrolls_constant_loops && constant_int(first).has_value() && constant_int(end).has_value()))
         return flatten_unrolled_for(from, id, loop, first, end);
     flatten_looped_for(from, id, loop, first, end);
 }
@@ -798,6 +798,14 @@ void sgl::check::impl::flattener::flatten_expr_stmt(origin from, ast::expr_id va
         && tables().type_at(value) == checked_module::void_type)
     {
         auto const& r = c.out.call_records[record];
+        if (is_diff_call(where.symbol))
+        {
+            auto const derived = flatten_diff(value, checked_module::void_type, r);
+            if (!is_valid(derived))
+                return;
+            auto const b = entry.at(derived).node.as<flat_block>();
+            return add_stmt(from, flat_block{.label = b.label, .body = b.body});
+        }
         auto const values = flatten_written(c.out.at(r.written));
         // a function argument is handed over as a closure, and a generic callee takes its type arguments
         auto const handed = written_closures;

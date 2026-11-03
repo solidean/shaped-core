@@ -51,6 +51,37 @@ test bwd_diff(splat_cov2)(...) ~= central_difference(splat_cov2, ...)
   That loop gets a `@derivative` written by hand, and the per-step math inside it is still derived.
 * An SSIM loss is a convolution, which differentiates without help.
 
+**Differentiable rendering is the other case it is for**, and it asks two things more of the design.
+A trace is no differentiable operation: visibility is `no_diff`, and what is shaded behind the hit is derived.
+A path's loop has no bound, so it can keep no tape, and its derivative is written by hand in the manner of path replay: the path traced again, the adjoint carried along it.
+So `@derivative` is part of the first design, not an extension of it, and nothing may assume that every loop is bounded.
+
+## The prototype
+
+A prototype is built: [flatten_diff.cc](../../../src/shaped-graphics-language/check/flatten_diff.cc), and its tests are [corpus/derivatives/](../../../tests/corpus/derivatives).
+They hold both modes to central differences, among them the whole gradient of one Gaussian splat's opacity at a pixel, whose backward kernel every target writes.
+
+* **The surface is generic prelude functions**, so the check pass is untouched.
+  `fwd_diff(f, a, da, b, db)` gives the tangent of the result, and `bwd_diff(f, a, mut da, b, mut db, dr)` adds each adjoint to the caller's place.
+  Adding rather than returning settled the first open question below: it is what accumulating a gradient wants, and a test starts its places at zero.
+  The flattener writes the derivative where the call stands, as it does for `by_target`.
+* **One rule per builtin serves both modes.**
+  `derive` writes a tangent as linear operations over primal values, and reverse mode **transposes** that linear expression, as JAX linearizes and then transposes.
+  So a new builtin needs only its forward rule, and only the linear primitives have a transpose: `+`, `-`, `*`, `/` by a value, `dot`, `cross`, `transpose`, `select`, constructions and fields.
+* **Reverse mode runs on straight structured code.**
+  Every loop of constant bounds is unrolled as `@unroll` would, every declaration is hoisted, every early leave becomes a flag that guards what follows it, and every condition is recorded.
+  Each statement then runs at most once, so the backward sweep needs no tape: it restores what each statement overwrote from a save, and transposes that statement's tangent.
+  A loop of any other bound is `unsupported-yet`, and forward mode follows every loop.
+* **A tangent is of its value's own type**, which is the prototype's largest simplification: a `pos3`'s tangent should be a `vec3`, and `mat4 * pos3` is refused for that reason.
+
+What it found in SGL itself:
+
+* **The prelude's matrices have no `+`, `-` nor scale by a scalar.**
+  A product rule over matrices needs all three, so the transform writes them column by column ([debt-sgl-matrix-arithmetic](../../issues/debt-sgl-matrix-arithmetic.md)).
+  They belong in the registry.
+* The emitted text is long, about 800 lines of HLSL for the splat's backward kernel, and DXC folds it to a DXIL of about the primal's size.
+  A save of a local that is assigned once, and a flag that nothing reads after it, are what to cut first.
+
 ## What it touches
 
 * **Types**: which types are differentiable, and each one's **tangent type**.
@@ -78,18 +109,16 @@ test bwd_diff(splat_cov2)(...) ~= central_difference(splat_cov2, ...)
 
 ## The order to build it in
 
-1. Differentiable types and tangent types, with nothing to differentiate yet.
-2. Forward mode over straight-line code and `if`, with the derivative rules of the arithmetic builtins and the corpus tests against central differences.
-3. Reverse mode over the same, `no_diff`, and `@derivative`.
-4. Loops with a constant bound.
-5. Adjoints accumulated across invocations, once float atomics or a reduction pattern exist.
+The prototype has done forward mode, reverse mode, and loops of constant bounds; tangent types are what it skipped.
 
-Until step 3 lands, a backward kernel is written by hand and checked against central differences on the interpreter, which is what step 3 later replaces.
+1. Tangent types: a geometry type's tangent its direction type.
+2. `no_diff`, and a parameter that is not differentiated taking no tangent at the call.
+3. `@derivative`, which differentiable rendering needs before anything else.
+4. The rules as registry records, and the matrix arithmetic in the registry.
+5. Adjoints accumulated across invocations, once float atomics or a reduction pattern exist.
 
 ## Open
 
-* **What `bwd_diff f` returns**: a struct of adjoints named after the parameters, a structural tuple ([structural-types.md](structural-types.md)), or `mut` parameters it adds to.
-  Adding to the caller's adjoints suits accumulation, and returning them suits a test.
 * **How a call marks the parameters it does not differentiate**: per call as in the sketch, per declaration with `no_diff` on the parameter, or both.
 * **Whether a tape may spill** to a buffer for a long bounded loop, or the bound is limited to what fits in registers and the rest needs a `@derivative`.
 * **Accumulation across invocations**: a float atomic add behind a feature, a compare-exchange loop on the bits as a polyfill, or a subgroup reduction first and one atomic per subgroup.

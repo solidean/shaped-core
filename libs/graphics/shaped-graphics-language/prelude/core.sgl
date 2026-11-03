@@ -113,6 +113,30 @@ fun int4.from_bits(u: uint4) => reinterpret_as_int(u)
 
 fun nearly_equal(a: float, b: float, .within: float) => abs(a - b) <= within
 
+// ---- derivatives ----------------------------------------------------------------------------------------------------
+//
+// PROTOTYPE (docs/spec/incubator/autodiff.md): the flattener writes these calls' derivatives, and never their bodies.
+// The bodies only check, which is what lets a generic declaration stand for every `f`.
+// A tangent and an adjoint are of their value's own type for now.
+//
+// `fwd_diff(f, x, dx)` is the derivative of `f` at `x` in the direction `dx`: what `f` changes by, per unit of `dx`.
+// `bwd_diff(f, x, dx, dy)` adds to each `dx` what `f`'s result changing by `dy` asks of that parameter.
+
+fun fwd_diff[A, R](f: (A) -> R, a: A, da: A) -> R => f(a)
+fun fwd_diff[A, B, R](f: (A, B) -> R, a: A, da: A, b: B, db: B) -> R => f(a, b)
+fun fwd_diff[A, B, C, R](f: (A, B, C) -> R, a: A, da: A, b: B, db: B, c: C, dc: C) -> R => f(a, b, c)
+fun fwd_diff[A, B, C, D, R](f: (A, B, C, D) -> R, a: A, da: A, b: B, db: B, c: C, dc: C, d: D, dd: D) -> R =>
+    f(a, b, c, d)
+
+fun bwd_diff[A, R](f: (A) -> R, a: A, da: mut A, dr: R):
+    da = da
+fun bwd_diff[A, B, R](f: (A, B) -> R, a: A, da: mut A, b: B, db: mut B, dr: R):
+    da = da
+fun bwd_diff[A, B, C, R](f: (A, B, C) -> R, a: A, da: mut A, b: B, db: mut B, c: C, dc: mut C, dr: R):
+    da = da
+fun bwd_diff[A, B, C, D, R](f: (A, B, C, D) -> R, a: A, da: mut A, b: B, db: mut B, c: C, dc: mut C, d: D, dd: mut D, dr: R):
+    da = da
+
 // ---- the raster pipeline description --------------------------------------------------------------------------------
 //
 // What a `pipeline` declaration's settings are paths into: sg::raster_pipeline_description, with sg's names and nesting.

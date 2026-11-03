@@ -1,0 +1,107 @@
+// PROTOTYPE (docs/spec/incubator/autodiff.md): `fwd_diff` and `bwd_diff`, held to the derivatives written by hand.
+// `fwd_diff(f, x, dx)` is how `f` changes along `dx`; `bwd_diff(f, x, mut dx, dr)` adds to `dx` what `dr` asks of `x`.
+
+fun square(x: float) => x * x
+fun poly(x: float, y: float) => x * x * y + sin(y)
+
+test fwd_diff(square, 3.0, 1.0) == 6.0
+test nearly_equal(fwd_diff(poly, 2.0, 1.0, 0.5, 0.0), 2.0, within = 1e-5)
+test nearly_equal(fwd_diff(poly, 2.0, 0.0, 0.5, 1.0), 4.0 + cos(0.5), within = 1e-5)
+
+test:
+    let mut dx = 0.0
+    bwd_diff(square, 3.0, mut dx, 1.0)
+    dx == 6.0
+
+// an adjoint is added to what the place held, so gradients accumulate
+test:
+    let mut dx = 1.0
+    let mut dy = 0.0
+    bwd_diff(poly, 2.0, mut dx, 0.5, mut dy, 2.0)
+    nearly_equal(dx, 5.0, within = 1e-5)
+    nearly_equal(dy, 2.0 * (4.0 + cos(0.5)), within = 1e-5)
+
+// an early return: each side of the branch has its own derivative
+fun ramp(x: float) -> float:
+    if x < 0.0 => return 0.0
+    let y = x * 3.0
+    return y * y
+
+test fwd_diff(ramp, -1.0, 1.0) == 0.0
+test fwd_diff(ramp, 1.0, 1.0) == 18.0
+test:
+    let mut above = 0.0
+    bwd_diff(ramp, 1.0, mut above, 1.0)
+    let mut below = 0.0
+    bwd_diff(ramp, -1.0, mut below, 1.0)
+    above == 18.0
+    below == 0.0
+
+// a local overwritten in a loop: backward unrolls the loop and restores each value it overwrote
+fun energy(v: float3) -> float:
+    let mut e = 0.0
+    for i in 0 ..< 3:
+        e = e * v.z + v.x * v.y
+    return e + length(v)
+
+fun central_difference(v: float3, axis: float3) => (energy(v + axis * 1e-3) - energy(v - axis * 1e-3)) / 2e-3
+
+fun agrees(v: float3, axis: float3) -> bool:
+    let numeric = central_difference(v, axis)
+    let mut gradient = float3(0.0)
+    bwd_diff(energy, v, mut gradient, 1.0)
+    let tolerance = 1e-3 + 1e-3 * abs(numeric)
+    return nearly_equal(fwd_diff(energy, v, axis), numeric, within = tolerance)
+        and nearly_equal(dot(gradient, axis), numeric, within = tolerance)
+
+test agrees(float3(1.0, 2.0, 0.5), float3(1.0, 0.0, 0.0))
+test agrees(float3(1.0, 2.0, 0.5), float3(0.0, 1.0, 0.0))
+test agrees(float3(1.0, 2.0, 0.5), float3(0.0, 0.0, 1.0))
+
+// the builtins with a rule, each along one direction, against a central difference
+fun spread(x: float3) => dot(normalize(x), float3(0.3, -0.2, 0.9)) + length(cross(x, float3(0.0, 1.0, 0.5)))
+    + dot(exp(x * 0.1) + sqrt(abs(x) + 1.0) + sin(x) * cos(x), float3(1.0))
+    + atan2(x.y, x.x) + pow(abs(x.z) + 1.0, 1.5) + distance(x, float3(1.0)) + mix(x.x, x.y, x.z)
+    + clamp(x.x, -0.5, 0.5) + max(x.y, 0.0) + tanh(x.z) + log(x.x * x.x + 1.0)
+
+fun spread_agrees(v: float3, axis: float3) -> bool:
+    let numeric = (spread(v + axis * 1e-3) - spread(v - axis * 1e-3)) / 2e-3
+    let mut gradient = float3(0.0)
+    bwd_diff(spread, v, mut gradient, 1.0)
+    let tolerance = 1e-2 + 1e-2 * abs(numeric)
+    return nearly_equal(fwd_diff(spread, v, axis), numeric, within = tolerance)
+        and nearly_equal(dot(gradient, axis), numeric, within = tolerance)
+
+test spread_agrees(float3(0.7, 0.3, -0.4), float3(1.0, 0.0, 0.0))
+test spread_agrees(float3(0.7, 0.3, -0.4), float3(0.0, 1.0, 0.0))
+test spread_agrees(float3(0.7, 0.3, -0.4), float3(0.0, 0.0, 1.0))
+test spread_agrees(float3(0.7, 0.3, -0.4), float3(0.6, -0.8, 0.3))
+
+// what it cannot differentiate is a diagnostic, never a zero
+fun until_small(x: float) -> float:
+    let mut y = x
+    while y > 1.0:
+        y = y * 0.5
+    return y
+
+binding gradients:
+    values: mut buffer[float]
+
+@expect(error = "unsupported-yet")
+@compute(1) fun refuses_a_loop_backward(){gradients}:
+    let mut dx = 0.0
+    bwd_diff(until_small, gradients.values[0], mut dx, 1.0)
+    gradients.values[1] = dx
+
+// a loop of any kind runs forward, where nothing has to be kept
+test fwd_diff(until_small, 5.0, 1.0) == 0.125
+
+// a tangent is of its value's own type for now, so a position's tangent through a matrix would wrongly take the translation
+fun projected(p: pos3) => mat4(float4(1.0, 0.0, 0.0, 0.0), float4(0.0, 1.0, 0.0, 0.0), float4(0.0, 0.0, 1.0, 0.0), float4(2.0, 0.0, 0.0, 1.0)) * p
+
+binding positions:
+    values: mut buffer[hpos4]
+
+@expect(error = "unsupported-yet")
+@compute(1) fun refuses_a_position_through_a_matrix(){positions}:
+    positions.values[0] = fwd_diff(projected, pos3(1.0), pos3(1.0))
