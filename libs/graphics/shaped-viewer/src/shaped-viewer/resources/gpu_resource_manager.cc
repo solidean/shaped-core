@@ -389,8 +389,6 @@ shaders::tracer::instance_record gpu_resource_manager::describe_instance(sg::com
     CC_ASSERT(contains_instance(instance), "no such instance_id");
     auto& r = _instances[isize(u32(instance))];
 
-    _upload_parameters(cmd, r);
-
     // A pending batch is traced as the placeholder CUBE through the triangle fallback, so its record has to name the
     // cube's range of the pools — exactly as the mesh overload below does, and for the same reason: the triangle closest hit reads the hit
     // triangle's three corners back out of `inst.vertices` to recompute the geometric normal.
@@ -400,13 +398,23 @@ shaders::tracer::instance_record gpu_resource_manager::describe_instance(sg::com
     // still filling waits for the whole transfer to land, and the first frames would pay that for bytes the placeholder
     // never reads.
     // The cube is uploaded directly rather than streamed, so it is never the thing being waited on.
-    auto const pending = q.state != residency::complete;
+    // A batch whose attributes still stream is the cube too, as the resolve draws it: its parameter block would bind them.
+    auto const pending = q.state != residency::complete || !attributes_resident(instance);
     auto const vertices = pending ? meshes.vertex_pool().raw()->as_raw_readonly() : q.primitives.raw()->as_raw_readonly();
     auto const& cube = meshes.placeholder_geometry();
 
+    // The cube shades through the fallback, which reads no parameter block, so none is built: building it binds the attributes.
+    // The index pool fills the slot, since a record has to name some buffer there.
+    auto param_buffer = u32(acquire_buffer(meshes.index_pool().raw()->as_raw_readonly()));
+    if (!pending)
+    {
+        _upload_parameters(cmd, r);
+        param_buffer = u32(acquire_buffer(r.parameters.as_readonly_buffer()));
+    }
+
     // A landed quadric indexes nothing, so the field names its boxes, which the raster path draws each primitive as.
     auto const indices = pending ? meshes.index_pool().raw()->as_raw_readonly() : q.aabbs.raw()->as_raw_readonly();
-    return {.param_buffer = u32(acquire_buffer(r.parameters.as_readonly_buffer())),
+    return {.param_buffer = param_buffer,
             .param_offset = 0,
             .vertices = u32(acquire_buffer(vertices)),
             .indices = u32(acquire_buffer(indices)),

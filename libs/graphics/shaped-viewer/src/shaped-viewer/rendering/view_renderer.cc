@@ -183,7 +183,8 @@ resolved_view resolve_scene(sg::command_list& cmd, layer const& l, gpu_resource_
 
             // A batch still streaming keeps its place as a box, exactly as a mesh does, and one that declared no extent is
             // skipped for the same reason: there is no honest place to draw it.
-            auto const pending = set->state != residency::complete;
+            // So does one whose attributes still stream: its parameter block would bind them, stalling the frame until they land.
+            auto const pending = set->state != residency::complete || !resources.attributes_resident(item.instance);
             if (pending && !set->bounds.has_value())
                 continue;
 
