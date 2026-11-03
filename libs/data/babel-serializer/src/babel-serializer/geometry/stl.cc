@@ -1,11 +1,10 @@
+#include <babel-serializer/geometry/impl/parse_number.hh>
 #include <babel-serializer/geometry/stl.hh>
 #include <clean-core/common/endian.hh> // cc::load_bytes_le
 #include <clean-core/common/profiling.hh>
 #include <clean-core/common/utility.hh> // cc::move
 #include <clean-core/string/char_predicates.hh>
 #include <clean-core/string/format.hh>
-
-#include <babel-serializer/geometry/impl/parse_number.hh>
 
 // STL, in both containers.
 //
