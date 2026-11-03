@@ -301,6 +301,7 @@ sc_add_shader_package(
         fsr_clear_uint.sgl:*
         metalfx_prepare.sgl:*
         metalfx_copy_out.sgl:*
+        dlss_specular_hit_distance.sgl:*
         box_filter_mipmap.sgl:*
 )
 

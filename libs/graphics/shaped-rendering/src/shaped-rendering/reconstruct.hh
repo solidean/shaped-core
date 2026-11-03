@@ -91,7 +91,9 @@ enum class sr::reconstruct_guide : sg::u8
     /// The surface's own motion, in input pixels, in rg: where this frame's sample was traced minus where that
     /// surface was last frame, so a still camera reports zero whatever the jitter.
     motion,
-    hit_distance, ///< distance to the first secondary hit, in r
+    /// How far each lobe's ray travelled from the primary hit to the first secondary hit: the diffuse ray's in r, the specular ray's in g.
+    /// nrd reads both, and dlss_rr the specular one, beside the camera's own matrices, to reproject reflections at their own depth.
+    hit_distance,
 
     split_diffuse_specular, ///< radiance arrives as two textures (`color` diffuse, `specular` specular) rather than one
 };

@@ -93,6 +93,10 @@ binding thin_io:
     let color = hybrid.finite(float3(emission.x, emission.y, emission.z) + lit + bounced.throughput * (bounced.escaped + bounced.lights + bounce_lit + beyond))
 
     tracer.traced.output.store(px, float4(..color, 1.0))
+    // Where the bounce went, in its lobe's half, as the tracer writes it: 1e4 for an escape, and 0 for the half no direction was drawn from.
+    if f.write_hit_distance != 0u:
+        let distance = if not bounced.drawn => 0.0 else (if bounced.hit => length(bounced.at - p) else 1e4)
+        tracer.traced.guide_hit_distance[px] = if bounced.specular => float2(0.0, distance) else float2(distance, 0.0)
     tracer.traced.guide_normal.store(px, float4(..n, 0.0))
     tracer.traced.guide_albedo.store(px, float4(..openpbr.pt_diffuse_albedo(surface), 0.0))
     tracer.traced.guide_specular_albedo.store(px, float4(..openpbr.pt_specular_albedo(surface), 0.0))

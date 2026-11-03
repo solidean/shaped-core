@@ -165,6 +165,9 @@ struct frame_constants:
 
     /// whether to write `frame_diffuse`, `frame_specular` and `guide_hit_distance`, for a split-signal denoiser
     write_split: uint
+
+    /// whether the hybrid's deferred kernel writes `guide_hit_distance` for a temporal member that reads it, without the split
+    write_hit_distance: uint
     /// whether to write `primary_depth`, at the camera's `near_plane`
     write_primary_depth: uint
     near_plane: float

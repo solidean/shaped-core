@@ -111,6 +111,9 @@ struct bounce:
     /// whether it refracted on the way, through the primary hit's own glass or any solid glass after it, which spends no bounce
     /// What it met is then followed by a bounce of its own, `is_followed`.
     through_glass: bool
+    /// whether a direction was drawn at all, and whether from the specular half of the closure, `openpbr.bsdf_lobe_is_specular`
+    drawn: bool
+    specular: bool
 
 /// One bounce from `p`: a direction drawn from the closure `b`, traced inline to what it meets.
 ///
@@ -127,6 +130,8 @@ fun bounce_from(b: openpbr.bsdf, f: openpbr.frame, n: float3, wo_local: float3, 
     let sampled = openpbr.to_world(f, s.direction)
     // the shading normal bent the direction to the other side of the face than it was drawn for
     if (dot(sampled, n) < 0.0) != refracts => return result
+    result.drawn = true
+    result.specular = openpbr.bsdf_lobe_is_specular(s.lobe)
 
     let origin = pt.offset_ray(p, if refracts => -n else n)
     let weight_pdf = if refracts => 1e30 else s.pdf
@@ -139,7 +144,7 @@ fun bounce_from(b: openpbr.bsdf, f: openpbr.frame, n: float3, wo_local: float3, 
 
 /// A bounce that has not happened: nothing carried, nothing met.
 fun no_bounce() -> bounce:
-    return bounce(float3(0.0), float3(0.0), float3(0.0), false, float3(0.0), float3(0.0, 1.0, 0.0), float3(0.0, 0.0, 1.0), float3(0.5), -1.0, 0.0, 1.0, false)
+    return bounce(float3(0.0), float3(0.0), float3(0.0), false, float3(0.0), float3(0.0, 1.0, 0.0), float3(0.0, 0.0, 1.0), float3(0.5), -1.0, 0.0, 1.0, false, false, false)
 
 /// `bounce_from` for a closure that refracts nowhere: one direction reflected off it, and one trace, with no glass to pass.
 /// It is the second bounce, from the surface the first met, whose closure `secondary_of` makes with no transmission, so a second `bounce_from` would only inline code nothing runs.

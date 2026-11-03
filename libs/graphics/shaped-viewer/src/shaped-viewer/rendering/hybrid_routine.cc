@@ -100,6 +100,7 @@ sg::routine_outcome hybrid_routine::execute(sg::command_list& cmd, hybrid_frame_
         .guide_albedo = deferred ? t.albedo : sg::texture_2d(),
         .guide_specular_albedo = deferred ? t.specular_albedo : sg::texture_2d(),
         .guide_roughness = deferred ? t.roughness : sg::texture_2d(),
+        .guide_hit_distance = deferred ? t.hit_distance : sg::texture_2d(),
         .instance_table = d.instance_table,
         .lights = lights,
         .emitters = d.emitters,
