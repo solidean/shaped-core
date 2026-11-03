@@ -36,7 +36,7 @@ bool sgl::check::impl::writes_outside(flat_entry_point const& e, ast::range_of<f
             assign != nullptr && is_known(e, assign->place) && e.at(assign->place).node.is<flat_buffer_element>())
             return true;
         auto result = false;
-        for_each_expr_of(s, [&](flat_expr_id x) { result = result || writes_outside(e, x, depth + 1); });
+        for_each_expr_of(e, s, [&](flat_expr_id x) { result = result || writes_outside(e, x, depth + 1); });
         for_each_body_of(
             e, s, [&](ast::range_of<flat_stmt_id> inner) { result = result || writes_outside(e, inner, depth + 1); });
         if (result)
@@ -839,6 +839,20 @@ void checker::flatten_entry_point(symbol_id id, traversal_request const* travers
             {
                 f.fused.value().payload = f.add_local(local_kind::parameter, "payload", traversal->payload);
                 f.entry.input = traversal->payload;
+            }
+            if (is_valid(traversal->any_hit))
+            {
+                // a report's `is_hit` is the one bool at hand, since `bool` is a builtin rather than a prelude struct
+                auto boolean = type_id::none;
+                for (auto const& m : out.at(out.at(info.result).members))
+                    if (m.name == "is_hit")
+                        boolean = m.type;
+                auto const ends = f.add_local(local_kind::var, "ends_search", boolean);
+                f.add_stmt({.file = s.file, .expr = ast::expr_id::none},
+                           flat_var{.local = ends,
+                                    .value = f.add_expr(boolean, ast::expr_id::none, flat_bool_literal{.value = false})});
+                f.fused.value().ends_search = ends;
+                f.entry.ends_search = ends;
             }
         }
         for (auto const& parameter : parameters)

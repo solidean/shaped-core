@@ -60,12 +60,14 @@ ASYNC_INVOCABLE_TEST("sv - a frame mesh uploads once per epoch, names its own bu
     auto const& other = resources.acquire_frame_mesh(*cmd, b.geometry, true);
     CHECK(other.vertices.raw() != first_vertices);
 
-    // its record names its own vertices, not the placeholder's
+    // its record names its own buffers from their start, not the central pool every resident mesh and the placeholder share
     auto const& mine = resources.acquire_frame_mesh(*cmd, a.geometry, true);
     auto const record = resources.describe_instance(*cmd, mine, item.instance);
     CHECK(record.vertices == u32(resources.acquire_buffer(mine.vertices.raw()->as_raw_readonly())));
-    CHECK(record.vertices
-          != u32(resources.acquire_buffer(resources.meshes.placeholder_vertices().raw()->as_raw_readonly())));
+    CHECK(record.indices == u32(resources.acquire_buffer(mine.indices.raw()->as_raw_readonly())));
+    CHECK(record.base_vertex == 0u);
+    CHECK(record.first_index == 0u);
+    CHECK(record.vertices != u32(resources.acquire_buffer(resources.meshes.vertex_pool().raw()->as_raw_readonly())));
     ctx.submit_command_list(cc::move(cmd));
     ctx.advance_epoch();
     (void)co_await ctx.idle_completion();

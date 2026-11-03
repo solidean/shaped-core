@@ -115,7 +115,18 @@ public:
         bool held_write = false;
     };
 
-    explicit dx12_texture_access(sg::subresource_extent extent) : _current(extent) {}
+    /// Every subresource starts in `resting`: `general` for a committed texture, which D3D12 creates in COMMON.
+    /// A placed one starts `undefined`, so its first transition discards, which is how D3D12 requires a placed texture to be initialized.
+    explicit dx12_texture_access(sg::subresource_extent extent, sg::texture_layout resting = sg::texture_layout::general)
+      : _current(extent)
+    {
+        _current.for_each_in(sg::subresource_range::whole(extent),
+                             [&](sg::resource_access_state& state)
+                             {
+                                 state.curr_layout = resting;
+                                 state.prev_layout = resting;
+                             });
+    }
 
     /// The layout `range`'s first subresource is in as of the last submitted list.
     /// For the async transfer path, which records on the copy queue and so cannot go through declare/flush at all.
@@ -343,6 +354,6 @@ private:
     }
 
     cc::small_vector<slot_state, 4> _slots; // indexed by command_list_slot
-    sg::subresource_partition _current;     // between-lists state, as of the last submitted list (initially general)
-    int _active_slot_count = 0;             // open command lists currently using this texture (active slots)
+    sg::subresource_partition _current; // between-lists state, as of the last submitted list (initially the resting layout)
+    int _active_slot_count = 0;         // open command lists currently using this texture (active slots)
 };

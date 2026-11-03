@@ -30,8 +30,8 @@ function(sc_add_nexus_web_runner base)
     get_target_property(_srcs ${base} SOURCES)
     get_target_property(_libs ${base} LINK_LIBRARIES)
 
-    # Out of `all`: a runner compiles its test's sources a second time, a third of a full build, and only a browser
-    # loads it. `dev.py test-web` builds the one it serves, or `tests-web` for all of them.
+    # Out of `all`: it compiles and links every test source a second time, and only a browser page runs it.
+    # `nexus-web-runners` builds them all, and `dev.py test-web` builds what its page needs.
     add_executable(${web} EXCLUDE_FROM_ALL ${_srcs} "${SC_NEXUS_WEB_RUNNER_SRC}")
     set_property(GLOBAL APPEND PROPERTY SC_WEB_TEST_TARGETS ${web})
     if(_libs)
@@ -109,6 +109,10 @@ function(sc_finalize_web_runners)
         return()
     endif()
 
+    get_property(_targets GLOBAL PROPERTY SC_WEB_TEST_TARGETS)
+    add_custom_target(nexus-web-runners)
+    add_dependencies(nexus-web-runners ${_targets})
+
     # Shared renderer next to the pages.
     configure_file("${SC_NEXUS_WEB_DIR}/nexus-web-driver.js" "${CMAKE_BINARY_DIR}/nexus-web-driver.js" COPYONLY)
 
@@ -125,8 +129,6 @@ function(sc_finalize_web_runners)
 
     # Aggregate page: all libraries at once.
     _sc_write_web_page("${CMAKE_BINARY_DIR}/tests-web.html" "all libraries" ${_all_literals})
-    get_property(_targets GLOBAL PROPERTY SC_WEB_TEST_TARGETS)
-    add_custom_target(tests-web DEPENDS ${_targets})
 
     message(STATUS "[nexus] browser test runners: tests-web.html + per-library pages in ${CMAKE_BINARY_DIR}")
 endfunction()

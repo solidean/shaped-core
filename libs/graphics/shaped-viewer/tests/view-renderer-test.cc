@@ -107,11 +107,11 @@ ASYNC_INVOCABLE_TEST("sv - view renderer renders indexed geometry (headless)", (
 
     auto const* const mesh_rec = resources.meshes.get_ptr(item.mesh);
     REQUIRE(mesh_rec != nullptr);
-    CHECK(mesh_rec->is_indexed); // an indexed BLAS, and the closest-hit reads through the real index buffer
-    CHECK(mesh_rec->indices.element_count() == welded.indices.size());
-    CHECK(mesh_rec->vertices.element_count() == welded.positions.size());
+    // The welded vertices stay shared: the pool holds the mesh's own indices, not one vertex per corner.
+    CHECK(mesh_rec->geometry.index_count() == welded.indices.size());
+    CHECK(mesh_rec->geometry.vertex_count == welded.positions.size());
     // Triangle order follows the index buffer, so the per-triangle material set still lines up.
-    CHECK(mesh_rec->triangle_count == box.materials.size());
+    CHECK(mesh_rec->geometry.triangle_count == box.materials.size());
 
     auto const size = tg::vec2i(96, 96);
 
@@ -143,4 +143,17 @@ ASYNC_INVOCABLE_TEST("sv - view renderer renders indexed geometry (headless)", (
     auto const again = resources.meshes.acquire(sv::indexed_triangle_data::create(welded.positions, welded.indices));
     CHECK(again == item.mesh);
     CHECK(resources.meshes.count() == 1);
+}
+
+// `automatic` is the hybrid wherever the device traces, and raster where it cannot; a mode named is itself.
+ASYNC_INVOCABLE_TEST("sv - render_mode::automatic resolves to the hybrid where the device traces",
+                     (sg::context_handle const& ctx_h))
+{
+    auto& ctx = *ctx_h;
+    auto const traces = ctx.supports(sg::feature::raytracing_pipeline) && ctx.supports(sg::feature::ray_query);
+    CHECK(sv::resolve_render_mode(ctx, sv::render_mode::automatic)
+          == (traces ? sv::render_mode::hybrid : sv::render_mode::raster));
+    CHECK(sv::resolve_render_mode(ctx, sv::render_mode::wavefront) == sv::render_mode::wavefront);
+    CHECK(sv::resolve_render_mode(ctx, sv::render_mode::hybrid) == sv::render_mode::hybrid);
+    co_return;
 }

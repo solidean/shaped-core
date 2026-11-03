@@ -134,9 +134,10 @@ ASYNC_INVOCABLE_TEST("sv - path-traced Cornell box (headless)", (sg::context_han
         }));
 
     // Reaching here means the whole GI pipeline ran (BLAS + TLAS build, ray dispatch) without a device error.
-    CHECK(mesh_rec->triangle_count == box.materials.size());
-    CHECK(!mesh_rec->is_indexed); // the non-indexed path: the corner indices come from the primitive, not a buffer
-    CHECK(records[0].is_indexed == 0u);
+    CHECK(mesh_rec->geometry.triangle_count == box.materials.size());
+    // A raw list is indexed in the pool too: one vertex per corner.
+    CHECK(mesh_rec->geometry.vertex_count == mesh_rec->geometry.index_count());
+    CHECK(records[0].first_index == u32(mesh_rec->geometry.first_index));
 
     co_await cc::async_settled(sv::background_work(ctx));
 }
@@ -1022,6 +1023,9 @@ ASYNC_INVOCABLE_TEST("sv - a light that casts no shadow ignores what stands in i
     REQUIRE(covered_scene.has_value());
     open_scene.value().max_bounces = 2;
     covered_scene.value().max_bounces = 2;
+    // The comparison reads a 4 by 4 window under a wide sun, which 64 samples leave noisy to a few percent.
+    open_scene.value().samples_per_pixel = 512;
+    covered_scene.value().samples_per_pixel = 512;
 
     // Travelling down and toward +x, so the path from the floor's center back to the light passes under the cover.
     // The sun is wide on purpose: a narrow one leaves next-event estimation nearly all the weight, and a bounce ray that
@@ -1049,7 +1053,7 @@ ASYNC_INVOCABLE_TEST("sv - a light that casts no shadow ignores what stands in i
 
         // The cover really is in the way — or the comparison below proves nothing.
         CHECK(shadowed < 0.5f * clear);
-        CHECK(tg::abs(ignored - clear) < 0.03f * clear);
+        CHECK(tg::abs(ignored - clear) < 0.03f * clear).dump("ignored", ignored).dump("clear", clear);
     }
 
     co_await cc::async_settled(sv::background_work(ctx));

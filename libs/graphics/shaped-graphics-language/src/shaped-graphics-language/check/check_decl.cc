@@ -2170,6 +2170,20 @@ bool checker::is_color_value(type_id type) const
     return false;
 }
 
+bool checker::is_printable(type_id type) const
+{
+    if (out.at(type).kind == type_kind::enumeration)
+        return true;
+    auto const* const record = out.builtin_type_of(type);
+    if (record == nullptr)
+        return false;
+    for (auto const family : {"float", "half", "int", "uint", "bool"})
+        for (auto const width : {"", "2", "3", "4"})
+            if (record->name == cc::format("{}{}", family, width))
+                return true;
+    return false;
+}
+
 type_id checker::pixel_targets_of(symbol_id entry, type_id color)
 {
     // a name no symbol of the module has, so the struct the emitter writes clashes with nothing
@@ -2199,9 +2213,11 @@ type_id checker::pixel_targets_of(symbol_id entry, type_id color)
 
 void checker::judge_entry_point(symbol_id id)
 {
+    // `s` dangles once pixel_targets_of mints a symbol, so what is read after it is copied out here
     auto const& s = out.at(id);
     auto const file = s.file;
-    auto const& info = out.functions[s.info];
+    auto const function = s.info;
+    auto const& info = out.functions[function];
     auto const where = ast_of(file).at(s.declaration).node.as<ast::fun_decl>().name;
     auto const parameters = out.at(info.parameters);
     auto const& result = out.at(info.result);
@@ -2410,7 +2426,7 @@ void checker::judge_entry_point(symbol_id id)
         if (result.edge != stage::pixel && info.result != checked_module::void_type)
         {
             if (is_color_value(info.result))
-                out.functions.own(s.info).pixel_targets = pixel_targets_of(id, info.result);
+                out.functions.own(function).pixel_targets = pixel_targets_of(id, info.result);
             else
                 invalid("a @pixel fun returns a @pixel struct, one color value or nothing");
         }
@@ -2466,7 +2482,7 @@ void checker::judge_entry_point(symbol_id id)
         judge_link(info.result);
     }
 
-    notes[s.info].is_valid_entry = is_valid;
+    notes[function].is_valid_entry = is_valid;
 }
 
 cc::span<stage_input_info const> sgl::check::stage_inputs()
@@ -2474,6 +2490,12 @@ cc::span<stage_input_info const> sgl::check::stage_inputs()
     static constexpr stage_input_info k_inputs[] = {
         {.input = stage_input::vertex_index, .name = "vertex_index", .in_stage = stage::vertex, .type = "int"},
         {.input = stage_input::instance_index, .name = "instance_index", .in_stage = stage::vertex, .type = "int"},
+        // CHK-272: WGSL has no builtin for it, so it is a feature WebGPU lacks
+        {.input = stage_input::first_instance,
+         .name = "first_instance",
+         .in_stage = stage::vertex,
+         .type = "int",
+         .feature = i32(feature::first_instance)},
         {.input = stage_input::is_front_facing, .name = "is_front_facing", .in_stage = stage::pixel, .type = "bool"},
         {.input = stage_input::sample_index,
          .name = "sample_index",

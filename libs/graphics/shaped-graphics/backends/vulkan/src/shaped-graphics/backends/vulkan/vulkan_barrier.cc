@@ -48,7 +48,7 @@ VkAccessFlags2 vk_access2_from(sg::access_flags access)
         out |= VK_ACCESS_2_SHADER_WRITE_BIT | VK_ACCESS_2_SHADER_READ_BIT;
     if (access.has(sg::access_flag::storage_read))
         out |= VK_ACCESS_2_SHADER_STORAGE_READ_BIT;
-    if (access.has(sg::access_flag::shader_atomic))
+    if (access.has_any(sg::access_flag::shader_atomic | sg::access_flag::shader_append))
         out |= VK_ACCESS_2_SHADER_STORAGE_READ_BIT | VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT;
     if (access.has(sg::access_flag::copy_read))
         out |= VK_ACCESS_2_TRANSFER_READ_BIT;

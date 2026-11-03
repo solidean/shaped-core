@@ -27,6 +27,13 @@ const path_flag_specular = 8u
 /// the path is a pixel's guide ray, not a sample: its camera ray skips every partial coverage, its hit writes the guides, and it gathers nothing
 const path_flag_guide = 16u
 
+/// how many of `path_state::bounce` were free refractions, `is_free_refraction`, which `max_bounces` does not count
+const path_free_shift = 8u
+const path_free_mask = 0xf00u
+
+/// The bounces `st` has spent against `max_bounces`: every surface it continued from, less its free refractions.
+fun spent_bounces(st: path_state) -> uint => st.bounce - ((st.flags & path_free_mask) >> path_free_shift)
+
 /// `hit_record::kind`.
 const hit_none = 0u
 const hit_triangle = 1u
@@ -288,6 +295,24 @@ fun wavefront_begin(slot: uint){traced, wavefront_step}:
 
 // ---- extend: the round's segments, traced ---------------------------------------------------------------------------
 
+/// What a trace masks the instances with: every one against `ray_mask_all`.
+/// The hybrid's bounces trace against `ray_mask_hybrid` and its shadow rays against `ray_mask_hybrid_shadow`.
+/// `view_renderer` clears both bits on an instance that keeps coverage and on a thin pane, and the shadow bit alone on solid glass.
+const ray_mask_all = 255
+const ray_mask_hybrid = 1
+const ray_mask_hybrid_shadow = 2
+
+/// The nearest hit the segment from `origin` along `direction` meets, traced inline, the cutouts it crosses drawing from `seed`.
+/// It meets only the instances whose mask shares a bit with `mask`.
+fun trace_hit(origin: float3, direction: float3, seed: uint, mask: int){traced, bindless} -> hit_record:
+    let r = ray(origin = pos3(origin.x, origin.y, origin.z), direction = vec3(direction.x, direction.y, direction.z), t_min = 0.0, t_max = 1e4)
+    let h = traced.world.trace(r, any_hit = c => cutout(c, seed, candidate_opacity(c)), intersection = intersect_quadric, procedural_any_hit = c => hit_decision.accept, mask = mask)
+    if h.kind == hit_kind.triangle:
+        return hit_record(h.instance_id as uint, h.primitive_index as uint, hit_triangle, h.t, float2(h.barycentrics.y, h.barycentrics.z), float3(0.0))
+    if h.kind == hit_kind.procedural:
+        return hit_record(h.instance_id as uint, h.primitive_index as uint, hit_procedural, h.t, float2(0.0), h.procedural().attributes.normal)
+    return hit_record(0u, 0u, hit_none, -1.0, float2(0.0), float3(0.0))
+
 /// Traces the segment of the round's path at `index` and records the nearest hit it accepted.
 fun wavefront_extend(index: uint){traced, bindless, wavefront_step}:
     if index >= round_count() => return
@@ -298,7 +323,7 @@ fun wavefront_extend(index: uint){traced, bindless, wavefront_step}:
     let st = traced.path_states[s]
     let cutouts = cutout_seed(st.rng, cutout_ray_surface)
     let guide = (st.flags & path_flag_guide) != 0u
-    let pr = ray(origin = pos3(r.origin.x, r.origin.y, r.origin.z), direction = vec3(r.direction.x, r.direction.y, r.direction.z), t_min = 1e-3, t_max = 1e4)
+    let pr = ray(origin = pos3(r.origin.x, r.origin.y, r.origin.z), direction = vec3(r.direction.x, r.direction.y, r.direction.z), t_min = 0.0, t_max = 1e4)
     let h = traced.world.trace(pr, any_hit = c => (if guide => guide_cutout(candidate_opacity(c)) else cutout(c, cutouts, candidate_opacity(c))), intersection = intersect_quadric, procedural_any_hit = c => hit_decision.accept)
 
     if h.kind == hit_kind.triangle:
@@ -467,9 +492,11 @@ fun segment_settle(index: uint){traced, wavefront_step} -> uint3:
 
     if hit_t < 0.0 and not (ended or escaped_inside):
         // Escaped to the SH environment: the primary ray sees it at full weight, a bounce ray as the BSDF strategy of the hit's own estimate.
-        let emission = scene.background_radiance(background_sh(), normalize(dir))
+        // A ray that left the camera sees the backdrop, which a dome draws apart from what it lights with.
+        let env = background_lanes()
+        let emission = if b == 0u => scene.environment_backdrop(env, normalize(dir)) else scene.environment_radiance(env, normalize(dir))
         // The environment's sample reaches only the shading frame's upper hemisphere on the face's own side, and a medium scatter takes none.
-        let w = if b == 0u or not prev_nee_reachable => 1.0 else pt.mis_weight(st.prev_pdf, pt.env_pdf())
+        let w = if b == 0u or not prev_nee_reachable => 1.0 else pt.mis_weight(st.prev_pdf, scene.environment_pdf(env, normalize(dir)))
         let c = throughput * emission * w
         light.radiance += c
         lit = true
@@ -587,7 +614,7 @@ fun shade_stored(slot: uint, inst: scene.instance, n_obj: float3, surface: openp
         let local = openpbr.frame_from_quaternion(surface.geometry_tangent_frame, surface.geometry_handedness)
         authored = openpbr.frame(normalize(instance_to_world(inst, local.t)), normalize(instance_to_world(inst, local.b)), normalize(instance_to_world(inst, local.n)))
 
-    let last_bounce = if st.bounce + 1u >= (f.max_bounces as uint) => 1u else 0u
+    let last_bounce = if spent_bounces(st) + 1u >= (f.max_bounces as uint) => 1u else 0u
     let mut p = surface_payload_for(st.rng, md.sigma_t, md.albedo, md.g, md.channel, last_bounce)
     let mut light_s = no_light_sample()
     let mut env_s = no_light_sample()
@@ -660,15 +687,19 @@ fun shade_stored(slot: uint, inst: scene.instance, n_obj: float3, surface: openp
         else:
             st.flags = st.flags & ~path_flag_prev_nee_reachable
         st.bounce = b + 1u
+        let free = (st.flags & path_free_mask) >> path_free_shift
+        if is_free_refraction(p.lobe, p.roughness) and free < free_refraction_cap:
+            st.flags = (st.flags & ~path_free_mask) | ((free + 1u) << path_free_shift)
 
         // The offset follows the direction rather than the normal: a refracted continuation leaves on the far side.
-        let side = if dot(p.direction, p.normal) < 0.0 => -1e-3 else 1e-3
-        traced.path_rays[s] = path_ray(ray_origin + ray_dir * hit.t + p.normal * side, p.direction)
+        let leaving = if dot(p.direction, p.normal) < 0.0 => -p.normal else p.normal
+        traced.path_rays[s] = path_ray(pt.offset_ray(ray_origin + ray_dir * hit.t, leaving), p.direction)
         traced.path_media[s] = path_medium(p.medium_sigma_t, p.medium_albedo, p.medium_g, p.channel)
 
-        if st.bounce >= (f.max_bounces as uint):
+        let spent = spent_bounces(st)
+        if spent >= (f.max_bounces as uint):
             continues = false
-        else if f.roulette_after > 0u and st.bounce > f.roulette_after:
+        else if f.roulette_after > 0u and spent > f.roulette_after:
             // Russian roulette ends a path that carries little, without taking its energy with it.
             let q = clamp(max(next_throughput.x, max(next_throughput.y, next_throughput.z)), 0.05, 1.0)
             let u_roulette = pt.rand(mut rng)
@@ -688,6 +719,18 @@ fun shade_stored(slot: uint, inst: scene.instance, n_obj: float3, surface: openp
 
 // ---- connect: the shadow rays ---------------------------------------------------------------------------------------
 
+/// Whether anything blocks the segment from `origin` along `direction` for `distance`, traced inline here and now.
+/// The inline counterpart of `occluded`, which traces through the pipeline's shadow miss; `seed` is what the cutouts it crosses draw from.
+fun blocked(origin: float3, direction: float3, distance: float, seed: uint, mask: int){traced, bindless} -> bool:
+    let r = ray(origin = pos3(origin.x, origin.y, origin.z), direction = vec3(direction.x, direction.y, direction.z), t_min = 0.0, t_max = distance)
+    let h = traced.world.trace(r, any_hit = c => cutout(c, seed, candidate_opacity(c)), intersection = intersect_quadric, procedural_any_hit = c => hit_decision.accept, flags = ray_flags.accept_first_hit_and_end_search, mask = mask)
+    return h.kind != hit_kind.none
+
+/// Whether `s` arrives, its shadow ray traced inline where it has one: `visible` for a caller with no pipeline.
+fun reaches(s: light_sample, seed: uint, mask: int){traced, bindless} -> bool:
+    if s.tested == 0u => return true
+    return not blocked(s.origin, s.direction, s.distance, seed, mask)
+
 /// Tests the shadow rays of the slot at `index` of `queue_shadow` and adds what arrives to its path.
 /// One thread per slot rather than per ray, so the slot's radiance has one writer.
 fun wavefront_connect(index: uint){traced, bindless, wavefront_step}:
@@ -697,9 +740,7 @@ fun wavefront_connect(index: uint){traced, bindless, wavefront_step}:
     for j in 0 ..< 2:
         let sr = traced.shadow_rays[((2u * slot) as int) + j]
         if sr.tested == 0u => continue
-        let r = ray(origin = pos3(sr.origin.x, sr.origin.y, sr.origin.z), direction = vec3(sr.direction.x, sr.direction.y, sr.direction.z), t_min = 1e-3, t_max = sr.distance)
-        let h = traced.world.trace(r, any_hit = c => cutout(c, sr.seed, candidate_opacity(c)), intersection = intersect_quadric, procedural_any_hit = c => hit_decision.accept, flags = ray_flags.accept_first_hit_and_end_search)
-        if h.kind == hit_kind.none:
+        if not blocked(sr.origin, sr.direction, sr.distance, sr.seed, ray_mask_all):
             light.radiance += sr.radiance
             light.specular += sr.specular
     traced.path_lights[slot as int] = light

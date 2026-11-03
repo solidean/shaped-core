@@ -154,10 +154,14 @@ public:
         case sg::feature::shader_int16:
         case sg::feature::device_coherence:
         case sg::feature::image_atomics:
+        case sg::feature::first_instance:
         case sg::feature::helper_lane_query:
         case sg::feature::vertex_layer_output:
-            // WGSL has no 16-bit integers, no coherence qualifier, no atomic texel, no test for a helper invocation and
-            // no layer output.
+            // WGSL has no 16-bit integers, no coherence qualifier, no atomic texel, no first-instance builtin, no test
+            // for a helper invocation and no layer output, on any device.
+            return false;
+        case sg::feature::opacity_micromap:
+            // The ray-query polyfill traverses its own boxes and knows no micromap.
             return false;
         case sg::feature::unaligned_block_compression:
             // Lifted by `texture-compression-unaligned`, which the emdawnwebgpu this builds against does not offer.
@@ -229,9 +233,13 @@ public:
     {
         return cc::result<sg::raw_texture_handle>(create_webgpu_texture(desc, alloc));
     }
-    [[nodiscard]] cc::result<sg::memory_heap_handle> try_create_memory_heap(isize size_in_bytes) override
+    [[nodiscard]] cc::result<sg::memory_heap_handle> try_create_memory_heap(isize size_in_bytes,
+                                                                            sg::memory_heap_contents contents) override
     {
         CC_ASSERT(size_in_bytes >= 0, "heap size must be non-negative");
+        // WebGPU has no memory to place a texture into, only textures it allocates itself.
+        if (contents == sg::memory_heap_contents::textures)
+            return cc::error("webgpu places no textures");
         return sg::memory_heap_handle(std::make_shared<webgpu_memory_heap>(size_in_bytes));
     }
     [[nodiscard]] cc::result<sg::swapchain_handle> try_create_swapchain(sg::swapchain_description const& desc) override

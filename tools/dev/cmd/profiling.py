@@ -19,11 +19,6 @@ from .context import Context
 
 NAME = "profiling"
 
-# The nexus manual test whose body calls nx::bench::print_hw_counters(), named exactly so it fires regardless of bucket.
-# Must stay in sync with libs/base/nexus/tests/bench-hardware-counters-test.cc.
-_COUNTERS_TEST = "nexus bench - list hardware counters"
-
-
 def add_parser(sub: argparse._SubParsersAction) -> argparse.ArgumentParser:
     p = sub.add_parser(NAME, help="Profiling helpers (hardware counters, ...)")
     psub = p.add_subparsers(dest="profiling_cmd", required=True)
@@ -94,21 +89,20 @@ def _run_counters(args: argparse.Namespace, ctx: Context) -> None:
     presets = ctx.resolve_build_presets(args)
     preset = presets[0]
 
-    # Build just the nexus test binary (incremental — a no-op when nothing changed).
+    # Every nexus binary answers --list-hw-counters, so a consumer without nexus-test uses one of its own.
+    # nexus-test where there is one, else a binary already built, so the build below is a no-op.
+    candidates = [t for t in ctx.discover(preset, args.emsdk_path)
+                  if t.nexus_kinds and t.artifact is not None and t.kind == "EXECUTABLE"]
+    if not candidates:
+        ctx.die(f"no nexus binary in {preset.name!r} to list the counters with")
+    target = min(candidates, key=lambda t: (t.name != "nexus-test", not t.artifact.exists(), t.name))
+
     results = dev.build(
-        [preset], ["nexus-test"], root=ctx.root,
+        [preset], [target.name], root=ctx.root,
         auto_configure=True, mirror=args.mirror_output, verbose=args.verbose,
         emsdk_path=args.emsdk_path,
     )
     if not all(r.ok for r in results):
         ctx.fail_build(results, [preset])
 
-    # Locate the built binary and run just the counter-listing test, streaming its output straight through.
-    target = next(
-        (t for t in ctx.discover(preset, args.emsdk_path) if t.name == "nexus-test" and t.artifact is not None),
-        None,
-    )
-    if target is None:
-        ctx.die("could not locate the built nexus-test binary")
-
-    sys.exit(subprocess.run([str(target.artifact), _COUNTERS_TEST]).returncode)
+    sys.exit(subprocess.run([str(target.artifact), "--list-hw-counters"]).returncode)

@@ -363,10 +363,9 @@ written write_non_finite(call_context const& c)
     switch (c.target)
     {
     case language::hlsl:
-    {
-        auto const uints = type_name("uint", Width);
-        return {.text = cc::format("((asuint({1}) & {0}(0x7fffffffu)) {2} {0}(0x7f800000u))", uints, x, op)};
-    }
+        // The masks stay scalars, which HLSL broadcasts against a vector: its vector constructors take one value per
+        // element, so DXC refuses `uint3(0x7fffffffu)` where WGSL and MSL splat it.
+        return {.text = cc::format("((asuint({0}) & 0x7fffffffu) {1} 0x7f800000u)", x, op)};
     case language::wgsl:
     {
         auto const uints = Width == 1 ? cc::string("u32") : cc::format("vec{}<u32>", Width);

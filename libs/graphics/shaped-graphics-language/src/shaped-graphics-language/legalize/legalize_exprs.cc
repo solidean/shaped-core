@@ -39,7 +39,7 @@ struct leave_counter
             auto const& s = e.at(id);
             if (auto const* const l = s.node.try_as<flat_leave>(); l != nullptr && l->target == label)
                 ++count;
-            for_each_expr_of(s, [&](flat_expr_id x) { expr(x, depth + 1); });
+            for_each_expr_of(e, s, [&](flat_expr_id x) { expr(x, depth + 1); });
             for_each_body_of(e, s, [&](ast::range_of<flat_stmt_id> inner) { body(inner, depth + 1); });
         }
     }
@@ -480,8 +480,10 @@ struct expr_lowering
             lower_assign(*assign, attributed, into);
         else if (auto const* const print = s.node.try_as<flat_print>())
         {
-            auto const value = lower_expr(print->value, into);
-            into.push_back(attributed().print(value));
+            auto values = cc::vector<flat_expr_id>();
+            for (auto const value : out.e.at(print->values))
+                values.push_back(lower_expr(value, into));
+            into.push_back(attributed().print(print->message, values));
         }
         else if (auto const* const eval = s.node.try_as<flat_eval>())
         {

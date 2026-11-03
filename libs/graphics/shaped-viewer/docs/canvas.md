@@ -38,7 +38,7 @@ They differ in where they are added and in what depth means.
 A decal is a drawing projected onto the traced surfaces of a scene, painted into their material: `scene_ref::add_decal(set, id, decal)`.
 It is lit and shadowed with the surface, curves with it and shows in reflections, which a 3D drawing drawn over the trace cannot.
 
-- **The projector is a box.** The drawing is placed on a plane as an instance is, and projected along `y_axis × x_axis` — away from a viewer reading it the right way round — to `depth` on either side.
+- **The projector is a box.** The drawing is placed on a plane as an instance is, and projected along `x_axis × y_axis` — away from a viewer reading it the right way round — to `depth` on either side.
 - **Only the side facing the projector is painted**, judged by the normal the hit turned toward the ray, so it does not depend on how a mesh is wound.
   A surface met at a grazing angle fades out, rather than smearing the drawing along it.
 - **It is paint.** At every hit `tracer.shade` tests the layer's decals before the material is read, and where a shape covers, the base takes its color and loses its metalness.

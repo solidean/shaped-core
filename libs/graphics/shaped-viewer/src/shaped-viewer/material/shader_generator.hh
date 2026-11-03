@@ -126,6 +126,24 @@ struct sv::material_emission
     [[nodiscard]] bool declares() const { return color.kind != material_value_kind::none; }
 };
 
+/// Where a permutation's secondary material lives: what a hybrid's secondary hit reads as data, rather than run the material's code.
+/// Each value is the type's attribute of that role, `material_type::base_color_attribute` and its neighbors, and kind `none` where the type names none.
+struct sv::material_secondary
+{
+    material_emission_factor base_color;
+    material_emission_factor roughness;
+    material_emission_factor metalness;
+    /// The dielectric specular layer's weight; a type that names none has the layer whole.
+    material_emission_factor specular_weight;
+
+    /// The type's transmission weight and thin-wall switch, which the host reads to let the hybrid's rays pass a pane.
+    material_emission_factor transmission;
+    material_emission_factor thin_walled;
+
+    /// The type's tangent frame, whose +z a bounce reads as the smooth normal; only an attribute, interpolated per vertex or corner, is read.
+    material_emission_factor tangent_frame;
+};
+
 /// A material permutation as an SGL hit group, plus the parameter layout it reads.
 struct sv::generated_material_shader
 {
@@ -137,12 +155,21 @@ struct sv::generated_material_shader
     /// range of the sorted queue, shaded through `tracer.shade_stored_triangle` or `tracer.shade_stored_quadric`.
     cc::string shade_source;
 
-    /// The raster path's pixel stage, `@pixel fun sv_raster`: the same material over the triangle module `raster`'s vertex stage drew, lit without tracing.
-    /// It writes `raster.targets` through `raster.shade`, and cuts out where the hit group's any-hit would.
+    /// The raster path's pixel stages, which cut out where the hit group's any-hit would.
+    /// `@pixel fun sv_raster` is the same material over the triangle module `raster`'s vertex stage drew, lit without tracing, into `raster.targets`.
+    /// `@pixel fun sv_gbuffer` writes the hybrid's thin G-buffer instead, `raster.thin_targets`, which a deferred frame lights after.
     /// Empty for a quadric permutation, which the raster path does not draw yet.
     cc::string raster_source;
 
+    /// The hybrid's forward pixel stage, `@pixel fun sv_hybrid`: the same material lit through `hybrid.shade`, tracing its shadow rays inline.
+    /// Its own source rather than an entry of `raster_source`, since it lists `tracer.traced` and so needs ray tracing.
+    /// Empty for a quadric permutation.
+    cc::string hybrid_source;
+
     material_parameter_layout layout;
+
+    /// Where this permutation's secondary material lives.
+    material_secondary secondary;
 
     /// Where this permutation's cutout opacity lives, and `none` where it cannot cut out.
     ///

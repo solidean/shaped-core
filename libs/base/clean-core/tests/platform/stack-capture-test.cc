@@ -189,8 +189,8 @@ TEST("stack capture - a deeper capture extends a shallower one")
 
     REQUIRE(shallow.result.count > 3);
 
-    // An exact count assumes the build reports a frame per call the source makes, which an optimized wasm build
-    // without DWARF does not — see CC_WASM_KEEPS_FRAME_STRUCTURE.
+    // An exact count assumes the build reports a frame per call the source makes, which a Release wasm build does
+    // not — see CC_WASM_KEEPS_FRAME_STRUCTURE.
     if (CC_WASM_KEEPS_FRAME_STRUCTURE)
         CHECK(deep.result.count == shallow.result.count + 1);
     else

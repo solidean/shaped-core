@@ -36,4 +36,4 @@ rules:
     reason: "from_chars is what a number is parsed with; issue: chore-babel-from-chars-to-cc-from-string"
     files:
       - src/babel-serializer/geometry/obj.cc
-      - src/babel-serializer/geometry/stl.cc
+      - src/babel-serializer/geometry/impl/parse_number.hh

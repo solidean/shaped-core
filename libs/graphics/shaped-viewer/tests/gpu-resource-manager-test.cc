@@ -698,8 +698,10 @@ ASYNC_INVOCABLE_TEST("sv - an instance record names its own geometry and paramet
     auto const record = m.describe_instance(*cmd, mesh_id, instance);
 
     CHECK(record.param_offset == 0u);
-    CHECK(record.vertices == u32(m.acquire_buffer(m.meshes.get(mesh_id).vertices.raw()->as_raw_readonly())));
-    CHECK(record.indices == u32(m.acquire_buffer(m.meshes.get(mesh_id).indices.raw()->as_raw_readonly())));
+    CHECK(record.vertices == u32(m.acquire_buffer(m.meshes.vertex_pool().raw()->as_raw_readonly())));
+    CHECK(record.indices == u32(m.acquire_buffer(m.meshes.index_pool().raw()->as_raw_readonly())));
+    CHECK(record.base_vertex == u32(m.meshes.get(mesh_id).geometry.base_vertex));
+    CHECK(record.first_index == u32(m.meshes.get(mesh_id).geometry.first_index));
 
     // Every element the record names was acquired by building it, which is what makes the access declaration complete.
     {
@@ -717,17 +719,16 @@ ASYNC_INVOCABLE_TEST("sv - an instance record names its own geometry and paramet
         CHECK(holds(record.indices));
     }
 
-    // Geometry layout is a property of the mesh, which is what lets a view hold an indexed and a non-indexed one at once.
-    CHECK(record.is_indexed == 0u);
-
+    // An indexed mesh and a raw list share the pools, each its own range of both.
     auto const indexed_geometry
-        = sv::triangle_geometry::create_from_indexed_triangles(positions, cc::vector<u32>{0, 1, 2});
+        = sv::triangle_geometry::create_from_indexed_triangles(positions, cc::vector<u32>{0, 2, 1});
     auto const indexed = m.meshes.acquire(sv::indexed_triangle_data::from(indexed_geometry));
     m.wait_for_pending_uploads();
-    CHECK(m.describe_instance(*cmd, indexed, instance).is_indexed == 1u);
-
-    // Two meshes are two distinct geometry slots — which is the thing "one mesh per view" made impossible.
-    CHECK(m.describe_instance(*cmd, indexed, instance).vertices != record.vertices);
+    auto const other = m.describe_instance(*cmd, indexed, instance);
+    CHECK(other.vertices == record.vertices);
+    CHECK(other.indices == record.indices);
+    CHECK(other.base_vertex != record.base_vertex);
+    CHECK(other.first_index != record.first_index);
 
     ctx.submit_command_list(cc::move(cmd));
     ctx.advance_epoch();
@@ -837,7 +838,8 @@ ASYNC_INVOCABLE_TEST("sv - a mesh that has not streamed in yet is traced as a pl
         auto cmd = ctx.create_command_list();
         auto const item = m.acquire_scene_item(sv::resident_mesh{.geometry = b.geometry, .material = material});
         auto const record = m.describe_instance(*cmd, item.mesh, item.instance);
-        CHECK(record.vertices == u32(m.acquire_buffer(m.meshes.placeholder_vertices().raw()->as_raw_readonly())));
+        CHECK(record.base_vertex == u32(m.meshes.placeholder_geometry().base_vertex));
+        CHECK(record.first_index == u32(m.meshes.placeholder_geometry().first_index));
 
         ctx.submit_command_list(cc::move(cmd));
     }
@@ -862,7 +864,8 @@ ASYNC_INVOCABLE_TEST("sv - a mesh that has not streamed in yet is traced as a pl
         auto cmd = ctx.create_command_list();
         auto const item = m.acquire_scene_item(sv::resident_mesh{.geometry = a.geometry, .material = material});
         auto const record = m.describe_instance(*cmd, item.mesh, item.instance);
-        CHECK(record.vertices == u32(m.acquire_buffer(m.meshes.get(a.geometry).vertices.raw()->as_raw_readonly())));
+        CHECK(record.base_vertex == u32(m.meshes.get(a.geometry).geometry.base_vertex));
+        CHECK(record.first_index == u32(m.meshes.get(a.geometry).geometry.first_index));
 
         ctx.submit_command_list(cc::move(cmd));
     }
@@ -957,6 +960,71 @@ ASYNC_INVOCABLE_TEST("sv - a texture still streaming samples a placeholder seede
     auto const once_resident
         = u32_at(cc::span<byte const>(m.build_instance_parameters(m.get_instance(instance))), slot_offset);
     CHECK(once_resident == element_of(m, texture));
+
+    ctx.advance_epoch();
+    co_await ctx.idle_completion();
+}
+
+ASYNC_INVOCABLE_TEST("sv - a parameter block is built once per epoch, so a texture landing mid-epoch shows the next "
+                     "one",
+                     (sg::context_handle const& ctx_h))
+{
+    auto& ctx = *ctx_h;
+
+    auto m = sv::gpu_resource_manager::create(ctx);
+    m.advance_to(ctx.current_epoch());
+
+    auto lib = sv::material_library::create();
+    sv::register_builtin_material_types(lib);
+    auto const type = lib.acquire_type(sv::builtin_material::openpbr).value();
+    auto const id = lib.acquire(sv::material::create("plain", type, {}));
+
+    // The mesh lands first, so describing it builds the block, while the texture it samples is still pending.
+    auto const positions = cc::vector<tg::pos3f>{tg::pos3f(0, 0, 0), tg::pos3f(1, 0, 0), tg::pos3f(0, 1, 0)};
+    auto data = sv::mesh{.name = "tri", .geometry = sv::triangle_geometry::create_from_positions(positions)};
+    data.attributes.push_back(
+        sv::mesh_attribute::create("uv", sv::attribute_frequency::per_vertex,
+                                   cc::vector<tg::vec2f>{tg::vec2f(0, 0), tg::vec2f(1, 0), tg::vec2f(0, 1)}));
+    auto textured = m.create_mesh(data);
+    m.wait_for_pending_uploads();
+
+    auto const pixels = cc::vector<byte>::create_filled(4 * 4 * 4, byte(0xFF));
+    auto const texture = m.acquire_texture(sv::texture_data::create(pixels, sg::pixel_format::rgba8_unorm, 4, 4));
+    textured.textures.push_back({.name = "base_color", .source = {.texture = texture, .uv_attribute = "uv"}});
+    textured.material = id;
+
+    auto const resolved = sv::resolve_material(lib, id, textured);
+    auto const generated = sv::generate_material_shader(resolved);
+    auto const instance = m.acquire_instance(resolved, generated.layout);
+    auto const slot_offset = [&]
+    {
+        for (auto const& sl : generated.layout.slots)
+            if (sl.name == "base_color" && sl.kind == sv::material_slot_kind::texture_index)
+                return sl.offset;
+        FAIL("no such texture slot");
+        return 0;
+    }();
+    auto const named = [&] { return u32_at(cc::span<byte const>(m.get_instance(instance).uploaded), slot_offset); };
+
+    auto cmd = ctx.create_command_list();
+    REQUIRE(m.textures.get(texture).state == sv::residency::pending);
+    (void)m.describe_instance(*cmd, textured.geometry, instance);
+    auto const placeholder = named();
+    CHECK(placeholder != element_of(m, texture));
+
+    // Landed, but this epoch's block is built: describing it again reuses that build rather than re-minting mid-epoch.
+    m.wait_for_pending_uploads();
+    REQUIRE(m.textures.get(texture).state != sv::residency::pending);
+    (void)m.describe_instance(*cmd, textured.geometry, instance);
+    CHECK(named() == placeholder);
+    ctx.submit_command_list(cc::move(cmd));
+
+    ctx.advance_epoch();
+    m.advance_to(ctx.current_epoch());
+    auto next = ctx.create_command_list();
+    (void)m.describe_instance(*next, textured.geometry, instance);
+    CHECK(named() == element_of(m, texture));
+    ctx.submit_command_list(cc::move(next));
 
     ctx.advance_epoch();
     co_await ctx.idle_completion();

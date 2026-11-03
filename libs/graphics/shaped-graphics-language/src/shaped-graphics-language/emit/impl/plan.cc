@@ -67,6 +67,7 @@ struct validator
     checked_module const& m;
     flat_entry_point const& e;
     cc::vector<error>& errors;
+    bool writes_prints = false;
 
     void report(error_kind kind, symbol_id symbol, cc::string detail)
     {
@@ -140,7 +141,7 @@ struct validator
         if (auto const violation = find_core_violation(m, e); violation.has_value())
             report(error_kind::not_core, e.function, violation.value().reason);
         for (auto const& s : e.stmts)
-            if (s.node.is<flat_print>())
+            if (s.node.is<flat_print>() && !writes_prints)
             {
                 report(error_kind::unsupported, e.function, "a print, which no target writes yet");
                 break;
@@ -1172,9 +1173,12 @@ sgl::emit::impl::block_placement sgl::emit::impl::place_block(check::checked_mod
     return {.offsets = cc::move(placed.offsets), .sizes = cc::move(placed.sizes), .size = placed.end};
 }
 
-void sgl::emit::impl::validate(check::checked_module const& m, check::flat_entry_point const& e, cc::vector<error>& errors)
+void sgl::emit::impl::validate(check::checked_module const& m,
+                               check::flat_entry_point const& e,
+                               cc::vector<error>& errors,
+                               bool writes_prints)
 {
-    auto v = validator{.m = m, .e = e, .errors = errors};
+    auto v = validator{.m = m, .e = e, .errors = errors, .writes_prints = writes_prints};
     if (e.input == e.result && e.entry_stage != stage::compute)
         v.report(error_kind::unsupported, e.function,
                  cc::format("one struct as both the parameter and the result: '{}'", m.name_of(e.input)));
@@ -1248,7 +1252,7 @@ struct live_nodes
                 local(var->local);
             else if (auto const* const f = s.node.try_as<check::flat_for>())
                 local(f->index);
-            check::impl::for_each_expr_of(s, [&](check::flat_expr_id x) { expr(x, depth + 1); });
+            check::impl::for_each_expr_of(e, s, [&](check::flat_expr_id x) { expr(x, depth + 1); });
             check::impl::for_each_pattern_of(e, s,
                                              [&](ast::range_of<check::flat_expr_id> patterns)
                                              {
@@ -1430,6 +1434,9 @@ sgl::emit::impl::stage_input_spelling const& sgl::emit::impl::spelling_of(check:
         = {"uint", "SV_VertexID", "u32", "vertex_index", "uint", "vertex_id"};
     static constexpr stage_input_spelling k_instance_index
         = {"uint", "SV_InstanceID", "u32", "instance_index", "uint", "instance_id"};
+    // WGSL has no builtin for it, which the feature it needs keeps from ever reaching that target
+    static constexpr stage_input_spelling k_first_instance
+        = {"uint", "SV_StartInstanceLocation", "u32", "", "uint", "base_instance"};
     static constexpr stage_input_spelling k_front_facing
         = {"bool", "SV_IsFrontFace", "bool", "front_facing", "bool", "front_facing"};
     static constexpr stage_input_spelling k_sample_index
@@ -1459,6 +1466,8 @@ sgl::emit::impl::stage_input_spelling const& sgl::emit::impl::spelling_of(check:
         return k_vertex_index;
     case stage_input::instance_index:
         return k_instance_index;
+    case stage_input::first_instance:
+        return k_first_instance;
     case stage_input::is_front_facing:
         return k_front_facing;
     case stage_input::sample_index:
@@ -1501,8 +1510,13 @@ cc::string sgl::emit::impl::stage_input_value(plan const& p, isize index)
                        : cc::string_view(p.stage_input_names[index]);
     auto const type = check::info_of(input.input).type;
     // HLSL counts a vertex and an instance from the draw's base, and DXC keeps that meaning on vulkan (EMIT-128).
-    auto const value
-        = has_base(p, input.input) ? cc::format("{} + {}", raw, p.stage_input_bases[index]) : cc::string(raw);
+    // An entry taking `@first_instance` too has that base as a parameter already, and HLSL takes one semantic once.
+    auto base = cc::string(p.stage_input_bases[index]);
+    if (input.input == check::stage_input::instance_index)
+        for (auto j = isize(0); j < p.e.stage_inputs.size(); ++j)
+            if (p.e.stage_inputs[j].input == check::stage_input::first_instance)
+                base = cc::string(p.stage_input_names[j]);
+    auto const value = has_base(p, input.input) ? cc::format("{} + {}", raw, base) : cc::string(raw);
     if (type == "int")
         return cc::format("{}({})", is_wgsl ? "i32" : "int", value);
     if (type == "int3")

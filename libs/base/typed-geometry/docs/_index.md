@@ -31,6 +31,7 @@ Add one when a module lands, and cover the big rationales there; the small ones 
 
 - [modules/scalar](modules/scalar.md) — the scalar seam, `angle`, which types count as scalars.
 - [modules/linalg](modules/linalg.md) — `vec`/`pos`/`comp`/`bivec`/`mat`/`quat`; the `pos + pos` translation rule and the `bivec != vec` decision.
+- [modules/symbolic](modules/symbolic.md) — polynomials over any coefficient; why the algebra follows the coefficient, and the packed exponents.
 - [modules/transform](modules/transform.md) — one transform type over a capability lattice.
   Why containment is not a bit test, why widening is explicit, and how an object's `.transformed(t)` picks its return type.
 - [modules/camera](modules/camera.md) — projections and views; why the default is left-handed reverse-Z, and the project / unproject round trip as the contract.

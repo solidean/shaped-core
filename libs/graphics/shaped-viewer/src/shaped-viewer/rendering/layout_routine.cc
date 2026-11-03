@@ -17,6 +17,7 @@ struct layout_constants_gpu
     tg::vec4f tint = tg::vec4f(1, 1, 1, 1);
     tg::vec4f wipe = tg::vec4f(0.5f, 0, 0, 0);
     tg::vec4f separator_color = tg::vec4f(1, 1, 1, 1);
+    tg::vec4f display = tg::vec4f(1, 0, 0, 0);
 };
 
 // A field moved in the shader is a compile error here rather than a wrong sample.
@@ -35,6 +36,8 @@ static_assert(offsetof(sv::shaders::layout::layout_constants, wipe) == offsetof(
 static_assert(offsetof(sv::shaders::layout::layout_constants, separator_color)
                   == offsetof(layout_constants_gpu, separator_color),
               "separator_color moved in layout.sgl");
+static_assert(offsetof(sv::shaders::layout::layout_constants, display) == offsetof(layout_constants_gpu, display),
+              "display moved in layout.sgl");
 
 /// A uv rect as the shader wants it: a scale and a bias applied to the covering triangle's [0,1] corner.
 [[nodiscard]] tg::vec4f uv_scale_bias(tg::aabb2f const& uv)
@@ -233,6 +236,7 @@ sg::routine_outcome layout_routine::execute(sg::rendering_scope& scope,
             constants.wipe = tg::vec4f(d.post.split, d.post.horizontal ? 0.0f : 1.0f,
                                        w > 0 ? 0.5f * float(d.post.separator_width) / float(w) : 0.0f, 0.0f);
             constants.separator_color = d.post.separator_color;
+            constants.display = tg::vec4f(d.display.exposure_scale(), f32(d.display.curve), 0.0f, 0.0f);
 
             auto const filter
                 = d.sampler == sampler_mode::nearest ? sg::sampler_filter::nearest : sg::sampler_filter::linear;

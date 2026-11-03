@@ -531,7 +531,11 @@ struct uniformity_pass
                 }
             },
             [&](flat_eval const& v) { (void)value(v.value, flow); },
-            [&](flat_print const& p) { (void)value(p.value, flow); },
+            [&](flat_print const& p)
+            {
+                for (auto const v : e.at(p.values))
+                    (void)value(v, flow);
+            },
             [&](flat_if const& i)
             {
                 auto const inside = first_of(flow, as_branch(value(i.condition, flow), s.from, s.inlined_through));
@@ -649,7 +653,7 @@ void checker::judge_uniformity(flat_entry_point const& structured)
                                     .reconverges = reconverges,
                                     .judges_per_draw = judges_per_draw};
 
-        // CHK-283: what differs between invocations from the start, which is every parameter but the workgroup's id
+        // CHK-283: what differs between invocations from the start, which is every parameter but the workgroup's id and the draw's first instance
         for (auto i = isize(0); i < e.locals.size(); ++i)
             if (e.locals[i].kind == local_kind::parameter)
                 pass.locals[i] = {.is = true,
@@ -659,7 +663,7 @@ void checker::judge_uniformity(flat_entry_point const& structured)
             pass.locals[0] = {.is = true, .varies = true, .why = cc::string("comes from the stage's input struct")};
         for (auto const& input : e.stage_inputs)
             pass.locals[index_of(input.local)]
-                = input.input == stage_input::workgroup_id
+                = input.input == stage_input::workgroup_id || input.input == stage_input::first_instance
                     ? divergence::none()
                     : divergence{.is = true,
                                  .varies = true,

@@ -11,10 +11,12 @@ add_library(shaped-rendering
     src/shaped-rendering/window.cc
     src/shaped-rendering/blit_routine.cc
     src/shaped-rendering/box_filter_mipmap_routine.cc
+    src/shaped-rendering/display.cc
     src/shaped-rendering/reconstruct.cc
     src/shaped-rendering/atrous_denoise_routine.cc
     src/shaped-rendering/svgf_denoise_routine.cc
     src/shaped-rendering/mix_routine.cc
+    src/shaped-rendering/exposure_meter_routine.cc
     src/shaped-rendering/dlss_rr_routine.cc
     src/shaped-rendering/nrd_denoise_routine.cc
     src/shaped-rendering/oidn_denoise_routine.cc
@@ -54,10 +56,12 @@ target_sources(shaped-rendering
     src/shaped-rendering/input.hh
     src/shaped-rendering/blit_routine.hh
     src/shaped-rendering/box_filter_mipmap_routine.hh
+    src/shaped-rendering/display.hh
     src/shaped-rendering/reconstruct.hh
     src/shaped-rendering/atrous_denoise_routine.hh
     src/shaped-rendering/svgf_denoise_routine.hh
     src/shaped-rendering/mix_routine.hh
+    src/shaped-rendering/exposure_meter_routine.hh
     src/shaped-rendering/dlss_rr_routine.hh
     src/shaped-rendering/nrd_denoise_routine.hh
     src/shaped-rendering/oidn_denoise_routine.hh
@@ -289,6 +293,7 @@ sc_add_shader_package(
         nn_io.sgl:*
         slug_quads.sgl:*
         mix.sgl:*
+        exposure_meter.sgl:*
         atrous_denoise.sgl:*
         svgf.sgl:*
         fsr_prepare_depth.sgl:*
@@ -296,6 +301,7 @@ sc_add_shader_package(
         fsr_clear_uint.sgl:*
         metalfx_prepare.sgl:*
         metalfx_copy_out.sgl:*
+        dlss_specular_hit_distance.sgl:*
         box_filter_mipmap.sgl:*
 )
 
@@ -338,6 +344,7 @@ if(SC_BUILD_TESTS)
         tests/shader-package-test.cc
         tests/slug-font-test.cc
         tests/slug-module-test.cc
+        tests/display-module-test.cc
         tests/slug-path-test.cc
         tests/text-layout-test.cc
         tests/slug-shape-test.cc
@@ -405,6 +412,7 @@ if(SC_BUILD_TESTS)
             tests/shader_fixtures.cc
             tests/compression/bc-compress-test.cc
             tests/blit-routine-test.cc
+            tests/debug-output-test.cc
             tests/imgui-routine-test.cc
             tests/raster-box-filter-mipmap-test.cc
             tests/nn-resample-test.cc
@@ -412,8 +420,33 @@ if(SC_BUILD_TESTS)
             tests/slug-traced-test.cc
             tests/metalfx-test.cc
             tests/dlss-rr-jitter-test.cc
+            tests/box-filter-mipmap-test.cc
+            tests/denoise-test.cc
+            tests/denoise-reference-test.cc
+            tests/fsr-clear-test.cc
+            tests/mix-test.cc
+            tests/exposure-meter-test.cc
+            tests/svgf-reference-test.cc
+            tests/oidn-test.cc
+            tests/nn-conv-test.cc
+            tests/nn-ops-test.cc
+            tests/oidn-network-test.cc
         )
         target_link_libraries(shaped-rendering-test PRIVATE ${_sr_test_backends})
+
+        # Intel's own filter, as the oracle the OIDN member is measured against, where it was fetched on request.
+        # Linked here and nowhere else: the member runs the weights in its own shaders and never calls the library.
+        # Its facade loads its core and its CPU device module by name out of its own directory, so all of them have to
+        # sit beside the binary rather than only the one the link names.
+        if(TARGET oidn)
+            target_sources(shaped-rendering-test PRIVATE tests/oidn_reference.cc)
+            target_link_libraries(shaped-rendering-test PRIVATE oidn)
+            if(OIDN_RUNTIME_LIBRARIES)
+                sc_stage_runtime_dlls(shaped-rendering-test DLLS ${OIDN_RUNTIME_LIBRARIES} TAG oidn)
+            endif()
+        else()
+            target_sources(shaped-rendering-test PRIVATE tests/oidn_reference_null.cc)
+        endif()
 
         # The probes the GPU tests trace with, which use sr's modules as any other package would.
         sc_add_shader_package(
@@ -435,37 +468,12 @@ if(SC_BUILD_TESTS)
         target_sources(shaped-rendering-test PRIVATE tests/imgui-manual-test.cc)
     endif()
 
-    # The tests held to dx12 and vulkan, which a build with DXC has and no other: NRD's and FSR's HLSL need DXC.
-    # The SGL routines among them are listed here until webgpu and metal are held to them too; issue: chore-sr-sgl-routines-on-webgpu-and-metal
+    # The tests held to dx12 and vulkan, which a build with DXC has and no other: NRD's and FSR's own passes are HLSL.
     if(_sr_test_backends AND SC_HAS_DXC_COMPILER)
         target_sources(shaped-rendering-test PRIVATE
-            tests/box-filter-mipmap-test.cc
-            tests/denoise-test.cc
-            tests/denoise-reference-test.cc
-            tests/fsr-clear-test.cc
             tests/fsr-test.cc
-            tests/mix-test.cc
             tests/nrd-test.cc
-            tests/svgf-reference-test.cc
-            tests/oidn-test.cc
-            tests/nn-conv-test.cc
-            tests/nn-ops-test.cc
-            tests/oidn-network-test.cc
         )
-
-        # Intel's own filter, as the oracle the OIDN member is measured against, where it was fetched on request.
-        # Linked here and nowhere else: the member runs the weights in its own shaders and never calls the library.
-        # Its facade loads its core and its CPU device module by name out of its own directory, so all of them have to
-        # sit beside the binary rather than only the one the link names.
-        if(TARGET oidn)
-            target_sources(shaped-rendering-test PRIVATE tests/oidn_reference.cc)
-            target_link_libraries(shaped-rendering-test PRIVATE oidn)
-            if(OIDN_RUNTIME_LIBRARIES)
-                sc_stage_runtime_dlls(shaped-rendering-test DLLS ${OIDN_RUNTIME_LIBRARIES} TAG oidn)
-            endif()
-        else()
-            target_sources(shaped-rendering-test PRIVATE tests/oidn_reference_null.cc)
-        endif()
     endif()
 
     # SGL against the hand-written HLSL each of these shaders was ported from, timed on a dx12 device.

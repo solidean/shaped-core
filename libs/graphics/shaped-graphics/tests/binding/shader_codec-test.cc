@@ -69,6 +69,16 @@ sg::compiled_shader make_shader()
     return shader;
 }
 
+bool same_sites(cc::span<sg::shader_debug_site const> a, cc::span<sg::shader_debug_site const> b)
+{
+    if (a.size() != b.size())
+        return false;
+    for (auto i = isize(0); i < a.size(); ++i)
+        if (!(a[i] == b[i]))
+            return false;
+    return true;
+}
+
 bool same(sg::compiled_shader const& a, sg::compiled_shader const& b)
 {
     if (a.stage != b.stage || a.format != b.format || a.entry_point != b.entry_point)
@@ -102,6 +112,8 @@ bool same(sg::compiled_shader const& a, sg::compiled_shader const& b)
         return false;
     if (a.footprint != b.footprint)
         return false;
+    if (!same_sites(a.debug_sites, b.debug_sites))
+        return false;
     if (a.workgroup_size.has_value() != b.workgroup_size.has_value())
         return false;
     if (a.workgroup_size.has_value())
@@ -125,6 +137,34 @@ TEST("sg shader codec round-trips every field")
     auto const decoded = sg::impl::decode_compiled_shader(encoded);
     REQUIRE(decoded.has_value());
     CHECK(same(original, decoded.value()));
+}
+
+TEST("sg shader codec round-trips a shader's debug sites")
+{
+    auto original = make_shader();
+    original.debug_sites.push_back({.id = 0xC0FFEEu,
+                                    .is_assert = true,
+                                    .pieces = {"v = ", " at ", ""},
+                                    .values = {{.scalar = sg::debug_scalar::float32, .lanes = 1, .type = "float"},
+                                               {.scalar = sg::debug_scalar::int32, .lanes = 2, .type = "int2"}},
+                                    .at = {.file = "shade.sgl", .line = 12},
+                                    .inlined_from = {{.file = "main.sgl", .line = 40}}});
+    auto const decoded = sg::impl::decode_compiled_shader(sg::impl::encode_compiled_shader(original));
+    REQUIRE(decoded.has_value());
+    CHECK(same(original, decoded.value()));
+}
+
+TEST("sg shader codec round-trips a shader's source map")
+{
+    auto original = make_shader();
+    original.source_map.push_back({.emitted = 14, .at = {.file = "shade.sgl", .line = 7}});
+    original.source_map.push_back(
+        {.emitted = 15, .at = {.file = "shade.sgl", .line = 3}, .inlined_from = {{.file = "main.sgl", .line = 40}}});
+    auto const decoded = sg::impl::decode_compiled_shader(sg::impl::encode_compiled_shader(original));
+    REQUIRE(decoded.has_value());
+    REQUIRE(decoded.value().source_map.size() == 2);
+    CHECK(decoded.value().source_map[0] == original.source_map[0]);
+    CHECK(decoded.value().source_map[1] == original.source_map[1]);
 }
 
 TEST("sg shader codec round-trips the absent optionals")

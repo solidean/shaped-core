@@ -4,6 +4,7 @@
 #include <shaped-graphics/backends/dx12/dx12_sampler.hh>
 #include <shaped-graphics/binding/binding.hh> // sg::is_sampler
 #include <shaped-graphics/binding/impl/layout_hash.hh>
+#include <shaped-graphics/context/impl/debug_windows.hh>
 
 namespace sg::backend::dx12
 {
@@ -96,6 +97,19 @@ cc::result<dx12_pipeline_layout_handle> dx12_pipeline_layout::create(ID3D12Devic
         param.Constants.RegisterSpace = ic.space.value();
         pl->inline_constants_root_param = int(params.size());
         pl->inline_constants_num_32bit = int(ic.block_size.value() / 4);
+        params.push_back(param);
+    }
+
+    // The context's debug window, a root UAV at u0 in space 11, last again so nothing above moves.
+    // Every layout carries it where diagnostics are on: a shader that prints or asserts writes it, and any other leaves it unread.
+    if (sg::impl::debug_windows::k_enabled)
+    {
+        D3D12_ROOT_PARAMETER param = {};
+        param.ParameterType = D3D12_ROOT_PARAMETER_TYPE_UAV;
+        param.ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
+        param.Descriptor.ShaderRegister = 0;
+        param.Descriptor.RegisterSpace = 11;
+        pl->debug_root_param = int(params.size());
         params.push_back(param);
     }
 

@@ -184,12 +184,13 @@ cc::shared_async<cc::vector<tg::vec3f>> trace_cornell_at_fill(sg::context& ctx,
     co_return image;
 }
 
-/// A closed cube, wound so every face points outward.
-[[nodiscard]] cc::vector<tg::pos3f> closed_cube(float h)
+/// A closed box of half extents `h`, wound so every face points outward.
+[[nodiscard]] cc::vector<tg::pos3f> closed_box(tg::vec3f h)
 {
     auto const corners = cc::array<tg::pos3f>{
-        tg::pos3f(-h, -h, -h), tg::pos3f(+h, -h, -h), tg::pos3f(+h, +h, -h), tg::pos3f(-h, +h, -h),
-        tg::pos3f(-h, -h, +h), tg::pos3f(+h, -h, +h), tg::pos3f(+h, +h, +h), tg::pos3f(-h, +h, +h),
+        tg::pos3f(-h[0], -h[1], -h[2]), tg::pos3f(+h[0], -h[1], -h[2]), tg::pos3f(+h[0], +h[1], -h[2]),
+        tg::pos3f(-h[0], +h[1], -h[2]), tg::pos3f(-h[0], -h[1], +h[2]), tg::pos3f(+h[0], -h[1], +h[2]),
+        tg::pos3f(+h[0], +h[1], +h[2]), tg::pos3f(-h[0], +h[1], +h[2]),
     };
     auto const faces = cc::array<u32>{0, 2, 1, 0, 3, 2, 4, 5, 6, 4, 6, 7, 0, 1, 5, 0, 5, 4,
                                       3, 7, 6, 3, 6, 2, 0, 4, 7, 0, 7, 3, 1, 2, 6, 1, 6, 5};
@@ -197,6 +198,12 @@ cc::shared_async<cc::vector<tg::vec3f>> trace_cornell_at_fill(sg::context& ctx,
     for (auto const i : faces)
         out.push_back(corners[i]);
     return out;
+}
+
+/// A closed cube of half extent `h`, wound so every face points outward.
+[[nodiscard]] cc::vector<tg::pos3f> closed_cube(float h)
+{
+    return closed_box(tg::vec3f(h, h, h));
 }
 
 [[nodiscard]] f32 block_mean(cc::span<tg::vec3f const> pixels, int bx, int by)
@@ -1158,6 +1165,8 @@ ASYNC_INVOCABLE_TEST("sv::wavefront_routine - a lossless interior is invisible u
         f32 at_least = 0.0f;
         /// whether a default run traces it, or only a thorough one
         bool by_default = true;
+        /// the box's half extents
+        tg::vec3f half = tg::vec3f(0.6f, 0.6f, 0.6f);
     };
     auto cases = cc::vector<furnace_case>();
     // A default run keeps refraction, a medium walk and absorption; the clear interior and the rough glass only a thorough one.
@@ -1182,7 +1191,12 @@ ASYNC_INVOCABLE_TEST("sv::wavefront_routine - a lossless interior is invisible u
         glass.push_back(binding::of("specular_ior", 1.5f));
         glass.push_back(binding::of("specular_roughness", 0.05f));
         glass.push_back(binding::of("transmission_weight", 1.0f));
-        cases.push_back({.name = "glass interior at index 1.5", .bindings = cc::move(glass)});
+        cases.push_back({.name = "glass interior at index 1.5", .bindings = glass});
+        // Half a millimeter thick, thinner than any fixed distance a continuing ray could be offset by at a scene's largest scale.
+        // A ray that steps over the far face escapes still inside the glass, and the pane goes dark.
+        cases.push_back({.name = "glass pane half a millimeter thick",
+                         .bindings = cc::move(glass),
+                         .half = tg::vec3f(0.6f, 0.6f, 0.00025f)});
     }
     {
         auto scattering = base();
@@ -1211,7 +1225,7 @@ ASYNC_INVOCABLE_TEST("sv::wavefront_routine - a lossless interior is invisible u
         if (!c.by_default && !nx::is_thorough())
             continue;
         auto const mesh = sv::mesh{.name = cc::format("wavefront {}", c.name),
-                                   .geometry = sv::triangle_geometry::create_from_positions(closed_cube(0.6f)),
+                                   .geometry = sv::triangle_geometry::create_from_positions(closed_box(c.half)),
                                    .material = lib.acquire(sv::material::create(cc::string(c.name), type, c.bindings))};
         auto const pixels = co_await trace_wavefront(
             ctx, resources, mesh,

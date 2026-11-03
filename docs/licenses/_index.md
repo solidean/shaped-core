@@ -13,6 +13,7 @@ Our own license is in [shaped-core.txt](shaped-core.txt), so this directory is a
 | [DLSS](https://github.com/NVIDIA/DLSS) | v310.9.1 | `LicenseRef-NVIDIA-RTX-SDK` | shaped-rendering — sr::dlss_rr_routine (the DLSS Ray Reconstruction denoise member) | [dlss.txt](dlss.txt) |
 | [DXC](https://github.com/microsoft/DirectXShaderCompiler) | v1.9.2602.24 | `LicenseRef-Microsoft-DXC-Binary` | shaped-shader-compiler-dxc — HLSL to sg::compiled_shader | [dxc.txt](dxc.txt), [dxc-llvm.txt](dxc-llvm.txt), [dxc-mit.txt](dxc-mit.txt) |
 | [FidelityFX-SDK](https://gpuopen.com/amd-fsr-sdk/) | 60f4ea81909200d8542eca14dccb2628b763a9a3 | `MIT` | shaped-rendering — sr::fsr_upscale_routine, AMD FSR 3.1's upscaler run through sg | [fidelityfx-sdk.txt](fidelityfx-sdk.txt) |
+| [glTF Research Scenes](https://github.com/ErfanMo77/gltf-research-scenes) | v1.1.0 | `CC0-1.0 AND CC-BY-3.0` | shaped-viewer — the research-scenes example | [gltf-research-scenes.txt](gltf-research-scenes.txt) |
 | [Dear ImGui](https://github.com/ocornut/imgui) | v1.92.8-docking | `MIT` | shaped-rendering — sr::imgui_context and sr::imgui_routine | [dear-imgui.txt](dear-imgui.txt) |
 | [ImPlot](https://github.com/epezent/implot) | d65a2bef53d3 | `MIT` | shaped-rendering — plotting inside the imgui bundle | [implot.txt](implot.txt) |
 | [ImGuizmo](https://github.com/cedricguillemet/ImGuizmo) | dc25afb98bc3 | `MIT` | shaped-rendering — manipulation gizmos inside the imgui bundle | [imguizmo.txt](imguizmo.txt) |

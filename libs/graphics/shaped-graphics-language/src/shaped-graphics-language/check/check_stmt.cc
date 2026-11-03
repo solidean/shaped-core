@@ -88,6 +88,36 @@ void checker::declare_local(function_scope& scope, local_name local)
 
 // ---- statements -----------------------------------------------------------------------------------------------------
 
+void checker::check_message(function_scope& scope, ast::expr_id message, bool takes_value)
+{
+    auto const file = scope.file;
+    auto const& ast = ast_of(file);
+    auto const* const literal = ast.at(message).node.try_as<ast::literal>();
+    if (literal == nullptr || literal->kind != ast::literal_kind::quoted)
+    {
+        // `print total` prints the one value as it is
+        if (takes_value)
+            (void)check_expr(scope, message);
+        else
+            unsupported(file, span_of(file, message), "an assert message that is no quoted literal");
+        return;
+    }
+    if (text_of(file, span_of(file, message)).contains('\n'))
+    {
+        unsupported(file, span_of(file, message), "a multi-line message");
+        return;
+    }
+    // a message is no value, so it takes no type of its own: strings are not first class
+    for (auto const part : ast.at(literal->interpolations))
+    {
+        auto const type = check_expr(scope, part);
+        if (type != error_type && !is_printable(type))
+            report(diagnostic_kind::type_mismatch, file, span_of(file, part),
+                   cc::format("a message interpolates a scalar, a plain vector or an enum, and this is {}",
+                              out.name_of(type)));
+    }
+}
+
 flow checker::check_stmt(function_scope& scope, ast::stmt_id stmt)
 {
     auto const file = scope.file;
@@ -116,7 +146,7 @@ flow checker::check_stmt(function_scope& scope, ast::stmt_id stmt)
         },
         // CHK-420: its own scope, whose locals end with it; what it returns or leaves is what the statement does
         [&](ast::scope_stmt const& block) { result = check_nested(scope, block.body); },
-        [&](ast::print_stmt const& print) { (void)check_expr(scope, print.message); },
+        [&](ast::print_stmt const& print) { check_message(scope, print.message, true); },
         [&](ast::expr_stmt const& e)
         {
             if (!ast::is_valid(e.value))
@@ -172,7 +202,7 @@ flow checker::check_stmt(function_scope& scope, ast::stmt_id stmt)
             // CHK-227: a bool condition; the run stops where it is false, and a target writes nothing of it
             check_condition(scope, a.condition);
             if (ast::is_valid(a.message))
-                unsupported(file, span_of(file, a.message), "an assert message");
+                check_message(scope, a.message, false);
         },
         [&](ast::decl_stmt const& d)
         {

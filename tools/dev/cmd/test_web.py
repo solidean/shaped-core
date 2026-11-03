@@ -34,14 +34,14 @@ def run(args: argparse.Namespace, ctx: Context) -> None:
     if not preset.is_emscripten:
         ctx.die(f"test-web needs an Emscripten preset (got {preset.name!r}); e.g. --preset {ctx.policy.web_preset}")
 
-    # The runners are out of `all`, so the build names them: one library's, or `tests-web` for every one of them.
     if args.library:
         # Accept "clean-core", "clean-core-test", or "clean-core-test-web" — all name the same runner.
         lib = args.library.removesuffix("-web").removesuffix("-test")
         target = f"{lib}-test-web"
         page = f"{lib}-web.html"
     else:
-        target = "tests-web"
+        # every module the aggregate page loads; they are out of `all` (NexusWebRunner.cmake)
+        target = "nexus-web-runners"
         page = "tests-web.html"
 
     if not args.no_build:

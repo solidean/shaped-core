@@ -159,6 +159,12 @@ bool metal_context::supports(sg::feature f) const
     case sg::feature::wireframe_fill:
         // `MTLTriangleFillModeLines` is on every Apple GPU.
         return true;
+    case sg::feature::first_instance:
+        // `[[base_instance]]` is on every Apple GPU this backend's Metal 4 floor admits.
+        return true;
+    case sg::feature::opacity_micromap:
+        // Metal 4 has no opacity micromaps.
+        return false;
     case sg::feature::depth32_float_stencil8:
         // `MTLPixelFormatDepth32Float_Stencil8` is on every Apple GPU.
         return true;
@@ -973,8 +979,12 @@ cc::result<sg::raw_texture_handle> metal_context::try_create_raw_texture(texture
     return cc::result<sg::raw_texture_handle>(create_metal_texture(desc, alloc));
 }
 
-cc::result<sg::memory_heap_handle> metal_context::try_create_memory_heap(isize size_in_bytes)
+cc::result<sg::memory_heap_handle> metal_context::try_create_memory_heap(isize size_in_bytes,
+                                                                         memory_heap_contents contents)
 {
+    // issue: feat-sg-metal-texture-heap
+    if (contents == memory_heap_contents::textures)
+        return cc::error("metal places textures, but its heap answers no texture requirements yet");
     return cc::result<sg::memory_heap_handle>(create_metal_memory_heap(size_in_bytes));
 }
 

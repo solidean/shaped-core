@@ -543,7 +543,7 @@ constexpr auto raster_spelling = body_spelling{.explicit_level = false, .mark = 
 [[nodiscard]] cc::string source_header(resolved_material const& r,
                                        geometry_kind kind,
                                        cc::string_view requires_,
-                                       cc::string_view extra_use = {})
+                                       cc::span<cc::string_view const> extra_uses = {})
 {
     auto src = cc::string();
     cc::format_append(src, "// generated from material type '{}' — do not edit\n", r.type->name);
@@ -551,8 +551,8 @@ constexpr auto raster_spelling = body_spelling{.explicit_level = false, .mark = 
     src += "\nuse material\nuse openpbr\n";
     if (kind == geometry_kind::quadrics)
         src += "use quadric\n";
-    if (!extra_use.empty())
-        cc::format_append(src, "use {}\n", extra_use);
+    for (auto const use : extra_uses)
+        cc::format_append(src, "use {}\n", use);
     src += "use slug\nuse tracer\n\n";
     return src;
 }
@@ -718,28 +718,123 @@ constexpr auto raster_spelling = body_spelling{.explicit_level = false, .mark = 
     return src;
 }
 
-/// The raster path's pixel stage of one triangle permutation: `sv_raster`, over the triangle module `raster`'s vertex stage drew.
+/// The raster path's pixel stages of one triangle permutation, over the triangle module `raster`'s vertex stage drew:
+/// `sv_raster`, lit without tracing, and `sv_gbuffer`, the hybrid's thin G-buffer.
 ///
+/// The draw is indexed, so a pixel learns its triangle from `@primitive_id`, which is why it requires `primitive_index`.
 /// The cutout reads the instance's opacity record through `tracer.instance_opacity`, the reader a hit's any-hit cuts through.
-/// So a pixel cuts what a hit does wherever the type's cutoff is above 0; coverage, a cutoff of 0, is cut below one half (`raster.is_cut`).
+/// So a pixel cuts what a hit does wherever the type's cutoff is above 0; coverage, a cutoff of 0, as `raster.is_cut` says.
 /// The type's declared occlusion reaches `raster.shade` the same way, and 1 where it declares none.
 [[nodiscard]] cc::string generate_raster_pixel(resolved_material const& r,
                                                material_parameter_layout const& layout,
                                                material_opacity const& opacity)
 {
-    auto src = source_header(r, geometry_kind::triangles, {}, "raster");
+    cc::string_view const uses[] = {"raster"};
+    auto src = source_header(r, geometry_kind::triangles, "require primitive_index\n", uses);
     auto supplied_frame = cc::string();
     src += material_body(r, layout, supplied_frame, raster_spelling);
 
-    src += "@pixel fun sv_raster(p: raster.varyings){raster.drawn, tracer.bindless, slug.tables} -> raster.targets:\n"
-           "    let ctx = raster.pixel_context(p)\n";
-    if (opacity.can_cut_out())
-        src += "    if raster.is_cut(p, ctx) => discard\n";
+    auto const opening = [&](cc::string_view entry, cc::string_view targets)
+    {
+        cc::format_append(src,
+                          "@pixel fun {}(p: raster.varyings, @primitive_id primitive: int){{raster.drawn, "
+                          "tracer.bindless, slug.tables}} -> {}:\n"
+                          "    let ctx = raster.pixel_context(p, primitive as uint)\n",
+                          entry, targets);
+        if (opacity.can_cut_out())
+            src += "    if raster.is_cut(p, ctx) => discard\n";
+    };
+    opening("sv_raster", "raster.targets");
     auto const occlusion = r.type->occlusion_attribute.empty()
                              ? cc::string("1.0")
                              : cc::format("sv_attribute_{}(ctx)", r.type->occlusion_attribute);
-    cc::format_append(src, "    return raster.shade(p, ctx, sv_evaluate_material(ctx), {}, {})\n", supplied_frame,
+    cc::format_append(src, "    return raster.shade(p, ctx, sv_evaluate_material(ctx), {}, {})\n\n", supplied_frame,
                       occlusion);
+    opening("sv_gbuffer", "raster.thin_targets");
+    cc::format_append(src, "    return raster.thin(p, ctx, sv_evaluate_material(ctx), {})\n", supplied_frame);
+    return src;
+}
+
+/// The raster path's pixel stages of one quadric permutation, over the box `raster.quadric_vertex_of` drew: `sv_raster` and `sv_gbuffer`.
+///
+/// A box is no surface, so each pixel solves its primitive along its camera ray, discards a miss, and writes the surface's depth.
+/// A quadric cuts nothing out, as its hit group has no any-hit to cut with.
+[[nodiscard]] cc::string generate_quadric_raster_pixel(resolved_material const& r, material_parameter_layout const& layout)
+{
+    cc::string_view const uses[] = {"raster"};
+    auto src = source_header(r, geometry_kind::quadrics, "", uses);
+    auto supplied_frame = cc::string();
+    src += material_body(r, layout, supplied_frame, raster_spelling);
+
+    auto const opening = [&](cc::string_view entry, cc::string_view targets)
+    {
+        cc::format_append(src,
+                          "@pixel fun {}(p: raster.quadric_varyings){{raster.drawn, tracer.bindless, slug.tables}} -> "
+                          "{}:\n"
+                          "    let hit = raster.quadric_pixel_of(p)\n"
+                          "    if not hit.valid => discard\n"
+                          "    let ctx = raster.quadric_context_of(p)\n",
+                          entry, targets);
+    };
+    opening("sv_raster", "raster.quadric_targets");
+    auto const occlusion = r.type->occlusion_attribute.empty()
+                             ? cc::string("1.0")
+                             : cc::format("sv_attribute_{}(ctx)", r.type->occlusion_attribute);
+    cc::format_append(src, "    return raster.shade_quadric(p, hit, sv_evaluate_material(ctx), {}, {})\n\n",
+                      supplied_frame, occlusion);
+    opening("sv_gbuffer", "raster.quadric_thin_targets");
+    cc::format_append(src, "    return raster.thin_quadric(p, hit, sv_evaluate_material(ctx), {})\n", supplied_frame);
+    return src;
+}
+
+/// The hybrid's forward pixel stage of one quadric permutation: `sv_hybrid` over `hybrid_quadric_vs`, as the raster stage solves it.
+[[nodiscard]] cc::string generate_quadric_hybrid_pixel(resolved_material const& r, material_parameter_layout const& layout)
+{
+    cc::string_view const uses[] = {"hybrid", "raster"};
+    auto src = source_header(r, geometry_kind::quadrics, "require ray_query\nrequire raytracing_pipeline\n", uses);
+    auto supplied_frame = cc::string();
+    src += material_body(r, layout, supplied_frame, raster_spelling);
+
+    cc::format_append(src,
+                      "@pixel fun sv_hybrid(p: raster.quadric_varyings){{tracer.traced, tracer.bindless, slug.tables, "
+                      "hybrid.pass}} -> raster.quadric_targets:\n"
+                      "    let hit = hybrid.quadric_pixel_of(p)\n"
+                      "    if not hit.valid => discard\n"
+                      "    let ctx = hybrid.quadric_context_of(p)\n"
+                      "    let surface = sv_evaluate_material(ctx)\n"
+                      "    let face = hybrid.quadric_face(p, hit, surface, {})\n"
+                      "    let lit = hybrid.shade_face(float2(p.position.x, p.position.y), hit.world, face, surface, "
+                      "{})\n"
+                      "    return raster.with_surface_depth(lit, hybrid.quadric_depth(hit))\n",
+                      supplied_frame, supplied_frame);
+    return src;
+}
+
+/// The hybrid's forward pixel stage of one triangle permutation: `sv_hybrid`, over the vertex stage of hybrid_pass.sgl.
+///
+/// `sv_raster` with `tracer.traced` in place of `raster.drawn`, lit by `hybrid.shade`, which traces its shadow rays inline.
+/// Baked occlusion does not reach it, since the environment's own shadow ray stands for it.
+[[nodiscard]] cc::string generate_hybrid_pixel(resolved_material const& r,
+                                               material_parameter_layout const& layout,
+                                               material_opacity const& opacity)
+{
+    cc::string_view const uses[] = {"hybrid", "raster"};
+    auto src = source_header(r, geometry_kind::triangles,
+                             "require primitive_index\nrequire ray_query\nrequire raytracing_pipeline\n", uses);
+    auto supplied_frame = cc::string();
+    src += material_body(r, layout, supplied_frame, raster_spelling);
+
+    src += "@pixel fun sv_hybrid(p: raster.varyings, @primitive_id primitive: int){tracer.traced, tracer.bindless, "
+           "slug.tables, hybrid.pass} -> raster.targets:\n"
+           "    let ctx = hybrid.pixel_context(p, primitive as uint)\n";
+    if (opacity.can_cut_out())
+        src += "    if hybrid.is_cut(p, ctx) => discard\n";
+    // The face and the shading are called from here rather than through `hybrid.shade`, which keeps the inlining one level shallower.
+    cc::format_append(src,
+                      "    let surface = sv_evaluate_material(ctx)\n"
+                      "    let face = hybrid.pixel_face(p, ctx, surface, {})\n"
+                      "    return hybrid.shade_face(float2(p.position.x, p.position.y), p.world, face, surface, {})\n",
+                      supplied_frame, supplied_frame);
     return src;
 }
 } // namespace
@@ -841,12 +936,25 @@ generated_material_shader generate_material_shader(resolved_material const& r, m
 
     auto source = generate_hit_group(r, layout, opts.kind, opacity.can_cut_out());
     auto shade_source = generate_shade_kernel(r, layout, opts.kind);
-    // A quadric has no raster stage yet; issue: feat-sv-raster-quadric-batches
-    auto raster_source = opts.kind == geometry_kind::triangles ? generate_raster_pixel(r, layout, opacity) : cc::string();
+    auto const triangles = opts.kind == geometry_kind::triangles;
+    auto raster_source = triangles ? generate_raster_pixel(r, layout, opacity) : generate_quadric_raster_pixel(r, layout);
+    auto hybrid_source = triangles ? generate_hybrid_pixel(r, layout, opacity) : generate_quadric_hybrid_pixel(r, layout);
+    // Read off the layout before it is moved into the result.
+    auto const factor_of = [&](cc::string const& attribute)
+    { return attribute.empty() ? material_emission_factor{} : emission_factor_of(r, layout, attribute); };
+    auto const secondary = material_secondary{.base_color = factor_of(r.type->base_color_attribute),
+                                              .roughness = factor_of(r.type->roughness_attribute),
+                                              .metalness = factor_of(r.type->metalness_attribute),
+                                              .specular_weight = factor_of(r.type->specular_weight_attribute),
+                                              .transmission = factor_of(r.type->transmission_attribute),
+                                              .thin_walled = factor_of(r.type->thin_walled_attribute),
+                                              .tangent_frame = factor_of(r.type->tangent_frame_attribute)};
     return {.source = cc::move(source),
             .shade_source = cc::move(shade_source),
             .raster_source = cc::move(raster_source),
+            .hybrid_source = cc::move(hybrid_source),
             .layout = cc::move(layout),
+            .secondary = secondary,
             .opacity = opacity,
             .emission = emission,
             .key = material_shader_key(r.permutation_key, opts)};

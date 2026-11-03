@@ -616,7 +616,7 @@ struct scope_checker
         for (auto const id : e.at(range))
         {
             auto const& s = e.at(id);
-            impl::for_each_expr_of(s, [&](flat_expr_id x) { expr(x); });
+            impl::for_each_expr_of(e, s, [&](flat_expr_id x) { expr(x); });
             if (auto const* const let = s.node.try_as<flat_let>())
                 declared.push_back(let->local);
             if (auto const* const var = s.node.try_as<flat_var>())

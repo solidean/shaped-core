@@ -389,8 +389,11 @@ TEST("sv::generate_material_shader - the raster pixel stage evaluates the same m
     CHECK(!g.raster_source.contains("require raytracing_pipeline"));
 
     // The cut reads the instance's opacity record through the any-hit's reader, ahead of the evaluation, rather than the material's loads.
-    CHECK(g.raster_source.contains("@pixel fun sv_raster(p: raster.varyings){raster.drawn, tracer.bindless, "
-                                   "slug.tables} -> raster.targets:"));
+    // The draw is indexed, so the pixel takes its triangle from `@primitive_id`, which the device must have.
+    CHECK(g.raster_source.contains("require primitive_index\n"));
+    CHECK(g.raster_source.contains("@pixel fun sv_raster(p: raster.varyings, @primitive_id primitive: "
+                                   "int){raster.drawn, "
+                                   "tracer.bindless, slug.tables} -> raster.targets:"));
     CHECK(g.raster_source.contains("    if raster.is_cut(p, ctx) => discard\n"));
     CHECK(g.raster_source.find("raster.is_cut") < g.raster_source.find("raster.shade("));
 
@@ -402,10 +405,13 @@ TEST("sv::generate_material_shader - the raster pixel stage evaluates the same m
     REQUIRE(!opaque.opacity.can_cut_out());
     CHECK(!opaque.raster_source.contains("raster.is_cut"));
 
-    // A quadric batch has no raster stage yet.
+    // A quadric batch's stages solve the surface along the pixel's ray over its box, and write its depth.
     auto const quadric = sv::generate_material_shader(sv::resolve_material(type, material, make_mesh()),
                                                       {.kind = sv::geometry_kind::quadrics});
-    CHECK(quadric.raster_source.empty());
+    CHECK(quadric.raster_source.contains("raster.quadric_pixel_of(p)"));
+    CHECK(quadric.raster_source.contains("raster.quadric_targets"));
+    CHECK(quadric.raster_source.contains("raster.quadric_thin_targets"));
+    CHECK(quadric.hybrid_source.contains("hybrid.quadric_pixel_of(p)"));
 }
 
 TEST("sv::generate_material_shader - the raster pixel stage hands shade the type's occlusion, or 1")

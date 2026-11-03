@@ -21,9 +21,11 @@ lint_config const& empty_lint_config();
 /// `config` is the merged `.shaped-lint.yml` policy for this file, which only `config_resolver` produces —
 /// resolving it here rather than in each rule means one filesystem walk per file whatever the rule count,
 /// and it is what keeps the engine itself off the disk.
+/// `files`, when given, is the run's source manager `buffer` came from: a rule whose fix edits another file looks it up there.
 cc::vector<finding> run_rules(source_buffer const& buffer,
                               cc::span<rule const> rules = all_rules(),
-                              lint_config const& config = empty_lint_config());
+                              lint_config const& config = empty_lint_config(),
+                              source_manager* files = nullptr);
 
 /// Convenience for tests / snippets: lint in-memory text with a throwaway buffer.
 /// The findings are self-contained (owned strings plus byte offsets), so they outlive the buffer.

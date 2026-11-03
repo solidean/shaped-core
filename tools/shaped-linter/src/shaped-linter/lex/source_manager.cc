@@ -30,6 +30,34 @@ cc::result<source_buffer const*> source_manager::add_from_file(cc::string_view p
     return &add_from_text(cc::move(text), path);
 }
 
+source_buffer const* source_manager::find(cc::string_view path) const
+{
+    auto const same = [](cc::string_view a, cc::string_view b)
+    {
+        if (a.size() != b.size())
+            return false;
+        for (auto i = isize(0); i < a.size(); ++i)
+        {
+            auto const x = a[i] == '\\' ? '/' : a[i];
+            auto const y = b[i] == '\\' ? '/' : b[i];
+            if (x != y)
+                return false;
+        }
+        return true;
+    };
+    for (auto const& b : _buffers)
+        if (same(b->path(), path))
+            return b.get();
+    return nullptr;
+}
+
+cc::result<source_buffer const*> source_manager::find_or_add_file(cc::string_view path)
+{
+    if (auto const* const found = find(path))
+        return found;
+    return add_from_file(path);
+}
+
 source_buffer const& source_manager::buffer(u32 file_id) const
 {
     CC_ASSERT(file_id < _buffers.size(), "unknown file_id");

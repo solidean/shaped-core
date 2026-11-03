@@ -79,7 +79,13 @@ expr_id builder::expression_node(form_id form)
     case form_kind::number:
         return make_expr(form, literal{.kind = literal_kind::number});
     case form_kind::quoted:
-        return make_expr(form, literal{.kind = literal_kind::quoted});
+    {
+        auto parts = cc::vector<expr_id>();
+        for (auto child = f.first_child; is_valid(child); child = at(child).next_sibling)
+            parts.push_back(expression(child));
+        auto const interpolations = append(ast.expr_lists, cc::span<expr_id const>(parts));
+        return make_expr(form, literal{.kind = literal_kind::quoted, .interpolations = interpolations});
+    }
     case form_kind::hash_literal:
         return make_expr(form, literal{.kind = literal_kind::hash});
 

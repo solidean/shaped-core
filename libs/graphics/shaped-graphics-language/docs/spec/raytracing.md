@@ -380,14 +380,10 @@ A pipeline there waits for a polyfill, which the [incubator](incubator/raytracin
 * A record without a closest hit calls `sgl_empty_closest_hit`, since an empty table slot is no function.
 * The closest hit's record is found from each instance's hit-group offset, which sg keeps in a buffer of its own at buffer 5.
 
-Metal falls short of DXR in four places, which [feat-sgl-metal-raytracing-pipeline-dxr-parity](../issues/feat-sgl-metal-raytracing-pipeline-dxr-parity.md) tracks:
+Metal falls short of DXR in one place: **one TLAS per dispatch**, whose instance offsets are the one buffer at buffer 5.
+[epic-sgl-metal-raytracing-dxr-parity](../issues/epic-sgl-metal-raytracing-dxr-parity.md) tracks it.
 
-* **A hit's instance transforms are the identity** in a pipeline: Metal hands them only under intersection tags sg's tables do not declare.
-* **A closest hit's `object_ray` is the world ray**, for the same reason, while an intersection's is in object space.
-* **`accept_and_end_search` acts as `accept`** in an intersection function.
-* **One TLAS per dispatch**, whose instance offsets are the one buffer at buffer 5.
-
-The metal pipeline is exercised by CI alone.
+The metal pipeline's GPU tests pass on an M4, which traces in hardware; no Apple GPU without hardware ray tracing has run them.
 
 ## Open
 

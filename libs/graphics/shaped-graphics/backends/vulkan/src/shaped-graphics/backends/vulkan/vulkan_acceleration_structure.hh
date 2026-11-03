@@ -55,6 +55,37 @@ private:
     }
 };
 
+/// A micromap is the same shape: a VkMicromapEXT object placed over its storage buffer.
+class sg::backend::vulkan::vulkan_micromap final : public sg::micromap
+{
+public:
+    vulkan_micromap(vulkan_context& ctx,
+                    vulkan_buffer_handle storage,
+                    VkMicromapEXT micromap,
+                    isize size_in_bytes,
+                    isize build_scratch_size_in_bytes,
+                    cc::vector<sg::micromap_usage> usage)
+      : sg::micromap(size_in_bytes, build_scratch_size_in_bytes, cc::move(usage)),
+        _ctx(ctx),
+        _vulkan_storage(cc::move(storage)),
+        _micromap(micromap)
+    {
+    }
+
+    ~vulkan_micromap() override;
+
+    vulkan_context& _ctx;
+    vulkan_buffer_handle _vulkan_storage;
+    VkMicromapEXT _micromap = VK_NULL_HANDLE;
+
+private:
+    void on_expired() const override
+    {
+        if (_vulkan_storage)
+            _vulkan_storage->expire();
+    }
+};
+
 class sg::backend::vulkan::vulkan_tlas final : public sg::tlas
 {
 public:

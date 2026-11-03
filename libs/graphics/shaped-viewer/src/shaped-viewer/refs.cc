@@ -10,6 +10,7 @@
 #include <shaped-viewer/resources/gpu_resource_manager.hh>
 #include <shaped-viewer/scene/mesh.hh>
 #include <shaped-viewer/scene/resident_mesh.hh>
+#include <shaped-viewer/scene/studio.hh>
 #include <typed-geometry/linalg/cross.hh>   // tg::cross, tg::dual
 #include <typed-geometry/linalg/vec_ops.hh> // tg::dot
 
@@ -65,7 +66,7 @@ namespace
 [[nodiscard]] decal_placement place_decal(drawing_manager& drawings, drawing_set_id set, u32 index, sv::decal const& d)
 {
     CC_ASSERT(d.depth > 0.0f, "a decal's projection must reach some depth");
-    auto const normal = tg::dual(cross(d.y_axis, d.x_axis));
+    auto const normal = tg::dual(cross(d.x_axis, d.y_axis));
     CC_ASSERT(tg::dot(normal, normal) > 0.0f, "a decal's axes must span a plane, which they do not by default");
     return {.first_record = drawings.first_record(set, index),
             .record_count = drawings.record_count(set, index),
@@ -540,6 +541,32 @@ void scene_ref::settings(render_settings const& s)
     target().settings = s;
 }
 
+void scene_ref::studio(studio_options const& options)
+{
+    // The exposure is a quadrature over the dome, so the last one is kept: a scene calls this every frame with the same options.
+    thread_local auto last_setup = studio_setup::floor;
+    thread_local auto last_horizon = -1.0f;
+    thread_local auto last_exposure = 0.0f;
+
+    auto d = studio_dome(options.setup, options.horizon);
+    if (!options.exposure.has_value() && (last_setup != options.setup || last_horizon != options.horizon))
+    {
+        last_setup = options.setup;
+        last_horizon = options.horizon;
+        last_exposure = studio_exposure(d);
+    }
+    if (options.lights_from.has_value())
+        d = d.seen_from(options.lights_from.value());
+
+    auto& l = target();
+    l.background = sv::background::of_dome(d);
+    l.fallback_light = cc::nullopt;
+    l.settings.display = {.exposure = options.exposure.has_value() ? options.exposure.value() : last_exposure,
+                          .curve = sr::display_curve::neutral};
+    if (options.setup == studio_setup::floor && options.draw_floor)
+        add_mesh(studio_floor(options.floor_height, options.floor_half_extent));
+}
+
 // ---- leaf_ref --------------------------------------------------------------------------------------------
 
 layout_leaf& leaf_ref::target() const
@@ -800,6 +827,11 @@ u32 view_ref::accumulated_samples() const
 bool view_ref::is_accumulation_converged(cc::optional<u32> samples) const
 {
     return impl::is_accumulation_converged(_frame->state_of(_view), samples);
+}
+
+void view_ref::restart_accumulation() const
+{
+    impl::restart_accumulation(_frame->state_of(_view));
 }
 
 // ---- window_ref ------------------------------------------------------------------------------------------

@@ -129,8 +129,8 @@ doc.has_issues();           // bool
 doc.has_issue_of(babel::gltf::issue_kind::unsupported); // unsupported | unresolved | malformed
 doc.issue_report();         // cc::string, one "kind: message" line per issue; "" when clean
 
-doc.extensions_used;   // cc::vector<cc::string>; a required extension other than KHR_lights_punctual,
-                       // EXT_meshopt_compression or a registered extension fails the read
+doc.extensions_used;   // cc::vector<cc::string>; a required extension other than KHR_lights_punctual, EXT_meshopt_compression,
+                       // the six KHR_materials_* below, or a registered extension fails the read
 // a registered extension: hookless when it only adds information (read it via json_of), hooks when it changes bytes
 gltf::extension{.name = "VENDOR_x", .decode_buffer_view = f, .decode_accessor = g}; // f, g: function_refs, outlive the read
 //   f(buffer_view_decode{doc, view, extension}) / g(accessor_decode{doc, accessor, extension}) -> decoded_bytes:
@@ -148,7 +148,13 @@ doc.accessors;    // cc::vector<accessor>    — { buffer_view, byte_offset, com
 doc.attributes;   // cc::vector<attribute>   — every primitive attribute, flattened { semantic, accessor }
 doc.primitives;   // cc::vector<primitive>   — flattened { first_attribute, attribute_count, indices, material, mode }
 doc.meshes; doc.nodes; doc.scenes; doc.materials; doc.textures; doc.images; doc.samplers;
-doc.lights;       // cc::vector<light> — KHR_lights_punctual, the one interpreted extension:
+doc.materials[i]; // core metallic-roughness, plus the factors of KHR_materials_emissive_strength (emissive_strength),
+                  //   _transmission (transmission_factor), _ior (ior), _volume (thickness_factor, optional attenuation_distance,
+                  //   attenuation_color), _specular (specular_factor, specular_color_factor), _clearcoat (clearcoat_factor, clearcoat_roughness_factor)
+                  //   each at its extension's default when absent; their textures are not read, and are recorded as issues
+doc.cameras;      // cc::vector<camera> — { type: unknown|perspective|orthographic, yfov, optional aspect_ratio, xmag, ymag, znear, optional zfar, name }
+                  //   node.camera names one (camera_index); it looks down that node's -Z with +Y up
+doc.lights;       // cc::vector<light> — KHR_lights_punctual:
                   //   { type: unknown|directional|point|spot, color, intensity (cd, or lux when directional), optional range, inner/outer_cone_angle, name }
                   //   unknown: a type the extension does not define, kept in its slot so node indices hold, and recorded as malformed
                   //   node.light names one (light_index); it points down that node's -Z, and the node's scale does not touch it
@@ -498,7 +504,7 @@ Only what the signatures above cannot tell you.
 - **glTF is strict about bytes, lenient about everything else.**
   Hard errors: a sparse accessor, an unknown `componentType` / `type` / `mode`, and any range escaping its bufferView or buffer.
   A non-empty `extensionsRequired` is one too, which is what refuses Draco / meshopt / basisu by name.
-  Skipped: unknown members, `extras`, morph targets, and the `skins` / `animations` / `cameras` arrays.
+  Skipped: unknown members, `extras`, morph targets, and the `skins` / `animations` arrays.
   A wrong JSON type on an *optional* scalar falls back to the default.
 - **glTF `.value()` is not the whole answer — check `issues`**, which names every element the reader skipped, could not resolve, or tolerated.
   A usable-but-incomplete import is the normal case for a real asset, and a file the reader fully understood leaves `has_issues()` false.

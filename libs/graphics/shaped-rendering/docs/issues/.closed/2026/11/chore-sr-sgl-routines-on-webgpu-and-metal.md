@@ -2,6 +2,8 @@
 created: 2026-10-17
 refs:
   - file: libs/graphics/shaped-rendering/CMakeLists.txt
+closed: 2026-11-02
+resolution: fixed
 ---
 
 # Hold webgpu and metal to sr's SGL routines

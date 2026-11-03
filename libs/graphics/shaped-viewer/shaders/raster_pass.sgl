@@ -3,12 +3,19 @@
 // The pixel stage of a surface is generated per material permutation and compiled at run time, so it has no entry here.
 // The file joins module `raster` (shaders/sgl), which holds what those generated stages share with it.
 // sv::raster_routine builds the pipelines, and libs/graphics/shaped-viewer/docs/raster.md is the design.
+require first_instance
+
 use raster
 use tracer
 
-/// One corner of one triangle of the draw's instance: three vertices per triangle, and no vertex buffer.
-@vertex fun surface_vs(@vertex_index vertex: int){raster.drawn, tracer.bindless, raster.draw} -> raster.varyings:
-    return raster.corner_of(vertex)
+/// One vertex of the draw's instance: an indexed draw through the index pool, and no vertex buffer.
+/// The draw's first instance is its row of `raster.drawn.instances`, the same for the whole draw.
+@vertex fun surface_vs(@vertex_index vertex: int, @first_instance row: int){raster.drawn, tracer.bindless} -> raster.varyings:
+    return raster.vertex_of(vertex, row as uint)
+
+/// A quadric batch's boxes: 36 vertices a box, one instance a primitive, counted from the row the draw's first instance names.
+@vertex fun quadric_vs(@vertex_index vertex: int, @instance_index index: int, @first_instance row: int){raster.drawn, tracer.bindless} -> raster.quadric_varyings:
+    return raster.quadric_vertex_of(vertex, row as uint, (index - row) as uint)
 
 /// What the environment pass hands its pixel stage: the position alone, whose pixel is the camera ray.
 struct environment_varyings:
@@ -24,3 +31,7 @@ struct environment_varyings:
 /// The environment where no surface was drawn, which the depth test against the far plane decides.
 @pixel fun environment_ps(p: environment_varyings){raster.drawn} -> raster.targets:
     return raster.environment(float2(p.position.x, p.position.y))
+
+/// The environment where no surface was drawn, into the thin G-buffer of a deferred hybrid frame.
+@pixel fun environment_thin_ps(p: environment_varyings){raster.drawn} -> raster.thin_targets:
+    return raster.environment_thin(float2(p.position.x, p.position.y))

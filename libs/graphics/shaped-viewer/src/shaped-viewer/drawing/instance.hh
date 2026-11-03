@@ -50,7 +50,7 @@ struct sv::instance_3d
 
 /// A drawing projected onto the traced surfaces of a scene, which it paints as part of their material.
 ///
-/// The drawing is placed on a plane as `instance_3d` places it, and projected along `y_axis × x_axis` — away from a
+/// The drawing is placed on a plane as `instance_3d` places it, and projected along `x_axis × y_axis` — away from a
 /// viewer who reads it the right way round — to `depth` world units on either side of that plane.
 /// Every surface inside that box takes the drawing's colors as its base color on the side facing the projector, and is
 /// lit, shadowed and reflected with it, whichever way its mesh is wound.

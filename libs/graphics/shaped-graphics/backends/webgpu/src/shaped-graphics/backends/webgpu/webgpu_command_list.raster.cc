@@ -195,9 +195,17 @@ void webgpu_command_list::apply_raster_state()
             wgpuRenderPassEncoderSetBindGroup(pass, u32(i), s.layout->empty_group(), 0, nullptr);
         u32 offsets[2] = {};
         auto const offset_count = s.layout->reserved_dynamic_offsets(s.constants_offset, offsets);
-        wgpuRenderPassEncoderSetBindGroup(pass, u32(sg::reserved_binding_group),
-                                          s.layout->reserved_group_for(s.constants_page), size_t(offset_count),
-                                          offset_count > 0 ? offsets : nullptr);
+        auto window = sg::raw_buffer_handle();
+        if (sg::impl::debug_windows::k_enabled)
+        {
+            window = _ctx.debug_windows().window_for_recording(s.writes_debug);
+            touch(window);
+        }
+        wgpuRenderPassEncoderSetBindGroup(
+            pass, u32(sg::reserved_binding_group),
+            s.layout->reserved_group_for(
+                s.constants_page, window != nullptr ? static_cast<webgpu_buffer const&>(*window).raw() : nullptr),
+            size_t(offset_count), offset_count > 0 ? offsets : nullptr);
     }
     s.needs_full_apply = false;
 }
@@ -393,5 +401,24 @@ void webgpu_command_list::raster_draw_indexed(sg::draw_indexed_config const& con
     wgpuRenderPassEncoderDrawIndexed(render_pass(), u32(config.index_range.size), u32(config.instance_range.size),
                                      u32(config.index_range.offset), config.vertex_offset,
                                      u32(config.instance_range.offset));
+}
+
+void webgpu_command_list::raster_draw_indexed_indirect(sg::raw_buffer_handle const& args, isize offset_in_bytes, isize count)
+{
+    CC_ASSERT(_in_rendering_scope, "an indirect draw is only valid inside a rendering scope");
+    CC_ASSERT(_index_buffer != nullptr, "an indirect indexed draw needs a bound index buffer");
+    auto const* buffer = dynamic_cast<webgpu_buffer const*>(args.get());
+    CC_ASSERT(buffer != nullptr, "indirect draw arguments are not a webgpu buffer");
+    CC_ASSERT(!buffer->is_expired(), "indirect draw arguments are a transient buffer used past its epoch");
+
+    // WebGPU orders the arguments' reads after earlier writes; the list only keeps the buffer alive.
+    touch(args);
+    order_draw_within_pass(true);
+    apply_raster_state();
+
+    // WebGPU has no multi-draw, so each record is a draw of its own.
+    auto const stride = isize(sizeof(sg::draw_indexed_args));
+    for (auto i = isize(0); i < count; ++i)
+        wgpuRenderPassEncoderDrawIndexedIndirect(render_pass(), buffer->raw(), u64(offset_in_bytes + i * stride));
 }
 } // namespace sg::backend::webgpu

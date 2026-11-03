@@ -7,6 +7,7 @@ module raster
 use material
 use openpbr
 use pt
+use quadric
 use scene
 use slug
 use tracer
@@ -21,6 +22,13 @@ fun background_sh(){drawn} -> float4[16]:
         sh[k] = drawn.background[k]
     return sh
 
+/// The whole environment, copied out of its buffer into the array `scene.environment_*` take.
+fun background_lanes(){drawn} -> float4[28]:
+    let mut env = float4[28].filled(float4(0.0))
+    for k in 0 ..< 28:
+        env[k] = drawn.background[k]
+    return env
+
 /// An object-space point of `inst` in the world.
 fun to_world_point(inst: scene.instance, p: float3) -> float3:
     let q = float4(p.x, p.y, p.z, 1.0)
@@ -30,6 +38,36 @@ fun to_world_point(inst: scene.instance, p: float3) -> float3:
 fun to_world_vector(inst: scene.instance, v: float3) -> float3:
     let q = float4(v.x, v.y, v.z, 0.0)
     return float3(dot(inst.to_world_x, q), dot(inst.to_world_y, q), dot(inst.to_world_z, q))
+
+/// The columns of `inst`'s linear part, `to_world_vector` of the three axes.
+struct linear_columns:
+    a: float3
+    b: float3
+    c: float3
+
+fun columns_of(inst: scene.instance) -> linear_columns:
+    let a = float3(inst.to_world_x.x, inst.to_world_y.x, inst.to_world_z.x)
+    let b = float3(inst.to_world_x.y, inst.to_world_y.y, inst.to_world_z.y)
+    let c = float3(inst.to_world_x.z, inst.to_world_y.z, inst.to_world_z.z)
+    return linear_columns(a, b, c)
+
+/// A world direction in `inst`'s object space: the inverse of `to_world_vector`, by the cross products of its columns.
+fun to_object_vector(inst: scene.instance, v: float3) -> float3:
+    let m = columns_of(inst)
+    let det = dot(m.a, cross(m.b, m.c))
+    return float3(dot(cross(m.b, m.c), v), dot(cross(m.c, m.a), v), dot(cross(m.a, m.b), v)) / det
+
+/// A world point in `inst`'s object space: the inverse of `to_world_point`.
+fun to_object_point(inst: scene.instance, p: float3) -> float3:
+    return to_object_vector(inst, p - float3(inst.to_world_x.w, inst.to_world_y.w, inst.to_world_z.w))
+
+/// An object-space normal of `inst` in the world, by the inverse transpose of its linear part, normalized.
+/// A non-uniform scale tilts a normal as it does not tilt a tangent, which is why this is not `to_world_vector`.
+fun normal_to_world(inst: scene.instance, n: float3) -> float3:
+    let m = columns_of(inst)
+    let det = dot(m.a, cross(m.b, m.c))
+    let sign = if det < 0.0 => -1.0 else 1.0
+    return normalize(cross(m.b, m.c) * n.x + cross(m.c, m.a) * n.y + cross(m.a, m.b) * n.z) * sign
 
 /// -1 where `inst`'s placement mirrors, and 1 where it does not.
 ///
@@ -46,60 +84,150 @@ fun mirroring_of(inst: scene.instance) -> float:
 /// A float's spacing shrinks toward 0 as fast as `near / w` does, so the depth test resolves a far surface as finely as a near one.
 /// That is the raster pass's own depth alone; `primary_depth` stays `1 - near / w`, the depth `sv::matrices_of` builds and the tracer writes.
 /// Up is up in clip space, which is the tracer's image read top row first.
-fun project(cam: scene.camera, p: float3, near: float) -> hpos4:
+/// `shift` moves the image in clip space, `jitter_shift` of a frame's jitter, so a pixel's center lands where its jittered ray would.
+fun project(cam: scene.camera, p: float3, near: float, shift: float2) -> hpos4:
     let offset = p - cam.position
     let depth = dot(offset, normalize(cam.forward))
     let x = dot(offset, cam.right_scaled) / dot(cam.right_scaled, cam.right_scaled)
     let y = dot(offset, cam.up_scaled) / dot(cam.up_scaled, cam.up_scaled)
-    return hpos4(x, y, near, depth)
+    return hpos4(x + shift.x * depth, y + shift.y * depth, near, depth)
 
-/// Corner `vertex % 3` of triangle `vertex / 3` of the draw's instance, pulled out of the bindless tables.
+/// The clip-space shift that moves an image of `size` pixels by `-jitter`, so pixel `px` samples the image at `px + 0.5 + jitter`.
+/// Clip space's y is up where the image's is down.
+fun jitter_shift(jitter: float2, size: float2) -> float2:
+    return float2(-2.0 * jitter.x / size.x, 2.0 * jitter.y / size.y)
+
+/// Vertex `vertex` of row `instance` of the instance table, pulled out of the vertex pool.
 ///
-/// No vertex buffer and no index buffer are bound: the draw is three vertices per triangle, and each reads its own corner the way a hit reads all three.
-/// That is what lets one pipeline draw every mesh, indexed or not, whatever its attributes.
-fun corner_of(vertex: int){drawn, tracer.bindless, draw} -> varyings:
+/// The draw is indexed through the index pool, and `vertex` already carries the mesh's base vertex, so it is the pool's own index.
+/// No vertex buffer is bound, which is what lets one pipeline draw every mesh, whatever its attributes.
+/// `instance` must be the same for the whole draw, which the `@per_draw` member it lands in holds the caller to.
+fun vertex_of(vertex: int, instance: uint){drawn, tracer.bindless} -> varyings:
     let f = drawn.frame[0]
-    let instance = draw.instance
-    let inst = scene.instance(..drawn.instances[instance as int])
-    let primitive = (vertex / 3) as uint
-    let k = vertex % 3
+    return vertex_from(scene.instance(..drawn.instances[instance as int]), instance, vertex, scene.camera(..f.camera), f.near_plane, jitter_shift(f.jitter, f.size))
 
-    let indices = inst.indices as int
-    let corners = material.triangle_corners(inst, tracer.bindless.buffers[indices], primitive)
-    let mut index = corners.x
-    let mut bary = float3(1.0, 0.0, 0.0)
-    if k == 1:
-        index = corners.y
-        bary = float3(0.0, 1.0, 0.0)
-    else if k == 2:
-        index = corners.z
-        bary = float3(0.0, 0.0, 1.0)
-
+/// `vertex_of` for whichever group holds the frame and the instance table: vertex `vertex` of `inst`, row `instance`, seen through `cam`.
+fun vertex_from(inst: scene.instance, instance: uint, vertex: int, cam: scene.camera, near: float, shift: float2){tracer.bindless} -> varyings:
     let vertices = inst.vertices as int
-    let object = reinterpret_as_float(tracer.bindless.buffers[vertices].load3(index * 12u))
+    let object = reinterpret_as_float(tracer.bindless.buffers[vertices].load3((vertex as uint) * 12))
     let world = to_world_point(inst, object)
     return {
-        position = project(scene.camera(..f.camera), world, f.near_plane)
+        position = project(cam, world, near, shift)
         instance = instance
-        primitive = primitive
-        barycentrics = bary
+        object = object
         world = world
     }
 
-/// The shading context of the pixel's triangle, as `tracer.triangle_context` makes one for a hit there.
-fun pixel_context(p: varyings){drawn, tracer.bindless} -> material.shading_context:
+/// The four corners of box face `face`, counter-clockwise seen from outside, one per nibble; a corner's bits are its x, y and z in that order.
+fun box_face(face: int) -> uint:
+    if face == 0 => return 0x2640u
+    if face == 1 => return 0x7315u
+    if face == 2 => return 0x4510u
+    if face == 3 => return 0x7623u
+    if face == 4 => return 0x3201u
+    return 0x6754u
+
+/// Corner `vertex` of the 36 a box draws as, in [0, 1] on each axis: two triangles a face, wound as `box_face` winds it.
+fun box_corner(vertex: int) -> float3:
+    let face = vertex / 6
+    let k = (vertex - face * 6) as uint
+    let quad_index = (0x320210u >> (k * 4u)) & 15u
+    let corner = (box_face(face) >> (quad_index * 4u)) & 15u
+    return float3((corner & 1u) as float, ((corner >> 1u) & 1u) as float, ((corner >> 2u) & 1u) as float)
+
+/// Vertex `vertex` of the box of primitive `primitive` of `inst`'s quadric batch, row `instance`, seen through `cam`.
+///
+/// `inst.indices` names the batch's boxes, one `tg::aabb3f` of 24 bytes each, the same boxes its acceleration structure is built from.
+fun quadric_vertex_from(inst: scene.instance, instance: uint, primitive: uint, vertex: int, cam: scene.camera, near: float, shift: float2){tracer.bindless} -> quadric_varyings:
+    let boxes = inst.indices as int
+    let base = primitive * 24u
+    let lo = reinterpret_as_float(tracer.bindless.buffers[boxes].load3(base))
+    let hi = reinterpret_as_float(tracer.bindless.buffers[boxes].load3(base + 12u))
+    let object = mix(lo, hi, box_corner(vertex))
+    let world = to_world_point(inst, object)
+    return {
+        position = project(cam, world, near, shift)
+        instance = instance
+        primitive = primitive
+        object = object
+        world = world
+    }
+
+/// `quadric_vertex_from` through `drawn`: vertex `vertex` of the box of `primitive`, row `instance`.
+fun quadric_vertex_of(vertex: int, instance: uint, primitive: uint){drawn, tracer.bindless} -> quadric_varyings:
+    let f = drawn.frame[0]
+    return quadric_vertex_from(scene.instance(..drawn.instances[instance as int]), instance, primitive, vertex, scene.camera(..f.camera), f.near_plane, jitter_shift(f.jitter, f.size))
+
+/// Where a pixel's camera ray meets its quadric: the world point, the object-space outward normal, and whether it met it at all.
+struct quadric_pixel:
+    valid: bool
+    world: float3
+    object_normal: float3
+
+/// Primitive `primitive` of `inst`'s batch solved along `cam`'s ray through `at`, on an image of `size`.
+/// The point is the solve's own, mapped into the world, so it is rounded as an interpolated point is and a ray offset covers it.
+fun quadric_pixel_from(inst: scene.instance, primitive: uint, cam: scene.camera, at: float2, size: float2){tracer.bindless} -> quadric_pixel:
+    let prim = quadric.load_primitive(tracer.bindless.buffers[inst.vertices as int], primitive)
+    let dir = scene.camera_ray_offset(cam, at, size)
+    let found = quadric.intersect(prim, to_object_point(inst, cam.position), to_object_vector(inst, dir), 0.0, 3.0e38)
+    return quadric_pixel(found.valid, to_world_point(inst, found.point), found.normal)
+
+/// `quadric_pixel_from` for the pixel `p` covers, through `drawn`.
+fun quadric_pixel_of(p: quadric_varyings){drawn, tracer.bindless} -> quadric_pixel:
+    let f = drawn.frame[0]
     let inst = scene.instance(..drawn.instances[p.instance as int])
+    return quadric_pixel_from(inst, p.primitive, scene.camera(..f.camera), float2(p.position.x, p.position.y) + f.jitter, f.size)
+
+/// The shading context of the quadric `p` covers, as `tracer.quadric_context` makes one for a hit there.
+fun quadric_context_of(p: quadric_varyings){drawn} -> material.shading_context:
+    return quadric.make_context(scene.instance(..drawn.instances[p.instance as int]), p.primitive)
+
+/// The weights of `a`, `b` and `c`, in that order, that put the point of their plane nearest `q` together.
+///
+/// Through the triangle's normal rather than the edges' dot products, which cancel on a thin triangle.
+/// A degenerate triangle covers no pixel, and takes its first corner whole.
+fun barycentrics_of(q: float3, a: float3, b: float3, c: float3) -> float3:
+    let e0 = b - a
+    let e1 = c - a
+    let n = cross(e0, e1)
+    let nn = dot(n, n)
+    if nn <= 0.0 => return float3(1.0, 0.0, 0.0)
+    let d = q - a
+    let v = dot(cross(d, e1), n) / nn
+    let w = dot(cross(e0, d), n) / nn
+    return float3(1.0 - v - w, v, w)
+
+/// The shading context of the pixel's triangle `primitive`, as `tracer.triangle_context` makes one for a hit there.
+fun pixel_context(p: varyings, primitive: uint){drawn, tracer.bindless} -> material.shading_context:
+    return context_from(scene.instance(..drawn.instances[p.instance as int]), p, primitive)
+
+/// `pixel_context` for whichever group holds the instance table, whose row of `p` is `inst`.
+fun context_from(inst: scene.instance, p: varyings, primitive: uint){tracer.bindless} -> material.shading_context:
     let indices = inst.indices as int
-    return material.make_context(inst, tracer.bindless.buffers[indices], p.primitive, float2(p.barycentrics.y, p.barycentrics.z))
+    let vertices = inst.vertices as int
+    let corner = material.triangle_corners(inst, tracer.bindless.buffers[indices], primitive)
+    let o0 = material.position_of(inst, tracer.bindless.buffers[vertices], corner.x)
+    let o1 = material.position_of(inst, tracer.bindless.buffers[vertices], corner.y)
+    let o2 = material.position_of(inst, tracer.bindless.buffers[vertices], corner.z)
+    let bary = barycentrics_of(p.object, o0, o1, o2)
+    return material.shading_context(inst.param_buffer, inst.param_offset, primitive, corner, bary)
 
 /// Whether a cutout material removes this pixel, read through `tracer.instance_opacity` as the tracer's any-hit reads it.
 ///
 /// Where the type's cutoff is above 0 that is glTF's MASK, and the pixel is cut exactly where a hit is.
 /// A cutoff of 0 is coverage, which a tracer draws stochastically and converges to a partial surface.
-/// One raster frame cannot, so coverage below one half is cut and the rest kept.
+/// A frame that accumulates draws it the same way, from its `coverage_seed`; one that does not, a seed of 0, cuts coverage below one half.
 fun is_cut(p: varyings, ctx: material.shading_context){drawn, tracer.bindless} -> bool:
     let inst = scene.instance(..drawn.instances[p.instance as int])
-    return tracer.instance_opacity(inst, ctx) < 0.5
+    let opacity = tracer.instance_opacity(inst, ctx)
+    let f = drawn.frame[0]
+    if f.coverage_seed == 0u => return opacity < 0.5
+    return coverage_cut(opacity, uint2(p.position.x as uint, p.position.y as uint), f.size.x as uint, f.coverage_seed)
+
+/// Whether coverage `opacity` loses pixel `px` this frame: an opacity of 1 never does, 0 always, and anything between in that share of frames.
+fun coverage_cut(opacity: float, px: uint2, width: uint, seed: uint) -> bool:
+    let mut rng = pt.hash(px.x + px.y * width + seed * 9781u + 0x2545f491u)
+    return opacity <= pt.rand(mut rng)
 
 /// Paints every decal reaching `p` into `surface`'s base, as `tracer.apply_decals` paints a hit.
 fun apply_decals(surface: mut openpbr.surface, p: float3, n: float3, footprint: float){drawn, slug.tables}:
@@ -170,40 +298,95 @@ fun ambient(surface: openpbr.surface, n: float3, v: float3){drawn} -> float3:
     let specular = mix(scene.background_radiance(sh, mirror), diffuse, openpbr.pt_roughness(surface))
     return openpbr.pt_diffuse_albedo(surface) * diffuse + openpbr.pt_specular_albedo(surface) * specular
 
-/// Shades the pixel `p` covers, whose material evaluated to `surface_in` through `ctx` as `pixel_context` made it, and writes every target.
-///
-/// The surface is described as `tracer.shade_triangle` describes a hit: the flat face normal of the triangle's own corners, turned toward the viewer, and the material's authored frame.
-/// `supplied_tangent_frame` is whether that frame was authored rather than defaulted, which the generated material knows.
-/// `occlusion` is the material's baked ambient occlusion, 1 for none: it darkens the environment's light and no analytic light's.
-fun shade(p: varyings, ctx: material.shading_context, surface_in: openpbr.surface, supplied_tangent_frame: bool, occlusion: float){drawn, tracer.bindless, slug.tables} -> targets:
-    let f = drawn.frame[0]
-    let cam = scene.camera(..f.camera)
-    let inst = scene.instance(..drawn.instances[p.instance as int])
+/// The triangle a pixel shades, as `tracer.shade_triangle` describes a hit's.
+struct pixel_face:
+    /// the flat face normal of the triangle's own corners, turned toward the viewer
+    n: float3
+    /// whether the viewer was behind the face before it was turned
+    exiting: bool
+    /// the material's authored frame in the world, where the material supplies one
+    authored: openpbr.frame
 
+/// The face of `ctx`'s triangle of `inst` seen from `eye`, at the world point `world` on it, with the authored frame `surface` carries.
+/// `supplied_tangent_frame` is whether that frame was authored rather than defaulted, which the generated material knows.
+fun face_of(inst: scene.instance, ctx: material.shading_context, world: float3, eye: float3, surface: openpbr.surface, supplied_tangent_frame: bool){tracer.bindless} -> pixel_face:
     let w0 = to_world_point(inst, tracer.instance_position(inst, ctx.corner.x))
     let w1 = to_world_point(inst, tracer.instance_position(inst, ctx.corner.y))
     let w2 = to_world_point(inst, tracer.instance_position(inst, ctx.corner.z))
     let mut n = normalize(cross(w1 - w0, w2 - w0)) * mirroring_of(inst)
 
-    let v = normalize(cam.position - p.world)
     // Which side the viewer is on, read off the geometry BEFORE the normal is turned to face it.
-    let exiting = dot(n, v) < 0.0
+    let exiting = dot(n, eye - world) < 0.0
     if exiting => n = -n
 
     // The authored frame is in object space, so it moves with the instance the geometry does.
     let mut authored = openpbr.frame(float3(0.0), float3(0.0), float3(0.0))
     if supplied_tangent_frame:
-        let local = openpbr.frame_from_quaternion(surface_in.geometry_tangent_frame, surface_in.geometry_handedness)
+        let local = openpbr.frame_from_quaternion(surface.geometry_tangent_frame, surface.geometry_handedness)
         authored = openpbr.frame(normalize(to_world_vector(inst, local.t)), normalize(to_world_vector(inst, local.b)), normalize(to_world_vector(inst, local.n)))
+    return { n = n, exiting = exiting, authored = authored }
 
-    let to_point = p.world - cam.position
+/// The face of a quadric whose object-space outward normal at the world point `world` is `object_normal`, as `face_of` describes a triangle's.
+fun quadric_face_of(inst: scene.instance, object_normal: float3, world: float3, eye: float3, surface: openpbr.surface, supplied_tangent_frame: bool) -> pixel_face:
+    let mut n = normal_to_world(inst, object_normal)
+    // A quadric is two-sided in earnest, as `tracer.shade_quadric` says: an open tube's inside wall is seen from behind its gradient.
+    let exiting = dot(n, eye - world) < 0.0
+    if exiting => n = -n
+    let mut authored = openpbr.frame(float3(0.0), float3(0.0), float3(0.0))
+    if supplied_tangent_frame:
+        let local = openpbr.frame_from_quaternion(surface.geometry_tangent_frame, surface.geometry_handedness)
+        authored = openpbr.frame(normalize(to_world_vector(inst, local.t)), normalize(to_world_vector(inst, local.b)), normalize(to_world_vector(inst, local.n)))
+    return { n = n, exiting = exiting, authored = authored }
+
+/// Shades the pixel `p` covers, whose material evaluated to `surface_in` through `ctx` as `pixel_context` made it, and writes every target.
+///
+/// The surface is described as `face_of` describes it, and `supplied_tangent_frame` is its parameter.
+/// `occlusion` is the material's baked ambient occlusion, 1 for none: it darkens the environment's light and no analytic light's.
+fun shade(p: varyings, ctx: material.shading_context, surface_in: openpbr.surface, supplied_tangent_frame: bool, occlusion: float){drawn, tracer.bindless, slug.tables} -> targets:
+    let cam = scene.camera(..drawn.frame[0].camera)
+    let inst = scene.instance(..drawn.instances[p.instance as int])
+    let face = face_of(inst, ctx, p.world, cam.position, surface_in, supplied_tangent_frame)
+    return shade_face(float2(p.position.x, p.position.y), p.world, face, surface_in, supplied_tangent_frame, occlusion)
+
+/// Shades the quadric pixel `p` found at `hit`, whose material evaluated to `surface_in`, and writes every target and its depth.
+fun shade_quadric(p: quadric_varyings, hit: quadric_pixel, surface_in: openpbr.surface, supplied_tangent_frame: bool, occlusion: float){drawn, tracer.bindless, slug.tables} -> quadric_targets:
+    let f = drawn.frame[0]
+    let cam = scene.camera(..f.camera)
+    let inst = scene.instance(..drawn.instances[p.instance as int])
+    let face = quadric_face_of(inst, hit.object_normal, hit.world, cam.position, surface_in, supplied_tangent_frame)
+    let lit = shade_face(float2(p.position.x, p.position.y), hit.world, face, surface_in, supplied_tangent_frame, occlusion)
+    return with_surface_depth(lit, f.near_plane / dot(hit.world - cam.position, normalize(cam.forward)))
+
+/// `t` and the reversed depth `surface_depth` of the surface it was shaded at.
+fun with_surface_depth(t: targets, surface_depth: float) -> quadric_targets:
+    return {
+        color = t.color
+        normal = t.normal
+        depth = t.depth
+        albedo = t.albedo
+        specular_albedo = t.specular_albedo
+        roughness = t.roughness
+        motion = t.motion
+        primary_depth = t.primary_depth
+        surface_depth = surface_depth
+    }
+
+/// `shade` for the surface at world point `world` that pixel `pixel` covers, described by `face`.
+fun shade_face(pixel: float2, world: float3, face: pixel_face, surface_in: openpbr.surface, supplied_tangent_frame: bool, occlusion: float){drawn, tracer.bindless, slug.tables} -> targets:
+    let f = drawn.frame[0]
+    let cam = scene.camera(..f.camera)
+    let n = face.n
+    let exiting = face.exiting
+    let v = normalize(cam.position - world)
+
+    let to_point = world - cam.position
     let view_depth = dot(to_point, normalize(cam.forward))
 
     // Painted before anything reads the base, the G-buffer included.
     let mut surface = surface_in
-    apply_decals(mut surface, p.world, n, f.pixel_spread * length(to_point))
+    apply_decals(mut surface, world, n, f.pixel_spread * length(to_point))
 
-    let shading = openpbr.shading_frame(mut surface, n, v, authored, supplied_tangent_frame)
+    let shading = openpbr.shading_frame(mut surface, n, v, face.authored, supplied_tangent_frame)
     // Every wavelength at once: a dispersive interface has no single path here to collapse onto one.
     let b = openpbr.bsdf_prepare(surface, exiting, 3u)
     let wo_local = openpbr.to_local(shading, v)
@@ -212,11 +395,15 @@ fun shade(p: varyings, ctx: material.shading_context, surface_in: openpbr.surfac
     // `shading_frame` leaves the viewer in front of the frame, so only a degenerate input fails this.
     if wo_local.z > 0.0:
         for i in 0 ..< (f.light_count as int):
-            color += direct_light(scene.light(..drawn.lights[i]), b, shading, n, wo_local, p.world)
+            color += direct_light(scene.light(..drawn.lights[i]), b, shading, n, wo_local, world)
         color += ambient(surface, shading.n, v) * occlusion
 
     let prev = scene.camera(..f.previous_camera)
-    let motion = float2(p.position.x, p.position.y) - scene.camera_project(prev, p.world - prev.position, f.size)
+    let motion = pixel + f.jitter - scene.camera_project(prev, world - prev.position, f.size)
+    return lit_targets(color, n, view_depth, surface, motion, f.near_plane)
+
+/// What a lit pixel writes: `color`, and the guides of `surface` at view depth `view_depth`, whose turned geometric normal is `n`.
+fun lit_targets(color: float3, n: float3, view_depth: float, surface: openpbr.surface, motion: float2, near: float) -> targets:
     return {
         color = float4(..color, 1.0)
         normal = float4(..n, 0.0)
@@ -225,7 +412,7 @@ fun shade(p: varyings, ctx: material.shading_context, surface_in: openpbr.surfac
         specular_albedo = float4(..openpbr.pt_specular_albedo(surface), 0.0)
         roughness = openpbr.pt_roughness(surface)
         motion = motion
-        primary_depth = max(1.0 - f.near_plane / view_depth, 0.0)
+        primary_depth = max(1.0 - near / view_depth, 0.0)
     }
 
 /// What a pixel no surface covers holds: the environment along its camera ray, and an empty G-buffer.
@@ -234,15 +421,16 @@ fun shade(p: varyings, ctx: material.shading_context, surface_in: openpbr.surfac
 fun environment(pixel: float2){drawn} -> targets:
     let f = drawn.frame[0]
     let cam = scene.camera(..f.camera)
-    let dir = normalize(scene.camera_ray_offset(cam, pixel, f.size))
+    let at = pixel + f.jitter
+    let dir = normalize(scene.camera_ray_offset(cam, at, f.size))
     let prev = scene.camera(..f.previous_camera)
     return {
-        color = float4(..scene.background_radiance(background_sh(), dir), 1.0)
+        color = float4(..scene.environment_backdrop(background_lanes(), dir), 1.0)
         normal = float4(0.0)
         depth = 0.0
         albedo = float4(0.0)
         specular_albedo = float4(0.0)
         roughness = 0.0
-        motion = pixel - scene.camera_project(prev, dir, f.size)
+        motion = at - scene.camera_project(prev, dir, f.size)
         primary_depth = 1.0
     }

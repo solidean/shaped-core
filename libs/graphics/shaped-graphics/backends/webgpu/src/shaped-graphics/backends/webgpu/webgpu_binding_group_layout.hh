@@ -104,10 +104,11 @@ public:
     /// Whether group 3 exists at all.
     [[nodiscard]] bool has_reserved_group() const { return !_reserved_entries.empty(); }
 
-    /// The bind group for group 3 over constant page `page`, cached per page since pages live as long as the context.
-    /// Without a reserved block the page is ignored and one group serves every call.
+    /// The bind group for group 3 over constant page `page` and debug window `debug_window`, cached per page and window,
+    /// since both live as long as the context.
+    /// Without a reserved block the page is ignored.
     /// A grown acceleration pool drops the cache, since the group names the pool buffer.
-    [[nodiscard]] WGPUBindGroup reserved_group_for(webgpu_constant_page const* page) const;
+    [[nodiscard]] WGPUBindGroup reserved_group_for(webgpu_constant_page const* page, WGPUBuffer debug_window) const;
 
     /// Group 3's dynamic offsets for a reserved block placed at `block_offset`, in binding order, into `out`; returns how many.
     [[nodiscard]] isize reserved_dynamic_offsets(u32 block_offset, cc::span<u32> out) const;
@@ -144,8 +145,11 @@ private:
     mutable wgpu_bind_group_layout _empty_layout;
     mutable wgpu_bind_group _empty_group;
 
-    /// Group 3 over one page, keyed by the page's position in the context's page list.
+    /// Group 3 over one page and one debug window, at the page's position in the context's page list times
+    /// `k_debug_slots`, plus the window's position in `_debug_windows`; without a page, at the window's position alone.
+    static constexpr isize k_debug_slots = 8;
     mutable cc::vector<wgpu_bind_group> _reserved_groups;
-    mutable wgpu_bind_group _reserved_group_without_page;
+    mutable cc::vector<wgpu_bind_group> _reserved_groups_without_page;
+    mutable cc::vector<WGPUBuffer> _debug_windows;
     mutable u64 _reserved_groups_pool_generation = 0;
 };

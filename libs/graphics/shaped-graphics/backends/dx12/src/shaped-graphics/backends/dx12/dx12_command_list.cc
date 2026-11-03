@@ -80,6 +80,23 @@ void fold_stream_wait(cc::vector<sg::backend::dx12::dx12_group_value>& waits,
 }
 } // namespace
 
+void dx12_command_list::bind_debug_window(dx12_pipeline_layout const& layout,
+                                          sg::impl::pipeline_footprint const& footprint,
+                                          bool is_graphics)
+{
+    if (layout.debug_root_param < 0)
+        return;
+    auto const window = std::dynamic_pointer_cast<dx12_buffer const>(
+        _ctx.debug_windows().window_for_recording(!footprint.debug_stages().is_empty()));
+    CC_ASSERT(window != nullptr, "the debug window is not a dx12 buffer");
+    // declared by each op that runs with it bound (declare_group_accesses), as a bound group is
+    _bound_debug_window = window;
+    if (is_graphics)
+        _list->SetGraphicsRootUnorderedAccessView(UINT(layout.debug_root_param), window->gpu_virtual_address());
+    else
+        _list->SetComputeRootUnorderedAccessView(UINT(layout.debug_root_param), window->gpu_virtual_address());
+}
+
 sg::impl::member_track dx12_command_list::track_buffer_access(dx12_buffer_handle const& buffer,
                                                               sg::pipeline_stage_flags stages,
                                                               sg::access_flags access,
@@ -278,6 +295,7 @@ void dx12_command_list::compute_bind_pipeline(sg::compute_pipeline const& pipeli
     _list->SetDescriptorHeaps(2, heaps);
     _list->SetComputeRootSignature(dp->layout->root_signature.Get());
     _list->SetPipelineState(dp->pipeline_state.Get());
+    bind_debug_window(*dp->layout, pipeline.footprint(), false);
 
     // The pipeline layout supplies each slot's root-parameter indices for bind_group; reset the per-slot
     // bound groups to one nullptr per group slot (a new pipeline may have a different slot count).
@@ -409,6 +427,7 @@ void dx12_command_list::raytracing_bind_pipeline(sg::raytracing_pipeline const& 
     _list->SetDescriptorHeaps(2, heaps);
     _list->SetComputeRootSignature(rp->layout->root_signature.Get());
     list4->SetPipelineState1(rp->state_object.Get());
+    bind_debug_window(*rp->layout, pipeline.footprint(), false);
 
     _bound_pipeline_layout = rp->layout.get();
     _bound_groups.clear_resize_to_filled(_bound_pipeline_layout->groups.size(), nullptr);
@@ -495,10 +514,22 @@ void dx12_command_list::withdraw_array_declaration(u32 id)
         (void)_raster_arrays.withdraw(id);
 }
 
+void dx12_command_list::declare_debug_window(sg::impl::pipeline_footprint const* footprint,
+                                             sg::pipeline_stage_flags op_stages)
+{
+    if (_bound_debug_window == nullptr)
+        return;
+    // every op declares it, so no list starts while the copy queue still resets the window, and appends never wait on each other
+    auto const stages
+        = footprint != nullptr && !footprint->debug_stages().is_empty() ? footprint->debug_stages() : op_stages;
+    (void)track_buffer_access(_bound_debug_window, stages, sg::access_flag::shader_append);
+}
+
 void dx12_command_list::declare_group_accesses(cc::span<dx12_binding_group const* const> groups,
                                                sg::impl::pipeline_footprint const* footprint,
                                                sg::pipeline_stage_flags op_stages)
 {
+    declare_debug_window(footprint, op_stages);
     for (auto group = 0; group < int(groups.size()); ++group)
     {
         auto const* bound_group = groups[group];

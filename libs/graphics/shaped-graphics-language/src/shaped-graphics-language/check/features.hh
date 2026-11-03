@@ -35,6 +35,8 @@ enum class sgl::check::feature : sgl::u8
     device_coherence,
     /// An `@atomic` image (CHK-372), which WebGPU has on no device.
     image_atomics,
+    /// `@first_instance` in the vertex stage, which WGSL has no builtin for.
+    first_instance,
     /// A pixel stage's `compare_exchange_strong` (EMIT-163), whose loop must tell a helper invocation; WGSL cannot.
     helper_lane_query,
     /// A `@layer` member (CHK-419): the vertex stage picks the render target's layer, which WebGPU has on no device.
@@ -63,6 +65,7 @@ inline constexpr cc::string_view k_feature_names[] = {
     "subgroups",                   //
     "device_coherence",            //
     "image_atomics",               //
+    "first_instance",              //
     "helper_lane_query",           //
     "vertex_layer_output",         //
 };

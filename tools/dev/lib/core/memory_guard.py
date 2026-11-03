@@ -16,6 +16,8 @@ from __future__ import annotations
 
 import os
 import platform
+import signal
+import subprocess
 import sys
 import threading
 import time
@@ -43,6 +45,9 @@ def _limit(name: str, default: float) -> float:
 def _report(message: str) -> None:
     try:
         print(f"\ndev.py memory guard: {message}", file=sys.stderr, flush=True)
+        # on GitHub Actions also an annotation, so the run's summary names it beside the failed step
+        if os.environ.get("GITHUB_ACTIONS") == "true":
+            print(f"::error title=dev.py memory guard::{message}", flush=True)
     except OSError:
         pass
 
@@ -154,52 +159,32 @@ else:
     def _job(process_bytes: int, total_bytes: int):
         return None
 
-    def _parents() -> dict[int, int]:
-        """Every process's parent, from /proc where there is one and from `ps` elsewhere (macOS)."""
-        parents: dict[int, int] = {}
-        if os.path.isdir("/proc"):
-            for entry in os.listdir("/proc"):
-                if not entry.isdigit():
-                    continue
-                try:
-                    with open(f"/proc/{entry}/stat", encoding="ascii", errors="replace") as f:
-                        # the name in parentheses may hold spaces; the parent is the second field after it
-                        parents[int(entry)] = int(f.read().rsplit(")", 1)[1].split()[1])
-                except (OSError, ValueError, IndexError):
-                    pass
-            return parents
-        import subprocess
+    def _descendants() -> list[int]:
+        """Every process below this one, from `ps`; a child in a process group or session of its own included."""
         try:
-            out = subprocess.run(["ps", "-A", "-o", "pid=,ppid="], capture_output=True, text=True, timeout=5).stdout
+            out = subprocess.run(["ps", "-A", "-o", "pid=,ppid="], capture_output=True, text=True, timeout=10).stdout
         except (OSError, subprocess.SubprocessError):
-            return parents
+            return []
+        children: dict[int, list[int]] = {}
         for line in out.splitlines():
             fields = line.split()
             if len(fields) == 2 and fields[0].isdigit() and fields[1].isdigit():
-                parents[int(fields[0])] = int(fields[1])
-        return parents
-
-    def _descendants() -> list[int]:
-        children: dict[int, list[int]] = {}
-        for pid, parent in _parents().items():
-            children.setdefault(parent, []).append(pid)
-        found: list[int] = []
+                children.setdefault(int(fields[1]), []).append(int(fields[0]))
+        found = []
         pending = [os.getpid()]
         while pending:
-            for child in children.get(pending.pop(), []):
-                found.append(child)
-                pending.append(child)
+            for pid in children.get(pending.pop(), []):
+                found.append(pid)
+                pending.append(pid)
         return found
 
     def _end_everything(job) -> None:
-        # Never the process group: without job control, as in a CI step, it holds whoever started dev.py too.
-        # The second pass catches what the first one's survivors started in between.
-        for _ in range(2):
-            for pid in _descendants():
-                try:
-                    os.kill(pid, 9)
-                except OSError:
-                    pass
+        # only what dev.py started: its process group can hold its callers, a CI runner's worker among them
+        for pid in _descendants():
+            try:
+                os.kill(pid, signal.SIGKILL)
+            except OSError:
+                pass
         os._exit(3)
 
 

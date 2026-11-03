@@ -52,47 +52,31 @@ if(EMSCRIPTEN)
         sc_build_options(LINK "SHELL:--use-port=emdawnwebgpu")
     endif()
 
-    set(SC_WASM_DEBUG_SIDECARS "off" CACHE STRING "WASM debug sidecars: off | source-map | dwarf | both")
-
-    # Lower-cased before it is matched, so OFF -- which is what a bool-shaped cache entry or a habit produces --
-    # means what it obviously means rather than failing configure.
-    string(TOLOWER "${SC_WASM_DEBUG_SIDECARS}" sc_wasm_sidecars)
-    if(NOT sc_wasm_sidecars MATCHES "^(off|source-map|dwarf|both)$")
-        message(FATAL_ERROR "SC_WASM_DEBUG_SIDECARS='${SC_WASM_DEBUG_SIDECARS}': expected off, source-map, dwarf or both")
-    endif()
-
-    # RelWithDebInfo keeps the name section and drops the DWARF that CMake's -g would embed in the module.
-    # That DWARF is what made a link expensive: on shaped-graphics-language-test wasm-opt peaked at 4.6 GB against
-    # 0.4 GB without it, the link took 24 s against 8 s, the module was 133 MB against 11 MB, and the tests ran no
-    # faster for it.
-    # Debug keeps -g for a debugger, and the dwarf sidecar below is the way to keep it here.
-    # It must come first: emcc's -g0 also clears the name section and the source map that later flags ask for.
-    set(sc_wasm_keeps_dwarf OFF)
-    if(CMAKE_BUILD_TYPE STREQUAL "Debug")
-        set(sc_wasm_keeps_dwarf ON)
-    elseif(CMAKE_BUILD_TYPE STREQUAL "RelWithDebInfo")
-        if(sc_wasm_sidecars MATCHES "^(dwarf|both)$")
-            set(sc_wasm_keeps_dwarf ON)
-        else()
-            sc_build_options(COMPILE -g0)
-            sc_build_options(LINK -g0)
-        endif()
+    # RelWithDebInfo links at -O1 without DWARF: the objects keep -O2, and only the post-link Binaryen pass is skipped.
+    # Measured on clean-core-test against the -O2 -g the build type passes to the link: 17.8 s to 1.1 s, a 2.7 GB peak
+    # to 0.4 GB, a 69 MB module to 13 MB, and the same test time.
+    # DWARF at link is what costs most: wasm-opt carries it through, and runs only limited optimizations beside it.
+    # Release, the deploy build, keeps the full -O2.
+    # Ahead of --profiling-funcs and the sidecars below, since a later -g0 would drop the names they keep.
+    if(CMAKE_BUILD_TYPE STREQUAL "RelWithDebInfo")
+        sc_build_options(LINK -O1 -g0)
     endif()
 
     # Keep the wasm name section, so a captured stack reads as function names rather than as bare indices.
     # cc::stacktrace's Emscripten backend renders whatever emscripten_get_callstack can see, and without this it can
     # see only numbers -- which is the difference between a usable assert and a useless one.
     # Release is left stripped: those names are a large part of the size a release wasm build exists to avoid.
+    #
+    # It also decides CC_WASM_KEEPS_FRAME_STRUCTURE, which is a separate observation about the same builds.
+    # A Release wasm build collapses calls that the source keeps apart: two functions marked CC_DONT_INLINE, neither
+    # tail-calling, still arrive as one frame in the engine's stack trace, while the same source at RelWithDebInfo
+    # reports both.
+    # It is Binaryen's -O2 at link, which never saw the C++ attribute: measured on clean-core-test, objects at -O2 linked
+    # at -O2 fail the frame tests, linked at -O1 pass them.
+    # Nothing but a test should care: a walk reports the frames that exist, and these are the frames that exist.
     if(NOT CMAKE_BUILD_TYPE STREQUAL "Release")
         sc_build_options(COMPILE --profiling-funcs)
         sc_build_options(LINK --profiling-funcs)
-    endif()
-
-    # CC_WASM_KEEPS_FRAME_STRUCTURE: whether two calls the source keeps apart arrive as two frames.
-    # Binaryen's full post-link optimization merges two CC_DONT_INLINE functions, neither tail-calling, into one frame;
-    # emcc runs only a limited set of those passes while it keeps DWARF, and that set leaves both.
-    # Nothing but a test should care: a walk reports the frames that exist, and these are the frames that exist.
-    if(sc_wasm_keeps_dwarf)
         sc_build_options(DEFINITIONS CC_WASM_KEEPS_FRAME_STRUCTURE=1)
     else()
         sc_build_options(DEFINITIONS CC_WASM_KEEPS_FRAME_STRUCTURE=0)
@@ -118,7 +102,15 @@ if(EMSCRIPTEN)
     # Nothing checks a sidecar against the stack it resolves, and nothing here can: an offset from another build of
     # the same source resolves to a plausible, confident, wrong name.
     # Keeping the sidecar beside the artifact it was built with is what stands in for a build identity.
-    # The knob itself is read further up, since the -g0 there depends on it.
+    set(SC_WASM_DEBUG_SIDECARS "off" CACHE STRING "WASM debug sidecars: off | source-map | dwarf | both")
+
+    # Lower-cased before it is matched, so OFF -- which is what a bool-shaped cache entry or a habit produces --
+    # means what it obviously means rather than failing configure.
+    string(TOLOWER "${SC_WASM_DEBUG_SIDECARS}" sc_wasm_sidecars)
+    if(NOT sc_wasm_sidecars MATCHES "^(off|source-map|dwarf|both)$")
+        message(FATAL_ERROR "SC_WASM_DEBUG_SIDECARS='${SC_WASM_DEBUG_SIDECARS}': expected off, source-map, dwarf or both")
+    endif()
+
     if(sc_wasm_sidecars STREQUAL "source-map" OR sc_wasm_sidecars STREQUAL "both")
         sc_build_options(COMPILE -gsource-map)
         sc_build_options(LINK -gsource-map)
@@ -152,8 +144,8 @@ if(EMSCRIPTEN)
     # they no-op on the static libraries and apply to the linked test binaries.
     sc_build_options(LINK "SHELL:-s NODERAWFS=1" "SHELL:-s EXIT_RUNTIME=1" "SHELL:-s ALLOW_MEMORY_GROWTH=1")
 
-    # A link runs wasm-opt, a few hundred MB without DWARF and several GB with it, so a full test build links more
-    # binaries at once than a developer machine has memory for; compiles stay at full parallelism.
+    # A full -O2 link runs wasm-opt, which takes about 2 GB per process with DWARF, so a full test build links more binaries at once
+    # than a developer machine has memory for; compiles stay at full parallelism.
     # A Ninja job pool, so another generator ignores it.
     set(SC_WASM_LINK_JOBS 4 CACHE STRING "How many wasm links (each running wasm-opt) may run at once")
     set_property(GLOBAL APPEND PROPERTY JOB_POOLS sc_wasm_link=${SC_WASM_LINK_JOBS})

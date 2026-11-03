@@ -167,7 +167,7 @@ struct constant_folder
             if (!is_known(e(), id))
                 continue;
             auto const s = e().at(id);
-            for_each_expr_of(s, [&](flat_expr_id x) { fold(x, 0); });
+            for_each_expr_of(e(), s, [&](flat_expr_id x) { fold(x, 0); });
             for_each_pattern_of(e(), s,
                                 [&](ast::range_of<flat_expr_id> patterns)
                                 {
@@ -643,7 +643,7 @@ struct let_simplifier
                 count_value_reads(assign->value, local, reads, depth + 1);
             }
             else
-                for_each_expr_of(s, [&](flat_expr_id x) { count_value_reads(x, local, reads, depth + 1); });
+                for_each_expr_of(e(), s, [&](flat_expr_id x) { count_value_reads(x, local, reads, depth + 1); });
             for_each_pattern_of(e(), s,
                                 [&](ast::range_of<flat_expr_id> patterns)
                                 {
@@ -787,7 +787,7 @@ struct let_simplifier
             auto const& s = e().at(id);
             if (s.node.is<flat_let>())
                 lets.push_back(id);
-            for_each_expr_of(s, [&](flat_expr_id x) { count_reads_of(x, reads, 1, 0); });
+            for_each_expr_of(e(), s, [&](flat_expr_id x) { count_reads_of(x, reads, 1, 0); });
             for_each_pattern_of(e(), s,
                                 [&](ast::range_of<flat_expr_id> patterns)
                                 {
@@ -821,7 +821,7 @@ struct let_simplifier
             if (!is_known(e(), id) || is_dropped(id))
                 continue;
             auto const& s = e().at(id);
-            for_each_expr_of(s, [&](flat_expr_id x) { visit_expr(x, visit, 0); });
+            for_each_expr_of(e(), s, [&](flat_expr_id x) { visit_expr(x, visit, 0); });
             for_each_pattern_of(e(), s,
                                 [&](ast::range_of<flat_expr_id> patterns)
                                 {

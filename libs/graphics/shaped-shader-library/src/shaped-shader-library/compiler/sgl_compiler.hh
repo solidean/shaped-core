@@ -20,6 +20,9 @@ struct slib::sgl_compiler_options
     /// A store given must outlive the compiler and answer on its own thread, since a lookup only waits for it.
     /// There is no persistent tier on wasm or without threads, whatever is given.
     cc::optional<bcache::blob_cache*> persistent_cache = {};
+    /// Writes every print and failed assert into sg's debug window, and states each site on the shader (EMIT-183).
+    /// Off, the text holds neither.
+    bool diagnostics = false;
 };
 
 namespace slib

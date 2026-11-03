@@ -6,6 +6,7 @@
 #include <clean-core/string/string.hh>
 #include <shaped-graphics/barrier/footprint.hh>
 #include <shaped-graphics/binding/binding.hh>
+#include <shaped-graphics/binding/debug_site.hh>
 #include <shaped-graphics/binding/shader_stage.hh>
 #include <shaped-graphics/context/capabilities.hh>
 #include <shaped-graphics/fwd.hh>
@@ -98,6 +99,14 @@ struct sg::compiled_shader
     /// SGL states an `exact` one; a compiler's reflection gives a `reflected` one.
     /// Unknown (`none`) where nothing could tell, and then every writable view counts as written.
     shader_footprint footprint;
+
+    /// Every print and assert the code writes into the context's debug buffer; empty for a shader that writes none.
+    /// SGL states them when it compiled with diagnostics, and a shader that has any binds the buffer in sg's reserved slot.
+    cc::vector<shader_debug_site> debug_sites;
+
+    /// Where each line of a text format's code came from, so a backend that compiles the text names the source's line.
+    /// SGL states it; empty for every other compiler, and for bytecode, whose compiler already reported its lines.
+    cc::vector<shader_source_line> source_map;
 
     // Deferred: constant-buffer member layouts, root/push constants, content hash, I/O signatures.
 };

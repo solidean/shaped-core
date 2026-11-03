@@ -1,0 +1,408 @@
+# SGL beside the alternatives: the full matrix
+
+How SGL compares with the other ways to write one set of shaders for DX12, Vulkan, WebGPU and Metal.
+Every row is judged for a renderer that targets all four, WebGPU in a browser included, and wants hardware ray tracing wherever a platform has it.
+
+**As of 2026-11-02**; SGL's E3 and E4 as of 2026-11-03.
+The other columns move fast, Slang's Metal and WGSL support above all, so each cell carries a source and the date it was checked; see [Sources](#sources).
+
+## Columns
+
+| Column | What it means |
+|---|---|
+| **HLSL + chain** | HLSL through DXC to DXIL and SPIR-V; to Metal through Apple's Metal Shader Converter (MSC) from DXIL, or SPIRV-Cross from SPIR-V; to WGSL through Tint or Naga from SPIR-V. |
+| **Slang** | Slang v2026.20 (Khronos), emitting HLSL for DXC, SPIR-V directly, MSL and WGSL. |
+| **WGSL** | WGSL as the source language, translated by Naga (wgpu 30) or Tint (Dawn) to HLSL, SPIR-V and MSL; WESL where it changes an answer. |
+| **GLSL + chain** | GLSL through glslang to SPIR-V, then SPIRV-Cross to HLSL and MSL, and Tint or Naga to WGSL. |
+| **SGL** | SGL at shaped-core `main`, with slib and sg for the host side. |
+
+## Markers
+
+| Marker | Meaning |
+|---|---|
+| ✅ | Yes, and it works for this setup. |
+| ⚠️ | Partly, or with a caveat the cell names. |
+| ❌ | No. |
+| ❓ | Unsure: not verified, or documented but never shown to run. |
+| 🗺️ | SGL only: on the roadmap, linked to the issue or incubator note that tracks it. |
+
+A per-target cell reads `dx12 / vulkan / metal / webgpu`.
+"No issue yet" in an SGL cell marks a gap nothing tracks so far.
+
+## A. Targets and ray tracing
+
+| Row | HLSL + chain | Slang | WGSL | GLSL + chain | SGL |
+|---|---|---|---|---|---|
+| **A1** DX12 path | ✅ DXC → DXIL, one hop | ✅ HLSL text → DXC, in process | ⚠️ HLSL text → DXC, two hops | ⚠️ SPIR-V → SPIRV-Cross HLSL → DXC, three hops | ✅ HLSL text → DXC |
+| **A2** Vulkan path | ✅ DXC → SPIR-V (a community-maintained backend) | ✅ SPIR-V directly | ✅ SPIR-V directly | ✅ glslang → SPIR-V | ✅ HLSL text → DXC → SPIR-V |
+| **A3** Metal path | ⚠️ two hops: DXIL → MSC, or SPIR-V → SPIRV-Cross → MSL | ✅ MSL text; metallib through Apple's tool | ✅ MSL text | ✅ SPIRV-Cross → MSL | ✅ MSL text; metallib, or the driver compiles the MSL |
+| **A4** WebGPU path | ⚠️ SPIR-V → Tint or Naga; drops bindless, int64 and ray queries | ⚠️ WGSL text; no ray tracing, mesh, geometry or tessellation | ✅ the browser takes it as is; wgpu-only extensions do not reach a browser | ⚠️ SPIR-V → Tint or Naga, a subset | ⚠️ WGSL text directly; what WebGPU lacks is refused by feature; ray queries emulated |
+| **A5** Inline ray queries | ✅ / ✅ / ✅ / ❌ | ✅ / ✅ / ⚠️ / ❌ metal: one fixed query shape, first run on hardware 2026-10 | ⚠️ / ⚠️ / ⚠️ / ❌ a wgpu-only experimental extension; a WGSL proposal was accepted 2026-10-27 | ✅ / ✅ / ✅ / ❌ | ✅ / ✅ / ⚠️ ❓ / ⚠️ metal never run on Apple hardware 🗺️ [chore](../issues/chore-sgl-metal-raytracing-on-apple-hardware.md); webgpu emulated in software, not watertight 🗺️ [bug](../issues/bug-sgl-emulated-trace-not-watertight.md) |
+| **A6** Ray-tracing pipelines | ✅ / ✅ / ⚠️ / ❌ metal through MSC alone, emulated as a compute kernel over function tables | ✅ / ✅ / ❌ / ❌ metal at design stage | ❌ / ⚠️ / ❌ / ❌ Naga to SPIR-V only, experimental | ❌ / ✅ / ❌ / ❌ SPIRV-Cross has no ray-tracing stages | ✅ / ✅ / ⚠️ / ❌ metal: four gaps to DXR 🗺️ [epic](../issues/epic-sgl-metal-raytracing-dxr-parity.md); webgpu: a polyfill in the 🗺️ [incubator](../spec/incubator/raytracing-futures.md) |
+| **A7** Ray-tracing host side across DXR and Metal | ⚠️ MSC's runtime header helps; the engine still writes both host paths | ❌ the engine writes the shader table and Metal's function tables | ❌ | ❌ | ✅ pipeline description and shader tables generated for dx12, vulkan and metal; ❓ metal side untested on hardware |
+| **A8** Ray-tracing depth | ⚠️ full on DX12 and Vulkan; MSC fuses any hit into intersection, no payload qualifiers | ⚠️ full on DX12 and Vulkan; motion blur NVIDIA-only; Metal ray queries only | ⚠️ no callables, no intersection stage | ⚠️ full on Vulkan; elsewhere ray queries only | ⚠️ callables, intersection, any hit, ray flags; no recursive trace graph, no motion blur 🗺️ [incubator](../spec/incubator/raytracing-futures.md) |
+
+## B. Portability and semantics
+
+| Row | HLSL + chain | Slang | WGSL | GLSL + chain | SGL |
+|---|---|---|---|---|---|
+| **B1** Portable by default | ❌ each hop accepts or rejects on its own, late | ⚠️ capabilities reject missing features statically; behaviour is implementation-defined | ⚠️ designed portable; Naga and Tint disagree on uniformity | ❌ | ✅ one check judges every target; a non-portable form needs a feature (floats: B3) |
+| **B2** Integer semantics | ❌ per target | ⚠️ unsigned wrap defined; the rest unspecified | ✅ fully defined, polyfilled on every target | ❌ division overflow, ÷0 and wide shifts undefined | ⚠️ wrap, truncating `/`, signed `%`, masked shifts defined; ÷0 and `INT_MIN / -1` undefined, a constant one is an error |
+| **B3** Float semantics | ⚠️ per target; Metal fast math by default | ⚠️ implementation-defined; `precise` has no effect on Metal | ⚠️ loose by spec; Metal relaxed by default in Dawn and wgpu | ❌ per target | ⚠️ the spec says IEEE f32, which Metal keeps in safe math mode, while Vulkan and WebGPU may still assume no NaN or infinity 🗺️ [question](../issues/question-sgl-float-semantics-on-every-target.md) |
+| **B4** Out-of-bounds access | ⚠️ per target and robustness setting | ⚠️ undefined by spec | ⚠️ bounded outcomes, where the translator is configured for them | ❌ undefined unless robustness is on | ⚠️ undefined; the interpreter reports it as a program error |
+| **B5** Uniformity, derivatives, discard | ⚠️ no uniformity check; a failure surfaces at Tint or in the browser | ⚠️ no model of WGSL uniformity; open bugs | ⚠️ Tint enforces it; Naga skips derivative checks | ⚠️ no uniformity analysis | ⚠️ its own uniformity pass for every target; discard's helper lanes on metal 🗺️ [feat](../issues/feat-sgl-discard-helper-emulation.md) |
+| **B6** Float and 64-bit atomics | ⚠️ 64-bit on DX12 and Vulkan; reported by whichever hop fails | ⚠️ neither on Metal or WGSL; a static capability error | ⚠️ core has 32-bit only; native-only extensions | ⚠️ SPIRV-Cross refuses 64-bit atomics for MSL | ⚠️ 32-bit only; float and 64-bit refused statically 🗺️ [feat](../issues/feat-sgl-float-and-64-bit-atomics.md) |
+| **B7** Subgroup operations | ⚠️ MSC requires wave size 32; WGSL needs its extension | ⚠️ docs and code disagree for WGSL; wave size left to the user | ✅ `subgroups` extension, shipped in Chrome 134 | ✅ to Wave and SIMD-group ops | ✅ behind `subgroups` on all four; code must be correct at any size |
+| **B8** Vendor features (SER, OMM) | ⚠️ DX12 only (SM 6.9); DXC has no SPIR-V lowering; none on Metal or WebGPU; not reported statically | ⚠️ SER on DX12 and Vulkan, checked statically; no OMM | ❌ | ⚠️ extensions reach Vulkan; other targets fail at SPIRV-Cross | ❌ none yet; the features SGL has are checked statically 🗺️ [feat](../issues/feat-sgl-inline-target-code.md) |
+| **B9** Inline target code | ⚠️ inline SPIR-V, Vulkan only | ✅ `__target_switch`, `__intrinsic_asm`, `spirv_asm` | ⚠️ whole-module passthrough in wgpu only | ❌ | ❌ 🗺️ [feat](../issues/feat-sgl-inline-target-code.md) |
+
+## C. Host integration and reflection
+
+| Row | HLSL + chain | Slang | WGSL | GLSL + chain | SGL |
+|---|---|---|---|---|---|
+| **C1** Binding reflection | ✅ three formats, one per target | ✅ rich API and JSON | ✅ Naga's module, Tint's inspector | ✅ SPIRV-Cross reflection | ✅ `sgl describe`, from the source, one format for every target |
+| **C2** Usage per entry point: used, read, write | ⚠️ which bindings an entry uses; no read or write bit | ⚠️ a used bit per entry; read or write from the type alone | ✅ Naga: read, write and atomic use per entry (Tint: ❓) | ⚠️ active variables; read or write from decorations | ✅ the footprint: per slot, after inlining and dead-branch removal, pinnable in a test |
+| **C3** Generated host code | ❌ | ❌ | ❌ community bindgens only | ❌ | ✅ typed C++ for groups, constants, vertex inputs, targets and pipelines |
+| **C4** Binding model across APIs | ⚠️ the engine maps it; MSC lays out an argument buffer from a root signature | ⚠️ parameter blocks map to sets, argument buffers and bind groups; the engine builds the API objects | ⚠️ binding maps; the engine designs the layout | ⚠️ SPIRV-Cross remaps | ✅ each target's final addresses are written by the emitter, by sg's binding conventions |
+
+## D. Language
+
+| Row | HLSL + chain | Slang | WGSL | GLSL + chain | SGL |
+|---|---|---|---|---|---|
+| **D1** Generics | ✅ templates (HLSL 2021), no constraints | ✅ interfaces and checked generics | ❌ (WESL: draft) | ❌ | ✅ templates checked per instance: type and value parameters, generic structs; no interfaces, by design |
+| **D2** Modules | ❌ `#include` | ✅ modules, precompiled modules, link-time specialization | ⚠️ WESL imports | ⚠️ `#include` extension | ⚠️ modules, no separate compilation 🗺️ [epic](../issues/epic-sgl-modules-beyond-a-tracer.md) |
+| **D3** Bindless | ✅ / ✅ / ✅ (MSC) / ❌ | ✅ / ✅ / ⚠️ / ⚠️ | ⚠️ / ⚠️ / ⚠️ / ❌ native extension only | ✅ / ✅ / ⚠️ / ❌ | ✅ / ✅ / ✅ / ❌ fixed-size binding arrays, checked `nonuniform`; unbounded arrays not yet 🗺️ [feat](../issues/feat-sgl-unbounded-binding-arrays.md) |
+| **D4** GPU pointers | ⚠️ Vulkan only | ⚠️ SPIR-V; Metal partly | ❌ | ⚠️ Vulkan, and Metal through SPIRV-Cross | ❌ 🗺️ [feat](../issues/feat-sgl-gpu-pointers.md) |
+| **D5** half, f64, int64, int16 | ⚠️ f64 not on Metal or WebGPU; 64- and 16-bit ints not on WebGPU | ⚠️ the same shape | ⚠️ f16 extension; no f64 or int64 in a browser | ⚠️ the same shape as HLSL | ⚠️ half and 16-bit ints behind features (webgpu: half only); no f64 or int64 anywhere 🗺️ [feat](../issues/feat-sgl-64-bit-types.md) |
+| **D6** Mesh, geometry, tessellation, work graphs | ⚠️ mesh on DX12, Vulkan and MSC; work graphs on DX12 | ⚠️ mesh on DX12, Vulkan and Metal; geometry and tessellation on DX12 and Vulkan | ⚠️ Naga experimental mesh; none in a browser | ⚠️ mesh to HLSL and MSL | ⚠️ geometry and tessellation on dx12 and vulkan; no mesh 🗺️ [feat](../issues/feat-sgl-mesh-and-task-stages.md), no work graphs |
+| **D7** Autodiff | ❌ | ✅ forward and backward | ❌ | ❌ | ❌ 🗺️ [epic](../issues/epic-sgl-autodiff.md) |
+| **D8** Methods, operators, enums, inference | ⚠️ methods, operators, enums, `auto`; no constructors | ✅ | ⚠️ no methods, operators or enums | ❌ | ✅ methods, properties, `@operator`, enums, inference, arrow lambdas |
+
+## E. Testing and debugging
+
+| Row | HLSL + chain | Slang | WGSL | GLSL + chain | SGL |
+|---|---|---|---|---|---|
+| **E1** Shader unit tests without a GPU | ❌ | ✅ CPU target and an interpreter, documented as incomplete | ❌ (WESL tests run on a GPU) | ❌ | ✅ `test` blocks run on the spec's interpreter; no textures, subgroups or derivatives yet 🗺️ [feat](../issues/feat-sgl-test-texture-bindings.md) |
+| **E2** Diagnostics | ⚠️ later hops report against IR, once per hop | ⚠️ once against the source; downstream errors per target | ✅ once against the source | ⚠️ SPIRV-Cross errors per target, against SPIR-V | ✅ once against the source, for every target |
+| **E3** Debugging the output | ⚠️ PIX at source level on DXIL; mapping lost after a hop | ⚠️ debug info and line directives | ⚠️ readable output, no source stepping | ⚠️ readable output, mapping lost | ✅ readable text with SGL's names; `#line` in HLSL and MSL, so DXC, Metal and PIX name the `.sgl` line; webgpu logs Tint's messages at the `.sgl` line and its inlined calls |
+| **E4** printf and assert on a GPU | ⚠️ printf on Vulkan only | ⚠️ printf except on WGSL; no assert | ⚠️ Naga printf on Metal and Vulkan | ⚠️ printf on Vulkan only | ⚠️ `print` and `assert` with interpolated values on dx12, vulkan and webgpu, logged once the epoch completes; a failed assert ends its invocation and fails a test; metal not yet, and no vertex-stage `print` on vulkan or webgpu 🗺️ [feat](../issues/feat-sgl-gpu-print-and-assert.md) |
+| **E5** Normative specification | ⚠️ an Ecma working draft; DXC is the de facto spec | ⚠️ a spec, self-described incomplete | ✅ W3C Candidate Recommendation | ✅ GLSL 4.60 | ✅ normative, with stable rule ids; every example in it is a test |
+
+## F. Workflow and production
+
+| Row | HLSL + chain | Slang | WGSL | GLSL + chain | SGL |
+|---|---|---|---|---|---|
+| **F1** Hot reload, native | ✅ libraries in process | ✅ in-process API | ✅ microseconds to translate | ✅ libraries in process | ✅ survives a broken edit |
+| **F2** Compile in the browser | ❌ no official DXC for wasm (a third-party build is ~17 MB); no MSC | ✅ official slang-wasm, 25 MB (10 MB zipped) | ✅ the browser takes WGSL; Naga is 1.6 MB as wasm | ⚠️ glslang ~0.9 MB plus a 1.7 MB translator | ⚠️ the compiler runs in the page; ❓ the live-edit loop is missing 🗺️ [feat](../../../shaped-shader-library/docs/issues/feat-slib-wasm-live-edit.md); the wasm size is unmeasured |
+| **F3** Compile in a shipped product | ⚠️ DXC is tens of MB; MSC's redistribution terms are unclear | ⚠️ 26.5 MB, plus DXC for DXIL | ⚠️ Naga is small; DX12 still needs DXC | ⚠️ a heavy chain | ⚠️ the compiler depends on clean-core alone; dx12 and vulkan still need DXC; metal and webgpu need no toolchain |
+| **F4** Compile speed | ❓ | ❓ | ✅ Naga: 20–60 µs per small shader and backend | ❓ | ✅ a corpus of bgfx shaders compiles as fast as with Naga; a fixed cost of ~115 µs per compile against Naga's ~18 µs 🗺️ [epic](../issues/epic-sgl-prelude-check-cost.md) |
+| **F5** Permutations | ⚠️ macros; specialization constants on SPIR-V only | ✅ macros, specialization constants, link-time specialization | ⚠️ `override` constants; WESL `@if` | ✅ macros and specialization constants | ✅ options; a false branch leaves the text and the footprint; no specialization constants |
+| **F6** Shipping and caching | ✅ offline bundles | ⚠️ precompiled modules; determinism undocumented | ⚠️ no bundle format | ⚠️ SPIR-V as the cached form | ✅ frozen bundles, a persistent cache, deterministic text |
+| **F7** Editor tooling | ⚠️ third-party language servers | ⚠️ `slangd`; no formatter | ⚠️ wgsl-analyzer | ⚠️ community language servers | ⚠️ an in-tree language server: diagnostics, tokens, inlay hints, tests; no hover, completion or formatter |
+| **F8** Toolchain hosts | ⚠️ MSC on macOS and Windows only | ⚠️ text anywhere; metallib needs Apple's tool | ✅ | ✅ | ⚠️ text anywhere, wasm included; DXIL needs DXC (Windows, Linux), a metallib needs macOS |
+| **F9** Licensing | ⚠️ MSC is proprietary; whether an app may ship it is unanswered | ✅ Apache-2.0 with LLVM exception | ✅ MIT, Apache-2.0, BSD-3 | ✅ permissive | ✅ MIT |
+
+## G. Ecosystem and risk
+
+| Row | HLSL + chain | Slang | WGSL | GLSL + chain | SGL |
+|---|---|---|---|---|---|
+| **G1** Governance | ⚠️ only as strong as its weakest link: DXC's SPIR-V backend is community-contributed, SPIRV-Cross mostly one maintainer, MSC a closed Apple binary | ✅ Khronos, driven by NVIDIA | ✅ W3C | ⚠️ Khronos; SPIRV-Cross mostly one maintainer | ⚠️ one company |
+| **G2** Maturity | ✅ the industry default | ⚠️ mature on DX12 and Vulkan; young on Metal and WGSL | ⚠️ in production in browsers; ray tracing experimental | ✅ mature | ⚠️ young: first commit 2026-09; in use by an in-house path tracer and renderer |
+| **G3** Exit cost | ✅ you keep HLSL | ✅ readable output; Slang-only features lost | ✅ a standard with two implementations | ✅ | ⚠️ the emitted HLSL, MSL and WGSL are readable and can be kept; they follow sg's binding model; MIT allows a fork |
+| **G4** Migration from HLSL | ✅ none | ✅ accepts most HLSL | ❌ a rewrite | ❌ a rewrite | ⚠️ a rewrite; LLM-assisted ports of hundreds of shaders have gone through |
+| **G5** Vendor libraries (FSR, NRD, RTXDI) | ✅ native; NVAPI on DX12 only | ⚠️ compile for DX12 and Vulkan | ❌ | ⚠️ | ⚠️ beside SGL as HLSL packages on dx12 and vulkan, or ported; not callable from SGL 🗺️ [feat](../issues/feat-sgl-inline-target-code.md) |
+| **G6** Speed of the emitted code | ⚠️ near native on DXIL and SPIR-V; later hops unbenchmarked | ❓ | ⚠️ bounds checks and polyfills cost | ❓ | ⚠️ dx12: 0.99–1.02× hand-written HLSL on three kernels; other targets unmeasured 🗺️ [chore](../issues/chore-sgl-emitted-code-speed-on-every-target.md); WGSL unoptimized 🗺️ [epic](../issues/epic-sgl-optimizing-passes-and-ir-targets.md) |
+
+## Sources
+
+Short names:
+
+- **DXC**: <https://github.com/microsoft/DirectXShaderCompiler> (releases, `docs/SPIR-V.rst`), v1.9.2609 (2026-09-29)
+- **SM69**: <https://devblogs.microsoft.com/directx/shader-model-6-9-retail-and-more/>
+- **HLSLSPEC**: <https://microsoft.github.io/hlsl-specs/specs/hlsl.html>, <https://devblogs.microsoft.com/directx/standardizing-hlsl/> (2026-02-10)
+- **MSC**: <https://developer.apple.com/metal/shader-converter/>, MSC 4.0 beta, its manual and changelog
+- **SXC**: <https://github.com/KhronosGroup/SPIRV-Cross> (`spirv_hlsl.cpp`, `spirv_msl.cpp`), main 2026-10-28
+- **TINT**: <https://github.com/google/dawn> (`src/tint/lang/spirv/reader`, `src/dawn/native/metal/ShaderModuleMTL.mm`), main 2026-11
+- **NAGA**: <https://github.com/gfx-rs/wgpu> (`naga/`, `CHANGELOG.md`, `wgpu/src/documentation/extensions/`), 30.0.1 (2026-08-21)
+- **WGSL**: <https://www.w3.org/TR/WGSL/>, Candidate Recommendation Draft 2026-10-26; ray-query proposal <https://github.com/gpuweb/gpuweb/pull/11056>
+- **WESL**: <https://wesl-lang.dev/>
+- **GLSL**: <https://registry.khronos.org/OpenGL/specs/gl/GLSLangSpec.4.60.html>, 4.60.8
+- **SLANG**: <https://github.com/shader-slang/slang> (releases, `source/slang/slang-capabilities.capdef`, `docs/`), v2026.20 (2026-10-17); <https://shader-slang.org/slang/user-guide/>
+- **SLANGSPEC**: <https://github.com/shader-slang/spec>, commit of 2026-10-15
+- **VK**: <https://docs.vulkan.org/refpages/latest/refpages/source/VK_EXT_ray_tracing_invocation_reorder.html>
+- SGL cells cite this repository; paths are relative to `libs/graphics/shaped-graphics-language/` unless they name another library.
+
+Per row and column:
+
+- **A1**
+  - HLSL + chain: DXC releases
+  - Slang: SLANG `slangc` reference (downstream compilers)
+  - WGSL: NAGA `back/hlsl`, TINT `lang/hlsl/writer`
+  - GLSL + chain: SXC `spirv_hlsl.cpp`
+  - SGL: [architecture.md](../architecture.md) "The emitters"
+- **A2**
+  - HLSL + chain: DXC `docs/SPIR-V.rst`
+  - Slang: SLANG `slangc` reference
+  - WGSL: NAGA `back/spv`
+  - GLSL + chain: glslang
+  - SGL: [bindings.md](../spec/bindings.md) "What the compiler carries today"
+- **A3**
+  - HLSL + chain: MSC
+  - Slang: SXC
+  - WGSL: SLANG Metal target page
+  - GLSL + chain: NAGA `back/msl`
+  - SGL: slib `docs/structure.md` "The MSL arm"
+- **A4**
+  - HLSL + chain: TINT SPIR-V reader capability list, NAGA `front/spv`
+  - Slang: SLANG WGSL target page
+  - WGSL: WGSL, NAGA extension docs
+  - GLSL + chain: SXC with TINT or NAGA
+  - SGL: [emitting.md](../spec/semantics/emitting.md) EMIT-109, [bindings.md](../spec/bindings.md) "Features"
+- **A5**
+  - HLSL + chain: MSC manual, SXC `spirv_msl.cpp`
+  - Slang: SLANG capdef `rayquery`, issues 13688, 13860, 13408
+  - WGSL: NAGA `ray_tracing.rs`, WGSL proposal 11056
+  - GLSL + chain: SXC
+  - SGL: [raytracing.md](../spec/raytracing.md) "Native and emulated"
+- **A6**
+  - HLSL + chain: MSC manual
+  - Slang: SLANG capdef `raytracing`, issues 11296, 11516, 13067
+  - WGSL: NAGA CHANGELOG v29 and v30
+  - GLSL + chain: SXC (no ray-tracing execution models outside its GLSL backend)
+  - SGL: [raytracing.md](../spec/raytracing.md) "Per target"
+- **A7**
+  - HLSL + chain: MSC manual (`IRShaderIdentifier`, `IRDispatchRaysArgument`)
+  - Slang: SLANG issues 11296, 13067
+  - WGSL: NAGA
+  - GLSL + chain: SXC
+  - SGL: slib `docs/raytracing-pipelines.md`
+- **A8**
+  - HLSL + chain: MSC manual feature table
+  - Slang: SLANG capdef, issues 13408, 13688
+  - WGSL: NAGA `ray_tracing.rs`
+  - GLSL + chain: Khronos GLSL extension registry
+  - SGL: [raytracing.md](../spec/raytracing.md) "Stages", CHK-332
+- **B1**
+  - HLSL + chain: TINT and NAGA capability lists, DXC
+  - Slang: SLANG capabilities guide, SLANGSPEC `basics-behavior.md`
+  - WGSL: NAGA `valid/analyzer.rs`
+  - GLSL + chain: SXC
+  - SGL: [bindings.md](../spec/bindings.md) "Features", EMIT-13
+- **B2**
+  - HLSL + chain: WGSL §8, SPIR-V spec, HLSLSPEC
+  - Slang: SLANGSPEC
+  - WGSL: WGSL §8, NAGA `wgsl-operators.metal`
+  - GLSL + chain: GLSL §4.1.3, §5.9
+  - SGL: [evaluation.md](../spec/semantics/evaluation.md) EVAL-6, EVAL-83, EVAL-84, EVAL-86
+- **B3**
+  - HLSL + chain: MSC 4.0 changelog
+  - Slang: SLANG issue 13689
+  - WGSL: WGSL §15.7, TINT `ShaderModuleMTL.mm`
+  - GLSL + chain: GLSL
+  - SGL: EVAL-6, and sg's metal backend `metal_common.cc`, which compiles with default options
+- **B4**
+  - HLSL + chain: WGSL §6.5.7, Vulkan robustness
+  - Slang: SLANGSPEC
+  - WGSL: NAGA `proc/index.rs`, TINT robustness transform
+  - GLSL + chain: GLSL §5.11
+  - SGL: EVAL-90, EVAL-97
+- **B5**
+  - HLSL + chain: DXC 1.9.2609 notes, WGSL uniformity
+  - Slang: SLANG uniformity guide, issues 6962, 13631, 13640
+  - WGSL: NAGA `analyzer.rs`, TINT `demote_to_helper`
+  - GLSL + chain: SXC
+  - SGL: [checking.md](../spec/semantics/checking.md) CHK-277, CHK-282, CHK-283
+- **B6**
+  - HLSL + chain: TINT and NAGA capability lists
+  - Slang: SLANG capdef `atomic64`, `atomicfloat`
+  - WGSL: NAGA CHANGELOG v24
+  - GLSL + chain: SXC `spirv_msl.cpp`
+  - SGL: CHK-296, [incubator/atomics.md](../spec/incubator/atomics.md)
+- **B7**
+  - HLSL + chain: MSC manual
+  - Slang: SLANG capdef `subgroup_basic`, issue 14095
+  - WGSL: WGSL, <https://developer.chrome.com/blog/new-in-webgpu-134>
+  - GLSL + chain: SXC
+  - SGL: CHK-371, CHK-376 to CHK-380
+- **B8**
+  - HLSL + chain: SM69, VK, DXC `SpirvEmitter.cpp`
+  - Slang: <https://shader-slang.org/slang/shader-execution-reordering.html>, capdef
+  - WGSL: WGSL
+  - GLSL + chain: SXC
+  - SGL: [incubator/raytracing-futures.md](../spec/incubator/raytracing-futures.md)
+- **B9**
+  - HLSL + chain: <https://github.com/microsoft/DirectXShaderCompiler/wiki/GL_EXT_spirv_intrinsics-for-SPIR-V-code-gen>
+  - Slang: SLANG capabilities guide
+  - WGSL: NAGA CHANGELOG v28
+  - SGL: [feat-sgl-inline-target-code](../issues/feat-sgl-inline-target-code.md)
+- **C1**
+  - HLSL + chain: D3D12 shader reflection docs
+  - Slang: SLANG reflection guide
+  - WGSL: NAGA, TINT inspector
+  - GLSL + chain: SXC
+  - SGL: `src/shaped-graphics-language/driver/describe.hh`
+- **C2**
+  - HLSL + chain: <https://learn.microsoft.com/en-us/windows/win32/api/d3dcommon/ne-d3dcommon-d3d_shader_input_flags>
+  - Slang: SLANG reflection guide (`isParameterLocationUsed`)
+  - WGSL: NAGA `analyzer.rs` (`GlobalUse`)
+  - GLSL + chain: SXC
+  - SGL: [bindings.md](../spec/bindings.md) "Footprint", CHK-267, CHK-356
+- **C3**
+  - HLSL + chain: DXC
+  - Slang: SLANG
+  - SGL: slib `docs/structure.md` "Compiler chains"
+- **C4**
+  - HLSL + chain: MSC manual, DXC `SPIR-V.rst`
+  - Slang: SLANG Metal and WGSL target pages
+  - WGSL: NAGA backend options
+  - GLSL + chain: SXC
+  - SGL: [bindings.md](../spec/bindings.md) "How a group reaches sg", EMIT-89, EMIT-133
+- **D1**
+  - HLSL + chain: DXC releases
+  - Slang: SLANG interfaces and generics guide
+  - WGSL: <https://wesl-lang.dev/spec/Generics.html>
+  - GLSL + chain: GLSL
+  - SGL: CHK-338 to CHK-340
+- **D2**
+  - HLSL + chain: HLSLSPEC
+  - Slang: SLANG modules guide
+  - WGSL: WESL
+  - GLSL + chain: glslang
+  - SGL: CHK-346, [epic-sgl-modules-beyond-a-tracer](../issues/epic-sgl-modules-beyond-a-tracer.md)
+- **D3**
+  - HLSL + chain: MSC shader-model table, TINT capability list
+  - Slang: SLANG `DescriptorHandle`, issue 14041
+  - WGSL: NAGA CHANGELOG, TINT `chromium_experimental_resource_table`
+  - GLSL + chain: SXC
+  - SGL: [bindings.md](../spec/bindings.md) "Binding arrays"
+- **D4**
+  - HLSL + chain: DXC 1.8.2505 notes
+  - Slang: SLANG convenience features, issues 14035, 14141, 14142
+  - WGSL: WGSL
+  - GLSL + chain: SXC
+  - SGL: [bindings.md](../spec/bindings.md) "Bytes"
+- **D5**
+  - HLSL + chain: TINT capability list, MSC table
+  - Slang: SLANG target compatibility
+  - WGSL: WGSL, NAGA
+  - GLSL + chain: SXC
+  - SGL: CHK-381, CHK-382
+- **D6**
+  - HLSL + chain: MSC table
+  - Slang: SLANG capdef `_meshshading`
+  - WGSL: NAGA CHANGELOG v28, v30
+  - GLSL + chain: SXC
+  - SGL: CHK-301 to CHK-307, sg `docs/issues/feat-sg-mesh-task-stages.md`
+- **D7**
+  - HLSL + chain: DXC
+  - Slang: SLANG autodiff guide
+  - WGSL: WGSL
+  - GLSL + chain: GLSL
+  - SGL: [epic-sgl-autodiff](../issues/epic-sgl-autodiff.md)
+- **D8**
+  - HLSL + chain: DXC 1.9.2607 notes
+  - Slang: SLANG convenience features
+  - WGSL: WGSL
+  - GLSL + chain: GLSL
+  - SGL: CHK-36, CHK-68, CHK-142 to CHK-151, CHK-416
+- **E1**
+  - HLSL + chain: DXC
+  - Slang: SLANG `slangc` targets (`slangvm`, `llvm`, `cpp`)
+  - WGSL: WESL
+  - SGL: [evaluation.md](../spec/semantics/evaluation.md), [architecture.md](../architecture.md) "Tests"
+- **E2**
+  - HLSL + chain: TINT, NAGA, MSC error formats
+  - Slang: SLANG
+  - WGSL: NAGA
+  - GLSL + chain: SXC
+  - SGL: CHK-402
+- **E3**
+  - HLSL + chain: DXC 1.9.2602 notes, MSC changelog v2
+  - Slang: SLANG `slangc` `-g`, `-line-directive-mode`
+  - SGL: EMIT-47, EMIT-181, EMIT-182 (2026-11-03)
+- **E4**
+  - HLSL + chain: DXC `SPIR-V.rst`
+  - Slang: SLANG capdef `printf`
+  - WGSL: NAGA `debug_printf.rs`
+  - GLSL + chain: Khronos registry
+  - SGL: CHK-424, EVAL-103, LEGAL-63, LEGAL-64, EMIT-183 (2026-11-03)
+- **E5**
+  - HLSL + chain: HLSLSPEC, <https://ecma-international.org/technical-committees/tc57/>
+  - Slang: SLANGSPEC
+  - WGSL: WGSL
+  - GLSL + chain: GLSL
+  - SGL: [spec/_index.md](../spec/_index.md)
+- **F1**
+  - HLSL + chain: DXC, MSC
+  - Slang: SLANG compiling guide
+  - WGSL: NAGA
+  - GLSL + chain: glslang, SXC
+  - SGL: slib `docs/structure.md` "Reload"
+- **F2**
+  - HLSL + chain: <https://kaltinril.github.io/ShadowDusk/architecture/wasm-frontend.html>, MSC
+  - Slang: SLANG release `slang-2026.20-wasm.zip`, measured
+  - WGSL: NAGA 30.0.1 built for wasm32, measured
+  - GLSL + chain: <https://unpkg.com/@webgpu/glslang@0.0.15/>, Babylon twgsl
+  - SGL: `examples/graphics/sgl-cube`, slib `docs/structure.md`
+- **F3**
+  - HLSL + chain: MSC changelog 3.1, <https://developer.apple.com/forums/thread/829379>
+  - Slang: SLANG Windows release, measured
+  - WGSL: NAGA
+  - SGL: [architecture.md](../architecture.md) "Dependencies", slib `docs/frozen-shaders.md`
+- **F4**
+  - Slang: SLANG issue 13565
+  - WGSL: NAGA measured on the bgfx shaders
+  - SGL: shader-rosetta `tools/sgl-benchmark.py`, `sgl bench`, [epic-sgl-prelude-check-cost](../issues/epic-sgl-prelude-check-cost.md)
+- **F5**
+  - HLSL + chain: DXC `SPIR-V.rst`, MSC changelog v3
+  - Slang: SLANG link-time specialization guide
+  - WGSL: WGSL, WESL
+  - GLSL + chain: SXC
+  - SGL: CHK-355, CHK-356
+- **F6**
+  - HLSL + chain: DXC, MSC
+  - Slang: SLANG modules guide
+  - SGL: slib `docs/frozen-shaders.md`, EMIT-8
+- **F7**
+  - Slang: SLANG release (`slangd`)
+  - WGSL: WESL
+  - SGL: [lsp.md](../lsp.md)
+- **F8**
+  - HLSL + chain: MSC, <https://vulkan.lunarg.com/doc/view/latest/mac/getting_started.html>
+  - Slang: SLANG `slangc` reference
+  - SGL: root `CMakeLists.txt`, slib `docs/issues/feat-slib-hlsl-to-metal-route.md`
+- **F9**
+  - HLSL + chain: DXC, SXC, TINT, NAGA licenses, MSC agreements
+  - Slang: SLANG `LICENSES/`
+  - WGSL: NAGA, TINT, WESL
+  - GLSL + chain: glslang, SXC
+  - SGL: repository `LICENSE`
+- **G1**
+  - HLSL + chain: DXC, HLSLSPEC, MSC
+  - Slang: <https://www.khronos.org/news/press/khronos-group-launches-slang-initiative-hosting-open-source-compiler-contributed-by-nvidia>
+  - WGSL: WGSL, WESL
+  - GLSL + chain: SXC
+  - SGL: repository `LICENSE`
+- **G2**
+  - HLSL + chain: DXC releases
+  - Slang: SLANG releases and issue tracker
+  - WGSL: NAGA CHANGELOG
+  - GLSL + chain: SXC
+  - SGL: the git history, shader-rosetta
+- **G3**
+  - Slang: SLANG `slangc` targets
+  - WGSL: WGSL
+  - SGL: [emitting.md](../spec/semantics/emitting.md), [bindings.md](../spec/bindings.md) "How a group reaches sg"
+- **G4**
+  - Slang: SLANG `agent-skills/slang-port-hlsl` in the release
+  - WGSL: NAGA (no HLSL frontend)
+  - SGL: shader-rosetta, [question-sgl-bgfx-wave3-friction](../issues/question-sgl-bgfx-wave3-friction.md)
+- **G5**
+  - HLSL + chain: vendor repositories
+  - Slang: SLANG (inferred from G4, A5, A6)
+  - SGL: shaped-rendering `shaders/fsr3/`, slib `docs/issues/feat-slib-hlsl-to-metal-route.md`
+- **G6**
+  - HLSL + chain: MSC manual performance notes
+  - Slang: SLANG issues 11774, 13220, 13245, 14016
+  - WGSL: NAGA `BoundsCheckPolicy`
+  - SGL: [readme.md](../../readme.md) "Performance", shaped-rendering `tests/bench/sgl-against-hlsl-benchmark.cc`, [perf-sgl-svgf-filter-two-percent](../issues/perf-sgl-svgf-filter-two-percent.md)

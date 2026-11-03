@@ -93,7 +93,10 @@ sgl::emit::impl::dialect const& sgl::emit::impl::dialect_of(target t)
     return hlsl_dx12_dialect();
 }
 
-sgl::emit::emitted_text sgl::emit::emit(check::checked_module const& m, sgl::isize entry_point, target t)
+sgl::emit::emitted_text sgl::emit::emit(check::checked_module const& m,
+                                        sgl::isize entry_point,
+                                        target t,
+                                        options const& sources)
 {
     auto result = emitted_text();
 
@@ -114,15 +117,18 @@ sgl::emit::emitted_text sgl::emit::emit(check::checked_module const& m, sgl::isi
     }
 
     // WebGPU traces through the emulated form of a trace, and every other target through its native query
-    return emit_entry_point(m, check::legalize(m, m.entry_points[entry_point], {.is_emulated = t == target::wgsl}), t);
+    return emit_entry_point(
+        m, check::legalize(m, m.entry_points[entry_point], {.is_emulated = t == target::wgsl, .erases_prints = true}),
+        t, sources);
 }
 
 sgl::emit::emitted_text sgl::emit::emit_entry_point(check::checked_module const& m,
                                                     check::flat_entry_point const& e,
-                                                    target t)
+                                                    target t,
+                                                    options const& sources)
 {
     auto result = emitted_text();
-    impl::validate(m, e, result.errors);
+    impl::validate(m, e, result.errors, sources.diagnostics);
     if (!result.errors.empty())
         return result;
 
@@ -131,9 +137,9 @@ sgl::emit::emitted_text sgl::emit::emit_entry_point(check::checked_module const&
     {
         auto const never
             = check::feature_set(check::feature::binding_arrays) | check::feature::multisampled_array_textures
-            | check::feature::raytracing_pipeline | check::feature::geometry_shader
-            | check::feature::tessellation_shader | check::feature::shader_int16 | check::feature::device_coherence
-            | check::feature::image_atomics | check::feature::helper_lane_query | check::feature::vertex_layer_output;
+            | check::feature::raytracing_pipeline | check::feature::geometry_shader | check::feature::tessellation_shader
+            | check::feature::shader_int16 | check::feature::device_coherence | check::feature::image_atomics
+            | check::feature::first_instance | check::feature::helper_lane_query | check::feature::vertex_layer_output;
         for (auto i = isize(0); i < check::k_feature_count; ++i)
             if (e.features.has(check::feature(i)) && never.has(check::feature(i)))
                 result.errors.push_back({.kind = error_kind::target_lacks_feature,
@@ -237,7 +243,10 @@ sgl::emit::emitted_text sgl::emit::emit_entry_point(check::checked_module const&
                 }
     if (!result.errors.empty())
         return result;
-    result.text = impl::write_text(plan, impl::dialect_of(t));
+    auto written = impl::write_text(plan, impl::dialect_of(t), sources);
+    result.text = cc::move(written.text);
+    result.lines = cc::move(written.lines);
+    result.debug_sites = cc::move(written.debug_sites);
     result.entry_point = plan.entry_name;
     if (plan.constants.has_value())
         result.bound_names.push_back({.emitted = plan.constants.value().name, .host = plan.constants.value().host_name});

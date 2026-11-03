@@ -184,6 +184,13 @@ material_type material_type::create(material_type_description description)
     b.add_string(description.occlusion_attribute);
     b.add_string(description.emission_color_attribute);
     b.add_string(description.emission_scale_attribute);
+    b.add_string(description.base_color_attribute);
+    b.add_string(description.roughness_attribute);
+    b.add_string(description.metalness_attribute);
+    b.add_string(description.specular_weight_attribute);
+    b.add_string(description.transmission_attribute);
+    b.add_string(description.thin_walled_attribute);
+    b.add_string(description.tangent_frame_attribute);
     b.add_pod(i64(description.signature.size()));
     for (auto const& d : description.signature)
     {
@@ -202,6 +209,13 @@ material_type material_type::create(material_type_description description)
                               .occlusion_attribute = cc::move(description.occlusion_attribute),
                               .emission_color_attribute = cc::move(description.emission_color_attribute),
                               .emission_scale_attribute = cc::move(description.emission_scale_attribute),
+                              .base_color_attribute = cc::move(description.base_color_attribute),
+                              .roughness_attribute = cc::move(description.roughness_attribute),
+                              .metalness_attribute = cc::move(description.metalness_attribute),
+                              .specular_weight_attribute = cc::move(description.specular_weight_attribute),
+                              .transmission_attribute = cc::move(description.transmission_attribute),
+                              .thin_walled_attribute = cc::move(description.thin_walled_attribute),
+                              .tangent_frame_attribute = cc::move(description.tangent_frame_attribute),
                               .hash = cc::hash128::create(b.written_bytes(), impl::material_type_hash_seed)};
 
     for (auto i = 0; i < type.signature.size(); ++i)
@@ -265,6 +279,18 @@ material_type material_type::create(material_type_description description)
     CC_ASSERT(
         type.emission_scale_attribute.empty() || (emission_scale != nullptr && emission_scale->format == scalar_float),
         "a material type's emission_scale_attribute must name a float attribute its signature declares");
+    auto const* const base_color = type.base_color_attribute.empty() ? nullptr : type.find(type.base_color_attribute);
+    CC_ASSERT(type.base_color_attribute.empty()
+                  || (base_color != nullptr && base_color->format == attribute_format::of_vector(scalar_type::f32, 3)),
+              "a material type's base_color_attribute must name a float3 attribute its signature declares");
+    for (auto const* const name : {&type.roughness_attribute, &type.metalness_attribute, &type.specular_weight_attribute,
+                                   &type.transmission_attribute, &type.thin_walled_attribute})
+    {
+        auto const* const attribute = name->empty() ? nullptr : type.find(*name);
+        CC_ASSERT(name->empty() || (attribute != nullptr && attribute->format == scalar_float),
+                  "a material type's roughness, metalness, transmission and thin-walled attributes must name float "
+                  "attributes its signature declares");
+    }
     CC_ASSERT(type.emission_scale_attribute.empty() || !type.emission_color_attribute.empty(),
               "an emission scale scales the emission color, so a type declaring one declares both");
 

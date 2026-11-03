@@ -40,6 +40,7 @@ struct vulkan_descriptor_functions; // the VK_EXT_descriptor_buffer entry points
 struct vulkan_raytracing_functions; // the acceleration-structure + ray-tracing-pipeline entry points
 class vulkan_blas;
 class vulkan_tlas;
+class vulkan_micromap;
 struct vulkan_descriptor_range;    // one allocated range within the descriptor heap
 class vulkan_descriptor_heap;      // host-visible memory descriptors are written into
 struct vulkan_image_view_key;      // the identity one cached VkImageView is keyed on

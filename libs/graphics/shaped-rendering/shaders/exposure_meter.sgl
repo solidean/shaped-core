@@ -1,0 +1,44 @@
+// An image's brightness, for an automatic exposure: log2 luminance over a 64x64 grid of its cells, as 256 partial sums.
+// Paired with sr::exposure_meter_routine, which a caller reads the partials back through and finishes the mean on the host.
+//
+// One group of 256 threads, each summing its 16 cells: no group memory and no atomics, so it is one portable dispatch, and the host adds 256 numbers.
+// A grid rather than every pixel, since a mean over 4096 evenly spread cells is as good a meter and costs the same at any size.
+//
+// A cell's luminance is the linear mean of pixels spread over it, and only that mean is taken to the log.
+// The log of single pixels would meter noise: a mean of logs sits below the log of the mean by about half the variance over the mean squared,
+// so an image of few samples reads darker than the same image converged, and the exposure jumps up on every restart.
+
+binding meter_io:
+    @unfilterable
+    source: texture_2d[float4]
+    // per thread: the sum of log2 luminance over its cells, and how many it summed
+    partials: mut buffer[float2]
+
+const grid = 64
+const per_thread = 16
+
+// How many pixels across and down a cell's mean reads, evenly spread over the cell.
+const per_cell = 8
+
+// The luminance a black cell is metered at, so a few of them darken the mean rather than send it to minus infinity.
+const darkest = 0.0001
+
+/// The mean luminance over cell `gx`, `gy` of an image of `size`.
+fun cell_luminance(gx: int, gy: int, size: int2){meter_io} -> float:
+    let mut sum = 0.0
+    for j in 0 ..< per_cell * per_cell:
+        let sx = (((j % per_cell) as float) + 0.5) / (per_cell as float)
+        let sy = (((j / per_cell) as float) + 0.5) / (per_cell as float)
+        let x = (((gx as float) + sx) / (grid as float) * (size.x as float)) as int
+        let y = (((gy as float) + sy) / (grid as float) * (size.y as float)) as int
+        let c = meter_io.source.load(int2(x, y))
+        sum += 0.2126 * c.x + 0.7152 * c.y + 0.0722 * c.z
+    return sum / ((per_cell * per_cell) as float)
+
+@compute(256, 1, 1) fun main_cs(@thread_id id: int3){meter_io}:
+    let size = meter_io.source.size()
+    let mut sum = 0.0
+    for k in 0 ..< per_thread:
+        let cell = id.x * per_thread + k
+        sum += log2(max(cell_luminance(cell % grid, cell / grid, size), darkest))
+    meter_io.partials[id.x] = float2(sum, per_thread as float)

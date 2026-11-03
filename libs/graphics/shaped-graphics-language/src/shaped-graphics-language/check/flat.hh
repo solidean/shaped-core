@@ -438,11 +438,27 @@ struct sgl::check::flat_assign
     constexpr bool operator==(flat_assign const&) const = default;
 };
 
-/// Records `value`, which is the one effect a program has besides its result.
+/// The text of a `print`'s or an `assert`'s message around its interpolations (CHK-424).
+struct sgl::check::flat_message
+{
+    /// One more than the interpolations: the text before each, then the text after the last, its escapes resolved.
+    cc::vector<cc::string> pieces;
+    /// An `assert`'s, which a print reports only where its condition was false (LEGAL-64).
+    bool is_assert = false;
+
+    bool operator==(flat_message const& rhs) const
+    {
+        return ast::impl::is_equal(pieces, rhs.pieces) && is_assert == rhs.is_assert;
+    }
+};
+
+/// Records `values`, which are the one effect a program has besides its result.
 /// No emitter writes it yet.
 struct sgl::check::flat_print
 {
-    flat_expr_id value = flat_expr_id::none;
+    /// A position in `flat_entry_point::messages`; -1 for a print of bare values, which only a built tree holds.
+    i32 message = -1;
+    ast::range_of<flat_expr_id> values;
 
     constexpr bool operator==(flat_print const&) const = default;
 };
@@ -589,6 +605,10 @@ struct sgl::check::flat_check_site
     ast::range_of<flat_check_node> nodes;
     /// A `flat_local_ref` per `for` of the test around the check, outermost first.
     ast::range_of<flat_expr_id> loop_variables;
+    /// An `assert`'s message as a position in `flat_entry_point::messages`, -1 for none, and its interpolated values.
+    /// The values are computed by the check's body, beside the condition.
+    i32 message = -1;
+    ast::range_of<flat_expr_id> message_values;
 
     constexpr bool operator==(flat_check_site const&) const = default;
 };
@@ -717,6 +737,9 @@ struct sgl::check::flat_entry_point
     /// A procedural hit's attributes, which the target hands a closest or any hit as a parameter of its own; `none`
     /// for every other entry point.
     local_id attributes = local_id::none;
+    /// Set where a metal traversal's fused any hit decided `accept_and_end_search`, which the traversal's result then
+    /// says (CHK-345); `none` for every other entry point.
+    local_id ends_search = local_id::none;
 
     cc::vector<flat_local> locals;
     cc::vector<flat_label> labels;
@@ -732,6 +755,8 @@ struct sgl::check::flat_entry_point
     /// Every check and `assert` of the tree, which a `flat_check` names by position; empty once the tree is core.
     cc::vector<flat_check_site> check_sites;
     cc::vector<flat_check_node> check_nodes;
+    /// The text of every message a `print` or a check names by position.
+    cc::vector<flat_message> messages;
     /// The statements of the function, in order.
     ast::range_of<flat_stmt_id> body;
 
@@ -761,8 +786,8 @@ struct sgl::check::flat_entry_point
             && is_equal(locals, rhs.locals) && is_equal(labels, rhs.labels) && root == rhs.root
             && is_equal(exprs, rhs.exprs) && is_equal(stmts, rhs.stmts) && is_equal(expr_lists, rhs.expr_lists)
             && is_equal(stmt_lists, rhs.stmt_lists) && is_equal(arms, rhs.arms) && is_equal(call_sites, rhs.call_sites)
-            && is_equal(check_sites, rhs.check_sites) && is_equal(check_nodes, rhs.check_nodes) && body == rhs.body
-            && names == rhs.names && is_equal(traced_rays, rhs.traced_rays) && attributes == rhs.attributes
-            && is_equal(options, rhs.options);
+            && is_equal(check_sites, rhs.check_sites) && is_equal(check_nodes, rhs.check_nodes)
+            && is_equal(messages, rhs.messages) && body == rhs.body && names == rhs.names
+            && is_equal(traced_rays, rhs.traced_rays) && attributes == rhs.attributes && is_equal(options, rhs.options);
     }
 };

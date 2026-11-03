@@ -35,11 +35,11 @@ Back to the [semantics](_index.md); the reasons are in [why/emitting.md](why/emi
 * **EMIT-13** No error depends on the target but EMIT-109's and EMIT-122's: an entry point is written for every target or for none ([why](why/emitting.md#emit-13)).
 * **EMIT-109** An entry point that needs a feature no device of the target has is `target-lacks-feature`, and its detail names the feature.
   Today that is `wgsl` against `binding_arrays`, `multisampled_array_textures`, `raytracing_pipeline`, `geometry_shader` and `tessellation_shader`.
-  It is also `wgsl` against `shader_int16`, `device_coherence`, `image_atomics` and `helper_lane_query`, which core WebGPU has none of.
+  It is also `wgsl` against `shader_int16`, `device_coherence`, `image_atomics`, `first_instance` and `helper_lane_query`, which core WebGPU has none of.
   `ray_query` is none of them: WGSL writes a trace's emulated form (EMIT-135).
   The shader chose it by `require`, so a portable shader still meets EMIT-13's promise.
 * **EMIT-66** A tree that is not core is the error `not-core`, and its detail names the first node that offends.
-* **EMIT-67** A `print` is `unsupported`: no target writes one yet.
+* **EMIT-67** A `print` is `unsupported`: no target writes one yet, so the driver legalizes every entry point without them (LEGAL-63).
 
 ## Names
 
@@ -232,7 +232,7 @@ A binding that is not `@inline` is a group.
   `hlsl-dx12` states none, since dx12 takes the format from the view, and neither does `bgra8_unorm` on vulkan, which SPIR-V has no name for.
 * **EMIT-99** A static sampler of a group is its `SamplerState`, or `SamplerComparisonState` where it has a `compare`, with its address and nothing else.
   Its settings reach the layout from `sgl describe`, never from the text, so every target writes it as it writes a sampler the host binds.
-* **EMIT-100** WGSL writes a 1D texture or image as a 2D one and a 1D array as a 2D array, since sg's webgpu backend creates every 1D texture that way (the bindings file, "Shapes").
+* **EMIT-100** WGSL and MSL write a 1D texture or image as a 2D one and a 1D array as a 2D array, since sg's webgpu and metal backends create every 1D texture that way (the bindings file, "Shapes").
 * **EMIT-101** A call of a builtin that gives nothing is a statement as it stands, with no `_ =` in WGSL.
 * **EMIT-102** A builtin a target cannot write as one expression declares a helper function ahead of the entry point, once per text, and the call names it.
   HLSL's `GetDimensions` writes through out parameters, so `size` is an overload of `sgl_size` per texture type the entry point passes.
@@ -313,7 +313,8 @@ binding affine:
   HLSL's `sign`, `countbits`, `firstbithigh` and `firstbitlow` give an int or a uint whatever they take, so the writer converts back, and `reversebits` of an int goes through a uint.
   `is_nan` and `is_inf` are a test of the float's bits on every target: `(bits & 0x7fffffff)` above `0x7f800000` is a NaN, and equal to it an infinity.
   No target may be handed the value, since a test of it could fold to false where a test of its bits cannot.
-  Vulkan may assume neither arises unless a module declares `SignedZeroInfNanPreserve`, which DXC's SPIR-V does not; WGSL may assume it outright; and Metal compiles fast-math by default.
+  Vulkan may assume neither arises unless a module declares `SignedZeroInfNanPreserve`, which DXC's SPIR-V does not; and WGSL may assume it outright.
+  Metal's own default is fast math, so sg and `ssc::msl` compile MSL in its safe mode, which keeps both.
   A half is tested as the float it widens to, which keeps a NaN and an infinity exactly, since WGSL bitcasts no lone `f16`.
   WGSL writes a reinterpretation as `bitcast<T>`, MSL as `as_type<T>` and HLSL as `asuint`, `asint` or `asfloat`.
   MSL's `first_bit_*` and HLSL's packing functions are helpers the text declares (EMIT-102).
@@ -394,7 +395,32 @@ fn main_ps(p: pixel_input) -> target_ {
 }
 ```
 
-## MSL
+## Lines
+
+* **EMIT-181** Each line of the function body maps to the source line it writes, and to every call it was inlined through, innermost first.
+  A line belongs to the statement being written, so a brace, an `else` and a let the emitter hoisted map to their statement's line.
+  The prelude's frames are left out wherever another frame remains: a builtin written in SGL maps to the line that called it, which is a line its author wrote.
+  The table is the emitter's result, written when the caller hands it the source files; a line is counted as the text holds it, directives included.
+* **EMIT-182** Asked for directives, HLSL and MSL write `#line n "file"` before a statement's first line wherever the compiler would otherwise take it for another line.
+  So the target's compiler and debugger name the SGL line themselves, and a run of statements on consecutive lines takes one directive.
+  Where the inlined calls change, a comment names them first, `// inlined from shade.sgl:12 > main.sgl:40`, each file by its name alone.
+  The file name is a string literal, so a backslash or a quote in it is escaped.
+  WGSL has no such directive, and its messages map back through the table (EMIT-181).
+
+## Diagnostics
+
+* **EMIT-183** Asked for diagnostics, a text writes each `print` into sg's debug buffer as one record, and describes its site to the host.
+  The tree must keep its prints and lower its asserts (LEGAL-64); without diagnostics the driver drops both (LEGAL-63).
+  The buffer is a header of three words, a cursor, a capacity and a dropped count, then 32-bit words.
+  A record is the site's id, its word count, then each value's lanes in order, one word each: a float's bits, an int's, a bool as 0 or 1, and a `half` widened to a float first.
+  It reserves its words with one atomic add on the cursor, writes them where they fit under the capacity, and otherwise adds one to the dropped count.
+  The buffer stands in sg's reserved group: `register(u0, space11)` in `hlsl-dx12` and `[[vk::binding(19, 3)]]` in `hlsl-vulkan`.
+  It is `@group(3) @binding(19)` in WGSL, and the entry point's parameter `[[buffer(30)]]` in MSL, the argument table's last slot, clear of the vertex buffers from `[[buffer(5)]]` up.
+  A text declares it only where it writes a record.
+  WebGPU's vertex stage has no writable storage, vulkan's vertex, geometry and tessellation stages write none without a feature sg does not ask for, and MSL's ray-tracing stages take no buffer.
+  There a print is dropped and the text declares none.
+  A site's id hashes the entry point's name, the message and the line it stands on, so one site has one id on every target.
+
 
 The rules above say HLSL and WGSL by name; these say what `msl` writes in the same places.
 
@@ -454,15 +480,18 @@ So `{float3; float}` is written with `packed_float3`: the `float` is at byte 12 
   * The raygen is a `kernel`, which takes the argument buffers, sg's tables at `[[buffer(3)]]` and each instance's hit-group offset at `[[buffer(5)]]`.
   * A miss, a closest hit and a callable are `[[visible]]` functions of one signature: the payload as `uint4` words, a hit record but for a callable, and an `sgl_context`.
     The context carries the argument buffers, the inline constants, the tables and the launch, and the function binds each to a local.
-  * An any hit is an `[[intersection(triangle, triangle_data, instancing)]]` function that answers whether it accepts, and writes the payload back into the ray data.
-    `accept_and_end_search` is `accept` there.
-  * A procedural record is its traversal entry point (CHK-345), an `[[intersection(bounding_box, triangle_data, instancing)]]` function.
+  * An any hit is an `[[intersection(triangle, triangle_data, instancing, world_space_data)]]` function.
+    It answers whether it accepts and whether the search goes on, and writes the payload back into the ray data.
+    `accept_and_end_search` accepts and ends the search through `[[continue_search]]`.
+  * A procedural record is its traversal entry point (CHK-345), an `[[intersection(bounding_box, triangle_data, instancing, world_space_data)]]` function.
+    Where its fused any hit decides `accept_and_end_search`, its result ends the search the same way.
   * A trace is the kernel's own `intersector`, configured from the ray flags, then the miss or the closest hit through the tables.
     The closest hit's record is the instance's offset plus the geometry index times the multiplier plus the contribution, as DXR finds it.
   * The ray data holds as many words as the largest payload of the set, so every shader of a pipeline agrees on it.
     The set is the one of the pipeline or the hit group holding the shader, and one it traces only where none holds it.
     A shader that traces or stands in traversal, held by two whose sets' payloads differ, is `ray-data-conflict`, since one text cannot agree with both.
-  * A hit's instance transforms are the identity, since Metal hands them only under intersection tags sg's tables do not declare.
+  * Every table, intersection function and intersector carries `world_space_data`, the tag under which Metal hands over the instance's transforms.
+    A closest hit's object ray is the world ray through the world-to-object transform.
 
 ## Subgroups, coherence and image atomics
 

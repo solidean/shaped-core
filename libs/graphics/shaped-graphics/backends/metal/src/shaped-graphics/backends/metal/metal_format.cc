@@ -141,8 +141,10 @@ MTL::TextureType texture_type_of(sg::texture_dimension dimension, bool is_array,
 
     switch (dimension)
     {
+    // Metal's own 1D textures take no mips, so every sg 1D texture is a 2D one a texel high, as on webgpu.
+    // SGL's MSL reads it that way (EMIT-100).
     case sg::texture_dimension::d1:
-        return is_array ? MTL::TextureType1DArray : MTL::TextureType1D;
+        return is_array ? MTL::TextureType2DArray : MTL::TextureType2D;
 
     case sg::texture_dimension::d2:
         if (is_multisampled)
@@ -162,9 +164,9 @@ MTL::TextureType texture_type_of(sg::texture_view_dimension dimension)
     switch (dimension)
     {
     case sg::texture_view_dimension::tex_1d:
-        return MTL::TextureType1D;
+        return MTL::TextureType2D;
     case sg::texture_view_dimension::tex_1d_array:
-        return MTL::TextureType1DArray;
+        return MTL::TextureType2DArray;
     case sg::texture_view_dimension::tex_2d:
         return MTL::TextureType2D;
     case sg::texture_view_dimension::tex_2d_ms:

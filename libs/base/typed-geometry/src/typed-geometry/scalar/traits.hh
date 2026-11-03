@@ -61,6 +61,7 @@ struct tg::scalar_traits
     static constexpr bool has_pow2 = false;
     static constexpr bool has_non_finite = false;
     static constexpr bool is_exact = false;
+    static constexpr bool is_field = false;
 };
 
 // std::sqrt and the std trig functions honor errno, which costs codegen for a contract nobody wants.
@@ -75,6 +76,7 @@ struct tg::scalar_traits<cc::f32>
     static constexpr bool has_abs = true;
     static constexpr bool has_pow2 = true;
     static constexpr bool has_non_finite = true;
+    static constexpr bool is_field = true;
 
     [[nodiscard]] static constexpr f32 one() { return 1.0f; }
     [[nodiscard]] static constexpr f32 lowest() { return -std::numeric_limits<f32>::infinity(); }
@@ -125,6 +127,7 @@ struct tg::scalar_traits<cc::f64>
     static constexpr bool has_abs = true;
     static constexpr bool has_pow2 = true;
     static constexpr bool has_non_finite = true;
+    static constexpr bool is_field = true;
 
     [[nodiscard]] static constexpr f64 one() { return 1.0; }
     [[nodiscard]] static constexpr f64 lowest() { return -std::numeric_limits<f64>::infinity(); }
@@ -262,6 +265,18 @@ inline constexpr bool is_exact = []
 {
     if constexpr (requires { scalar_traits<T>::is_exact; })
         return bool(scalar_traits<T>::is_exact);
+    else
+        return false;
+}();
+
+/// true if the scalar's division inverts its multiplication, so that algorithms dividing by a non-zero value may: the floats and tg::bigrat.
+/// The integers' / truncates, so they are not fields however the operator is spelled, and tg::divrem of polynomials refuses them.
+/// A float is a field up to rounding, which is what its caller has opted into.
+template <class T>
+inline constexpr bool is_field = []
+{
+    if constexpr (requires { scalar_traits<T>::is_field; })
+        return bool(scalar_traits<T>::is_field);
     else
         return false;
 }();

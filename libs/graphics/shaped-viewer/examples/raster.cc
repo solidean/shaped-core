@@ -9,11 +9,13 @@
 
 using namespace cc::primitive_defines;
 
-// One scene twice: path-traced on the left, rasterized on the right.
+// One scene four times: path-traced, the hybrid lit forward, the hybrid lit deferred, and rasterized.
 //
 // Both panels draw the same meshes with the same OpenPBR materials — the raster one runs the very material code the tracer's hit groups do, as a pixel stage.
 // What differs is the light transport: the raster panel lights each surface directly from every light and from the sky's SH, with no shadow and no bounce.
 // So the spheres read alike, and the floor under them is where the two part: the tracer's has their shadows and their colored bounce, the raster one has neither.
+// The two hybrid panels sit between: rasterized, with the direct light's shadows traced inline, and no bounce yet.
+// Forward lights each material's full closure in its own pixel stage, deferred a reduced one from a thin G-buffer; ../docs/plans/hybrid-renderer.md is that design.
 // The cut-out fence at the back is a texture-free `opacity` below its `alpha_cutoff`, which both panels cut.
 // ../docs/raster.md is the design.
 //
@@ -181,7 +183,7 @@ EXAMPLE("shaped-viewer/raster")
     {
         auto columns = f.window().view().layout_columns({.padding = 6, .spacing = 6});
 
-        auto const panel = [&](cc::string_view id, sv::render_mode mode)
+        auto const panel = [&](cc::string_view id, sv::render_settings const& settings)
         {
             auto view = columns.add_view(id);
             view.initial_orbit({.target = tg::pos3d(0, 0.6, 0.6),
@@ -194,22 +196,29 @@ EXAMPLE("shaped-viewer/raster")
             scene.background(sky);
             scene.add_rect_light("key", tg::pos3f(-1.5f, 3.5f, -1.0f), tg::vec3f(0.8f, 0, 0), tg::vec3f(0, 0, 0.8f)).nits(6);
             scene.add_directional_light("sun", sun_direction).lux(1.5f);
-            scene.settings({.mode = mode});
+            scene.settings(settings);
 
-            // Seen from above, the floor's normal is +y, so the marking projects down: y_axis x x_axis is -y.
+            // Seen from above, the floor's normal is +y, so the marking projects down: x_axis x y_axis is -y.
             scene.add_decal(marking, {.at = tg::pos3f(0, 0, -1.0f),
                                       .x_axis = tg::vec3f(1, 0, 0),
-                                      .y_axis = tg::vec3f(0, 0, -1),
+                                      .y_axis = tg::vec3f(0, 0, 1),
                                       .scale = 1,
                                       .depth = 0.3f});
 
             // A label lying on the crate's lid: a drawing over the image, occluded by the image's own primary depth.
             scene.add_text(
-                id, {.at = tg::pos3f(1.92f, 1.005f, 1.95f), .x_axis = tg::vec3f(1, 0, 0), .y_axis = tg::vec3f(0, 0, -1)},
+                id, {.at = tg::pos3f(1.92f, 1.005f, 1.65f), .x_axis = tg::vec3f(1, 0, 0), .y_axis = tg::vec3f(0, 0, 1)},
                 {.size = 0.24f, .color = tg::vec4f(1, 1, 1, 1)});
         };
 
-        panel("traced", sv::render_mode::wavefront);
-        panel("raster", sv::render_mode::raster);
+        panel("traced", {.mode = sv::render_mode::wavefront});
+        // Denoised, since a moving hybrid frame is one sample per pixel.
+        panel("forward", {.mode = sv::render_mode::hybrid,
+                          .hybrid_lighting = sv::hybrid_lighting::forward,
+                          .reconstruct = {.denoiser = sr::denoise_method::automatic}});
+        panel("deferred", {.mode = sv::render_mode::hybrid,
+                           .hybrid_lighting = sv::hybrid_lighting::deferred,
+                           .reconstruct = {.denoiser = sr::denoise_method::automatic}});
+        panel("raster", {.mode = sv::render_mode::raster});
     }
 }

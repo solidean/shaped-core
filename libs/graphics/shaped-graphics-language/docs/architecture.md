@@ -168,7 +168,7 @@ The registry has no signature language of its own: `registry::finalize` parses t
 `checked_module::builtins` points at the registry a module was checked against, and `builtin_type_of` / `builtin_function` are how every reader gets from an id to a record.
 
 **Registration is explicit and ordered**: `register_builtins` calls one function per topic, so the generated text is deterministic and no linker can drop a translation unit.
-A family of overloads is a C++ loop that formats one signature per type, until generics can write it once in SGL.
+A family of overloads is a C++ loop that formats one signature per type, unless SGL's generics can say it once, in `prelude/core.sgl`.
 `builtins::default_registry()` is the one cached value in the library: it is immutable, and building it parses the whole prelude.
 
 **The prelude is three files.**
@@ -230,9 +230,9 @@ Every "why" is mirrored in a `why/` folder beside its rules, and ideas that are 
 
 ## What does not exist yet
 
-Generic structs of the program, lambdas beyond an arrow body, and `mut self`.
+Lambdas beyond an arrow body, and `mut self`.
 GLSL.
 Iterative walks: `interpret`'s `eval` and the legalizer's expression walks recurse, so the smallest stack a walk runs on bounds `k_max_depth`.
 That makes a 40-term sum `nesting-too-deep` (CHK-268).
 Over an explicit work stack, with a cycle caught by an on-path bit rather than by depth, the limit could be far higher.
-Modules, interfaces and the parallel driver of [the compilation model](spec/incubator/compilation-model.md).
+Separate compilation, interfaces and the parallel driver of [the compilation model](spec/incubator/compilation-model.md).

@@ -109,6 +109,26 @@ fun rect_intersect(l: scene.light, origin: float3, dir: float3, t_hit: mut float
 fun is_finite(v: float3) -> bool:
     return all(abs(v) < float3(1e30, 1e30, 1e30))
 
+// ---- Leaving a surface ----------------------------------------------------------------------------------------------
+
+/// `p`, on a surface whose geometric normal is `n` turned to the side a ray leaves on, moved just off it: where that ray starts, traced with a `t_min` of 0.
+///
+/// A few steps of each coordinate's own float bits rather than a fixed distance, so it clears the hit's rounding at any scale.
+/// A fixed distance has to be large enough for the largest coordinate in the scene, and then steps over walls thinner than itself:
+/// a millimeter left a wine glass's inner surface unseen wherever its wall was thinner than two.
+/// Near the origin, where a step of bits is vanishingly small, it moves a fixed distance instead.
+/// Wächter and Binder, "A Fast and Robust Method for Avoiding Self-Intersection", Ray Tracing Gems, chapter 6.
+fun offset_ray(p: float3, n: float3) -> float3:
+    return float3(offset_coordinate(p.x, n.x), offset_coordinate(p.y, n.y), offset_coordinate(p.z, n.z))
+
+/// One coordinate of `offset_ray`: `p` moved toward the sign of `n`, by 256 float steps per unit of `n`.
+fun offset_coordinate(p: float, n: float) -> float:
+    if abs(p) < 1.0 / 32.0 => return p + n * (1.0 / 65536.0)
+    let steps = (abs(n) * 256.0) as uint
+    // more magnitude where `p` and `n` agree in sign, less where they do not
+    let bits = if (p >= 0.0) == (n >= 0.0) => p.bits + steps else p.bits - steps
+    return float.from_bits(bits)
+
 // ---- Random numbers -------------------------------------------------------------------------------------------------
 
 /// A hashed per-lane RNG (PCG-style): `hash` seeds a stream once per pixel and sample, and `rand` pulls uniforms in [0, 1) from it.

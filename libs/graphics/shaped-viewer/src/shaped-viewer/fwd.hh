@@ -19,6 +19,7 @@ using namespace cc::primitive_defines;
 // GPU resource managers (see resources/resource_managers.hh)
 struct resource_budget;
 struct manager_config;
+struct geometry_range;
 struct mesh_record;
 struct texture_record;
 struct attribute_record;
@@ -70,6 +71,11 @@ struct light_emission;
 class light;
 struct scene_light;
 struct background;
+enum class studio_setup : u8; // the studio spec's floor or ceiling setup (scene/studio.hh)
+enum class studio_view : u8;  // one of the six views of its sheet
+struct studio_options;        // what scene_ref::studio sets up
+struct dome;                  // an analytic environment: a gradient and soft lobes (scene/background.hh)
+struct dome_lobe;             // one von Mises-Fisher lobe of a dome
 struct sky_and_sun; // a sky and the sun that lights it, as sv::daylight() hands them back (scene/background.hh)
 struct background_gpu;
 struct render_settings;
@@ -121,7 +127,8 @@ struct asset_loader_config;
 struct filesystem_resolver_options;
 struct asset_material;
 struct asset_node;
-struct asset_light; // one light a file placed (asset/asset_data.hh)
+struct asset_light;  // one light a file placed (asset/asset_data.hh)
+struct asset_camera; // one camera a file placed
 struct asset_data;
 class asset;
 class asset_loader;
@@ -150,7 +157,8 @@ struct material_parameter_layout; // the parameter block one permutation reads
 enum class material_value_kind : u32;
 struct material_opacity;         // where a permutation's cutout opacity lives, for the one generic reader
 struct material_emission_factor; // where one factor of a permutation's emission lives
-struct material_emission; // where a permutation's emission lives, which is what lets its instances light the scene
+struct material_emission;  // where a permutation's emission lives, which is what lets its instances light the scene
+struct material_secondary; // where a permutation's base color, roughness and metalness live, which a secondary hit reads
 struct generated_material_shader; // that permutation as an SGL hit group, plus its layout
 struct material_shader_options;
 class material_library;
@@ -258,6 +266,7 @@ struct plan_resources;
 namespace impl
 {
 struct layout_pipeline_key;
+struct resolved_view; // a layer resolved to what a trace binds (rendering/impl/resolved_view.hh)
 } // namespace impl
 
 // rendering
@@ -274,9 +283,16 @@ enum class wavefront_stage : u8; // what a wavefront frame's timestamps divide i
 struct wavefront_timing;         // one wavefront frame's stage timestamps (rendering/wavefront_routine.hh)
 class wavefront_routine;
 struct raster_gbuffer; // what a raster frame writes: the image and the primary hit's G-buffer (rendering/raster_routine.hh)
-struct raster_draw;       // one draw of a raster frame (rendering/raster_routine.hh)
-struct raster_frame_desc; // one raster frame (rendering/raster_routine.hh)
+struct raster_draw;             // one draw of a raster frame (rendering/raster_routine.hh)
+struct raster_frame_desc;       // one raster frame (rendering/raster_routine.hh)
+enum class raster_culling : u8; // how far a raster frame culls (rendering/raster_routine.hh)
+enum class raster_shading : u8; // which pixel stage a raster frame's shading draws run (rendering/raster_routine.hh)
+struct raster_thin_targets;     // the hybrid's thin G-buffer (rendering/raster_routine.hh)
 class raster_routine;
+enum class hybrid_lighting : u8; // where a hybrid frame lights its primary hits (view/render_settings.hh)
+enum class still_denoise : u8; // what denoises a still image once the temporal member hands over (view/render_settings.hh)
+struct hybrid_frame_desc;      // one hybrid frame (rendering/hybrid_routine.hh)
+class hybrid_routine;
 class view_renderer;
 class viewer_renderer;
 

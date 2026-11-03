@@ -53,7 +53,7 @@ struct footprint_builder
     };
     for (auto const& s : e.stmts)
     {
-        impl::for_each_expr_of(s, count);
+        impl::for_each_expr_of(e, s, count);
         impl::for_each_pattern_of(e, s,
                                   [&](ast::range_of<flat_expr_id> patterns)
                                   {

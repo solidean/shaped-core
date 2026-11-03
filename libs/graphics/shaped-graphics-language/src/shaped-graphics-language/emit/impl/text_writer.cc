@@ -53,6 +53,105 @@ struct writer
     flat_expr_id gathered_member = flat_expr_id::none;
     cc::string gathered_name;
 
+    /// EMIT-181: the files the line table reads, and the statement whose source line the next line writes.
+    options const& sources;
+    flat_stmt const* current = nullptr;
+    cc::vector<line_origin> lines;
+    /// Per file, the offset each of its lines starts at; built on the first line asked of the file.
+    cc::vector<cc::vector<u32>> line_starts;
+    /// The text's lines up to `counted`, which the next emitted line number counts on from.
+    isize counted = 0;
+    i32 newlines = 0;
+    /// EMIT-182: the source line the target's compiler takes the next line for, and the calls the last comment named.
+    source_line assumed;
+    cc::vector<source_line> commented;
+    /// The statement just begun, until its first line is written.
+    flat_stmt const* unwritten = nullptr;
+    /// EMIT-183: every print written into sg's debug buffer.
+    cc::vector<debug_site> debug_sites;
+
+    /// FNV-1a over `text`, continuing from `hash`.
+    [[nodiscard]] static u32 hashed(u32 hash, cc::string_view text)
+    {
+        for (auto const c : text)
+            hash = (hash ^ u32(u8(c))) * 16777619u;
+        return (hash ^ 0xFFu) * 16777619u;
+    }
+
+    /// The family and lanes of a printable type (CHK-424): `float3` is `float` in 3, and an enum one `int`.
+    [[nodiscard]] debug_value debug_value_of(type_id type) const
+    {
+        auto result = debug_value{.family = "int", .type = cc::string(p.m.name_of(type))};
+        // the prelude declares `bool` an enum, which is no enum a message writes as its int
+        if (p.m.at(type).kind == check::type_kind::enumeration && result.type != "bool")
+            return result;
+        auto name = cc::string_view(result.type);
+        if (!name.empty() && name[name.size() - 1] >= '2' && name[name.size() - 1] <= '4')
+        {
+            result.lanes = name[name.size() - 1] - '0';
+            name = name.subview({.offset = 0, .size = name.size() - 1});
+        }
+        result.family = cc::string(name);
+        return result;
+    }
+
+    /// EMIT-183: a print as one record in sg's debug buffer, written whole or counted as dropped.
+    void print_record(flat_stmt const& s, flat_print const& n)
+    {
+        if (!p.writes_debug)
+            return;
+        auto site = debug_site();
+        if (n.message >= 0 && n.message < p.e.messages.size())
+        {
+            site.pieces = p.e.messages[n.message].pieces;
+            site.is_assert = p.e.messages[n.message].is_assert;
+        }
+        if (!sources.files.empty())
+            site.origin = origin_of(s);
+
+        auto words = cc::vector<cc::string>();
+        for (auto const id : p.e.at(n.values))
+        {
+            auto const type = p.e.at(id).type;
+            auto value = debug_value_of(type);
+            // bound once, so a value is computed once whatever its lanes
+            auto const name = p.names.mint("printed");
+            auto declaration = cc::string();
+            auto const value_text = expr(id).text;
+            d.write_local(declaration, {.name = name, .type = type_text(p, d, type), .value = value_text});
+            line(declaration);
+            for (auto lane = 0; lane < value.lanes; ++lane)
+            {
+                auto const lane_text = value.lanes == 1 ? cc::string(name) : cc::format("{}.{}", name, "xyzw"[lane]);
+                words.push_back(d.debug_word(lane_text, value.family));
+            }
+            site.values.push_back(cc::move(value));
+        }
+
+        auto id = hashed(2166136261u, p.entry_name);
+        id = hashed(id, cc::format("{}", n.message));
+        for (auto const& piece : site.pieces)
+            id = hashed(id, piece);
+        if (site.origin.at.file >= 0)
+            id = hashed(id, cc::format("{}:{}", name_of(site.origin.at.file), site.origin.at.line));
+        site.id = id;
+
+        auto const count = isize(words.size()) + 2;
+        auto const at = p.names.mint("debug_at");
+        if (auto const declaration = d.debug_declare(at); !declaration.empty())
+            line(declaration);
+        line(d.debug_reserve(at, count));
+        open(condition_text("if", d.debug_fits(at, count)));
+        line(d.debug_store(at, 0, cc::format("{}u", id)));
+        line(d.debug_store(at, 1, cc::format("{}u", count)));
+        for (auto i = isize(0); i < words.size(); ++i)
+            line(d.debug_store(at, i + 2, words[i]));
+        reopen("else");
+        line(d.debug_drop());
+        close();
+        debug_sites.push_back(cc::move(site));
+    }
+
     /// The name a target writes member `name` of struct `type` with, which the plan may have renamed.
     [[nodiscard]] cc::string_view member_of(type_id type, cc::string_view name) const
     {
@@ -72,9 +171,145 @@ struct writer
 
     void line(cc::string_view text)
     {
+        if (current != nullptr && !sources.files.empty())
+            map_line(origin_of(*current));
         indent(out, depth);
         out += text;
         out += "\n";
+        if (assumed.file >= 0)
+        {
+            ++assumed.line;
+            for (auto const c : text)
+                assumed.line += c == '\n' ? 1 : 0;
+        }
+    }
+
+    /// The line of `file` that byte `offset` is on; a line ends at `\n`, `\r\n` or a bare `\r`.
+    [[nodiscard]] i32 line_at(i32 file, u32 offset)
+    {
+        if (line_starts.size() < sources.files.size())
+            line_starts.resize_to_defaulted(sources.files.size());
+        auto& starts = line_starts[file];
+        if (starts.empty())
+        {
+            auto const text = cc::string_view(sources.files[file].file.source);
+            starts.push_back(0);
+            for (auto i = isize(0); i < text.size(); ++i)
+                if (text[i] == '\n' || (text[i] == '\r' && (i + 1 >= text.size() || text[i + 1] != '\n')))
+                    starts.push_back(u32(i + 1));
+        }
+        auto line = isize(1);
+        while (line < starts.size() && starts[line] <= offset)
+            ++line;
+        return i32(line);
+    }
+
+    /// The source line of an expression or a statement of `file`; none where the file is not one of `sources`.
+    [[nodiscard]] source_line line_of(i32 file, ast::expr_id expr, ast::stmt_id stmt)
+    {
+        if (file < 0 || file >= sources.files.size())
+            return {};
+        auto const& f = sources.files[file];
+        auto const form = ast::is_valid(expr) ? f.ast.at(expr).form
+                        : ast::is_valid(stmt) ? f.ast.at(stmt).form
+                                              : form_id::none;
+        if (!is_valid(form))
+            return {};
+        return {.file = file, .line = line_at(file, f.file.at(form).where.offset)};
+    }
+
+    /// Where statement `s` came from: its own line, and the calls it was inlined through.
+    /// The prelude's frames are left out wherever another frame remains.
+    [[nodiscard]] line_origin origin_of(flat_stmt const& s)
+    {
+        // innermost first: the statement, then its calls from the inside out
+        auto frames = cc::vector<source_line>();
+        frames.push_back(line_of(s.from.file, s.from.expr, s.from.stmt));
+        auto const calls = p.e.at(s.inlined_through);
+        for (auto i = calls.size(); i > 0; --i)
+            frames.push_back(line_of(calls[i - 1].file, calls[i - 1].call, ast::stmt_id::none));
+
+        auto const is_prelude = [&](source_line const& l) { return l.file >= 0 && l.file < p.m.prelude_files; };
+        auto any_outside = false;
+        for (auto const& f : frames)
+            any_outside = any_outside || (f.file >= 0 && !is_prelude(f));
+        auto result = line_origin();
+        for (auto const& f : frames)
+        {
+            if (f.file < 0 || (any_outside && is_prelude(f)))
+                continue;
+            if (result.at.file < 0)
+                result.at = f;
+            else
+                result.inlined_from.push_back(f);
+        }
+        return result;
+    }
+
+    /// The line the text's next line is, counted from 1.
+    [[nodiscard]] i32 next_line()
+    {
+        for (; counted < out.size(); ++counted)
+            newlines += out[counted] == '\n' ? 1 : 0;
+        return newlines + 1;
+    }
+
+    [[nodiscard]] cc::string_view name_of(i32 file) const
+    {
+        return file >= 0 && file < sources.names.size() ? sources.names[file] : cc::string_view("<sgl>");
+    }
+
+    /// The name of `file` without its directories, which a comment is short enough with.
+    [[nodiscard]] cc::string_view base_name_of(i32 file) const
+    {
+        auto const name = name_of(file);
+        auto start = name.size();
+        while (start > 0 && name[start - 1] != '/' && name[start - 1] != '\\')
+            --start;
+        return name.subview({.offset = start, .size = name.size() - start});
+    }
+
+    /// Records where the next line came from, behind the comment and the `#line` that say so where the target has them.
+    void map_line(line_origin o)
+    {
+        if (o.at.file < 0)
+            return;
+        // only a statement's first line says where it is: a brace or an `else` after it is no line of its own
+        auto const is_first = unwritten == current;
+        unwritten = nullptr;
+        if (is_first && sources.write_directives && d.has_line_directives())
+        {
+            if (!ast::impl::is_equal(o.inlined_from, commented))
+            {
+                commented = o.inlined_from;
+                if (!o.inlined_from.empty())
+                {
+                    indent(out, depth);
+                    out += "// inlined from";
+                    for (auto i = isize(0); i < o.inlined_from.size(); ++i)
+                        out.appendf("{} {}:{}", i == 0 ? "" : " >", base_name_of(o.inlined_from[i].file),
+                                    o.inlined_from[i].line);
+                    out += "\n";
+                    if (assumed.file >= 0)
+                        ++assumed.line;
+                }
+            }
+            if (assumed != o.at)
+            {
+                out.appendf("#line {} \"", o.at.line);
+                // a `#line` name is a string literal, so a Windows path's backslashes are escaped
+                for (auto const c : name_of(o.at.file))
+                {
+                    if (c == '\\' || c == '"')
+                        out += '\\';
+                    out += c;
+                }
+                out += "\"\n";
+                assumed = o.at;
+            }
+        }
+        o.emitted = next_line();
+        lines.push_back(cc::move(o));
     }
 
     /// `head` and the brace that opens its body, where the target puts it.
@@ -534,7 +769,7 @@ struct writer
         /// Member positions from the root down, as `memory_leaf::path` holds them.
         cc::vector<i32> path;
         type_id type = type_id::none;
-        /// EMIT-178: the element of an array leaf this addresses, as text; empty for the leaf itself or any other.
+        /// EMIT-181: the element of an array leaf this addresses, as text; empty for the leaf itself or any other.
         cc::string index;
     };
 
@@ -577,7 +812,7 @@ struct writer
             inner.value().type = x.type;
             return inner;
         }
-        // EMIT-178: an element of a packed array leaf is read and written through the leaf's own field
+        // EMIT-181: an element of a packed array leaf is read and written through the leaf's own field
         if (auto const* const element = x.node.try_as<flat_element>(); element != nullptr && is_builtin_type(p.m, x.type))
         {
             auto inner = memory_of(element->object);
@@ -628,7 +863,7 @@ struct writer
     {
         if (r.index.empty())
             return cc::format("{}.{}", r.root, r.form->fields[leaf.fields[i]].name);
-        // EMIT-178: every element of a split array is its scalars back to back in one array
+        // EMIT-181: every element of a split array is its scalars back to back in one array
         auto const& field = r.form->fields[leaf.fields[0]];
         if (leaf.is_split)
             return cc::format("{}.{}[{} * {} + {}]", r.root, field.name, p.m.builtin_type_of(leaf.type)->leaf_count,
@@ -653,7 +888,7 @@ struct writer
         return record.leaf_count > 4 || record.hlsl == "float2x2";
     }
 
-    /// EMIT-178: the whole array a packed array leaf `r` holds, rebuilt into a local element by element.
+    /// EMIT-181: the whole array a packed array leaf `r` holds, rebuilt into a local element by element.
     cc::string read_packed_array(memory_ref const& r, memory_leaf const& leaf)
     {
         auto const name = p.names.mint("unpacked");
@@ -765,7 +1000,7 @@ struct writer
         {
             auto const& leaf = leaf_at(r);
             auto const& record = *p.m.builtin_type_of(r.type);
-            // EMIT-178: a whole packed array is stored element by element; it is only ever a member of a struct being
+            // EMIT-181: a whole packed array is stored element by element; it is only ever a member of a struct being
             // stored, so `value` already names one evaluation of it
             if (leaf.count > 0 && r.index.empty() && (leaf.is_split || leaf.is_packed))
             {
@@ -1246,11 +1481,20 @@ struct writer
 
     void statement(flat_stmt const& s)
     {
+        auto const* const outer = current;
+        current = &s;
+        unwritten = &s;
+        statement_node(s);
+        current = outer;
+    }
+
+    void statement_node(flat_stmt const& s)
+    {
         s.node.visit(
             [&](flat_let const& let) { declare(let.local, let.value, p.e.at(let.local).is_mut); },
             [&](flat_var const& var) { declare(var.local, var.value, true); }, [&](flat_assign const& a) { assign(a); },
             // `validate` refuses a tree that holds one
-            [&](flat_print const&) {}, //
+            [&](flat_print const& n) { print_record(s, n); }, //
             [&](flat_eval const& v)
             {
                 // an atomic HLSL writes as statements alone has nothing left to evaluate
@@ -1320,7 +1564,7 @@ struct writer
                     auto const decision = p.names.mint("decision");
                     line(cc::format("const int {} = {};", decision, expr(r.value, true).text));
                     write_back();
-                    line(cc::format("return {} != 1;", decision));
+                    line(cc::format("return {{{0} != 1, {0} != 2}};", decision));
                     return;
                 }
                 if (is_msl && p.e.entry_stage == check::stage::intersection)
@@ -1333,9 +1577,12 @@ struct writer
                     line("{");
                     line(cc::format("    *reinterpret_cast<ray_data {}*>(sgl_data.attributes) = {}.{};",
                                     type_text(p, d, p.m.at(type).element), reported, member_of(type, "attributes")));
-                    line(cc::format("    return {{true, {}.{}}};", reported, member_of(type, "t")));
+                    auto const continues = check::is_valid(p.e.ends_search)
+                                             ? cc::format("!{}", p.locals[index_of(p.e.ends_search)])
+                                             : cc::string("true");
+                    line(cc::format("    return {{true, {}.{}, {}}};", reported, member_of(type, "t"), continues));
                     line("}");
-                    line("return {false, 0.0f};");
+                    line("return {false, 0.0f, true};");
                     return;
                 }
                 // EMIT-136: an any hit's decision is the target's call that ends the stage, and a plain return
@@ -1461,9 +1708,13 @@ void sgl::emit::impl::write_helpers(cc::string& out, plan const& p, dialect cons
         out.appendf("{}\n", w);
 }
 
-cc::string sgl::emit::impl::write_text(plan& p, dialect const& d)
+sgl::emit::impl::written_text sgl::emit::impl::write_text(plan& p, dialect const& d, options const& sources)
 {
-    auto w = writer{.p = p, .d = d};
+    auto w = writer{.p = p, .d = d, .sources = sources};
+    // EMIT-183: a stage that cannot write the buffer drops its prints, and declares no buffer
+    if (sources.diagnostics && d.writes_debug_in(p.e.entry_stage))
+        for (auto const& s : p.e.stmts)
+            p.writes_debug = p.writes_debug || s.node.is<flat_print>();
     for (auto const& r : p.resources)
         w.is_device_coherent = w.is_device_coherent || r.is_coherent;
     if (d.fences_image_stores())
@@ -1475,6 +1726,8 @@ cc::string sgl::emit::impl::write_text(plan& p, dialect const& d)
     w.out += "// Generated: the SGL source is what to edit.\n\n";
     d.write_declarations(w.out, p);
     write_helpers(w.out, p, d);
+    if (p.writes_debug)
+        d.write_debug_buffer(w.out);
     d.write_function_head(w.out, p);
     if (d.declares_workgroup_in_function())
         for (auto const& memory : p.workgroup)
@@ -1487,5 +1740,5 @@ cc::string sgl::emit::impl::write_text(plan& p, dialect const& d)
         w.statement(p.e.at(id));
     w.out += "}\n";
     d.write_function_tail(w.out, p);
-    return cc::move(w.out);
+    return {.text = cc::move(w.out), .lines = cc::move(w.lines), .debug_sites = cc::move(w.debug_sites)};
 }

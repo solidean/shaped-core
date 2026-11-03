@@ -194,7 +194,11 @@ struct core_checker
                               "write the value's first",
                               s.place);
             },
-            [&](flat_print const& s) { expr(s.value, 0); }, //
+            [&](flat_print const& s)
+            {
+                for (auto const value : e.at(s.values))
+                    expr(value, 0);
+            },
             [&](flat_eval const& s)
             {
                 if (is_void_value(s.value) && !e.at(s.value).node.is<flat_call>())

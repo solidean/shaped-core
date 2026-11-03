@@ -39,7 +39,8 @@ D3D12_BARRIER_ACCESS d3d12_access_from(sg::access_flags access)
     if (access.has(sg::access_flag::shader_read))
         out |= D3D12_BARRIER_ACCESS_SHADER_RESOURCE;
     // A read through a UAV is still a UAV access to D3D12, whatever the shader does with it.
-    if (access.has_any(sg::access_flag::shader_write | sg::access_flag::storage_read | sg::access_flag::shader_atomic))
+    if (access.has_any(sg::access_flag::shader_write | sg::access_flag::storage_read | sg::access_flag::shader_atomic
+                       | sg::access_flag::shader_append))
         out |= D3D12_BARRIER_ACCESS_UNORDERED_ACCESS;
     if (access.has(sg::access_flag::copy_read))
         out |= D3D12_BARRIER_ACCESS_COPY_SOURCE;
@@ -83,7 +84,8 @@ namespace
 
     auto const vertex_stage_access = sg::access_flag::vertex_read | sg::access_flag::constants_read
                                    | sg::access_flag::shader_read | sg::access_flag::storage_read
-                                   | sg::access_flag::shader_write | sg::access_flag::shader_atomic;
+                                   | sg::access_flag::shader_write | sg::access_flag::shader_atomic
+                                   | sg::access_flag::shader_append;
     auto const also_shades = access.has_any(vertex_stage_access);
 
     sync &= ~D3D12_BARRIER_SYNC_VERTEX_SHADING;

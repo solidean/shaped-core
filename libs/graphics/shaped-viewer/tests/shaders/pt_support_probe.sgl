@@ -115,3 +115,32 @@ fun probe_direction(u: float3) -> float3:
     pt_support_io.results[base + 6] = w6
     pt_support_io.results[base + 7] = w7
     pt_support_io.results[base + 8] = w8
+
+// ---- The environment's sampler --------------------------------------------------------------------------------------
+
+binding environment_io:
+    /// The environment, `sv::background_gpu` byte for byte.
+    environment: buffer[float4]
+
+    /// Per item: the sampled radiance over its density, and whether `environment_pdf` agrees with the density it was drawn with.
+    results: mut buffer[float4]
+
+    item_count: uint
+
+/// One direction per item from the environment, as `tracer.sample_environment` draws it.
+/// The mean of `radiance / pdf` over the items estimates the environment's integral over the sphere.
+@compute(64) fun environment_measure(@thread_id id: int3){environment_io}:
+    let item = id.x as uint
+    if item >= environment_io.item_count => return
+
+    let mut env = float4[28].filled(float4(0.0))
+    for k in 0 ..< 28:
+        env[k] = environment_io.environment[k]
+
+    let mut rng = pt.hash(item * 7919 + 3)
+    let u = float3(pt.rand(mut rng), pt.rand(mut rng), pt.rand(mut rng))
+    let drawn = scene.sample_environment_direction(env, float3(0.0, 1.0, 0.0), u)
+    let radiance = scene.environment_radiance(env, drawn.wi)
+    let agrees = if abs(scene.environment_pdf(env, drawn.wi) - drawn.pdf) <= 1e-4 * drawn.pdf => 1.0 else 0.0
+    let weighed = radiance / drawn.pdf
+    environment_io.results[id.x] = float4(weighed.x, weighed.y, weighed.z, agrees)

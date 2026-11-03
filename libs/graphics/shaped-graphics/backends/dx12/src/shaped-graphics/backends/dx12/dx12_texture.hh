@@ -13,13 +13,12 @@
 
 namespace sg::backend::dx12
 {
-/// The D3D12_RESOURCE_DESC for a texture of this shape.
-/// The create path is its only caller today: placed textures and heap requirement queries need a texture-capable memory_heap, which dx12 does not have.
+/// The D3D12_RESOURCE_DESC for a texture of this shape, for its creation and for a heap's requirement query.
 [[nodiscard]] D3D12_RESOURCE_DESC texture_resource_desc(sg::texture_description const& desc);
 
 } // namespace sg::backend::dx12
 
-/// DirectX 12 implementation of sg::raw_texture, holding the ID3D12Resource (GPU-resident, default heap).
+/// DirectX 12 implementation of sg::raw_texture, holding the ID3D12Resource (GPU-resident, default heap), committed or placed.
 /// Also owns the per-command-list subresource access tracking that drives layout-transition barriers — see dx12_texture_access.
 class sg::backend::dx12::dx12_texture final : public sg::raw_texture
 {
@@ -37,7 +36,8 @@ public:
         _resource(cc::move(resource)),
         _heap(cc::move(heap)),
         _borrowed(borrowed),
-        _access(subresource_extent_of(desc))
+        _access(subresource_extent_of(desc),
+                _heap != nullptr ? sg::texture_layout::undefined : sg::texture_layout::general)
     {
         acquire_completion_groups();
     }

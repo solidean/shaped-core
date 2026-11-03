@@ -274,12 +274,14 @@ protected:
     void raster_set_inline_constants(cc::span<byte const> data, cc::optional<isize> offset) override;
     void raster_draw(sg::draw_config const& config) override;
     void raster_draw_indexed(sg::draw_indexed_config const& config) override;
+    void raster_draw_indexed_indirect(sg::raw_buffer_handle const& args, isize offset_in_bytes, isize count) override;
 
     // Ray-tracing acceleration-structure builds (reached through cmd.raytracing). Bodies in dx12_raytracing.cc.
     [[nodiscard]] bool raytracing_is_supported() const override;
     [[nodiscard]] sg::blas_handle raytracing_build_blas_triangles(cc::span<sg::blas_triangles const> geometries,
                                                                   sg::accel_build_flags flags,
                                                                   int hit_record_stride) override;
+    [[nodiscard]] sg::micromap_handle raytracing_build_micromap(sg::micromap_triangles const& triangles) override;
     [[nodiscard]] sg::blas_handle raytracing_build_blas_aabbs(cc::span<sg::blas_aabbs const> geometries,
                                                               sg::accel_build_flags flags,
                                                               int hit_record_stride) override;
@@ -310,6 +312,12 @@ private:
     // An access landing in the write bucket of an array member counts toward _member_writes.
     // `from_array_application` makes the buffer one, and the result says whether the op already held a write of it.
     // Also files the buffer into the touched set, and into the written one for a write, which fold_transfer_waits reads at submit.
+    /// Binds the context's debug window for the epoch being recorded at `layout`'s root UAV.
+    /// A pipeline whose code writes records declares its appends, which no other append orders against.
+    void bind_debug_window(dx12_pipeline_layout const& layout,
+                           sg::impl::pipeline_footprint const& footprint,
+                           bool is_graphics);
+
     sg::impl::member_track track_buffer_access(dx12_buffer_handle const& buffer,
                                                sg::pipeline_stage_flags stages,
                                                sg::access_flags access,
@@ -352,4 +360,8 @@ private:
     void declare_group_accesses(cc::span<dx12_binding_group const* const> groups,
                                 sg::impl::pipeline_footprint const* footprint,
                                 sg::pipeline_stage_flags op_stages);
+
+    /// The debug window bound with the current pipeline, which every op declares as an append.
+    void declare_debug_window(sg::impl::pipeline_footprint const* footprint, sg::pipeline_stage_flags op_stages);
+    dx12_buffer_handle _bound_debug_window;
 };

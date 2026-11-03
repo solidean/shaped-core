@@ -38,6 +38,47 @@ public:
     bool has_struct_constructor() const override { return false; }
 
     bool is_c_like() const override { return true; }
+    bool has_line_directives() const override { return true; }
+
+    // vulkan writes no storage from a vertex, geometry or tessellation stage without vertexPipelineStoresAndAtomics,
+    // which sg does not ask a device for
+    bool writes_debug_in(check::stage s) const override
+    {
+        return !_is_vulkan
+            || (s != check::stage::vertex && s != check::stage::geometry && s != check::stage::tessellation_control
+                && s != check::stage::tessellation_evaluation);
+    }
+    void write_debug_buffer(cc::string& out) const override
+    {
+        if (_is_vulkan)
+            out += "[[vk::binding(19, 3)]] RWByteAddressBuffer sg_debug;\n\n";
+        else
+            out += "RWByteAddressBuffer sg_debug : register(u0, space11);\n\n";
+    }
+    cc::string debug_reserve(cc::string_view at, isize count) const override
+    {
+        return cc::format("sg_debug.InterlockedAdd(0, {}, {});", count, at);
+    }
+    cc::string debug_declare(cc::string_view at) const override { return cc::format("uint {};", at); }
+    cc::string debug_fits(cc::string_view at, isize count) const override
+    {
+        return cc::format("{} + {} <= sg_debug.Load(4)", at, count);
+    }
+    cc::string debug_store(cc::string_view at, isize i, cc::string_view word) const override
+    {
+        return cc::format("sg_debug.Store(12 + ({} + {}) * 4, {});", at, i, word);
+    }
+    cc::string debug_drop() const override { return "sg_debug.InterlockedAdd(8, 1);"; }
+    cc::string debug_word(cc::string_view value, cc::string_view family) const override
+    {
+        if (family == "uint")
+            return cc::string(value);
+        if (family == "bool")
+            return cc::format("({} ? 1u : 0u)", value);
+        if (family == "half")
+            return cc::format("asuint(float({}))", value);
+        return cc::format("asuint({})", value);
+    }
     cc::string_view rolled_loop_hint() const override { return "[loop]"; }
 
     void write_for_head(cc::string& out, cc::string_view index, cc::string_view first, cc::string_view end) const override
@@ -711,7 +752,13 @@ public:
             parameters.push_back(
                 cc::format("{} {} : {}", spelled.hlsl_type, p.stage_input_names[i], spelled.hlsl_semantic));
             // EMIT-128: HLSL counts from the draw's base, and shader model 6.8 says where the draw started
-            if (has_base(p, p.e.stage_inputs[i].input))
+            // An instance's base is `@first_instance` itself where the entry takes that, since a semantic is taken once.
+            auto takes_first_instance = false;
+            for (auto const& other : p.e.stage_inputs)
+                takes_first_instance = takes_first_instance || other.input == check::stage_input::first_instance;
+            auto const base_is_shared
+                = p.e.stage_inputs[i].input == check::stage_input::instance_index && takes_first_instance;
+            if (has_base(p, p.e.stage_inputs[i].input) && !base_is_shared)
                 parameters.push_back(cc::format("uint {} : {}", p.stage_input_bases[i],
                                                 p.e.stage_inputs[i].input == check::stage_input::vertex_index
                                                     ? "SV_StartVertexLocation"

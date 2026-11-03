@@ -155,8 +155,7 @@ Plus the `allowed_in_flight` throttle, deferred deletion of buffers with finaliz
 dx12 additionally holds a resource back past its epoch while an async upload to it is still in flight — a second gate on the copy fence, see [async upload](upload.async.md).
 
 **Deferred** (see [issues](../issues/)): the split GPU/CPU download watermarks for readback, and vulkan's async copy queue with its per-resource pending syncs.
-Also placed transient *textures*: one works today, but as a dedicated allocation auto-expired at the next epoch rather than suballocated from the transient bump heap, which is buffers-only.
-[feat-sg-transient-texture-heap](../issues/feat-sg-transient-texture-heap.md) tracks that.
+Also placed transient textures on metal, which still allocates each one dedicated: [feat-sg-metal-texture-heap](../issues/feat-sg-metal-texture-heap.md).
 
 ## See also
 

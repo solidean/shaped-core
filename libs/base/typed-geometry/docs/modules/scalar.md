@@ -128,6 +128,95 @@ It needs integers of a chosen width, and arithmetic whose result width the calle
 - **A `fixed_int` is a scalar**, so `vec<3, fi64>` exists — and its operations wrap at the element width, so a dot product over `fi64` is computed in `fi64`.
   Width-aware `dot` and `cross` belong to a predicate layer on top of this one.
 
+### `bigfloat_sbo` is exact ring arithmetic, sized for the values it holds
+
+`tg::bigfloat_sbo<K>` is a sign, a mantissa of 64-bit limbs and an `i32` exponent in bits, for exact predicates past any bound a `fixed_int` width could claim.
+`+ - *` and comparison never round, so every double is one exactly and every result is the exact value.
+
+- **Each value holds the limbs it uses, not a worst-case capacity.**
+  K limbs live inline and a longer mantissa spills to cc's node allocator, whose free needs only the class index the value stores.
+  K is the template parameter, at 16, 24 and 32 bytes for K = 1, 2 and 3; `tg::bigfloat` is K = 2 until the sweep in `tests/benchmarks/bigfloat-benchmark.cc` decides.
+- **The kernels are not templates.** They work over a view of the mantissa, so K sizes the storage and nothing else.
+  The small cases are inline and branch-free: a sum of operands of at most two limbs within 64 bits of each other, and a product of at most 2 × 2 limbs.
+  They cover every difference of two doubles of similar magnitude and every product of two such differences.
+- **The mantissa is trimmed at both ends, not normalized to odd.**
+  A predicate reads only signs, so a canonical form buys nothing for the shift it costs per operation.
+  A double's trailing zeros do move into the exponent on the way in, so a product of two doubles stays within two limbs.
+- **An exponent gap costs limbs.** A sum is computed in one dense window from the lower value's bottom bit to the higher value's top bit, so 2^1000 + 2^-1000 takes 32 limbs.
+- **`msum` accumulates a sum of products in one two's-complement window**, with at most one allocation, which pays off once values spill.
+  On small values the operators are faster for now: an orient2d retires ~1,000 instructions through them and ~1,500 through msum, on a Zen 5.
+- **A value type is not the fastest shape for a generated predicate.** The benchmark carries a prototype that allocates from a bump arena per call, with no destructor and no copy of a result.
+  It retires 20–30% fewer instructions than the operators; `tests/benchmarks/bigfloat-benchmark.cc` has the counters.
+- **`to_f64` rounds to nearest with ties to even**, correctly unless the result is subnormal, where ldexp may round a second time; every double converts back exactly.
+  The tests use that as their oracle: an exact sum, product or fma rounded once must equal the hardware's.
+- **Rounding is not supported yet.** When it comes, it is a set of operations that take a precision, over this representation.
+
+### `bigint` is an integer one pointer wide
+
+`tg::bigint` is an arbitrary-precision integer, in sign and magnitude, for values of a few hundred bits that no width can be claimed for in advance.
+It is the base a rational type will build on.
+
+- **Sign and magnitude, not two's complement.** A product multiplies magnitudes and XORs signs, where two's complement needs corrections or a sign-extended double width.
+  Sign, negation and absolute value read or flip the header alone, and a varying length needs no sign extension.
+  The cost is a magnitude comparison when a sum's signs differ, which the sizes or the top limbs almost always decide.
+- **One pointer, to a node of cc's node allocator.** The node starts with a header word: the limbs in use, the node class, the sign, and the limbs the node holds, for a room check of one compare.
+  The limbs follow, so the classes of 16 to 256 bytes hold 1, 3, 7, 15 and 31 limbs, and a 64-byte node is a cache line holding 448 bits.
+  Zero is the null pointer, so it allocates nothing, and a moved-from value is zero.
+- **A node is reused while it holds the result.** Every `assign_*` writes into the target's node when it is large enough, and an operand may be the target.
+  The limbs past the size are left as they are, so a smaller result costs nothing to shrink to.
+  The operators take an rvalue operand's node for their result, so `a * b - c * d` allocates once per product.
+- **`+ - *` of one- and two-limb operands are inline, and everything else is one call.** At that size the call and its register saves cost more than the arithmetic.
+  The out-of-line operations have a lean path for a target that holds the result, and a separate slow one for allocation and aliasing, so the common case needs few registers.
+  A lean path returns false rather than calling the slow one, which the inline caller does: the operands then need not outlive its first decisions.
+  Its decisions all come before the kernel, and a difference splits off at the signs, before anything else is live; every register save avoided is a push and a pop less per call.
+- **No unsigned `bignat` beside it.** The sign is one header bit, so an unsigned sum would save a sign compare, about 5 of 115 to 220 instructions.
+  An unsigned difference still compares the magnitudes, to refuse `a < b`, which is the work the signed one does to pick its sign.
+  Natural-number code already exists one level down: `scalar/impl/limbs.hh` is unsigned, and gcd or a rational's reduction work on magnitudes there.
+  A second public type would repeat the operators, parsing, printing, division and conversions, with their tests, for close to no speed.
+  It pays only to have "never negative" checked by the type, say for a count or a denominator in an API; then it is a thin wrapper over the same header, its conversions handing over the node.
+- **The limb kernels are shared with `bigfloat`.** `scalar/impl/limbs.hh` holds natural numbers as limb arrays; `bigfloat` keeps its own sum, since its operands are aligned at an exponent first.
+- **On x64 with clang or gcc, the carry chains are inline assembly**, with portable C++ beside them for every other target.
+  As C++, clang cannot keep a carry in the flag across a loop's compare, nor in a third accumulator word: it saves and restores it through `setb` and `movzx`, about twice the instructions.
+  Sums run `adc` on an index that counts up to zero, four limbs a round closed by `lea` and `inc`, which leave the carry alone; products accumulate `mulx` into three words by `add`, `adc`, `adc`.
+  A sum's carry through the longer operand's rest is in the same asm block, six registers: as C++ that copy loop is vectorized and costs the caller its registers and a `vzeroupper`.
+  `addmul_1` and `submul_1` take limbs in pairs, the first product's high limb folded into the second's low off the carry's path, two cycles a limb where one at a time takes three.
+- **A product picks its algorithm by shape.**
+  Up to 4 × 4 limbs and squares up to 16 × 16 are fully unrolled column products, five instructions per limb product.
+  From 17 limbs squares split by Karatsuba down onto those, its middle recombined in place as GMP's toom22 does; an unbalanced product takes the longer operand in chunks of the shorter.
+  Other shapes run in rows of `addmul_1`.
+- **Division is Knuth's Algorithm D with Möller and Granlund's 3/2 digit**, truncating like the builtins; `>>` floors, like an arithmetic shift.
+  Each digit divides the window's top three limbs by the divisor's top two through a reciprocal computed once, two products and at most one correction, where a hardware `div` costs tens of cycles.
+  A divisor of two limbs keeps the whole window in registers and needs no scratch, and one of one limb divides by a 2/1 reciprocal.
+  `div_mod(q, r, a, b)` writes into kept results.
+- **The gcd is binary to two limbs and Lehmer's above**, since a rational reduces by one on almost every operation.
+  One limb is Stein's binary gcd, ten instructions a step in asm; values far apart in size take one division first, which closes the gap a bit a step would.
+  Above two limbs each pass runs Euclid on the top 62 bits in a register, at most one division a step, and applies its cofactors to the whole.
+  `div_exact` by one limb multiplies by the divisor's inverse modulo 2^64, where a division by it takes a hardware division a limb.
+- **Measured against GMP 6.3, its generic C build, in instructions retired on a Zen 5.**
+  An orient3d over 50-bit integers retires about 1,580 with results reused, GMP 2,390; over 120-bit integers about 2,300, GMP 3,200.
+  A 16 × 16 limb product retires about 1,520, GMP 1,750; a division of 32 limbs by 16 about 3,350, GMP 4,600, and fewer cycles at every size.
+  A sum retires fewer at every size, a difference within 8 below 12 limbs; `perf-bigint-past-one-limb` has the open items.
+  A gcd of two 4-limb values retires about 6,300, GMP 9,500, Euclid's on divisions 47,500; of 32 limbs about 93,000, GMP 117,000.
+
+### `bigrat` is a reduced rational over two bigints
+
+`tg::bigrat` is num / den with den positive and coprime to num after every operation, as GMP's mpq keeps it.
+
+- **Reduced by default, `bigrat_unreduced` as the escape hatch.** Reduced, equality is the parts' equality and sizes stay as small as the value.
+  Unreduced, a sum or product is bigint products alone, but the parts grow with every operation the reduction defers.
+  A predicate needs only a sign, so it is where the unreduced type pays: orient3d over rational points takes a fifth of the reduced one's instructions.
+- **The denominator's zero stands for 1.** An integer-valued rational holds no second node and adds, subtracts and multiplies at bigint's cost.
+- **Each operation reduces by the smallest gcds it can**, Knuth's and Henrici's choices, as GMP makes them.
+  A sum takes the denominators' gcd g, then the gcd of the new numerator with g alone; a sum with an integer takes none.
+  A product takes the two cross gcds, each of half the size of the one gcd its result would need.
+- **Comparison never divides**: signs first, then the cross products' bit widths, which decide most pairs, then the cross products themselves.
+- **Temporaries are per thread**, so a stream of operations into kept results allocates nothing once their nodes have grown.
+- **Measured against GMP's mpq, its generic C build, in instructions retired on a Zen 5.**
+  A three-plane intersection point on a 26-bit grid, three rationals over the planes' determinant, retires about 11,300, GMP 16,400.
+  orient3d over four such points about 330,000, GMP 464,000, and unreduced about 62,000.
+  A Gaussian elimination of an 8 × 8 integer system in rationals about 852,000, GMP 1,080,000.
+  A harmonic sum of 200 terms, where a denominator only grows, about 316,000, GMP 275,000.
+
 ### `half_float` is binary16, correctly rounded
 
 `tg::half_float`, spelled `tg::f16`, is IEEE 754 binary16: a struct over its 16 bits, the same type on every compiler.

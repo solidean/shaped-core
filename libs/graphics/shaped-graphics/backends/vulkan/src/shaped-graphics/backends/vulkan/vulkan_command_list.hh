@@ -45,6 +45,12 @@ public:
     /// Declaring is separate from flushing so a buffer bound several times to one op produces a single merged barrier.
     /// An access landing in the write bucket of an array member counts toward _member_writes.
     /// `from_array_application` makes the buffer one, and the result says whether the op already held a write of it.
+    /// The context's debug window for the epoch being recorded, where diagnostics are on; null where they are off.
+    /// Every op that runs with it bound declares it as an append (declare_debug_window), as a bound group is declared.
+    [[nodiscard]] sg::raw_buffer_handle bind_debug_window(sg::impl::pipeline_footprint const& footprint);
+    void declare_debug_window(sg::impl::pipeline_footprint const* footprint, sg::pipeline_stage_flags op_stages);
+    sg::raw_buffer_handle _bound_debug_window;
+
     sg::impl::member_track track_buffer_access(vulkan_buffer const& buffer,
                                                sg::pipeline_stage_flags stages,
                                                sg::access_flags access,
@@ -324,6 +330,7 @@ protected:
     void raster_set_inline_constants(cc::span<byte const> data, cc::optional<isize> offset) override;
     void raster_draw(sg::draw_config const& config) override;
     void raster_draw_indexed(sg::draw_indexed_config const& config) override;
+    void raster_draw_indexed_indirect(sg::raw_buffer_handle const& args, isize offset_in_bytes, isize count) override;
 
     // Ray tracing (reached through cmd.raytracing).
     // is_supported()'s body is in vulkan_command_list.cc, which has vulkan_context complete.
@@ -331,6 +338,7 @@ protected:
     [[nodiscard]] sg::blas_handle raytracing_build_blas_triangles(cc::span<sg::blas_triangles const> geometries,
                                                                   sg::accel_build_flags flags,
                                                                   int hit_record_stride) override;
+    [[nodiscard]] sg::micromap_handle raytracing_build_micromap(sg::micromap_triangles const& triangles) override;
     [[nodiscard]] sg::blas_handle raytracing_build_blas_aabbs(cc::span<sg::blas_aabbs const> geometries,
                                                               sg::accel_build_flags flags,
                                                               int hit_record_stride) override;
