@@ -35,8 +35,9 @@ TEST("sg metal - a texture shape folds into one MTLTextureType")
     // the product is worth pinning — each of these is a combination a reader cannot infer from the enum.
     using sg::texture_dimension;
 
-    CHECK(mtl::texture_type_of(texture_dimension::d1, false, false, false) == MTL::TextureType1D);
-    CHECK(mtl::texture_type_of(texture_dimension::d1, true, false, false) == MTL::TextureType1DArray);
+    // a 1D texture is 2D one texel high, since Metal's own 1D textures take no mips
+    CHECK(mtl::texture_type_of(texture_dimension::d1, false, false, false) == MTL::TextureType2D);
+    CHECK(mtl::texture_type_of(texture_dimension::d1, true, false, false) == MTL::TextureType2DArray);
     CHECK(mtl::texture_type_of(texture_dimension::d2, false, false, false) == MTL::TextureType2D);
     CHECK(mtl::texture_type_of(texture_dimension::d2, true, false, false) == MTL::TextureType2DArray);
     CHECK(mtl::texture_type_of(texture_dimension::d2, false, false, true) == MTL::TextureType2DMultisample);
@@ -104,8 +105,8 @@ TEST("sg metal - a view's texture type comes from the view, not the texture")
     // the texture's own type is the wrong answer for every view that reshapes it.
     using sg::texture_view_dimension;
 
-    CHECK(mtl::texture_type_of(texture_view_dimension::tex_1d) == MTL::TextureType1D);
-    CHECK(mtl::texture_type_of(texture_view_dimension::tex_1d_array) == MTL::TextureType1DArray);
+    CHECK(mtl::texture_type_of(texture_view_dimension::tex_1d) == MTL::TextureType2D);
+    CHECK(mtl::texture_type_of(texture_view_dimension::tex_1d_array) == MTL::TextureType2DArray);
     CHECK(mtl::texture_type_of(texture_view_dimension::tex_2d) == MTL::TextureType2D);
     CHECK(mtl::texture_type_of(texture_view_dimension::tex_2d_ms) == MTL::TextureType2DMultisample);
     CHECK(mtl::texture_type_of(texture_view_dimension::tex_2d_array) == MTL::TextureType2DArray);

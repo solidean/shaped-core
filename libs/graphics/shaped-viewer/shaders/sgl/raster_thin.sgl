@@ -33,6 +33,19 @@ use tracer
     /// the clip depth, `1 - near_plane / depth`, which a layer's drawings are occluded by
     @format(.r32_float) primary_depth: float
 
+/// `thin_targets` and the depth of the quadric surface a pixel found, as `quadric_targets` adds it to `targets`.
+@pixel struct quadric_thin_targets:
+    @format(.rgba16_float) emission: float4
+    @format(.rgba16_float) normals: float4
+    @format(.rgba8_unorm) base: float4
+    @format(.rgba8_unorm) specular: float4
+    @format(.rgba8_unorm) extra: float4
+    @format(.r32_float) depth: float
+    @format(.rg32_float) motion: float2
+    @format(.r32_float) primary_depth: float
+    /// `near_plane / depth`, the raster pass's own reversed depth, at the surface
+    @depth(.greater_equal) surface_depth: float
+
 // ---- tests: run when this file is compiled on its own ----
 
 // Both halves of the channel round-trip through eight bits, the weight to within a step of 1/127.
@@ -138,20 +151,44 @@ fun plane_depth(cam: scene.camera, pixel: float2, size: float2, to_point: float3
 
 /// The thin G-buffer of the pixel `p` covers, whose material evaluated to `surface_in` through `ctx`, as `shade` describes the surface.
 fun thin(p: varyings, ctx: material.shading_context, surface_in: openpbr.surface, supplied_tangent_frame: bool){drawn, tracer.bindless, slug.tables} -> thin_targets:
+    let cam = scene.camera(..drawn.frame[0].camera)
+    let inst = scene.instance(..drawn.instances[p.instance as int])
+    let face = face_of(inst, ctx, p.world, cam.position, surface_in, supplied_tangent_frame)
+    return thin_face(float2(p.position.x, p.position.y), p.world, face, surface_in, supplied_tangent_frame)
+
+/// The thin G-buffer of the quadric pixel `p` found at `hit`, and its depth.
+fun thin_quadric(p: quadric_varyings, hit: quadric_pixel, surface_in: openpbr.surface, supplied_tangent_frame: bool){drawn, tracer.bindless, slug.tables} -> quadric_thin_targets:
     let f = drawn.frame[0]
     let cam = scene.camera(..f.camera)
     let inst = scene.instance(..drawn.instances[p.instance as int])
-    let face = face_of(inst, ctx, p.world, cam.position, surface_in, supplied_tangent_frame)
-    let v = normalize(cam.position - p.world)
-    let to_point = p.world - cam.position
-    let view_depth = plane_depth(cam, float2(p.position.x, p.position.y) + f.jitter, f.size, to_point, face.n)
+    let face = quadric_face_of(inst, hit.object_normal, hit.world, cam.position, surface_in, supplied_tangent_frame)
+    let t = thin_face(float2(p.position.x, p.position.y), hit.world, face, surface_in, supplied_tangent_frame)
+    return {
+        emission = t.emission
+        normals = t.normals
+        base = t.base
+        specular = t.specular
+        extra = t.extra
+        depth = t.depth
+        motion = t.motion
+        primary_depth = t.primary_depth
+        surface_depth = f.near_plane / dot(hit.world - cam.position, normalize(cam.forward))
+    }
+
+/// `thin` for the surface at world point `world` that pixel `pixel` covers, described by `face`.
+fun thin_face(pixel: float2, world: float3, face: pixel_face, surface_in: openpbr.surface, supplied_tangent_frame: bool){drawn, tracer.bindless, slug.tables} -> thin_targets:
+    let f = drawn.frame[0]
+    let cam = scene.camera(..f.camera)
+    let v = normalize(cam.position - world)
+    let to_point = world - cam.position
+    let view_depth = plane_depth(cam, pixel + f.jitter, f.size, to_point, face.n)
 
     let mut surface = surface_in
-    apply_decals(mut surface, p.world, face.n, f.pixel_spread * length(to_point))
+    apply_decals(mut surface, world, face.n, f.pixel_spread * length(to_point))
     let shading = openpbr.shading_frame(mut surface, face.n, v, face.authored, supplied_tangent_frame)
 
     let prev = scene.camera(..f.previous_camera)
-    let motion = float2(p.position.x, p.position.y) + f.jitter - scene.camera_project(prev, p.world - prev.position, f.size)
+    let motion = pixel + f.jitter - scene.camera_project(prev, world - prev.position, f.size)
     return thin_of(surface, shading.n, face.n, view_depth, motion, f.near_plane)
 
 /// What a pixel no surface covers holds in the thin G-buffer, as `environment` fills the lit targets.

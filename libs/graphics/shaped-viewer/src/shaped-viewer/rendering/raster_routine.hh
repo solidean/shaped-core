@@ -47,6 +47,10 @@ struct sv::raster_gbuffer
 
     /// The clip depth `1 - near / depth` a layer's drawings are occluded by, r32_float, or null where nothing reads it.
     sg::texture_2d primary_depth;
+
+    /// How far each pixel's bounce went, the diffuse half in r and the specular in g, rg32_float, or null where nothing reads it.
+    /// Only a deferred hybrid frame writes it, from its lighting kernel; a raster pass never does.
+    sg::texture_2d hit_distance;
 };
 
 /// The hybrid's thin G-buffer, which a deferred frame's raster pass writes beside the depth, motion and primary depth of `raster_gbuffer`.
@@ -88,14 +92,18 @@ enum class sv::raster_shading : sv::u8
 
 /// One draw of a raster frame: every triangle of one row of the instance table, through one permutation's pixel stage.
 ///
-/// An indexed draw over `raster_frame_desc::index_pool`: the row's geometry range, as its instance record names it.
+/// An indexed draw over `raster_frame_desc::index_pool`: the row's geometry range, as its instance record names it;
+/// or over a frame mesh's own index buffer, `indices`.
 struct sv::raster_draw
 {
     /// The row of `raster_frame_desc::instance_table` the draw is.
     u32 instance = 0;
 
-    /// How many triangles the row's geometry holds.
+    /// How many triangles the row's geometry holds; 0 for a quadric batch's row.
     u32 triangle_count = 0;
+
+    /// How many primitives the row's quadric batch holds, each drawn as its box; 0 for a mesh's row.
+    u32 primitive_count = 0;
 
     /// Which of `raster_frame_desc::permutations` shades it.
     u32 permutation = 0;
@@ -106,6 +114,10 @@ struct sv::raster_draw
 
     /// The row's geometry's box in its own space, which the GPU culls the draw by through the row's placement; none draws it always.
     cc::optional<tg::aabb3f> bounds;
+
+    /// A frame mesh's own index buffer, which the draw binds in place of the pool, from its first index; null draws through the pool.
+    /// Such a draw is never culled and is drawn directly, once, in the frame's first pass.
+    sg::buffer<u32> indices;
 };
 
 /// How far a raster frame culls: `occlusion` where it has a visibility record, else `view`; `none` draws every item.
@@ -232,9 +244,12 @@ private:
 
     /// `raster_pass.sgl`'s vertex stage, which every material's pipeline shares.
     sg::compiled_shader _surface_vs;
+    /// The vertex stage of a quadric batch's boxes, beside `_surface_vs`.
+    sg::compiled_shader _quadric_vs;
 
     /// `hybrid_pass.sgl`'s vertex stage, over `tracer.traced`; none where the device does not trace, which declines a `traced` frame.
     cc::optional<sg::compiled_shader> _hybrid_vs;
+    cc::optional<sg::compiled_shader> _hybrid_quadric_vs;
 
     /// The environment pass of `raster_pass.sgl`, into the lit targets and into the thin ones.
     sg::raster_pipeline_handle _environment;

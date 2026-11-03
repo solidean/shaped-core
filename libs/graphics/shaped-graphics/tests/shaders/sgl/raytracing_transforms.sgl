@@ -1,0 +1,53 @@
+// raytracing_pipeline.sgl's cells, each hit reporting where its instance stands: its transforms, through a closest hit
+// and an any hit.
+require raytracing_pipeline
+
+binding placements:
+    world: acceleration_structure[.triangles]
+    seen: mut buffer[float4]
+
+struct placement:
+    origin_in_world: float4
+    hit_in_object: float4
+    candidate_origin_in_world: float4
+
+rays placement_rays:
+    placed: placement
+
+// three float4 per cell: the instance's origin in world space, the hit in object space, and the any hit's origin
+@raygen fun placed_primary(@launch_id id: int3){placements}:
+    let zero = float4(0.0, 0.0, 0.0, 0.0)
+    let mut p = placement(zero, zero, zero)
+    let r = ray(
+        origin = pos3((id.x as float) + 0.25, (id.y as float) + 0.5, -1.0)
+        direction = vec3(0.0, 0.0, 1.0)
+    )
+    trace(placements.world, r, placement_rays.placed, mut p)
+    let at = (id.x + id.y * 8) * 3
+    placements.seen[at] = p.origin_in_world
+    placements.seen[at + 1] = p.hit_in_object
+    placements.seen[at + 2] = p.candidate_origin_in_world
+
+// a miss leaves the payload's zeroes, so a hit is told by the 1 in its origin's w
+@miss fun placed_sky(p: mut placement):
+    p.origin_in_world.w = 0.0
+
+@closest_hit fun place(h: triangle_hit, p: mut placement):
+    let o = h.to_world(pos3(0.0, 0.0, 0.0))
+    let q = h.to_object(h.ray.origin + h.ray.direction * h.t)
+    p.origin_in_world = float4(o.x, o.y, o.z, 1.0)
+    p.hit_in_object = float4(q.x, q.y, q.z, 0.0)
+
+@any_hit fun place_candidate(c: triangle_candidate, p: mut placement) -> hit_decision:
+    let o = c.to_world(pos3(0.0, 0.0, 0.0))
+    p.candidate_origin_in_world = float4(o.x, o.y, o.z, 0.0)
+    return hit_decision.accept
+
+hit_group placed for placement_rays:
+    placed = (closest_hit = place, any_hit = place_candidate)
+
+@raytracing pipeline placed_path:
+    rays = placement_rays
+    raygen = placed_primary
+    miss.placed = placed_sky
+    hit_groups = (placed)

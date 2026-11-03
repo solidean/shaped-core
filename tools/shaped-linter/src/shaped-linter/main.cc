@@ -82,14 +82,15 @@ int run(scl::options const& opts)
 
     for (auto const& file : opts.files)
     {
-        auto buffer = sm.add_from_file(file);
+        // find_or_add: a fwd.hh an earlier file's fix already read is the same buffer, so both files' edits land in one text
+        auto buffer = sm.find_or_add_file(file);
         if (buffer.has_error())
         {
             cc::eprintln("error: cannot read {}: {}", file, buffer.error().to_string());
             return exit_usage;
         }
 
-        auto found = scl::run_rules(*buffer.value(), rules, configs.resolve(file));
+        auto found = scl::run_rules(*buffer.value(), rules, configs.resolve(file), &sm);
         for (auto& f : found)
         {
             // Prose findings outside the changed lines are somebody else's older prose, not this edit's.

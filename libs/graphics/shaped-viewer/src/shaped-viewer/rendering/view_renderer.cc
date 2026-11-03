@@ -183,7 +183,8 @@ resolved_view resolve_scene(sg::command_list& cmd, layer const& l, gpu_resource_
 
             // A batch still streaming keeps its place as a box, exactly as a mesh does, and one that declared no extent is
             // skipped for the same reason: there is no honest place to draw it.
-            auto const pending = set->state != residency::complete;
+            // So does one whose attributes still stream: its parameter block would bind them, stalling the frame until they land.
+            auto const pending = set->state != residency::complete || !resources.attributes_resident(item.instance);
             if (pending && !set->bounds.has_value())
                 continue;
 
@@ -210,8 +211,10 @@ resolved_view resolve_scene(sg::command_list& cmd, layer const& l, gpu_resource_
                                   out.hit_groups[permutation]->secondary);
             out.parameter_blocks.push_back(item.instance);
             out.frame_contents.push_back({});
+            out.own_indices.push_back({});
             // A pending batch is the cube a raster frame draws too; a landed one has no triangles to draw.
             out.triangle_counts.push_back(pending ? u32(resources.meshes.placeholder_geometry().triangle_count) : 0);
+            out.primitive_counts.push_back(pending ? 0 : u32(set->primitive_count));
             out.bounds.push_back(pending ? cc::optional<tg::aabb3f>(tg::aabb3f(tg::pos3f(0, 0, 0), tg::pos3f(1, 1, 1)))
                                          : cc::optional<tg::aabb3f>());
 
@@ -242,7 +245,9 @@ resolved_view resolve_scene(sg::command_list& cmd, layer const& l, gpu_resource_
                                   out.hit_groups[permutation]->secondary);
             out.parameter_blocks.push_back(item.instance);
             out.frame_contents.push_back(item.frame_geometry.hash);
+            out.own_indices.push_back(m.draw_indices);
             out.triangle_counts.push_back(u32(m.triangle_count));
+            out.primitive_counts.push_back(0);
             // No box: a frame mesh's geometry is new each frame, so a raster frame draws it always rather than measure it.
             out.bounds.push_back(cc::optional<tg::aabb3f>());
             continue;
@@ -301,7 +306,9 @@ resolved_view resolve_scene(sg::command_list& cmd, layer const& l, gpu_resource_
                               out.hit_groups[permutation]->secondary);
         out.parameter_blocks.push_back(item.instance);
         out.frame_contents.push_back({});
+        out.own_indices.push_back({});
         out.triangle_counts.push_back(triangle_count);
+        out.primitive_counts.push_back(0);
         out.bounds.push_back(object_bounds);
 
         // An instance lights the scene where its own permutation declares an emission that is not dark throughout.
@@ -972,53 +979,30 @@ struct raster_scene
     u64 hash = 0;
 };
 
-/// A layer's raster draws: its triangle permutations, each once, and one draw per triangle row of `resolved`.
+/// A layer's raster draws: its permutations, each once, and one draw per row of `resolved`.
 struct raster_batch
 {
     cc::vector<material_permutation const*> permutations;
     cc::vector<raster_draw> draws;
 };
 
-/// The draws of `resolved` a raster pass makes, warning once per `slot` of the quadric batches it skips.
-[[nodiscard]] raster_batch raster_batch_of(resolved_view const& resolved,
-                                           impl::view_state const& rec,
-                                           impl::temporal_slot& slot)
+/// The draws of `resolved` a raster pass makes.
+[[nodiscard]] raster_batch raster_batch_of(resolved_view const& resolved)
 {
     auto batch = raster_batch{};
-    auto permutation_of = cc::vector<u32>();
-    permutation_of.resize_to_defaulted(resolved.hit_groups.size());
-    for (auto i = isize(0); i < resolved.hit_groups.size(); ++i)
-    {
-        if (resolved.hit_groups[i]->kind != geometry_kind::triangles)
-            continue;
-        permutation_of[i] = u32(batch.permutations.size());
-        batch.permutations.push_back(resolved.hit_groups[i]);
-    }
+    batch.permutations.reserve(resolved.hit_groups.size());
+    for (auto const* const group : resolved.hit_groups)
+        batch.permutations.push_back(group);
 
-    auto skipped_quadrics = false;
     for (auto i = isize(0); i < resolved.instances.size(); ++i)
-    {
-        auto const group = resolved.instances[i].hit_group_offset / 2;
-        if (resolved.hit_groups[group]->kind != geometry_kind::triangles)
-        {
-            skipped_quadrics = true;
-            continue;
-        }
         batch.draws.push_back({.instance = u32(i),
                                .triangle_count = resolved.triangle_counts[i],
-                               .permutation = permutation_of[group],
+                               .primitive_count = resolved.primitive_counts[i],
+                               .permutation = resolved.instances[i].hit_group_offset / 2,
                                .first_index = resolved.records[i].first_index,
                                .base_vertex = resolved.records[i].base_vertex,
-                               .bounds = resolved.bounds[i]});
-    }
-
-    // Quadric batches are not drawn yet; issue: feat-sv-raster-quadric-batches
-    if (skipped_quadrics && !slot.raster_skip_reported)
-    {
-        CC_LOG_WARNING("a raster layer of view '{}' holds quadric batches, which the raster path does not draw yet",
-                       rec.display_name);
-        slot.raster_skip_reported = true;
-    }
+                               .bounds = resolved.bounds[i],
+                               .indices = resolved.own_indices[i]});
     return batch;
 }
 
@@ -1046,7 +1030,7 @@ struct raster_batch
         return s;
     };
     auto* const motion = slot_of(temporal_id::motion_guide(layer));
-    auto const batch = raster_batch_of(resolved, rec, slot);
+    auto const batch = raster_batch_of(resolved);
 
     // The camera, with the aspect of the resolution the frame settled on, as a trace would describe it.
     auto const fc = make_frame_constants(v, l, *scene.lights, resolution);
@@ -1171,7 +1155,7 @@ struct raster_batch
         return s;
     };
     auto* const motion = slot_of(temporal_id::motion_guide(layer));
-    auto const batch = raster_batch_of(resolved, rec, slot);
+    auto const batch = raster_batch_of(resolved);
 
     fc.previous_camera = motion->has_last_camera ? motion->last_camera : fc.camera;
     fc.near_plane = f32(v.camera.projection.near_plane);
@@ -1562,6 +1546,17 @@ sg::routine_outcome view_renderer::trace(sg::command_list& cmd,
         return sr::required_guides(sr::resolve_denoise_method(ctx, fresh, traceable_guides()))
             .has(sr::reconstruct_guide::split_diffuse_specular);
     }();
+    // A hybrid frame writes no split signal, but its deferred kernel writes the hit distance, which dlss_rr reads beside the whole radiance.
+    // Resolved against the device for the reason `splitting` is.
+    auto const hybrid_hit_distance = [&]
+    {
+        if (!denoising || mode != render_mode::hybrid || l.settings.hybrid_lighting != hybrid_lighting::deferred)
+            return false;
+        auto fresh = l.settings.reconstruct;
+        fresh.fresh_samples = true;
+        auto const member = sr::resolve_denoise_method(ctx, fresh, traceable_guides());
+        return (sr::required_guides(member) | sr::optional_guides(member)).has(sr::reconstruct_guide::hit_distance);
+    }();
     auto const split_slot_of = [&](u64 id) { return splitting ? rec.temporal.get_ptr(id) : nullptr; };
     auto const ds = denoise_slots{
         .normal = slot_of(temporal_id::normal_guide(tr.layer)),
@@ -1575,7 +1570,8 @@ sg::routine_outcome view_renderer::trace(sg::command_list& cmd,
         .crossfade = slot_of(temporal_id::denoised_crossfade(tr.layer)),
         .frame_diffuse = split_slot_of(temporal_id::frame_diffuse(tr.layer)),
         .frame_specular = split_slot_of(temporal_id::frame_specular(tr.layer)),
-        .hit_distance = split_slot_of(temporal_id::hit_distance_guide(tr.layer)),
+        .hit_distance
+        = splitting || hybrid_hit_distance ? rec.temporal.get_ptr(temporal_id::hit_distance_guide(tr.layer)) : nullptr,
     };
     // The guides are declared together, so they are all present or all absent.
     auto const has_guides = ds.normal != nullptr && ds.depth != nullptr && ds.albedo != nullptr
@@ -1650,6 +1646,8 @@ sg::routine_outcome view_renderer::trace(sg::command_list& cmd,
     // not pay to split its radiance.
     auto const has_split
         = writes_temporal && ds.frame_diffuse != nullptr && ds.frame_specular != nullptr && ds.hit_distance != nullptr;
+    // The hit distance alone, which a deferred hybrid frame writes for a member that reads it beside the whole radiance.
+    auto const has_hit_distance = writes_temporal && hybrid_hit_distance && ds.hit_distance != nullptr;
 
     if (has_temporal)
     {
@@ -1668,6 +1666,7 @@ sg::routine_outcome view_renderer::trace(sg::command_list& cmd,
         fc.write_temporal = 1;
         fc.previous_camera = ds.motion->has_last_camera ? ds.motion->last_camera : fc.camera;
         fc.write_split = has_split ? 1 : 0;
+        fc.write_hit_distance = has_hit_distance ? 1 : 0;
     }
 
     // A frame of a move traces at the upscaler's input extent, every primary ray at one jitter, and the temporal member
@@ -1772,7 +1771,8 @@ sg::routine_outcome view_renderer::trace(sg::command_list& cmd,
     auto const guide_motion = image_of(ds.motion, writes_temporal, sg::pixel_format::rg32_float);
     auto const frame_diffuse = image_of(ds.frame_diffuse, has_split, sg::pixel_format::rgba16_float);
     auto const frame_specular = image_of(ds.frame_specular, has_split, sg::pixel_format::rgba16_float);
-    auto const guide_hit_distance = image_of(ds.hit_distance, has_split, sg::pixel_format::rg32_float);
+    auto const guide_hit_distance
+        = image_of(ds.hit_distance, has_split || has_hit_distance, sg::pixel_format::rg32_float);
 
     // Everything the dispatch reads beside those, uploaded only by a frame that traces.
     // The scene's resolve and the hash above run on every frame: the hash is what notices a change that restarts the mean,
@@ -1792,8 +1792,14 @@ sg::routine_outcome view_renderer::trace(sg::command_list& cmd,
                                         .albedo = guide_albedo,
                                         .specular_albedo = guide_specular_albedo,
                                         .roughness = guide_roughness,
-                                        .motion = guide_motion}
-                       : gbuffer_slots_of(rec, tr.layer),
+                                        .motion = guide_motion,
+                                        .hit_distance = guide_hit_distance}
+                       : [&]
+                {
+                    auto slots = gbuffer_slots_of(rec, tr.layer);
+                    slots.hit_distance = guide_hit_distance;
+                    return slots;
+                }(),
                 !scaled, frame_output, stand_ins);
 
         auto const frame = ctx.transient.create_buffer<shaders::tracer::frame_constants>(
@@ -1894,6 +1900,10 @@ sg::routine_outcome view_renderer::trace(sg::command_list& cmd,
     // Every frame that traces writes the whole primary depth, the wavefront's from what its tallies kept since the restart.
     if (traces && depth_slot != nullptr)
         depth_slot->accum_frame = 1;
+
+    // Whether this frame wrote the hit distance on its own, which the denoise reads it only where it did: a traced frame's goes with the split.
+    if (ds.hit_distance != nullptr)
+        ds.hit_distance->accum_frame = traces && has_hit_distance ? 1u : 0u;
 
     // Every frame, the temporal member's or not: the first one it runs after a still period reprojects from here.
     if (has_temporal)
@@ -2118,6 +2128,8 @@ sr::reconstruct_status view_renderer::_denoise(sg::command_list& cmd,
         auto const split = !schedule.temporal_on_mean && ds.frame_diffuse != nullptr && ds.frame_specular != nullptr
                         && ds.hit_distance != nullptr;
         if (split)
+            temporal_guides.hit_distance = ds.hit_distance->texture;
+        else if (!schedule.temporal_on_mean && ds.hit_distance != nullptr && ds.hit_distance->accum_frame != 0)
             temporal_guides.hit_distance = ds.hit_distance->texture;
 
         auto const inputs = sr::reconstruct_inputs{

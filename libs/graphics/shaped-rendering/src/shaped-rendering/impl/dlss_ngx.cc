@@ -377,7 +377,7 @@ bool dlss_evaluate(sg::command_list& cmd, dlss_stream& stream, dlss_eval_desc co
     // Everything NGX reads, plus the one thing it writes.
     // Declaring them is the whole contract of a native scope: sg cannot see the call, so under-declaring here is a
     // barrier that never happens and a result that is wrong on some machines and fine on others.
-    dx12::native_texture_access const textures[] = {
+    auto textures = cc::vector<dx12::native_texture_access>{
         read_access(desc.color),
         read_access(desc.albedo),
         read_access(desc.specular_albedo),
@@ -387,6 +387,9 @@ bool dlss_evaluate(sg::command_list& cmd, dlss_stream& stream, dlss_eval_desc co
         read_access(desc.motion),
         {.texture = desc.output.raw(), .access = sg::access_flag::shader_write, .stages = sg::pipeline_stage_flag::compute},
     };
+    auto const has_hit_distance = desc.specular_hit_distance.raw() != nullptr;
+    if (has_hit_distance)
+        textures.push_back(read_access(desc.specular_hit_distance));
 
     auto const native = dx12::dx12_native_scope::open(cmd, textures);
 
@@ -399,6 +402,16 @@ bool dlss_evaluate(sg::command_list& cmd, dlss_stream& stream, dlss_eval_desc co
     eval.pInSpecularAlbedo = native.resource(desc.specular_albedo.raw());
     eval.pInNormals = native.resource(desc.normal.raw());
     eval.pInRoughness = native.resource(desc.roughness.raw());
+
+    // NGX reads the matrices only beside the hit distance, as plain float[16]; tg's layout is the row-vector one D3D's is.
+    auto world_to_view = desc.world_to_view;
+    auto view_to_clip = desc.view_to_clip;
+    if (has_hit_distance)
+    {
+        eval.pInSpecularHitDistance = native.resource(desc.specular_hit_distance.raw());
+        eval.pInWorldToViewMatrix = &world_to_view[0, 0];
+        eval.pInViewToClipMatrix = &view_to_clip[0, 0];
+    }
 
     // sr's jitter is where the sample lies; NGX's offset is the one that moves it back to the pixel centre.
     // dlss-rr-jitter-test's sign comparison is what settles it: 0.046 against 0.242 the other way, on an RTX 5070 Ti.

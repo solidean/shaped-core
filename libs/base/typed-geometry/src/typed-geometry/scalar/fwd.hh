@@ -73,6 +73,10 @@ struct bigfloat_summand;
 
 /// an arbitrary-precision integer, sign and magnitude, one pointer wide (see scalar/bigint/bigint.hh).
 struct bigint;
+/// an exact rational over two bigints, always reduced (see scalar/bigrat/bigrat.hh).
+struct bigrat;
+/// a rational whose reduction is deferred, for hot loops (see scalar/bigrat/bigrat.hh).
+struct bigrat_unreduced;
 
 /// a quotient with its remainder, from one long division (see scalar/fixed_int/fixed_arith.hh).
 template <class T>

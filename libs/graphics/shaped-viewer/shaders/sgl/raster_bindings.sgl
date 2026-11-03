@@ -62,6 +62,18 @@ struct varyings:
     object: float3
     world: float3
 
+/// What a quadric's box hands the pixel stage: `varyings`, and which primitive of the batch the box bounds.
+///
+/// A box is no surface: the pixel solves the primitive along its own camera ray, and `object` and `world` only say where the box was crossed.
+struct quadric_varyings:
+    @position position: hpos4
+    /// the row of `drawn.instances`, as `varyings` holds it
+    @per_draw instance: uint
+    /// the primitive of the batch, which the draw takes from `@instance_index`, one instance per box
+    @interpolate(.flat) primitive: uint
+    object: float3
+    world: float3
+
 /// What a raster frame writes per pixel: the lit image and the primary hit's G-buffer.
 ///
 /// Each target is the layer's slot of the same meaning (`sv::impl::raster_slots`, view/view_data.hh), in the format the tracer writes it in.
@@ -83,3 +95,18 @@ struct varyings:
     @format(.rg32_float) motion: float2
     /// the clip depth, `1 - near_plane / depth`, which a layer's drawings are occluded by
     @format(.r32_float) primary_depth: float
+
+/// `targets` and the depth of the quadric surface a pixel found, which the box it was drawn through does not have.
+///
+/// The box's far side is drawn, so the surface in front of it only ever raises the reversed depth, which `.greater_equal` promises.
+@pixel struct quadric_targets:
+    @format(.rgba32_float) color: float4
+    @format(.rgba16_float) normal: float4
+    @format(.r32_float) depth: float
+    @format(.rgba16_float) albedo: float4
+    @format(.rgba16_float) specular_albedo: float4
+    @format(.r16_float) roughness: float
+    @format(.rg32_float) motion: float2
+    @format(.r32_float) primary_depth: float
+    /// `near_plane / depth`, the raster pass's own reversed depth, at the surface
+    @depth(.greater_equal) surface_depth: float

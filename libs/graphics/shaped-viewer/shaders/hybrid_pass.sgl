@@ -16,6 +16,10 @@ use tracer
 @vertex fun hybrid_vs(@vertex_index vertex: int, @first_instance row: int){tracer.traced, tracer.bindless, hybrid.pass} -> raster.varyings:
     return hybrid.vertex_of(vertex, row as uint)
 
+/// `quadric_vs` of raster_pass.sgl, reading `tracer.traced`.
+@vertex fun hybrid_quadric_vs(@vertex_index vertex: int, @instance_index index: int, @first_instance row: int){tracer.traced, tracer.bindless, hybrid.pass} -> raster.quadric_varyings:
+    return hybrid.quadric_vertex_of(vertex, row as uint, (index - row) as uint)
+
 /// The thin G-buffer a deferred frame's raster pass wrote, `raster.thin_targets` but the guide slots it wrote in place.
 binding thin_io:
     @unfilterable
@@ -66,7 +70,10 @@ binding thin_io:
     // `pt.offset_ray` sizes its offset from the point's own coordinates, as an interpolated point is rounded, which is far less on a floor near y = 0.
     // So the point is lifted off the surface by that rounding first, or a row of it starts under the floor and its bounce rays hit the floor.
     let reach = max(abs(cam.position.x), max(abs(cam.position.y), abs(cam.position.z))) + length(ray) * t
-    let p = cam.position + ray * t + n * (reach * (1.0 / 1048576.0))
+    let lift = reach * (1.0 / 1048576.0)
+    let surface_p = cam.position + ray * t
+    // Reflections and light samples leave on the viewer's side; a refraction leaves through the surface, which `bounce_from` lifts toward itself.
+    let p = surface_p + n * lift
     let surface = raster.thin_surface(thin_io.base.load(px), thin_io.specular.load(px), thin_io.extra.load(px))
     let shading = openpbr.make_frame(shading_n)
     let v = normalize(cam.position - p)
@@ -76,7 +83,7 @@ binding thin_io:
 
     let mut rng = hybrid.pixel_rng(uint2(id.x as uint, id.y as uint), size.x as uint)
     let lit = hybrid.direct(b, shading, n, wo_local, p, true, mut rng)
-    let bounced = hybrid.bounce_from(b, shading, n, wo_local, p, mut rng)
+    let bounced = hybrid.bounce_from(b, shading, n, wo_local, surface_p, lift, mut rng)
     let followed = hybrid.is_followed(bounced)
     let s2 = hybrid.secondary_of(bounced, followed)
     let bounce_lit = hybrid.direct(s2.b, s2.f, bounced.n, s2.wo_local, bounced.at, followed, mut rng)
@@ -89,6 +96,10 @@ binding thin_io:
     let color = hybrid.finite(float3(emission.x, emission.y, emission.z) + lit + bounced.throughput * (bounced.escaped + bounced.lights + bounce_lit + beyond))
 
     tracer.traced.output.store(px, float4(..color, 1.0))
+    // Where the bounce went, in its lobe's half, as the tracer writes it: 1e4 for an escape, and 0 for the half no direction was drawn from.
+    if f.write_hit_distance != 0u:
+        let distance = if not bounced.drawn => 0.0 else (if bounced.hit => length(bounced.at - p) else 1e4)
+        tracer.traced.guide_hit_distance[px] = if bounced.specular => float2(0.0, distance) else float2(distance, 0.0)
     tracer.traced.guide_normal.store(px, float4(..n, 0.0))
     tracer.traced.guide_albedo.store(px, float4(..openpbr.pt_diffuse_albedo(surface), 0.0))
     tracer.traced.guide_specular_albedo.store(px, float4(..openpbr.pt_specular_albedo(surface), 0.0))

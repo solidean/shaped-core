@@ -118,6 +118,10 @@ enum class scl::rule_layer : scl::u8
 /// `config` is every `.shaped-lint.yml` above this file, merged — the per-library policy.
 /// It is resolved once per file before any rule runs, and a file nothing was said about gets an empty one,
 /// which a config-reading rule must treat as "stay quiet" rather than "deny everything".
+///
+/// `files` is the run's source manager, for a fix that must also edit another file (a type's declaration in its library's fwd.hh).
+/// A file looked up through it is the same buffer the run lints, so edits from several findings land in one text.
+/// Null where the caller lints a snippet alone; a rule then offers no fix that needs another file.
 struct scl::lint_context
 {
     source_buffer const& source;
@@ -127,6 +131,7 @@ struct scl::lint_context
     prose_view const& prose;
     lint_config const& config;
     cc::vector<finding>& out;
+    source_manager* files = nullptr;
 
     void report(finding f) { out.push_back(cc::move(f)); }
 };

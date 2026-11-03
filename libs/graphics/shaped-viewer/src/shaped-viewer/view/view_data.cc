@@ -90,6 +90,15 @@ cc::vector<temporal_input> temporal_inputs_of(view_data const& v)
                     if (settings.temporal_denoise_fade_frames > 0)
                         out.push_back(
                             {.id = temporal_id::denoised_crossfade(u8(i)), .format = sg::pixel_format::rgba16_float});
+
+                    // The hit distance its deferred kernel writes for a member that reads one beside the whole radiance.
+                    // `automatic` counts for the reason it counts below: what it resolves to depends on the device.
+                    auto const may_read_hit_distance = method == sr::denoise_method::automatic
+                                                    || (sr::required_guides(method) | sr::optional_guides(method))
+                                                           .has(sr::reconstruct_guide::hit_distance);
+                    if (may_read_hit_distance && settings.hybrid_lighting == hybrid_lighting::deferred)
+                        out.push_back(
+                            {.id = temporal_id::hit_distance_guide(u8(i)), .format = sg::pixel_format::rg32_float});
                 }
             }
             continue;

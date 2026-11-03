@@ -21,6 +21,13 @@ struct scl::source_manager
     /// Fails if the file cannot be opened or read.
     cc::result<source_buffer const*> add_from_file(cc::string_view path);
 
+    /// The buffer registered under `path`, or null; `\` and `/` compare equal.
+    [[nodiscard]] source_buffer const* find(cc::string_view path) const;
+
+    /// The buffer registered under `path`, read from disk the first time.
+    /// One path is one buffer, so a fix that edits a file another file asked for lands in the same text the run lints.
+    cc::result<source_buffer const*> find_or_add_file(cc::string_view path);
+
     /// The buffer for a file_id (which is its registration index).
     source_buffer const& buffer(u32 file_id) const;
 

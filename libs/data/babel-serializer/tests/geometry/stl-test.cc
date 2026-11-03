@@ -178,6 +178,40 @@ TEST("babel::stl - an ascii file mirrors its facets in order")
     CHECK(m.value().attribute_counts.empty());
 }
 
+// From Thingi10K 37219, one of 75 files there that write such a normal.
+TEST("babel::stl - an ascii coordinate below f32's range reads as zero, as strtof reads it")
+{
+    constexpr cc::string_view tiny = R"stl(solid s
+  facet normal -1.0 -2.22044604925031e-016 3.10624314520051e-048
+    outer loop
+      vertex 0 0 0
+      vertex 1e-40 -1e-400 0
+      vertex 0 1 0
+    endloop
+  endfacet
+endsolid s
+)stl";
+    auto const m = babel::stl::read(tiny);
+    REQUIRE(m.has_value());
+    CHECK(m.value().normals[0][2] == 0.0f);
+    // A subnormal is in range and kept; past a double's range too, the negative exponent still says zero.
+    CHECK(m.value().positions[1][0] > 0.0f);
+    CHECK(m.value().positions[1][1] == 0.0f);
+
+    // An overflow is still no number.
+    constexpr cc::string_view huge = R"stl(solid s
+  facet normal 0 0 1e39
+    outer loop
+      vertex 0 0 0
+      vertex 1 0 0
+      vertex 0 1 0
+    endloop
+  endfacet
+endsolid s
+)stl";
+    CHECK(babel::stl::read(huge).has_error());
+}
+
 TEST("babel::stl - a malformed ascii facet fails with its line number")
 {
     // Two vertices where a triangle needs three.

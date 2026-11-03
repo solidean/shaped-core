@@ -286,11 +286,23 @@ A CPU reference implementation for testing lives beside sv's test.
 
 ## The raster path
 
-Not designed here, and no decision above was made in anticipation of one.
+**Each primitive draws as its box, and each pixel solves the quadric along its own camera ray.**
+The raster frame, and the hybrid's deferred and forward passes over it, all draw quadrics this way.
 
-A quadric rasterizes as a coarse proxy with the same quadratic solved per pixel and the true depth written, and that works identically whatever the record holds.
-The one thing recorded as intent is that **the primitive buffer stays a plain bindless byte buffer whose indexing assumes no ray-tracing stage**, which the batching decision already produces.
-Depth semantics — conservative depth costs the early-z rejection that is the raster path's main saving — are not decidable before a raster path exists.
+- **The boxes are the acceleration structure's own.**
+  The batch's box buffer is readable through the bindless table, and a landed batch's instance record names it in `indices`, which a quadric does not otherwise use.
+  So the raster path bounds each primitive exactly as the trace does, with nothing recomputed on the GPU.
+- **One draw per batch**: 36 vertices of a box, one instance per primitive, the instance index counted from the row the first instance names.
+  Only the far faces draw, so a camera inside a box still covers it, and each pixel solves the surface once.
+- **The pixel solves `quadric.intersect`** along the jittered camera ray in the batch's object space, and discards a miss.
+  The hit point is the solve's own, mapped into the world, so it rounds as an interpolated point does and a ray leaving it needs no larger offset.
+- **It writes the surface's depth** as `@depth(.greater_equal)`.
+  The far face's depth is the least the surface can have, so the promise holds and early-z still rejects what lies behind earlier draws.
+- **A depth-writing pixel stage is a target set of its own**, so the boxes draw in their own pass after the triangles and the environment.
+  They are kept out of the depth prepass and the occlusion pyramid, which see triangles alone.
+
+The primitive buffer stays a plain bindless byte buffer whose indexing assumes no ray-tracing stage, which is what lets the pixel stage read it.
+A quadric cuts nothing out, as its hit group has no any-hit to cut with.
 
 ## Phasing
 

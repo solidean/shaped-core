@@ -13,6 +13,10 @@ use tracer
 @vertex fun surface_vs(@vertex_index vertex: int, @first_instance row: int){raster.drawn, tracer.bindless} -> raster.varyings:
     return raster.vertex_of(vertex, row as uint)
 
+/// A quadric batch's boxes: 36 vertices a box, one instance a primitive, counted from the row the draw's first instance names.
+@vertex fun quadric_vs(@vertex_index vertex: int, @instance_index index: int, @first_instance row: int){raster.drawn, tracer.bindless} -> raster.quadric_varyings:
+    return raster.quadric_vertex_of(vertex, row as uint, (index - row) as uint)
+
 /// What the environment pass hands its pixel stage: the position alone, whose pixel is the camera ray.
 struct environment_varyings:
     @position position: hpos4

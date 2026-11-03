@@ -16,14 +16,16 @@ camera camera::orbiting(tg::pos3d target, f64 distance, tg::angle_d azimuth, tg:
 tg::quat_d camera::look_rotation(tg::pos3d eye, tg::pos3d target, tg::vec3d up)
 {
     auto const forward = (target - eye).normalized();
-    auto const right = tg::dual(tg::cross(up, forward)).normalized();
-    auto const true_up = tg::dual(tg::cross(forward, right));
-    return tg::quat_d::make_from_basis(right, true_up, forward);
+    // Right-handed, as glTF's world is: a camera looking down -Z with +Y up has +X on its right.
+    auto const right = tg::dual(tg::cross(forward, up)).normalized();
+    auto const true_up = tg::dual(tg::cross(right, forward));
+    // (right, up, forward) is a mirror, so the rotation takes the local -X to the right.
+    return tg::quat_d::make_from_basis(-right, true_up, forward);
 }
 
 camera_basis camera::basis() const
 {
-    return {.right = orientation * tg::vec3d(1, 0, 0),
+    return {.right = orientation * tg::vec3d(-1, 0, 0),
             .up = orientation * tg::vec3d(0, 1, 0),
             .forward = orientation * tg::vec3d(0, 0, 1)};
 }

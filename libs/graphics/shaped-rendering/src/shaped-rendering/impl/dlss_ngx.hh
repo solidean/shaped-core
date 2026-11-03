@@ -71,6 +71,12 @@ struct dlss_eval_desc
     sg::texture_2d motion;
     sg::texture_2d output;
 
+    /// The specular ray's hit distance, in r and in world units; empty where the caller has none, which NGX takes as optional.
+    /// It reprojects reflections in world space, so it travels with the camera's own matrices.
+    sg::texture_2d specular_hit_distance;
+    tg::mat4f world_to_view = tg::mat4f::identity;
+    tg::mat4f view_to_clip = tg::mat4f::identity;
+
     /// This frame's sub-pixel offset of the primary rays, in input pixels.
     tg::vec2f jitter = tg::vec2f(0, 0);
 

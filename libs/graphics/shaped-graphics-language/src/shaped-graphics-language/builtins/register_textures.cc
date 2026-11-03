@@ -438,6 +438,8 @@ written wgsl_call(call const& c, call_context const& ctx)
 
 cc::string msl_gradient(shape_traits const& s, cc::string const& dx, cc::string const& dy)
 {
+    if (s.dim == 1)
+        return cc::format(", gradient2d(float2({}, 0.0), float2({}, 0.0))", dx, dy);
     if (s.is_cube)
         return cc::format(", gradientcube({}, {})", dx, dy);
     return s.dim == 3 ? cc::format(", gradient3d({}, {})", dx, dy) : cc::format(", gradient2d({}, {})", dx, dy);
@@ -449,14 +451,17 @@ written msl_call(call const& c, call_context const& ctx)
     auto const l = layout_of(c);
     auto const& t = argument(ctx, 0);
     auto const smp = l.sampler >= 0 ? argument(ctx, l.sampler) : cc::string();
-    auto const coord = ctx.arguments.size() > 1 ? argument(ctx, 1) : cc::string();
+    // sg's metal backend creates every 1D texture as a 2D one a texel high (EMIT-100), so a 1D coordinate gains a second
+    auto const coord = ctx.arguments.size() > 1
+                         ? (s.dim == 1 ? cc::format("float2({}, 0.5)", argument(ctx, 1)) : cc::string(argument(ctx, 1)))
+                         : cc::string();
     auto const layer = l.layer >= 0 ? cc::format(", uint({})", argument(ctx, l.layer)) : cc::string();
     auto const offset = l.offset >= 0 ? cc::format(", {}", argument(ctx, l.offset)) : cc::string();
     auto const texel = [&](cc::string text) -> written
     { return {.text = c.is_depth ? cc::move(text) : narrowed(cc::move(text), c.width)}; };
-    // Metal's 1D textures have no levels, so their samples take no level option.
-    auto const has_levels = s.dim != 1;
-    auto const uint_coord = s.dim == 1 ? cc::format("uint({})", coord) : cc::format("uint{}({})", s.dim, coord);
+    auto const uint_coord = ctx.arguments.size() < 2 ? cc::string()
+                          : s.dim == 1               ? cc::format("uint2(uint({}), 0u)", argument(ctx, 1))
+                                                     : cc::format("uint{}({})", s.dim, coord);
     switch (c.what)
     {
     case op::sample:
@@ -465,16 +470,13 @@ written msl_call(call const& c, call_context const& ctx)
     {
         auto const& lod = argument(ctx, l.first);
         auto const level = c.is_depth ? cc::format(", level(float({}))", lod) : cc::format(", level({})", lod);
-        return texel(
-            cc::format("{}.sample({}, {}{}{}{})", t, smp, coord, layer, has_levels ? level : cc::string(), offset));
+        return texel(cc::format("{}.sample({}, {}{}{}{})", t, smp, coord, layer, level, offset));
     }
     case op::sample_bias:
-        return texel(cc::format("{}.sample({}, {}{}{})", t, smp, coord, layer,
-                                has_levels ? cc::format(", bias({})", argument(ctx, l.first)) : cc::string()));
+        return texel(cc::format("{}.sample({}, {}{}, bias({}))", t, smp, coord, layer, argument(ctx, l.first)));
     case op::sample_grad:
-        return texel(
-            cc::format("{}.sample({}, {}{}{})", t, smp, coord, layer,
-                       has_levels ? msl_gradient(s, argument(ctx, l.first), argument(ctx, l.second)) : cc::string()));
+        return texel(cc::format("{}.sample({}, {}{}{})", t, smp, coord, layer,
+                                msl_gradient(s, argument(ctx, l.first), argument(ctx, l.second))));
     case op::gather:
         if (c.is_depth)
             return {.text = cc::format("{}.gather({}, {}{})", t, smp, coord, layer)};
@@ -497,9 +499,9 @@ written msl_call(call const& c, call_context const& ctx)
     case op::size:
     case op::image_size:
     {
-        auto const level = l.first >= 0 && has_levels ? cc::string(argument(ctx, l.first)) : cc::string();
+        auto const level = l.first >= 0 ? cc::string(argument(ctx, l.first)) : cc::string();
         if (s.dim == 1)
-            return {.text = cc::format("int({}.get_width())", t)};
+            return {.text = cc::format("int({}.get_width({}))", t, level)};
         auto const w = cc::format("{}.get_width({})", t, level);
         auto const h = cc::format("{}.get_height({})", t, level);
         if (s.dim == 3 && !s.is_cube)
@@ -631,7 +633,7 @@ cc::string offset_type(shape_traits const& s)
     return type_name("int", s.dim);
 }
 
-/// Metal samples a 1D texture with no offset, so no target does.
+/// A 1D texture is sampled with no offset, on every target alike.
 bool takes_offset(shape_traits const& s)
 {
     return !s.is_cube && !s.is_ms && s.dim != 1;

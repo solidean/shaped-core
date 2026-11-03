@@ -11,9 +11,5 @@ refs:
 The spec's [raytracing.md](../spec/raytracing.md) lists where metal falls short under "Per target".
 A pipeline that runs on dx12 must run the same on metal, so each gap is a child:
 
-- [feat-sgl-metal-hit-instance-transforms](feat-sgl-metal-hit-instance-transforms.md): a hit's instance transforms are the identity, and a closest hit's object ray is the world ray.
-- [feat-sgl-metal-accept-and-end-search](feat-sgl-metal-accept-and-end-search.md): `accept_and_end_search` acts as `accept`.
 - [feat-sgl-metal-several-tlas-per-dispatch](feat-sgl-metal-several-tlas-per-dispatch.md): a dispatch traces one TLAS.
-- [chore-sgl-metal-raytracing-on-apple-hardware](chore-sgl-metal-raytracing-on-apple-hardware.md): none of it has run on Apple hardware; CI alone exercises the pipeline.
-
-The instance transforms are the one a scene built from instances meets first.
+- [chore-sgl-metal-raytracing-on-apple-hardware](chore-sgl-metal-raytracing-on-apple-hardware.md): an Apple GPU without hardware ray tracing, and sv against dx12's images.

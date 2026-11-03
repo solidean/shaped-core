@@ -150,14 +150,14 @@ TEST("sv - orbit controller zooms geometrically and clamps the distance")
 TEST("sv - orbit controller pans the target across the view plane")
 {
     auto c = sv::orbit_camera_controller{};
-    c.orbit.elevation = tg::angle_d::make_from_degree(0); // eye on -z looking along +z, so right is +x and up is +y
+    c.orbit.elevation = tg::angle_d::make_from_degree(0); // eye on -z looking along +z, so right is -x and up is +y
 
     (void)c.handle(button(sr::mouse_button::middle, true));
     CHECK(c.is_dragging());
     CHECK(c.handle(drag(sr::mouse_button::middle, 10, 0)));
 
-    // The scene follows the cursor, so dragging right moves the target left.
-    CHECK(c.orbit.target[0] < 0);
+    // The scene follows the cursor, so dragging right moves the target to the camera's left, toward +x.
+    CHECK(c.orbit.target[0] > 0);
     CHECK(abs_of(c.orbit.target[1]) < eps);
 
     (void)c.handle(button(sr::mouse_button::middle, false));
@@ -305,9 +305,9 @@ TEST("sv - fps controller turns a right-drag into yaw and pitch")
     CHECK(!c.handle(button(sr::mouse_button::right, true))); // the press itself turns nothing
     CHECK(c.is_looking());
 
-    // Moving right turns right, and yaw +90 degrees looks along +x.
+    // Moving right turns right, which from yaw 0, looking along +z, is toward -x: a negative yaw.
     CHECK(c.handle(drag(sr::mouse_button::right, 10, 0)));
-    CHECK(abs_of(c.pose.yaw.degree() - 10 * step) < eps);
+    CHECK(abs_of(c.pose.yaw.degree() + 10 * step) < eps);
 
     // Moving down looks down.
     CHECK(c.handle(drag(sr::mouse_button::right, 0, 10)));
@@ -397,7 +397,7 @@ TEST("sv - fps controller normalizes its movement direction")
     (void)c.handle(key(sr::scancode::d, true));
     CHECK(c.update(1.0));
     CHECK(abs_of(c.pose.position.distance_to(tg::pos3d::zero) - 2.0) < eps);
-    CHECK(abs_of(c.pose.position[0] - c.pose.position[2]) < eps); // yaw 0: right is +x, forward is +z
+    CHECK(abs_of(c.pose.position[0] + c.pose.position[2]) < eps); // yaw 0: right is -x, forward is +z
 
     // Opposing keys cancel exactly rather than drifting or normalizing a zero vector.
     auto const before = c.pose.position;

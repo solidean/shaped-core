@@ -208,9 +208,9 @@ ASYNC_INVOCABLE_TEST("sv - a decal paints the traced surface its projector reach
     // still the quad.
     auto const center = image_size / 2;
 
-    // Read the right way round from the camera, whose right is -x looking down -z: the projection runs along -z, into the quad.
+    // Read the right way round from the camera, whose right is +x looking down -z: the projection runs along -z, into the quad.
     auto const facing
-        = sv::decal{.at = tg::pos3f(0, 0, 0), .x_axis = tg::vec3f(-1, 0, 0), .y_axis = tg::vec3f(0, -1, 0), .depth = 0.5f};
+        = sv::decal{.at = tg::pos3f(0, 0, 0), .x_axis = tg::vec3f(1, 0, 0), .y_axis = tg::vec3f(0, -1, 0), .depth = 0.5f};
 
     SECTION("inside the square the quad is red, and outside it gray")
     {

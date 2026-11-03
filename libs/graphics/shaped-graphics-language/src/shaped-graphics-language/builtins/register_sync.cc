@@ -501,7 +501,8 @@ written write_texel_atomic(call_context const& ctx)
     case language::msl:
     {
         // a texture's atomics take a four-wide value to store and give a four-wide one back, of which x is the texel
-        auto coordinate = dim == 1 ? cc::format("uint({})", xy) : cc::format("uint{}({})", dim, xy);
+        // a 1D image is 2D one texel high on metal (EMIT-100)
+        auto coordinate = dim == 1 ? cc::format("uint2(uint({}), 0u)", xy) : cc::format("uint{}({})", dim, xy);
         if (is_array)
             coordinate.appendf(", uint({})", ctx.arguments[2].text);
         auto const vector = is_signed ? "int4" : "uint4";
@@ -513,9 +514,10 @@ written write_texel_atomic(call_context const& ctx)
         {
             // the coordinate and layer are evaluated once, ahead of the expected and desired values
             auto result = written();
-            auto const texel_type = dim == 1 ? cc::string("uint") : cc::format("uint{}", dim);
+            auto const texel_type = dim == 1 ? cc::string("uint2") : cc::format("uint{}", dim);
             auto place = exchange_place{.atomic = image, .is_texel = true, .texel = minted(ctx, "exchange_texel")};
-            result.lines.push_back(cc::format("const {} {} = {}({});", texel_type, place.texel, texel_type, xy));
+            auto const texel = dim == 1 ? cc::format("uint2(uint({}), 0u)", xy) : cc::format("{}({})", texel_type, xy);
+            result.lines.push_back(cc::format("const {} {} = {};", texel_type, place.texel, texel));
             if (is_array)
             {
                 auto const layer = minted(ctx, "exchange_layer");

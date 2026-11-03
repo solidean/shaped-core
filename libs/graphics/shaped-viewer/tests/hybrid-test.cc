@@ -187,10 +187,10 @@ cc::shared_async<hybrid_readback> draw_hybrid(sg::context& ctx,
         out.color.push_back(s / f32(frames));
     co_return out;
 }
-/// An indexed UV sphere of `radius` at the origin, faceted, wound so every face points outward.
+/// An indexed UV sphere of `radius` around `center`, faceted, wound so every face points outward.
 ///
 /// TEMPORARY(debt-sv-examples-hand-rolled-primitive-meshes): one more hand-rolled sphere; a `tg::` sphere tessellation replaces it.
-[[nodiscard]] sv::triangle_geometry sphere_geometry(f32 radius, int rings, int segments)
+[[nodiscard]] sv::triangle_geometry sphere_geometry(f32 radius, int rings, int segments, tg::vec3f center = {})
 {
     auto positions = cc::vector<tg::pos3f>();
     for (auto r = 0; r <= rings; ++r)
@@ -200,7 +200,8 @@ cc::shared_async<hybrid_readback> draw_hybrid(sg::context& ctx,
         {
             auto const phi = tg::angle_f::make_from_radians(f32(s) / f32(segments) * 2.0f * tg::pi<f32>);
             positions.push_back(tg::pos3f(radius * tg::sin(theta) * tg::cos(phi), radius * tg::cos(theta),
-                                          radius * tg::sin(theta) * tg::sin(phi)));
+                                          radius * tg::sin(theta) * tg::sin(phi))
+                                + center);
         }
     }
     auto indices = cc::vector<u32>();
@@ -311,58 +312,69 @@ ASYNC_INVOCABLE_TEST("sv::hybrid_routine - a glass sphere under a uniform sky sh
     bindings.push_back(binding::of("specular_roughness", 0.05f));
     bindings.push_back(binding::of("transmission_weight", 1.0f));
     auto resources = sv::gpu_resource_manager::create(ctx);
-    auto const item = resources.acquire_scene_item(
-        sv::mesh{.name = "hybrid glass sphere",
-                 .geometry = sphere_geometry(0.6f, 24, 32),
-                 .material = lib.acquire(sv::material::create("hybrid glass", openpbr, cc::move(bindings)))});
-    resources.wait_for_pending_uploads();
+    auto const material = lib.acquire(sv::material::create("hybrid glass", openpbr, cc::move(bindings)));
+    auto const sky = 0.5f;
+    constexpr auto size = tg::vec2i(48, 48);
 
-    auto cam = sv::camera{.position = tg::pos3d(0, 0, -1.9)};
-    cam.projection.vertical_fov = tg::angle_d::make_from_degree(60.0);
+    auto const item = resources.acquire_scene_item(
+        sv::mesh{.name = "hybrid glass sphere", .geometry = sphere_geometry(0.6f, 24, 32), .material = material});
+    resources.wait_for_pending_uploads();
     // a light that adds nothing, since the sky is the whole of the lighting
     auto const lights = sv_test::light_table_of(
         {.center = tg::vec3f(0, 50, 0), .half_x = 0.1f, .half_z = 0.1f, .emission = tg::vec3f(0, 0, 0)});
-    auto const sky = 0.5f;
 
-    constexpr auto size = tg::vec2i(48, 48);
-    for (auto const lighting : {sv::hybrid_lighting::forward, sv::hybrid_lighting::deferred})
+    // Close by, and from a thousand units off through a narrow lens, framing the sphere the same.
+    // From far off the deferred kernel's rebuilt point is rounded to the camera's distance and lifted off the surface by that.
+    // A refraction has to be lifted through the surface rather than back toward the viewer, or the glass meets its own front face.
+    struct placement
     {
-        auto const name = lighting == sv::hybrid_lighting::forward ? "forward" : "deferred";
-        auto const hybrid = co_await draw_hybrid(ctx, resources, item, cam, lights, size, lighting, 64,
-                                                 sv::background::uniform(tg::vec3f(sky, sky, sky)));
+        f64 distance = 1.9;
+        f64 fov_degrees = 60.0;
+    };
+    for (auto const at :
+         {placement{.distance = 1.9, .fov_degrees = 60.0}, placement{.distance = 1000.0, .fov_degrees = 0.1146}})
+        for (auto const lighting : {sv::hybrid_lighting::forward, sv::hybrid_lighting::deferred})
+        {
+            auto cam = sv::camera::looking_at(tg::pos3d(0, 0, -at.distance), tg::pos3d(0, 0, 0));
+            cam.projection.vertical_fov = tg::angle_d::make_from_degree(at.fov_degrees);
 
-        // The middle of the image, which only the sphere covers, and the whole of its disc.
-        auto center = 0.0f;
-        auto center_count = 0;
-        auto disc = 0.0f;
-        auto disc_count = 0;
-        for (auto y = 0; y < size[1]; ++y)
-            for (auto x = 0; x < size[0]; ++x)
-            {
-                auto const i = isize(y) * isize(size[0]) + isize(x);
-                auto const n = hybrid.normal[i];
-                if (f32(n.r) == 0.0f && f32(n.g) == 0.0f && f32(n.b) == 0.0f)
-                    continue;
-                auto const c = hybrid.color[i];
-                auto const lum = 0.2126f * c[0] + 0.7152f * c[1] + 0.0722f * c[2];
-                disc += lum;
-                ++disc_count;
-                if (tg::abs(x - size[0] / 2) < 6 && tg::abs(y - size[1] / 2) < 6)
+            auto const name = cc::format(
+                "{} from {}", lighting == sv::hybrid_lighting::forward ? "forward" : "deferred", at.distance);
+            auto const hybrid = co_await draw_hybrid(ctx, resources, item, cam, lights, size, lighting, 64,
+                                                     sv::background::uniform(tg::vec3f(sky, sky, sky)));
+
+            // The middle of the image, which only the sphere covers, and the whole of its disc.
+            auto center = 0.0f;
+            auto center_count = 0;
+            auto disc = 0.0f;
+            auto disc_count = 0;
+            for (auto y = 0; y < size[1]; ++y)
+                for (auto x = 0; x < size[0]; ++x)
                 {
-                    center += lum;
-                    ++center_count;
+                    auto const i = isize(y) * isize(size[0]) + isize(x);
+                    auto const n = hybrid.normal[i];
+                    if (f32(n.r) == 0.0f && f32(n.g) == 0.0f && f32(n.b) == 0.0f)
+                        continue;
+                    auto const c = hybrid.color[i];
+                    auto const lum = 0.2126f * c[0] + 0.7152f * c[1] + 0.0722f * c[2];
+                    disc += lum;
+                    ++disc_count;
+                    if (tg::abs(x - size[0] / 2) < 6 && tg::abs(y - size[1] / 2) < 6)
+                    {
+                        center += lum;
+                        ++center_count;
+                    }
                 }
-            }
-        REQUIRE(center_count == 11 * 11);
-        REQUIRE(disc_count > size[0] * size[1] / 4);
-        center /= f32(center_count);
-        disc /= f32(disc_count);
-        CC_LOG_INFO("{} hybrid glass sphere under a sky of {}: {} at its center, {} over its disc", name, sky, center,
-                    disc);
-        CHECK(center > 0.9f * sky).context(name).dump("center", center);
-        CHECK(center < 1.02f * sky).context(name).dump("center", center);
-        CHECK(disc > 0.82f * sky).context(name).dump("disc", disc);
-    }
+            REQUIRE(center_count == 11 * 11);
+            REQUIRE(disc_count > size[0] * size[1] / 4);
+            center /= f32(center_count);
+            disc /= f32(disc_count);
+            CC_LOG_INFO("{} hybrid glass sphere under a sky of {}: {} at its center, {} over its disc", name, sky,
+                        center, disc);
+            CHECK(center > 0.9f * sky).context(name).dump("center", center);
+            CHECK(center < 1.02f * sky).context(name).dump("center", center);
+            CHECK(disc > 0.82f * sky).context(name).dump("disc", disc);
+        }
     co_await cc::async_settled(sv::background_work(ctx));
 }
 

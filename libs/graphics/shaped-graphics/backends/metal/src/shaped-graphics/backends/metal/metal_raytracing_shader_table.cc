@@ -251,11 +251,12 @@ cc::result<sg::raytracing_shader_table_handle> metal_context::create_metal_raytr
 
                 // **The signature must match the table's own MSL declaration**, which `None` does not.
                 // A table that holds any triangle group is declared `intersection_function_table<instancing,
-                // triangle_data>` — see the readme, which states that as the requirement on a kernel — so the opaque
-                // default is asked for with exactly those two.
-                table->setOpaqueTriangleIntersectionFunction(
-                    MTL::IntersectionFunctionSignatureInstancing | MTL::IntersectionFunctionSignatureTriangleData,
-                    NS::UInteger(slot));
+                // triangle_data, world_space_data>` — see the readme, which states that as the requirement on a
+                // kernel — so the opaque default is asked for with exactly those three.
+                table->setOpaqueTriangleIntersectionFunction(MTL::IntersectionFunctionSignatureInstancing
+                                                                 | MTL::IntersectionFunctionSignatureTriangleData
+                                                                 | MTL::IntersectionFunctionSignatureWorldSpaceData,
+                                                             NS::UInteger(slot));
             }
 
         // The reserved group's argument buffer: one resource id per table, in the [[id(n)]] order the header states.

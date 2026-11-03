@@ -169,6 +169,11 @@ It is the base a rational type will build on.
   The out-of-line operations have a lean path for a target that holds the result, and a separate slow one for allocation and aliasing, so the common case needs few registers.
   A lean path returns false rather than calling the slow one, which the inline caller does: the operands then need not outlive its first decisions.
   Its decisions all come before the kernel, and a difference splits off at the signs, before anything else is live; every register save avoided is a push and a pop less per call.
+- **No unsigned `bignat` beside it.** The sign is one header bit, so an unsigned sum would save a sign compare, about 5 of 115 to 220 instructions.
+  An unsigned difference still compares the magnitudes, to refuse `a < b`, which is the work the signed one does to pick its sign.
+  Natural-number code already exists one level down: `scalar/impl/limbs.hh` is unsigned, and gcd or a rational's reduction work on magnitudes there.
+  A second public type would repeat the operators, parsing, printing, division and conversions, with their tests, for close to no speed.
+  It pays only to have "never negative" checked by the type, say for a count or a denominator in an API; then it is a thin wrapper over the same header, its conversions handing over the node.
 - **The limb kernels are shared with `bigfloat`.** `scalar/impl/limbs.hh` holds natural numbers as limb arrays; `bigfloat` keeps its own sum, since its operands are aligned at an exponent first.
 - **On x64 with clang or gcc, the carry chains are inline assembly**, with portable C++ beside them for every other target.
   As C++, clang cannot keep a carry in the flag across a loop's compare, nor in a third accumulator word: it saves and restores it through `setb` and `movzx`, about twice the instructions.
@@ -181,12 +186,36 @@ It is the base a rational type will build on.
   Other shapes run in rows of `addmul_1`.
 - **Division is Knuth's Algorithm D with Möller and Granlund's 3/2 digit**, truncating like the builtins; `>>` floors, like an arithmetic shift.
   Each digit divides the window's top three limbs by the divisor's top two through a reciprocal computed once, two products and at most one correction, where a hardware `div` costs tens of cycles.
-  A divisor of two limbs keeps the whole window in registers and needs no scratch.
-  `div_mod(q, r, a, b)` writes into kept results, and `gcd` reuses its three values from step to step.
+  A divisor of two limbs keeps the whole window in registers and needs no scratch, and one of one limb divides by a 2/1 reciprocal.
+  `div_mod(q, r, a, b)` writes into kept results.
+- **The gcd is binary to two limbs and Lehmer's above**, since a rational reduces by one on almost every operation.
+  One limb is Stein's binary gcd, ten instructions a step in asm; values far apart in size take one division first, which closes the gap a bit a step would.
+  Above two limbs each pass runs Euclid on the top 62 bits in a register, at most one division a step, and applies its cofactors to the whole.
+  `div_exact` by one limb multiplies by the divisor's inverse modulo 2^64, where a division by it takes a hardware division a limb.
 - **Measured against GMP 6.3, its generic C build, in instructions retired on a Zen 5.**
   An orient3d over 50-bit integers retires about 1,580 with results reused, GMP 2,390; over 120-bit integers about 2,300, GMP 3,200.
   A 16 × 16 limb product retires about 1,520, GMP 1,750; a division of 32 limbs by 16 about 3,350, GMP 4,600, and fewer cycles at every size.
   A sum retires fewer at every size, a difference within 8 below 12 limbs; `perf-bigint-past-one-limb` has the open items.
+  A gcd of two 4-limb values retires about 6,300, GMP 9,500, Euclid's on divisions 47,500; of 32 limbs about 93,000, GMP 117,000.
+
+### `bigrat` is a reduced rational over two bigints
+
+`tg::bigrat` is num / den with den positive and coprime to num after every operation, as GMP's mpq keeps it.
+
+- **Reduced by default, `bigrat_unreduced` as the escape hatch.** Reduced, equality is the parts' equality and sizes stay as small as the value.
+  Unreduced, a sum or product is bigint products alone, but the parts grow with every operation the reduction defers.
+  A predicate needs only a sign, so it is where the unreduced type pays: orient3d over rational points takes a fifth of the reduced one's instructions.
+- **The denominator's zero stands for 1.** An integer-valued rational holds no second node and adds, subtracts and multiplies at bigint's cost.
+- **Each operation reduces by the smallest gcds it can**, Knuth's and Henrici's choices, as GMP makes them.
+  A sum takes the denominators' gcd g, then the gcd of the new numerator with g alone; a sum with an integer takes none.
+  A product takes the two cross gcds, each of half the size of the one gcd its result would need.
+- **Comparison never divides**: signs first, then the cross products' bit widths, which decide most pairs, then the cross products themselves.
+- **Temporaries are per thread**, so a stream of operations into kept results allocates nothing once their nodes have grown.
+- **Measured against GMP's mpq, its generic C build, in instructions retired on a Zen 5.**
+  A three-plane intersection point on a 26-bit grid, three rationals over the planes' determinant, retires about 11,300, GMP 16,400.
+  orient3d over four such points about 330,000, GMP 464,000, and unreduced about 62,000.
+  A Gaussian elimination of an 8 × 8 integer system in rationals about 852,000, GMP 1,080,000.
+  A harmonic sum of 200 terms, where a denominator only grows, about 316,000, GMP 275,000.
 
 ### `half_float` is binary16, correctly rounded
 

@@ -9,6 +9,7 @@
 #include <clean-core/string/string_view.hh>
 #include <typed-geometry/scalar/fixed_int/fixed_arith.hh>
 #include <typed-geometry/scalar/impl/limbs.hh>
+#include <typed-geometry/scalar/traits.hh>
 
 #include <compare>
 #include <type_traits>
@@ -157,6 +158,11 @@ struct tg::bigint
     /// -1, 0 or +1: a predicate's answer.
     [[nodiscard]] int sign() const { return is_zero() ? 0 : (_node->negative ? -1 : 1); }
     [[nodiscard]] bool is_odd() const { return !is_zero() && (impl::bigint_limbs(_node)[0] & 1) != 0; }
+    /// Whether the value is 1, a gcd's most common answer.
+    [[nodiscard]] bool is_one() const
+    {
+        return _node != nullptr && _node->size == 1 && !_node->negative && impl::bigint_limbs(_node)[0] == 1;
+    }
     /// The limbs of the magnitude.
     [[nodiscard]] i32 size() const { return _node == nullptr ? 0 : i32(_node->size); }
     /// The limbs held without reallocating; 0 when no node is held.
@@ -211,6 +217,19 @@ struct tg::bigint
         if (!_try_mul_small(a, b)) [[unlikely]]
             _assign_mul(a, b);
     }
+    /// *this += a * b, without a temporary: the inner step of a polynomial product or a dot product.
+    /// One-limb factors into an accumulator of up to two limbs stay inline; the rest multiplies into a thread-local scratch.
+    CC_FORCE_INLINE void assign_add_mul(bigint const& a, bigint const& b)
+    {
+        if (!_try_mul_sum_small(a, b, false)) [[unlikely]]
+            _assign_mul_sum_slow(a, b, false);
+    }
+    /// *this -= a * b, as assign_add_mul.
+    CC_FORCE_INLINE void assign_sub_mul(bigint const& a, bigint const& b)
+    {
+        if (!_try_mul_sum_small(a, b, true)) [[unlikely]]
+            _assign_mul_sum_slow(a, b, true);
+    }
     /// *this = a << n, n >= 0.
     void assign_shl(bigint const& a, i64 n);
     /// *this = floor(a / 2^n), n >= 0.
@@ -222,6 +241,12 @@ struct tg::bigint
     friend void div_mod(bigint& q, bigint& r, bigint const& a, bigint const& b);
     /// The greatest common divisor of |a| and |b|; gcd(0, 0) is 0.
     friend bigint gcd(bigint const& a, bigint const& b);
+    /// The same into g, reusing its node; g may be a or b.
+    friend void gcd(bigint& g, bigint const& a, bigint const& b);
+    /// a / d for a d that divides a, d != 0; cheaper than div_mod by one limb, since no remainder is found.
+    friend bigint div_exact(bigint const& a, bigint const& d);
+    /// The same into q, reusing its node; q may be a, not d.
+    friend void div_exact(bigint& q, bigint const& a, bigint const& d);
     [[nodiscard]] friend bigint abs(bigint a)
     {
         if (!a.is_zero())
@@ -512,6 +537,42 @@ private:
         return _store_small(p00.lo, t1.value, t2.value, r3, size, negative);
     }
 
+    /// *this ± a * b for one-limb factors and an accumulator of at most two limbs; false leaves *this's value untouched.
+    /// The factors are read before *this is written, so either may be *this.
+    [[nodiscard]] CC_FORCE_INLINE bool _try_mul_sum_small(bigint const& a, bigint const& b, bool subtract)
+    {
+        auto* const ah = a._node;
+        auto* const bh = b._node;
+        if (ah == nullptr || bh == nullptr || ah->size != 1 || bh->size != 1)
+            return false;
+        auto const p = cc::umul128(impl::bigint_limbs(ah)[0], impl::bigint_limbs(bh)[0]);
+        auto const p_negative = (ah->negative != bh->negative) != subtract;
+        auto* const h = _node;
+        if (h == nullptr || h->size == 0)
+            return _store_small(p.lo, p.hi, 0, 0, p.hi != 0 ? 2 : 1, p_negative);
+        if (!_is_small(h))
+            return false;
+        auto const x0 = impl::bigint_limbs(h)[0];
+        auto const x1 = _high_of_small(h);
+        auto const x_negative = h->negative;
+        if (x_negative == p_negative)
+        {
+            auto const s0 = cc::add_with_carry(x0, p.lo);
+            auto const s1 = cc::add_with_carry(x1, p.hi, s0.carry);
+            auto const size = s1.carry != 0 ? 3 : (s1.value != 0 ? 2 : 1);
+            return _store_small(s0.value, s1.value, s1.carry, 0, size, x_negative);
+        }
+        // x - p, negated back when it borrows, as _try_sum_small does
+        auto const d0 = cc::sub_with_borrow(x0, p.lo);
+        auto const d1 = cc::sub_with_borrow(x1, p.hi, d0.borrow);
+        auto const mask = u64(0) - d1.borrow;
+        auto const n0 = cc::add_with_carry(d0.value ^ mask, 0, d1.borrow);
+        auto const r1 = (d1.value ^ mask) + n0.carry;
+        auto const size = r1 != 0 ? 2 : (n0.value != 0 ? 1 : 0);
+        return _store_small(n0.value, r1, 0, 0, size, d1.borrow != 0 ? p_negative : x_negative);
+    }
+    void _assign_mul_sum_slow(bigint const& a, bigint const& b, bool subtract);
+
     void _copy_new(bigint const& o);
     void _assign_copy(bigint const& o);
     /// a ± b for nonzero operands into a node that holds the result; false leaves *this untouched, for _assign_sum_slow.
@@ -545,4 +606,32 @@ namespace tg
 [[nodiscard]] div_mod_result<bigint> div_mod(bigint const& a, bigint const& b);
 void div_mod(bigint& q, bigint& r, bigint const& a, bigint const& b);
 [[nodiscard]] bigint gcd(bigint const& a, bigint const& b);
+void gcd(bigint& g, bigint const& a, bigint const& b);
+[[nodiscard]] bigint div_exact(bigint const& a, bigint const& d);
+void div_exact(bigint& q, bigint const& a, bigint const& d);
 } // namespace tg
+
+/// A bigint is an exact scalar with the integer capabilities, and a ring, not a field: its / truncates.
+template <>
+struct tg::scalar_traits<tg::bigint>
+{
+    static constexpr bool has_sqrt = false;
+    static constexpr bool has_trigonometry = false;
+    static constexpr bool has_exponential = false;
+    static constexpr bool has_rounding = false;
+    static constexpr bool has_abs = true;
+    static constexpr bool has_pow2 = false;
+    static constexpr bool has_non_finite = false;
+    static constexpr bool is_exact = true;
+    static constexpr bool is_field = false;
+
+    [[nodiscard]] static bigint one() { return bigint(1); }
+    [[nodiscard]] static bool is_zero(bigint const& x) { return x.is_zero(); }
+    [[nodiscard]] static bool is_one(bigint const& x) { return x.is_one(); }
+    [[nodiscard]] static bigint abs(bigint x)
+    {
+        if (x.is_negative())
+            x.negate();
+        return x;
+    }
+};

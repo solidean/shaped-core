@@ -132,16 +132,17 @@ EXAMPLE("shaped-viewer/drawings")
             }
 
         // A label on each side face, lying on it: x along the face, y down it, lifted a hair off it.
+        // Read from outside, looking along -normal with +y up, so its right is y cross normal.
         struct face_label
         {
             char const* text;
             tg::vec3f normal;
             tg::vec3f right;
         };
-        face_label const labels[] = {{"+X", tg::vec3f(1, 0, 0), tg::vec3f(0, 0, 1)},
-                                     {"-X", tg::vec3f(-1, 0, 0), tg::vec3f(0, 0, -1)},
-                                     {"+Z", tg::vec3f(0, 0, 1), tg::vec3f(-1, 0, 0)},
-                                     {"-Z", tg::vec3f(0, 0, -1), tg::vec3f(1, 0, 0)}};
+        face_label const labels[] = {{"+X", tg::vec3f(1, 0, 0), tg::vec3f(0, 0, -1)},
+                                     {"-X", tg::vec3f(-1, 0, 0), tg::vec3f(0, 0, 1)},
+                                     {"+Z", tg::vec3f(0, 0, 1), tg::vec3f(1, 0, 0)},
+                                     {"-Z", tg::vec3f(0, 0, -1), tg::vec3f(-1, 0, 0)}};
         for (auto const& l : labels)
             scene.add_text(l.text,
                            {.at = tg::pos3f(0, 0, 0) + l.normal * 1.003f - l.right * 0.25f + tg::vec3f(0, 0.2f, 0),

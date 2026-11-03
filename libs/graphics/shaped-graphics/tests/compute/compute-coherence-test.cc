@@ -142,3 +142,53 @@ ASYNC_INVOCABLE_TEST("sg - SGL's @coherent buffer and image take every invocatio
     for (auto i = 0; i < count; ++i)
         CHECK(texel_at<float>(got_mip, i) == float(i));
 }
+
+ASYNC_INVOCABLE_TEST("sg - the last SGL workgroup to arrive reads every @coherent write the others published",
+                     (sg::context_handle const& ctx))
+{
+    REQUIRE(ctx != nullptr);
+    if (!sg_test::shaders_reach(*ctx))
+        SKIP("no compiler builds this binary's shaders into a format this context accepts");
+    if (!ctx->supports(sg::feature::device_coherence))
+        SKIP("this context has no device coherence");
+
+    auto const pipeline = co_await shaders::coherence::sum_on_last_arrival.acquire_pipeline(*ctx);
+    auto const layout = ctx->cached.acquire_binding_group_layout<shaders::coherence::last_arrival>();
+
+    // enough workgroups that they run at once and finish in no order the dispatch promises
+    constexpr auto groups = 1024;
+    constexpr auto count = groups * 64;
+    auto const usage = sg::buffer_usage::readwrite_buffer | sg::buffer_usage::copy_src;
+    auto const values = ctx->persistent.create_buffer_from_data(cc::vector<u32>::create_defaulted(count), usage);
+    auto const arrivals = ctx->persistent.create_buffer_from_data(cc::vector<u32>::create_defaulted(1), usage);
+    auto const sums = ctx->persistent.create_buffer_from_data(cc::vector<u32>::create_defaulted(64), usage);
+
+    auto cmd = ctx->create_command_list();
+    auto const group = ctx->transient.create_binding_group(
+        *cmd, layout,
+        shaders::coherence::last_arrival{.values = values.as_readwrite_buffer(),
+                                         .arrivals = arrivals.as_readwrite_buffer(),
+                                         .sums = sums.as_readwrite_buffer(),
+                                         .groups = u32(groups)});
+    cmd->compute.bind_pipeline(*pipeline);
+    cmd->compute.bind_group(0, *group);
+    cmd->compute.dispatch_threads(count);
+    auto const arrivals_back = cmd->download.data_from_buffer(arrivals);
+    auto const sums_back = cmd->download.data_from_buffer(sums);
+    ctx->submit_command_list(cc::move(cmd));
+
+    auto const got_arrivals = co_await arrivals_back.data();
+    REQUIRE(got_arrivals.size() == 1);
+    CHECK(got_arrivals[0] == u32(groups));
+
+    // thread `li` of the last workgroup sums the value at `li` of every workgroup, each `3 * index + 1`
+    auto const got_sums = co_await sums_back.data();
+    REQUIRE(got_sums.size() == 64);
+    for (auto li = 0; li < 64; ++li)
+    {
+        auto expected = u32(0);
+        for (auto g = 0; g < groups; ++g)
+            expected += u32(g * 64 + li) * 3u + 1u;
+        CHECK(got_sums[li] == expected).dump("li", li);
+    }
+}

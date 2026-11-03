@@ -5,6 +5,8 @@ refs:
   - file: libs/graphics/shaped-viewer/docs/raster.md
   - symbol: sv::generate_material_shader
   - symbol: sv::raster_routine
+closed: 2026-11-02
+resolution: fixed
 ---
 
 # Draw quadric batches on the raster path

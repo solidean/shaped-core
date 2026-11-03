@@ -26,6 +26,10 @@ namespace tracer = sv::shaders::tracer;
 /// It is reversed — `near / depth`, cleared to 0 at infinity — so a float resolves a far surface as finely as a near one.
 constexpr auto depth_format = sg::pixel_format::depth32_float;
 
+/// The faces of a quadric's box that are not drawn: the near ones, wound counter-clockwise from outside as `raster.box_face` winds them.
+/// A camera inside the box sees only far faces, which is what the hybrid test placing one there holds this to.
+constexpr auto quadric_box_cull = sg::cull_mode::front;
+
 /// The seed of a surface pipeline's key, which hashes the permutation's key and the bindless layout it was built against.
 constexpr u64 surface_key_seed = 0x5a5f3c;
 
@@ -182,27 +186,32 @@ cc::shared_async<cc::unit> raster_routine::init(sg::routine_init_scope scope)
     _environment = nullptr;
     _environment_thin = nullptr;
     _hybrid_vs = {};
+    _hybrid_quadric_vs = {};
 
     auto const surface_vs = shaders::raster_pass::surface_vs->acquire(ctx);
+    auto const quadric_vs = shaders::raster_pass::quadric_vs->acquire(ctx);
     auto const environment_vs = shaders::raster_pass::environment_vs->acquire(ctx);
     auto const environment_ps = shaders::raster_pass::environment_ps->acquire(ctx);
     auto const environment_thin_ps = shaders::raster_pass::environment_thin_ps->acquire(ctx);
     co_await cc::async_settled(surface_vs);
+    co_await cc::async_settled(quadric_vs);
     co_await cc::async_settled(environment_vs);
     co_await cc::async_settled(environment_ps);
     co_await cc::async_settled(environment_thin_ps);
 
     auto const* const compiled_surface_vs = surface_vs->try_value();
+    auto const* const compiled_quadric_vs = quadric_vs->try_value();
     auto const* const compiled_environment_vs = environment_vs->try_value();
     auto const* const compiled_environment_ps = environment_ps->try_value();
     auto const* const compiled_environment_thin_ps = environment_thin_ps->try_value();
-    if (compiled_surface_vs == nullptr || compiled_environment_vs == nullptr || compiled_environment_ps == nullptr
-        || compiled_environment_thin_ps == nullptr)
+    if (compiled_surface_vs == nullptr || compiled_quadric_vs == nullptr || compiled_environment_vs == nullptr
+        || compiled_environment_ps == nullptr || compiled_environment_thin_ps == nullptr)
     {
         fail_init();
         co_return;
     }
     _surface_vs = *compiled_surface_vs;
+    _quadric_vs = *compiled_quadric_vs;
 
     // Behind every surface: drawn at depth 0, tested against the far plane the clear left, and writing no depth of its own.
     auto const environment_of = [&](sg::compiled_shader const& ps, raster_shading shading)
@@ -236,12 +245,18 @@ cc::shared_async<cc::unit> raster_routine::init(sg::routine_init_scope scope)
     if (ctx.supports(sg::feature::ray_query) && ctx.supports(sg::feature::raytracing_pipeline))
     {
         auto const hybrid_vs = shaders::hybrid_pass::hybrid_vs->acquire(ctx);
+        auto const hybrid_quadric_vs = shaders::hybrid_pass::hybrid_quadric_vs->acquire(ctx);
         co_await cc::async_settled(hybrid_vs);
+        co_await cc::async_settled(hybrid_quadric_vs);
         auto const* const compiled_hybrid_vs = hybrid_vs->try_value();
-        if (compiled_hybrid_vs != nullptr)
+        auto const* const compiled_hybrid_quadric_vs = hybrid_quadric_vs->try_value();
+        if (compiled_hybrid_vs != nullptr && compiled_hybrid_quadric_vs != nullptr)
+        {
             _hybrid_vs = *compiled_hybrid_vs;
+            _hybrid_quadric_vs = *compiled_hybrid_quadric_vs;
+        }
         else
-            CC_LOG_ERROR("the hybrid's vertex stage did not compile, so a forward hybrid frame is declined");
+            CC_LOG_ERROR("the hybrid's vertex stages did not compile, so a forward hybrid frame is declined");
     }
 
     // Culling is what makes a frame cheaper, never what makes it right, so a kernel that does not build draws everything.
@@ -300,7 +315,7 @@ sg::raster_pipeline_handle raster_routine::_surface_pipeline_of(sg::context& ctx
     if (!s.shader.is_valid())
     {
         auto const source = stage_source_of(*p, shading);
-        CC_ASSERT(!source.empty(), "a raster frame draws a triangle permutation, which has a pixel stage");
+        CC_ASSERT(!source.empty(), "every permutation a raster frame draws has a pixel stage");
         auto lib = acquire_shader_library();
         auto const format = lib.has_value() ? sgl_format_for(ctx, *lib.value()) : cc::optional<sg::shader_format>();
         if (!format.has_value())
@@ -331,12 +346,17 @@ sg::raster_pipeline_handle raster_routine::_surface_pipeline_of(sg::context& ctx
 
         // Two-sided like the tracer, which shades a triangle seen from behind through its turned normal.
         // Both variants pass an equal depth, which is what lets a prepass's own depth through.
+        // A quadric's box draws its far side alone, so a camera inside the box still covers it, and each pixel solves the surface once.
+        auto const quadrics = p->kind == geometry_kind::quadrics;
+        auto const traced = shading == raster_shading::traced;
+        auto const vertex_shader = quadrics ? (traced ? _hybrid_quadric_vs.value() : _quadric_vs)
+                                            : (traced ? _hybrid_vs.value() : _surface_vs);
         s.pending[variant] = ctx.cached.acquire_raster_pipeline({
             .layout = surface_layout_of(ctx, bindless, shading),
-            .vertex_shader = shading == raster_shading::traced ? _hybrid_vs.value() : _surface_vs,
+            .vertex_shader = vertex_shader,
             .fragment_shader = *compiled,
             .topology = sg::primitive_topology::triangle_list,
-            .rasterization = {.cull = sg::cull_mode::none},
+            .rasterization = {.cull = quadrics ? quadric_box_cull : sg::cull_mode::none},
             .depth_stencil
             = {.depth_test = true, .depth_write = writes_depth, .depth_compare = sg::compare_op::greater_equal},
             .color_targets = color_targets_of(shading),
@@ -451,6 +471,8 @@ sg::routine_outcome raster_routine::execute(sg::command_list& cmd, raster_frame_
     {
         sg::raster_pipeline_handle pipeline;
         bool cutout = false;
+        /// a quadric permutation's, whose draws are boxes outside the argument buffers; no pipeline while it compiles
+        bool quadrics = false;
         isize first = 0;
         isize count = 0;
     };
@@ -463,7 +485,21 @@ sg::routine_outcome raster_routine::execute(sg::command_list& cmd, raster_frame_
     for (auto const* p : d.permutations)
     {
         CC_ASSERT(p != nullptr, "a raster frame names a permutation the shader cache does not hold");
-        CC_ASSERT(p->kind == geometry_kind::triangles, "a raster frame draws triangle permutations alone");
+        // A quadric's depth is the surface its pixel solves, so it skips the prepass and writes it as it shades.
+        // No stand-in draws its boxes while it compiles, since a triangle permutation's would read them as triangles.
+        if (p->kind == geometry_kind::quadrics)
+        {
+            auto pipeline = self->_surface_pipeline_of(ctx, p, *d.bindless, shading, true);
+            if (pipeline == nullptr)
+            {
+                auto const& stage = self->_surfaces.get_ptr(surface_key_of(*p, *d.bindless))->stages[int(shading)];
+                pending = pending || !stage.failed;
+                substituted = true;
+            }
+            bins.push_back({.pipeline = cc::move(pipeline), .quadrics = true});
+            bound.push_back(p);
+            continue;
+        }
         // A cutout's depth depends on its material, so it skips the prepass and writes its depth as it shades.
         // The fallback standing in for one keeps that place.
         auto const cutout = p->opacity.kind != material_value_kind::none;
@@ -507,10 +543,20 @@ sg::routine_outcome raster_routine::execute(sg::command_list& cmd, raster_frame_
             .bands = (has_atlas ? d.decal_atlas->band_texture() : self->_stand_ins.decal_bands).as_texture_view()});
 
     static_assert(sizeof(shaders::raster_cull::draw_args) == sizeof(sg::draw_indexed_args));
+    // A frame mesh's draw binds its own index buffer, so it cannot join a bin's indirect run: it is drawn directly, never culled.
+    auto own = cc::vector<raster_draw const*>();
+    auto own_opaque = false;
     for (auto const& draw : d.draws)
     {
         CC_ASSERT(isize(draw.permutation) < bins.size(), "a raster draw names a permutation the frame holds");
-        if (draw.triangle_count != 0)
+        if (draw.triangle_count == 0)
+            continue;
+        if (draw.indices.raw() != nullptr)
+        {
+            own.push_back(&draw);
+            own_opaque = own_opaque || !bins[draw.permutation].cutout;
+        }
+        else
             ++bins[draw.permutation].count;
     }
     auto total = isize(0);
@@ -535,7 +581,7 @@ sg::routine_outcome raster_routine::execute(sg::command_list& cmd, raster_frame_
     auto items = cc::vector<shaders::raster_cull::cull_item>::create_defaulted(total);
     for (auto const& draw : d.draws)
     {
-        if (draw.triangle_count == 0)
+        if (draw.triangle_count == 0 || draw.indices.raw() != nullptr)
             continue;
         auto const slot = next[draw.permutation]++;
         templates[slot] = {.index_count = draw.triangle_count * 3,
@@ -596,36 +642,58 @@ sg::routine_outcome raster_routine::execute(sg::command_list& cmd, raster_frame_
             pass.set_inline_constants(pass_block);
     };
 
-    // Every draw of every bin, from `args`, into the scope open on `pass`.
-    auto const draw_bins = [&](sg::rendering_scope& pass, sg::buffer<sg::draw_indexed_args> const& args)
+    // A frame mesh's draw over its own index buffer, through `pipeline`, into the scope open on `pass`.
+    auto const draw_own = [&](sg::rendering_scope& pass, raster_draw const& draw, sg::raster_pipeline const& pipeline)
     {
-        if (total == 0)
-            return;
-        CC_ASSERT(d.index_pool.raw() != nullptr, "raster_routine: a frame with draws binds the index pool");
-        pass.bind_index_buffer(d.index_pool.as_index_buffer());
-        for (auto const& b : bins)
-        {
-            if (b.count == 0)
-                continue;
-            pass.bind_pipeline(*b.pipeline);
-            bind_groups(pass);
-            // The base vertex reaches the vertex stage in `@vertex_index`, so it reads the vertex pool at the index as it stands.
-            pass.draw_indexed_indirect(args, b.first, b.count);
-        }
+        pass.bind_index_buffer(draw.indices.as_index_buffer());
+        pass.bind_pipeline(pipeline);
+        bind_groups(pass);
+        pass.draw_indexed({.index_range = {.offset = 0, .size = isize(draw.triangle_count) * 3},
+                           .instance_range = {.offset = isize(draw.instance), .size = 1}});
     };
 
-    // The depth of every opaque draw in `args`, into `depth` as `target` opens it.
-    auto const draw_depth = [&](sg::buffer<sg::draw_indexed_args> const& args, sg::depth_stencil_target target)
+    // Every draw of every bin, from `args`, into the scope open on `pass`; with `with_own` the frame meshes' draws too.
+    auto const draw_bins = [&](sg::rendering_scope& pass, sg::buffer<sg::draw_indexed_args> const& args, bool with_own)
+    {
+        if (total > 0)
+        {
+            CC_ASSERT(d.index_pool.raw() != nullptr, "raster_routine: a frame with draws binds the index pool");
+            pass.bind_index_buffer(d.index_pool.as_index_buffer());
+            for (auto const& b : bins)
+            {
+                if (b.count == 0)
+                    continue;
+                pass.bind_pipeline(*b.pipeline);
+                bind_groups(pass);
+                // The base vertex reaches the vertex stage in `@vertex_index`, so it reads the vertex pool at the index as it stands.
+                pass.draw_indexed_indirect(args, b.first, b.count);
+            }
+        }
+        if (with_own)
+            for (auto const* draw : own)
+                draw_own(pass, *draw, *bins[draw->permutation].pipeline);
+    };
+
+    // The depth of every opaque draw in `args`, into `depth` as `target` opens it; with `with_own` the opaque frame meshes' too.
+    auto const draw_depth
+        = [&](sg::buffer<sg::draw_indexed_args> const& args, sg::depth_stencil_target target, bool with_own)
     {
         auto pass = cmd.raster.render_to({.depth_stencil_target = cc::move(target)});
-        if (opaque_total == 0)
+        if (opaque_total == 0 && !(with_own && own_opaque))
             return;
         // The vertex stage reads the vertex pool through the bindless tables.
         auto const declared = d.bindless->declare_raster_access(cmd);
-        pass.bind_index_buffer(d.index_pool.as_index_buffer());
-        pass.bind_pipeline(*depth_only);
-        bind_groups(pass);
-        pass.draw_indexed_indirect(args, 0, opaque_total);
+        if (opaque_total > 0)
+        {
+            pass.bind_index_buffer(d.index_pool.as_index_buffer());
+            pass.bind_pipeline(*depth_only);
+            bind_groups(pass);
+            pass.draw_indexed_indirect(args, 0, opaque_total);
+        }
+        if (with_own)
+            for (auto const* draw : own)
+                if (!bins[draw->permutation].cutout)
+                    draw_own(pass, *draw, *depth_only);
     };
 
     // The scope the shading draws run in: every target, the depth as `depth_target` opens it.
@@ -662,6 +730,54 @@ sg::routine_outcome raster_routine::execute(sg::command_list& cmd, raster_frame_
         });
     };
 
+    // Every quadric batch's boxes, last, in a scope of their own: their pixel stages write depth, which is a target set of its own.
+    // The prepass and the occlusion pyramid never saw them, and the environment the shading passes drew writes no depth, so they cover it.
+    auto const draw_quadrics = [&]
+    {
+        auto any = false;
+        for (auto const& draw : d.draws)
+            any = any || (draw.primitive_count != 0 && bins[draw.permutation].pipeline != nullptr);
+        if (!any)
+            return;
+
+        auto const keep = [](sg::texture_2d const& texture) { return texture.as_render_target_view().preserved(); };
+        auto pass = thin ? cmd.raster.render_to(raster::quadric_thin_targets{
+                               .emission = keep(d.thin.emission),
+                               .normals = keep(d.thin.normals),
+                               .base = keep(d.thin.base),
+                               .specular = keep(d.thin.specular),
+                               .extra = keep(d.thin.extra),
+                               .depth = keep(t.depth),
+                               .motion = keep(t.motion),
+                               .primary_depth = keep(primary_depth),
+                               .depth_stencil = depth.as_depth_stencil_view().preserved(),
+                           })
+                         : cmd.raster.render_to(raster::quadric_targets{
+                               .color = keep(t.color),
+                               .normal = keep(t.normal),
+                               .depth = keep(t.depth),
+                               .albedo = keep(t.albedo),
+                               .specular_albedo = keep(t.specular_albedo),
+                               .roughness = keep(t.roughness),
+                               .motion = keep(t.motion),
+                               .primary_depth = keep(primary_depth),
+                               .depth_stencil = depth.as_depth_stencil_view().preserved(),
+                           });
+        auto const declared = d.bindless->declare_raster_access(cmd);
+        for (auto const& draw : d.draws)
+        {
+            if (draw.primitive_count == 0)
+                continue;
+            auto const& b = bins[draw.permutation];
+            if (b.pipeline == nullptr)
+                continue;
+            pass.bind_pipeline(*b.pipeline);
+            bind_groups(pass);
+            pass.draw({.vertex_range = {.offset = 0, .size = 36},
+                       .instance_range = {.offset = isize(draw.instance), .size = isize(draw.primitive_count)}});
+        }
+    };
+
     auto const draw_environment = [&](sg::rendering_scope& pass)
     {
         pass.bind_pipeline(thin ? *self->_environment_thin : *self->_environment);
@@ -675,7 +791,9 @@ sg::routine_outcome raster_routine::execute(sg::command_list& cmd, raster_frame_
     auto drawn_args = sg::buffer<sg::draw_indexed_args>();
     if (!occlusion)
     {
-        drawn_args = template_buffer.reinterpret_as<sg::draw_indexed_args>();
+        // none where every draw is a frame mesh's, drawn directly
+        if (total > 0)
+            drawn_args = template_buffer.reinterpret_as<sg::draw_indexed_args>();
         if (total > 0 && self->_cull != nullptr && d.culling != raster_culling::none)
         {
             auto const args = args_buffer();
@@ -694,7 +812,7 @@ sg::routine_outcome raster_routine::execute(sg::command_list& cmd, raster_frame_
         }
 
         if (prepass)
-            draw_depth(drawn_args, depth.as_depth_stencil_view().cleared(0.0f));
+            draw_depth(drawn_args, depth.as_depth_stencil_view().cleared(0.0f), true);
 
         // Without a prepass the depth is cleared here, to the far plane the environment tests against.
         auto pass = open_shading(
@@ -704,7 +822,7 @@ sg::routine_outcome raster_routine::execute(sg::command_list& cmd, raster_frame_
         // The first draw applies them, and a later one finds them current unless its pipeline touches them at new stages.
         // The environment draw binds no table, so it leaves them dormant, and a pass with nothing else to draw ends them silently.
         auto const declared = d.bindless->declare_raster_access(cmd);
-        draw_bins(pass, drawn_args);
+        draw_bins(pass, drawn_args, true);
         draw_environment(pass);
     }
     else
@@ -738,13 +856,14 @@ sg::routine_outcome raster_routine::execute(sg::command_list& cmd, raster_frame_
             cmd.compute.dispatch_threads(int(total));
         }
         auto const first_drawn = first_args.reinterpret_as<sg::draw_indexed_args>();
+        // The frame meshes are drawn with the first pass, so they occlude in the pyramid and are drawn once.
         if (prepass)
-            draw_depth(first_drawn, depth.as_depth_stencil_view().cleared(0.0f));
+            draw_depth(first_drawn, depth.as_depth_stencil_view().cleared(0.0f), true);
         else
         {
             auto pass = open_shading(depth.as_depth_stencil_view().cleared(0.0f), false, true);
             auto const declared = d.bindless->declare_raster_access(cmd);
-            draw_bins(pass, first_drawn);
+            draw_bins(pass, first_drawn, true);
         }
 
         // The pyramid: the farthest primary depth under each texel, level by level.
@@ -818,11 +937,11 @@ sg::routine_outcome raster_routine::execute(sg::command_list& cmd, raster_frame_
         if (prepass)
         {
             // Every surface is shaded once, both passes' draws against the depth they laid down together.
-            draw_depth(drawn_args, depth.as_depth_stencil_view().preserved());
+            draw_depth(drawn_args, depth.as_depth_stencil_view().preserved(), false);
             auto pass = open_shading(depth.as_depth_stencil_view().preserved(), false, false);
             auto const declared = d.bindless->declare_raster_access(cmd);
-            draw_bins(pass, first_drawn);
-            draw_bins(pass, drawn_args);
+            draw_bins(pass, first_drawn, true);
+            draw_bins(pass, drawn_args, false);
             draw_environment(pass);
         }
         else
@@ -830,10 +949,11 @@ sg::routine_outcome raster_routine::execute(sg::command_list& cmd, raster_frame_
             // The first pass's surfaces stay, and the environment fills what neither pass covered.
             auto pass = open_shading(depth.as_depth_stencil_view().preserved(), true, false);
             auto const declared = d.bindless->declare_raster_access(cmd);
-            draw_bins(pass, drawn_args);
+            draw_bins(pass, drawn_args, false);
             draw_environment(pass);
         }
     }
+    draw_quadrics();
     if (d.drawn_args != nullptr)
         *d.drawn_args = drawn_args;
 

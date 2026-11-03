@@ -168,12 +168,13 @@ ASYNC_INVOCABLE_TEST("sv - motion vectors follow the camera, and the sky ignores
     auto const still = base_camera();
 
     // A step to the camera's own right, small enough that the point stays well inside the image.
+    // It looks along +z, so its right is -x.
     auto stepped = still;
-    stepped.position = tg::pos3d(0.5, 0, -5);
+    stepped.position = tg::pos3d(-0.5, 0, -5);
 
     // A turn to the left of the same order, so the two cases are comparable in magnitude.
     auto turned = still;
-    turned.look_at(tg::pos3d(-0.5, 0, 0));
+    turned.look_at(tg::pos3d(0.5, 0, 0));
 
     enum : isize
     {
@@ -259,6 +260,27 @@ ASYNC_INVOCABLE_TEST("sv - a point behind the previous camera reprojects off the
 // The matrices `sv::matrices_of` hands a denoiser, against the frustum the raygen actually traces.
 //
 // sv rasterizes nothing, so these two matrices have no other use and nothing else would notice them being wrong.
+// sv's world is right-handed, as glTF's is: a camera looking down -Z with +Y up has +X on its right, on the image's right.
+// A left-handed camera renders every scene mirrored, which nothing but text on a wall gives away.
+TEST("sv - a camera looking down -Z sees +X on the right of its image")
+{
+    auto cam = sv::camera::looking_at(tg::pos3d(0, 0, 0), tg::pos3d(0, 0, -1));
+    cam.projection.aspect_ratio = 1.0;
+    auto const b = cam.basis();
+    CHECK((b.right - tg::vec3d(1, 0, 0)).length() < 1e-9);
+    CHECK((b.up - tg::vec3d(0, 1, 0)).length() < 1e-9);
+    CHECK((b.forward - tg::vec3d(0, 0, -1)).length() < 1e-9);
+
+    // On the image: a point to the camera's +X lands right of the center, and one above it lands above the center.
+    auto const record = sv::camera_record_of(cam);
+    auto const m = sv::matrices_of(record, 0.1f);
+    auto const clip = [&](tg::vec3f p) { return m.view_to_clip * (m.world_to_view * tg::vec4f(p[0], p[1], p[2], 1.0f)); };
+    auto const right = clip(tg::vec3f(1, 0, -5));
+    auto const above = clip(tg::vec3f(0, 1, -5));
+    CHECK(right[0] / right[3] > 0.1f);
+    CHECK(above[1] / above[3] > 0.1f);
+}
+
 // A denoiser reprojecting through a transposed or mis-scaled projection ghosts rather than fails, which is the same
 // failure mode the probe above exists for.
 //

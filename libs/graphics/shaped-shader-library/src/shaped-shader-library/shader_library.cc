@@ -63,11 +63,14 @@ void compare_binding(sg::binding const& reflected, sg::binding const& declared, 
     if (reflected.block_size.has_value() && declared.block_size.has_value()
         && rows(reflected.block_size.value()) != rows(declared.block_size.value()))
         differs("block size", reflected.block_size.value(), declared.block_size.value());
-    // WGSL writes a 1D texture as 2D of height 1, as sg's webgpu backend creates one, so that is what it reflects.
+    // WGSL and MSL write a 1D texture as 2D of height 1, as sg's webgpu and metal backends create one, so that is what
+    // they reflect.
     auto stated_dimension = declared.texture_dimension;
-    if (format == sg::shader_format::wgsl && stated_dimension == sg::texture_view_dimension::tex_1d)
+    auto const is_1d_as_2d = format == sg::shader_format::wgsl || format == sg::shader_format::msl
+                          || format == sg::shader_format::metal_lib;
+    if (is_1d_as_2d && stated_dimension == sg::texture_view_dimension::tex_1d)
         stated_dimension = sg::texture_view_dimension::tex_2d;
-    if (format == sg::shader_format::wgsl && stated_dimension == sg::texture_view_dimension::tex_1d_array)
+    if (is_1d_as_2d && stated_dimension == sg::texture_view_dimension::tex_1d_array)
         stated_dimension = sg::texture_view_dimension::tex_2d_array;
     if (reflected.texture_dimension.has_value() && reflected.texture_dimension != stated_dimension)
         differs("dimension", int(reflected.texture_dimension.value()), int(stated_dimension.value_or({})));

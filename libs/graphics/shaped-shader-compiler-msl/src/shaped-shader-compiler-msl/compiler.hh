@@ -60,6 +60,11 @@ public:
     /// A caller deciding whether to ask for a metallib reads this first.
     [[nodiscard]] toolchain_info const& toolchain() const;
 
+    /// The arm and every flag a compile under `options` runs with, as stamped on its result's `compiler.signature`.
+    /// It includes the flags this wrapper always passes, which `options` does not show, so a cache that outlives the
+    /// process must fold it into its key.
+    [[nodiscard]] cc::string signature(compile_options const& options) const;
+
 private:
     struct state;
     explicit compiler(cc::unique_ptr<state> s);

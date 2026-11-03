@@ -473,6 +473,7 @@ tg::traits::has_sqrt<T>;  tg::traits::has_trigonometry<T>;   // inline constexpr
 tg::traits::has_abs<T>;  tg::traits::has_exponential<T>;  tg::traits::has_rounding<T>;
 tg::traits::has_pow2<T>;                  // the exact base-two family; f32/f64 only
 tg::traits::is_zero(x);  tg::traits::is_one(x);   // bool — routed through the trait (symbolic-friendly)
+tg::traits::is_exact<T>; tg::traits::is_field<T>; // exact arithmetic; a division that inverts multiplication (floats, bigrat; not integers)
 tg::traits::lowest<T>();  tg::traits::highest<T>(); // the extremes of T's order: +-inf for floats and f16, the limits for ints / fixed_int
 tg::one<T>();                             // T   — multiplicative identity (always)
 tg::sqrt(x);                              // T   — requires has_sqrt<T>
@@ -558,13 +559,69 @@ tg::bigint::parse("-123456789012345678901234567890");     // -> cc::optional<big
 a + b; a - b; a * b; a / b; a % b; -a; a << n; a >> n;     // exact; / and % truncate, >> floors
 r.assign_add(a, b); r.assign_sub(a, b); r.assign_mul(a, b); // into r's node when it holds the result; a or b may be r
 auto [q, rem] = div_mod(a, b); div_mod(q, rem, a, b);     // the second into kept values, reusing their nodes
-gcd(a, b); abs(a);
+gcd(a, b); gcd(g, a, b); abs(a);                          // binary gcd to two limbs, Lehmer above; the second into g
+div_exact(a, d); div_exact(q, a, d);                       // a / d for a d that divides a: no remainder sought
 x.sign(); compare(a, b); a < b; a == b;                    // -1/0/+1; compare without computing a - b
 x.to_f64(); x.to_i64(); x.fits_i64(); x.to_string();       // nearest, ties to even; to_i64 asserts it fits
 x.limbs(); x.size(); x.capacity(); x.bit_width();           // the magnitude, least significant limb first
 // One pointer to a node of cc's node allocator: a header word, then the limbs; 1, 3, 7, 15, 31 limbs from 16 to 256 bytes.
 // Reuse results (assign_* into kept values) in hot loops: an operator's result allocates a node.
 // + - * of one- and two-limb operands are inline; products up to 16 x 16 limbs are unrolled, Karatsuba above.
+```
+
+## bigrat (exact rational)
+
+```cpp
+#include <typed-geometry/scalar/bigrat/bigrat.hh>
+tg::bigrat q = 3; tg::bigrat(tg::bigint(6), tg::bigint(-4)); // -> -3/2: reduced, denominator positive
+tg::bigrat::from_f64(0.1);                                   // exact: 3602879701896397/36028797018963968
+a + b; a - b; a * b; a / b; -a; abs(a);                      // exact, reduced after every operation
+r.assign_add(a, b); r.assign_sub(a, b); r.assign_mul(a, b); r.assign_div(a, b); // into r's nodes; a or b may be r
+x.numerator(); x.denominator(); x.is_integer();              // the denominator by value: an integer holds none
+x.sign(); compare(a, b); a < b; a == b;                      // signs, then bit widths, then cross products
+x.to_f64(); x.to_string();                                   // nearest, ties to even; "-3/2", or "3" for an integer
+tg::bigrat_unreduced u = a; u += b; u *= c; u.sign(); u.reduced(); // no gcd per operation; reduce once at the end
+// An integer-valued bigrat costs a bigint: its denominator is held as zero, meaning 1.
+// A sum reduces by the denominators' gcd, a product by the two cross gcds: the smallest gcds there are.
+// For a predicate's sign alone, bigrat_unreduced skips every gcd: about 5x cheaper on orient3d over rational points.
+```
+
+## polynomial (univariate, dense)
+
+```cpp
+#include <typed-geometry/symbolic/polynomial.hh>
+tg::polynomial<tg::bigint> p = {1, 0, 3};                   // 1 + 3x^2: coefficients lowest first; any C with + - * and C(int)
+tg::polynomial<f64, 3> c = {1.0, -3.0, 0.0, 2.0};           // a fixed bound: inline, no allocation; degree() may be lower
+P::x(); P::monomial(c, k); P::zeroed(n); p[i]; p.trim();    // building blocks: n stored zeros, set, then trim
+p.degree(); p.is_zero(); p.leading_coefficient(); p.coefficient(i); p.coefficients(); // degree -1 for zero
+p + q; p - q; p * q; p * s; -p; pow(p, e);                  // fixed bounds propagate: cubic * quadratic is polynomial<f64, 5>
+p(x);                                                       // Horner, in X when X is built from C: a bigint polynomial at a bigrat is a bigrat
+compose(p, q); derivative(p);                               // p(q); d/dx
+auto [q, r] = divrem(a, b);                                 // a = q b + r; requires tg::traits::is_field<C>: floats, bigrat
+auto pd = pseudo_divrem(a, b);                              // lc(b)^pd.power * a = pd.quotient * b + pd.remainder, any ring
+div_exact(a, b);                                            // b divides a: bigint coefficients divide exactly
+p.to_string("t");                                           // "3*t^2 + 1"
+tg::polynomial<tg::polynomial<tg::bigint>> xy;              // a polynomial is a coefficient: nesting gives more variables
+```
+
+## multi_polynomial (sparse, packed exponents)
+
+```cpp
+#include <typed-geometry/symbolic/multi_polynomial.hh>
+using P = tg::multi_polynomial<tg::bigint, tg::vars<3>>;     // 3 variables, grevlex, 16-bit exponent fields
+tg::vars<N, tg::lex_order | tg::grlex_order | tg::grevlex_order | tg::infinitesimal_order, Bits = 16>;
+auto g = P::generators(); auto p = 3 * g[0] * g[0] * g[1] - g[1] + 1;  // also P::variable(v), P::monomial(c, {e0, e1, e2})
+p.term_count(); p.coefficient(t); p.exponents(t); p.leading_coefficient(); p.coefficient_of({2, 1, 0});
+p.degree(v); p.total_degree();                              // -1 for zero
+p + q; p - q; p * q; p * s; p == q;                         // terms stay sorted, combined, never zero
+p({2, 3, 4}); p(cc::fixed_array<tg::bigrat, 3>{...});       // evaluation, in X when X is built from C
+derivative(p, v); substitute(p, v, value);                  // the result no longer in x(v)
+to_univariate(p, v); from_univariate(u, v);                 // polynomial<multi_polynomial<...>> in x(v), and back
+p.to_string(names);                                         // "3*x0^2*x1 - x1 + 1"; names a span of string_view
+using E = tg::multi_polynomial<tg::bigint, tg::vars<3, tg::infinitesimal_order>>;
+e.sign();                                                   // 1 >> e0 >> e0^2 >> e1 >> ...: the leading coefficient's sign
+// An exponent or a graded total degree is at most 2^(Bits-1) - 1; overflow fails in every build, not only with assertions.
+// The infinitesimal order is local (1 is the largest monomial): it ranks for signs, not for division.
 ```
 
 ## half_float (binary16)

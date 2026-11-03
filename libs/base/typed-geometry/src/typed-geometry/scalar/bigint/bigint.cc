@@ -330,6 +330,19 @@ CC_DONT_INLINE void tg::bigint::_assign_sum_slow(bigint const& a, bigint const& 
     free_if(replaced);
 }
 
+void tg::bigint::_assign_mul_sum_slow(bigint const& a, bigint const& b, bool subtract)
+{
+    if (a.is_zero() || b.is_zero())
+        return;
+    // the product's node is kept per thread, so an accumulation allocates nothing once it has grown
+    thread_local bigint product;
+    product.assign_mul(a, b);
+    if (subtract)
+        assign_sub(*this, product);
+    else
+        assign_add(*this, product);
+}
+
 void tg::bigint::_assign_mul(bigint const& a, bigint const& b)
 {
     // the common case, kept lean so it needs few registers: nonzero operands, and a target that is neither and holds the product,
@@ -588,16 +601,82 @@ tg::div_mod_result<tg::bigint> tg::div_mod(bigint const& a, bigint const& b)
 
 tg::bigint tg::gcd(bigint const& a, bigint const& b)
 {
-    // Euclid, its three values reusing their nodes from step to step
-    auto x = abs(a);
-    auto y = abs(b);
-    bigint q;
-    bigint r;
-    while (!y.is_zero())
+    bigint g;
+    gcd(g, a, b);
+    return g;
+}
+
+void tg::gcd(bigint& g, bigint const& a, bigint const& b)
+{
+    auto const an = a.size();
+    auto const bn = b.size();
+    if (an == 0 || bn == 0)
     {
-        div_mod(q, r, x, y); // x and y are nonnegative, so r is too
-        cc::swap(x, y);
-        cc::swap(y, r);
+        g = an == 0 ? abs(b) : abs(a);
+        return;
     }
-    return x;
+    auto const* const ap = bigint_limbs(a._node);
+    auto const* const bp = bigint_limbs(b._node);
+    if (an == 1 || bn == 1)
+    {
+        // one limb: the other's remainder by it, then the binary gcd of two limbs, without Lehmer's buffers
+        // of two one-limb values the smaller divides the larger, so the binary gcd starts on two balanced ones
+        auto const a_divides = an == 1 && (bn > 1 || ap[0] <= bp[0]);
+        auto const d = a_divides ? ap[0] : bp[0];
+        auto const r = a_divides ? impl::limbs_mod_1(bp, bn, d) : impl::limbs_mod_1(ap, an, d);
+        auto const x = impl::limb_gcd(r, d);
+        bigint_header* replaced = nullptr;
+        g._room(1, replaced)[0] = x;
+        free_if(replaced);
+        g._set(1, false);
+        return;
+    }
+    // the kernel copies its operands first, but g's node may be one of them, so the result is built apart when it is
+    auto const n = an < bn ? an : bn;
+    if (&g == &a || &g == &b)
+    {
+        bigint t;
+        gcd(t, a, b);
+        g = cc::move(t);
+        return;
+    }
+    bigint_header* replaced = nullptr;
+    auto* const out = g._room(n, replaced);
+    free_if(replaced);
+    g._set(impl::limbs_gcd(out, ap, an, bp, bn), false);
+}
+
+tg::bigint tg::div_exact(bigint const& a, bigint const& d)
+{
+    bigint q;
+    div_exact(q, a, d);
+    return q;
+}
+
+void tg::div_exact(bigint& q, bigint const& a, bigint const& d)
+{
+    CC_ASSERT(!d.is_zero(), "division by zero");
+    CC_ASSERT(&q != &d, "the quotient overwrites the divisor");
+    auto const an = a.size();
+    if (an == 0)
+    {
+        if (q._node != nullptr)
+            q._set(0, false);
+        return;
+    }
+    auto const negative = a._node->negative != d._node->negative;
+    if (d.size() == 1)
+    {
+        // the kernel reads limb i before writing it, so q may be a
+        bigint_header* replaced = nullptr;
+        auto const* ap = bigint_limbs(a._node);
+        auto* const out = q._room(an, replaced);
+        impl::limbs_divexact_1(out, ap, an, bigint_limbs(d._node)[0]);
+        free_if(replaced);
+        q._set(impl::limbs_normalized_size(out, an), negative);
+        return;
+    }
+    bigint r;
+    div_mod(q, r, a, d);
+    CC_ASSERT(r.is_zero(), "div_exact takes a divisor that divides");
 }

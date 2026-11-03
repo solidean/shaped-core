@@ -72,6 +72,9 @@ struct hit:
     /// object space, normalized
     normal: float3
     valid: bool
+    /// The point itself, in object space, as the solve built it from its shifted origin.
+    /// Rounded as an interpolated point is, where `origin + dir * t` would be rounded to the ray's own length.
+    point: float3
 
 /// `v` transformed by the quadric's symmetric 3x3 block.
 fun a_mul(q: quadric3, v: float3) -> float3:
@@ -143,7 +146,7 @@ fun roots_of(q: quadric3, o_in: float3, d: float3) -> roots:
 ///
 /// Mirrors `sv::intersect` (scene/quadric.hh) exactly; a divergence between them is a bug in one rather than a difference of intent.
 fun intersect(prim: primitive, origin: float3, dir: float3, t_min: float, t_max: float) -> hit:
-    let mut r = hit(0.0, float3(0.0, 0.0, 1.0), false)
+    let mut r = hit(0.0, float3(0.0, 0.0, 1.0), false, float3(0.0))
 
     let o = origin - prim.origin
 
@@ -192,7 +195,7 @@ fun intersect(prim: primitive, origin: float3, dir: float3, t_min: float, t_max:
 
         if outside > 0.0 => continue
 
-        r = hit(t, normalize(normal), true)
+        r = hit(t, normalize(normal), true, prim.origin + p)
 
     return r
 
