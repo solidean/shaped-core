@@ -416,7 +416,8 @@ fn main_ps(p: pixel_input) -> target_ {
   The buffer stands in sg's reserved group: `register(u0, space11)` in `hlsl-dx12` and `[[vk::binding(19, 3)]]` in `hlsl-vulkan`.
   It is `@group(3) @binding(19)` in WGSL, and the entry point's parameter `[[buffer(30)]]` in MSL, the argument table's last slot, clear of the vertex buffers from `[[buffer(5)]]` up.
   A text declares it only where it writes a record.
-  WebGPU's vertex stage has no writable storage and MSL's ray-tracing stages take no buffer, so there a print is dropped and the text declares none.
+  WebGPU's vertex stage has no writable storage, vulkan's vertex, geometry and tessellation stages write none without a feature sg does not ask for, and MSL's ray-tracing stages take no buffer.
+  There a print is dropped and the text declares none.
   A site's id hashes the entry point's name, the message and the line it stands on, so one site has one id on every target.
 
 
