@@ -8,7 +8,7 @@ using namespace cc::primitive_defines;
 using tg::bigint;
 using tg::fi256;
 
-static_assert(sizeof(bigint) == 8);
+static_assert(sizeof(bigint) == sizeof(void*));
 
 namespace
 {

@@ -365,6 +365,16 @@ private:
                 described.inlined_from.push_back({.file = file_of(line), .line = line.line});
             shader.debug_sites.push_back(cc::move(described));
         }
+        // EMIT-181: what a backend compiling the text itself, webgpu's, reports a message at
+        if (shader.format == sg::shader_format::wgsl)
+            for (auto const& line : emitted.lines)
+            {
+                auto mapped = sg::shader_source_line{.emitted = line.emitted,
+                                                     .at = {.file = file_of(line.at), .line = line.at.line}};
+                for (auto const& call : line.inlined_from)
+                    mapped.inlined_from.push_back({.file = file_of(call), .line = call.line});
+                shader.source_map.push_back(cc::move(mapped));
+            }
         result.stated = cc::move(shader);
         for (auto const& l : emitted.layouts)
         {

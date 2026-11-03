@@ -260,6 +260,7 @@ enum class debug_scalar : u8;
 struct debug_value;
 struct debug_source_line;
 struct shader_debug_site;
+struct shader_source_line;
 enum class footprint_source : u8; // how far a shader's footprint can be trusted (see barrier/footprint.hh)
 struct slot_footprint;            // how one shader's code touches one binding
 struct shader_footprint;          // every binding a shader's code touches, and how
