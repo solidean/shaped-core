@@ -38,7 +38,7 @@ The readme lists "assertions, logging, per expression traces" among what SGL off
 1. Done: interpolated messages on the interpreter (CHK-424, EVAL-103).
 2. Done: the compiler writes records with diagnostics on (LEGAL-63, LEGAL-64, EMIT-183); without them the text holds neither.
    MSL takes the buffer at `[[buffer(30)]]`, since `[[buffer(6)]]` is a vertex buffer's slot.
-   A failed assert in a vertex, geometry or tessellation stage, an any hit or an intersection records and goes on, since ending one means writing a result.
+   A failed assert in a vertex, geometry or tessellation stage, an any hit or an intersection recorded and went on at first; see the status below for what ends since.
 3. sg, decided: every pipeline layout gets the debug slot when diagnostics are on, and layout-fit and slib's WGSL reader accept `sg_debug` by name, as they do the acceleration pool.
    dx12 binds it as a root UAV after the inline constants, set where each of the three root signatures is set.
    webgpu adds group 3's binding 19, its bind group keyed by the ring slot as it is by the pool's generation.
@@ -54,4 +54,5 @@ The readme lists "assertions, logging, per expression traces" among what SGL off
 
 Landed by 2026-11-03: stages 1 to 4 on dx12, vulkan and webgpu, with sr's end-to-end test on each.
 Left: metal (Julius), whose SGL edge asks for no records until its backend binds `[[buffer(30)]]`.
-And an assert in a vertex, geometry or tessellation stage, an any hit or an intersection, which records and goes on.
+A vertex and a tessellation evaluation stage end a failed assert at a NaN position, and a geometry stage returns (2026-11-03).
+An assert in a tessellation control stage, an any hit or an intersection still records and goes on: zero factors, `ignore` and no report would end them.

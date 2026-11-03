@@ -27,8 +27,9 @@ The worked examples are WGSL, since it is the strictest target: no `do … while
 * **LEGAL-53** (V0) A core tree holds no `check`: each goes with its body, first, since no target writes a check or an `assert` (EVAL-75).
 * **LEGAL-63** (V0) Asked to, legalization drops every `print` with its values too, which is how a text is written without diagnostics.
 * **LEGAL-64** (V0) Asked to, it lowers each `assert` instead: its body, then `if not condition`, a print of its message and the end of the invocation.
-  A compute or a ray-tracing stage that returns nothing returns, and a pixel stage discards.
-  A vertex, geometry or tessellation stage, an any hit and an intersection go on, since what ends them would have to write a result they hold none of.
+  A compute, a geometry or a ray-tracing stage that returns nothing returns, and a pixel stage discards.
+  A vertex and a tessellation evaluation stage return their result at a NaN position, which culls every primitive the vertex is part of.
+  A tessellation control stage, an any hit and an intersection go on, since each ends otherwise: zero factors, `ignore`, and no report.
   The tree then prints nothing; it is the one way it may behave otherwise than its input, and only when the caller asked.
 * **LEGAL-52** (V1) A core tree holds no `void` local, and no `let`, `var`, assignment, `return` or read of a `void` value: what evaluating one does stays as an `eval`, and the value itself is gone.
   It follows every rule that introduces a local for a result, since a `void` result is one of them; only the let rules come after it.

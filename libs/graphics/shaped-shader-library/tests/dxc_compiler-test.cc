@@ -457,4 +457,26 @@ TEST("slib - DXC compiles SGL's debug records for dx12 and vulkan", exclusive("s
         (void)await(shader);
     }
 }
+
+TEST("slib - DXC compiles a vertex stage's culled vertex for dx12 and vulkan", exclusive("slib-shader-library"))
+{
+    // LEGAL-64: a failed assert in a vertex stage returns the vertex at a NaN position
+    constexpr auto source = "struct varyings:\n"
+                            "    @position position: hpos4\n"
+                            "    uv: float2\n"
+                            "\n"
+                            "@vertex fun vs(@vertex_index v: int) -> varyings:\n"
+                            "    assert v < 3, \"vertex $v\"\n"
+                            "    return { position = hpos4(v as float, 0.0, 0.0, 1.0), uv = float2(0.0, 1.0) }\n";
+    for (auto const t : {sgl::emit::target::hlsl_dx12, sgl::emit::target::hlsl_vulkan})
+    {
+        auto const text = sgl::compile_to_text({.source = source, .entry_point = "vs", .target = t, .diagnostics = true});
+        REQUIRE(text.has_value());
+        auto compiler
+            = t == sgl::emit::target::hlsl_vulkan ? slib::create_dxc_spirv_compiler() : slib::create_dxc_compiler();
+        REQUIRE(compiler.has_value());
+        (void)await(compiler.value()->compile(
+            {.source = text.value().text, .entry_point = text.value().entry_point, .stage = sg::shader_stage::vertex}));
+    }
+}
 #endif
