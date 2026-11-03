@@ -2003,6 +2003,12 @@ sg::routine_outcome view_renderer::trace(sg::command_list& cmd,
             return sg::routine_outcome::executed;
         }
 
+        // An incomplete frame whose mean holds no sample has nothing to denoise, and a switch restarted the denoised slot, so nothing is held either.
+        // Denoised, it is black where nothing landed, and was presented over the image before it; declining keeps that image up.
+        // `samples` trails the GPU, so a complete frame denoises at 0: a restart drains, and its mean is whole before the count says so.
+        if (incomplete && slot->samples == 0)
+            return sg::routine_outcome::declined;
+
         auto const denoised = _denoise(cmd, schedule, *slot, ds, cameras, sample_counts, res.traces[trace_index]);
         if (ds.denoised->accum_frame > 0)
             mark_denoised(*ds.denoised, fc.camera);

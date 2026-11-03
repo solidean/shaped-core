@@ -357,6 +357,10 @@ struct sv_test::agreement::denoised_frame
     cc::vector<tg::vec4f> denoised;
     bool ran = false;
     u32 samples = 0;
+    /// whether the viewer drew the frame, rather than declining it and leaving the output as it was
+    bool executed = false;
+    /// the output the frame presented, bgra8 a pixel, as a window shows it
+    cc::vector<u32> shown;
 };
 
 /// One denoised view through the viewer, stepped a frame at a time; the view is `def.views[0]`, which a caller may move.
@@ -390,8 +394,9 @@ public:
         _store.begin_frame(u64(_ctx.current_epoch()));
         auto const index = _index++;
         auto const plan = sv::build_render_plan(def, k_size, index, _history);
-        (void)sv::viewer_renderer::execute(*cmd, def, plan, _resources, _store,
-                                           _output.as_render_target_view().cleared(tg::vec4f(0, 0, 0, 1)));
+        auto const outcome = sv::viewer_renderer::execute(
+            *cmd, def, plan, _resources, _store, _output.as_render_target_view().cleared(tg::vec4f(0, 0, 0, 1)));
+        auto const shown = sg::data_future<u32>(cmd->download.bytes_from_texture(_output.raw()));
         auto const id = def.views[0].id;
         auto const* const state = _store.peek_ptr(id);
         auto const slot_of = [&](u64 temporal) { return state != nullptr ? state->temporal.get_ptr(temporal) : nullptr; };
@@ -404,14 +409,21 @@ public:
         if (denoised_slot != nullptr && denoised_slot->texture.raw() != nullptr)
             denoised = sg::data_future<rgba16>(cmd->download.bytes_from_texture(denoised_slot->texture.raw()));
         // The slot holds a current image only on a frame the denoiser produced it, and the raw mean is presented otherwise.
-        auto const ran = denoised_slot != nullptr && denoised_slot->accum_frame != 0 && mean_slot != nullptr
+        // A layer switched to no denoiser keeps its old slot a while, still marked current, so the setting is read too.
+        auto const ran = def.views[0].layers[0].settings.reconstruct.denoiser != sr::denoise_method::none
+                      && denoised_slot != nullptr && denoised_slot->accum_frame != 0 && mean_slot != nullptr
                       && mean_slot->stand_in_hash == 0;
         _ctx.submit_command_list(cc::move(cmd));
         _ctx.advance_epoch();
         co_await _ctx.idle_completion();
         sv_test::drive_ambient_work();
 
-        auto out = denoised_frame{.ran = ran, .samples = _store.min_accumulated_samples(id)};
+        auto out = denoised_frame{.ran = ran,
+                                  .samples = _store.min_accumulated_samples(id),
+                                  .executed = outcome == sg::routine_outcome::executed};
+        if (auto const s = shown.try_get_data(); s.has_value())
+            for (auto const px : s.value())
+                out.shown.push_back(px);
         if (auto const m = mean.try_get_data(); mean.is_valid() && m.has_value())
             for (auto const& v : m.value())
                 out.raw.push_back(v);
