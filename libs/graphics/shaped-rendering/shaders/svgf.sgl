@@ -20,25 +20,48 @@ const has_specular_albedo = 8u
 // A zero albedo would make demodulation divide by zero; one floor used both ways keeps the round trip exact.
 const albedo_floor = 0.001
 
-// What color is demodulated by: the surface's total reflectance, since SVGF filters unsplit radiance and a metal's color is in the specular half.
-fun reflectance(albedo: float3, specular_albedo: float3, flags: uint) -> float3:
+// Below this reflectance in every channel a surface reflects nothing worth demodulating: what it shows is its own emission.
+// It sits above a dielectric's 0.04 at normal incidence, since a black base under the default specular layer is such a surface, a lamp's included.
+const reflects_nothing_below = 0.06
+
+// The surface's total reflectance, since SVGF filters unsplit radiance and a metal's color is in the specular half.
+fun total_reflectance(albedo: float3, specular_albedo: float3, flags: uint) -> float3:
     let mut a = albedo
     if (flags & has_specular_albedo) != 0u:
         a += specular_albedo
-    return max(a, float3(albedo_floor))
+    return a
+
+// Whether a pixel shows a surface that reflects nothing, an emitter's own radiance, which is filtered as it is and apart from every reflecting surface.
+// Demodulated, a lamp of zero albedo is its radiance over the floor, a thousand times brighter than any wall beside it, and averages into them.
+fun reflects_nothing(albedo: float3, specular_albedo: float3, flags: uint) -> bool:
+    if (flags & has_albedo) == 0u => return false
+    return all(total_reflectance(albedo, specular_albedo, flags) < float3(reflects_nothing_below))
+
+// What color is demodulated by: the total reflectance, or 1 where the surface reflects nothing.
+fun reflectance(albedo: float3, specular_albedo: float3, flags: uint) -> float3:
+    if reflects_nothing(albedo, specular_albedo, flags) => return float3(1.0)
+    return max(total_reflectance(albedo, specular_albedo, flags), float3(albedo_floor))
 
 fun luminance(c: float3) => dot(c, float3(0.2126, 0.7152, 0.0722))
 
-// A zero normal or a non-positive depth is a pixel with no surface: the primary ray escaped.
-fun is_surface(n: float3, depth: float) => dot(n, n) > 0.0 and depth > 0.0
+// What a pixel of the normal and depth the temporal pass carries shows, each kind averaging with its own alone.
+// A non-positive depth is a missed ray, the sky; a zero normal at a positive depth is a surface that reflects nothing; anything else reflects.
+const kind_missed = 0u
+const kind_emitter = 1u
+const kind_surface = 2u
+fun kind_of(n: float3, depth: float) -> uint:
+    if depth <= 0.0 => return kind_missed
+    if dot(n, n) <= 0.0 => return kind_emitter
+    return kind_surface
+
+fun is_surface(n: float3, depth: float) => kind_of(n, depth) == kind_surface
 
 // Whether a neighbor at `offset` pixels shows the same surface as the center, as a weight in [0, 1].
-// Two missed pixels match each other and nothing else, so the sky never averages into geometry.
+// Two missed pixels match each other and nothing else, so the sky never averages into geometry, and two emitters likewise.
 fun geometry_weight(n_p: float3, d_p: float, n_q: float3, d_q: float, offset: float2, normal_power: float, depth_sigma: float) -> float:
-    let surface_p = is_surface(n_p, d_p)
-    let surface_q = is_surface(n_q, d_q)
-    if surface_p != surface_q => return 0.0
-    if not surface_p => return 1.0
+    let kind_p = kind_of(n_p, d_p)
+    if kind_p != kind_of(n_q, d_q) => return 0.0
+    if kind_p != kind_surface => return 1.0
 
     let w_n = pow(saturate(dot(normalize(n_p), normalize(n_q))), normal_power)
     let allowed = depth_sigma * d_p * max(length(offset), 1.0) + 0.00001
@@ -106,12 +129,14 @@ binding svgf_temporal_images:
     let flags = svgf_temporal_constants.flags
 
     let mut color = svgf_temporal_images.color.load(p).xyz
+    let albedo = svgf_temporal_images.albedo.load(p).xyz
+    let specular_albedo = svgf_temporal_images.specular_albedo.load(p).xyz
     if (flags & has_albedo) != 0u:
-        let albedo = svgf_temporal_images.albedo.load(p).xyz
-        color /= reflectance(albedo, svgf_temporal_images.specular_albedo.load(p).xyz, flags)
+        color /= reflectance(albedo, specular_albedo, flags)
 
-    let n = svgf_temporal_images.normal.load(p).xyz
+    // An emitter's pixel carries a zero normal from here on, so every later test keeps it apart from the surfaces it lights.
     let d = svgf_temporal_images.depth.load(p).x
+    let n = if reflects_nothing(albedo, specular_albedo, flags) and d > 0.0 => float3(0.0) else svgf_temporal_images.normal.load(p).xyz
     let lum = luminance(color)
     let moments = float2(lum, lum * lum)
 
@@ -124,8 +149,7 @@ binding svgf_temporal_images:
     if valid:
         let prev_nd = svgf_temporal_images.previous_normal_depth.load(q)
         let surface = is_surface(n, d)
-        let prev_surface = is_surface(prev_nd.xyz, prev_nd.w)
-        if surface != prev_surface:
+        if kind_of(n, d) != kind_of(prev_nd.xyz, prev_nd.w):
             valid = false
         else if surface:
             let same_normal = dot(normalize(n), normalize(prev_nd.xyz))

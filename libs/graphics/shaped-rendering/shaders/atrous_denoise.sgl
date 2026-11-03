@@ -62,12 +62,27 @@ fun is_set(flag: uint){atrous_constants} => (atrous_constants.flags & flag) != 0
 
 fun luminance(c: float3) => dot(c, float3(0.2126, 0.7152, 0.0722))
 
+// Below this reflectance in every channel a surface reflects nothing worth demodulating: what it shows is its own emission.
+// It sits above a dielectric's 0.04 at normal incidence, since a black base under the default specular layer is such a surface, a lamp's included.
+const reflects_nothing_below = 0.06
+
 // The surface's total reflectance: this filters unsplit radiance, so a metal's color is in the specular half.
-fun albedo_at(p: int2){atrous_images, atrous_constants} -> float3:
+fun total_reflectance_at(p: int2){atrous_images, atrous_constants} -> float3:
     let mut a = atrous_images.albedo.load(p).xyz
     if is_set(has_specular_albedo):
         a += atrous_images.specular_albedo.load(p).xyz
-    return max(a, float3(albedo_floor))
+    return a
+
+// Whether `p` shows a surface that reflects nothing, an emitter's own radiance, which is filtered as it is and apart from every reflecting surface.
+// Demodulated, a lamp of zero albedo is its radiance over the floor, a thousand times brighter than any wall beside it.
+fun reflects_nothing_at(p: int2){atrous_images, atrous_constants} -> bool:
+    if not is_set(has_albedo) => return false
+    return all(total_reflectance_at(p) < float3(reflects_nothing_below))
+
+// What color is demodulated by: the total reflectance, or 1 where the surface reflects nothing.
+fun albedo_at(p: int2){atrous_images, atrous_constants} -> float3:
+    if reflects_nothing_at(p) => return float3(1.0)
+    return max(total_reflectance_at(p), float3(albedo_floor))
 
 // The source's color at `p`, in the space this pass filters in: divided by the albedo on the first pass when asked.
 fun source_at(p: int2){atrous_images, atrous_constants} -> float4:
@@ -97,11 +112,10 @@ fun source_at(p: int2){atrous_images, atrous_constants} -> float4:
         center_depth = atrous_images.depth.load(p).x
 
     // Relative, so the edge-stop means the same thing for a dim corner and a bright highlight.
-    // The additive floor keeps a black pixel from refusing every neighbor.
     let mut luminance_scale = atrous_constants.luminance_scale
     if is_set(has_sample_counts):
         luminance_scale /= sqrt(max(atrous_images.sample_counts.load(p).x, 1.0))
-    let lum_width = luminance_scale * (abs(center_lum) + 0.01) + 0.000001
+    let center_emits = reflects_nothing_at(p)
 
     let kernel = [1.0 / 16.0, 1.0 / 4.0, 3.0 / 8.0, 1.0 / 4.0, 1.0 / 16.0]
 
@@ -120,8 +134,18 @@ fun source_at(p: int2){atrous_images, atrous_constants} -> float4:
 
             // Gaussian rather than exponential in the difference.
             // A tap several noise widths away must count for nothing, or a converged mean's detail is averaged away by the long tail of many such taps.
-            let lum_ratio = (luminance(c.xyz) - center_lum) / lum_width
+            // The width is the brighter pixel's of the two, so a pair weighs alike from either end.
+            // Sized by the center alone, a dark pixel refused the bright samples beside it while a bright one took the dark ones in,
+            // which drained a young image's energy downward: 8% to 15% of it at four samples a pixel.
+            // The additive floor keeps two black pixels from refusing each other.
+            let tap_lum = luminance(c.xyz)
+            let lum_width = luminance_scale * (max(abs(center_lum), abs(tap_lum)) + 0.01) + 0.000001
+            let lum_ratio = (tap_lum - center_lum) / lum_width
             w *= exp(-lum_ratio * lum_ratio)
+
+            // An emitter and a surface it lights never average into each other, as the sky and geometry do not.
+            if reflects_nothing_at(q) != center_emits:
+                w = 0.0
 
             if is_set(has_normal):
                 let n = atrous_images.normal.load(q).xyz
