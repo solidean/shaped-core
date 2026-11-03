@@ -1,3 +1,4 @@
+#include <babel-serializer/geometry/impl/parse_number.hh>
 #include <babel-serializer/geometry/obj.hh>
 #include <clean-core/common/profiling.hh>
 #include <clean-core/common/utility.hh> // cc::unit, cc::move
@@ -38,6 +39,17 @@ struct line_tokenizer
         return true;
     }
 
+    /// `next` for a directive of values: a token starting with '#' opens a trailing comment, which ends the line (`f 1 2 3 # note`).
+    [[nodiscard]] bool next_value(cc::string_view& out)
+    {
+        if (!next(out))
+            return false;
+        if (out.front() != '#')
+            return true;
+        p = end;
+        return false;
+    }
+
     /// The remaining text (trimmed of surrounding blanks) — used for `o` / `g` names that may contain spaces.
     [[nodiscard]] cc::string_view rest()
     {
@@ -52,10 +64,7 @@ struct line_tokenizer
 
 [[nodiscard]] bool parse_float(cc::string_view tok, f32& out)
 {
-    auto const* const first = tok.data();
-    auto const* const last = tok.data() + tok.size();
-    auto const [ptr, ec] = std::from_chars(first, last, out);
-    return ec == std::errc() && ptr == last;
+    return parse_f32(tok, out);
 }
 
 [[nodiscard]] bool parse_int(cc::string_view tok, i32& out)
@@ -159,7 +168,7 @@ struct obj_parser
             for (auto i = 0; i < 3; ++i)
             {
                 auto value = cc::string_view();
-                if (!tok.next(value) || !parse_float(value, xyz[i]))
+                if (!tok.next_value(value) || !parse_float(value, xyz[i]))
                     return error_here("expected 3 coordinates after 'v'");
             }
             result.positions.push_back(xyz);
@@ -168,10 +177,10 @@ struct obj_parser
         {
             auto uv = tg::vec2f(0, 0);
             auto u = cc::string_view();
-            if (!tok.next(u) || !parse_float(u, uv[0]))
+            if (!tok.next_value(u) || !parse_float(u, uv[0]))
                 return error_here("expected at least a u coordinate after 'vt'");
             auto v = cc::string_view();
-            if (tok.next(v) && !parse_float(v, uv[1]))
+            if (tok.next_value(v) && !parse_float(v, uv[1]))
                 return error_here("invalid v coordinate after 'vt'");
             result.texcoords.push_back(uv);
         }
@@ -181,7 +190,7 @@ struct obj_parser
             for (auto i = 0; i < 3; ++i)
             {
                 auto value = cc::string_view();
-                if (!tok.next(value) || !parse_float(value, n[i]))
+                if (!tok.next_value(value) || !parse_float(value, n[i]))
                     return error_here("expected 3 components after 'vn'");
             }
             result.normals.push_back(n);
@@ -190,7 +199,7 @@ struct obj_parser
         {
             auto const first_corner = i32(result.corners.size());
             auto vertex = cc::string_view();
-            while (tok.next(vertex))
+            while (tok.next_value(vertex))
             {
                 auto c = obj::corner();
                 if (!parse_corner(vertex, c))

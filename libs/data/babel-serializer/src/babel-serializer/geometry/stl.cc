@@ -5,7 +5,7 @@
 #include <clean-core/string/char_predicates.hh>
 #include <clean-core/string/format.hh>
 
-#include <charconv> // std::from_chars
+#include <babel-serializer/geometry/impl/parse_number.hh>
 
 // STL, in both containers.
 //
@@ -97,10 +97,7 @@ struct line_tokenizer
 
 [[nodiscard]] bool parse_float(cc::string_view tok, f32& out)
 {
-    auto const* const first = tok.data();
-    auto const* const last = tok.data() + tok.size();
-    auto const [ptr, ec] = std::from_chars(first, last, out);
-    return ec == std::errc() && ptr == last;
+    return parse_f32(tok, out);
 }
 
 /// Three floats off `tok`, which must be the rest of the line.
