@@ -31,6 +31,9 @@ struct vars;
 template <class C, class Vars>
 struct multi_polynomial;
 
+/// an interval holding exactly one real root of a polynomial, or the root itself (see symbolic/polynomial_roots.hh).
+struct root_interval;
+
 /// a quotient and a remainder, as tg::divrem of polynomials returns them.
 template <class Q, class R = Q>
 struct quotient_remainder;

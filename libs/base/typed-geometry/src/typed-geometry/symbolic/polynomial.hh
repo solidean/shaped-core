@@ -207,7 +207,7 @@ struct tg::polynomial
     [[nodiscard]] bool is_constant() const { return degree() <= 0; }
 
     /// The stored coefficients, lowest first: degree() + 1 after a trim, Degree + 1 for a fixed bound.
-    [[nodiscard]] cc::span<C const> coefficients() const { return {_data(), isize(stored_count())}; }
+    [[nodiscard]] cc::span<C const> coefficients() const { return cc::span<C const>(_data(), isize(stored_count())); }
     [[nodiscard]] int stored_count() const
     {
         if constexpr (is_dynamic)
@@ -654,6 +654,199 @@ template <class C, int A, int B>
     for (auto j = 0; j < m; ++j)
         CC_ASSERT(impl::coefficient_is_zero(w[j]), "tg::div_exact: the divisor does not divide");
     return impl::polynomial_from_range<polynomial<C, A>>(&w[0], m, n + 1);
+}
+
+// content, primitive part and gcd
+
+namespace impl
+{
+/// C has a gcd: bigint does, and a polynomial over such a C, through tg::gcd below.
+template <class C>
+concept has_gcd = requires(C const& a) { gcd(a, a); };
+
+/// -1, 0 or +1 for a coefficient: its own sign() where it has one, a polynomial's leading coefficient's, its comparison with 0 otherwise.
+template <class C>
+[[nodiscard]] int leading_sign(C const& c)
+{
+    if constexpr (requires { c.sign(); })
+        return c.sign();
+    else if constexpr (is_polynomial<C>)
+        return c.is_zero() ? 0 : leading_sign(c.leading_coefficient());
+    else
+        return int(C(0) < c) - int(c < C(0));
+}
+
+/// p with every coefficient divided by c, which divides each of them.
+template <class C, int D>
+[[nodiscard]] polynomial<C, D> divide_coefficients(polynomial<C, D> p, C const& c)
+{
+    for (auto i = 0; i < p.stored_count(); ++i)
+        if (!coefficient_is_zero(p[i]))
+            p[i] = exact_quotient(p[i], c);
+    return p;
+}
+
+template <class C>
+[[nodiscard]] C power_of(C const& c, int e)
+{
+    auto r = C(1);
+    for (auto i = 0; i < e; ++i)
+        r = r * c;
+    return r;
+}
+
+/// The subresultant sequence's scale factors (Collins, Brown): g the last leading coefficient, h the last subresultant's.
+template <class C>
+struct subresultant_scale
+{
+    C g = C(1);
+    C h = C(1);
+};
+
+/// One step of the sequence, from the pseudo-remainder r of x by y with delta = deg x - deg y:
+/// x takes y, and y takes r / (g h^delta), which is exact; then g and h move on, h to g^delta / h^(delta - 1), also exact.
+template <class C>
+void subresultant_step(polynomial<C>& x, polynomial<C>& y, polynomial<C> r, int delta, subresultant_scale<C>& s)
+{
+    x = cc::move(y);
+    y = divide_coefficients(cc::move(r), s.g * power_of(s.h, delta));
+    s.g = x.leading_coefficient();
+    if (delta == 1)
+        s.h = s.g;
+    else if (delta > 1)
+        s.h = exact_quotient(power_of(s.g, delta), power_of(s.h, delta - 1));
+}
+} // namespace impl
+
+/// The gcd of p's coefficients, signed as p's leading coefficient, so that primitive_part(p) leads positively; 0 for p = 0.
+template <class C, int D>
+    requires impl::has_gcd<C>
+[[nodiscard]] C content(polynomial<C, D> const& p)
+{
+    auto g = C(0);
+    for (auto i = 0; i < p.stored_count(); ++i)
+        if (!impl::coefficient_is_zero(p[i]))
+            g = gcd(g, p[i]);
+    if (!p.is_zero() && impl::leading_sign(p.leading_coefficient()) < 0)
+        g = -g;
+    return g;
+}
+
+/// p / content(p): coefficients without a common factor, the leading one positive.
+template <class C, int D>
+    requires impl::has_gcd<C>
+[[nodiscard]] polynomial<C, D> primitive_part(polynomial<C, D> const& p)
+{
+    if (p.is_zero())
+        return p;
+    return impl::divide_coefficients(p, content(p));
+}
+
+/// The greatest common divisor, unique up to a unit and normalized: monic over a field, leading positively over the integers.
+/// Over an exact field it is Euclid's; over a ring with a gcd of its own, the subresultant sequence, whose divisions are exact
+/// and whose coefficients stay as small as the determinants they are (Collins, Brown).
+/// A polynomial over such a ring has this gcd, so nested polynomials have one too; floats have none, their remainders never vanish.
+template <class C, int A, int B>
+    requires((traits::is_field<C> && traits::is_exact<C>) || impl::has_gcd<C>)
+[[nodiscard]] polynomial<C> gcd(polynomial<C, A> const& a, polynomial<C, B> const& b)
+{
+    using P = polynomial<C>;
+    P x(a);
+    P y(b);
+    if (x.degree() < y.degree())
+        cc::swap(x, y);
+    if constexpr (traits::is_field<C> && traits::is_exact<C>)
+    {
+        while (!y.is_zero())
+        {
+            P r(divrem(x, y).remainder);
+            x = cc::move(y);
+            y = cc::move(r);
+        }
+        if (x.is_zero())
+            return x;
+        auto const lc = x.leading_coefficient();
+        return impl::divide_coefficients(x, lc);
+    }
+    else
+    {
+        if (y.is_zero())
+            return impl::leading_sign(x.is_zero() ? C(0) : x.leading_coefficient()) < 0 ? -x : x;
+        auto const c = gcd(content(x), content(y));
+        x = primitive_part(x);
+        y = primitive_part(y);
+        impl::subresultant_scale<C> scale;
+        while (true)
+        {
+            auto const delta = x.degree() - y.degree();
+            auto r = pseudo_divrem(x, y).remainder;
+            if (r.is_zero())
+                break;
+            if (r.degree() == 0)
+            {
+                y = P(C(1));
+                break;
+            }
+            impl::subresultant_step(x, y, cc::move(r), delta, scale);
+        }
+        return primitive_part(y) * c;
+    }
+}
+
+/// The resultant: the determinant of the Sylvester matrix, zero exactly when a and b share a root.
+/// By the subresultant sequence, over an exact field or a ring with a gcd, its divisions exact (Cohen, Algorithm 3.3.7).
+template <class C, int A, int B>
+    requires((traits::is_field<C> && traits::is_exact<C>) || impl::has_gcd<C>)
+[[nodiscard]] C resultant(polynomial<C, A> const& a, polynomial<C, B> const& b)
+{
+    using P = polynomial<C>;
+    P x(a);
+    P y(b);
+    if (x.is_zero() || y.is_zero())
+        return C(0);
+    // res(a, b) = (-1)^(deg a deg b) res(b, a)
+    auto sign = 1;
+    if (x.degree() < y.degree())
+    {
+        cc::swap(x, y);
+        if (x.degree() % 2 == 1 && y.degree() % 2 == 1)
+            sign = -1;
+    }
+    // res(c p, d q) = c^deg q d^deg p res(p, q): contents out first where there are any
+    auto t = C(1);
+    if constexpr (!traits::is_field<C>)
+    {
+        auto const cx = content(x);
+        auto const cy = content(y);
+        t = impl::power_of(cx, y.degree()) * impl::power_of(cy, x.degree());
+        x = impl::divide_coefficients(x, cx);
+        y = impl::divide_coefficients(y, cy);
+    }
+    impl::subresultant_scale<C> scale;
+    while (y.degree() > 0)
+    {
+        auto const delta = x.degree() - y.degree();
+        if (x.degree() % 2 == 1 && y.degree() % 2 == 1)
+            sign = -sign;
+        auto r = pseudo_divrem(x, y).remainder;
+        impl::subresultant_step(x, y, cc::move(r), delta, scale);
+    }
+    if (y.is_zero())
+        return C(0);
+    // the last subresultant: h^(1 - deg x) lc(y)^deg x, exact
+    auto const d = x.degree();
+    auto const last = impl::exact_quotient(impl::power_of(y.leading_coefficient(), d), impl::power_of(scale.h, d - 1));
+    return sign < 0 ? -(t * last) : t * last;
+}
+
+/// p without repeated factors: p / gcd(p, p'), up to a unit.
+template <class C, int D>
+    requires((traits::is_field<C> && traits::is_exact<C>) || impl::has_gcd<C>)
+[[nodiscard]] polynomial<C> squarefree_part(polynomial<C, D> const& p)
+{
+    if (p.degree() <= 0)
+        return polynomial<C>(p);
+    return div_exact(polynomial<C>(p), gcd(p, derivative(p)));
 }
 } // namespace tg
 
