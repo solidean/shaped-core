@@ -39,7 +39,8 @@ The local runs hung in "sv - a decal coming, changing or going restarts the view
 
 A trace of every completion, arm, park and wake showed both hypotheses above wrong: the waiter is parked on the right submission's fence, and the GPU never reaches it.
 - **Measured:** the stuck submission waits on no copy or download fence, so no cross-queue cycle; WARP simply never finishes it.
-- **Measured:** "sv - a view stepping sideways in front of a wall reports the step as every pixel's motion" alone, `--thorough`, hangs every time on the first frame that runs the full hybrid deferred pass, within 30 s.
+- **Measured:** "sv - a view stepping sideways in front of a wall reports the step as every pixel's motion" alone, `--thorough`, hangs every time.
+  It stops on the first frame that runs the full hybrid deferred pass, within 30 s.
   With that frame's `light_thin` dispatch removed, the hang moves to the first full hybrid forward frame.
   With `light_thin` cut to a constant store, it moves to the first wavefront frame.
   A single constant ray in `light_thin`, opaque and skipping procedurals, still hangs, and so does `light_thin` without any trace; a smaller wall changes nothing.
