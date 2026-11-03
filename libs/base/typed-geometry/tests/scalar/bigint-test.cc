@@ -8,7 +8,8 @@ using namespace cc::primitive_defines;
 using tg::bigint;
 using tg::fi256;
 
-static_assert(sizeof(bigint) == 8);
+// one pointer, to a node of cc's node allocator: 8 bytes on a 64-bit target and 4 on wasm32
+static_assert(sizeof(bigint) == sizeof(void*));
 
 namespace
 {
