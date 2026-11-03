@@ -180,6 +180,9 @@ struct sv::frame_mesh
     cc::hash128 hash;
     sg::buffer<tg::pos3f> vertices;
     sg::buffer<u32> indices;
+    /// The same indices as a raster frame binds them to draw the mesh, a buffer of their own: `indices` is in the bindless tables,
+    /// and on dx12 a buffer uploaded this frame and read both through them and as the index buffer inside one pass was refused its barrier.
+    sg::buffer<u32> draw_indices;
     isize triangle_count = 0;
     sg::blas_handle blas; // null until a trace asks for it
 };

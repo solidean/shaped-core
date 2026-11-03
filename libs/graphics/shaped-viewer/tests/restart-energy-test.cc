@@ -32,6 +32,8 @@ struct reading
     /// the automatic exposure, in stops, or 0 before a reading landed
     f32 exposure = 0;
     u32 samples = 0;
+    /// whether the frame shaded through a stand-in for a permutation still compiling, whose image is not the converged one
+    bool stand_ins = false;
 };
 
 [[nodiscard]] f32 mean_luminance(cc::span<tg::vec4f const> pixels)
@@ -121,10 +123,12 @@ ASYNC_INVOCABLE_TEST("sv - restarting the accumulation keeps the image's mean an
             co_await ctx.idle_completion();
             sv_test::drive_ambient_work();
 
-            auto out = reading{.samples = store.min_accumulated_samples(id)};
+            auto out = reading{.samples = store.min_accumulated_samples(id),
+                               .stand_ins = slot == nullptr || slot->stand_in_hash != 0};
             if (accumulated.is_valid())
             {
-                auto const& pixels = co_await accumulated.data();
+                auto const pixels_async = accumulated.data();
+                auto const& pixels = co_await pixels_async;
                 out.mean = mean_luminance(cc::span<tg::vec4f const>(pixels.data(), pixels.size()));
             }
             if (state != nullptr && !state->auto_exposure.empty() && state->auto_exposure[0].primed)
@@ -133,16 +137,16 @@ ASYNC_INVOCABLE_TEST("sv - restarting the accumulation keeps the image's mean an
         };
 
         // Converged: every compile landed, the mean holds enough samples, and the exposure has had time to settle.
-        // Counted from the first frame that drew anything, since a compile may take most of the frames otherwise, and
-        // the exposure moves a fifth of the way per reading.
+        // Counted from the last frame that shaded through a stand-in, since its image is another one, and the exposure
+        // meters it all the same: it moves a fifth of the way per reading, so it needs frames after the compile lands.
+        // Counting stand-in frames let a late compile end the wait while the exposure was still adapting (measured).
         auto converged = reading{};
         auto drawn = 0;
         auto const start = cc::current_time_steady_secs();
         while (drawn < 128 || converged.samples < 64)
         {
             converged = co_await frame();
-            if (converged.samples > 0)
-                ++drawn;
+            drawn = converged.samples > 0 && !converged.stand_ins ? drawn + 1 : 0;
             REQUIRE(cc::current_time_steady_secs() - start < 60.0);
         }
         REQUIRE(converged.mean > 0.0f);
