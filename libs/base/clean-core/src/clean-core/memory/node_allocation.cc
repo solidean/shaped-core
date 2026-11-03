@@ -19,31 +19,85 @@ byte* system_refill_slabs_and_allocate_node_bytes(cc::node_allocator::slab_info&
 // forward declaration of the system node memory resource (defined below)
 extern cc::node_memory_resource system_node_memory_resource;
 
-/// Splice a slab into the class's ring as the new head, retaining the existing slabs.
-/// Frontend-agnostic — it touches only next pointers — and used by both fresh refill and orphan adoption.
-void node_splice_slab_as_head(cc::node_allocator::slab_info& slabs, cc::node_class_index idx, byte* new_slab)
+/// The owning allocator's slab_info, stamped at refill and adoption; read only by an owner free into a full slab.
+cc::node_allocator::slab_info*& node_slab_allocator_for_base(byte* base)
 {
-    byte*& head = slabs.slab_base[isize(idx)];
-    if (head == nullptr) // first slab for this class: a self-cycle
+    return *reinterpret_cast<cc::node_allocator::slab_info**>(base + cc::node_slab_allocator_offset); // NOLINT
+}
+
+/// The link through the allocator's available stack.
+byte*& node_slab_available_next_for_base(byte* base)
+{
+    return *reinterpret_cast<byte**>(base + cc::node_slab_available_next_offset); // NOLINT
+}
+
+/// Push a slab with free slots onto its allocator's available stack; it must be neither the head nor marked full.
+void node_push_available(cc::node_allocator::slab_info& slabs, cc::node_class_index idx, byte* slab)
+{
+    node_slab_available_next_for_base(slab) = slabs.available[isize(idx)];
+    slabs.available[isize(idx)] = slab;
+}
+
+/// Mark one of this thread's slabs full: off the available stack, so the owner's next free into it lists it again.
+/// Valid only for a slab whose local is empty.
+/// Threaded, the mark is the owner stamp's full bit, so the owner's free path stays one compare; single-threaded, it is local's bit 0.
+void node_slab_mark_full(byte* base)
+{
+#if CC_HAS_THREADS
+    // atomic for the remote frees reading the stamp concurrently; any value it takes routes them to remote
+    cc::atomic_ref<u32>(*cc::node_slab_owner_for_base(base))
+        .store(cc::node_owner_token() | cc::node_slab_owner_full, cc::memory_order_relaxed);
+#else
+    *cc::node_slab_freemap_for_base(base) = cc::node_slab_full_mark;
+#endif
+}
+
+/// Clear a slab's full mark, if it has one; the slab must be this thread's.
+void node_slab_clear_full(byte* base)
+{
+#if CC_HAS_THREADS
+    cc::atomic_ref<u32>(*cc::node_slab_owner_for_base(base)).store(cc::node_owner_token(), cc::memory_order_relaxed);
+#else
+    *cc::node_slab_freemap_for_base(base) &= ~cc::node_slab_full_mark;
+#endif
+}
+
+/// A slab's free slots in local, without a full mark.
+u64 node_slab_free_bits(byte* base)
+{
+#if CC_HAS_THREADS
+    return *cc::node_slab_freemap_for_base(base);
+#else
+    return *cc::node_slab_freemap_for_base(base) & ~cc::node_slab_full_mark;
+#endif
+}
+
+/// Splice a slab into the class's ring after the hand, and move the hand onto it, so the next walk carries on past it.
+/// Stamps the slab with the allocator; the caller decides whether it becomes the head.
+/// Frontend-agnostic, and used by both fresh refill and orphan adoption.
+void node_splice_slab(cc::node_allocator::slab_info& slabs, cc::node_class_index idx, byte* new_slab)
+{
+    byte*& hand = slabs.hand[isize(idx)];
+    if (hand == nullptr) // first slab for this class: a self-cycle
         *cc::node_slab_next_ptr_for_base(new_slab) = new_slab;
-    else // insert after the old head so the whole ring stays reachable
+    else
     {
-        *cc::node_slab_next_ptr_for_base(new_slab) = cc::node_slab_next_for_base(head);
-        *cc::node_slab_next_ptr_for_base(head) = new_slab;
+        *cc::node_slab_next_ptr_for_base(new_slab) = cc::node_slab_next_for_base(hand);
+        *cc::node_slab_next_ptr_for_base(hand) = new_slab;
     }
-    head = new_slab;
+    hand = new_slab;
+    node_slab_allocator_for_base(new_slab) = &slabs;
 }
 
 /// Drain a slab's remote frees into local and report whether every usable slot is now free, i.e. no live node points into it.
 /// The single-threaded frontend has no remote to drain.
 bool node_slab_drain_and_is_fully_free(byte* base, cc::node_class_index idx)
 {
-    u64 local = *cc::node_slab_freemap_for_base(base);
 #if CC_HAS_THREADS
-    local |= cc::atomic_ref<u64>(*cc::node_slab_remote_for_base(base, idx)).exchange(0, cc::memory_order_acquire);
-    *cc::node_slab_freemap_for_base(base) = local;
+    *cc::node_slab_freemap_for_base(base)
+        |= cc::atomic_ref<u64>(*cc::node_slab_remote_for_base(base, idx)).exchange(0, cc::memory_order_acquire);
 #endif
-    return local == cc::node_seed_local_freemaps[isize(idx)];
+    return node_slab_free_bits(base) == cc::node_seed_local_freemaps[isize(idx)];
 }
 
 /// Return a slab to the backing resource.
@@ -59,35 +113,38 @@ void node_free_slab_to_backing(byte* base, cc::node_class_index idx)
 // a long-lived thread with a stable working set never produces a fully-free slab, so it never actually frees anything however often the sweep runs.
 constexpr u16 node_trim_period = 64;
 
-// how many slabs one exhaustion visits before it refills: the walk is a clock hand, resuming where the last one stopped.
-// so an exhaustion costs O(1) however long the ring, and a slot freed behind the hand waits for the next lap.
-// a lap takes ring / limit exhaustions, each adding at most one slab, so the slabs added while a free slot waits stay under 1 / limit of the ring: 12.5% at 8.
+// how many slabs one walk for remote frees visits before it refills: the walk is a clock hand, resuming where the last one stopped.
+// owner frees never wait for it, they list their slab at once; only a remote free into a full slab waits for the hand.
+// a lap takes ring / limit exhaustions, each adding at most one slab, so the slabs added while a remote free waits stay under 1 / limit of the ring: 12.5% at 8.
 constexpr int node_walk_limit = 8;
 
 /// Reclaim surplus fully-free slabs of a class back to the backing resource, keeping the ring non-empty and
 /// retaining exactly one fully-free slab as a spare (so steady churn never re-mallocs). Cold path only.
+/// Rebuilds the available stack from what is left, so the remote frees it drained are listed too.
 void node_trim_ring(cc::node_allocator::slab_info& slabs, cc::node_class_index idx)
 {
-    byte* const head = slabs.slab_base[isize(idx)];
-    if (head == nullptr)
+    byte* const hand = slabs.hand[isize(idx)];
+    if (hand == nullptr)
         return;
 
     // gather the ring into a local buffer; rings are small (bounded working set). skip if pathologically big.
     constexpr int cap = 64;
     byte* ring[cap];
     int n = 0;
-    for (byte* cur = head;;)
+    for (byte* cur = hand;;)
     {
         if (n == cap)
             return; // unexpectedly large ring: leave it alone this sweep
         ring[n++] = cur;
         cur = cc::node_slab_next_for_base(cur);
-        if (cur == head)
+        if (cur == hand)
             break;
     }
 
     // survivors = every non-fully-free slab, plus one fully-free spare; free the rest.
     // never empties the ring.
+    byte* const old_head = slabs.slab_base[isize(idx)];
+    bool head_survives = false;
     byte* survivors[cap];
     int s = 0;
     bool kept_spare = false;
@@ -96,21 +153,38 @@ void node_trim_ring(cc::node_allocator::slab_info& slabs, cc::node_class_index i
         if (node_slab_drain_and_is_fully_free(ring[i], idx))
         {
             if (!kept_spare)
-            {
                 kept_spare = true;
-                survivors[s++] = ring[i];
-            }
             else
+            {
                 node_free_slab_to_backing(ring[i], idx);
+                continue;
+            }
         }
-        else
-            survivors[s++] = ring[i];
+        head_survives |= ring[i] == old_head;
+        survivors[s++] = ring[i];
     }
 
     // rebuild the cyclic ring from the survivors (s >= 1 always: a non-empty ring keeps >= 1 slab)
     for (int i = 0; i < s; ++i)
         *cc::node_slab_next_ptr_for_base(survivors[i]) = survivors[(i + 1) % s];
-    slabs.slab_base[isize(idx)] = survivors[0];
+    byte* const head = head_survives ? old_head : survivors[0];
+    slabs.slab_base[isize(idx)] = head;
+    slabs.hand[isize(idx)] = survivors[0];
+
+    // every survivor but the head is listed if it has room and marked full if not; the head is never marked
+    slabs.available[isize(idx)] = nullptr;
+    for (int i = 0; i < s; ++i)
+    {
+        if (survivors[i] == head)
+            node_slab_clear_full(survivors[i]);
+        else if (node_slab_free_bits(survivors[i]) != 0)
+        {
+            node_slab_clear_full(survivors[i]);
+            node_push_available(slabs, idx, survivors[i]);
+        }
+        else
+            node_slab_mark_full(survivors[i]);
+    }
 }
 
 #if CC_HAS_THREADS
@@ -166,14 +240,14 @@ void system_reclaim_slabs(cc::node_allocator::slab_info& slabs, void* userdata)
     for (isize ci = 0; ci < isize(cc::node_class_index::small_count); ++ci)
     {
         auto const idx = cc::node_class_index(ci);
-        byte* const head = slabs.slab_base[ci];
-        if (head == nullptr)
+        byte* const hand = slabs.hand[ci];
+        if (hand == nullptr)
             continue;
 
         // one lock per class: a single release publishes every pushed slab to a future adopter
         auto& bin = s_orphans[ci];
         bin.lock();
-        byte* cur = head;
+        byte* cur = hand;
         do
         {
             byte* const nxt = cc::node_slab_next_for_base(cur); // read next before push/free clobbers cur
@@ -181,16 +255,21 @@ void system_reclaim_slabs(cc::node_allocator::slab_info& slabs, void* userdata)
                 node_free_slab_to_backing(cur, idx);
             else
             {
-                // only the exiting owner ever reaches here; the never-recycled token proves no live sharer
-                CC_ASSERT(*cc::node_slab_owner_for_base(cur) == cc::node_owner_token(),
+                CC_ASSERT((*cc::node_slab_owner_for_base(cur) & ~cc::node_slab_owner_full) == cc::node_owner_token(),
                           "reclaim must only orphan slabs still owned by the calling thread");
+                // this thread may still free into the slab after its allocator is gone, from a thread_local destroyed later.
+                // the orphan stamp no thread holds routes that free to remote, where the adopter drains it, instead of a plain write racing the adoption.
+                // atomic for the remote frees reading the stamp concurrently; this thread's own later frees see it in program order.
+                cc::atomic_ref<u32>(*cc::node_slab_owner_for_base(cur)).store(cc::node_orphan_owner, cc::memory_order_relaxed);
                 push_orphan_locked(idx, cur);
             }
             cur = nxt;
-        } while (cur != head);
+        } while (cur != hand);
         bin.unlock();
 
         slabs.slab_base[ci] = nullptr;
+        slabs.hand[ci] = nullptr;
+        slabs.available[ci] = nullptr;
     }
 }
 #endif // CC_HAS_THREADS
@@ -300,16 +379,18 @@ byte* system_refill_slabs_and_allocate_node_bytes(cc::node_allocator::slab_info&
         // drain remote frees accumulated while orphaned into local
         u64 local = *cc::node_slab_freemap_for_base(orphan);
         local |= cc::atomic_ref<u64>(*cc::node_slab_remote_for_base(orphan, idx)).exchange(0, cc::memory_order_acquire);
-        *cc::node_slab_freemap_for_base(orphan) = local;
         // track it in the ring regardless of capacity (future remote frees drain on the cold walk)
-        node_splice_slab_as_head(slabs, idx, orphan);
+        node_splice_slab(slabs, idx, orphan);
         if (local != 0) // adopted a slab with capacity: allocate from it and we are done
         {
             auto const slot_idx = cc::count_trailing_zeroes(local);
             *cc::node_slab_freemap_for_base(orphan) = local & ~(u64(1) << slot_idx);
+            slabs.slab_base[isize(idx)] = orphan;
             return cc::node_slot_ptr_for(orphan, idx, slot_idx);
         }
-        // orphan was full (all slots handed to others): fall through to malloc a fresh slab for this alloc
+        // orphan was full (all slots handed to others): marked, so our first free into it lists it, and on to a fresh slab for this alloc
+        *cc::node_slab_freemap_for_base(orphan) = 0;
+        node_slab_mark_full(orphan);
     }
 #endif
 
@@ -332,8 +413,9 @@ byte* system_refill_slabs_and_allocate_node_bytes(cc::node_allocator::slab_info&
     *cc::node_slab_owner_for_base(new_slab) = cc::node_owner_token(); // stamp the hydrating thread
 #endif
 
-    // splice into the ring as the new head, retaining any previous slabs (they may hold free slots)
-    node_splice_slab_as_head(slabs, idx, new_slab);
+    // splice into the ring at the hand as the new head, retaining any previous slabs (they may hold free slots)
+    node_splice_slab(slabs, idx, new_slab);
+    slabs.slab_base[isize(idx)] = new_slab;
 
     // allocate the first free slot from the new slab (owner-only, non-atomic — we just created it)
     CC_ASSERT(initial_freemap != 0, "newly allocated slab must have at least one free slot");
@@ -365,8 +447,9 @@ u32 cc::impl::node_next_owner_id()
     // ids are not reclaimed on thread exit (that leaks the thread's slabs -- a known, deferred follow-up).
     static cc::atomic<u32> s_next_owner_id = {1}; // 0 is reserved for "unassigned"
     u32 const id = s_next_owner_id.fetch_add(1, cc::memory_order_relaxed);
-    CC_ASSERT(id != 0, "node owner-id space exhausted (>4B threads ever); cross-thread-free after "
-                       "thread-exit is unsupported");
+    CC_ASSERT(id != 0 && id < cc::node_slab_owner_full - 1,
+              "node owner-id space exhausted (>2B threads ever); cross-thread-free after "
+              "thread-exit is unsupported");
     return id;
 }
 
@@ -423,51 +506,85 @@ byte* cc::node_allocator::allocate_node_bytes_non_fast(node_class_index idx)
         node_trim_ring(_slabs, idx);
     }
 
-    auto const start_base = _slabs.slab_base[isize(idx)];
-    if (start_base == nullptr) [[unlikely]]
+    byte* const head = _slabs.slab_base[isize(idx)];
+    if (head == nullptr) [[unlikely]]
         return this->refill_slabs_and_allocate_node_bytes(idx);
 
-    // The head's local just emptied, which is why the fast path fell through.
-    // But any slab in the ring, the head included, may have free slots: owner frees in local, cross-thread frees in remote.
-    // Walk at most node_walk_limit slabs from the head; on each slab with an empty local, drain remote into local, and retry.
-    // A walk that finds nothing leaves the head on the last slab it visited, so the refill splices the new slab in there and the next walk carries on past it.
-    auto base = start_base;
-    auto last = start_base;
-    for (int visited = 0; visited < node_walk_limit; ++visited)
+    // take a slot from a slab whose local just showed room, the head itself included; the head is never marked
+    auto const take = [&](byte* base, u64 freemap)
     {
-        CC_ASSERT(base != nullptr, "the slab ring must be a cycling single-linked-list. indicates a "
-                                   "node_memory_resource bug.");
+        _slabs.slab_base[isize(idx)] = base;
+        auto const slot_idx = cc::count_trailing_zeroes(freemap);
+        *cc::node_slab_freemap_for_base(base) = freemap & ~(u64(1) << slot_idx); // owner-only, non-atomic
+        return cc::node_slot_ptr_for(base, idx, slot_idx);
+    };
 
-        auto const local = cc::node_slab_freemap_for_base(base);
-        u64 freemap = *local;
 #if CC_HAS_THREADS
-        // reclaim cross-thread frees into local; the plain load first keeps a full slab free of a locked instruction.
-        // a free that lands after the load waits for the next lap.
-        if (freemap == 0)
-        {
-            auto remote = cc::atomic_ref<u64>(*cc::node_slab_remote_for_base(base, idx));
-            if (remote.load(cc::memory_order_relaxed) != 0)
-                freemap = remote.exchange(0, cc::memory_order_acquire);
-        }
+    // drain a slab's remote frees, if it has any; the plain load first keeps a slab without them free of a locked instruction.
+    // a free that lands after the load waits for the next lap.
+    auto const drain_remote = [&](byte* base) -> u64
+    {
+        auto remote = cc::atomic_ref<u64>(*cc::node_slab_remote_for_base(base, idx));
+        return remote.load(cc::memory_order_relaxed) != 0 ? remote.exchange(0, cc::memory_order_acquire) : 0;
+    };
+
 #endif
 
-        if (freemap != 0) [[likely]]
-        {
-            _slabs.slab_base[isize(idx)] = base; // keep allocating from this slab
-            auto const slot_idx = cc::count_trailing_zeroes(freemap);
-            *local = freemap & ~(u64(1) << slot_idx); // owner-only, non-atomic
-            return cc::node_slot_ptr_for(base, idx, slot_idx);
-        }
+    // the head's local just emptied, which is why the fast path fell through, unless the trim above chose a new head with room
+    if (u64 const freemap = *cc::node_slab_freemap_for_base(head); freemap != 0)
+        return take(head, freemap);
 
-        last = base;
-        base = cc::node_slab_next_for_base(base);
-        if (base == start_base)
-            break;
+#if CC_HAS_THREADS
+    // the head's own remote frees come first
+    if (u64 const freemap = drain_remote(head); freemap != 0)
+        return take(head, freemap);
+#endif
+
+    // the head is full: marked, so the first owner free into it lists it again
+    node_slab_mark_full(head);
+
+    // a slab an owner free listed: room for certain, and no search
+    if (byte* const listed = _slabs.available[isize(idx)]; listed != nullptr)
+    {
+        _slabs.available[isize(idx)] = node_slab_available_next_for_base(listed);
+        u64 const freemap = *cc::node_slab_freemap_for_base(listed);
+        CC_ASSERT(freemap != 0 && freemap == node_slab_free_bits(listed), "a listed slab must have room and no full "
+                                                                          "mark");
+        return take(listed, freemap);
     }
 
-    // the walk found nothing (local + remote) => request a new slab, spliced in where the walk stopped
-    _slabs.slab_base[isize(idx)] = last;
+#if CC_HAS_THREADS
+    // no owner free left room, so only remote frees can have: walk at most node_walk_limit slabs on from the hand.
+    // the available stack is empty, so every slab the walk meets is marked full; one with remote frees loses its mark and becomes the head.
+    // a walk that finds nothing leaves the hand on the last slab it visited, so the refill splices the new slab in there and the next walk carries on past it.
+    byte*& hand = _slabs.hand[isize(idx)];
+    byte* const start = hand;
+    for (int visited = 0; visited < node_walk_limit; ++visited)
+    {
+        hand = cc::node_slab_next_for_base(hand);
+        CC_ASSERT(hand != nullptr, "the slab ring must be a cycling single-linked-list. indicates a "
+                                   "node_memory_resource bug.");
+        if (u64 const freemap = drain_remote(hand); freemap != 0)
+        {
+            node_slab_clear_full(hand);
+            return take(hand, freemap);
+        }
+        if (hand == start)
+            break;
+    }
+#endif
+
+    // nothing has room (local + remote) => request a new slab, spliced in at the hand
     return this->refill_slabs_and_allocate_node_bytes(idx);
+}
+
+void cc::node_allocation_free_into_full(byte* base, node_class_index idx, u64 slot_bit)
+{
+    node_slab_clear_full(base);
+    auto const freemap = cc::node_slab_freemap_for_base(base);
+    CC_ASSERT((*freemap & slot_bit) == 0, "node is already freed. double-delete or corruption?");
+    *freemap |= slot_bit;
+    node_push_available(*node_slab_allocator_for_base(base), idx, base);
 }
 
 cc::node_allocator* cc::impl::node_alloc_hydrate_default()

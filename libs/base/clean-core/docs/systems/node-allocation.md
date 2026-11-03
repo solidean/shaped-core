@@ -25,21 +25,45 @@ So the slab base is recovered from any interior pointer by `ptr & ~(slab_size - 
 Data starts at slab offset 0, and slots that overlap the slab's metadata are permanently blocked by a per-class **consteval seed mask** (`node_compute_seed_local_freemap`).
 The metadata layout is **frontend-dependent**, on `CC_HAS_THREADS`:
 
-- **Threaded** (native, wasm+pthreads): `local` free bitmap `@0` (u64), `owner_id` `@8` (u32),
-  next-slab pointer `@16`; a second **`remote`** free bitmap on the 2nd cache line `@64` (for classes
-  whose slab spans two lines, i.e. ≥ 2 B) or `@24` for the single-line 1 B class.
-- **Single-threaded** (wasm without `-pthread`): `local` free bitmap `@0`, next-slab pointer `@8`.
-  No
-  owner/remote — the second cache line is not touched.
+- **Threaded** (native, wasm+pthreads): `local` free bitmap `@0` (u64), `owner_id` `@8` (u32), next-slab pointer `@16`, owning allocator `@24`, available-stack link `@32`.
+  A second **`remote`** free bitmap sits on the 2nd cache line `@64` for classes whose slab spans two lines, i.e. ≥ 2 B, or `@40` for the single-line 1 B class.
+- **Single-threaded** (wasm without `-pthread`): `local` free bitmap `@0`, next-slab pointer `@8`, owning allocator `@16`, available-stack link `@24`.
+  No owner/remote — the second cache line is not touched.
 
 The metadata consumes whole slots, so usable capacity depends on class size and frontend:
 
 | class size | usable (threaded) | usable (single) |
 |---:|---:|---:|
-| 1 B | 36 | 48 |
-| 2 B | 50 | 56 |
-| 8 B | 60 | 62 |
-| ≥ 16 B | ~62 | 63 |
+| 1 B | 20 | 32 |
+| 2 B | 42 | 48 |
+| 4 B | 53 | 56 |
+| 8 B | 58 | 60 |
+| 16 B | 60 | 62 |
+| 32 B | 61 | 63 |
+| ≥ 64 B | 62–63 | 63 |
+
+The owning allocator and the stack link cost the 1 B class 16 slots, the 2 B class 8 and the 8 B class 2; from 64 B on they fit in slot 0 with the bitmap.
+
+### Finding room: the available stack, and a clock hand for remote frees
+
+Each allocator keeps, per class, a **ring** of all its slabs, an **available stack** of the slabs with free slots, and a **hand** into the ring.
+When the head's `local` empties, the cold path drains the head's own `remote`, then marks the head full and pops the available stack.
+Threaded, the mark is the top bit of the slab's `owner_id`, `node_slab_owner_full`.
+The owner's free into a marked slab then fails the owner compare it makes anyway, and lands in the remote branch.
+There a second compare recognizes the owner with the bit, and an out-of-line call clears the mark and lists the slab.
+So the owner's free path is the single `or` it always was, and only remote frees pay a second compare.
+The call costs a loop of frees one load: after it the compiler can no longer assume the owner token, so it reloads it from TLS before each compare.
+Measured against the clock hand alone, release on a 9950X3D2: about 4.5% in the 10-node batch benchmark, and 0.16% more instructions on labs/bignum's sparse polynomial product.
+Listing inline instead, with no call, removes the reload but spills registers around every free site: 0.8% more instructions on that product, so it lost.
+Single-threaded there is no owner stamp, so a full slab's `local` is bit 0 alone, `node_slab_full_mark`, which costs that frontend's free one compare.
+Bit 0 is never a slot, since slot 0 always overlaps the bitmap.
+The owning allocator is found through the slab's metadata.
+So an owner free is reused at the next exhaustion, with no search, and a refill happens only when no slab holds an owner free.
+Folding the mark into `local` on the threaded frontend too measured about 11% slower in the batch benchmark: a load, compare and store in place of one `or`.
+
+A remote free cannot list its slab: the owning allocator may already be gone when another thread frees, and only the slab is known to outlive the node.
+So remote frees are found by a **clock hand**: with the stack empty, a walk visits at most 8 slabs on from the hand, drains the first `remote` it finds, and leaves the hand where it stopped.
+A walk that finds nothing refills, splicing the new slab in at the hand, so the next walk carries on past it; an exhaustion is O(1) however long the ring.
 
 The **fast path is two frontends behind an unchanged API**, selected at compile time:
 
@@ -80,13 +104,16 @@ unhydrated ──refill──▶ owned(T) ──thread exit, has live nodes─�
 - **Abandonment (thread exit).** When a thread's `thread_local` allocator is destroyed, it reclaims its ring **through a resource hook** (`node_memory_resource::reclaim_slabs`).
   The system resource implements it; a resource without the hook leaks its slabs on exit instead.
   Per class, under a per-class lock: each slab's `remote` is drained into `local`, **fully-free** slabs go back to the backing resource, and the rest are pushed onto a per-class **orphan bin**.
-  Because `owner_id` is never recycled and the owner only stops owning by *dying*, every subsequent free into an orphaned slab is guaranteed to take the `remote` path.
-  So no plain-local writer can race the future adopter.
+  Each orphan is stamped `node_orphan_owner`, an owner id no thread holds, so every later free into it takes the `remote` path.
+  That includes the exiting thread's own: a `thread_local` constructed before the thread's allocator is destroyed after it, and its frees come after the reclaim.
+  So no plain-local writer can race the future adopter; the test "a free after its thread's allocator is gone routes to remote" pins it.
 - **Adoption (refill).** Before mallocing a fresh slab, refill pops one orphan of the class if present.
   It re-stamps `owner_id` to the adopting thread, drains the slab's accumulated `remote` frees, and splices it into the ring.
   `owner_id` is only ever *stamped* atomically — an `atomic_ref` store on the cold refill path — while the hot free-path read stays a plain `u32` load.
 - **Trim.** On the cold allocation path only, never on free, a per-class counter gates a rare O(ring) sweep that returns surplus fully-free slabs to the backing resource.
   One fully-free spare is kept, so a steady working set never re-mallocs.
+  The sweep drains every `remote`, so it rebuilds the available stack from what is left.
+  It skips a ring of more than 64 slabs, so the slabs of a big bulk phase stay with the thread after it is freed.
   A stable set of live nodes never produces a fully-free slab, so a long-lived thread never actually trims.
 
 The per-class orphan bins are `constinit` spinlocks rather than `std::mutex`, so they are never torn down and the main thread's allocator can reclaim safely even during static destruction.
@@ -97,7 +124,8 @@ There is deliberately **no mid-life slab migration** between live threads: that 
 
 - **`owner_id` is a `u32` and is never recycled.** Abandonment reclaims *slabs*, not *ids*, so the counter stays monotonic.
   That is what keeps a live id from ever being reused, and a free from being miscategorized.
-  An assert fires past ~4 B threads *ever* created: a fixed thread pool never wraps, and a server that spawns billions of threads over its lifetime would.
+  Its top bit is the full mark, and `~0` the orphan stamp, so ids stay below 2^31 - 1.
+  An assert fires past ~2 B threads *ever* created: a fixed thread pool never wraps, and a server that spawns billions of threads over its lifetime would.
   Accepted, and loud when hit — see [philosophy.md](../../../../../docs/philosophy.md), "fail loud".
 
 - **Cross-thread frees into an orphaned-but-never-adopted slab accumulate in `remote`.**
@@ -105,12 +133,11 @@ There is deliberately **no mid-life slab migration** between live threads: that 
   Frees keep landing in `remote` and are only reclaimed once the slab is adopted.
   Bounded at one bin per class, so not a leak in the grow-unbounded sense — but worth knowing.
 
-- **An exhaustion visits at most 8 slabs, so a free slot can wait a lap, and the ring can grow up to 12.5% while it waits** ([node_allocation.cc](../../src/clean-core/memory/node_allocation.cc)).
-  The walk is a clock hand: it resumes where the last one stopped, and a walk that finds nothing refills, splicing the new slab in at the hand.
-  So an exhaustion is O(1) however long the ring, and a bulk phase is linear in its nodes; a full lap per exhaustion made it quadratic.
-  The price: a slot freed behind the hand is found only on the next lap, ring / 8 exhaustions later, each adding a slab.
-  The slabs added while free slots wait stay under 1/8 of the ring, 12.5%; that lap then reuses the slots.
-  `node_walk_limit` is the knob, and the test "a slot freed behind the walk is reused within one lap" pins the bound.
+- **A remote free into a full slab can wait a lap, and the ring can grow up to 12.5% while it waits** ([node_allocation.cc](../../src/clean-core/memory/node_allocation.cc)).
+  Owner frees never wait; this is the clock hand's price for remote frees alone.
+  A slot freed behind the hand is found only on the next lap, ring / 8 exhaustions later, each adding a slab.
+  The slabs added while remote frees wait stay under 1/8 of the ring, 12.5%; that lap then reuses the slots.
+  `node_walk_limit` is the knob, and the test "a remote free into a full slab is reused within one lap" pins the bound.
 
 - **Allocation is single-threaded per allocator.** A `node_allocator` is a thread-local cache and must not allocate from two threads; only *free* is concurrency-safe.
   A `node_memory_resource` that serves many threads does so by handing out different allocators, e.g. via TLS, which is what the default does.
@@ -120,9 +147,10 @@ There is deliberately **no mid-life slab migration** between live threads: that 
 
 Still open:
 
-- **Exact reuse instead of the clock hand** — find a freed slot at once, so the ring never grows past its live nodes while one waits.
-  The owner's own frees could do it cheaply: a full slab leaves the walk, and the first free into it lists it again, one compare on the free path.
-  A candidate that removes the walk entirely: a **per-owner pending stack** of slabs with remote frees.
+- **Exact reuse of remote frees** — the owner's frees list their slab at once; remote frees still wait for the clock hand.
+  The principled fix is metadata that lives as long as the slab, which a remote free may touch: **segments**, slabs carved from one aligned block whose header is found by masking, as mimalloc does.
+  A remote free would mark its slab in the header, and the owner would scan one word per 64 slabs; the price is that slabs stop being individual allocations, and trim and orphaning go per segment.
+  Another candidate removes the walk entirely: a **per-owner pending stack** of slabs with remote frees.
   The remote free that takes a slab's `remote` bitmap from empty to non-empty also pushes the slab onto its owner's lock-free stack.
   The stack is linked through the slab metadata, and a `listed` flag keeps a slab from being pushed twice.
   On exhaustion the owner takes the whole stack with one `exchange` and drains exactly the slabs that gained frees, so there is no ABA and no scan.
@@ -193,9 +221,10 @@ mov   [r8], r9                     ; write the bitmap back           <- no lock
 ; --- free ---
 mov   r11d, [base + 8]             ; the slab's owner_id
 cmp   r11d, [owner_token]          ; == this thread's token?  (raw TLS read, no lazy-init branch)
-jne   .remote
+jne   .not_owner
 or    [base], bit                  ; owner: OR the slot back          <- no lock
-.remote:
+.not_owner:
+;     owner_id == token | full bit: the owner into a slab marked full, a cold call lists it again
 lock  or [base + remote_off], bit  ; other thread: the ONLY atomic in the hot path
 ```
 
