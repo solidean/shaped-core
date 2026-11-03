@@ -8,7 +8,6 @@ using namespace cc::primitive_defines;
 using tg::bigint;
 using tg::fi256;
 
-// one pointer, to a node of cc's node allocator: 8 bytes on a 64-bit target and 4 on wasm32
 static_assert(sizeof(bigint) == sizeof(void*));
 
 namespace
@@ -147,6 +146,65 @@ TEST("tg bigint - ring and division identities hold exactly")
     }
 }
 
+TEST("tg bigint - every sum shape agrees with limb-at-a-time sums")
+{
+    // up to 20 limbs each, so the kernel's first loop meets every length mod 4 and its tail every length,
+    // into a target that holds the result, the lean path, and in place
+    auto rng = nx::test_random();
+    auto r = bigint(1) << (64 * 40); // a node with room for every result
+    for (auto n = 1; n <= 20; ++n)
+        for (auto m = 1; m <= 20; ++m)
+        {
+            // all ones: 2^64n - 1 + 2^64m - 1, and their difference, where every carry and borrow runs as far as it can
+            auto const ones_n = (bigint(1) << (64 * n)) - bigint(1);
+            auto const ones_m = (bigint(1) << (64 * m)) - bigint(1);
+            r.assign_add(ones_n, ones_m);
+            CHECK(r == (bigint(1) << (64 * n)) + (bigint(1) << (64 * m)) - bigint(2));
+            r.assign_sub(ones_n, ones_m);
+            CHECK(r == (bigint(1) << (64 * n)) - (bigint(1) << (64 * m)));
+
+            u64 a_limbs[20];
+            u64 b_limbs[20];
+            for (auto i = 0; i < n; ++i)
+                a_limbs[i] = random_limb(rng);
+            for (auto i = 0; i < m; ++i)
+                b_limbs[i] = random_limb(rng);
+            a_limbs[n - 1] |= 1;
+            b_limbs[m - 1] |= 1;
+            auto const a = bigint::from_limbs(cc::span<u64 const>(a_limbs, isize(n)), (rng.next_u64() & 1) != 0);
+            auto const b = bigint::from_limbs(cc::span<u64 const>(b_limbs, isize(m)), (rng.next_u64() & 1) != 0);
+
+            // b one limb at a time, each sum of a different shape than a + b
+            auto sum = a;
+            auto difference = a;
+            for (auto i = 0; i < m; ++i)
+            {
+                auto term = bigint(b_limbs[i]) << (64 * i);
+                if (b.is_negative())
+                    term.negate();
+                sum += term;
+                difference -= term;
+            }
+
+            r.assign_add(a, b);
+            CHECK(r == sum);
+            r.assign_sub(a, b);
+            CHECK(r == difference);
+            auto x = a;
+            x += b;
+            CHECK(x == sum);
+            x = a;
+            x -= b;
+            CHECK(x == difference);
+            auto y = b;
+            y.assign_add(a, y);
+            CHECK(y == sum);
+            y = b;
+            y.assign_sub(a, y);
+            CHECK(y == difference);
+        }
+}
+
 TEST("tg bigint - every product shape agrees with the one-limb rows")
 {
     // up to 70 limbs, past the fixed kernels, Karatsuba's threshold, its odd splits and the chunks of an unbalanced product
@@ -179,6 +237,34 @@ TEST("tg bigint - every product shape agrees with the one-limb rows")
             CHECK(a * b == expected);
             CHECK(b * a == expected);
         }
+}
+
+TEST("tg bigint - division recovers a known quotient and remainder")
+{
+    // divisors of all ones or a lone top bit, quotient limbs of all ones: windows whose top two limbs equal the divisor's,
+    // and digits whose 3/2 estimate is one too large, the division's rarely taken branches
+    auto rng = nx::test_random();
+    for (auto m = 2; m <= 12; ++m)
+        for (auto k = 1; k <= 12; ++k)
+            for (auto round = 0; round < 8; ++round)
+            {
+                u64 d_limbs[12];
+                for (auto i = 0; i < m; ++i)
+                    d_limbs[i] = round % 2 == 0 ? random_limb(rng) : ~u64(0);
+                d_limbs[m - 1] |= round % 4 < 2 ? u64(1) << 63 : u64(1);
+                auto const d = bigint::from_limbs(cc::span<u64 const>(d_limbs, isize(m)));
+                u64 q_limbs[12];
+                for (auto i = 0; i < k; ++i)
+                    q_limbs[i] = round < 4 ? ~u64(0) : random_limb(rng);
+                q_limbs[k - 1] |= 1;
+                auto const q = bigint::from_limbs(cc::span<u64 const>(q_limbs, isize(k)));
+                // the largest remainder, or a random one below d
+                auto const r = round % 3 == 0 ? d - bigint(1) : abs(random_bigint(rng, m)) % d;
+                auto const a = q * d + r;
+                auto const [qq, rr] = div_mod(a, d);
+                CHECK(qq == q);
+                CHECK(rr == r);
+            }
 }
 
 TEST("tg bigint - gcd")
@@ -273,6 +359,18 @@ TEST("tg bigint - storage")
     CHECK(y.capacity() == 1);
     y += bigint(1);
     CHECK(y == (bigint(1) << 64));
+
+    // past 65535 limbs the header's capacity saturates: the lean paths step aside, and the node is still reused
+    auto huge = bigint(1) << (64 * 70000);
+    CHECK(huge.capacity() == 131071);
+    auto const* const huge_limbs = huge.limbs().data();
+    huge += bigint(1);
+    huge -= bigint(2);
+    CHECK(huge == (bigint(1) << (64 * 70000)) - bigint(1));
+    CHECK(huge.limbs().data() == huge_limbs);
+    huge.assign_add(huge, huge);
+    CHECK(huge == (bigint(1) << (64 * 70000 + 1)) - bigint(2));
+    CHECK(huge.limbs().data() == huge_limbs);
 
     auto copy = x;
     CHECK(copy == x);

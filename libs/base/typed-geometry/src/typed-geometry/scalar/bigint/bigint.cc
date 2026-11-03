@@ -199,64 +199,83 @@ void tg::bigint::_assign_sum_with_zero(bigint const& a, bigint const& b, bool su
         negate();
 }
 
-void tg::bigint::_assign_sum(bigint const& a, bigint const& b, bool subtract)
+bool tg::bigint::_try_sum(bigint const& a, bigint const& b, bool subtract)
 {
-    // the common case, kept lean so it needs few registers: nonzero operands into a node that holds the result,
-    // or into a fresh one when *this has none, as an operator's result starts out
+    // the common case, kept lean so it needs few registers: nonzero operands into a node that holds the result
     // the kernels read limb i before they write it, so *this may be either operand
-    auto* const ah = a._node;
-    auto* const bh = b._node;
-    if (ah != nullptr && bh != nullptr) [[likely]]
+    auto* const h = _node;
+    auto const* xh = a._node;
+    auto const* yh = b._node;
+    // one branch on the lowest address: as three tests clang merges them into setcc chains it then tests
+    if (cc::min(cc::min(reinterpret_cast<u64>(h), reinterpret_cast<u64>(xh)), reinterpret_cast<u64>(yh)) == 0)
+        [[unlikely]] // NOLINT
+        return false;
+    // terms of opposite signs, b's being -b in a subtraction, go to the difference before anything else is live
+    if ((xh->negative != yh->negative) != subtract)
+        return _try_difference(xh, yh);
+    // a sum of magnitudes, with the sign both terms share, x the longer one
+    auto const negative = xh->negative;
+    auto xn = i32(xh->size);
+    auto yn = i32(yh->size);
+    if (xn < yn)
     {
-        auto const an = i32(ah->size);
-        auto const bn = i32(bh->size);
-        if (an != 0 && bn != 0) [[likely]]
+        cc::swap(xh, yh);
+        cc::swap(xn, yn);
+    }
+    // room for a carry limb; a node exactly one short goes the slow way, which grows it
+    if (yn == 0 || i32(h->capacity) <= xn) [[unlikely]]
+        return false;
+    h->size = u32(xn);
+    h->negative = negative;
+    if (impl::limbs_add(bigint_limbs(h), bigint_limbs(xh), xn, bigint_limbs(yh), yn) != 0) [[unlikely]]
+    {
+        // the size read back from the node, so that nothing but h lives across the kernel
+        auto const n = h->size;
+        bigint_limbs(h)[n] = 1;
+        h->size = n + 1;
+    }
+    return true;
+}
+
+CC_DONT_INLINE bool tg::bigint::_try_difference(bigint_header const* ah, bigint_header const* bh)
+{
+    // the smaller magnitude from the larger, with the sign of the larger one's term: a's sign, or its opposite
+    auto const* xh = ah;
+    auto const* yh = bh;
+    auto xn = i32(xh->size);
+    auto yn = i32(yh->size);
+    auto negative = ah->negative;
+    if (xn < yn)
+    {
+        cc::swap(xh, yh);
+        cc::swap(xn, yn);
+        negative = !negative;
+    }
+    auto* const h = _node;
+    if (yn == 0 || i32(h->capacity) < xn) [[unlikely]]
+        return false;
+    auto const* x = bigint_limbs(xh);
+    auto const* y = bigint_limbs(yh);
+    if (xn == yn)
+    {
+        auto const c = impl::limbs_cmp(x, y, xn);
+        if (c == 0)
         {
-            auto const a_negative = ah->negative;
-            auto const b_negative = bh->negative != subtract;
-            auto const a_longer = an >= bn;
-            auto const* const x = bigint_limbs(a_longer ? ah : bh);
-            auto const* const y = bigint_limbs(a_longer ? bh : ah);
-            auto const xn = a_longer ? an : bn;
-            auto const yn = a_longer ? bn : an;
-            auto const same_sign = a_negative == b_negative;
-            // a carry out of the top limb needs x's top plus y's limb there to reach 2^64 - 1, so most sums need no extra limb
-            auto const y_top = yn == xn ? y[xn - 1] : u64(0);
-            auto const need = xn + i32(same_sign && x[xn - 1] >= ~y_top);
-            auto* h = _node;
-            if (h == nullptr)
-                h = _node = impl::bigint_allocate_out_of_line(need);
-            if (impl::bigint_class_capacity(h->node_class) >= need) [[likely]]
-            {
-                auto* const out = bigint_limbs(h);
-                if (same_sign)
-                {
-                    auto const carry = impl::limbs_add(out, x, xn, y, yn);
-                    if (carry != 0)
-                        out[xn] = carry;
-                    h->size = u32(xn + i32(carry));
-                    h->negative = a_negative;
-                    return;
-                }
-                // the smaller magnitude from the larger, with the larger one's sign
-                auto const c = xn != yn ? 1 : impl::limbs_cmp(x, y, xn);
-                if (c == 0)
-                {
-                    h->size = 0;
-                    h->negative = false;
-                    return;
-                }
-                auto const* const big = c > 0 ? x : y;
-                auto const* const small = c > 0 ? y : x;
-                (void)impl::limbs_sub(out, big, xn, small, c > 0 ? yn : xn);
-                auto const size = impl::limbs_normalized_size(out, xn);
-                h->size = u32(size);
-                h->negative = size != 0 && ((c > 0) == a_longer ? a_negative : b_negative);
-                return;
-            }
+            h->size = 0;
+            h->negative = false;
+            return true;
+        }
+        if (c < 0)
+        {
+            cc::swap(x, y);
+            negative = !negative;
         }
     }
-    _assign_sum_slow(a, b, subtract);
+    auto* const out = bigint_limbs(h);
+    (void)impl::limbs_sub(out, x, xn, y, yn);
+    h->size = u32(impl::limbs_normalized_size(out, xn));
+    h->negative = negative;
+    return true;
 }
 
 CC_DONT_INLINE void tg::bigint::_assign_sum_slow(bigint const& a, bigint const& b, bool subtract)
@@ -283,10 +302,8 @@ CC_DONT_INLINE void tg::bigint::_assign_sum_slow(bigint const& a, bigint const& 
         auto const* const y = a_longer ? bp : ap;
         auto const xn = a_longer ? an : bn;
         auto const yn = a_longer ? bn : an;
-        // a carry out of the top limb needs x's top plus y's limb there to reach 2^64 - 1, so most sums need no extra limb
-        auto const y_top = yn == xn ? y[xn - 1] : u64(0);
-        auto const may_carry = x[xn - 1] >= ~y_top;
-        auto* const out = _room(xn + i32(may_carry), replaced);
+        // room for the carry even when this sum has none, so that the next sum into *this takes the lean path
+        auto* const out = _room(xn + 1, replaced);
         auto const carry = impl::limbs_add(out, x, xn, y, yn);
         if (carry != 0)
             out[xn] = carry;
@@ -327,7 +344,7 @@ void tg::bigint::_assign_mul(bigint const& a, bigint const& b)
         auto const n = an + bn;
         if (h == nullptr && an != 0 && bn != 0)
             h = _node = impl::bigint_allocate_out_of_line(n);
-        if (h != nullptr && an != 0 && bn != 0 && impl::bigint_class_capacity(h->node_class) >= n) [[likely]]
+        if (h != nullptr && an != 0 && bn != 0 && i32(h->capacity) >= n) [[likely]]
         {
             auto* const out = bigint_limbs(h);
             impl::limbs_mul(out, bigint_limbs(ah), an, bigint_limbs(bh), bn);
@@ -489,6 +506,26 @@ void tg::bigint::assign_shr(bigint const& a, i64 n)
     free_if(replaced);
 }
 
+namespace
+{
+/// limbs_divrem with its scratch on the stack or, past that, the heap; apart, so a small division keeps a small frame.
+CC_DONT_INLINE void divrem_with_scratch(u64* q, u64* r, u64 const* a, i32 an, u64 const* b, i32 bn)
+{
+    auto const scratch_n = tg::impl::limbs_divrem_scratch(an, bn);
+    if (scratch_n <= 2 * stack_limbs)
+    {
+        u64 scratch[2 * stack_limbs];
+        tg::impl::limbs_divrem(q, r, a, an, b, bn, scratch);
+    }
+    else
+    {
+        auto scratch = cc::vector<u64>();
+        scratch.resize_to_uninitialized(scratch_n);
+        tg::impl::limbs_divrem(q, r, a, an, b, bn, scratch.data());
+    }
+}
+} // namespace
+
 void tg::div_mod(bigint& q, bigint& r, bigint const& a, bigint const& b)
 {
     CC_ASSERT(!b.is_zero(), "division by zero");
@@ -534,18 +571,10 @@ void tg::div_mod(bigint& q, bigint& r, bigint const& a, bigint const& b)
         return;
     }
 
-    auto const scratch_n = impl::limbs_divrem_scratch(an, bn);
-    if (scratch_n <= 2 * stack_limbs)
-    {
-        u64 scratch[2 * stack_limbs];
-        impl::limbs_divrem(qd, rd, ap, an, bp, bn, scratch);
-    }
+    if (bn == 2)
+        impl::limbs_divrem_2(qd, rd, ap, an, bp);
     else
-    {
-        auto scratch = cc::vector<u64>();
-        scratch.resize_to_uninitialized(scratch_n);
-        impl::limbs_divrem(qd, rd, ap, an, bp, bn, scratch.data());
-    }
+        divrem_with_scratch(qd, rd, ap, an, bp, bn);
     q._set(impl::limbs_normalized_size(qd, qn), q_negative);
     r._set(impl::limbs_normalized_size(rd, bn), r_negative);
 }
