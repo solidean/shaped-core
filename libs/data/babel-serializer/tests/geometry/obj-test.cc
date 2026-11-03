@@ -15,6 +15,26 @@ cc::span<byte const> as_bytes(cc::string_view s)
 }
 } // namespace
 
+TEST("obj - a '#' after a directive's values is a comment to the end of the line")
+{
+    auto const src = cc::string_view(R"(
+v 0 0 0 # origin
+v 1 0 0
+v 0 1 0
+vt 0.5 # u alone
+vn 0 0 1 # up
+f 1 2 3 # a note
+f 1 2 3 #glued
+)");
+    auto const m = babel::obj::read(src);
+    REQUIRE(m.has_value());
+    REQUIRE(m.value().faces.size() == 2);
+    CHECK(m.value().faces[0].corner_count == 3);
+    CHECK(m.value().faces[1].corner_count == 3);
+    REQUIRE(m.value().texcoords.size() == 1);
+    CHECK(m.value().texcoords[0][1] == 0.0f);
+}
+
 TEST("obj - basic attributes and a triangle")
 {
     auto const src = cc::string_view(R"(
