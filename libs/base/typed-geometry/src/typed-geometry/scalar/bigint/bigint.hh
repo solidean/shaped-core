@@ -157,6 +157,11 @@ struct tg::bigint
     /// -1, 0 or +1: a predicate's answer.
     [[nodiscard]] int sign() const { return is_zero() ? 0 : (_node->negative ? -1 : 1); }
     [[nodiscard]] bool is_odd() const { return !is_zero() && (impl::bigint_limbs(_node)[0] & 1) != 0; }
+    /// Whether the value is 1, a gcd's most common answer.
+    [[nodiscard]] bool is_one() const
+    {
+        return _node != nullptr && _node->size == 1 && !_node->negative && impl::bigint_limbs(_node)[0] == 1;
+    }
     /// The limbs of the magnitude.
     [[nodiscard]] i32 size() const { return _node == nullptr ? 0 : i32(_node->size); }
     /// The limbs held without reallocating; 0 when no node is held.
@@ -222,6 +227,12 @@ struct tg::bigint
     friend void div_mod(bigint& q, bigint& r, bigint const& a, bigint const& b);
     /// The greatest common divisor of |a| and |b|; gcd(0, 0) is 0.
     friend bigint gcd(bigint const& a, bigint const& b);
+    /// The same into g, reusing its node; g may be a or b.
+    friend void gcd(bigint& g, bigint const& a, bigint const& b);
+    /// a / d for a d that divides a, d != 0; cheaper than div_mod by one limb, since no remainder is found.
+    friend bigint div_exact(bigint const& a, bigint const& d);
+    /// The same into q, reusing its node; q may be a, not d.
+    friend void div_exact(bigint& q, bigint const& a, bigint const& d);
     [[nodiscard]] friend bigint abs(bigint a)
     {
         if (!a.is_zero())
@@ -545,4 +556,7 @@ namespace tg
 [[nodiscard]] div_mod_result<bigint> div_mod(bigint const& a, bigint const& b);
 void div_mod(bigint& q, bigint& r, bigint const& a, bigint const& b);
 [[nodiscard]] bigint gcd(bigint const& a, bigint const& b);
+void gcd(bigint& g, bigint const& a, bigint const& b);
+[[nodiscard]] bigint div_exact(bigint const& a, bigint const& d);
+void div_exact(bigint& q, bigint const& a, bigint const& d);
 } // namespace tg
