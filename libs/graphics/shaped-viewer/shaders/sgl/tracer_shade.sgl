@@ -311,6 +311,10 @@ fun emitter_radiance(e: emitter_record, ctx: material.shading_context){traced, b
     let scale = emission_factor(e.scale_kind, e.scale_offset, e.scale_uv_offset, e.scale_frequency, e.scale_channel, e.scale_sampler, e.scale_transform, 1u, ctx)
     return max(0.0, scale.x) * max(float3(0.0), color)
 
+/// `c` saturated where a half float stops, for the half-float frames a temporal denoiser reads.
+/// Past 65504 a half float holds infinity, which a denoiser turns into NaN; the 32-bit mean beside them keeps the sample whole.
+fun half_safe(c: float3) -> float3 => clamp(c, float3(-65504.0), float3(65504.0))
+
 /// The base color of `inst` where `ctx` sits, read through the instance's base color record rather than its material's code.
 /// What a hybrid's secondary hit is lit as, a diffuse surface of this color; mid-gray for a type that declares none.
 fun instance_base_color(inst: scene.instance, ctx: material.shading_context){traced, bindless} -> float3:

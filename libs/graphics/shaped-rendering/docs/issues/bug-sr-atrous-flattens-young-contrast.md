@@ -20,5 +20,13 @@ Such a window can never refuse a tap brighter than the center, so a one-sample f
 `sr - atrous keeps a single extreme sample where it fell` holds that now.
 
 A fix has to keep refusing outliers while letting a dark pixel take in its share of bright noise.
-That wants a noise width measured rather than modeled from the center, `feat-atrous-measured-variance`, as SVGF's is.
+The member departs from its reference here: Dammertz et al. 2010 weigh a fixed sigma per pass, halved each pass, symmetric in the difference.
+The center-relative window and its `1 / sqrt(samples)` scale are sr's own noise model.
+
+The published ways to a width that is measured rather than modeled:
+- SVGF (Schied et al. 2017): the variance of the mean from per-pixel luminance moments, 3x3-blurred, a 7x7 spatial estimate while the mean is young; `svgf.sgl` has it.
+  It needs a second moment the accumulated mean does not keep: sv would accumulate it, in the mean's unused alpha.
+- Rousselle et al. 2012: per-pixel variance from two half buffers of the same mean, which needs no moment but a second accumulation.
+- Either wants an anti-firefly clamp first, as NVIDIA's ReLAX applies, or one extreme sample widens its own window and spreads.
+`feat-atrous-measured-variance` is the issue for that work.
 The flattening is measured and not explained yet; the same noise model, letting a stray bright sample near the lamp spread along the ceiling, is the likely cause.

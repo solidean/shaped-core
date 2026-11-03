@@ -13,6 +13,8 @@ require extended_image_formats
 @inline binding mix_constants:
     // 0 keeps the destination, 1 replaces it with the source
     weight: float
+    // the largest magnitude the destination's format holds, which the source saturates at rather than becoming infinity
+    ceiling: float
 
 binding mix_images:
     @unfilterable
@@ -23,5 +25,8 @@ binding mix_images:
     let size = mix_images.destination.size()
     if id.x >= size.x or id.y >= size.y => return
 
-    let blended = mix(mix_images.destination[id.xy], mix_images.source.load(id.xy) as texel[destination_format], mix_constants.weight)
+    // A half float holds nothing past 65504, and a bright sample converted to one becomes infinity, which a denoiser reading it turns into NaN.
+    let c = mix_constants.ceiling
+    let source = clamp(mix_images.source.load(id.xy), float4(-c), float4(c))
+    let blended = mix(mix_images.destination[id.xy], source as texel[destination_format], mix_constants.weight)
     mix_images.destination[id.xy] = blended

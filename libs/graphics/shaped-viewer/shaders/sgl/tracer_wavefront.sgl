@@ -808,15 +808,15 @@ fun wavefront_resolve(slot: uint){traced, wavefront_step}:
     if f.write_temporal != 0u:
         // A pixel that finished no path this frame has no estimate of its own, so it hands the denoiser its mean.
         let frame = if tally.frame_count > 0.0 => tally.frame_sum / tally.frame_count else mean
-        traced.frame_output[xy] = float4(..frame, 1.0)
+        traced.frame_output[xy] = float4(..half_safe(frame), 1.0)
         traced.guide_motion[xy] = if tally.frame_primary_count > 0.0 => tally.frame_motion / tally.frame_primary_count else float2(0.0)
 
     if f.write_split != 0u:
         // The specular share was clamped to the total per path, so the difference is never negative.
         let frame_specular = if tally.frame_count > 0.0 => tally.frame_sum_specular / tally.frame_count else (if tally.count > 0.0 => tally.sum_specular / tally.count else float3(0.0))
         let frame = if tally.frame_count > 0.0 => tally.frame_sum / tally.frame_count else mean
-        traced.frame_specular[xy] = float4(..frame_specular, 1.0)
-        traced.frame_diffuse[xy] = float4(..(frame - frame_specular), 1.0)
+        traced.frame_specular[xy] = float4(..half_safe(frame_specular), 1.0)
+        traced.frame_diffuse[xy] = float4(..half_safe(frame - frame_specular), 1.0)
 
         // A mean over the paths of each kind: some path hit, every path escaped (the ray's own `t_max`), or no path of this lobe (0).
         let escaped_distance = 1e4

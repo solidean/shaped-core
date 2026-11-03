@@ -348,15 +348,15 @@ use tracer
     let mut color = accum / spp_f
 
     if f.write_temporal != 0u:
-        tracer.traced.frame_output[xy] = float4(..color, 1.0)
+        tracer.traced.frame_output[xy] = float4(..tracer.half_safe(color), 1.0)
         tracer.traced.guide_motion[xy] = motion / spp_f
 
     if f.write_split != 0u:
         // The specular share was clamped to the total per sample, so the difference is never negative.
         let specular = accum_specular / spp_f
         let diffuse = color - specular
-        tracer.traced.frame_specular[xy] = float4(..specular, 1.0)
-        tracer.traced.frame_diffuse[xy] = float4(..diffuse, 1.0)
+        tracer.traced.frame_specular[xy] = float4(..tracer.half_safe(specular), 1.0)
+        tracer.traced.frame_diffuse[xy] = float4(..tracer.half_safe(diffuse), 1.0)
 
         // A mean over the paths of each kind: some path hit, every path escaped (the ray's own `t_max`), or no path of this lobe (0).
         let escaped_distance = 1e4
