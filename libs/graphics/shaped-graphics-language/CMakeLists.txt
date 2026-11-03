@@ -58,6 +58,7 @@ add_library(shaped-graphics-language
     src/shaped-graphics-language/check/check_pipeline.cc
     src/shaped-graphics-language/check/check_expr.cc
     src/shaped-graphics-language/check/check_calls.cc
+    src/shaped-graphics-language/check/check_diff.cc
     src/shaped-graphics-language/check/check_overloads.cc
     src/shaped-graphics-language/check/check_features.cc
     src/shaped-graphics-language/check/check_options.cc

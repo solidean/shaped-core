@@ -1858,10 +1858,11 @@ void checker::compile_function(symbol_id id)
         auto input = stage_input::none;
         if (!p.attributes.empty())
         {
-            cc::string_view known_on_parameter[16] = {};
+            cc::string_view known_on_parameter[24] = {};
             auto known_count = isize(0);
             for (auto const& candidate : stage_inputs())
                 known_on_parameter[known_count++] = candidate.name;
+            known_on_parameter[known_count++] = "no_diff";
             judge_attributes(file, p.attributes, cc::span<cc::string_view const>(known_on_parameter, known_count),
                              "a parameter");
             for (auto const& candidate : stage_inputs())

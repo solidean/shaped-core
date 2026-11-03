@@ -96,12 +96,3 @@ binding gradients:
 // a loop of any kind runs forward, where nothing has to be kept
 test fwd_diff(until_small, 5.0, 1.0) == 0.125
 
-// a tangent is of its value's own type for now, so a position's tangent through a matrix would wrongly take the translation
-fun projected(p: pos3) => mat4(float4(1.0, 0.0, 0.0, 0.0), float4(0.0, 1.0, 0.0, 0.0), float4(0.0, 0.0, 1.0, 0.0), float4(2.0, 0.0, 0.0, 1.0)) * p
-
-binding positions:
-    values: mut buffer[hpos4]
-
-@expect(error = "unsupported-yet")
-@compute(1) fun refuses_a_position_through_a_matrix(){positions}:
-    positions.values[0] = fwd_diff(projected, pos3(1.0), pos3(1.0))

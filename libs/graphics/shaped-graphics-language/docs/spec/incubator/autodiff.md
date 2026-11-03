@@ -61,8 +61,9 @@ So a derivative written by hand is part of the first design, not an extension of
 A prototype is built: [flatten_diff.cc](../../../src/shaped-graphics-language/check/flatten_diff.cc), and its tests are [corpus/derivatives/](../../../tests/corpus/derivatives/).
 They hold both modes to central differences, among them the whole gradient of one Gaussian splat's opacity at a pixel, whose backward kernel every target writes.
 
-* **The surface is generic prelude functions**, so the check pass is untouched.
+* **The surface is two prelude names**, and a call that names a function resolves against an overload the check pass writes for it.
   `fwd_diff(f, a, da, b, db)` gives the tangent of the result, and `bwd_diff(f, a, mut da, b, mut db, dr)` adds each adjoint to the caller's place.
+  A parameter of no differentiable type takes no tangent, and neither does one marked `@no_diff`: `fwd_diff(scaled, x, dx, n)` for an int `n`.
   Adding rather than returning settled the first open question below: it is what accumulating a gradient wants, and a test starts its places at zero.
   The flattener writes the derivative where the call stands, as it does for `by_target`.
 * **One rule per builtin serves both modes.**
@@ -79,7 +80,8 @@ They hold both modes to central differences, among them the whole gradient of on
   Going backward `f` runs forward and is never reversed, so it may hold a loop of any bound.
   [written-derivatives.sgl](../../../tests/corpus/derivatives/written-derivatives.sgl) composites front to back until almost nothing shows through, and walks back without a tape.
   The attribute names `f` by its text for now, which a resolved expression would replace.
-* **A tangent is of its value's own type**, which is the prototype's largest simplification: a `pos3`'s tangent should be a `vec3`, and `mat4 * pos3` is refused for that reason.
+* **A position's tangent is its direction**: a `pos3`'s is a `vec3`, an `hpos4`'s a `float4`, and `mat4 * pos3` moves a change of the position without the translation.
+  A struct's tangent is the struct itself for now, so a position in one holds its direction, which every target writes alike.
 
 What it found in SGL itself:
 
@@ -116,16 +118,15 @@ What it found in SGL itself:
 
 ## The order to build it in
 
-The prototype has done forward mode, reverse mode, loops of constant bounds, and derivatives written by hand; tangent types are what it skipped.
+The prototype has done forward mode, reverse mode, loops of constant bounds, derivatives written by hand, `@no_diff`, and the tangent types of the builtin geometry types.
 
-1. Tangent types: a geometry type's tangent its direction type.
-2. `no_diff`, and a parameter that is not differentiated taking no tangent at the call.
-3. The rules as registry records, and the matrix arithmetic in the registry.
-4. Adjoints accumulated across invocations, once float atomics or a reduction pattern exist.
+1. A struct's tangent type, a struct of its fields' tangents, so a struct holding a position says what it holds.
+2. The rules as registry records, and the matrix arithmetic in the registry.
+3. Adjoints accumulated across invocations, once float atomics or a reduction pattern exist.
 
 ## Open
 
-* **How a call marks the parameters it does not differentiate**: per call as in the sketch, per declaration with `no_diff` on the parameter, or both.
+* **Whether a call may mark a parameter it does not differentiate**, beside `@no_diff` on the declaration, which the prototype has.
 * **Whether a tape may spill** to a buffer for a long bounded loop, or the bound is limited to what fits in registers and the rest needs a `@backward`.
 * **Accumulation across invocations**: a float atomic add behind a feature, a compare-exchange loop on the bits as a polyfill, or a subgroup reduction first and one atomic per subgroup.
   The last is what makes any of them fast, and it may want to be a prelude function rather than something the transform writes.

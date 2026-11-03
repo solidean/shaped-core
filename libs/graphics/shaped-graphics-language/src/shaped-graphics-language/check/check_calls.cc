@@ -652,6 +652,10 @@ type_id checker::check_named_call(function_scope& scope,
     }
     if (!judge_uniform_load(file, candidates, call.arguments))
         return error_type;
+    // PROTOTYPE (autodiff): a derivative of a named function takes what that function's parameters ask
+    if ((text == "fwd_diff" || text == "bwd_diff") && is_prelude_file(out.at(candidates[0]).file))
+        if (auto derived = derivative_candidates(candidates, arguments, file, callee_where); !derived.empty())
+            candidates = cc::move(derived);
     auto const result = resolve_overload(scope, id, call.callee, candidates, arguments, text);
     if (result != error_type)
     {

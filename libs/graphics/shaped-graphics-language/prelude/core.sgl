@@ -116,11 +116,13 @@ fun nearly_equal(a: float, b: float, .within: float) => abs(a - b) <= within
 // ---- derivatives ----------------------------------------------------------------------------------------------------
 //
 // PROTOTYPE (docs/spec/incubator/autodiff.md): the flattener writes these calls' derivatives, and never their bodies.
-// The bodies only check, which is what lets a generic declaration stand for every `f`.
-// A tangent and an adjoint are of their value's own type for now.
 //
 // `fwd_diff(f, x, dx)` is the derivative of `f` at `x` in the direction `dx`: what `f` changes by, per unit of `dx`.
-// `bwd_diff(f, x, dx, dy)` adds to each `dx` what `f`'s result changing by `dy` asks of that parameter.
+// `bwd_diff(f, x, mut dx, dr)` adds to each `dx` what `f`'s result changing by `dr` asks of that parameter.
+//
+// These declarations stand for the name, and a call that names a function takes what the check pass writes for it:
+// after each parameter its tangent, of the parameter's tangent type, `vec3` for a `pos3`.
+// A parameter of no differentiable type takes none, and neither does one marked `@no_diff`.
 
 fun fwd_diff[A, R](f: (A) -> R, a: A, da: A) -> R => f(a)
 fun fwd_diff[A, B, R](f: (A, B) -> R, a: A, da: A, b: B, db: B) -> R => f(a, b)

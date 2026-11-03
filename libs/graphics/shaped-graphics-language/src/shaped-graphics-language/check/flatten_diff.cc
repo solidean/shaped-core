@@ -103,22 +103,9 @@ struct differentiator
         return k == value_kind::scalar_float || k == value_kind::scalar_half;
     }
 
-    [[nodiscard]] bool is_differentiable(type_id t) const
-    {
-        if (!is_valid(t) || t == checked_module::error_type || t == checked_module::void_type)
-            return false;
-        if (auto const* const r = record_of(t))
-            return is_float_kind(r->leaf_kind);
-        auto const& info = m().at(t);
-        if (info.kind == type_kind::array)
-            return is_differentiable(info.element);
-        if (info.kind != type_kind::structure)
-            return false;
-        for (auto const& member : m().at(info.members))
-            if (is_differentiable(member.type))
-                return true;
-        return false;
-    }
+    [[nodiscard]] bool is_differentiable(type_id t) const { return f.c.is_differentiable_type(t); }
+    /// What a change of a value of `t` is: a position's is a direction.
+    [[nodiscard]] type_id tangent(type_id t) const { return f.c.tangent_type(t); }
 
     [[nodiscard]] i32 leaf_count(type_id t) const
     {
@@ -639,8 +626,8 @@ struct differentiator
             return flat_expr_id::none;
         if (auto const* const p = placeholder_of.get_ptr(i32(local)))
             return ref(*p);
-        auto const p
-            = f.add_local(local_kind::temporary, cc::format("t_{}", f.entry.at(local).name), f.entry.at(local).type);
+        auto const p = f.add_local(local_kind::temporary, cc::format("t_{}", f.entry.at(local).name),
+                                   tangent(f.entry.at(local).type));
         placeholder_of[i32(local)] = p;
         primal_of_placeholder[i32(p)] = local;
         linear_locals.insert(i32(p));
@@ -666,8 +653,8 @@ struct differentiator
                 = add(x.type, flat_member{.object = object.primal, .member = n->member, .letters = n->letters});
             if (!is_valid(object.tangent))
                 return {primal, flat_expr_id::none};
-            return {primal,
-                    add(x.type, flat_member{.object = object.tangent, .member = n->member, .letters = n->letters})};
+            return {primal, add(tangent(x.type),
+                                flat_member{.object = object.tangent, .member = n->member, .letters = n->letters})};
         }
         if (auto const* const n = x.node.try_as<flat_element>())
         {
@@ -676,7 +663,7 @@ struct differentiator
             auto const primal = add(x.type, flat_element{.object = object.primal, .index = use(index)});
             if (!is_valid(object.tangent))
                 return {primal, flat_expr_id::none};
-            return {primal, add(x.type, flat_element{.object = object.tangent, .index = use(index)})};
+            return {primal, add(tangent(x.type), flat_element{.object = object.tangent, .index = use(index)})};
         }
         if (auto const* const n = x.node.try_as<flat_construct>())
         {
@@ -696,8 +683,8 @@ struct differentiator
                 return {primal, flat_expr_id::none};
             for (auto i = isize(0); i < tangents.size(); ++i)
                 if (!is_valid(tangents[i]))
-                    tangents[i] = zero(type_of(primals[i]));
-            return {primal, add(x.type, flat_construct{.arguments = f.add_list(tangents)})};
+                    tangents[i] = zero(tangent(type_of(primals[i])));
+            return {primal, add(tangent(x.type), flat_construct{.arguments = f.add_list(tangents)})};
         }
         if (auto const* const n = x.node.try_as<flat_call>())
             return derive_call(x.type, *n);
@@ -815,6 +802,29 @@ struct differentiator
         return true;
     }
 
+    /// The tangent of `m * p`, which is `dm * (p, 1) + m * (dp, 0)` as a `float4`: the change of `p` takes no translation.
+    flat_expr_id transform_position_tangent(cc::span<flat_expr_id const> primals,
+                                            cc::span<flat_expr_id const> tangents,
+                                            type_id type)
+    {
+        auto const float4 = tangent(type);
+        auto const scalar = scalar_of(float4);
+        auto const extended = [&](flat_expr_id v, f64 w)
+        {
+            auto parts = cc::vector<flat_expr_id>();
+            for (auto i = 0; i < 3; ++i)
+                parts.push_back(add(f.field_type(type_of(v), i), flat_member{.object = use(v), .member = i}));
+            parts.push_back(add(scalar, flat_literal{.value = w}));
+            return add(float4, flat_construct{.arguments = f.add_list(parts)});
+        };
+        auto result = flat_expr_id::none;
+        if (is_valid(tangents[0]))
+            result = call("*", share_tangent(tangents[0]), extended(primals[1], 1.0));
+        if (is_valid(tangents[1]))
+            result = sum(result, call("*", use(primals[0]), extended(share_tangent(tangents[1]), 0.0)));
+        return result;
+    }
+
     dual derive_call(type_id type, flat_call const& n)
     {
         auto const arguments = copy_of(n.arguments);
@@ -838,14 +848,15 @@ struct differentiator
         if (!any)
             return {write_primal(), flat_expr_id::none};
         auto const name = rule_name(n.callee);
-        // a tangent is of its value's own type for now, so a position's would take the translation a direction does not
-        if (auto const& callee = m().at(n.callee).name;
-            (callee == "transform_position" || callee == "transform_position_affine") && is_valid(tangents[1]))
-        {
-            failed("a position transformed by a matrix, whose tangent is a direction; tangent types come later");
-            return {write_primal(), flat_expr_id::none};
-        }
         auto const result = share(write_primal(), "r");
+        // `m * p` takes the translation, and its tangent does not: a position's change moves through `m` as a direction
+        if (m().at(n.callee).name == "transform_position")
+            return {use(result), transform_position_tangent(primals, tangents, type)};
+        if (m().at(n.callee).name == "transform_position_affine")
+        {
+            failed("an affine3 times a position, which has no rule yet");
+            return {use(result), flat_expr_id::none};
+        }
 
         if (is_linear_function(name, arguments.size()))
         {
@@ -864,8 +875,11 @@ struct differentiator
                 if (!is_differentiable(type_of(primals[i])))
                     written.push_back(use(primals[i]));
                 else
-                    written.push_back(is_valid(tangents[i]) ? tangents[i] : zero(type_of(primals[i])));
+                    written.push_back(is_valid(tangents[i]) ? tangents[i] : zero(tangent(type_of(primals[i]))));
             }
+            // a construction of a position builds its tangent as the direction it is: `pos3(x)`'s is `vec3(dx)`
+            if (tangent(type) != type && name == m().name_of(type))
+                return {use(result), call(m().name_of(tangent(type)), written)};
             return {use(result), f.builtin_call(at, n.callee, written)};
         }
 
@@ -983,13 +997,15 @@ struct differentiator
     {
         auto const place_type = type_of(place_of(root(), steps));
         type_id const types[] = {place_type, type_of(g)};
-        if (is_valid(find("+", types)))
+        // a matrix has no `+` of the prelude's yet, and `call` writes it by columns
+        if (is_valid(find("+", types)) || (is_matrix(place_type) && place_type == type_of(g)))
         {
             auto const read = place_of(root(), steps);
             return emit(flat_assign{.place = place_of(root(), steps), .value = call("+", read, use(g))});
         }
         auto const& info = m().at(place_type);
-        if (place_type != type_of(g) || (info.kind != type_kind::structure && info.kind != type_kind::array))
+        auto const has_parts = info.kind == type_kind::array ? info.count > 0 : info.members.count > 0;
+        if (place_type != type_of(g) || (info.kind != type_kind::structure && info.kind != type_kind::array) || !has_parts)
         {
             failed(cc::format("an adjoint of {} that it cannot add {} to", m().name_of(place_type),
                               m().name_of(type_of(g))));
@@ -1039,8 +1055,8 @@ struct differentiator
             auto const tangent = is_valid(value) ? tangent_of_value(value) : flat_expr_id::none;
             f.block.push_back(id);
             auto const t = f.add_local(is_mut ? local_kind::var : local_kind::let,
-                                       cc::format("d_{}", f.entry.at(local).name), type);
-            auto const initial = is_valid(tangent) ? tangent : zero(type);
+                                       cc::format("d_{}", f.entry.at(local).name), this->tangent(type));
+            auto const initial = is_valid(tangent) ? tangent : zero(this->tangent(type));
             if (is_mut)
                 emit(flat_var{.local = t, .value = initial});
             else
@@ -1066,7 +1082,7 @@ struct differentiator
             auto const tangent_local = *t;
             // computed before the assignment, which may change what it reads
             auto const tangent = tangent_of_value(n->value);
-            auto const value = share(is_valid(tangent) ? tangent : zero(type_of(n->place)), "dt");
+            auto const value = share(is_valid(tangent) ? tangent : zero(this->tangent(type_of(n->place))), "dt");
             f.block.push_back(id);
             return emit(flat_assign{.place = place_of(ref(tangent_local), steps), .value = use(value)});
         }
@@ -1285,7 +1301,7 @@ struct differentiator
     {
         if (auto const* const a = adjoint_of.get_ptr(i32(local)))
             return *a;
-        auto const type = f.entry.at(local).type;
+        auto const type = linear_locals.contains(i32(local)) ? f.entry.at(local).type : tangent(f.entry.at(local).type);
         auto const a = f.add_local(local_kind::var, cc::format("a_{}", f.entry.at(local).name), type);
         adjoint_declarations.push_back(
             f.make_stmt(where, flat_var{.local = a, .value = is_valid(initial) ? initial : zero(type)}));
@@ -1589,7 +1605,7 @@ struct differentiator
                 return;
             auto const adjoint = adjoint_of_local(root);
             auto const g = share(place_of(ref(adjoint), steps), "g");
-            emit(flat_assign{.place = place_of(ref(adjoint), steps), .value = zero(type_of(n->place))});
+            emit(flat_assign{.place = place_of(ref(adjoint), steps), .value = zero(tangent(type_of(n->place)))});
             linear_lets.clear();
             auto const t = tangent_of_value(n->value);
             transpose(t, g);
@@ -1677,7 +1693,7 @@ struct differentiator
         {
             arguments.push_back(ref(a));
             auto const* const t = tangent_of.get_ptr(i32(a));
-            arguments.push_back(t != nullptr ? ref(*t) : zero(f.entry.at(a).type));
+            arguments.push_back(t != nullptr ? ref(*t) : zero(tangent(f.entry.at(a).type)));
         }
         emit(flat_assign{.place = ref(tangent_local),
                          .value = inline_derivative(custom, custom.derivatives.forward, arguments)});
@@ -1699,16 +1715,17 @@ struct differentiator
                                            m().at(custom.function).name));
         auto const adjoint = adjoint_of_local(result_local);
         auto const g = share(ref(adjoint), "g");
-        emit(flat_assign{.place = ref(adjoint), .value = zero(result_type)});
+        emit(flat_assign{.place = ref(adjoint), .value = zero(tangent(result_type))});
         auto arguments = cc::vector<flat_expr_id>();
         for (auto const a : custom.arguments)
         {
             arguments.push_back(ref(a));
             // what is not followed takes its adjoint into a local nobody reads
-            auto const place = tracked.contains(i32(a)) ? adjoint_of_local(a)
-                                                        : f.add_local(local_kind::var, "ignored", f.entry.at(a).type);
+            auto const place = tracked.contains(i32(a))
+                                 ? adjoint_of_local(a)
+                                 : f.add_local(local_kind::var, "ignored", tangent(f.entry.at(a).type));
             if (!tracked.contains(i32(a)))
-                emit(flat_var{.local = place, .value = zero(f.entry.at(a).type)});
+                emit(flat_var{.local = place, .value = zero(tangent(f.entry.at(a).type))});
             arguments.push_back(ref(place));
         }
         arguments.push_back(use(g));
@@ -1796,15 +1813,14 @@ auto sgl::check::impl::flattener::flatten_diff(ast::expr_id id, type_id type, ca
     auto const values = flatten_written(c.out.at(record.written));
     auto const handed = written_closures;
     auto const slots = c.out.at(record.slots);
-    auto const parameter_count = c.out.at(c.out.functions[c.out.at(record.callee).info].parameters).size();
-    // the parameters are `f`, then a value and its tangent or adjoint each, then, backward, the result's adjoint
-    auto const arity = d.is_reverse ? (parameter_count - 2) / 2 : (parameter_count - 1) / 2;
-    auto by_parameter = cc::vector<isize>();
-    by_parameter.resize_to_filled(parameter_count, -1);
+    auto const* const signature = c.derivative_signatures.get_ptr(i32(record.callee));
+    if (signature == nullptr)
+        return d.failed("a lambda or a parameter handed on, where it can differentiate a function's name alone");
+    auto const arity = signature->value_slots.size();
+    auto function_slot = isize(-1);
     for (auto k = isize(0); k < slots.size(); ++k)
-        if (slots[k] >= 0 && slots[k] < parameter_count)
-            by_parameter[slots[k]] = k;
-    auto const function_slot = by_parameter[0];
+        if (slots[k] == 0)
+            function_slot = k;
     if (function_slot < 0 || function_slot >= handed.size() || handed[function_slot] < 0)
         return d.failed("the function to differentiate is no function it can inline");
 
@@ -1828,22 +1844,22 @@ auto sgl::check::impl::flattener::flatten_diff(ast::expr_id id, type_id type, ca
         auto const p = slots[k];
         if (p <= 0 || !is_valid(values[k]))
             continue;
-        auto const position = (p - 1) / 2;
-        if (position >= arity)
+        if (p == signature->result_slot)
         {
             result_adjoint = d.share(values[k], "dr");
             continue;
         }
-        if ((p - 1) % 2 == 0)
+        for (auto i = isize(0); i < arity; ++i)
         {
-            auto const local = add_local(local_kind::let, "x", entry.at(values[k]).type);
-            add_stmt(d.where, flat_let{.local = local, .value = values[k]});
-            primals[position] = local;
+            if (p == signature->value_slots[i])
+            {
+                auto const local = add_local(local_kind::let, "x", entry.at(values[k]).type);
+                add_stmt(d.where, flat_let{.local = local, .value = values[k]});
+                primals[i] = local;
+            }
+            else if (p == signature->tangent_slots[i])
+                seconds[i] = d.is_reverse ? pin_place(values[k]) : d.share(values[k], "dx");
         }
-        else if (d.is_reverse)
-            seconds[position] = pin_place(values[k]);
-        else
-            seconds[position] = d.share(values[k], "dx");
     }
     for (auto const p : primals)
         if (!is_valid(p))
@@ -1859,7 +1875,7 @@ auto sgl::check::impl::flattener::flatten_diff(ast::expr_id id, type_id type, ca
         identity.push_back(i32(i));
         no_closures.push_back(-1);
     }
-    auto const result_type = d.is_reverse ? entry.at(result_adjoint).type : type;
+    auto const result_type = c.out.functions[c.out.at(signature->function).info].result;
     auto const outer_unroll = unrolls_constant_loops;
     unrolls_constant_loops = d.is_reverse;
     ++diff_depth;
@@ -1880,7 +1896,7 @@ auto sgl::check::impl::flattener::flatten_diff(ast::expr_id id, type_id type, ca
         for (auto i = isize(0); i < arity; ++i)
             if (d.is_differentiable(entry.at(primals[i]).type) && is_valid(seconds[i]))
             {
-                auto const t = add_local(local_kind::let, "dx", entry.at(primals[i]).type);
+                auto const t = add_local(local_kind::let, "dx", entry.at(seconds[i]).type);
                 statements.push_back(make_stmt(d.where, flat_let{.local = t, .value = d.use(seconds[i])}));
                 d.tangent_of[i32(primals[i])] = t;
             }
@@ -1892,9 +1908,9 @@ auto sgl::check::impl::flattener::flatten_diff(ast::expr_id id, type_id type, ca
     }
     else
     {
-        for (auto const p : primals)
-            if (d.is_differentiable(entry.at(p).type))
-                d.tracked.insert(i32(p));
+        for (auto i = isize(0); i < arity; ++i)
+            if (d.is_differentiable(entry.at(primals[i]).type) && is_valid(seconds[i]))
+                d.tracked.insert(i32(primals[i]));
         auto const flat = d.hoist_declarations(body);
         auto const straight = d.straighten(flat);
         d.adjoint_of_local(result, d.use(result_adjoint));

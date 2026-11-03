@@ -431,6 +431,23 @@ struct checker
     /// The symbols in compilation, outermost first, which is the loop a dependency cycle names.
     cc::vector<symbol_id> compiling;
     cc::vector<function_notes> notes;
+
+    /// PROTOTYPE (autodiff): the concrete overload `fwd_diff` or `bwd_diff` takes for one function, which check_diff.cc
+    /// writes when a call names that function: its parameters, and which of them is which.
+    struct derivative_signature
+    {
+        symbol_id function = symbol_id::none;
+        bool is_reverse = false;
+        /// Per parameter of `function`: where its value and its tangent or adjoint stand, -1 where it takes none.
+        cc::vector<i32> value_slots;
+        cc::vector<i32> tangent_slots;
+        /// Backward: where the result's adjoint stands.
+        i32 result_slot = -1;
+    };
+    /// By the overload's symbol.
+    cc::map<i32, derivative_signature> derivative_signatures;
+    /// The overload of each function and mode, by `2 * symbol + is_reverse`.
+    cc::map<i64, symbol_id> derivative_overloads;
     /// A `const` in a function body (CHK-413): a symbol no file scope sees, with the earlier ones of its body it reads.
     struct local_constant
     {
@@ -1278,6 +1295,17 @@ struct checker
     /// The candidates of `spelling` seen from `file` that take exactly `types`, without a report.
     /// It is what the flat tree is written from.
     [[nodiscard]] symbol_id find_operator(i32 file, cc::string_view spelling, cc::span<type_id const> types) const;
+
+    /// PROTOTYPE (autodiff): a value of `type` has a derivative: a float, a half, or what holds one.
+    [[nodiscard]] bool is_differentiable_type(type_id type) const;
+    /// The type of a change of a value of `type`: a position's is its direction, and any other type is its own.
+    [[nodiscard]] type_id tangent_type(type_id type) const;
+    /// For a call of the prelude's `fwd_diff` or `bwd_diff`: one overload per function the first argument names, each
+    /// taking that function's parameters and their tangents; empty where the first argument names no function.
+    [[nodiscard]] cc::vector<symbol_id> derivative_candidates(cc::span<symbol_id const> generic,
+                                                              call_arguments const& arguments,
+                                                              i32 file,
+                                                              source_span where);
     [[nodiscard]] call_arguments check_arguments(function_scope& scope,
                                                  ast::range_of<ast::argument> range,
                                                  bool is_constructor);
