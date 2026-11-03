@@ -380,8 +380,48 @@ struct tg::multi_polynomial
     {
         return _product(a, b);
     }
-    multi_polynomial& operator+=(multi_polynomial const& b) { return *this = _merge(*this, b, false); }
-    multi_polynomial& operator-=(multi_polynomial const& b) { return *this = _merge(*this, b, true); }
+    // an rvalue operand's storage becomes the result's, its coefficients moved rather than copied
+    [[nodiscard]] friend multi_polynomial operator+(multi_polynomial&& a, multi_polynomial const& b)
+    {
+        a._merge_into(b, false);
+        return cc::move(a);
+    }
+    [[nodiscard]] friend multi_polynomial operator+(multi_polynomial const& a, multi_polynomial&& b)
+    {
+        b._merge_into(a, false);
+        return cc::move(b);
+    }
+    [[nodiscard]] friend multi_polynomial operator+(multi_polynomial&& a, multi_polynomial&& b)
+    {
+        a._merge_into(b, false);
+        return cc::move(a);
+    }
+    [[nodiscard]] friend multi_polynomial operator-(multi_polynomial&& a, multi_polynomial const& b)
+    {
+        a._merge_into(b, true);
+        return cc::move(a);
+    }
+    [[nodiscard]] friend multi_polynomial operator-(multi_polynomial const& a, multi_polynomial&& b)
+    {
+        b.negate();
+        b._merge_into(a, false);
+        return cc::move(b);
+    }
+    [[nodiscard]] friend multi_polynomial operator-(multi_polynomial&& a, multi_polynomial&& b)
+    {
+        a._merge_into(b, true);
+        return cc::move(a);
+    }
+    multi_polynomial& operator+=(multi_polynomial const& b)
+    {
+        _merge_into(b, false);
+        return *this;
+    }
+    multi_polynomial& operator-=(multi_polynomial const& b)
+    {
+        _merge_into(b, true);
+        return *this;
+    }
     multi_polynomial& operator*=(multi_polynomial const& b) { return *this = _product(*this, b); }
 
     // a scalar operand takes these over a conversion to a polynomial
@@ -576,8 +616,73 @@ private:
         return r;
     }
 
-    /// The product: every pair's monomial, sorted, and each run of equal ones accumulated in place.
-    /// A single-term factor keeps the other's order, the order being compatible with multiplication, so it skips the sort.
+    /// *this ± b in place: grown by b's terms and merged from the back, the smallest terms last,
+    /// then compacted over any terms that cancelled; b may be *this.
+    void _merge_into(multi_polynomial const& b, bool subtract)
+    {
+        if (&b == this)
+        {
+            if (subtract)
+                *this = {};
+            else
+                _scale(C(2));
+            return;
+        }
+        auto const na = term_count();
+        auto const nb = b.term_count();
+        if (nb == 0)
+            return;
+        _keys.resize_to_defaulted(na + nb);
+        _coeffs.resize_to_filled(na + nb, C(0));
+        auto i = na - 1;
+        auto j = nb - 1;
+        auto w = na + nb - 1;
+        while (j >= 0)
+        {
+            if (i >= 0 && Vars::greater(b._keys[j], _keys[i]))
+            {
+                _keys[w] = _keys[i];
+                _coeffs[w] = cc::move(_coeffs[i]);
+                --i;
+            }
+            else if (i >= 0 && _keys[i] == b._keys[j])
+            {
+                _keys[w] = _keys[i];
+                _coeffs[w] = cc::move(_coeffs[i]);
+                if (subtract)
+                    _coeffs[w] -= b._coeffs[j];
+                else
+                    _coeffs[w] += b._coeffs[j];
+                --i;
+                --j;
+            }
+            else
+            {
+                _keys[w] = b._keys[j];
+                _coeffs[w] = subtract ? -b._coeffs[j] : b._coeffs[j];
+                --j;
+            }
+            --w;
+        }
+        // [0, i] never moved; (w, na + nb) holds the rest, with a gap between where terms combined, and maybe zeros
+        auto dst = i + 1;
+        for (auto src = w + 1; src < na + nb; ++src)
+        {
+            if (impl::coefficient_is_zero(_coeffs[src]))
+                continue;
+            if (dst != src)
+            {
+                _keys[dst] = _keys[src];
+                _coeffs[dst] = cc::move(_coeffs[src]);
+            }
+            ++dst;
+        }
+        _keys.resize_down_to(dst);
+        _coeffs.resize_down_to(dst);
+    }
+
+    /// The product, densely when the exponents' box is small and by a heap otherwise, each coefficient accumulated in place.
+    /// A single-term factor keeps the other's order, the order being compatible with multiplication, so it needs neither.
     [[nodiscard]] static multi_polynomial _product(multi_polynomial const& a, multi_polynomial const& b)
     {
         multi_polynomial r;
@@ -597,31 +702,184 @@ private:
             return r;
         }
 
-        struct pair_product
+        if (_product_dense(a, b, r))
+            return r;
+        return _product_heap(a, b);
+    }
+
+    /// The product by Kronecker substitution, when the box of its exponents is small against the pairs it sums:
+    /// each term's exponents become one index into a dense accumulator, a pair's product lands at the sum of its factors' indices,
+    /// and the slots it touched are read out in the order.
+    /// False, with r untouched, when the box is too large or an exponent would overflow.
+    [[nodiscard]] static bool _product_dense(multi_polynomial const& a, multi_polynomial const& b, multi_polynomial& r)
+    {
+        constexpr auto n = variable_count;
+        exponents_t da = {};
+        exponents_t db = {};
+        for (auto const& k : a._keys)
+            for (auto v = 0; v < n; ++v)
+                da[v] = cc::max(da[v], Vars::exponent(k, v));
+        for (auto const& k : b._keys)
+            for (auto v = 0; v < n; ++v)
+                db[v] = cc::max(db[v], Vars::exponent(k, v));
+
+        // a box up to four slots per pair, under 2^22 slots, stays in cache against the pairs that write it
+        auto const pairs = i64(a.term_count()) * b.term_count();
+        auto const limit = cc::min(4 * pairs + 16, i64(1) << 22);
+        cc::fixed_array<i64, Vars::count> stride;
+        cc::fixed_array<int, Vars::count> extent;
+        i64 size = 1;
+        for (auto v = 0; v < n; ++v)
+        {
+            if (da[v] + db[v] > Vars::max_exponent)
+                return false;
+            stride[v] = size;
+            extent[v] = da[v] + db[v] + 1;
+            size *= extent[v];
+            if (size > limit)
+                return false;
+        }
+        if constexpr (Vars::order::graded)
+            if (a.total_degree() + b.total_degree() > Vars::max_exponent)
+                return false;
+
+        // the accumulator is all zeros between calls: every slot read out is reset
+        thread_local cc::vector<C> dense;
+        thread_local cc::vector<i64> index_a;
+        thread_local cc::vector<i64> index_b;
+        if (dense.size() < size)
+            dense.resize_to_filled(size, C(0));
+        auto const index_of = [&](key_t const& k)
+        {
+            i64 i = 0;
+            for (auto v = 0; v < n; ++v)
+                i += Vars::exponent(k, v) * stride[v];
+            return i;
+        };
+        index_a.resize_to_uninitialized(a.term_count());
+        index_b.resize_to_uninitialized(b.term_count());
+        for (auto t = 0; t < a.term_count(); ++t)
+            index_a[t] = index_of(a._keys[t]);
+        for (auto t = 0; t < b.term_count(); ++t)
+            index_b[t] = index_of(b._keys[t]);
+
+        // a slot going from zero to non-zero records its monomial; a slot that cancels and comes back is recorded twice,
+        // and the second record reads a zero, since the first moved the coefficient out
+        struct touched_slot
+        {
+            key_t key;
+            i64 slot;
+        };
+        thread_local cc::vector<touched_slot> touched;
+        touched.clear();
+        for (auto i = 0; i < a.term_count(); ++i)
+        {
+            auto* const row = dense.data() + index_a[i];
+            auto const& ca = a._coeffs[i];
+            auto const& ka = a._keys[i];
+            for (auto j = 0; j < b.term_count(); ++j)
+            {
+                auto& c = row[index_b[j]];
+                if (impl::coefficient_is_zero(c))
+                    touched.push_back({.key = ka + b._keys[j], .slot = index_a[i] + index_b[j]});
+                impl::add_mul(c, ca, b._coeffs[j]);
+            }
+        }
+
+        // the box fits every exponent and degree, so the raw sums of keys above need no overflow check
+        if (touched.size() <= 24)
+        {
+            // a short list sorts fastest by insertion
+            for (isize i = 1; i < touched.size(); ++i)
+            {
+                auto const t = touched[i];
+                auto j = i;
+                for (; j > 0 && Vars::greater(t.key, touched[j - 1].key); --j)
+                    touched[j] = touched[j - 1];
+                touched[j] = t;
+            }
+        }
+        else
+            cc::sort(touched, [](touched_slot const& x, touched_slot const& y) { return Vars::greater(x.key, y.key); });
+        r._keys.reserve(touched.size());
+        r._coeffs.reserve(touched.size());
+        for (auto const& t : touched)
+        {
+            auto& c = dense[t.slot];
+            if (impl::coefficient_is_zero(c))
+                continue;
+            r._push(t.key, cc::move(c));
+            // a moved-from bigint is zero already; a coefficient that keeps its value when moved is reset
+            if (!impl::coefficient_is_zero(c))
+                c = C(0);
+        }
+        return true;
+    }
+
+    /// The product by Monagan and Pearce's heap: one row per term of the smaller factor, each walking the larger,
+    /// so the pairs' monomials come out greatest first and each run of equal ones is accumulated in place, sorted without a sort.
+    [[nodiscard]] static multi_polynomial _product_heap(multi_polynomial const& a, multi_polynomial const& b)
+    {
+        auto const& rows = a.term_count() <= b.term_count() ? a : b;
+        auto const& cols = a.term_count() <= b.term_count() ? b : a;
+        auto const width = cols.term_count();
+
+        struct entry
         {
             key_t key;
             int i;
             int j;
         };
-        cc::vector<pair_product> pairs;
-        pairs.reserve(isize(a.term_count()) * b.term_count());
-        for (auto i = 0; i < a.term_count(); ++i)
-            for (auto j = 0; j < b.term_count(); ++j)
-                pairs.push_back({.key = Vars::multiply(a._keys[i], b._keys[j]), .i = i, .j = j});
-        cc::sort(pairs, [](pair_product const& x, pair_product const& y) { return Vars::greater(x.key, y.key); });
+        // the rows' first products descend as the rows do, so in row order they already form a max-heap
+        cc::vector<entry> heap;
+        heap.reserve(rows.term_count());
+        for (auto i = 0; i < rows.term_count(); ++i)
+            heap.push_back({.key = Vars::multiply(rows._keys[i], cols._keys[0]), .i = i, .j = 0});
 
-        for (isize s = 0; s < pairs.size();)
+        auto const sift_down = [&]
         {
+            auto const n = heap.size();
+            isize p = 0;
+            while (true)
+            {
+                auto c = 2 * p + 1;
+                if (c >= n)
+                    break;
+                if (c + 1 < n && Vars::greater(heap[c + 1].key, heap[c].key))
+                    ++c;
+                if (!Vars::greater(heap[c].key, heap[p].key))
+                    break;
+                cc::swap(heap[c], heap[p]);
+                p = c;
+            }
+        };
+
+        multi_polynomial r;
+        while (!heap.empty())
+        {
+            auto const k = heap[0].key;
             auto acc = C(0);
-            auto e = s;
-            for (; e < pairs.size() && pairs[e].key == pairs[s].key; ++e)
-                impl::add_mul(acc, a._coeffs[pairs[e].i], b._coeffs[pairs[e].j]);
+            do
+            {
+                auto& top = heap[0];
+                impl::add_mul(acc, rows._coeffs[top.i], cols._coeffs[top.j]);
+                if (++top.j < width)
+                {
+                    top.key = Vars::multiply(rows._keys[top.i], cols._keys[top.j]);
+                }
+                else
+                {
+                    top = heap.back();
+                    heap.remove_back();
+                }
+                sift_down();
+            } while (!heap.empty() && heap[0].key == k);
             if (!impl::coefficient_is_zero(acc))
-                r._push(pairs[s].key, cc::move(acc));
-            s = e;
+                r._push(k, cc::move(acc));
         }
         return r;
     }
+
 
     /// Terms in any order, possibly repeated, made sorted and combined.
     [[nodiscard]] static multi_polynomial _from_unsorted(cc::vector<key_t> keys, cc::vector<C> coeffs)

@@ -93,6 +93,21 @@ void check_ring_against_evaluation(cc::random& rng, int rounds)
         CHECK((a - a).is_zero());
         CHECK(is_canonical(a * b));
         CHECK(is_canonical(a - b));
+
+        // the rvalue operators merge in place, and an operand may be the accumulator itself
+        CHECK((a - b * c)(x) == a(x) - b(x) * c(x));
+        CHECK((a * b - c)(x) == a(x) * b(x) - c(x));
+        CHECK((a * c - b * c)(x) == a(x) * c(x) - b(x) * c(x));
+        CHECK(is_canonical(a * c - b * c));
+        auto d = a;
+        d += d;
+        CHECK(d == a * 2);
+        d -= d;
+        CHECK(d.is_zero());
+        d = a;
+        d -= b;
+        d += b;
+        CHECK(d == a);
     }
 }
 
@@ -160,6 +175,57 @@ TEST("tg multi_polynomial - ring operations agree with evaluation, under every o
     check_ring_against_evaluation<multi_polynomial<bigint, vars<4, tg::infinitesimal_order>>>(rng, n);
     check_ring_against_evaluation<multi_polynomial<bigint, vars<5, tg::grevlex_order>>>(rng, n);
     check_ring_against_evaluation<multi_polynomial<bigint, vars<2, tg::lex_order, 8>>>(rng, n);
+}
+
+TEST("tg multi_polynomial - sparse products with large exponents take the heap and agree too")
+{
+    // exponents up to 300 make the dense box far larger than the pairs, so these products go through the heap
+    auto rng = nx::test_random();
+    auto const n = nx::is_thorough() ? 400 : 60;
+    auto const check_order = [&]<class P>(P*)
+    {
+        for (auto i = 0; i < n; ++i)
+        {
+            auto const a = random_poly<P>(rng, 12, 300);
+            auto const b = random_poly<P>(rng, 12, 300);
+            auto const c = random_poly<P>(rng, 3, 2);
+            cc::fixed_array<bigint, P::variable_count> x;
+            for (auto v = 0; v < P::variable_count; ++v)
+                x[v] = bigint(i64(rng.next_u64() % 5) - 2);
+
+            CHECK((a * b)(x) == a(x) * b(x));
+            CHECK(a * b == b * a);
+            CHECK((a + c) * b == a * b + c * b);
+            CHECK(is_canonical(a * b));
+        }
+    };
+    check_order(static_cast<multi_polynomial<bigint, vars<3>>*>(nullptr));
+    check_order(static_cast<multi_polynomial<bigint, vars<3, tg::lex_order>>*>(nullptr));
+    check_order(static_cast<multi_polynomial<bigint, vars<3, tg::infinitesimal_order>>*>(nullptr));
+    check_order(static_cast<multi_polynomial<bigint, vars<2, tg::grlex_order, 32>>*>(nullptr));
+}
+
+TEST("tg multi_polynomial - products in a row over a coefficient that keeps its value when moved from")
+{
+    // i64 is no bigint: a slot of the dense accumulator read out by a move still holds its value, so it must be reset
+    using P = multi_polynomial<i64, vars<3, tg::lex_order>>;
+    auto rng = nx::test_random();
+    for (auto i = 0; i < 300; ++i)
+    {
+        auto const random_small = [&]
+        {
+            P p;
+            for (auto t = 0; t < 6; ++t)
+                p += P::monomial(i64(rng.next_u64() % 7) - 3,
+                                 {int(rng.next_u64() % 3), int(rng.next_u64() % 3), int(rng.next_u64() % 3)});
+            return p;
+        };
+        auto const a = random_small();
+        auto const b = random_small();
+        auto const x = cc::fixed_array<i64, 3>{i64(rng.next_u64() % 5) - 2, i64(rng.next_u64() % 5) - 2, 3};
+        CHECK((a * b)(x) == a(x) * b(x));
+        CHECK(is_canonical(a * b));
+    }
 }
 
 TEST("tg multi_polynomial - construction, observers and printing")

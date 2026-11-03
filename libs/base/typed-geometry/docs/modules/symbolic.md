@@ -55,7 +55,22 @@ Symbolic perturbation evaluates a predicate with infinitesimals ε0 >> ε1 >> ..
 The sign of a polynomial in infinitesimals is then its leading coefficient's, which `sign()` returns.
 1 being the largest monomial makes it a local order rather than a well-order: it ranks terms for signs, and division algorithms that need a well-order use the others.
 
-### Not yet measured
+### Products: a dense box when it is small, a heap otherwise
 
-Products sort all pairs of terms and accumulate each run of equal monomials in place; that is the correct first version, not the fast one.
-Kronecker substitution into a dense accumulator, Monagan and Pearce's heap multiplication, and a fused `bigint::assign_add_mul` are perf-tg-polynomial-multiplication's, measured against FLINT.
+A product's pairs are summed where its exponents' box is small, at most four slots per pair: Kronecker substitution.
+Each term's exponents become one index into a thread-local accumulator, a pair lands at the sum of its factors' indices,
+and the slots it touched are read out sorted by the order, so no slot outside the result is visited.
+Past that, Monagan and Pearce's heap walks one row per term of the smaller factor, and the pairs come out greatest first, sorted without a sort.
+Either way a coefficient is accumulated in place, through `assign_add_mul` where `C` has one, as `bigint` does.
+Sums merge the sorted term lists, in place from the back when an operand is an rvalue, so `a * b + c * d` moves rather than copies.
+
+Instructions retired on a Zen 5, from sorting every pair with plain `acc += a * b` to now:
+
+| product | terms | before | now |
+|---|---|---|---|
+| orient3d over four points, each perturbed by an infinitesimal | 64 | 106,000 | 70,000 |
+| Fateman's (1 + x + y + z + t)^10 squared | 10,626 | 568 M | 104 M |
+| a sparse product in five variables, n = 6 | 114,000 | 286 M | 152 M |
+| a univariate product of degree 100, two-limb coefficients | 201 | 3.08 M | 2.54 M |
+
+What remains in the infinitesimal case is mostly allocation: every non-zero `bigint` coefficient is a node, and every polynomial two vectors.

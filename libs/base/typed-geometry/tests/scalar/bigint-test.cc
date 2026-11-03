@@ -239,6 +239,44 @@ TEST("tg bigint - every product shape agrees with the one-limb rows")
         }
 }
 
+TEST("tg bigint - assign_add_mul and assign_sub_mul agree with the product and the sum")
+{
+    auto rng = nx::test_random();
+    auto const n = nx::is_thorough() ? 50000 : 5000;
+    for (auto i = 0; i < n; ++i)
+    {
+        // one-limb factors and small accumulators most of the time, the inline path's shapes, with their boundaries
+        auto const a = random_bigint(rng, rng.next_u64() % 4 == 0 ? 3 : 1);
+        auto const b = random_bigint(rng, rng.next_u64() % 4 == 0 ? 3 : 1);
+        auto const acc = random_bigint(rng, 1 + int(rng.next_u64() % 4));
+
+        auto r = acc;
+        r.assign_add_mul(a, b);
+        CHECK(r == acc + a * b);
+        r = acc;
+        r.assign_sub_mul(a, b);
+        CHECK(r == acc - a * b);
+
+        // the accumulator may be either factor, or both
+        r = acc;
+        r.assign_add_mul(r, b);
+        CHECK(r == acc + acc * b);
+        r = acc;
+        r.assign_sub_mul(a, r);
+        CHECK(r == acc - a * acc);
+        r = acc;
+        r.assign_add_mul(r, r);
+        CHECK(r == acc + acc * acc);
+    }
+
+    // a product cancelling the accumulator exactly leaves zero
+    auto z = bigint(-6);
+    z.assign_add_mul(bigint(2), bigint(3));
+    CHECK(z.is_zero());
+    z.assign_sub_mul(bigint(0), bigint(5));
+    CHECK(z.is_zero());
+}
+
 TEST("tg bigint - division recovers a known quotient and remainder")
 {
     // divisors of all ones or a lone top bit, quotient limbs of all ones: windows whose top two limbs equal the divisor's,

@@ -217,6 +217,19 @@ struct tg::bigint
         if (!_try_mul_small(a, b)) [[unlikely]]
             _assign_mul(a, b);
     }
+    /// *this += a * b, without a temporary: the inner step of a polynomial product or a dot product.
+    /// One-limb factors into an accumulator of up to two limbs stay inline; the rest multiplies into a thread-local scratch.
+    CC_FORCE_INLINE void assign_add_mul(bigint const& a, bigint const& b)
+    {
+        if (!_try_mul_sum_small(a, b, false)) [[unlikely]]
+            _assign_mul_sum_slow(a, b, false);
+    }
+    /// *this -= a * b, as assign_add_mul.
+    CC_FORCE_INLINE void assign_sub_mul(bigint const& a, bigint const& b)
+    {
+        if (!_try_mul_sum_small(a, b, true)) [[unlikely]]
+            _assign_mul_sum_slow(a, b, true);
+    }
     /// *this = a << n, n >= 0.
     void assign_shl(bigint const& a, i64 n);
     /// *this = floor(a / 2^n), n >= 0.
@@ -523,6 +536,42 @@ private:
         auto const size = r3 != 0 ? 4 : (t2.value != 0 ? 3 : 2);
         return _store_small(p00.lo, t1.value, t2.value, r3, size, negative);
     }
+
+    /// *this ± a * b for one-limb factors and an accumulator of at most two limbs; false leaves *this's value untouched.
+    /// The factors are read before *this is written, so either may be *this.
+    [[nodiscard]] CC_FORCE_INLINE bool _try_mul_sum_small(bigint const& a, bigint const& b, bool subtract)
+    {
+        auto* const ah = a._node;
+        auto* const bh = b._node;
+        if (ah == nullptr || bh == nullptr || ah->size != 1 || bh->size != 1)
+            return false;
+        auto const p = cc::umul128(impl::bigint_limbs(ah)[0], impl::bigint_limbs(bh)[0]);
+        auto const p_negative = (ah->negative != bh->negative) != subtract;
+        auto* const h = _node;
+        if (h == nullptr || h->size == 0)
+            return _store_small(p.lo, p.hi, 0, 0, p.hi != 0 ? 2 : 1, p_negative);
+        if (!_is_small(h))
+            return false;
+        auto const x0 = impl::bigint_limbs(h)[0];
+        auto const x1 = _high_of_small(h);
+        auto const x_negative = h->negative;
+        if (x_negative == p_negative)
+        {
+            auto const s0 = cc::add_with_carry(x0, p.lo);
+            auto const s1 = cc::add_with_carry(x1, p.hi, s0.carry);
+            auto const size = s1.carry != 0 ? 3 : (s1.value != 0 ? 2 : 1);
+            return _store_small(s0.value, s1.value, s1.carry, 0, size, x_negative);
+        }
+        // x - p, negated back when it borrows, as _try_sum_small does
+        auto const d0 = cc::sub_with_borrow(x0, p.lo);
+        auto const d1 = cc::sub_with_borrow(x1, p.hi, d0.borrow);
+        auto const mask = u64(0) - d1.borrow;
+        auto const n0 = cc::add_with_carry(d0.value ^ mask, 0, d1.borrow);
+        auto const r1 = (d1.value ^ mask) + n0.carry;
+        auto const size = r1 != 0 ? 2 : (n0.value != 0 ? 1 : 0);
+        return _store_small(n0.value, r1, 0, 0, size, d1.borrow != 0 ? p_negative : x_negative);
+    }
+    void _assign_mul_sum_slow(bigint const& a, bigint const& b, bool subtract);
 
     void _copy_new(bigint const& o);
     void _assign_copy(bigint const& o);
