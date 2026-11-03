@@ -37,7 +37,6 @@ using sv_test::block_mean;
 using sv_test::can_raster;
 using sv_test::can_run;
 using sv_test::cornell_camera;
-using sv_test::is_interior;
 using sv_test::rgba16;
 using sv_test::trace_direct;
 
@@ -1079,7 +1078,7 @@ ASYNC_TEST("sv vulkan - the raster path draws what it draws on dx12, to rounding
     for (auto y = 0; y < size[1]; ++y)
         for (auto x = 0; x < size[0]; ++x)
         {
-            if (!is_interior(held.normal, size, x, y) || !is_interior(own.normal, size, x, y))
+            if (!sv_test::is_interior(held.normal, size, x, y) || !sv_test::is_interior(own.normal, size, x, y))
                 continue;
             ++compared;
             auto const i = y * size[0] + x;
