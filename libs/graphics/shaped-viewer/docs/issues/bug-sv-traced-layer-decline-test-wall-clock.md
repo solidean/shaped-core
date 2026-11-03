@@ -12,4 +12,5 @@ Its `nx::expect_error("on a device without sg::feature::raytracing_pipeline")` t
 Run alone on the same preset it passes in 1.5 s, so the budget is what the load of a full check exceeds, not the decline that is slow.
 
 A budget measured in wall-clock seconds is a wait for a duration, which the test guidelines rule out: the wait should be for the decline itself.
-Measured, not a hypothesis: the timing above. Not known: which step of the test the 46 s went into.
+The timing above is measured.
+Which step of the test the 46 s went into is not known.
