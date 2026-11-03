@@ -168,6 +168,9 @@ struct frame_constants:
 
     /// whether the hybrid's deferred kernel writes `guide_hit_distance` for a temporal member that reads it, without the split
     write_hit_distance: uint
+
+    /// how many samples per pixel a hybrid frame lights, `render_settings::hybrid_moving_samples` while the image moves; 0 is 1
+    hybrid_samples: int
     /// whether to write `primary_depth`, at the camera's `near_plane`
     write_primary_depth: uint
     near_plane: float

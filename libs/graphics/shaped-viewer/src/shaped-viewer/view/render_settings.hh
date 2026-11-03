@@ -130,6 +130,12 @@ struct sv::render_settings
     /// which reaches indirect light a room lit through a door or a window otherwise misses.
     i32 hybrid_bounces = 1;
 
+    /// How many samples per pixel a deferred `hybrid` frame lights while the image moves, 1 to 4; a still image accumulates one a frame.
+    /// Forward lights one regardless: a loop around its per-material lighting nests deeper than SGL's inlining limit.
+    /// A moving frame restarts the mean, so its temporal denoiser works from that frame's samples alone,
+    /// and more of them are a steadier input to it at that many times the lighting's cost.
+    i32 hybrid_moving_samples = 1;
+
     /// How many rounds a still frame of the wavefront tracer runs, each moving every live path one segment.
     ///
     /// The wavefront's counterpart to `samples_per_pixel`, which it does not read: this is what a still frame costs, and a path still alive after it carries on next frame.

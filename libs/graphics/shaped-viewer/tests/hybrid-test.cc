@@ -65,7 +65,8 @@ cc::shared_async<hybrid_readback> draw_hybrid(sg::context& ctx,
                                               sv::hybrid_lighting lighting,
                                               int frames,
                                               sv::background const& background = {},
-                                              int bounces = 1)
+                                              int bounces = 1,
+                                              int samples = 1)
 {
     auto const* const mesh_rec = resources.meshes.get_ptr(item.mesh);
     REQUIRE(mesh_rec != nullptr);
@@ -116,6 +117,8 @@ cc::shared_async<hybrid_readback> draw_hybrid(sg::context& ctx,
         fc.rng_seed = u32(f) + 1u;
         // what a hybrid frame reads as its bounce count, `render_settings::hybrid_bounces`
         fc.max_bounces = bounces;
+        // and its samples per pixel, `render_settings::hybrid_moving_samples`
+        fc.hybrid_samples = samples;
 
         auto const background_buffer = ctx.transient.create_buffer_from_pod(*cmd, sv::background_gpu::from(background),
                                                                             sg::buffer_usage::readonly_buffer);
@@ -293,6 +296,44 @@ ASYNC_INVOCABLE_TEST("sv::hybrid_routine - forward and deferred light the Cornel
 // Glass under a uniform sky is the furnace the tracer's own tests hold their refraction to: lossless, it is invisible.
 // The hybrid's bounce crosses the sphere once and loses what its far side reflects back inside: 0.96 of the sky at the center, 0.88 over the disc.
 // Without the crossing a glass primary hit showed its reflection alone, a tenth of the sky.
+// A deferred frame of four samples per pixel is the mean of four: 16 such frames hold what 64 frames of one do, which only noise separates.
+// A moving image lights this many to give its temporal denoiser a steadier frame, so a bias here would show as a moving image brighter or darker than a still one.
+ASYNC_INVOCABLE_TEST("sv::hybrid_routine - a deferred frame of four samples per pixel is the mean of four frames of "
+                     "one",
+                     (sg::context_handle const& ctx_h))
+{
+#if defined(CC_ARCH_ARM64) && defined(_WIN32)
+    SKIP("known broken on Windows on ARM — the inline readback path fastfails; "
+         "issue: bug-sv-woa-inline-readback-fastfail");
+#endif
+    auto& ctx = *ctx_h;
+    if (!sv_test::can_run(ctx) || !ctx.supports(sg::feature::ray_query))
+        SKIP("no inline ray tracing or no SGL compiler, so the hybrid does not build");
+
+    auto resources = sv::gpu_resource_manager::create(ctx);
+    auto const item = resources.acquire_scene_item(shadowed_cornell_box());
+    resources.wait_for_pending_uploads();
+    auto const cam = sv_test::cornell_camera();
+    auto const lights = sv_test::light_table_of(sv_test::make_cornell_box().light);
+
+    constexpr auto size = tg::vec2i(48, 48);
+    auto const ones = co_await draw_hybrid(ctx, resources, item, cam, lights, size, sv::hybrid_lighting::deferred, 64);
+    auto const fours
+        = co_await draw_hybrid(ctx, resources, item, cam, lights, size, sv::hybrid_lighting::deferred, 16, {}, 1, 4);
+    auto const mean = [](cc::span<tg::vec4f const> image)
+    {
+        auto sum = 0.0;
+        for (auto const& c : image)
+            sum += 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2];
+        return sum / f64(image.size());
+    };
+    auto const one = mean(ones.color);
+    auto const four = mean(fours.color);
+    CC_LOG_INFO("the Cornell box, deferred: {} from 64 frames of one sample, {} from 16 frames of four", one, four);
+    CHECK(tg::abs(four - one) < 0.02 * one).dump("one", one).dump("four", four);
+    co_await cc::async_settled(sv::background_work(ctx));
+}
+
 ASYNC_INVOCABLE_TEST("sv::hybrid_routine - a glass sphere under a uniform sky shows the sky through it",
                      (sg::context_handle const& ctx_h))
 {

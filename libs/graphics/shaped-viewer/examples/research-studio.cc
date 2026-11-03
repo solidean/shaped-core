@@ -228,6 +228,7 @@ EXAMPLE("shaped-viewer/research-studio")
     auto bounces = from_environment("SV_STUDIO_BOUNCES", 0, 3); // render_settings::hybrid_bounces, 0 for its default
     if (bounces == 0)
         bounces = sv::render_settings{}.hybrid_bounces;
+    auto moving_samples = sv::render_settings{}.hybrid_moving_samples;
     auto denoiser = 0;         // into k_denoisers
     auto temporal_frames = 16; // render_settings::temporal_denoise_frames
     // On unless asked otherwise: the spatial member a still image is otherwise handed to is far noisier than DLSS.
@@ -272,7 +273,10 @@ EXAMPLE("shaped-viewer/research-studio")
             ImGui::RadioButton("hybrid, forward", &mode, 1);
             ImGui::RadioButton("path traced", &mode, 2);
             if (mode != 2)
+            {
                 ImGui::SliderInt("hybrid bounces", &bounces, 1, 2);
+                ImGui::SliderInt("moving samples", &moving_samples, 1, 4);
+            }
             if (ImGui::BeginCombo("denoiser", sr::to_string(k_denoisers[denoiser]).data()))
             {
                 // Asked while the list is open rather than once up front: sr's shaders answer only once a viewer has
@@ -393,6 +397,7 @@ EXAMPLE("shaped-viewer/research-studio")
             .mode = mode == 2 ? sv::render_mode::wavefront : sv::render_mode::hybrid,
             .hybrid_lighting = mode == 1 ? sv::hybrid_lighting::forward : sv::hybrid_lighting::deferred,
             .hybrid_bounces = bounces,
+            .hybrid_moving_samples = moving_samples,
             .reconstruct = reconstruct,
             .temporal_denoise_frames = temporal,
             .temporal_denoise_fade_frames = u32(fade_frames),

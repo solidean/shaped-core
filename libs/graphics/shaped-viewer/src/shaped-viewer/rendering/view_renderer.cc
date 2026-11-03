@@ -1734,6 +1734,10 @@ sg::routine_outcome view_renderer::trace(sg::command_list& cmd,
         slot->last_jitter = jitter;
     }
 
+    // A hybrid frame lights more samples per pixel while the image moves, which only its own shaders read: set after the hash.
+    if (mode == render_mode::hybrid)
+        fc.hybrid_samples = moving ? cc::clamp(l.settings.hybrid_moving_samples, 1, 4) : 1;
+
     // How many samples each pixel averages, where the wavefront traces a layer the spatial denoiser reads: its pixels
     // finish different numbers of paths, so one count for the image would misjudge every one of them.
     // Transient, since the tallies hold the counts and the resolve rewrites every pixel each frame.

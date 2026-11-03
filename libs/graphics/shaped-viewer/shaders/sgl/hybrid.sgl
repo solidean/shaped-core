@@ -404,6 +404,12 @@ fun quadric_depth(hit: raster.quadric_pixel){tracer.traced} -> float:
 fun quadric_context_of(p: raster.quadric_varyings){tracer.traced} -> material.shading_context:
     return quadric.make_context(scene.instance(..tracer.traced.instances[p.instance as int]), p.primitive)
 
+/// How many samples per pixel the deferred kernel lights frame `f`'s pixels with: `render_settings::hybrid_moving_samples` while the image moves, and 1 still.
+/// The forward stage lights one, since a loop around its lighting nests deeper than the inlining limit allows.
+/// The frame's `hybrid_samples` carries it, and 0, which a frame no hybrid setting reached leaves there, is 1.
+fun samples_of(f: tracer.frame_constants) -> int:
+    return clamp(f.hybrid_samples, 1, 4)
+
 /// `c`, or black where any channel is not a finite number.
 /// One such sample spreads through the accumulated mean into every later frame, and a denoiser smears it across a block, so it is dropped here, where both lightings write.
 fun finite(c: float3) -> float3:
@@ -441,6 +447,7 @@ fun shade_face(pixel: float2, world: float3, face: raster.pixel_face, surface_in
     let b = openpbr.bsdf_prepare(surface, face.exiting, 3u)
     let wo_local = openpbr.to_local(shading, v)
 
+    // One sample, whatever the frame asks for: a loop around this nests a level deeper than the inlining limit allows.
     let mut rng = pixel_rng(uint2(pixel.x as uint, pixel.y as uint), pass.size.x as uint)
     let lit = direct(b, shading, face.n, wo_local, world, true, mut rng)
     let bounced = bounce_from(b, shading, face.n, wo_local, world, 0.0, mut rng)

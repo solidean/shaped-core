@@ -138,6 +138,13 @@ cc::shared_async<cc::unit> measure(sg::context& ctx,
                               .settings = {.mode = sv::render_mode::hybrid,
                                            .hybrid_lighting = sv::hybrid_lighting::deferred,
                                            .reconstruct = dlss}});
+        for (auto const samples : {2, 4})
+            contenders.push_back({.name = samples == 2 ? "hybrid deferred, 2 moving samples, dlss_rr"
+                                                       : "hybrid deferred, 4 moving samples, dlss_rr",
+                                  .settings = {.mode = sv::render_mode::hybrid,
+                                               .hybrid_lighting = sv::hybrid_lighting::deferred,
+                                               .hybrid_moving_samples = samples,
+                                               .reconstruct = dlss}});
         contenders.push_back({.name = "hybrid deferred, two bounces, dlss_rr",
                               .settings = {.mode = sv::render_mode::hybrid,
                                            .hybrid_lighting = sv::hybrid_lighting::deferred,
