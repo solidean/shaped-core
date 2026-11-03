@@ -86,6 +86,11 @@ And `dwarf` would leave it un-stripped as well, which makes the offline path moo
 An offset from another build of the same source resolves to a plausible, confident, wrong name, and neither `dev.py symbolize` nor `llvm-symbolizer` can tell.
 Keeping a sidecar beside the artifact it was built with is what stands in for a recorded build identity.
 
+**RelWithDebInfo keeps no DWARF inside the module**, only the name section, so stacks still read as function names.
+DWARF inside the module is what made a wasm link expensive, and the tests ran no faster for it.
+On `shaped-graphics-language-test` it took wasm-opt from 0.4 GB to 4.6 GB, and the module from 11 MB to 133 MB.
+Debug keeps `-g` for a debugger, and `dwarf` here is the way to get DWARF from a RelWithDebInfo build.
+
 ### SteamOS
 
 SteamOS is generic Linux x64 to the build, and Tier 2 rather than Tier 1 only because no CI runner runs it.

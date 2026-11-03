@@ -34,18 +34,19 @@ def run(args: argparse.Namespace, ctx: Context) -> None:
     if not preset.is_emscripten:
         ctx.die(f"test-web needs an Emscripten preset (got {preset.name!r}); e.g. --preset {ctx.policy.web_preset}")
 
+    # The runners are out of `all`, so the build names them: one library's, or `tests-web` for every one of them.
     if args.library:
         # Accept "clean-core", "clean-core-test", or "clean-core-test-web" — all name the same runner.
         lib = args.library.removesuffix("-web").removesuffix("-test")
-        target: str | None = f"{lib}-test-web"
+        target = f"{lib}-test-web"
         page = f"{lib}-web.html"
     else:
-        target = None  # build everything so all modules + the aggregate page are present
+        target = "tests-web"
         page = "tests-web.html"
 
     if not args.no_build:
         results = dev.build(
-            presets, [target] if target else None, root=ctx.root,
+            presets, [target], root=ctx.root,
             mirror=args.mirror_output, verbose=args.verbose, emsdk_path=args.emsdk_path,
         )
         if not all(r.ok for r in results):

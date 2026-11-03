@@ -277,7 +277,7 @@ The `=` is needed, since a value starting with `--` would otherwise read as the 
 
 The same flags are on `run`, `example` and `benchmark`.
 
-**Browser test runner.** Under Emscripten each `*-test` target also builds a MODULARIZE wasm module (`*-test-web.js` + `.wasm`).
+**Browser test runner.** Under Emscripten each `*-test` target has a MODULARIZE wasm twin (`*-test-web.js` + `.wasm`).
 CMake generates HTML pages at the build root: one per library (`<library>-web.html`), plus an aggregate **`tests-web.html`**.
 The aggregate loads every library's module and shows them grouped, with a grand total.
 Each page runs its tests **one per animation frame**, rendering a live table of per-test timing, assertion counts, and pass/fail.
@@ -292,7 +292,9 @@ uv run dev.py test-web clean-core      # just one library
 It defaults to the `emscripten-relwithdebinfo` preset and takes the same `--emsdk-path` as the other commands.
 The pages are plain static files, so hosting them means serving the build root over HTTP from any static server rather than `file://` — emrun is not needed in deployment.
 
-The pages are built by the normal `dev.py build` too, since they are regular targets, and they are not run by `dev.py test`: only `*-test`, not `*-test-web`, is a node test.
+**The twins are not part of a normal `dev.py build`**: each compiles its test's sources a second time, about a third of a full build.
+`test-web` builds the one it serves, and `uv run dev.py build -t tests-web` builds them all.
+`dev.py test` never runs them: only `*-test`, not `*-test-web`, is a node test.
 The implementation is nexus'.
 [web_runner.cc](../../libs/base/nexus/src/nexus/web/web_runner.cc) exposes the `nx_web_*` C ABI and [NexusWebRunner.cmake](../../libs/base/nexus/cmake/NexusWebRunner.cmake) is the build glue.
 The page itself is the shared renderer [nexus-web-driver.js](../../libs/base/nexus/web/nexus-web-driver.js).
