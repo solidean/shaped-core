@@ -104,5 +104,9 @@ struct sg::compiled_shader
     /// SGL states them when it compiled with diagnostics, and a shader that has any binds the buffer in sg's reserved slot.
     cc::vector<shader_debug_site> debug_sites;
 
+    /// Where each line of a text format's code came from, so a backend that compiles the text names the source's line.
+    /// SGL states it; empty for every other compiler, and for bytecode, whose compiler already reported its lines.
+    cc::vector<shader_source_line> source_map;
+
     // Deferred: constant-buffer member layouts, root/push constants, content hash, I/O signatures.
 };
