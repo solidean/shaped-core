@@ -299,6 +299,20 @@ cc::vector<byte> encode_compiled_shader(compiled_shader const& shader)
         }
     }
 
+    put_u64(out, u64(shader.source_map.size()));
+    for (auto const& line : shader.source_map)
+    {
+        put_u32(out, u32(line.emitted));
+        put_string(out, line.at.file);
+        put_u32(out, u32(line.at.line));
+        put_u64(out, u64(line.inlined_from.size()));
+        for (auto const& call : line.inlined_from)
+        {
+            put_string(out, call.file);
+            put_u32(out, u32(call.line));
+        }
+    }
+
     return out;
 }
 
@@ -400,6 +414,25 @@ cc::optional<compiled_shader> decode_compiled_shader(cc::span<byte const> bytes)
             site.inlined_from.push_back(cc::move(line));
         }
         shader.debug_sites.push_back(cc::move(site));
+    }
+
+    // A line is at least its number, a file's length prefix, its line and a call count.
+    auto const line_count = r.get_count(4 + 8 + 4 + 8);
+    for (auto i = isize(0); r.ok && i < line_count; ++i)
+    {
+        auto line = shader_source_line();
+        line.emitted = i32(r.get_u32());
+        line.at.file = r.get_string();
+        line.at.line = i32(r.get_u32());
+        auto const call_count = r.get_count(8 + 4);
+        for (auto k = isize(0); r.ok && k < call_count; ++k)
+        {
+            auto call = debug_source_line();
+            call.file = r.get_string();
+            call.line = i32(r.get_u32());
+            line.inlined_from.push_back(cc::move(call));
+        }
+        shader.source_map.push_back(cc::move(line));
     }
 
     // Trailing bytes mean this is not the blob we think it is, so it is refused like any other inconsistency.

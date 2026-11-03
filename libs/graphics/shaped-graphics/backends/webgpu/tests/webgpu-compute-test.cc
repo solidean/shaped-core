@@ -5,6 +5,7 @@
 #include <nexus/test.hh>
 #include <shaped-graphics/all.hh>
 
+
 using namespace cc::primitive_defines;
 
 // Compute on WebGPU end to end: pipelines built both ways, inline constants emulated in group 3, and the group-3
@@ -304,4 +305,33 @@ ASYNC_INVOCABLE_TEST("sg webgpu - a bound sampler is group 3 binding index + 1",
     REQUIRE(data.size() == 2);
     CHECK(data[0] == 30);
     CHECK(data[1] == 40);
+}
+
+ASYNC_INVOCABLE_TEST("sg webgpu - a WGSL compile error is logged at the source line its source map names",
+                     (webgpu::webgpu_context_handle const& handle))
+{
+    auto& ctx = *handle;
+    // line 3 names nothing, which Dawn reports at that line of the text
+    constexpr auto broken = "@compute @workgroup_size(1)\n"
+                            "fn main() {\n"
+                            "    let x = undefined_name;\n"
+                            "}\n";
+    auto shader = make_shader(sg::shader_stage::compute, broken, "main", {}, sg::compute_dimensions{.x = 1});
+    shader.source_map.push_back(
+        {.emitted = 3, .at = {.file = "broken.sgl", .line = 12}, .inlined_from = {{.file = "main.sgl", .line = 40}}});
+
+    nx::expect_error("broken.sgl:12, inlined from main.sgl:40: *", nx::exactly(1));
+    // the device's own reports of the broken module are what this test provokes, so it takes them itself
+    auto device_errors = cc::make_shared<int>(0);
+    ctx.set_message_callback([device_errors](WGPUErrorType, cc::string_view) { ++*device_errors; });
+
+    auto const layout = ctx.uncached.create_pipeline_layout({});
+    (void)ctx.uncached.try_create_compute_pipeline({.shader = shader, .layout = layout});
+    // the device delivers the module's messages when it gets to them, never inside the call, and the backlog holds them
+    co_await cc::async_settled(ctx.backlog.settled());
+    CHECK(*device_errors >= 1);
+
+    // what the driver installs, without holding this test past its end: a later error reports to the test that runs
+    ctx.set_message_callback([](WGPUErrorType, cc::string_view message)
+                             { CHECK(false).context(cc::format("webgpu error: {}", message)); });
 }

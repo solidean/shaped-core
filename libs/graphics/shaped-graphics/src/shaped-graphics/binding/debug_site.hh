@@ -44,6 +44,27 @@ struct sg::debug_source_line
     bool operator==(debug_source_line const&) const = default;
 };
 
+/// Where one line of a shader's text came from: the source line it writes, and the calls that was inlined through.
+/// What a compiler's message about that line is reported at, by a backend that compiles the text itself.
+struct sg::shader_source_line
+{
+    /// The line of the text, counted from 1.
+    i32 emitted = 0;
+    debug_source_line at;
+    /// Innermost first.
+    cc::vector<debug_source_line> inlined_from;
+
+    [[nodiscard]] bool operator==(shader_source_line const& rhs) const
+    {
+        if (emitted != rhs.emitted || !(at == rhs.at) || inlined_from.size() != rhs.inlined_from.size())
+            return false;
+        for (auto i = isize(0); i < inlined_from.size(); ++i)
+            if (!(inlined_from[i] == rhs.inlined_from[i]))
+                return false;
+        return true;
+    }
+};
+
 /// One print or assert of a shader.
 struct sg::shader_debug_site
 {
