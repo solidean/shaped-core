@@ -725,6 +725,9 @@ auto sgl::check::impl::flattener::flatten_bound_call(ast::expr_id id, type_id ty
     auto const slots = c.out.at(record.slots);
     if (is_inlined(record.callee))
     {
+        if (diff_depth > 0 && type != checked_module::void_type)
+            if (auto const d = custom_derivatives_of(record.callee); is_valid(d.forward) || is_valid(d.backward))
+                return flatten_custom_call(id, type, record, d, values);
         auto const inlined = inline_bound(id, record.callee, values, slots, handed, c.out.at(record.type_arguments));
         return add_expr(type, id, flat_block{.label = inlined.label, .body = inlined.body});
     }

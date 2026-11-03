@@ -1,0 +1,113 @@
+// PROTOTYPE (docs/spec/incubator/autodiff.md): derivatives written by hand, `@forward(f)` and `@backward(f)`.
+// Inside a function being differentiated, a call of `f` runs as it is, and its derivative is what these give.
+// So `f` may hold what no derivative is derived through, such as a loop that stops when it is done.
+
+// Front-to-back alpha compositing, as a splat rasterizer's pixel runs it: it stops once almost nothing shows through.
+struct layers:
+    alpha: float[4]
+    color: float[4]
+
+fun composite(l: layers) -> float:
+    let mut t = 1.0
+    let mut c = 0.0
+    let mut i = 0
+    while i < 4 and t > 0.05:
+        c += t * l.alpha[i] * l.color[i]
+        t *= 1.0 - l.alpha[i]
+        i += 1
+    return c
+
+// The tangent, carried front to back beside the value.
+@forward(composite)
+fun composite_forward(l: layers, dl: layers) -> float:
+    let mut t = 1.0
+    let mut dt = 0.0
+    let mut dc = 0.0
+    let mut i = 0
+    while i < 4 and t > 0.05:
+        let a = l.alpha[i]
+        dc += (dt * a + t * dl.alpha[i]) * l.color[i] + t * a * dl.color[i]
+        dt = dt * (1.0 - a) - t * dl.alpha[i]
+        t *= 1.0 - a
+        i += 1
+    return dc
+
+// The adjoint, walked back to front without a tape: the run is replayed to find where it stopped, and each layer's
+// transmittance is divided back out of the one behind it.
+@backward(composite)
+fun composite_backward(l: layers, dl: mut layers, dr: float):
+    let mut t = 1.0
+    let mut n = 0
+    while n < 4 and t > 0.05:
+        t *= 1.0 - l.alpha[n]
+        n += 1
+    // what the layers behind the current one contributed
+    let mut behind = 0.0
+    for k in 0 ..< n:
+        let i = n - 1 - k
+        let a = l.alpha[i]
+        t = t / (1.0 - a)
+        dl.color[i] += dr * t * a
+        dl.alpha[i] += dr * (t * l.color[i] - behind / (1.0 - a))
+        behind += t * a * l.color[i]
+
+// a pixel's loss around the composite, so derived and written derivatives meet
+fun shaded(l: layers, exposure: float) => exp(exposure) * composite(l) + 0.1 * l.alpha[0] * l.alpha[0]
+
+const scene = layers(alpha = [0.3, 0.5, 0.8, 0.6], color = [0.9, 0.2, 0.7, 0.4])
+const nothing = layers(alpha = [0.0, 0.0, 0.0, 0.0], color = [0.0, 0.0, 0.0, 0.0])
+
+fun moved(l: layers, by: layers, h: float) -> layers:
+    let mut result = l
+    for i in 0 ..< 4:
+        result.alpha[i] += by.alpha[i] * h
+        result.color[i] += by.color[i] * h
+    return result
+
+fun along(g: layers, d: layers) -> float:
+    let mut sum = 0.0
+    for i in 0 ..< 4:
+        sum += g.alpha[i] * d.alpha[i] + g.color[i] * d.color[i]
+    return sum
+
+// forward and reverse, each against a central difference along `d`
+fun agrees(d: layers) -> bool:
+    let h = 1e-3
+    let numeric = (shaded(moved(scene, d, h), 0.2) - shaded(moved(scene, d, -h), 0.2)) / (2.0 * h)
+    let forward = fwd_diff(shaded, scene, d, 0.2, 0.0)
+    let mut gradient = nothing
+    let mut exposure_gradient = 0.0
+    bwd_diff(shaded, scene, mut gradient, 0.2, mut exposure_gradient, 1.0)
+    let tolerance = 1e-3 + 1e-2 * abs(numeric)
+    return nearly_equal(forward, numeric, within = tolerance) and nearly_equal(along(gradient, d), numeric, within = tolerance)
+
+test agrees(layers(alpha = [1.0, 0.0, 0.0, 0.0], color = [0.0, 0.0, 0.0, 0.0]))
+test agrees(layers(alpha = [0.0, 1.0, 0.0, 0.0], color = [0.0, 0.0, 0.0, 0.0]))
+test agrees(layers(alpha = [0.0, 0.0, 1.0, 0.0], color = [0.0, 0.0, 0.0, 0.0]))
+test agrees(layers(alpha = [0.0, 0.0, 0.0, 0.0], color = [1.0, 0.0, 0.0, 0.0]))
+test agrees(layers(alpha = [0.0, 0.0, 0.0, 0.0], color = [0.0, 0.0, 1.0, 0.0]))
+// the fourth layer is behind where the run stopped, so nothing it holds changes the pixel
+test agrees(layers(alpha = [0.0, 0.0, 0.0, 1.0], color = [0.0, 0.0, 0.0, 1.0]))
+test agrees(layers(alpha = [0.3, -0.2, 0.5, 0.1], color = [-0.4, 0.6, 0.2, 0.9]))
+
+// the exposure is derived through `exp`, beside the written derivative
+test:
+    let mut gradient = nothing
+    let mut exposure_gradient = 0.0
+    bwd_diff(shaded, scene, mut gradient, 0.2, mut exposure_gradient, 1.0)
+    nearly_equal(exposure_gradient, exp(0.2) * composite(scene), within = 1e-5)
+
+// the kernels a trainer dispatches, which every target writes
+binding pixels:
+    stacks: buffer[layers]
+    gradients: mut buffer[layers]
+    tangents: mut buffer[float]
+
+@compute(64) fun pixel_backward(@thread_id id: int3){pixels}:
+    let mut gradient = nothing
+    let mut exposure_gradient = 0.0
+    bwd_diff(shaded, pixels.stacks[id.x], mut gradient, 0.2, mut exposure_gradient, 1.0)
+    pixels.gradients[id.x] = gradient
+
+@compute(64) fun pixel_forward(@thread_id id: int3){pixels}:
+    pixels.tangents[id.x] = fwd_diff(shaded, pixels.stacks[id.x], scene, 0.2, 0.0)

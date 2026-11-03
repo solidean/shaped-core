@@ -516,6 +516,36 @@ struct flattener
     /// Why the tree failed, where a pass knows better than CHK-213's words; empty otherwise.
     cc::string failure_detail;
 
+    /// How many `fwd_diff` and `bwd_diff` are inlining the function they differentiate right now.
+    i32 diff_depth = 0;
+
+    /// The derivatives written by hand for a function: `@forward(f)` and `@backward(f)` (autodiff.md).
+    struct custom_derivatives
+    {
+        symbol_id forward = symbol_id::none;
+        symbol_id backward = symbol_id::none;
+    };
+    [[nodiscard]] custom_derivatives custom_derivatives_of(symbol_id function) const;
+
+    /// A call, inside a function being differentiated, of a function with a derivative written by hand.
+    /// Its arguments are bound to `arguments`, one per parameter, and its block's label keys it in `custom_calls`.
+    struct custom_call
+    {
+        symbol_id function = symbol_id::none;
+        custom_derivatives derivatives;
+        cc::vector<local_id> arguments;
+        ast::expr_id call = ast::expr_id::none;
+    };
+    cc::map<i32, custom_call> custom_calls;
+
+    /// The call `id` of `record.callee`, which has a derivative written by hand, inlined over locals that hold its
+    /// arguments; the derivative takes those locals rather than the body.
+    flat_expr_id flatten_custom_call(ast::expr_id id,
+                                     type_id type,
+                                     call_record const& record,
+                                     custom_derivatives d,
+                                     cc::span<flat_expr_id const> values);
+
     /// `by_target(native, emulated)` of raytracing.sgl: both lambdas written out, each a block, and one node holding both.
     [[nodiscard]] bool is_by_target(symbol_id callee) const;
 

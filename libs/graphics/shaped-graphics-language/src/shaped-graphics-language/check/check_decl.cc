@@ -1797,7 +1797,9 @@ void checker::compile_function(symbol_id id)
                                      "stages",
                                      "shadowable",
                                      "expect",
-                                     "internal"};
+                                     "internal",
+                                     "forward",
+                                     "backward"};
     judge_attributes(file, d.attributes, known, "a function",
                      is_raster_entry ? setting_scope::description : setting_scope::none);
     auto const* const geometry = find_attribute(file, d.attributes, "geometry");
