@@ -24,8 +24,9 @@
 /// has no counterpart — see libs/graphics/shaped-graphics/docs/concepts/raytracing-pipeline.md.
 ///
 /// **A kernel whose intersection table holds any triangle group must declare it
-/// `intersection_function_table<instancing, triangle_data>`**, because the opaque triangle default is installed with
-/// exactly that signature and Metal requires the two to agree.
+/// `intersection_function_table<instancing, triangle_data, world_space_data>`**, because the opaque triangle default is
+/// installed with exactly that signature and Metal requires the two to agree.
+/// `world_space_data` is what hands a traversal and its result the instance's transforms.
 ///
 /// **They reach a kernel through `sg::reserved_binding_group`**, as members of that group's argument buffer:
 /// `[[id(0)]]` ray type 0's intersection table, `[[id(1)]]` miss, `[[id(2)]]` closest-hit, `[[id(3)]]` callable, and

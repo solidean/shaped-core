@@ -2213,9 +2213,11 @@ type_id checker::pixel_targets_of(symbol_id entry, type_id color)
 
 void checker::judge_entry_point(symbol_id id)
 {
+    // `s` dangles once pixel_targets_of mints a symbol, so what is read after it is copied out here
     auto const& s = out.at(id);
     auto const file = s.file;
-    auto const& info = out.functions[s.info];
+    auto const function = s.info;
+    auto const& info = out.functions[function];
     auto const where = ast_of(file).at(s.declaration).node.as<ast::fun_decl>().name;
     auto const parameters = out.at(info.parameters);
     auto const& result = out.at(info.result);
@@ -2424,7 +2426,7 @@ void checker::judge_entry_point(symbol_id id)
         if (result.edge != stage::pixel && info.result != checked_module::void_type)
         {
             if (is_color_value(info.result))
-                out.functions.own(s.info).pixel_targets = pixel_targets_of(id, info.result);
+                out.functions.own(function).pixel_targets = pixel_targets_of(id, info.result);
             else
                 invalid("a @pixel fun returns a @pixel struct, one color value or nothing");
         }
@@ -2480,7 +2482,7 @@ void checker::judge_entry_point(symbol_id id)
         judge_link(info.result);
     }
 
-    notes[s.info].is_valid_entry = is_valid;
+    notes[function].is_valid_entry = is_valid;
 }
 
 cc::span<stage_input_info const> sgl::check::stage_inputs()

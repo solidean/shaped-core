@@ -1,0 +1,27 @@
+// IEEE behaviour a fast-math compiler would fold away: NaNs, infinities, signed zeros and an unreassociated sum.
+// The inputs arrive in a buffer, so no compiler sees a constant to fold before the GPU's own does.
+
+binding float_specials:
+    // 0.0, 1.0 and 1.0e30
+    inputs: buffer[float]
+    results: mut buffer[float]
+    comparisons: mut buffer[uint]
+
+@compute(1) fun probe(){float_specials}:
+    let zero = float_specials.inputs[0]
+    let one = float_specials.inputs[1]
+    let big = float_specials.inputs[2]
+    let inf = one / zero
+    let nan = zero / zero
+    let negative_zero = zero * -one
+    float_specials.results[0] = inf
+    float_specials.results[1] = nan
+    float_specials.results[2] = inf * zero
+    float_specials.results[3] = negative_zero + zero
+    float_specials.results[4] = negative_zero
+    float_specials.results[5] = (big + one) - big
+    float_specials.results[6] = -inf
+    float_specials.comparisons[0] = if nan != nan => 1u else 0u
+    float_specials.comparisons[1] = if nan == nan => 1u else 0u
+    float_specials.comparisons[2] = if nan < one or nan >= one => 1u else 0u
+    float_specials.comparisons[3] = if inf > big => 1u else 0u

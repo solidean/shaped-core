@@ -291,6 +291,65 @@ TEST("tg bigint - gcd")
     }
 }
 
+TEST("tg bigint - gcd agrees with Euclid's at every size, and div_exact undoes a product")
+{
+    // Euclid on div_mod, the reference: slow, but nothing of the binary or Lehmer paths
+    auto const euclid = [](bigint x, bigint y)
+    {
+        x = abs(x);
+        y = abs(y);
+        while (!y.is_zero())
+        {
+            auto r = x % y;
+            x = cc::move(y);
+            y = cc::move(r);
+        }
+        return x;
+    };
+    auto rng = nx::test_random();
+    auto const random_magnitude = [&](int n)
+    {
+        u64 limbs[24];
+        for (auto i = 0; i < n; ++i)
+            limbs[i] = random_limb(rng);
+        limbs[n - 1] |= 1;
+        return bigint::from_limbs(cc::span<u64 const>(limbs, isize(n)));
+    };
+    for (auto n = 1; n <= 16; ++n)
+        for (auto m = 1; m <= n; ++m)
+            for (auto k = 0; k <= 4; ++k)
+            {
+                // a common factor of k limbs, none for k = 0, times a power of two now and then
+                auto factor = k == 0 ? bigint(1) : random_magnitude(k);
+                if (rng.next_u64() % 3 == 0)
+                    factor <<= i64(rng.next_u64() % 130);
+                auto const a = random_magnitude(n) * factor;
+                auto const b = (rng.next_u64() % 2 == 0 ? -random_magnitude(m) : random_magnitude(m)) * factor;
+                auto const expected = euclid(a, b);
+                CHECK(gcd(a, b) == expected);
+                CHECK(gcd(b, a) == expected);
+                auto g = a;
+                gcd(g, g, b);
+                CHECK(g == expected);
+                CHECK(div_exact(a, expected) * expected == a);
+                CHECK(div_exact(b, -expected) * -expected == b);
+                auto q = b;
+                div_exact(q, q, expected);
+                CHECK(q * expected == b);
+            }
+    // values whose Euclid quotients are all one, Fibonacci numbers, take the most steps there are
+    auto f0 = bigint(1);
+    auto f1 = bigint(1);
+    for (auto i = 0; i < 700; ++i)
+    {
+        auto f2 = f0 + f1;
+        f0 = cc::move(f1);
+        f1 = cc::move(f2);
+        CHECK(gcd(f1, f0) == bigint(1));
+        CHECK(gcd(f1 * bigint(6), f0 * bigint(4)) == bigint(2) * gcd(f1 * bigint(3), f0 * bigint(2)));
+    }
+}
+
 TEST("tg bigint - decimal strings")
 {
     CHECK(bigint().to_string() == "0");

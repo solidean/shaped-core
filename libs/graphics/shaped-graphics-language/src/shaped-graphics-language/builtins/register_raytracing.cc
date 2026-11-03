@@ -470,7 +470,7 @@ written write_trace_ray_msl(call_context const& ctx)
     lines.push_back(cc::format("{}.world_origin = {};", data, a[1].text));
     lines.push_back(cc::format("{}.world_direction = {};", data, a[2].text));
     lines.push_back(cc::format("{}.context = sgl_ctx;", data));
-    lines.push_back(cc::format("intersector<triangle_data, instancing> {};", traversal));
+    lines.push_back(cc::format("intersector<triangle_data, instancing, world_space_data> {};", traversal));
     lines.push_back(cc::format("sgl_configure({}, uint({}));", traversal, a[5].text));
     lines.push_back(cc::format("ray {}({}, {}, {}, {});", r, a[1].text, a[2].text, a[3].text, a[4].text));
     lines.push_back(cc::format("auto const {} = {}.intersect({}, {}, uint({}), sgl_t.hit_{}, {});", found, traversal, r,
@@ -492,7 +492,7 @@ cc::string msl_trace_helper(helper_context const& ctx)
 {
     if (ctx.target != language::msl)
         return {};
-    return "void sgl_configure(thread intersector<triangle_data, instancing>& i, uint flags)\n"
+    return "void sgl_configure(thread intersector<triangle_data, instancing, world_space_data>& i, uint flags)\n"
            "{\n"
            "    i.accept_any_intersection((flags & 4u) != 0u);\n"
            "    if ((flags & 1u) != 0u)\n"
@@ -513,16 +513,14 @@ cc::string msl_trace_helper(helper_context const& ctx)
            "        i.assume_geometry_type(geometry_type::triangle);\n"
            "}\n"
            "\n"
-           "sgl_hit_record sgl_record_of(intersection_result<triangle_data, instancing> h, ray r, thread sgl_ray_data "
-           "const& d)\n"
+           "sgl_hit_record sgl_record_of(intersection_result<triangle_data, instancing, world_space_data> h, ray r, "
+           "thread sgl_ray_data const& d)\n"
            "{\n"
            "    sgl_hit_record rec;\n"
            "    rec.t = h.type == intersection_type::none ? r.max_distance : h.distance;\n"
            "    rec.t_min = r.min_distance;\n"
            "    rec.origin = r.origin;\n"
            "    rec.direction = r.direction;\n"
-           "    rec.object_origin = r.origin;\n"
-           "    rec.object_direction = r.direction;\n"
            "    rec.instance_id = h.user_instance_id;\n"
            "    rec.instance_index = h.instance_id;\n"
            "    rec.geometry_index = h.geometry_id;\n"
@@ -531,6 +529,13 @@ cc::string msl_trace_helper(helper_context const& ctx)
            "    rec.front_face = h.triangle_front_facing ? 1u : 0u;\n"
            "    rec.object_to_world = float4x3(float3(1, 0, 0), float3(0, 1, 0), float3(0, 0, 1), float3(0));\n"
            "    rec.world_to_object = rec.object_to_world;\n"
+           "    if (h.type != intersection_type::none)\n"
+           "    {\n"
+           "        rec.object_to_world = h.object_to_world_transform;\n"
+           "        rec.world_to_object = h.world_to_object_transform;\n"
+           "    }\n"
+           "    rec.object_origin = rec.world_to_object * float4(r.origin, 1.0f);\n"
+           "    rec.object_direction = rec.world_to_object * float4(r.direction, 0.0f);\n"
            "    rec.attributes[0] = d.attributes[0];\n"
            "    rec.attributes[1] = d.attributes[1];\n"
            "    return rec;\n"

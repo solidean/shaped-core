@@ -41,6 +41,8 @@ using namespace cc::primitive_defines;
     args.push_back("-x");
     args.push_back("metal");
     args.push_back(cc::string(optimization_flag(options.optimization)));
+    // Metal defaults to fast math, which folds NaNs, infinities and signed zeros away and reassociates sums.
+    args.push_back("-fmetal-math-mode=safe");
 
     if (!options.language_version.empty())
         args.push_back(cc::format("-std={}", options.language_version));
@@ -89,6 +91,13 @@ using namespace cc::primitive_defines;
     return text;
 }
 
+/// Whether a compile under `options` runs the toolchain, which is known before it runs.
+[[nodiscard]] bool wants_metallib(ssc::msl::compile_options const& options, ssc::msl::toolchain_info const& toolchain)
+{
+    return options.artifact == ssc::msl::artifact_kind::metallib
+        || (options.artifact == ssc::msl::artifact_kind::automatic && toolchain.is_available);
+}
+
 /// The provenance a cache key folds in: what compiled it, which version, and the flags that shaped the result.
 [[nodiscard]] cc::string signature_of(ssc::msl::compile_options const& options, cc::string_view arm)
 {
@@ -132,6 +141,11 @@ ssc::msl::toolchain_info const& ssc::msl::compiler::toolchain() const
     return _state->toolchain;
 }
 
+cc::string ssc::msl::compiler::signature(compile_options const& options) const
+{
+    return signature_of(options, wants_metallib(options, _state->toolchain) ? "metallib" : "msl");
+}
+
 cc::result<sg::compiled_shader> ssc::msl::compiler::compile(shader_description const& desc,
                                                             compile_options const& options) const
 {
@@ -144,8 +158,7 @@ cc::result<sg::compiled_shader> ssc::msl::compiler::compile(shader_description c
     if (reflected.has_error())
         return cc::error(cc::move(reflected).error());
 
-    auto const wants_metallib = options.artifact == artifact_kind::metallib
-                             || (options.artifact == artifact_kind::automatic && _state->toolchain.is_available);
+    auto const is_metallib = wants_metallib(options, _state->toolchain);
 
     if (options.artifact == artifact_kind::metallib && !_state->toolchain.is_available)
         return cc::error("compile: a metallib was asked for and this host has no Metal toolchain — install it with "
@@ -157,7 +170,7 @@ cc::result<sg::compiled_shader> ssc::msl::compiler::compile(shader_description c
     shader.bindings = cc::move(reflected.value().bindings);
     shader.workgroup_size = desc.workgroup_size.has_value() ? desc.workgroup_size : reflected.value().workgroup_size;
 
-    if (wants_metallib)
+    if (is_metallib)
     {
         auto run = impl::run_process(_state->toolchain.driver_path, driver_arguments(options), desc.source);
         if (run.has_error())
@@ -189,9 +202,7 @@ cc::result<sg::compiled_shader> ssc::msl::compiler::compile(shader_description c
         shader.bytecode = cc::make_pinned_data(cc::move(bytes));
     }
 
-    shader.compiler = {.name = "metal",
-                       .version = _state->toolchain.version,
-                       .signature = signature_of(options, wants_metallib ? "metallib" : "msl")};
+    shader.compiler = {.name = "metal", .version = _state->toolchain.version, .signature = signature(options)};
 
     return shader;
 }

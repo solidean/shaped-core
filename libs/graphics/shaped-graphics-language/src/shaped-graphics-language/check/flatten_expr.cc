@@ -602,15 +602,28 @@ auto sgl::check::impl::flattener::decide_report(origin from, flat_expr_id report
         flat_expr_id const handed[] = {candidate, local_ref(fused.value().payload, id)};
         auto const decided = inline_bound(id, fused.value().any_hit, handed, both);
         auto const decision_type = c.out.functions[c.out.at(fused.value().any_hit).info].result;
-        auto const decision = add_expr(decision_type, id, flat_block{.label = decided.label, .body = decided.body});
-        // `ignore` is the decision's case 1, which no report survives
-        type_id const ints[] = {decision_type, decision_type};
+        auto const decision = add_local(local_kind::let, "decision", decision_type);
+        add_stmt(from, flat_let{.local = decision,
+                                .value = add_expr(decision_type, id,
+                                                  flat_block{.label = decided.label, .body = decided.body})});
+        // `==` of one enum is the `int` overload (CHK-149)
+        type_id const ints[] = {c.prelude_type(builtins::k_int), c.prelude_type(builtins::k_int)};
         auto const equals = c.find_operator(file(), "==", ints);
         if (!is_valid(equals))
             return fail();
-        flat_expr_id const compared[] = {decision, add_expr(decision_type, id, flat_enum_value{.case_index = 1})};
+        // `ignore` is the decision's case 1, which no report survives
+        flat_expr_id const compared[]
+            = {local_ref(decision, id), add_expr(decision_type, id, flat_enum_value{.case_index = 1})};
         flat_stmt_id const ignored[] = {no_hit()};
         add_stmt(from, flat_if{.condition = builtin_call(id, equals, compared), .then_body = add_list(ignored)});
+        // `accept_and_end_search` is case 2, which the traversal's result carries out as metal's `continue_search`
+        auto const ends = fused.value().ends_search;
+        flat_expr_id const ending[]
+            = {local_ref(decision, id), add_expr(decision_type, id, flat_enum_value{.case_index = 2})};
+        flat_stmt_id const ended[] = {make_stmt(
+            from, flat_assign{.place = local_ref(ends, id),
+                              .value = add_expr(members[is_hit].type, id, flat_bool_literal{.value = true})})};
+        add_stmt(from, flat_if{.condition = builtin_call(id, equals, ending), .then_body = add_list(ended)});
     }
     auto const decide = add_list(block);
     block = cc::move(outer);

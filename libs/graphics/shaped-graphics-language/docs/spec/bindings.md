@@ -105,8 +105,8 @@ The digit is set off by `_`, unlike a vector's `float4`, because it names a dime
 No target has a cube or a multisampled storage texture, and no target has a 1D or 3D depth texture.
 A depth texture is its own type, with the sg shape and then `_depth`, because it has functions of its own: comparison sampling.
 
-**1D on webgpu is a polyfill.**
-sg's webgpu backend creates every 1D texture as a 2D one, one texel high, and so does the WGSL SGL writes.
+**1D on webgpu and metal is a polyfill.**
+sg's webgpu and metal backends create every 1D texture as a 2D one, one texel high, and so do the WGSL and MSL SGL writes.
 One rule is simpler than "1D without mips, 2D with them", removing 1D would remove it everywhere, and drivers are understood to promote 1D the same way.
 A 1D texture's size then reads its width from `x`.
 

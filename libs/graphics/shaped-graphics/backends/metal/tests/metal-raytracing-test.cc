@@ -671,17 +671,17 @@ struct scene_bindings
 /// Ray type 0's intersection table keeps id 0, and ray type 1's follows the callable table at id 4.
 struct ray_type_tables
 {
-    intersection_function_table<instancing, triangle_data> hit_type0 [[id(0)]];
+    intersection_function_table<instancing, triangle_data, world_space_data> hit_type0 [[id(0)]];
     visible_function_table<void(thread float&)> miss [[id(1)]];
     visible_function_table<void(thread float&, float)> closest_hit [[id(2)]];
     visible_function_table<void(thread float&)> callable [[id(3)]];
-    intersection_function_table<instancing, triangle_data> hit_type1 [[id(4)]];
+    intersection_function_table<instancing, triangle_data, world_space_data> hit_type1 [[id(4)]];
 };
 
 [[visible]] void miss_marker(thread float& payload) { payload = -1.0f; }
 [[visible]] void closest_hit_marker(thread float& payload, float distance) { payload = distance; }
 
-[[intersection(triangle, instancing, triangle_data)]]
+[[intersection(triangle, instancing, triangle_data, world_space_data)]]
 bool any_hit_reject(float distance [[distance]])
 {
     return false;
@@ -698,7 +698,7 @@ kernel void raygen_ray_types(device scene_bindings& b [[buffer(0)]],
     r.min_distance = 0.0f;
     r.max_distance = 100.0f;
 
-    intersector<instancing, triangle_data> isect;
+    intersector<instancing, triangle_data, world_space_data> isect;
     auto const hit = tid == 0 ? isect.intersect(r, b.scene, 0xFF, t.hit_type0)
                               : isect.intersect(r, b.scene, 0xFF, t.hit_type1);
 

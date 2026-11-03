@@ -116,6 +116,7 @@ struct flattener
         symbol_id any_hit = symbol_id::none;
         local_id payload = local_id::none;
         local_id box = local_id::none;
+        local_id ends_search = local_id::none;
     };
     cc::optional<fusion> fused;
 
