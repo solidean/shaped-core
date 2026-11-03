@@ -3,6 +3,8 @@ created: 2026-11-03
 priority: next
 refs:
   - file: libs/base/clean-core/src/clean-core/memory/node_allocation.cc
+claimed-by: Claude (for Philip Trettner)
+claimed-at: 2026-11-03T20:05Z
 ---
 
 # Node allocation walks the whole slab ring on every exhaustion, so allocating many live nodes is quadratic
