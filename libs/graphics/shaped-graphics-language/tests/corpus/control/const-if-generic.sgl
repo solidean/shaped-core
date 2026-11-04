@@ -1,0 +1,49 @@
+// A `const if` in a generic body, decided by the instance's own parameters (CHK-429, CHK-430).
+// A branch the parameters rule out is never checked for that instance, as C++'s `if constexpr` discards it.
+
+// `>>` takes no float, so the instance for float would fail where it shifts, had it checked that branch
+fun halved[T](x: T) -> T:
+    const if T == float:
+        return x * 0.5
+    else:
+        return x >> 1
+
+test halved(5.0) == 2.5
+test halved(9) == 4
+test halved(9u) == 4u
+
+// `!=`, and a type the program declares
+struct pair:
+    a: int
+    b: int
+
+fun weight[T](x: T) -> int:
+    const if T != pair:
+        return 1
+    else:
+        return x.a + x.b
+
+test weight(2.0) == 1
+test weight(pair(3, 4)) == 7
+
+// a value parameter decides it too, and `and`, `or` and `not` combine what an instance knows
+fun scaled[n: int](x: float) -> float:
+    const if n > 2 and not (n == 5):
+        return x * 4.0
+    else if n == 5 or n < 0:
+        return x * 5.0
+    else:
+        return x
+
+test scaled[3](1.0) == 4.0
+test scaled[5](1.0) == 5.0
+test scaled[1](1.0) == 1.0
+
+// an instance that takes no branch is checked in none, and the chain's value is the one after it
+fun bonus[T](x: T) -> int:
+    const if T == int:
+        return x
+    return 0
+
+test bonus(3) == 3
+test bonus(3.0) == 0

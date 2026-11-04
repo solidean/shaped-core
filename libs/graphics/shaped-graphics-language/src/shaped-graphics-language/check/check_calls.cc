@@ -417,6 +417,9 @@ type_id checker::check_call(function_scope& scope, ast::expr_id id, ast::call co
         // `and`, `or` and `not` are the language's own: no function could leave an operand unevaluated
         if (call.is_short_circuit || spelling == "not")
             return check_logical(scope, id, call);
+        if (spelling == "==" || spelling == "!=")
+            if (auto const compared = check_type_comparison(scope, id, call); compared.has_value())
+                return compared.value();
         auto arguments = check_arguments(scope, call.arguments, false);
         // CHK-152: a leading dot beside an enum, `api == .vulkan`, names a case of that enum
         if ((spelling == "==" || spelling == "!=") && arguments.types.size() == 2)

@@ -480,6 +480,7 @@ const if fast: ... else: ...             // the same, but a condition no constan
                                          // both sides are still checked; it decides what is written, never what is checked
 const if target_api == .vulkan: ...      // the compile's own API (.none .dx12 .vulkan .metal .webgpu) and target_language (.sgl .hlsl .wgsl .msl)
 const if has(.subgroups): ...            // the compile's device; the branch it takes uses the feature without a `require` (CHK-426)
+const if T == float: ...                 // in a generic: each instance checks only the branch its arguments leave (CHK-429, CHK-430)
                                          // a test sees .none, .sgl and no feature; a const holding any of them is ERROR, a function may return them
 fun f(x: float) -> float:                // a body in the target's own text: a run of "hlsl / "wgsl / "msl, or one per const if branch (CHK-427)
     "hlsl                                //   $x is the argument, $result the value; the text is unchecked and the call impure

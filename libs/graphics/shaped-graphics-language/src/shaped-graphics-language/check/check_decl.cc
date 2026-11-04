@@ -1523,8 +1523,7 @@ void checker::compile_const(symbol_id id)
         else if (target.kind == target_kind::symbol && out.at(target.symbol).kind == symbol_kind::constant)
         {
             // CHK-426: what a compile stands for is no one value a const could hold
-            if (auto const& named = out.at(target.symbol);
-                is_prelude_file(named.file) && (named.name == "target_api" || named.name == "target_language"))
+            if (auto const& named = out.at(target.symbol); is_target_constant(target.symbol))
             {
                 report(diagnostic_kind::invalid_constant_argument, file, where,
                        cc::format("{} reads {}, which each compile stands for once a body is inlined, while a const "

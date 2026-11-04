@@ -35,7 +35,8 @@ fun add(a: mut atomic[float], v: float) -> float:
 ### `const if`
 
 Specified so far: `const if` itself (AST-157, CHK-425), the target and device it reads (CHK-426), and text bodies in their first form (STR-46, AST-158, CHK-427).
-What stays here is what it grows into: discarding by a generic's parameters, and the rest of text bodies below.
+So is discarding what an instance rules out (CHK-429, CHK-430): `const if T == float:` checks one branch per instance.
+What stays here is what it grows into: asking more of a type than which it is, and the rest of text bodies below.
 
 **`const if` heads an ordinary `if` chain, and every `else if` of the chain is constant too.**
 The chain's siblings pair as an `if`'s do (AST-50, AST-51), and a condition that is not constant is an error.
@@ -47,7 +48,8 @@ What a condition reads:
 * `target_api` — `.dx12`, `.vulkan`, `.metal` or `.webgpu`, and `.none` in a test.
 * `has(.f)` — the device has sg feature `f`, as the host reports when it compiles.
 * Any option, and any constant built from one.
-* A generic's parameters, and what [types-as-values.md](types-as-values.md) lets a condition ask of a type.
+* A generic's parameters, and whether two types are one, `T == float` (CHK-429).
+  More than that, whether `T` is a vector or of which scalar, is what [types-as-values.md](types-as-values.md) would let a condition ask.
 
 They are `target_api` rather than `target.api` because the prelude's names are shadowable, and a program's own `target` struct is common.
 
@@ -171,12 +173,13 @@ What SGL lacks is the 2-state ray flag and `opacity_micromap` among the features
 ## What it touches
 
 Done: `const if`, constant conditions, `target_api`, `target_language` and `has`, the grant, slib's device features.
+Discarding is done too: a type comparison, and the three-valued decision that leaves an instance's ruled-out branches unchecked (CHK-430).
 Text bodies in their first form are done too: the tagged string as a body, its placement, placeholders and `$result`, a `flat_call` with `text`, and the emitters writing it inline.
 In that form a call of one is impure, needs no uniform control flow and gives a varying result, whatever its text does.
 Left:
 
-* The check pass: three-valued discarding, effect and uniformity attributes as the contract, SGL branches checked against it, and coverage.
-* Generics: a branch ruled out for an instance is never checked for it.
+* The check pass: effect and uniformity attributes as the contract, SGL branches checked against it, and coverage.
+* Generics: questions of a type beyond its identity, such as whether it is a vector, and its scalar where it is a scalar itself.
 * The emitters: reserved names read from the text, and `#line` inside it.
   The preamble is done (CHK-428), a file's per language; one per API, such as vulkan's alone among the HLSL targets, is open.
 * A buffer as a parameter, which SGL has for no function yet, so a text body reaches a buffer through an element or an atomic alone.

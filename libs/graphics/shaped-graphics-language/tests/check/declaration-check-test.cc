@@ -278,6 +278,29 @@ TEST("sgl check - a generic body is checked per instantiation, and its names whe
               .starts_with("unsupported-yet user:[T] a type parameter with an attribute\n"));
 }
 
+TEST("sgl check - an instance checks only the const if branch its parameters leave")
+{
+    // CHK-430: the instance for float never checks the shift, which no float has
+    CHECK(reports_for("fun h[T](x: T) -> T:\n    const if T == float:\n        return x * 0.5\n    else:\n"
+                      "        return x >> 1\nfun f() -> float => h(2.0)\nfun g() -> int => h(2)\n")
+          == "");
+    // a plain `if` decides nothing before inlining, so each instance checks both branches
+    CHECK(reports_for("fun h[T](x: T) -> T:\n    if T == float:\n        return x * 0.5\n    else:\n"
+                      "        return x >> 1\nfun f() -> float => h(2.0)\n")
+              .starts_with("no-matching-overload user:[x >> 1]"));
+    // a condition reading the target is known by no instance
+    CHECK(reports_for("fun h[T](x: T) -> T:\n    const if target_api == .dx12 and T == float:\n        return x >> 1\n"
+                      "    else:\n        return x\nfun f() -> float => h(2.0)\n")
+              .starts_with("no-matching-overload user:[x >> 1]"));
+    // CHK-429: a type compares with a type alone
+    CHECK(reports_for("fun h[T](x: T) -> bool => T == x\nfun f() -> bool => h(1)\n")
+              .starts_with("type-mismatch user:[x] a type compares with a type"));
+    // what follows a chain an instance decided serves the instances that take another branch
+    CHECK(reports_for("fun h[T](x: T) -> int:\n    const if T == int:\n        return x\n    return 0\n"
+                      "fun f() -> int => h(3)\nfun g() -> int => h(3.0)\n")
+          == "");
+}
+
 TEST("sgl check - a generic struct takes one argument per parameter, each of its kind")
 {
     // CHK-339

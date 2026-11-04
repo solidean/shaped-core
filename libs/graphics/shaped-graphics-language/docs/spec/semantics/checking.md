@@ -1392,7 +1392,14 @@ hit_group textured for path_rays:
   A call inlined to a block that does nothing but leave a constant is that constant, so a branch on `is_vulkan()` is taken as one on its result.
 * **CHK-425** Every condition of a `const if` chain (AST-157) is a constant (CHK-310) once the entry point or the test is inlined, so CHK-356 takes exactly one branch, or none.
   A condition that is not is `invalid-constant-argument`, judged of each inlined copy as an unrolled `for`'s bound is (CHK-389).
-  Every branch is still checked on its own as an `if`'s is: a `const if` decides what is written, never what is checked.
+  Every branch is still checked on its own as an `if`'s is, but for the branches CHK-430 rules out before inlining.
+* **CHK-430** A branch of a `const if` whose condition is false whatever the target, the device and the options are is never checked, nor is any branch after one whose condition is true.
+  Such a condition is built by `and`, `or` and `not` from `true` and `false`, a generic's parameters in an instance, a type comparison (CHK-429), and a comparison of numbers.
+  Those numbers are literals, value parameters, enum cases and consts that read no option.
+  It is decided in three values: a known false decides an `and`, and a known true an `or`, whatever the other side reads.
+  So an instance checks only the branches its own arguments leave, as C++'s `if constexpr` discards the rest, and the open body still judges the names of every branch (CHK-338).
+  A condition that reads the target, `has` or an option decides nothing here, so every branch it guards is checked for every compile.
+  What follows a chain an instance decided is never `unreachable-code`, since it serves the instances that take another branch.
 * **CHK-268** A flat tree nests at most 40 levels, and an entry point whose tree nests deeper is `nesting-too-deep` and has no flat tree.
   A level is an operand, the body of a block expression, an expression a statement holds, and a statement list inside a statement; every call counts as inlined.
   A top-level `let x = a + b + …` is one level for the `let` and one per term, so 40 terms is past the limit.
@@ -1547,7 +1554,7 @@ A call deduces what each parameter stands for, and inlining writes that in its p
   Nothing deduces a value parameter yet, so a call states it (CHK-340).
   A parameter may have a default of its kind, `[T = float]` or `[n: int = 4]`, which may name a parameter before it, `[T, U = T]`.
   A type parameter in scope hides every type of its name, and one with an attribute is `unsupported-yet`.
-  It hides every other symbol of its name too, so its name as a value or before a dot is `wrong-kind-of-name`.
+  It hides every other symbol of its name too, so its name as a value or before a dot is `wrong-kind-of-name`, but as an operand of a type comparison (CHK-429).
   A call of it, `T(x)`, is a call of what it stands for in each instance: `float(x)` where `T` is `float`.
   An entry point with type parameters is `wrong-kind-of-name`, since the GPU hands it values of known types.
 * **CHK-339** `struct name[A, n: int]:` declares a **generic struct**, over parameters its members may name, declared as a function's are (CHK-338) ([why](why/checking.md#chk-339)).
@@ -1577,6 +1584,10 @@ A call deduces what each parameter stands for, and inlining writes that in its p
   A type parameter nothing binds is `no-matching-overload`, whose detail names it.
   A parameter only numbers meet takes its default before a number's own type, where every number there fits it: `f[T = float](x: T)` makes `f(1)` a float.
   Every instance an inlined body names exists before the first entry point is flattened.
+* **CHK-429** `A == B` and `A != B` compare two types where either operand names one: a type parameter, a struct, an enum, a builtin type, an instance, `scalar_of[T]`.
+  The other operand names a type too, or it is `type-mismatch`, and the comparison is a `bool`.
+  In an instance it is the constant its arguments make it, which a `const if` decides on (CHK-430): `const if T == float:`.
+  Two mentions of one type are equal, and so are two instances of one generic struct whose arguments are (CHK-339).
 * **CHK-341** `undefined()` in the prelude is a value of the type of the parameter it meets, and binds no type parameter ([why](why/checking.md#chk-341)).
   It is a local declared and never assigned, which nobody may read: the interpreter reads it as zeroes, and a target reads what its local holds.
   `report.none()` is the use it exists for: a report with no hit has attributes of the report's type and no value.
@@ -1587,6 +1598,18 @@ fun apply[A](x: A, f: (A) -> A) -> A => f(x)
 fun twice[A](x: A, f: (A) -> A) -> A => apply(apply(x, f), f)
 
 fun bumped(n: int) -> int => twice(n, x => x + 1)
+```
+
+No float shifts, so the instance for `float` must never check the `else`, and by CHK-430 it never does.
+
+```sgl
+fun halved[T](x: T) -> T:
+    const if T == float:
+        return x * 0.5
+    else:
+        return x >> 1
+
+fun both(a: float, b: int) -> float => halved(a) + (halved(b) as float)
 ```
 
 ## Inferred results and dropped values
@@ -1634,11 +1657,11 @@ A diagnostic of this pass has a kind, a file, a byte span in that file, and a de
 | `invalid-attribute-arguments` | CHK-36, CHK-39, CHK-204, CHK-208, CHK-211, CHK-212, CHK-220, CHK-231, CHK-267, CHK-403, CHK-292, CHK-293, CHK-301, CHK-304, CHK-384, CHK-369, CHK-370, CHK-371 |
 | `binding-not-listed` | CHK-45, CHK-131, CHK-228 |
 | `as-precedence` | CHK-411 |
-| `type-mismatch` | CHK-52, CHK-56, CHK-77, CHK-112 to CHK-118, CHK-121, CHK-167, CHK-210, CHK-214, CHK-219, CHK-236, CHK-243, CHK-275, CHK-276, CHK-279, CHK-281, CHK-287, CHK-329, CHK-344, CHK-362, CHK-375, CHK-392 |
+| `type-mismatch` | CHK-52, CHK-56, CHK-77, CHK-112 to CHK-118, CHK-121, CHK-167, CHK-210, CHK-214, CHK-219, CHK-236, CHK-243, CHK-275, CHK-276, CHK-279, CHK-281, CHK-287, CHK-329, CHK-344, CHK-362, CHK-375, CHK-392, CHK-429 |
 | `not-assignable` | CHK-112, CHK-236, CHK-316, CHK-352, CHK-367 |
 | `read-before-assignment` | CHK-55 |
 | `missing-return` | CHK-125, CHK-236 |
-| `unreachable-code` | CHK-126, CHK-162 |
+| `unreachable-code` | CHK-126, CHK-162, CHK-430 |
 | `no-effect` | CHK-225 |
 | `recursive-call` | CHK-130 |
 | `recursive-trace` | CHK-332 |

@@ -523,6 +523,13 @@ struct checker
     [[nodiscard]] ast::file_ast const& ast_of(i32 file) const { return files[file].ast; }
     [[nodiscard]] cc::string_view text_of(i32 file, source_span where) const { return file_of(file).text_of(where); }
     [[nodiscard]] bool is_prelude_file(i32 file) const { return file < prelude_count; }
+    /// `target_api` or `target_language`, the prelude's consts each compile stands for once inlined (CHK-426).
+    [[nodiscard]] bool is_target_constant(symbol_id s) const
+    {
+        auto const& named = out.at(s);
+        return named.kind == symbol_kind::constant && is_prelude_file(named.file)
+            && (named.name == "target_api" || named.name == "target_language");
+    }
     /// The program is the last file, behind the prelude and the library files it reaches.
     [[nodiscard]] i32 program_file() const { return i32(files.size()) - 1; }
     /// The module-level names a lookup from `file` finds: a prelude file sees the prelude alone, and a module's file sees
@@ -1279,6 +1286,18 @@ struct checker
     [[nodiscard]] bool calls_prelude_operator(i32 file, ast::expr_id expr) const;
     /// What a comparison of number literals alone folds to (CHK-394); none for any other expression.
     [[nodiscard]] cc::optional<bool> comparison_of(i32 file, ast::expr_id expr) const;
+    /// What type parameter `name` stands for, innermost first; `none` where no type parameter has the name.
+    [[nodiscard]] type_id type_parameter_stands_for(cc::string_view name) const;
+    /// Whether `expr`, as an operand, names a type: a type parameter, a struct or an enum, `scalar_of[T]`.
+    /// Reports nothing; a local of the name hides every type of it.
+    [[nodiscard]] bool is_type_operand(function_scope const& scope, ast::expr_id expr) const;
+    /// CHK-429: `A == B` or `A != B` over two types, a `bool` an instance knows; none where neither operand is a type.
+    [[nodiscard]] cc::optional<type_id> check_type_comparison(function_scope& scope, ast::expr_id id, ast::call const& call);
+    /// What checked condition `expr` is whatever the target, the device and the options are (CHK-430).
+    /// None where it reads any of them, or anything else this compile alone knows.
+    [[nodiscard]] cc::optional<bool> known_condition(i32 file, ast::expr_id expr) const;
+    /// A number `known_condition` compares: a literal, a value parameter, an enum's case, a const no option reaches.
+    [[nodiscard]] cc::optional<f64> known_number_of(i32 file, ast::expr_id expr) const;
     /// The elements of tuple or object literal `expr`, checked where they are no literal themselves, into `literals`.
     [[nodiscard]] i32 shape_literal(function_scope& scope, ast::expr_id expr);
     /// Converts literal `expr`, shaped as `literal`, to `to` by a call of `to`'s name (CHK-81, CHK-85).

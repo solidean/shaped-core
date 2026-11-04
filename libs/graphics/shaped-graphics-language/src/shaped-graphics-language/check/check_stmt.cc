@@ -505,11 +505,23 @@ flow checker::check_if(function_scope& scope, ast::if_stmt const& chain)
     auto has_else = false;
     for (auto const& branch : branches)
     {
+        auto known = cc::optional<bool>(true);
         if (ast::is_valid(branch.condition))
+        {
             check_condition(scope, branch.condition);
+            known = chain.is_const ? known_condition(scope.file, branch.condition) : cc::nullopt;
+        }
         else
             has_else = true;
-        result = either(result, check_nested(scope, branch.then));
+        // CHK-430: a branch a condition rules out whatever the compile is, as an instance's parameters do, is
+        // never checked; one it takes is the chain, and nothing after it is checked either.
+        // What follows a decided chain serves the instances that take another branch, so it is never unreachable.
+        if (known.has_value() && !known.value())
+            continue;
+        auto const taken = check_nested(scope, branch.then);
+        if (chain.is_const && known.has_value() && ast::is_valid(branch.condition))
+            return taken == flow::exits ? flow::unknown : taken;
+        result = either(result, taken);
     }
     // Without an `else` the chain can be skipped whole.
     return has_else ? result : flow::falls_through;
