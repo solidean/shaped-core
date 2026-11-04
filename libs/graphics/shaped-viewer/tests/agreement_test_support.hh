@@ -68,6 +68,9 @@ struct sv_test::agreement::mode_config
     /// what one megakernel frame traces
     i32 samples_per_pixel = 16;
     sr::denoise_method denoiser = sr::denoise_method::none;
+    sv::background background = {};
+    /// false lights the layer by its background alone when it has no light of its own
+    bool fallback_light = true;
 };
 
 /// A layer's mean converged twice, from seeds that share nothing, with the G-buffer a rasterizing mode writes beside it.
@@ -197,6 +200,9 @@ void check_finite(cc::string_view stream, cc::string_view image, u64 frame, cc::
     scene.settings.samples_per_pixel = config.samples_per_pixel;
     scene.settings.motion_hold_ms = 0.0f;
     scene.settings.reconstruct.denoiser = config.denoiser;
+    scene.background = config.background;
+    if (!config.fallback_light)
+        scene.fallback_light = cc::nullopt;
     def.views.push_back(cc::move(v));
 
     auto const root_node = def.nodes.add_container(sv::invalid_node);
@@ -213,6 +219,7 @@ void check_finite(cc::string_view stream, cc::string_view image, u64 frame, cc::
 
 /// `items` drawn the `config` way, its mean converged to `samples` per pixel twice over.
 /// The second half starts after a restart, so it draws from other seeds than the first.
+/// `may_be_noiseless` accepts halves that agree to the bit, as every sample of a mirror in a uniform environment does.
 inline cc::shared_async<converged> converge(sg::context& ctx,
                                             sv::gpu_resource_manager& resources,
                                             cc::span<sv::scene_item const> items,
@@ -220,7 +227,8 @@ inline cc::shared_async<converged> converge(sg::context& ctx,
                                             mode_config const& config,
                                             u32 samples,
                                             int restarts_before = 0,
-                                            tg::vec2i size = k_size)
+                                            tg::vec2i size = k_size,
+                                            bool may_be_noiseless = false)
 {
     auto const output
         = ctx.persistent.create_texture_2d({.format = sg::pixel_format::bgra8_unorm,
@@ -342,7 +350,8 @@ inline cc::shared_async<converged> converge(sg::context& ctx,
     for (auto i = isize(0); i < out.first.size(); ++i)
         if (out.first[i] != out.second[i])
             ++differing;
-    REQUIRE(differing > out.first.size() / 2).dump("mode", config.name).dump("differing pixels", differing);
+    if (!may_be_noiseless)
+        REQUIRE(differing > out.first.size() / 2).dump("mode", config.name).dump("differing pixels", differing);
 
     co_await cc::async_settled(sv::background_work(ctx));
     co_return out;

@@ -343,6 +343,7 @@ if(SC_BUILD_TESTS)
             tests/denoiser-agreement-test.cc
             tests/denoiser-stream-test.cc
             tests/mode-switch-fuzz-test.cc
+            tests/furnace-test.cc
             tests/jitter-accumulation-test.cc
             tests/glowing-sphere-test.cc
             tests/moving-view-motion-test.cc
