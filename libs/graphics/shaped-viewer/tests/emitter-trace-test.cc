@@ -127,7 +127,7 @@ struct emitter_scene
 
 [[nodiscard]] sv::render_settings settings_of(sv::render_mode mode, i32 max_bounces)
 {
-    return {.samples_per_pixel = 16, .max_bounces = max_bounces, .mode = mode, .rounds_per_frame = 16};
+    return {.samples_per_pixel = 64, .max_bounces = max_bounces, .mode = mode, .rounds_per_frame = 64};
 }
 
 /// Traces `scene` through the single-view renderer until its mean holds `samples` per pixel, and reads it back.
@@ -195,7 +195,7 @@ cc::shared_async<cc::vector<tg::vec3f>> render(sg::context& ctx,
     }
 }
 
-/// The samples per pixel an image accumulates, the same for both tracers so their noise compares: 32 megakernel frames of 16.
+/// The samples per pixel an image accumulates, the same for both tracers so their noise compares: 8 megakernel frames of 64.
 constexpr u32 k_samples = 512;
 
 [[nodiscard]] tg::vec3f block_mean(cc::span<tg::vec3f const> image, int bx, int by)
