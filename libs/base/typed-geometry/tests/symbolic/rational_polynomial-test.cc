@@ -3,10 +3,10 @@
 #include <typed-geometry/scalar/bigfloat/bigfloat.hh>
 #include <typed-geometry/scalar/bigint/bigint.hh>
 #include <typed-geometry/scalar/bigrat/bigrat.hh>
+#include <typed-geometry/scalar/scalar.hh>
 #include <typed-geometry/symbolic/multi_polynomial.hh>
 #include <typed-geometry/symbolic/polynomial.hh>
 #include <typed-geometry/symbolic/rational_polynomial.hh>
-#include <typed-geometry/scalar/scalar.hh>
 
 #include <type_traits>
 
@@ -131,7 +131,8 @@ TEST("tg rational polynomial - the sign over infinitesimals is the parts' signs"
     CHECK((eps_ratio(e[0], e[1] + 1) * eps_ratio(e[1] + 1, eps(1))) == eps_ratio(e[0]));
 }
 
-TEST("tg rational polynomial - over bigfloat and bigrat coefficients, a quotient of dyadic epsilon polynomials keeps its sign")
+TEST("tg rational polynomial - over bigfloat and bigrat coefficients, a quotient of dyadic epsilon polynomials keeps "
+     "its sign")
 {
     // bigfloat has no division, so no gcd: the parts stay unreduced; over bigrat, a field, they reduce and go monic
     using eps_f = tg::multi_polynomial<tg::bigfloat, tg::vars<2, tg::infinitesimal_order>>;
@@ -164,7 +165,8 @@ TEST("tg rational polynomial - over bigfloat and bigrat coefficients, a quotient
                 return 2;
             auto const r = R(p(c[0]) + p(c[1]) * e[0], d1) - R(p(c[4]) * e[0] * e[1] + p(c[5]), d2);
             // a bool, since tg::bigfloat has no to_string for CHECK to print the parts with
-            auto const cleared = r * R(d1) * R(d2) == R((p(c[0]) + p(c[1]) * e[0]) * d2 - (p(c[4]) * e[0] * e[1] + p(c[5])) * d1);
+            auto const cleared
+                = r * R(d1) * R(d2) == R((p(c[0]) + p(c[1]) * e[0]) * d2 - (p(c[4]) * e[0] * e[1] + p(c[5])) * d1);
             CHECK(cleared);
             return r.sign();
         };
