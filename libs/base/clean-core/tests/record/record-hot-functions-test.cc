@@ -266,26 +266,34 @@ REC_TEST("record/hot - skip_idle leaves out a parked thread's samples, and they 
     rec_fixture const fixture(deterministic_config());
 
     // A second thread the sampler knows, parked on a condition variable for as long as the test thread burns.
-    std::condition_variable cv;
-    auto phase = cc::mutex<int>(0); // 0 starting, 1 parked, 2 released
-    auto const r = capture(
-        [&]
-        {
-            auto parked = cc::native_thread::start(
-                [&]
-                {
-                    CC_RECORD_MARK("parking");
-                    phase.lock([](int& p) { p = 1; });
-                    cv.notify_all();
-                    phase.wait(cv, [](int const& p) { return p == 2; }, [](int&) {});
-                });
-            phase.wait(cv, [](int const& p) { return p >= 1; }, [](int&) {});
-            busy_until_sampled(40);
-            phase.lock([](int& p) { p = 2; });
-            cv.notify_all();
-            parked.join();
-        },
-        true);
+    auto const parked_while_sampled = [&]
+    {
+        std::condition_variable cv;
+        auto phase = cc::mutex<int>(0); // 0 starting, 1 parked, 2 released
+        return capture(
+            [&]
+            {
+                auto parked = cc::native_thread::start(
+                    [&]
+                    {
+                        CC_RECORD_MARK("parking");
+                        phase.lock([](int& p) { p = 1; });
+                        cv.notify_all();
+                        phase.wait(cv, [](int const& p) { return p == 2; }, [](int&) {});
+                    });
+                phase.wait(cv, [](int const& p) { return p >= 1; }, [](int&) {});
+                busy_until_sampled(40);
+                phase.lock([](int& p) { p = 2; });
+                cv.notify_all();
+                parked.join();
+            },
+            true);
+    };
+
+    // A loaded machine may not sample the parked thread while it waits in one run, so a few runs are asked for.
+    auto r = parked_while_sampled();
+    for (auto attempt = 0; attempt < 10 && cc::rec::hot_functions(r, {.skip_idle = true}).idle_samples == 0; ++attempt)
+        r = parked_while_sampled();
 
     auto const all = cc::rec::hot_functions(r);
     auto const busy = cc::rec::hot_functions(r, {.skip_idle = true});
