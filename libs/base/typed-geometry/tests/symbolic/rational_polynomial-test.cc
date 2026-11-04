@@ -1,10 +1,12 @@
 #include <clean-core/math/random.hh>
 #include <nexus/test.hh>
+#include <typed-geometry/scalar/bigfloat/bigfloat.hh>
 #include <typed-geometry/scalar/bigint/bigint.hh>
 #include <typed-geometry/scalar/bigrat/bigrat.hh>
 #include <typed-geometry/symbolic/multi_polynomial.hh>
 #include <typed-geometry/symbolic/polynomial.hh>
 #include <typed-geometry/symbolic/rational_polynomial.hh>
+#include <typed-geometry/scalar/scalar.hh>
 
 #include <type_traits>
 
@@ -127,4 +129,47 @@ TEST("tg rational polynomial - the sign over infinitesimals is the parts' signs"
     CHECK(common.numerator() == e[0] - e[1]);
     CHECK(common.denominator() == e[1] + 1);
     CHECK((eps_ratio(e[0], e[1] + 1) * eps_ratio(e[1] + 1, eps(1))) == eps_ratio(e[0]));
+}
+
+TEST("tg rational polynomial - over bigfloat and bigrat coefficients, a quotient of dyadic epsilon polynomials keeps its sign")
+{
+    // bigfloat has no division, so no gcd: the parts stay unreduced; over bigrat, a field, they reduce and go monic
+    using eps_f = tg::multi_polynomial<tg::bigfloat, tg::vars<2, tg::infinitesimal_order>>;
+    using eps_q = tg::multi_polynomial<bigrat, tg::vars<2, tg::infinitesimal_order>>;
+    using ratio_f = tg::rational_polynomial<eps_f>;
+    using ratio_q = tg::rational_polynomial<eps_q>;
+    static_assert(!ratio_f::is_reduced);
+    auto const ef = eps_f::generators();
+    auto const eq = eps_q::generators();
+    auto rng = cc::random(11);
+    auto const dyadic = [&]
+    {
+        auto const m = f64(i64(rng.next_u64() % 2001) - 1000);
+        return tg::scale_by_pow2(m, int(rng.next_u64() % 41) - 20);
+    };
+    for (auto i = 0; i < 500; ++i)
+    {
+        f64 c[8];
+        for (auto& x : c)
+            x = dyadic();
+        // (c0 + c1 e0) / (c2 + c3 e1) - (c4 e0 e1 + c5) / (c6 + c7 e0), in both coefficient types
+        auto const f = [&](auto const& e, auto k)
+        {
+            using P = std::decay_t<decltype(e[0])>;
+            using R = tg::rational_polynomial<P>;
+            auto const p = [&](f64 x) { return P(k(x)); };
+            auto const d1 = p(c[2]) + p(c[3]) * e[1];
+            auto const d2 = p(c[6]) + p(c[7]) * e[0];
+            if (d1.is_zero() || d2.is_zero())
+                return 2;
+            auto const r = R(p(c[0]) + p(c[1]) * e[0], d1) - R(p(c[4]) * e[0] * e[1] + p(c[5]), d2);
+            // a bool, since tg::bigfloat has no to_string for CHECK to print the parts with
+            auto const cleared = r * R(d1) * R(d2) == R((p(c[0]) + p(c[1]) * e[0]) * d2 - (p(c[4]) * e[0] * e[1] + p(c[5])) * d1);
+            CHECK(cleared);
+            return r.sign();
+        };
+        auto const sf = f(ef, [](f64 x) { return tg::bigfloat(x); });
+        auto const sq = f(eq, [](f64 x) { return bigrat::from_f64(x); });
+        CHECK(sf == sq);
+    }
 }
