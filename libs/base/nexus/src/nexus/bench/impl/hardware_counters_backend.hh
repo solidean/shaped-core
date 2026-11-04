@@ -6,7 +6,7 @@
 #include <clean-core/string/string.hh>
 #include <nexus/bench/hardware_counters.hh>
 
-// Internal interface between the platform-agnostic front (hardware_counters.cc) and the per-OS backends (hardware_counters_{linux,windows,none}.cc).
+// Internal interface between the platform-agnostic front (hardware_counters.cc) and the per-OS backends (hardware_counters_{linux,windows,macos,none}.cc).
 // Exactly one backend .cc is compiled, selected in CMake.
 //
 // The backend owns everything platform-specific: which counters the CPU exposes, their native names, and the actual measurement.
