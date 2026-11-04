@@ -197,7 +197,7 @@ struct sr::reconstruct_inputs
 {
     /// The noisy radiance, linear and HDR, at the input extent.
     /// Diffuse radiance alone when the guides carry `split_diffuse_specular`.
-    /// No member reads its alpha; every member copies it into `output`.
+    /// No member reads its alpha unless `moment_in_alpha` says what it holds; every member copies it into `output`.
     sg::texture_2d color;
 
     /// Specular radiance, only under `split_diffuse_specular`.
@@ -222,6 +222,11 @@ struct sr::reconstruct_inputs
     /// average different numbers of samples.
     /// Where set, a member that reads a count reads this one and ignores `sample_count`.
     sg::texture_2d sample_counts;
+
+    /// Whether `color`'s alpha holds the mean of each sample's luminance squared, beside the mean radiance in its rgb.
+    /// A member that reads it measures each pixel's variance as `(alpha - luminance(rgb)^2) / samples` rather than modeling it from the count: à-trous does.
+    /// The alpha still comes back in `output` untouched.
+    bool moment_in_alpha = false;
 
     /// The guides this call carries, derived from which textures are set — `specular` included.
     [[nodiscard]] reconstruct_guide_set present_guides() const;

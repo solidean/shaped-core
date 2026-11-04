@@ -4,6 +4,8 @@ refs:
   - symbol: sr::atrous_denoise_routine
   - file: libs/graphics/shaped-rendering/shaders/atrous_denoise.sgl
   - file: libs/graphics/shaped-rendering/shaders/svgf.sgl
+closed: 2026-11-04
+resolution: fixed
 ---
 
 # à-trous from a measured per-pixel variance

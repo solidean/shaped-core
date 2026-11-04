@@ -7,6 +7,14 @@ refs:
 
 # À-trous darkens a young image and flattens its contrast
 
+**From four samples on, this is fixed**: sv's mean carries its moment, and à-trous steers by the measured variance with a window that is the pair's.
+At four samples it is within 0.4% of the converged brightness behind the megakernel and the hybrid, its worst tile within 7%, which the agreement test now holds it to.
+**Below four samples it remains**: the variance is modeled there, and inside a cluster of black samples every modeled variance is small, so the cluster stays dark.
+The mode-switch fuzzer finds a one-sample frame 5.3% dark against its 5% ceiling, and exempts à-trous below four samples under this issue.
+SVGF's spatial estimate, the variance over 7x7 neighbors while the history is young, is the remaining fix, in a pass of its own so the first filter pass need not repeat it per tap.
+
+What follows is the defect as it stood before that.
+
 On the Cornell box at four samples a pixel, à-trous comes out 8% darker than the raw mean behind the megakernel and 15% behind the hybrid.
 It also moves light from the lit back wall into the ceiling's corners, a fifth of the frame's mean brightness between 16x16 tiles.
 SVGF, OIDN and DLSS-RR keep the brightness within 2% and move at most 14% between tiles.

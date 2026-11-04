@@ -190,6 +190,7 @@ cc::shared_async<cc::vector<tg::vec4f>> run_atrous(sg::context& ctx,
                                                        .normal = gpu.texture(in.normal).as_texture_view(),
                                                        .depth = gpu.texture(in.depth).as_texture_view(),
                                                        .sample_counts = gpu.texture(in.counts).as_texture_view(),
+                                                       .input = gpu.texture(in.source).as_texture_view(),
                                                        .target = target.as_any_image_view()});
     cmd->compute.bind_pipeline(*pipeline);
     cmd->compute.bind_group(0, *group);

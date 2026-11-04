@@ -259,6 +259,7 @@ ASYNC_BENCHMARK("sr - SGL against the HLSL it was ported from, GPU time per disp
                                                                     .normal = normal.as_texture_view(),
                                                                     .depth = depth.as_texture_view(),
                                                                     .sample_counts = color.as_texture_view(),
+                                                                    .input = color.as_texture_view(),
                                                                     .target = target.as_any_image_view()});
                  cmd.compute.bind_pipeline(**sgl_pipeline->try_value());
                  cmd.compute.bind_group(0, *group);

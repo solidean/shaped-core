@@ -17,6 +17,10 @@ struct sr::atrous_options
     /// Higher removes more noise and more detail.
     f32 luminance_sigma = 2.25f;
 
+    /// The same where the input carries its variance, `reconstruct_inputs::moment_in_alpha`: multiples of each pixel's
+    /// measured noise, falling off exponentially, as SVGF's `luminance_sigma` does and at its scale.
+    f32 measured_luminance_sigma = 5.0f;
+
     /// How closely normals must agree, as the exponent on their dot product.
     f32 normal_power = 64.0f;
 

@@ -27,6 +27,20 @@ const remodulate_out = 16u
 const has_specular_albedo = 32u
 // `sample_counts` holds each pixel's sample count in red
 const has_sample_counts = 64u
+// this pass's source alpha is the mean of each sample's luminance squared, which the variance of the mean is measured from
+const moment_in = 128u
+// this pass's source alpha is the variance the pass before it carried forward
+const variance_in = 256u
+// this pass writes `input`'s alpha rather than its source's
+const keeps_input_alpha = 512u
+
+// Below this many samples a pixel's measured moment says too little, and its variance is the one-noise-width-per-sample model instead.
+const measured_from = 4.0
+
+// A pixel's window is its 3x3-blurred variance, each of the nine capped at this many times their median.
+// One firefly's variance would otherwise widen every neighbor's window until they take it in, which is how one sample spreads.
+// A cap at the pixel's own variance would close the window of a pixel whose few samples all came out black, which then stays black.
+const blur_ceiling = 4.0
 
 // A zero albedo would make demodulation divide by zero, and clamping both directions by the same floor keeps the round trip exact.
 const albedo_floor = 0.001
@@ -44,6 +58,10 @@ const albedo_floor = 0.001
     depth_sigma: float
     // the largest magnitude `target_format` holds, which a brighter result saturates at rather than becoming infinity
     ceiling: float
+    // the luminance edge-stop's width in measured noise widths, where the variance is measured
+    luminance_sigma: float
+    // how many samples every pixel averages, where `has_sample_counts` is clear
+    sample_count: float
 
 binding atrous_images:
     @unfilterable
@@ -58,6 +76,9 @@ binding atrous_images:
     depth: texture_2d[float4]
     @unfilterable
     sample_counts: texture_2d[float4]
+    // the call's own color, read only by the pass that `keeps_input_alpha`
+    @unfilterable
+    input: texture_2d[float4]
     target: out image_2d[target_format]
 
 fun is_set(flag: uint){atrous_constants} => (atrous_constants.flags & flag) != 0u
@@ -96,6 +117,30 @@ fun source_at(p: int2){atrous_images, atrous_constants} -> float4:
         return float4(..(c.xyz / albedo_at(p)), c.w)
     return c
 
+fun is_measured(){atrous_constants} => is_set(moment_in) or is_set(variance_in)
+
+// How many samples the mean at `q` averages.
+fun samples_at(q: int2){atrous_images, atrous_constants} -> float:
+    if is_set(has_sample_counts) => return max(atrous_images.sample_counts.load(q).x, 1.0)
+    return max(atrous_constants.sample_count, 1.0)
+
+// The variance of the mean at `q`, in the space this pass filters in, demodulated where it is.
+// From the moment where the mean holds enough samples to measure it, and from the model a young pixel keeps otherwise:
+// one noise width per sample, as wide as the pixel's luminance.
+fun variance_at(q: int2){atrous_images, atrous_constants} -> float:
+    let raw = atrous_images.source.load(q)
+    if not (pt_is_finite(raw)) => return 0.0
+    if is_set(variance_in) => return max(raw.w, 0.0)
+    let n = samples_at(q)
+    let l = luminance(raw.xyz)
+    let mut v = if n >= measured_from => max(raw.w - l * l, 0.0) / n else (abs(l) + 0.01) * (abs(l) + 0.01) / n
+    if is_set(demodulate_in):
+        let a = luminance(albedo_at(q))
+        v /= a * a
+    return v
+
+fun pt_is_finite(c: float4) => not (any(is_nan(c)) or any(is_inf(c)))
+
 @compute(8, 8) fun main_cs(@thread_id id: int3){atrous_images, atrous_constants}:
     let size = atrous_images.target.size()
     if id.x >= size.x or id.y >= size.y => return
@@ -123,13 +168,45 @@ fun source_at(p: int2){atrous_images, atrous_constants} -> float4:
     let mut luminance_scale = atrous_constants.luminance_scale
     if is_set(has_sample_counts):
         luminance_scale /= sqrt(max(atrous_images.sample_counts.load(p).x, 1.0))
-    let lum_width = luminance_scale * (abs(center_lum) + 0.01) + 0.000001
+    let mut lum_width = luminance_scale * (abs(center_lum) + 0.01) + 0.000001
+    let mut center_variance = 0.0
+    let mut tap_cap = 0.0
+
+    // Measured: the window is the luminance stop's sigma in the mean's own noise widths, as SVGF steers it.
+    // Blurred over 3x3, so one pixel whose samples happened to agree is still filtered, each tap capped against the median.
+    if is_measured():
+        let mut taps = float[9].filled(0.0)
+        @unroll
+        for k in 0 ..< 9:
+            let q = clamp(p + int2(k % 3 - 1, k / 3 - 1), int2(0), size - int2(1))
+            taps[k] = variance_at(q)
+        // The median of the nine, by an insertion sort of a copy.
+        let mut sorted = taps
+        for i in 1 ..< 9:
+            let mut j = i
+            while j > 0 and sorted[j - 1] > sorted[j]:
+                let swap = sorted[j]
+                sorted[j] = sorted[j - 1]
+                sorted[j - 1] = swap
+                j -= 1
+        let cap = blur_ceiling * sorted[4]
+        tap_cap = cap
+        let mut blurred = 0.0
+        let mut blur_weight = 0.0
+        @unroll
+        for k in 0 ..< 9:
+            let w = (if k % 3 == 1 => 0.5 else 0.25) * (if k / 3 == 1 => 0.5 else 0.25)
+            blurred += min(taps[k], cap) * w
+            blur_weight += w
+        center_variance = blurred / blur_weight
+        lum_width = atrous_constants.luminance_sigma * sqrt(center_variance) + 0.000001
     let center_emits = reflects_nothing_at(p)
 
     let kernel = [1.0 / 16.0, 1.0 / 4.0, 3.0 / 8.0, 1.0 / 4.0, 1.0 / 16.0]
 
     let mut sum = float3(0.0)
     let mut weight_sum = 0.0
+    let mut variance_sum = 0.0
     @unroll
     for dy in -2 ..< 3:
         @unroll
@@ -140,11 +217,17 @@ fun source_at(p: int2){atrous_images, atrous_constants} -> float4:
 
             let c = source_at(q)
             let mut w = kernel[dx + 2] * kernel[dy + 2]
+            let tap_variance = if is_measured() => variance_at(q) else 0.0
+            // Measured, the window is the pair's, both pixels' noise: sized by the center alone, a dark pixel's narrow window refuses
+            // its bright neighbors while a bright one's takes its dark neighbors in, so energy would only ever move down.
+            // The tap's variance is capped as the blur's taps are, so a firefly still widens nothing.
+            let pair_width = if is_measured() => atrous_constants.luminance_sigma * sqrt(0.5 * (center_variance + min(tap_variance, tap_cap))) + 0.000001 else lum_width
 
-            // Gaussian rather than exponential in the difference.
-            // A tap several noise widths away must count for nothing, or a converged mean's detail is averaged away by the long tail of many such taps.
-            let lum_ratio = (luminance(c.xyz) - center_lum) / lum_width
-            w *= exp(-lum_ratio * lum_ratio)
+            // Modeled, Gaussian in the difference: a tap several modeled widths away must count for nothing, or a converged
+            // mean's detail is averaged away by the long tail of many such taps.
+            // Measured, exponential as SVGF's: path-tracing noise is heavy-tailed, and the width itself shrinks to nothing as the mean converges.
+            let lum_ratio = (luminance(c.xyz) - center_lum) / pair_width
+            w *= if is_measured() => exp(-abs(lum_ratio)) else exp(-lum_ratio * lum_ratio)
 
             // An emitter and a surface it lights never average into each other, as the sky and geometry do not.
             if reflects_nothing_at(q) != center_emits:
@@ -172,6 +255,8 @@ fun source_at(p: int2){atrous_images, atrous_constants} -> float4:
 
             sum += c.xyz * w
             weight_sum += w
+            if is_measured():
+                variance_sum += tap_variance * w * w
 
     // The center always passes its own edge-stops, so it contributes at least kernel[2]^2 and weight_sum is never zero.
     let mut result = sum / weight_sum
@@ -179,5 +264,12 @@ fun source_at(p: int2){atrous_images, atrous_constants} -> float4:
     if is_set(remodulate_out):
         result *= albedo_at(p)
 
+    // The variance of this pass's average is what the next, at twice the spacing, filters by.
+    let mut out_alpha = center.w
+    if is_measured():
+        out_alpha = variance_sum / (weight_sum * weight_sum)
+    if is_set(keeps_input_alpha):
+        out_alpha = atrous_images.input.load(p).w
+
     let c = atrous_constants.ceiling
-    atrous_images.target[id.xy] = float4(..clamp(result, float3(-c), float3(c)), center.w) as texel[target_format]
+    atrous_images.target[id.xy] = float4(..clamp(result, float3(-c), float3(c)), out_alpha) as texel[target_format]
