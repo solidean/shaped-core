@@ -352,6 +352,8 @@ if(SC_BUILD_TESTS)
             tests/convergence-test.cc
             tests/backend-agreement-test.cc
             tests/content-agreement-test.cc
+            tests/invariant-test.cc
+            tests/image-size-test.cc
             tests/jitter-accumulation-test.cc
             tests/glowing-sphere-test.cc
             tests/moving-view-motion-test.cc

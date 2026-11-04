@@ -261,6 +261,8 @@ inline cc::shared_async<converged> converge(sg::context& ctx,
         (void)ctx.routines.tick();
         auto cmd = ctx.create_command_list();
         resources.advance_to(ctx.current_epoch());
+        // As the viewer records it: what landed since the last frame is finished ahead of the traces that read it.
+        (void)resources.record_pending_work(*cmd);
         store.begin_frame(u64(ctx.current_epoch()));
         auto const plan = sv::build_render_plan(def, size, index++, history);
         (void)sv::viewer_renderer::execute(*cmd, def, plan, resources, store,
