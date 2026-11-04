@@ -164,8 +164,8 @@ fun sample_light(b: openpbr.bsdf, f: openpbr.frame, wo_local: float3, p: float3,
     let tested = if scene.light_casts_shadows(l) => 1u else 0u
     return light_sample(f_diffuse * scale, f_specular * scale, pt.offset_ray(p, n_geom), wi, shadow_dist, tested)
 
-/// `frame_constants::environment_diffuse` where the environment's diffuse light is estimated against its irradiance.
-const environment_diffuse_exact = 1u
+/// `frame_constants::environment_estimate` where the environment's light is estimated against its exact unshadowed part.
+const environment_estimate_exact = 1u
 
 /// The light next-event estimation picks with the uniform `u`, among the `count` the table holds.
 /// It searches the table's cumulative probabilities, which favor the powerful lights, and picks uniformly where the table carries none.
@@ -394,38 +394,95 @@ fun emission_factor(kind: uint, offset: uint, uv_offset: uint, frequency: uint, 
 fun instance_point_to_world(inst: scene.instance, p: float3) -> float3:
     return float3(dot(inst.to_world_x.xyz, p) + inst.to_world_x.w, dot(inst.to_world_y.xyz, p) + inst.to_world_y.w, dot(inst.to_world_z.xyz, p) + inst.to_world_z.w)
 
-/// The diffuse lobe a hit's environment variate holds constant over directions: `b`'s diffuse half toward the shading normal.
-/// Zero where the variate is off: the frame asks for the sampled estimate, the environment is black or a dome, or the viewer is below the frame.
-/// A dome has no irradiance on the GPU yet, so its diffuse light is sampled as any other.
-fun environment_variate_lobe(b: openpbr.bsdf, wo_local: float3){traced} -> float3:
+/// What a hit's environment variate holds of its closure, `environment_variate_of`: made once per hit, and handed to each of its three shares.
+///
+/// The variate integrates `g(wi) = (k + f_specular(wi)) * L(wi) * cos`, `L` the SH radiance before its clamp.
+/// The diffuse half holds the lobe constant at `k`, so its integral is `k` times the exact irradiance.
+/// The specular half is the closure's own, so a sample nothing blocks cancels it exactly, and its integral is estimated with no ray at all.
+struct environment_variate:
+    /// whether there is a variate at all
+    active: bool
+    /// the diffuse lobe toward the shading normal, held constant over directions
+    k: float3
+    /// whether the specular half is on: the lobes past the diffuse one, on a closure that transmits nothing
+    specular: bool
+    /// the closure's lobe probabilities seen from the hit's `wo_local`, which the specular half's draws pick among
+    probs: openpbr.lobe_probs
+
+/// How many directions the specular half's integral is estimated from, each a closure evaluation and no ray.
+const environment_specular_samples = 2
+
+/// The variate a hit forms none of.
+fun no_environment_variate() -> environment_variate:
+    return environment_variate(false, float3(0.0), false, openpbr.lobe_probs(0.0, 0.0, 0.0, 0.0, 1.0, 0.0))
+
+/// The variate of the closure `b` seen from `wo_local`, or none.
+/// None where the frame asks for the sampled estimate, the environment is black or a dome, or the viewer is below the frame.
+/// A dome has no irradiance on the GPU yet, so its light is sampled as any other.
+fun environment_variate_of(b: openpbr.bsdf, wo_local: float3){traced} -> environment_variate:
     let env = background_lanes()
-    if traced.frame[0].environment_diffuse != environment_diffuse_exact or wo_local.z <= 0.0 => return float3(0.0)
-    if scene.environment_is_black(env) or scene.environment_is_dome(env) => return float3(0.0)
+    if traced.frame[0].environment_estimate != environment_estimate_exact or wo_local.z <= 0.0 => return no_environment_variate()
+    if scene.environment_is_black(env) or scene.environment_is_dome(env) => return no_environment_variate()
     let mut f_diffuse = float3(0.0)
     let mut f_specular = float3(0.0)
     openpbr.bsdf_eval_split(b, wo_local, float3(0.0, 0.0, 1.0), mut f_diffuse, mut f_specular)
-    return f_diffuse
+    let p = openpbr.bsdf_lobe_probs(b, wo_local)
+    return environment_variate(true, f_diffuse, p.transmission <= 0.0 and p.fuzz + p.coat + p.metal + p.spec > 0.0, p)
 
-/// The bounce's share of a hit's environment variate: what the BSDF-drawn `wi_local`, of density `pdf`, would carry of the variate's light unshadowed, subtracted.
+/// `g` at `wi_local`, `f_specular` the closure's specular half there and `radiance` the signed SH radiance along it: nothing below the frame.
+fun variate_integrand(v: environment_variate, f_specular: float3, wi_local: float3, radiance: float3) -> float3:
+    if wi_local.z <= 0.0 => return float3(0.0)
+    let lobe = v.k + (if v.specular => f_specular else float3(0.0))
+    return lobe * radiance * wi_local.z
+
+/// The specular half's integral over the sky unshadowed, which the caller of `sample_environment` adds beside it, for the same `v`.
+///
+/// Estimated from directions drawn from the specular lobes alone, whose density there is the closure's less its diffuse lobe's, over the share the specular lobes hold.
+/// Over a sky as smooth as order-3 SH this varies little from one draw to the next, which is all it costs: no ray is traced.
+/// Apart from `sample_environment` because the draws nest too deep to inline from inside the hybrid's lighting.
+fun environment_specular_variate(v: environment_variate, b: openpbr.bsdf, f: openpbr.frame, wo_local: float3, rng: mut uint){traced} -> float3:
+    if not v.specular => return float3(0.0)
+    let p = v.probs
+    let share = p.fuzz + p.coat + p.metal + p.spec
+    let sh = scene.environment_sh(background_lanes())
+    let mut sum = float3(0.0)
+    for i in 0 ..< environment_specular_samples:
+        // Stratified along the lobe's first direction number, so the draws spread over the lobe rather than clumping.
+        let pick = pt.rand(mut rng) * share
+        let uv = float2(((i as float) + pt.rand(mut rng)) / (environment_specular_samples as float), pt.rand(mut rng))
+        let mut lobe = 0u
+        let wi_local = openpbr.draw_specular_lobe(b, p, wo_local, pick, uv, mut lobe)
+        if wi_local.z <= 0.0 => continue
+        let q = (openpbr.bsdf_pdf(b, wo_local, wi_local) - p.diffuse * wi_local.z / pt.pi) / share
+        if q <= 0.0 => continue
+        let mut f_diffuse = float3(0.0)
+        let mut f_specular = float3(0.0)
+        openpbr.bsdf_eval_split(b, wo_local, wi_local, mut f_diffuse, mut f_specular)
+        sum += f_specular * scene.background_radiance_signed(sh, openpbr.to_world(f, wi_local)) * (wi_local.z / q)
+    return sum / (environment_specular_samples as float)
+
+/// The bounce's share of a hit's environment variate: what the BSDF-drawn `wi_local`, of density `pdf`, would carry of `g` unshadowed, subtracted.
 /// Weighed as an escape along it is weighed against the environment sample, so the two shares' weights sum to 1.
 /// Only where the hit's environment sample was weighed against this bounce, which `sample_environment` does short of its last bounce.
-fun environment_bounce_variate(b: openpbr.bsdf, f: openpbr.frame, wo_local: float3, wi_local: float3, pdf: float){traced} -> float3:
-    if pdf <= 0.0 or wi_local.z <= 0.0 => return float3(0.0)
-    let k = environment_variate_lobe(b, wo_local)
-    if all(k <= float3(0.0)) => return float3(0.0)
+fun environment_bounce_variate(v: environment_variate, b: openpbr.bsdf, f: openpbr.frame, wo_local: float3, wi_local: float3, pdf: float){traced} -> float3:
+    if pdf <= 0.0 or wi_local.z <= 0.0 or not v.active => return float3(0.0)
+    let mut f_diffuse = float3(0.0)
+    let mut f_specular = float3(0.0)
+    if v.specular => openpbr.bsdf_eval_split(b, wo_local, wi_local, mut f_diffuse, mut f_specular)
     let env = background_lanes()
     let wi = openpbr.to_world(f, wi_local)
     let w = pt.mis_weight(pdf, scene.environment_pdf(env, wi))
-    return -k * scene.background_radiance_signed(scene.environment_sh(env), wi) * (wi_local.z * w / pdf)
+    return -variate_integrand(v, f_specular, wi_local, scene.background_radiance_signed(scene.environment_sh(env), wi)) * (w / pdf)
 
 /// One environment sample toward the sky at a hit, its visibility left to the caller.
 ///
-/// `variate` is added whatever the shadow ray finds: the environment's diffuse light as a control variate, `environment_variate_lobe` times the exact irradiance,
-/// less what this sample would carry of that light unshadowed.
+/// `variate` is added whatever the shadow ray finds: the integral of `v`'s `g`, less what this sample would carry of it unshadowed.
+/// Its specular half's integral is the caller's to add, `environment_specular_variate`.
 /// Short of the last bounce the caller subtracts the bounce's share too, `environment_bounce_variate`.
-/// Where nothing blocks the sky and the diffuse lobe is Lambertian, what the samples carry cancels and the diffuse light is exact; a blocked one leaves its share subtracted, which is the shadow.
-/// Unbiased whatever the lobe, since the irradiance is the integral the two shares estimate.
-fun sample_environment(b: openpbr.bsdf, f: openpbr.frame, wo_local: float3, p: float3, n_geom: float3, last_bounce: bool, rng: mut uint, variate: mut float3){traced} -> light_sample:
+/// Where nothing blocks the sky, what the samples carry cancels: the diffuse light is exact for a Lambertian lobe, and the specular light is its integral's estimate.
+/// A blocked sample leaves its share subtracted, which is the shadow.
+/// Unbiased whatever the lobe, since the variate's integral is what the shares estimate; a hit handed `no_environment_variate` is sampled as it was.
+fun sample_environment(v: environment_variate, b: openpbr.bsdf, f: openpbr.frame, wo_local: float3, p: float3, n_geom: float3, last_bounce: bool, rng: mut uint, variate: mut float3){traced} -> light_sample:
     variate = float3(0.0)
     let env = background_lanes()
     let u1 = pt.rand(mut rng)
@@ -444,12 +501,17 @@ fun sample_environment(b: openpbr.bsdf, f: openpbr.frame, wo_local: float3, p: f
     // No bounce ray follows the last hit, so there is nothing to balance against there.
     let w = if last_bounce => 1.0 else pt.mis_weight(drawn.pdf, openpbr.bsdf_pdf(b, wo_local, wi_local))
 
-    // Before any test below: a direction under the face is one the sky is blocked from, and stays subtracted.
-    let k = environment_variate_lobe(b, wo_local)
-    if any(k > float3(0.0)):
+    // Before any test below where there is a variate: a direction under the face is one the sky is blocked from, and stays subtracted.
+    let mut f_diffuse = float3(0.0)
+    let mut f_specular = float3(0.0)
+    let mut evaluated = false
+    if v.active:
+        if wi_local.z > 0.0:
+            openpbr.bsdf_eval_split(b, wo_local, wi_local, mut f_diffuse, mut f_specular)
+            evaluated = true
         let sh = scene.environment_sh(env)
-        variate = k * scene.background_irradiance(sh, f.n)
-        if wi_local.z > 0.0 => variate -= k * scene.background_radiance_signed(sh, wi) * (wi_local.z * w / drawn.pdf)
+        variate = v.k * scene.background_irradiance(sh, f.n)
+        variate -= variate_integrand(v, f_specular, wi_local, scene.background_radiance_signed(sh, wi)) * (w / drawn.pdf)
 
     // On the face's own side and the shading frame's upper half only, as a light's sample is.
     if dot(wi, n_geom) <= 0.0 or wi_local.z <= 0.0 => return no_light_sample()
@@ -457,10 +519,7 @@ fun sample_environment(b: openpbr.bsdf, f: openpbr.frame, wo_local: float3, p: f
     // background would otherwise trace one for every sample, toward light that is not there.
     let radiance = scene.environment_radiance(env, wi)
     if all(radiance <= float3(0.0)) => return no_light_sample()
-
-    let mut f_diffuse = float3(0.0)
-    let mut f_specular = float3(0.0)
-    openpbr.bsdf_eval_split(b, wo_local, wi_local, mut f_diffuse, mut f_specular)
+    if not evaluated => openpbr.bsdf_eval_split(b, wo_local, wi_local, mut f_diffuse, mut f_specular)
     if all(f_diffuse + f_specular <= float3(0.0)) => return no_light_sample()
 
     let scale = radiance * (wi_local.z / drawn.pdf) * w
@@ -616,9 +675,11 @@ fun shade_sampled(payload: mut surface_payload, surface_in: openpbr.surface, n: 
 
     // A hit past the path's bounces adds only the emission the bounce reached, which the caller weighs, so it samples no light.
     let mut variate = float3(0.0)
+    let v = if payload.emission_only == 0u => environment_variate_of(b, wo_local) else no_environment_variate()
     if payload.emission_only == 0u:
         light = sample_light(b, f, wo_local, p, n, mut rng)
-        env = sample_environment(b, f, wo_local, p, n, false, mut rng, mut variate)
+        env = sample_environment(v, b, f, wo_local, p, n, false, mut rng, mut variate)
+        variate += environment_specular_variate(v, b, f, wo_local, mut rng)
 
     // The continuation, importance-sampled from the closure the material just described.
     let u1 = pt.rand(mut rng)
@@ -629,7 +690,7 @@ fun shade_sampled(payload: mut surface_payload, surface_in: openpbr.surface, n: 
 
     // As drawn, before the face's own side rejects it, as the environment sample's share is taken before its tests.
     if payload.emission_only == 0u:
-        variate += environment_bounce_variate(b, f, wo_local, s.direction, s.pdf)
+        variate += environment_bounce_variate(v, b, f, wo_local, s.direction, s.pdf)
     payload.direct_diffuse = variate
 
     // A reflection has to leave on the face's own side and a transmission through it, whatever the shading frame says.

@@ -3,13 +3,13 @@
 #include <shaped-rendering/input.hh>
 #include <shaped-viewer/all.hh>
 
-// The environment's diffuse light, sampled against estimated from its irradiance: the same moving cube in two panels.
+// The environment's light, sampled against taken whole where nothing blocks it: the same moving cube in two panels.
 //
 // The scene is lit by the studio sky alone, and the cube moves, so every frame restarts the image and shows one sample per pixel.
-// Left, `sv::environment_diffuse::sampled`: each hit stands one sky direction in for the whole sky, so the faces swim with noise.
-// Right, `exact`: the unshadowed diffuse light is the sky's irradiance, and only what is blocked is sampled.
-// What noise is left is the sky's reflection off the default material's specular layer, which is still sampled: the speckles on the floor.
-// Then the shadow under the cube, and the cube's sides, whose lower half sees the floor rather than the sky.
+// Left, `sv::environment_estimate::sampled`: each hit stands one sky direction in for the whole sky, so the faces swim with noise.
+// Its specular layer reflects the sky only on the rare bounce that lands in its lobe, which is the bright speckles.
+// Right, `exact`: the unshadowed light is taken whole, the diffuse half from the sky's irradiance and the specular half from its own lobe, and only what is blocked is sampled.
+// What noise is left is the occlusion: the shadow under the cube, the far floor's rare sample the cube blocks, and the cube's sides, whose lower half sees the floor.
 // Nothing denoises either panel, so what you see is the estimate itself.
 //
 // Controls
@@ -18,8 +18,8 @@
 //   left-drag    orbit (per panel)          middle-drag    pan          wheel    zoom
 //
 // Run it:
-//   uv run dev.py example shaped-viewer/environment-diffuse
-//   uv run dev.py example shaped-viewer/environment-diffuse --capture    # headless, writes an image
+//   uv run dev.py example shaped-viewer/environment-estimate
+//   uv run dev.py example shaped-viewer/environment-estimate --capture    # headless, writes an image
 
 namespace
 {
@@ -50,7 +50,7 @@ sv::mesh matte(cc::string_view name, cc::vector<tg::pos3f> const& positions, tg:
 }
 } // namespace
 
-EXAMPLE("shaped-viewer/environment-diffuse")
+EXAMPLE("shaped-viewer/environment-estimate")
 {
     auto const floor
         = matte("floor", box_triangles(tg::pos3f(-4, -0.05f, -4), tg::pos3f(4, 0, 4)), tg::vec3f(0.7f, 0.7f, 0.7f));
@@ -62,7 +62,7 @@ EXAMPLE("shaped-viewer/environment-diffuse")
     // The cube's own clock, which stops while paused.
     auto t = 0.0;
 
-    for (auto f : sv::interactive("shaped-viewer/environment-diffuse"))
+    for (auto f : sv::interactive("shaped-viewer/environment-estimate"))
     {
         if (!f.imgui_wants_keyboard())
             for (auto const& e : f.input_events())
@@ -83,7 +83,7 @@ EXAMPLE("shaped-viewer/environment-diffuse")
             tg::quat_f::make_rotation_y(angle * 1.7f) * tg::quat_f::make_rotation_x(angle * 0.6f), tg::vec3f(1, 1, 1));
 
         auto grid = f.window().view().layout_grid(2, 1, {.padding = 6, .spacing = 6});
-        auto const panel = [&](cc::string_view id, cc::string_view title, sv::environment_diffuse estimate)
+        auto const panel = [&](cc::string_view id, cc::string_view title, sv::environment_estimate estimate)
         {
             auto view = grid.add_view(id);
             view.initial_orbit({.target = tg::pos3d(0, 0.5, 0),
@@ -97,12 +97,12 @@ EXAMPLE("shaped-viewer/environment-diffuse")
             scene.background(sv::background::studio());
             scene.fallback_light(cc::nullopt);
             scene.settings({.mode = sv::render_mode::hybrid,
-                            .environment_diffuse = estimate,
+                            .environment_estimate = estimate,
                             .reconstruct = {.denoiser = denoised ? sr::denoise_method::svgf : sr::denoise_method::none}});
 
             view.add_canvas().add_text(title, tg::pos2f(16, 14), {.size = 20});
         };
-        panel("before", "before: sampled", sv::environment_diffuse::sampled);
-        panel("after", "after: exact", sv::environment_diffuse::exact);
+        panel("before", "before: sampled", sv::environment_estimate::sampled);
+        panel("after", "after: exact", sv::environment_estimate::exact);
     }
 }

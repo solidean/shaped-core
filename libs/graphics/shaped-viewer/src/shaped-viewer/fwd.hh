@@ -291,8 +291,8 @@ struct raster_thin_targets;     // the hybrid's thin G-buffer (rendering/raster_
 class raster_routine;
 enum class hybrid_lighting : u8; // where a hybrid frame lights its primary hits (view/render_settings.hh)
 enum class still_denoise : u8; // what denoises a still image once the temporal member hands over (view/render_settings.hh)
-enum class environment_diffuse : u8; // how a traced layer estimates its environment's diffuse light (view/render_settings.hh)
-struct hybrid_frame_desc;            // one hybrid frame (rendering/hybrid_routine.hh)
+enum class environment_estimate : u8; // how a traced layer estimates its environment's diffuse light (view/render_settings.hh)
+struct hybrid_frame_desc;             // one hybrid frame (rendering/hybrid_routine.hh)
 class hybrid_routine;
 class view_renderer;
 class viewer_renderer;

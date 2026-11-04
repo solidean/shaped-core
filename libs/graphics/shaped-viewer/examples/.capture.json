@@ -18,7 +18,7 @@
             {}
         ]
     },
-    "shaped-viewer/environment-diffuse": {
+    "shaped-viewer/environment-estimate": {
         "mechanism": "sv",
         "size": "1440x600",
         "format": "jpg",

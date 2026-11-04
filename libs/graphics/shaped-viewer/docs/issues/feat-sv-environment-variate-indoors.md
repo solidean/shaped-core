@@ -2,14 +2,14 @@
 created: 2026-11-04
 refs:
   - file: libs/graphics/shaped-viewer/shaders/sgl/tracer_shade.sgl
-  - test: sv environment diffuse - exact converges to the sampled image where the sky is partly blocked
+  - test: sv environment estimate - exact converges to the sampled image where the sky is partly blocked
 ---
 
-# The environment's diffuse variate is noisier than sampling where most of the sky is blocked
+# The environment's variate is noisier than sampling where most of the sky is blocked
 
-`environment_diffuse::exact` adds the sky's exact irradiance through the diffuse lobe and subtracts what each blocked sample would have carried.
+`environment_estimate::exact` adds the sky's unshadowed light through the closure and subtracts what each blocked sample would have carried.
 With the variate at full strength, a hit that sees little of the sky subtracts on most of its samples, which is noisier than adding on the few that arrive.
-Measured in the open Cornell box under the studio sky, which sees the sky only through its front, as the relative difference between two converged halves:
+Measured with the diffuse half alone, in the open Cornell box under the studio sky, which sees the sky only through its front, as the relative difference between two converged halves:
 
 | mode       | sampled | exact  |
 |------------|---------|--------|

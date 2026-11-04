@@ -544,7 +544,7 @@ shaders::tracer::frame_constants make_frame_constants(view_data const& v,
     // A hybrid layer lights its own count of bounces, which its shaders read from the same field.
     fc.max_bounces
         = l.settings.mode == render_mode::hybrid ? cc::clamp(l.settings.hybrid_bounces, 1, 2) : l.settings.max_bounces;
-    fc.environment_diffuse = l.settings.environment_diffuse == environment_diffuse::exact ? 1u : 0u;
+    fc.environment_estimate = l.settings.environment_estimate == environment_estimate::exact ? 1u : 0u;
 
     // `seed` and `accum_frame` are stamped by execute from the view's persistent record, once it knows whether this frame restarts.
     return fc;

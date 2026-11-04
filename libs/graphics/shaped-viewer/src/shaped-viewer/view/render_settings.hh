@@ -99,17 +99,17 @@ enum class sv::still_denoise : sv::u8
     temporal_on_mean,
 };
 
-/// How a traced layer estimates the diffuse light its environment sends, which every mode but `raster` reads.
-enum class sv::environment_diffuse : sv::u8
+/// How a traced layer estimates the light its environment sends, which every mode but `raster` reads.
+enum class sv::environment_estimate : sv::u8
 {
     /// Each hit's environment sample and bounce carry it as they carry any other light.
     /// Unbiased, and noisy on a face nothing shadows: one direction a hit stands in for the whole sky.
     sampled,
 
-    /// The diffuse lobe's unshadowed light is the environment's exact irradiance, and the samples carry only what they find blocked.
-    /// A face open to the sky takes no noise from it, and a shadow keeps the noise of the rays it blocks.
-    /// Exact for a Lambertian lobe; another lobe keeps the noise of how far it departs from one, unbiased all the same.
-    /// Under a probe only: a dome is still sampled.
+    /// The unshadowed light is taken whole, and the samples carry only what they find blocked.
+    /// The diffuse half is the environment's exact irradiance, and the specular half the closure's own lobe integrated over the sky with no ray traced.
+    /// A face open to the sky keeps only the noise of that integral, which a smooth sky makes small; a shadow keeps the noise of the rays it blocks.
+    /// Unbiased; a closure that transmits keeps its specular half sampled, and a dome is sampled whole.
     exact,
 };
 
@@ -150,8 +150,8 @@ struct sv::render_settings
     /// and more of them are a steadier input to it at that many times the lighting's cost.
     i32 hybrid_moving_samples = 1;
 
-    /// How the environment's diffuse light is estimated, `exact` unless named; switching restarts the image.
-    sv::environment_diffuse environment_diffuse = sv::environment_diffuse::exact;
+    /// How the environment's light is estimated, `exact` unless named; switching restarts the image.
+    sv::environment_estimate environment_estimate = sv::environment_estimate::exact;
 
     /// How many rounds a still frame of the wavefront tracer runs, each moving every live path one segment.
     ///

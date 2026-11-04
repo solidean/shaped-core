@@ -354,7 +354,7 @@ if(SC_BUILD_TESTS)
             tests/content-agreement-test.cc
             tests/invariant-test.cc
             tests/image-size-test.cc
-            tests/environment-diffuse-test.cc
+            tests/environment-estimate-test.cc
             tests/jitter-accumulation-test.cc
             tests/glowing-sphere-test.cc
             tests/moving-view-motion-test.cc

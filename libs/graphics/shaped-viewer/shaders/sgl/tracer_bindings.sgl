@@ -151,8 +151,8 @@ struct frame_constants:
     light_count: uint
     /// Where the emissive instances' records start in `traced.lights`: they follow every analytic light, and `traced.emitters` is indexed from here.
     emitter_offset: uint
-    /// `environment_diffuse_exact` where the environment's unshadowed diffuse light is taken from its irradiance, `sv::render_settings::environment_diffuse`
-    environment_diffuse: uint
+    /// `environment_estimate_exact` where the environment's light is estimated against its exact unshadowed part, `sv::render_settings::environment_estimate`
+    environment_estimate: uint
     pad0: uint
     path_offset: uint4
     path_count: uint4
