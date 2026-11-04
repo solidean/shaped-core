@@ -1,6 +1,7 @@
 #pragma once
 
 #include <clean-core/container/span.hh>
+#include <clean-core/container/vector.hh>
 #include <clean-core/fwd.hh>
 
 // Capturing return addresses, as distinct from producing a readable stack trace.
@@ -22,6 +23,7 @@
 namespace cc
 {
 struct stack_capture_result;
+struct unwind_snapshot;
 enum class stack_walk : u8;
 } // namespace cc
 
@@ -67,8 +69,38 @@ struct cc::stack_capture_result
     /// rather than a guarantee.
     bool broken = false;
 
+    /// A walk against an unwind snapshot reached code in no module it holds: loaded since, or generated at run time.
+    /// The prefix is correct, and a fresh snapshot is what lets the next walk go further.
+    bool left_snapshot = false;
+
     /// Whether anything was captured at all.
     [[nodiscard]] explicit operator bool() const { return count > 0; }
+};
+
+/// The unwind tables of every module loaded now, read without taking any lock.
+///
+/// **Walking a suspended thread with the OS's own lookup can deadlock.**
+/// Windows looks a function's unwind data up under a loader lock, which a thread loading a DLL holds exclusively.
+/// Suspend that thread mid-load, and the walk waits for the lock while the lock's holder waits to be resumed.
+/// A snapshot is read with no lock at all.
+/// It allocates, so create it BEFORE suspending anything, and again once a walk reports `left_snapshot`.
+/// Empty off Windows, where no walk runs against a suspended thread.
+struct cc::unwind_snapshot
+{
+    /// One module's function table, as the image maps it.
+    struct module
+    {
+        u64 base = 0;
+        u64 end = 0;
+        /// The image's own `RUNTIME_FUNCTION` array, sorted by start address as the format requires.
+        void const* functions = nullptr;
+        isize function_count = 0;
+    };
+
+    /// Sorted by base.
+    cc::vector<module> modules;
+
+    [[nodiscard]] static unwind_snapshot create();
 };
 
 namespace cc
@@ -101,7 +133,9 @@ namespace cc
 /// this way — POSIX sampling runs the walk ON the target, from a signal handler, where plain capture_stack works.
 ///
 /// **The target must not be running.** Walking a live thread's stack reads a chain that is being rewritten underneath.
+/// Functions are looked up in `unwind` alone, never through the OS, so the walk takes no lock the target may hold.
 [[nodiscard]] cc::stack_capture_result capture_stack_from_native_context(void* native_context,
+                                                                         cc::unwind_snapshot const& unwind,
                                                                          cc::span<void*> out,
                                                                          isize skip = 0,
                                                                          void const* stop_frame = nullptr,

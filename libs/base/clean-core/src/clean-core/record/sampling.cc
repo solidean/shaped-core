@@ -256,8 +256,10 @@ public:
 
 /// Suspends `handle`, fills `out`, and resumes it.
 /// Everything between the suspend and the resume is a stack read into `frames`; nothing allocates and nothing locks.
+/// That includes the OS's own function lookup, whose lock a thread suspended mid-DLL-load holds: `unwind` stands in.
 /// `ts` is null for a thread the recorder has never heard of, which then contributes frames and nothing else.
 [[nodiscard]] bool sample_suspended(void* handle,
+                                    cc::unwind_snapshot const& unwind,
                                     cc::rec::impl::thread_state const* ts,
                                     cc::span<void*> frames,
                                     bool stop_at_scope,
@@ -280,7 +282,7 @@ public:
                     stop = ts->tls != nullptr ? ts->tls->scope_frame : nullptr;
             }
 
-            out.capture = cc::capture_stack_from_native_context(&ctx, frames, 0, stop);
+            out.capture = cc::capture_stack_from_native_context(&ctx, unwind, frames, 0, stop);
             ok = out.capture.count > 0;
         }
     }
@@ -357,6 +359,13 @@ void sampler_main()
     // was told to care about anyway.
     constexpr f64 refresh_interval_secs = 0.1;
     auto next_refresh_at = cc::current_time_steady_secs() + refresh_interval_secs;
+
+    // Taken again once a walk reaches a module it lacks, at most this often: code generated at run time is in no
+    // module, and a stack through it would otherwise rebuild the snapshot on every tick.
+    auto unwind = cc::unwind_snapshot::create();
+    auto unwind_is_stale = false;
+    constexpr f64 unwind_refresh_secs = 0.25;
+    auto next_unwind_refresh_at = cc::current_time_steady_secs() + unwind_refresh_secs;
 #endif
 
     while (!g_stop.load(cc::memory_order_acquire))
@@ -381,6 +390,13 @@ void sampler_main()
         sample s;
 
 #if defined(_WIN32)
+        if (unwind_is_stale && cc::current_time_steady_secs() >= next_unwind_refresh_at)
+        {
+            unwind = cc::unwind_snapshot::create();
+            unwind_is_stale = false;
+            next_unwind_refresh_at = cc::current_time_steady_secs() + unwind_refresh_secs;
+        }
+
         if (cfg.include_unknown_threads && cc::current_time_steady_secs() >= next_refresh_at)
         {
             os_threads.refresh(self_tid);
@@ -428,7 +444,7 @@ void sampler_main()
                             attempted = true;
                             s.native_tid = ts.native_tid;
                             if (auto* const h = handles.get(ts.native_tid); h != nullptr)
-                                took = sample_suspended(h, &ts, frames, cfg.stop_at_scope, s);
+                                took = sample_suspended(h, unwind, &ts, frames, cfg.stop_at_scope, s);
                         });
                 }
                 else
@@ -437,8 +453,10 @@ void sampler_main()
                     attempted = true;
                     s.native_tid = tid;
                     if (auto* const h = handles.get(tid); h != nullptr)
-                        took = sample_suspended(h, nullptr, frames, cfg.stop_at_scope, s);
+                        took = sample_suspended(h, unwind, nullptr, frames, cfg.stop_at_scope, s);
                 }
+
+                unwind_is_stale = unwind_is_stale || s.capture.left_snapshot;
 
                 if (took)
                 {
