@@ -86,16 +86,16 @@ TEST("sgl target type - a compile spells the type as its branch says, and a test
 TEST("sgl target type - a type spelled in a target's text has no field and no constructor there")
 {
     // a field read outside the branch that has fields reaches a dx12 compile
-    auto const read = compiled(handle_with("work.values[id.x] = first(h) * 2.0", "work.values[id.x] = h.a"),
-                               target::hlsl_dx12);
+    auto const read
+        = compiled(handle_with("work.values[id.x] = first(h) * 2.0", "work.values[id.x] = h.a"), target::hlsl_dx12);
     REQUIRE(read.has_error());
     CHECK(read.error().contains("invalid-target-text"));
     CHECK(read.error().contains("its fields are its SGL branch's alone"));
     CHECK(compiled(handle_with("work.values[id.x] = first(h) * 2.0", "work.values[id.x] = h.a"), target::hlsl_vulkan)
               .has_value());
     // and so does a construction
-    auto const built = compiled(handle_with("let h = make(work.values[id.x])", "let h = handle(1.0, 2.0)"),
-                                target::hlsl_dx12);
+    auto const built
+        = compiled(handle_with("let h = make(work.values[id.x])", "let h = handle(1.0, 2.0)"), target::hlsl_dx12);
     REQUIRE(built.has_error());
     CHECK(built.error().contains("no SGL constructor builds"));
 }
@@ -132,7 +132,8 @@ TEST("sgl target type - a compile whose branch has no spelling in its language i
 TEST("sgl target type - a text type is held by locals, parameters and results alone, and spelled once per language")
 {
     // CHK-397: no memory holds it, since a compile may spell it in its target's text
-    CHECK(reports_of(handle_with("    values: mut buffer[float]\n", "    values: mut buffer[float]\n    hs: buffer[handle]\n"))
+    CHECK(reports_of(handle_with("    values: mut buffer[float]\n", "    values: mut buffer[float]\n    hs: "
+                                                                    "buffer[handle]\n"))
               .contains("unsupported-yet"));
     // one SGL branch, so the fields are one list for every target
     CHECK(reports_of("struct pair:\n"

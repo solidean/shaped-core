@@ -319,16 +319,14 @@ bool checker::target_condition_of(i32 file, ast::expr_id expr, cc::vector<target
         if (!is_valid(s) || !is_target_constant(s) || name.empty())
             continue;
         auto const is_api = out.at(s).name == "target_api";
-        auto const value
-            = is_api ? position_in(k_graphics_api_names, name) : position_in(k_shading_language_names, name);
+        auto const value = is_api ? position_in(k_graphics_api_names, name) : position_in(k_shading_language_names, name);
         if (value < 0)
         {
             report(diagnostic_kind::unknown_member, file, span_of(file, arguments[1 - k].value),
                    cc::format("{} has no case {}", is_api ? "graphics_api" : "shading_language", name));
             return false;
         }
-        add({.kind = is_api ? target_condition::kind_t::api_is : target_condition::kind_t::language_is,
-             .value = value});
+        add({.kind = is_api ? target_condition::kind_t::api_is : target_condition::kind_t::language_is, .value = value});
         if (op == "!=")
             add({.kind = target_condition::kind_t::negated, .lhs = i32(into.size()) - 1});
         return true;
@@ -351,8 +349,7 @@ bool checker::compile_type_branches(symbol_id id, i32 file, ast::struct_decl con
             // one SGL branch, so the fields a check judges are the same for every compile
             if (has_fields)
                 report(diagnostic_kind::invalid_target_text, file, file_of(file).at(branch.form).where,
-                       cc::format("{} has a second SGL branch, and a type's fields are one list for every target",
-                                  name));
+                       cc::format("{} has a second SGL branch, and a type's fields are one list for every target", name));
             has_fields = true;
         }
         for (auto const text : ast.at(branch.texts))

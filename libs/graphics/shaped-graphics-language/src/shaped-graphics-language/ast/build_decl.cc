@@ -499,7 +499,7 @@ decl_id builder::type_body_declaration(statement_head const& head, keyword_parts
     // AST-160: a struct body that is one `const if` chain spells the type per branch
     auto const chain = body_scope == scope_kind::struct_body && is_valid(parts.block) ? type_branches(parts.block)
                                                                                       : cc::optional<type_chain>();
-    auto const members = chain.has_value()      ? chain.value().members
+    auto const members = chain.has_value()     ? chain.value().members
                        : is_valid(parts.block) ? declarations(parts.block, body_scope)
                                                : range_of<decl_id>();
 

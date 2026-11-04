@@ -473,8 +473,8 @@ struct sgl::check::checked_module
             && is_equal(near_misses, rhs.near_misses) && is_equal(ray_traces, rhs.ray_traces)
             && is_equal(callable_calls, rhs.callable_calls) && is_equal(texel_stores, rhs.texel_stores)
             && is_equal(target_texts, rhs.target_texts) && is_equal(target_preambles, rhs.target_preambles)
-            && is_equal(target_type_branches, rhs.target_type_branches)
-            && is_equal(files, rhs.files) && is_equal(entry_points, rhs.entry_points) && is_equal(tests, rhs.tests)
+            && is_equal(target_type_branches, rhs.target_type_branches) && is_equal(files, rhs.files)
+            && is_equal(entry_points, rhs.entry_points) && is_equal(tests, rhs.tests)
             && is_equal(test_units, rhs.test_units) && is_equal(entry_expectations, rhs.entry_expectations)
             && is_equal(diagnostics, rhs.diagnostics) && builtins == rhs.builtins;
     }

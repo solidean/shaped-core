@@ -87,9 +87,9 @@ struct sgl::ast::file_ast
             && impl::is_equal(fields, rhs.fields) && impl::is_equal(arguments, rhs.arguments)
             && impl::is_equal(attributes, rhs.attributes) && impl::is_equal(case_arms, rhs.case_arms)
             && impl::is_equal(if_branches, rhs.if_branches) && impl::is_equal(type_branches, rhs.type_branches)
-            && impl::is_equal(settings, rhs.settings)
-            && impl::is_equal(expr_lists, rhs.expr_lists) && impl::is_equal(stmt_lists, rhs.stmt_lists)
-            && impl::is_equal(decl_lists, rhs.decl_lists) && impl::is_equal(token_lists, rhs.token_lists)
-            && impl::is_equal(diagnostics, rhs.diagnostics) && declarations == rhs.declarations;
+            && impl::is_equal(settings, rhs.settings) && impl::is_equal(expr_lists, rhs.expr_lists)
+            && impl::is_equal(stmt_lists, rhs.stmt_lists) && impl::is_equal(decl_lists, rhs.decl_lists)
+            && impl::is_equal(token_lists, rhs.token_lists) && impl::is_equal(diagnostics, rhs.diagnostics)
+            && declarations == rhs.declarations;
     }
 };
