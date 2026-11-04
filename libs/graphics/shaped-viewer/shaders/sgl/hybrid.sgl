@@ -66,7 +66,7 @@ fun secondary_environment(b: openpbr.bsdf, f: openpbr.frame, n: float3, wo_local
     let pick = pt.rand(mut rng)
     let u = float3(pt.rand(mut rng), pt.rand(mut rng), pt.rand(mut rng))
     let seed = tracer.cutout_seed(rng, tracer.cutout_ray_environment)
-    if wo_local.z <= 0.0 => return float3(0.0)
+    if wo_local.z <= 0.0 or scene.environment_is_black(env) => return float3(0.0)
     if not scene.environment_is_dome(env) => return probe_environment(b, f, n, wo_local, p, rng)
 
     let drawn = scene.sample_environment_direction(env, float3(0.0, 1.0, 0.0), u)

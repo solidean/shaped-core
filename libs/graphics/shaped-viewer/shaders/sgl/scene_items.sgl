@@ -186,6 +186,14 @@ const four_pi = 12.56637061435917295384
 fun environment_is_dome(env: float4[28]) -> bool:
     return env[16].x > 0.5
 
+/// Whether `env` sends nothing from any direction: a probe whose every coefficient is zero, as a scene lit by its own lights alone leaves it.
+/// A sampler then has nothing to draw toward, and skips the closure it would weigh the direction by.
+fun environment_is_black(env: float4[28]) -> bool:
+    if environment_is_dome(env) => return false
+    for k in 0 ..< 16:
+        if env[k].x != 0.0 or env[k].y != 0.0 or env[k].z != 0.0 => return false
+    return true
+
 /// The 16 SH lanes of `env`, as `background_radiance` takes them.
 fun environment_sh(env: float4[28]) -> float4[16]:
     let mut sh = float4[16].filled(float4(0.0))

@@ -440,6 +440,15 @@ What the lighting's parts cost, measured by cutting the kernel short after each:
 - the bounced surface's material, light sample and environment sample, about 4.5 ms;
 - the next and last rays that weigh the lights against the BSDF, about 3.1 ms.
 
+Rays dominate it: with every trace missing and every shadow ray arriving, the kernel took 3.4 ms.
+Cutouts cost nothing in this room, 12.5 ms with every instance opaque, and reading the bounced surface's material through its parameters cost nothing either.
+Three savings followed, each leaving the image as it was:
+- an environment sample toward a direction the environment sends nothing from returns no sample, so it traces no shadow ray;
+- a third surface nothing follows is no longer prepared, since everything lit from it came to zero;
+- an environment that is black everywhere skips both environment samplers whole, the bounced surface's BSDF sample with them.
+
+The deferred lighting went from 12.7 to 8.3 ms, and the still frame from 21.9 to 16.8 ms.
+
 ## Phasing
 
 Each phase lands with its tests, and its measurement on Sponza and on one large geometry scene.

@@ -405,6 +405,7 @@ fun sample_environment(b: openpbr.bsdf, f: openpbr.frame, wo_local: float3, p: f
     let env = background_lanes()
     let u1 = pt.rand(mut rng)
     let u2 = pt.rand(mut rng)
+    if scene.environment_is_black(env) => return no_light_sample()
     // A probe draws as it always has, uniformly over the shading frame's upper half from two numbers, so its scenes keep their random stream.
     let mut drawn = scene.environment_direction(float3(0.0), 1.0 / (2.0 * pt.pi))
     if scene.environment_is_dome(env):
