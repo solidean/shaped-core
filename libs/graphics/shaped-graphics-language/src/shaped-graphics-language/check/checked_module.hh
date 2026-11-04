@@ -170,6 +170,18 @@ struct sgl::check::target_text
     }
 };
 
+/// A file's text in a target's own language, written once ahead of an entry point that writes a body of that file in
+/// it (CHK-428).
+struct sgl::check::target_preamble
+{
+    i32 file = 0;
+    shading_language language = shading_language::sgl;
+    /// Whole lines, each ending in `\n`.
+    cc::string text;
+
+    [[nodiscard]] bool operator==(target_preamble const&) const = default;
+};
+
 struct sgl::check::checked_module
 {
     /// The module-level declarations of every file, in file order and then in source order.
@@ -212,6 +224,8 @@ struct sgl::check::checked_module
     layered<texel_store> texel_stores;
     /// Every function body in a target's own text, one entry per language it is written in (CHK-427).
     layered<target_text> target_texts;
+    /// Every file's preamble per language (CHK-428).
+    layered<target_preamble> target_preambles;
 
     /// One entry per file checked: the prelude's, then the library files the program reaches, then the program's.
     layered<file_tables> files;
@@ -389,6 +403,7 @@ struct sgl::check::checked_module
         callable_calls.freeze();
         texel_stores.freeze();
         target_texts.freeze();
+        target_preambles.freeze();
         files.freeze();
         tests.freeze();
         test_units.freeze();
@@ -404,10 +419,11 @@ struct sgl::check::checked_module
             && is_equal(samplers, rhs.samplers) && is_equal(pipelines, rhs.pipelines)
             && is_equal(pipeline_settings, rhs.pipeline_settings) && is_equal(constants, rhs.constants)
             && is_equal(option_uses, rhs.option_uses) && is_equal(call_records, rhs.call_records)
-            && is_equal(function_instances, rhs.function_instances) && is_equal(written_arguments, rhs.written_arguments)
-            && is_equal(call_slots, rhs.call_slots) && is_equal(near_misses, rhs.near_misses)
-            && is_equal(ray_traces, rhs.ray_traces) && is_equal(callable_calls, rhs.callable_calls)
-            && is_equal(texel_stores, rhs.texel_stores) && is_equal(target_texts, rhs.target_texts)
+            && is_equal(function_instances, rhs.function_instances)
+            && is_equal(written_arguments, rhs.written_arguments) && is_equal(call_slots, rhs.call_slots)
+            && is_equal(near_misses, rhs.near_misses) && is_equal(ray_traces, rhs.ray_traces)
+            && is_equal(callable_calls, rhs.callable_calls) && is_equal(texel_stores, rhs.texel_stores)
+            && is_equal(target_texts, rhs.target_texts) && is_equal(target_preambles, rhs.target_preambles)
             && is_equal(files, rhs.files) && is_equal(entry_points, rhs.entry_points) && is_equal(tests, rhs.tests)
             && is_equal(test_units, rhs.test_units) && is_equal(entry_expectations, rhs.entry_expectations)
             && is_equal(diagnostics, rhs.diagnostics) && builtins == rhs.builtins;

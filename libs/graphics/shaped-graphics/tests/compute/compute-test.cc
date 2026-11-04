@@ -698,6 +698,39 @@ ASYNC_INVOCABLE_TEST("sg - a compute shader that calls a helper keeps its workgr
         CHECK(data[i] == cc::min(float(i), 10.0f));
 }
 
+ASYNC_INVOCABLE_TEST("sg - an SGL body in a target's own text, and the preamble it calls, reach the target's compiler",
+                     (sg::context_handle const& ctx))
+{
+    REQUIRE(ctx != nullptr);
+    if (!sg_test::shaders_reach(*ctx))
+        SKIP("no compiler builds this binary's shaders into a format this context accepts");
+
+    // `tripled` is HLSL text over a preamble on dx12 and vulkan, MSL on metal, and SGL on webgpu (CHK-427, CHK-428)
+    auto const pipeline = co_await shaders::double_values::triple_values.acquire_pipeline(*ctx);
+    auto const group_layout = ctx->cached.acquire_binding_group_layout<shaders::double_values::work>();
+
+    constexpr auto count = 64;
+    auto initial = cc::vector<float>::create_defaulted(count);
+    for (auto i = 0; i < count; ++i)
+        initial[i] = float(i);
+    auto const values = ctx->persistent.create_buffer_from_data(
+        cc::move(initial), sg::buffer_usage::readwrite_buffer | sg::buffer_usage::copy_src);
+    auto cmd = ctx->create_command_list();
+    auto const group = ctx->transient.create_binding_group(
+        *cmd, group_layout, shaders::double_values::work{.values = values.as_readwrite_buffer()});
+
+    cmd->compute.bind_pipeline(*pipeline);
+    cmd->compute.bind_group(0, *group);
+    cmd->compute.dispatch_threads(count);
+    auto const future = cmd->download.data_from_buffer(values);
+    ctx->submit_command_list(cc::move(cmd));
+
+    auto const data = co_await future.data();
+    REQUIRE(data.size() == isize(count));
+    for (auto i = 0; i < count; ++i)
+        CHECK(data[i] == float(i) * 3.0f);
+}
+
 ASYNC_INVOCABLE_TEST("sg - a pipeline whose shader needs a feature the device lacks is refused by its name",
                      (sg::context_handle const& ctx))
 {

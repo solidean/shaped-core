@@ -859,7 +859,8 @@ void sgl::check::impl::flattener::flatten_target_text(origin from, ast::stmt_id 
         if (t.file != file() || t.first != stmt)
             continue;
         function = t.function;
-        if (t.language == language)
+        // a description writes no text, and a body's footprint is its parameters' whichever language it is in
+        if (t.language == language || (language == shading_language::sgl && !is_test && chosen < 0))
             chosen = i32(i);
     }
     if (!is_valid(function))

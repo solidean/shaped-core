@@ -189,3 +189,52 @@ cc::optional<flow> checker::target_text_flow(i32 file, ast::stmt_id stmt)
     // as it would end its body where it stood rightly, so no missing return follows from it
     return flow::exits;
 }
+
+void checker::declare_preamble(i32 file, ast::preamble_decl const& preamble)
+{
+    auto const& ast = ast_of(file);
+    auto const& source = file_of(file);
+    auto const& tokens = source.tokens;
+    if (!ast::is_valid(preamble.text))
+        return;
+    auto const open = index_of(source.at(ast.at(preamble.text).form).token);
+    auto const tag_span = tokens[open + 1].where;
+    auto const tag = source.text_of(tag_span);
+    auto const language = language_named(tag);
+    if (!language.has_value())
+    {
+        report(diagnostic_kind::invalid_target_text, file, tag_span,
+               cc::format("{} names no language a target writes; a preamble is one of hlsl, wgsl or msl", tag));
+        return;
+    }
+
+    // whole lines, as the target reads them ahead of the entry point
+    auto result = target_preamble{.file = file, .language = language.value()};
+    auto previous_end = tag_span.end();
+    for (auto i = isize(open + 2); i < tokens.size() && tokens[i].kind != token_kind::quote_close; ++i)
+    {
+        auto const& t = tokens[i];
+        auto const between = source.text_of({.offset = previous_end, .length = t.where.offset - previous_end});
+        if (!result.text.empty() && between.contains('\n'))
+            result.text += '\n';
+        previous_end = t.where.end();
+        if (t.kind == token_kind::dollar)
+        {
+            report(diagnostic_kind::invalid_target_text, file, t.where,
+                   "a preamble belongs to no call, so it has no placeholder; `$$` is a dollar of the text");
+            return;
+        }
+        if (t.kind != token_kind::string_body)
+            continue;
+        auto const body = source.text_of(t.where);
+        for (auto c = isize(0); c < body.size(); ++c)
+        {
+            result.text += body[c];
+            if (body[c] == '$' && c + 1 < body.size() && body[c + 1] == '$')
+                ++c;
+        }
+    }
+    if (!result.text.empty())
+        result.text += '\n';
+    out.target_preambles.push_back(cc::move(result));
+}

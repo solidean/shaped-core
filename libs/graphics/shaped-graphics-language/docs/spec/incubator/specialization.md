@@ -177,7 +177,8 @@ Left:
 
 * The check pass: three-valued discarding, effect and uniformity attributes as the contract, SGL branches checked against it, and coverage.
 * Generics: a branch ruled out for an instance is never checked for it.
-* The emitters: the preamble, reserved names read from the text, and `#line` inside it.
+* The emitters: reserved names read from the text, and `#line` inside it.
+  The preamble is done (CHK-428), a file's per language; one per API, such as vulkan's alone among the HLSL targets, is open.
 * A buffer as a parameter, which SGL has for no function yet, so a text body reaches a buffer through an element or an atomic alone.
 * Text types, which SER's hit object waits for.
 * The interpreter: the features a test sets.

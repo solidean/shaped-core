@@ -679,6 +679,11 @@ void checker::declare(i32 file, ast::decl_id decl)
             judge_attributes(file, d.attributes, {}, "a require");
             file_features[file] |= read_require(file, r, require_scope::file, symbol_id::none);
         },
+        [&](ast::preamble_decl const& p)
+        {
+            judge_attributes(file, d.attributes, {}, "a preamble");
+            declare_preamble(file, p);
+        },
         [&](ast::enum_decl const& e)
         {
             auto const owner = symbol_id(out.symbols.size());

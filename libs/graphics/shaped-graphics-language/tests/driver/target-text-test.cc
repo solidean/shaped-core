@@ -193,3 +193,48 @@ TEST("sgl target text - a body's text stands where a body does, in a language a 
                      "    \"\n")
               .contains("no parameter of it is named result"));
 }
+
+TEST("sgl target text - a file's preamble is written once ahead of an entry point that writes a body of that file")
+{
+    constexpr auto source = "\"hlsl\n"
+                            "    float doubled_spirv(float x);\n"
+                            "\"\n"
+                            "\n"
+                            "binding work:\n"
+                            "    values: mut buffer[float]\n"
+                            "\n"
+                            "fun twice(x: float) -> float:\n"
+                            "    const if target_api == .vulkan:\n"
+                            "        \"hlsl\n"
+                            "            $result = $x * 2.0;\n"
+                            "        \"\n"
+                            "    else:\n"
+                            "        return x + x\n"
+                            "\n"
+                            "@compute(64) fun main_cs(@thread_id id: int3){work}:\n"
+                            "    work.values[id.x] = twice(twice(work.values[id.x]))\n";
+    auto const vulkan = compiled(source, target::hlsl_vulkan);
+    auto const dx12 = compiled(source, target::hlsl_dx12);
+    REQUIRE(vulkan.has_value());
+    REQUIRE(dx12.has_value());
+    auto const& text = vulkan.value().text;
+    auto const at = text.find("float doubled_spirv(float x);\n");
+    REQUIRE(at >= 0);
+    // once, whatever number of calls reach the file's bodies, and ahead of the entry point
+    CHECK(!cc::string_view(text).subview(at + 1).contains("float doubled_spirv"));
+    CHECK(at < text.find("void main_cs"));
+    // a compile that writes none of the file's text writes none of its preamble
+    CHECK(!dx12.value().text.contains("doubled_spirv"));
+}
+
+TEST("sgl target text - a preamble is in a language a target writes, and has no placeholder")
+{
+    CHECK(reports_of("\"glsl\n"
+                     "    float f();\n"
+                     "\"\n")
+              .contains("glsl names no language a target writes"));
+    CHECK(reports_of("\"hlsl\n"
+                     "    float f($x);\n"
+                     "\"\n")
+              .contains("a preamble belongs to no call, so it has no placeholder"));
+}

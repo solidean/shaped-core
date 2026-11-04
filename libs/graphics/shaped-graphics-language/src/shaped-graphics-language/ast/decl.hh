@@ -34,6 +34,16 @@ struct sgl::ast::require_decl
     constexpr bool operator==(require_decl const&) const = default;
 };
 
+/// A tagged string at file scope: what a target's text needs ahead of the entry point, in the language its tag names
+/// (AST-159).
+struct sgl::ast::preamble_decl
+{
+    /// The quoted literal.
+    expr_id text = expr_id::none;
+
+    constexpr bool operator==(preamble_decl const&) const = default;
+};
+
 enum class sgl::ast::receiver_kind : sgl::u8
 {
     /// No `self`: a free function, or a static method when it is a member.
@@ -214,6 +224,7 @@ struct sgl::ast::decl
                 module_decl,
                 use_decl,
                 require_decl,
+                preamble_decl,
                 fun_decl,
                 struct_decl,
                 enum_decl,

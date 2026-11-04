@@ -32,6 +32,11 @@ decl_id builder::declaration(statement_head const& head, scope_kind scope, bool 
     auto const is_member_scope = scope != scope_kind::file && scope != scope_kind::function;
     auto const not_a_declaration
         = is_member_scope ? diagnostic_kind::expected_member : diagnostic_kind::expected_declaration;
+    // AST-159: a tagged string at file scope is a preamble of the target's text in its language
+    if (!is_valid(head.keyword_form) && scope == scope_kind::file && is_kind(head.whole, form_kind::quoted)
+        && is_valid(at(head.whole).token) && index_of(at(head.whole).token) + 1 < file.tokens.size()
+        && file.tokens[index_of(at(head.whole).token) + 1].kind == token_kind::symbol)
+        return make_decl(head.whole, attributes_of(head.whole), preamble_decl{.text = expression(head.whole)});
     if (!is_valid(head.keyword_form))
         return invalid_declaration(head.whole, not_a_declaration);
 

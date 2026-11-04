@@ -1726,6 +1726,21 @@ cc::string_view sgl::emit::impl::type_text(plan const& p, dialect const& d, chec
 
 void sgl::emit::impl::write_helpers(cc::string& out, plan const& p, dialect const& d)
 {
+    // CHK-428: the preambles of each file whose bodies in a target's text the entry point writes, once, in the order
+    // first needed
+    auto const language = d.language() == builtins::language::hlsl ? check::shading_language::hlsl
+                        : d.language() == builtins::language::wgsl ? check::shading_language::wgsl
+                                                                   : check::shading_language::msl;
+    auto text_files = cc::vector<i32>();
+    for (auto const& x : p.e.exprs)
+        if (auto const* const call = x.node.try_as<check::flat_call>(); call != nullptr && call->text >= 0)
+            if (auto const file = p.m.target_texts[call->text].file; !text_files.values().contains(file))
+                text_files.push_back(file);
+    for (auto const file : text_files)
+        for (auto const& preamble : p.m.target_preambles)
+            if (preamble.file == file && preamble.language == language)
+                out.appendf("{}\n", preamble.text);
+
     // EMIT-102: each helper the entry point's builtin calls need, once, in the order first needed.
     auto written = cc::vector<cc::string>();
     for (auto const& x : p.e.exprs)

@@ -406,6 +406,8 @@ struct checker
     void register_text_run(symbol_id function, i32 file, cc::span<ast::stmt_id const> run);
     /// How a tagged string ends its block, where `stmt` is one; none for any other statement.
     [[nodiscard]] cc::optional<flow> target_text_flow(i32 file, ast::stmt_id stmt);
+    /// A file's tagged string at file scope, registered in `out.target_preambles` (CHK-428).
+    void declare_preamble(i32 file, ast::preamble_decl const& preamble);
 
     /// How many of `files` are the prelude's; every other file is a module's.
     i32 prelude_count = 0;

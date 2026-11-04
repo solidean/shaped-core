@@ -924,6 +924,10 @@ A feature is what a device may lack, so using one makes a shader non-portable on
   `$name` is the parameter of that name, as the argument written, and `$result` a local of the result type the text assigns, which is the call's value.
   A function with a result has `$result` in every alternative and none without one, no parameter is named `result`, and a placeholder names nothing of a parameter.
   The text is not checked, and a call of such a function has an effect; what GPU memory it touches is what its parameters' marks say, and the footprint reads them.
+  A description writes for no target, so it reads such a body as any of its alternatives, whose footprint is the same.
+* **CHK-428** A tagged string at file scope (AST-159) is that file's preamble in its language.
+  It is written once ahead of an entry point that writes a body in a target's text from that file in that language.
+  Its language is one a target writes, or it is `invalid-target-text`, and so is a placeholder in it, since it belongs to no call; `$$` is a dollar.
 * **CHK-265** A `require` in a body that is not the declaration an entry point needs is the warning `unused-require`, and so is a second `require` of a feature in one body.
   A `require` in a test's body or a helper's is used where a call that body reaches, inlined, needs the feature (CHK-322).
   A `require` of a file or of a binding is never unused: each declares an intent, whether anything uses the feature or not ([why](why/checking.md#chk-265)).
@@ -1677,7 +1681,7 @@ A diagnostic of this pass has a kind, a file, a byte span in that file, and a de
 | `non-uniform-per-draw` | CHK-393 |
 | `invalid-option` | CHK-354 |
 | `unroll-too-long` | CHK-389 |
-| `invalid-target-text` | CHK-427 |
+| `invalid-target-text` | CHK-427, CHK-428 |
 
 ## Open
 

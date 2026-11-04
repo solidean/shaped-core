@@ -556,6 +556,11 @@ struct dumper
                     out += file.text_of(n.alias);
                 }
             },
+            [&](preamble_decl const& n)
+            {
+                open("preamble");
+                dump_expr(n.text, depth);
+            },
             [&](require_decl const& n)
             {
                 open("require");

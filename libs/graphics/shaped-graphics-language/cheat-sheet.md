@@ -485,6 +485,9 @@ fun f(x: float) -> float:                // a body in the target's own text: a r
     "hlsl                                //   $x is the argument, $result the value; the text is unchecked and the call impure
         $result = rsqrt($x);             //   a target with no alternative and no SGL branch is ERROR invalid-target-text
     "
+"hlsl                                    // at file scope: a preamble, written once ahead of an entry point that writes
+    float helper(float x);               //   a text body of this file in that language (CHK-428); no placeholders
+"
 @unroll                                  // on a `for`: the body once per index, the index a literal in each copy, within 256 copies (CHK-389)
 for i in 0 ..< taps: ...                 // nothing of it runs as a loop, no text holds a hint, and the bounds are int constants
                                          // past 256 copies, a nest's counted together, it stays a loop: WARNING unroll-too-long
