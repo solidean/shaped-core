@@ -525,11 +525,12 @@ BENCHMARK("tg bigfloat - counters per call")
         auto out_of_range = 0;
         for (auto i = 0; i + 4 < input_count; ++i)
         {
-            auto const s
-                = insphere_t<tg::float_expansion>(p + 3 * i, p + 3 * i + 3, p + 3 * i + 6, p + 3 * i + 9, p + 3 * i + 12);
+            auto const s = insphere_t<tg::float_expansion>(p + 3 * i, p + 3 * i + 3, p + 3 * i + 6, p + 3 * i + 9,
+                                                           p + 3 * i + 12);
             out_of_range += s == tg::float_expansion::invalid_sign;
             if (s != tg::float_expansion::invalid_sign)
-                CHECK(s == insphere_t<tg::bigfloat>(p + 3 * i, p + 3 * i + 3, p + 3 * i + 6, p + 3 * i + 9, p + 3 * i + 12));
+                CHECK(s
+                      == insphere_t<tg::bigfloat>(p + 3 * i, p + 3 * i + 3, p + 3 * i + 6, p + 3 * i + 9, p + 3 * i + 12));
         }
         CHECK((out_of_range == 0) == !spread);
         cc::println("insphere through float_expansion: {} of {} calls out of range", out_of_range, input_count - 4);

@@ -1,8 +1,8 @@
 #pragma once
 
 #include <clean-core/common/utility.hh>
-#include <clean-core/math/bit.hh>
 #include <clean-core/container/span.hh>
+#include <clean-core/math/bit.hh>
 #include <typed-geometry/scalar/float_expansion/impl/kernels.hh>
 
 #include <compare>
@@ -274,7 +274,9 @@ struct tg::float_expansion_sbo
         auto const c = compare(a, b);
         if (c == invalid_sign)
             return std::partial_ordering::unordered;
-        return c < 0 ? std::partial_ordering::less : c > 0 ? std::partial_ordering::greater : std::partial_ordering::equivalent;
+        return c < 0 ? std::partial_ordering::less
+             : c > 0 ? std::partial_ordering::greater
+                     : std::partial_ordering::equivalent;
     }
 
 private:

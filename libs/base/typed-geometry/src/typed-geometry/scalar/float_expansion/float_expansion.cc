@@ -7,7 +7,10 @@ using namespace cc::primitive_defines;
 using tg::impl::float_expansion_invalid;
 
 /// Whether a sum chain stayed in range: an overflow makes its running total infinite or NaN, and both stay so.
-bool is_finite(f64 q) { return q - q == 0.0; }
+bool is_finite(f64 q)
+{
+    return q - q == 0.0;
+}
 
 /// h = e + b: Shewchuk's grow_expansion_zeroelim, a two_sum per component and no merge.
 /// h may alias e: each component is read before the one written at its index or below.
