@@ -76,8 +76,11 @@ They hold both modes to central differences, among them the whole gradient of on
   Inside it, each save and each recorded condition is a local array with one slot per iteration, of every kept loop around it.
   The backward sweep walks the loop down from its last iteration, and every read of its index in what it clones reads the index reversed.
   [loops.sgl](../../../tests/corpus/derivatives/loops.sgl) has one of 64 iterations, whose backward kernel is 355 lines of HLSL and 275 DXIL instructions, against 5508 and 2309 unrolled.
-  A loop of 4 is the other way round, since DXC unrolls it anyway and keeps what the tape costs; a bound below which to unroll is the obvious next step.
-  A tape holds at most 1024 slots, a `break` or a `return` out of a kept loop is `unsupported-yet`, and so is a loop of any other bound.
+  The same loop of 4 iterations is 117 kept against 149 unrolled, so no trip count below which to unroll pays: what decides is the body.
+  A loop whose body is a few operations is the exception, 57 kept against 24 unrolled, and `@unroll` on it unrolls it going backward too.
+  A `continue` leaves a block around the body, and a `break` or a `return` from inside the loop sets a flag.
+  The iterations after it run as nothing, each one's guard recorded on the tape, so going backward they are skipped alike.
+  A tape holds at most 1024 slots, and a loop of any other bound is `unsupported-yet`.
   Forward mode follows every loop.
 * **A derivative written by hand is two attributes.**
   `@forward(f)` stands on a function of each parameter and its tangent, which gives the result's tangent.
@@ -149,7 +152,7 @@ What it found in SGL itself:
 
 The prototype has done forward mode, reverse mode, loops of constant bounds over a tape, derivatives written by hand, `@no_diff`, and the tangent types of the builtin geometry types.
 
-1. A `break` out of a kept loop, and a loop whose bound is stated rather than constant, as Slang's `[MaxIters]` is.
+1. A loop whose bound is stated rather than constant, as Slang's `[MaxIters]` is, which a `while` needs.
 2. A struct's tangent type, a struct of its fields' tangents, so a struct holding a position says what it holds.
 3. The rules as registry records, and the matrix arithmetic in the registry.
 4. Differentiable buffers as binding members, once float atomics or a subgroup reduction exist.

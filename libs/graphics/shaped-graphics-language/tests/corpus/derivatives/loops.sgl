@@ -97,7 +97,7 @@ binding colors:
     bwd_diff(shaded_of, colors.coefficients[id.x], mut gradient, 1.0)
     colors.gradients[id.x] = gradient
 
-// a loop left early would need its tape to say where it stopped: refused, for now
+// a loop left early: the iterations after the break do nothing, and the tape says so going backward
 fun until_large(x: float) -> float:
     let mut y = x
     for i in 0 ..< 8:
@@ -105,14 +105,49 @@ fun until_large(x: float) -> float:
         if y > 10.0 => break
     return y
 
-binding refused:
-    values: mut buffer[float]
-
-@expect(error = "unsupported-yet")
-@compute(1) fun refuses_a_break_backward(){refused}:
+// 2.0 grows 1.5 times a step and passes 10 after 4 steps, so the derivative is 1.5^4
+test nearly_equal(fwd_diff(until_large, 2.0, 1.0), 5.0625, within = 1e-4)
+test:
     let mut dx = 0.0
-    bwd_diff(until_large, refused.values[0], mut dx, 1.0)
-    refused.values[1] = dx
+    bwd_diff(until_large, 2.0, mut dx, 1.0)
+    nearly_equal(dx, 5.0625, within = 1e-4)
+
+// a loop that breaks in its first iteration runs none after it
+test:
+    let mut dx = 0.0
+    bwd_diff(until_large, 9.0, mut dx, 1.0)
+    nearly_equal(dx, 1.5, within = 1e-5)
+
+// a continue skips the rest of its iteration: the odd steps add nothing
+fun even_steps(x: float) -> float:
+    let mut y = 0.0
+    for i in 0 ..< 6:
+        if i % 2 == 1 => continue
+        y += x * float(i)
+    return y
+
+test fwd_diff(even_steps, 1.0, 1.0) == 6.0
+test:
+    let mut dx = 0.0
+    bwd_diff(even_steps, 1.0, mut dx, 1.0)
+    dx == 6.0
+
+// a return from inside a loop, which leaves the loop and the function it stands in
+fun first_above(x: float2) -> float:
+    for i in 0 ..< 5:
+        let v = x.x * float(i + 1)
+        if v > x.y => return v * v
+    return x.y
+
+fun first_above_of(x: float2) => first_above(x) + 1.0
+
+test:
+    let mut dx = float2(0.0)
+    bwd_diff(first_above_of, float2(0.7, 1.5), mut dx, 1.0)
+    // 0.7 * 3 = 2.1 is the first above 1.5, and the result is (3 x)^2, whose derivative is 18 x
+    nearly_equal(dx.x, 12.6, within = 1e-4)
+    dx.y == 0.0
+test nearly_equal(fwd_diff(first_above_of, float2(0.7, 1.5), float2(1.0, 0.0)), 12.6, within = 1e-4)
 
 // a long loop, which unrolled would be 64 copies of its body going backward, and kept is one walked back over a tape
 fun march(p: float3) -> float:
@@ -136,3 +171,12 @@ fun march_agrees(p: float3, axis: float3) -> bool:
 test march_agrees(float3(0.2, -0.4, 0.3), float3(1.0, 0.0, 0.0))
 test march_agrees(float3(0.2, -0.4, 0.3), float3(0.0, 1.0, 0.0))
 test march_agrees(float3(0.2, -0.4, 0.3), float3(0.0, 0.0, 1.0))
+
+binding growth:
+    values: buffer[float]
+    gradients: mut buffer[float]
+
+@compute(64) fun growth_backward(@thread_id id: int3){growth}:
+    let mut dx = 0.0
+    bwd_diff(until_large, growth.values[id.x], mut dx, 1.0)
+    growth.gradients[id.x] = dx

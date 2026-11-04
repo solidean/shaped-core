@@ -78,8 +78,6 @@ struct differentiator
         local_id index = local_id::none;
         i32 first = 0;
         i32 count = 0;
-        /// The blocks inside its body, which a leave inside it may target; any other leave would leave the loop.
-        cc::set<i32> labels;
     };
     cc::vector<kept_loop> kept_loops;
     /// Reverse: how many loops the declarations being hoisted stand in; a `let` in one is assigned once per iteration.
@@ -1214,8 +1212,14 @@ struct differentiator
                     else if (auto const* const n = s.node.try_as<flat_for>();
                              n != nullptr && constant_bounds(*n).has_value())
                     {
+                        // a `continue` of this loop leaves the rest of its iteration: a block around the body
+                        auto const iteration = f.add_label("iteration");
+                        auto const wrapped = f.make_stmt(
+                            where,
+                            flat_block{.label = iteration,
+                                       .body = f.add_list(continues_as_leaves(copy_of(n->body), n->label, iteration))});
                         ++loop_depth;
-                        auto const body = f.add_list(hoist_declarations(copy_of(n->body)));
+                        auto const body = f.add_list(hoist_declarations(cc::span<flat_stmt_id const>(&wrapped, 1)));
                         --loop_depth;
                         restate(
                             id,
@@ -1227,6 +1231,41 @@ struct differentiator
                         failed("a case");
                     else if (s.node.is<flat_continue>() || s.node.is<flat_break>() || s.node.is<flat_discard>())
                         failed("a jump it cannot follow yet");
+                    else
+                        f.block.push_back(id);
+                }
+            });
+    }
+
+    /// `statements` with every `continue` of the loop `loop` a leave of `iteration`, the block around its body.
+    cc::vector<flat_stmt_id> continues_as_leaves(cc::span<flat_stmt_id const> statements, label_id loop, label_id iteration)
+    {
+        auto const copy = cc::vector<flat_stmt_id>::create_copy_of(statements);
+        return collect(
+            [&]
+            {
+                for (auto const id : copy)
+                {
+                    auto const s = f.entry.at(id);
+                    auto const inside = [&](ast::range_of<flat_stmt_id> r)
+                    { return f.add_list(continues_as_leaves(copy_of(r), loop, iteration)); };
+                    if (auto const* const n = s.node.try_as<flat_continue>(); n != nullptr && n->target == loop)
+                        restate(id, flat_leave{.target = iteration});
+                    else if (auto const* const n = s.node.try_as<flat_if>())
+                    {
+                        auto const then_body = inside(n->then_body);
+                        auto const else_body = inside(n->else_body);
+                        restate(id, flat_if{.condition = n->condition, .then_body = then_body, .else_body = else_body});
+                    }
+                    else if (auto const* const n = s.node.try_as<flat_block>();
+                             n != nullptr && !f.custom_calls.contains(i32(n->label)))
+                        restate(id, flat_block{.label = n->label, .body = inside(n->body)});
+                    else if (auto const* const n = s.node.try_as<flat_for>())
+                        restate(id, flat_for{.label = n->label,
+                                             .index = n->index,
+                                             .first = n->first,
+                                             .end = n->end,
+                                             .body = inside(n->body)});
                     else
                         f.block.push_back(id);
                 }
@@ -1251,6 +1290,11 @@ struct differentiator
             body(n->else_body);
         }
         else if (auto const* const n = s.node.try_as<flat_block>())
+        {
+            body(n->body);
+            inner.erase(i32(n->label));
+        }
+        else if (auto const* const n = s.node.try_as<flat_for>())
         {
             body(n->body);
             inner.erase(i32(n->label));
@@ -1356,11 +1400,7 @@ struct differentiator
                 f.block.push_back(id);
             }
             else if (auto const* const n = s.node.try_as<flat_leave>())
-            {
-                if (!kept_loops.empty() && !kept_loops.back().labels.contains(i32(n->target)))
-                    return (void)failed("a leave out of a loop it keeps: a break, or a return from inside the loop");
                 emit(flat_assign{.place = ref(flag_of(n->target)), .value = boolean(true)});
-            }
             else if (auto const* const n = s.node.try_as<flat_if>())
             {
                 auto const condition = record(n->condition);
@@ -1371,8 +1411,6 @@ struct differentiator
             else if (auto const* const n = s.node.try_as<flat_block>();
                      n != nullptr && !f.custom_calls.contains(i32(n->label)))
             {
-                if (!kept_loops.empty())
-                    kept_loops.back().labels.insert(i32(n->label));
                 auto body = straighten(copy_of(n->body));
                 // a block in a loop runs again, and its leave of the last run must not guard this one
                 if (auto const* const flag = left_flag.get_ptr(i32(n->label)))
@@ -1382,8 +1420,30 @@ struct differentiator
             else if (auto const* const n = s.node.try_as<flat_for>())
             {
                 auto const bounds = constant_bounds(*n).value();
+                auto left = cc::set<i32>();
+                for (auto const x : f.entry.at(n->body))
+                    escapes(x, left);
+                // a break leaves to the loop, whose flag starts false each time the loop does
+                if (left.contains(i32(n->label)))
+                    emit(flat_assign{.place = ref(flag_of(n->label)), .value = boolean(false)});
                 kept_loops.push_back({.index = n->index, .first = bounds.first, .count = bounds.count});
-                auto const body = straighten(copy_of(n->body));
+                auto body = straighten(copy_of(n->body));
+                if (!left.empty())
+                    body = collect(
+                        [&]
+                        {
+                            auto still = flat_expr_id::none;
+                            for (auto const l : left)
+                            {
+                                auto const stays = add(f.bool_type(), flat_not{.operand = ref(flag_of(label_id(l)))});
+                                still = is_valid(still) ? add(f.bool_type(), flat_and{.lhs = still, .rhs = stays})
+                                                        : stays;
+                            }
+                            auto const runs = record(still);
+                            emit(flat_if{.condition = runs,
+                                         .then_body = f.add_list(body),
+                                         .else_body = f.add_list(cc::span<flat_stmt_id const>())});
+                        });
                 kept_loops.remove_back();
                 restate(id, flat_for{.label = n->label,
                                      .index = n->index,
