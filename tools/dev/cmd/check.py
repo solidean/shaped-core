@@ -171,28 +171,43 @@ def _build_checks(ctx: Context, *, memo: dev.CheckMemo | None = None, all_preset
         # miscounts its own height has no other way of being caught.
         # extern/'s manifest resolution runs here for the same reason: which upstream is available on which machine is
         # answered on every configure and reported by nothing, so a wrong answer surfaces as a link error on one runner.
-        # Not fixable and not scopable, so fix and scope are ignored.
         # clean-simd's link-map check runs after every link of a dispatching binary, where a parser that silently stopped
         # matching would look exactly like a clean link.
-        ok = True
+        # Not fixable, so fix is ignored.
+        #
+        # Each script runs when its own code changed: itself, the dev.py packages it imports, and lib/core, which they all stand on.
+        # A whole-tree run (`--all`), or a scope that cannot be read, runs every one.
+        dev_lib = "tools/dev/lib"
+        core = f"{dev_lib}/core/**"
         runners = (
-            (Path("tools") / "dev" / "profile-self-test.py", []),
-            (Path("tools") / "dev" / "changes-self-test.py", []),
-            (Path("tools") / "dev" / "checks-self-test.py", []),
-            (Path("tools") / "dev" / "roots-self-test.py", []),
-            (Path("tools") / "dev" / "jsruntime-self-test.py", []),
-            (Path("tools") / "dev" / "ui-self-test.py", []),
-            (Path("tools") / "dev" / "symbolize-self-test.py", []),
-            (Path("tools") / "dev" / "submodules-self-test.py", []),
-            (Path("tools") / "dev" / "benchmarks-self-test.py", []),
-            (Path("tools") / "dev" / "memory-guard-self-test.py", []),
-            (Path("extern") / "manifest-self-test.py", []),
-            (Path("libs") / "base" / "clean-simd" / "tools" / "check-link-map.py", ["--self-test"]),
+            ("tools/dev/profile-self-test.py", [], (core,)),
+            ("tools/dev/changes-self-test.py", [], (core, f"{dev_lib}/quality/**", f"{dev_lib}/project/**")),
+            ("tools/dev/checks-self-test.py", [], (core, f"{dev_lib}/quality/**")),
+            ("tools/dev/roots-self-test.py", [], (core, f"{dev_lib}/quality/**")),
+            ("tools/dev/jsruntime-self-test.py", [], (core, f"{dev_lib}/toolchain/**", "tools/dev/js/*.json")),
+            ("tools/dev/ui-self-test.py", [], (core,)),
+            ("tools/dev/symbolize-self-test.py", [], (core, "tools/dev/cmd/symbolize.py")),
+            ("tools/dev/submodules-self-test.py", [], (core, f"{dev_lib}/project/**")),
+            ("tools/dev/benchmarks-self-test.py", [], (core, f"{dev_lib}/pipeline/**")),
+            ("tools/dev/memory-guard-self-test.py", [], (core,)),
+            ("extern/manifest-self-test.py", [], ("extern/**",)),
+            ("libs/base/clean-simd/tools/check-link-map.py", ["--self-test"], ("libs/base/clean-simd/tools/**",)),
         )
-        for runner, args in runners:
+        touched = None
+        if scope is not None:
+            try:
+                touched = dev.touched_paths(ctx.root, scope)
+            except dev.ChangeScopeError:
+                touched = None
+        ok = True
+        for runner, args, watches in runners:
+            if touched is not None:
+                watch = dev.Watch.of((runner, *watches))
+                if not any(watch.matches(p) for p in touched):
+                    continue
             result = dev.run_step(
                 ["uv", "run", str(ctx.root / runner), *args],
-                step_type="selftest", name=runner.name.removesuffix(".py"),
+                step_type="selftest", name=Path(runner).name.removesuffix(".py"),
                 build_dir=ctx.root / "build", cwd=ctx.root, mirror=mirror, verbose=verbose,
             )
             ok = ok and result.ok
