@@ -42,6 +42,7 @@ add_library(shaped-graphics-dx12
     src/shaped-graphics/backends/dx12/dx12_bind.cc
     src/shaped-graphics/backends/dx12/dx12_raytracing.cc
     src/shaped-graphics/backends/dx12/dx12_query.cc
+    src/shaped-graphics/backends/dx12/dx12_runtime.cc
 )
 
 target_sources(shaped-graphics-dx12
@@ -86,6 +87,7 @@ target_sources(shaped-graphics-dx12
     src/shaped-graphics/backends/dx12/dx12_staging_binding_group.hh
     src/shaped-graphics/backends/dx12/dx12_acceleration_structure.hh
     src/shaped-graphics/backends/dx12/dx12_query.hh
+    src/shaped-graphics/backends/dx12/dx12_runtime.hh
 )
 
 target_compile_features(shaped-graphics-dx12 PUBLIC cxx_std_23)
@@ -101,6 +103,17 @@ target_include_directories(shaped-graphics-dx12
 # pdh: the GPU Engine performance counters, which are the only route to GPU busy time on Windows.
 # version: the loaded WARP's file version, which is the driver version a pipeline blob is keyed on there.
 target_link_libraries(shaped-graphics-dx12 PUBLIC shaped-graphics d3d12 dxgi dxguid pdh version)
+
+# The Agility SDK, where it was fetched: its headers ahead of the Windows SDK's, and its runtime loaded from where it
+# was installed (dx12_runtime.hh). `SG_HAS_AGILITY` says which, and the backend works either way.
+if(TARGET agility)
+    get_target_property(_sg_agility_dir agility SC_AGILITY_RUNTIME_DIR)
+    target_link_libraries(shaped-graphics-dx12 PUBLIC agility)
+    target_compile_definitions(shaped-graphics-dx12 PUBLIC SG_HAS_AGILITY=1
+                               PRIVATE "SG_AGILITY_RUNTIME_DIR=\"${_sg_agility_dir}/\"")
+else()
+    target_compile_definitions(shaped-graphics-dx12 PUBLIC SG_HAS_AGILITY=0)
+endif()
 
 # Names dx12_common.hh, this backend's single SDK gate, rather than <d3d12.h> and friends.
 # The gate opens and closes its own `byte` bracket and keeps its clean-core headers above it, so the PCH inherits the sanitization instead of racing it.

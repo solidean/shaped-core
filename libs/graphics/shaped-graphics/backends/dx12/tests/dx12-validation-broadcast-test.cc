@@ -55,6 +55,8 @@ TEST("sg dx12 - a debug-layer message reaches every context's listener")
     auto second = dx12::make_fresh_context();
     if (second == nullptr)
         SKIP("could not create a second dx12 context");
+    // one adapter, one device, whichever runtime made it (dx12_runtime.hh)
+    REQUIRE(first->_device.Get() == second->_device.Get());
 
     // The provocation is this test's subject.
     // Whether another context in the process logs it depends on what else is alive, so it is allowed rather than expected.

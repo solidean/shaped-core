@@ -1,0 +1,3 @@
+# Fetched by fetch-agility.py; never committed, since only the runtime DLLs are redistributable and only inside an application.
+/.install/
+/.install.staging/

@@ -10,6 +10,7 @@
 #include <clean-core/thread/atomic.hh>
 #include <clean-core/thread/mutex.hh>
 #include <shaped-graphics/backends/dx12/dx12_context.hh>
+#include <shaped-graphics/backends/dx12/dx12_runtime.hh>
 #include <shaped-graphics/backends/dx12/dx12_dred.hh>
 
 // ID3D12Debug / ID3D12InfoQueue1, the debug-layer interfaces, live in the SDK-layers header, separate from d3d12.h.
@@ -70,7 +71,7 @@ adapter_search_result find_hardware_adapter(IDXGIFactory4* factory, ComPtr<IDXGI
             continue;
 
         // A null out-param probes D3D12 support (FL 11_0) without creating a device.
-        HRESULT const hr = D3D12CreateDevice(out.Get(), D3D_FEATURE_LEVEL_11_0, __uuidof(ID3D12Device), nullptr);
+        HRESULT const hr = create_d3d12_device(out.Get(), D3D_FEATURE_LEVEL_11_0, __uuidof(ID3D12Device), nullptr);
         if (SUCCEEDED(hr))
             return {.status = adapter_search::found};
 
@@ -161,6 +162,7 @@ cc::string loaded_warp_identity()
 /// as a version anyone should compare.
 /// On WARP, once a device exists, the loaded module's identity replaces it: pipeline blobs are keyed on it, and
 /// one WARP rejects the blobs another wrote, which the debug layer reports on every pipeline.
+/// The Agility SDK's runtime is named after it for the same reason.
 sg::adapter_info describe_adapter(IDXGIAdapter1* adapter)
 {
     auto info = sg::adapter_info();
@@ -191,6 +193,9 @@ sg::adapter_info describe_adapter(IDXGIAdapter1* adapter)
     if (info.is_software)
         if (auto warp = loaded_warp_identity(); !warp.empty())
             info.driver_version = cc::move(warp);
+    // The runtime is part of what a pipeline blob depends on: the Agility SDK's rejects the system runtime's, and back.
+    if (runs_agility_runtime())
+        info.driver_version += cc::format(" (Agility SDK {})", D3D12_SDK_VERSION);
 
     return info;
 }
@@ -205,7 +210,7 @@ constexpr auto k_required_shader_model = D3D_SHADER_MODEL_6_8;
 cc::optional<cc::string> check_shader_model(ID3D12Device* device, IDXGIAdapter1* adapter)
 {
     auto data = D3D12_FEATURE_DATA_SHADER_MODEL{.HighestShaderModel = k_required_shader_model};
-    auto const queried = SUCCEEDED(device->CheckFeatureSupport(D3D12_FEATURE_SHADER_MODEL, &data, sizeof(data)));
+    auto const queried = SUCCEEDED(check_feature_support(device, D3D12_FEATURE_SHADER_MODEL, &data, sizeof(data)));
     if (queried && data.HighestShaderModel >= k_required_shader_model)
         return {};
 
@@ -346,7 +351,7 @@ bool activate_global_debug_layer_once()
         debug_layer_activation_attempted() = true;
 
         ComPtr<ID3D12Debug> debug;
-        if (FAILED(D3D12GetDebugInterface(IID_PPV_ARGS(&debug))))
+        if (FAILED(get_d3d12_configuration(CLSID_D3D12Debug, IID_PPV_ARGS(&debug))))
             return false;
         debug->EnableDebugLayer();
         debug_layer_active() = true;
@@ -438,7 +443,7 @@ cc::result<context_handle> create_dx12_context(backend::dx12::dx12_config const&
         // activation to perform -- so the request is the documented best-effort miss rather than the hazard, and it
         // must not fail a context that would simply have run unvalidated.
         ComPtr<ID3D12Debug> debug;
-        if (SUCCEEDED(D3D12GetDebugInterface(IID_PPV_ARGS(&debug))))
+        if (SUCCEEDED(get_d3d12_configuration(CLSID_D3D12Debug, IID_PPV_ARGS(&debug))))
             return dx12_error(E_INVALIDARG, "the dx12 debug layer must be activated before this process creates its "
                                             "first device; ask for it on the first context instead");
     }
@@ -491,7 +496,7 @@ cc::result<context_handle> create_dx12_context(backend::dx12::dx12_config const&
     }
 
     ComPtr<ID3D12Device> device;
-    if (HRESULT hr = D3D12CreateDevice(adapter.Get(), D3D_FEATURE_LEVEL_11_0, IID_PPV_ARGS(&device)); FAILED(hr))
+    if (HRESULT hr = create_d3d12_device(adapter.Get(), D3D_FEATURE_LEVEL_11_0, IID_PPV_ARGS(&device)); FAILED(hr))
         return dx12_error(hr, "D3D12CreateDevice failed");
     process_has_device() = true;
 
@@ -519,34 +524,34 @@ cc::result<context_handle> create_dx12_context(backend::dx12::dx12_config const&
     D3D12_RAYTRACING_TIER raytracing_tier = D3D12_RAYTRACING_TIER_NOT_SUPPORTED;
     D3D12_FEATURE_DATA_D3D12_OPTIONS5 options5 = {};
     if (!config.withhold_raytracing
-        && SUCCEEDED(device->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS5, &options5, sizeof(options5))))
+        && SUCCEEDED(check_feature_support(device.Get(), D3D12_FEATURE_D3D12_OPTIONS5, &options5, sizeof(options5))))
         raytracing_tier = options5.RaytracingTier;
 
     // A failed query is an older runtime, which requires block-aligned sizes.
     D3D12_FEATURE_DATA_D3D12_OPTIONS8 options8 = {};
     auto const unaligned_block_textures
-        = SUCCEEDED(device->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS8, &options8, sizeof(options8)))
+        = SUCCEEDED(check_feature_support(device.Get(), D3D12_FEATURE_D3D12_OPTIONS8, &options8, sizeof(options8)))
        && options8.UnalignedBlockTexturesSupported;
 
     // Of the image formats beyond the portable set, bgra8_unorm is the one whose typed UAV D3D12 leaves optional.
     auto bgra8 = D3D12_FEATURE_DATA_FORMAT_SUPPORT{.Format = DXGI_FORMAT_B8G8R8A8_UNORM};
     auto const extended_image_formats
-        = SUCCEEDED(device->CheckFeatureSupport(D3D12_FEATURE_FORMAT_SUPPORT, &bgra8, sizeof(bgra8)))
+        = SUCCEEDED(check_feature_support(device.Get(), D3D12_FEATURE_FORMAT_SUPPORT, &bgra8, sizeof(bgra8)))
        && (bgra8.Support1 & D3D12_FORMAT_SUPPORT1_TYPED_UNORDERED_ACCESS_VIEW) != 0;
 
     // A failed query is an older runtime, which has neither.
     D3D12_FEATURE_DATA_D3D12_OPTIONS4 options4 = {};
     auto const native_16bit_shader_ops
-        = SUCCEEDED(device->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS4, &options4, sizeof(options4)))
+        = SUCCEEDED(check_feature_support(device.Get(), D3D12_FEATURE_D3D12_OPTIONS4, &options4, sizeof(options4)))
        && options4.Native16BitShaderOpsSupported;
     // A failed query is an older runtime, which sends a primitive to a layer from the geometry stage alone.
     D3D12_FEATURE_DATA_D3D12_OPTIONS options = {};
     auto const vertex_layer_output
-        = SUCCEEDED(device->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS, &options, sizeof(options)))
+        = SUCCEEDED(check_feature_support(device.Get(), D3D12_FEATURE_D3D12_OPTIONS, &options, sizeof(options)))
        && options.VPAndRTArrayIndexFromAnyShaderFeedingRasterizerSupportedWithoutGSEmulation;
     D3D12_FEATURE_DATA_D3D12_OPTIONS1 options1 = {};
     auto const wave_ops
-        = SUCCEEDED(device->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS1, &options1, sizeof(options1)))
+        = SUCCEEDED(check_feature_support(device.Get(), D3D12_FEATURE_D3D12_OPTIONS1, &options1, sizeof(options1)))
        && options1.WaveOps;
 
     auto ctx = std::make_shared<dx12_context>();

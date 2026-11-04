@@ -55,6 +55,12 @@ jobs:
       - name: Fetch the pinned WARP
         run: uv run extern/warp/fetch-warp.py
 
+      # The dx12 backend creates its devices through the Agility SDK's runtime where it was fetched, which is what
+      # brings Shader Model 6.9 and the features that need it. On request, since its terms are Microsoft's DirectX
+      # license, accepted here for the CI runners: extern/agility/dependency.yml.
+      - name: Fetch the pinned Agility SDK
+        run: uv run extern/agility/fetch-agility.py --accept-license
+
       - name: Build
         run: uv run dev.py --collect-logs build/ci-logs.zip build --preset relwithdebinfo-clang --toolset 20 --diag-archive build/ci-diag.zip --keep-going
 

@@ -4,6 +4,7 @@
 #include <clean-core/string/conversion.hh> // cc::utf16_to_utf8
 #include <clean-core/string/format.hh>
 #include <shaped-graphics/backends/dx12/dx12_dred.hh>
+#include <shaped-graphics/backends/dx12/dx12_runtime.hh>
 
 namespace sg::backend::dx12
 {
@@ -165,7 +166,7 @@ bool enable_dred_once()
     static bool const enabled = []
     {
         ComPtr<ID3D12DeviceRemovedExtendedDataSettings> settings;
-        if (FAILED(D3D12GetDebugInterface(IID_PPV_ARGS(&settings))))
+        if (FAILED(get_d3d12_configuration(CLSID_D3D12DeviceRemovedExtendedData, IID_PPV_ARGS(&settings))))
             return false;
 
         settings->SetAutoBreadcrumbsEnablement(D3D12_DRED_ENABLEMENT_FORCED_ON);

@@ -17,10 +17,10 @@ Forcing every instance opaque recovers all of it, and sampling the opacity at a 
 
 Settled in a design review on 2026-10-29.
 
-**Both dx12 and vulkan, and the D3D12 Agility SDK becomes a required dx12 dependency.**
+**Both dx12 and vulkan, and dx12's micromaps come with the D3D12 Agility SDK.**
 dx12 has micromaps only from DXR 1.2, which ships in the Agility SDK 1.619 or later with Shader Model 6.9, not in the runtime Windows carries.
-Every dx12 executable then exports `D3D12SDKVersion` and `D3D12SDKPath` and carries the SDK's `D3D12Core.dll` beside it, and the debug layer comes from the same SDK.
-Its download is fetched like DXC's, once its license terms have been shown to and accepted by the user; nothing accepts them on anyone's behalf.
+The SDK became an optional dx12 dependency on 2026-11-04 rather than the required one this review settled: without it dx12 reports no micromaps.
+It is fetched on request with `--accept-license`, and the backend loads it through a device factory rather than exports from every executable — [backends.md](../concepts/backends.md#the-dx12-runtime).
 vulkan has `VK_EXT_opacity_micromap`, in the installed SDK and the NVIDIA driver; metal has no equivalent we found, and webgpu none.
 
 **A shader opts in through its target, not its source.**

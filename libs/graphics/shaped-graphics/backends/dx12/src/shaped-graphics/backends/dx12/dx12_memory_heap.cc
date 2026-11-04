@@ -7,6 +7,7 @@
 #include <shaped-graphics/backends/dx12/dx12_buffer.hh>
 #include <shaped-graphics/backends/dx12/dx12_context.hh>
 #include <shaped-graphics/backends/dx12/dx12_memory_heap.hh>
+#include <shaped-graphics/backends/dx12/dx12_runtime.hh>
 #include <shaped-graphics/backends/dx12/dx12_texture.hh>
 
 namespace sg::backend::dx12
@@ -22,7 +23,7 @@ cc::result<dx12_memory_heap_handle> dx12_memory_heap::create(ID3D12Device* devic
     {
         // Tier 1 splits textures by whether they are render targets, and the transient textures sg places are both.
         auto options = D3D12_FEATURE_DATA_D3D12_OPTIONS{};
-        if (FAILED(device->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS, &options, sizeof(options)))
+        if (FAILED(check_feature_support(device, D3D12_FEATURE_D3D12_OPTIONS, &options, sizeof(options)))
             || options.ResourceHeapTier < D3D12_RESOURCE_HEAP_TIER_2)
             return cc::error("a textures heap needs D3D12 resource heap tier 2");
     }

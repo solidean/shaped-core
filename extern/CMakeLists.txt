@@ -115,6 +115,10 @@ option(SC_USE_VENDORED_NRD "Build the fetched NRD in extern/nrd/.install (OFF ex
 # Nothing links it; the directory only publishes where the DLL is, for shaped-graphics to stage beside its WARP test binaries.
 option(SC_USE_VENDORED_WARP "Stage the fetched WARP in extern/warp/.install beside the dx12 test binaries" ON)
 
+# The D3D12 Agility SDK from NuGet is fetched ON REQUEST, and with `--accept-license` only: its terms are Microsoft's
+# DirectX license. Without it the dx12 backend runs on the system runtime; extern/agility/dependency.yml says what it adds.
+option(SC_USE_VENDORED_AGILITY "Create dx12 devices through the fetched Agility SDK in extern/agility/.install" ON)
+
 # The OIDN library is only the reference shaped-rendering-test's oracle compares sr::denoise_method::oidn against, and nothing we ship links it.
 # So it is fetched ON REQUEST — `uv run extern/oidn/fetch-oidn.py` — rather than on every configure, and the oracle tests SKIP without the `oidn` target.
 option(SC_USE_VENDORED_OIDN "Wrap the fetched Open Image Denoise in extern/oidn/.install (OFF expects an external `oidn` target)" ON)
@@ -257,4 +261,8 @@ endif()
 set(SC_PINNED_WARP_DLL "" CACHE INTERNAL "The pinned WARP the dx12 test binaries load")
 if(WIN32 AND SC_USE_VENDORED_WARP AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/warp/.install/pin.txt")
     add_subdirectory(warp)
+endif()
+
+if(WIN32 AND SC_USE_VENDORED_AGILITY AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/agility/.install/pin.txt")
+    add_subdirectory(agility)
 endif()
