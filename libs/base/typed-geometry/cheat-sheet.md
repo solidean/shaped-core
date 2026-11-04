@@ -557,9 +557,10 @@ tg::float_expansion_sbo<K>; tg::float_expansion;   // K components inline (8K + 
 tg::float_expansion x = 0.1; tg::float_expansion(i64(-3));   // exact from any finite double or integer, implicit
 tg::float_expansion::from_fixed_int(fi256(v));     // v exactly, below 2^1024
 a + b; a - b; a * b; -a; a += b;                   // exact while in range: no overflow, no component product below 2^-960
-x.sign(); compare(a, b); a < b; a == b;            // -1/0/+1, the sign of the largest component
-x.components(); x.approximate();                   // smallest magnitude first, none zero; their sum, within a few ulps
-// Out of range is a CC_ASSERT; tg::bigfloat has no range limit, and is faster past degree 3 (docs/modules/scalar.md).
+x.is_valid();                                      // false once out of range, and sticky like a NaN through every operation
+x.sign(); compare(a, b); a < b; a == b;            // -1/0/+1, the largest component's; invalid: invalid_sign (-128), unordered
+x.components(); x.approximate();                   // smallest magnitude first, none zero; their sum, within a few ulps; NaN if invalid
+// tg::bigfloat has no range limit, and is faster past degree 3 (docs/modules/scalar.md).
 ```
 
 ## bigint (arbitrary-precision integer)

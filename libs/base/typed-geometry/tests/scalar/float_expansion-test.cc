@@ -171,7 +171,68 @@ void check_storage()
     CHECK((-z).sign() == -1);
     CHECK(z.approximate() == 7.0);
 }
+template <int K>
+void check_invalid()
+{
+    using fe = tg::float_expansion_sbo<K>;
+    constexpr auto inf = 0x1p1023 * 2.0;
+    auto const big = fe(0x1p1023) + fe(0x1p1023);
+    auto const tiny = fe(0x1p-500) * fe(0x1p-500);
+    auto const long_value = fe(1.0) + fe(0x1p-80) + fe(0x1p-200);
+
+    // every way out of range: an overflowing sum, a product below 2^-960 or past 2^1024, a non-finite double, a huge integer
+    CHECK(!big.is_valid());
+    CHECK(!tiny.is_valid());
+    CHECK(!(fe(0x1p600) * fe(0x1p600)).is_valid());
+    CHECK(!(long_value * fe(0x1p-950)).is_valid());
+    CHECK(!fe(inf).is_valid());
+    CHECK(!fe(inf - inf).is_valid());
+    u64 const limbs[17] = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1};
+    CHECK(!fe::from_limbs(cc::span<u64 const>(limbs, 17), false).is_valid());
+    CHECK(fe::from_limbs(cc::span<u64 const>(limbs, 16), false).is_zero());
+
+    // the edges of the range are still exact
+    CHECK((fe(0x1p-480) * fe(0x1p-480)).is_valid());
+    CHECK((fe(0x1p1022) + fe(0x1p1022)).is_valid());
+
+    // sticky, like a NaN: through every operation, its operand order and a zero operand included
+    for (auto const& x : {big, tiny})
+    {
+        CHECK(!(x + fe(1.0)).is_valid());
+        CHECK(!(fe(1.0) - x).is_valid());
+        CHECK(!(x * fe(0.0)).is_valid());
+        CHECK(!(fe(0.0) * x).is_valid());
+        CHECK(!(long_value * x).is_valid());
+        CHECK(!(long_value + x).is_valid());
+        CHECK(!(-x).is_valid());
+        auto y = long_value;
+        y *= x;
+        CHECK(!y.is_valid());
+        auto const copy = x;
+        CHECK(!copy.is_valid());
+        auto moved = fe(x);
+        auto const target = cc::move(moved);
+        CHECK(!target.is_valid());
+
+        CHECK(x.sign() == fe::invalid_sign);
+        CHECK(!x.is_zero());
+        CHECK(!x.is_negative());
+        CHECK(x.components().empty());
+        CHECK(x.approximate() != x.approximate());
+        CHECK(compare(x, fe(1.0)) == fe::invalid_sign);
+        CHECK(!(x == x));
+        CHECK((x <=> fe(1.0)) == std::partial_ordering::unordered);
+        CHECK(!(x < fe(1.0)));
+        CHECK(!(x > fe(1.0)));
+    }
+}
 } // namespace
+
+TEST("tg::float_expansion - a result out of range is invalid, and stays so like a NaN")
+{
+    check_invalid<1>();
+    check_invalid<4>();
+}
 
 TEST("tg::float_expansion - exact against bigfloat, the components nonoverlapping")
 {

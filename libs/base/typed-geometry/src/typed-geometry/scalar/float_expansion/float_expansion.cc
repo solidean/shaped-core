@@ -4,10 +4,15 @@
 namespace
 {
 using namespace cc::primitive_defines;
+using tg::impl::float_expansion_invalid;
+
+/// Whether a sum chain stayed in range: an overflow makes its running total infinite or NaN, and both stay so.
+bool is_finite(f64 q) { return q - q == 0.0; }
 
 /// h = e + b: Shewchuk's grow_expansion_zeroelim, a two_sum per component and no merge.
 /// h may alias e: each component is read before the one written at its index or below.
 /// A nonadjacent e gives a nonadjacent h, so growing from single doubles keeps the merges' precondition.
+/// Invalid where a sum overflowed; e must be valid.
 i32 grow(f64 const* e, i32 en, f64 b, f64* h)
 {
     auto q = b;
@@ -23,7 +28,8 @@ i32 grow(f64 const* e, i32 en, f64 b, f64* h)
         if (y != 0.0)
             h[hn++] = y;
     }
-    CC_ASSERT(q - q == 0.0, "a float_expansion is exact only while its sums stay finite");
+    if (!is_finite(q)) [[unlikely]]
+        return float_expansion_invalid;
     if (q != 0.0)
         h[hn++] = q;
     return hn;
@@ -114,7 +120,8 @@ i32 merge(f64 const* e, i32 en, f64 const* f, i32 fn, f64 s, f64* h)
         if (y != 0.0)
             h[hn++] = y;
     }
-    CC_ASSERT(q - q == 0.0, "a float_expansion is exact only while its sums stay finite");
+    if (!is_finite(q)) [[unlikely]]
+        return float_expansion_invalid;
     if (q != 0.0)
         h[hn++] = q;
     return hn;
@@ -125,6 +132,8 @@ i32 scale(f64 const* e, i32 en, f64 b, f64* h)
 {
     f64 p[2];
     auto const pn = tg::impl::float_expansion_two_product(e[0], b, p);
+    if (pn == float_expansion_invalid) [[unlikely]]
+        return float_expansion_invalid;
     auto hn = 0;
     if (pn == 2)
         h[hn++] = p[0];
@@ -132,6 +141,8 @@ i32 scale(f64 const* e, i32 en, f64 b, f64* h)
     for (auto i = 1; i < en; ++i)
     {
         auto const pi = tg::impl::float_expansion_two_product(e[i], b, p);
+        if (pi == float_expansion_invalid) [[unlikely]]
+            return float_expansion_invalid;
         auto const p0 = pi == 2 ? p[0] : 0.0;
         auto const p1 = p[pi - 1];
         // q + p0 by two_sum, then its high part + p1 by fast two_sum, p1 being the larger
@@ -146,6 +157,8 @@ i32 scale(f64 const* e, i32 en, f64 b, f64* h)
         if (y != 0.0)
             h[hn++] = y;
     }
+    if (!is_finite(q)) [[unlikely]]
+        return float_expansion_invalid;
     if (q != 0.0)
         h[hn++] = q;
     return hn;
@@ -170,17 +183,16 @@ i32 tg::impl::float_expansion_sum(f64 const* e, i32 en, f64 const* f, i32 fn, bo
     // a short side is grown in one component at a time, which skips the merge's comparisons
     if (fn <= 2)
     {
-        auto hn = grow(e, en, s * f[0], h);
-        return fn == 2 ? grow(h, hn, s * f[1], h) : hn;
+        auto const hn = grow(e, en, s * f[0], h);
+        return fn == 2 && hn != float_expansion_invalid ? grow(h, hn, s * f[1], h) : hn;
     }
     if (en <= 2)
     {
         // f's components negated as they are grown over, then e's added
-        auto hn = 0;
         for (auto i = 0; i < fn; ++i)
             h[i] = s * f[i];
-        hn = grow(h, fn, e[0], h);
-        return en == 2 ? grow(h, hn, e[1], h) : hn;
+        auto const hn = grow(h, fn, e[0], h);
+        return en == 2 && hn != float_expansion_invalid ? grow(h, hn, e[1], h) : hn;
     }
     return merge(e, en, f, fn, s, h);
 }
@@ -211,13 +223,13 @@ i32 tg::impl::float_expansion_product(f64 const* e, i32 en, f64 const* f, i32 fn
     auto* cur = h;
     auto* next = t;
     auto n = scale(e, en, f[0], cur);
-    for (auto i = 1; i < fn; ++i)
+    for (auto i = 1; i < fn && n != float_expansion_invalid; ++i)
     {
         auto const sn = scale(e, en, f[i], s);
-        n = float_expansion_sum(cur, n, s, sn, false, next);
+        n = sn == float_expansion_invalid ? sn : float_expansion_sum(cur, n, s, sn, false, next);
         cc::swap(cur, next);
     }
-    if (cur != h)
+    if (cur != h && n != float_expansion_invalid)
         for (auto i = 0; i < n; ++i)
             h[i] = cur[i];
     if (heap)
@@ -230,16 +242,15 @@ i32 tg::impl::float_expansion_from_limbs(u64 const* limbs, i32 n, bool negative,
     // each limb's halves are doubles exactly, grown in from the lowest so the result stays nonadjacent
     auto const sign = negative ? -1.0 : 1.0;
     auto hn = 0;
-    for (auto i = 0; i < n; ++i)
+    for (auto i = 0; i < n && hn != float_expansion_invalid; ++i)
     {
         auto const lo = f64(limbs[i] & 0xffffffffu);
         auto const hi = f64(limbs[i] >> 32);
         if (lo != 0.0)
             hn = grow(h, hn, sign * tg::scale_by_pow2(lo, 64 * i), h);
-        if (hi != 0.0)
+        if (hi != 0.0 && hn != float_expansion_invalid)
             hn = grow(h, hn, sign * tg::scale_by_pow2(hi, 64 * i + 32), h);
     }
-    CC_ASSERT(hn == 0 || h[hn - 1] - h[hn - 1] == 0.0, "a float_expansion holds an integer below 2^1024");
     return hn;
 }
 

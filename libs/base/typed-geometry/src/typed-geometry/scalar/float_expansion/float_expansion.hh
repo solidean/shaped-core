@@ -1,6 +1,7 @@
 #pragma once
 
 #include <clean-core/common/utility.hh>
+#include <clean-core/math/bit.hh>
 #include <clean-core/container/span.hh>
 #include <typed-geometry/scalar/float_expansion/impl/kernels.hh>
 
@@ -12,7 +13,9 @@
 
 /// Exact for + - * and comparison while every intermediate stays in range: no sum may overflow,
 /// and no product of two components may fall below 2^-960 in magnitude, where its roundoff would reach the subnormals.
-/// Out of range is a CC_ASSERT, never a silent wrong value where assertions are on; tg::bigfloat has no such limit.
+/// A result out of range is invalid, and stays so like a NaN: every operation on it is invalid, sign() is invalid_sign,
+/// == is false and <=> unordered; a non-finite double converts to it too.
+/// tg::bigfloat has no range limit.
 /// K components live inline, and a longer expansion spills to cc's node allocator; sizeof is 8 * K + 8.
 template <int K>
 struct tg::float_expansion_sbo
@@ -20,14 +23,17 @@ struct tg::float_expansion_sbo
     static_assert(K >= 1, "K = 0 would cost the 16 bytes of K = 1, since the pointer needs the word anyway");
 
     static constexpr int inline_components = K;
+    /// What sign() and compare return for an invalid value, outside -1, 0 and +1.
+    static constexpr int invalid_sign = -128;
 
     float_expansion_sbo() = default;
 
-    /// Exact; v must be finite.
+    /// Exact; invalid for an infinity or a NaN.
     float_expansion_sbo(f64 v)
     {
-        CC_ASSERT(v - v == 0.0, "a float_expansion is finite");
-        if (v != 0.0)
+        if (!(v - v == 0.0)) [[unlikely]]
+            _size = impl::float_expansion_invalid;
+        else if (v != 0.0)
         {
             _inline_components[0] = v;
             _size = 1;
@@ -50,7 +56,7 @@ struct tg::float_expansion_sbo
         }
     }
 
-    /// x, exactly; its magnitude must stay below 2^1024.
+    /// x, exactly; invalid from 2^1024 on.
     template <int Bits, bool Signed>
         requires(Bits % 64 == 0)
     [[nodiscard]] static float_expansion_sbo from_fixed_int(impl::fixed_integer<Bits, Signed> const& x)
@@ -75,13 +81,13 @@ struct tg::float_expansion_sbo
         return r;
     }
 
-    /// The integer whose magnitude is the limbs, least significant first, exactly; it must stay below 2^1024.
+    /// The integer whose magnitude is the limbs, least significant first, exactly; invalid from 2^1024 on.
     [[nodiscard]] static float_expansion_sbo from_limbs(cc::span<u64 const> limbs, bool negative)
     {
         float_expansion_sbo r;
         auto const n = i32(limbs.size());
         r._reserve_discarding(2 * n);
-        r._size = u32(impl::float_expansion_from_limbs(limbs.data(), n, negative, r._data()));
+        r._size = impl::float_expansion_from_limbs(limbs.data(), n, negative, r._data());
         return r;
     }
 
@@ -91,12 +97,12 @@ struct tg::float_expansion_sbo
         if (o._size > K)
         {
             u32 c = 0;
-            _heap_components = impl::float_expansion_allocate(i32(o._size), c);
+            _heap_components = impl::float_expansion_allocate(o._size, c);
             _cap_class = c;
             d = _heap_components;
         }
         auto const* const s = o._data();
-        for (auto i = 0; i < i32(o._size); ++i)
+        for (auto i = 0; i < o._size; ++i)
             d[i] = s[i];
     }
 
@@ -106,10 +112,10 @@ struct tg::float_expansion_sbo
     {
         if (this != &o)
         {
-            _reserve_discarding(i32(o._size));
+            _reserve_discarding(o._size);
             auto* const d = _data();
             auto const* const s = o._data();
-            for (auto i = 0; i < i32(o._size); ++i)
+            for (auto i = 0; i < o._size; ++i)
                 d[i] = s[i];
             _size = o._size;
         }
@@ -135,17 +141,22 @@ struct tg::float_expansion_sbo
 
     // observers
 
+    /// False once a result left the range in which it is exact, and for every value computed from it.
+    [[nodiscard]] bool is_valid() const { return _size >= 0; }
     [[nodiscard]] bool is_zero() const { return _size == 0; }
-    /// -1, 0 or +1: a predicate's answer, the sign of the largest component.
+    /// -1, 0 or +1, the sign of the largest component: a predicate's answer; invalid_sign for an invalid value.
     [[nodiscard]] int sign() const
     {
-        if (_size == 0)
-            return 0;
+        if (_size <= 0)
+            return _size == 0 ? 0 : invalid_sign;
         return _data()[_size - 1] > 0.0 ? 1 : -1;
     }
-    [[nodiscard]] bool is_negative() const { return sign() < 0; }
-    /// The components, smallest magnitude first; none is zero.
-    [[nodiscard]] cc::span<f64 const> components() const { return cc::span<f64 const>(_data(), isize(_size)); }
+    [[nodiscard]] bool is_negative() const { return _size > 0 && _data()[_size - 1] < 0.0; }
+    /// The components, smallest magnitude first; none is zero, and an invalid value has none.
+    [[nodiscard]] cc::span<f64 const> components() const
+    {
+        return cc::span<f64 const>(_data(), isize(_size < 0 ? 0 : _size));
+    }
     [[nodiscard]] bool is_inline() const { return _cap_class == 0; }
     /// The components held without reallocating; a value never moves back inline once it spilled.
     [[nodiscard]] i32 capacity() const
@@ -153,15 +164,20 @@ struct tg::float_expansion_sbo
         return _cap_class == 0 ? K : impl::float_expansion_class_components(_cap_class);
     }
 
-    /// Approximately, within a few ulps: the components summed from the smallest up.
-    [[nodiscard]] f64 approximate() const { return impl::float_expansion_approximate(_data(), i32(_size)); }
+    /// Approximately, within a few ulps: the components summed from the smallest up; NaN for an invalid value.
+    [[nodiscard]] f64 approximate() const
+    {
+        if (_size < 0)
+            return cc::bit_cast<f64>(u64(0x7ff8000000000000));
+        return impl::float_expansion_approximate(_data(), _size);
+    }
 
     // arithmetic
 
     void negate()
     {
         auto* const d = _data();
-        for (auto i = 0; i < i32(_size); ++i)
+        for (auto i = 0; i < _size; ++i)
             d[i] = -d[i];
     }
 
@@ -235,9 +251,11 @@ struct tg::float_expansion_sbo
 
     // comparison
 
-    /// The sign of a - b, computed as the difference.
+    /// The sign of a - b, computed as the difference; invalid_sign where either is invalid.
     [[nodiscard]] friend int compare(float_expansion_sbo const& a, float_expansion_sbo const& b)
     {
+        if (a._size < 0 || b._size < 0)
+            return invalid_sign;
         auto const sa = a.sign();
         auto const sb = b.sign();
         if (sa != sb)
@@ -250,10 +268,13 @@ struct tg::float_expansion_sbo
     {
         return compare(a, b) == 0;
     }
-    [[nodiscard]] friend std::strong_ordering operator<=>(float_expansion_sbo const& a, float_expansion_sbo const& b)
+    /// Unordered where either is invalid, as a NaN is.
+    [[nodiscard]] friend std::partial_ordering operator<=>(float_expansion_sbo const& a, float_expansion_sbo const& b)
     {
         auto const c = compare(a, b);
-        return c < 0 ? std::strong_ordering::less : c > 0 ? std::strong_ordering::greater : std::strong_ordering::equal;
+        if (c == invalid_sign)
+            return std::partial_ordering::unordered;
+        return c < 0 ? std::partial_ordering::less : c > 0 ? std::partial_ordering::greater : std::partial_ordering::equivalent;
     }
 
 private:
@@ -262,7 +283,8 @@ private:
         f64 _inline_components[K];
         f64* _heap_components;
     };
-    u32 _size = 0;
+    /// The components in use, or impl::float_expansion_invalid.
+    i32 _size = 0;
     /// 0 for the inline components, else the node class of _heap_components.
     u32 _cap_class = 0;
 
@@ -295,7 +317,7 @@ private:
         if (o._cap_class != 0)
             _heap_components = o._heap_components;
         else
-            for (auto i = 0; i < i32(o._size); ++i)
+            for (auto i = 0; i < o._size; ++i)
                 _inline_components[i] = o._inline_components[i];
         _cap_class = o._cap_class;
         _size = o._size;
@@ -303,7 +325,7 @@ private:
         o._size = 0;
     }
 
-    /// *this = the n components in the window h of N, which is not *this's storage.
+    /// *this = the n components in the window h of N, which is not *this's storage; n may be invalid.
     template <int N>
     CC_FORCE_INLINE void _assign_window(f64 const* h, i32 n)
     {
@@ -319,7 +341,7 @@ private:
             for (auto i = 0; i < n; ++i)
                 d[i] = h[i];
         }
-        _size = u32(n);
+        _size = n;
     }
 
     CC_FORCE_INLINE void _assign_sum(float_expansion_sbo const& a, float_expansion_sbo const& b, bool subtract)
@@ -335,6 +357,11 @@ private:
 
     CC_DONT_INLINE void _assign_sum_general(float_expansion_sbo const& a, float_expansion_sbo const& b, bool subtract)
     {
+        if (a._size < 0 || b._size < 0)
+        {
+            _size = impl::float_expansion_invalid;
+            return;
+        }
         if (this == &a || this == &b)
         {
             float_expansion_sbo t;
@@ -342,15 +369,16 @@ private:
             *this = cc::move(t);
             return;
         }
-        _reserve_discarding(i32(a._size + b._size));
-        _size = u32(impl::float_expansion_sum(a._data(), i32(a._size), b._data(), i32(b._size), subtract, _data()));
+        _reserve_discarding(a._size + b._size);
+        _size = impl::float_expansion_sum(a._data(), a._size, b._data(), b._size, subtract, _data());
     }
 
     CC_DONT_INLINE void _assign_mul_general(float_expansion_sbo const& a, float_expansion_sbo const& b)
     {
-        if (a._size == 0 || b._size == 0)
+        // invalid before zero, as NaN * 0 is NaN
+        if (a._size <= 0 || b._size <= 0)
         {
-            _size = 0;
+            _size = a._size < 0 || b._size < 0 ? impl::float_expansion_invalid : 0;
             return;
         }
         if (this == &a || this == &b)
@@ -360,7 +388,7 @@ private:
             *this = cc::move(t);
             return;
         }
-        _reserve_discarding(i32(2 * a._size * b._size));
-        _size = u32(impl::float_expansion_product(a._data(), i32(a._size), b._data(), i32(b._size), _data()));
+        _reserve_discarding(2 * a._size * b._size);
+        _size = impl::float_expansion_product(a._data(), a._size, b._data(), b._size, _data());
     }
 };

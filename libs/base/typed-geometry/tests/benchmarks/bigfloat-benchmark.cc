@@ -521,9 +521,18 @@ BENCHMARK("tg bigfloat - counters per call")
             CHECK(raw::orient3d(p + 3 * i, p + 3 * i + 3, p + 3 * i + 6, p + 3 * i + 9)
                   == orient3d_ops<2>(p + 3 * i, p + 3 * i + 3, p + 3 * i + 6, p + 3 * i + 9));
         }
+        // an expansion's degree-5 products leave its range over spread exponents: invalid, never a wrong sign
+        auto out_of_range = 0;
         for (auto i = 0; i + 4 < input_count; ++i)
-            CHECK(insphere_t<tg::float_expansion>(p + 3 * i, p + 3 * i + 3, p + 3 * i + 6, p + 3 * i + 9, p + 3 * i + 12)
-                  == insphere_t<tg::bigfloat>(p + 3 * i, p + 3 * i + 3, p + 3 * i + 6, p + 3 * i + 9, p + 3 * i + 12));
+        {
+            auto const s
+                = insphere_t<tg::float_expansion>(p + 3 * i, p + 3 * i + 3, p + 3 * i + 6, p + 3 * i + 9, p + 3 * i + 12);
+            out_of_range += s == tg::float_expansion::invalid_sign;
+            if (s != tg::float_expansion::invalid_sign)
+                CHECK(s == insphere_t<tg::bigfloat>(p + 3 * i, p + 3 * i + 3, p + 3 * i + 6, p + 3 * i + 9, p + 3 * i + 12));
+        }
+        CHECK((out_of_range == 0) == !spread);
+        cc::println("insphere through float_expansion: {} of {} calls out of range", out_of_range, input_count - 4);
         cc::println("orient2d, {}", spread ? "spread exponents" : "similar magnitudes");
         count_orient2d("f64, inexact", pts, orient2d_f64);
         count_orient2d("K=1 ops", pts, orient2d_ops<1>);
