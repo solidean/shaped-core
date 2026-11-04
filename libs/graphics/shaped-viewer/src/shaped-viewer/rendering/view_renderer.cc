@@ -2141,7 +2141,10 @@ sr::reconstruct_status view_renderer::_denoise(sg::command_list& cmd,
         auto temporal_guides = guides;
         temporal_guides.motion = ds.motion->texture;
         // A hybrid frame that blended its guides into the layer's kept its own beside them, which its samples were drawn at.
-        if (!schedule.temporal_on_mean && frame_guides.normal.raw() != nullptr)
+        // Only a member reconstructing from each frame's jitter reads those: SVGF averages its frames into a history as the
+        // mean does, which the blended guides describe, and steered by one frame's it flickers.
+        auto const member = sr::resolve_denoise_method(cmd.context(), schedule.temporal_settings, traceable_guides());
+        if (!schedule.temporal_on_mean && frame_guides.normal.raw() != nullptr && sr::reconstructs_from_jitter(member))
         {
             temporal_guides.albedo = frame_guides.albedo;
             temporal_guides.specular_albedo = frame_guides.specular_albedo;

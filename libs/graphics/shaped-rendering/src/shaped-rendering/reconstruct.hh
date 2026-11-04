@@ -508,6 +508,10 @@ namespace sr
 /// Whether a member reads history, and so needs fresh per-frame samples and motion vectors rather than a converging mean.
 [[nodiscard]] bool is_temporal(denoise_method m);
 
+/// Whether a member reconstructs from each frame's sub-pixel jitter, and so wants the guides that frame's samples were drawn at.
+/// SVGF is temporal without being one: it averages its frames into a history of its own, which guides averaged over the same frames describe.
+[[nodiscard]] bool reconstructs_from_jitter(denoise_method m);
+
 /// The guides `m` requires; a call missing one reports `unsupported`.
 [[nodiscard]] reconstruct_guide_set required_guides(denoise_method m);
 

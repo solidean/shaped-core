@@ -435,3 +435,72 @@ ASYNC_INVOCABLE_TEST("sv temporal - the White Room's still denoised image stops 
         lights.push_back({.id = sv::light_id::from_string(l.id), .light = l.light});
     co_await hold_still(ctx, resources, items, asset.value().cameras[0].camera, lights, "settled-white-room");
 }
+
+// The first still frames belong to the temporal member, which denoises each frame's own samples against its history.
+// Its image must change less from frame to frame than the mean beside it does, or its history is not doing its job.
+// A temporal member handed guides that describe something other than its history rejects or misweighs that history every frame.
+ASYNC_INVOCABLE_TEST("sv temporal - a temporal member's young still image changes less than its mean",
+                     (sg::context_handle const& ctx_h))
+{
+    auto& ctx = *ctx_h;
+    if (!agreement::can_trace(ctx))
+        SKIP("no inline ray tracing or no SGL compiler, so neither the tracers nor the hybrid build");
+    auto resources = sv::gpu_resource_manager::create(ctx);
+    auto const box = agreement::make_lit_box(resources);
+    auto const support = sr::query_reconstruct_support(ctx);
+
+    for (auto const member : {sr::denoise_method::svgf, sr::denoise_method::dlss_rr})
+    {
+        auto const name = cc::format("young-hybrid-{}", sr::to_string(member));
+        if (!support.supports(member))
+        {
+            CC_LOG_INFO("{}: not run, this build or device has no {}", name, sr::to_string(member));
+            continue;
+        }
+        auto view = agreement::denoise_view(ctx, resources, box.items, box.camera,
+                                            {.name = name, .mode = sv::render_mode::hybrid, .denoiser = member});
+        auto const warmed = co_await view.warm_up();
+        CHECK(warmed).dump("test", cc::string_view(name));
+        if (!warmed)
+            continue;
+        // A restart, so the still period starts at frame 0.
+        view.def.views[0].camera.position += tg::vec3d(1e-3, 0, 0);
+        (void)co_await view.frame();
+        view.def.views[0].camera = box.camera;
+
+        auto previous = cc::vector<tg::vec4f>();
+        auto previous_mean = cc::vector<tg::vec4f>();
+        auto denoised_change = 0.0;
+        auto mean_change = 0.0;
+        auto frames = 0;
+        // Inside the temporal member's window, which `temporal_denoise_frames` makes 16.
+        for (auto f = 0; f < 16; ++f)
+        {
+            auto const r = co_await view.frame();
+            if (!r.ran || r.denoised.empty())
+            {
+                previous.clear();
+                continue;
+            }
+            if (!previous.empty())
+            {
+                denoised_change += change_of(r.denoised, previous);
+                mean_change += change_of(r.raw, previous_mean);
+                ++frames;
+            }
+            previous = r.denoised;
+            previous_mean = r.raw;
+        }
+        REQUIRE(frames > 8).dump("test", cc::string_view(name));
+        denoised_change /= f64(frames);
+        mean_change /= f64(frames);
+        CC_LOG_INFO("{}: over the first 16 still frames, the denoised image changes {:.2f}% a frame and its mean "
+                    "{:.2f}%",
+                    name, 100.0 * denoised_change, 100.0 * mean_change);
+        CHECK(denoised_change < 0.5 * mean_change)
+            .dump("test", cc::string_view(name))
+            .dump("denoised change", denoised_change)
+            .dump("mean change", mean_change);
+        co_await cc::async_settled(sv::background_work(ctx));
+    }
+}
