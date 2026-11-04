@@ -726,6 +726,11 @@ bool fsr_stream::record_compute(sg::command_list& cmd, FfxComputeJobDescription 
             if (auto s = sampler_for(b.name); s.has_value())
                 samplers.push_back(cc::move(s.value()));
 
+    // A pass over an input of a pixel or two schedules no group along an axis, which the GPU would run as nothing and a
+    // debug layer warns of; it is skipped here, its constant buffers counted above so the next job reads its own.
+    if (job.dimensions[0] == 0 || job.dimensions[1] == 0)
+        return true;
+
     auto const group = ctx->transient.create_binding_group(program.layout, views, samplers);
     cmd.compute.bind_pipeline(*program.pipeline);
     cmd.compute.bind_group(0, *group);
