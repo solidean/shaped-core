@@ -43,6 +43,9 @@ def add_parser(sub: argparse._SubParsersAction) -> argparse.ArgumentParser:
     p.add_argument("--no-test", action="store_true",
                    help="Skip the test suite (build + run); just the static checks")
     p.add_argument("--list", action="store_true", help="List registered checks and exit")
+    p.add_argument("--memo", action="store_true",
+                   help="Read the verdict memo even for gates named on the command line, which otherwise run afresh. "
+                        "What `ship` asks of the gates it names, so a ship right after a green check reruns nothing.")
     p.add_argument("--all-presets", action="store_true",
                    help="Also build and test the debug, release, single-threaded and sanitizer presets, "
                         "each under --smoke. Off by default: every extra preset is a whole build, and CI runs them.")
@@ -644,8 +647,8 @@ def _build_for_gates(ctx: Context, *, mirror: bool, verbose: bool):
 
 
 def run(args: argparse.Namespace, ctx: Context) -> None:
-    # A deliberate full run (--all) and a gate named on the command line bypass the memo's reads; both still record.
-    memo = _memo(ctx, read=not (args.all or bool(args.names)))
+    # A deliberate full run (--all) and a gate named on the command line bypass the memo's reads, unless --memo asks; both still record.
+    memo = _memo(ctx, read=args.memo or not (args.all or bool(args.names)))
     try:
         checks = _build_checks(ctx, memo=memo, all_presets=args.all_presets)
         dev.validate_checks(checks, root=ctx.root)
