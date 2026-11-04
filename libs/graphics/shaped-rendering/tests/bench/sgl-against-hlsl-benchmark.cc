@@ -267,7 +267,8 @@ ASYNC_BENCHMARK("sr - SGL against the HLSL it was ported from, GPU time per disp
                                                                        .flags = flags,
                                                                        .luminance_scale = 0.5f,
                                                                        .normal_power = 128.0f,
-                                                                       .depth_sigma = 1.0f}
+                                                                       .depth_sigma = 1.0f,
+                                                                       .ceiling = 3.4028234e38f}
                          .to_block());
                  cmd.compute.dispatch_threads(k_extent[0], k_extent[1], 1);
              }});
@@ -333,7 +334,8 @@ ASYNC_BENCHMARK("sr - SGL against the HLSL it was ported from, GPU time per disp
                                                                                                .flags = 0u,
                                                                                                .luminance_sigma = 4.0f,
                                                                                                .normal_power = 128.0f,
-                                                                                               .depth_sigma = 1.0f}
+                                                                                               .depth_sigma = 1.0f,
+                                                                                               .ceiling = 3.4028234e38f}
                                                       .to_block());
                  cmd.compute.dispatch_threads(k_extent[0], k_extent[1], 1);
              }});

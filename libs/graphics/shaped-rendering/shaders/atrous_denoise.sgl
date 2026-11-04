@@ -42,6 +42,8 @@ const albedo_floor = 0.001
     normal_power: float
     // allowed depth difference, as a fraction of the center's depth per pixel of tap distance
     depth_sigma: float
+    // the largest magnitude `target_format` holds, which a brighter result saturates at rather than becoming infinity
+    ceiling: float
 
 binding atrous_images:
     @unfilterable
@@ -177,4 +179,5 @@ fun source_at(p: int2){atrous_images, atrous_constants} -> float4:
     if is_set(remodulate_out):
         result *= albedo_at(p)
 
-    atrous_images.target[id.xy] = float4(..result, center.w) as texel[target_format]
+    let c = atrous_constants.ceiling
+    atrous_images.target[id.xy] = float4(..clamp(result, float3(-c), float3(c)), center.w) as texel[target_format]

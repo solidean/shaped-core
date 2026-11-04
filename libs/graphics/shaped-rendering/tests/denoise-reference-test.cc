@@ -198,7 +198,8 @@ cc::shared_async<cc::vector<tg::vec4f>> run_atrous(sg::context& ctx,
                                                           .flags = k.flags,
                                                           .luminance_scale = f32(k.luminance_scale),
                                                           .normal_power = f32(k.normal_power),
-                                                          .depth_sigma = f32(k.depth_sigma)}
+                                                          .depth_sigma = f32(k.depth_sigma),
+                                                          .ceiling = 3.4028234e38f}
             .to_block());
     cmd->compute.dispatch_threads(k_w, k_h, 1);
     ctx.submit_command_list(cc::move(cmd));

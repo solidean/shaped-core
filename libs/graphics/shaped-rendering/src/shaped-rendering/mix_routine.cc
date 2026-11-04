@@ -9,28 +9,9 @@
 
 namespace sr
 {
+using impl::ceiling_of;
 using impl::extent_of;
 using impl::is_set;
-
-namespace
-{
-/// The largest finite magnitude a texel of `f` holds: a half float's for the 16-bit float formats, which the 11- and
-/// 10-bit ones share near enough, and a float's otherwise, where a normalized format saturates on its own.
-[[nodiscard]] f32 ceiling_of(sg::pixel_format f)
-{
-    switch (f)
-    {
-    case sg::pixel_format::r16_float:
-    case sg::pixel_format::rg16_float:
-    case sg::pixel_format::rgba16_float:
-        return 65504.0f;
-    case sg::pixel_format::rg11b10_float:
-        return 64512.0f;
-    default:
-        return 3.4028234e38f;
-    }
-}
-} // namespace
 
 cc::shared_async<cc::unit> mix_routine::init(sg::routine_init_scope scope)
 {

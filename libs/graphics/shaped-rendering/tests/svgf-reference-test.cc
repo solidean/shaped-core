@@ -291,7 +291,8 @@ cc::shared_async<cc::vector<tg::vec4f>> run_filter(sg::context& ctx, svgf_inputs
                                                                                    .flags = flags,
                                                                                    .luminance_sigma = k_luminance_sigma,
                                                                                    .normal_power = k_normal_power,
-                                                                                   .depth_sigma = k_depth_sigma}
+                                                                                   .depth_sigma = k_depth_sigma,
+                                                                                   .ceiling = 3.4028234e38f}
                                           .to_block());
     cmd->compute.dispatch_threads(k_w, k_h, 1);
     ctx.submit_command_list(cc::move(cmd));

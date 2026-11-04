@@ -254,6 +254,8 @@ binding svgf_variance_images:
     luminance_sigma: float
     normal_power: float
     depth_sigma: float
+    // the largest magnitude `target_format` holds, which a brighter result saturates at rather than becoming infinity
+    ceiling: float
 
 binding svgf_atrous_images:
     // xyz demodulated color, w a variance
@@ -336,4 +338,5 @@ binding svgf_atrous_images:
             result *= reflectance(albedo, svgf_atrous_images.specular_albedo.load(p).xyz, flags)
         out_alpha = svgf_atrous_images.color.load(p).w
 
-    svgf_atrous_images.target[id.xy] = float4(..result, out_alpha) as texel[target_format]
+    let c = svgf_atrous_constants.ceiling
+    svgf_atrous_images.target[id.xy] = float4(..clamp(result, float3(-c), float3(c)), out_alpha) as texel[target_format]

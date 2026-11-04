@@ -1,4 +1,5 @@
 #include "shader_fixtures.hh"
+#include "texel_formats.hh"
 
 #include <clean-core/common/utility.hh>
 #include <clean-core/string/format.hh>
@@ -865,6 +866,53 @@ ASYNC_INVOCABLE_TEST("sr - a non-finite pixel spreads through neither atrous nor
             REQUIRE(s.outcome.status == sr::reconstruct_status::denoised);
             CHECK(non_finite_count(s.output) == 0).dump("svgf, input", bad).dump("frame", frame);
         }
+    }
+}
+
+// A viewer's denoised image is a half float, which holds nothing past 65504, and a lamp in the image is brighter than that.
+// Converted as it was, such a pixel became infinity, which whatever reads the image next turns into NaN.
+ASYNC_INVOCABLE_TEST("sr - atrous and svgf saturate a pixel past a half float's range in a half-float output",
+                     (sg::context_handle const& ctx_h),
+                     exclusive("sg-reload-generation"))
+{
+    REQUIRE(ctx_h != nullptr);
+    sg::context& ctx = *ctx_h;
+    (void)sr_test::shader_fixtures();
+    sr::atrous_denoise_routine::prewarm(ctx, sg::pixel_format::rgba16_float);
+    sr::svgf_denoise_routine::prewarm(ctx, sg::pixel_format::rgba16_float);
+    sr::reconstruct_routine::prewarm(ctx, sg::pixel_format::rgba16_float);
+    (void)co_await ctx.routines.idle_completion();
+
+    for (auto const member : {sr::denoise_method::atrous, sr::denoise_method::svgf})
+    {
+        auto stream = make_stream(ctx);
+        stream.output = ctx.persistent.create_texture_2d(
+            {.format = sg::pixel_format::rgba16_float, .width = k_size, .height = k_size, .usage = image_usage});
+        auto shown = cc::vector<tg::vec4f>();
+        // A few frames, so SVGF's history holds the bright image too.
+        for (auto frame = 0; frame < 3; ++frame)
+        {
+            auto cmd = ctx.create_command_list();
+            upload(*cmd, stream.color, filled(tg::vec4f(1e6f, 1e6f, 1e6f, 1)));
+            upload(*cmd, stream.normal, split_normals());
+            upload(*cmd, stream.depth, filled(tg::vec4f(1, 0, 0, 0)));
+            upload(*cmd, stream.motion, filled(tg::vec4f(0, 0, 0, 0)));
+            auto const outcome = sr::reconstruct_routine::execute(
+                *cmd,
+                {.color = stream.color,
+                 .guides = {.normal = stream.normal, .depth = stream.depth, .motion = stream.motion},
+                 .output = stream.output},
+                stream.history, {.denoiser = member, .fresh_samples = member == sr::denoise_method::svgf});
+            auto const readback = cmd->download.bytes_from_texture(stream.output.raw());
+            ctx.submit_command_list(cc::move(cmd));
+            ctx.advance_epoch();
+            REQUIRE(outcome.status == sr::reconstruct_status::denoised).dump("member", sr::to_string(member));
+            shown = sr_test::unpacked(sg::pixel_format::rgba16_float, co_await readback.bytes(), k_size * k_size);
+        }
+        auto saturated = 0;
+        for (auto const& p : shown)
+            saturated += p[0] == 65504.0f && p[1] == 65504.0f && p[2] == 65504.0f ? 1 : 0;
+        CHECK(saturated == k_size * k_size).dump("member", sr::to_string(member)).dump("saturated pixels", saturated);
     }
 }
 

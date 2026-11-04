@@ -240,6 +240,7 @@ reconstruct_outcome svgf_denoise_routine::execute(sg::command_list& cmd,
             .luminance_sigma = options.luminance_sigma,
             .normal_power = options.normal_power,
             .depth_sigma = options.depth_sigma,
+            .ceiling = impl::ceiling_of(target.format()),
         }
                                              .to_block());
         cmd.compute.dispatch_threads(extent[0], extent[1], 1);
