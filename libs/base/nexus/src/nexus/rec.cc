@@ -384,6 +384,34 @@ void nx::impl::end_run_recording(cc::string_view log_dir)
                     cc::println("  total%  function");
                     for (isize i = 0; i < cc::min(by_total.size(), isize(40)); ++i)
                         cc::println("  {:5.1f}   {}", by_total[i].total_ratio * 100, by_total[i].function);
+
+                    // The named work beside it, which says how often a hot function's caller ran and for how long.
+                    // A scope nested in one of its own name counts twice.
+                    struct scope_total
+                    {
+                        cc::string name;
+                        isize count = 0;
+                        f64 secs = 0;
+                    };
+                    auto scopes = cc::vector<scope_total>();
+                    for (auto const& s : r.scopes())
+                    {
+                        if (s.is_open || s.desc == nullptr)
+                            continue;
+                        auto const name = cc::string_view(s.desc->name);
+                        auto* found = static_cast<scope_total*>(nullptr);
+                        for (auto& t : scopes)
+                            if (t.name == name)
+                                found = &t;
+                        if (found == nullptr)
+                            found = &scopes.push_back({.name = cc::string(name)});
+                        found->count += 1;
+                        found->secs += s.duration_secs();
+                    }
+                    cc::sort(scopes, [](scope_total const& a, scope_total const& b) { return a.secs > b.secs; });
+                    cc::println("  scope seconds  count  name");
+                    for (isize i = 0; i < cc::min(scopes.size(), isize(15)); ++i)
+                        cc::println("  {:13.3f}  {:5}  {}", scopes[i].secs, scopes[i].count, scopes[i].name);
                     cc::println();
                 }
                 bytes = cc::rec::serialize(r);

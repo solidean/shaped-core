@@ -1,5 +1,6 @@
 #include "front_end.hh"
 
+#include <clean-core/common/profiling.hh>
 #include <shaped-graphics-language/ast/build.hh>
 #include <shaped-graphics-language/builtins/registry.hh>
 #include <shaped-graphics-language/check/check.hh>
@@ -65,6 +66,7 @@ sgl::driver::impl::front_end sgl::driver::impl::run_front_end(cc::string_view so
                                                               cc::span<library_file const> library,
                                                               cc::span<check::option_value const> options)
 {
+    CC_RECORD_SCOPE("sgl.front_end");
     auto result = front_end{.prelude = prelude_files(), .source_name = source_name};
     auto const own = prelude_file_of(source_name);
 
@@ -92,6 +94,7 @@ sgl::driver::impl::front_end sgl::driver::impl::run_front_end(cc::string_view so
     // A library file named like the source is the source itself, which a module directory holding it hands in again.
     auto library_files = cc::vector<check::module_file>();
     auto library_names = cc::vector<cc::string_view>();
+    CC_RECORD_SCOPE_BEGIN("sgl.parse");
     if (own < 0)
         for (auto const& f : library)
             if (!is_same_path(f.name, source_name) && may_declare_module(f.source))
@@ -100,14 +103,17 @@ sgl::driver::impl::front_end sgl::driver::impl::run_front_end(cc::string_view so
                 library_names.push_back(f.name);
             }
     auto const user = own_file(own >= 0 ? cc::string_view() : source);
+    CC_RECORD_SCOPE_END("sgl.parse");
 
     auto modules = cc::vector<check::module_file>();
     for (auto i = isize(0); i < result.prelude.size(); ++i)
         modules.push_back({.file = *result.files[i], .ast = *result.asts[i]});
     auto const* const checked = own >= 0 ? nullptr : checked_prelude();
+    CC_RECORD_SCOPE_BEGIN("sgl.check");
     result.module = checked != nullptr
                       ? check::check(*checked, library_files, user, options)
                       : check::check(modules, library_files, user, builtins::default_registry(), options);
+    CC_RECORD_SCOPE_END("sgl.check");
 
     // The files as the check placed them: the prelude, the library files the source reached, then the source.
     for (auto const i : result.module.library_files)

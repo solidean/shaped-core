@@ -2,6 +2,7 @@
 
 #include <clean-core/algorithm/sort.hh>
 #include <clean-core/common/assert.hh>
+#include <clean-core/common/profiling.hh>
 #include <clean-core/string/format.hh>
 #include <shaped-graphics-language/check/resources.hh>
 #include <shaped-graphics-language/check/structural_hash.hh>
@@ -747,6 +748,7 @@ cc::vector<sgl::check::symbol_id> sgl::driver::impl::file_samplers_of(check::fla
 
 cc::result<sgl::module_description, cc::string> sgl::describe(describe_request const& request)
 {
+    CC_RECORD_SCOPE("sgl.describe");
     // A module is described through a program that joins it, which is its every file and nothing else.
     auto const is_module = !request.module.empty();
     auto const joining = cc::format("module {}\n", request.module);
