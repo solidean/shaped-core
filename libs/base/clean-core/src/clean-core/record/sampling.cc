@@ -389,8 +389,11 @@ void sampler_main()
 
         // One round-robin over both halves, so a thread with no stream competes for slots on equal terms.
         // The two differ only in whether there is a stream to anchor into; the walk is the same.
+        // Slots are laid out against the counts as of this tick: the known half answers its live count back, and a
+        // set that shrank mid-tick must not shift an unknown slot past the end of `os_threads.tids`.
         auto const unknown_count = cfg.include_unknown_threads ? os_threads.tids.size() : isize(0);
-        auto const total_targets = known_count + unknown_count;
+        auto const known_at_tick = known_count;
+        auto const total_targets = known_at_tick + unknown_count;
         auto const per_tick = cfg.threads_per_tick > 0 ? cc::min(cfg.threads_per_tick, total_targets) : total_targets;
 
         if (total_targets > 0)
@@ -413,7 +416,7 @@ void sampler_main()
                 // indistinguishable from one whose suspend or walk failed, and only the second is a symptom.
                 auto attempted = false;
 
-                if (slot < known_count || unknown_count == 0)
+                if (slot < known_at_tick || unknown_count == 0)
                 {
                     known_count = cc::rec::impl::with_nth_thread_state(
                         slot,
@@ -430,7 +433,7 @@ void sampler_main()
                 }
                 else
                 {
-                    auto const tid = os_threads.tids[slot - known_count];
+                    auto const tid = os_threads.tids[slot - known_at_tick];
                     attempted = true;
                     s.native_tid = tid;
                     if (auto* const h = handles.get(tid); h != nullptr)
