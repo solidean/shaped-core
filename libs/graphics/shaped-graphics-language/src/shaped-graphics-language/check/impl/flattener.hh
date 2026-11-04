@@ -727,6 +727,9 @@ struct flattener
 
     /// `is_const` for a `const if`, whose condition that no constant decides is an error (CHK-425).
     void flatten_if(origin from, cc::span<ast::if_branch const> branches, bool is_const = false);
+    /// CHK-432: each text type the tree holds a value of, as this compile spells it, into `entry.text_types`.
+    /// A field or a constructor of one that the compile spells in its target's text is reported.
+    void judge_text_types();
 
     void flatten_assign(origin from, ast::assign_stmt const& assign);
 

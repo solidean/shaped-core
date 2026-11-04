@@ -667,6 +667,7 @@ void checker::flatten_test(i32 index)
     auto const& body = ast_of(test.file).at(test.declaration).node.as<ast::test_decl>().body;
     for (auto const stmt : ast_of(test.file).at(body.statements))
         f.flatten_stmt(stmt);
+    f.judge_text_types();
     // CHK-265: the test's `require` and a helper's that the test reaches are used by the calls that need them
     for (auto const& u : f.feature_uses)
         mark_requires_used(u.within, u.features);
@@ -953,6 +954,7 @@ void checker::flatten_entry_point(symbol_id id, traversal_request const* travers
         f.flatten_return({.file = s.file, .expr = body.value}, body.value);
     for (auto const stmt : ast_of(s.file).at(body.statements))
         f.flatten_stmt(stmt);
+    f.judge_text_types();
 
     // CHK-322: what the body calls needs a device's feature, which the entry point declares like one of its signature
     // CHK-402: what is judged of this entry point's inlined body is its own, which a compile of a sibling leaves out.

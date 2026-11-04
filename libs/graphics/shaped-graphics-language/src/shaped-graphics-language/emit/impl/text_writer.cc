@@ -1720,6 +1720,10 @@ cc::string_view sgl::emit::impl::type_text(plan const& p, dialect const& d, chec
         return p.array_texts[p.array_of_type[index_of(type)]];
     if (is_valid(type) && p.m.at(type).kind == check::type_kind::atomic)
         return atomic_text(p, type);
+    // CHK-432: a text type is spelled as its compile's branch says
+    for (auto const& t : p.e.text_types)
+        if (t.type == type)
+            return t.spelling;
     return p.structs[p.struct_of_type[index_of(type)]].name;
 }
 

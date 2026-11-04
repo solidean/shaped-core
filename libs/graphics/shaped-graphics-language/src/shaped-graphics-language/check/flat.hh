@@ -716,6 +716,15 @@ struct sgl::check::flat_traced_ray
     constexpr bool operator==(flat_traced_ray const&) const = default;
 };
 
+/// A text type this compile spells in its target's own text, and how (CHK-432).
+struct sgl::check::flat_text_type
+{
+    type_id type = type_id::none;
+    cc::string spelling;
+
+    bool operator==(flat_text_type const&) const = default;
+};
+
 struct sgl::check::flat_entry_point
 {
     stage entry_stage = stage::none;
@@ -742,6 +751,8 @@ struct sgl::check::flat_entry_point
     cc::shared_ptr<flat_entry_point const> legalized;
     /// The ray types it traces, by their position in their set, each once (CHK-332).
     cc::vector<flat_traced_ray> traced_rays;
+    /// The text types it holds a value of that its compile spells in the target's text, each once (CHK-432).
+    cc::vector<flat_text_type> text_types;
     /// A procedural hit's attributes, which the target hands a closest or any hit as a parameter of its own; `none`
     /// for every other entry point.
     local_id attributes = local_id::none;
@@ -796,6 +807,7 @@ struct sgl::check::flat_entry_point
             && is_equal(stmt_lists, rhs.stmt_lists) && is_equal(arms, rhs.arms) && is_equal(call_sites, rhs.call_sites)
             && is_equal(check_sites, rhs.check_sites) && is_equal(check_nodes, rhs.check_nodes)
             && is_equal(messages, rhs.messages) && body == rhs.body && names == rhs.names
-            && is_equal(traced_rays, rhs.traced_rays) && attributes == rhs.attributes && is_equal(options, rhs.options);
+            && is_equal(traced_rays, rhs.traced_rays) && is_equal(text_types, rhs.text_types)
+            && attributes == rhs.attributes && is_equal(options, rhs.options);
     }
 };

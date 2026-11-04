@@ -256,6 +256,8 @@ struct sgl::check::type_info
     ast::range_of<enum_case_info> cases;
     /// Declared without a block: no member can be named and no constructor exists.
     bool is_opaque = false;
+    /// A struct whose body is a `const if` chain, which a compile may spell in its target's text (CHK-432).
+    bool is_text_type = false;
     /// `@vertex struct` is a vertex input and `@pixel struct` a set of render targets.
     stage edge = stage::none;
     /// `@no_padding`: a layout that leaves a gap before any of its members is an error wherever it is placed.

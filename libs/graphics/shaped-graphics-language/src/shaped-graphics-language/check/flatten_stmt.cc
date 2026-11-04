@@ -920,3 +920,80 @@ void sgl::check::impl::flattener::flatten_target_text(origin from, ast::stmt_id 
     else
         add_stmt(from, flat_return{.value = call});
 }
+
+void sgl::check::impl::flattener::judge_text_types()
+{
+    if (c.out.target_type_branches.empty())
+        return;
+    auto const target = compiled_for();
+    // what each text type this tree holds is on this compile: -1 for not yet seen, -2 for fields, else its spelling's
+    // position in `entry.text_types`, or -3 where it has none
+    auto decided = cc::vector<cc::pair<type_id, i32>>();
+    auto const report_at = [&](flat_expr const& x, cc::string detail)
+    {
+        auto const chain = entry.at(x.inlined_through);
+        unroll_reports.push_back({.kind = diagnostic_kind::invalid_target_text,
+                                  .file = x.from.file,
+                                  .where = c.span_of(x.from.file, x.from.expr),
+                                  .detail = cc::move(detail),
+                                  .site = chain.empty() ? call_site{} : chain[chain.size() - 1]});
+        is_failed = true;
+        meets_error = true;
+    };
+    auto const decide = [&](flat_expr const& x, type_id type) -> i32
+    {
+        for (auto const& d : decided)
+            if (d.first == type)
+                return d.second;
+        auto const& name = c.out.name_of(type);
+        auto const chosen = chosen_type_branch(c.out, c.out.at(type).symbol, target);
+        auto result = -3;
+        if (chosen >= 0 && c.out.target_type_branches[chosen].is_fields)
+            result = -2;
+        else if (chosen < 0)
+            report_at(x, cc::format("{} has no branch this compile takes, so it has no type here", name));
+        else if (target.language == shading_language::sgl)
+        {
+            // a description writes no text, and a test runs on no target's type
+            if (is_test)
+                report_at(x, cc::format("a test reaches {}, which this compile spells in a target's own text, and no "
+                                        "interpreter runs that",
+                                        name));
+        }
+        else
+        {
+            auto const& branch = c.out.target_type_branches[chosen];
+            for (auto i = isize(0); i < branch.languages.size() && result < 0; ++i)
+                if (branch.languages[i] == target.language)
+                {
+                    result = i32(entry.text_types.size());
+                    entry.text_types.push_back({.type = type, .spelling = branch.spellings[i]});
+                }
+            if (result < 0)
+                report_at(x, cc::format("{} has no spelling in {}, the language this compile writes", name,
+                                        k_shading_language_names[isize(target.language)]));
+        }
+        decided.push_back({type, result});
+        return result;
+    };
+    auto const is_text_type = [&](type_id type)
+    {
+        return is_valid(type) && type != checked_module::error_type && c.out.at(type).kind == type_kind::structure
+            && c.out.at(type).is_text_type;
+    };
+    for (auto i = isize(0); i < entry.exprs.size(); ++i)
+    {
+        auto const& x = entry.exprs[i];
+        if (is_text_type(x.type) && decide(x, x.type) != -2 && x.node.is<flat_construct>())
+            report_at(x, cc::format("{} is a target's own type on this compile, which no SGL constructor builds",
+                                    c.out.name_of(x.type)));
+        if (auto const* const m = x.node.try_as<flat_member>(); m != nullptr && is_valid(m->object))
+        {
+            auto const object = entry.exprs[index_of(m->object)].type;
+            if (is_text_type(object) && decide(x, object) != -2)
+                report_at(x, cc::format("{} is a target's own type on this compile, and its fields are its SGL "
+                                        "branch's alone",
+                                        c.out.name_of(object)));
+        }
+    }
+}

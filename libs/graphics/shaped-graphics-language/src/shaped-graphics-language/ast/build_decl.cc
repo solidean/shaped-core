@@ -33,9 +33,7 @@ decl_id builder::declaration(statement_head const& head, scope_kind scope, bool 
     auto const not_a_declaration
         = is_member_scope ? diagnostic_kind::expected_member : diagnostic_kind::expected_declaration;
     // AST-159: a tagged string at file scope is a preamble of the target's text in its language
-    if (!is_valid(head.keyword_form) && scope == scope_kind::file && is_kind(head.whole, form_kind::quoted)
-        && is_valid(at(head.whole).token) && index_of(at(head.whole).token) + 1 < file.tokens.size()
-        && file.tokens[index_of(at(head.whole).token) + 1].kind == token_kind::symbol)
+    if (!is_valid(head.keyword_form) && scope == scope_kind::file && is_tagged_string(head.whole))
         return make_decl(head.whole, attributes_of(head.whole), preamble_decl{.text = expression(head.whole)});
     if (!is_valid(head.keyword_form))
         return invalid_declaration(head.whole, not_a_declaration);
@@ -498,7 +496,12 @@ decl_id builder::type_body_declaration(statement_head const& head, keyword_parts
     auto const attributes = attributes_of(head.whole);
     reject_arrow(head);
     auto const declared = declared_name(head.keyword_form, parts);
-    auto const members = is_valid(parts.block) ? declarations(parts.block, body_scope) : range_of<decl_id>();
+    // AST-160: a struct body that is one `const if` chain spells the type per branch
+    auto const chain = body_scope == scope_kind::struct_body && is_valid(parts.block) ? type_branches(parts.block)
+                                                                                      : cc::optional<type_chain>();
+    auto const members = chain.has_value()      ? chain.value().members
+                       : is_valid(parts.block) ? declarations(parts.block, body_scope)
+                                               : range_of<decl_id>();
 
     if (body_scope == scope_kind::binding_body)
     {
@@ -517,9 +520,74 @@ decl_id builder::type_body_declaration(statement_head const& head, keyword_parts
         return make_decl(head.whole, attributes,
                          struct_decl{.name = declared,
                                      .members = members,
+                                     .branches = chain.has_value() ? chain.value().branches : range_of<type_branch>(),
                                      .is_opaque = !is_valid(parts.block),
                                      .type_parameters = type_parameters_of(parts)});
     return make_decl(head.whole, attributes, enum_decl{.name = declared, .members = members});
+}
+
+bool builder::is_tagged_string(form_id line)
+{
+    auto const whole = head_of(line).whole;
+    return is_kind(whole, form_kind::quoted) && is_valid(at(whole).token)
+        && index_of(at(whole).token) + 1 < file.tokens.size()
+        && file.tokens[index_of(at(whole).token) + 1].kind == token_kind::symbol;
+}
+
+auto builder::type_branches(form_id block) -> cc::optional<type_chain>
+{
+    auto const lines = lines_of(block);
+    if (lines.empty() || !is_const_if(lines[0]))
+        return cc::nullopt;
+    auto collected = cc::vector<type_branch>();
+    auto members = range_of<decl_id>();
+    auto has_members = false;
+    for (auto i = isize(0); i < lines.size(); ++i)
+    {
+        auto const head = head_of(lines[i]);
+        auto const is_else = i > 0 && is_keyword_led(head.keyword_form, "else");
+        // the chain is the whole body: nothing stands beside it
+        if (i > 0 && !is_else)
+        {
+            report(diagnostic_kind::member_not_allowed_here, lines[i]);
+            continue;
+        }
+        reject_arrow(head);
+        auto const parts = keyword_parts_of(head.keyword_form);
+        auto branch = type_branch{.form = lines[i]};
+        auto const has_condition = !is_else || parts.keywords.size() > 1;
+        if (has_condition && parts.arguments.empty())
+            branch.condition = invalid_expression(head.keyword_form, diagnostic_kind::expected_expression);
+        else if (has_condition)
+            branch.condition = expression(parts.arguments[0]);
+        if (parts.arguments.size() > (has_condition ? 1 : 0))
+            report(diagnostic_kind::too_many_arguments, parts.arguments[has_condition ? 1 : 0]);
+        if (!is_valid(parts.block))
+            report(diagnostic_kind::expected_body, head.whole);
+        else
+        {
+            auto const inner = lines_of(parts.block);
+            auto is_text = !inner.empty();
+            for (auto const l : inner)
+                is_text = is_text && is_tagged_string(l);
+            if (is_text)
+            {
+                auto texts = cc::vector<expr_id>();
+                for (auto const l : inner)
+                    texts.push_back(expression(head_of(l).whole));
+                branch.texts = append(ast.expr_lists, cc::span<expr_id const>(texts));
+            }
+            else
+            {
+                branch.members = declarations(parts.block, scope_kind::struct_body);
+                if (!has_members)
+                    members = branch.members;
+                has_members = true;
+            }
+        }
+        collected.push_back(branch);
+    }
+    return type_chain{.branches = append(ast.type_branches, cc::span<type_branch const>(collected)), .members = members};
 }
 
 decl_id builder::type_declaration(statement_head const& head, keyword_parts const& parts)

@@ -404,6 +404,19 @@ struct checker
     /// A run is the whole of `statements`, or of a branch of a `const if` that is the whole of them, at any depth.
     void plan_target_text(symbol_id function, i32 file, ast::range_of<ast::stmt_id> statements);
     void register_text_run(symbol_id function, i32 file, cc::span<ast::stmt_id const> run);
+    /// A tagged string's language and its text, whole lines each ending in a newline, where it has no placeholder.
+    /// `what` names what it is in a diagnostic: `a preamble`.
+    struct plain_text
+    {
+        shading_language language = shading_language::sgl;
+        cc::string text;
+    };
+    [[nodiscard]] cc::optional<plain_text> plain_target_text(i32 file, ast::expr_id expr, cc::string_view what);
+    /// CHK-432: the branches of a struct whose body is a `const if` chain, into `target_type_branches`.
+    /// False where it has no SGL branch, which leaves it opaque.
+    bool compile_type_branches(symbol_id id, i32 file, ast::struct_decl const& s);
+    /// A text type's condition as nodes a compile decides alone, appended to `into`; false where it reads anything else.
+    bool target_condition_of(i32 file, ast::expr_id expr, cc::vector<target_condition>& into);
     /// CHK-431: `@barrier`, `@subgroup` and `@derivatives` declare what a body in a target's text does, and stand on
     /// such a function alone; a barrier is an effect, so it is never `@pure` as well.
     void judge_text_effects(symbol_id function, i32 file, ast::range_of<ast::attribute> attributes);

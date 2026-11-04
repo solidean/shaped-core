@@ -466,6 +466,7 @@ if(SC_BUILD_TESTS)
         tests/driver/options-test.cc
         tests/driver/compile-target-test.cc
         tests/driver/target-text-test.cc
+        tests/driver/target-type-test.cc
         tests/driver/describe-test.cc
         tests/driver/source-differential-test.cc
         tests/driver/test-source-test.cc

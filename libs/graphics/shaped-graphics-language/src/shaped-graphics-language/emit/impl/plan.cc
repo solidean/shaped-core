@@ -408,6 +408,10 @@ struct planner
             return;
         if (p.struct_of_type[index_of(type)] != -1)
             return;
+        // CHK-432: a text type this compile spells in its target's text is the target's own, which nothing declares
+        for (auto const& t : p.e.text_types)
+            if (t.type == type)
+                return;
         auto const& info = p.m.at(type);
         // CHK-339: two instances of one template whose members came out alike are one struct, since after the front end
         // nothing tells them apart

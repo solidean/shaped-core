@@ -210,24 +210,32 @@ cc::optional<flow> checker::target_text_flow(i32 file, ast::stmt_id stmt)
 
 void checker::declare_preamble(i32 file, ast::preamble_decl const& preamble)
 {
+    if (!ast::is_valid(preamble.text))
+        return;
+    auto text = plain_target_text(file, preamble.text, "a preamble");
+    if (text.has_value())
+        out.target_preambles.push_back(
+            {.file = file, .language = text.value().language, .text = cc::move(text.value().text)});
+}
+
+cc::optional<checker::plain_text> checker::plain_target_text(i32 file, ast::expr_id expr, cc::string_view what)
+{
     auto const& ast = ast_of(file);
     auto const& source = file_of(file);
     auto const& tokens = source.tokens;
-    if (!ast::is_valid(preamble.text))
-        return;
-    auto const open = index_of(source.at(ast.at(preamble.text).form).token);
+    auto const open = index_of(source.at(ast.at(expr).form).token);
     auto const tag_span = tokens[open + 1].where;
     auto const tag = source.text_of(tag_span);
     auto const language = language_named(tag);
     if (!language.has_value())
     {
         report(diagnostic_kind::invalid_target_text, file, tag_span,
-               cc::format("{} names no language a target writes; a preamble is one of hlsl, wgsl or msl", tag));
-        return;
+               cc::format("{} names no language a target writes; {} is one of hlsl, wgsl or msl", tag, what));
+        return cc::nullopt;
     }
 
-    // whole lines, as the target reads them ahead of the entry point
-    auto result = target_preamble{.file = file, .language = language.value()};
+    // whole lines, as the target reads them
+    auto result = plain_text{.language = language.value()};
     auto previous_end = tag_span.end();
     for (auto i = isize(open + 2); i < tokens.size() && tokens[i].kind != token_kind::quote_close; ++i)
     {
@@ -239,8 +247,8 @@ void checker::declare_preamble(i32 file, ast::preamble_decl const& preamble)
         if (t.kind == token_kind::dollar)
         {
             report(diagnostic_kind::invalid_target_text, file, t.where,
-                   "a preamble belongs to no call, so it has no placeholder; `$$` is a dollar of the text");
-            return;
+                   cc::format("{} belongs to no call, so it has no placeholder; `$$` is a dollar of the text", what));
+            return cc::nullopt;
         }
         if (t.kind != token_kind::string_body)
             continue;
@@ -254,5 +262,5 @@ void checker::declare_preamble(i32 file, ast::preamble_decl const& preamble)
     }
     if (!result.text.empty())
         result.text += '\n';
-    out.target_preambles.push_back(cc::move(result));
+    return result;
 }

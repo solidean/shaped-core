@@ -1167,6 +1167,16 @@ void checker::compile_struct(symbol_id id)
     });
     out.type_lists.push_back_range(parameters);
     out.symbols.own(index_of(id)).type = type;
+
+    // CHK-432: a body that is one `const if` chain spells the type per compile, and its SGL branch is its fields
+    if (!s.branches.empty())
+    {
+        if (!parameters.empty())
+            unsupported(file, s.name, "a generic struct whose body is a const if chain");
+        auto const has_fields = compile_type_branches(id, file, s);
+        out.types.own(index_of(type)).is_text_type = true;
+        out.types.own(index_of(type)).is_opaque = !has_fields;
+    }
 }
 
 void checker::compile_enum(symbol_id id)

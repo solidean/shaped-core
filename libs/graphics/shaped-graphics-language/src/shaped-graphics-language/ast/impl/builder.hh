@@ -325,6 +325,16 @@ struct builder
     /// Reads the lists and the return type, and leaves a missing name or parameter list to the caller to report.
     [[nodiscard]] fun_signature signature_of(keyword_parts const& parts);
     decl_id type_body_declaration(statement_head const& head, keyword_parts const& parts, scope_kind body);
+    /// Whether `line` is a tagged string, a quote a name follows directly (STR-31).
+    [[nodiscard]] bool is_tagged_string(form_id line);
+    /// AST-160: the branches of a struct body that is one `const if` chain, and the fields of its first SGL branch.
+    /// None where the body is anything else.
+    struct type_chain
+    {
+        range_of<type_branch> branches;
+        range_of<decl_id> members;
+    };
+    [[nodiscard]] cc::optional<type_chain> type_branches(form_id block);
     decl_id type_declaration(statement_head const& head, keyword_parts const& parts);
     decl_id const_declaration(statement_head const& head, keyword_parts const& parts);
     decl_id sampler_declaration(statement_head const& head, keyword_parts const& parts);

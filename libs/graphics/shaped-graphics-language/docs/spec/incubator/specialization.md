@@ -139,8 +139,9 @@ struct hit_object:
         // fields of an SGL struct holding a hit, for the branches that fall back
 ```
 
-A text type is opaque and local-only, as a ray query is: no field is reachable, no GPU memory holds it, and no stage edge carries it.
-Only the text bodies of specialized functions take it apart.
+Specified as CHK-432: the check judges the type by its SGL branch, and a compile that spells it as text refuses a field read or a construction that reaches it.
+It is local-only on every target, as a ray query is: no GPU memory holds it, and no stage edge carries it.
+So the SGL branches of specialized functions read its fields, and their text bodies take it apart where it is the target's own.
 
 ### Coverage
 
@@ -177,6 +178,7 @@ Done: `const if`, constant conditions, `target_api`, `target_language` and `has`
 Discarding is done too: a type comparison, and the three-valued decision that leaves an instance's ruled-out branches unchecked (CHK-430).
 Text bodies in their first form are done too: the tagged string as a body, its placement, placeholders and `$result`, a `flat_call` with `text`, and the emitters writing it inline.
 So is their declared contract, `@pure`, `@barrier`, `@subgroup` and `@derivatives` on the `fun`, which the uniformity pass reads in place of the text (CHK-431).
+So are text types, a struct spelled per compile in the target's text or as its SGL fields (AST-160, CHK-432).
 Left:
 
 * The check pass: SGL branches checked against the declared contract, so a fallback of a `@pure` function that writes memory is an error, and coverage.
@@ -185,7 +187,7 @@ Left:
 * The emitters: reserved names read from the text, and `#line` inside it.
   The preamble is done (CHK-428), a file's per language; one per API, such as vulkan's alone among the HLSL targets, is open.
 * A buffer as a parameter, which SGL has for no function yet, so a text body reaches a buffer through an element or an atomic alone.
-* Text types, which SER's hit object waits for.
+* Text types beyond their first form (CHK-432): a condition on an option, and a placeholder reaching into one, `$h.x`, which needs `($h).x` today.
 * The interpreter: the features a test sets.
 * `sgl describe`: optional features.
 * sg: each feature a condition names, beginning with SER's.

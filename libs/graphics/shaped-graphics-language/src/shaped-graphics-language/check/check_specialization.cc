@@ -210,3 +210,225 @@ cc::optional<f64> checker::known_number_of(i32 file, ast::expr_id expr) const
     }
     return cc::nullopt;
 }
+
+// ---- text types (CHK-432) ----------------------------------------------------------------------------------------
+
+namespace
+{
+/// The position of `name` in `names`, or -1 where it is none of them.
+template <isize N>
+i32 position_in(cc::string_view const (&names)[N], cc::string_view name)
+{
+    for (auto i = isize(0); i < N; ++i)
+        if (names[i] == name)
+            return i32(i);
+    return -1;
+}
+} // namespace
+
+bool checker::target_condition_of(i32 file, ast::expr_id expr, cc::vector<target_condition>& into)
+{
+    auto const& ast = ast_of(file);
+    auto const refuse = [&]
+    {
+        unsupported(file, span_of(file, expr),
+                    "a text type's condition other than target_api, target_language and has(.f), joined by and, or "
+                    "and not");
+        return false;
+    };
+    if (!ast::is_valid(expr))
+        return false;
+    auto const& node = ast.at(expr).node;
+    auto const add = [&](target_condition c)
+    {
+        into.push_back(c);
+        return true;
+    };
+    auto const named = [&](ast::expr_id e) -> symbol_id
+    {
+        auto const* const n = ast::is_valid(e) ? ast.at(e).node.try_as<ast::name>() : nullptr;
+        auto const* const found = n != nullptr ? seen_from(file, text_of(file, n->where)) : nullptr;
+        return found != nullptr && !found->empty() ? found->front() : symbol_id::none;
+    };
+    auto const dotted = [&](ast::expr_id e) -> cc::string_view
+    {
+        auto const* const d = ast::is_valid(e) ? ast.at(e).node.try_as<ast::leading_dot>() : nullptr;
+        return d != nullptr ? text_of(file, d->name) : cc::string_view();
+    };
+
+    if (auto const s = named(expr); is_valid(s) && is_prelude_file(out.at(s).file)
+                                    && out.at(s).kind == symbol_kind::constant
+                                    && (out.at(s).name == "true" || out.at(s).name == "false"))
+    {
+        add({.kind = target_condition::kind_t::always});
+        if (out.at(s).name == "false")
+            add({.kind = target_condition::kind_t::negated, .lhs = i32(into.size()) - 1});
+        return true;
+    }
+    auto const* const call = node.try_as<ast::call>();
+    if (call == nullptr)
+        return refuse();
+    auto const arguments = ast.at(call->arguments);
+    for (auto const& a : arguments)
+        if (!a.name.empty() || a.is_splat)
+            return refuse();
+
+    // `has(.f)`, the prelude's
+    if (!sgl::is_valid(call->op))
+    {
+        auto const callee = named(call->callee);
+        if (!is_valid(callee) || !is_prelude_file(out.at(callee).file) || out.at(callee).name != "has"
+            || arguments.size() != 1)
+            return refuse();
+        auto const name = dotted(arguments[0].value);
+        auto const f = find_feature(name);
+        if (f < 0)
+        {
+            report(diagnostic_kind::unknown_feature, file, span_of(file, arguments[0].value), name);
+            return false;
+        }
+        return add({.kind = target_condition::kind_t::has, .value = f});
+    }
+    auto const op = text_of(file, file_of(file).at(call->op).where);
+    if (op == "not" && arguments.size() == 1)
+    {
+        if (!target_condition_of(file, arguments[0].value, into))
+            return false;
+        return add({.kind = target_condition::kind_t::negated, .lhs = i32(into.size()) - 1});
+    }
+    if (arguments.size() != 2)
+        return refuse();
+    if (op == "and" || op == "or")
+    {
+        if (!target_condition_of(file, arguments[0].value, into))
+            return false;
+        auto const lhs = i32(into.size()) - 1;
+        if (!target_condition_of(file, arguments[1].value, into))
+            return false;
+        return add({.kind = op == "and" ? target_condition::kind_t::both : target_condition::kind_t::either,
+                    .lhs = lhs,
+                    .rhs = i32(into.size()) - 1});
+    }
+    if (op != "==" && op != "!=")
+        return refuse();
+    // `target_api == .vulkan`, either way round
+    for (auto k = 0; k < 2; ++k)
+    {
+        auto const s = named(arguments[k].value);
+        auto const name = dotted(arguments[1 - k].value);
+        if (!is_valid(s) || !is_target_constant(s) || name.empty())
+            continue;
+        auto const is_api = out.at(s).name == "target_api";
+        auto const value
+            = is_api ? position_in(k_graphics_api_names, name) : position_in(k_shading_language_names, name);
+        if (value < 0)
+        {
+            report(diagnostic_kind::unknown_member, file, span_of(file, arguments[1 - k].value),
+                   cc::format("{} has no case {}", is_api ? "graphics_api" : "shading_language", name));
+            return false;
+        }
+        add({.kind = is_api ? target_condition::kind_t::api_is : target_condition::kind_t::language_is,
+             .value = value});
+        if (op == "!=")
+            add({.kind = target_condition::kind_t::negated, .lhs = i32(into.size()) - 1});
+        return true;
+    }
+    return refuse();
+}
+
+bool checker::compile_type_branches(symbol_id id, i32 file, ast::struct_decl const& s)
+{
+    auto const& ast = ast_of(file);
+    auto const name = cc::string(out.at(id).name);
+    auto has_fields = false;
+    for (auto const& branch : ast.at(s.branches))
+    {
+        auto record = target_type_branch{.type_symbol = id, .is_fields = ast.at(branch.texts).empty()};
+        if (ast::is_valid(branch.condition))
+            (void)target_condition_of(file, branch.condition, record.condition);
+        if (record.is_fields)
+        {
+            // one SGL branch, so the fields a check judges are the same for every compile
+            if (has_fields)
+                report(diagnostic_kind::invalid_target_text, file, file_of(file).at(branch.form).where,
+                       cc::format("{} has a second SGL branch, and a type's fields are one list for every target",
+                                  name));
+            has_fields = true;
+        }
+        for (auto const text : ast.at(branch.texts))
+        {
+            auto spelled = plain_target_text(file, text, "a type's spelling");
+            if (!spelled.has_value())
+                continue;
+            auto const language = spelled.value().language;
+            if (record.languages.values().contains(language))
+            {
+                report(diagnostic_kind::invalid_target_text, file, span_of(file, text),
+                       cc::format("{} has a second spelling in {}, where one per language is all a target takes", name,
+                                  k_shading_language_names[isize(language)]));
+                continue;
+            }
+            // a spelling is a type's name, so its lines are one
+            auto line = cc::string();
+            for (auto const c : spelled.value().text.as_span())
+            {
+                auto const is_space = c == ' ' || c == '\n' || c == '\r' || c == '\t';
+                if (!is_space)
+                    line += c;
+                else if (!line.empty() && line.back() != ' ')
+                    line += ' ';
+            }
+            while (!line.empty() && line.back() == ' ')
+                line.resize_down_to(line.size() - 1);
+            if (line.empty())
+            {
+                report(diagnostic_kind::invalid_target_text, file, span_of(file, text),
+                       cc::format("{} spells no type in {}", name, k_shading_language_names[isize(language)]));
+                continue;
+            }
+            record.languages.push_back(language);
+            record.spellings.push_back(cc::move(line));
+        }
+        out.target_type_branches.push_back(cc::move(record));
+    }
+    return has_fields;
+}
+
+namespace
+{
+bool holds(cc::span<target_condition const> nodes, i32 at, compile_target const& target)
+{
+    auto const& n = nodes[at];
+    switch (n.kind)
+    {
+    case target_condition::kind_t::api_is:
+        return i32(target.api) == n.value;
+    case target_condition::kind_t::language_is:
+        return i32(target.language) == n.value;
+    case target_condition::kind_t::has:
+        return target.device_features.has(feature(n.value));
+    case target_condition::kind_t::always:
+        return true;
+    case target_condition::kind_t::negated:
+        return !holds(nodes, n.lhs, target);
+    case target_condition::kind_t::both:
+        return holds(nodes, n.lhs, target) && holds(nodes, n.rhs, target);
+    case target_condition::kind_t::either:
+        return holds(nodes, n.lhs, target) || holds(nodes, n.rhs, target);
+    }
+    return false;
+}
+} // namespace
+
+i32 sgl::check::chosen_type_branch(checked_module const& m, symbol_id type_symbol, compile_target const& target)
+{
+    for (auto i = isize(0); i < m.target_type_branches.size(); ++i)
+    {
+        auto const& b = m.target_type_branches[i];
+        if (b.type_symbol != type_symbol)
+            continue;
+        if (b.condition.empty() || holds(b.condition, i32(b.condition.size()) - 1, target))
+            return i32(i);
+    }
+    return -1;
+}

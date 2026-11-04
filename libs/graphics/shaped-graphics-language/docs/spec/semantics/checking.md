@@ -931,6 +931,15 @@ A feature is what a device may lack, so using one makes a shader non-portable on
   Each makes the call need the uniform control flow a builtin of its kind does (CHK-282, CHK-377), and what a `@subgroup` call gives is unproven as a builtin's is.
   What it writes through a `mut` parameter is what the call gives.
   On a function whose body is SGL, each of the three is `unsupported-yet`, and a `@barrier` function that is `@pure` is `invalid-attribute-arguments`, since a barrier is an effect.
+* **CHK-432** A struct whose body is a `const if` chain (AST-160) is a **text type**, which each compile spells as the first branch whose condition holds.
+  A branch of members is its SGL branch, which a text type has at most one of, or the second is `invalid-target-text`: its fields are one list for every target.
+  Any other branch spells the type in a target's text, a tagged string per language, which holds no placeholder and reads as one line.
+  The check judges the type by its SGL branch alone, as a struct of those fields; without one it is opaque, with no field and no constructor.
+  A condition reads `target_api`, `target_language` and `has(.f)`, joined by `and`, `or` and `not`, and anything else is `unsupported-yet`.
+  A compile that spells it in its target's text writes that text wherever the type stands, declares no struct for it, and hands it to a text body as is.
+  There a field read or a construction of it is `invalid-target-text`, since its fields are its SGL branch's alone, and so is a compile that takes no branch or one with no spelling in its language.
+  A text type is a value of function bodies alone (CHK-397), so no binding, buffer or stage edge holds it, whatever branch a compile takes.
+  A test runs on no target, so it takes the SGL branch, and one that takes another is `invalid-target-text`.
 * **CHK-428** A tagged string at file scope (AST-159) is that file's preamble in its language.
   It is written once ahead of an entry point that writes a body in a target's text from that file in that language.
   Its language is one a target writes, or it is `invalid-target-text`, and so is a placeholder in it, since it belongs to no call; `$$` is a dollar.
@@ -1647,7 +1656,7 @@ A diagnostic of this pass has a kind, a file, a byte span in that file, and a de
 
 | kind | reported by |
 |---|---|
-| `unsupported-yet` | CHK-8, CHK-61, CHK-134, CHK-213, CHK-237, CHK-291, CHK-299, CHK-307, CHK-314, CHK-321, CHK-329, CHK-333, CHK-338, CHK-339, CHK-344, CHK-346, CHK-347, CHK-350, CHK-352, CHK-353, CHK-357, CHK-366, CHK-374, CHK-379, CHK-381, CHK-383, CHK-387, CHK-389, CHK-397, CHK-431 |
+| `unsupported-yet` | CHK-8, CHK-61, CHK-134, CHK-213, CHK-237, CHK-291, CHK-299, CHK-307, CHK-314, CHK-321, CHK-329, CHK-333, CHK-338, CHK-339, CHK-344, CHK-346, CHK-347, CHK-350, CHK-352, CHK-353, CHK-357, CHK-366, CHK-374, CHK-379, CHK-381, CHK-383, CHK-387, CHK-389, CHK-397, CHK-431, CHK-432 |
 | `duplicate-declaration` | CHK-12, CHK-28, CHK-241, CHK-347, CHK-351 |
 | `dependency-cycle` | CHK-18, CHK-136 |
 | `unknown-module`, `use-of-own-module` | CHK-347 |
@@ -1710,7 +1719,7 @@ A diagnostic of this pass has a kind, a file, a byte span in that file, and a de
 | `non-uniform-per-draw` | CHK-393 |
 | `invalid-option` | CHK-354 |
 | `unroll-too-long` | CHK-389 |
-| `invalid-target-text` | CHK-427, CHK-428 |
+| `invalid-target-text` | CHK-427, CHK-428, CHK-432 |
 
 ## Open
 

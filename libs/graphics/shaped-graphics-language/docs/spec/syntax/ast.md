@@ -748,6 +748,9 @@ pipeline shadow = (shadow_vs, shadow_ps)
 * **AST-146** A `require` stands in a `binding` as well, and in a `struct` or an `enum` is `member-not-allowed-here`.
 * **AST-125** A `struct` line without a block is an **opaque struct**: it has no member that can be named, which a block without members does not say ([why](why/ast.md#ast-125)).
 * **AST-126** The AST accepts an opaque struct wherever a `struct` stands, and a later phase allows it for a small set of `@builtin` types only.
+* **AST-160** A `struct` block whose first line is `const if` is one `const if` chain, a **text type** (CHK-432), and a line beside the chain is `member-not-allowed-here`.
+  Each branch's block is a run of tagged strings that spell the type, or members as a struct block's are.
+  The struct's members are those of its first branch of members, and every branch is recorded with its condition.
 * **AST-115** A case may carry a value, which is an expression: `red = 1`.
 * **AST-116** The default of a field may name the fields that stand before it, and the AST checks nothing about it ([why](why/ast.md#ast-116)).
 

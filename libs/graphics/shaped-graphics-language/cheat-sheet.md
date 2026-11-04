@@ -488,6 +488,13 @@ fun f(x: float) -> float:                // a body in the target's own text: a r
     "
 @pure @subgroup fun lane_sum(x: float) -> float: ...  // what a text body does (CHK-431): @pure for no effect and a result as uniform
                                          //   as its arguments; @barrier @subgroup @derivatives need uniform control flow
+struct hit:                              // a text type (CHK-432): the target's own type where a branch spells it,
+    const if target_api == .dx12:        //   its SGL fields elsewhere; local-only, and no field or constructor where
+        "hlsl                            //   it is text, so its fields are read in the SGL branches of const if bodies
+            dx::HitObject
+        "
+    else:
+        t: float
 "hlsl                                    // at file scope: a preamble, written once ahead of an entry point that writes
     float helper(float x);               //   a text body of this file in that language (CHK-428); no placeholders
 "
