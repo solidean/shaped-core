@@ -147,12 +147,10 @@ void checker::register_text_run(symbol_id function, i32 file, cc::span<ast::stmt
                 continue;
             has_content = true;
             auto const is_name = i + 1 < tokens.size() && tokens[i + 1].kind == token_kind::symbol;
-            auto const is_member = is_name && i + 2 < tokens.size() && tokens[i + 2].kind == token_kind::dot;
-            if (!is_name || is_member)
+            if (!is_name)
             {
                 report(diagnostic_kind::invalid_target_text, file, t.where,
-                       "a placeholder of a target's text names a parameter or `result`, and nothing of either: "
-                       "`$name`");
+                       "a placeholder of a target's text names a parameter or `result`: `$name`, or `$name.member`");
                 is_sound = false;
                 continue;
             }
@@ -181,6 +179,15 @@ void checker::register_text_run(symbol_id function, i32 file, cc::span<ast::stmt
             }
             text.slots.push_back(slot);
             text.pieces.push_back({});
+            // `$h.x`: what follows is the target's member of the argument, which a target writes as a primary
+            while (i + 2 < tokens.size() && tokens[i + 1].kind == token_kind::dot
+                   && tokens[i + 2].kind == token_kind::symbol)
+            {
+                text.pieces.back() += '.';
+                text.pieces.back() += source.text_of(tokens[i + 2].where);
+                i += 2;
+                previous_end = tokens[i].where.end();
+            }
         }
         if (has_result && !has_result_slot)
         {

@@ -483,7 +483,7 @@ const if has(.subgroups): ...            // the compile's device; the branch it 
 const if T == float: ...                 // in a generic: each instance checks only the branch its arguments leave (CHK-429, CHK-430)
                                          // a test sees .none, .sgl and no feature; a const holding any of them is ERROR, a function may return them
 fun f(x: float) -> float:                // a body in the target's own text: a run of "hlsl / "wgsl / "msl, or one per const if branch (CHK-427)
-    "hlsl                                //   $x is the argument, $result the value; the text is unchecked, and the call impure
+    "hlsl                                //   $x is the argument, $x.y its member, $result the value; the text is unchecked
         $result = rsqrt($x);             //   a target with no alternative and no SGL branch is ERROR invalid-target-text
     "
 @pure @subgroup fun lane_sum(x: float) -> float: ...  // what a text body does (CHK-431): @pure for no effect and a result as uniform

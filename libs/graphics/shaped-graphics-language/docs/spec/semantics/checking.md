@@ -922,7 +922,8 @@ A feature is what a device may lack, so using one makes a shader non-portable on
   The run stands as the whole body, or as the whole branch of a `const if` that is the whole body, at any depth of such chains; anywhere else it is `invalid-target-text`.
   A compile writes the alternative in its own language where the call stands, and one with no alternative in it is `invalid-target-text` at the entry point; a test runs none.
   `$name` is the parameter of that name, as the argument written, and `$result` a local of the result type the text assigns, which is the call's value.
-  A function with a result has `$result` in every alternative and none without one, no parameter is named `result`, and a placeholder names nothing of a parameter.
+  A function with a result has `$result` in every alternative and none without one, and no parameter is named `result`.
+  `$name.member`, a run of fused `.symbol` pairs (STR-25), is the target's member of the argument, which a target writes as a primary.
   The text is not checked, so a call of such a function is what its declaration says (CHK-431); what GPU memory it touches is what its parameters' marks say, and the footprint reads them.
   A description writes for no target, so it reads such a body as any of its alternatives, whose footprint is the same.
 * **CHK-431** A function whose body is a target's text declares what its text does, since the check reads nothing of the text.

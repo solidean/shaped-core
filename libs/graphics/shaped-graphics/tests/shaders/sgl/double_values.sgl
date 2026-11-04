@@ -83,11 +83,11 @@ fun packed_of(x: float) -> packed:
 fun unpacked(p: packed) -> float:
     const if target_language == .hlsl:
         "hlsl
-            $result = asfloat(($p).x);
+            $result = asfloat($p.x);
         "
     else if target_language == .msl:
         "msl
-            $result = as_type<float>(($p).x);
+            $result = as_type<float>($p.x);
         "
     else:
         return p.bits

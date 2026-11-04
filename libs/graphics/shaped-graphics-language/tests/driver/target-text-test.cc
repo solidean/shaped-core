@@ -166,17 +166,32 @@ TEST("sgl target text - a body's text stands where a body does, in a language a 
                      "        $result = -$x;\n"
                      "    \"\n")
               .contains("f has a second body in hlsl"));
-    // a placeholder naming nothing, and one reaching into a parameter
+    // a placeholder naming nothing
     CHECK(reports_of("fun f(x: float) -> float:\n"
                      "    \"hlsl\n"
                      "        $result = $nope;\n"
                      "    \"\n")
               .contains("$nope names no parameter of f"));
+    // `$p.y` is the target's member of the argument, which is written as a primary
+    auto const member = sgl::compile_to_text({.source = "binding work:\n"
+                                                        "    values: mut buffer[float]\n"
+                                                        "\n"
+                                                        "fun f(p: float2) -> float:\n"
+                                                        "    \"hlsl\n"
+                                                        "        $result = $p.y;\n"
+                                                        "    \"\n"
+                                                        "\n"
+                                                        "@compute(64) fun main_cs(@thread_id id: int3){work}:\n"
+                                                        "    work.values[id.x] = f(float2(1.0, work.values[0]))\n",
+                                              .entry_point = "main_cs",
+                                              .target = target::hlsl_dx12});
+    REQUIRE(member.has_value());
+    CHECK(member.value().text.contains(".y;"));
     CHECK(reports_of("fun f(p: float2) -> float:\n"
                      "    \"hlsl\n"
-                     "        $result = $p.x;\n"
+                     "        $result = $p.y;\n"
                      "    \"\n")
-              .contains("names a parameter or `result`, and nothing of either"));
+          == "");
     // `$result` is exactly where there is a result
     CHECK(reports_of("fun f(x: float):\n"
                      "    \"hlsl\n"

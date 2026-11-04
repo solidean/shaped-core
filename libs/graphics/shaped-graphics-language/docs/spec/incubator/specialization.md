@@ -187,7 +187,7 @@ Left:
 * The emitters: reserved names read from the text, and `#line` inside it.
   The preamble is done (CHK-428), a file's per language; one per API, such as vulkan's alone among the HLSL targets, is open.
 * A buffer as a parameter, which SGL has for no function yet, so a text body reaches a buffer through an element or an atomic alone.
-* Text types beyond their first form (CHK-432): a condition on an option, and a placeholder reaching into one, `$h.x`, which needs `($h).x` today.
+* Text types beyond their first form (CHK-432): a condition on an option.
 * The interpreter: the features a test sets.
 * `sgl describe`: optional features.
 * sg: each feature a condition names, beginning with SER's.
