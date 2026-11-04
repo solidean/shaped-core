@@ -19,7 +19,7 @@ if(NOT SC_BUILD_EXAMPLES)
 endif()
 
 # Every example here, by stem: each is <stem>.cc and the target shaped-viewer-<stem>-example.
-set(_sv_example_stems hello-cube load-asset openpbr-spheres mesh-structure mesh-structure-dense quadric-gallery quadric-arrows lights light-stage drawings decals bistro raster hybrid-sponza research-studio tg-objects)
+set(_sv_example_stems hello-cube load-asset openpbr-spheres mesh-structure mesh-structure-dense quadric-gallery quadric-arrows lights light-stage drawings decals bistro raster hybrid-sponza research-studio tg-objects environment-diffuse)
 
 # Its own gate passed, so the question left is which backend the build was ASKED for.
 # The viewer's default context is dx12's or metal's, so a build set to vulkan gets targets that say so, though the tracer itself runs there.
