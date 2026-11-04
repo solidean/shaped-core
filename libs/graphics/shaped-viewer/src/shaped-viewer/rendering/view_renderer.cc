@@ -1639,10 +1639,10 @@ sg::routine_outcome view_renderer::trace(sg::command_list& cmd,
     if (l.settings.display.automatic && isize(tr.layer) < rec.auto_exposure.size() && rec.auto_exposure[tr.layer].primed)
         display_exposure += rec.auto_exposure[tr.layer].exposure;
     auto const display_scale = sr::display_transform{.exposure = display_exposure}.exposure_scale();
-    auto const schedule = has_guides
-                            ? _schedule_denoise(ctx, l.settings, ds,
-                                                samples ? next_frame_count(*slot) : slot->accum_frame, display_scale)
-                            : denoise_schedule{};
+    auto const schedule
+        = has_guides ? _schedule_denoise(ctx, l.settings, ds, samples ? next_frame_count(*slot) : slot->accum_frame,
+                                         display_scale, mode == render_mode::hybrid)
+                     : denoise_schedule{};
     auto const writes_temporal = has_temporal && schedule.runs_temporal();
 
     // All three or none: a member filtering the lobes apart needs both halves AND the distances, and two of the three
@@ -2042,7 +2042,8 @@ view_renderer::denoise_schedule view_renderer::_schedule_denoise(sg::context con
                                                                  render_settings const& settings,
                                                                  denoise_slots const& ds,
                                                                  u32 accum_frame,
-                                                                 f32 display_scale)
+                                                                 f32 display_scale,
+                                                                 bool jittered)
 {
     // Temporal while the mean is young, on this frame's own samples: a young mean is barely less noisy than one frame,
     // and a temporal member's history is what makes up the difference.
@@ -2050,16 +2051,20 @@ view_renderer::denoise_schedule view_renderer::_schedule_denoise(sg::context con
     // unbiased.
     // `fresh_samples` says which of the two a call carries, and it lives in the settings so that resolving a method and
     // running it cannot disagree — so each member takes its own settings value rather than a flag per call.
-    auto const with_fresh_samples = [&settings, display_scale](bool fresh)
+    auto const with_fresh_samples = [&settings, display_scale, jittered](bool fresh)
     {
         auto copy = settings.reconstruct;
         copy.fresh_samples = fresh;
         // A member judging noise by how bright a pixel ends up on screen is told the display's scale, or it denoises an
         // image many stops brighter or darker than the one shown.
         copy.exposure = settings.reconstruct.exposure * display_scale;
-        // These two run at the view's own size, without a jitter, so an upscaler would run 1:1 on an image it cannot
-        // reconstruct from; only a frame traced at the input extent upscales, and `trace` asks for that itself.
-        copy.upscaler = sr::upscale_method::none;
+        // These two run at the view's own size, where an upscaler has something to reconstruct from only in one frame's
+        // samples drawn at one shared offset: a hybrid frame's, which a NAMED upscaler then takes as anti-aliasing.
+        // A traced frame's rays each draw their own offset, and the mean behind the spatial member is antialiased already.
+        // A frame traced at the input extent upscales on its own path, which `trace` asks for itself.
+        auto const antialiases = fresh && jittered && settings.reconstruct.upscaler != sr::upscale_method::automatic;
+        if (!antialiases)
+            copy.upscaler = sr::upscale_method::none;
         return copy;
     };
     auto schedule = denoise_schedule{

@@ -449,16 +449,29 @@ ASYNC_INVOCABLE_TEST("sv temporal - a temporal member's young still image change
     auto const box = agreement::make_lit_box(resources);
     auto const support = sr::query_reconstruct_support(ctx);
 
-    for (auto const member : {sr::denoise_method::svgf, sr::denoise_method::dlss_rr})
+    struct young_case
     {
-        auto const name = cc::format("young-hybrid-{}", sr::to_string(member));
-        if (!support.supports(member))
+        sr::denoise_method member;
+        sr::upscale_method upscaler;
+    };
+    // SVGF followed by FSR at the native scale too, which a hybrid frame's shared jitter lets run as anti-aliasing.
+    young_case const cases[] = {{.member = sr::denoise_method::svgf, .upscaler = sr::upscale_method::none},
+                                {.member = sr::denoise_method::svgf, .upscaler = sr::upscale_method::fsr},
+                                {.member = sr::denoise_method::dlss_rr, .upscaler = sr::upscale_method::none}};
+    for (auto const& c : cases)
+    {
+        auto const member = c.member;
+        auto const name = c.upscaler == sr::upscale_method::none
+                            ? cc::format("young-hybrid-{}", sr::to_string(member))
+                            : cc::format("young-hybrid-{}-{}", sr::to_string(member), sr::to_string(c.upscaler));
+        if (!support.supports(member) || (c.upscaler != sr::upscale_method::none && !support.supports(c.upscaler)))
         {
-            CC_LOG_INFO("{}: not run, this build or device has no {}", name, sr::to_string(member));
+            CC_LOG_INFO("{}: not run, this build or device cannot", name);
             continue;
         }
         auto view = agreement::denoise_view(ctx, resources, box.items, box.camera,
                                             {.name = name, .mode = sv::render_mode::hybrid, .denoiser = member});
+        sv::ensure_scene_3d(view.def.views[0]).settings.reconstruct.upscaler = c.upscaler;
         auto const warmed = co_await view.warm_up();
         CHECK(warmed).dump("test", cc::string_view(name));
         if (!warmed)

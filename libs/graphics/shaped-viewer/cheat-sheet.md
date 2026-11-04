@@ -63,7 +63,8 @@ sv::render_mode              // automatic (default) | megakernel | wavefront | r
 sv::resolve_render_mode(ctx, m)  // -> render_mode: m itself unless automatic
                                  //   raster: the same materials drawn, lit directly and unshadowed, final every frame, never denoised (docs/raster.md)
                                  //   reconstruct defaults to denoiser none; NOTHING in it restarts accumulation (see "Denoising" below)
-                                 //   sv owns reconstruct.fresh_samples and reconstruct.upscaler (none), and overwrites whatever a caller set: each half of the hand-off runs with its own value
+                                 //   sv owns reconstruct.fresh_samples and reconstruct.upscaler, and overwrites whatever a caller set: each half of the hand-off runs with its own value
+                                 //   a NAMED upscaler (fsr) at scale native still follows a hybrid layer's temporal member, as anti-aliasing; everywhere else at native the upscaler is none
                                  //   display: exposure (stops) and curve, applied where the parent composites the layer; never restarts; the default curve none passes radiance through unencoded
                                  //   display.automatic: the viewer meters the layer's image and adapts toward middle gray, a fifth per reading; exposure is then the compensation
 sv::scene_item                   // { scene_item_kind kind; mesh_id mesh; instance_id instance; hash128 permutation; tg::affine_transform3f transform; } — triangle_mesh only for now
