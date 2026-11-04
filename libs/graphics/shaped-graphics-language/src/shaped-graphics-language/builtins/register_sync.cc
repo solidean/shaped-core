@@ -463,16 +463,45 @@ evaluator evaluator_of(atomic_op op)
 // update came between its read and its write.
 
 constexpr cc::string_view k_float_atomics_hlsl[] = {
-    "InterlockedOr", "InterlockedExchange", "InterlockedCompareExchange", "asfloat", "asuint",
+    "InterlockedOr",
+    "InterlockedExchange",
+    "InterlockedCompareExchange",
+    "asfloat",
+    "asuint",
+    "sgl_atomic_add_float",
+    "sgl_atomic_load_float",
+    "sgl_atomic_store_float",
+    "sgl_atomic_exchange_float",
 };
 constexpr cc::string_view k_float_atomics_wgsl[] = {
     "atomicLoad", "atomicStore", "atomicExchange", "atomicCompareExchangeWeak", "bitcast",
 };
 constexpr cc::string_view k_float_atomics_msl[] = {
-    "atomic_load_explicit",     "atomic_store_explicit",
-    "atomic_exchange_explicit", "atomic_compare_exchange_weak_explicit",
-    "memory_order_relaxed",     "as_type",
+    "atomic_load_explicit",      "atomic_store_explicit",
+    "atomic_exchange_explicit",  "atomic_compare_exchange_weak_explicit",
+    "memory_order_relaxed",      "as_type",
+    "atomic_fetch_add_explicit",
 };
+
+/// Vulkan's native float atomics, which HLSL has no word for: SPIR-V's own instructions, declared once ahead of the entry
+/// point of a text whose `atomic[float]` is a `float`.
+/// The scope is Device (1) and the semantics Relaxed (0), the ordering every SGL atomic has.
+cc::string float_atomic_helper(helper_context const& c)
+{
+    if (c.target != language::hlsl || c.argument_types.empty() || c.argument_types[0] != "float")
+        return {};
+    return "[[vk::ext_extension(\"SPV_EXT_shader_atomic_float_add\")]]\n"
+           "[[vk::ext_capability(6033)]]\n"
+           "[[vk::ext_instruction(6035)]]\n"
+           "float sgl_atomic_add_float([[vk::ext_reference]] float place, uint scope, uint semantics, float value);\n"
+           "[[vk::ext_instruction(227)]]\n"
+           "float sgl_atomic_load_float([[vk::ext_reference]] float place, uint scope, uint semantics);\n"
+           "[[vk::ext_instruction(228)]]\n"
+           "void sgl_atomic_store_float([[vk::ext_reference]] float place, uint scope, uint semantics, float value);\n"
+           "[[vk::ext_instruction(229)]]\n"
+           "float sgl_atomic_exchange_float([[vk::ext_reference]] float place, uint scope, uint semantics, float "
+           "value);\n";
+}
 
 /// An add stands in a loop, which a helper invocation, whose atomics have no effect, would never leave.
 constexpr cc::string_view k_float_add_stages = "@stages(.compute, .raygen, .miss, .closest_hit, .callable)";
@@ -483,6 +512,21 @@ written write_float_atomic(call_context const& ctx)
     auto const& a = ctx.arguments[0].text;
     auto const v = ctx.arguments.size() > 1 ? wrapped(ctx.arguments[1], precedence::primary) : cc::string();
     auto result = written();
+    // the target's own float atomic, one instruction each
+    if (ctx.native_float_atomics && ctx.target == language::hlsl)
+    {
+        if (op == atomic_op::load)
+            return {.text = cc::format("sgl_atomic_load_float({}, 1, 0)", a)};
+        auto const name = op == atomic_op::store ? "store" : op == atomic_op::exchange ? "exchange" : "add";
+        return {.text = cc::format("sgl_atomic_{}_float({}, 1, 0, {})", name, a, v)};
+    }
+    if (ctx.native_float_atomics && ctx.target == language::msl)
+    {
+        if (op == atomic_op::load)
+            return {.text = cc::format("atomic_load_explicit(&{}, memory_order_relaxed)", a)};
+        auto const name = op == atomic_op::store ? "store" : op == atomic_op::exchange ? "exchange" : "fetch_add";
+        return {.text = cc::format("atomic_{}_explicit(&{}, {}, memory_order_relaxed)", name, a, v)};
+    }
     switch (ctx.target)
     {
     case language::hlsl:
@@ -814,8 +858,9 @@ void sgl::builtins::register_sync(registry& r)
          "/// Stores `v`, and gives the value before.", float_atomic_update<atomic_op::exchange>},
         {atomic_op::add, "fun add(a: mut atomic[float], v: float) -> float",
          "/// Adds `v`, rounded once, and gives the value before.\n"
-         "/// It retries a compare-exchange until no other update came between, which a pixel stage's helper "
-         "invocations would never leave.",
+         "/// Where the device has no float add it retries a compare-exchange until no other update came between, "
+         "which a\n"
+         "/// pixel stage's helper invocations would never leave.",
          float_atomic_update<atomic_op::add>},
     };
     for (auto const& f : float_atomics)
@@ -825,6 +870,7 @@ void sgl::builtins::register_sync(registry& r)
             .evaluate = f.evaluate,
             .write = {.kind = spelling_kind::custom,
                       .custom = write_float_atomic,
+                      .helper = float_atomic_helper,
                       .writes_lines = f.op == atomic_op::add ? every_language : is_hlsl,
                       .data = u32(f.op),
                       .hlsl_names = k_float_atomics_hlsl,

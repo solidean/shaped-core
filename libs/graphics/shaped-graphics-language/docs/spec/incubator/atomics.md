@@ -13,7 +13,6 @@ Each thing below is what one target or another lacks, so each comes back behind 
 
 | what | who lacks it | how it would come back |
 |---|---|---|
-| a native float add, `atomic[float].add` in one instruction | WGSL; HLSL, whose float atomics are bitwise exchanges alone; vulkan needs `shaderBufferFloat32AtomicAdd` | an sg feature, which the compare-exchange loop every target writes today stands in for |
 | 64-bit atomics | WGSL | an sg feature over `atomic[long]` and `atomic[ulong]`, once SGL has 64-bit integers, named as `short` and `ushort` are |
 | a vertex stage's atomics and stores | WebGPU; vulkan needs `vertexPipelineStoresAndAtomics` | `vertex_stores`, adding `.vertex` to the atomics' `@stages` |
 | orderings stronger than relaxed | WGSL, which has relaxed alone | acquire and release as named arguments, once a shader needs orderings rather than the coherence `@coherent` gives |

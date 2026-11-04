@@ -174,10 +174,23 @@ bool slib::shader_asset::can_acquire(sg::context const& ctx) const
 
 sg::async_compiled_shader slib::shader_asset::acquire(sg::context const& ctx, cc::span<shader_option const> options) const
 {
+    // SGL's float atomics add in one instruction where the device can, which the prelude's option asks for
+    auto with_device = cc::vector<shader_option>::create_copy_of(options);
+    if (auto const library = _library.lock(); library != nullptr
+                                              && library->language_of(_virtual_path) == shader_language::sgl
+                                              && ctx.supports(sg::feature::float_atomic_add))
+    {
+        auto is_set = false;
+        for (auto const& o : with_device)
+            is_set = is_set || o.name == k_native_float_atomic_add_option;
+        if (!is_set)
+            with_device.push_back({.name = cc::string(k_native_float_atomic_add_option), .value = "true"});
+    }
+
     // The context lists what it takes in preference order, so the first one we can actually build wins.
     for (auto const format : ctx.accepted_shader_formats())
         if (this->can_build(format))
-            return acquire(format, options);
+            return acquire(format, with_device);
 
     if (_library.expired())
         return make_failed_shader(cc::format("the shader library that owns '{}' is gone", _virtual_path));

@@ -156,6 +156,9 @@ bool metal_context::supports(sg::feature f) const
         // `[[primitive_id]]`, `[[sample_id]]` and a vertex function's `[[render_target_array_index]]` exist on every
         // Apple GPU this backend's Metal 4 floor admits.
         return true;
+    case sg::feature::float_atomic_add:
+        // `atomic_float` and `atomic_fetch_add_explicit` exist in device and threadgroup memory from MSL 3.0.
+        return true;
     case sg::feature::wireframe_fill:
         // `MTLTriangleFillModeLines` is on every Apple GPU.
         return true;

@@ -2638,7 +2638,8 @@ struct exchange_result[T]:
 /// Stores `v`, and gives the value before.
 @builtin @stages(.pixel, .compute, .raygen, .miss, .closest_hit, .callable) fun exchange(a: mut atomic[float], v: float) -> float
 /// Adds `v`, rounded once, and gives the value before.
-/// It retries a compare-exchange until no other update came between, which a pixel stage's helper invocations would never leave.
+/// Where the device has no float add it retries a compare-exchange until no other update came between, which a
+/// pixel stage's helper invocations would never leave.
 @builtin @stages(.compute, .raygen, .miss, .closest_hit, .callable) fun add(a: mut atomic[float], v: float) -> float
 
 // The atomics of an `@atomic` image's texels, which the flat tree calls for `img[xy].max(v)` (CHK-373).

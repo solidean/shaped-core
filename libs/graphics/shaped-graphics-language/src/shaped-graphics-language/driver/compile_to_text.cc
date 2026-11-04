@@ -104,7 +104,8 @@ cc::result<emitted_source, cc::string> emit_text(driver::impl::front_end const& 
                                                  check::flat_entry_point const& e,
                                                  emit::target target,
                                                  bool line_directives,
-                                                 bool diagnostics)
+                                                 bool diagnostics,
+                                                 bool native_float_atomic_add)
 {
     auto const& m = front.module;
     auto const source_name = front.source_name;
@@ -118,9 +119,12 @@ cc::result<emitted_source, cc::string> emit_text(driver::impl::front_end const& 
     auto names = cc::vector<cc::string_view>();
     for (auto i = isize(0); i < files.size(); ++i)
         names.push_back(front.name_of(i));
-    auto emitted = emit::emit_entry_point(
-        m, legal, target,
-        {.files = files, .names = names, .write_directives = line_directives, .diagnostics = diagnostics});
+    auto emitted = emit::emit_entry_point(m, legal, target,
+                                          {.files = files,
+                                           .names = names,
+                                           .write_directives = line_directives,
+                                           .diagnostics = diagnostics,
+                                           .native_float_atomic_add = native_float_atomic_add});
     if (!emitted.has_text())
     {
         auto text = cc::string();
@@ -211,7 +215,8 @@ cc::result<sgl::emitted_source, cc::string> sgl::compile_to_text(text_request co
     // CHK-402: what was judged of another entry point's body is no error of this one
     if (auto own = front.errors_of(e.function); !own.empty())
         return cc::error(cc::move(own));
-    auto result = emit_text(front, e, request.target, request.line_directives, request.diagnostics);
+    auto result = emit_text(front, e, request.target, request.line_directives, request.diagnostics,
+                            request.native_float_atomic_add);
     add_source_facts(result, front, e);
     return result;
 }
@@ -228,7 +233,7 @@ cc::result<cc::vector<sgl::entry_text>, cc::string> sgl::compile_all_to_text(all
         auto own = front.errors_of(e.function);
         for (auto const t : request.targets)
         {
-            auto text = own.empty() ? emit_text(front, e, t, false, false)
+            auto text = own.empty() ? emit_text(front, e, t, false, false, false)
                                     : cc::result<emitted_source, cc::string>(cc::error(own));
             add_source_facts(text, front, e);
             result.push_back({.entry_point = e.name, .target = t, .text = cc::move(text)});

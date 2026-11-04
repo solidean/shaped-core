@@ -144,6 +144,13 @@ enum class sg::feature
     /// D3D12 grants it with `VPAndRTArrayIndexFromAnyShaderFeedingRasterizerSupportedWithoutGSEmulation`, Vulkan with
     /// `shaderOutputLayer`, and Metal on every Apple GPU its Metal 4 floor admits; WebGPU has no such output.
     vertex_layer_output,
+
+    /// A shader may add to a 32-bit float atomically in one instruction, in a buffer and in workgroup memory.
+    /// Vulkan grants it with `VK_EXT_shader_atomic_float`'s `shaderBufferFloat32AtomicAdd` and `shaderSharedFloat32AtomicAdd`,
+    /// and Metal on every Apple GPU its Metal 4 floor admits; D3D12 and WebGPU have none.
+    /// SGL's `atomic[float].add` is a compare-exchange loop without it, so slib asks for the native add where a context
+    /// has it, and no `require` names it.
+    float_atomic_add,
 };
 
 CC_FLAG_ENUM_INDEXED(sg, feature, cc::u32);
@@ -181,8 +188,9 @@ inline constexpr feature k_all_features[] = {
     feature::helper_lane_query,
     feature::opacity_micromap,
     feature::vertex_layer_output,
+    feature::float_atomic_add,
 };
-static_assert(isize(sizeof(k_all_features) / sizeof(k_all_features[0])) == isize(feature::vertex_layer_output) + 1,
+static_assert(isize(sizeof(k_all_features) / sizeof(k_all_features[0])) == isize(feature::float_atomic_add) + 1,
               "k_all_features lists every feature");
 
 /// The enumerator's name, `ray_query`, which is also what SGL's `require` spells it as.
@@ -242,6 +250,8 @@ static_assert(isize(sizeof(k_all_features) / sizeof(k_all_features[0])) == isize
         return "opacity_micromap";
     case feature::vertex_layer_output:
         return "vertex_layer_output";
+    case feature::float_atomic_add:
+        return "float_atomic_add";
     }
     return "";
 }

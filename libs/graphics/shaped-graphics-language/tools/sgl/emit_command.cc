@@ -27,6 +27,7 @@ COMMAND("emit")
     auto run_tests = false;
     auto line_directives = false;
     auto diagnostics = false;
+    auto native_float_atomic_add = false;
     auto option_arguments = cc::vector<cc::string>();
     auto module_dirs = cc::vector<cc::string>();
     auto args = nx::args({.name = "sgl emit",
@@ -41,6 +42,9 @@ COMMAND("emit")
                       "statement"});
     args.arg({"diagnostics"}, diagnostics,
              {.desc = "write print and assert into sg's debug buffer, as a dev build does"});
+    args.arg({"native-float-atomic-add"}, native_float_atomic_add,
+             {.desc = "write an atomic[float] as the target's own float atomic, as slib does for a device that adds "
+                      "floats in one instruction (vulkan, metal)"});
     args.arg(
         {"option"}, option_arguments,
         {.desc = "give an option of the source a value, `--option tile=16`; repeat for each", .metavar = "NAME=VALUE"});
@@ -91,7 +95,8 @@ COMMAND("emit")
                                             .options = options.value(),
                                             .run_tests = run_tests,
                                             .line_directives = line_directives,
-                                            .diagnostics = diagnostics});
+                                            .diagnostics = diagnostics,
+                                            .native_float_atomic_add = native_float_atomic_add});
     if (text.has_error())
     {
         cc::eprint(text.error());

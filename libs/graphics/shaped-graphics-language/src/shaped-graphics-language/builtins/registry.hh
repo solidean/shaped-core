@@ -72,6 +72,9 @@ struct sgl::builtins::call_context
     bool is_device_coherent = false;
     /// The entry point is a pixel stage, whose helper invocations run its atomics without effect (EMIT-162).
     bool is_pixel_stage = false;
+    /// The entry point's `atomic[float]`s are the target's own float atomics, which add in one instruction: the
+    /// request said the device has one, and the target can say it (vulkan, metal).
+    bool native_float_atomics = false;
 };
 
 /// What a helper writer is given: the target, and each argument's type as the target spells it.

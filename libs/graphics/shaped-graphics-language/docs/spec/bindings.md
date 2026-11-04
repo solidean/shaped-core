@@ -461,10 +461,12 @@ An any hit and an intersection run as often as the traversal decides, so they wr
 So is one in a decision an inline trace calls, in any stage.
 The host holds a buffer of atomics as the plain integers it is.
 
-**An `atomic[float]` has `load`, `store`, `exchange` and `add`, and every target holds it as the bits of a `uint` atomic**, so the host writes and reads the float itself.
-Its `add` reads the bits, adds in float, and retries a compare-exchange until no other update came between, so it is exact once per update and in no promised order.
+**An `atomic[float]` has `load`, `store`, `exchange` and `add`**, and the host writes and reads the float itself.
+Where the device adds floats in one instruction, `sg::feature::float_atomic_add`, slib asks for the target's own float atomic, which vulkan and metal write.
+Everywhere else it is the bits of a `uint` atomic, and its `add` reads them, adds in float, and retries a compare-exchange until no other update came between.
+Either way it is exact once per update and in no promised order.
 A helper invocation's atomics have no effect, so a pixel stage would never leave that loop, and its `add` takes no pixel stage.
-A native float add, which Metal and a Vulkan extension have, is [the incubator's](incubator/atomics.md), as are 64 bits and a vertex stage.
+64 bits and a vertex stage are [the incubator's](incubator/atomics.md).
 
 **`add_reduced(mut slot, key, v)` adds where many invocations add to one slot**, as every pixel a splat covers adds to the splat's gradient.
 Where every active invocation of the subgroup names the same `key`, it adds the subgroup's sum once, from the first of them, and otherwise each adds its own.

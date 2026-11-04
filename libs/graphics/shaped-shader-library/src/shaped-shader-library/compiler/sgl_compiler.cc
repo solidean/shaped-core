@@ -282,9 +282,17 @@ private:
             return cc::error(cc::format("SGL has no entry point of the stage '{}' is declared as", desc.entry_point));
         }
 
+        // shader_asset::acquire says through this name that the device adds floats in one instruction, which is the
+        // emitter's to know and no option of the source
         auto options = cc::vector<sgl::check::option_value>();
+        auto native_float_atomic_add = false;
         for (auto const& o : desc.options)
-            options.push_back({.name = o.name, .value = o.value});
+        {
+            if (o.name == slib::k_native_float_atomic_add_option)
+                native_float_atomic_add = o.value == "true";
+            else
+                options.push_back({.name = o.name, .value = o.value});
+        }
         auto const library = slib::impl::sgl_library_of(desc.modules);
         auto text = sgl::compile_to_text(
             {.source = desc.source,
@@ -296,7 +304,8 @@ private:
              .options = options,
              // EMIT-182: DXC's and Metal's messages, and PIX's and Xcode's source view, name the SGL line
              .line_directives = true,
-             .diagnostics = _diagnostics});
+             .diagnostics = _diagnostics,
+             .native_float_atomic_add = native_float_atomic_add});
         if (text.has_error())
             return cc::error(cc::format("SGL reported errors:\n{}", text.error()));
         auto const& emitted = text.value();
