@@ -160,7 +160,7 @@ The default preset only exercises the assertions-on branch the table above names
 
 Every preset above builds against per-target precompiled headers.
 The `nopch-*` and `debug-nopch-*` presets set `CMAKE_DISABLE_PRECOMPILE_HEADERS=ON` instead, which is what catches a source relying on a header only the PCH's `/FI` supplied.
-`check` runs `debug-nopch-*` as its debug leg and CI runs `nopch-linux-clang`, so you rarely reach for these by hand.
+`check --all-presets` runs `debug-nopch-*` as its debug leg and CI runs `nopch-linux-clang`, so you rarely reach for these by hand.
 `uv run dev.py build --preset nopch-clang` reproduces a CI canary failure locally.
 [precompiled-headers.md](precompiled-headers.md) is the tiers, how to pick one, and the ordering rule the SDK gates impose.
 
@@ -545,11 +545,11 @@ A test opts in with `nx::config::rerun_on("<glob>")`, written by its author: a f
 dev.py reads the triggers from each binary's `--list-tests-json` listing, runs the matching tests by name with `--thorough` on the default preset alone, and fails if fewer ran than were selected.
 A glob matching no tracked file is an error, so a moved file cannot silently disarm the rule.
 [test-runtime.md](../../libs/base/nexus/docs/test-runtime.md) has the declaration.
-It builds and runs the suite across five build variants:
+It builds and runs the suite on the platform default **relwithdebinfo**, `CC_ASSERT` on.
+Each further variant is a whole build of its own, so they are opt-in: `--all-presets` adds them, each under `--smoke`, and CI runs them all:
 
 - **debug** — `-O0` plus mimalloc's `MI_DEBUG` heap, `CC_ASSERT` on, and **precompiled headers off**
   (`debug-nopch-*`, the cheapest of the four to give a PCH up on, so a source that dropped an include the PCH's `/FI` was supplying fails here — see [precompiled-headers.md](precompiled-headers.md))
-- the platform default **relwithdebinfo** — `CC_ASSERT` on
 - the **release** sibling — `CC_ASSERT` off
 - a **single-threaded** sibling — `SC_THREADS=OFF`, otherwise reachable only through a wasm build
 - on **Linux and macOS**, a **sanitizer** preset — ASan + UBSan
@@ -835,7 +835,7 @@ A low load under a low `serial` is waiting on something no test declared.
 
 `uv run dev.py test --thorough` runs every test at full strength: a test reads it through `nx::is_thorough()` and raises what its default run narrows, such as a fuzz's seed count.
 A test marked `thorough_only` runs only then, and the per-binary timeout grows tenfold to 600 s unless `--timeout` is given.
-`uv run dev.py test --smoke` is the other direction: a heavy test narrows to its smallest case under `nx::is_smoke()`, and `check` runs every preset but its default one so.
+`uv run dev.py test --smoke` is the other direction: a heavy test narrows to its smallest case under `nx::is_smoke()`, and `check --all-presets` runs every preset but its default one so.
 [nexus' test-runtime](../../libs/base/nexus/docs/test-runtime.md) is the concept.
 
 `uv run dev.py test "<filter>" --sample` profiles what it runs.

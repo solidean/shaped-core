@@ -298,7 +298,7 @@ The loop is **run `dev.py`, then diagnose with `repo_tools`** — `build_diag` a
   A tier's header list belongs next to the headers it names, never centrally.
   A bigger tier is not automatically better — pick one with `uv run dev.py compile-time pch`, never by eye.
   [docs/guides/precompiled-headers.md](docs/guides/precompiled-headers.md) is what to read before changing one.
-  The `nopch-*` / `debug-nopch-*` presets set `CMAKE_DISABLE_PRECOMPILE_HEADERS=ON`; `check`'s debug leg and CI both run one, because a PCH's `/FI` otherwise hides a missing include.
+  The `nopch-*` / `debug-nopch-*` presets set `CMAKE_DISABLE_PRECOMPILE_HEADERS=ON`; `check --all-presets`' debug leg and CI both run one, because a PCH's `/FI` otherwise hides a missing include.
 * `SC_EXAMPLE_BACKEND` (default `auto`) picks the graphics backend the `*-example` binaries build against: `auto`, `dx12`, `vulkan`, `metal` or `webgpu`.
   `auto` takes dx12 wherever there is one, so the setting exists to reach the vulkan arm — building `rotating-cube` both ways is how one HLSL source is shown to serve both.
   `sgl-cube` is the same cube from one SGL source, on every backend.
@@ -309,7 +309,7 @@ The loop is **run `dev.py`, then diagnose with `repo_tools`** — `build_diag` a
   All default to ON for a top-level build (the normal flow) and OFF when shaped-core is consumed via `add_subdirectory`.
 * `SC_THREADS` (default ON) is the repo-wide threading knob → clean-core's `CC_HAS_THREADS`.
   **No API is gated on it** — threaded types keep their full surface and fall back to running on the calling thread, so never `#if` a declaration away.
-  OFF is a whole-build switch, never per-target, and `check` runs a `singlethreaded-*` preset so both modes stay exercised.
+  OFF is a whole-build switch, never per-target, and CI and `check --all-presets` run a `singlethreaded-*` preset so both modes stay exercised.
   **OFF is refused on Apple targets**: metal takes command-buffer completion on a dispatch queue Apple owns, which the flag cannot remove, so that build would not be single-threaded.
   The refusal is keyed on the target, so a Mac building the `emscripten-*` presets still gets the unthreaded mode — and there is no macOS `singlethreaded-*` preset.
   See [docs/platforms.md](docs/platforms.md#threading-sc_threads).
@@ -333,7 +333,7 @@ The loop is **run `dev.py`, then diagnose with `repo_tools`** — `build_diag` a
   SGL writes them as records into a debug window sg binds, reads back after the epoch and logs, so a failed GPU assert fails a test.
   See [docs/platforms.md](docs/platforms.md#shader-diagnostics-sc_shader_diagnostics).
 * `SC_CHECK_WIDE_ARITH` (default OFF) checks typed-geometry's `fixed_int` claims — a result width, a shift amount — at runtime → `TG_CHECK_WIDE_ARITH`.
-  Off by default because they sit in predicate hot loops; the `debug-nopch` presets turn it on, so `check` exercises it.
+  Off by default because they sit in predicate hot loops; the `debug-nopch` presets turn it on, so CI and `check --all-presets` exercise it.
   See [docs/platforms.md](docs/platforms.md#wide-arithmetic-checks-sc_check_wide_arith).
 * `SC_SIMD_EXHAUSTIVE_TESTS` (default OFF) tests clean-simd at every lane width instead of one 256-bit type per element → `CIMD_EXHAUSTIVE_TESTS`; the `debug-nopch` presets turn it on.
   See [docs/platforms.md](docs/platforms.md#exhaustive-simd-tests-sc_simd_exhaustive_tests).
@@ -356,7 +356,7 @@ Guidance, not invariants — use judgment.
 * **Tests stay fast.** Flag slow ones rather than landing them silently.
   **No deliberate waiting:** wait for a condition, never for a duration, and test a timeout by injecting a clock.
   An expensive test narrows itself for the default run under `nx::is_thorough()` — [test-runtime](libs/base/nexus/docs/test-runtime.md).
-  It narrows further under `nx::is_smoke()`, which `check` passes to every preset but its default.
+  It narrows further under `nx::is_smoke()`, which `check --all-presets` passes to every preset but its default.
 * **Codify non-obvious edge cases as tests.** A test that pins a subtle invariant is nearly as valuable as one that catches a bug.
 
 ---

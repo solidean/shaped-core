@@ -60,9 +60,9 @@ The fuzz narrowing helpers are `cap_seed_count(n)` — each seed is a whole prog
 
 ## Smoke runs: `nx::is_smoke()`
 
-`dev.py check` runs the suite on several presets, and only its default one needs a heavy test's full ground.
+`dev.py check --all-presets` and CI run the suite on several presets, and only the default one needs a heavy test's full ground.
 The others differ in flags (assertions off, no threads, debug checks), and what a heavy test proves there it proves on its smallest case.
-So `check` passes `--smoke` to every preset but the default, and a heavy test narrows further under `nx::is_smoke()`:
+So `check --all-presets` passes `--smoke` to every preset but the default, and a heavy test narrows further under `nx::is_smoke()`:
 
 ```cpp
 auto const smoke = nx::is_smoke();

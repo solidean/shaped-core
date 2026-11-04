@@ -43,6 +43,9 @@ def add_parser(sub: argparse._SubParsersAction) -> argparse.ArgumentParser:
     p.add_argument("--no-test", action="store_true",
                    help="Skip the test suite (build + run); just the static checks")
     p.add_argument("--list", action="store_true", help="List registered checks and exit")
+    p.add_argument("--all-presets", action="store_true",
+                   help="Also build and test the debug, release, single-threaded and sanitizer presets, "
+                        "each under --smoke. Off by default: every extra preset is a whole build, and CI runs them.")
     return p
 
 
@@ -73,7 +76,7 @@ def _branch_base(ctx: Context) -> str | None:
     return None
 
 
-def _build_checks(ctx: Context, *, memo: dev.CheckMemo | None = None) -> list[dev.Check]:
+def _build_checks(ctx: Context, *, memo: dev.CheckMemo | None = None, all_presets: bool = False) -> list[dev.Check]:
     """The pre-commit registry: project policy for which gates exist.
 
     `memo` lets the test gate skip a binary that passed before on an identical artifact, and record each pass.
@@ -368,13 +371,16 @@ def _build_checks(ctx: Context, *, memo: dev.CheckMemo | None = None) -> list[de
         # Not fixable, so fix and scope are ignored.
         system = platform.system()
         specs = [ctx.default_preset_name()]
-        for sibling in (
+        # The siblings are opt-in: each is a whole build of its own after any change to clean-core, which made
+        # them most of a gate run's time, and CI runs every one of them anyway.
+        siblings = (
             ctx.policy.default_debug.get(system),
             ctx.policy.default_release.get(system),
             ctx.policy.default_singlethreaded.get(system),
             ctx.policy.default_sanitize.get(system),
             ctx.policy.default_sanitize_thread.get(system),
-        ):
+        ) if all_presets else ()
+        for sibling in siblings:
             if sibling:
                 specs.append(sibling)
         presets = ctx.resolve_presets(specs)
@@ -513,8 +519,8 @@ def _build_checks(ctx: Context, *, memo: dev.CheckMemo | None = None) -> list[de
                            "libs/graphics/shaped-graphics/**"),
                   builds=("sgl",)),
         dev.Check("test",
-                  "build + run the full suite on the debug, default, release, single-threaded "
-                  "(and where supported, sanitizer) presets",
+                  "build + run the full suite on the default preset; with --all-presets also on the debug, release, "
+                  "single-threaded and sanitizer ones, under --smoke",
                   False, check_tests, requires_green=True, always=True),
     ]
 
@@ -641,7 +647,7 @@ def run(args: argparse.Namespace, ctx: Context) -> None:
     # A deliberate full run (--all) and a gate named on the command line bypass the memo's reads; both still record.
     memo = _memo(ctx, read=not (args.all or bool(args.names)))
     try:
-        checks = _build_checks(ctx, memo=memo)
+        checks = _build_checks(ctx, memo=memo, all_presets=args.all_presets)
         dev.validate_checks(checks, root=ctx.root)
     except dev.CheckRegistryError as e:
         ctx.die(str(e))
