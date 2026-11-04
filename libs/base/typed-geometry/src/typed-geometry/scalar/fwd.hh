@@ -68,6 +68,14 @@ struct bigfloat_sbo;
 /// the inline size used until the sweep over K is measured.
 using bigfloat = bigfloat_sbo<2>;
 
+/// an exact sum of doubles, Shewchuk's floating-point expansion, with K components inline; exact only within the double range
+/// (see scalar/float_expansion/float_expansion.hh).
+template <int K>
+struct float_expansion_sbo;
+
+/// the inline size used until a sweep over K is measured.
+using float_expansion = float_expansion_sbo<4>;
+
 /// one summand of bigfloat_sbo<K>::msum, a or a * b (see scalar/bigfloat/bigfloat.hh).
 struct bigfloat_summand;
 

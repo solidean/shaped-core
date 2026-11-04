@@ -7,6 +7,7 @@ add_library(typed-geometry
     src/typed-geometry/typed-geometry.cc
     src/typed-geometry/scalar/half_float.cc
     src/typed-geometry/scalar/bigfloat/bigfloat.cc
+    src/typed-geometry/scalar/float_expansion/float_expansion.cc
     src/typed-geometry/scalar/bigint/bigint.cc
     src/typed-geometry/scalar/bigrat/bigrat.cc
     src/typed-geometry/scalar/limbs.cc
@@ -43,6 +44,8 @@ target_sources(typed-geometry
     src/typed-geometry/scalar/fixed_int/fixed_arith.hh
     src/typed-geometry/scalar/bigfloat/impl/kernels.hh
     src/typed-geometry/scalar/bigfloat/bigfloat.hh
+    src/typed-geometry/scalar/float_expansion/impl/kernels.hh
+    src/typed-geometry/scalar/float_expansion/float_expansion.hh
     src/typed-geometry/scalar/impl/limbs.hh
     src/typed-geometry/scalar/bigint/bigint.hh
     src/typed-geometry/scalar/bigrat/bigrat.hh
@@ -201,6 +204,7 @@ if(SC_BUILD_TESTS)
         tests/scalar/fixed_int-test.cc
         tests/scalar/fixed_int-golden.gen.cc
         tests/scalar/bigfloat-test.cc
+        tests/scalar/float_expansion-test.cc
         tests/scalar/bigint-test.cc
         tests/scalar/bigrat-test.cc
 

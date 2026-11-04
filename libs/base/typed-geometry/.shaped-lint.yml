@@ -21,3 +21,13 @@ rules:
     value: <cmath>
     reason: std::fma is the correctly rounded oracle the exact bigfloat msum is held against, and neither tg nor clean-core has a fused multiply-add
     files: tests/scalar/bigfloat-test.cc
+
+  - kind: allow-include
+    value: <immintrin.h>
+    reason: the FMA instruction for an expansion's two_product, compiled in only where the build target guarantees FMA
+    files: src/typed-geometry/scalar/float_expansion/impl/kernels.hh
+
+  - kind: allow-include
+    value: <cmath>
+    reason: std::fma for an expansion's two_product on MSVC without FMA, since neither tg nor clean-core has a fused multiply-add
+    files: src/typed-geometry/scalar/float_expansion/impl/kernels.hh

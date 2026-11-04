@@ -5,6 +5,7 @@
 // - Operators against the fused msum, which accumulates a sum of products in one window with at most one allocation.
 // - Two input regimes: coordinates of similar magnitude, as geometry has, and exponents spread wide, which spill at any K.
 // - A bump-arena prototype over the same kernels, against the value type.
+// - tg::float_expansion, Shewchuk's expansions, against bigfloat: as a value type, and as its kernels over stack arrays alone.
 // The counters benchmark is the one to read on a loaded machine: instructions retired per call barely move under load.
 //
 // Run with
@@ -17,6 +18,7 @@
 #include <nexus/bench/run.hh>
 #include <nexus/test.hh>
 #include <typed-geometry/scalar/bigfloat/bigfloat.hh>
+#include <typed-geometry/scalar/float_expansion/float_expansion.hh>
 #include <typed-geometry/scalar/scalar.hh>
 
 #include <type_traits>
@@ -96,6 +98,124 @@ int orient3d_msum(f64 const* a, f64 const* b, f64 const* c, f64 const* d)
     auto const m2 = bf::msum({{v[0], w[1]}, {v[1], w[0], true}});
     return bf::msum({{u[0], m0}, {u[1], m1}, {u[2], m2}}).sign();
 }
+
+template <int K>
+int orient2d_fe(f64 const* p, f64 const* q, f64 const* r)
+{
+    using fe = tg::float_expansion_sbo<K>;
+    auto const ax = fe(p[0]) - fe(r[0]);
+    auto const ay = fe(p[1]) - fe(r[1]);
+    auto const bx = fe(q[0]) - fe(r[0]);
+    auto const by = fe(q[1]) - fe(r[1]);
+    return (ax * by - ay * bx).sign();
+}
+
+template <int K>
+int orient3d_fe(f64 const* a, f64 const* b, f64 const* c, f64 const* d)
+{
+    using fe = tg::float_expansion_sbo<K>;
+    fe u[3], v[3], w[3];
+    for (auto i = 0; i < 3; ++i)
+    {
+        u[i] = fe(a[i]) - fe(d[i]);
+        v[i] = fe(b[i]) - fe(d[i]);
+        w[i] = fe(c[i]) - fe(d[i]);
+    }
+    auto const m0 = v[1] * w[2] - v[2] * w[1];
+    auto const m1 = v[2] * w[0] - v[0] * w[2];
+    auto const m2 = v[0] * w[1] - v[1] * w[0];
+    return (u[0] * m0 + u[1] * m1 + u[2] * m2).sign();
+}
+
+/// insphere of a, b, c, d against e, degree 5, in any exact type T: the lifted 4x4 determinant by its 2x2 minors.
+template <class T>
+int insphere_t(f64 const* a, f64 const* b, f64 const* c, f64 const* d, f64 const* e)
+{
+    T x[4], y[4], z[4];
+    f64 const* const ps[4] = {a, b, c, d};
+    for (auto i = 0; i < 4; ++i)
+    {
+        x[i] = T(ps[i][0]) - T(e[0]);
+        y[i] = T(ps[i][1]) - T(e[1]);
+        z[i] = T(ps[i][2]) - T(e[2]);
+    }
+    T l[4];
+    for (auto i = 0; i < 4; ++i)
+        l[i] = x[i] * x[i] + y[i] * y[i] + z[i] * z[i];
+    auto const ab = x[0] * y[1] - x[1] * y[0];
+    auto const bc = x[1] * y[2] - x[2] * y[1];
+    auto const cd = x[2] * y[3] - x[3] * y[2];
+    auto const da = x[3] * y[0] - x[0] * y[3];
+    auto const ac = x[0] * y[2] - x[2] * y[0];
+    auto const bd = x[1] * y[3] - x[3] * y[1];
+    auto const abc = z[2] * ab + z[0] * bc - z[1] * ac;
+    auto const bcd = z[3] * bc + z[1] * cd - z[2] * bd;
+    auto const cda = z[0] * cd + z[2] * da + z[3] * ac;
+    auto const dab = z[1] * da + z[3] * ab + z[0] * bd;
+    return (l[3] * abc - l[2] * dab + l[1] * cda - l[0] * bcd).sign();
+}
+
+// float_expansion's kernels over stack arrays, as a generated expansion predicate runs them: no value type, no allocation.
+namespace raw
+{
+struct expansion
+{
+    f64 c[64];
+    i32 n = 0;
+};
+
+CC_FORCE_INLINE expansion diff(f64 a, f64 b)
+{
+    expansion r;
+    r.n = tg::impl::float_expansion_two_sum(a, -b, r.c);
+    return r;
+}
+
+CC_FORCE_INLINE expansion mul(expansion const& a, expansion const& b)
+{
+    expansion r;
+    if (a.n == 0 || b.n == 0)
+        return r;
+    r.n = tg::impl::float_expansion_product(a.c, a.n, b.c, b.n, r.c);
+    return r;
+}
+
+CC_FORCE_INLINE expansion add(expansion const& a, expansion const& b, bool subtract)
+{
+    expansion r;
+    r.n = tg::impl::float_expansion_sum(a.c, a.n, b.c, b.n, subtract, r.c);
+    return r;
+}
+
+CC_FORCE_INLINE int sign(expansion const& a)
+{
+    return a.n == 0 ? 0 : a.c[a.n - 1] > 0.0 ? 1 : -1;
+}
+
+int orient2d(f64 const* p, f64 const* q, f64 const* r)
+{
+    auto const ax = diff(p[0], r[0]);
+    auto const ay = diff(p[1], r[1]);
+    auto const bx = diff(q[0], r[0]);
+    auto const by = diff(q[1], r[1]);
+    return sign(add(mul(ax, by), mul(ay, bx), true));
+}
+
+int orient3d(f64 const* a, f64 const* b, f64 const* c, f64 const* d)
+{
+    expansion u[3], v[3], w[3];
+    for (auto i = 0; i < 3; ++i)
+    {
+        u[i] = diff(a[i], d[i]);
+        v[i] = diff(b[i], d[i]);
+        w[i] = diff(c[i], d[i]);
+    }
+    auto const m0 = add(mul(v[1], w[2]), mul(v[2], w[1]), true);
+    auto const m1 = add(mul(v[2], w[0]), mul(v[0], w[2]), true);
+    auto const m2 = add(mul(v[0], w[1]), mul(v[1], w[0]), true);
+    return sign(add(add(mul(u[0], m0), mul(u[1], m1), false), mul(u[2], m2), false));
+}
+} // namespace raw
 
 // A prototype to measure against bigfloat_sbo: values live in a bump arena per predicate call.
 // A value is a handle into the arena, trivially destructible; an allocation is one add, and the arena is dropped as a whole.
@@ -363,6 +483,21 @@ void count_orient3d(char const* name, cc::vector<f64> const& pts, F f)
                        nx::bench::sink(acc);
                    });
 }
+
+template <class F>
+void count_insphere(char const* name, cc::vector<f64> const& pts, F f)
+{
+    count_per_call(name, counter_repeats / 10 * (input_count - 4),
+                   [&]
+                   {
+                       auto acc = 0;
+                       auto const* const p = nx::bench::keep(pts.data());
+                       for (auto r = 0; r < counter_repeats / 10; ++r)
+                           for (auto i = 0; i + 4 < input_count; ++i)
+                               acc += f(p + 3 * i, p + 3 * i + 3, p + 3 * i + 6, p + 3 * i + 9, p + 3 * i + 12);
+                       nx::bench::sink(acc);
+                   });
+}
 } // namespace
 
 BENCHMARK("tg bigfloat - counters per call")
@@ -377,7 +512,18 @@ BENCHMARK("tg bigfloat - counters per call")
                   == orient2d_ops<2>(p + 3 * i, p + 3 * i + 3, p + 3 * i + 6));
             CHECK(arena::orient3d(p + 3 * i, p + 3 * i + 3, p + 3 * i + 6, p + 3 * i + 9)
                   == orient3d_ops<2>(p + 3 * i, p + 3 * i + 3, p + 3 * i + 6, p + 3 * i + 9));
+            CHECK(orient2d_fe<4>(p + 3 * i, p + 3 * i + 3, p + 3 * i + 6)
+                  == orient2d_ops<2>(p + 3 * i, p + 3 * i + 3, p + 3 * i + 6));
+            CHECK(raw::orient2d(p + 3 * i, p + 3 * i + 3, p + 3 * i + 6)
+                  == orient2d_ops<2>(p + 3 * i, p + 3 * i + 3, p + 3 * i + 6));
+            CHECK(orient3d_fe<4>(p + 3 * i, p + 3 * i + 3, p + 3 * i + 6, p + 3 * i + 9)
+                  == orient3d_ops<2>(p + 3 * i, p + 3 * i + 3, p + 3 * i + 6, p + 3 * i + 9));
+            CHECK(raw::orient3d(p + 3 * i, p + 3 * i + 3, p + 3 * i + 6, p + 3 * i + 9)
+                  == orient3d_ops<2>(p + 3 * i, p + 3 * i + 3, p + 3 * i + 6, p + 3 * i + 9));
         }
+        for (auto i = 0; i + 4 < input_count; ++i)
+            CHECK(insphere_t<tg::float_expansion>(p + 3 * i, p + 3 * i + 3, p + 3 * i + 6, p + 3 * i + 9, p + 3 * i + 12)
+                  == insphere_t<tg::bigfloat>(p + 3 * i, p + 3 * i + 3, p + 3 * i + 6, p + 3 * i + 9, p + 3 * i + 12));
         cc::println("orient2d, {}", spread ? "spread exponents" : "similar magnitudes");
         count_orient2d("f64, inexact", pts, orient2d_f64);
         count_orient2d("K=1 ops", pts, orient2d_ops<1>);
@@ -387,6 +533,10 @@ BENCHMARK("tg bigfloat - counters per call")
         count_orient2d("K=2 msum", pts, orient2d_msum<2>);
         count_orient2d("K=3 msum", pts, orient2d_msum<3>);
         count_orient2d("arena", pts, arena::orient2d);
+        count_orient2d("expansion K=2", pts, orient2d_fe<2>);
+        count_orient2d("expansion K=4", pts, orient2d_fe<4>);
+        count_orient2d("expansion K=8", pts, orient2d_fe<8>);
+        count_orient2d("expansion raw", pts, raw::orient2d);
         cc::println("orient3d, {}", spread ? "spread exponents" : "similar magnitudes");
         count_orient3d("f64, inexact", pts, orient3d_f64);
         count_orient3d("K=1 ops", pts, orient3d_ops<1>);
@@ -396,6 +546,15 @@ BENCHMARK("tg bigfloat - counters per call")
         count_orient3d("K=2 msum", pts, orient3d_msum<2>);
         count_orient3d("K=3 msum", pts, orient3d_msum<3>);
         count_orient3d("arena", pts, arena::orient3d);
+        count_orient3d("expansion K=2", pts, orient3d_fe<2>);
+        count_orient3d("expansion K=4", pts, orient3d_fe<4>);
+        count_orient3d("expansion K=8", pts, orient3d_fe<8>);
+        count_orient3d("expansion raw", pts, raw::orient3d);
+        cc::println("insphere, {}", spread ? "spread exponents" : "similar magnitudes");
+        count_insphere("K=2 ops", pts, insphere_t<tg::bigfloat_sbo<2>>);
+        count_insphere("K=3 ops", pts, insphere_t<tg::bigfloat_sbo<3>>);
+        count_insphere("expansion K=4", pts, insphere_t<tg::float_expansion_sbo<4>>);
+        count_insphere("expansion K=8", pts, insphere_t<tg::float_expansion_sbo<8>>);
     }
 }
 

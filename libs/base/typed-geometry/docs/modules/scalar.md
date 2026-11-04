@@ -151,6 +151,33 @@ It needs integers of a chosen width, and arithmetic whose result width the calle
   The tests use that as their oracle: an exact sum, product or fma rounded once must equal the hardware's.
 - **Rounding is not supported yet.** When it comes, it is a set of operations that take a precision, over this representation.
 
+### `float_expansion_sbo` is exact ring arithmetic in doubles, cheap only at low degree
+
+`tg::float_expansion_sbo<K>` is Shewchuk's floating-point expansion: a value as a sum of doubles, smallest magnitude first, strongly nonoverlapping, with no zero component.
+`+ - *` and comparison are exact by error-free transforms, two_sum and a two_product by fma, with zero elimination after each.
+
+- **Exact only within the double range, which bigfloat is not limited to.** No sum may overflow, and no product of components may fall below 2^-960, where its roundoff reaches the subnormals.
+  Leaving the range is a CC_ASSERT, so a build with assertions never returns a silent wrong value; a release build does.
+- **Over f64 only.** An f32 expansion has 2^±126 of range, which a degree-5 predicate leaves on ordinary coordinates, and needs twice the components for the same value.
+  Its wider SIMD buys nothing: the merges branch on the data.
+- **Storage is bigfloat's**: K components inline, sizeof 8 K + 8, spilling to cc's node allocator; `tg::float_expansion` is K = 4 until a sweep decides.
+  A sum or product of single components is inline, and every merge is one call into non-template kernels.
+- **Measured against bigfloat, it wins only at low degree.** Per call on a Zen 5, orient2d through the operators, inputs of similar magnitude and spread over 2^±200
+  (`tests/benchmarks/bigfloat-benchmark.cc`, the counters benchmark):
+
+  | predicate | inputs | bigfloat K=2 | float_expansion K=4 | expansion kernels on stack arrays |
+  |---|---|---|---|---|
+  | orient2d | similar | 995 ins, 232 cyc | 468 ins, 194 cyc | 413 ins, 104 cyc |
+  | orient2d | spread | 3,217 ins, 745 cyc | 1,960 ins, 540 cyc | 1,472 ins, 363 cyc |
+  | orient3d | similar | 4,683 ins, 1,029 cyc | 3,127 ins, 938 cyc | 2,738 ins, 859 cyc |
+  | orient3d | spread | 12,068 ins, 3,922 cyc | 16,675 ins, 10,089 cyc | 13,696 ins, 9,348 cyc |
+  | insphere | similar | 16,367 ins, 3,959 cyc | 18,304 ins, 9,292 cyc | |
+  | insphere | spread | 46,260 ins, 16,178 cyc | 588,596 ins, 481,225 cyc | |
+
+  The merges' branches decide it: an expansion's length grows with degree and with the spread of exponents, and each merge step is a data-dependent branch.
+  At degree 5 over spread inputs a call mispredicts ~8,700 times against bigfloat's ~230.
+  These evaluate the whole determinant on every call; a generated predicate filters first and pays this only near degeneracy.
+
 ### `bigint` is an integer one pointer wide
 
 `tg::bigint` is an arbitrary-precision integer, in sign and magnitude, for values of a few hundred bits that no width can be claimed for in advance.
