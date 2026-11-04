@@ -172,3 +172,13 @@ struct covered:
 @pixel fun adding_pixel(p: covered){gradients} -> shade:
     let before = gradients.per_splat[0].add(1.0)
     return {color = float4(before)}
+
+// a mut parameter of an atomic's type is the caller's atomic, which the function updates as the caller would
+fun bump_twice(counter: mut atomic[uint]) -> uint:
+    counter.add(1u)
+    return counter.add(1u)
+
+test:
+    counters.hits.store(3)
+    bump_twice(mut counters.hits) == 4
+    counters.hits.load() == 5

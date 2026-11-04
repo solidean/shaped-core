@@ -466,6 +466,10 @@ Its `add` reads the bits, adds in float, and retries a compare-exchange until no
 A helper invocation's atomics have no effect, so a pixel stage would never leave that loop, and its `add` takes no pixel stage.
 A native float add, which Metal and a Vulkan extension have, is [the incubator's](incubator/atomics.md), as are 64 bits and a vertex stage.
 
+**`add_reduced(mut slot, key, v)` adds where many invocations add to one slot**, as every pixel a splat covers adds to the splat's gradient.
+Where every active invocation of the subgroup names the same `key`, it adds the subgroup's sum once, from the first of them, and otherwise each adds its own.
+It is a subgroup operation, so it needs `subgroups` and stands in uniform control flow (CHK-376, CHK-377): an invocation with nothing to add calls it with 0.
+
 **A compare-exchange stores `desired` where the atomic holds `expected`, and comes in two forms, each named for what it promises.**
 
 * **`compare_exchange_strong(expected, desired)`** gives the value before, and never fails spuriously.

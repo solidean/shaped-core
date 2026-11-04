@@ -761,10 +761,12 @@ struct checker
     /// `resolve_type` for the type of a value — a field, a parameter, a result, a local — where a buffer cannot stand.
     /// A buffer is a resource a binding member names, and is only ever read through a subscript.
     /// `allows_resource` takes a texture, an image or a sampler, as a parameter of a function of the program (CHK-366).
+    /// `allows_atomic` takes an atomic, as a `mut` parameter does: the caller's atomic, which the body updates (CHK-297).
     [[nodiscard]] type_id resolve_value_type(i32 file,
                                              ast::expr_id expr,
                                              function_scope const* scope = nullptr,
-                                             bool allows_resource = false);
+                                             bool allows_resource = false,
+                                             bool allows_atomic = false);
     /// The type of the prelude's `@builtin struct` named `name`; without one it reports at `where` and is the error type.
     [[nodiscard]] type_id type_of_builtin(cc::string_view name, i32 file, source_span where);
     /// The name of the plain vector of `count` values of `element`, `float3`; empty for an element without vectors.

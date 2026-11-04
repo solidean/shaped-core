@@ -113,6 +113,24 @@ fun int4.from_bits(u: uint4) => reinterpret_as_int(u)
 
 fun nearly_equal(a: float, b: float, .within: float) => abs(a - b) <= within
 
+// ---- an add many invocations make to one slot ------------------------------------------------------------------------
+//
+// Where every active invocation of the subgroup adds to the same slot, one atomic add of their sum stands for all of
+// them: the first of them adds it, which the exclusive sum of 1 says, being 0 in it alone.
+// The subgroup operations run in every invocation that calls it, before any branch (CHK-377).
+
+/// Adds `v` to `slot`, as `slot.add(v)` would; where every active invocation of the subgroup names the same `key`, the
+/// subgroup's sum is added once instead.
+/// It needs `subgroups`, and stands in uniform control flow: an invocation with nothing to add calls it with 0.
+fun add_reduced(slot: mut atomic[float], key: int, v: float):
+    let shared = subgroup_all(key == subgroup_broadcast_first(key))
+    let total = subgroup_add(v)
+    let first = subgroup_exclusive_add(1) == 0
+    if shared:
+        if first => slot.add(total)
+    else:
+        slot.add(v)
+
 // ---- derivatives ----------------------------------------------------------------------------------------------------
 //
 // PROTOTYPE (docs/spec/incubator/autodiff.md): the flattener writes these calls' derivatives, and never their bodies.
