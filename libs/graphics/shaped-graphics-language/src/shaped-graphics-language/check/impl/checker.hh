@@ -1295,7 +1295,9 @@ struct checker
     /// Reports nothing; a local of the name hides every type of it.
     [[nodiscard]] bool is_type_operand(function_scope const& scope, ast::expr_id expr) const;
     /// CHK-429: `A == B` or `A != B` over two types, a `bool` an instance knows; none where neither operand is a type.
-    [[nodiscard]] cc::optional<type_id> check_type_comparison(function_scope& scope, ast::expr_id id, ast::call const& call);
+    [[nodiscard]] cc::optional<type_id> check_type_comparison(function_scope& scope,
+                                                              ast::expr_id id,
+                                                              ast::call const& call);
     /// What checked condition `expr` is whatever the target, the device and the options are (CHK-430).
     /// None where it reads any of them, or anything else this compile alone knows.
     [[nodiscard]] cc::optional<bool> known_condition(i32 file, ast::expr_id expr) const;

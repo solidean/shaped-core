@@ -336,7 +336,8 @@ struct uniformity_pass
         auto const parameters = m.at(info.parameters);
         auto const arguments = e.at(c.arguments);
         for (auto k = isize(0); k < parameters.size() && k < arguments.size(); ++k)
-            if (auto const* const l = e.at(arguments[k]).node.try_as<flat_local_ref>(); l != nullptr && parameters[k].is_mut)
+            if (auto const* const l = e.at(arguments[k]).node.try_as<flat_local_ref>();
+                l != nullptr && parameters[k].is_mut)
                 settle_local(l->local, result, flow);
         return result;
     }

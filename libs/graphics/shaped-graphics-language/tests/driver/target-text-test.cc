@@ -290,7 +290,8 @@ TEST("sgl target text - a body's declaration says what its text asks of the cont
     CHECK(varying.error().contains("non-uniform-control-flow"));
     CHECK(varying.error().contains("lane_sum exchanges values within the subgroup"));
     // without `@pure`, what a text gives is unproven, and so is what it writes through a `mut` parameter
-    auto const unproven = compiled(branching_on(k_lane_functions, "lane_index() > 4", "lane_sum(1.0)"), target::hlsl_dx12);
+    auto const unproven
+        = compiled(branching_on(k_lane_functions, "lane_index() > 4", "lane_sum(1.0)"), target::hlsl_dx12);
     REQUIRE(unproven.has_error());
     CHECK(unproven.error().contains("lane_index gave, whose body is a target's text"));
     auto const written = compiled(
