@@ -129,6 +129,9 @@ ASYNC_INVOCABLE_TEST("sv::material_shader_cache - two materials of one permutati
 {
     if (cannot_compile())
         SKIP("no SGL compiler for this backend to build the generated hit groups");
+    // what collapses into one compile is the cache's to decide, which no preset's flags change
+    if (nx::is_smoke())
+        SKIP("a smoke run: the default preset holds what one compile serves");
 
     auto lib = sv::material_library::create();
     sv::register_builtin_material_types(lib);
@@ -186,14 +189,19 @@ ASYNC_INVOCABLE_TEST("sv::material_shader_cache - every builtin type compiles as
     auto cache = sv::material_shader_cache::create(ctx_h.get());
     auto const mesh = make_mesh();
 
-    for (auto const& name : {sv::builtin_material::openpbr, sv::builtin_material::pbr, sv::builtin_material::unlit})
+    // a smoke run compiles one type, which is what a preset's flags can break
+    cc::string_view const all_types[]
+        = {sv::builtin_material::openpbr, sv::builtin_material::pbr, sv::builtin_material::unlit};
+    auto const types = nx::is_smoke() ? cc::span<cc::string_view const>(all_types).subspan({.offset = 1, .size = 1})
+                                      : cc::span<cc::string_view const>(all_types);
+    for (auto const name : types)
     {
         auto const type = lib.acquire_type(name).value();
         auto const id = lib.acquire(sv::material::create(cc::string(name), type, {}));
         (void)co_await require_compiled(ctx_h.get(), &cache.acquire(sv::resolve_material(lib, id, mesh)));
     }
 
-    CHECK(cache.count() == 3); // three types, three permutations — nothing collapsed that should not have
+    CHECK(cache.count() == types.size()); // a type each, a permutation each — nothing collapsed that should not have
 
     // find() answers for what was acquired, and only for that.
     auto const pbr = lib.acquire_type(sv::builtin_material::pbr).value();

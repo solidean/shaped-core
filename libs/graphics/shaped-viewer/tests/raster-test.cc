@@ -1040,6 +1040,9 @@ ASYNC_INVOCABLE_TEST("sv - a raster layer's capture finishes on its first drawn 
 // So inside every face the two images agree to rounding; an edge is left out, since the two rasterizers may cover it apart.
 ASYNC_TEST("sv vulkan - the raster path draws what it draws on dx12, to rounding")
 {
+    // what one SGL source draws on two APIs is the shader compiler's, which no preset's flags change
+    if (nx::is_smoke())
+        SKIP("a smoke run: the default preset holds vulkan's image to dx12's");
     auto ctx = sg::create_vulkan_context({.enable_validation_layers = true});
     if (ctx.has_error())
         SKIP("no vulkan device");

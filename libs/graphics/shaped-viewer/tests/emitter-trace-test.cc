@@ -289,6 +289,12 @@ void check_channels_match(cc::span<tg::vec3f const> image,
 
 constexpr sv::render_mode k_modes[] = {sv::render_mode::megakernel, sv::render_mode::wavefront};
 
+/// Both tracers, each its own shader code; a smoke run traces the megakernel alone.
+[[nodiscard]] cc::span<sv::render_mode const> modes()
+{
+    return nx::is_smoke() ? cc::span<sv::render_mode const>(k_modes, 1) : cc::span<sv::render_mode const>(k_modes);
+}
+
 [[nodiscard]] cc::string_view name_of(sv::render_mode mode)
 {
     return mode == sv::render_mode::megakernel ? "megakernel" : "wavefront";
@@ -319,7 +325,7 @@ ASYNC_INVOCABLE_TEST("sv - an emissive quad lights a floor as a rect light of it
     rect.lights.push_back(
         sv::light::rect(center - tg::vec3f(0, 1e-3f, 0), tg::vec3f(half[0], 0, 0), tg::vec3f(0, 0, half[1])).nits(nits));
 
-    for (auto const mode : k_modes)
+    for (auto const mode : modes())
     {
         if (!can_trace(ctx, mode))
             continue;
@@ -372,7 +378,7 @@ ASYNC_INVOCABLE_TEST("sv - an emitter of many uneven triangles lights as a rect 
     rect.lights.push_back(
         sv::light::rect(center - tg::vec3f(0, 1e-3f, 0), tg::vec3f(half[0], 0, 0), tg::vec3f(0, 0, half[1])).nits(nits));
 
-    for (auto const mode : k_modes)
+    for (auto const mode : modes())
     {
         if (!can_trace(ctx, mode))
             continue;
@@ -402,7 +408,7 @@ ASYNC_INVOCABLE_TEST("sv - an emitter's mean is the same sampled or reached by b
     auto bounced = sampled;
     bounced.lights.push_back(sv::light::point(tg::pos3f(0, -0.5f, 3)).candela(1e5f));
 
-    for (auto const mode : k_modes)
+    for (auto const mode : modes())
     {
         if (!can_trace(ctx, mode))
             continue;
@@ -438,7 +444,7 @@ ASYNC_INVOCABLE_TEST("sv - an emissive furnace converges to its geometric series
     furnace.meshes.push_back({.mesh = mesh_of("furnace", box_positions(tg::pos3f(-1, -1, -1), tg::pos3f(1, 1, 1)),
                                               lambert(tg::vec3f(albedo, albedo, albedo), emission))});
 
-    for (auto const mode : k_modes)
+    for (auto const mode : modes())
     {
         if (!can_trace(ctx, mode))
             continue;
@@ -480,7 +486,7 @@ ASYNC_INVOCABLE_TEST("sv - an emitter placed by a non-uniform scale and a rotati
     auto baked = emitter_scene{.meshes = room(), .camera = floor_camera()};
     baked.meshes.push_back({.mesh = mesh_of("baked lamp", world, material)});
 
-    for (auto const mode : k_modes)
+    for (auto const mode : modes())
     {
         if (!can_trace(ctx, mode))
             continue;
@@ -511,7 +517,7 @@ ASYNC_INVOCABLE_TEST("sv - power selection over a dim large and a bright small e
         return s;
     };
 
-    for (auto const mode : k_modes)
+    for (auto const mode : modes())
     {
         if (!can_trace(ctx, mode))
             continue;
@@ -544,7 +550,7 @@ ASYNC_INVOCABLE_TEST("sv - a cutout emitter at opacity one half delivers half th
         return s;
     };
 
-    for (auto const mode : k_modes)
+    for (auto const mode : modes())
     {
         if (!can_trace(ctx, mode))
             continue;
@@ -777,7 +783,7 @@ ASYNC_INVOCABLE_TEST("sv - a half-black, half-white textured emitter lights as a
         {.mesh = mesh_of("white half", ceiling_quad(center + tg::vec3f(quarter, 0, 0), tg::vec2f(quarter, half[1])),
                          lambert(tg::vec3f(0, 0, 0), nits))});
 
-    for (auto const mode : k_modes)
+    for (auto const mode : modes())
     {
         if (!can_trace(ctx, mode))
             continue;
@@ -831,7 +837,7 @@ ASYNC_INVOCABLE_TEST("sv - a per-vertex emitter's mean is the same sampled or re
     auto bounced = sampled;
     bounced.lights.push_back(sv::light::point(tg::pos3f(0, -0.5f, 3)).candela(1e5f));
 
-    for (auto const mode : k_modes)
+    for (auto const mode : modes())
     {
         if (!can_trace(ctx, mode))
             continue;
@@ -890,7 +896,7 @@ ASYNC_INVOCABLE_TEST("sv - the Cornell box's per-triangle lamp lights the box as
     constant.meshes.push_back({.mesh = enclosure});
     constant.meshes.push_back({.mesh = mesh_of("cornell lamp, constant", lamp_positions, constant_material)});
 
-    for (auto const mode : k_modes)
+    for (auto const mode : modes())
     {
         if (!can_trace(ctx, mode))
             continue;
@@ -948,7 +954,7 @@ ASYNC_INVOCABLE_TEST("sv - an indexed emitter reads its per-vertex and per-corne
     corner_lit.meshes.push_back(
         {.mesh = lamp("indexed ramp, per corner", sv::attribute_frequency::per_corner, per_corner)});
 
-    for (auto const mode : k_modes)
+    for (auto const mode : modes())
     {
         if (!can_trace(ctx, mode))
             continue;
@@ -1015,7 +1021,7 @@ ASYNC_INVOCABLE_TEST("sv - a per-triangle lamp of two different triangles lights
                                                     lamp_positions.subspan(cc::offset_size{.offset = 3 * t, .size = 3}),
                                                     constant_of(lamp_materials[t], t))});
 
-    for (auto const mode : k_modes)
+    for (auto const mode : modes())
     {
         if (!can_trace(ctx, mode))
             continue;
@@ -1107,7 +1113,7 @@ ASYNC_INVOCABLE_TEST("sv - a textured emitter under a transform and a textured l
         {.mesh = mesh_of("right half", ceiling_quad(center + tg::vec3f(quarter, 0, 0), tg::vec2f(quarter, half[1])),
                          glow(tg::vec3f(5, 2.9f, 3.45f), 0.6f))});
 
-    for (auto const mode : k_modes)
+    for (auto const mode : modes())
     {
         if (!can_trace(ctx, mode))
             continue;
@@ -1158,7 +1164,7 @@ ASYNC_INVOCABLE_TEST("sv - a layer whose only emitter is shown to emit nothing k
     auto plain = emitter_scene{.meshes = room(), .camera = floor_camera(), .keeps_fallback = true};
     plain.meshes.push_back({.mesh = mesh_of("black quad", ceiling_quad(center, half), lambert(tg::vec3f(0, 0, 0)))});
 
-    for (auto const mode : k_modes)
+    for (auto const mode : modes())
     {
         if (!can_trace(ctx, mode))
             continue;
@@ -1197,7 +1203,9 @@ ASYNC_INVOCABLE_TEST("sv - an emitter whose material fails to compile lights the
 
     // Each permutation's failure is said once by each integrator that meets it: the megakernel's hit group, the wavefront's shade kernel.
     nx::expect_error("the hit group of <material 'sv_test_broken_lamp_*'> did not compile*", nx::exactly(2));
-    nx::expect_error("the shade kernel of <material 'sv_test_broken_lamp_*'> did not compile*", nx::exactly(2));
+    // the shade kernel is the wavefront's, which a smoke run does not trace
+    if (!nx::is_smoke())
+        nx::expect_error("the shade kernel of <material 'sv_test_broken_lamp_*'> did not compile*", nx::exactly(2));
 
     auto resources = sv::gpu_resource_manager::create(ctx);
     auto const center = tg::pos3f(0, 1.5f, 0.3f);
@@ -1211,7 +1219,7 @@ ASYNC_INVOCABLE_TEST("sv - an emitter whose material fails to compile lights the
     no_lamp.meshes.push_back({.mesh = mesh_of("failed quad", ceiling_quad(center, half), dark_material)});
     no_lamp.lights.push_back(key);
 
-    for (auto const mode : k_modes)
+    for (auto const mode : modes())
     {
         if (!can_trace(ctx, mode))
             continue;

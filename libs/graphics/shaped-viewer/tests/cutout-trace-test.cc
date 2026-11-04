@@ -6,7 +6,7 @@
 #include <clean-core/thread/async_coroutine.hh>
 #include <nexus/async-test.hh>
 #include <nexus/test.hh>
-#include <nexus/tests/thorough.hh> // nx::is_thorough
+#include <nexus/tests/thorough.hh> // nx::is_thorough, nx::is_smoke
 #include <shaped-graphics/all.hh>
 #include <shaped-viewer/all.hh>
 #include <typed-geometry/scalar/scalar.hh> // tg::abs
@@ -231,52 +231,56 @@ ASYNC_INVOCABLE_TEST("sv::pathtrace_routine - a cutout cuts where its opacity sa
             ctx, resources, quad_of("cutout threshold", openpbr, dark_openpbr(0.5f), cc::move(attributes)));
         check_counts(c, expect_cut::half, "a cutoff of 0.5 over opacities of 0.3 and 0.7");
     }
+    // a smoke run traces the first case alone, which is what a preset's flags can break
+    if (!nx::is_smoke())
     {
-        auto attributes = cc::vector<sv::mesh_attribute>();
-        attributes.push_back(per_triangle("opacity", 0.6f, 0.9f));
-        auto const c = co_await trace_cut(
-            ctx, resources, quad_of("cutout threshold kept", openpbr, dark_openpbr(0.5f), cc::move(attributes)));
-        check_counts(c, expect_cut::none, "a cutoff of 0.5 over opacities of 0.6 and 0.9");
-    }
-    if (nx::is_thorough())
-    {
-        {
-            auto bindings = cc::vector<binding>{black, binding::of("opacity", 0.0f)};
-            auto const c = co_await trace_cut(ctx, resources, quad_of("cutout constant", unlit, cc::move(bindings), {}));
-            check_counts(c, expect_cut::all, "a constant opacity of 0");
-        }
         {
             auto attributes = cc::vector<sv::mesh_attribute>();
-            attributes.push_back(per_triangle("opacity", 0.0f, 1.0f));
+            attributes.push_back(per_triangle("opacity", 0.6f, 0.9f));
             auto const c = co_await trace_cut(
-                ctx, resources, quad_of("cutout attribute", unlit, cc::vector<binding>{black}, cc::move(attributes)));
-            check_counts(c, expect_cut::half, "a per-triangle opacity of 0 and 1");
+                ctx, resources, quad_of("cutout threshold kept", openpbr, dark_openpbr(0.5f), cc::move(attributes)));
+            check_counts(c, expect_cut::none, "a cutoff of 0.5 over opacities of 0.6 and 0.9");
+        }
+        if (nx::is_thorough())
+        {
+            {
+                auto bindings = cc::vector<binding>{black, binding::of("opacity", 0.0f)};
+                auto const c
+                    = co_await trace_cut(ctx, resources, quad_of("cutout constant", unlit, cc::move(bindings), {}));
+                check_counts(c, expect_cut::all, "a constant opacity of 0");
+            }
+            {
+                auto attributes = cc::vector<sv::mesh_attribute>();
+                attributes.push_back(per_triangle("opacity", 0.0f, 1.0f));
+                auto const c = co_await trace_cut(
+                    ctx, resources, quad_of("cutout attribute", unlit, cc::vector<binding>{black}, cc::move(attributes)));
+                check_counts(c, expect_cut::half, "a per-triangle opacity of 0 and 1");
+            }
+        }
+        {
+            // A 2x1 texture whose left texel is transparent and right one opaque, read through its alpha channel.
+            // u runs with x across the quad, so the left half of the view is cut.
+            auto uvs = cc::array<tg::vec2f>::create_defaulted(6);
+            auto const positions = quad_positions();
+            for (auto i = isize(0); i < uvs.size(); ++i)
+                uvs[i] = tg::vec2f((positions[i][0] + 2.0f) / 4.0f, 0.5f);
+            auto attributes = cc::vector<sv::mesh_attribute>();
+            attributes.push_back(sv::mesh_attribute::create("uv", sv::attribute_frequency::per_vertex, cc::move(uvs)));
+            auto mesh = quad_of("cutout texture", unlit, cc::vector<binding>{black}, cc::move(attributes));
+
+            auto pixels = cc::array<byte>::create_filled(2 * 4, byte(0));
+            pixels[7] = byte(255);
+            mesh.textures.push_back(
+                {.name = "opacity",
+                 .source = {.texture = sv::texture_data::create(cc::move(pixels), sg::pixel_format::rgba8_unorm, 2, 1),
+                            .uv_attribute = "uv",
+                            .sampler = {.mag_filter = sg::sampler_filter::nearest,
+                                        .address_u = sg::sampler_address_mode::clamp_edge,
+                                        .address_v = sg::sampler_address_mode::clamp_edge},
+                            .swizzle = sv::channel_swizzle::of_channel(sv::texture_channel::a)}});
+            auto const c = co_await trace_cut(ctx, resources, mesh);
+            check_counts(c, expect_cut::half, "a texture's alpha channel");
         }
     }
-    {
-        // A 2x1 texture whose left texel is transparent and right one opaque, read through its alpha channel.
-        // u runs with x across the quad, so the left half of the view is cut.
-        auto uvs = cc::array<tg::vec2f>::create_defaulted(6);
-        auto const positions = quad_positions();
-        for (auto i = isize(0); i < uvs.size(); ++i)
-            uvs[i] = tg::vec2f((positions[i][0] + 2.0f) / 4.0f, 0.5f);
-        auto attributes = cc::vector<sv::mesh_attribute>();
-        attributes.push_back(sv::mesh_attribute::create("uv", sv::attribute_frequency::per_vertex, cc::move(uvs)));
-        auto mesh = quad_of("cutout texture", unlit, cc::vector<binding>{black}, cc::move(attributes));
-
-        auto pixels = cc::array<byte>::create_filled(2 * 4, byte(0));
-        pixels[7] = byte(255);
-        mesh.textures.push_back(
-            {.name = "opacity",
-             .source = {.texture = sv::texture_data::create(cc::move(pixels), sg::pixel_format::rgba8_unorm, 2, 1),
-                        .uv_attribute = "uv",
-                        .sampler = {.mag_filter = sg::sampler_filter::nearest,
-                                    .address_u = sg::sampler_address_mode::clamp_edge,
-                                    .address_v = sg::sampler_address_mode::clamp_edge},
-                        .swizzle = sv::channel_swizzle::of_channel(sv::texture_channel::a)}});
-        auto const c = co_await trace_cut(ctx, resources, mesh);
-        check_counts(c, expect_cut::half, "a texture's alpha channel");
-    }
-
     co_await cc::async_settled(sv::background_work(ctx));
 }
