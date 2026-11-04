@@ -42,7 +42,13 @@ auto sgl::check::impl::flattener::flatten_expr(ast::expr_id id) -> flat_expr_id
     {
         if (where.kind == target_kind::symbol && c.out.at(where.symbol).kind == symbol_kind::constant
             && c.out.at(where.symbol).state == symbol_state::checked)
+        {
+            // CHK-426: the target is this compile's, which no const holds
+            if (auto const index = target_case_of(where.symbol); index >= 0)
+                return refuses_target_in_const(c.out.at(where.symbol).name) ? flat_expr_id::none
+                                                                            : enum_value(type, id, index);
             return constant_value(type, id, c.out.constants[c.out.at(where.symbol).info]);
+        }
         if (where.kind == target_kind::symbol && c.out.at(where.symbol).kind == symbol_kind::sampler
             && c.out.at(where.symbol).state == symbol_state::checked)
             return add_expr(type, id, flat_file_sampler{.sampler = where.symbol});
@@ -716,6 +722,9 @@ auto sgl::check::impl::flattener::flatten_bound_call(ast::expr_id id, type_id ty
 {
     if (is_by_target(record.callee))
         return flatten_by_target(id, type, record);
+    // CHK-426: the device this compile writes for answers `has`
+    if (is_has_call(record.callee))
+        return flatten_has(id, type, record);
     if (is_diff_call(record.callee))
         return flatten_diff(id, type, record);
     if (auto const texel = atomic_texel_of(record); ast::is_valid(texel))
@@ -1100,6 +1109,106 @@ auto sgl::check::impl::flattener::flatten_closure_call(ast::expr_id id, type_id 
     auto const argument_closures = written_closures;
     auto const slots = c.out.at(record.slots);
     return call_closure(id, type, handed, values, slots, argument_closures);
+}
+
+auto sgl::check::impl::flattener::target_case_of(symbol_id constant) const -> i32
+{
+    auto const& s = c.out.at(constant);
+    if (s.kind != symbol_kind::constant || !c.is_prelude_file(s.file))
+        return -1;
+    if (s.name == "target_api")
+        return i32(compiled_for().api);
+    if (s.name == "target_language")
+        return i32(compiled_for().language);
+    return -1;
+}
+
+auto sgl::check::impl::flattener::is_has_call(symbol_id callee) const -> bool
+{
+    // a call of a parameter of function type has no callee of its own
+    if (!is_valid(callee))
+        return false;
+    // `ray_flags.has` is a prelude function of that name too, and `has(f: feature)` the one free of it
+    auto const& s = c.out.at(callee);
+    if (s.kind != symbol_kind::function || s.name != "has" || !c.is_prelude_file(s.file) || s.info < 0)
+        return false;
+    auto const parameters = c.out.at(c.out.functions[s.info].parameters);
+    return parameters.size() == 1 && c.out.name_of(parameters[0].type) == "feature";
+}
+
+auto sgl::check::impl::flattener::refuses_target_in_const(cc::string_view what) -> bool
+{
+    if (!is_const_evaluation)
+        return false;
+    if (target_in_const.empty())
+        target_in_const = cc::format("reads {}, which each compile stands for once a body is inlined, while a const is "
+                                     "computed once for every compile; a function that returns it is inlined where "
+                                     "it is called",
+                                     what);
+    mark_failed();
+    return true;
+}
+
+auto sgl::check::impl::flattener::feature_case_of(ast::expr_id argument) -> i32
+{
+    if (!ast::is_valid(argument))
+        return -1;
+    auto const& where = tables().target_at(argument);
+    if (where.kind == target_kind::enum_case)
+        return where.index;
+    // a parameter bound to a literal case, as an inlined `has(f)` of a function's own `f` is
+    for (auto const& b : current()->bound)
+        if (b.where == where && is_valid(b.literal))
+            if (auto const* const e = entry.at(b.literal).node.try_as<flat_enum_value>())
+                return e->case_index;
+    if (where.kind == target_kind::symbol && c.out.at(where.symbol).kind == symbol_kind::constant
+        && c.out.at(where.symbol).state == symbol_state::checked)
+        if (auto const& info = c.out.constants[c.out.at(where.symbol).info]; info.kind == constant_kind::enum_case)
+            return info.case_index;
+    return -1;
+}
+
+auto sgl::check::impl::flattener::flatten_has(ast::expr_id id, type_id type, call_record const& record) -> flat_expr_id
+{
+    if (refuses_target_in_const("has"))
+        return flat_expr_id::none;
+    auto const written = c.out.at(record.written);
+    auto const index = written.size() == 1 ? feature_case_of(written[0].expr) : -1;
+    if (index < 0 || index >= k_feature_count)
+    {
+        unroll_reports.push_back({.file = file(),
+                                  .where = c.span_of(file(), id),
+                                  .detail = "has asks for a feature its call names as a constant once inlined, such "
+                                            "as `has(.subgroups)`",
+                                  .site = innermost_call()});
+        mark_failed();
+        meets_error = true;
+        return flat_expr_id::none;
+    }
+    return add_expr(type, id, flat_bool_literal{.value = compiled_for().device_features.has(feature(index))});
+}
+
+auto sgl::check::impl::flattener::grants_of(ast::expr_id condition) -> feature_set
+{
+    if (!ast::is_valid(condition))
+        return {};
+    auto const* const call = ast().at(condition).node.try_as<ast::call>();
+    if (call == nullptr)
+        return {};
+    auto const arguments = ast().at(call->arguments);
+    if (call->is_short_circuit && arguments.size() == 2 && sgl::is_valid(call->op)
+        && c.text_of(file(), c.file_of(file()).at(call->op).where) == "and")
+        return grants_of(arguments[0].value) | grants_of(arguments[1].value);
+    auto const record = tables().call_at(condition);
+    if (record < 0 || !is_has_call(c.out.call_records[record].callee))
+        return {};
+    auto const written = c.out.at(c.out.call_records[record].written);
+    auto const index = written.size() == 1 ? feature_case_of(written[0].expr) : -1;
+    if (index < 0 || index >= k_feature_count || !compiled_for().device_features.has(feature(index)))
+        return {};
+    auto result = feature_set();
+    result.set(feature(index));
+    return result;
 }
 
 auto sgl::check::impl::flattener::is_by_target(symbol_id callee) const -> bool

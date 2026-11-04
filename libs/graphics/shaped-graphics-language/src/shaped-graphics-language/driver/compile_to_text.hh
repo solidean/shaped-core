@@ -5,6 +5,7 @@
 #include <clean-core/error/result.hh>
 #include <clean-core/string/string.hh>
 #include <clean-core/string/string_view.hh>
+#include <shaped-graphics-language/check/features.hh>
 #include <shaped-graphics-language/check/footprint.hh>
 #include <shaped-graphics-language/check/symbols.hh>
 #include <shaped-graphics-language/driver/describe.hh>
@@ -36,9 +37,10 @@ struct sgl::text_request
     /// Writes every print and every failed assert into sg's debug buffer, and describes each site (EMIT-183).
     /// Without it the text holds neither.
     bool diagnostics = false;
-    /// The device adds floats atomically in one instruction (`sg::feature::float_atomic_add`): an `atomic[float]` is
-    /// then the target's own float atomic where the target can say one, vulkan and metal, and a `uint`'s bits elsewhere.
-    bool native_float_atomic_add = false;
+    /// What the device has, each named as `sg::feature` names it, which `has` answers once inlined (CHK-426).
+    /// With `float_atomic_add` an `atomic[float]` is the target's own float atomic where the target can say one,
+    /// vulkan and metal, and a `uint`'s bits elsewhere.
+    check::feature_set device_features;
 };
 
 /// Every entry point of one SGL source, asked for as the text of each of `targets`.

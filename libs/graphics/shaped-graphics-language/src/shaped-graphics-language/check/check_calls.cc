@@ -418,6 +418,32 @@ type_id checker::check_call(function_scope& scope, ast::expr_id id, ast::call co
         if (call.is_short_circuit || spelling == "not")
             return check_logical(scope, id, call);
         auto arguments = check_arguments(scope, call.arguments, false);
+        // CHK-152: a leading dot beside an enum, `api == .vulkan`, names a case of that enum
+        if ((spelling == "==" || spelling == "!=") && arguments.types.size() == 2)
+            for (auto k = isize(0); k < 2; ++k)
+            {
+                auto const enumeration = arguments.types[1 - k];
+                if (arguments.leading_dots[k].empty() || !is_valid(enumeration) || !out.is_plain_enum(enumeration))
+                    continue;
+                auto const name = arguments.leading_dots[k];
+                auto const dot = arguments.written[k].expr;
+                auto const cases = out.at(out.at(enumeration).cases);
+                auto index = -1;
+                for (auto i = isize(0); i < cases.size(); ++i)
+                    if (cases[i].name == name)
+                        index = i32(i);
+                if (index < 0)
+                {
+                    report(diagnostic_kind::unknown_member, file, span_of(file, dot),
+                           cc::format("the enum {} has no case {}", out.name_of(enumeration), name));
+                    return error_type;
+                }
+                set_target(file, dot,
+                           {.kind = target_kind::enum_case, .symbol = out.at(enumeration).symbol, .index = index});
+                set_type(file, dot, enumeration);
+                arguments.types[k] = enumeration;
+                arguments.leading_dots[k] = {};
+            }
         // `==` and `!=` over one enum are the language's own (CHK-149), and what they compare is the cases'
         // `int`s (EVAL-64) — so they resolve to the `int` overload, and no later pass needs an enum rule.
         if ((spelling == "==" || spelling == "!=") && arguments.types.size() == 2

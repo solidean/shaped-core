@@ -57,7 +57,7 @@ void sgl::check::impl::flattener::note_value_use(type_id type, ast::expr_id from
     for (auto const& fr : frames)
         within.push_back(fr.function);
     feature_uses.push_back(
-        {.file = file(), .call = from, .features = needs, .within = cc::move(within), .is_value = true});
+        {.file = file(), .call = from, .features = needs, .within = cc::move(within), .is_value = true, .granted = granted});
 }
 
 void sgl::check::impl::flattener::judge_stage(ast::expr_id call, symbol_id callee)
@@ -68,7 +68,8 @@ void sgl::check::impl::flattener::judge_stage(ast::expr_id call, symbol_id calle
         auto within = cc::vector<symbol_id>();
         for (auto const& fr : frames)
             within.push_back(fr.function);
-        feature_uses.push_back({.file = file(), .call = call, .features = record->features, .within = cc::move(within)});
+        feature_uses.push_back(
+            {.file = file(), .call = call, .features = record->features, .within = cc::move(within), .granted = granted});
     }
     // CHK-298: a test's run is one invocation, which has no quad to take a derivative across
     if (is_test)
@@ -109,8 +110,11 @@ void sgl::check::impl::flattener::judge_stage(ast::expr_id call, symbol_id calle
         auto within = cc::vector<symbol_id>();
         for (auto const& fr : frames)
             within.push_back(fr.function);
-        feature_uses.push_back(
-            {.file = file(), .call = call, .features = record->pixel_features, .within = cc::move(within)});
+        feature_uses.push_back({.file = file(),
+                                .call = call,
+                                .features = record->pixel_features,
+                                .within = cc::move(within),
+                                .granted = granted});
     }
     auto const& s = c.out.at(callee);
     if (s.info >= 0 && (c.out.functions[s.info].stages & stage_bit(entry.entry_stage)) == 0)
@@ -751,7 +755,11 @@ checker::const_evaluation checker::evaluate_const(symbol_id scope, i32 file, ast
     f.entry.names.also_taken = taken.own;
     f.entry.names.also_taken_below = taken.below;
     f.frames.push_back({.function = scope, .file = file, .result = type});
+    f.is_const_evaluation = true;
     auto const result = f.flatten_expr(expr);
+    // CHK-426: a const is one value for every compile, so it holds nothing a compile stands for
+    if (!f.target_in_const.empty())
+        return {.kind = diagnostic_kind::invalid_constant_argument, .detail = cc::move(f.target_in_const)};
     if (f.is_failed || !is_valid(result))
         return {.detail = "a const whose value reaches a construct the flat tree cannot hold yet"};
     f.add_stmt(origin{.file = file, .expr = expr}, flat_return{.value = result});
@@ -980,7 +988,12 @@ void checker::flatten_entry_point(symbol_id id, traversal_request const* travers
         auto const needed = feature(i);
         if (!used.has(needed))
             continue;
-        if (!declared.has(needed))
+        // CHK-426: a use inside a branch whose `has` granted the feature needs no `require`
+        auto is_granted_everywhere = true;
+        for (auto const& u : f.feature_uses)
+            if (u.features.has(needed) && !u.granted.has(needed))
+                is_granted_everywhere = false;
+        if (!declared.has(needed) && !is_granted_everywhere)
         {
             auto& d = report_of_entry(diagnostic_kind::feature_not_declared, s.file,
                                       ast_of(s.file).at(s.declaration).node.as<ast::fun_decl>().name,
@@ -988,7 +1001,7 @@ void checker::flatten_entry_point(symbol_id id, traversal_request const* travers
                                                  "requires",
                                                  s.name, name_of(needed)));
             for (auto const& u : f.feature_uses)
-                if (u.features.has(needed))
+                if (u.features.has(needed) && !u.granted.has(needed))
                 {
                     d.notes.push_back({.file = u.file,
                                        .where = span_of(u.file, u.call),

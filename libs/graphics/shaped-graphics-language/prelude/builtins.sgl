@@ -4007,3 +4007,55 @@ struct exchange_result[T]:
 @builtin @internal @pure fun acceleration_root(world: acceleration_structure[.mixed]) -> uint
 /// One unit of the pool.
 @builtin @internal @pure fun acceleration_pool_load(unit: uint) -> uint4
+
+// What a compile writes for, which a `const if` branches on (CHK-426).
+// Each compile stands for its own target and device where an inlined body reads them.
+// So the values below are a test's, which writes no text and runs on no device.
+
+/// An API a compile writes text for; `none` where no text is written.
+enum graphics_api:
+    none
+    dx12
+    vulkan
+    metal
+    webgpu
+
+/// A language a compile writes; `sgl` where no text is written, since the interpreter runs SGL itself.
+enum shading_language:
+    sgl
+    hlsl
+    wgsl
+    msl
+
+/// A feature a device may have, named as sg names it.
+enum feature:
+    binding_arrays
+    extended_image_formats
+    readwrite_image_formats
+    multisampled_array_textures
+    ray_query
+    raytracing_pipeline
+    primitive_index
+    sample_rate_shading
+    geometry_shader
+    tessellation_shader
+    shader_f16
+    shader_int16
+    subgroups
+    device_coherence
+    image_atomics
+    first_instance
+    helper_lane_query
+    vertex_layer_output
+    float_atomic_add
+
+/// The API this compile writes for, known once a body is inlined; no const holds it.
+const target_api: graphics_api = .none
+
+/// The language this compile writes, known once a body is inlined; no const holds it.
+const target_language: shading_language = .sgl
+
+/// Whether the device this compile writes for has `f`, known once a body is inlined.
+/// A branch that `has` takes may use `f` without a `require`.
+/// The body is a test's answer; `1 < 0`, since this file holds no `bool` case to name.
+fun has(f: feature) -> bool => 1 < 0

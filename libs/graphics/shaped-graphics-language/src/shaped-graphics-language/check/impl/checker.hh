@@ -382,6 +382,9 @@ struct checker
     checked_module out;
     /// The values this compile gives the options, by the name each is set by (CHK-354).
     cc::span<option_value const> options;
+    /// What this compile writes for, which the flattener substitutes for `target_api`, `target_language` and `has`
+    /// (CHK-426).
+    compile_target compiled_target;
 
     /// How many of `files` are the prelude's; every other file is a module's.
     i32 prelude_count = 0;

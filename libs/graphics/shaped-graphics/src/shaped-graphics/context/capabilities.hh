@@ -148,8 +148,8 @@ enum class sg::feature
     /// A shader may add to a 32-bit float atomically in one instruction, in a buffer and in workgroup memory.
     /// Vulkan grants it with `VK_EXT_shader_atomic_float`'s `shaderBufferFloat32AtomicAdd` and `shaderSharedFloat32AtomicAdd`,
     /// and Metal on every Apple GPU its Metal 4 floor admits; D3D12 and WebGPU have none.
-    /// SGL's `atomic[float].add` is a compare-exchange loop without it, so slib asks for the native add where a context
-    /// has it, and no `require` names it.
+    /// SGL's `atomic[float].add` is a compare-exchange loop without it, and the native add where a context has it: slib
+    /// hands an SGL compile every feature its context has, which SGL's `has` also answers.
     float_atomic_add,
 };
 

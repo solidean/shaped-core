@@ -35,6 +35,8 @@ void register_sync(registry& r);
 void register_subgroups(registry& r);
 /// The steps of an inline ray query, `ray_flags`, and the emulated trace's view of sg's acceleration pool.
 void register_raytracing(registry& r);
+/// What a compile writes for, which a `const if` branches on: `target_api`, `target_language` and `has` (CHK-426).
+void register_target(registry& r);
 } // namespace sgl::builtins
 
 /// What the topic files share.

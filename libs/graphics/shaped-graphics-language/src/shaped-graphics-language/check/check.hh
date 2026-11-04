@@ -6,6 +6,7 @@
 #include <clean-core/memory/unique_ptr.hh>
 #include <shaped-graphics-language/ast/file_ast.hh>
 #include <shaped-graphics-language/check/checked_module.hh>
+#include <shaped-graphics-language/check/features.hh>
 #include <shaped-graphics-language/syntax/parsed_file.hh>
 
 /// One file of a module: what `sgl::parse` and `sgl::ast::build` made of it.
@@ -40,22 +41,27 @@ namespace sgl::check
 /// `options` sets the program's options by name, each standing for its value wherever it is named (CHK-354).
 /// A module's option the program uses is named `module.name`.
 /// An option `options` leaves out keeps its default, and a name no option has is `invalid-option`.
+/// `target` is what the compile writes for, which an inlined body reads through `target_api`, `target_language` and
+/// `has` (CHK-426); the default is no target, as a test runs.
 [[nodiscard]] checked_module check(cc::span<module_file const> prelude,
                                    cc::span<module_file const> library,
                                    module_file program,
                                    builtins::registry const& builtins,
-                                   cc::span<option_value const> options = {});
+                                   cc::span<option_value const> options = {},
+                                   compile_target const& target = {});
 
 /// The same with no library.
 [[nodiscard]] checked_module check(cc::span<module_file const> prelude,
                                    module_file user,
                                    builtins::registry const& builtins,
-                                   cc::span<option_value const> options = {});
+                                   cc::span<option_value const> options = {},
+                                   compile_target const& target = {});
 
 /// The same against `builtins::default_registry()`.
 [[nodiscard]] checked_module check(cc::span<module_file const> prelude,
                                    module_file user,
-                                   cc::span<option_value const> options = {});
+                                   cc::span<option_value const> options = {},
+                                   compile_target const& target = {});
 
 /// The files of `prelude` checked once, for any number of programs behind them; none where they report anything.
 /// A failed prelude is never kept, so a caller falls back to `check` over the files, which reports it.
@@ -70,12 +76,14 @@ namespace sgl::check
 [[nodiscard]] checked_module check(checked_prelude const& prelude,
                                    cc::span<module_file const> library,
                                    module_file program,
-                                   cc::span<option_value const> options = {});
+                                   cc::span<option_value const> options = {},
+                                   compile_target const& target = {});
 
 /// The same with no library.
 [[nodiscard]] checked_module check(checked_prelude const& prelude,
                                    module_file user,
-                                   cc::span<option_value const> options = {});
+                                   cc::span<option_value const> options = {},
+                                   compile_target const& target = {});
 
 /// The prelude and the library modules `program` reaches, checked once as one layer behind `prelude`, for every program
 /// that reaches the same ones: the compilation model's checked layers, with the modules a program uses as one layer.
@@ -141,7 +149,8 @@ private:
     friend checked_module check(checked_prelude const& prelude,
                                 cc::span<module_file const> library,
                                 module_file program,
-                                cc::span<option_value const> options);
+                                cc::span<option_value const> options,
+                                compile_target const& target);
     friend cc::optional<checked_prelude> check_modules(checked_prelude const& prelude,
                                                        cc::span<module_file const> library,
                                                        module_file program);

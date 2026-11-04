@@ -27,7 +27,7 @@ COMMAND("emit")
     auto run_tests = false;
     auto line_directives = false;
     auto diagnostics = false;
-    auto native_float_atomic_add = false;
+    auto device_feature_names = cc::vector<cc::string>();
     auto option_arguments = cc::vector<cc::string>();
     auto module_dirs = cc::vector<cc::string>();
     auto args = nx::args({.name = "sgl emit",
@@ -42,9 +42,10 @@ COMMAND("emit")
                       "statement"});
     args.arg({"diagnostics"}, diagnostics,
              {.desc = "write print and assert into sg's debug buffer, as a dev build does"});
-    args.arg({"native-float-atomic-add"}, native_float_atomic_add,
-             {.desc = "write an atomic[float] as the target's own float atomic, as slib does for a device that adds "
-                      "floats in one instruction (vulkan, metal)"});
+    args.arg({"device-feature"}, device_feature_names,
+             {.desc = "a feature the device has, which `has` answers and slib passes for every one a context has, "
+                      "`--device-feature float_atomic_add`; repeat for each",
+              .metavar = "FEATURE"});
     args.arg(
         {"option"}, option_arguments,
         {.desc = "give an option of the source a value, `--option tile=16`; repeat for each", .metavar = "NAME=VALUE"});
@@ -73,6 +74,18 @@ COMMAND("emit")
         return exit_usage;
     }
 
+    auto device_features = sgl::check::feature_set();
+    for (auto const& name : device_feature_names)
+    {
+        auto const index = sgl::check::find_feature(name);
+        if (index < 0)
+        {
+            cc::eprintln("sgl emit: unknown feature '{}'", name);
+            return exit_usage;
+        }
+        device_features.set(sgl::check::feature(index));
+    }
+
     auto const options = sgl_tool::parse_options(option_arguments);
     if (options.has_error())
     {
@@ -96,7 +109,7 @@ COMMAND("emit")
                                             .run_tests = run_tests,
                                             .line_directives = line_directives,
                                             .diagnostics = diagnostics,
-                                            .native_float_atomic_add = native_float_atomic_add});
+                                            .device_features = device_features});
     if (text.has_error())
     {
         cc::eprint(text.error());

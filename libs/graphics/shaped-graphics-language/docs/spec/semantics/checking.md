@@ -309,6 +309,7 @@ An option is read like any `const`, and a branch on it leaves the text with what
 * **CHK-147** `enum.case` is an expression of the enum's type, and a name the enum has no case of is `unknown-member`.
 * **CHK-148** An enum's own name is no value, by CHK-63.
 * **CHK-149** `==` and `!=` over two values of one enum are the language's own, as `and` is by CHK-116: no function declares them, and each gives a `bool`.
+  A leading dot on either side is a case of the other side's enum, by CHK-152: `api == .vulkan`.
 * **CHK-150** An enum converts to no type and no type converts to it, `int` included, and it has no other operator ([why](why/checking.md#chk-150)).
 * **CHK-151** A nested declaration in an `enum` block is `unsupported-yet`; its properties and methods are those of a struct (CHK-233).
 * **CHK-218** `bool` is a `@builtin enum` of the prelude with the cases `false` and `true`, in that order, so `bool.true` is a value like `light_kind.sun`.
@@ -910,6 +911,13 @@ A feature is what a device may lack, so using one makes a shader non-portable on
   So a body's `require` that such a call needs is used, which CHK-265 judges once every entry point is flattened.
   The prelude's `trace` is how a program reaches one: its steps need `ray_query`.
 * **CHK-264** A feature an entry point needs and does not declare is the normal error `feature-not-declared` at its name, with a note at each listed binding that needs it.
+* **CHK-426** A compile writes for one target and one device, and an inlined body reads them as constants: `target_api`, `target_language` and `has(.f)`.
+  `target_api` is a `graphics_api`, `.none`, `.dx12`, `.vulkan`, `.metal` or `.webgpu`, and `target_language` a `shading_language`, `.sgl`, `.hlsl`, `.wgsl` or `.msl`.
+  `has(.f)` is whether the device has feature `f`, named as a `require` names it, and its feature is a constant once inlined or the call is `invalid-constant-argument`.
+  A test is written for no target and runs on no device: `.none`, `.sgl`, and `has` false for every feature.
+  A const is one value for every compile, so one whose value reads any of the three is `invalid-constant-argument`; a function that returns it is inlined where it is called.
+  A branch whose condition is `has(.f)`, or an `and` of it, is granted `f` where the device has it, so a call there that needs `f` needs no `require`; a use outside that branch still does.
+  So `const if has(.subgroups):` (CHK-425) keeps a fast branch on a device with the feature and the other one where it lacks it, and neither is an error.
 * **CHK-265** A `require` in a body that is not the declaration an entry point needs is the warning `unused-require`, and so is a second `require` of a feature in one body.
   A `require` in a test's body or a helper's is used where a call that body reaches, inlined, needs the feature (CHK-322).
   A `require` of a file or of a binding is never unused: each declares an intent, whether anything uses the feature or not ([why](why/checking.md#chk-265)).
@@ -1371,6 +1379,7 @@ hit_group textured for path_rays:
   No rule that judges an entry point's inlined body judges it: neither the uniformity pass (CHK-282) nor the features the entry point needs (CHK-263).
   Every body is still checked on its own (CHK-129), so an error in that branch is reported all the same.
   A `let` holds no constant, so a branch on a local that holds an option keeps both sides.
+  A call inlined to a block that does nothing but leave a constant is that constant, so a branch on `is_vulkan()` is taken as one on its result.
 * **CHK-425** Every condition of a `const if` chain (AST-157) is a constant (CHK-310) once the entry point or the test is inlined, so CHK-356 takes exactly one branch, or none.
   A condition that is not is `invalid-constant-argument`, judged of each inlined copy as an unrolled `for`'s bound is (CHK-389).
   Every branch is still checked on its own as an `if`'s is: a `const if` decides what is written, never what is checked.
@@ -1652,7 +1661,7 @@ A diagnostic of this pass has a kind, a file, a byte span in that file, and a de
 | `constant-without-value` | CHK-311 |
 | `constant-not-representable` | CHK-312, CHK-396 |
 | `missing-sampler` | CHK-279 |
-| `invalid-constant-argument` | CHK-280, CHK-285, CHK-299, CHK-309, CHK-378, CHK-389, CHK-425 |
+| `invalid-constant-argument` | CHK-280, CHK-285, CHK-299, CHK-309, CHK-378, CHK-389, CHK-425, CHK-426 |
 | `non-uniform-control-flow` | CHK-282, CHK-374, CHK-377 |
 | `non-uniform-index` | CHK-300, CHK-401 |
 | `needless-nonuniform` | CHK-300, CHK-401 |

@@ -64,13 +64,15 @@ checked_module sgl::check::check(cc::span<module_file const> prelude,
                                  cc::span<module_file const> library,
                                  module_file program,
                                  builtins::registry const& builtins,
-                                 cc::span<option_value const> options)
+                                 cc::span<option_value const> options,
+                                 compile_target const& target)
 {
     auto planned = plan_files(prelude, library, program);
     auto c = checker{.files = planned.files, .builtins = builtins};
     c.out.builtins = &builtins;
     apply_plan(c, planned.plan, i32(prelude.size()));
     c.options = options;
+    c.compiled_target = target;
     c.run();
     return cc::move(c.out);
 }
@@ -78,14 +80,18 @@ checked_module sgl::check::check(cc::span<module_file const> prelude,
 checked_module sgl::check::check(cc::span<module_file const> prelude,
                                  module_file user,
                                  builtins::registry const& builtins,
-                                 cc::span<option_value const> options)
+                                 cc::span<option_value const> options,
+                                 compile_target const& target)
 {
-    return check(prelude, {}, user, builtins, options);
+    return check(prelude, {}, user, builtins, options, target);
 }
 
-checked_module sgl::check::check(cc::span<module_file const> prelude, module_file user, cc::span<option_value const> options)
+checked_module sgl::check::check(cc::span<module_file const> prelude,
+                                 module_file user,
+                                 cc::span<option_value const> options,
+                                 compile_target const& target)
 {
-    return check(prelude, user, builtins::default_registry(), options);
+    return check(prelude, user, builtins::default_registry(), options, target);
 }
 
 sgl::check::checked_prelude::checked_prelude() = default;
@@ -250,7 +256,8 @@ bool sgl::check::reaches_the_same_modules(checked_prelude const& layer,
 checked_module sgl::check::check(checked_prelude const& prelude,
                                  cc::span<module_file const> library,
                                  module_file program,
-                                 cc::span<option_value const> options)
+                                 cc::span<option_value const> options,
+                                 compile_target const& target)
 {
     auto planned
         = plan_files(cc::span<module_file const>(prelude._files).subspan({.offset = 0, .size = prelude._prelude_count}),
@@ -261,13 +268,17 @@ checked_module sgl::check::check(checked_prelude const& prelude,
     c.files = planned.files;
     apply_plan(c, planned.plan, prelude._prelude_count);
     c.options = options;
+    c.compiled_target = target;
     c.run(prelude._resume);
     return cc::move(c.out);
 }
 
-checked_module sgl::check::check(checked_prelude const& prelude, module_file user, cc::span<option_value const> options)
+checked_module sgl::check::check(checked_prelude const& prelude,
+                                 module_file user,
+                                 cc::span<option_value const> options,
+                                 compile_target const& target)
 {
-    return check(prelude, {}, user, options);
+    return check(prelude, {}, user, options, target);
 }
 
 cc::string sgl::check::checked_module::qualified_name_of(symbol_id id) const

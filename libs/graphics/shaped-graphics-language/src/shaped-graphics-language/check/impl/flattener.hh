@@ -71,6 +71,12 @@ struct flattener
         call_site site = {};
     };
     cc::vector<unroll_report> unroll_reports;
+    /// The features the `has` conditions of the branches being flattened grant (CHK-426).
+    feature_set granted;
+    /// The tree is a const's value, which reads no compile's target (CHK-426).
+    bool is_const_evaluation = false;
+    /// Why a const's value read what a compile stands for; empty where it read nothing of it.
+    cc::string target_in_const;
     /// How many times the statement being written is written: the product of the copies of every unrolled `for` around it.
     /// It is what bounds a nest of them as a whole (CHK-389).
     i64 unrolled_copies = 1;
@@ -106,6 +112,8 @@ struct flattener
         cc::vector<symbol_id> within;
         /// A value rather than a call, which the note says.
         bool is_value = false;
+        /// What the `has` of the branches around the use granted, which then needs no `require` (CHK-426).
+        feature_set granted;
     };
     cc::vector<feature_use> feature_uses;
 
@@ -546,6 +554,34 @@ struct flattener
                                      call_record const& record,
                                      custom_derivatives d,
                                      cc::span<flat_expr_id const> values);
+
+    /// What the tree is written for: the compile's target, and none for a test, which the interpreter runs (CHK-426).
+    [[nodiscard]] compile_target compiled_for() const { return is_test ? compile_target() : c.compiled_target; }
+    /// `target_api` and `target_language` of the prelude, which a compile stands for (CHK-426): the position of the case
+    /// the compile names, or -1 for every other symbol.
+    [[nodiscard]] i32 target_case_of(symbol_id constant) const;
+    /// `has(f)` of the prelude, which the device this compile writes for answers (CHK-426).
+    [[nodiscard]] bool is_has_call(symbol_id callee) const;
+    /// A `has` call as the literal its device makes of it; its feature must be a constant once inlined.
+    flat_expr_id flatten_has(ast::expr_id id, type_id type, call_record const& record);
+    /// What a condition of the current file grants the branch it guards: the features of the `has` calls it is, or the
+    /// `and` of, that this compile's device has (CHK-426).
+    [[nodiscard]] feature_set grants_of(ast::expr_id condition);
+    /// What `make()` flattens, with the features `condition` grants added to `granted` while it does (CHK-426).
+    template <class F>
+    auto granting(ast::expr_id condition, F&& make)
+    {
+        auto const outer = granted;
+        granted |= grants_of(condition);
+        auto result = make();
+        granted = outer;
+        return result;
+    }
+    /// The case of a feature an argument names as a constant, `.subgroups`; -1 where it names none.
+    [[nodiscard]] i32 feature_case_of(ast::expr_id argument);
+    /// Refuses what a compile stands for inside a const, whose value one check computes for every compile (CHK-426).
+    /// True where it refused, which makes the flattening fail.
+    bool refuses_target_in_const(cc::string_view what);
 
     /// `by_target(native, emulated)` of raytracing.sgl: both lambdas written out, each a block, and one node holding both.
     [[nodiscard]] bool is_by_target(symbol_id callee) const;

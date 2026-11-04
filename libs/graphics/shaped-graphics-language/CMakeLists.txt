@@ -40,6 +40,7 @@ add_library(shaped-graphics-language
     src/shaped-graphics-language/builtins/register_sync.cc
     src/shaped-graphics-language/builtins/register_subgroups.cc
     src/shaped-graphics-language/builtins/register_raytracing.cc
+    src/shaped-graphics-language/builtins/register_target.cc
     src/shaped-graphics-language/builtins/register_conversions.cc
     src/shaped-graphics-language/builtins/register_scalar_math.cc
     src/shaped-graphics-language/builtins/register_textures.cc
@@ -461,6 +462,7 @@ if(SC_BUILD_TESTS)
         tests/driver/compile-to-text-test.cc
         tests/driver/compile-profile-test.cc
         tests/driver/options-test.cc
+        tests/driver/compile-target-test.cc
         tests/driver/describe-test.cc
         tests/driver/source-differential-test.cc
         tests/driver/test-source-test.cc

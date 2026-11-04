@@ -478,6 +478,9 @@ if tile > 8: ...                         // a branch on a constant keeps the sid
 fun f(x: float, .fast: bool)             // ...and a literal argument is a constant, so `f(x, fast = false)` sheds its fast side
 const if fast: ... else: ...             // the same, but a condition no constant decides once inlined is ERROR invalid-constant-argument (CHK-425)
                                          // both sides are still checked; it decides what is written, never what is checked
+const if target_api == .vulkan: ...      // the compile's own API (.none .dx12 .vulkan .metal .webgpu) and target_language (.sgl .hlsl .wgsl .msl)
+const if has(.subgroups): ...            // the compile's device; the branch it takes uses the feature without a `require` (CHK-426)
+                                         // a test sees .none, .sgl and no feature; a const holding any of them is ERROR, a function may return them
 @unroll                                  // on a `for`: the body once per index, the index a literal in each copy, within 256 copies (CHK-389)
 for i in 0 ..< taps: ...                 // nothing of it runs as a loop, no text holds a hint, and the bounds are int constants
                                          // past 256 copies, a nest's counted together, it stays a loop: WARNING unroll-too-long
@@ -646,7 +649,7 @@ ops[i](mut v)                                            // raygen, miss, closes
 - **A `@workgroup binding` is memory one workgroup shares** (CHK-292 to CHK-295): listed like a binding, in no group, and left out of describe.
   Only a compute entry point lists one, all of it within 16 KiB; `workgroup_barrier()`, `storage_barrier()` and `texture_barrier()` sync it (EMIT-131).
 - **`atomic[uint]`, `atomic[int]` and `atomic[float]` live only in a `mut buffer` or a `@workgroup` binding** (CHK-296), and an expression of one is only ever a builtin's argument (CHK-297).
-  A float's has `load`, `store`, `exchange` and `add`: the device's own float atomic where slib finds `float_atomic_add` (vulkan, metal),
+  A float's has `load`, `store`, `exchange` and `add`: the device's own float atomic where the compile's device has `float_atomic_add` (vulkan, metal),
   and a compare-exchange loop on a uint's bits elsewhere, so no pixel stage takes its `add`.
   `compare_exchange_strong(e, d)` gives the value before, and stored exactly where that is `e`; it is a loop in WGSL and MSL (EMIT-161).
   `compare_exchange_weak(e, d)` gives `exchange_result[T]`: `old`, and `exchanged`, the only proof it stored; retry while `old == e and not exchanged`.

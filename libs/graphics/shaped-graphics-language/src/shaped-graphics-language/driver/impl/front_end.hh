@@ -124,9 +124,10 @@ struct front_end
 /// In the second case the file behind the prelude is empty, and the library is not read.
 /// A source with errors still yields a module, whose `errors` say why nothing should be read from it.
 /// Only the reached library files' parse and AST diagnostics are reported, since only those were checked.
-/// `options` are the values the compile gives the source's options (CHK-354).
+/// `options` are the values the compile gives the source's options (CHK-354), and `target` what it writes for (CHK-426).
 [[nodiscard]] front_end run_front_end(cc::string_view source,
                                       cc::string_view source_name,
                                       cc::span<library_file const> library = {},
-                                      cc::span<check::option_value const> options = {});
+                                      cc::span<check::option_value const> options = {},
+                                      check::compile_target const& target = {});
 } // namespace sgl::driver::impl

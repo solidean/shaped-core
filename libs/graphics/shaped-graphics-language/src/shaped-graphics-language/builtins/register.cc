@@ -19,6 +19,7 @@ void sgl::builtins::register_builtins(registry& r)
     register_sync(r);
     register_subgroups(r);
     register_raytracing(r);
+    register_target(r);
 }
 
 void impl::add_infix(registry& r,

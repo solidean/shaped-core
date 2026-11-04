@@ -60,7 +60,7 @@ void sgl::check::impl::flattener::flatten_if(origin from, cc::span<ast::if_branc
     if (auto const taken = constant_condition(condition); taken.has_value())
     {
         if (taken.value())
-            return add_taken(from, flatten_body(first.then));
+            return add_taken(from, granting(first.condition, [&] { return flatten_body(first.then); }));
         if (!rest.empty() && !ast::is_valid(rest.front().condition))
             return add_taken(from, flatten_body(rest.front().then));
         return flatten_if(from, rest, is_const);
@@ -78,7 +78,7 @@ void sgl::check::impl::flattener::flatten_if(origin from, cc::span<ast::if_branc
         meets_error = true;
         return;
     }
-    auto const then_body = flatten_body(first.then);
+    auto const then_body = granting(first.condition, [&] { return flatten_body(first.then); });
 
     auto else_body = ast::range_of<flat_stmt_id>();
     if (!rest.empty() && !ast::is_valid(rest.front().condition))

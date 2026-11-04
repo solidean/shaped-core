@@ -15,15 +15,16 @@ One mechanism thus covers four things SGL lacks or does by hand:
   [feat-sgl-scoped-require-and-if-feature](../../issues/feat-sgl-scoped-require-and-if-feature.md) is that gap.
 * **Branching on a generic's parameter** — `const if T.is_float:` in a template, as C++'s `if constexpr`.
 * **Per-target choices the compiler makes in C++ today** — the native float atomic add is one ([plan.cc](../../../src/shaped-graphics-language/emit/impl/plan.cc), `native_float_atomics`).
+  It reads the compile's device features already, as `has` does.
 
 ```sgl sketch
 @stages(.compute, .raygen, .miss, .closest_hit, .callable)
 fun add(a: mut atomic[float], v: float) -> float:
-    const if has(float_atomic_add) and target.api == .vulkan:
+    const if has(.float_atomic_add) and target_api == .vulkan:
         "hlsl
             $result = sgl_atomic_add_float($a, 1, 0, $v);
         "
-    else if has(float_atomic_add) and target.api == .metal:
+    else if has(.float_atomic_add) and target_api == .metal:
         "msl
             $result = atomic_fetch_add_explicit(&$a, $v, memory_order_relaxed);
         "
@@ -33,8 +34,8 @@ fun add(a: mut atomic[float], v: float) -> float:
 
 ### `const if`
 
-`const if` itself is specified: AST-157 and CHK-425, a chain each of whose conditions a constant decides once inlined.
-What stays here is what it grows into: the discarding below, `target` and `has`, and text bodies.
+Specified so far: `const if` itself (AST-157, CHK-425), and the target and device it reads (CHK-426).
+What stays here is what it grows into: discarding by a generic's parameters, and text bodies.
 
 **`const if` heads an ordinary `if` chain, and every `else if` of the chain is constant too.**
 The chain's siblings pair as an `if`'s do (AST-50, AST-51), and a condition that is not constant is an error.
@@ -42,11 +43,13 @@ It may stand wherever an `if` may, a function's whole body or one statement amon
 
 What a condition reads:
 
-* `target.language` — `.hlsl`, `.wgsl` or `.msl` today; `.glsl`, `.spirv` and `.dxil` when SGL emits them.
-* `target.api` — `.dx12`, `.vulkan`, `.metal` or `.webgpu`.
-* `has(f)` — the device has sg feature `f`, as the host reports when it compiles.
+* `target_language` — `.hlsl`, `.wgsl` or `.msl` today, and `.sgl` in a test; `.glsl`, `.spirv` and `.dxil` when SGL emits them.
+* `target_api` — `.dx12`, `.vulkan`, `.metal` or `.webgpu`, and `.none` in a test.
+* `has(.f)` — the device has sg feature `f`, as the host reports when it compiles.
 * Any option, and any constant built from one.
 * A generic's parameters, and what [types-as-values.md](types-as-values.md) lets a condition ask of a type.
+
+They are `target_api` rather than `target.api` because the prelude's names are shadowable, and a program's own `target` struct is common.
 
 ### What is checked
 
@@ -60,24 +63,23 @@ The condition is evaluated with `target`, `has(…)` and every option unknown, i
 
 A branch is never skipped because it fails to check, as C++'s SFINAE skips an overload.
 
-**The target and the device's features are implicit options**: inputs of a compile, substituted where options are (CHK-354).
-So a source is checked once per target, and `const if target.api == .vulkan` folds exactly as an `if` on an option does (CHK-356).
+**The target and the device's features are inputs of a compile, as options are** (CHK-426).
+So a source is checked once per target, and `const if target_api == .vulkan` folds exactly as an `if` on an option does (CHK-356).
+They are substituted where an inlined body reads them, rather than where a const compiles, and a const that reads them is refused.
+That is what lets a checked layer of modules serve every target.
 "Checked" above is the check pass: names, types and the contract, for every branch the rule keeps.
 What is judged of the inlined tree, uniformity, the footprint and the features an entry point needs, is judged of the branch taken alone.
 So a compile for one target judges its own branch, and a compile of every target, as the corpus runs, judges them all.
 
 ### Features
 
-**`has(f)` makes `f` an optional feature**: used where the device has it, and never required of one.
+**`has(.f)` makes `f` an optional feature**: used where the device has it, and never required of one.
 That is new beside `require`, which refuses a device without the feature.
 
-* A branch under `has(f)` is granted `f`, as a `require` in it would grant it; that is the scoped grant the feature epic is missing.
-* The features the host reports join the options in what keys a compiled text: in slib's cache, and in a frozen bundle.
-* `sgl describe` reports an optional feature apart from a required one, so the host asks for it where the device has it rather than failing where it does not.
-
-slib does exactly this for one feature already: it hands `float_atomic_add` to the compiler as an option.
-That is `k_native_float_atomic_add_option` in [shader_asset.cc](../../../../shaped-shader-library/src/shaped-shader-library/shader_asset.cc).
-`has` makes that the rule for every feature, rather than one option per feature.
+* A branch under `has(.f)` is granted `f`, as a `require` in it would grant it; that is the scoped grant the feature epic is missing.
+* slib hands every feature a context has to an SGL compile as one option, `k_device_features_option` in [shader_asset.cc](../../../../shaped-shader-library/src/shaped-shader-library/shader_asset.cc).
+  So the features key a compiled text in slib's cache, and in a frozen bundle, as the options do.
+* `sgl describe` checks for no device, so it reports what the fallback needs; reporting an optional feature apart from a required one is open below.
 
 **A condition names sg features only**, never a target's extension string.
 A vendor capability reaches a shader through sg first, which keeps sg's rule that a feature is a whole code path a device has or has not.
@@ -126,7 +128,7 @@ Each branch holds fields, or a text body that spells the type:
 
 ```sgl sketch
 struct hit_object:
-    const if target.api == .dx12:
+    const if target_api == .dx12:
         "hlsl
             dx::HitObject
         "
@@ -142,7 +144,7 @@ Only the text bodies of specialized functions take it apart.
 * A compile that takes a branch with no body for its language is an error at the entry point that reaches the call, as `target-lacks-feature` is today.
 * A function whose whole body is a `const if` chain without an `else` has no fallback, which a lint reports.
 * The interpreter is a target whose language is SGL itself, so a branch it takes must be SGL, and a test reaching only text is an error.
-  A test may set the features `has` sees, so every SGL branch runs on the CPU, the fallback above all.
+  A test sees `.none`, `.sgl` and no feature today (CHK-426), so it runs the fallback; letting it set the features `has` sees is open below.
 
 ### Text bodies are a lane, not a home
 
@@ -168,14 +170,18 @@ What SGL lacks is the 2-state ray flag and `opacity_micromap` among the features
 
 ## What it touches
 
-* The parser and the AST: `const if` as a keyword form, and the tagged string as a body.
-* The check pass: constant conditions, `target` and `has` as names, three-valued discarding, the declaration as the contract, SGL branches checked against it, and coverage.
+Done: `const if`, constant conditions, `target_api`, `target_language` and `has`, the grant, slib's device features.
+Left:
+
+* The parser and the AST: the tagged string as a body.
+* The check pass: three-valued discarding, the declaration as the contract, SGL branches checked against it, and coverage.
 * Generics: a branch ruled out for an instance is never checked for it.
-* Flatten: the branch taken inlines like any other, and a text body is a leaf whose effects are declared.
+* Flatten: a text body is a leaf whose effects are declared.
 * The emitters: placeholders, `$result`, the preamble, reserved names read from the text, and `#line` inside it.
-* The interpreter: SGL branches by the same conditions, with the features a test sets.
-* `sgl describe` and slib: optional features, and the reported features in the cache key and in frozen bundles.
+* The interpreter: the features a test sets.
+* `sgl describe`: optional features.
 * sg: each feature a condition names, beginning with SER's.
+* raytracing.sgl's `by_target`, the flat tree's own select between the native and the emulated trace, which a `const if` on `target_api` could replace once `describe` reports per target.
 
 ## Already fixed by the syntax
 
@@ -187,7 +193,8 @@ What SGL lacks is the 2-state ray flag and `opacity_micromap` among the features
 
 ## Open
 
-* What `target.api` is in the interpreter, and whether a test names features by `has` or by a set it states.
+* How a test states the features `has` sees, so the native branch runs on the CPU too.
+* Whether `sgl describe` describes per target, which a `const if` on `target_api` would need for the footprint it reports.
 * Whether the declared effects may be inferred where every branch is SGL, so only a function with a text body declares them.
 * Whether an optional feature's reported value comes from the device, or from what the host chooses to enable, which may be less.
 * Whether two branches may differ in what they need of a pipeline layout, such as a binding the fallback uses and the native body does not.

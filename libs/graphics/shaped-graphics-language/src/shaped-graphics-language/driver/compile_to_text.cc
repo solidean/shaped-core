@@ -105,7 +105,7 @@ cc::result<emitted_source, cc::string> emit_text(driver::impl::front_end const& 
                                                  emit::target target,
                                                  bool line_directives,
                                                  bool diagnostics,
-                                                 bool native_float_atomic_add)
+                                                 check::feature_set device_features)
 {
     auto const& m = front.module;
     auto const source_name = front.source_name;
@@ -124,7 +124,7 @@ cc::result<emitted_source, cc::string> emit_text(driver::impl::front_end const& 
                                            .names = names,
                                            .write_directives = line_directives,
                                            .diagnostics = diagnostics,
-                                           .native_float_atomic_add = native_float_atomic_add});
+                                           .device_features = device_features});
     if (!emitted.has_text())
     {
         auto text = cc::string();
@@ -171,7 +171,9 @@ void add_source_facts(cc::result<emitted_source, cc::string>& text,
 
 cc::result<sgl::emitted_source, cc::string> sgl::compile_to_text(text_request const& request)
 {
-    auto const front = driver::impl::run_front_end(request.source, request.source_name, request.library, request.options);
+    // CHK-426: an inlined body reads the target and the device as this compile's
+    auto const front = driver::impl::run_front_end(request.source, request.source_name, request.library, request.options,
+                                                   emit::compile_target_of(request.target, request.device_features));
     if (!front.errors.empty())
         return cc::error(front.errors);
     auto const& m = front.module;
@@ -215,29 +217,37 @@ cc::result<sgl::emitted_source, cc::string> sgl::compile_to_text(text_request co
     // CHK-402: what was judged of another entry point's body is no error of this one
     if (auto own = front.errors_of(e.function); !own.empty())
         return cc::error(cc::move(own));
-    auto result = emit_text(front, e, request.target, request.line_directives, request.diagnostics,
-                            request.native_float_atomic_add);
+    auto result
+        = emit_text(front, e, request.target, request.line_directives, request.diagnostics, request.device_features);
     add_source_facts(result, front, e);
     return result;
 }
 
 cc::result<cc::vector<sgl::entry_text>, cc::string> sgl::compile_all_to_text(all_text_request const& request)
 {
-    auto const front = driver::impl::run_front_end(request.source, request.source_name, request.library);
-    if (!front.errors.empty())
-        return cc::error(front.errors);
-    auto result = cc::vector<entry_text>();
-    for (auto const& e : front.module.entry_points)
+    // CHK-426: each target is a check of its own, since an inlined body reads the target it is written for
+    auto fronts = cc::vector<driver::impl::front_end>();
+    for (auto const t : request.targets)
     {
-        // CHK-402: an entry point's own errors are that element's, and leave the others built
-        auto own = front.errors_of(e.function);
-        for (auto const t : request.targets)
+        fronts.push_back(driver::impl::run_front_end(request.source, request.source_name, request.library, {},
+                                                     emit::compile_target_of(t)));
+        if (!fronts.back().errors.empty())
+            return cc::error(fronts.back().errors);
+    }
+    auto result = cc::vector<entry_text>();
+    if (fronts.empty())
+        return result;
+    for (auto i = isize(0); i < fronts.front().module.entry_points.size(); ++i)
+        for (auto k = isize(0); k < request.targets.size(); ++k)
         {
-            auto text = own.empty() ? emit_text(front, e, t, false, false, false)
+            auto const& front = fronts[k];
+            auto const& e = front.module.entry_points[i];
+            // CHK-402: an entry point's own errors are that element's, and leave the others built
+            auto own = front.errors_of(e.function);
+            auto text = own.empty() ? emit_text(front, e, request.targets[k], false, false, {})
                                     : cc::result<emitted_source, cc::string>(cc::error(own));
             add_source_facts(text, front, e);
-            result.push_back({.entry_point = e.name, .target = t, .text = cc::move(text)});
+            result.push_back({.entry_point = e.name, .target = request.targets[k], .text = cc::move(text)});
         }
-    }
     return result;
 }

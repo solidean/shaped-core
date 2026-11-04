@@ -282,16 +282,27 @@ private:
             return cc::error(cc::format("SGL has no entry point of the stage '{}' is declared as", desc.entry_point));
         }
 
-        // shader_asset::acquire says through this name that the device adds floats in one instruction, which is the
-        // emitter's to know and no option of the source
+        // shader_asset::acquire says through this name what the device has, which is the compile's to know and no
+        // option of the source; an sg feature no shader asks about is no name SGL knows, and is left out
         auto options = cc::vector<sgl::check::option_value>();
-        auto native_float_atomic_add = false;
+        auto device_features = sgl::check::feature_set();
         for (auto const& o : desc.options)
         {
-            if (o.name == slib::k_native_float_atomic_add_option)
-                native_float_atomic_add = o.value == "true";
-            else
+            if (o.name != slib::k_device_features_option)
+            {
                 options.push_back({.name = o.name, .value = o.value});
+                continue;
+            }
+            auto rest = cc::string_view(o.value);
+            while (!rest.empty())
+            {
+                auto end = isize(0);
+                while (end < rest.size() && rest[end] != ',')
+                    ++end;
+                if (auto const index = sgl::check::find_feature(rest.subview({.offset = 0, .size = end})); index >= 0)
+                    device_features.set(sgl::check::feature(index));
+                rest = end < rest.size() ? rest.subview(end + 1) : cc::string_view();
+            }
         }
         auto const library = slib::impl::sgl_library_of(desc.modules);
         auto text = sgl::compile_to_text(
@@ -305,7 +316,7 @@ private:
              // EMIT-182: DXC's and Metal's messages, and PIX's and Xcode's source view, name the SGL line
              .line_directives = true,
              .diagnostics = _diagnostics,
-             .native_float_atomic_add = native_float_atomic_add});
+             .device_features = device_features});
         if (text.has_error())
             return cc::error(cc::format("SGL reported errors:\n{}", text.error()));
         auto const& emitted = text.value();

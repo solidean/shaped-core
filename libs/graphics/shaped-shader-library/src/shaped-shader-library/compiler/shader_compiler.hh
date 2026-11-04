@@ -93,9 +93,10 @@ struct slib::shader_option
 
 namespace slib
 {
-/// The option `shader_asset::acquire` adds for an SGL shader on a context with `sg::feature::float_atomic_add`.
-/// The SGL compiler takes it as the emitter's to know, not as an option of the source, and the cache keys on it alike.
-inline constexpr cc::string_view k_native_float_atomic_add_option = "native_float_atomic_add";
+/// The option `shader_asset::acquire` adds for an SGL shader: every `sg::feature` the context has, comma-separated,
+/// in the enum's order, which SGL's `has` answers (CHK-426).
+/// The SGL compiler takes it as the compile's device, not as an option of the source, and the cache keys on it alike.
+inline constexpr cc::string_view k_device_features_option = "device_features";
 } // namespace slib
 
 namespace slib

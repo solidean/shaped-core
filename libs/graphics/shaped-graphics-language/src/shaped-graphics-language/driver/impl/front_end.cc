@@ -158,7 +158,8 @@ layer_ptr layer_of(parsed_library& library, sgl::check::checked_prelude const& p
 sgl::driver::impl::front_end sgl::driver::impl::run_front_end(cc::string_view source,
                                                               cc::string_view source_name,
                                                               cc::span<library_file const> library,
-                                                              cc::span<check::option_value const> options)
+                                                              cc::span<check::option_value const> options,
+                                                              check::compile_target const& target)
 {
     CC_RECORD_SCOPE("sgl.front_end");
     auto result = front_end{.prelude = prelude_files(), .source_name = source_name};
@@ -221,10 +222,11 @@ sgl::driver::impl::front_end sgl::driver::impl::run_front_end(cc::string_view so
     for (auto i = isize(0); i < result.prelude.size(); ++i)
         modules.push_back({.file = *result.files[i], .ast = *result.asts[i]});
     CC_RECORD_SCOPE_BEGIN("sgl.check");
-    result.module = result.layer != nullptr ? check::check(*result.layer, library_files, user, options)
+    // CHK-426: a layer holds no const of the target, so a compile for any target continues from one
+    result.module = result.layer != nullptr ? check::check(*result.layer, library_files, user, options, target)
                   : checked != nullptr
-                      ? check::check(*checked, library_files, user, options)
-                      : check::check(modules, library_files, user, builtins::default_registry(), options);
+                      ? check::check(*checked, library_files, user, options, target)
+                      : check::check(modules, library_files, user, builtins::default_registry(), options, target);
     CC_RECORD_SCOPE_END("sgl.check");
 
     // The files as the check placed them: the prelude, the library files the source reached, then the source.
