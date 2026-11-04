@@ -893,7 +893,7 @@ cc::result<sgl::module_description, cc::string> sgl::describe(describe_request c
     for (auto const& e : m.entry_points)
     {
         auto const before = errors.size();
-        legal.push_back(check::legalize(m, e));
+        legal.push_back(e.legalized != nullptr ? *e.legalized : check::legalize(m, e));
         emit_impl::validate(m, legal.back(), errors);
         if (errors.size() == before)
             result.entry_points.push_back(describe_entry_point(m, e, legal.back()));

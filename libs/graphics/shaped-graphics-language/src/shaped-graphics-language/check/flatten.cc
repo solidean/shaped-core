@@ -1120,8 +1120,14 @@ void checker::flatten_entry_point(symbol_id id, traversal_request const* travers
     }
     judge_constants(f.entry);
     judge_assignments(f.entry);
-    judge_uniformity(f.entry);
+    auto legalized = judge_uniformity(f.entry);
     f.entry.options = options_reached(id, traversal != nullptr ? traversal->any_hit : symbol_id::none);
+    // legalizing copies the entry point's own fields, so the copy takes what was set after it
+    if (legalized.has_value())
+    {
+        legalized.value().options = f.entry.options;
+        f.entry.legalized = cc::make_shared<flat_entry_point const>(cc::move(legalized.value()));
+    }
     out.entry_points.push_back(cc::move(f.entry));
 }
 

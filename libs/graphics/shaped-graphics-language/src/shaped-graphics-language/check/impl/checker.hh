@@ -847,7 +847,8 @@ struct checker
     /// Indexes the symbols from `first`, the ones before it indexed when their layer was checked.
     void index_builtin_symbols(isize first);
     /// CHK-282: every barrier and every call that takes derivatives stands where all invocations of its group arrive.
-    void judge_uniformity(flat_entry_point const& structured);
+    /// Gives the entry point legalized with the default options where judging it needed that, and none where not.
+    [[nodiscard]] cc::optional<flat_entry_point> judge_uniformity(flat_entry_point const& structured);
     /// CHK-300, CHK-401: every index into a binding array, judged over the copies the entry points inlined of it.
     void judge_indices();
     /// CHK-402: one diagnostic for each that several entry points were judged to have alike, which names them all.

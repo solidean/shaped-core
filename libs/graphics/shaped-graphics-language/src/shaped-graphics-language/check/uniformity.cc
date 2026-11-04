@@ -616,7 +616,7 @@ struct uniformity_pass
 };
 } // namespace
 
-void checker::judge_uniformity(flat_entry_point const& structured)
+cc::optional<flat_entry_point> checker::judge_uniformity(flat_entry_point const& structured)
 {
     // most entry points call nothing that asks, and index no binding array, and legalizing is not free
     auto asks_barrier = false;
@@ -640,9 +640,9 @@ void checker::judge_uniformity(flat_entry_point const& structured)
             judges_per_draw = judges_per_draw || member.is_per_draw;
     asks_reconverged = asks_reconverged || judges_per_draw;
     if (!asks_barrier && !asks_reconverged)
-        return;
+        return {};
 
-    auto const e = legalize(out, structured);
+    auto e = legalize(out, structured);
     auto const judged = [&](bool reconverges)
     {
         auto pass = uniformity_pass{.m = out,
@@ -806,6 +806,7 @@ void checker::judge_uniformity(flat_entry_point const& structured)
         auto const span = ast::is_valid(from.expr) ? span_of(from.file, from.expr) : span_of(from.file, from.stmt);
         d.notes.push_back({.file = from.file, .where = span, .message = v.flow.why});
     }
+    return cc::move(e);
 }
 
 namespace

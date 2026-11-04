@@ -7,6 +7,7 @@
 #include <clean-core/container/span.hh>
 #include <clean-core/container/variant.hh>
 #include <clean-core/container/vector.hh>
+#include <clean-core/memory/shared_ptr.hh>
 #include <clean-core/string/string.hh>
 #include <clean-core/string/string_view.hh>
 #include <shaped-graphics-language/ast/file_ast.hh>
@@ -732,6 +733,9 @@ struct sgl::check::flat_entry_point
     feature_set features;
     /// The options it reaches, each once, in declaration order (CHK-355); empty for a test.
     cc::vector<symbol_id> options;
+    /// This entry point legalized with the default options, where its check did so already to judge its uniformity.
+    /// What `legalize(m, *this)` gives, so a reader that wants that form takes it; null where the check did not.
+    cc::shared_ptr<flat_entry_point const> legalized;
     /// The ray types it traces, by their position in their set, each once (CHK-332).
     cc::vector<flat_traced_ray> traced_rays;
     /// A procedural hit's attributes, which the target hands a closest or any hit as a parameter of its own; `none`
