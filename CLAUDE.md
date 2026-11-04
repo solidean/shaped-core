@@ -228,10 +228,9 @@ Each entry above names what it depends on, and the `CMakeLists.txt` files are th
   **Never introduce a new version of one of our file formats** (`.vdoc` above all) — that is a question, not a migration you write unprompted.
   When a change breaks something, **ask whether compatibility must be preserved**; most current work is on unreleased features, so the answer is usually no.
   See [Stability & Evolution](docs/coding-guidelines.md#stability--evolution).
-* **Most work goes straight to `main`; a PR is for big reworks and substantial new API** (see Git workflow).
+* **Work goes straight to `main`** (see Git workflow).
 * **Never wait for CI.** Push and move on; a red run is fixed after the fact, directly on `main`.
 * **No force-push to `main`.**
-* **Opening a PR requires the `opening-a-pr` skill.** Activate it before any `gh pr create` — do not hand-roll the PR.
 
 ---
 
@@ -485,12 +484,8 @@ A stale "no cc:: equivalent yet" reason sends the next author back to the old wa
 
 ## Git workflow
 
-* **`main` is the integration branch, and most changes are committed to it directly.**
-  That covers fixes, internal improvements, tests, CI fixes, docs, and API that was basically expected to be there — the missing overload, the accessor the type obviously lacked.
-* **A PR with a review is for big reworks and anything that adds substantial new API** — a new concept, type family or library, a public shape someone should weigh before it sets.
-  Those go on a feature branch namespaced per contributor, `u/<your-initials>/<feature>` (Philip Trettner is `u/pt/...`), through the `opening-a-pr` skill.
-  When a change could go either way, pick a lane and say which in one line, so the maintainer can redirect.
-* **CI is never waited on**, neither before a push to `main` nor before opening a PR.
+* **`main` is the integration branch, and changes are committed to it directly**, big reworks and new API included.
+* **CI is never waited on** before a push to `main`.
   Red CI is fixed after the fact and opportunistically, as its own commit on `main` — the `debugging-ci` skill reads the failing run.
   It is usually small: an arm the local machine does not compile, a newer compiler's warning.
 * **`git pull` merges, not rebases** — merge commits preserve the order parallel work landed.
@@ -502,9 +497,6 @@ A stale "no cc:: equivalent yet" reason sends the next author back to the old wa
   It is the local gate that makes skipping CI cheap, so it is not skipped.
   Its default scope is everything since the merge base with `origin/main`, so on `main` it covers exactly the unpushed commits.
 * **An agent never pushes on its own initiative.** A push needs the user's intent: ask, or wait until told to push.
-* **The review workflow is: open the PR, then review it in a fresh session, which lands changes or comments.**
-  The review with the tool always comes after the PR is open, never before.
-  So "anything to add before the PR?" asks what this session should still do; "a proper review with the tool" is never the answer.
 * **Commit attribution.** For largely Claude-generated commits, either no trailer or the `Assisted-By: Claude Code <model-id>` trailer — either is fine.
   The trailer uses the exact model id, and it is **never** `Co-Authored-By`.
   Human-written or trivial agent edits carry none.
