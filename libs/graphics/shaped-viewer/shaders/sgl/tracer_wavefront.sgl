@@ -168,7 +168,7 @@ fun lane_of(v: float3, i: uint) -> float:
 fun empty_tally() -> pixel_tally:
     let z3 = float3(0.0)
     let z2 = float2(0.0)
-    return pixel_tally(z3, 0.0, z3, 0.0, z3, 0.0, z3, 0.0, z3, 0.0, z3, 0.0, z3, -1.0, z2, z2, z2, z2)
+    return pixel_tally(z3, 0.0, z3, 0.0, z3, 0.0, z3, 0.0, z3, 0.0, z3, 0.0, z3, -1.0, z2, z2, z2, z2, z2)
 
 // ---- Instances ------------------------------------------------------------------------------------------------------
 
@@ -771,6 +771,7 @@ fun wavefront_finalize(index: uint){traced, wavefront_step}:
         let mut tally = traced.tallies[s]
         tally.sum += radiance
         tally.sum_specular += specular
+        tally.moment_sum.x += pt.moment_of(radiance)
         tally.count += 1.0
         tally.frame_sum += radiance
         tally.frame_sum_specular += specular
@@ -801,7 +802,8 @@ fun wavefront_resolve(slot: uint){traced, wavefront_step}:
     let tally = traced.tallies[slot as int]
 
     let mean = if tally.count > 0.0 => tally.sum / tally.count else float3(0.0)
-    traced.output[xy] = float4(..mean, 1.0)
+    let moment = if tally.count > 0.0 => tally.moment_sum.x / tally.count else 0.0
+    traced.output[xy] = float4(..mean, moment)
     traced.counters[counter_sample_floor].min(tally.count as uint)
     if wavefront_step.sample_target != 0u and wants_sample(tally.count) => traced.counters[counter_samples_short].add(1u)
 

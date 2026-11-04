@@ -52,7 +52,7 @@ binding thin_io:
     let emission = thin_io.emission.load(px)
 
     if thin_io.primary_depth.load(px) >= 1.0:
-        tracer.traced.output.store(px, float4(emission.x, emission.y, emission.z, 1.0))
+        tracer.traced.output.store(px, float4(emission.x, emission.y, emission.z, pt.moment_of(emission.xyz)))
         tracer.traced.guide_normal.store(px, float4(0.0))
         tracer.traced.guide_albedo.store(px, float4(0.0))
         tracer.traced.guide_specular_albedo.store(px, float4(0.0))
@@ -89,6 +89,8 @@ binding thin_io:
     let mut rng = hybrid.pixel_rng(uint2(id.x as uint, id.y as uint), size.x as uint)
     let count = hybrid.samples_of(f)
     let mut sum = float3(0.0)
+    // Each sample's luminance squared, `pt.moment_of`, which the frame's alpha carries into the mean beside its color.
+    let mut moment_sum = 0.0
     let mut hit_distance = float2(0.0)
     for sample in 0 ..< count:
         let lit = hybrid.direct(b, shading, n, wo_local, p, true, true, mut rng)
@@ -106,7 +108,9 @@ binding thin_io:
         let next = hybrid.bounce_plain(s2.b, s2.f, bounced.n, hybrid.kept_if(followed or not light_taken, s2.wo_local), bounced.at, mut rng)
         // Where nothing follows the bounced surface, `next` was its BSDF's half, and nothing past it is lit: the rest would all come to zero.
         if not followed:
-            sum += hybrid.finite(lit + bounced.throughput * (bounced.escaped + bounced.lights + bounce_lit + 2.0 * next.throughput * next.lights))
+            let unfollowed = hybrid.finite(lit + bounced.throughput * (bounced.escaped + bounced.lights + bounce_lit + 2.0 * next.throughput * next.lights))
+            sum += unfollowed
+            moment_sum += pt.moment_of(hybrid.finite(float3(emission.x, emission.y, emission.z)) + unfollowed)
             continue
         // The surface after a followed one is followed by none, so its lights are halved the same way, `last` the BSDF's half.
         let s3 = hybrid.secondary_of(next, false)
@@ -116,10 +120,12 @@ binding thin_io:
         let next_lit = hybrid.direct(s3.b, s3.f, next.n, s3_wo, next.at, false, last_taken, mut rng) + 2.0 * last.throughput * last.lights
             + hybrid.secondary_environment(s3.b, s3.f, next.n, s3_wo, next.at, mut rng)
         let beyond = if followed => next.throughput * (next.escaped + next.lights + next_lit) else 2.0 * next.throughput * next.lights
-        sum += hybrid.finite(lit + bounced.throughput * (bounced.escaped + bounced.lights + bounce_lit + beyond))
+        let one = hybrid.finite(lit + bounced.throughput * (bounced.escaped + bounced.lights + bounce_lit + beyond))
+        sum += one
+        moment_sum += pt.moment_of(hybrid.finite(float3(emission.x, emission.y, emission.z)) + one)
     let color = hybrid.finite(float3(emission.x, emission.y, emission.z)) + sum / (count as float)
 
-    tracer.traced.output.store(px, float4(..color, 1.0))
+    tracer.traced.output.store(px, float4(..color, moment_sum / (count as float)))
     if f.write_hit_distance != 0u:
         tracer.traced.guide_hit_distance[px] = hit_distance
     tracer.traced.guide_normal.store(px, float4(..n, 0.0))

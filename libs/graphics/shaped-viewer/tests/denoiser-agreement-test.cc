@@ -211,18 +211,11 @@ ASYNC_INVOCABLE_TEST("sv agreement - every denoiser keeps the image's brightness
                    agreement::display_of(f.denoised, exposure)};
             agreement::write_panels(name, panels);
 
-            // À-trous darkens a young image, 8% behind the megakernel and 15% behind the hybrid, and flattens its contrast at
-            // the scale of its widest pass, up to a third of the frame's brightness gone from the lit wall under the lamp.
-            // The other members keep the brightness within 5% and their tiles within some 15%.
-            // issue: bug-sr-atrous-flattens-young-contrast
-            auto const shift_limit = member == sr::denoise_method::atrous ? 0.17 : 0.05;
-            CHECK(tg::abs(r.global_shift) < shift_limit).dump("test", cc::string_view(name)).dump("shift", r.global_shift);
-            // À-trous's worst tile measured 29% to 37% from run to run, the hybrid's seeds following its compiles.
+            // Every member keeps the brightness within 5% and its tiles within some 15%.
+            CHECK(tg::abs(r.global_shift) < 0.05).dump("test", cc::string_view(name)).dump("shift", r.global_shift);
             // SVGF's measured 17% on the hybrid: a still hybrid frame hands it the guides blended over the mean's frames, which
             // its history needs to stay steady, and which describe a jittered frame's edges a little less closely than its own.
-            auto const tile_limit = member == sr::denoise_method::atrous ? 0.45
-                                  : member == sr::denoise_method::svgf   ? 0.18
-                                                                         : 0.15;
+            auto const tile_limit = member == sr::denoise_method::svgf ? 0.18 : 0.15;
             CHECK(tg::abs(r.worst_tile_shift) < tile_limit)
                 .dump("test", cc::string_view(name))
                 .dump("tile shift", r.worst_tile_shift);

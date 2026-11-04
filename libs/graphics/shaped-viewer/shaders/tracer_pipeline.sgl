@@ -27,6 +27,8 @@ use tracer
 
     let spp = max(1, f.samples_per_pixel)
     let mut accum = float3(0.0)
+    // The samples' luminance squared, summed as `accum` is: the mean's alpha is their mean, `pt.moment_of`.
+    let mut accum_moment = 0.0
 
     // The denoiser guides, summed over this frame's samples like `accum` is.
     let mut guide_normal = float3(0.0)
@@ -340,6 +342,7 @@ use tracer
         // It counts as a sample of zero instead: the sum is still divided by `spp`, as the wavefront counts one.
         if pt.is_finite(radiance):
             accum += radiance
+            accum_moment += pt.moment_of(radiance)
 
             // Clamped to the total, because the two are summed back together downstream.
             accum_specular += clamp(radiance_specular, float3(0.0), max(radiance, float3(0.0)))
@@ -367,11 +370,14 @@ use tracer
         tracer.traced.guide_hit_distance[xy] = float2(guide_diffuse, guide_specular)
 
     // Progressive accumulation: this frame's estimate folded into the running mean already in the target, every frame at the same weight.
+    let mut moment = accum_moment / spp_f
     if f.accum_frame > 0u:
         let frames = f.accum_frame as float
-        color = (tracer.traced.output[xy].xyz * frames + color) / (frames + 1.0)
+        let held = tracer.traced.output[xy]
+        color = (held.xyz * frames + color) / (frames + 1.0)
+        moment = (held.w * frames + moment) / (frames + 1.0)
 
-    tracer.traced.output[xy] = float4(..color, 1.0)
+    tracer.traced.output[xy] = float4(..color, moment)
 
     if f.write_primary_depth != 0u => tracer.traced.primary_depth[xy] = primary_depth
 

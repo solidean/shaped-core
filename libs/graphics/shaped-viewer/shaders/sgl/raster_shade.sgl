@@ -407,7 +407,7 @@ fun shade_face(pixel: float2, world: float3, face: pixel_face, surface_in: openp
 /// What a lit pixel writes: `color`, and the guides of `surface` at view depth `view_depth`, whose turned geometric normal is `n`.
 fun lit_targets(color: float3, n: float3, view_depth: float, surface: openpbr.surface, motion: float2, near: float) -> targets:
     return {
-        color = float4(..color, 1.0)
+        color = float4(..color, pt.moment_of(color))
         normal = float4(..n, 0.0)
         depth = view_depth
         albedo = float4(..openpbr.pt_diffuse_albedo(surface), 0.0)
@@ -426,8 +426,9 @@ fun environment(pixel: float2){drawn} -> targets:
     let at = pixel + f.jitter
     let dir = normalize(scene.camera_ray_offset(cam, at, f.size))
     let prev = scene.camera(..f.previous_camera)
+    let backdrop = scene.environment_backdrop(background_lanes(), dir)
     return {
-        color = float4(..scene.environment_backdrop(background_lanes(), dir), 1.0)
+        color = float4(..backdrop, pt.moment_of(backdrop))
         normal = float4(0.0)
         depth = 0.0
         albedo = float4(0.0)

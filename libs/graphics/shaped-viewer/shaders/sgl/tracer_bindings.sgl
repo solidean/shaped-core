@@ -309,6 +309,8 @@ struct pixel_tally:
     hit_specular: float2
     /// every path's first secondary ray that escaped since the restart, per lobe
     escaped: float2
+    /// x: the samples' luminance squared since the restart, summed as `sum` is, `pt.moment_of`; y: unused, for the packing
+    moment_sum: float2
 
 /// The workgroup counts an indirect dispatch reads, `sg::dispatch_args`.
 struct dispatch_args:
@@ -327,6 +329,7 @@ binding traced:
     world: acceleration_structure[.mixed]
 
     /// The view's accumulator: the running mean of every sample this estimate has drawn, read back and blended into at the dispatch's own pixel.
+    /// Its alpha is the mean of those samples' luminance squared, `pt.moment_of`, which à-trous measures each pixel's variance from.
     output: mut image_2d[.rgba32_float]
 
     /// One element, the frame constants.

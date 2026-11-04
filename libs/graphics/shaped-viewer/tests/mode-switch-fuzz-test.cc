@@ -146,12 +146,11 @@ cc::shared_async<f32> run_frames(session& s, int frames, bool moving, cc::random
         // A block is wrong in an image denoised or a few samples deep.
         // A raw one-sample frame is a quarter black, and in the shadow under the blocks, lit by a bounce alone, a patch of it.
         // What a filter breaks shows in a denoised image, and a NaN in the mean stays in it, so neither escapes this.
-        // À-trous leaves a black cluster of a young mean black, its window sized by the black center, so a young image of it is darker than this allows.
+        // Below four samples à-trous models its variance rather than measuring it, and inside a cluster of black samples
+        // every local variance it models is small, so the cluster stays a few percent darker than this allows.
         // issue: bug-sr-atrous-flattens-young-contrast
-        auto const atrous = settings_of(s).reconstruct.denoiser == sr::denoise_method::atrous;
-        auto const known_holes = atrous && r.samples < 4;
-        auto const known_dark = atrous && r.samples < 16;
-        if (s.shown && (r.ran || r.samples >= 4) && !known_holes)
+        auto const known_young = settings_of(s).reconstruct.denoiser == sr::denoise_method::atrous && r.samples < 4;
+        if (s.shown && (r.ran || r.samples >= 4) && !known_young)
             CHECK(st.blocks == 0)
                 .dump("settings", describe(s))
                 .dump("frame", f)
@@ -159,7 +158,7 @@ cc::shared_async<f32> run_frames(session& s, int frames, bool moving, cc::random
                 .dump("drawn", r.executed)
                 .dump("samples", r.samples);
         // The share of dark pixels means something only for an image denoised or a few samples deep.
-        if (s.shown && (r.ran || r.samples >= 16) && !known_dark)
+        if (s.shown && (r.ran || r.samples >= 16) && !known_young)
             CHECK(st.dark < k_dark_ceiling)
                 .dump("settings", describe(s))
                 .dump("frame", f)

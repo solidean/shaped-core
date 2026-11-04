@@ -226,3 +226,11 @@ fun triangle_normal(e1: float3, e2: float3, fallback: float3) -> float3:
     let c = cross(e1, e2)
     let length_squared = dot(c, c)
     return if length_squared > 1e-30 => c / sqrt(length_squared) else fallback
+
+/// What one sample of radiance `c` adds to its pixel's second moment: its luminance squared.
+/// The accumulated image carries the mean of these in its alpha, beside the mean radiance, so a filter reads each pixel's
+/// variance as `(alpha - luminance(rgb)^2) / samples`, which is what sr's à-trous steers its edge-stop by.
+/// Capped where its square still fits a float, as SVGF caps its moments.
+fun moment_of(c: float3) -> float:
+    let l = dot(c, float3(0.2126, 0.7152, 0.0722))
+    return min(l * l, 1e18)

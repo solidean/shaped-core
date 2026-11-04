@@ -2195,6 +2195,8 @@ sr::reconstruct_status view_renderer::_denoise(sg::command_list& cmd,
             // Samples rather than frames, since a wavefront frame holds no fixed number; its pixels' own counts are `sample_counts`.
             .sample_count = accumulator.samples,
             .sample_counts = sample_counts,
+            // Every integrator blends its samples' luminance squared into the mean's alpha, `pt.moment_of`.
+            .moment_in_alpha = true,
         };
 
         // On doubling, the denoised slot's `samples` holds the mean's count as of the run that wrote it.
