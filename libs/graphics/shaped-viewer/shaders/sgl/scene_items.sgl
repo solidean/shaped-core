@@ -287,6 +287,10 @@ fun sample_environment_direction(env: float4[28], n: float3, u: float3) -> envir
 /// `d` must be a unit direction.
 /// Negative lobes are clamped away, since radiance cannot go below zero.
 fun background_radiance(sh: float4[16], d: float3) -> float3:
+    return max(background_radiance_signed(sh, d), float3(0.0, 0.0, 0.0))
+
+/// `background_radiance` before its clamp: the function `background_irradiance` integrates exactly.
+fun background_radiance_signed(sh: float4[16], d: float3) -> float3:
     let x = d.x
     let y = d.y
     let z = d.z
@@ -316,8 +320,7 @@ fun background_radiance(sh: float4[16], d: float3) -> float3:
     let mut radiance = float3(0.0, 0.0, 0.0)
     for i in 0 ..< 16:
         radiance += sh[i].xyz * y_basis[i]
-
-    return max(radiance, float3(0.0, 0.0, 0.0))
+    return radiance
 
 /// Diffuse irradiance E(n) from the SH environment, via the clamped-cosine convolution.
 /// That is Ramamoorthi and Hanrahan, "An Efficient Representation for Irradiance Environment Maps", 2001.

@@ -51,10 +51,12 @@ fun direct(b: openpbr.bsdf, f: openpbr.frame, n: float3, wo_local: float3, p: fl
     if tracer.reaches(l, tracer.cutout_seed(rng, tracer.cutout_ray_light), tracer.ray_mask_hybrid_shadow):
         sum += l.diffuse + l.specular
     if not followed => return 2.0 * sum
-    let e = tracer.sample_environment(b, f, wo_local, p, n, false, mut rng)
+    // Its variate holds the environment sample's share; the caller adds the bounce's, `bounce_variate`.
+    let mut variate = float3(0.0)
+    let e = tracer.sample_environment(b, f, wo_local, p, n, false, mut rng, mut variate)
     if tracer.reaches(e, tracer.cutout_seed(rng, tracer.cutout_ray_environment), tracer.ray_mask_hybrid_shadow):
         sum += e.diffuse + e.specular
-    return sum
+    return sum + variate
 
 /// The environment at a surface no bounce leaves, its shadow ray traced inline: one sample from either of two samplers, the dome's or the BSDF's, picked with even odds.
 ///
@@ -91,11 +93,13 @@ fun secondary_environment(b: openpbr.bsdf, f: openpbr.frame, n: float3, wo_local
     return e.diffuse + e.specular
 
 /// `tracer.sample_environment`'s own draw at a surface no bounce leaves, and its shadow ray.
+/// Its variate is whole, since no bounce is weighed against the sample.
 fun probe_environment(b: openpbr.bsdf, f: openpbr.frame, n: float3, wo_local: float3, p: float3, rng: uint){tracer.traced, tracer.bindless} -> float3:
     let mut r = rng
-    let e = tracer.sample_environment(b, f, wo_local, p, n, true, mut r)
-    if not tracer.reaches(e, tracer.cutout_seed(r, tracer.cutout_ray_environment), tracer.ray_mask_hybrid_shadow) => return float3(0.0)
-    return e.diffuse + e.specular
+    let mut variate = float3(0.0)
+    let e = tracer.sample_environment(b, f, wo_local, p, n, true, mut r, mut variate)
+    if not tracer.reaches(e, tracer.cutout_seed(r, tracer.cutout_ray_environment), tracer.ray_mask_hybrid_shadow) => return variate
+    return variate + e.diffuse + e.specular
 
 /// Where one bounce from a primary hit went: what it carries there, and either the environment it escaped into or the surface it met.
 struct bounce:
@@ -124,6 +128,10 @@ struct bounce:
     /// whether a direction was drawn at all, and whether from the specular half of the closure, `openpbr.bsdf_lobe_is_specular`
     drawn: bool
     specular: bool
+    /// the reflected direction the closure drew and its density, kept where the face rejected it too; a zero density where none was drawn
+    /// `bounce_variate` reads them.
+    drawn_wi: float3
+    drawn_pdf: float
 
 /// One bounce from `p`: a direction drawn from the closure `b`, traced inline to what it meets.
 ///
@@ -135,6 +143,7 @@ fun bounce_from(b: openpbr.bsdf, f: openpbr.frame, n: float3, wo_local: float3, 
     let mut result = no_bounce()
     let u = float3(pt.rand(mut rng), pt.rand(mut rng), pt.rand(mut rng))
     let s = openpbr.bsdf_sample_direction(b, wo_local, u)
+    result = drew(result, f, s)
     if s.pdf <= 0.0 or s.direction.z == 0.0 or not s.valid => return result
     let refracts = s.direction.z < 0.0
     if refracts and s.medium == openpbr.medium_subsurface => return result
@@ -154,9 +163,22 @@ fun bounce_from(b: openpbr.bsdf, f: openpbr.frame, n: float3, wo_local: float3, 
     result.through_glass = refracts or way.crossings > 0u
     return landed(result, way.h, way.at, way.wi, if way.crossings > 0u => 1e30 else weight_pdf)
 
+/// `so_far` keeping the reflected direction `s` drew in frame `f`, whatever becomes of it.
+fun drew(so_far: bounce, f: openpbr.frame, s: openpbr.bsdf_sample) -> bounce:
+    let mut result = so_far
+    if s.pdf > 0.0 and s.direction.z > 0.0:
+        result.drawn_wi = openpbr.to_world(f, s.direction)
+        result.drawn_pdf = s.pdf
+    return result
+
+/// The bounce's share of the environment variate of the hit it left, closure `b` in frame `f` seen from `wo_local`: `tracer.environment_bounce_variate`.
+/// Only where that hit's `direct` was followed, which weighs its environment sample against this bounce.
+fun bounce_variate(b: openpbr.bsdf, f: openpbr.frame, wo_local: float3, bounced: bounce){tracer.traced} -> float3:
+    return tracer.environment_bounce_variate(b, f, wo_local, openpbr.to_local(f, bounced.drawn_wi), bounced.drawn_pdf)
+
 /// A bounce that has not happened: nothing carried, nothing met.
 fun no_bounce() -> bounce:
-    return bounce(float3(0.0), float3(0.0), float3(0.0), false, float3(0.0), float3(0.0, 1.0, 0.0), float3(0.0, 0.0, 1.0), float3(0.5), -1.0, 0.0, 1.0, false, false, false)
+    return bounce(float3(0.0), float3(0.0), float3(0.0), false, float3(0.0), float3(0.0, 1.0, 0.0), float3(0.0, 0.0, 1.0), float3(0.5), -1.0, 0.0, 1.0, false, false, false, float3(0.0, 0.0, 1.0), 0.0)
 
 /// `bounce_from` for a closure that refracts nowhere: one direction reflected off it, and one trace, with no glass to pass.
 /// It is the second bounce, from the surface the first met, whose closure `secondary_of` makes with no transmission, so a second `bounce_from` would only inline code nothing runs.
@@ -166,6 +188,7 @@ fun bounce_plain(b: openpbr.bsdf, f: openpbr.frame, n: float3, wo_local: float3,
     if wo_local.z <= 0.0 => return result
     let u = float3(pt.rand(mut rng), pt.rand(mut rng), pt.rand(mut rng))
     let s = openpbr.bsdf_sample_direction(b, wo_local, u)
+    result = drew(result, f, s)
     if s.pdf <= 0.0 or s.direction.z <= 0.0 or not s.valid => return result
     let wi = openpbr.to_world(f, s.direction)
     if dot(wi, n) <= 0.0 => return result
@@ -491,7 +514,8 @@ fun shade_face(pixel: float2, world: float3, face: raster.pixel_face, surface_in
     let last = bounce_plain(s3.b, s3.f, next.n, kept_if(not last_taken, s3_wo), next.at, mut rng)
     let next_lit = direct(s3.b, s3.f, next.n, s3_wo, next.at, false, last_taken, mut rng) + 2.0 * last.throughput * last.lights + secondary_environment(s3.b, s3.f, next.n, s3_wo, next.at, mut rng)
     let beyond = if followed => next.throughput * (next.escaped + next.lights + next_lit) else 2.0 * next.throughput * next.lights
-    let color = finite(b.emission + lit + bounced.throughput * (bounced.escaped + bounced.lights + bounce_lit + beyond))
+    let next_variate = if followed => bounce_variate(s2.b, s2.f, s2.wo_local, next) else float3(0.0)
+    let color = finite(b.emission + lit + bounce_variate(b, shading, wo_local, bounced) + bounced.throughput * (bounced.escaped + bounced.lights + bounce_lit + next_variate + beyond))
 
     let prev = scene.camera(..f.previous_camera)
     let motion = pixel + jitter_of(f) - scene.camera_project(prev, world - prev.position, pass.size)

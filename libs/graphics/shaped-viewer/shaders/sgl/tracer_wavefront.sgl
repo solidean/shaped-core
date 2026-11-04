@@ -672,6 +672,12 @@ fun shade_stored(slot: uint, inst: scene.instance, n_obj: float3, reach: float, 
         light.radiance += c
         if path_is_specular => light.specular += c
 
+    // The environment's variate, added whatever the shadow rays find.
+    if gathers:
+        let c = throughput * p.direct_diffuse
+        light.radiance += c
+        if b > 0u and path_is_specular => light.specular += c
+
     // Seeded from the stream where shade left it, as the megakernel's closest hit seeds its own two shadow rays.
     if gathers:
         let light_waits = defer_light(slot, 0u, light_s, throughput, b, path_is_specular, cutout_seed(p.rng, cutout_ray_light), mut light)

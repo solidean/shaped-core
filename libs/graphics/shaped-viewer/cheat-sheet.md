@@ -53,6 +53,8 @@ sv::perspective_projection       // { angle_d vertical_fov; f64 aspect_ratio; f6
 sv::camera_record_of(cam)        // -> shaders::tracer::camera_record (the GPU basis: forward/right_scaled/up_scaled); aspect from projection.aspect_ratio
 sv::render_settings              // { int samples_per_pixel, max_bounces; render_mode mode; int rounds_per_frame; f32 motion_hold_ms; sr::reconstruct_settings reconstruct; sr::display_transform display; } — per-layer integration controls (no light/sky: those are on the view)
                                  //   samples_per_pixel is the megakernel's alone; the wavefront's still frame runs rounds_per_frame (8), a moving one drains
+                                 //   environment_diffuse (exact): the sky's unshadowed diffuse light from its irradiance, samples only for what is blocked
+sv::environment_diffuse          // sampled | exact (default) — exact takes a face open to the sky's noise away; under a probe only, a dome is sampled
 sv::viewer_config::frame_budget_ms // (16) the GPU ms a frame's still wavefront layers share, split evenly; each fits its share with whole rounds, then with a partial fill
                                  //   0 runs rounds_per_frame at full fill; a headless viewer forces 0; a plan built by hand takes viewer_definition::wavefront_budget_ms (0)
 sv::wavefront_routine::drain_rounds(max_bounces) // -> i32: a moving frame's rounds, max_bounces + free_refractions (8) + 2 + medium_roulette_after (16, pt.roulette_after)
@@ -921,6 +923,10 @@ sv::shader_package()                                 // the one SGL package: tra
 The light is picked half by power and half uniformly.
 Each is balance-heuristic weighted against the BSDF-sampled bounce ray, so a near-smooth surface under a small light converges instead of sparkling.
 That is why it converges at far fewer `samples_per_pixel` than a naive path tracer.
+The environment's diffuse light is a control variate under `environment_diffuse::exact`: the SH irradiance through the diffuse lobe.
+Less what the environment sample and the bounce would carry of it unshadowed.
+Where nothing blocks the sky the two cancel, and a shadow keeps what its blocked rays subtract; `sample_environment` in `tracer_shade.sgl` is the one place it is formed.
+Where most of the sky is blocked, as inside a room seen through its window, it is noisier than the sampled estimate: issue `feat-sv-environment-variate-indoors`.
 What a caller supplies is a view.
 The `view_renderer` groups the layer's lights into a `pt_light_table`, uploads it as `traced.lights`, and writes its table into the frame constants.
 Every path is traced; a point or a parallel light is a delta and has next-event estimation alone (docs/lights.md).

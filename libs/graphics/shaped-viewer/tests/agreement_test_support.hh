@@ -71,6 +71,7 @@ struct sv_test::agreement::mode_config
     sv::background background = {};
     /// false lights the layer by its background alone when it has no light of its own
     bool fallback_light = true;
+    sv::environment_diffuse environment_diffuse = sv::environment_diffuse::exact;
 };
 
 /// A layer's mean converged twice, from seeds that share nothing, with the G-buffer a rasterizing mode writes beside it.
@@ -206,6 +207,7 @@ void check_finite(cc::string_view stream, cc::string_view image, u64 frame, cc::
     scene.settings.motion_hold_ms = 0.0f;
     scene.settings.reconstruct.denoiser = config.denoiser;
     scene.background = config.background;
+    scene.settings.environment_diffuse = config.environment_diffuse;
     if (!config.fallback_light)
         scene.fallback_light = cc::nullopt;
     def.views.push_back(cc::move(v));
