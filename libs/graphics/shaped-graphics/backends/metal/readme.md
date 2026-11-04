@@ -495,10 +495,9 @@ Two raygen kernels and the inline ray-query one, plus a miss function, a closest
 It is what makes the two execution tests the only thing anywhere that traces a ray on metal, since the tier-1 suite cannot.
 
 **That fixture is hand-written, and temporary.**
-The agreed shape is HLSL run through SPIRV-Cross with all three artifacts checked in.
-The argument-buffer layout this backend encodes was chosen to match what SPIRV-Cross emits, so a hand-written kernel can agree with the backend and still disagree with every real shader.
-Neither DXC nor SPIRV-Cross is available on an arm64 macOS host today, which is why it exists in the meantime.
-`raytrace.metal`'s own comment says so, and [debt-sg-metal-hand-written-fixtures](../../docs/issues/debt-sg-metal-hand-written-fixtures.md) carries the gap.
+A hand-written kernel can agree with the backend and still disagree with every real shader.
+The target shape is an SGL package, as `metal-sgl-test.cc` already is; HLSL does not reach metal, by decision.
+[debt-sg-metal-hand-written-fixtures](../../docs/issues/debt-sg-metal-hand-written-fixtures.md) carries the gap.
 So the fixture is reproducible by hand, and the binary needs neither the shader library nor the Metal toolchain.
 Its reflection is written out by hand next to it, so the test states the binding shape it means rather than inheriting whatever a reflector produced.
 Every test builds its own context, because the context is its subject.
