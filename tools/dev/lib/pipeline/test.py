@@ -138,6 +138,22 @@ def _binary_timeout(target: Target, timeout: float | None, explicit: bool) -> fl
     return max(timeout, target.timeout_secs)
 
 
+def _echo_sample_report(stdout_log: Path | None, recording: Path) -> None:
+    """Print the hot-function report nexus --sample wrote at the end of its stdout, and where the recording went."""
+    text = stdout_log.read_text(encoding="utf-8", errors="replace") if stdout_log and stdout_log.is_file() else ""
+    marker = "where the busy time went, sampled:"
+    at = text.rfind(marker)
+    if at < 0:
+        ui.write_line(console.yellow("  no sample report: the run wrote none (--no-recording, or a crash before the end)"))
+        return
+    for line in text[at:].splitlines():
+        if not line.strip():
+            break
+        ui.write_line(f"  {line}")
+    if recording.is_file():
+        ui.write_line(console.dim(f"  recording: {recording}"))
+
+
 def test(
     presets: list[Preset],
     binary_names: list[str],
@@ -155,6 +171,7 @@ def test(
     verbose: bool = False,
     emsdk_path: str | None = None,
     runtime: jsr.JsRuntimeRequest | None = None,
+    sample: bool = False,
 ) -> list[dict]:
     """Run the named test binaries, optionally filtered by `test_name`.
 
@@ -168,6 +185,9 @@ def test(
     in which case it holds for every binary; None or 0 runs without one.
     `watchdog_fraction` passes each binary a `--watchdog` of that fraction of its own timeout, so the hang report still
     lands before the kill however long a binary was given.
+
+    `sample` has each binary sample its threads for the whole run (nexus --sample), keep the recording as
+    `<artifact>.ccrec` beside it, and print where the busy time went, which this echoes from the binary's stdout log.
 
     `extra_env_for(name)` injects per-binary environment variables, merged on top of the inherited process env and `env` rather than replacing them.
     The coverage runner uses it to point each binary's LLVM_PROFILE_FILE at a distinct file; None leaves the child env untouched.
@@ -244,6 +264,10 @@ def test(
                 # Before extra_args, so a --watchdog the caller passed through to the runner still wins.
                 if watchdog_fraction is not None and binary_timeout:
                     cmd += ["--watchdog", f"{binary_timeout * watchdog_fraction:g}"]
+                sample_path = target.artifact.parent / f"{target.artifact.name}.ccrec"
+                if sample:
+                    sample_path.unlink(missing_ok=True)
+                    cmd += ["--sample", str(sample_path)]
                 cmd += extra_args
 
                 # Per-binary and per-preset env layer onto the inherited environment, so PATH and the MSVC vars the child needs are never dropped.
@@ -270,6 +294,9 @@ def test(
 
                 if profile.enabled():
                     _harvest_test_timings(timings_path, binary=name, preset=preset.name)
+
+                if sample:
+                    _echo_sample_report(result.stdout_log, sample_path)
 
                 kept = crash_reports.collect(preset.build_dir, target.artifact, result.stdout_log, result.stderr_log)
                 if kept is not None:

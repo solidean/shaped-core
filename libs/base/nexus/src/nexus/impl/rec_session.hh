@@ -40,7 +40,10 @@ void end_run_recording(cc::string_view log_dir);
 /// **Call it after begin_run_recording and before anything runs.** Events already drained are gone.
 /// Writing happens inside end_run_recording, because a recording holds chunk references and cannot outlive the
 /// shutdown that ends the run — which is the same constraint the failing-test dumps are serialized early for.
-void begin_run_capture(cc::string_view path);
+///
+/// With `sample`, the threads the recorder knows are sampled until the run ends, and their busy stacks are printed as
+/// a hot-function report beside the write.
+void begin_run_capture(cc::string_view path, bool sample = false);
 
 /// Where this run keeps its crash reports, from the environment variable NX_CRASH_DIR, or empty when it is unset.
 /// A driver sets it so a crash leaves files that outlive the run: the report, a minidump, and the recording below.

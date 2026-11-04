@@ -838,6 +838,10 @@ A test marked `thorough_only` runs only then, and the per-binary timeout grows t
 `uv run dev.py test --smoke` is the other direction: a heavy test narrows to its smallest case under `nx::is_smoke()`, and `check` runs every preset but its default one so.
 [nexus' test-runtime](../../libs/base/nexus/docs/test-runtime.md) is the concept.
 
+`uv run dev.py test "<filter>" --sample` profiles what it runs.
+Each binary samples its threads until the run ends and prints where the busy time went, by self and by total, keeping the recording as `<binary>.ccrec` beside it.
+The table is symbolized at exit, seconds per few thousand distinct addresses, so pair it with a filter; [profiling](../../libs/base/clean-core/docs/profiling.md#sampling) has the rest.
+
 ## Examples (`example`)
 
 Example executables follow the convention `<lib>-<name>-example` and are built on nexus like the tests, but in the `example` bucket: every build compiles them and no sweep ever runs one.

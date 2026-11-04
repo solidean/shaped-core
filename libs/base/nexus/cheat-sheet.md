@@ -570,6 +570,7 @@ TEST("y", nx::config::exclusive(), nx::config::owns_recorder)  // this test driv
 - Opting in is what keeps it free: bucketing EVERY test costs the worst binary in this repo 31%, the handful that ask ~0%.
 - `--record` buckets EVERY test and dumps each failing one — a debug flag, normally with a filter, retention unbounded.
 - `--no-recording` turns the run's recorder off entirely (console logger and dumps included), and wins over `--record`.
+- `--sample <file>` profiles the run: samples the recorder's threads, prints where the busy time went, keeps the `.ccrec` — `dev.py test --sample`.
 
 [docs/recording.md](docs/recording.md) has the mechanism and the measurements.
 

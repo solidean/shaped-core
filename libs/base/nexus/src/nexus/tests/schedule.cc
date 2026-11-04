@@ -253,6 +253,9 @@ nx::args_builder build_cli(nx::test_schedule_config& config, cli_state& state)
     args.group("recording");
     args.arg({"record"}, config.record_all, "bucket every test's cc::rec events, whatever its own config says");
     args.arg({"no-recording"}, config.no_recording, "leave cc::rec down for the whole run");
+    args.arg({"sample"}, config.sample_file,
+             {.desc = "sample the run's threads, write its .ccrec here and print where the busy time went",
+              .metavar = "FILE"});
 
     args.group("reports");
     args.arg({"junit-xml"}, config.junit_xml_file, {.desc = "also write a JUnit XML report here", .metavar = "FILE"});

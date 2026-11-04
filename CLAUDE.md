@@ -525,6 +525,7 @@ A stale "no cc:: equivalent yet" reason sends the next author back to the old wa
 | Run the full suite               | `uv run dev.py test`                                              |
 | Run one or a batch of tests      | `uv run dev.py test "<pattern>"` (a pattern matching no test name selects by source file: `vector-test.cc`, `libs/base/**/tests/memory/*`) |
 | Chase a flaky test               | `uv run dev.py test <binary> --repeat 100` (stops at the first failure, so its logs survive for `test_diag`) |
+| Find why a test is slow          | `uv run dev.py test "<pattern>" --sample` (prints where the busy time went, by self and total; keeps `<binary>.ccrec`) |
 | Build a single target            | `uv run dev.py build -t <target>`                                 |
 | Run a non-test executable        | `uv run dev.py run <target> [args…]` (builds first, forwards args, propagates the exit code) |
 | Compile an SGL file to target text | `uv run dev.py run sgl -- emit <file.sgl> --entry <name> --target <t>` (`hlsl-dx12`, `hlsl-vulkan`, `wgsl`, `msl`) |

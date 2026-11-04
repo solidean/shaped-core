@@ -640,7 +640,10 @@ int nx::run(int argc, char** argv)
 
         // Started here rather than lazily: events already drained are gone, and the point of this file is to carry
         // what happened BEFORE the interesting sample as much as the sample itself.
-        nx::impl::begin_run_capture(config.benchmark_rec_file);
+        if (!config.sample_file.empty())
+            nx::impl::begin_run_capture(config.sample_file, true);
+        else
+            nx::impl::begin_run_capture(config.benchmark_rec_file);
 
         // A dump the crash handler and the hang watchdog can both write.
         //

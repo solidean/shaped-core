@@ -1227,6 +1227,7 @@ hot.self_ratio_of("render_frame") > 0.3;             // the assertion form: a re
 // SELF is the innermost frame and is what a profile is for; a high TOTAL and low SELF is a caller, not a problem.
 // Inclusive counts cover only what was CAPTURED — sampling stops at the innermost open scope by design.
 // {.include_stacktrace_events = true} folds in the stacks logs captured, which is a different question.
+// {.skip_idle = true} drops stacks parked in an OS wait (hot.idle_samples counts them): where the BUSY time went.
 
 #include <clean-core/platform/module_table.hh>   // which binaries were mapped where
 cc::enumerate_loaded_modules();              // -> cc::vector<cc::loaded_module>{base, size, path, identity}

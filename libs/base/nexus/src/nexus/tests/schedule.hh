@@ -99,6 +99,12 @@ struct nx::test_schedule_config
     // worth paying to be able to ask what a test recorded, and worth skipping when timing the tests themselves.
     bool no_recording = false;
 
+    // Sample every thread the recorder knows for the whole run, keep the recording here, and print where the busy time went.
+    // Paired with a filter, like --record: the report symbolizes at exit, seconds per few thousand distinct addresses.
+    // Needs the recorder, so --no-recording turns it off.
+    // Set via --sample <file>.
+    cc::string sample_file;
+
     // --watchdog SECS: after this long with no test starting or finishing, the run is reported as hung and exits with code 4.
     // The report names the running tests, every thread's stack and open scopes, and outstanding tracked work, and writes the recording.
     // 0 turns it off.
