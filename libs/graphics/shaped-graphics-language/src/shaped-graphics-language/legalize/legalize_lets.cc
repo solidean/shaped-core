@@ -520,7 +520,10 @@ struct let_simplifier
                 equal = n.member == other.member && n.letters == other.letters && same_operands(x, y, depth);
             },
             [&](flat_call const& n)
-            { equal = n.intrinsic == y.node.as<flat_call>().intrinsic && same_operands(x, y, depth); },
+            {
+                equal = n.intrinsic == y.node.as<flat_call>().intrinsic && n.text == y.node.as<flat_call>().text
+                     && same_operands(x, y, depth);
+            },
             [&](flat_element const&) { equal = same_operands(x, y, depth); }, [&](flat_buffer_element const&)
             { equal = same_operands(x, y, depth); }, [&](flat_construct const&) { equal = same_operands(x, y, depth); },
             [&](flat_not const&) { equal = same_operands(x, y, depth); },

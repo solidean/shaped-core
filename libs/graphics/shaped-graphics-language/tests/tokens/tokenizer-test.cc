@@ -315,7 +315,12 @@ TEST("sgl tokenizer - reserved openers are openers, so nothing below them change
               == "code: symbol(let) symbol(s) op(=) quote_open(\")~symbol(json)\n"
                  "  string_content: string_body({ \"a\": )~dollar($)~symbol(a)~string_body( })\n"
                  "code: quote_close(\")\n");
-        CHECK(sgl::dump_diagnostics(tagged) == "reserved-string-opener @8+5\n");
+        // STR-46: a double quote's tag names the language of a body in a target's own text
+        CHECK(sgl::dump_diagnostics(tagged) == "");
+
+        // the other quotes' tags are reserved still
+        auto const single = sgl::parse("let s = 'json\n    { }\n'\n");
+        CHECK(sgl::dump_diagnostics(single) == "reserved-string-opener @8+5\n");
 
         // Without lines below, it is what it looks like: a one-word string somebody has not closed yet.
         auto const typing = sgl::parse("print \"hello\nlet x = 1\n");

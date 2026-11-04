@@ -167,6 +167,15 @@ struct validator
                     report(error_kind::non_finite_literal, e.function,
                            cc::format("a literal of type '{}'", m.name_of(x.type)));
             }
+            else if (auto const* c = x.node.try_as<flat_call>(); c != nullptr && c->text >= 0)
+            {
+                // CHK-427: a body in a target's own text takes its function's parameters, each in order
+                auto const parameters = m.at(m.functions[m.at(c->callee).info].parameters).size();
+                if (c->text >= m.target_texts.size() || parameters != e.at(c->arguments).size())
+                    report(error_kind::malformed_tree, e.function,
+                           cc::format("a target's text of '{}' with {} arguments", m.at(c->callee).name,
+                                      e.at(c->arguments).size()));
+            }
             else if (auto const* c = x.node.try_as<flat_call>())
             {
                 auto const* const record = m.builtin_function(c->intrinsic);

@@ -481,6 +481,10 @@ const if fast: ... else: ...             // the same, but a condition no constan
 const if target_api == .vulkan: ...      // the compile's own API (.none .dx12 .vulkan .metal .webgpu) and target_language (.sgl .hlsl .wgsl .msl)
 const if has(.subgroups): ...            // the compile's device; the branch it takes uses the feature without a `require` (CHK-426)
                                          // a test sees .none, .sgl and no feature; a const holding any of them is ERROR, a function may return them
+fun f(x: float) -> float:                // a body in the target's own text: a run of "hlsl / "wgsl / "msl, or one per const if branch (CHK-427)
+    "hlsl                                //   $x is the argument, $result the value; the text is unchecked and the call impure
+        $result = rsqrt($x);             //   a target with no alternative and no SGL branch is ERROR invalid-target-text
+    "
 @unroll                                  // on a `for`: the body once per index, the index a literal in each copy, within 256 copies (CHK-389)
 for i in 0 ..< taps: ...                 // nothing of it runs as a loop, no text holds a hint, and the bounds are int constants
                                          // past 256 copies, a nest's counted together, it stays a loop: WARNING unroll-too-long

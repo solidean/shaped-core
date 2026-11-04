@@ -150,6 +150,26 @@ struct sgl::check::test_info
 /// It has two readers.
 /// An editor reads `files`, the side tables over the untouched AST, and `symbols`.
 /// An emitter reads `entry_points` with `types`, `members` and `bindings`, and never the AST.
+/// One alternative of a function body in a target's own text, a tagged string such as `"hlsl` (CHK-427).
+/// Its run is the tagged strings that stand together as one body, one per language, and `first` is the first of them.
+struct sgl::check::target_text
+{
+    symbol_id function = symbol_id::none;
+    i32 file = 0;
+    ast::stmt_id first = ast::stmt_id::none;
+    shading_language language = shading_language::sgl;
+    /// One more than `slots`: the text before each placeholder, then the text after the last; lines end in `\n`.
+    cc::vector<cc::string> pieces;
+    /// Parallel to the placeholders: the position of the parameter each names, and -1 for `$result`.
+    cc::vector<i32> slots;
+
+    [[nodiscard]] bool operator==(target_text const& rhs) const
+    {
+        return function == rhs.function && file == rhs.file && first == rhs.first && language == rhs.language
+            && ast::impl::is_equal(pieces, rhs.pieces) && ast::impl::is_equal(slots, rhs.slots);
+    }
+};
+
 struct sgl::check::checked_module
 {
     /// The module-level declarations of every file, in file order and then in source order.
@@ -190,6 +210,8 @@ struct sgl::check::checked_module
     layered<callable_call> callable_calls;
     /// Every assignment to an image's texel (CHK-367).
     layered<texel_store> texel_stores;
+    /// Every function body in a target's own text, one entry per language it is written in (CHK-427).
+    layered<target_text> target_texts;
 
     /// One entry per file checked: the prelude's, then the library files the program reaches, then the program's.
     layered<file_tables> files;
@@ -366,6 +388,7 @@ struct sgl::check::checked_module
         ray_traces.freeze();
         callable_calls.freeze();
         texel_stores.freeze();
+        target_texts.freeze();
         files.freeze();
         tests.freeze();
         test_units.freeze();
@@ -381,10 +404,10 @@ struct sgl::check::checked_module
             && is_equal(samplers, rhs.samplers) && is_equal(pipelines, rhs.pipelines)
             && is_equal(pipeline_settings, rhs.pipeline_settings) && is_equal(constants, rhs.constants)
             && is_equal(option_uses, rhs.option_uses) && is_equal(call_records, rhs.call_records)
-            && is_equal(function_instances, rhs.function_instances)
-            && is_equal(written_arguments, rhs.written_arguments) && is_equal(call_slots, rhs.call_slots)
-            && is_equal(near_misses, rhs.near_misses) && is_equal(ray_traces, rhs.ray_traces)
-            && is_equal(callable_calls, rhs.callable_calls) && is_equal(texel_stores, rhs.texel_stores)
+            && is_equal(function_instances, rhs.function_instances) && is_equal(written_arguments, rhs.written_arguments)
+            && is_equal(call_slots, rhs.call_slots) && is_equal(near_misses, rhs.near_misses)
+            && is_equal(ray_traces, rhs.ray_traces) && is_equal(callable_calls, rhs.callable_calls)
+            && is_equal(texel_stores, rhs.texel_stores) && is_equal(target_texts, rhs.target_texts)
             && is_equal(files, rhs.files) && is_equal(entry_points, rhs.entry_points) && is_equal(tests, rhs.tests)
             && is_equal(test_units, rhs.test_units) && is_equal(entry_expectations, rhs.entry_expectations)
             && is_equal(diagnostics, rhs.diagnostics) && builtins == rhs.builtins;

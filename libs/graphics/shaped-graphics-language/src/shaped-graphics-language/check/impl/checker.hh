@@ -386,6 +386,27 @@ struct checker
     /// (CHK-426).
     compile_target compiled_target;
 
+    /// A statement of a body in a target's own text that stands where one may (CHK-427).
+    struct text_statement
+    {
+        i32 file = 0;
+        ast::stmt_id stmt = ast::stmt_id::none;
+        /// The last of its run, which is where the body ends.
+        bool ends_run = false;
+    };
+    cc::vector<text_statement> text_statements;
+    /// The functions whose bodies `plan_target_text` read already, which an instance does not read again.
+    cc::vector<symbol_id> planned_text_functions;
+
+    /// The token index of `stmt`'s opening quote where it is a tagged string, a body in a target's text; -1 otherwise.
+    [[nodiscard]] i32 tagged_text_token(i32 file, ast::stmt_id stmt) const;
+    /// Finds the runs of tagged strings `function`'s body may hold, and registers each in `out.target_texts`.
+    /// A run is the whole of `statements`, or of a branch of a `const if` that is the whole of them, at any depth.
+    void plan_target_text(symbol_id function, i32 file, ast::range_of<ast::stmt_id> statements);
+    void register_text_run(symbol_id function, i32 file, cc::span<ast::stmt_id const> run);
+    /// How a tagged string ends its block, where `stmt` is one; none for any other statement.
+    [[nodiscard]] cc::optional<flow> target_text_flow(i32 file, ast::stmt_id stmt);
+
     /// How many of `files` are the prelude's; every other file is a module's.
     i32 prelude_count = 0;
     /// The modules of the files behind the prelude: 0 is the program's, every other one a module it reaches by `use`.

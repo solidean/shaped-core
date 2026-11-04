@@ -502,6 +502,7 @@ print "total:", total
 * **AST-61** Any other expression statement is the warning `no-effect`, and it is still read: an infix or a prefix `call`, a name, a literal, a `member`, a `tuple`.
 * **AST-114** The last statement of a block is no exception to AST-61, since a block has no implicit value ([AST-106](#value-blocks-and-yield)).
 * **AST-140** Inside a `test` body, and not inside a function nested in one, AST-61 does not report: a line of type `bool` is a check there, and only the check pass knows a line's type.
+* **AST-158** A tagged string of `"` (STR-46) standing as a statement is a body in a target's own text, which has an effect: AST-61 does not report it.
 
 ```sgl
 fun update(state: particle):

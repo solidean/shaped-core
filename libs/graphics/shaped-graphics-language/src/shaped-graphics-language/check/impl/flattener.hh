@@ -721,6 +721,10 @@ struct flattener
 
     void flatten_return(origin from, ast::expr_id value);
 
+    /// The run of tagged strings `stmt` opens, as the call of its function that the emitter writes as the text of the
+    /// language this compile writes; nothing for a statement that opens no run (CHK-427).
+    void flatten_target_text(origin from, ast::stmt_id stmt);
+
     /// `is_const` for a `const if`, whose condition that no constant decides is an error (CHK-425).
     void flatten_if(origin from, cc::span<ast::if_branch const> branches, bool is_const = false);
 

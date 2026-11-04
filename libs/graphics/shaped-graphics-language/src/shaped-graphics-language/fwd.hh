@@ -208,6 +208,7 @@ enum class feature : u8;
 enum class graphics_api : u8;
 enum class shading_language : u8;
 struct compile_target;
+struct target_text;
 struct sampler_state;
 struct shape_info;
 struct image_format_info;

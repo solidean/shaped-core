@@ -371,9 +371,14 @@ struct writer
         if (needs_member_assignment(x))
             return true;
         if (auto const* const c = x.node.try_as<flat_call>())
+        {
+            // CHK-427: a body in a target's own text is lines alone
+            if (c->text >= 0)
+                return true;
             if (auto const* const record = p.m.builtin_function(c->intrinsic);
                 record != nullptr && record->write.writes_lines != nullptr && record->write.writes_lines(d.language()))
                 return true;
+        }
         auto result = false;
         check::impl::for_each_operand(p.e, x, [&](flat_expr_id operand) { result = result || writes_lines(operand); });
         return result;
@@ -1149,9 +1154,46 @@ struct writer
         line(cc::format("{} = {};", expr(a.place).text, value));
     }
 
+    /// A body in a target's own text, written ahead of the statement that holds the call, each placeholder the argument
+    /// it names, and `$result` a local the text assigns, which is the call's value (CHK-427).
+    rendered target_text_call(flat_call const& c, check::type_id type)
+    {
+        auto const& t = p.m.target_texts[c.text];
+        auto arguments = cc::vector<cc::string>();
+        for (auto const id : p.e.at(c.arguments))
+            arguments.push_back(wrapped(expr(id), level::primary));
+        auto result = cc::string();
+        if (type != check::checked_module::void_type)
+        {
+            result = p.names.mint(cc::format("{}_text", p.m.at(c.callee).name));
+            auto const type_name = cc::string(type_text(p, d, type));
+            auto declaration = cc::string();
+            d.write_local(declaration, {.name = result, .type = type_name, .is_mut = true, .is_zeroed = is_padded(type)});
+            line(declaration);
+        }
+        auto text = cc::string(t.pieces[0]);
+        for (auto i = isize(0); i < t.slots.size(); ++i)
+        {
+            text += t.slots[i] < 0 ? cc::string_view(result) : cc::string_view(arguments[t.slots[i]]);
+            text += t.pieces[i + 1];
+        }
+        // each line of the text a line of its own, indented where the call stands
+        auto start = isize(0);
+        for (auto i = isize(0); i <= text.size(); ++i)
+            if (i == text.size() || text[i] == '\n')
+            {
+                if (i > start)
+                    line(cc::string(cc::string_view(text).subview({.offset = start, .size = i - start})));
+                start = i + 1;
+            }
+        return {.text = cc::move(result)};
+    }
+
     /// Every call is written from its registry record; nothing here knows one builtin from another.
     rendered call(flat_call const& c, check::type_id type)
     {
+        if (c.text >= 0)
+            return target_text_call(c, type);
         auto const& record = *p.m.builtin_function(c.intrinsic);
         auto arguments = cc::vector<rendered>();
         for (auto const id : p.e.at(c.arguments))
@@ -1498,8 +1540,9 @@ struct writer
             [&](flat_print const& n) { print_record(s, n); }, //
             [&](flat_eval const& v)
             {
-                // an atomic HLSL writes as statements alone has nothing left to evaluate
-                if (is_hlsl_atomic(v.value))
+                // an atomic HLSL writes as statements alone has nothing left to evaluate, nor has a target's own text
+                auto const* const evaluated = p.e.at(v.value).node.try_as<flat_call>();
+                if (is_hlsl_atomic(v.value) || (evaluated != nullptr && evaluated->text >= 0))
                 {
                     (void)expr(v.value);
                     return;

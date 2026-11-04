@@ -221,7 +221,8 @@ struct dumper
                      },
                      [&](flat_call const& c)
                      {
-                         out.appendf("(call{} {}", c.is_pure ? "" : ":effect", m.at(c.callee).name);
+                         out.appendf("(call{}{} {}", c.is_pure ? "" : ":effect", c.text >= 0 ? ":text" : "",
+                                     m.at(c.callee).name);
                          arguments(c.arguments, false);
                      },
                      [&](flat_not const& n)

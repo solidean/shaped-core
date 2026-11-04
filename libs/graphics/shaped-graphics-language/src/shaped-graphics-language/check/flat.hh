@@ -328,6 +328,10 @@ struct sgl::check::flat_call
     /// The callee's `function_info::is_pure`, repeated for the same reason; a call that is not pure has an effect.
     bool is_pure = false;
     ast::range_of<flat_expr_id> arguments;
+    /// A body in a target's own text, as a position in `checked_module::target_texts`, which the emitter writes in place
+    /// of the call; -1 for a builtin's call (CHK-427).
+    /// Its callee is the SGL function, its arguments that function's parameters in order, and it has no `intrinsic`.
+    i32 text = -1;
 
     constexpr bool operator==(flat_call const&) const = default;
 };

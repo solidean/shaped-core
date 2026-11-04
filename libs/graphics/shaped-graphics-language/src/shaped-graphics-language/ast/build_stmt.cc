@@ -111,10 +111,14 @@ stmt_id builder::expression_statement(form_id form)
     auto const is_application
         = as_call != nullptr
        && (as_call->spelling == call_spelling::paren || as_call->spelling == call_spelling::juxtaposition);
+    // AST-158: a tagged string standing as a statement is a body in a target's own text, the language its tag names
+    auto const is_target_text = is_kind(form, form_kind::quoted) && is_valid(at(form).token)
+                             && index_of(at(form).token) + 1 < file.tokens.size()
+                             && file.tokens[index_of(at(form).token) + 1].kind == token_kind::symbol;
     auto const has_effect = is_application || node.is<return_expr>() || node.is<yield_expr>() || node.is<break_expr>()
                          || node.is<continue_expr>() || node.is<discard_expr>() || node.is<case_expr>()
                          || node.is<if_expr>() || node.is<loop_expr>() || node.is<with_bindings>()
-                         || node.is<invalid_expr>();
+                         || node.is<invalid_expr>() || is_target_text;
     // AST-140: in a test a line of type `bool` is a check, and only the check pass knows a line's type.
     if (!has_effect && !is_in_test_body())
         report(diagnostic_kind::no_effect, form);

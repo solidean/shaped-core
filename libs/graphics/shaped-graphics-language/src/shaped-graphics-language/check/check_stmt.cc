@@ -130,6 +130,9 @@ flow checker::check_stmt(function_scope& scope, ast::stmt_id stmt)
         judge_attributes(file, s.attributes, loop_attributes, "a for");
     else
         judge_attributes(file, s.attributes, {}, "a statement");
+    // CHK-427: a body in a target's own text is checked where its function's body is planned, and ends it
+    if (auto const text = target_text_flow(file, stmt); text.has_value())
+        return text.value();
 
     auto result = flow::falls_through;
     s.node.visit(

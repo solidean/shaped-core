@@ -170,13 +170,14 @@ print "cost in $ is unknown"
 
 * **STR-30** `"""` as the last token of its line is tokenized as an opening quote, and it is the normal error `reserved-string-opener`.
 * **STR-31** A quote followed by exactly one name and then the end of the line, on a line that has children, is a **tagged opener** ([why](why/strings-and-comments.md#str-31)).
-* **STR-45** A tagged opener is tokenized as an opening quote and a symbol, and it is the normal error `reserved-string-opener`.
+* **STR-45** A tagged opener is tokenized as an opening quote and a symbol; one of `'` or a backquote is the normal error `reserved-string-opener`.
+* **STR-46** A tagged opener of `"` is a string in the language its tag names, which a function body in a target's own text is (AST-158, CHK-427).
 * **STR-34** The same spelling on a line without children is a one-line string with no closing quote, and STR-6 applies.
 * **STR-35** No whitespace stands between the quote and the name of a tagged opener.
 * **STR-36** A `"""` opener is closed by `"""` at the start of the next sibling, and its content does not interpolate.
 * **STR-37** A tagged opener is closed like any multi-line string, and its content interpolates when the quote is `"`.
 
-`"""` is reserved, so the line below reports `reserved-string-opener`.
+`"""` and a tagged opener of `'` are reserved, so the line below reports `reserved-string-opener`.
 
 ```sgl error
 let raw = """
@@ -189,9 +190,9 @@ let shader = """
     raw text, $no interpolation
 """
 
-let config = "json
+let config = 'json
     { "width": 4 }
-"
+'
 ```
 
 ## Other quotes
@@ -201,6 +202,7 @@ let config = "json
 
 ## Open
 
-* Whether a tagged opener exists for all three quote characters, as it does today, or for `"` only.
+* Whether a tagged opener of `'` and of a backquote, reserved today, means anything, or exists for `"` only.
+* Whether a tagged string may stand anywhere but a target's text, as a value of a language such as JSON.
 * Whether a `\u{…}` escape that names a surrogate, or a value past the last code point, is `unknown-escape` or a kind of its own.
 * Whether a tag is a free name or must name something declared.

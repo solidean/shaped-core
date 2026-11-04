@@ -34,8 +34,8 @@ fun add(a: mut atomic[float], v: float) -> float:
 
 ### `const if`
 
-Specified so far: `const if` itself (AST-157, CHK-425), and the target and device it reads (CHK-426).
-What stays here is what it grows into: discarding by a generic's parameters, and text bodies.
+Specified so far: `const if` itself (AST-157, CHK-425), the target and device it reads (CHK-426), and text bodies in their first form (STR-46, AST-158, CHK-427).
+What stays here is what it grows into: discarding by a generic's parameters, and the rest of text bodies below.
 
 **`const if` heads an ordinary `if` chain, and every `else if` of the chain is constant too.**
 The chain's siblings pair as an `if`'s do (AST-50, AST-51), and a condition that is not constant is an error.
@@ -171,13 +171,15 @@ What SGL lacks is the 2-state ray flag and `opacity_micromap` among the features
 ## What it touches
 
 Done: `const if`, constant conditions, `target_api`, `target_language` and `has`, the grant, slib's device features.
+Text bodies in their first form are done too: the tagged string as a body, its placement, placeholders and `$result`, a `flat_call` with `text`, and the emitters writing it inline.
+In that form a call of one is impure, needs no uniform control flow and gives a varying result, whatever its text does.
 Left:
 
-* The parser and the AST: the tagged string as a body.
-* The check pass: three-valued discarding, the declaration as the contract, SGL branches checked against it, and coverage.
+* The check pass: three-valued discarding, effect and uniformity attributes as the contract, SGL branches checked against it, and coverage.
 * Generics: a branch ruled out for an instance is never checked for it.
-* Flatten: a text body is a leaf whose effects are declared.
-* The emitters: placeholders, `$result`, the preamble, reserved names read from the text, and `#line` inside it.
+* The emitters: the preamble, reserved names read from the text, and `#line` inside it.
+* A buffer as a parameter, which SGL has for no function yet, so a text body reaches a buffer through an element or an atomic alone.
+* Text types, which SER's hit object waits for.
 * The interpreter: the features a test sets.
 * `sgl describe`: optional features.
 * sg: each feature a condition names, beginning with SER's.

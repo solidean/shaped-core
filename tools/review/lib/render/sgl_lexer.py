@@ -55,6 +55,8 @@ _ESCAPE = re.compile(r"\\.")
 # The real tokenizer leaves these as separate fused
 # tokens for the form phase to assemble; a highlighter has no later phase, so it assembles them here.
 _FRACTION = re.compile(r"[.](?![.])[0-9][0-9A-Za-z_']*")
+# A quote fused to exactly one name and then the end of the line: a tagged opener (STR-31).
+_TAGGED_OPENER = re.compile(r"([A-Za-z_][0-9A-Za-z_]*)[ \t]*$")
 _EXPONENT = re.compile(r"(?<=[eEpP])[+-][0-9][0-9A-Za-z_']*")
 # `$name`, `$name.member`, `$$`, and `$(…)` without nested parentheses, which is as far as a highlighter needs to see.
 _INTERPOLATION = re.compile(r"\$\$|\$[A-Za-z_][0-9A-Za-z_]*(?:\.[A-Za-z_][0-9A-Za-z_]*)*|\$\([^()]*(?:\([^()]*\)[^()]*)*\)")
@@ -157,6 +159,12 @@ def _code_tokens(line: str, closes: str):
             end = _closing_quote(line, i + 1, ch)
             if line[i:].strip() == ch * 3:
                 end = -1
+            tag = _TAGGED_OPENER.match(line, i + 1)
+            if end < 0 and tag:
+                # A quote fused to one name: a tagged opener, whose name says the content's language (STR-31, STR-46).
+                yield i, token, ch, code
+                yield i + 1, Name.Tag, tag.group(1), ("string" if ch == '"' else "raw-string", ch)
+                return
             if end < 0 and (not line[i + 1:].strip() or line[i:].strip() == ch * 3):
                 # An open quote with nothing after it: the children are the string, and the next sibling closes it.
                 is_raw = ch != '"' or line[i:].strip() == '"""'

@@ -237,6 +237,8 @@ enum class sgl::diagnostic_kind : sgl::u8
     invalid_option,
     /// An unrolled `for` that would write more copies of its body than the compiler writes, which stays a loop; a warning.
     unroll_too_long,
+    /// A function body in a target's own text that breaks a rule of where it stands or what it names (CHK-427).
+    invalid_target_text,
 };
 
 namespace sgl

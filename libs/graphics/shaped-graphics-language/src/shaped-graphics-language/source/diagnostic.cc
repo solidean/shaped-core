@@ -244,6 +244,8 @@ cc::string_view sgl::to_string(diagnostic_kind kind)
         return "invalid-option";
     case diagnostic_kind::unroll_too_long:
         return "unroll-too-long";
+    case diagnostic_kind::invalid_target_text:
+        return "invalid-target-text";
     case diagnostic_kind::missing_sampler:
         return "missing-sampler";
     case diagnostic_kind::invalid_constant_argument:
@@ -518,6 +520,8 @@ cc::string_view sgl::summary_of(diagnostic_kind kind)
         return "a value for a name no option has, of another type than the option's, or for a name given twice";
     case diagnostic_kind::unroll_too_long:
         return "an unrolled for that would write more copies of its body than the compiler writes, and stays a loop";
+    case diagnostic_kind::invalid_target_text:
+        return "a body in a target's own text that stands where none may, or names what it may not";
     case diagnostic_kind::unknown_feature:
         return "a `require` of a name that is no feature a shader can use";
     case diagnostic_kind::feature_not_declared:
@@ -654,6 +658,7 @@ sgl::severity sgl::default_severity_of(diagnostic_kind kind)
     case diagnostic_kind::uniform_index_varies:
     case diagnostic_kind::non_uniform_per_draw:
     case diagnostic_kind::invalid_option:
+    case diagnostic_kind::invalid_target_text:
         return severity::normal_error;
     case diagnostic_kind::spaced_attribute_arguments:
     case diagnostic_kind::needless_nonuniform:

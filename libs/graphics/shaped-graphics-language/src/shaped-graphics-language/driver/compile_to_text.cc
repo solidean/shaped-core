@@ -202,6 +202,12 @@ cc::result<sgl::emitted_source, cc::string> sgl::compile_to_text(text_request co
 
     if (index < 0)
     {
+        // CHK-402: an entry point whose own body did not check has no flat tree, and its errors say why
+        for (auto i = isize(0); i < m.symbols.size(); ++i)
+            if (auto const& s = m.symbols[i]; s.kind == check::symbol_kind::function && s.name == request.entry_point
+                                              && s.file == front.program_file())
+                if (auto own = front.errors_of(check::symbol_id(i)); !own.empty())
+                    return cc::error(cc::move(own));
         auto held = cc::string();
         for (auto const& e : m.entry_points)
             held.appendf("{}{} '{}'", held.empty() ? "" : ", ", check::stage_name(e.entry_stage), e.name);

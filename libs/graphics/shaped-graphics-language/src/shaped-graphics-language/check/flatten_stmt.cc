@@ -723,6 +723,9 @@ void sgl::check::impl::flattener::flatten_stmt(ast::stmt_id id)
         return;
     if (auto const* const a = s.node.try_as<ast::assert_stmt>())
         return flatten_check(from, a->condition, true, a->message);
+    // CHK-427: a body in a target's own text is a call the emitter writes as that text
+    if (c.tagged_text_token(file(), id) >= 0)
+        return flatten_target_text(from, id);
 
     auto const* const e = s.node.try_as<ast::expr_stmt>();
     if (e == nullptr || !ast::is_valid(e->value))
@@ -842,4 +845,74 @@ void sgl::check::impl::flattener::flatten_expr_stmt(origin from, ast::expr_id va
     }
     // Any other call has a value, which is evaluated where it stands and dropped.
     add_stmt(from, flat_eval{.value = flatten_expr(value)});
+}
+
+void sgl::check::impl::flattener::flatten_target_text(origin from, ast::stmt_id stmt)
+{
+    // the run's first statement stands for all of it, one alternative per language
+    auto const language = compiled_for().language;
+    auto chosen = -1;
+    auto function = symbol_id::none;
+    for (auto i = isize(0); i < c.out.target_texts.size(); ++i)
+    {
+        auto const& t = c.out.target_texts[i];
+        if (t.file != file() || t.first != stmt)
+            continue;
+        function = t.function;
+        if (t.language == language)
+            chosen = i32(i);
+    }
+    if (!is_valid(function))
+        return;
+
+    auto const literal = ast().at(stmt).node.as<ast::expr_stmt>().value;
+    auto const& name = c.out.at(function).name;
+    if (chosen < 0)
+    {
+        auto const detail = language == shading_language::sgl
+                              ? cc::format("a test reaches {}, whose body is a target's own text, which no "
+                                           "interpreter runs",
+                                           name)
+                              : cc::format("{} has no body in {}, the language this compile writes", name,
+                                           k_shading_language_names[isize(language)]);
+        unroll_reports.push_back({.kind = diagnostic_kind::invalid_target_text,
+                                  .file = file(),
+                                  .where = c.span_of(file(), stmt),
+                                  .detail = detail,
+                                  .site = innermost_call()});
+        mark_failed();
+        meets_error = true;
+        return;
+    }
+
+    // every parameter in order, as the footprint reads a call's arguments against its callee's parameters
+    auto arguments = cc::vector<flat_expr_id>();
+    for (auto const& p : c.out.at(c.out.functions[c.out.at(function).info].parameters))
+    {
+        auto const where = target{.kind = target_kind::parameter, .index = i32(p.field)};
+        auto value = flat_expr_id::none;
+        for (auto const& b : current()->bound)
+            if (b.where == where && is_valid(b.literal))
+                value = again(b.literal, literal);
+            else if (b.where == where && is_valid(b.local))
+                value = local_ref(b.local, literal);
+        if (!is_valid(value))
+        {
+            mark_failed();
+            return;
+        }
+        arguments.push_back(value);
+    }
+
+    auto const return_label = current()->return_label;
+    auto const result_type = current()->result;
+    auto const is_void = !is_valid(result_type) || result_type == checked_module::void_type;
+    auto const call = add_expr(is_void ? checked_module::void_type : result_type, literal,
+                               flat_call{.callee = function, .arguments = add_list(arguments), .text = chosen});
+    if (is_void)
+        return add_stmt(from, flat_eval{.value = call});
+    if (is_valid(return_label))
+        add_stmt(from, flat_leave{.target = return_label, .value = call});
+    else
+        add_stmt(from, flat_return{.value = call});
 }

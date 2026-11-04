@@ -129,6 +129,12 @@ void checker::check_body_of(symbol_id id, i32 instance)
         return;
     }
 
+    // CHK-427: the bodies in a target's own text a function's body may hold, read once whatever instances follow
+    if (f != nullptr && !planned_text_functions.values().contains(id))
+    {
+        planned_text_functions.push_back(id);
+        plan_target_text(id, file, body.statements);
+    }
     auto ending = check_statements(scope, body.statements);
     auto inferred = type_id::none;
     if (ast::is_valid(body.value) && notes[index].infers_result)
