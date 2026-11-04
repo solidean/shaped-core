@@ -4,24 +4,26 @@
 
 ## The idea
 
-**A function may hold several bodies, tried top to bottom, and the first whose guard holds is the one compiled.**
-A guard is a constant `bool` over what a compile knows: the target's language and API, the device features the host reports, and the program's options.
-A body is SGL, or the target's own text in a tagged string: inline target code, as inline assembly is to a C compiler.
+**`const if` is an `if` whose conditions are constants, so only the branch taken is compiled.**
+A condition reads what a compile knows: the target's language and API, the device features the host reports, the program's options, and a generic's parameters.
+A function whose whole body is such a chain may hold the target's own text in a branch: inline target code, as inline assembly is to a C compiler.
 
-One mechanism thus covers three things SGL lacks or does by hand:
+One mechanism thus covers four things SGL lacks or does by hand:
 
 * **Inline target code** — SER, NVAPI intrinsics, a Metal-only builtin, anything SGL has not named yet ([feat-sgl-inline-target-code](../../issues/feat-sgl-inline-target-code.md)).
 * **Branching on a feature** — a fast path where a device has one, and a portable one where it does not.
   [feat-sgl-scoped-require-and-if-feature](../../issues/feat-sgl-scoped-require-and-if-feature.md) is that gap.
+* **Branching on a generic's parameter** — `const if T.is_float:` in a template, as C++'s `if constexpr`.
 * **Per-target choices the compiler makes in C++ today** — the native float atomic add is one ([plan.cc](../../../src/shaped-graphics-language/emit/impl/plan.cc), `native_float_atomics`).
 
 ```sgl sketch
+@stages(.compute, .raygen, .miss, .closest_hit, .callable)
 fun add(a: mut atomic[float], v: float) -> float:
-    when has(float_atomic_add) and target.api == .vulkan:
+    const if has(float_atomic_add) and target.api == .vulkan:
         "hlsl
             $result = sgl_atomic_add_float($a, 1, 0, $v);
         "
-    when has(float_atomic_add) and target.api == .metal:
+    else if has(float_atomic_add) and target.api == .metal:
         "msl
             $result = atomic_fetch_add_explicit(&$a, $v, memory_order_relaxed);
         "
@@ -29,62 +31,80 @@ fun add(a: mut atomic[float], v: float) -> float:
         // the compare-exchange loop every target has, in SGL
 ```
 
-### Guards
+### `const if`
 
-**A guard is an ordinary constant expression, and only the guard decides.**
-A body is never skipped because it fails to check, as C++'s SFINAE skips one; a body whose guard holds and which is wrong is an error.
-Every SGL body is checked on every compile, whether it is chosen or not, as both branches of an `if` on an option are today.
+**`const if` heads an ordinary `if` chain, and every `else if` of the chain is constant too.**
+The chain's siblings pair as an `if`'s do (AST-50, AST-51), and a condition that is not constant is an error.
+It may stand wherever an `if` may, a function's whole body or one statement among others.
 
-What a guard reads:
+What a condition reads:
 
 * `target.language` — `.hlsl`, `.wgsl` or `.msl` today; `.glsl`, `.spirv` and `.dxil` when SGL emits them.
 * `target.api` — `.dx12`, `.vulkan`, `.metal` or `.webgpu`.
 * `has(f)` — the device has sg feature `f`, as the host reports when it compiles.
 * Any option, and any constant built from one.
+* A generic's parameters, and what [types-as-values.md](types-as-values.md) lets a condition ask of a type.
 
-**A text body's tag is its language**, and it adds `target.language == tag` to its guard.
-So HLSL for vulkan and GLSL for vulkan are two bodies under one `target.api == .vulkan`, and the one the emitter can write is chosen.
-A guard over the API alone and several tagged strings inside it is the common case, which is why the tag carries the language rather than the guard.
+### What is checked
+
+**A branch is checked unless its condition is false whatever the target, the features and the options are.**
+The condition is evaluated with `target`, `has(…)` and every option unknown, in three-valued logic:
+
+* A condition over a generic's parameters alone is known per instance, so the branch it rules out is never checked for that instance, as C++ discards it.
+* A condition that reads `target`, `has` or an option is unknown, so every branch it guards is checked on every compile, the one not taken included.
+  So a fallback a dx12 author never runs still fails on their machine, and one check keeps judging every target.
+* `else` after a branch whose condition is known true is ruled out, and so is everything after it.
+
+A branch is never skipped because it fails to check, as C++'s SFINAE skips an overload.
 
 ### Features
 
 **`has(f)` makes `f` an optional feature**: used where the device has it, and never required of one.
 That is new beside `require`, which refuses a device without the feature.
 
-* A body under `has(f)` is granted `f`, as a `require` in it would grant it; that is the scoped grant the feature epic is missing.
+* A branch under `has(f)` is granted `f`, as a `require` in it would grant it; that is the scoped grant the feature epic is missing.
 * The features the host reports join the options in what keys a compiled text: in slib's cache, and in a frozen bundle.
 * `sgl describe` reports an optional feature apart from a required one, so the host asks for it where the device has it rather than failing where it does not.
 
 slib does exactly this for one feature already: it hands `float_atomic_add` to the compiler as an option.
 That is `k_native_float_atomic_add_option` in [shader_asset.cc](../../../../shaped-shader-library/src/shaped-shader-library/shader_asset.cc).
-Specialization makes that the rule for every feature, rather than one option per feature.
+`has` makes that the rule for every feature, rather than one option per feature.
 
-**A guard names sg features only**, never a target's extension string.
+**A condition names sg features only**, never a target's extension string.
 A vendor capability reaches a shader through sg first, which keeps sg's rule that a feature is a whole code path a device has or has not.
 That is where SGL and sg meet: a text body makes the shader half of SER possible without the compiler knowing it, and enabling it on the device stays sg's.
 
-### The signature is the contract
+### Text bodies
 
-**Callers see one function, and what they are checked against is its declaration, never the chosen body.**
-Otherwise a uniformity error, a footprint or a stage restriction would differ by target, and one check would no longer judge every target.
+**A tagged string in the target's language is a text body**, and it stands only as a whole body:
 
-* Parameter types and their marks (`mut`, `out`) are the signature's, and a text body names them by placeholder.
-* Effects and uniformity are declared on the function with the registry's own vocabulary: `@pure`, `@reads_only`, `@barrier`, `@derivatives`, `@subgroup`, and whether the result is uniform.
+* the whole body of a function;
+* or the whole branch of a `const if` that is itself the function's whole body, at any depth of such chains.
+
+A run of tagged strings, one per language, counts as one text body, of which the emitter writes the one in its language.
+A branch taken with no tagged string in the language being written is an error, never a fall-through to the next branch.
+So a condition states the APIs its text serves, and a new target that meets a condition meets an error rather than a slower path chosen in silence.
+
+**Every body of the function honors one contract, its declaration**, and callers are checked against that, never against the branch taken.
+Otherwise a uniformity error, a footprint or a stage restriction would differ by target.
+
+* Parameter types and their marks (`mut`, `out`) are the signature's.
+* Effects and uniformity are attributes of the `fun`, in the registry's own vocabulary: `@pure`, `@reads_only`, `@barrier`, `@derivatives`, `@subgroup`, and whether the result is uniform.
   Undeclared means impure, needing no uniform control flow, with a result that varies.
-* An SGL body is checked against the declaration: a body of a `@pure` function that writes memory is an error, and so is one that takes a derivative where `@derivatives` is not declared.
-* `@stages(…)` is the function's too, so the weakest body decides it: the float add's loop never leaves a helper invocation, which keeps every body of it out of the pixel stage.
+* An SGL branch is checked against the declaration: one of a `@pure` function that writes memory is an error, and so is one that takes a derivative where `@derivatives` is not declared.
+* `@stages(…)` is the function's too, so the weakest branch decides it: the float add's loop never leaves a helper invocation, which keeps every branch of it out of the pixel stage.
 * **A text body reaches GPU memory only through a resource parameter**, whose mark says read or write, as a clobber list says what inline assembly touches.
   So the footprint stays exact with no help from the text.
 
-### Text bodies
+How the text is written:
 
-* **They are only allowed in a specialized function**, whose signature is the contract above.
-  At statement level an `if` on a constant already leaves its dead branch out of the text and the footprint (CHK-355), so `if has(subgroups):` needs nothing new.
-* **They expand inline at the call**, as a builtin's custom writer does, rather than becoming a helper function in the target text.
+* **It expands inline at the call**, as a builtin's custom writer does, rather than becoming a helper function in the target text.
   WGSL takes no storage buffer as a parameter, and a resource parameter is what the hazard model rests on.
 * **`$name` is a parameter**, as the argument written, bound to a local first where it is no plain name, so a placeholder used twice evaluates once.
   A `mut` parameter is a place the text may assign.
-  `$result` is a local of the result type the text assigns; a function without one has none.
+* **`$result` is a local of the result type, which the text assigns**, so one rule serves every language and a body of several statements.
+* **The placeholders are checked, although the text is not**: a `$name` naming no parameter is an error.
+  `$result` stands in a text body exactly when the function has a result, and no parameter is named `result`.
 * **Every name the text writes is reserved** from the program's names in that language (EMIT-15), read from the text rather than listed by hand.
 * **A preamble per target**, deduplicated across calls, holds what the text needs ahead of the entry point.
   That is an `enable` directive, an `#include`, or a declaration such as the float add's `[[vk::ext_instruction]]`.
@@ -92,27 +112,27 @@ Otherwise a uniformity error, a footprint or a stage restriction would differ by
 
 ### Types
 
-A type may be specialized too, which SER needs for its hit object:
+A struct whose whole body is a `const if` chain is specialized the same way, which SER needs for its hit object:
 
 ```sgl sketch
 struct hit_object:
-    when target.api == .dx12:
+    const if target.api == .dx12:
         "hlsl
             dx::HitObject
         "
     else:
-        // an SGL struct holding a hit, for the bodies that fall back
+        // fields of an SGL struct holding a hit, for the branches that fall back
 ```
 
 A text type is opaque and local-only, as a ray query is: no field is reachable, no GPU memory holds it, and no stage edge carries it.
-Only the bodies of specialized functions take it apart.
+Only the text bodies of specialized functions take it apart.
 
 ### Coverage
 
-* A compile in which no body's guard holds is an error at the entry point that reaches the call, as `target-lacks-feature` is today.
-* A specialized function whose last body is guarded has no fallback, which a lint reports.
-* The interpreter is a target whose language is SGL itself, so it runs the first SGL body whose guard holds, and a test reaching only text bodies is an error.
-  A test may set the features `has` sees, so every SGL body runs on the CPU, the fallback above all.
+* A compile that takes a branch with no body for its language is an error at the entry point that reaches the call, as `target-lacks-feature` is today.
+* A function whose whole body is a `const if` chain without an `else` has no fallback, which a lint reports.
+* The interpreter is a target whose language is SGL itself, so a branch it takes must be SGL, and a test reaching only text is an error.
+  A test may set the features `has` sees, so every SGL branch runs on the CPU, the fallback above all.
 
 ### Text bodies are a lane, not a home
 
@@ -124,7 +144,7 @@ Some of the prelude's own builtins may go the other way, from a C++ custom write
 
 **The float atomic add, first.**
 The C++ special case becomes a specialized prelude function, as in the first sketch above.
-It proves guards on API and feature, text bodies with a preamble, an optional feature, and the SGL fallback, against GPU tests that exist already, with no sg work.
+It proves conditions on API and feature, text bodies with a preamble, an optional feature, and the SGL fallback, against GPU tests that exist already, with no sg work.
 The fallback has to reach the `uint` bits of an `atomic[float]`, which no SGL spelling does yet, so an `@internal` builtin for that view comes with it.
 
 **SER, second.**
@@ -138,13 +158,14 @@ What SGL lacks is the 2-state ray flag and `opacity_micromap` among the features
 
 ## What it touches
 
-* The parser and the AST: a function or a struct whose body is guarded bodies, and the tagged string as a body.
-* The check pass: guards as constants, `target` and `has` as names, the declaration as the contract, SGL bodies checked against it, and coverage.
-* Flatten: the chosen body inlines like any other, and a text body is a leaf whose effects are declared.
+* The parser and the AST: `const if` as a keyword form, and the tagged string as a body.
+* The check pass: constant conditions, `target` and `has` as names, three-valued discarding, the declaration as the contract, SGL branches checked against it, and coverage.
+* Generics: a branch ruled out for an instance is never checked for it.
+* Flatten: the branch taken inlines like any other, and a text body is a leaf whose effects are declared.
 * The emitters: placeholders, `$result`, the preamble, reserved names read from the text, and `#line` inside it.
-* The interpreter: SGL bodies by the same guards, with the features a test sets.
+* The interpreter: SGL branches by the same conditions, with the features a test sets.
 * `sgl describe` and slib: optional features, and the reported features in the cache key and in frozen bundles.
-* sg: each feature a guard names, beginning with SER's.
+* sg: each feature a condition names, beginning with SER's.
 
 ## Already fixed by the syntax
 
@@ -152,14 +173,12 @@ What SGL lacks is the 2-state ray flag and `opacity_micromap` among the features
   [string-family.md](string-family.md) reserves it for language-tagged strings, which a text body is.
 * `$name` and `$(expr)` interpolation are tokenized in every double-quoted string (STR-37), so placeholders need no new token.
 * `"""` and `"""lang` are reserved for raw strings, a text body with no placeholders at all.
-* `when` is no keyword yet.
+* `const` and `if` are keywords already, and `else if` shows the shape of a two-word keyword form.
 
 ## Open
 
-* The syntax: `when` arms inside one declaration, as sketched, or one `@when(…)` declaration per body, top to bottom in one file.
-* Whether a text statement may stand in an ordinary body, reaching any local in scope, as GCC's `asm` does.
-* `$result`, `$return` or a last line that is the value.
 * What `target.api` is in the interpreter, and whether a test names features by `has` or by a set it states.
-* Whether the declared effects may be inferred from the SGL bodies where every body is SGL, so only a function with a text body declares them.
+* Whether the declared effects may be inferred where every branch is SGL, so only a function with a text body declares them.
 * Whether an optional feature's reported value comes from the device, or from what the host chooses to enable, which may be less.
-* Whether two bodies may differ in what they need of a pipeline layout, such as a binding the fallback uses and the native body does not.
+* Whether two branches may differ in what they need of a pipeline layout, such as a binding the fallback uses and the native body does not.
+* Whether a `const if` among other statements, rather than as a whole body, discards its ruled-out branch from the footprint as an `if` on an option does (CHK-355).
