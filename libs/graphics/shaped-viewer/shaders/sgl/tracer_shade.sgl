@@ -661,7 +661,7 @@ fun shade_triangle(h: triangle_hit, payload: mut surface_payload, ctx: material.
     let v0 = instance_position(inst, ctx.corner.x)
     let v1 = instance_position(inst, ctx.corner.y)
     let v2 = instance_position(inst, ctx.corner.z)
-    let n_obj = normalize(cross(v1 - v0, v2 - v0))
+    let n_obj = pt.triangle_normal(v1 - v0, v2 - v0, float3(0.0, 0.0, 1.0))
 
     // By the inverse transpose, not by the object-to-world transform: a normal is a covector, so a non-uniform placement tilts it differently.
     let n_world = h.normal_to_world(vec3(n_obj.x, n_obj.y, n_obj.z))

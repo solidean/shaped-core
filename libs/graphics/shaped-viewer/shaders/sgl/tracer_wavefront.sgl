@@ -568,7 +568,7 @@ fun shade_stored_triangle(slot: uint, ctx: material.shading_context, surface: op
     let r = traced.path_rays[slot as int]
     let light_pdf = emitter_pdf(inst, hit.primitive, instance_to_world(inst, v1 - v0), instance_to_world(inst, v2 - v0), normalize(r.direction), hit.t * length(r.direction))
     let reach = pt.corner_reach(r.origin, instance_point_to_world(inst, v0), instance_point_to_world(inst, v1), instance_point_to_world(inst, v2))
-    shade_stored(slot, inst, normalize(cross(v1 - v0, v2 - v0)), reach, surface, supplied_tangent_frame, light_pdf)
+    shade_stored(slot, inst, pt.triangle_normal(v1 - v0, v2 - v0, float3(0.0, 0.0, 1.0)), reach, surface, supplied_tangent_frame, light_pdf)
 
 /// Shades the quadric hit of `slot` from the normal its intersection reported — the wavefront's `shade_quadric`.
 fun shade_stored_quadric(slot: uint, surface: openpbr.surface, supplied_tangent_frame: bool){traced, bindless, slug.tables, wavefront_step}:

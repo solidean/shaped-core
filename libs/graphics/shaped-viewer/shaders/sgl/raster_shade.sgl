@@ -315,7 +315,7 @@ fun face_of(inst: scene.instance, ctx: material.shading_context, world: float3, 
     let w0 = to_world_point(inst, tracer.instance_position(inst, ctx.corner.x))
     let w1 = to_world_point(inst, tracer.instance_position(inst, ctx.corner.y))
     let w2 = to_world_point(inst, tracer.instance_position(inst, ctx.corner.z))
-    let mut n = normalize(cross(w1 - w0, w2 - w0)) * mirroring_of(inst)
+    let mut n = pt.triangle_normal(w1 - w0, w2 - w0, normalize(eye - world)) * mirroring_of(inst)
 
     // Which side the viewer is on, read off the geometry BEFORE the normal is turned to face it.
     let exiting = dot(n, eye - world) < 0.0

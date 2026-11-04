@@ -279,20 +279,21 @@ ASYNC_INVOCABLE_TEST("sv temporal - a denoised stream leaves no ghost behind a m
     }
 }
 
-// Once a still mean has nearly converged, it hardly changes from one frame to the next, and its denoised image must not either.
-// Each still frame samples its pixels at another offset, so the mean antialiases; a guide drawn at that frame's offset
-// changes surface behind every edge from frame to frame, and a filter steered by it flickers there however converged its input.
-ASYNC_INVOCABLE_TEST("sv temporal - a still denoised image stops changing as its mean converges",
-                     (sg::context_handle const& ctx_h))
+namespace
 {
-    auto& ctx = *ctx_h;
-    if (!agreement::can_trace(ctx))
-        SKIP("no inline ray tracing or no SGL compiler, so neither the tracers nor the hybrid build");
-
-    auto resources = sv::gpu_resource_manager::create(ctx);
-    auto const box = agreement::make_lit_box(resources);
+/// Holds `items`, seen through `camera` and lit by `lights` where given, still under every denoiser, and measures how
+/// much each denoised image changes from frame to frame once the mean has nearly converged, against the mean's own change.
+/// Each still frame samples its pixels at another offset, so the mean antialiases; a guide drawn at that frame's offset
+/// changes surface behind every edge from frame to frame, and a filter steered by it flickers there however converged its input.
+/// Awaited on the spot, so what it takes by reference outlives every suspend.
+cc::shared_async<cc::unit> hold_still(sg::context& ctx,
+                                      sv::gpu_resource_manager& resources,
+                                      cc::span<sv::scene_item const> items,
+                                      sv::camera const& camera,
+                                      cc::span<sv::scene_light const> lights,
+                                      cc::string_view prefix)
+{
     auto const size = agreement::k_size;
-
     auto const support = sr::query_reconstruct_support(ctx);
     sr::denoise_method const members[]
         = {sr::denoise_method::atrous, sr::denoise_method::svgf, sr::denoise_method::oidn, sr::denoise_method::dlss_rr};
@@ -302,14 +303,21 @@ ASYNC_INVOCABLE_TEST("sv temporal - a still denoised image stops changing as its
 
     for (auto const member : members)
     {
-        auto const name = cc::format("settled-hybrid-{}", sr::to_string(member));
+        auto const name = cc::format("{}-{}", prefix, sr::to_string(member));
         if (!support.supports(member))
         {
             CC_LOG_INFO("{}: not run, this build or device has no {}", name, sr::to_string(member));
             continue;
         }
-        auto view = agreement::denoise_view(ctx, resources, box.items, box.camera,
+        auto view = agreement::denoise_view(ctx, resources, items, camera,
                                             {.name = name, .mode = sv::render_mode::hybrid, .denoiser = member});
+        if (!lights.empty())
+        {
+            auto& scene = sv::ensure_scene_3d(view.def.views[0]);
+            for (auto const& l : lights)
+                scene.lights.push_back(l);
+            scene.fallback_light = cc::nullopt;
+        }
         auto const warmed = co_await view.warm_up();
         CHECK(warmed).dump("test", cc::string_view(name));
         if (!warmed)
@@ -374,7 +382,8 @@ ASYNC_INVOCABLE_TEST("sv temporal - a still denoised image stops changing as its
         for (auto const w : where)
             map.push_back(tg::vec3f(f32(w / peak), f32(w / peak), f32(w / peak)));
         auto const exposure = agreement::exposure_of(last);
-        cc::vector<tg::vec3f> const panels[] = {agreement::display_of(last, exposure), cc::move(map)};
+        cc::vector<tg::vec3f> const panels[]
+            = {agreement::display_of(last, exposure), agreement::display_of(previous_mean, exposure), cc::move(map)};
         agreement::write_panels(name, panels);
 
         CHECK(denoised_change <= 2.0 * mean_change + 0.001)
@@ -387,4 +396,42 @@ ASYNC_INVOCABLE_TEST("sv temporal - a still denoised image stops changing as its
             .dump("mean, 99th percentile", mean_tail);
         co_await cc::async_settled(sv::background_work(ctx));
     }
+}
+} // namespace
+
+ASYNC_INVOCABLE_TEST("sv temporal - a still denoised image stops changing as its mean converges",
+                     (sg::context_handle const& ctx_h))
+{
+    auto& ctx = *ctx_h;
+    if (!agreement::can_trace(ctx))
+        SKIP("no inline ray tracing or no SGL compiler, so neither the tracers nor the hybrid build");
+    auto resources = sv::gpu_resource_manager::create(ctx);
+    auto const box = agreement::make_lit_box(resources);
+    co_await hold_still(ctx, resources, box.items, box.camera, {}, "settled-hybrid");
+}
+
+// The scene the edge flicker was first seen in: a room of furniture edges, lit by its own lights, from its author's camera.
+// It is fetched on request, so a run without it skips.
+ASYNC_INVOCABLE_TEST("sv temporal - the White Room's still denoised image stops changing as its mean converges",
+                     (sg::context_handle const& ctx_h))
+{
+    auto& ctx = *ctx_h;
+    if (!agreement::can_trace(ctx))
+        SKIP("no inline ray tracing or no SGL compiler, so neither the tracers nor the hybrid build");
+    auto const asset = sv::asset_loader().load(SV_TEST_RESEARCH_SCENES_DIR "/living-room-2/living_room_2_extended.glb");
+    if (asset.has_error())
+        SKIP(cc::format("the White Room did not load ({}); uv run extern/gltf-research-scenes/fetch-research-scenes.py "
+                        "installs it",
+                        asset.error().to_string()));
+    REQUIRE(!asset.value().cameras.empty());
+
+    auto resources = sv::gpu_resource_manager::create(ctx);
+    auto items = cc::vector<sv::scene_item>();
+    for (auto const& mesh : asset.value().meshes)
+        items.push_back(resources.acquire_scene_item(mesh));
+    resources.wait_for_pending_uploads();
+    auto lights = cc::vector<sv::scene_light>();
+    for (auto const& l : asset.value().lights)
+        lights.push_back({.id = sv::light_id::from_string(l.id), .light = l.light});
+    co_await hold_still(ctx, resources, items, asset.value().cameras[0].camera, lights, "settled-white-room");
 }

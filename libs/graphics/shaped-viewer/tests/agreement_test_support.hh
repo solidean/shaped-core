@@ -150,6 +150,11 @@ namespace sv_test::agreement
     return true;
 }
 
+[[nodiscard]] inline bool is_finite(f32 v)
+{
+    return tg::abs(v) < 1e30f;
+}
+
 [[nodiscard]] inline bool is_finite(rgba16 const& c)
 {
     return is_finite(tg::vec4f(f32(c.r), f32(c.g), f32(c.b), f32(c.a)));
@@ -413,6 +418,17 @@ public:
         auto const* const denoised_slot = slot_of(sv::temporal_id::denoised(0));
         auto mean = sg::data_future<tg::vec4f>();
         auto denoised = sg::data_future<rgba16>();
+        // The guides a denoiser steers by, which a blend over the mean's frames keeps a bad value in for good.
+        auto const download = [&](u64 temporal, auto into)
+        {
+            auto const* const s = slot_of(temporal);
+            return s != nullptr && s->texture.raw() != nullptr
+                     ? decltype(into)(cmd->download.bytes_from_texture(s->texture.raw()))
+                     : decltype(into)();
+        };
+        auto const normal_guide = download(sv::temporal_id::normal_guide(0), sg::data_future<rgba16>());
+        auto const albedo_guide = download(sv::temporal_id::albedo_guide(0), sg::data_future<rgba16>());
+        auto const depth_guide = download(sv::temporal_id::depth_guide(0), sg::data_future<f32>());
         if (mean_slot != nullptr && mean_slot->texture.raw() != nullptr)
             mean = sg::data_future<tg::vec4f>(cmd->download.bytes_from_texture(mean_slot->texture.raw()));
         if (denoised_slot != nullptr && denoised_slot->texture.raw() != nullptr)
@@ -440,6 +456,12 @@ public:
             for (auto const& v : d.value())
                 out.denoised.push_back(tg::vec4f(f32(v.r), f32(v.g), f32(v.b), f32(v.a)));
         check_finite(_name, "mean", index, cc::span<tg::vec4f const>(out.raw));
+        if (auto const d = normal_guide.try_get_data(); normal_guide.is_valid() && d.has_value())
+            check_finite(_name, "normal guide", index, cc::span<rgba16 const>(d.value()));
+        if (auto const d = albedo_guide.try_get_data(); albedo_guide.is_valid() && d.has_value())
+            check_finite(_name, "albedo guide", index, cc::span<rgba16 const>(d.value()));
+        if (auto const d = depth_guide.try_get_data(); depth_guide.is_valid() && d.has_value())
+            check_finite(_name, "depth guide", index, cc::span<f32 const>(d.value()));
         // A denoised image the member did not produce this frame is an older one, which its own frame already checked.
         if (ran)
             check_finite(_name, "denoised", index, cc::span<tg::vec4f const>(out.denoised));

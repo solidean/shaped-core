@@ -193,7 +193,7 @@ fun landed(so_far: bounce, h: tracer.hit_record, origin: float3, wi: float3, pdf
         let w1 = raster.to_world_point(inst, tracer.instance_position(inst, ctx.corner.y))
         let w2 = raster.to_world_point(inst, tracer.instance_position(inst, ctx.corner.z))
         reach = pt.corner_reach(origin, w0, w1, w2)
-        let geometric = normalize(cross(w1 - w0, w2 - w0))
+        let geometric = pt.triangle_normal(w1 - w0, w2 - w0, -wi)
         result.n = tracer.instance_shading_normal(inst, ctx, if dot(geometric, wi) > 0.0 => -geometric else geometric)
         result.albedo = tracer.instance_base_color(inst, ctx)
         result.roughness = tracer.instance_roughness(inst, ctx)
@@ -303,7 +303,7 @@ fun face_normal(h: tracer.hit_record){tracer.traced, tracer.bindless} -> float3:
     let w0 = raster.to_world_point(inst, tracer.instance_position(inst, ctx.corner.x))
     let w1 = raster.to_world_point(inst, tracer.instance_position(inst, ctx.corner.y))
     let w2 = raster.to_world_point(inst, tracer.instance_position(inst, ctx.corner.z))
-    let geometric = normalize(cross(w1 - w0, w2 - w0))
+    let geometric = pt.triangle_normal(w1 - w0, w2 - w0, float3(0.0, 0.0, 1.0))
     return tracer.instance_shading_normal(inst, ctx, geometric)
 
 /// The analytic lights a bounce from `origin` along `wi` reaches, drawn at `bsdf_pdf`: the rects it crosses before `hit_t`, and on an escape, a negative `hit_t`, the discs it points into.

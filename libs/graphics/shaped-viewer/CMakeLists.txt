@@ -299,6 +299,10 @@ if(SC_BUILD_TESTS)
     cmake_path(SET _sv_test_bistro_dir NORMALIZE "${CMAKE_CURRENT_SOURCE_DIR}/../../../extern/bistro/.install")
     target_compile_definitions(shaped-viewer-test PRIVATE SV_TEST_BISTRO_DIR="${_sv_test_bistro_dir}")
 
+    # Where the glTF Research Scenes land (extern/gltf-research-scenes/fetch-research-scenes.py), for the tests that draw one when present.
+    cmake_path(SET _sv_test_research_dir NORMALIZE "${CMAKE_CURRENT_SOURCE_DIR}/../../../extern/gltf-research-scenes/.install")
+    target_compile_definitions(shaped-viewer-test PRIVATE SV_TEST_RESEARCH_SCENES_DIR="${_sv_test_research_dir}")
+
     sc_target_pch(shaped-viewer-test SG NEXUS) # 0.53
 
     # The GPU tests run once per backend this build has: an entry driver per backend invokes every

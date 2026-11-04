@@ -219,3 +219,10 @@ fun sample_cosine_hemisphere(n: float3, u1: float, u2: float) -> float3:
     let t = normalize(cross(up, n))
     let b = cross(n, t)
     return normalize(t * x + b * y + n * z)
+
+/// The unit normal of a triangle whose edges from one corner are `e1` and `e2`, or `fallback` where their cross product is too short to have a direction.
+/// A sliver whose area rounds away still covers a pixel or meets a ray now and then, and normalizing its zero cross product is NaN, which a blended guide keeps for good.
+fun triangle_normal(e1: float3, e2: float3, fallback: float3) -> float3:
+    let c = cross(e1, e2)
+    let length_squared = dot(c, c)
+    return if length_squared > 1e-30 => c / sqrt(length_squared) else fallback
