@@ -278,3 +278,113 @@ ASYNC_INVOCABLE_TEST("sv temporal - a denoised stream leaves no ghost behind a m
         co_await cc::async_settled(sv::background_work(ctx));
     }
 }
+
+// Once a still mean has nearly converged, it hardly changes from one frame to the next, and its denoised image must not either.
+// Each still frame samples its pixels at another offset, so the mean antialiases; a guide drawn at that frame's offset
+// changes surface behind every edge from frame to frame, and a filter steered by it flickers there however converged its input.
+ASYNC_INVOCABLE_TEST("sv temporal - a still denoised image stops changing as its mean converges",
+                     (sg::context_handle const& ctx_h))
+{
+    auto& ctx = *ctx_h;
+    if (!agreement::can_trace(ctx))
+        SKIP("no inline ray tracing or no SGL compiler, so neither the tracers nor the hybrid build");
+
+    auto resources = sv::gpu_resource_manager::create(ctx);
+    auto const box = agreement::make_lit_box(resources);
+    auto const size = agreement::k_size;
+
+    auto const support = sr::query_reconstruct_support(ctx);
+    sr::denoise_method const members[]
+        = {sr::denoise_method::atrous, sr::denoise_method::svgf, sr::denoise_method::oidn, sr::denoise_method::dlss_rr};
+    // Late enough that the mean's own change is a fraction of a percent, and long enough to average.
+    constexpr int measure_from = 256;
+    constexpr int measure_to = 320;
+
+    for (auto const member : members)
+    {
+        auto const name = cc::format("settled-hybrid-{}", sr::to_string(member));
+        if (!support.supports(member))
+        {
+            CC_LOG_INFO("{}: not run, this build or device has no {}", name, sr::to_string(member));
+            continue;
+        }
+        auto view = agreement::denoise_view(ctx, resources, box.items, box.camera,
+                                            {.name = name, .mode = sv::render_mode::hybrid, .denoiser = member});
+        auto const warmed = co_await view.warm_up();
+        CHECK(warmed).dump("test", cc::string_view(name));
+        if (!warmed)
+            continue;
+
+        auto denoised_change = 0.0;
+        auto mean_change = 0.0;
+        auto frames = 0;
+        auto where = cc::vector<f64>::create_filled(isize(size[0]) * size[1], 0.0);
+        auto where_mean = cc::vector<f64>::create_filled(isize(size[0]) * size[1], 0.0);
+        auto previous_denoised = cc::vector<tg::vec4f>();
+        auto previous_mean = cc::vector<tg::vec4f>();
+        auto last = cc::vector<tg::vec4f>();
+        for (auto f = 0; f < 4 * measure_to; ++f)
+        {
+            auto const r = co_await view.frame();
+            if (!r.ran || r.denoised.empty() || r.samples < u32(measure_from))
+            {
+                previous_denoised.clear();
+                continue;
+            }
+            if (r.samples >= u32(measure_to))
+                break;
+            if (!previous_denoised.empty())
+            {
+                denoised_change += change_of(r.denoised, previous_denoised);
+                mean_change += change_of(r.raw, previous_mean);
+                for (auto i = isize(0); i < where.size(); ++i)
+                {
+                    where[i] += tg::abs(agreement::luminance_of(r.denoised[i])
+                                        - agreement::luminance_of(previous_denoised[i]));
+                    where_mean[i]
+                        += tg::abs(agreement::luminance_of(r.raw[i]) - agreement::luminance_of(previous_mean[i]));
+                }
+                ++frames;
+            }
+            previous_denoised = r.denoised;
+            previous_mean = r.raw;
+            last = r.denoised;
+        }
+        REQUIRE(frames > 8).dump("test", cc::string_view(name));
+        denoised_change /= f64(frames);
+        mean_change /= f64(frames);
+        // An edge is a few pixels of the image, so its flicker shows in the pixels that change most rather than in the average.
+        auto const tail = [&](cc::vector<f64> values)
+        {
+            cc::sort(values);
+            return values[values.size() * 99 / 100] / f64(frames);
+        };
+        auto const denoised_tail = tail(where);
+        auto const mean_tail = tail(where_mean);
+        CC_LOG_INFO(
+            "{}: from {} to {} samples, the denoised image changes {:.3f}% a frame and its mean {:.3f}%; the 1% of "
+            "pixels changing most, {:.4f} and {:.4f}",
+            name, measure_from, measure_to, 100.0 * denoised_change, 100.0 * mean_change, denoised_tail, mean_tail);
+
+        // Where the denoised image changes, brightest where it changes most.
+        auto peak = 1e-9;
+        for (auto const w : where)
+            peak = cc::max(peak, w);
+        auto map = cc::vector<tg::vec3f>();
+        for (auto const w : where)
+            map.push_back(tg::vec3f(f32(w / peak), f32(w / peak), f32(w / peak)));
+        auto const exposure = agreement::exposure_of(last);
+        cc::vector<tg::vec3f> const panels[] = {agreement::display_of(last, exposure), cc::move(map)};
+        agreement::write_panels(name, panels);
+
+        CHECK(denoised_change <= 2.0 * mean_change + 0.001)
+            .dump("test", cc::string_view(name))
+            .dump("denoised change", denoised_change)
+            .dump("mean change", mean_change);
+        CHECK(denoised_tail <= 2.0 * mean_tail)
+            .dump("test", cc::string_view(name))
+            .dump("denoised, 99th percentile", denoised_tail)
+            .dump("mean, 99th percentile", mean_tail);
+        co_await cc::async_settled(sv::background_work(ctx));
+    }
+}

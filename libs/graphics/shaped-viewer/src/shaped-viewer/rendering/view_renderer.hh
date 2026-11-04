@@ -192,10 +192,13 @@ private:
     /// `cameras` is this frame's view and projection and the previous frame's, which a member reprojecting in world
     /// space reads instead of the motion guide alone.
     /// `sample_counts` is the mean's count per pixel where its pixels differ, and null where one count holds for the image.
+    /// `frame_guides` are this frame's own guides where `ds`'s blend over the mean's frames, which a temporal member of
+    /// this frame's samples reads instead; a null normal says the two are one.
     [[nodiscard]] static sr::reconstruct_status _denoise(sg::command_list& cmd,
                                                          denoise_schedule const& schedule,
                                                          impl::temporal_slot const& accumulator,
                                                          denoise_slots const& ds,
+                                                         raster_gbuffer const& frame_guides,
                                                          denoise_cameras const& cameras,
                                                          sg::texture_2d const& sample_counts,
                                                          sg::texture_2d& presented);

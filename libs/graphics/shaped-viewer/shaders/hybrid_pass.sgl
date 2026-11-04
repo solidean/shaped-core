@@ -5,6 +5,8 @@
 require first_instance
 require ray_query
 require raytracing_pipeline
+require readwrite_image_formats
+require extended_image_formats
 
 use hybrid
 use openpbr
@@ -120,3 +122,42 @@ binding thin_io:
     tracer.traced.guide_albedo.store(px, float4(..openpbr.pt_diffuse_albedo(surface), 0.0))
     tracer.traced.guide_specular_albedo.store(px, float4(..openpbr.pt_specular_albedo(surface), 0.0))
     tracer.traced.guide_roughness.store(px, openpbr.pt_roughness(surface))
+
+/// One still frame's guides, and the layer's that `blend_guides` folds them into.
+binding guide_io:
+    @unfilterable
+    normal: texture_2d[float4]
+    @unfilterable
+    depth: texture_2d[float]
+    @unfilterable
+    albedo: texture_2d[float4]
+    @unfilterable
+    specular_albedo: texture_2d[float4]
+    @unfilterable
+    roughness: texture_2d[float]
+    blended_normal: mut image_2d[.rgba16_float]
+    blended_depth: mut image_2d[.r32_float]
+    blended_albedo: mut image_2d[.rgba16_float]
+    blended_specular_albedo: mut image_2d[.rgba16_float]
+    blended_roughness: mut image_2d[.r16_float]
+
+/// How many frames the layer's guides already hold.
+@inline binding guide_blend:
+    frames: uint
+    pad0: uint
+    pad1: uint
+    pad2: uint
+
+/// Folds a still frame's guides into the layer's, as the tracer folds its guides into the mean: each frame at the same weight.
+/// Each still frame draws its pixels at another sub-pixel offset, so a pixel an edge crosses holds each surface's share, as its color does.
+@compute(8, 8) fun blend_guides(@thread_id id: int3){guide_io, guide_blend}:
+    let size = guide_io.depth.size()
+    if id.x >= size.x or id.y >= size.y => return
+    let px = int2(id.x, id.y)
+    let g = guide_blend.frames as float
+    let w = 1.0 / (g + 1.0)
+    guide_io.blended_normal[px] = float4(..((guide_io.blended_normal[px].xyz * g + guide_io.normal.load(px).xyz) * w), 0.0)
+    guide_io.blended_depth[px] = (guide_io.blended_depth[px] * g + guide_io.depth.load(px)) * w
+    guide_io.blended_albedo[px] = float4(..((guide_io.blended_albedo[px].xyz * g + guide_io.albedo.load(px).xyz) * w), 0.0)
+    guide_io.blended_specular_albedo[px] = float4(..((guide_io.blended_specular_albedo[px].xyz * g + guide_io.specular_albedo.load(px).xyz) * w), 0.0)
+    guide_io.blended_roughness[px] = (guide_io.blended_roughness[px] * g + guide_io.roughness.load(px)) * w

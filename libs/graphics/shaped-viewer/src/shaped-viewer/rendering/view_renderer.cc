@@ -1130,6 +1130,7 @@ struct raster_batch
 /// `fc` is the frame block a trace of the layer would upload, its seed and jitter set, and `slot` must already have restarted on its hash.
 /// A frame drawn for an upscaler is at the upscaler's input extent, into scratch `guides`, and is no sample of the mean.
 /// Where `frame_output` is set, it receives this frame alone, which a temporal denoiser reads.
+/// `frame_guides` receives this frame's own guides where it blends them into `guides`, as `hybrid_frame_desc::frame_guides` says.
 /// Counts nothing: the caller counts a frame that executed, as a trace counts its own.
 [[nodiscard]] sg::routine_outcome hybrid_frame(sg::command_list& cmd,
                                                view_data const& v,
@@ -1144,6 +1145,7 @@ struct raster_batch
                                                raster_gbuffer const& guides,
                                                bool into_mean,
                                                sg::texture_2d const& frame_output,
+                                               raster_gbuffer& frame_guides,
                                                stand_in_report& stand_ins)
 {
     auto& ctx = cmd.context();
@@ -1201,6 +1203,7 @@ struct raster_batch
                                                        .fallback = &resources.shaders.acquire_fallback(),
                                                        .bindless = &bindless,
                                                        .targets = targets,
+                                                       .frame_guides = &frame_guides,
                                                        .stand_ins = &stand_ins,
                                                        .visibility = &slot.raster_visibility});
     if (outcome == sg::routine_outcome::declined)
@@ -1237,8 +1240,10 @@ struct raster_batch
     auto seeded = fc;
     seeded.rng_seed = seed_of(slot);
     auto stand_ins = stand_in_report{};
+    // Nothing denoises this frame's samples alone, so its own guides are read by nobody.
+    auto frame_guides = raster_gbuffer{};
     auto const outcome = hybrid_frame(cmd, v, l, layer, resolution, scene, seeded, rec, slot, resources,
-                                      gbuffer_slots_of(rec, layer), true, {}, stand_ins);
+                                      gbuffer_slots_of(rec, layer), true, {}, frame_guides, stand_ins);
     if (outcome == sg::routine_outcome::declined)
         return outcome;
 
@@ -1782,6 +1787,7 @@ sg::routine_outcome view_renderer::trace(sg::command_list& cmd,
     // The scene's resolve and the hash above run on every frame: the hash is what notices a change that restarts the mean,
     // and the resolve is what keeps the scene's working set resident.
     auto stand_ins = stand_in_report{};
+    auto hybrid_guides = raster_gbuffer{};
     auto const dispatch = [&]
     {
         // A hybrid frame draws its primary hits and lights them inline, then blends into the mean the trace would have.
@@ -1804,7 +1810,7 @@ sg::routine_outcome view_renderer::trace(sg::command_list& cmd,
                     slots.hit_distance = guide_hit_distance;
                     return slots;
                 }(),
-                !scaled, frame_output, stand_ins);
+                !scaled, frame_output, hybrid_guides, stand_ins);
 
         auto const frame = ctx.transient.create_buffer<shaders::tracer::frame_constants>(
             1, sg::buffer_usage::readonly_buffer | sg::buffer_usage::copy_dst);
@@ -2009,7 +2015,8 @@ sg::routine_outcome view_renderer::trace(sg::command_list& cmd,
         if (incomplete && slot->samples == 0)
             return sg::routine_outcome::declined;
 
-        auto const denoised = _denoise(cmd, schedule, *slot, ds, cameras, sample_counts, res.traces[trace_index]);
+        auto const denoised
+            = _denoise(cmd, schedule, *slot, ds, hybrid_guides, cameras, sample_counts, res.traces[trace_index]);
         if (ds.denoised->accum_frame > 0)
             mark_denoised(*ds.denoised, fc.camera);
         if (denoised == sr::reconstruct_status::pending)
@@ -2098,6 +2105,7 @@ sr::reconstruct_status view_renderer::_denoise(sg::command_list& cmd,
                                                denoise_schedule const& schedule,
                                                impl::temporal_slot const& accumulator,
                                                denoise_slots const& ds,
+                                               raster_gbuffer const& frame_guides,
                                                denoise_cameras const& cameras,
                                                sg::texture_2d const& sample_counts,
                                                sg::texture_2d& presented)
@@ -2132,6 +2140,15 @@ sr::reconstruct_status view_renderer::_denoise(sg::command_list& cmd,
     {
         auto temporal_guides = guides;
         temporal_guides.motion = ds.motion->texture;
+        // A hybrid frame that blended its guides into the layer's kept its own beside them, which its samples were drawn at.
+        if (!schedule.temporal_on_mean && frame_guides.normal.raw() != nullptr)
+        {
+            temporal_guides.albedo = frame_guides.albedo;
+            temporal_guides.specular_albedo = frame_guides.specular_albedo;
+            temporal_guides.normal = frame_guides.normal;
+            temporal_guides.roughness = frame_guides.roughness;
+            temporal_guides.depth = frame_guides.depth;
+        }
 
         // A split-signal member reads the two lobes as its colour pair; everything else reads their sum, which is
         // what `frame` already holds — or, fed the mean, what the accumulator holds, which has no lobes apart.
