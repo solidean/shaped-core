@@ -798,6 +798,14 @@ void sgl::check::impl::flattener::flatten_expr_stmt(origin from, ast::expr_id va
         && tables().type_at(value) == checked_module::void_type)
     {
         auto const& r = c.out.call_records[record];
+        if (is_diff_call(where.symbol))
+        {
+            auto const derived = flatten_diff(value, checked_module::void_type, r);
+            if (!is_valid(derived))
+                return;
+            auto const b = entry.at(derived).node.as<flat_block>();
+            return add_stmt(from, flat_block{.label = b.label, .body = b.body});
+        }
         auto const values = flatten_written(c.out.at(r.written));
         // a function argument is handed over as a closure, and a generic callee takes its type arguments
         auto const handed = written_closures;

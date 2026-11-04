@@ -99,6 +99,12 @@ struct nx::test_schedule_config
     // worth paying to be able to ask what a test recorded, and worth skipping when timing the tests themselves.
     bool no_recording = false;
 
+    // Sample every thread the recorder knows for the whole run, keep the recording here, and print where the busy time went.
+    // Paired with a filter, like --record: the report symbolizes at exit, seconds per few thousand distinct addresses.
+    // Needs the recorder, so --no-recording turns it off.
+    // Set via --sample <file>.
+    cc::string sample_file;
+
     // --watchdog SECS: after this long with no test starting or finishing, the run is reported as hung and exits with code 4.
     // The report names the running tests, every thread's stack and open scopes, and outstanding tracked work, and writes the recording.
     // 0 turns it off.
@@ -115,6 +121,10 @@ struct nx::test_schedule_config
     // Let every test run at full strength rather than narrowed to what a default run can afford.
     // Read from a test body through nx::is_thorough(); set via --thorough.
     bool thorough = false;
+
+    // Let a heavy test narrow to its smallest case, as `check` asks of every preset but its default one.
+    // Read from a test body through nx::is_smoke(); set via --smoke.
+    bool smoke = false;
 
     // When non-empty, run() writes a JUnit XML report to this path, additionally to the normal console output.
     // Set via --junit-xml <file>.

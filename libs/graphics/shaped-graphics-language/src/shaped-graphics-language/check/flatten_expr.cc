@@ -716,6 +716,8 @@ auto sgl::check::impl::flattener::flatten_bound_call(ast::expr_id id, type_id ty
 {
     if (is_by_target(record.callee))
         return flatten_by_target(id, type, record);
+    if (is_diff_call(record.callee))
+        return flatten_diff(id, type, record);
     if (auto const texel = atomic_texel_of(record); ast::is_valid(texel))
         return flatten_texel_atomic(id, type, record, texel);
     auto const values = flatten_written(c.out.at(record.written));
@@ -723,7 +725,12 @@ auto sgl::check::impl::flattener::flatten_bound_call(ast::expr_id id, type_id ty
     auto const slots = c.out.at(record.slots);
     if (is_inlined(record.callee))
     {
+        if (diff_depth > 0 && type != checked_module::void_type)
+            if (auto const d = custom_derivatives_of(record.callee); is_valid(d.forward) || is_valid(d.backward))
+                return flatten_custom_call(id, type, record, d, values);
         auto const inlined = inline_bound(id, record.callee, values, slots, handed, c.out.at(record.type_arguments));
+        if (diff_depth > 0 && is_detach_call(record.callee) && is_valid(inlined.label))
+            custom_calls[i32(inlined.label)] = {.function = record.callee, .call = id, .is_detached = true};
         return add_expr(type, id, flat_block{.label = inlined.label, .body = inlined.body});
     }
     return target_call(id, type, record.callee, values, slots);

@@ -284,6 +284,13 @@ struct let_simplifier
     cc::vector<cc::vector<local_id>> split_fields;
     /// Per local: whether a call writes through it or hands it on.
     cc::vector<bool> written_by_call;
+    /// Per local: how often the whole body reads it, assignment places aside; what L3 asks of each candidate.
+    /// Counted once, since L3 only marks statements dropped and never changes what a count walks.
+    cc::vector<i32> whole_reads;
+    /// Per local: whether the `end` of a `for` in the whole body reads it, which keeps it from becoming a `var` (LEGAL-7).
+    cc::vector<bool> bounds_loop;
+    /// Set where the walk met a range it could not read, which then bounds a loop for every local, conservatively.
+    bool bounds_every_loop = false;
 
     struct available
     {
@@ -599,18 +606,19 @@ struct let_simplifier
         return writes;
     }
 
-    /// How often `local` is read, a place of an assignment not among them, in what `range` holds.
-    void count_value_reads(flat_expr_id id, local_id local, isize& reads, int depth) const
+    /// Adds every read of a local in `id` to `reads`.
+    void count_value_reads(flat_expr_id id, cc::vector<i32>& reads, int depth) const
     {
         if (!is_known(e(), id) || depth > k_max_depth)
             return;
         auto const& x = e().at(id);
-        if (auto const* const ref = x.node.try_as<flat_local_ref>(); ref != nullptr && ref->local == local)
-            ++reads;
-        for_each_operand(e(), x, [&](flat_expr_id operand) { count_value_reads(operand, local, reads, depth + 1); });
+        if (auto const* const ref = x.node.try_as<flat_local_ref>(); ref != nullptr && is_known(e(), ref->local))
+            ++reads[index_of(ref->local)];
+        for_each_operand(e(), x, [&](flat_expr_id operand) { count_value_reads(operand, reads, depth + 1); });
     }
 
-    void count_value_reads(ast::range_of<flat_stmt_id> range, local_id local, isize& reads, int depth) const
+    /// Adds every read of a local in what `range` holds to `reads`, the place of an assignment not among them.
+    void count_value_reads(ast::range_of<flat_stmt_id> range, cc::vector<i32>& reads, int depth) const
     {
         if (!is_known(e(), range) || depth > k_max_depth)
             return;
@@ -628,7 +636,7 @@ struct let_simplifier
                     auto const& node = e().at(at).node;
                     if (auto const* const element = node.try_as<flat_element>())
                     {
-                        count_value_reads(element->index, local, reads, depth + 1);
+                        count_value_reads(element->index, reads, depth + 1);
                         at = element->object;
                     }
                     else if (auto const* const member = node.try_as<flat_member>())
@@ -636,52 +644,64 @@ struct let_simplifier
                     else
                     {
                         if (!node.is<flat_local_ref>())
-                            count_value_reads(at, local, reads, depth + 1);
+                            count_value_reads(at, reads, depth + 1);
                         break;
                     }
                 }
-                count_value_reads(assign->value, local, reads, depth + 1);
+                count_value_reads(assign->value, reads, depth + 1);
             }
             else
-                for_each_expr_of(e(), s, [&](flat_expr_id x) { count_value_reads(x, local, reads, depth + 1); });
+                for_each_expr_of(e(), s, [&](flat_expr_id x) { count_value_reads(x, reads, depth + 1); });
             for_each_pattern_of(e(), s,
                                 [&](ast::range_of<flat_expr_id> patterns)
                                 {
                                     if (is_known(e(), patterns))
                                         for (auto const p : e().at(patterns))
-                                            count_value_reads(p, local, reads, depth + 1);
+                                            count_value_reads(p, reads, depth + 1);
                                 });
-            for_each_body_of(
-                e(), s, [&](ast::range_of<flat_stmt_id> inner) { count_value_reads(inner, local, reads, depth + 1); });
+            for_each_body_of(e(), s,
+                             [&](ast::range_of<flat_stmt_id> inner) { count_value_reads(inner, reads, depth + 1); });
         }
     }
 
-    /// Whether the `end` of a `for` in `range` reads `local`, which may then not become a `var` (LEGAL-7).
-    [[nodiscard]] bool bounds_a_loop(ast::range_of<flat_stmt_id> range, local_id local, int depth) const
+    /// Marks in `bounds_loop` every local the `end` of a `for` in `range` reads.
+    void mark_loop_bounds(ast::range_of<flat_stmt_id> range, int depth)
     {
         if (!is_known(e(), range) || depth > k_max_depth)
-            return true;
-        auto bounds = false;
+        {
+            bounds_every_loop = true;
+            return;
+        }
         for (auto const id : e().at(range))
         {
-            if (!is_known(e(), id) || bounds)
+            if (!is_known(e(), id))
                 continue;
             auto const& s = e().at(id);
             if (auto const* const f = s.node.try_as<flat_for>())
             {
-                auto reads = isize(0);
-                count_value_reads(f->end, local, reads, 0);
-                bounds = reads > 0;
+                auto reads = cc::vector<i32>::create_filled(e().locals.size(), 0);
+                count_value_reads(f->end, reads, 0);
+                for (auto i = isize(0); i < reads.size(); ++i)
+                    if (reads[i] > 0)
+                        bounds_loop[i] = true;
             }
-            for_each_body_of(e(), s, [&](ast::range_of<flat_stmt_id> inner)
-                             { bounds = bounds || bounds_a_loop(inner, local, depth + 1); });
+            for_each_body_of(e(), s, [&](ast::range_of<flat_stmt_id> inner) { mark_loop_bounds(inner, depth + 1); });
         }
-        return bounds;
+    }
+
+    /// What L3 asks of every candidate in `whole`, gathered in one walk each rather than one walk per candidate.
+    void count_whole(ast::range_of<flat_stmt_id> whole)
+    {
+        whole_reads = cc::vector<i32>::create_filled(e().locals.size(), 0);
+        count_value_reads(whole, whole_reads, 0);
+        bounds_loop = cc::vector<bool>::create_filled(e().locals.size(), false);
+        mark_loop_bounds(whole, 0);
     }
 
     /// L3: a `let` whose value is a block's result, the temporary `var` E1 declared in the same list, is that `var`
     /// under the let's name, where nothing else reads the `var` and nothing writes it after the let.
-    void merge_results(ast::range_of<flat_stmt_id> range, ast::range_of<flat_stmt_id> whole, int depth)
+    /// `count_whole` must have counted the body `range` is part of.
+    void merge_results(ast::range_of<flat_stmt_id> range, int depth)
     {
         if (!is_known(e(), range) || depth > k_max_depth)
             return;
@@ -698,7 +718,7 @@ struct let_simplifier
                 var != nullptr && !is_valid(var->value) && is_known(e(), var->local)
                 && (e().at(var->local).kind == local_kind::temporary || e().at(var->local).kind == local_kind::var))
                 declared.push_back(var->local);
-            for_each_body_of(e(), s, [&](ast::range_of<flat_stmt_id> inner) { merge_results(inner, whole, depth + 1); });
+            for_each_body_of(e(), s, [&](ast::range_of<flat_stmt_id> inner) { merge_results(inner, depth + 1); });
 
             // A `let`, or a `var` given that value, which then fills the block's storage in place: `T[N].filled(v)`.
             auto local = local_id::none;
@@ -724,12 +744,11 @@ struct let_simplifier
                 is_declared_here = is_declared_here || (ref != nullptr && d == ref->local);
             if (!is_declared_here || e().at(ref->local).type != e().at(local).type)
                 continue;
-            auto reads = isize(0);
-            count_value_reads(whole, ref->local, reads, 0);
+            auto const reads = whole_reads[index_of(ref->local)];
             auto is_written_after = false;
             for (auto k = i + 1; k < list.size() && !is_written_after; ++k)
                 is_written_after = writes_local(list[k], ref->local, 0);
-            if (reads != 1 || is_written_after || bounds_a_loop(whole, local, 0))
+            if (reads != 1 || is_written_after || bounds_every_loop || bounds_loop[index_of(local)])
                 continue;
             replaced[index_of(local)] = ref->local;
             out.e.locals[index_of(ref->local)].name = e().at(local).name;
@@ -1173,7 +1192,8 @@ stmt_list sgl::check::impl::simplify_lets(flat_builder& out, stmt_list const& un
     auto s = let_simplifier{.out = out};
     s.find_written();
     auto const whole = out.stmt_list(body);
-    s.merge_results(whole, whole, 0);
+    s.count_whole(whole);
+    s.merge_results(whole, 0);
     s.scan_body(whole, 0);
     s.apply_replacements();
     s.drop_unread(body);

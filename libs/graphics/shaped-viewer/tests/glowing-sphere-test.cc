@@ -166,10 +166,14 @@ ASYNC_INVOCABLE_TEST("sv - inside a glowing sphere the hybrid sees the emission 
         sv::render_mode mode = sv::render_mode::hybrid;
         sv::hybrid_lighting lighting = sv::hybrid_lighting::deferred;
     };
-    for (auto const c : {contender{.mode = sv::render_mode::hybrid, .lighting = sv::hybrid_lighting::deferred},
-                         contender{.mode = sv::render_mode::hybrid, .lighting = sv::hybrid_lighting::forward},
-                         contender{.mode = sv::render_mode::megakernel}})
-        for (auto const bounces : {1, 2})
+    contender const contenders[] = {{.mode = sv::render_mode::hybrid, .lighting = sv::hybrid_lighting::deferred},
+                                    {.mode = sv::render_mode::hybrid, .lighting = sv::hybrid_lighting::forward},
+                                    {.mode = sv::render_mode::megakernel}};
+    int const all_bounces[] = {1, 2};
+    // a smoke run measures one contender at one bounce, which is what a preset's flags can break
+    auto const smoke = nx::is_smoke();
+    for (auto const c : cc::span<contender const>(contenders).subspan({.offset = 0, .size = smoke ? 1 : 3}))
+        for (auto const bounces : cc::span<int const>(all_bounces).subspan({.offset = 0, .size = smoke ? 1 : 2}))
         {
             auto const seen = co_await measure(f32(rho), bounces, c.mode, c.lighting);
             auto const expected = bounce_sum(le, rho, bounces);

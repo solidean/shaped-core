@@ -643,7 +643,9 @@ ops[i](mut v)                                            // raygen, miss, closes
   A path that ends in one needs no value, and the uniformity pass does not count it as an exit (CHK-284).
 - **A `@workgroup binding` is memory one workgroup shares** (CHK-292 to CHK-295): listed like a binding, in no group, and left out of describe.
   Only a compute entry point lists one, all of it within 16 KiB; `workgroup_barrier()`, `storage_barrier()` and `texture_barrier()` sync it (EMIT-131).
-- **`atomic[uint]` and `atomic[int]` live only in a `mut buffer` or a `@workgroup` binding** (CHK-296), and an expression of one is only ever a builtin's argument (CHK-297).
+- **`atomic[uint]`, `atomic[int]` and `atomic[float]` live only in a `mut buffer` or a `@workgroup` binding** (CHK-296), and an expression of one is only ever a builtin's argument (CHK-297).
+  A float's has `load`, `store`, `exchange` and `add`: the device's own float atomic where slib finds `float_atomic_add` (vulkan, metal),
+  and a compare-exchange loop on a uint's bits elsewhere, so no pixel stage takes its `add`.
   `compare_exchange_strong(e, d)` gives the value before, and stored exactly where that is `e`; it is a loop in WGSL and MSL (EMIT-161).
   `compare_exchange_weak(e, d)` gives `exchange_result[T]`: `old`, and `exchanged`, the only proof it stored; retry while `old == e and not exchanged`.
   Both are relaxed: publishing what a claim guards needs a barrier.

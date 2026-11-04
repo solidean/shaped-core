@@ -456,6 +456,173 @@ evaluator evaluator_of(atomic_op op)
     }
     return nullptr;
 }
+// ---- a float's atomics -----------------------------------------------------------------------------------------
+//
+// Every target holds an `atomic[float]` as the bits of a `uint` atomic, so the host sees the float it wrote.
+// A load, a store and an exchange carry the bits across; an add retries a compare-exchange of them until no other
+// update came between its read and its write.
+
+constexpr cc::string_view k_float_atomics_hlsl[] = {
+    "InterlockedOr",
+    "InterlockedExchange",
+    "InterlockedCompareExchange",
+    "asfloat",
+    "asuint",
+    "sgl_atomic_add_float",
+    "sgl_atomic_load_float",
+    "sgl_atomic_store_float",
+    "sgl_atomic_exchange_float",
+};
+constexpr cc::string_view k_float_atomics_wgsl[] = {
+    "atomicLoad", "atomicStore", "atomicExchange", "atomicCompareExchangeWeak", "bitcast",
+};
+constexpr cc::string_view k_float_atomics_msl[] = {
+    "atomic_load_explicit",      "atomic_store_explicit",
+    "atomic_exchange_explicit",  "atomic_compare_exchange_weak_explicit",
+    "memory_order_relaxed",      "as_type",
+    "atomic_fetch_add_explicit",
+};
+
+/// Vulkan's native float atomics, which HLSL has no word for: SPIR-V's own instructions, declared once ahead of the entry
+/// point of a text whose `atomic[float]` is a `float`.
+/// The scope is Device (1) and the semantics Relaxed (0), the ordering every SGL atomic has.
+cc::string float_atomic_helper(helper_context const& c)
+{
+    if (c.target != language::hlsl || c.argument_types.empty() || c.argument_types[0] != "float")
+        return {};
+    return "[[vk::ext_extension(\"SPV_EXT_shader_atomic_float_add\")]]\n"
+           "[[vk::ext_capability(6033)]]\n"
+           "[[vk::ext_instruction(6035)]]\n"
+           "float sgl_atomic_add_float([[vk::ext_reference]] float place, uint scope, uint semantics, float value);\n"
+           "[[vk::ext_instruction(227)]]\n"
+           "float sgl_atomic_load_float([[vk::ext_reference]] float place, uint scope, uint semantics);\n"
+           "[[vk::ext_instruction(228)]]\n"
+           "void sgl_atomic_store_float([[vk::ext_reference]] float place, uint scope, uint semantics, float value);\n"
+           "[[vk::ext_instruction(229)]]\n"
+           "float sgl_atomic_exchange_float([[vk::ext_reference]] float place, uint scope, uint semantics, float "
+           "value);\n";
+}
+
+/// An add stands in a loop, which a helper invocation, whose atomics have no effect, would never leave.
+constexpr cc::string_view k_float_add_stages = "@stages(.compute, .raygen, .miss, .closest_hit, .callable)";
+
+written write_float_atomic(call_context const& ctx)
+{
+    auto const op = atomic_op(ctx.data);
+    auto const& a = ctx.arguments[0].text;
+    auto const v = ctx.arguments.size() > 1 ? wrapped(ctx.arguments[1], precedence::primary) : cc::string();
+    auto result = written();
+    // the target's own float atomic, one instruction each
+    if (ctx.native_float_atomics && ctx.target == language::hlsl)
+    {
+        if (op == atomic_op::load)
+            return {.text = cc::format("sgl_atomic_load_float({}, 1, 0)", a)};
+        auto const name = op == atomic_op::store ? "store" : op == atomic_op::exchange ? "exchange" : "add";
+        return {.text = cc::format("sgl_atomic_{}_float({}, 1, 0, {})", name, a, v)};
+    }
+    if (ctx.native_float_atomics && ctx.target == language::msl)
+    {
+        if (op == atomic_op::load)
+            return {.text = cc::format("atomic_load_explicit(&{}, memory_order_relaxed)", a)};
+        auto const name = op == atomic_op::store ? "store" : op == atomic_op::exchange ? "exchange" : "fetch_add";
+        return {.text = cc::format("atomic_{}_explicit(&{}, {}, memory_order_relaxed)", name, a, v)};
+    }
+    switch (ctx.target)
+    {
+    case language::hlsl:
+    {
+        auto const before = minted(ctx, "atomic_before");
+        if (op == atomic_op::add)
+        {
+            // the plain read is only a first guess, which the compare-exchange checks
+            auto const operand = minted(ctx, "atomic_operand");
+            auto const expected = minted(ctx, "atomic_expected");
+            result.lines.push_back(cc::format("const float {} = {};", operand, v));
+            result.lines.push_back(cc::format("uint {} = {};", expected, a));
+            result.lines.push_back(cc::format("uint {};", before));
+            result.lines.push_back("[allow_uav_condition] for (;;)");
+            result.lines.push_back("{");
+            result.lines.push_back(cc::format("    InterlockedCompareExchange({}, {}, asuint(asfloat({}) + {}), {});",
+                                              a, expected, expected, operand, before));
+            result.lines.push_back(cc::format("    if ({} == {})", before, expected));
+            result.lines.push_back("        break;");
+            result.lines.push_back(cc::format("    {} = {};", expected, before));
+            result.lines.push_back("}");
+            result.text = cc::format("asfloat({})", before);
+            return result;
+        }
+        result.lines.push_back(cc::format("uint {};", before));
+        if (op == atomic_op::load)
+            result.lines.push_back(cc::format("InterlockedOr({}, 0u, {});", a, before));
+        else
+            result.lines.push_back(cc::format("InterlockedExchange({}, asuint({}), {});", a, v, before));
+        result.text = op == atomic_op::store ? cc::string() : cc::format("asfloat({})", before);
+        return result;
+    }
+    case language::wgsl:
+    {
+        if (op == atomic_op::load)
+            return {.text = cc::format("bitcast<f32>(atomicLoad(&{}))", a)};
+        if (op == atomic_op::store)
+            return {.text = cc::format("atomicStore(&{}, bitcast<u32>({}))", a, v)};
+        if (op == atomic_op::exchange)
+            return {.text = cc::format("bitcast<f32>(atomicExchange(&{}, bitcast<u32>({})))", a, v)};
+        auto const place = minted(ctx, "atomic_place");
+        auto const operand = minted(ctx, "atomic_operand");
+        auto const before = minted(ctx, "atomic_before");
+        auto const outcome = minted(ctx, "exchange_outcome");
+        result.lines.push_back(cc::format("let {} = &{};", place, a));
+        result.lines.push_back(cc::format("let {}: f32 = {};", operand, v));
+        result.lines.push_back(cc::format("var {}: u32 = atomicLoad({});", before, place));
+        result.lines.push_back("loop {");
+        result.lines.push_back(cc::format("    let {} = atomicCompareExchangeWeak({}, {}, "
+                                          "bitcast<u32>(bitcast<f32>({}) + {}));",
+                                          outcome, place, before, before, operand));
+        result.lines.push_back(cc::format("    if {}.exchanged {{", outcome));
+        result.lines.push_back("        break;");
+        result.lines.push_back("    }");
+        result.lines.push_back(cc::format("    {} = {}.old_value;", before, outcome));
+        result.lines.push_back("}");
+        result.text = cc::format("bitcast<f32>({})", before);
+        return result;
+    }
+    case language::msl:
+    {
+        if (op == atomic_op::load)
+            return {.text = cc::format("as_type<float>(atomic_load_explicit(&{}, memory_order_relaxed))", a)};
+        if (op == atomic_op::store)
+            return {.text = cc::format("atomic_store_explicit(&{}, as_type<uint>({}), memory_order_relaxed)", a, v)};
+        if (op == atomic_op::exchange)
+            return {.text = cc::format(
+                        "as_type<float>(atomic_exchange_explicit(&{}, as_type<uint>({}), memory_order_relaxed))", a, v)};
+        // a failed attempt leaves what it read in `before`, which the next attempt adds to
+        auto const operand = minted(ctx, "atomic_operand");
+        auto const before = minted(ctx, "atomic_before");
+        result.lines.push_back(cc::format("const float {} = {};", operand, v));
+        result.lines.push_back(cc::format("uint {} = atomic_load_explicit(&{}, memory_order_relaxed);", before, a));
+        result.lines.push_back(cc::format("while (!atomic_compare_exchange_weak_explicit(&{}, &{}, "
+                                          "as_type<uint>(as_type<float>({}) + "
+                                          "{}), memory_order_relaxed, memory_order_relaxed)) {{}}",
+                                          a, before, before, operand));
+        result.text = cc::format("as_type<float>({})", before);
+        return result;
+    }
+    }
+    return {};
+}
+
+/// The atomic's float first, then the operand; gives what the atomic holds after (EVAL-93).
+template <atomic_op Op>
+void float_atomic_update(cc::span<scalar const> in, cc::vector<scalar>& out)
+{
+    if constexpr (Op == atomic_op::add)
+        out.push_back(scalar::of(in[0].as_float() + in[1].as_float()));
+    else if constexpr (Op == atomic_op::load)
+        out.push_back(in[0]);
+    else
+        out.push_back(in[1]);
+}
+
 // ---- the texels of an `@atomic` image -------------------------------------------------------------------------
 
 using check::texture_shape;
@@ -671,6 +838,46 @@ void sgl::builtins::register_sync(registry& r)
             });
         }
     }
+
+    r.add_comment("// A float's atomics, which every target holds as the bits of a `uint` atomic.\n"
+                  "// Its add retries a compare-exchange of those bits, so a stage with helper invocations takes "
+                  "none.");
+    struct float_atomic
+    {
+        atomic_op op;
+        cc::string_view signature;
+        cc::string_view doc;
+        evaluator evaluate;
+    };
+    float_atomic const float_atomics[] = {
+        {atomic_op::load, "fun load(a: atomic[float]) -> float", "/// The value, read in one step.",
+         float_atomic_update<atomic_op::load>},
+        {atomic_op::store, "fun store(a: out atomic[float], v: float)", "/// Stores `v` in one step.",
+         float_atomic_update<atomic_op::store>},
+        {atomic_op::exchange, "fun exchange(a: mut atomic[float], v: float) -> float",
+         "/// Stores `v`, and gives the value before.", float_atomic_update<atomic_op::exchange>},
+        {atomic_op::add, "fun add(a: mut atomic[float], v: float) -> float",
+         "/// Adds `v`, rounded once, and gives the value before.\n"
+         "/// Where the device has no float add it retries a compare-exchange until no other update came between, "
+         "which a\n"
+         "/// pixel stage's helper invocations would never leave.",
+         float_atomic_update<atomic_op::add>},
+    };
+    for (auto const& f : float_atomics)
+        r.add(function_record{
+            .signature = cc::format("{} {}", f.op == atomic_op::add ? k_float_add_stages : k_atomic_stages, f.signature),
+            .doc = cc::string(f.doc),
+            .evaluate = f.evaluate,
+            .write = {.kind = spelling_kind::custom,
+                      .custom = write_float_atomic,
+                      .helper = float_atomic_helper,
+                      .writes_lines = f.op == atomic_op::add ? every_language : is_hlsl,
+                      .data = u32(f.op),
+                      .hlsl_names = k_float_atomics_hlsl,
+                      .wgsl_names = k_float_atomics_wgsl,
+                      .msl_names = k_float_atomics_msl},
+            .is_atomic = true,
+        });
 
     r.add_comment("// The atomics of an `@atomic` image's texels, which the flat tree calls for `img[xy].max(v)` "
                   "(CHK-373).\n"

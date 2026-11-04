@@ -256,8 +256,10 @@ public:
 
 /// Suspends `handle`, fills `out`, and resumes it.
 /// Everything between the suspend and the resume is a stack read into `frames`; nothing allocates and nothing locks.
+/// That includes the OS's own function lookup, whose lock a thread suspended mid-DLL-load holds: `unwind` stands in.
 /// `ts` is null for a thread the recorder has never heard of, which then contributes frames and nothing else.
 [[nodiscard]] bool sample_suspended(void* handle,
+                                    cc::unwind_snapshot const& unwind,
                                     cc::rec::impl::thread_state const* ts,
                                     cc::span<void*> frames,
                                     bool stop_at_scope,
@@ -280,7 +282,7 @@ public:
                     stop = ts->tls != nullptr ? ts->tls->scope_frame : nullptr;
             }
 
-            out.capture = cc::capture_stack_from_native_context(&ctx, frames, 0, stop);
+            out.capture = cc::capture_stack_from_native_context(&ctx, unwind, frames, 0, stop);
             ok = out.capture.count > 0;
         }
     }
@@ -357,6 +359,13 @@ void sampler_main()
     // was told to care about anyway.
     constexpr f64 refresh_interval_secs = 0.1;
     auto next_refresh_at = cc::current_time_steady_secs() + refresh_interval_secs;
+
+    // Taken again once a walk reaches a module it lacks, at most this often: code generated at run time is in no
+    // module, and a stack through it would otherwise rebuild the snapshot on every tick.
+    auto unwind = cc::unwind_snapshot::create();
+    auto unwind_is_stale = false;
+    constexpr f64 unwind_refresh_secs = 0.25;
+    auto next_unwind_refresh_at = cc::current_time_steady_secs() + unwind_refresh_secs;
 #endif
 
     while (!g_stop.load(cc::memory_order_acquire))
@@ -381,6 +390,13 @@ void sampler_main()
         sample s;
 
 #if defined(_WIN32)
+        if (unwind_is_stale && cc::current_time_steady_secs() >= next_unwind_refresh_at)
+        {
+            unwind = cc::unwind_snapshot::create();
+            unwind_is_stale = false;
+            next_unwind_refresh_at = cc::current_time_steady_secs() + unwind_refresh_secs;
+        }
+
         if (cfg.include_unknown_threads && cc::current_time_steady_secs() >= next_refresh_at)
         {
             os_threads.refresh(self_tid);
@@ -389,8 +405,11 @@ void sampler_main()
 
         // One round-robin over both halves, so a thread with no stream competes for slots on equal terms.
         // The two differ only in whether there is a stream to anchor into; the walk is the same.
+        // Slots are laid out against the counts as of this tick: the known half answers its live count back, and a
+        // set that shrank mid-tick must not shift an unknown slot past the end of `os_threads.tids`.
         auto const unknown_count = cfg.include_unknown_threads ? os_threads.tids.size() : isize(0);
-        auto const total_targets = known_count + unknown_count;
+        auto const known_at_tick = known_count;
+        auto const total_targets = known_at_tick + unknown_count;
         auto const per_tick = cfg.threads_per_tick > 0 ? cc::min(cfg.threads_per_tick, total_targets) : total_targets;
 
         if (total_targets > 0)
@@ -413,7 +432,7 @@ void sampler_main()
                 // indistinguishable from one whose suspend or walk failed, and only the second is a symptom.
                 auto attempted = false;
 
-                if (slot < known_count || unknown_count == 0)
+                if (slot < known_at_tick || unknown_count == 0)
                 {
                     known_count = cc::rec::impl::with_nth_thread_state(
                         slot,
@@ -425,17 +444,19 @@ void sampler_main()
                             attempted = true;
                             s.native_tid = ts.native_tid;
                             if (auto* const h = handles.get(ts.native_tid); h != nullptr)
-                                took = sample_suspended(h, &ts, frames, cfg.stop_at_scope, s);
+                                took = sample_suspended(h, unwind, &ts, frames, cfg.stop_at_scope, s);
                         });
                 }
                 else
                 {
-                    auto const tid = os_threads.tids[slot - known_count];
+                    auto const tid = os_threads.tids[slot - known_at_tick];
                     attempted = true;
                     s.native_tid = tid;
                     if (auto* const h = handles.get(tid); h != nullptr)
-                        took = sample_suspended(h, nullptr, frames, cfg.stop_at_scope, s);
+                        took = sample_suspended(h, unwind, nullptr, frames, cfg.stop_at_scope, s);
                 }
+
+                unwind_is_stale = unwind_is_stale || s.capture.left_snapshot;
 
                 if (took)
                 {

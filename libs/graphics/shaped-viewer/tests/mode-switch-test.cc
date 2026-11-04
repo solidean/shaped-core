@@ -162,7 +162,10 @@ ASYNC_INVOCABLE_TEST("sv - switching renderers and denoisers never shows black b
     // Until the first frame executes there is no earlier image to hold, so the output shows what it was cleared to.
     auto shown = false;
 
-    for (auto const& p : k_script)
+    // a smoke run plays the first phases, which still switch renderers, and what a preset's flags can break
+    auto const script = nx::is_smoke() ? cc::span<phase const>(k_script).subspan({.offset = 0, .size = 3})
+                                       : cc::span<phase const>(k_script);
+    for (auto const& p : script)
     {
         auto& settings = def.views[0].layers[0].settings;
         settings.mode = p.mode;

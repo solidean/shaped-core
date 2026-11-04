@@ -157,8 +157,9 @@ public:
         case sg::feature::first_instance:
         case sg::feature::helper_lane_query:
         case sg::feature::vertex_layer_output:
+        case sg::feature::float_atomic_add:
             // WGSL has no 16-bit integers, no coherence qualifier, no atomic texel, no first-instance builtin, no test
-            // for a helper invocation and no layer output, on any device.
+            // for a helper invocation, no layer output and no float atomic, on any device.
             return false;
         case sg::feature::opacity_micromap:
             // The ray-query polyfill traverses its own boxes and knows no micromap.

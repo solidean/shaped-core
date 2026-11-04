@@ -240,6 +240,9 @@ public:
             return _wave_ops;
         case sg::feature::vertex_layer_output:
             return _vertex_layer_output;
+        case sg::feature::float_atomic_add:
+            // HLSL's float atomics are bitwise exchanges alone; an add is NVAPI's, which this backend does not take
+            return false;
         }
         return false;
     }

@@ -178,6 +178,8 @@ struct sgl::emit::options
     /// Writes each print into sg's debug buffer, and describes its site (EMIT-183).
     /// The tree must have been legalized to keep its prints and lower its asserts (LEGAL-64); otherwise a print is `unsupported`.
     bool diagnostics = false;
+    /// The device adds floats atomically in one instruction, so vulkan and metal write the target's own float atomics.
+    bool native_float_atomic_add = false;
 };
 
 /// Either the text or the reasons there is none.

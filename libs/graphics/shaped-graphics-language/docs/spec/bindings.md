@@ -438,7 +438,7 @@ let counted = materials.albedo[uniform (counts.picked[0] % 64)].sample(p.uv)
 
 ## Atomics
 
-**`atomic[uint]` and `atomic[int]` are memory every invocation updates in one indivisible step**, and like a resource they are never a value.
+**`atomic[uint]`, `atomic[int]` and `atomic[float]` are memory every invocation updates in one indivisible step**, and like a resource they are never a value.
 One stands as the element of a `mut buffer`, or as a member of a `@workgroup` binding, arrays of them included:
 
 ```sgl
@@ -460,7 +460,17 @@ A pixel and a compute stage take them, and so do the ray-tracing stages that run
 An any hit and an intersection run as often as the traversal decides, so they write no memory through a binding, and an atomic there is `stage-not-allowed` as a store is (CHK-404).
 So is one in a decision an inline trace calls, in any stage.
 The host holds a buffer of atomics as the plain integers it is.
-Floats, 64 bits and a vertex stage are [the incubator's](incubator/atomics.md).
+
+**An `atomic[float]` has `load`, `store`, `exchange` and `add`**, and the host writes and reads the float itself.
+Where the device adds floats in one instruction, `sg::feature::float_atomic_add`, slib asks for the target's own float atomic, which vulkan and metal write.
+Everywhere else it is the bits of a `uint` atomic, and its `add` reads them, adds in float, and retries a compare-exchange until no other update came between.
+Either way it is exact once per update and in no promised order.
+A helper invocation's atomics have no effect, so a pixel stage would never leave that loop, and its `add` takes no pixel stage.
+64 bits and a vertex stage are [the incubator's](incubator/atomics.md).
+
+**`add_reduced(mut slot, key, v)` adds where many invocations add to one slot**, as every pixel a splat covers adds to the splat's gradient.
+Where every active invocation of the subgroup names the same `key`, it adds the subgroup's sum once, from the first of them, and otherwise each adds its own.
+It is a subgroup operation, so it needs `subgroups` and stands in uniform control flow (CHK-376, CHK-377): an invocation with nothing to add calls it with 0.
 
 **A compare-exchange stores `desired` where the atomic holds `expected`, and comes in two forms, each named for what it promises.**
 

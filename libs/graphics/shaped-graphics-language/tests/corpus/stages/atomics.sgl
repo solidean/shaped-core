@@ -135,3 +135,50 @@ struct sphere_attributes:
 @miss fun counting_miss(p: mut radiance){traced}:
     traced.counts[2].add(1u)
     p.color = 0.0
+
+// a float's atomic holds the bits of a uint's on every target, and its add retries until nothing came between
+@workgroup binding sums:
+    total: atomic[float]
+    parts: atomic[float][3]
+
+test:
+    sums.total.store(1.5)
+    sums.total.add(2.25) == 1.5
+    sums.total.add(-0.75) == 3.75
+    sums.total.load() == 3.0
+    sums.total.exchange(8.0) == 3.0
+    sums.total.load() == 8.0
+
+test:
+    for i in 0 ..< 3 => sums.parts[i].store(0.0)
+    for i in 0 ..< 3 => sums.parts[i].add(float(i) * 0.5)
+    sums.parts[2].load() == 1.0
+
+// a gradient many invocations add into one slot, as a splat's from every pixel it covers
+binding gradients:
+    per_splat: mut buffer[atomic[float]]
+
+@compute(64) fun scatter(@thread_id id: int3){gradients}:
+    gradients.per_splat[id.x / 16].add(0.25)
+
+// an add stands in a loop a helper invocation would never leave, so a pixel stage takes none
+struct covered:
+    @position position: hpos4
+
+@pixel struct shade:
+    color: float4
+
+@expect(error = "stage-not-allowed")
+@pixel fun adding_pixel(p: covered){gradients} -> shade:
+    let before = gradients.per_splat[0].add(1.0)
+    return {color = float4(before)}
+
+// a mut parameter of an atomic's type is the caller's atomic, which the function updates as the caller would
+fun bump_twice(counter: mut atomic[uint]) -> uint:
+    counter.add(1u)
+    return counter.add(1u)
+
+test:
+    counters.hits.store(3)
+    bump_twice(mut counters.hits) == 4
+    counters.hits.load() == 5

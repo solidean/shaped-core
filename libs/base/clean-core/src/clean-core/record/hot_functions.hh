@@ -29,6 +29,14 @@ struct cc::rec::hot_options
 
     /// Drop anything below this share of self samples, as a ratio rather than a percentage.
     f64 min_self_ratio = 0;
+
+    /// Leave out the stacks whose innermost frame is the OS blocking the thread: a wait, a sleep, a futex.
+    ///
+    /// A sampler catches a parked thread as readily as a busy one, so a pool of idle workers buries the one thread
+    /// doing work under samples that say only "waiting".
+    /// Skipped stacks count in `idle_samples` and in no ratio, which then answer where the BUSY time went.
+    /// Recognized by the name of the system call itself, so a frame the symbolizer could not name is never idle.
+    bool skip_idle = false;
 };
 
 /// One function, and how much of the profile landed in it.
@@ -66,6 +74,9 @@ struct cc::rec::hot_report
 
     /// Stacks whose innermost frame resolved to no module at all, so they count in `sample_count` and in nothing else.
     isize unresolved_samples = 0;
+
+    /// Stacks left out under `hot_options::skip_idle`, which count in nothing else, `sample_count` included.
+    isize idle_samples = 0;
 
     [[nodiscard]] bool empty() const { return functions.empty(); }
 

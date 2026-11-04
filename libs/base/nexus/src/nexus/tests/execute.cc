@@ -1814,6 +1814,12 @@ bool nx::is_thorough()
     return config != nullptr && config->thorough;
 }
 
+bool nx::is_smoke()
+{
+    auto const* const config = nx::impl::current_config();
+    return config != nullptr && config->smoke && !config->thorough;
+}
+
 int nx::impl::current_filter_consumed()
 {
     auto* const ctx = current_context();

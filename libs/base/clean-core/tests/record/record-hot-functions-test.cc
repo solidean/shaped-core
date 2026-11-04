@@ -8,6 +8,8 @@
 #include <clean-core/record/recording.hh>
 #include <clean-core/record/sampling.hh>
 #include <clean-core/record/system.hh>
+#include <clean-core/thread/mutex.hh>
+#include <clean-core/thread/native_thread.hh>
 #include <nexus/test.hh>
 
 using namespace cc::primitive_defines;
@@ -254,4 +256,51 @@ REC_TEST("record/hot - a report renders as something a human can read")
     auto const text = report.to_string(5);
     CHECK(text.contains("sample"));
     CHECK(text.contains("self%"));
+}
+
+REC_TEST("record/hot - skip_idle leaves out a parked thread's samples, and they count nowhere else")
+{
+    if (!can_sample())
+        SKIP("this build has no sampler");
+
+    rec_fixture const fixture(deterministic_config());
+
+    // A second thread the sampler knows, parked on a condition variable for as long as the test thread burns.
+    std::condition_variable cv;
+    auto phase = cc::mutex<int>(0); // 0 starting, 1 parked, 2 released
+    auto const r = capture(
+        [&]
+        {
+            auto parked = cc::native_thread::start(
+                [&]
+                {
+                    CC_RECORD_MARK("parking");
+                    phase.lock([](int& p) { p = 1; });
+                    cv.notify_all();
+                    phase.wait(cv, [](int const& p) { return p == 2; }, [](int&) {});
+                });
+            phase.wait(cv, [](int const& p) { return p >= 1; }, [](int&) {});
+            busy_until_sampled(40);
+            phase.lock([](int& p) { p = 2; });
+            cv.notify_all();
+            parked.join();
+        },
+        true);
+
+    auto const all = cc::rec::hot_functions(r);
+    auto const busy = cc::rec::hot_functions(r, {.skip_idle = true});
+    REQUIRE(all.sample_count > 0);
+
+    // The skipped stacks partition out exactly: none is lost, none counted twice.
+    CHECK(all.idle_samples == 0);
+    CHECK(busy.sample_count + busy.idle_samples == all.sample_count);
+    isize self_total = 0;
+    for (auto const& f : busy.functions)
+        self_total += f.self_samples;
+    CHECK(self_total == busy.sample_count);
+
+#if defined(_WIN32)
+    // ntdll exports its wait calls by name, so the parked thread's samples are recognizable whatever else resolves.
+    CHECK(busy.idle_samples > 0);
+#endif
 }

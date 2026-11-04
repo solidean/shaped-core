@@ -1,0 +1,19 @@
+// Float atomics as the GPU runs them: the device's own float add where it has one, and a compare-exchange loop on the
+// bits where it has none, in a buffer and in workgroup memory alike.
+
+binding sums:
+    totals: mut buffer[atomic[float]]
+
+@workgroup binding tile:
+    shared_total: atomic[float]
+
+// Each thread adds a quarter to one of four totals, and half to its workgroup's, whose first thread adds it on.
+@compute(64) fun add_quarters(@thread_id id: int3, @local_thread_index local: int){sums, tile}:
+    if local == 0 => tile.shared_total.store(0.0)
+    workgroup_barrier()
+    sums.totals[id.x % 4].add(0.25)
+    tile.shared_total.add(0.5)
+    workgroup_barrier()
+    if local == 0:
+        sums.totals[4].add(tile.shared_total.load())
+        sums.totals[5].exchange(1.0)

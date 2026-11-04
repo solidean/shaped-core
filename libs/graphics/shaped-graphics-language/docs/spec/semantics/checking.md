@@ -1065,7 +1065,8 @@ A `require` in a test's body that nothing in it uses is `unused-require`, and a 
   The payload, the decision's result and its locals it writes freely, since they are how it answers.
   A decision is an `@any_hit` or an `@intersection` entry point, and a function an inline trace calls as one: a parameter that takes a candidate or a box makes it so, in any stage.
   The other ray-tracing stages take every atomic of a `mut buffer` and of an `@atomic` image; none of them lists workgroup memory (CHK-294).
-* **CHK-297** An expression of an atomic's type stands only as a builtin's argument; anywhere else, and as the place of an assignment, it is `wrong-kind-of-name`.
+* **CHK-297** An expression of an atomic's type stands only as a builtin's argument or a `mut` parameter's; anywhere else, and as the place of an assignment, it is `wrong-kind-of-name`.
+  A `mut` parameter of an atomic's type is the caller's atomic, so a function updates it by its methods as the caller would.
   A local, a parameter or a field of an atomic's type is `wrong-kind-of-name` as well.
 * **CHK-372** `@atomic` on a `mut` image member of the format `.r32_uint` or `.r32_sint` makes each of its texels an atomic of `uint` or `int` ([why](why/checking.md#chk-372)).
   On any other member it is `wrong-kind-of-name`, and it needs `image_atomics`, a form CHK-201 judges.

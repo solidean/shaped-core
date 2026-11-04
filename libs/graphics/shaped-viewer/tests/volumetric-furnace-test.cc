@@ -366,6 +366,10 @@ ASYNC_INVOCABLE_TEST("sv - a lossless interior is invisible under a uniform envi
                      .lossless = false,
                      .at_least = 0.81f * luminance_of(environment)});
 
+    // a smoke run traces the clear interior alone, which is what a preset's flags can break
+    if (nx::is_smoke())
+        cases.resize_down_to(1);
+
     auto& lib = *sv::acquire_material_library().value();
     auto const type = lib.acquire_type(sv::builtin_material::openpbr).value();
     auto const positions = closed_cube(0.6f);
@@ -414,7 +418,10 @@ ASYNC_INVOCABLE_TEST("sv - a lossless interior is invisible under a uniform envi
 
     // The clear interior and the scattering one must agree with each other as well as with the environment: they differ
     // only in the walk, so a difference between them IS the walk's error, with the interface divided out.
-    REQUIRE(lossless_means.size() == 4);
+    auto lossless_cases = isize(0);
+    for (auto const& c : cases)
+        lossless_cases += c.lossless ? 1 : 0;
+    REQUIRE(lossless_means.size() == lossless_cases);
     for (auto i = isize(1); i < lossless_means.size(); ++i)
         CHECK(tg::abs(lossless_means[0] - lossless_means[i]) <= 0.05f * luminance_of(environment))
             .dump("clear", lossless_means[0])

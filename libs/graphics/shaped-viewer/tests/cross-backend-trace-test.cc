@@ -580,6 +580,9 @@ ASYNC_INVOCABLE_TEST("sv::pathtrace_routine - every material spelling traces a l
 // Without a dx12 hardware device the vulkan images are held to being lit and finite alone.
 ASYNC_TEST("sv vulkan - the path tracer traces what it traces on dx12, to rounding")
 {
+    // what one SGL source traces on two APIs is the shader compiler's, which no preset's flags change
+    if (nx::is_smoke())
+        SKIP("a smoke run: the default preset holds vulkan's image to dx12's");
     auto ctx = sg::create_vulkan_context({.enable_validation_layers = true});
     if (ctx.has_error())
         SKIP("no vulkan device");

@@ -526,7 +526,11 @@ type_id checker::resolve_type(i32 file, ast::expr_id expr, function_scope const*
     return result;
 }
 
-type_id checker::resolve_value_type(i32 file, ast::expr_id expr, function_scope const* scope, bool allows_resource)
+type_id checker::resolve_value_type(i32 file,
+                                    ast::expr_id expr,
+                                    function_scope const* scope,
+                                    bool allows_resource,
+                                    bool allows_atomic)
 {
     auto const type = resolve_type(file, expr, scope);
     if (type == checked_module::error_type)
@@ -538,8 +542,9 @@ type_id checker::resolve_value_type(i32 file, ast::expr_id expr, function_scope 
                "a stream is what a geometry stage appends to, a parameter of its entry point and no value");
         return checked_module::error_type;
     }
-    // CHK-297: an atomic stands in a `mut buffer` or in workgroup memory, and no value holds one
-    if (holds_atomic(type))
+    // CHK-297: an atomic stands in a `mut buffer` or in workgroup memory, and no value holds one; a `mut` parameter
+    // names the caller's
+    if (holds_atomic(type) && !(allows_atomic && out.at(type).kind == type_kind::atomic))
     {
         report(diagnostic_kind::wrong_kind_of_name, file, span_of(file, expr),
                "an atomic is memory in a `mut buffer` or a @workgroup binding, and never a value");
@@ -1797,7 +1802,9 @@ void checker::compile_function(symbol_id id)
                                      "stages",
                                      "shadowable",
                                      "expect",
-                                     "internal"};
+                                     "internal",
+                                     "forward",
+                                     "backward"};
     judge_attributes(file, d.attributes, known, "a function",
                      is_raster_entry ? setting_scope::description : setting_scope::none);
     auto const* const geometry = find_attribute(file, d.attributes, "geometry");
@@ -1856,10 +1863,11 @@ void checker::compile_function(symbol_id id)
         auto input = stage_input::none;
         if (!p.attributes.empty())
         {
-            cc::string_view known_on_parameter[16] = {};
+            cc::string_view known_on_parameter[24] = {};
             auto known_count = isize(0);
             for (auto const& candidate : stage_inputs())
                 known_on_parameter[known_count++] = candidate.name;
+            known_on_parameter[known_count++] = "no_diff";
             judge_attributes(file, p.attributes, cc::span<cc::string_view const>(known_on_parameter, known_count),
                              "a parameter");
             for (auto const& candidate : stage_inputs())
@@ -1910,7 +1918,7 @@ void checker::compile_function(symbol_id id)
             is_mut_parameter = true;
             // a function is no place, so a function type is not the whole type here (CHK-317)
             allows_function_type = false;
-            type = resolve_value_type(file, q->type);
+            type = resolve_value_type(file, q->type, nullptr, false, true);
             set_type(file, p.type, type);
             // what a stage takes the GPU hands it, and nothing hands an entry point a place
             if (is_raster_entry || find_attribute(file, d.attributes, "compute") != nullptr || control != nullptr

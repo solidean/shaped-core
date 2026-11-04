@@ -1,7 +1,9 @@
 #include "stack_capture.hh"
 
+#include <clean-core/algorithm/sort.hh>
 #include <clean-core/common/macros.hh>
 #include <clean-core/platform/intrinsics.hh>
+#include <clean-core/platform/module_table.hh>
 
 #if defined(__EMSCRIPTEN__)
 // No walkable native stack, so the JS engine's own account of it is the only one there is.
@@ -215,20 +217,94 @@ cc::stack_capture_result capture_wasm(cc::span<void*> out, isize skip)
 #endif
 }
 
+/// Where the function holding `rva` ends, as an rva: stated on x64, encoded in the unwind data on arm64.
+[[nodiscard]] u32 end_of(RUNTIME_FUNCTION const& f, u64 image_base)
+{
+#if defined(CC_ARCH_ARM64)
+    // Packed unwind data carries the length in its own bits; otherwise it is the first field of the .xdata record.
+    auto const length = (f.UnwindData & 3) != 0 ? ((f.UnwindData >> 2) & 0x7FF)
+                                                : (*reinterpret_cast<u32 const*>(image_base + f.UnwindData) & 0x3FFFF);
+    return f.BeginAddress + length * 4;
+#else
+    (void)image_base;
+    return f.EndAddress;
+#endif
+}
+
+/// What RtlLookupFunctionEntry answers, from `snapshot` alone and without its lock.
+/// `outside` is set when `pc` is in no module the snapshot holds, as opposed to a module's leaf without unwind data.
+[[nodiscard]] RUNTIME_FUNCTION const* find_function(cc::unwind_snapshot const& snapshot,
+                                                    u64 pc,
+                                                    DWORD64& image_base,
+                                                    bool& outside)
+{
+    auto const& modules = snapshot.modules;
+    auto lo = isize(0);
+    auto hi = modules.size();
+    while (lo < hi)
+    {
+        auto const mid = (lo + hi) / 2;
+        if (modules[mid].base <= pc)
+            lo = mid + 1;
+        else
+            hi = mid;
+    }
+    if (lo == 0 || pc >= modules[lo - 1].end)
+    {
+        outside = true;
+        return nullptr;
+    }
+
+    auto const& m = modules[lo - 1];
+    image_base = m.base;
+    auto const rva = u32(pc - m.base);
+    auto const* const functions = static_cast<RUNTIME_FUNCTION const*>(m.functions);
+    lo = 0;
+    hi = m.function_count;
+    while (lo < hi)
+    {
+        auto const mid = (lo + hi) / 2;
+        if (functions[mid].BeginAddress <= rva)
+            lo = mid + 1;
+        else
+            hi = mid;
+    }
+    if (lo == 0)
+        return nullptr;
+
+    auto const* f = &functions[lo - 1];
+    if (rva >= end_of(*f, m.base))
+        return nullptr;
+#if !defined(CC_ARCH_ARM64)
+    // An entry may stand for another one, as RtlLookupFunctionEntry follows too.
+    while ((f->UnwindData & 1) != 0)
+        f = reinterpret_cast<RUNTIME_FUNCTION const*>(m.base + (f->UnwindData & ~DWORD(1)));
+#endif
+    return f;
+}
+
 /// One frame of the walk: looks `ctx`'s function up and unwinds `ctx` past it.
 /// Returns false when the frame has no unwind data, or when the step faulted.
+/// With a `snapshot`, the lookup reads it alone, and `outside` reports a pc in no module it holds.
 ///
 /// A sampled thread is suspended wherever it happened to be, and a frame the tables misdescribe there yields a garbage
 /// stack pointer, which the next step dereferences.
 /// Such a step faults inside RtlVirtualUnwind, and unguarded that fault took the whole process down.
 /// A fault here ends the walk instead; nothing the walk touches is shared, so ending it leaves nothing half-done.
 /// Kept free of C++ objects, which a function with __try cannot unwind.
-[[nodiscard]] bool unwind_one_frame(CONTEXT& ctx, UNWIND_HISTORY_TABLE& history, bool& faulted)
+[[nodiscard]] bool unwind_one_frame(CONTEXT& ctx,
+                                    UNWIND_HISTORY_TABLE& history,
+                                    cc::unwind_snapshot const* snapshot,
+                                    bool& outside,
+                                    bool& faulted)
 {
     __try
     {
         DWORD64 image_base = 0;
-        auto* const function = ::RtlLookupFunctionEntry(context_pc(ctx), &image_base, &history);
+        auto* const function
+            = snapshot != nullptr
+                ? const_cast<RUNTIME_FUNCTION*>(find_function(*snapshot, u64(context_pc(ctx)), image_base, outside))
+                : ::RtlLookupFunctionEntry(context_pc(ctx), &image_base, &history);
         if (function == nullptr)
             return false;
 
@@ -260,7 +336,8 @@ CC_DONT_INLINE cc::stack_capture_result capture_from_context(void* start,
                                                              cc::span<void*> out,
                                                              isize skip,
                                                              void const* stop_frame,
-                                                             u64 skip_below = 0)
+                                                             u64 skip_below = 0,
+                                                             cc::unwind_snapshot const* snapshot = nullptr)
 {
     cc::stack_capture_result result;
 
@@ -308,9 +385,11 @@ CC_DONT_INLINE cc::stack_capture_result capture_from_context(void* start,
         auto const sp_before = u64(context_sp(ctx));
         auto const pc_before = u64(context_pc(ctx));
         auto faulted = false;
-        if (!unwind_one_frame(ctx, history, faulted))
+        auto outside = false;
+        if (!unwind_one_frame(ctx, history, snapshot, outside, faulted))
         {
             result.broken = true;
+            result.left_snapshot = outside;
             break;
         }
 
@@ -552,6 +631,7 @@ bool cc::stack_capture_from_context_available()
 }
 
 cc::stack_capture_result cc::capture_stack_from_native_context(void* native_context,
+                                                               cc::unwind_snapshot const& unwind,
                                                                cc::span<void*> out,
                                                                isize skip,
                                                                void const* stop_frame,
@@ -565,8 +645,9 @@ cc::stack_capture_result cc::capture_stack_from_native_context(void* native_cont
 
     (void)ctx;
     (void)walk;
-    return capture_from_context(native_context, out, skip, stop_frame);
+    return capture_from_context(native_context, out, skip, stop_frame, 0, &unwind);
 #else
+    (void)unwind;
     (void)native_context;
     (void)out;
     (void)skip;
@@ -638,4 +719,53 @@ CC_DONT_INLINE cc::stack_capture_result cc::capture_stack(cc::span<void*> out,
     (void)walk;
     return {};
 #endif
+}
+
+#if defined(_WIN32) && !defined(__EMSCRIPTEN__)
+namespace
+{
+/// The exception directory of the image mapped at `base`, false where its headers do not read as an image.
+/// Guarded, because a module may be unmapped between enumerating it and reading it.
+bool read_function_table(u64 base, u32& rva, u32& size)
+{
+    __try
+    {
+        auto const* const dos = reinterpret_cast<IMAGE_DOS_HEADER const*>(base);
+        if (dos->e_magic != IMAGE_DOS_SIGNATURE)
+            return false;
+        auto const* const nt = reinterpret_cast<IMAGE_NT_HEADERS const*>(base + u64(dos->e_lfanew));
+        if (nt->Signature != IMAGE_NT_SIGNATURE
+            || nt->OptionalHeader.NumberOfRvaAndSizes <= IMAGE_DIRECTORY_ENTRY_EXCEPTION)
+            return false;
+        auto const& directory = nt->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXCEPTION];
+        rva = directory.VirtualAddress;
+        size = directory.Size;
+        return rva != 0 && size != 0;
+    }
+    __except (EXCEPTION_EXECUTE_HANDLER)
+    {
+        return false;
+    }
+}
+} // namespace
+#endif
+
+cc::unwind_snapshot cc::unwind_snapshot::create()
+{
+    auto snapshot = unwind_snapshot();
+#if defined(_WIN32) && !defined(__EMSCRIPTEN__)
+    for (auto const& m : cc::enumerate_loaded_modules())
+    {
+        auto rva = u32(0);
+        auto size = u32(0);
+        if (!read_function_table(m.base, rva, size))
+            continue;
+        snapshot.modules.push_back({.base = m.base,
+                                    .end = m.base + m.size,
+                                    .functions = reinterpret_cast<void const*>(m.base + rva),
+                                    .function_count = isize(size / sizeof(RUNTIME_FUNCTION))});
+    }
+    cc::sort(snapshot.modules, [](module const& a, module const& b) { return a.base < b.base; });
+#endif
+    return snapshot;
 }

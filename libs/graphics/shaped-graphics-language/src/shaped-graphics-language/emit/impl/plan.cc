@@ -769,7 +769,11 @@ sgl::i32 sgl::emit::impl::resource_of(plan const& p, check::symbol_id binding, i
 
 cc::string_view sgl::emit::impl::atomic_text(plan const& p, check::type_id type)
 {
-    auto const is_signed = p.m.name_of(p.m.at(type).element) == builtins::k_int;
+    // a float's atomic is a uint's, holding its bits, unless the target's own float atomic is in use
+    auto const element = p.m.name_of(p.m.at(type).element);
+    if (element == builtins::k_float && p.native_float_atomics)
+        return p.which == target::msl ? "atomic_float" : "float";
+    auto const is_signed = element == builtins::k_int;
     switch (p.which)
     {
     case target::hlsl_dx12:
@@ -1267,9 +1271,14 @@ struct live_nodes
 };
 } // namespace
 
-sgl::emit::impl::plan sgl::emit::impl::make_plan(check::checked_module const& m, check::flat_entry_point const& e, target t)
+sgl::emit::impl::plan sgl::emit::impl::make_plan(check::checked_module const& m,
+                                                 check::flat_entry_point const& e,
+                                                 target t,
+                                                 bool native_float_atomic_add)
 {
     auto result = plan{.m = m, .e = e, .which = t};
+    // dx12 and WebGPU have no float add, so there an `atomic[float]` stays a uint's bits whatever the device says
+    result.native_float_atomics = native_float_atomic_add && (t == target::hlsl_vulkan || t == target::msl);
     // The tree's names and the builtins' go on being taken where they are, since both outlive the plan.
     result.names.parent = &e.names;
     if (m.builtins != nullptr)

@@ -40,6 +40,8 @@ HOST_TYPES: dict[str, tuple[str, int, str | None]] = {
     # an atomic is a plain integer to the host, which never updates it while the shader does
     "atomic[uint]": ("cc::u32", 4, None),
     "atomic[int]": ("cc::i32", 4, None),
+    # a float's atomic holds its bits, so the host writes and reads the float itself
+    "atomic[float]": ("float", 4, None),
     "bool32": ("slib::gpu_bool", 4, None),
     # the 16-bit families: typed-geometry's IEEE binary16, and clean-core's 16-bit integers
     "half": ("tg::f16", 2, None),
