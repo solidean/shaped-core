@@ -234,7 +234,9 @@ EXAMPLE("shaped-viewer/research-studio")
     // On unless asked otherwise: the spatial member a still image is otherwise handed to is far noisier than DLSS.
     auto still = from_environment("SV_STUDIO_STILL", 0, k_still_count); // into k_stills
     auto scale = 0;                                                     // into k_scales
-    auto fade_frames = 8;                                               // render_settings::temporal_denoise_fade_frames
+    // FSR after the temporal member at the native scale too, as anti-aliasing; below native it upscales either way.
+    auto fsr = false;
+    auto fade_frames = 8; // render_settings::temporal_denoise_fade_frames
     auto ceiling = false;
     auto exposure_offset = 0.0f;
     auto restart = false; // the panel asked for the image to converge again
@@ -304,6 +306,8 @@ EXAMPLE("shaped-viewer/research-studio")
                         scale = i;
                 ImGui::EndCombo();
             }
+            if (mode != 2)
+                ImGui::Checkbox("FSR anti-aliasing at native", &fsr);
             if (ImGui::BeginCombo("still image", k_stills[still].name))
             {
                 for (auto i = 0; i < k_still_count; ++i)
@@ -391,7 +395,10 @@ EXAMPLE("shaped-viewer/research-studio")
             scene.add_light(l.id, l.light);
 
         // Below native, a moving image is traced smaller and upscaled by the temporal member; a still one restarts at full size.
-        auto const reconstruct = sr::reconstruct_settings{.denoiser = k_denoisers[denoiser], .scale = k_scales[scale]};
+        auto const reconstruct
+            = sr::reconstruct_settings{.denoiser = k_denoisers[denoiser],
+                                       .upscaler = fsr ? sr::upscale_method::fsr : sr::upscale_method::automatic,
+                                       .scale = k_scales[scale]};
         auto const temporal = k_stills[still].temporal_forever ? u32(-1) : u32(temporal_frames);
         auto const scene_settings = sv::render_settings{
             .mode = mode == 2 ? sv::render_mode::wavefront : sv::render_mode::hybrid,
