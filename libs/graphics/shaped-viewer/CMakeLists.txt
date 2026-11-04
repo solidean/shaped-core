@@ -345,6 +345,7 @@ if(SC_BUILD_TESTS)
             tests/mode-switch-fuzz-test.cc
             tests/furnace-test.cc
             tests/temporal-stability-test.cc
+            tests/convergence-test.cc
             tests/jitter-accumulation-test.cc
             tests/glowing-sphere-test.cc
             tests/moving-view-motion-test.cc
