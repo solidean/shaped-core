@@ -123,6 +123,21 @@ Products go through the heap, there being no static box for the dense path; `par
 `rational_polynomial<P>` is a field, so a polynomial over it has `divrem`, which is what the trait seam was for.
 Where `P` has a gcd, a univariate polynomial over `bigint` or an exact field, every operation reduces by it and the denominator leads positively,
 monic over a field: the representation is canonical, and equality compares parts.
-Where it has none, the multivariate types for now, the parts are kept as they come but for the sign, and equality cross-multiplies.
+Where it has none, the dynamic variables for now, the parts are kept as they come but for the sign, and equality cross-multiplies.
 Symbolic perturbation needs no more there: the sign of a quotient of infinitesimal polynomials is the product of its parts' signs.
 Evaluating needs the point in a field, so a rational polynomial over `bigint` is refused a `bigint` point at compile time instead of dividing with truncation.
+
+### The multivariate gcd: a heuristic proved by division, then recursion
+
+Over `bigint` the gcd is first the heuristic of Char, Geddes and Gonnet, FLINT's first resort too:
+a variable is evaluated at an integer xi above twice the smaller input's largest coefficient, the evaluations' gcd taken one variable down,
+an integer gcd at the bottom, and a candidate read back from that gcd's balanced base-xi digits.
+Exact division of both inputs proves a candidate, so a wrong one never comes out; a few failures grow xi and then give up.
+The integer contents come apart at every level: the method holds for primitive inputs, and the evaluations are not primitive.
+What the heuristic gives up on, and every other coefficient type, goes to the recursive route:
+the inputs as polynomials in one variable over the others, the subresultant gcd there, its coefficients' gcds recursing down.
+`try_div_exact` divides leading terms in turn, which holds under any order compatible with products, the local one included;
+a remainder past the dividend's degree ends a division that is not exact, which a local order would otherwise run on forever.
+With a gcd, a `rational_polynomial` over the multivariate types reduces too.
+
+Against FLINT 3.3.1 in instructions retired, the gcd of (1 + x + y + z)^4 times a cofactor each: 720,000 to FLINT's 957,000.

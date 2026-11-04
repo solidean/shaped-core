@@ -943,7 +943,8 @@ Without that, LeakSanitizer never scans mimalloc memory and reports anything own
 The cost is that allocation behaviour is not what the other presets do — in-place resize always declines — so a bug that only reproduces here may be the allocator rather than the code.
 [platforms.md](../platforms.md#default-allocator-sc_mimalloc) owns the knob, and it is independent of `SANITIZE`: sanitizing a mimalloc build stays available for when mimalloc itself is the suspect.
 
-**Vendored code is excluded.** [tools/cmake/sanitizer-ignorelist.txt](../../tools/cmake/sanitizer-ignorelist.txt) suppresses findings attributed to `extern/`.
+**Vendored code is excluded.** [tools/cmake/sanitizer-ignorelist.txt.in](../../tools/cmake/sanitizer-ignorelist.txt.in) suppresses findings attributed to this repository's own `extern/`.
+It is anchored to the repository root, so shaped-core stays instrumented when a consumer checks it out under its own `extern/`.
 We cannot fix those without diverging from upstream, and a finding nobody will ever act on trains the reader to scroll past the next one.
 Only attribution is suppressed: our own code stays fully instrumented, including the calls it makes into those libraries.
 The flag is not wired for clang-cl, so the Windows sanitize preset still reports them.

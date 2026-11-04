@@ -1,6 +1,6 @@
 # LeakSanitizer runtime suppressions, applied to every sanitized test run (see tools/dev/lib/pipeline/test.py).
 #
-# Distinct from sanitizer-ignorelist.txt beside it, which is a COMPILE-time list excluding vendored sources from
+# Distinct from sanitizer-ignorelist.txt.in beside it, which is a COMPILE-time list excluding vendored sources from
 # instrumentation. This one is a RUNTIME list, for allocations that are not ours and have no call site of ours to
 # annotate.
 #

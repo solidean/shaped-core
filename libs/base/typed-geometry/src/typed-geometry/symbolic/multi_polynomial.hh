@@ -6,9 +6,11 @@
 #include <clean-core/container/fixed_array.hh>
 #include <clean-core/container/span.hh>
 #include <clean-core/container/vector.hh>
+#include <clean-core/error/optional.hh>
 #include <clean-core/string/format.hh>
 #include <clean-core/string/string.hh>
 #include <clean-core/string/string_view.hh>
+#include <typed-geometry/scalar/bigint/bigint.hh>
 #include <typed-geometry/scalar/traits.hh>
 #include <typed-geometry/symbolic/fwd.hh>
 #include <typed-geometry/symbolic/polynomial.hh>
@@ -516,6 +518,85 @@ struct tg::multi_polynomial
         return u;
     }
 
+    /// a / b when b divides a, empty otherwise; b must not be zero.
+    /// Leading terms divide in turn, which holds under any order compatible with products, the local infinitesimal one included,
+    /// since the remainder's leading term is the next quotient term's times b's.
+    /// A remainder past a's degree in some variable cannot come from an exact quotient, which ends a division that is not one:
+    /// under a local order it would otherwise run on forever, 1 / (1 - x) being a series.
+    [[nodiscard]] friend cc::optional<multi_polynomial> try_div_exact(multi_polynomial const& a, multi_polynomial const& b)
+    {
+        CC_ASSERT(!b.is_zero(), "tg::multi_polynomial: division by the zero polynomial");
+        multi_polynomial q;
+        if (a.is_zero())
+            return q;
+        exponents_t bound;
+        for (auto v = 0; v < variable_count; ++v)
+            bound[v] = a.degree(v);
+        auto const lb = Vars::unpack(b._keys[0]);
+        auto const& lc = b._coeffs[0];
+        auto r = a;
+        while (!r.is_zero())
+        {
+            auto const lr = Vars::unpack(r._keys[0]);
+            exponents_t m;
+            for (auto v = 0; v < variable_count; ++v)
+            {
+                if (lr[v] > bound[v] || lr[v] < lb[v])
+                    return {};
+                m[v] = lr[v] - lb[v];
+            }
+            C c;
+            if (!impl::try_exact_quotient(r._coeffs[0], lc, c))
+                return {};
+            auto const t = monomial(c, m);
+            r -= t * b;
+            q._push(t._keys[0], cc::move(c));
+        }
+        return q;
+    }
+
+    /// a / b where b divides a.
+    [[nodiscard]] friend multi_polynomial div_exact(multi_polynomial const& a, multi_polynomial const& b)
+    {
+        auto q = try_div_exact(a, b);
+        CC_ASSERT_ALWAYS(q.has_value(), "tg::div_exact: the divisor does not divide");
+        return cc::move(q.value());
+    }
+
+    /// The greatest common divisor, its leading coefficient positive, over coefficients with a gcd of their own or an exact field.
+    /// Recursive: a and b as polynomials in one variable over the others, the subresultant gcd there,
+    /// whose coefficients' gcds recurse over the remaining variables down to the coefficients' own.
+    [[nodiscard]] friend multi_polynomial gcd(multi_polynomial const& a, multi_polynomial const& b)
+        requires(impl::has_gcd<C> || (traits::is_field<C> && traits::is_exact<C>))
+    {
+        auto const normalized = [](multi_polynomial p)
+        {
+            if (!p.is_zero() && impl::leading_sign(p._coeffs[0]) < 0)
+                p.negate();
+            return p;
+        };
+        if (a.is_zero())
+            return normalized(b);
+        if (b.is_zero())
+            return normalized(a);
+        auto v = -1;
+        for (auto w = 0; w < variable_count && v < 0; ++w)
+            if (a.degree(w) > 0 || b.degree(w) > 0)
+                v = w;
+        if (v < 0)
+        {
+            // two constants
+            if constexpr (impl::has_gcd<C>)
+                return normalized(multi_polynomial(gcd(a._coeffs[0], b._coeffs[0])));
+            else
+                return multi_polynomial(C(1));
+        }
+        if constexpr (std::is_same_v<C, bigint>)
+            if (auto h = _heuristic_gcd(a, b); h.has_value())
+                return normalized(h.value());
+        return normalized(from_univariate(gcd(to_univariate(a, v), to_univariate(b, v)), v));
+    }
+
     /// The inverse of to_univariate: u's coefficients times powers of x(v).
     [[nodiscard]] friend multi_polynomial from_univariate(polynomial<multi_polynomial> const& u, int v)
     {
@@ -527,6 +608,103 @@ struct tg::multi_polynomial
     }
 
 private:
+    /// The gcd of the coefficients, positive.
+    [[nodiscard]] C _integer_content() const
+    {
+        auto g = C(0);
+        for (auto const& c : _coeffs)
+            g = gcd(g, c);
+        return g;
+    }
+
+    /// Every coefficient divided by d, which divides each of them.
+    [[nodiscard]] multi_polynomial _divided_by(C const& d) const
+    {
+        multi_polynomial r = *this;
+        if (!traits::is_one(d))
+            for (auto& c : r._coeffs)
+                c = div_exact(c, d);
+        return r;
+    }
+
+    /// The largest coefficient's magnitude.
+    [[nodiscard]] C _max_norm() const
+    {
+        auto m = C(0);
+        for (auto const& c : _coeffs)
+            if (auto const x = abs(c); x > m)
+                m = x;
+        return m;
+    }
+
+    /// The heuristic gcd of Char, Geddes and Gonnet over the integers, or empty where it fails.
+    /// The integer contents are taken apart at every level, the method holding for primitive inputs:
+    /// the evaluations one level down are not primitive, and their common integer factor is what this level reads back.
+    /// The first present variable is evaluated at an integer xi above twice the smaller input's largest coefficient,
+    /// the evaluations' gcd taken by the same method one variable down, an integer gcd at the bottom,
+    /// and a candidate read back from that gcd's balanced base-xi digits; division of both inputs proves it.
+    /// A failed candidate grows xi, and a few failures hand the gcd to the subresultant sequence.
+    [[nodiscard]] static cc::optional<multi_polynomial> _heuristic_gcd(multi_polynomial const& a,
+                                                                       multi_polynomial const& b)
+    {
+        auto v = -1;
+        for (auto w = 0; w < variable_count && v < 0; ++w)
+            if (a.degree(w) > 0 || b.degree(w) > 0)
+                v = w;
+        if (v < 0)
+            return multi_polynomial(gcd(a.is_zero() ? C(0) : a._coeffs[0], b.is_zero() ? C(0) : b._coeffs[0]));
+        if (a.is_zero() || b.is_zero())
+            return a.is_zero() ? b : a;
+
+        auto const content = gcd(a._integer_content(), b._integer_content());
+        auto const pa = a._divided_by(a._integer_content());
+        auto const pb = b._divided_by(b._integer_content());
+        auto const na = pa._max_norm();
+        auto const nb = pb._max_norm();
+        auto xi = (na < nb ? na : nb) * 2 + 29;
+        for (auto attempt = 0; attempt < 6; ++attempt)
+        {
+            auto const gamma = _heuristic_gcd(substitute(pa, v, xi), substitute(pb, v, xi));
+            if (gamma.has_value())
+            {
+                // the balanced base-xi digits of gamma are the candidate's coefficients in x(v)
+                auto rest = gamma.value();
+                cc::vector<multi_polynomial> digits;
+                auto const half = xi / 2;
+                while (!rest.is_zero())
+                {
+                    multi_polynomial digit;
+                    for (auto t = 0; t < rest.term_count(); ++t)
+                    {
+                        auto c = rest._coeffs[t] % xi;
+                        if (c > half)
+                            c = c - xi;
+                        else if (c < -half)
+                            c = c + xi;
+                        if (!c.is_zero())
+                            digit._push(rest._keys[t], cc::move(c));
+                    }
+                    rest = (rest - digit)._divided_by(xi);
+                    digits.push_back(cc::move(digit));
+                }
+                auto u = polynomial<multi_polynomial>::zeroed(int(digits.size()));
+                for (isize i = 0; i < digits.size(); ++i)
+                    u[int(i)] = cc::move(digits[i]);
+                u.trim();
+                auto candidate = from_univariate(u, v);
+                if (!candidate.is_zero())
+                {
+                    candidate = candidate._divided_by(candidate._integer_content());
+                    if (try_div_exact(pa, candidate).has_value() && try_div_exact(pb, candidate).has_value())
+                        return candidate * content;
+                }
+            }
+            // xi grows by a factor near 2.73 that avoids small rational ratios, as the method's authors chose
+            xi = xi * 73794 / 27011;
+        }
+        return {};
+    }
+
     void _push(key_t const& k, C c)
     {
         _keys.push_back(k);
@@ -788,22 +966,50 @@ private:
 
         if (size <= pairs)
         {
-            // A box no larger than the pairs: accumulate untracked, then walk every slot once.
+            // A box no larger than the pairs: accumulate untracked and walk every slot once, a slab of the leading variable at a time.
+            // Output slab k holds the pairs whose leading exponents sum to k, so only a slab's accumulators are live at once,
+            // which keeps them in cache where the whole box would not fit.
             // The walk is an odometer, least significant variable fastest, carrying the packed key along:
             // a key is linear in the exponents, so a step adds a variable's unit and a carry takes its wrap back off.
             // A larger index is a greater monomial unless the order compares its fields reversed, which walks upwards;
             // a graded order sorts the result afterwards.
-            for (auto i = 0; i < a.term_count(); ++i)
+            constexpr auto lead = Vars::order::variables_reversed ? n - 1 : 0;
+            auto const slab = stride[lead];
+
+            // the terms counting-sorted by their leading exponent, their factors and their indices less the leading part
+            struct sorted_terms
             {
-                auto* const row = dense_base + index_a[i];
-                auto const ca = fa[i];
-                for (auto j = 0; j < nb; ++j)
-                    impl::slot_add_mul_factors<C>(row[ib[j]], ca, fbp[j]);
-            }
+                cc::vector<int> start; // bucket e is [start[e], start[e + 1])
+                cc::vector<i64> rest;
+                cc::vector<typename impl::slot_factor<C, S>::type> factor;
+            };
+            auto const sort_terms
+                = [&](multi_polynomial const& p, cc::vector<i64> const& index, auto const& factors, int top)
+            {
+                sorted_terms st;
+                st.start.resize_to_filled(top + 2, 0);
+                for (auto const& k : p._keys)
+                    ++st.start[Vars::exponent(k, lead) + 1];
+                for (auto e = 0; e <= top; ++e)
+                    st.start[e + 1] += st.start[e];
+                auto fill = st.start;
+                st.rest.resize_to_filled(p.term_count(), i64(0));
+                st.factor.resize_to_filled(p.term_count(), factors[0]);
+                for (auto t = 0; t < p.term_count(); ++t)
+                {
+                    auto const e = Vars::exponent(p._keys[t], lead);
+                    auto const at = fill[e]++;
+                    st.rest[at] = index[t] - e * slab;
+                    st.factor[at] = factors[t];
+                }
+                return st;
+            };
+            auto const sa = sort_terms(a, index_a, fa, da[lead]);
+            auto const sb = sort_terms(b, index_b, fb, db[lead]);
+
             constexpr auto upwards = Vars::order::compare_reversed;
             cc::fixed_array<key_t, Vars::count> unit;
             cc::fixed_array<key_t, Vars::count> wrap;
-            exponents_t e = {};
             for (auto v = 0; v < n; ++v)
             {
                 exponents_t u = {};
@@ -811,39 +1017,107 @@ private:
                 unit[v] = Vars::pack(u);
                 u[v] = extent[v] - 1;
                 wrap[v] = Vars::pack(u);
-                if constexpr (!upwards)
-                    e[v] = extent[v] - 1;
             }
-            auto key = Vars::pack(e);
-            auto slot = upwards ? i64(0) : size - 1;
-            for (i64 left = size; left > 0; --left)
-            {
-                if (!impl::slot_is_zero<C>(dense_base[slot]))
-                    r._push(key, impl::slot_take<C>(dense_base[slot]));
-                slot += upwards ? 1 : -1;
-                for (auto q = 0; q < n; ++q)
+            // multiple[v][x] = the key of x in variable v alone, for taking an exponent back off in one step
+            cc::fixed_array<cc::vector<key_t>, Vars::count> multiple;
+            for (auto v = 0; v < n; ++v)
+                for (auto x = 0; x < extent[v]; ++x)
                 {
-                    auto const v = Vars::order::variables_reversed ? q : n - 1 - q;
-                    if constexpr (upwards)
+                    exponents_t u = {};
+                    u[v] = x;
+                    multiple[v].push_back(Vars::pack(u));
+                }
+            auto const max_total = a.total_degree() + b.total_degree();
+            auto const top = extent[lead] - 1;
+            r._keys.reserve(cc::min(size, pairs));
+            r._coeffs.reserve(cc::min(size, pairs));
+            for (auto step = 0; step <= top; ++step)
+            {
+                auto const k = upwards ? step : top - step;
+                auto const lo = cc::max(0, k - db[lead]);
+                auto const hi = cc::min(k, da[lead]);
+                for (auto ea = lo; ea <= hi; ++ea)
+                {
+                    auto const eb = k - ea;
+                    auto const b_begin = sb.start[eb];
+                    auto const b_end = sb.start[eb + 1];
+                    auto const* const rb = sb.rest.data();
+                    auto const* const fbs = sb.factor.data();
+                    for (auto ii = sa.start[ea]; ii < sa.start[ea + 1]; ++ii)
                     {
-                        if (++e[v] < extent[v])
-                        {
-                            key = key + unit[v];
-                            break;
-                        }
-                        e[v] = 0;
-                        key = key - wrap[v];
+                        auto* const row = dense_base + sa.rest[ii];
+                        auto const ca = sa.factor[ii];
+                        for (auto jj = b_begin; jj < b_end; ++jj)
+                            impl::slot_add_mul_factors<C>(row[rb[jj]], ca, fbs[jj]);
                     }
-                    else
+                }
+
+                // read the slab out, the leading exponent held at k
+                if constexpr (upwards)
+                {
+                    // Upwards, the odometer skips past the product's total degree: a slot beyond it was never written,
+                    // and a simplex-shaped support such as Fateman's fills a few percent of its box.
+                    exponents_t e = {};
+                    e[lead] = k;
+                    auto key = Vars::pack(e);
+                    i64 slot = 0;
+                    auto sum = k;
+                    while (true)
                     {
-                        if (e[v] > 0)
+                        if (!impl::slot_is_zero<C>(dense_base[slot]))
+                            r._push(key, impl::slot_take<C>(dense_base[slot]));
+                        auto advanced = false;
+                        for (auto q = 0; q < n; ++q)
                         {
-                            --e[v];
-                            key = key - unit[v];
-                            break;
+                            auto const v = Vars::order::variables_reversed ? q : n - 1 - q;
+                            if (v == lead)
+                                break;
+                            if (sum < max_total && e[v] + 1 < extent[v])
+                            {
+                                ++e[v];
+                                ++sum;
+                                key = key + unit[v];
+                                slot += stride[v];
+                                advanced = true;
+                                break;
+                            }
+                            sum -= e[v];
+                            slot -= e[v] * stride[v];
+                            key = key - multiple[v][e[v]];
+                            e[v] = 0;
                         }
-                        e[v] = extent[v] - 1;
-                        key = key + wrap[v];
+                        if (!advanced)
+                            break;
+                    }
+                }
+                else
+                {
+                    exponents_t e = {};
+                    for (auto v = 0; v < n; ++v)
+                        if (v != lead)
+                            e[v] = extent[v] - 1;
+                    e[lead] = k;
+                    auto key = Vars::pack(e);
+                    auto slot = slab - 1;
+                    for (i64 left = slab; left > 0; --left)
+                    {
+                        if (!impl::slot_is_zero<C>(dense_base[slot]))
+                            r._push(key, impl::slot_take<C>(dense_base[slot]));
+                        --slot;
+                        if (left == 1)
+                            break;
+                        for (auto q = 0; q < n; ++q)
+                        {
+                            auto const v = Vars::order::variables_reversed ? q : n - 1 - q;
+                            if (e[v] > 0)
+                            {
+                                --e[v];
+                                key = key - unit[v];
+                                break;
+                            }
+                            e[v] = extent[v] - 1;
+                            key = key + wrap[v];
+                        }
                     }
                 }
             }
@@ -907,7 +1181,7 @@ private:
         return true;
     }
 
-    /// The product by Monagan and Pearce's heap: one row per term of the smaller factor, each walking the larger,
+    /// The product by Monagan and Pearce's heap: a row per term of the smaller factor, each walking the larger,
     /// so the pairs' monomials come out greatest first and each run of equal ones is accumulated in place, sorted without a sort.
     template <class S>
     [[nodiscard]] static multi_polynomial _product_heap(multi_polynomial const& a, multi_polynomial const& b)
@@ -922,28 +1196,47 @@ private:
             int i;
             int j;
         };
-        // the rows' first products descend as the rows do, so in row order they already form a max-heap
+        // Rows enter lazily, as Monagan and Pearce's do: row i + 1's first product ranks no higher than row i's,
+        // so it is inserted when row i's first is taken, and the heap holds only the rows begun.
+        auto const height = rows.term_count();
         cc::vector<entry> heap;
-        heap.reserve(rows.term_count());
-        for (auto i = 0; i < rows.term_count(); ++i)
-            heap.push_back({.key = Vars::multiply(rows._keys[i], cols._keys[0]), .i = i, .j = 0});
+        heap.reserve(height);
+        heap.push_back({.key = Vars::multiply(rows._keys[0], cols._keys[0]), .i = 0, .j = 0});
 
+        // both sifts carry the moving entry in a hole, one store a level rather than a swap, through raw pointers
+        auto const sift_up = [&](isize c)
+        {
+            auto* const h = heap.data();
+            auto const x = h[c];
+            while (c > 0)
+            {
+                auto const p = (c - 1) / 2;
+                if (!Vars::greater(x.key, h[p].key))
+                    break;
+                h[c] = h[p];
+                c = p;
+            }
+            h[c] = x;
+        };
         auto const sift_down = [&]
         {
+            auto* const h = heap.data();
             auto const n = heap.size();
+            auto const x = h[0];
             isize p = 0;
             while (true)
             {
                 auto c = 2 * p + 1;
                 if (c >= n)
                     break;
-                if (c + 1 < n && Vars::greater(heap[c + 1].key, heap[c].key))
+                if (c + 1 < n && Vars::greater(h[c + 1].key, h[c].key))
                     ++c;
-                if (!Vars::greater(heap[c].key, heap[p].key))
+                if (!Vars::greater(h[c].key, x.key))
                     break;
-                cc::swap(heap[c], heap[p]);
+                h[p] = h[c];
                 p = c;
             }
+            h[p] = x;
         };
 
         auto const fr = impl::slot_factors<C, S>(rows._coeffs);
@@ -956,17 +1249,26 @@ private:
             do
             {
                 auto& top = heap[0];
-                impl::slot_add_mul_factors<C>(acc, fr[top.i], fc[top.j]);
-                if (++top.j < width)
+                auto const i = top.i;
+                auto const j = top.j;
+                impl::slot_add_mul_factors<C>(acc, fr[i], fc[j]);
+                if (j + 1 < width)
                 {
-                    top.key = Vars::multiply(rows._keys[top.i], cols._keys[top.j]);
+                    top.j = j + 1;
+                    top.key = Vars::multiply(rows._keys[i], cols._keys[j + 1]);
                 }
                 else
                 {
                     top = heap.back();
                     heap.remove_back();
                 }
-                sift_down();
+                if (!heap.empty())
+                    sift_down();
+                if (j == 0 && i + 1 < height)
+                {
+                    heap.push_back({.key = Vars::multiply(rows._keys[i + 1], cols._keys[0]), .i = i + 1, .j = 0});
+                    sift_up(heap.size() - 1);
+                }
             } while (!heap.empty() && heap[0].key == k);
             if (!impl::slot_is_zero<C>(acc))
                 r._push(k, impl::slot_take<C>(acc));
@@ -975,22 +1277,26 @@ private:
     }
 
     /// Sorts the terms by the order, their monomials distinct already.
+    /// The keys sort inline beside their term's index, so a compare reads two keys and no indirection.
     void _sort_terms()
     {
-        cc::vector<int> order;
-        for (auto t = 0; t < term_count(); ++t)
-            order.push_back(t);
-        cc::sort(order, [&](int x, int y) { return Vars::greater(_keys[x], _keys[y]); });
-        cc::vector<key_t> keys;
-        cc::vector<C> coeffs;
-        keys.reserve(term_count());
-        coeffs.reserve(term_count());
-        for (auto const t : order)
+        struct keyed
         {
-            keys.push_back(_keys[t]);
-            coeffs.push_back(cc::move(_coeffs[t]));
+            key_t key;
+            int t;
+        };
+        cc::vector<keyed> order;
+        order.reserve(term_count());
+        for (auto t = 0; t < term_count(); ++t)
+            order.push_back({.key = _keys[t], .t = t});
+        cc::sort(order, [](keyed const& x, keyed const& y) { return Vars::greater(x.key, y.key); });
+        cc::vector<C> coeffs;
+        coeffs.reserve(term_count());
+        for (auto i = 0; i < term_count(); ++i)
+        {
+            _keys[i] = order[i].key;
+            coeffs.push_back(cc::move(_coeffs[order[i].t]));
         }
-        _keys = cc::move(keys);
         _coeffs = cc::move(coeffs);
     }
 

@@ -19,7 +19,10 @@ if(SANITIZE)
         # Excludes vendored code from the checks; the list itself says what and why.
         # Not wired for clang-cl below: the flag needs a different spelling there and no Windows host has been available
         # to verify it, so the Windows sanitize preset still reports extern/ findings.
-        sc_build_options(COMPILE -fsanitize-ignorelist=${CMAKE_CURRENT_LIST_DIR}/sanitizer-ignorelist.txt)
+        cmake_path(GET CMAKE_CURRENT_LIST_DIR PARENT_PATH _sc_tools_dir)
+        cmake_path(GET _sc_tools_dir PARENT_PATH SC_SANITIZER_ROOT)
+        configure_file(${CMAKE_CURRENT_LIST_DIR}/sanitizer-ignorelist.txt.in ${CMAKE_BINARY_DIR}/sanitizer-ignorelist.txt @ONLY)
+        sc_build_options(COMPILE -fsanitize-ignorelist=${CMAKE_BINARY_DIR}/sanitizer-ignorelist.txt)
     else()
         # clang-cl. ASan is incompatible with the debug CRT (/MDd) the Debug build
         # type selects; force the non-debug dynamic CRT — also the only one the

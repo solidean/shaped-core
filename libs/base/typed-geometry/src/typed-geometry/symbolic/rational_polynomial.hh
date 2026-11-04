@@ -27,9 +27,9 @@ concept rational_polynomial_numerator_of = std::is_convertible_v<S const&, P> &&
 
 /// numerator / denominator over a polynomial type P closed under its operators: tg::polynomial<C> or a tg::multi_polynomial.
 /// It is a field, so a polynomial over it has divrem, as tg::traits::is_field says.
-/// Where P has a gcd (a univariate polynomial over bigint or an exact field), every operation reduces by it,
+/// Where P has a gcd (any polynomial over bigint or an exact field), every operation reduces by it,
 /// and the denominator leads positively, monic over a field: equal values have equal parts.
-/// Where it has none (the multivariate types, whose gcd is to come), the parts are kept as they come but for the sign,
+/// Where it has none (floats, the dynamic variables for now), the parts are kept as they come but for the sign,
 /// the denominator's leading coefficient positive, and equality cross-multiplies; a sign needs only the parts' signs.
 template <class P>
 struct tg::rational_polynomial
@@ -155,8 +155,9 @@ private:
             auto const lc = _den.leading_coefficient();
             if (!traits::is_one(lc))
             {
-                _num = impl::divide_coefficients(_num, lc);
-                _den = impl::divide_coefficients(_den, lc);
+                auto const inverse = coefficient_t(1) / lc;
+                _num = _num * inverse;
+                _den = _den * inverse;
             }
         }
     }

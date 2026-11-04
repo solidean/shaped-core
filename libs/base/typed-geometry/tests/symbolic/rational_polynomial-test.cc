@@ -112,7 +112,7 @@ TEST("tg rational polynomial - the sign over infinitesimals is the parts' signs"
 {
     using eps = tg::multi_polynomial<bigint, tg::vars<2, tg::infinitesimal_order>>;
     using eps_ratio = tg::rational_polynomial<eps>;
-    static_assert(!eps_ratio::is_reduced);
+    static_assert(eps_ratio::is_reduced); // by the multivariate gcd
     auto const e = eps::generators();
     // (e0 - 1) / (e1 - 2): negative over negative
     auto const r = eps_ratio(e[0] - 1, e[1] - 2);
@@ -121,7 +121,10 @@ TEST("tg rational polynomial - the sign over infinitesimals is the parts' signs"
     // (e0 - e1) / (3 + e1): the numerator's dominant term is e0
     CHECK(eps_ratio(e[0] - e[1], e[1] + 3).sign() == 1);
     CHECK(eps_ratio(e[1] - e[0], e[1] + 3).sign() == -1);
-    // equality without a gcd is by cross products
+    // reduced by the multivariate gcd: a common factor goes, and equal values have equal parts
     CHECK(eps_ratio(e[0] * 2, eps(4)) == eps_ratio(e[0], eps(2)));
+    auto const common = eps_ratio((e[0] - e[1]) * (e[0] + 3), (e[1] + 1) * (e[0] + 3));
+    CHECK(common.numerator() == e[0] - e[1]);
+    CHECK(common.denominator() == e[1] + 1);
     CHECK((eps_ratio(e[0], e[1] + 1) * eps_ratio(e[1] + 1, eps(1))) == eps_ratio(e[0]));
 }
