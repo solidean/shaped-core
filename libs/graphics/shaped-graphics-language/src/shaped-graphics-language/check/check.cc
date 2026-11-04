@@ -98,6 +98,75 @@ sgl::check::checked_module const& sgl::check::checked_prelude::module() const
     return _state->out;
 }
 
+namespace
+{
+/// Ends a layer's check: the empty program behind it goes, its tables are shared from here, and a program's check
+/// resumes after its `files` files.
+/// Every program's check reads the layer's entries in place rather than copying them.
+impl::resume_point freeze_layer(checker& c, i32 files)
+{
+    // The empty file's tables are the program's to replace, and nothing may point into the empty file past here.
+    c.files = {};
+    c.out.files.remove_back();
+    c.file_features.remove_back();
+    c.file_module.remove_back();
+    c.uses.remove_back();
+    c.out.file_modules.remove_back();
+    c.out.freeze_tables();
+    c.prelude_names.freeze();
+    c.prelude_operators.freeze();
+    c.operators.freeze();
+    c.type_scopes.freeze();
+    c.interned_types.freeze();
+    c.prelude_visible.freeze();
+    c.instances.freeze();
+    // the layer's names, once, for every program behind it; a program's check makes a set of its own names alone
+    auto names = cc::make_shared<cc::set<cc::string>>();
+    for (auto const& s : c.out.symbols)
+        if (!s.name.empty())
+            (void)names->insert(s.name);
+    c.module_names_below = cc::move(names);
+    c.module_names_below_count = c.out.symbols.size();
+    c.own_module_names = nullptr;
+    c.module_names_for = -1;
+    c.out.module_names = {};
+    return {
+        .files = files,
+        .symbols = c.out.symbols.size(),
+        .extensions = c.pending_extensions.size(),
+        .tests = c.out.tests.size(),
+        .wide_literals = c.wide_literals.size(),
+    };
+}
+
+/// Whether `plan` reaches library modules a layer may hold: some, and none of them the program's own module.
+/// A library file of the program's module shares the program's scope, which a program's check starts afresh.
+bool may_layer(module_plan const& plan)
+{
+    if (!plan.diagnostics.empty() || plan.library_order.empty())
+        return false;
+    for (auto i = isize(0); i < plan.library_order.size(); ++i)
+        if (plan.file_module[i] == 0)
+            return false;
+    return true;
+}
+
+/// Whether `plan` reaches the modules `layer` holds, in the same order and under the same names.
+/// The program's own module is not the layer's, and may be named anything.
+bool plan_matches(module_plan const& plan, cc::span<i32 const> library_order, cc::span<cc::string const> modules)
+{
+    if (!may_layer(plan) || plan.library_order.size() != library_order.size() || plan.modules.size() != modules.size())
+        return false;
+    for (auto i = isize(0); i < library_order.size(); ++i)
+        if (plan.library_order[i] != library_order[i])
+            return false;
+    for (auto i = isize(1); i < modules.size(); ++i)
+        if (plan.modules[i] != modules[i])
+            return false;
+    return true;
+}
+} // namespace
+
 cc::optional<checked_prelude> sgl::check::check_prelude(cc::span<module_file const> prelude,
                                                         builtins::registry const& builtins)
 {
@@ -106,6 +175,7 @@ cc::optional<checked_prelude> sgl::check::check_prelude(cc::span<module_file con
     auto const empty_ast = ast::build(empty_file);
     auto result = checked_prelude();
     result._files.push_back_range(prelude);
+    result._prelude_count = i32(prelude.size());
     auto files = cc::vector<module_file>();
     files.push_back_range(prelude);
     files.push_back({.file = empty_file, .ast = empty_ast});
@@ -118,39 +188,63 @@ cc::optional<checked_prelude> sgl::check::check_prelude(cc::span<module_file con
     c.run();
     if (!c.out.diagnostics.empty())
         return {};
-    // The empty file's tables are the program's to replace, and nothing may point into the empty file past here.
-    c.files = {};
-    c.out.files.remove_back();
-    c.file_features.remove_back();
-    c.file_module.remove_back();
-    c.uses.remove_back();
-    c.out.file_modules.remove_back();
-    // shared from here: every program's check reads the prelude's entries in place, rather than copying them
-    c.out.freeze_tables();
-    c.prelude_names.freeze();
-    c.prelude_operators.freeze();
-    c.operators.freeze();
-    c.type_scopes.freeze();
-    c.interned_types.freeze();
-    c.prelude_visible.freeze();
-    c.instances.freeze();
-    // the prelude's names, once, for every program behind it; a program's check makes a set of its own names alone
-    auto names = cc::make_shared<cc::set<cc::string>>();
-    for (auto const& s : c.out.symbols)
-        if (!s.name.empty())
-            (void)names->insert(s.name);
-    c.module_names_below = cc::move(names);
-    c.module_names_below_count = c.out.symbols.size();
-    c.own_module_names = nullptr;
-    c.out.module_names = {};
-    result._resume = {
-        .files = i32(prelude.size()),
-        .symbols = c.out.symbols.size(),
-        .extensions = c.pending_extensions.size(),
-        .tests = c.out.tests.size(),
-        .wide_literals = c.wide_literals.size(),
-    };
+    result._resume = freeze_layer(c, i32(prelude.size()));
     return result;
+}
+
+cc::optional<checked_prelude> sgl::check::check_modules(checked_prelude const& prelude,
+                                                        cc::span<module_file const> library,
+                                                        module_file program)
+{
+    // a layer is made over the prelude alone, never over another one
+    CC_ASSERT(prelude._library_order.empty(), "check_modules continues from the prelude's layer");
+    auto plan = plan_modules(library, program);
+    if (!may_layer(plan))
+        return {};
+
+    // The modules behind an empty program: the program's own `use` lines name nothing of the empty file.
+    auto const empty_file = parse("");
+    auto const empty_ast = ast::build(empty_file);
+    auto result = checked_prelude();
+    result._files.push_back_range(cc::span<module_file const>(prelude._files));
+    result._prelude_count = prelude._prelude_count;
+    for (auto const i : plan.library_order)
+        result._files.push_back(library[i]);
+    result._library_order = plan.library_order;
+    result._modules = plan.modules;
+    auto files = result._files;
+    files.push_back({.file = empty_file, .ast = empty_ast});
+    plan.uses.back() = {};
+
+    result._state = cc::make_unique<checker>(*prelude._state);
+    auto& c = *result._state;
+    c.files = files;
+    apply_plan(c, plan, prelude._prelude_count);
+    c.run(prelude._resume);
+
+    // An unused `require` is judged after the program's entry points are flattened, which the program's check does.
+    auto kept = cc::vector<located_diagnostic>();
+    for (auto& d : c.out.diagnostics)
+        if (d.what.kind != diagnostic_kind::unused_require)
+            kept.push_back(cc::move(d));
+    if (!kept.empty())
+        return {};
+    c.out.diagnostics = {};
+    result._resume = freeze_layer(c, i32(result._files.size()));
+    return result;
+}
+
+bool sgl::check::reaches_modules_to_layer(cc::span<module_file const> library, module_file program)
+{
+    return may_layer(plan_modules(library, program));
+}
+
+bool sgl::check::reaches_the_same_modules(checked_prelude const& layer,
+                                          cc::span<module_file const> library,
+                                          module_file program)
+{
+    return !layer._library_order.empty()
+        && plan_matches(plan_modules(library, program), layer._library_order, layer._modules);
 }
 
 checked_module sgl::check::check(checked_prelude const& prelude,
@@ -158,10 +252,14 @@ checked_module sgl::check::check(checked_prelude const& prelude,
                                  module_file program,
                                  cc::span<option_value const> options)
 {
-    auto planned = plan_files(prelude._files, library, program);
+    auto planned
+        = plan_files(cc::span<module_file const>(prelude._files).subspan({.offset = 0, .size = prelude._prelude_count}),
+                     library, program);
+    CC_ASSERT(prelude._library_order.empty() || plan_matches(planned.plan, prelude._library_order, prelude._modules),
+              "a program continues from a layer of modules only where it reaches exactly those");
     auto c = *prelude._state;
     c.files = planned.files;
-    apply_plan(c, planned.plan, i32(prelude._files.size()));
+    apply_plan(c, planned.plan, prelude._prelude_count);
     c.options = options;
     c.run(prelude._resume);
     return cc::move(c.out);

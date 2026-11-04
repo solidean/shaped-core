@@ -20,10 +20,16 @@ void checker::run(resume_point from)
         out.types.push_back({.kind = type_kind::error});
         out.types.push_back({.kind = type_kind::void_});
     }
-    // A checked prelude leaves the scope of its empty program behind, which this check's modules replace.
-    module_scopes = {};
-    for (auto i = isize(0); i < modules.size(); ++i)
-        module_scopes.push_back({});
+    // A checked layer leaves the scope of its empty program behind, which this check's own module replaces.
+    // A layer of modules keeps theirs, since their files are declared already and are not declared again.
+    if (from.files > prelude_count)
+        module_scopes[0] = {};
+    else
+    {
+        module_scopes = {};
+        for (auto i = isize(0); i < modules.size(); ++i)
+            module_scopes.push_back({});
+    }
     for (auto file = from.files; file < i32(files.size()); ++file)
     {
         auto const count = ast_of(file).exprs.size();
