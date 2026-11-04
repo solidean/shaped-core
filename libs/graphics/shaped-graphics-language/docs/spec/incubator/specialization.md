@@ -33,6 +33,9 @@ fun add(a: mut atomic[float], v: float) -> float:
 
 ### `const if`
 
+`const if` itself is specified: AST-157 and CHK-425, a chain each of whose conditions a constant decides once inlined.
+What stays here is what it grows into: the discarding below, `target` and `has`, and text bodies.
+
 **`const if` heads an ordinary `if` chain, and every `else if` of the chain is constant too.**
 The chain's siblings pair as an `if`'s do (AST-50, AST-51), and a condition that is not constant is an error.
 It may stand wherever an `if` may, a function's whole body or one statement among others.
@@ -56,6 +59,12 @@ The condition is evaluated with `target`, `has(…)` and every option unknown, i
 * `else` after a branch whose condition is known true is ruled out, and so is everything after it.
 
 A branch is never skipped because it fails to check, as C++'s SFINAE skips an overload.
+
+**The target and the device's features are implicit options**: inputs of a compile, substituted where options are (CHK-354).
+So a source is checked once per target, and `const if target.api == .vulkan` folds exactly as an `if` on an option does (CHK-356).
+"Checked" above is the check pass: names, types and the contract, for every branch the rule keeps.
+What is judged of the inlined tree, uniformity, the footprint and the features an entry point needs, is judged of the branch taken alone.
+So a compile for one target judges its own branch, and a compile of every target, as the corpus runs, judges them all.
 
 ### Features
 
@@ -112,7 +121,8 @@ How the text is written:
 
 ### Types
 
-A struct whose whole body is a `const if` chain is specialized the same way, which SER needs for its hit object:
+A struct whose only top-level form is a `const if` chain is specialized the same way, which SER needs for its hit object.
+Each branch holds fields, or a text body that spells the type:
 
 ```sgl sketch
 struct hit_object:

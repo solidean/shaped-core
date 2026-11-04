@@ -441,7 +441,7 @@ struct dumper
             },
             [&](if_stmt const& n)
             {
-                open("if");
+                open(n.is_const ? "const if" : "if");
                 for (auto const& branch : ast.at(n.branches))
                 {
                     new_line(depth + 1);

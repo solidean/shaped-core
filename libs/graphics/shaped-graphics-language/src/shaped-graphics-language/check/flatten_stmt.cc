@@ -43,7 +43,7 @@ void sgl::check::impl::flattener::flatten_return(origin from, ast::expr_id value
         add_stmt(from, flat_return{.value = result});
 }
 
-void sgl::check::impl::flattener::flatten_if(origin from, cc::span<ast::if_branch const> branches)
+void sgl::check::impl::flattener::flatten_if(origin from, cc::span<ast::if_branch const> branches, bool is_const)
 {
     if (branches.empty())
         return;
@@ -63,7 +63,20 @@ void sgl::check::impl::flattener::flatten_if(origin from, cc::span<ast::if_branc
             return add_taken(from, flatten_body(first.then));
         if (!rest.empty() && !ast::is_valid(rest.front().condition))
             return add_taken(from, flatten_body(rest.front().then));
-        return flatten_if(from, rest);
+        return flatten_if(from, rest, is_const);
+    }
+    // CHK-425: a `const if` keeps no branch it cannot decide
+    if (is_const)
+    {
+        unroll_reports.push_back({.file = file(),
+                                  .where = c.span_of(file(), first.condition),
+                                  .detail = "a const if decides each condition once the function is inlined: a "
+                                            "literal, a const, an option, a literal argument, or a pure builtin "
+                                            "of those",
+                                  .site = innermost_call()});
+        mark_failed();
+        meets_error = true;
+        return;
     }
     auto const then_body = flatten_body(first.then);
 
@@ -668,7 +681,7 @@ void sgl::check::impl::flattener::flatten_stmt(ast::stmt_id id)
     if (auto const* const assign = s.node.try_as<ast::assign_stmt>())
         return flatten_assign(from, *assign);
     if (auto const* const chain = s.node.try_as<ast::if_stmt>())
-        return flatten_if(from, ast().at(chain->branches));
+        return flatten_if(from, ast().at(chain->branches), chain->is_const);
     if (auto const* const loop = s.node.try_as<ast::for_stmt>())
         return flatten_for(from, id, *loop);
     if (auto const* const loop = s.node.try_as<ast::while_stmt>())

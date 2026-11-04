@@ -1371,6 +1371,9 @@ hit_group textured for path_rays:
   No rule that judges an entry point's inlined body judges it: neither the uniformity pass (CHK-282) nor the features the entry point needs (CHK-263).
   Every body is still checked on its own (CHK-129), so an error in that branch is reported all the same.
   A `let` holds no constant, so a branch on a local that holds an option keeps both sides.
+* **CHK-425** Every condition of a `const if` chain (AST-157) is a constant (CHK-310) once the entry point or the test is inlined, so CHK-356 takes exactly one branch, or none.
+  A condition that is not is `invalid-constant-argument`, judged of each inlined copy as an unrolled `for`'s bound is (CHK-389).
+  Every branch is still checked on its own as an `if`'s is: a `const if` decides what is written, never what is checked.
 * **CHK-268** A flat tree nests at most 40 levels, and an entry point whose tree nests deeper is `nesting-too-deep` and has no flat tree.
   A level is an operand, the body of a block expression, an expression a statement holds, and a statement list inside a statement; every call counts as inlined.
   A top-level `let x = a + b + …` is one level for the `let` and one per term, so 40 terms is past the limit.
@@ -1649,7 +1652,7 @@ A diagnostic of this pass has a kind, a file, a byte span in that file, and a de
 | `constant-without-value` | CHK-311 |
 | `constant-not-representable` | CHK-312, CHK-396 |
 | `missing-sampler` | CHK-279 |
-| `invalid-constant-argument` | CHK-280, CHK-285, CHK-299, CHK-309, CHK-378, CHK-389 |
+| `invalid-constant-argument` | CHK-280, CHK-285, CHK-299, CHK-309, CHK-378, CHK-389, CHK-425 |
 | `non-uniform-control-flow` | CHK-282, CHK-374, CHK-377 |
 | `non-uniform-index` | CHK-300, CHK-401 |
 | `needless-nonuniform` | CHK-300, CHK-401 |

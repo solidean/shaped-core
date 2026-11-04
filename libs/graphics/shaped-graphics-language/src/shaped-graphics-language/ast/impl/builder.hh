@@ -275,8 +275,10 @@ struct builder
     stmt_id assert_statement(statement_head const& head, keyword_parts const& parts);
     stmt_id print_statement(statement_head const& head, keyword_parts const& parts);
     stmt_id expression_statement(form_id form);
-    /// `chain` is an `if` or a stray `else`, then the `else` forms that follow it directly.
+    /// `chain` is an `if`, a `const if` or a stray `else`, then the `else` forms that follow it directly.
     stmt_id if_chain(cc::span<form_id const> chain);
+    /// A line led by `const if`, which opens a chain as `if` does (AST-157).
+    [[nodiscard]] bool is_const_if(form_id line);
 
     [[nodiscard]] body block_body(form_id block);
     /// The body of something that yields a value: a block, or the expression right of `=>`.

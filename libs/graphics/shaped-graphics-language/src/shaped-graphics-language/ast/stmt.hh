@@ -34,6 +34,8 @@ struct sgl::ast::if_stmt
     /// Never empty.
     /// Only the last branch may lack a condition — or the first, when the chain opens with a stray `else`.
     range_of<if_branch> branches;
+    /// Opened by `const if`, which makes every condition of the chain one that must be constant (AST-157).
+    bool is_const = false;
 
     constexpr bool operator==(if_stmt const&) const = default;
 };

@@ -14,7 +14,7 @@ range_of<stmt_id> builder::statements(form_id block)
     auto i = isize(0);
     while (i < lines.size())
     {
-        if (!starts_with(lines[i], "if") && !starts_with(lines[i], "else"))
+        if (!starts_with(lines[i], "if") && !starts_with(lines[i], "else") && !is_const_if(lines[i]))
         {
             collected.push_back(statement(head_of(lines[i])));
             ++i;
@@ -56,7 +56,7 @@ stmt_id builder::statement(statement_head const& head)
     auto const keyword = token_text_of(parts.keywords[0]);
     auto const second = parts.keywords.size() > 1 ? token_text_of(parts.keywords[1]) : cc::string_view();
 
-    if (keyword == "if" || keyword == "else")
+    if (keyword == "if" || keyword == "else" || (keyword == "const" && second == "if"))
     {
         form_id const chain[] = {form};
         return if_chain(cc::span<form_id const>(chain));
@@ -267,6 +267,7 @@ stmt_id builder::print_statement(statement_head const& head, keyword_parts const
 stmt_id builder::if_chain(cc::span<form_id const> chain)
 {
     auto const attributes = attributes_of(chain[0]);
+    auto const is_const = is_const_if(chain[0]);
 
     auto collected = cc::vector<if_branch>();
     for (auto i = isize(0); i < chain.size(); ++i)
@@ -281,8 +282,10 @@ stmt_id builder::if_chain(cc::span<form_id const> chain)
         else if (is_else)
             report(diagnostic_kind::stray_else, parts.keywords[0]);
 
+        // AST-157: `const if` heads a chain, and the `else if` below it is constant already
         auto const is_known = parts.keywords.size() == 1
-                           || (is_else && parts.keywords.size() == 2 && token_text_of(parts.keywords[1]) == "if");
+                           || (parts.keywords.size() == 2 && token_text_of(parts.keywords[1]) == "if"
+                               && (is_else || (i == 0 && is_const)));
         if (!is_known)
             report(diagnostic_kind::unexpected_keyword, parts.keywords[1]);
 
@@ -300,7 +303,16 @@ stmt_id builder::if_chain(cc::span<form_id const> chain)
     }
 
     auto const branches = append(ast.if_branches, cc::span<if_branch const>(collected));
-    return make_stmt(chain[0], attributes, if_stmt{.branches = branches});
+    return make_stmt(chain[0], attributes, if_stmt{.branches = branches, .is_const = is_const});
+}
+
+bool builder::is_const_if(form_id line)
+{
+    auto const head = head_of(line);
+    if (!is_keyword_led(head.keyword_form, "const"))
+        return false;
+    auto const parts = keyword_parts_of(head.keyword_form);
+    return parts.keywords.size() == 2 && token_text_of(parts.keywords[1]) == "if";
 }
 
 body builder::block_body(form_id block)

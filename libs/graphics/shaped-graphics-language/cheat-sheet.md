@@ -476,6 +476,8 @@ img[xy] = v as texel[out_format]         // a store into a host-picked format: .
                                          // the ONLY width change: `float4 as float2` is no conversion, and no kind changes (CHK-391, CHK-392)
 if tile > 8: ...                         // a branch on a constant keeps the side it takes, in text, footprint and verdicts (CHK-356)
 fun f(x: float, .fast: bool)             // ...and a literal argument is a constant, so `f(x, fast = false)` sheds its fast side
+const if fast: ... else: ...             // the same, but a condition no constant decides once inlined is ERROR invalid-constant-argument (CHK-425)
+                                         // both sides are still checked; it decides what is written, never what is checked
 @unroll                                  // on a `for`: the body once per index, the index a literal in each copy, within 256 copies (CHK-389)
 for i in 0 ..< taps: ...                 // nothing of it runs as a loop, no text holds a hint, and the bounds are int constants
                                          // past 256 copies, a nest's counted together, it stays a loop: WARNING unroll-too-long

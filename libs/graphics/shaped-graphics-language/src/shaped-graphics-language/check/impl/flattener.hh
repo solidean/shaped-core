@@ -60,6 +60,7 @@ struct flattener
     cc::vector<origin> discards;
     /// An unrolled `for` the tree did not unroll, which its caller reports once (CHK-389).
     /// One whose bound is no constant is an error, and one that would write too many copies is a loop instead, and a warning.
+    /// A `const if` whose condition is no constant is reported here too, as an error (CHK-425).
     struct unroll_report
     {
         diagnostic_kind kind = diagnostic_kind::invalid_constant_argument;
@@ -684,7 +685,8 @@ struct flattener
 
     void flatten_return(origin from, ast::expr_id value);
 
-    void flatten_if(origin from, cc::span<ast::if_branch const> branches);
+    /// `is_const` for a `const if`, whose condition that no constant decides is an error (CHK-425).
+    void flatten_if(origin from, cc::span<ast::if_branch const> branches, bool is_const = false);
 
     void flatten_assign(origin from, ast::assign_stmt const& assign);
 

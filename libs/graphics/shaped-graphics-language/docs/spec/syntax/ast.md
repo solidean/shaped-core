@@ -391,7 +391,7 @@ fun tally(kind: light_kind, hits: int) -> float:
 |---|---|
 | `let` | `let pattern`, `let pattern : type`, each with an optional `= expression`; and the same after `let mut` |
 | assignment | `target = expression`, and `target op= expression` for every assignment operator |
-| `if` | `if condition` with a body, then any number of `else if condition`, then at most one `else`, each with a body |
+| `if` | `if condition` or `const if condition` with a body, then any number of `else if condition`, then at most one `else`, each with a body |
 | `for` | `for name in expression` or `for _ in expression`, each with an optional `: type` after the variable, with a body |
 | `while` | `while condition` with a body |
 | `assert` | `assert condition` or `assert condition, message` |
@@ -432,6 +432,9 @@ fun blend(base: vec3, top: vec3, mask: float) -> vec3:
   The `else` joins the `if` on its own line, so a statement written that way is the same chain, and it gives no value.
 * **AST-155** `return`, `yield` or `break` in front of such an `if` takes the whole `if` as its value: `return if c => a else b` returns `a` or `b`.
   `=>` is looser than a keyword form, so the jump arrives in the first condition's keyword form, and the AST puts it back together as it does a lambda's.
+* **AST-157** `const if` heads an `if` statement as `if` does, and the statement records that it is constant, which every condition of its chain then is (CHK-425).
+  The `else if` and the `else` below it are written as they are below an `if`.
+  `const if` stands as a statement only, and one where a value is expected is a normal error.
 
 ```sgl
 if count > 0:
