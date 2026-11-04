@@ -146,27 +146,45 @@ binding svgf_temporal_images:
     let lum = min(luminance(color), 1e18)
     let moments = float2(lum, lum * lum)
 
-    // Where this pixel's surface was last frame: the pixel's center moved back by its motion.
-    let previous_center = as_float2(p) + 0.5 - svgf_temporal_images.motion.load(p).xy
-    let floored = floor(previous_center)
-    let q = int2(floored.x as int, floored.y as int)
+    // Where this pixel's surface was last frame, among last frame's pixel centers: this center moved back by its motion.
+    // The history there is read bilinearly from the four pixels around it, as Schied et al. do, each only where it shows this surface.
+    // A single nearest pixel would snap a sub-pixel motion to whole pixels, and resample the history differently from frame to frame.
+    let previous = as_float2(p) - svgf_temporal_images.motion.load(p).xy
+    let floored = floor(previous)
+    let fraction = previous - floored
+    let base = int2(floored.x as int, floored.y as int)
+    let kind = kind_of(n, d)
+    let surface = is_surface(n, d)
 
-    let mut valid = (flags & reset) == 0u and all(q >= int2(0)) and all(q < size)
-    if valid:
-        let prev_nd = svgf_temporal_images.previous_normal_depth.load(q)
-        let surface = is_surface(n, d)
-        if kind_of(n, d) != kind_of(prev_nd.xyz, prev_nd.w):
-            valid = false
-        else if surface:
-            let same_normal = dot(normalize(n), normalize(prev_nd.xyz))
-            let depth_change = abs(prev_nd.w - d) / max(d, 0.0001)
-            valid = same_normal >= svgf_temporal_constants.normal_similarity and depth_change <= svgf_temporal_constants.depth_similarity
+    let mut sum_history = float4(0.0)
+    let mut sum_moments = float2(0.0)
+    let mut sum_weight = 0.0
+    if (flags & reset) == 0u:
+        for ty in 0 ..< 2:
+            for tx in 0 ..< 2:
+                let q = base + int2(tx, ty)
+                if any(q < int2(0)) or any(q >= size) => continue
+                let prev_nd = svgf_temporal_images.previous_normal_depth.load(q)
+                if kind_of(prev_nd.xyz, prev_nd.w) != kind => continue
+                if surface:
+                    let same_normal = dot(normalize(n), normalize(prev_nd.xyz))
+                    let depth_change = abs(prev_nd.w - d) / max(d, 0.0001)
+                    if same_normal < svgf_temporal_constants.normal_similarity or depth_change > svgf_temporal_constants.depth_similarity => continue
+                let wx = if tx == 0 => 1.0 - fraction.x else fraction.x
+                let wy = if ty == 0 => 1.0 - fraction.y else fraction.y
+                let w = wx * wy
+                sum_history += svgf_temporal_images.previous_history.load(q) * w
+                sum_moments += svgf_temporal_images.previous_moments.load(q) * w
+                sum_weight += w
+
+    // Too little of the footprint shows this surface to say what it held: a disocclusion, which starts over.
+    let valid = sum_weight > 0.01
 
     let mut out_color = color
     let mut out_moments = moments
     let mut history_length = 1.0
     if valid:
-        let prev = svgf_temporal_images.previous_history.load(q)
+        let prev = sum_history / sum_weight
         history_length = min(prev.w + 1.0, svgf_temporal_constants.max_history)
 
         // 1 / length is the exact running mean while the history is young.
@@ -174,7 +192,7 @@ binding svgf_temporal_images:
         let color_alpha = max(1.0 / history_length, svgf_temporal_constants.color_alpha_min)
         let moments_alpha = max(1.0 / history_length, svgf_temporal_constants.moments_alpha_min)
         out_color = mix(prev.xyz, color, color_alpha)
-        out_moments = mix(svgf_temporal_images.previous_moments.load(q), moments, moments_alpha)
+        out_moments = mix(sum_moments / sum_weight, moments, moments_alpha)
 
     svgf_temporal_images.history[id.xy] = float4(..out_color, history_length)
     svgf_temporal_images.moments[id.xy] = out_moments
@@ -243,6 +261,9 @@ binding svgf_variance_images:
 
 // ---- filter ---------------------------------------------------------------------------------------------------------
 
+// Schied et al. also feed the first pass's result back as the next frame's history; this does not, measured both ways.
+// While still, the history is the mean itself, so a frame changes no less with it, and it bakes the first pass's blur into every frame after.
+//
 // The difference from sr's plain à-trous is where the noise estimate comes from.
 // There it is modeled from a sample count; here it is measured per pixel, blurred over a 3x3 so one lucky sample does not stop a pixel from being filtered, and carried through every pass.
 // A pass leaves each pixel's variance as the variance of the average it produced, so the next pass, at twice the spacing, filters less where this one already removed the noise.
