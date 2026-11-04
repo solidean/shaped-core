@@ -22,7 +22,7 @@ _DECLARATION_KEYWORDS = frozenset({
 })
 # `mut buffer[float]`, `out image_2d[.rgba8_unorm]`: an access word at the top of a type position leaves the position a type.
 _TYPE_QUALIFIERS = frozenset({"mut", "out"})
-_CONTROL_KEYWORDS = frozenset({"if", "else", "for", "while", "loop", "return", "yield", "continue", "discard", "break",
+_CONTROL_KEYWORDS = frozenset({"if", "else", "for", "while", "loop", "scope", "return", "yield", "continue", "discard", "break",
                                "case"})
 # Builtins whose name alone says they constrain control flow, drawn as control keywords as the VS Code grammar draws them.
 # An atomic's `max` or an implicit-derivative `sample` shares its name with an ordinary function, so neither is here.
