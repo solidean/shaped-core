@@ -269,6 +269,7 @@ resolved_view resolve_scene(sg::command_list& cmd, layer const& l, gpu_resource_
         // One that declared no bounds is skipped instead: there is no honest extent to draw it at, and an invented one
         // would put it somewhere it is not.
         auto const is_pending = mesh->state != residency::complete;
+        auto const mesh_failed = mesh->state == residency::failed;
         if (is_pending && !mesh->bounds.has_value())
             continue;
 
@@ -313,8 +314,6 @@ resolved_view resolve_scene(sg::command_list& cmd, layer const& l, gpu_resource_
 
         // An instance lights the scene where its own permutation declares an emission that is not dark throughout.
         // The GPU reads each factor at the sampled point, so a constant, a texture and a mesh attribute all qualify; the estimate weighs selection alone.
-        if (shade_fallback)
-            continue;
         // A texture that does not sample its own texels yet, or ever, is unknown rather than proven by them.
         auto texture_summary = [&](texture_id id) -> cc::optional<value_summary>
         {
@@ -326,9 +325,25 @@ resolved_view resolve_scene(sg::command_list& cmd, layer const& l, gpu_resource_
             auto const* const r = resources.attributes.get_ptr(id);
             return r != nullptr ? r->summary : cc::optional<value_summary>();
         };
-        auto const& emission = out.hit_groups[permutation]->emission;
-        auto const estimate = impl::emitter_estimate_of(emission, resources.get_instance(item.instance),
-                                                        {.texture = texture_summary, .attribute = attribute_summary});
+        // The item's own emission, which a fallback-shaded item does not shade yet.
+        auto const* const own = shade_fallback ? resources.shaders.find(item.shader_key) : out.hit_groups[permutation];
+        auto const estimate = own != nullptr
+                                ? impl::emitter_estimate_of(own->emission, resources.get_instance(item.instance),
+                                                            {.texture = texture_summary, .attribute = attribute_summary})
+                                : cc::optional<impl::emitter_estimate>();
+
+        // An emitter whose geometry or attributes are still landing lights nothing yet: an image of a darker scene, so it restarts.
+        // One whose mesh failed draws its placeholder for good, so that image is final.
+        if (shade_fallback)
+        {
+            if (estimate.has_value() && traced && resources.meshes.can_build_emitter_cdfs() && !mesh_failed)
+            {
+                out.emitters_pending = true;
+                if (estimate.value().shows_emission())
+                    ++out.emissive_items;
+            }
+            continue;
+        }
 
         // The hybrid's rays skip an instance that keeps coverage and lights nothing: such a material is a decal over a
         // surface, mostly fractional, so every crossing asks the cutout decision for a shadow and a bounce that barely move.
@@ -400,7 +415,7 @@ resolved_view resolve_scene(sg::command_list& cmd, layer const& l, gpu_resource_
              .select_pdf = 0,
              .select_cdf = 0});
         out.emitters.push_back(emitter_record_of(u32(out.records.size() - 1), cdf_index, u32(triangles),
-                                                 emitter_cdf_block_count(triangles), emission));
+                                                 emitter_cdf_block_count(triangles), own->emission));
     }
 
     CC_ASSERT(!out.instances.empty(), "a view needs at least one drawable item to render");
@@ -755,7 +770,9 @@ constexpr u32 frame_count_cap = u32(1) << 30;
 
 /// Counts a frame of `slot`'s layer that traced: its frame, and for a megakernel frame the samples it added to every pixel.
 /// A megakernel layer's frames therefore hold `samples_per_pixel` times however many it took to reach its target, the first that did included.
-void count_traced_frame(impl::temporal_slot& slot, render_settings const& settings)
+/// An `incomplete` frame, drawn through a stand-in still compiling or short of an emitter still loading, holds none:
+/// the next frame restarts the mean, so until then it is no sample of the image asked for, however many it traced.
+void count_traced_frame(impl::temporal_slot& slot, render_settings const& settings, bool incomplete)
 {
     slot.drew_since_restart = true;
     slot.accum_frame = next_frame_count(slot);
@@ -763,6 +780,8 @@ void count_traced_frame(impl::temporal_slot& slot, render_settings const& settin
         slot.samples = slot.accum_frame * megakernel_samples_per_frame(settings);
     if (settings.mode == render_mode::hybrid)
         slot.samples = slot.accum_frame;
+    if (incomplete)
+        slot.samples = 0;
 }
 
 /// Raises `slot.samples` by every wavefront sample floor that has landed, and drops one whose download failed.
@@ -1249,9 +1268,10 @@ struct raster_batch
 
     // As a trace: one drawn through a stand-in still compiling, or short of an emitter still loading, restarts next frame.
     slot.stand_in_hash = stand_ins.hash;
-    if (stand_ins.pending || scene.resolved->emitters_pending)
+    auto const incomplete = stand_ins.pending || scene.resolved->emitters_pending;
+    if (incomplete)
         slot.reset_hash = cc::combine_hash(slot.reset_hash, u64(1));
-    count_traced_frame(slot, l.settings);
+    count_traced_frame(slot, l.settings, incomplete);
     return outcome;
 }
 } // namespace
@@ -1859,7 +1879,8 @@ sg::routine_outcome view_renderer::trace(sg::command_list& cmd,
              .frame_diffuse = frame_diffuse,
              .frame_specular = frame_specular,
              .guide_hit_distance = guide_hit_distance,
-             .primary_depth = depth_slot != nullptr ? depth_slot->texture : sg::texture_2d(),
+             // A scaled frame writes no depth, and its targets are at the input extent, which the slot is not.
+             .primary_depth = depth_slot != nullptr && !scaled ? depth_slot->texture : sg::texture_2d(),
              .sample_counts = sample_counts,
              .instance_table = instance_table,
              .lights = light_buffer,
@@ -1904,7 +1925,7 @@ sg::routine_outcome view_renderer::trace(sg::command_list& cmd,
 
     // A scaled frame is no sample of the mean, which the next still frame restarts at full size.
     if (traces && !scaled)
-        count_traced_frame(*slot, l.settings);
+        count_traced_frame(*slot, l.settings, stand_ins.pending || resolved.emitters_pending);
     slot->traced_scaled = scaled;
 
     // Every frame that traces writes the whole primary depth, the wavefront's from what its tallies kept since the restart.
@@ -2406,7 +2427,7 @@ sg::texture_2d view_renderer::execute(sg::command_list& cmd,
         ++slot.loading_frames;
     }
     if (traced == sg::routine_outcome::executed)
-        count_traced_frame(slot, scene->settings);
+        count_traced_frame(slot, scene->settings, stand_ins.pending || resolved.emitters_pending);
     return slot.texture;
 }
 } // namespace sv
