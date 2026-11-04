@@ -769,6 +769,7 @@ sgl::i32 sgl::emit::impl::resource_of(plan const& p, check::symbol_id binding, i
 
 cc::string_view sgl::emit::impl::atomic_text(plan const& p, check::type_id type)
 {
+    // a float's atomic is a uint's, holding its bits
     auto const is_signed = p.m.name_of(p.m.at(type).element) == builtins::k_int;
     switch (p.which)
     {

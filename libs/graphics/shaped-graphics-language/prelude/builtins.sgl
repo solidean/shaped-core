@@ -2629,6 +2629,18 @@ struct exchange_result[T]:
 /// It may fail although the value was `expected`, so only `exchanged` says it stored: retry in a loop.
 @builtin @stages(.pixel, .compute, .raygen, .miss, .closest_hit, .callable) fun compare_exchange_weak(a: mut atomic[int], expected: int, desired: int) -> exchange_result[int]
 
+// A float's atomics, which every target holds as the bits of a `uint` atomic.
+// Its add retries a compare-exchange of those bits, so a stage with helper invocations takes none.
+/// The value, read in one step.
+@builtin @stages(.pixel, .compute, .raygen, .miss, .closest_hit, .callable) fun load(a: atomic[float]) -> float
+/// Stores `v` in one step.
+@builtin @stages(.pixel, .compute, .raygen, .miss, .closest_hit, .callable) fun store(a: out atomic[float], v: float)
+/// Stores `v`, and gives the value before.
+@builtin @stages(.pixel, .compute, .raygen, .miss, .closest_hit, .callable) fun exchange(a: mut atomic[float], v: float) -> float
+/// Adds `v`, rounded once, and gives the value before.
+/// It retries a compare-exchange until no other update came between, which a pixel stage's helper invocations would never leave.
+@builtin @stages(.compute, .raygen, .miss, .closest_hit, .callable) fun add(a: mut atomic[float], v: float) -> float
+
 // The atomics of an `@atomic` image's texels, which the flat tree calls for `img[xy].max(v)` (CHK-373).
 // Each takes the image, the coordinate and an array's layer where the buffer atomic takes the atomic.
 /// Adds `v`, wrapping, and gives the value before.

@@ -109,8 +109,8 @@ What a differentiable buffer would be, once it is the language's:
 
 * **A binding member says it is one**, as `weights: diff_buffer[float]`, and sg binds it as three buffers: the values, their tangents and their gradients.
   A read of it then is what the hand-written pair above writes, with no function around it.
-* **An adjoint from many invocations is a float atomic add**, which [atomics.md](atomics.md) has behind an sg feature.
-  dx12 and WebGPU lack one, and a compare-exchange loop on the bits is the polyfill.
+* **An adjoint from many invocations is a float atomic add**: `atomic[float].add`, a compare-exchange loop on the bits on every target ([bindings.md](../bindings.md#atomics)).
+  A native add where a device has one is [atomics.md](atomics.md)'s.
 * **An index every invocation of a subgroup shares is reduced first**, one subgroup sum and one atomic in place of thirty-two.
   A tiled splat rasterizer is that case: every pixel of a tile walks the same splats at once, which is the optimization 3DGS's CUDA backward relies on.
 * **A texture's sample scatters its adjoint to the texels it filtered**, four atomic adds at the bilinear weights, one level for a sample at a level.
@@ -155,7 +155,7 @@ The prototype has done forward mode, reverse mode, loops of constant bounds over
 1. A loop whose bound is stated rather than constant, as Slang's `[MaxIters]` is, which a `while` needs.
 2. A struct's tangent type, a struct of its fields' tangents, so a struct holding a position says what it holds.
 3. The rules as registry records, and the matrix arithmetic in the registry.
-4. Differentiable buffers as binding members, once float atomics or a subgroup reduction exist.
+4. Differentiable buffers as binding members, over `atomic[float]`, with a subgroup reduction first where the index is uniform.
 
 ## Open
 

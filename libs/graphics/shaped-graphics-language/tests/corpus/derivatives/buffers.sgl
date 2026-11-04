@@ -17,7 +17,7 @@ binding scene:
     weights: buffer[float]
 
 binding training:
-    gradients: mut buffer[float]
+    gradients: mut buffer[atomic[float]]
     tangents: buffer[float]
     losses: mut buffer[float]
 
@@ -48,7 +48,7 @@ fun weighted_held(x: float, i: int){scene} => x * no_diff(scene.weights[i])
 
 // A differentiable buffer, written by hand: the function that reads an element says where the element's change comes
 // from going forward, and where its gradient goes going backward.
-// One thread per element here; where several add to one, the add is what float atomics are for.
+// Many invocations may add to one element, as every pixel a splat covers adds to its gradient, so the add is atomic.
 fun weight(i: int){scene} => no_diff(scene.weights[i])
 
 @forward(weight)
@@ -56,7 +56,7 @@ fun weight_forward(i: int){training} => training.tangents[i]
 
 @backward(weight)
 fun weight_backward(i: int, dr: float){training}:
-    training.gradients[i] += dr
+    training.gradients[i].add(dr)
 
 fun loss(i: int){scene} -> float:
     let w = weight(i)
