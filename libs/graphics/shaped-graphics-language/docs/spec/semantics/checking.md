@@ -413,7 +413,7 @@ fun shade(k: float) -> float:
 
 | on | the known attributes |
 |---|---|
-| a function | `@builtin`, `@pure`, `@operator`, `@vertex`, `@pixel`, `@compute`, `@geometry`, `@tessellation_control`, `@tessellation_evaluation`, `@stages`, `@shadowable`, `@expect`, `@internal`, `@preferred_subgroup_size` |
+| a function | `@builtin`, `@pure`, `@barrier`, `@subgroup`, `@derivatives`, `@operator`, `@vertex`, `@pixel`, `@compute`, `@geometry`, `@tessellation_control`, `@tessellation_evaluation`, `@stages`, `@shadowable`, `@expect`, `@internal`, `@preferred_subgroup_size` |
 | a function, as a ray-tracing stage | `@raygen`, `@miss`, `@closest_hit`, `@any_hit`, `@intersection`, `@callable` |
 | a struct | `@builtin`, `@vertex`, `@pixel`, `@shadowable`, `@no_padding`, `@internal`, `@swizzle` |
 | an enum | `@builtin`, `@shadowable`, `@bitflags`, `@internal` |
@@ -923,8 +923,14 @@ A feature is what a device may lack, so using one makes a shader non-portable on
   A compile writes the alternative in its own language where the call stands, and one with no alternative in it is `invalid-target-text` at the entry point; a test runs none.
   `$name` is the parameter of that name, as the argument written, and `$result` a local of the result type the text assigns, which is the call's value.
   A function with a result has `$result` in every alternative and none without one, no parameter is named `result`, and a placeholder names nothing of a parameter.
-  The text is not checked, and a call of such a function has an effect; what GPU memory it touches is what its parameters' marks say, and the footprint reads them.
+  The text is not checked, so a call of such a function is what its declaration says (CHK-431); what GPU memory it touches is what its parameters' marks say, and the footprint reads them.
   A description writes for no target, so it reads such a body as any of its alternatives, whose footprint is the same.
+* **CHK-431** A function whose body is a target's text declares what its text does, since the check reads nothing of the text.
+  `@pure` makes a call of it a value of no effect, as uniform as its arguments; without it, a call has an effect and gives a value that may differ between invocations.
+  `@barrier`, `@subgroup` and `@derivatives` say that its text waits for the workgroup, exchanges values in the subgroup, or takes derivatives across a quad of pixels.
+  Each makes the call need the uniform control flow a builtin of its kind does (CHK-282, CHK-377), and what a `@subgroup` call gives is unproven as a builtin's is.
+  What it writes through a `mut` parameter is what the call gives.
+  On a function whose body is SGL, each of the three is `unsupported-yet`, and a `@barrier` function that is `@pure` is `invalid-attribute-arguments`, since a barrier is an effect.
 * **CHK-428** A tagged string at file scope (AST-159) is that file's preamble in its language.
   It is written once ahead of an entry point that writes a body in a target's text from that file in that language.
   Its language is one a target writes, or it is `invalid-target-text`, and so is a placeholder in it, since it belongs to no call; `$$` is a dollar.
@@ -1641,7 +1647,7 @@ A diagnostic of this pass has a kind, a file, a byte span in that file, and a de
 
 | kind | reported by |
 |---|---|
-| `unsupported-yet` | CHK-8, CHK-61, CHK-134, CHK-213, CHK-237, CHK-291, CHK-299, CHK-307, CHK-314, CHK-321, CHK-329, CHK-333, CHK-338, CHK-339, CHK-344, CHK-346, CHK-347, CHK-350, CHK-352, CHK-353, CHK-357, CHK-366, CHK-374, CHK-379, CHK-381, CHK-383, CHK-387, CHK-389, CHK-397 |
+| `unsupported-yet` | CHK-8, CHK-61, CHK-134, CHK-213, CHK-237, CHK-291, CHK-299, CHK-307, CHK-314, CHK-321, CHK-329, CHK-333, CHK-338, CHK-339, CHK-344, CHK-346, CHK-347, CHK-350, CHK-352, CHK-353, CHK-357, CHK-366, CHK-374, CHK-379, CHK-381, CHK-383, CHK-387, CHK-389, CHK-397, CHK-431 |
 | `duplicate-declaration` | CHK-12, CHK-28, CHK-241, CHK-347, CHK-351 |
 | `dependency-cycle` | CHK-18, CHK-136 |
 | `unknown-module`, `use-of-own-module` | CHK-347 |
@@ -1654,7 +1660,7 @@ A diagnostic of this pass has a kind, a file, a byte span in that file, and a de
 | `unknown-builtin` | CHK-31 |
 | `expected-body` | CHK-32, CHK-236 |
 | `opaque-struct-needs-builtin` | CHK-34 |
-| `invalid-attribute-arguments` | CHK-36, CHK-39, CHK-204, CHK-208, CHK-211, CHK-212, CHK-220, CHK-231, CHK-267, CHK-403, CHK-292, CHK-293, CHK-301, CHK-304, CHK-384, CHK-369, CHK-370, CHK-371 |
+| `invalid-attribute-arguments` | CHK-36, CHK-39, CHK-204, CHK-208, CHK-211, CHK-212, CHK-220, CHK-231, CHK-267, CHK-403, CHK-292, CHK-293, CHK-301, CHK-304, CHK-384, CHK-369, CHK-370, CHK-371, CHK-431 |
 | `binding-not-listed` | CHK-45, CHK-131, CHK-228 |
 | `as-precedence` | CHK-411 |
 | `type-mismatch` | CHK-52, CHK-56, CHK-77, CHK-112 to CHK-118, CHK-121, CHK-167, CHK-210, CHK-214, CHK-219, CHK-236, CHK-243, CHK-275, CHK-276, CHK-279, CHK-281, CHK-287, CHK-329, CHK-344, CHK-362, CHK-375, CHK-392, CHK-429 |
@@ -1695,7 +1701,7 @@ A diagnostic of this pass has a kind, a file, a byte span in that file, and a de
 | `constant-not-representable` | CHK-312, CHK-396 |
 | `missing-sampler` | CHK-279 |
 | `invalid-constant-argument` | CHK-280, CHK-285, CHK-299, CHK-309, CHK-378, CHK-389, CHK-425, CHK-426 |
-| `non-uniform-control-flow` | CHK-282, CHK-374, CHK-377 |
+| `non-uniform-control-flow` | CHK-282, CHK-374, CHK-377, CHK-431 |
 | `non-uniform-index` | CHK-300, CHK-401 |
 | `needless-nonuniform` | CHK-300, CHK-401 |
 | `unproven-index` | CHK-300 |

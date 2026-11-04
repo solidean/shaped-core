@@ -404,6 +404,9 @@ struct checker
     /// A run is the whole of `statements`, or of a branch of a `const if` that is the whole of them, at any depth.
     void plan_target_text(symbol_id function, i32 file, ast::range_of<ast::stmt_id> statements);
     void register_text_run(symbol_id function, i32 file, cc::span<ast::stmt_id const> run);
+    /// CHK-431: `@barrier`, `@subgroup` and `@derivatives` declare what a body in a target's text does, and stand on
+    /// such a function alone; a barrier is an effect, so it is never `@pure` as well.
+    void judge_text_effects(symbol_id function, i32 file, ast::range_of<ast::attribute> attributes);
     /// How a tagged string ends its block, where `stmt` is one; none for any other statement.
     [[nodiscard]] cc::optional<flow> target_text_flow(i32 file, ast::stmt_id stmt);
     /// A file's tagged string at file scope, registered in `out.target_preambles` (CHK-428).

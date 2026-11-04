@@ -102,8 +102,9 @@ So a condition states the APIs its text serves, and a new target that meets a co
 Otherwise a uniformity error, a footprint or a stage restriction would differ by target.
 
 * Parameter types and their marks (`mut`, `out`) are the signature's.
-* Effects and uniformity are attributes of the `fun`, in the registry's own vocabulary: `@pure`, `@reads_only`, `@barrier`, `@derivatives`, `@subgroup`, and whether the result is uniform.
-  Undeclared means impure, needing no uniform control flow, with a result that varies.
+* Effects and uniformity are attributes of the `fun`, in the registry's own vocabulary: `@pure`, `@barrier`, `@subgroup` and `@derivatives` (CHK-431).
+  `@pure` also says the result is as uniform as the arguments.
+  Undeclared means impure, needing no uniform control flow, with a result that may differ between invocations.
 * An SGL branch is checked against the declaration: one of a `@pure` function that writes memory is an error, and so is one that takes a derivative where `@derivatives` is not declared.
 * `@stages(…)` is the function's too, so the weakest branch decides it: the float add's loop never leaves a helper invocation, which keeps every branch of it out of the pixel stage.
 * **A text body reaches GPU memory only through a resource parameter**, whose mark says read or write, as a clobber list says what inline assembly touches.
@@ -175,10 +176,11 @@ What SGL lacks is the 2-state ray flag and `opacity_micromap` among the features
 Done: `const if`, constant conditions, `target_api`, `target_language` and `has`, the grant, slib's device features.
 Discarding is done too: a type comparison, and the three-valued decision that leaves an instance's ruled-out branches unchecked (CHK-430).
 Text bodies in their first form are done too: the tagged string as a body, its placement, placeholders and `$result`, a `flat_call` with `text`, and the emitters writing it inline.
-In that form a call of one is impure, needs no uniform control flow and gives a varying result, whatever its text does.
+So is their declared contract, `@pure`, `@barrier`, `@subgroup` and `@derivatives` on the `fun`, which the uniformity pass reads in place of the text (CHK-431).
 Left:
 
-* The check pass: effect and uniformity attributes as the contract, SGL branches checked against it, and coverage.
+* The check pass: SGL branches checked against the declared contract, so a fallback of a `@pure` function that writes memory is an error, and coverage.
+* The attributes' stages: `@derivatives` keeps a call to the pixel stage, and `@subgroup` to a device with subgroups, which `@stages` and `has` say by hand today.
 * Generics: questions of a type beyond its identity, such as whether it is a vector, and its scalar where it is a scalar itself.
 * The emitters: reserved names read from the text, and `#line` inside it.
   The preamble is done (CHK-428), a file's per language; one per API, such as vulkan's alone among the HLSL targets, is open.

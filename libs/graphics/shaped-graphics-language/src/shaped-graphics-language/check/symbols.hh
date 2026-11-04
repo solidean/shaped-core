@@ -579,6 +579,13 @@ struct sgl::check::function_info
     /// Carries `@pure`: a call of it has no effect, so nobody can tell whether or when it ran.
     /// A `@builtin` without it is assumed to have one.
     bool is_pure = false;
+    /// What a body in a target's own text does, which the check cannot read from it (CHK-431).
+    /// `@barrier`: a call waits for the workgroup.
+    bool is_barrier = false;
+    /// `@subgroup`: a call exchanges values within the subgroup.
+    bool is_subgroup_operation = false;
+    /// `@derivatives`: a call takes derivatives across a quad of pixels.
+    bool uses_derivatives = false;
     /// A pixel entry point that returns one color value (CHK-418): the `@pixel struct` of one member, `color`, which
     /// the checker mints and every return builds; none for one that returns its `@pixel struct`, or nothing.
     type_id pixel_targets = type_id::none;

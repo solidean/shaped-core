@@ -59,6 +59,24 @@ void checker::plan_target_text(symbol_id function, i32 file, ast::range_of<ast::
         plan_target_text(function, file, branch.then.statements);
 }
 
+void checker::judge_text_effects(symbol_id function, i32 file, ast::range_of<ast::attribute> attributes)
+{
+    auto has_text = false;
+    for (auto i = isize(0); i < out.target_texts.size(); ++i)
+        has_text = has_text || out.target_texts[i].function == function;
+    cc::string_view const declared[] = {"barrier", "subgroup", "derivatives"};
+    for (auto const name : declared)
+        if (auto const* const a = find_attribute(file, attributes, name); a != nullptr && !has_text)
+            unsupported(file, a->name,
+                        cc::format("@{} on a function whose body is SGL, which says what it does itself; it declares "
+                                   "what a body in a target's own text does",
+                                   name));
+    auto const* const barrier = find_attribute(file, attributes, "barrier");
+    if (barrier != nullptr && find_attribute(file, attributes, "pure") != nullptr)
+        report(diagnostic_kind::invalid_attribute_arguments, file, barrier->name,
+               "a barrier is an effect, so a @barrier function is never @pure");
+}
+
 void checker::register_text_run(symbol_id function, i32 file, cc::span<ast::stmt_id const> run)
 {
     auto const& ast = ast_of(file);

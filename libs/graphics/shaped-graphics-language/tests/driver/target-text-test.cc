@@ -1,3 +1,4 @@
+#include <clean-core/string/format.hh>
 #include <nexus/test.hh>
 #include <shaped-graphics-language/driver/compile_to_text.hh>
 #include <shaped-graphics-language/driver/test_source.hh>
@@ -237,4 +238,90 @@ TEST("sgl target text - a preamble is in a language a target writes, and has no 
                      "    float f($x);\n"
                      "\"\n")
               .contains("a preamble belongs to no call, so it has no placeholder"));
+}
+
+namespace
+{
+/// A source whose entry point runs `before`, branches on `condition`, then calls `call` under the branch.
+cc::string branching_on(cc::string_view functions,
+                        cc::string_view condition,
+                        cc::string_view call,
+                        cc::string_view before = "let lane = 0")
+{
+    return cc::format("binding work:\n"
+                      "    values: mut buffer[float]\n"
+                      "\n"
+                      "{}\n"
+                      "@compute(64) fun main_cs(@thread_id id: int3){{work}}:\n"
+                      "    {}\n"
+                      "    if {}:\n"
+                      "        work.values[lane] = {}\n",
+                      functions, before, condition, call);
+}
+
+constexpr cc::string_view k_lane_functions = "@subgroup @pure fun lane_sum(x: float) -> float:\n"
+                                             "    \"hlsl\n"
+                                             "        $result = WaveActiveSum($x);\n"
+                                             "    \"\n"
+                                             "\n"
+                                             "fun lane_index() -> int:\n"
+                                             "    \"hlsl\n"
+                                             "        $result = WaveGetLaneIndex();\n"
+                                             "    \"\n"
+                                             "\n"
+                                             "@pure fun doubled(x: int) -> int:\n"
+                                             "    \"hlsl\n"
+                                             "        $result = 2 * $x;\n"
+                                             "    \"\n"
+                                             "\n"
+                                             "fun read_lane(i: mut int):\n"
+                                             "    \"hlsl\n"
+                                             "        $i = WaveGetLaneIndex();\n"
+                                             "    \"\n";
+} // namespace
+
+TEST("sgl target text - a body's declaration says what its text asks of the control flow, and what it gives")
+{
+    auto const uniform = compiled(branching_on(k_lane_functions, "doubled(3) > 4", "lane_sum(1.0)"), target::hlsl_dx12);
+    CHECK(uniform.has_value());
+    // CHK-431: `@subgroup` needs every invocation of the subgroup to reach the call
+    auto const varying = compiled(branching_on(k_lane_functions, "id.x > 4", "lane_sum(1.0)"), target::hlsl_dx12);
+    REQUIRE(varying.has_error());
+    CHECK(varying.error().contains("non-uniform-control-flow"));
+    CHECK(varying.error().contains("lane_sum exchanges values within the subgroup"));
+    // without `@pure`, what a text gives is unproven, and so is what it writes through a `mut` parameter
+    auto const unproven = compiled(branching_on(k_lane_functions, "lane_index() > 4", "lane_sum(1.0)"), target::hlsl_dx12);
+    REQUIRE(unproven.has_error());
+    CHECK(unproven.error().contains("lane_index gave, whose body is a target's text"));
+    auto const written = compiled(
+        branching_on(k_lane_functions, "lane > 4", "lane_sum(1.0)", "let mut lane = 0\n    read_lane(mut lane)"),
+        target::hlsl_dx12);
+    CHECK(written.has_error());
+    // `@pure` makes it follow its arguments, and a value of no effect, so it runs no matter where it was asked for
+    auto const pure = compiled(branching_on(k_lane_functions, "doubled(id.x) > 4", "lane_sum(1.0)"), target::hlsl_dx12);
+    REQUIRE(pure.has_error());
+    CHECK(pure.error().contains("comes from the stage input id"));
+}
+
+TEST("sgl target text - @barrier, @subgroup and @derivatives declare what a body in a target's text does")
+{
+    // a body in SGL says what it does itself
+    CHECK(reports_of("@subgroup fun f(x: float) -> float => x\n\ntest f(1.0) == 1.0\n")
+              .contains("@subgroup on a function whose body is SGL"));
+    // a barrier is an effect
+    CHECK(reports_of("@barrier @pure fun f():\n    \"hlsl\n        GroupMemoryBarrierWithGroupSync();\n    \"\n")
+              .contains("a @barrier function is never @pure"));
+    // `@barrier` needs the whole workgroup to reach it
+    auto const fence = compiled(branching_on("@barrier fun fence():\n"
+                                             "    \"hlsl\n"
+                                             "        GroupMemoryBarrierWithGroupSync();\n"
+                                             "    \"\n"
+                                             "\n"
+                                             "fun one() -> float:\n"
+                                             "    fence()\n"
+                                             "    return 1.0\n",
+                                             "id.x > 4", "one()"),
+                                target::hlsl_dx12);
+    REQUIRE(fence.has_error());
+    CHECK(fence.error().contains("fence waits for every thread of the workgroup"));
 }

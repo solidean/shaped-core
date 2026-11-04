@@ -909,7 +909,10 @@ void sgl::check::impl::flattener::flatten_target_text(origin from, ast::stmt_id 
     auto const result_type = current()->result;
     auto const is_void = !is_valid(result_type) || result_type == checked_module::void_type;
     auto const call = add_expr(is_void ? checked_module::void_type : result_type, literal,
-                               flat_call{.callee = function, .arguments = add_list(arguments), .text = chosen});
+                               flat_call{.callee = function,
+                                         .is_pure = c.out.functions[c.out.at(function).info].is_pure,
+                                         .arguments = add_list(arguments),
+                                         .text = chosen});
     if (is_void)
         return add_stmt(from, flat_eval{.value = call});
     if (is_valid(return_label))
