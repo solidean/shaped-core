@@ -351,6 +351,7 @@ if(SC_BUILD_TESTS)
             tests/temporal-stability-test.cc
             tests/convergence-test.cc
             tests/backend-agreement-test.cc
+            tests/content-agreement-test.cc
             tests/jitter-accumulation-test.cc
             tests/glowing-sphere-test.cc
             tests/moving-view-motion-test.cc
