@@ -10,4 +10,13 @@ namespace nx
 /// inputs — so `check` stays fast while the full-strength version stays one flag away.
 /// False outside a running test.
 [[nodiscard]] bool is_thorough();
+
+/// Whether the running test is a smoke run, which asks LESS of it than a default run: `--smoke` on the binary.
+///
+/// `dev.py check` runs the whole suite on several presets, and only the default one needs a heavy test's full ground.
+/// The others prove the code builds and runs where their flags differ, which a heavy test proves on its smallest case:
+/// `check` passes `--smoke` to every preset but the default, and such a test narrows to that case under it.
+/// Narrow ground, never checks, as under a default run; `--thorough` wins over it.
+/// False outside a running test.
+[[nodiscard]] bool is_smoke();
 } // namespace nx

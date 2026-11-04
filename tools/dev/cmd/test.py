@@ -65,6 +65,10 @@ def add_parser(sub: argparse._SubParsersAction) -> argparse.ArgumentParser:
                         "Forwarded to the runner as --thorough. "
                         f"Raises the per-binary timeout to {DEFAULT_TIMEOUT_S * THOROUGH_TIMEOUT_FACTOR:g} s "
                         "unless --timeout is given.")
+    p.add_argument("--smoke", action="store_true",
+                   help="Let a heavy test narrow to its smallest case, as `check` asks of every preset but its default "
+                        "one: tests read it through nx::is_smoke(). Forwarded to the runner as --smoke; "
+                        "--thorough wins over it.")
     p.add_argument("--repeat", type=int, default=1, metavar="N",
                    help="Run the selection up to N times, stopping at the first failing iteration "
                         "(default: 1). For chasing a flake: the build and discovery happen once, and "
@@ -97,6 +101,8 @@ def run(args: argparse.Namespace, ctx: Context) -> None:
 
     if args.thorough:
         runner_args = ["--thorough", *runner_args]
+    if args.smoke:
+        runner_args = ["--smoke", *runner_args]
 
     # An explicit --timeout always wins, 0 included; only the default scales with --thorough.
     timeout = args.timeout

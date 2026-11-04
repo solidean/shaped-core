@@ -85,6 +85,11 @@ if (!nx::is_thorough())                  // false by default; true under --thoro
 ```
 
 ```cpp
+if (nx::is_smoke())                      // true under --smoke, which `check` passes to every preset but its default:
+    SKIP("covered by the default preset");//   a heavy test narrows to its smallest case, or skips what no preset's flags reach
+```
+
+```cpp
 TEST("corpus soak", thorough_only) { }   // skipped (a passing SKIP) unless --thorough; for a test with no narrow
                                          //   version. Also honoured on an INVOCABLE_TEST, whatever its driver holds
 ```

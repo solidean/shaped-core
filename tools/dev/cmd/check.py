@@ -412,9 +412,12 @@ def _build_checks(ctx: Context, *, memo: dev.CheckMemo | None = None) -> list[de
                 to_run = [n for n in names if n not in done]
             if not to_run:
                 continue
+            # Only the default preset needs a heavy test's full ground; the others prove their flags on its
+            # smallest case, which a test reads through nx::is_smoke().
             preset_records = dev.test(
                 [preset], to_run, root=ctx.root,
                 test_name=None, timeout=60.0, write_xml=True, mirror=mirror, verbose=verbose,
+                extra_args=[] if preset == presets[0] else ["--smoke"],
             )
             records += preset_records
             if memo is not None:

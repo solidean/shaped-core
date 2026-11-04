@@ -357,6 +357,7 @@ Guidance, not invariants — use judgment.
 * **Tests stay fast.** Flag slow ones rather than landing them silently.
   **No deliberate waiting:** wait for a condition, never for a duration, and test a timeout by injecting a clock.
   An expensive test narrows itself for the default run under `nx::is_thorough()` — [test-runtime](libs/base/nexus/docs/test-runtime.md).
+  It narrows further under `nx::is_smoke()`, which `check` passes to every preset but its default.
 * **Codify non-obvious edge cases as tests.** A test that pins a subtle invariant is nearly as valuable as one that catches a bug.
 
 ---

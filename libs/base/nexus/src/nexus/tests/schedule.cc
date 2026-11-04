@@ -241,6 +241,8 @@ nx::args_builder build_cli(nx::test_schedule_config& config, cli_state& state)
     args.action(
         {"match-files"}, [&config] { config.mode = filter_mode::file; }, "read the filters as globs over source files");
     args.arg({"thorough"}, config.thorough, "run every test at full strength, however long that takes (nx::is_thorough)");
+    args.arg({"smoke"}, config.smoke,
+             "let a heavy test narrow to its smallest case, as check's other presets do (nx::is_smoke)");
     args.arg({"watchdog"}, config.watchdog_secs,
              {.desc = "after this many seconds with no test starting or finishing, report the hung run and exit 4; 0 "
                       "turns it off",

@@ -835,6 +835,7 @@ A low load under a low `serial` is waiting on something no test declared.
 
 `uv run dev.py test --thorough` runs every test at full strength: a test reads it through `nx::is_thorough()` and raises what its default run narrows, such as a fuzz's seed count.
 A test marked `thorough_only` runs only then, and the per-binary timeout grows tenfold to 600 s unless `--timeout` is given.
+`uv run dev.py test --smoke` is the other direction: a heavy test narrows to its smallest case under `nx::is_smoke()`, and `check` runs every preset but its default one so.
 [nexus' test-runtime](../../libs/base/nexus/docs/test-runtime.md) is the concept.
 
 ## Examples (`example`)

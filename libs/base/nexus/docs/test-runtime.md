@@ -58,6 +58,24 @@ uv run dev.py test "sg vulkan backend" --thorough   # the full-strength version,
 The fuzz narrowing helpers are `cap_seed_count(n)` — each seed is a whole program, so this scales runtime linearly — and `cap_max_executions(n)`, which lowers every operation's at-most.
 [fuzz-testing](fuzz-testing.md) has the engine they narrow.
 
+## Smoke runs: `nx::is_smoke()`
+
+`dev.py check` runs the suite on several presets, and only its default one needs a heavy test's full ground.
+The others differ in flags (assertions off, no threads, debug checks), and what a heavy test proves there it proves on its smallest case.
+So `check` passes `--smoke` to every preset but the default, and a heavy test narrows further under `nx::is_smoke()`:
+
+```cpp
+auto const smoke = nx::is_smoke();
+for (auto const mode : cc::span(modes).subspan({.offset = 0, .size = smoke ? 1 : 2}))
+    ...
+```
+
+- **Narrow ground, never checks**, as a default run does; a count a test asserts follows the ground it traced.
+- **Skip what no preset's flags reach.** A smoke run skips such a test with a reason.
+  Two APIs agreeing on one shader's image, or a cache collapsing two materials into one compile, holds or fails alike on every preset.
+- **`--thorough` wins over it**, and `uv run dev.py test --smoke` reproduces what a sibling preset runs.
+- It is for the tests whose runtime a sibling preset would pay for nothing: a GPU suite converging images, a sweep over every material, not a test that already runs in milliseconds.
+
 ## Tests with no narrow version: `thorough_only`
 
 Some tests have nothing worth running in a default run — a soak, a sweep whose only point is its size.

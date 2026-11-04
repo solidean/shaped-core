@@ -116,6 +116,10 @@ struct nx::test_schedule_config
     // Read from a test body through nx::is_thorough(); set via --thorough.
     bool thorough = false;
 
+    // Let a heavy test narrow to its smallest case, as `check` asks of every preset but its default one.
+    // Read from a test body through nx::is_smoke(); set via --smoke.
+    bool smoke = false;
+
     // When non-empty, run() writes a JUnit XML report to this path, additionally to the normal console output.
     // Set via --junit-xml <file>.
     cc::string junit_xml_file;
