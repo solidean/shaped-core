@@ -2017,6 +2017,7 @@ sg::routine_outcome view_renderer::trace(sg::command_list& cmd,
 
         auto const denoised
             = _denoise(cmd, schedule, *slot, ds, hybrid_guides, cameras, sample_counts, res.traces[trace_index]);
+        impl::gpu_mark(cmd, "denoise");
         if (ds.denoised->accum_frame > 0)
             mark_denoised(*ds.denoised, fc.camera);
         if (denoised == sr::reconstruct_status::pending)
