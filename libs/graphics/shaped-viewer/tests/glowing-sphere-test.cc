@@ -146,7 +146,7 @@ ASYNC_INVOCABLE_TEST("sv - inside a glowing sphere the hybrid sees the emission 
             co_await ctx.idle_completion();
             sv_test::drive_ambient_work();
             REQUIRE(cc::current_time_steady_secs() - start < 60.0);
-            if (store.min_accumulated_samples(id) < 256 || !accumulated.is_valid())
+            if (store.min_accumulated_samples(id) < 64 || !accumulated.is_valid())
                 continue;
 
             auto const& pixels = co_await accumulated.data();

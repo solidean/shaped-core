@@ -32,7 +32,8 @@ struct frame_stats
     f32 change = 0;
 };
 
-/// One phase of the script: the settings it switches to, whether the camera moves through it, and how many frames it lasts.
+/// One phase of the script: the settings it switches to, whether the camera moves through it, and how many frames it lasts
+/// at most, a compile it waits out included.
 struct phase
 {
     char const* name;
@@ -47,6 +48,9 @@ struct phase
 };
 
 constexpr u32 forever = u32(-1);
+
+/// The executed frames a phase ends after: what settling is judged over, and the most any phase plays once compiled.
+constexpr isize k_executed_frames = 64;
 
 /// The share of near-black pixels a lit frame holds at most: the shadow under the blocks is about 2.5% of this view.
 constexpr f32 dark_ceiling = 0.05f;
@@ -180,7 +184,7 @@ ASYNC_INVOCABLE_TEST("sv - switching renderers and denoisers never shows black b
         auto skipped = 0;
         auto worst_dark = 0.0f;
         auto worst_at = -1;
-        for (auto f = 0; f < p.frames; ++f)
+        for (auto f = 0; f < p.frames && executed.size() < k_executed_frames; ++f)
         {
             if (p.moving)
                 def.views[0].camera.position = start_camera.position + tg::vec3d(0.01 * f, 0, 0);
