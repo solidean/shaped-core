@@ -3,7 +3,7 @@
 How SGL compares with the other ways to write one set of shaders for DX12, Vulkan, WebGPU and Metal.
 Every row is judged for a renderer that targets all four, WebGPU in a browser included, and wants hardware ray tracing wherever a platform has it.
 
-**As of 2026-11-02**; SGL's E3 and E4 as of 2026-11-03.
+**As of 2026-11-02**; SGL's E3 and E4 as of 2026-11-03, its B8 and B9 as of 2026-11-04.
 The other columns move fast, Slang's Metal and WGSL support above all, so each cell carries a source and the date it was checked; see [Sources](#sources).
 
 ## Columns
@@ -53,8 +53,8 @@ A per-target cell reads `dx12 / vulkan / metal / webgpu`.
 | **B5** Uniformity, derivatives, discard | ⚠️ no uniformity check; a failure surfaces at Tint or in the browser | ⚠️ no model of WGSL uniformity; open bugs | ⚠️ Tint enforces it; Naga skips derivative checks | ⚠️ no uniformity analysis | ⚠️ its own uniformity pass for every target; discard's helper lanes on metal 🗺️ [feat](../issues/feat-sgl-discard-helper-emulation.md) |
 | **B6** Float and 64-bit atomics | ⚠️ 64-bit on DX12 and Vulkan; reported by whichever hop fails | ⚠️ neither on Metal or WGSL; a static capability error | ⚠️ core has 32-bit only; native-only extensions | ⚠️ SPIRV-Cross refuses 64-bit atomics for MSL | ⚠️ 32-bit only; float and 64-bit refused statically 🗺️ [feat](../issues/feat-sgl-float-and-64-bit-atomics.md) |
 | **B7** Subgroup operations | ⚠️ MSC requires wave size 32; WGSL needs its extension | ⚠️ docs and code disagree for WGSL; wave size left to the user | ✅ `subgroups` extension, shipped in Chrome 134 | ✅ to Wave and SIMD-group ops | ✅ behind `subgroups` on all four; code must be correct at any size |
-| **B8** Vendor features (SER, OMM) | ⚠️ DX12 only (SM 6.9); DXC has no SPIR-V lowering; none on Metal or WebGPU; not reported statically | ⚠️ SER on DX12 and Vulkan, checked statically; no OMM | ❌ | ⚠️ extensions reach Vulkan; other targets fail at SPIRV-Cross | ❌ none yet; the features SGL has are checked statically 🗺️ [feat](../issues/feat-sgl-inline-target-code.md) |
-| **B9** Inline target code | ⚠️ inline SPIR-V, Vulkan only | ✅ `__target_switch`, `__intrinsic_asm`, `spirv_asm` | ⚠️ whole-module passthrough in wgpu only | ❌ | ❌ 🗺️ [feat](../issues/feat-sgl-inline-target-code.md) |
+| **B8** Vendor features (SER, OMM) | ⚠️ DX12 only (SM 6.9); DXC has no SPIR-V lowering; none on Metal or WebGPU; not reported statically | ⚠️ SER on DX12 and Vulkan, checked statically; no OMM | ❌ | ⚠️ extensions reach Vulkan; other targets fail at SPIRV-Cross | ⚠️ opacity micromaps traced on vulkan with no change to the shader, sg building them; no 2-state ray flag yet, no issue yet; no SER 🗺️ [incubator](../spec/incubator/specialization.md) |
+| **B9** Inline target code | ⚠️ inline SPIR-V, Vulkan only | ✅ `__target_switch`, `__intrinsic_asm`, `spirv_asm` | ⚠️ whole-module passthrough in wgpu only | ❌ | ❌ a design: bodies in target text under guards on target, feature and option 🗺️ [incubator](../spec/incubator/specialization.md) |
 
 ## C. Host integration and reflection
 
@@ -229,12 +229,12 @@ Per row and column:
   - Slang: <https://shader-slang.org/slang/shader-execution-reordering.html>, capdef
   - WGSL: WGSL
   - GLSL + chain: SXC
-  - SGL: [incubator/raytracing-futures.md](../spec/incubator/raytracing-futures.md)
+  - SGL: sg `tests/pipeline/ray-query-test.cc` over `tests/shaders/sgl/raytracing.sgl`, [incubator/specialization.md](../spec/incubator/specialization.md) (2026-11-04)
 - **B9**
   - HLSL + chain: <https://github.com/microsoft/DirectXShaderCompiler/wiki/GL_EXT_spirv_intrinsics-for-SPIR-V-code-gen>
   - Slang: SLANG capabilities guide
   - WGSL: NAGA CHANGELOG v28
-  - SGL: [feat-sgl-inline-target-code](../issues/feat-sgl-inline-target-code.md)
+  - SGL: [incubator/specialization.md](../spec/incubator/specialization.md), [feat-sgl-inline-target-code](../issues/feat-sgl-inline-target-code.md) (2026-11-04)
 - **C1**
   - HLSL + chain: D3D12 shader reflection docs
   - Slang: SLANG reflection guide
