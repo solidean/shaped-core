@@ -417,6 +417,10 @@ fun sample_environment(b: openpbr.bsdf, f: openpbr.frame, wo_local: float3, p: f
     let wi_local = openpbr.to_local(f, wi)
     // On the face's own side and the shading frame's upper half only, as a light's sample is.
     if dot(wi, n_geom) <= 0.0 or wi_local.z <= 0.0 => return no_light_sample()
+    // A direction the environment sends nothing from needs no shadow ray: a room lit by its own lamps under a black
+    // background would otherwise trace one for every sample, toward light that is not there.
+    let radiance = scene.environment_radiance(env, wi)
+    if all(radiance <= float3(0.0)) => return no_light_sample()
 
     let mut f_diffuse = float3(0.0)
     let mut f_specular = float3(0.0)
@@ -426,7 +430,7 @@ fun sample_environment(b: openpbr.bsdf, f: openpbr.frame, wo_local: float3, p: f
     // No bounce ray follows the last hit, so there is nothing to balance against there.
     let w = if last_bounce => 1.0 else pt.mis_weight(drawn.pdf, openpbr.bsdf_pdf(b, wo_local, wi_local))
 
-    let scale = scene.environment_radiance(env, wi) * (wi_local.z / drawn.pdf) * w
+    let scale = radiance * (wi_local.z / drawn.pdf) * w
     return light_sample(f_diffuse * scale, f_specular * scale, pt.offset_ray(p, n_geom), wi, 1e4, 1u)
 
 // ---- Decals ---------------------------------------------------------------------------------------------------------

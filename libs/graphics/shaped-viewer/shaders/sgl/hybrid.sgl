@@ -76,13 +76,16 @@ fun secondary_environment(b: openpbr.bsdf, f: openpbr.frame, n: float3, wo_local
     let wi = if by_bsdf => openpbr.to_world(f, s.direction) else drawn.wi
     let wi_local = openpbr.to_local(f, wi)
     if dot(wi, n) <= 0.0 or wi_local.z <= 0.0 => return float3(0.0)
+    // No shadow ray toward a direction the environment sends nothing from, as `tracer.sample_environment` traces none.
+    let radiance = scene.environment_radiance(env, wi)
+    if all(radiance <= float3(0.0)) => return float3(0.0)
 
     let mut f_diffuse = float3(0.0)
     let mut f_specular = float3(0.0)
     openpbr.bsdf_eval_split(b, wo_local, wi_local, mut f_diffuse, mut f_specular)
     let pdf = 0.5 * scene.environment_pdf(env, wi) + 0.5 * openpbr.bsdf_pdf(b, wo_local, wi_local)
     if pdf <= 0.0 => return float3(0.0)
-    let scale = scene.environment_radiance(env, wi) * (wi_local.z / pdf)
+    let scale = radiance * (wi_local.z / pdf)
     let e = tracer.light_sample(f_diffuse * scale, f_specular * scale, pt.offset_ray(p, n), wi, 1e4, 1u)
     if not tracer.reaches(e, seed, tracer.ray_mask_hybrid_shadow) => return float3(0.0)
     return e.diffuse + e.specular
