@@ -240,13 +240,12 @@ INVOCABLE_TEST("sg error handling - advance rejects an epoch with open command l
     ctx->drop_command_list(cc::move(cmd)); // clean up so the context stays usable
 }
 
-INVOCABLE_TEST("sg error handling - an unbounded binding array is an error, not an assert",
+INVOCABLE_TEST("sg error handling - an unbounded binding array out of place is an error, not an assert",
                (sg::context_handle const& ctx))
 {
     REQUIRE(ctx != nullptr);
 
-    // count 0 is HLSL's unbounded array, which WebGPU has no equivalent for, so sg rejects it on every backend
-    // alike (see libs/graphics/shaped-graphics/docs/concepts/bindings.md).
+    // count 0 is an unbounded array, which builds where the device has unbounded_binding_arrays and stands last.
     // Reflection is where these come from, which makes it content rather than a contract violation: the
     // fallible core returns an error and the throwing default raises, neither asserts.
     sg::binding const unbounded = {
@@ -257,9 +256,17 @@ INVOCABLE_TEST("sg error handling - an unbounded binding array is an error, not 
         .type = sg::binding_type::texture,
         .texture_dimension = sg::texture_view_dimension::tex_2d,
     };
-    auto const bindings = cc::span<sg::binding const>(&unbounded, 1);
-    CHECK(ctx->uncached.try_create_binding_group_layout(bindings).has_error());
-    CHECK_THROWS_AS(ctx->uncached.create_binding_group_layout(bindings), sg::pipeline_creation_exception);
+    CHECK(ctx->uncached.try_create_binding_group_layout(cc::span<sg::binding const>(&unbounded, 1)).has_value()
+          == ctx->supports(sg::feature::unbounded_binding_arrays));
+
+    // vulkan sizes only a set's last binding, so an unbounded one before another is refused on every backend
+    auto after = unbounded;
+    after.name = "After";
+    after.index = 1;
+    after.count = 1;
+    sg::binding const out_of_place[] = {unbounded, after};
+    CHECK(ctx->uncached.try_create_binding_group_layout(out_of_place).has_error());
+    CHECK_THROWS_AS(ctx->uncached.create_binding_group_layout(out_of_place), sg::pipeline_creation_exception);
 
     // A bounded count of the same binding is what a bindless table declares, and builds where arrays exist.
     auto bounded = unbounded;
