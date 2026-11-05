@@ -2,6 +2,7 @@
 //
 // Vulkan by default, where the runtime's images are rendered into directly; `--dx12` takes the other binding.
 // Both eyes are one draw through view instancing, and the room shows behind the cube where the runtime offers passthrough.
+// Each hand holds a small cube; pull the trigger near the big one to grab it, and let go to leave it where it is.
 
 #include <clean-core/common/time.hh>
 #include <clean-core/string/print.hh>
@@ -63,17 +64,25 @@ constexpr int cube_index_count = 36;
     return out;
 }
 
-/// The cube's world matrix: a 30 cm cube a metre ahead of where the session started, at eye height, spinning.
-[[nodiscard]] tg::mat4f cube_to_world(tg::angle_f spin)
+/// `linear` scaled by `scale` and placed at `at`, as a world matrix.
+[[nodiscard]] tg::mat4f placed(tg::mat3f const& linear, f32 scale, tg::vec3f at)
 {
-    auto const rotation = tg::mat3f::make_rotation_y(spin) * 0.3f;
     auto m = tg::mat4f::identity;
     for (auto c = 0; c < 3; ++c)
         for (auto r = 0; r < 3; ++r)
-            m[c, r] = rotation[c, r];
-    m[3, 2] = 1.0f;
+            m[c, r] = linear[c, r] * scale;
+    for (auto r = 0; r < 3; ++r)
+        m[3, r] = at[r];
     return m;
 }
+
+[[nodiscard]] tg::vec3f origin_of(tg::mat4f const& m) { return tg::vec3f(m[3, 0], m[3, 1], m[3, 2]); }
+
+constexpr auto cube_size = 0.3f;     // the big cube's edge, in metres
+constexpr auto hand_size = 0.06f;    // a hand's marker cube
+constexpr auto reach = 0.25f;        // how near the cube's centre a grip must be to grab it
+constexpr auto grab_trigger = 0.7f;  // trigger travel that grabs, and below `release_trigger` lets go
+constexpr auto release_trigger = 0.3f;
 } // namespace
 
 // `dev.py example xr-cube --test-args "--dx12"` takes the dx12 binding
@@ -108,7 +117,7 @@ ASYNC_EXAMPLE("shaped-graphics/xr-cube", nx::config::args("--vulkan"))
         co_return;
     }
 
-    auto created_session = system->create_session(*ctx, {.passthrough = true});
+    auto created_session = system->create_session(*ctx, {.passthrough = true, .actions = xr::standard_controller_actions()});
     if (created_session.has_error())
     {
         cc::eprintln("no session: {}", created_session.error().to_string());
@@ -126,9 +135,15 @@ ASYNC_EXAMPLE("shaped-graphics/xr-cube", nx::config::args("--vulkan"))
     auto pipeline = sg::raster_pipeline_handle();
     auto built_for = sg::pixel_format::undefined;
 
+    // a metre ahead of where the session started, at eye height; spinning until a hand holds it
+    auto cube = placed(tg::mat3f::identity, cube_size, tg::vec3f(0, 0, 1));
+    auto held_by = cc::optional<xr::hand>();
+    auto held_offset = tg::mat4f::identity; // the cube in the holding grip's frame
+
     auto frames = u64(0);
     auto const start = cc::current_time_steady_secs();
     auto window_start = start;
+    auto last_time = start;
     while (session->poll_events())
     {
         auto waited = session->wait_frame();
@@ -138,6 +153,33 @@ ASYNC_EXAMPLE("shaped-graphics/xr-cube", nx::config::args("--vulkan"))
             continue;
         }
         auto& frame = waited.value();
+        auto const now = cc::current_time_steady_secs();
+        auto const dt = f32(now - last_time);
+        last_time = now;
+
+        // ---- the hands: a trigger pulled near the cube grabs it, and released lets it go where it is
+        for (auto const h : {xr::hand::left, xr::hand::right})
+        {
+            auto const grip = session->pose("grip", h);
+            auto const trigger = session->scalar("trigger", h);
+            if (held_by == h && trigger < release_trigger)
+                held_by = {};
+            else if (!held_by.has_value() && grip.has_value() && trigger > grab_trigger
+                     && (origin_of(grip.value().to_mat()) - origin_of(cube)).length() < reach)
+            {
+                held_by = h;
+                held_offset = grip.value().to_mat().inverse() * cube;
+                session->vibrate("haptic", h, 0.6f, 0.05f);
+            }
+        }
+        if (held_by.has_value())
+        {
+            if (auto const grip = session->pose("grip", held_by.value()); grip.has_value())
+                cube = grip.value().to_mat() * held_offset;
+        }
+        else
+            cube = cube * placed(tg::mat3f::make_rotation_y(tg::angle_f::make_from_degree(dt * 30.0f)), 1.0f, tg::vec3f(0, 0, 0));
+
         auto cmd = std::unique_ptr<sg::command_list>();
         if (frame.should_render)
         {
@@ -157,7 +199,6 @@ ASYNC_EXAMPLE("shaped-graphics/xr-cube", nx::config::args("--vulkan"))
                 built_for = frame.color.format();
             }
 
-            auto const model = cube_to_world(tg::angle_f::make_from_degree(float(cc::current_time_steady_secs() - start) * 30.0f));
             auto const clear = session->shows_passthrough() ? tg::vec4f(0, 0, 0, 0) : tg::vec4f(0.02f, 0.02f, 0.03f, 1.0f);
             cmd = ctx->create_command_list();
             {
@@ -168,10 +209,18 @@ ASYNC_EXAMPLE("shaped-graphics/xr-cube", nx::config::args("--vulkan"))
                 pass.bind_pipeline(*pipeline);
                 pass.bind_vertex_buffers({vertices.as_vertex_buffer()});
                 pass.bind_index_buffer(indices.as_index_buffer());
-                pass.set_inline_constants(shaders::xr_cube::constants{.left_eye = frame.views[0].world_to_clip() * model,
-                                                                      .right_eye = frame.views[1].world_to_clip() * model}
-                                              .to_block());
-                pass.draw_indexed({.index_range = {.offset = 0, .size = cube_index_count}});
+                auto const draw = [&](tg::mat4f const& model)
+                {
+                    pass.set_inline_constants(shaders::xr_cube::constants{.left_eye = frame.views[0].world_to_clip() * model,
+                                                                          .right_eye = frame.views[1].world_to_clip() * model}
+                                                  .to_block());
+                    pass.draw_indexed({.index_range = {.offset = 0, .size = cube_index_count}});
+                };
+                draw(cube);
+                // a small cube in each hand, where the controller is held
+                for (auto const h : {xr::hand::left, xr::hand::right})
+                    if (auto const grip = session->pose("grip", h); grip.has_value())
+                        draw(grip.value().to_mat() * placed(tg::mat3f::identity, hand_size, tg::vec3f(0, 0, 0)));
             }
         }
         session->submit_frame(cc::move(cmd));
@@ -180,7 +229,6 @@ ASYNC_EXAMPLE("shaped-graphics/xr-cube", nx::config::args("--vulkan"))
 
         if (++frames % 300 == 0)
         {
-            auto const now = cc::current_time_steady_secs();
             cc::println("xr: {} frames, {:.1f} fps over the last 300", frames, 300.0 / (now - window_start));
             window_start = now;
         }

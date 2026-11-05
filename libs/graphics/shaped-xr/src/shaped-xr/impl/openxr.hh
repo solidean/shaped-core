@@ -83,6 +83,16 @@ struct xr::session::state
     XrPassthroughFB passthrough = XR_NULL_HANDLE;
     XrPassthroughLayerFB passthrough_layer = XR_NULL_HANDLE;
 
+    // the actions, parallel to desc.actions; a pose action has a space and a located pose per hand, two slots each
+    XrActionSet action_set = XR_NULL_HANDLE;
+    cc::vector<XrAction> actions;
+    XrPath hand_paths[2] = {XR_NULL_PATH, XR_NULL_PATH};
+    cc::vector<XrSpace> pose_spaces;
+    cc::vector<cc::optional<tg::rigid_transform3f>> poses;
+
+    /// The position of `name` in desc.actions; asserts on a name the session was not created with.
+    [[nodiscard]] isize action_index(cc::string_view name) const;
+
     // the frame in flight, between wait_frame and submit_frame
     bool in_frame = false;
     bool frame_renders = false;

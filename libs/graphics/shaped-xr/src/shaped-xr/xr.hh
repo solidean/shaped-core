@@ -30,6 +30,44 @@ struct xr::system_description
     bool wants_passthrough = false;
 };
 
+/// What an action reports: a button, an axis, a stick, where something is, or a vibration it makes.
+enum class xr::action_kind : xr::u8
+{
+    boolean,
+    scalar,
+    vector2,
+    pose,
+    vibration,
+};
+
+/// Which hand an action is read for; an action declared for both is one action with a state per hand.
+enum class xr::hand : xr::u8
+{
+    left,
+    right,
+};
+
+/// One suggested binding: an input or output path of an interaction profile, such as
+/// `/interaction_profiles/oculus/touch_controller` and `/user/hand/left/input/trigger/value`.
+/// The runtime binds what the controllers in hand offer, and remaps a profile it does not have to one it does.
+struct xr::action_binding
+{
+    cc::string profile;
+    cc::string path;
+};
+
+/// An action the application reads by name rather than by device path, OpenXR's model.
+/// `name` is lowercase letters, digits, `-`, `_` and `.`; `label` is what the runtime shows a user who rebinds it.
+struct xr::action_description
+{
+    cc::string name;
+    cc::string label;
+    action_kind kind = action_kind::boolean;
+    /// One state per hand, read with `xr::hand`; every binding then starts with `/user/hand/left` or `/user/hand/right`.
+    bool is_per_hand = true;
+    cc::vector<action_binding> bindings;
+};
+
 struct xr::session_description
 {
     /// The depth range every view's projection maps to 0 and 1, and the one the runtime is told for its depth layer.
@@ -38,7 +76,17 @@ struct xr::session_description
     /// Shows the headset's cameras behind what is rendered, where the system asked for passthrough and it came up.
     /// The frame's color is then cleared to transparent where the room shows through.
     bool passthrough = false;
+    /// The actions the session reads, bound before it begins; `xr::standard_controller_actions()` is the usual set.
+    cc::vector<action_description> actions;
 };
+
+namespace xr
+{
+/// Both hands' grip and aim poses, trigger, squeeze, thumbstick, the two face buttons, the thumbstick click, the menu
+/// button and haptics, named so, bound for Quest Touch and for OpenXR's simple controller.
+/// The face buttons are `primary` (A or X) and `secondary` (B or Y); the menu button is the left controller's alone.
+[[nodiscard]] cc::vector<action_description> standard_controller_actions();
+} // namespace xr
 
 /// One eye: where it is and how it projects, in tg's frame — left-handed, +y up, +z forward — of the session's space.
 /// OpenXR's frame is right-handed with -z forward, and the session converts at its edge so nothing above sees that.
@@ -136,6 +184,19 @@ public:
     /// Submits `cmd`, which drew the frame `wait_frame` returned, and hands the frame to the runtime.
     /// `cmd` must be a list of the session's context; null for a frame that did not render.
     void submit_frame(std::unique_ptr<sg::command_list> cmd);
+
+    // ---- actions, synced by every `wait_frame` while the session is focused
+    //
+    // A name is one of `session_description::actions`; one that is not asserts.
+    // An action the controllers in hand do not offer, or one read while unfocused, reads as released, zero or untracked.
+
+    [[nodiscard]] bool pressed(cc::string_view action, hand h = hand::left) const;
+    [[nodiscard]] f32 scalar(cc::string_view action, hand h = hand::left) const;
+    [[nodiscard]] tg::vec2f vector2(cc::string_view action, hand h = hand::left) const;
+    /// Where the pose is at the frame's display time, in tg's frame of the session's space; none while untracked.
+    [[nodiscard]] cc::optional<tg::rigid_transform3f> pose(cc::string_view action, hand h = hand::left) const;
+    /// Vibrates for `seconds` at `amplitude`, 0 to 1.
+    void vibrate(cc::string_view action, hand h, f32 amplitude, f32 seconds);
 
     /// What `system::create_session` makes a session of; `state` is shaped-xr's own, so nothing else can name one.
     struct state;

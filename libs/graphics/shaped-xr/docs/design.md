@@ -11,6 +11,8 @@ The epic is [epic-xr](../../../../docs/issues/epic-xr.md); what the first protot
   It begins when the runtime is ready and ends when it stops, as a headset taken off does, and resumes on the next ready.
 - **A frame is one image of a layer an eye**, color and depth, so view instancing draws both eyes in one pass.
   Depth reaches the runtime too, where it offers `XR_KHR_composition_layer_depth`.
+- **Actions** are OpenXR's: declared by name with suggested bindings per interaction profile, synced by `wait_frame`, read by name and hand.
+  `xr::standard_controller_actions()` is the usual set for Quest Touch and the simple controller, and poses come back in tg's frame.
 - **Passthrough** is the runtime's own camera layer (`XR_FB_passthrough`) under the frame, which blends over it by alpha.
 
 ## Decisions
@@ -27,6 +29,6 @@ The epic is [epic-xr](../../../../docs/issues/epic-xr.md); what the first protot
 
 ## Planned
 
-- Controller input as actions (`feat-xr-controller-actions`), and hand tracking (`feat-xr-hand-tracking`).
+- Drawing the controllers, an sr-backed routine (`feat-xr-controller-actions`), and hand tracking (`feat-xr-hand-tracking`).
 - Quest standalone: the same code in an APK (`feat-android-apk`).
 - Headless CI against Monado (`chore-xr-monado-ci`).

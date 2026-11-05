@@ -11,7 +11,7 @@ Format conventions live in [docs/guides/cheat-sheets.md](../../../docs/guides/ch
 
 **Recording domain:** `xr`.
 
-**Early stage.** System, session, frames with depth, and passthrough exist; input and Android are planned.
+**Early stage.** System, session, frames with depth, passthrough and actions exist; drawing controllers and Android are planned.
 
 ## System and context
 
@@ -40,6 +40,21 @@ f.views[i].world_to_clip()                         // tg::mat4f, projection * in
 f.color; f.depth                                   // sg::texture_2d_array, views.size() layers: view i into layer i
 // render both in one pass: render_to({..., .view_count = 2}) with a `view_count = 2` SGL pipeline and @view_index
 // clear color to transparent where shows_passthrough(): the frame blends over the room by its alpha
+```
+
+## Actions
+
+```cpp
+create_session(*ctx, {.actions = xr::standard_controller_actions()})  // grip, aim, trigger, squeeze, thumbstick, thumbstick_click,
+                                                   //   primary (A/X), secondary (B/Y), menu, haptic; Quest Touch + khr/simple
+xr::action_description{.name, .label, .kind = xr::action_kind::scalar, .is_per_hand = true, .bindings = {{profile, path}}}
+//   name: lowercase, digits, - _ . ; a per-hand binding starts /user/hand/left/ or /user/hand/right/; vibration binds /output/
+session->pressed("primary", xr::hand::right)     // bool;   released while unfocused or unbound
+session->scalar("trigger", xr::hand::left)        // f32 0..1
+session->vector2("thumbstick", xr::hand::left)    // tg::vec2f
+session->pose("grip", xr::hand::left)             // optional<rigid_transform3f>, tg's frame, at the frame's display time
+session->vibrate("haptic", xr::hand::left, amplitude, seconds)
+//   synced by wait_frame; an unknown name asserts
 ```
 
 Gotchas: the color format is the runtime's choice (sRGB 8-bit rgba or bgra), so build the pipeline for `f.color.format()`.

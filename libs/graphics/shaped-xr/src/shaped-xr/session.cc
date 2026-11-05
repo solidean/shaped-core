@@ -1,6 +1,9 @@
+#include <clean-core/common/assertf.hh>
+#include <clean-core/common/utility.hh>
 #include <clean-core/record/log.hh>
 #include <clean-core/string/format.hh>
 #include <shaped-graphics/all.hh>
+#include <shaped-xr/impl/actions.hh>
 #include <shaped-xr/impl/openxr.hh>
 #include <shaped-xr/impl/view_math.hh>
 
@@ -41,6 +44,25 @@ cc::optional<xr::frame> xr::session::wait_frame()
     return {};
 }
 void xr::session::submit_frame(std::unique_ptr<sg::command_list>)
+{
+}
+bool xr::session::pressed(cc::string_view, hand) const
+{
+    return false;
+}
+xr::f32 xr::session::scalar(cc::string_view, hand) const
+{
+    return 0.0f;
+}
+tg::vec2f xr::session::vector2(cc::string_view, hand) const
+{
+    return {};
+}
+cc::optional<tg::rigid_transform3f> xr::session::pose(cc::string_view, hand) const
+{
+    return {};
+}
+void xr::session::vibrate(cc::string_view, hand, f32, f32)
 {
 }
 
@@ -111,6 +133,11 @@ xr::session::state::~state()
         destroy_layer(passthrough_layer);
     if (passthrough != XR_NULL_HANDLE && destroy_passthrough != nullptr)
         destroy_passthrough(passthrough);
+    for (auto const space : pose_spaces)
+        if (space != XR_NULL_HANDLE)
+            xrDestroySpace(space);
+    if (action_set != XR_NULL_HANDLE)
+        xrDestroyActionSet(action_set); // and every action in it
     // the wrapped textures go before the swapchains whose images they name
     color.wrapped.clear();
     depth.wrapped.clear();
@@ -179,6 +206,107 @@ cc::result<cc::unique_ptr<xr::session>> xr::system::create_session(sg::context& 
         = impl::failed(instance, xrCreateReferenceSpace(s->session, &space_info, &s->space), "xrCreateReferenceSpace");
         !why.empty())
         return cc::error(error_of(why));
+
+    // ---- the actions, bound before the session begins, since OpenXR attaches them once
+    if (!desc.actions.empty())
+    {
+        if (auto const why = impl::problem_of(desc.actions); !why.empty())
+            return cc::error(error_of(why));
+        auto const path = [&](cc::string_view text)
+        {
+            auto p = XrPath(XR_NULL_PATH);
+            auto copy = cc::string(text);
+            xrStringToPath(instance, copy.c_str_materialize(), &p);
+            return p;
+        };
+        s->hand_paths[0] = path("/user/hand/left");
+        s->hand_paths[1] = path("/user/hand/right");
+        auto const copy_name = [](char* to, isize capacity, cc::string_view from)
+        {
+            auto const n = cc::min(from.size(), capacity - 1);
+            for (auto i = isize(0); i < n; ++i)
+                to[i] = from[i];
+            to[n] = 0;
+        };
+        auto set_info = XrActionSetCreateInfo{.type = XR_TYPE_ACTION_SET_CREATE_INFO, .priority = 0};
+        copy_name(set_info.actionSetName, XR_MAX_ACTION_SET_NAME_SIZE, "shaped_xr");
+        copy_name(set_info.localizedActionSetName, XR_MAX_LOCALIZED_ACTION_SET_NAME_SIZE, "Application");
+        if (auto const why
+            = impl::failed(instance, xrCreateActionSet(instance, &set_info, &s->action_set), "xrCreateActionSet");
+            !why.empty())
+            return cc::error(error_of(why));
+        for (auto const& a : desc.actions)
+        {
+            auto info = XrActionCreateInfo{.type = XR_TYPE_ACTION_CREATE_INFO,
+                                           .countSubactionPaths = a.is_per_hand ? 2u : 0u,
+                                           .subactionPaths = a.is_per_hand ? s->hand_paths : nullptr};
+            switch (a.kind)
+            {
+            case action_kind::boolean:
+                info.actionType = XR_ACTION_TYPE_BOOLEAN_INPUT;
+                break;
+            case action_kind::scalar:
+                info.actionType = XR_ACTION_TYPE_FLOAT_INPUT;
+                break;
+            case action_kind::vector2:
+                info.actionType = XR_ACTION_TYPE_VECTOR2F_INPUT;
+                break;
+            case action_kind::pose:
+                info.actionType = XR_ACTION_TYPE_POSE_INPUT;
+                break;
+            case action_kind::vibration:
+                info.actionType = XR_ACTION_TYPE_VIBRATION_OUTPUT;
+                break;
+            }
+            copy_name(info.actionName, XR_MAX_ACTION_NAME_SIZE, a.name);
+            copy_name(info.localizedActionName, XR_MAX_LOCALIZED_ACTION_NAME_SIZE,
+                      a.label.empty() ? cc::string_view(a.name) : cc::string_view(a.label));
+            auto action = XrAction(XR_NULL_HANDLE);
+            if (auto const why = impl::failed(instance, xrCreateAction(s->action_set, &info, &action),
+                                              cc::format("xrCreateAction {}", a.name));
+                !why.empty())
+                return cc::error(error_of(why));
+            s->actions.push_back(action);
+        }
+        // a profile the runtime does not know is refused alone, and the others still bind
+        for (auto const& group : impl::bindings_by_profile(desc.actions))
+        {
+            auto suggested = cc::vector<XrActionSuggestedBinding>();
+            for (auto i = isize(0); i < group.actions.size(); ++i)
+                suggested.push_back({.action = s->actions[group.actions[i]], .binding = path(group.paths[i])});
+            auto const info = XrInteractionProfileSuggestedBinding{.type = XR_TYPE_INTERACTION_PROFILE_SUGGESTED_BINDING,
+                                                                   .interactionProfile = path(group.profile),
+                                                                   .countSuggestedBindings = u32(suggested.size()),
+                                                                   .suggestedBindings = suggested.data()};
+            if (auto const why = impl::failed(instance, xrSuggestInteractionProfileBindings(instance, &info),
+                                              "xrSuggestInteractionProfileBindings");
+                !why.empty())
+                CC_LOG_WARNING("{} for {}", why, group.profile);
+        }
+        auto const attach = XrSessionActionSetsAttachInfo{.type = XR_TYPE_SESSION_ACTION_SETS_ATTACH_INFO,
+                                                          .countActionSets = 1,
+                                                          .actionSets = &s->action_set};
+        if (auto const why
+            = impl::failed(instance, xrAttachSessionActionSets(s->session, &attach), "xrAttachSessionActionSets");
+            !why.empty())
+            return cc::error(error_of(why));
+        for (auto i = isize(0); i < desc.actions.size(); ++i)
+            for (auto h = 0; h < 2; ++h)
+            {
+                auto space = XrSpace(XR_NULL_HANDLE);
+                if (desc.actions[i].kind == action_kind::pose && (desc.actions[i].is_per_hand || h == 0))
+                {
+                    auto const info = XrActionSpaceCreateInfo{
+                        .type = XR_TYPE_ACTION_SPACE_CREATE_INFO,
+                        .action = s->actions[i],
+                        .subactionPath = desc.actions[i].is_per_hand ? s->hand_paths[h] : XR_NULL_PATH,
+                        .poseInActionSpace = {.orientation = {0, 0, 0, 1}}};
+                    xrCreateActionSpace(s->session, &info, &space);
+                }
+                s->pose_spaces.push_back(space);
+                s->poses.push_back({});
+            }
+    }
 
     // ---- one swapchain of a layer an eye for color and one for depth, at the size the runtime recommends
     auto view_count = u32(0);
@@ -412,6 +540,36 @@ cc::optional<xr::frame> xr::session::wait_frame()
     s.frame_renders
         = frame_state.shouldRender && located == s.view_count && (view_state.viewStateFlags & tracked) == tracked;
 
+    // the actions, synced while focused and released otherwise, and the poses where they are at display time
+    if (s.action_set != XR_NULL_HANDLE)
+    {
+        if (s.current == XR_SESSION_STATE_FOCUSED)
+        {
+            auto const active = XrActiveActionSet{.actionSet = s.action_set, .subactionPath = XR_NULL_PATH};
+            auto const sync = XrActionsSyncInfo{.type = XR_TYPE_ACTIONS_SYNC_INFO,
+                                                .countActiveActionSets = 1,
+                                                .activeActionSets = &active};
+            xrSyncActions(s.session, &sync);
+        }
+        for (auto i = isize(0); i < s.pose_spaces.size(); ++i)
+        {
+            s.poses[i] = {};
+            if (s.pose_spaces[i] == XR_NULL_HANDLE)
+                continue;
+            auto location = XrSpaceLocation{.type = XR_TYPE_SPACE_LOCATION};
+            auto const valid = XR_SPACE_LOCATION_POSITION_VALID_BIT | XR_SPACE_LOCATION_ORIENTATION_VALID_BIT;
+            if (XR_SUCCEEDED(xrLocateSpace(s.pose_spaces[i], s.space, s.display_time, &location))
+                && (location.locationFlags & valid) == valid)
+                s.poses[i] = impl::camera_to_world_of({.qx = location.pose.orientation.x,
+                                                       .qy = location.pose.orientation.y,
+                                                       .qz = location.pose.orientation.z,
+                                                       .qw = location.pose.orientation.w,
+                                                       .px = location.pose.position.x,
+                                                       .py = location.pose.position.y,
+                                                       .pz = location.pose.position.z});
+        }
+    }
+
     auto f = frame{.should_render = s.frame_renders, .width = s.width, .height = s.height};
     if (!s.frame_renders)
         return f;
@@ -440,6 +598,76 @@ cc::optional<xr::frame> xr::session::wait_frame()
     f.color = s.color.wrapped.empty() ? s.own_color : s.color.wrapped[s.color.acquired];
     f.depth = s.depth.wrapped.empty() ? s.own_depth : s.depth.wrapped[s.depth.acquired];
     return f;
+}
+
+isize xr::session::state::action_index(cc::string_view name) const
+{
+    for (auto i = isize(0); i < desc.actions.size(); ++i)
+        if (desc.actions[i].name == name)
+            return i;
+    CC_ASSERTF(false, "the session was created with no action named {}", name);
+    return -1;
+}
+
+namespace
+{
+/// What an action is read for: its handle and, for one per hand, which.
+[[nodiscard]] XrActionStateGetInfo state_info(xr::session::state const& s, isize i, xr::hand h)
+{
+    return {.type = XR_TYPE_ACTION_STATE_GET_INFO,
+            .action = s.actions[i],
+            .subactionPath = s.desc.actions[i].is_per_hand ? s.hand_paths[int(h)] : XR_NULL_PATH};
+}
+} // namespace
+
+bool xr::session::pressed(cc::string_view action, hand h) const
+{
+    auto const& s = *_state;
+    auto const info = state_info(s, s.action_index(action), h);
+    auto state = XrActionStateBoolean{.type = XR_TYPE_ACTION_STATE_BOOLEAN};
+    return XR_SUCCEEDED(xrGetActionStateBoolean(s.session, &info, &state)) && state.isActive && state.currentState;
+}
+
+xr::f32 xr::session::scalar(cc::string_view action, hand h) const
+{
+    auto const& s = *_state;
+    auto const info = state_info(s, s.action_index(action), h);
+    auto state = XrActionStateFloat{.type = XR_TYPE_ACTION_STATE_FLOAT};
+    if (XR_FAILED(xrGetActionStateFloat(s.session, &info, &state)) || !state.isActive)
+        return 0.0f;
+    return state.currentState;
+}
+
+tg::vec2f xr::session::vector2(cc::string_view action, hand h) const
+{
+    auto const& s = *_state;
+    auto const info = state_info(s, s.action_index(action), h);
+    auto state = XrActionStateVector2f{.type = XR_TYPE_ACTION_STATE_VECTOR2F};
+    if (XR_FAILED(xrGetActionStateVector2f(s.session, &info, &state)) || !state.isActive)
+        return {};
+    return tg::vec2f(state.currentState.x, state.currentState.y);
+}
+
+cc::optional<tg::rigid_transform3f> xr::session::pose(cc::string_view action, hand h) const
+{
+    auto const& s = *_state;
+    auto const i = s.action_index(action);
+    return s.poses[i * 2 + (s.desc.actions[i].is_per_hand ? int(h) : 0)];
+}
+
+void xr::session::vibrate(cc::string_view action, hand h, f32 amplitude, f32 seconds)
+{
+    auto const& s = *_state;
+    auto const i = s.action_index(action);
+    auto const info
+        = XrHapticActionInfo{.type = XR_TYPE_HAPTIC_ACTION_INFO,
+                             .action = s.actions[i],
+                             .subactionPath = s.desc.actions[i].is_per_hand ? s.hand_paths[int(h)] : XR_NULL_PATH};
+    auto const vibration = XrHapticVibration{.type = XR_TYPE_HAPTIC_VIBRATION,
+                                             .duration = XrDuration(f64(seconds) * 1e9),
+                                             .frequency = XR_FREQUENCY_UNSPECIFIED,
+                                             .amplitude = amplitude};
+    xrApplyHapticFeedback(s.session, &info, reinterpret_cast<XrHapticBaseHeader const*>(&vibration));
 }
 
 void xr::session::submit_frame(std::unique_ptr<sg::command_list> cmd)
