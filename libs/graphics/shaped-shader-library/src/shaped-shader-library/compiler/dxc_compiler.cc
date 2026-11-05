@@ -80,6 +80,7 @@ private:
     {
         // the oldest shader model that holds what the text needs, so every other shader runs where it always has
         auto const model = desc.required_features.has(sg::feature::shader_execution_reordering)
+                                || desc.required_features.has(sg::feature::opacity_micromap)
                              ? ssc::dxc::shader_model::sm_6_9
                              : ssc::dxc::shader_model::sm_6_8;
         return ssc::dxc::shader_description{.source = desc.source,

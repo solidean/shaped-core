@@ -136,7 +136,7 @@ enum class sg::feature
 
     /// A triangle geometry may carry an opacity micromap (`cmd.raytracing.build_micromap`), which traversal decides most candidates by.
     /// Vulkan grants it with `VK_EXT_opacity_micromap`, D3D12 from DXR 1.2 in the Agility SDK; metal and WebGPU have no equivalent.
-    /// The host's alone: a shader traces the same way either way, so no `require` names it.
+    /// A shader traces the same way either way, so none names it; SGL states it for a dx12 ray query, which then compiles at SM 6.9.
     opacity_micromap,
 
     /// A vertex shader may send its primitive to one layer of a layered render target (SGL's `@layer`), so one draw

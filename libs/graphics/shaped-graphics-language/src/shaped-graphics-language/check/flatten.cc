@@ -68,6 +68,14 @@ void sgl::check::impl::flattener::judge_stage(ast::expr_id call, symbol_id calle
         auto within = cc::vector<symbol_id>();
         for (auto const& fr : frames)
             within.push_back(fr.function);
+        // EMIT-184: a dx12 ray query sees the micromaps of a device that has them, which the compile states for it
+        auto const target = compiled_for();
+        if (record->declares_only && record->features.has(feature::ray_query) && target.api == graphics_api::dx12
+            && target.device_features.has(feature::opacity_micromap))
+        {
+            auto const sees = feature_set(feature::opacity_micromap);
+            feature_uses.push_back({.file = file(), .call = call, .features = sees, .within = within, .granted = sees});
+        }
         feature_uses.push_back(
             {.file = file(), .call = call, .features = record->features, .within = cc::move(within), .granted = granted});
     }

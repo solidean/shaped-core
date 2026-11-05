@@ -1468,10 +1468,16 @@ struct writer
         auto const dimensions = array_dimensions(p, local.type);
         auto const* const type_record = p.m.builtin_type_of(local.type);
         auto const& flags = p.local_flags[index_of(id)];
-        auto const type = declares_only && d.language() == builtins::language::hlsl && type_record != nullptr
-                               && type_record->hlsl_flagged != nullptr && flags.has_value()
-                            ? type_record->hlsl_flagged(flags.value())
-                            : cc::string(type_text(p, d, local.type));
+        auto type = declares_only && d.language() == builtins::language::hlsl && type_record != nullptr
+                         && type_record->hlsl_flagged != nullptr && flags.has_value()
+                      ? type_record->hlsl_flagged(flags.value())
+                      : cc::string(type_text(p, d, local.type));
+        // EMIT-184: a query of an entry point that states opacity micromaps sees them, which HLSL asks of each query
+        if (declares_only && type_record != nullptr && type_record->hlsl_flagged != nullptr
+            && d.language() == builtins::language::hlsl && p.e.features.has(check::feature::opacity_micromap)
+            && type.ends_with(">"))
+            type = cc::format("{}, RAYQUERY_FLAG_ALLOW_OPACITY_MICROMAPS>",
+                              type.subview({.offset = 0, .size = type.size() - 1}));
         d.write_local(declaration, {.name = name,
                                     .type = type,
                                     .value = text,

@@ -99,12 +99,15 @@ The BLAS holds every micromap it was built from, the edge a TLAS has with its BL
   A geometry names its own counts, which default to the micromap's.
 - **The records are the APIs' own**: `micromap_descriptor` is the 8-byte record D3D12 and Vulkan both read, and states pack lowest bits first.
 - **Strict where the feature is absent**: `build_micromap`, and a geometry naming a micromap, assert without `sg::feature::opacity_micromap`, so a caller checks before baking.
-- **A ray query needs nothing on vulkan**; a ray-tracing pipeline is created with the micromap flag wherever micromaps are enabled.
+- **A ray query needs nothing on vulkan**; on dx12 SGL writes each `RayQuery` with the micromap flag where the device has them, which compiles it at Shader Model 6.9 (EMIT-184).
+  A ray-tracing pipeline is created with the micromap flag wherever micromaps are enabled, on either.
 
 **vulkan** builds them through `VK_EXT_opacity_micromap`, enabled wherever the device grants it.
 Vulkan builds micromaps in a pipeline stage sg's barrier vocabulary does not name, so each build is bracketed by two global barriers, one into that stage and one out of it.
 sg's own tracking meanwhile records the buffers as acceleration-structure accesses.
-**dx12** reports the feature absent until it runs the Agility SDK's DXR 1.2, and metal and webgpu have no equivalent — [feat-sg-opacity-micromaps](../issues/feat-sg-opacity-micromaps.md).
+**dx12** builds them as DXR 1.2's micromap arrays, where it runs the Agility SDK on a device of ray-tracing tier 1.2 and Shader Model 6.9, and reports the feature absent otherwise.
+A geometry naming one becomes DXR's OMM triangles, linking its index buffer and the array's address.
+metal and webgpu have no equivalent — [feat-sg-opacity-micromaps](../issues/feat-sg-opacity-micromaps.md).
 
 ## Invariants
 
@@ -133,6 +136,8 @@ Preserve these; the rest is tuning:
 - **AS storage buffers are created in — and stay in — the `RAYTRACING_ACCELERATION_STRUCTURE` resource state**, with `ALLOW_UNORDERED_ACCESS`, rather than the usual `COMMON`.
   D3D12 forbids transitioning an AS resource, and both the enhanced AS barriers and `BuildRaytracingAccelerationStructure` require that state.
   This is the one buffer usage that overrides the backend's default COMMON creation, in [`dx12_buffer.cc`](../../backends/dx12/src/shaped-graphics/backends/dx12/dx12_buffer.cc).
+- **Under the Agility runtime they also carry `D3D12_RESOURCE_FLAG_RAYTRACING_ACCELERATION_STRUCTURE`**, which a micromap array requires.
+  The legacy creation calls drop that flag, so such a buffer is created through `CreateCommittedResource3` or `CreatePlacedResource2`, which take a layout rather than a state.
 
 ## metal implementation
 

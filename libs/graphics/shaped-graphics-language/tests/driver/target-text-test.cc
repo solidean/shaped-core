@@ -388,3 +388,30 @@ TEST("sgl target text - maybe_reorder asks shader execution reordering of the de
     CHECK(!without.value().text.contains("MaybeReorderThread"));
     CHECK(!without.value().features.has(sgl::check::feature::shader_execution_reordering));
 }
+
+TEST("sgl target text - a dx12 ray query sees the opacity micromaps of a device that has them")
+{
+    // EMIT-184: no program names the feature; the compile states it for each query
+    constexpr auto source = "require ray_query\n"
+                            "\n"
+                            "binding work:\n"
+                            "    world: acceleration_structure[.triangles]\n"
+                            "    values: mut buffer[float]\n"
+                            "\n"
+                            "@compute(64) fun main_cs(@thread_id id: int3){work}:\n"
+                            "    let r = ray(origin = pos3(0.0, 0.0, 0.0), direction = vec3(0.0, 0.0, 1.0))\n"
+                            "    work.values[id.x] = work.world.trace(r, c => hit_decision.ignore).t\n";
+    auto device = sgl::check::feature_set();
+    device.set(sgl::check::feature::opacity_micromap);
+    auto const with = compiled(source, target::hlsl_dx12, device);
+    REQUIRE(with.has_value());
+    CHECK(with.value().text.contains(", RAYQUERY_FLAG_ALLOW_OPACITY_MICROMAPS>"));
+    CHECK(with.value().features.has(sgl::check::feature::opacity_micromap));
+    // vulkan sees them with no flag, and a device without them is asked for nothing
+    for (auto const& other : {compiled(source, target::hlsl_dx12), compiled(source, target::hlsl_vulkan, device)})
+    {
+        REQUIRE(other.has_value());
+        CHECK(!other.value().text.contains("OPACITY_MICROMAPS"));
+        CHECK(!other.value().features.has(sgl::check::feature::opacity_micromap));
+    }
+}
