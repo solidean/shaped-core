@@ -45,3 +45,32 @@ TEST("sgl emit - WGSL and MSL refuse a mesh stage (EMIT-109, EMIT-206)")
     auto const msl = sgl::emit::dump_errors(emit_source(k_program, 0, target::msl));
     CHECK(msl.contains("is a mesh stage and needs mesh_shader")).dump("errors", msl);
 }
+
+TEST("sgl emit - HLSL hands a task stage's payload over from groupshared memory, and a mesh stage takes it in "
+     "(EMIT-207, "
+     "EMIT-208)")
+{
+    constexpr auto program = cc::string_view("require mesh_shader\n"
+                                             "struct corner:\n    @position position: hpos4\n"
+                                             "struct handed:\n    blue: float\n"
+                                             "@task(8) fun ts():\n"
+                                             "    let h: handed = {blue = 1.0}\n"
+                                             "    dispatch_mesh(2u, 1u, 1u, h)\n"
+                                             "@mesh(1, vertices = 3, triangles = 1)\n"
+                                             "fun ms(h: handed, output: mut mesh_output[corner]):\n"
+                                             "    output.set_counts(0u, 0u)\n");
+    for (auto const t : {target::hlsl_dx12, target::hlsl_vulkan})
+    {
+        auto const task = emit_source(program, 0, t);
+        REQUIRE(sgl::emit::dump_errors(task) == "");
+        CHECK(task.text.contains("groupshared handed sgl_payload;")).dump("text", task.text);
+        CHECK(task.text.contains("[numthreads(8, 1, 1)]")).dump("text", task.text);
+        CHECK(task.text.contains("sgl_payload = h;")).dump("text", task.text);
+        CHECK(task.text.contains("DispatchMesh(2u, 1u, 1u, sgl_payload);")).dump("text", task.text);
+        auto const mesh = emit_source(program, 1, t);
+        REQUIRE(sgl::emit::dump_errors(mesh) == "");
+        CHECK(mesh.text.contains("in payload handed h,")).dump("text", mesh.text);
+    }
+    CHECK(sgl::emit::dump_errors(emit_source(program, 0, target::wgsl)).contains("WebGPU does not have"));
+    CHECK(sgl::emit::dump_errors(emit_source(program, 0, target::msl)).contains("needs mesh_shader"));
+}

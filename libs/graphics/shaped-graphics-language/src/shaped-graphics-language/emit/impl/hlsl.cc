@@ -704,6 +704,12 @@ public:
                 parameters.push_back(cc::format("inout {}<{}> {}", stream, type_text(p, *this, t.element), name));
                 continue;
             }
+            // EMIT-208: a mesh stage's one struct parameter is the payload its task stage handed it
+            if (p.e.entry_stage == stage::mesh)
+            {
+                parameters.push_back(cc::format("in payload {} {}", type_text(p, *this, local.type), name));
+                continue;
+            }
             factors = local.type;
             parameters.push_back(cc::format("{} {}", type_text(p, *this, local.type), name));
         }
@@ -821,7 +827,7 @@ public:
             return;
         }
 
-        if (p.e.entry_stage == stage::compute)
+        if (p.e.entry_stage == stage::compute || p.e.entry_stage == stage::task)
         {
             out.appendf("[numthreads({}, {}, {})]\n", p.e.workgroup[0], p.e.workgroup[1], p.e.workgroup[2]);
             // EMIT-148: the range form, which every dx12 device runs, prefers the size where the device has it

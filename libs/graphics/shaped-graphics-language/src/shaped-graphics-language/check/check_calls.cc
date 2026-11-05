@@ -604,6 +604,10 @@ type_id checker::check_call(function_scope& scope, ast::expr_id id, ast::call co
             }
     }
 
+    // CHK-485: a task stage's launch, whose payload is a struct of the program
+    if (text == "dispatch_mesh")
+        return check_dispatch_mesh(scope, id, call);
+
     return check_named_call(scope, id, call, text, seen_from(file, text), false);
 }
 

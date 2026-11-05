@@ -555,7 +555,8 @@ described_pipeline describe_pipeline(check::checked_module const& m,
     for (auto const s :
          {named_stage{p.vertex, &result.vertex}, named_stage{p.pixel, &result.pixel},
           named_stage{p.geometry, &result.geometry}, named_stage{p.tessellation_control, &result.tessellation_control},
-          named_stage{p.tessellation_evaluation, &result.tessellation_evaluation}, named_stage{p.mesh, &result.mesh}})
+          named_stage{p.tessellation_evaluation, &result.tessellation_evaluation}, named_stage{p.mesh, &result.mesh},
+          named_stage{p.task, &result.task}})
         if (check::is_valid(s.entry))
         {
             *s.name = m.at(s.entry).name;
@@ -608,7 +609,7 @@ described_pipeline describe_pipeline(check::checked_module const& m,
     // The host's code holds a shader per stage, so a reload that adds or drops one has nothing to build it with.
     auto stages = cc::string();
     for (auto const* name : {&result.vertex, &result.tessellation_control, &result.tessellation_evaluation,
-                             &result.geometry, &result.mesh, &result.pixel})
+                             &result.geometry, &result.task, &result.mesh, &result.pixel})
         if (!name->empty())
             stages += cc::format("{}{}", stages.empty() ? "" : ", ", *name);
     result.frozen.push_back(cc::format("stages = {}", stages));

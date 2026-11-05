@@ -73,7 +73,9 @@ struct_role input_role(flat_entry_point const& e)
 {
     // A compute parameter crosses no edge: it is a system value, or a struct of them.
     // a ray-tracing stage's payload is a plain struct the target hands over by reference
-    if (e.entry_stage == stage::compute || e.entry_stage >= stage::raygen)
+    // a mesh stage's payload is a plain struct, which its task stage stored in groupshared memory
+    if (e.entry_stage == stage::compute || e.entry_stage == stage::task || e.entry_stage == stage::mesh
+        || e.entry_stage >= stage::raygen)
         return struct_role::plain;
     // the geometry and the tessellation stages take an array of what the stage before hands on
     return e.entry_stage == stage::vertex ? struct_role::vertex_input : struct_role::stage_link;
@@ -1237,13 +1239,13 @@ void sgl::emit::impl::validate(check::checked_module const& m,
                                bool writes_prints)
 {
     auto v = validator{.m = m, .e = e, .errors = errors, .writes_prints = writes_prints};
-    if (e.input == e.result && e.entry_stage != stage::compute)
+    if (e.input == e.result && e.entry_stage != stage::compute && e.entry_stage != stage::task)
         v.report(error_kind::unsupported, e.function,
                  cc::format("one struct as both the parameter and the result: '{}'", m.name_of(e.input)));
 
     // A compute entry point has no pipeline edge at either end, so neither struct is judged as one, and a ray-tracing
     // stage's payload is handed over by reference rather than across an edge.
-    if (e.entry_stage != stage::compute && e.entry_stage < stage::raygen)
+    if (e.entry_stage != stage::compute && e.entry_stage != stage::task && e.entry_stage < stage::raygen)
     {
         // the geometry and the tessellation stages take an array of what crosses, and a geometry stage hands its
         // vertices on through its stream rather than its result
@@ -1252,7 +1254,7 @@ void sgl::emit::impl::validate(check::checked_module const& m,
             input = m.at(input).element;
         if (check::is_valid(input))
             v.edge_struct(input, input_role(e));
-        if (e.entry_stage == stage::geometry)
+        if (e.entry_stage == stage::geometry || e.entry_stage == stage::mesh)
         {
             for (auto const& local : e.locals)
                 if (local.kind == check::local_kind::parameter && m.at(local.type).kind == type_kind::stream)

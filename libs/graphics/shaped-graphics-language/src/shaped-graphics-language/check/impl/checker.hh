@@ -756,6 +756,10 @@ struct checker
     type_id check_stream_call(function_scope& scope, ast::expr_id id, ast::call const& call, type_id stream);
     /// `out.vertex(i, v)` of a mesh output, whose `v` is of the output's own type (CHK-482).
     type_id check_mesh_vertex(function_scope& scope, ast::expr_id id, ast::call const& call, type_id output);
+    /// `dispatch_mesh(x, y, z, payload)` of a task stage, whose payload is any struct of the program (CHK-485).
+    type_id check_dispatch_mesh(function_scope& scope, ast::expr_id id, ast::call const& call);
+    /// CHK-487: each pipeline's mesh stage takes the payload its task stage hands on, once every body is checked.
+    void judge_mesh_payloads();
     /// CHK-301 to CHK-306: an entry point of the geometry or a tessellation stage, which `judge_entry_point` hands on.
     void judge_primitive_stage(symbol_id id, cc::function_ref<void(cc::string_view)> invalid);
     /// The ray set a `rays` declaration made of `symbol`, and its ray types; null for any other symbol.

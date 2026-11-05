@@ -69,6 +69,7 @@ struct slib::pipeline_definition
     shader_asset_handle const* tessellation_control = nullptr;
     shader_asset_handle const* tessellation_evaluation = nullptr;
     shader_asset_handle const* mesh = nullptr;
+    shader_asset_handle const* task = nullptr;
     /// The layout its stages' binding lists state, from their generated group types.
     sg::pipeline_layout_handle (*acquire_layout)(sg::context& ctx) = nullptr;
     /// Null for a vertex stage that draws from no vertex buffer.

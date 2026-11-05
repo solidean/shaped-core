@@ -229,10 +229,9 @@ sgl::emit::emitted_text sgl::emit::emit_entry_point(check::checked_module const&
     {
         result.errors.push_back({.kind = error_kind::target_lacks_feature,
                                  .symbol = e.function,
-                                 .detail = cc::format("{} is a mesh stage and needs mesh_shader, which the metal "
-                                                      "target "
+                                 .detail = cc::format("{} is a {} stage and needs mesh_shader, which the metal target "
                                                       "does not write yet",
-                                                      e.name)});
+                                                      e.name, check::stage_name(e.entry_stage))});
         return result;
     }
 

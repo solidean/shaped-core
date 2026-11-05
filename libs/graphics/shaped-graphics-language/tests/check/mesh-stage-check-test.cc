@@ -119,3 +119,65 @@ TEST("sgl check - @workgroup memory and barriers belong to a mesh stage too")
                     "    output.set_counts(0u, 0u)\n")
           == "");
 }
+
+namespace
+{
+constexpr auto k_task = cc::string_view("struct handed:\n    blue: float\n"
+                                        "@task(1) fun ts():\n"
+                                        "    let h: handed = {blue = 1.0}\n"
+                                        "    dispatch_mesh(2u, 1u, 1u, h)\n"
+                                        "@mesh(1, vertices = 3, triangles = 1)\n"
+                                        "fun ms(h: handed, output: mut mesh_output[corner]):\n"
+                                        "    output.set_counts(0u, 0u)\n");
+} // namespace
+
+TEST("sgl check - a task stage and its mesh stage check as a pipeline (CHK-484 to CHK-487)")
+{
+    CHECK(with_head(cc::string(k_task)
+                    + "pipeline:\n    task = ts\n    mesh = ms\n    pixel = ps\n    format = .rgba8_unorm\n")
+          == "");
+}
+
+TEST("sgl check - a task stage dispatches once, as the last statement of its body (CHK-485)")
+{
+    auto const head = cc::string_view("struct handed:\n    blue: float\n");
+    auto const before = with_head(cc::string(head)
+                                  + "@task(1) fun ts():\n"
+                                    "    let h: handed = {blue = 1.0}\n"
+                                    "    dispatch_mesh(1u, 1u, 1u, h)\n"
+                                    "    let after = 1\n");
+    CHECK(before.contains("calls dispatch_mesh once, as the last statement")).dump("reports", before);
+    auto const none = with_head("@task(1) fun ts():\n    let x = 1\n");
+    CHECK(none.contains("calls dispatch_mesh once")).dump("reports", none);
+    auto const varying = with_head(cc::string(head)
+                                   + "@task(4) fun ts(@local_thread_index k: int):\n"
+                                     "    let h: handed = {blue = 1.0}\n"
+                                     "    if k == 0:\n"
+                                     "        dispatch_mesh(1u, 1u, 1u, h)\n");
+    CHECK(!varying.empty()).dump("reports", varying);
+}
+
+TEST("sgl check - a payload is a struct of the program (CHK-485)")
+{
+    auto const scalar = with_head("@task(1) fun ts():\n    dispatch_mesh(1u, 1u, 1u, 1.0)\n");
+    CHECK(scalar.contains("a payload is a struct of the program")).dump("reports", scalar);
+    auto const arity = with_head("@task(1) fun ts():\n    dispatch_mesh(1u, 1u, 1u)\n");
+    CHECK(arity.contains("dispatch_mesh takes three workgroup counts and the payload")).dump("reports", arity);
+}
+
+TEST("sgl check - a pipeline's mesh stage takes exactly the payload its task stage hands on (CHK-487)")
+{
+    auto const other
+        = with_head(cc::string(k_task) + "struct other:\n    red: float\n"
+                    + "@mesh(1, vertices = 3, triangles = 1)\n"
+                      "fun ms2(o: other, output: mut mesh_output[corner]):\n"
+                      "    output.set_counts(0u, 0u)\n"
+                    + "pipeline:\n    task = ts\n    mesh = ms2\n    pixel = ps\n    format = .rgba8_unorm\n");
+    CHECK(other.contains("ts hands its mesh stage handed, and ms2 takes other")).dump("reports", other);
+    auto const without_task
+        = with_head(cc::string(k_task) + "pipeline:\n    mesh = ms\n    pixel = ps\n    format = .rgba8_unorm\n");
+    CHECK(without_task.contains("ms takes a payload, which only a task stage hands it")).dump("reports", without_task);
+    auto const without_mesh
+        = with_head(cc::string(k_task) + "pipeline:\n    task = ts\n    pixel = ps\n    format = .rgba8_unorm\n");
+    CHECK(without_mesh.contains("a pipeline with a task stage has a mesh stage")).dump("reports", without_mesh);
+}
