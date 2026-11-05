@@ -23,12 +23,11 @@ namespace sg::backend::vulkan::test
 ///
 /// Synchronization validation is forced on here rather than defaulted, so a caller passing its own config still gets it.
 /// It is the only check that sees a hazard between two submissions.
-[[nodiscard]] inline vulkan_context_handle make_context(vulkan_config const& config = {.enable_validation_layers = true})
+[[nodiscard]] inline vulkan_context_handle make_context(vulkan_config config = {.enable_validation_layers = true})
 {
-    auto sync_config = config;
-    sync_config.enable_sync_validation = true;
+    config.enable_sync_validation = true;
 
-    auto ctx = sg::create_vulkan_context(sync_config);
+    auto ctx = sg::create_vulkan_context(config);
     if (ctx.has_error())
         return nullptr;
 

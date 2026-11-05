@@ -1,6 +1,6 @@
 ---
 created: 2026-11-05
-priority: next
+priority: normal
 tags: [xr, android, dev.py]
 parent: epic-xr
 ---
@@ -8,7 +8,7 @@ parent: epic-xr
 # A gradle-free Android APK, deployed and launched by `dev.py`
 
 The NDK presets build, but nothing packages an APK, so nothing runs on a Quest.
-Phase 1 of `epic-xr`, and useful beyond XR: any Android example or app needs it.
+`epic-xr` reaches the Quest over Link first; this is what runs it standalone, and it is useful beyond XR: any Android example or app needs it.
 
 ## Wanted
 

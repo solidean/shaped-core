@@ -1,6 +1,7 @@
 #pragma once
 
 #include <clean-core/common/assert.hh>
+#include <clean-core/error/optional.hh>
 #include <clean-core/function/unique_function.hh>
 #include <clean-core/thread/mutex.hh>
 #include <clean-core/thread/thread_pump.hh>
@@ -102,6 +103,13 @@ struct sg::backend::dx12::dx12_config
 
     /// The adapter the device is created on.
     dx12_adapter adapter = dx12_adapter::hardware;
+
+    /// The adapter with this LUID, in place of `adapter`: what an XR runtime names, or another context's `sg::adapter_info::luid`.
+    /// Creation fails where no adapter has it, rather than falling back to another, and where `SC_DX12_ADAPTER` hides the one that does.
+    cc::optional<u64> adapter_luid;
+
+    /// The least feature level the device is created at, for a runtime that demands more than sg's own floor of 11_0.
+    D3D_FEATURE_LEVEL minimum_feature_level = D3D_FEATURE_LEVEL_11_0;
 
     /// What `execution()` reports: `may_block` for a real renderer, `never_block` to run this context under a browser's rules on the dev box.
     ///
@@ -641,6 +649,11 @@ public:
 
     // create_dx12_context fills these in once it has picked an adapter, like every other member here.
     using sg::context::set_adapter_info;
+
+    /// The native objects this context runs on, for whoever must name them to another API, such as an XR runtime's session.
+    /// Both are owned by the context; a caller that keeps one past it holds its own reference.
+    [[nodiscard]] ID3D12Device* device() const { return _device.Get(); }
+    [[nodiscard]] ID3D12CommandQueue* queue() const { return _queue.Get(); }
 
     /// The context's stat totals, for the transfer systems that count into them.
     [[nodiscard]] sg::impl::stat_totals& stat_totals() { return _stats; }
