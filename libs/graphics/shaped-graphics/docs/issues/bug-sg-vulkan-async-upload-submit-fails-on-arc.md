@@ -3,6 +3,8 @@ created: 2026-11-05
 refs:
   - file: libs/graphics/shaped-graphics/backends/vulkan/src/shaped-graphics/backends/vulkan/vulkan_upload_async.cc
   - test: shaped-graphics-vulkan-test
+claimed-by: Claude (for Philip Trettner)
+claimed-at: 2026-11-05T14:23Z
 ---
 
 # vkQueueSubmit (async upload) fails under the full vulkan backend suite on an Intel Arc B580
