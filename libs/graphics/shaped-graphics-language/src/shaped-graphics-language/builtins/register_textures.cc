@@ -1,5 +1,6 @@
 #include <clean-core/string/format.hh>
 #include <shaped-graphics-language/builtins/register.hh>
+#include <shaped-graphics-language/builtins/texture_calls.hh>
 #include <shaped-graphics-language/check/resources.hh>
 
 using namespace sgl;
@@ -18,28 +19,8 @@ using check::value_kind;
 using leaves = cc::span<scalar const>;
 using result = cc::vector<scalar>;
 
-enum class op : u8
-{
-    sample,
-    sample_level,
-    sample_bias,
-    sample_grad,
-    gather,
-    sample_compare,
-    sample_compare_level,
-    gather_compare,
-    load,
-    size,
-    layer_count,
-    level_count,
-    sample_count,
-    image_load,
-    image_store,
-    image_size,
-    image_layer_count,
-};
-
 using check::texture_shape;
+using namespace sgl::builtins::texture;
 
 /// What a shape's calls need to know of it beyond the check pass's table.
 struct shape_traits
@@ -77,55 +58,21 @@ shape_traits traits_of(texture_shape s)
             .is_cube = is_cube,
             .is_ms = s == texture_shape::d2_ms || s == texture_shape::d2_ms_array};
 }
+} // namespace
 
-/// One texture call, packed into a record's `spelling::data`.
-struct call
+sgl::builtins::texture::shape_axes sgl::builtins::texture::axes_of(check::texture_shape s)
 {
-    op what = op::sample;
-    texture_shape where = texture_shape::d2;
-    /// The texel's width, 1 to 4; what a sample of a depth texture gives is 1.
-    int width = 4;
-    value_kind kind = value_kind::scalar_float;
-    bool is_depth = false;
-    bool has_offset = false;
+    auto const t = traits_of(s);
+    return {.dim = t.dim, .is_array = t.is_array, .is_cube = t.is_cube, .is_ms = t.is_ms};
+}
 
-    [[nodiscard]] u32 pack() const
-    {
-        return u32(what) | u32(where) << 5 | u32(width) << 9 | u32(kind) << 12 | u32(is_depth) << 15
-             | u32(has_offset) << 16;
-    }
-    [[nodiscard]] static call unpack(u32 d)
-    {
-        return {.what = op(d & 31u),
-                .where = texture_shape((d >> 5) & 15u),
-                .width = int((d >> 9) & 7u),
-                .kind = value_kind((d >> 12) & 7u),
-                .is_depth = ((d >> 15) & 1u) != 0,
-                .has_offset = ((d >> 16) & 1u) != 0};
-    }
-};
-
-// ---- where each argument stands, which the signature and every writer agree on ----------------------------------
-
-/// Positions in a call's arguments; -1 for one the call does not take.
-struct argument_layout
-{
-    int sampler = -1;
-    int layer = -1;
-    /// The level, the bias, the component, the reference, the sample or the value, by what the call is.
-    int first = -1;
-    /// The second gradient, or a compare's level.
-    int second = -1;
-    int offset = -1;
-};
-
-bool takes_sampler(op o)
+bool sgl::builtins::texture::takes_sampler(op o)
 {
     return o == op::sample || o == op::sample_level || o == op::sample_bias || o == op::sample_grad || o == op::gather
         || o == op::sample_compare || o == op::sample_compare_level || o == op::gather_compare;
 }
 
-argument_layout layout_of(call const& c)
+sgl::builtins::texture::argument_layout sgl::builtins::texture::layout_of(call const& c)
 {
     auto const& s = traits_of(c.where);
     auto result = argument_layout();
@@ -179,7 +126,9 @@ argument_layout layout_of(call const& c)
     return result;
 }
 
-// ---- the interpreter: no texture has texels it could read, so every read gives zeros ------------------------------
+namespace
+{
+// ---- what a record evaluates to where the interpreter reads no texel: zeros, which it never runs ----------------
 
 template <int Width, value_kind Kind>
 void zeros(leaves, result& out)
@@ -743,7 +692,8 @@ void add_texture_call(registry& r, call const& c, cc::string_view texture_type)
     auto const id = r.add(function_record{.signature = with.signature,
                                           .evaluate = with.evaluate,
                                           .write = spelled,
-                                          .uses_derivatives = with.uses_derivatives});
+                                          .uses_derivatives = with.uses_derivatives,
+                                          .is_texture_call = true});
     if (!takes_sampler(c.what))
         return;
     auto const without = texture_record(c, texture_type, false);
@@ -751,7 +701,8 @@ void add_texture_call(registry& r, call const& c, cc::string_view texture_type)
                           .evaluate = with.evaluate,
                           .write = spelled,
                           .with_default_sampler = id,
-                          .uses_derivatives = with.uses_derivatives});
+                          .uses_derivatives = with.uses_derivatives,
+                          .is_texture_call = true});
 }
 
 void add_sampled_shape(registry& r, shape_traits const& s)
@@ -837,6 +788,7 @@ void add_image_shape(registry& r, shape_traits const& s)
                           .hlsl_names = k_textures_hlsl,
                           .wgsl_names = k_textures_wgsl,
                           .msl_names = k_textures_msl},
+                .is_texture_call = true,
             });
             auto store = c;
             store.what = op::image_store;
@@ -854,6 +806,7 @@ void add_image_shape(registry& r, shape_traits const& s)
                           .hlsl_names = k_textures_hlsl,
                           .wgsl_names = k_textures_wgsl,
                           .msl_names = k_textures_msl},
+                .is_texture_call = true,
                 .is_image_store = true,
             });
         }
@@ -881,12 +834,14 @@ void add_sizes(registry& r, shape_traits const& s, cc::string_view type_name_tex
         = cc::format("@pure fun size(t: {}{}) -> {}", type_name_text, takes_level ? ", level: int = 0" : "", result),
         .evaluate = evaluate,
         .write = spelled(is_image ? op::image_size : op::size),
+        .is_texture_call = true,
     });
     if (s.is_array)
         r.add(function_record{
             .signature = cc::format("@pure fun layer_count(t: {}) -> int", type_name_text),
             .evaluate = zero_int,
             .write = spelled(is_image ? op::image_layer_count : op::layer_count),
+            .is_texture_call = true,
         });
     if (is_image)
         return;
@@ -895,12 +850,14 @@ void add_sizes(registry& r, shape_traits const& s, cc::string_view type_name_tex
             .signature = cc::format("@pure fun sample_count(t: {}) -> int", type_name_text),
             .evaluate = zero_int,
             .write = spelled(op::sample_count),
+            .is_texture_call = true,
         });
     else
         r.add(function_record{
             .signature = cc::format("@pure fun level_count(t: {}) -> int", type_name_text),
             .evaluate = zero_int,
             .write = spelled(op::level_count),
+            .is_texture_call = true,
         });
 }
 } // namespace

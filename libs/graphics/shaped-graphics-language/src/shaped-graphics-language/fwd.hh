@@ -327,6 +327,9 @@ enum class value_kind : u8;
 struct scalar;
 struct value;
 struct buffer_contents;
+struct texture_contents;
+struct sampler_binding;
+struct texture_data;
 enum class run_status : u8;
 struct run_inputs;
 struct member_data;
@@ -384,3 +387,11 @@ struct debug_value;
 struct debug_site;
 struct options;
 } // namespace sgl::emit
+
+namespace sgl::builtins::texture
+{
+enum class op : u8;
+struct argument_layout;
+struct shape_axes;
+struct call;
+} // namespace sgl::builtins::texture

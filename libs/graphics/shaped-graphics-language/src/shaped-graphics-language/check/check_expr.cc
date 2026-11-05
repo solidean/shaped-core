@@ -879,11 +879,6 @@ type_id checker::check_symbol_value(function_scope& scope,
         auto is_handed = false;
         for (auto const h : handed)
             is_handed = is_handed || h == id;
-        if (scope.is_test)
-        {
-            unsupported(file, where, "a file-scope sampler in a test, which samples no texture");
-            break;
-        }
         if (!is_valid(scope.function) || !is_handed)
         {
             unsupported(file, where, "a sampler as a value; hand it to a builtin, as in `t.sample(uv, smp)`");

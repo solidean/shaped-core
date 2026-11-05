@@ -122,21 +122,9 @@ void checker::check_test(i32 index)
     auto const& body = d.node.as<ast::test_decl>().body;
     auto const info = out.at(test.symbol).info;
 
-    // CHK-333: what a test lists is bound by its driver, which gives values, buffers and acceleration structures alone
+    // CHK-333: what a test lists is bound by its driver, textures, images and samplers included (EVAL-120)
     auto is_list_failed = false;
     auto const bindings = binding_list_of(file, d.node.as<ast::test_decl>().bindings, is_list_failed);
-    for (auto const binding : bindings)
-        for (auto const& member : out.at(out.bindings[out.at(binding).info].members))
-        {
-            auto const kind = out.at(member.type).kind;
-            if (kind == type_kind::texture || kind == type_kind::image || kind == type_kind::sampler)
-            {
-                is_list_failed = true;
-                unsupported(file, test.where,
-                            cc::format("a test that lists {}, whose {} is a texture, an image or a sampler",
-                                       out.at(binding).name, member.name));
-            }
-        }
     out.functions.own(info).bindings = {.first = u32(out.binding_lists.size()), .count = u32(bindings.size())};
     out.binding_lists.push_back_range(bindings);
 

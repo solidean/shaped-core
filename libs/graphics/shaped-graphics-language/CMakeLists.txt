@@ -96,6 +96,7 @@ add_library(shaped-graphics-language
     src/shaped-graphics-language/legalize/legalize_onces.cc
 
     src/shaped-graphics-language/interpret/interpret.cc
+    src/shaped-graphics-language/interpret/textures.cc
 
     src/shaped-graphics-language/test/run_tests.cc
 
@@ -245,6 +246,7 @@ target_sources(shaped-graphics-language
     src/shaped-graphics-language/builtins/impl/soft_math.hh
     src/shaped-graphics-language/builtins/register.hh
     src/shaped-graphics-language/builtins/registry.hh
+    src/shaped-graphics-language/builtins/texture_calls.hh
 
     src/shaped-graphics-language/check/check.hh
     src/shaped-graphics-language/check/checked_module.hh
@@ -263,6 +265,7 @@ target_sources(shaped-graphics-language
     src/shaped-graphics-language/legalize/impl/legalizer.hh
     src/shaped-graphics-language/legalize/impl/walk.hh
 
+    src/shaped-graphics-language/interpret/impl/textures.hh
     src/shaped-graphics-language/interpret/interpret.hh
     src/shaped-graphics-language/interpret/scalar.hh
 
@@ -433,6 +436,7 @@ if(SC_BUILD_TESTS)
         tests/interpret/expect-test.cc
         tests/interpret/interpret-test.cc
         tests/interpret/run-tests-test.cc
+        tests/interpret/texture-interpret-test.cc
         tests/interpret/message-test.cc
 
         tests/legalize/flat-test-support.hh

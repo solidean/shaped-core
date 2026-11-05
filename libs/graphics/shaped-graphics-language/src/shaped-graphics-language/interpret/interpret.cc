@@ -4,6 +4,7 @@
 #include <clean-core/math/bit.hh>
 #include <clean-core/string/format.hh>
 #include <shaped-graphics-language/builtins/impl/soft_math.hh>
+#include <shaped-graphics-language/interpret/impl/textures.hh>
 #include <shaped-graphics-language/legalize/impl/walk.hh>
 
 using namespace sgl;
@@ -96,6 +97,11 @@ struct machine
     cc::vector<workgroup_cell> workgroup;
     /// Parallel to `out.buffers`: whether the run stored to that buffer, which is what the outcome keeps.
     cc::vector<bool> is_stored;
+    /// Every texture and image the run binds, which an image store changes, and whether one did.
+    cc::vector<texture_contents> textures;
+    cc::vector<bool> is_texture_stored;
+    /// What a call reads of a texture the run binds nothing to: 0 by 0, with no level (EVAL-121).
+    texture_contents unbound_texture;
     /// Each weak compare-exchange of the source that met `expected` so far, and whether that last attempt failed.
     /// One of the source is one wherever it was inlined (EVAL-100).
     struct weak_exchange
@@ -364,6 +370,119 @@ struct machine
         return {};
     }
 
+    /// The resource `id` names: a binding member, or an element of a binding array of them, whose index runs here.
+    flow resource_of(flat_expr_id id, symbol_id& binding, i32& member, i32& element)
+    {
+        if (!is_known(e, id))
+            return type_error("a resource that names nothing");
+        element = 0;
+        auto named = id;
+        if (auto const* const array = e.at(id).node.try_as<flat_element>())
+        {
+            auto index = value();
+            if (auto const f = eval(array->index, index); !f.is_normal())
+                return f;
+            if (index.leaves.size() != 1)
+                return type_error("an index into a binding array that is no int");
+            element = index.leaves[0].as_int();
+            named = array->object;
+        }
+        auto const* const b = is_known(e, named) ? e.at(named).node.try_as<flat_binding_member>() : nullptr;
+        if (b == nullptr)
+            return type_error("a resource that no binding member names");
+        binding = b->binding;
+        member = b->member;
+        return {};
+    }
+
+    /// EVAL-123: the sampler `id` names: a file-scope one or a static member, whose state the source sets, or a
+    /// dynamic member, whose state the driver sets and otherwise `sampler_state`'s default.
+    flow sampler_of(flat_expr_id id, sampler_state& state)
+    {
+        if (!is_known(e, id))
+            return type_error("a sampler that names nothing");
+        if (auto const* const file = e.at(id).node.try_as<flat_file_sampler>())
+        {
+            auto const info = m.at(file->sampler).info;
+            if (info < 0 || info >= m.samplers.size())
+                return type_error("a file-scope sampler with no state");
+            state = m.samplers[info];
+            return {};
+        }
+        auto binding = symbol_id::none;
+        auto member = i32(-1);
+        auto element = i32(0);
+        if (auto const f = resource_of(id, binding, member, element); !f.is_normal())
+            return f;
+        auto const members = m.at(m.bindings[m.at(binding).info].members);
+        if (member < 0 || member >= members.size())
+            return type_error("a sampler member its binding does not have");
+        if (auto const s = members[member].static_sampler; s >= 0 && s < m.samplers.size())
+        {
+            state = m.samplers[s];
+            return {};
+        }
+        state = sampler_state();
+        for (auto const& bound : inputs.samplers)
+            if (bound.binding == binding && bound.member == member && bound.element == element)
+                state = bound.state;
+        return {};
+    }
+
+    /// EVAL-120: a texture or an image call, on the texels the run binds; its arguments run left to right.
+    flow texture_call(flat_expr const& x, flat_call const& c, builtins::function_record const& record, value& result)
+    {
+        auto const call = builtins::texture::call::unpack(record.write.data);
+        auto const layout = builtins::texture::layout_of(call);
+        if (!is_known(e, c.arguments) || c.arguments.count == 0)
+            return type_error(cc::format("a call of '{}' without its texture", record.name));
+        auto const arguments = e.at(c.arguments);
+        auto args = cc::vector<value>();
+        args.resize_to_defaulted(arguments.size());
+        auto binding = symbol_id::none;
+        auto member = i32(-1);
+        auto element = i32(0);
+        auto state = sampler_state();
+        auto has_sampler = false;
+        for (auto k = isize(0); k < arguments.size(); ++k)
+        {
+            auto f = flow();
+            if (k == 0)
+                f = resource_of(arguments[0], binding, member, element);
+            else if (k == layout.sampler)
+            {
+                f = sampler_of(arguments[k], state);
+                has_sampler = true;
+            }
+            else
+                f = eval(arguments[k], args[k]);
+            if (!f.is_normal())
+                return f;
+        }
+
+        auto texture = isize(-1);
+        for (auto i = isize(0); i < textures.size(); ++i)
+            if (textures[i].binding == binding && textures[i].member == member && textures[i].element == element)
+                texture = i;
+        unbound_texture = texture_contents{.binding = binding, .member = member, .element = element};
+        auto& contents = texture >= 0 ? textures[texture] : unbound_texture;
+
+        result.type = x.type;
+        result.leaves.clear();
+        auto stored = false;
+        if (auto const failure
+            = run_texture_call(call, contents, has_sampler ? &state : nullptr, args, result.leaves, stored);
+            !failure.is_ok())
+            return fail(failure.status, cc::format("{}, in a call of '{}'", failure.detail, record.name));
+        if (stored && texture >= 0)
+            is_texture_stored[texture] = true;
+        if (result.leaves.size() != leaf_count_of(m, x.type))
+            return type_error(cc::format("a call of '{}' with a result of the wrong type", record.name));
+        if (!c.is_pure)
+            out.trace.push_back(result);
+        return {};
+    }
+
     flow call(flat_expr const& x, flat_call const& c, value& result)
     {
         // CHK-427: a body in a target's own text runs where that target does, never here
@@ -375,6 +494,8 @@ struct machine
             return atomic_call(x, c, *record, result);
         if (auto const* const record = m.builtin_function(c.intrinsic); record != nullptr && record->bytes_words > 0)
             return bytes_call(x, c, *record, result);
+        if (auto const* const record = m.builtin_function(c.intrinsic); record != nullptr && record->is_texture_call)
+            return texture_call(x, c, *record, result);
         auto args = cc::vector<value>();
         if (auto const f = eval_all(c.arguments, args); !f.is_normal())
             return f;
@@ -1407,6 +1528,8 @@ outcome sgl::check::interpret(checked_module const& m,
     auto run = machine{.m = m, .e = e, .inputs = inputs, .limits = limits, .fuel = limits.fuel};
     run.out.buffers = inputs.buffers;
     run.is_stored.resize_to_filled(inputs.buffers.size(), false);
+    run.textures = inputs.textures;
+    run.is_texture_stored.resize_to_filled(inputs.textures.size(), false);
     run.out.sites.resize_to_defaulted(e.check_sites.size());
     run.locals.resize_to_defaulted(e.locals.size());
     run.is_set.resize_to_filled(e.locals.size(), false);
@@ -1446,6 +1569,9 @@ outcome sgl::check::interpret(checked_module const& m,
         if (run.is_stored[i])
             stored.push_back(cc::move(run.out.buffers[i]));
     run.out.buffers = cc::move(stored);
+    for (auto i = isize(0); i < run.textures.size(); ++i)
+        if (run.is_texture_stored[i])
+            run.out.images.push_back(cc::move(run.textures[i]));
     return cc::move(run.out);
 }
 
@@ -1485,6 +1611,52 @@ void read_leaves(cc::span<byte const> bytes, cc::span<scalar> leaves)
         if (is_64_bit(leaf.kind))
             leaf.high = word_at();
     }
+}
+
+/// The contents of one texture or image of type `t` from what a driver binds to it (EVAL-120).
+cc::result<texture_contents> texture_of(checked_module const& m, check::type_info const& t, texture_data const& d)
+{
+    auto contents = texture_contents{.width = d.width,
+                                     .height = d.height,
+                                     .depth = d.depth,
+                                     .layers = d.layers,
+                                     .levels = d.levels,
+                                     .samples = d.samples};
+    // a texel as the shader reads it: a depth texture's one float, an image's format's channels, a texture's element
+    auto texel = cc::vector<scalar>();
+    if (t.kind == type_kind::image && t.format >= 0)
+    {
+        auto const& format = k_image_formats[t.format];
+        for (auto c = 0; c < format.channels; ++c)
+            texel.push_back({.kind = format.component});
+    }
+    else if (t.is_depth)
+        texel.push_back(scalar::of(0.0f));
+    else
+        texel = zero_value(m, t.element).leaves;
+    contents.channels = i32(texel.size());
+    auto const axes = builtins::texture::axes_of(t.shape);
+    if (d.width < 1 || d.height < 1 || d.depth < 1 || d.layers < 1 || d.levels < 1 || d.samples < 1)
+        return cc::error(cc::format("a texture of {} by {} by {}, {} layers, {} levels and {} samples, which holds no "
+                                    "texel",
+                                    d.width, d.height, d.depth, d.layers, d.levels, d.samples));
+    if (axes.is_cube && d.layers % 6 != 0)
+        return cc::error(cc::format("a cube of {} faces, which is no whole number of cubes", d.layers));
+    auto texels = isize(0);
+    for (auto l = 0; l < d.levels; ++l)
+    {
+        auto const extent = [&](i32 n, bool has) { return !has ? 1 : (n >> l) < 1 ? 1 : n >> l; };
+        texels += isize(extent(d.width, true)) * extent(d.height, axes.dim >= 2)
+                * extent(d.depth, axes.dim == 3 && !axes.is_cube) * d.layers * d.samples;
+    }
+    auto const bytes = !d.mutable_texels.empty() ? cc::span<byte const>(d.mutable_texels.span()) : d.texels.span();
+    if (bytes.size() != texels * contents.channels * 4)
+        return cc::error(cc::format("{} bytes of texels, where {} texels of {} channels take {}", bytes.size(), texels,
+                                    contents.channels, texels * contents.channels * 4));
+    for (auto k = isize(0); k < texels; ++k)
+        contents.texels.push_back_range(texel);
+    read_leaves(bytes, contents.texels);
+    return contents;
 }
 
 member_data const* find_member(driver_bindings const& bound, cc::string_view binding, cc::string_view member)
@@ -1527,6 +1699,34 @@ cc::result<run_inputs> sgl::check::resolve_inputs(checked_module const& m,
                              : !d->mutable_bytes.empty() ? cc::span<byte const>(d->mutable_bytes.span())
                                                          : d->bytes.span();
             auto const& type = m.at(member.type);
+            // EVAL-120: a texture, an image, a sampler, or a binding array of them
+            auto const& resource = type.kind == type_kind::array ? m.at(type.element) : type;
+            if (resource.kind == type_kind::texture || resource.kind == type_kind::image)
+            {
+                auto const count = type.kind == type_kind::array ? type.count : 1;
+                if (d != nullptr && d->textures.size() > count)
+                    return cc::error(cc::format("{}.{} is bound {} textures, and holds {}", name, member.name,
+                                                d->textures.size(), count));
+                for (auto k = isize(0); d != nullptr && k < d->textures.size(); ++k)
+                {
+                    auto made = texture_of(m, resource, d->textures[k]);
+                    if (made.has_error())
+                        return cc::error(cc::format("{}.{}: {}", name, member.name, made.error().to_string()));
+                    auto contents = cc::move(made.value());
+                    contents.binding = binding;
+                    contents.member = i32(i);
+                    contents.element = i32(k);
+                    inputs.textures.push_back(cc::move(contents));
+                }
+                continue;
+            }
+            if (resource.kind == type_kind::sampler)
+            {
+                for (auto k = isize(0); d != nullptr && k < d->samplers.size(); ++k)
+                    inputs.samplers.push_back(
+                        {.binding = binding, .member = i32(i), .element = i32(k), .state = d->samplers[k]});
+                continue;
+            }
             if (type.kind == type_kind::acceleration_structure)
             {
                 inputs.acceleration_roots.push_back(d == nullptr ? 0 : d->acceleration_root);
@@ -1587,6 +1787,23 @@ void sgl::check::write_back(checked_module const& m, outcome const& o, driver_bi
         for (auto const& leaf : b.leaves)
             for (auto k = 0; k < leaf_bytes(leaf.kind); ++k)
                 d->mutable_bytes[at++] = byte(u8(leaf.wide_bits() >> (8 * k)));
+    }
+    for (auto const& image : o.images)
+    {
+        auto const members = m.at(m.bindings[m.at(image.binding).info].members);
+        if (image.member < 0 || image.member >= members.size())
+            continue;
+        auto const* const d = find_member(bound, m.at(image.binding).name, members[image.member].name);
+        if (d == nullptr || image.element < 0 || image.element >= d->textures.size())
+            continue;
+        auto& texels = d->textures[image.element].mutable_texels;
+        if (texels.empty())
+            continue;
+        CC_ASSERT(texels.size() == image.texels.size() * 4, "a run never changes the size of an image");
+        auto at = isize(0);
+        for (auto const& leaf : image.texels)
+            for (auto k = 0; k < 4; ++k)
+                texels[at++] = byte(u8(leaf.bits >> (8 * k)));
     }
 }
 
@@ -1678,6 +1895,11 @@ cc::string sgl::check::dump(outcome const& o)
     {
         out += " | buffer";
         write(out, value{.leaves = b.leaves});
+    }
+    for (auto const& image : o.images)
+    {
+        out += " | image";
+        write(out, value{.leaves = image.texels});
     }
     return out;
 }

@@ -263,6 +263,9 @@ struct sgl::builtins::function_record
     /// Takes screen-space derivatives implicitly, as a sample that picks its own level does.
     /// So every pixel of the quad reaches the call together (CHK-282).
     bool uses_derivatives = false;
+    /// A texture or image call, whose `write.data` packs what it is (`texture::call`); the interpreter reads the
+    /// texels the run binds rather than evaluate it (EVAL-120).
+    bool is_texture_call = false;
     /// Waits for every thread of the workgroup, so every one of them reaches the call or none does (CHK-282).
     bool is_barrier = false;
     /// Updates its first argument, an atomic, in one step (EVAL-93): the evaluator is given the atomic's value and then
