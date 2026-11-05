@@ -3,7 +3,7 @@
 How SGL compares with the other ways to write one set of shaders for DX12, Vulkan, WebGPU and Metal.
 Every row is judged for a renderer that targets all four, WebGPU in a browser included, and wants hardware ray tracing wherever a platform has it.
 
-**As of 2026-11-02**; SGL's E3 and E4 as of 2026-11-03, its B8 and B9 as of 2026-11-04, its A5, A7, B10, B11, F2 and F7 as of 2026-11-05.
+**As of 2026-11-02**; SGL's E3 and E4 as of 2026-11-03, its B8 and B9 as of 2026-11-04, its A5, A7, B3, B10, B11, B12, F2 and F7 as of 2026-11-05.
 The other columns move fast, Slang's Metal and WGSL support above all, so each cell carries a source and the date it was checked; see [Sources](#sources).
 
 ## Columns
@@ -48,7 +48,7 @@ A per-target cell reads `dx12 / vulkan / metal / webgpu`.
 |---|---|---|---|---|---|
 | **B1** Portable by default | ❌ each hop accepts or rejects on its own, late | ⚠️ capabilities reject missing features statically; behaviour is implementation-defined | ⚠️ designed portable; Naga and Tint disagree on uniformity | ❌ | ✅ one check judges every target; a non-portable form needs a feature (floats: B3) |
 | **B2** Integer semantics | ❌ per target | ⚠️ unsigned wrap defined; the rest unspecified | ✅ fully defined, polyfilled on every target | ❌ division overflow, ÷0 and wide shifts undefined | ⚠️ wrap, truncating `/`, signed `%`, masked shifts defined; ÷0 and `INT_MIN / -1` undefined, a constant one is an error, and a profile reports or ends a run one (B10, B11) |
-| **B3** Float semantics | ⚠️ per target; Metal fast math by default | ⚠️ implementation-defined; `precise` has no effect on Metal | ⚠️ loose by spec; Metal relaxed by default in Dawn and wgpu | ❌ per target | ⚠️ the spec says IEEE f32, which Metal keeps in safe math mode, while Vulkan and WebGPU may still assume no NaN or infinity 🗺️ [question](../issues/question-sgl-float-semantics-on-every-target.md) |
+| **B3** Float semantics | ⚠️ per target; Metal fast math by default | ⚠️ implementation-defined; `precise` has no effect on Metal | ⚠️ loose by spec; Metal relaxed by default in Dawn and wgpu | ❌ per target | ⚠️ the exact meaning is IEEE f32, which the interpreter computes; on a GPU an entry point's `@float` level licenses named departures, `fast` by default (B12) |
 | **B4** Out-of-bounds access | ⚠️ per target and robustness setting | ⚠️ undefined by spec | ⚠️ bounded outcomes, where the translator is configured for them | ❌ undefined unless robustness is on | ⚠️ undefined; the interpreter reports it as a program error, and a profile guards an array index (B10, B11) |
 | **B5** Uniformity, derivatives, discard | ⚠️ no uniformity check; a failure surfaces at Tint or in the browser | ⚠️ no model of WGSL uniformity; open bugs | ⚠️ Tint enforces it; Naga skips derivative checks | ⚠️ no uniformity analysis | ⚠️ its own uniformity pass for every target; discard's helper lanes on metal 🗺️ [feat](../issues/feat-sgl-discard-helper-emulation.md) |
 | **B6** Float and 64-bit atomics | ⚠️ 64-bit on DX12 and Vulkan; reported by whichever hop fails | ⚠️ neither on Metal or WGSL; a static capability error | ⚠️ core has 32-bit only; native-only extensions | ⚠️ SPIRV-Cross refuses 64-bit atomics for MSL | ⚠️ 32-bit only; float and 64-bit refused statically 🗺️ [feat](../issues/feat-sgl-float-and-64-bit-atomics.md) |
@@ -57,6 +57,7 @@ A per-target cell reads `dx12 / vulkan / metal / webgpu`.
 | **B9** Inline target code | ⚠️ inline SPIR-V, Vulkan only | ✅ `__target_switch`, `__intrinsic_asm`, `spirv_asm` | ⚠️ whole-module passthrough in wgpu only | ❌ | ❌ a design: function bodies in target text under `const if` on target, feature and option 🗺️ [incubator](../spec/incubator/specialization.md) |
 | **B10** Finding UB in development | ⚠️ the API validation layers catch out-of-bounds memory, per API and against its objects; nothing checks an integer division | ⚠️ the same API layers; none of its own | ❌ defined rather than reported: a division by zero has a value, an access is clamped, and nothing says so | ⚠️ the same API layers | ⚠️ the `report` profile logs a division by zero or an array index past its array at its `.sgl` line, with its operands, on dx12, vulkan and webgpu; metal ends the run without a report; buffers, `bytes` and maths builtins not yet 🗺️ [epic](../issues/epic-sgl-robustness-profiles.md) |
 | **B11** Containing UB in production | ⚠️ per API: vulkan's robust buffer access, dx12's zero for an out-of-range descriptor; integer division per target | ⚠️ the same | ✅ every access bounded and every integer operation defined, polyfilled on every target | ⚠️ vulkan's robustness alone | ⚠️ the `abort` profile ends the invocation, with no debug window; writes before an end that waits for a barrier are not masked 🗺️ [feat](../issues/feat-sgl-guard-write-masking.md); a profile that defines every result 🗺️ [feat](../issues/feat-sgl-defined-profile.md) |
+| **B12** Float conformance and fast modes | ⚠️ DXC's `-Gis` per compile and `precise` per variable, `-denorm` from SM 6.2; the later hops carry neither, and nothing refuses a target that drops them | ⚠️ `-fp-mode precise` or `fast` per compile, and denormal modes for SPIR-V and DXIL; nothing documented for Metal or WGSL ❓ | ❌ one mode, whose implementations may assume no NaN or infinity | ⚠️ `precise` per variable, `NoContraction` in SPIR-V; nothing keeps NaNs or infinities | ⚠️ a ladder from `fast` to `ieee`, stated per function and kept per entry point; dx12 keeps every level, metal up to `precise`, vulkan every level where the device has its float controls; webgpu refuses above `fast` unless the host weakens it 🗺️ [feat](../issues/feat-sgl-float-level-per-target.md); `x != x` at `fast` warns |
 
 ## C. Host integration and reflection
 
@@ -204,7 +205,7 @@ Per row and column:
   - Slang: SLANG issue 13689
   - WGSL: WGSL §15.7, TINT `ShaderModuleMTL.mm`
   - GLSL + chain: GLSL
-  - SGL: EVAL-6, and sg's metal backend `metal_common.cc`, which compiles with default options
+  - SGL: EVAL-6, CHK-435, sg's metal backend `metal_common.cc` (2026-11-05)
 - **B4**
   - HLSL + chain: WGSL §6.5.7, Vulkan robustness
   - Slang: SLANGSPEC
@@ -252,6 +253,12 @@ Per row and column:
   - WGSL: WGSL §8, §6.5.7, TINT robustness transform
   - GLSL + chain: Vulkan `VK_EXT_robustness2`
   - SGL: LEGAL-65, [epic-sgl-robustness-profiles](../issues/epic-sgl-robustness-profiles.md) (2026-11-05)
+- **B12**
+  - HLSL + chain: DXC `-help` (`-Gis`, `-denorm`), SXC, TINT
+  - Slang: SLANG `docs/command-line-slangc-reference.md` (`-fp-mode`, `-denorm-mode-fp16/32/64`), read 2026-11-05
+  - WGSL: WGSL §15.7
+  - GLSL + chain: GLSL §4.7 `precise`, glslang
+  - SGL: CHK-435, CHK-436, EMIT-185, sg `tests/compute/compute-float-specials-test.cc` (2026-11-05)
 - **C1**
   - HLSL + chain: D3D12 shader reflection docs
   - Slang: SLANG reflection guide

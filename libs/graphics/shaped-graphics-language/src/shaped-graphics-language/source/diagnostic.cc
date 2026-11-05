@@ -246,6 +246,8 @@ cc::string_view sgl::to_string(diagnostic_kind kind)
         return "unroll-too-long";
     case diagnostic_kind::invalid_target_text:
         return "invalid-target-text";
+    case diagnostic_kind::nan_test_at_fast:
+        return "nan-test-at-fast";
     case diagnostic_kind::missing_sampler:
         return "missing-sampler";
     case diagnostic_kind::invalid_constant_argument:
@@ -522,6 +524,8 @@ cc::string_view sgl::summary_of(diagnostic_kind kind)
         return "an unrolled for that would write more copies of its body than the compiler writes, and stays a loop";
     case diagnostic_kind::invalid_target_text:
         return "a body in a target's own text that stands where none may, or names what it may not";
+    case diagnostic_kind::nan_test_at_fast:
+        return "a float compared with itself, a NaN test that code compiled at @float(.fast) may fold";
     case diagnostic_kind::unknown_feature:
         return "a `require` of a name that is no feature a shader can use";
     case diagnostic_kind::feature_not_declared:
@@ -668,6 +672,7 @@ sgl::severity sgl::default_severity_of(diagnostic_kind kind)
     case diagnostic_kind::unused_require:
     case diagnostic_kind::generic_not_instantiated:
     case diagnostic_kind::unroll_too_long:
+    case diagnostic_kind::nan_test_at_fast:
         return severity::warning;
     }
     CC_UNREACHABLE("unknown diagnostic_kind");

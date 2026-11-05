@@ -124,11 +124,6 @@ fun micro_corners(index: uint, level: int) -> micro_triangle:
     if is_upright => return micro_triangle(first, first + float2(step, 0.0), first + float2(0.0, step))
     return micro_triangle(first, first - float2(step, 0.0), first - float2(0.0, step))
 
-/// Floor division by a power of two, for coordinates left of the texture too.
-fun floor_shift(x: int, by: int) -> int:
-    if x >= 0 => return x >> by
-    return -((-x + (1 << by) - 1) >> by)
-
 /// The texel coordinate `x` reads on an axis of `n` texels, under `mode`.
 fun addressed(x: int, n: int, mode: int) -> int:
     if mode == 2 => return clamp(x, 0, n - 1)
@@ -170,18 +165,38 @@ fun classify(map: int4, index: uint){classify_io, classify_constants} -> uint:
         if level >= classify_constants.levels - 1 => break
         if (hi.x - lo.x) >> level <= 2 and (hi.y - lo.y) >> level <= 2 => break
         level += 1
-    let level_size = classify_io.pyramid.size(level)
+    let mut level_size = classify_io.pyramid.size(level)
+
+    // A coarser level folds an odd row or column into its last texel, so wrapping there by the level's own size is no
+    // fold of the texture's: a footprint crossing a repeating or mirroring edge reads the whole texture instead.
+    let crosses_x = classify_constants.address_u != 2 and (lo.x < 0 or hi.x >= size.x)
+    let crosses_y = classify_constants.address_v != 2 and (lo.y < 0 or hi.y >= size.y)
+    let is_whole = level > 0 and (crosses_x or crosses_y)
+    if is_whole:
+        loop:
+            if level >= classify_constants.levels - 1 or (level_size.x <= 4 and level_size.y <= 4) => break
+            level += 1
+            level_size = classify_io.pyramid.size(level)
     let mut smallest = 1000000000.0
     let mut largest = -1000000000.0
-    let x0 = floor_shift(lo.x, level)
-    let y0 = floor_shift(lo.y, level)
-    let x1 = min(floor_shift(hi.x, level), x0 + 3)
-    let y1 = min(floor_shift(hi.y, level), y0 + 3)
-    for y in y0 ..< y1 + 1:
-        for x in x0 ..< x1 + 1:
-            let m = classify_io.pyramid.load(texel_at(x, y, level_size), level)
-            smallest = min(smallest, m.x)
-            largest = max(largest, m.y)
+    if level == 0:
+        // no folding here, so each texel is addressed as the sampler addresses it
+        for y in lo.y ..< min(hi.y, lo.y + 3) + 1:
+            for x in lo.x ..< min(hi.x, lo.x + 3) + 1:
+                let m = classify_io.pyramid.load(texel_at(x, y, size), 0)
+                smallest = min(smallest, m.x)
+                largest = max(largest, m.y)
+    else:
+        // inside the texture, or clamped to it: a level texel covers its share of the texels below, the last one the fold
+        let x0 = if is_whole => 0 else min(clamp(lo.x, 0, size.x - 1) >> level, level_size.x - 1)
+        let y0 = if is_whole => 0 else min(clamp(lo.y, 0, size.y - 1) >> level, level_size.y - 1)
+        let x1 = if is_whole => level_size.x - 1 else min(clamp(hi.x, 0, size.x - 1) >> level, level_size.x - 1)
+        let y1 = if is_whole => level_size.y - 1 else min(clamp(hi.y, 0, size.y - 1) >> level, level_size.y - 1)
+        for y in y0 ..< min(y1, y0 + 3) + 1:
+            for x in x0 ..< min(x1, x0 + 3) + 1:
+                let m = classify_io.pyramid.load(int2(x, y), level)
+                smallest = min(smallest, m.x)
+                largest = max(largest, m.y)
     if smallest >= classify_constants.cutoff => return 1u
     if largest < classify_constants.cutoff => return 0u
     let at = centre * scale

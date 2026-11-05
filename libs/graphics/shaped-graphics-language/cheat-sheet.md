@@ -408,6 +408,7 @@ sgl::test::diagnostic_of(m, r)             // `test-failed` at the test, one rel
 uv run dev.py run sgl -- emit shader.sgl --entry main_ps --target wgsl   # the text and its warnings on stderr, or the diagnostics and exit 2
 uv run dev.py run sgl -- emit shader.sgl --entry main_cs --option tile=16 # an option set for this compile; `describe` takes it too
 uv run dev.py run sgl -- emit shader.sgl --entry main_cs --undefined report --diagnostics  # the guards of LEGAL-65; abort: no report
+uv run dev.py run sgl -- emit shader.sgl --entry main_cs --target wgsl --weaken-float     # a @float WGSL cannot keep, at .fast with a warning
 uv run dev.py run sgl -- test a.sgl b.sgl                                # the tests of each file; exit 2 when one fails
 #   emit, test and describe take --module-dir DIR, repeatable: the .sgl files directly in it are modules to `use`
 uv run dev.py run sgl -- describe --module view --module-dir shaders     # a module of the directories, as its package entry reads it
@@ -504,6 +505,11 @@ for i in 0 ..< taps: ...                 // nothing of it runs as a loop, no tex
                                          // past 256 copies, a nest's counted together, it stays a loop: WARNING unroll-too-long
                                          // ...and so does an inner one whose bound reads its index, under the same warning
                                          // a rule judging a constant judges each index: `1u << (i as uint)` past 31 is refused
+
+@float(.specials) fun clean(v: float) -> float:   // the least float guarantee a body needs (CHK-435): .fast (default),
+    return if v != v => 0.0 else v       //   .specials, .precise, .ieee; an entry point keeps the strictest it reaches
+                                         // dx12 keeps all, msl up to .precise, vulkan and wgsl refuse above .fast (EMIT-185)
+                                         // `v != v` at .fast: WARNING nan-test-at-fast; is_nan tests the bits, fine anywhere
 
 fun bump(c: mut counter, by: float):     // a mut parameter: the caller's place (CHK-315)
     c.total += by

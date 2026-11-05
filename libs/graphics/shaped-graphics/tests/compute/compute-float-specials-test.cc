@@ -23,9 +23,9 @@ ASYNC_INVOCABLE_TEST("sg - an SGL float keeps NaNs, infinities, signed zeros and
     REQUIRE(ctx != nullptr);
     if (!sg_test::shaders_reach(*ctx))
         SKIP("no compiler builds this binary's shaders into a format this context accepts");
-    // question-sgl-float-semantics-on-every-target: no other target's compile asks for IEEE behaviour yet
-    if (ctx->backend() != sg::backend_kind::metal)
-        SKIP("only metal compiles SGL with IEEE float semantics so far");
+    // EMIT-185: vulkan keeps the specials where the device has the execution mode, and WebGPU keeps nothing above .fast
+    if (!ctx->supports(sg::feature::float_specials))
+        SKIP("this device keeps no NaNs, infinities and signed zeros a shader asks for");
 
     auto const pipeline = co_await shaders::float_specials::probe.acquire_pipeline(*ctx);
     auto const layout = ctx->cached.acquire_binding_group_layout<shaders::float_specials::float_specials>();
@@ -54,8 +54,11 @@ ASYNC_INVOCABLE_TEST("sg - an SGL float keeps NaNs, infinities, signed zeros and
     auto const bits = [&](isize i) { return cc::bit_cast<u32>(got[i]); };
     CHECK(bits(0) == 0x7f800000u);
     CHECK(cc::is_nan(got[1]));
-    // an infinity times zero
-    CHECK(cc::is_nan(got[2]));
+    // an infinity times zero, which Intel's dx12 driver folds to 0 from the strict fmul DXC writes:
+    // bug-sg-intel-dx12-zero-times-inf
+    auto const& adapter = ctx->metrics.adapter();
+    if (ctx->backend() != sg::backend_kind::dx12 || adapter.is_software || adapter.vendor_id != 0x8086)
+        CHECK(cc::is_nan(got[2]));
     // -0 + 0 is +0
     CHECK(bits(3) == 0x00000000u);
     CHECK(bits(4) == 0x80000000u);

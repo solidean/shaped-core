@@ -239,6 +239,9 @@ enum class sgl::diagnostic_kind : sgl::u8
     unroll_too_long,
     /// A function body in a target's own text that breaks a rule of where it stands or what it names (CHK-427).
     invalid_target_text,
+    /// A float compared with itself in code an entry point compiles at `@float(.fast)`, a NaN test it may fold (CHK-436);
+    /// a warning.
+    nan_test_at_fast,
 };
 
 namespace sgl

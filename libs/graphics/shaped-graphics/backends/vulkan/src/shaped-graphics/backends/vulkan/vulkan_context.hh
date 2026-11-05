@@ -180,6 +180,15 @@ public:
         _sampler_anisotropy = features.samplerAnisotropy == VK_TRUE;
         _texture_compression_bc = features.textureCompressionBC == VK_TRUE;
 
+        // a property rather than a feature: no creation enables it, and SPIR-V asks it of each entry point
+        auto vulkan12
+            = VkPhysicalDeviceVulkan12Properties{.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_PROPERTIES};
+        auto properties
+            = VkPhysicalDeviceProperties2{.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2, .pNext = &vulkan12};
+        vkGetPhysicalDeviceProperties2(_physical_device, &properties);
+        _float_specials = vulkan12.shaderSignedZeroInfNanPreserveFloat32 == VK_TRUE;
+        _float_denormals = vulkan12.shaderDenormPreserveFloat32 == VK_TRUE;
+
         // A device must have D24S8 or D32S8 as a depth-stencil attachment, and not necessarily the one sg names.
         auto d32s8 = VkFormatProperties{};
         vkGetPhysicalDeviceFormatProperties(_physical_device, VK_FORMAT_D32_SFLOAT_S8_UINT, &d32s8);
@@ -356,6 +365,10 @@ public:
         case sg::feature::shader_execution_reordering:
             // VK_EXT_ray_tracing_invocation_reorder is a device's, but no DXC lowers HLSL's reordering to SPIR-V yet.
             return false;
+        case sg::feature::float_specials:
+            return _float_specials;
+        case sg::feature::float_denormals:
+            return _float_denormals;
         // SPIR-V's `Coherent` decoration is core, and storage-image atomics on r32 integer formats are required.
         // BaseInstance is the DrawParameters capability, which creation requires `shaderDrawParameters` for.
         case sg::feature::device_coherence:
@@ -910,6 +923,8 @@ public:
     bool _texture_compression_bc = false;
     bool _tessellation_shader = false;
     bool _sample_rate_shading = false;
+    bool _float_specials = false;
+    bool _float_denormals = false;
     bool _wireframe_fill = false;
     bool _depth32_float_stencil8 = false;
     /// The 16-bit kinds each with the 16-bit buffer storage they need, and the whole subgroup family in compute and pixel.

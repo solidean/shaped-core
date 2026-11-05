@@ -285,6 +285,9 @@ described_entry_point describe_entry_point(check::checked_module const& m,
     for (auto axis = 0; axis < 3; ++axis)
         result.workgroup[axis] = e.workgroup[axis];
     result.preferred_subgroup_size = e.preferred_subgroup_size;
+    result.float_guarantee = e.float_guarantee;
+    if (check::is_valid(e.float_raised_by))
+        result.float_raised_by = m.at(e.float_raised_by).name;
     for (auto const id : e.bindings)
         if (!m.bindings[m.at(id).info].is_workgroup)
             result.bindings.push_back(host_name_of(m, id));

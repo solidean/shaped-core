@@ -26,12 +26,18 @@ The random-program differential runs under both profiles, and a GPU test reports
 
 A lowered `assert` before such a statement takes the same flag, so a dev build's asserts trigger no UB either.
 
+## The first sweep (2026-11-05)
+
+Every SGL shader of slib, sg and sr compiled under `report` and ran on dx12: no guard reported a division by zero or an index past an array.
+It found two bugs a package shader with a print or an assert would have met as well, both fixed.
+slib's reflection check refused sg's debug window, and one line inlined along two call chains got one debug-site id.
+Left from it is [bug-sg-debug-readback-outlives-a-test](../../../shaped-graphics/docs/issues/bug-sg-debug-readback-outlives-a-test.md).
+And [bug-sv-guarded-raster-pipeline-stalls-intel-driver](../../../shaped-viewer/docs/issues/bug-sv-guarded-raster-pipeline-stalls-intel-driver.md), which stopped sv's part of the sweep.
+
 ## Left
 
 The children, and:
 
-- Deferral is defined but not bounded in time: a loop whose bound a safe operand gave, `x / 1` where `x / 0` was, may run long enough to reset the driver.
-  An iteration cap while the flag is set is one answer, and it is a design question.
 - A site nested past the legalizer's depth limit is left unguarded, silently.
 
 - Turning `report` on by default in a dev build, once the suite has run under it.

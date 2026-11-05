@@ -2,8 +2,7 @@
 
 // The compiled form of raytrace.metal, checked in beside it.
 //
-// Embedded rather than built, so the tier-2 binary needs neither the shader library nor the Metal toolchain —
-// the same reason double_compute.metallib.h is embedded.
+// Embedded rather than built, so the tests run without the Metal toolchain.
 // The command line that produced it is in raytrace.metal's own comment, so it is reproducible by hand.
 //
 // One library, nine entry points: three raygen kernels and the inline ray-query one, plus the miss,

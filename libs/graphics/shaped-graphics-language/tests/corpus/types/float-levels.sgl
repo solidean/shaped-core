@@ -1,0 +1,26 @@
+// CHK-435 and CHK-436: a function states the float guarantee it needs, and a float compared with itself warns where
+// the entry point is at .fast, which may fold the test.
+// Every entry point here compiles for every target, so none states a level vulkan or WGSL refuses (EMIT-185); the
+// driver's float tests hold those.
+
+binding work:
+    values: mut buffer[float]
+
+// a float compared with itself tests for a NaN, which an entry point at .fast may assume never arises
+@expect(warning = "nan-test-at-fast")
+@compute(64) fun folds(@thread_id id: int3){work}:
+    let v = work.values[id.x]
+    work.values[id.x] = if v != v => 0.0 else v
+
+// is_nan tests the bits on every target, and holds at every level
+@compute(64) fun bits(@thread_id id: int3){work}:
+    let v = work.values[id.x]
+    work.values[id.x] = if is_nan(v) => 0.0 else v
+
+// a helper that states its need, which no entry point here reaches
+@float(.specials) fun cleaned(v: float) -> float:
+    return if v != v => 0.0 else v
+
+// the interpreter computes the exact meaning, whatever level a function states
+test cleaned(1.5) == 1.5
+test is_nan(0.0) == false

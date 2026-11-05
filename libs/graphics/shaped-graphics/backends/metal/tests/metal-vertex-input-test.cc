@@ -1,5 +1,5 @@
-#include "mesh-fixture.hh"
 #include "metal-test-common.hh"
+#include "sgl-fixture.hh"
 
 #include <clean-core/common/utility.hh>
 #include <clean-core/string/format.hh>
@@ -20,14 +20,17 @@ using namespace cc::primitive_defines;
 
 namespace
 {
-/// The fixtures' buffer array, `inputs`, as an array declaration takes it.
-/// Spelled by hand: these layouts come from create_metal_binding_group_layout, which the by-name lookup does not see.
-constexpr auto k_inputs_array = sg::buffer_array_binding{.name = "inputs"};
+namespace draws = mtl::test::shaders::draws;
+namespace kernels = mtl::test::shaders::kernels;
+
+/// The fixtures' buffer array, `summed.inputs`, as an array declaration takes it.
+/// Named by the package: these layouts come from create_metal_binding_group_layout, which the by-name lookup does not see.
+constexpr auto k_inputs_array = kernels::summed::arrays::inputs;
 
 constexpr auto k_size = 4;
 
-/// One vertex of the fixture's quad: a clip-space position, then a colour — the layout `mesh.metal`'s `vertex_in`
-/// declares, with the colour at offset 8.
+/// One vertex of the fixture's quad: a clip-space position, then a colour — the attributes `draws.sgl`'s `mesh_vertex`
+/// names, laid out here with the colour at offset 8.
 struct mesh_vertex
 {
     float x = 0.0f;
@@ -38,7 +41,7 @@ struct mesh_vertex
     float a = 0.0f;
 };
 
-/// The inline-constants block `mesh.metal` reads at [[buffer(4)]].
+/// The inline-constants block `draws.sgl`'s `tinted_vs` reads, which sg places at [[buffer(4)]].
 struct tint_constants
 {
     float r = 1.0f;
@@ -81,13 +84,27 @@ struct tint_constants
     return sg::pipeline_layout_handle(layout.value());
 }
 
+/// The tinted draw's two stages, compiled once per test: a library is one per process.
+struct mesh_stages
+{
+    sg::compiled_shader vertex;
+    sg::compiled_shader fragment;
+};
+
+[[nodiscard]] cc::shared_async<mesh_stages> compile_mesh(mtl::metal_context& ctx)
+{
+    co_return mesh_stages{.vertex = co_await mtl::test::sgl_shader(ctx, draws::tinted_vs),
+                          .fragment = co_await mtl::test::sgl_shader(ctx, draws::tinted_ps)};
+}
+
 [[nodiscard]] cc::result<mtl::metal_raster_pipeline_handle> make_mesh_pipeline(mtl::metal_context_handle const& ctx,
-                                                                               sg::pipeline_layout_handle layout)
+                                                                               sg::pipeline_layout_handle layout,
+                                                                               mesh_stages const& stages)
 {
     auto desc = sg::raster_pipeline_description{
         .layout = cc::move(layout),
-        .vertex_shader = mtl::test::mesh_shader(sg::shader_stage::vertex, "vertex_main"),
-        .fragment_shader = mtl::test::mesh_shader(sg::shader_stage::fragment, "fragment_main"),
+        .vertex_shader = stages.vertex,
+        .fragment_shader = stages.fragment,
         .vertex_input = mesh_vertex_layout(),
         // No culling: what these tests assert is which vertices were fetched, not which way the quad happens to wind.
         .rasterization = {.cull = sg::cull_mode::none},
@@ -167,7 +184,8 @@ struct tint_constants
 }
 } // namespace
 
-ASYNC_TEST("sg metal - an indexed draw reads its vertices, its indices and its base vertex")
+ASYNC_TEST("sg metal - an indexed draw reads its vertices, its indices and its base vertex",
+           exclusive("slib-shader-library"))
 {
     auto const ctx = mtl::test::make_context();
     if (ctx == nullptr)
@@ -176,7 +194,7 @@ ASYNC_TEST("sg metal - an indexed draw reads its vertices, its indices and its b
     auto layout = make_tint_pipeline_layout(ctx);
     REQUIRE(layout.has_value()).context(layout.has_error() ? layout.error().to_string() : cc::string());
 
-    auto pipeline = make_mesh_pipeline(ctx, layout.value());
+    auto pipeline = make_mesh_pipeline(ctx, layout.value(), co_await compile_mesh(*ctx));
     REQUIRE(pipeline.has_value()).context(pipeline.has_error() ? pipeline.error().to_string() : cc::string());
 
     auto const target = make_color_target(ctx);
@@ -222,7 +240,8 @@ ASYNC_TEST("sg metal - an indexed draw reads its vertices, its indices and its b
                             int(u8(bytes.value()[0])), int(u8(bytes.value()[1])), int(u8(bytes.value()[2]))));
 }
 
-ASYNC_TEST("sg metal - raster inline constants reach the shader, and a changed block restages")
+ASYNC_TEST("sg metal - raster inline constants reach the shader, and a changed block restages",
+           exclusive("slib-shader-library"))
 {
     auto const ctx = mtl::test::make_context();
     if (ctx == nullptr)
@@ -230,7 +249,7 @@ ASYNC_TEST("sg metal - raster inline constants reach the shader, and a changed b
 
     auto layout = make_tint_pipeline_layout(ctx);
     REQUIRE(layout.has_value());
-    auto pipeline = make_mesh_pipeline(ctx, layout.value());
+    auto pipeline = make_mesh_pipeline(ctx, layout.value(), co_await compile_mesh(*ctx));
     REQUIRE(pipeline.has_value()).context(pipeline.has_error() ? pipeline.error().to_string() : cc::string());
 
     // **Two passes in one list, differing only in their constants.**
@@ -286,7 +305,8 @@ ASYNC_TEST("sg metal - raster inline constants reach the shader, and a changed b
                             int(u8(halved_bytes.value()[1])), int(u8(halved_bytes.value()[2]))));
 }
 
-ASYNC_TEST("sg metal - a draw reads the vertex buffer a dispatch in the same list wrote")
+ASYNC_TEST("sg metal - a draw reads the vertex buffer a dispatch in the same list wrote",
+           exclusive("slib-shader-library"))
 {
     auto const ctx = mtl::test::make_context();
     if (ctx == nullptr)
@@ -301,15 +321,7 @@ ASYNC_TEST("sg metal - a draw reads the vertex buffer a dispatch in the same lis
     // So read a failure here as the dispatch-to-draw path being broken, not as the ordering being unprotected — what
     // would catch that needs a dispatch long enough to lose the race, which is a slow test rather than a sharp one.
     // issue: question-sg-metal-encoder-barrier-unproven
-    auto emit = mtl::test::mesh_kernel("emit_quad_main");
-    emit.bindings.push_back({
-        .name = "vertices",
-        .space = 0,
-        .index = 0,
-        .count = 1,
-        .type = sg::binding_type::buffer,
-        .access = sg::access_mode::read_write,
-    });
+    auto const emit = co_await mtl::test::sgl_shader(*ctx, kernels::emit_quad_main);
 
     auto group_layout = ctx->create_metal_binding_group_layout(emit.bindings, {}, sg::lifetime_scope::persistent);
     REQUIRE(group_layout.has_value());
@@ -325,7 +337,7 @@ ASYNC_TEST("sg metal - a draw reads the vertex buffer a dispatch in the same lis
 
     auto draw_layout = make_tint_pipeline_layout(ctx);
     REQUIRE(draw_layout.has_value());
-    auto pipeline = make_mesh_pipeline(ctx, draw_layout.value());
+    auto pipeline = make_mesh_pipeline(ctx, draw_layout.value(), co_await compile_mesh(*ctx));
     REQUIRE(pipeline.has_value());
 
     auto const target = make_color_target(ctx);
@@ -335,7 +347,7 @@ ASYNC_TEST("sg metal - a draw reads the vertex buffer a dispatch in the same lis
     auto const vertex_buffer = ctx->persistent.create_raw_buffer(
         4 * isize(sizeof(mesh_vertex)), sg::buffer_usage::vertex_buffer | sg::buffer_usage::readwrite_buffer);
 
-    auto const nv = sg::named_view{.name = "vertices",
+    auto const nv = sg::named_view{.name = "quad.vertices",
                                    .view = vertex_buffer->as_raw_readwrite(
                                        {.offset = 0, .size = vertex_buffer->size_in_bytes()}, isize(sizeof(float)))};
     auto group = ctx->create_metal_binding_group(group_layout.value(), cc::span<sg::named_view const>(&nv, 1), {},
@@ -373,7 +385,8 @@ ASYNC_TEST("sg metal - a draw reads the vertex buffer a dispatch in the same lis
                             int(u8(bytes.value()[0])), int(u8(bytes.value()[1])), int(u8(bytes.value()[2]))));
 }
 
-TEST("sg metal - a draw resolves its array declarations against the groups it binds")
+ASYNC_TEST("sg metal - a draw resolves its array declarations against the groups it binds",
+           exclusive("slib-shader-library"))
 {
     auto const ctx = mtl::test::make_context();
     if (ctx == nullptr)
@@ -382,7 +395,7 @@ TEST("sg metal - a draw resolves its array declarations against the groups it bi
     // A draw meets its declarations with what is bound exactly as a dispatch does: an empty span declares the array
     // unused, and an element the array does not have is the host's mistake, which asserts.
     auto bindings = cc::vector<sg::binding>();
-    bindings.push_back({.name = "inputs", .space = 0, .index = 0, .count = 4, .type = sg::binding_type::buffer});
+    bindings.push_back({.name = "summed.inputs", .space = 0, .index = 0, .count = 4, .type = sg::binding_type::buffer});
 
     auto group_layout = ctx->create_metal_binding_group_layout(bindings, {}, sg::lifetime_scope::persistent);
     REQUIRE(group_layout.has_value());
@@ -397,7 +410,8 @@ TEST("sg metal - a draw resolves its array declarations against the groups it bi
     auto pipeline_layout = ctx->create_metal_pipeline_layout(desc, sg::lifetime_scope::persistent);
     REQUIRE(pipeline_layout.has_value());
 
-    auto pipeline = make_mesh_pipeline(ctx, sg::pipeline_layout_handle(pipeline_layout.value()));
+    auto pipeline
+        = make_mesh_pipeline(ctx, sg::pipeline_layout_handle(pipeline_layout.value()), co_await compile_mesh(*ctx));
     REQUIRE(pipeline.has_value()).context(pipeline.has_error() ? pipeline.error().to_string() : cc::string());
 
     auto elements = cc::vector<sg::raw_view>();
@@ -410,7 +424,7 @@ TEST("sg metal - a draw resolves its array declarations against the groups it bi
     }
 
     auto views = cc::vector<sg::named_view>();
-    views.push_back({.name = "inputs", .view = sg::bound_view(cc::move(elements))});
+    views.push_back({.name = "summed.inputs", .view = sg::bound_view(cc::move(elements))});
     auto group = ctx->create_metal_binding_group(group_layout.value(), views, {}, sg::lifetime_scope::persistent);
     REQUIRE(group.has_value()).context(group.has_error() ? group.error().to_string() : cc::string());
 
@@ -444,7 +458,7 @@ TEST("sg metal - a draw resolves its array declarations against the groups it bi
     ctx->drop_command_list(cc::move(cmd));
 }
 
-TEST("sg metal - a rendering scope leaves no bound-group state behind")
+ASYNC_TEST("sg metal - a rendering scope leaves no bound-group state behind", exclusive("slib-shader-library"))
 {
     auto const ctx = mtl::test::make_context();
     if (ctx == nullptr)
@@ -453,7 +467,7 @@ TEST("sg metal - a rendering scope leaves no bound-group state behind")
     // A group bound in one scope must not still be bound in the next, or a draw that bound nothing resolves the arrays
     // of a group it never saw — which is what a slot outliving its scope would cause.
     auto bindings = cc::vector<sg::binding>();
-    bindings.push_back({.name = "inputs", .space = 0, .index = 0, .count = 4, .type = sg::binding_type::buffer});
+    bindings.push_back({.name = "summed.inputs", .space = 0, .index = 0, .count = 4, .type = sg::binding_type::buffer});
 
     auto group_layout = ctx->create_metal_binding_group_layout(bindings, {}, sg::lifetime_scope::persistent);
     REQUIRE(group_layout.has_value());
@@ -467,7 +481,8 @@ TEST("sg metal - a rendering scope leaves no bound-group state behind")
                                               .block_size = isize(sizeof(tint_constants))};
     auto array_layout = ctx->create_metal_pipeline_layout(array_desc, sg::lifetime_scope::persistent);
     REQUIRE(array_layout.has_value());
-    auto array_pipeline = make_mesh_pipeline(ctx, sg::pipeline_layout_handle(array_layout.value()));
+    auto array_pipeline
+        = make_mesh_pipeline(ctx, sg::pipeline_layout_handle(array_layout.value()), co_await compile_mesh(*ctx));
     REQUIRE(array_pipeline.has_value());
 
     auto elements = cc::vector<sg::raw_view>();
@@ -479,13 +494,13 @@ TEST("sg metal - a rendering scope leaves no bound-group state behind")
         kept.push_back(buffer);
     }
     auto views = cc::vector<sg::named_view>();
-    views.push_back({.name = "inputs", .view = sg::bound_view(cc::move(elements))});
+    views.push_back({.name = "summed.inputs", .view = sg::bound_view(cc::move(elements))});
     auto group = ctx->create_metal_binding_group(group_layout.value(), views, {}, sg::lifetime_scope::persistent);
     REQUIRE(group.has_value());
 
     auto plain_layout = make_tint_pipeline_layout(ctx);
     REQUIRE(plain_layout.has_value());
-    auto plain_pipeline = make_mesh_pipeline(ctx, plain_layout.value());
+    auto plain_pipeline = make_mesh_pipeline(ctx, plain_layout.value(), co_await compile_mesh(*ctx));
     REQUIRE(plain_pipeline.has_value());
 
     auto const target = make_color_target(ctx);
@@ -521,7 +536,8 @@ TEST("sg metal - a rendering scope leaves no bound-group state behind")
     ctx->drop_command_list(cc::move(cmd));
 }
 
-TEST("sg metal - a compute-bound group is not bound at the first draw of a rendering scope")
+ASYNC_TEST("sg metal - a compute-bound group is not bound at the first draw of a rendering scope",
+           exclusive("slib-shader-library"))
 {
     auto const ctx = mtl::test::make_context();
     if (ctx == nullptr)
@@ -533,14 +549,7 @@ TEST("sg metal - a compute-bound group is not bound at the first draw of a rende
     // Left on the books, the group's buffers and its array are declared for a draw that reads none of them, which
     // spends barriers on work that never touches them.
     // dx12 and vulkan both draw this.
-    auto kernel = mtl::test::mesh_kernel("array_sum_main");
-    kernel.bindings.push_back({.name = "inputs", .space = 0, .index = 0, .count = 4, .type = sg::binding_type::buffer});
-    kernel.bindings.push_back({.name = "output",
-                               .space = 0,
-                               .index = 4,
-                               .count = 1,
-                               .type = sg::binding_type::buffer,
-                               .access = sg::access_mode::read_write});
+    auto const kernel = co_await mtl::test::sgl_shader(*ctx, kernels::array_sum_main);
 
     auto group_layout = ctx->create_metal_binding_group_layout(kernel.bindings, {}, sg::lifetime_scope::persistent);
     REQUIRE(group_layout.has_value());
@@ -569,16 +578,16 @@ TEST("sg metal - a compute-bound group is not bound at the first draw of a rende
         = ctx->persistent.create_raw_buffer(k_count * isize(sizeof(u32)), sg::buffer_usage::readwrite_buffer);
 
     auto views = cc::vector<sg::named_view>();
-    views.push_back({.name = "inputs", .view = sg::bound_view(cc::move(elements))});
+    views.push_back({.name = "summed.inputs", .view = sg::bound_view(cc::move(elements))});
     views.push_back(
-        {.name = "output",
+        {.name = "summed.output",
          .view = output->as_raw_readwrite({.offset = 0, .size = output->size_in_bytes()}, isize(sizeof(u32)))});
     auto array_group = ctx->create_metal_binding_group(group_layout.value(), views, {}, sg::lifetime_scope::persistent);
     REQUIRE(array_group.has_value());
 
     auto plain_layout = make_tint_pipeline_layout(ctx);
     REQUIRE(plain_layout.has_value());
-    auto plain_pipeline = make_mesh_pipeline(ctx, plain_layout.value());
+    auto plain_pipeline = make_mesh_pipeline(ctx, plain_layout.value(), co_await compile_mesh(*ctx));
     REQUIRE(plain_pipeline.has_value());
 
     auto const target = make_color_target(ctx);

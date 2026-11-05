@@ -153,6 +153,12 @@ bool metal_context::supports(sg::feature f) const
     case sg::feature::shader_execution_reordering:
         // Metal reorders no ray-tracing work on request.
         return false;
+    case sg::feature::float_specials:
+        // every compile of this backend runs in safe math
+        return true;
+    case sg::feature::float_denormals:
+        // whether safe math keeps denormals is not known
+        return false;
     case sg::feature::wireframe_fill:
         // `MTLTriangleFillModeLines` is on every Apple GPU.
         return true;

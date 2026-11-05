@@ -13,6 +13,12 @@ namespace sg::backend::dx12
 /// Whether this process's devices come from the Agility SDK's runtime rather than the system's.
 [[nodiscard]] bool runs_agility_runtime();
 
+/// Whether acceleration-structure buffers carry `D3D12_RESOURCE_FLAG_RAYTRACING_ACCELERATION_STRUCTURE`, which a
+/// micromap array needs: from the first context that reports `sg::feature::opacity_micromap` on, and never before.
+/// A device without micromaps so keeps the creation calls it always had.
+[[nodiscard]] bool marks_acceleration_structures();
+void mark_acceleration_structures();
+
 /// `D3D12CreateDevice` through the runtime this process chose; a null `out` probes as `D3D12CreateDevice` does.
 /// One adapter yields one device, as the system's singleton does.
 HRESULT create_d3d12_device(IUnknown* adapter, D3D_FEATURE_LEVEL level, REFIID riid, void** out);

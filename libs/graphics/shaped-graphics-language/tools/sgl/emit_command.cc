@@ -28,6 +28,7 @@ COMMAND("emit")
     auto line_directives = false;
     auto diagnostics = false;
     auto undefined = cc::string("none");
+    auto weaken_float = false;
     auto device_feature_names = cc::vector<cc::string>();
     auto option_arguments = cc::vector<cc::string>();
     auto module_dirs = cc::vector<cc::string>();
@@ -47,6 +48,9 @@ COMMAND("emit")
              {.desc = "what an integer division by zero or an array index outside the array does: none, abort, or "
                       "report, which prints it with --diagnostics",
               .metavar = "GUARD"});
+    args.arg({"weaken-float"}, weaken_float,
+             {.desc = "compile an entry point whose @float WGSL cannot keep at .fast, with a warning, as a host that "
+                      "allows it on WebGPU does"});
     args.arg({"device-feature"}, device_feature_names,
              {.desc = "a feature the device has, which `has` answers and slib passes for every one a context has, "
                       "`--device-feature float_atomic_add`; repeat for each",
@@ -126,6 +130,7 @@ COMMAND("emit")
                                             .line_directives = line_directives,
                                             .diagnostics = diagnostics,
                                             .guards_undefined = guards_undefined,
+                                            .weakens_float = weaken_float,
                                             .device_features = device_features});
     if (text.has_error())
     {

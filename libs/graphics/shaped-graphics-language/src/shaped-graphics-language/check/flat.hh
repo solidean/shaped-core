@@ -744,6 +744,10 @@ struct sgl::check::flat_entry_point
     i32 preferred_subgroup_size = 0;
     /// What a device needs to run it, `function_info::features`.
     feature_set features;
+    /// The strictest `@float` of every function it reaches, itself included (CHK-435), and the first function that
+    /// stated it; `none` at `fast`.
+    float_level float_guarantee = float_level::fast;
+    symbol_id float_raised_by = symbol_id::none;
     /// The options it reaches, each once, in declaration order (CHK-355); empty for a test.
     cc::vector<symbol_id> options;
     /// This entry point legalized with the default options, where its check did so already to judge its uniformity.
@@ -808,6 +812,7 @@ struct sgl::check::flat_entry_point
             && is_equal(check_sites, rhs.check_sites) && is_equal(check_nodes, rhs.check_nodes)
             && is_equal(messages, rhs.messages) && body == rhs.body && names == rhs.names
             && is_equal(traced_rays, rhs.traced_rays) && is_equal(text_types, rhs.text_types)
-            && attributes == rhs.attributes && is_equal(options, rhs.options);
+            && attributes == rhs.attributes && is_equal(options, rhs.options) && float_guarantee == rhs.float_guarantee
+            && float_raised_by == rhs.float_raised_by;
     }
 };

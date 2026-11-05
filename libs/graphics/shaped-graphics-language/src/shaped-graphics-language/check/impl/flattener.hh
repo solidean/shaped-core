@@ -194,6 +194,22 @@ struct flattener
     };
 
     /// One function being written: the entry point at the bottom, then every call being inlined.
+    /// CHK-435: the entry point keeps the strictest `@float` of every function whose body it inlines.
+    void raise_float_level(symbol_id function)
+    {
+        if (!is_valid(function) || index_of(function) >= c.out.symbols.size())
+            return;
+        auto const& s = c.out.at(function);
+        if (s.info < 0 || s.info >= c.out.functions.size())
+            return;
+        auto const level = c.out.functions[s.info].float_guarantee;
+        if (u8(level) > u8(entry.float_guarantee))
+        {
+            entry.float_guarantee = level;
+            entry.float_raised_by = function;
+        }
+    }
+
     struct frame
     {
         symbol_id function = symbol_id::none;

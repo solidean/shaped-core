@@ -5,8 +5,8 @@ refs:
   - file: libs/graphics/shaped-graphics/backends/metal/tests
   - file: libs/graphics/shaped-graphics/backends/metal/tests/metal-sgl-test.cc
   - test: ssc::msl end to end - the reflected bindings build the layout the backend encodes
-claimed-by: Claude (for Julius Nehring-Wirxel)
-claimed-at: 2026-11-05T12:43Z
+closed: 2026-11-05
+resolution: fixed
 ---
 
 # The metal tier-2 fixtures are hand-written and hand-compiled
@@ -17,10 +17,21 @@ So a fixture can agree with the backend's argument-buffer convention and still d
 
 **The target shape is SGL packages, as `metal-sgl-test.cc` already is.**
 SGL is the one source promised on every target, so it is what real metal shaders are written in.
-HLSL is not a route: it does not reach metal, by decision ([feat-slib-hlsl-to-metal-route](../../../shaped-shader-library/docs/issues/.closed/2026/11/feat-slib-hlsl-to-metal-route.md)).
+HLSL is not a route: it does not reach metal, by decision ([feat-slib-hlsl-to-metal-route](../../../../../../shaped-shader-library/docs/issues/.closed/2026/11/feat-slib-hlsl-to-metal-route.md)).
 A fixture SGL cannot say yet, such as a ray-tracing entry point it does not support, stays hand-written, and that gap belongs to an SGL issue.
 
 **The cost is a dependency the tier-2 binary avoids today**: an SGL package needs slib and the metal compiler edge (`SC_HAS_METAL_COMPILER`).
 `metal-sgl-test.cc` already takes it behind that gate; moving the rest is the same trade made for the whole binary, deliberately rather than in passing.
 `ssc::msl end to end - the reflected bindings build the layout the backend encodes` checks that a reflected layout and the encoded one agree.
 That is the property the hand-written fixtures could never pin.
+
+**Done on 2026-11-05 for everything but ray tracing.**
+`kernels.sgl` and `draws.sgl` replace `double_compute.metal`, `triangle.metal` and `mesh.metal`.
+The compute, raster, barrier and vertex-input tests take their shaders and bindings from the package.
+The tier-2 binary links slib unconditionally now, which costs no toolchain: the metal compiler emits MSL source where there is none.
+Then ray tracing: `tracing.sgl` takes over the inline query, the closest hit and miss, the any-hit, the intersection, the per-geometry records and the separate-library case.
+Those tests build the pipeline and table from the package's description through the backend's own calls; `raytrace_second.metal` is gone.
+
+**Closed with `raytrace.metal` kept on purpose, for two tests SGL cannot express.**
+A closest hit recursing through its own table is a recursive trace, which SGL refuses (CHK-332).
+A procedural hit group carrying an any-hit is what the backend must refuse, and SGL cannot spell it.

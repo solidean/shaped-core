@@ -1,5 +1,5 @@
 #include "metal-test-common.hh"
-#include "triangle.metallib.h"
+#include "sgl-fixture.hh"
 
 #include <clean-core/common/utility.hh>
 #include <clean-core/string/format.hh>
@@ -11,8 +11,8 @@
 
 #include <atomic>
 
-// Raster, end to end: a pipeline built from a metallib, a rendering scope that clears and draws, and the target read
-// back.
+// Raster, end to end: a pipeline built from the SGL package's covering triangle, a rendering scope that clears and draws,
+// and the target read back.
 //
 // The tier-1 suite has no raster execution test, for the same reason it has no compute one — bytecode is per-backend —
 // so this tier is the specification for the rendering scope and the draw.
@@ -22,22 +22,23 @@ using namespace cc::primitive_defines;
 
 namespace
 {
-[[nodiscard]] sg::compiled_shader triangle_stage(sg::shader_stage stage, cc::string entry)
-{
-    auto shader = sg::compiled_shader{};
-    shader.stage = stage;
-    shader.format = sg::shader_format::metal_lib;
-    shader.entry_point = cc::move(entry);
+namespace draws = mtl::test::shaders::draws;
 
-    auto blob = cc::pinned_data<byte>::create_uninitialized(isize(sizeof(mtl::test::triangle_metallib)));
-    cc::memcpy(blob.data(), mtl::test::triangle_metallib, sizeof(mtl::test::triangle_metallib));
-    shader.bytecode = cc::pinned_data<byte const>(cc::move(blob));
-    return shader;
+/// The covering triangle's two stages, compiled once: a library is one per process, and the shaders serve any context.
+struct triangle_stages
+{
+    sg::compiled_shader vertex;
+    sg::compiled_shader fragment;
+};
+
+[[nodiscard]] cc::shared_async<triangle_stages> compile_triangle(mtl::metal_context& ctx)
+{
+    co_return triangle_stages{.vertex = co_await mtl::test::sgl_shader(ctx, draws::covering_vs),
+                              .fragment = co_await mtl::test::sgl_shader(ctx, draws::covering_ps)};
 }
 
-[[nodiscard]] cc::result<sg::backend::metal::metal_raster_pipeline_handle> make_triangle_pipeline(
-    mtl::metal_context_handle const& ctx,
-    sg::pixel_format format)
+[[nodiscard]] cc::result<sg::backend::metal::metal_raster_pipeline_handle>
+make_triangle_pipeline(mtl::metal_context_handle const& ctx, sg::pixel_format format, triangle_stages const& stages)
 {
     auto layout = ctx->create_metal_pipeline_layout({}, sg::lifetime_scope::persistent);
     if (layout.has_error())
@@ -45,8 +46,8 @@ namespace
 
     auto desc = sg::raster_pipeline_description{
         .layout = layout.value(),
-        .vertex_shader = triangle_stage(sg::shader_stage::vertex, "vertex_main"),
-        .fragment_shader = triangle_stage(sg::shader_stage::fragment, "fragment_main"),
+        .vertex_shader = stages.vertex,
+        .fragment_shader = stages.fragment,
         // No culling: what this fixture exercises is the rendering scope and the draw, and sg's default cull_mode is
         // `back` — so a winding the fixture never meant to assert would otherwise decide whether anything appears.
         .rasterization = {.cull = sg::cull_mode::none},
@@ -57,13 +58,13 @@ namespace
 }
 } // namespace
 
-TEST("sg metal - a raster pipeline builds from a metal library")
+ASYNC_TEST("sg metal - a raster pipeline builds from a metal library", exclusive("slib-shader-library"))
 {
     auto const ctx = mtl::test::make_context();
     if (ctx == nullptr)
         SKIP("no metal 4 device on this host");
 
-    auto pipeline = make_triangle_pipeline(ctx, sg::pixel_format::rgba8_unorm);
+    auto pipeline = make_triangle_pipeline(ctx, sg::pixel_format::rgba8_unorm, co_await compile_triangle(*ctx));
     REQUIRE(pipeline.has_value()).context(pipeline.has_error() ? pipeline.error().to_string() : cc::string());
 
     CHECK(pipeline.value()->state() != nullptr);
@@ -73,11 +74,14 @@ TEST("sg metal - a raster pipeline builds from a metal library")
     CHECK(pipeline.value()->depth_stencil_state() != nullptr);
 }
 
-TEST("sg metal - pipelines build concurrently from several contexts")
+ASYNC_TEST("sg metal - pipelines build concurrently from several contexts", exclusive("slib-shader-library"))
 {
     auto const probe = mtl::test::make_context();
     if (probe == nullptr)
         SKIP("no metal 4 device on this host");
+
+    // Compiled once up front, so what the threads race on is pipeline creation alone.
+    auto const stages = co_await compile_triangle(*probe);
 
     // **Concurrent MTL4 pipeline compilation aborts inside the driver**, in `_os_unfair_lock_corruption_abort` under
     // `AGXG16GFamilyCompiler`, and it is the driver rather than the validation layer — it reproduces with
@@ -109,7 +113,7 @@ TEST("sg metal - pipelines build concurrently from several contexts")
 
                 // No CHECK on a spawned thread: it would not be attributed to the running test, and what is being
                 // proven is the aggregate below — plus the absence of an abort, which no check can express.
-                if (make_triangle_pipeline(ctx, sg::pixel_format::rgba8_unorm).has_value())
+                if (make_triangle_pipeline(ctx, sg::pixel_format::rgba8_unorm, stages).has_value())
                     built.fetch_add(1, std::memory_order_acq_rel);
             }));
 
@@ -119,7 +123,7 @@ TEST("sg metal - pipelines build concurrently from several contexts")
     CHECK(built.load(std::memory_order_acquire) == thread_count);
 }
 
-ASYNC_TEST("sg metal - a rendering scope clears and draws")
+ASYNC_TEST("sg metal - a rendering scope clears and draws", exclusive("slib-shader-library"))
 {
     auto const ctx = mtl::test::make_context();
     if (ctx == nullptr)
@@ -133,7 +137,7 @@ ASYNC_TEST("sg metal - a rendering scope clears and draws")
         .usage = sg::texture_usage::render_target | sg::texture_usage::copy_src,
     });
 
-    auto pipeline = make_triangle_pipeline(ctx, sg::pixel_format::rgba8_unorm);
+    auto pipeline = make_triangle_pipeline(ctx, sg::pixel_format::rgba8_unorm, co_await compile_triangle(*ctx));
     REQUIRE(pipeline.has_value()).context(pipeline.has_error() ? pipeline.error().to_string() : cc::string());
 
     auto cmd = ctx->create_command_list();
@@ -208,7 +212,8 @@ namespace
 /// A pipeline over the fixture's vertex stage with no fragment stage at all — which is what a depth-only pass is.
 [[nodiscard]] cc::result<sg::backend::metal::metal_raster_pipeline_handle> make_depth_only_pipeline(
     mtl::metal_context_handle const& ctx,
-    sg::depth_stencil_state const& depth_stencil)
+    sg::depth_stencil_state const& depth_stencil,
+    sg::compiled_shader const& vertex)
 {
     auto layout = ctx->create_metal_pipeline_layout({}, sg::lifetime_scope::persistent);
     if (layout.has_error())
@@ -217,7 +222,7 @@ namespace
     return ctx->create_metal_raster_pipeline(
         {
             .layout = layout.value(),
-            .vertex_shader = triangle_stage(sg::shader_stage::vertex, "vertex_main"),
+            .vertex_shader = vertex,
             .rasterization = {.cull = sg::cull_mode::none},
             .depth_stencil = depth_stencil,
             .depth_stencil_format = sg::pixel_format::depth32_float,
@@ -237,7 +242,8 @@ namespace
         .usage = sg::texture_usage::depth_stencil | sg::texture_usage::copy_src,
     });
 
-    auto pipeline = make_depth_only_pipeline(ctx, depth_stencil);
+    auto const stages = co_await compile_triangle(*ctx);
+    auto pipeline = make_depth_only_pipeline(ctx, depth_stencil, stages.vertex);
     CC_ASSERT(pipeline.has_value(), "the depth-only fixture pipeline could not be built");
 
     auto cmd = ctx->create_command_list();
@@ -263,7 +269,7 @@ namespace
 }
 } // namespace
 
-ASYNC_TEST("sg metal - a depth-only pass writes depth")
+ASYNC_TEST("sg metal - a depth-only pass writes depth", exclusive("slib-shader-library"))
 {
     auto const ctx = mtl::test::make_context();
     if (ctx == nullptr)
@@ -282,7 +288,7 @@ ASYNC_TEST("sg metal - a depth-only pass writes depth")
     CHECK(wrong == 0).context(cc::format("{} of 16 depth texels were not written; first is {}", wrong, depth[0]));
 }
 
-ASYNC_TEST("sg metal - depth is not written with the test off")
+ASYNC_TEST("sg metal - depth is not written with the test off", exclusive("slib-shader-library"))
 {
     auto const ctx = mtl::test::make_context();
     if (ctx == nullptr)
@@ -301,7 +307,7 @@ ASYNC_TEST("sg metal - depth is not written with the test off")
     CHECK(wrong == 0).context(cc::format("{} of 16 depth texels were written; first is {}", wrong, depth[0]));
 }
 
-ASYNC_TEST("sg metal - a stencil-masked draw is masked by the stencil clear")
+ASYNC_TEST("sg metal - a stencil-masked draw is masked by the stencil clear", exclusive("slib-shader-library"))
 {
     auto const ctx = mtl::test::make_context();
     if (ctx == nullptr)
@@ -335,10 +341,11 @@ ASYNC_TEST("sg metal - a stencil-masked draw is masked by the stencil clear")
     auto layout = ctx->create_metal_pipeline_layout({}, sg::lifetime_scope::persistent);
     REQUIRE(layout.has_value());
 
+    auto const stages = co_await compile_triangle(*ctx);
     auto desc = sg::raster_pipeline_description{
         .layout = layout.value(),
-        .vertex_shader = triangle_stage(sg::shader_stage::vertex, "vertex_main"),
-        .fragment_shader = triangle_stage(sg::shader_stage::fragment, "fragment_main"),
+        .vertex_shader = stages.vertex,
+        .fragment_shader = stages.fragment,
         .rasterization = {.cull = sg::cull_mode::none},
         // Draw only where the stencil equals the reference, which each pass sets for itself.
         .depth_stencil = {.stencil_test = true,

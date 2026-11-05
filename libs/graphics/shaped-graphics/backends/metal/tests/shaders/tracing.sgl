@@ -1,0 +1,94 @@
+// The tier-2 ray-tracing fixtures, written in SGL.
+// Thread 0 aims at the unit triangle (or box) and thread 1 aims past it, so one dispatch covers the hit path and the
+// miss path: a hit reports its distance, a miss reports -1, and a payload nothing wrote stays 0.
+// The recursion and the refused procedural any-hit stay in raytrace.metal: SGL refuses the one and cannot spell the other.
+
+require raytracing_pipeline, ray_query
+
+binding scene:
+    world: acceleration_structure[.triangles]
+    results: mut buffer[float]
+
+binding boxes:
+    world: acceleration_structure[.procedural]
+    results: mut buffer[float]
+
+struct probe:
+    value: float
+
+rays probe_rays:
+    marker: probe
+
+// Along +z from z = -1: at (0.25, 0.25) the unit triangle is at distance 1, and (5, 5) passes everything.
+fun probe_ray(id: int3) -> ray:
+    let at = if id.x == 0 => 0.25 else 5.0
+    return ray(origin = pos3(at, at, -1.0), direction = vec3(0.0, 0.0, 1.0), t_max = 100.0)
+
+// The portable trace shape, an ordinary kernel that traverses and shades in its own code.
+@compute(1) fun trace_inline(@thread_id id: int3){scene}:
+    let h = scene.world.trace(probe_ray(id), flags = ray_flags.force_opaque)
+    scene.results[id.x] = if h.is_hit => h.t else -1.0
+
+@raygen fun probe_main(@launch_id id: int3){scene}:
+    let mut p = probe(0.0)
+    trace(scene.world, probe_ray(id), probe_rays.marker, mut p)
+    scene.results[id.x] = p.value
+
+@miss fun miss_marker(p: mut probe):
+    p.value = -1.0
+
+// The miss the second pipeline takes, which tells it apart from the first's.
+@miss fun miss_second(p: mut probe):
+    p.value = -2.0
+
+@closest_hit fun closest_hit_marker(h: triangle_hit, p: mut probe):
+    p.value = h.t
+
+// Rejects every hit, so a non-opaque scene it is attached to reports a miss where the same geometry otherwise hits.
+@any_hit fun any_hit_reject(c: triangle_candidate, p: mut probe) -> hit_decision:
+    return hit_decision.ignore
+
+hit_group marked for probe_rays:
+    marker = (closest_hit = closest_hit_marker)
+
+hit_group rejected for probe_rays:
+    marker = (closest_hit = closest_hit_marker, any_hit = any_hit_reject)
+
+@raytracing pipeline marked_path:
+    rays = probe_rays
+    raygen = probe_main
+    miss.marker = miss_marker
+    hit_groups = (marked, rejected)
+
+@raytracing pipeline second_path:
+    rays = probe_rays
+    raygen = probe_main
+    miss.marker = miss_second
+    hit_groups = (marked)
+
+// ---- a procedural primitive: the box is [0, 1]³, and the intersection reports 3, not the box's own entry distance
+
+struct box_attributes:
+    side: float
+
+@intersection fun procedural_hit(b: procedural_box) -> report[box_attributes]:
+    return report(t = 3.0, attributes = box_attributes(1.0))
+
+@closest_hit fun closest_box(h: procedural_hit[box_attributes], p: mut probe):
+    p.value = h.t
+
+hit_group boxed for probe_rays:
+    geometry = .procedural
+    intersection = procedural_hit
+    marker = (closest_hit = closest_box)
+
+@raygen fun probe_boxes(@launch_id id: int3){boxes}:
+    let mut p = probe(0.0)
+    trace(boxes.world, probe_ray(id), probe_rays.marker, mut p)
+    boxes.results[id.x] = p.value
+
+@raytracing pipeline boxed_path:
+    rays = probe_rays
+    raygen = probe_boxes
+    miss.marker = miss_marker
+    hit_groups = (boxed)

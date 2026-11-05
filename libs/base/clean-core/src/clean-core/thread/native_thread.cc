@@ -1,6 +1,7 @@
 #include <clean-core/common/assert.hh>
 #include <clean-core/common/assertf.hh>
 #include <clean-core/common/utility.hh> // cc::memcpy
+#include <clean-core/error/impl/signal_stack.hh>
 #include <clean-core/memory/unique_ptr.hh>
 #include <clean-core/thread/native_thread.hh>
 #include <clean-core/thread/thread.hh>
@@ -27,9 +28,12 @@ void run_body(StartData& start) noexcept
 {
     if (!start.name.empty())
         cc::set_current_thread_name(start.name);
+    // A stack of its own for the crash handler's signals, so an overflow on this thread is still reported.
+    cc::impl::enter_thread_signal_stack();
     start.body();
     // Released here, so what the body captured dies on the thread that ran it, as it would under std::thread.
     start.body = {};
+    cc::impl::leave_thread_signal_stack();
 }
 
 #if CC_HAS_THREADS

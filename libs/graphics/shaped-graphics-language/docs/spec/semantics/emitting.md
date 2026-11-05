@@ -468,6 +468,13 @@ So `{float3; float}` is written with `packed_float3`: the `float` is at byte 12 
   The entry point then states the feature, which no program names, and is compiled at Shader Model 6.9.
   vulkan sees micromaps without the flag, but DXC takes a ray forced to 2 states only beside it, and the entry point declares `SPV_EXT_opacity_micromap`'s capability, which DXC leaves out.
   `ray_flags.force_omm_2_state` is in a `RayQuery`'s template only there, since only 6.9 names it; elsewhere the template leaves it out, and the trace's flags still carry it.
+* **EMIT-185** A text keeps its entry point's float guarantee (CHK-435), or the compile refuses with `float-guarantee-not-kept`, naming the function that asked.
+  `hlsl-dx12` keeps every level: DXC compiles from `.specials` on with `-Gis`, and at `.ieee` with `-denorm preserve` too.
+  `msl` keeps up to `.precise`, since Metal's safe math keeps the special values and the order, and is not known to keep denormals.
+  `hlsl-vulkan` keeps every level through the same flags: DXC writes `SignedZeroInfNanPreserve` and `NoContraction` on every float operation for `-Gis`, and `DenormPreserve` for `-denorm preserve`.
+  Each mode needs its device property, so a vulkan entry point needs the feature `float_specials` from `.specials` on, and `float_denormals` at `.ieee`.
+  `wgsl` keeps `.fast` alone.
+  A host may weaken a guarantee on WGSL alone, which compiles at `.fast` with the warning `float-guarantee-weakened`.
 * **EMIT-136** HLSL writes a ray-tracing stage as a library export named by its kind, `[shader("closesthit")]` over `void`, whose payload is an `inout` parameter.
   A triangle closest hit or any hit takes `BuiltInTriangleIntersectionAttributes` too.
   An any hit's decision ends the stage: `ignore` is `IgnoreHit()`, `accept_and_end_search` `AcceptHitAndEndSearch()`, and `accept` a plain `return`.

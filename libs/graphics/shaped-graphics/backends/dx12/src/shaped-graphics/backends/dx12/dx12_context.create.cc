@@ -606,6 +606,8 @@ cc::result<context_handle> create_dx12_context(backend::dx12::dx12_config const&
     ctx->_wave_ops = wave_ops;
     ctx->_shader_execution_reordering = shader_execution_reordering;
     ctx->_opacity_micromap = opacity_micromap;
+    if (opacity_micromap)
+        mark_acceleration_structures();
     ctx->_vertex_layer_output = vertex_layer_output;
 
     // One dispatch per argument record, no root-signature changes, so the signature takes no root signature.

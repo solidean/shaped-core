@@ -198,6 +198,12 @@ sg::async_compiled_shader slib::shader_asset::acquire(sg::context const& ctx, cc
                     names.appendf("{}{}", names.empty() ? "" : ",", sg::to_string(f));
             with_device.push_back({.name = cc::string(k_device_features_option), .value = cc::move(names)});
         }
+        // EMIT-185: a context that accepts weaker floats says so for every pipeline it builds
+        auto weakens = false;
+        for (auto const& o : with_device)
+            weakens = weakens || o.name == k_weakens_float_option;
+        if (!weakens && ctx.weakens_float_guarantees())
+            with_device.push_back({.name = cc::string(k_weakens_float_option), .value = cc::string("true")});
     }
 
     // The context lists what it takes in preference order, so the first one we can actually build wins.

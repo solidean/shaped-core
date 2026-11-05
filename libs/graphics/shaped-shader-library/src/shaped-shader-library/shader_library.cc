@@ -95,6 +95,9 @@ cc::string reflection_mismatch(sg::compiled_shader const& reflected,
     auto out = cc::string();
     for (auto const& r : reflected.bindings)
     {
+        // sg's debug window, which sg binds itself wherever a shader writes print or assert records (EMIT-183)
+        if (r.name == "sg_debug" && !stated.debug_sites.empty())
+            continue;
         sg::binding const* match = nullptr;
         for (auto const& d : declared)
             if (emitted_name_of(d) == r.name)
@@ -639,6 +642,8 @@ void slib::shader_library::_compile_text(compile_outcome& outcome,
     // A preprocessor that renamed the entry point says so, and the compile has to ask for the name the text declares.
     if (!preprocessed.value().entry_point.empty())
         desc.entry_point = cc::move(preprocessed.value().entry_point);
+    for (auto& arg : preprocessed.value().dxc_args)
+        desc.dxc_args.push_back(cc::move(arg));
 
     // Between the flatten and the compile, because a group's numbering is defined over one flattened translation
     // unit, and because a decorating compiler could be displaced by any later add_compiler for the same edge.

@@ -44,6 +44,7 @@ namespace
     result.warnings.push_back(cc::string("cube.sgl:3:5: warning: no-effect: a statement that does nothing"));
     result.warnings.push_back(cc::string("view/frame.sgl:7:14: warning: unroll-too-long: 257 values\n"
                                          "view/frame.sgl:6:5: note: the loop"));
+    result.dxc_args.push_back(cc::string("-Gis"));
     result.layouts.push_back({.global = "constants", .stride = 0, .fields = {{.name = "view_projection", .offset = 0}}});
     result.declared_bindings.back().reflected_name = "sgl_constants";
     auto& stated = result.stated.value();
@@ -77,6 +78,11 @@ namespace
         return false;
     for (auto i = isize(0); i < a.warnings.size(); ++i)
         if (a.warnings[i] != b.warnings[i])
+            return false;
+    if (a.dxc_args.size() != b.dxc_args.size())
+        return false;
+    for (auto i = isize(0); i < a.dxc_args.size(); ++i)
+        if (a.dxc_args[i] != b.dxc_args[i])
             return false;
     if (a.layouts.size() != b.layouts.size())
         return false;

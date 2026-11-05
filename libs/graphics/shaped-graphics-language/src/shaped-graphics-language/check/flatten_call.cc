@@ -657,6 +657,7 @@ auto sgl::check::impl::flattener::inline_bound(ast::expr_id call,
     // CHK-338: an instance's body was checked with these bindings, and an inferred result is the instance's
     auto const instance = c.existing_function_instance(callee, bindings);
     auto const result = instance >= 0 ? c.out.function_instances[instance].result : info.result;
+    raise_float_level(callee);
     frames.push_back({.function = callee,
                       .file = s.file,
                       .result = result,

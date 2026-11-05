@@ -454,8 +454,6 @@ struct checker
     /// The functions of each struct's and enum's type scope, keyed by the index of the type's symbol, then by name.
     /// Members are declared with their type, and extensions once every file is declared (CHK-233, CHK-237).
     layered_map<i32, cc::map<cc::string, cc::vector<symbol_id>>> type_scopes;
-    /// The symbols `type_scopes` holds, which take no name an emitter writes: a call of one is inlined, never named.
-    cc::set<i32> scoped_functions;
     /// The types `resource_type` and `buffer_type` interned, by spelling, so a mention looks up only its equals.
     /// The function arguments of every call checked so far; `call_arguments::functions` indexes it.
     cc::vector<function_argument> function_arguments;
@@ -732,6 +730,8 @@ struct checker
     [[nodiscard]] i32 preferred_subgroup_size_of(i32 file, ast::attribute const* a, bool is_compute);
     /// `@padding(.none)` on a binding or a buffer member; anything else reports and leaves the natural padding.
     [[nodiscard]] padding_kind padding_of(i32 file, ast::attribute const* a);
+    /// CHK-435: `@float(.specials)` and the other levels; `fast` without the attribute, and after a bad one, which it reports.
+    [[nodiscard]] float_level float_level_of(i32 file, ast::attribute const* a);
     /// `@geometry(max_vertices = N)`'s `N`, from 1 to 256; 1 after a bad argument, which it reports (CHK-301).
     [[nodiscard]] i32 max_vertices_of(i32 file, ast::attribute const& a);
     struct tessellation_mode

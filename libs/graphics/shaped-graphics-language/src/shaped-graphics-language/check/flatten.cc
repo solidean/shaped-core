@@ -1,3 +1,4 @@
+#include <shaped-graphics-language/builtins/registry.hh>
 #include <shaped-graphics-language/check/impl/flattener.hh>
 
 using namespace sgl;
@@ -615,6 +616,22 @@ void sgl::check::impl::flattener::flatten_swizzle_assign(origin from, ast::assig
 
 namespace
 {
+/// CHK-436: a float compared with itself, `x != x` or `x == x`, which a fast-math compiler folds.
+/// `is_nan` and `is_inf` test the bits on every target, which no such compiler can fold, so they are no such test.
+bool is_special_value_test(flat_entry_point const& e, flat_call const& call)
+{
+    auto const& registry = builtins::default_registry();
+    if (!is_valid(call.intrinsic) || index_of(call.intrinsic) >= registry.functions.size())
+        return false;
+    auto const& name = registry.at(call.intrinsic).name;
+    if ((name != "equal" && name != "not_equal") || call.arguments.count != 2)
+        return false;
+    auto const arguments = e.at(call.arguments);
+    auto const* const a = e.at(arguments[0]).node.try_as<flat_local_ref>();
+    auto const* const b = e.at(arguments[1]).node.try_as<flat_local_ref>();
+    return a != nullptr && b != nullptr && a->local == b->local;
+}
+
 /// CHK-389: once, however many trees inline the function the loop stands in.
 /// A loop of an inlined function names the call it was reached through, whose arguments may be what its bounds read.
 located_diagnostic& report_unroll(checker& c, flattener::unroll_report const& u)
@@ -638,7 +655,7 @@ checker::taken_names checker::module_names()
         auto names = cc::make_shared<cc::set<cc::string>>();
         // a function of a type scope is reached through its type, `x.row(1)`, and never written under its own name
         for (auto i = module_names_below_count; i < out.symbols.size(); ++i)
-            if (!out.symbols[i].name.empty() && !scoped_functions.contains(i32(i)))
+            if (!out.symbols[i].name.empty() && !takes_no_emitted_name(out.symbols[i]))
                 (void)names->insert(out.symbols[i].name);
         own_module_names = names.get();
         // the checked module keeps both alive, since its flat trees' mints point at them
@@ -847,6 +864,7 @@ void checker::flatten_entry_point(symbol_id id, traversal_request const* travers
     f.entry.names.also_taken_below = taken.below;
     f.entry.names.reserve(s.name);
 
+    f.raise_float_level(id);
     f.frames.push_back({.function = id, .file = s.file, .result = info.result});
     // CHK-326: a ray-tracing stage's one parameter of the target is its payload, `locals[0]`, which the stage writes
     // through; its launch, its ray and its hit it reads from the target where the entry point starts
@@ -1032,6 +1050,22 @@ void checker::flatten_entry_point(symbol_id id, traversal_request const* travers
     f.entry.features |= used;
     for (auto const& u : f.unroll_reports)
         of_entry([&]() -> located_diagnostic& { return report_unroll(*this, u); });
+    // CHK-436: at `fast` a target may assume no NaN or infinity arises, and decide a test for one ahead of time
+    if (f.entry.float_guarantee == float_level::fast)
+        for (auto const& x : f.entry.exprs)
+            if (auto const* const call = x.node.try_as<flat_call>(); call != nullptr && ast::is_valid(x.from.expr)
+                                                                     && !is_prelude_file(x.from.file)
+                                                                     && is_special_value_test(f.entry, *call))
+                of_entry(
+                    [&]() -> located_diagnostic&
+                    {
+                        return report_once(diagnostic_kind::nan_test_at_fast, x.from.file,
+                                           span_of(x.from.file, x.from.expr),
+                                           "a float compared with itself tests for a NaN, which code at "
+                                           "@float(.fast) may assume never arises, so a target may fold the test; "
+                                           "is_nan tests the bits and holds at every level, or the function needs "
+                                           "@float(.specials)");
+                    });
     // CHK-227: once, however many trees inline the function the assert stands in
     for (auto const& a : f.effectful_asserts)
         of_entry(

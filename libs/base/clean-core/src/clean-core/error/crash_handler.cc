@@ -3,6 +3,7 @@
 #include <clean-core/common/macros.hh>
 #include <clean-core/common/utility.hh>
 #include <clean-core/error/impl/posix_thread_stacks.hh>
+#include <clean-core/error/impl/signal_stack.hh>
 #include <clean-core/platform/stacktrace.hh>
 #include <clean-core/platform/symbolize.hh> // cc::impl::with_dbghelp_if_free, so the walk never waits on a suspended thread's lock
 #include <clean-core/record/thread_scopes.hh>
@@ -497,6 +498,8 @@ bool with_symbols(F&& walk) noexcept
             // common case where the process never crashes at all.
             // A report that is not fatal keeps the process running, so the session it shares stays up after it.
             cc::impl::ensure_process_symbols_locked();
+            // the session came up at the first symbolization, so a module loaded since is unknown to it until refreshed
+            SymRefreshModuleList(GetCurrentProcess());
             walk();
         });
 }
@@ -773,24 +776,46 @@ char const* signal_reason(int sig) noexcept
     }
 }
 
-void signal_handler(int sig) noexcept
+/// A fault at or just below the faulting thread's own stack is that stack running out, which macOS reports as SIGBUS.
+[[nodiscard]] bool is_stack_overflow(int sig, siginfo_t const* info) noexcept
 {
-    release_report(report_crash(signal_reason(sig)));
+#ifdef SIGBUS
+    auto const is_access = sig == SIGSEGV || sig == SIGBUS;
+#else
+    auto const is_access = sig == SIGSEGV;
+#endif
+    return is_access && info != nullptr && cc::impl::is_stack_overflow_address(info->si_addr);
+}
+
+void signal_handler(int sig, siginfo_t* info, void*) noexcept
+{
+    release_report(report_crash(is_stack_overflow(sig, info) ? "stack overflow" : signal_reason(sig)));
     // Restore the default disposition and re-raise so the process exits with the
     // signal's normal status (and can still produce a core dump).
     std::signal(sig, SIG_DFL);
     std::raise(sig);
 }
 
+/// `SA_ONSTACK`, so a thread with a signal stack of its own runs the handler there: an overflowed stack has no room for it.
+void install_signal_handler(int sig) noexcept
+{
+    struct sigaction action = {};
+    action.sa_sigaction = signal_handler;
+    action.sa_flags = SA_SIGINFO | SA_ONSTACK;
+    sigemptyset(&action.sa_mask);
+    (void)sigaction(sig, &action, nullptr);
+}
+
 void install_platform_handlers() noexcept
 {
-    std::signal(SIGSEGV, signal_handler);
-    std::signal(SIGABRT, signal_handler);
-    std::signal(SIGILL, signal_handler);
-    std::signal(SIGFPE, signal_handler);
+    install_signal_handler(SIGSEGV);
+    install_signal_handler(SIGABRT);
+    install_signal_handler(SIGILL);
+    install_signal_handler(SIGFPE);
 #ifdef SIGBUS
-    std::signal(SIGBUS, signal_handler);
+    install_signal_handler(SIGBUS);
 #endif
+    cc::impl::enable_thread_signal_stacks();
 }
 
 #endif

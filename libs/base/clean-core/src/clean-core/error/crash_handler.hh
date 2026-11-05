@@ -49,6 +49,8 @@ using crash_context_hook = void (*)() noexcept;
 ///
 /// On Windows a stack overflow is reported by a thread parked for it at install, since the overflowed stack has no room left for the report.
 /// It walks the faulting thread from the fault's context: the top frames, where the recursion shows, the bottom ones and the depth.
+/// On Linux and macOS the handler runs on a signal stack of the faulting thread's own, and names a fault at its stack's end an overflow.
+/// Only the installing thread and every `cc::native_thread` have one: an overflow on any other thread still ends the process unreported.
 ///
 /// Idempotent — installing more than once is harmless.
 /// Implemented per platform (Windows SEH plus SIGABRT, POSIX signals); a best-effort no-op where unsupported.

@@ -31,6 +31,10 @@ struct sg::backend::webgpu::webgpu_config
     /// Ask for the low-power adapter rather than the high-performance one; only a hint to the browser.
     bool prefer_low_power = false;
 
+    /// Run an SGL entry point whose `@float` WGSL cannot keep at `.fast`, with a warning, rather than refusing it.
+    /// WGSL keeps no float guarantee above `.fast`, so this is the host accepting that for every pipeline it builds.
+    bool weakens_float_guarantees = false;
+
     /// Capacity of the staging ring behind cmd.upload, in bytes.
     /// The ring rewinds whenever no open list holds a span, so it bounds one list's uploads rather than one epoch's.
     isize upload_ring_bytes = 16 * 1024 * 1024;
@@ -115,6 +119,7 @@ public:
     using sg::context::settle_due_completions;
 
     [[nodiscard]] sg::execution_model execution() const override { return sg::execution_model::never_block; }
+    [[nodiscard]] bool weakens_float_guarantees() const override { return _config.weakens_float_guarantees; }
 
     /// Free-threaded, so every case reads what creation recorded: `device()` asserts the device thread.
     [[nodiscard]] bool supports(sg::feature f) const override
@@ -166,6 +171,10 @@ public:
             return false;
         case sg::feature::shader_execution_reordering:
             // WebGPU has no ray-tracing pipeline to reorder.
+            return false;
+        case sg::feature::float_specials:
+        case sg::feature::float_denormals:
+            // WGSL may assume no NaN or infinity arises, and nothing a shader says reaches the compiler's float handling
             return false;
         case sg::feature::unaligned_block_compression:
             // Lifted by `texture-compression-unaligned`, which the emdawnwebgpu this builds against does not offer.
