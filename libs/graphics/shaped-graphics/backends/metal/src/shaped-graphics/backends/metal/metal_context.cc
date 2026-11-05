@@ -162,6 +162,9 @@ bool metal_context::supports(sg::feature f) const
     case sg::feature::view_instancing:
         // vertex amplification would grant it, and is not wired up yet
         return false;
+    case sg::feature::vertex_pipeline_stores:
+        // a vertex function writes a device buffer on every Apple GPU
+        return true;
     case sg::feature::wireframe_fill:
         // `MTLTriangleFillModeLines` is on every Apple GPU.
         return true;
@@ -189,9 +192,14 @@ bool metal_context::supports(sg::feature f) const
         return _device != nullptr && _device->supportsBCTextureCompression();
     case sg::feature::shader_f16:
     case sg::feature::shader_int16:
+    case sg::feature::shader_int64:
     case sg::feature::subgroups:
-        // `half`, `short` and the SIMD-group and quad functions are on every Apple GPU, so nothing is probed.
+        // `half`, `short`, `long` and the SIMD-group and quad functions are on every Apple GPU, so nothing is probed.
         return true;
+    case sg::feature::shader_f64:
+    case sg::feature::shader_int64_atomics:
+        // MSL has no double, and its 64-bit atomics are a ulong's min and max alone.
+        return false;
     case sg::feature::image_atomics:
         // Inferred from the floor rather than probed: texture atomics need Apple7, below every Metal 4 device.
         return true;

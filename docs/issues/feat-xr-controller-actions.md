@@ -4,6 +4,8 @@ priority: normal
 tags: [xr, input]
 parent: epic-xr
 blocked-by: [feat-shaped-xr-core]
+claimed-by: Claude (for Philip)
+claimed-at: 2026-11-05T15:32Z
 ---
 
 # Controller input as OpenXR-style actions

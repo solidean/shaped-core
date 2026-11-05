@@ -18,6 +18,14 @@ This page is for whoever works on the server.
   Only the server can tell an atomic `max` from a plain one, so the grammar colours just the names that are unique.
 * **Inlay hints**: ` : type` after every `let` that writes no type, and `-> type` before the `=>` of every function or property whose return type is inferred.
   Each inserts itself when accepted, except on a property of a type body, which takes no `-> type`.
+* **Hover and go to definition**: `sgl::reference_at` resolves the name at the position through the check's side tables.
+  A hover is its declaration as SGL writes it, in a `sgl` code block, then the `///` lines above the declaration.
+  A definition is the declared name, which for a builtin is in its `sgl-prelude:` document.
+  A swizzle, an array's `length` and `self` have a hover and no definition.
+* **Completion**, with `.` as its trigger: `sgl::completions_at`, filtered by the word the cursor ends.
+  After `x.` it is what `x` has; while that line does not parse yet, `x` is read as a name in scope, since nothing checked it.
+  Anywhere else it is the locals declared before the cursor in a block still open, the parameters, the document's and its module's declarations, the prelude's, and the keywords.
+  An overloaded name is one item, with its first overload's signature as the detail.
 * **Quick fixes**: a diagnostic the checker knows a fix for carries it as `located_diagnostic::fixes`, and `textDocument/codeAction` offers each as a `quickfix`.
   The one fix of a diagnostic is the preferred one, so an editor's "fix all" applies it; `as-precedence` is the first.
 * **Tests**: after every check the server runs the document's tests itself.
@@ -103,5 +111,9 @@ Recorded so they are not re-derived:
   A relative directory is resolved against the first workspace folder only, which leaves a multi-root workspace and per-folder settings open.
   An error in a module a document reaches is shown once, on the document's `use` of that module, with the module's own location beside it.
 * **Reusing a checked prelude and checked modules** across analyses, which waits for the compilation model's interfaces.
-* **Hover, go-to-definition, completion and formatting**: the checker's side tables already answer the first two per expression; the library needs a position-to-node lookup.
+* **Completion from the last analysis that checked**, so `x.` completes `x` by its checked type even where the line under edit breaks its function's check.
+  Today the name is looked up again by its text, which knows locals, parameters and module-level names, and not `a.b.` chains.
+* **Signature help** while a call's arguments are written, and every overload in a hover, which `sgl::reference_at` would answer per call record.
+* **Find references and rename**, which invert the same side tables.
+* **A formatter**.
 * **A Test Explorer** view beside the gutter marks.

@@ -75,6 +75,7 @@ Metal has no layouts and no such barrier: its first write defines the contents, 
 **Keep the epochs in flight bounded**, as a swapchain does: with dozens queued, every new frame's textures overlap memory the queued ones still use.
 The NVIDIA driver then stalls when a placed render target is bound, for up to 2 s in a benchmark that queued 48 frames unthrottled.
 Throttled to 2 in flight, the same frames recorded in 5 ms where dedicated textures had taken 15.
+On an M4, `sg transient - per-frame render targets` took 31.8 ms for ten frames of ten 1920x1080 targets from the heap, 87 ms with every one dedicated, and 33 ms with the targets kept.
 A texture falls back to a dedicated allocation where it cannot be placed:
 - **The backend places no textures**: webgpu and dx12 below resource heap tier 2.
 - **The heap cannot hold this one**: a multisampled texture on dx12, which needs a 4 MiB placement alignment, or a Vulkan image whose memory types exclude the heap's.

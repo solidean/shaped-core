@@ -630,6 +630,21 @@ bool checker::holds(number_literal const& n, type_id to) const
         auto const magnitude = n.real < 0 ? -n.real : n.real;
         return magnitude < 65520.0;
     }
+    // CHK-450: a literal is held in 64 bits, so a long holds every integer one and a ulong every one not negative
+    if (to == prelude_type(builtins::k_long))
+        return n.is_integer;
+    if (to == prelude_type(builtins::k_ulong))
+        return n.is_integer && n.integer >= 0;
+    if (to == prelude_type(builtins::k_double))
+    {
+        // an integer exactly, below 2^63, where the round trip itself would overflow; a float literal is a double
+        if (n.is_integer)
+        {
+            auto const d = f64(n.integer);
+            return d < 9223372036854775808.0 && i64(d) == n.integer;
+        }
+        return n.real - n.real == 0.0;
+    }
     return false;
 }
 
@@ -752,8 +767,9 @@ type_id checker::check_expected(function_scope& scope, ast::expr_id expr, type_i
     // CHK-253: a number literal where a number type is expected converts to it where it holds exactly; anything else,
     // a vector included, is no number and the literal is simply of another type
     auto const number = number_of(file, expr);
-    cc::string_view const number_types[] = {builtins::k_int,   builtins::k_uint,   builtins::k_float,
-                                            builtins::k_short, builtins::k_ushort, builtins::k_half};
+    cc::string_view const number_types[]
+        = {builtins::k_int,  builtins::k_uint, builtins::k_float, builtins::k_short, builtins::k_ushort,
+           builtins::k_half, builtins::k_long, builtins::k_ulong, builtins::k_double};
     auto is_number_type = false;
     for (auto const name : number_types)
         is_number_type = is_number_type || to == prelude_type(name);

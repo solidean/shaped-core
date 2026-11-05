@@ -393,7 +393,6 @@ if(SC_BUILD_TESTS)
                 fragment_hazard.hlsl:fragment:ps_write
                 fragment_hazard.hlsl:fragment:ps_read
                 pattern_fill.hlsl:compute:main
-                ping_pong.hlsl:compute:main
                 mesh.hlsl:mesh:ms_main
                 mesh.hlsl:task:as_main
                 mesh.hlsl:mesh:ms_halves
@@ -407,9 +406,6 @@ if(SC_BUILD_TESTS)
 
         # The mesh and task stages, which no SGL entry point writes yet.
         target_sources(shaped-graphics-test PRIVATE tests/pipeline/mesh-test.cc)
-
-        # Frame-shaped: what creating render targets every frame costs against keeping them, per backend.
-        target_sources(shaped-graphics-test PRIVATE tests/transient/transient-benchmark.cc)
 
         # The render-routine framework tests are backend-agnostic invocables like the rest of the tier-1
         # suite, so they need only the shader package this block already gated: the end-to-end test
@@ -439,6 +435,7 @@ if(SC_BUILD_TESTS)
             tests/compute/compute-float-specials-test.cc
             tests/compute/compute-diagnostics-test.cc
             tests/compute/compute-sixteen-bit-test.cc
+            tests/compute/compute-sixty-four-bit-test.cc
             tests/compute/compute-float-atomics-test.cc
             tests/compute/compute-texture-test.cc
             tests/raster/raster-test.cc
@@ -457,6 +454,8 @@ if(SC_BUILD_TESTS)
             tests/pipeline/stages-test.cc
             tests/pipeline/ray-query-test.cc
             tests/pipeline/raytracing-pipeline-test.cc
+            # Frame-shaped: what creating render targets every frame costs against keeping them, per backend.
+            tests/transient/transient-benchmark.cc
         )
         sc_add_shader_package(
             TARGET     shaped-graphics-test
@@ -472,6 +471,7 @@ if(SC_BUILD_TESTS)
                 double_values.sgl:*
                 quads.sgl:*
                 textures.sgl:*
+                ping_pong.sgl:*
                 footprint.sgl:*
                 layout.sgl:*
                 sync.sgl:*
@@ -499,6 +499,7 @@ if(SC_BUILD_TESTS)
                 float_specials.sgl:*
                 diagnostics.sgl:*
                 sixteen_bit.sgl:*
+                sixty_four_bit.sgl:*
                 float_atomics.sgl:*
                 option_formats.sgl:*
         )

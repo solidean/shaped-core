@@ -61,6 +61,8 @@ void for_each_operand(flat_entry_point const& e, flat_expr const& x, Fn&& fn)
         fn(element->buffer);
         fn(element->index);
     }
+    else if (auto const* const length = x.node.try_as<flat_buffer_length>())
+        fn(length->buffer);
     else if (auto const* const element = x.node.try_as<flat_element>())
     {
         fn(element->object);

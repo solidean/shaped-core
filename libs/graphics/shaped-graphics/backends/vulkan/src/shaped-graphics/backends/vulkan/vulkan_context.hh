@@ -358,6 +358,12 @@ public:
             return _shader_f16;
         case sg::feature::shader_int16:
             return _shader_int16;
+        case sg::feature::shader_int64:
+            return _shader_int64;
+        case sg::feature::shader_f64:
+            return _shader_f64;
+        case sg::feature::shader_int64_atomics:
+            return _shader_int64_atomics;
         case sg::feature::subgroups:
             return _subgroups;
         case sg::feature::vertex_layer_output:
@@ -373,6 +379,8 @@ public:
             return _float_denormals;
         case sg::feature::view_instancing:
             return _view_instancing;
+        case sg::feature::vertex_pipeline_stores:
+            return _vertex_pipeline_stores;
         // SPIR-V's `Coherent` decoration is core, and storage-image atomics on r32 integer formats are required.
         // BaseInstance is the DrawParameters capability, which creation requires `shaderDrawParameters` for.
         case sg::feature::device_coherence:
@@ -946,10 +954,15 @@ public:
     /// Creation enables the device features behind them wherever the device has them.
     bool _shader_f16 = false;
     bool _shader_int16 = false;
+    bool _shader_int64 = false;
+    bool _shader_f64 = false;
+    bool _shader_int64_atomics = false;
     bool _subgroups = false;
     bool _vertex_layer_output = false;
     /// `multiview`, enabled wherever the device has it.
     bool _view_instancing = false;
+    /// `vertexPipelineStoresAndAtomics`, enabled wherever the device has it.
+    bool _vertex_pipeline_stores = false;
     /// `VK_EXT_shader_atomic_float`, enabled with its buffer and shared float32 atomics and adds alike.
     bool _float_atomic_add = false;
     /// `VK_EXT_mesh_shader`'s mesh and task stages, enabled wherever the device has both, and its draw.

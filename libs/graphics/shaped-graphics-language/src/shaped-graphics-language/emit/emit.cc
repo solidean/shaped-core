@@ -165,7 +165,8 @@ sgl::emit::emitted_text sgl::emit::emit_entry_point(check::checked_module const&
             | check::feature::raytracing_pipeline | check::feature::geometry_shader
             | check::feature::tessellation_shader | check::feature::shader_int16 | check::feature::device_coherence
             | check::feature::image_atomics | check::feature::first_instance | check::feature::helper_lane_query
-            | check::feature::vertex_layer_output | check::feature::view_instancing;
+            | check::feature::vertex_layer_output | check::feature::view_instancing | check::feature::shader_int64
+            | check::feature::shader_f64 | check::feature::shader_int64_atomics;
         for (auto i = isize(0); i < check::k_feature_count; ++i)
             if (e.features.has(check::feature(i)) && never.has(check::feature(i)))
                 result.errors.push_back({.kind = error_kind::target_lacks_feature,
@@ -197,6 +198,19 @@ sgl::emit::emitted_text sgl::emit::emit_entry_point(check::checked_module const&
             return result;
     }
 
+    // EMIT-195: a Metal buffer argument is a pointer and carries no length, which sg does not pass in yet
+    if (t == target::msl)
+        for (auto const& x : e.exprs)
+            if (x.node.is<check::flat_buffer_length>())
+            {
+                result.errors.push_back({.kind = error_kind::target_lacks_feature,
+                                         .symbol = e.function,
+                                         .detail = cc::format("{} reads a buffer's length, which a Metal buffer does "
+                                                              "not carry",
+                                                              e.name)});
+                return result;
+            }
+
     // EMIT-122: Metal has no geometry stage, and its tessellation is shaped otherwise: a compute kernel writes the factors
     if (t == target::msl
         && (e.features.has(check::feature::geometry_shader) || e.features.has(check::feature::tessellation_shader)))
@@ -209,6 +223,18 @@ sgl::emit::emitted_text sgl::emit::emit_entry_point(check::checked_module const&
                                                       e.name, check::stage_name(e.entry_stage), check::name_of(f))});
         return result;
     }
+
+    // EMIT-192: Metal has no double, and its 64-bit atomics are a ulong's min and max alone
+    if (t == target::msl)
+        for (auto const f : {check::feature::shader_f64, check::feature::shader_int64_atomics})
+            if (e.features.has(f))
+            {
+                result.errors.push_back(
+                    {.kind = error_kind::target_lacks_feature,
+                     .symbol = e.function,
+                     .detail = cc::format("{} needs {}, which Metal does not have", e.name, check::name_of(f))});
+                return result;
+            }
 
     // EMIT-139: a stage that traces or stands in traversal agrees on the ray data with every shader it is linked with
     auto const uses_ray_data = !e.traced_rays.empty() || e.entry_stage == check::stage::any_hit

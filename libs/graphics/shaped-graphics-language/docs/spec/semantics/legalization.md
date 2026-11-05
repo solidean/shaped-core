@@ -33,18 +33,34 @@ The worked examples are WGSL, since it is the strictest target: no `do … while
   An any hit returns `ignore`, and an intersection a report whose `is_hit` is false.
   An `assert` before the last barrier, derivative or subgroup operation sets LEGAL-65's flag instead, and its invocation ends where a guard's does.
   The tree then prints nothing; it is the one way it may behave otherwise than its input, and only when the caller asked.
-* **LEGAL-65** (G1) Asked to, legalization first guards each operation that may have no value: the robustness profile `abort` or `report`.
+* **LEGAL-65** (G1) Asked to, legalization first guards each operation that may have no value: the robustness profile `abort`, `report` or `define` (LEGAL-68).
   That is an integer `/` or `%` whose divisor is no literal that cannot fail (EVAL-84), and an array index that is no literal (EVAL-90).
   The guard is a block in the operation's place that binds the operands, tests them, and only then runs the operation, so every later rule keeps its order and its short circuits.
   A failed test ends the invocation as an `assert` of LEGAL-64 does, and `report` first prints the operation and its operands as that `assert`'s message.
   Where a barrier, a derivative or a subgroup operation may still follow, every invocation must reach it, so the end waits:
   the guard sets a flag and replaces the failing operand with one that cannot fail, a divisor of 1 or an index of 0.
-  The invocation then ends after the last statement of the entry point's body that holds such an operation, and what it writes until then is not masked.
+  The invocation then ends after the last statement of the entry point's body that holds such an operation, and what it writes until then is skipped (LEGAL-67).
   Until then, a loop that holds none of those operations is left at the top of each iteration once the flag is set, so a safe operand never keeps it running long.
   A loop that holds one has a trip count every invocation of the workgroup shares, so its guards trip in all of them or in none.
-  It guards the maths builtins of EVAL-87 too, each by the test the interpreter asks: `pow`, `asin`, `acos`, `atan2`, `smoothstep` and `clamp`, whose operands share one number shape.
-  A buffer element, `bytes` (EVAL-97), workgroup memory (EVAL-92) and the matrix part builtins are not guarded yet.
+  It guards the maths builtins of EVAL-87 too, each by the test the interpreter asks: `pow`, `asin`, `acos`, `atan2`, `smoothstep` and `clamp`, a scalar beside a vector read as every lane of it.
+  So is a matrix's `row` or `column` whose index is outside the matrix.
+  Workgroup memory read before it is written (EVAL-92) is not guarded yet.
   Wherever the input has a value, the tree behaves as the input does; where it has none, the tree ends the invocation instead.
+* **LEGAL-66** (G1) Where the target reads a buffer's length (EMIT-195), those profiles also guard a buffer index and a `bytes` access, by the length of CHK-460.
+  A buffer index outside `0 ..< values.length` ends the invocation as an array index does (EVAL-90).
+  So does a `bytes` load or store whose offset is no multiple of 4, or whose last word reaches past the bound memory (EVAL-97).
+  The memory itself is never bound to a local, so only the offset and a stored value are, in their order.
+  MSL reads no length, so a metal text guards neither.
+* **LEGAL-67** (G1) Once a guard may set that flag, every write up to the flag's test is skipped where it is set, so a safe operand's result reaches no memory.
+  A write is a store to a buffer element or to workgroup memory, and a call with an effect, an atomic or an image store, that stands as a statement.
+  A barrier, a derivative and a subgroup operation are never skipped, since every invocation must reach them.
+  An atomic whose result a `let` binds runs only where the flag is clear, and the `let` is 0 where it is set.
+* **LEGAL-68** (G1) The profile `define` runs each guard of LEGAL-65 and LEGAL-66 without ending anything: a failed test replaces the operand by its safe value, and the operation runs on it.
+  A divisor of 1, so `x / 0` is `x`, `x % 0` is 0 and `INT_MIN / -1` is `INT_MIN`, which are WGSL's values; an index or an offset of 0.
+  A maths builtin of EVAL-87 runs on the operands its deferred guard gives: `pow` on a base of 1, `asin` and `acos` on 0, `atan2` on an `x` of 1.
+  `smoothstep` runs on the edges 0 and 1, and `clamp` on a `high` of `low`.
+  It prints nothing and needs no flag, since no invocation ends, and the tree has a value wherever the input has one.
+  An index of 0 is still past the end of a buffer that holds nothing, which it leaves to the target.
 * **LEGAL-52** (V1) A core tree holds no `void` local, and no `let`, `var`, assignment, `return` or read of a `void` value: what evaluating one does stays as an `eval`, and the value itself is gone.
   It follows every rule that introduces a local for a result, since a `void` result is one of them; only the let rules come after it.
 

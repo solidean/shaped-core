@@ -80,7 +80,7 @@ TEST("sgl check - a require names a feature a shader can use, as sg names it")
              "sample_rate_shading, geometry_shader, tessellation_shader, shader_f16, shader_int16, subgroups, "
              "device_coherence, image_atomics, first_instance, helper_lane_query, vertex_layer_output, "
              "float_atomic_add, shader_execution_reordering, opacity_micromap, float_specials, float_denormals, "
-             "view_instancing\n");
+             "view_instancing, vertex_pipeline_stores, shader_int64, shader_f64, shader_int64_atomics\n");
     CHECK(reports_for("require raytracing\n").contains("unknown-feature user:[raytracing]"));
     CHECK(reports_for("require ray_query, binding_arrays\n") == "");
 
@@ -301,4 +301,56 @@ TEST("sgl check - an @inline binding holds no 16-bit value, at any depth")
     // a group's constant block holds one, and an @inline binding a 32-bit value
     CHECK(reports_for(listing("require shader_f16\n\n", "    gain: half\n")) == "");
     CHECK(reports_for(listing("@inline ", "    gain: float\n")) == "");
+}
+
+TEST("sgl check - a 64-bit value needs its feature, crosses no stage edge and stands in no @inline binding")
+{
+    // CHK-451: a long needs shader_int64 and a double shader_f64
+    CHECK(reports_for("@compute(64) fun cs(@thread_id id: int3):\n    let s = 3i64 + 1i64\n")
+              .contains("cs needs shader_int64"));
+    CHECK(reports_for(listing("", "    scale: double\n"))
+          == "needs-feature user:[double] a value of double needs shader_f64, which `require shader_f64` grants\n");
+    CHECK(reports_for(listing("require shader_int64\n\n", "    keys: mut buffer[ulong3]\n")) == "");
+    // a test runs on no device, and needs nothing
+    CHECK(reports_for("test (1i64 << 40) > 0i64\n") == "");
+
+    // CHK-383 and CHK-387, as for a 16-bit value
+    CHECK(reports_for("require shader_int64\n\n"
+                      "struct varyings:\n"
+                      "    @position position: hpos4\n"
+                      "    @flat key: long\n"
+                      "\n"
+                      "@vertex fun vs() -> varyings:\n"
+                      "    return {position = hpos4(0.0, 0.0, 0.0, 1.0), key = 1i64}\n")
+              .contains("a 64-bit value crossing a stage edge, in varyings.key: long"));
+    CHECK(reports_for(listing("require shader_int64\n\n@inline ", "    seed: long\n"))
+          == "unsupported-yet user:[long] a 64-bit value in an @inline binding, in work.seed: long\n");
+}
+
+TEST("sgl check - a 64-bit atomic needs shader_int64_atomics, and stands in a buffer alone")
+{
+    // CHK-296: a buffer's, which needs the atomics' feature beside the integer's
+    CHECK(reports_for(listing("require shader_int64\n\n", "    totals: mut buffer[atomic[ulong]]\n"))
+              .contains("needs shader_int64_atomics"));
+    CHECK(reports_for(listing("require shader_int64, shader_int64_atomics\n\n", "    totals: mut "
+                                                                                "buffer[atomic[long]]\n"))
+          == "");
+    // workgroup memory's are optional on every device that has a buffer's
+    CHECK(reports_for("require shader_int64, shader_int64_atomics\n\n@workgroup binding local:\n    sum: "
+                      "atomic[ulong]\n")
+              .contains("a 64-bit atomic in workgroup memory, in local.sum"));
+    CHECK(reports_for(listing("require shader_int64\n\n", "    counts: mut buffer[atomic[short]]\n"))
+              .contains("an atomic holds a `uint`, an `int`, a `float`, a `ulong` or a `long`"));
+}
+
+TEST("sgl check - a constant block holds no 64-bit vector wider than a 16-byte row")
+{
+    // CHK-453: a long3 is 24 bytes, which no row of a constant block holds
+    CHECK(reports_for(listing("require shader_int64\n\n", "    corner: long3\n"))
+          == "unsupported-yet user:[long3] a 64-bit vector wider than a 16-byte row in a constant block, in "
+             "work.corner: long3\n");
+    CHECK(reports_for(listing("require shader_f64\n\nstruct frame:\n    origin: double4\n\n", "    f: frame\n"))
+              .contains("in work.f.origin: double4"));
+    // a long2 is a row, and a buffer holds the wider ones
+    CHECK(reports_for(listing("require shader_int64\n\n", "    pair: long2\n    corners: buffer[long4]\n")) == "");
 }

@@ -175,7 +175,8 @@ cc::result<emitted_source, cc::string> emit_text(driver::impl::front_end const& 
                                        {.is_emulated = target == emit::target::wgsl,
                                         .erases_prints = !diagnostics,
                                         .lowers_asserts = diagnostics,
-                                        .guards_undefined = guards_undefined});
+                                        .guards_undefined = guards_undefined,
+                                        .guards_buffers = target != emit::target::msl});
     auto const files = driver::impl::module_files_of(front);
     auto names = cc::vector<cc::string_view>();
     for (auto i = isize(0); i < files.size(); ++i)

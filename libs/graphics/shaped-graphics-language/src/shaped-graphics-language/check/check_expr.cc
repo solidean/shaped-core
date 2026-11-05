@@ -707,12 +707,13 @@ type_id checker::check_suffixed_literal(i32 file, source_span where, cc::string_
 {
     // CHK-357: the suffix names the type, and the literal converts to no other
     auto const s = split_suffix(text).value();
-    if (s.width != 32 && s.width != 16)
+    if (s.width != 32 && s.width != 16 && s.width != 64)
     {
         unsupported(file, where, cc::format("a literal of {} bits, which no type of the prelude is", s.width));
         return error_type;
     }
     auto const is_narrow = s.width == 16;
+    auto const is_wide = s.width == 64;
     auto const is_float_body = classify_number(s.body) == number_class::plain_float;
     if (is_float_body && s.letter != 'f')
     {
@@ -721,9 +722,15 @@ type_id checker::check_suffixed_literal(i32 file, source_span where, cc::string_
         return error_type;
     }
 
-    auto const name = s.letter == 'f' ? (is_narrow ? builtins::k_half : builtins::k_float)
-                    : s.letter == 'u' ? (is_narrow ? builtins::k_ushort : builtins::k_uint)
-                                      : (is_narrow ? builtins::k_short : builtins::k_int);
+    auto const name = s.letter == 'f' ? (is_narrow ? builtins::k_half
+                                         : is_wide ? builtins::k_double
+                                                   : builtins::k_float)
+                    : s.letter == 'u' ? (is_narrow ? builtins::k_ushort
+                                         : is_wide ? builtins::k_ulong
+                                                   : builtins::k_uint)
+                                      : (is_narrow ? builtins::k_short
+                                         : is_wide ? builtins::k_long
+                                                   : builtins::k_int);
     auto const type = type_of_builtin(name, file, where);
     if (type == error_type)
         return error_type;
@@ -977,8 +984,10 @@ type_id checker::check_member(function_scope& scope, ast::expr_id id, ast::membe
             auto is_handed = false;
             for (auto const h : handed)
                 is_handed = is_handed || h == id;
+            // CHK-460: a `bytes` whose length is read is named as a subscripted buffer is
+            auto const is_measured = out.at(type).kind == type_kind::bytes && id == subscripted;
             if (type != error_type && is_resource(out.at(type).kind) && out.at(type).kind != type_kind::buffer
-                && !is_handed)
+                && !is_handed && !is_measured)
             {
                 unsupported(file, span_of(file, id),
                             cc::format("{} as a value; call a builtin on it, as in `t.load(xy)`", out.name_of(type)));
@@ -1014,7 +1023,12 @@ type_id checker::check_member(function_scope& scope, ast::expr_id id, ast::membe
         }
     }
 
+    // CHK-460: `values.length` names a buffer without reading an element of it, as a subscript does
+    auto const outer = subscripted;
+    if (name == "length")
+        subscripted = member.object;
     auto const object = check_expr(scope, member.object);
+    subscripted = outer;
     if (object == error_type || member.name.empty())
         return error_type;
 
@@ -1029,6 +1043,18 @@ type_id checker::check_member(function_scope& scope, ast::expr_id id, ast::membe
         }
         set_target(file, id, {.kind = target_kind::array_length, .index = out.at(object).count});
         return type_of_builtin(builtins::k_int, file, span_of(file, id));
+    }
+
+    // CHK-460: a buffer's length is the bound memory's, a binding member's alone
+    if ((out.at(object).kind == type_kind::buffer || out.at(object).kind == type_kind::bytes) && name == "length")
+    {
+        if (ast_of(file).at(member.object).node.is<ast::index>())
+        {
+            unsupported(file, span_of(file, id), "the length of an element of a binding array");
+            return error_type;
+        }
+        set_target(file, id, {.kind = target_kind::buffer_length});
+        return type_of_builtin(builtins::k_uint, file, span_of(file, id));
     }
 
     // CHK-249: `a.foo` is the field where there is one, and a call of `foo` with `a` otherwise

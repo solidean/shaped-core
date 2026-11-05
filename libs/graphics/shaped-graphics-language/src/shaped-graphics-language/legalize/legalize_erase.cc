@@ -244,6 +244,8 @@ struct void_eraser
             element->buffer = expr(element->buffer, depth + 1);
             element->index = expr(element->index, depth + 1);
         }
+        else if (auto* const length = copy.node.try_as<flat_buffer_length>())
+            length->buffer = expr(length->buffer, depth + 1);
         else if (auto* const array_element = copy.node.try_as<flat_element>())
         {
             array_element->object = expr(array_element->object, depth + 1);

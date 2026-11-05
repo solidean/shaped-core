@@ -13,6 +13,9 @@ enum class sgl::check::undefined_guard : sgl::u8
     /// The operation and its operands are printed as a failed `assert` is, and the invocation ends as for `abort`.
     /// Without diagnostics there is nothing to print into, and it is `abort`.
     report,
+    /// The operation runs on a substitute operand that has a value, so it gives a value the rule names and the
+    /// invocation goes on, as WGSL defines its integer division (LEGAL-68).
+    define,
 };
 
 /// Switches that exist for the tests of the legalizer, each one breaking a rule on purpose.
@@ -32,6 +35,8 @@ struct sgl::check::legalize_options
     bool lowers_asserts = false;
     /// LEGAL-65: what an integer division by zero, or an array index outside the array, does in the text.
     undefined_guard guards_undefined = undefined_guard::none;
+    /// The target reads a buffer's length, so a guard also bounds a buffer index (LEGAL-66); MSL's buffers carry none.
+    bool guards_buffers = true;
 };
 
 namespace sgl::check
