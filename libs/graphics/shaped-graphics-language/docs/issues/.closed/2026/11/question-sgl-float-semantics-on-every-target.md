@@ -5,6 +5,8 @@ refs:
   - file: libs/graphics/shaped-graphics-language/docs/spec/semantics/emitting.md
   - test: "sg - an SGL float keeps*"
   - issue: bug-sgl-metal-fast-math
+closed: 2026-11-05
+resolution: fixed
 ---
 
 # What a float guarantees on every target, beyond metal's
@@ -31,5 +33,5 @@ Vulkan needs the `SignedZeroInfNanPreserve` execution mode, which DXC can write 
 ## The answer, agreed 2026-11-05
 
 Not one promise for every shader, but a ladder an entry point climbs where it needs to: `fast`, `specials`, `precise` and `ieee`, with `fast` the default.
-[incubator/float-guarantees.md](../spec/incubator/float-guarantees.md) is the design, and [epic-sgl-float-guarantee-ladder](epic-sgl-float-guarantee-ladder.md) the work.
+[incubator/float-guarantees.md](../../../../spec/incubator/float-guarantees.md) is the design, and [epic-sgl-float-guarantee-ladder](../../../epic-sgl-float-guarantee-ladder.md) the work.
 This question closes when the epic's first child lands.

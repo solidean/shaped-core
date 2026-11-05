@@ -192,6 +192,9 @@ struct sgl::described_entry_point
     i32 workgroup[3] = {1, 1, 1};
     /// The subgroup size a compute entry point prefers (CHK-371); 0 where it prefers none.
     i32 preferred_subgroup_size = 0;
+    /// The strictest `@float` it reaches (CHK-435), and the function that stated it, by name; empty at `fast`.
+    check::float_level float_guarantee = check::float_level::fast;
+    cc::string float_raised_by;
     /// The binding list in the order written, which is the order of the pipeline layout's groups with any `@inline` one last.
     /// A `@workgroup` binding is left out, since the host binds nothing for it.
     /// A binding of another module is `m.name`, whatever name the file's `use` gave the module.

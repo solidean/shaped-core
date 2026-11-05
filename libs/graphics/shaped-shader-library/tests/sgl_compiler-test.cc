@@ -1130,3 +1130,51 @@ TEST("slib sgl compiler - an entry point asked for as another stage is an error"
     auto const ray_stage = error_of(lib.compile_source(source, sg::shader_stage::raygen, "main_ps", wgsl, options));
     CHECK(ray_stage.contains("entry point 'main_ps' is a pixel entry point"));
 }
+
+TEST("slib sgl compiler - an entry point's @float picks DXC's float flags for dx12, and WebGPU refuses it unless "
+     "weakened")
+{
+    auto resolve = [](cc::string_view) -> cc::optional<cc::string> { return cc::nullopt; };
+    auto const source_at = [](cc::string_view level)
+    {
+        return cc::format("binding work:\n"
+                          "    values: mut buffer[float]\n"
+                          "\n"
+                          "{}@compute(64) fun cs(@thread_id id: int3){{work}}:\n"
+                          "    work.values[id.x] = work.values[id.x] * 2.0\n",
+                          level);
+    };
+    auto const args_at = [&](cc::string_view level)
+    {
+        auto const dx12 = slib::create_sgl_compiler(
+            std::make_unique<slib_test::fake_compiler>(slib::shader_language::hlsl, sg::shader_format::dxil));
+        auto const text = dx12->preprocess(
+            {.source = source_at(level), .entry_point = "cs", .stage = sg::shader_stage::compute}, resolve);
+        REQUIRE(text.has_value());
+        return text.value().dxc_args;
+    };
+    CHECK(args_at("").empty());
+    auto const specials = args_at("@float(.specials) ");
+    REQUIRE(specials.size() == 1);
+    CHECK(specials[0] == "-Gis");
+    auto const ieee = args_at("@float(.ieee) ");
+    REQUIRE(ieee.size() == 3);
+    CHECK(ieee[0] == "-Gis");
+    CHECK(ieee[1] == "-denorm");
+    CHECK(ieee[2] == "preserve");
+
+    auto const wgsl = slib::create_sgl_compiler(slib::create_wgsl_compiler());
+    auto const refused = wgsl->preprocess(
+        {.source = source_at("@float(.specials) "), .entry_point = "cs", .stage = sg::shader_stage::compute}, resolve);
+    CHECK(refused.has_error());
+    auto const weakened = wgsl->preprocess(
+        {.source = source_at("@float(.specials) "),
+         .entry_point = "cs",
+         .stage = sg::shader_stage::compute,
+         .options = {slib::shader_option{.name = cc::string(slib::k_weakens_float_option), .value = cc::string("true")}}},
+        resolve);
+    REQUIRE(weakened.has_value());
+    CHECK(weakened.value().dxc_args.empty());
+    REQUIRE(weakened.value().warnings.size() == 1);
+    CHECK(weakened.value().warnings[0].contains("float-guarantee-weakened"));
+}

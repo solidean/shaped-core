@@ -3,6 +3,8 @@ created: 2026-11-05
 parent: epic-sgl-float-guarantee-ladder
 refs:
   - file: libs/graphics/shaped-graphics-language/docs/spec/incubator/float-guarantees.md
+closed: 2026-11-05
+resolution: fixed
 ---
 
 # @float(...) on functions and entry points, and an entry point's level as the most it reaches

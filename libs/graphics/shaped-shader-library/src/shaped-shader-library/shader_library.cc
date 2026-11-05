@@ -642,6 +642,8 @@ void slib::shader_library::_compile_text(compile_outcome& outcome,
     // A preprocessor that renamed the entry point says so, and the compile has to ask for the name the text declares.
     if (!preprocessed.value().entry_point.empty())
         desc.entry_point = cc::move(preprocessed.value().entry_point);
+    for (auto& arg : preprocessed.value().dxc_args)
+        desc.dxc_args.push_back(cc::move(arg));
 
     // Between the flatten and the compile, because a group's numbering is defined over one flattened translation
     // unit, and because a decorating compiler could be displaced by any later add_compiler for the same edge.

@@ -2,13 +2,16 @@
 
 *Incubator: not normative.*
 
+**Specified since 2026-11-05**: the attribute and an entry point's level (CHK-435), the lint (CHK-436), what each target keeps (EMIT-185) and the licenses (EVAL-6).
+What stays here is vulkan's execution modes, a WebGPU opt-in on the context, levels finer than the entry point, and the open questions below.
+
 ## The idea
 
 **A float means exactly what the interpreter computes, and each level of a ladder licenses a target to depart from that in named ways.**
 EVAL-6 calls a `float` a 32-bit IEEE number, and no target compiles shaders that way by default: DXC marks every operation `fast`, Metal compiles fast math, and WGSL may assume no NaN or infinity.
 Asking for strictness everywhere costs every shader for what few need, and it has a sharper cost too.
 On an Intel Arc B580, DXC's `-Gis` left shaped-viewer's pipelines stuck in the driver's compiler for minutes.
-[question-sgl-float-semantics-on-every-target](../../issues/question-sgl-float-semantics-on-every-target.md) has the measurements.
+[question-sgl-float-semantics-on-every-target](../../issues/.closed/2026/11/question-sgl-float-semantics-on-every-target.md) has the measurements.
 So strictness is asked for where it is needed, and paid for only there.
 
 The ladder, from loosest to strictest; each level licenses what is listed and every level below it is stricter:

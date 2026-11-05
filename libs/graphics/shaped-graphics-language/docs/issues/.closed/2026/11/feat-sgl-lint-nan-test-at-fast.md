@@ -3,6 +3,8 @@ created: 2026-11-05
 parent: epic-sgl-float-guarantee-ladder
 refs:
   - file: libs/graphics/shaped-graphics-language/docs/spec/incubator/float-guarantees.md
+closed: 2026-11-05
+resolution: fixed
 ---
 
 # Warn on a NaN or infinity test in code compiled at fast

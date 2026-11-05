@@ -268,6 +268,30 @@ sgl::check::padding_kind checker::padding_of(i32 file, ast::attribute const* a)
     return padding_kind::natural;
 }
 
+/// CHK-435: `@float(.precise)`, the least float guarantee a function's body needs.
+sgl::check::float_level checker::float_level_of(i32 file, ast::attribute const* a)
+{
+    if (a == nullptr)
+        return float_level::fast;
+    auto const arguments = ast_of(file).at(a->arguments);
+    auto const* const dot = arguments.size() == 1 && arguments[0].name.empty() && !arguments[0].is_splat
+                                 && ast::is_valid(arguments[0].value)
+                              ? ast_of(file).at(arguments[0].value).node.try_as<ast::leading_dot>()
+                              : nullptr;
+    auto const level = dot != nullptr ? text_of(file, dot->name) : cc::string_view();
+    if (level == "fast")
+        return float_level::fast;
+    if (level == "specials")
+        return float_level::specials;
+    if (level == "precise")
+        return float_level::precise;
+    if (level == "ieee")
+        return float_level::ieee;
+    report(diagnostic_kind::invalid_attribute_arguments, file, a->name,
+           "@float takes the guarantee a body needs: `.fast`, `.specials`, `.precise` or `.ieee`");
+    return float_level::fast;
+}
+
 /// `@stream(normals)`: one bare name, which is the buffer a vertex input member is read from.
 cc::string checker::name_argument_of(i32 file, ast::attribute const* a)
 {
@@ -1819,6 +1843,7 @@ void checker::compile_function(symbol_id id)
                                      "pixel",
                                      "compute",
                                      "preferred_subgroup_size",
+                                     "float",
                                      "geometry",
                                      "tessellation_control",
                                      "tessellation_evaluation",
@@ -2066,6 +2091,7 @@ void checker::compile_function(symbol_id id)
         .is_barrier = find_attribute(file, d.attributes, "barrier") != nullptr,
         .is_subgroup_operation = find_attribute(file, d.attributes, "subgroup") != nullptr,
         .uses_derivatives = find_attribute(file, d.attributes, "derivatives") != nullptr,
+        .float_guarantee = float_level_of(file, find_attribute(file, d.attributes, "float")),
         .max_vertices = max_vertices,
         .partitioning = tessellation.partitioning,
         .is_clockwise = tessellation.is_clockwise,

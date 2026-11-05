@@ -240,6 +240,7 @@ struct option_value;
 struct parameter;
 struct function_info;
 enum class padding_kind : u8;
+enum class float_level : u8;
 struct binding_info;
 enum class setting_kind : u8;
 enum class setting_source : u8;

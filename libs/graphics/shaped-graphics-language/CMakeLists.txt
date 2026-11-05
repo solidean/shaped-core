@@ -466,6 +466,7 @@ if(SC_BUILD_TESTS)
         tests/driver/compile-to-text-test.cc
         tests/driver/compile-profile-test.cc
         tests/driver/options-test.cc
+        tests/driver/float-guarantee-test.cc
         tests/driver/compile-target-test.cc
         tests/driver/target-text-test.cc
         tests/driver/target-type-test.cc

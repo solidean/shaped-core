@@ -346,6 +346,21 @@ enum class sgl::check::padding_kind : sgl::u8
     every_element,
 };
 
+/// How far a target may depart from the exact meaning of a float, the interpreter's, as `@float` asks (CHK-435).
+/// Ordered: each level licenses what every stricter one licenses, and more.
+enum class sgl::check::float_level : sgl::u8
+{
+    /// No annotation: assume no NaN or infinity arises, ignore the sign of zero, reassociate, contract, divide through
+    /// a reciprocal, and flush denormals.
+    fast,
+    /// NaNs, infinities and signed zeros are kept; reassociating, contracting and flushing denormals are not ruled out.
+    specials,
+    /// As `specials`, and the order of evaluation is kept: no reassociation and no contraction; denormals may flush.
+    precise,
+    /// The exact meaning, but the builtins' own stated precision.
+    ieee,
+};
+
 /// A field of a struct or a member of a binding.
 struct sgl::check::member_info
 {
@@ -589,6 +604,8 @@ struct sgl::check::function_info
     bool is_subgroup_operation = false;
     /// `@derivatives`: a call takes derivatives across a quad of pixels.
     bool uses_derivatives = false;
+    /// `@float(...)`: the least float guarantee its body needs, which every entry point reaching it keeps (CHK-435).
+    float_level float_guarantee = float_level::fast;
     /// A pixel entry point that returns one color value (CHK-418): the `@pixel struct` of one member, `color`, which
     /// the checker mints and every return builds; none for one that returns its `@pixel struct`, or nothing.
     type_id pixel_targets = type_id::none;

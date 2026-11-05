@@ -876,6 +876,13 @@ fun f() -> float:
   The shader is correct at any size, reads the size it got through `@subgroup_size`, and needs no feature.
   `n` is a power of two from 4 to 128, written as an `int` literal or as an `int` `const`.
   Any other `n`, and the attribute on any other function, is `invalid-attribute-arguments`.
+* **CHK-435** `@float(.specials)` on a function states the least float guarantee its body needs: `.fast`, `.specials`, `.precise` or `.ieee`, each stricter than the one before.
+  An entry point keeps the strictest guarantee of every function it inlines, itself included, and a function that states none is at `.fast`.
+  What each level lets a target do to a float is EVAL-6's, and what a target keeps is EMIT-185's.
+  Any other argument is `invalid-attribute-arguments`.
+* **CHK-436** A float compared with itself, `x != x` or `x == x`, in code an entry point compiles at `.fast` is the warning `nan-test-at-fast`.
+  It tests for a NaN, which a target may assume never arises at `.fast` and fold.
+  `is_nan` and `is_inf` test the bits on every target, and hold at every level.
 * **CHK-267** `@expect(footprint = "slot: access, ...")` on an entry point pins its [footprint](../bindings.md#footprint): each touched slot once, as `read`, `write` or `read write`, in any order.
   A footprint that differs is `unmet-expectation`, whose detail spells the one the code has.
   On a function that is no entry point, or with any other argument, it is `invalid-attribute-arguments`.
@@ -1669,7 +1676,7 @@ fun make_mvp(model: mat4){frame} => frame.proj * frame.view * model
 ## Diagnostic kinds
 
 Every kind below is a normal error by [DIAG-4](../syntax/diagnostics.md#rules), except some warnings.
-They are `unreachable-code`, `no-effect`, `unused-require`, `needless-nonuniform`, `unroll-too-long` and `generic-not-instantiated`.
+They are `unreachable-code`, `no-effect`, `unused-require`, `needless-nonuniform`, `unroll-too-long`, `generic-not-instantiated` and `nan-test-at-fast`.
 A diagnostic of this pass has a kind, a file, a byte span in that file, and a detail.
 
 | kind | reported by |
@@ -1687,7 +1694,7 @@ A diagnostic of this pass has a kind, a file, a byte span in that file, and a de
 | `unknown-builtin` | CHK-31 |
 | `expected-body` | CHK-32, CHK-236 |
 | `opaque-struct-needs-builtin` | CHK-34 |
-| `invalid-attribute-arguments` | CHK-36, CHK-39, CHK-204, CHK-208, CHK-211, CHK-212, CHK-220, CHK-231, CHK-267, CHK-403, CHK-292, CHK-293, CHK-301, CHK-304, CHK-384, CHK-369, CHK-370, CHK-371, CHK-431 |
+| `invalid-attribute-arguments` | CHK-36, CHK-39, CHK-204, CHK-208, CHK-211, CHK-212, CHK-220, CHK-231, CHK-267, CHK-403, CHK-292, CHK-293, CHK-301, CHK-304, CHK-384, CHK-369, CHK-370, CHK-371, CHK-431, CHK-435 |
 | `binding-not-listed` | CHK-45, CHK-131, CHK-228 |
 | `as-precedence` | CHK-411 |
 | `type-mismatch` | CHK-52, CHK-56, CHK-77, CHK-112 to CHK-118, CHK-121, CHK-167, CHK-210, CHK-214, CHK-219, CHK-236, CHK-243, CHK-275, CHK-276, CHK-279, CHK-281, CHK-287, CHK-329, CHK-344, CHK-362, CHK-375, CHK-392, CHK-429, CHK-433, CHK-434 |
@@ -1696,6 +1703,7 @@ A diagnostic of this pass has a kind, a file, a byte span in that file, and a de
 | `missing-return` | CHK-125, CHK-236 |
 | `unreachable-code` | CHK-126, CHK-162, CHK-430 |
 | `no-effect` | CHK-225 |
+| `nan-test-at-fast` | CHK-436 |
 | `recursive-call` | CHK-130 |
 | `recursive-trace` | CHK-332 |
 | `unknown-member` | CHK-64, CHK-147, CHK-152, CHK-279, CHK-329, CHK-385 |
