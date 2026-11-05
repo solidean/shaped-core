@@ -103,6 +103,9 @@ constexpr stage k_raster_stages[]
                  : cc::format("{} is a power of two from 1 to 64", path);
     if (path == "patch_control_points")
         return value >= 0 && value <= 32 ? cc::string() : cc::format("{} is 0 to 32", path);
+    // dx12 renders at most four views, which is every target's floor
+    if (path == "view_count")
+        return value >= 1 && value <= 4 ? cc::string() : cc::format("{} is 1 to 4", path);
     return {};
 }
 } // namespace

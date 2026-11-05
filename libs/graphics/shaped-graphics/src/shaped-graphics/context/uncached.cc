@@ -61,6 +61,8 @@ cc::optional<cc::string> refusal_of(sg::raster_pipeline_description const& desc,
                           "sg::feature::tessellation_shader");
     if (desc.geometry_shader.has_value() && !supported.has(sg::feature::geometry_shader))
         return cc::string("the pipeline has a geometry stage, and this device lacks sg::feature::geometry_shader");
+    if (desc.view_count > 1 && !supported.has(sg::feature::view_instancing))
+        return cc::string("the pipeline renders several views, and this device lacks sg::feature::view_instancing");
     if (desc.rasterization.fill == sg::fill_mode::wireframe && !supported.has(sg::feature::wireframe_fill))
         return cc::string("the pipeline fills wireframe, and this device lacks sg::feature::wireframe_fill");
     if (desc.depth_stencil_format == sg::pixel_format::depth32_float_stencil8
@@ -116,8 +118,9 @@ cc::string_view target_set_of(sg::raster_pipeline_description const& desc)
 /// The targets a pipeline built from `desc` must be bound with.
 sg::raster_target_formats target_formats_of(sg::raster_pipeline_description const& desc)
 {
-    auto formats
-        = sg::raster_target_formats{.depth_stencil = desc.depth_stencil_format, .sample_count = desc.sample_count};
+    auto formats = sg::raster_target_formats{.depth_stencil = desc.depth_stencil_format,
+                                             .sample_count = desc.sample_count,
+                                             .view_count = desc.view_count};
     for (auto const& target : desc.color_targets)
         formats.color.push_back(target.format);
     return formats;

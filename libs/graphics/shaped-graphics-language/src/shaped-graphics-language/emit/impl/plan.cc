@@ -1514,6 +1514,8 @@ sgl::emit::impl::stage_input_spelling const& sgl::emit::impl::spelling_of(check:
         = {"uint", "", "u32", "subgroup_size", "uint", "threads_per_simdgroup", "WaveGetLaneCount()"};
     static constexpr stage_input_spelling k_subgroup_invocation_id
         = {"uint", "", "u32", "subgroup_invocation_id", "uint", "thread_index_in_simdgroup", "WaveGetLaneIndex()"};
+    // WGSL has none, which view_instancing keeps from that target; Metal's is its vertex amplification's
+    static constexpr stage_input_spelling k_view_index = {"uint", "SV_ViewID", "u32", "", "uint", "amplification_id"};
     switch (input)
     {
     case stage_input::vertex_index:
@@ -1544,6 +1546,8 @@ sgl::emit::impl::stage_input_spelling const& sgl::emit::impl::spelling_of(check:
         return k_subgroup_size;
     case stage_input::subgroup_invocation_id:
         return k_subgroup_invocation_id;
+    case stage_input::view_index:
+        return k_view_index;
     // a ray-tracing stage reads its launch through builtins, which flatten binds its parameters to
     case stage_input::launch_id:
     case stage_input::launch_size:

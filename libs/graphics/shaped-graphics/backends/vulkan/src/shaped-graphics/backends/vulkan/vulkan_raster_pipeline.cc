@@ -289,6 +289,8 @@ cc::result<vulkan_raster_pipeline_handle> vulkan_raster_pipeline::create(vulkan_
     auto const depth_format = to_vk_format(desc.depth_stencil_format);
     auto const rendering = VkPipelineRenderingCreateInfo{
         .sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO,
+        // view `i` into layer `i`, which the rendering's own view mask must match
+        .viewMask = desc.view_count > 1 ? (1u << u32(desc.view_count)) - 1u : 0u,
         .colorAttachmentCount = u32(color_formats.size()),
         .pColorAttachmentFormats = color_formats.data(),
         .depthAttachmentFormat = depth_format,

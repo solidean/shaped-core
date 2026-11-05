@@ -194,3 +194,26 @@ pipeline layered_tags:
     pixel = layered_ps
     cull = .none
     format = .rgba32_float
+
+struct viewed:
+    @position position: hpos4
+    @interpolate(.flat) tag: int
+
+// One draw renders both views, each into its own layer, and both stages read which view they run for (CHK-437).
+@vertex fun viewed_vs(v: tagged_corner, @view_index view: int) -> viewed:
+    require view_instancing
+    return {
+        position = hpos4(v.position.x, v.position.y, v.depth, 1.0)
+        tag = v.tag + 10 * view
+    }
+
+@pixel fun viewed_ps(p: viewed, @view_index view: int) -> float4:
+    require view_instancing
+    return float4(p.tag as float, view as float, 0.0, 1.0)
+
+pipeline viewed_tags:
+    vertex = viewed_vs
+    pixel = viewed_ps
+    cull = .none
+    format = .rgba32_float
+    view_count = 2

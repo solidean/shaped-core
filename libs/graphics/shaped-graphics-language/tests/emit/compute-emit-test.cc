@@ -193,6 +193,29 @@ TEST("sgl emit - @first_instance is the draw's first instance on its own")
     CHECK(hlsl.contains("    const int i = int(i_in + f_in);\n"));
 }
 
+TEST("sgl emit - @view_index is the view a draw of several renders, in the vertex and the pixel stage")
+{
+    constexpr auto source = "require view_instancing\n"
+                            "struct varyings:\n"
+                            "    @position position: hpos4\n"
+                            "\n"
+                            "@vertex fun vs(@view_index v: int) -> varyings:\n"
+                            "    return { position = hpos4(v as float, 0.0, 0.0, 1.0) }\n"
+                            "\n"
+                            "@pixel fun ps(p: varyings, @view_index v: int) -> float4:\n"
+                            "    return float4(v as float, 0.0, 0.0, 1.0)\n";
+    for (auto const t : {target::hlsl_dx12, target::hlsl_vulkan})
+    {
+        auto const hlsl = text_of(source, t);
+        CHECK(hlsl.contains("varyings vs(uint v_in : SV_ViewID)\n"));
+        CHECK(hlsl.contains("    const int v = int(v_in);\n"));
+    }
+    CHECK(text_of(source, target::msl).contains("vertex varyings vs(uint v_in [[amplification_id]])\n"));
+    // CHK-437: WGSL has no multiview on any device
+    CHECK(sgl::emit::dump_errors(emit_source(source, 0, target::wgsl))
+          == "target-lacks-feature vs needs view_instancing, which WebGPU does not have\n");
+}
+
 TEST("sgl emit - WGSL enables primitive_index before it reads one")
 {
     constexpr auto source = "require primitive_index\n"

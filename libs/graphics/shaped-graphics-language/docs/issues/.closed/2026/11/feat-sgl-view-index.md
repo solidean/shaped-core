@@ -3,8 +3,8 @@ created: 2026-11-05
 priority: next
 tags: [xr]
 parent: epic-xr
-claimed-by: Claude (for Philip Trettner)
-claimed-at: 2026-11-05T14:10Z
+closed: 2026-11-05
+resolution: fixed
 ---
 
 # `@view_index`: which view a shader invocation renders
@@ -21,3 +21,11 @@ SGL's stereo surface, decided in `epic-xr`: an input, with the view count a host
 ## Known
 
 - The host side is `feat-sg-view-instancing`.
+
+## Done (2026-11-05)
+
+- `@view_index` is CHK-437: a vertex and pixel stage input, needing `view_instancing` in every stage that reads it.
+- It is `SV_ViewID` in HLSL, which DXC writes as SPIR-V's `ViewIndex` for vulkan, and `[[amplification_id]]` in MSL.
+- An SGL pipeline sets `view_count`, 1 to 4, through the prelude's mirror of sg's description.
+- WGSL refuses it as `target-lacks-feature`; the per-draw lowering is `feat-sg-view-instancing-metal-webgpu`.
+- Tested in C++ rather than a corpus file, beside the other stage inputs' emit and feature checks.

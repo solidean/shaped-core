@@ -218,6 +218,8 @@ enum class sgl::check::stage_input : sgl::u8
     /// How many invocations the subgroup holds, and this one's index in it (CHK-271).
     subgroup_size,
     subgroup_invocation_id,
+    /// Which view of a draw of several this invocation renders, from 0: the pipeline's `view_count` says how many.
+    view_index,
 };
 
 /// What the checker knows of one stage input: the attribute, the stage that has it, its type and the feature it needs.

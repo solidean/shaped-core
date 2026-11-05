@@ -824,6 +824,7 @@ fun f() -> float:
 | `@local_thread_index` | compute | `int` |
 | `@subgroup_size`, `@subgroup_invocation_id` | pixel, compute | `int` |
 | `@launch_id`, `@launch_size` | every ray-tracing stage (CHK-327) | `int3` |
+| `@view_index` | vertex, pixel (CHK-437) | `int` |
 
   A `@compute fun` takes stage inputs alone.
   `vertex_index` and `instance_index` count from the draw's first vertex and first instance on every target.
@@ -856,6 +857,10 @@ fun f() -> float:
   Each stage whose struct holds one needs `vertex_layer_output`, which WebGPU has on no device, so its WGSL is `target-lacks-feature`.
   A layer past the target's last layers draws nothing.
   The struct that reaches the rasterizer carries exactly one, which CHK-307 asks of the pipeline.
+* **CHK-437** `@view_index` is which view of a draw of several the invocation renders, from 0, and the pipeline's `view_count` says how many.
+  View `i` renders into layer `i` of every target, so a stereo frame is one draw into a two-layer array, and the shader picks each eye's camera by it.
+  The count is the host's, so one shader serves one view and two alike: a pipeline of one view reads 0.
+  It needs `view_instancing`, which WebGPU has on no device, so its WGSL is `target-lacks-feature`.
 * **CHK-91** A `@pixel fun` returns a `@pixel struct`, one color value, or nothing (CHK-418).
 * **CHK-418** A `@pixel fun` that returns one numeric scalar or plain vector of `float`, `half`, `int` or `uint` writes it as its one color target, named `color`.
   It stands for a `@pixel struct` of that one member, which the compiler declares as `<entry>_target`, or under a name past it where the module has that one.
@@ -901,7 +906,7 @@ A feature is what a device may lack, so using one makes a shader non-portable on
   `binding_arrays`, `extended_image_formats`, `readwrite_image_formats`, `multisampled_array_textures`, `ray_query` and `raytracing_pipeline`.
   The 16-bit types add `shader_f16` and `shader_int16` (CHK-382), and the subgroup operations `subgroups` (CHK-376).
   Coherent memory adds `device_coherence` (CHK-368), image atomics `image_atomics` (CHK-372), and a pixel stage's strong compare-exchange `helper_lane_query` (EMIT-163).
-  A `@layer` field adds `vertex_layer_output` (CHK-419).
+  A `@layer` field adds `vertex_layer_output` (CHK-419), and `@view_index` adds `view_instancing` (CHK-437).
   A vulkan entry point at `@float(.specials)` or above adds `float_specials`, and at `.ieee` `float_denormals`, which no program needs to name (EMIT-185).
   What `has` asks rather than a `require` needs adds `float_atomic_add` and `shader_execution_reordering` (CHK-426).
   The stages and stage inputs a device may lack add `primitive_index`, `sample_rate_shading`, `geometry_shader` and `tessellation_shader`.
