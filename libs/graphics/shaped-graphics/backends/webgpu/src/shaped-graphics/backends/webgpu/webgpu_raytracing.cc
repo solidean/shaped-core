@@ -511,6 +511,7 @@ sg::tlas_handle webgpu_command_list::raytracing_build_tlas(cc::span<sg::tlas_ins
 
     auto referenced_blases = cc::vector<sg::blas_handle>();
     auto kinds_present = u32(0);
+    auto is_moving = false;
     for (auto const& inst : instances)
     {
         CC_ASSERT(inst.blas != nullptr, "tlas_instance.blas is null");
@@ -521,17 +522,20 @@ sg::tlas_handle webgpu_command_list::raytracing_build_tlas(cc::span<sg::tlas_ins
         CC_ASSERT(blas != nullptr, "tlas_instance.blas is not a webgpu blas");
         kinds_present |= 1u << u32(blas->kind());
         referenced_blases.push_back(inst.blas);
+        is_moving = is_moving || inst.transform_at_end.has_value();
     }
 
     auto const instance_count = u32(instances.size());
     auto const tree = lay_out_tree(instance_count);
     auto const records = 1 + 2 * tree.node_count;
-    auto const units = isize(records) + 7 * isize(instance_count);
+    // a TLAS with a moving instance gives each instance its transform at time 1 too, in units 7 to 9
+    auto const stride = is_moving ? isize(10) : isize(7);
+    auto const units = isize(records) + stride * isize(instance_count);
     auto const unit = allocate_acceleration_region(units);
     auto const first_instance = unit + records;
 
-    auto words = region_start(tree, first_instance, instance_count, kinds_present);
-    words.reserve(words.size() + 28 * isize(instance_count));
+    auto words = region_start(tree, first_instance, instance_count, kinds_present | (is_moving ? 4u : 0u));
+    words.reserve(words.size() + 4 * stride * isize(instance_count));
     for (auto i = u32(0); i < instance_count; ++i)
     {
         auto const& inst = instances[i];
@@ -548,13 +552,20 @@ sg::tlas_handle webgpu_command_list::raytracing_build_tlas(cc::span<sg::tlas_ins
         if (inst.opaque_override.has_value())
             instance_flags |= inst.opaque_override.value() ? 1u : 2u;
         instance_flags |= u32(inst.cull_mode) << 2;
+        if (inst.transform_at_end.has_value())
+            instance_flags |= 1u << 4;
         words.push_back(blas.unit());
         words.push_back(inst.instance_id | (u32(inst.mask) << 24));
         words.push_back(inst.hit_group_offset | (instance_flags << 24));
         words.push_back(i);
+        if (is_moving)
+            for (auto k = 0; k < 12; ++k)
+                words.push_back(float_bits(inst.transform_at_end.has_value() ? inst.transform_at_end.value()[k]
+                                                                             : inst.transform[k]));
     }
     write_acceleration_region(unit, units, words);
-    record_tree_boxes(*this, unit, tree, 2, first_instance);
+    // leaf kind 3 is instances that move, whose box holds both of their transforms' boxes
+    record_tree_boxes(*this, unit, tree, is_moving ? 3 : 2, first_instance);
 
     return std::make_shared<webgpu_tlas>(_ctx, unit, u32(units), flags, int(instance_count), cc::move(referenced_blases));
 }

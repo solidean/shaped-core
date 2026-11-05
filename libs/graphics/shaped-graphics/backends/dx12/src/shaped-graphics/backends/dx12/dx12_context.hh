@@ -268,6 +268,9 @@ public:
             return _view_instancing;
         case sg::feature::mesh_shader:
             return _mesh_shader;
+        case sg::feature::ray_tracing_motion_blur:
+            // DXR has no motion
+            return false;
         case sg::feature::vertex_pipeline_stores:
             // a UAV is visible to every stage of a root signature
             return true;

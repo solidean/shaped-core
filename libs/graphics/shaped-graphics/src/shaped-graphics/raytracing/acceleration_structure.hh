@@ -2,6 +2,7 @@
 
 #include <clean-core/common/flags.hh>
 #include <clean-core/common/utility.hh>
+#include <clean-core/container/fixed_array.hh>
 #include <clean-core/container/span.hh>
 #include <clean-core/container/vector.hh>
 #include <clean-core/error/optional.hh>
@@ -122,6 +123,11 @@ struct sg::tlas_instance
     /// This is the DXR / Vulkan wire layout, and is deliberately row-major unlike typed-geometry's column-major `tg::mat`.
     /// So build this array explicitly rather than memcpy'ing a `tg::mat`.
     float transform[12] = {1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0};
+
+    /// Where `transform` has moved to at the end of the frame's interval, in its layout: a ray at time `s` meets the
+    /// instance under `transform + (transform_at_end - transform) * s`, element by element (SGL's EVAL-130).
+    /// Unset, the instance stands still; set, it requires `sg::feature::ray_tracing_motion_blur`.
+    cc::optional<cc::fixed_array<float, 12>> transform_at_end = {};
 
     /// Surfaced to the shader as InstanceID() / gl_InstanceCustomIndex.
     /// Must fit in 24 bits.
