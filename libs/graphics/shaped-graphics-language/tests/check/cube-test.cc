@@ -1,12 +1,14 @@
 #include "check-test-support.hh"
 
+#include <nexus/source_root.hh>
+
 using namespace sgl_test;
 
 namespace
 {
 cc::string read_cube()
 {
-    return read_text(cc::string(SGL_SAMPLES_DIR) + "/cube.sgl");
+    return read_text(nx::source_path(SGL_SAMPLES_DIR) + "/cube.sgl");
 }
 } // namespace
 

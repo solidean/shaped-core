@@ -1,13 +1,14 @@
 #include "../check/check-test-support.hh"
 
 #include <clean-core/string/uri.hh>
+#include <nexus/source_root.hh>
 #include <shaped-graphics-language/driver/compile_to_text.hh>
 #include <shaped-graphics-language/driver/prelude.hh>
 #include <shaped-graphics-language/driver/test_source.hh>
 
 TEST("sgl driver - the library's own prelude files are recognized by their path, and a user's of the same name is not")
 {
-    auto const dir = cc::string(sgl::impl::prelude_directory());
+    auto const dir = nx::source_path(SGL_PRELUDE_DIR);
     CHECK(sgl::prelude_file_of(dir + "/builtins.sgl") == 0);
     CHECK(sgl::prelude_file_of(dir + "/core.sgl") == 1);
     auto const uri = cc::string(dir.starts_with("/") ? "file://" : "file:///")
@@ -29,7 +30,7 @@ TEST("sgl driver - the library's own prelude files are recognized by their path,
 
 TEST("sgl driver - a file of the prelude is checked in its own place, where it declares each name once")
 {
-    auto const dir = cc::string(sgl::impl::prelude_directory());
+    auto const dir = nx::source_path(SGL_PRELUDE_DIR);
     auto const builtins = sgl::prelude_files()[0].source;
     CHECK(sgl::test_source(builtins, dir + "/builtins.sgl").errors == "");
     // behind the prelude, each builtin type is declared a second time, and so it is in a user's prelude folder

@@ -9,6 +9,8 @@
 #include <shaped-graphics-language/test/run_tests.hh>
 
 // clean-core has no directory listing yet.
+#include <nexus/source_root.hh>
+
 #include <filesystem>
 
 // A program checked behind the checked prelude is the program checked together with the prelude.
@@ -188,7 +190,7 @@ INVOCABLE_TEST("sgl checked prelude - a program behind it checks as it does with
 TEST("sgl checked prelude - the corpus files, every fourth by default")
 {
     auto files = cc::vector<program>();
-    add_files_under(files, "corpus", SGL_CORPUS_DIR);
+    add_files_under(files, "corpus", nx::source_path(SGL_CORPUS_DIR));
     REQUIRE(files.size() > 0);
     // a default run takes every fourth file
     auto const stride = nx::is_thorough() ? isize(1) : isize(4);
@@ -199,10 +201,10 @@ TEST("sgl checked prelude - the corpus files, every fourth by default")
 TEST("sgl checked prelude - the samples and sg shaders, every third by default")
 {
     auto files = cc::vector<program>();
-    add_files_under(files, "samples", SGL_SAMPLES_DIR);
+    add_files_under(files, "samples", nx::source_path(SGL_SAMPLES_DIR));
     REQUIRE(files.size() > 0);
     auto const samples = files.size();
-    add_files_under(files, "sg", SGL_SG_SHADERS_DIR);
+    add_files_under(files, "sg", nx::source_path(SGL_SG_SHADERS_DIR));
     REQUIRE(files.size() > samples);
     // A default run takes every third file.
     auto const stride = nx::is_thorough() ? isize(1) : isize(3);
@@ -244,7 +246,7 @@ parsed_modules const& corpus_modules()
     {
         auto out = parsed_modules();
         auto sources = cc::vector<program>();
-        add_files_under(sources, "corpus", SGL_CORPUS_DIR);
+        add_files_under(sources, "corpus", nx::source_path(SGL_CORPUS_DIR));
         for (auto const& p : sources)
             if (p.name.starts_with("corpus/modules/"))
             {
@@ -299,7 +301,7 @@ INVOCABLE_TEST("sgl checked modules - a program behind its modules' layer checks
 TEST("sgl checked modules - every corpus file that uses a module")
 {
     auto files = cc::vector<program>();
-    add_files_under(files, "corpus", SGL_CORPUS_DIR);
+    add_files_under(files, "corpus", nx::source_path(SGL_CORPUS_DIR));
     auto const& library = corpus_modules().files;
     auto layered = isize(0);
     for (auto const& f : files)

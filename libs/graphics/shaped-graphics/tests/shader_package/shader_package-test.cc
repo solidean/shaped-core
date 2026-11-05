@@ -27,7 +27,7 @@ TEST("sg - a consumer's shader package registers")
     CHECK(sg::test::shaders::double_values.compute.main->entry_point() == "main");
     // One definition per entry point rather than per file, which is why fragment_hazard.hlsl counts three.
     CHECK(sg::test::shaders::package().definitions.size()
-          == 5); // double_values, fragment_hazard x3 (fragment-write-hazard-test), pattern_fill
+          == 9); // double_values, fragment_hazard x3 (fragment-write-hazard-test), pattern_fill, mesh x4 (mesh-test)
 }
 
 ASYNC_INVOCABLE_TEST("sg - a consumer's shader compiles for the context it is acquired with",

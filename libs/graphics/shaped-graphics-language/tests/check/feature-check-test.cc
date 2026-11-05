@@ -77,7 +77,8 @@ TEST("sgl check - a require names a feature a shader can use, as sg names it")
           == "unknown-feature user:[timestamp_query] timestamp_query; a shader may require binding_arrays, "
              "extended_image_formats, readwrite_image_formats, multisampled_array_textures, ray_query, "
              "raytracing_pipeline, primitive_index, "
-             "sample_rate_shading, geometry_shader, tessellation_shader, shader_f16, shader_int16, subgroups, "
+             "sample_rate_shading, geometry_shader, tessellation_shader, mesh_shader, shader_f16, shader_int16, "
+             "subgroups, "
              "device_coherence, image_atomics, first_instance, helper_lane_query, vertex_layer_output, "
              "float_atomic_add, shader_execution_reordering, opacity_micromap, float_specials, float_denormals, "
              "view_instancing, vertex_pipeline_stores, shader_int64, shader_f64, shader_int64_atomics\n");
@@ -314,15 +315,23 @@ TEST("sgl check - a 64-bit value needs its feature, crosses no stage edge and st
     // a test runs on no device, and needs nothing
     CHECK(reports_for("test (1i64 << 40) > 0i64\n") == "");
 
-    // CHK-383 and CHK-387, as for a 16-bit value
-    CHECK(reports_for("require shader_int64\n\n"
-                      "struct varyings:\n"
-                      "    @position position: hpos4\n"
-                      "    @flat key: long\n"
-                      "\n"
-                      "@vertex fun vs() -> varyings:\n"
-                      "    return {position = hpos4(0.0, 0.0, 0.0, 1.0), key = 1i64}\n")
-              .contains("a 64-bit value crossing a stage edge, in varyings.key: long"));
+    // CHK-454: a stage link carries a 64-bit scalar or two-vector flat, and nothing wider
+    auto const crossing = [](cc::string_view member)
+    {
+        return reports_for(cc::format("require shader_int64\n\n"
+                                      "struct varyings:\n"
+                                      "    @position position: hpos4\n"
+                                      "    {}\n"
+                                      "\n"
+                                      "@vertex fun vs() -> varyings:\n"
+                                      "    return {{position = hpos4(0.0, 0.0, 0.0, 1.0)}}\n",
+                                      member));
+    };
+    CHECK(crossing("@interpolate(.flat) key: long = 1i64") == "");
+    CHECK(crossing("@interpolate(.flat) key: ulong2 = ulong2(1u64)") == "");
+    CHECK(crossing("@interpolate(.flat) key: long3 = long3(1i64)")
+              .contains("a 64-bit three- or four-vector crossing a stage edge"));
+    CHECK(crossing("key: long = 1i64").contains("crosses stages only flat"));
     CHECK(reports_for(listing("require shader_int64\n\n@inline ", "    seed: long\n"))
           == "unsupported-yet user:[long] a 64-bit value in an @inline binding, in work.seed: long\n");
 }

@@ -227,6 +227,7 @@ include(PrecompiledHeaders)
 # helpers below both call.
 include(RuntimeDlls)
 include(SourceFingerprint) # sc_add_source_fingerprint — a cache key that moves with a library's own sources
+include(SourcePaths)       # sc_target_source_paths — a source-tree directory as a path relative to the source root
 
 # RelWithDebInfo = Release codegen + assertions + debug info. MSVC/clang-cl default this config to /Ob1
 # (inline only functions explicitly marked inline) — a misleading dev default: /O2 is otherwise identical to
@@ -328,6 +329,7 @@ add_subdirectory(libs/data/blob-cache)
 # Added in dependency order; sg pulls in its per-backend static libraries itself.
 add_subdirectory(libs/graphics/shaped-graphics)
 add_subdirectory(libs/graphics/shaped-rendering)
+add_subdirectory(libs/graphics/shaped-xr)
 add_subdirectory(libs/graphics/shaped-viewer)
 
 # shaped-graphics-language (sgl): the SGL compiler, linter and language server. The syntactic half is over clean-core

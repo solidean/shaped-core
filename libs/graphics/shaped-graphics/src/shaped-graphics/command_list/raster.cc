@@ -181,6 +181,7 @@ void command_list::check_raster_aliasing(bool indexed)
 
 void command_list::draw(draw_config const& config)
 {
+    CC_ASSERT(!_raster_is_mesh_shaded, "a mesh-shaded pipeline draws with draw_mesh_tasks");
     _stats.add(stat::draws);
     check_raster_aliasing(false);
     raster_draw(config);
@@ -188,9 +189,21 @@ void command_list::draw(draw_config const& config)
 
 void command_list::draw_indexed(draw_indexed_config const& config)
 {
+    CC_ASSERT(!_raster_is_mesh_shaded, "a mesh-shaded pipeline draws with draw_mesh_tasks");
     _stats.add(stat::draws);
     check_raster_aliasing(true);
     raster_draw_indexed(config);
+}
+
+void command_list::draw_mesh_tasks(int x, int y, int z)
+{
+    CC_ASSERT(_raster_is_mesh_shaded, "draw_mesh_tasks draws a mesh-shaded pipeline; bind one first");
+    CC_ASSERT(x >= 0 && y >= 0 && z >= 0, "a mesh draw's workgroup counts must be non-negative");
+    if (x == 0 || y == 0 || z == 0)
+        return;
+    _stats.add(stat::draws);
+    check_raster_aliasing(false);
+    raster_draw_mesh_tasks(x, y, z);
 }
 
 void command_list::draw_indexed_indirect(raw_buffer_handle const& args, isize offset_in_bytes, isize count)
@@ -248,6 +261,7 @@ void command_list::bind_raster_pipeline(raster_pipeline const& pipeline)
         for (auto& g : _raster_groups)
             g = nullptr;
     }
+    _raster_is_mesh_shaded = pipeline.is_mesh_shaded();
     raster_bind_pipeline(pipeline);
 }
 
@@ -349,6 +363,10 @@ void rendering_scope::draw_indexed(draw_indexed_config const& config)
 {
     _cmd.draw_indexed(config);
 }
+void rendering_scope::draw_mesh_tasks(int x, int y, int z)
+{
+    _cmd.draw_mesh_tasks(x, y, z);
+}
 void rendering_scope::draw_indexed_indirect(buffer<draw_indexed_args> const& args, isize first, isize count)
 {
     CC_ASSERT(first >= 0 && count >= 0 && first + count <= args.element_count(), "indirect draws read past the "
@@ -446,6 +464,10 @@ void command_list_raster_scope::draw_indexed(draw_indexed_config const& config)
 {
     _cmd.draw_indexed(config);
 }
+void command_list_raster_scope::draw_mesh_tasks(int x, int y, int z)
+{
+    _cmd.draw_mesh_tasks(x, y, z);
+}
 void command_list_raster_scope::draw_indexed_indirect(buffer<draw_indexed_args> const& args, isize first, isize count)
 {
     CC_ASSERT(first >= 0 && count >= 0 && first + count <= args.element_count(), "indirect draws read past the "
@@ -528,6 +550,10 @@ void command_list_raster_manual_scope::draw(draw_config const& config)
 void command_list_raster_manual_scope::draw_indexed(draw_indexed_config const& config)
 {
     _cmd.draw_indexed(config);
+}
+void command_list_raster_manual_scope::draw_mesh_tasks(int x, int y, int z)
+{
+    _cmd.draw_mesh_tasks(x, y, z);
 }
 void command_list_raster_manual_scope::draw_indexed_indirect(buffer<draw_indexed_args> const& args, isize first, isize count)
 {

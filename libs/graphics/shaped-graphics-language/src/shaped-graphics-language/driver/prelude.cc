@@ -3,6 +3,7 @@
 #include <clean-core/common/macros.hh>
 #include <clean-core/container/vector.hh>
 #include <clean-core/string/char_predicates.hh>
+#include <clean-core/string/format.hh>
 #include <clean-core/string/string.hh>
 #include <clean-core/string/uri.hh>
 #include <shaped-graphics-language/ast/build.hh>
@@ -112,10 +113,9 @@ bool sgl::is_same_path(cc::string_view a, cc::string_view b)
 sgl::i32 sgl::prelude_file_of(cc::string_view path)
 {
     auto const given = normalized(path);
-    auto const directory = normalized(impl::prelude_directory());
     auto const files = prelude_files();
     for (auto i = isize(0); i < files.size(); ++i)
-        if (given == directory + "/" + normalized(files[i].name))
+        if (given.ends_with(normalized(cc::format("/shaped-graphics-language/prelude/{}", files[i].name))))
             return i32(i);
     return -1;
 }

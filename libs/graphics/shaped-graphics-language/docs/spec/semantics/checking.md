@@ -124,7 +124,9 @@ use view
   Their operators are the arithmetic, the comparisons, a vector beside its scalar, and for `long` and `ulong` the bit operators; `abs`, `min`, `max`, `clamp` and `select` take them too.
   No other builtin takes one yet: no maths function of a double, which DXIL has none of, and no subgroup operation.
 * **CHK-451** `long`, `ulong` and their vectors name the feature `shader_int64`, and `double` and its vectors `shader_f64`, as CHK-382 says of the 16-bit types.
-* **CHK-383** A 16-bit or a 64-bit value crosses no stage edge: a member of one, at any depth of a struct an entry point takes or returns, is `unsupported-yet`.
+* **CHK-383** A 16-bit value crosses no stage edge: a member of one, at any depth of a struct an entry point takes or returns, is `unsupported-yet`.
+* **CHK-454** A 64-bit scalar or two-vector crosses a stage link, flat as an integer does (CHK-273), a location apiece.
+  A 64-bit three- or four-vector there takes two locations and is `unsupported-yet`, and so is a 64-bit value in a vertex input or a pixel stage's target, which no API has a format for.
 * **CHK-388** `bytes` and `mut bytes` are resources of their own kind, and `out bytes` is an error.
   The prelude's loads take either, its stores `mut bytes` alone, and `@coherent` applies to `mut bytes` as to a `mut buffer`.
 * **CHK-387** An `@inline` binding holds no 16-bit value: a member that is one, or holds one at any depth, is `unsupported-yet` ([why](why/checking.md#chk-387)).
@@ -1113,7 +1115,7 @@ A `require` in a test's body that nothing in it uses is `unused-require`, and a 
   An array stands in one, since workgroup memory has no host layout, and a member of one is a place a shader assigns.
   `@inline` or `@no_padding` together with `@workgroup` is `invalid-attribute-arguments`.
 * **CHK-293** A `@workgroup` binding whose members take more than 16384 bytes, laid out as WGSL lays out workgroup variables, is `invalid-attribute-arguments`.
-* **CHK-294** An entry point listing a `@workgroup` binding is a compute stage, and all it lists fits the same 16384 bytes, or it is `invalid-entry-point`.
+* **CHK-294** An entry point listing a `@workgroup` binding is a compute or a mesh stage, and all it lists fits the same 16384 bytes, or it is `invalid-entry-point`.
 * **CHK-295** A test uses a `@workgroup` binding, and calls a function listing one, without listing it: the run holds its own.
 
 ## Atomics
@@ -1301,6 +1303,25 @@ HLSL writes them on dx12 and vulkan; WebGPU and Metal have neither, so WGSL and 
   A pipeline without the tessellation stages draws no patches, and sets neither but `patch_control_points = 0`.
   A geometry stage's primitive is the one the pipeline assembles: the topology's family, or the tessellator's lines for isolines and triangles otherwise.
   A primitive with adjacency is `unsupported-yet` in a pipeline, since sg has no topology that assembles one.
+
+## Mesh stages
+
+A mesh stage takes the vertex stage's place: a workgroup writes the vertices and the triangles the rasterizer draws, and reads no vertex buffer.
+HLSL writes it on dx12 and vulkan; WebGPU has none, and sg's metal backend does not wire Metal's up yet, so WGSL and MSL refuse it.
+
+* **CHK-480** `@mesh(x, y, z, vertices = N, triangles = M)` makes an entry point of the mesh stage, which needs `mesh_shader`.
+  One to three workgroup sizes come first, as `@compute`'s do (CHK-370), and hold at most 128 invocations together.
+  `N` and `M` are what the workgroup writes at most, each from 1 to 256, and each is named once; anything else is `invalid-attribute-arguments`.
+  A mesh stage takes `@thread_id`, `@local_thread_id`, `@local_thread_index` and `@workgroup_id` as a compute stage does, and lists `@workgroup` bindings (CHK-294).
+* **CHK-481** Its last parameter is its output, `mut mesh_output[T]`, after its stage inputs, and it returns nothing.
+  `T` is the struct it hands the pixel stage, with one `@position` field and no `@per_draw` member.
+  An output is no value, as a stream is none: only the entry point's parameter is one.
+* **CHK-482** `o.set_counts(v, t)` states how many vertices and triangles the workgroup writes, at most `N` and `M`.
+  It is a barrier of CHK-282, so it stands in control flow every invocation of the workgroup takes, and it comes before any write.
+  `o.vertex(i, v)` writes the vertex `v`, which converts to `T`, at the `uint` index `i`, and `o.triangle(i, t)` the triangle of the three vertices the `uint3` `t` indexes.
+  Each is a mesh stage's alone; an index at or past its count, or a write before the counts, is the target's undefined behaviour.
+* **CHK-483** A pipeline names its mesh stage as `mesh = f`, in the vertex stage's place, with no tessellation or geometry stage beside it.
+  What the mesh stage writes is what the pixel stage takes, by CHK-183's rule, and the pipeline reads no vertex input.
 
 ## Ray tracing
 
@@ -1702,7 +1723,7 @@ A diagnostic of this pass has a kind, a file, a byte span in that file, and a de
 
 | kind | reported by |
 |---|---|
-| `unsupported-yet` | CHK-8, CHK-61, CHK-134, CHK-213, CHK-237, CHK-291, CHK-299, CHK-307, CHK-314, CHK-321, CHK-329, CHK-333, CHK-338, CHK-339, CHK-344, CHK-346, CHK-347, CHK-350, CHK-352, CHK-353, CHK-357, CHK-366, CHK-374, CHK-379, CHK-381, CHK-383, CHK-387, CHK-389, CHK-397, CHK-431, CHK-432, CHK-434, CHK-460, CHK-450, CHK-453 |
+| `unsupported-yet` | CHK-8, CHK-61, CHK-134, CHK-213, CHK-237, CHK-291, CHK-299, CHK-307, CHK-314, CHK-321, CHK-329, CHK-333, CHK-338, CHK-339, CHK-344, CHK-346, CHK-347, CHK-350, CHK-352, CHK-353, CHK-357, CHK-366, CHK-374, CHK-379, CHK-381, CHK-383, CHK-387, CHK-389, CHK-397, CHK-431, CHK-432, CHK-434, CHK-460, CHK-450, CHK-453, CHK-454 |
 | `duplicate-declaration` | CHK-12, CHK-28, CHK-241, CHK-347, CHK-351 |
 | `dependency-cycle` | CHK-18, CHK-136 |
 | `unknown-module`, `use-of-own-module` | CHK-347 |
@@ -1715,7 +1736,7 @@ A diagnostic of this pass has a kind, a file, a byte span in that file, and a de
 | `unknown-builtin` | CHK-31 |
 | `expected-body` | CHK-32, CHK-236 |
 | `opaque-struct-needs-builtin` | CHK-34 |
-| `invalid-attribute-arguments` | CHK-36, CHK-39, CHK-204, CHK-208, CHK-211, CHK-212, CHK-220, CHK-231, CHK-267, CHK-403, CHK-292, CHK-293, CHK-301, CHK-304, CHK-384, CHK-369, CHK-370, CHK-371, CHK-431, CHK-435 |
+| `invalid-attribute-arguments` | CHK-36, CHK-39, CHK-204, CHK-208, CHK-211, CHK-212, CHK-220, CHK-231, CHK-267, CHK-403, CHK-292, CHK-293, CHK-301, CHK-304, CHK-384, CHK-369, CHK-370, CHK-371, CHK-431, CHK-435, CHK-480 |
 | `binding-not-listed` | CHK-45, CHK-131, CHK-228 |
 | `as-precedence` | CHK-411 |
 | `type-mismatch` | CHK-52, CHK-56, CHK-77, CHK-112 to CHK-118, CHK-121, CHK-167, CHK-210, CHK-214, CHK-219, CHK-236, CHK-243, CHK-275, CHK-276, CHK-279, CHK-281, CHK-287, CHK-329, CHK-344, CHK-362, CHK-375, CHK-392, CHK-429, CHK-433, CHK-434 |
@@ -1740,7 +1761,7 @@ A diagnostic of this pass has a kind, a file, a byte span in that file, and a de
 | `stage-not-allowed` | CHK-193, CHK-277, CHK-298, CHK-329, CHK-344 |
 | `ambiguous-overload` | CHK-72 |
 | `missing-field`, `unknown-field`, `duplicate-field` | CHK-178 |
-| `invalid-entry-point` | CHK-87, CHK-88, CHK-89, CHK-93, CHK-271, CHK-273, CHK-276, CHK-294, CHK-301 to CHK-306, CHK-326 to CHK-328, CHK-342, CHK-380 |
+| `invalid-entry-point` | CHK-87, CHK-88, CHK-89, CHK-93, CHK-271, CHK-273, CHK-276, CHK-294, CHK-301 to CHK-306, CHK-326 to CHK-328, CHK-342, CHK-380, CHK-481 |
 | `nesting-too-deep` | CHK-268 |
 | `invalid-pipeline` | CHK-175 to CHK-185, CHK-187, CHK-276, CHK-307, CHK-308, CHK-328, CHK-330, CHK-331, CHK-332, CHK-343, CHK-403 |
 | `shadows-unshadowable` | CHK-220, CHK-266 |

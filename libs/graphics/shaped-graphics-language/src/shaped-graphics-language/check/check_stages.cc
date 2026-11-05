@@ -15,6 +15,9 @@ constexpr auto error_type = checked_module::error_type;
 // vulkan's guaranteed maxGeometryTotalOutputComponents too
 constexpr auto k_max_geometry_vertices = 256;
 constexpr auto k_max_geometry_scalars = 1024;
+// CHK-480: what D3D allows a mesh stage, and vulkan's VK_EXT_mesh_shader guarantees
+constexpr auto k_max_mesh_outputs = 256;
+constexpr auto k_max_mesh_workgroup = 128;
 
 /// The scalars a value of `type` is: what D3D and vulkan count of a geometry stage's output vertex.
 i32 scalars_of(checked_module const& m, type_id type)
@@ -54,6 +57,44 @@ i32 checker::max_vertices_of(i32 file, ast::attribute const& a)
         return 1;
     }
     return n.value();
+}
+
+checker::mesh_shape checker::mesh_of(i32 file, ast::attribute const& a)
+{
+    auto result = mesh_shape();
+    auto sizes = 0;
+    auto const fail = [&]
+    {
+        report(diagnostic_kind::invalid_attribute_arguments, file, a.name,
+               "@mesh takes one to three workgroup sizes, then `vertices = N` and `triangles = M`, each from 1 to "
+               "256: `@mesh(32, vertices = 64, triangles = 126)`");
+        return mesh_shape{.workgroup = {1, 1, 1}, .vertices = 1, .triangles = 1};
+    };
+    for (auto const& argument : ast_of(file).at(a.arguments))
+    {
+        auto const value = ast::is_valid(argument.value) && !argument.is_splat ? constant_count(file, argument.value)
+                                                                               : cc::optional<i32>();
+        if (!value.has_value() || value.value() < 1)
+            return fail();
+        auto const key = text_of(file, argument.name);
+        if (key.empty() && sizes < 3 && result.vertices == 0 && result.triangles == 0)
+            result.workgroup[sizes++] = value.value();
+        else if (key == "vertices" && result.vertices == 0 && value.value() <= k_max_mesh_outputs)
+            result.vertices = value.value();
+        else if (key == "triangles" && result.triangles == 0 && value.value() <= k_max_mesh_outputs)
+            result.triangles = value.value();
+        else
+            return fail();
+    }
+    if (sizes == 0 || result.vertices == 0 || result.triangles == 0)
+        return fail();
+    if (result.workgroup[0] * result.workgroup[1] * result.workgroup[2] > k_max_mesh_workgroup)
+    {
+        report(diagnostic_kind::invalid_attribute_arguments, file, a.name,
+               cc::format("a mesh workgroup holds at most {} invocations", k_max_mesh_workgroup));
+        result.workgroup = {1, 1, 1};
+    }
+    return result;
 }
 
 checker::tessellation_mode checker::tessellation_of(i32 file, ast::attribute const& a)
@@ -115,7 +156,8 @@ type_id checker::resolve_stream(i32 file, ast::expr_id expr, ast::index const& n
         return error_type;
     }
     auto const shape = text_of(file, span_of(file, node.object));
-    auto const vertices = shape == "point_stream" ? 1 : shape == "line_stream" ? 2 : 3;
+    // CHK-481: a mesh stage's output is a stream of no primitive shape, written by index rather than appended
+    auto const vertices = shape == "point_stream" ? 1 : shape == "line_stream" ? 2 : shape == "triangle_stream" ? 3 : 0;
     return resource_type({.kind = type_kind::stream,
                           .element = element,
                           .count = vertices,
@@ -150,6 +192,34 @@ void checker::judge_primitive_stage(symbol_id id, cc::function_ref<void(cc::stri
                 invalid(cc::format("@{} is taken twice", input.name));
         seen.push_back(parameter.input);
     }
+    // CHK-481: a mesh stage takes stage inputs and its output, and hands the rasterizer nothing else
+    if (info.entry_stage == stage::mesh)
+    {
+        if (info.result != checked_module::void_type)
+            invalid("a @mesh fun returns nothing, and writes its vertices and triangles through its output");
+        auto const* const output = values.size() == 1 && values[0] == &parameters.back() ? values[0] : nullptr;
+        auto const& t = output != nullptr ? out.at(output->type) : out.at(error_type);
+        if (output == nullptr || t.kind != type_kind::stream || t.count != 0)
+        {
+            invalid("a @mesh fun takes stage inputs, and last its output: `out: mut mesh_output[varyings]`");
+            return;
+        }
+        if (t.access != access_mode::read_write)
+            invalid("a mesh stage writes its output, so the output is `mut`");
+        auto positions = 0;
+        for (auto const& m : out.at(out.at(t.element).members))
+        {
+            positions += m.is_position ? 1 : 0;
+            if (m.is_per_draw)
+                invalid(cc::format("what a mesh stage writes has the @per_draw member '{}', and only a vertex stage "
+                                   "writes one yet",
+                                   m.name));
+        }
+        if (positions != 1)
+            invalid("what a mesh stage writes reaches the rasterizer, so it has one @position field");
+        return;
+    }
+
     // CHK-302, CHK-304, CHK-306: what the stage before hands on comes first, as a raster stage's stage struct does
     if (!parameters.empty() && parameters[0].input != stage_input::none)
     {
@@ -331,6 +401,8 @@ type_id checker::check_stream_call(function_scope& scope, ast::expr_id id, ast::
     auto const& t = out.at(stream);
     auto const where = span_of(file, id);
 
+    if (t.count == 0)
+        return check_mesh_vertex(scope, id, call, stream);
     auto const is_emit = name == "emit";
     if (!is_emit && name != "end_strip")
     {
@@ -370,6 +442,54 @@ type_id checker::check_stream_call(function_scope& scope, ast::expr_id id, ast::
     if (is_emit)
         recorded.written.push_back({.expr = arguments[0].value});
     i32 const slots[] = {0};
+    record_call(file, id, callee, recorded, slots);
+    set_target(file, call.callee, {.kind = target_kind::overload, .symbol = callee});
+    set_target(file, id, {.kind = target_kind::overload, .symbol = callee});
+    return checked_module::void_type;
+}
+
+type_id checker::check_mesh_vertex(function_scope& scope, ast::expr_id id, ast::call const& call, type_id output)
+{
+    auto const file = scope.file;
+    auto const& member = ast_of(file).at(call.callee).node.as<ast::member>();
+    auto const arguments = ast_of(file).at(call.arguments);
+    auto const& t = out.at(output);
+    auto const where = span_of(file, id);
+
+    // CHK-482: the vertex at an index, of the output's own type
+    auto const is_plain = arguments.size() == 2 && arguments[0].name.empty() && !arguments[0].is_splat
+                       && arguments[1].name.empty() && !arguments[1].is_splat;
+    if (!is_plain)
+    {
+        report(diagnostic_kind::no_matching_overload, file, where,
+               cc::format("vertex takes an index and the vertex written there, a {}", out.name_of(t.element)));
+        return error_type;
+    }
+    auto const index_type = type_of_builtin(builtins::k_uint, file, where);
+    if (check_expected(scope, arguments[0].value, index_type, "the index of the vertex") != index_type)
+        return error_type;
+    if (check_expected(scope, arguments[1].value, t.element, "the vertex it writes") != t.element)
+        return error_type;
+
+    auto callee = symbol_id::none;
+    for (auto const candidate : candidates_of(file, "vertex", output))
+    {
+        if (demand(candidate, file, where) != symbol_state::checked)
+            continue;
+        auto const parameters = out.at(out.functions[out.at(candidate).info].parameters);
+        if (!parameters.empty() && takes(parameters[0].type, output))
+            callee = candidate;
+    }
+    if (!is_valid(callee))
+    {
+        report(diagnostic_kind::unknown_builtin, file, where, cc::format("vertex of {}", out.name_of(output)));
+        return error_type;
+    }
+    auto recorded = call_arguments();
+    recorded.written.push_back({.expr = member.object});
+    recorded.written.push_back({.expr = arguments[0].value});
+    recorded.written.push_back({.expr = arguments[1].value});
+    i32 const slots[] = {0, 1};
     record_call(file, id, callee, recorded, slots);
     set_target(file, call.callee, {.kind = target_kind::overload, .symbol = callee});
     set_target(file, id, {.kind = target_kind::overload, .symbol = callee});

@@ -1,3 +1,4 @@
+#include "../pipeline/pipeline_harness.hh"
 #include "../shaders/shader_fixtures.hh"
 
 #include <clean-core/container/vector.hh>
@@ -7,6 +8,7 @@
 #include <shaped-graphics/command_list/command_list.hh>
 #include <shaped-graphics/compute/compute_pipeline.hh>
 #include <shaped-graphics/context/context.hh>
+#include <shaped-graphics/raster/raster_pipeline.hh>
 #include <typed-geometry/linalg/vec.hh>
 
 using namespace cc::primitive_defines;
@@ -152,4 +154,43 @@ ASYNC_INVOCABLE_TEST("sg - an SGL compute shader's 64-bit atomics update all 64 
         CHECK(got_totals[g] == u64(2080) << 33);
         CHECK(got_lows[g] == -(i64(64 * g + 63) << 40));
     }
+}
+
+ASYNC_INVOCABLE_TEST("sg - a long crosses from the vertex to the pixel stage flat, all 64 bits (CHK-454)",
+                     (sg::context_handle const& ctx))
+{
+    REQUIRE(ctx != nullptr);
+    if (!sg_test::shaders_reach(*ctx))
+        SKIP("no compiler builds this binary's shaders into a format this context accepts");
+    if (!ctx->supports(sg::feature::shader_int64) || !ctx->supports(sg::feature::shader_f64)
+        || !ctx->supports(sg::feature::shader_int64_atomics))
+        SKIP("this context lacks a 64-bit feature the package requires");
+    if (ctx->backend() != sg::backend_kind::vulkan)
+        SKIP("only SPIR-V carries a 64-bit value between stages (EMIT-196)");
+
+    auto const pipeline = co_await ctx->cached.acquire_raster_pipeline(shaders::sixty_four_bit::long_crossing);
+    auto const words = ctx->persistent.create_buffer_from_data(
+        cc::vector<u32>::create_defaulted(2), sg::buffer_usage::readwrite_buffer | sg::buffer_usage::copy_src);
+    auto const group = ctx->persistent.create_binding_group(
+        ctx->cached.acquire_binding_group_layout<shaders::sixty_four_bit::crossed>(),
+        shaders::sixty_four_bit::crossed{.words = words.as_readwrite_buffer()});
+    auto const pixels = co_await sg_test::draw_offscreen(*ctx,
+                                                         {.width = 4,
+                                                          .height = 4,
+                                                          .colors = {sg::pixel_format::rgba8_unorm},
+                                                          .target_set = shaders::sixty_four_bit::long_target::name},
+                                                         [&](sg::rendering_scope& scope)
+                                                         {
+                                                             scope.bind_pipeline(*pipeline);
+                                                             scope.bind_group(0, *group);
+                                                             scope.draw({.vertex_range = {.offset = 0, .size = 3}});
+                                                         });
+    CHECK(pixels.colors.size() == 1);
+    auto cmd = ctx->create_command_list();
+    auto const back = cmd->download.data_from_buffer(words);
+    ctx->submit_command_list(cc::move(cmd));
+    auto const got = co_await back.data();
+    REQUIRE(got.size() == 2);
+    CHECK(got[0] == 0x09abcdefu);
+    CHECK(got[1] == 0x12345678u);
 }

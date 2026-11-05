@@ -12,6 +12,9 @@
 #include <nexus/test.hh>
 #include <shaped-graphics/all.hh>
 #include <shaped-graphics/backends/dx12/dx12_context.hh> // sg::create_dx12_context
+#if SR_BENCH_HAS_VULKAN
+#include <shaped-graphics/backends/vulkan/vulkan_context.hh>
+#endif
 #include <shaped-shader-library/shader_library.hh>
 #include <sr_bench_hlsl_shaders.hh>
 #include <sr_sgl_shaders.hh>
@@ -170,13 +173,11 @@ cc::shared_async<cc::unit> measure(sg::context& ctx, cc::string_view kernel, cc:
 }
 } // namespace
 
-ASYNC_BENCHMARK("sr - SGL against the HLSL it was ported from, GPU time per dispatch")
+/// Every pair on `ctx`: the HLSL through DXC to DXIL or SPIR-V, beside SGL's text through the same compiler.
+static cc::shared_async<cc::unit> compare_on(sg::context& ctx)
 {
-    auto created = sg::create_dx12_context({.adapter = sg::backend::dx12::dx12_adapter::hardware});
-    if (created.has_error())
-        SKIP("no dx12 hardware device");
-    auto& ctx = *created.value();
-    CC_LOG_INFO("adapter: {}", ctx.metrics.adapter().name);
+    CC_LOG_INFO("{} adapter: {}", ctx.backend() == sg::backend_kind::vulkan ? "vulkan" : "dx12",
+                ctx.metrics.adapter().name);
 
     // The fixture's library holds sr's own packages; the HLSL originals join it here, in the one binary that has them.
     static auto const registered = []
@@ -440,3 +441,21 @@ ASYNC_BENCHMARK("sr - SGL against the HLSL it was ported from, GPU time per disp
 
     co_await ctx.idle_completion();
 }
+
+ASYNC_BENCHMARK("sr - SGL against the HLSL it was ported from, GPU time per dispatch")
+{
+    auto created = sg::create_dx12_context({.adapter = sg::backend::dx12::dx12_adapter::hardware});
+    if (created.has_error())
+        SKIP("no dx12 hardware device");
+    co_await compare_on(*created.value());
+}
+
+#if SR_BENCH_HAS_VULKAN
+ASYNC_BENCHMARK("sr - SGL against the HLSL it was ported from, GPU time per dispatch, on vulkan")
+{
+    auto created = sg::create_vulkan_context({});
+    if (created.has_error())
+        SKIP("no vulkan device");
+    co_await compare_on(*created.value());
+}
+#endif

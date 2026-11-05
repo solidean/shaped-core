@@ -38,7 +38,8 @@ struct settings_source
 
 /// The raster stages, in the order a vertex passes through them.
 constexpr stage k_raster_stages[]
-    = {stage::vertex, stage::tessellation_control, stage::tessellation_evaluation, stage::geometry, stage::pixel};
+    = {stage::vertex, stage::tessellation_control, stage::tessellation_evaluation, stage::geometry, stage::mesh,
+       stage::pixel};
 
 /// The stage a pipeline's line `name = f` fills, or `none` for a line that fills no stage.
 [[nodiscard]] stage slot_named(cc::string_view name)
@@ -612,10 +613,13 @@ void checker::compile_pipeline(symbol_id id)
     auto geometry = symbol_id::none;
     auto control = symbol_id::none;
     auto evaluation = symbol_id::none;
+    auto mesh = symbol_id::none;
     auto const slot_of = [&](stage s) -> symbol_id&
     {
         switch (s)
         {
+        case stage::mesh:
+            return mesh;
         case stage::vertex:
             return vertex;
         case stage::geometry:
@@ -730,10 +734,17 @@ void checker::compile_pipeline(symbol_id id)
                 (void)place_stage(s.value, slot, span_of(file, s.form));
         }
     }
-    if (!is_valid(vertex))
+    // CHK-483: a mesh stage takes the place of the vertex stage, and of everything between it and the rasterizer
+    if (is_valid(mesh) && (is_valid(vertex) || is_valid(control) || is_valid(evaluation) || is_valid(geometry)))
     {
         if (!pc.is_failed)
-            pc.fail(file, where, "a pipeline has a vertex stage: `vertex = <entry point>`");
+            pc.fail(file, where, "a pipeline with a mesh stage has no vertex, tessellation or geometry stage");
+        return fail_symbol();
+    }
+    if (!is_valid(vertex) && !is_valid(mesh))
+    {
+        if (!pc.is_failed)
+            pc.fail(file, where, "a pipeline has a vertex stage: `vertex = <entry point>`, or a mesh stage in its place");
         return fail_symbol();
     }
     // CHK-307: a tessellator runs between a control and an evaluation stage
@@ -745,12 +756,13 @@ void checker::compile_pipeline(symbol_id id)
     if (pc.is_failed)
         return fail_symbol();
 
-    auto const& vertex_info = out.functions[out.at(vertex).info];
-    // A vertex stage that draws from no vertex buffer has no vertex input (CHK-271).
+    auto const& vertex_info = out.functions[out.at(is_valid(mesh) ? mesh : vertex).info];
+    // A vertex stage that draws from no vertex buffer has no vertex input (CHK-271), and a mesh stage reads none.
     auto const vertex_parameters = out.at(vertex_info.parameters);
-    auto const vertex_input = !vertex_parameters.empty() && vertex_parameters[0].input == stage_input::none
-                                ? vertex_parameters[0].type
-                                : type_id::none;
+    auto const vertex_input
+        = !is_valid(mesh) && !vertex_parameters.empty() && vertex_parameters[0].input == stage_input::none
+            ? vertex_parameters[0].type
+            : type_id::none;
     auto target_set = type_id::none;
 
     // ---- the interface between the stages, and the targets
@@ -788,6 +800,13 @@ void checker::compile_pipeline(symbol_id id)
 
     auto passed = vertex_info.result;
     auto from = vertex;
+    if (is_valid(mesh))
+    {
+        for (auto const& parameter : vertex_parameters)
+            if (out.at(parameter.type).kind == type_kind::stream)
+                passed = out.at(parameter.type).element;
+        from = mesh;
+    }
     // the control points of a patch, and the edges of its domain: 2 for isolines, 3 for triangles, 4 for quads
     auto patch_size = 0;
     auto domain = 0;
@@ -876,7 +895,7 @@ void checker::compile_pipeline(symbol_id id)
     auto inline_constants = symbol_id::none;
     {
         auto lists = cc::vector<cc::vector<symbol_id>>();
-        for (auto const entry : {vertex, control, evaluation, geometry, pixel})
+        for (auto const entry : {vertex, control, evaluation, geometry, mesh, pixel})
         {
             if (!is_valid(entry))
                 continue;
@@ -944,7 +963,7 @@ void checker::compile_pipeline(symbol_id id)
     if (is_valid(target_set))
         edge_source(target_set, true);
 
-    for (auto const entry : {vertex, control, evaluation, geometry, pixel})
+    for (auto const entry : {vertex, control, evaluation, geometry, mesh, pixel})
     {
         if (!is_valid(entry))
             continue;
@@ -1099,6 +1118,7 @@ void checker::compile_pipeline(symbol_id id)
         .geometry = geometry,
         .tessellation_control = control,
         .tessellation_evaluation = evaluation,
+        .mesh = mesh,
         .layout = {.first = u32(out.binding_lists.size()), .count = u32(layout.size())},
         .inline_constants = inline_constants,
         .vertex_input = vertex_input,

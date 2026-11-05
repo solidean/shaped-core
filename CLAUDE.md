@@ -165,6 +165,13 @@ One-liner per library:
   `SR_HAS_WINDOW` (1/0) says whether a backend was compiled in.
   sr also hosts the **denoise members**, the vendor ones included: `SR_HAS_DLSS` (1/0) says whether NVIDIA's SDK was fetched.
   **That fetch is on request and nothing performs it for you** — `uv run extern/dlss/fetch-dlss.py` — because its license is NVIDIA's rather than one a build accepts on anyone's behalf.
+* **`libs/graphics/shaped-xr`** — sg rendering in a headset through OpenXR: `xr::system`, `xr::session` and its frames, Quest 3 over Quest Link first.
+  The runtime dictates the GPU, so `system::create_context` makes the sg context to its spec, on vulkan or dx12.
+  A frame is one image of a layer an eye, color and depth, so view instancing draws both eyes in one pass; passthrough is the runtime's own layer.
+  **Views are in tg's frame**: OpenXR's right-handed space is converted at the session's edge, and no public header names an OpenXR type.
+  Namespace `xr`.
+  Depends on shaped-rendering, plus the fetched OpenXR loader and an sg backend where the build has them.
+  [docs/design.md](libs/graphics/shaped-xr/docs/design.md) has the decisions; `uv run dev.py example xr-cube --window` puts the cube in the headset.
 * **`libs/graphics/shaped-graphics-language`** — SGL, our own shading language, and its whole toolchain in one library: compiler, linter, language server.
   One `.sgl` source compiles to readable shader text for dx12, vulkan, webgpu and metal, and slib's SGL compiler edge is what calls it.
   [examples/graphics/sgl-cube](examples/graphics/sgl-cube/shaders/cube.sgl) draws one on dx12, vulkan, webgpu and metal, from that one source.
@@ -231,6 +238,8 @@ Each entry above names what it depends on, and the `CMakeLists.txt` files are th
   **Never introduce a new version of one of our file formats** (`.vdoc` above all) — that is a question, not a migration you write unprompted.
   When a change breaks something, **ask whether compatibility must be preserved**; most current work is on unreleased features, so the answer is usually no.
   See [Stability & Evolution](docs/coding-guidelines.md#stability--evolution).
+* **Absolute paths are never baked into binaries** ([Build Configurations](docs/coding-guidelines.md#build-configurations)).
+  A source-tree directory goes through `sc_target_source_paths` and `nx::source_path`, and `check`'s `abspaths` gate holds the line.
 * **Work goes straight to `main`** (see Git workflow).
 * **Never wait for CI.** Push and move on; a red run is fixed after the fact, directly on `main`.
 * **No force-push to `main`.**

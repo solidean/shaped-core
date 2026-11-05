@@ -33,7 +33,7 @@ struct sg::raster_pipeline_description
 {
     pipeline_layout_handle layout;
 
-    compiled_shader vertex_shader;                 ///< the vertex stage (required)
+    compiled_shader vertex_shader;                 ///< the vertex stage, required unless `mesh_shader` is set
     cc::optional<compiled_shader> fragment_shader; ///< the fragment stage; omit for a depth-only pipeline
 
     /// Optional tessellation stages, both set together or both omitted — a tessellator needs a hull *and* a domain stage.
@@ -44,6 +44,13 @@ struct sg::raster_pipeline_description
     /// Optional geometry stage — a per-primitive shader that may amplify or emit primitives.
     /// Omit it for none.
     cc::optional<compiled_shader> geometry_shader;
+
+    /// Optional mesh stage, which replaces the vertex stage and everything before the rasterizer: its workgroups write the vertices and primitives.
+    /// When set, `vertex_shader` must be empty, `vertex_input` must hold no buffer, and no tessellation or geometry stage may be set.
+    /// The pipeline draws with `draw_mesh_tasks`, never `draw`; it needs sg::feature::mesh_shader.
+    cc::optional<compiled_shader> mesh_shader;
+    /// Optional task stage before `mesh_shader`, whose workgroups each launch mesh workgroups and hand them one payload.
+    cc::optional<compiled_shader> task_shader;
 
     vertex_input_layout vertex_input;
     primitive_topology topology = primitive_topology::triangle_list;
@@ -120,6 +127,9 @@ public:
     /// Empty only for a pipeline a backend built outside the context's creation paths.
     [[nodiscard]] cc::optional<raster_target_formats> const& target_formats() const { return _target_formats; }
 
+    /// Whether a mesh stage draws for this pipeline, which `draw_mesh_tasks` needs and every other draw refuses.
+    [[nodiscard]] bool is_mesh_shaded() const { return _is_mesh_shaded; }
+
     /// What this pipeline's code does to each binding, resolved against its layout, which dispatch follows for barriers.
     /// Unknown when any stage's shader carried none, or named a binding the layout does not hold.
     [[nodiscard]] impl::pipeline_footprint const& footprint() const { return _footprint; }
@@ -133,11 +143,13 @@ protected:
 private:
     friend void impl::set_targets(raster_pipeline const& pipeline,
                                   cc::string_view target_set,
-                                  raster_target_formats const& formats);
+                                  raster_target_formats const& formats,
+                                  bool is_mesh_shaded);
 
     friend void impl::set_footprint(raster_pipeline const& pipeline, impl::pipeline_footprint footprint);
 
     cc::string _target_set;
     cc::optional<raster_target_formats> _target_formats;
     impl::pipeline_footprint _footprint;
+    bool _is_mesh_shaded = false;
 };

@@ -303,7 +303,8 @@ TEST("sgl check - the short form places each entry point by its stage")
     CHECK(reports(cc::string("pipeline:\n    vertex = vs\n    pixel = ps\n    vertex = vs\n") + formats)
           == "invalid-pipeline user:[vs] a pipeline has one vertex stage\n");
     CHECK(reports("pipeline:\n    pixel = ps\n")
-          == "invalid-pipeline user:[pipeline:] a pipeline has a vertex stage: `vertex = <entry point>`\n");
+          == "invalid-pipeline user:[pipeline:] a pipeline has a vertex stage: `vertex = <entry point>`, or a mesh "
+             "stage in its place\n");
     CHECK(reports("pipeline:\n    vertex = ps\n") == "invalid-pipeline user:[ps] ps is no @vertex entry point\n");
     CHECK(reports("fun helper() -> float => 1.0\npipeline:\n    vertex = helper\n")
           == "invalid-pipeline user:[helper] helper is no entry point\n");

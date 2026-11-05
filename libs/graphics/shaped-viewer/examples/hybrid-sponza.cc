@@ -1,4 +1,5 @@
 #include <clean-core/record/log.hh>
+#include <nexus/source_root.hh>
 #include <nexus/test.hh>
 #include <shaped-viewer/all.hh>
 
@@ -21,7 +22,7 @@ using namespace cc::primitive_defines;
 EXAMPLE("shaped-viewer/hybrid-sponza")
 {
     auto const loader = sv::asset_loader();
-    auto asset = loader.load_async(SV_SPONZA_DIR "/NewSponza_Main_glTF_003.gltf");
+    auto asset = loader.load_async(nx::source_path(SV_SPONZA_DIR "/NewSponza_Main_glTF_003.gltf"));
     auto reported = false;
 
     for (auto f : sv::interactive("shaped-viewer/hybrid-sponza"))

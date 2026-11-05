@@ -3,7 +3,7 @@
 How SGL compares with the other ways to write one set of shaders for DX12, Vulkan, WebGPU and Metal.
 Every row is judged for a renderer that targets all four, WebGPU in a browser included, and wants hardware ray tracing wherever a platform has it.
 
-**As of 2026-11-02**; SGL's E3 and E4 as of 2026-11-03, its B8 as of 2026-11-04, its A5, A7, B2, B3, B4, B6, B8, B9, B10, B11, B12, D5, E4, F2, F7 and G5 as of 2026-11-05.
+**As of 2026-11-02**; SGL's E3 and E4 as of 2026-11-03, its B8 as of 2026-11-04, its A5, A7, B2, B3, B4, B6, B8, B9, B10, B11, B12, D5, D6, E4, F2, F7, G5 and G6 as of 2026-11-05.
 Every cell's marker was judged again on 2026-11-05, when ✅ came to mean full support to the extent the targets allow.
 The other columns move fast, Slang's Metal and WGSL support above all, so each cell carries a source and the date it was checked; see [Sources](#sources).
 
@@ -81,8 +81,8 @@ A per-target cell reads `dx12 / vulkan / metal / webgpu`.
 | **D2** Modules | ❌ `#include` | ✅ modules, precompiled modules, link-time specialization | ⚠️ WESL imports | ⚠️ `#include` extension | ⚠️ modules, no separate compilation 🗺️ [epic](../issues/epic-sgl-modules-beyond-a-tracer.md) |
 | **D3** Bindless | ✅ / ✅ / ✅ (MSC) / — | ✅ / ✅ / ⚠️ / ⚠️ | ⚠️ / ⚠️ / ⚠️ / — native extension only | ✅ / ✅ / ⚠️ / — | ⚠️ / ⚠️ / ⚠️ / — fixed-size binding arrays, checked `nonuniform`; unbounded arrays not yet 🗺️ [feat](../issues/feat-sgl-unbounded-binding-arrays.md) |
 | **D4** GPU pointers | ⚠️ Vulkan only | ⚠️ SPIR-V; Metal partly | ❌ | ⚠️ Vulkan, and Metal through SPIRV-Cross | ❌ 🗺️ [feat](../issues/feat-sgl-gpu-pointers.md) |
-| **D5** half, f64, int64, int16 | ✅ f64 on DX12 and Vulkan, which alone have it; 64- and 16-bit ints everywhere but WebGPU | ✅ the same shape | ⚠️ f16 extension; no f64 or int64 in a browser | ✅ the same shape as HLSL | ⚠️ half, 16- and 64-bit ints and double behind features, wherever the target has them: all of them on dx12 and vulkan, all but double on metal, half alone on webgpu; a 64-bit value crosses no stage edge yet, and double has no maths builtins |
-| **D6** Mesh, geometry, tessellation, work graphs | ⚠️ mesh on DX12, Vulkan and MSC; work graphs on DX12 | ⚠️ mesh on DX12, Vulkan and Metal; geometry and tessellation on DX12 and Vulkan | ⚠️ Naga experimental mesh; none in a browser | ⚠️ mesh to HLSL and MSL | ⚠️ geometry and tessellation on dx12 and vulkan; no mesh 🗺️ [feat](../issues/feat-sgl-mesh-and-task-stages.md), no work graphs |
+| **D5** half, f64, int64, int16 | ✅ f64 on DX12 and Vulkan, which alone have it; 64- and 16-bit ints everywhere but WebGPU | ✅ the same shape | ⚠️ f16 extension; no f64 or int64 in a browser | ✅ the same shape as HLSL | ⚠️ half, 16- and 64-bit ints and double behind features, wherever the target has them: all of them on dx12 and vulkan, all but double on metal, half alone on webgpu; a 64-bit value crosses a stage link on vulkan alone, since DXIL and MSL carry none and SGL does not split it into words yet; double has no maths builtins |
+| **D6** Mesh, geometry, tessellation, work graphs | ⚠️ mesh on DX12, Vulkan and MSC; work graphs on DX12 | ⚠️ mesh on DX12, Vulkan and Metal; geometry and tessellation on DX12 and Vulkan | ⚠️ Naga experimental mesh; none in a browser | ⚠️ mesh to HLSL and MSL | ⚠️ geometry and tessellation on dx12 and vulkan; a mesh stage on dx12 and vulkan, refused on webgpu; no task stage or per-primitive attributes yet, and metal not yet 🗺️ [feat](../issues/feat-sgl-mesh-and-task-stages.md); no work graphs |
 | **D7** Autodiff | ❌ | ✅ forward and backward | ❌ | ❌ | ❌ 🗺️ [epic](../issues/epic-sgl-autodiff.md) |
 | **D8** Methods, operators, enums, inference | ⚠️ methods, operators, enums, `auto`; no constructors | ✅ | ⚠️ no methods, operators or enums | ❌ | ✅ methods, properties, `@operator`, enums, inference, arrow lambdas |
 
@@ -119,7 +119,7 @@ A per-target cell reads `dx12 / vulkan / metal / webgpu`.
 | **G3** Exit cost | ✅ you keep HLSL | ✅ readable output; Slang-only features lost | ✅ a standard with two implementations | ✅ | ⚠️ the emitted HLSL, MSL and WGSL are readable and can be kept; they follow sg's binding model; MIT allows a fork |
 | **G4** Migration from HLSL | ✅ none | ✅ accepts most HLSL | ❌ a rewrite | ❌ a rewrite | ⚠️ a rewrite; LLM-assisted ports of hundreds of shaders have gone through |
 | **G5** Vendor libraries (FSR, NRD, RTXDI) | ✅ native; NVAPI on DX12 only | ⚠️ compile for DX12 and Vulkan | ❌ | ⚠️ | ⚠️ beside SGL as HLSL packages on dx12 and vulkan, or ported; reachable from SGL through a text body (B9) over a preamble, untried on a whole vendor library |
-| **G6** Speed of the emitted code | ⚠️ near native on DXIL and SPIR-V; later hops unbenchmarked | ❓ | ⚠️ bounds checks and polyfills cost | ❓ | ⚠️ dx12: 0.99–1.02× hand-written HLSL on three kernels; other targets unmeasured 🗺️ [chore](../issues/chore-sgl-emitted-code-speed-on-every-target.md); WGSL unoptimized 🗺️ [epic](../issues/epic-sgl-optimizing-passes-and-ir-targets.md) |
+| **G6** Speed of the emitted code | ⚠️ near native on DXIL and SPIR-V; later hops unbenchmarked | ❓ | ⚠️ bounds checks and polyfills cost | ❓ | ⚠️ against hand-written HLSL on three kernels, dx12: 0.91–1.02×, vulkan: 0.98–1.02×; metal and webgpu unmeasured 🗺️ [chore](../issues/chore-sgl-emitted-code-speed-on-every-target.md); WGSL unoptimized 🗺️ [epic](../issues/epic-sgl-optimizing-passes-and-ir-targets.md) |
 
 ## Sources
 
@@ -434,4 +434,5 @@ Per row and column:
   - HLSL + chain: MSC manual performance notes
   - Slang: SLANG issues 11774, 13220, 13245, 14016
   - WGSL: NAGA `BoundsCheckPolicy`
-  - SGL: [readme.md](../../readme.md) "Performance", shaped-rendering `tests/bench/sgl-against-hlsl-benchmark.cc`, [perf-sgl-svgf-filter-two-percent](../issues/perf-sgl-svgf-filter-two-percent.md)
+  - SGL: [readme.md](../../readme.md) "Performance", shaped-rendering `tests/bench/sgl-against-hlsl-benchmark.cc` (2026-11-05, Arc B580)
+  - SGL, the gap on an RTX: [perf-sgl-svgf-filter-two-percent](../issues/perf-sgl-svgf-filter-two-percent.md)

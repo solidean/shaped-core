@@ -163,10 +163,10 @@ sgl::emit::emitted_text sgl::emit::emit_entry_point(check::checked_module const&
         auto const never
             = check::feature_set(check::feature::binding_arrays) | check::feature::multisampled_array_textures
             | check::feature::raytracing_pipeline | check::feature::geometry_shader
-            | check::feature::tessellation_shader | check::feature::shader_int16 | check::feature::device_coherence
-            | check::feature::image_atomics | check::feature::first_instance | check::feature::helper_lane_query
-            | check::feature::vertex_layer_output | check::feature::view_instancing | check::feature::shader_int64
-            | check::feature::shader_f64 | check::feature::shader_int64_atomics;
+            | check::feature::tessellation_shader | check::feature::mesh_shader | check::feature::shader_int16
+            | check::feature::device_coherence | check::feature::image_atomics | check::feature::first_instance
+            | check::feature::helper_lane_query | check::feature::vertex_layer_output | check::feature::view_instancing
+            | check::feature::shader_int64 | check::feature::shader_f64 | check::feature::shader_int64_atomics;
         for (auto i = isize(0); i < check::k_feature_count; ++i)
             if (e.features.has(check::feature(i)) && never.has(check::feature(i)))
                 result.errors.push_back({.kind = error_kind::target_lacks_feature,
@@ -211,6 +211,41 @@ sgl::emit::emitted_text sgl::emit::emit_entry_point(check::checked_module const&
                 return result;
             }
 
+    // EMIT-196: neither MSL nor DXIL carries a 64-bit value between stages
+    if ((t == target::msl || t == target::hlsl_dx12)
+        && (e.entry_stage == check::stage::vertex || e.entry_stage == check::stage::pixel)
+        && check::is_valid(e.function) && m.at(e.function).info >= 0 && m.at(e.function).info < m.functions.size())
+    {
+        auto const& info = m.functions[m.at(e.function).info];
+        auto carries = [&](auto const& self, check::type_id type, int depth) -> bool
+        {
+            if (!check::is_valid(type) || depth > 8)
+                return false;
+            if (auto const* const record = m.builtin_type_of(type))
+                return check::is_64_bit(record->leaf_kind);
+            auto const& t = m.at(type);
+            if (t.kind == check::type_kind::array)
+                return self(self, t.element, depth + 1);
+            if (t.kind != check::type_kind::structure)
+                return false;
+            for (auto const& member : m.at(t.members))
+                if (self(self, member.type, depth + 1))
+                    return true;
+            return false;
+        };
+        auto found = carries(carries, info.result, 0);
+        for (auto const& p : m.at(info.parameters))
+            found = found || carries(carries, p.type, 0);
+        if (found)
+        {
+            result.errors.push_back({.kind = error_kind::target_lacks_feature,
+                                     .symbol = e.function,
+                                     .detail = cc::format("{} carries a 64-bit value between stages, which {} does not",
+                                                          e.name, t == target::msl ? "MSL" : "DXIL")});
+            return result;
+        }
+    }
+
     // EMIT-122: Metal has no geometry stage, and its tessellation is shaped otherwise: a compute kernel writes the factors
     if (t == target::msl
         && (e.features.has(check::feature::geometry_shader) || e.features.has(check::feature::tessellation_shader)))
@@ -221,6 +256,18 @@ sgl::emit::emitted_text sgl::emit::emit_entry_point(check::checked_module const&
                                  .symbol = e.function,
                                  .detail = cc::format("{} is a {} stage and needs {}, which Metal does not have",
                                                       e.name, check::stage_name(e.entry_stage), check::name_of(f))});
+        return result;
+    }
+
+    // EMIT-206: sg's metal backend does not wire Metal's mesh stage up yet, so no MSL text writes one
+    if (t == target::msl && e.features.has(check::feature::mesh_shader))
+    {
+        result.errors.push_back({.kind = error_kind::target_lacks_feature,
+                                 .symbol = e.function,
+                                 .detail = cc::format("{} is a mesh stage and needs mesh_shader, which the metal "
+                                                      "target "
+                                                      "does not write yet",
+                                                      e.name)});
         return result;
     }
 

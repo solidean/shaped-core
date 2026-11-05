@@ -1,5 +1,6 @@
 #include "../check/check-test-support.hh"
 
+#include <nexus/source_root.hh>
 #include <shaped-graphics-language/check/checked_module.hh>
 #include <shaped-graphics-language/driver/classify.hh>
 #include <shaped-graphics-language/driver/inferred_results.hh>
@@ -134,7 +135,7 @@ TEST("sgl classify - an atomic image's update constrains control flow, and a pla
 
 TEST("sgl classify - spans are in source order and never overlap, on the extension's whole sample")
 {
-    auto const source = read_text(cc::string(SGL_SAMPLES_DIR) + "/../../tools/vscode-extension/examples/sample.sgl");
+    auto const source = read_text(nx::source_path(SGL_SAMPLES_DIR) + "/../../tools/vscode-extension/examples/sample.sgl");
     auto const checked = check_sources(read_prelude(), source);
     auto const spans
         = sgl::classify(checked.user, checked.user_ast, {.module = &checked.module, .file_index = checked.user_file()});

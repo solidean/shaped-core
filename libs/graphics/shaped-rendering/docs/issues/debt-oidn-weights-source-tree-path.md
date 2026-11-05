@@ -12,3 +12,5 @@ refs:
 The OIDN weights are found through a compile-time path, which is fine for a test and not for a shipped binary.
 `SR_OIDN_WEIGHTS_DIR` points into the source tree.
 The member will want the blob staged beside the executable, the way OIDN's own runtime is, or embedded.
+It is defined on `oidn_network.cc` alone, so the library's other files compile the same in any checkout, and the `abspaths` gate allows it until this closes.
+The test reads the weights through `nx::source_path` and carries no path of its own.

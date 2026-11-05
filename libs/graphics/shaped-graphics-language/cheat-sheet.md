@@ -88,8 +88,8 @@ sgl::prelude_files()                       // -> cc::span<prelude_file const> { 
                                            // "core.sgl": the hand-written prelude/core.sgl as it was when the library was built
 sgl::parsed_prelude()                      // -> cc::span<parsed_prelude_file const> { file, ast }: the same files, parsed ONCE per
                                            // process and shared by every thread; point a module_file at it rather than parsing again
-sgl::prelude_file_of(path)                 // -> i32: which prelude file an ABSOLUTE path or file:// uri is, else -1;
-                                           // only the library's own prelude/ dir counts: shaders/prelude/core.sgl is -1
+sgl::prelude_file_of(path)                 // -> i32: which prelude file a path or file:// uri is, else -1; only a file in
+                                           // a shaped-graphics-language/prelude/ dir counts: shaders/prelude/core.sgl is -1
                                            // a driver checks such a source IN that file's place, never behind a 2nd prelude
 
 #include <shaped-graphics-language/source/format_diagnostic.hh>
@@ -790,6 +790,9 @@ ops[i](mut v)                                            // raygen, miss, closes
   A vertex input's host struct keeps the member whole, and its layout names an attribute per piece; a pixel output takes neither.
 - **`scope:` opens a block whose locals end with it** (AST-156), transparent to `break`, `yield` and `return`; it flattens into its parent.
 - **`floatN(…)`, `intN(…)` and `uintN(…)` convert a scalar of another of those kinds**, as `as` would (CHK-421); `vec3` and `pos3` never do.
+- **`@mesh(x, y, z, vertices = N, triangles = M)` is the mesh stage** (CHK-480 to CHK-483), under `require mesh_shader`: dx12 and vulkan, refused on WGSL and MSL.
+  Its last parameter is `output: mut mesh_output[T]`; `output.set_counts(v, t)` in uniform control flow, then `output.vertex(i, v)` and `output.triangle(i, uint3)`.
+  A `pipeline` names it as `mesh = f` in the vertex stage's place, and the host draws it with `draw_mesh_tasks`.
 - **`half`, `short`, `ushort` and their vectors are the 16-bit families** (CHK-381): `require shader_f16` or `shader_int16`, and WGSL has no short.
   HLSL spells a half `float16_t`, never `half`, so slib's SGL edge hands DXC `-enable-16bit-types` on every compile; a 16-bit literal is a construction, `half(0.5)`.
   A 16-bit value aligns to its size, a `half3` to 8, and crosses no stage edge and sits in no `@inline` binding (CHK-387).
@@ -798,7 +801,8 @@ ops[i](mut v)                                            // raygen, miss, closes
   Literals: `5i64`, `5u64`, `0.1f64`, or an unsuffixed literal where the type is asked; a `ulong` literal stops at 2^63 - 1, so `~0u64` is the largest.
   Arithmetic, comparisons, bits (a shift counts to 63), `abs` / `min` / `max` / `clamp` / `select`; no maths function of a double and no subgroup operation yet.
   `as` converts within a width or within a family: `x as long as double`, never `int as double` in one step.
-  No 64-bit value crosses a stage edge or sits in an `@inline` binding, and a constant block holds no `long3` / `double4` (CHK-453); a buffer does.
+  A 64-bit scalar or two-vector crosses a stage link flat on vulkan alone (CHK-454, EMIT-196).
+  None sits in an `@inline` binding, and a constant block holds no `long3` / `double4` (CHK-453); a buffer does.
   `atomic[ulong]` / `atomic[long]` in a `mut buffer` take `require shader_int64_atomics` (dx12 SM 6.6, vulkan); none in workgroup memory yet.
   **No layout is guaranteed without an annotation** (EMIT-116): the compiler may reorder members, so the host goes through the generated struct, never through offsets it assumed.
 - **A warning never fails `compile_to_text`, and only a text carries one.** A failed compile's error holds its errors alone.

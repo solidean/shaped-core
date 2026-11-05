@@ -352,6 +352,8 @@ cc::result<std::unique_ptr<raster_pipeline_build>> prepare_raster_pipeline(webgp
     if (desc.tessellation_control_shader.has_value() || desc.tessellation_evaluation_shader.has_value()
         || desc.topology == sg::primitive_topology::patch_list)
         return cc::error("webgpu has no tessellation stages (ctx.supports(sg::feature::tessellation_shader) is false)");
+    if (desc.mesh_shader.has_value())
+        return cc::error("webgpu has no mesh stage (ctx.supports(sg::feature::mesh_shader) is false)");
     if (desc.rasterization.fill == sg::fill_mode::wireframe)
         return cc::error("webgpu has no wireframe fill mode");
     if (desc.sample_count != 1 && desc.sample_count != 4)

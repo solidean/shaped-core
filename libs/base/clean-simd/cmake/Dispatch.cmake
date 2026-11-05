@@ -42,6 +42,13 @@ function(cimd_dispatch target)
 
     get_property(_kernels GLOBAL PROPERTY SC_SIMD_DISPATCH_KERNELS)
     get_filename_component(_header "${ARG_HEADER}" ABSOLUTE BASE_DIR "${CMAKE_CURRENT_SOURCE_DIR}")
+    # The generated TUs name the header relative to the top-level source directory, which they search.
+    # So no absolute path of the checkout is part of their text.
+    cmake_path(IS_PREFIX CMAKE_SOURCE_DIR "${_header}" NORMALIZE _header_in_tree)
+    if(NOT _header_in_tree)
+        message(FATAL_ERROR "cimd_dispatch(${target}): HEADER '${_header}' is outside the source tree '${CMAKE_SOURCE_DIR}'")
+    endif()
+    file(RELATIVE_PATH _header "${CMAKE_SOURCE_DIR}" "${_header}")
     set(_dir "${CMAKE_CURRENT_BINARY_DIR}/cimd-dispatch")
     set(_fn "${ARG_FUNCTION}")
     set(_name "${ARG_NAME}")
@@ -103,6 +110,8 @@ cimd::kernel_id cimd_dispatch_kernel_@_name@()
 }
 ]=])
     target_sources(${target} PRIVATE "${_dir}/${_name}-dispatch.cc")
+    set_property(SOURCE "${_dir}/${_name}-dispatch.cc" TARGET_DIRECTORY ${target}
+                 APPEND PROPERTY INCLUDE_DIRECTORIES "${CMAKE_SOURCE_DIR}")
     target_link_libraries(${target} PRIVATE clean-simd)
 
     if(NOT _kernels)
@@ -132,7 +141,7 @@ decltype(&@_fn@<cimd::scalar>) const cimd_entry_@_name@_@_k@ = &@_fn@<cimd::@_k@
     add_library(${_lib} STATIC ${_kernel_sources})
     target_link_libraries(${_lib} PRIVATE clean-simd ${ARG_LINK})
     target_compile_definitions(${_lib} PRIVATE $<TARGET_PROPERTY:${target},COMPILE_DEFINITIONS>)
-    target_include_directories(${_lib} PRIVATE $<TARGET_PROPERTY:${target},INCLUDE_DIRECTORIES>)
+    target_include_directories(${_lib} PRIVATE $<TARGET_PROPERTY:${target},INCLUDE_DIRECTORIES> "${CMAKE_SOURCE_DIR}")
     set_target_properties(${_lib} PROPERTIES INTERPROCEDURAL_OPTIMIZATION OFF)
     target_link_libraries(${target} PRIVATE ${_lib})
 endfunction()

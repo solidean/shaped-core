@@ -1,0 +1,46 @@
+// Mesh stages that hand the rasterizer what they write (CHK-480): one full-screen triangle, and a target split between
+// two workgroups, each covering its half and coloring it by its own index.
+
+require mesh_shader
+
+struct corner:
+    @position position: hpos4
+    color: float4
+
+@pixel struct painted:
+    color: float4
+
+@mesh(1, vertices = 3, triangles = 1) fun covering(output: mut mesh_output[corner]):
+    output.set_counts(3u, 1u)
+    let green = float4(0.0, 1.0, 0.0, 1.0)
+    output.vertex(0u, {position = hpos4(-1.0, -1.0, 0.0, 1.0), color = green})
+    output.vertex(1u, {position = hpos4(3.0, -1.0, 0.0, 1.0), color = green})
+    output.vertex(2u, {position = hpos4(-1.0, 3.0, 0.0, 1.0), color = green})
+    output.triangle(0u, uint3(0u, 1u, 2u))
+
+// Four invocations, each writing one corner of its workgroup's half; the first writes both triangles.
+@mesh(4, vertices = 4, triangles = 2)
+fun halves(@workgroup_id group: int3, @local_thread_index k: int, output: mut mesh_output[corner]):
+    output.set_counts(4u, 2u)
+    let left = if group.x == 0 => -1.0 else 0.0
+    let x = if (k & 1) == (k >> 1) => left else left + 1.0
+    let y = if k < 2 => -1.0 else 1.0
+    output.vertex(k as uint, {position = hpos4(x, y, 0.0, 1.0), color = float4(group.x as float, 0.0, 1.0, 1.0)})
+    if k == 0:
+        output.triangle(0u, uint3(0u, 1u, 2u))
+        output.triangle(1u, uint3(0u, 2u, 3u))
+
+@pixel fun painting(c: corner) -> painted:
+    return {color = c.color}
+
+pipeline covered:
+    mesh = covering
+    pixel = painting
+    cull = .none
+    format = .rgba8_unorm
+
+pipeline split:
+    mesh = halves
+    pixel = painting
+    cull = .none
+    format = .rgba8_unorm

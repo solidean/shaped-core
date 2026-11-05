@@ -1,5 +1,7 @@
 #include "emit-test-support.hh"
 
+#include <shaped-graphics-language/driver/compile_to_text.hh>
+
 using namespace sgl_test;
 using sgl::emit::target;
 
@@ -134,4 +136,27 @@ TEST("sgl emit - a double is double in HLSL, its literal suffixed L, and Metal a
     CHECK(sgl::emit::dump_errors(emit_source(k_longs, 0, target::wgsl))
               .contains("needs shader_int64, which WebGPU does "
                         "not have"));
+}
+
+TEST("sgl emit - a long crosses a stage link on vulkan alone, since neither DXIL nor MSL carries one (EMIT-196)")
+{
+    constexpr auto source = "require shader_int64\n"
+                            "\n"
+                            "struct varyings:\n"
+                            "    @position position: hpos4\n"
+                            "    @interpolate(.flat) key: long\n"
+                            "\n"
+                            "@vertex fun vs(@vertex_index v: int) -> varyings:\n"
+                            "    return {position = hpos4(0.0, 0.0, 0.0, 1.0), key = v as long}\n";
+    auto const text_for
+        = [&](target t) { return sgl::compile_to_text({.source = source, .entry_point = "vs", .target = t}); };
+    auto const vulkan = text_for(target::hlsl_vulkan);
+    REQUIRE(vulkan.has_value()).dump("error", vulkan.has_error() ? vulkan.error() : cc::string());
+    CHECK(vulkan.value().text.contains("nointerpolation int64_t")).dump("text", vulkan.value().text);
+    for (auto const t : {target::hlsl_dx12, target::msl})
+    {
+        auto const refused = text_for(t);
+        REQUIRE(refused.has_error());
+        CHECK(refused.error().contains("carries a 64-bit value between stages")).dump("error", refused.error());
+    }
 }

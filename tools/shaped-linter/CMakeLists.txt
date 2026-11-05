@@ -116,8 +116,7 @@ if(SC_BUILD_TESTS)
     # The corpus lives next to each rule and is read at run time, so the test binary is told where the
     # rule tree starts; it is scanned recursively for *.md.
     # Adding a corpus file therefore needs no CMake change — only a re-run.
-    target_compile_definitions(shaped-linter-test
-        PRIVATE SCL_CORPUS_DIR="${CMAKE_CURRENT_SOURCE_DIR}/rules")
+    sc_target_source_paths(shaped-linter-test PRIVATE SCL_CORPUS_DIR rules)
 endif()
 
 # One directory per rule group, each naming the files of the rules it holds.

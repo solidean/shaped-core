@@ -181,6 +181,10 @@ const light_kind_sun: i32 = 2;
 
 * **EMIT-122** `msl` refuses a geometry and a tessellation entry point as `target-lacks-feature`, naming the stage's feature as EMIT-109 says.
   Metal has neither stage, and tessellates by a compute kernel instead.
+* **EMIT-205** HLSL writes a mesh stage as `[outputtopology("triangle")]` and `[numthreads(x, y, z)]` over `void`.
+  Its output `o` is two parameters, `out vertices T o_vertices[N]` and `out indices uint3 o_triangles[M]`.
+  `set_counts` is `SetMeshOutputCounts`, and `vertex` and `triangle` are writes to those arrays.
+* **EMIT-206** `msl` refuses a mesh entry point as `target-lacks-feature`, since sg's metal backend does not build a mesh pipeline yet; WGSL refuses it by EMIT-109.
 * **EMIT-123** HLSL writes the stages as dx12 and vulkan both take them:
   * a geometry stage is `[maxvertexcount(N)]` over `void`, taking `triangle T tri[3]` and last `inout TriangleStream<T>`, and `emit` and `end_strip` are `Append` and `RestartStrip`;
   * a control stage is a passthrough hull function that returns `patch[point_index]`, named by its `domain`, `partitioning`, `outputtopology`, `outputcontrolpoints` and `patchconstantfunc`;
@@ -489,6 +493,8 @@ So `{float3; float}` is written with `packed_float3`: the `float` is at byte 12 
   WGSL and MSL write `!=`, which is unordered in both.
 * **EMIT-195** HLSL reads a buffer's length (CHK-460) through `GetDimensions`, in a helper per buffer, and WGSL through `arrayLength`, four bytes per word of a `bytes`.
   A Metal buffer argument is a pointer that carries no length, and sg passes none in yet, so an MSL compile that reads one is `target-lacks-feature`.
+* **EMIT-196** Neither MSL nor DXIL carries a 64-bit value between stages, so an MSL or `hlsl-dx12` vertex or pixel stage whose link holds one is `target-lacks-feature`.
+  SPIR-V carries one, so `hlsl-vulkan` writes it; splitting it into two words would reach the other two.
 * **EMIT-136** HLSL writes a ray-tracing stage as a library export named by its kind, `[shader("closesthit")]` over `void`, whose payload is an `inout` parameter.
   A triangle closest hit or any hit takes `BuiltInTriangleIntersectionAttributes` too.
   An any hit's decision ends the stage: `ignore` is `IgnoreHit()`, `accept_and_end_search` `AcceptHitAndEndSearch()`, and `accept` a plain `return`.
@@ -682,7 +688,7 @@ The C++ struct a package generates is that layout byte for byte, padding include
 | `too-many-samplers` | EMIT-133 |
 | `too-many-acceleration-structures` | EMIT-135 |
 | `ray-data-conflict` | EMIT-139 |
-| `target-lacks-feature` | EMIT-109, EMIT-122 |
+| `target-lacks-feature` | EMIT-109, EMIT-122, EMIT-206 |
 
 ## Open
 

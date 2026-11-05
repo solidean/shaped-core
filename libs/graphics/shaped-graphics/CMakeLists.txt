@@ -393,12 +393,19 @@ if(SC_BUILD_TESTS)
                 fragment_hazard.hlsl:fragment:ps_write
                 fragment_hazard.hlsl:fragment:ps_read
                 pattern_fill.hlsl:compute:main
+                mesh.hlsl:mesh:ms_main
+                mesh.hlsl:task:as_main
+                mesh.hlsl:mesh:ms_halves
+                mesh.hlsl:fragment:ps_main
         )
         # What tests/shaders/shader_fixtures.cc keys on: the SGL package is always there, this one is not.
         target_compile_definitions(shaped-graphics-test PRIVATE SG_TEST_HAS_HLSL_SHADERS=1)
 
         # The one tier-1 test that executes raster shaders, for the hazard only a running GPU shows.
         target_sources(shaped-graphics-test PRIVATE tests/command_list/fragment-write-hazard-test.cc)
+
+        # The mesh and task stages, which no SGL entry point writes yet.
+        target_sources(shaped-graphics-test PRIVATE tests/pipeline/mesh-test.cc)
 
         # The render-routine framework tests are backend-agnostic invocables like the rest of the tier-1
         # suite, so they need only the shader package this block already gated: the end-to-end test
@@ -491,6 +498,7 @@ if(SC_BUILD_TESTS)
                 coherence.sgl:*
                 float_specials.sgl:*
                 diagnostics.sgl:*
+                meshes.sgl:*
                 sixteen_bit.sgl:*
                 sixty_four_bit.sgl:*
                 float_atomics.sgl:*
