@@ -164,7 +164,8 @@ def _gate(ctx: Context, *, tests: bool) -> None:
         ctx.die("ship: the gate failed; nothing was pushed (the bump commit, if any, stays local)")
     if dirty := _dirty(ctx.root):
         ctx.die(_changed_during_gate(dirty, "commit them and ship again"))
-    if tests and _dev(ctx, "check", "test") != 0:
+    # --memo, so a test binary that already passed on these exact bytes is not run again.
+    if tests and _dev(ctx, "check", "test", "--memo") != 0:
         ctx.die("ship: the tests failed; nothing was pushed (the bump commit, if any, stays local)")
 
 

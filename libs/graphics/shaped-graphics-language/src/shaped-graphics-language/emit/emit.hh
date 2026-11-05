@@ -178,6 +178,8 @@ struct sgl::emit::options
     /// Writes each print into sg's debug buffer, and describes its site (EMIT-183).
     /// The tree must have been legalized to keep its prints and lower its asserts (LEGAL-64); otherwise a print is `unsupported`.
     bool diagnostics = false;
+    /// What the device has; with `float_atomic_add`, vulkan and metal write the target's own float atomics.
+    check::feature_set device_features;
 };
 
 /// Either the text or the reasons there is none.
@@ -220,6 +222,9 @@ namespace sgl::emit
 
 /// `hlsl-dx12`, `hlsl-vulkan`, `wgsl`, `msl`.
 [[nodiscard]] cc::string_view to_string(target t);
+
+/// What a compile for `t` on a device with `device_features` stands for where an inlined body reads it (CHK-426).
+[[nodiscard]] check::compile_target compile_target_of(target t, check::feature_set device_features = {});
 
 /// The stable kebab-case name of a kind, e.g. "reserved-entry-point-name".
 [[nodiscard]] cc::string_view to_string(error_kind kind);

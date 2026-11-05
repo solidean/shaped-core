@@ -4,6 +4,7 @@
 #include <clean-core/common/profiling.hh>
 #include <shaped-graphics/backends/dx12/dx12_context.hh>
 #include <shaped-graphics/backends/dx12/dx12_memory_heap.hh>
+#include <shaped-graphics/backends/dx12/dx12_runtime.hh>
 
 namespace sg::backend::dx12
 {
@@ -31,6 +32,12 @@ D3D12_RESOURCE_DESC buffer_resource_desc(isize size_in_bytes, sg::buffer_usages 
     bool const needs_uav
         = usage.has(sg::buffer_usage::readwrite_buffer) || usage.has(sg::buffer_usage::accel_structure_storage);
     desc.Flags = needs_uav ? D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS : D3D12_RESOURCE_FLAG_NONE;
+#if SG_HAS_AGILITY
+    // The Agility runtime marks an acceleration structure's buffer with a flag of its own, which a micromap array must
+    // carry beside the UAV flag.
+    if (usage.has(sg::buffer_usage::accel_structure_storage) && marks_acceleration_structures())
+        desc.Flags |= D3D12_RESOURCE_FLAG_RAYTRACING_ACCELERATION_STRUCTURE;
+#endif
     return desc;
 }
 
@@ -174,6 +181,27 @@ cc::result<dx12_buffer_handle> dx12_context::create_dx12_buffer(isize size_in_by
         D3D12_RESOURCE_STATES const initial_state = usage.has(sg::buffer_usage::accel_structure_storage)
                                                       ? D3D12_RESOURCE_STATE_RAYTRACING_ACCELERATION_STRUCTURE
                                                       : D3D12_RESOURCE_STATE_COMMON;
+#if SG_HAS_AGILITY
+        // The acceleration-structure flag survives only the creation calls of enhanced barriers, which take no state.
+        auto const is_flagged_structure = (desc.Flags & D3D12_RESOURCE_FLAG_RAYTRACING_ACCELERATION_STRUCTURE) != 0;
+        ComPtr<ID3D12Device10> device10;
+        if (is_flagged_structure)
+            if (HRESULT hr = _device.As(&device10); FAILED(hr) || device10 == nullptr)
+                return dx12_error(FAILED(hr) ? hr : E_NOINTERFACE, "the Agility runtime's device has no "
+                                                                   "ID3D12Device10");
+        auto const desc1 = D3D12_RESOURCE_DESC1{.Dimension = desc.Dimension,
+                                                .Alignment = desc.Alignment,
+                                                .Width = desc.Width,
+                                                .Height = desc.Height,
+                                                .DepthOrArraySize = desc.DepthOrArraySize,
+                                                .MipLevels = desc.MipLevels,
+                                                .Format = desc.Format,
+                                                .SampleDesc = desc.SampleDesc,
+                                                .Layout = desc.Layout,
+                                                .Flags = desc.Flags};
+#else
+        auto const is_flagged_structure = false;
+#endif
         if (alloc.is_placed())
         {
             // Placed: sub-allocate into the caller's heap at the offset its allocator picked.
@@ -182,10 +210,21 @@ cc::result<dx12_buffer_handle> dx12_context::create_dx12_buffer(isize size_in_by
             CC_ASSERT(dx_heap->_heap != nullptr, "cannot place a buffer into an empty (size 0) heap");
             CC_ASSERT(alloc.offset >= 0, "placement offset must be non-negative");
             CC_ASSERT(alloc.offset + size_in_bytes <= dx_heap->size_in_bytes(), "placement exceeds the heap");
-            if (HRESULT hr = _device->CreatePlacedResource(dx_heap->_heap.Get(), UINT64(alloc.offset), &desc,
-                                                           initial_state, nullptr, IID_PPV_ARGS(&resource));
-                FAILED(hr))
-                return dx12_error(hr, "ID3D12Device::CreatePlacedResource failed");
+#if SG_HAS_AGILITY
+            if (is_flagged_structure)
+            {
+                if (HRESULT hr = device10->CreatePlacedResource2(dx_heap->_heap.Get(), UINT64(alloc.offset), &desc1,
+                                                                 D3D12_BARRIER_LAYOUT_UNDEFINED, nullptr, 0, nullptr,
+                                                                 IID_PPV_ARGS(&resource));
+                    FAILED(hr))
+                    return dx12_error(hr, "ID3D12Device10::CreatePlacedResource2 failed");
+            }
+#endif
+            if (!is_flagged_structure)
+                if (HRESULT hr = _device->CreatePlacedResource(dx_heap->_heap.Get(), UINT64(alloc.offset), &desc,
+                                                               initial_state, nullptr, IID_PPV_ARGS(&resource));
+                    FAILED(hr))
+                    return dx12_error(hr, "ID3D12Device::CreatePlacedResource failed");
             heap_handle = alloc.heap;
         }
         else
@@ -193,10 +232,21 @@ cc::result<dx12_buffer_handle> dx12_context::create_dx12_buffer(isize size_in_by
             // Dedicated: a committed resource owns its own allocation.
             D3D12_HEAP_PROPERTIES heap = {};
             heap.Type = D3D12_HEAP_TYPE_DEFAULT; // GPU-resident: sg exposes no host-visible buffers.
-            if (HRESULT hr = _device->CreateCommittedResource(&heap, D3D12_HEAP_FLAG_NONE, &desc, initial_state,
-                                                              nullptr, IID_PPV_ARGS(&resource));
-                FAILED(hr))
-                return dx12_error(hr, "ID3D12Device::CreateCommittedResource failed");
+#if SG_HAS_AGILITY
+            if (is_flagged_structure)
+            {
+                if (HRESULT hr = device10->CreateCommittedResource3(&heap, D3D12_HEAP_FLAG_NONE, &desc1,
+                                                                    D3D12_BARRIER_LAYOUT_UNDEFINED, nullptr, nullptr, 0,
+                                                                    nullptr, IID_PPV_ARGS(&resource));
+                    FAILED(hr))
+                    return dx12_error(hr, "ID3D12Device10::CreateCommittedResource3 failed");
+            }
+#endif
+            if (!is_flagged_structure)
+                if (HRESULT hr = _device->CreateCommittedResource(&heap, D3D12_HEAP_FLAG_NONE, &desc, initial_state,
+                                                                  nullptr, IID_PPV_ARGS(&resource));
+                    FAILED(hr))
+                    return dx12_error(hr, "ID3D12Device::CreateCommittedResource failed");
         }
     }
 

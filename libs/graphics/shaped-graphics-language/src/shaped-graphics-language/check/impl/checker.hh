@@ -382,6 +382,48 @@ struct checker
     checked_module out;
     /// The values this compile gives the options, by the name each is set by (CHK-354).
     cc::span<option_value const> options;
+    /// What this compile writes for, which the flattener substitutes for `target_api`, `target_language` and `has`
+    /// (CHK-426).
+    compile_target compiled_target;
+
+    /// A statement of a body in a target's own text that stands where one may (CHK-427).
+    struct text_statement
+    {
+        i32 file = 0;
+        ast::stmt_id stmt = ast::stmt_id::none;
+        /// The last of its run, which is where the body ends.
+        bool ends_run = false;
+    };
+    cc::vector<text_statement> text_statements;
+    /// The functions whose bodies `plan_target_text` read already, which an instance does not read again.
+    cc::vector<symbol_id> planned_text_functions;
+
+    /// The token index of `stmt`'s opening quote where it is a tagged string, a body in a target's text; -1 otherwise.
+    [[nodiscard]] i32 tagged_text_token(i32 file, ast::stmt_id stmt) const;
+    /// Finds the runs of tagged strings `function`'s body may hold, and registers each in `out.target_texts`.
+    /// A run is the whole of `statements`, or of a branch of a `const if` that is the whole of them, at any depth.
+    void plan_target_text(symbol_id function, i32 file, ast::range_of<ast::stmt_id> statements);
+    void register_text_run(symbol_id function, i32 file, cc::span<ast::stmt_id const> run);
+    /// A tagged string's language and its text, whole lines each ending in a newline, where it has no placeholder.
+    /// `what` names what it is in a diagnostic: `a preamble`.
+    struct plain_text
+    {
+        shading_language language = shading_language::sgl;
+        cc::string text;
+    };
+    [[nodiscard]] cc::optional<plain_text> plain_target_text(i32 file, ast::expr_id expr, cc::string_view what);
+    /// CHK-432: the branches of a struct whose body is a `const if` chain, into `target_type_branches`.
+    /// False where it has no SGL branch, which leaves it opaque.
+    bool compile_type_branches(symbol_id id, i32 file, ast::struct_decl const& s);
+    /// A text type's condition as nodes a compile decides alone, appended to `into`; false where it reads anything else.
+    bool target_condition_of(i32 file, ast::expr_id expr, cc::vector<target_condition>& into);
+    /// CHK-431: `@barrier`, `@subgroup` and `@derivatives` declare what a body in a target's text does, and stand on
+    /// such a function alone; a barrier is an effect, so it is never `@pure` as well.
+    void judge_text_effects(symbol_id function, i32 file, ast::range_of<ast::attribute> attributes);
+    /// How a tagged string ends its block, where `stmt` is one; none for any other statement.
+    [[nodiscard]] cc::optional<flow> target_text_flow(i32 file, ast::stmt_id stmt);
+    /// A file's tagged string at file scope, registered in `out.target_preambles` (CHK-428).
+    void declare_preamble(i32 file, ast::preamble_decl const& preamble);
 
     /// How many of `files` are the prelude's; every other file is a module's.
     i32 prelude_count = 0;
@@ -431,6 +473,23 @@ struct checker
     /// The symbols in compilation, outermost first, which is the loop a dependency cycle names.
     cc::vector<symbol_id> compiling;
     cc::vector<function_notes> notes;
+
+    /// PROTOTYPE (autodiff): the concrete overload `fwd_diff` or `bwd_diff` takes for one function, which check_diff.cc
+    /// writes when a call names that function: its parameters, and which of them is which.
+    struct derivative_signature
+    {
+        symbol_id function = symbol_id::none;
+        bool is_reverse = false;
+        /// Per parameter of `function`: where its value and its tangent or adjoint stand, -1 where it takes none.
+        cc::vector<i32> value_slots;
+        cc::vector<i32> tangent_slots;
+        /// Backward: where the result's adjoint stands.
+        i32 result_slot = -1;
+    };
+    /// By the overload's symbol.
+    cc::map<i32, derivative_signature> derivative_signatures;
+    /// The overload of each function and mode, by `2 * symbol + is_reverse`.
+    cc::map<i64, symbol_id> derivative_overloads;
     /// A `const` in a function body (CHK-413): a symbol no file scope sees, with the earlier ones of its body it reads.
     struct local_constant
     {
@@ -480,6 +539,13 @@ struct checker
     [[nodiscard]] ast::file_ast const& ast_of(i32 file) const { return files[file].ast; }
     [[nodiscard]] cc::string_view text_of(i32 file, source_span where) const { return file_of(file).text_of(where); }
     [[nodiscard]] bool is_prelude_file(i32 file) const { return file < prelude_count; }
+    /// `target_api` or `target_language`, the prelude's consts each compile stands for once inlined (CHK-426).
+    [[nodiscard]] bool is_target_constant(symbol_id s) const
+    {
+        auto const& named = out.at(s);
+        return named.kind == symbol_kind::constant && is_prelude_file(named.file)
+            && (named.name == "target_api" || named.name == "target_language");
+    }
     /// The program is the last file, behind the prelude and the library files it reaches.
     [[nodiscard]] i32 program_file() const { return i32(files.size()) - 1; }
     /// The module-level names a lookup from `file` finds: a prelude file sees the prelude alone, and a module's file sees
@@ -664,6 +730,8 @@ struct checker
     [[nodiscard]] i32 preferred_subgroup_size_of(i32 file, ast::attribute const* a, bool is_compute);
     /// `@padding(.none)` on a binding or a buffer member; anything else reports and leaves the natural padding.
     [[nodiscard]] padding_kind padding_of(i32 file, ast::attribute const* a);
+    /// CHK-435: `@float(.specials)` and the other levels; `fast` without the attribute, and after a bad one, which it reports.
+    [[nodiscard]] float_level float_level_of(i32 file, ast::attribute const* a);
     /// `@geometry(max_vertices = N)`'s `N`, from 1 to 256; 1 after a bad argument, which it reports (CHK-301).
     [[nodiscard]] i32 max_vertices_of(i32 file, ast::attribute const& a);
     struct tessellation_mode
@@ -686,6 +754,17 @@ struct checker
     [[nodiscard]] cc::optional<ray_trace> ray_type_of(i32 file, ast::expr_id expr);
     /// `trace(world, r, set.ray, mut payload)`, the trace of a ray-tracing stage (CHK-329).
     type_id check_pipeline_trace(function_scope& scope, ast::expr_id id, ast::call const& call, ray_trace ray);
+    /// `h.invoke(mut p)` of a hit object a `trace_hit` let holds (CHK-434).
+    type_id check_hit_invoke(function_scope& scope, ast::expr_id id, ast::call const& call);
+    /// A hit object's let, and the ray type its trace traced.
+    struct hit_let
+    {
+        i32 file = 0;
+        i32 statement = -1;
+        symbol_id set = symbol_id::none;
+        i32 ray = 0;
+    };
+    cc::vector<hit_let> hit_lets;
     /// CHK-326: an entry point of a ray-tracing stage, which `judge_entry_point` hands on.
     void judge_ray_stage(symbol_id id, cc::function_ref<void(cc::string_view)> invalid);
     /// The one name of a `@stream(name)` or a `@sampler(name)`; empty without one, and after a bad argument it reports.
@@ -744,10 +823,12 @@ struct checker
     /// `resolve_type` for the type of a value — a field, a parameter, a result, a local — where a buffer cannot stand.
     /// A buffer is a resource a binding member names, and is only ever read through a subscript.
     /// `allows_resource` takes a texture, an image or a sampler, as a parameter of a function of the program (CHK-366).
+    /// `allows_atomic` takes an atomic, as a `mut` parameter does: the caller's atomic, which the body updates (CHK-297).
     [[nodiscard]] type_id resolve_value_type(i32 file,
                                              ast::expr_id expr,
                                              function_scope const* scope = nullptr,
-                                             bool allows_resource = false);
+                                             bool allows_resource = false,
+                                             bool allows_atomic = false);
     /// The type of the prelude's `@builtin struct` named `name`; without one it reports at `where` and is the error type.
     [[nodiscard]] type_id type_of_builtin(cc::string_view name, i32 file, source_span where);
     /// The name of the plain vector of `count` values of `element`, `float3`; empty for an element without vectors.
@@ -828,7 +909,8 @@ struct checker
     /// Indexes the symbols from `first`, the ones before it indexed when their layer was checked.
     void index_builtin_symbols(isize first);
     /// CHK-282: every barrier and every call that takes derivatives stands where all invocations of its group arrive.
-    void judge_uniformity(flat_entry_point const& structured);
+    /// Gives the entry point legalized with the default options where judging it needed that, and none where not.
+    [[nodiscard]] cc::optional<flat_entry_point> judge_uniformity(flat_entry_point const& structured);
     /// CHK-300, CHK-401: every index into a binding array, judged over the copies the entry points inlined of it.
     void judge_indices();
     /// CHK-402: one diagnostic for each that several entry points were judged to have alike, which names them all.
@@ -1233,6 +1315,20 @@ struct checker
     [[nodiscard]] bool calls_prelude_operator(i32 file, ast::expr_id expr) const;
     /// What a comparison of number literals alone folds to (CHK-394); none for any other expression.
     [[nodiscard]] cc::optional<bool> comparison_of(i32 file, ast::expr_id expr) const;
+    /// What type parameter `name` stands for, innermost first; `none` where no type parameter has the name.
+    [[nodiscard]] type_id type_parameter_stands_for(cc::string_view name) const;
+    /// Whether `expr`, as an operand, names a type: a type parameter, a struct or an enum, `scalar_of[T]`.
+    /// Reports nothing; a local of the name hides every type of it.
+    [[nodiscard]] bool is_type_operand(function_scope const& scope, ast::expr_id expr) const;
+    /// CHK-429: `A == B` or `A != B` over two types, a `bool` an instance knows; none where neither operand is a type.
+    [[nodiscard]] cc::optional<type_id> check_type_comparison(function_scope& scope,
+                                                              ast::expr_id id,
+                                                              ast::call const& call);
+    /// What checked condition `expr` is whatever the target, the device and the options are (CHK-430).
+    /// None where it reads any of them, or anything else this compile alone knows.
+    [[nodiscard]] cc::optional<bool> known_condition(i32 file, ast::expr_id expr) const;
+    /// A number `known_condition` compares: a literal, a value parameter, an enum's case, a const no option reaches.
+    [[nodiscard]] cc::optional<f64> known_number_of(i32 file, ast::expr_id expr) const;
     /// The elements of tuple or object literal `expr`, checked where they are no literal themselves, into `literals`.
     [[nodiscard]] i32 shape_literal(function_scope& scope, ast::expr_id expr);
     /// Converts literal `expr`, shaped as `literal`, to `to` by a call of `to`'s name (CHK-81, CHK-85).
@@ -1278,6 +1374,19 @@ struct checker
     /// The candidates of `spelling` seen from `file` that take exactly `types`, without a report.
     /// It is what the flat tree is written from.
     [[nodiscard]] symbol_id find_operator(i32 file, cc::string_view spelling, cc::span<type_id const> types) const;
+
+    /// PROTOTYPE (autodiff): a value of `type` has a derivative: a float, a half, or what holds one.
+    [[nodiscard]] bool is_differentiable_type(type_id type) const;
+    /// Parameter `parameter` of `function` takes a tangent: it is of a differentiable type, no `mut`, and no `@no_diff`.
+    [[nodiscard]] bool takes_tangent(symbol_id function, isize parameter) const;
+    /// The type of a change of a value of `type`: a position's is its direction, and any other type is its own.
+    [[nodiscard]] type_id tangent_type(type_id type) const;
+    /// For a call of the prelude's `fwd_diff` or `bwd_diff`: one overload per function the first argument names, each
+    /// taking that function's parameters and their tangents; empty where the first argument names no function.
+    [[nodiscard]] cc::vector<symbol_id> derivative_candidates(cc::span<symbol_id const> generic,
+                                                              call_arguments const& arguments,
+                                                              i32 file,
+                                                              source_span where);
     [[nodiscard]] call_arguments check_arguments(function_scope& scope,
                                                  ast::range_of<ast::argument> range,
                                                  bool is_constructor);

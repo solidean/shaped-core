@@ -46,6 +46,16 @@ struct cc::resource_limits
 
 namespace cc
 {
+/// Caps this process's memory at `bytes`, so a runaway ends itself instead of swapping the machine; 0 or less does nothing.
+/// Two layers, as far as the platform gives them:
+/// - on Windows, the process joins a new Job Object whose per-process commit limit is the cap,
+///   so an allocation past it fails and cc's allocation failure ends the process, however fast the spike;
+/// - with threads, a watchdog thread reads the process's memory every 100 ms and ends it with a message naming the cap:
+///   the commit charge on Windows, the resident set elsewhere, since a sanitizer's shadow reservations make any address-space measure useless.
+/// A later call moves the watchdog's cap and adds another job, whose tighter limit wins; the watchdog thread is started once.
+/// query_resource_limits reports the job's cap afterwards, on Windows.
+void cap_process_memory(i64 bytes);
+
 /// The current limits, read fresh.
 ///
 /// **Not memoized, unlike cc::get_system_info.**

@@ -1,3 +1,4 @@
+#include <shaped-graphics-language/builtins/registry.hh>
 #include <shaped-graphics-language/check/impl/flattener.hh>
 
 using namespace sgl;
@@ -57,7 +58,7 @@ void sgl::check::impl::flattener::note_value_use(type_id type, ast::expr_id from
     for (auto const& fr : frames)
         within.push_back(fr.function);
     feature_uses.push_back(
-        {.file = file(), .call = from, .features = needs, .within = cc::move(within), .is_value = true});
+        {.file = file(), .call = from, .features = needs, .within = cc::move(within), .is_value = true, .granted = granted});
 }
 
 void sgl::check::impl::flattener::judge_stage(ast::expr_id call, symbol_id callee)
@@ -68,7 +69,17 @@ void sgl::check::impl::flattener::judge_stage(ast::expr_id call, symbol_id calle
         auto within = cc::vector<symbol_id>();
         for (auto const& fr : frames)
             within.push_back(fr.function);
-        feature_uses.push_back({.file = file(), .call = call, .features = record->features, .within = cc::move(within)});
+        // EMIT-184: an HLSL ray query sees the micromaps of a device that has them, which the compile states for it
+        auto const target = compiled_for();
+        if (record->declares_only && record->features.has(feature::ray_query)
+            && (target.api == graphics_api::dx12 || target.api == graphics_api::vulkan)
+            && target.device_features.has(feature::opacity_micromap))
+        {
+            auto const sees = feature_set(feature::opacity_micromap);
+            feature_uses.push_back({.file = file(), .call = call, .features = sees, .within = within, .granted = sees});
+        }
+        feature_uses.push_back(
+            {.file = file(), .call = call, .features = record->features, .within = cc::move(within), .granted = granted});
     }
     // CHK-298: a test's run is one invocation, which has no quad to take a derivative across
     if (is_test)
@@ -109,8 +120,11 @@ void sgl::check::impl::flattener::judge_stage(ast::expr_id call, symbol_id calle
         auto within = cc::vector<symbol_id>();
         for (auto const& fr : frames)
             within.push_back(fr.function);
-        feature_uses.push_back(
-            {.file = file(), .call = call, .features = record->pixel_features, .within = cc::move(within)});
+        feature_uses.push_back({.file = file(),
+                                .call = call,
+                                .features = record->pixel_features,
+                                .within = cc::move(within),
+                                .granted = granted});
     }
     auto const& s = c.out.at(callee);
     if (s.info >= 0 && (c.out.functions[s.info].stages & stage_bit(entry.entry_stage)) == 0)
@@ -602,6 +616,22 @@ void sgl::check::impl::flattener::flatten_swizzle_assign(origin from, ast::assig
 
 namespace
 {
+/// CHK-436: a float compared with itself, `x != x` or `x == x`, which a fast-math compiler folds.
+/// `is_nan` and `is_inf` test the bits on every target, which no such compiler can fold, so they are no such test.
+bool is_special_value_test(flat_entry_point const& e, flat_call const& call)
+{
+    auto const& registry = builtins::default_registry();
+    if (!is_valid(call.intrinsic) || index_of(call.intrinsic) >= registry.functions.size())
+        return false;
+    auto const& name = registry.at(call.intrinsic).name;
+    if ((name != "equal" && name != "not_equal") || call.arguments.count != 2)
+        return false;
+    auto const arguments = e.at(call.arguments);
+    auto const* const a = e.at(arguments[0]).node.try_as<flat_local_ref>();
+    auto const* const b = e.at(arguments[1]).node.try_as<flat_local_ref>();
+    return a != nullptr && b != nullptr && a->local == b->local;
+}
+
 /// CHK-389: once, however many trees inline the function the loop stands in.
 /// A loop of an inlined function names the call it was reached through, whose arguments may be what its bounds read.
 located_diagnostic& report_unroll(checker& c, flattener::unroll_report const& u)
@@ -623,8 +653,9 @@ checker::taken_names checker::module_names()
     if (own_module_names == nullptr || module_names_for != out.symbols.size())
     {
         auto names = cc::make_shared<cc::set<cc::string>>();
+        // a function of a type scope is reached through its type, `x.row(1)`, and never written under its own name
         for (auto i = module_names_below_count; i < out.symbols.size(); ++i)
-            if (!out.symbols[i].name.empty())
+            if (!out.symbols[i].name.empty() && !takes_no_emitted_name(out.symbols[i]))
                 (void)names->insert(out.symbols[i].name);
         own_module_names = names.get();
         // the checked module keeps both alive, since its flat trees' mints point at them
@@ -663,6 +694,7 @@ void checker::flatten_test(i32 index)
     auto const& body = ast_of(test.file).at(test.declaration).node.as<ast::test_decl>().body;
     for (auto const stmt : ast_of(test.file).at(body.statements))
         f.flatten_stmt(stmt);
+    f.judge_text_types();
     // CHK-265: the test's `require` and a helper's that the test reaches are used by the calls that need them
     for (auto const& u : f.feature_uses)
         mark_requires_used(u.within, u.features);
@@ -709,7 +741,10 @@ void checker::flatten_test(i32 index)
                cc::format("{} takes derivatives across a quad of pixels, and a test runs one invocation",
                           out.at(v.callee).name));
     if (f.is_failed && !f.meets_error)
-        unsupported(test.file, test.where, "a test whose body reaches a construct the flat tree cannot hold yet");
+        unsupported(test.file, test.where,
+                    f.failure_detail.empty() ? cc::string("a test whose body reaches a construct the flat tree cannot "
+                                                          "hold yet")
+                                             : f.failure_detail);
     if (f.is_failed || !f.stage_violations.empty() || !f.ray_stage_calls.empty() || !f.subgroup_calls.empty())
         return;
     f.entry.body = f.root_body();
@@ -748,7 +783,11 @@ checker::const_evaluation checker::evaluate_const(symbol_id scope, i32 file, ast
     f.entry.names.also_taken = taken.own;
     f.entry.names.also_taken_below = taken.below;
     f.frames.push_back({.function = scope, .file = file, .result = type});
+    f.is_const_evaluation = true;
     auto const result = f.flatten_expr(expr);
+    // CHK-426: a const is one value for every compile, so it holds nothing a compile stands for
+    if (!f.target_in_const.empty())
+        return {.kind = diagnostic_kind::invalid_constant_argument, .detail = cc::move(f.target_in_const)};
     if (f.is_failed || !is_valid(result))
         return {.detail = "a const whose value reaches a construct the flat tree cannot hold yet"};
     f.add_stmt(origin{.file = file, .expr = expr}, flat_return{.value = result});
@@ -825,6 +864,7 @@ void checker::flatten_entry_point(symbol_id id, traversal_request const* travers
     f.entry.names.also_taken_below = taken.below;
     f.entry.names.reserve(s.name);
 
+    f.raise_float_level(id);
     f.frames.push_back({.function = id, .file = s.file, .result = info.result});
     // CHK-326: a ray-tracing stage's one parameter of the target is its payload, `locals[0]`, which the stage writes
     // through; its launch, its ray and its hit it reads from the target where the entry point starts
@@ -942,6 +982,7 @@ void checker::flatten_entry_point(symbol_id id, traversal_request const* travers
         f.flatten_return({.file = s.file, .expr = body.value}, body.value);
     for (auto const stmt : ast_of(s.file).at(body.statements))
         f.flatten_stmt(stmt);
+    f.judge_text_types();
 
     // CHK-322: what the body calls needs a device's feature, which the entry point declares like one of its signature
     // CHK-402: what is judged of this entry point's inlined body is its own, which a compile of a sibling leaves out.
@@ -977,7 +1018,12 @@ void checker::flatten_entry_point(symbol_id id, traversal_request const* travers
         auto const needed = feature(i);
         if (!used.has(needed))
             continue;
-        if (!declared.has(needed))
+        // CHK-426: a use inside a branch whose `has` granted the feature needs no `require`
+        auto is_granted_everywhere = true;
+        for (auto const& u : f.feature_uses)
+            if (u.features.has(needed) && !u.granted.has(needed))
+                is_granted_everywhere = false;
+        if (!declared.has(needed) && !is_granted_everywhere)
         {
             auto& d = report_of_entry(diagnostic_kind::feature_not_declared, s.file,
                                       ast_of(s.file).at(s.declaration).node.as<ast::fun_decl>().name,
@@ -985,7 +1031,7 @@ void checker::flatten_entry_point(symbol_id id, traversal_request const* travers
                                                  "requires",
                                                  s.name, name_of(needed)));
             for (auto const& u : f.feature_uses)
-                if (u.features.has(needed))
+                if (u.features.has(needed) && !u.granted.has(needed))
                 {
                     d.notes.push_back({.file = u.file,
                                        .where = span_of(u.file, u.call),
@@ -1004,6 +1050,22 @@ void checker::flatten_entry_point(symbol_id id, traversal_request const* travers
     f.entry.features |= used;
     for (auto const& u : f.unroll_reports)
         of_entry([&]() -> located_diagnostic& { return report_unroll(*this, u); });
+    // CHK-436: at `fast` a target may assume no NaN or infinity arises, and decide a test for one ahead of time
+    if (f.entry.float_guarantee == float_level::fast)
+        for (auto const& x : f.entry.exprs)
+            if (auto const* const call = x.node.try_as<flat_call>(); call != nullptr && ast::is_valid(x.from.expr)
+                                                                     && !is_prelude_file(x.from.file)
+                                                                     && is_special_value_test(f.entry, *call))
+                of_entry(
+                    [&]() -> located_diagnostic&
+                    {
+                        return report_once(diagnostic_kind::nan_test_at_fast, x.from.file,
+                                           span_of(x.from.file, x.from.expr),
+                                           "a float compared with itself tests for a NaN, which code at "
+                                           "@float(.fast) may assume never arises, so a target may fold the test; "
+                                           "is_nan tests the bits and holds at every level, or the function needs "
+                                           "@float(.specials)");
+                    });
     // CHK-227: once, however many trees inline the function the assert stands in
     for (auto const& a : f.effectful_asserts)
         of_entry(
@@ -1088,8 +1150,10 @@ void checker::flatten_entry_point(symbol_id id, traversal_request const* travers
             // the construct itself, and the entry point it was reached from, however many calls deep
             auto const at = f.first_failure.value();
             auto const where = ast::is_valid(at.expr) ? span_of(at.file, at.expr) : span_of(at.file, at.stmt);
-            auto& d = report(diagnostic_kind::unsupported_yet, at.file, where,
-                             "a construct the flat tree cannot hold yet, here");
+            auto& d = report_of_entry(diagnostic_kind::unsupported_yet, at.file, where,
+                                      f.failure_detail.empty()
+                                          ? cc::string("a construct the flat tree cannot hold yet, here")
+                                          : f.failure_detail);
             d.notes.push_back({.file = s.file,
                                .where = name,
                                .message = cc::format("reached from the {} entry point {}",
@@ -1115,8 +1179,14 @@ void checker::flatten_entry_point(symbol_id id, traversal_request const* travers
     }
     judge_constants(f.entry);
     judge_assignments(f.entry);
-    judge_uniformity(f.entry);
+    auto legalized = judge_uniformity(f.entry);
     f.entry.options = options_reached(id, traversal != nullptr ? traversal->any_hit : symbol_id::none);
+    // legalizing copies the entry point's own fields, so the copy takes what was set after it
+    if (legalized.has_value())
+    {
+        legalized.value().options = f.entry.options;
+        f.entry.legalized = cc::make_shared<flat_entry_point const>(cc::move(legalized.value()));
+    }
     out.entry_points.push_back(cc::move(f.entry));
 }
 

@@ -124,6 +124,8 @@ One-liner per library:
 * **`libs/graphics/shaped-graphics`** — graphics-API wrapper: `context`, `command_list`, GPU resources, over per-backend static libs.
   dx12 and vulkan cover the whole surface; webgpu covers it but the ray-tracing pipeline, on wasm over emdawnwebgpu, and never blocks.
   **Ray tracing is two features**, `sg::feature::ray_query` and `raytracing_pipeline`; webgpu has ray queries alone, as a software polyfill `ctx.implementation_of` reports `emulated`.
+  dx12 runs on the D3D12 Agility SDK where it was fetched, and on the system runtime otherwise; `SG_HAS_AGILITY` (1/0) says which.
+  Fetching it is a choice nothing makes for you: `uv run extern/agility/fetch-agility.py --accept-license`.
   **metal** covers it too, on Metal 4 (macOS / iOS 26 floor, Apple silicon): windowed and headless presentation, ray tracing, and GPU timestamps.
   opengl and webgl are intended tiers with no backend yet.
   Also home to the **render-routine framework** (`sg::render_routine`, per-context `ctx.routines`) — concrete routines live in shaped-rendering.
@@ -218,6 +220,7 @@ Each entry above names what it depends on, and the `CMakeLists.txt` files are th
 * **`.clang-format` is authoritative.** Source must not change under it (requires clang-format >= 22); it wins over prose docs.
   `.clang-tidy` is still being calibrated — treat its warnings as advisory, not gospel.
 * **Building or testing requires the `building-and-testing` skill.** Activate it before the first `dev.py` build/test in a session, and don't drive `dev.py` from memory.
+* **When dev.py refuses for lack of disk space, stop working and escalate to the user** (lib/core/disk_guard.py): it usually needs them, and lowering the floor is not yours to decide.
 * **Never run a nexus binary's tests directly** — go through `uv run dev.py test`, which passes `--tests`.
   A nexus binary run with nothing selected runs its default `APP` or `COMMAND`, or lists what it holds; test binaries are still named `*-test` by convention.
   dev.py finds them through the `nexus-binaries.json` manifest configure writes, not the name — `sc_nexus_binary` in [NexusBinaries.cmake](libs/base/nexus/cmake/NexusBinaries.cmake).
@@ -228,10 +231,9 @@ Each entry above names what it depends on, and the `CMakeLists.txt` files are th
   **Never introduce a new version of one of our file formats** (`.vdoc` above all) — that is a question, not a migration you write unprompted.
   When a change breaks something, **ask whether compatibility must be preserved**; most current work is on unreleased features, so the answer is usually no.
   See [Stability & Evolution](docs/coding-guidelines.md#stability--evolution).
-* **Most work goes straight to `main`; a PR is for big reworks and substantial new API** (see Git workflow).
+* **Work goes straight to `main`** (see Git workflow).
 * **Never wait for CI.** Push and move on; a red run is fixed after the fact, directly on `main`.
 * **No force-push to `main`.**
-* **Opening a PR requires the `opening-a-pr` skill.** Activate it before any `gh pr create` — do not hand-roll the PR.
 
 ---
 
@@ -299,7 +301,7 @@ The loop is **run `dev.py`, then diagnose with `repo_tools`** — `build_diag` a
   A tier's header list belongs next to the headers it names, never centrally.
   A bigger tier is not automatically better — pick one with `uv run dev.py compile-time pch`, never by eye.
   [docs/guides/precompiled-headers.md](docs/guides/precompiled-headers.md) is what to read before changing one.
-  The `nopch-*` / `debug-nopch-*` presets set `CMAKE_DISABLE_PRECOMPILE_HEADERS=ON`; `check`'s debug leg and CI both run one, because a PCH's `/FI` otherwise hides a missing include.
+  The `nopch-*` / `debug-nopch-*` presets set `CMAKE_DISABLE_PRECOMPILE_HEADERS=ON`; `check --all-presets`' debug leg and CI both run one, because a PCH's `/FI` otherwise hides a missing include.
 * `SC_EXAMPLE_BACKEND` (default `auto`) picks the graphics backend the `*-example` binaries build against: `auto`, `dx12`, `vulkan`, `metal` or `webgpu`.
   `auto` takes dx12 wherever there is one, so the setting exists to reach the vulkan arm — building `rotating-cube` both ways is how one HLSL source is shown to serve both.
   `sgl-cube` is the same cube from one SGL source, on every backend.
@@ -310,7 +312,7 @@ The loop is **run `dev.py`, then diagnose with `repo_tools`** — `build_diag` a
   All default to ON for a top-level build (the normal flow) and OFF when shaped-core is consumed via `add_subdirectory`.
 * `SC_THREADS` (default ON) is the repo-wide threading knob → clean-core's `CC_HAS_THREADS`.
   **No API is gated on it** — threaded types keep their full surface and fall back to running on the calling thread, so never `#if` a declaration away.
-  OFF is a whole-build switch, never per-target, and `check` runs a `singlethreaded-*` preset so both modes stay exercised.
+  OFF is a whole-build switch, never per-target, and CI and `check --all-presets` run a `singlethreaded-*` preset so both modes stay exercised.
   **OFF is refused on Apple targets**: metal takes command-buffer completion on a dispatch queue Apple owns, which the flag cannot remove, so that build would not be single-threaded.
   The refusal is keyed on the target, so a Mac building the `emscripten-*` presets still gets the unthreaded mode — and there is no macOS `singlethreaded-*` preset.
   See [docs/platforms.md](docs/platforms.md#threading-sc_threads).
@@ -333,8 +335,11 @@ The loop is **run `dev.py`, then diagnose with `repo_tools`** — `build_diag` a
 * `SC_SHADER_DIAGNOSTICS` (default: on unless `SC_FROZEN_SHADERS`) is whether a shader's `print` and `assert` reach the log → `SG_SHADER_DIAGNOSTICS`.
   SGL writes them as records into a debug window sg binds, reads back after the epoch and logs, so a failed GPU assert fails a test.
   See [docs/platforms.md](docs/platforms.md#shader-diagnostics-sc_shader_diagnostics).
+* `SC_SHADER_UNDEFINED` (default `NONE`; `ABORT`, `REPORT`) is SGL's robustness profile: what an integer division by zero or an array index past the array does.
+  `REPORT` logs it as a failed shader assert at the `.sgl` line and ends that invocation, `ABORT` only ends it.
+  See [docs/platforms.md](docs/platforms.md#operations-with-no-value-sc_shader_undefined).
 * `SC_CHECK_WIDE_ARITH` (default OFF) checks typed-geometry's `fixed_int` claims — a result width, a shift amount — at runtime → `TG_CHECK_WIDE_ARITH`.
-  Off by default because they sit in predicate hot loops; the `debug-nopch` presets turn it on, so `check` exercises it.
+  Off by default because they sit in predicate hot loops; the `debug-nopch` presets turn it on, so CI and `check --all-presets` exercise it.
   See [docs/platforms.md](docs/platforms.md#wide-arithmetic-checks-sc_check_wide_arith).
 * `SC_SIMD_EXHAUSTIVE_TESTS` (default OFF) tests clean-simd at every lane width instead of one 256-bit type per element → `CIMD_EXHAUSTIVE_TESTS`; the `debug-nopch` presets turn it on.
   See [docs/platforms.md](docs/platforms.md#exhaustive-simd-tests-sc_simd_exhaustive_tests).
@@ -357,6 +362,7 @@ Guidance, not invariants — use judgment.
 * **Tests stay fast.** Flag slow ones rather than landing them silently.
   **No deliberate waiting:** wait for a condition, never for a duration, and test a timeout by injecting a clock.
   An expensive test narrows itself for the default run under `nx::is_thorough()` — [test-runtime](libs/base/nexus/docs/test-runtime.md).
+  It narrows further under `nx::is_smoke()`, which `check --all-presets` passes to every preset but its default.
 * **Codify non-obvious edge cases as tests.** A test that pins a subtle invariant is nearly as valuable as one that catches a bug.
 
 ---
@@ -484,12 +490,8 @@ A stale "no cc:: equivalent yet" reason sends the next author back to the old wa
 
 ## Git workflow
 
-* **`main` is the integration branch, and most changes are committed to it directly.**
-  That covers fixes, internal improvements, tests, CI fixes, docs, and API that was basically expected to be there — the missing overload, the accessor the type obviously lacked.
-* **A PR with a review is for big reworks and anything that adds substantial new API** — a new concept, type family or library, a public shape someone should weigh before it sets.
-  Those go on a feature branch namespaced per contributor, `u/<your-initials>/<feature>` (Philip Trettner is `u/pt/...`), through the `opening-a-pr` skill.
-  When a change could go either way, pick a lane and say which in one line, so the maintainer can redirect.
-* **CI is never waited on**, neither before a push to `main` nor before opening a PR.
+* **`main` is the integration branch, and changes are committed to it directly**, big reworks and new API included.
+* **CI is never waited on** before a push to `main`.
   Red CI is fixed after the fact and opportunistically, as its own commit on `main` — the `debugging-ci` skill reads the failing run.
   It is usually small: an arm the local machine does not compile, a newer compiler's warning.
 * **`git pull` merges, not rebases** — merge commits preserve the order parallel work landed.
@@ -501,9 +503,6 @@ A stale "no cc:: equivalent yet" reason sends the next author back to the old wa
   It is the local gate that makes skipping CI cheap, so it is not skipped.
   Its default scope is everything since the merge base with `origin/main`, so on `main` it covers exactly the unpushed commits.
 * **An agent never pushes on its own initiative.** A push needs the user's intent: ask, or wait until told to push.
-* **The review workflow is: open the PR, then review it in a fresh session, which lands changes or comments.**
-  The review with the tool always comes after the PR is open, never before.
-  So "anything to add before the PR?" asks what this session should still do; "a proper review with the tool" is never the answer.
 * **Commit attribution.** For largely Claude-generated commits, either no trailer or the `Assisted-By: Claude Code <model-id>` trailer — either is fine.
   The trailer uses the exact model id, and it is **never** `Co-Authored-By`.
   Human-written or trivial agent edits carry none.
@@ -524,6 +523,7 @@ A stale "no cc:: equivalent yet" reason sends the next author back to the old wa
 | Run the full suite               | `uv run dev.py test`                                              |
 | Run one or a batch of tests      | `uv run dev.py test "<pattern>"` (a pattern matching no test name selects by source file: `vector-test.cc`, `libs/base/**/tests/memory/*`) |
 | Chase a flaky test               | `uv run dev.py test <binary> --repeat 100` (stops at the first failure, so its logs survive for `test_diag`) |
+| Find why a test is slow          | `uv run dev.py test "<pattern>" --sample` (prints where the busy time went, by self and total; keeps `<binary>.ccrec`) |
 | Build a single target            | `uv run dev.py build -t <target>`                                 |
 | Run a non-test executable        | `uv run dev.py run <target> [args…]` (builds first, forwards args, propagates the exit code) |
 | Compile an SGL file to target text | `uv run dev.py run sgl -- emit <file.sgl> --entry <name> --target <t>` (`hlsl-dx12`, `hlsl-vulkan`, `wgsl`, `msl`) |

@@ -32,7 +32,9 @@ struct frame_stats
     f32 change = 0;
 };
 
-/// One phase of the script: the settings it switches to, whether the camera moves through it, and how many frames it lasts.
+/// One phase of the script: the settings it switches to, whether the camera moves through it, and how many frames it
+/// executes.
+/// A frame declined while a compile runs is waited out on top, so a phase settles however fast frames are.
 struct phase
 {
     char const* name;
@@ -58,7 +60,7 @@ constexpr phase k_script[] = {
      64},
     {"deferred, atrous", sv::render_mode::hybrid, sv::hybrid_lighting::deferred, sr::denoise_method::atrous, 16, false,
      64},
-    {"forward", sv::render_mode::hybrid, sv::hybrid_lighting::forward, sr::denoise_method::automatic, 16, false, 400},
+    {"forward", sv::render_mode::hybrid, sv::hybrid_lighting::forward, sr::denoise_method::automatic, 16, false, 64},
     {"path traced", sv::render_mode::wavefront, sv::hybrid_lighting::deferred, sr::denoise_method::automatic, 16, false,
      48},
     {"deferred again, temporal forever", sv::render_mode::hybrid, sv::hybrid_lighting::deferred,
@@ -162,7 +164,10 @@ ASYNC_INVOCABLE_TEST("sv - switching renderers and denoisers never shows black b
     // Until the first frame executes there is no earlier image to hold, so the output shows what it was cleared to.
     auto shown = false;
 
-    for (auto const& p : k_script)
+    // a smoke run plays the first phases, which still switch renderers, and what a preset's flags can break
+    auto const script = nx::is_smoke() ? cc::span<phase const>(k_script).subspan({.offset = 0, .size = 3})
+                                       : cc::span<phase const>(k_script);
+    for (auto const& p : script)
     {
         auto& settings = def.views[0].layers[0].settings;
         settings.mode = p.mode;
@@ -177,8 +182,11 @@ ASYNC_INVOCABLE_TEST("sv - switching renderers and denoisers never shows black b
         auto skipped = 0;
         auto worst_dark = 0.0f;
         auto worst_at = -1;
-        for (auto f = 0; f < p.frames; ++f)
+        auto const phase_start = cc::current_time_steady_secs();
+        for (auto f = 0; executed.size() < isize(p.frames); ++f)
         {
+            // Before the list: a REQUIRE unwinding past an unsubmitted one asserts in its destructor.
+            REQUIRE(cc::current_time_steady_secs() - phase_start < 60.0);
             if (p.moving)
                 def.views[0].camera.position = start_camera.position + tg::vec3d(0.01 * f, 0, 0);
 
@@ -227,8 +235,7 @@ ASYNC_INVOCABLE_TEST("sv - switching renderers and denoisers never shows black b
                     p.name, stats.size(), skipped, worst_dark, worst_at, tail_change, first_mean, last_mean);
 
         CHECK(worst_dark < dark_ceiling).dump("phase", cc::string_view(p.name)).dump("darkest", worst_dark).dump("at", worst_at);
-        // A phase too short to finish its compile has nothing executed to settle, which the next phase then covers.
-        if (!p.moving && executed.size() >= 8)
+        if (!p.moving)
         {
             CHECK(tail_change < 4.0f).dump("phase", cc::string_view(p.name)).dump("change", tail_change);
             CHECK(tg::abs(last_mean - first_mean) < 0.1f * first_mean + 2.0f)

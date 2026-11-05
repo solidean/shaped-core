@@ -136,7 +136,7 @@ enum class sg::feature
 
     /// A triangle geometry may carry an opacity micromap (`cmd.raytracing.build_micromap`), which traversal decides most candidates by.
     /// Vulkan grants it with `VK_EXT_opacity_micromap`, D3D12 from DXR 1.2 in the Agility SDK; metal and WebGPU have no equivalent.
-    /// The host's alone: a shader traces the same way either way, so no `require` names it.
+    /// A shader traces the same way either way, so none names it; SGL states it for a dx12 ray query, which then compiles at SM 6.9.
     opacity_micromap,
 
     /// A vertex shader may send its primitive to one layer of a layered render target (SGL's `@layer`), so one draw
@@ -144,6 +144,19 @@ enum class sg::feature
     /// D3D12 grants it with `VPAndRTArrayIndexFromAnyShaderFeedingRasterizerSupportedWithoutGSEmulation`, Vulkan with
     /// `shaderOutputLayer`, and Metal on every Apple GPU its Metal 4 floor admits; WebGPU has no such output.
     vertex_layer_output,
+
+    /// A shader may add to a 32-bit float atomically in one instruction, in a buffer and in workgroup memory.
+    /// Vulkan grants it with `VK_EXT_shader_atomic_float`'s `shaderBufferFloat32AtomicAdd` and `shaderSharedFloat32AtomicAdd`,
+    /// and Metal on every Apple GPU its Metal 4 floor admits; D3D12 and WebGPU have none.
+    /// SGL's `atomic[float].add` is a compare-exchange loop without it, and the native add where a context has it: slib
+    /// hands an SGL compile every feature its context has, which SGL's `has` also answers.
+    float_atomic_add,
+
+    /// A ray-generation shader may reorder its invocations by a coherence hint, so threads that will run alike run together.
+    /// D3D12 grants it from Shader Model 6.9 beside ray-tracing pipelines, which only the Agility SDK's runtime has.
+    /// Vulkan's `VK_EXT_ray_tracing_invocation_reorder` has no compiler path from HLSL yet, and metal and WebGPU have none.
+    /// SGL's `maybe_reorder` is a hint: without the feature it does nothing, so it is what `has` asks.
+    shader_execution_reordering,
 };
 
 CC_FLAG_ENUM_INDEXED(sg, feature, cc::u32);
@@ -181,8 +194,10 @@ inline constexpr feature k_all_features[] = {
     feature::helper_lane_query,
     feature::opacity_micromap,
     feature::vertex_layer_output,
+    feature::float_atomic_add,
+    feature::shader_execution_reordering,
 };
-static_assert(isize(sizeof(k_all_features) / sizeof(k_all_features[0])) == isize(feature::vertex_layer_output) + 1,
+static_assert(isize(sizeof(k_all_features) / sizeof(k_all_features[0])) == isize(feature::shader_execution_reordering) + 1,
               "k_all_features lists every feature");
 
 /// The enumerator's name, `ray_query`, which is also what SGL's `require` spells it as.
@@ -242,6 +257,10 @@ static_assert(isize(sizeof(k_all_features) / sizeof(k_all_features[0])) == isize
         return "opacity_micromap";
     case feature::vertex_layer_output:
         return "vertex_layer_output";
+    case feature::float_atomic_add:
+        return "float_atomic_add";
+    case feature::shader_execution_reordering:
+        return "shader_execution_reordering";
     }
     return "";
 }

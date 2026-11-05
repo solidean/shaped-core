@@ -81,12 +81,22 @@ cc::vector<cc::loaded_module> cc::enumerate_loaded_modules()
         do
         {
             auto const base = reinterpret_cast<u64>(entry.modBaseAddr);
-            out.push_back({
-                .base = base,
-                .size = u64(entry.modBaseSize),
-                .path = cc::string(entry.szExePath),
-                .identity = pe_identity(base),
-            });
+
+            // Pinned while its headers are read: the snapshot is already stale, and a module another thread unloaded
+            // since has no headers left to read.
+            // One that is gone, or replaced by another at that base, is no longer loaded and so is left out.
+            HMODULE pinned = nullptr;
+            if (::GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS, reinterpret_cast<LPCWSTR>(base), &pinned)
+                == 0)
+                continue;
+            if (reinterpret_cast<u64>(pinned) == base)
+                out.push_back({
+                    .base = base,
+                    .size = u64(entry.modBaseSize),
+                    .path = cc::string(entry.szExePath),
+                    .identity = pe_identity(base),
+                });
+            ::FreeLibrary(pinned);
         } while (::Module32Next(snap, &entry) != 0);
 
     ::CloseHandle(snap);

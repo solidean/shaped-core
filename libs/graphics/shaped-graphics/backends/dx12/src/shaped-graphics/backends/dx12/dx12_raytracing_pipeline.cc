@@ -114,7 +114,8 @@ struct hit_group_build
 
 cc::result<dx12_raytracing_pipeline_handle> dx12_raytracing_pipeline::create(ID3D12Device* device,
                                                                              dx12_pipeline_layout_handle layout,
-                                                                             sg::raytracing_pipeline_description const& desc)
+                                                                             sg::raytracing_pipeline_description const& desc,
+                                                                             bool allows_micromaps)
 {
     CC_ASSERT(layout != nullptr, "raytracing pipeline requires a pipeline_layout");
     CC_ASSERT(!desc.raygen_shaders.empty(), "raytracing pipeline requires at least one raygen shader");
@@ -202,8 +203,14 @@ cc::result<dx12_raytracing_pipeline_handle> dx12_raytracing_pipeline::create(ID3
     shader_config.MaxPayloadSizeInBytes = UINT(desc.max_payload_size);
     shader_config.MaxAttributeSizeInBytes = UINT(desc.max_attribute_size);
 
-    D3D12_RAYTRACING_PIPELINE_CONFIG pipeline_config = {};
-    pipeline_config.MaxTraceRecursionDepth = desc.max_recursion_depth;
+    // a device with micromaps lets every trace see them, as a vulkan pipeline does
+    auto pipeline_config = D3D12_RAYTRACING_PIPELINE_CONFIG1{.MaxTraceRecursionDepth = UINT(desc.max_recursion_depth)};
+#if SG_HAS_AGILITY
+    if (allows_micromaps)
+        pipeline_config.Flags |= D3D12_RAYTRACING_PIPELINE_FLAG_ALLOW_OPACITY_MICROMAPS;
+#else
+    CC_ASSERT(!allows_micromaps, "micromaps are DXR 1.2's, which only the Agility SDK carries");
+#endif
 
     D3D12_GLOBAL_ROOT_SIGNATURE global_root_signature = {};
     global_root_signature.pGlobalRootSignature = layout->root_signature.Get();
@@ -218,7 +225,7 @@ cc::result<dx12_raytracing_pipeline_handle> dx12_raytracing_pipeline::create(ID3
         subobjects.push_back(D3D12_STATE_SUBOBJECT{.Type = D3D12_STATE_SUBOBJECT_TYPE_HIT_GROUP, .pDesc = &hg_desc});
     subobjects.push_back(
         D3D12_STATE_SUBOBJECT{.Type = D3D12_STATE_SUBOBJECT_TYPE_RAYTRACING_SHADER_CONFIG, .pDesc = &shader_config});
-    subobjects.push_back(D3D12_STATE_SUBOBJECT{.Type = D3D12_STATE_SUBOBJECT_TYPE_RAYTRACING_PIPELINE_CONFIG,
+    subobjects.push_back(D3D12_STATE_SUBOBJECT{.Type = D3D12_STATE_SUBOBJECT_TYPE_RAYTRACING_PIPELINE_CONFIG1,
                                                .pDesc = &pipeline_config});
     subobjects.push_back(D3D12_STATE_SUBOBJECT{.Type = D3D12_STATE_SUBOBJECT_TYPE_GLOBAL_ROOT_SIGNATURE,
                                                .pDesc = &global_root_signature});

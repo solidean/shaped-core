@@ -209,7 +209,8 @@ struct line_tokenizer
             return;
         }
 
-        // Exactly one name after the quote, with lines below it: a tagged opener, kept free for embedded languages.
+        // Exactly one name after the quote, with lines below it: a tagged opener, whose name says what language its
+        // content is; a double quote's is a body in a target's own text (STR-46), and the other quotes' are reserved.
         // Without lines below it is what it looks like, a one-word string somebody has not closed yet.
         if (has_children && is_name_start(peek()))
         {
@@ -219,7 +220,8 @@ struct line_tokenizer
             if (is_blank_from(name_end))
             {
                 emit(token_kind::symbol, at, name_end);
-                report(diagnostic_kind::reserved_string_opener, start, name_end);
+                if (!interpolates)
+                    report(diagnostic_kind::reserved_string_opener, start, name_end);
                 opened = {.quote = quote};
                 opened_interpolates = interpolates;
                 at = end;

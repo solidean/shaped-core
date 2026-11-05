@@ -268,6 +268,30 @@ sgl::check::padding_kind checker::padding_of(i32 file, ast::attribute const* a)
     return padding_kind::natural;
 }
 
+/// CHK-435: `@float(.precise)`, the least float guarantee a function's body needs.
+sgl::check::float_level checker::float_level_of(i32 file, ast::attribute const* a)
+{
+    if (a == nullptr)
+        return float_level::fast;
+    auto const arguments = ast_of(file).at(a->arguments);
+    auto const* const dot = arguments.size() == 1 && arguments[0].name.empty() && !arguments[0].is_splat
+                                 && ast::is_valid(arguments[0].value)
+                              ? ast_of(file).at(arguments[0].value).node.try_as<ast::leading_dot>()
+                              : nullptr;
+    auto const level = dot != nullptr ? text_of(file, dot->name) : cc::string_view();
+    if (level == "fast")
+        return float_level::fast;
+    if (level == "specials")
+        return float_level::specials;
+    if (level == "precise")
+        return float_level::precise;
+    if (level == "ieee")
+        return float_level::ieee;
+    report(diagnostic_kind::invalid_attribute_arguments, file, a->name,
+           "@float takes the guarantee a body needs: `.fast`, `.specials`, `.precise` or `.ieee`");
+    return float_level::fast;
+}
+
 /// `@stream(normals)`: one bare name, which is the buffer a vertex input member is read from.
 cc::string checker::name_argument_of(i32 file, ast::attribute const* a)
 {
@@ -526,7 +550,11 @@ type_id checker::resolve_type(i32 file, ast::expr_id expr, function_scope const*
     return result;
 }
 
-type_id checker::resolve_value_type(i32 file, ast::expr_id expr, function_scope const* scope, bool allows_resource)
+type_id checker::resolve_value_type(i32 file,
+                                    ast::expr_id expr,
+                                    function_scope const* scope,
+                                    bool allows_resource,
+                                    bool allows_atomic)
 {
     auto const type = resolve_type(file, expr, scope);
     if (type == checked_module::error_type)
@@ -538,8 +566,9 @@ type_id checker::resolve_value_type(i32 file, ast::expr_id expr, function_scope 
                "a stream is what a geometry stage appends to, a parameter of its entry point and no value");
         return checked_module::error_type;
     }
-    // CHK-297: an atomic stands in a `mut buffer` or in workgroup memory, and no value holds one
-    if (holds_atomic(type))
+    // CHK-297: an atomic stands in a `mut buffer` or in workgroup memory, and no value holds one; a `mut` parameter
+    // names the caller's
+    if (holds_atomic(type) && !(allows_atomic && out.at(type).kind == type_kind::atomic))
     {
         report(diagnostic_kind::wrong_kind_of_name, file, span_of(file, expr),
                "an atomic is memory in a `mut buffer` or a @workgroup binding, and never a value");
@@ -1162,6 +1191,16 @@ void checker::compile_struct(symbol_id id)
     });
     out.type_lists.push_back_range(parameters);
     out.symbols.own(index_of(id)).type = type;
+
+    // CHK-432: a body that is one `const if` chain spells the type per compile, and its SGL branch is its fields
+    if (!s.branches.empty())
+    {
+        if (!parameters.empty())
+            unsupported(file, s.name, "a generic struct whose body is a const if chain");
+        auto const has_fields = compile_type_branches(id, file, s);
+        out.types.own(index_of(type)).is_text_type = true;
+        out.types.own(index_of(type)).is_opaque = !has_fields;
+    }
 }
 
 void checker::compile_enum(symbol_id id)
@@ -1517,6 +1556,16 @@ void checker::compile_const(symbol_id id)
         }
         else if (target.kind == target_kind::symbol && out.at(target.symbol).kind == symbol_kind::constant)
         {
+            // CHK-426: what a compile stands for is no one value a const could hold
+            if (auto const& named = out.at(target.symbol); is_target_constant(target.symbol))
+            {
+                report(diagnostic_kind::invalid_constant_argument, file, where,
+                       cc::format("{} reads {}, which each compile stands for once a body is inlined, while a const "
+                                  "is computed once for every compile; a function that returns it is inlined where "
+                                  "it is called",
+                                  out.at(id).name, named.name));
+                return fail();
+            }
             info = out.constants[out.at(target.symbol).info];
             info.symbol = id;
         }
@@ -1786,18 +1835,24 @@ void checker::compile_function(symbol_id id)
                                      "callable",
                                      "builtin",
                                      "pure",
+                                     "barrier",
+                                     "subgroup",
+                                     "derivatives",
                                      "operator",
                                      "vertex",
                                      "pixel",
                                      "compute",
                                      "preferred_subgroup_size",
+                                     "float",
                                      "geometry",
                                      "tessellation_control",
                                      "tessellation_evaluation",
                                      "stages",
                                      "shadowable",
                                      "expect",
-                                     "internal"};
+                                     "internal",
+                                     "forward",
+                                     "backward"};
     judge_attributes(file, d.attributes, known, "a function",
                      is_raster_entry ? setting_scope::description : setting_scope::none);
     auto const* const geometry = find_attribute(file, d.attributes, "geometry");
@@ -1856,10 +1911,11 @@ void checker::compile_function(symbol_id id)
         auto input = stage_input::none;
         if (!p.attributes.empty())
         {
-            cc::string_view known_on_parameter[16] = {};
+            cc::string_view known_on_parameter[24] = {};
             auto known_count = isize(0);
             for (auto const& candidate : stage_inputs())
                 known_on_parameter[known_count++] = candidate.name;
+            known_on_parameter[known_count++] = "no_diff";
             judge_attributes(file, p.attributes, cc::span<cc::string_view const>(known_on_parameter, known_count),
                              "a parameter");
             for (auto const& candidate : stage_inputs())
@@ -1910,7 +1966,7 @@ void checker::compile_function(symbol_id id)
             is_mut_parameter = true;
             // a function is no place, so a function type is not the whole type here (CHK-317)
             allows_function_type = false;
-            type = resolve_value_type(file, q->type);
+            type = resolve_value_type(file, q->type, nullptr, false, true);
             set_type(file, p.type, type);
             // what a stage takes the GPU hands it, and nothing hands an entry point a place
             if (is_raster_entry || find_attribute(file, d.attributes, "compute") != nullptr || control != nullptr
@@ -2032,6 +2088,10 @@ void checker::compile_function(symbol_id id)
         .workgroup = {workgroup[0], workgroup[1], workgroup[2]},
         .preferred_subgroup_size = preferred_subgroup_size,
         .is_pure = find_attribute(file, d.attributes, "pure") != nullptr,
+        .is_barrier = find_attribute(file, d.attributes, "barrier") != nullptr,
+        .is_subgroup_operation = find_attribute(file, d.attributes, "subgroup") != nullptr,
+        .uses_derivatives = find_attribute(file, d.attributes, "derivatives") != nullptr,
+        .float_guarantee = float_level_of(file, find_attribute(file, d.attributes, "float")),
         .max_vertices = max_vertices,
         .partitioning = tessellation.partitioning,
         .is_clockwise = tessellation.is_clockwise,

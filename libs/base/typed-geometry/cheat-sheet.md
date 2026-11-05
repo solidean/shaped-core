@@ -549,6 +549,20 @@ x.limbs(); x.exponent(); x.is_inline(); x.capacity();  // the trimmed mantissa, 
 // A msum summand refers to its operands: build it in the msum's own full expression.
 ```
 
+## float_expansion (exact sum of doubles)
+
+```cpp
+#include <typed-geometry/scalar/float_expansion/float_expansion.hh>
+tg::float_expansion_sbo<K>; tg::float_expansion;   // K components inline (8K + 8 bytes); tg::float_expansion is K = 4
+tg::float_expansion x = 0.1; tg::float_expansion(i64(-3));   // exact from any finite double or integer, implicit
+tg::float_expansion::from_fixed_int(fi256(v));     // v exactly, below 2^1024
+a + b; a - b; a * b; -a; a += b;                   // exact while in range: no overflow, no component product below 2^-960
+x.is_valid();                                      // false once out of range, and sticky like a NaN through every operation
+x.sign(); compare(a, b); a < b; a == b;            // -1/0/+1, the largest component's; invalid: invalid_sign (-128), unordered
+x.components(); x.approximate();                   // smallest magnitude first, none zero; their sum, within a few ulps; NaN if invalid
+// tg::bigfloat has no range limit, and is faster past degree 3 (docs/modules/scalar.md).
+```
+
 ## bigint (arbitrary-precision integer)
 
 ```cpp
@@ -601,6 +615,12 @@ auto [q, r] = divrem(a, b);                                 // a = q b + r; requ
 auto pd = pseudo_divrem(a, b);                              // lc(b)^pd.power * a = pd.quotient * b + pd.remainder, any ring
 div_exact(a, b);                                            // b divides a: bigint coefficients divide exactly
 p.to_string("t");                                           // "3*t^2 + 1"
+content(p); primitive_part(p);                              // gcd of the coefficients, signed so the primitive part leads positively
+gcd(a, b); resultant(a, b); squarefree_part(p);             // exact fields (bigrat) and gcd rings (bigint, polynomials over them)
+#include <typed-geometry/symbolic/polynomial_roots.hh>
+auto rs = isolate_real_roots(p);                            // bigint p: cc::vector<tg::root_interval>{lo, hi}, ascending, one root each
+refine_root(p, rs[0], width);                               // bisect until hi - lo <= width; r.is_exact() when lo == hi
+real_roots(c, 0.0, 1.0);                                    // float p: roots in [lo, hi], ascending; fixed degree -> cc::fixed_vector
 tg::polynomial<tg::polynomial<tg::bigint>> xy;              // a polynomial is a coefficient: nesting gives more variables
 ```
 
@@ -617,11 +637,30 @@ p + q; p - q; p * q; p * s; p == q;                         // terms stay sorted
 p({2, 3, 4}); p(cc::fixed_array<tg::bigrat, 3>{...});       // evaluation, in X when X is built from C
 derivative(p, v); substitute(p, v, value);                  // the result no longer in x(v)
 to_univariate(p, v); from_univariate(u, v);                 // polynomial<multi_polynomial<...>> in x(v), and back
+gcd(p, q); div_exact(p, q); try_div_exact(p, q);            // heuristic gcd over bigint, proved by division; optional when not exact
 p.to_string(names);                                         // "3*x0^2*x1 - x1 + 1"; names a span of string_view
 using E = tg::multi_polynomial<tg::bigint, tg::vars<3, tg::infinitesimal_order>>;
 e.sign();                                                   // 1 >> e0 >> e0^2 >> e1 >> ...: the leading coefficient's sign
 // An exponent or a graded total degree is at most 2^(Bits-1) - 1; overflow fails in every build, not only with assertions.
+#include <typed-geometry/symbolic/dynamic_polynomial.hh>
+using Q = tg::multi_polynomial<tg::bigint, tg::dynamic_vars<>>;  // variables by name, each polynomial its own list; grevlex
+auto x = tg::symbol("x"); Q::variable(x); Q::parse("3*x^2*y - y + 1"); // parse -> cc::optional<Q>; p.to_string() prints it back
+p + q; p * q; p == q;                                       // over different variables: both repacked onto the union first
+p.degree(x); p.exponent(t, x); p.variables(); p({{x, 2}, {y, 3}}); p.evaluate(span_of_assignments);
+derivative(p, x); substitute(p, x, q);                      // q a polynomial or a constant
 // The infinitesimal order is local (1 is the largest monomial): it ranks for signs, not for division.
+```
+
+## rational_polynomial (a field of polynomial quotients)
+
+```cpp
+#include <typed-geometry/symbolic/rational_polynomial.hh>
+using R = tg::rational_polynomial<tg::polynomial<tg::bigint>>;  // or over any multi_polynomial
+R r(num, den); r.numerator(); r.denominator(); r.is_zero(); R::is_reduced; // reduced by gcd where P has one
+a + b; a - b; a * b; a / b; a == b;                         // canonical parts where reduced, cross products otherwise
+r(tg::bigrat(1, 3));                                        // evaluation needs a field's value
+r.sign();                                                   // over infinitesimal variables: the parts' signs multiplied
+tg::polynomial<R> p; divrem(p, q);                          // a field, so polynomials over it divide
 ```
 
 ## half_float (binary16)

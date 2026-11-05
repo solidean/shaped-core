@@ -2,6 +2,7 @@
 
 #include <clean-core/common/assert.hh>
 #include <shaped-graphics/backends/metal/metal_context.hh>
+#include <shaped-graphics/backends/metal/metal_texture.hh>
 
 namespace sg::backend::metal
 {
@@ -36,6 +37,28 @@ sg::memory_requirements metal_memory_heap::query_buffer_requirements(isize size_
     // heap reports has to already carry the padding that keeps the next placement legal.
     // D3D12 and Vulkan both round for you; Metal answers the two questions independently and returns, for a 1-byte
     // buffer, a size of 1 at an alignment of 256 — so every placement after the first would land unaligned.
+    auto const size = isize(size_and_align.size);
+    auto const padded = (size + alignment - 1) / alignment * alignment;
+
+    return {.alignment_in_bytes = alignment, .size_in_bytes = padded};
+}
+
+sg::memory_requirements metal_memory_heap::query_texture_requirements(sg::texture_description const& desc) const
+{
+    auto const scope = autorelease_scope();
+
+    // A format metal lacks is not placeable; creating it dedicated is what reports why.
+    auto described = new_texture_descriptor(desc);
+    if (described.has_error())
+        return {.placeable = false};
+    auto* const descriptor = described.value();
+    auto const size_and_align = _ctx.device()->heapTextureSizeAndAlign(descriptor);
+    descriptor->release();
+
+    auto const alignment = isize(size_and_align.align);
+    CC_ASSERT(alignment > 0, "metal reported a zero texture alignment");
+
+    // Padded to the alignment for the same reason as a buffer's: the bump allocator never re-aligns its head.
     auto const size = isize(size_and_align.size);
     auto const padded = (size + alignment - 1) / alignment * alignment;
 

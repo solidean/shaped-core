@@ -742,28 +742,33 @@ sg::routine_outcome raster_routine::execute(sg::command_list& cmd, raster_frame_
             return;
 
         auto const keep = [](sg::texture_2d const& texture) { return texture.as_render_target_view().preserved(); };
-        auto pass = thin ? cmd.raster.render_to(raster::quadric_thin_targets{
-                               .emission = keep(d.thin.emission),
-                               .normals = keep(d.thin.normals),
-                               .base = keep(d.thin.base),
-                               .specular = keep(d.thin.specular),
-                               .extra = keep(d.thin.extra),
-                               .depth = keep(t.depth),
-                               .motion = keep(t.motion),
-                               .primary_depth = keep(primary_depth),
-                               .depth_stencil = depth.as_depth_stencil_view().preserved(),
-                           })
-                         : cmd.raster.render_to(raster::quadric_targets{
-                               .color = keep(t.color),
-                               .normal = keep(t.normal),
-                               .depth = keep(t.depth),
-                               .albedo = keep(t.albedo),
-                               .specular_albedo = keep(t.specular_albedo),
-                               .roughness = keep(t.roughness),
-                               .motion = keep(t.motion),
-                               .primary_depth = keep(primary_depth),
-                               .depth_stencil = depth.as_depth_stencil_view().preserved(),
-                           });
+        // A return per branch rather than `?:`: MSVC wants the deleted move for a conditional of two prvalue scopes, where a return elides it
+        auto pass = [&]
+        {
+            if (thin)
+                return cmd.raster.render_to(raster::quadric_thin_targets{
+                    .emission = keep(d.thin.emission),
+                    .normals = keep(d.thin.normals),
+                    .base = keep(d.thin.base),
+                    .specular = keep(d.thin.specular),
+                    .extra = keep(d.thin.extra),
+                    .depth = keep(t.depth),
+                    .motion = keep(t.motion),
+                    .primary_depth = keep(primary_depth),
+                    .depth_stencil = depth.as_depth_stencil_view().preserved(),
+                });
+            return cmd.raster.render_to(raster::quadric_targets{
+                .color = keep(t.color),
+                .normal = keep(t.normal),
+                .depth = keep(t.depth),
+                .albedo = keep(t.albedo),
+                .specular_albedo = keep(t.specular_albedo),
+                .roughness = keep(t.roughness),
+                .motion = keep(t.motion),
+                .primary_depth = keep(primary_depth),
+                .depth_stencil = depth.as_depth_stencil_view().preserved(),
+            });
+        }();
         auto const declared = d.bindless->declare_raster_access(cmd);
         for (auto const& draw : d.draws)
         {

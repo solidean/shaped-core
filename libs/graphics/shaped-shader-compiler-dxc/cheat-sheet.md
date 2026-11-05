@@ -23,7 +23,7 @@ Every `CC_LOG_*` and `CC_RECORD_*` site in this library is attributed to it; see
 #include <shaped-shader-compiler-dxc/compile_options.hh>
 ssc::dxc::compile_target        // dxil (dx12; reflection needs the Windows SDK) | spirv (vulkan)
                                 //   metal_lib slots in later
-ssc::dxc::shader_model          // sm_6_0 .. sm_6_8   -> profile suffix "6_8"
+ssc::dxc::shader_model          // sm_6_0 .. sm_6_9   -> profile suffix "6_9"; slib picks 6.9 only where SER is used
 ssc::dxc::optimization_level    // disabled(-Od) | level_0..level_3(-O0..-O3)
 ssc::dxc::compile_options       // { target; optimization; bool debug_info; bool warnings_as_errors;
                            //   cc::vector<cc::string> defines; cc::vector<cc::string> extra_args }

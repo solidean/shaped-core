@@ -36,6 +36,31 @@ cc::string_view sgl::emit::to_string(target t)
     return "";
 }
 
+sgl::check::compile_target sgl::emit::compile_target_of(target t, check::feature_set device_features)
+{
+    auto result = check::compile_target{.device_features = device_features};
+    switch (t)
+    {
+    case target::hlsl_dx12:
+        result.api = check::graphics_api::dx12;
+        result.language = check::shading_language::hlsl;
+        break;
+    case target::hlsl_vulkan:
+        result.api = check::graphics_api::vulkan;
+        result.language = check::shading_language::hlsl;
+        break;
+    case target::wgsl:
+        result.api = check::graphics_api::webgpu;
+        result.language = check::shading_language::wgsl;
+        break;
+    case target::msl:
+        result.api = check::graphics_api::metal;
+        result.language = check::shading_language::msl;
+        break;
+    }
+    return result;
+}
+
 cc::string_view sgl::emit::to_string(error_kind kind)
 {
     switch (kind)
@@ -216,7 +241,7 @@ sgl::emit::emitted_text sgl::emit::emit_entry_point(check::checked_module const&
             }
     }
 
-    auto plan = impl::make_plan(m, e, t);
+    auto plan = impl::make_plan(m, e, t, sources.device_features.has(check::feature::float_atomic_add));
     // EMIT-133: a ray-tracing stage's file sampler is a `constexpr sampler` on metal, which takes no mip bias
     if (t == target::msl && e.entry_stage >= check::stage::raygen)
         for (auto const& s : plan.samplers)

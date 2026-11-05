@@ -116,11 +116,14 @@ ASYNC_INVOCABLE_TEST("sv - a quadric draws on the raster path where the tracer d
         /// whether its color is held to the tracer's, which a raster frame's unshadowed lighting is not
         bool lit_as_traced = true;
     };
-    auto const contenders = cc::array<contender>{
+    auto const all_contenders = cc::array<contender>{
         contender{.name = "raster", .mode = sv::render_mode::raster, .lit_as_traced = false},
         contender{.name = "hybrid deferred", .lighting = sv::hybrid_lighting::deferred},
         contender{.name = "hybrid forward", .lighting = sv::hybrid_lighting::forward},
     };
+    // a smoke run draws through the raster path and the deferred hybrid, which is what a preset's flags can break
+    auto const contenders
+        = cc::span<contender const>(all_contenders).subspan({.offset = 0, .size = nx::is_smoke() ? 2 : 3});
     auto const pixels = isize(k_size[0]) * isize(k_size[1]);
 
     // Outside: the sphere covers the pixels the tracer's does, lit as the tracer lights it.

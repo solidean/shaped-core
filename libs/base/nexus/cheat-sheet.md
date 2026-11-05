@@ -85,6 +85,11 @@ if (!nx::is_thorough())                  // false by default; true under --thoro
 ```
 
 ```cpp
+if (nx::is_smoke())                      // true under --smoke, which `check` passes to every preset but its default:
+    SKIP("covered by the default preset");//   a heavy test narrows to its smallest case, or skips what no preset's flags reach
+```
+
+```cpp
 TEST("corpus soak", thorough_only) { }   // skipped (a passing SKIP) unless --thorough; for a test with no narrow
                                          //   version. Also honoured on an INVOCABLE_TEST, whatever its driver holds
 ```
@@ -561,10 +566,12 @@ TEST("y", nx::config::exclusive(), nx::config::owns_recorder)  // this test driv
 
 - **`sync()` drains the recorder under a process-wide mutex** — a few per test is nothing, one per check in a loop is not.
 - Every `nx::run` installs the console logger, so `CC_LOG_*` prints from tests and examples with zero source changes.
+- Every `nx::run` caps its process at 30 GB (`SC_DEV_MEMORY_PROCESS_GB`, 0 for none), as dev.py caps what it starts; a tool with its own `main` calls `nx::install_memory_cap()`.
 - A **failing** test's recording is written next to the JUnit XML at the end of the run; a passing one's is dropped.
 - Opting in is what keeps it free: bucketing EVERY test costs the worst binary in this repo 31%, the handful that ask ~0%.
 - `--record` buckets EVERY test and dumps each failing one — a debug flag, normally with a filter, retention unbounded.
 - `--no-recording` turns the run's recorder off entirely (console logger and dumps included), and wins over `--record`.
+- `--sample <file>` profiles the run: samples the recorder's threads, prints where the busy time went, keeps the `.ccrec` — `dev.py test --sample`.
 
 [docs/recording.md](docs/recording.md) has the mechanism and the measurements.
 
@@ -598,7 +605,7 @@ NX_ALLOW_LOGS(cc::rec::level::warning, "sg.dx12", patterns);        // ... or ea
 - **`CHECK_ASSERTS` / `REQUIRE_ASSERTS` report success — and skip executing the expression — when assertions are compiled out** (`CC_ASSERT_ENABLED == 0`, the release presets).
   Run an assert-enabled preset (debug / relwithdebinfo) to actually exercise them.
 - **The `_AS` exception checks match subclasses too**: a `std::runtime_error` satisfies `..._THROWS_AS(expr, std::exception)`.
-- **`SKIP` does not yet interact cleanly with `SECTION`** (known limitation).
+- **`SKIP` inside a `SECTION` skips that section alone**: the sections after it still run, and the test is reported skipped only when nothing in it ran but skips.
 - **Data-driven / generators / matrices:** use `INVOCABLE_TEST` + `nx::invoke_tests` above, not Catch2 generators.
 - **Not supported yet:** Catch2 `INFO`/`CAPTURE`, tags, and type-parametrized (templated) tests.
   Use `.context()` / `.note()` / `.dump()` for messages, and `BENCHMARK` + `nx::bench` for benchmarks.

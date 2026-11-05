@@ -90,7 +90,7 @@ Each of these is a fact about Metal rather than a gap in the backend.
   MTL4's render encoder has no `setVertexBuffer`, and Metal has no root constants and no push constants — so both arrive the way a binding group does, as an address in the one `MTL4ArgumentTable`.
   That fixes a buffer-index convention the shader has to agree with, and `metal_common.hh` is where it is stated.
   Groups at 0 to 2, sg's reserved group at 3, inline constants at 4, and vertex-input slot `n` at 5 + `n`.
-  `dispatch_rays` borrows 5, `k_hit_group_offsets_buffer_index`, for the traced TLAS's hit-group offsets, since a kernel draws no vertices.
+  `dispatch_rays` borrows 5, `k_hit_group_offsets_buffer_index`, for the bound groups' hit-offsets mirrors, since a kernel draws no vertices.
   An `[[attribute(n)]]` index is the attribute's position in `vertex_input_layout::attributes`, which is the workaround the vulkan backend already states for its SPIR-V locations.
   Both are a workaround for the same missing field: sg names a vertex input by an HLSL semantic, and neither MSL nor SPIR-V has one.
   **Nothing below checks any of it.**
@@ -213,8 +213,10 @@ Each of these is a fact about Metal rather than a gap in the backend.
   `block_until_idle()` drains the GPU without advancing, so an open epoch's payload never runs — a download deferred onto the epoch would stay unsettled forever in an unadvanced frame.
   `MTL4CommitFeedback` fires at exactly the right moment, and `block_until_transfers_drained` is sg's hook for waiting on the outstanding ones.
   That is why there is no readback actor here where the other two backends have one.
-- **Placement works for textures from the start.**
-  A Metal placement heap is not told what it will hold, so there is no buffers-only stage to grow out of the way dx12 has one.
+- **Placement needs no texture-only heap.**
+  A Metal placement heap is not told what it will hold; `contents` is sg's record of what was asked for.
+  `heapTextureSizeAndAlign` answers from the same descriptor the texture is created with, and its size is padded to the alignment as a buffer's is.
+  `sg metal - a textures heap places textures back to back at their reported sizes` pins both.
 - **Two queues need three waits, not one.**
   An off-frame transfer runs on a second `MTL4CommandQueue`, and neither queue knows anything about the other's timeline.
   A command list waits on `metal_transfer_system::pending_value_for` before it runs.
@@ -305,14 +307,14 @@ The pipeline path maps as follows.
   The reservation already existed for exactly this, so nothing about what `group_index` means changes.
   A caller still gets groups 0 to 2.
   Ray tracing and shader-side diagnostics now share that group, so those `[[id(n)]]` assignments are one namespace rather than two.
-- **A TLAS carries its instances' hit-group offsets, and `dispatch_rays` binds them at MSL buffer 5.**
+- **A TLAS carries its instances' hit-group offsets, and a binding group mirrors them slot for slot.**
   Metal's intersection result names the instance but not the `intersectionFunctionTableOffset` it carried, and a kernel needs that offset to find a closest hit's record.
   So `build_tlas` also uploads one `u32` per instance into `metal_tlas::hit_group_offsets()`.
-  `dispatch_rays` binds it at `k_hit_group_offsets_buffer_index`, which is vertex-input slot 0's index, free during a dispatch.
-  A dispatch with no such TLAS binds a context-wide zeroed buffer there instead, since the kernel declares the slot either way.
-  A kernel then calls the closest-hit table at `offsets[instance] + geometry * stride + ray type`, which is how SGL's kernels find it.
-  **A dispatch traces one TLAS**: it binds the first bound TLAS's offsets, and logs a warning when the bound groups hold more than one.
-  This is untested on metal hardware so far; the tier-1 pipeline tests exercise it in CI.
+  A group holding a TLAS gets a second buffer beside its argument buffer: slot `n` holds the offsets address of the TLAS at slot `n`.
+  `dispatch_rays` stages the three bound groups' mirror addresses and binds them at `k_hit_group_offsets_buffer_index`, which is vertex-input slot 0's index, free during a dispatch.
+  A kernel then calls the closest-hit table at `mirrors[group][slot + element][instance] + geometry * stride + ray type`, which is how SGL's kernels find it.
+  So any number of TLASes trace in one dispatch, in one group or across groups, and through an array; the convention needs nothing beyond `[[id(n)]]` being the slot.
+  `sg - an SGL ray-tracing pipeline finds each traced TLAS's records through that TLAS's instances` pins it on metal hardware.
 - **An empty closest-hit slot holds no function**, and a kernel must not call one.
   A group without a closest hit leaves its slot empty, which is valid for the table and not callable.
   SGL's kernels call every record's closest hit, so slib fills the empty slots with `sgl_empty_closest_hit` for them.
@@ -484,23 +486,21 @@ A handler still in flight then does nothing instead of reporting into freed memo
 
 `shaped-graphics-metal-test` is the tier-2 binary: bring-up, the floor refusal, the epoch timelines, command-list lifetime, transfer, the bind path, compute, raster, and what Metal reports where.
 
-The tier-1 suite has **no compute execution test at all** — it cannot, because bytecode is per-backend by construction — so this tier is the specification for the dispatch path.
-`double_compute.metal` is checked in beside the `double_compute.metallib.h` compiled from it, with the command line in the source's own comment.
-`mesh.metal` is the vertex-input fixture, one library with five entry points.
-The two stages of a draw that reads its colour from a vertex attribute and its tint from inline constants, plus three kernels.
-One kernel takes inline constants, one takes an array binding, and one writes the vertex buffer a draw then reads.
-Its quad carries decoy vertices and decoy indices ahead of the real ones, so a draw that ignored `vertex_offset` or the first index covers a different part of the target rather than the same one.
-`raytrace.metal` is the ray-tracing fixture, one library with seven entry points.
-Two raygen kernels and the inline ray-query one, plus a miss function, a closest-hit function, an any-hit function and a procedural intersection function.
-It is what makes the two execution tests the only thing anywhere that traces a ray on metal, since the tier-1 suite cannot.
+The fixtures are an SGL package in `tests/shaders`, compiled for metal through slib, so the binary links the shader library.
+`kernels.sgl` holds the dispatch paths: a doubling kernel, one taking inline constants and one taking an array binding.
+Beside them, one writing the vertex buffer a draw then reads, and a copy.
+`draws.sgl` holds the draws: a covering triangle from the vertex index alone, a draw whose colour is a vertex attribute times an inline-constants tint, and the fragment-write hazard's two halves.
+A test still builds its layouts and pipelines through the backend's own calls; only the shader and its bindings come from the package, through `sgl-fixture.hh`.
+So the argument-buffer convention a test exercises is the one every real shader's reflection states, rather than one written beside a hand-written kernel.
+The vertex-input tests state their vertex layout themselves, and their quad carries decoy vertices and decoy indices ahead of the real ones.
+So a draw that ignored `vertex_offset` or the first index covers a different part of the target.
 
-**That fixture is hand-written, and temporary.**
-The agreed shape is HLSL run through SPIRV-Cross with all three artifacts checked in.
-The argument-buffer layout this backend encodes was chosen to match what SPIRV-Cross emits, so a hand-written kernel can agree with the backend and still disagree with every real shader.
-Neither DXC nor SPIRV-Cross is available on an arm64 macOS host today, which is why it exists in the meantime.
-`raytrace.metal`'s own comment says so, and [debt-sg-metal-hand-written-fixtures](../../docs/issues/debt-sg-metal-hand-written-fixtures.md) carries the gap.
-So the fixture is reproducible by hand, and the binary needs neither the shader library nor the Metal toolchain.
-Its reflection is written out by hand next to it, so the test states the binding shape it means rather than inheriting whatever a reflector produced.
+`tracing.sgl` holds the ray-tracing pipelines: an inline query, a closest hit and a miss, a rejecting any-hit, a procedural intersection, and a second pipeline whose miss differs.
+Each test builds the pipeline and the shader table from the package's description through the backend's own calls.
+Since SGL compiles each shader on its own, every such pipeline hands the backend one library per shader.
+
+`raytrace.metal` stays hand-written MSL for two tests SGL cannot express: a closest hit recursing through its own table, and a procedural hit group carrying an any-hit, which the backend must refuse.
+The two-ray-type test compiles its own MSL from source in the test, for the same kind of reason.
 Every test builds its own context, because the context is its subject.
 The whole binary runs with API validation armed, so a violation anywhere in it ends the run.
 

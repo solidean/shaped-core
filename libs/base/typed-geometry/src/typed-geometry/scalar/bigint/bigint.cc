@@ -330,6 +330,19 @@ CC_DONT_INLINE void tg::bigint::_assign_sum_slow(bigint const& a, bigint const& 
     free_if(replaced);
 }
 
+void tg::bigint::_assign_mul_sum_slow(bigint const& a, bigint const& b, bool subtract)
+{
+    if (a.is_zero() || b.is_zero())
+        return;
+    // the product's node is kept per thread, so an accumulation allocates nothing once it has grown
+    thread_local bigint product;
+    product.assign_mul(a, b);
+    if (subtract)
+        assign_sub(*this, product);
+    else
+        assign_add(*this, product);
+}
+
 void tg::bigint::_assign_mul(bigint const& a, bigint const& b)
 {
     // the common case, kept lean so it needs few registers: nonzero operands, and a target that is neither and holds the product,

@@ -78,7 +78,15 @@ public:
 private:
     [[nodiscard]] static ssc::dxc::shader_description to_dxc(slib::shader_source_description const& desc)
     {
-        return ssc::dxc::shader_description{.source = desc.source, .entry_point = desc.entry_point, .stage = desc.stage};
+        // the oldest shader model that holds what the text needs, so every other shader runs where it always has
+        auto const model = desc.required_features.has(sg::feature::shader_execution_reordering)
+                                || desc.required_features.has(sg::feature::opacity_micromap)
+                             ? ssc::dxc::shader_model::sm_6_9
+                             : ssc::dxc::shader_model::sm_6_8;
+        return ssc::dxc::shader_description{.source = desc.source,
+                                            .entry_point = desc.entry_point,
+                                            .stage = desc.stage,
+                                            .model = model};
     }
 
     ssc::dxc::compile_target _target;

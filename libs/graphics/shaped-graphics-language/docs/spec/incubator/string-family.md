@@ -12,7 +12,7 @@ Around it sits a small family, arranged so that the common case needs the least 
 | `"text"` on one line | backslash escapes | `$` | specified |
 | `"` … `"` multi-line | none | `$` | specified |
 | `"""` … `"""` multi-line | none | none — fully raw | reserved |
-| `"lang` … `"` | none | `$` | reserved |
+| `"lang` … `"` | none | `$` | specified as a body in a target's own text (STR-46, CHK-427); reserved anywhere else |
 | `"""lang` … `"""` | none | none | reserved |
 
 **A multi-line string needs no escapes** because indentation delimits it: no character inside it can close it.

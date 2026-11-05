@@ -31,3 +31,66 @@ fun at_most(x: float, limit: float) -> float:
 
 @compute(64) fun clamp_values(@thread_id id: int3){work}:
     work.values[id.x] = at_most(work.values[id.x], 10.0)
+
+// A body in each target's own text, and a preamble the HLSL one calls into (CHK-427, CHK-428).
+// The text reaches DXC and Metal as written, WebGPU takes the SGL branch, and every one triples.
+"hlsl
+    float tripled_by_text(float x) { return x * 3.0; }
+"
+
+fun tripled(x: float) -> float:
+    const if target_language == .hlsl:
+        "hlsl
+            $result = tripled_by_text($x);
+        "
+    else if target_language == .msl:
+        "msl
+            $result = $x * 3.0f;
+        "
+    else:
+        return x * 3.0
+
+@compute(64) fun triple_values(@thread_id id: int3){work}:
+    work.values[id.x] = tripled(work.values[id.x])
+
+// A type each target spells its own way: a `uint2` of the HLSL and MSL texts, and two fields on WebGPU (CHK-432).
+// The value goes into one and back out, so every backend doubles what it read.
+struct packed:
+    const if target_language == .hlsl:
+        "hlsl
+            uint2
+        "
+    else if target_language == .msl:
+        "msl
+            uint2
+        "
+    else:
+        bits: float
+        tag: float
+
+fun packed_of(x: float) -> packed:
+    const if target_language == .hlsl:
+        "hlsl
+            $result = uint2(asuint($x), 7u);
+        "
+    else if target_language == .msl:
+        "msl
+            $result = uint2(as_type<uint>($x), 7u);
+        "
+    else:
+        return packed(x, 7.0)
+
+fun unpacked(p: packed) -> float:
+    const if target_language == .hlsl:
+        "hlsl
+            $result = asfloat($p.x);
+        "
+    else if target_language == .msl:
+        "msl
+            $result = as_type<float>($p.x);
+        "
+    else:
+        return p.bits
+
+@compute(64) fun repack_values(@thread_id id: int3){work}:
+    work.values[id.x] = unpacked(packed_of(work.values[id.x])) * 2.0

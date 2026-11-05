@@ -98,6 +98,7 @@ enum class body_kind : u8;
 struct body;
 struct case_arm;
 struct if_branch;
+struct type_branch;
 struct setting;
 
 enum class literal_kind : u8;
@@ -155,6 +156,7 @@ struct invalid_decl;
 struct module_decl;
 struct use_decl;
 struct require_decl;
+struct preamble_decl;
 struct fun_decl;
 struct struct_decl;
 struct enum_decl;
@@ -205,6 +207,13 @@ enum class type_kind : u8;
 enum class texture_shape : u8;
 enum class access_mode : u8;
 enum class feature : u8;
+enum class graphics_api : u8;
+enum class shading_language : u8;
+struct compile_target;
+struct target_text;
+struct target_preamble;
+struct target_condition;
+struct target_type_branch;
 struct sampler_state;
 struct shape_info;
 struct image_format_info;
@@ -231,6 +240,7 @@ struct option_value;
 struct parameter;
 struct function_info;
 enum class padding_kind : u8;
+enum class float_level : u8;
 struct binding_info;
 enum class setting_kind : u8;
 enum class setting_source : u8;
@@ -245,6 +255,7 @@ struct ray_trace;
 struct callable_call;
 struct texel_store;
 struct flat_traced_ray;
+struct flat_text_type;
 struct call_record;
 struct function_instance;
 struct table_view;
@@ -323,6 +334,7 @@ struct printed_message;
 struct site_tally;
 struct outcome;
 
+enum class undefined_guard : u8;
 struct legalize_options;
 
 enum class expectation_kind : u8;
@@ -340,6 +352,7 @@ template <class T>
 class layered;
 template <class K, class V>
 class layered_map;
+enum class ray_trace_kind : u8;
 } // namespace sgl::check
 
 namespace sgl::test

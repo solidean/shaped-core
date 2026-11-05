@@ -1,3 +1,4 @@
+#include <clean-core/algorithm/sort.hh>
 #include <clean-core/container/map.hh>
 #include <clean-core/platform/environment.hh>
 #include <clean-core/platform/file_path.hh>
@@ -5,7 +6,9 @@
 #include <clean-core/record/console_listener.hh>
 #include <clean-core/record/domain.hh>
 #include <clean-core/record/event_view.hh>
+#include <clean-core/record/hot_functions.hh>
 #include <clean-core/record/listener.hh>
+#include <clean-core/record/sampling.hh>
 #include <clean-core/record/serialize.hh>
 #include <clean-core/record/system.hh>
 #include <clean-core/record/trace.hh>
@@ -211,6 +214,7 @@ struct capture_listener final : cc::rec::listener
 capture_listener g_capture_listener;
 cc::rec::listener_handle g_capture_handle;
 cc::string g_capture_path;
+bool g_sampling = false;
 
 /// nexus's own defaults, with `CC_LOG_*` applied over them.
 ///
@@ -309,19 +313,33 @@ cc::string nx::impl::run_dump_path()
     return path;
 }
 
-void nx::impl::begin_run_capture(cc::string_view path)
+void nx::impl::begin_run_capture(cc::string_view path, bool sample)
 {
     if (!g_active || path.empty())
         return;
 
     g_capture_path = cc::string(path);
     g_capture_handle = cc::rec::register_listener(g_capture_listener);
+
+    // Whole stacks rather than stopping at the innermost scope: the report reads frames alone, and a stack cut at a
+    // scope names the scope's function and nothing it called.
+    if (sample)
+    {
+        cc::rec::start_sampling({.stop_at_scope = false});
+        g_sampling = true;
+    }
 }
 
 void nx::impl::end_run_recording(cc::string_view log_dir)
 {
     if (!g_active)
         return;
+
+    // Stopped before the drain, so the last tick's samples are in it.
+    auto const sampled = g_sampling;
+    if (sampled)
+        cc::rec::stop_sampling();
+    g_sampling = false;
 
     // One drain for the whole run, which is what deferring the per-test dumps bought.
     cc::rec::flush_blocking();
@@ -353,6 +371,49 @@ void nx::impl::end_run_recording(cc::string_view log_dir)
         g_capture.lock(
             [&](cc::rec::recording& r)
             {
+                if (sampled)
+                {
+                    auto const hot = cc::rec::hot_functions(r, {.skip_idle = true});
+                    // One block with no blank line inside, which is where dev.py's echo of it stops.
+                    cc::print("\nwhere the busy time went, sampled:\n{}", hot.to_string(30));
+
+                    // By total too: self time names the leaf, and the caller that owns it is what a fix changes.
+                    auto by_total = hot.functions;
+                    cc::sort(by_total, [](cc::rec::hot_function const& a, cc::rec::hot_function const& b)
+                             { return a.total_samples > b.total_samples; });
+                    cc::println("  total%  function");
+                    for (isize i = 0; i < cc::min(by_total.size(), isize(40)); ++i)
+                        cc::println("  {:5.1f}   {}", by_total[i].total_ratio * 100, by_total[i].function);
+
+                    // The named work beside it, which says how often a hot function's caller ran and for how long.
+                    // A scope nested in one of its own name counts twice.
+                    struct scope_total
+                    {
+                        cc::string name;
+                        isize count = 0;
+                        f64 secs = 0;
+                    };
+                    auto scopes = cc::vector<scope_total>();
+                    for (auto const& s : r.scopes())
+                    {
+                        if (s.is_open || s.desc == nullptr)
+                            continue;
+                        auto const name = cc::string_view(s.desc->name);
+                        auto* found = static_cast<scope_total*>(nullptr);
+                        for (auto& t : scopes)
+                            if (t.name == name)
+                                found = &t;
+                        if (found == nullptr)
+                            found = &scopes.push_back({.name = cc::string(name)});
+                        found->count += 1;
+                        found->secs += s.duration_secs();
+                    }
+                    cc::sort(scopes, [](scope_total const& a, scope_total const& b) { return a.secs > b.secs; });
+                    cc::println("  scope seconds  count  name");
+                    for (isize i = 0; i < cc::min(scopes.size(), isize(15)); ++i)
+                        cc::println("  {:13.3f}  {:5}  {}", scopes[i].secs, scopes[i].count, scopes[i].name);
+                    cc::println();
+                }
                 bytes = cc::rec::serialize(r);
                 r = {};
             });

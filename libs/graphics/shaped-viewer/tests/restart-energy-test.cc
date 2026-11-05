@@ -206,6 +206,8 @@ ASYNC_INVOCABLE_TEST("sv - restarting the accumulation keeps the image's mean an
 {
     if (!sv_test::can_run(*ctx_h) || !ctx_h->supports(sg::feature::ray_query))
         SKIP("no inline ray tracing or no SGL compiler, so the view does not build");
+    if (nx::is_smoke())
+        SKIP("a smoke run: the hybrid's restart covers what a preset's flags can break");
     co_await check_restart(*ctx_h, sv::render_mode::wavefront);
 }
 
@@ -215,5 +217,7 @@ ASYNC_INVOCABLE_TEST("sv - restarting the accumulation keeps the image's mean an
 {
     if (!sv_test::can_run(*ctx_h) || !ctx_h->supports(sg::feature::ray_query))
         SKIP("no inline ray tracing or no SGL compiler, so the view does not build");
+    if (nx::is_smoke())
+        SKIP("a smoke run: the hybrid's restart covers what a preset's flags can break");
     co_await check_restart(*ctx_h, sv::render_mode::megakernel);
 }

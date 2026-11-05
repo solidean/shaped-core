@@ -13,6 +13,10 @@
 #include <clean-core/string/string.hh>
 #include <nexus/test.hh>
 
+#if defined(_WIN32)
+#include <clean-core/platform/win32_sanitized.hh>
+#endif
+
 using namespace cc::primitive_defines;
 using namespace cc_rec_test;
 
@@ -527,4 +531,46 @@ REC_TEST("record/sampling - a platform that cannot walk a foreign thread refuses
     // And it is still safe to stop something that never started.
     cc::rec::stop_sampling();
     CHECK(!cc::rec::is_sampling());
+}
+
+// The OS's own unwind lookup takes the loader's function-table lock, which a thread mapping a DLL holds exclusively.
+// A sampler that used it would suspend such a thread mid-load and then wait for its lock forever, so a regression
+// here HANGS rather than fails: the watchdog's report is where it shows.
+REC_TEST("record/sampling - a thread sampled while it loads DLLs is walked rather than waited on")
+{
+#if !defined(_WIN32)
+    SKIP("only Windows walks a suspended thread from outside");
+#else
+    if (!sampling_possible())
+        SKIP("this build has no sampler — no foreign-thread walk, or no threads at all");
+
+    // One this process has not loaded, so every load maps it again and every free unmaps it.
+    auto const* dll = static_cast<wchar_t const*>(nullptr);
+    for (auto const* candidate : {L"msimg32.dll", L"wtsapi32.dll", L"riched20.dll", L"mscms.dll"})
+        if (dll == nullptr && ::GetModuleHandleW(candidate) == nullptr)
+            dll = candidate;
+    if (dll == nullptr)
+        SKIP("every candidate DLL is already loaded, so no load would take the lock");
+
+    rec_fixture const fixture(deterministic_config());
+
+    auto loads = 0;
+    auto const r = capture_sampled(
+        [&]
+        {
+            CC_RECORD_MARK("loading");
+            auto const target = cc::rec::sampling_statistics().taken + 100;
+            auto const start = cc::current_time_steady_secs();
+            while (cc::rec::sampling_statistics().taken < target && cc::current_time_steady_secs() - start < 10.0)
+            {
+                if (auto* const module = ::LoadLibraryW(dll); module != nullptr)
+                    ::FreeLibrary(module);
+                ++loads;
+            }
+        },
+        {.rate_hz = 2000.0, .stop_at_scope = false});
+
+    CHECK(loads > 0);
+    CHECK(count_samples(r) > 0);
+#endif
 }

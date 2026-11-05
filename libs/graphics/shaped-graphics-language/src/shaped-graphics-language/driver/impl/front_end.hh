@@ -2,10 +2,13 @@
 
 #include <clean-core/container/span.hh>
 #include <clean-core/container/vector.hh>
+#include <clean-core/memory/shared_ptr.hh>
 #include <clean-core/memory/unique_ptr.hh>
 #include <clean-core/string/string.hh>
 #include <clean-core/string/string_view.hh>
+#include <clean-core/thread/mutex.hh>
 #include <shaped-graphics-language/ast/file_ast.hh>
+#include <shaped-graphics-language/check/check.hh>
 #include <shaped-graphics-language/check/checked_module.hh>
 #include <shaped-graphics-language/driver/library_file.hh>
 #include <shaped-graphics-language/driver/prelude.hh>
@@ -13,6 +16,25 @@
 
 namespace sgl::driver::impl
 {
+/// A library's module files parsed once, shared by every compile in the process that hands in the same files.
+/// It also keeps the checked layers of the module sets those compiles reach, so a module's body is checked once per set.
+struct parsed_library
+{
+    cc::vector<cc::unique_ptr<parsed_file>> parsed;
+    cc::vector<cc::unique_ptr<ast::file_ast>> built;
+    /// Each file as the check pass takes it, and the name it was handed in under.
+    cc::vector<check::module_file> files;
+    cc::vector<cc::string> names;
+
+    struct layers
+    {
+        cc::vector<cc::shared_ptr<check::checked_prelude const>> made;
+        /// Set once a set of this library's modules failed to make a layer, after which its compiles check it whole.
+        bool has_failed = false;
+    };
+    cc::mutex<layers> checked;
+};
+
 /// One source checked against the prelude, which is what every driver starts from.
 ///
 /// `module` refers into `files` and `asts`, so the three move together and are never copied apart.
@@ -24,6 +46,10 @@ struct front_end
     cc::vector<ast::file_ast const*> asts;
     cc::vector<cc::unique_ptr<parsed_file>> owned_files;
     cc::vector<cc::unique_ptr<ast::file_ast>> owned_asts;
+    /// The library files the check read, where they came from the process's cache rather than `owned_files`.
+    cc::shared_ptr<parsed_library const> library;
+    /// The layer the check continued from, which `module` reads in place.
+    cc::shared_ptr<check::checked_prelude const> layer;
     check::checked_module module;
     cc::string_view source_name;
     /// The file the source is: behind the prelude and the library files it reaches, or the prelude's own file when it
@@ -98,9 +124,10 @@ struct front_end
 /// In the second case the file behind the prelude is empty, and the library is not read.
 /// A source with errors still yields a module, whose `errors` say why nothing should be read from it.
 /// Only the reached library files' parse and AST diagnostics are reported, since only those were checked.
-/// `options` are the values the compile gives the source's options (CHK-354).
+/// `options` are the values the compile gives the source's options (CHK-354), and `target` what it writes for (CHK-426).
 [[nodiscard]] front_end run_front_end(cc::string_view source,
                                       cc::string_view source_name,
                                       cc::span<library_file const> library = {},
-                                      cc::span<check::option_value const> options = {});
+                                      cc::span<check::option_value const> options = {},
+                                      check::compile_target const& target = {});
 } // namespace sgl::driver::impl

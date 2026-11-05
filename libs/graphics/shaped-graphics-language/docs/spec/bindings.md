@@ -322,6 +322,24 @@ An entry point must declare each of those itself: by its file, by a binding it l
 `ray_query` and `raytracing_pipeline` are the two halves of ray tracing, and [raytracing.md](raytracing.md) says what each grants.
 A device may have either without the other, which is why they are two features.
 
+**`has(.f)` asks the device instead of requiring it** (CHK-426).
+It is the device the compile writes for, known once a body is inlined, so `const if has(.subgroups):` keeps a fast branch where the device has the feature and a portable one where it does not.
+The branch it takes may use `f` without a `require`, and a device without `f` never reaches that branch, so it never needs it.
+slib hands every feature a context has to an SGL compile, so a host does nothing for it.
+
+```sgl
+binding work:
+    values: mut buffer[float]
+
+fun total(v: float) -> float:
+    const if has(.subgroups):
+        return subgroup_add(v)
+    return v
+
+@compute(64) fun sum_cs(@thread_id id: int3){work}:
+    work.values[id.x] = total(work.values[id.x])
+```
+
 **`acceleration_structure[.geometry]` is a binding member: the TLAS a trace runs against** (CHK-320).
 Its argument is required and names what it holds, `.triangles`, `.procedural` or `.mixed`.
 It is `sg::binding_type::acceleration_structure`, a resource like a texture, never a value, and a host binds an `sg::tlas_view` to it.
@@ -438,7 +456,7 @@ let counted = materials.albedo[uniform (counts.picked[0] % 64)].sample(p.uv)
 
 ## Atomics
 
-**`atomic[uint]` and `atomic[int]` are memory every invocation updates in one indivisible step**, and like a resource they are never a value.
+**`atomic[uint]`, `atomic[int]` and `atomic[float]` are memory every invocation updates in one indivisible step**, and like a resource they are never a value.
 One stands as the element of a `mut buffer`, or as a member of a `@workgroup` binding, arrays of them included:
 
 ```sgl
@@ -460,7 +478,18 @@ A pixel and a compute stage take them, and so do the ray-tracing stages that run
 An any hit and an intersection run as often as the traversal decides, so they write no memory through a binding, and an atomic there is `stage-not-allowed` as a store is (CHK-404).
 So is one in a decision an inline trace calls, in any stage.
 The host holds a buffer of atomics as the plain integers it is.
-Floats, 64 bits and a vertex stage are [the incubator's](incubator/atomics.md).
+
+**An `atomic[float]` has `load`, `store`, `exchange` and `add`**, and the host writes and reads the float itself.
+Where the device adds floats in one instruction, `sg::feature::float_atomic_add` among the compile's device features, vulkan and metal write the target's own float atomic.
+On metal not where the entry point's workgroup memory holds an `atomic[float]`: MSL has float atomics there only from 4.1, past sg's floor of 4.0.
+Everywhere else it is the bits of a `uint` atomic, and its `add` reads them, adds in float, and retries a compare-exchange until no other update came between.
+Either way it is exact once per update and in no promised order.
+A helper invocation's atomics have no effect, so a pixel stage would never leave that loop, and its `add` takes no pixel stage.
+64 bits and a vertex stage are [the incubator's](incubator/atomics.md).
+
+**`add_reduced(mut slot, key, v)` adds where many invocations add to one slot**, as every pixel a splat covers adds to the splat's gradient.
+Where every active invocation of the subgroup names the same `key`, it adds the subgroup's sum once, from the first of them, and otherwise each adds its own.
+It is a subgroup operation, so it needs `subgroups` and stands in uniform control flow (CHK-376, CHK-377): an invocation with nothing to add calls it with 0.
 
 **A compare-exchange stores `desired` where the atomic holds `expected`, and comes in two forms, each named for what it promises.**
 

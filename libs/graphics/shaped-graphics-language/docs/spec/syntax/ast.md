@@ -391,7 +391,7 @@ fun tally(kind: light_kind, hits: int) -> float:
 |---|---|
 | `let` | `let pattern`, `let pattern : type`, each with an optional `= expression`; and the same after `let mut` |
 | assignment | `target = expression`, and `target op= expression` for every assignment operator |
-| `if` | `if condition` with a body, then any number of `else if condition`, then at most one `else`, each with a body |
+| `if` | `if condition` or `const if condition` with a body, then any number of `else if condition`, then at most one `else`, each with a body |
 | `for` | `for name in expression` or `for _ in expression`, each with an optional `: type` after the variable, with a body |
 | `while` | `while condition` with a body |
 | `assert` | `assert condition` or `assert condition, message` |
@@ -432,6 +432,9 @@ fun blend(base: vec3, top: vec3, mask: float) -> vec3:
   The `else` joins the `if` on its own line, so a statement written that way is the same chain, and it gives no value.
 * **AST-155** `return`, `yield` or `break` in front of such an `if` takes the whole `if` as its value: `return if c => a else b` returns `a` or `b`.
   `=>` is looser than a keyword form, so the jump arrives in the first condition's keyword form, and the AST puts it back together as it does a lambda's.
+* **AST-157** `const if` heads an `if` statement as `if` does, and the statement records that it is constant, which every condition of its chain then is (CHK-425).
+  The `else if` and the `else` below it are written as they are below an `if`.
+  `const if` stands as a statement only, and one where a value is expected is a normal error.
 
 ```sgl
 if count > 0:
@@ -499,6 +502,8 @@ print "total:", total
 * **AST-61** Any other expression statement is the warning `no-effect`, and it is still read: an infix or a prefix `call`, a name, a literal, a `member`, a `tuple`.
 * **AST-114** The last statement of a block is no exception to AST-61, since a block has no implicit value ([AST-106](#value-blocks-and-yield)).
 * **AST-140** Inside a `test` body, and not inside a function nested in one, AST-61 does not report: a line of type `bool` is a check there, and only the check pass knows a line's type.
+* **AST-158** A tagged string of `"` (STR-46) standing as a statement is a body in a target's own text, which has an effect: AST-61 does not report it.
+* **AST-159** A tagged string of `"` standing at file scope is a declaration, a preamble of the target's text in its language (CHK-428).
 
 ```sgl
 fun update(state: particle):
@@ -743,6 +748,9 @@ pipeline shadow = (shadow_vs, shadow_ps)
 * **AST-146** A `require` stands in a `binding` as well, and in a `struct` or an `enum` is `member-not-allowed-here`.
 * **AST-125** A `struct` line without a block is an **opaque struct**: it has no member that can be named, which a block without members does not say ([why](why/ast.md#ast-125)).
 * **AST-126** The AST accepts an opaque struct wherever a `struct` stands, and a later phase allows it for a small set of `@builtin` types only.
+* **AST-160** A `struct` block whose first line is `const if` is one `const if` chain, a **text type** (CHK-432), and a line beside the chain is `member-not-allowed-here`.
+  Each branch's block is a run of tagged strings that spell the type, or members as a struct block's are.
+  The struct's members are those of its first branch of members, and every branch is recorded with its condition.
 * **AST-115** A case may carry a value, which is an expression: `red = 1`.
 * **AST-116** The default of a field may name the fields that stand before it, and the AST checks nothing about it ([why](why/ast.md#ast-116)).
 

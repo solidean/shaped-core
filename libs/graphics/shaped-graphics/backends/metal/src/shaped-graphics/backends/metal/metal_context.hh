@@ -116,11 +116,6 @@ public:
     [[nodiscard]] metal_staging_ring& upload_ring() { return _upload_ring; }
     [[nodiscard]] metal_staging_ring& download_ring() { return _download_ring; }
 
-    /// A small zeroed buffer `dispatch_rays` binds at `k_hit_group_offsets_buffer_index` when no traced TLAS brings its
-    /// own, since every ray-tracing kernel declares that slot whether it traces or not.
-    /// Shared storage, written once at creation and never again, so it needs no access tracking.
-    [[nodiscard]] MTL::Buffer* zero_hit_group_offsets() const { return _zero_hit_group_offsets; }
-
     /// The fence a native scope hands foreign code (see metal_native_scope.hh).
     /// One per context is enough: a wait finds the latest update encoded before it, and lists commit in queue order.
     [[nodiscard]] MTL::Fence* native_scope_fence() const { return _native_scope_fence; }
@@ -137,7 +132,8 @@ public:
                                                                         sg::allocation_info const& alloc);
 
     /// The backend-typed heap create, which the sg::context virtual forwards to.
-    [[nodiscard]] cc::result<metal_memory_heap_handle> create_metal_memory_heap(isize size_in_bytes);
+    [[nodiscard]] cc::result<metal_memory_heap_handle> create_metal_memory_heap(isize size_in_bytes,
+                                                                                sg::memory_heap_contents contents);
 
     // The bind path's backend-typed creates; the sg::context virtuals forward to these.
     [[nodiscard]] cc::result<metal_binding_group_layout_handle> create_metal_binding_group_layout(
@@ -389,7 +385,6 @@ private:
 
     metal_staging_ring _upload_ring;
     metal_staging_ring _download_ring;
-    MTL::Buffer* _zero_hit_group_offsets = nullptr;
     MTL::Fence* _native_scope_fence = nullptr;
 
     /// What a completion-signal waiter parks on, and what the GPU's notification handlers wake it through.

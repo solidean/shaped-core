@@ -275,8 +275,10 @@ struct builder
     stmt_id assert_statement(statement_head const& head, keyword_parts const& parts);
     stmt_id print_statement(statement_head const& head, keyword_parts const& parts);
     stmt_id expression_statement(form_id form);
-    /// `chain` is an `if` or a stray `else`, then the `else` forms that follow it directly.
+    /// `chain` is an `if`, a `const if` or a stray `else`, then the `else` forms that follow it directly.
     stmt_id if_chain(cc::span<form_id const> chain);
+    /// A line led by `const if`, which opens a chain as `if` does (AST-157).
+    [[nodiscard]] bool is_const_if(form_id line);
 
     [[nodiscard]] body block_body(form_id block);
     /// The body of something that yields a value: a block, or the expression right of `=>`.
@@ -323,6 +325,16 @@ struct builder
     /// Reads the lists and the return type, and leaves a missing name or parameter list to the caller to report.
     [[nodiscard]] fun_signature signature_of(keyword_parts const& parts);
     decl_id type_body_declaration(statement_head const& head, keyword_parts const& parts, scope_kind body);
+    /// Whether `line` is a tagged string, a quote a name follows directly (STR-31).
+    [[nodiscard]] bool is_tagged_string(form_id line);
+    /// AST-160: the branches of a struct body that is one `const if` chain, and the fields of its first SGL branch.
+    /// None where the body is anything else.
+    struct type_chain
+    {
+        range_of<type_branch> branches;
+        range_of<decl_id> members;
+    };
+    [[nodiscard]] cc::optional<type_chain> type_branches(form_id block);
     decl_id type_declaration(statement_head const& head, keyword_parts const& parts);
     decl_id const_declaration(statement_head const& head, keyword_parts const& parts);
     decl_id sampler_declaration(statement_head const& head, keyword_parts const& parts);

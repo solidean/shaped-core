@@ -40,6 +40,9 @@ add_library(shaped-graphics-language
     src/shaped-graphics-language/builtins/register_sync.cc
     src/shaped-graphics-language/builtins/register_subgroups.cc
     src/shaped-graphics-language/builtins/register_raytracing.cc
+    src/shaped-graphics-language/builtins/register_target.cc
+    src/shaped-graphics-language/check/check_specialization.cc
+    src/shaped-graphics-language/check/check_target_text.cc
     src/shaped-graphics-language/builtins/register_conversions.cc
     src/shaped-graphics-language/builtins/register_scalar_math.cc
     src/shaped-graphics-language/builtins/register_textures.cc
@@ -58,6 +61,7 @@ add_library(shaped-graphics-language
     src/shaped-graphics-language/check/check_pipeline.cc
     src/shaped-graphics-language/check/check_expr.cc
     src/shaped-graphics-language/check/check_calls.cc
+    src/shaped-graphics-language/check/check_diff.cc
     src/shaped-graphics-language/check/check_overloads.cc
     src/shaped-graphics-language/check/check_features.cc
     src/shaped-graphics-language/check/check_options.cc
@@ -78,12 +82,14 @@ add_library(shaped-graphics-language
     src/shaped-graphics-language/check/flatten_expr.cc
     src/shaped-graphics-language/check/flatten_call.cc
     src/shaped-graphics-language/check/flatten_stmt.cc
+    src/shaped-graphics-language/check/flatten_diff.cc
     src/shaped-graphics-language/check/footprint.cc
 
     src/shaped-graphics-language/legalize/core.cc
     src/shaped-graphics-language/legalize/legalize_cases.cc
     src/shaped-graphics-language/legalize/legalize_exits.cc
     src/shaped-graphics-language/legalize/legalize_exprs.cc
+    src/shaped-graphics-language/legalize/legalize_guards.cc
     src/shaped-graphics-language/legalize/legalize_erase.cc
     src/shaped-graphics-language/legalize/legalize_lets.cc
     src/shaped-graphics-language/legalize/legalize_onces.cc
@@ -430,6 +436,7 @@ if(SC_BUILD_TESTS)
         tests/legalize/random-program.cc
         tests/legalize/differential-test.cc
         tests/legalize/legalize-rules-test.cc
+        tests/legalize/guard-test.cc
 
         tests/emit/emit-test-support.hh
         tests/emit/core-emit-test.cc
@@ -459,6 +466,10 @@ if(SC_BUILD_TESTS)
         tests/driver/compile-to-text-test.cc
         tests/driver/compile-profile-test.cc
         tests/driver/options-test.cc
+        tests/driver/float-guarantee-test.cc
+        tests/driver/compile-target-test.cc
+        tests/driver/target-text-test.cc
+        tests/driver/target-type-test.cc
         tests/driver/describe-test.cc
         tests/driver/source-differential-test.cc
         tests/driver/test-source-test.cc

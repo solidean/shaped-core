@@ -1,0 +1,38 @@
+// What a compile writes for is a constant once a body is inlined, which a `const if` branches on (CHK-426).
+// A test writes no text and runs on no device, so it sees no API, the language SGL itself and no feature.
+
+test target_api == .none and target_language == .sgl
+test not has(.subgroups)
+test not has(.float_atomic_add)
+
+// a function that returns the target is inlined where it is called, so it reads that compile's target
+fun is_native_text() => target_language != .sgl
+
+test not is_native_text()
+
+// the branch `has` takes may use its feature without a `require`, and a device without it never reaches the branch
+binding work:
+    values: mut buffer[float]
+
+fun summed(v: float) -> float:
+    const if has(.subgroups):
+        return subgroup_add(v)
+    return v
+
+test summed(2.5) == 2.5
+
+@compute(64) fun sum_cs(@thread_id id: int3){work}:
+    work.values[id.x] = summed(work.values[id.x])
+
+// each target takes its own branch, and the corpus writes this entry point for every one of them
+fun lane_scale() -> float:
+    const if target_api == .webgpu:
+        return 0.5
+    else if target_language == .hlsl:
+        return 2.0
+    return 1.0
+
+test lane_scale() == 1.0
+
+@compute(64) fun scale_cs(@thread_id id: int3){work}:
+    work.values[id.x] *= lane_scale()

@@ -42,7 +42,13 @@ auto sgl::check::impl::flattener::flatten_expr(ast::expr_id id) -> flat_expr_id
     {
         if (where.kind == target_kind::symbol && c.out.at(where.symbol).kind == symbol_kind::constant
             && c.out.at(where.symbol).state == symbol_state::checked)
+        {
+            // CHK-426: the target is this compile's, which no const holds
+            if (auto const index = target_case_of(where.symbol); index >= 0)
+                return refuses_target_in_const(c.out.at(where.symbol).name) ? flat_expr_id::none
+                                                                            : enum_value(type, id, index);
             return constant_value(type, id, c.out.constants[c.out.at(where.symbol).info]);
+        }
         if (where.kind == target_kind::symbol && c.out.at(where.symbol).kind == symbol_kind::sampler
             && c.out.at(where.symbol).state == symbol_state::checked)
             return add_expr(type, id, flat_file_sampler{.sampler = where.symbol});
@@ -468,9 +474,13 @@ auto sgl::check::impl::flattener::flatten_ray_trace(ast::expr_id id, ast::call c
 {
     auto const arguments = ast().at(call.arguments);
     auto const where = origin{.file = file(), .expr = id};
+    if (t.kind == ray_trace_kind::invoke)
+        return flatten_hit_invoke(id, call);
     auto const world = flatten_expr(arguments[0].value);
     auto const world_type = tables().type_at(arguments[0].value);
-    auto const* const overloads = c.prelude_names.get_ptr("trace_ray");
+    // CHK-434: a trace_hit gives the hit object, and runs no shader but the traversal's
+    auto const is_hit_object = t.kind == ray_trace_kind::hit_object;
+    auto const* const overloads = c.prelude_names.get_ptr(cc::string_view(is_hit_object ? "trace_hit_ray" : "trace_ray"));
     auto callee = symbol_id::none;
     for (auto const candidate :
          overloads == nullptr ? cc::span<symbol_id const>() : cc::span<symbol_id const>(*overloads))
@@ -496,10 +506,48 @@ auto sgl::check::impl::flattener::flatten_ray_trace(ast::expr_id id, ast::call c
     auto flags = add_expr(c.out.at(c.out.functions[c.out.at(callee).info].parameters)[5].type, id,
                           flat_int_literal{.value = 0});
     auto mask = add_expr(int_type(), id, flat_int_literal{.value = 0xff});
+    auto reorder = ast::expr_id::none;
+    auto reorder_bits = ast::expr_id::none;
     for (auto i = isize(4); i < arguments.size(); ++i)
     {
         auto const name = c.text_of(file(), arguments[i].name);
-        (name == "flags" ? flags : mask) = flatten_expr(arguments[i].value);
+        if (name == "reorder")
+            reorder = arguments[i].value;
+        else if (name == "reorder_bits")
+            reorder_bits = arguments[i].value;
+        else
+            (name == "flags" ? flags : mask) = flatten_expr(arguments[i].value);
+    }
+    // CHK-433: a raygen of a dx12 compile whose device reorders traces through a hit object; every other trace is the
+    // plain one, its hint unevaluated, since a hint changes nothing a shader computes
+    auto const target = compiled_for();
+    auto const reorders = ast::is_valid(reorder) && entry.entry_stage == stage::raygen && target.api == graphics_api::dx12
+                       && target.device_features.has(feature::shader_execution_reordering);
+    auto hint = flat_expr_id::none;
+    auto hint_bits = flat_expr_id::none;
+    auto is_reordered = false;
+    if (reorders && c.out.name_of(tables().type_at(reorder)) == builtins::k_bool)
+        is_reordered = c.known_condition(file(), reorder).value_or(false);
+    else if (reorders)
+    {
+        hint = flatten_expr(reorder);
+        hint_bits = flatten_expr(reorder_bits);
+        is_reordered = is_valid(hint) && is_valid(hint_bits);
+    }
+    if (is_reordered)
+    {
+        auto const name = cc::string_view(is_valid(hint) ? "trace_ray_reordered_by_hint" : "trace_ray_reordered");
+        auto const* const reordered = c.prelude_names.get_ptr(name);
+        for (auto const candidate :
+             reordered == nullptr ? cc::span<symbol_id const>() : cc::span<symbol_id const>(*reordered))
+            if (c.out.at(c.out.functions[c.out.at(candidate).info].parameters)[0].type == world_type)
+                callee = candidate;
+        auto within = cc::vector<symbol_id>();
+        for (auto const& fr : frames)
+            within.push_back(fr.function);
+        auto const used = feature_set(feature::shader_execution_reordering);
+        feature_uses.push_back(
+            {.file = file(), .call = id, .features = used, .within = cc::move(within), .granted = used});
     }
     auto const count = c.out.at(c.out.at(c.out.at(t.set).type).members).size();
 
@@ -518,7 +566,7 @@ auto sgl::check::impl::flattener::flatten_ray_trace(ast::expr_id id, ast::call c
         payload = local_ref(local, id);
     }
 
-    flat_expr_id const values[] = {
+    auto values = cc::vector<flat_expr_id>{
         world,
         field(0),
         field(1),
@@ -529,15 +577,60 @@ auto sgl::check::impl::flattener::flatten_ray_trace(ast::expr_id id, ast::call c
         add_expr(int_type(), id, flat_int_literal{.value = t.ray}),
         add_expr(int_type(), id, flat_int_literal{.value = i32(count)}),
         add_expr(int_type(), id, flat_int_literal{.value = t.ray}),
-        payload,
     };
+    if (is_reordered && is_valid(hint))
+    {
+        values.push_back(hint);
+        values.push_back(hint_bits);
+    }
+    values.push_back(payload);
     auto const traced_ray = flat_traced_ray{.set = t.set, .ray = t.ray};
     if (!entry.traced_rays.values().any([&](flat_traced_ray const& r) { return r == traced_ray; }))
         entry.traced_rays.push_back(traced_ray);
     auto const traced = builtin_call(id, callee, values);
     if (is_local)
         return traced;
+    if (is_hit_object)
+    {
+        auto const hit = add_local(local_kind::let, "hit", entry.at(traced).type);
+        add_stmt(where, flat_let{.local = hit, .value = traced});
+        add_stmt(where, flat_assign{.place = again(place, id), .value = again(payload, id)});
+        return local_ref(hit, id);
+    }
     add_stmt(where, flat_eval{.value = traced});
+    add_stmt(where, flat_assign{.place = again(place, id), .value = again(payload, id)});
+    return add_expr(checked_module::void_type, id, flat_construct{});
+}
+
+auto sgl::check::impl::flattener::flatten_hit_invoke(ast::expr_id id, ast::call const& call) -> flat_expr_id
+{
+    auto const where = origin{.file = file(), .expr = id};
+    auto const& member = ast().at(call.callee).node.as<ast::member>();
+    auto const arguments = ast().at(call.arguments);
+    auto const* const overloads = c.prelude_names.get_ptr("hit_object_invoke");
+    auto const hit = flatten_expr(member.object);
+    if (overloads == nullptr || overloads->empty() || !is_valid(hit))
+        return fail();
+
+    // the payload a trace hands over, copied through a local where it is no local itself
+    auto place = flatten_expr(arguments[0].value);
+    if (!is_valid(place))
+        return fail();
+    auto const is_local = entry.at(place).node.is<flat_local_ref>();
+    auto payload = place;
+    if (!is_local)
+    {
+        place = with_bound_index(place, id);
+        auto const local = add_local(local_kind::var, "payload", entry.at(place).type);
+        add_stmt(where, flat_var{.local = local});
+        add_stmt(where, flat_assign{.place = add_expr(entry.at(place).type, id, flat_local_ref{.local = local}),
+                                    .value = again(place, id)});
+        payload = local_ref(local, id);
+    }
+    auto const invoked = builtin_call(id, overloads->front(), cc::vector<flat_expr_id>{hit, payload});
+    if (is_local)
+        return invoked;
+    add_stmt(where, flat_eval{.value = invoked});
     add_stmt(where, flat_assign{.place = again(place, id), .value = again(payload, id)});
     return add_expr(checked_module::void_type, id, flat_construct{});
 }
@@ -716,6 +809,11 @@ auto sgl::check::impl::flattener::flatten_bound_call(ast::expr_id id, type_id ty
 {
     if (is_by_target(record.callee))
         return flatten_by_target(id, type, record);
+    // CHK-426: the device this compile writes for answers `has`
+    if (is_has_call(record.callee))
+        return flatten_has(id, type, record);
+    if (is_diff_call(record.callee))
+        return flatten_diff(id, type, record);
     if (auto const texel = atomic_texel_of(record); ast::is_valid(texel))
         return flatten_texel_atomic(id, type, record, texel);
     auto const values = flatten_written(c.out.at(record.written));
@@ -723,7 +821,12 @@ auto sgl::check::impl::flattener::flatten_bound_call(ast::expr_id id, type_id ty
     auto const slots = c.out.at(record.slots);
     if (is_inlined(record.callee))
     {
+        if (diff_depth > 0 && type != checked_module::void_type)
+            if (auto const d = custom_derivatives_of(record.callee); is_valid(d.forward) || is_valid(d.backward))
+                return flatten_custom_call(id, type, record, d, values);
         auto const inlined = inline_bound(id, record.callee, values, slots, handed, c.out.at(record.type_arguments));
+        if (diff_depth > 0 && is_detach_call(record.callee) && is_valid(inlined.label))
+            custom_calls[i32(inlined.label)] = {.function = record.callee, .call = id, .is_detached = true};
         return add_expr(type, id, flat_block{.label = inlined.label, .body = inlined.body});
     }
     return target_call(id, type, record.callee, values, slots);
@@ -855,6 +958,7 @@ auto sgl::check::impl::flattener::target_call(ast::expr_id id,
         for (auto p = isize(0); p < slots.size(); ++p)
             copies.push_back(slots[p] >= 0 ? again(bound[slots[p]], id) : flat_expr_id::none);
         auto const chain = chain_through(id);
+        raise_float_level(callee);
         frames.push_back({.function = callee, .file = s.file, .chain = chain});
         for (auto p = isize(0); p < slots.size(); ++p)
             if (slots[p] >= 0)
@@ -1095,6 +1199,106 @@ auto sgl::check::impl::flattener::flatten_closure_call(ast::expr_id id, type_id 
     return call_closure(id, type, handed, values, slots, argument_closures);
 }
 
+auto sgl::check::impl::flattener::target_case_of(symbol_id constant) const -> i32
+{
+    auto const& s = c.out.at(constant);
+    if (s.kind != symbol_kind::constant || !c.is_prelude_file(s.file))
+        return -1;
+    if (s.name == "target_api")
+        return i32(compiled_for().api);
+    if (s.name == "target_language")
+        return i32(compiled_for().language);
+    return -1;
+}
+
+auto sgl::check::impl::flattener::is_has_call(symbol_id callee) const -> bool
+{
+    // a call of a parameter of function type has no callee of its own
+    if (!is_valid(callee))
+        return false;
+    // `ray_flags.has` is a prelude function of that name too, and `has(f: feature)` the one free of it
+    auto const& s = c.out.at(callee);
+    if (s.kind != symbol_kind::function || s.name != "has" || !c.is_prelude_file(s.file) || s.info < 0)
+        return false;
+    auto const parameters = c.out.at(c.out.functions[s.info].parameters);
+    return parameters.size() == 1 && c.out.name_of(parameters[0].type) == "feature";
+}
+
+auto sgl::check::impl::flattener::refuses_target_in_const(cc::string_view what) -> bool
+{
+    if (!is_const_evaluation)
+        return false;
+    if (target_in_const.empty())
+        target_in_const = cc::format("reads {}, which each compile stands for once a body is inlined, while a const is "
+                                     "computed once for every compile; a function that returns it is inlined where "
+                                     "it is called",
+                                     what);
+    mark_failed();
+    return true;
+}
+
+auto sgl::check::impl::flattener::feature_case_of(ast::expr_id argument) -> i32
+{
+    if (!ast::is_valid(argument))
+        return -1;
+    auto const& where = tables().target_at(argument);
+    if (where.kind == target_kind::enum_case)
+        return where.index;
+    // a parameter bound to a literal case, as an inlined `has(f)` of a function's own `f` is
+    for (auto const& b : current()->bound)
+        if (b.where == where && is_valid(b.literal))
+            if (auto const* const e = entry.at(b.literal).node.try_as<flat_enum_value>())
+                return e->case_index;
+    if (where.kind == target_kind::symbol && c.out.at(where.symbol).kind == symbol_kind::constant
+        && c.out.at(where.symbol).state == symbol_state::checked)
+        if (auto const& info = c.out.constants[c.out.at(where.symbol).info]; info.kind == constant_kind::enum_case)
+            return info.case_index;
+    return -1;
+}
+
+auto sgl::check::impl::flattener::flatten_has(ast::expr_id id, type_id type, call_record const& record) -> flat_expr_id
+{
+    if (refuses_target_in_const("has"))
+        return flat_expr_id::none;
+    auto const written = c.out.at(record.written);
+    auto const index = written.size() == 1 ? feature_case_of(written[0].expr) : -1;
+    if (index < 0 || index >= k_feature_count)
+    {
+        unroll_reports.push_back({.file = file(),
+                                  .where = c.span_of(file(), id),
+                                  .detail = "has asks for a feature its call names as a constant once inlined, such "
+                                            "as `has(.subgroups)`",
+                                  .site = innermost_call()});
+        mark_failed();
+        meets_error = true;
+        return flat_expr_id::none;
+    }
+    return add_expr(type, id, flat_bool_literal{.value = compiled_for().device_features.has(feature(index))});
+}
+
+auto sgl::check::impl::flattener::grants_of(ast::expr_id condition) -> feature_set
+{
+    if (!ast::is_valid(condition))
+        return {};
+    auto const* const call = ast().at(condition).node.try_as<ast::call>();
+    if (call == nullptr)
+        return {};
+    auto const arguments = ast().at(call->arguments);
+    if (call->is_short_circuit && arguments.size() == 2 && sgl::is_valid(call->op)
+        && c.text_of(file(), c.file_of(file()).at(call->op).where) == "and")
+        return grants_of(arguments[0].value) | grants_of(arguments[1].value);
+    auto const record = tables().call_at(condition);
+    if (record < 0 || !is_has_call(c.out.call_records[record].callee))
+        return {};
+    auto const written = c.out.at(c.out.call_records[record].written);
+    auto const index = written.size() == 1 ? feature_case_of(written[0].expr) : -1;
+    if (index < 0 || index >= k_feature_count || !compiled_for().device_features.has(feature(index)))
+        return {};
+    auto result = feature_set();
+    result.set(feature(index));
+    return result;
+}
+
 auto sgl::check::impl::flattener::is_by_target(symbol_id callee) const -> bool
 {
     auto const& s = c.out.at(callee);
@@ -1186,6 +1390,7 @@ auto sgl::check::impl::flattener::call_closure(ast::expr_id id,
             bound.push_back({.where = where, .local = local});
         }
     }
+    raise_float_level(f.owner);
     frames.push_back({.function = f.owner,
                       .file = f.file,
                       .result = type,

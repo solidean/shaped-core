@@ -210,6 +210,13 @@ slib::create_sgl_compiler(std::unique_ptr<shader_compiler> inner, sgl_compiler_o
                                    //   an SGL warning is in preprocessed_source::warnings; a shader_library logs it under `slib`, once per (label, warning):
                                    //   `SGL warns of 'pkg/cube.sgl' main: pkg/cube.sgl:7:14: warning: unroll-too-long: ...`
                                    //   so a test compiling a shader that warns declares it: nx::expect_warning("unroll-too-long", ...)
+                                   // options: {.diagnostics = true} writes print/assert records;
+                                   //   {.guards_undefined = sgl_undefined_guard::report} logs a division by zero or an
+                                   //   index past an array as a failed assert and ends that invocation (abort: ends it only);
+                                   //   add_available_compilers takes SC_SHADER_UNDEFINED
+                                   // an entry point's @float picks DXC's flags (-Gis, -denorm preserve) through preprocessed_source::dxc_args;
+                                   //   on WebGPU one it cannot keep is refused, unless acquire is passed
+                                   //   {.name = slib::k_weakens_float_option, .value = "true"}, which compiles at .fast and warns
                                    //   every target's text carries its final addresses, so the binding pass never runs behind it
                                    //   preprocess is cached under everything it reads: in memory, and in a persistent store
 slib::sgl_compiler_options         // { cc::optional<bcache::blob_cache*> persistent_cache; }

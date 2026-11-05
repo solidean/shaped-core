@@ -407,6 +407,8 @@ sgl::test::diagnostic_of(m, r)             // `test-failed` at the test, one rel
 ```bash
 uv run dev.py run sgl -- emit shader.sgl --entry main_ps --target wgsl   # the text and its warnings on stderr, or the diagnostics and exit 2
 uv run dev.py run sgl -- emit shader.sgl --entry main_cs --option tile=16 # an option set for this compile; `describe` takes it too
+uv run dev.py run sgl -- emit shader.sgl --entry main_cs --undefined report --diagnostics  # the guards of LEGAL-65; abort: no report
+uv run dev.py run sgl -- emit shader.sgl --entry main_cs --target wgsl --weaken-float     # a @float WGSL cannot keep, at .fast with a warning
 uv run dev.py run sgl -- test a.sgl b.sgl                                # the tests of each file; exit 2 when one fails
 #   emit, test and describe take --module-dir DIR, repeatable: the .sgl files directly in it are modules to `use`
 uv run dev.py run sgl -- describe --module view --module-dir shaders     # a module of the directories, as its package entry reads it
@@ -476,11 +478,38 @@ img[xy] = v as texel[out_format]         // a store into a host-picked format: .
                                          // the ONLY width change: `float4 as float2` is no conversion, and no kind changes (CHK-391, CHK-392)
 if tile > 8: ...                         // a branch on a constant keeps the side it takes, in text, footprint and verdicts (CHK-356)
 fun f(x: float, .fast: bool)             // ...and a literal argument is a constant, so `f(x, fast = false)` sheds its fast side
+const if fast: ... else: ...             // the same, but a condition no constant decides once inlined is ERROR invalid-constant-argument (CHK-425)
+                                         // both sides are still checked; it decides what is written, never what is checked
+const if target_api == .vulkan: ...      // the compile's own API (.none .dx12 .vulkan .metal .webgpu) and target_language (.sgl .hlsl .wgsl .msl)
+const if has(.subgroups): ...            // the compile's device; the branch it takes uses the feature without a `require` (CHK-426)
+const if T == float: ...                 // in a generic: each instance checks only the branch its arguments leave (CHK-429, CHK-430)
+                                         // a test sees .none, .sgl and no feature; a const holding any of them is ERROR, a function may return them
+fun f(x: float) -> float:                // a body in the target's own text: a run of "hlsl / "wgsl / "msl, or one per const if branch (CHK-427)
+    "hlsl                                //   $x is the argument, $x.y its member, $result the value; the text is unchecked
+        $result = rsqrt($x);             //   a target with no alternative and no SGL branch is ERROR invalid-target-text
+    "
+@pure @subgroup fun lane_sum(x: float) -> float: ...  // what a text body does (CHK-431): @pure for no effect and a result as uniform
+                                         //   as its arguments; @barrier @subgroup @derivatives need uniform control flow
+struct hit:                              // a text type (CHK-432): the target's own type where a branch spells it,
+    const if target_api == .dx12:        //   its SGL fields elsewhere; local-only, and no field or constructor where
+        "hlsl                            //   it is text, so its fields are read in the SGL branches of const if bodies
+            dx::HitObject
+        "
+    else:
+        t: float
+"hlsl                                    // at file scope: a preamble, written once ahead of an entry point that writes
+    float helper(float x);               //   a text body of this file in that language (CHK-428); no placeholders
+"
 @unroll                                  // on a `for`: the body once per index, the index a literal in each copy, within 256 copies (CHK-389)
 for i in 0 ..< taps: ...                 // nothing of it runs as a loop, no text holds a hint, and the bounds are int constants
                                          // past 256 copies, a nest's counted together, it stays a loop: WARNING unroll-too-long
                                          // ...and so does an inner one whose bound reads its index, under the same warning
                                          // a rule judging a constant judges each index: `1u << (i as uint)` past 31 is refused
+
+@float(.specials) fun clean(v: float) -> float:   // the least float guarantee a body needs (CHK-435): .fast (default),
+    return if v != v => 0.0 else v       //   .specials, .precise, .ieee; an entry point keeps the strictest it reaches
+                                         // dx12 keeps all, msl up to .precise, vulkan and wgsl refuse above .fast (EMIT-185)
+                                         // `v != v` at .fast: WARNING nan-test-at-fast; is_nan tests the bits, fine anywhere
 
 fun bump(c: mut counter, by: float):     // a mut parameter: the caller's place (CHK-315)
     c.total += by
@@ -512,6 +541,7 @@ binding scene:
 let h = scene.world.trace(r)                             // -> triangle_hit; h.is_hit, h.t, h.barycentrics, h.instance_id, …
 let h = scene.world.trace(r, cutout)                     // cutout: (triangle_candidate) -> hit_decision, a name or a lambda
 let h = scene.world.trace(r, flags = ray_flags.force_opaque, mask = 0x01)
+let h = scene.world.trace(r, cutout, flags = ray_flags.force_omm_2_state)  // micromap unknowns take their guess, never asking cutout
 let p = spheres.trace(r, sphere, cutout_sphere)          // .procedural: (procedural_box) -> report[A], then the any hit
 let m = both.trace(r, any_hit = a, intersection = s, procedural_any_hit = b)   // .mixed -> mixed_hit[A]: m.kind, m.triangle(), m.procedural()
 is_occluded(scene.world, r)                              // the shadow ray
@@ -529,6 +559,12 @@ rays path_rays:                                          // a ray set: position 
 @intersection fun sphere(b: procedural_box) -> report[sphere_attributes]   // no payload; A a struct of the program
 @callable fun doubled(v: mut operand)
 trace(b.world, r, path_rays.surface, mut p, flags = f)   // a trace of a ray type: raygen, miss, closest hit only (CHK-329)
+maybe_reorder(hint, 4)                                   // raygen: regroup invocations by hint's low bits; dx12 SM 6.9 SER, else nothing
+trace(b.world, r, set.ray, mut p, reorder = true)       // raygen: dx12 SER traces a hit object, regroups by it, invokes; else plain
+trace(…, reorder = material, reorder_bits = 4)          // by the hit and a uint hint's low bits, 1..16 (CHK-433)
+let h = trace_hit(b.world, r, set.ray, mut p)           // raygen, under has(.shader_execution_reordering): no closest hit or miss yet
+h.is_hit; h.t; h.instance_id; h.primitive_index         // what was hit, before its shaders run (CHK-434)
+h.reorder(); h.reorder(hint, 4); h.invoke(mut p)        // regroup by it, then run its shaders on that ray type's payload
 hit_group textured for path_rays:                        // one row: a record per ray type (CHK-330)
     surface = (closest_hit = shade, any_hit = cutout)
     occlusion = ()                                       // empty: accept, run no closest hit
@@ -643,7 +679,9 @@ ops[i](mut v)                                            // raygen, miss, closes
   A path that ends in one needs no value, and the uniformity pass does not count it as an exit (CHK-284).
 - **A `@workgroup binding` is memory one workgroup shares** (CHK-292 to CHK-295): listed like a binding, in no group, and left out of describe.
   Only a compute entry point lists one, all of it within 16 KiB; `workgroup_barrier()`, `storage_barrier()` and `texture_barrier()` sync it (EMIT-131).
-- **`atomic[uint]` and `atomic[int]` live only in a `mut buffer` or a `@workgroup` binding** (CHK-296), and an expression of one is only ever a builtin's argument (CHK-297).
+- **`atomic[uint]`, `atomic[int]` and `atomic[float]` live only in a `mut buffer` or a `@workgroup` binding** (CHK-296), and an expression of one is only ever a builtin's argument (CHK-297).
+  A float's has `load`, `store`, `exchange` and `add`: the device's own float atomic where the compile's device has `float_atomic_add` (vulkan, metal),
+  and a compare-exchange loop on a uint's bits elsewhere, so no pixel stage takes its `add`.
   `compare_exchange_strong(e, d)` gives the value before, and stored exactly where that is `e`; it is a loop in WGSL and MSL (EMIT-161).
   `compare_exchange_weak(e, d)` gives `exchange_result[T]`: `old`, and `exchanged`, the only proof it stored; retry while `old == e and not exchanged`.
   Both are relaxed: publishing what a claim guards needs a barrier.
@@ -685,7 +723,7 @@ ops[i](mut v)                                            // raygen, miss, closes
   The inline one needs `ray_query` where the entry point REACHES it (CHK-322), so a stage that never traces runs on a device without it.
 - **A trace graph with a cycle is `recursive-trace`** (CHK-332): a miss or closest hit tracing its own ray type, directly or through others, is refused, never bounded.
 - **A payload on HLSL is `[raypayload]` with inferred qualifiers**, unless a `.host` pipeline (or no pipeline) traces it: then every field is widest (EMIT-137).
-- **Metal's pipeline traces one TLAS per dispatch**; transforms and `accept_and_end_search` behave as DXR's, and its GPU tests pass on an M4.
+- **Metal's pipeline traces any bound TLAS**, two in one group or across groups; transforms and `accept_and_end_search` behave as DXR's, and its GPU tests pass on an M4.
 - **An arrow body without `-> T` infers its result**, and a BLOCK body without one returns `void`.
   Its body is checked as part of compiling it, so two such functions that need each other are `dependency-cycle`, not `recursive-call`.
   An overload whose parameters cannot take a call is not demanded by it, so an overload set works from inside one of its inferred members.

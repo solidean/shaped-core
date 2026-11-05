@@ -6,6 +6,7 @@
 #include <nexus/test.hh>
 #include <shaped-graphics/backends/dx12/dx12_buffer.hh>
 #include <shaped-graphics/backends/dx12/dx12_context.hh>
+#include <shaped-graphics/backends/dx12/dx12_runtime.hh>
 
 // dx12 backend bring-up: a command list and buffers through the public sg::context API.
 // Part of the dx12 test binary (shaped-graphics-dx12-test), built only where the dx12 backend builds (Windows), so it never needs an #ifdef guard.
@@ -153,4 +154,18 @@ ASYNC_INVOCABLE_TEST("sg dx12 - a context counts the textures and buffers alive 
         CHECK(ctx->live_resource_count() == before + 2);
     }
     CHECK(ctx->live_resource_count() == before);
+}
+
+TEST("sg dx12 - devices come from the Agility SDK exactly where it was fetched")
+{
+    // A fetched SDK that fails to load would quietly cost every SM 6.9 feature, so a build with it asserts it loaded.
+    CHECK(dx12::runs_agility_runtime() == bool(SG_HAS_AGILITY));
+    if (!SG_HAS_AGILITY)
+        SKIP("the Agility SDK was not fetched (uv run extern/agility/fetch-agility.py --accept-license)");
+    dx12::ComPtr<ID3D12Device> device;
+    REQUIRE(SUCCEEDED(dx12::create_d3d12_device(nullptr, D3D_FEATURE_LEVEL_11_0, IID_PPV_ARGS(&device))));
+    // the runtime that ships Shader Model 6.9 knows to answer for it, whatever the adapter's driver then supports
+    auto shader_model = D3D12_FEATURE_DATA_SHADER_MODEL{.HighestShaderModel = D3D_SHADER_MODEL_6_9};
+    CHECK(SUCCEEDED(
+        dx12::check_feature_support(device.Get(), D3D12_FEATURE_SHADER_MODEL, &shader_model, sizeof(shader_model))));
 }

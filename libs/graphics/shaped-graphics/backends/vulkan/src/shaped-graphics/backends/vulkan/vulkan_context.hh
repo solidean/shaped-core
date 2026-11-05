@@ -304,6 +304,11 @@ public:
             return _subgroups;
         case sg::feature::vertex_layer_output:
             return _vertex_layer_output;
+        case sg::feature::float_atomic_add:
+            return _float_atomic_add;
+        case sg::feature::shader_execution_reordering:
+            // VK_EXT_ray_tracing_invocation_reorder is a device's, but no DXC lowers HLSL's reordering to SPIR-V yet.
+            return false;
         // SPIR-V's `Coherent` decoration is core, and storage-image atomics on r32 integer formats are required.
         // BaseInstance is the DrawParameters capability, which creation requires `shaderDrawParameters` for.
         case sg::feature::device_coherence:
@@ -866,6 +871,8 @@ public:
     bool _shader_int16 = false;
     bool _subgroups = false;
     bool _vertex_layer_output = false;
+    /// `VK_EXT_shader_atomic_float`, enabled with its buffer and shared float32 atomics and adds alike.
+    bool _float_atomic_add = false;
     /// What a pipeline may require of its subgroups' size: all zero where `subgroupSizeControl` was not enabled.
     struct subgroup_size_control
     {

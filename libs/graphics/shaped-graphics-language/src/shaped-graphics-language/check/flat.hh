@@ -7,6 +7,7 @@
 #include <clean-core/container/span.hh>
 #include <clean-core/container/variant.hh>
 #include <clean-core/container/vector.hh>
+#include <clean-core/memory/shared_ptr.hh>
 #include <clean-core/string/string.hh>
 #include <clean-core/string/string_view.hh>
 #include <shaped-graphics-language/ast/file_ast.hh>
@@ -327,6 +328,10 @@ struct sgl::check::flat_call
     /// The callee's `function_info::is_pure`, repeated for the same reason; a call that is not pure has an effect.
     bool is_pure = false;
     ast::range_of<flat_expr_id> arguments;
+    /// A body in a target's own text, as a position in `checked_module::target_texts`, which the emitter writes in place
+    /// of the call; -1 for a builtin's call (CHK-427).
+    /// Its callee is the SGL function, its arguments that function's parameters in order, and it has no `intrinsic`.
+    i32 text = -1;
 
     constexpr bool operator==(flat_call const&) const = default;
 };
@@ -711,6 +716,15 @@ struct sgl::check::flat_traced_ray
     constexpr bool operator==(flat_traced_ray const&) const = default;
 };
 
+/// A text type this compile spells in its target's own text, and how (CHK-432).
+struct sgl::check::flat_text_type
+{
+    type_id type = type_id::none;
+    cc::string spelling;
+
+    bool operator==(flat_text_type const&) const = default;
+};
+
 struct sgl::check::flat_entry_point
 {
     stage entry_stage = stage::none;
@@ -730,10 +744,19 @@ struct sgl::check::flat_entry_point
     i32 preferred_subgroup_size = 0;
     /// What a device needs to run it, `function_info::features`.
     feature_set features;
+    /// The strictest `@float` of every function it reaches, itself included (CHK-435), and the first function that
+    /// stated it; `none` at `fast`.
+    float_level float_guarantee = float_level::fast;
+    symbol_id float_raised_by = symbol_id::none;
     /// The options it reaches, each once, in declaration order (CHK-355); empty for a test.
     cc::vector<symbol_id> options;
+    /// This entry point legalized with the default options, where its check did so already to judge its uniformity.
+    /// What `legalize(m, *this)` gives, so a reader that wants that form takes it; null where the check did not.
+    cc::shared_ptr<flat_entry_point const> legalized;
     /// The ray types it traces, by their position in their set, each once (CHK-332).
     cc::vector<flat_traced_ray> traced_rays;
+    /// The text types it holds a value of that its compile spells in the target's text, each once (CHK-432).
+    cc::vector<flat_text_type> text_types;
     /// A procedural hit's attributes, which the target hands a closest or any hit as a parameter of its own; `none`
     /// for every other entry point.
     local_id attributes = local_id::none;
@@ -788,6 +811,8 @@ struct sgl::check::flat_entry_point
             && is_equal(stmt_lists, rhs.stmt_lists) && is_equal(arms, rhs.arms) && is_equal(call_sites, rhs.call_sites)
             && is_equal(check_sites, rhs.check_sites) && is_equal(check_nodes, rhs.check_nodes)
             && is_equal(messages, rhs.messages) && body == rhs.body && names == rhs.names
-            && is_equal(traced_rays, rhs.traced_rays) && attributes == rhs.attributes && is_equal(options, rhs.options);
+            && is_equal(traced_rays, rhs.traced_rays) && is_equal(text_types, rhs.text_types)
+            && attributes == rhs.attributes && is_equal(options, rhs.options) && float_guarantee == rhs.float_guarantee
+            && float_raised_by == rhs.float_raised_by;
     }
 };

@@ -24,6 +24,22 @@ The one part worth restating here is the direction it points.
 Genuinely shared code belongs *below* `sg` — the `sg` core, clean-core, typed-geometry — never in a cross-backend layer inside `backends/`.
 That is what lets each backend **evolve on its own schedule** as its API demands.
 
+## The dx12 runtime
+
+**dx12 runs on the D3D12 Agility SDK's runtime where it was fetched, and on the one Windows carries otherwise.**
+Shader Model 6.9, DXR 1.2 and shader execution reordering arrive only through the SDK, so a feature that needs them reports unsupported without it.
+It is fetched on request, `uv run extern/agility/fetch-agility.py --accept-license`, since its terms are Microsoft's to accept rather than a build's; `SG_HAS_AGILITY` (1/0) says whether it was.
+
+* **No executable exports `D3D12SDKVersion`.**
+  The backend loads D3D12Core.dll through `ID3D12SDKConfiguration1::CreateDeviceFactory`, so a static library chooses the runtime.
+  It looks in a `D3D12` directory beside the executable first, which is how a shipped application would carry it, and in the fetched install otherwise.
+* **Every device, debug-layer and DRED call goes through [`dx12_runtime.hh`](../../backends/dx12/src/shaped-graphics/backends/dx12/dx12_runtime.hh).**
+  `D3D12CreateDevice` and `D3D12GetDebugInterface` directly would load the system runtime beside the SDK's.
+* **One adapter has one device**, as the system runtime's singleton gives.
+  The factory's own `ALLOW_RETURNING_EXISTING_DEVICE` hands out a second one regardless, and the backend's message routing assumes contexts on one adapter share theirs.
+* **A capability is asked through `check_feature_support`**, which passes the SDK version the backend was built against, so nothing reported exceeds what that version knows.
+* **A pipeline blob's key names the runtime**, since each runtime rejects the other's blobs.
+
 ## Backends carry their own tests
 
 Each backend has its **own `*-test` binary** (`shaped-graphics-dx12-test`), built only where that backend builds.

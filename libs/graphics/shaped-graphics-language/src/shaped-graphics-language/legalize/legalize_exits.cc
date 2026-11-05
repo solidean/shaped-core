@@ -669,7 +669,8 @@ flat_entry_point sgl::check::legalize(checked_module const& m,
     auto asserts = false;
     for (auto const& site : e.check_sites)
         asserts = asserts || site.stops;
-    if (is_core(m, e) && !(options.erases_prints && prints) && !(options.lowers_asserts && asserts))
+    if (is_core(m, e) && !(options.erases_prints && prints) && !(options.lowers_asserts && asserts)
+        && options.guards_undefined == undefined_guard::none)
     {
         auto out = flat_builder::extend(m, e);
         auto const body = ids_of(out.e, out.e.body);
@@ -680,6 +681,7 @@ flat_entry_point sgl::check::legalize(checked_module const& m,
         return compacted(m, out.e, simplified);
     }
     auto out = flat_builder::extend(m, e);
+    out.set_body(guard_undefined(out, ids_of(out.e, out.e.body), options));
     out.set_body(erase_checks(out, ids_of(out.e, out.e.body), options.erases_prints, options.lowers_asserts));
     out.set_body(lower_expressions(out, options));
     out.set_body(lower_cases(out));

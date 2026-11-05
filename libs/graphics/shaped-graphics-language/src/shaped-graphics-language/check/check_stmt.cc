@@ -130,6 +130,9 @@ flow checker::check_stmt(function_scope& scope, ast::stmt_id stmt)
         judge_attributes(file, s.attributes, loop_attributes, "a for");
     else
         judge_attributes(file, s.attributes, {}, "a statement");
+    // CHK-427: a body in a target's own text is checked where its function's body is planned, and ends it
+    if (auto const text = target_text_flow(file, stmt); text.has_value())
+        return text.value();
 
     auto result = flow::falls_through;
     s.node.visit(
@@ -280,6 +283,23 @@ void checker::check_let(function_scope& scope, ast::stmt_id id, ast::let_stmt co
     }
 
     auto const self = target{.kind = target_kind::local, .index = i32(id)};
+    // CHK-434: a hit object is a let of the trace_hit that gave it, so its invocation knows the payload's type
+    if (type != error_type && out.name_of(type) == "hit_object" && out.builtin_type_of(type) != nullptr)
+    {
+        auto const* const traced = [&]() -> ray_trace const*
+        {
+            for (auto const& t : out.ray_traces)
+                if (t.file == file && t.call == let.value && t.kind == ray_trace_kind::hit_object)
+                    return &t;
+            return nullptr;
+        }();
+        if (traced == nullptr || let.is_mut)
+            unsupported(file, where,
+                        let.is_mut ? "a `let mut` of a hit object, which nothing could assign"
+                                   : "a hit object that is no `let h = trace_hit(…)`");
+        else
+            hit_lets.push_back({.file = file, .statement = i32(id), .set = traced->set, .ray = traced->ray});
+    }
     set_type(file, let.pattern, type);
     set_target(file, let.pattern, self);
     judge_shadowing(file, text_of(file, n->where), n->where);
@@ -502,11 +522,23 @@ flow checker::check_if(function_scope& scope, ast::if_stmt const& chain)
     auto has_else = false;
     for (auto const& branch : branches)
     {
+        auto known = cc::optional<bool>(true);
         if (ast::is_valid(branch.condition))
+        {
             check_condition(scope, branch.condition);
+            known = chain.is_const ? known_condition(scope.file, branch.condition) : cc::nullopt;
+        }
         else
             has_else = true;
-        result = either(result, check_nested(scope, branch.then));
+        // CHK-430: a branch a condition rules out whatever the compile is, as an instance's parameters do, is
+        // never checked; one it takes is the chain, and nothing after it is checked either.
+        // What follows a decided chain serves the instances that take another branch, so it is never unreachable.
+        if (known.has_value() && !known.value())
+            continue;
+        auto const taken = check_nested(scope, branch.then);
+        if (chain.is_const && known.has_value() && ast::is_valid(branch.condition))
+            return taken == flow::exits ? flow::unknown : taken;
+        result = either(result, taken);
     }
     // Without an `else` the chain can be skipped whole.
     return has_else ? result : flow::falls_through;

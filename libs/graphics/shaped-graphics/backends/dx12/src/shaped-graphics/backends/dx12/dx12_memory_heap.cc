@@ -7,6 +7,7 @@
 #include <shaped-graphics/backends/dx12/dx12_buffer.hh>
 #include <shaped-graphics/backends/dx12/dx12_context.hh>
 #include <shaped-graphics/backends/dx12/dx12_memory_heap.hh>
+#include <shaped-graphics/backends/dx12/dx12_runtime.hh>
 #include <shaped-graphics/backends/dx12/dx12_texture.hh>
 
 namespace sg::backend::dx12
@@ -22,7 +23,7 @@ cc::result<dx12_memory_heap_handle> dx12_memory_heap::create(ID3D12Device* devic
     {
         // Tier 1 splits textures by whether they are render targets, and the transient textures sg places are both.
         auto options = D3D12_FEATURE_DATA_D3D12_OPTIONS{};
-        if (FAILED(device->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS, &options, sizeof(options)))
+        if (FAILED(check_feature_support(device, D3D12_FEATURE_D3D12_OPTIONS, &options, sizeof(options)))
             || options.ResourceHeapTier < D3D12_RESOURCE_HEAP_TIER_2)
             return cc::error("a textures heap needs D3D12 resource heap tier 2");
     }
@@ -52,7 +53,11 @@ sg::memory_requirements dx12_memory_heap::query_buffer_requirements(isize size_i
     if (size_in_bytes == 0)
         return {.alignment_in_bytes = D3D12_DEFAULT_RESOURCE_PLACEMENT_ALIGNMENT, .size_in_bytes = 0};
 
-    D3D12_RESOURCE_DESC const desc = buffer_resource_desc(size_in_bytes, usage);
+    // the acceleration-structure flag is the enhanced creation calls' alone, and changes no size
+    auto desc = buffer_resource_desc(size_in_bytes, usage);
+#if SG_HAS_AGILITY
+    desc.Flags &= ~D3D12_RESOURCE_FLAG_RAYTRACING_ACCELERATION_STRUCTURE;
+#endif
     D3D12_RESOURCE_ALLOCATION_INFO const info = _device->GetResourceAllocationInfo(0, 1, &desc);
     return {.alignment_in_bytes = isize(info.Alignment), .size_in_bytes = isize(info.SizeInBytes)};
 }

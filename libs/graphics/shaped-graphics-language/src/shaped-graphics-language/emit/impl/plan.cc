@@ -15,6 +15,35 @@ using namespace sgl::check;
 using namespace sgl::emit;
 using namespace sgl::emit::impl;
 
+/// Whether `type` holds an `atomic[float]`, as itself, as an array's element or as a struct's field.
+[[nodiscard]] bool holds_float_atomic(checked_module const& m, type_id type)
+{
+    auto const& t = m.at(type);
+    if (t.kind == type_kind::atomic)
+        return m.name_of(t.element) == builtins::k_float;
+    if (t.kind == type_kind::array)
+        return holds_float_atomic(m, t.element);
+    if (t.kind == type_kind::structure && !is_builtin_type(m, type))
+        for (auto const& field : m.at(t.members))
+            if (holds_float_atomic(m, field.type))
+                return true;
+    return false;
+}
+
+/// Whether the entry point's workgroup memory holds an `atomic[float]`.
+[[nodiscard]] bool shares_float_atomic(checked_module const& m, flat_entry_point const& e)
+{
+    for (auto const id : e.bindings)
+    {
+        auto const& b = m.bindings[m.at(id).info];
+        if (b.is_workgroup)
+            for (auto const& member : m.at(b.members))
+                if (holds_float_atomic(m, member.type))
+                    return true;
+    }
+    return false;
+}
+
 cc::string_view role_name(struct_role role)
 {
     switch (role)
@@ -166,6 +195,15 @@ struct validator
                 if (!(l->value - l->value == 0))
                     report(error_kind::non_finite_literal, e.function,
                            cc::format("a literal of type '{}'", m.name_of(x.type)));
+            }
+            else if (auto const* c = x.node.try_as<flat_call>(); c != nullptr && c->text >= 0)
+            {
+                // CHK-427: a body in a target's own text takes its function's parameters, each in order
+                auto const parameters = m.at(m.functions[m.at(c->callee).info].parameters).size();
+                if (c->text >= m.target_texts.size() || parameters != e.at(c->arguments).size())
+                    report(error_kind::malformed_tree, e.function,
+                           cc::format("a target's text of '{}' with {} arguments", m.at(c->callee).name,
+                                      e.at(c->arguments).size()));
             }
             else if (auto const* c = x.node.try_as<flat_call>())
             {
@@ -399,6 +437,10 @@ struct planner
             return;
         if (p.struct_of_type[index_of(type)] != -1)
             return;
+        // CHK-432: a text type this compile spells in its target's text is the target's own, which nothing declares
+        for (auto const& t : p.e.text_types)
+            if (t.type == type)
+                return;
         auto const& info = p.m.at(type);
         // CHK-339: two instances of one template whose members came out alike are one struct, since after the front end
         // nothing tells them apart
@@ -769,7 +811,11 @@ sgl::i32 sgl::emit::impl::resource_of(plan const& p, check::symbol_id binding, i
 
 cc::string_view sgl::emit::impl::atomic_text(plan const& p, check::type_id type)
 {
-    auto const is_signed = p.m.name_of(p.m.at(type).element) == builtins::k_int;
+    // a float's atomic is a uint's, holding its bits, unless the target's own float atomic is in use
+    auto const element = p.m.name_of(p.m.at(type).element);
+    if (element == builtins::k_float && p.native_float_atomics)
+        return p.which == target::msl ? "atomic_float" : "float";
+    auto const is_signed = element == builtins::k_int;
     switch (p.which)
     {
     case target::hlsl_dx12:
@@ -1267,9 +1313,17 @@ struct live_nodes
 };
 } // namespace
 
-sgl::emit::impl::plan sgl::emit::impl::make_plan(check::checked_module const& m, check::flat_entry_point const& e, target t)
+sgl::emit::impl::plan sgl::emit::impl::make_plan(check::checked_module const& m,
+                                                 check::flat_entry_point const& e,
+                                                 target t,
+                                                 bool native_float_atomic_add)
 {
     auto result = plan{.m = m, .e = e, .which = t};
+    // dx12 and WebGPU have no float add, so there an `atomic[float]` stays a uint's bits whatever the device says.
+    // MSL has float atomics in threadgroup memory only from 4.1, past sg's floor of 4.0 (the spec's bindings file).
+    // So an entry point sharing one keeps every `atomic[float]` a uint's bits, the type being one whatever holds it.
+    result.native_float_atomics
+        = native_float_atomic_add && (t == target::hlsl_vulkan || (t == target::msl && !shares_float_atomic(m, e)));
     // The tree's names and the builtins' go on being taken where they are, since both outlive the plan.
     result.names.parent = &e.names;
     if (m.builtins != nullptr)

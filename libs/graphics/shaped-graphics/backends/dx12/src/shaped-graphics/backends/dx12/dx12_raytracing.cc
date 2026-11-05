@@ -2,6 +2,7 @@
 // Translates the backend-neutral geometry / instance inputs to DXR descs, sizes the result from a prebuild query, and records the build via ID3D12GraphicsCommandList4.
 // See libs/graphics/shaped-graphics/docs/concepts/acceleration-structures.md.
 
+#include <clean-core/common/assertf.hh>
 #include <clean-core/container/span.hh>
 #include <clean-core/container/vector.hh>
 #include <shaped-graphics/backends/dx12/dx12_acceleration_structure.hh>
@@ -123,6 +124,13 @@ sg::blas_handle dx12_command_list::raytracing_build_blas_triangles(cc::span<sg::
     cc::vector<D3D12_RAYTRACING_GEOMETRY_DESC> descs;
     descs.reserve(geometries.size());
     cc::vector<dx12_buffer_handle> inputs;
+#if SG_HAS_AGILITY
+    // pointed at by the OMM descs, so neither may move until the build is recorded
+    cc::vector<D3D12_RAYTRACING_GEOMETRY_TRIANGLES_DESC> omm_triangles;
+    cc::vector<D3D12_RAYTRACING_GEOMETRY_OMM_LINKAGE_DESC> omm_linkages;
+    omm_triangles.reserve(geometries.size());
+    omm_linkages.reserve(geometries.size());
+#endif
 
     for (auto const& g : geometries)
     {
@@ -162,16 +170,117 @@ sg::blas_handle dx12_command_list::raytracing_build_blas_triangles(cc::span<sg::
             d.Triangles.Transform3x4 = tf->gpu_virtual_address() + UINT64(g.transform_offset_in_bytes);
         }
 
+        if (g.micromap != nullptr)
+        {
+#if SG_HAS_AGILITY
+            auto const* const mm = dynamic_cast<dx12_micromap const*>(g.micromap.get());
+            CC_ASSERT(mm != nullptr, "blas_triangles.micromap is not a dx12 micromap");
+            auto const indices = require_build_input(g.micromap_indices, "micromap indices");
+            inputs.push_back(indices);
+            auto const wide = g.micromap_index_type == sg::index_format::uint32;
+            omm_triangles.push_back(d.Triangles);
+            omm_linkages.push_back({
+                .OpacityMicromapIndexBuffer
+                = {.StartAddress = indices->gpu_virtual_address() + UINT64(g.micromap_indices_offset_in_bytes),
+                   .StrideInBytes = UINT64(wide ? 4 : 2)},
+                .OpacityMicromapIndexFormat = wide ? DXGI_FORMAT_R32_UINT : DXGI_FORMAT_R16_UINT,
+                .OpacityMicromapBaseLocation = 0,
+                .OpacityMicromapArray = mm->_dx12_storage->gpu_virtual_address(),
+            });
+            // the micromap is an input of the build like the geometry, which reads it as an acceleration structure
+            track_buffer_access(mm->_dx12_storage, sg::pipeline_stage_flag::accel_build, sg::access_flag::accel_read);
+            d.Type = D3D12_RAYTRACING_GEOMETRY_TYPE_OMM_TRIANGLES;
+            d.OmmTriangles = {.pTriangles = &omm_triangles.back(), .pOmmLinkage = &omm_linkages.back()};
+#else
+            CC_UNREACHABLE("micromaps are DXR 1.2's, which only the Agility SDK carries, and this build has none");
+#endif
+        }
+
         descs.push_back(d);
     }
 
     return build_blas_common(descs, inputs, flags, int(geometries.size()));
 }
 
-sg::micromap_handle dx12_command_list::raytracing_build_micromap(sg::micromap_triangles const& /*triangles*/)
+sg::micromap_handle dx12_command_list::raytracing_build_micromap(sg::micromap_triangles const& triangles)
 {
-    // issue: feat-sg-opacity-micromaps
-    CC_UNREACHABLE("dx12 reports no sg::feature::opacity_micromap until it runs the Agility SDK's DXR 1.2");
+#if SG_HAS_AGILITY
+    CC_ASSERT(_ctx.supports(sg::feature::opacity_micromap), "opacity micromaps are not supported on this device");
+    ComPtr<ID3D12Device5> device5;
+    [[maybe_unused]] HRESULT const device5_hr = _ctx._device.As(&device5);
+    CC_ASSERT(SUCCEEDED(device5_hr) && device5, "ID3D12Device5 unavailable (SDK/driver too old for DXR)");
+    ComPtr<ID3D12GraphicsCommandList4> list4;
+    [[maybe_unused]] HRESULT const list4_hr = _list.As(&list4);
+    CC_ASSERT(SUCCEEDED(list4_hr) && list4, "ID3D12GraphicsCommandList4 unavailable (SDK/driver too old for DXR)");
+
+    auto const states = require_build_input(triangles.states, "micromap states");
+    auto const descriptors = require_build_input(triangles.descriptors, "micromap descriptors");
+    auto histogram = cc::vector<D3D12_RAYTRACING_OPACITY_MICROMAP_HISTOGRAM_ENTRY>();
+    for (auto const& u : triangles.usage)
+    {
+        CC_ASSERTF(u.subdivision_level <= D3D12_RAYTRACING_OPACITY_MICROMAP_OC1_MAX_SUBDIVISION_LEVEL,
+                   "micromap subdivision level {} exceeds DXR's limit of {}", u.subdivision_level,
+                   D3D12_RAYTRACING_OPACITY_MICROMAP_OC1_MAX_SUBDIVISION_LEVEL);
+        histogram.push_back({.Count = UINT(u.count),
+                             .SubdivisionLevel = UINT(u.subdivision_level),
+                             .Format = D3D12_RAYTRACING_OPACITY_MICROMAP_FORMAT(u.format)});
+    }
+
+    // sg's descriptor is DXR's own record, so the descriptor buffer is read as it is
+    auto const array = D3D12_RAYTRACING_OPACITY_MICROMAP_ARRAY_DESC{
+        .NumOmmHistogramEntries = UINT(histogram.size()),
+        .pOmmHistogram = histogram.data(),
+        .InputBuffer = states->gpu_virtual_address() + UINT64(triangles.states_offset_in_bytes),
+        .PerOmmDescs
+        = {.StartAddress = descriptors->gpu_virtual_address() + UINT64(triangles.descriptors_offset_in_bytes),
+           .StrideInBytes = sizeof(sg::micromap_descriptor)},
+    };
+    auto const inputs = D3D12_BUILD_RAYTRACING_ACCELERATION_STRUCTURE_INPUTS{
+        .Type = D3D12_RAYTRACING_ACCELERATION_STRUCTURE_TYPE_OPACITY_MICROMAP_ARRAY,
+        .Flags = D3D12_RAYTRACING_ACCELERATION_STRUCTURE_BUILD_FLAG_PREFER_FAST_TRACE,
+        .NumDescs = 1,
+        .DescsLayout = D3D12_ELEMENTS_LAYOUT_ARRAY,
+        .pOpacityMicromapArrayDesc = &array,
+    };
+
+    D3D12_RAYTRACING_ACCELERATION_STRUCTURE_PREBUILD_INFO prebuild = {};
+    {
+        sg::impl::raytracing_driver_hold const driver_guard;
+        device5->GetRaytracingAccelerationStructurePrebuildInfo(&inputs, &prebuild);
+    }
+    CC_ASSERT(prebuild.ResultDataMaxSizeInBytes > 0, "prebuild reported a zero-size micromap result");
+
+    auto const result_raw = _ctx.persistent.create_raw_buffer(isize(prebuild.ResultDataMaxSizeInBytes),
+                                                              sg::buffer_usage::accel_structure_storage);
+    auto const scratch_raw
+        = _ctx.transient.create_raw_buffer(isize(prebuild.ScratchDataSizeInBytes), sg::buffer_usage::readwrite_buffer);
+    auto const result = std::dynamic_pointer_cast<dx12_buffer const>(result_raw);
+    auto const scratch = std::dynamic_pointer_cast<dx12_buffer const>(scratch_raw);
+    CC_ASSERT(result != nullptr && scratch != nullptr, "micromap buffers are not dx12 buffers");
+    CC_ASSERT(result->gpu_virtual_address() % D3D12_RAYTRACING_OPACITY_MICROMAP_ARRAY_BYTE_ALIGNMENT == 0,
+              "a micromap array starts 128-byte aligned");
+
+    // ordered as a BLAS build is: the result is the structure, the rest are buffers the build reads or scratches
+    track_buffer_access(result, sg::pipeline_stage_flag::accel_build, sg::access_flag::accel_write);
+    track_buffer_access(scratch, sg::pipeline_stage_flag::accel_build, sg::access_flag::shader_write);
+    track_buffer_access(states, sg::pipeline_stage_flag::accel_build, sg::access_flag::shader_read);
+    track_buffer_access(descriptors, sg::pipeline_stage_flag::accel_build, sg::access_flag::shader_read);
+    flush_barriers();
+
+    auto const build_desc = D3D12_BUILD_RAYTRACING_ACCELERATION_STRUCTURE_DESC{
+        .DestAccelerationStructureData = result->gpu_virtual_address(),
+        .Inputs = inputs,
+        .ScratchAccelerationStructureData = scratch->gpu_virtual_address()};
+    {
+        sg::impl::raytracing_driver_hold const driver_guard;
+        list4->BuildRaytracingAccelerationStructure(&build_desc, 0, nullptr);
+    }
+    return std::make_shared<dx12_micromap>(result, isize(prebuild.ResultDataMaxSizeInBytes),
+                                           isize(prebuild.ScratchDataSizeInBytes), triangles.usage);
+#else
+    (void)triangles;
+    CC_UNREACHABLE("micromaps are DXR 1.2's, which only the Agility SDK carries, and this build has none");
+#endif
 }
 
 sg::blas_handle dx12_command_list::raytracing_build_blas_aabbs(cc::span<sg::blas_aabbs const> geometries,

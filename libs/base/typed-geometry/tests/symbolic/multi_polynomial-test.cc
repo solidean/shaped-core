@@ -93,6 +93,21 @@ void check_ring_against_evaluation(cc::random& rng, int rounds)
         CHECK((a - a).is_zero());
         CHECK(is_canonical(a * b));
         CHECK(is_canonical(a - b));
+
+        // the rvalue operators merge in place, and an operand may be the accumulator itself
+        CHECK((a - b * c)(x) == a(x) - b(x) * c(x));
+        CHECK((a * b - c)(x) == a(x) * b(x) - c(x));
+        CHECK((a * c - b * c)(x) == a(x) * c(x) - b(x) * c(x));
+        CHECK(is_canonical(a * c - b * c));
+        auto d = a;
+        d += d;
+        CHECK(d == a * 2);
+        d -= d;
+        CHECK(d.is_zero());
+        d = a;
+        d -= b;
+        d += b;
+        CHECK(d == a);
     }
 }
 
@@ -160,6 +175,57 @@ TEST("tg multi_polynomial - ring operations agree with evaluation, under every o
     check_ring_against_evaluation<multi_polynomial<bigint, vars<4, tg::infinitesimal_order>>>(rng, n);
     check_ring_against_evaluation<multi_polynomial<bigint, vars<5, tg::grevlex_order>>>(rng, n);
     check_ring_against_evaluation<multi_polynomial<bigint, vars<2, tg::lex_order, 8>>>(rng, n);
+}
+
+TEST("tg multi_polynomial - sparse products with large exponents take the heap and agree too")
+{
+    // exponents up to 300 make the dense box far larger than the pairs, so these products go through the heap
+    auto rng = nx::test_random();
+    auto const n = nx::is_thorough() ? 400 : 60;
+    auto const check_order = [&]<class P>(P*)
+    {
+        for (auto i = 0; i < n; ++i)
+        {
+            auto const a = random_poly<P>(rng, 12, 300);
+            auto const b = random_poly<P>(rng, 12, 300);
+            auto const c = random_poly<P>(rng, 3, 2);
+            cc::fixed_array<bigint, P::variable_count> x;
+            for (auto v = 0; v < P::variable_count; ++v)
+                x[v] = bigint(i64(rng.next_u64() % 5) - 2);
+
+            CHECK((a * b)(x) == a(x) * b(x));
+            CHECK(a * b == b * a);
+            CHECK((a + c) * b == a * b + c * b);
+            CHECK(is_canonical(a * b));
+        }
+    };
+    check_order(static_cast<multi_polynomial<bigint, vars<3>>*>(nullptr));
+    check_order(static_cast<multi_polynomial<bigint, vars<3, tg::lex_order>>*>(nullptr));
+    check_order(static_cast<multi_polynomial<bigint, vars<3, tg::infinitesimal_order>>*>(nullptr));
+    check_order(static_cast<multi_polynomial<bigint, vars<2, tg::grlex_order, 32>>*>(nullptr));
+}
+
+TEST("tg multi_polynomial - products in a row over a coefficient that keeps its value when moved from")
+{
+    // i64 is no bigint: a slot of the dense accumulator read out by a move still holds its value, so it must be reset
+    using P = multi_polynomial<i64, vars<3, tg::lex_order>>;
+    auto rng = nx::test_random();
+    for (auto i = 0; i < 300; ++i)
+    {
+        auto const random_small = [&]
+        {
+            P p;
+            for (auto t = 0; t < 6; ++t)
+                p += P::monomial(i64(rng.next_u64() % 7) - 3,
+                                 {int(rng.next_u64() % 3), int(rng.next_u64() % 3), int(rng.next_u64() % 3)});
+            return p;
+        };
+        auto const a = random_small();
+        auto const b = random_small();
+        auto const x = cc::fixed_array<i64, 3>{i64(rng.next_u64() % 5) - 2, i64(rng.next_u64() % 5) - 2, 3};
+        CHECK((a * b)(x) == a(x) * b(x));
+        CHECK(is_canonical(a * b));
+    }
 }
 
 TEST("tg multi_polynomial - construction, observers and printing")
@@ -281,4 +347,78 @@ TEST("tg multi_polynomial - nesting, and coefficients other than bigint")
     CHECK(r.term_count() == 4);
     static_assert(tg::traits::is_exact<Q>);
     static_assert(!tg::traits::is_field<Q>);
+}
+
+TEST("tg multi_polynomial - exact division, and its refusal")
+{
+    auto rng = nx::test_random();
+    using P = multi_polynomial<bigint, vars<3>>;
+    for (auto i = 0; i < 300; ++i)
+    {
+        auto const a = random_poly<P>(rng, 6, 3);
+        auto b = random_poly<P>(rng, 4, 2);
+        if (b.is_zero())
+            b = P(1) + P::variable(0);
+        CHECK(div_exact(a * b, b) == a);
+    }
+    auto const g = P::generators();
+    CHECK(!try_div_exact(g[0], g[1]).has_value());
+    CHECK(!try_div_exact(g[0] * g[0] + 1, g[0] + 1).has_value());
+    CHECK(!try_div_exact(P(3), P(2)).has_value());
+
+    // under the local order 1 / (1 - x) is a series, never exact: the degree bound ends it
+    using E = multi_polynomial<bigint, vars<2, tg::infinitesimal_order>>;
+    auto const e = E::generators();
+    CHECK(!try_div_exact(E(1), E(1) - e[0]).has_value());
+    CHECK(div_exact((E(1) - e[0]) * (e[1] + 2), E(1) - e[0]) == e[1] + 2);
+}
+
+namespace
+{
+template <class P>
+void check_gcd(cc::random& rng, int rounds)
+{
+    for (auto i = 0; i < rounds; ++i)
+    {
+        auto const a = random_poly<P>(rng, 4, 2);
+        auto const b = random_poly<P>(rng, 4, 2);
+        auto c = random_poly<P>(rng, 3, 2);
+        if (c.is_zero())
+            c = P(1) + P::variable(1);
+        auto const ac = a * c;
+        auto const bc = b * c;
+        auto const g = gcd(ac, bc);
+        if (ac.is_zero() && bc.is_zero())
+        {
+            CHECK(g.is_zero());
+            continue;
+        }
+        // c divides the gcd, the gcd divides both, and what is left of them shares no factor
+        CHECK(try_div_exact(g, c).has_value());
+        auto const qa = try_div_exact(ac, g);
+        auto const qb = try_div_exact(bc, g);
+        REQUIRE(qa.has_value());
+        REQUIRE(qb.has_value());
+        CHECK(gcd(qa.value(), qb.value()).total_degree() == 0);
+        CHECK(gcd(bc, ac) == g);
+        CHECK(g.leading_coefficient().sign() > 0);
+    }
+}
+} // namespace
+
+TEST("tg multi_polynomial - gcd by recursion over the variables, under every order")
+{
+    auto rng = nx::test_random();
+    auto const n = nx::is_thorough() ? 300 : 60;
+    check_gcd<multi_polynomial<bigint, vars<3>>>(rng, n);
+    check_gcd<multi_polynomial<bigint, vars<3, tg::lex_order>>>(rng, n);
+    check_gcd<multi_polynomial<bigint, vars<3, tg::infinitesimal_order>>>(rng, n);
+
+    using P = multi_polynomial<bigint, vars<2, tg::lex_order>>;
+    auto const x = P::variable(0);
+    auto const y = P::variable(1);
+    CHECK(gcd(x * x - y * y, x * x + 2 * x * y + y * y) == x + y);
+    CHECK(gcd(x * y * 6, y * y * 4) == y * 2);
+    CHECK(gcd(P(12), P(-18)) == P(6));
+    CHECK(gcd(P(), -x) == x);
 }

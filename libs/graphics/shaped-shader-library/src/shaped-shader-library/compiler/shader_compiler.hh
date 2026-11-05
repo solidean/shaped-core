@@ -79,6 +79,9 @@ struct slib::preprocessed_source
     /// What the compiler warned of while writing the text, one diagnostic each, its notes on the lines under it.
     /// Only SGL fills it, and a cached result keeps them; a shader_library logs each once.
     cc::vector<cc::string> warnings;
+    /// What the text asks of DXC beyond what its edge always hands it, which the compile of this text appends.
+    /// Only SGL fills it: `-Gis` for an entry point whose `@float` keeps the special values (EMIT-185).
+    cc::vector<cc::string> dxc_args;
 };
 
 /// A value one compile gives an option of an SGL source, by the option's name, spelled as SGL spells it: `16`, `true`, `.rgba16_float`.
@@ -90,6 +93,19 @@ struct slib::shader_option
 
     [[nodiscard]] bool operator==(shader_option const&) const = default;
 };
+
+namespace slib
+{
+/// The option `shader_asset::acquire` adds for an SGL shader: every `sg::feature` the context has, comma-separated,
+/// in the enum's order, which SGL's `has` answers (CHK-426).
+/// The SGL compiler takes it as the compile's device, not as an option of the source, and the cache keys on it alike.
+inline constexpr cc::string_view k_device_features_option = "device_features";
+
+/// The option a caller passes to `shader_asset::acquire`, valued `true`, to let a WebGPU pipeline run an SGL entry
+/// point at `fast` whose `@float` WGSL cannot keep, with a warning, rather than refusing it (EMIT-185).
+/// The host's call, never the shader's, and the cache keys on it as on any option.
+inline constexpr cc::string_view k_weakens_float_option = "weakens_float";
+} // namespace slib
 
 namespace slib
 {
@@ -111,6 +127,10 @@ struct slib::shader_source_description
     cc::string label;
     /// The values SGL's `preprocess` writes the text with; what it writes is all a compile reads, so the cache keys on that.
     cc::vector<shader_option> options;
+    /// What the text needs of a device, where the source language states it, which only SGL does; set by the library
+    /// between preprocess and compile.
+    /// A compiler picks what its target needs from it: DXC compiles at Shader Model 6.9 for shader execution reordering.
+    sg::feature_set required_features;
     /// The module library an SGL source may `use`, which every other language ignores.
     /// A file of it whose path is `label` is the source itself, and is left out.
     cc::span<module_source const> modules;

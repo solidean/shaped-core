@@ -2,6 +2,7 @@
 
 #include <clean-core/algorithm/sort.hh>
 #include <clean-core/common/assert.hh>
+#include <clean-core/common/profiling.hh>
 #include <clean-core/string/format.hh>
 #include <shaped-graphics-language/check/resources.hh>
 #include <shaped-graphics-language/check/structural_hash.hh>
@@ -284,6 +285,9 @@ described_entry_point describe_entry_point(check::checked_module const& m,
     for (auto axis = 0; axis < 3; ++axis)
         result.workgroup[axis] = e.workgroup[axis];
     result.preferred_subgroup_size = e.preferred_subgroup_size;
+    result.float_guarantee = e.float_guarantee;
+    if (check::is_valid(e.float_raised_by))
+        result.float_raised_by = m.at(e.float_raised_by).name;
     for (auto const id : e.bindings)
         if (!m.bindings[m.at(id).info].is_workgroup)
             result.bindings.push_back(host_name_of(m, id));
@@ -747,6 +751,7 @@ cc::vector<sgl::check::symbol_id> sgl::driver::impl::file_samplers_of(check::fla
 
 cc::result<sgl::module_description, cc::string> sgl::describe(describe_request const& request)
 {
+    CC_RECORD_SCOPE("sgl.describe");
     // A module is described through a program that joins it, which is its every file and nothing else.
     auto const is_module = !request.module.empty();
     auto const joining = cc::format("module {}\n", request.module);
@@ -891,7 +896,7 @@ cc::result<sgl::module_description, cc::string> sgl::describe(describe_request c
     for (auto const& e : m.entry_points)
     {
         auto const before = errors.size();
-        legal.push_back(check::legalize(m, e));
+        legal.push_back(e.legalized != nullptr ? *e.legalized : check::legalize(m, e));
         emit_impl::validate(m, legal.back(), errors);
         if (errors.size() == before)
             result.entry_points.push_back(describe_entry_point(m, e, legal.back()));

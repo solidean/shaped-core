@@ -6,6 +6,7 @@
 #include <shaped-graphics-language/builtins/ids.hh>
 #include <shaped-graphics-language/check/features.hh>
 #include <shaped-graphics-language/check/ids.hh>
+#include <shaped-graphics-language/fwd.hh>
 #include <shaped-graphics-language/interpret/scalar.hh>
 
 /// What the check pass knows about the declarations of a module: its types, its symbols and the per-file side tables.
@@ -256,6 +257,8 @@ struct sgl::check::type_info
     ast::range_of<enum_case_info> cases;
     /// Declared without a block: no member can be named and no constructor exists.
     bool is_opaque = false;
+    /// A struct whose body is a `const if` chain, which a compile may spell in its target's text (CHK-432).
+    bool is_text_type = false;
     /// `@vertex struct` is a vertex input and `@pixel struct` a set of render targets.
     stage edge = stage::none;
     /// `@no_padding`: a layout that leaves a gap before any of its members is an error wherever it is placed.
@@ -341,6 +344,21 @@ enum class sgl::check::padding_kind : sgl::u8
     none,
     /// `@padding(.every_element)` on a constant block's array: each element starts a 16-byte row (EMIT-172).
     every_element,
+};
+
+/// How far a target may depart from the exact meaning of a float, the interpreter's, as `@float` asks (CHK-435).
+/// Ordered: each level licenses what every stricter one licenses, and more.
+enum class sgl::check::float_level : sgl::u8
+{
+    /// No annotation: assume no NaN or infinity arises, ignore the sign of zero, reassociate, contract, divide through
+    /// a reciprocal, and flush denormals.
+    fast,
+    /// NaNs, infinities and signed zeros are kept; reassociating, contracting and flushing denormals are not ruled out.
+    specials,
+    /// As `specials`, and the order of evaluation is kept: no reassociation and no contraction; denormals may flush.
+    precise,
+    /// The exact meaning, but the builtins' own stated precision.
+    ieee,
 };
 
 /// A field of a struct or a member of a binding.
@@ -482,6 +500,16 @@ struct sgl::check::symbol
     bool operator==(symbol const&) const = default;
 };
 
+namespace sgl::check
+{
+/// A function of a type scope, which is reached through its type and inlined, so no target text writes its name (CHK-105).
+/// A constructor's name is its struct's, which the struct takes anyway.
+[[nodiscard]] inline bool takes_no_emitted_name(symbol const& s)
+{
+    return s.kind == symbol_kind::function && s.owner != symbol_id::none;
+}
+} // namespace sgl::check
+
 enum class sgl::check::constant_kind : sgl::u8
 {
     integer,
@@ -579,6 +607,15 @@ struct sgl::check::function_info
     /// Carries `@pure`: a call of it has no effect, so nobody can tell whether or when it ran.
     /// A `@builtin` without it is assumed to have one.
     bool is_pure = false;
+    /// What a body in a target's own text does, which the check cannot read from it (CHK-431).
+    /// `@barrier`: a call waits for the workgroup.
+    bool is_barrier = false;
+    /// `@subgroup`: a call exchanges values within the subgroup.
+    bool is_subgroup_operation = false;
+    /// `@derivatives`: a call takes derivatives across a quad of pixels.
+    bool uses_derivatives = false;
+    /// `@float(...)`: the least float guarantee its body needs, which every entry point reaching it keeps (CHK-435).
+    float_level float_guarantee = float_level::fast;
     /// A pixel entry point that returns one color value (CHK-418): the `@pixel struct` of one member, `color`, which
     /// the checker mints and every return builds; none for one that returns its `@pixel struct`, or nothing.
     type_id pixel_targets = type_id::none;
@@ -835,6 +872,13 @@ struct sgl::check::texel_store
     constexpr bool operator==(texel_store const&) const = default;
 };
 
+enum class sgl::check::ray_trace_kind : sgl::u8
+{
+    trace,
+    hit_object,
+    invoke,
+};
+
 /// `trace(world, r, set.ray, mut payload)`: a trace of a ray-tracing pipeline's ray type (CHK-329).
 struct sgl::check::ray_trace
 {
@@ -846,6 +890,9 @@ struct sgl::check::ray_trace
     i32 ray = 0;
     /// The function the trace stands in, whose ray type it is a trace graph's edge from.
     symbol_id caller = symbol_id::none;
+    /// `trace_hit(…)`, which gives a hit object rather than running its shaders, or that hit object's `h.invoke(mut p)`,
+    /// which runs them and traces nothing (CHK-434).
+    ray_trace_kind kind = ray_trace_kind::trace;
 
     constexpr bool operator==(ray_trace const&) const = default;
 };

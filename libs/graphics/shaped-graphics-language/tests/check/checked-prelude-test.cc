@@ -221,3 +221,95 @@ TEST("sgl checked prelude - programs written to report")
     for (auto const& p : written_programs())
         nx::invoke_tests(p.name, p);
 }
+
+namespace
+{
+/// A program that reaches modules, its own type so the prelude's drivers do not hand it to this test, or theirs to it.
+struct module_program
+{
+    program p;
+};
+
+/// The files of tests/corpus/modules/, parsed once: the library every corpus file may `use`.
+struct parsed_modules
+{
+    cc::vector<cc::unique_ptr<sgl::parsed_file>> parsed;
+    cc::vector<cc::unique_ptr<sgl::ast::file_ast>> built;
+    cc::vector<sgl::check::module_file> files;
+};
+
+parsed_modules const& corpus_modules()
+{
+    static auto const result = []
+    {
+        auto out = parsed_modules();
+        auto sources = cc::vector<program>();
+        add_files_under(sources, "corpus", SGL_CORPUS_DIR);
+        for (auto const& p : sources)
+            if (p.name.starts_with("corpus/modules/"))
+            {
+                out.parsed.push_back(cc::make_unique<sgl::parsed_file>(sgl::parse(p.source)));
+                out.built.push_back(cc::make_unique<sgl::ast::file_ast>(sgl::ast::build(*out.parsed.back())));
+                out.files.push_back({.file = *out.parsed.back(), .ast = *out.built.back()});
+            }
+        return out;
+    }();
+    return result;
+}
+} // namespace
+
+INVOCABLE_TEST("sgl checked modules - a program behind its modules' layer checks as it does with them beside it",
+               (module_program const& m))
+{
+    auto const* const checked = sgl::checked_prelude();
+    REQUIRE(checked != nullptr);
+    auto const& library = corpus_modules().files;
+    auto const file = sgl::parse(m.p.source);
+    auto const ast = sgl::ast::build(file);
+    auto const user = sgl::check::module_file{.file = file, .ast = ast};
+
+    auto const layer = sgl::check::check_modules(*checked, library, user);
+    REQUIRE(layer.has_value());
+    REQUIRE(sgl::check::reaches_the_same_modules(layer.value(), library, user));
+    auto const beside = sgl::check::check(*checked, library, user);
+    auto const behind = sgl::check::check(layer.value(), library, user);
+
+    REQUIRE(behind.library_files.size() == beside.library_files.size());
+    auto files = cc::vector<sgl::check::module_file>();
+    for (auto const& f : sgl::parsed_prelude())
+        files.push_back({.file = f.file, .ast = f.ast});
+    for (auto i = isize(0); i < beside.library_files.size(); ++i)
+    {
+        CHECK(behind.library_files[i] == beside.library_files[i]);
+        files.push_back(library[beside.library_files[i]]);
+    }
+    files.push_back(user);
+    CHECK(observed(behind, files) == observed(beside, files));
+    CHECK(behind.symbols.size() == beside.symbols.size());
+    CHECK(behind.types.size() == beside.types.size());
+    CHECK(behind.tests.size() == beside.tests.size());
+
+    // the layer is shared by every program that reaches its modules, so a program's check leaves its part alone
+    auto written = cc::string();
+    for (auto const& w : prelude_writes(layer.value().module(), behind))
+        written.appendf("{} ", w);
+    CHECK(written == "");
+}
+
+TEST("sgl checked modules - every corpus file that uses a module")
+{
+    auto files = cc::vector<program>();
+    add_files_under(files, "corpus", SGL_CORPUS_DIR);
+    auto const& library = corpus_modules().files;
+    auto layered = isize(0);
+    for (auto const& f : files)
+    {
+        auto const parsed = sgl::parse(f.source);
+        auto const built = sgl::ast::build(parsed);
+        if (!sgl::check::reaches_modules_to_layer(library, {.file = parsed, .ast = built}))
+            continue;
+        nx::invoke_tests(f.name, module_program{.p = f});
+        ++layered;
+    }
+    REQUIRE(layered > 0);
+}

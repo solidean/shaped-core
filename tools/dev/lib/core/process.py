@@ -21,7 +21,7 @@ from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
 
-from . import console, profile, ui
+from . import console, profile, stall_report, ui
 from .layout import DRIVER_ROOT
 from .logs import capture_line, step_log_paths
 from .models import Preset, StepResult
@@ -72,7 +72,7 @@ def _find_vsdevcmd(toolset: str | None = None) -> str | None:
     if vswhere.is_file():
         result = subprocess.run(
             [str(vswhere), "-latest", "-property", "installationPath"],
-            capture_output=True, text=True,
+            capture_output=True, text=True, errors="replace",  # vswhere writes in the console's code page
         )
         if result.returncode == 0:
             candidate = Path(result.stdout.strip()) / "Common7" / "Tools" / "VsDevCmd.bat"
@@ -116,7 +116,7 @@ def msvc_env(toolset: str | None = None, arch: str = "x64") -> dict[str, str] | 
     vcvars_ver = f" -vcvars_ver={toolset}" if toolset and not ("/" in toolset or "\\" in toolset) else ""
     result = subprocess.run(
         f'cmd /c "call \"{vsdevcmd}\" -arch={arch}{vcvars_ver} >nul 2>&1 && set"',
-        capture_output=True, text=True, shell=True,
+        capture_output=True, text=True, errors="replace", shell=True,  # `set` writes in the console's code page
     )
     if result.returncode != 0:
         return None
@@ -484,7 +484,24 @@ def run_step(
         if proc is not None:
             # Both streams feed the one row, so ninja's stdout edges and the compiler's stderr diagnostics
             # interleave in the tail the way they actually happened.
+            # A quiet step names what it is still running (stall_report); a test binary has nexus's own watchdog.
+            watch = None
+            if step_type != "test":
+
+                def report(text: str) -> None:
+                    ui.write_line(console.yellow(text))
+                    err_f.write(text + "\n")
+
+                watch = stall_report.StallWatch(proc.pid, name or step_type, report)
             feed = live.feed
+            if watch is not None:
+                row_feed = feed
+
+                def feed(line: str) -> None:
+                    watch.touch()
+                    row_feed(line)
+
+                watch.start()
             threads = [
                 threading.Thread(target=_pump, args=(proc.stdout, out_f, sys.stdout if mirror else None, feed)),
                 threading.Thread(target=_pump, args=(proc.stderr, err_f, sys.stderr if mirror else None, feed)),
@@ -507,6 +524,8 @@ def run_step(
                 proc.wait()
             for t in threads:
                 t.join()
+            if watch is not None:
+                watch.stop()
         if timed_out:
             err_f.write(f"\n[dev.py] TIMEOUT: '{name or step_type}' exceeded {timeout:.0f}s, then killed.\n")
             if asked:

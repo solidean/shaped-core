@@ -399,7 +399,10 @@ auto sgl::check::impl::flattener::flatten_value_if(ast::expr_id id, type_id type
             break;
         condition = flat_expr_id::none;
         if (taken.value())
-            return taken_value(id, type, branches.front().then);
+        {
+            auto const& first = branches.front();
+            return granting(first.condition, [&] { return taken_value(id, type, first.then); });
+        }
         branches = branches.subspan({.offset = 1, .size = branches.size() - 1});
         if (branches.size() == 1)
             return taken_value(id, type, branches.front().then);
@@ -431,6 +434,17 @@ auto sgl::check::impl::flattener::taken_value(ast::expr_id id, type_id type, ast
 
 auto sgl::check::impl::flattener::constant_condition(flat_expr_id condition) const -> cc::optional<bool>
 {
+    // CHK-356: a call inlined to a block that does nothing but leave a constant is that constant
+    while (is_valid(condition))
+    {
+        auto const* const b = entry.at(condition).node.try_as<flat_block>();
+        if (b == nullptr || b->body.count != 1)
+            break;
+        auto const* const leave = entry.at(entry.at(b->body)[0]).node.try_as<flat_leave>();
+        if (leave == nullptr || leave->target != b->label)
+            break;
+        condition = leave->value;
+    }
     if (!is_valid(condition) || !is_constant(c.out, entry, condition))
         return {};
     auto const o = evaluate_constant(c.out, entry, condition);
@@ -457,15 +471,16 @@ void sgl::check::impl::flattener::flatten_if_branches(origin from,
     auto const condition = is_valid(first) ? first : flatten_expr(branches.front().condition);
     auto const rest = branches.subspan({.offset = 1, .size = branches.size() - 1});
     // CHK-356: only the side a constant takes is flattened, so nothing judges what the other side would use
+    auto const& head = branches.front();
     if (auto const taken = constant_condition(condition); taken.has_value())
     {
         if (taken.value())
-            return add_taken(from, flatten_arm_body(branches.front().then, value_block));
+            return add_taken(from, granting(head.condition, [&] { return flatten_arm_body(head.then, value_block); }));
         if (rest.size() == 1)
             return add_taken(from, flatten_arm_body(rest.front().then, value_block));
         return flatten_if_branches(from, rest, value_block);
     }
-    auto const then_body = flatten_arm_body(branches.front().then, value_block);
+    auto const then_body = granting(head.condition, [&] { return flatten_arm_body(head.then, value_block); });
     auto else_body = ast::range_of<flat_stmt_id>();
     if (rest.size() == 1)
         else_body = flatten_arm_body(rest.front().then, value_block);
@@ -642,6 +657,7 @@ auto sgl::check::impl::flattener::inline_bound(ast::expr_id call,
     // CHK-338: an instance's body was checked with these bindings, and an inferred result is the instance's
     auto const instance = c.existing_function_instance(callee, bindings);
     auto const result = instance >= 0 ? c.out.function_instances[instance].result : info.result;
+    raise_float_level(callee);
     frames.push_back({.function = callee,
                       .file = s.file,
                       .result = result,

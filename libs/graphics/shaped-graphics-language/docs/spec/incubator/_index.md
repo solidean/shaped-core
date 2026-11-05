@@ -40,7 +40,10 @@ Each file has the same shape, so an idea can be picked up cold:
 | [texture-methods.md](texture-methods.md) | a texture's subscript over `load`, and what is left of the texture methods |
 | [uniformity.md](uniformity.md) | SGL's own uniformity analysis after inlining, refusing a derivative sample in divergent control flow with a fix to offer |
 | [stage-polyfills.md](stage-polyfills.md) | the geometry and tessellation stages as a compute pass ahead of the draw, where a device lacks them |
-| [atomics.md](atomics.md) | float, 64-bit and vertex-stage atomics, each behind the sg feature its missing target needs |
+| [atomics.md](atomics.md) | 64-bit and vertex-stage atomics, each behind the sg feature its missing target needs |
 | [beyond-shaders.md](beyond-shaders.md) | SGL as a test run for a general-purpose language, and what that asks of today's decisions |
 | [testing.md](testing.md) | tests on the GPU against the interpreter, resource values in tests, captured constants and message matching |
 | [compute-throughput.md](compute-throughput.md) | matrix fragments as a feature, which a fast compute kernel such as a denoise network needs beside the 16-bit float |
+| [specialization.md](specialization.md) | `const if` over target, feature, option and generic parameter, and a function body in the target's own text under it |
+| [autodiff.md](autodiff.md) | `fwd_diff f` and `bwd_diff f` written by the compiler as a transform of the flat tree, checked against central differences on the interpreter |
+| [float-guarantees.md](float-guarantees.md) | a ladder of float guarantees from `fast` to `ieee`, stated per function, kept per entry point, and refused where a target cannot keep it |

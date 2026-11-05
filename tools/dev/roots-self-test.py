@@ -14,10 +14,12 @@ Each case builds a throwaway superproject whose submodule `extern/api` has a loc
 
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 import tempfile
 import traceback
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 from pathlib import Path
 
@@ -230,21 +232,27 @@ def test_revision_scope_follows_the_gitlink(base: Path) -> None:
 
 # ---------------------------------------------------------------------------
 
+def run_case(t) -> str | None:
+    with tempfile.TemporaryDirectory(prefix="roots-self-test-") as tmp:
+        try:
+            t(Path(tmp).resolve())
+            return None
+        except Exception as e:  # noqa: BLE001 — a self-test reports every failure rather than stopping at the first
+            return f"{type(e).__name__}: {e}" + (f"\n{traceback.format_exc()}" if VERBOSE else "")
+
+
 def main() -> int:
+    # Each case owns its temporary directory and spends its time in git processes, so they run side by side.
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
+    with ThreadPoolExecutor(max_workers=min(len(tests), os.cpu_count() or 4)) as pool:
+        results = list(pool.map(run_case, tests))
     failed = 0
-    for t in tests:
-        with tempfile.TemporaryDirectory(prefix="roots-self-test-") as tmp:
-            try:
-                t(Path(tmp).resolve())
-            except Exception as e:  # noqa: BLE001 — a self-test reports every failure rather than stopping at the first
-                failed += 1
-                print(f"FAIL {t.__name__}: {type(e).__name__}: {e}")
-                if VERBOSE:
-                    traceback.print_exc()
-            else:
-                if VERBOSE:
-                    print(f"ok   {t.__name__}")
+    for t, error in zip(tests, results):
+        if error is not None:
+            failed += 1
+            print(f"FAIL {t.__name__}: {error}")
+        elif VERBOSE:
+            print(f"ok   {t.__name__}")
 
     print(f"\n{len(tests) - failed}/{len(tests)} passed")
     return 1 if failed else 0

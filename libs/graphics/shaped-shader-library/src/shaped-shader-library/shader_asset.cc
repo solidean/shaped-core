@@ -98,6 +98,14 @@ sg::async_compiled_shader slib::shader_asset::acquire(sg::shader_format format, 
                 key.push_back(o);
                 break;
             }
+    // What the device has is no option of the source, so no entry point lists it, and it may change what any of them
+    // writes: a `has` anywhere it inlines, a prelude function's included.
+    for (auto const& o : options)
+        if (o.name == k_device_features_option)
+        {
+            key.push_back(o);
+            break;
+        }
     cc::sort(key, [](shader_option const& a, shader_option const& b) { return a.name < b.name; });
 
     auto const entry_of = [&](state& s) -> format_entry&
@@ -174,10 +182,28 @@ bool slib::shader_asset::can_acquire(sg::context const& ctx) const
 
 sg::async_compiled_shader slib::shader_asset::acquire(sg::context const& ctx, cc::span<shader_option const> options) const
 {
+    // SGL's `has` asks what the device has, and its float atomics add in one instruction where the device can
+    auto with_device = cc::vector<shader_option>::create_copy_of(options);
+    if (auto const library = _library.lock();
+        library != nullptr && library->language_of(_virtual_path) == shader_language::sgl)
+    {
+        auto is_set = false;
+        for (auto const& o : with_device)
+            is_set = is_set || o.name == k_device_features_option;
+        if (!is_set)
+        {
+            auto names = cc::string();
+            for (auto const f : sg::k_all_features)
+                if (ctx.supports(f))
+                    names.appendf("{}{}", names.empty() ? "" : ",", sg::to_string(f));
+            with_device.push_back({.name = cc::string(k_device_features_option), .value = cc::move(names)});
+        }
+    }
+
     // The context lists what it takes in preference order, so the first one we can actually build wins.
     for (auto const format : ctx.accepted_shader_formats())
         if (this->can_build(format))
-            return acquire(format, options);
+            return acquire(format, with_device);
 
     if (_library.expired())
         return make_failed_shader(cc::format("the shader library that owns '{}' is gone", _virtual_path));

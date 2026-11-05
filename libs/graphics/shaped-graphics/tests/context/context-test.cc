@@ -149,6 +149,11 @@ INVOCABLE_TEST("sg - coherence, image atomics and 16-bit integers follow the API
         CHECK(!ctx->supports(sg::feature::shader_int16));
         CHECK(!ctx->supports(sg::feature::vertex_layer_output));
     }
+    // a float atomic add is metal's on every device, vulkan's with an extension, and neither D3D12's nor WebGPU's
+    if (ctx->backend() == sg::backend_kind::metal)
+        CHECK(ctx->supports(sg::feature::float_atomic_add));
+    if (ctx->backend() == sg::backend_kind::dx12 || is_webgpu)
+        CHECK(!ctx->supports(sg::feature::float_atomic_add));
 }
 
 // The limits are floors a portable caller sizes against, so they must be reportable and sane on every backend.

@@ -229,8 +229,8 @@ public:
             return true;
         case sg::feature::extended_image_formats:
             return _extended_image_formats;
-        case sg::feature::opacity_micromap: // DXR 1.2, which only the Agility SDK carries — issue: feat-sg-opacity-micromaps
-            return false;
+        case sg::feature::opacity_micromap: // DXR 1.2, which only the Agility SDK carries
+            return _opacity_micromap;
         case sg::feature::unaligned_block_compression:
             return _unaligned_block_textures;
         case sg::feature::shader_f16:
@@ -240,6 +240,11 @@ public:
             return _wave_ops;
         case sg::feature::vertex_layer_output:
             return _vertex_layer_output;
+        case sg::feature::shader_execution_reordering:
+            return _shader_execution_reordering;
+        case sg::feature::float_atomic_add:
+            // HLSL's float atomics are bitwise exchanges alone; an add is NVAPI's, which this backend does not take
+            return false;
         }
         return false;
     }
@@ -651,11 +656,13 @@ public:
     // DXR support tier, queried once at creation (D3D12_FEATURE_D3D12_OPTIONS5).
     // NOT_SUPPORTED until set.
     D3D12_RAYTRACING_TIER _raytracing_tier = D3D12_RAYTRACING_TIER_NOT_SUPPORTED;
-    bool _unaligned_block_textures = false; // D3D12_OPTIONS8, cached at creation
-    bool _extended_image_formats = false;   // bgra8_unorm's typed UAV, cached at creation
-    bool _native_16bit_shader_ops = false;  // D3D12_OPTIONS4, cached at creation
-    bool _wave_ops = false;                 // D3D12_OPTIONS1, cached at creation
-    bool _vertex_layer_output = false;      // D3D12_OPTIONS, cached at creation
+    bool _unaligned_block_textures = false;    // D3D12_OPTIONS8, cached at creation
+    bool _extended_image_formats = false;      // bgra8_unorm's typed UAV, cached at creation
+    bool _native_16bit_shader_ops = false;     // D3D12_OPTIONS4, cached at creation
+    bool _wave_ops = false;                    // D3D12_OPTIONS1, cached at creation
+    bool _shader_execution_reordering = false; // SM 6.9 beside ray-tracing pipelines, from the Agility SDK
+    bool _opacity_micromap = false;            // DXR 1.2 and SM 6.9, from the Agility SDK
+    bool _vertex_layer_output = false;         // D3D12_OPTIONS, cached at creation
 
     // Where debug-layer messages go; empty means stderr.
     // See set_message_callback.

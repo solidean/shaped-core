@@ -65,7 +65,10 @@ Prints every counter with `[x]` (measurable right now) or `[ ]`, and — when th
   Gated by `/proc/sys/kernel/perf_event_paranoid`; commonly blocked inside containers/sandboxes.
 - **Windows** — a real-time ETW context-switch session (details below).
   Needs a one-time setup to read counters without elevation.
-- **macOS / ARM64** — baseline only for now (no PMU backend).
+- **macOS / ARM64** — cycles and instructions with no privilege and no setup, from the kernel's per-thread fixed counters (`thread_selfcounts`).
+  Both include the thread's kernel time, unlike Linux's user-space-only events, so they differ only for a body that spends time in syscalls.
+  The other counters need kperf, which requires root, and are reported unavailable.
+  No one-time setup can change that: measured on macOS 26, kperf refuses an unprivileged process even its reads while a root process holds the configuration.
 
 `NX_BENCH_HAS_HW_COUNTERS` (1/0) is a coarse compile-time hint that a real backend was compiled in; the runtime source of truth is always `available_hw_counters()`.
 

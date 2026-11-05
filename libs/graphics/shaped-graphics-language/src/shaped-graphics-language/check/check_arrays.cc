@@ -506,11 +506,11 @@ type_id checker::resolve_atomic(i32 file, ast::expr_id expr, ast::index const& n
                            ? resolve_type(file, arguments[0].value, scope)
                            : checked_module::error_type;
     auto const name = element == checked_module::error_type ? cc::string_view() : out.name_of(element);
-    // CHK-296: the widths and kinds every target has atomics of
-    if (name != builtins::k_uint && name != builtins::k_int)
+    // CHK-296: the widths and kinds every target has atomics of, and a float, which every target holds as a `uint`'s bits
+    if (name != builtins::k_uint && name != builtins::k_int && name != builtins::k_float)
     {
         report(diagnostic_kind::wrong_kind_of_name, file, span_of(file, expr),
-               "an atomic holds a `uint` or an `int`: `atomic[uint]`");
+               "an atomic holds a `uint`, an `int` or a `float`: `atomic[uint]`");
         return checked_module::error_type;
     }
     return resource_type({.kind = type_kind::atomic, .element = element});

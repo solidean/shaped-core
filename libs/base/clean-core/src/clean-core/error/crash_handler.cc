@@ -493,14 +493,13 @@ bool with_symbols(F&& walk) noexcept
     return cc::impl::with_dbghelp_if_free(
         [&]
         {
-            // Inside the guard, because these are DbgHelp calls like any other.
-            // Symbols are initialized here rather than at install time: the handler must stay free of setup cost for
-            // the overwhelmingly common case where the process never crashes at all.
-            SymSetOptions(SYMOPT_DEFERRED_LOADS | SYMOPT_LOAD_LINES | SYMOPT_UNDNAME);
-            SymInitialize(GetCurrentProcess(), nullptr, TRUE);
+            // Here rather than at install time: the handler must stay free of setup cost for the overwhelmingly
+            // common case where the process never crashes at all.
+            // A report that is not fatal keeps the process running, so the session it shares stays up after it.
+            cc::impl::ensure_process_symbols_locked();
+            // the session came up at the first symbolization, so a module loaded since is unknown to it until refreshed
+            SymRefreshModuleList(GetCurrentProcess());
             walk();
-            // Also inside: this tears down the session cc::symbolizer shares, so it must not race one.
-            SymCleanup(GetCurrentProcess());
         });
 }
 

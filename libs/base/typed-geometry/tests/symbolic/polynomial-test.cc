@@ -239,3 +239,139 @@ TEST("tg polynomial - a polynomial is a coefficient, so nesting gives two variab
     CHECK(pd.remainder.is_zero());
     CHECK(pd.quotient == s);
 }
+
+TEST("tg polynomial - content and primitive part")
+{
+    CHECK(content(poly_z{4, 0, 6}) == bigint(2));
+    CHECK((primitive_part(poly_z{4, 0, 6}) == poly_z{2, 0, 3}));
+    CHECK(content(poly_z{4, 0, -6}) == bigint(-2));
+    CHECK((primitive_part(poly_z{4, 0, -6}) == poly_z{-2, 0, 3}));
+    CHECK(content(poly_z()) == bigint(0));
+    CHECK(primitive_part(poly_z()).is_zero());
+}
+
+TEST("tg polynomial - gcd by subresultants over the integers agrees with Euclid's over the rationals")
+{
+    auto rng = nx::test_random();
+    auto const n = nx::is_thorough() ? 1500 : 200;
+    auto const divides = [](poly_z const& d, poly_z const& p) { return pseudo_divrem(p, d).remainder.is_zero(); };
+    for (auto i = 0; i < n; ++i)
+    {
+        auto const a = random_poly(rng, 5);
+        auto const b = random_poly(rng, 5);
+        auto c = random_poly(rng, 3);
+        if (c.is_zero())
+            c = poly_z{1, 1};
+        auto const ac = a * c;
+        auto const bc = b * c;
+
+        auto const g = gcd(ac, bc);
+        CHECK((divides(c, g) || (ac.is_zero() && bc.is_zero())));
+        CHECK((g.is_zero() || divides(g, ac)));
+        CHECK((g.is_zero() || divides(g, bc)));
+        CHECK((g.is_zero() || g.leading_coefficient().sign() > 0));
+        CHECK(gcd(bc, ac) == g);
+
+        // the integer gcd made monic is the rational one
+        auto const q = gcd(to_rational(ac), to_rational(bc));
+        if (g.is_zero())
+            CHECK(q.is_zero());
+        else
+            CHECK((q * bigrat(g.leading_coefficient()) == to_rational(g)));
+    }
+
+    CHECK(gcd(poly_z(), poly_z()).is_zero());
+    CHECK((gcd(poly_z{-2, -4}, poly_z()) == poly_z{2, 4}));
+    CHECK((gcd(poly_z{1, 1}, poly_z{1, -1}) == poly_z(1)));
+    // the classic subresultant example: Knuth's, whose plain Euclid coefficients explode
+    auto const k1 = poly_z{-5, 2, 8, -3, -3, 0, 1, 0, 1};
+    auto const k2 = poly_z{21, -9, -4, 0, 5, 0, 3};
+    CHECK(gcd(k1, k2) == poly_z(1));
+}
+
+TEST("tg polynomial - squarefree part, and a gcd of nested polynomials")
+{
+    auto const x = poly_z::x();
+    auto const p = pow(x - 1, 2) * pow(x + 2, 3) * 6;
+    CHECK(squarefree_part(p) == (x - 1) * (x + 2));
+
+    // gcd((x + y)(x - y), (x + y)^2) in two variables, y outside
+    using inner = poly_z;
+    using outer = polynomial<inner>;
+    auto const xx = outer(inner::x());
+    auto const yy = outer::x();
+    CHECK(gcd((xx + yy) * (xx - yy), (xx + yy) * (xx + yy)) == yy + xx);
+    CHECK(gcd(xx * yy * 2, yy * yy * 4) == yy * 2);
+}
+
+namespace
+{
+/// det of the Sylvester matrix of a and b, by Gaussian elimination in the rationals: the resultant's definition.
+bigrat sylvester_determinant(poly_z const& a, poly_z const& b)
+{
+    auto const m = a.degree();
+    auto const n = b.degree();
+    auto const size = m + n;
+    if (size == 0)
+        return bigrat(1);
+    cc::vector<cc::vector<bigrat>> s;
+    for (auto r = 0; r < size; ++r)
+    {
+        cc::vector<bigrat> row;
+        row.resize_to_filled(size, bigrat(0));
+        // n rows of a's coefficients, highest first, each shifted one further; then m rows of b's
+        auto const& p = r < n ? a : b;
+        auto const shift = r < n ? r : r - n;
+        for (auto i = 0; i <= p.degree(); ++i)
+            row[shift + i] = bigrat(p[p.degree() - i]);
+        s.push_back(cc::move(row));
+    }
+    auto det = bigrat(1);
+    for (auto c = 0; c < size; ++c)
+    {
+        auto pivot = c;
+        while (pivot < size && s[pivot][c].is_zero())
+            ++pivot;
+        if (pivot == size)
+            return bigrat(0);
+        if (pivot != c)
+        {
+            cc::swap(s[pivot], s[c]);
+            det = -det;
+        }
+        det = det * s[c][c];
+        for (auto r = c + 1; r < size; ++r)
+        {
+            if (s[r][c].is_zero())
+                continue;
+            auto const f = s[r][c] / s[c][c];
+            for (auto k = c; k < size; ++k)
+                s[r][k] = s[r][k] - f * s[c][k];
+        }
+    }
+    return det;
+}
+} // namespace
+
+TEST("tg polynomial - the resultant is the Sylvester matrix's determinant")
+{
+    auto rng = nx::test_random();
+    auto const n = nx::is_thorough() ? 600 : 100;
+    for (auto i = 0; i < n; ++i)
+    {
+        auto const a = random_poly(rng, 6);
+        auto const b = random_poly(rng, 6);
+        if (a.is_zero() || b.is_zero())
+        {
+            CHECK(resultant(a, b) == bigint(0));
+            continue;
+        }
+        auto const r = resultant(a, b);
+        CHECK(bigrat(r) == sylvester_determinant(a, b));
+        CHECK(bigrat(resultant(to_rational(a), to_rational(b))) == bigrat(r));
+        // a common factor makes it vanish
+        CHECK(resultant(a * (poly_z::x() - 3), b * (poly_z::x() - 3)).is_zero());
+    }
+    // b at the roots +-1 of a: (1 - 4)(1 - 4)
+    CHECK(resultant(poly_z{-1, 0, 1}, poly_z{-4, 0, 1}) == bigint(9));
+}

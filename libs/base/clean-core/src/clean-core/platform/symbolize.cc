@@ -102,26 +102,13 @@ cc::mutex<dbghelp_access>& dbghelp_lock()
     return type == DRIVE_FIXED || type == DRIVE_REMOVABLE || type == DRIVE_RAMDISK || type == DRIVE_CDROM;
 }
 
-/// Brings the process's symbol handler up, exactly once.
-///
-/// **Never torn down.** The DbgHelp session is process-global and shared with the crash handler, so a symbolizer that
-/// cleaned up after itself would take the crash reporter's symbols with it.
+/// Whether the process session is up; read and written only under the DbgHelp lock.
+bool g_process_symbols_up = false;
+
 void ensure_symbol_handler()
 {
-    static bool const once = []
-    {
-        auto const guard = dbghelp_lock().lock_scoped();
-
-        // DEFERRED_LOADS so standing this up does not read every PDB the process has; LOAD_LINES because a file and a
-        // line are most of the value; UNDNAME so a name reads as C++ rather than as a mangling.
-        ::SymSetOptions(::SymGetOptions() | SYMOPT_DEFERRED_LOADS | SYMOPT_LOAD_LINES | SYMOPT_UNDNAME);
-
-        // The return is deliberately ignored: the crash handler may already have initialized the session, in which
-        // case this fails and the session is exactly as usable.
-        ::SymInitialize(::GetCurrentProcess(), nullptr, TRUE);
-        return true;
-    }();
-    (void)once;
+    auto const guard = dbghelp_lock().lock_scoped();
+    cc::impl::ensure_process_symbols_locked();
 }
 #else
 constexpr bool has_symbolization = false;
@@ -320,6 +307,23 @@ cc::symbol_info const& cc::symbolizer::resolve(void const* address)
 #endif
 
     return out;
+}
+
+void cc::impl::ensure_process_symbols_locked()
+{
+#if defined(_WIN32) && !defined(__EMSCRIPTEN__)
+    if (g_process_symbols_up)
+        return;
+    g_process_symbols_up = true;
+
+    // DEFERRED_LOADS so standing this up does not read every PDB the process has; LOAD_LINES because a file and a line
+    // are most of the value; UNDNAME so a name reads as C++ rather than as a mangling.
+    ::SymSetOptions(::SymGetOptions() | SYMOPT_DEFERRED_LOADS | SYMOPT_LOAD_LINES | SYMOPT_UNDNAME);
+
+    // The return is deliberately ignored: the standard library's stacktrace may already have initialized the session,
+    // in which case this fails and the session is exactly as usable.
+    ::SymInitialize(::GetCurrentProcess(), nullptr, TRUE);
+#endif
 }
 
 bool cc::impl::with_dbghelp_if_free(cc::function_ref<void()> fn)

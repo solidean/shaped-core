@@ -1,0 +1,57 @@
+// `const if` is an `if` whose every condition is a constant once the function is inlined (AST-157, CHK-425)
+// It is taken as CHK-356 takes a branch on a constant, so the other side is in no text, no footprint and no verdict.
+
+const detailed = true
+
+test:
+    let mut runs = 0
+    const if detailed:
+        runs += 10
+    else:
+        runs += 1
+    runs == 10
+
+// a literal argument decides it in each inlined copy, and the `else if` below a `const if` is constant too
+fun level(.coarse: bool, .fine: bool) -> int:
+    const if coarse:
+        return 1
+    else if fine:
+        return 3
+    return 2
+
+test level(coarse = true, fine = false) == 1
+test level(coarse = false, fine = true) == 3
+test level(coarse = false, fine = false) == 2
+
+// a condition no constant decides is an error, where a plain `if` would keep both sides
+@expect(error = "invalid-constant-argument")
+test:
+    let n = 3
+    let mut total = 0
+    const if n > 2:
+        total = 1
+    total == 1
+
+// so is one that only a call with a constant argument decides, where it is called with a varying one
+fun halved(x: float, .exact: bool) -> float:
+    const if exact:
+        return x / 2.0
+    return x * 0.5
+
+binding frame:
+    flags: buffer[int]
+    values: mut buffer[float]
+
+@expect(error = "invalid-constant-argument")
+@compute(64) fun halve_by_flag(@thread_id id: int3){frame}:
+    frame.values[id.x] = halved(frame.values[id.x], exact = frame.flags[id.x] != 0)
+
+// the branch a `const if` does not take touches no binding member
+fun read_value(i: int, .from_flags: bool){frame} -> float:
+    const if from_flags:
+        return frame.flags[i] as float
+    return frame.values[i]
+
+@expect(footprint = "frame.values: read write")
+@compute(64) fun double_values(@thread_id id: int3){frame}:
+    frame.values[id.x] = read_value(id.x, from_flags = false) * 2.0

@@ -162,6 +162,10 @@ Each step stands on its own and is measured by the `sgl profile` tests.
    The prelude is still checked once per process; what goes is the copy.
 2. **A module is a layer**, checked once per process and kept, reused by every compile that reaches it.
    This is where ids start to name their layer, since a module's layer then sits at different heights in different compiles.
+   *A first form landed on 2026-11-04: the modules a program reaches are one layer over the prelude's, `check::check_modules`, with ids unchanged.*
+   The driver keeps one per set of modules, beside the library it parsed once for the process, for compiles that set no options.
+   A shaped-viewer hit group's `describe` went from 81 to 54 ms, and its check from 71 to 23 ms.
+   What it does not do is share a module between two sets that both reach it, which is what ids naming their layer would buy.
 3. **Artifacts**: saving and loading a layer, first for the prelude, then for modules, through slib's persistent cache.
 4. **Parallel layers**, and then perhaps an interface-only pass.
 

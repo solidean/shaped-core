@@ -54,6 +54,7 @@ struct block_layout;
 struct shader_definition;
 struct shader_package;
 class shader_compiler;
+enum class sgl_undefined_guard : u8;
 struct sgl_compiler_options;
 class shader_asset;
 class shader_library;

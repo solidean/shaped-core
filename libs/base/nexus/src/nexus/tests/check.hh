@@ -402,11 +402,12 @@ template <class T>
 // Optionally takes a message argument
 // Returns check_handle that can be chained with other helper functions
 //
+// Inside a SECTION it skips that section alone, and the sections after it still run.
+// The test is reported skipped only when nothing in it ran but skips.
+//
 // Examples:
 //   SKIP();                              // skips with default note
 //   SKIP("not implemented yet");         // skips with custom message
-//
-// issue: bug-nexus-skip-inside-section
 #define SKIP(...)                                                                                         \
     ::nx::impl::check_handle::make(::nx::impl::check_kind::check, ::nx::impl::cmp_op::skip, "SKIP", true, \
                                    cc::source_location::current())                                        \

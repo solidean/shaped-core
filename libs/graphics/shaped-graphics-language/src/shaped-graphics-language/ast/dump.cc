@@ -441,7 +441,7 @@ struct dumper
             },
             [&](if_stmt const& n)
             {
-                open("if");
+                open(n.is_const ? "const if" : "if");
                 for (auto const& branch : ast.at(n.branches))
                 {
                     new_line(depth + 1);
@@ -556,6 +556,11 @@ struct dumper
                     out += file.text_of(n.alias);
                 }
             },
+            [&](preamble_decl const& n)
+            {
+                open("preamble");
+                dump_expr(n.text, depth);
+            },
             [&](require_decl const& n)
             {
                 open("require");
@@ -608,7 +613,25 @@ struct dumper
                     out += " ";
                     dump_fields("type-params", n.type_parameters, depth);
                 }
-                dump_members(n.members, depth);
+                if (n.branches.empty())
+                    dump_members(n.members, depth);
+                for (auto const& b : ast.at(n.branches))
+                {
+                    new_line(depth + 1);
+                    out += is_valid(b.condition) ? "(const-if" : "(else";
+                    if (is_valid(b.condition))
+                    {
+                        out += " ";
+                        dump_expr(b.condition, depth + 1);
+                    }
+                    for (auto const t : ast.at(b.texts))
+                    {
+                        out += " ";
+                        dump_expr(t, depth + 1);
+                    }
+                    dump_members(b.members, depth + 1);
+                    out += ")";
+                }
             },
             [&](enum_decl const& n)
             {

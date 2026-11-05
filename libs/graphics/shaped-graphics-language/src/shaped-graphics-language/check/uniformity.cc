@@ -294,7 +294,7 @@ struct uniformity_pass
         for (auto const a : arguments)
             result = first_of(result, value(a, flow));
         if (record == nullptr)
-            return result;
+            return c.text >= 0 ? text_call(id, c, result, flow) : result;
         auto const is_judged
             = reconverges ? record->uses_derivatives || record->is_subgroup_operation : record->is_barrier;
         if (is_judged && flow.is && is_reporting)
@@ -317,6 +317,28 @@ struct uniformity_pass
         if (!arguments.empty() && !result.is)
             result = stored_to(id, arguments[0]);
         write_through(id, *record, arguments, result, flow);
+        return result;
+    }
+
+    /// CHK-431: a body in a target's text is read by nothing but its declaration, which says what it asks of the
+    /// control flow, and whether what it gives follows its arguments.
+    divergence text_call(flat_expr_id id, flat_call const& c, divergence result, divergence const& flow)
+    {
+        auto const& info = m.functions[m.at(c.callee).info];
+        auto const is_judged = reconverges ? info.uses_derivatives || info.is_subgroup_operation : info.is_barrier;
+        if (is_judged && flow.is && is_reporting)
+            violations.push_back({.call = id, .flow = flow});
+        if ((!info.is_pure || info.is_subgroup_operation) && !result.is)
+            result = {.is = true,
+                      .where = e.at(id).from,
+                      .why = cc::format("is what {} gave, whose body is a target's text", m.at(c.callee).name)};
+        // a `mut` argument takes what the call gives
+        auto const parameters = m.at(info.parameters);
+        auto const arguments = e.at(c.arguments);
+        for (auto k = isize(0); k < parameters.size() && k < arguments.size(); ++k)
+            if (auto const* const l = e.at(arguments[k]).node.try_as<flat_local_ref>();
+                l != nullptr && parameters[k].is_mut)
+                settle_local(l->local, result, flow);
         return result;
     }
 
@@ -616,7 +638,7 @@ struct uniformity_pass
 };
 } // namespace
 
-void checker::judge_uniformity(flat_entry_point const& structured)
+cc::optional<flat_entry_point> checker::judge_uniformity(flat_entry_point const& structured)
 {
     // most entry points call nothing that asks, and index no binding array, and legalizing is not free
     auto asks_barrier = false;
@@ -624,11 +646,19 @@ void checker::judge_uniformity(flat_entry_point const& structured)
     for (auto const& x : structured.exprs)
     {
         if (auto const* const c = x.node.try_as<flat_call>())
+        {
             if (auto const* const record = out.builtin_function(c->intrinsic))
             {
                 asks_barrier = asks_barrier || record->is_barrier || record->is_uniform_load;
                 asks_reconverged = asks_reconverged || record->uses_derivatives || record->is_subgroup_operation;
             }
+            else if (c->text >= 0)
+            {
+                auto const& info = out.functions[out.at(c->callee).info];
+                asks_barrier = asks_barrier || info.is_barrier;
+                asks_reconverged = asks_reconverged || info.uses_derivatives || info.is_subgroup_operation;
+            }
+        }
         if (x.node.is<flat_element>())
             asks_reconverged = asks_reconverged || is_resource(out.at(x.type).kind);
     }
@@ -640,9 +670,9 @@ void checker::judge_uniformity(flat_entry_point const& structured)
             judges_per_draw = judges_per_draw || member.is_per_draw;
     asks_reconverged = asks_reconverged || judges_per_draw;
     if (!asks_barrier && !asks_reconverged)
-        return;
+        return {};
 
-    auto const e = legalize(out, structured);
+    auto e = legalize(out, structured);
     auto const judged = [&](bool reconverges)
     {
         auto pass = uniformity_pass{.m = out,
@@ -770,20 +800,28 @@ void checker::judge_uniformity(flat_entry_point const& structured)
         auto const& call = e.at(v.call);
         auto const& c = call.node.as<flat_call>();
         auto const* const record = out.builtin_function(c.intrinsic);
-        auto const where = span_of(call.from.file, call.from.expr);
+        // a body in a target's text asks what its declaration says (CHK-431)
+        auto const& info = out.functions[out.at(c.callee).info];
+        auto const& name = record != nullptr ? record->name : out.at(c.callee).name;
+        auto const is_barrier = record != nullptr ? record->is_barrier : info.is_barrier;
+        auto const is_subgroup = record != nullptr ? record->is_subgroup_operation : info.is_subgroup_operation;
+        // a text body's call stands where its function is called, since the text is no line of the program
+        auto at = call_site{.file = call.from.file, .call = call.from.expr};
+        if (record == nullptr && !e.at(call.inlined_through).empty())
+            at = e.at(call.inlined_through).back();
+        auto const where = span_of(at.file, at.call);
         auto& d = report(
-            diagnostic_kind::non_uniform_control_flow, call.from.file, where,
-            record->is_barrier
-                ? cc::format("{} waits for every thread of the workgroup, and not every one reaches it here", record->name)
-            : record->is_subgroup_operation
+            diagnostic_kind::non_uniform_control_flow, at.file, where,
+            is_barrier ? cc::format("{} waits for every thread of the workgroup, and not every one reaches it here", name)
+            : is_subgroup
                 ? cc::format("{} exchanges values within the subgroup, and not every invocation of it reaches it here",
-                             record->name)
+                             name)
                 : cc::format("{} takes derivatives across a quad of pixels, and not every pixel of the "
                              "quad reaches it here{}",
-                             record->name,
-                             record->name.starts_with("sample") ? ": sample before the branch, or name the level or "
-                                                                  "the gradients"
-                                                                : ": take them before the branch"));
+                             name,
+                             name.starts_with("sample") ? ": sample before the branch, or name the level or "
+                                                          "the gradients"
+                                                        : ": take them before the branch"));
         // CHK-402: a compile of another entry point does not report it
         d.entry_points.push_back(e.function);
         // a branch of the prelude is no line of the program, so the note names the program's call that reached it
@@ -806,6 +844,7 @@ void checker::judge_uniformity(flat_entry_point const& structured)
         auto const span = ast::is_valid(from.expr) ? span_of(from.file, from.expr) : span_of(from.file, from.stmt);
         d.notes.push_back({.file = from.file, .where = span, .message = v.flow.why});
     }
+    return cc::move(e);
 }
 
 namespace

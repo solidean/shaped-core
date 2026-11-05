@@ -51,15 +51,6 @@ cc::result<cc::unit> metal_context::create_systems(isize upload_bytes, isize dow
     _residency.add(_upload_ring.buffer());
     _residency.add(_download_ring.buffer());
 
-    // Shared rather than private, so it is zeroed here instead of through a copy.
-    auto constexpr zero_offsets_bytes = isize(16);
-    _zero_hit_group_offsets = _device->newBuffer(
-        NS::UInteger(zero_offsets_bytes), MTL::ResourceStorageModeShared | MTL::ResourceHazardTrackingModeUntracked);
-    if (_zero_hit_group_offsets == nullptr)
-        return cc::error("the metal device refused the zeroed hit-group offsets buffer");
-    cc::memset(_zero_hit_group_offsets->contents(), 0, size_t(zero_offsets_bytes));
-    _residency.add(_zero_hit_group_offsets);
-
     _native_scope_fence = _device->newFence();
     if (_native_scope_fence == nullptr)
         return cc::error("the metal device refused the native scope's fence");
@@ -156,6 +147,12 @@ bool metal_context::supports(sg::feature f) const
         // `[[primitive_id]]`, `[[sample_id]]` and a vertex function's `[[render_target_array_index]]` exist on every
         // Apple GPU this backend's Metal 4 floor admits.
         return true;
+    case sg::feature::float_atomic_add:
+        // `atomic_float` and `atomic_fetch_add_explicit` exist in device and threadgroup memory from MSL 3.0.
+        return true;
+    case sg::feature::shader_execution_reordering:
+        // Metal reorders no ray-tracing work on request.
+        return false;
     case sg::feature::wireframe_fill:
         // `MTLTriangleFillModeLines` is on every Apple GPU.
         return true;
@@ -557,12 +554,6 @@ void metal_context::shutdown()
     _download_ring.shutdown();
     _samplers.shutdown();
     _texture_views.shutdown();
-    if (_zero_hit_group_offsets != nullptr)
-    {
-        _residency.remove(_zero_hit_group_offsets);
-        _zero_hit_group_offsets->release();
-        _zero_hit_group_offsets = nullptr;
-    }
 
     if (_native_scope_fence != nullptr)
     {
@@ -943,7 +934,8 @@ cc::result<metal_buffer_handle> metal_context::create_metal_buffer(isize size_in
     return handle;
 }
 
-cc::result<metal_memory_heap_handle> metal_context::create_metal_memory_heap(isize size_in_bytes)
+cc::result<metal_memory_heap_handle> metal_context::create_metal_memory_heap(isize size_in_bytes,
+                                                                             sg::memory_heap_contents contents)
 {
     CC_ASSERT(size_in_bytes > 0, "heap size must be positive");
 
@@ -967,10 +959,10 @@ cc::result<metal_memory_heap_handle> metal_context::create_metal_memory_heap(isi
     if (heap == nullptr)
         return cc::error("the metal device refused a heap allocation");
 
-    // A placement heap is the allocation; the buffers placed into it are not separately resident.
+    // A placement heap is the allocation; the resources placed into it are not separately resident.
     _residency.add(heap);
 
-    return std::make_shared<metal_memory_heap const>(*this, size_in_bytes, heap);
+    return std::make_shared<metal_memory_heap const>(*this, size_in_bytes, contents, heap);
 }
 
 cc::result<sg::raw_texture_handle> metal_context::try_create_raw_texture(texture_description const& desc,
@@ -982,10 +974,7 @@ cc::result<sg::raw_texture_handle> metal_context::try_create_raw_texture(texture
 cc::result<sg::memory_heap_handle> metal_context::try_create_memory_heap(isize size_in_bytes,
                                                                          memory_heap_contents contents)
 {
-    // issue: feat-sg-metal-texture-heap
-    if (contents == memory_heap_contents::textures)
-        return cc::error("metal places textures, but its heap answers no texture requirements yet");
-    return cc::result<sg::memory_heap_handle>(create_metal_memory_heap(size_in_bytes));
+    return cc::result<sg::memory_heap_handle>(create_metal_memory_heap(size_in_bytes, contents));
 }
 
 cc::result<sg::binding_group_layout_handle> metal_context::try_create_binding_group_layout(

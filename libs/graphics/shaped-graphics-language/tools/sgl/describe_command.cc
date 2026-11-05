@@ -179,6 +179,13 @@ void write_entry_point(babel::json::object_writer& o, sgl::described_entry_point
     // CHK-371: only an entry point that asks for a size says so
     if (e.preferred_subgroup_size > 0)
         o.write("preferred_subgroup_size", e.preferred_subgroup_size);
+    // CHK-435: what a host would weaken on WebGPU, and the function to read before it does
+    if (e.float_guarantee != sgl::check::float_level::fast)
+    {
+        cc::string_view const names[] = {"fast", "specials", "precise", "ieee"};
+        o.write("float_guarantee", names[int(e.float_guarantee)]);
+        o.write("float_raised_by", e.float_raised_by);
+    }
     {
         auto list = o.write_array("bindings", babel::json::layout::compact);
         for (auto const& name : e.bindings)

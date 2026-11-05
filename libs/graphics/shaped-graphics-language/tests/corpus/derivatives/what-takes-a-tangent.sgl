@@ -1,0 +1,90 @@
+// PROTOTYPE (docs/spec/incubator/autodiff.md): which parameter takes a tangent, and of what type.
+// A derivative takes, after each parameter, its tangent going forward and its adjoint going backward.
+// A parameter of no differentiable type takes neither, nor does one marked `@no_diff`.
+// A position's tangent is its direction: what `pos3` changes by is a `vec3`.
+
+// an int takes no tangent: `fwd_diff(scaled, x, dx, n)`
+fun scaled(x: float, n: int) => x * float(n)
+
+test fwd_diff(scaled, 2.0, 1.0, 3) == 3.0
+test:
+    let mut dx = 0.0
+    bwd_diff(scaled, 2.0, mut dx, 3, 1.0)
+    dx == 3.0
+
+// a float marked @no_diff takes none either: the derivative holds it constant
+fun damped(x: float, @no_diff k: float) => x * x * k
+
+test fwd_diff(damped, 3.0, 1.0, 0.5) == 3.0
+test:
+    let mut dx = 0.0
+    bwd_diff(damped, 3.0, mut dx, 0.5, 1.0)
+    dx == 3.0
+
+// a position's tangent is a vec3, and a distance between two takes one per position
+fun spread(a: pos3, b: pos3) => distance(a, b) + dot(a - b, vec3(0.0, 0.0, 1.0))
+
+test nearly_equal(fwd_diff(spread, pos3(1.0, 2.0, 3.0), vec3(1.0, 0.0, 0.0), pos3(1.0, 2.0, 0.0), vec3(0.0)), 0.0, within = 1e-6)
+test nearly_equal(fwd_diff(spread, pos3(1.0, 2.0, 3.0), vec3(0.0, 0.0, 1.0), pos3(1.0, 2.0, 0.0), vec3(0.0)), 2.0, within = 1e-6)
+test:
+    let mut da = vec3(0.0)
+    let mut db = vec3(0.0)
+    bwd_diff(spread, pos3(1.0, 2.0, 3.0), mut da, pos3(1.0, 2.0, 0.0), mut db, 1.0)
+    nearly_equal(da.z, 2.0, within = 1e-6)
+    nearly_equal(db.z, -2.0, within = 1e-6)
+
+// a position through a matrix moves as a direction: its change takes no translation
+const translate = mat4(float4(2.0, 0.0, 0.0, 0.0), float4(0.0, 2.0, 0.0, 0.0), float4(0.0, 0.0, 2.0, 0.0), float4(5.0, 6.0, 7.0, 1.0))
+
+fun projected_x(p: pos3) -> float:
+    let h = translate * p
+    return h.x / h.w
+
+test fwd_diff(projected_x, pos3(1.0), vec3(1.0, 0.0, 0.0)) == 2.0
+test:
+    let mut dp = vec3(0.0)
+    bwd_diff(projected_x, pos3(1.0), mut dp, 1.0)
+    dp.x == 2.0
+    dp.y == 0.0
+
+// the matrix's own tangent moves the position as a position: its translation column counts
+fun projected_by(m: mat4, p: pos3) -> float:
+    let h = m * p
+    return h.x
+
+const nudge = mat4(float4(0.0), float4(0.0), float4(0.0), float4(1.0, 0.0, 0.0, 0.0))
+
+test fwd_diff(projected_by, translate, nudge, pos3(1.0), vec3(0.0)) == 1.0
+test:
+    let mut dm = mat4(float4(0.0), float4(0.0), float4(0.0), float4(0.0))
+    let mut dp = vec3(0.0)
+    bwd_diff(projected_by, translate, mut dm, pos3(1.0, 2.0, 3.0), mut dp, 1.0)
+    dm.column(0).x == 1.0
+    dm.column(3).x == 1.0
+    dm.column(1).x == 2.0
+    dp.x == 2.0
+
+// a struct's tangent is the struct itself for now, so a position in one holds its direction
+struct particle:
+    at: pos3
+    mass: float
+
+fun reach(p: particle) => distance(p.at, pos3(0.0)) * p.mass
+
+const somewhere = particle(at = pos3(3.0, 4.0, 0.0), mass = 2.0)
+
+test fwd_diff(reach, somewhere, particle(at = pos3(1.0, 0.0, 0.0), mass = 0.0)) == 1.2
+test:
+    let mut g = particle(at = pos3(0.0), mass = 0.0)
+    bwd_diff(reach, somewhere, mut g, 1.0)
+    g.at.x == 1.2
+    g.mass == 5.0
+
+binding particles:
+    values: buffer[particle]
+    gradients: mut buffer[particle]
+
+@compute(64) fun particle_backward(@thread_id id: int3){particles}:
+    let mut g = particle(at = pos3(0.0), mass = 0.0)
+    bwd_diff(reach, particles.values[id.x], mut g, 1.0)
+    particles.gradients[id.x] = g

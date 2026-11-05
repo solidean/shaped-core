@@ -41,6 +41,15 @@ enum class sgl::check::feature : sgl::u8
     helper_lane_query,
     /// A `@layer` member (CHK-419): the vertex stage picks the render target's layer, which WebGPU has on no device.
     vertex_layer_output,
+    /// A float added atomically in one instruction, which vulkan and metal write where the device has it.
+    /// `atomic[float]` runs on every device without it, so it is what `has` asks rather than what a `require` needs.
+    float_atomic_add,
+    /// A ray-generation stage reorders its invocations by a hint, which only dx12 on Shader Model 6.9 writes.
+    /// `maybe_reorder` does nothing without it, so it is what `has` asks rather than what a `require` needs.
+    shader_execution_reordering,
+    /// A ray query that sees the opacity micromaps its BLASes hold, which only Shader Model 6.9 writes.
+    /// No program names it: an HLSL compile for a device that has micromaps states it for every ray query (EMIT-184).
+    opacity_micromap,
 };
 
 CC_FLAG_ENUM_INDEXED(sgl::check, feature, u32);
@@ -68,6 +77,9 @@ inline constexpr cc::string_view k_feature_names[] = {
     "first_instance",              //
     "helper_lane_query",           //
     "vertex_layer_output",         //
+    "float_atomic_add",            //
+    "shader_execution_reordering", //
+    "opacity_micromap",            //
 };
 inline constexpr isize k_feature_count = isize(sizeof(k_feature_names) / sizeof(k_feature_names[0]));
 
@@ -85,3 +97,44 @@ inline constexpr isize k_feature_count = isize(sizeof(k_feature_names) / sizeof(
     return -1;
 }
 } // namespace sgl::check
+
+/// The API a compile writes text for, which `target_api` reads once inlined (CHK-426).
+/// `none` where no text is written, as in a test or a description.
+/// The prelude's `graphics_api` enum lists these cases in this order.
+enum class sgl::check::graphics_api : sgl::u8
+{
+    none,
+    dx12,
+    vulkan,
+    metal,
+    webgpu,
+};
+
+/// The language a compile writes, which `target_language` reads once inlined (CHK-426).
+/// `sgl` where no text is written, since the interpreter runs SGL itself.
+/// The prelude's `shading_language` enum lists these cases in this order.
+enum class sgl::check::shading_language : sgl::u8
+{
+    sgl,
+    hlsl,
+    wgsl,
+    msl,
+};
+
+namespace sgl::check
+{
+inline constexpr cc::string_view k_graphics_api_names[] = {"none", "dx12", "vulkan", "metal", "webgpu"};
+inline constexpr cc::string_view k_shading_language_names[] = {"sgl", "hlsl", "wgsl", "msl"};
+} // namespace sgl::check
+
+/// What one compile writes for, which the check pass substitutes where an inlined body reads it (CHK-426).
+/// The default is no target and no device, which is what a test runs as.
+struct sgl::check::compile_target
+{
+    graphics_api api = graphics_api::none;
+    shading_language language = shading_language::sgl;
+    /// What the device has, which `has` answers; a feature outside it is one the device lacks.
+    feature_set device_features;
+
+    [[nodiscard]] bool operator==(compile_target const&) const = default;
+};

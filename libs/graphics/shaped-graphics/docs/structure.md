@@ -203,7 +203,7 @@ Every resource's backing memory is either **dedicated** (self-allocating) or **p
 Lifetime modes and the placed-vs-dedicated system: [concepts/memory.md](concepts/memory.md).
 
 `context` exposes `try_create_memory_heap` for a heap of buffers or of textures, which is what `ctx.transient`'s two bump allocators run on.
-Placement is live for buffers on dx12, vulkan and metal and for textures on dx12 and vulkan; webgpu places nothing.
+Placement is live for buffers on dx12, vulkan and metal and for textures on dx12, vulkan and metal; webgpu places nothing.
 
 ## Planned surface (beyond the current stubs)
 

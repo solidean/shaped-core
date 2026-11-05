@@ -366,6 +366,9 @@ struct machine
 
     flow call(flat_expr const& x, flat_call const& c, value& result)
     {
+        // CHK-427: a body in a target's own text runs where that target does, never here
+        if (c.text >= 0)
+            return type_error("a body in a target's own text, which only its target runs");
         // a texel of an `@atomic` image is no memory a test holds, so its update is evaluated as a load of one is
         if (auto const* const record = m.builtin_function(c.intrinsic);
             record != nullptr && record->is_atomic && !is_texel_atomic(c))

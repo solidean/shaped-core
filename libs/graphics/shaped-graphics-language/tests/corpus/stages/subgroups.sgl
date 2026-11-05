@@ -86,3 +86,11 @@ fun widest(b: bool) -> float:
 // reached through a helper, it is the test's own call that is refused
 @expect(error = "unsupported-yet")
 test widest(true) == 2.0
+
+// many invocations adding to one slot: where the subgroup agrees on the slot, its sum is added once
+binding splat_gradients:
+    per_splat: mut buffer[atomic[float]]
+
+@compute(64) fun splat_scatter(@thread_id id: int3){splat_gradients}:
+    let splat = id.x / 64
+    add_reduced(mut splat_gradients.per_splat[splat], splat, 0.25)

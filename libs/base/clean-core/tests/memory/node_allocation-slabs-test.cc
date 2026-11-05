@@ -130,6 +130,58 @@ TEST("node_allocation - multi-slab ring reuse")
     }
 }
 
+TEST("node_allocation - an owner free into a full slab is reused at the next exhaustion")
+{
+    cc::node_allocator alloc(cc::default_node_memory_resource);
+    auto const idx = cc::node_class_index_for<T8B>();
+    int const usable = usable_slots<T8B>();
+
+    // a bulk phase: every slab full, the head included
+    constexpr int slabs = 40;
+    cc::vector<cc::node_allocation<T8B>> nodes;
+    for (int i = 0; i < usable * slabs; ++i)
+        nodes.push_back(cc::node_allocation<T8B>::create_from(alloc, u64(i)));
+    REQUIRE(ring_len(alloc, idx) == slabs);
+
+    // one owner free in the oldest slab lists it, so the very next allocation takes the slot instead of a new slab
+    auto* const freed = nodes[0].ptr;
+    nodes[0] = {};
+    nodes[0] = cc::node_allocation<T8B>::create_from(alloc, u64(0));
+    CHECK(nodes[0].ptr == freed);
+    CHECK(ring_len(alloc, idx) == slabs);
+}
+
+#if CC_HAS_THREADS
+TEST("node_allocation - a remote free into a full slab is reused within one lap")
+{
+    cc::node_allocator alloc(cc::default_node_memory_resource);
+    auto const idx = cc::node_class_index_for<T8B>();
+    int const usable = usable_slots<T8B>();
+
+    constexpr int slabs = 40;
+    cc::vector<cc::node_allocation<T8B>> nodes;
+    for (int i = 0; i < usable * slabs; ++i)
+        nodes.push_back(cc::node_allocation<T8B>::create_from(alloc, u64(i)));
+    REQUIRE(ring_len(alloc, idx) == slabs);
+
+    // one free in the oldest slab, from another thread: it lands in remote, which only the walk's hand finds
+    auto* const freed = nodes[0].ptr;
+    cc::native_thread::start([&nodes] { nodes[0] = {}; }).join();
+
+    // a walk visits 8 slabs and leaves the hand there, so a lap takes slabs / 8 exhaustions plus the one in progress.
+    // each exhaustion that finds nothing adds one slab: that is the memory a remote free can cost while it waits.
+    int const lap_exhaustions = slabs / 8 + 2;
+    bool reused = false;
+    for (int i = 0; i < lap_exhaustions * usable && !reused; ++i)
+    {
+        nodes.push_back(cc::node_allocation<T8B>::create_from(alloc, u64(i)));
+        reused = nodes.back().ptr == freed;
+    }
+    CHECK(reused);
+    CHECK(ring_len(alloc, idx) <= slabs + lap_exhaustions);
+}
+#endif
+
 TEST("node_allocation - slab trim returns surplus fully-free slabs to backing")
 {
     cc::node_allocator alloc(cc::default_node_memory_resource);
@@ -305,5 +357,47 @@ TEST("node_allocation - abandoned slab is adopted by a later thread", exclusive(
     // consumer's refill took the producer's slab out of the orphan bin rather than mallocing a fresh one — which is
     // the whole property, and the one claim the process-global bin cannot invalidate.
     CHECK(base_of(consumer_nodes[0]) == producer_base);
+}
+#endif
+
+#if CC_HAS_THREADS
+namespace
+{
+// constructed on its thread before that thread's first allocation, so destroyed after the thread's allocator
+struct late_free_holder
+{
+    cc::node_allocation<T8B> node;
+};
+
+// outlives the thread, so the slab it shares with the holder's node stays orphaned instead of going back to backing
+cc::node_allocation<T8B> s_orphan_keeper;
+} // namespace
+
+TEST("node_allocation - a free after its thread's allocator is gone routes to remote", exclusive())
+{
+    auto const idx = cc::node_class_index_for<T8B>();
+    byte* base = nullptr;
+    u64 late_bit = 0;
+    bool same_slab = false;
+
+    cc::native_thread::start(
+        [&]
+        {
+            thread_local late_free_holder holder;
+            holder.node = cc::node_allocation<T8B>::create_from(cc::default_node_allocator(), u64(1));
+            s_orphan_keeper = cc::node_allocation<T8B>::create_from(cc::default_node_allocator(), u64(2));
+            base = base_of(holder.node);
+            same_slab = base_of(s_orphan_keeper) == base;
+            late_bit = u64(1) << cc::node_slot_index_for_ptr(reinterpret_cast<byte*>(holder.node.ptr), base, idx);
+        })
+        .join();
+    REQUIRE(same_slab);
+
+    // the allocator orphaned the slab under a stamp no thread holds, so the holder's later free took the remote path.
+    // a plain write to local there would have raced whichever thread adopts the slab.
+    CHECK(*cc::node_slab_owner_for_base(base) == cc::node_orphan_owner);
+    CHECK((*cc::node_slab_remote_for_base(base, idx) & late_bit) != 0);
+
+    s_orphan_keeper = {};
 }
 #endif

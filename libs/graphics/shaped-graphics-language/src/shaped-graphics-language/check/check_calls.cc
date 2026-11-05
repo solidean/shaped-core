@@ -417,7 +417,36 @@ type_id checker::check_call(function_scope& scope, ast::expr_id id, ast::call co
         // `and`, `or` and `not` are the language's own: no function could leave an operand unevaluated
         if (call.is_short_circuit || spelling == "not")
             return check_logical(scope, id, call);
+        if (spelling == "==" || spelling == "!=")
+            if (auto const compared = check_type_comparison(scope, id, call); compared.has_value())
+                return compared.value();
         auto arguments = check_arguments(scope, call.arguments, false);
+        // CHK-152: a leading dot beside an enum, `api == .vulkan`, names a case of that enum
+        if ((spelling == "==" || spelling == "!=") && arguments.types.size() == 2)
+            for (auto k = isize(0); k < 2; ++k)
+            {
+                auto const enumeration = arguments.types[1 - k];
+                if (arguments.leading_dots[k].empty() || !is_valid(enumeration) || !out.is_plain_enum(enumeration))
+                    continue;
+                auto const name = arguments.leading_dots[k];
+                auto const dot = arguments.written[k].expr;
+                auto const cases = out.at(out.at(enumeration).cases);
+                auto index = -1;
+                for (auto i = isize(0); i < cases.size(); ++i)
+                    if (cases[i].name == name)
+                        index = i32(i);
+                if (index < 0)
+                {
+                    report(diagnostic_kind::unknown_member, file, span_of(file, dot),
+                           cc::format("the enum {} has no case {}", out.name_of(enumeration), name));
+                    return error_type;
+                }
+                set_target(file, dot,
+                           {.kind = target_kind::enum_case, .symbol = out.at(enumeration).symbol, .index = index});
+                set_type(file, dot, enumeration);
+                arguments.types[k] = enumeration;
+                arguments.leading_dots[k] = {};
+            }
         // `==` and `!=` over one enum are the language's own (CHK-149), and what they compare is the cases'
         // `int`s (EVAL-64) — so they resolve to the `int` overload, and no later pass needs an enum rule.
         if ((spelling == "==" || spelling == "!=") && arguments.types.size() == 2
@@ -561,13 +590,18 @@ type_id checker::check_call(function_scope& scope, ast::expr_id id, ast::call co
     }
 
     // CHK-329: a trace whose third argument names a ray type is a ray-tracing stage's trace
-    if (text == "trace")
+    // CHK-434: `trace_hit` is one that gives its hit object rather than running its shaders
+    if (text == "trace" || text == "trace_hit")
     {
         auto const arguments = ast.at(call.arguments);
         if (arguments.size() >= 4 && arguments[2].name.empty() && ast::is_valid(arguments[2].value))
-            if (auto const ray = ray_type_of(file, arguments[2].value); ray.has_value())
+            if (auto ray = ray_type_of(file, arguments[2].value); ray.has_value())
+            {
+                if (text == "trace_hit")
+                    ray.value().kind = ray_trace_kind::hit_object;
                 return ray.value().ray < 0 ? checked_module::error_type
                                            : check_pipeline_trace(scope, id, call, ray.value());
+            }
     }
 
     return check_named_call(scope, id, call, text, seen_from(file, text), false);
@@ -652,6 +686,10 @@ type_id checker::check_named_call(function_scope& scope,
     }
     if (!judge_uniform_load(file, candidates, call.arguments))
         return error_type;
+    // PROTOTYPE (autodiff): a derivative of a named function takes what that function's parameters ask
+    if ((text == "fwd_diff" || text == "bwd_diff") && is_prelude_file(out.at(candidates[0]).file))
+        if (auto derived = derivative_candidates(candidates, arguments, file, callee_where); !derived.empty())
+            candidates = cc::move(derived);
     auto const result = resolve_overload(scope, id, call.callee, candidates, arguments, text);
     if (result != error_type)
     {
@@ -780,6 +818,9 @@ type_id checker::check_dot_call(function_scope& scope, ast::expr_id id, ast::cal
     handed.remove_back();
     if (receiver != error_type && out.at(receiver).kind == type_kind::stream)
         return check_stream_call(scope, id, call, receiver);
+    if (receiver != error_type && name == "invoke" && out.name_of(receiver) == "hit_object"
+        && out.builtin_type_of(receiver) != nullptr)
+        return check_hit_invoke(scope, id, call);
     auto arguments = check_arguments(scope, call.arguments, false);
     if (receiver == error_type || member.name.empty())
         return error_type;

@@ -5,15 +5,11 @@
 //   xcrun -sdk macosx metal -O2 -o raytrace.metallib raytrace.metal
 //   xxd -i raytrace.metallib > raytrace.metallib.h
 //
-// That keeps the tier-2 binary free of the shader library and the compiler toolchain, the same way
-// double_compute.metal does for the dispatch path.
-//
-// **HAND-WRITTEN, AND TEMPORARY.**
-// The agreed shape is HLSL run through SPIRV-Cross, with the HLSL, the generated MSL and the metallib all checked in —
-// because the argument-buffer layout this backend encodes was chosen to match what SPIRV-Cross emits, so a fixture
-// written by hand can agree with the backend and still disagree with every real shader.
-// Neither DXC nor SPIRV-Cross is available on an arm64 macOS host today, which is why this exists in the meantime.
-// Regenerate it from HLSL once they are: TEMPORARY(debt-sg-metal-hand-written-fixtures).
+// **HAND-WRITTEN, ON PURPOSE.**
+// Every other tier-2 fixture is the SGL package in tests/shaders, tracing.sgl among them.
+// Two tests still take their shaders from here, because SGL cannot express them: a closest hit that recurses through its
+// own table, which SGL refuses as a recursive trace, and a procedural hit group carrying an any-hit, which the backend
+// refuses and SGL cannot spell.
 //
 // The binding shape is written by hand in the test beside it, so the test states what it means rather than inheriting
 // whatever a reflector produced.

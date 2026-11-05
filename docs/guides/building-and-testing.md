@@ -160,7 +160,7 @@ The default preset only exercises the assertions-on branch the table above names
 
 Every preset above builds against per-target precompiled headers.
 The `nopch-*` and `debug-nopch-*` presets set `CMAKE_DISABLE_PRECOMPILE_HEADERS=ON` instead, which is what catches a source relying on a header only the PCH's `/FI` supplied.
-`check` runs `debug-nopch-*` as its debug leg and CI runs `nopch-linux-clang`, so you rarely reach for these by hand.
+`check --all-presets` runs `debug-nopch-*` as its debug leg and CI runs `nopch-linux-clang`, so you rarely reach for these by hand.
 `uv run dev.py build --preset nopch-clang` reproduces a CI canary failure locally.
 [precompiled-headers.md](precompiled-headers.md) is the tiers, how to pick one, and the ordering rule the SDK gates impose.
 
@@ -310,6 +310,24 @@ Everything dev.py starts runs under a memory guard, so a runaway process or a pi
 - A gate that fails on the guard is a setup to fix, or a wait for memory to free up, never a reason to raise the limits by default.
 
 [memory_guard.py](../../tools/dev/lib/core/memory_guard.py) has the details, and [its self-test](../../tools/dev/memory-guard-self-test.py) runs with `check`.
+
+## A step that goes quiet
+
+A hung build prints nothing past its `[build] all` banner, so after 5 minutes without output dev.py names what is still running under the step.
+- Each process below it is listed with its age, its CPU time and its command line, and the report repeats every 5 minutes the step stays quiet.
+- One that used no CPU since the last look is marked: it is waiting rather than working, and is most likely where the step is stuck.
+- It only reports and never ends anything, since a long link is quiet and busy; a test binary is left to nexus's own watchdog.
+- `SC_DEV_STALL_SECS` sets the quiet time in seconds, 0 turning it off.
+
+[stall_report.py](../../tools/dev/lib/core/stall_report.py) has the details, and [its self-test](../../tools/dev/stall-report-self-test.py) runs with `check`.
+
+## A build directory keeps its environment
+
+On Windows a build directory is configured inside the MSVC developer environment or outside it, for life, and a configure that switches is refused with an error saying so.
+CMake re-detects tools at every configure while the cache keeps what it found first, so a switch pairs the two.
+That is how a bare `cmake <build>` from a plain shell once gave SDL3's `version.rc` a rule for llvm-rc that ran rc.exe, which deadlocked the build with no output.
+dev.py enters the environment itself, so configuring through it is always right; a toolset or SDK update inside the environment only warns.
+[ConfigureEnvironment.cmake](../../tools/cmake/ConfigureEnvironment.cmake) is the check.
 
 ## Quiet by default, and how to diagnose
 
@@ -545,11 +563,11 @@ A test opts in with `nx::config::rerun_on("<glob>")`, written by its author: a f
 dev.py reads the triggers from each binary's `--list-tests-json` listing, runs the matching tests by name with `--thorough` on the default preset alone, and fails if fewer ran than were selected.
 A glob matching no tracked file is an error, so a moved file cannot silently disarm the rule.
 [test-runtime.md](../../libs/base/nexus/docs/test-runtime.md) has the declaration.
-It builds and runs the suite across five build variants:
+It builds and runs the suite on the platform default **relwithdebinfo**, `CC_ASSERT` on.
+Each further variant is a whole build of its own, so they are opt-in: `--all-presets` adds them, each under `--smoke`, and CI runs them all:
 
 - **debug** — `-O0` plus mimalloc's `MI_DEBUG` heap, `CC_ASSERT` on, and **precompiled headers off**
   (`debug-nopch-*`, the cheapest of the four to give a PCH up on, so a source that dropped an include the PCH's `/FI` was supplying fails here — see [precompiled-headers.md](precompiled-headers.md))
-- the platform default **relwithdebinfo** — `CC_ASSERT` on
 - the **release** sibling — `CC_ASSERT` off
 - a **single-threaded** sibling — `SC_THREADS=OFF`, otherwise reachable only through a wasm build
 - on **Linux and macOS**, a **sanitizer** preset — ASan + UBSan
@@ -835,7 +853,12 @@ A low load under a low `serial` is waiting on something no test declared.
 
 `uv run dev.py test --thorough` runs every test at full strength: a test reads it through `nx::is_thorough()` and raises what its default run narrows, such as a fuzz's seed count.
 A test marked `thorough_only` runs only then, and the per-binary timeout grows tenfold to 600 s unless `--timeout` is given.
+`uv run dev.py test --smoke` is the other direction: a heavy test narrows to its smallest case under `nx::is_smoke()`, and `check --all-presets` runs every preset but its default one so.
 [nexus' test-runtime](../../libs/base/nexus/docs/test-runtime.md) is the concept.
+
+`uv run dev.py test "<filter>" --sample` profiles what it runs.
+Each binary samples its threads until the run ends and prints where the busy time went, by self and by total, keeping the recording as `<binary>.ccrec` beside it.
+The table is symbolized at exit, seconds per few thousand distinct addresses, so pair it with a filter; [profiling](../../libs/base/clean-core/docs/profiling.md#sampling) has the rest.
 
 ## Examples (`example`)
 
@@ -943,7 +966,8 @@ Without that, LeakSanitizer never scans mimalloc memory and reports anything own
 The cost is that allocation behaviour is not what the other presets do — in-place resize always declines — so a bug that only reproduces here may be the allocator rather than the code.
 [platforms.md](../platforms.md#default-allocator-sc_mimalloc) owns the knob, and it is independent of `SANITIZE`: sanitizing a mimalloc build stays available for when mimalloc itself is the suspect.
 
-**Vendored code is excluded.** [tools/cmake/sanitizer-ignorelist.txt](../../tools/cmake/sanitizer-ignorelist.txt) suppresses findings attributed to `extern/`.
+**Vendored code is excluded.** [tools/cmake/sanitizer-ignorelist.txt.in](../../tools/cmake/sanitizer-ignorelist.txt.in) suppresses findings attributed to this repository's own `extern/`.
+It is anchored to the repository root, so shaped-core stays instrumented when a consumer checks it out under its own `extern/`.
 We cannot fix those without diverging from upstream, and a finding nobody will ever act on trains the reader to scroll past the next one.
 Only attribution is suppressed: our own code stays fully instrumented, including the calls it makes into those libraries.
 The flag is not wired for clang-cl, so the Windows sanitize preset still reports them.

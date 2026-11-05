@@ -81,7 +81,8 @@ cc::result<dx12_raytracing_pipeline_handle> dx12_context::create_dx12_raytracing
     CC_RECORD_SCOPE("sg.pipeline.raytracing.create");
 
     require_persistent(scope);
-    return dx12_raytracing_pipeline::create(_device.Get(), cc::move(layout), desc);
+    return dx12_raytracing_pipeline::create(_device.Get(), cc::move(layout), desc,
+                                            supports(sg::feature::opacity_micromap));
 }
 
 cc::result<dx12_raytracing_shader_table_handle> dx12_context::create_dx12_raytracing_shader_table(

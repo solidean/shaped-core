@@ -143,6 +143,10 @@ struct cc::rec::sampling_stats
 
     /// Ticks that found no thread worth sampling.
     u64 idle = 0;
+
+    /// Ticks completed, each covering up to `threads_per_tick` threads.
+    /// `taken` sums over every thread the process has, so this is what counts samples of any one thread.
+    u64 ticks = 0;
 };
 
 namespace cc::rec

@@ -34,6 +34,16 @@ struct sgl::ast::require_decl
     constexpr bool operator==(require_decl const&) const = default;
 };
 
+/// A tagged string at file scope: what a target's text needs ahead of the entry point, in the language its tag names
+/// (AST-159).
+struct sgl::ast::preamble_decl
+{
+    /// The quoted literal.
+    expr_id text = expr_id::none;
+
+    constexpr bool operator==(preamble_decl const&) const = default;
+};
+
 enum class sgl::ast::receiver_kind : sgl::u8
 {
     /// No `self`: a free function, or a static method when it is a member.
@@ -63,10 +73,27 @@ struct sgl::ast::fun_decl
     constexpr bool operator==(fun_decl const&) const = default;
 };
 
+/// One branch of a struct whose whole body is a `const if` chain (AST-160).
+struct sgl::ast::type_branch
+{
+    form_id form = form_id::none;
+    /// `none` for the closing `else`.
+    expr_id condition = expr_id::none;
+    /// The branch's fields, where it is an SGL branch.
+    range_of<decl_id> members;
+    /// Its tagged strings, one per language, where it spells the type in a target's text.
+    range_of<expr_id> texts;
+
+    constexpr bool operator==(type_branch const&) const = default;
+};
+
 struct sgl::ast::struct_decl
 {
     source_span name;
+    /// The fields; for a struct whose body is a `const if` chain, those of its first SGL branch.
     range_of<decl_id> members;
+    /// The branches of a struct whose whole body is a `const if` chain, a text type; empty for every other struct.
+    range_of<type_branch> branches;
     /// No block at all: the type has no members one could name, which differs from a block that declares none.
     bool is_opaque = false;
     /// `rays name:`, a ray set: each member a ray type and the payload it carries (AST-150).
@@ -214,6 +241,7 @@ struct sgl::ast::decl
                 module_decl,
                 use_decl,
                 require_decl,
+                preamble_decl,
                 fun_decl,
                 struct_decl,
                 enum_decl,

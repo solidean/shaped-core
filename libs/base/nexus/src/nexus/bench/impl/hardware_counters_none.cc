@@ -2,7 +2,7 @@
 #include <nexus/bench/impl/hardware_counters_backend.hh>
 
 // Fallback backend: no PMU.
-// Used on any platform without a hardware-counter implementation — currently macOS, and any OS that is neither Windows nor Linux.
+// Used on any platform without a hardware-counter implementation: any OS that is neither Windows, Linux nor macOS.
 // Produces only the baseline (elapsed time, and on x86 a reference-cycle count) and reports every PMU counter as unavailable.
 
 namespace nx::bench::impl
@@ -53,8 +53,7 @@ cc::vector<hw_counter_sample> backend_measure(cc::function_ref<void()> body, cc:
     auto const cycles_end = cc::current_cycles();
 
     if (pmu_requested)
-        warn_pmu_unavailable_once("this platform has no hardware-counter backend yet (macOS/ARM64 is unsupported for "
-                                  "now).");
+        warn_pmu_unavailable_once("this platform has no hardware-counter backend yet.");
 
     cc::vector<hw_counter_sample> out;
     out.reserve(counters.size());

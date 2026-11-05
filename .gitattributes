@@ -1,3 +1,9 @@
+# Every text file is checked out with LF on every platform, whatever a contributor's core.autocrlf says.
+# Otherwise each checkout drifts into its own mix: a file a tool rewrote with LF still looks unchanged to git.
+# Identical bytes in every checkout keep build outputs identical, since debug info records each source file's checksum.
+# Git detects binary files by content; the rules below stay as the reasons specific files need LF.
+* text=auto eol=lf
+
 # Shell scripts must keep LF line endings regardless of a contributor's
 # core.autocrlf: a trailing CR on the shebang line makes the interpreter path
 # invalid under POSIX shells, which silently breaks the diag-launcher wrapper

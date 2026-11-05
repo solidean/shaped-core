@@ -203,6 +203,11 @@ checker::local_only_found checker::local_only_path(type_id type, bool in_memory,
                                     .reason = record->local_only_reason,
                                     .type = type};
     auto const& t = out.at(type);
+    // CHK-432: a text type is the target's own type on some compile, which no memory and no edge of ours lays out
+    if (t.kind == type_kind::structure && t.is_text_type)
+        return {.path = cc::format(": {}", out.name_of(type)),
+                .reason = "a compile may spell it in its target's own text",
+                .type = type};
     if (t.kind == type_kind::array || t.kind == type_kind::buffer)
     {
         // an array of one is named whole, `ms: mat3[2]`, so the path keeps the length the member was declared with

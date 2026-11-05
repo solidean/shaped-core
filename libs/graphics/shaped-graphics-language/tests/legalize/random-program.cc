@@ -253,6 +253,15 @@ struct generator
                 auto const rhs = expr(type, depth - 1);
                 return b.call(operators[r - 4], {lhs, rhs});
             }
+            if (r == 7 && chance(50))
+            {
+                // a square is 0 or 1 mod 4, so `e * e + 1` is never 0 nor -1: a guard of LEGAL-65 stands and never fails
+                auto const lhs = expr(type, depth - 1);
+                auto const e = leaf(type);
+                auto const again = b.add_expr(type, b.e.at(e).node);
+                auto const divisor = b.call("add_int", {b.call("multiply_int", {e, again}), b.int_literal(1)});
+                return b.call(chance(50) ? "divide_int" : "remainder_int", {lhs, divisor});
+            }
             return r == 9 ? racy(type, depth) : block_expr(type, depth);
         }
 

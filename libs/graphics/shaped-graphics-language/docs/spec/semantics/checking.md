@@ -309,6 +309,7 @@ An option is read like any `const`, and a branch on it leaves the text with what
 * **CHK-147** `enum.case` is an expression of the enum's type, and a name the enum has no case of is `unknown-member`.
 * **CHK-148** An enum's own name is no value, by CHK-63.
 * **CHK-149** `==` and `!=` over two values of one enum are the language's own, as `and` is by CHK-116: no function declares them, and each gives a `bool`.
+  A leading dot on either side is a case of the other side's enum, by CHK-152: `api == .vulkan`.
 * **CHK-150** An enum converts to no type and no type converts to it, `int` included, and it has no other operator ([why](why/checking.md#chk-150)).
 * **CHK-151** A nested declaration in an `enum` block is `unsupported-yet`; its properties and methods are those of a struct (CHK-233).
 * **CHK-218** `bool` is a `@builtin enum` of the prelude with the cases `false` and `true`, in that order, so `bool.true` is a value like `light_kind.sun`.
@@ -412,7 +413,7 @@ fun shade(k: float) -> float:
 
 | on | the known attributes |
 |---|---|
-| a function | `@builtin`, `@pure`, `@operator`, `@vertex`, `@pixel`, `@compute`, `@geometry`, `@tessellation_control`, `@tessellation_evaluation`, `@stages`, `@shadowable`, `@expect`, `@internal`, `@preferred_subgroup_size` |
+| a function | `@builtin`, `@pure`, `@barrier`, `@subgroup`, `@derivatives`, `@operator`, `@vertex`, `@pixel`, `@compute`, `@geometry`, `@tessellation_control`, `@tessellation_evaluation`, `@stages`, `@shadowable`, `@expect`, `@internal`, `@preferred_subgroup_size` |
 | a function, as a ray-tracing stage | `@raygen`, `@miss`, `@closest_hit`, `@any_hit`, `@intersection`, `@callable` |
 | a struct | `@builtin`, `@vertex`, `@pixel`, `@shadowable`, `@no_padding`, `@internal`, `@swizzle` |
 | an enum | `@builtin`, `@shadowable`, `@bitflags`, `@internal` |
@@ -875,6 +876,13 @@ fun f() -> float:
   The shader is correct at any size, reads the size it got through `@subgroup_size`, and needs no feature.
   `n` is a power of two from 4 to 128, written as an `int` literal or as an `int` `const`.
   Any other `n`, and the attribute on any other function, is `invalid-attribute-arguments`.
+* **CHK-435** `@float(.specials)` on a function states the least float guarantee its body needs: `.fast`, `.specials`, `.precise` or `.ieee`, each stricter than the one before.
+  An entry point keeps the strictest guarantee of every function it inlines, itself included, and a function that states none is at `.fast`.
+  What each level lets a target do to a float is EVAL-6's, and what a target keeps is EMIT-185's.
+  Any other argument is `invalid-attribute-arguments`.
+* **CHK-436** A float compared with itself, `x != x` or `x == x`, in code an entry point compiles at `.fast` is the warning `nan-test-at-fast`.
+  It tests for a NaN, which a target may assume never arises at `.fast` and fold.
+  `is_nan` and `is_inf` test the bits on every target, and hold at every level.
 * **CHK-267** `@expect(footprint = "slot: access, ...")` on an entry point pins its [footprint](../bindings.md#footprint): each touched slot once, as `read`, `write` or `read write`, in any order.
   A footprint that differs is `unmet-expectation`, whose detail spells the one the code has.
   On a function that is no entry point, or with any other argument, it is `invalid-attribute-arguments`.
@@ -894,6 +902,7 @@ A feature is what a device may lack, so using one makes a shader non-portable on
   The 16-bit types add `shader_f16` and `shader_int16` (CHK-382), and the subgroup operations `subgroups` (CHK-376).
   Coherent memory adds `device_coherence` (CHK-368), image atomics `image_atomics` (CHK-372), and a pixel stage's strong compare-exchange `helper_lane_query` (EMIT-163).
   A `@layer` field adds `vertex_layer_output` (CHK-419).
+  What `has` asks rather than a `require` needs adds `float_atomic_add` and `shader_execution_reordering` (CHK-426).
   The stages and stage inputs a device may lack add `primitive_index`, `sample_rate_shading`, `geometry_shader` and `tessellation_shader`.
   Any other name is the normal error `unknown-feature`, and its detail lists the names.
 * **CHK-259** A `require` at file scope grants its features to everything in the file ([why](why/checking.md#chk-259)).
@@ -910,6 +919,40 @@ A feature is what a device may lack, so using one makes a shader non-portable on
   So a body's `require` that such a call needs is used, which CHK-265 judges once every entry point is flattened.
   The prelude's `trace` is how a program reaches one: its steps need `ray_query`.
 * **CHK-264** A feature an entry point needs and does not declare is the normal error `feature-not-declared` at its name, with a note at each listed binding that needs it.
+* **CHK-426** A compile writes for one target and one device, and an inlined body reads them as constants: `target_api`, `target_language` and `has(.f)`.
+  `target_api` is a `graphics_api`, `.none`, `.dx12`, `.vulkan`, `.metal` or `.webgpu`, and `target_language` a `shading_language`, `.sgl`, `.hlsl`, `.wgsl` or `.msl`.
+  `has(.f)` is whether the device has feature `f`, named as a `require` names it, and its feature is a constant once inlined or the call is `invalid-constant-argument`.
+  A test is written for no target and runs on no device: `.none`, `.sgl`, and `has` false for every feature.
+  A const is one value for every compile, so one whose value reads any of the three is `invalid-constant-argument`; a function that returns it is inlined where it is called.
+  A branch whose condition is `has(.f)`, or an `and` of it, is granted `f` where the device has it, so a call there that needs `f` needs no `require`; a use outside that branch still does.
+  So `const if has(.subgroups):` (CHK-425) keeps a fast branch on a device with the feature and the other one where it lacks it, and neither is an error.
+* **CHK-427** A function's body may be a target's own text: a run of tagged strings (STR-46), one per language, `"hlsl`, `"wgsl` or `"msl`.
+  The run stands as the whole body, or as the whole branch of a `const if` that is the whole body, at any depth of such chains; anywhere else it is `invalid-target-text`.
+  A compile writes the alternative in its own language where the call stands, and one with no alternative in it is `invalid-target-text` at the entry point; a test runs none.
+  `$name` is the parameter of that name, as the argument written, and `$result` a local of the result type the text assigns, which is the call's value.
+  A function with a result has `$result` in every alternative and none without one, and no parameter is named `result`.
+  `$name.member`, a run of fused `.symbol` pairs (STR-25), is the target's member of the argument, which a target writes as a primary.
+  The text is not checked, so a call of such a function is what its declaration says (CHK-431); what GPU memory it touches is what its parameters' marks say, and the footprint reads them.
+  A description writes for no target, so it reads such a body as any of its alternatives, whose footprint is the same.
+  A text inside a branch a `has(.f)` granted (CHK-426) uses `f`: the entry point's features name it, and a compile reads what it needs from them, a shader model among it.
+* **CHK-431** A function whose body is a target's text declares what its text does, since the check reads nothing of the text.
+  `@pure` makes a call of it a value of no effect, as uniform as its arguments; without it, a call has an effect and gives a value that may differ between invocations.
+  `@barrier`, `@subgroup` and `@derivatives` say that its text waits for the workgroup, exchanges values in the subgroup, or takes derivatives across a quad of pixels.
+  Each makes the call need the uniform control flow a builtin of its kind does (CHK-282, CHK-377), and what a `@subgroup` call gives is unproven as a builtin's is.
+  What it writes through a `mut` parameter is what the call gives.
+  On a function whose body is SGL, each of the three is `unsupported-yet`, and a `@barrier` function that is `@pure` is `invalid-attribute-arguments`, since a barrier is an effect.
+* **CHK-432** A struct whose body is a `const if` chain (AST-160) is a **text type**, which each compile spells as the first branch whose condition holds.
+  A branch of members is its SGL branch, which a text type has at most one of, or the second is `invalid-target-text`: its fields are one list for every target.
+  Any other branch spells the type in a target's text, a tagged string per language, which holds no placeholder and reads as one line.
+  The check judges the type by its SGL branch alone, as a struct of those fields; without one it is opaque, with no field and no constructor.
+  A condition reads `target_api`, `target_language` and `has(.f)`, joined by `and`, `or` and `not`, and anything else is `unsupported-yet`.
+  A compile that spells it in its target's text writes that text wherever the type stands, declares no struct for it, and hands it to a text body as is.
+  There a field read or a construction of it is `invalid-target-text`, since its fields are its SGL branch's alone, and so is a compile that takes no branch or one with no spelling in its language.
+  A text type is a value of function bodies alone (CHK-397), so no binding, buffer or stage edge holds it, whatever branch a compile takes.
+  A test runs on no target, so it takes the SGL branch, and one that takes another is `invalid-target-text`.
+* **CHK-428** A tagged string at file scope (AST-159) is that file's preamble in its language.
+  It is written once ahead of an entry point that writes a body in a target's text from that file in that language.
+  Its language is one a target writes, or it is `invalid-target-text`, and so is a placeholder in it, since it belongs to no call; `$$` is a dollar.
 * **CHK-265** A `require` in a body that is not the declaration an entry point needs is the warning `unused-require`, and so is a second `require` of a feature in one body.
   A `require` in a test's body or a helper's is used where a call that body reaches, inlined, needs the feature (CHK-322).
   A `require` of a file or of a binding is never unused: each declares an intent, whether anything uses the feature or not ([why](why/checking.md#chk-265)).
@@ -1065,7 +1108,8 @@ A `require` in a test's body that nothing in it uses is `unused-require`, and a 
   The payload, the decision's result and its locals it writes freely, since they are how it answers.
   A decision is an `@any_hit` or an `@intersection` entry point, and a function an inline trace calls as one: a parameter that takes a candidate or a box makes it so, in any stage.
   The other ray-tracing stages take every atomic of a `mut buffer` and of an `@atomic` image; none of them lists workgroup memory (CHK-294).
-* **CHK-297** An expression of an atomic's type stands only as a builtin's argument; anywhere else, and as the place of an assignment, it is `wrong-kind-of-name`.
+* **CHK-297** An expression of an atomic's type stands only as a builtin's argument or a `mut` parameter's; anywhere else, and as the place of an assignment, it is `wrong-kind-of-name`.
+  A `mut` parameter of an atomic's type is the caller's atomic, so a function updates it by its methods as the caller would.
   A local, a parameter or a field of an atomic's type is `wrong-kind-of-name` as well.
 * **CHK-372** `@atomic` on a `mut` image member of the format `.r32_uint` or `.r32_sint` makes each of its texels an atomic of `uint` or `int` ([why](why/checking.md#chk-372)).
   On any other member it is `wrong-kind-of-name`, and it needs `image_atomics`, a form CHK-201 judges.
@@ -1279,7 +1323,7 @@ HLSL writes them on dx12 and vulkan; WebGPU and Metal have neither, so WGSL and 
 * **CHK-329** `trace(world, r, set.ray, mut p)` whose third argument names a ray type of a ray set is a **trace of a ray type**, and no call of the prelude's `trace`.
   `world` is an acceleration structure and `r` a `ray`, or `type-mismatch`; a name the set has no ray type of is `unknown-member`.
   The payload is marked `mut`, or `no-matching-overload`, and it is a place (CHK-316) of exactly the ray type's payload, or `type-mismatch`.
-  `flags`, a `ray_flags`, and `mask`, an `int`, may follow by name, and any other argument is `no-matching-overload`.
+  `flags`, a `ray_flags`, `mask`, an `int`, and `reorder` with its bits (CHK-433) may follow by name, and any other argument is `no-matching-overload`.
   It gives `void`, and is the target's trace with the ray type's position in its set as the ray contribution and the miss index, and the set's size as the multiplier.
   Its builtin is `@stages(.raygen, .closest_hit, .miss)`, so a trace from any other stage is `stage-not-allowed` (CHK-193).
   A test that reaches one is `unsupported-yet`, since a test runs no pipeline and has no tables to trace through.
@@ -1296,6 +1340,20 @@ HLSL writes them on dx12 and vulkan; WebGPU and Metal have neither, so WGSL and 
 
 ### Declarations of a pipeline
 
+* **CHK-433** A trace of a ray type takes `reorder` by name.
+  A constant `bool` regroups the invocations by what the trace hit.
+  A `uint` hint regroups them by the hit and the hint's low `reorder_bits` bits.
+  `reorder_bits` is an `int` constant from 1 to 16, and stands exactly where `reorder` is a hint.
+  Anything else is `invalid-constant-argument` or `no-matching-overload`, and a `reorder` of another type `type-mismatch`.
+  It is a hint: a trace means what it means without it, and each invocation goes on as it was.
+  A raygen of a dx12 compile whose device has `shader_execution_reordering` traces into a hit object, regroups by it, then runs its shaders, and uses the feature.
+  Every other trace is the plain one, its hint unevaluated.
+* **CHK-434** `trace_hit(world, r, set.ray, mut p)` traces as `trace` does, and runs the any-hit and intersection shaders alone: it gives a `hit_object`, and `flags` and `mask` follow by name.
+  `h.invoke(mut p)` then runs the closest hit or the miss the hit object holds, on a payload of the ray type it traced, which is `type-mismatch` otherwise.
+  Before that, `h.is_hit`, `h.is_miss`, `h.t`, `h.instance_id`, `h.instance_index`, `h.geometry_index` and `h.primitive_index` read what was hit.
+  `h.reorder()` or `h.reorder(hint, bits)` regroups the invocations by it.
+  A hit object is a `let` of the `trace_hit` that gave it, which is how its invocation knows the payload's type; any other value of it is `unsupported-yet`, and so is a `reorder` on the trace itself.
+  Every part of it needs `shader_execution_reordering`, so it stands under `has(.shader_execution_reordering)` with a plain `trace` beside it, and is raygen's alone.
 * **CHK-330** A `hit_group name for set:` is one row of a ray-tracing pipeline's table, for the ray set it names.
   A name that is no ray set is `invalid-pipeline`, and one that names nothing `unknown-name`, in a hit group and in a pipeline's `rays` alike.
   Its settings are `geometry`, `intersection`, and at most one record per ray type of its set, `ray = (closest_hit = f, any_hit = g)`, either left out.
@@ -1361,6 +1419,7 @@ hit_group textured for path_rays:
   A splatted value that is no local is bound to a temporary local where its first member stands, so it is evaluated once and no earlier than written.
 * **CHK-104** Every name an emitter writes comes from one **mint**, which hands out a desired name when it is free and `name_1`, `name_2`, … otherwise ([why](why/checking.md#chk-104)).
 * **CHK-105** An entry point keeps its name, and every module-level name is taken in the mint before the first local is minted.
+  A function of a type scope takes none: a method, a static or a property is reached through its type and inlined, so no text writes its name, and `let t` stays `t`.
 * **CHK-213** An entry point whose flat tree the pass cannot write, though nothing it reaches reported an error, is `unsupported-yet`.
   It stands at the first expression or statement the pass could not write, in whatever function that was inlined from, and a note names the entry point.
   Where the pass knows no such place, it stands at the entry point's name.
@@ -1370,6 +1429,17 @@ hit_group textured for path_rays:
   No rule that judges an entry point's inlined body judges it: neither the uniformity pass (CHK-282) nor the features the entry point needs (CHK-263).
   Every body is still checked on its own (CHK-129), so an error in that branch is reported all the same.
   A `let` holds no constant, so a branch on a local that holds an option keeps both sides.
+  A call inlined to a block that does nothing but leave a constant is that constant, so a branch on `is_vulkan()` is taken as one on its result.
+* **CHK-425** Every condition of a `const if` chain (AST-157) is a constant (CHK-310) once the entry point or the test is inlined, so CHK-356 takes exactly one branch, or none.
+  A condition that is not is `invalid-constant-argument`, judged of each inlined copy as an unrolled `for`'s bound is (CHK-389).
+  Every branch is still checked on its own as an `if`'s is, but for the branches CHK-430 rules out before inlining.
+* **CHK-430** A branch of a `const if` whose condition is false whatever the target, the device and the options are is never checked, nor is any branch after one whose condition is true.
+  Such a condition is built by `and`, `or` and `not` from `true` and `false`, a generic's parameters in an instance, a type comparison (CHK-429), and a comparison of numbers.
+  Those numbers are literals, value parameters, enum cases and consts that read no option.
+  It is decided in three values: a known false decides an `and`, and a known true an `or`, whatever the other side reads.
+  So an instance checks only the branches its own arguments leave, as C++'s `if constexpr` discards the rest, and the open body still judges the names of every branch (CHK-338).
+  A condition that reads the target, `has` or an option decides nothing here, so every branch it guards is checked for every compile.
+  What follows a chain an instance decided is never `unreachable-code`, since it serves the instances that take another branch.
 * **CHK-268** A flat tree nests at most 40 levels, and an entry point whose tree nests deeper is `nesting-too-deep` and has no flat tree.
   A level is an operand, the body of a block expression, an expression a statement holds, and a statement list inside a statement; every call counts as inlined.
   A top-level `let x = a + b + …` is one level for the `let` and one per term, so 40 terms is past the limit.
@@ -1524,7 +1594,7 @@ A call deduces what each parameter stands for, and inlining writes that in its p
   Nothing deduces a value parameter yet, so a call states it (CHK-340).
   A parameter may have a default of its kind, `[T = float]` or `[n: int = 4]`, which may name a parameter before it, `[T, U = T]`.
   A type parameter in scope hides every type of its name, and one with an attribute is `unsupported-yet`.
-  It hides every other symbol of its name too, so its name as a value or before a dot is `wrong-kind-of-name`.
+  It hides every other symbol of its name too, so its name as a value or before a dot is `wrong-kind-of-name`, but as an operand of a type comparison (CHK-429).
   A call of it, `T(x)`, is a call of what it stands for in each instance: `float(x)` where `T` is `float`.
   An entry point with type parameters is `wrong-kind-of-name`, since the GPU hands it values of known types.
 * **CHK-339** `struct name[A, n: int]:` declares a **generic struct**, over parameters its members may name, declared as a function's are (CHK-338) ([why](why/checking.md#chk-339)).
@@ -1554,6 +1624,10 @@ A call deduces what each parameter stands for, and inlining writes that in its p
   A type parameter nothing binds is `no-matching-overload`, whose detail names it.
   A parameter only numbers meet takes its default before a number's own type, where every number there fits it: `f[T = float](x: T)` makes `f(1)` a float.
   Every instance an inlined body names exists before the first entry point is flattened.
+* **CHK-429** `A == B` and `A != B` compare two types where either operand names one: a type parameter, a struct, an enum, a builtin type, an instance, `scalar_of[T]`.
+  The other operand names a type too, or it is `type-mismatch`, and the comparison is a `bool`.
+  In an instance it is the constant its arguments make it, which a `const if` decides on (CHK-430): `const if T == float:`.
+  Two mentions of one type are equal, and so are two instances of one generic struct whose arguments are (CHK-339).
 * **CHK-341** `undefined()` in the prelude is a value of the type of the parameter it meets, and binds no type parameter ([why](why/checking.md#chk-341)).
   It is a local declared and never assigned, which nobody may read: the interpreter reads it as zeroes, and a target reads what its local holds.
   `report.none()` is the use it exists for: a report with no hit has attributes of the report's type and no value.
@@ -1564,6 +1638,18 @@ fun apply[A](x: A, f: (A) -> A) -> A => f(x)
 fun twice[A](x: A, f: (A) -> A) -> A => apply(apply(x, f), f)
 
 fun bumped(n: int) -> int => twice(n, x => x + 1)
+```
+
+No float shifts, so the instance for `float` must never check the `else`, and by CHK-430 it never does.
+
+```sgl
+fun halved[T](x: T) -> T:
+    const if T == float:
+        return x * 0.5
+    else:
+        return x >> 1
+
+fun both(a: float, b: int) -> float => halved(a) + (halved(b) as float)
 ```
 
 ## Inferred results and dropped values
@@ -1590,12 +1676,12 @@ fun make_mvp(model: mat4){frame} => frame.proj * frame.view * model
 ## Diagnostic kinds
 
 Every kind below is a normal error by [DIAG-4](../syntax/diagnostics.md#rules), except some warnings.
-They are `unreachable-code`, `no-effect`, `unused-require`, `needless-nonuniform`, `unroll-too-long` and `generic-not-instantiated`.
+They are `unreachable-code`, `no-effect`, `unused-require`, `needless-nonuniform`, `unroll-too-long`, `generic-not-instantiated` and `nan-test-at-fast`.
 A diagnostic of this pass has a kind, a file, a byte span in that file, and a detail.
 
 | kind | reported by |
 |---|---|
-| `unsupported-yet` | CHK-8, CHK-61, CHK-134, CHK-213, CHK-237, CHK-291, CHK-299, CHK-307, CHK-314, CHK-321, CHK-329, CHK-333, CHK-338, CHK-339, CHK-344, CHK-346, CHK-347, CHK-350, CHK-352, CHK-353, CHK-357, CHK-366, CHK-374, CHK-379, CHK-381, CHK-383, CHK-387, CHK-389, CHK-397 |
+| `unsupported-yet` | CHK-8, CHK-61, CHK-134, CHK-213, CHK-237, CHK-291, CHK-299, CHK-307, CHK-314, CHK-321, CHK-329, CHK-333, CHK-338, CHK-339, CHK-344, CHK-346, CHK-347, CHK-350, CHK-352, CHK-353, CHK-357, CHK-366, CHK-374, CHK-379, CHK-381, CHK-383, CHK-387, CHK-389, CHK-397, CHK-431, CHK-432, CHK-434 |
 | `duplicate-declaration` | CHK-12, CHK-28, CHK-241, CHK-347, CHK-351 |
 | `dependency-cycle` | CHK-18, CHK-136 |
 | `unknown-module`, `use-of-own-module` | CHK-347 |
@@ -1608,19 +1694,20 @@ A diagnostic of this pass has a kind, a file, a byte span in that file, and a de
 | `unknown-builtin` | CHK-31 |
 | `expected-body` | CHK-32, CHK-236 |
 | `opaque-struct-needs-builtin` | CHK-34 |
-| `invalid-attribute-arguments` | CHK-36, CHK-39, CHK-204, CHK-208, CHK-211, CHK-212, CHK-220, CHK-231, CHK-267, CHK-403, CHK-292, CHK-293, CHK-301, CHK-304, CHK-384, CHK-369, CHK-370, CHK-371 |
+| `invalid-attribute-arguments` | CHK-36, CHK-39, CHK-204, CHK-208, CHK-211, CHK-212, CHK-220, CHK-231, CHK-267, CHK-403, CHK-292, CHK-293, CHK-301, CHK-304, CHK-384, CHK-369, CHK-370, CHK-371, CHK-431, CHK-435 |
 | `binding-not-listed` | CHK-45, CHK-131, CHK-228 |
 | `as-precedence` | CHK-411 |
-| `type-mismatch` | CHK-52, CHK-56, CHK-77, CHK-112 to CHK-118, CHK-121, CHK-167, CHK-210, CHK-214, CHK-219, CHK-236, CHK-243, CHK-275, CHK-276, CHK-279, CHK-281, CHK-287, CHK-329, CHK-344, CHK-362, CHK-375, CHK-392 |
+| `type-mismatch` | CHK-52, CHK-56, CHK-77, CHK-112 to CHK-118, CHK-121, CHK-167, CHK-210, CHK-214, CHK-219, CHK-236, CHK-243, CHK-275, CHK-276, CHK-279, CHK-281, CHK-287, CHK-329, CHK-344, CHK-362, CHK-375, CHK-392, CHK-429, CHK-433, CHK-434 |
 | `not-assignable` | CHK-112, CHK-236, CHK-316, CHK-352, CHK-367 |
 | `read-before-assignment` | CHK-55 |
 | `missing-return` | CHK-125, CHK-236 |
-| `unreachable-code` | CHK-126, CHK-162 |
+| `unreachable-code` | CHK-126, CHK-162, CHK-430 |
 | `no-effect` | CHK-225 |
+| `nan-test-at-fast` | CHK-436 |
 | `recursive-call` | CHK-130 |
 | `recursive-trace` | CHK-332 |
 | `unknown-member` | CHK-64, CHK-147, CHK-152, CHK-279, CHK-329, CHK-385 |
-| `no-matching-overload` | CHK-71, CHK-155, CHK-316, CHK-340, CHK-329, CHK-344, CHK-365, CHK-366, CHK-367, CHK-392, CHK-396 |
+| `no-matching-overload` | CHK-71, CHK-155, CHK-316, CHK-340, CHK-329, CHK-344, CHK-365, CHK-366, CHK-367, CHK-392, CHK-396, CHK-433, CHK-434 |
 | `non-exhaustive-case` | CHK-160 |
 | `duplicate-case-pattern` | CHK-161 |
 | `missing-value-in-arm` | CHK-168 |
@@ -1648,8 +1735,8 @@ A diagnostic of this pass has a kind, a file, a byte span in that file, and a de
 | `constant-without-value` | CHK-311 |
 | `constant-not-representable` | CHK-312, CHK-396 |
 | `missing-sampler` | CHK-279 |
-| `invalid-constant-argument` | CHK-280, CHK-285, CHK-299, CHK-309, CHK-378, CHK-389 |
-| `non-uniform-control-flow` | CHK-282, CHK-374, CHK-377 |
+| `invalid-constant-argument` | CHK-280, CHK-285, CHK-299, CHK-309, CHK-378, CHK-389, CHK-425, CHK-426, CHK-433 |
+| `non-uniform-control-flow` | CHK-282, CHK-374, CHK-377, CHK-431 |
 | `non-uniform-index` | CHK-300, CHK-401 |
 | `needless-nonuniform` | CHK-300, CHK-401 |
 | `unproven-index` | CHK-300 |
@@ -1658,6 +1745,7 @@ A diagnostic of this pass has a kind, a file, a byte span in that file, and a de
 | `non-uniform-per-draw` | CHK-393 |
 | `invalid-option` | CHK-354 |
 | `unroll-too-long` | CHK-389 |
+| `invalid-target-text` | CHK-427, CHK-428, CHK-432 |
 
 ## Open
 

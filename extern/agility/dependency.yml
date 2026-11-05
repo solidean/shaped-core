@@ -1,0 +1,32 @@
+# Pin and license for the upstream fetched here.
+# fetch-agility.py reads its pin from this file.
+
+upstreams:
+  - name: Agility SDK
+    homepage: https://www.nuget.org/packages/Microsoft.Direct3D.D3D12
+    install: on-request
+    source: nuget
+    # The package id on nuget.org, which with `version` names the download.
+    repo: Microsoft.Direct3D.D3D12
+    track: none
+    version: 1.620.1
+    asset: Microsoft.Direct3D.D3D12.1.620.1.nupkg
+    digest_algo: sha256
+    pin_hash: a8a494c3e5f687d9be0a465ec8248da70781ab689d888db8806b600422722be6
+    # The D3D12 runtime: there is nothing to run it on anywhere else.
+    unavailable_on: [linux, macos]
+    license: LicenseRef-Microsoft-DirectX
+    license_files: [.install/LICENSE.txt, .install/LICENSE-CODE.txt]
+    used_by: shaped-graphics' dx12 backend, which creates its devices through this runtime where it was fetched
+    notes: |
+      The D3D12 runtime newer than the one Windows carries: Shader Model 6.9, DXR 1.2 (opacity micromaps) and
+      shader execution reordering arrive only through it.
+      The dx12 backend loads its D3D12Core.dll through ID3D12SDKConfiguration1::CreateDeviceFactory, so no executable
+      exports D3D12SDKVersion; without it the backend runs on the system runtime, at Shader Model 6.8.
+
+      ON REQUEST rather than fetched: Microsoft's DirectX terms carry data-collection, indemnification and
+      distribution clauses that are a person's or a CI job's to accept, never a build's.
+      fetch-agility.py refuses to run without `--accept-license`, and the Windows Clang workflow passes it.
+      Only D3D12Core.dll, d3d12SDKLayers.dll and d3dconfig.exe are distributable, by the package's own list.
+      The headers are MIT (LICENSE-CODE.txt).
+      Re-read the terms on any bump, since the license allowlist names them individually.

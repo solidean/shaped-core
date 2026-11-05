@@ -17,6 +17,7 @@ import os
 import subprocess
 import sys
 import tempfile
+from concurrent.futures import ThreadPoolExecutor
 import traceback
 from pathlib import Path
 
@@ -272,13 +273,7 @@ def test_a_missing_submodule_is_initialized_then_synced(base: Path):
     assert lib.list_submodules(w.parent) == [] and lib.list_submodules(w.parent, missing=True) == [w.sub]
     o = lib.init(w.parent, w.sub, dry_run=True)
     assert o.status == "would init" and not (w.lib / ".git").exists(), o
-    # The library's own git calls clone from a local path, which git allows only when told to.
-    os.environ.update(GIT_CONFIG_COUNT="1", GIT_CONFIG_KEY_0="protocol.file.allow", GIT_CONFIG_VALUE_0="always")
-    try:
-        o = lib.init(w.parent, w.sub)
-    finally:
-        for k in ("GIT_CONFIG_COUNT", "GIT_CONFIG_KEY_0", "GIT_CONFIG_VALUE_0"):
-            os.environ.pop(k)
+    o = lib.init(w.parent, w.sub)
     assert o.status == "initialized" and w.head() == w.c1, o
     assert lib.list_submodules(w.parent) == [w.sub]
     identity(w.lib)
@@ -302,12 +297,7 @@ def test_a_missing_nested_submodule_is_initialized(base: Path):
 
     o = lib.init_nested(w.parent, w.sub, dry_run=True)
     assert [(x.path, x.status) for x in o] == [("extern/lib/extern/deep", "would init")], o
-    os.environ.update(GIT_CONFIG_COUNT="1", GIT_CONFIG_KEY_0="protocol.file.allow", GIT_CONFIG_VALUE_0="always")
-    try:
-        o = lib.init_nested(w.parent, w.sub)
-    finally:
-        for k in ("GIT_CONFIG_COUNT", "GIT_CONFIG_KEY_0", "GIT_CONFIG_VALUE_0"):
-            os.environ.pop(k)
+    o = lib.init_nested(w.parent, w.sub)
     assert [(x.path, x.status) for x in o] == [("extern/lib/extern/deep", "initialized")], o
     assert git(w.lib / "extern/deep", "rev-parse", "HEAD") == deep
     assert lib.init_nested(w.parent, w.sub) == [], "one checked out already is left alone"
@@ -315,18 +305,32 @@ def test_a_missing_nested_submodule_is_initialized(base: Path):
 
 # ---------------------------------------------------------------------------
 
+def run_case(name: str, fn) -> tuple[str, str | None]:
+    with tempfile.TemporaryDirectory(prefix="submodules-test-") as tmp:
+        try:
+            fn(Path(tmp))
+            return name, None
+        except Exception:
+            return name, traceback.format_exc()
+
+
 def main() -> int:
+    # The library's own git calls clone from a local path, which git allows only when told to.
+    # Set once for the whole run, since the cases run side by side and one popping it would pull it from under another.
+    os.environ.update(GIT_CONFIG_COUNT="1", GIT_CONFIG_KEY_0="protocol.file.allow", GIT_CONFIG_VALUE_0="always")
+
+    # Each case owns its temporary directory and spends its time in git processes, so they run side by side.
     tests = [(name, fn) for name, fn in globals().items() if name.startswith("test_")]
+    with ThreadPoolExecutor(max_workers=min(len(tests), os.cpu_count() or 4)) as pool:
+        results = list(pool.map(lambda t: run_case(*t), tests))
     failed = 0
-    for name, fn in tests:
-        with tempfile.TemporaryDirectory(prefix="submodules-test-") as tmp:
-            try:
-                fn(Path(tmp))
-                print(f"ok    {name}")
-            except Exception:
-                failed += 1
-                print(f"FAIL  {name}")
-                traceback.print_exc()
+    for name, error in results:
+        if error is None:
+            print(f"ok    {name}")
+        else:
+            failed += 1
+            print(f"FAIL  {name}")
+            print(error)
     print(f"{len(tests) - failed} of {len(tests)} passed")
     return 1 if failed else 0
 

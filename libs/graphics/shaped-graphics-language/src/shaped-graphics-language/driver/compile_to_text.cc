@@ -99,28 +99,86 @@ cc::vector<interface_binding> interface_of(check::checked_module const& m,
     return result;
 }
 
+/// `level`'s name as `@float` spells it.
+cc::string_view float_level_name(check::float_level level)
+{
+    switch (level)
+    {
+    case check::float_level::fast:
+        return "fast";
+    case check::float_level::specials:
+        return "specials";
+    case check::float_level::precise:
+        return "precise";
+    case check::float_level::ieee:
+        return "ieee";
+    }
+    return "fast";
+}
+
+/// EMIT-185: the strictest float guarantee `target`'s compile keeps today.
+check::float_level kept_float_level(emit::target target)
+{
+    switch (target)
+    {
+    case emit::target::hlsl_dx12:
+        return check::float_level::ieee;
+    // safe math keeps the specials and the order; whether it keeps denormals is not known
+    case emit::target::msl:
+        return check::float_level::precise;
+    // the execution modes wait for the device features they need (feat-sgl-float-level-per-target)
+    case emit::target::hlsl_vulkan:
+        return check::float_level::fast;
+    // nothing a shader says reaches Tint's or Naga's float handling
+    case emit::target::wgsl:
+        return check::float_level::fast;
+    }
+    return check::float_level::fast;
+}
+
 /// The back half of `compile_to_text`: one entry point of a checked module, written for one target.
 cc::result<emitted_source, cc::string> emit_text(driver::impl::front_end const& front,
                                                  check::flat_entry_point const& e,
                                                  emit::target target,
                                                  bool line_directives,
-                                                 bool diagnostics)
+                                                 bool diagnostics,
+                                                 check::undefined_guard guards_undefined,
+                                                 bool weakens_float,
+                                                 check::feature_set device_features)
 {
     auto const& m = front.module;
     auto const source_name = front.source_name;
+    // EMIT-185: a guarantee the target cannot keep is refused, unless the host weakened it on WebGPU
+    auto const raised_by = check::is_valid(e.float_raised_by) ? m.at(e.float_raised_by).name : cc::string();
+    auto float_guarantee = e.float_guarantee;
+    if (u8(float_guarantee) > u8(kept_float_level(target)))
+    {
+        if (target != emit::target::wgsl || !weakens_float)
+            return cc::error(cc::format("{}: error: float-guarantee-not-kept: entry point '{}' needs @float(.{}), "
+                                        "which "
+                                        "'{}' asks for, and {} keeps no more than .{}\n",
+                                        source_name, e.name, float_level_name(float_guarantee), raised_by,
+                                        emit::to_string(target), float_level_name(kept_float_level(target))));
+        float_guarantee = check::float_level::fast;
+    }
     // The check pass writes the structured form, and a target prints the core form.
     // WebGPU traces through the emulated form of a trace, and every other target through its native query.
     // LEGAL-63, LEGAL-64: without diagnostics the text holds no print and no assert, and with them both write a record
-    auto const legal = check::legalize(
-        m, e,
-        {.is_emulated = target == emit::target::wgsl, .erases_prints = !diagnostics, .lowers_asserts = diagnostics});
+    auto const legal = check::legalize(m, e,
+                                       {.is_emulated = target == emit::target::wgsl,
+                                        .erases_prints = !diagnostics,
+                                        .lowers_asserts = diagnostics,
+                                        .guards_undefined = guards_undefined});
     auto const files = driver::impl::module_files_of(front);
     auto names = cc::vector<cc::string_view>();
     for (auto i = isize(0); i < files.size(); ++i)
         names.push_back(front.name_of(i));
-    auto emitted = emit::emit_entry_point(
-        m, legal, target,
-        {.files = files, .names = names, .write_directives = line_directives, .diagnostics = diagnostics});
+    auto emitted = emit::emit_entry_point(m, legal, target,
+                                          {.files = files,
+                                           .names = names,
+                                           .write_directives = line_directives,
+                                           .diagnostics = diagnostics,
+                                           .device_features = device_features});
     if (!emitted.has_text())
     {
         auto text = cc::string();
@@ -148,6 +206,9 @@ cc::result<emitted_source, cc::string> emit_text(driver::impl::front_end const& 
     for (auto axis = 0; axis < 3; ++axis)
         result.workgroup[axis] = e.workgroup[axis];
     result.preferred_subgroup_size = e.preferred_subgroup_size;
+    result.float_guarantee = float_guarantee;
+    if (float_guarantee != check::float_level::fast)
+        result.float_raised_by = raised_by;
     return result;
 }
 
@@ -167,7 +228,9 @@ void add_source_facts(cc::result<emitted_source, cc::string>& text,
 
 cc::result<sgl::emitted_source, cc::string> sgl::compile_to_text(text_request const& request)
 {
-    auto const front = driver::impl::run_front_end(request.source, request.source_name, request.library, request.options);
+    // CHK-426: an inlined body reads the target and the device as this compile's
+    auto const front = driver::impl::run_front_end(request.source, request.source_name, request.library, request.options,
+                                                   emit::compile_target_of(request.target, request.device_features));
     if (!front.errors.empty())
         return cc::error(front.errors);
     auto const& m = front.module;
@@ -196,6 +259,12 @@ cc::result<sgl::emitted_source, cc::string> sgl::compile_to_text(text_request co
 
     if (index < 0)
     {
+        // CHK-402: an entry point whose own body did not check has no flat tree, and its errors say why
+        for (auto i = isize(0); i < m.symbols.size(); ++i)
+            if (auto const& s = m.symbols[i]; s.kind == check::symbol_kind::function && s.name == request.entry_point
+                                              && s.file == front.program_file())
+                if (auto own = front.errors_of(check::symbol_id(i)); !own.empty())
+                    return cc::error(cc::move(own));
         auto held = cc::string();
         for (auto const& e : m.entry_points)
             held.appendf("{}{} '{}'", held.empty() ? "" : ", ", check::stage_name(e.entry_stage), e.name);
@@ -211,28 +280,45 @@ cc::result<sgl::emitted_source, cc::string> sgl::compile_to_text(text_request co
     // CHK-402: what was judged of another entry point's body is no error of this one
     if (auto own = front.errors_of(e.function); !own.empty())
         return cc::error(cc::move(own));
-    auto result = emit_text(front, e, request.target, request.line_directives, request.diagnostics);
+    auto result = emit_text(front, e, request.target, request.line_directives, request.diagnostics,
+                            request.guards_undefined, request.weakens_float, request.device_features);
     add_source_facts(result, front, e);
+    if (result.has_value() && result.value().float_guarantee != e.float_guarantee)
+        result.value().warnings.push_back(cc::format(
+            "{}: warning: float-guarantee-weakened: entry point '{}' needs @float(.{}), which '{}' asks for, and runs "
+            "at .fast on {}, as the host allowed",
+            request.source_name, e.name, float_level_name(e.float_guarantee),
+            check::is_valid(e.float_raised_by) ? m.at(e.float_raised_by).name : cc::string(),
+            emit::to_string(request.target)));
     return result;
 }
 
 cc::result<cc::vector<sgl::entry_text>, cc::string> sgl::compile_all_to_text(all_text_request const& request)
 {
-    auto const front = driver::impl::run_front_end(request.source, request.source_name, request.library);
-    if (!front.errors.empty())
-        return cc::error(front.errors);
-    auto result = cc::vector<entry_text>();
-    for (auto const& e : front.module.entry_points)
+    // CHK-426: each target is a check of its own, since an inlined body reads the target it is written for
+    auto fronts = cc::vector<driver::impl::front_end>();
+    for (auto const t : request.targets)
     {
-        // CHK-402: an entry point's own errors are that element's, and leave the others built
-        auto own = front.errors_of(e.function);
-        for (auto const t : request.targets)
-        {
-            auto text = own.empty() ? emit_text(front, e, t, false, false)
-                                    : cc::result<emitted_source, cc::string>(cc::error(own));
-            add_source_facts(text, front, e);
-            result.push_back({.entry_point = e.name, .target = t, .text = cc::move(text)});
-        }
+        fronts.push_back(driver::impl::run_front_end(request.source, request.source_name, request.library, {},
+                                                     emit::compile_target_of(t)));
+        if (!fronts.back().errors.empty())
+            return cc::error(fronts.back().errors);
     }
+    auto result = cc::vector<entry_text>();
+    if (fronts.empty())
+        return result;
+    for (auto i = isize(0); i < fronts.front().module.entry_points.size(); ++i)
+        for (auto k = isize(0); k < request.targets.size(); ++k)
+        {
+            auto const& front = fronts[k];
+            auto const& e = front.module.entry_points[i];
+            // CHK-402: an entry point's own errors are that element's, and leave the others built
+            auto own = front.errors_of(e.function);
+            auto text = own.empty()
+                          ? emit_text(front, e, request.targets[k], false, false, check::undefined_guard::none, false, {})
+                          : cc::result<emitted_source, cc::string>(cc::error(own));
+            add_source_facts(text, front, e);
+            result.push_back({.entry_point = e.name, .target = request.targets[k], .text = cc::move(text)});
+        }
     return result;
 }

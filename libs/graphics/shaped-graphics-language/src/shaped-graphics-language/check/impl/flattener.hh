@@ -60,6 +60,7 @@ struct flattener
     cc::vector<origin> discards;
     /// An unrolled `for` the tree did not unroll, which its caller reports once (CHK-389).
     /// One whose bound is no constant is an error, and one that would write too many copies is a loop instead, and a warning.
+    /// A `const if` whose condition is no constant is reported here too, as an error (CHK-425).
     struct unroll_report
     {
         diagnostic_kind kind = diagnostic_kind::invalid_constant_argument;
@@ -70,6 +71,12 @@ struct flattener
         call_site site = {};
     };
     cc::vector<unroll_report> unroll_reports;
+    /// The features the `has` conditions of the branches being flattened grant (CHK-426).
+    feature_set granted;
+    /// The tree is a const's value, which reads no compile's target (CHK-426).
+    bool is_const_evaluation = false;
+    /// Why a const's value read what a compile stands for; empty where it read nothing of it.
+    cc::string target_in_const;
     /// How many times the statement being written is written: the product of the copies of every unrolled `for` around it.
     /// It is what bounds a nest of them as a whole (CHK-389).
     i64 unrolled_copies = 1;
@@ -105,6 +112,8 @@ struct flattener
         cc::vector<symbol_id> within;
         /// A value rather than a call, which the note says.
         bool is_value = false;
+        /// What the `has` of the branches around the use granted, which then needs no `require` (CHK-426).
+        feature_set granted;
     };
     cc::vector<feature_use> feature_uses;
 
@@ -185,6 +194,22 @@ struct flattener
     };
 
     /// One function being written: the entry point at the bottom, then every call being inlined.
+    /// CHK-435: the entry point keeps the strictest `@float` of every function whose body it inlines.
+    void raise_float_level(symbol_id function)
+    {
+        if (!is_valid(function) || index_of(function) >= c.out.symbols.size())
+            return;
+        auto const& s = c.out.at(function);
+        if (s.info < 0 || s.info >= c.out.functions.size())
+            return;
+        auto const level = c.out.functions[s.info].float_guarantee;
+        if (u8(level) > u8(entry.float_guarantee))
+        {
+            entry.float_guarantee = level;
+            entry.float_raised_by = function;
+        }
+    }
+
     struct frame
     {
         symbol_id function = symbol_id::none;
@@ -442,6 +467,8 @@ struct flattener
     /// contribution and its miss, and the set's size as its multiplier.
     /// The payload is handed over as a local the call writes through, copied in and out where it is another place.
     flat_expr_id flatten_ray_trace(ast::expr_id id, ast::call const& call, ray_trace const& t);
+    /// `h.invoke(mut p)`: the hit object's shaders, run on the payload (CHK-434).
+    flat_expr_id flatten_hit_invoke(ast::expr_id id, ast::call const& call);
 
     /// CHK-345: a report beyond the ray's range is none, and one in it is what the any hit decides of it.
     flat_expr_id decide_report(origin from, flat_expr_id reported);
@@ -503,6 +530,76 @@ struct flattener
 
     /// `f(args)` where `f` is a parameter of function type: the function it was handed, inlined here (CHK-319).
     flat_expr_id flatten_closure_call(ast::expr_id id, type_id type, i32 handed, call_record const& record);
+
+    /// PROTOTYPE: `fwd_diff` or `bwd_diff` of core.sgl, whose derivative flatten_diff.cc writes in place of its body.
+    [[nodiscard]] bool is_diff_call(symbol_id callee) const;
+    /// PROTOTYPE: `no_diff` of core.sgl, a value a derivative holds constant.
+    [[nodiscard]] bool is_detach_call(symbol_id callee) const;
+
+    flat_expr_id flatten_diff(ast::expr_id id, type_id type, call_record const& record);
+
+    /// Why the tree failed, where a pass knows better than CHK-213's words; empty otherwise.
+    cc::string failure_detail;
+
+    /// How many `fwd_diff` and `bwd_diff` are inlining the function they differentiate right now.
+    i32 diff_depth = 0;
+
+    /// The derivatives written by hand for a function: `@forward(f)` and `@backward(f)`.
+    struct custom_derivatives
+    {
+        symbol_id forward = symbol_id::none;
+        symbol_id backward = symbol_id::none;
+    };
+    [[nodiscard]] custom_derivatives custom_derivatives_of(symbol_id function) const;
+
+    /// A call, inside a function being differentiated, of a function with a derivative written by hand.
+    /// Its arguments are bound to `arguments`, one per parameter, and its block's label keys it in `custom_calls`.
+    struct custom_call
+    {
+        symbol_id function = symbol_id::none;
+        custom_derivatives derivatives;
+        cc::vector<local_id> arguments;
+        ast::expr_id call = ast::expr_id::none;
+        /// `no_diff(x)`, whose derivative is zero: its argument is bound inside it, so nothing it reads is followed.
+        bool is_detached = false;
+    };
+    cc::map<i32, custom_call> custom_calls;
+
+    /// The call `id` of `record.callee`, which has a derivative written by hand, inlined over locals that hold its
+    /// arguments; the derivative takes those locals rather than the body.
+    flat_expr_id flatten_custom_call(ast::expr_id id,
+                                     type_id type,
+                                     call_record const& record,
+                                     custom_derivatives d,
+                                     cc::span<flat_expr_id const> values);
+
+    /// What the tree is written for: the compile's target, and none for a test, which the interpreter runs (CHK-426).
+    [[nodiscard]] compile_target compiled_for() const { return is_test ? compile_target() : c.compiled_target; }
+    /// `target_api` and `target_language` of the prelude, which a compile stands for (CHK-426): the position of the case
+    /// the compile names, or -1 for every other symbol.
+    [[nodiscard]] i32 target_case_of(symbol_id constant) const;
+    /// `has(f)` of the prelude, which the device this compile writes for answers (CHK-426).
+    [[nodiscard]] bool is_has_call(symbol_id callee) const;
+    /// A `has` call as the literal its device makes of it; its feature must be a constant once inlined.
+    flat_expr_id flatten_has(ast::expr_id id, type_id type, call_record const& record);
+    /// What a condition of the current file grants the branch it guards: the features of the `has` calls it is, or the
+    /// `and` of, that this compile's device has (CHK-426).
+    [[nodiscard]] feature_set grants_of(ast::expr_id condition);
+    /// What `make()` flattens, with the features `condition` grants added to `granted` while it does (CHK-426).
+    template <class F>
+    auto granting(ast::expr_id condition, F&& make)
+    {
+        auto const outer = granted;
+        granted |= grants_of(condition);
+        auto result = make();
+        granted = outer;
+        return result;
+    }
+    /// The case of a feature an argument names as a constant, `.subgroups`; -1 where it names none.
+    [[nodiscard]] i32 feature_case_of(ast::expr_id argument);
+    /// Refuses what a compile stands for inside a const, whose value one check computes for every compile (CHK-426).
+    /// True where it refused, which makes the flattening fail.
+    bool refuses_target_in_const(cc::string_view what);
 
     /// `by_target(native, emulated)` of raytracing.sgl: both lambdas written out, each a block, and one node holding both.
     [[nodiscard]] bool is_by_target(symbol_id callee) const;
@@ -642,7 +739,15 @@ struct flattener
 
     void flatten_return(origin from, ast::expr_id value);
 
-    void flatten_if(origin from, cc::span<ast::if_branch const> branches);
+    /// The run of tagged strings `stmt` opens, as the call of its function that the emitter writes as the text of the
+    /// language this compile writes; nothing for a statement that opens no run (CHK-427).
+    void flatten_target_text(origin from, ast::stmt_id stmt);
+
+    /// `is_const` for a `const if`, whose condition that no constant decides is an error (CHK-425).
+    void flatten_if(origin from, cc::span<ast::if_branch const> branches, bool is_const = false);
+    /// CHK-432: each text type the tree holds a value of, as this compile spells it, into `entry.text_types`.
+    /// A field or a constructor of one that the compile spells in its target's text is reported.
+    void judge_text_types();
 
     void flatten_assign(origin from, ast::assign_stmt const& assign);
 

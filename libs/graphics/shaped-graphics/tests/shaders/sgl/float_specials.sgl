@@ -7,7 +7,8 @@ binding float_specials:
     results: mut buffer[float]
     comparisons: mut buffer[uint]
 
-@compute(1) fun probe(){float_specials}:
+// It states the guarantee it tests, which a target that cannot keep it refuses (CHK-435, EMIT-185).
+@float(.specials) @compute(1) fun probe(){float_specials}:
     let zero = float_specials.inputs[0]
     let one = float_specials.inputs[1]
     let big = float_specials.inputs[2]

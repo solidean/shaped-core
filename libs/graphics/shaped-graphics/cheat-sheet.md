@@ -106,11 +106,16 @@ ctx.supports(sg::feature::ray_query)               // bool — THE capability qu
                                                    //   | device_coherence (globallycoherent / coherent(device); false on webgpu)
                                                    //   | image_atomics (atomics on r32 integer images; false on webgpu)
                                                    //   | first_instance (SGL's @first_instance, draw-uniform; false on webgpu, which has no builtin)
-                                                   //   | opacity_micromap (a blas_triangles may name a micromap; vulkan with VK_EXT_opacity_micromap; host-only, no `require`)
+                                                   //   | opacity_micromap (a blas_triangles may name a micromap; vulkan with VK_EXT_opacity_micromap, dx12 with the Agility SDK's DXR 1.2)
                                                    //   | helper_lane_query (a pixel stage can tell a helper; SGL's strong
                                                    //     compare-exchange in a pixel stage needs it; false on webgpu)
                                                    //   | vertex_layer_output (a vertex stage picks the layer of an array target,
                                                    //     SGL's @layer; dx12 and vulkan ask the device, true on metal, false on webgpu)
+                                                   //   | float_atomic_add (a float atomic add in one instruction; vulkan with
+                                                   //     VK_EXT_shader_atomic_float, true on metal, false on dx12 and webgpu;
+                                                   //     slib asks SGL for the native add where it is true; no `require`)
+                                                   //   | shader_execution_reordering (a raygen regroups by a hint; dx12 on the
+                                                   //     Agility SDK's SM 6.9 beside RT pipelines; SGL's maybe_reorder asks it)
                                                    //   vulkan's geometry, tessellation, sample-rate and wireframe answers are the device features creation enabled
                                                    //   binding_arrays false (webgpu) = no count > 1 bindings, no staging_binding_group, no bindless_array
                                                    //   the per-scope bools (cmd.raytracing.is_supported(), cmd.query.is_supported(),

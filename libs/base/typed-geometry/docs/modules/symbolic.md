@@ -4,15 +4,16 @@
 
 ## What this module is
 
-`symbolic/` is exact algebra over the scalars: polynomials today, rational polynomials next.
+`symbolic/` is exact algebra over the scalars: polynomials and rational polynomials.
 It sits above `scalar/` and knows nothing of geometry; geometry may instantiate over its types, never the other way around.
 
 ## What belongs here
 
 - `tg::polynomial<C, Degree>`: one variable, dense, the degree bounded inline or grown in a vector.
 - `tg::multi_polynomial<C, Vars>`: several variables, sparse, the exponents packed into machine words.
-- The monomial orders and variable sets `multi_polynomial` is generic over: `tg::vars<N, Order, Bits>` today, interned symbols next.
-- Algorithms on them: arithmetic, evaluation, composition, derivatives, division; gcds, real roots and rational polynomials as they land.
+- The monomial orders and variable sets `multi_polynomial` is generic over: `tg::vars<N, Order, Bits>`, and `tg::dynamic_vars<Order>` over `tg::symbol`s.
+- `tg::rational_polynomial<P>`: a quotient of either, and a field.
+- Algorithms on them: arithmetic, evaluation, composition, derivatives, division, gcds, resultants and real roots.
 
 ## What does NOT belong here
 
@@ -55,7 +56,88 @@ Symbolic perturbation evaluates a predicate with infinitesimals ε0 >> ε1 >> ..
 The sign of a polynomial in infinitesimals is then its leading coefficient's, which `sign()` returns.
 1 being the largest monomial makes it a local order rather than a well-order: it ranks terms for signs, and division algorithms that need a well-order use the others.
 
-### Not yet measured
+### Products: a dense box when it is small, a heap otherwise
 
-Products sort all pairs of terms and accumulate each run of equal monomials in place; that is the correct first version, not the fast one.
-Kronecker substitution into a dense accumulator, Monagan and Pearce's heap multiplication, and a fused `bigint::assign_add_mul` are perf-tg-polynomial-multiplication's, measured against FLINT.
+A product's pairs are summed where its exponents' box is small, at most four slots per pair: Kronecker substitution.
+Each term's exponents become one index into a thread-local accumulator, a pair lands at the sum of its factors' indices,
+and the slots it touched are read out sorted by the order, so no slot outside the result is visited.
+Past that, Monagan and Pearce's heap walks one row per term of the smaller factor, and the pairs come out greatest first, sorted without a sort.
+Either way a coefficient is accumulated in place, through `assign_add_mul` where `C` has one, as `bigint` does.
+Sums merge the sorted term lists, in place from the back when an operand is an rvalue, so `a * b + c * d` moves rather than copies.
+
+Instructions retired on a Zen 5, from sorting every pair with plain `acc += a * b` to now:
+
+| product | terms | before | now |
+|---|---|---|---|
+| orient3d over four points, each perturbed by an infinitesimal | 64 | 106,000 | 70,000 |
+| Fateman's (1 + x + y + z + t)^10 squared | 10,626 | 568 M | 104 M |
+| a sparse product in five variables, n = 6 | 114,000 | 286 M | 152 M |
+| a univariate product of degree 100, two-limb coefficients | 201 | 3.08 M | 2.54 M |
+
+What remains in the infinitesimal case is mostly allocation: every non-zero `bigint` coefficient is a node, and every polynomial two vectors.
+
+### Small coefficients sum in words
+
+A product of bigints whose coefficients all fit an i64, or one or two limbs, sums each output coefficient in a fixed-width accumulator:
+three or five limbs of two's complement, one signed multiply and three adds a pair for i64s, no node until the sum is read out.
+The polynomials find it by duck typing, `C::word_accumulator` and `C::template accumulator<W>`, and read the factors into word form once.
+Against FLINT 3.3.1, built with MSVC, the univariate products of two-limb coefficients are level with it and the infinitesimal orient3d ahead,
+Fateman's product is twice its instructions, and the sparse product 1.5 times.
+
+### The gcd is the subresultant sequence, and the resultant shares its step
+
+Over an exact field the gcd is Euclid's, made monic.
+Over a ring with a gcd of its own, `bigint` or a polynomial over one, it is the subresultant sequence (Collins, Brown):
+pseudo-remainders divided exactly by `g h^delta`, which keeps the coefficients as small as the determinants they are,
+where the primitive sequence would take a gcd of every remainder's coefficients and plain Euclid's coefficients grow exponentially.
+A polynomial over such a ring has this gcd itself, so nested polynomials have one: recursive, not the modular gcd a multivariate one wants.
+Floats have none: their remainders never vanish.
+
+The scale factors only change how large the coefficients grow on the way, never the normalized gcd, so no test of the gcd can see them.
+`resultant` is the sequence's last value with every factor intact, so the step lives in one place for both,
+and the resultant is tested against the Sylvester matrix's determinant, computed independently in rationals.
+
+### Real roots: exact isolation, and floating-point roots on an interval
+
+`isolate_real_roots` is Descartes' rule of signs with bisection (Vincent, Collins and Akritas) on the squarefree part, in exact integers:
+Taylor shifts by one, reversals and scalings by powers of two, no division.
+It returns one interval per distinct real root, open with dyadic endpoints, or a single point for a root met at a midpoint; `refine_root` narrows one.
+
+`real_roots(p, lo, hi)` is for floating-point coefficients, curves and surfaces first.
+The derivative's roots, found the same way, cut [lo, hi] into pieces on which p is monotone, and each piece with a sign change holds one root,
+found by Newton's steps kept inside the bracket by bisection.
+A fixed degree returns a `cc::fixed_vector`, so it never allocates.
+A root of even multiplicity has no sign change; it is found only where p is exactly zero at a critical point.
+
+### Named variables carry their own list
+
+`multi_polynomial<C, dynamic_vars<Order>>` is the computer-algebra mode: variables are `tg::symbol`s, interned names compared by identity.
+Each polynomial carries the sorted list of variables its terms are packed over, in the same 16-bit fields and under the same orders as `vars<>`.
+Operands over different lists are repacked onto their union first; a variable with exponent zero everywhere ranks nothing, so no term moves.
+The list is sorted by the names' bytes, not by the interned identity, so the variable order and the printed form are the same every run.
+The width stays fixed and checked, as `vars<>`'s does, rather than growing: one representation to test, and 32767 is a large exponent.
+Products go through the heap, there being no static box for the dense path; `parse` reads the printed form back.
+
+### Rational polynomials reduce where a gcd exists
+
+`rational_polynomial<P>` is a field, so a polynomial over it has `divrem`, which is what the trait seam was for.
+Where `P` has a gcd, a univariate polynomial over `bigint` or an exact field, every operation reduces by it and the denominator leads positively,
+monic over a field: the representation is canonical, and equality compares parts.
+Where it has none, the dynamic variables for now, the parts are kept as they come but for the sign, and equality cross-multiplies.
+Symbolic perturbation needs no more there: the sign of a quotient of infinitesimal polynomials is the product of its parts' signs.
+Evaluating needs the point in a field, so a rational polynomial over `bigint` is refused a `bigint` point at compile time instead of dividing with truncation.
+
+### The multivariate gcd: a heuristic proved by division, then recursion
+
+Over `bigint` the gcd is first the heuristic of Char, Geddes and Gonnet, FLINT's first resort too:
+a variable is evaluated at an integer xi above twice the smaller input's largest coefficient, the evaluations' gcd taken one variable down,
+an integer gcd at the bottom, and a candidate read back from that gcd's balanced base-xi digits.
+Exact division of both inputs proves a candidate, so a wrong one never comes out; a few failures grow xi and then give up.
+The integer contents come apart at every level: the method holds for primitive inputs, and the evaluations are not primitive.
+What the heuristic gives up on, and every other coefficient type, goes to the recursive route:
+the inputs as polynomials in one variable over the others, the subresultant gcd there, its coefficients' gcds recursing down.
+`try_div_exact` divides leading terms in turn, which holds under any order compatible with products, the local one included;
+a remainder past the dividend's degree ends a division that is not exact, which a local order would otherwise run on forever.
+With a gcd, a `rational_polynomial` over the multivariate types reduces too.
+
+Against FLINT 3.3.1 in instructions retired, the gcd of (1 + x + y + z)^4 times a cofactor each: 720,000 to FLINT's 957,000.

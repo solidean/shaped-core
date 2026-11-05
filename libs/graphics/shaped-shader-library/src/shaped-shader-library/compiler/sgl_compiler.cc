@@ -172,11 +172,13 @@ class sgl_shader_compiler final : public slib::shader_compiler
 public:
     sgl_shader_compiler(std::unique_ptr<slib::shader_compiler> inner,
                         cc::optional<bcache::blob_cache*> persistent_cache,
-                        bool diagnostics)
+                        bool diagnostics,
+                        sgl::check::undefined_guard guards_undefined)
       : _inner(cc::move(inner)),
         _target(target_of(_inner->target_format())),
         _persistent_cache(persistent_cache),
-        _diagnostics(diagnostics)
+        _diagnostics(diagnostics),
+        _guards_undefined(guards_undefined)
     {
     }
 
@@ -221,6 +223,7 @@ private:
         b.add_string(desc.label);
         b.add_pod(_target);
         b.add_pod(_diagnostics);
+        b.add_pod(_guards_undefined);
         b.add_pod(i64(desc.options.size()));
         for (auto const& o : desc.options)
         {
@@ -282,9 +285,34 @@ private:
             return cc::error(cc::format("SGL has no entry point of the stage '{}' is declared as", desc.entry_point));
         }
 
+        // shader_asset::acquire says through this name what the device has, which is the compile's to know and no
+        // option of the source; an sg feature no shader asks about is no name SGL knows, and is left out
         auto options = cc::vector<sgl::check::option_value>();
+        auto device_features = sgl::check::feature_set();
+        auto weakens_float = false;
         for (auto const& o : desc.options)
-            options.push_back({.name = o.name, .value = o.value});
+        {
+            if (o.name == slib::k_weakens_float_option)
+            {
+                weakens_float = o.value == "true";
+                continue;
+            }
+            if (o.name != slib::k_device_features_option)
+            {
+                options.push_back({.name = o.name, .value = o.value});
+                continue;
+            }
+            auto rest = cc::string_view(o.value);
+            while (!rest.empty())
+            {
+                auto end = isize(0);
+                while (end < rest.size() && rest[end] != ',')
+                    ++end;
+                if (auto const index = sgl::check::find_feature(rest.subview({.offset = 0, .size = end})); index >= 0)
+                    device_features.set(sgl::check::feature(index));
+                rest = end < rest.size() ? rest.subview(end + 1) : cc::string_view();
+            }
+        }
         auto const library = slib::impl::sgl_library_of(desc.modules);
         auto text = sgl::compile_to_text(
             {.source = desc.source,
@@ -296,7 +324,10 @@ private:
              .options = options,
              // EMIT-182: DXC's and Metal's messages, and PIX's and Xcode's source view, name the SGL line
              .line_directives = true,
-             .diagnostics = _diagnostics});
+             .diagnostics = _diagnostics,
+             .guards_undefined = _guards_undefined,
+             .weakens_float = weakens_float,
+             .device_features = device_features});
         if (text.has_error())
             return cc::error(cc::format("SGL reported errors:\n{}", text.error()));
         auto const& emitted = text.value();
@@ -307,6 +338,15 @@ private:
                                                 .entry_point = emitted.entry_point,
                                                 .used_modules = emitted.library_files,
                                                 .warnings = emitted.warnings};
+        // EMIT-185: DXIL keeps the special values and the order only with every float operation strict, and
+        // denormals only where Shader Model 6.2 is asked to preserve them
+        if (_target == sgl::emit::target::hlsl_dx12 && emitted.float_guarantee != sgl::check::float_level::fast)
+            result.dxc_args.push_back(cc::string("-Gis"));
+        if (_target == sgl::emit::target::hlsl_dx12 && emitted.float_guarantee == sgl::check::float_level::ieee)
+        {
+            result.dxc_args.push_back(cc::string("-denorm"));
+            result.dxc_args.push_back(cc::string("preserve"));
+        }
         for (auto const& b : emitted.bindings)
         {
             auto binding = binding_of(b, shader.format, shader.stage);
@@ -391,6 +431,7 @@ private:
     /// As `sgl_compiler_options` holds it, resolved at each compile so the default follows whatever is installed then.
     cc::optional<bcache::blob_cache*> _persistent_cache = {};
     bool _diagnostics = false;
+    sgl::check::undefined_guard _guards_undefined = sgl::check::undefined_guard::none;
 };
 } // namespace
 
@@ -412,9 +453,13 @@ slib::shader_option slib::option_of(cc::string_view name, sg::pixel_format value
     CC_UNREACHABLE("every sg::pixel_format has a name");
 }
 
+static_assert(int(slib::sgl_undefined_guard::abort) == int(sgl::check::undefined_guard::abort)
+              && int(slib::sgl_undefined_guard::report) == int(sgl::check::undefined_guard::report));
+
 std::unique_ptr<slib::shader_compiler> slib::create_sgl_compiler(std::unique_ptr<shader_compiler> inner,
                                                                  sgl_compiler_options const& options)
 {
     CC_ASSERT(inner != nullptr, "an SGL compiler needs the compiler that builds its text");
-    return std::make_unique<sgl_shader_compiler>(cc::move(inner), options.persistent_cache, options.diagnostics);
+    return std::make_unique<sgl_shader_compiler>(cc::move(inner), options.persistent_cache, options.diagnostics,
+                                                 sgl::check::undefined_guard(options.guards_undefined));
 }

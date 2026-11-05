@@ -226,6 +226,9 @@ struct plan
     target which;
     /// EMIT-183: the text writes a print into sg's debug buffer, which it declares.
     bool writes_debug = false;
+    /// Every `atomic[float]` is the target's own float atomic, rather than a `uint`'s bits: the device adds floats in one
+    /// instruction, and the target can say so (vulkan, metal).
+    bool native_float_atomics = false;
 
     /// The program's structs the entry point needs, each after every struct it holds.
     cc::vector<planned_struct> structs;
@@ -395,5 +398,8 @@ void plan_memory_accesses(plan& p);
 [[nodiscard]] cc::vector<emitted_layout> layouts_of(plan const& p);
 
 /// `e` must have passed `validate`.
-[[nodiscard]] plan make_plan(check::checked_module const& m, check::flat_entry_point const& e, target t);
+[[nodiscard]] plan make_plan(check::checked_module const& m,
+                             check::flat_entry_point const& e,
+                             target t,
+                             bool native_float_atomic_add = false);
 } // namespace sgl::emit::impl

@@ -142,6 +142,13 @@ cc::rec::sampling_scope const s({.rate_hz = 1000.0});
 A sample stops at the innermost open scope, so a sample inside instrumented code is often one address — the scope stack already names everything below it.
 So scopes and sampling are worth having together rather than as alternatives.
 
+`cc::rec::hot_functions` folds the samples into a self/total table without a viewer.
+A sampler catches a parked thread as often as a busy one, so a pool of idle workers buries the work under waits: `{.skip_idle = true}` leaves those stacks out.
+
+To profile a slow test, `uv run dev.py test "<filter>" --sample` does all of it.
+Each binary samples its threads for the whole run, prints the busy table by self and by total, and keeps the recording as `<binary>.ccrec`.
+The table is symbolized at exit, which costs seconds per few thousand distinct addresses, so pair it with a filter.
+
 ## Looking at it
 
 `babel::chrome_trace` writes a recording as Chrome Trace Event JSON, for `chrome://tracing` and `ui.perfetto.dev`:

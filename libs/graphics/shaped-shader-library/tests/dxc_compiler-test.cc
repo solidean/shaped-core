@@ -472,6 +472,9 @@ TEST("slib - DXC compiles a vertex stage's culled vertex for dx12 and vulkan", e
     {
         auto const text = sgl::compile_to_text({.source = source, .entry_point = "vs", .target = t, .diagnostics = true});
         REQUIRE(text.has_value());
+        // DXIL needs the reflection the Linux DXC lacks (see make_dxc_compiler); the dx12 text is still emitted above
+        if (t == sgl::emit::target::hlsl_dx12 && k_target_format != sg::shader_format::dxil)
+            continue;
         auto compiler
             = t == sgl::emit::target::hlsl_vulkan ? slib::create_dxc_spirv_compiler() : slib::create_dxc_compiler();
         REQUIRE(compiler.has_value());
@@ -516,6 +519,9 @@ TEST("slib - DXC compiles how a failed assert ends a patch, a candidate and a bo
         auto const text = sgl::compile_to_text(
             {.source = e.source, .entry_point = e.name, .target = sgl::emit::target::hlsl_dx12, .diagnostics = true});
         REQUIRE(text.has_value());
+        // DXIL needs the reflection the Linux DXC lacks (see make_dxc_compiler); the dx12 text is still emitted above
+        if (k_target_format != sg::shader_format::dxil)
+            continue;
         auto compiler = slib::create_dxc_compiler();
         REQUIRE(compiler.has_value());
         (void)await(compiler.value()->compile(

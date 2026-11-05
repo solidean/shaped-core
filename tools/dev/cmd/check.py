@@ -43,6 +43,12 @@ def add_parser(sub: argparse._SubParsersAction) -> argparse.ArgumentParser:
     p.add_argument("--no-test", action="store_true",
                    help="Skip the test suite (build + run); just the static checks")
     p.add_argument("--list", action="store_true", help="List registered checks and exit")
+    p.add_argument("--memo", action="store_true",
+                   help="Read the verdict memo even for gates named on the command line, which otherwise run afresh. "
+                        "What `ship` asks of the gates it names, so a ship right after a green check reruns nothing.")
+    p.add_argument("--all-presets", action="store_true",
+                   help="Also build and test the debug, release, single-threaded and sanitizer presets, "
+                        "each under --smoke. Off by default: every extra preset is a whole build, and CI runs them.")
     return p
 
 
@@ -73,7 +79,7 @@ def _branch_base(ctx: Context) -> str | None:
     return None
 
 
-def _build_checks(ctx: Context, *, memo: dev.CheckMemo | None = None) -> list[dev.Check]:
+def _build_checks(ctx: Context, *, memo: dev.CheckMemo | None = None, all_presets: bool = False) -> list[dev.Check]:
     """The pre-commit registry: project policy for which gates exist.
 
     `memo` lets the test gate skip a binary that passed before on an identical artifact, and record each pass.
@@ -165,28 +171,44 @@ def _build_checks(ctx: Context, *, memo: dev.CheckMemo | None = None) -> list[de
         # miscounts its own height has no other way of being caught.
         # extern/'s manifest resolution runs here for the same reason: which upstream is available on which machine is
         # answered on every configure and reported by nothing, so a wrong answer surfaces as a link error on one runner.
-        # Not fixable and not scopable, so fix and scope are ignored.
         # clean-simd's link-map check runs after every link of a dispatching binary, where a parser that silently stopped
         # matching would look exactly like a clean link.
-        ok = True
+        # Not fixable, so fix is ignored.
+        #
+        # Each script runs when its own code changed: itself, the dev.py packages it imports, and lib/core, which they all stand on.
+        # A whole-tree run (`--all`), or a scope that cannot be read, runs every one.
+        dev_lib = "tools/dev/lib"
+        core = f"{dev_lib}/core/**"
         runners = (
-            (Path("tools") / "dev" / "profile-self-test.py", []),
-            (Path("tools") / "dev" / "changes-self-test.py", []),
-            (Path("tools") / "dev" / "checks-self-test.py", []),
-            (Path("tools") / "dev" / "roots-self-test.py", []),
-            (Path("tools") / "dev" / "jsruntime-self-test.py", []),
-            (Path("tools") / "dev" / "ui-self-test.py", []),
-            (Path("tools") / "dev" / "symbolize-self-test.py", []),
-            (Path("tools") / "dev" / "submodules-self-test.py", []),
-            (Path("tools") / "dev" / "benchmarks-self-test.py", []),
-            (Path("tools") / "dev" / "memory-guard-self-test.py", []),
-            (Path("extern") / "manifest-self-test.py", []),
-            (Path("libs") / "base" / "clean-simd" / "tools" / "check-link-map.py", ["--self-test"]),
+            ("tools/dev/profile-self-test.py", [], (core,)),
+            ("tools/dev/changes-self-test.py", [], (core, f"{dev_lib}/quality/**", f"{dev_lib}/project/**")),
+            ("tools/dev/checks-self-test.py", [], (core, f"{dev_lib}/quality/**")),
+            ("tools/dev/roots-self-test.py", [], (core, f"{dev_lib}/quality/**")),
+            ("tools/dev/jsruntime-self-test.py", [], (core, f"{dev_lib}/toolchain/**", "tools/dev/js/*.json")),
+            ("tools/dev/ui-self-test.py", [], (core,)),
+            ("tools/dev/symbolize-self-test.py", [], (core, "tools/dev/cmd/symbolize.py")),
+            ("tools/dev/submodules-self-test.py", [], (core, f"{dev_lib}/project/**")),
+            ("tools/dev/benchmarks-self-test.py", [], (core, f"{dev_lib}/pipeline/**")),
+            ("tools/dev/memory-guard-self-test.py", [], (core,)),
+            ("tools/dev/stall-report-self-test.py", [], (core,)),
+            ("extern/manifest-self-test.py", [], ("extern/**",)),
+            ("libs/base/clean-simd/tools/check-link-map.py", ["--self-test"], ("libs/base/clean-simd/tools/**",)),
         )
-        for runner, args in runners:
+        touched = None
+        if scope is not None:
+            try:
+                touched = dev.touched_paths(ctx.root, scope)
+            except dev.ChangeScopeError:
+                touched = None
+        ok = True
+        for runner, args, watches in runners:
+            if touched is not None:
+                watch = dev.Watch.of((runner, *watches))
+                if not any(watch.matches(p) for p in touched):
+                    continue
             result = dev.run_step(
                 ["uv", "run", str(ctx.root / runner), *args],
-                step_type="selftest", name=runner.name.removesuffix(".py"),
+                step_type="selftest", name=Path(runner).name.removesuffix(".py"),
                 build_dir=ctx.root / "build", cwd=ctx.root, mirror=mirror, verbose=verbose,
             )
             ok = ok and result.ok
@@ -368,13 +390,16 @@ def _build_checks(ctx: Context, *, memo: dev.CheckMemo | None = None) -> list[de
         # Not fixable, so fix and scope are ignored.
         system = platform.system()
         specs = [ctx.default_preset_name()]
-        for sibling in (
+        # The siblings are opt-in: each is a whole build of its own after any change to clean-core, which made
+        # them most of a gate run's time, and CI runs every one of them anyway.
+        siblings = (
             ctx.policy.default_debug.get(system),
             ctx.policy.default_release.get(system),
             ctx.policy.default_singlethreaded.get(system),
             ctx.policy.default_sanitize.get(system),
             ctx.policy.default_sanitize_thread.get(system),
-        ):
+        ) if all_presets else ()
+        for sibling in siblings:
             if sibling:
                 specs.append(sibling)
         presets = ctx.resolve_presets(specs)
@@ -412,9 +437,12 @@ def _build_checks(ctx: Context, *, memo: dev.CheckMemo | None = None) -> list[de
                 to_run = [n for n in names if n not in done]
             if not to_run:
                 continue
+            # Only the default preset needs a heavy test's full ground; the others prove their flags on its
+            # smallest case, which a test reads through nx::is_smoke().
             preset_records = dev.test(
                 [preset], to_run, root=ctx.root,
                 test_name=None, timeout=60.0, write_xml=True, mirror=mirror, verbose=verbose,
+                extra_args=[] if preset == presets[0] else ["--smoke"],
             )
             records += preset_records
             if memo is not None:
@@ -510,8 +538,8 @@ def _build_checks(ctx: Context, *, memo: dev.CheckMemo | None = None) -> list[de
                            "libs/graphics/shaped-graphics/**"),
                   builds=("sgl",)),
         dev.Check("test",
-                  "build + run the full suite on the debug, default, release, single-threaded "
-                  "(and where supported, sanitizer) presets",
+                  "build + run the full suite on the default preset; with --all-presets also on the debug, release, "
+                  "single-threaded and sanitizer ones, under --smoke",
                   False, check_tests, requires_green=True, always=True),
     ]
 
@@ -635,10 +663,10 @@ def _build_for_gates(ctx: Context, *, mirror: bool, verbose: bool):
 
 
 def run(args: argparse.Namespace, ctx: Context) -> None:
-    # A deliberate full run (--all) and a gate named on the command line bypass the memo's reads; both still record.
-    memo = _memo(ctx, read=not (args.all or bool(args.names)))
+    # A deliberate full run (--all) and a gate named on the command line bypass the memo's reads, unless --memo asks; both still record.
+    memo = _memo(ctx, read=args.memo or not (args.all or bool(args.names)))
     try:
-        checks = _build_checks(ctx, memo=memo)
+        checks = _build_checks(ctx, memo=memo, all_presets=args.all_presets)
         dev.validate_checks(checks, root=ctx.root)
     except dev.CheckRegistryError as e:
         ctx.die(str(e))

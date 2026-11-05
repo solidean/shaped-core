@@ -245,7 +245,8 @@ struct expr_lowering
             auto const result = out.add_expr(mark.type, flat_call{.callee = call->callee,
                                                                   .intrinsic = call->intrinsic,
                                                                   .is_pure = call->is_pure,
-                                                                  .arguments = out.expr_list(arguments)});
+                                                                  .arguments = out.expr_list(arguments),
+                                                                  .text = call->text});
             out.from = from;
             return result;
         };

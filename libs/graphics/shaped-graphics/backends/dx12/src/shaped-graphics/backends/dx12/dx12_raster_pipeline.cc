@@ -183,7 +183,10 @@ cc::result<dx12_raster_pipeline_handle> dx12_raster_pipeline::create(ID3D12Devic
     pso.NumRenderTargets = UINT(desc.color_targets.size());
     for (int i = 0; i < int(desc.color_targets.size()); ++i)
         pso.RTVFormats[i] = to_dxgi_format(desc.color_targets[i].format);
-    pso.DSVFormat = to_dxgi_format(desc.depth_stencil_format);
+    // A pass may bind a depth target the pipeline neither tests, writes nor stencils, which the runtime then ignores,
+    // and the Agility SDK's debug layer asks that such a pipeline name no format for it.
+    auto const uses_depth_stencil = ds.depth_test || ds.depth_write || ds.stencil_test;
+    pso.DSVFormat = uses_depth_stencil ? to_dxgi_format(desc.depth_stencil_format) : DXGI_FORMAT_UNKNOWN;
     pso.SampleDesc.Count = UINT(desc.sample_count);
     pso.SampleDesc.Quality = 0;
     pso.NodeMask = 0;

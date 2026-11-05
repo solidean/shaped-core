@@ -4,12 +4,14 @@
 #include <clean-core/common/utility.hh>
 #include <clean-core/container/span.hh>
 #include <clean-core/container/vector.hh>
+#include <clean-core/error/optional.hh>
 #include <clean-core/string/format.hh>
 #include <clean-core/string/string.hh>
 #include <clean-core/string/string_view.hh>
 #include <typed-geometry/scalar/traits.hh>
 #include <typed-geometry/symbolic/fwd.hh>
 
+#include <concepts>
 #include <initializer_list>
 #include <type_traits>
 
@@ -79,6 +81,139 @@ void sub_mul(C& acc, C const& a, C const& b)
         acc -= a * b;
 }
 
+/// C has a fixed-width accumulator for sums of products of small values, as bigint has, and a size in limbs to choose it by.
+template <class C>
+concept has_word_accumulator = requires(C const& c) {
+    typename C::template accumulator<3>;
+    { c.size() } -> std::convertible_to<int>;
+};
+
+/// The widest coefficient among ranges of them, in limbs, and 0 when every one fits an i64 and C has a word accumulator for them;
+/// a large number for a C with no accumulator at all, which then never takes one.
+template <class C, class... Ranges>
+[[nodiscard]] int widest_limbs(Ranges const&... ranges)
+{
+    if constexpr (!has_word_accumulator<C>)
+        return 1 << 30;
+    else
+    {
+        auto w = 0;
+        auto words = true;
+        (
+            [&]
+            {
+                for (auto const& c : ranges)
+                {
+                    w = c.size() > w ? int(c.size()) : w;
+                    if constexpr (requires { typename C::word_accumulator; })
+                        words = words && c.fits_i64();
+                }
+            }(),
+            ...);
+        if constexpr (requires { typename C::word_accumulator; })
+            if (words)
+                return 0;
+        return w == 0 ? 1 : w;
+    }
+}
+
+/// A slot that sums products of coefficients: C itself, or C's word accumulator when every factor fits it.
+template <class C, class S>
+[[nodiscard]] S zero_slot()
+{
+    if constexpr (std::is_same_v<S, C>)
+        return C(0);
+    else
+        return S{};
+}
+template <class C, class S>
+CC_FORCE_INLINE void slot_add_mul(S& s, C const& a, C const& b)
+{
+    if constexpr (std::is_same_v<S, C>)
+        add_mul(s, a, b);
+    else
+        s.add_mul(a, b);
+}
+template <class C, class S>
+[[nodiscard]] bool slot_is_zero(S const& s)
+{
+    if constexpr (std::is_same_v<S, C>)
+        return coefficient_is_zero(s);
+    else
+        return s.is_zero();
+}
+/// The slot's sum as a C, the slot left zero.
+/// The reset is unconditional: a moved-from coefficient need not be a valid zero, a rational polynomial's denominator being empty.
+template <class C, class S>
+[[nodiscard]] C slot_take(S& s)
+{
+    if constexpr (std::is_same_v<S, C>)
+    {
+        C c = cc::move(s);
+        s = C(0);
+        return c;
+    }
+    else
+    {
+        C c = s.to_bigint();
+        s.clear();
+        return c;
+    }
+}
+
+/// A factor as a slot reads it: the slot's word form where it has one, a pointer to the coefficient otherwise.
+template <class C, class S>
+struct slot_factor
+{
+    using type = C const*;
+    [[nodiscard]] static type make(C const& c) { return &c; }
+};
+template <class C, class S>
+    requires requires { typename S::factor; }
+struct slot_factor<C, S>
+{
+    using type = typename S::factor;
+    [[nodiscard]] static type make(C const& c) { return S::make_factor(c); }
+};
+
+/// A range of coefficients read once into the slot's factors, contiguous, for an inner loop that touches each many times.
+template <class C, class S, class Range>
+[[nodiscard]] cc::vector<typename slot_factor<C, S>::type> slot_factors(Range const& coefficients)
+{
+    cc::vector<typename slot_factor<C, S>::type> f;
+    f.reserve(isize(coefficients.size()));
+    for (auto const& c : coefficients)
+        f.push_back(slot_factor<C, S>::make(c));
+    return f;
+}
+
+template <class C, class S, class F>
+CC_FORCE_INLINE void slot_add_mul_factors(S& s, F const& a, F const& b)
+{
+    if constexpr (std::is_same_v<S, C>)
+        add_mul(s, *a, *b);
+    else
+        s.add_mul(a, b);
+}
+
+/// f.template operator()<S>() with the narrowest slot S the coefficients allow:
+/// C's signed word accumulator where every factor fits an i64, its limb accumulators for one or two limbs, C itself beyond.
+template <class C, class F>
+decltype(auto) with_slot(int widest, F&& f)
+{
+    if constexpr (has_word_accumulator<C>)
+    {
+        if constexpr (requires { typename C::word_accumulator; })
+            if (widest == 0)
+                return f.template operator()<typename C::word_accumulator>();
+        if (widest <= 1)
+            return f.template operator()<typename C::template accumulator<3>>();
+        if (widest <= 2)
+            return f.template operator()<typename C::template accumulator<5>>();
+    }
+    return f.template operator()<C>();
+}
+
 /// a / b where b divides a: a field's division, a ring's exact division where it has one, its truncating one otherwise.
 template <class C>
 [[nodiscard]] C exact_quotient(C const& a, C const& b)
@@ -89,6 +224,39 @@ template <class C>
         return div_exact(a, b);
     else
         return a / b;
+}
+
+/// a / b where b divides a, and false where it does not, never asserting: a field's division,
+/// an integer's by its remainder, a polynomial's by its own try_div_exact.
+template <class C>
+[[nodiscard]] bool try_exact_quotient(C const& a, C const& b, C& q)
+{
+    if constexpr (tg::traits::is_field<C>)
+    {
+        q = a / b;
+        return true;
+    }
+    else if constexpr (requires { try_div_exact(a, b); })
+    {
+        auto r = try_div_exact(a, b);
+        if (!r.has_value())
+            return false;
+        q = cc::move(r.value());
+        return true;
+    }
+    else if constexpr (requires { div_mod(a, b).remainder; })
+    {
+        auto r = div_mod(a, b);
+        if (!r.remainder.is_zero())
+            return false;
+        q = cc::move(r.quotient);
+        return true;
+    }
+    else
+    {
+        q = a / b;
+        return q * b == a;
+    }
 }
 
 template <class C>
@@ -207,7 +375,7 @@ struct tg::polynomial
     [[nodiscard]] bool is_constant() const { return degree() <= 0; }
 
     /// The stored coefficients, lowest first: degree() + 1 after a trim, Degree + 1 for a fixed bound.
-    [[nodiscard]] cc::span<C const> coefficients() const { return {_data(), isize(stored_count())}; }
+    [[nodiscard]] cc::span<C const> coefficients() const { return cc::span<C const>(_data(), isize(stored_count())); }
     [[nodiscard]] int stored_count() const
     {
         if constexpr (is_dynamic)
@@ -316,9 +484,14 @@ struct tg::polynomial
         trim();
         return *this;
     }
+    // defined here: an out-of-class definition must restate the constraint, and GCC and MSVC match no spelling of it but this one
     template <int D>
         requires is_dynamic
-    polynomial& operator*=(polynomial<C, D> const& b);
+    polynomial& operator*=(polynomial<C, D> const& b)
+    {
+        *this = *this * b;
+        return *this;
+    }
 
 private:
     template <int D>
@@ -432,24 +605,27 @@ template <class C, int A, int B>
     if (da < 0 || db < 0)
         return R();
     auto r = R::zeroed(da + db + 1);
-    for (auto i = 0; i <= da; ++i)
-    {
-        if (impl::coefficient_is_zero(a[i]))
-            continue;
-        for (auto j = 0; j <= db; ++j)
-            impl::add_mul(r[i + j], a[i], b[j]);
-    }
+    // each coefficient a convolution summed in one slot, a word accumulator where the coefficients are small enough
+    impl::with_slot<C>(
+        impl::widest_limbs<C>(a.coefficients(), b.coefficients()),
+        [&]<class S>
+        {
+            auto const fa
+                = impl::slot_factors<C, S>(a.coefficients().subspan(cc::offset_size{.offset = 0, .size = da + 1}));
+            auto const fb
+                = impl::slot_factors<C, S>(b.coefficients().subspan(cc::offset_size{.offset = 0, .size = db + 1}));
+            auto acc = impl::zero_slot<C, S>();
+            for (auto k = 0; k <= da + db; ++k)
+            {
+                auto const lo = k > db ? k - db : 0;
+                auto const hi = k < da ? k : da;
+                for (auto i = lo; i <= hi; ++i)
+                    impl::slot_add_mul_factors<C>(acc, fa[i], fb[k - i]);
+                r[k] = impl::slot_take<C>(acc);
+            }
+        });
     r.trim();
     return r;
-}
-
-template <class C, int D>
-template <int B>
-    requires polynomial<C, D>::is_dynamic
-polynomial<C, D>& polynomial<C, D>::operator*=(polynomial<C, B> const& b)
-{
-    *this = *this * b;
-    return *this;
 }
 
 template <class C, int D, class S>
@@ -654,6 +830,199 @@ template <class C, int A, int B>
     for (auto j = 0; j < m; ++j)
         CC_ASSERT(impl::coefficient_is_zero(w[j]), "tg::div_exact: the divisor does not divide");
     return impl::polynomial_from_range<polynomial<C, A>>(&w[0], m, n + 1);
+}
+
+// content, primitive part and gcd
+
+namespace impl
+{
+/// C has a gcd: bigint does, and a polynomial over such a C, through tg::gcd below.
+template <class C>
+concept has_gcd = requires(C const& a) { gcd(a, a); };
+
+/// -1, 0 or +1 for a coefficient: its own sign() where it has one, any polynomial's leading coefficient's, its comparison with 0 otherwise.
+template <class C>
+[[nodiscard]] int leading_sign(C const& c)
+{
+    if constexpr (requires { c.sign(); })
+        return c.sign();
+    else if constexpr (requires { c.leading_coefficient(); })
+        return c.is_zero() ? 0 : leading_sign(c.leading_coefficient());
+    else
+        return int(C(0) < c) - int(c < C(0));
+}
+
+/// p with every coefficient divided by c, which divides each of them.
+template <class C, int D>
+[[nodiscard]] polynomial<C, D> divide_coefficients(polynomial<C, D> p, C const& c)
+{
+    for (auto i = 0; i < p.stored_count(); ++i)
+        if (!coefficient_is_zero(p[i]))
+            p[i] = exact_quotient(p[i], c);
+    return p;
+}
+
+template <class C>
+[[nodiscard]] C power_of(C const& c, int e)
+{
+    auto r = C(1);
+    for (auto i = 0; i < e; ++i)
+        r = r * c;
+    return r;
+}
+
+/// The subresultant sequence's scale factors (Collins, Brown): g the last leading coefficient, h the last subresultant's.
+template <class C>
+struct subresultant_scale
+{
+    C g = C(1);
+    C h = C(1);
+};
+
+/// One step of the sequence, from the pseudo-remainder r of x by y with delta = deg x - deg y:
+/// x takes y, and y takes r / (g h^delta), which is exact; then g and h move on, h to g^delta / h^(delta - 1), also exact.
+template <class C>
+void subresultant_step(polynomial<C>& x, polynomial<C>& y, polynomial<C> r, int delta, subresultant_scale<C>& s)
+{
+    x = cc::move(y);
+    y = divide_coefficients(cc::move(r), s.g * power_of(s.h, delta));
+    s.g = x.leading_coefficient();
+    if (delta == 1)
+        s.h = s.g;
+    else if (delta > 1)
+        s.h = exact_quotient(power_of(s.g, delta), power_of(s.h, delta - 1));
+}
+} // namespace impl
+
+/// The gcd of p's coefficients, signed as p's leading coefficient, so that primitive_part(p) leads positively; 0 for p = 0.
+template <class C, int D>
+    requires impl::has_gcd<C>
+[[nodiscard]] C content(polynomial<C, D> const& p)
+{
+    auto g = C(0);
+    for (auto i = 0; i < p.stored_count(); ++i)
+        if (!impl::coefficient_is_zero(p[i]))
+            g = gcd(g, p[i]);
+    if (!p.is_zero() && impl::leading_sign(p.leading_coefficient()) < 0)
+        g = -g;
+    return g;
+}
+
+/// p / content(p): coefficients without a common factor, the leading one positive.
+template <class C, int D>
+    requires impl::has_gcd<C>
+[[nodiscard]] polynomial<C, D> primitive_part(polynomial<C, D> const& p)
+{
+    if (p.is_zero())
+        return p;
+    return impl::divide_coefficients(p, content(p));
+}
+
+/// The greatest common divisor, unique up to a unit and normalized: monic over a field, leading positively over the integers.
+/// Over an exact field it is Euclid's; over a ring with a gcd of its own, the subresultant sequence, whose divisions are exact
+/// and whose coefficients stay as small as the determinants they are (Collins, Brown).
+/// A polynomial over such a ring has this gcd, so nested polynomials have one too; floats have none, their remainders never vanish.
+template <class C, int A, int B>
+    requires((traits::is_field<C> && traits::is_exact<C>) || impl::has_gcd<C>)
+[[nodiscard]] polynomial<C> gcd(polynomial<C, A> const& a, polynomial<C, B> const& b)
+{
+    using P = polynomial<C>;
+    P x(a);
+    P y(b);
+    if (x.degree() < y.degree())
+        cc::swap(x, y);
+    if constexpr (traits::is_field<C> && traits::is_exact<C>)
+    {
+        while (!y.is_zero())
+        {
+            P r(divrem(x, y).remainder);
+            x = cc::move(y);
+            y = cc::move(r);
+        }
+        if (x.is_zero())
+            return x;
+        auto const lc = x.leading_coefficient();
+        return impl::divide_coefficients(x, lc);
+    }
+    else
+    {
+        if (y.is_zero())
+            return impl::leading_sign(x.is_zero() ? C(0) : x.leading_coefficient()) < 0 ? -x : x;
+        auto const c = gcd(content(x), content(y));
+        x = primitive_part(x);
+        y = primitive_part(y);
+        impl::subresultant_scale<C> scale;
+        while (true)
+        {
+            auto const delta = x.degree() - y.degree();
+            auto r = pseudo_divrem(x, y).remainder;
+            if (r.is_zero())
+                break;
+            if (r.degree() == 0)
+            {
+                y = P(C(1));
+                break;
+            }
+            impl::subresultant_step(x, y, cc::move(r), delta, scale);
+        }
+        return primitive_part(y) * c;
+    }
+}
+
+/// The resultant: the determinant of the Sylvester matrix, zero exactly when a and b share a root.
+/// By the subresultant sequence, over an exact field or a ring with a gcd, its divisions exact (Cohen, Algorithm 3.3.7).
+template <class C, int A, int B>
+    requires((traits::is_field<C> && traits::is_exact<C>) || impl::has_gcd<C>)
+[[nodiscard]] C resultant(polynomial<C, A> const& a, polynomial<C, B> const& b)
+{
+    using P = polynomial<C>;
+    P x(a);
+    P y(b);
+    if (x.is_zero() || y.is_zero())
+        return C(0);
+    // res(a, b) = (-1)^(deg a deg b) res(b, a)
+    auto sign = 1;
+    if (x.degree() < y.degree())
+    {
+        cc::swap(x, y);
+        if (x.degree() % 2 == 1 && y.degree() % 2 == 1)
+            sign = -1;
+    }
+    // res(c p, d q) = c^deg q d^deg p res(p, q): contents out first where there are any
+    auto t = C(1);
+    if constexpr (!traits::is_field<C>)
+    {
+        auto const cx = content(x);
+        auto const cy = content(y);
+        t = impl::power_of(cx, y.degree()) * impl::power_of(cy, x.degree());
+        x = impl::divide_coefficients(x, cx);
+        y = impl::divide_coefficients(y, cy);
+    }
+    impl::subresultant_scale<C> scale;
+    while (y.degree() > 0)
+    {
+        auto const delta = x.degree() - y.degree();
+        if (x.degree() % 2 == 1 && y.degree() % 2 == 1)
+            sign = -sign;
+        auto r = pseudo_divrem(x, y).remainder;
+        impl::subresultant_step(x, y, cc::move(r), delta, scale);
+    }
+    if (y.is_zero())
+        return C(0);
+    // the last subresultant: h^(1 - deg x) lc(y)^deg x, exact
+    auto const d = x.degree();
+    auto const last = impl::exact_quotient(impl::power_of(y.leading_coefficient(), d), impl::power_of(scale.h, d - 1));
+    return sign < 0 ? -(t * last) : t * last;
+}
+
+/// p without repeated factors: p / gcd(p, p'), up to a unit.
+template <class C, int D>
+    requires((traits::is_field<C> && traits::is_exact<C>) || impl::has_gcd<C>)
+[[nodiscard]] polynomial<C> squarefree_part(polynomial<C, D> const& p)
+{
+    if (p.degree() <= 0)
+        return polynomial<C>(p);
+    return div_exact(polynomial<C>(p), gcd(p, derivative(p)));
 }
 } // namespace tg
 

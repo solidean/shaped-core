@@ -31,6 +31,41 @@ struct accumulator
         return info.module;
     return "<unknown>";
 }
+
+/// Whether `function` is the OS parking the thread, which is where a waiting thread's innermost frame always is.
+[[nodiscard]] bool is_idle_leaf(cc::string_view function)
+{
+    // ntdll exports each call twice, as Nt* and Zw*, and either name may come back.
+    for (auto const prefix : {"NtWaitFor", "ZwWaitFor", "NtDelayExecution", "ZwDelayExecution", "NtRemoveIoCompletion",
+                              "ZwRemoveIoCompletion", "NtSignalAndWaitForSingleObject", "ZwSignalAndWaitForSingleObject"})
+        if (function.starts_with(prefix))
+            return true;
+
+    // Linux (glibc) and Apple (libsystem_kernel) name theirs after the call.
+    for (auto const name : {"futex_wait",
+                            "__futex_abstimed_wait_common",
+                            "__futex_abstimed_wait_common64",
+                            "epoll_wait",
+                            "epoll_pwait",
+                            "poll",
+                            "ppoll",
+                            "nanosleep",
+                            "clock_nanosleep",
+                            "__psynch_cvwait",
+                            "__psynch_mutexwait",
+                            "__semwait_signal",
+                            "__ulock_wait",
+                            "__ulock_wait2",
+                            "__workq_kernreturn",
+                            "mach_msg_trap",
+                            "mach_msg2_trap",
+                            "kevent",
+                            "kevent64",
+                            "kevent_id"})
+        if (function == name)
+            return true;
+    return false;
+}
 } // namespace
 
 cc::rec::hot_function const* cc::rec::hot_report::find(cc::string_view function) const
@@ -56,6 +91,8 @@ cc::string cc::rec::hot_report::to_string(isize max_rows) const
     out += cc::format("{} sample(s)", sample_count);
     if (unresolved_samples > 0)
         out += cc::format(", {} in no known module", unresolved_samples);
+    if (idle_samples > 0)
+        out += cc::format(", {} idle left out", idle_samples);
     out += "\n";
     out += "  self%  total%  function\n";
 
@@ -96,6 +133,12 @@ cc::rec::hot_report cc::rec::hot_functions(rec::recording const& r, rec::hot_opt
     {
         if (frames.empty())
             return;
+
+        if (opts.skip_idle && is_idle_leaf(symbols.resolve(reinterpret_cast<void const*>(frames[0])).function))
+        {
+            ++report.idle_samples;
+            return;
+        }
 
         ++report.sample_count;
         seen.clear();

@@ -68,11 +68,25 @@ struct bigfloat_sbo;
 /// the inline size used until the sweep over K is measured.
 using bigfloat = bigfloat_sbo<2>;
 
+/// an exact sum of doubles, Shewchuk's floating-point expansion, with K components inline; exact only within the double range
+/// (see scalar/float_expansion/float_expansion.hh).
+template <int K>
+struct float_expansion_sbo;
+
+/// the inline size used until a sweep over K is measured.
+using float_expansion = float_expansion_sbo<4>;
+
 /// one summand of bigfloat_sbo<K>::msum, a or a * b (see scalar/bigfloat/bigfloat.hh).
 struct bigfloat_summand;
 
 /// an arbitrary-precision integer, sign and magnitude, one pointer wide (see scalar/bigint/bigint.hh).
 struct bigint;
+/// a fixed-width two's-complement accumulator of bigint products, W limbs wide, for sums of products of small bigints
+/// (see scalar/bigint/bigint.hh).
+template <int W>
+struct bigint_accumulator;
+/// the accumulator for factors that fit an i64, multiplied signed (see scalar/bigint/bigint.hh).
+struct bigint_word_accumulator;
 /// an exact rational over two bigints, always reduced (see scalar/bigrat/bigrat.hh).
 struct bigrat;
 /// a rational whose reduction is deferred, for hot loops (see scalar/bigrat/bigrat.hh).

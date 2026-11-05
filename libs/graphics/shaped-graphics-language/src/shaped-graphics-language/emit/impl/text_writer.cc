@@ -134,6 +134,10 @@ struct writer
             id = hashed(id, piece);
         if (site.origin.at.file >= 0)
             id = hashed(id, cc::format("{}:{}", name_of(site.origin.at.file), site.origin.at.line));
+        // one line inlined along two call chains is two sites, which another permutation of this entry point may hold
+        for (auto const& from : site.origin.inlined_from)
+            if (from.file >= 0)
+                id = hashed(id, cc::format("<{}:{}", name_of(from.file), from.line));
         site.id = id;
 
         auto const count = isize(words.size()) + 2;
@@ -371,9 +375,14 @@ struct writer
         if (needs_member_assignment(x))
             return true;
         if (auto const* const c = x.node.try_as<flat_call>())
+        {
+            // CHK-427: a body in a target's own text is lines alone
+            if (c->text >= 0)
+                return true;
             if (auto const* const record = p.m.builtin_function(c->intrinsic);
                 record != nullptr && record->write.writes_lines != nullptr && record->write.writes_lines(d.language()))
                 return true;
+        }
         auto result = false;
         check::impl::for_each_operand(p.e, x, [&](flat_expr_id operand) { result = result || writes_lines(operand); });
         return result;
@@ -386,7 +395,14 @@ struct writer
             return false;
         auto const* const c = p.e.at(id).node.try_as<flat_call>();
         auto const* const record = c != nullptr ? p.m.builtin_function(c->intrinsic) : nullptr;
-        return record != nullptr && record->is_atomic;
+        if (record == nullptr || !record->is_atomic)
+            return false;
+        // the device's own float atomic is one call whose value is the whole of it, as vulkan writes it
+        if (p.native_float_atomics && !p.e.at(c->arguments).empty())
+            if (auto const& t = p.m.at(p.e.at(p.e.at(c->arguments)[0]).type);
+                t.kind == check::type_kind::atomic && p.m.name_of(t.element) == builtins::k_float)
+                return false;
+        return true;
     }
 
     /// The image member whose texel `x` loads or, with `is_store`, stores; null for any other expression.
@@ -1149,9 +1165,68 @@ struct writer
         line(cc::format("{} = {};", expr(a.place).text, value));
     }
 
+    /// A body in a target's own text, written ahead of the statement that holds the call, each placeholder the argument
+    /// it names, and `$result` a local the text assigns, which is the call's value (CHK-427).
+    rendered target_text_call(flat_call const& c, check::type_id type)
+    {
+        auto const& t = p.m.target_texts[c.text];
+        auto arguments = cc::vector<cc::string>();
+        for (auto const id : p.e.at(c.arguments))
+            arguments.push_back(wrapped(expr(id), level::primary));
+        auto result = cc::string();
+        if (type != check::checked_module::void_type)
+        {
+            result = p.names.mint(cc::format("{}_text", p.m.at(c.callee).name));
+            auto const type_name = cc::string(type_text(p, d, type));
+            auto declaration = cc::string();
+            d.write_local(declaration, {.name = result, .type = type_name, .is_mut = true, .is_zeroed = is_padded(type)});
+            line(declaration);
+        }
+        auto text = cc::string(t.pieces[0]);
+        for (auto i = isize(0); i < t.slots.size(); ++i)
+        {
+            text += t.slots[i] < 0 ? cc::string_view(result) : cc::string_view(arguments[t.slots[i]]);
+            text += t.pieces[i + 1];
+        }
+        // each line of the text a line of its own, indented where the call stands
+        auto start = isize(0);
+        for (auto i = isize(0); i <= text.size(); ++i)
+            if (i == text.size() || text[i] == '\n')
+            {
+                if (i > start)
+                    line(cc::string(cc::string_view(text).subview({.offset = start, .size = i - start})));
+                start = i + 1;
+            }
+        return {.text = cc::move(result)};
+    }
+
+    /// EMIT-139: the per-instance hit-group offsets of the acceleration structure `id` names, which sg's metal backend
+    /// mirrors slot for slot beside each group's argument buffer: `hit_offsets->groups[group][slot + element]`.
+    /// Empty where `id` is no acceleration-structure member, or an element of one.
+    cc::string hit_offsets_of(flat_expr_id id)
+    {
+        if (p.m.at(p.e.at(id).type).kind != type_kind::acceleration_structure)
+            return {};
+        auto named = id;
+        auto element = cc::string();
+        if (auto const* const e = p.e.at(id).node.try_as<flat_element>())
+        {
+            named = e->object;
+            element = cc::format(" + {}", wrapped(expr(e->index), level::additive));
+        }
+        auto const* const member = p.e.at(named).node.try_as<flat_binding_member>();
+        auto const found = member != nullptr ? resource_of(p, member->binding, member->member) : -1;
+        if (found < 0)
+            return {};
+        auto const& r = p.resources[found];
+        return cc::format("sgl_ctx.hit_offsets->groups[{}][{}{}].instances", r.group, r.slot, element);
+    }
+
     /// Every call is written from its registry record; nothing here knows one builtin from another.
     rendered call(flat_call const& c, check::type_id type)
     {
+        if (c.text >= 0)
+            return target_text_call(c, type);
         auto const& record = *p.m.builtin_function(c.intrinsic);
         auto arguments = cc::vector<rendered>();
         for (auto const id : p.e.at(c.arguments))
@@ -1169,6 +1244,9 @@ struct writer
         case builtins::spelling_kind::custom:
         {
             auto mint = [&](cc::string_view desired) { return p.names.mint(desired); };
+            auto const offsets = d.language() == builtins::language::msl && !arguments.empty()
+                                   ? hit_offsets_of(p.e.at(c.arguments)[0])
+                                   : cc::string();
             auto result = how.custom({.target = d.language(),
                                       .arguments = arguments,
                                       .builtins = *p.m.builtins,
@@ -1177,8 +1255,10 @@ struct writer
                                       .result_type = p.m.builtin_type_of(type) != nullptr || record.gives_prelude_struct
                                                        ? type_text(p, d, type)
                                                        : cc::string_view(),
+                                      .hit_offsets = offsets,
                                       .is_device_coherent = is_device_coherent,
-                                      .is_pixel_stage = p.e.entry_stage == check::stage::pixel});
+                                      .is_pixel_stage = p.e.entry_stage == check::stage::pixel,
+                                      .native_float_atomics = p.native_float_atomics});
             // the statements its value needs, ahead of the one that holds it
             for (auto const& l : result.lines)
                 line(l);
@@ -1418,10 +1498,17 @@ struct writer
         auto const dimensions = array_dimensions(p, local.type);
         auto const* const type_record = p.m.builtin_type_of(local.type);
         auto const& flags = p.local_flags[index_of(id)];
-        auto const type = declares_only && d.language() == builtins::language::hlsl && type_record != nullptr
-                               && type_record->hlsl_flagged != nullptr && flags.has_value()
-                            ? type_record->hlsl_flagged(flags.value())
-                            : cc::string(type_text(p, d, local.type));
+        // EMIT-184: forcing micromaps to 2 states is a name of Shader Model 6.9 alone, and the template only a hint
+        auto const sees_micromaps = p.e.features.has(check::feature::opacity_micromap);
+        auto type = declares_only && d.language() == builtins::language::hlsl && type_record != nullptr
+                         && type_record->hlsl_flagged != nullptr && flags.has_value()
+                      ? type_record->hlsl_flagged(sees_micromaps ? flags.value() : flags.value() & ~1024u)
+                      : cc::string(type_text(p, d, local.type));
+        // EMIT-184: a query of an entry point that states opacity micromaps sees them, which HLSL asks of each query
+        if (declares_only && type_record != nullptr && type_record->hlsl_flagged != nullptr
+            && d.language() == builtins::language::hlsl && sees_micromaps && type.ends_with(">"))
+            type = cc::format("{}, RAYQUERY_FLAG_ALLOW_OPACITY_MICROMAPS>",
+                              type.subview({.offset = 0, .size = type.size() - 1}));
         d.write_local(declaration, {.name = name,
                                     .type = type,
                                     .value = text,
@@ -1497,8 +1584,9 @@ struct writer
             [&](flat_print const& n) { print_record(s, n); }, //
             [&](flat_eval const& v)
             {
-                // an atomic HLSL writes as statements alone has nothing left to evaluate
-                if (is_hlsl_atomic(v.value))
+                // an atomic HLSL writes as statements alone has nothing left to evaluate, nor has a target's own text
+                auto const* const evaluated = p.e.at(v.value).node.try_as<flat_call>();
+                if (is_hlsl_atomic(v.value) || (evaluated != nullptr && evaluated->text >= 0))
                 {
                     (void)expr(v.value);
                     return;
@@ -1676,12 +1764,31 @@ cc::string_view sgl::emit::impl::type_text(plan const& p, dialect const& d, chec
         return p.array_texts[p.array_of_type[index_of(type)]];
     if (is_valid(type) && p.m.at(type).kind == check::type_kind::atomic)
         return atomic_text(p, type);
+    // CHK-432: a text type is spelled as its compile's branch says
+    for (auto const& t : p.e.text_types)
+        if (t.type == type)
+            return t.spelling;
     return p.structs[p.struct_of_type[index_of(type)]].name;
 }
 
 
 void sgl::emit::impl::write_helpers(cc::string& out, plan const& p, dialect const& d)
 {
+    // CHK-428: the preambles of each file whose bodies in a target's text the entry point writes, once, in the order
+    // first needed
+    auto const language = d.language() == builtins::language::hlsl ? check::shading_language::hlsl
+                        : d.language() == builtins::language::wgsl ? check::shading_language::wgsl
+                                                                   : check::shading_language::msl;
+    auto text_files = cc::vector<i32>();
+    for (auto const& x : p.e.exprs)
+        if (auto const* const call = x.node.try_as<check::flat_call>(); call != nullptr && call->text >= 0)
+            if (auto const file = p.m.target_texts[call->text].file; !text_files.values().contains(file))
+                text_files.push_back(file);
+    for (auto const file : text_files)
+        for (auto const& preamble : p.m.target_preambles)
+            if (preamble.file == file && preamble.language == language)
+                out.appendf("{}\n", preamble.text);
+
     // EMIT-102: each helper the entry point's builtin calls need, once, in the order first needed.
     auto written = cc::vector<cc::string>();
     for (auto const& x : p.e.exprs)

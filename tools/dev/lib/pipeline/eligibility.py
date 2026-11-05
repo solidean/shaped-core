@@ -90,7 +90,7 @@ def query_listing(
         return None
     try:
         data = json.loads(proc.stdout)
-    except (json.JSONDecodeError, ValueError):
+    except (json.JSONDecodeError, ValueError, TypeError):  # TypeError: no output at all
         return None
     return BinaryListing(
         name=target.name,

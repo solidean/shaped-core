@@ -75,6 +75,14 @@ target_sources(shaped-shader-library
 # SC_FROZEN_SHADERS is the root CMakeLists' whole-build switch; an add_subdirectory consumer that never set it is not frozen.
 # Private: it changes what a library reads at run time, never a type a consumer sees.
 target_compile_definitions(shaped-shader-library PRIVATE SLIB_FROZEN_SHADERS=$<BOOL:${SC_FROZEN_SHADERS}>)
+# SC_SHADER_UNDEFINED is the root CMakeLists' switch, as slib::sgl_undefined_guard's value; a consumer that never set it guards nothing
+if(SC_SHADER_UNDEFINED STREQUAL "REPORT")
+    target_compile_definitions(shaped-shader-library PRIVATE SLIB_SHADER_UNDEFINED=2)
+elseif(SC_SHADER_UNDEFINED STREQUAL "ABORT")
+    target_compile_definitions(shaped-shader-library PRIVATE SLIB_SHADER_UNDEFINED=1)
+else()
+    target_compile_definitions(shaped-shader-library PRIVATE SLIB_SHADER_UNDEFINED=0)
+endif()
 
 # The OS file-watch backend behind real_filesystem::watch.
 # real_filesystem and these are the only files in slib that reach the OS.

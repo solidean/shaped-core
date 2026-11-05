@@ -113,6 +113,12 @@ The text, the footprint, the uniformity pass and the features an entry point nee
 An entry point's options are the uses inside its declaration, its callees', its bindings' and the structs any of those name, which no value changes.
 A module's option is matched by its qualified name, `checked_module::qualified_name_of`, which `describe` reports too.
 
+**The target and the device are inputs of a check, as the options are** (CHK-426).
+`check::compile_target` is what `check` takes beside them, and the flattener substitutes it where an inlined body reads `target_api`, `target_language` or `has`: `flattener::compiled_for`.
+So a source is checked once per target, and `compile_all_to_text` checks once for each target it writes.
+A test is flattened for no target, and a const that reads one is refused, which is what lets a layer of modules serve every target.
+`describe` checks for no target, so a `const if` on one reports its `else` branch's footprint.
+
 **Compiling a function means its signature, with one exception.**
 A body is checked after every signature is known, which is what lets a function call one declared below it.
 An arrow body without `-> T` infers its result, so its body is checked as part of compiling it, while the symbol is still in compilation.
