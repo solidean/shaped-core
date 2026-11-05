@@ -156,11 +156,14 @@ endif()
 # The trained OIDN weights the member runs, as a path rather than a target: nothing links them, and the member reads
 # the blob at run time.
 # Empty when they were not fetched, which makes the member report `unsupported` rather than fail to build.
+# TEMPORARY(debt-oidn-weights-source-tree-path): an absolute path into the source tree.
+# So it is defined on the one file that reads it, and the library's other files compile the same in any checkout.
 set(SR_OIDN_WEIGHTS_DIR_VALUE "")
 if(OIDN_WEIGHTS_DIR)
     set(SR_OIDN_WEIGHTS_DIR_VALUE "${OIDN_WEIGHTS_DIR}")
 endif()
-target_compile_definitions(shaped-rendering PRIVATE SR_OIDN_WEIGHTS_DIR="${SR_OIDN_WEIGHTS_DIR_VALUE}")
+set_property(SOURCE src/shaped-rendering/impl/oidn_network.cc APPEND PROPERTY
+    COMPILE_DEFINITIONS SR_OIDN_WEIGHTS_DIR="${SR_OIDN_WEIGHTS_DIR_VALUE}")
 # NVIDIA DLSS Ray Reconstruction, when somebody has fetched the SDK (extern/dlss/fetch-dlss.py).
 #
 # It needs a dx12 native scope to hand NGX a command list, so it is built only where that backend is, and it links
@@ -362,7 +365,7 @@ if(SC_BUILD_TESTS)
         nexus
         shaped-graphics-language # the slug module's own tests run on SGL's interpreter
     )
-    target_compile_definitions(shaped-rendering-test PRIVATE SR_SGL_MODULE_DIR="${SR_SGL_MODULE_DIR}")
+    sc_target_source_paths(shaped-rendering-test PRIVATE SR_SGL_MODULE_DIR "${SR_SGL_MODULE_DIR}")
     target_include_directories(shaped-rendering-test PRIVATE "${BABEL_TEST_DIR}") # font/font_builder.hh, for crafted fonts
 
     sc_target_pch(shaped-rendering-test SG NEXUS) # 0.44
@@ -518,7 +521,9 @@ if(SC_BUILD_TESTS)
         sc_stage_runtime_dlls(shaped-rendering-test DLLS "${SC_DLSS_RUNTIME}" TAG dlss)
     endif()
 
-    target_compile_definitions(shaped-rendering-test PRIVATE SR_OIDN_WEIGHTS_DIR="${SR_OIDN_WEIGHTS_DIR_VALUE}")
+    if(OIDN_WEIGHTS_DIR)
+        sc_target_source_paths(shaped-rendering-test PRIVATE SR_TEST_OIDN_WEIGHTS_DIR "${OIDN_WEIGHTS_DIR}")
+    endif()
 
     # The one test that crosses sr's window into metal's windowed presentation, which nothing else covers.
     # SDL is what hands out the CAMetalLayer, so it needs a window backend as well as the metal one.

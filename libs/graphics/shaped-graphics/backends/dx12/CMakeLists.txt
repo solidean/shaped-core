@@ -109,8 +109,11 @@ target_link_libraries(shaped-graphics-dx12 PUBLIC shaped-graphics d3d12 dxgi dxg
 if(TARGET agility)
     get_target_property(_sg_agility_dir agility SC_AGILITY_RUNTIME_DIR)
     target_link_libraries(shaped-graphics-dx12 PUBLIC agility)
-    target_compile_definitions(shaped-graphics-dx12 PUBLIC SG_HAS_AGILITY=1
-                               PRIVATE "SG_AGILITY_RUNTIME_DIR=\"${_sg_agility_dir}/\"")
+    target_compile_definitions(shaped-graphics-dx12 PUBLIC SG_HAS_AGILITY=1)
+    # TEMPORARY(debt-dx12-agility-source-tree-fallback): an absolute path into the source tree.
+    # So it is defined on the one file that reads it, and the backend's other files compile the same in any checkout.
+    set_property(SOURCE src/shaped-graphics/backends/dx12/dx12_runtime.cc APPEND PROPERTY
+        COMPILE_DEFINITIONS "SG_AGILITY_RUNTIME_DIR=\"${_sg_agility_dir}/\"")
 else()
     target_compile_definitions(shaped-graphics-dx12 PUBLIC SG_HAS_AGILITY=0)
 endif()

@@ -2,6 +2,7 @@
 #include <clean-core/memory/unique_ptr.hh>
 #include <clean-core/string/format.hh>
 #include <clean-core/string/string.hh>
+#include <nexus/source_root.hh>
 #include <nexus/test.hh>
 #include <nexus/tests/logs.hh>
 #include <shaped-graphics-language/driver/describe.hh>
@@ -28,8 +29,8 @@ using namespace cc::primitive_defines;
 TEST("slib pipeline - the committed field setters are what the prelude's mirror of sg's description generates")
 {
     // `uv run dev.py check sgl-prelude --fix` rewrites the file; this is the same comparison, for a tree without the tool.
-    auto const committed
-        = slib::real_filesystem(SLIB_SOURCE_DIR).read_text("src/shaped-shader-library/impl/pipeline_fields.hh");
+    auto const committed = slib::real_filesystem(nx::source_path(SLIB_SOURCE_DIR))
+                               .read_text("src/shaped-shader-library/impl/pipeline_fields.hh");
     REQUIRE(committed.has_value());
     CHECK(committed.value() == sgl::pipeline_fields_text());
 }

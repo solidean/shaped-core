@@ -6,6 +6,8 @@
 #include <shaped-graphics-language/emit/emit.hh>
 
 // clean-core has no directory listing yet, and a corpus file needs no CMake entry of its own only when it is found by one.
+#include <nexus/source_root.hh>
+
 #include <filesystem>
 
 // The corpus is how SGL's semantics are tested: one `.sgl` file per topic under tests/corpus/, each a program whose
@@ -36,7 +38,7 @@ cc::vector<sgl_corpus_file> corpus_files()
 {
     namespace fs = std::filesystem;
     auto out = cc::vector<sgl_corpus_file>();
-    auto const root = fs::path(SGL_CORPUS_DIR);
+    auto const root = fs::path(nx::source_path(SGL_CORPUS_DIR).c_str_materialize());
     auto ec = std::error_code();
     for (auto const& e : fs::recursive_directory_iterator(root, ec))
     {

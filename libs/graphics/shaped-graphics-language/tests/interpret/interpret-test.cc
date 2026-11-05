@@ -1,6 +1,7 @@
 #include "../legalize/flat-test-support.hh"
 
 #include <clean-core/math/bit.hh>
+#include <nexus/source_root.hh>
 
 using namespace sgl_test;
 using namespace sgl::check;
@@ -15,7 +16,7 @@ cc::string run(flat_builder const& b, run_limits const& limits = {})
 
 TEST("sgl interpret - the cube's entry points run: a pixel is lit, and a vertex goes through the matrix")
 {
-    auto const checked = check_sources(read_prelude(), read_text(cc::string(SGL_SAMPLES_DIR) + "/cube.sgl"));
+    auto const checked = check_sources(read_prelude(), read_text(nx::source_path(SGL_SAMPLES_DIR) + "/cube.sgl"));
     auto const& m = checked.module;
     REQUIRE(m.entry_points.size() == 2);
 

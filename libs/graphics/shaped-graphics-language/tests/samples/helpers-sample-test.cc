@@ -1,5 +1,6 @@
 #include "../legalize/flat-test-support.hh"
 
+#include <nexus/source_root.hh>
 #include <shaped-graphics-language/driver/compile_to_text.hh>
 #include <shaped-graphics-language/emit/emit.hh>
 
@@ -10,7 +11,7 @@ namespace
 {
 cc::string read_helpers()
 {
-    return read_text(cc::string(SGL_SAMPLES_DIR) + "/helpers.sgl");
+    return read_text(nx::source_path(SGL_SAMPLES_DIR) + "/helpers.sgl");
 }
 
 /// The pixel stage of the sample for `t`, from the line that starts the function.

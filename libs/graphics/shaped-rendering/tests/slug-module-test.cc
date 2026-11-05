@@ -1,5 +1,6 @@
 #include <clean-core/streams/file_stream.hh>
 #include <clean-core/string/string.hh>
+#include <nexus/source_root.hh>
 #include <nexus/test.hh>
 #include <shaped-graphics-language/driver/test_source.hh>
 
@@ -10,7 +11,7 @@ using namespace cc::primitive_defines;
 
 TEST("sr::slug - the slug module checks clean and passes its own tests")
 {
-    auto const path = cc::string(SR_SGL_MODULE_DIR) + "/slug.sgl";
+    auto const path = nx::source_path(SR_SGL_MODULE_DIR) + "/slug.sgl";
     auto adapter = cc::file_read_stream_adapter::open(path);
     REQUIRE(adapter.has_value());
     auto stream = adapter.value().stream();

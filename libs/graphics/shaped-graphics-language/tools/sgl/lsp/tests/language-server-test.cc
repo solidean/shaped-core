@@ -2,6 +2,7 @@
 #include "lsp-test-support.hh"
 
 #include <clean-core/string/uri.hh>
+#include <nexus/source_root.hh>
 #include <shaped-graphics-language/driver/prelude.hh>
 
 using namespace lsp_test;
@@ -139,7 +140,7 @@ TEST("sgl lsp - opening a document publishes its diagnostics, with a summary whe
 
 TEST("sgl lsp - a file of the prelude is checked in its own place, not behind a second copy of itself", main_thread)
 {
-    auto const dir = cc::string(sgl::impl::prelude_directory());
+    auto const dir = nx::source_path(SGL_PRELUDE_DIR);
     auto const uri_of = [&](cc::string_view name)
     {
         return cc::string(dir.starts_with("/") ? "file://" : "file:///")
@@ -388,7 +389,7 @@ TEST("sgl lsp - a test judged by the diagnostics it expects is one mark on its k
 TEST("sgl lsp - an error in a module the document uses is shown on its `use`, pointing into the module's file",
      main_thread)
 {
-    sgl_lsp::set_module_dirs({cc::string(SGL_LSP_TEST_MODULES_DIR)});
+    sgl_lsp::set_module_dirs({nx::source_path(SGL_LSP_TEST_MODULES_DIR)});
     auto s = session("// uses a broken module\nuse broken\nfun g() -> float => broken.f()\n");
     sgl_lsp::set_module_dirs({});
     auto const p = s.last("textDocument/publishDiagnostics");
@@ -400,7 +401,7 @@ TEST("sgl lsp - an error in a module the document uses is shown on its `use`, po
 
 TEST("sgl lsp - a module file open in the editor is what the documents using it are checked against", main_thread)
 {
-    sgl_lsp::set_module_dirs({cc::string(SGL_LSP_TEST_MODULES_DIR)});
+    sgl_lsp::set_module_dirs({nx::source_path(SGL_LSP_TEST_MODULES_DIR)});
     auto s = session("use broken\nfun g() -> float => broken.f()\n");
     auto const last_of_document = [&]
     {
@@ -413,7 +414,7 @@ TEST("sgl lsp - a module file open in the editor is what the documents using it 
     CHECK(last_of_document() == "0:0 unknown-name module broken does not check: nope\n");
 
     // the module opened with an unsaved fix: the document that uses it is checked again, against the fix
-    auto const dir = cc::string(SGL_LSP_TEST_MODULES_DIR);
+    auto const dir = nx::source_path(SGL_LSP_TEST_MODULES_DIR);
     auto const module_uri = dir.starts_with("/") ? "file://" + dir + "/broken.sgl" : "file:///" + dir + "/broken.sgl";
     s.send_open("module broken\n\nfun f() -> float => 1.0\n", module_uri);
     s.settle();

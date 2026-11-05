@@ -1,6 +1,7 @@
 #include "emit-test-support.hh"
 
 #include <clean-core/container/pair.hh>
+#include <nexus/source_root.hh>
 
 using namespace sgl_test;
 using sgl::emit::target;
@@ -48,7 +49,7 @@ cc::string_view text_of(cc::span<cc::pair<cc::string, cc::string> const> stages,
 
 TEST("sgl emit msl - every stage of sg's ray-tracing pipeline writes, and all agree on the ray data")
 {
-    auto const stages = msl_stages_of(read_text(cc::string(SGL_SG_SHADERS_DIR) + "/raytracing_pipeline.sgl"));
+    auto const stages = msl_stages_of(read_text(nx::source_path(SGL_SG_SHADERS_DIR) + "/raytracing_pipeline.sgl"));
     // five raygens (three reordering, one storing into images) and three misses (one storing), three closest hits (one
     // of them the empty one), two any hits, the intersection, and a traversal per ray type of the procedural group
     auto names = cc::string();
@@ -86,7 +87,7 @@ TEST("sgl emit msl - every stage of sg's ray-tracing pipeline writes, and all ag
 
 TEST("sgl emit msl - every stage of sg's callables pipeline writes, and a callable takes no hit record")
 {
-    auto const stages = msl_stages_of(read_text(cc::string(SGL_SG_SHADERS_DIR) + "/raytracing_callables.sgl"));
+    auto const stages = msl_stages_of(read_text(nx::source_path(SGL_SG_SHADERS_DIR) + "/raytracing_callables.sgl"));
     CHECK(text_of(stages, "doubled")
               .contains("[[visible]] void doubled(thread uint4* sgl_payload, thread sgl_context const& sgl_ctx)\n"));
     CHECK(text_of(stages, "negated").contains("[[visible]] void negated("));
@@ -235,7 +236,7 @@ TEST("sgl emit msl - an inline trace outside a ray-tracing stage reaches metal::
 {
     // compute and pixel stages, each tracing inline: none of them is a ray-tracing stage, and each names the
     // namespace's types, so each must include it
-    auto const stages = msl_stages_of(read_text(cc::string(SGL_SG_SHADERS_DIR) + "/raytracing.sgl"));
+    auto const stages = msl_stages_of(read_text(nx::source_path(SGL_SG_SHADERS_DIR) + "/raytracing.sgl"));
     CHECK(!stages.empty());
     for (auto const& [entry, text] : stages)
     {

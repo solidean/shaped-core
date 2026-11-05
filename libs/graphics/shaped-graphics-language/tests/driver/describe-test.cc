@@ -1,6 +1,7 @@
 #include "../emit/emit-test-support.hh"
 
 #include <clean-core/sequence/sequence.hh>
+#include <nexus/source_root.hh>
 #include <shaped-graphics-language/driver/describe.hh>
 
 using namespace sgl_test;
@@ -29,7 +30,7 @@ cc::string error_of(cc::string_view source)
 
 TEST("sgl describe - the cube: an inline block, a vertex input, a target set and two entry points")
 {
-    auto const d = described(read_text(cc::string(SGL_SAMPLES_DIR) + "/cube.sgl"));
+    auto const d = described(read_text(nx::source_path(SGL_SAMPLES_DIR) + "/cube.sgl"));
 
     REQUIRE(d.bindings.size() == 1);
     auto const& constants = d.bindings[0];
@@ -218,7 +219,7 @@ TEST("sgl describe - a group's plain members are its constant buffer, at slot 0 
 
 TEST("sgl describe - a vertex input's members say which buffer they come from, and how it steps")
 {
-    auto const d = described(read_text(cc::string(SGL_SAMPLES_DIR) + "/cube.sgl"));
+    auto const d = described(read_text(nx::source_path(SGL_SAMPLES_DIR) + "/cube.sgl"));
     // Unmarked: one buffer, stepped per vertex.
     CHECK(d.structs[0].members[0].stream == "per_vertex");
     CHECK(!d.structs[0].members[0].is_per_instance);
@@ -299,7 +300,7 @@ struct pixel_input:
 
 TEST("sgl describe - a pipeline: its stages, its layout, its settings in order, and what the host states")
 {
-    auto const d = described(read_text(cc::string(SGL_SAMPLES_DIR) + "/pipeline.sgl"));
+    auto const d = described(read_text(nx::source_path(SGL_SAMPLES_DIR) + "/pipeline.sgl"));
 
     REQUIRE(d.pipelines.size() == 1);
     auto const& p = d.pipelines[0];
@@ -331,7 +332,7 @@ TEST("sgl describe - a pipeline: its stages, its layout, its settings in order, 
 
 TEST("sgl describe - a later setting takes a part back from the host")
 {
-    auto const d = described(read_text(cc::string(SGL_SAMPLES_DIR) + "/pipeline.sgl")
+    auto const d = described(read_text(nx::source_path(SGL_SAMPLES_DIR) + "/pipeline.sgl")
                              + "pipeline fixed:\n"
                                "    vertex = main_vs\n    pixel = main_ps\n    format = .bgra8_unorm\n");
     REQUIRE(d.pipelines.size() == 2);

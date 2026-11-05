@@ -162,7 +162,6 @@ endfunction()
 _sgl_embed_prelude("${CMAKE_CURRENT_SOURCE_DIR}/prelude/core.sgl" _sgl_prelude_literals)
 _sgl_embed_prelude("${CMAKE_CURRENT_SOURCE_DIR}/prelude/raytracing.sgl" _sgl_raytracing_literals)
 
-# The same file names the prelude's directory, which tells the library's own prelude files from a user's files of the same names.
 # Written only when it differs, so a configure that changes nothing recompiles nothing.
 # Not file(CONFIGURE): SGL spells an attribute `@name`, and two of them on one line would read as a CMake variable.
 set(_sgl_prelude_generated "${CMAKE_CURRENT_BINARY_DIR}/generated/prelude.generated.cc")
@@ -178,8 +177,6 @@ constexpr char const* k_raytracing =${_sgl_raytracing_literals};
 
 cc::string_view sgl::impl::embedded_core_prelude() { return k_prelude; }
 cc::string_view sgl::impl::embedded_raytracing_prelude() { return k_raytracing; }
-
-cc::string_view sgl::impl::prelude_directory() { return R\"sglprelude(${CMAKE_CURRENT_SOURCE_DIR}/prelude)sglprelude\"; }
 ")
 set(_sgl_prelude_existing "")
 if(EXISTS "${_sgl_prelude_generated}")
@@ -371,8 +368,10 @@ if(SC_BUILD_TOOLS)
     # babel-data writes `describe`'s JSON; the tool may take it, and the library must not.
     target_link_libraries(sgl PRIVATE shaped-graphics-language sgl-lsp-protocol babel-data nexus)
     sc_target_pch(sgl SGL NEXUS)
-    target_compile_definitions(sgl PRIVATE SGL_SAMPLES_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/samples"
-        SGL_LSP_TEST_MODULES_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tools/sgl/lsp/tests/modules")
+    sc_target_source_paths(sgl PRIVATE
+        SGL_SAMPLES_DIR tests/samples
+        SGL_PRELUDE_DIR prelude
+        SGL_LSP_TEST_MODULES_DIR tools/sgl/lsp/tests/modules)
 endif()
 
 # Test executable
@@ -483,15 +482,15 @@ if(SC_BUILD_TESTS)
     sc_nexus_binary(shaped-graphics-language-test KINDS tests)
 
     # The spec's `sgl` fences are test input, read from the source tree so an edited example needs no reconfigure.
-    target_compile_definitions(shaped-graphics-language-test
+    sc_target_source_paths(shaped-graphics-language-test
         PRIVATE
-        SGL_SPEC_DIR="${CMAKE_CURRENT_SOURCE_DIR}/docs/spec"
-        SGL_SAMPLES_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/samples"
+        SGL_SPEC_DIR docs/spec
+        SGL_SAMPLES_DIR tests/samples
         # the corpus is walked when the test runs, so a new file needs no entry here
-        SGL_CORPUS_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/corpus"
-        SGL_PRELUDE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/prelude"
+        SGL_CORPUS_DIR tests/corpus
+        SGL_PRELUDE_DIR prelude
         # sg's metal ray-tracing shaders, whose MSL text is checked here on every box, while only a Mac runs them
-        SGL_SG_SHADERS_DIR="${CMAKE_CURRENT_SOURCE_DIR}/../shaped-graphics/tests/shaders/sgl")
+        SGL_SG_SHADERS_DIR ../shaped-graphics/tests/shaders/sgl)
 
     target_link_libraries(shaped-graphics-language-test
         PRIVATE

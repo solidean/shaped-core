@@ -108,7 +108,8 @@ plus a `.dump("rule", …)` naming the rule when the check is per-rule.
 
 ## How the corpus reaches the test binary
 
-`tests/rules/corpus-test.cc` is a `nx::invoke_tests` driver: it scans `SCL_CORPUS_DIR` (the `rules/` tree, baked in by CMake) **recursively** for `*.md`, parses each with `babel::markdown`,
+`SCL_CORPUS_DIR` is the `rules/` tree relative to the source root, which the test joins at run time with `nx::source_path`.
+`tests/rules/corpus-test.cc` is a `nx::invoke_tests` driver: it scans that tree **recursively** for `*.md`, parses each with `babel::markdown`,
 and invokes once per file with the file's path relative to `rules/` as the invocation name.
 So a single file is addressable:
 
