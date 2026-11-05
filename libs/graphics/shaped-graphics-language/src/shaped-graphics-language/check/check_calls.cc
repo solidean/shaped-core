@@ -604,6 +604,10 @@ type_id checker::check_call(function_scope& scope, ast::expr_id id, ast::call co
             }
     }
 
+    // CHK-485: a task stage's launch, whose payload is a struct of the program
+    if (text == "dispatch_mesh")
+        return check_dispatch_mesh(scope, id, call);
+
     return check_named_call(scope, id, call, text, seen_from(file, text), false);
 }
 
@@ -817,7 +821,7 @@ type_id checker::check_dot_call(function_scope& scope, ast::expr_id id, ast::cal
     auto const receiver = check_expr(scope, member.object);
     handed.remove_back();
     if (receiver != error_type && out.at(receiver).kind == type_kind::stream
-        && (out.at(receiver).count > 0 || name == "vertex"))
+        && (out.at(receiver).count > 0 || name == "vertex" || name == "primitive"))
         return check_stream_call(scope, id, call, receiver);
     if (receiver != error_type && name == "invoke" && out.name_of(receiver) == "hit_object"
         && out.builtin_type_of(receiver) != nullptr)

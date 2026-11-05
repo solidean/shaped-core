@@ -1119,7 +1119,7 @@ A `require` in a test's body that nothing in it uses is `unused-require`, and a 
   An array stands in one, since workgroup memory has no host layout, and a member of one is a place a shader assigns.
   `@inline` or `@no_padding` together with `@workgroup` is `invalid-attribute-arguments`.
 * **CHK-293** A `@workgroup` binding whose members take more than 16384 bytes, laid out as WGSL lays out workgroup variables, is `invalid-attribute-arguments`.
-* **CHK-294** An entry point listing a `@workgroup` binding is a compute or a mesh stage, and all it lists fits the same 16384 bytes, or it is `invalid-entry-point`.
+* **CHK-294** An entry point listing a `@workgroup` binding is a compute, a task or a mesh stage, and all it lists fits the same 16384 bytes, or it is `invalid-entry-point`.
 * **CHK-295** A test uses a `@workgroup` binding, and calls a function listing one, without listing it: the run holds its own.
 
 ## Atomics
@@ -1326,6 +1326,19 @@ HLSL writes it on dx12 and vulkan; WebGPU has none, and sg's metal backend does 
   Each is a mesh stage's alone; an index at or past its count, or a write before the counts, is the target's undefined behaviour.
 * **CHK-483** A pipeline names its mesh stage as `mesh = f`, in the vertex stage's place, with no tessellation or geometry stage beside it.
   What the mesh stage writes is what the pixel stage takes, by CHK-183's rule, and the pipeline reads no vertex input.
+* **CHK-484** `@task(x, y, z)` makes an entry point of the task stage, which needs `mesh_shader`.
+  Its workgroup sizes are `@compute`'s, and it takes the compute stage's inputs and `@workgroup` bindings, and returns nothing.
+* **CHK-485** `dispatch_mesh(x, y, z, payload)` launches `x * y * z` mesh workgroups and hands each the struct `payload`; it is a task stage's alone.
+  The three counts are `uint`, and `payload` is a struct of the program, or `wrong-kind-of-name`.
+  It is a barrier of CHK-282, and the entry point calls it exactly once, as the last statement of its body once inlined, or it is `invalid-entry-point`.
+* **CHK-486** A mesh stage may take that struct as a parameter before its output, the payload its task stage handed it.
+* **CHK-487** A pipeline names its task stage as `task = f`, before a mesh stage it launches.
+  The mesh stage takes exactly the struct the task stage hands on, and a payload only where a task stage hands one, or the pipeline is `invalid-pipeline`.
+  What the task stage hands on is known once its body is checked, so that part is judged after every body.
+* **CHK-488** `mesh_output[T, F]` also writes the struct `F` per triangle, which has no `@position` and no `@per_draw` member.
+  `o.primitive(i, f)` writes the values of the triangle at the `uint` index `i`, which convert to `F`; on an output of no `F` it is `unknown-member`.
+* **CHK-489** A pixel stage may take a second struct right after its stage struct: what a mesh stage wrote for the triangle, the same for each of its pixels.
+  A pipeline's pixel stage takes it exactly where its mesh stage's output names `F`, and it is that struct, or the pipeline is `invalid-pipeline`.
 
 ## Ray tracing
 
@@ -1753,7 +1766,7 @@ A diagnostic of this pass has a kind, a file, a byte span in that file, and a de
 | `nan-test-at-fast` | CHK-436 |
 | `recursive-call` | CHK-130 |
 | `recursive-trace` | CHK-332 |
-| `unknown-member` | CHK-64, CHK-147, CHK-152, CHK-279, CHK-329, CHK-385 |
+| `unknown-member` | CHK-64, CHK-147, CHK-152, CHK-279, CHK-329, CHK-385, CHK-488 |
 | `no-matching-overload` | CHK-71, CHK-155, CHK-316, CHK-340, CHK-329, CHK-344, CHK-365, CHK-366, CHK-367, CHK-392, CHK-396, CHK-433, CHK-434 |
 | `non-exhaustive-case` | CHK-160 |
 | `duplicate-case-pattern` | CHK-161 |
@@ -1766,7 +1779,7 @@ A diagnostic of this pass has a kind, a file, a byte span in that file, and a de
 | `stage-not-allowed` | CHK-193, CHK-277, CHK-298, CHK-329, CHK-344 |
 | `ambiguous-overload` | CHK-72 |
 | `missing-field`, `unknown-field`, `duplicate-field` | CHK-178 |
-| `invalid-entry-point` | CHK-87, CHK-88, CHK-89, CHK-93, CHK-271, CHK-273, CHK-276, CHK-294, CHK-301 to CHK-306, CHK-326 to CHK-328, CHK-342, CHK-380, CHK-481 |
+| `invalid-entry-point` | CHK-87, CHK-88, CHK-89, CHK-93, CHK-271, CHK-273, CHK-276, CHK-294, CHK-301 to CHK-306, CHK-326 to CHK-328, CHK-342, CHK-380, CHK-481, CHK-484, CHK-485 |
 | `nesting-too-deep` | CHK-268 |
 | `invalid-pipeline` | CHK-175 to CHK-185, CHK-187, CHK-276, CHK-307, CHK-308, CHK-328, CHK-330, CHK-331, CHK-332, CHK-343, CHK-403 |
 | `shadows-unshadowable` | CHK-220, CHK-266 |

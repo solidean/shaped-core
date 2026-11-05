@@ -22,6 +22,7 @@ SGL_STAGES = {
     "tessellation_evaluation": "tessellation_evaluation",
     "geometry": "geometry",
     "mesh": "mesh",
+    "task": "task",
     "pixel": "fragment",
     "compute": "compute",
     "raygen": "raygen",

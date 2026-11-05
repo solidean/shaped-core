@@ -22,10 +22,11 @@ A compute polyfill is the incubator's idea for the geometry stages there ([stage
 `@mesh(x, y, z, vertices = N, triangles = M)` and `mut mesh_output[T]`, with `set_counts`, `vertex` and `triangle` (CHK-480 to CHK-482).
 A `pipeline` names it as `mesh = f` (CHK-483), HLSL writes it on dx12 and vulkan (EMIT-205), and WGSL and MSL refuse it (EMIT-109, EMIT-206).
 slib maps the stage, and a generated pipeline acquires and builds it; sg's `tests/pipeline/mesh-test.cc` draws two SGL mesh pipelines on dx12 and vulkan.
+The task stage and per-triangle values are done too (2026-11-05): `@task(x, y, z)` and `dispatch_mesh` with a payload the mesh stage takes (CHK-484 to CHK-487, EMIT-207, EMIT-208).
+`mesh_output[T, F]` writes `F` per triangle, which the pixel stage takes as a second struct (CHK-488, CHK-489, EMIT-209).
+sg's mesh-test.cc draws a task stage launching two mesh workgroups, and a quad of two differently tinted triangles, on dx12 and vulkan.
 Left:
 
-* The task stage: `@task(x, y, z)`, `dispatch_mesh(x, y, z, payload)` as the last statement of its body, and the mesh stage's `@payload` parameter of the same struct.
-  HLSL wants the payload in `groupshared` memory and `DispatchMesh` called once, in uniform control flow.
-* Per-primitive attributes: a second struct of `mesh_output`, written by `o.primitive(i, p)`, which the pixel stage reads beside the vertex's.
 * Line and point topologies, which the attribute would name.
 * metal, once sg's metal backend builds a mesh pipeline.
+* An indirect mesh draw, sg's own.

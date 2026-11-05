@@ -144,11 +144,29 @@ checker::tessellation_mode checker::tessellation_of(i32 file, ast::attribute con
 type_id checker::resolve_stream(i32 file, ast::expr_id expr, ast::index const& node, function_scope const* scope)
 {
     auto const arguments = ast_of(file).at(node.arguments);
-    auto const element = arguments.size() == 1 && arguments[0].name.empty() && !arguments[0].is_splat
-                           ? resolve_value_type(file, arguments[0].value, scope)
-                           : error_type;
+    auto const shape_name = text_of(file, span_of(file, node.object));
+    // CHK-488: a mesh output may name a second struct, of what it writes per triangle
+    auto const takes = shape_name == "mesh_output" && arguments.size() == 2 ? isize(2) : isize(1);
+    auto is_plain = arguments.size() == takes;
+    for (auto const& a : arguments)
+        is_plain = is_plain && a.name.empty() && !a.is_splat;
+    auto const element = is_plain ? resolve_value_type(file, arguments[0].value, scope) : error_type;
     if (element == error_type)
         return element;
+    auto primitive = type_id::none;
+    if (takes == 2)
+    {
+        primitive = resolve_value_type(file, arguments[1].value, scope);
+        if (primitive == error_type)
+            return error_type;
+        if (out.at(primitive).kind != type_kind::structure || out.builtin_type_of(primitive) != nullptr)
+        {
+            report(diagnostic_kind::wrong_kind_of_name, file, span_of(file, expr),
+                   "a mesh output's second argument is the struct it writes per triangle: `mesh_output[corner, "
+                   "face]`");
+            return error_type;
+        }
+    }
     if (out.at(element).kind != type_kind::structure || out.builtin_type_of(element) != nullptr)
     {
         report(diagnostic_kind::wrong_kind_of_name, file, span_of(file, expr),
@@ -160,6 +178,7 @@ type_id checker::resolve_stream(i32 file, ast::expr_id expr, ast::index const& n
     auto const vertices = shape == "point_stream" ? 1 : shape == "line_stream" ? 2 : shape == "triangle_stream" ? 3 : 0;
     return resource_type({.kind = type_kind::stream,
                           .element = element,
+                          .primitive = primitive,
                           .count = vertices,
                           .spelled = cc::format("{}[{}]", shape, out.name_of(element))});
 }
@@ -197,7 +216,12 @@ void checker::judge_primitive_stage(symbol_id id, cc::function_ref<void(cc::stri
     {
         if (info.result != checked_module::void_type)
             invalid("a @mesh fun returns nothing, and writes its vertices and triangles through its output");
-        auto const* const output = values.size() == 1 && values[0] == &parameters.back() ? values[0] : nullptr;
+        // CHK-486: the payload its task stage hands it, a struct, may stand before its output
+        auto const* const output
+            = !values.empty() && values.size() <= 2 && values.back() == &parameters.back() ? values.back() : nullptr;
+        if (values.size() == 2
+            && (out.at(values[0]->type).kind != type_kind::structure || out.builtin_type_of(values[0]->type) != nullptr))
+            invalid("a @mesh fun takes, before its output, the payload struct its task stage hands it");
         auto const& t = output != nullptr ? out.at(output->type) : out.at(error_type);
         if (output == nullptr || t.kind != type_kind::stream || t.count != 0)
         {
@@ -217,6 +241,13 @@ void checker::judge_primitive_stage(symbol_id id, cc::function_ref<void(cc::stri
         }
         if (positions != 1)
             invalid("what a mesh stage writes reaches the rasterizer, so it has one @position field");
+        // CHK-488: what it writes per triangle reaches the pixel stage alone, flat
+        if (is_valid(t.primitive))
+            for (auto const& m : out.at(out.at(t.primitive).members))
+                if (m.is_position || m.is_per_draw)
+                    invalid(cc::format("what a mesh stage writes per triangle has no @position or @per_draw member, "
+                                       "and '{}' is one",
+                                       m.name));
         return;
     }
 
@@ -456,23 +487,33 @@ type_id checker::check_mesh_vertex(function_scope& scope, ast::expr_id id, ast::
     auto const& t = out.at(output);
     auto const where = span_of(file, id);
 
-    // CHK-482: the vertex at an index, of the output's own type
+    // CHK-482: the vertex at an index, of the output's own type; CHK-488: a primitive's values, of its second
+    auto const name = text_of(file, member.name);
+    auto const is_primitive = name == "primitive";
+    auto const written_type = is_primitive ? t.primitive : t.element;
+    if (is_primitive && !is_valid(written_type))
+    {
+        report(diagnostic_kind::unknown_member, file, member.name,
+               cc::format("{} writes no values per triangle; `mesh_output[{}, face]` names the struct it would",
+                          out.name_of(output), out.name_of(t.element)));
+        return error_type;
+    }
     auto const is_plain = arguments.size() == 2 && arguments[0].name.empty() && !arguments[0].is_splat
                        && arguments[1].name.empty() && !arguments[1].is_splat;
     if (!is_plain)
     {
         report(diagnostic_kind::no_matching_overload, file, where,
-               cc::format("vertex takes an index and the vertex written there, a {}", out.name_of(t.element)));
+               cc::format("{} takes an index and the value written there, a {}", name, out.name_of(written_type)));
         return error_type;
     }
     auto const index_type = type_of_builtin(builtins::k_uint, file, where);
-    if (check_expected(scope, arguments[0].value, index_type, "the index of the vertex") != index_type)
+    if (check_expected(scope, arguments[0].value, index_type, "the index it writes at") != index_type)
         return error_type;
-    if (check_expected(scope, arguments[1].value, t.element, "the vertex it writes") != t.element)
+    if (check_expected(scope, arguments[1].value, written_type, "the value it writes") != written_type)
         return error_type;
 
     auto callee = symbol_id::none;
-    for (auto const candidate : candidates_of(file, "vertex", output))
+    for (auto const candidate : candidates_of(file, name, output))
     {
         if (demand(candidate, file, where) != symbol_state::checked)
             continue;
@@ -482,7 +523,7 @@ type_id checker::check_mesh_vertex(function_scope& scope, ast::expr_id id, ast::
     }
     if (!is_valid(callee))
     {
-        report(diagnostic_kind::unknown_builtin, file, where, cc::format("vertex of {}", out.name_of(output)));
+        report(diagnostic_kind::unknown_builtin, file, where, cc::format("{} of {}", name, out.name_of(output)));
         return error_type;
     }
     auto recorded = call_arguments();
@@ -494,4 +535,92 @@ type_id checker::check_mesh_vertex(function_scope& scope, ast::expr_id id, ast::
     set_target(file, call.callee, {.kind = target_kind::overload, .symbol = callee});
     set_target(file, id, {.kind = target_kind::overload, .symbol = callee});
     return checked_module::void_type;
+}
+
+type_id checker::check_dispatch_mesh(function_scope& scope, ast::expr_id id, ast::call const& call)
+{
+    auto const file = scope.file;
+    auto const arguments = ast_of(file).at(call.arguments);
+    auto const where = span_of(file, id);
+    auto is_plain = arguments.size() == 4;
+    for (auto const& a : arguments)
+        is_plain = is_plain && a.name.empty() && !a.is_splat;
+    if (!is_plain)
+    {
+        report(diagnostic_kind::no_matching_overload, file, where,
+               "dispatch_mesh takes three workgroup counts and the payload it hands them: `dispatch_mesh(2u, 1u, 1u, "
+               "p)`");
+        return error_type;
+    }
+    auto const count_type = type_of_builtin(builtins::k_uint, file, where);
+    for (auto i = 0; i < 3; ++i)
+        if (check_expected(scope, arguments[i].value, count_type, "a count of mesh workgroups") != count_type)
+            return error_type;
+    // CHK-485: the payload is a struct of the program, handed to every mesh workgroup it launches
+    auto const payload = check_expr(scope, arguments[3].value);
+    if (payload == error_type)
+        return error_type;
+    if (out.at(payload).kind != type_kind::structure || out.builtin_type_of(payload) != nullptr)
+    {
+        report(diagnostic_kind::wrong_kind_of_name, file, span_of(file, arguments[3].value),
+               cc::format("a payload is a struct of the program, and {} is none", out.name_of(payload)));
+        return error_type;
+    }
+
+    auto callee = symbol_id::none;
+    for (auto const candidate : candidates_of(file, "dispatch_mesh", count_type))
+        if (demand(candidate, file, where) == symbol_state::checked)
+            callee = candidate;
+    if (!is_valid(callee))
+    {
+        report(diagnostic_kind::unknown_builtin, file, where, "dispatch_mesh");
+        return error_type;
+    }
+    // what the entry point hands on, which a pipeline holds against what its mesh stage takes (CHK-487)
+    if (is_valid(scope.function) && out.at(scope.function).info >= 0)
+    {
+        auto& info = out.functions.own(out.at(scope.function).info);
+        if (info.entry_stage == stage::task)
+        {
+            if (is_valid(info.mesh_payload) && info.mesh_payload != payload)
+                report(diagnostic_kind::invalid_entry_point, file, where,
+                       "a task stage hands its mesh stage one payload struct");
+            info.mesh_payload = payload;
+        }
+    }
+    auto recorded = call_arguments();
+    for (auto const& a : arguments)
+        recorded.written.push_back({.expr = a.value});
+    i32 const slots[] = {0, 1, 2};
+    record_call(file, id, callee, recorded, slots);
+    set_target(file, call.callee, {.kind = target_kind::overload, .symbol = callee});
+    set_target(file, id, {.kind = target_kind::overload, .symbol = callee});
+    return checked_module::void_type;
+}
+
+void checker::judge_mesh_payloads()
+{
+    for (auto i = isize(0); i < out.pipelines.size(); ++i)
+    {
+        auto const& p = out.pipelines[i];
+        if (!is_valid(p.task) || !is_valid(p.mesh))
+            continue;
+        auto taken = type_id::none;
+        for (auto const& parameter : out.at(out.functions[out.at(p.mesh).info].parameters))
+            if (parameter.input == stage_input::none && out.at(parameter.type).kind != type_kind::stream)
+                taken = parameter.type;
+        auto const handed = out.functions[out.at(p.task).info].mesh_payload;
+        if (handed == taken)
+            continue;
+        auto const& s = out.at(p.symbol);
+        auto const where = ast_of(s.file).at(s.declaration).node.as<ast::pipeline_decl>().name;
+        auto const detail = !is_valid(handed) ? cc::format("{} hands its mesh stage no payload, and {} takes {}",
+                                                           out.at(p.task).name, out.at(p.mesh).name, out.name_of(taken))
+                          : !is_valid(taken)
+                              ? cc::format("{} hands its mesh stage {}, and {} takes none", out.at(p.task).name,
+                                           out.name_of(handed), out.at(p.mesh).name)
+                              : cc::format("{} hands its mesh stage {}, and {} takes {}", out.at(p.task).name,
+                                           out.name_of(handed), out.at(p.mesh).name, out.name_of(taken));
+        report(diagnostic_kind::invalid_pipeline, s.file, where, detail);
+    }
 }

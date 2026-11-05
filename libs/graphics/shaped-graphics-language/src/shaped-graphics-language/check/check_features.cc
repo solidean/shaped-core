@@ -72,7 +72,7 @@ void checker::judge_entry_features(symbol_id id)
     if (info.entry_stage == stage::geometry)
         needed.set(feature::geometry_shader);
     // CHK-480: so is the mesh stage
-    if (info.entry_stage == stage::mesh)
+    if (info.entry_stage == stage::mesh || info.entry_stage == stage::task)
         needed.set(feature::mesh_shader);
     if (info.entry_stage == stage::tessellation_control || info.entry_stage == stage::tessellation_evaluation)
         needed.set(feature::tessellation_shader);

@@ -37,9 +37,13 @@ struct settings_source
 };
 
 /// The raster stages, in the order a vertex passes through them.
-constexpr stage k_raster_stages[]
-    = {stage::vertex, stage::tessellation_control, stage::tessellation_evaluation, stage::geometry, stage::mesh,
-       stage::pixel};
+constexpr stage k_raster_stages[] = {stage::vertex,
+                                     stage::tessellation_control,
+                                     stage::tessellation_evaluation,
+                                     stage::geometry,
+                                     stage::task,
+                                     stage::mesh,
+                                     stage::pixel};
 
 /// The stage a pipeline's line `name = f` fills, or `none` for a line that fills no stage.
 [[nodiscard]] stage slot_named(cc::string_view name)
@@ -614,12 +618,15 @@ void checker::compile_pipeline(symbol_id id)
     auto control = symbol_id::none;
     auto evaluation = symbol_id::none;
     auto mesh = symbol_id::none;
+    auto task = symbol_id::none;
     auto const slot_of = [&](stage s) -> symbol_id&
     {
         switch (s)
         {
         case stage::mesh:
             return mesh;
+        case stage::task:
+            return task;
         case stage::vertex:
             return vertex;
         case stage::geometry:
@@ -741,6 +748,14 @@ void checker::compile_pipeline(symbol_id id)
             pc.fail(file, where, "a pipeline with a mesh stage has no vertex, tessellation or geometry stage");
         return fail_symbol();
     }
+    // CHK-487: a task stage launches a mesh stage, which takes the payload it hands on
+    if (is_valid(task) && !is_valid(mesh))
+    {
+        if (!pc.is_failed)
+            pc.fail(file, where,
+                    "a pipeline with a task stage has a mesh stage for it to launch: `mesh = <entry point>`");
+        return fail_symbol();
+    }
     if (!is_valid(vertex) && !is_valid(mesh))
     {
         if (!pc.is_failed)
@@ -800,12 +815,25 @@ void checker::compile_pipeline(symbol_id id)
 
     auto passed = vertex_info.result;
     auto from = vertex;
+    // what a mesh stage writes per triangle, which the pixel stage takes as its second struct (CHK-489)
+    auto per_triangle = type_id::none;
     if (is_valid(mesh))
     {
+        auto taken_payload = type_id::none;
         for (auto const& parameter : vertex_parameters)
+        {
             if (out.at(parameter.type).kind == type_kind::stream)
+            {
                 passed = out.at(parameter.type).element;
+                per_triangle = out.at(parameter.type).primitive;
+            }
+            else if (parameter.input == stage_input::none)
+                taken_payload = parameter.type;
+        }
         from = mesh;
+        // what the task stage hands on is known once its body is checked, which judge_mesh_payloads holds it to
+        if (is_valid(taken_payload) && !is_valid(task) && !pc.is_failed)
+            pc.fail(file, where, cc::format("{} takes a payload, which only a task stage hands it", out.at(mesh).name));
     }
     // the control points of a patch, and the edges of its domain: 2 for isolines, 3 for triangles, 4 for quads
     auto patch_size = 0;
@@ -858,6 +886,20 @@ void checker::compile_pipeline(symbol_id id)
         auto const& pixel_info = out.functions[out.at(pixel).info];
         // a valid pixel entry point takes its struct first (CHK-271)
         match(passed, from, out.at(pixel_info.parameters)[0].type, pixel);
+        // CHK-489: and a second only from a mesh stage that writes values per triangle, which it then takes
+        auto taken_per_triangle = type_id::none;
+        if (auto const ps = out.at(pixel_info.parameters); ps.size() >= 2 && ps[1].input == stage_input::none)
+            taken_per_triangle = ps[1].type;
+        if (taken_per_triangle != per_triangle && !pc.is_failed)
+            pc.fail(file, where,
+                    !is_valid(per_triangle)
+                        ? cc::format("{} takes {} per triangle, which only a mesh stage's output writes",
+                                     out.at(pixel).name, out.name_of(taken_per_triangle))
+                    : !is_valid(taken_per_triangle)
+                        ? cc::format("{} writes {} per triangle, and {} takes none", out.at(from).name,
+                                     out.name_of(per_triangle), out.at(pixel).name)
+                        : cc::format("{} writes {} per triangle, and {} takes {}", out.at(from).name,
+                                     out.name_of(per_triangle), out.at(pixel).name, out.name_of(taken_per_triangle)));
         // CHK-308: a pixel stage reads the primitive's id from a geometry stage only where that stage writes it
         if (is_valid(geometry))
             for (auto const& parameter : out.at(pixel_info.parameters))
@@ -895,7 +937,7 @@ void checker::compile_pipeline(symbol_id id)
     auto inline_constants = symbol_id::none;
     {
         auto lists = cc::vector<cc::vector<symbol_id>>();
-        for (auto const entry : {vertex, control, evaluation, geometry, mesh, pixel})
+        for (auto const entry : {vertex, control, evaluation, geometry, task, mesh, pixel})
         {
             if (!is_valid(entry))
                 continue;
@@ -963,7 +1005,7 @@ void checker::compile_pipeline(symbol_id id)
     if (is_valid(target_set))
         edge_source(target_set, true);
 
-    for (auto const entry : {vertex, control, evaluation, geometry, mesh, pixel})
+    for (auto const entry : {vertex, control, evaluation, geometry, task, mesh, pixel})
     {
         if (!is_valid(entry))
             continue;
@@ -1119,6 +1161,7 @@ void checker::compile_pipeline(symbol_id id)
         .tessellation_control = control,
         .tessellation_evaluation = evaluation,
         .mesh = mesh,
+        .task = task,
         .layout = {.first = u32(out.binding_lists.size()), .count = u32(layout.size())},
         .inline_constants = inline_constants,
         .vertex_input = vertex_input,

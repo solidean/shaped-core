@@ -126,6 +126,9 @@ enum class sgl::check::stage : sgl::u8
     tessellation_control,
     /// A `@tessellation_evaluation` fun: it takes a patch, its factors and a point of the domain, and returns a vertex (CHK-306).
     tessellation_evaluation,
+    /// A `@task(x, y, z)` fun: a workgroup launches mesh workgroups with `dispatch_mesh`, handing them one payload
+    /// (CHK-484).
+    task,
     /// A `@mesh(x, y, z, vertices = N, triangles = M)` fun: a workgroup writes up to N vertices and M triangles for the
     /// rasterizer through its output (CHK-480), in the vertex stage's place.
     mesh,
@@ -162,6 +165,8 @@ namespace sgl::check
         return "tessellation_control";
     case stage::tessellation_evaluation:
         return "tessellation_evaluation";
+    case stage::task:
+        return "task";
     case stage::mesh:
         return "mesh";
     case stage::raygen:
@@ -276,6 +281,8 @@ struct sgl::check::type_info
     cc::string swizzle_alias;
     /// The element of a `buffer` or an `array`; `none` for every other kind.
     type_id element = type_id::none;
+    /// A mesh output's per-primitive struct, `mesh_output[V, P]`'s `P` (CHK-488); `none` for every other type.
+    type_id primitive = type_id::none;
     /// An `array`'s length; 0 for `T[]`, whose length the host binds (CHK-286).
     i32 count = 0;
     /// The value parameter an array's length or an image's format is, `T[n]` or `image_2d[f]`, which an instance
@@ -630,6 +637,9 @@ struct sgl::check::function_info
     i32 max_vertices = 0;
     /// `@mesh`'s `triangles`; 0 for every other stage.
     i32 max_primitives = 0;
+    /// A task entry point's: the struct its `dispatch_mesh` hands the mesh stage (CHK-485); `none` before its body
+    /// is checked, and for every other function.
+    type_id mesh_payload = type_id::none;
     /// `@tessellation_control(partitioning = …, winding = …)`; the first of each for every other stage.
     tessellation_partitioning partitioning = tessellation_partitioning::integer;
     bool is_clockwise = true;
@@ -735,6 +745,8 @@ struct sgl::check::pipeline_info
     symbol_id tessellation_evaluation = symbol_id::none;
     /// In the vertex stage's place, which is then `none` (CHK-483).
     symbol_id mesh = symbol_id::none;
+    /// The task stage before `mesh`, or `none` (CHK-487).
+    symbol_id task = symbol_id::none;
     /// The binding layout: the longest binding list of its stages with `@inline` left out; a range of `binding_lists`.
     ast::range_of<symbol_id> layout;
     /// The one `@inline` binding its stages list, or `none`.

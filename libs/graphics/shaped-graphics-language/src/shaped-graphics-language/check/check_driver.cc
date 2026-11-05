@@ -83,6 +83,8 @@ void checker::run(resume_point from)
     for (auto i = from.symbols; i < out.symbols.size(); ++i)
         if (out.symbols[i].kind == symbol_kind::function && out.symbols[i].state == symbol_state::checked)
             judge_entry_features(symbol_id(i));
+    // CHK-487: what a task stage hands on is known once its body is, and its pipeline's mesh stage takes exactly it
+    judge_mesh_payloads();
 
     index_builtin_symbols(from.symbols);
     instantiate_generics();

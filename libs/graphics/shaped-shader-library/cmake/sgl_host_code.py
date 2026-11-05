@@ -1332,7 +1332,7 @@ def open_fields(pipeline: dict) -> list[tuple[str, str, str]]:
 
 
 # A pipeline's stages in the order a vertex passes through them, each a field of `describe`'s pipeline.
-PIPELINE_STAGES = ("vertex", "tessellation_control", "tessellation_evaluation", "geometry", "mesh", "pixel")
+PIPELINE_STAGES = ("vertex", "tessellation_control", "tessellation_evaluation", "geometry", "task", "mesh", "pixel")
 
 
 def pipeline_includes(entries: SglEntries) -> list[str]:
@@ -1488,7 +1488,7 @@ def emit_pipelines_impl(package: str, namespace: str, entries: SglEntries) -> st
         out.append(f'        .file = "{file.path}",\n')
         out.append(f'        .name = "{p["name"]}",\n')
         # in pipeline_definition's field order, which a designated initializer has to follow
-        for s in ("vertex", "pixel", "geometry", "tessellation_control", "tessellation_evaluation", "mesh"):
+        for s in ("vertex", "pixel", "geometry", "tessellation_control", "tessellation_evaluation", "mesh", "task"):
             if p.get(s):
                 out.append(f"        .{s} = {handle(p[s])},\n")
         out.append(f"        .acquire_layout = &{key}_layout,\n")

@@ -240,6 +240,7 @@ struct sgl::described_pipeline
     cc::string tessellation_evaluation;
     /// The mesh stage, in the vertex stage's place, which is then empty (CHK-483).
     cc::string mesh;
+    cc::string task;
     /// The binding layout, in group order, and its one `@inline` binding or empty.
     cc::vector<cc::string> layout;
     cc::string inline_constants;

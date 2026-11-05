@@ -34,6 +34,8 @@ enum class struct_role : u8
     render_targets,
     /// What a tessellation control stage returns and the evaluation stage takes: its factors, and data per patch.
     patch_constants,
+    /// What a mesh stage writes per triangle and the pixel stage takes beside its stage link, flat (CHK-488).
+    primitive_link,
 };
 
 struct planned_member

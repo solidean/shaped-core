@@ -260,6 +260,9 @@ private:
         case sg::shader_stage::mesh:
             stage = sgl::check::stage::mesh;
             break;
+        case sg::shader_stage::task:
+            stage = sgl::check::stage::task;
+            break;
         case sg::shader_stage::fragment:
             stage = sgl::check::stage::pixel;
             break;
