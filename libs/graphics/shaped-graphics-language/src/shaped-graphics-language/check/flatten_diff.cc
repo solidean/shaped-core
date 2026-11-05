@@ -1205,27 +1205,29 @@ struct differentiator
                         restate(id, flat_if{.condition = n->condition, .then_body = then_body, .else_body = else_body});
                     }
                     // a call with a derivative written by hand runs forward as it is, loops and all
-                    else if (auto const* const n = s.node.try_as<flat_block>();
-                             n != nullptr && f.custom_calls.contains(i32(n->label)))
+                    else if (auto const* const custom = s.node.try_as<flat_block>();
+                             custom != nullptr && f.custom_calls.contains(i32(custom->label)))
                         f.block.push_back(id);
                     else if (auto const* const n = s.node.try_as<flat_block>())
                         restate(id,
                                 flat_block{.label = n->label, .body = f.add_list(hoist_declarations(copy_of(n->body)))});
-                    else if (auto const* const n = s.node.try_as<flat_for>();
-                             n != nullptr && constant_bounds(*n).has_value())
+                    else if (auto const* const loop = s.node.try_as<flat_for>();
+                             loop != nullptr && constant_bounds(*loop).has_value())
                     {
                         // a `continue` of this loop leaves the rest of its iteration: a block around the body
                         auto const iteration = f.add_label("iteration");
-                        auto const wrapped = f.make_stmt(
-                            where,
-                            flat_block{.label = iteration,
-                                       .body = f.add_list(continues_as_leaves(copy_of(n->body), n->label, iteration))});
+                        auto const wrapped
+                            = f.make_stmt(where, flat_block{.label = iteration,
+                                                            .body = f.add_list(continues_as_leaves(
+                                                                copy_of(loop->body), loop->label, iteration))});
                         ++loop_depth;
                         auto const body = f.add_list(hoist_declarations(cc::span<flat_stmt_id const>(&wrapped, 1)));
                         --loop_depth;
-                        restate(
-                            id,
-                            flat_for{.label = n->label, .index = n->index, .first = n->first, .end = n->end, .body = body});
+                        restate(id, flat_for{.label = loop->label,
+                                             .index = loop->index,
+                                             .first = loop->first,
+                                             .end = loop->end,
+                                             .body = body});
                     }
                     else if (s.node.is<flat_loop>() || s.node.is<flat_while>() || s.node.is<flat_for>())
                         failed("a loop whose bounds are no constants, which only a @backward can walk back");
@@ -1259,9 +1261,9 @@ struct differentiator
                         auto const else_body = inside(n->else_body);
                         restate(id, flat_if{.condition = n->condition, .then_body = then_body, .else_body = else_body});
                     }
-                    else if (auto const* const n = s.node.try_as<flat_block>();
-                             n != nullptr && !f.custom_calls.contains(i32(n->label)))
-                        restate(id, flat_block{.label = n->label, .body = inside(n->body)});
+                    else if (auto const* const block = s.node.try_as<flat_block>();
+                             block != nullptr && !f.custom_calls.contains(i32(block->label)))
+                        restate(id, flat_block{.label = block->label, .body = inside(block->body)});
                     else if (auto const* const n = s.node.try_as<flat_for>())
                         restate(id, flat_for{.label = n->label,
                                              .index = n->index,
@@ -1410,14 +1412,14 @@ struct differentiator
                 auto const else_body = f.add_list(straighten(copy_of(n->else_body)));
                 restate(id, flat_if{.condition = condition, .then_body = then_body, .else_body = else_body});
             }
-            else if (auto const* const n = s.node.try_as<flat_block>();
-                     n != nullptr && !f.custom_calls.contains(i32(n->label)))
+            else if (auto const* const block = s.node.try_as<flat_block>();
+                     block != nullptr && !f.custom_calls.contains(i32(block->label)))
             {
-                auto body = straighten(copy_of(n->body));
+                auto body = straighten(copy_of(block->body));
                 // a block in a loop runs again, and its leave of the last run must not guard this one
-                if (auto const* const flag = left_flag.get_ptr(i32(n->label)))
+                if (auto const* const flag = left_flag.get_ptr(i32(block->label)))
                     body.insert_at(0, f.make_stmt(where, flat_assign{.place = ref(*flag), .value = boolean(false)}));
-                restate(id, flat_block{.label = n->label, .body = f.add_list(body)});
+                restate(id, flat_block{.label = block->label, .body = f.add_list(body)});
             }
             else if (auto const* const n = s.node.try_as<flat_for>())
             {

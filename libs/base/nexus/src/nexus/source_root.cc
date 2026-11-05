@@ -2,6 +2,7 @@
 
 #include <clean-core/common/assert.hh>
 #include <clean-core/common/macros.hh>
+#include <clean-core/container/vector.hh>
 #include <clean-core/platform/environment.hh>
 #include <clean-core/streams/file_stream.hh>
 #include <clean-core/string/format.hh>
@@ -16,8 +17,6 @@
 #include <unistd.h>
 #elif defined(CC_OS_EMSCRIPTEN)
 #include <emscripten/emscripten.h>
-
-#include <cstdlib> // free, for what EM_JS allocated
 #endif
 
 using namespace cc::primitive_defines;
@@ -29,32 +28,51 @@ constexpr char const* k_variable = "SC_SOURCE_ROOT";
 #if defined(CC_OS_EMSCRIPTEN)
 // A wasm binary runs under node or deno, whose environment emscripten does not forward.
 // Its script is the nearest thing to an executable; a browser has neither, and both answer null there.
+// Each writes its answer into `out`, up to `capacity` bytes and a terminator, and gives the bytes it needs; 0 for none.
+// Nothing is allocated in JS, since a binary need not export malloc.
 // clang-format off
-EM_JS(char*, nx_impl_host_environment_variable, (char const* name), {
+EM_JS(int, nx_impl_host_environment_variable, (char const* name, char* out, int capacity), {
     var value = (typeof process !== 'undefined' && process.env) ? process.env[UTF8ToString(name)] : undefined;
-    return value ? stringToNewUTF8(value) : 0;
+    if (!value) return 0;
+    if (capacity > 0) stringToUTF8(value, out, capacity);
+    return lengthBytesUTF8(value);
 });
-EM_JS(char*, nx_impl_host_script_path, (), {
+EM_JS(int, nx_impl_host_script_path, (char* out, int capacity), {
     var path = (typeof process !== 'undefined' && process.argv && process.argv.length > 1) ? process.argv[1] : undefined;
-    return path ? stringToNewUTF8(path) : 0;
+    if (!path) return 0;
+    if (capacity > 0) stringToUTF8(path, out, capacity);
+    return lengthBytesUTF8(path);
 });
+// a library function EM_JS calls is linked only where something names it
+EM_JS_DEPS(nx_impl_source_root, "$stringToUTF8,$lengthBytesUTF8");
 // clang-format on
 
-[[nodiscard]] cc::string take_host_string(char* text)
+/// What `ask(out, capacity)` writes, asked once for its size and once more for its bytes.
+template <class Ask>
+[[nodiscard]] cc::string host_string(Ask const& ask)
 {
-    if (text == nullptr)
+    auto const length = ask(nullptr, 0);
+    if (length <= 0)
         return {};
-    auto out = cc::string(text);
-    free(text);
-    return out;
+    auto buffer = cc::vector<char>::create_filled(isize(length) + 1, '\0');
+    (void)ask(buffer.data(), int(buffer.size()));
+    return cc::string(buffer.data());
 }
 #endif
 
 [[nodiscard]] cc::optional<cc::string> variable_value()
 {
 #if defined(CC_OS_EMSCRIPTEN)
-    if (auto value = take_host_string(nx_impl_host_environment_variable(k_variable)); !value.empty())
+    if (auto value = host_string([](char* out, int capacity)
+                                 { return nx_impl_host_environment_variable(k_variable, out, capacity); });
+        !value.empty())
+    {
+        // a Windows host names it with backslashes, which emscripten's paths take as part of a name
+        for (auto i = isize(0); i < value.size(); ++i)
+            if (value[i] == '\\')
+                value[i] = '/';
         return value;
+    }
 #endif
     return cc::environment_variable(k_variable);
 }
@@ -82,7 +100,7 @@ EM_JS(char*, nx_impl_host_script_path, (), {
         return {};
     return cc::string(cc::string_view(buffer.data(), isize(length)));
 #elif defined(CC_OS_EMSCRIPTEN)
-    return take_host_string(nx_impl_host_script_path());
+    return host_string([](char* out, int capacity) { return nx_impl_host_script_path(out, capacity); });
 #else
     return {};
 #endif

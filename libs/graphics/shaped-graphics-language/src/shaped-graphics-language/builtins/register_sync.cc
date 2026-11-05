@@ -820,8 +820,8 @@ void sgl::builtins::register_sync(registry& r)
                   .hlsl_names = k_dispatch_mesh_hlsl,
                   .wgsl_names = k_dispatch_mesh_hlsl,
                   .msl_names = k_dispatch_mesh_hlsl},
-        .takes_element = true,
         .is_barrier = true,
+        .takes_element = true,
     });
     r.add_comment("// A mesh stage's output, called as its methods (CHK-482): `out.set_counts(v, t)` says how many\n"
                   "// vertices and triangles it writes, once, in control flow every invocation of the workgroup "

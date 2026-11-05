@@ -33,10 +33,16 @@ void add_files_under(cc::vector<program>& into, cc::string_view label, cc::strin
     auto found = cc::vector<program>();
     auto ec = std::error_code();
     auto const base = fs::path(root.data(), root.data() + root.size());
+    // the name below `root` by its text: emscripten's fs::relative gives nothing for a root with a drive letter
+    auto const prefix = base.generic_string() + "/";
     for (auto const& e : fs::recursive_directory_iterator(base, ec))
         if (e.is_regular_file() && e.path().extension() == ".sgl")
-            found.push_back({.name = cc::format("{}/{}", label, fs::relative(e.path(), base, ec).generic_string().c_str()),
+        {
+            auto const full = e.path().generic_string();
+            auto const below = full.starts_with(prefix) ? full.substr(prefix.size()) : full;
+            found.push_back({.name = cc::format("{}/{}", label, below.c_str()),
                              .source = read_text(cc::string(e.path().string().c_str()))});
+        }
     cc::sort(found, [](program const& a, program const& b) { return a.name < b.name; });
     for (auto& p : found)
         into.push_back(cc::move(p));
