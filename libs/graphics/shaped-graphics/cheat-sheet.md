@@ -121,6 +121,8 @@ ctx.supports(sg::feature::ray_query)               // bool — THE capability qu
                                                    //   | vertex_pipeline_stores (a vertex, geometry or tessellation stage writes
                                                    //     storage, which SGL's print and assert there need; vulkan's
                                                    //     vertexPipelineStoresAndAtomics, true on dx12 and metal, false on webgpu)
+                                                   //   | ray_tracing_motion_blur (a tlas_instance moves over the frame; webgpu's polyfill
+                                                   //     alone, since DXR has no motion and vulkan's NV extension no ray query)
                                                    //   | float_atomic_add (a float atomic add in one instruction; vulkan with
                                                    //     VK_EXT_shader_atomic_float, true on metal, false on dx12 and webgpu;
                                                    //     slib asks SGL for the native add where it is true; no `require`)
@@ -889,7 +891,8 @@ sg::blas_triangles { vertices(float3), vertex_count/stride/offset; optional indi
                      optional transform buffer(3x4 row-major)+offset; is_opaque=true }
 sg::blas_aabbs     { aabbs(6 floats each), aabb_count/stride/offset; is_opaque=true }
 sg::tlas_instance  { blas_handle blas; float transform[12] ROW-MAJOR 3x4 (transform[r*4+c], not tg col-major);
-                     u32 instance_id:24; u32 hit_group_offset:24; u8 mask=0xFF; instance_cull_mode; optional opaque_override }
+                     u32 instance_id:24; u32 hit_group_offset:24; u8 mask=0xFF; instance_cull_mode; optional opaque_override;
+                     optional<fixed_array<float, 12>> transform_at_end — moving, needs ray_tracing_motion_blur }
 sg::accel_build_flag    // fast_trace(default)/fast_build/allow_update/allow_compaction/minimize_memory
 sg::accel_build_flags   // cc::flags<accel_build_flag> — a set of them; combine with |, test with .has()
 sg::index_format        // uint16 | uint32  — index-buffer element width (shared with draw's bind_index_buffer)

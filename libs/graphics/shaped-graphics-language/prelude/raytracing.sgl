@@ -17,6 +17,9 @@ struct ray:
     direction: vec3
     t_min: float = 0.0
     t_max: float = 3.0e38
+    /// Where in the frame's interval the ray is cast, 0 at its start and 1 at its end, which a moving instance
+    /// is placed at (EVAL-130); a static scene ignores it.
+    time: float = 0.0
 
 /// What an any-hit decision says of a candidate.
 enum hit_decision:
@@ -796,6 +799,46 @@ fun hit_object.reorder(self, hint: uint, bits: int) => hit_object_reorder_by_hin
     if flags.has(ray_flags.cull_front_facing) and is_front => return true
     return false
 
+/// How many units each instance of a TLAS takes: 10 where its header says one of them moves, 7 otherwise.
+@internal fun instance_stride(header: uint4) -> uint:
+    if (header.w & 4) != 0 => return 10
+    return 7
+
+/// Whether the instance moves over the frame: flag bit 28, whose end transform stands in units 7 to 9.
+@internal fun is_moving_instance(instance: uint4) -> bool => ((instance.z >> 28) & 1) != 0
+
+/// The instance's object-to-world map at `time`: its two transforms mixed element by element (EVAL-130).
+/// A time below 0, and a NaN, is 0, and one above 1 is 1.
+@internal fun instance_to_world(unit: uint, instance: uint4, time: float) -> affine3:
+    let r0 = pool_float4(acceleration_pool_load(unit + 3))
+    let r1 = pool_float4(acceleration_pool_load(unit + 4))
+    let r2 = pool_float4(acceleration_pool_load(unit + 5))
+    if not is_moving_instance(instance) => return affine3.from_rows(r0, r1, r2)
+    let mut s = 0.0
+    if time > 0.0 => s = min(time, 1.0)
+    let e0 = pool_float4(acceleration_pool_load(unit + 7))
+    let e1 = pool_float4(acceleration_pool_load(unit + 8))
+    let e2 = pool_float4(acceleration_pool_load(unit + 9))
+    return affine3.from_rows(r0 + (e0 - r0) * s, r1 + (e1 - r1) * s, r2 + (e2 - r2) * s)
+
+/// The inverse of an affine map: its linear part's inverse, by the cofactors, and the translation taken back through it.
+@internal fun inverse_of_affine(m: affine3) -> affine3:
+    let a = m.row(0).xyz
+    let b = m.row(1).xyz
+    let c = m.row(2).xyz
+    let t = float3(m.row(0).w, m.row(1).w, m.row(2).w)
+    let bc = cross(b, c)
+    let ca = cross(c, a)
+    let ab = cross(a, b)
+    let scale = 1.0 / dot(a, bc)
+    let i0 = float3(bc.x, ca.x, ab.x) * scale
+    let i1 = float3(bc.y, ca.y, ab.y) * scale
+    let i2 = float3(bc.z, ca.z, ab.z) * scale
+    let r0 = float4(i0.x, i0.y, i0.z, -dot(i0, t))
+    let r1 = float4(i1.x, i1.y, i1.z, -dot(i1, t))
+    let r2 = float4(i2.x, i2.y, i2.z, -dot(i2, t))
+    return affine3.from_rows(r0, r1, r2)
+
 @internal fun trace_emulated(
     root: uint
     r: ray
@@ -830,6 +873,7 @@ fun hit_object.reorder(self, hint: uint, bits: int) => hit_object_reorder_by_hin
     let mut to_object_x = float4(0.0, 0.0, 0.0, 0.0)
     let mut to_object_y = float4(0.0, 0.0, 0.0, 0.0)
     let mut to_object_z = float4(0.0, 0.0, 0.0, 0.0)
+    let mut to_world = affine3.from_rows(float4(0.0, 0.0, 0.0, 0.0), float4(0.0, 0.0, 0.0, 0.0), float4(0.0, 0.0, 0.0, 0.0))
     while top > 0 and not is_done:
         top -= 1
         let owner = owners[top]
@@ -842,12 +886,20 @@ fun hit_object.reorder(self, hint: uint, bits: int) => hit_object_reorder_by_hin
             o = origin
             d = direction
             if owner >= 0:
-                instance_unit = header.y + 7 * (owner as uint)
+                instance_unit = header.y + instance_stride(header) * (owner as uint)
                 instance = acceleration_pool_load(instance_unit + 6)
                 region = instance.x
-                to_object_x = pool_float4(acceleration_pool_load(instance_unit))
-                to_object_y = pool_float4(acceleration_pool_load(instance_unit + 1))
-                to_object_z = pool_float4(acceleration_pool_load(instance_unit + 2))
+                to_world = instance_to_world(instance_unit, instance, r.time)
+                // a static instance's inverse is stored, and a moving one's is taken at the ray's time
+                if is_moving_instance(instance):
+                    let back = inverse_of_affine(to_world)
+                    to_object_x = back.row(0)
+                    to_object_y = back.row(1)
+                    to_object_z = back.row(2)
+                else:
+                    to_object_x = pool_float4(acceleration_pool_load(instance_unit))
+                    to_object_y = pool_float4(acceleration_pool_load(instance_unit + 1))
+                    to_object_z = pool_float4(acceleration_pool_load(instance_unit + 2))
                 o = apply_point(affine3.from_rows(to_object_x, to_object_y, to_object_z), origin)
                 d = apply_vector(affine3.from_rows(to_object_x, to_object_y, to_object_z), direction)
             inverse = float3(1.0 / d.x, 1.0 / d.y, 1.0 / d.z)
@@ -872,7 +924,7 @@ fun hit_object.reorder(self, hint: uint, bits: int) => hit_object_reorder_by_hin
             let primitive = lo.w + (k as uint)
             if owner < 0:
                 // a TLAS leaf holds instances, whose BLAS root is pushed where the instance's mask lets the ray in
-                let entry = acceleration_pool_load(header.y + 7 * primitive + 6)
+                let entry = acceleration_pool_load(header.y + instance_stride(header) * primitive + 6)
                 let instance_mask = ((entry.y >> 24) & 255) as int
                 if (instance_mask & mask) != 0 and top < 64:
                     nodes[top] = 0
@@ -904,11 +956,7 @@ fun hit_object.reorder(self, hint: uint, bits: int) => hit_object_reorder_by_hin
                 a.w as int
                 float3(1.0 - found.y - found.z, found.y, found.z)
                 is_front
-                affine3.from_rows(
-                    pool_float4(acceleration_pool_load(instance_unit + 3))
-                    pool_float4(acceleration_pool_load(instance_unit + 4))
-                    pool_float4(acceleration_pool_load(instance_unit + 5))
-                )
+                to_world
                 affine3.from_rows(to_object_x, to_object_y, to_object_z)
             )
             let mut decision = hit_decision.accept
@@ -964,6 +1012,7 @@ fun hit_object.reorder(self, hint: uint, bits: int) => hit_object_reorder_by_hin
     let mut to_object_x = float4(0.0, 0.0, 0.0, 0.0)
     let mut to_object_y = float4(0.0, 0.0, 0.0, 0.0)
     let mut to_object_z = float4(0.0, 0.0, 0.0, 0.0)
+    let mut to_world = affine3.from_rows(float4(0.0, 0.0, 0.0, 0.0), float4(0.0, 0.0, 0.0, 0.0), float4(0.0, 0.0, 0.0, 0.0))
     while top > 0 and not is_done:
         top -= 1
         let owner = owners[top]
@@ -976,12 +1025,20 @@ fun hit_object.reorder(self, hint: uint, bits: int) => hit_object_reorder_by_hin
             o = origin
             d = direction
             if owner >= 0:
-                instance_unit = header.y + 7 * (owner as uint)
+                instance_unit = header.y + instance_stride(header) * (owner as uint)
                 instance = acceleration_pool_load(instance_unit + 6)
                 region = instance.x
-                to_object_x = pool_float4(acceleration_pool_load(instance_unit))
-                to_object_y = pool_float4(acceleration_pool_load(instance_unit + 1))
-                to_object_z = pool_float4(acceleration_pool_load(instance_unit + 2))
+                to_world = instance_to_world(instance_unit, instance, r.time)
+                // a static instance's inverse is stored, and a moving one's is taken at the ray's time
+                if is_moving_instance(instance):
+                    let back = inverse_of_affine(to_world)
+                    to_object_x = back.row(0)
+                    to_object_y = back.row(1)
+                    to_object_z = back.row(2)
+                else:
+                    to_object_x = pool_float4(acceleration_pool_load(instance_unit))
+                    to_object_y = pool_float4(acceleration_pool_load(instance_unit + 1))
+                    to_object_z = pool_float4(acceleration_pool_load(instance_unit + 2))
                 o = apply_point(affine3.from_rows(to_object_x, to_object_y, to_object_z), origin)
                 d = apply_vector(affine3.from_rows(to_object_x, to_object_y, to_object_z), direction)
             inverse = float3(1.0 / d.x, 1.0 / d.y, 1.0 / d.z)
@@ -1004,7 +1061,7 @@ fun hit_object.reorder(self, hint: uint, bits: int) => hit_object_reorder_by_hin
         for k in 0 ..< (count as int):
             let primitive = lo.w + (k as uint)
             if owner < 0:
-                let entry = acceleration_pool_load(header.y + 7 * primitive + 6)
+                let entry = acceleration_pool_load(header.y + instance_stride(header) * primitive + 6)
                 let instance_mask = ((entry.y >> 24) & 255) as int
                 if (instance_mask & mask) != 0 and top < 64:
                     nodes[top] = 0
@@ -1027,11 +1084,7 @@ fun hit_object.reorder(self, hint: uint, bits: int) => hit_object_reorder_by_hin
                 instance.w as int
                 (box_hi.w & 2147483647) as int
                 box_lo.w as int
-                affine3.from_rows(
-                    pool_float4(acceleration_pool_load(instance_unit + 3))
-                    pool_float4(acceleration_pool_load(instance_unit + 4))
-                    pool_float4(acceleration_pool_load(instance_unit + 5))
-                )
+                to_world
                 affine3.from_rows(to_object_x, to_object_y, to_object_z)
             )
             let reported = intersection(b)
@@ -1082,6 +1135,7 @@ fun hit_object.reorder(self, hint: uint, bits: int) => hit_object_reorder_by_hin
     let mut to_object_x = float4(0.0, 0.0, 0.0, 0.0)
     let mut to_object_y = float4(0.0, 0.0, 0.0, 0.0)
     let mut to_object_z = float4(0.0, 0.0, 0.0, 0.0)
+    let mut to_world = affine3.from_rows(float4(0.0, 0.0, 0.0, 0.0), float4(0.0, 0.0, 0.0, 0.0), float4(0.0, 0.0, 0.0, 0.0))
     while top > 0 and not is_done:
         top -= 1
         let owner = owners[top]
@@ -1094,12 +1148,20 @@ fun hit_object.reorder(self, hint: uint, bits: int) => hit_object_reorder_by_hin
             o = origin
             d = direction
             if owner >= 0:
-                instance_unit = header.y + 7 * (owner as uint)
+                instance_unit = header.y + instance_stride(header) * (owner as uint)
                 instance = acceleration_pool_load(instance_unit + 6)
                 region = instance.x
-                to_object_x = pool_float4(acceleration_pool_load(instance_unit))
-                to_object_y = pool_float4(acceleration_pool_load(instance_unit + 1))
-                to_object_z = pool_float4(acceleration_pool_load(instance_unit + 2))
+                to_world = instance_to_world(instance_unit, instance, r.time)
+                // a static instance's inverse is stored, and a moving one's is taken at the ray's time
+                if is_moving_instance(instance):
+                    let back = inverse_of_affine(to_world)
+                    to_object_x = back.row(0)
+                    to_object_y = back.row(1)
+                    to_object_z = back.row(2)
+                else:
+                    to_object_x = pool_float4(acceleration_pool_load(instance_unit))
+                    to_object_y = pool_float4(acceleration_pool_load(instance_unit + 1))
+                    to_object_z = pool_float4(acceleration_pool_load(instance_unit + 2))
                 o = apply_point(affine3.from_rows(to_object_x, to_object_y, to_object_z), origin)
                 d = apply_vector(affine3.from_rows(to_object_x, to_object_y, to_object_z), direction)
             inverse = float3(1.0 / d.x, 1.0 / d.y, 1.0 / d.z)
@@ -1123,7 +1185,7 @@ fun hit_object.reorder(self, hint: uint, bits: int) => hit_object_reorder_by_hin
         for k in 0 ..< (count as int):
             let primitive = lo.w + (k as uint)
             if owner < 0:
-                let entry = acceleration_pool_load(header.y + 7 * primitive + 6)
+                let entry = acceleration_pool_load(header.y + instance_stride(header) * primitive + 6)
                 let instance_mask = ((entry.y >> 24) & 255) as int
                 if (instance_mask & mask) != 0 and top < 64:
                     nodes[top] = 0
@@ -1147,11 +1209,7 @@ fun hit_object.reorder(self, hint: uint, bits: int) => hit_object_reorder_by_hin
                     instance.w as int
                     (box_hi.w & 2147483647) as int
                     box_lo.w as int
-                    affine3.from_rows(
-                        pool_float4(acceleration_pool_load(instance_unit + 3))
-                        pool_float4(acceleration_pool_load(instance_unit + 4))
-                        pool_float4(acceleration_pool_load(instance_unit + 5))
-                    )
+                    to_world
                     affine3.from_rows(to_object_x, to_object_y, to_object_z)
                 )
                 let reported = intersection(b)
@@ -1192,11 +1250,7 @@ fun hit_object.reorder(self, hint: uint, bits: int) => hit_object_reorder_by_hin
                 a.w as int
                 float3(1.0 - found.y - found.z, found.y, found.z)
                 is_front
-                affine3.from_rows(
-                    pool_float4(acceleration_pool_load(instance_unit + 3))
-                    pool_float4(acceleration_pool_load(instance_unit + 4))
-                    pool_float4(acceleration_pool_load(instance_unit + 5))
-                )
+                to_world
                 affine3.from_rows(to_object_x, to_object_y, to_object_z)
             )
             let mut decision = hit_decision.accept

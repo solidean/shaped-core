@@ -113,7 +113,7 @@ fn write_boxes(@builtin(global_invocation_id) id: vec3u) {
 }
 
 // write_leaves
-//   a: z the region's unit, w what a leaf holds (0 triangles, 1 boxes, 2 instances)
+//   a: z the region's unit, w what a leaf holds (0 triangles, 1 boxes, 2 instances, 3 instances that move)
 //   b: x the first leaf's node index, y the first primitive or instance unit
 fn primitive_bounds(j: u32) -> bounds {
     if (args.a.w == 0u) {
@@ -129,7 +129,20 @@ fn primitive_bounds(j: u32) -> bounds {
     }
 
     // An instance: its BLAS root box, the node right after that region's header, moved to world space.
-    let first = args.b.y + 7u * j;
+    // Kind 3 is instances that move, 10 units apiece: a point moves on a line between its two places, so the box of
+    // both transforms holds it at every time.
+    let stride = select(7u, 10u, args.a.w == 3u);
+    let first = args.b.y + stride * j;
+    let start = instance_box(first, first + 3u);
+    if (args.a.w != 3u) {
+        return start;
+    }
+    let end = instance_box(first, first + 7u);
+    return bounds(min(start.lo, end.lo), max(start.hi, end.hi));
+}
+
+/// The instance at `first`'s BLAS root box under the transform whose rows start at `rows`.
+fn instance_box(first: u32, rows: u32) -> bounds {
     let blas = pool[first + 6u].x;
     let lo = as_vec3f(pool[blas + 1u]);
     let hi = as_vec3f(pool[blas + 2u]);
@@ -139,7 +152,7 @@ fn primitive_bounds(j: u32) -> bounds {
     var world_extent = vec3f(0.0);
     var pad = vec3f(0.0);
     for (var row = 0u; row < 3u; row++) {
-        let m = bitcast<vec4f>(pool[first + 3u + row]);
+        let m = bitcast<vec4f>(pool[rows + row]);
         world_center[row] = dot(m.xyz, center) + m.w;
         world_extent[row] = dot(abs(m.xyz), extent);
         // The transform rounds, and the box must still hold every point of the instance.
