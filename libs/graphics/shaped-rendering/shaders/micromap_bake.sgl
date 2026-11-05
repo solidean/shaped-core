@@ -1,0 +1,187 @@
+// Opacity micromaps from an opacity texture, which sr::micromap_bake_routine dispatches.
+//
+// First a min/max pyramid of the opacity channel: level 0 holds each texel's value as both, every level above the
+// extremes of the texels below it, an odd row or column folded into the last.
+// Then one thread per word of the states: 16 micro-triangles of 2 bits, lowest first, as both APIs pack 4-state maps.
+//
+// A micro-triangle is opaque only where everything a bilinear lookup blends inside it is at or above the cutoff, and
+// transparent only where all of it is below, read at the pyramid level where that footprint spans at most 4 texels.
+// Everything else is unknown, with the centre texel's side of the cutoff as the guess a 2-state ray takes.
+
+@inline binding pyramid_constants:
+    // the texel component that is opacity, 0 to 3, and the affine map from it to what the cutoff compares
+    channel: int
+    scale: float
+    bias: float
+
+binding pyramid_seed_io:
+    @unfilterable
+    source: texture_2d[float4]
+    target: out image_2d[.rgba32_float]
+
+binding pyramid_reduce_io:
+    // one level of the pyramid, which the dispatch reduces into the next
+    @unfilterable
+    source: texture_2d[float4]
+    target: out image_2d[.rgba32_float]
+
+fun component_of(c: float4, i: int) -> float:
+    if i == 0 => return c.x
+    if i == 1 => return c.y
+    if i == 2 => return c.z
+    return c.w
+
+@compute(8, 8) fun seed_cs(@thread_id id: int3){pyramid_seed_io, pyramid_constants}:
+    let size = pyramid_seed_io.source.size()
+    if id.x >= size.x or id.y >= size.y => return
+    let at = int2(id.x, id.y)
+    let v = component_of(pyramid_seed_io.source.load(at), pyramid_constants.channel) * pyramid_constants.scale
+        + pyramid_constants.bias
+    pyramid_seed_io.target.store(at, float4(v, v, 0.0, 0.0))
+
+@compute(8, 8) fun reduce_cs(@thread_id id: int3){pyramid_reduce_io}:
+    let below = pyramid_reduce_io.source.size()
+    let size = int2(max(below.x / 2, 1), max(below.y / 2, 1))
+    if id.x >= size.x or id.y >= size.y => return
+    // the last texel of a level takes the odd row or column below it too
+    let last_x = if id.x == size.x - 1 => below.x - 1 else id.x * 2 + 1
+    let last_y = if id.y == size.y - 1 => below.y - 1 else id.y * 2 + 1
+    let mut low = 1000000000.0
+    let mut high = -1000000000.0
+    for y in id.y * 2 ..< last_y + 1:
+        for x in id.x * 2 ..< last_x + 1:
+            let m = pyramid_reduce_io.source.load(int2(min(x, below.x - 1), min(y, below.y - 1)))
+            low = min(low, m.x)
+            high = max(high, m.y)
+    pyramid_reduce_io.target.store(int2(id.x, id.y), float4(low, high, 0.0, 0.0))
+
+// ---- classification -------------------------------------------------------------------------------------------------
+
+@inline binding classify_constants:
+    word_count: int
+    cutoff: float
+    // how many levels the pyramid has
+    levels: int
+    // 1 where coordinates outside the texture clamp to its edge, 0 where they repeat
+    clamps: int
+
+binding classify_io:
+    @unfilterable
+    pyramid: texture_2d[float4]
+    uvs: buffer[float2]
+    indices: buffer[int]
+    // per map: the triangle it covers, its subdivision level, and the word of the states its first micro-triangle is in
+    maps: buffer[int4]
+    // the map each word of the states belongs to
+    word_maps: buffer[int]
+    states: mut buffer[uint]
+
+fun even_bits(value: uint) -> uint:
+    let mut x = value & 0x55555555u
+    x = (x | (x >> 1u)) & 0x33333333u
+    x = (x | (x >> 2u)) & 0x0f0f0f0fu
+    x = (x | (x >> 4u)) & 0x00ff00ffu
+    x = (x | (x >> 8u)) & 0x0000ffffu
+    return x
+
+fun prefix_xor(value: uint) -> uint:
+    let mut x = value
+    x = x ^ (x >> 1u)
+    x = x ^ (x >> 2u)
+    x = x ^ (x >> 4u)
+    x = x ^ (x >> 8u)
+    return x
+
+/// A micro-triangle's corners, as barycentrics of the triangle's second and third vertex.
+struct micro_triangle:
+    first: float2
+    second: float2
+    third: float2
+
+/// The corners of micro-triangle `index` of a map of `level`, along the space-filling curve both APIs number
+/// micro-triangles by: the first corner, then its two neighbours.
+fun micro_corners(index: uint, level: int) -> micro_triangle:
+    if level == 0 => return micro_triangle(float2(0.0, 0.0), float2(1.0, 0.0), float2(0.0, 1.0))
+    let b0 = even_bits(index)
+    let b1 = even_bits(index >> 1u)
+    let fx = prefix_xor(b0)
+    let fy = prefix_xor(b0 & ~b1)
+    let t = fy ^ b1
+    let mask = (1u << (level as uint)) - 1u
+    let mut u = ((fx & ~t) | (b0 & ~t) | (~b0 & ~fx & t)) & mask
+    let mut v = (fy ^ b0) & mask
+    let w = ((~fx & ~t) | (b0 & ~t) | (~b0 & fx & t)) & mask
+    let is_upright = ((u & 1u) ^ (v & 1u) ^ (w & 1u)) != 0u
+    if not is_upright:
+        u += 1u
+        v += 1u
+    let step = 1.0 / ((1 << level) as float)
+    let first = float2(u as float, v as float) * step
+    if is_upright => return micro_triangle(first, first + float2(step, 0.0), first + float2(0.0, step))
+    return micro_triangle(first, first - float2(step, 0.0), first - float2(0.0, step))
+
+/// Floor division by a power of two, for coordinates left of the texture too.
+fun floor_shift(x: int, by: int) -> int:
+    if x >= 0 => return x >> by
+    return -((-x + (1 << by) - 1) >> by)
+
+fun texel_at(x: int, y: int, size: int2){classify_constants} -> int2:
+    if classify_constants.clamps != 0 => return int2(clamp(x, 0, size.x - 1), clamp(y, 0, size.y - 1))
+    return int2(((x % size.x) + size.x) % size.x, ((y % size.y) + size.y) % size.y)
+
+/// The 2-bit state of micro-triangle `index` of `map`.
+fun classify(map: int4, index: uint){classify_io, classify_constants} -> uint:
+    let a = classify_io.uvs[classify_io.indices[map.x * 3]]
+    let b = classify_io.uvs[classify_io.indices[map.x * 3 + 1]]
+    let c = classify_io.uvs[classify_io.indices[map.x * 3 + 2]]
+    let corners = micro_corners(index, map.y)
+    let size = classify_io.pyramid.size()
+    let scale = float2(size.x as float, size.y as float)
+    let mut low = float2(1000000000.0, 1000000000.0)
+    let mut high = float2(-1000000000.0, -1000000000.0)
+    let mut centre = float2(0.0, 0.0)
+    for k in 0 ..< 3:
+        let bary = if k == 0 => corners.first else if k == 1 => corners.second else corners.third
+        let uv = a * (1.0 - bary.x - bary.y) + b * bary.x + c * bary.y
+        // in texels, where a bilinear lookup at p blends the texels around p - 0.5
+        let p = uv * scale - float2(0.5, 0.5)
+        low = min(low, p)
+        high = max(high, p)
+        centre += uv / 3.0
+    let lo = int2(floor(low.x) as int, floor(low.y) as int)
+    let hi = int2((floor(high.x) as int) + 1, (floor(high.y) as int) + 1)
+
+    // the level where the footprint spans at most 4 texels on either axis
+    let mut level = 0
+    loop:
+        if level >= classify_constants.levels - 1 => break
+        if (hi.x - lo.x) >> level <= 2 and (hi.y - lo.y) >> level <= 2 => break
+        level += 1
+    let level_size = classify_io.pyramid.size(level)
+    let mut smallest = 1000000000.0
+    let mut largest = -1000000000.0
+    let x0 = floor_shift(lo.x, level)
+    let y0 = floor_shift(lo.y, level)
+    let x1 = min(floor_shift(hi.x, level), x0 + 3)
+    let y1 = min(floor_shift(hi.y, level), y0 + 3)
+    for y in y0 ..< y1 + 1:
+        for x in x0 ..< x1 + 1:
+            let m = classify_io.pyramid.load(texel_at(x, y, level_size), level)
+            smallest = min(smallest, m.x)
+            largest = max(largest, m.y)
+    if smallest >= classify_constants.cutoff => return 1u
+    if largest < classify_constants.cutoff => return 0u
+    let at = centre * scale
+    let guess = classify_io.pyramid.load(texel_at(floor(at.x) as int, floor(at.y) as int, size), 0).x
+    return if guess >= classify_constants.cutoff => 3u else 2u
+
+@compute(64) fun classify_cs(@thread_id id: int3){classify_io, classify_constants}:
+    if id.x >= classify_constants.word_count => return
+    let map = classify_io.maps[classify_io.word_maps[id.x]]
+    let count = 1u << ((2 * map.y) as uint)
+    let first = ((id.x - map.z) * 16) as uint
+    let mut word = 0u
+    for k in 0 ..< 16:
+        let index = first + (k as uint)
+        if index < count => word = word | (classify(map, index) << ((2 * k) as uint))
+    classify_io.states[id.x] = word

@@ -1,0 +1,25 @@
+// Inline traces of a micromapped quad, for sr's micromap bake test: one ray a cell of an 8 x 8 grid, along +z.
+// A trace that decides every candidate one way shows where the micromap decided instead.
+require ray_query
+
+binding probe:
+    world: acceleration_structure[.triangles]
+    // 1 where the cell's ray hit, 0 where it missed
+    hits: mut buffer[int]
+
+// a quarter cell off the centre in x, so no ray runs along an edge two micro-triangles share
+fun cell_ray(id: int3) -> ray => ray(
+    origin = pos3((id.x as float) + 0.25, (id.y as float) + 0.5, -1.0)
+    direction = vec3(0.0, 0.0, 1.0)
+)
+
+fun store(id: int3, h: triangle_hit){probe}:
+    probe.hits[id.x + id.y * 8] = if h.is_hit => 1 else 0
+
+// only what the micromap marks opaque is hit
+@compute(8, 8) fun rejecting_cs(@thread_id id: int3){probe}:
+    store(id, probe.world.trace(cell_ray(id), c => hit_decision.ignore))
+
+// only what the micromap marks transparent is missed
+@compute(8, 8) fun accepting_cs(@thread_id id: int3){probe}:
+    store(id, probe.world.trace(cell_ray(id), c => hit_decision.accept))
