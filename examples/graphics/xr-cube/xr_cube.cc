@@ -1,8 +1,8 @@
 // The SGL cube in a headset, over Quest Link or any other OpenXR runtime on Windows, on dx12.
 //
-// A prototype: it talks to OpenXR directly, renders each eye into an sg texture and copies that into the runtime's
-// image natively, and draws the eyes one at a time.
-// Each of those is a shortcut marked against the issue that replaces it; feat-xr-link-cube-prototype has the plan.
+// A prototype: it talks to OpenXR directly and draws the eyes one at a time, shortcuts each marked against the issue
+// that replaces it.
+// Each eye renders into an sg texture a native copy moves into the runtime's image, which is how dx12 fills one.
 
 #include <clean-core/common/time.hh>
 #include <clean-core/string/format.hh>
@@ -128,7 +128,7 @@ struct eye
     cc::vector<XrSwapchainImageD3D12KHR> images;
     int width = 0;
     int height = 0;
-    // TEMPORARY(feat-sg-wrap-native-texture): sg cannot render into the runtime's image yet, so it renders here
+    // the runtime's image rests in legacy RENDER_TARGET, which sg's enhanced barriers never meet, so sg renders here
     sg::texture_2d target;
 };
 
@@ -386,7 +386,7 @@ ASYNC_EXAMPLE("shaped-graphics/xr-cube")
                     pass.draw_indexed({.index_range = {.offset = 0, .size = cube_index_count}});
                 }
 
-                // TEMPORARY(feat-sg-wrap-native-texture): the runtime's image is filled by a native copy
+                // filled from a native scope with legacy barriers, as dx12_context::wrap_dx12_texture's notes prescribe
                 sg::backend::dx12::native_texture_access const reads[]
                     = {{.texture = e.target.raw(), .access = sg::access_flag::copy_read, .stages = sg::pipeline_stage_flag::copy}};
                 {
