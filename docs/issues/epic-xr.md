@@ -16,8 +16,9 @@ shaped-viewer is out of scope.
 
 ## Targets
 
-- **Quest 3 standalone is first**: Android, vulkan, OpenXR.
-- **PCVR** (OpenXR over Link or SteamVR, dx12 and vulkan) and **WebXR** (webgpu) are in scope.
+- **The Quest 3 is the first headset, reached over Quest Link first**: a Windows app, OpenXR on Meta's Link runtime, vulkan.
+- **Quest 3 standalone follows**: Android, the same OpenXR and vulkan code, packaged as an APK.
+- **PCVR on dx12** and **WebXR** (webgpu) are in scope.
 - **AR passthrough is a major use case**, not an afterthought.
 - **Controller and hand input is needed soon.**
 - visionOS (Compositor Services, metal) is later and not designed for now.
@@ -47,6 +48,11 @@ shaped-viewer is out of scope.
 - **Quest packaging is a gradle-free APK built in CMake**, with `dev.py` deploying and launching over adb.
 - **CI tries Monado headless**; the Meta XR Simulator and the Quest are for development by hand.
   Whether GitHub runners can host Monado is unknown, and not having it there is acceptable.
+- **Link before standalone, vulkan before dx12** (decided later the same day).
+  Link gives the Windows loop — debugger, RenderDoc, hot reload — with no APK.
+  Vulkan first keeps the Link code identical to the standalone code: the same `XR_KHR_vulkan_enable2` binding, the same multiview.
+  What Link hides is Adreno's performance profile, which standalone brings back.
+  Whether environment depth, scene and anchors reach Link is unverified; `question-xr-ar-capability-api` checks it.
 
 ## Still to settle
 
@@ -58,11 +64,11 @@ The design deck, its answers and annotations are in `.tmp/xr-design/` for now; w
 
 ## Phases
 
-1. Android APK and `dev.py` deploy over adb — a triangle on the Quest's 2D panel: `feat-android-apk`.
-2. sg hooks: `feat-sg-external-device-requirements`, `feat-sg-wrap-native-texture`, `feat-sg-view-instancing`, with `feat-sgl-view-index` beside them.
-3. shaped-xr core on OpenXR and vulkan: `feat-shaped-xr-core`, then `chore-xr-monado-ci`.
-4. One SGL source, multiview, in the headset: `feat-xr-cube-example`.
-5. `feat-xr-passthrough` and `feat-xr-controller-actions`; the AR capability API is designed first, in `question-xr-ar-capability-api`.
+1. sg hooks: `feat-sg-external-device-requirements`, `feat-sg-wrap-native-texture`, `feat-sg-view-instancing`, with `feat-sgl-view-index` beside them.
+2. shaped-xr core on OpenXR and vulkan, on Windows over Link: `feat-shaped-xr-core`, then `chore-xr-monado-ci`.
+3. One SGL source, multiview, in the headset: `feat-xr-cube-example`.
+4. `feat-xr-passthrough` and `feat-xr-controller-actions`; the AR capability API is designed first, in `question-xr-ar-capability-api`.
+5. Standalone on the Quest: `feat-android-apk`.
 6. `feat-xr-pcvr-dx12`, `feat-xr-webxr` and `feat-xr-hand-tracking`.
 
 `feat-sr-gamepads` follows from the input decision and blocks nothing.
