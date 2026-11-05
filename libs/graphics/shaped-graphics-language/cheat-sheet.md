@@ -88,8 +88,8 @@ sgl::prelude_files()                       // -> cc::span<prelude_file const> { 
                                            // "core.sgl": the hand-written prelude/core.sgl as it was when the library was built
 sgl::parsed_prelude()                      // -> cc::span<parsed_prelude_file const> { file, ast }: the same files, parsed ONCE per
                                            // process and shared by every thread; point a module_file at it rather than parsing again
-sgl::prelude_file_of(path)                 // -> i32: which prelude file an ABSOLUTE path or file:// uri is, else -1;
-                                           // only the library's own prelude/ dir counts: shaders/prelude/core.sgl is -1
+sgl::prelude_file_of(path)                 // -> i32: which prelude file a path or file:// uri is, else -1; only a file in
+                                           // a shaped-graphics-language/prelude/ dir counts: shaders/prelude/core.sgl is -1
                                            // a driver checks such a source IN that file's place, never behind a 2nd prelude
 
 #include <shaped-graphics-language/source/format_diagnostic.hh>

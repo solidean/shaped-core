@@ -102,6 +102,24 @@ TEST("corpus soak", thorough_only,                  // `dev.py check` runs this 
 A flag, not a bucket: the test runs either way, and `manual` is not where a thorough test goes.
 [docs/test-runtime.md](docs/test-runtime.md) has the rules.
 
+## The source tree (`nx::source_root`)
+
+```cmake
+sc_target_source_paths(my-test PRIVATE MY_DATA_DIR tests/data)   # a string literal RELATIVE to the top-level source dir
+```
+
+```cpp
+#include <nexus/source_root.hh>
+nx::source_path(MY_DATA_DIR)             // cc::string, absolute: the directory joined onto the source root
+nx::source_path(MY_DATA_DIR "/a.obj")    //   a literal suffix concatenates as usual
+nx::source_root()                        // cc::string_view: SC_SOURCE_ROOT, else the CMakeCache.txt above the executable;
+                                         //   neither ends the process naming both. Resolved once, thread-safe
+```
+
+- **Never an absolute path in a definition**: `check`'s `abspaths` gate refuses one ([coding guidelines](../../../docs/coding-guidelines.md#build-configurations)).
+- `dev.py` sets `SC_SOURCE_ROOT` for every binary it runs; a binary started by hand finds its build's `CMakeCache.txt`, wherever that build directory is.
+- For tests, examples and tools: a shipped library never asks, and links no nexus.
+
 ## Examples (`EXAMPLE`)
 
 A runnable demonstration of an API **in practice**, in the `example` bucket, run one at a time by `dev.py example`.

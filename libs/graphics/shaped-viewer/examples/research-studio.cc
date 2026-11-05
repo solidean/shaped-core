@@ -2,6 +2,7 @@
 #include <clean-core/record/log.hh>
 #include <clean-core/string/format.hh>
 #include <imgui/imgui.h>
+#include <nexus/source_root.hh>
 #include <nexus/test.hh>
 #include <shaped-viewer/all.hh>
 
@@ -330,7 +331,8 @@ EXAMPLE("shaped-viewer/research-studio")
 
         auto const& entry = k_scenes[scene_index];
         if (!assets[scene_index].has_value())
-            assets[scene_index] = loader.load_async(cc::format("{}/{}", SV_RESEARCH_SCENES_DIR, entry.file));
+            assets[scene_index]
+                = loader.load_async(cc::format("{}/{}", nx::source_path(SV_RESEARCH_SCENES_DIR), entry.file));
         auto& asset = assets[scene_index].value();
 
         if (asset.has_error())

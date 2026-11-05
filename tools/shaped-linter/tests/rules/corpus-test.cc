@@ -6,6 +6,7 @@
 #include <clean-core/container/vector.hh>
 #include <clean-core/string/format.hh>
 #include <clean-core/string/string.hh>
+#include <nexus/source_root.hh>
 #include <nexus/test.hh>
 #include <shaped-linter/config/lint_config.hh>
 #include <shaped-linter/rules/engine.hh>
@@ -36,7 +37,7 @@ cc::vector<corpus_file> corpus_files()
     namespace fs = std::filesystem;
 
     auto out = cc::vector<corpus_file>();
-    auto const root = fs::path(SCL_CORPUS_DIR);
+    auto const root = fs::path(nx::source_path(SCL_CORPUS_DIR).c_str_materialize());
 
     auto ec = std::error_code();
     for (auto const& e : fs::recursive_directory_iterator(root, ec))

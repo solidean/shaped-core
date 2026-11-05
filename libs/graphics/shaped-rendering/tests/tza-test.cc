@@ -2,6 +2,7 @@
 #include <clean-core/container/vector.hh>
 #include <clean-core/streams/file_stream.hh>
 #include <clean-core/string/format.hh>
+#include <nexus/source_root.hh>
 #include <nexus/test.hh>
 #include <shaped-rendering/impl/tza.hh>
 
@@ -20,7 +21,11 @@ namespace
 /// One pinned blob, or empty when the weights were not fetched into this build.
 [[nodiscard]] cc::vector<byte> load_weights(char const* file)
 {
-    auto const path = cc::string(SR_OIDN_WEIGHTS_DIR) + "/" + file;
+#ifndef SR_TEST_OIDN_WEIGHTS_DIR
+    (void)file;
+    return {};
+#else
+    auto const path = nx::source_path(SR_TEST_OIDN_WEIGHTS_DIR) + "/" + file;
 
     // The adapter owns the buffer the stream reads through, so it must outlive the stream.
     auto adapter = cc::file_read_stream_adapter::open(path);
@@ -32,6 +37,7 @@ namespace
     if (bytes.has_error())
         return {};
     return cc::move(bytes.value());
+#endif
 }
 
 /// A tensor archive written by hand, little-endian like the real one, so a malformed case needs no file on disk.

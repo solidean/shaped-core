@@ -321,6 +321,14 @@ A hung build prints nothing past its `[build] all` banner, so after 5 minutes wi
 
 [stall_report.py](../../tools/dev/lib/core/stall_report.py) has the details, and [its self-test](../../tools/dev/stall-report-self-test.py) runs with `check`.
 
+## Where a binary finds the source tree
+
+A test, example or tool that reads files of the source tree gets their directory relative to the top-level source directory, never absolute.
+dev.py sets `SC_SOURCE_ROOT` to the repository root for everything it starts, and `nx::source_root()` joins the two at run time.
+A binary started by hand finds the root without it, through the `CMakeCache.txt` above its build directory, wherever that build directory is.
+`SC_SOURCE_ROOT` set by hand wins over that, which is how one build reads another checkout's data on purpose.
+[nexus/source_root.hh](../../libs/base/nexus/src/nexus/source_root.hh) is the lookup, and the `abspaths` gate keeps absolute paths out of the build.
+
 ## A build directory keeps its environment
 
 On Windows a build directory is configured inside the MSVC developer environment or outside it, for life, and a configure that switches is refused with an error saying so.
@@ -461,6 +469,7 @@ Registered checks (`check --list` shows what each watches); the fixers run in th
 | `fixed-int-gen` | typed-geometry's generated `fixed_int` headers and golden tests are what `tools/gen-fixed-int.py` writes. | yes (regenerates them) |
 | `format`     | clang-format our C++ sources. Scoped to the branch by default; `--dirty-only`, `--commit` or `--all` to rescope. | yes (rewrites in place) |
 | `crossrefs`  | Validate doc↔code cross-references repo-wide (always full-repo).                 | no (report only) |
+| `abspaths`   | No compile definition or generated source of the default preset's build carries an absolute source or build path ([where a binary finds the source tree](#where-a-binary-finds-the-source-tree)). Known exceptions name their issue in [abspaths.py](../../tools/dev/lib/quality/abspaths.py). | no (report only) |
 | `sgl-prelude`| SGL's committed `prelude/builtins.sgl` and slib's `impl/pipeline_fields.hh` are what `sgl` generates. Builds the `sgl` tool. | yes (rewrites the files) |
 | `test`       | Build + run the full suite on the debug, default, release, single-threaded **and** (Linux/macOS) sanitizer presets. | no (report only) |
 

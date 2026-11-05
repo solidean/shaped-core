@@ -21,6 +21,7 @@ add_library(nexus
     src/nexus/args/impl/setup_check.cc
     src/nexus/args/impl/suggest.cc
     src/nexus/rec.cc
+    src/nexus/source_root.cc
     src/nexus/test.cc
     src/nexus/pgo.cc
     src/nexus/bench/barriers.cc
@@ -84,6 +85,7 @@ target_sources(nexus
     src/nexus/args/impl/command.hh
     src/nexus/rec.hh
     src/nexus/impl/rec_session.hh
+    src/nexus/source_root.hh
     src/nexus/test.hh
     src/nexus/async-test.hh
     src/nexus/pgo.hh

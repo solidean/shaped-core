@@ -1,5 +1,6 @@
 #include "emit-test-support.hh"
 
+#include <nexus/source_root.hh>
 #include <shaped-graphics-language/emit/reserved_words.hh>
 
 using namespace sgl_test;
@@ -589,7 +590,7 @@ TEST("sgl emit - emit is total: a module with errors and a position out of range
                                                                  "    }\n"));
     CHECK(sgl::emit::dump_errors(sgl::emit::emit(broken.module, 0, target::wgsl)) == "module-has-errors 1 errors\n");
 
-    auto const cube = check_sources(read_prelude(), read_text(cc::string(SGL_SAMPLES_DIR) + "/cube.sgl"));
+    auto const cube = check_sources(read_prelude(), read_text(nx::source_path(SGL_SAMPLES_DIR) + "/cube.sgl"));
     CHECK(sgl::emit::dump_errors(sgl::emit::emit(cube.module, 2, target::wgsl)) == "unknown-entry-point 2 of 2\n");
     CHECK(sgl::emit::dump_errors(sgl::emit::emit(cube.module, -1, target::hlsl_dx12)) == "unknown-entry-point -1 of 2\n");
 }

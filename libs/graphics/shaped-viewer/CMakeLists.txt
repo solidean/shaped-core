@@ -296,8 +296,7 @@ if(SC_BUILD_TESTS)
     target_include_directories(shaped-viewer-test PRIVATE "${BABEL_TEST_DIR}")
 
     # Where a fetched Bistro lands (extern/bistro/fetch-bistro.py), for the import test that reads the real scene when present.
-    cmake_path(SET _sv_test_bistro_dir NORMALIZE "${CMAKE_CURRENT_SOURCE_DIR}/../../../extern/bistro/.install")
-    target_compile_definitions(shaped-viewer-test PRIVATE SV_TEST_BISTRO_DIR="${_sv_test_bistro_dir}")
+    sc_target_source_paths(shaped-viewer-test PRIVATE SV_TEST_BISTRO_DIR ../../../extern/bistro/.install)
 
     sc_target_pch(shaped-viewer-test SG NEXUS) # 0.53
 
@@ -397,7 +396,7 @@ if(SC_BUILD_TESTS)
         endif()
 
         # Where the on-request Sponza fetch installs, which the raster and hybrid benchmarks draw when it is there.
-        target_compile_definitions(shaped-viewer-test PRIVATE SV_TEST_SPONZA_DIR="${CMAKE_SOURCE_DIR}/extern/sponza/.install")
+        sc_target_source_paths(shaped-viewer-test PRIVATE SV_TEST_SPONZA_DIR ../../../extern/sponza/.install)
 
         # Stage the runtime DLLs (DXC's dxcompiler/dxil, the dx12 backend, SDL3 for the window) next to the
         # binary so it starts. $<TARGET_RUNTIME_DLLS> reaches them through the link chain; empty off Windows.

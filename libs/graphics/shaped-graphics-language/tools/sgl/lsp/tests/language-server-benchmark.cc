@@ -3,6 +3,7 @@
 
 #include <clean-core/streams/file_stream.hh>
 #include <nexus/bench/run.hh>
+#include <nexus/source_root.hh>
 #include <shaped-graphics-language/ast/build.hh>
 #include <shaped-graphics-language/driver/prelude.hh>
 
@@ -22,7 +23,7 @@ cc::shared_ptr<lsp::document> document_of(cc::string text)
 
 cc::string read_sample(cc::string_view name)
 {
-    auto adapter = cc::file_read_stream_adapter::open(cc::string(SGL_SAMPLES_DIR) + "/" + name);
+    auto adapter = cc::file_read_stream_adapter::open(nx::source_path(SGL_SAMPLES_DIR) + "/" + name);
     REQUIRE(adapter.has_value());
     auto const bytes = adapter.value().stream().read_all();
     REQUIRE(bytes.has_value());

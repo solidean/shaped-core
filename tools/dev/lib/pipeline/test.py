@@ -273,6 +273,9 @@ def test(
                 # Per-binary and per-preset env layer onto the inherited environment, so PATH and the MSVC vars the child needs are never dropped.
                 run_env = preset_base_env
                 layered = {**preset_env, **(extra_env_for(name) if extra_env_for else {})}
+                # Where the binary finds the source tree's data (nexus/source_root.hh).
+                # Named, so a run never depends on the walk up to the build's CMakeCache.txt, nor inherits another checkout's.
+                layered["SC_SOURCE_ROOT"] = str(root)
                 # A native nexus binary keeps every crash or hang report in files too, which collect() files below.
                 if not preset.is_cross_compiling:
                     layered.setdefault("NX_CRASH_DIR", str(crash_reports.incoming_dir(preset.build_dir)))
