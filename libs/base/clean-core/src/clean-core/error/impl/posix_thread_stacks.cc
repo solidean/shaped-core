@@ -1,6 +1,7 @@
 #include "posix_thread_stacks.hh"
 
 #include <clean-core/common/macros.hh>
+#include <clean-core/error/crash_handler.hh> // CC_CRASH_HANDLER_SANITIZED
 
 #if defined(__linux__) && !defined(__EMSCRIPTEN__)
 
@@ -326,7 +327,153 @@ bool cc::impl::report_posix_thread_stacks() noexcept
     return true;
 }
 
-#else // not Linux
+#elif defined(__APPLE__) && !CC_CRASH_HANDLER_SANITIZED
+
+#include <clean-core/platform/stack_capture.hh>
+#include <clean-core/platform/symbolize.hh>
+#include <clean-core/thread/atomic.hh>
+#include <mach/mach.h>
+#include <pthread.h>
+
+#include <cstdint>
+#include <cstdio>
+
+using namespace cc::primitive_defines;
+
+// **macOS walks a thread from outside, as Windows does.**
+// Mach suspends a thread and reads its registers, so nothing here needs the thread to cooperate: a thread stuck in the
+// kernel is walked as readily as one spinning.
+// Only reading happens while a thread is suspended, its registers and its own stack; naming the frames waits until
+// every thread runs again, since dladdr takes the loader's lock and a suspended thread may hold it.
+
+namespace
+{
+constexpr isize max_threads = 256;
+constexpr isize max_frames = 32;
+
+cc::atomic<bool> g_installed = false;
+
+/// What one other thread was found doing, kept in static storage so a report allocates nothing to collect it.
+struct walked_thread
+{
+    u64 id = 0;
+    char name[64] = {};
+    void* frames[max_frames] = {};
+    isize frame_count = 0;
+    bool walked = false;
+};
+
+walked_thread g_walked[max_threads];
+
+/// Walks `thread`, which the caller has suspended, into `out`: its program counter, then its frame chain within its own
+/// stack.
+/// A thread whose stack is unknown, one no pthread owns, gives its program counter alone, since reading past it could
+/// fault.
+void walk_suspended(thread_act_t thread, pthread_t owner, walked_thread& out) noexcept
+{
+#if defined(__aarch64__)
+    auto state = arm_thread_state64_t{};
+    auto count = mach_msg_type_number_t(ARM_THREAD_STATE64_COUNT);
+    if (thread_get_state(thread, ARM_THREAD_STATE64, reinterpret_cast<thread_state_t>(&state), &count) != KERN_SUCCESS)
+        return;
+    auto const fp = u64(arm_thread_state64_get_fp(state));
+    auto const pc = u64(arm_thread_state64_get_pc(state));
+#else
+    auto state = x86_thread_state64_t{};
+    auto count = mach_msg_type_number_t(x86_THREAD_STATE64_COUNT);
+    if (thread_get_state(thread, x86_THREAD_STATE64, reinterpret_cast<thread_state_t>(&state), &count) != KERN_SUCCESS)
+        return;
+    auto const fp = u64(state.__rbp);
+    auto const pc = u64(state.__rip);
+#endif
+    out.walked = true;
+    if (owner == nullptr)
+    {
+        out.frames[out.frame_count++] = reinterpret_cast<void*>(pc);
+        return;
+    }
+
+    auto const high = u64(reinterpret_cast<uintptr_t>(pthread_get_stackaddr_np(owner)));
+    auto const low = high - u64(pthread_get_stacksize_np(owner));
+    out.frame_count = cc::capture_stack_from_frame(reinterpret_cast<void const*>(fp), reinterpret_cast<void*>(pc), low,
+                                                   high, cc::span<void*>(out.frames))
+                          .count;
+}
+} // namespace
+
+bool cc::impl::posix_thread_stacks_available()
+{
+    return g_installed.load(cc::memory_order_acquire);
+}
+
+void cc::impl::install_posix_thread_stack_reporter()
+{
+    g_installed.store(true, cc::memory_order_release);
+}
+
+bool cc::impl::report_posix_thread_stacks() noexcept
+{
+    if (!g_installed.load(cc::memory_order_acquire))
+        return false;
+
+    thread_act_array_t threads = nullptr;
+    auto thread_count = mach_msg_type_number_t(0);
+    if (task_threads(mach_task_self(), &threads, &thread_count) != KERN_SUCCESS)
+        return false;
+
+    auto const self = mach_thread_self();
+    auto walked = isize(0);
+    for (auto i = mach_msg_type_number_t(0); i < thread_count && walked < max_threads; ++i)
+    {
+        if (threads[i] == self)
+            continue;
+
+        auto& out = g_walked[walked++];
+        out = {};
+
+        // Asked before the thread stops, since both may take the pthread list's lock, which a stopped thread could hold.
+        auto identifier = thread_identifier_info_data_t{};
+        auto info_count = mach_msg_type_number_t(THREAD_IDENTIFIER_INFO_COUNT);
+        if (thread_info(threads[i], THREAD_IDENTIFIER_INFO, reinterpret_cast<thread_info_t>(&identifier), &info_count)
+            == KERN_SUCCESS)
+            out.id = identifier.thread_id;
+        auto const owner = pthread_from_mach_thread_np(threads[i]);
+        if (owner != nullptr)
+            (void)pthread_getname_np(owner, out.name, sizeof(out.name));
+
+        if (thread_suspend(threads[i]) != KERN_SUCCESS)
+            continue;
+        walk_suspended(threads[i], owner, out);
+        (void)thread_resume(threads[i]);
+    }
+
+    for (auto i = mach_msg_type_number_t(0); i < thread_count; ++i)
+        (void)mach_port_deallocate(mach_task_self(), threads[i]);
+    (void)vm_deallocate(mach_task_self(), vm_address_t(threads), vm_size_t(thread_count * sizeof(thread_act_t)));
+    (void)mach_port_deallocate(mach_task_self(), self);
+
+    // Every thread runs again, so naming the frames can take whatever lock it needs.
+    auto symbols = cc::symbolizer();
+    for (auto t = isize(0); t < walked; ++t)
+    {
+        auto const& w = g_walked[t];
+        std::fprintf(stderr, "  thread %s (tid %llu):\n", w.name[0] != '\0' ? w.name : "<unnamed>",
+                     static_cast<unsigned long long>(w.id));
+        if (!w.walked)
+            std::fputs("    <not walked; it could not be suspended or read>\n", stderr);
+        for (auto f = isize(0); f < w.frame_count; ++f)
+        {
+            auto const& info = symbols.resolve(w.frames[f]);
+            auto const name = info.has_function() ? info.to_string() : cc::string("<unknown>");
+            std::fprintf(stderr, "    #%-2d %.*s  (%.*s+0x%llx)\n", int(f), int(name.size()), name.data(),
+                         int(info.module.size()), info.module.data(),
+                         static_cast<unsigned long long>(info.module_offset));
+        }
+    }
+    return true;
+}
+
+#else // neither Linux nor macOS
 
 bool cc::impl::posix_thread_stacks_available()
 {
