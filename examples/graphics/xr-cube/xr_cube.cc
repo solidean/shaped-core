@@ -140,9 +140,19 @@ struct xr_state
     XrSession session = XR_NULL_HANDLE;
     XrSpace space = XR_NULL_HANDLE;
     cc::vector<eye> eyes;
+    // the headset's cameras behind the cube, where the runtime offers XR_FB_passthrough and its user enabled it
+    bool offers_passthrough = false;
+    XrPassthroughFB passthrough = XR_NULL_HANDLE;
+    XrPassthroughLayerFB passthrough_layer = XR_NULL_HANDLE;
+    PFN_xrDestroyPassthroughFB destroy_passthrough = nullptr;
+    PFN_xrDestroyPassthroughLayerFB destroy_passthrough_layer = nullptr;
 
     ~xr_state()
     {
+        if (passthrough_layer != XR_NULL_HANDLE)
+            destroy_passthrough_layer(passthrough_layer);
+        if (passthrough != XR_NULL_HANDLE)
+            destroy_passthrough(passthrough);
         for (auto& e : eyes)
             if (e.swapchain != XR_NULL_HANDLE)
                 xrDestroySwapchain(e.swapchain);
@@ -157,9 +167,19 @@ struct xr_state
 
 [[nodiscard]] cc::string create_instance(xr_state& xr)
 {
-    char const* const extensions[] = {XR_KHR_D3D12_ENABLE_EXTENSION_NAME};
+    auto available_count = u32(0);
+    xrEnumerateInstanceExtensionProperties(nullptr, 0, &available_count, nullptr);
+    auto available = cc::vector<XrExtensionProperties>();
+    for (auto i = u32(0); i < available_count; ++i)
+        available.push_back({.type = XR_TYPE_EXTENSION_PROPERTIES});
+    xrEnumerateInstanceExtensionProperties(nullptr, available_count, &available_count, available.data());
+    for (auto const& e : available)
+        if (cc::string_view(e.extensionName) == XR_FB_PASSTHROUGH_EXTENSION_NAME)
+            xr.offers_passthrough = true;
+
+    char const* const extensions[] = {XR_KHR_D3D12_ENABLE_EXTENSION_NAME, XR_FB_PASSTHROUGH_EXTENSION_NAME};
     auto info = XrInstanceCreateInfo{.type = XR_TYPE_INSTANCE_CREATE_INFO,
-                                     .enabledExtensionCount = 1,
+                                     .enabledExtensionCount = xr.offers_passthrough ? 2u : 1u,
                                      .enabledExtensionNames = extensions};
     std::snprintf(info.applicationInfo.applicationName, XR_MAX_APPLICATION_NAME_SIZE, "shaped-core xr-cube");
     std::snprintf(info.applicationInfo.engineName, XR_MAX_ENGINE_NAME_SIZE, "shaped-core");
@@ -227,6 +247,39 @@ ASYNC_EXAMPLE("shaped-graphics/xr-cube")
                                                        .referenceSpaceType = XR_REFERENCE_SPACE_TYPE_LOCAL,
                                                        .poseInReferenceSpace = {.orientation = {0, 0, 0, 1}}};
     xrCreateReferenceSpace(xr.session, &space_info, &xr.space);
+
+    // TEMPORARY(feat-xr-passthrough): the runtime's own passthrough, called directly as everything else here is
+    if (xr.offers_passthrough)
+    {
+        auto create_passthrough = PFN_xrCreatePassthroughFB(nullptr);
+        auto create_layer = PFN_xrCreatePassthroughLayerFB(nullptr);
+        xrGetInstanceProcAddr(xr.instance, "xrCreatePassthroughFB", (PFN_xrVoidFunction*)&create_passthrough);
+        xrGetInstanceProcAddr(xr.instance, "xrCreatePassthroughLayerFB", (PFN_xrVoidFunction*)&create_layer);
+        xrGetInstanceProcAddr(xr.instance, "xrDestroyPassthroughFB", (PFN_xrVoidFunction*)&xr.destroy_passthrough);
+        xrGetInstanceProcAddr(xr.instance, "xrDestroyPassthroughLayerFB", (PFN_xrVoidFunction*)&xr.destroy_passthrough_layer);
+        auto const passthrough_info
+            = XrPassthroughCreateInfoFB{.type = XR_TYPE_PASSTHROUGH_CREATE_INFO_FB, .flags = XR_PASSTHROUGH_IS_RUNNING_AT_CREATION_BIT_FB};
+        auto const created_passthrough = create_passthrough(xr.session, &passthrough_info, &xr.passthrough);
+        if (XR_SUCCEEDED(created_passthrough))
+        {
+            auto const layer_info = XrPassthroughLayerCreateInfoFB{.type = XR_TYPE_PASSTHROUGH_LAYER_CREATE_INFO_FB,
+                                                                   .passthrough = xr.passthrough,
+                                                                   .flags = XR_PASSTHROUGH_IS_RUNNING_AT_CREATION_BIT_FB,
+                                                                   .purpose = XR_PASSTHROUGH_LAYER_PURPOSE_RECONSTRUCTION_FB};
+            if (auto const why = failed(xr.instance, create_layer(xr.session, &layer_info, &xr.passthrough_layer), "xrCreatePassthroughLayerFB");
+                !why.empty())
+                cc::println("xr: {}, so the cube stands in the dark", why);
+        }
+        else
+            cc::println("xr: {} — over Link, passthrough needs the Link app's Settings > Beta > Developer Runtime Features "
+                        "and Passthrough over Meta Quest Link",
+                        failed(xr.instance, created_passthrough, "xrCreatePassthroughFB"));
+    }
+    else
+        cc::println("xr: the runtime offers no XR_FB_passthrough, so the cube stands in the dark");
+    auto const sees_through = xr.passthrough_layer != XR_NULL_HANDLE;
+    if (sees_through)
+        cc::println("xr: passthrough on");
 
     // one swapchain an eye, at the size the runtime recommends
     auto view_count = u32(0);
@@ -372,12 +425,12 @@ ASYNC_EXAMPLE("shaped-graphics/xr-cube")
                     tg::tan(tg::angle_f::make_from_radians(view.fov.angleUp)) * near_distance, near_distance, 100.0f);
                 auto const transform = projection.to_mat() * camera_to_world(view.pose).inverse() * cube_to_world(spin);
 
-                // TEMPORARY(feat-sg-view-instancing): one pass an eye, rather than one pass for both
+                // one pass an eye; feat-xr-cube-example draws both in one, through view instancing
                 {
                     auto const depth = ctx->transient.create_texture_2d(
                         {.format = sg::pixel_format::depth32_float, .width = e.width, .height = e.height, .usage = sg::texture_usage::depth_stencil});
                     auto pass = cmd->raster.render_to(
-                        shaders::cube::target{.color = e.target.as_render_target_view().cleared(tg::vec4f(0.02f, 0.02f, 0.03f, 1.0f)),
+                        shaders::cube::target{.color = e.target.as_render_target_view().cleared(sees_through ? tg::vec4f(0, 0, 0, 0) : tg::vec4f(0.02f, 0.02f, 0.03f, 1.0f)),
                                               .depth_stencil = depth.as_depth_stencil_view().cleared(1.0f)});
                     pass.bind_pipeline(*pipeline);
                     pass.bind_vertex_buffers({vertices.as_vertex_buffer()});
@@ -419,16 +472,26 @@ ASYNC_EXAMPLE("shaped-graphics/xr-cube")
             }
         }
 
-        auto layer = XrCompositionLayerProjection{.type = XR_TYPE_COMPOSITION_LAYER_PROJECTION,
-                                                  .space = xr.space,
-                                                  .viewCount = u32(projection_views.size()),
-                                                  .views = projection_views.data()};
-        auto const* const layers = reinterpret_cast<XrCompositionLayerBaseHeader const*>(&layer);
+        auto const camera_layer = XrCompositionLayerPassthroughFB{.type = XR_TYPE_COMPOSITION_LAYER_PASSTHROUGH_FB,
+                                                                  .flags = XR_COMPOSITION_LAYER_BLEND_TEXTURE_SOURCE_ALPHA_BIT,
+                                                                  .space = XR_NULL_HANDLE,
+                                                                  .layerHandle = xr.passthrough_layer};
+        auto const layer = XrCompositionLayerProjection{
+            .type = XR_TYPE_COMPOSITION_LAYER_PROJECTION,
+            .layerFlags = sees_through ? XrCompositionLayerFlags(XR_COMPOSITION_LAYER_BLEND_TEXTURE_SOURCE_ALPHA_BIT) : 0,
+            .space = xr.space,
+            .viewCount = u32(projection_views.size()),
+            .views = projection_views.data()};
+        auto layers = cc::vector<XrCompositionLayerBaseHeader const*>();
+        if (sees_through)
+            layers.push_back(reinterpret_cast<XrCompositionLayerBaseHeader const*>(&camera_layer));
+        if (should_render)
+            layers.push_back(reinterpret_cast<XrCompositionLayerBaseHeader const*>(&layer));
         auto const end_info = XrFrameEndInfo{.type = XR_TYPE_FRAME_END_INFO,
                                              .displayTime = frame_state.predictedDisplayTime,
                                              .environmentBlendMode = XR_ENVIRONMENT_BLEND_MODE_OPAQUE,
-                                             .layerCount = should_render ? 1u : 0u,
-                                             .layers = should_render ? &layers : nullptr};
+                                             .layerCount = u32(layers.size()),
+                                             .layers = layers.empty() ? nullptr : layers.data()};
         xrEndFrame(xr.session, &end_info);
 
         ctx->advance_epoch();
