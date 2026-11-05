@@ -7,11 +7,18 @@ claimed-by: Claude (for Philip Trettner)
 claimed-at: 2026-11-05T15:33Z
 ---
 
-# A vulkan timestamp pair reads a negative delta of exactly -2^32 ticks on an AMD iGPU
+# A vulkan timestamp pair reads nothing on an AMD iGPU
 
-On the AMD Radeon iGPU of a Windows machine (an Intel Arc B580 beside it, run with `VK_LOADER_DRIVERS_SELECT=*amd*`), the test reads `elapsed == -42.94967297` ms.
-That is −2³² ticks at the device's 10 ns period, so the second timestamp wrapped past a 32-bit boundary the first did not.
+On the AMD Radeon iGPU of a Windows machine (an Intel Arc B580 beside it, run with `VK_LOADER_DRIVERS_SELECT=*amd*`), the test fails.
+It read `elapsed == -42.94967297` seconds once, and exactly 0 on every later run.
 
-## Hypothesis, unconfirmed
+## Cause (2026-11-05)
 
-- The queue family reports `timestampValidBits` of 32 and the delta is not taken modulo 2^validBits, or the read masks one value and not the other.
+- **The ticks were right in the pool and lost on the way out.**
+  `vkGetQueryPoolResults` after the epoch retired read two real ticks 2.1 ms apart, while sg's readback of the same pair read `0 -> 0`.
+- sg copies the results into a buffer with `vkCmdCopyQueryPoolResults` and reads that buffer back, behind a copy-to-copy barrier from its tracker.
+  Synchronization2 puts that command in the copy stage, so the barrier is enough by the letter; AMD's Windows driver writes it from another stage, and the readback copied what the buffer held before.
+- **Fixed** by a barrier from every stage after the query copy, once per list that records a timestamp.
+  The test then passes twenty runs in a row on that iGPU, and the vulkan backend suite on it and on the Arc.
+- The wrapped-counter hypothesis was wrong: the iGPU's graphics family reports 64 valid bits.
+  So were a missing dependency before the copy and the host-side pool reset, which were each tried and changed nothing.
