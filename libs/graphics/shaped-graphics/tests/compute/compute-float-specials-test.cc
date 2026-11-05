@@ -54,7 +54,7 @@ ASYNC_INVOCABLE_TEST("sg - an SGL float keeps NaNs, infinities, signed zeros and
     auto const bits = [&](isize i) { return cc::bit_cast<u32>(got[i]); };
     CHECK(bits(0) == 0x7f800000u);
     CHECK(cc::is_nan(got[1]));
-    // an infinity times zero, which Intel's dx12 driver folds to 0 from the strict fmul DXC writes:
+    // an infinity times zero, whose `(one / zero) * zero` Intel's dx12 driver cancels to 1 even from strict DXIL:
     // bug-sg-intel-dx12-zero-times-inf
     auto const& adapter = ctx->metrics.adapter();
     if (ctx->backend() != sg::backend_kind::dx12 || adapter.is_software || adapter.vendor_id != 0x8086)
