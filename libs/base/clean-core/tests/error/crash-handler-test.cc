@@ -1,6 +1,7 @@
 #include <clean-core/error/crash_handler.hh>
 #include <clean-core/platform/environment.hh>
 #include <clean-core/platform/file_path.hh>
+#include <clean-core/platform/symbolize.hh>
 #include <clean-core/streams/file_stream.hh>
 #include <clean-core/string/format.hh>
 #include <clean-core/string/string.hh>
@@ -49,6 +50,9 @@ TEST("crash handler - a report kept in a file holds what stderr got, and on Wind
         cc::set_crash_report_files({.directory = directory, .name = nx::program_name()});
     };
 
+    // whether this build resolves names at all, asked before any report
+    auto const had_symbols = cc::symbolizer().resolve(reinterpret_cast<void const*>(&contains)).has_function();
+
     // the non-fatal entry: the same report, file and minidump as a fault, without the fault
     cc::report_all_thread_stacks("a report the test asked for");
 
@@ -80,4 +84,8 @@ TEST("crash handler - a report kept in a file holds what stderr got, and on Wind
 #ifdef CC_OS_WINDOWS
     CHECK(cc::remove_file(cc::format("{}.dmp", second)));
 #endif
+
+    // the process goes on after a report, and so must the symbols every later profile resolves through
+    if (had_symbols)
+        CHECK(cc::symbolizer().resolve(reinterpret_cast<void const*>(&read_file)).has_function());
 }

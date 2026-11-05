@@ -167,4 +167,11 @@ namespace cc::impl
 /// Waiting is correct here, unlike in the crash handler: no thread is suspended, so whoever holds it will finish.
 /// A plain pass-through where there is no DbgHelp to guard, so a caller needs no platform test of its own.
 void with_dbghelp(cc::function_ref<void()> fn);
+
+/// Brings the process's DbgHelp session up if it is not yet; the DbgHelp lock must be held, through one of the two above.
+///
+/// **Never torn down**, by anyone: the session is process-global, so a caller that cleaned up after itself would leave
+/// every cc::symbolizer resolving nothing for the rest of the process.
+/// A no-op where there is no DbgHelp.
+void ensure_process_symbols_locked();
 } // namespace cc::impl
