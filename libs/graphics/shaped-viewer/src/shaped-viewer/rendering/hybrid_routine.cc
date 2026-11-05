@@ -37,11 +37,13 @@ cc::shared_async<cc::unit> hybrid_routine::init(sg::routine_init_scope scope)
     if (auto const* const built = light_thin->try_value(); built != nullptr)
         _light_thin = *built;
     else
-        CC_LOG_ERROR("the hybrid's deferred lighting kernel did not build, so a deferred hybrid frame is declined");
+        CC_LOG_ERROR("the hybrid's deferred lighting kernel did not build, so a deferred hybrid frame is declined: {}",
+                     light_thin->try_error()->underlying().to_string());
     if (auto const* const built = blend_guides->try_value(); built != nullptr)
         _blend_guides = *built;
     else
-        CC_LOG_ERROR("the hybrid's guide blend did not build, so a still hybrid frame is declined");
+        CC_LOG_ERROR("the hybrid's guide blend did not build, so a still hybrid frame is declined: {}",
+                     blend_guides->try_error()->underlying().to_string());
     co_return;
 }
 
