@@ -2,6 +2,8 @@
 created: 2026-11-02
 refs:
   - file: libs/graphics/shaped-graphics-language/docs/spec/bindings.md
+claimed-by: Claude (for Philip Trettner)
+claimed-at: 2026-11-05T18:09Z
 ---
 
 # Unbounded binding arrays, and arrays of samplers
