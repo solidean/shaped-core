@@ -3108,6 +3108,8 @@
 @builtin @stages(.mesh) fun set_counts(o: mut mesh_output, vertices: uint, triangles: uint)
 /// Writes the vertex at `i`, handed as a third argument of the output's own type.
 @builtin @stages(.mesh) fun vertex(o: mut mesh_output, i: uint)
+/// Writes the values of the triangle at `i`, handed as a third argument of the output's second struct.
+@builtin @stages(.mesh) fun primitive(o: mut mesh_output, i: uint)
 /// Writes the triangle at `i`, of the three vertices `t` indexes.
 @builtin @stages(.mesh) fun triangle(o: mut mesh_output, i: uint, t: uint3)
 

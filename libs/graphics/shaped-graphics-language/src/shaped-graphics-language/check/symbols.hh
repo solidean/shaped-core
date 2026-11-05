@@ -281,6 +281,8 @@ struct sgl::check::type_info
     cc::string swizzle_alias;
     /// The element of a `buffer` or an `array`; `none` for every other kind.
     type_id element = type_id::none;
+    /// A mesh output's per-primitive struct, `mesh_output[V, P]`'s `P` (CHK-488); `none` for every other type.
+    type_id primitive = type_id::none;
     /// An `array`'s length; 0 for `T[]`, whose length the host binds (CHK-286).
     i32 count = 0;
     /// The value parameter an array's length or an image's format is, `T[n]` or `image_2d[f]`, which an instance

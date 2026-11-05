@@ -1329,6 +1329,10 @@ HLSL writes it on dx12 and vulkan; WebGPU has none, and sg's metal backend does 
 * **CHK-487** A pipeline names its task stage as `task = f`, before a mesh stage it launches.
   The mesh stage takes exactly the struct the task stage hands on, and a payload only where a task stage hands one, or the pipeline is `invalid-pipeline`.
   What the task stage hands on is known once its body is checked, so that part is judged after every body.
+* **CHK-488** `mesh_output[T, F]` also writes the struct `F` per triangle, which has no `@position` and no `@per_draw` member.
+  `o.primitive(i, f)` writes the values of the triangle at the `uint` index `i`, which convert to `F`; on an output of no `F` it is `unknown-member`.
+* **CHK-489** A pixel stage may take a second struct right after its stage struct: what a mesh stage wrote for the triangle, the same for each of its pixels.
+  A pipeline's pixel stage takes it exactly where its mesh stage's output names `F`, and it is that struct, or the pipeline is `invalid-pipeline`.
 
 ## Ray tracing
 
@@ -1755,7 +1759,7 @@ A diagnostic of this pass has a kind, a file, a byte span in that file, and a de
 | `nan-test-at-fast` | CHK-436 |
 | `recursive-call` | CHK-130 |
 | `recursive-trace` | CHK-332 |
-| `unknown-member` | CHK-64, CHK-147, CHK-152, CHK-279, CHK-329, CHK-385 |
+| `unknown-member` | CHK-64, CHK-147, CHK-152, CHK-279, CHK-329, CHK-385, CHK-488 |
 | `no-matching-overload` | CHK-71, CHK-155, CHK-316, CHK-340, CHK-329, CHK-344, CHK-365, CHK-366, CHK-367, CHK-392, CHK-396, CHK-433, CHK-434 |
 | `non-exhaustive-case` | CHK-160 |
 | `duplicate-case-pattern` | CHK-161 |

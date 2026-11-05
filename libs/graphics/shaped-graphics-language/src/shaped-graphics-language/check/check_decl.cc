@@ -2435,7 +2435,9 @@ void checker::judge_entry_point(symbol_id id)
     {
         if (parameter.input == stage_input::none)
         {
-            if (!seen.empty() || structs > 0)
+            // CHK-489: a pixel stage may take a second struct right after its first, what a mesh stage wrote per triangle
+            auto const is_per_triangle = info.entry_stage == stage::pixel && structs == 1 && seen.empty();
+            if ((!seen.empty() || structs > 0) && !is_per_triangle)
                 invalid("an entry point takes its stage struct first, and stage inputs after it");
             ++structs;
             continue;
@@ -2460,7 +2462,7 @@ void checker::judge_entry_point(symbol_id id)
                 invalid(cc::format("@{} is taken twice", input.name));
         seen.push_back(parameter.input);
     }
-    auto const* const stage_struct = structs == 1 && parameters[0].input == stage_input::none ? &parameters[0] : nullptr;
+    auto const* const stage_struct = structs >= 1 && parameters[0].input == stage_input::none ? &parameters[0] : nullptr;
 
     if (info.entry_stage == stage::compute)
     {

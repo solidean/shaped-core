@@ -795,6 +795,7 @@ ops[i](mut v)                                            // raygen, miss, closes
   A `pipeline` names it as `mesh = f` in the vertex stage's place, and the host draws it with `draw_mesh_tasks`.
 - **`@task(x, y, z)` launches mesh workgroups** (CHK-484 to CHK-487): its body ends in `dispatch_mesh(x, y, z, payload)`, once, in uniform control flow.
   The mesh stage takes `payload`'s struct as a parameter before its output, and the pipeline names both: `task = t`, `mesh = m`.
+- **`mesh_output[T, F]` writes `F` per triangle** with `output.primitive(i, f)` (CHK-488), and the pixel stage takes it as a second struct: `fun ps(c: T, f: F)` (CHK-489).
 - **`half`, `short`, `ushort` and their vectors are the 16-bit families** (CHK-381): `require shader_f16` or `shader_int16`, and WGSL has no short.
   HLSL spells a half `float16_t`, never `half`, so slib's SGL edge hands DXC `-enable-16bit-types` on every compile; a 16-bit literal is a construction, `half(0.5)`.
   A 16-bit value aligns to its size, a `half3` to 8, and crosses no stage edge and sits in no `@inline` binding (CHK-387).

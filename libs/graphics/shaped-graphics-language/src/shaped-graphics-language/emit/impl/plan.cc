@@ -58,6 +58,8 @@ cc::string_view role_name(struct_role role)
         return "render target struct";
     case struct_role::patch_constants:
         return "factors struct";
+    case struct_role::primitive_link:
+        return "per-triangle struct";
     }
     return "";
 }
@@ -247,6 +249,21 @@ struct planner
     cc::set<cc::string> binding_spellings;
     /// Where a factors struct's locations start: after the control point's, which SPIR-V counts in the same space.
     i32 patch_location_base = 0;
+    /// Where a per-triangle struct's locations start: after the stage link's, whose space the pixel stage shares.
+    i32 primitive_location_base = 0;
+
+    /// How many locations the members of a stage link `type` take.
+    [[nodiscard]] i32 locations_of(type_id type) const
+    {
+        auto count = 0;
+        for (auto const& member : p.m.at(p.m.at(type).members))
+            if (!member.is_position && !member.is_layer && member.type != check::checked_module::void_type)
+            {
+                auto const split = pieces_of(member.type);
+                count += split.count > 0 ? split.count : 1;
+            }
+        return count;
+    }
 
     /// A name of the program as this target may spell it: itself, or with a trailing underscore where it is reserved.
     /// Every target reserves the prefix `sgl_` for what an emitter writes, whose names end in no underscore.
@@ -483,7 +500,9 @@ struct planner
             .name = is_valid(info.generic) ? instance_name(type) : spell_type(p.m.at(info.symbol).name),
             .role = role,
             .members = members_of(written, role != struct_role::plain,
-                                  role == struct_role::patch_constants ? patch_location_base : 0),
+                                  role == struct_role::patch_constants  ? patch_location_base
+                                  : role == struct_role::primitive_link ? primitive_location_base
+                                                                        : 0),
             .member_of = cc::move(member_of),
         });
     }
@@ -896,7 +915,7 @@ void sgl::emit::impl::validate_edge_struct(check::checked_module const& m,
         auto const is_factor = role == struct_role::patch_constants && member.factor != check::tessellation_factor::none;
         // EMIT-174: a stage link carries an array of what crosses, and a matrix, as one member per element or column
         auto const is_link = role == struct_role::stage_link || role == struct_role::patch_constants
-                          || role == struct_role::vertex_input;
+                          || role == struct_role::primitive_link || role == struct_role::vertex_input;
         auto const* const element = record == nullptr && m.at(member.type).kind == check::type_kind::array
                                       ? m.builtin_type_of(m.at(member.type).element)
                                       : nullptr;
@@ -1365,6 +1384,18 @@ sgl::emit::impl::plan sgl::emit::impl::make_plan(check::checked_module const& m,
         auto const& t = m.at(local.type);
         if (t.kind == type_kind::stream)
             p.need(t.element, struct_role::stage_link);
+        // CHK-488, CHK-489: what a mesh stage writes per triangle, and the pixel stage's struct of it, after the link
+        if (t.kind == type_kind::stream && check::is_valid(t.primitive))
+        {
+            p.primitive_location_base = p.locations_of(t.element);
+            p.need(t.primitive, struct_role::primitive_link);
+        }
+        if (e.entry_stage == stage::pixel && t.kind == type_kind::structure && local.type != e.input
+            && check::is_valid(e.input))
+        {
+            p.primitive_location_base = p.locations_of(e.input);
+            p.need(local.type, struct_role::primitive_link);
+        }
         if (e.entry_stage == stage::tessellation_evaluation && t.kind == type_kind::structure && local.type != e.input)
             p.need(local.type, struct_role::patch_constants);
     }

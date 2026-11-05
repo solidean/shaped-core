@@ -766,7 +766,7 @@ written write_mesh_output(call_context const& ctx)
     auto const& o = ctx.arguments[0].text;
     if (ctx.data == 0)
         return {.text = cc::format("SetMeshOutputCounts({}, {})", ctx.arguments[1].text, ctx.arguments[2].text)};
-    auto const array = ctx.data == 1 ? "vertices" : "triangles";
+    auto const array = ctx.data == 1 ? "vertices" : ctx.data == 2 ? "triangles" : "primitives";
     return {.text = cc::format("{}_{}[{}] = {}", o, array, ctx.arguments[1].text, ctx.arguments[2].text)};
 }
 
@@ -838,6 +838,14 @@ void sgl::builtins::register_sync(registry& r)
         .doc = "/// Writes the vertex at `i`, handed as a third argument of the output's own type.",
         .evaluate = nothing,
         .write = {.kind = spelling_kind::custom, .custom = write_mesh_output, .data = 1},
+        .takes_element = true,
+    });
+    r.add(function_record{
+        .signature = "@stages(.mesh) fun primitive(o: mut mesh_output, i: uint)",
+        .doc = "/// Writes the values of the triangle at `i`, handed as a third argument of the output's second "
+               "struct.",
+        .evaluate = nothing,
+        .write = {.kind = spelling_kind::custom, .custom = write_mesh_output, .data = 3},
         .takes_element = true,
     });
     r.add(function_record{

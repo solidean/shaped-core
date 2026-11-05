@@ -155,6 +155,7 @@ public:
             return cc::format("color({})", member.location);
         // MSL refuses the tessellation stages (EMIT-122), so no struct of theirs reaches it
         case struct_role::patch_constants:
+        case struct_role::primitive_link:
         case struct_role::plain:
             break;
         }

@@ -74,3 +74,33 @@ TEST("sgl emit - HLSL hands a task stage's payload over from groupshared memory,
     CHECK(sgl::emit::dump_errors(emit_source(program, 0, target::wgsl)).contains("WebGPU does not have"));
     CHECK(sgl::emit::dump_errors(emit_source(program, 0, target::msl)).contains("needs mesh_shader"));
 }
+
+TEST("sgl emit - a per-triangle struct is out primitives in a mesh stage, and a flat per-primitive input in the pixel "
+     "stage (EMIT-209)")
+{
+    constexpr auto program
+        = cc::string_view("require mesh_shader\n"
+                          "struct corner:\n    @position position: hpos4\n    shade: float4\n"
+                          "struct face:\n    tint: float4\n"
+                          "@pixel struct painted:\n    color: float4\n"
+                          "@mesh(1, vertices = 3, triangles = 1)\n"
+                          "fun ms(output: mut mesh_output[corner, face]):\n"
+                          "    output.set_counts(3u, 1u)\n"
+                          "    output.primitive(0u, {tint = float4(1.0)})\n"
+                          "@pixel fun ps(c: corner, f: face) -> painted => { color = c.shade + f.tint }\n");
+    for (auto const t : {target::hlsl_dx12, target::hlsl_vulkan})
+    {
+        auto const mesh = emit_source(program, 0, t);
+        REQUIRE(sgl::emit::dump_errors(mesh) == "");
+        CHECK(mesh.text.contains("out primitives face output_primitives[1])")).dump("text", mesh.text);
+        CHECK(mesh.text.contains("output_primitives[0u] = ")).dump("text", mesh.text);
+        // its locations follow the stage link's, in the space the pixel stage reads both from
+        CHECK(mesh.text.contains("float4 tint : SGL1;")).dump("text", mesh.text);
+        auto const pixel = emit_source(program, 1, t);
+        REQUIRE(sgl::emit::dump_errors(pixel) == "");
+        CHECK(pixel.text.contains("(corner c, face f)")).dump("text", pixel.text);
+        CHECK(pixel.text.contains("nointerpolation float4 tint : SGL1;")).dump("text", pixel.text);
+        CHECK(pixel.text.contains("[[vk::ext_decorate(5271)]]") == (t == target::hlsl_vulkan)).dump("text", pixel.text);
+        CHECK(pixel.text.contains("[[vk::ext_capability(5283)]]") == (t == target::hlsl_vulkan)).dump("text", pixel.text);
+    }
+}

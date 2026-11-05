@@ -71,3 +71,29 @@ pipeline launched:
     pixel = painting
     cull = .none
     format = .rgba8_unorm
+
+// A quad of two triangles, each tinted by what the mesh stage wrote for it alone (CHK-488, CHK-489).
+struct face:
+    tint: float4
+
+@mesh(1, vertices = 4, triangles = 2)
+fun faces(output: mut mesh_output[corner, face]):
+    output.set_counts(4u, 2u)
+    let black = float4(0.0, 0.0, 0.0, 1.0)
+    output.vertex(0u, {position = hpos4(-1.0, -1.0, 0.0, 1.0), color = black})
+    output.vertex(1u, {position = hpos4(1.0, -1.0, 0.0, 1.0), color = black})
+    output.vertex(2u, {position = hpos4(1.0, 1.0, 0.0, 1.0), color = black})
+    output.vertex(3u, {position = hpos4(-1.0, 1.0, 0.0, 1.0), color = black})
+    output.triangle(0u, uint3(0u, 1u, 2u))
+    output.triangle(1u, uint3(0u, 2u, 3u))
+    output.primitive(0u, {tint = float4(1.0, 0.0, 0.0, 0.0)})
+    output.primitive(1u, {tint = float4(0.0, 0.0, 1.0, 0.0)})
+
+@pixel fun tinting(c: corner, f: face) -> painted:
+    return {color = c.color + f.tint}
+
+pipeline tinted:
+    mesh = faces
+    pixel = tinting
+    cull = .none
+    format = .rgba8_unorm

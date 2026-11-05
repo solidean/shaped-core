@@ -205,3 +205,33 @@ ASYNC_INVOCABLE_TEST("sg - an SGL task stage launches two mesh workgroups and ha
             CHECK(pixels[0].rgba8(x, y) == tg::vec4i(red, 0, 255, 255)).context(cc::format("pixel ({}, {})", x, y));
         }
 }
+
+ASYNC_INVOCABLE_TEST("sg - an SGL pixel stage reads what its mesh stage wrote per triangle (CHK-489)",
+                     (sg::context_handle const& ctx))
+{
+    REQUIRE(ctx != nullptr);
+    if (!sg_test::shaders_reach(*ctx))
+        SKIP("no compiler builds this binary's shaders into a format this context accepts");
+    if (!ctx->supports(sg::feature::mesh_shader))
+        SKIP("this device has no mesh stage");
+
+    auto const pipeline = co_await ctx->cached.acquire_raster_pipeline(sg::test::sgl_shaders::meshes::tinted);
+    auto target = mesh_target();
+    target.target_set = sg::test::sgl_shaders::meshes::painted::name;
+    auto const pixels = co_await sg_test::draw_offscreen(*ctx, target,
+                                                         [&](sg::rendering_scope& scope)
+                                                         {
+                                                             scope.bind_pipeline(*pipeline);
+                                                             scope.draw_mesh_tasks(1);
+                                                         });
+    // triangle 0 is below the diagonal from the bottom-left corner to the top-right one, red, and triangle 1 above, blue;
+    // a pixel on the diagonal is either's
+    for (auto y = 0; y < size; ++y)
+        for (auto x = 0; x < size; ++x)
+        {
+            if (x + y == size - 1)
+                continue;
+            auto const expected = x + y > size - 1 ? tg::vec4i(255, 0, 0, 255) : tg::vec4i(0, 0, 255, 255);
+            CHECK(pixels[0].rgba8(x, y) == expected).context(cc::format("pixel ({}, {})", x, y));
+        }
+}

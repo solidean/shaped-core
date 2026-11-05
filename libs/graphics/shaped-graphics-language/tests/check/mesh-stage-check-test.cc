@@ -81,7 +81,7 @@ TEST("sgl check - a mesh output's vertex takes one of its own type at an index (
     CHECK(!wrong.empty());
     auto const extra = with_head("@mesh(1, vertices = 3, triangles = 1) fun ms(output: mut mesh_output[corner]):\n"
                                  "    output.vertex(0u)\n");
-    CHECK(extra.contains("vertex takes an index and the vertex written there")).dump("reports", extra);
+    CHECK(extra.contains("vertex takes an index and the value written there")).dump("reports", extra);
 }
 
 TEST("sgl check - a mesh output's counts are set in control flow the whole workgroup takes (CHK-482)")
@@ -180,4 +180,52 @@ TEST("sgl check - a pipeline's mesh stage takes exactly the payload its task sta
     auto const without_mesh
         = with_head(cc::string(k_task) + "pipeline:\n    task = ts\n    pixel = ps\n    format = .rgba8_unorm\n");
     CHECK(without_mesh.contains("a pipeline with a task stage has a mesh stage")).dump("reports", without_mesh);
+}
+
+namespace
+{
+constexpr auto k_faces
+    = cc::string_view("struct face:\n    tint: float4\n"
+                      "@mesh(1, vertices = 3, triangles = 1)\n"
+                      "fun ms(output: mut mesh_output[corner, face]):\n"
+                      "    output.set_counts(3u, 1u)\n"
+                      "    output.primitive(0u, {tint = float4(1.0)})\n"
+                      "@pixel fun tinting(c: corner, f: face) -> target => { color = c.color + f.tint }\n");
+} // namespace
+
+TEST("sgl check - a mesh output writes values per triangle, which the pixel stage takes beside its stage struct "
+     "(CHK-488, CHK-489)")
+{
+    CHECK(with_head(cc::string(k_faces) + "pipeline:\n    mesh = ms\n    pixel = tinting\n    format = .rgba8_unorm\n")
+          == "");
+}
+
+TEST("sgl check - a per-triangle struct holds no @position, and primitive needs one (CHK-488)")
+{
+    auto const positioned
+        = with_head("struct face:\n    @position p: hpos4\n"
+                    "@mesh(1, vertices = 3, triangles = 1) fun ms(output: mut mesh_output[corner, face]):\n"
+                    "    output.set_counts(0u, 0u)\n");
+    CHECK(positioned.contains("no @position or @per_draw member")).dump("reports", positioned);
+    auto const without = with_head("@mesh(1, vertices = 3, triangles = 1) fun ms(output: mut mesh_output[corner]):\n"
+                                   "    output.set_counts(1u, 1u)\n"
+                                   "    output.primitive(0u, {color = float4(1.0)})\n");
+    CHECK(without.contains("writes no values per triangle")).dump("reports", without);
+    auto const scalar
+        = with_head("@mesh(1, vertices = 3, triangles = 1) fun ms(output: mut mesh_output[corner, float]):\n"
+                    "    output.set_counts(0u, 0u)\n");
+    CHECK(scalar.contains("the struct it writes per triangle")).dump("reports", scalar);
+}
+
+TEST("sgl check - a pipeline's pixel stage takes exactly what its mesh stage writes per triangle (CHK-489)")
+{
+    auto const missing
+        = with_head(cc::string(k_faces) + "pipeline:\n    mesh = ms\n    pixel = ps\n    format = .rgba8_unorm\n");
+    CHECK(missing.contains("ms writes face per triangle, and ps takes none")).dump("reports", missing);
+    auto const vertex
+        = with_head(cc::string(k_faces)
+                    + "@vertex fun vs(@vertex_index i: int) -> corner => { position = hpos4(0.0, 0.0, 0.0, "
+                      "1.0), color = float4(1.0) }\n"
+                    + "pipeline:\n    vertex = vs\n    pixel = tinting\n    format = .rgba8_unorm\n");
+    CHECK(vertex.contains("tinting takes face per triangle, which only a mesh stage's output writes")).dump("reports", vertex);
 }

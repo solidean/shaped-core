@@ -815,13 +815,18 @@ void checker::compile_pipeline(symbol_id id)
 
     auto passed = vertex_info.result;
     auto from = vertex;
+    // what a mesh stage writes per triangle, which the pixel stage takes as its second struct (CHK-489)
+    auto per_triangle = type_id::none;
     if (is_valid(mesh))
     {
         auto taken_payload = type_id::none;
         for (auto const& parameter : vertex_parameters)
         {
             if (out.at(parameter.type).kind == type_kind::stream)
+            {
                 passed = out.at(parameter.type).element;
+                per_triangle = out.at(parameter.type).primitive;
+            }
             else if (parameter.input == stage_input::none)
                 taken_payload = parameter.type;
         }
@@ -881,6 +886,20 @@ void checker::compile_pipeline(symbol_id id)
         auto const& pixel_info = out.functions[out.at(pixel).info];
         // a valid pixel entry point takes its struct first (CHK-271)
         match(passed, from, out.at(pixel_info.parameters)[0].type, pixel);
+        // CHK-489: and a second only from a mesh stage that writes values per triangle, which it then takes
+        auto taken_per_triangle = type_id::none;
+        if (auto const ps = out.at(pixel_info.parameters); ps.size() >= 2 && ps[1].input == stage_input::none)
+            taken_per_triangle = ps[1].type;
+        if (taken_per_triangle != per_triangle && !pc.is_failed)
+            pc.fail(file, where,
+                    !is_valid(per_triangle)
+                        ? cc::format("{} takes {} per triangle, which only a mesh stage's output writes",
+                                     out.at(pixel).name, out.name_of(taken_per_triangle))
+                    : !is_valid(taken_per_triangle)
+                        ? cc::format("{} writes {} per triangle, and {} takes none", out.at(from).name,
+                                     out.name_of(per_triangle), out.at(pixel).name)
+                        : cc::format("{} writes {} per triangle, and {} takes {}", out.at(from).name,
+                                     out.name_of(per_triangle), out.at(pixel).name, out.name_of(taken_per_triangle)));
         // CHK-308: a pixel stage reads the primitive's id from a geometry stage only where that stage writes it
         if (is_valid(geometry))
             for (auto const& parameter : out.at(pixel_info.parameters))

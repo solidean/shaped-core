@@ -187,6 +187,10 @@ const light_kind_sun: i32 = 2;
 * **EMIT-207** HLSL writes a task stage as `[numthreads(x, y, z)]` over `void`, and declares `groupshared P sgl_payload` for its payload's struct `P`.
   `dispatch_mesh` stores its payload there and calls `DispatchMesh(x, y, z, sgl_payload)`, since HLSL hands a payload over from groupshared memory alone.
 * **EMIT-208** A mesh stage's payload parameter is `in payload P p`.
+* **EMIT-209** A mesh output's `F` is a third array, `out primitives F o_primitives[M]`, and `primitive` writes to it.
+  `F`'s locations follow the vertex struct's, in the one space the pixel stage reads both from, and the pixel stage takes it as a parameter of its own.
+  There its members are `nointerpolation`; for vulkan each also carries SPIR-V's `PerPrimitiveEXT`, as `[[vk::ext_decorate(5271)]]`.
+  The entry point then declares `SPV_EXT_mesh_shader` and its `MeshShadingEXT` capability, which DXC leaves out of a pixel stage.
 * **EMIT-206** `msl` refuses a mesh and a task entry point as `target-lacks-feature`, since sg's metal backend does not build a mesh pipeline yet; WGSL refuses both by EMIT-109.
 * **EMIT-123** HLSL writes the stages as dx12 and vulkan both take them:
   * a geometry stage is `[maxvertexcount(N)]` over `void`, taking `triangle T tri[3]` and last `inout TriangleStream<T>`, and `emit` and `end_strip` are `Append` and `RestartStrip`;
