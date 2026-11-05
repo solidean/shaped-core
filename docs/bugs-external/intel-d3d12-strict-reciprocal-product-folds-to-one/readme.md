@@ -45,7 +45,8 @@ It exits 1 when the hardware adapter returns a product that is no NaN from stric
 ## What we do about it in the tree
 
 Nothing works around it: SGL's `-Gis` is the right request, and no spelling of the shader we know of avoids the fold.
-`compute-float-specials-test.cc` skips its `(1 / 0) * 0` check on Intel's dx12 adapters, and checks it everywhere else.
+`compute-float-specials-test.cc` skips its `(1 / 0) * 0` check on Intel's hardware adapters, and checks it everywhere else.
+The same test sees the fold on Intel's vulkan driver too, from SPIR-V that keeps NaNs and contracts nothing; this reproduction is D3D12's alone.
 [bug-sg-intel-dx12-zero-times-inf](../../../libs/graphics/shaped-graphics/docs/issues/bug-sg-intel-dx12-zero-times-inf.md) tracks it.
 
 ## What to re-check after a driver update
