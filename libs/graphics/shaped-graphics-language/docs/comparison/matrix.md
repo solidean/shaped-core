@@ -3,7 +3,7 @@
 How SGL compares with the other ways to write one set of shaders for DX12, Vulkan, WebGPU and Metal.
 Every row is judged for a renderer that targets all four, WebGPU in a browser included, and wants hardware ray tracing wherever a platform has it.
 
-**As of 2026-11-02**; SGL's E3 and E4 as of 2026-11-03, its B8 as of 2026-11-04, its A5, A7, B2, B3, B4, B6, B8, B9, B10, B11, B12, D3, D5, D6, E1, E4, F2, F7, G5 and G6 as of 2026-11-05.
+**As of 2026-11-02**; SGL's E3 and E4 as of 2026-11-03, its B8 as of 2026-11-04, its A5, A7, A8, B2, B3, B4, B6, B8, B9, B10, B11, B12, D3, D5, D6, E1, E4, F2, F7, G5 and G6 as of 2026-11-05.
 Every cell's marker was judged again on 2026-11-05, when ✅ came to mean full support to the extent the targets allow.
 Where a stack lets a program choose defined behaviour on every target, as SGL's robustness profiles do, its semantics rows are ✅ though the default leaves a case undefined.
 The other columns move fast, Slang's Metal and WGSL support above all, so each cell carries a source and the date it was checked; see [Sources](#sources).
@@ -46,7 +46,7 @@ A per-target cell reads `dx12 / vulkan / metal / webgpu`.
 | **A5** Inline ray queries | ✅ / ✅ / ✅ / — | ✅ / ✅ / ⚠️ / — metal: one fixed query shape, first run on hardware 2026-10 | ⚠️ / ⚠️ / ⚠️ / — a wgpu-only experimental extension; a WGSL proposal was accepted 2026-10-27 | ✅ / ✅ / ✅ / — | ✅ / ✅ / ✅ / ➕ metal: every inline-trace GPU test passes on an M4; not yet run on an M-series GPU without hardware ray tracing 🗺️ [chore](../issues/chore-sgl-metal-raytracing-on-apple-hardware.md); webgpu emulated in software, not watertight 🗺️ [bug](../issues/bug-sgl-emulated-trace-not-watertight.md) |
 | **A6** Ray-tracing pipelines | ✅ / ✅ / ⚠️ / — metal through MSC alone, emulated as a compute kernel over function tables | ✅ / ✅ / ❌ / — metal at design stage | ❌ / ⚠️ / ❌ / — Naga to SPIR-V only, experimental | ❌ / ✅ / ❌ / — SPIRV-Cross has no ray-tracing stages | ✅ / ✅ / ⚠️ / — metal: four gaps to DXR 🗺️ [epic](../issues/epic-sgl-metal-raytracing-dxr-parity.md); webgpu: a polyfill in the 🗺️ [incubator](../spec/incubator/raytracing-futures.md) |
 | **A7** Ray-tracing host side across DXR and Metal | ⚠️ MSC's runtime header helps; the engine still writes both host paths | ❌ the engine writes the shader table and Metal's function tables | ❌ | ❌ | ✅ pipeline description and shader tables generated for dx12, vulkan and metal; the metal side passes sg's, sr's and sv's pipeline tests on an M4 |
-| **A8** Ray-tracing depth | ⚠️ full on DX12 and Vulkan; MSC fuses any hit into intersection, no payload qualifiers | ⚠️ full on DX12 and Vulkan; motion blur NVIDIA-only; Metal ray queries only | ⚠️ no callables, no intersection stage | ⚠️ full on Vulkan; elsewhere ray queries only | ⚠️ callables, intersection, any hit, ray flags; no recursive trace graph, no motion blur 🗺️ [incubator](../spec/incubator/raytracing-futures.md) |
+| **A8** Ray-tracing depth | ⚠️ full on DX12 and Vulkan; MSC fuses any hit into intersection, no payload qualifiers | ⚠️ full on DX12 and Vulkan; motion blur NVIDIA-only; Metal ray queries only | ⚠️ no callables, no intersection stage | ⚠️ full on Vulkan; elsewhere ray queries only | ⚠️ callables, intersection, any hit, ray flags; motion blur through the emulated trace, on webgpu and the interpreter, and natively nowhere yet 🗺️ [feat](../issues/feat-sgl-ray-tracing-motion-blur.md); no recursive trace graph 🗺️ [incubator](../spec/incubator/raytracing-futures.md) |
 
 ## B. Portability and semantics
 
