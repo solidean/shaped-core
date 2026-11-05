@@ -481,6 +481,7 @@ The host holds a buffer of atomics as the plain integers it is.
 
 **An `atomic[float]` has `load`, `store`, `exchange` and `add`**, and the host writes and reads the float itself.
 Where the device adds floats in one instruction, `sg::feature::float_atomic_add` among the compile's device features, vulkan and metal write the target's own float atomic.
+On metal not where the entry point's workgroup memory holds an `atomic[float]`: MSL has float atomics there only from 4.1, past sg's floor of 4.0.
 Everywhere else it is the bits of a `uint` atomic, and its `add` reads them, adds in float, and retries a compare-exchange until no other update came between.
 Either way it is exact once per update and in no promised order.
 A helper invocation's atomics have no effect, so a pixel stage would never leave that loop, and its `add` takes no pixel stage.

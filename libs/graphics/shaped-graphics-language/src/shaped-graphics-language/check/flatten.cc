@@ -68,6 +68,15 @@ void sgl::check::impl::flattener::judge_stage(ast::expr_id call, symbol_id calle
         auto within = cc::vector<symbol_id>();
         for (auto const& fr : frames)
             within.push_back(fr.function);
+        // EMIT-184: an HLSL ray query sees the micromaps of a device that has them, which the compile states for it
+        auto const target = compiled_for();
+        if (record->declares_only && record->features.has(feature::ray_query)
+            && (target.api == graphics_api::dx12 || target.api == graphics_api::vulkan)
+            && target.device_features.has(feature::opacity_micromap))
+        {
+            auto const sees = feature_set(feature::opacity_micromap);
+            feature_uses.push_back({.file = file(), .call = call, .features = sees, .within = within, .granted = sees});
+        }
         feature_uses.push_back(
             {.file = file(), .call = call, .features = record->features, .within = cc::move(within), .granted = granted});
     }
@@ -627,8 +636,9 @@ checker::taken_names checker::module_names()
     if (own_module_names == nullptr || module_names_for != out.symbols.size())
     {
         auto names = cc::make_shared<cc::set<cc::string>>();
+        // a function of a type scope is reached through its type, `x.row(1)`, and never written under its own name
         for (auto i = module_names_below_count; i < out.symbols.size(); ++i)
-            if (!out.symbols[i].name.empty())
+            if (!out.symbols[i].name.empty() && !scoped_functions.contains(i32(i)))
                 (void)names->insert(out.symbols[i].name);
         own_module_names = names.get();
         // the checked module keeps both alive, since its flat trees' mints point at them

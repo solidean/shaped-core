@@ -128,9 +128,9 @@ impl::resume_point freeze_layer(checker& c, i32 files)
     c.instances.freeze();
     // the layer's names, once, for every program behind it; a program's check makes a set of its own names alone
     auto names = cc::make_shared<cc::set<cc::string>>();
-    for (auto const& s : c.out.symbols)
-        if (!s.name.empty())
-            (void)names->insert(s.name);
+    for (auto i = isize(0); i < c.out.symbols.size(); ++i)
+        if (!c.out.symbols[i].name.empty() && !c.scoped_functions.contains(i32(i)))
+            (void)names->insert(c.out.symbols[i].name);
     c.module_names_below = cc::move(names);
     c.module_names_below_count = c.out.symbols.size();
     c.own_module_names = nullptr;

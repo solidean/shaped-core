@@ -1516,6 +1516,7 @@ auto lim = cc::query_resource_limits();             // NOT memoized: a cgroup qu
 lim.cpu_quota; lim.memory_limit_bytes;              // optional; absent outside a container
 lim.affinity_cores; lim.containerized;              // i32 / bool
 lim.hypervisor_present;                             // NOT "is a VM": Windows VBS sets it on bare metal
+cc::cap_process_memory(i64(30) << 30);              // past it the process ends: a Windows job, and a watchdog thread
 
 #include <clean-core/platform/system_metrics.hh>
 auto sampler = cc::cpu_load_sampler();              // takes a baseline; NOT thread-safe, hold one per subsystem

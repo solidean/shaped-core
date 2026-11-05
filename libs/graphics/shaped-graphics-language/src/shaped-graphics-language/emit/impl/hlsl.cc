@@ -738,6 +738,9 @@ public:
 
     void write_function_head(cc::string& out, plan const& p) const override
     {
+        // EMIT-184: DXC lowers a query's micromap flags to SPIR-V without declaring the capability they need
+        if (_is_vulkan && p.e.features.has(check::feature::opacity_micromap))
+            out += "[[vk::ext_extension(\"SPV_EXT_opacity_micromap\")]]\n[[vk::ext_capability(5381)]]\n";
         if (p.e.entry_stage == stage::geometry || p.e.entry_stage == stage::tessellation_control
             || p.e.entry_stage == stage::tessellation_evaluation)
             return write_primitive_head(out, p);

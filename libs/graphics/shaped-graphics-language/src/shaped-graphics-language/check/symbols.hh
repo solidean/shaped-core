@@ -6,6 +6,7 @@
 #include <shaped-graphics-language/builtins/ids.hh>
 #include <shaped-graphics-language/check/features.hh>
 #include <shaped-graphics-language/check/ids.hh>
+#include <shaped-graphics-language/fwd.hh>
 #include <shaped-graphics-language/interpret/scalar.hh>
 
 /// What the check pass knows about the declarations of a module: its types, its symbols and the per-file side tables.
@@ -844,6 +845,13 @@ struct sgl::check::texel_store
     constexpr bool operator==(texel_store const&) const = default;
 };
 
+enum class sgl::check::ray_trace_kind : sgl::u8
+{
+    trace,
+    hit_object,
+    invoke,
+};
+
 /// `trace(world, r, set.ray, mut payload)`: a trace of a ray-tracing pipeline's ray type (CHK-329).
 struct sgl::check::ray_trace
 {
@@ -855,6 +863,9 @@ struct sgl::check::ray_trace
     i32 ray = 0;
     /// The function the trace stands in, whose ray type it is a trace graph's edge from.
     symbol_id caller = symbol_id::none;
+    /// `trace_hit(…)`, which gives a hit object rather than running its shaders, or that hit object's `h.invoke(mut p)`,
+    /// which runs them and traces nothing (CHK-434).
+    ray_trace_kind kind = ray_trace_kind::trace;
 
     constexpr bool operator==(ray_trace const&) const = default;
 };

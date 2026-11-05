@@ -259,6 +259,24 @@ It is a hint: each invocation goes on as it was, and only which ones share a wav
 It is dx12's `dx::MaybeReorderThread` where the device has `shader_execution_reordering`, which needs Shader Model 6.9 from the Agility SDK, and nothing elsewhere.
 The prelude writes it as a text body under `const if has(…)`, so the compile that takes the text asks the feature of the pipeline (CHK-427).
 
+**`trace(…, reorder = true)` regroups by what the trace hit**, and `reorder = hint, reorder_bits = n` by the hit and the hint's low `n` bits (CHK-433).
+On dx12 with the feature, the trace is a hit object: traced, regrouped by it, then its shaders run, so invocations meeting one material shade together.
+Everywhere else it is the plain trace, which computes the same.
+
+**A hit object is a trace whose closest hit or miss has not run yet** (CHK-434), so a raygen can read what was hit before its shaders run:
+
+```sgl sketch
+const if has(.shader_execution_reordering):
+    let h = trace_hit(b.world, r, rs.primary, mut p)
+    h.reorder(h.instance_id as uint, 4)
+    if h.is_hit => hits += 1
+    h.invoke(mut p)
+else:
+    trace(b.world, r, rs.primary, mut p)
+```
+
+Nothing but a device with the feature can trace without running those shaders, so a hit object has no fallback, and the `else` is the program's to write.
+
 ### Hit groups
 
 **`hit_group name for set:` is one row of the table: a record per ray type** (CHK-330).
@@ -385,10 +403,11 @@ A pipeline there waits for a polyfill, which the [incubator](incubator/raytracin
 * An any hit is a triangle intersection function.
 * **A procedural group's record is one fused entry point, `sgl_<group>_<ray>`**: its intersection, the range check and the record's any hit.
 * A record without a closest hit calls `sgl_empty_closest_hit`, since an empty table slot is no function.
-* The closest hit's record is found from each instance's hit-group offset, which sg keeps in a buffer of its own at buffer 5.
+* The closest hit's record is found from each instance's hit-group offset, which sg keeps in a buffer per TLAS.
+  sg mirrors each group's argument buffer slot for slot with those buffers, and binds the three groups' mirrors at buffer 5.
+  So a trace reads `hit_offsets->groups[group][slot + element]`, its own TLAS's offsets, however many a dispatch binds.
 
-Metal falls short of DXR in one place: **one TLAS per dispatch**, whose instance offsets are the one buffer at buffer 5.
-[epic-sgl-metal-raytracing-dxr-parity](../issues/epic-sgl-metal-raytracing-dxr-parity.md) tracks it.
+[epic-sgl-metal-raytracing-dxr-parity](../issues/epic-sgl-metal-raytracing-dxr-parity.md) tracks what parity with DXR still needs.
 
 The metal pipeline's GPU tests pass on an M4, which traces in hardware; no Apple GPU without hardware ray tracing has run them.
 

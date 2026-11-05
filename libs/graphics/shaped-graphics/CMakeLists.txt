@@ -477,6 +477,7 @@ if(SC_BUILD_TESTS)
                 dispatch.sgl:*
                 raytracing.sgl:*
                 raytracing_pipeline.sgl:*
+                raytracing_scenes.sgl:*
                 raytracing_transforms.sgl:*
                 raytracing_end_search.sgl:*
                 raytracing_open.sgl:*

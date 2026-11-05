@@ -534,6 +534,7 @@ binding scene:
 let h = scene.world.trace(r)                             // -> triangle_hit; h.is_hit, h.t, h.barycentrics, h.instance_id, …
 let h = scene.world.trace(r, cutout)                     // cutout: (triangle_candidate) -> hit_decision, a name or a lambda
 let h = scene.world.trace(r, flags = ray_flags.force_opaque, mask = 0x01)
+let h = scene.world.trace(r, cutout, flags = ray_flags.force_omm_2_state)  // micromap unknowns take their guess, never asking cutout
 let p = spheres.trace(r, sphere, cutout_sphere)          // .procedural: (procedural_box) -> report[A], then the any hit
 let m = both.trace(r, any_hit = a, intersection = s, procedural_any_hit = b)   // .mixed -> mixed_hit[A]: m.kind, m.triangle(), m.procedural()
 is_occluded(scene.world, r)                              // the shadow ray
@@ -552,6 +553,11 @@ rays path_rays:                                          // a ray set: position 
 @callable fun doubled(v: mut operand)
 trace(b.world, r, path_rays.surface, mut p, flags = f)   // a trace of a ray type: raygen, miss, closest hit only (CHK-329)
 maybe_reorder(hint, 4)                                   // raygen: regroup invocations by hint's low bits; dx12 SM 6.9 SER, else nothing
+trace(b.world, r, set.ray, mut p, reorder = true)       // raygen: dx12 SER traces a hit object, regroups by it, invokes; else plain
+trace(…, reorder = material, reorder_bits = 4)          // by the hit and a uint hint's low bits, 1..16 (CHK-433)
+let h = trace_hit(b.world, r, set.ray, mut p)           // raygen, under has(.shader_execution_reordering): no closest hit or miss yet
+h.is_hit; h.t; h.instance_id; h.primitive_index         // what was hit, before its shaders run (CHK-434)
+h.reorder(); h.reorder(hint, 4); h.invoke(mut p)        // regroup by it, then run its shaders on that ray type's payload
 hit_group textured for path_rays:                        // one row: a record per ray type (CHK-330)
     surface = (closest_hit = shade, any_hit = cutout)
     occlusion = ()                                       // empty: accept, run no closest hit
@@ -710,7 +716,7 @@ ops[i](mut v)                                            // raygen, miss, closes
   The inline one needs `ray_query` where the entry point REACHES it (CHK-322), so a stage that never traces runs on a device without it.
 - **A trace graph with a cycle is `recursive-trace`** (CHK-332): a miss or closest hit tracing its own ray type, directly or through others, is refused, never bounded.
 - **A payload on HLSL is `[raypayload]` with inferred qualifiers**, unless a `.host` pipeline (or no pipeline) traces it: then every field is widest (EMIT-137).
-- **Metal's pipeline traces one TLAS per dispatch**; transforms and `accept_and_end_search` behave as DXR's, and its GPU tests pass on an M4.
+- **Metal's pipeline traces any bound TLAS**, two in one group or across groups; transforms and `accept_and_end_search` behave as DXR's, and its GPU tests pass on an M4.
 - **An arrow body without `-> T` infers its result**, and a BLOCK body without one returns `void`.
   Its body is checked as part of compiling it, so two such functions that need each other are `dependency-cycle`, not `recursive-call`.
   An overload whose parameters cannot take a call is not demanded by it, so an overload set works from inside one of its inferred members.

@@ -283,6 +283,23 @@ void checker::check_let(function_scope& scope, ast::stmt_id id, ast::let_stmt co
     }
 
     auto const self = target{.kind = target_kind::local, .index = i32(id)};
+    // CHK-434: a hit object is a let of the trace_hit that gave it, so its invocation knows the payload's type
+    if (type != error_type && out.name_of(type) == "hit_object" && out.builtin_type_of(type) != nullptr)
+    {
+        auto const* const traced = [&]() -> ray_trace const*
+        {
+            for (auto const& t : out.ray_traces)
+                if (t.file == file && t.call == let.value && t.kind == ray_trace_kind::hit_object)
+                    return &t;
+            return nullptr;
+        }();
+        if (traced == nullptr || let.is_mut)
+            unsupported(file, where,
+                        let.is_mut ? "a `let mut` of a hit object, which nothing could assign"
+                                   : "a hit object that is no `let h = trace_hit(…)`");
+        else
+            hit_lets.push_back({.file = file, .statement = i32(id), .set = traced->set, .ray = traced->ray});
+    }
     set_type(file, let.pattern, type);
     set_target(file, let.pattern, self);
     judge_shadowing(file, text_of(file, n->where), n->where);

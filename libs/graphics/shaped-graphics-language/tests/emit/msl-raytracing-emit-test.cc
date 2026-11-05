@@ -49,13 +49,14 @@ cc::string_view text_of(cc::span<cc::pair<cc::string, cc::string> const> stages,
 TEST("sgl emit msl - every stage of sg's ray-tracing pipeline writes, and all agree on the ray data")
 {
     auto const stages = msl_stages_of(read_text(cc::string(SGL_SG_SHADERS_DIR) + "/raytracing_pipeline.sgl"));
-    // three raygens (one reordering, one storing into images) and three misses (one storing), three closest hits (one
+    // five raygens (three reordering, one storing into images) and three misses (one storing), three closest hits (one
     // of them the empty one), two any hits, the intersection, and a traversal per ray type of the procedural group
     auto names = cc::string();
     for (auto const& [entry, text] : stages)
         names.appendf("{} ", entry);
     CHECK(names
-          == "primary sky open_sky shade cutout shadow_cutout sphere shade_sphere reordered_primary pictured_primary "
+          == "primary sky open_sky shade cutout shadow_cutout sphere shade_sphere reordered_primary "
+             "hit_reordered_primary inspected_primary pictured_primary "
              "pictured_sky "
              "counted_primary counted_shade counted_sky sgl_spheres_surface "
              "sgl_spheres_occlusion sgl_empty_closest_hit ");

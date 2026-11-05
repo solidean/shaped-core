@@ -54,7 +54,11 @@ One BLAS per mesh and cutout material where two instances differ; blob-cache onl
 
 ## Status
 
-The sg API and the vulkan backend are in; the shaped-rendering baker, sv's integration and dx12 are not.
+The sg API, the vulkan and dx12 backends and the shaped-rendering baker, `sr::micromap_bake_routine`, are in.
+The baker reads the UVs on the host to size the build, and a GPU test traces a baked cutout on both backends.
+`ray_flags.force_omm_2_state` is in SGL, and a test traces the baked quad both ways on both backends: 4-state exact, 2-state taking the guesses.
+Left is sv's integration.
+dx12 needs the Agility SDK, and its two GPU tests run on a device of ray-tracing tier 1.2.
 **Sponza no longer motivates the rest.**
 Its 2.5 ms came from a dirt decal whose opacity is a soft mask, 79% of it strictly between 0 and 1, where an exact micromap decides little.
 sv's hybrid now skips such coverage instances through the instance mask instead, which removed the cost.

@@ -22,7 +22,8 @@ public:
     /// Requires ID3D12Device5 (queried from `device`); at least one raygen shader.
     [[nodiscard]] static cc::result<dx12_raytracing_pipeline_handle> create(ID3D12Device* device,
                                                                             dx12_pipeline_layout_handle layout,
-                                                                            sg::raytracing_pipeline_description const& desc);
+                                                                            sg::raytracing_pipeline_description const& desc,
+                                                                            bool allows_micromaps);
 
     /// State-object cached blobs are a later optimization — empty for now.
     [[nodiscard]] cc::pinned_data<byte const> cached_pipeline_data() const override;

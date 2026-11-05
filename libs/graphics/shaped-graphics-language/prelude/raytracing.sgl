@@ -468,6 +468,26 @@ fun maybe_reorder(hint: uint, bits: int):
     else:
         return
 
+// ---- hit objects ----------------------------------------------------------------------------------------------------
+//
+// `let h = trace_hit(world, r, set.ray, mut p)` traces without running the closest hit or the miss, and `h.invoke(mut p)`
+// runs them (CHK-434).
+// Only a device with `shader_execution_reordering` has them, so they stand under `has(.shader_execution_reordering)`.
+
+fun hit_object.is_hit => hit_object_is_hit(self)
+fun hit_object.is_miss => hit_object_is_miss(self)
+fun hit_object.t => hit_object_t(self)
+fun hit_object.instance_id => hit_object_instance_id(self)
+fun hit_object.instance_index => hit_object_instance_index(self)
+fun hit_object.geometry_index => hit_object_geometry_index(self)
+fun hit_object.primitive_index => hit_object_primitive_index(self)
+
+/// Regroups the invocations so those whose hit objects run the same shaders run together.
+fun hit_object.reorder(self) => hit_object_reorder(self)
+
+/// Regroups them by what their hit objects run, then by the low `bits` bits of `hint`.
+fun hit_object.reorder(self, hint: uint, bits: int) => hit_object_reorder_by_hint(self, hint, bits)
+
 // ---- what a ray-tracing stage is handed -----------------------------------------------------------------------------
 //
 // A stage's parameter of these types is its ray, its hit or its candidate, which its entry point reads from the target.

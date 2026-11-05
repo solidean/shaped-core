@@ -61,6 +61,7 @@ class dx12_blas;
 using dx12_blas_handle = std::shared_ptr<dx12_blas const>;
 class dx12_tlas;
 using dx12_tlas_handle = std::shared_ptr<dx12_tlas const>;
+class dx12_micromap;
 
 // Bind path (see dx12_binding_group_layout.hh / dx12_pipeline_layout.hh / dx12_compute_pipeline.hh /
 // dx12_binding_group.hh).

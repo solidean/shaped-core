@@ -590,13 +590,18 @@ type_id checker::check_call(function_scope& scope, ast::expr_id id, ast::call co
     }
 
     // CHK-329: a trace whose third argument names a ray type is a ray-tracing stage's trace
-    if (text == "trace")
+    // CHK-434: `trace_hit` is one that gives its hit object rather than running its shaders
+    if (text == "trace" || text == "trace_hit")
     {
         auto const arguments = ast.at(call.arguments);
         if (arguments.size() >= 4 && arguments[2].name.empty() && ast::is_valid(arguments[2].value))
-            if (auto const ray = ray_type_of(file, arguments[2].value); ray.has_value())
+            if (auto ray = ray_type_of(file, arguments[2].value); ray.has_value())
+            {
+                if (text == "trace_hit")
+                    ray.value().kind = ray_trace_kind::hit_object;
                 return ray.value().ray < 0 ? checked_module::error_type
                                            : check_pipeline_trace(scope, id, call, ray.value());
+            }
     }
 
     return check_named_call(scope, id, call, text, seen_from(file, text), false);
@@ -813,6 +818,9 @@ type_id checker::check_dot_call(function_scope& scope, ast::expr_id id, ast::cal
     handed.remove_back();
     if (receiver != error_type && out.at(receiver).kind == type_kind::stream)
         return check_stream_call(scope, id, call, receiver);
+    if (receiver != error_type && name == "invoke" && out.name_of(receiver) == "hit_object"
+        && out.builtin_type_of(receiver) != nullptr)
+        return check_hit_invoke(scope, id, call);
     auto arguments = check_arguments(scope, call.arguments, false);
     if (receiver == error_type || member.name.empty())
         return error_type;

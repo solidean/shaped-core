@@ -1316,7 +1316,7 @@ HLSL writes them on dx12 and vulkan; WebGPU and Metal have neither, so WGSL and 
 * **CHK-329** `trace(world, r, set.ray, mut p)` whose third argument names a ray type of a ray set is a **trace of a ray type**, and no call of the prelude's `trace`.
   `world` is an acceleration structure and `r` a `ray`, or `type-mismatch`; a name the set has no ray type of is `unknown-member`.
   The payload is marked `mut`, or `no-matching-overload`, and it is a place (CHK-316) of exactly the ray type's payload, or `type-mismatch`.
-  `flags`, a `ray_flags`, and `mask`, an `int`, may follow by name, and any other argument is `no-matching-overload`.
+  `flags`, a `ray_flags`, `mask`, an `int`, and `reorder` with its bits (CHK-433) may follow by name, and any other argument is `no-matching-overload`.
   It gives `void`, and is the target's trace with the ray type's position in its set as the ray contribution and the miss index, and the set's size as the multiplier.
   Its builtin is `@stages(.raygen, .closest_hit, .miss)`, so a trace from any other stage is `stage-not-allowed` (CHK-193).
   A test that reaches one is `unsupported-yet`, since a test runs no pipeline and has no tables to trace through.
@@ -1333,6 +1333,20 @@ HLSL writes them on dx12 and vulkan; WebGPU and Metal have neither, so WGSL and 
 
 ### Declarations of a pipeline
 
+* **CHK-433** A trace of a ray type takes `reorder` by name.
+  A constant `bool` regroups the invocations by what the trace hit.
+  A `uint` hint regroups them by the hit and the hint's low `reorder_bits` bits.
+  `reorder_bits` is an `int` constant from 1 to 16, and stands exactly where `reorder` is a hint.
+  Anything else is `invalid-constant-argument` or `no-matching-overload`, and a `reorder` of another type `type-mismatch`.
+  It is a hint: a trace means what it means without it, and each invocation goes on as it was.
+  A raygen of a dx12 compile whose device has `shader_execution_reordering` traces into a hit object, regroups by it, then runs its shaders, and uses the feature.
+  Every other trace is the plain one, its hint unevaluated.
+* **CHK-434** `trace_hit(world, r, set.ray, mut p)` traces as `trace` does, and runs the any-hit and intersection shaders alone: it gives a `hit_object`, and `flags` and `mask` follow by name.
+  `h.invoke(mut p)` then runs the closest hit or the miss the hit object holds, on a payload of the ray type it traced, which is `type-mismatch` otherwise.
+  Before that, `h.is_hit`, `h.is_miss`, `h.t`, `h.instance_id`, `h.instance_index`, `h.geometry_index` and `h.primitive_index` read what was hit.
+  `h.reorder()` or `h.reorder(hint, bits)` regroups the invocations by it.
+  A hit object is a `let` of the `trace_hit` that gave it, which is how its invocation knows the payload's type; any other value of it is `unsupported-yet`, and so is a `reorder` on the trace itself.
+  Every part of it needs `shader_execution_reordering`, so it stands under `has(.shader_execution_reordering)` with a plain `trace` beside it, and is raygen's alone.
 * **CHK-330** A `hit_group name for set:` is one row of a ray-tracing pipeline's table, for the ray set it names.
   A name that is no ray set is `invalid-pipeline`, and one that names nothing `unknown-name`, in a hit group and in a pipeline's `rays` alike.
   Its settings are `geometry`, `intersection`, and at most one record per ray type of its set, `ray = (closest_hit = f, any_hit = g)`, either left out.
@@ -1398,6 +1412,7 @@ hit_group textured for path_rays:
   A splatted value that is no local is bound to a temporary local where its first member stands, so it is evaluated once and no earlier than written.
 * **CHK-104** Every name an emitter writes comes from one **mint**, which hands out a desired name when it is free and `name_1`, `name_2`, … otherwise ([why](why/checking.md#chk-104)).
 * **CHK-105** An entry point keeps its name, and every module-level name is taken in the mint before the first local is minted.
+  A function of a type scope takes none: a method, a static or a property is reached through its type and inlined, so no text writes its name, and `let t` stays `t`.
 * **CHK-213** An entry point whose flat tree the pass cannot write, though nothing it reaches reported an error, is `unsupported-yet`.
   It stands at the first expression or statement the pass could not write, in whatever function that was inlined from, and a note names the entry point.
   Where the pass knows no such place, it stands at the entry point's name.
@@ -1659,7 +1674,7 @@ A diagnostic of this pass has a kind, a file, a byte span in that file, and a de
 
 | kind | reported by |
 |---|---|
-| `unsupported-yet` | CHK-8, CHK-61, CHK-134, CHK-213, CHK-237, CHK-291, CHK-299, CHK-307, CHK-314, CHK-321, CHK-329, CHK-333, CHK-338, CHK-339, CHK-344, CHK-346, CHK-347, CHK-350, CHK-352, CHK-353, CHK-357, CHK-366, CHK-374, CHK-379, CHK-381, CHK-383, CHK-387, CHK-389, CHK-397, CHK-431, CHK-432 |
+| `unsupported-yet` | CHK-8, CHK-61, CHK-134, CHK-213, CHK-237, CHK-291, CHK-299, CHK-307, CHK-314, CHK-321, CHK-329, CHK-333, CHK-338, CHK-339, CHK-344, CHK-346, CHK-347, CHK-350, CHK-352, CHK-353, CHK-357, CHK-366, CHK-374, CHK-379, CHK-381, CHK-383, CHK-387, CHK-389, CHK-397, CHK-431, CHK-432, CHK-434 |
 | `duplicate-declaration` | CHK-12, CHK-28, CHK-241, CHK-347, CHK-351 |
 | `dependency-cycle` | CHK-18, CHK-136 |
 | `unknown-module`, `use-of-own-module` | CHK-347 |
@@ -1675,7 +1690,7 @@ A diagnostic of this pass has a kind, a file, a byte span in that file, and a de
 | `invalid-attribute-arguments` | CHK-36, CHK-39, CHK-204, CHK-208, CHK-211, CHK-212, CHK-220, CHK-231, CHK-267, CHK-403, CHK-292, CHK-293, CHK-301, CHK-304, CHK-384, CHK-369, CHK-370, CHK-371, CHK-431 |
 | `binding-not-listed` | CHK-45, CHK-131, CHK-228 |
 | `as-precedence` | CHK-411 |
-| `type-mismatch` | CHK-52, CHK-56, CHK-77, CHK-112 to CHK-118, CHK-121, CHK-167, CHK-210, CHK-214, CHK-219, CHK-236, CHK-243, CHK-275, CHK-276, CHK-279, CHK-281, CHK-287, CHK-329, CHK-344, CHK-362, CHK-375, CHK-392, CHK-429 |
+| `type-mismatch` | CHK-52, CHK-56, CHK-77, CHK-112 to CHK-118, CHK-121, CHK-167, CHK-210, CHK-214, CHK-219, CHK-236, CHK-243, CHK-275, CHK-276, CHK-279, CHK-281, CHK-287, CHK-329, CHK-344, CHK-362, CHK-375, CHK-392, CHK-429, CHK-433, CHK-434 |
 | `not-assignable` | CHK-112, CHK-236, CHK-316, CHK-352, CHK-367 |
 | `read-before-assignment` | CHK-55 |
 | `missing-return` | CHK-125, CHK-236 |
@@ -1684,7 +1699,7 @@ A diagnostic of this pass has a kind, a file, a byte span in that file, and a de
 | `recursive-call` | CHK-130 |
 | `recursive-trace` | CHK-332 |
 | `unknown-member` | CHK-64, CHK-147, CHK-152, CHK-279, CHK-329, CHK-385 |
-| `no-matching-overload` | CHK-71, CHK-155, CHK-316, CHK-340, CHK-329, CHK-344, CHK-365, CHK-366, CHK-367, CHK-392, CHK-396 |
+| `no-matching-overload` | CHK-71, CHK-155, CHK-316, CHK-340, CHK-329, CHK-344, CHK-365, CHK-366, CHK-367, CHK-392, CHK-396, CHK-433, CHK-434 |
 | `non-exhaustive-case` | CHK-160 |
 | `duplicate-case-pattern` | CHK-161 |
 | `missing-value-in-arm` | CHK-168 |
@@ -1712,7 +1727,7 @@ A diagnostic of this pass has a kind, a file, a byte span in that file, and a de
 | `constant-without-value` | CHK-311 |
 | `constant-not-representable` | CHK-312, CHK-396 |
 | `missing-sampler` | CHK-279 |
-| `invalid-constant-argument` | CHK-280, CHK-285, CHK-299, CHK-309, CHK-378, CHK-389, CHK-425, CHK-426 |
+| `invalid-constant-argument` | CHK-280, CHK-285, CHK-299, CHK-309, CHK-378, CHK-389, CHK-425, CHK-426, CHK-433 |
 | `non-uniform-control-flow` | CHK-282, CHK-374, CHK-377, CHK-431 |
 | `non-uniform-index` | CHK-300, CHK-401 |
 | `needless-nonuniform` | CHK-300, CHK-401 |
