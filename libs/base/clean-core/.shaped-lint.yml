@@ -157,6 +157,11 @@ rules:
     files: src/clean-core/platform/symbolize.cc
 
   - kind: allow-include
+    value: [<cxxabi.h>, <dlfcn.h>, <stdlib.h>]
+    reason: dladdr is the only route from an address to a name on macOS, and its names are mangled - __cxa_demangle reads them, and free releases what it allocated
+    files: src/clean-core/platform/symbolize.cc
+
+  - kind: allow-include
     value: <tlhelp32.h>
     reason: the thread and module snapshots are the only way to find what the recorder was never told about
     files:
@@ -176,6 +181,11 @@ rules:
   - kind: allow-include
     value: <pthread.h>
     reason: a thread's stack bounds are what a frame-chain walk validates against, and pthread is the only source
+    files: src/clean-core/platform/stack_capture.cc
+
+  - kind: allow-include
+    value: [<sys/ucontext.h>, <ucontext.h>]
+    reason: a signal handler's interrupted registers are where a walk of the thread it interrupted starts, and ucontext_t is their only spelling
     files: src/clean-core/platform/stack_capture.cc
 
   - kind: allow-include

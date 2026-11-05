@@ -5,6 +5,8 @@ tags: [xr]
 parent: epic-xr
 refs:
   - file: libs/graphics/shaped-graphics/src/shaped-graphics/context/capabilities.hh
+claimed-by: Claude (for Philip Trettner)
+claimed-at: 2026-11-05T14:10Z
 ---
 
 # `sg::feature::view_instancing`: one draw rendering every view

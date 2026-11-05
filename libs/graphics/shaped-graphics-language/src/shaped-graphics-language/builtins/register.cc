@@ -34,6 +34,38 @@ void impl::add_infix(registry& r,
     add_operator(r, op, name, lhs, rhs, result, evaluate, infix(op), undefined_when);
 }
 
+namespace
+{
+constexpr cc::string_view k_any_name[] = {"any"};
+
+written write_float_not_equal(call_context const& c)
+{
+    if (c.target != language::hlsl)
+        return write_infix("!=", precedence::comparison, c.arguments[0], c.arguments[1]);
+    auto const equal = write_infix("==", precedence::comparison, c.arguments[0], c.arguments[1]);
+    return {.text = cc::format("!({})", equal.text), .binds = precedence::unary};
+}
+
+written write_float_vectors_differ(call_context const& c)
+{
+    return {.text = cc::format("any({})", write_float_not_equal(c).text)};
+}
+} // namespace
+
+sgl::builtins::spelling impl::float_not_equal()
+{
+    return {.kind = spelling_kind::custom, .custom = write_float_not_equal};
+}
+
+sgl::builtins::spelling impl::float_vectors_differ()
+{
+    return {.kind = spelling_kind::custom,
+            .custom = write_float_vectors_differ,
+            .hlsl_names = k_any_name,
+            .wgsl_names = k_any_name,
+            .msl_names = k_any_name};
+}
+
 void impl::add_operator(registry& r,
                         cc::string_view op,
                         cc::string_view name,

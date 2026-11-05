@@ -240,6 +240,9 @@ sg::create_vulkan_context(vulkan_config = {})      // -> cc::result<context_hand
 // vulkan::required_api_version                    // the version every context is created at — what a runtime's version range is checked against
 // vk_ctx.instance() / physical_device() / device() / queue() / queue_family_index()  // the native objects, for another API to name
 //   GOTCHA: the queue is externally synchronized — anything else submitting to it (an XR runtime) holds vk_ctx.queue_guard()
+vk_ctx.wrap_vulkan_texture(VkImage, desc, layout)  // -> result<vulkan_texture_handle> over a foreign image (an XR swapchain image)
+//   `layout` is where the image IS now (undefined = sg moves it out of UNDEFINED); sg never destroys the image;
+//   hand it back with cmd.ensure_layout(tex, layout) — sg leaves it where the last list did; desc is trusted, not checked
 #include <shaped-graphics/backends/webgpu/webgpu_context.hh>   // wasm + SC_WASM_WEBGPU only
 co_await sg::request_webgpu_context(webgpu_config = {})  // -> context_handle; any thread (it requests on main); FAILS without WebGPU / adapter
 sg::create_webgpu_context(WGPUDevice, webgpu_config = {}) // -> cc::result<context_handle> over a device someone else requested; main only
@@ -251,6 +254,9 @@ sg::create_dx12_context(dx12_config = {})          // -> cc::result<context_hand
 // dx12_config { adapter_luid  (optional<u64>; overrides `adapter`, fails rather than falling back; SC_DX12_ADAPTER still hides it)
 //               minimum_feature_level=11_0  (a runtime may demand more, never less) }
 // dx12_ctx.device() / queue()                     // ID3D12Device* / ID3D12CommandQueue*, owned by the context
+dx12_ctx.wrap_dx12_texture(ID3D12Resource*, desc)  // -> result<dx12_texture_handle>; refuses a shape or flag mismatch
+//   GOTCHA: only a resource in COMMON at every submit — sg's enhanced barriers meet a legacy state nowhere else, so an
+//   OpenXR D3D12 image (legacy RENDER_TARGET) is filled from a dx12_native_scope with legacy ResourceBarrier calls instead
 // GOTCHA: activate_global_debug_layer is PROCESS-wide and one-way, unlike vulkan's per-instance enable_validation_layers.
 //   false = 'this context does not ask for it', NOT 'this context is unvalidated' — nothing ever deactivates it.
 //   it must be activated before the process's FIRST device: a later activation is refused, because performing it

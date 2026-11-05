@@ -14,6 +14,13 @@
 #include <clean-core/platform/win32_sanitized.hh>
 #else
 #include <pthread.h>
+// A signal handler's interrupted registers, which capture_stack_from_native_context walks from.
+// macOS's <ucontext.h> refuses to compile without _XOPEN_SOURCE, and the type alone is in <sys/ucontext.h>.
+#if defined(__APPLE__)
+#include <sys/ucontext.h>
+#else
+#include <ucontext.h>
+#endif
 #endif
 
 using namespace cc::primitive_defines;
@@ -626,6 +633,7 @@ bool cc::stack_capture_from_context_available()
 #if defined(_WIN32) && !defined(__EMSCRIPTEN__)
     return true;
 #else
+    // A POSIX context is walkable too, but only from the handler of the thread it interrupted: no foreign thread.
     return false;
 #endif
 }
@@ -646,6 +654,29 @@ cc::stack_capture_result cc::capture_stack_from_native_context(void* native_cont
     (void)ctx;
     (void)walk;
     return capture_from_context(native_context, out, skip, stop_frame, 0, &unwind);
+#elif CC_CAN_CHASE_FRAME_POINTERS
+    (void)unwind;
+    (void)walk; // the chain is the only walk here
+    if (native_context == nullptr || out.empty() || skip < 0)
+        return {};
+
+    // The interrupted frame pointer heads the chain, and the program counter is where the thread IS, which no link of
+    // the chain records.
+    auto const* const uc = static_cast<ucontext_t const*>(native_context);
+#if defined(__APPLE__) && defined(__aarch64__)
+    auto const fp = __darwin_arm_thread_state64_get_fp(uc->uc_mcontext->__ss);
+    auto const pc = __darwin_arm_thread_state64_get_pc(uc->uc_mcontext->__ss);
+#elif defined(__APPLE__)
+    auto const fp = uc->uc_mcontext->__ss.__rbp;
+    auto const pc = uc->uc_mcontext->__ss.__rip;
+#elif defined(__aarch64__)
+    auto const fp = uc->uc_mcontext.regs[29];
+    auto const pc = uc->uc_mcontext.pc;
+#else
+    auto const fp = uc->uc_mcontext.gregs[REG_RBP];
+    auto const pc = uc->uc_mcontext.gregs[REG_RIP];
+#endif
+    return chase_chain(reinterpret_cast<frame const*>(fp), reinterpret_cast<void*>(pc), out, skip, stop_frame);
 #else
     (void)unwind;
     (void)native_context;

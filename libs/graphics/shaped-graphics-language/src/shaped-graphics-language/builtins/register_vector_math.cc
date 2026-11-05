@@ -575,14 +575,19 @@ void sgl::builtins::register_vector_math(registry& r)
                       .hlsl_names = k_all,
                       .wgsl_names = k_all,
                       .msl_names = k_all});
+        // EMIT-186: a float lane's `!=` is true for a NaN, which HLSL has to spell `!(a == b)`
+        auto const has_float_lanes = type.starts_with("float") || type.starts_with("half") || type == "vec3"
+                                  || type == "pos3" || type == "hpos4";
         add_operator(r, "!=", named("differs", type), type, type, "bool", not_equal_whole,
-                     {.kind = spelling_kind::custom,
-                      .custom = write_whole<false>,
-                      .hlsl_names = k_any,
-                      .wgsl_names = k_any,
-                      .msl_names = k_any});
+                     has_float_lanes ? float_vectors_differ()
+                                     : spelling{.kind = spelling_kind::custom,
+                                                .custom = write_whole<false>,
+                                                .hlsl_names = k_any,
+                                                .wgsl_names = k_any,
+                                                .msl_names = k_any});
         add_function(r, "equal", {"a", type, "b", type}, bools, equal_each, infix("=="));
-        add_function(r, "not_equal", {"a", type, "b", type}, bools, not_equal_each, infix("!="));
+        add_function(r, "not_equal", {"a", type, "b", type}, bools, not_equal_each,
+                     has_float_lanes ? float_not_equal() : infix("!="));
     }
 
     r.add_comment("// a bool vector read whole (CHK-364), and `select`, which evaluates all three of its arguments\n"

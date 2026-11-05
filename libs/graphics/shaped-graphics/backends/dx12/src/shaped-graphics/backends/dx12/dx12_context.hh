@@ -282,6 +282,20 @@ public:
                                                                     sg::allocation_info const& alloc);
     [[nodiscard]] cc::result<dx12_texture_handle> create_dx12_texture(sg::texture_description const& desc,
                                                                       sg::allocation_info const& alloc);
+
+    /// An sg texture over a resource someone else created.
+    ///
+    /// **The resource must be in COMMON whenever a list using it is submitted, and sg leaves it there.**
+    /// sg barriers with enhanced barriers, which D3D12 lets meet a legacy resource state only at COMMON; a resource
+    /// handed out in any other state — an OpenXR D3D12 swapchain image, in RENDER_TARGET — is refused by the debug
+    /// layer at the first submit.
+    /// Such a resource is filled from a native scope with legacy barriers of its own instead.
+    ///
+    /// The texture holds a reference and never destroys the resource, so the owner's own release is what ends it.
+    /// Its views are made in `desc.format`, which must be one the resource's format admits, a typeless one included.
+    /// Errors where the resource's shape is not `desc`'s, or it lacks a flag `desc.usage` needs.
+    [[nodiscard]] cc::result<dx12_texture_handle> wrap_dx12_texture(ID3D12Resource* resource,
+                                                                    sg::texture_description const& desc);
     [[nodiscard]] cc::result<dx12_memory_heap_handle> create_dx12_memory_heap(isize size_in_bytes,
                                                                               sg::memory_heap_contents contents);
     [[nodiscard]] cc::result<dx12_swapchain_handle> create_dx12_swapchain(sg::swapchain_description const& desc);
