@@ -174,3 +174,66 @@ TEST("sg metal - a heap's buffer requirements keep a bump allocator aligned")
             .context(cc::format("size {} -> {} bytes at alignment {}", size, reqs.size_in_bytes, reqs.alignment_in_bytes));
     }
 }
+
+// Placed back to back the way ctx.transient's bump allocator does: a head advanced by each reported size and never
+// re-aligned, so every texture's offset must already sit on its own alignment, and the heap must accept each one.
+TEST("sg metal - a textures heap places textures back to back at their reported sizes")
+{
+    auto const ctx = test::make_context();
+    if (ctx == nullptr)
+        SKIP("no metal 4 device on this host");
+
+    auto const heap = ctx->persistent.create_memory_heap(64 * 1024 * 1024, sg::memory_heap_contents::textures);
+    CHECK(heap->contents() == sg::memory_heap_contents::textures);
+
+    auto const descs = cc::vector<sg::texture_description>{
+        sg::texture_2d_description{.format = sg::pixel_format::rgba8_unorm,
+                                   .width = 3,
+                                   .height = 5,
+                                   .usage = sg::texture_usage::copy_dst}
+            .to_texture_description(),
+        sg::texture_2d_description{.format = sg::pixel_format::rgba16_float,
+                                   .width = 257,
+                                   .height = 129,
+                                   .mip_levels = 4,
+                                   .usage = sg::texture_usage::render_target | sg::texture_usage::texture}
+            .to_texture_description(),
+        sg::texture_2d_description{.format = sg::pixel_format::depth32_float,
+                                   .width = 640,
+                                   .height = 360,
+                                   .usage = sg::texture_usage::depth_stencil}
+            .to_texture_description(),
+        sg::texture_2d_ms_description{.format = sg::pixel_format::rgba8_unorm,
+                                      .width = 64,
+                                      .height = 64,
+                                      .sample_count = 4,
+                                      .usage = sg::texture_usage::render_target}
+            .to_texture_description(),
+        sg::texture_2d_description{.format = sg::pixel_format::r32_uint,
+                                   .width = 1,
+                                   .height = 1,
+                                   .usage = sg::texture_usage::image}
+            .to_texture_description(),
+    };
+
+    auto head = isize(0);
+    auto textures = cc::vector<sg::backend::metal::metal_texture_handle>();
+    for (auto i = isize(0); i < descs.size(); ++i)
+    {
+        auto const& desc = descs[i];
+        auto const reqs = heap->memory_requirements_for_texture(desc);
+        REQUIRE(reqs.placeable).context(cc::format("texture {}", i));
+        CHECK(reqs.alignment_in_bytes > 0).context(cc::format("texture {}", i));
+        CHECK(reqs.size_in_bytes % reqs.alignment_in_bytes == 0)
+            .context(cc::format("texture {}: {} bytes at alignment {}", i, reqs.size_in_bytes, reqs.alignment_in_bytes));
+        CHECK(head % reqs.alignment_in_bytes == 0).context(cc::format("texture {} at {}", i, head));
+
+        auto const alloc = heap->acquire_allocation_for_texture(desc, head);
+        CHECK(alloc.is_placed());
+        auto created = ctx->create_metal_texture(desc, alloc);
+        REQUIRE(created.has_value()).context(cc::format("texture {}", i));
+        textures.push_back(created.value());
+        head += reqs.size_in_bytes;
+    }
+    CHECK(head <= heap->size_in_bytes());
+}

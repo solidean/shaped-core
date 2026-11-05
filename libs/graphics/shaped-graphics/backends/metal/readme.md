@@ -213,8 +213,10 @@ Each of these is a fact about Metal rather than a gap in the backend.
   `block_until_idle()` drains the GPU without advancing, so an open epoch's payload never runs — a download deferred onto the epoch would stay unsettled forever in an unadvanced frame.
   `MTL4CommitFeedback` fires at exactly the right moment, and `block_until_transfers_drained` is sg's hook for waiting on the outstanding ones.
   That is why there is no readback actor here where the other two backends have one.
-- **Placement works for textures from the start.**
-  A Metal placement heap is not told what it will hold, so there is no buffers-only stage to grow out of the way dx12 has one.
+- **Placement needs no texture-only heap.**
+  A Metal placement heap is not told what it will hold; `contents` is sg's record of what was asked for.
+  `heapTextureSizeAndAlign` answers from the same descriptor the texture is created with, and its size is padded to the alignment as a buffer's is.
+  `sg metal - a textures heap places textures back to back at their reported sizes` pins both.
 - **Two queues need three waits, not one.**
   An off-frame transfer runs on a second `MTL4CommandQueue`, and neither queue knows anything about the other's timeline.
   A command list waits on `metal_transfer_system::pending_value_for` before it runs.

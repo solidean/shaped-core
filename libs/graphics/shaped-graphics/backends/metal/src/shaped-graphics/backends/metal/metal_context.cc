@@ -949,7 +949,8 @@ cc::result<metal_buffer_handle> metal_context::create_metal_buffer(isize size_in
     return handle;
 }
 
-cc::result<metal_memory_heap_handle> metal_context::create_metal_memory_heap(isize size_in_bytes)
+cc::result<metal_memory_heap_handle> metal_context::create_metal_memory_heap(isize size_in_bytes,
+                                                                             sg::memory_heap_contents contents)
 {
     CC_ASSERT(size_in_bytes > 0, "heap size must be positive");
 
@@ -973,10 +974,10 @@ cc::result<metal_memory_heap_handle> metal_context::create_metal_memory_heap(isi
     if (heap == nullptr)
         return cc::error("the metal device refused a heap allocation");
 
-    // A placement heap is the allocation; the buffers placed into it are not separately resident.
+    // A placement heap is the allocation; the resources placed into it are not separately resident.
     _residency.add(heap);
 
-    return std::make_shared<metal_memory_heap const>(*this, size_in_bytes, heap);
+    return std::make_shared<metal_memory_heap const>(*this, size_in_bytes, contents, heap);
 }
 
 cc::result<sg::raw_texture_handle> metal_context::try_create_raw_texture(texture_description const& desc,
@@ -988,10 +989,7 @@ cc::result<sg::raw_texture_handle> metal_context::try_create_raw_texture(texture
 cc::result<sg::memory_heap_handle> metal_context::try_create_memory_heap(isize size_in_bytes,
                                                                          memory_heap_contents contents)
 {
-    // issue: feat-sg-metal-texture-heap
-    if (contents == memory_heap_contents::textures)
-        return cc::error("metal places textures, but its heap answers no texture requirements yet");
-    return cc::result<sg::memory_heap_handle>(create_metal_memory_heap(size_in_bytes));
+    return cc::result<sg::memory_heap_handle>(create_metal_memory_heap(size_in_bytes, contents));
 }
 
 cc::result<sg::binding_group_layout_handle> metal_context::try_create_binding_group_layout(

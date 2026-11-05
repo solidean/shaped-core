@@ -3,6 +3,8 @@ created: 2026-10-28
 refs:
   - file: libs/graphics/shaped-graphics/backends/metal/src/shaped-graphics/backends/metal/metal_context.cc
   - file: libs/graphics/shaped-graphics/src/shaped-graphics/context/transient.cc
+closed: 2026-11-05
+resolution: fixed
 ---
 
 # Metal places transient textures in a texture heap
