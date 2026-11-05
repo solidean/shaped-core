@@ -143,6 +143,20 @@ namespace cc
                                                                          void const* stop_frame = nullptr,
                                                                          cc::stack_walk walk = cc::stack_walk::automatic);
 
+/// Captures a stack from a frame pointer and a program counter read off a thread stopped from outside.
+///
+/// Where a foreign thread is walked by its registers rather than by a `CONTEXT`: macOS, through Mach.
+/// `stack_low` and `stack_high` are that thread's own stack, which every link is checked against; the caller reads them
+/// before the thread stops, since asking for them may take a lock it holds.
+/// `program_counter` comes first, since no link of the chain records where the thread IS.
+/// Returns an empty capture where this build keeps no frame chain, or where the bounds are unknown.
+[[nodiscard]] cc::stack_capture_result capture_stack_from_frame(void const* frame_pointer,
+                                                                void* program_counter,
+                                                                u64 stack_low,
+                                                                u64 stack_high,
+                                                                cc::span<void*> out,
+                                                                void const* stop_frame = nullptr);
+
 /// Whether `walk` is a real option in this build.
 /// `automatic` is always available where any walk is.
 [[nodiscard]] bool stack_walk_available(cc::stack_walk walk);

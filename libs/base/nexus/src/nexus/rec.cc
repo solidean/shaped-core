@@ -367,6 +367,11 @@ void nx::impl::end_run_recording(cc::string_view log_dir)
     // alive, and let go of the recording before shutdown() deletes the chunks it points at.
     if (!g_capture_path.empty())
     {
+        // Let go of the listener first: a chunk delivered after the take would land in g_capture again, and that
+        // recording would then outlive the pool, released only by static destruction.
+        cc::rec::unregister_listener(g_capture_handle);
+        g_capture_handle = {};
+
         auto bytes = cc::vector<byte>();
         g_capture.lock(
             [&](cc::rec::recording& r)
@@ -422,8 +427,6 @@ void nx::impl::end_run_recording(cc::string_view log_dir)
             cc::eprintln("nexus: could not write the run recording to `{}': {}", g_capture_path,
                          written.error().to_string());
 
-        cc::rec::unregister_listener(g_capture_handle);
-        g_capture_handle = {};
         g_capture_path = {};
     }
 

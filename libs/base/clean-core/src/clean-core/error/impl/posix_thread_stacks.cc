@@ -329,6 +329,7 @@ bool cc::impl::report_posix_thread_stacks() noexcept
 
 #elif defined(__APPLE__) && !CC_CRASH_HANDLER_SANITIZED
 
+#include <clean-core/platform/stack_capture.hh>
 #include <clean-core/platform/symbolize.hh>
 #include <clean-core/thread/atomic.hh>
 #include <mach/mach.h>
@@ -351,13 +352,6 @@ constexpr isize max_threads = 256;
 constexpr isize max_frames = 32;
 
 cc::atomic<bool> g_installed = false;
-
-/// One frame record, `{ enclosing frame, return address }` at the frame pointer on arm64 and x86-64 alike.
-struct frame
-{
-    frame const* enclosing;
-    void* return_address;
-};
 
 /// What one other thread was found doing, kept in static storage so a report allocates nothing to collect it.
 struct walked_thread
@@ -393,25 +387,17 @@ void walk_suspended(thread_act_t thread, pthread_t owner, walked_thread& out) no
     auto const pc = u64(state.__rip);
 #endif
     out.walked = true;
-    out.frames[out.frame_count++] = reinterpret_cast<void*>(pc);
     if (owner == nullptr)
+    {
+        out.frames[out.frame_count++] = reinterpret_cast<void*>(pc);
         return;
+    }
 
     auto const high = u64(reinterpret_cast<uintptr_t>(pthread_get_stackaddr_np(owner)));
     auto const low = high - u64(pthread_get_stacksize_np(owner));
-    auto previous = u64(0);
-    for (auto at = fp; out.frame_count < max_frames;)
-    {
-        // inside the thread's stack, aligned, and above the last link, or it is no frame record of this chain
-        if (at < low || at + sizeof(frame) > high || at <= previous || (at & (alignof(void*) - 1)) != 0)
-            break;
-        auto const* const f = reinterpret_cast<frame const*>(at);
-        if (f->return_address == nullptr)
-            break;
-        out.frames[out.frame_count++] = f->return_address;
-        previous = at;
-        at = u64(reinterpret_cast<uintptr_t>(f->enclosing));
-    }
+    out.frame_count = cc::capture_stack_from_frame(reinterpret_cast<void const*>(fp), reinterpret_cast<void*>(pc), low,
+                                                   high, cc::span<void*>(out.frames))
+                          .count;
 }
 } // namespace
 

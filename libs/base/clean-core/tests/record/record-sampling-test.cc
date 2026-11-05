@@ -92,7 +92,7 @@ CC_DONT_INLINE void busy_for_secs(f64 secs)
 /// Two independent reasons it might not: no way to walk a foreign thread, and no threads to run a sampler on.
 [[nodiscard]] bool sampling_possible()
 {
-    return cc::stack_capture_from_context_available() && CC_HAS_THREADS;
+    return cc::rec::sampling_available();
 }
 
 [[nodiscard]] isize count_samples(cc::rec::recording const& r)
@@ -515,7 +515,7 @@ REC_TEST("record/sampling - a live rate change is picked up too")
 
 REC_TEST("record/sampling - a platform that cannot walk a foreign thread refuses to sample")
 {
-    if (cc::stack_capture_from_context_available())
+    if (cc::rec::sampling_available())
         SKIP("this platform can walk a foreign thread, so there is nothing to refuse");
 
     rec_fixture const fixture(deterministic_config());

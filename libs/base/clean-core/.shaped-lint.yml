@@ -184,6 +184,11 @@ rules:
     files: src/clean-core/platform/stack_capture.cc
 
   - kind: allow-include
+    value: <pthread.h>
+    reason: a Mach thread's pthread is what knows its stack's bounds, which a walk of it from outside is checked against
+    files: src/clean-core/record/sampling.cc
+
+  - kind: allow-include
     value: [<sys/ucontext.h>, <ucontext.h>]
     reason: a signal handler's interrupted registers are where a walk of the thread it interrupted starts, and ucontext_t is their only spelling
     files: src/clean-core/platform/stack_capture.cc
