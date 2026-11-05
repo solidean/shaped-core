@@ -638,7 +638,7 @@ checker::taken_names checker::module_names()
         auto names = cc::make_shared<cc::set<cc::string>>();
         // a function of a type scope is reached through its type, `x.row(1)`, and never written under its own name
         for (auto i = module_names_below_count; i < out.symbols.size(); ++i)
-            if (!out.symbols[i].name.empty() && !scoped_functions.contains(i32(i)))
+            if (!out.symbols[i].name.empty() && !takes_no_emitted_name(out.symbols[i]))
                 (void)names->insert(out.symbols[i].name);
         own_module_names = names.get();
         // the checked module keeps both alive, since its flat trees' mints point at them
