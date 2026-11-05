@@ -11,4 +11,5 @@ struct sg::raster_target_formats
     cc::fixed_vector<pixel_format, max_color_targets> color; ///< in output-merger order
     pixel_format depth_stencil = pixel_format::undefined;    ///< `undefined` for no depth-stencil target
     int sample_count = 1;
+    int view_count = 1; ///< the views one draw renders; see raster_pipeline_description::view_count
 };

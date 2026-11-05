@@ -5,7 +5,9 @@
 #include <clean-core/streams/file_stream.hh>
 #include <clean-core/string/format.hh>
 #include <clean-core/string/string.hh>
+#include <clean-core/thread/atomic.hh>
 #include <clean-core/thread/native_thread.hh>
+#include <clean-core/thread/thread.hh> // cc::this_thread_yield
 #include <nexus/args/ambient.hh>
 #include <nexus/test.hh>
 
@@ -115,3 +117,47 @@ TEST("crash handler - a stack overflow on a clean-core thread is reported", nx::
     auto thread = cc::native_thread::start([] { (void)overflow_stack(0); });
     thread.join();
 }
+
+#ifdef __APPLE__
+namespace
+{
+cc::atomic<int> g_parked_state = 0; // 1 once the thread is parked, 2 to let it go
+
+/// Spins until told to stop, so a report finds this frame on the thread's stack.
+[[gnu::noinline]] void parked_for_the_report()
+{
+    g_parked_state.store(1);
+    while (g_parked_state.load() != 2)
+        cc::this_thread_yield();
+}
+} // namespace
+
+// macOS walks every other thread from outside, suspending it; so a thread parked in a known function shows it by name.
+TEST("crash handler - a report names what another thread was doing, on macOS", exclusive())
+{
+    if constexpr (CC_CRASH_HANDLER_SANITIZED != 0)
+        SKIP("a sanitized build compiles the report machinery out, so the runtime's own handlers stay in place");
+
+    cc::install_crash_handler();
+    cc::set_crash_report_files({.directory = cc::temp_directory_path(), .name = "cc-crash-threads-test"});
+    CC_DEFER
+    {
+        auto const directory = cc::environment_variable("NX_CRASH_DIR").value_or(cc::string());
+        cc::set_crash_report_files({.directory = directory, .name = nx::program_name()});
+    };
+
+    g_parked_state.store(0);
+    auto thread = cc::native_thread::start([] { parked_for_the_report(); });
+    while (g_parked_state.load() != 1)
+        cc::this_thread_yield();
+
+    cc::report_all_thread_stacks("a report of a parked thread");
+    g_parked_state.store(2);
+    thread.join();
+
+    auto const report_path = cc::format("{}.txt", cc::last_crash_report_path());
+    auto const report = read_file(report_path);
+    CHECK(contains(report, "parked_for_the_report"));
+    CHECK(cc::remove_file(report_path));
+}
+#endif

@@ -168,6 +168,14 @@ enum class sg::feature
     /// D3D12 grants it, Shader Model 6.2 on, through DXC's `-denorm preserve`; Metal is not known to keep them, and
     /// WebGPU keeps none.
     float_denormals,
+
+    /// One draw renders several views, view `i` into layer `i` of every target, as a pipeline's `view_count` asks and
+    /// SGL's `@view_index` reads.
+    /// What a stereo frame wants on a tiled GPU, where the driver bins both views together: layered rendering through
+    /// `vertex_layer_output` rasterises them separately.
+    /// D3D12 grants it with a `ViewInstancingTier`, Vulkan with `multiview`; Metal's vertex amplification is not wired up
+    /// yet, and WebGPU has no such thing.
+    view_instancing,
 };
 
 CC_FLAG_ENUM_INDEXED(sg, feature, cc::u32);
@@ -209,8 +217,9 @@ inline constexpr feature k_all_features[] = {
     feature::shader_execution_reordering,
     feature::float_specials,
     feature::float_denormals,
+    feature::view_instancing,
 };
-static_assert(isize(sizeof(k_all_features) / sizeof(k_all_features[0])) == isize(feature::float_denormals) + 1,
+static_assert(isize(sizeof(k_all_features) / sizeof(k_all_features[0])) == isize(feature::view_instancing) + 1,
               "k_all_features lists every feature");
 
 /// The enumerator's name, `ray_query`, which is also what SGL's `require` spells it as.
@@ -278,6 +287,8 @@ static_assert(isize(sizeof(k_all_features) / sizeof(k_all_features[0])) == isize
         return "float_specials";
     case feature::float_denormals:
         return "float_denormals";
+    case feature::view_instancing:
+        return "view_instancing";
     }
     return "";
 }

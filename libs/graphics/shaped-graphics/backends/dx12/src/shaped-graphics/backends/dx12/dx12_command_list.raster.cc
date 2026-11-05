@@ -144,6 +144,14 @@ void dx12_command_list::raster_begin_rendering(sg::rendering_info const& info)
     _list->OMSetRenderTargets(UINT(rtv_handles.size()), rtv_handles.empty() ? nullptr : rtv_handles.data(), FALSE,
                               info.depth_stencil_target.has_value() ? &dsv_handle : nullptr);
 
+    // A pipeline of several views renders only those the mask enables, and a list starts with view 0 alone.
+    if (info.view_count > 1)
+    {
+        ComPtr<ID3D12GraphicsCommandList1> list1;
+        CC_ASSERT(SUCCEEDED(_list.As(&list1)), "view instancing needs ID3D12GraphicsCommandList1");
+        list1->SetViewInstanceMask((1u << UINT(info.view_count)) - 1u);
+    }
+
     // 5) Viewport + scissor — default to the full target extent (the common "render to the whole target" case).
     int extent_w = 1;
     int extent_h = 1;

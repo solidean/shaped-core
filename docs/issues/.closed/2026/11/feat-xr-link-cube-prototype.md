@@ -7,8 +7,8 @@ refs:
   - file: examples/graphics/sgl-cube
   - file: libs/graphics/shaped-graphics/backends/dx12/src/shaped-graphics/backends/dx12/dx12_native_scope.hh
   - symbol: sg::backend::dx12::dx12_config
-claimed-by: Claude (for Philip)
-claimed-at: 2026-11-05T14:03Z
+closed: 2026-11-05
+resolution: fixed
 ---
 
 # A cube in the headset over Quest Link, as fast as possible

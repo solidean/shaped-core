@@ -69,6 +69,12 @@ void add_operator(registry& r,
                   spelling write,
                   undefined_check undefined_when = nullptr);
 
+/// `!=` of float or half lanes, true where either is a NaN (EMIT-186): HLSL writes it `!(a == b)`, since DXC lowers its
+/// own float `!=` to SPIR-V as an ordered compare, false for a NaN; every other target writes `a != b`.
+[[nodiscard]] spelling float_not_equal();
+/// The whole-vector `!=` of float or half lanes, `any` over each lane's `float_not_equal`.
+[[nodiscard]] spelling float_vectors_differ();
+
 /// `/` and `%` of `int`, `uint` and their vectors, componentwise, each reading its kind off its leaves.
 /// Both truncate toward zero, as every target does: `-7 / 2 == -3` and `-7 % 3 == -1`.
 void divide_integers(cc::span<check::scalar const> in, cc::vector<check::scalar>& out);
