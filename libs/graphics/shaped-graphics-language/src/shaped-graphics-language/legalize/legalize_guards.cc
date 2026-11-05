@@ -859,6 +859,35 @@ struct guarder
         return false;
     }
 
+    /// `s` as `let x = (0 where the flag is set, else the call)` where `s` binds the result of a call that writes memory,
+    /// a number scalar's; `none` for any other statement.
+    flat_stmt_id masked_binding(flat_stmt const& s)
+    {
+        auto const* const let = s.node.try_as<flat_let>();
+        if (let == nullptr || !is_known(out.e, let->value))
+            return flat_stmt_id::none;
+        auto const* const call = out.e.at(let->value).node.try_as<flat_call>();
+        if (call == nullptr || call->is_pure || constrains_uniformity(*call))
+            return flat_stmt_id::none;
+        auto const type = out.e.at(let->value).type;
+        auto const name = out.m.name_of(type);
+        auto const zero = name == builtins::k_int   ? out.int_literal(0)
+                        : name == builtins::k_uint  ? uint_literal(0)
+                        : name == builtins::k_float ? out.literal(0.0)
+                                                    : flat_expr_id::none;
+        if (!is_valid(zero))
+            return flat_stmt_id::none;
+        out.from = s.from;
+        out.inlined_through = s.inlined_through;
+        auto const label = out.add_label("masked");
+        auto skipped = stmt_list();
+        skipped.push_back(out.leave(label, zero));
+        auto stmts = stmt_list();
+        stmts.push_back(out.if_(out.local(aborted), skipped));
+        stmts.push_back(out.leave(label, let->value));
+        return out.let(let->local, out.block_expr(label, type, stmts));
+    }
+
     ast::range_of<flat_stmt_id> left_once_aborted(label_id label, ast::range_of<flat_stmt_id> range, bool& changed)
     {
         if (!breaks_loops || !is_valid(label) || !is_known(out.e, range) || body_constrains(range, 0))
@@ -950,6 +979,10 @@ struct guarder
             out.e.stmts.push_back(cc::move(copy));
             result = flat_stmt_id(out.e.stmts.size() - 1);
         }
+        // LEGAL-67: an atomic whose result a let binds runs only where the flag is clear, and gives 0 where it is set
+        if (breaks_loops)
+            if (auto const masked = masked_binding(out.e.at(result)); is_valid(masked))
+                return masked;
         // LEGAL-67: an invocation whose guard tripped computes on with a safe operand, and writes none of it
         if (breaks_loops && writes_memory(out.e.at(result)))
         {

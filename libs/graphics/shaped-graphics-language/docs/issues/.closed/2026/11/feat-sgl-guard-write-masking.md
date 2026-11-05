@@ -3,6 +3,8 @@ created: 2026-11-05
 parent: epic-sgl-robustness-profiles
 refs:
   - file: libs/graphics/shaped-graphics-language/src/shaped-graphics-language/legalize/legalize_guards.cc
+closed: 2026-11-05
+resolution: fixed
 ---
 
 # Mask the writes of an invocation whose guard tripped before a barrier
@@ -15,4 +17,4 @@ Without masking the abort profile can still let a wrong value reach memory, whic
 ## Done on 2026-11-05
 
 LEGAL-67: once a guard may set the flag, every store to a buffer element or workgroup memory, and every atomic or image store standing as a statement, is skipped where the flag is set.
-Left: an atomic whose result a `let` binds, as in `let slot = counter.add(1)`, which still counts; the `let` would become a `var` assigned under the mask.
+An atomic whose result a `let` binds, as in `let slot = counter.add(1)`, runs only where the flag is clear, and the `let` is 0 where it is set.

@@ -53,7 +53,7 @@ The worked examples are WGSL, since it is the strictest target: no `do … while
 * **LEGAL-67** (G1) Once a guard may set that flag, every write up to the flag's test is skipped where it is set, so a safe operand's result reaches no memory.
   A write is a store to a buffer element or to workgroup memory, and a call with an effect, an atomic or an image store, that stands as a statement.
   A barrier, a derivative and a subgroup operation are never skipped, since every invocation must reach them.
-  An atomic whose result is bound by a `let` is not skipped yet.
+  An atomic whose result a `let` binds runs only where the flag is clear, and the `let` is 0 where it is set.
 * **LEGAL-68** (G1) The profile `define` runs each guard of LEGAL-65 and LEGAL-66 without ending anything: a failed test replaces the operand by its safe value, and the operation runs on it.
   A divisor of 1, so `x / 0` is `x`, `x % 0` is 0 and `INT_MIN / -1` is `INT_MIN`, which are WGSL's values; an index or an offset of 0.
   A maths builtin of EVAL-87 runs on the operands its deferred guard gives: `pow` on a base of 1, `asin` and `acos` on 0, `atan2` on an `x` of 1.

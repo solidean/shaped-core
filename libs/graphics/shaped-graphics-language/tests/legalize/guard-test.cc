@@ -582,3 +582,20 @@ TEST("sgl guards - every target writes the define profile, before a barrier too"
         CHECK(!text.value().text.contains("aborted")).dump("text", text.value().text);
     }
 }
+
+TEST("sgl guards - an atomic whose result a let binds runs only where the flag is clear (LEGAL-67)")
+{
+    constexpr auto source = "binding work:\n"
+                            "    values: mut buffer[int]\n"
+                            "    hits: mut buffer[atomic[uint]]\n"
+                            "\n"
+                            "@compute(64) fun cs(@thread_id id: int3){work}:\n"
+                            "    let q = 7 / id.x\n"
+                            "    let slot = work.hits[0].add(1u)\n"
+                            "    workgroup_barrier()\n"
+                            "    work.values[slot] = q\n";
+    auto const dump = guarded_dump(source);
+    // the atomic stands in the else of the flag's test, and the then gives the let 0
+    CHECK(dump.contains("(assign (local slot : uint) = (lit 0u : uint))")).dump("core", dump);
+    CHECK(dump.contains("(assign (local slot : uint) = (call:effect add")).dump("core", dump);
+}
