@@ -132,6 +132,12 @@ public:
     /// sg hands a caller no way to block, so what asks is sg's own code: the routine tick, and a registry clear that would wait for background work.
     [[nodiscard]] virtual execution_model execution() const { return execution_model::may_block; }
 
+    /// Whether this context lets a shader run with a weaker float guarantee than its source states, where the backend
+    /// keeps nothing stricter: only a WebGPU context created with `webgpu_config::weakens_float_guarantees`.
+    /// shaped-shader-library asks it, so SGL compiles such an entry point at `.fast` with a warning rather than
+    /// refusing it (SGL's EMIT-185).
+    [[nodiscard]] virtual bool weakens_float_guarantees() const { return false; }
+
     /// The home the bound calls run in, or null when there is none to move to.
     ///
     /// The main thread's under main_thread, null otherwise: a single_threaded context's creating thread has no home unless the application gives it one.
