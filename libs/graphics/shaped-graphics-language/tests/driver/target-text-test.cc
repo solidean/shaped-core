@@ -388,3 +388,52 @@ TEST("sgl target text - maybe_reorder asks shader execution reordering of the de
     CHECK(!without.value().text.contains("MaybeReorderThread"));
     CHECK(!without.value().features.has(sgl::check::feature::shader_execution_reordering));
 }
+
+TEST("sgl target text - a dx12 ray query sees the opacity micromaps of a device that has them")
+{
+    // EMIT-184: no program names the feature; the compile states it for each query
+    constexpr auto source = "require ray_query\n"
+                            "\n"
+                            "binding work:\n"
+                            "    world: acceleration_structure[.triangles]\n"
+                            "    values: mut buffer[float]\n"
+                            "\n"
+                            "@compute(64) fun main_cs(@thread_id id: int3){work}:\n"
+                            "    let r = ray(origin = pos3(0.0, 0.0, 0.0), direction = vec3(0.0, 0.0, 1.0))\n"
+                            "    work.values[id.x] = work.world.trace(r, c => hit_decision.ignore).t\n";
+    auto device = sgl::check::feature_set();
+    device.set(sgl::check::feature::opacity_micromap);
+    auto const with = compiled(source, target::hlsl_dx12, device);
+    REQUIRE(with.has_value());
+    CHECK(with.value().text.contains(", RAYQUERY_FLAG_ALLOW_OPACITY_MICROMAPS>"));
+    CHECK(with.value().features.has(sgl::check::feature::opacity_micromap));
+    // forcing 2 states is Shader Model 6.9's name, so only a compile that sees micromaps writes it into the template
+    auto const forced
+        = cc::string_view("require ray_query\n"
+                          "\n"
+                          "binding work:\n"
+                          "    world: acceleration_structure[.triangles]\n"
+                          "    values: mut buffer[float]\n"
+                          "\n"
+                          "@compute(64) fun main_cs(@thread_id id: int3){work}:\n"
+                          "    let r = ray(origin = pos3(0.0, 0.0, 0.0), direction = vec3(0.0, 0.0, 1.0))\n"
+                          "    let flags = ray_flags.force_omm_2_state\n"
+                          "    work.values[id.x] = work.world.trace(r, c => hit_decision.ignore, flags = flags).t\n");
+    auto const forced_with = compiled(forced, target::hlsl_dx12, device);
+    REQUIRE(forced_with.has_value());
+    CHECK(forced_with.value().text.contains("RAY_FLAG_FORCE_OMM_2_STATE"));
+    auto const forced_without = compiled(forced, target::hlsl_dx12);
+    REQUIRE(forced_without.has_value());
+    CHECK(!forced_without.value().text.contains("FORCE_OMM_2_STATE"));
+    // a device without them is asked for nothing
+    auto const without = compiled(source, target::hlsl_dx12);
+    REQUIRE(without.has_value());
+    CHECK(!without.value().text.contains("OPACITY_MICROMAPS"));
+    CHECK(!without.value().features.has(sgl::check::feature::opacity_micromap));
+    // vulkan's HLSL goes through DXC too, which wants the flag before it takes a forced ray, and the SPIR-V capability
+    auto const vulkan = compiled(forced, target::hlsl_vulkan, device);
+    REQUIRE(vulkan.has_value());
+    CHECK(vulkan.value().text.contains(", RAYQUERY_FLAG_ALLOW_OPACITY_MICROMAPS>"));
+    CHECK(vulkan.value().text.contains("[[vk::ext_capability(5381)]]"));
+    CHECK(vulkan.value().features.has(sgl::check::feature::opacity_micromap));
+}

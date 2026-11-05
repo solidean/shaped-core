@@ -229,8 +229,8 @@ public:
             return true;
         case sg::feature::extended_image_formats:
             return _extended_image_formats;
-        case sg::feature::opacity_micromap: // DXR 1.2, which only the Agility SDK carries — issue: feat-sg-opacity-micromaps
-            return false;
+        case sg::feature::opacity_micromap: // DXR 1.2, which only the Agility SDK carries
+            return _opacity_micromap;
         case sg::feature::unaligned_block_compression:
             return _unaligned_block_textures;
         case sg::feature::shader_f16:
@@ -661,6 +661,7 @@ public:
     bool _native_16bit_shader_ops = false;     // D3D12_OPTIONS4, cached at creation
     bool _wave_ops = false;                    // D3D12_OPTIONS1, cached at creation
     bool _shader_execution_reordering = false; // SM 6.9 beside ray-tracing pipelines, from the Agility SDK
+    bool _opacity_micromap = false;            // DXR 1.2 and SM 6.9, from the Agility SDK
     bool _vertex_layer_output = false;         // D3D12_OPTIONS, cached at creation
 
     // Where debug-layer messages go; empty means stderr.

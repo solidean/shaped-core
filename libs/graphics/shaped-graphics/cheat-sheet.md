@@ -106,7 +106,7 @@ ctx.supports(sg::feature::ray_query)               // bool — THE capability qu
                                                    //   | device_coherence (globallycoherent / coherent(device); false on webgpu)
                                                    //   | image_atomics (atomics on r32 integer images; false on webgpu)
                                                    //   | first_instance (SGL's @first_instance, draw-uniform; false on webgpu, which has no builtin)
-                                                   //   | opacity_micromap (a blas_triangles may name a micromap; vulkan with VK_EXT_opacity_micromap; host-only, no `require`)
+                                                   //   | opacity_micromap (a blas_triangles may name a micromap; vulkan with VK_EXT_opacity_micromap, dx12 with the Agility SDK's DXR 1.2)
                                                    //   | helper_lane_query (a pixel stage can tell a helper; SGL's strong
                                                    //     compare-exchange in a pixel stage needs it; false on webgpu)
                                                    //   | vertex_layer_output (a vertex stage picks the layer of an array target,

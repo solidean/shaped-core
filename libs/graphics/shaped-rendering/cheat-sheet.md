@@ -457,6 +457,14 @@ sr::display_curve // none (radiance as is, unclamped, unencoded) | srgb (clamp +
 sr::exposure_for_average(average_luminance)   // -> f32 stops that show that mean as middle gray, 0.18
 sr::exposure_meter_routine::execute(cmd, image) // -> optional<buffer<vec2f>>: 256 partial sums of log2 luminance over a 64x64 grid of cells, each a linear mean, so noise meters as its mean; none while compiling
 sr::exposure_meter_routine::average_luminance(partials) // -> optional<f32>, 2^(mean log2); read the partials back with cmd.download.data_from_buffer
+
+// opacity micromaps baked from a texture — needs sg::feature::opacity_micromap (micromap_bake_routine.hh):
+sr::micromap_bake_routine::execute(cmd, {.uvs, .indices, .opacity, .channel = 3, .cutoff = 0.5f})  // -> optional<micromap_bake>; none while compiling
+cmd.raytracing.build_micromap(bake.triangles)    // then blas_triangles{.micromap = it, .micromap_indices = bake.indices}
+//   4-state, one map a triangle, ~1 micro-triangle a texel (max_level caps it); opaque/transparent only where every
+//   texel a bilinear lookup blends agrees with the cutoff, so a 4-state trace decides exactly as its any-hit would
+//   .clamps for clamp-to-edge UVs (default repeats); .scale/.bias map the channel before the cutoff
+sr::micromap_bake_routine::level_for(a, b, c, width, height, max_level)  // -> int, the level a triangle of those UVs gets
 ```
 
 ## Reconstruction

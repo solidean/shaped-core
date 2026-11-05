@@ -732,6 +732,7 @@ cc::string hlsl_ray_query_type(u32 flags)
         "CULL_NON_OPAQUE",
         "SKIP_TRIANGLES",
         "SKIP_PROCEDURAL_PRIMITIVES",
+        "FORCE_OMM_2_STATE",
     };
     auto text = cc::string();
     auto bit = 0;
@@ -761,7 +762,8 @@ void sgl::builtins::register_raytracing(registry& r)
                        "    cull_opaque = 64\n"
                        "    cull_non_opaque = 128\n"
                        "    skip_triangles = 256\n"
-                       "    skip_procedural = 512",
+                       "    skip_procedural = 512\n"
+                       "    force_omm_2_state = 1024",
         .doc = "/// What a trace may skip, cull or decide without asking: DXR's `RAY_FLAG_*` without the prefix.",
         .hlsl = "int",
         .wgsl = "i32",

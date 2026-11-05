@@ -33,6 +33,11 @@ enum class display_curve : u8; // none, the clamped sRGB encode, or the neutral 
 struct display_transform;      // an exposure in stops and a curve
 class exposure_meter_routine;  // an image's mean log luminance, for an automatic exposure (exposure_meter_routine.hh)
 
+// Opacity micromaps baked from a texture (see micromap_bake_routine.hh).
+struct micromap_bake_input;  // UVs, indices and the opacity texture
+struct micromap_bake;        // what build_micromap and a blas_triangles take
+class micromap_bake_routine; // the GPU bake
+
 // Reconstruction (see reconstruct.hh): one front routine over denoise and upscale members.
 enum class denoise_method : u8;      // which member runs, or automatic
 enum class upscale_method : u8;      // which upscaler runs behind it, or automatic
