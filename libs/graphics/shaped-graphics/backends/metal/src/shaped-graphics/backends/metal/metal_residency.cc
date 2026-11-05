@@ -49,6 +49,10 @@ void metal_residency_set::add(MTL::Allocation const* allocation)
             s->addAllocation(allocation);
             // The commit is what publishes the change; an uncommitted add is not resident.
             s->commit();
+            // A commit alone left the newest additions absent from the first command buffers after it: a fresh
+            // process's first imgui frame read back nothing, while one more addition after it made the frame land.
+            // Asking for residency is what makes them resident before that work runs, so it follows every addition.
+            s->requestResidency();
         });
 }
 
