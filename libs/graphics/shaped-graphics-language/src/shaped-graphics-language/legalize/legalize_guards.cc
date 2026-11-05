@@ -119,7 +119,10 @@ struct guarder
         if (!is_valid(type))
             return {};
         auto const is_integer = [](cc::string_view name)
-        { return name == "int" || name == "uint" || name == "short" || name == "ushort"; };
+        {
+            return name == "int" || name == "uint" || name == "short" || name == "ushort" || name == "long"
+                || name == "ulong";
+        };
         auto const name = out.m.name_of(type);
         if (is_integer(name))
             return shape{.width = 1, .element = name};
@@ -141,7 +144,7 @@ struct guarder
         return result;
     }
 
-    /// Lane `i` of the value `local` holds, widened to 32 bits.
+    /// Lane `i` of the value `local` holds, widened to 32 bits; a 64-bit lane stays as it is.
     [[nodiscard]] flat_expr_id lane_of(local_id local, shape const& s, i32 i)
     {
         auto value = s.lanes.empty() ? out.local(local) : out.member(out.local(local), s.lanes[i]);
@@ -152,7 +155,12 @@ struct guarder
         return value;
     }
 
-    [[nodiscard]] bool is_signed(shape const& s) const { return s.element == "int" || s.element == "short"; }
+    [[nodiscard]] bool is_signed(shape const& s) const
+    {
+        return s.element == "int" || s.element == "short" || s.element == "long";
+    }
+
+    [[nodiscard]] static bool is_64_bit(shape const& s) { return s.element == "long" || s.element == "ulong"; }
 
     flat_expr_id uint_literal(i32 value)
     {
@@ -160,15 +168,18 @@ struct guarder
     }
 
     /// `int` or `uint` `value`, as the lanes `lane_of` gives compare to it.
-    flat_expr_id literal_for(shape const& s, i32 value)
+    flat_expr_id literal_for(shape const& s, i64 value)
     {
-        return is_signed(s) ? out.int_literal(value) : uint_literal(value);
+        if (is_64_bit(s))
+            return out.add_expr(out.type_named(s.element), flat_wide_literal{.bits = u64(value)});
+        return is_signed(s) ? out.int_literal(i32(value)) : uint_literal(i32(value));
     }
 
     flat_expr_id compare(cc::string_view op, shape const& s, flat_expr_id a, flat_expr_id b)
     {
         flat_expr_id const args[] = {a, b};
-        return out.call(cc::format("{}_{}", op, is_signed(s) ? builtins::k_int : builtins::k_uint), args);
+        auto const family = is_64_bit(s) ? s.element : is_signed(s) ? builtins::k_int : builtins::k_uint;
+        return out.call(cc::format("{}_{}", op, family), args);
     }
 
     /// A value of `type`, of shape `s`, whose every lane is 1.
@@ -192,6 +203,8 @@ struct guarder
     /// Whether a divisor is a literal that can never fail: no zero, and no -1 under an int.
     [[nodiscard]] bool is_safe_divisor(flat_expr_id divisor, shape const& dividend) const
     {
+        if (auto const* const wide = out.e.at(divisor).node.try_as<flat_wide_literal>())
+            return wide->bits != 0 && (wide->bits != ~u64(0) || dividend.element != "long");
         auto const* const literal = out.e.at(divisor).node.try_as<flat_int_literal>();
         if (literal == nullptr || literal->value == 0)
             return false;
@@ -282,19 +295,22 @@ struct guarder
         {
             auto const b_lane = lane_of(b, b_shape, b_shape.lanes.empty() ? 0 : i);
             auto lane_bad = compare("equal", b_shape, b_lane, literal_for(b_shape, 0));
-            if (a_shape.element == "int")
+            if (a_shape.element == "int" || a_shape.element == "long")
             {
                 auto const a_lane = lane_of(a, a_shape, a_shape.lanes.empty() ? 0 : i);
-                auto const overflows = out.and_(
-                    compare("equal", b_shape, lane_of(b, b_shape, b_shape.lanes.empty() ? 0 : i), out.int_literal(-1)),
-                    compare("less", a_shape, a_lane, out.int_literal(-2147483647)));
+                auto const lowest_but_one = a_shape.element == "int" ? i64(-2147483647) : -i64((u64(1) << 63) - 1);
+                auto const overflows
+                    = out.and_(compare("equal", b_shape, lane_of(b, b_shape, b_shape.lanes.empty() ? 0 : i),
+                                       literal_for(b_shape, -1)),
+                               compare("less", a_shape, a_lane, literal_for(a_shape, lowest_but_one)));
                 lane_bad = out.or_(lane_bad, overflows);
             }
             bad = is_valid(bad) ? out.or_(bad, lane_bad) : lane_bad;
         }
 
         auto const op = cc::string_view(out.m.at(call.callee).operator_spelling);
-        auto const is_16_bit = a_shape.element == "short" || a_shape.element == "ushort";
+        // a report writes 32-bit words alone, so a 16-bit or a 64-bit operand is left out of it
+        auto const is_16_bit = a_shape.element == "short" || a_shape.element == "ushort" || is_64_bit(a_shape);
         flat_expr_id const values[] = {out.local(a), out.local(b)};
         auto pieces = is_16_bit
                         ? cc::vector<cc::string>{cc::format("an integer `{}` has no value", op)}

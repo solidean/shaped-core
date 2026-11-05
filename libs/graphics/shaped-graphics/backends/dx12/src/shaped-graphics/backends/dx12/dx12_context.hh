@@ -246,6 +246,12 @@ public:
             return _native_16bit_shader_ops;
         case sg::feature::subgroups:
             return _wave_ops;
+        case sg::feature::shader_int64:
+            return _int64_shader_ops;
+        case sg::feature::shader_f64:
+            return _double_shader_ops;
+        case sg::feature::shader_int64_atomics:
+            return _int64_atomics;
         case sg::feature::vertex_layer_output:
             return _vertex_layer_output;
         case sg::feature::shader_execution_reordering:
@@ -695,6 +701,9 @@ public:
     bool _extended_image_formats = false;      // bgra8_unorm's typed UAV, cached at creation
     bool _native_16bit_shader_ops = false;     // D3D12_OPTIONS4, cached at creation
     bool _wave_ops = false;                    // D3D12_OPTIONS1, cached at creation
+    bool _int64_shader_ops = false;            // D3D12_OPTIONS1, cached at creation
+    bool _double_shader_ops = false;           // D3D12_OPTIONS, cached at creation
+    bool _int64_atomics = false;               // D3D12_OPTIONS1 and OPTIONS9, cached at creation
     bool _shader_execution_reordering = false; // SM 6.9 beside ray-tracing pipelines, from the Agility SDK
     bool _opacity_micromap = false;            // DXR 1.2 and SM 6.9, from the Agility SDK
     bool _vertex_layer_output = false;         // D3D12_OPTIONS, cached at creation

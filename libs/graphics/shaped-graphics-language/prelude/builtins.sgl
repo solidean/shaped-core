@@ -219,6 +219,74 @@
     z: ushort
     w: ushort
 
+// the 64-bit families (CHK-450), each needing a feature of the device (CHK-451); no value of one
+// crosses a stage edge (CHK-383)
+/// 64 bits, signed; its arithmetic wraps.
+@shadowable(false)
+@builtin struct long
+
+@shadowable(false)
+@builtin @swizzle(rg) struct long2:
+    x: long
+    y: long
+
+@shadowable(false)
+@builtin @swizzle(rgb) struct long3:
+    x: long
+    y: long
+    z: long
+
+@shadowable(false)
+@builtin @swizzle(rgba) struct long4:
+    x: long
+    y: long
+    z: long
+    w: long
+
+/// 64 bits, unsigned; its arithmetic wraps.
+@shadowable(false)
+@builtin struct ulong
+
+@shadowable(false)
+@builtin @swizzle(rg) struct ulong2:
+    x: ulong
+    y: ulong
+
+@shadowable(false)
+@builtin @swizzle(rgb) struct ulong3:
+    x: ulong
+    y: ulong
+    z: ulong
+
+@shadowable(false)
+@builtin @swizzle(rgba) struct ulong4:
+    x: ulong
+    y: ulong
+    z: ulong
+    w: ulong
+
+/// A 64-bit float; every operation rounds to it, to nearest and ties to even.
+@shadowable(false)
+@builtin struct double
+
+@shadowable(false)
+@builtin @swizzle(rg) struct double2:
+    x: double
+    y: double
+
+@shadowable(false)
+@builtin @swizzle(rgb) struct double3:
+    x: double
+    y: double
+    z: double
+
+@shadowable(false)
+@builtin @swizzle(rgba) struct double4:
+    x: double
+    y: double
+    z: double
+    w: double
+
 // a vector of one value, beside the constructor of its fields (CHK-360)
 /// Every component `x`.
 @builtin @pure fun float2(x: float) -> float2
@@ -268,6 +336,24 @@
 @builtin @pure fun ushort3(x: ushort) -> ushort3
 /// Every component `x`.
 @builtin @pure fun ushort4(x: ushort) -> ushort4
+/// Every component `x`.
+@builtin @pure fun long2(x: long) -> long2
+/// Every component `x`.
+@builtin @pure fun long3(x: long) -> long3
+/// Every component `x`.
+@builtin @pure fun long4(x: long) -> long4
+/// Every component `x`.
+@builtin @pure fun ulong2(x: ulong) -> ulong2
+/// Every component `x`.
+@builtin @pure fun ulong3(x: ulong) -> ulong3
+/// Every component `x`.
+@builtin @pure fun ulong4(x: ulong) -> ulong4
+/// Every component `x`.
+@builtin @pure fun double2(x: double) -> double2
+/// Every component `x`.
+@builtin @pure fun double3(x: double) -> double3
+/// Every component `x`.
+@builtin @pure fun double4(x: double) -> double4
 
 // @pure: a call has no effect, so nobody can tell whether or when it ran.
 // A @builtin without it is assumed to have one, and the compiler then keeps its place among its neighbours.
@@ -784,6 +870,18 @@
 @builtin @pure @operator("+") fun identity_ushort3(x: ushort3) -> ushort3
 @builtin @pure @operator("+") fun identity_ushort4(x: ushort4) -> ushort4
 @builtin @pure @operator("+") fun identity_vec3(x: vec3) -> vec3
+@builtin @pure @operator("+") fun identity_long(x: long) -> long
+@builtin @pure @operator("+") fun identity_long2(x: long2) -> long2
+@builtin @pure @operator("+") fun identity_long3(x: long3) -> long3
+@builtin @pure @operator("+") fun identity_long4(x: long4) -> long4
+@builtin @pure @operator("+") fun identity_ulong(x: ulong) -> ulong
+@builtin @pure @operator("+") fun identity_ulong2(x: ulong2) -> ulong2
+@builtin @pure @operator("+") fun identity_ulong3(x: ulong3) -> ulong3
+@builtin @pure @operator("+") fun identity_ulong4(x: ulong4) -> ulong4
+@builtin @pure @operator("+") fun identity_double(x: double) -> double
+@builtin @pure @operator("+") fun identity_double2(x: double2) -> double2
+@builtin @pure @operator("+") fun identity_double3(x: double3) -> double3
+@builtin @pure @operator("+") fun identity_double4(x: double4) -> double4
 
 // two vectors compared: an ordering per component (CHK-362), and `==` and `!=` of the whole value,
 // which `equal` and `not_equal` are per component (CHK-363)
@@ -859,6 +957,42 @@
 @builtin @pure @operator("<=") fun less_equal_ushort4(a: ushort4, b: ushort4) -> bool4
 @builtin @pure @operator(">") fun greater_ushort4(a: ushort4, b: ushort4) -> bool4
 @builtin @pure @operator(">=") fun greater_equal_ushort4(a: ushort4, b: ushort4) -> bool4
+@builtin @pure @operator("<") fun less_long2(a: long2, b: long2) -> bool2
+@builtin @pure @operator("<=") fun less_equal_long2(a: long2, b: long2) -> bool2
+@builtin @pure @operator(">") fun greater_long2(a: long2, b: long2) -> bool2
+@builtin @pure @operator(">=") fun greater_equal_long2(a: long2, b: long2) -> bool2
+@builtin @pure @operator("<") fun less_long3(a: long3, b: long3) -> bool3
+@builtin @pure @operator("<=") fun less_equal_long3(a: long3, b: long3) -> bool3
+@builtin @pure @operator(">") fun greater_long3(a: long3, b: long3) -> bool3
+@builtin @pure @operator(">=") fun greater_equal_long3(a: long3, b: long3) -> bool3
+@builtin @pure @operator("<") fun less_long4(a: long4, b: long4) -> bool4
+@builtin @pure @operator("<=") fun less_equal_long4(a: long4, b: long4) -> bool4
+@builtin @pure @operator(">") fun greater_long4(a: long4, b: long4) -> bool4
+@builtin @pure @operator(">=") fun greater_equal_long4(a: long4, b: long4) -> bool4
+@builtin @pure @operator("<") fun less_ulong2(a: ulong2, b: ulong2) -> bool2
+@builtin @pure @operator("<=") fun less_equal_ulong2(a: ulong2, b: ulong2) -> bool2
+@builtin @pure @operator(">") fun greater_ulong2(a: ulong2, b: ulong2) -> bool2
+@builtin @pure @operator(">=") fun greater_equal_ulong2(a: ulong2, b: ulong2) -> bool2
+@builtin @pure @operator("<") fun less_ulong3(a: ulong3, b: ulong3) -> bool3
+@builtin @pure @operator("<=") fun less_equal_ulong3(a: ulong3, b: ulong3) -> bool3
+@builtin @pure @operator(">") fun greater_ulong3(a: ulong3, b: ulong3) -> bool3
+@builtin @pure @operator(">=") fun greater_equal_ulong3(a: ulong3, b: ulong3) -> bool3
+@builtin @pure @operator("<") fun less_ulong4(a: ulong4, b: ulong4) -> bool4
+@builtin @pure @operator("<=") fun less_equal_ulong4(a: ulong4, b: ulong4) -> bool4
+@builtin @pure @operator(">") fun greater_ulong4(a: ulong4, b: ulong4) -> bool4
+@builtin @pure @operator(">=") fun greater_equal_ulong4(a: ulong4, b: ulong4) -> bool4
+@builtin @pure @operator("<") fun less_double2(a: double2, b: double2) -> bool2
+@builtin @pure @operator("<=") fun less_equal_double2(a: double2, b: double2) -> bool2
+@builtin @pure @operator(">") fun greater_double2(a: double2, b: double2) -> bool2
+@builtin @pure @operator(">=") fun greater_equal_double2(a: double2, b: double2) -> bool2
+@builtin @pure @operator("<") fun less_double3(a: double3, b: double3) -> bool3
+@builtin @pure @operator("<=") fun less_equal_double3(a: double3, b: double3) -> bool3
+@builtin @pure @operator(">") fun greater_double3(a: double3, b: double3) -> bool3
+@builtin @pure @operator(">=") fun greater_equal_double3(a: double3, b: double3) -> bool3
+@builtin @pure @operator("<") fun less_double4(a: double4, b: double4) -> bool4
+@builtin @pure @operator("<=") fun less_equal_double4(a: double4, b: double4) -> bool4
+@builtin @pure @operator(">") fun greater_double4(a: double4, b: double4) -> bool4
+@builtin @pure @operator(">=") fun greater_equal_double4(a: double4, b: double4) -> bool4
 @builtin @pure @operator("==") fun same_float2(a: float2, b: float2) -> bool
 @builtin @pure @operator("!=") fun differs_float2(a: float2, b: float2) -> bool
 @builtin @pure fun equal(a: float2, b: float2) -> bool2
@@ -955,6 +1089,42 @@
 @builtin @pure @operator("!=") fun differs_ushort4(a: ushort4, b: ushort4) -> bool
 @builtin @pure fun equal(a: ushort4, b: ushort4) -> bool4
 @builtin @pure fun not_equal(a: ushort4, b: ushort4) -> bool4
+@builtin @pure @operator("==") fun same_long2(a: long2, b: long2) -> bool
+@builtin @pure @operator("!=") fun differs_long2(a: long2, b: long2) -> bool
+@builtin @pure fun equal(a: long2, b: long2) -> bool2
+@builtin @pure fun not_equal(a: long2, b: long2) -> bool2
+@builtin @pure @operator("==") fun same_long3(a: long3, b: long3) -> bool
+@builtin @pure @operator("!=") fun differs_long3(a: long3, b: long3) -> bool
+@builtin @pure fun equal(a: long3, b: long3) -> bool3
+@builtin @pure fun not_equal(a: long3, b: long3) -> bool3
+@builtin @pure @operator("==") fun same_long4(a: long4, b: long4) -> bool
+@builtin @pure @operator("!=") fun differs_long4(a: long4, b: long4) -> bool
+@builtin @pure fun equal(a: long4, b: long4) -> bool4
+@builtin @pure fun not_equal(a: long4, b: long4) -> bool4
+@builtin @pure @operator("==") fun same_ulong2(a: ulong2, b: ulong2) -> bool
+@builtin @pure @operator("!=") fun differs_ulong2(a: ulong2, b: ulong2) -> bool
+@builtin @pure fun equal(a: ulong2, b: ulong2) -> bool2
+@builtin @pure fun not_equal(a: ulong2, b: ulong2) -> bool2
+@builtin @pure @operator("==") fun same_ulong3(a: ulong3, b: ulong3) -> bool
+@builtin @pure @operator("!=") fun differs_ulong3(a: ulong3, b: ulong3) -> bool
+@builtin @pure fun equal(a: ulong3, b: ulong3) -> bool3
+@builtin @pure fun not_equal(a: ulong3, b: ulong3) -> bool3
+@builtin @pure @operator("==") fun same_ulong4(a: ulong4, b: ulong4) -> bool
+@builtin @pure @operator("!=") fun differs_ulong4(a: ulong4, b: ulong4) -> bool
+@builtin @pure fun equal(a: ulong4, b: ulong4) -> bool4
+@builtin @pure fun not_equal(a: ulong4, b: ulong4) -> bool4
+@builtin @pure @operator("==") fun same_double2(a: double2, b: double2) -> bool
+@builtin @pure @operator("!=") fun differs_double2(a: double2, b: double2) -> bool
+@builtin @pure fun equal(a: double2, b: double2) -> bool2
+@builtin @pure fun not_equal(a: double2, b: double2) -> bool2
+@builtin @pure @operator("==") fun same_double3(a: double3, b: double3) -> bool
+@builtin @pure @operator("!=") fun differs_double3(a: double3, b: double3) -> bool
+@builtin @pure fun equal(a: double3, b: double3) -> bool3
+@builtin @pure fun not_equal(a: double3, b: double3) -> bool3
+@builtin @pure @operator("==") fun same_double4(a: double4, b: double4) -> bool
+@builtin @pure @operator("!=") fun differs_double4(a: double4, b: double4) -> bool
+@builtin @pure fun equal(a: double4, b: double4) -> bool4
+@builtin @pure fun not_equal(a: double4, b: double4) -> bool4
 
 // a bool vector read whole (CHK-364), and `select`, which evaluates all three of its arguments
 // and gives `if_true` where `cond` holds (CHK-365)
@@ -1022,6 +1192,27 @@
 @builtin @pure fun select(cond: bool3, if_true: ushort3, if_false: ushort3) -> ushort3
 @builtin @pure fun select(cond: bool, if_true: ushort4, if_false: ushort4) -> ushort4
 @builtin @pure fun select(cond: bool4, if_true: ushort4, if_false: ushort4) -> ushort4
+@builtin @pure fun select(cond: bool, if_true: long, if_false: long) -> long
+@builtin @pure fun select(cond: bool, if_true: long2, if_false: long2) -> long2
+@builtin @pure fun select(cond: bool2, if_true: long2, if_false: long2) -> long2
+@builtin @pure fun select(cond: bool, if_true: long3, if_false: long3) -> long3
+@builtin @pure fun select(cond: bool3, if_true: long3, if_false: long3) -> long3
+@builtin @pure fun select(cond: bool, if_true: long4, if_false: long4) -> long4
+@builtin @pure fun select(cond: bool4, if_true: long4, if_false: long4) -> long4
+@builtin @pure fun select(cond: bool, if_true: ulong, if_false: ulong) -> ulong
+@builtin @pure fun select(cond: bool, if_true: ulong2, if_false: ulong2) -> ulong2
+@builtin @pure fun select(cond: bool2, if_true: ulong2, if_false: ulong2) -> ulong2
+@builtin @pure fun select(cond: bool, if_true: ulong3, if_false: ulong3) -> ulong3
+@builtin @pure fun select(cond: bool3, if_true: ulong3, if_false: ulong3) -> ulong3
+@builtin @pure fun select(cond: bool, if_true: ulong4, if_false: ulong4) -> ulong4
+@builtin @pure fun select(cond: bool4, if_true: ulong4, if_false: ulong4) -> ulong4
+@builtin @pure fun select(cond: bool, if_true: double, if_false: double) -> double
+@builtin @pure fun select(cond: bool, if_true: double2, if_false: double2) -> double2
+@builtin @pure fun select(cond: bool2, if_true: double2, if_false: double2) -> double2
+@builtin @pure fun select(cond: bool, if_true: double3, if_false: double3) -> double3
+@builtin @pure fun select(cond: bool3, if_true: double3, if_false: double3) -> double3
+@builtin @pure fun select(cond: bool, if_true: double4, if_false: double4) -> double4
+@builtin @pure fun select(cond: bool4, if_true: double4, if_false: double4) -> double4
 
 // a direction adds to a direction; what `vec3 * vec3` would mean is a question, so it is no operator
 @builtin @pure @operator("+") fun add_vec3(a: vec3, b: vec3) -> vec3
@@ -1142,173 +1333,329 @@
 @builtin @pure @operator("as") fun convert_float_to_int(x: float) -> int
 @builtin @pure @operator("as") fun convert_float_to_uint(x: float) -> uint
 @builtin @pure @operator("as") fun convert_float_to_half(x: float) -> half
+@builtin @pure @operator("as") fun convert_float_to_double(x: float) -> double
 @builtin @pure @operator("as") fun convert_int_to_float(x: int) -> float
 @builtin @pure @operator("as") fun convert_int_to_uint(x: int) -> uint
 @builtin @pure @operator("as") fun convert_int_to_short(x: int) -> short
+@builtin @pure @operator("as") fun convert_int_to_long(x: int) -> long
 @builtin @pure @operator("as") fun convert_uint_to_float(x: uint) -> float
 @builtin @pure @operator("as") fun convert_uint_to_int(x: uint) -> int
 @builtin @pure @operator("as") fun convert_uint_to_ushort(x: uint) -> ushort
+@builtin @pure @operator("as") fun convert_uint_to_ulong(x: uint) -> ulong
 @builtin @pure @operator("as") fun convert_half_to_float(x: half) -> float
 @builtin @pure @operator("as") fun convert_half_to_short(x: half) -> short
 @builtin @pure @operator("as") fun convert_half_to_ushort(x: half) -> ushort
+@builtin @pure @operator("as") fun convert_half_to_double(x: half) -> double
 @builtin @pure @operator("as") fun convert_short_to_int(x: short) -> int
 @builtin @pure @operator("as") fun convert_short_to_half(x: short) -> half
 @builtin @pure @operator("as") fun convert_short_to_ushort(x: short) -> ushort
+@builtin @pure @operator("as") fun convert_short_to_long(x: short) -> long
 @builtin @pure @operator("as") fun convert_ushort_to_uint(x: ushort) -> uint
 @builtin @pure @operator("as") fun convert_ushort_to_half(x: ushort) -> half
 @builtin @pure @operator("as") fun convert_ushort_to_short(x: ushort) -> short
+@builtin @pure @operator("as") fun convert_ushort_to_ulong(x: ushort) -> ulong
+@builtin @pure @operator("as") fun convert_long_to_int(x: long) -> int
+@builtin @pure @operator("as") fun convert_long_to_short(x: long) -> short
+@builtin @pure @operator("as") fun convert_long_to_ulong(x: long) -> ulong
+@builtin @pure @operator("as") fun convert_long_to_double(x: long) -> double
+@builtin @pure @operator("as") fun convert_ulong_to_uint(x: ulong) -> uint
+@builtin @pure @operator("as") fun convert_ulong_to_ushort(x: ulong) -> ushort
+@builtin @pure @operator("as") fun convert_ulong_to_long(x: ulong) -> long
+@builtin @pure @operator("as") fun convert_ulong_to_double(x: ulong) -> double
+@builtin @pure @operator("as") fun convert_double_to_float(x: double) -> float
+@builtin @pure @operator("as") fun convert_double_to_half(x: double) -> half
+@builtin @pure @operator("as") fun convert_double_to_long(x: double) -> long
+@builtin @pure @operator("as") fun convert_double_to_ulong(x: double) -> ulong
 @builtin @pure @operator("as") fun convert_float2_to_int2(x: float2) -> int2
 @builtin @pure @operator("as") fun convert_float2_to_uint2(x: float2) -> uint2
 @builtin @pure @operator("as") fun convert_float2_to_half2(x: float2) -> half2
+@builtin @pure @operator("as") fun convert_float2_to_double2(x: float2) -> double2
 @builtin @pure @operator("as") fun convert_int2_to_float2(x: int2) -> float2
 @builtin @pure @operator("as") fun convert_int2_to_uint2(x: int2) -> uint2
 @builtin @pure @operator("as") fun convert_int2_to_short2(x: int2) -> short2
+@builtin @pure @operator("as") fun convert_int2_to_long2(x: int2) -> long2
 @builtin @pure @operator("as") fun convert_uint2_to_float2(x: uint2) -> float2
 @builtin @pure @operator("as") fun convert_uint2_to_int2(x: uint2) -> int2
 @builtin @pure @operator("as") fun convert_uint2_to_ushort2(x: uint2) -> ushort2
+@builtin @pure @operator("as") fun convert_uint2_to_ulong2(x: uint2) -> ulong2
 @builtin @pure @operator("as") fun convert_half2_to_float2(x: half2) -> float2
 @builtin @pure @operator("as") fun convert_half2_to_short2(x: half2) -> short2
 @builtin @pure @operator("as") fun convert_half2_to_ushort2(x: half2) -> ushort2
+@builtin @pure @operator("as") fun convert_half2_to_double2(x: half2) -> double2
 @builtin @pure @operator("as") fun convert_short2_to_int2(x: short2) -> int2
 @builtin @pure @operator("as") fun convert_short2_to_half2(x: short2) -> half2
 @builtin @pure @operator("as") fun convert_short2_to_ushort2(x: short2) -> ushort2
+@builtin @pure @operator("as") fun convert_short2_to_long2(x: short2) -> long2
 @builtin @pure @operator("as") fun convert_ushort2_to_uint2(x: ushort2) -> uint2
 @builtin @pure @operator("as") fun convert_ushort2_to_half2(x: ushort2) -> half2
 @builtin @pure @operator("as") fun convert_ushort2_to_short2(x: ushort2) -> short2
+@builtin @pure @operator("as") fun convert_ushort2_to_ulong2(x: ushort2) -> ulong2
+@builtin @pure @operator("as") fun convert_long2_to_int2(x: long2) -> int2
+@builtin @pure @operator("as") fun convert_long2_to_short2(x: long2) -> short2
+@builtin @pure @operator("as") fun convert_long2_to_ulong2(x: long2) -> ulong2
+@builtin @pure @operator("as") fun convert_long2_to_double2(x: long2) -> double2
+@builtin @pure @operator("as") fun convert_ulong2_to_uint2(x: ulong2) -> uint2
+@builtin @pure @operator("as") fun convert_ulong2_to_ushort2(x: ulong2) -> ushort2
+@builtin @pure @operator("as") fun convert_ulong2_to_long2(x: ulong2) -> long2
+@builtin @pure @operator("as") fun convert_ulong2_to_double2(x: ulong2) -> double2
+@builtin @pure @operator("as") fun convert_double2_to_float2(x: double2) -> float2
+@builtin @pure @operator("as") fun convert_double2_to_half2(x: double2) -> half2
+@builtin @pure @operator("as") fun convert_double2_to_long2(x: double2) -> long2
+@builtin @pure @operator("as") fun convert_double2_to_ulong2(x: double2) -> ulong2
 @builtin @pure @operator("as") fun convert_float3_to_int3(x: float3) -> int3
 @builtin @pure @operator("as") fun convert_float3_to_uint3(x: float3) -> uint3
 @builtin @pure @operator("as") fun convert_float3_to_half3(x: float3) -> half3
+@builtin @pure @operator("as") fun convert_float3_to_double3(x: float3) -> double3
 @builtin @pure @operator("as") fun convert_int3_to_float3(x: int3) -> float3
 @builtin @pure @operator("as") fun convert_int3_to_uint3(x: int3) -> uint3
 @builtin @pure @operator("as") fun convert_int3_to_short3(x: int3) -> short3
+@builtin @pure @operator("as") fun convert_int3_to_long3(x: int3) -> long3
 @builtin @pure @operator("as") fun convert_uint3_to_float3(x: uint3) -> float3
 @builtin @pure @operator("as") fun convert_uint3_to_int3(x: uint3) -> int3
 @builtin @pure @operator("as") fun convert_uint3_to_ushort3(x: uint3) -> ushort3
+@builtin @pure @operator("as") fun convert_uint3_to_ulong3(x: uint3) -> ulong3
 @builtin @pure @operator("as") fun convert_half3_to_float3(x: half3) -> float3
 @builtin @pure @operator("as") fun convert_half3_to_short3(x: half3) -> short3
 @builtin @pure @operator("as") fun convert_half3_to_ushort3(x: half3) -> ushort3
+@builtin @pure @operator("as") fun convert_half3_to_double3(x: half3) -> double3
 @builtin @pure @operator("as") fun convert_short3_to_int3(x: short3) -> int3
 @builtin @pure @operator("as") fun convert_short3_to_half3(x: short3) -> half3
 @builtin @pure @operator("as") fun convert_short3_to_ushort3(x: short3) -> ushort3
+@builtin @pure @operator("as") fun convert_short3_to_long3(x: short3) -> long3
 @builtin @pure @operator("as") fun convert_ushort3_to_uint3(x: ushort3) -> uint3
 @builtin @pure @operator("as") fun convert_ushort3_to_half3(x: ushort3) -> half3
 @builtin @pure @operator("as") fun convert_ushort3_to_short3(x: ushort3) -> short3
+@builtin @pure @operator("as") fun convert_ushort3_to_ulong3(x: ushort3) -> ulong3
+@builtin @pure @operator("as") fun convert_long3_to_int3(x: long3) -> int3
+@builtin @pure @operator("as") fun convert_long3_to_short3(x: long3) -> short3
+@builtin @pure @operator("as") fun convert_long3_to_ulong3(x: long3) -> ulong3
+@builtin @pure @operator("as") fun convert_long3_to_double3(x: long3) -> double3
+@builtin @pure @operator("as") fun convert_ulong3_to_uint3(x: ulong3) -> uint3
+@builtin @pure @operator("as") fun convert_ulong3_to_ushort3(x: ulong3) -> ushort3
+@builtin @pure @operator("as") fun convert_ulong3_to_long3(x: ulong3) -> long3
+@builtin @pure @operator("as") fun convert_ulong3_to_double3(x: ulong3) -> double3
+@builtin @pure @operator("as") fun convert_double3_to_float3(x: double3) -> float3
+@builtin @pure @operator("as") fun convert_double3_to_half3(x: double3) -> half3
+@builtin @pure @operator("as") fun convert_double3_to_long3(x: double3) -> long3
+@builtin @pure @operator("as") fun convert_double3_to_ulong3(x: double3) -> ulong3
 @builtin @pure @operator("as") fun convert_float4_to_int4(x: float4) -> int4
 @builtin @pure @operator("as") fun convert_float4_to_uint4(x: float4) -> uint4
 @builtin @pure @operator("as") fun convert_float4_to_half4(x: float4) -> half4
+@builtin @pure @operator("as") fun convert_float4_to_double4(x: float4) -> double4
 @builtin @pure @operator("as") fun convert_int4_to_float4(x: int4) -> float4
 @builtin @pure @operator("as") fun convert_int4_to_uint4(x: int4) -> uint4
 @builtin @pure @operator("as") fun convert_int4_to_short4(x: int4) -> short4
+@builtin @pure @operator("as") fun convert_int4_to_long4(x: int4) -> long4
 @builtin @pure @operator("as") fun convert_uint4_to_float4(x: uint4) -> float4
 @builtin @pure @operator("as") fun convert_uint4_to_int4(x: uint4) -> int4
 @builtin @pure @operator("as") fun convert_uint4_to_ushort4(x: uint4) -> ushort4
+@builtin @pure @operator("as") fun convert_uint4_to_ulong4(x: uint4) -> ulong4
 @builtin @pure @operator("as") fun convert_half4_to_float4(x: half4) -> float4
 @builtin @pure @operator("as") fun convert_half4_to_short4(x: half4) -> short4
 @builtin @pure @operator("as") fun convert_half4_to_ushort4(x: half4) -> ushort4
+@builtin @pure @operator("as") fun convert_half4_to_double4(x: half4) -> double4
 @builtin @pure @operator("as") fun convert_short4_to_int4(x: short4) -> int4
 @builtin @pure @operator("as") fun convert_short4_to_half4(x: short4) -> half4
 @builtin @pure @operator("as") fun convert_short4_to_ushort4(x: short4) -> ushort4
+@builtin @pure @operator("as") fun convert_short4_to_long4(x: short4) -> long4
 @builtin @pure @operator("as") fun convert_ushort4_to_uint4(x: ushort4) -> uint4
 @builtin @pure @operator("as") fun convert_ushort4_to_half4(x: ushort4) -> half4
 @builtin @pure @operator("as") fun convert_ushort4_to_short4(x: ushort4) -> short4
+@builtin @pure @operator("as") fun convert_ushort4_to_ulong4(x: ushort4) -> ulong4
+@builtin @pure @operator("as") fun convert_long4_to_int4(x: long4) -> int4
+@builtin @pure @operator("as") fun convert_long4_to_short4(x: long4) -> short4
+@builtin @pure @operator("as") fun convert_long4_to_ulong4(x: long4) -> ulong4
+@builtin @pure @operator("as") fun convert_long4_to_double4(x: long4) -> double4
+@builtin @pure @operator("as") fun convert_ulong4_to_uint4(x: ulong4) -> uint4
+@builtin @pure @operator("as") fun convert_ulong4_to_ushort4(x: ulong4) -> ushort4
+@builtin @pure @operator("as") fun convert_ulong4_to_long4(x: ulong4) -> long4
+@builtin @pure @operator("as") fun convert_ulong4_to_double4(x: ulong4) -> double4
+@builtin @pure @operator("as") fun convert_double4_to_float4(x: double4) -> float4
+@builtin @pure @operator("as") fun convert_double4_to_half4(x: double4) -> half4
+@builtin @pure @operator("as") fun convert_double4_to_long4(x: double4) -> long4
+@builtin @pure @operator("as") fun convert_double4_to_ulong4(x: double4) -> ulong4
 
 // `T(x)` is `x as T` for every conversion above, and `x` where it is a `T` already (CHK-396)
 @builtin @pure fun float(x: float) -> float
 @builtin @pure fun float(x: int) -> float
 @builtin @pure fun float(x: uint) -> float
 @builtin @pure fun float(x: half) -> float
+@builtin @pure fun float(x: double) -> float
 @builtin @pure fun int(x: float) -> int
 @builtin @pure fun int(x: int) -> int
 @builtin @pure fun int(x: uint) -> int
 @builtin @pure fun int(x: short) -> int
+@builtin @pure fun int(x: long) -> int
 @builtin @pure fun uint(x: float) -> uint
 @builtin @pure fun uint(x: int) -> uint
 @builtin @pure fun uint(x: uint) -> uint
 @builtin @pure fun uint(x: ushort) -> uint
+@builtin @pure fun uint(x: ulong) -> uint
 @builtin @pure fun half(x: float) -> half
 @builtin @pure fun half(x: half) -> half
 @builtin @pure fun half(x: short) -> half
 @builtin @pure fun half(x: ushort) -> half
+@builtin @pure fun half(x: double) -> half
 @builtin @pure fun short(x: int) -> short
 @builtin @pure fun short(x: half) -> short
 @builtin @pure fun short(x: short) -> short
 @builtin @pure fun short(x: ushort) -> short
+@builtin @pure fun short(x: long) -> short
 @builtin @pure fun ushort(x: uint) -> ushort
 @builtin @pure fun ushort(x: half) -> ushort
 @builtin @pure fun ushort(x: short) -> ushort
 @builtin @pure fun ushort(x: ushort) -> ushort
+@builtin @pure fun ushort(x: ulong) -> ushort
+@builtin @pure fun long(x: int) -> long
+@builtin @pure fun long(x: short) -> long
+@builtin @pure fun long(x: long) -> long
+@builtin @pure fun long(x: ulong) -> long
+@builtin @pure fun long(x: double) -> long
+@builtin @pure fun ulong(x: uint) -> ulong
+@builtin @pure fun ulong(x: ushort) -> ulong
+@builtin @pure fun ulong(x: long) -> ulong
+@builtin @pure fun ulong(x: ulong) -> ulong
+@builtin @pure fun ulong(x: double) -> ulong
+@builtin @pure fun double(x: float) -> double
+@builtin @pure fun double(x: half) -> double
+@builtin @pure fun double(x: long) -> double
+@builtin @pure fun double(x: ulong) -> double
+@builtin @pure fun double(x: double) -> double
 @builtin @pure fun float2(x: float2) -> float2
 @builtin @pure fun float2(x: int2) -> float2
 @builtin @pure fun float2(x: uint2) -> float2
 @builtin @pure fun float2(x: half2) -> float2
+@builtin @pure fun float2(x: double2) -> float2
 @builtin @pure fun int2(x: float2) -> int2
 @builtin @pure fun int2(x: int2) -> int2
 @builtin @pure fun int2(x: uint2) -> int2
 @builtin @pure fun int2(x: short2) -> int2
+@builtin @pure fun int2(x: long2) -> int2
 @builtin @pure fun uint2(x: float2) -> uint2
 @builtin @pure fun uint2(x: int2) -> uint2
 @builtin @pure fun uint2(x: uint2) -> uint2
 @builtin @pure fun uint2(x: ushort2) -> uint2
+@builtin @pure fun uint2(x: ulong2) -> uint2
 @builtin @pure fun half2(x: float2) -> half2
 @builtin @pure fun half2(x: half2) -> half2
 @builtin @pure fun half2(x: short2) -> half2
 @builtin @pure fun half2(x: ushort2) -> half2
+@builtin @pure fun half2(x: double2) -> half2
 @builtin @pure fun short2(x: int2) -> short2
 @builtin @pure fun short2(x: half2) -> short2
 @builtin @pure fun short2(x: short2) -> short2
 @builtin @pure fun short2(x: ushort2) -> short2
+@builtin @pure fun short2(x: long2) -> short2
 @builtin @pure fun ushort2(x: uint2) -> ushort2
 @builtin @pure fun ushort2(x: half2) -> ushort2
 @builtin @pure fun ushort2(x: short2) -> ushort2
 @builtin @pure fun ushort2(x: ushort2) -> ushort2
+@builtin @pure fun ushort2(x: ulong2) -> ushort2
+@builtin @pure fun long2(x: int2) -> long2
+@builtin @pure fun long2(x: short2) -> long2
+@builtin @pure fun long2(x: long2) -> long2
+@builtin @pure fun long2(x: ulong2) -> long2
+@builtin @pure fun long2(x: double2) -> long2
+@builtin @pure fun ulong2(x: uint2) -> ulong2
+@builtin @pure fun ulong2(x: ushort2) -> ulong2
+@builtin @pure fun ulong2(x: long2) -> ulong2
+@builtin @pure fun ulong2(x: ulong2) -> ulong2
+@builtin @pure fun ulong2(x: double2) -> ulong2
+@builtin @pure fun double2(x: float2) -> double2
+@builtin @pure fun double2(x: half2) -> double2
+@builtin @pure fun double2(x: long2) -> double2
+@builtin @pure fun double2(x: ulong2) -> double2
+@builtin @pure fun double2(x: double2) -> double2
 @builtin @pure fun float3(x: float3) -> float3
 @builtin @pure fun float3(x: int3) -> float3
 @builtin @pure fun float3(x: uint3) -> float3
 @builtin @pure fun float3(x: half3) -> float3
+@builtin @pure fun float3(x: double3) -> float3
 @builtin @pure fun int3(x: float3) -> int3
 @builtin @pure fun int3(x: int3) -> int3
 @builtin @pure fun int3(x: uint3) -> int3
 @builtin @pure fun int3(x: short3) -> int3
+@builtin @pure fun int3(x: long3) -> int3
 @builtin @pure fun uint3(x: float3) -> uint3
 @builtin @pure fun uint3(x: int3) -> uint3
 @builtin @pure fun uint3(x: uint3) -> uint3
 @builtin @pure fun uint3(x: ushort3) -> uint3
+@builtin @pure fun uint3(x: ulong3) -> uint3
 @builtin @pure fun half3(x: float3) -> half3
 @builtin @pure fun half3(x: half3) -> half3
 @builtin @pure fun half3(x: short3) -> half3
 @builtin @pure fun half3(x: ushort3) -> half3
+@builtin @pure fun half3(x: double3) -> half3
 @builtin @pure fun short3(x: int3) -> short3
 @builtin @pure fun short3(x: half3) -> short3
 @builtin @pure fun short3(x: short3) -> short3
 @builtin @pure fun short3(x: ushort3) -> short3
+@builtin @pure fun short3(x: long3) -> short3
 @builtin @pure fun ushort3(x: uint3) -> ushort3
 @builtin @pure fun ushort3(x: half3) -> ushort3
 @builtin @pure fun ushort3(x: short3) -> ushort3
 @builtin @pure fun ushort3(x: ushort3) -> ushort3
+@builtin @pure fun ushort3(x: ulong3) -> ushort3
+@builtin @pure fun long3(x: int3) -> long3
+@builtin @pure fun long3(x: short3) -> long3
+@builtin @pure fun long3(x: long3) -> long3
+@builtin @pure fun long3(x: ulong3) -> long3
+@builtin @pure fun long3(x: double3) -> long3
+@builtin @pure fun ulong3(x: uint3) -> ulong3
+@builtin @pure fun ulong3(x: ushort3) -> ulong3
+@builtin @pure fun ulong3(x: long3) -> ulong3
+@builtin @pure fun ulong3(x: ulong3) -> ulong3
+@builtin @pure fun ulong3(x: double3) -> ulong3
+@builtin @pure fun double3(x: float3) -> double3
+@builtin @pure fun double3(x: half3) -> double3
+@builtin @pure fun double3(x: long3) -> double3
+@builtin @pure fun double3(x: ulong3) -> double3
+@builtin @pure fun double3(x: double3) -> double3
 @builtin @pure fun float4(x: float4) -> float4
 @builtin @pure fun float4(x: int4) -> float4
 @builtin @pure fun float4(x: uint4) -> float4
 @builtin @pure fun float4(x: half4) -> float4
+@builtin @pure fun float4(x: double4) -> float4
 @builtin @pure fun int4(x: float4) -> int4
 @builtin @pure fun int4(x: int4) -> int4
 @builtin @pure fun int4(x: uint4) -> int4
 @builtin @pure fun int4(x: short4) -> int4
+@builtin @pure fun int4(x: long4) -> int4
 @builtin @pure fun uint4(x: float4) -> uint4
 @builtin @pure fun uint4(x: int4) -> uint4
 @builtin @pure fun uint4(x: uint4) -> uint4
 @builtin @pure fun uint4(x: ushort4) -> uint4
+@builtin @pure fun uint4(x: ulong4) -> uint4
 @builtin @pure fun half4(x: float4) -> half4
 @builtin @pure fun half4(x: half4) -> half4
 @builtin @pure fun half4(x: short4) -> half4
 @builtin @pure fun half4(x: ushort4) -> half4
+@builtin @pure fun half4(x: double4) -> half4
 @builtin @pure fun short4(x: int4) -> short4
 @builtin @pure fun short4(x: half4) -> short4
 @builtin @pure fun short4(x: short4) -> short4
 @builtin @pure fun short4(x: ushort4) -> short4
+@builtin @pure fun short4(x: long4) -> short4
 @builtin @pure fun ushort4(x: uint4) -> ushort4
 @builtin @pure fun ushort4(x: half4) -> ushort4
 @builtin @pure fun ushort4(x: short4) -> ushort4
 @builtin @pure fun ushort4(x: ushort4) -> ushort4
+@builtin @pure fun ushort4(x: ulong4) -> ushort4
+@builtin @pure fun long4(x: int4) -> long4
+@builtin @pure fun long4(x: short4) -> long4
+@builtin @pure fun long4(x: long4) -> long4
+@builtin @pure fun long4(x: ulong4) -> long4
+@builtin @pure fun long4(x: double4) -> long4
+@builtin @pure fun ulong4(x: uint4) -> ulong4
+@builtin @pure fun ulong4(x: ushort4) -> ulong4
+@builtin @pure fun ulong4(x: long4) -> ulong4
+@builtin @pure fun ulong4(x: ulong4) -> ulong4
+@builtin @pure fun ulong4(x: double4) -> ulong4
+@builtin @pure fun double4(x: float4) -> double4
+@builtin @pure fun double4(x: half4) -> double4
+@builtin @pure fun double4(x: long4) -> double4
+@builtin @pure fun double4(x: ulong4) -> double4
+@builtin @pure fun double4(x: double4) -> double4
 
 // `b as T` of a bool and its vectors, to a float, an int or a uint: 1 where true and 0 where not
 @builtin @pure @operator("as") fun convert_bool_to_float(x: bool) -> float
@@ -1446,6 +1793,275 @@
 @builtin @pure @operator("^") fun bit_xor_scalar_uint4(a: uint, b: uint4) -> uint4
 @builtin @pure @operator("<<") fun shift_left_scalar_uint4(a: uint, b: uint4) -> uint4
 @builtin @pure @operator(">>") fun shift_right_scalar_uint4(a: uint, b: uint4) -> uint4
+
+// long, ulong and double (CHK-450): arithmetic componentwise, a vector beside its scalar from either side,
+// and the integers' `/` and `%` truncating toward zero, with no value for a zero divisor
+@builtin @pure @operator("+") fun add_long(a: long, b: long) -> long
+@builtin @pure @operator("-") fun subtract_long(a: long, b: long) -> long
+@builtin @pure @operator("*") fun multiply_long(a: long, b: long) -> long
+@builtin @pure @operator("/") fun divide_long(a: long, b: long) -> long
+@builtin @pure @operator("%") fun remainder_long(a: long, b: long) -> long
+@builtin @pure @operator("-") fun negate_long(x: long) -> long
+@builtin @pure fun abs(x: long) -> long
+@builtin @pure fun min(a: long, b: long) -> long
+@builtin @pure fun max(a: long, b: long) -> long
+@builtin @pure fun clamp(x: long, low: long, high: long) -> long
+@builtin @pure @operator("+") fun add_long2(a: long2, b: long2) -> long2
+@builtin @pure @operator("-") fun subtract_long2(a: long2, b: long2) -> long2
+@builtin @pure @operator("*") fun multiply_long2(a: long2, b: long2) -> long2
+@builtin @pure @operator("/") fun divide_long2(a: long2, b: long2) -> long2
+@builtin @pure @operator("%") fun remainder_long2(a: long2, b: long2) -> long2
+@builtin @pure @operator("-") fun negate_long2(x: long2) -> long2
+@builtin @pure fun abs(x: long2) -> long2
+@builtin @pure fun min(a: long2, b: long2) -> long2
+@builtin @pure fun max(a: long2, b: long2) -> long2
+@builtin @pure fun clamp(x: long2, low: long2, high: long2) -> long2
+@builtin @pure @operator("+") fun add_long2_scalar(a: long2, b: long) -> long2
+@builtin @pure @operator("-") fun subtract_long2_scalar(a: long2, b: long) -> long2
+@builtin @pure @operator("*") fun multiply_long2_scalar(a: long2, b: long) -> long2
+@builtin @pure @operator("/") fun divide_long2_scalar(a: long2, b: long) -> long2
+@builtin @pure @operator("%") fun remainder_long2_scalar(a: long2, b: long) -> long2
+@builtin @pure @operator("+") fun add_scalar_long2(a: long, b: long2) -> long2
+@builtin @pure @operator("-") fun subtract_scalar_long2(a: long, b: long2) -> long2
+@builtin @pure @operator("*") fun multiply_scalar_long2(a: long, b: long2) -> long2
+@builtin @pure @operator("/") fun divide_scalar_long2(a: long, b: long2) -> long2
+@builtin @pure @operator("%") fun remainder_scalar_long2(a: long, b: long2) -> long2
+@builtin @pure @operator("+") fun add_long3(a: long3, b: long3) -> long3
+@builtin @pure @operator("-") fun subtract_long3(a: long3, b: long3) -> long3
+@builtin @pure @operator("*") fun multiply_long3(a: long3, b: long3) -> long3
+@builtin @pure @operator("/") fun divide_long3(a: long3, b: long3) -> long3
+@builtin @pure @operator("%") fun remainder_long3(a: long3, b: long3) -> long3
+@builtin @pure @operator("-") fun negate_long3(x: long3) -> long3
+@builtin @pure fun abs(x: long3) -> long3
+@builtin @pure fun min(a: long3, b: long3) -> long3
+@builtin @pure fun max(a: long3, b: long3) -> long3
+@builtin @pure fun clamp(x: long3, low: long3, high: long3) -> long3
+@builtin @pure @operator("+") fun add_long3_scalar(a: long3, b: long) -> long3
+@builtin @pure @operator("-") fun subtract_long3_scalar(a: long3, b: long) -> long3
+@builtin @pure @operator("*") fun multiply_long3_scalar(a: long3, b: long) -> long3
+@builtin @pure @operator("/") fun divide_long3_scalar(a: long3, b: long) -> long3
+@builtin @pure @operator("%") fun remainder_long3_scalar(a: long3, b: long) -> long3
+@builtin @pure @operator("+") fun add_scalar_long3(a: long, b: long3) -> long3
+@builtin @pure @operator("-") fun subtract_scalar_long3(a: long, b: long3) -> long3
+@builtin @pure @operator("*") fun multiply_scalar_long3(a: long, b: long3) -> long3
+@builtin @pure @operator("/") fun divide_scalar_long3(a: long, b: long3) -> long3
+@builtin @pure @operator("%") fun remainder_scalar_long3(a: long, b: long3) -> long3
+@builtin @pure @operator("+") fun add_long4(a: long4, b: long4) -> long4
+@builtin @pure @operator("-") fun subtract_long4(a: long4, b: long4) -> long4
+@builtin @pure @operator("*") fun multiply_long4(a: long4, b: long4) -> long4
+@builtin @pure @operator("/") fun divide_long4(a: long4, b: long4) -> long4
+@builtin @pure @operator("%") fun remainder_long4(a: long4, b: long4) -> long4
+@builtin @pure @operator("-") fun negate_long4(x: long4) -> long4
+@builtin @pure fun abs(x: long4) -> long4
+@builtin @pure fun min(a: long4, b: long4) -> long4
+@builtin @pure fun max(a: long4, b: long4) -> long4
+@builtin @pure fun clamp(x: long4, low: long4, high: long4) -> long4
+@builtin @pure @operator("+") fun add_long4_scalar(a: long4, b: long) -> long4
+@builtin @pure @operator("-") fun subtract_long4_scalar(a: long4, b: long) -> long4
+@builtin @pure @operator("*") fun multiply_long4_scalar(a: long4, b: long) -> long4
+@builtin @pure @operator("/") fun divide_long4_scalar(a: long4, b: long) -> long4
+@builtin @pure @operator("%") fun remainder_long4_scalar(a: long4, b: long) -> long4
+@builtin @pure @operator("+") fun add_scalar_long4(a: long, b: long4) -> long4
+@builtin @pure @operator("-") fun subtract_scalar_long4(a: long, b: long4) -> long4
+@builtin @pure @operator("*") fun multiply_scalar_long4(a: long, b: long4) -> long4
+@builtin @pure @operator("/") fun divide_scalar_long4(a: long, b: long4) -> long4
+@builtin @pure @operator("%") fun remainder_scalar_long4(a: long, b: long4) -> long4
+
+// long: the comparisons of a scalar, and a double's `!=` true for a NaN (EMIT-186)
+@builtin @pure @operator("<") fun less_long(a: long, b: long) -> bool
+@builtin @pure @operator("<=") fun less_equal_long(a: long, b: long) -> bool
+@builtin @pure @operator(">") fun greater_long(a: long, b: long) -> bool
+@builtin @pure @operator(">=") fun greater_equal_long(a: long, b: long) -> bool
+@builtin @pure @operator("==") fun equal_long(a: long, b: long) -> bool
+@builtin @pure @operator("!=") fun not_equal_long(a: long, b: long) -> bool
+@builtin @pure @operator("+") fun add_ulong(a: ulong, b: ulong) -> ulong
+@builtin @pure @operator("-") fun subtract_ulong(a: ulong, b: ulong) -> ulong
+@builtin @pure @operator("*") fun multiply_ulong(a: ulong, b: ulong) -> ulong
+@builtin @pure @operator("/") fun divide_ulong(a: ulong, b: ulong) -> ulong
+@builtin @pure @operator("%") fun remainder_ulong(a: ulong, b: ulong) -> ulong
+@builtin @pure fun min(a: ulong, b: ulong) -> ulong
+@builtin @pure fun max(a: ulong, b: ulong) -> ulong
+@builtin @pure fun clamp(x: ulong, low: ulong, high: ulong) -> ulong
+@builtin @pure @operator("+") fun add_ulong2(a: ulong2, b: ulong2) -> ulong2
+@builtin @pure @operator("-") fun subtract_ulong2(a: ulong2, b: ulong2) -> ulong2
+@builtin @pure @operator("*") fun multiply_ulong2(a: ulong2, b: ulong2) -> ulong2
+@builtin @pure @operator("/") fun divide_ulong2(a: ulong2, b: ulong2) -> ulong2
+@builtin @pure @operator("%") fun remainder_ulong2(a: ulong2, b: ulong2) -> ulong2
+@builtin @pure fun min(a: ulong2, b: ulong2) -> ulong2
+@builtin @pure fun max(a: ulong2, b: ulong2) -> ulong2
+@builtin @pure fun clamp(x: ulong2, low: ulong2, high: ulong2) -> ulong2
+@builtin @pure @operator("+") fun add_ulong2_scalar(a: ulong2, b: ulong) -> ulong2
+@builtin @pure @operator("-") fun subtract_ulong2_scalar(a: ulong2, b: ulong) -> ulong2
+@builtin @pure @operator("*") fun multiply_ulong2_scalar(a: ulong2, b: ulong) -> ulong2
+@builtin @pure @operator("/") fun divide_ulong2_scalar(a: ulong2, b: ulong) -> ulong2
+@builtin @pure @operator("%") fun remainder_ulong2_scalar(a: ulong2, b: ulong) -> ulong2
+@builtin @pure @operator("+") fun add_scalar_ulong2(a: ulong, b: ulong2) -> ulong2
+@builtin @pure @operator("-") fun subtract_scalar_ulong2(a: ulong, b: ulong2) -> ulong2
+@builtin @pure @operator("*") fun multiply_scalar_ulong2(a: ulong, b: ulong2) -> ulong2
+@builtin @pure @operator("/") fun divide_scalar_ulong2(a: ulong, b: ulong2) -> ulong2
+@builtin @pure @operator("%") fun remainder_scalar_ulong2(a: ulong, b: ulong2) -> ulong2
+@builtin @pure @operator("+") fun add_ulong3(a: ulong3, b: ulong3) -> ulong3
+@builtin @pure @operator("-") fun subtract_ulong3(a: ulong3, b: ulong3) -> ulong3
+@builtin @pure @operator("*") fun multiply_ulong3(a: ulong3, b: ulong3) -> ulong3
+@builtin @pure @operator("/") fun divide_ulong3(a: ulong3, b: ulong3) -> ulong3
+@builtin @pure @operator("%") fun remainder_ulong3(a: ulong3, b: ulong3) -> ulong3
+@builtin @pure fun min(a: ulong3, b: ulong3) -> ulong3
+@builtin @pure fun max(a: ulong3, b: ulong3) -> ulong3
+@builtin @pure fun clamp(x: ulong3, low: ulong3, high: ulong3) -> ulong3
+@builtin @pure @operator("+") fun add_ulong3_scalar(a: ulong3, b: ulong) -> ulong3
+@builtin @pure @operator("-") fun subtract_ulong3_scalar(a: ulong3, b: ulong) -> ulong3
+@builtin @pure @operator("*") fun multiply_ulong3_scalar(a: ulong3, b: ulong) -> ulong3
+@builtin @pure @operator("/") fun divide_ulong3_scalar(a: ulong3, b: ulong) -> ulong3
+@builtin @pure @operator("%") fun remainder_ulong3_scalar(a: ulong3, b: ulong) -> ulong3
+@builtin @pure @operator("+") fun add_scalar_ulong3(a: ulong, b: ulong3) -> ulong3
+@builtin @pure @operator("-") fun subtract_scalar_ulong3(a: ulong, b: ulong3) -> ulong3
+@builtin @pure @operator("*") fun multiply_scalar_ulong3(a: ulong, b: ulong3) -> ulong3
+@builtin @pure @operator("/") fun divide_scalar_ulong3(a: ulong, b: ulong3) -> ulong3
+@builtin @pure @operator("%") fun remainder_scalar_ulong3(a: ulong, b: ulong3) -> ulong3
+@builtin @pure @operator("+") fun add_ulong4(a: ulong4, b: ulong4) -> ulong4
+@builtin @pure @operator("-") fun subtract_ulong4(a: ulong4, b: ulong4) -> ulong4
+@builtin @pure @operator("*") fun multiply_ulong4(a: ulong4, b: ulong4) -> ulong4
+@builtin @pure @operator("/") fun divide_ulong4(a: ulong4, b: ulong4) -> ulong4
+@builtin @pure @operator("%") fun remainder_ulong4(a: ulong4, b: ulong4) -> ulong4
+@builtin @pure fun min(a: ulong4, b: ulong4) -> ulong4
+@builtin @pure fun max(a: ulong4, b: ulong4) -> ulong4
+@builtin @pure fun clamp(x: ulong4, low: ulong4, high: ulong4) -> ulong4
+@builtin @pure @operator("+") fun add_ulong4_scalar(a: ulong4, b: ulong) -> ulong4
+@builtin @pure @operator("-") fun subtract_ulong4_scalar(a: ulong4, b: ulong) -> ulong4
+@builtin @pure @operator("*") fun multiply_ulong4_scalar(a: ulong4, b: ulong) -> ulong4
+@builtin @pure @operator("/") fun divide_ulong4_scalar(a: ulong4, b: ulong) -> ulong4
+@builtin @pure @operator("%") fun remainder_ulong4_scalar(a: ulong4, b: ulong) -> ulong4
+@builtin @pure @operator("+") fun add_scalar_ulong4(a: ulong, b: ulong4) -> ulong4
+@builtin @pure @operator("-") fun subtract_scalar_ulong4(a: ulong, b: ulong4) -> ulong4
+@builtin @pure @operator("*") fun multiply_scalar_ulong4(a: ulong, b: ulong4) -> ulong4
+@builtin @pure @operator("/") fun divide_scalar_ulong4(a: ulong, b: ulong4) -> ulong4
+@builtin @pure @operator("%") fun remainder_scalar_ulong4(a: ulong, b: ulong4) -> ulong4
+
+// ulong: the comparisons of a scalar, and a double's `!=` true for a NaN (EMIT-186)
+@builtin @pure @operator("<") fun less_ulong(a: ulong, b: ulong) -> bool
+@builtin @pure @operator("<=") fun less_equal_ulong(a: ulong, b: ulong) -> bool
+@builtin @pure @operator(">") fun greater_ulong(a: ulong, b: ulong) -> bool
+@builtin @pure @operator(">=") fun greater_equal_ulong(a: ulong, b: ulong) -> bool
+@builtin @pure @operator("==") fun equal_ulong(a: ulong, b: ulong) -> bool
+@builtin @pure @operator("!=") fun not_equal_ulong(a: ulong, b: ulong) -> bool
+@builtin @pure @operator("+") fun add_double(a: double, b: double) -> double
+@builtin @pure @operator("-") fun subtract_double(a: double, b: double) -> double
+@builtin @pure @operator("*") fun multiply_double(a: double, b: double) -> double
+@builtin @pure @operator("/") fun divide_double(a: double, b: double) -> double
+@builtin @pure @operator("-") fun negate_double(x: double) -> double
+@builtin @pure fun abs(x: double) -> double
+@builtin @pure fun min(a: double, b: double) -> double
+@builtin @pure fun max(a: double, b: double) -> double
+@builtin @pure fun clamp(x: double, low: double, high: double) -> double
+@builtin @pure @operator("+") fun add_double2(a: double2, b: double2) -> double2
+@builtin @pure @operator("-") fun subtract_double2(a: double2, b: double2) -> double2
+@builtin @pure @operator("*") fun multiply_double2(a: double2, b: double2) -> double2
+@builtin @pure @operator("/") fun divide_double2(a: double2, b: double2) -> double2
+@builtin @pure @operator("-") fun negate_double2(x: double2) -> double2
+@builtin @pure fun abs(x: double2) -> double2
+@builtin @pure fun min(a: double2, b: double2) -> double2
+@builtin @pure fun max(a: double2, b: double2) -> double2
+@builtin @pure fun clamp(x: double2, low: double2, high: double2) -> double2
+@builtin @pure @operator("+") fun add_double2_scalar(a: double2, b: double) -> double2
+@builtin @pure @operator("-") fun subtract_double2_scalar(a: double2, b: double) -> double2
+@builtin @pure @operator("*") fun multiply_double2_scalar(a: double2, b: double) -> double2
+@builtin @pure @operator("/") fun divide_double2_scalar(a: double2, b: double) -> double2
+@builtin @pure @operator("+") fun add_scalar_double2(a: double, b: double2) -> double2
+@builtin @pure @operator("-") fun subtract_scalar_double2(a: double, b: double2) -> double2
+@builtin @pure @operator("*") fun multiply_scalar_double2(a: double, b: double2) -> double2
+@builtin @pure @operator("/") fun divide_scalar_double2(a: double, b: double2) -> double2
+@builtin @pure @operator("+") fun add_double3(a: double3, b: double3) -> double3
+@builtin @pure @operator("-") fun subtract_double3(a: double3, b: double3) -> double3
+@builtin @pure @operator("*") fun multiply_double3(a: double3, b: double3) -> double3
+@builtin @pure @operator("/") fun divide_double3(a: double3, b: double3) -> double3
+@builtin @pure @operator("-") fun negate_double3(x: double3) -> double3
+@builtin @pure fun abs(x: double3) -> double3
+@builtin @pure fun min(a: double3, b: double3) -> double3
+@builtin @pure fun max(a: double3, b: double3) -> double3
+@builtin @pure fun clamp(x: double3, low: double3, high: double3) -> double3
+@builtin @pure @operator("+") fun add_double3_scalar(a: double3, b: double) -> double3
+@builtin @pure @operator("-") fun subtract_double3_scalar(a: double3, b: double) -> double3
+@builtin @pure @operator("*") fun multiply_double3_scalar(a: double3, b: double) -> double3
+@builtin @pure @operator("/") fun divide_double3_scalar(a: double3, b: double) -> double3
+@builtin @pure @operator("+") fun add_scalar_double3(a: double, b: double3) -> double3
+@builtin @pure @operator("-") fun subtract_scalar_double3(a: double, b: double3) -> double3
+@builtin @pure @operator("*") fun multiply_scalar_double3(a: double, b: double3) -> double3
+@builtin @pure @operator("/") fun divide_scalar_double3(a: double, b: double3) -> double3
+@builtin @pure @operator("+") fun add_double4(a: double4, b: double4) -> double4
+@builtin @pure @operator("-") fun subtract_double4(a: double4, b: double4) -> double4
+@builtin @pure @operator("*") fun multiply_double4(a: double4, b: double4) -> double4
+@builtin @pure @operator("/") fun divide_double4(a: double4, b: double4) -> double4
+@builtin @pure @operator("-") fun negate_double4(x: double4) -> double4
+@builtin @pure fun abs(x: double4) -> double4
+@builtin @pure fun min(a: double4, b: double4) -> double4
+@builtin @pure fun max(a: double4, b: double4) -> double4
+@builtin @pure fun clamp(x: double4, low: double4, high: double4) -> double4
+@builtin @pure @operator("+") fun add_double4_scalar(a: double4, b: double) -> double4
+@builtin @pure @operator("-") fun subtract_double4_scalar(a: double4, b: double) -> double4
+@builtin @pure @operator("*") fun multiply_double4_scalar(a: double4, b: double) -> double4
+@builtin @pure @operator("/") fun divide_double4_scalar(a: double4, b: double) -> double4
+@builtin @pure @operator("+") fun add_scalar_double4(a: double, b: double4) -> double4
+@builtin @pure @operator("-") fun subtract_scalar_double4(a: double, b: double4) -> double4
+@builtin @pure @operator("*") fun multiply_scalar_double4(a: double, b: double4) -> double4
+@builtin @pure @operator("/") fun divide_scalar_double4(a: double, b: double4) -> double4
+
+// double: the comparisons of a scalar, and a double's `!=` true for a NaN (EMIT-186)
+@builtin @pure @operator("<") fun less_double(a: double, b: double) -> bool
+@builtin @pure @operator("<=") fun less_equal_double(a: double, b: double) -> bool
+@builtin @pure @operator(">") fun greater_double(a: double, b: double) -> bool
+@builtin @pure @operator(">=") fun greater_equal_double(a: double, b: double) -> bool
+@builtin @pure @operator("==") fun equal_double(a: double, b: double) -> bool
+@builtin @pure @operator("!=") fun not_equal_double(a: double, b: double) -> bool
+
+// bits of long, ulong and their vectors, componentwise; only a count's low six bits count (CHK-452)
+@builtin @pure @operator("&") fun bit_and_long(a: long, b: long) -> long
+@builtin @pure @operator("|") fun bit_or_long(a: long, b: long) -> long
+@builtin @pure @operator("^") fun bit_xor_long(a: long, b: long) -> long
+@builtin @pure @operator("<<") fun shift_left_long(a: long, b: long) -> long
+@builtin @pure @operator(">>") fun shift_right_long(a: long, b: long) -> long
+@builtin @pure @operator("~") fun bit_not_long(x: long) -> long
+@builtin @pure @operator("&") fun bit_and_long2(a: long2, b: long2) -> long2
+@builtin @pure @operator("|") fun bit_or_long2(a: long2, b: long2) -> long2
+@builtin @pure @operator("^") fun bit_xor_long2(a: long2, b: long2) -> long2
+@builtin @pure @operator("<<") fun shift_left_long2(a: long2, b: long2) -> long2
+@builtin @pure @operator(">>") fun shift_right_long2(a: long2, b: long2) -> long2
+@builtin @pure @operator("~") fun bit_not_long2(x: long2) -> long2
+@builtin @pure @operator("&") fun bit_and_long3(a: long3, b: long3) -> long3
+@builtin @pure @operator("|") fun bit_or_long3(a: long3, b: long3) -> long3
+@builtin @pure @operator("^") fun bit_xor_long3(a: long3, b: long3) -> long3
+@builtin @pure @operator("<<") fun shift_left_long3(a: long3, b: long3) -> long3
+@builtin @pure @operator(">>") fun shift_right_long3(a: long3, b: long3) -> long3
+@builtin @pure @operator("~") fun bit_not_long3(x: long3) -> long3
+@builtin @pure @operator("&") fun bit_and_long4(a: long4, b: long4) -> long4
+@builtin @pure @operator("|") fun bit_or_long4(a: long4, b: long4) -> long4
+@builtin @pure @operator("^") fun bit_xor_long4(a: long4, b: long4) -> long4
+@builtin @pure @operator("<<") fun shift_left_long4(a: long4, b: long4) -> long4
+@builtin @pure @operator(">>") fun shift_right_long4(a: long4, b: long4) -> long4
+@builtin @pure @operator("~") fun bit_not_long4(x: long4) -> long4
+@builtin @pure @operator("&") fun bit_and_ulong(a: ulong, b: ulong) -> ulong
+@builtin @pure @operator("|") fun bit_or_ulong(a: ulong, b: ulong) -> ulong
+@builtin @pure @operator("^") fun bit_xor_ulong(a: ulong, b: ulong) -> ulong
+@builtin @pure @operator("<<") fun shift_left_ulong(a: ulong, b: ulong) -> ulong
+@builtin @pure @operator(">>") fun shift_right_ulong(a: ulong, b: ulong) -> ulong
+@builtin @pure @operator("~") fun bit_not_ulong(x: ulong) -> ulong
+@builtin @pure @operator("&") fun bit_and_ulong2(a: ulong2, b: ulong2) -> ulong2
+@builtin @pure @operator("|") fun bit_or_ulong2(a: ulong2, b: ulong2) -> ulong2
+@builtin @pure @operator("^") fun bit_xor_ulong2(a: ulong2, b: ulong2) -> ulong2
+@builtin @pure @operator("<<") fun shift_left_ulong2(a: ulong2, b: ulong2) -> ulong2
+@builtin @pure @operator(">>") fun shift_right_ulong2(a: ulong2, b: ulong2) -> ulong2
+@builtin @pure @operator("~") fun bit_not_ulong2(x: ulong2) -> ulong2
+@builtin @pure @operator("&") fun bit_and_ulong3(a: ulong3, b: ulong3) -> ulong3
+@builtin @pure @operator("|") fun bit_or_ulong3(a: ulong3, b: ulong3) -> ulong3
+@builtin @pure @operator("^") fun bit_xor_ulong3(a: ulong3, b: ulong3) -> ulong3
+@builtin @pure @operator("<<") fun shift_left_ulong3(a: ulong3, b: ulong3) -> ulong3
+@builtin @pure @operator(">>") fun shift_right_ulong3(a: ulong3, b: ulong3) -> ulong3
+@builtin @pure @operator("~") fun bit_not_ulong3(x: ulong3) -> ulong3
+@builtin @pure @operator("&") fun bit_and_ulong4(a: ulong4, b: ulong4) -> ulong4
+@builtin @pure @operator("|") fun bit_or_ulong4(a: ulong4, b: ulong4) -> ulong4
+@builtin @pure @operator("^") fun bit_xor_ulong4(a: ulong4, b: ulong4) -> ulong4
+@builtin @pure @operator("<<") fun shift_left_ulong4(a: ulong4, b: ulong4) -> ulong4
+@builtin @pure @operator(">>") fun shift_right_ulong4(a: ulong4, b: ulong4) -> ulong4
+@builtin @pure @operator("~") fun bit_not_ulong4(x: ulong4) -> ulong4
 
 // the maths of float, half and their plain vectors, componentwise; `round` is ties to even
 // everywhere, and a value a target leaves indeterminate - pow of a negative base, asin of 2 - has no behaviour
@@ -2565,6 +3181,30 @@
 @builtin @stages(.compute) fun workgroup_uniform_load(m: ushort3) -> ushort3
 /// `m`, a member of workgroup memory, read once every thread of the workgroup has arrived.
 @builtin @stages(.compute) fun workgroup_uniform_load(m: ushort4) -> ushort4
+/// `m`, a member of workgroup memory, read once every thread of the workgroup has arrived.
+@builtin @stages(.compute) fun workgroup_uniform_load(m: long) -> long
+/// `m`, a member of workgroup memory, read once every thread of the workgroup has arrived.
+@builtin @stages(.compute) fun workgroup_uniform_load(m: long2) -> long2
+/// `m`, a member of workgroup memory, read once every thread of the workgroup has arrived.
+@builtin @stages(.compute) fun workgroup_uniform_load(m: long3) -> long3
+/// `m`, a member of workgroup memory, read once every thread of the workgroup has arrived.
+@builtin @stages(.compute) fun workgroup_uniform_load(m: long4) -> long4
+/// `m`, a member of workgroup memory, read once every thread of the workgroup has arrived.
+@builtin @stages(.compute) fun workgroup_uniform_load(m: ulong) -> ulong
+/// `m`, a member of workgroup memory, read once every thread of the workgroup has arrived.
+@builtin @stages(.compute) fun workgroup_uniform_load(m: ulong2) -> ulong2
+/// `m`, a member of workgroup memory, read once every thread of the workgroup has arrived.
+@builtin @stages(.compute) fun workgroup_uniform_load(m: ulong3) -> ulong3
+/// `m`, a member of workgroup memory, read once every thread of the workgroup has arrived.
+@builtin @stages(.compute) fun workgroup_uniform_load(m: ulong4) -> ulong4
+/// `m`, a member of workgroup memory, read once every thread of the workgroup has arrived.
+@builtin @stages(.compute) fun workgroup_uniform_load(m: double) -> double
+/// `m`, a member of workgroup memory, read once every thread of the workgroup has arrived.
+@builtin @stages(.compute) fun workgroup_uniform_load(m: double2) -> double2
+/// `m`, a member of workgroup memory, read once every thread of the workgroup has arrived.
+@builtin @stages(.compute) fun workgroup_uniform_load(m: double3) -> double3
+/// `m`, a member of workgroup memory, read once every thread of the workgroup has arrived.
+@builtin @stages(.compute) fun workgroup_uniform_load(m: double4) -> double4
 
 // What a weak compare-exchange gives, a struct of fields every target declares as a program's own.
 // The weak one may fail although the atomic held `expected`, so `old` alone cannot say whether it stored (EMIT-161).
@@ -4100,6 +4740,9 @@ enum feature:
     float_specials
     float_denormals
     view_instancing
+    shader_int64
+    shader_f64
+    shader_int64_atomics
 
 /// The API this compile writes for, known once a body is inlined; no const holds it.
 const target_api: graphics_api = .none

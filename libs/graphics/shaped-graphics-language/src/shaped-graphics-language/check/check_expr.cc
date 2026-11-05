@@ -707,12 +707,13 @@ type_id checker::check_suffixed_literal(i32 file, source_span where, cc::string_
 {
     // CHK-357: the suffix names the type, and the literal converts to no other
     auto const s = split_suffix(text).value();
-    if (s.width != 32 && s.width != 16)
+    if (s.width != 32 && s.width != 16 && s.width != 64)
     {
         unsupported(file, where, cc::format("a literal of {} bits, which no type of the prelude is", s.width));
         return error_type;
     }
     auto const is_narrow = s.width == 16;
+    auto const is_wide = s.width == 64;
     auto const is_float_body = classify_number(s.body) == number_class::plain_float;
     if (is_float_body && s.letter != 'f')
     {
@@ -721,9 +722,15 @@ type_id checker::check_suffixed_literal(i32 file, source_span where, cc::string_
         return error_type;
     }
 
-    auto const name = s.letter == 'f' ? (is_narrow ? builtins::k_half : builtins::k_float)
-                    : s.letter == 'u' ? (is_narrow ? builtins::k_ushort : builtins::k_uint)
-                                      : (is_narrow ? builtins::k_short : builtins::k_int);
+    auto const name = s.letter == 'f' ? (is_narrow ? builtins::k_half
+                                         : is_wide ? builtins::k_double
+                                                   : builtins::k_float)
+                    : s.letter == 'u' ? (is_narrow ? builtins::k_ushort
+                                         : is_wide ? builtins::k_ulong
+                                                   : builtins::k_uint)
+                                      : (is_narrow ? builtins::k_short
+                                         : is_wide ? builtins::k_long
+                                                   : builtins::k_int);
     auto const type = type_of_builtin(name, file, where);
     if (type == error_type)
         return error_type;

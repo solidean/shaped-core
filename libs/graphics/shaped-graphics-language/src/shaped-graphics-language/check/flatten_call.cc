@@ -710,7 +710,8 @@ auto sgl::check::impl::flattener::is_stable(flat_expr_id id, int depth) const ->
     if (!is_valid(id) || depth > k_max_inline_depth)
         return false;
     auto const& x = entry.at(id).node;
-    if (x.is<flat_literal>() || x.is<flat_int_literal>() || x.is<flat_bool_literal>() || x.is<flat_enum_value>())
+    if (x.is<flat_literal>() || x.is<flat_int_literal>() || x.is<flat_wide_literal>() || x.is<flat_bool_literal>()
+        || x.is<flat_enum_value>())
         return true;
     if (auto const* const ref = x.try_as<flat_local_ref>())
         return !entry.at(ref->local).is_mut;

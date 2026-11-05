@@ -432,6 +432,7 @@ if(SC_BUILD_TESTS)
             tests/compute/compute-float-specials-test.cc
             tests/compute/compute-diagnostics-test.cc
             tests/compute/compute-sixteen-bit-test.cc
+            tests/compute/compute-sixty-four-bit-test.cc
             tests/compute/compute-float-atomics-test.cc
             tests/compute/compute-texture-test.cc
             tests/raster/raster-test.cc
@@ -492,6 +493,7 @@ if(SC_BUILD_TESTS)
                 float_specials.sgl:*
                 diagnostics.sgl:*
                 sixteen_bit.sgl:*
+                sixty_four_bit.sgl:*
                 float_atomics.sgl:*
                 option_formats.sgl:*
         )

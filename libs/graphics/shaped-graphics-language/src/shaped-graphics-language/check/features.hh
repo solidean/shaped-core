@@ -57,6 +57,12 @@ enum class sgl::check::feature : sgl::u8
     float_denormals,
     /// `@view_index` (CHK-437): one draw renders several views, which WebGPU has on no device.
     view_instancing,
+    /// `long`, `ulong` and their vectors (CHK-451), which WebGPU has on no device.
+    shader_int64,
+    /// `double` and its vectors (CHK-451), which WebGPU and Metal have on no device.
+    shader_f64,
+    /// `atomic[long]` and `atomic[ulong]` (CHK-296), which WebGPU and Metal have on no device.
+    shader_int64_atomics,
 };
 
 CC_FLAG_ENUM_INDEXED(sgl::check, feature, u32);
@@ -90,6 +96,9 @@ inline constexpr cc::string_view k_feature_names[] = {
     "float_specials",              //
     "float_denormals",             //
     "view_instancing",             //
+    "shader_int64",                //
+    "shader_f64",                  //
+    "shader_int64_atomics",        //
 };
 inline constexpr isize k_feature_count = isize(sizeof(k_feature_names) / sizeof(k_feature_names[0]));
 

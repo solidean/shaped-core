@@ -27,6 +27,8 @@ void register_textures(registry& r);
 void register_bytes(registry& r);
 /// `&`, `|`, `^`, `~`, `<<` and `>>` of `int`, `uint` and their vectors.
 void register_bit_math(registry& r);
+/// Arithmetic, comparisons, bits and `abs`, `min`, `max` and `clamp` of `long`, `ulong`, `double` and their vectors.
+void register_64_bit_math(registry& r);
 /// Transcendentals, rounding, derivatives, geometry, integer bit functions, packing and reinterpreting bits.
 void register_math(registry& r);
 /// The barriers of a compute workgroup, its uniform load, the atomics and a geometry stage's streams.
@@ -44,9 +46,10 @@ namespace sgl::builtins::impl
 {
 /// Every builtin type a value of passes through `select` whole, and through `workgroup_uniform_load` (CHK-365, CHK-374).
 inline constexpr cc::string_view k_selectable[]
-    = {"float", "float2", "float3", "float4", "int",    "int2",   "int3",    "int4",    "uint",   "uint2", "uint3",
-       "uint4", "bool",   "bool2",  "bool3",  "bool4",  "vec3",   "pos3",    "hpos4",   "half",   "half2", "half3",
-       "half4", "short",  "short2", "short3", "short4", "ushort", "ushort2", "ushort3", "ushort4"};
+    = {"float", "float2", "float3", "float4", "int",    "int2",   "int3",    "int4",    "uint",    "uint2",  "uint3",
+       "uint4", "bool",   "bool2",  "bool3",  "bool4",  "vec3",   "pos3",    "hpos4",   "half",    "half2",  "half3",
+       "half4", "short",  "short2", "short3", "short4", "ushort", "ushort2", "ushort3", "ushort4", "long",   "long2",
+       "long3", "long4",  "ulong",  "ulong2", "ulong3", "ulong4", "double",  "double2", "double3", "double4"};
 
 /// `@pure @operator("op") fun name(a: lhs, b: rhs) -> result`, written `a op b` by every target.
 void add_infix(registry& r,

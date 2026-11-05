@@ -227,6 +227,14 @@ struct sgl::check::flat_int_literal
     constexpr bool operator==(flat_int_literal const&) const = default;
 };
 
+/// Of `long` or `ulong`, its 64 bits two's complement either way (CHK-450).
+struct sgl::check::flat_wide_literal
+{
+    u64 bits = 0;
+
+    constexpr bool operator==(flat_wide_literal const&) const = default;
+};
+
 /// Of the prelude's type `bool`.
 struct sgl::check::flat_bool_literal
 {
@@ -394,6 +402,7 @@ struct sgl::check::flat_expr
     cc::variant<flat_invalid,
                 flat_literal,
                 flat_int_literal,
+                flat_wide_literal,
                 flat_bool_literal,
                 flat_enum_value,
                 flat_local_ref,

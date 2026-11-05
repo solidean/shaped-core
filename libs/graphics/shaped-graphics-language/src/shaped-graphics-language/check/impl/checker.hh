@@ -944,10 +944,13 @@ struct checker
     /// What a value of `type` needs of a device: its builtin's, or what any member or element holds (CHK-382).
     /// A resource holds its element, so `buffer[half]` needs what `half` needs; a texture holds nothing.
     [[nodiscard]] feature_set features_of_type(type_id type) const;
-    /// The path from `type` down to the first 16-bit value it holds, through struct members, as `.inner.gain: half`.
+    /// The path from `type` down to the first value of `bits` bits it holds, 16 or 64, through struct members, as
+    /// `.inner.gain: half`.
     /// Empty when it holds none.
-    [[nodiscard]] cc::string sixteen_bit_path(type_id type) const;
-    /// CHK-383: refuses each 16-bit value a struct crossing a stage edge holds, reported at `where` of `file`.
+    [[nodiscard]] cc::string sized_value_path(type_id type, i32 bits) const;
+    /// The path from `type` down to the first 64-bit vector of three or four components it holds, as `sized_value_path`.
+    [[nodiscard]] cc::string wide_vector_path(type_id type) const;
+    /// CHK-383: refuses each 16-bit and 64-bit value a struct crossing a stage edge holds, reported at `where` of `file`.
     void judge_edge_16_bit(i32 file, source_span where, type_id type);
     /// The first value of function bodies alone that `type` holds, such as a `mat3`, through struct members, arrays and
     /// a buffer's element; `path` is empty when it holds none (CHK-397).

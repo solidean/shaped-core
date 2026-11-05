@@ -620,7 +620,8 @@ type_id checker::type_of_builtin(cc::string_view name, i32 file, source_span whe
 cc::string checker::vector_name_of(type_id element, isize count) const
 {
     // CHK-384: the element types that have a vector family, each named after it and its width
-    cc::string_view const families[] = {"float", "int", "uint", "bool", "half", "short", "ushort"};
+    cc::string_view const families[]
+        = {"float", "int", "uint", "bool", "half", "short", "ushort", "long", "ulong", "double"};
     if (element == checked_module::error_type || out.builtin_type_of(element) == nullptr)
         return {};
     for (auto const family : families)
@@ -1690,13 +1691,23 @@ void checker::compile_binding(symbol_id id)
             if (auto const* const smp = ast_of(file).at(member).node.try_as<ast::sampler_decl>())
                 report(diagnostic_kind::wrong_kind_of_name, file, smp->name,
                        "an @inline binding holds constants only, and a sampler is none");
-    // CHK-387: an `@inline` binding is a vulkan push constant, where a 16-bit member needs a bit of its own
+    // CHK-387: an `@inline` binding is a vulkan push constant, where a 16-bit member needs a bit of its own, and a
+    // 64-bit one is a layout no test has shown yet
     if (is_inline)
         for (auto const& m : out.at(members))
-            if (auto const path = sixteen_bit_path(m.type); !path.empty())
-                unsupported(
-                    file, span_of(file, ast_of(file).at(m.field).type),
-                    cc::format("a 16-bit value in an @inline binding, in {}.{}{}", out.at(id).name, m.name, path));
+            for (auto const bits : {16, 64})
+                if (auto const path = sized_value_path(m.type, bits); !path.empty())
+                    unsupported(file, span_of(file, ast_of(file).at(m.field).type),
+                                cc::format("a {}-bit value in an @inline binding, in {}.{}{}", bits, out.at(id).name,
+                                           m.name, path));
+    // CHK-453: a 64-bit three- or four-vector is wider than a 16-byte row, which a constant block lays no vector across
+    if (!is_workgroup)
+        for (auto const& m : out.at(members))
+            if (m.type != checked_module::error_type && !out.takes_slots(m.type))
+                if (auto const path = wide_vector_path(m.type); !path.empty())
+                    unsupported(file, span_of(file, ast_of(file).at(m.field).type),
+                                cc::format("a 64-bit vector wider than a 16-byte row in a constant block, in {}.{}{}",
+                                           out.at(id).name, m.name, path));
     out.symbols.own(index_of(id)).info = i32(out.bindings.size());
     out.bindings.push_back({
         .symbol = id,

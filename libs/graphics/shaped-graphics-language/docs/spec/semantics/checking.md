@@ -118,10 +118,19 @@ use view
 * **CHK-382** A builtin type's record may name the feature a value of it needs, as a builtin function's record may (CHK-322).
   `half` and its vectors name `shader_f16`, and `short`, `ushort` and their vectors name `shader_int16`.
   An entry point whose flat tree holds a value of such a type needs its feature, and a binding member that holds one is a form CHK-201 judges.
-* **CHK-383** A 16-bit value crosses no stage edge: a member of one, at any depth of a struct an entry point takes or returns, is `unsupported-yet`.
+* **CHK-450** `long`, `ulong` and `double` are the prelude's 64-bit `int`, `uint` and `float`.
+  Their vectors are `long2` to `long4`, `ulong2` to `ulong4` and `double2` to `double4`.
+  A literal converts to one by CHK-253, and since an integer literal is held in 64 bits, a `ulong` literal past 2^63 - 1 is `unsupported-yet`: `~0u64` spells the largest.
+  Their operators are the arithmetic, the comparisons, a vector beside its scalar, and for `long` and `ulong` the bit operators; `abs`, `min`, `max`, `clamp` and `select` take them too.
+  No other builtin takes one yet: no maths function of a double, which DXIL has none of, and no subgroup operation.
+* **CHK-451** `long`, `ulong` and their vectors name the feature `shader_int64`, and `double` and its vectors `shader_f64`, as CHK-382 says of the 16-bit types.
+* **CHK-383** A 16-bit or a 64-bit value crosses no stage edge: a member of one, at any depth of a struct an entry point takes or returns, is `unsupported-yet`.
 * **CHK-388** `bytes` and `mut bytes` are resources of their own kind, and `out bytes` is an error.
   The prelude's loads take either, its stores `mut bytes` alone, and `@coherent` applies to `mut bytes` as to a `mut buffer`.
 * **CHK-387** An `@inline` binding holds no 16-bit value: a member that is one, or holds one at any depth, is `unsupported-yet` ([why](why/checking.md#chk-387)).
+  It holds no 64-bit value either, whose push-constant layout no test has shown yet.
+* **CHK-453** A constant block holds no 64-bit three- or four-vector, at any depth: one is `unsupported-yet`.
+  It is wider than a 16-byte row, and EMIT-110 lays no vector of a constant block across one; a buffer holds it.
 * **CHK-397** `mat3` and `mat2` are the prelude's 3x3 and 2x2 matrices of floats, column-major like `mat4` ([why](why/checking.md#chk-397)).
   `mat3(c0, c1, c2)` makes one of three `float3` or three `vec3` columns, `c0` first, and `mat2(c0, c1)` one of two `float2` columns.
   `m * v` of a `mat3` and a `float3` or a `vec3` gives the same type, and of a `mat2` and a `float2` a `float2`.
@@ -592,7 +601,7 @@ fun shade(k: float) -> float:
 * **CHK-269** A literal of hexadecimal digits behind `0x`, or of binary ones behind `0b`, is an integer literal like a decimal one ([why](why/checking.md#chk-269)).
   Its value is the number it spells: `0xffff'ffff` is 4294967295, which a `uint` holds and an `int` does not, and `-0x8000'0000` is the most negative `int`.
 * **CHK-357** A literal with a suffix ([NUM-15](../syntax/numbers.md#inside-the-symbols)) is of the type its suffix names wherever it stands, and converts to no other ([why](why/checking.md#chk-357)).
-  `i`, `u` and `f` name `int`, `uint` and `float` at the width 32, and `short`, `ushort` and `half` at 16; any other width is `unsupported-yet`.
+  `i`, `u` and `f` name `int`, `uint` and `float` at the width 32, `short`, `ushort` and `half` at 16, and `long`, `ulong` and `double` at 64; any other width is `unsupported-yet`.
   An `f` on digits alone makes a float literal of the value they spell, so `1f` is `1.0`, and an `i` or a `u` on a float literal is `literal-not-representable`.
   A value its type does not hold is `literal-not-representable`, as by CHK-253.
 * **CHK-62** A name resolves to a local or a parameter first, and to a symbol of the module after that; one that resolves to nothing is `unknown-name`.
@@ -663,6 +672,7 @@ fun shade(k: float) -> float:
 * **CHK-257** An operator whose operands are all integer literals, and whose best candidate converts one of them, is the normal error `literal-needs-type` ([why](why/checking.md#chk-257)).
   `7.0 / 2` is the float `/`, since one operand is no integer literal.
 * **CHK-270** A `<<` or a `>>` whose count is a constant outside 0 to 31 is the normal error `shift-out-of-range`, whatever it shifts; a count computed at run time keeps its low five bits (EVAL-86).
+* **CHK-452** Of a `long` or a `ulong` the count is 0 to 63, and one computed at run time keeps its low six bits (EVAL-104).
 * **CHK-310** A **constant** is a literal, an enum value, or a construction, a member, a logical operator or a call of a `@pure` builtin whose operands are all constants.
   It is judged on the flat tree of each entry point and each test, where a literal argument of an inlined call stands for its parameter (EVAL-48), and folded by the abstract machine.
   A `let` holds no constant, even of one: WGSL folds what it creates the shader from, and a local is no part of that.
@@ -708,7 +718,7 @@ fun shade(k: float) -> float:
   It is tried only where no candidate matches the arguments as written, and a literal converts by CHK-253 instead.
   A strong vector, `vec3`, `pos3` or `hpos4`, converts nothing, and no width changes: a `half` is no `float` component.
   Every target writes the conversion, so the text never leans on a target's implicit rules.
-  Each family also converts between its widths: `half` and `float`, `short` and `int`, `ushort` and `uint` (CHK-381).
+  Each family also converts between its widths: `half` and `float`, `short` and `int`, `ushort` and `uint` (CHK-381), and `double` and `float`, `long` and `int`, `ulong` and `uint` (CHK-450).
   A `bool` and its vectors convert to `float`, `int` and `uint` of their width as 1 where true and 0 where not; nothing converts to a `bool` but a comparison.
   A float whose truncation the integer holds becomes that integer, truncated toward zero.
   A float out of the integer's range, and a NaN, become a value the language does not specify, and it may differ between targets.
@@ -904,7 +914,7 @@ A feature is what a device may lack, so using one makes a shader non-portable on
 
 * **CHK-258** A `require` names features as `sg::feature` names them, and only those a shader can use:
   `binding_arrays`, `extended_image_formats`, `readwrite_image_formats`, `multisampled_array_textures`, `ray_query` and `raytracing_pipeline`.
-  The 16-bit types add `shader_f16` and `shader_int16` (CHK-382), and the subgroup operations `subgroups` (CHK-376).
+  The 16-bit types add `shader_f16` and `shader_int16` (CHK-382), the 64-bit ones `shader_int64` and `shader_f64` (CHK-451), and the subgroup operations `subgroups` (CHK-376).
   Coherent memory adds `device_coherence` (CHK-368), image atomics `image_atomics` (CHK-372), and a pixel stage's strong compare-exchange `helper_lane_query` (EMIT-163).
   A `@layer` field adds `vertex_layer_output` (CHK-419), and `@view_index` adds `view_instancing` (CHK-437).
   A vulkan entry point at `@float(.specials)` or above adds `float_specials`, and at `.ieee` `float_denormals`, which no program needs to name (EMIT-185).
@@ -1105,7 +1115,7 @@ A `require` in a test's body that nothing in it uses is `unused-require`, and a 
 
 ## Atomics
 
-* **CHK-296** `atomic[T]` is an atomic of `uint` or `int`, and of any other `T` `wrong-kind-of-name`.
+* **CHK-296** `atomic[T]` is an atomic of `uint`, `int` or `float`, and of any other `T` `wrong-kind-of-name`.
   It is the element of a `mut buffer` or a member of a `@workgroup` binding, arrays of them included; in a read-only buffer or a constant block it is `wrong-kind-of-name`.
   Its builtins are `@stages(.pixel, .compute, .raygen, .miss, .closest_hit, .callable)`.
 * **CHK-404** A traversal's decision writes no memory through a binding ([why](why/checking.md#chk-404)).
@@ -1687,7 +1697,7 @@ A diagnostic of this pass has a kind, a file, a byte span in that file, and a de
 
 | kind | reported by |
 |---|---|
-| `unsupported-yet` | CHK-8, CHK-61, CHK-134, CHK-213, CHK-237, CHK-291, CHK-299, CHK-307, CHK-314, CHK-321, CHK-329, CHK-333, CHK-338, CHK-339, CHK-344, CHK-346, CHK-347, CHK-350, CHK-352, CHK-353, CHK-357, CHK-366, CHK-374, CHK-379, CHK-381, CHK-383, CHK-387, CHK-389, CHK-397, CHK-431, CHK-432, CHK-434 |
+| `unsupported-yet` | CHK-8, CHK-61, CHK-134, CHK-213, CHK-237, CHK-291, CHK-299, CHK-307, CHK-314, CHK-321, CHK-329, CHK-333, CHK-338, CHK-339, CHK-344, CHK-346, CHK-347, CHK-350, CHK-352, CHK-353, CHK-357, CHK-366, CHK-374, CHK-379, CHK-381, CHK-383, CHK-387, CHK-389, CHK-397, CHK-431, CHK-432, CHK-434, CHK-450, CHK-453 |
 | `duplicate-declaration` | CHK-12, CHK-28, CHK-241, CHK-347, CHK-351 |
 | `dependency-cycle` | CHK-18, CHK-136 |
 | `unknown-module`, `use-of-own-module` | CHK-347 |
@@ -1717,7 +1727,7 @@ A diagnostic of this pass has a kind, a file, a byte span in that file, and a de
 | `non-exhaustive-case` | CHK-160 |
 | `duplicate-case-pattern` | CHK-161 |
 | `missing-value-in-arm` | CHK-168 |
-| `needs-feature` | CHK-201, CHK-320, CHK-382, CHK-368, CHK-372 |
+| `needs-feature` | CHK-201, CHK-320, CHK-382, CHK-368, CHK-372, CHK-451 |
 | `unknown-feature` | CHK-258 |
 | `feature-not-declared` | CHK-264, CHK-322, CHK-382 |
 | `unused-require` | CHK-265 |
@@ -1737,7 +1747,7 @@ A diagnostic of this pass has a kind, a file, a byte span in that file, and a de
 | `call-spelling` | CHK-256 |
 | `literal-conversion-result` | CHK-85 |
 | `literal-needs-type` | CHK-257, CHK-313 |
-| `shift-out-of-range` | CHK-270 |
+| `shift-out-of-range` | CHK-270, CHK-452 |
 | `constant-without-value` | CHK-311 |
 | `constant-not-representable` | CHK-312, CHK-396 |
 | `missing-sampler` | CHK-279 |

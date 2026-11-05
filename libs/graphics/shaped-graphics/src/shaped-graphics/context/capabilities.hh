@@ -176,9 +176,24 @@ enum class sg::feature
     /// D3D12 grants it with a `ViewInstancingTier`, Vulkan with `multiview`; Metal's vertex amplification is not wired up
     /// yet, and WebGPU has no such thing.
     view_instancing,
+
+    /// A shader may compute and store 64-bit integers (SGL's `long` and `ulong`), in registers and in buffers.
+    /// D3D12 grants it with `Int64ShaderOps`, Vulkan with `shaderInt64`, and Metal always; WebGPU has none.
+    shader_int64,
+
+    /// A shader may compute and store 64-bit floats (SGL's `double`), in registers and in buffers.
+    /// D3D12 grants it with `DoublePrecisionFloatShaderOps`, Vulkan with `shaderFloat64`; Metal and WebGPU have none.
+    shader_f64,
+
+    /// A shader may update a 64-bit integer of a buffer or of workgroup memory atomically (SGL's `atomic[long]`).
+    /// D3D12 grants it with `Int64ShaderOps` on Shader Model 6.6, which makes raw and structured buffers' 64-bit atomics
+    /// required, and workgroup ones with `AtomicInt64OnGroupSharedSupported`.
+    /// Vulkan grants it with `shaderBufferInt64Atomics` and `shaderSharedInt64Atomics`.
+    /// Metal's 64-bit atomics are a ulong's min and max alone, and WebGPU has none.
+    shader_int64_atomics,
 };
 
-CC_FLAG_ENUM_INDEXED(sg, feature, cc::u32);
+CC_FLAG_ENUM_INDEXED(sg, feature, cc::u64);
 
 namespace sg
 {
@@ -218,8 +233,11 @@ inline constexpr feature k_all_features[] = {
     feature::float_specials,
     feature::float_denormals,
     feature::view_instancing,
+    feature::shader_int64,
+    feature::shader_f64,
+    feature::shader_int64_atomics,
 };
-static_assert(isize(sizeof(k_all_features) / sizeof(k_all_features[0])) == isize(feature::view_instancing) + 1,
+static_assert(isize(sizeof(k_all_features) / sizeof(k_all_features[0])) == isize(feature::shader_int64_atomics) + 1,
               "k_all_features lists every feature");
 
 /// The enumerator's name, `ray_query`, which is also what SGL's `require` spells it as.
@@ -289,6 +307,12 @@ static_assert(isize(sizeof(k_all_features) / sizeof(k_all_features[0])) == isize
         return "float_denormals";
     case feature::view_instancing:
         return "view_instancing";
+    case feature::shader_int64:
+        return "shader_int64";
+    case feature::shader_f64:
+        return "shader_f64";
+    case feature::shader_int64_atomics:
+        return "shader_int64_atomics";
     }
     return "";
 }

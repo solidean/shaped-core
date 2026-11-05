@@ -474,7 +474,7 @@ i32 checker::storage_size_of(type_id type) const
     auto const measure = [&](auto const& self, type_id t) -> measured
     {
         if (auto const* const record = out.builtin_type_of(t))
-            return {.size = record->hlsl_layout.size, .alignment = is_16_bit(record->leaf_kind) ? 2 : 4};
+            return {.size = record->hlsl_layout.size, .alignment = scalar_bytes_of(record->leaf_kind)};
         auto const& info = out.at(t);
         if (info.kind != type_kind::structure)
             return {.size = 4, .alignment = 4};

@@ -1,0 +1,32 @@
+// 64-bit values as the GPU runs them: longs where a device has shader_int64, and doubles where it has shader_f64.
+// WGSL has neither and MSL no double, so WebGPU runs none of this and Metal the longs alone.
+
+require shader_int64
+require shader_f64
+
+// In a constant block a long takes 8 bytes, and a ulong2 starts on the next 16-byte row.
+binding long_sums:
+    seed: long
+    mask: ulong2
+    deltas: buffer[long2]
+    totals: mut buffer[ulong2]
+
+// Every step leaves 32 bits behind: a product past 2^32, a shift into the high word and back, a quotient of 64-bit
+// values, and a sum that wraps.
+@compute(64) fun sum_longs(@thread_id id: int3){long_sums}:
+    let d = long_sums.deltas[id.x]
+    let product = d.x * 3'000'000'000 + long_sums.seed
+    let shifted = ((product as ulong) << 20) >> 4
+    let quotient = product / (d.y | 1)
+    long_sums.totals[id.x] = ulong2((shifted ^ long_sums.mask.x) + long_sums.mask.y, (quotient - d.y) as ulong)
+
+binding double_sums:
+    scale: double
+    values: buffer[double2]
+    results: mut buffer[double2]
+
+// 2^-40 is lost to a float beside any integer past 2^-16, and a double keeps it through every step.
+@compute(64) fun sum_doubles(@thread_id id: int3){double_sums}:
+    let v = double_sums.values[id.x]
+    let fine = v.x + 1.0f64 / 1099511627776.0f64
+    double_sums.results[id.x] = double2(fine * double_sums.scale - v.x * double_sums.scale, min(v.y, -v.x) / 4.0f64)

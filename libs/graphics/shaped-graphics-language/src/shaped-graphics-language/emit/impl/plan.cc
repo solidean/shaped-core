@@ -1196,6 +1196,13 @@ cc::string_view sgl::emit::impl::row_vector_of(plan const& p, check::type_id ele
         return "short4";
     case check::value_kind::scalar_ushort:
         return "ushort4";
+    // a row of 16 bytes holds two 64-bit scalars (EMIT-191)
+    case check::value_kind::scalar_long:
+        return "long2";
+    case check::value_kind::scalar_ulong:
+        return "ulong2";
+    case check::value_kind::scalar_double:
+        return "double2";
     default:
         return "float4";
     }

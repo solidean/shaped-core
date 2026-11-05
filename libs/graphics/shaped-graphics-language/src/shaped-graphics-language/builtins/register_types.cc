@@ -34,6 +34,14 @@ constexpr scalar_family k_short_family
     = {"short", "int16_t", "i16", "", value_kind::scalar_short, true, false, 2, check::feature::shader_int16};
 constexpr scalar_family k_ushort_family
     = {"ushort", "uint16_t", "u16", "", value_kind::scalar_ushort, true, false, 2, check::feature::shader_int16};
+// CHK-450 and CHK-451: no 64-bit value crosses a stage edge either, and WGSL has none at all, so its spellings are
+// placeholders no text ever holds (EMIT-109).
+constexpr scalar_family k_long_family
+    = {"long", "int64_t", "i64", "", value_kind::scalar_long, true, false, 8, check::feature::shader_int64};
+constexpr scalar_family k_ulong_family
+    = {"ulong", "uint64_t", "u64", "", value_kind::scalar_ulong, true, false, 8, check::feature::shader_int64};
+constexpr scalar_family k_double_family
+    = {"double", "double", "f64", "", value_kind::scalar_double, true, false, 8, check::feature::shader_f64};
 
 /// A vector of `width` scalars of `family` with the fields `x y [z [w]]`, which every target spells as its own vector.
 /// Its swizzles are the target's own too (EMIT-142).
@@ -249,6 +257,15 @@ void sgl::builtins::register_types(registry& r)
     add_vectors(r, k_short_family, vectors);
     r.add(scalar_of(k_ushort_family, "/// 16 bits, unsigned; its arithmetic wraps."));
     add_vectors(r, k_ushort_family, vectors);
+
+    r.add_comment("// the 64-bit families (CHK-450), each needing a feature of the device (CHK-451); no value of one\n"
+                  "// crosses a stage edge (CHK-383)");
+    r.add(scalar_of(k_long_family, "/// 64 bits, signed; its arithmetic wraps."));
+    add_vectors(r, k_long_family, vectors);
+    r.add(scalar_of(k_ulong_family, "/// 64 bits, unsigned; its arithmetic wraps."));
+    add_vectors(r, k_ulong_family, vectors);
+    r.add(scalar_of(k_double_family, "/// A 64-bit float; every operation rounds to it, to nearest and ties to even."));
+    add_vectors(r, k_double_family, vectors);
 
     r.add_comment("// a vector of one value, beside the constructor of its fields (CHK-360)");
     evaluator const fills[] = {nullptr, nullptr, fill<2>, fill<3>, fill<4>};

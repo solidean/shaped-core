@@ -431,6 +431,9 @@ public:
                           : record->leaf_kind == check::value_kind::scalar_half   ? "half4"
                           : record->leaf_kind == check::value_kind::scalar_short  ? "short4"
                           : record->leaf_kind == check::value_kind::scalar_ushort ? "ushort4"
+                          : record->leaf_kind == check::value_kind::scalar_long   ? "long4"
+                          : record->leaf_kind == check::value_kind::scalar_ulong  ? "ulong4"
+                          : record->leaf_kind == check::value_kind::scalar_double ? "double4"
                                                                                   : "float4";
         return cc::string(builtin_spelling(p, family));
     }

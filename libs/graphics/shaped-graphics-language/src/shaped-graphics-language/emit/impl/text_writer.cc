@@ -38,6 +38,20 @@ cc::string int_literal_text(i32 value)
     return cc::to_string(value);
 }
 
+/// A 64-bit integer literal of `kind` in `language`, suffixed so no target reads it as 32 bits (EMIT-190):
+/// `5LL` and `5ULL` in HLSL, `5L` and `5UL` in MSL, whose long is 64 bits.
+/// The most negative long is a minus in front of a number that does not fit, as for an int.
+cc::string wide_literal_text(u64 bits, value_kind kind, builtins::language language)
+{
+    auto const is_hlsl = language == builtins::language::hlsl;
+    if (kind == value_kind::scalar_ulong)
+        return cc::format("{}{}", bits, is_hlsl ? "ULL" : "UL");
+    auto const suffix = is_hlsl ? "LL" : "L";
+    if (bits == u64(1) << 63)
+        return cc::format("(-9223372036854775807{0} - 1{0})", suffix);
+    return cc::format("{}{}", i64(bits), suffix);
+}
+
 struct writer
 {
     plan& p;
@@ -1305,6 +1319,9 @@ struct writer
         auto const* const literal_type = p.m.builtin_type_of(x.type);
         auto const narrow = [&](rendered r)
         {
+            // EMIT-190: a double literal is suffixed in HLSL, where a bare one is a float
+            if (literal_type != nullptr && literal_type->leaf_kind == value_kind::scalar_double)
+                return rendered{.text = r.text + "L", .binds = r.binds};
             if (literal_type == nullptr || !is_16_bit(literal_type->leaf_kind))
                 return r;
             return rendered{.text = cc::format("{}({})", literal_type->spelled_in(d.language()), r.text)};
@@ -1321,6 +1338,13 @@ struct writer
                                           : int_literal_text(l.value);
                 result = narrow(
                     {.text = cc::move(text), .binds = l.value < 0 && !is_wrapped ? level::unary : level::primary});
+            },
+            [&](flat_wide_literal const& l)
+            {
+                auto const kind = literal_type != nullptr ? literal_type->leaf_kind : value_kind::scalar_long;
+                auto const is_negative = kind == value_kind::scalar_long && i64(l.bits) < 0 && l.bits != u64(1) << 63;
+                result = {.text = wide_literal_text(l.bits, kind, d.language()),
+                          .binds = is_negative ? level::unary : level::primary};
             },
             [&](flat_bool_literal const& l) { result = {.text = l.value ? "true" : "false"}; },
             [&](flat_enum_value const& v)

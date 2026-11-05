@@ -575,6 +575,14 @@ cc::result<context_handle> create_dx12_context(backend::dx12::dx12_config const&
     auto const wave_ops
         = SUCCEEDED(check_feature_support(device.Get(), D3D12_FEATURE_D3D12_OPTIONS1, &options1, sizeof(options1)))
        && options1.WaveOps;
+    // Shader Model 6.6, below the required 6.8, makes a buffer's 64-bit atomics part of `Int64ShaderOps`; workgroup
+    // memory's are a flag of their own.
+    auto const int64_shader_ops = options1.Int64ShaderOps != 0;
+    D3D12_FEATURE_DATA_D3D12_OPTIONS9 options9 = {};
+    auto const int64_atomics
+        = int64_shader_ops
+       && SUCCEEDED(check_feature_support(device.Get(), D3D12_FEATURE_D3D12_OPTIONS9, &options9, sizeof(options9)))
+       && options9.AtomicInt64OnGroupSharedSupported;
 
     // Every SM 6.9 device beside ray-tracing pipelines takes the reordering calls, whether or not it really reorders.
     // Shader Model 6.9 is the Agility SDK's alone, whose headers are the ones that name it.
@@ -604,6 +612,9 @@ cc::result<context_handle> create_dx12_context(backend::dx12::dx12_config const&
     ctx->_extended_image_formats = extended_image_formats;
     ctx->_native_16bit_shader_ops = native_16bit_shader_ops;
     ctx->_wave_ops = wave_ops;
+    ctx->_int64_shader_ops = int64_shader_ops;
+    ctx->_double_shader_ops = options.DoublePrecisionFloatShaderOps != 0;
+    ctx->_int64_atomics = int64_atomics;
     ctx->_shader_execution_reordering = shader_execution_reordering;
     ctx->_opacity_micromap = opacity_micromap;
     if (opacity_micromap)

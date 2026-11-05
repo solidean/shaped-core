@@ -102,6 +102,10 @@ ctx.supports(sg::feature::ray_query)               // bool — THE capability qu
                                                    //   | depth32_float_stencil8 (the one stencil format; webgpu needs depth32float-stencil8, vulkan asks per format)
                                                    //   | shader_f16 / shader_int16 (16-bit types in registers and buffers; dx12 Native16BitShaderOps, no int16 on webgpu;
                                                    //     vulkan grants them beside subgroups only with shaderSubgroupExtendedTypes)
+                                                   //   | shader_int64 / shader_f64 (64-bit integers and doubles; dx12 Int64ShaderOps / DoublePrecisionFloatShaderOps,
+                                                   //     vulkan shaderInt64 / shaderFloat64; metal has longs and no double, webgpu neither)
+                                                   //   | shader_int64_atomics (atomic[long] in buffers and workgroup memory; dx12 SM 6.6 plus
+                                                   //     AtomicInt64OnGroupSharedSupported, vulkan buffer and shared int64 atomics; none on metal or webgpu)
                                                    //   | subgroups (wave / SIMD-group ops in compute and pixel; dx12 WaveOps, webgpu needs subgroups)
                                                    //   | device_coherence (globallycoherent / coherent(device); false on webgpu)
                                                    //   | image_atomics (atomics on r32 integer images; false on webgpu)

@@ -272,6 +272,7 @@ struct flat_label;
 struct flat_invalid;
 struct flat_literal;
 struct flat_int_literal;
+struct flat_wide_literal;
 struct flat_bool_literal;
 struct flat_enum_value;
 struct flat_arm;
