@@ -18,7 +18,6 @@
 #include <clean-core/platform/impl/wasm_frames.hh>
 #endif
 #include <clean-core/platform/stack_capture.hh>
-#include <clean-core/platform/symbolize.hh>
 #include <clean-core/string/format.hh>
 
 using namespace cc::primitive_defines;
