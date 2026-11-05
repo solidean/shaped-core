@@ -217,9 +217,13 @@ public:
 
     /// Flattens the frame into a render plan, records it and presents.
     /// Idempotent, and a no-op on a closed frame.
+    /// Blocks until the frames in flight fall back to the swapchain's depth; `viewer::end_frame_async` is the form that does not.
     void present();
 
 private:
+    /// present without the wait: the frame is submitted, and its throttle left with the viewer.
+    void submit();
+
     friend class viewer;
     friend class frame_scope;
     friend class frame_iterator;

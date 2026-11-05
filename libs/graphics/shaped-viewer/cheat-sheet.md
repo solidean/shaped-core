@@ -1053,7 +1053,11 @@ viewer.frames() -> frame_range;  viewer.request_close()
 // the manual loop, for an application whose own loop must stay in charge — same frame, same authoring calls
 viewer.is_running()             // -> bool; not close-requested, not quit, not device-lost
 auto& f = viewer.begin_frame()  // -> frame&, owned by the viewer; `!f.is_open()` means it cannot draw right now, so `continue`
-viewer.end_frame()              // presents it — a bare frame ends nothing itself, so every open one needs this
+viewer.end_frame()              // presents it — a bare frame ends nothing itself, so every open one needs this; blocks on the frames in flight
+
+// the same loop on a context that never blocks (WebGPU): awaited, never waited for
+co_await viewer.end_frame_async()  // presents and hands back the frames-in-flight wait; awaiting it returns a page's thread to the browser
+co_await viewer.finish()           // drains what the destructor would; REQUIRED there, since a never-block destructor cannot wait
 
 // on a frame — plus everything a window and a view offer, inherited
 frame.window() / frame.window("name")  -> window_ref           // the default window, created on first use

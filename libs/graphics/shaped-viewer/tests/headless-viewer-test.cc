@@ -552,6 +552,34 @@ ASYNC_INVOCABLE_TEST("sv - light ids are scoped like view ids, and a duplicate i
     co_await cc::async_settled(sv::background_work(ctx));
 }
 
+// The loop a context that never blocks needs, run here on one that may, since the shape is the same on both.
+// Each frame is awaited rather than waited for, and finish drains what the destructor would have, so it owes nothing.
+ASYNC_INVOCABLE_TEST("sv - a frame loop awaited through end_frame_async and finish draws every frame and drains",
+                     (sg::context_handle const& ctx_h))
+{
+    auto v_r = sv::viewer::try_create(*ctx_h, "sv-test/async-loop", {.width = 32, .height = 32, .headless = true});
+    REQUIRE(v_r.has_value());
+    auto viewer = cc::move(v_r.value());
+
+    auto frames = 0;
+    while (viewer.is_running())
+    {
+        auto& f = viewer.begin_frame();
+        if (f.is_open())
+            ++frames;
+        if (frames == 3)
+            viewer.request_close();
+        co_await viewer.end_frame_async();
+    }
+    co_await viewer.finish();
+    CHECK(frames == 3);
+
+    // A finished viewer owes nothing: finishing it again submits nothing and waits for nothing.
+    auto const epoch_before = ctx_h->current_epoch();
+    co_await viewer.finish();
+    CHECK(ctx_h->current_epoch() == epoch_before);
+}
+
 // A frames() loop opens no `sv.frame` scope, so tearing its viewer down must close none.
 // An unmatched close pops whatever scope the caller has open on its thread, and a coroutine step around the loop then
 // fails as a profiling scope crossing a co_await.

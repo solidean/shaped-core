@@ -335,6 +335,14 @@ void frame::present()
 {
     if (_viewer == nullptr || !_open || _presented)
         return;
+    submit();
+    _viewer->wait_for_throttle();
+}
+
+void frame::submit()
+{
+    if (_viewer == nullptr || !_open || _presented)
+        return;
     _presented = true;
     _viewer->finish_frame(*this);
 }

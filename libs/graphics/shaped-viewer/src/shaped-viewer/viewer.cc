@@ -109,8 +109,8 @@ constexpr sr::key_modifiers zoom_modifiers = sr::key_modifiers::ctrl;
 
 /// Blocks the calling thread until `node` settles, and hands back how it settled.
 ///
-/// **A workaround, and marked as one:** the viewer is a synchronous pull loop, so it blocks where an async frame loop would await.
-/// It goes once `sv::viewer` grows an async frame loop, and until then it refuses a context that cannot block.
+/// The synchronous loops' wait: `end_frame`, a `frame_scope` and the destructor block where `end_frame_async` and `finish` are awaited.
+/// It refuses a context that cannot block, whose caller drives the awaited forms instead.
 /// An error is left to the caller, and a device lost mid-wait surfaces again as the next device call's throw.
 template <class T>
 [[nodiscard]] cc::result<T, cc::async_error> block_on(sg::context& ctx, cc::shared_async<T> const& node)
@@ -202,6 +202,13 @@ struct viewer::impl
     // A frames() loop and a destructor with no frame open must close nothing: an unmatched end would pop whatever scope
     // the caller has open on this thread.
     bool frame_scope_open = false;
+
+    // What the last submitted frame leaves to wait on: the epochs in flight falling back to the swapchain's depth.
+    // end_frame and a frame_scope block on it before returning; end_frame_async hands it to its caller to await.
+    cc::shared_async<cc::unit> throttle;
+
+    // Whether finish() drained the viewer, so its destructor owes nothing more.
+    bool finished = false;
 
     // Everything this viewer's views keep across frames: cameras, controllers, placements and textures alike.
     // Handed to the renderers rather than reached out of them — see view/view_store.hh.
@@ -369,8 +376,15 @@ viewer& viewer::operator=(viewer&&) noexcept = default;
 
 viewer::~viewer()
 {
-    if (_impl == nullptr)
+    if (_impl == nullptr || _impl->finished)
         return;
+    if (_impl->ctx->execution() == sg::execution_model::never_block)
+    {
+        // Nothing here may wait, so what the viewer still owes is left to the context's own shutdown.
+        CC_LOG_ERROR("a viewer on a context that never blocks was destroyed without awaiting finish(); its last "
+                     "frames and background work were not drained");
+        return;
+    }
     try
     {
         // A loop that left through a break still holds a frame here, and its backbuffer and command list have to be
@@ -959,6 +973,65 @@ void viewer::end_frame()
     }
 }
 
+cc::shared_async<cc::unit> viewer::end_frame_async()
+{
+    _impl->current_frame.submit();
+    _impl->current_frame = frame{};
+    if (_impl->frame_scope_open)
+    {
+        CC_RECORD_SCOPE_END("sv.frame");
+        _impl->frame_scope_open = false;
+    }
+    return take_throttle();
+}
+
+cc::shared_async<cc::unit> viewer::finish()
+{
+    if (_impl == nullptr || _impl->finished)
+        co_return;
+    try
+    {
+        // A frame begin_frame opened and nothing ended is submitted first, so its backbuffer and list are handed back.
+        co_await end_frame_async();
+
+        // A loop that left before its capture finished still owes the images it submitted.
+        for (auto const& writing : _impl->capture_writes)
+        {
+            co_await cc::async_settled(writing);
+            auto const* const failure = writing->try_value();
+            if (failure == nullptr)
+                CC_LOG_ERROR("capture: {}", writing->try_error()->underlying().to_string());
+            else if (!failure->empty())
+                CC_LOG_ERROR("capture: {}", *failure);
+        }
+        _impl->capture_writes.clear();
+
+        _impl->ctx->advance_epoch();
+        co_await _impl->ctx->idle_completion();
+        co_await sv::background_work(*_impl->ctx);
+    }
+    catch (sg::device_lost_exception const&)
+    {
+        // tearing down after a device loss: nothing left to drain
+    }
+    _impl->finished = true;
+}
+
+cc::shared_async<cc::unit> viewer::take_throttle()
+{
+    auto throttle = cc::move(_impl->throttle);
+    _impl->throttle = nullptr;
+    if (throttle == nullptr)
+        return cc::make_async_from_value(cc::unit{});
+    return throttle;
+}
+
+void viewer::wait_for_throttle()
+{
+    auto const throttle = take_throttle();
+    (void)block_on(*_impl->ctx, throttle);
+}
+
 frame_range viewer::frames()
 {
     begin_frames();
@@ -1255,13 +1328,13 @@ void viewer::finish_frame(frame& f)
         {
             im.ctx->submit_command_list(cc::move(im.current_cmd));
             im.ctx->advance_epoch();
-            (void)block_on(*im.ctx, im.ctx->epochs_in_flight_completion(im.config.buffer_count));
+            im.throttle = im.ctx->epochs_in_flight_completion(im.config.buffer_count);
         }
         else
         {
             im.ctx->submit_command_list_and_present(*im.swapchain, cc::move(im.current_cmd));
             im.ctx->advance_epoch();
-            (void)block_on(*im.ctx, im.ctx->epochs_in_flight_completion(im.swapchain->buffer_count()));
+            im.throttle = im.ctx->epochs_in_flight_completion(im.swapchain->buffer_count());
         }
     }
     catch (sg::device_lost_exception const& e)

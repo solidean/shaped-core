@@ -130,7 +130,31 @@ public:
 
     /// Presents the frame `begin_frame` opened — here nothing else will, since the viewer holds a bare `frame` rather
     /// than the `frame_scope` that ends the loop's frames for it.
+    /// Blocks until the frames in flight fall back to the swapchain's depth, so it requires a context that may block.
     void end_frame();
+
+    /// Presents the frame `begin_frame` opened, and hands back when the loop may go on instead of waiting for it.
+    /// **The frame loop of a context that never blocks**, WebGPU's above all: awaiting it is where a page's thread
+    /// returns to the browser, so the canvas is composited and input arrives.
+    ///
+    ///     while (viewer.is_running())
+    ///     {
+    ///         auto& frame = viewer.begin_frame();
+    ///         if (frame.is_open())
+    ///             frame.add_scene().add_mesh(mesh);
+    ///         co_await viewer.end_frame_async();
+    ///     }
+    ///     co_await viewer.finish();
+    ///
+    /// A closed frame submits nothing, and what it hands back is already settled.
+    [[nodiscard]] cc::shared_async<cc::unit> end_frame_async();
+
+    /// Drains what the viewer still owes — an open frame, capture writes, the frames in flight, background work —
+    /// without blocking; its destructor then owes nothing.
+    /// **Required on a context that never blocks**, whose viewer cannot wait in its destructor.
+    /// Elsewhere it is optional, and the destructor drains what it skipped.
+    /// The viewer must outlive the returned async.
+    [[nodiscard]] cc::shared_async<cc::unit> finish();
 
     /// Ends the frame loop: the current frame still finishes and presents, then `frames()` stops.
     /// Exactly what the window's close button does, so a caller needs no handle on the window to quit.
@@ -203,9 +227,15 @@ private:
     void drain_capture_writes();
 
     /// Runs one frame's rendering: resolve layout, translate views to a viewer_definition, drive viewer_renderer, present, advance the epoch.
-    /// Called by frame::present.
+    /// Called by frame::submit; it waits for nothing, and leaves the frame's throttle for the caller.
     /// Never throws — device loss stops the viewer instead.
     void finish_frame(frame& f);
+
+    /// The throttle the last submitted frame left, or a settled async where it left none.
+    [[nodiscard]] cc::shared_async<cc::unit> take_throttle();
+
+    /// Blocks on that throttle: what end_frame and a frame_scope do, on a context that may block.
+    void wait_for_throttle();
 
     /// Polls the window, routes input to the built-in camera controllers and acquires the next frame — the one step
     /// both loops take.
