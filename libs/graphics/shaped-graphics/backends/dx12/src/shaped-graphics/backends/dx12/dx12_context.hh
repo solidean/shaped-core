@@ -256,6 +256,8 @@ public:
         case sg::feature::float_denormals:
             // -denorm preserve, from Shader Model 6.2, which every shader of this backend compiles at or above
             return true;
+        case sg::feature::view_instancing:
+            return _view_instancing;
         case sg::feature::float_atomic_add:
             // HLSL's float atomics are bitwise exchanges alone; an add is NVAPI's, which this backend does not take
             return false;
@@ -696,6 +698,7 @@ public:
     bool _shader_execution_reordering = false; // SM 6.9 beside ray-tracing pipelines, from the Agility SDK
     bool _opacity_micromap = false;            // DXR 1.2 and SM 6.9, from the Agility SDK
     bool _vertex_layer_output = false;         // D3D12_OPTIONS, cached at creation
+    bool _view_instancing = false;             // D3D12_OPTIONS3's ViewInstancingTier, cached at creation
 
     // Where debug-layer messages go; empty means stderr.
     // See set_message_callback.

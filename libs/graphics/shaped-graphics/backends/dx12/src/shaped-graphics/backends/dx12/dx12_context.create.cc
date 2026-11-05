@@ -609,6 +609,10 @@ cc::result<context_handle> create_dx12_context(backend::dx12::dx12_config const&
     if (opacity_micromap)
         mark_acceleration_structures();
     ctx->_vertex_layer_output = vertex_layer_output;
+    D3D12_FEATURE_DATA_D3D12_OPTIONS3 options3 = {};
+    ctx->_view_instancing
+        = SUCCEEDED(check_feature_support(ctx->_device.Get(), D3D12_FEATURE_D3D12_OPTIONS3, &options3, sizeof(options3)))
+       && options3.ViewInstancingTier != D3D12_VIEW_INSTANCING_TIER_NOT_SUPPORTED;
 
     // One dispatch per argument record, no root-signature changes, so the signature takes no root signature.
     {

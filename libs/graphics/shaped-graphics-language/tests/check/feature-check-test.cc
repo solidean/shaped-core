@@ -79,7 +79,8 @@ TEST("sgl check - a require names a feature a shader can use, as sg names it")
              "raytracing_pipeline, primitive_index, "
              "sample_rate_shading, geometry_shader, tessellation_shader, shader_f16, shader_int16, subgroups, "
              "device_coherence, image_atomics, first_instance, helper_lane_query, vertex_layer_output, "
-             "float_atomic_add, shader_execution_reordering, opacity_micromap, float_specials, float_denormals\n");
+             "float_atomic_add, shader_execution_reordering, opacity_micromap, float_specials, float_denormals, "
+             "view_instancing\n");
     CHECK(reports_for("require raytracing\n").contains("unknown-feature user:[raytracing]"));
     CHECK(reports_for("require ray_query, binding_arrays\n") == "");
 
@@ -231,6 +232,11 @@ TEST("sgl check - a stage input some device lacks needs its feature, as a bindin
                       + "@vertex fun vs(@first_instance first: int) -> vout:\n"
                         "    return { p = hpos4(first as float, 0.0, 0.0, 1.0) }\n")
               .contains("feature-not-declared user:[vs] vs needs first_instance"));
+    // CHK-437: `@view_index` needs view_instancing in every stage that reads it, the pixel stage included
+    CHECK(reports_for(cc::string(edges)
+                      + "@pixel fun ps(v: vout, @view_index view: int) -> target:\n"
+                        "    return { c = float4(view as float, 0.0, 0.0, 1.0) }\n")
+              .contains("feature-not-declared user:[ps] ps needs view_instancing"));
     // one every device has needs nothing
     CHECK(reports_for(cc::string(edges)
                       + "@pixel fun ps(v: vout, @is_front_facing f: bool) -> target:\n"

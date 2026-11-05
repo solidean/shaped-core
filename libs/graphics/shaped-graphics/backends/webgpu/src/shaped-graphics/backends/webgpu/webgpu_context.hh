@@ -176,6 +176,9 @@ public:
         case sg::feature::float_denormals:
             // WGSL may assume no NaN or infinity arises, and nothing a shader says reaches the compiler's float handling
             return false;
+        case sg::feature::view_instancing:
+            // WebGPU has no multiview; WebXR hands out a texture per view instead
+            return false;
         case sg::feature::unaligned_block_compression:
             // Lifted by `texture-compression-unaligned`, which the emdawnwebgpu this builds against does not offer.
             return false;

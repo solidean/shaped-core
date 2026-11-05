@@ -178,6 +178,7 @@ public:
     VkRect2D _rendering_area = {};
     /// The layers every target of the scope spans, which a vertex stage's `@layer` picks among.
     u32 _rendering_layer_count = 1;
+    u32 _rendering_view_mask = 0; // nonzero for a rendering of several views; a reopen repeats it
 
     // Opens the rendering instance from the stored attachments, forcing every load op to LOAD.
     // Body in vulkan_command_list.raster.cc.

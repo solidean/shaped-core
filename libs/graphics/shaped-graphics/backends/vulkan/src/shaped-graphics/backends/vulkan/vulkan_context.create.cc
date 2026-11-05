@@ -455,6 +455,8 @@ struct optional_shader_features
     VkBool32 subgroup_size_control = VK_FALSE;
     /// SPIR-V's `Layer` written by a vertex shader, which DXC declares as `ShaderLayer`.
     VkBool32 shader_output_layer = VK_FALSE;
+    /// One draw rendering several views through a rendering's view mask, and SPIR-V's `ViewIndex` that reads which.
+    VkBool32 multiview = VK_FALSE;
     /// DXC writes a compute stage's quad operations in a derivative group, linear along one axis or of 2x2 threads.
     /// Both are VK_KHR_compute_shader_derivatives', which creation enables wherever the device has it.
     bool has_compute_derivatives = false;
@@ -520,6 +522,7 @@ optional_shader_features query_optional_shader_features(VkPhysicalDevice dev)
         .subgroup_extended_types = vk12.shaderSubgroupExtendedTypes,
         .subgroup_size_control = vk13.subgroupSizeControl,
         .shader_output_layer = vk12.shaderOutputLayer,
+        .multiview = vk11.multiview,
         .has_compute_derivatives = has_compute_derivatives,
         .compute_derivative_group_linear = linear,
         .compute_derivative_group_quads = has_compute_derivatives ? derivatives.computeDerivativeGroupQuads : VK_FALSE,
@@ -920,6 +923,7 @@ cc::result<context_handle> create_vulkan_context(backend::vulkan::vulkan_config 
         .storageBuffer16BitAccess = shader_features.storage_buffer_16bit,
         .uniformAndStorageBuffer16BitAccess = shader_features.uniform_and_storage_buffer_16bit,
         .storagePushConstant16 = shader_features.storage_push_constant_16bit,
+        .multiview = shader_features.multiview,
         .shaderDrawParameters = VK_TRUE,
     };
 
@@ -1073,6 +1077,7 @@ cc::result<context_handle> create_vulkan_context(backend::vulkan::vulkan_config 
     ctx->_shader_int16 = shader_features.has_int16();
     ctx->_subgroups = shader_features.subgroups;
     ctx->_vertex_layer_output = shader_features.shader_output_layer == VK_TRUE;
+    ctx->_view_instancing = shader_features.multiview == VK_TRUE;
     ctx->_float_atomic_add = float_atomic_add_supported;
     if (shader_features.subgroup_size_control == VK_TRUE)
         ctx->_subgroup_size_control = {
