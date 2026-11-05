@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import fnmatch
+import os
 import platform
 import sys
 from dataclasses import dataclass
@@ -55,6 +56,9 @@ class Context:
         memory_guard.install()
         # and none runs on a nearly full system or repository drive (lib/core/disk_guard.py)
         disk_guard.check(self.root)
+        # Every binary a command starts finds the source tree's data here (nexus/source_root.hh), not in a path compiled in;
+        # `dev.py test` names it again for each binary it runs.
+        os.environ["SC_SOURCE_ROOT"] = str(self.root)
 
     def die(self, msg: str) -> None:
         print(console.red(f"ERROR: {msg}"), file=sys.stderr)

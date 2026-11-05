@@ -226,6 +226,7 @@ include(PrecompiledHeaders)
 # helpers below both call.
 include(RuntimeDlls)
 include(SourceFingerprint) # sc_add_source_fingerprint — a cache key that moves with a library's own sources
+include(SourcePaths)       # sc_target_source_paths — a source-tree directory as a path relative to the source root
 
 # RelWithDebInfo = Release codegen + assertions + debug info. MSVC/clang-cl default this config to /Ob1
 # (inline only functions explicitly marked inline) — a misleading dev default: /O2 is otherwise identical to
