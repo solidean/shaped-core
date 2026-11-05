@@ -71,11 +71,12 @@ For an epoch or two both heaps exist; a caller for whom that matters lets the in
 
 A placed transient texture **starts with undefined contents**: its memory held an earlier epoch's texture.
 Its first barrier is the one from `undefined`, which on dx12 carries the discard that D3D12 requires to initialize a placed render target, and on Vulkan is the image's own initial transition.
+Metal has no layouts and no such barrier: its first write defines the contents, as a render pass's clear does.
 **Keep the epochs in flight bounded**, as a swapchain does: with dozens queued, every new frame's textures overlap memory the queued ones still use.
 The NVIDIA driver then stalls when a placed render target is bound, for up to 2 s in a benchmark that queued 48 frames unthrottled.
 Throttled to 2 in flight, the same frames recorded in 5 ms where dedicated textures had taken 15.
 A texture falls back to a dedicated allocation where it cannot be placed:
-- **The backend places no textures**: metal (until [feat-sg-metal-texture-heap](../issues/feat-sg-metal-texture-heap.md)), webgpu, and dx12 below resource heap tier 2.
+- **The backend places no textures**: webgpu and dx12 below resource heap tier 2.
 - **The heap cannot hold this one**: a multisampled texture on dx12, which needs a 4 MiB placement alignment, or a Vulkan image whose memory types exclude the heap's.
 - **The epoch's window is full.**
 
@@ -96,7 +97,7 @@ recycled its descriptor slots.
 
 ## Status
 
-Both **dedicated** and **placed** backing work for buffers on dx12, vulkan and metal, and for textures on dx12 and vulkan.
+Both **dedicated** and **placed** backing work for buffers on dx12, vulkan and metal, and for textures on dx12, vulkan and metal.
 `ctx.persistent.create_memory_heap(size, contents)` mints a heap of buffers or of textures.
 A placement's `allocation_info` routes the create through `CreatePlacedResource`, `vkBind*Memory` or the metal heap.
 The resource holds a handle to its heap, so the heap outlives the placement.

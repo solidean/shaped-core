@@ -46,19 +46,11 @@ void metal_texture::release_storage() const
                 f();
         });
 }
-cc::result<metal_texture_handle> metal_context::create_metal_texture(sg::texture_description const& desc,
-                                                                     sg::allocation_info const& alloc)
+cc::result<MTL::TextureDescriptor*> new_texture_descriptor(sg::texture_description const& desc)
 {
-    desc.assert_valid();
-
-    if (is_device_lost())
-        return cc::error("the metal device has been lost");
-
     auto const format = pixel_format_of(desc.format);
     if (format == MTL::PixelFormatInvalid)
         return cc::error(cc::format("texture: pixel format {} has no metal equivalent", int(desc.format)));
-
-    auto const scope = autorelease_scope();
 
     auto* const descriptor = MTL::TextureDescriptor::alloc()->init();
     descriptor->setPixelFormat(format);
@@ -84,6 +76,23 @@ cc::result<metal_texture_handle> metal_context::create_metal_texture(sg::texture
     // access model is what emits the barriers.
     descriptor->setStorageMode(MTL::StorageModePrivate);
     descriptor->setHazardTrackingMode(MTL::HazardTrackingModeUntracked);
+    return descriptor;
+}
+
+cc::result<metal_texture_handle> metal_context::create_metal_texture(sg::texture_description const& desc,
+                                                                     sg::allocation_info const& alloc)
+{
+    desc.assert_valid();
+
+    if (is_device_lost())
+        return cc::error("the metal device has been lost");
+
+    auto const scope = autorelease_scope();
+
+    auto described = new_texture_descriptor(desc);
+    if (described.has_error())
+        return cc::error(cc::move(described.error()));
+    auto* const descriptor = described.value();
 
     MTL::Texture* texture = nullptr;
     if (alloc.is_placed())

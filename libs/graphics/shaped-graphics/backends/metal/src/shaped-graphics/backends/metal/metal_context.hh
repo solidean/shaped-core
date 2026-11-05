@@ -137,7 +137,8 @@ public:
                                                                         sg::allocation_info const& alloc);
 
     /// The backend-typed heap create, which the sg::context virtual forwards to.
-    [[nodiscard]] cc::result<metal_memory_heap_handle> create_metal_memory_heap(isize size_in_bytes);
+    [[nodiscard]] cc::result<metal_memory_heap_handle> create_metal_memory_heap(isize size_in_bytes,
+                                                                                sg::memory_heap_contents contents);
 
     // The bind path's backend-typed creates; the sg::context virtuals forward to these.
     [[nodiscard]] cc::result<metal_binding_group_layout_handle> create_metal_binding_group_layout(

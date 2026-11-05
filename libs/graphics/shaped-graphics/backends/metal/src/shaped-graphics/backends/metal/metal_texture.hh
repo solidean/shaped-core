@@ -13,6 +13,10 @@ namespace sg::backend::metal
 {
 /// Mints the process-unique stamp behind `metal_texture::identity()`.
 [[nodiscard]] u64 next_texture_identity();
+
+/// The descriptor a texture of `desc` is created from, retained for the caller to release, or why metal has no equivalent.
+/// A heap's texture requirements are asked with this same descriptor, so a placement and its creation agree.
+[[nodiscard]] cc::result<MTL::TextureDescriptor*> new_texture_descriptor(sg::texture_description const& desc);
 } // namespace sg::backend::metal
 
 /// Metal implementation of sg::raw_texture.
