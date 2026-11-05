@@ -499,6 +499,28 @@ TEST("sgl emit - a binding array takes consecutive registers, and a marked index
     CHECK(sgl::emit::dump_errors(emit_source(arrays, 0, target::wgsl)).contains("binding_arrays"));
 }
 
+TEST("sgl emit - an array of samplers takes consecutive sampler registers, and an element is handed to a sample")
+{
+    constexpr auto arrays
+        = "require binding_arrays\n"
+          "\n"
+          "binding look:\n"
+          "    tex: texture_2d[float4]\n"
+          "    samplers: sampler[3]\n"
+          "    values: mut buffer[float4]\n"
+          "\n"
+          "@compute(64) fun cs(@thread_id id: int3){look}:\n"
+          "    look.values[id.x] = look.tex.sample(float2(0.5, 0.5), look.samplers[nonuniform (id.x % "
+          "3)], level = 0.0)\n";
+    auto const dx12 = text_of(arrays, target::hlsl_dx12);
+    CHECK(dx12.contains("SamplerState look_samplers[3] : register(s1, space0);\n"
+                        "RWStructuredBuffer<float4> look_values : register(u4, space0);\n"));
+    CHECK(dx12.contains("look_tex.SampleLevel(look_samplers[NonUniformResourceIndex(id.x % 3)], float2(0.5, 0.5), "
+                        "0.0)"));
+    CHECK(text_of(arrays, target::hlsl_vulkan).contains("[[vk::binding(1, 0)]] SamplerState look_samplers[3];\n"));
+    CHECK(text_of(arrays, target::msl).contains("look_tex.sample(look_samplers[id.x % 3], float2(0.5, 0.5), level(0.0))"));
+}
+
 TEST("sgl emit - a `uniform` mark is the plain index on every target, beside a `nonuniform` one")
 {
     // CHK-400: the author's word is all the mark is, so no target is told anything of it

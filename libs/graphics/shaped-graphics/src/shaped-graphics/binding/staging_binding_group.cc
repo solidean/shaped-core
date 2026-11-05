@@ -150,9 +150,22 @@ void staging_binding_group::set_sampler(binding_slot slot, sampler const& smp)
     CC_ASSERT(is_sampler(info.declared->type), "staging_binding_group: that binding is not a sampler");
     CC_ASSERT(info.first_descriptor >= 0, "staging_binding_group: that sampler is static — it lives in the root "
                                           "signature, not in the group");
-    CC_ASSERT(info.declared->count == 1, "dynamic sampler arrays are not supported yet");
+    CC_ASSERT(info.declared->count == 1, "staging_binding_group: that sampler is an array — use set_sampler_element");
 
     write_sampler_descriptor(info.first_descriptor, smp);
+    _dirty = true;
+    touch(slot);
+}
+
+void staging_binding_group::set_sampler_element(binding_slot slot, int element, sampler const& smp)
+{
+    auto const& info = info_of(slot);
+    CC_ASSERT(is_sampler(info.declared->type), "staging_binding_group: that binding is not a sampler");
+    CC_ASSERT(info.first_descriptor >= 0, "staging_binding_group: that sampler is static — it lives in the root "
+                                          "signature, not in the group");
+    CC_ASSERT(element >= 0 && element < int(info.declared->count), "staging_binding_group: no such sampler element");
+
+    write_sampler_descriptor(info.first_descriptor + element, smp);
     _dirty = true;
     touch(slot);
 }

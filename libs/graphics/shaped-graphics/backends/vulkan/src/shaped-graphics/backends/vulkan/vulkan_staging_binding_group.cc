@@ -82,8 +82,9 @@ cc::result<cc::unit> vulkan_staging_binding_group::initialize()
                 return cc::error("staging_binding_group: could not create the default sampler");
         }
         // Qualified: the member overload below hides the free function this needs.
-        sg::backend::vulkan::write_sampler_descriptor(_ctx, sampler,
-                                                      _image.data() + _vk_layout->descriptor_offset_of(i, 0));
+        for (auto element = 0; element < int(bindings[i].count); ++element)
+            sg::backend::vulkan::write_sampler_descriptor(_ctx, sampler,
+                                                          _image.data() + _vk_layout->descriptor_offset_of(i, element));
     }
     return cc::unit{};
 }

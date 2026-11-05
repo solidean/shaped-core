@@ -294,6 +294,21 @@ cc::result<binding_group_layout_handle> context_uncached_scope::try_create_bindi
                                         b.name));
     }
 
+    for (auto const& b : bindings)
+    {
+        if (!sg::is_sampler(b.type) || b.count == 1)
+            continue;
+        if (!_ctx.supports(feature::binding_arrays))
+            return cc::error(cc::format("binding_group_layout: '{}' is an array of samplers, which needs "
+                                        "sg::feature::binding_arrays",
+                                        b.name));
+        for (auto const& s : static_samplers)
+            if (s.name == b.name)
+                return cc::error(cc::format("binding_group_layout: '{}' is an array of samplers, which is supplied per "
+                                            "group and is never static",
+                                            b.name));
+    }
+
     if (auto unsupported = impl::find_unsupported_binding(_ctx.supports(feature::extended_image_formats), bindings);
         unsupported.has_value())
         return cc::error(cc::move(unsupported.value()));

@@ -76,4 +76,7 @@ struct sg::named_sampler
 {
     cc::string name;
     sg::sampler sampler; // qualified: bare `sampler` here would shadow the type (GCC -Wchanges-meaning)
+    /// The element of a sampler array this supplies; a group supplies each element of one once.
+    /// 0 for a plain sampler binding, and for a static sampler, which is never an array.
+    int element = 0;
 };

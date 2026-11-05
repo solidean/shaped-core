@@ -50,8 +50,14 @@ cc::result<metal_binding_group_layout_handle> metal_context::create_metal_bindin
                                             bindings[i].name, bindings[j].name, bindings[i].index));
 
     for (auto const& b : bindings)
+    {
         if (b.count == 0)
             return cc::error(cc::format("binding_group_layout: '{}' is an unbounded array, which sg rejects", b.name));
+        if (sg::is_sampler(b.type) && b.count != 1)
+            return cc::error(cc::format("binding_group_layout: '{}' is an array of samplers, which sg's metal backend "
+                                        "does not bind yet",
+                                        b.name));
+    }
 
     auto const hash = sg::impl::binding_group_layout_hash(bindings, static_samplers);
     return std::make_shared<metal_binding_group_layout const>(

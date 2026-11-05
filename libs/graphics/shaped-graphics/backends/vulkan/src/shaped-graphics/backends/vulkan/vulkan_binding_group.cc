@@ -249,7 +249,15 @@ cc::result<vulkan_binding_group_handle> vulkan_binding_group::create_resolved(vu
 
     // Match each provided dynamic sampler by name and write its descriptor.
     // A static sampler was already written above, so supplying one is an error rather than an override.
-    auto sampler_filled = cc::vector<char>::create_filled(bindings.size(), char(0));
+    // one flag per element of each binding, so a sampler array is filled element by element
+    auto sampler_first = cc::vector<isize>::create_filled(bindings.size(), isize(0));
+    auto sampler_elements = isize(0);
+    for (isize i = 0; i < bindings.size(); ++i)
+    {
+        sampler_first[i] = sampler_elements;
+        sampler_elements += sg::is_sampler(bindings[i].type) ? isize(bindings[i].count) : 0;
+    }
+    auto sampler_filled = cc::vector<char>::create_filled(sampler_elements, char(0));
     for (auto const& ns : samplers)
     {
         isize slot = -1;
@@ -265,14 +273,16 @@ cc::result<vulkan_binding_group_handle> vulkan_binding_group::create_resolved(vu
             return cc::error(cc::format("binding_group: sampler '{}' is static — it is fixed by the layout and must "
                                         "not be supplied per group",
                                         ns.name));
-        CC_ASSERT(sampler_filled[slot] == char(0), "binding_group: a sampler was provided more than once");
-        CC_ASSERT(bindings[slot].count == 1, "dynamic sampler arrays are not supported yet");
-        sampler_filled[slot] = char(1);
+        if (ns.element < 0 || ns.element >= int(bindings[slot].count))
+            return cc::error(cc::format("binding_group: sampler '{}' has no element {}", ns.name, ns.element));
+        auto& filled = sampler_filled[sampler_first[slot] + ns.element];
+        CC_ASSERT(filled == char(0), "binding_group: a sampler was provided more than once");
+        filled = char(1);
 
         VkSampler const sampler = ctx._samplers.acquire(ns.sampler);
         if (sampler == VK_NULL_HANDLE)
             return cc::error(cc::format("binding_group: could not create the sampler for '{}'", ns.name));
-        write_sampler_descriptor(ctx, sampler, base + layout->descriptor_offset_of(slot, 0));
+        write_sampler_descriptor(ctx, sampler, base + layout->descriptor_offset_of(slot, ns.element));
     }
 
     // Every binding must be provided — there is no default descriptor at this level.
@@ -281,8 +291,14 @@ cc::result<vulkan_binding_group_handle> vulkan_binding_group::create_resolved(vu
     {
         if (sg::is_sampler(bindings[i].type))
         {
-            if (layout->_slot_samplers[i] == VK_NULL_HANDLE && sampler_filled[i] == char(0))
-                return cc::error(cc::format("binding_group: sampler '{}' was not provided", bindings[i].name));
+            if (layout->_slot_samplers[i] == VK_NULL_HANDLE)
+                for (auto e = 0; e < int(bindings[i].count); ++e)
+                    if (sampler_filled[sampler_first[i] + e] == char(0))
+                        return cc::error(
+                            bindings[i].count == 1
+                                ? cc::format("binding_group: sampler '{}' was not provided", bindings[i].name)
+                                : cc::format("binding_group: element {} of sampler array '{}' was not provided", e,
+                                             bindings[i].name));
         }
         else if (view_filled[i] == char(0))
             return cc::error(cc::format("binding_group: binding '{}' was not provided", bindings[i].name));
