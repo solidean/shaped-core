@@ -19,7 +19,7 @@ namespace
 {
 constexpr auto k_copy_both = sg::buffer_usage::copy_src | sg::buffer_usage::copy_dst;
 
-/// The same shape double_compute.metal has: one argument buffer, one readwrite structured member at [[id(0)]].
+/// The shape a one-binding group compiles to: one argument buffer, one readwrite structured member at [[id(0)]].
 constexpr char const* k_double_kernel = R"(
 #include <metal_stdlib>
 using namespace metal;

@@ -486,22 +486,19 @@ A handler still in flight then does nothing instead of reporting into freed memo
 
 `shaped-graphics-metal-test` is the tier-2 binary: bring-up, the floor refusal, the epoch timelines, command-list lifetime, transfer, the bind path, compute, raster, and what Metal reports where.
 
-The tier-1 suite has **no compute execution test at all** — it cannot, because bytecode is per-backend by construction — so this tier is the specification for the dispatch path.
-`double_compute.metal` is checked in beside the `double_compute.metallib.h` compiled from it, with the command line in the source's own comment.
-`mesh.metal` is the vertex-input fixture, one library with five entry points.
-The two stages of a draw that reads its colour from a vertex attribute and its tint from inline constants, plus three kernels.
-One kernel takes inline constants, one takes an array binding, and one writes the vertex buffer a draw then reads.
-Its quad carries decoy vertices and decoy indices ahead of the real ones, so a draw that ignored `vertex_offset` or the first index covers a different part of the target rather than the same one.
-`raytrace.metal` is the ray-tracing fixture, one library with seven entry points.
-Two raygen kernels and the inline ray-query one, plus a miss function, a closest-hit function, an any-hit function and a procedural intersection function.
-It is what makes the two execution tests the only thing anywhere that traces a ray on metal, since the tier-1 suite cannot.
+The fixtures are an SGL package in `tests/shaders`, compiled for metal through slib, so the binary links the shader library.
+`kernels.sgl` holds the dispatch paths: a doubling kernel, one taking inline constants and one taking an array binding.
+Beside them, one writing the vertex buffer a draw then reads, and a copy.
+`draws.sgl` holds the draws: a covering triangle from the vertex index alone, a draw whose colour is a vertex attribute times an inline-constants tint, and the fragment-write hazard's two halves.
+A test still builds its layouts and pipelines through the backend's own calls; only the shader and its bindings come from the package, through `sgl-fixture.hh`.
+So the argument-buffer convention a test exercises is the one every real shader's reflection states, rather than one written beside a hand-written kernel.
+The vertex-input tests state their vertex layout themselves, and their quad carries decoy vertices and decoy indices ahead of the real ones.
+So a draw that ignored `vertex_offset` or the first index covers a different part of the target.
 
-**That fixture is hand-written, and temporary.**
-A hand-written kernel can agree with the backend and still disagree with every real shader.
-The target shape is an SGL package, as `metal-sgl-test.cc` already is; HLSL does not reach metal, by decision.
-[debt-sg-metal-hand-written-fixtures](../../docs/issues/debt-sg-metal-hand-written-fixtures.md) carries the gap.
-So the fixture is reproducible by hand, and the binary needs neither the shader library nor the Metal toolchain.
-Its reflection is written out by hand next to it, so the test states the binding shape it means rather than inheriting whatever a reflector produced.
+`raytrace.metal` is the ray-tracing fixture, still hand-written MSL: one library with seven entry points, plus `raytrace_second.metal`.
+Two raygen kernels and the inline ray-query one, plus a miss function, a closest-hit function, an any-hit function and a procedural intersection function.
+Its tests drive the backend's ray-tracing pipeline description with those functions directly, which SGL's generated pipelines do not spell.
+[debt-sg-metal-hand-written-fixtures](../../docs/issues/debt-sg-metal-hand-written-fixtures.md) carries it.
 Every test builds its own context, because the context is its subject.
 The whole binary runs with API validation armed, so a violation anywhere in it ends the run.
 

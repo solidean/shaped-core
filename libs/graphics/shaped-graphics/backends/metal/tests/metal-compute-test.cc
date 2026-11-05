@@ -1,6 +1,5 @@
-#include "double_compute.metallib.h"
-#include "mesh-fixture.hh"
 #include "metal-test-common.hh"
+#include "sgl-fixture.hh"
 
 #include <clean-core/common/utility.hh>
 #include <clean-core/string/format.hh>
@@ -8,7 +7,7 @@
 #include <nexus/test.hh>
 #include <shaped-graphics/binding/compiled_shader.hh>
 
-// Compute, end to end: a checked-in metallib, a hand-written binding shape, a dispatch, and the bytes read back.
+// Compute, end to end: a kernel of the SGL package, its reflected bindings, a dispatch, and the bytes read back.
 //
 // The tier-1 suite has no compute execution test at all — it cannot, because bytecode is per-backend by construction —
 // so this tier is the specification for the dispatch path, the way dx12's and vulkan's are for theirs.
@@ -18,43 +17,22 @@ using namespace cc::primitive_defines;
 
 namespace
 {
-/// The fixtures' buffer array, `inputs`, as an array declaration takes it.
-/// Spelled by hand: these layouts come from create_metal_binding_group_layout, which the by-name lookup does not see.
-constexpr auto k_inputs_array = sg::buffer_array_binding{.name = "inputs"};
+namespace kernels = mtl::test::shaders::kernels;
+
+/// The fixtures' buffer array, `summed.inputs`, as an array declaration takes it.
+/// Named by the package: these layouts come from create_metal_binding_group_layout, which the by-name lookup does not see.
+constexpr auto k_inputs_array = kernels::summed::arrays::inputs;
 
 constexpr auto k_copy_both = sg::buffer_usage::copy_src | sg::buffer_usage::copy_dst;
-
-/// The reflection, written by hand next to the shader rather than produced by a reflector.
-/// That is what makes the test state the binding shape it means — see double_compute.metal.
-[[nodiscard]] sg::compiled_shader double_compute_shader()
-{
-    auto shader = sg::compiled_shader{};
-    shader.stage = sg::shader_stage::compute;
-    shader.format = sg::shader_format::metal_lib;
-    shader.entry_point = "main0";
-    auto blob = cc::pinned_data<byte>::create_uninitialized(isize(sizeof(mtl::test::double_compute_metallib)));
-    cc::memcpy(blob.data(), mtl::test::double_compute_metallib, sizeof(mtl::test::double_compute_metallib));
-    shader.bytecode = cc::pinned_data<byte const>(cc::move(blob));
-    shader.workgroup_size = sg::compute_dimensions{.x = 1, .y = 1, .z = 1};
-    shader.bindings.push_back({
-        .name = "values",
-        .space = 0,
-        .index = 0,
-        .count = 1,
-        .type = sg::binding_type::buffer,
-        .access = sg::access_mode::read_write,
-    });
-    return shader;
-}
 } // namespace
 
-TEST("sg metal - a compute pipeline builds from a metal library")
+ASYNC_TEST("sg metal - a compute pipeline builds from a metal library", exclusive("slib-shader-library"))
 {
     auto const ctx = mtl::test::make_context();
     if (ctx == nullptr)
         SKIP("no metal 4 device on this host");
 
-    auto const shader = double_compute_shader();
+    auto const shader = co_await mtl::test::sgl_shader(*ctx, kernels::double_main);
     auto layout = ctx->create_metal_binding_group_layout(shader.bindings, {}, sg::lifetime_scope::persistent);
     REQUIRE(layout.has_value()).context(layout.has_error() ? layout.error().to_string() : cc::string());
 
@@ -73,13 +51,13 @@ TEST("sg metal - a compute pipeline builds from a metal library")
     CHECK(!pipeline.value()->used_cached_pipeline());
 }
 
-TEST("sg metal - a compute pipeline refuses a shader of the wrong format")
+ASYNC_TEST("sg metal - a compute pipeline refuses a shader of the wrong format", exclusive("slib-shader-library"))
 {
     auto const ctx = mtl::test::make_context();
     if (ctx == nullptr)
         SKIP("no metal 4 device on this host");
 
-    auto shader = double_compute_shader();
+    auto shader = co_await mtl::test::sgl_shader(*ctx, kernels::double_main);
     shader.format = sg::shader_format::spirv;
 
     auto const pipeline
@@ -87,13 +65,13 @@ TEST("sg metal - a compute pipeline refuses a shader of the wrong format")
     CHECK(pipeline.has_error());
 }
 
-ASYNC_TEST("sg metal - a dispatch doubles the values it was given")
+ASYNC_TEST("sg metal - a dispatch doubles the values it was given", exclusive("slib-shader-library"))
 {
     auto const ctx = mtl::test::make_context();
     if (ctx == nullptr)
         SKIP("no metal 4 device on this host");
 
-    auto const shader = double_compute_shader();
+    auto const shader = co_await mtl::test::sgl_shader(*ctx, kernels::double_main);
     auto layout = ctx->create_metal_binding_group_layout(shader.bindings, {}, sg::lifetime_scope::persistent);
     REQUIRE(layout.has_value());
 
@@ -115,7 +93,7 @@ ASYNC_TEST("sg metal - a dispatch doubles the values it was given")
         source[i] = u32(i + 1);
 
     auto const nv = sg::named_view{
-        .name = "values",
+        .name = "doubled.values",
         .view = buffer->as_raw_readwrite({.offset = 0, .size = buffer->size_in_bytes()}, isize(sizeof(u32)))};
     auto group = ctx->create_metal_binding_group(layout.value(), cc::span<sg::named_view const>(&nv, 1), {},
                                                  sg::lifetime_scope::persistent);
@@ -145,49 +123,26 @@ ASYNC_TEST("sg metal - a dispatch doubles the values it was given")
                             source[0] * 2u));
 }
 
-// -- inline constants and array bindings, over the mesh.metal fixture --------------------------------
+// -- inline constants and array bindings -------------------------------------------------------------
 //
 // Both are paths Metal has no native form of: there are no root constants, and which elements of an array a kernel
 // indexes is something no backend can infer.
 
-namespace
-{
-/// The inline-constants block `mesh.metal`'s `scale_main` reads at [[buffer(4)]].
-struct scale_constants
-{
-    u32 factor = 1;
-};
-
-} // namespace
-
-ASYNC_TEST("sg metal - compute inline constants reach the kernel")
+ASYNC_TEST("sg metal - compute inline constants reach the kernel", exclusive("slib-shader-library"))
 {
     auto const ctx = mtl::test::make_context();
     if (ctx == nullptr)
         SKIP("no metal 4 device on this host");
 
-    auto shader = mtl::test::mesh_kernel("scale_main");
-    shader.bindings.push_back({
-        .name = "values",
-        .space = 0,
-        .index = 0,
-        .count = 1,
-        .type = sg::binding_type::buffer,
-        .access = sg::access_mode::read_write,
-    });
+    auto const shader = co_await mtl::test::sgl_shader(*ctx, kernels::scale_main);
 
-    auto group_layout = ctx->create_metal_binding_group_layout(shader.bindings, {}, sg::lifetime_scope::persistent);
+    auto group_layout = ctx->create_metal_binding_group_layout(kernels::scaled::declared_bindings(), {},
+                                                               sg::lifetime_scope::persistent);
     REQUIRE(group_layout.has_value());
 
     auto layout_desc = sg::pipeline_layout_description{};
     layout_desc.groups.push_back(group_layout.value());
-    layout_desc.inline_constants = sg::binding{
-        .space = 0,
-        .index = 0,
-        .count = 1,
-        .type = sg::binding_type::constants_buffer,
-        .block_size = isize(sizeof(scale_constants)),
-    };
+    layout_desc.inline_constants = kernels::scale::inline_binding();
     auto pipeline_layout = ctx->create_metal_pipeline_layout(layout_desc, sg::lifetime_scope::persistent);
     REQUIRE(pipeline_layout.has_value())
         .context(pipeline_layout.has_error() ? pipeline_layout.error().to_string() : cc::string());
@@ -205,7 +160,7 @@ ASYNC_TEST("sg metal - compute inline constants reach the kernel")
         source[i] = u32(i + 1);
 
     auto const nv = sg::named_view{
-        .name = "values",
+        .name = "scaled.values",
         .view = buffer->as_raw_readwrite({.offset = 0, .size = buffer->size_in_bytes()}, isize(sizeof(u32)))};
     auto group = ctx->create_metal_binding_group(group_layout.value(), cc::span<sg::named_view const>(&nv, 1), {},
                                                  sg::lifetime_scope::persistent);
@@ -218,8 +173,8 @@ ASYNC_TEST("sg metal - compute inline constants reach the kernel")
 
     // Set twice, dispatched once: the block is placed by the dispatch, so what runs is the value that was current
     // then — not the first one set.
-    cmd->compute.set_inline_constants(scale_constants{.factor = 2});
-    cmd->compute.set_inline_constants(scale_constants{.factor = 3});
+    cmd->compute.set_inline_constants(kernels::scale{.factor = 2}.to_block());
+    cmd->compute.set_inline_constants(kernels::scale{.factor = 3}.to_block());
     cmd->compute.dispatch_groups(k_count, 1, 1);
 
     auto future = cmd->download.bytes_from_buffer(buffer, 0, buffer->size_in_bytes());
@@ -240,7 +195,7 @@ ASYNC_TEST("sg metal - compute inline constants reach the kernel")
                             source[0] * 3u));
 }
 
-ASYNC_TEST("sg metal - an array binding's elements are declared one by one")
+ASYNC_TEST("sg metal - an array binding's elements are declared one by one", exclusive("slib-shader-library"))
 {
     auto const ctx = mtl::test::make_context();
     if (ctx == nullptr)
@@ -248,22 +203,7 @@ ASYNC_TEST("sg metal - an array binding's elements are declared one by one")
 
     // The array takes four consecutive slots from its own index, so the scalar output sits at index 4 — the spacing
     // rule a layout must follow and nothing checks.
-    auto shader = mtl::test::mesh_kernel("array_sum_main");
-    shader.bindings.push_back({
-        .name = "inputs",
-        .space = 0,
-        .index = 0,
-        .count = 4,
-        .type = sg::binding_type::buffer,
-    });
-    shader.bindings.push_back({
-        .name = "output",
-        .space = 0,
-        .index = 4,
-        .count = 1,
-        .type = sg::binding_type::buffer,
-        .access = sg::access_mode::read_write,
-    });
+    auto const shader = co_await mtl::test::sgl_shader(*ctx, kernels::array_sum_main);
 
     auto group_layout = ctx->create_metal_binding_group_layout(shader.bindings, {}, sg::lifetime_scope::persistent);
     REQUIRE(group_layout.has_value());
@@ -295,9 +235,9 @@ ASYNC_TEST("sg metal - an array binding's elements are declared one by one")
                                                           k_copy_both | sg::buffer_usage::readwrite_buffer);
 
     auto views = cc::vector<sg::named_view>();
-    views.push_back({.name = "inputs", .view = sg::bound_view(cc::move(element_views))});
+    views.push_back({.name = "summed.inputs", .view = sg::bound_view(cc::move(element_views))});
     views.push_back(
-        {.name = "output",
+        {.name = "summed.output",
          .view = output->as_raw_readwrite({.offset = 0, .size = output->size_in_bytes()}, isize(sizeof(u32)))});
 
     auto group = ctx->create_metal_binding_group(group_layout.value(), views, {}, sg::lifetime_scope::persistent);
@@ -342,7 +282,8 @@ ASYNC_TEST("sg metal - an array binding's elements are declared one by one")
                             10u * 1u));
 }
 
-TEST("sg metal - a transient group freed after its bind is retained, and its successor is a group of its own")
+ASYNC_TEST("sg metal - a transient group freed after its bind is retained, and its successor is a group of its own",
+           exclusive("slib-shader-library"))
 {
     auto const ctx = mtl::test::make_context();
     if (ctx == nullptr)
@@ -352,14 +293,7 @@ TEST("sg metal - a transient group freed after its bind is retained, and its suc
     // group it binds: a transient one the caller drops cannot be freed, and a new one allocated at its address, while
     // the list records.
     // The successor is then a group of its own, resolved and checked again at its first op.
-    auto shader = mtl::test::mesh_kernel("array_sum_main");
-    shader.bindings.push_back({.name = "inputs", .space = 0, .index = 0, .count = 4, .type = sg::binding_type::buffer});
-    shader.bindings.push_back({.name = "output",
-                               .space = 0,
-                               .index = 4,
-                               .count = 1,
-                               .type = sg::binding_type::buffer,
-                               .access = sg::access_mode::read_write});
+    auto const shader = co_await mtl::test::sgl_shader(*ctx, kernels::array_sum_main);
 
     auto group_layout = ctx->create_metal_binding_group_layout(shader.bindings, {}, sg::lifetime_scope::persistent);
     REQUIRE(group_layout.has_value());
@@ -390,9 +324,9 @@ TEST("sg metal - a transient group freed after its bind is retained, and its suc
                     input->as_raw_readonly({.offset = 0, .size = input->size_in_bytes()}, isize(sizeof(u32))));
         }
         auto views = cc::vector<sg::named_view>();
-        views.push_back({.name = "inputs", .view = sg::bound_view(cc::move(elements))});
+        views.push_back({.name = "summed.inputs", .view = sg::bound_view(cc::move(elements))});
         views.push_back(
-            {.name = "output",
+            {.name = "summed.output",
              .view = output->as_raw_readwrite({.offset = 0, .size = output->size_in_bytes()}, isize(sizeof(u32)))});
         auto group = ctx->create_metal_binding_group(group_layout.value(), views, {}, sg::lifetime_scope::transient);
         REQUIRE(group.has_value()).context(group.has_error() ? group.error().to_string() : cc::string());

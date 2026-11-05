@@ -24,3 +24,9 @@ A fixture SGL cannot say yet, such as a ray-tracing entry point it does not supp
 `metal-sgl-test.cc` already takes it behind that gate; moving the rest is the same trade made for the whole binary, deliberately rather than in passing.
 `ssc::msl end to end - the reflected bindings build the layout the backend encodes` checks that a reflected layout and the encoded one agree.
 That is the property the hand-written fixtures could never pin.
+
+**Done on 2026-11-05 for everything but ray tracing.**
+`kernels.sgl` and `draws.sgl` replace `double_compute.metal`, `triangle.metal` and `mesh.metal`.
+The compute, raster, barrier and vertex-input tests take their shaders and bindings from the package.
+The tier-2 binary links slib unconditionally now, which costs no toolchain: the metal compiler emits MSL source where there is none.
+`raytrace.metal` and `raytrace_second.metal` remain, because their tests hand the backend's pipeline description metal functions directly, which SGL's generated pipelines do not spell.

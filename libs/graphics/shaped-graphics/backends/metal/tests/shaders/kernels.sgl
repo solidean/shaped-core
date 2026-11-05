@@ -1,0 +1,55 @@
+// The tier-2 kernels, written in SGL: each a dispatch path the metal backend encodes on its own.
+// The bindings come from the package's reflection, so a test meets the argument-buffer convention every real shader has.
+
+require binding_arrays
+
+// Doubles every value in place.
+binding doubled:
+    values: mut buffer[uint]
+
+@compute(1) fun double_main(@thread_id id: int3){doubled}:
+    doubled.values[id.x] = doubled.values[id.x] * 2u
+
+// Scales every value by a factor arriving as inline constants, which metal has no native form of.
+binding scaled:
+    values: mut buffer[uint]
+
+@inline binding scale:
+    factor: uint
+
+@compute(1) fun scale_main(@thread_id id: int3){scaled, scale}:
+    scaled.values[id.x] = scaled.values[id.x] * scale.factor
+
+// An array binding and a scalar one in the same group, which is what `declare_array_buffer_access` addresses.
+// The array takes four consecutive slots from its own, so the scalar output sits at slot 4.
+binding summed:
+    inputs: buffer[uint][4]
+    output: mut buffer[uint]
+
+@compute(1) fun array_sum_main(@thread_id id: int3){summed}:
+    let mut sum = 0u
+    for i in 0 ..< 4:
+        sum = sum + summed.inputs[i][id.x]
+    summed.output[id.x] = sum
+
+// Writes the vertex buffer a later draw reads, so the dependency crosses an encoder boundary.
+// One thread per vertex of a quad, six floats each: position, then colour.
+binding quad:
+    vertices: mut buffer[float]
+
+@compute(1) fun emit_quad_main(@thread_id id: int3){quad}:
+    let at = id.x * 6
+    quad.vertices[at] = if (id.x % 2) == 1 => 1.0 else -1.0
+    quad.vertices[at + 1] = if id.x >= 2 => 1.0 else -1.0
+    quad.vertices[at + 2] = 0.25
+    quad.vertices[at + 3] = 0.5
+    quad.vertices[at + 4] = 0.75
+    quad.vertices[at + 5] = 1.0
+
+// One readonly input and one readwrite output in a group: the smallest shape that separates the two access classes.
+binding copied:
+    source: buffer[uint]
+    target: mut buffer[uint]
+
+@compute(1) fun copy_main(@thread_id id: int3){copied}:
+    copied.target[id.x] = copied.source[id.x]
