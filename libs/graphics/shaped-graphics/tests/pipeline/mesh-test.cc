@@ -4,6 +4,7 @@
 #include <clean-core/thread/async_coroutine.hh>
 #include <nexus/async-test.hh>
 #include <nexus/test.hh>
+#include <sg_test_sgl_shaders.hh>
 #include <sg_test_shaders.hh>
 #include <shaped-graphics/all.hh>
 
@@ -126,4 +127,54 @@ ASYNC_INVOCABLE_TEST("sg - a mesh-shaded pipeline is refused without the feature
     else
         CHECK(refused.error().to_string().contains("sg::feature::mesh_shader")).dump("error", refused.error().to_string());
     co_return;
+}
+
+ASYNC_INVOCABLE_TEST("sg - an SGL mesh stage writes the triangle its pipeline draws (CHK-480)",
+                     (sg::context_handle const& ctx))
+{
+    REQUIRE(ctx != nullptr);
+    if (!sg_test::shaders_reach(*ctx))
+        SKIP("no compiler builds this binary's shaders into a format this context accepts");
+    if (!ctx->supports(sg::feature::mesh_shader))
+        SKIP("this device has no mesh stage");
+
+    auto const pipeline = co_await ctx->cached.acquire_raster_pipeline(sg::test::sgl_shaders::meshes::covered);
+    CHECK(pipeline->is_mesh_shaded());
+    auto target = mesh_target();
+    target.target_set = sg::test::sgl_shaders::meshes::painted::name;
+    auto const pixels = co_await sg_test::draw_offscreen(*ctx, target,
+                                                         [&](sg::rendering_scope& scope)
+                                                         {
+                                                             scope.bind_pipeline(*pipeline);
+                                                             scope.draw_mesh_tasks(1);
+                                                         });
+    for (auto y = 0; y < size; ++y)
+        for (auto x = 0; x < size; ++x)
+            CHECK(pixels[0].rgba8(x, y) == tg::vec4i(0, 255, 0, 255)).context(cc::format("pixel ({}, {})", x, y));
+}
+
+ASYNC_INVOCABLE_TEST("sg - two SGL mesh workgroups each write their half, by their @workgroup_id",
+                     (sg::context_handle const& ctx))
+{
+    REQUIRE(ctx != nullptr);
+    if (!sg_test::shaders_reach(*ctx))
+        SKIP("no compiler builds this binary's shaders into a format this context accepts");
+    if (!ctx->supports(sg::feature::mesh_shader))
+        SKIP("this device has no mesh stage");
+
+    auto const pipeline = co_await ctx->cached.acquire_raster_pipeline(sg::test::sgl_shaders::meshes::split);
+    auto target = mesh_target();
+    target.target_set = sg::test::sgl_shaders::meshes::painted::name;
+    auto const pixels = co_await sg_test::draw_offscreen(*ctx, target,
+                                                         [&](sg::rendering_scope& scope)
+                                                         {
+                                                             scope.bind_pipeline(*pipeline);
+                                                             scope.draw_mesh_tasks(2);
+                                                         });
+    for (auto y = 0; y < size; ++y)
+        for (auto x = 0; x < size; ++x)
+        {
+            auto const red = x < size / 2 ? 0 : 255;
+            CHECK(pixels[0].rgba8(x, y) == tg::vec4i(red, 0, 255, 255)).context(cc::format("pixel ({}, {})", x, y));
+        }
 }

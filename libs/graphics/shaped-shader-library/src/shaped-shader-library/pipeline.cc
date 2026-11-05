@@ -192,9 +192,15 @@ cc::string moved(Built const& built, Now const& now)
 }
 
 /// `d`'s stage handles, each null without its stage.
-cc::fixed_array<slib::shader_asset_handle const*, 5> stages_of(slib::pipeline_definition const& d)
+cc::fixed_array<slib::shader_asset_handle const*, 6> stages_of(slib::pipeline_definition const& d)
 {
-    return {d.vertex, d.pixel, d.geometry, d.tessellation_control, d.tessellation_evaluation};
+    return {d.vertex, d.pixel, d.geometry, d.tessellation_control, d.tessellation_evaluation, d.mesh};
+}
+
+/// The stage whose source holds the pipeline declaration's file: the vertex stage, or the mesh stage in its place.
+slib::shader_asset_handle const* first_stage_of(slib::pipeline_definition const& d)
+{
+    return d.mesh != nullptr ? d.mesh : d.vertex;
 }
 
 /// One declared pipeline's reload state, kept for the life of the process like the definition it belongs to.
@@ -203,7 +209,7 @@ struct live_pipeline
     slib::pipeline_definition const* definition = nullptr;
     /// The stages' generations the configuration was last read at, in `stages_of` order; the build's settings are
     /// generation 0's.
-    cc::fixed_array<u64, 5> generations = {};
+    cc::fixed_array<u64, 6> generations = {};
     slib::pipeline_configuration configuration;
 
     /// The stages last described on a context with a set of option values, while the frozen part still matched.
@@ -215,6 +221,7 @@ struct live_pipeline
         cc::optional<sg::compiled_shader> geometry;
         cc::optional<sg::compiled_shader> tessellation_control;
         cc::optional<sg::compiled_shader> tessellation_evaluation;
+        cc::optional<sg::compiled_shader> mesh;
     };
     slib::impl::kept_builds<stages> kept;
 };
@@ -226,7 +233,8 @@ live_pipeline::stages stages_in(sg::raster_pipeline_description const& desc)
             .pixel = desc.fragment_shader,
             .geometry = desc.geometry_shader,
             .tessellation_control = desc.tessellation_control_shader,
-            .tessellation_evaluation = desc.tessellation_evaluation_shader};
+            .tessellation_evaluation = desc.tessellation_evaluation_shader,
+            .mesh = desc.mesh_shader};
 }
 
 void use_stages(sg::raster_pipeline_description& desc, live_pipeline::stages const& s)
@@ -236,6 +244,7 @@ void use_stages(sg::raster_pipeline_description& desc, live_pipeline::stages con
     desc.geometry_shader = s.geometry;
     desc.tessellation_control_shader = s.tessellation_control;
     desc.tessellation_evaluation_shader = s.tessellation_evaluation;
+    desc.mesh_shader = s.mesh;
 }
 
 cc::mutex<cc::vector<cc::unique_ptr<live_pipeline>>>& live_pipelines()
@@ -263,7 +272,7 @@ cc::string slib::impl::frozen_moved(cc::span<cc::string_view const> built, cc::s
 
 slib::pipeline_configuration slib::configuration_of(pipeline_definition const& d)
 {
-    auto generations = cc::fixed_array<u64, 5>{};
+    auto generations = cc::fixed_array<u64, 6>{};
     auto const stages = stages_of(d);
     for (auto i = isize(0); i < stages.size(); ++i)
         generations[i] = stages[i] != nullptr && *stages[i] != nullptr ? (*stages[i])->generation() : 0;
@@ -283,13 +292,14 @@ slib::pipeline_configuration slib::configuration_of(pipeline_definition const& d
 
     // A stage reloaded, so the source may say something new: described outside the lock, since it checks the whole file.
     auto next = current;
-    auto const source = (*d.vertex)->read_source();
-    auto const modules = (*d.vertex)->read_modules();
+    auto const& first = *first_stage_of(d);
+    auto const source = first->read_source();
+    auto const modules = first->read_modules();
     auto const library = impl::sgl_library_of(modules.files());
     auto const described
         = source.has_value()
             ? slib::impl::cached_describe(
-                  {.source = source.value(), .source_name = (*d.vertex)->virtual_path(), .library = library})
+                  {.source = source.value(), .source_name = first->virtual_path(), .library = library})
             : cc::result<sgl::module_description, cc::string>(cc::error(cc::string("the source is gone")));
     auto const* found = static_cast<sgl::described_pipeline const*>(nullptr);
     if (described.has_value())
@@ -340,7 +350,7 @@ cc::shared_async<sg::raster_pipeline_description> slib::describe_raster_pipeline
                                                                                  cc::vector<shader_option> options)
 {
     auto const& d = *definition;
-    CC_ASSERTF(d.vertex != nullptr && *d.vertex != nullptr,
+    CC_ASSERTF(first_stage_of(d) != nullptr && *first_stage_of(d) != nullptr,
                "{}'s {}: its package was never added to a shader library, so it has no shaders", d.file, d.name);
     // What the host states is the host's to get right: a format it left `undefined`, or a sample count of 0.
     for (auto const& part : open)
@@ -360,6 +370,11 @@ cc::shared_async<sg::raster_pipeline_description> slib::describe_raster_pipeline
                                                                        "and this device "
                                                                        "lacks sg::feature::tessellation_shader",
                                                                        d.file, d.name)));
+    if (d.mesh != nullptr && !ctx->supports(sg::feature::mesh_shader))
+        throw sg::pipeline_creation_exception(
+            cc::string(d.name), cc::any_error(cc::format("{}'s {}: the pipeline has a mesh stage, and this device "
+                                                         "lacks sg::feature::mesh_shader",
+                                                         d.file, d.name)));
     if (d.geometry != nullptr && !ctx->supports(sg::feature::geometry_shader))
         throw sg::pipeline_creation_exception(
             cc::string(d.name), cc::any_error(cc::format("{}'s {}: the pipeline has a geometry stage, and this device "
@@ -369,7 +384,10 @@ cc::shared_async<sg::raster_pipeline_description> slib::describe_raster_pipeline
     // The stages first: awaiting them is what promotes a reload, which the configuration is then read against.
     auto desc = raster_pipeline_description();
     desc.layout = d.acquire_layout(*ctx);
-    desc.vertex_shader = co_await (*d.vertex)->acquire(*ctx, options);
+    if (d.vertex != nullptr)
+        desc.vertex_shader = co_await (*d.vertex)->acquire(*ctx, options);
+    if (d.mesh != nullptr)
+        desc.mesh_shader = co_await (*d.mesh)->acquire(*ctx, options);
     if (d.pixel != nullptr)
         desc.fragment_shader = co_await (*d.pixel)->acquire(*ctx, options);
     if (d.geometry != nullptr)

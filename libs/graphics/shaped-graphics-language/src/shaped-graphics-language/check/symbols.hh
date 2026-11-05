@@ -126,6 +126,9 @@ enum class sgl::check::stage : sgl::u8
     tessellation_control,
     /// A `@tessellation_evaluation` fun: it takes a patch, its factors and a point of the domain, and returns a vertex (CHK-306).
     tessellation_evaluation,
+    /// A `@mesh(x, y, z, vertices = N, triangles = M)` fun: a workgroup writes up to N vertices and M triangles for the
+    /// rasterizer through its output (CHK-480), in the vertex stage's place.
+    mesh,
     /// The ray-tracing stages (CHK-326): where a dispatch of rays starts, one invocation per launch index.
     raygen,
     /// What a ray that hit nothing runs, with its ray type's payload.
@@ -159,6 +162,8 @@ namespace sgl::check
         return "tessellation_control";
     case stage::tessellation_evaluation:
         return "tessellation_evaluation";
+    case stage::mesh:
+        return "mesh";
     case stage::raygen:
         return "raygen";
     case stage::miss:
@@ -621,8 +626,10 @@ struct sgl::check::function_info
     /// A pixel entry point that returns one color value (CHK-418): the `@pixel struct` of one member, `color`, which
     /// the checker mints and every return builds; none for one that returns its `@pixel struct`, or nothing.
     type_id pixel_targets = type_id::none;
-    /// `@geometry(max_vertices = N)`'s `N`; 0 for every other stage.
+    /// `@geometry(max_vertices = N)`'s `N`, and `@mesh`'s `vertices`; 0 for every other stage.
     i32 max_vertices = 0;
+    /// `@mesh`'s `triangles`; 0 for every other stage.
+    i32 max_primitives = 0;
     /// `@tessellation_control(partitioning = …, winding = …)`; the first of each for every other stage.
     tessellation_partitioning partitioning = tessellation_partitioning::integer;
     bool is_clockwise = true;
@@ -726,6 +733,8 @@ struct sgl::check::pipeline_info
     symbol_id geometry = symbol_id::none;
     symbol_id tessellation_control = symbol_id::none;
     symbol_id tessellation_evaluation = symbol_id::none;
+    /// In the vertex stage's place, which is then `none` (CHK-483).
+    symbol_id mesh = symbol_id::none;
     /// The binding layout: the longest binding list of its stages with `@inline` left out; a range of `binding_lists`.
     ast::range_of<symbol_id> layout;
     /// The one `@inline` binding its stages list, or `none`.

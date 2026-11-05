@@ -298,6 +298,7 @@ void write_pipeline(babel::json::object_writer& o, sgl::described_pipeline const
     o.write("geometry", cc::string_view(p.geometry));
     o.write("tessellation_control", cc::string_view(p.tessellation_control));
     o.write("tessellation_evaluation", cc::string_view(p.tessellation_evaluation));
+    o.write("mesh", cc::string_view(p.mesh));
     {
         auto list = o.write_array("layout", babel::json::layout::compact);
         for (auto const& name : p.layout)

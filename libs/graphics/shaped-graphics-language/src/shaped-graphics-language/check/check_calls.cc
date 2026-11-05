@@ -816,7 +816,8 @@ type_id checker::check_dot_call(function_scope& scope, ast::expr_id id, ast::cal
     handed.push_back(member.object);
     auto const receiver = check_expr(scope, member.object);
     handed.remove_back();
-    if (receiver != error_type && out.at(receiver).kind == type_kind::stream)
+    if (receiver != error_type && out.at(receiver).kind == type_kind::stream
+        && (out.at(receiver).count > 0 || name == "vertex"))
         return check_stream_call(scope, id, call, receiver);
     if (receiver != error_type && name == "invoke" && out.name_of(receiver) == "hit_object"
         && out.builtin_type_of(receiver) != nullptr)

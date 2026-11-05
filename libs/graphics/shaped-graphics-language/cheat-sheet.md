@@ -790,6 +790,9 @@ ops[i](mut v)                                            // raygen, miss, closes
   A vertex input's host struct keeps the member whole, and its layout names an attribute per piece; a pixel output takes neither.
 - **`scope:` opens a block whose locals end with it** (AST-156), transparent to `break`, `yield` and `return`; it flattens into its parent.
 - **`floatN(…)`, `intN(…)` and `uintN(…)` convert a scalar of another of those kinds**, as `as` would (CHK-421); `vec3` and `pos3` never do.
+- **`@mesh(x, y, z, vertices = N, triangles = M)` is the mesh stage** (CHK-480 to CHK-483), under `require mesh_shader`: dx12 and vulkan, refused on WGSL and MSL.
+  Its last parameter is `output: mut mesh_output[T]`; `output.set_counts(v, t)` in uniform control flow, then `output.vertex(i, v)` and `output.triangle(i, uint3)`.
+  A `pipeline` names it as `mesh = f` in the vertex stage's place, and the host draws it with `draw_mesh_tasks`.
 - **`half`, `short`, `ushort` and their vectors are the 16-bit families** (CHK-381): `require shader_f16` or `shader_int16`, and WGSL has no short.
   HLSL spells a half `float16_t`, never `half`, so slib's SGL edge hands DXC `-enable-16bit-types` on every compile; a 16-bit literal is a construction, `half(0.5)`.
   A 16-bit value aligns to its size, a `half3` to 8, and crosses no stage edge and sits in no `@inline` binding (CHK-387).

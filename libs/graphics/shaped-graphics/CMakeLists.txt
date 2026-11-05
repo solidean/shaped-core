@@ -498,6 +498,7 @@ if(SC_BUILD_TESTS)
                 coherence.sgl:*
                 float_specials.sgl:*
                 diagnostics.sgl:*
+                meshes.sgl:*
                 sixteen_bit.sgl:*
                 sixty_four_bit.sgl:*
                 float_atomics.sgl:*

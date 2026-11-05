@@ -77,7 +77,8 @@ TEST("sgl check - a require names a feature a shader can use, as sg names it")
           == "unknown-feature user:[timestamp_query] timestamp_query; a shader may require binding_arrays, "
              "extended_image_formats, readwrite_image_formats, multisampled_array_textures, ray_query, "
              "raytracing_pipeline, primitive_index, "
-             "sample_rate_shading, geometry_shader, tessellation_shader, shader_f16, shader_int16, subgroups, "
+             "sample_rate_shading, geometry_shader, tessellation_shader, mesh_shader, shader_f16, shader_int16, "
+             "subgroups, "
              "device_coherence, image_atomics, first_instance, helper_lane_query, vertex_layer_output, "
              "float_atomic_add, shader_execution_reordering, opacity_micromap, float_specials, float_denormals, "
              "view_instancing, vertex_pipeline_stores, shader_int64, shader_f64, shader_int64_atomics\n");
