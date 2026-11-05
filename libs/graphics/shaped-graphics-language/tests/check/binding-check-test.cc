@@ -464,7 +464,7 @@ TEST("sgl check - an atomic is memory a builtin updates, in a mut buffer or in w
               .contains("a buffer of atomics is written by every update, so it is a `mut buffer`"));
     CHECK(reports_for("binding stats:\n    hits: atomic[uint]\n").contains("a constant block holds none"));
     CHECK(reports_for("binding stats:\n    hits: mut buffer[atomic[half]]\n")
-              .contains("an atomic holds a `uint`, an `int` or a `float`: `atomic[uint]`"));
+              .contains("an atomic holds a `uint`, an `int`, a `float`, a `ulong` or a `long`: `atomic[uint]`"));
     CHECK(reports_for("binding stats:\n    hits: mut buffer[atomic[float]]\n").empty());
     CHECK(reports_for("fun f() -> int:\n    let a: atomic[int] = 0\n    return 0\n")
               .contains("an atomic is memory in a `mut buffer` or a @workgroup binding, and never a value"));

@@ -42,8 +42,9 @@ The worked examples are WGSL, since it is the strictest target: no `do … while
   The invocation then ends after the last statement of the entry point's body that holds such an operation, and what it writes until then is skipped (LEGAL-67).
   Until then, a loop that holds none of those operations is left at the top of each iteration once the flag is set, so a safe operand never keeps it running long.
   A loop that holds one has a trip count every invocation of the workgroup shares, so its guards trip in all of them or in none.
-  It guards the maths builtins of EVAL-87 too, each by the test the interpreter asks: `pow`, `asin`, `acos`, `atan2`, `smoothstep` and `clamp`, whose operands share one number shape.
-  Workgroup memory read before it is written (EVAL-92) and the matrix part builtins are not guarded yet.
+  It guards the maths builtins of EVAL-87 too, each by the test the interpreter asks: `pow`, `asin`, `acos`, `atan2`, `smoothstep` and `clamp`, a scalar beside a vector read as every lane of it.
+  So is a matrix's `row` or `column` whose index is outside the matrix.
+  Workgroup memory read before it is written (EVAL-92) is not guarded yet.
   Wherever the input has a value, the tree behaves as the input does; where it has none, the tree ends the invocation instead.
 * **LEGAL-66** (G1) Where the target reads a buffer's length (EMIT-195), those profiles also guard a buffer index and a `bytes` access, by the length of CHK-460.
   A buffer index outside `0 ..< values.length` ends the invocation as an array index does (EVAL-90).
@@ -53,7 +54,7 @@ The worked examples are WGSL, since it is the strictest target: no `do … while
 * **LEGAL-67** (G1) Once a guard may set that flag, every write up to the flag's test is skipped where it is set, so a safe operand's result reaches no memory.
   A write is a store to a buffer element or to workgroup memory, and a call with an effect, an atomic or an image store, that stands as a statement.
   A barrier, a derivative and a subgroup operation are never skipped, since every invocation must reach them.
-  An atomic whose result is bound by a `let` is not skipped yet.
+  An atomic whose result a `let` binds runs only where the flag is clear, and the `let` is 0 where it is set.
 * **LEGAL-68** (G1) The profile `define` runs each guard of LEGAL-65 and LEGAL-66 without ending anything: a failed test replaces the operand by its safe value, and the operation runs on it.
   A divisor of 1, so `x / 0` is `x`, `x % 0` is 0 and `INT_MIN / -1` is `INT_MIN`, which are WGSL's values; an index or an offset of 0.
   A maths builtin of EVAL-87 runs on the operands its deferred guard gives: `pow` on a base of 1, `asin` and `acos` on 0, `atan2` on an `x` of 1.

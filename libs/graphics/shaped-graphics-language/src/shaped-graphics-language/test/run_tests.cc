@@ -241,6 +241,18 @@ cc::string sgl::test::text_of_value(checked_module const& m, value const& v)
             return cc::format("{}", leaf.as_int());
         case value_kind::scalar_uint:
             return cc::format("{}u", leaf.as_uint());
+        // a 64-bit value reads with the suffix that spells its literal (CHK-357)
+        case value_kind::scalar_long:
+            return cc::format("{}i64", leaf.as_long());
+        case value_kind::scalar_ulong:
+            return cc::format("{}u64", leaf.as_ulong());
+        case value_kind::scalar_double:
+        {
+            auto const f = leaf.as_double();
+            if (f != f || f - f != 0.0)
+                return cc::format("{}", f != f ? "nan" : f < 0.0 ? "-inf" : "inf");
+            return cc::format("{}f64", f);
+        }
         case value_kind::boolean:
             return cc::string(leaf.as_bool() ? "true" : "false");
         default:
