@@ -1344,6 +1344,11 @@ struct writer
                 result = read_as_value(id, result);
             },
             [&](flat_file_sampler const& smp) { result = {.text = p.samplers[sampler_of(p, smp.sampler)].name}; },
+            [&](flat_buffer_length const& b)
+            {
+                auto const is_bytes = p.m.at(p.e.at(b.buffer).type).kind == check::type_kind::bytes;
+                result = {.text = d.buffer_length(expr(b.buffer).text, is_bytes), .binds = level::primary};
+            },
             [&](flat_buffer_element const& b)
             {
                 auto const buffer = wrapped(expr(b.buffer), level::primary);
@@ -1805,6 +1810,23 @@ void sgl::emit::impl::write_helpers(cc::string& out, plan const& p, dialect cons
                                                                   : cc::string(type_text(p, d, type)));
         }
         auto text = record->write.helper({.target = d.language(), .argument_types = types, .data = record->write.data});
+        auto is_known = text.empty();
+        for (auto const& w : written)
+            is_known = is_known || w == text;
+        if (!is_known)
+            written.push_back(cc::move(text));
+    }
+    // CHK-460: a length the target reads through a helper, once per buffer
+    for (auto const& x : p.e.exprs)
+    {
+        auto const* const length = x.node.try_as<check::flat_buffer_length>();
+        auto const* const member
+            = length != nullptr ? p.e.at(length->buffer).node.try_as<check::flat_binding_member>() : nullptr;
+        auto const found = member != nullptr ? resource_of(p, member->binding, member->member) : -1;
+        if (found < 0)
+            continue;
+        auto const is_bytes = p.m.at(p.e.at(length->buffer).type).kind == check::type_kind::bytes;
+        auto text = d.buffer_length_helper(p.resources[found].name, is_bytes);
         auto is_known = text.empty();
         for (auto const& w : written)
             is_known = is_known || w == text;

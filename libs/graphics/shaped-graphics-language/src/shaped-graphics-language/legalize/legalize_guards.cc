@@ -35,6 +35,8 @@ struct guarder
     bool guards = true;
     /// Prints the operation and its operands before the invocation ends.
     bool reports = false;
+    /// Bounds a buffer index by the bound buffer's length, which the target can read.
+    bool guards_buffers = true;
     /// LEGAL-64: an `assert` before the last barrier is lowered here, where the flag is, rather than ending at once.
     bool lowers_asserts = false;
     /// The flag a guard sets where a barrier, a derivative or a subgroup operation may still follow, which the
@@ -346,6 +348,116 @@ struct guarder
         return out.block_expr(label, index_type, stmts);
     }
 
+    /// The index of `element`, a buffer's, as a block that ends the invocation where it is past the bound buffer's end
+    /// (EVAL-90, LEGAL-66); `none` where it needs no guard or the buffer is no binding member.
+    flat_expr_id guarded_buffer_index(flat_expr const& x, flat_buffer_element const& element)
+    {
+        if (!guards_buffers || !is_known(out.e, element.buffer) || !is_known(out.e, element.index))
+            return flat_expr_id::none;
+        if (!out.e.at(element.buffer).node.is<flat_binding_member>())
+            return flat_expr_id::none;
+        auto const index_type = out.e.at(element.index).type;
+        auto const index_known = integer_shape_of(index_type);
+        if (!index_known.has_value() || !index_known.value().lanes.empty()
+            || (index_known.value().element != "int" && index_known.value().element != "uint"))
+            return flat_expr_id::none;
+        auto const index_shape = index_known.value();
+        auto const uint_shape = shape{.element = builtins::k_uint};
+
+        out.from = x.from;
+        out.inlined_through = x.inlined_through;
+        auto const label = out.add_label("guard");
+        auto stmts = stmt_list();
+        auto const i = pinned("index", element.index, stmts);
+        auto const length = pinned(
+            "length", out.add_expr(out.type_named(builtins::k_uint), flat_buffer_length{.buffer = element.buffer}),
+            stmts);
+        auto unsigned_index = out.local(i);
+        if (index_shape.element == "int")
+        {
+            flat_expr_id const argument[] = {out.local(i)};
+            unsigned_index = out.call("convert_int_to_uint", argument);
+        }
+        auto bad = out.not_(compare("less", uint_shape, unsigned_index, out.local(length)));
+        if (index_shape.element == "int")
+            bad = out.or_(compare("less", index_shape, out.local(i), out.int_literal(0)), bad);
+        flat_expr_id const values[] = {out.local(i), out.local(length)};
+        auto const on_failure
+            = failed({cc::string("index "), cc::string(" is outside a buffer of "), cc::string(" elements")}, values, i,
+                     literal_for(index_shape, 0));
+        stmts.push_back(out.if_(bad, on_failure));
+        stmts.push_back(out.leave(label, out.local(i)));
+        return out.block_expr(label, index_type, stmts);
+    }
+
+    /// How many words a load or a store of `bytes` reaches, or 0 for a call that is none (EVAL-97).
+    [[nodiscard]] i32 bytes_words_of(flat_call const& call) const
+    {
+        if (!guards_buffers || !is_valid(call.intrinsic) || index_of(call.intrinsic) >= registry.functions.size()
+            || !is_known(out.e, call.arguments) || call.arguments.count < 2)
+            return 0;
+        auto const arguments = out.e.at(call.arguments);
+        if (out.m.at(out.e.at(arguments[0]).type).kind != type_kind::bytes
+            || !out.e.at(arguments[0]).node.is<flat_binding_member>())
+            return 0;
+        auto const& r = registry.at(call.intrinsic);
+        if (r.name == "load")
+            return 1;
+        if (r.name == "load2" || r.name == "load3" || r.name == "load4")
+            return r.name[4] - '0';
+        if (r.name == "store" && arguments.size() == 3)
+            if (auto const s = integer_shape_of(out.e.at(arguments[2]).type); s.has_value())
+                return s.value().width;
+        return 0;
+    }
+
+    /// `call`, a load or a store of `bytes`, as a block that ends the invocation where its offset is no multiple of 4
+    /// or a word it reaches is past the bound memory's end (EVAL-97, LEGAL-66).
+    flat_expr_id guard_bytes(flat_expr_id id, i32 words)
+    {
+        auto const x = out.e.at(id);
+        auto const& call = *x.node.try_as<flat_call>();
+        auto operands = cc::vector<flat_expr_id>();
+        for (auto const a : out.e.at(call.arguments))
+            operands.push_back(a);
+        auto const uint_shape = shape{.element = builtins::k_uint};
+
+        out.from = x.from;
+        out.inlined_through = x.inlined_through;
+        auto const label = out.add_label("guard");
+        auto stmts = stmt_list();
+        // the memory is a resource and no local holds one; the offset and a stored value keep their order
+        auto const offset = pinned("offset", operands[1], stmts);
+        auto stored = local_id::none;
+        if (operands.size() == 3)
+            stored = pinned("stored", operands[2], stmts);
+        auto const length = pinned(
+            "length", out.add_expr(out.type_named(builtins::k_uint), flat_buffer_length{.buffer = operands[0]}), stmts);
+
+        flat_expr_id const remainder_args[] = {out.local(offset), uint_literal(4)};
+        auto const misaligned
+            = compare("not_equal", uint_shape, out.call("remainder_uint", remainder_args), uint_literal(0));
+        auto const reach = uint_literal(4 * words);
+        flat_expr_id const room_args[] = {out.local(length), reach};
+        auto const past_the_end
+            = out.or_(compare("less", uint_shape, out.local(length), uint_literal(4 * words)),
+                      compare("less", uint_shape, out.call("subtract_uint", room_args), out.local(offset)));
+        flat_expr_id const values[] = {out.local(offset), out.local(length)};
+        auto const on_failure
+            = failed({cc::string("the offset "), cc::format(" of {} words is unaligned or outside memory of ", words),
+                      cc::string(" bytes")},
+                     values, offset, uint_literal(0));
+        stmts.push_back(out.if_(out.or_(misaligned, past_the_end), on_failure));
+
+        auto guarded = call;
+        auto arguments = cc::vector<flat_expr_id>{operands[0], out.local(offset)};
+        if (operands.size() == 3)
+            arguments.push_back(out.local(stored));
+        guarded.arguments = out.expr_list(arguments);
+        stmts.push_back(out.leave(label, out.add_expr(x.type, guarded)));
+        return out.block_expr(label, x.type, stmts);
+    }
+
     // ---- the maths builtins of EVAL-87 --------------------------------------------------------------------------------
 
     /// The shape of `type`, where it is a scalar of a number type, `float` and `half` included, or a vector of one.
@@ -593,6 +705,12 @@ struct guarder
                 element->index = index;
                 changed = true;
             }
+        if (auto* const element = copy.node.try_as<flat_buffer_element>(); element != nullptr && may_guard)
+            if (auto const index = guarded_buffer_index(copy, *element); is_valid(index))
+            {
+                element->index = index;
+                changed = true;
+            }
         auto result = id;
         if (changed)
         {
@@ -605,6 +723,9 @@ struct guarder
         if (auto const* const call = out.e.at(result).node.try_as<flat_call>(); call != nullptr && may_guard)
             if (auto const name = guarded_math_of(*call); !name.empty())
                 return guard_math(result, name);
+        if (auto const* const call = out.e.at(result).node.try_as<flat_call>(); call != nullptr && may_guard)
+            if (auto const words = bytes_words_of(*call); words > 0)
+                return guard_bytes(result, words);
         return result;
     }
 
@@ -803,6 +924,7 @@ stmt_list sgl::check::impl::guard_undefined(flat_builder& out, stmt_list const& 
     auto g = guarder{.out = out,
                      .guards = options.guards_undefined != undefined_guard::none,
                      .reports = options.guards_undefined == undefined_guard::report && !options.erases_prints,
+                     .guards_buffers = options.guards_buffers,
                      .lowers_asserts = options.lowers_asserts};
 
     // The last statement of the body that holds a barrier, a derivative or a subgroup operation, which an invocation

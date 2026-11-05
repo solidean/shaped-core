@@ -47,6 +47,17 @@ public:
             || (s != check::stage::vertex && s != check::stage::geometry && s != check::stage::tessellation_control
                 && s != check::stage::tessellation_evaluation);
     }
+    // GetDimensions writes through out parameters, so each buffer's length is a helper reading it
+    cc::string buffer_length(cc::string_view name, bool) const override { return cc::format("sgl_length_{}()", name); }
+    cc::string buffer_length_helper(cc::string_view name, bool is_bytes) const override
+    {
+        if (is_bytes)
+            return cc::format("uint sgl_length_{0}()\n{{\n    uint n;\n    {0}.GetDimensions(n);\n    return n;\n}}\n",
+                              name);
+        return cc::format("uint sgl_length_{0}()\n{{\n    uint n, stride;\n    {0}.GetDimensions(n, stride);\n    "
+                          "return n;\n}}\n",
+                          name);
+    }
     void write_debug_buffer(cc::string& out) const override
     {
         if (_is_vulkan)

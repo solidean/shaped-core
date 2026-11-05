@@ -32,6 +32,8 @@ struct sgl::check::legalize_options
     bool lowers_asserts = false;
     /// LEGAL-65: what an integer division by zero, or an array index outside the array, does in the text.
     undefined_guard guards_undefined = undefined_guard::none;
+    /// The target reads a buffer's length, so a guard also bounds a buffer index (LEGAL-66); MSL's buffers carry none.
+    bool guards_buffers = true;
 };
 
 namespace sgl::check

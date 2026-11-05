@@ -407,7 +407,7 @@ sgl::test::diagnostic_of(m, r)             // `test-failed` at the test, one rel
 ```bash
 uv run dev.py run sgl -- emit shader.sgl --entry main_ps --target wgsl   # the text and its warnings on stderr, or the diagnostics and exit 2
 uv run dev.py run sgl -- emit shader.sgl --entry main_cs --option tile=16 # an option set for this compile; `describe` takes it too
-uv run dev.py run sgl -- emit shader.sgl --entry main_cs --undefined report --diagnostics  # the guards of LEGAL-65; abort: no report
+uv run dev.py run sgl -- emit shader.sgl --entry main_cs --undefined report --diagnostics  # the guards of LEGAL-65 and LEGAL-66; abort: no report
 uv run dev.py run sgl -- emit shader.sgl --entry main_cs --target wgsl --weaken-float     # a @float WGSL cannot keep, at .fast with a warning
 uv run dev.py run sgl -- test a.sgl b.sgl                                # the tests of each file; exit 2 when one fails
 #   emit, test and describe take --module-dir DIR, repeatable: the .sgl files directly in it are modules to `use`
@@ -674,6 +674,8 @@ ops[i](mut v)                                            // raygen, miss, closes
   `@tessellation_control(partitioning = …, winding = …)` takes the patch and returns a factors struct, and `@tessellation_evaluation` takes both and `@domain_location`.
   HLSL writes them; WGSL and MSL refuse by the feature, so they are tested in C++ rather than in the corpus, which emits for all four targets.
 - **`T[N]` is a value like a struct** (CHK-285 to CHK-290): copied where passed, `float[3, 5]` is three arrays of five, and `xs.length` is a constant.
+- **`values.length` of a buffer is a `uint` the bound buffer decides** (CHK-460), of `bytes` its bytes; metal refuses it, since a Metal buffer carries no length (EMIT-195).
+  The robustness profiles bound every buffer index and `bytes` access by it, except on metal (LEGAL-66).
   `T[N].filled(v)` and a square literal `[a, b, c]` build one; `T[]` is a binding member's alone.
 - **`discard` is a jump, and only a `@pixel fun` may reach it** (CHK-277): anywhere else it is `stage-not-allowed` at the `discard`.
   A path that ends in one needs no value, and the uniformity pass does not count it as an exit (CHK-284).

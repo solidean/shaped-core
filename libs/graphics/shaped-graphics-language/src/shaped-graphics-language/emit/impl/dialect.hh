@@ -64,6 +64,10 @@ public:
     virtual void write_debug_buffer(cc::string& out) const = 0;
     /// The declaration of `at` on a line of its own, where the reservation cannot declare it; empty where it can.
     [[nodiscard]] virtual cc::string debug_declare(cc::string_view) const { return {}; }
+    /// The length of the buffer or `bytes` declared as `name`, in elements or bytes (CHK-460); MSL has none.
+    [[nodiscard]] virtual cc::string buffer_length(cc::string_view name, bool is_bytes) const = 0;
+    /// What the text declares before the entry point for `buffer_length` of `name`, empty where nothing.
+    [[nodiscard]] virtual cc::string buffer_length_helper(cc::string_view, bool) const { return {}; }
     /// The statement that reserves `count` words and leaves the first one's index in `at`.
     [[nodiscard]] virtual cc::string debug_reserve(cc::string_view at, isize count) const = 0;
     /// The condition under which `count` words from `at` fit.

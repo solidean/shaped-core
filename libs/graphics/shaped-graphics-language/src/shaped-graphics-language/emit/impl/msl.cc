@@ -52,6 +52,8 @@ public:
 
     // a ray-tracing stage is a visible function, which takes no buffer of its own
     bool writes_debug_in(check::stage s, check::feature_set) const override { return s < check::stage::raygen; }
+    // a Metal buffer is a pointer, and emit refuses a length before any text is written (EMIT-195)
+    cc::string buffer_length(cc::string_view, bool) const override { return "0u"; }
     void write_debug_buffer(cc::string& out) const override
     {
         out += "struct sg_debug_buffer\n{\n    atomic_uint cursor;\n    uint capacity;\n    atomic_uint dropped;\n"

@@ -179,7 +179,8 @@ TEST("sgl guards - without a barrier, a derivative or a subgroup operation no fl
                             "@compute(64) fun cs(@thread_id id: int3){work}:\n"
                             "    work.values[id.x] = work.values[0] / id.x\n";
     auto const dump = guarded_dump(source);
-    CHECK(dump.contains("divisor"));
+    // the divisor is pinned once, under the name its buffer index's guard gave it
+    CHECK(dump.contains("(call equal_int")).dump("core", dump);
     CHECK(!dump.contains("aborted")).dump("core", dump);
 }
 
@@ -341,4 +342,150 @@ TEST("sgl guards - every target writes the guards of the maths builtins, scalar,
         REQUIRE(text.has_value()).dump("error", text.has_error() ? text.error() : cc::string());
         CHECK(text.value().text.contains("operand")).dump("text", text.value().text);
     }
+}
+
+namespace
+{
+constexpr cc::string_view k_store = "binding store:\n"
+                                    "    data: mut buffer[float]\n"
+                                    "    counts: mut buffer[int]\n"
+                                    "\n";
+} // namespace
+
+TEST("sgl guards - a buffer index past the bound buffer's end ends the invocation, and its report names the length "
+     "(LEGAL-66)")
+{
+    // p.b is 0.75, so i is 6, and the run's buffers hold 4 elements
+    auto const r = run_both(cc::string(k_store)
+                                + "@pixel fun ps(p: frag){store} -> target:\n"
+                                  "    let i = int(p.b * 8.0)\n"
+                                  "    return {\n"
+                                  "        color = float4(store.data[i], 0.0, 0.0, 1.0)\n"
+                                  "    }\n",
+                            undefined_guard::report);
+    CHECK(r.structured.status == run_status::program_error);
+    CHECK(r.guarded.status == run_status::discarded).dump("core", r.dump);
+    REQUIRE(r.core.messages.size() == 1);
+    CHECK(r.core.messages[0].pieces[1] == " is outside a buffer of ");
+    REQUIRE(r.guarded.printed.size() == 1);
+    CHECK(r.guarded.printed[0].values[0].leaves[0].as_int() == 6);
+    CHECK(r.guarded.printed[0].values[1].leaves[0].as_uint() == u32(k_store_elements));
+}
+
+TEST("sgl guards - a buffer index and a store inside the buffer behave as they do unguarded")
+{
+    for (auto const guard : {undefined_guard::abort, undefined_guard::report})
+    {
+        auto const r = run_both(cc::string(k_store)
+                                    + "@pixel fun ps(p: frag){store} -> target:\n"
+                                      "    let i = uint(p.b * 4.0)\n"
+                                      "    store.counts[i] = store.counts[i - 1u] + 1\n"
+                                      "    return {\n"
+                                      "        color = float4(store.data[i], 0.0, 0.0, 1.0)\n"
+                                      "    }\n",
+                                guard);
+        CHECK(r.structured.status == run_status::ok);
+        CHECK(r.guarded == r.structured).dump("core", r.dump);
+        CHECK(r.dump.contains("(length")).dump("core", r.dump);
+    }
+}
+
+TEST("sgl - a buffer's length is how many elements the bound buffer holds (CHK-460)")
+{
+    auto const checked = check_sources(read_prelude(), cc::string(k_edges) + k_store
+                                                           + "@pixel fun ps(p: frag){store} -> target:\n"
+                                                             "    let n = store.data.length\n"
+                                                             "    return {\n"
+                                                             "        color = float4(float(n), 0.0, 0.0, 1.0)\n"
+                                                             "    }\n");
+    REQUIRE(reports_of(checked) == "");
+    auto const& m = checked.module;
+    auto const run = interpret(m, m.entry_points[0], test_inputs(m));
+    REQUIRE(run.status == run_status::ok);
+    CHECK(run.result.leaves[0].as_float() == float(k_store_elements));
+}
+
+TEST("sgl - the length of an element of a binding array is unsupported-yet (CHK-460)")
+{
+    auto const checked = check_sources(read_prelude(), "binding parts:\n"
+                                                       "    chunks: buffer[float][2]\n"
+                                                       "\n"
+                                                       "@compute(1) fun cs(@thread_id id: int3){parts}:\n"
+                                                       "    let n = parts.chunks[0].length\n");
+    CHECK(reports_of(checked).contains("unsupported-yet")).dump("reports", reports_of(checked));
+}
+
+TEST("sgl emit - a buffer's length is read through GetDimensions in HLSL and arrayLength in WGSL, and refused in MSL "
+     "(EMIT-195)")
+{
+    constexpr auto source = "binding work:\n"
+                            "    values: mut buffer[float]\n"
+                            "    raw: bytes\n"
+                            "\n"
+                            "@compute(64) fun cs(@thread_id id: int3){work}:\n"
+                            "    work.values[0] = float(work.values.length + work.raw.length)\n";
+    auto const text_for = [&](sgl::emit::target t)
+    { return sgl::compile_to_text({.source = source, .entry_point = "cs", .target = t}); };
+    for (auto const t : {sgl::emit::target::hlsl_dx12, sgl::emit::target::hlsl_vulkan})
+    {
+        auto const hlsl = text_for(t);
+        REQUIRE(hlsl.has_value()).dump("error", hlsl.has_error() ? hlsl.error() : cc::string());
+        CHECK(hlsl.value().text.contains(".GetDimensions(n, stride);")).dump("text", hlsl.value().text);
+        CHECK(hlsl.value().text.contains(".GetDimensions(n);")).dump("text", hlsl.value().text);
+    }
+    auto const wgsl = text_for(sgl::emit::target::wgsl);
+    REQUIRE(wgsl.has_value()).dump("error", wgsl.has_error() ? wgsl.error() : cc::string());
+    CHECK(wgsl.value().text.contains("arrayLength(&")).dump("text", wgsl.value().text);
+    CHECK(wgsl.value().text.contains(") * 4u)")).dump("text", wgsl.value().text);
+    auto const msl = text_for(sgl::emit::target::msl);
+    REQUIRE(msl.has_error());
+    CHECK(msl.error().contains("which a Metal buffer does not carry")).dump("error", msl.error());
+}
+
+TEST("sgl guards - a bytes load past the end or off a word ends the invocation, and one inside runs alike (LEGAL-66)")
+{
+    // p.b is 0.75, so `at` is the offset plus 3; the memory holds four words, 16 bytes
+    auto const run = [](cc::string_view offset)
+    {
+        auto const checked
+            = check_sources(read_prelude(), cc::string(k_edges)
+                                                + cc::format("binding work:\n"
+                                                             "    raw: mut bytes\n"
+                                                             "\n"
+                                                             "@pixel fun ps(p: frag){{work}} -> target:\n"
+                                                             "    let at = {} + uint(p.b * 4.0)\n"
+                                                             "    let v = work.raw.load2(at).y\n"
+                                                             "    work.raw.store(at, v + 1u)\n"
+                                                             "    return {{\n"
+                                                             "        color = float4(float(v), 0.0, 0.0, 1.0)\n"
+                                                             "    }}\n",
+                                                             offset));
+        REQUIRE(reports_of(checked) == "");
+        auto const& m = checked.module;
+        auto inputs = test_inputs(m);
+        for (auto i = isize(0); i < m.symbols.size(); ++i)
+            if (m.symbols[i].kind == symbol_kind::binding && m.symbols[i].name == "work")
+            {
+                auto raw = buffer_contents{.binding = symbol_id(i), .member = 0};
+                for (auto w = 0u; w < 4u; ++w)
+                    raw.leaves.push_back(scalar::of_uint(10u + w));
+                inputs.buffers.push_back(cc::move(raw));
+            }
+        auto const& e = m.entry_points[0];
+        auto const core = legalize(m, e, {.guards_undefined = undefined_guard::abort});
+        CHECK(!find_core_violation(m, core).has_value());
+        return cc::pair(interpret(m, e, inputs), interpret(m, core, inputs));
+    };
+    // 1 + 3 = 4: words 1 and 2, inside
+    auto const [inside, inside_guarded] = run("1u");
+    CHECK(inside.status == run_status::ok);
+    CHECK(inside_guarded == inside);
+    // 6 + 3 = 9: off a word
+    auto const [unaligned, unaligned_guarded] = run("6u");
+    CHECK(unaligned.status == run_status::program_error);
+    CHECK(unaligned_guarded.status == run_status::discarded);
+    // 9 + 3 = 12: word 3 is the last, and word 4 is past it
+    auto const [past, past_guarded] = run("9u");
+    CHECK(past.status == run_status::program_error);
+    CHECK(past_guarded.status == run_status::discarded);
 }

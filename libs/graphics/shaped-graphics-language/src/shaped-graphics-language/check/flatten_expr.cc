@@ -91,6 +91,8 @@ auto sgl::check::impl::flattener::flatten_expr(ast::expr_id id) -> flat_expr_id
                             flat_binding_member{.binding = where.symbol,
                                                 .member = where.index,
                                                 .is_workgroup = c.is_workgroup_binding(where.symbol)});
+        if (where.kind == target_kind::buffer_length)
+            return add_expr(type, id, flat_buffer_length{.buffer = flatten_expr(m->object)});
         // CHK-288: a constant, and an object with an effect still runs for it
         if (where.kind == target_kind::array_length)
         {

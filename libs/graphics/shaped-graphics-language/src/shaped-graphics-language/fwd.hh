@@ -282,6 +282,7 @@ struct flat_binding_member;
 struct flat_file_sampler;
 struct flat_member;
 struct flat_buffer_element;
+struct flat_buffer_length;
 struct flat_element;
 struct flat_construct;
 struct flat_call;
