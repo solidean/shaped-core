@@ -3,7 +3,7 @@
 How SGL compares with the other ways to write one set of shaders for DX12, Vulkan, WebGPU and Metal.
 Every row is judged for a renderer that targets all four, WebGPU in a browser included, and wants hardware ray tracing wherever a platform has it.
 
-**As of 2026-11-02**; SGL's E3 and E4 as of 2026-11-03, its B8 as of 2026-11-04, its A5, A7, B2, B3, B4, B6, B8, B9, B10, B11, B12, D5, E4, F2, F7, G5 and G6 as of 2026-11-05.
+**As of 2026-11-02**; SGL's E3 and E4 as of 2026-11-03, its B8 as of 2026-11-04, its A5, A7, B2, B3, B4, B6, B8, B9, B10, B11, B12, D5, D6, E4, F2, F7, G5 and G6 as of 2026-11-05.
 Every cell's marker was judged again on 2026-11-05, when ✅ came to mean full support to the extent the targets allow.
 The other columns move fast, Slang's Metal and WGSL support above all, so each cell carries a source and the date it was checked; see [Sources](#sources).
 
@@ -82,7 +82,7 @@ A per-target cell reads `dx12 / vulkan / metal / webgpu`.
 | **D3** Bindless | ✅ / ✅ / ✅ (MSC) / — | ✅ / ✅ / ⚠️ / ⚠️ | ⚠️ / ⚠️ / ⚠️ / — native extension only | ✅ / ✅ / ⚠️ / — | ⚠️ / ⚠️ / ⚠️ / — fixed-size binding arrays, checked `nonuniform`; unbounded arrays not yet 🗺️ [feat](../issues/feat-sgl-unbounded-binding-arrays.md) |
 | **D4** GPU pointers | ⚠️ Vulkan only | ⚠️ SPIR-V; Metal partly | ❌ | ⚠️ Vulkan, and Metal through SPIRV-Cross | ❌ 🗺️ [feat](../issues/feat-sgl-gpu-pointers.md) |
 | **D5** half, f64, int64, int16 | ✅ f64 on DX12 and Vulkan, which alone have it; 64- and 16-bit ints everywhere but WebGPU | ✅ the same shape | ⚠️ f16 extension; no f64 or int64 in a browser | ✅ the same shape as HLSL | ⚠️ half, 16- and 64-bit ints and double behind features, wherever the target has them: all of them on dx12 and vulkan, all but double on metal, half alone on webgpu; a 64-bit value crosses no stage edge yet, and double has no maths builtins |
-| **D6** Mesh, geometry, tessellation, work graphs | ⚠️ mesh on DX12, Vulkan and MSC; work graphs on DX12 | ⚠️ mesh on DX12, Vulkan and Metal; geometry and tessellation on DX12 and Vulkan | ⚠️ Naga experimental mesh; none in a browser | ⚠️ mesh to HLSL and MSL | ⚠️ geometry and tessellation on dx12 and vulkan; mesh and task stages run in sg on dx12 and vulkan from HLSL packages, and SGL does not write them yet 🗺️ [feat](../issues/feat-sgl-mesh-and-task-stages.md); no work graphs |
+| **D6** Mesh, geometry, tessellation, work graphs | ⚠️ mesh on DX12, Vulkan and MSC; work graphs on DX12 | ⚠️ mesh on DX12, Vulkan and Metal; geometry and tessellation on DX12 and Vulkan | ⚠️ Naga experimental mesh; none in a browser | ⚠️ mesh to HLSL and MSL | ⚠️ geometry and tessellation on dx12 and vulkan; a mesh stage on dx12 and vulkan, refused on webgpu; no task stage or per-primitive attributes yet, and metal not yet 🗺️ [feat](../issues/feat-sgl-mesh-and-task-stages.md); no work graphs |
 | **D7** Autodiff | ❌ | ✅ forward and backward | ❌ | ❌ | ❌ 🗺️ [epic](../issues/epic-sgl-autodiff.md) |
 | **D8** Methods, operators, enums, inference | ⚠️ methods, operators, enums, `auto`; no constructors | ✅ | ⚠️ no methods, operators or enums | ❌ | ✅ methods, properties, `@operator`, enums, inference, arrow lambdas |
 
