@@ -192,7 +192,7 @@ That is what makes it worth writing down: a checkout missing all of it configure
 
 | Need | For | Absent |
 |------|-----|--------|
-| **Vulkan headers** (`vulkan/vulkan.h`, via `$VULKAN_SDK` or a distro package) | building the vulkan backend at all — `find_package(Vulkan)` gates it | the backend is skipped at configure, and on non-Windows that leaves sg with no backend |
+| **Vulkan headers** (`vulkan/vulkan.h`: `uv run dev.py install vulkan-sdk`, an SDK `$VULKAN_SDK` names, or a distro package) | building the vulkan backend at all — `find_package(Vulkan)` gates it | the backend is skipped at configure, and on non-Windows that leaves sg with no backend |
 | **Vulkan loader + an ICD** | creating a device at run time | `create_vulkan_context` fails with no graphics device |
 | **X11 / XCB / wayland development headers** (Linux) | a *windowed* swapchain, and SDL3 configuring at all | `sr::window_system::try_create` fails and a swapchain reports the platform unsupported; headless present and `--capture` are unaffected |
 | **DXC** (`uv run extern/dxc/download-dxc.py`, run by dev.py) | `ssc::dxc`, so a shader package's HLSL becomes DXIL or SPIR-V | every `slib` `acquire` fails, and the examples that draw are gated out of the build |
@@ -239,6 +239,20 @@ uv run dev.py install sde --archive <file>   # into ~/tools/sde, checked against
 
 Then `~/tools/sde/sde64 -snb -- <program>` (`sde.exe` on Windows) runs a program as a Sandy Bridge, with AVX but no AVX2, and `-help` lists the CPUs.
 There are kits for Windows and Linux x86-64 only.
+
+### Vulkan SDK
+
+LunarG's SDK is what the vulkan backend builds against, and its validation layer is what the vulkan tests run under.
+
+```bash
+uv run dev.py install vulkan-sdk   # into ~/tools/vulkan-sdk/<version>, checked against the SHA-256 tools/vulkan-sdk.version pins
+```
+
+**Every dev.py run then points `VULKAN_SDK` at it**, and adds its validation layer to `VK_ADD_LAYER_PATH`, so no environment variable is yours to set.
+A `VULKAN_SDK` already set wins: an SDK you chose is never replaced by the pinned one.
+On Windows the SDK is LunarG's installer, run unattended; if it asks for admin rights, `dev.py` starts it again elevated and Windows asks you to confirm.
+On Linux it is LunarG's tarball, unpacked, which needs no admin rights.
+There are kits for Windows and Linux x86-64 only; macOS builds the metal backend and needs none.
 
 ## What `dev.py doctor` validates
 
