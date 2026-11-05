@@ -8,7 +8,8 @@ refs:
 
 # Each target's compile keeps the level its entry point states
 
-Done on 2026-11-05: dx12, and metal, whose safe math keeps up to `precise`; vulkan refuses above `fast` until the rest lands.
+Done on 2026-11-05: dx12; metal, whose safe math keeps up to `precise`; and vulkan up to `specials`, behind sg's `float_specials`.
+Left: vulkan's `precise`, which needs `NoContraction` on each operation, and its `ieee` with `DenormPreserve`; metal's denormals.
 
 dx12: `-Gis` from `specials` on, and `-denorm preserve` for `ieee`, handed to DXC by slib's SGL edge per entry point.
 metal: safe math from `specials` on, which sg sets today for every compile and would set per pipeline instead.

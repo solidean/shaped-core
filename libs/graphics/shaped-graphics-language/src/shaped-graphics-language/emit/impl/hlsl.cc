@@ -713,6 +713,13 @@ public:
     }
 
     /// A control stage's control points pass through unchanged, which is a hull function that hands each on.
+    void write_body_prologue(cc::string& out, plan const& p) const override
+    {
+        // EMIT-185: DXC takes an execution mode as a call inside the entry point, SignedZeroInfNanPreserve at width 32
+        if (_is_vulkan && p.e.features.has(check::feature::float_specials))
+            out += "    vk::ext_execution_mode(4461, 32);\n";
+    }
+
     void write_function_tail(cc::string& out, plan const& p) const override
     {
         if (p.e.entry_stage != stage::tessellation_control)
@@ -741,6 +748,9 @@ public:
         // EMIT-184: DXC lowers a query's micromap flags to SPIR-V without declaring the capability they need
         if (_is_vulkan && p.e.features.has(check::feature::opacity_micromap))
             out += "[[vk::ext_extension(\"SPV_EXT_opacity_micromap\")]]\n[[vk::ext_capability(5381)]]\n";
+        // EMIT-185: SignedZeroInfNanPreserve for 32-bit floats needs SPV_KHR_float_controls; the mode is in the body
+        if (_is_vulkan && p.e.features.has(check::feature::float_specials))
+            out += "[[vk::ext_extension(\"SPV_KHR_float_controls\")]]\n[[vk::ext_capability(4466)]]\n";
         if (p.e.entry_stage == stage::geometry || p.e.entry_stage == stage::tessellation_control
             || p.e.entry_stage == stage::tessellation_evaluation)
             return write_primitive_head(out, p);

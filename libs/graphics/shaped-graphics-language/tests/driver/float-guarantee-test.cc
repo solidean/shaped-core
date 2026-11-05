@@ -71,6 +71,21 @@ TEST("sgl float - each target keeps what it can, and refuses more by name")
         CHECK(refused.error().contains("float-guarantee-not-kept")).dump("error", refused.error());
         CHECK(refused.error().contains("'ordered'")).dump("error", refused.error());
     }
+    // vulkan keeps the specials through an execution mode the device must have, so the entry point needs its feature
+    constexpr auto specials = "binding work:\n"
+                              "    values: mut buffer[float]\n"
+                              "\n"
+                              "@float(.specials) @compute(64) fun cs(@thread_id id: int3){work}:\n"
+                              "    work.values[id.x] = work.values[id.x] * 2.0\n";
+    auto const vulkan = sgl::compile_to_text({.source = specials, .entry_point = "cs", .target = target::hlsl_vulkan});
+    REQUIRE(vulkan.has_value()).dump("error", vulkan.has_error() ? vulkan.error() : cc::string());
+    CHECK(vulkan.value().features.has(sgl::check::feature::float_specials));
+    CHECK(vulkan.value().text.contains("vk::ext_execution_mode(4461, 32);")).dump("text", vulkan.value().text);
+    auto const dx12 = sgl::compile_to_text({.source = specials, .entry_point = "cs", .target = target::hlsl_dx12});
+    REQUIRE(dx12.has_value());
+    CHECK(!dx12.value().features.has(sgl::check::feature::float_specials));
+    CHECK(!dx12.value().text.contains("vk::ext"));
+
     // metal's safe math is not known to keep denormals
     auto const metal = compiled("exact", target::msl);
     REQUIRE(metal.has_error());

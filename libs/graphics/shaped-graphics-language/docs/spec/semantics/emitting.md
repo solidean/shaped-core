@@ -471,7 +471,8 @@ So `{float3; float}` is written with `packed_float3`: the `float` is at byte 12 
 * **EMIT-185** A text keeps its entry point's float guarantee (CHK-435), or the compile refuses with `float-guarantee-not-kept`, naming the function that asked.
   `hlsl-dx12` keeps every level: DXC compiles from `.specials` on with `-Gis`, and at `.ieee` with `-denorm preserve` too.
   `msl` keeps up to `.precise`, since Metal's safe math keeps the special values and the order, and is not known to keep denormals.
-  `hlsl-vulkan` and `wgsl` keep `.fast` alone for now: vulkan's float execution modes wait for the device features they need.
+  `hlsl-vulkan` keeps up to `.specials`: the entry point states SPIR-V's `SignedZeroInfNanPreserve` at width 32, and needs the feature `float_specials`.
+  It keeps no more until each operation is written `NoContraction`, and `wgsl` keeps `.fast` alone.
   A host may weaken a guarantee on WGSL alone, which compiles at `.fast` with the warning `float-guarantee-weakened`.
 * **EMIT-136** HLSL writes a ray-tracing stage as a library export named by its kind, `[shader("closesthit")]` over `void`, whose payload is an `inout` parameter.
   A triangle closest hit or any hit takes `BuiltInTriangleIntersectionAttributes` too.

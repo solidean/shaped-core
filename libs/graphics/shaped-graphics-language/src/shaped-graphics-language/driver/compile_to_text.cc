@@ -126,9 +126,9 @@ check::float_level kept_float_level(emit::target target)
     // safe math keeps the specials and the order; whether it keeps denormals is not known
     case emit::target::msl:
         return check::float_level::precise;
-    // the execution modes wait for the device features they need (feat-sgl-float-level-per-target)
+    // SignedZeroInfNanPreserve keeps the specials; the order needs NoContraction on each operation, not written yet
     case emit::target::hlsl_vulkan:
-        return check::float_level::fast;
+        return check::float_level::specials;
     // nothing a shader says reaches Tint's or Naga's float handling
     case emit::target::wgsl:
         return check::float_level::fast;
@@ -161,10 +161,14 @@ cc::result<emitted_source, cc::string> emit_text(driver::impl::front_end const& 
                                         emit::to_string(target), float_level_name(kept_float_level(target))));
         float_guarantee = check::float_level::fast;
     }
+    // EMIT-185: vulkan keeps the specials through an execution mode the device must have
+    auto entry = e;
+    if (target == emit::target::hlsl_vulkan && float_guarantee != check::float_level::fast)
+        entry.features.set(check::feature::float_specials);
     // The check pass writes the structured form, and a target prints the core form.
     // WebGPU traces through the emulated form of a trace, and every other target through its native query.
     // LEGAL-63, LEGAL-64: without diagnostics the text holds no print and no assert, and with them both write a record
-    auto const legal = check::legalize(m, e,
+    auto const legal = check::legalize(m, entry,
                                        {.is_emulated = target == emit::target::wgsl,
                                         .erases_prints = !diagnostics,
                                         .lowers_asserts = diagnostics,
@@ -191,7 +195,7 @@ cc::result<emitted_source, cc::string> emit_text(driver::impl::front_end const& 
                                       .bindings = interface_of(m, legal, emitted.bound_names),
                                       .color_targets = emitted.color_targets,
                                       .target_struct = cc::move(emitted.target_struct),
-                                      .features = e.features,
+                                      .features = entry.features,
                                       .options = driver::impl::option_names_of(m, e),
                                       .footprint = check::footprint_of(m, legal),
                                       .layouts = cc::move(emitted.layouts),

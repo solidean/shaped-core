@@ -157,6 +157,11 @@ enum class sg::feature
     /// Vulkan's `VK_EXT_ray_tracing_invocation_reorder` has no compiler path from HLSL yet, and metal and WebGPU have none.
     /// SGL's `maybe_reorder` is a hint: without the feature it does nothing, so it is what `has` asks.
     shader_execution_reordering,
+
+    /// A shader may ask its 32-bit floats to keep NaNs, infinities and signed zeros, as SGL's `@float(.specials)` does.
+    /// Vulkan grants it with `shaderSignedZeroInfNanPreserveFloat32`, which SPIR-V's `SignedZeroInfNanPreserve` needs.
+    /// D3D12 and Metal keep them under a compile flag, `-Gis` and safe math, so they grant it; WebGPU keeps none.
+    float_specials,
 };
 
 CC_FLAG_ENUM_INDEXED(sg, feature, cc::u32);
@@ -196,8 +201,9 @@ inline constexpr feature k_all_features[] = {
     feature::vertex_layer_output,
     feature::float_atomic_add,
     feature::shader_execution_reordering,
+    feature::float_specials,
 };
-static_assert(isize(sizeof(k_all_features) / sizeof(k_all_features[0])) == isize(feature::shader_execution_reordering) + 1,
+static_assert(isize(sizeof(k_all_features) / sizeof(k_all_features[0])) == isize(feature::float_specials) + 1,
               "k_all_features lists every feature");
 
 /// The enumerator's name, `ray_query`, which is also what SGL's `require` spells it as.
@@ -261,6 +267,8 @@ static_assert(isize(sizeof(k_all_features) / sizeof(k_all_features[0])) == isize
         return "float_atomic_add";
     case feature::shader_execution_reordering:
         return "shader_execution_reordering";
+    case feature::float_specials:
+        return "float_specials";
     }
     return "";
 }

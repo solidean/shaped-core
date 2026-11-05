@@ -23,9 +23,9 @@ ASYNC_INVOCABLE_TEST("sg - an SGL float keeps NaNs, infinities, signed zeros and
     REQUIRE(ctx != nullptr);
     if (!sg_test::shaders_reach(*ctx))
         SKIP("no compiler builds this binary's shaders into a format this context accepts");
-    // EMIT-185: vulkan's execution modes wait for their device features, and WebGPU keeps nothing above .fast
-    if (ctx->backend() != sg::backend_kind::metal && ctx->backend() != sg::backend_kind::dx12)
-        SKIP("only metal and dx12 keep @float(.specials) so far");
+    // EMIT-185: vulkan keeps the specials where the device has the execution mode, and WebGPU keeps nothing above .fast
+    if (!ctx->supports(sg::feature::float_specials))
+        SKIP("this device keeps no NaNs, infinities and signed zeros a shader asks for");
 
     auto const pipeline = co_await shaders::float_specials::probe.acquire_pipeline(*ctx);
     auto const layout = ctx->cached.acquire_binding_group_layout<shaders::float_specials::float_specials>();
