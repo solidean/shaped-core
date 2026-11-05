@@ -736,7 +736,8 @@ sg::bound_view             // one raw_view (stored inline, `.view = tex.as_textu
                             //   consumers read both arms via .span() / .size()
 sg::slotted_view            // { binding_slot slot; bound_view view }  — the same input keyed by SLOT (a position in layout->bindings()), for generated code that already knows it
                             //   `{}` is ambiguous under the two overloads: pass `cc::span<sg::named_view const>()` to mean "no views"
-sg::named_sampler           // { cc::string name; sampler sampler }  — name-matched: static (on group layout) or dynamic (on group)
+sg::named_sampler           // { cc::string name; sampler sampler; int element = 0 }  — name-matched: static (on group layout) or dynamic (on group)
+                            //   a sampler ARRAY (count > 1, binding_arrays) is dynamic only: a group supplies one per element, each naming its element
 sg::bound_sampler           // { binding binding; sampler sampler }  — register-bound static sampler, attached to a pipeline_layout
 sg::max_binding_groups      // int (3) — group slots a CALLER gets (== cmd.compute.bind_group's `group_index`); same on every backend
 sg::reserved_binding_group  // int (3) — the slot above them, sg's own: inline-constant emulation where a backend has no
@@ -794,6 +795,7 @@ sbg->set_array_range(slot, first, span<raw_view const>) / unset_array_range(slot
 sbg->set_array(slot[, first], span<raw_view const>)  // void — REPLACE the whole array: the run lands at `first` (0 by default) and every element it does NOT cover is CLEARED
 sbg->unset_array(slot)                // void — clear every element
 sbg->set_sampler(slot, sampler) / unset_sampler(slot)  // void — dynamic samplers only (a static one asserts); unset = the default sampler state
+sbg->set_sampler_element(slot, i, sampler)             // void — one element of a sampler array; every element starts at the default state
 // by NAME (asserts the binding exists) — the one-shot whole-binding calls only; per-element work runs off a resolved slot, which is the point of having one:
 sbg->set_binding(name, raw_view) / set_array(name, views) / unset_array(name) / set_sampler(name, sampler) / unset_sampler(name)
 sbg->snapshot()                       // -> binding_group_handle — SAME handle while nothing changed since the last one; throws sg::binding_group_exception (+ try_ twin)

@@ -428,7 +428,9 @@ let counted = materials.albedo[uniform (counts.picked[0] % 64)].sample(p.uv)
 * `T[]` is an unbounded array, whose length each binding group decides by the views the host gives it (CHK-490).
   It needs `unbounded_binding_arrays` beside `binding_arrays`, and is its binding's last member, since both APIs size only a group's last binding.
   Its `length` is the host's, which a shader that needs it is passed (CHK-491).
-  An array of samplers, and one of more than one dimension, are `unsupported-yet`.
+* `sampler[N]` and `comparison_sampler[N]` are arrays of samplers, read by element and handed to a sample as the member would be.
+  Each element is the host's per group, since sg has no static sampler array, and the generated field is a `cc::fixed_array<sg::sampler, N>`.
+  An unbounded one and one of more than one dimension are `unsupported-yet`.
 * HLSL writes `Texture2D<float4> albedo[64]` and `NonUniformResourceIndex` around a `nonuniform` index, and a `uniform` one plain, as MSL writes both.
   WebGPU has no binding arrays, so WGSL refuses by the feature.
 

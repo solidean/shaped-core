@@ -23,9 +23,12 @@ Left:
 
 * metal, through an argument buffer, which sg's metal backend does not lay out yet (EMIT-211).
 * `length` of one, which no target reads back (CHK-491); the host passes it in.
-* An array of samplers, and one of more than one dimension.
+* A binding array of more than one dimension, and an unbounded array of samplers.
 
 ## Also done on 2026-11-05
 
 A `staging_binding_group`, and so a `bindless_array`, over an unbounded binding, given a capacity at creation: `create_staging_binding_group(layout, n)`.
 sg's compute test sets five buffers of a capacity of 16, replaces one in place, and reads both snapshots on dx12 and vulkan.
+
+An array of samplers on dx12 and vulkan: `sampler[N]` in SGL, `named_sampler::element` and `set_sampler_element` in sg, and a `cc::fixed_array<sg::sampler, N>` field in the generated host code.
+sg's sampler test reads one texture through three samplers, through a group and through a staging group whose element 0 it replaces.

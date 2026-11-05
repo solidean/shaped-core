@@ -530,7 +530,7 @@ def emit_group(package: str, memory: dict[str, int], namespace: str, file: SglFi
         if member["kind"] == "sampler":
             # A static sampler is the layout's, so the group has no field for it.
             if "static_sampler" not in member:
-                out.append(f"    sg::sampler {member['name']}; ///< `{member['type']}`, which the group binds\n")
+                out.append(f"    {array('sg::sampler')} {member['name']}; ///< `{member['type']}`, which the group binds\n")
             continue
         if member["kind"] == "bytes":
             access = "readwrite" if member["access"] == "read_write" else "readonly"
@@ -743,7 +743,13 @@ def emit_group_impl(package: str, memory: dict[str, int], namespace: str, file: 
             continue
         out.append(f"    views.push_back({{.slot = sg::binding_slot({slot}), .view = {member['name']}}});\n")
     for member in dynamic:
-        out.append(f'    samplers.push_back({{.name = "{member["host_name"]}", .sampler = {member["name"]}}});\n')
+        if member.get("count", 1) != 1:
+            # one per element, which names its element; `this->`, since a member may be called `samplers` too
+            out.append(f"    for (auto i = 0; i < int(this->{member['name']}.size()); ++i)\n")
+            out.append(f'        samplers.push_back({{.name = "{member["host_name"]}", .sampler = this->{member["name"]}[i], '
+                       f".element = i}});\n")
+            continue
+        out.append(f'    samplers.push_back({{.name = "{member["host_name"]}", .sampler = this->{member["name"]}}});\n')
     out.append("}\n")
 
     if has_block(binding):

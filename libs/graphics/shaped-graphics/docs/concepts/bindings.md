@@ -180,7 +180,10 @@ Three rules distinguish an array binding from a scalar one:
   An empty element span says "unused" for every op it lives through, and an array the code never indexes needs no declaration at all.
 
 Element resources are still kept alive by the group, exactly like scalar bindings.
-Arrays of samplers, constants buffers or acceleration structures are not supported.
+Arrays of constants buffers or acceleration structures are not supported.
+An array of samplers is, behind `feature::binding_arrays`, and is always dynamic: a static sampler array is refused at layout creation.
+A group supplies one `named_sampler` per element, each naming its `element`, and a staging group sets one with `set_sampler_element`.
+sg's metal backend refuses one at layout creation, since it does not bind one yet.
 
 ## Staging a group instead of rebuilding it
 

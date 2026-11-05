@@ -836,9 +836,10 @@ ast::range_of<member_info> checker::compile_members(i32 file,
                 unsupported(file, span_of(file, f.type), "a binding array of more than one dimension");
                 type = checked_module::error_type;
             }
-            else if (element.kind == type_kind::sampler)
+            // CHK-299: sg binds a sampler array per group, element by element, and sizes none per group
+            else if (element.kind == type_kind::sampler && t.count == 0)
             {
-                unsupported(file, span_of(file, f.type), "an array of samplers");
+                unsupported(file, span_of(file, f.type), "an unbounded array of samplers");
                 type = checked_module::error_type;
             }
             // CHK-490: the host sizes an unbounded array per group, which both APIs allow at a group's end alone

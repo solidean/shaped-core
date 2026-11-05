@@ -1072,7 +1072,8 @@ A `require` in a test's body that nothing in it uses is `unused-require`, and a 
 * **CHK-299** A binding member `T[N]` of a texture, an image or a buffer is a **binding array**, which needs `binding_arrays`.
   Its `N` is at least 2, or it is `invalid-constant-argument`: one resource is a plain member.
   It is read by element alone, `name[i]`, and naming it whole is `wrong-kind-of-name`; an element is the resource, which only a builtin takes.
-  `T[]` is an unbounded one (CHK-490); an array of samplers and one of more than one dimension are `unsupported-yet`.
+  `T[]` is an unbounded one (CHK-490); one of more than one dimension is `unsupported-yet`.
+  An array of samplers is a binding array like the others, and an unbounded one is `unsupported-yet`, since sg sizes none per group.
   An array whose innermost element is a value is no binding array, whatever its dimensions: CHK-291 is what judges it.
   An access word stands before it and qualifies its element: `out image_2d[.rgba8_unorm][4]`.
 * **CHK-490** A binding member `T[]` of a texture, an image, a buffer or `bytes` is an **unbounded binding array**, whose length each binding group decides.

@@ -119,6 +119,10 @@ public:
     /// Returns the dynamic sampler at `slot` to the default sampler state.
     void unset_sampler(binding_slot slot);
 
+    /// Supplies element `element` of the dynamic sampler array at `slot`, which must be within its count.
+    /// Each element starts at the default sampler state, so an array counts as set once any element was.
+    void set_sampler_element(binding_slot slot, int element, sampler const& smp);
+
     // --- the same, by name --------------------------------------------------------------------------
     // Whole-binding wiring, where resolving the name every call is not the cost that matters.
     // Each asserts the layout has a binding of that name.

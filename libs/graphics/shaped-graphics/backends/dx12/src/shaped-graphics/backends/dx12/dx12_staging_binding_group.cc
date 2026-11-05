@@ -76,9 +76,6 @@ cc::result<dx12_staging_binding_group_handle> dx12_staging_binding_group::create
     for (auto const& s : layout->view_slots)
         if (s.binding.is_array() && s.binding.type == sg::binding_type::acceleration_structure)
             return cc::error("staging_binding_group: acceleration-structure arrays are not supported yet");
-    for (auto const& s : layout->sampler_slots)
-        if (s.binding.is_array())
-            return cc::error("staging_binding_group: dynamic sampler arrays are not supported yet");
 
     auto offsets = descriptor_offsets_of(*layout);
     auto group
@@ -127,7 +124,8 @@ cc::result<cc::unit> dx12_staging_binding_group::initialize()
         for (int e = 0; e < element_count(s.binding); ++e)
             create_null_view(device, s.binding, view_cpu_at(s.table_offset + e));
     for (auto const& s : _dx_layout->sampler_slots)
-        create_null_view(device, s.binding, sampler_cpu_at(s.table_offset));
+        for (int e = 0; e < int(s.binding.count); ++e)
+            create_null_view(device, s.binding, sampler_cpu_at(s.table_offset + e));
 
     return cc::unit{};
 }
