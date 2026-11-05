@@ -265,16 +265,34 @@ cc::result<binding_group_layout_handle> context_uncached_scope::try_create_bindi
     cc::span<binding const> bindings,
     cc::span<named_sampler const> static_samplers)
 {
-    // Rejected here rather than per backend, so an unbounded array fails identically everywhere: WebGPU has no
-    // such thing, and sg holds the portable floor until it does.
-    // See libs/graphics/shaped-graphics/docs/concepts/bindings.md.
-    // An error rather than an assert — these bindings usually come from reflecting someone's shader, which
-    // makes an unbounded array content, not a contract violation.
-    for (auto const& b : bindings)
-        if (b.count == 0)
-            return cc::error(cc::format("binding_group_layout: '{}' is an unbounded array (count 0), which sg does "
-                                        "not support — declare a bounded count and treat it as capacity",
+    // Judged here rather than per backend, so an unbounded array fails identically everywhere it fails.
+    // Vulkan sizes only a set's last binding per set, so it stands last, and at the highest index; see
+    // libs/graphics/shaped-graphics/docs/concepts/bindings.md.
+    // An error rather than an assert: these bindings usually come from reflecting someone's shader.
+    for (auto i = isize(0); i < bindings.size(); ++i)
+    {
+        auto const& b = bindings[i];
+        if (!b.is_unbounded())
+            continue;
+        if (!_ctx.supports(feature::unbounded_binding_arrays))
+            return cc::error(cc::format("binding_group_layout: '{}' is an unbounded array (count 0), which needs "
+                                        "sg::feature::unbounded_binding_arrays",
                                         b.name));
+        if (i != bindings.size() - 1)
+            return cc::error(cc::format("binding_group_layout: '{}' is an unbounded array, and only the last binding "
+                                        "of a layout may be one",
+                                        b.name));
+        for (auto const& other : bindings)
+            if (&other != &b && other.index > b.index)
+                return cc::error(cc::format("binding_group_layout: '{}' is an unbounded array below '{}', and it must "
+                                            "take the layout's highest index",
+                                            b.name, other.name));
+        if (sg::is_sampler(b.type) || b.type == binding_type::constants_buffer
+            || b.type == binding_type::acceleration_structure)
+            return cc::error(cc::format("binding_group_layout: '{}' is an unbounded array of a kind no binding array "
+                                        "holds",
+                                        b.name));
+    }
 
     if (auto unsupported = impl::find_unsupported_binding(_ctx.supports(feature::extended_image_formats), bindings);
         unsupported.has_value())

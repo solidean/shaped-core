@@ -174,6 +174,55 @@ ASYNC_INVOCABLE_TEST("sg - an SGL binding array is filled with a view per elemen
         CHECK(got[i] == (i % 3) * 1000 + i);
 }
 
+ASYNC_INVOCABLE_TEST("sg - an SGL unbounded binding array takes as many views as the group is given (CHK-490)",
+                     (sg::context_handle const& ctx))
+{
+    REQUIRE(ctx != nullptr);
+    if (!sg_test::shaders_reach(*ctx))
+        SKIP("no compiler builds this binary's shaders into a format this context accepts");
+    if (!ctx->supports(sg::feature::unbounded_binding_arrays))
+        SKIP("this context has no unbounded binding arrays");
+
+    auto const pipeline = co_await shaders::unbounded_arrays::gather_unbounded.acquire_pipeline(*ctx);
+    auto const group_layout = ctx->cached.acquire_binding_group_layout<shaders::unbounded_arrays::parts>();
+
+    // five sources, a count the shader never names, chosen here when the group is made
+    constexpr auto count = 64;
+    constexpr auto lanes = 5;
+    auto sources = cc::vector<sg::buffer<i32>>();
+    for (auto lane = 0; lane < lanes; ++lane)
+    {
+        auto data = cc::vector<i32>();
+        for (auto i = 0; i < count; ++i)
+            data.push_back(lane * 1000 + i);
+        sources.push_back(ctx->persistent.create_buffer_from_data(cc::move(data), sg::buffer_usage::readonly_buffer));
+    }
+    auto const merged = ctx->persistent.create_buffer_from_data(
+        cc::vector<i32>::create_defaulted(count), sg::buffer_usage::readwrite_buffer | sg::buffer_usage::copy_src);
+
+    auto parts = shaders::unbounded_arrays::parts{.merged = merged.as_readwrite_buffer()};
+    auto reads = cc::vector<sg::array_buffer_access>();
+    for (auto lane = 0; lane < lanes; ++lane)
+    {
+        parts.sources.push_back(sources[lane].as_readonly_buffer());
+        reads.push_back({.index = lane, .access = sg::access_flag::shader_read});
+    }
+    auto cmd = ctx->create_command_list();
+    auto const group = ctx->transient.create_binding_group(*cmd, group_layout, parts);
+    cmd->compute.bind_pipeline(*pipeline);
+    cmd->compute.bind_group(0, *group);
+    auto const declared
+        = cmd->compute.declare_array_buffer_access(shaders::unbounded_arrays::parts::arrays::sources, reads);
+    cmd->compute.dispatch_threads(count);
+    auto const back = cmd->download.data_from_buffer(merged);
+    ctx->submit_command_list(cc::move(cmd));
+
+    auto const got = co_await back.data();
+    REQUIRE(got.size() == isize(count));
+    for (auto i = 0; i < count; ++i)
+        CHECK(got[i] == (i % lanes) * 1000 + i);
+}
+
 ASYNC_INVOCABLE_TEST("sg - SGL bytes are loaded and stored a word at a time, and picked per thread from an array",
                      (sg::context_handle const& ctx))
 {

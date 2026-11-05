@@ -827,15 +827,28 @@ ast::range_of<member_info> checker::compile_members(i32 file,
                 unsupported(file, span_of(file, f.type), "a binding array of more than one dimension");
                 type = checked_module::error_type;
             }
-            else if (t.count == 0)
-            {
-                unsupported(file, span_of(file, f.type), "an unbounded binding array, which sg binds none of yet");
-                type = checked_module::error_type;
-            }
             else if (element.kind == type_kind::sampler)
             {
                 unsupported(file, span_of(file, f.type), "an array of samplers");
                 type = checked_module::error_type;
+            }
+            // CHK-490: the host sizes an unbounded array per group, which both APIs allow at a group's end alone
+            else if (t.count == 0)
+            {
+                auto const all = ast.at(members);
+                if (member != all[all.size() - 1])
+                {
+                    report(diagnostic_kind::member_not_allowed_here, file, span_of(file, f.type),
+                           cc::format("{} is an unbounded binding array, which is its binding's last member",
+                                      out.name_of(type)));
+                    type = checked_module::error_type;
+                }
+                else
+                {
+                    judge_feature(file, span_of(file, f.type), "a binding array", feature::binding_arrays);
+                    judge_feature(file, span_of(file, f.type), "an unbounded binding array",
+                                  feature::unbounded_binding_arrays);
+                }
             }
             // one slot is a plain member, and never a binding array
             else if (t.count == 1)

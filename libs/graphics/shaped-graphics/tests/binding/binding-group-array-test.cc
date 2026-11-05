@@ -212,3 +212,42 @@ INVOCABLE_TEST("sg - scalar binding rejects a vacant element", (sg::context_hand
     CHECK_THROWS_AS(ctx->persistent.create_binding_group(layout, cc::span<sg::named_view const>(&nv, 1)),
                     sg::binding_group_exception);
 }
+
+INVOCABLE_TEST("sg - an unbounded array binding is its layout's last, and each group sizes it by its views",
+               (sg::context_handle const& ctx))
+{
+    REQUIRE(ctx != nullptr);
+    auto unbounded = texture_array_binding(0);
+    unbounded.index = 1;
+    if (!ctx->supports(sg::feature::unbounded_binding_arrays))
+    {
+        CHECK(ctx->uncached.try_create_binding_group_layout(cc::span<sg::binding const>(&unbounded, 1))
+                  .error()
+                  .message()
+                  .contains("unbounded_binding_arrays"));
+        SKIP("this backend has no unbounded binding arrays");
+    }
+
+    // an unbounded binding before another one is refused, since only a layout's last binding may be one
+    auto const plain = sg::binding{.name = "Plain",
+                                   .space = 0,
+                                   .index = 2,
+                                   .type = sg::binding_type::texture,
+                                   .texture_dimension = sg::texture_view_dimension::tex_2d};
+    sg::binding const misplaced[] = {unbounded, plain};
+    CHECK(ctx->uncached.try_create_binding_group_layout(misplaced).error().message().contains("only the last binding"));
+
+    auto layout = ctx->uncached.create_binding_group_layout(cc::span<sg::binding const>(&unbounded, 1));
+    for (auto const count : {1, 3, 40})
+    {
+        auto elements = cc::vector<sg::raw_view>();
+        for (auto i = 0; i < count; ++i)
+            elements.push_back(sg::vacant_view{});
+        auto const texture = make_texture(ctx);
+        elements[count - 1] = texture.as_texture_view();
+        auto const nv = sg::named_view{.name = "Textures", .view = cc::move(elements)};
+        CHECK(ctx->persistent.create_binding_group(layout, cc::span<sg::named_view const>(&nv, 1)) != nullptr);
+    }
+    // a staging group's image is the layout's own, which has no count for an unbounded binding
+    CHECK_THROWS_AS(ctx->persistent.create_staging_binding_group(layout), sg::binding_group_exception);
+}

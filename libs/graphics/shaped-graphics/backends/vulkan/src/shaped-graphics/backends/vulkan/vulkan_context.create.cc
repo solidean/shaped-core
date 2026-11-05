@@ -450,6 +450,8 @@ struct optional_shader_features
     VkBool32 shader_float64 = VK_FALSE;
     /// sg::feature::shader_int64_atomics, a buffer's; SGL holds no 64-bit atomic in workgroup memory yet.
     VkBool32 buffer_int64_atomics = VK_FALSE;
+    /// sg::feature::unbounded_binding_arrays: a group decides its last binding's count.
+    VkBool32 variable_descriptor_count = VK_FALSE;
     VkBool32 storage_buffer_16bit = VK_FALSE;
     VkBool32 uniform_and_storage_buffer_16bit = VK_FALSE;
     /// An HLSL push constant may hold a 16-bit member, which needs this bit; SGL refuses one in an `@inline` binding.
@@ -524,6 +526,7 @@ optional_shader_features query_optional_shader_features(VkPhysicalDevice dev)
         .shader_int64 = features.features.shaderInt64,
         .shader_float64 = features.features.shaderFloat64,
         .buffer_int64_atomics = vk12.shaderBufferInt64Atomics,
+        .variable_descriptor_count = vk12.descriptorBindingVariableDescriptorCount,
         .storage_buffer_16bit = vk11.storageBuffer16BitAccess,
         .uniform_and_storage_buffer_16bit = vk11.uniformAndStorageBuffer16BitAccess,
         .storage_push_constant_16bit = vk11.storagePushConstant16,
@@ -904,6 +907,7 @@ cc::result<context_handle> create_vulkan_context(backend::vulkan::vulkan_config 
         .shaderStorageImageArrayNonUniformIndexing = shader_features.storage_image_array_non_uniform_indexing,
         .descriptorBindingUpdateUnusedWhilePending = VK_TRUE,
         .descriptorBindingPartiallyBound = VK_TRUE,
+        .descriptorBindingVariableDescriptorCount = shader_features.variable_descriptor_count,
         .runtimeDescriptorArray = VK_TRUE,
         .scalarBlockLayout = VK_TRUE,
         .shaderSubgroupExtendedTypes = shader_features.subgroup_extended_types,
@@ -1114,6 +1118,7 @@ cc::result<context_handle> create_vulkan_context(backend::vulkan::vulkan_config 
     ctx->_shader_int64 = shader_features.shader_int64 == VK_TRUE;
     ctx->_shader_f64 = shader_features.shader_float64 == VK_TRUE;
     ctx->_shader_int64_atomics = shader_features.has_int64_atomics();
+    ctx->_unbounded_binding_arrays = shader_features.variable_descriptor_count == VK_TRUE;
     ctx->_subgroups = shader_features.subgroups;
     ctx->_vertex_layer_output = shader_features.shader_output_layer == VK_TRUE;
     ctx->_view_instancing = shader_features.multiview == VK_TRUE;

@@ -364,6 +364,8 @@ public:
             return _shader_f64;
         case sg::feature::shader_int64_atomics:
             return _shader_int64_atomics;
+        case sg::feature::unbounded_binding_arrays:
+            return _unbounded_binding_arrays;
         case sg::feature::subgroups:
             return _subgroups;
         case sg::feature::vertex_layer_output:
@@ -957,6 +959,8 @@ public:
     bool _shader_int64 = false;
     bool _shader_f64 = false;
     bool _shader_int64_atomics = false;
+    /// `descriptorBindingVariableDescriptorCount`, enabled wherever the device has it.
+    bool _unbounded_binding_arrays = false;
     bool _subgroups = false;
     bool _vertex_layer_output = false;
     /// `multiview`, enabled wherever the device has it.

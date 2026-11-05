@@ -400,6 +400,9 @@ def includes(entries: SglEntries) -> list[str]:
         out += ["<clean-core/container/fixed_array.hh>", "<clean-core/fwd.hh>"]
     if any(m.get("count", 1) > 1 for _, b in entries.bindings for m in b["members"]):
         out += ["<clean-core/container/fixed_array.hh>"]
+    # an unbounded binding array (CHK-490) is as many views as the host binds
+    if any(m.get("count", 1) == 0 for _, b in entries.bindings for m in b["members"]):
+        out += ["<clean-core/container/vector.hh>"]
 
     # Every type a field names: a constant's own, a buffer's element, and a vertex attribute's.
     types = {m["type"] for _, b in entries.bindings for m in b["members"]}
@@ -500,7 +503,9 @@ def emit_group(package: str, memory: dict[str, int], namespace: str, file: SglFi
         where = f"'{file.path}' `binding {name}` member '{member['name']}'"
         # a binding array is one field holding a view per element
         count = member.get("count", 1)
-        array = (lambda view: f"cc::fixed_array<{view}, {count}>") if count > 1 else (lambda view: view)
+        array = ((lambda view: f"cc::vector<{view}>") if count == 0
+                 else (lambda view: f"cc::fixed_array<{view}, {count}>") if count > 1
+                 else (lambda view: view))
         if member["kind"] == "constant":
             cpp = sized_host_type(package, memory, where, member["type"], member["size"])
             out.append(f"    {cpp} {member['name']}; ///< `{member['type']}`, "
@@ -582,7 +587,7 @@ def emit_array_bindings(where: str, members: list[tuple[str, str, str, int]]) ->
     A group without a binding array gets no struct, so no member can collide with a name it never emits.
     """
     arrays = [(member, name, ARRAY_FAMILIES[kind]) for member, name, kind, count in members
-              if count > 1 and kind in ARRAY_FAMILIES]
+              if count != 1 and kind in ARRAY_FAMILIES]
     if not arrays:
         return ""
     if any(member == "arrays" for member, _, _, _ in members):
@@ -727,7 +732,7 @@ def emit_group_impl(package: str, memory: dict[str, int], namespace: str, file: 
     position = {m["name"]: i + (1 if has_block(binding) else 0) for i, m in enumerate(resources)}
     for member in views:
         slot = position[member["name"]]
-        if member.get("count", 1) > 1:
+        if member.get("count", 1) != 1:
             # one view per element, in element order
             out.append("    {\n")
             out.append("        auto elements = cc::vector<sg::raw_view>();\n")

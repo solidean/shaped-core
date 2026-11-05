@@ -17,7 +17,7 @@ sg's baseline shading language is undecided, so the vocabulary is drawn instead 
   A buffer's access picks SRV or UAV; an image is a UAV whatever its access, which reaches only WebGPU's layout and the hazards.
 - **`index` + `count`** — the address within the group, following SPIR-V (`binding`), WGSL (`@binding`) and Metal argument buffers.
   A D3D12 backend derives its `(register-type, register)` at layout build: register-type from the kind and access → `t`/`u`/`b`/`s`, register = `index`.
-  `count == 0` is an unbounded array, which sg rejects — see [Array bindings](#array-bindings) for why.
+  `count == 0` is an unbounded array, which each binding group sizes — see [Array bindings](#array-bindings).
 - **`group_index`** and **`space`** — the two ways a shading language namespaces that address, each optional and each reflected by the languages that have it.
   They are kept apart because only one of them is hardware-visible; the section below is what that costs a caller.
 - **`block_size`** — a constants block's declared byte size, used to validate a bound view's size.
@@ -142,12 +142,12 @@ A feature only one backend lacks may still be judged by that backend alone, at l
 ## Array bindings
 
 An array binding is a `binding` with `count > 1`: `count` consecutive descriptors under one name — `Texture2D Texs[4]` in HLSL, and the building block of a bindless table.
-`count == 0` (unbounded) is **rejected**: `try_create_binding_group_layout` returns an error naming the binding, on every backend alike.
-A bindless table declares a bounded count and treats it as capacity.
-
-The reason is WebGPU, which has no unbounded binding arrays, and sg is meant to stay ready for the day it does.
-So this is the portable floor the storage-buffer offset rules in [views.md](views.md) already use: fail loudly on the dx12 dev box rather than letting it surface later on the weaker backend.
-The shape stays conditional enough that full support later needs no redesign.
+`count == 0` is an **unbounded** array: each `binding_group` built from the layout holds as many elements as the views it is given, at least one.
+It needs `feature::unbounded_binding_arrays`, which dx12 grants at resource binding tier 3 and vulkan with `descriptorBindingVariableDescriptorCount`.
+It is the layout's last binding and takes its highest index, since vulkan sizes only a set's last binding, and it holds no sampler, constants buffer or acceleration structure.
+A layout that breaks any of that is refused by `try_create_binding_group_layout`, with an error naming the binding, on every backend alike.
+dx12 writes the range as an unbounded one at its table's end, and vulkan gives the binding a capacity of the device's per-stage limit, at most 65536.
+A `staging_binding_group`, and so a `bindless_array`, keeps an image of the layout's size, so neither takes an unbounded binding yet; a bounded count treated as capacity is the bindless table.
 It is an error rather than an assert because these bindings usually come from reflecting someone's shader, which makes an unbounded array content rather than a contract violation.
 See [error-handling.md](../../../../../docs/error-handling.md).
 The dx12 layout builder keeps its own assert as a backstop.

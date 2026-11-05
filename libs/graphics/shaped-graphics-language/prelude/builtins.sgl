@@ -4808,6 +4808,7 @@ enum feature:
     shader_int64
     shader_f64
     shader_int64_atomics
+    unbounded_binding_arrays
 
 /// The API this compile writes for, known once a body is inlined; no const holds it.
 const target_api: graphics_api = .none

@@ -793,3 +793,30 @@ TEST("sgl emit - a file-scope sampler named as a word the target reserves is ren
     CHECK(dx12.text.contains("SamplerState register_ : register(s0, space10);\n"));
     CHECK((dx12.bound_names.back() == sgl::emit::bound_name{.emitted = "register_", .host = "register"}));
 }
+
+TEST("sgl emit - an unbounded binding array is `name[]` in HLSL, and WGSL and MSL refuse it (EMIT-210, EMIT-211)")
+{
+    constexpr auto arrays = "require binding_arrays, unbounded_binding_arrays\n"
+                            "\n"
+                            "binding scene:\n"
+                            "    smp: sampler\n"
+                            "    @sampler(smp) albedo: texture_2d[float4][]\n"
+                            "\n"
+                            "struct pixel_input:\n"
+                            "    @position position: hpos4\n"
+                            "    uv: float2\n"
+                            "    @interpolate(.flat) material: int\n"
+                            "\n"
+                            "@pixel struct target:\n"
+                            "    color: float4\n"
+                            "\n"
+                            "@pixel fun ps(p: pixel_input){scene} -> target:\n"
+                            "    return {color = scene.albedo[nonuniform p.material].sample(p.uv)}\n";
+    auto const dx12 = text_of(arrays, target::hlsl_dx12);
+    CHECK(dx12.contains("Texture2D<float4> scene_albedo[] : register(t1, space0);\n")).dump("text", dx12);
+    CHECK(dx12.contains("scene_albedo[NonUniformResourceIndex(p.material)]")).dump("text", dx12);
+    auto const vulkan = text_of(arrays, target::hlsl_vulkan);
+    CHECK(vulkan.contains("Texture2D<float4> scene_albedo[];\n")).dump("text", vulkan);
+    CHECK(sgl::emit::dump_errors(emit_source(arrays, 0, target::wgsl)).contains("binding_arrays"));
+    CHECK(sgl::emit::dump_errors(emit_source(arrays, 0, target::msl)).contains("unbounded_binding_arrays"));
+}

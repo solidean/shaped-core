@@ -524,7 +524,10 @@ public:
         auto const& t = p.m.at(b.type);
         auto const format = t.kind == type_kind::image ? k_image_formats[t.format].spirv : cc::string_view();
         // a binding array takes `count` consecutive registers from its first
-        auto const name = b.count > 1 ? cc::format("{}[{}]", b.name, b.count) : cc::string(b.name);
+        // EMIT-210: an unbounded array is `name[]`, whose range the pipeline layout leaves open
+        auto const name = b.count == 0 ? cc::format("{}[]", b.name)
+                        : b.count > 1  ? cc::format("{}[{}]", b.name, b.count)
+                                       : cc::string(b.name);
         // EMIT-150: DXC writes it as SPIR-V's `Coherent` for vulkan
         auto const resource = b.element_form.has_value()
                                 ? cc::format("{}StructuredBuffer<{}>", t.is_mut ? "RW" : "", b.element_form.value().name)

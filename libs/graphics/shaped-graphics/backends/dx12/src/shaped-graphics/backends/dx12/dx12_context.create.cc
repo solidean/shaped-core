@@ -608,6 +608,8 @@ cc::result<context_handle> create_dx12_context(backend::dx12::dx12_config const&
     ctx->_wave_ops = wave_ops;
     ctx->_int64_shader_ops = int64_shader_ops;
     ctx->_double_shader_ops = options.DoublePrecisionFloatShaderOps != 0;
+    // tier 3 takes every view type unbounded; tier 2 caps a UAV range and a CBV range
+    ctx->_unbounded_binding_arrays = options.ResourceBindingTier >= D3D12_RESOURCE_BINDING_TIER_3;
     ctx->_int64_atomics = int64_shader_ops;
     ctx->_shader_execution_reordering = shader_execution_reordering;
     ctx->_opacity_micromap = opacity_micromap;

@@ -136,8 +136,13 @@ cc::result<dx12_binding_group_handle> dx12_binding_group::create_resolved(dx12_c
         return a;
     };
 
+    // an unbounded binding, the table's tail, takes as many descriptors as its views
+    auto unbounded_count = 0;
+    for (auto const& nv : views)
+        if (layout->view_slots[nv.slot_index].binding.is_unbounded())
+            unbounded_count = int(nv.view->span().size());
     {
-        auto r = alloc_table(ctx._descriptor_heap, layout->descriptor_count);
+        auto r = alloc_table(ctx._descriptor_heap, layout->descriptor_count + unbounded_count);
         CC_RETURN_IF_ERROR(r);
         group->table = cc::move(r.value());
     }
@@ -166,7 +171,7 @@ cc::result<dx12_binding_group_handle> dx12_binding_group::create_resolved(dx12_c
         auto const& s = layout->view_slots[slot_index];
         bool const is_array = s.binding.is_array();
         auto const element_views = nv.view->span();
-        if (element_views.size() != isize(s.binding.count))
+        if (s.binding.is_unbounded() ? element_views.empty() : element_views.size() != isize(s.binding.count))
             return cc::error(cc::format("binding_group: '{}' takes {} view(s), {} provided (an array binding takes "
                                         "exactly one per element; a vacant element is sg::vacant_view)",
                                         nv.name, s.binding.count, element_views.size()));

@@ -1035,6 +1035,12 @@ type_id checker::check_member(function_scope& scope, ast::expr_id id, ast::membe
     // CHK-288: an array's length is a constant of its type, and it has no other member
     if (out.at(object).kind == type_kind::array)
     {
+        // CHK-491: an unbounded array's length is the host's, which no target reads back
+        if (name == "length" && out.at(object).count == 0)
+        {
+            unsupported(file, span_of(file, id), "the length of an unbounded binding array, which the host passes in");
+            return error_type;
+        }
         if (name != "length")
         {
             report(diagnostic_kind::unknown_member, file, member.name,
