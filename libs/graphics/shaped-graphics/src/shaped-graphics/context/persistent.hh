@@ -218,7 +218,12 @@ public:
     /// Opens a staging_binding_group over `layout`: a mutable descriptor image that `set` updates one slot at a time and `snapshot` mints binding_groups from.
     /// It starts fully vacant, so every scalar view binding must be set before the first snapshot.
     /// Throws sg::binding_group_exception if the staging descriptors cannot be allocated.
-    [[nodiscard]] staging_binding_group_handle create_staging_binding_group(binding_group_layout_handle layout);
+    ///
+    /// A layout with an unbounded binding needs `unbounded_capacity`, at least 1: the elements that binding holds in this group, all of them vacant until set.
+    /// Every snapshot is a group of that size, so a bindless table picks its capacity once, as it would a fixed array's.
+    /// A layout without one takes 0.
+    [[nodiscard]] staging_binding_group_handle create_staging_binding_group(binding_group_layout_handle layout,
+                                                                            int unbounded_capacity = 0);
 
     // Pinned to its owning context: neither copyable nor movable.
     context_persistent_scope(context_persistent_scope const&) = delete;
@@ -255,8 +260,8 @@ private:
                                                                             cc::span<slotted_view const> views,
                                                                             cc::span<named_sampler const> samplers = {});
 
-    [[nodiscard]] cc::result<staging_binding_group_handle> try_create_staging_binding_group(
-        binding_group_layout_handle layout);
+    [[nodiscard]] cc::result<staging_binding_group_handle> try_create_staging_binding_group(binding_group_layout_handle layout,
+                                                                                            int unbounded_capacity);
 
     /// A generated group's constant block, in a persistent buffer the group keeps alive through its view.
     /// Filled through `ctx.upload`, which a later command list reading it waits for.

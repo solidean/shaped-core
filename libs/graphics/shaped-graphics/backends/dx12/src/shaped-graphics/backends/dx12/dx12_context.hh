@@ -251,7 +251,10 @@ public:
         case sg::feature::shader_f64:
             return _double_shader_ops;
         case sg::feature::shader_int64_atomics:
+        case sg::feature::shader_int64_min_max_atomics:
             return _int64_atomics;
+        case sg::feature::shader_shared_int64_atomics:
+            return _shared_int64_atomics;
         case sg::feature::unbounded_binding_arrays:
             return _unbounded_binding_arrays;
         case sg::feature::vertex_layer_output:
@@ -268,6 +271,9 @@ public:
             return _view_instancing;
         case sg::feature::mesh_shader:
             return _mesh_shader;
+        case sg::feature::ray_tracing_motion_blur:
+            // DXR has no motion
+            return false;
         case sg::feature::vertex_pipeline_stores:
             // a UAV is visible to every stage of a root signature
             return true;
@@ -353,6 +359,7 @@ public:
                                                                                   sg::lifetime_scope scope);
     [[nodiscard]] cc::result<dx12_staging_binding_group_handle> create_dx12_staging_binding_group(
         dx12_binding_group_layout_handle layout,
+        int unbounded_capacity,
         sg::lifetime_scope scope);
 
     // Render-target / depth-stencil descriptors.
@@ -438,6 +445,7 @@ public:
                                                                                 sg::lifetime_scope scope) override;
     [[nodiscard]] cc::result<sg::staging_binding_group_handle> try_create_staging_binding_group(
         sg::binding_group_layout_handle layout,
+        int unbounded_capacity,
         sg::lifetime_scope scope) override;
 
     // The swapchain uses note_device_removed_if_lost (below) to mark the context lost on a failed Present.
@@ -711,6 +719,7 @@ public:
     bool _int64_shader_ops = false;            // D3D12_OPTIONS1, cached at creation
     bool _double_shader_ops = false;           // D3D12_OPTIONS, cached at creation
     bool _int64_atomics = false;               // D3D12_OPTIONS1 on Shader Model 6.6, cached at creation
+    bool _shared_int64_atomics = false;        // D3D12_OPTIONS9's AtomicInt64OnGroupSharedSupported, cached at creation
     bool _unbounded_binding_arrays = false;    // resource binding tier 3, cached at creation
     bool _shader_execution_reordering = false; // SM 6.9 beside ray-tracing pipelines, from the Agility SDK
     bool _opacity_micromap = false;            // DXR 1.2 and SM 6.9, from the Agility SDK

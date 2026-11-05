@@ -82,7 +82,7 @@ TEST("sgl check - a require names a feature a shader can use, as sg names it")
              "device_coherence, image_atomics, first_instance, helper_lane_query, vertex_layer_output, "
              "float_atomic_add, shader_execution_reordering, opacity_micromap, float_specials, float_denormals, "
              "view_instancing, vertex_pipeline_stores, shader_int64, shader_f64, shader_int64_atomics, "
-             "unbounded_binding_arrays\n");
+             "unbounded_binding_arrays, shader_shared_int64_atomics, shader_int64_min_max_atomics\n");
     CHECK(reports_for("require raytracing\n").contains("unknown-feature user:[raytracing]"));
     CHECK(reports_for("require ray_query, binding_arrays\n") == "");
 
@@ -341,14 +341,29 @@ TEST("sgl check - a 64-bit atomic needs shader_int64_atomics, and stands in a bu
 {
     // CHK-296: a buffer's, which needs the atomics' feature beside the integer's
     CHECK(reports_for(listing("require shader_int64\n\n", "    totals: mut buffer[atomic[ulong]]\n"))
+              .contains("needs shader_int64_min_max_atomics"));
+    CHECK(reports_for(listing("require shader_int64\n\n", "    totals: mut buffer[atomic[long]]\n"))
               .contains("needs shader_int64_atomics"));
     CHECK(reports_for(listing("require shader_int64, shader_int64_atomics\n\n", "    totals: mut "
                                                                                 "buffer[atomic[long]]\n"))
           == "");
-    // workgroup memory's are optional on every device that has a buffer's
+    // CHK-510: workgroup memory's are optional on every device that has a buffer's
     CHECK(reports_for("require shader_int64, shader_int64_atomics\n\n@workgroup binding local:\n    sum: "
                       "atomic[ulong]\n")
-              .contains("a 64-bit atomic in workgroup memory, in local.sum"));
+              .contains("a 64-bit atomic in workgroup memory needs shader_shared_int64_atomics"));
+    CHECK(reports_for("require shader_int64, shader_int64_atomics, shader_shared_int64_atomics\n\n"
+                      "@workgroup binding local:\n    sum: atomic[ulong]\n")
+          == "");
+    // CHK-511: a ulong's min and max need less than its other operations, and shader_int64_atomics grants both
+    constexpr auto maxed = "require shader_int64{}\n\n"
+                           "binding work:\n"
+                           "    top: mut buffer[atomic[ulong]]\n"
+                           "\n"
+                           "@compute(1) fun cs(@thread_id id: int3){{work}}:\n"
+                           "    work.top[0].{}(5u64)\n";
+    CHECK(reports_for(cc::format(maxed, ", shader_int64_min_max_atomics", "max")) == "");
+    CHECK(reports_for(cc::format(maxed, ", shader_int64_min_max_atomics", "add")).contains("needs shader_int64_atomics"));
+    CHECK(reports_for(cc::format(maxed, ", shader_int64_atomics", "add")) == "");
     CHECK(reports_for(listing("require shader_int64\n\n", "    counts: mut buffer[atomic[short]]\n"))
               .contains("an atomic holds a `uint`, an `int`, a `float`, a `ulong` or a `long`"));
 }

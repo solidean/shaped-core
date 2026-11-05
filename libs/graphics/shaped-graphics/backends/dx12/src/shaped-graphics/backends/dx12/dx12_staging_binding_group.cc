@@ -55,8 +55,9 @@ namespace
 
 dx12_staging_binding_group::dx12_staging_binding_group(dx12_context& ctx,
                                                        dx12_binding_group_layout_handle layout,
-                                                       cc::vector<int> descriptor_offsets)
-  : sg::staging_binding_group(layout, cc::move(descriptor_offsets)), // base first, so the move below is safe
+                                                       cc::vector<int> descriptor_offsets,
+                                                       int unbounded_capacity)
+  : sg::staging_binding_group(layout, cc::move(descriptor_offsets), unbounded_capacity), // base first: moved below
     _ctx(ctx),
     _dx_layout(cc::move(layout))
 {
@@ -65,7 +66,8 @@ dx12_staging_binding_group::dx12_staging_binding_group(dx12_context& ctx,
 dx12_staging_binding_group::~dx12_staging_binding_group() = default;
 
 cc::result<dx12_staging_binding_group_handle> dx12_staging_binding_group::create(dx12_context& ctx,
-                                                                                 dx12_binding_group_layout_handle layout)
+                                                                                 dx12_binding_group_layout_handle layout,
+                                                                                 int unbounded_capacity)
 {
     CC_ASSERT(layout != nullptr, "staging_binding_group requires a binding_group_layout");
 
@@ -79,17 +81,27 @@ cc::result<dx12_staging_binding_group_handle> dx12_staging_binding_group::create
             return cc::error("staging_binding_group: dynamic sampler arrays are not supported yet");
 
     auto offsets = descriptor_offsets_of(*layout);
-    auto group = std::make_shared<dx12_staging_binding_group>(ctx, cc::move(layout), cc::move(offsets));
+    auto group
+        = std::make_shared<dx12_staging_binding_group>(ctx, cc::move(layout), cc::move(offsets), unbounded_capacity);
     auto r = group->initialize();
     CC_RETURN_IF_ERROR(r);
     return dx12_staging_binding_group_handle(cc::move(group));
+}
+
+int dx12_staging_binding_group::view_descriptor_count() const
+{
+    auto count = _dx_layout->descriptor_count;
+    for (auto const& s : _dx_layout->view_slots)
+        if (s.binding.is_unbounded())
+            count += element_count(s.binding);
+    return count;
 }
 
 cc::result<cc::unit> dx12_staging_binding_group::initialize()
 {
     auto* const device = _ctx._device.Get();
 
-    int const view_count = _dx_layout->descriptor_count;
+    int const view_count = view_descriptor_count();
     int const sampler_count = _dx_layout->sampler_descriptor_count;
 
     if (view_count > 0)
@@ -112,7 +124,7 @@ cc::result<cc::unit> dx12_staging_binding_group::initialize()
     // Every descriptor starts at its binding's empty value, so a snapshot is copyable and bindable from the
     // first one — an unwritten descriptor in a bound table is a D3D12 validation error.
     for (auto const& s : _dx_layout->view_slots)
-        for (int e = 0; e < int(s.binding.count); ++e)
+        for (int e = 0; e < element_count(s.binding); ++e)
             create_null_view(device, s.binding, view_cpu_at(s.table_offset + e));
     for (auto const& s : _dx_layout->sampler_slots)
         create_null_view(device, s.binding, sampler_cpu_at(s.table_offset));
@@ -228,7 +240,7 @@ cc::result<sg::binding_group_handle> dx12_staging_binding_group::mint()
     };
 
     {
-        auto r = fill(_ctx._descriptor_heap, _view_heap, _dx_layout->descriptor_count,
+        auto r = fill(_ctx._descriptor_heap, _view_heap, view_descriptor_count(),
                       D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, _view_start, group->table, group->table_start);
         CC_RETURN_IF_ERROR(r);
     }
@@ -252,7 +264,7 @@ cc::result<sg::binding_group_handle> dx12_staging_binding_group::mint()
                                          .binding = binding,
                                          .bound_as = sg::view_class_of(s.binding),
                                          .elements = {}};
-            for (int e = 0; e < int(s.binding.count); ++e)
+            for (int e = 0; e < element_count(s.binding); ++e)
             {
                 auto const& res = _resources[s.table_offset + e];
                 ab.elements.push_back({.buffer = res.buffer, .texture = res.texture, .range = res.range});

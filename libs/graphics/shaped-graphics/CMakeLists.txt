@@ -351,7 +351,8 @@ if(SC_BUILD_TESTS)
             target_sources(shaped-graphics-test PRIVATE tests/backends/dx12-entry.cc tests/backends/dx12-rtv-record-time-test.cc)
         endif()
         if(Vulkan_FOUND)
-            target_sources(shaped-graphics-test PRIVATE tests/backends/vulkan-entry.cc)
+            target_sources(shaped-graphics-test PRIVATE tests/backends/vulkan-entry.cc
+                                                        tests/backends/vulkan-shared-atomics-test.cc)
         endif()
         if(APPLE AND TARGET metal-cpp)
             target_sources(shaped-graphics-test PRIVATE tests/backends/metal-entry.cc)
@@ -502,6 +503,7 @@ if(SC_BUILD_TESTS)
                 meshes.sgl:*
                 sixteen_bit.sgl:*
                 sixty_four_bit.sgl:*
+                sixty_four_bit_shared.sgl:*
                 float_atomics.sgl:*
                 option_formats.sgl:*
         )

@@ -38,6 +38,9 @@ feature_set checker::read_require(i32 file, ast::require_decl const& r, require_
         }
         auto const f = feature(index);
         result.set(f);
+        // CHK-511: every 64-bit atomic includes a ulong's min and max
+        if (f == feature::shader_int64_atomics)
+            result.set(feature::shader_int64_min_max_atomics);
         // CHK-265: a file's `require` states what the whole file may do, and a binding's what its listers need,
         // so neither is ever unused.
         if (scope == require_scope::body)
@@ -150,12 +153,13 @@ feature_set checker::features_of_type(type_id type) const
     case type_kind::array:
     case type_kind::buffer:
         return features_of_type(t.element);
-    // CHK-296: a 64-bit atomic needs its integer's feature and an atomic's
+    // CHK-296: a 64-bit atomic needs its integer's feature and an atomic's; a ulong's the min and max alone (CHK-511)
     case type_kind::atomic:
     {
         auto result = features_of_type(t.element);
         if (auto const* const record = out.builtin_type_of(t.element); record != nullptr && is_64_bit(record->leaf_kind))
-            result |= feature::shader_int64_atomics;
+            result |= record->leaf_kind == value_kind::scalar_ulong ? feature::shader_int64_min_max_atomics
+                                                                    : feature::shader_int64_atomics;
         return result;
     }
     case type_kind::structure:

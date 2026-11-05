@@ -41,6 +41,7 @@ HLSL writes `RaytracingAccelerationStructure`, MSL `instance_acceleration_struct
 ## The vocabulary
 
 * **`ray`** is `origin: pos3`, `direction: vec3`, `t_min: float = 0.0` and `t_max: float = 3.0e38`, in world space.
+  Its `time: float = 0.0` is where in the frame's interval it is cast, which a moving instance is placed at (EVAL-130); a static scene ignores it.
 * **`ray_flags`** is DXR's `RAY_FLAG_*` without the prefix, a builtin `@bitflags` enum (CHK-321).
   Flags combine with `|`, intersect with `&`, and `flags.has(f)` asks whether every flag of `f` is set.
   They are `none`, `force_opaque`, `force_non_opaque`, `accept_first_hit_and_end_search`, `skip_closest_hit`,
@@ -395,6 +396,11 @@ An intersection's report is `ReportHit`, and a procedural record's shaders take 
 
 **webgpu** traces inline through the emulated form, and has no pipeline: WebGPU has neither binding indexing nor function pointers, which a table needs.
 A pipeline there waits for a polyfill, which the [incubator](incubator/raytracing-futures.md) sketches.
+
+**Motion blur** is a property of a TLAS's instances, which sg builds: an instance may move from one transform at time 0 to another at time 1.
+The emulated trace places it at the ray's `time` (EVAL-130), so webgpu and a test on the interpreter see motion.
+DXR has none, and vulkan's `VK_NV_ray_tracing_motion_blur` reaches a pipeline's trace alone, never a ray query, so neither native trace takes the time yet.
+sg refuses a moving instance where the context has no `ray_tracing_motion_blur`, which only webgpu answers today.
 
 **metal** runs a pipeline as a kernel that intersects, then calls a miss or a closest hit through sg's tables (EMIT-139, CHK-345).
 

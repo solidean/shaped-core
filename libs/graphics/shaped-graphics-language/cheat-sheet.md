@@ -566,6 +566,7 @@ let h = scene.world.trace(r)                             // -> triangle_hit; h.i
 let h = scene.world.trace(r, cutout)                     // cutout: (triangle_candidate) -> hit_decision, a name or a lambda
 let h = scene.world.trace(r, flags = ray_flags.force_opaque, mask = 0x01)
 let h = scene.world.trace(r, cutout, flags = ray_flags.force_omm_2_state)  // micromap unknowns take their guess, never asking cutout
+let r = ray(origin = o, direction = d, time = 0.5)       // a moving instance stands where `time` puts it, 0 to 1 (EVAL-130); emulated trace only
 let p = spheres.trace(r, sphere, cutout_sphere)          // .procedural: (procedural_box) -> report[A], then the any hit
 let m = both.trace(r, any_hit = a, intersection = s, procedural_any_hit = b)   // .mixed -> mixed_hit[A]: m.kind, m.triangle(), m.procedural()
 is_occluded(scene.world, r)                              // the shadow ray
@@ -824,7 +825,10 @@ ops[i](mut v)                                            // raygen, miss, closes
   `as` converts within a width or within a family: `x as long as double`, never `int as double` in one step.
   A 64-bit scalar or two-vector crosses a stage link flat on vulkan alone (CHK-454, EMIT-196).
   None sits in an `@inline` binding, and a constant block holds no `long3` / `double4` (CHK-453); a buffer does.
-  `atomic[ulong]` / `atomic[long]` in a `mut buffer` take `require shader_int64_atomics` (dx12 SM 6.6, vulkan); none in workgroup memory yet.
+  `atomic[ulong]` / `atomic[long]` in a `mut buffer` take `require shader_int64_atomics` (dx12 SM 6.6, vulkan).
+  In workgroup memory they also take `shader_shared_int64_atomics` (CHK-510), which an Arc B580 lacks and an AMD Radeon iGPU has.
+  A ulong's `min` and `max` alone take `shader_int64_min_max_atomics`, which `shader_int64_atomics` grants too and Metal has (CHK-511);
+  MSL's give nothing back, so there they stand as statements (EMIT-218).
   **No layout is guaranteed without an annotation** (EMIT-116): the compiler may reorder members, so the host goes through the generated struct, never through offsets it assumed.
 - **A warning never fails `compile_to_text`, and only a text carries one.** A failed compile's error holds its errors alone.
   slib's SGL edge logs each warning under `slib`, and `sgl emit` prints them to stderr beside the text.

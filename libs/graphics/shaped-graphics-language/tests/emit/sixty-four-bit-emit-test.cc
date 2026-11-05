@@ -160,3 +160,59 @@ TEST("sgl emit - a long crosses a stage link on vulkan alone, since neither DXIL
         CHECK(refused.error().contains("carries a 64-bit value between stages")).dump("error", refused.error());
     }
 }
+
+TEST("sgl emit - a workgroup's 64-bit atomics are groupshared in HLSL, and no other target writes them (EMIT-218)")
+{
+    constexpr auto source = "require shader_int64, shader_int64_atomics, shader_shared_int64_atomics\n"
+                            "\n"
+                            "binding work:\n"
+                            "    sums: mut buffer[ulong]\n"
+                            "\n"
+                            "@workgroup binding local:\n"
+                            "    total: atomic[ulong]\n"
+                            "\n"
+                            "@compute(64) fun cs(@thread_id id: int3){work, local}:\n"
+                            "    local.total.add(id.x as uint as ulong)\n"
+                            "    workgroup_barrier()\n"
+                            "    work.sums[id.x] = local.total.load()\n";
+    auto const text_for
+        = [&](target t) { return sgl::compile_to_text({.source = source, .entry_point = "cs", .target = t}); };
+    for (auto const t : {target::hlsl_dx12, target::hlsl_vulkan})
+    {
+        auto const hlsl = text_for(t);
+        REQUIRE(hlsl.has_value()).dump("error", hlsl.has_error() ? hlsl.error() : cc::string());
+        CHECK(hlsl.value().text.contains("groupshared uint64_t")).dump("text", hlsl.value().text);
+        CHECK(hlsl.value().text.contains("InterlockedAdd(")).dump("text", hlsl.value().text);
+    }
+    for (auto const t : {target::wgsl, target::msl})
+        CHECK(text_for(t).has_error());
+}
+
+TEST("sgl emit - MSL writes a buffer's ulong min and max as statements, and refuses one whose value is read (EMIT-218)")
+{
+    constexpr auto source = "require shader_int64, shader_int64_min_max_atomics\n"
+                            "\n"
+                            "binding work:\n"
+                            "    top: mut buffer[atomic[ulong]]\n"
+                            "    sums: mut buffer[ulong]\n"
+                            "\n"
+                            "@compute(64) fun standing(@thread_id id: int3){work}:\n"
+                            "    work.top[0].max(id.x as uint as ulong)\n"
+                            "    work.top[1].min(id.x as uint as ulong)\n"
+                            "\n"
+                            "@compute(64) fun reading(@thread_id id: int3){work}:\n"
+                            "    work.sums[id.x] = work.top[0].max(id.x as uint as ulong)\n";
+    auto const text_for = [&](cc::string_view entry, target t)
+    { return sgl::compile_to_text({.source = source, .entry_point = entry, .target = t}); };
+    auto const standing = text_for("standing", target::msl);
+    REQUIRE(standing.has_value()).dump("error", standing.has_error() ? standing.error() : cc::string());
+    CHECK(standing.value().text.contains("atomic_ulong")).dump("text", standing.value().text);
+    CHECK(standing.value().text.contains("atomic_max_explicit(&")).dump("text", standing.value().text);
+    CHECK(standing.value().text.contains("atomic_min_explicit(&")).dump("text", standing.value().text);
+    auto const reading = text_for("reading", target::msl);
+    REQUIRE(reading.has_error());
+    CHECK(reading.error().contains("which Metal's does not give")).dump("error", reading.error());
+    // HLSL's Interlocked* hand the value before back, so both stand there
+    for (auto const entry : {cc::string_view("standing"), cc::string_view("reading")})
+        CHECK(text_for(entry, target::hlsl_vulkan).has_value());
+}

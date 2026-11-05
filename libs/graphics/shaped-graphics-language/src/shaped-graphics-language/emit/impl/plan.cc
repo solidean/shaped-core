@@ -837,11 +837,11 @@ cc::string_view sgl::emit::impl::atomic_text(plan const& p, check::type_id type)
     if (element == builtins::k_float && p.native_float_atomics)
         return p.which == target::msl ? "atomic_float" : "float";
     auto const is_signed = element == builtins::k_int;
-    // a 64-bit atomic is no target's but HLSL's (EMIT-192)
+    // a 64-bit atomic is HLSL's, and a ulong's MSL's for its min and max (EMIT-192, EMIT-218)
     if (element == builtins::k_long)
-        return "int64_t";
+        return p.which == target::msl ? "atomic_long" : "int64_t";
     if (element == builtins::k_ulong)
-        return "uint64_t";
+        return p.which == target::msl ? "atomic_ulong" : "uint64_t";
     switch (p.which)
     {
     case target::hlsl_dx12:

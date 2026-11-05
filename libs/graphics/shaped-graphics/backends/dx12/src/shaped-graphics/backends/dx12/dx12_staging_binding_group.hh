@@ -26,13 +26,15 @@ class sg::backend::dx12::dx12_staging_binding_group final : public sg::staging_b
 {
 public:
     [[nodiscard]] static cc::result<dx12_staging_binding_group_handle> create(dx12_context& ctx,
-                                                                              dx12_binding_group_layout_handle layout);
+                                                                              dx12_binding_group_layout_handle layout,
+                                                                              int unbounded_capacity);
 
     /// `descriptor_offsets` is the base's slot map — see staging_binding_group's constructor.
     /// Only `create` builds one correctly; it is not a public entry point.
     dx12_staging_binding_group(dx12_context& ctx,
                                dx12_binding_group_layout_handle layout,
-                               cc::vector<int> descriptor_offsets);
+                               cc::vector<int> descriptor_offsets,
+                               int unbounded_capacity);
     ~dx12_staging_binding_group() override;
 
 protected:
@@ -54,6 +56,9 @@ private:
     };
 
     [[nodiscard]] cc::result<cc::unit> initialize();
+
+    /// The view table's size: the layout's descriptors, and the unbounded binding's elements at its tail.
+    [[nodiscard]] int view_descriptor_count() const;
 
     [[nodiscard]] D3D12_CPU_DESCRIPTOR_HANDLE view_cpu_at(int index) const
     {

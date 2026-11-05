@@ -162,6 +162,9 @@ bool metal_context::supports(sg::feature f) const
     case sg::feature::view_instancing:
         // vertex amplification would grant it, and is not wired up yet
         return false;
+    case sg::feature::ray_tracing_motion_blur:
+        // Metal's motion acceleration structures are not wired up yet
+        return false;
     case sg::feature::vertex_pipeline_stores:
         // a vertex function writes a device buffer on every Apple GPU
         return true;
@@ -198,8 +201,12 @@ bool metal_context::supports(sg::feature f) const
         return true;
     case sg::feature::shader_f64:
     case sg::feature::shader_int64_atomics:
-        // MSL has no double, and its 64-bit atomics are a ulong's min and max alone.
+    case sg::feature::shader_shared_int64_atomics:
+        // MSL has no double, and its 64-bit atomics are a buffer's ulong min and max alone.
         return false;
+    case sg::feature::shader_int64_min_max_atomics:
+        // MSL 3.1's atomic_ulong min and max, which Apple's feature set tables give from Apple8; not run on hardware yet
+        return _device != nullptr && _device->supportsFamily(MTL::GPUFamilyApple8);
     case sg::feature::unbounded_binding_arrays:
         // an argument buffer would hold one, which this backend does not lay out yet
         return false;
@@ -1077,8 +1084,12 @@ cc::result<sg::binding_group_handle> metal_context::try_create_binding_group(bin
 }
 
 cc::result<sg::staging_binding_group_handle> metal_context::try_create_staging_binding_group(binding_group_layout_handle layout,
+                                                                                             int unbounded_capacity,
                                                                                              lifetime_scope scope)
 {
+    // metal grants no unbounded binding arrays yet, so no layout it made has one
+    if (unbounded_capacity != 0)
+        return cc::error("staging_binding_group: metal has no unbounded binding arrays yet");
     return create_metal_staging_binding_group(cc::move(layout), scope);
 }
 } // namespace sg::backend::metal

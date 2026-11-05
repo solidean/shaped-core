@@ -452,6 +452,53 @@ ASYNC_INVOCABLE_TEST("sg webgpu - builds lay the pool out as the ray-query polyf
     }
 }
 
+ASYNC_INVOCABLE_TEST("sg webgpu - a moving instance's TLAS takes 10 units an instance, and its box holds the sweep",
+                     (webgpu::webgpu_context_handle const& handle))
+{
+    auto& ctx = *handle;
+    REQUIRE(ctx.supports(sg::feature::ray_tracing_motion_blur));
+
+    float const vertices[] = {0, 0, 0, 1, 0, 0, 0, 1, 0};
+    sg::blas_triangles const triangles[] = {{.vertices = build_input(ctx, vertices), .vertex_count = 3}};
+    auto cmd = ctx.create_command_list();
+    auto const blas = cmd->raytracing.build_blas(triangles);
+
+    // instance 0 moves from x = 0 to x = 10 over the frame, and instance 1 stands at y = 50
+    auto moving = sg::tlas_instance{.blas = blas, .instance_id = 1};
+    moving.transform_at_end = cc::fixed_array<float, 12>{1, 0, 0, 10, 0, 1, 0, 0, 0, 0, 1, 0};
+    auto const still
+        = sg::tlas_instance{.blas = blas, .transform = {1, 0, 0, 0, 0, 1, 0, 50, 0, 0, 1, 0}, .instance_id = 2};
+    sg::tlas_instance const instances[] = {moving, still};
+    auto const tlas = cmd->raytracing.build_tlas(instances);
+    auto const future = static_cast<webgpu::webgpu_command_list&>(*cmd).download_acceleration_pool();
+    ctx.submit_command_list(cc::move(cmd));
+
+    auto const bytes = co_await future.bytes();
+    auto const pool = pool_reader{.bytes = bytes.span()};
+    auto const region = static_cast<webgpu::webgpu_tlas const&>(*tlas).unit();
+    // the header's kinds say triangles and motion, and the instances stride by 10
+    CHECK(pool.word(region, 3) == (1u | 4u));
+    auto const first = pool.word(region, 1);
+    CHECK(((pool.word(first + 6, 2) >> 24) & (1u << 4)) != 0);
+    CHECK(((pool.word(first + 10 + 6, 2) >> 24) & (1u << 4)) == 0);
+    CHECK(pool.word(first + 10 + 6, 1) == 2u);
+    auto mismatches = 0;
+    for (auto k = 0; k < 12; ++k)
+    {
+        if (pool.real(first + 7 + u32(k / 4), k % 4) != moving.transform_at_end.value()[k])
+            ++mismatches;
+        if (pool.real(first + 10 + 7 + u32(k / 4), k % 4) != still.transform[k])
+            ++mismatches;
+    }
+    CHECK(mismatches == 0);
+
+    // the root holds the moving triangle at both ends, x from 0 to 11, and the still one at y = 50
+    auto const root = pool.node_box(region, 0);
+    CHECK(root.lo.x <= 0.0f);
+    CHECK(root.hi.x >= 11.0f);
+    CHECK(root.hi.y >= 51.0f);
+}
+
 ASYNC_INVOCABLE_TEST("sg webgpu - a grown pool keeps every region, the ones an open list wrote included",
                      (webgpu::webgpu_context_handle const& handle))
 {

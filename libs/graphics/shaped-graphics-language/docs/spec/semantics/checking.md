@@ -1125,8 +1125,10 @@ A `require` in a test's body that nothing in it uses is `unused-require`, and a 
 ## Atomics
 
 * **CHK-296** `atomic[T]` is an atomic of `uint`, `int`, `float`, `ulong` or `long`, and of any other `T` `wrong-kind-of-name`.
-  A 64-bit one needs `shader_int64_atomics` beside `shader_int64`, and stands in a `mut buffer` alone.
-  One in workgroup memory is `unsupported-yet`, since a device that has a buffer's 64-bit atomics may lack those.
+  A 64-bit one needs `shader_int64_atomics` beside `shader_int64`, but a ulong's `min` and `max` (CHK-511).
+* **CHK-510** A 64-bit atomic in workgroup memory needs `shader_shared_int64_atomics` beside `shader_int64_atomics`, since a device that has a buffer's may lack those.
+* **CHK-511** `atomic[ulong]` itself, and its `min` and `max`, need `shader_int64_min_max_atomics`, which `shader_int64_atomics` grants too.
+  It is the one 64-bit atomic Metal has, in a buffer alone; every other 64-bit atomic operation needs `shader_int64_atomics`.
   It is the element of a `mut buffer` or a member of a `@workgroup` binding, arrays of them included; in a read-only buffer or a constant block it is `wrong-kind-of-name`.
   Its builtins are `@stages(.pixel, .compute, .raygen, .miss, .closest_hit, .callable)`.
 * **CHK-404** A traversal's decision writes no memory through a binding ([why](why/checking.md#chk-404)).
@@ -1771,7 +1773,7 @@ A diagnostic of this pass has a kind, a file, a byte span in that file, and a de
 | `non-exhaustive-case` | CHK-160 |
 | `duplicate-case-pattern` | CHK-161 |
 | `missing-value-in-arm` | CHK-168 |
-| `needs-feature` | CHK-201, CHK-320, CHK-382, CHK-368, CHK-372, CHK-451 |
+| `needs-feature` | CHK-201, CHK-320, CHK-382, CHK-368, CHK-372, CHK-451, CHK-510, CHK-511 |
 | `unknown-feature` | CHK-258 |
 | `feature-not-declared` | CHK-264, CHK-322, CHK-382 |
 | `unused-require` | CHK-265 |

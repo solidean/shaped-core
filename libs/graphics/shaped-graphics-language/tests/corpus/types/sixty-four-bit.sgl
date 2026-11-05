@@ -106,3 +106,19 @@ binding tallies:
     let before = tallies.totals[0].add(v)
     tallies.totals[id.x].max(before + v)
     tallies.lows[0].min(-(before as long))
+
+// a 64-bit atomic in workgroup memory, under a feature of its own (CHK-510)
+require shader_shared_int64_atomics
+
+@workgroup binding wide_local:
+    total: atomic[ulong]
+    low: atomic[long]
+
+test:
+    wide_local.total.store(1u64 << 40)
+    wide_local.total.add(5u64) == 1'099'511'627'776u64
+    wide_local.total.max(1u64 << 50) == 1'099'511'627'781u64
+    wide_local.total.load() == 1'125'899'906'842'624u64
+    wide_local.low.store(-3i64)
+    wide_local.low.min(-9'000'000'000i64) == -3i64
+    wide_local.low.load() == -9'000'000'000i64
