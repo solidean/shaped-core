@@ -9,11 +9,11 @@
 #include <clean-core/platform/environment.hh>
 #include <clean-core/platform/process_metrics.hh>
 #include <clean-core/platform/resource_limits.hh>
-#include <clean-core/string/from_string.hh>
 #include <clean-core/record/crash_dump.hh>
 #include <clean-core/record/quantity_format.hh>
 #include <clean-core/record/stat.hh>
 #include <clean-core/streams/file_stream.hh>
+#include <clean-core/string/from_string.hh>
 #include <clean-core/string/print.hh>
 #include <clean-core/string/string.hh>
 #include <clean-core/string/string_view.hh>

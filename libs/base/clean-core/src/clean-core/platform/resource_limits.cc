@@ -1,11 +1,11 @@
+#include <clean-core/common/assertf.hh>
 #include <clean-core/common/macros.hh> // CC_OS_WINDOWS
 #include <clean-core/common/utility.hh>
 #include <clean-core/platform/impl/cpuid.hh>
 #include <clean-core/platform/impl/text_file.hh>
-#include <clean-core/platform/resource_limits.hh>
-#include <clean-core/common/assertf.hh>
 #include <clean-core/platform/leak_annotations.hh>
 #include <clean-core/platform/process_metrics.hh>
+#include <clean-core/platform/resource_limits.hh>
 #include <clean-core/platform/system_info.hh>
 #include <clean-core/string/from_string.hh>
 #include <clean-core/thread/atomic.hh>
@@ -324,7 +324,8 @@ void cc::cap_process_memory(i64 bytes)
             {
                 auto const cap = g_memory_cap.load(cc::memory_order_relaxed);
                 auto const used = watched_bytes();
-                CC_ASSERTF_ALWAYS(used < cap, "memory cap: the process holds {} bytes, past its cap of {} (cc::cap_process_memory)",
+                CC_ASSERTF_ALWAYS(used < cap,
+                                  "memory cap: the process holds {} bytes, past its cap of {} (cc::cap_process_memory)",
                                   used, cap);
                 cc::this_thread_sleep_secs(0.1);
             }
