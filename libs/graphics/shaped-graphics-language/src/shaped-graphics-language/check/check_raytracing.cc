@@ -208,6 +208,16 @@ type_id checker::check_pipeline_trace(function_scope& scope, ast::expr_id id, as
             is_sound = false;
         }
     }
+    // CHK-434: a hit object is regrouped by `h.reorder(…)`, between its trace and its invocation
+    if (ray.kind == ray_trace_kind::hit_object && (ast::is_valid(reorder) || ast::is_valid(reorder_bits)))
+    {
+        report(diagnostic_kind::no_matching_overload, file,
+               span_of(file, ast::is_valid(reorder) ? reorder : reorder_bits),
+               "a trace_hit is regrouped by its hit object's `h.reorder()` or `h.reorder(hint, bits)`");
+        reorder = ast::expr_id::none;
+        reorder_bits = ast::expr_id::none;
+        is_sound = false;
+    }
     // CHK-433: `reorder` is a constant bool, the hit alone, or a uint hint whose low `reorder_bits` bits join it
     if (ast::is_valid(reorder))
     {
@@ -300,6 +310,67 @@ type_id checker::check_pipeline_trace(function_scope& scope, ast::expr_id id, as
     ray.call = id;
     ray.caller = scope.function;
     out.ray_traces.push_back(ray);
+    return ray.kind == ray_trace_kind::hit_object ? type_of_builtin("hit_object", file, where)
+                                                  : checked_module::void_type;
+}
+
+type_id checker::check_hit_invoke(function_scope& scope, ast::expr_id id, ast::call const& call)
+{
+    auto const file = scope.file;
+    auto const& ast = ast_of(file);
+    auto const& member = ast.at(call.callee).node.as<ast::member>();
+    auto const arguments = ast.at(call.arguments);
+
+    // CHK-434: the hit object of a let a trace_hit gave, so the payload is known to be its ray type's
+    auto const* const hit = [&]() -> hit_let const*
+    {
+        auto const* const n = ast.at(member.object).node.try_as<ast::name>();
+        auto const* const local = n == nullptr ? nullptr : scope.find_local(text_of(file, n->where));
+        if (local == nullptr || local->where.kind != target_kind::local)
+            return nullptr;
+        for (auto const& h : hit_lets)
+            if (h.file == file && h.statement == local->where.index)
+                return &h;
+        return nullptr;
+    }();
+    if (hit == nullptr)
+    {
+        (void)check_arguments(scope, call.arguments, false);
+        unsupported(file, span_of(file, member.object), "an invocation of a hit object no `let h = trace_hit(…)` holds");
+        return checked_module::error_type;
+    }
+    if (arguments.size() != 1 || !arguments[0].name.empty())
+    {
+        (void)check_arguments(scope, call.arguments, false);
+        report(diagnostic_kind::no_matching_overload, file, span_of(file, id),
+               "a hit object is invoked with the payload alone, as the caller's place: `h.invoke(mut p)`");
+        return checked_module::error_type;
+    }
+
+    auto const payload = out.at(out.at(out.at(hit->set).type).members)[hit->ray].type;
+    auto const given = check_expr(scope, arguments[0].value);
+    if (!arguments[0].is_mut)
+    {
+        report(diagnostic_kind::no_matching_overload, file, span_of(file, arguments[0].form),
+               "the payload is the caller's place, handed over as `mut p`");
+        return checked_module::error_type;
+    }
+    if (given != checked_module::error_type && given != payload)
+    {
+        report(diagnostic_kind::type_mismatch, file, span_of(file, arguments[0].value),
+               cc::format("the hit object traced {}.{}, which carries {}, and this payload is {}",
+                          out.at(hit->set).name, out.at(out.at(out.at(hit->set).type).members)[hit->ray].name,
+                          out.name_of(payload), out.name_of(given)));
+        return checked_module::error_type;
+    }
+    if (given == checked_module::error_type || !judge_place(scope, arguments[0].value, "a payload"))
+        return checked_module::error_type;
+    out.ray_traces.push_back({.file = file,
+                              .call = id,
+                              .set = hit->set,
+                              .ray = hit->ray,
+                              .caller = scope.function,
+                              .kind = ray_trace_kind::invoke});
     return checked_module::void_type;
 }
 

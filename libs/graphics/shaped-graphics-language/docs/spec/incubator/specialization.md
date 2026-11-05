@@ -169,7 +169,8 @@ sg reports the feature on dx12 where the Agility SDK's runtime gives Shader Mode
 A GPU test traces through a reordering raygen on dx12, really reordering, and through its fallback on vulkan.
 The second half is a compiler construct rather than a text type, since only the compiler knows a ray type's table indices.
 `trace(…, reorder = true)`, or `reorder = hint, reorder_bits = n`, traces into a hit object, regroups by it and invokes it on dx12 (CHK-433), and is the plain trace elsewhere.
-Left is a first-class `hit_object`, which lets a raygen inspect a hit before it runs its shaders.
+A first-class `hit_object` lets a raygen read a hit before it runs its shaders (CHK-434).
+It is gated on the feature rather than specialized: no other target can trace without running them, so the program writes the plain `trace` beside it.
 Under `.vulkan` it needs SPIR-V instructions of its own, since no DXC lowers SER to SPIR-V; neither the pinned 1.9.2602 nor the Vulkan SDK's does.
 
 **Opacity micromaps need no text body.**

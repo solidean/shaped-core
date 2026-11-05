@@ -193,6 +193,23 @@ ASYNC_INVOCABLE_TEST("sg - an SGL trace that reorders by its hit traces what it 
     CHECK((co_await first_wrong_cell(ctx, shaders::raytracing_pipeline::hit_reordered_path)) == "");
 }
 
+// `inspected_path` reads its hit object before invoking it, and marks a cell whose closest hit was handed anything else.
+ASYNC_INVOCABLE_TEST("sg - an SGL hit object says what its closest hit is then handed", (sg::context_handle const& ctx))
+{
+    REQUIRE(ctx != nullptr);
+    if (!sg_test::shaders_reach(*ctx))
+        SKIP("no compiler builds this binary's shaders into a format this context accepts");
+    if (!ctx->supports(sg::feature::raytracing_pipeline))
+        SKIP("this device has no ray-tracing pipelines");
+
+    auto const desc = co_await shaders::raytracing_pipeline::inspected_path.description(*ctx);
+    REQUIRE(desc.raygen_shaders.size() == 1);
+    auto const required = desc.raygen_shaders[0].required_features.value_or(sg::feature_set());
+    CHECK(required.has(sg::feature::shader_execution_reordering)
+          == ctx->supports(sg::feature::shader_execution_reordering));
+    CHECK((co_await first_wrong_cell(ctx, shaders::raytracing_pipeline::inspected_path)) == "");
+}
+
 ASYNC_INVOCABLE_TEST("sg - SGL atomics in a raygen, a closest hit and a miss count each stage's invocations exactly",
                      (sg::context_handle const& ctx))
 {
