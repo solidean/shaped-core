@@ -282,7 +282,8 @@ REC_TEST("record/hot - skip_idle leaves out a parked thread's samples, and they 
                         phase.wait(cv, [](int const& p) { return p == 2; }, [](int&) {});
                     });
                 phase.wait(cv, [](int const& p) { return p >= 1; }, [](int&) {});
-                busy_until_sampled(40);
+                CC_RECORD_MARK("busy");
+                burn_until_ticked(40);
                 phase.lock([](int& p) { p = 2; });
                 cv.notify_all();
                 parked.join();
@@ -309,6 +310,6 @@ REC_TEST("record/hot - skip_idle leaves out a parked thread's samples, and they 
 
 #if defined(_WIN32)
     // ntdll exports its wait calls by name, so the parked thread's samples are recognizable whatever else resolves.
-    CHECK(busy.idle_samples > 0);
+    CHECK(busy.idle_samples > 0).dump("all", all.to_string(40));
 #endif
 }

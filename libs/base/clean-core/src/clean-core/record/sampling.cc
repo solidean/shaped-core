@@ -69,6 +69,7 @@ cc::atomic<bool> g_stop = false;
 cc::atomic<u64> g_taken = 0;
 cc::atomic<u64> g_failed = 0;
 cc::atomic<u64> g_idle = 0;
+cc::atomic<u64> g_ticks = 0;
 
 /// The anchor plus the frames, filled while the target is suspended and written once it is not.
 struct sample
@@ -475,6 +476,7 @@ void sampler_main()
         // Inside the guard, with the `per_tick` it advances by: every target this loop knows about is Windows-only,
         // and off Windows the tick body does nothing to advance past.
         cursor += per_tick > 0 ? per_tick : 1;
+        g_ticks.fetch_add(1, cc::memory_order_relaxed);
 #endif
     }
 
@@ -530,6 +532,7 @@ void cc::rec::start_sampling(cc::rec::sampling_config const& cfg)
     g_taken.store(0, cc::memory_order_relaxed);
     g_failed.store(0, cc::memory_order_relaxed);
     g_idle.store(0, cc::memory_order_relaxed);
+    g_ticks.store(0, cc::memory_order_relaxed);
     g_stop.store(false, cc::memory_order_release);
     g_running.store(true, cc::memory_order_release);
 
@@ -573,5 +576,6 @@ cc::rec::sampling_stats cc::rec::sampling_statistics()
         .taken = g_taken.load(cc::memory_order_relaxed),
         .failed = g_failed.load(cc::memory_order_relaxed),
         .idle = g_idle.load(cc::memory_order_relaxed),
+        .ticks = g_ticks.load(cc::memory_order_relaxed),
     };
 }
