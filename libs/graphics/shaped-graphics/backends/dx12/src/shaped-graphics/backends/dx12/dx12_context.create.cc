@@ -10,8 +10,8 @@
 #include <clean-core/thread/atomic.hh>
 #include <clean-core/thread/mutex.hh>
 #include <shaped-graphics/backends/dx12/dx12_context.hh>
-#include <shaped-graphics/backends/dx12/dx12_runtime.hh>
 #include <shaped-graphics/backends/dx12/dx12_dred.hh>
+#include <shaped-graphics/backends/dx12/dx12_runtime.hh>
 
 // ID3D12Debug / ID3D12InfoQueue1, the debug-layer interfaces, live in the SDK-layers header, separate from d3d12.h.
 #include <d3d12sdklayers.h>

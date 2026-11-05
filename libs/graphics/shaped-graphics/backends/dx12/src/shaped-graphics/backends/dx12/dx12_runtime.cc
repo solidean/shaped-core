@@ -45,8 +45,8 @@ ComPtr<ID3D12DeviceFactory> make_agility_factory()
     }
     auto directory = agility_directory();
     ComPtr<ID3D12DeviceFactory> factory;
-    if (HRESULT hr = configuration->CreateDeviceFactory(D3D12_SDK_VERSION, directory.c_str_materialize(),
-                                                          IID_PPV_ARGS(&factory));
+    if (HRESULT hr
+        = configuration->CreateDeviceFactory(D3D12_SDK_VERSION, directory.c_str_materialize(), IID_PPV_ARGS(&factory));
         FAILED(hr))
     {
         CC_LOG_WARNING("the Agility SDK {} in {} did not load (hr=0x{:08X}), so dx12 runs on the system runtime",
@@ -66,7 +66,10 @@ ID3D12DeviceFactory* agility_factory()
 /// The factory's ALLOW_RETURNING_EXISTING_DEVICE gives a second device on a second call regardless, and every context of
 /// the process sharing one is what the backend's message routing rests on (dx12_context::set_message_callback).
 /// Held for the life of the process, and replaced once it reports removal, so a reset GPU gets a fresh device.
-HRESULT shared_agility_device(ID3D12DeviceFactory* factory, IUnknown* adapter, D3D_FEATURE_LEVEL level, REFIID riid,
+HRESULT shared_agility_device(ID3D12DeviceFactory* factory,
+                              IUnknown* adapter,
+                              D3D_FEATURE_LEVEL level,
+                              REFIID riid,
                               void** out)
 {
     ComPtr<IDXGIAdapter1> dxgi;
@@ -143,7 +146,8 @@ HRESULT sg::backend::dx12::get_d3d12_configuration(REFCLSID clsid, REFIID riid, 
 HRESULT sg::backend::dx12::check_feature_support(ID3D12Device* device, D3D12_FEATURE feature, void* data, UINT size)
 {
 #if SG_HAS_AGILITY
-    if (ComPtr<ID3D12Device16> device16; runs_agility_runtime() && SUCCEEDED(device->QueryInterface(IID_PPV_ARGS(&device16))))
+    if (ComPtr<ID3D12Device16> device16;
+        runs_agility_runtime() && SUCCEEDED(device->QueryInterface(IID_PPV_ARGS(&device16))))
         return device16->CheckFeatureSupport1(feature, data, size, D3D12_SDK_VERSION);
 #endif
     return device->CheckFeatureSupport(feature, data, size);

@@ -166,5 +166,6 @@ TEST("sg dx12 - devices come from the Agility SDK exactly where it was fetched")
     REQUIRE(SUCCEEDED(dx12::create_d3d12_device(nullptr, D3D_FEATURE_LEVEL_11_0, IID_PPV_ARGS(&device))));
     // the runtime that ships Shader Model 6.9 knows to answer for it, whatever the adapter's driver then supports
     auto shader_model = D3D12_FEATURE_DATA_SHADER_MODEL{.HighestShaderModel = D3D_SHADER_MODEL_6_9};
-    CHECK(SUCCEEDED(dx12::check_feature_support(device.Get(), D3D12_FEATURE_SHADER_MODEL, &shader_model, sizeof(shader_model))));
+    CHECK(SUCCEEDED(
+        dx12::check_feature_support(device.Get(), D3D12_FEATURE_SHADER_MODEL, &shader_model, sizeof(shader_model))));
 }
