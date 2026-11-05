@@ -256,6 +256,11 @@ fun graded(a: float) -> float:
 * **EVAL-95** A trace runs its emulated form, over the acceleration pool the driver binds, laid out as sg's webgpu backend lays it out.
   `acceleration_root(world)` is the root unit the driver gives that member, and `acceleration_pool_load(u)` is unit `u` of the pool.
   A run without a pool reads zero at every unit, so every trace misses; a unit past the end of a pool it has is a `program-error`.
+* **EVAL-130** A moving instance stands at the ray's `time`: its object-to-world map is its two transforms mixed element by element, `M0 + (M1 - M0) * s`.
+  `s` is the time held to 0 to 1, and a NaN time is 0; the ray reaches the instance through that map's inverse.
+  A static instance stands still at every time.
+* **EVAL-131** A hit or a candidate of a moving instance carries the maps at the ray's time, so `to_world` and `to_object` place a point where the ray met it.
+  A native motion trace mixes a matrix as EVAL-130 does, as vulkan's matrix motion and Metal's do; a GPU rounds the mix and the inverse in its own order.
 
 ## Textures
 
