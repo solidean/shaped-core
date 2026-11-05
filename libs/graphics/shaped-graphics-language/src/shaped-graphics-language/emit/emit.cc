@@ -197,6 +197,19 @@ sgl::emit::emitted_text sgl::emit::emit_entry_point(check::checked_module const&
             return result;
     }
 
+    // EMIT-195: a Metal buffer argument is a pointer and carries no length, which sg does not pass in yet
+    if (t == target::msl)
+        for (auto const& x : e.exprs)
+            if (x.node.is<check::flat_buffer_length>())
+            {
+                result.errors.push_back({.kind = error_kind::target_lacks_feature,
+                                         .symbol = e.function,
+                                         .detail = cc::format("{} reads a buffer's length, which a Metal buffer does "
+                                                              "not carry",
+                                                              e.name)});
+                return result;
+            }
+
     // EMIT-122: Metal has no geometry stage, and its tessellation is shaped otherwise: a compute kernel writes the factors
     if (t == target::msl
         && (e.features.has(check::feature::geometry_shader) || e.features.has(check::feature::tessellation_shader)))

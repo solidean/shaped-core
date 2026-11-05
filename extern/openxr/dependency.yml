@@ -1,0 +1,24 @@
+# Pin and license for the upstream fetched here.
+# fetch-openxr.py reads its pin from this file; dev.py scans the `pin_hash:` line to decide whether .install/ is current.
+
+upstreams:
+  - name: OpenXR loader
+    homepage: https://github.com/KhronosGroup/OpenXR-SDK
+    install: fetched
+    source: github-release
+    repo: https://github.com/KhronosGroup/OpenXR-SDK
+    track: github-releases
+    version: 1.1.65
+    tag: release-1.1.65
+    asset: OpenXR.Loader.1.1.65.nupkg
+    digest_algo: sha256
+    pin_hash: 05638c526f07ba3a5f1084bbc3308d654d5167f844ffa1e35515325cb72e0c34
+    # the prebuilt loader of the package is Windows' alone; Android's comes with the APK work
+    unavailable_on: [linux, macos]
+    license: Apache-2.0 OR MIT
+    license_files: [.install/LICENSE]
+    used_by: the xr-cube example, which talks to OpenXR directly until shaped-xr exists
+    notes: |
+      The Khronos loader, prebuilt: the headers and the x64 openxr_loader.dll with its import library, from the release's NuGet package.
+      The package carries no license text, so fetch-openxr.py takes LICENSE from the same tag of the repository.
+      The loader finds the active runtime through the registry (HKLM\SOFTWARE\Khronos\OpenXR\1), which the Meta Horizon Link app or SteamVR sets.

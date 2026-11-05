@@ -176,6 +176,10 @@ enum class sg::feature
     /// D3D12 grants it with a `ViewInstancingTier`, Vulkan with `multiview`; Metal's vertex amplification is not wired up
     /// yet, and WebGPU has no such thing.
     view_instancing,
+
+    /// A vertex, geometry or tessellation stage may write a storage buffer, which SGL's `print` and `assert` need there.
+    /// D3D12 and Metal grant it on every device, Vulkan with `vertexPipelineStoresAndAtomics`, and WebGPU on none.
+    vertex_pipeline_stores,
 };
 
 CC_FLAG_ENUM_INDEXED(sg, feature, cc::u32);
@@ -218,8 +222,9 @@ inline constexpr feature k_all_features[] = {
     feature::float_specials,
     feature::float_denormals,
     feature::view_instancing,
+    feature::vertex_pipeline_stores,
 };
-static_assert(isize(sizeof(k_all_features) / sizeof(k_all_features[0])) == isize(feature::view_instancing) + 1,
+static_assert(isize(sizeof(k_all_features) / sizeof(k_all_features[0])) == isize(feature::vertex_pipeline_stores) + 1,
               "k_all_features lists every feature");
 
 /// The enumerator's name, `ray_query`, which is also what SGL's `require` spells it as.
@@ -289,6 +294,8 @@ static_assert(isize(sizeof(k_all_features) / sizeof(k_all_features[0])) == isize
         return "float_denormals";
     case feature::view_instancing:
         return "view_instancing";
+    case feature::vertex_pipeline_stores:
+        return "vertex_pipeline_stores";
     }
     return "";
 }

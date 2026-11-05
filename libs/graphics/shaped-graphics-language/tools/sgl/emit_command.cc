@@ -88,9 +88,11 @@ COMMAND("emit")
         guards_undefined = sgl::check::undefined_guard::abort;
     else if (undefined == "report")
         guards_undefined = sgl::check::undefined_guard::report;
+    else if (undefined == "define")
+        guards_undefined = sgl::check::undefined_guard::define;
     else if (undefined != "none")
     {
-        cc::eprintln("sgl emit: unknown --undefined '{}' (one of none, abort, report)", undefined);
+        cc::eprintln("sgl emit: unknown --undefined '{}' (one of none, abort, report, define)", undefined);
         return exit_usage;
     }
 

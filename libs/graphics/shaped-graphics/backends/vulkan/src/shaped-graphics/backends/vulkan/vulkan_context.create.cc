@@ -949,6 +949,7 @@ cc::result<context_handle> create_vulkan_context(backend::vulkan::vulkan_config 
                      .fillModeNonSolid = supported.fillModeNonSolid,
                      .samplerAnisotropy = supported.samplerAnisotropy,
                      .textureCompressionBC = supported.textureCompressionBC,
+                     .vertexPipelineStoresAndAtomics = supported.vertexPipelineStoresAndAtomics,
                      .fragmentStoresAndAtomics = VK_TRUE,
                      .shaderStorageImageExtendedFormats = supported.shaderStorageImageExtendedFormats,
                      .shaderInt16 = shader_features.shader_int16},
@@ -1078,6 +1079,7 @@ cc::result<context_handle> create_vulkan_context(backend::vulkan::vulkan_config 
     ctx->_subgroups = shader_features.subgroups;
     ctx->_vertex_layer_output = shader_features.shader_output_layer == VK_TRUE;
     ctx->_view_instancing = shader_features.multiview == VK_TRUE;
+    ctx->_vertex_pipeline_stores = supported.vertexPipelineStoresAndAtomics == VK_TRUE;
     ctx->_float_atomic_add = float_atomic_add_supported;
     if (shader_features.subgroup_size_control == VK_TRUE)
         ctx->_subgroup_size_control = {
