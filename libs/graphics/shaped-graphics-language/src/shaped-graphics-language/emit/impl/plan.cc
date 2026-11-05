@@ -1320,8 +1320,8 @@ sgl::emit::impl::plan sgl::emit::impl::make_plan(check::checked_module const& m,
 {
     auto result = plan{.m = m, .e = e, .which = t};
     // dx12 and WebGPU have no float add, so there an `atomic[float]` stays a uint's bits whatever the device says.
-    // MSL has float atomics in threadgroup memory only from 4.1, past sg's floor of 4.0, so an entry point sharing one
-    // keeps every `atomic[float]` a uint's bits, the type being one whatever memory holds it (bindings.md, atomics).
+    // MSL has float atomics in threadgroup memory only from 4.1, past sg's floor of 4.0 (the spec's bindings file).
+    // So an entry point sharing one keeps every `atomic[float]` a uint's bits, the type being one whatever holds it.
     result.native_float_atomics
         = native_float_atomic_add && (t == target::hlsl_vulkan || (t == target::msl && !shares_float_atomic(m, e)));
     // The tree's names and the builtins' go on being taken where they are, since both outlive the plan.
