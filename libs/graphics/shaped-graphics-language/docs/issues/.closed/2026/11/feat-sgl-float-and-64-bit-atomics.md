@@ -11,5 +11,6 @@ resolution: fixed
 Done: `atomic[float]` on every target (bindings.md), and on 2026-11-05 `atomic[ulong]` and `atomic[long]` in a `mut buffer`, behind `shader_int64_atomics` (CHK-296).
 dx12 grants it through `Int64ShaderOps` on Shader Model 6.6 and vulkan through `shaderBufferInt64Atomics`; sg's compute test runs them on both.
 
-Left: 64-bit atomics in workgroup memory, which both APIs make optional, and an Intel Arc B580 lacks; [incubator/atomics.md](../../../../spec/incubator/atomics.md) has the row.
-Metal's ulong min and max alone would be a partial feature of their own.
+Later on 2026-11-05: workgroup memory's, behind `shader_shared_int64_atomics` (CHK-510), run on an AMD Radeon iGPU through vulkan, which an Intel Arc B580 lacks.
+And a ulong's min and max alone, behind `shader_int64_min_max_atomics` (CHK-511), which Metal writes (EMIT-218).
+Left: [feat-sgl-metal-ulong-min-max-atomics-on-hardware](../../../feat-sgl-metal-ulong-min-max-atomics-on-hardware.md), metal's on Apple hardware.

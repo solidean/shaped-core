@@ -167,7 +167,8 @@ sgl::emit::emitted_text sgl::emit::emit_entry_point(check::checked_module const&
             | check::feature::device_coherence | check::feature::image_atomics | check::feature::first_instance
             | check::feature::helper_lane_query | check::feature::vertex_layer_output | check::feature::view_instancing
             | check::feature::unbounded_binding_arrays | check::feature::shader_int64 | check::feature::shader_f64
-            | check::feature::shader_int64_atomics;
+            | check::feature::shader_int64_atomics | check::feature::shader_shared_int64_atomics
+            | check::feature::shader_int64_min_max_atomics;
         for (auto i = isize(0); i < check::k_feature_count; ++i)
             if (e.features.has(check::feature(i)) && never.has(check::feature(i)))
                 result.errors.push_back({.kind = error_kind::target_lacks_feature,
@@ -282,9 +283,10 @@ sgl::emit::emitted_text sgl::emit::emit_entry_point(check::checked_module const&
         return result;
     }
 
-    // EMIT-192: Metal has no double, and its 64-bit atomics are a ulong's min and max alone
+    // EMIT-192: Metal has no double, and its 64-bit atomics are a ulong's min and max alone, in a buffer
     if (t == target::msl)
-        for (auto const f : {check::feature::shader_f64, check::feature::shader_int64_atomics})
+        for (auto const f : {check::feature::shader_f64, check::feature::shader_int64_atomics,
+                             check::feature::shader_shared_int64_atomics})
             if (e.features.has(f))
             {
                 result.errors.push_back(
@@ -293,6 +295,31 @@ sgl::emit::emitted_text sgl::emit::emit_entry_point(check::checked_module const&
                      .detail = cc::format("{} needs {}, which Metal does not have", e.name, check::name_of(f))});
                 return result;
             }
+
+    // EMIT-218: MSL's ulong min and max give nothing back, so one whose value the program reads has no text
+    if (t == target::msl && e.features.has(check::feature::shader_int64_min_max_atomics))
+    {
+        auto standing = cc::vector<bool>::create_filled(e.exprs.size(), false);
+        for (auto const& st : e.stmts)
+            if (auto const* const eval = st.node.try_as<check::flat_eval>();
+                eval != nullptr && check::is_valid(eval->value))
+                standing[index_of(eval->value)] = true;
+        for (auto i = isize(0); i < e.exprs.size(); ++i)
+        {
+            auto const* const call = e.exprs[i].node.try_as<check::flat_call>();
+            auto const* const record = call != nullptr ? m.builtin_function(call->intrinsic) : nullptr;
+            if (record == nullptr || !record->is_atomic
+                || !record->features.has(check::feature::shader_int64_min_max_atomics) || standing[i])
+                continue;
+            result.errors.push_back({.kind = error_kind::target_lacks_feature,
+                                     .symbol = e.function,
+                                     .detail = cc::format("{} reads what an atomic ulong {} gave back, which Metal's "
+                                                          "does not "
+                                                          "give",
+                                                          e.name, record->name)});
+            return result;
+        }
+    }
 
     // EMIT-139: a stage that traces or stands in traversal agrees on the ray data with every shader it is linked with
     auto const uses_ray_data = !e.traced_rays.empty() || e.entry_stage == check::stage::any_hit

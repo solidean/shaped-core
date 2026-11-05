@@ -363,7 +363,10 @@ public:
         case sg::feature::shader_f64:
             return _shader_f64;
         case sg::feature::shader_int64_atomics:
+        case sg::feature::shader_int64_min_max_atomics:
             return _shader_int64_atomics;
+        case sg::feature::shader_shared_int64_atomics:
+            return _shader_shared_int64_atomics;
         case sg::feature::unbounded_binding_arrays:
             return _unbounded_binding_arrays;
         case sg::feature::subgroups:
@@ -965,6 +968,7 @@ public:
     bool _shader_int64 = false;
     bool _shader_f64 = false;
     bool _shader_int64_atomics = false;
+    bool _shader_shared_int64_atomics = false;
     /// `descriptorBindingVariableDescriptorCount`, enabled wherever the device has it.
     bool _unbounded_binding_arrays = false;
     bool _subgroups = false;

@@ -15,6 +15,11 @@ using namespace cc::primitive_defines;
 
 namespace shaders = sg::test::sgl_shaders;
 
+namespace sg_test
+{
+cc::shared_async<cc::unit> check_shared_sixty_four_bit_atomics(sg::context& ctx);
+}
+
 // The SGL fixture in tests/shaders/sgl/sixty_four_bit.sgl: long arithmetic that needs every one of its 64 bits, and
 // double arithmetic that keeps what a float rounds away.
 
@@ -193,4 +198,50 @@ ASYNC_INVOCABLE_TEST("sg - a long crosses from the vertex to the pixel stage fla
     REQUIRE(got.size() == 2);
     CHECK(got[0] == 0x09abcdefu);
     CHECK(got[1] == 0x12345678u);
+}
+
+/// tests/shaders/sgl/sixty_four_bit_shared.sgl on `ctx`, which must have shader_shared_int64_atomics: four
+/// workgroups each sum and take the minimum of 64 values in workgroup memory, and every result needs all 64 bits.
+cc::shared_async<cc::unit> sg_test::check_shared_sixty_four_bit_atomics(sg::context& ctx)
+{
+    auto const pipeline = co_await shaders::sixty_four_bit_shared::shared_sums.acquire_pipeline(ctx);
+    auto const layout = ctx.cached.acquire_binding_group_layout<shaders::sixty_four_bit_shared::shared_results>();
+    constexpr auto groups = 4;
+    auto const totals = ctx.persistent.create_buffer_from_data(
+        cc::vector<u64>::create_defaulted(groups), sg::buffer_usage::readwrite_buffer | sg::buffer_usage::copy_src);
+    auto const lows = ctx.persistent.create_buffer_from_data(
+        cc::vector<i64>::create_defaulted(groups), sg::buffer_usage::readwrite_buffer | sg::buffer_usage::copy_src);
+    auto cmd = ctx.create_command_list();
+    auto const group = ctx.transient.create_binding_group(
+        *cmd, layout,
+        shaders::sixty_four_bit_shared::shared_results{.totals = totals.as_readwrite_buffer(),
+                                                       .lows = lows.as_readwrite_buffer()});
+    cmd->compute.bind_pipeline(*pipeline);
+    cmd->compute.bind_group(0, *group);
+    cmd->compute.dispatch_threads(64 * groups);
+    auto const totals_back = cmd->download.data_from_buffer(totals);
+    auto const lows_back = cmd->download.data_from_buffer(lows);
+    ctx.submit_command_list(cc::move(cmd));
+    ctx.advance_epoch();
+
+    auto const got_totals = co_await totals_back.data();
+    auto const got_lows = co_await lows_back.data();
+    REQUIRE(got_totals.size() == groups);
+    REQUIRE(got_lows.size() == groups);
+    // 64 * 2^33 plus 0 + 1 + ... + 63, and -(2^40) - 63
+    for (auto g = 0; g < groups; ++g)
+    {
+        CHECK(got_totals[g] == (u64(64) << 33) + 2016u).context(cc::format("workgroup {}", g));
+        CHECK(got_lows[g] == -(i64(1) << 40) - 63).context(cc::format("workgroup {}", g));
+    }
+}
+
+ASYNC_INVOCABLE_TEST("sg - an SGL workgroup's 64-bit atomics keep all 64 bits (CHK-510)", (sg::context_handle const& ctx))
+{
+    REQUIRE(ctx != nullptr);
+    if (!sg_test::shaders_reach(*ctx))
+        SKIP("no compiler builds this binary's shaders into a format this context accepts");
+    if (!ctx->supports(sg::feature::shader_shared_int64_atomics))
+        SKIP("this device has no 64-bit atomics in workgroup memory");
+    co_await sg_test::check_shared_sixty_four_bit_atomics(*ctx);
 }

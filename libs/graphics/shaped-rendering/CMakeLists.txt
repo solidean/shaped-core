@@ -515,6 +515,23 @@ if(SC_BUILD_TESTS)
         )
     endif()
 
+    # SGL against the same three kernels written by hand in WGSL, timed on WebGPU.
+    # Each WGSL file declares the bindings SGL's port does, slot for slot, so one binding group serves both.
+    if(TARGET shaped-graphics-webgpu)
+        target_sources(shaped-rendering-test PRIVATE tests/bench/sgl-against-wgsl-benchmark.cc)
+        sc_add_shader_package(
+            TARGET     shaped-rendering-test
+            NAME       sr_bench_wgsl_shaders
+            NAMESPACE  sr_bench::wgsl
+            SOURCE_DIR tests/bench/shaders
+            LANGUAGE   wgsl
+            SHADERS
+                atrous_denoise.wgsl:compute:main_cs
+                svgf_atrous.wgsl:compute:atrous_cs
+                nn_conv.wgsl:compute:main_cs
+        )
+    endif()
+
     # slib imports dxcompiler.dll wherever DXC was fetched, so the binary does not start without it, and dxil.dll signs what it emits.
     # Staged here rather than left to the SDL3 block's $<TARGET_RUNTIME_DLLS>, which a build without SDL3 never runs.
     # The probes' shader package stages them itself where it exists, and a second staging is a configure error.

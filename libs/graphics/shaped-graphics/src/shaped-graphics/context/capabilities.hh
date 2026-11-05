@@ -197,7 +197,7 @@ enum class sg::feature
     /// A shader may update a 64-bit integer of a buffer atomically (SGL's `atomic[long]` in a `mut buffer`).
     /// D3D12 grants it with `Int64ShaderOps`, since Shader Model 6.6 makes raw and structured buffers' 64-bit atomics
     /// part of it; Vulkan grants it with `shaderBufferInt64Atomics`.
-    /// Workgroup memory's are optional on both, and SGL holds no 64-bit atomic there yet.
+    /// Workgroup memory's are optional on both, and are `shader_shared_int64_atomics`.
     /// Metal's 64-bit atomics are a ulong's min and max alone, and WebGPU has none.
     shader_int64_atomics,
 
@@ -206,6 +206,14 @@ enum class sg::feature
     /// D3D12 grants it at resource binding tier 3, Vulkan with `descriptorBindingVariableDescriptorCount`.
     /// Metal would reach it through an argument buffer, which is not wired up yet, and WebGPU has no binding arrays.
     unbounded_binding_arrays,
+
+    /// A shader may update a 64-bit integer of workgroup memory atomically (SGL's `atomic[long]` in a `@workgroup` binding).
+    /// D3D12 grants it with `AtomicInt64OnGroupSharedSupported`, Vulkan with `shaderSharedInt64Atomics`; both make it optional.
+    shader_shared_int64_atomics,
+
+    /// A shader may take the minimum or the maximum of a buffer's 64-bit unsigned integer atomically, and do nothing else to it.
+    /// Every device with `shader_int64_atomics` has it; Metal grants it alone, on the Apple GPUs that have 64-bit atomics.
+    shader_int64_min_max_atomics,
 
     /// A TLAS instance may move over the frame (`tlas_instance::transform_at_end`), and a trace places it at its ray's time.
     /// webgpu has it through the ray-query polyfill; DXR has no motion, and vulkan's VK_NV_ray_tracing_motion_blur
@@ -259,6 +267,8 @@ inline constexpr feature k_all_features[] = {
     feature::shader_f64,
     feature::shader_int64_atomics,
     feature::unbounded_binding_arrays,
+    feature::shader_shared_int64_atomics,
+    feature::shader_int64_min_max_atomics,
     feature::ray_tracing_motion_blur,
 };
 static_assert(isize(sizeof(k_all_features) / sizeof(k_all_features[0])) == isize(feature::ray_tracing_motion_blur) + 1,
@@ -343,6 +353,10 @@ static_assert(isize(sizeof(k_all_features) / sizeof(k_all_features[0])) == isize
         return "shader_int64_atomics";
     case feature::unbounded_binding_arrays:
         return "unbounded_binding_arrays";
+    case feature::shader_shared_int64_atomics:
+        return "shader_shared_int64_atomics";
+    case feature::shader_int64_min_max_atomics:
+        return "shader_int64_min_max_atomics";
     case feature::ray_tracing_motion_blur:
         return "ray_tracing_motion_blur";
     }
