@@ -47,8 +47,8 @@ enum class sgl::check::feature : sgl::u8
     /// A ray-generation stage reorders its invocations by a hint, which only dx12 on Shader Model 6.9 writes.
     /// `maybe_reorder` does nothing without it, so it is what `has` asks rather than what a `require` needs.
     shader_execution_reordering,
-    /// A dx12 ray query that sees the opacity micromaps its BLASes hold, which only Shader Model 6.9 writes.
-    /// No program names it: a dx12 compile for a device that has micromaps states it for every ray query (EMIT-184).
+    /// A ray query that sees the opacity micromaps its BLASes hold, which only Shader Model 6.9 writes.
+    /// No program names it: an HLSL compile for a device that has micromaps states it for every ray query (EMIT-184).
     opacity_micromap,
 };
 

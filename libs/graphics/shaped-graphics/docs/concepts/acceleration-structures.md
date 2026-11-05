@@ -99,7 +99,8 @@ The BLAS holds every micromap it was built from, the edge a TLAS has with its BL
   A geometry names its own counts, which default to the micromap's.
 - **The records are the APIs' own**: `micromap_descriptor` is the 8-byte record D3D12 and Vulkan both read, and states pack lowest bits first.
 - **Strict where the feature is absent**: `build_micromap`, and a geometry naming a micromap, assert without `sg::feature::opacity_micromap`, so a caller checks before baking.
-- **A ray query needs nothing on vulkan**; on dx12 SGL writes each `RayQuery` with the micromap flag where the device has them, which compiles it at Shader Model 6.9 (EMIT-184).
+- **A ray query sees them through its flag**: SGL writes each `RayQuery` with it where the device has micromaps, which compiles it at Shader Model 6.9 (EMIT-184).
+  vulkan would see them without it, but DXC takes a ray forced to 2 states (`ray_flags.force_omm_2_state`) only beside it.
   A ray-tracing pipeline is created with the micromap flag wherever micromaps are enabled, on either.
 
 **vulkan** builds them through `VK_EXT_opacity_micromap`, enabled wherever the device grants it.

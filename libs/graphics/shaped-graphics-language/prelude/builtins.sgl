@@ -3891,6 +3891,7 @@ struct exchange_result[T]:
     cull_non_opaque = 128
     skip_triangles = 256
     skip_procedural = 512
+    force_omm_2_state = 1024
 
 @builtin @pure @operator("|") fun combine_ray_flags(a: ray_flags, b: ray_flags) -> ray_flags
 @builtin @pure @operator("&") fun intersect_ray_flags(a: ray_flags, b: ray_flags) -> ray_flags

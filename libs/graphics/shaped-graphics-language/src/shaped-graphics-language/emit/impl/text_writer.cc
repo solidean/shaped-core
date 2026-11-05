@@ -1494,14 +1494,15 @@ struct writer
         auto const dimensions = array_dimensions(p, local.type);
         auto const* const type_record = p.m.builtin_type_of(local.type);
         auto const& flags = p.local_flags[index_of(id)];
+        // EMIT-184: forcing micromaps to 2 states is a name of Shader Model 6.9 alone, and the template only a hint
+        auto const sees_micromaps = p.e.features.has(check::feature::opacity_micromap);
         auto type = declares_only && d.language() == builtins::language::hlsl && type_record != nullptr
                          && type_record->hlsl_flagged != nullptr && flags.has_value()
-                      ? type_record->hlsl_flagged(flags.value())
+                      ? type_record->hlsl_flagged(sees_micromaps ? flags.value() : flags.value() & ~1024u)
                       : cc::string(type_text(p, d, local.type));
         // EMIT-184: a query of an entry point that states opacity micromaps sees them, which HLSL asks of each query
         if (declares_only && type_record != nullptr && type_record->hlsl_flagged != nullptr
-            && d.language() == builtins::language::hlsl && p.e.features.has(check::feature::opacity_micromap)
-            && type.ends_with(">"))
+            && d.language() == builtins::language::hlsl && sees_micromaps && type.ends_with(">"))
             type = cc::format("{}, RAYQUERY_FLAG_ALLOW_OPACITY_MICROMAPS>",
                               type.subview({.offset = 0, .size = type.size() - 1}));
         d.write_local(declaration, {.name = name,

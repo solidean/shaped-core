@@ -120,6 +120,22 @@ ASYNC_INVOCABLE_TEST("sr - a baked micromap decides the texels its cutoff decide
     CHECK(columns_hit(accepted) == "11111000");
 }
 
+ASYNC_INVOCABLE_TEST("sr - a ray forcing a baked micromap to 2 states takes the guesses, and asks nothing",
+                     (sg::context_handle const& ctx),
+                     exclusive("sg-reload-generation"))
+{
+    REQUIRE(ctx != nullptr);
+    (void)sr_test::shader_fixtures();
+    if (!ctx->supports(sg::feature::opacity_micromap))
+        SKIP("this device has no opacity micromaps");
+
+    // the edge's unknown cells guess by the texel at their centre: 3 is opaque and 4 transparent, whatever the decision
+    auto const rejected = co_await trace_baked(ctx, probes::rejecting_2_state_cs.acquire_pipeline(*ctx));
+    CHECK(columns_hit(rejected) == "11110000");
+    auto const accepted = co_await trace_baked(ctx, probes::accepting_2_state_cs.acquire_pipeline(*ctx));
+    CHECK(columns_hit(accepted) == "11110000");
+}
+
 TEST("sr - a triangle's micromap level gives it about one micro-triangle per texel it covers")
 {
     // half of a 64 x 64 texture is 2048 texels, which 4^6 = 4096 micro-triangles first reach

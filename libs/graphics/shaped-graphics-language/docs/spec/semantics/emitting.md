@@ -464,8 +464,10 @@ So `{float3; float}` is written with `packed_float3`: the `float` is at byte 12 
 * **EMIT-159** HLSL's `RayQuery` takes a trace's flags as its template where they are a constant, each by its `RAY_FLAG_` name, and `RAY_FLAG_NONE` where they are not.
   The template is ORed with the trace's own flags, so naming them there changes nothing but what a driver may specialize on.
   Forced opaque, the native form only steps the query to its end, since the target commits every candidate itself and none is left to decide.
-* **EMIT-184** A dx12 compile for a device with `opacity_micromap` writes every `RayQuery` with `RAYQUERY_FLAG_ALLOW_OPACITY_MICROMAPS`, so its traces see the micromaps their BLASes hold.
-  The entry point then states the feature, which no program names, and is compiled at Shader Model 6.9; vulkan sees micromaps with no flag at all.
+* **EMIT-184** An HLSL compile for a device with `opacity_micromap` writes every `RayQuery` with `RAYQUERY_FLAG_ALLOW_OPACITY_MICROMAPS`, so its traces see the micromaps their BLASes hold.
+  The entry point then states the feature, which no program names, and is compiled at Shader Model 6.9.
+  vulkan sees micromaps without the flag, but DXC takes a ray forced to 2 states only beside it, and the entry point declares `SPV_EXT_opacity_micromap`'s capability, which DXC leaves out.
+  `ray_flags.force_omm_2_state` is in a `RayQuery`'s template only there, since only 6.9 names it; elsewhere the template leaves it out, and the trace's flags still carry it.
 * **EMIT-136** HLSL writes a ray-tracing stage as a library export named by its kind, `[shader("closesthit")]` over `void`, whose payload is an `inout` parameter.
   A triangle closest hit or any hit takes `BuiltInTriangleIntersectionAttributes` too.
   An any hit's decision ends the stage: `ignore` is `IgnoreHit()`, `accept_and_end_search` `AcceptHitAndEndSearch()`, and `accept` a plain `return`.

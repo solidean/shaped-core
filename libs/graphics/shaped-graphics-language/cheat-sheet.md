@@ -534,6 +534,7 @@ binding scene:
 let h = scene.world.trace(r)                             // -> triangle_hit; h.is_hit, h.t, h.barycentrics, h.instance_id, …
 let h = scene.world.trace(r, cutout)                     // cutout: (triangle_candidate) -> hit_decision, a name or a lambda
 let h = scene.world.trace(r, flags = ray_flags.force_opaque, mask = 0x01)
+let h = scene.world.trace(r, cutout, flags = ray_flags.force_omm_2_state)  // micromap unknowns take their guess, never asking cutout
 let p = spheres.trace(r, sphere, cutout_sphere)          // .procedural: (procedural_box) -> report[A], then the any hit
 let m = both.trace(r, any_hit = a, intersection = s, procedural_any_hit = b)   // .mixed -> mixed_hit[A]: m.kind, m.triangle(), m.procedural()
 is_occluded(scene.world, r)                              // the shadow ray

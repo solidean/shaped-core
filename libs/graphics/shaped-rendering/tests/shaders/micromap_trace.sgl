@@ -23,3 +23,10 @@ fun store(id: int3, h: triangle_hit){probe}:
 // only what the micromap marks transparent is missed
 @compute(8, 8) fun accepting_cs(@thread_id id: int3){probe}:
     store(id, probe.world.trace(cell_ray(id), c => hit_decision.accept))
+
+// The same two, forcing the micromap to 2 states: an unknown micro-triangle takes its guess, so neither asks at all.
+@compute(8, 8) fun rejecting_2_state_cs(@thread_id id: int3){probe}:
+    store(id, probe.world.trace(cell_ray(id), c => hit_decision.ignore, flags = ray_flags.force_omm_2_state))
+
+@compute(8, 8) fun accepting_2_state_cs(@thread_id id: int3){probe}:
+    store(id, probe.world.trace(cell_ray(id), c => hit_decision.accept, flags = ray_flags.force_omm_2_state))
