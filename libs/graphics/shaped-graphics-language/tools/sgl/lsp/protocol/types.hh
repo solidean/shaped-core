@@ -82,6 +82,22 @@ enum class lsp::inlay_hint_kind : lsp::i32
     parameter = 2,
 };
 
+/// What an editor draws beside a completion, in the specification's numbering; a subset.
+enum class lsp::completion_item_kind : lsp::i32
+{
+    method = 2,
+    function = 3,
+    field = 5,
+    variable = 6,
+    property = 10,
+    enum_ = 13,
+    keyword = 14,
+    enum_member = 20,
+    constant = 21,
+    struct_ = 22,
+    type_parameter = 25,
+};
+
 namespace lsp
 {
 
@@ -212,6 +228,27 @@ struct lsp::code_action
     cc::vector<text_edit> edits;
 };
 
+/// The params of a request about one position of one document: hover, definition, completion.
+struct lsp::text_document_position_params
+{
+    cc::string uri;
+    lsp::position position;
+};
+
+/// A hover's contents, which are markdown.
+struct lsp::hover
+{
+    cc::string markdown;
+    cc::optional<lsp::range> range;
+};
+
+struct lsp::completion_item
+{
+    cc::string label;
+    completion_item_kind kind = completion_item_kind::variable;
+    cc::string detail;
+};
+
 struct lsp::log_message_params
 {
     message_type type = message_type::log;
@@ -233,6 +270,7 @@ namespace lsp
 [[nodiscard]] bool read(json::ref in, did_close_params& out);
 [[nodiscard]] bool read(json::ref in, inlay_hint_params& out);
 [[nodiscard]] bool read(json::ref in, code_action_params& out);
+[[nodiscard]] bool read(json::ref in, text_document_position_params& out);
 
 // writing
 void write_fields(json::writer& w, position const& v);
@@ -247,4 +285,6 @@ void write_fields(json::writer& w, semantic_tokens const& v);
 void write_fields(json::writer& w, inlay_hint const& v);
 void write_fields(json::writer& w, code_action const& v);
 void write_fields(json::writer& w, log_message_params const& v);
+void write_fields(json::writer& w, hover const& v);
+void write_fields(json::writer& w, completion_item const& v);
 } // namespace lsp

@@ -32,6 +32,18 @@ namespace sgl_lsp
 /// A quick fix per fix the checker suggests for a diagnostic of the document that touches `around`.
 [[nodiscard]] cc::vector<lsp::code_action> code_actions_of(analysis const& a, lsp::range around, lsp::position_encoding e);
 
+/// The declaration of the name at `at` as SGL writes it, with its doc comment; nothing where no resolved name is.
+[[nodiscard]] cc::optional<lsp::hover> hover_of(analysis const& a, lsp::position at, lsp::position_encoding e);
+
+/// Where the name at `at` is declared, a prelude file's `sgl-prelude:` document included; nothing where no declaration
+/// is, as for a swizzle.
+[[nodiscard]] cc::optional<lsp::location> definition_of(analysis const& a, lsp::position at, lsp::position_encoding e);
+
+/// What may be written at `at`, from `sgl::completions_at`.
+[[nodiscard]] cc::vector<lsp::completion_item> completions_of(analysis const& a,
+                                                              lsp::position at,
+                                                              lsp::position_encoding e);
+
 } // namespace sgl_lsp
 
 /// One test run of one analysis, and whether it was stopped before its end.

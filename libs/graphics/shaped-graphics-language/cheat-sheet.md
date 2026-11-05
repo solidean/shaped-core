@@ -118,6 +118,14 @@ sgl::unannotated_bindings(pf, ast, m, f)   // -> vector<unannotated_binding { na
                                            // left out: a pattern that is no name, a body the check never reached, the error type
 #include <shaped-graphics-language/driver/inferred_results.hh>
 sgl::inferred_results(pf, ast, m, f)       // -> vector<inferred_result { arrow, type, is_writable }>: each `=> value` without `->`
+#include <shaped-graphics-language/driver/references.hh>
+sgl::reference_at(files, m, f, offset)     // -> optional<reference { where, cls, declaring_file, declared, signature, doc }>
+                                           // a use or a declaration; an offset right AFTER a name still names it
+                                           // signature in SGL's words: `fun mix(a: float, b: float, t: float) -> float`, `let d : float`
+                                           // doc: the `///` lines above the declaration; declaring_file -1 for a swizzle or a length
+sgl::completions_at(files, m, f, offset)   // -> vector<completion { label, cls, detail }>, filtered by the word ending at offset
+                                           // after `x.`: x's members; else locals in scope, parameters, declarations, keywords
+                                           // `x.` that does not parse yet: x is read as a name; one entry per overloaded name
 ```
 
 ## Parsing a file
