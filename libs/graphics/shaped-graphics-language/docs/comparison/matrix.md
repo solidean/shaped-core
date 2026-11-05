@@ -434,4 +434,5 @@ Per row and column:
   - HLSL + chain: MSC manual performance notes
   - Slang: SLANG issues 11774, 13220, 13245, 14016
   - WGSL: NAGA `BoundsCheckPolicy`
-  - SGL: [readme.md](../../readme.md) "Performance", shaped-rendering `tests/bench/sgl-against-hlsl-benchmark.cc`, [perf-sgl-svgf-filter-two-percent](../issues/perf-sgl-svgf-filter-two-percent.md) (2026-11-05, Arc B580)
+  - SGL: [readme.md](../../readme.md) "Performance", shaped-rendering `tests/bench/sgl-against-hlsl-benchmark.cc` (2026-11-05, Arc B580)
+  - SGL, the gap on an RTX: [perf-sgl-svgf-filter-two-percent](../issues/perf-sgl-svgf-filter-two-percent.md)
