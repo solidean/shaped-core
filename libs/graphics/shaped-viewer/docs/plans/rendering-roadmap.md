@@ -21,6 +21,9 @@ Neither has landed; the items below are the way there, and [wavefront.md](../wav
 **The raster mode is meant to look good in its own right**, not only to stand in.
 Today it is unshadowed and reflects only the SH environment; a device without ray tracing sees exactly that, and the hybrid builds on it.
 
+**A second raster mode, `raster_bound`, is planned for devices without binding arrays**: WebGPU and phones first.
+It binds per material, shades forward, and approximates GI with probes traced through the polyfill — [raster-bound.md](raster-bound.md).
+
 ## Decided for the raster path and the hybrid
 
 - **Quality over cost for what is not opaque.**

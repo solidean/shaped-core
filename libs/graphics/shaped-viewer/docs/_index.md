@@ -18,6 +18,8 @@ shaped-viewer is built on [shaped-rendering](../../shaped-rendering/readme.md), 
   Built, and the default; the megakernel stays as the other integrator.
 - [plans/rendering-roadmap](plans/rendering-roadmap.md) — what is open after the wavefront tracer, across sv, sr, sg and SGL, and in what order.
   A plan being built: G0 to G2, D0 and D1 have landed.
+- [plans/raster-bound](plans/raster-bound.md) — the bound raster mode: sv on WebGPU and phones, without bindless and without ray-tracing pipelines.
+  A plan, nothing built; its checkpoints are [epic-sv-raster-bound](issues/epic-sv-raster-bound.md)'s children.
 - [coding-guidelines](coding-guidelines.md) — sv-specific conventions (thin for now) on top of the repo-wide ones.
 - [issues](issues/) — what is broken, planned or open, one file each; `uv run dev.py issues list --in libs/graphics/shaped-viewer` lists them.
 
