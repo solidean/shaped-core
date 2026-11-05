@@ -490,3 +490,7 @@ rules:
     value: [<cerrno>, <cstdio>, <cstring>, <fcntl.h>, <semaphore.h>, <signal.h>, <sys/syscall.h>, <time.h>, <unistd.h>, <unwind.h>]
     reason: asking another thread to report its own stack is a POSIX-only mechanism with no portable half - a real-time signal, a semaphore the handler posts, the unwinder the handler walks itself with, and /proc/self/task read by raw syscall for the thread list
     files: src/clean-core/error/impl/posix_thread_stacks.cc
+  - kind: allow-include
+    value: [<cstddef>, <cstdint>, <pthread.h>, <signal.h>, <sys/mman.h>]
+    reason: a per-thread stack for the crash handler's signals is POSIX-only - sigaltstack over memory mmap'd for it, and the thread's own stack bounds from pthread to tell an overflow from any other fault
+    files: src/clean-core/error/impl/signal_stack.cc
