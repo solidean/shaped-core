@@ -41,3 +41,30 @@ binding long_atomics:
 @compute(64) fun tally_longs(@thread_id id: int3, @local_thread_index local: int, @workgroup_id group: int3){long_atomics}:
     long_atomics.totals[group.x].add(((local as uint as ulong) + 1u64) << 33)
     long_atomics.lows[group.x].min(-(id.x as long) << 40)
+
+// A long crosses from the vertex to the pixel stage flat (CHK-454), and the pixel stage stores its two words.
+binding crossed:
+    words: mut buffer[uint]
+
+struct long_varyings:
+    @position position: hpos4
+    @interpolate(.flat) key: long
+
+@pixel struct long_target:
+    color: float4
+
+@vertex fun long_vs(@vertex_index v: int) -> long_varyings:
+    let x = ((v & 1) as float) * 4.0 - 1.0
+    let y = ((v >> 1) as float) * 4.0 - 1.0
+    return { position = hpos4(x, y, 0.0, 1.0), key = (0x12345678i64 << 32) | 0x9abcdefi64 }
+
+@pixel fun long_ps(p: long_varyings){crossed} -> long_target:
+    crossed.words[0] = ((p.key & 0xffffffffi64) as ulong) as uint
+    crossed.words[1] = ((p.key >> 32) as ulong) as uint
+    return { color = float4(1.0, 0.0, 0.0, 1.0) }
+
+pipeline long_crossing:
+    vertex = long_vs
+    pixel = long_ps
+    cull = .none
+    format = .rgba8_unorm

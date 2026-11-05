@@ -493,6 +493,8 @@ So `{float3; float}` is written with `packed_float3`: the `float` is at byte 12 
   WGSL and MSL write `!=`, which is unordered in both.
 * **EMIT-195** HLSL reads a buffer's length (CHK-460) through `GetDimensions`, in a helper per buffer, and WGSL through `arrayLength`, four bytes per word of a `bytes`.
   A Metal buffer argument is a pointer that carries no length, and sg passes none in yet, so an MSL compile that reads one is `target-lacks-feature`.
+* **EMIT-196** Neither MSL nor DXIL carries a 64-bit value between stages, so an MSL or `hlsl-dx12` vertex or pixel stage whose link holds one is `target-lacks-feature`.
+  SPIR-V carries one, so `hlsl-vulkan` writes it; splitting it into two words would reach the other two.
 * **EMIT-136** HLSL writes a ray-tracing stage as a library export named by its kind, `[shader("closesthit")]` over `void`, whose payload is an `inout` parameter.
   A triangle closest hit or any hit takes `BuiltInTriangleIntersectionAttributes` too.
   An any hit's decision ends the stage: `ignore` is `IgnoreHit()`, `accept_and_end_search` `AcceptHitAndEndSearch()`, and `accept` a plain `return`.

@@ -2384,17 +2384,17 @@ void checker::judge_entry_point(symbol_id id)
             }
             if (!is_reported)
                 judge_edge_arrays(file, where, parameter.type);
-            judge_edge_16_bit(file, where, parameter.type);
+            judge_edge_16_bit(file, where, parameter.type, links_parameter && info.entry_stage != stage::vertex);
         }
         else if (parameter.input == stage_input::none)
         {
             if (!judge_edge_local_only(file, where, parameter.type, links_parameter))
                 judge_edge_arrays(file, where, parameter.type, links_parameter);
-            judge_edge_16_bit(file, where, parameter.type);
+            judge_edge_16_bit(file, where, parameter.type, links_parameter && info.entry_stage != stage::vertex);
         }
     if (!judge_edge_local_only(file, where, info.result, links_result))
         judge_edge_arrays(file, where, info.result, links_result);
-    judge_edge_16_bit(file, where, info.result);
+    judge_edge_16_bit(file, where, info.result, links_result);
 
     // CHK-301 to CHK-306: the geometry and the tessellation stages take arrays of vertices, and are judged apart
     if (info.entry_stage == stage::geometry || info.entry_stage == stage::tessellation_control
@@ -2481,9 +2481,9 @@ void checker::judge_entry_point(symbol_id id)
                                     ? out.at(m.type).element
                                     : m.type;
             auto const* const record = out.builtin_type_of(crossing);
-            auto const is_integer
-                = record != nullptr
-               && (record->leaf_kind == value_kind::scalar_int || record->leaf_kind == value_kind::scalar_uint);
+            auto const is_integer = record != nullptr
+                                 && (record->leaf_kind == value_kind::scalar_int
+                                     || record->leaf_kind == value_kind::scalar_uint || is_64_bit(record->leaf_kind));
             // CHK-419: the layer is the rasterizer's, and the pixel stage reads the one its primitive went to
             if (m.is_layer && m.has_interpolate)
                 invalid(cc::format("the @layer member '{}' is the rasterizer's, and is no interpolated value", m.name));

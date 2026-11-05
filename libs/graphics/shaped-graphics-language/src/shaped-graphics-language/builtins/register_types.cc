@@ -37,11 +37,11 @@ constexpr scalar_family k_ushort_family
 // CHK-450 and CHK-451: no 64-bit value crosses a stage edge either, and WGSL has none at all, so its spellings are
 // placeholders no text ever holds (EMIT-109).
 constexpr scalar_family k_long_family
-    = {"long", "int64_t", "i64", "", value_kind::scalar_long, true, false, 8, check::feature::shader_int64};
+    = {"long", "int64_t", "i64", "", value_kind::scalar_long, true, true, 8, check::feature::shader_int64};
 constexpr scalar_family k_ulong_family
-    = {"ulong", "uint64_t", "u64", "", value_kind::scalar_ulong, true, false, 8, check::feature::shader_int64};
+    = {"ulong", "uint64_t", "u64", "", value_kind::scalar_ulong, true, true, 8, check::feature::shader_int64};
 constexpr scalar_family k_double_family
-    = {"double", "double", "f64", "", value_kind::scalar_double, true, false, 8, check::feature::shader_f64};
+    = {"double", "double", "f64", "", value_kind::scalar_double, true, true, 8, check::feature::shader_f64};
 
 /// A vector of `width` scalars of `family` with the fields `x y [z [w]]`, which every target spells as its own vector.
 /// Its swizzles are the target's own too (EMIT-142).
