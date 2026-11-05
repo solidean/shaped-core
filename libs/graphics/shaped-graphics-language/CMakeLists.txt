@@ -420,6 +420,7 @@ if(SC_BUILD_TESTS)
         tests/check/feature-check-test.cc
         tests/check/declaration-check-test.cc
         tests/check/pipeline-check-test.cc
+        tests/check/mesh-stage-check-test.cc
         tests/check/raytracing-pipeline-check-test.cc
         tests/check/enum-check-test.cc
         tests/check/expression-check-test.cc
@@ -449,6 +450,7 @@ if(SC_BUILD_TESTS)
         tests/emit/array-emit-test.cc
         tests/emit/unroll-emit-test.cc
         tests/emit/primitive-stage-emit-test.cc
+        tests/emit/mesh-stage-emit-test.cc
         tests/emit/buffer-emit-test.cc
         tests/emit/bytes-emit-test.cc
         tests/emit/texture-emit-test.cc

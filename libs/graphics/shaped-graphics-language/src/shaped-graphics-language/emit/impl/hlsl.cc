@@ -689,6 +689,15 @@ public:
                     parameters.push_back(cc::format("const OutputPatch<{}, {}> {}", element, t.count, name));
                 continue;
             }
+            // EMIT-205: a mesh stage's output is its two arrays, named after the parameter its calls write through
+            if (t.kind == type_kind::stream && t.count == 0)
+            {
+                auto const& mesh = p.m.functions[p.m.at(p.e.function).info];
+                parameters.push_back(cc::format("out vertices {} {}_vertices[{}]", type_text(p, *this, t.element), name,
+                                                mesh.max_vertices));
+                parameters.push_back(cc::format("out indices uint3 {}_triangles[{}]", name, mesh.max_primitives));
+                continue;
+            }
             if (t.kind == type_kind::stream)
             {
                 auto const stream = t.count == 1 ? "PointStream" : t.count == 2 ? "LineStream" : "TriangleStream";
@@ -703,7 +712,13 @@ public:
             list += cc::format("{}{}", list.empty() ? "" : ", ", parameter);
 
         auto const& info = p.m.functions[p.m.at(p.e.function).info];
-        if (p.e.entry_stage == stage::geometry)
+        if (p.e.entry_stage == stage::mesh)
+        {
+            out += "[outputtopology(\"triangle\")]\n";
+            out.appendf("[numthreads({}, {}, {})]\n", p.e.workgroup[0], p.e.workgroup[1], p.e.workgroup[2]);
+            out.appendf("void {}({})\n{{\n", p.entry_name, list);
+        }
+        else if (p.e.entry_stage == stage::geometry)
         {
             out.appendf("[maxvertexcount({})]\n", info.max_vertices);
             out.appendf("void {}({})\n{{\n", p.entry_name, list);
@@ -755,7 +770,7 @@ public:
         if (_is_vulkan && p.e.features.has(check::feature::opacity_micromap))
             out += "[[vk::ext_extension(\"SPV_EXT_opacity_micromap\")]]\n[[vk::ext_capability(5381)]]\n";
         if (p.e.entry_stage == stage::geometry || p.e.entry_stage == stage::tessellation_control
-            || p.e.entry_stage == stage::tessellation_evaluation)
+            || p.e.entry_stage == stage::tessellation_evaluation || p.e.entry_stage == stage::mesh)
             return write_primitive_head(out, p);
         auto parameters = cc::vector<cc::string>();
         if (check::is_valid(p.e.input))

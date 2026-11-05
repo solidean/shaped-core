@@ -25,6 +25,8 @@ enum class sgl::check::feature : sgl::u8
     sample_rate_shading,
     geometry_shader,
     tessellation_shader,
+    /// The mesh stage (CHK-480), which WebGPU has on no device.
+    mesh_shader,
     /// `half` and its vectors (CHK-382).
     shader_f16,
     /// `short`, `ushort` and their vectors (CHK-382), which WebGPU has on no device.
@@ -85,6 +87,7 @@ inline constexpr cc::string_view k_feature_names[] = {
     "sample_rate_shading",         //
     "geometry_shader",             //
     "tessellation_shader",         //
+    "mesh_shader",                 //
     "shader_f16",                  //
     "shader_int16",                //
     "subgroups",                   //

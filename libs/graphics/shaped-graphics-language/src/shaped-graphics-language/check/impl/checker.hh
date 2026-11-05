@@ -734,6 +734,15 @@ struct checker
     [[nodiscard]] float_level float_level_of(i32 file, ast::attribute const* a);
     /// `@geometry(max_vertices = N)`'s `N`, from 1 to 256; 1 after a bad argument, which it reports (CHK-301).
     [[nodiscard]] i32 max_vertices_of(i32 file, ast::attribute const& a);
+    /// `@mesh(x, y, z, vertices = N, triangles = M)`: its workgroup and its output's bounds (CHK-480).
+    struct mesh_shape
+    {
+        cc::fixed_array<i32, 3> workgroup = {1, 1, 1};
+        i32 vertices = 0;
+        i32 triangles = 0;
+    };
+    /// A bad argument reports and leaves a shape of one vertex and one triangle.
+    [[nodiscard]] mesh_shape mesh_of(i32 file, ast::attribute const& a);
     struct tessellation_mode
     {
         tessellation_partitioning partitioning = tessellation_partitioning::integer;
@@ -745,6 +754,8 @@ struct checker
     [[nodiscard]] type_id resolve_stream(i32 file, ast::expr_id expr, ast::index const& node, function_scope const* scope);
     /// CHK-303: `s.emit(v)` or `s.end_strip()` on a geometry stage's stream, which `check_dot_call` hands on.
     type_id check_stream_call(function_scope& scope, ast::expr_id id, ast::call const& call, type_id stream);
+    /// `out.vertex(i, v)` of a mesh output, whose `v` is of the output's own type (CHK-482).
+    type_id check_mesh_vertex(function_scope& scope, ast::expr_id id, ast::call const& call, type_id output);
     /// CHK-301 to CHK-306: an entry point of the geometry or a tessellation stage, which `judge_entry_point` hands on.
     void judge_primitive_stage(symbol_id id, cc::function_ref<void(cc::string_view)> invalid);
     /// The ray set a `rays` declaration made of `symbol`, and its ray types; null for any other symbol.

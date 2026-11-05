@@ -71,6 +71,9 @@ void checker::judge_entry_features(symbol_id id)
     // CHK-301, CHK-304, CHK-306: the geometry and the tessellation stages are features a device grants
     if (info.entry_stage == stage::geometry)
         needed.set(feature::geometry_shader);
+    // CHK-480: so is the mesh stage
+    if (info.entry_stage == stage::mesh)
+        needed.set(feature::mesh_shader);
     if (info.entry_stage == stage::tessellation_control || info.entry_stage == stage::tessellation_evaluation)
         needed.set(feature::tessellation_shader);
     // CHK-326: the ray-tracing stages are the pipeline's, which a device grants

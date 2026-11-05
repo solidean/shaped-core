@@ -257,6 +257,9 @@ private:
         case sg::shader_stage::geometry:
             stage = sgl::check::stage::geometry;
             break;
+        case sg::shader_stage::mesh:
+            stage = sgl::check::stage::mesh;
+            break;
         case sg::shader_stage::fragment:
             stage = sgl::check::stage::pixel;
             break;

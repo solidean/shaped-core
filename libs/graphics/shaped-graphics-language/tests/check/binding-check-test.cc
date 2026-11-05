@@ -397,7 +397,7 @@ TEST("sgl check - a @workgroup binding holds values a compute stage shares, with
                                     "@pixel struct target:\n    color: float4\n\n"
                                     "@pixel fun ps(p: pixel_input){tile} -> target:\n"
                                     "    return {color = float4(1.0, 1.0, 1.0, 1.0)}\n");
-    CHECK(raster.contains("tile is @workgroup memory, which only a compute stage has"));
+    CHECK(raster.contains("tile is @workgroup memory, which only a compute and a mesh stage have"));
 }
 
 TEST("sgl check - @padding(.none) on a binding or a buffer member packs GPU memory as C++ does (CHK-369)")

@@ -70,7 +70,10 @@ cc::string spelling_of(check::type_info const& t, checked_module const& m)
         return cc::format("{}atomic[{}]", access_prefix(t.access), m.name_of(t.element));
     case type_kind::stream:
     {
-        auto const shape = t.count == 1 ? "point_stream" : t.count == 2 ? "line_stream" : "triangle_stream";
+        auto const shape = t.count == 1 ? "point_stream"
+                         : t.count == 2 ? "line_stream"
+                         : t.count == 3 ? "triangle_stream"
+                                        : "mesh_output";
         // a builtin's bare pattern takes every stream of its shape
         return t.element == type_id::none ? cc::format("{}{}", access_prefix(t.access), shape)
                                           : cc::format("{}{}[{}]", access_prefix(t.access), shape, m.name_of(t.element));
@@ -790,8 +793,9 @@ type_id checker::resolve_pattern_type(i32 file, ast::expr_id expr)
         auto const vertices = text == "point_stream"    ? 1
                             : text == "line_stream"     ? 2
                             : text == "triangle_stream" ? 3
-                                                        : 0;
-        if (vertices > 0)
+                            : text == "mesh_output"     ? 0
+                                                        : -1;
+        if (vertices >= 0)
         {
             auto const result = resource_type({.kind = type_kind::stream, .count = vertices});
             set_type(file, expr, result);

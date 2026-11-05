@@ -163,10 +163,10 @@ sgl::emit::emitted_text sgl::emit::emit_entry_point(check::checked_module const&
         auto const never
             = check::feature_set(check::feature::binding_arrays) | check::feature::multisampled_array_textures
             | check::feature::raytracing_pipeline | check::feature::geometry_shader
-            | check::feature::tessellation_shader | check::feature::shader_int16 | check::feature::device_coherence
-            | check::feature::image_atomics | check::feature::first_instance | check::feature::helper_lane_query
-            | check::feature::vertex_layer_output | check::feature::view_instancing | check::feature::shader_int64
-            | check::feature::shader_f64 | check::feature::shader_int64_atomics;
+            | check::feature::tessellation_shader | check::feature::mesh_shader | check::feature::shader_int16
+            | check::feature::device_coherence | check::feature::image_atomics | check::feature::first_instance
+            | check::feature::helper_lane_query | check::feature::vertex_layer_output | check::feature::view_instancing
+            | check::feature::shader_int64 | check::feature::shader_f64 | check::feature::shader_int64_atomics;
         for (auto i = isize(0); i < check::k_feature_count; ++i)
             if (e.features.has(check::feature(i)) && never.has(check::feature(i)))
                 result.errors.push_back({.kind = error_kind::target_lacks_feature,
@@ -221,6 +221,18 @@ sgl::emit::emitted_text sgl::emit::emit_entry_point(check::checked_module const&
                                  .symbol = e.function,
                                  .detail = cc::format("{} is a {} stage and needs {}, which Metal does not have",
                                                       e.name, check::stage_name(e.entry_stage), check::name_of(f))});
+        return result;
+    }
+
+    // EMIT-206: sg's metal backend does not wire Metal's mesh stage up yet, so no MSL text writes one
+    if (t == target::msl && e.features.has(check::feature::mesh_shader))
+    {
+        result.errors.push_back({.kind = error_kind::target_lacks_feature,
+                                 .symbol = e.function,
+                                 .detail = cc::format("{} is a mesh stage and needs mesh_shader, which the metal "
+                                                      "target "
+                                                      "does not write yet",
+                                                      e.name)});
         return result;
     }
 
