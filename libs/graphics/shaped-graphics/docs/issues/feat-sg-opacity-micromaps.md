@@ -88,8 +88,6 @@ If that override wins over the micromap on DXR 1.2 or vulkan, a micromapped inst
 **The hybrid's rays force 2 states, the others stay 4-state.**
 `trace_hit`, `blocked` and `reaches` in `shaders/sgl/tracer_wavefront.sgl` are shared by the hybrid and the wavefront, so they take a flags parameter, or the hybrid gets its own spellings.
 
-**Two gaps in the baker against sv's samplers.**
-sv repeats, clamps or mirrors per axis, and the bake knows only clamp or repeat for both.
-sv's opacity sampler may be nearest, and the bake assumes a bilinear footprint, which is conservative for nearest but leaves more unknown than needed.
+**The baker takes sv's sampler as it is**: an `sg::sampler_address_mode` per axis and an `sg::sampler_filter`.
 
 **Done** is still the measurement: Bistro's thresholded foliage, whose candidate stops `tests/hybrid-benchmark.cc` already counts.

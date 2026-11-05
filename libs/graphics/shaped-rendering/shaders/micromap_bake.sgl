@@ -4,8 +4,9 @@
 // extremes of the texels below it, an odd row or column folded into the last.
 // Then one thread per word of the states: 16 micro-triangles of 2 bits, lowest first, as both APIs pack 4-state maps.
 //
-// A micro-triangle is opaque only where everything a bilinear lookup blends inside it is at or above the cutoff, and
-// transparent only where all of it is below, read at the pyramid level where that footprint spans at most 4 texels.
+// A micro-triangle is opaque only where everything a lookup reads inside it is at or above the cutoff, and transparent
+// only where all of it is below, read at the pyramid level where that footprint spans at most 4 texels.
+// A nearest lookup reads the texels the micro-triangle covers, and a linear one those around it a half texel further.
 // Everything else is unknown, with the centre texel's side of the cutoff as the guess a 2-state ray takes.
 
 @inline binding pyramid_constants:
@@ -62,8 +63,11 @@ fun component_of(c: float4, i: int) -> float:
     cutoff: float
     // how many levels the pyramid has
     levels: int
-    // 1 where coordinates outside the texture clamp to its edge, 0 where they repeat
-    clamps: int
+    // per axis, as sg::sampler_address_mode numbers them: 0 repeats, 1 mirrors every other tile, 2 clamps to the edge
+    address_u: int
+    address_v: int
+    // 1 where the trace samples the nearest texel, 0 where it blends the four around it
+    is_nearest: int
 
 binding classify_io:
     @unfilterable
@@ -125,9 +129,16 @@ fun floor_shift(x: int, by: int) -> int:
     if x >= 0 => return x >> by
     return -((-x + (1 << by) - 1) >> by)
 
+/// The texel coordinate `x` reads on an axis of `n` texels, under `mode`.
+fun addressed(x: int, n: int, mode: int) -> int:
+    if mode == 2 => return clamp(x, 0, n - 1)
+    if mode == 1:
+        let m = ((x % (2 * n)) + 2 * n) % (2 * n)
+        return if m < n => m else 2 * n - 1 - m
+    return ((x % n) + n) % n
+
 fun texel_at(x: int, y: int, size: int2){classify_constants} -> int2:
-    if classify_constants.clamps != 0 => return int2(clamp(x, 0, size.x - 1), clamp(y, 0, size.y - 1))
-    return int2(((x % size.x) + size.x) % size.x, ((y % size.y) + size.y) % size.y)
+    return int2(addressed(x, size.x, classify_constants.address_u), addressed(y, size.y, classify_constants.address_v))
 
 /// The 2-bit state of micro-triangle `index` of `map`.
 fun classify(map: int4, index: uint){classify_io, classify_constants} -> uint:
@@ -143,13 +154,15 @@ fun classify(map: int4, index: uint){classify_io, classify_constants} -> uint:
     for k in 0 ..< 3:
         let bary = if k == 0 => corners.first else if k == 1 => corners.second else corners.third
         let uv = a * (1.0 - bary.x - bary.y) + b * bary.x + c * bary.y
-        // in texels, where a bilinear lookup at p blends the texels around p - 0.5
-        let p = uv * scale - float2(0.5, 0.5)
+        // in texels, where a linear lookup at p blends the texels around p - 0.5 and a nearest one reads the one at p
+        let p = if classify_constants.is_nearest != 0 => uv * scale else uv * scale - float2(0.5, 0.5)
         low = min(low, p)
         high = max(high, p)
         centre += uv / 3.0
     let lo = int2(floor(low.x) as int, floor(low.y) as int)
-    let hi = int2((floor(high.x) as int) + 1, (floor(high.y) as int) + 1)
+    // the last texel an interior point reaches, so an edge on a texel boundary reads nothing past it
+    let reach = if classify_constants.is_nearest != 0 => 0 else 1
+    let hi = int2((ceil(high.x) as int) - 1 + reach, (ceil(high.y) as int) - 1 + reach)
 
     // the level where the footprint spans at most 4 texels on either axis
     let mut level = 0

@@ -23,7 +23,10 @@ namespace
 namespace probes = sr_test::sgl_shaders::micromap_trace;
 
 /// Which of the 8 x 8 cells the trace of `entry` hit, row by row.
-cc::shared_async<cc::vector<i32>> trace_baked(sg::context_handle ctx, sg::async_compute_pipeline entry)
+cc::shared_async<cc::vector<i32>> trace_baked(sg::context_handle ctx,
+                                              sg::async_compute_pipeline entry,
+                                              sg::sampler_address_mode address = sg::sampler_address_mode::clamp_edge,
+                                              sg::sampler_filter filter = sg::sampler_filter::linear)
 {
     sr::micromap_bake_routine::prewarm(*ctx);
     (void)co_await ctx->routines.idle_completion();
@@ -47,8 +50,12 @@ cc::shared_async<cc::vector<i32>> trace_baked(sg::context_handle ctx, sg::async_
 
     auto cmd = ctx->create_command_list();
     cmd->upload.bytes_to_texture(opacity.raw(), sr_test::packed(sg::pixel_format::rgba32_float, texels));
-    auto const bake = sr::micromap_bake_routine::execute(
-        *cmd, {.uvs = cc::span<tg::vec2f const>(uvs), .indices = indices, .opacity = opacity, .clamps = true});
+    auto const bake = sr::micromap_bake_routine::execute(*cmd, {.uvs = cc::span<tg::vec2f const>(uvs),
+                                                                .indices = indices,
+                                                                .opacity = opacity,
+                                                                .address_u = address,
+                                                                .address_v = address,
+                                                                .filter = filter});
     REQUIRE(bake.has_value());
     auto const micromap = cmd->raytracing.build_micromap(bake.value().triangles);
 
@@ -118,6 +125,32 @@ ASYNC_INVOCABLE_TEST("sr - a baked micromap decides the texels its cutoff decide
     // transparent from the texel past the blend, everything else asks and is accepted
     auto const accepted = co_await trace_baked(ctx, probes::accepting_cs.acquire_pipeline(*ctx));
     CHECK(columns_hit(accepted) == "11111000");
+}
+
+ASYNC_INVOCABLE_TEST("sr - a micromap baked for a nearest or a wrapping sampler reads what that sampler reads",
+                     (sg::context_handle const& ctx),
+                     exclusive("sg-reload-generation"))
+{
+    REQUIRE(ctx != nullptr);
+    (void)sr_test::shader_fixtures();
+    if (!ctx->supports(sg::feature::opacity_micromap))
+        SKIP("this device has no opacity micromaps");
+    using mode = sg::sampler_address_mode;
+
+    // a nearest lookup blends nothing across the edge at x = 4, so every texel is decided and the shader is never asked
+    auto const nearest_rejected = co_await trace_baked(ctx, probes::rejecting_cs.acquire_pipeline(*ctx),
+                                                       mode::clamp_edge, sg::sampler_filter::nearest);
+    CHECK(columns_hit(nearest_rejected) == "11110000");
+    auto const nearest_accepted = co_await trace_baked(ctx, probes::accepting_cs.acquire_pipeline(*ctx),
+                                                       mode::clamp_edge, sg::sampler_filter::nearest);
+    CHECK(columns_hit(nearest_accepted) == "11110000");
+
+    // a repeating linear lookup at the left edge blends in the transparent right column, so column 0 asks too
+    auto const repeated = co_await trace_baked(ctx, probes::rejecting_cs.acquire_pipeline(*ctx), mode::repeat);
+    CHECK(columns_hit(repeated) == "01100000");
+    // a mirroring one reads the opaque left column again, as clamping does
+    auto const mirrored = co_await trace_baked(ctx, probes::rejecting_cs.acquire_pipeline(*ctx), mode::mirror_repeat);
+    CHECK(columns_hit(mirrored) == "11100000");
 }
 
 ASYNC_INVOCABLE_TEST("sr - a ray forcing a baked micromap to 2 states takes the guesses, and asks nothing",

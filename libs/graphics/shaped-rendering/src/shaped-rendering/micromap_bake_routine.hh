@@ -2,6 +2,7 @@
 
 #include <clean-core/container/span.hh>
 #include <clean-core/error/optional.hh>
+#include <shaped-graphics/binding/sampler.hh>
 #include <shaped-graphics/fwd.hh>
 #include <shaped-graphics/raytracing/micromap.hh>
 #include <shaped-graphics/resource/texture.hh>
@@ -26,8 +27,11 @@ struct sr::micromap_bake_input
     /// At or above it a texel is opaque, as the shader's own test decides.
     f32 cutoff = 0.5f;
 
-    /// Whether texture coordinates outside 0 to 1 clamp to the edge, rather than repeat as glTF's default does.
-    bool clamps = false;
+    /// How the trace's sampler addresses coordinates outside 0 to 1 and filters, which decide what a lookup reads.
+    /// A nearest lookup reads fewer texels than a linear one, so fewer micro-triangles near an edge stay unknown.
+    sg::sampler_address_mode address_u = sg::sampler_address_mode::repeat;
+    sg::sampler_address_mode address_v = sg::sampler_address_mode::repeat;
+    sg::sampler_filter filter = sg::sampler_filter::linear;
     /// The finest subdivision a triangle gets, whatever its texel area asks.
     int max_level = 6;
 };
@@ -43,8 +47,8 @@ struct sr::micromap_bake
 
 /// Bakes 4-state opacity micromaps from a texture: one map per triangle, about one micro-triangle per texel it covers.
 ///
-/// A micro-triangle is opaque only where every texel a bilinear lookup blends inside it passes the cutoff, and
-/// transparent only where none does, so a trace that keeps 4-state decides exactly as its any-hit shader would.
+/// A micro-triangle is opaque only where every texel a lookup inside it reads passes the cutoff, and transparent only
+/// where none does, so a trace that keeps 4-state decides exactly as its any-hit shader would.
 /// Every other micro-triangle is unknown, with the side of the cutoff its centre is on as a 2-state ray's guess.
 /// The extremes come from a min/max pyramid of the channel, read where a micro-triangle spans at most 4 texels.
 ///
