@@ -82,8 +82,10 @@ private:
         auto const model = desc.required_features.has(sg::feature::shader_execution_reordering)
                              ? ssc::dxc::shader_model::sm_6_9
                              : ssc::dxc::shader_model::sm_6_8;
-        return ssc::dxc::shader_description{
-            .source = desc.source, .entry_point = desc.entry_point, .stage = desc.stage, .model = model};
+        return ssc::dxc::shader_description{.source = desc.source,
+                                            .entry_point = desc.entry_point,
+                                            .stage = desc.stage,
+                                            .model = model};
     }
 
     ssc::dxc::compile_target _target;

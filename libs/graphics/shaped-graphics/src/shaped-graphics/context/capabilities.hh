@@ -197,8 +197,7 @@ inline constexpr feature k_all_features[] = {
     feature::float_atomic_add,
     feature::shader_execution_reordering,
 };
-static_assert(isize(sizeof(k_all_features) / sizeof(k_all_features[0]))
-                  == isize(feature::shader_execution_reordering) + 1,
+static_assert(isize(sizeof(k_all_features) / sizeof(k_all_features[0])) == isize(feature::shader_execution_reordering) + 1,
               "k_all_features lists every feature");
 
 /// The enumerator's name, `ray_query`, which is also what SGL's `require` spells it as.

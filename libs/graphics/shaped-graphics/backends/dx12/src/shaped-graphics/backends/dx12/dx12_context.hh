@@ -656,12 +656,12 @@ public:
     // DXR support tier, queried once at creation (D3D12_FEATURE_D3D12_OPTIONS5).
     // NOT_SUPPORTED until set.
     D3D12_RAYTRACING_TIER _raytracing_tier = D3D12_RAYTRACING_TIER_NOT_SUPPORTED;
-    bool _unaligned_block_textures = false; // D3D12_OPTIONS8, cached at creation
-    bool _extended_image_formats = false;   // bgra8_unorm's typed UAV, cached at creation
-    bool _native_16bit_shader_ops = false;  // D3D12_OPTIONS4, cached at creation
-    bool _wave_ops = false;                 // D3D12_OPTIONS1, cached at creation
+    bool _unaligned_block_textures = false;    // D3D12_OPTIONS8, cached at creation
+    bool _extended_image_formats = false;      // bgra8_unorm's typed UAV, cached at creation
+    bool _native_16bit_shader_ops = false;     // D3D12_OPTIONS4, cached at creation
+    bool _wave_ops = false;                    // D3D12_OPTIONS1, cached at creation
     bool _shader_execution_reordering = false; // SM 6.9 beside ray-tracing pipelines, from the Agility SDK
-    bool _vertex_layer_output = false;      // D3D12_OPTIONS, cached at creation
+    bool _vertex_layer_output = false;         // D3D12_OPTIONS, cached at creation
 
     // Where debug-layer messages go; empty means stderr.
     // See set_message_callback.
