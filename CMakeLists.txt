@@ -1,5 +1,15 @@
 # Minimum versions and the rationale: docs/requirements.md
 cmake_minimum_required(VERSION 3.28)
+
+# Under clang-cl, CMake picks the .rc rule at every configure by whether `rc` is on PATH, not by the cached compiler.
+# A reconfigure outside the MSVC environment then pairs the llvm-rc rule with a cached rc.exe, which rejects its input,
+# and `cmake -E cmake_llvm_rc` deadlocks on the error text instead of failing: SDL3's version.rc hangs the build.
+# Seeding the choice from the cache keeps the rule and the compiler one pair, whoever configures.
+if(CMAKE_RC_COMPILER AND NOT CMAKE_RC_COMPILER_INIT)
+    set(CMAKE_RC_COMPILER_INIT "${CMAKE_RC_COMPILER}")
+endif()
+include("${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/ConfigureEnvironment.cmake")
+
 project(shaped-core LANGUAGES CXX)
 
 # Lock in C++23 for the whole repo.

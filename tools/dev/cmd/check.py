@@ -190,6 +190,7 @@ def _build_checks(ctx: Context, *, memo: dev.CheckMemo | None = None, all_preset
             ("tools/dev/submodules-self-test.py", [], (core, f"{dev_lib}/project/**")),
             ("tools/dev/benchmarks-self-test.py", [], (core, f"{dev_lib}/pipeline/**")),
             ("tools/dev/memory-guard-self-test.py", [], (core,)),
+            ("tools/dev/stall-report-self-test.py", [], (core,)),
             ("extern/manifest-self-test.py", [], ("extern/**",)),
             ("libs/base/clean-simd/tools/check-link-map.py", ["--self-test"], ("libs/base/clean-simd/tools/**",)),
         )
