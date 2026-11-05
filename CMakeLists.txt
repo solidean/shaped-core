@@ -329,6 +329,7 @@ add_subdirectory(libs/data/blob-cache)
 # Added in dependency order; sg pulls in its per-backend static libraries itself.
 add_subdirectory(libs/graphics/shaped-graphics)
 add_subdirectory(libs/graphics/shaped-rendering)
+add_subdirectory(libs/graphics/shaped-xr)
 add_subdirectory(libs/graphics/shaped-viewer)
 
 # shaped-graphics-language (sgl): the SGL compiler, linter and language server. The syntactic half is over clean-core
