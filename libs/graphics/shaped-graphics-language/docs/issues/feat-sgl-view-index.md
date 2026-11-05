@@ -3,6 +3,8 @@ created: 2026-11-05
 priority: next
 tags: [xr]
 parent: epic-xr
+claimed-by: Claude (for Philip Trettner)
+claimed-at: 2026-11-05T14:10Z
 ---
 
 # `@view_index`: which view a shader invocation renders

@@ -174,4 +174,17 @@ cc::result<vulkan_texture_handle> vulkan_context::create_vulkan_texture(sg::text
     return vulkan_texture_handle(register_if_transient(
         std::make_shared<vulkan_texture>(*this, current_epoch(), desc, image, memory), alloc.scope));
 }
+
+cc::result<vulkan_texture_handle> vulkan_context::wrap_vulkan_texture(VkImage image,
+                                                                      sg::texture_description const& desc,
+                                                                      sg::texture_layout layout)
+{
+    CC_ASSERT(image != VK_NULL_HANDLE, "wrap_vulkan_texture: image is null");
+    CC_ASSERT(layout != sg::texture_layout::present, "wrap_vulkan_texture: an image to present is a swapchain's");
+    desc.assert_valid();
+
+    auto const current = layout == sg::texture_layout::undefined ? cc::optional<sg::texture_layout>() : layout;
+    return vulkan_texture_handle(std::make_shared<vulkan_texture>(*this, current_epoch(), desc, image, VK_NULL_HANDLE,
+                                                                  /*owns_image =*/false, current));
+}
 } // namespace sg::backend::vulkan
