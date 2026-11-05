@@ -79,7 +79,7 @@ TEST("sgl check - a require names a feature a shader can use, as sg names it")
              "raytracing_pipeline, primitive_index, "
              "sample_rate_shading, geometry_shader, tessellation_shader, shader_f16, shader_int16, subgroups, "
              "device_coherence, image_atomics, first_instance, helper_lane_query, vertex_layer_output, "
-             "float_atomic_add\n");
+             "float_atomic_add, shader_execution_reordering\n");
     CHECK(reports_for("require raytracing\n").contains("unknown-feature user:[raytracing]"));
     CHECK(reports_for("require ray_query, binding_arrays\n") == "");
 

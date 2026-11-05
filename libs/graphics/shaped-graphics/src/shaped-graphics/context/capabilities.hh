@@ -151,6 +151,12 @@ enum class sg::feature
     /// SGL's `atomic[float].add` is a compare-exchange loop without it, and the native add where a context has it: slib
     /// hands an SGL compile every feature its context has, which SGL's `has` also answers.
     float_atomic_add,
+
+    /// A ray-generation shader may reorder its invocations by a coherence hint, so threads that will run alike run together.
+    /// D3D12 grants it from Shader Model 6.9 beside ray-tracing pipelines, which only the Agility SDK's runtime has.
+    /// Vulkan's `VK_EXT_ray_tracing_invocation_reorder` has no compiler path from HLSL yet, and metal and WebGPU have none.
+    /// SGL's `maybe_reorder` is a hint: without the feature it does nothing, so it is what `has` asks.
+    shader_execution_reordering,
 };
 
 CC_FLAG_ENUM_INDEXED(sg, feature, cc::u32);
@@ -189,8 +195,10 @@ inline constexpr feature k_all_features[] = {
     feature::opacity_micromap,
     feature::vertex_layer_output,
     feature::float_atomic_add,
+    feature::shader_execution_reordering,
 };
-static_assert(isize(sizeof(k_all_features) / sizeof(k_all_features[0])) == isize(feature::float_atomic_add) + 1,
+static_assert(isize(sizeof(k_all_features) / sizeof(k_all_features[0]))
+                  == isize(feature::shader_execution_reordering) + 1,
               "k_all_features lists every feature");
 
 /// The enumerator's name, `ray_query`, which is also what SGL's `require` spells it as.
@@ -252,6 +260,8 @@ static_assert(isize(sizeof(k_all_features) / sizeof(k_all_features[0])) == isize
         return "vertex_layer_output";
     case feature::float_atomic_add:
         return "float_atomic_add";
+    case feature::shader_execution_reordering:
+        return "shader_execution_reordering";
     }
     return "";
 }

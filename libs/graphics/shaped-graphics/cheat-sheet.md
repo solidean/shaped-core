@@ -114,6 +114,8 @@ ctx.supports(sg::feature::ray_query)               // bool — THE capability qu
                                                    //   | float_atomic_add (a float atomic add in one instruction; vulkan with
                                                    //     VK_EXT_shader_atomic_float, true on metal, false on dx12 and webgpu;
                                                    //     slib asks SGL for the native add where it is true; no `require`)
+                                                   //   | shader_execution_reordering (a raygen regroups by a hint; dx12 on the
+                                                   //     Agility SDK's SM 6.9 beside RT pipelines; SGL's maybe_reorder asks it)
                                                    //   vulkan's geometry, tessellation, sample-rate and wireframe answers are the device features creation enabled
                                                    //   binding_arrays false (webgpu) = no count > 1 bindings, no staging_binding_group, no bindless_array
                                                    //   the per-scope bools (cmd.raytracing.is_supported(), cmd.query.is_supported(),

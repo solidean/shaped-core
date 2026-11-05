@@ -905,6 +905,17 @@ void sgl::check::impl::flattener::flatten_target_text(origin from, ast::stmt_id 
         arguments.push_back(value);
     }
 
+    // CHK-427: the text uses what the `has` of the branches around it granted, which is how a compile learns what it
+    // asks of the device, a shader model among it
+    if (!granted.is_empty())
+    {
+        auto within = cc::vector<symbol_id>();
+        for (auto const& fr : frames)
+            within.push_back(fr.function);
+        feature_uses.push_back(
+            {.file = file(), .call = literal, .features = granted, .within = cc::move(within), .granted = granted});
+    }
+
     auto const return_label = current()->return_label;
     auto const result_type = current()->result;
     auto const is_void = !is_valid(result_type) || result_type == checked_module::void_type;

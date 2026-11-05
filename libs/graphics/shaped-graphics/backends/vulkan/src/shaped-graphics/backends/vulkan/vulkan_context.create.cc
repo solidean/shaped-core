@@ -708,8 +708,11 @@ cc::result<context_handle> create_vulkan_context(backend::vulkan::vulkan_config 
         auto features = VkPhysicalDeviceFeatures2{.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2,
                                                   .pNext = &float_atomic_query};
         vkGetPhysicalDeviceFeatures2(best_device, &features);
+        // SGL's native float atomics load, store and exchange the same floats they add to, in both storage classes
         float_atomic_add_supported = float_atomic_query.shaderBufferFloat32AtomicAdd == VK_TRUE
-                                  && float_atomic_query.shaderSharedFloat32AtomicAdd == VK_TRUE;
+                                  && float_atomic_query.shaderSharedFloat32AtomicAdd == VK_TRUE
+                                  && float_atomic_query.shaderBufferFloat32Atomics == VK_TRUE
+                                  && float_atomic_query.shaderSharedFloat32Atomics == VK_TRUE;
     }
     if (float_atomic_add_supported)
         device_extensions.push_back(VK_EXT_SHADER_ATOMIC_FLOAT_EXTENSION_NAME);
@@ -891,7 +894,9 @@ cc::result<context_handle> create_vulkan_context(backend::vulkan::vulkan_config 
     auto float_atomic_features = VkPhysicalDeviceShaderAtomicFloatFeaturesEXT{
         .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_ATOMIC_FLOAT_FEATURES_EXT,
         .pNext = micromap_supported ? static_cast<void*>(&micromap_features) : micromap_features.pNext,
+        .shaderBufferFloat32Atomics = VK_TRUE,
         .shaderBufferFloat32AtomicAdd = VK_TRUE,
+        .shaderSharedFloat32Atomics = VK_TRUE,
         .shaderSharedFloat32AtomicAdd = VK_TRUE,
     };
 

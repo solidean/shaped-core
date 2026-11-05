@@ -63,24 +63,26 @@ expected_cell expected_at(int x, int y)
 }
 } // namespace
 
-ASYNC_INVOCABLE_TEST("sg - an SGL ray-tracing pipeline traces two ray types, one from the other's closest hit",
-                     (sg::context_handle const& ctx))
+namespace
 {
-    REQUIRE(ctx != nullptr);
-    if (!sg_test::shaders_reach(*ctx))
-        SKIP("no compiler builds this binary's shaders into a format this context accepts");
-    if (!ctx->supports(sg::feature::raytracing_pipeline))
-        SKIP("this device has no ray-tracing pipelines");
+/// Traces the scene through `symbol`'s pipeline, whose raygen traces what `primary` traces, and names the first cell
+/// that is not what expected_at says; empty where every one is.
+template <class Pipeline>
+cc::shared_async<cc::string> first_wrong_cell(sg::context_handle ctx, Pipeline const& symbol)
+{
+    // a helper is an unhomed async: it moves to where the device lives before its first bound call
+    if (auto* const home = ctx->device_home())
+        co_await cc::async_resume_on(*home);
 
-    auto const desc = co_await shaders::raytracing_pipeline::path.description(*ctx);
-    CHECK(desc.max_recursion_depth == 2u);
-    auto const pipeline = co_await ctx->cached.acquire_raytracing_pipeline(desc);
-    REQUIRE(pipeline != nullptr);
+    auto const pipeline = co_await ctx->cached.acquire_raytracing_pipeline(co_await symbol.description(*ctx));
+    if (pipeline == nullptr)
+        co_return cc::string("the pipeline did not build");
 
-    auto table_desc = path_t::table_description(pipeline);
-    auto const row = path_t::add_row(table_desc, path_t::hit_groups_t::textured);
+    auto table_desc = Pipeline::table_description(pipeline);
+    auto const row = Pipeline::add_row(table_desc, Pipeline::hit_groups_t::textured);
     auto const table = ctx->uncached.create_raytracing_shader_table(table_desc);
-    REQUIRE(table != nullptr);
+    if (table == nullptr)
+        co_return cc::string("the shader table did not build");
 
     float const vertices[] = {0, 0, 0, 4, 0, 0, 0, 4, 0, 4, 0, 0, 4, 4, 0, 0, 4, 0};
     auto const input = ctx->persistent.create_buffer_from_data(vertices, sg::buffer_usage::accel_structure_build_input);
@@ -93,7 +95,7 @@ ASYNC_INVOCABLE_TEST("sg - an SGL ray-tracing pipeline traces two ray types, one
     auto const triangles = sg::blas_triangles{.vertices = input.raw(), .vertex_count = 6, .is_opaque = false};
     // a record per ray type, which metal bakes into the BLAS
     auto const blas = cmd->raytracing.build_blas(cc::span<sg::blas_triangles const>(&triangles, 1),
-                                                 sg::accel_build_flag::fast_trace, path_t::ray_count);
+                                                 sg::accel_build_flag::fast_trace, Pipeline::ray_count);
     auto const offset = table->offset_of(row);
     sg::tlas_instance const instances[] = {
         {.blas = blas, .instance_id = 10, .hit_group_offset = offset},
@@ -116,24 +118,60 @@ ASYNC_INVOCABLE_TEST("sg - an SGL ray-tracing pipeline traces two ray types, one
 
     auto const got_hits = co_await hits_back.data();
     auto const got_ids = co_await ids_back.data();
-    REQUIRE(got_hits.size() == grid * grid);
-    REQUIRE(got_ids.size() == grid * grid);
+    if (got_hits.size() != grid * grid || got_ids.size() != grid * grid)
+        co_return cc::string("the results came back short");
     for (auto y = 0; y < grid; ++y)
         for (auto x = 0; x < grid; ++x)
         {
             auto const want = expected_at(x, y);
             auto const at = y * grid + x;
-            auto const where = cc::format("cell ({}, {})", x, y);
-            CHECK(got_ids[at][0] == (want.is_hit ? 1 : 0)).context(where);
-            if (!want.is_hit)
-                continue;
-            CHECK(got_ids[at][1] == want.instance_id).context(where);
-            CHECK(got_ids[at][2] == want.primitive).context(where);
-            CHECK(got_ids[at][3] == (want.is_lit ? 1 : 0)).context(where);
-            CHECK(tg::abs(got_hits[at][0] - want.t) < 1e-4f).context(where);
-            CHECK(tg::abs(got_hits[at][1] - want.u) < 1e-4f).context(where);
-            CHECK(tg::abs(got_hits[at][2] - want.v) < 1e-4f).context(where);
+            auto const& i = got_ids[at];
+            auto const& h = got_hits[at];
+            auto is_right = i[0] == (want.is_hit ? 1 : 0);
+            if (is_right && want.is_hit)
+                is_right = i[1] == want.instance_id && i[2] == want.primitive && i[3] == (want.is_lit ? 1 : 0)
+                        && tg::abs(h[0] - want.t) < 1e-4f && tg::abs(h[1] - want.u) < 1e-4f
+                        && tg::abs(h[2] - want.v) < 1e-4f;
+            if (!is_right)
+                co_return cc::format("cell ({}, {}): hit {}, instance {}, primitive {}, lit {}, t {}, u {}, v {}", x, y,
+                                     i[0], i[1], i[2], i[3], h[0], h[1], h[2]);
         }
+    co_return cc::string();
+}
+} // namespace
+
+ASYNC_INVOCABLE_TEST("sg - an SGL ray-tracing pipeline traces two ray types, one from the other's closest hit",
+                     (sg::context_handle const& ctx))
+{
+    REQUIRE(ctx != nullptr);
+    if (!sg_test::shaders_reach(*ctx))
+        SKIP("no compiler builds this binary's shaders into a format this context accepts");
+    if (!ctx->supports(sg::feature::raytracing_pipeline))
+        SKIP("this device has no ray-tracing pipelines");
+
+    auto const desc = co_await shaders::raytracing_pipeline::path.description(*ctx);
+    CHECK(desc.max_recursion_depth == 2u);
+    CHECK((co_await first_wrong_cell(ctx, shaders::raytracing_pipeline::path)) == "");
+}
+
+// `reordered_path`'s raygen asks for its invocations to be regrouped before it traces, which changes which of them run
+// together and nothing they compute: a real reordering on a device with the feature, and no instruction elsewhere.
+ASYNC_INVOCABLE_TEST("sg - an SGL raygen that reorders its invocations traces what it would have traced",
+                     (sg::context_handle const& ctx))
+{
+    REQUIRE(ctx != nullptr);
+    if (!sg_test::shaders_reach(*ctx))
+        SKIP("no compiler builds this binary's shaders into a format this context accepts");
+    if (!ctx->supports(sg::feature::raytracing_pipeline))
+        SKIP("this device has no ray-tracing pipelines");
+
+    // the reordering is in the raygen exactly where the device has it, whose compile then asks it of the pipeline
+    auto const desc = co_await shaders::raytracing_pipeline::reordered_path.description(*ctx);
+    REQUIRE(desc.raygen_shaders.size() == 1);
+    auto const required = desc.raygen_shaders[0].required_features.value_or(sg::feature_set());
+    CHECK(required.has(sg::feature::shader_execution_reordering)
+          == ctx->supports(sg::feature::shader_execution_reordering));
+    CHECK((co_await first_wrong_cell(ctx, shaders::raytracing_pipeline::reordered_path)) == "");
 }
 
 ASYNC_INVOCABLE_TEST("sg - SGL atomics in a raygen, a closest hit and a miss count each stage's invocations exactly",

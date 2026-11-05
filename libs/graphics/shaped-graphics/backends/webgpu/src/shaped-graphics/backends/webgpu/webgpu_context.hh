@@ -164,6 +164,9 @@ public:
         case sg::feature::opacity_micromap:
             // The ray-query polyfill traverses its own boxes and knows no micromap.
             return false;
+        case sg::feature::shader_execution_reordering:
+            // WebGPU has no ray-tracing pipeline to reorder.
+            return false;
         case sg::feature::unaligned_block_compression:
             // Lifted by `texture-compression-unaligned`, which the emdawnwebgpu this builds against does not offer.
             return false;

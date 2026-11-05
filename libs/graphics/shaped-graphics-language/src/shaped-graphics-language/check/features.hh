@@ -44,6 +44,9 @@ enum class sgl::check::feature : sgl::u8
     /// A float added atomically in one instruction, which vulkan and metal write where the device has it.
     /// `atomic[float]` runs on every device without it, so it is what `has` asks rather than what a `require` needs.
     float_atomic_add,
+    /// A ray-generation stage reorders its invocations by a hint, which only dx12 on Shader Model 6.9 writes.
+    /// `maybe_reorder` does nothing without it, so it is what `has` asks rather than what a `require` needs.
+    shader_execution_reordering,
 };
 
 CC_FLAG_ENUM_INDEXED(sgl::check, feature, u32);
@@ -72,6 +75,7 @@ inline constexpr cc::string_view k_feature_names[] = {
     "helper_lane_query",           //
     "vertex_layer_output",         //
     "float_atomic_add",            //
+    "shader_execution_reordering", //
 };
 inline constexpr isize k_feature_count = isize(sizeof(k_feature_names) / sizeof(k_feature_names[0]));
 

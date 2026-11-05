@@ -252,6 +252,13 @@ The third argument names a ray type, which is what tells this `trace` from an in
 `flags` and `mask` follow by name.
 The call writes through the payload: what the miss or the closest hit wrote is there when it returns.
 
+### Reordering
+
+**`maybe_reorder(hint, bits)` lets the target regroup a raygen's invocations** by the low `bits` bits of `hint`, before the traces they go on to make.
+It is a hint: each invocation goes on as it was, and only which ones share a wave changes.
+It is dx12's `dx::MaybeReorderThread` where the device has `shader_execution_reordering`, which needs Shader Model 6.9 from the Agility SDK, and nothing elsewhere.
+The prelude writes it as a text body under `const if has(…)`, so the compile that takes the text asks the feature of the pipeline (CHK-427).
+
 ### Hit groups
 
 **`hit_group name for set:` is one row of the table: a record per ray type** (CHK-330).

@@ -391,7 +391,14 @@ struct writer
             return false;
         auto const* const c = p.e.at(id).node.try_as<flat_call>();
         auto const* const record = c != nullptr ? p.m.builtin_function(c->intrinsic) : nullptr;
-        return record != nullptr && record->is_atomic;
+        if (record == nullptr || !record->is_atomic)
+            return false;
+        // the device's own float atomic is one call whose value is the whole of it, as vulkan writes it
+        if (p.native_float_atomics && !p.e.at(c->arguments).empty())
+            if (auto const& t = p.m.at(p.e.at(p.e.at(c->arguments)[0]).type);
+                t.kind == check::type_kind::atomic && p.m.name_of(t.element) == builtins::k_float)
+                return false;
+        return true;
     }
 
     /// The image member whose texel `x` loads or, with `is_store`, stores; null for any other expression.

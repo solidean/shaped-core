@@ -341,3 +341,50 @@ TEST("sgl target text - @barrier, @subgroup and @derivatives declare what a body
     REQUIRE(fence.has_error());
     CHECK(fence.error().contains("fence waits for every thread of the workgroup"));
 }
+
+TEST("sgl target text - a body's text under has(.f) uses f, which is what the compile asks of the device")
+{
+    constexpr auto source = "binding work:\n"
+                            "    values: mut buffer[float]\n"
+                            "\n"
+                            "fun scaled(x: float) -> float:\n"
+                            "    const if has(.subgroups):\n"
+                            "        \"hlsl\n"
+                            "            $result = WaveActiveSum($x);\n"
+                            "        \"\n"
+                            "    else:\n"
+                            "        return x\n"
+                            "\n"
+                            "@compute(64) fun main_cs(@thread_id id: int3){work}:\n"
+                            "    work.values[id.x] = scaled(work.values[id.x])\n";
+    auto device = sgl::check::feature_set();
+    device.set(sgl::check::feature::subgroups);
+    auto const with = compiled(source, target::hlsl_dx12, device);
+    auto const without = compiled(source, target::hlsl_dx12);
+    REQUIRE(with.has_value());
+    REQUIRE(without.has_value());
+    CHECK(with.value().features.has(sgl::check::feature::subgroups));
+    CHECK(!without.value().features.has(sgl::check::feature::subgroups));
+}
+
+TEST("sgl target text - maybe_reorder asks shader execution reordering of the device that has it")
+{
+    constexpr auto source = "require raytracing_pipeline\n"
+                            "\n"
+                            "binding work:\n"
+                            "    values: mut buffer[float]\n"
+                            "\n"
+                            "@raygen fun main_cs(@launch_id id: int3){work}:\n"
+                            "    maybe_reorder(id.x as uint, 1)\n"
+                            "    work.values[id.x] = 1.0\n";
+    auto device = sgl::check::feature_set();
+    device.set(sgl::check::feature::shader_execution_reordering);
+    auto const with = compiled(source, target::hlsl_dx12, device);
+    REQUIRE(with.has_value());
+    CHECK(with.value().text.contains("dx::MaybeReorderThread("));
+    CHECK(with.value().features.has(sgl::check::feature::shader_execution_reordering));
+    auto const without = compiled(source, target::hlsl_dx12);
+    REQUIRE(without.has_value());
+    CHECK(!without.value().text.contains("MaybeReorderThread"));
+    CHECK(!without.value().features.has(sgl::check::feature::shader_execution_reordering));
+}

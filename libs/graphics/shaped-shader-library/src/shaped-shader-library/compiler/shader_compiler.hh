@@ -119,6 +119,10 @@ struct slib::shader_source_description
     cc::string label;
     /// The values SGL's `preprocess` writes the text with; what it writes is all a compile reads, so the cache keys on that.
     cc::vector<shader_option> options;
+    /// What the text needs of a device, where the source language states it, which only SGL does; set by the library
+    /// between preprocess and compile.
+    /// A compiler picks what its target needs from it: DXC compiles at Shader Model 6.9 for shader execution reordering.
+    sg::feature_set required_features;
     /// The module library an SGL source may `use`, which every other language ignores.
     /// A file of it whose path is `label` is the source itself, and is left out.
     cc::span<module_source const> modules;

@@ -98,6 +98,14 @@ sg::async_compiled_shader slib::shader_asset::acquire(sg::shader_format format, 
                 key.push_back(o);
                 break;
             }
+    // What the device has is no option of the source, so no entry point lists it, and it may change what any of them
+    // writes: a `has` anywhere it inlines, a prelude function's included.
+    for (auto const& o : options)
+        if (o.name == k_device_features_option)
+        {
+            key.push_back(o);
+            break;
+        }
     cc::sort(key, [](shader_option const& a, shader_option const& b) { return a.name < b.name; });
 
     auto const entry_of = [&](state& s) -> format_entry&

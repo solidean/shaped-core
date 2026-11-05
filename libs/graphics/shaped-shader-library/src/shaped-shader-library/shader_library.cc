@@ -619,6 +619,7 @@ void slib::shader_library::_compile_text(compile_outcome& outcome,
     auto pending = cc::optional<sgl_interface>();
     if (preprocessed.value().stated.has_value())
     {
+        desc.required_features = preprocessed.value().stated.value().required_features.value_or(sg::feature_set());
         pending = sgl_interface{.shader = cc::move(preprocessed.value().stated.value()),
                                 .declared = cc::move(preprocessed.value().declared_bindings),
                                 .layouts = cc::move(preprocessed.value().layouts),

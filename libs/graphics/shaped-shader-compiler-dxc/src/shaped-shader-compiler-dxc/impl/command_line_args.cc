@@ -59,6 +59,8 @@ namespace
         return "6_7";
     case shader_model::sm_6_8:
         return "6_8";
+    case shader_model::sm_6_9:
+        return "6_9";
     }
     return "6_8";
 }

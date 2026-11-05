@@ -164,9 +164,11 @@ It proves conditions on API and feature, text bodies with a preamble, an optiona
 The fallback has to reach the `uint` bits of an `atomic[float]`, which no SGL spelling does yet, so an `@internal` builtin for that view comes with it.
 
 **SER, second.**
-A specialized `hit_object` type and a specialized `reorder` function, with a `"hlsl` body under `.dx12` and an empty SGL fallback, since reordering is a hint.
-Under `.vulkan` the `"hlsl` body needs SPIR-V instructions of its own, since DXC lowers no SER to SPIR-V.
-sg needs the feature, the device extension and an SM 6.9 profile from slib's DXC edge first.
+The first half is done: prelude `maybe_reorder(hint, bits)`, a text body under `has(.shader_execution_reordering)` with an empty fallback.
+sg reports the feature on dx12 where the Agility SDK's runtime gives Shader Model 6.9, and slib compiles an entry point that uses it at 6.9.
+A GPU test traces through a reordering raygen on dx12, really reordering, and through its fallback on vulkan.
+Left is a specialized `hit_object` text type, traced, reordered by hit and invoked.
+Under `.vulkan` it needs SPIR-V instructions of its own, since no DXC lowers SER to SPIR-V; neither the pinned 1.9.2602 nor the Vulkan SDK's does.
 
 **Opacity micromaps need no text body.**
 sg builds them on vulkan already, and a trace honors one with no change to the shader.

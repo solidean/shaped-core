@@ -4048,6 +4048,7 @@ enum feature:
     helper_lane_query
     vertex_layer_output
     float_atomic_add
+    shader_execution_reordering
 
 /// The API this compile writes for, known once a body is inlined; no const holds it.
 const target_api: graphics_api = .none

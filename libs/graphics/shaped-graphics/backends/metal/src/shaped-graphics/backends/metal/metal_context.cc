@@ -159,6 +159,9 @@ bool metal_context::supports(sg::feature f) const
     case sg::feature::float_atomic_add:
         // `atomic_float` and `atomic_fetch_add_explicit` exist in device and threadgroup memory from MSL 3.0.
         return true;
+    case sg::feature::shader_execution_reordering:
+        // Metal reorders no ray-tracing work on request.
+        return false;
     case sg::feature::wireframe_fill:
         // `MTLTriangleFillModeLines` is on every Apple GPU.
         return true;

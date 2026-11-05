@@ -551,6 +551,7 @@ rays path_rays:                                          // a ray set: position 
 @intersection fun sphere(b: procedural_box) -> report[sphere_attributes]   // no payload; A a struct of the program
 @callable fun doubled(v: mut operand)
 trace(b.world, r, path_rays.surface, mut p, flags = f)   // a trace of a ray type: raygen, miss, closest hit only (CHK-329)
+maybe_reorder(hint, 4)                                   // raygen: regroup invocations by hint's low bits; dx12 SM 6.9 SER, else nothing
 hit_group textured for path_rays:                        // one row: a record per ray type (CHK-330)
     surface = (closest_hit = shade, any_hit = cutout)
     occlusion = ()                                       // empty: accept, run no closest hit

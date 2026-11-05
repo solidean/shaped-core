@@ -895,6 +895,7 @@ A feature is what a device may lack, so using one makes a shader non-portable on
   The 16-bit types add `shader_f16` and `shader_int16` (CHK-382), and the subgroup operations `subgroups` (CHK-376).
   Coherent memory adds `device_coherence` (CHK-368), image atomics `image_atomics` (CHK-372), and a pixel stage's strong compare-exchange `helper_lane_query` (EMIT-163).
   A `@layer` field adds `vertex_layer_output` (CHK-419).
+  What `has` asks rather than a `require` needs adds `float_atomic_add` and `shader_execution_reordering` (CHK-426).
   The stages and stage inputs a device may lack add `primitive_index`, `sample_rate_shading`, `geometry_shader` and `tessellation_shader`.
   Any other name is the normal error `unknown-feature`, and its detail lists the names.
 * **CHK-259** A `require` at file scope grants its features to everything in the file ([why](why/checking.md#chk-259)).
@@ -926,6 +927,7 @@ A feature is what a device may lack, so using one makes a shader non-portable on
   `$name.member`, a run of fused `.symbol` pairs (STR-25), is the target's member of the argument, which a target writes as a primary.
   The text is not checked, so a call of such a function is what its declaration says (CHK-431); what GPU memory it touches is what its parameters' marks say, and the footprint reads them.
   A description writes for no target, so it reads such a body as any of its alternatives, whose footprint is the same.
+  A text inside a branch a `has(.f)` granted (CHK-426) uses `f`: the entry point's features name it, and a compile reads what it needs from them, a shader model among it.
 * **CHK-431** A function whose body is a target's text declares what its text does, since the check reads nothing of the text.
   `@pure` makes a call of it a value of no effect, as uniform as its arguments; without it, a call has an effect and gives a value that may differ between invocations.
   `@barrier`, `@subgroup` and `@derivatives` say that its text waits for the workgroup, exchanges values in the subgroup, or takes derivatives across a quad of pixels.

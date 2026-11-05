@@ -27,6 +27,8 @@ enum class ssc::dxc::shader_model
     sm_6_6,
     sm_6_7,
     sm_6_8,
+    /// Shader execution reordering and DXR 1.2, which only the Agility SDK's runtime runs.
+    sm_6_9,
 };
 
 /// Optimization level — one DXC flag.
