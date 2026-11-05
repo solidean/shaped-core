@@ -12,5 +12,5 @@ refs:
 The float-specials probe computes `inf` as `one / zero`, then `inf * zero`, which IEEE makes a NaN.
 On an Intel Arc B580, driver 32.0.101.9150, it comes back 1.0 even from `-Gis` DXIL, which marks no operation `fast`.
 `0 * inf` with the infinity read from a buffer stays a NaN: the driver cancels the reciprocal against the multiply.
-[intel-d3d12-strict-reciprocal-product-folds-to-one](../../../../docs/bugs-external/intel-d3d12-strict-reciprocal-product-folds-to-one/readme.md) reproduces it standalone, against WARP.
+[intel-d3d12-strict-reciprocal-product-folds-to-one](../../../../../docs/bugs-external/intel-d3d12-strict-reciprocal-product-folds-to-one/readme.md) reproduces it standalone, against WARP.
 The test skips that one check on Intel's dx12 adapters until a driver passes `run.py`.
