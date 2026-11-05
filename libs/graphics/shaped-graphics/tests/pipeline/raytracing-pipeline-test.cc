@@ -1101,9 +1101,9 @@ ASYNC_INVOCABLE_TEST("sg - an SGL ray-tracing pipeline finds each traced TLAS's 
     if (!ctx->supports(sg::feature::raytracing_pipeline))
         SKIP("this device has no ray-tracing pipelines");
 
-    using scenes_t = shaders::raytracing_pipeline::three_scenes_path_t;
+    using scenes_t = shaders::raytracing_scenes::three_scenes_path_t;
     auto const pipeline = co_await ctx->cached.acquire_raytracing_pipeline(
-        co_await shaders::raytracing_pipeline::three_scenes_path.description(*ctx));
+        co_await shaders::raytracing_scenes::three_scenes_path.description(*ctx));
     REQUIRE(pipeline != nullptr);
     auto table_desc = scenes_t::table_description(pipeline);
     auto const one = scenes_t::add_row(table_desc, scenes_t::hit_groups_t::marked_one);
@@ -1131,13 +1131,13 @@ ASYNC_INVOCABLE_TEST("sg - an SGL ray-tracing pipeline finds each traced TLAS's 
     auto const third = tlas_of(three);
 
     auto const near_group = ctx->transient.create_binding_group(
-        *cmd, ctx->cached.acquire_binding_group_layout<shaders::raytracing_pipeline::near_scenes>(),
-        shaders::raytracing_pipeline::near_scenes{.first = first->as_view(),
-                                                  .second = second->as_view(),
-                                                  .marks = marks.as_readwrite_buffer()});
+        *cmd, ctx->cached.acquire_binding_group_layout<shaders::raytracing_scenes::near_scenes>(),
+        shaders::raytracing_scenes::near_scenes{.first = first->as_view(),
+                                                .second = second->as_view(),
+                                                .marks = marks.as_readwrite_buffer()});
     auto const far_group = ctx->transient.create_binding_group(
-        *cmd, ctx->cached.acquire_binding_group_layout<shaders::raytracing_pipeline::far_scenes>(),
-        shaders::raytracing_pipeline::far_scenes{.third = third->as_view()});
+        *cmd, ctx->cached.acquire_binding_group_layout<shaders::raytracing_scenes::far_scenes>(),
+        shaders::raytracing_scenes::far_scenes{.third = third->as_view()});
     cmd->raytracing.bind_pipeline(*pipeline);
     cmd->raytracing.bind_group(0, *near_group);
     cmd->raytracing.bind_group(1, *far_group);

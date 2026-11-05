@@ -1,0 +1,54 @@
+// Three acceleration structures in one dispatch, two in one group and one in another, each instance naming its own
+// hit group: a trace finds its closest hit's record through the instances of the structure it traced
+require raytracing_pipeline
+
+binding near_scenes:
+    first: acceleration_structure[.triangles]
+    second: acceleration_structure[.triangles]
+    marks: mut buffer[int4]
+
+binding far_scenes:
+    third: acceleration_structure[.triangles]
+
+struct marked:
+    group: int
+
+rays marked_rays:
+    probe: marked
+
+@raygen fun three_scenes(@launch_id id: int3){near_scenes, far_scenes}:
+    let r = ray(origin = pos3(1.0, 1.0, -1.0), direction = vec3(0.0, 0.0, 1.0))
+    let mut a = marked(0)
+    trace(near_scenes.first, r, marked_rays.probe, mut a)
+    let mut b = marked(0)
+    trace(near_scenes.second, r, marked_rays.probe, mut b)
+    let mut c = marked(0)
+    trace(far_scenes.third, r, marked_rays.probe, mut c)
+    near_scenes.marks[id.x] = int4(a.group, b.group, c.group, 0)
+
+@miss fun unmarked(m: mut marked):
+    m.group = -1
+
+@closest_hit fun mark_one(h: triangle_hit, m: mut marked):
+    m.group = 1
+
+@closest_hit fun mark_two(h: triangle_hit, m: mut marked):
+    m.group = 2
+
+@closest_hit fun mark_three(h: triangle_hit, m: mut marked):
+    m.group = 3
+
+hit_group marked_one for marked_rays:
+    probe = (closest_hit = mark_one)
+
+hit_group marked_two for marked_rays:
+    probe = (closest_hit = mark_two)
+
+hit_group marked_three for marked_rays:
+    probe = (closest_hit = mark_three)
+
+@raytracing pipeline three_scenes_path:
+    rays = marked_rays
+    raygen = three_scenes
+    miss.probe = unmarked
+    hit_groups = (marked_one, marked_two, marked_three)

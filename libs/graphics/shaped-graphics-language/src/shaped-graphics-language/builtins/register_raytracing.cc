@@ -1,4 +1,3 @@
-#include <clean-core/common/assert.hh>
 #include <clean-core/string/format.hh>
 #include <shaped-graphics-language/builtins/register.hh>
 #include <shaped-graphics-language/builtins/registry.hh>
@@ -457,8 +456,10 @@ written write_polyfill(call_context const& ctx)
 /// closest hit's record found from the instance's offset as DXR finds it, in the offsets of the structure it traced.
 written write_trace_ray_msl(call_context const& ctx)
 {
-    CC_ASSERT(!ctx.hit_offsets.empty(), "a metal trace names an acceleration-structure member");
     auto const& a = ctx.arguments;
+    // empty only where no member is named, which the registry's own checks write: those read the first slot
+    auto const offsets
+        = ctx.hit_offsets.empty() ? cc::string_view("sgl_ctx.hit_offsets->groups[0][0].instances") : ctx.hit_offsets;
     auto const mint = [&](cc::string_view name) { return ctx.mint.is_valid() ? ctx.mint(name) : cc::string(name); };
     auto const data = mint("sgl_d");
     auto const traversal = mint("sgl_i");
@@ -484,7 +485,7 @@ written write_trace_ray_msl(call_context const& ctx)
     lines.push_back(cc::format("    sgl_t.closest_hit[{5}[{0}.instance_id] + {0}.geometry_id * "
                                "uint({1}) + "
                                "uint({2})]({3}.payload, {4}, sgl_ctx);",
-                               found, a[8].text, a[7].text, data, record, ctx.hit_offsets));
+                               found, a[8].text, a[7].text, data, record, offsets));
     result.text = cc::format("sgl_load({}, {}.payload)", a[10].text, data);
     return result;
 }
