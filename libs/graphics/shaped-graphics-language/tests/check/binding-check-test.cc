@@ -478,8 +478,21 @@ TEST("sgl check - a binding array is one dimension of resources, bounded, grante
                                  granted))
           == "");
     CHECK(reports_for("binding b:\n    t: texture_2d[float4][8]\n").contains("needs binding_arrays"));
+    // CHK-490: an unbounded array is its binding's last member, under a feature of its own
     CHECK(reports_for(cc::format("{}binding b:\n    t: texture_2d[float4][]\n", granted))
-              .contains("an unbounded binding array, which sg binds none of yet"));
+              .contains("needs unbounded_binding_arrays"));
+    CHECK(reports_for(
+              cc::format("{}require unbounded_binding_arrays\n\nbinding b:\n    t: texture_2d[float4][]\n", granted))
+          == "");
+    CHECK(reports_for(cc::format("{}require unbounded_binding_arrays\n\nbinding b:\n    t: texture_2d[float4][]\n"
+                                 "    s: buffer[float]\n",
+                                 granted))
+              .contains("member-not-allowed-here"));
+    // CHK-491: the host decides the length, and nothing reads it back
+    CHECK(reports_for(cc::format("{}require unbounded_binding_arrays\n\nbinding b:\n    t: texture_2d[float4][]\n\n"
+                                 "@compute(1) fun cs(@thread_id id: int3){{b}}:\n    let n = b.t.length\n",
+                                 granted))
+              .contains("the length of an unbounded binding array"));
     CHECK(
         reports_for(cc::format("{}binding b:\n    s: comparison_sampler[4]\n", granted)).contains("an array of samplers"));
     // `sampler` is a keyword, and subscripted in a type position it reads as the name does (AST-135)

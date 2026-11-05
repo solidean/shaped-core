@@ -68,6 +68,8 @@ enum class sgl::check::feature : sgl::u8
     shader_f64,
     /// `atomic[long]` and `atomic[ulong]` in a buffer (CHK-296), which WebGPU and Metal have on no device.
     shader_int64_atomics,
+    /// A binding array `T[]` whose length the host binds (CHK-490), which WebGPU and Metal have on no device yet.
+    unbounded_binding_arrays,
 };
 
 CC_FLAG_ENUM_INDEXED(sgl::check, feature, u32);
@@ -106,6 +108,7 @@ inline constexpr cc::string_view k_feature_names[] = {
     "shader_int64",                //
     "shader_f64",                  //
     "shader_int64_atomics",        //
+    "unbounded_binding_arrays",    //
 };
 inline constexpr isize k_feature_count = isize(sizeof(k_feature_names) / sizeof(k_feature_names[0]));
 

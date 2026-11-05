@@ -200,6 +200,9 @@ bool metal_context::supports(sg::feature f) const
     case sg::feature::shader_int64_atomics:
         // MSL has no double, and its 64-bit atomics are a ulong's min and max alone.
         return false;
+    case sg::feature::unbounded_binding_arrays:
+        // an argument buffer would hold one, which this backend does not lay out yet
+        return false;
     case sg::feature::image_atomics:
         // Inferred from the floor rather than probed: texture atomics need Apple7, below every Metal 4 device.
         return true;

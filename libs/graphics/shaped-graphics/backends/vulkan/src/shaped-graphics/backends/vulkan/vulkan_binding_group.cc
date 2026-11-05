@@ -16,15 +16,13 @@ namespace
 {
 /// The heap range one group of `layout` needs, or an error when the heap cannot supply it.
 /// An empty layout takes no space, which is legal and yields an empty range.
-cc::result<vulkan_descriptor_range> allocate_range(vulkan_context& ctx,
-                                                   vulkan_binding_group_layout const& layout,
-                                                   bool transient)
+cc::result<vulkan_descriptor_range> allocate_range(vulkan_context& ctx, isize size_in_bytes, bool transient)
 {
-    if (layout._size_in_bytes == 0)
+    if (size_in_bytes == 0)
         return vulkan_descriptor_range{};
 
-    auto range = transient ? ctx._descriptor_heap.allocate_transient(layout._size_in_bytes)
-                           : ctx._descriptor_heap.allocate_persistent(layout._size_in_bytes);
+    auto range = transient ? ctx._descriptor_heap.allocate_transient(size_in_bytes)
+                           : ctx._descriptor_heap.allocate_persistent(size_in_bytes);
 
     // Exhaustion is a recoverable runtime failure rather than a contract violation — a large bindless table is
     // exactly the case that hits it — so it is reported instead of asserted.
@@ -134,12 +132,17 @@ cc::result<vulkan_binding_group_handle> vulkan_binding_group::create_resolved(vu
 
     // Stored on the group before anything can fail, so the destructor frees a persistent range even when a later
     // validation error abandons creation partway.
+    // an unbounded binding, the layout's last, takes as many elements as its views; a layout holds one at most
+    auto unbounded_count = isize(0);
+    for (auto const& nv : views)
+        if (layout->bindings()[nv.slot].is_unbounded())
+            unbounded_count = nv.view->span().size();
     {
-        auto r = allocate_range(ctx, *layout, group->transient);
+        auto r = allocate_range(ctx, layout->group_size_in_bytes(unbounded_count), group->transient);
         CC_RETURN_IF_ERROR(r);
         group->range = cc::move(r.value());
     }
-    byte* const base = layout->_size_in_bytes == 0 ? nullptr : ctx._descriptor_heap.mapped_at(group->range);
+    byte* const base = group->range.is_empty() ? nullptr : ctx._descriptor_heap.mapped_at(group->range);
 
     auto const bindings = layout->bindings();
 
@@ -160,7 +163,8 @@ cc::result<vulkan_binding_group_handle> vulkan_binding_group::create_resolved(vu
         auto const& b = bindings[slot];
         bool const is_array = b.is_array();
         auto const element_views = nv.view->span();
-        if (element_views.size() != isize(b.count))
+        if (b.is_unbounded() ? element_views.empty() || element_views.size() > isize(layout->_unbounded_capacity)
+                             : element_views.size() != isize(b.count))
             return cc::error(cc::format("binding_group: '{}' takes {} view(s), {} provided (an array binding takes "
                                         "exactly one per element; a vacant element is sg::vacant_view)",
                                         nv.name, b.count, element_views.size()));
@@ -306,7 +310,7 @@ cc::result<vulkan_binding_group_handle> vulkan_binding_group::create_from_image(
     group->creation_epoch = ctx.current_epoch();
 
     {
-        auto r = allocate_range(ctx, *layout, /*transient =*/false);
+        auto r = allocate_range(ctx, layout->_size_in_bytes, /*transient =*/false);
         CC_RETURN_IF_ERROR(r);
         group->range = cc::move(r.value());
     }

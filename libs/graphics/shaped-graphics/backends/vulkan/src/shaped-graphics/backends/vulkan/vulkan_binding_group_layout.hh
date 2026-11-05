@@ -34,13 +34,15 @@ public:
                                 VkDescriptorSetLayout layout,
                                 cc::vector<VkSampler> slot_samplers,
                                 isize size_in_bytes,
-                                cc::vector<isize> binding_offsets)
+                                cc::vector<isize> binding_offsets,
+                                u32 unbounded_capacity)
       : sg::binding_group_layout(structural_hash, cc::move(bindings), cc::move(static_samplers)),
         _ctx(ctx),
         _layout(layout),
         _slot_samplers(cc::move(slot_samplers)),
         _size_in_bytes(size_in_bytes),
-        _binding_offsets(cc::move(binding_offsets))
+        _binding_offsets(cc::move(binding_offsets)),
+        _unbounded_capacity(unbounded_capacity)
     {
     }
 
@@ -52,6 +54,10 @@ public:
     /// Byte offset of element `element` of binding slot `slot` within one group's range.
     /// `slot` indexes `bindings()`, and `element` must be inside that binding's count.
     [[nodiscard]] isize descriptor_offset_of(isize slot, int element) const;
+
+    /// How many bytes a group takes whose unbounded binding holds `unbounded_count` elements; `_size_in_bytes` for a
+    /// layout without one.
+    [[nodiscard]] isize group_size_in_bytes(isize unbounded_count) const;
 
     vulkan_context& _ctx;
     VkDescriptorSetLayout _layout = VK_NULL_HANDLE;
@@ -66,4 +72,7 @@ public:
     /// Byte offset of each binding's first descriptor within that range, parallel to `bindings()`.
     /// Element `i` of an array binding follows at `i * descriptor_size_of(type)`.
     cc::vector<isize> _binding_offsets;
+
+    /// The most elements the layout's last binding may hold where it is unbounded, and 0 where it is not.
+    u32 _unbounded_capacity = 0;
 };

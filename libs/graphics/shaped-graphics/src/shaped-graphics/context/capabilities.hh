@@ -200,6 +200,12 @@ enum class sg::feature
     /// Workgroup memory's are optional on both, and SGL holds no 64-bit atomic there yet.
     /// Metal's 64-bit atomics are a ulong's min and max alone, and WebGPU has none.
     shader_int64_atomics,
+
+    /// A binding of `count == 0`, an array whose length each binding group decides by the views it is given.
+    /// It is the last binding of its layout, and of its kind's table, which is where both APIs allow one.
+    /// D3D12 grants it at resource binding tier 3, Vulkan with `descriptorBindingVariableDescriptorCount`.
+    /// Metal would reach it through an argument buffer, which is not wired up yet, and WebGPU has no binding arrays.
+    unbounded_binding_arrays,
 };
 
 CC_FLAG_ENUM_INDEXED(sg, feature, cc::u64);
@@ -247,8 +253,9 @@ inline constexpr feature k_all_features[] = {
     feature::shader_int64,
     feature::shader_f64,
     feature::shader_int64_atomics,
+    feature::unbounded_binding_arrays,
 };
-static_assert(isize(sizeof(k_all_features) / sizeof(k_all_features[0])) == isize(feature::shader_int64_atomics) + 1,
+static_assert(isize(sizeof(k_all_features) / sizeof(k_all_features[0])) == isize(feature::unbounded_binding_arrays) + 1,
               "k_all_features lists every feature");
 
 /// The enumerator's name, `ray_query`, which is also what SGL's `require` spells it as.
@@ -328,6 +335,8 @@ static_assert(isize(sizeof(k_all_features) / sizeof(k_all_features[0])) == isize
         return "shader_f64";
     case feature::shader_int64_atomics:
         return "shader_int64_atomics";
+    case feature::unbounded_binding_arrays:
+        return "unbounded_binding_arrays";
     }
     return "";
 }
