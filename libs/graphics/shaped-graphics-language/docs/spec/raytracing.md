@@ -259,6 +259,10 @@ It is a hint: each invocation goes on as it was, and only which ones share a wav
 It is dx12's `dx::MaybeReorderThread` where the device has `shader_execution_reordering`, which needs Shader Model 6.9 from the Agility SDK, and nothing elsewhere.
 The prelude writes it as a text body under `const if has(…)`, so the compile that takes the text asks the feature of the pipeline (CHK-427).
 
+**`trace(…, reorder = true)` regroups by what the trace hit**, and `reorder = hint, reorder_bits = n` by the hit and the hint's low `n` bits (CHK-433).
+On dx12 with the feature, the trace is a hit object: traced, regrouped by it, then its shaders run, so invocations meeting one material shade together.
+Everywhere else it is the plain trace, which computes the same.
+
 ### Hit groups
 
 **`hit_group name for set:` is one row of the table: a record per ray type** (CHK-330).

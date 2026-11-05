@@ -552,6 +552,8 @@ rays path_rays:                                          // a ray set: position 
 @callable fun doubled(v: mut operand)
 trace(b.world, r, path_rays.surface, mut p, flags = f)   // a trace of a ray type: raygen, miss, closest hit only (CHK-329)
 maybe_reorder(hint, 4)                                   // raygen: regroup invocations by hint's low bits; dx12 SM 6.9 SER, else nothing
+trace(b.world, r, set.ray, mut p, reorder = true)       // raygen: dx12 SER traces a hit object, regroups by it, invokes; else plain
+trace(…, reorder = material, reorder_bits = 4)          // by the hit and a uint hint's low bits, 1..16 (CHK-433)
 hit_group textured for path_rays:                        // one row: a record per ray type (CHK-330)
     surface = (closest_hit = shade, any_hit = cutout)
     occlusion = ()                                       // empty: accept, run no closest hit

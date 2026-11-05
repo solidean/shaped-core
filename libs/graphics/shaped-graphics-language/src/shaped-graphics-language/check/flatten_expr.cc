@@ -502,10 +502,48 @@ auto sgl::check::impl::flattener::flatten_ray_trace(ast::expr_id id, ast::call c
     auto flags = add_expr(c.out.at(c.out.functions[c.out.at(callee).info].parameters)[5].type, id,
                           flat_int_literal{.value = 0});
     auto mask = add_expr(int_type(), id, flat_int_literal{.value = 0xff});
+    auto reorder = ast::expr_id::none;
+    auto reorder_bits = ast::expr_id::none;
     for (auto i = isize(4); i < arguments.size(); ++i)
     {
         auto const name = c.text_of(file(), arguments[i].name);
-        (name == "flags" ? flags : mask) = flatten_expr(arguments[i].value);
+        if (name == "reorder")
+            reorder = arguments[i].value;
+        else if (name == "reorder_bits")
+            reorder_bits = arguments[i].value;
+        else
+            (name == "flags" ? flags : mask) = flatten_expr(arguments[i].value);
+    }
+    // CHK-433: a raygen of a dx12 compile whose device reorders traces through a hit object; every other trace is the
+    // plain one, its hint unevaluated, since a hint changes nothing a shader computes
+    auto const target = compiled_for();
+    auto const reorders = ast::is_valid(reorder) && entry.entry_stage == stage::raygen
+                       && target.api == graphics_api::dx12
+                       && target.device_features.has(feature::shader_execution_reordering);
+    auto hint = flat_expr_id::none;
+    auto hint_bits = flat_expr_id::none;
+    auto is_reordered = false;
+    if (reorders && c.out.name_of(tables().type_at(reorder)) == builtins::k_bool)
+        is_reordered = c.known_condition(file(), reorder).value_or(false);
+    else if (reorders)
+    {
+        hint = flatten_expr(reorder);
+        hint_bits = flatten_expr(reorder_bits);
+        is_reordered = is_valid(hint) && is_valid(hint_bits);
+    }
+    if (is_reordered)
+    {
+        auto const name = cc::string_view(is_valid(hint) ? "trace_ray_reordered_by_hint" : "trace_ray_reordered");
+        auto const* const reordered = c.prelude_names.get_ptr(name);
+        for (auto const candidate :
+             reordered == nullptr ? cc::span<symbol_id const>() : cc::span<symbol_id const>(*reordered))
+            if (c.out.at(c.out.functions[c.out.at(candidate).info].parameters)[0].type == world_type)
+                callee = candidate;
+        auto within = cc::vector<symbol_id>();
+        for (auto const& fr : frames)
+            within.push_back(fr.function);
+        auto const used = feature_set(feature::shader_execution_reordering);
+        feature_uses.push_back({.file = file(), .call = id, .features = used, .within = cc::move(within), .granted = used});
     }
     auto const count = c.out.at(c.out.at(c.out.at(t.set).type).members).size();
 
@@ -524,7 +562,7 @@ auto sgl::check::impl::flattener::flatten_ray_trace(ast::expr_id id, ast::call c
         payload = local_ref(local, id);
     }
 
-    flat_expr_id const values[] = {
+    auto values = cc::vector<flat_expr_id>{
         world,
         field(0),
         field(1),
@@ -535,8 +573,13 @@ auto sgl::check::impl::flattener::flatten_ray_trace(ast::expr_id id, ast::call c
         add_expr(int_type(), id, flat_int_literal{.value = t.ray}),
         add_expr(int_type(), id, flat_int_literal{.value = i32(count)}),
         add_expr(int_type(), id, flat_int_literal{.value = t.ray}),
-        payload,
     };
+    if (is_reordered && is_valid(hint))
+    {
+        values.push_back(hint);
+        values.push_back(hint_bits);
+    }
+    values.push_back(payload);
     auto const traced_ray = flat_traced_ray{.set = t.set, .ray = t.ray};
     if (!entry.traced_rays.values().any([&](flat_traced_ray const& r) { return r == traced_ray; }))
         entry.traced_rays.push_back(traced_ray);

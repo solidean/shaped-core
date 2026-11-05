@@ -130,6 +130,25 @@ hit_group spheres for path_rays:
     miss.occlusion = open_sky
     hit_groups = (textured, spheres)
 
+// the trace itself regrouped by what it hit and by a hint, before the hit's shaders run
+@raygen fun hit_reordered_primary(@launch_id id: int3){traced}:
+    let mut p = radiance(0.0, 0.0, 0.0, 0, 0, 0, 0)
+    let r = ray(
+        origin = pos3((id.x as float) + 0.25, (id.y as float) + 0.5, -1.0)
+        direction = vec3(0.0, 0.0, 1.0)
+    )
+    trace(traced.world, r, path_rays.surface, mut p, reorder = id.y as uint, reorder_bits = 3)
+    let at = id.x + id.y * 8
+    traced.hits[at] = float4(p.t, p.u, p.v, 0.0)
+    traced.ids[at] = int4(p.is_hit, p.instance_id, p.primitive, p.is_lit)
+
+@raytracing pipeline hit_reordered_path:
+    rays = path_rays
+    raygen = hit_reordered_primary
+    miss.surface = sky
+    miss.occlusion = open_sky
+    hit_groups = (textured, spheres)
+
 // ---- the same rays, their results stored into images: the stages a ray runs once each store as compute does
 
 binding pictured:

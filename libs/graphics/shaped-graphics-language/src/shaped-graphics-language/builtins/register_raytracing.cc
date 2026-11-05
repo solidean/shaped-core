@@ -561,7 +561,37 @@ written write_trace_ray(call_context const& ctx)
     return result;
 }
 
+/// `trace_ray_reordered`: the trace as a hit object, the invocations regrouped by it, and its shaders run from it.
+/// `data` 1 adds a coherence hint and its bits, the arguments past the miss index.
+written write_trace_ray_reordered(call_context const& ctx)
+{
+    if (ctx.target != language::hlsl)
+        return {};
+    auto const desc = ctx.mint.is_valid() ? ctx.mint("ray_desc") : cc::string("ray_desc");
+    auto const hit = ctx.mint.is_valid() ? ctx.mint("hit_object") : cc::string("hit_object");
+    auto const payload = ctx.arguments[ctx.arguments.size() - 1].text;
+    auto result = written();
+    result.lines.push_back(cc::format("RayDesc {};", desc));
+    result.lines.push_back(cc::format("{}.Origin = {};", desc, ctx.arguments[1].text));
+    result.lines.push_back(cc::format("{}.TMin = {};", desc, ctx.arguments[3].text));
+    result.lines.push_back(cc::format("{}.Direction = {};", desc, ctx.arguments[2].text));
+    result.lines.push_back(cc::format("{}.TMax = {};", desc, ctx.arguments[4].text));
+    result.lines.push_back(cc::format("dx::HitObject {} = dx::HitObject::TraceRay({}, uint({}), uint({}), {}, {}, {}, {}, {});",
+                                      hit, ctx.arguments[0].text, ctx.arguments[5].text, ctx.arguments[6].text,
+                                      ctx.arguments[7].text, ctx.arguments[8].text, ctx.arguments[9].text, desc,
+                                      payload));
+    if (ctx.data == 1)
+        result.lines.push_back(cc::format("dx::MaybeReorderThread({}, uint({}), uint({}));", hit,
+                                          ctx.arguments[10].text, ctx.arguments[11].text));
+    else
+        result.lines.push_back(cc::format("dx::MaybeReorderThread({});", hit));
+    result.text = cc::format("dx::HitObject::Invoke({}, {})", hit, payload);
+    return result;
+}
+
 constexpr cc::string_view k_trace_ray_hlsl[] = {"RayDesc", "TraceRay"};
+constexpr cc::string_view k_trace_ray_reordered_hlsl[]
+    = {"RayDesc", "dx", "HitObject", "TraceRay", "MaybeReorderThread", "Invoke"};
 constexpr cc::string_view k_trace_ray_msl[] = {
     "sgl_configure",
     "sgl_record_of",
@@ -767,6 +797,29 @@ void sgl::builtins::register_raytracing(registry& r)
             .takes_element = true,
             .features = check::feature_set(check::feature::raytracing_pipeline),
         });
+
+    r.add_comment("// A trace of a ray type with `reorder` where the device has shader execution reordering (CHK-433).");
+    for (auto const is_hinted : {false, true})
+        for (auto const geometry : {"triangles", "procedural", "mixed"})
+            r.add(function_record{
+                .signature = cc::format(
+                    "@internal @stages(.raygen) fun {}(world: acceleration_structure[.{}], origin: pos3, direction: vec3, "
+                    "t_min: float, t_max: float, flags: ray_flags, mask: int, contribution: int, multiplier: int, "
+                    "miss: int{})",
+                    is_hinted ? "trace_ray_reordered_by_hint" : "trace_ray_reordered", geometry,
+                    is_hinted ? ", hint: uint, bits: int" : ""),
+                .doc = "/// Traces as `trace_ray` does, regrouping the invocations by the hit before its shaders run.",
+                .evaluate = nothing,
+                .write = {.kind = spelling_kind::custom,
+                          .custom = write_trace_ray_reordered,
+                          .data = is_hinted ? 1u : 0u,
+                          .writes_lines = is_not_wgsl,
+                          .hlsl_names = k_trace_ray_reordered_hlsl},
+                .writes_through = written_argument::element,
+                .takes_element = true,
+                // shader execution reordering too, which the trace that chose it records as the device's grant
+                .features = check::feature_set(check::feature::raytracing_pipeline),
+            });
 
     r.add_comment("// A call of a callable, which `table[i](mut p)` lowers to with the table's place in the section "
                   "added "

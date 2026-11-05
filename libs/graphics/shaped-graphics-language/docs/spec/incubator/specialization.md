@@ -167,7 +167,9 @@ The fallback has to reach the `uint` bits of an `atomic[float]`, which no SGL sp
 The first half is done: prelude `maybe_reorder(hint, bits)`, a text body under `has(.shader_execution_reordering)` with an empty fallback.
 sg reports the feature on dx12 where the Agility SDK's runtime gives Shader Model 6.9, and slib compiles an entry point that uses it at 6.9.
 A GPU test traces through a reordering raygen on dx12, really reordering, and through its fallback on vulkan.
-Left is a specialized `hit_object` text type, traced, reordered by hit and invoked.
+The second half is a compiler construct rather than a text type, since only the compiler knows a ray type's table indices.
+`trace(…, reorder = true)`, or `reorder = hint, reorder_bits = n`, traces into a hit object, regroups by it and invokes it on dx12 (CHK-433), and is the plain trace elsewhere.
+Left is a first-class `hit_object`, which lets a raygen inspect a hit before it runs its shaders.
 Under `.vulkan` it needs SPIR-V instructions of its own, since no DXC lowers SER to SPIR-V; neither the pinned 1.9.2602 nor the Vulkan SDK's does.
 
 **Opacity micromaps need no text body.**

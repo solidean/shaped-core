@@ -124,6 +124,29 @@ TEST("sgl check - a trace hands over its ray type's payload as a place")
           == "unknown-member user:[bounce] path_rays has no ray type bounce\n");
 }
 
+TEST("sgl check - a trace reorders by a constant bool or by a uint hint and its bits")
+{
+    auto const trace_with = [](cc::string_view arguments, cc::string_view before = "")
+    {
+        return reports(cc::string("@raygen fun other(@launch_id id: int3){frame}:\n") + before
+                       + "    let mut p = radiance(float3(0.0, 0.0, 0.0))\n"
+                         "    trace(frame.world, ray(origin = pos3(0.0, 0.0, 0.0), direction = vec3(0.0, 0.0, 1.0), "
+                         "t_min = 0.0, t_max = 1.0), path_rays.surface, mut p"
+                       + arguments + ")\n");
+    };
+    // CHK-433: the hit alone, or a hint's low bits beside it
+    CHECK(trace_with(", reorder = true") == "");
+    CHECK(trace_with(", reorder = id.x as uint, reorder_bits = 4") == "");
+    CHECK(trace_with(", reorder = 7, reorder_bits = 16") == "");
+    // a bool is a constant, and a hint has its bits, from 1 to 16, beside it and nowhere else
+    CHECK(trace_with(", reorder = id.x > 2").starts_with("invalid-constant-argument"));
+    CHECK(trace_with(", reorder = id.x as uint").starts_with("invalid-constant-argument"));
+    CHECK(trace_with(", reorder = id.x as uint, reorder_bits = 17").starts_with("invalid-constant-argument"));
+    CHECK(trace_with(", reorder = true, reorder_bits = 4").starts_with("no-matching-overload"));
+    CHECK(trace_with(", reorder_bits = 4").starts_with("no-matching-overload"));
+    CHECK(trace_with(", reorder = id.x").starts_with("type-mismatch"));
+}
+
 TEST("sgl check - a hit group's shaders carry the payloads of their ray types")
 {
     CHECK(reports("hit_group swapped for path_rays:\n    occlusion = (any_hit = cutout)\n")
