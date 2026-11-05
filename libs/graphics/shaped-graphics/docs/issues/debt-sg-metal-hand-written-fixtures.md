@@ -5,6 +5,8 @@ refs:
   - file: libs/graphics/shaped-graphics/backends/metal/tests
   - file: libs/graphics/shaped-graphics/backends/metal/tests/metal-sgl-test.cc
   - test: ssc::msl end to end - the reflected bindings build the layout the backend encodes
+claimed-by: Claude (for Julius Nehring-Wirxel)
+claimed-at: 2026-11-05T12:43Z
 ---
 
 # The metal tier-2 fixtures are hand-written and hand-compiled

@@ -11,6 +11,19 @@ namespace bcache
 class blob_cache;
 }
 
+/// What an SGL shader does where an operation of it has no value: an integer division by zero, an array index outside
+/// the array (SGL's LEGAL-65).
+enum class slib::sgl_undefined_guard : slib::u8
+{
+    /// Nothing is guarded, at no cost: such an operation is the target's undefined behaviour.
+    none,
+    /// The invocation ends before the operation runs, and nothing reports it.
+    abort,
+    /// The operation and its operands are logged as a failed `assert` is, and the invocation ends as for `abort`.
+    /// It needs `diagnostics` to log, and is `abort` without it.
+    report,
+};
+
 /// Where an SGL edge keeps SGL's front end, beside the in-memory tier every SGL edge in the process shares.
 struct slib::sgl_compiler_options
 {
@@ -23,6 +36,7 @@ struct slib::sgl_compiler_options
     /// Writes every print and failed assert into sg's debug window, and states each site on the shader (EMIT-183).
     /// Off, the text holds neither.
     bool diagnostics = false;
+    sgl_undefined_guard guards_undefined = sgl_undefined_guard::none;
 };
 
 namespace slib

@@ -463,7 +463,7 @@ sr::micromap_bake_routine::execute(cmd, {.uvs, .indices, .opacity, .channel = 3,
 cmd.raytracing.build_micromap(bake.triangles)    // then blas_triangles{.micromap = it, .micromap_indices = bake.indices}
 //   4-state, one map a triangle, ~1 micro-triangle a texel (max_level caps it); opaque/transparent only where every
 //   texel a bilinear lookup blends agrees with the cutoff, so a 4-state trace decides exactly as its any-hit would
-//   .clamps for clamp-to-edge UVs (default repeats); .scale/.bias map the channel before the cutoff
+//   .address_u/.address_v and .filter as the trace's sampler has them (default repeat, linear); .scale/.bias map the channel first
 sr::micromap_bake_routine::level_for(a, b, c, width, height, max_level)  // -> int, the level a triangle of those UVs gets
 ```
 

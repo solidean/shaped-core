@@ -303,6 +303,16 @@ Off, SGL writes neither, and sg creates no window and binds no slot for one.
 A dx12, a vulkan and a webgpu context bind it so far; metal shaders write no records yet.
 [feat-sgl-gpu-print-and-assert](../libs/graphics/shaped-graphics-language/docs/issues/feat-sgl-gpu-print-and-assert.md) is the design.
 
+## Operations with no value (`SC_SHADER_UNDEFINED`)
+
+`SC_SHADER_UNDEFINED` (default `NONE`) is the robustness profile of every SGL shader slib compiles: what an integer division by zero or an array index outside the array does.
+`NONE` leaves it the target's undefined behaviour, at no cost.
+`REPORT` logs the operation and its operands as a failed assert, at the `.sgl` line, and ends that invocation; it needs `SC_SHADER_DIAGNOSTICS`, and is `ABORT` without it or on metal.
+`ABORT` ends the invocation alone, with no debug window, so a shader that reaches one stops working rather than working by accident.
+Both cost a test and a branch at each guarded operation, which a literal divisor or index does not need.
+SGL's [LEGAL-65](../libs/graphics/shaped-graphics-language/docs/spec/semantics/legalization.md) is the rule, and `sgl emit --undefined` shows what it writes.
+[epic-sgl-robustness-profiles](../libs/graphics/shaped-graphics-language/docs/issues/epic-sgl-robustness-profiles.md) is the plan, and what is not guarded yet.
+
 ## Example backend (`SC_EXAMPLE_BACKEND`)
 
 `SC_EXAMPLE_BACKEND` (default `auto`) picks which graphics backend the `*-example` binaries are built and linked against: `auto`, `dx12`, `vulkan`, `metal` or `webgpu`.

@@ -333,6 +333,7 @@ struct printed_message;
 struct site_tally;
 struct outcome;
 
+enum class undefined_guard : u8;
 struct legalize_options;
 
 enum class expectation_kind : u8;

@@ -184,10 +184,13 @@ cc::optional<micromap_bake> micromap_bake_routine::execute(sg::command_list& cmd
                                                               });
         cmd.compute.bind_pipeline(**self->_classify->try_value());
         cmd.compute.bind_group(0, *group);
-        cmd.compute.set_inline_constants(file::classify_constants{.word_count = i32(word_maps.size()),
-                                                                  .cutoff = input.cutoff,
-                                                                  .levels = levels,
-                                                                  .clamps = input.clamps ? 1 : 0});
+        cmd.compute.set_inline_constants(
+            file::classify_constants{.word_count = i32(word_maps.size()),
+                                     .cutoff = input.cutoff,
+                                     .levels = levels,
+                                     .address_u = i32(input.address_u),
+                                     .address_v = i32(input.address_v),
+                                     .is_nearest = input.filter == sg::sampler_filter::nearest ? 1 : 0});
         cmd.compute.dispatch_threads(i32(word_maps.size()), 1, 1);
     }
 

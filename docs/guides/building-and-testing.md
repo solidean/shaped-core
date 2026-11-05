@@ -311,6 +311,24 @@ Everything dev.py starts runs under a memory guard, so a runaway process or a pi
 
 [memory_guard.py](../../tools/dev/lib/core/memory_guard.py) has the details, and [its self-test](../../tools/dev/memory-guard-self-test.py) runs with `check`.
 
+## A step that goes quiet
+
+A hung build prints nothing past its `[build] all` banner, so after 5 minutes without output dev.py names what is still running under the step.
+- Each process below it is listed with its age, its CPU time and its command line, and the report repeats every 5 minutes the step stays quiet.
+- One that used no CPU since the last look is marked: it is waiting rather than working, and is most likely where the step is stuck.
+- It only reports and never ends anything, since a long link is quiet and busy; a test binary is left to nexus's own watchdog.
+- `SC_DEV_STALL_SECS` sets the quiet time in seconds, 0 turning it off.
+
+[stall_report.py](../../tools/dev/lib/core/stall_report.py) has the details, and [its self-test](../../tools/dev/stall-report-self-test.py) runs with `check`.
+
+## A build directory keeps its environment
+
+On Windows a build directory is configured inside the MSVC developer environment or outside it, for life, and a configure that switches is refused with an error saying so.
+CMake re-detects tools at every configure while the cache keeps what it found first, so a switch pairs the two.
+That is how a bare `cmake <build>` from a plain shell once gave SDL3's `version.rc` a rule for llvm-rc that ran rc.exe, which deadlocked the build with no output.
+dev.py enters the environment itself, so configuring through it is always right; a toolset or SDK update inside the environment only warns.
+[ConfigureEnvironment.cmake](../../tools/cmake/ConfigureEnvironment.cmake) is the check.
+
 ## Quiet by default, and how to diagnose
 
 dev.py never streams child output into your scrollback.
