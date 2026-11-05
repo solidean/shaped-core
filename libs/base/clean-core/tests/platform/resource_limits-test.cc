@@ -81,7 +81,8 @@ TEST("cc resource_limits - cap_process_memory puts the process under its cap")
     CHECK(limits.memory_limit_bytes.value() <= cap);
 #else
     (void)limits;
-    SKIP("only a Windows job reports the cap back; elsewhere a watchdog enforces it, which the manual test below shows");
+    SKIP("only a Windows job reports the cap back; elsewhere a watchdog enforces it, which the manual test below "
+         "shows");
 #endif
 }
 
