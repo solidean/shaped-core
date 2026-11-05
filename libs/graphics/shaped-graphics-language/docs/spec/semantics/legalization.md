@@ -42,7 +42,8 @@ The worked examples are WGSL, since it is the strictest target: no `do … while
   The invocation then ends after the last statement of the entry point's body that holds such an operation, and what it writes until then is not masked.
   Until then, a loop that holds none of those operations is left at the top of each iteration once the flag is set, so a safe operand never keeps it running long.
   A loop that holds one has a trip count every invocation of the workgroup shares, so its guards trip in all of them or in none.
-  A buffer element, `bytes` (EVAL-97), workgroup memory (EVAL-92) and the builtins of EVAL-87 are not guarded yet.
+  It guards the maths builtins of EVAL-87 too, each by the test the interpreter asks: `pow`, `asin`, `acos`, `atan2`, `smoothstep` and `clamp`, whose operands share one number shape.
+  A buffer element, `bytes` (EVAL-97), workgroup memory (EVAL-92) and the matrix part builtins are not guarded yet.
   Wherever the input has a value, the tree behaves as the input does; where it has none, the tree ends the invocation instead.
 * **LEGAL-52** (V1) A core tree holds no `void` local, and no `let`, `var`, assignment, `return` or read of a `void` value: what evaluating one does stays as an `eval`, and the value itself is gone.
   It follows every rule that introduces a local for a result, since a `void` result is one of them; only the let rules come after it.
