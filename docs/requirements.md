@@ -248,7 +248,8 @@ LunarG's SDK is what the vulkan backend builds against, and its validation layer
 uv run dev.py install vulkan-sdk   # into ~/tools/vulkan-sdk/<version>, checked against the SHA-256 tools/vulkan-sdk.version pins
 ```
 
-**Every dev.py run then points `VULKAN_SDK` at it**, and adds its validation layer to `VK_ADD_LAYER_PATH`, so no environment variable is yours to set.
+**Every dev.py run then points `VULKAN_SDK` at it**, so no environment variable is yours to set.
+On Linux it also adds the SDK's layers to `VK_ADD_LAYER_PATH`, since an unpacked tarball registers none; the Windows installer registers its own.
 A `VULKAN_SDK` already set wins: an SDK you chose is never replaced by the pinned one.
 On Windows the SDK is LunarG's installer, run unattended.
 Its core component needs admin rights even when installing into your home, so `dev.py` starts it again elevated and Windows asks you to confirm once.

@@ -17,6 +17,11 @@ namespace
 {
 namespace vulkan = sg::backend::vulkan;
 
+[[nodiscard]] cc::span<char const* const> enabled_names(char const* const* names, u32 count)
+{
+    return cc::span<char const* const>(names, isize(count));
+}
+
 [[nodiscard]] int count_name(cc::span<char const* const> names, cc::string_view wanted)
 {
     auto n = 0;
@@ -101,14 +106,14 @@ TEST("sg vulkan - an extra extension sg enables already is enabled once", exclus
         .create_instance =
             [&](VkInstanceCreateInfo const& info, VkInstance& out)
         {
-            instance_surface_count = count_name({info.ppEnabledExtensionNames, isize(info.enabledExtensionCount)},
+            instance_surface_count = count_name(enabled_names(info.ppEnabledExtensionNames, info.enabledExtensionCount),
                                                 VK_KHR_SURFACE_EXTENSION_NAME);
             return vkCreateInstance(&info, nullptr, &out);
         },
         .create_device =
             [&](VkPhysicalDevice physical_device, VkDeviceCreateInfo const& info, VkDevice& out)
         {
-            device_swapchain_count = count_name({info.ppEnabledExtensionNames, isize(info.enabledExtensionCount)},
+            device_swapchain_count = count_name(enabled_names(info.ppEnabledExtensionNames, info.enabledExtensionCount),
                                                 VK_KHR_SWAPCHAIN_EXTENSION_NAME);
             return vkCreateDevice(physical_device, &info, nullptr, &out);
         },

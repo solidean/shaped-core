@@ -66,7 +66,8 @@ def activate() -> Path | None:
     """Point this process, and every child it starts, at the pinned SDK; returns it, or None when nothing changed.
 
     Nothing changes when VULKAN_SDK is set already, or when the pinned SDK is not installed.
-    VK_ADD_LAYER_PATH is what finds the validation layer: an install into ~/tools registers no layer with the system.
+    On Linux VK_ADD_LAYER_PATH is what finds the validation layer, since an unpacked tarball registers no layer.
+    Windows needs none: the installer runs elevated and registers its layers, and naming them again makes the loader report each one twice.
     """
     if os.environ.get("VULKAN_SDK"):
         return None
@@ -76,7 +77,6 @@ def activate() -> Path | None:
     os.environ["VULKAN_SDK"] = str(sdk)
     if platform.system() == "Windows":
         _prepend("PATH", sdk / "Bin")
-        _prepend("VK_ADD_LAYER_PATH", sdk / "Bin")
     else:
         _prepend("PATH", sdk / "bin")
         _prepend("LD_LIBRARY_PATH", sdk / "lib")
