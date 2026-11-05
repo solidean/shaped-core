@@ -417,7 +417,8 @@ fn main_ps(p: pixel_input) -> target_ {
   The buffer stands in sg's reserved group: `register(u0, space11)` in `hlsl-dx12` and `[[vk::binding(19, 3)]]` in `hlsl-vulkan`.
   It is `@group(3) @binding(19)` in WGSL, and the entry point's parameter `[[buffer(30)]]` in MSL, the argument table's last slot, clear of the vertex buffers from `[[buffer(5)]]` up.
   A text declares it only where it writes a record.
-  WebGPU's vertex stage has no writable storage, vulkan's vertex, geometry and tessellation stages write none without a feature sg does not ask for, and MSL's ray-tracing stages take no buffer.
+  WebGPU's vertex stage has no writable storage, and MSL's ray-tracing stages take no buffer.
+  vulkan's vertex, geometry and tessellation stages write one only on a device with `vertex_pipeline_stores`, which no program names.
   There a print is dropped and the text declares none.
   A site's id hashes the entry point's name, the message and the line it stands on, so one site has one id on every target.
 
@@ -478,6 +479,8 @@ So `{float3; float}` is written with `packed_float3`: the `float` is at byte 12 
 * **EMIT-186** HLSL writes `!=` of float or half lanes as `!(a == b)`, and a whole vector's as `any(!(a == b))`, which is true where either is a NaN.
   DXC lowers HLSL's own float `!=` to SPIR-V as `OpFOrdNotEqual`, false for a NaN, where DXIL's is unordered; the negated `==` is unordered on both.
   WGSL and MSL write `!=`, which is unordered in both.
+* **EMIT-195** HLSL reads a buffer's length (CHK-460) through `GetDimensions`, in a helper per buffer, and WGSL through `arrayLength`, four bytes per word of a `bytes`.
+  A Metal buffer argument is a pointer that carries no length, and sg passes none in yet, so an MSL compile that reads one is `target-lacks-feature`.
 * **EMIT-136** HLSL writes a ray-tracing stage as a library export named by its kind, `[shader("closesthit")]` over `void`, whose payload is an `inout` parameter.
   A triangle closest hit or any hit takes `BuiltInTriangleIntersectionAttributes` too.
   An any hit's decision ends the stage: `ignore` is `IgnoreHit()`, `accept_and_end_search` `AcceptHitAndEndSearch()`, and `accept` a plain `return`.

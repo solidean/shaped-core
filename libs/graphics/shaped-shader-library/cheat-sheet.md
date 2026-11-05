@@ -212,7 +212,8 @@ slib::create_sgl_compiler(std::unique_ptr<shader_compiler> inner, sgl_compiler_o
                                    //   so a test compiling a shader that warns declares it: nx::expect_warning("unroll-too-long", ...)
                                    // options: {.diagnostics = true} writes print/assert records;
                                    //   {.guards_undefined = sgl_undefined_guard::report} logs a division by zero or an
-                                   //   index past an array as a failed assert and ends that invocation (abort: ends it only);
+                                   //   index past an array as a failed assert and ends that invocation (abort: ends it only;
+                                   //   define: gives it WGSL's value and goes on);
                                    //   add_available_compilers takes SC_SHADER_UNDEFINED
                                    // an entry point's @float picks DXC's flags (-Gis, -denorm preserve) through preprocessed_source::dxc_args;
                                    //   on WebGPU one it cannot keep is refused, unless acquire is passed

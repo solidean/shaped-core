@@ -335,6 +335,8 @@ auto sgl::check::impl::flattener::again(flat_expr_id id, ast::expr_id from) -> f
         auto const object = again(member->object, from);
         return add_expr(x.type, from, flat_member{.object = object, .member = index, .letters = letters});
     }
+    if (auto const* const length = x.node.try_as<flat_buffer_length>())
+        return add_expr(x.type, from, flat_buffer_length{.buffer = again(length->buffer, from)});
     if (auto const* const element = x.node.try_as<flat_buffer_element>())
     {
         auto const buffer = again(element->buffer, from);

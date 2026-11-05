@@ -40,13 +40,23 @@ public:
     bool is_c_like() const override { return true; }
     bool has_line_directives() const override { return true; }
 
-    // vulkan writes no storage from a vertex, geometry or tessellation stage without vertexPipelineStoresAndAtomics,
-    // which sg does not ask a device for
-    bool writes_debug_in(check::stage s) const override
+    // vulkan writes no storage from a vertex, geometry or tessellation stage without vertexPipelineStoresAndAtomics
+    bool writes_debug_in(check::stage s, check::feature_set device) const override
     {
-        return !_is_vulkan
+        return !_is_vulkan || device.has(check::feature::vertex_pipeline_stores)
             || (s != check::stage::vertex && s != check::stage::geometry && s != check::stage::tessellation_control
                 && s != check::stage::tessellation_evaluation);
+    }
+    // GetDimensions writes through out parameters, so each buffer's length is a helper reading it
+    cc::string buffer_length(cc::string_view name, bool) const override { return cc::format("sgl_length_{}()", name); }
+    cc::string buffer_length_helper(cc::string_view name, bool is_bytes) const override
+    {
+        if (is_bytes)
+            return cc::format("uint sgl_length_{0}()\n{{\n    uint n;\n    {0}.GetDimensions(n);\n    return n;\n}}\n",
+                              name);
+        return cc::format("uint sgl_length_{0}()\n{{\n    uint n, stride;\n    {0}.GetDimensions(n, stride);\n    "
+                          "return n;\n}}\n",
+                          name);
     }
     void write_debug_buffer(cc::string& out) const override
     {

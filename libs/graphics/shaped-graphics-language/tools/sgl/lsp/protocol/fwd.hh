@@ -18,6 +18,7 @@ enum class diagnostic_severity : i32;
 enum class diagnostic_tag : i32;
 enum class message_type : i32;
 enum class inlay_hint_kind : i32;
+enum class completion_item_kind : i32;
 struct position;
 struct range;
 struct location;
@@ -39,6 +40,9 @@ struct inlay_hint_params;
 struct inlay_hint;
 struct code_action_params;
 struct code_action;
+struct text_document_position_params;
+struct hover;
+struct completion_item;
 struct log_message_params;
 
 class text_index;
