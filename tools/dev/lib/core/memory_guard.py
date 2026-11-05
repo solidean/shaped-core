@@ -6,6 +6,7 @@ On Windows dev.py puts itself into a Job Object, which every process it starts i
 - all of them together at most the total, half of physical RAM by default;
 - an allocation past either fails in the process that asked, so a runaway ends on its own failed allocation.
 On every platform a watchdog thread reads the free physical memory, and below the floor, 5 GB by default, it ends dev.py and everything it started.
+On macOS the floor is 2 GB: the one Mac this repository is developed on has 16 GB, and its parallel GPU test binaries alone take it below 5 GB.
 Elsewhere than Windows only the watchdog runs: a per-process address-space limit would also refuse the sanitizers' shadow reservations.
 
 The environment overrides each, in GB, 0 turning it off: SC_DEV_MEMORY_PROCESS_GB, SC_DEV_MEMORY_TOTAL_GB, SC_DEV_MEMORY_FREE_GB.
@@ -25,7 +26,7 @@ import time
 
 GB = 1 << 30
 DEFAULT_PROCESS_GB = 30.0
-DEFAULT_FREE_GB = 5.0
+DEFAULT_FREE_GB = 2.0 if platform.system() == "Darwin" else 5.0
 WATCH_SECONDS = 0.5
 
 _installed = False
