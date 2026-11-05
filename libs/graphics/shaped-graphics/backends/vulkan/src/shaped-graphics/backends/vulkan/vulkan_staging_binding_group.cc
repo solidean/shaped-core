@@ -11,10 +11,14 @@
 namespace sg::backend::vulkan
 {
 cc::result<vulkan_staging_binding_group_handle> vulkan_staging_binding_group::create(vulkan_context& ctx,
-                                                                                     vulkan_binding_group_layout_handle layout)
+                                                                                     vulkan_binding_group_layout_handle layout,
+                                                                                     int unbounded_capacity)
 {
     CC_ASSERT(layout != nullptr, "staging_binding_group requires a binding_group_layout");
     auto const bindings = layout->bindings();
+    if (unbounded_capacity > int(layout->_unbounded_capacity))
+        return cc::error(cc::format("staging_binding_group: an unbounded capacity of {} elements, past the device's {}",
+                                    unbounded_capacity, layout->_unbounded_capacity));
 
     // The flattened numbering the base addresses descriptors in: every binding's elements contiguous, in declaration
     // order, so that adding an element index to a binding's first descriptor lands on that element.
@@ -25,12 +29,13 @@ cc::result<vulkan_staging_binding_group_handle> vulkan_staging_binding_group::cr
     {
         bool const is_static_sampler = layout->_slot_samplers[i] != VK_NULL_HANDLE;
         descriptor_offsets[i] = is_static_sampler ? -1 : int(byte_offsets.size());
-        for (int e = 0; e < int(bindings[i].count); ++e)
+        auto const count = bindings[i].is_unbounded() ? unbounded_capacity : int(bindings[i].count);
+        for (int e = 0; e < count; ++e)
             byte_offsets.push_back(layout->descriptor_offset_of(i, e));
     }
 
     auto group = std::make_shared<vulkan_staging_binding_group>(ctx, cc::move(layout), cc::move(descriptor_offsets),
-                                                                cc::move(byte_offsets));
+                                                                cc::move(byte_offsets), unbounded_capacity);
     auto r = group->initialize();
     CC_RETURN_IF_ERROR(r);
     return group;
@@ -39,13 +44,14 @@ cc::result<vulkan_staging_binding_group_handle> vulkan_staging_binding_group::cr
 vulkan_staging_binding_group::vulkan_staging_binding_group(vulkan_context& ctx,
                                                            vulkan_binding_group_layout_handle layout,
                                                            cc::vector<int> descriptor_offsets,
-                                                           cc::vector<isize> byte_offsets)
-  : sg::staging_binding_group(layout, cc::move(descriptor_offsets)),
+                                                           cc::vector<isize> byte_offsets,
+                                                           int unbounded_capacity)
+  : sg::staging_binding_group(layout, cc::move(descriptor_offsets), unbounded_capacity),
     _ctx(ctx),
     _vk_layout(cc::move(layout)),
     _offsets(cc::move(byte_offsets))
 {
-    _image = cc::vector<byte>::create_filled(_vk_layout->_size_in_bytes, byte(0));
+    _image = cc::vector<byte>::create_filled(_vk_layout->group_size_in_bytes(unbounded_capacity), byte(0));
     _resources = cc::vector<staged>::create_defaulted(_offsets.size());
 }
 
@@ -62,7 +68,7 @@ cc::result<cc::unit> vulkan_staging_binding_group::initialize()
     {
         if (!sg::is_sampler(bindings[i].type))
         {
-            for (auto element = 0; element < int(bindings[i].count); ++element)
+            for (auto element = 0; element < element_count(bindings[i]); ++element)
                 write_null_descriptor(_ctx, bindings[i].type,
                                       _image.data() + _vk_layout->descriptor_offset_of(i, element));
             continue;
@@ -162,7 +168,7 @@ cc::result<sg::binding_group_handle> vulkan_staging_binding_group::mint()
         auto const& b = bindings[i];
         if (sg::is_sampler(b.type))
         {
-            flat += int(b.count);
+            flat += element_count(b);
             continue;
         }
 
@@ -173,7 +179,7 @@ cc::result<sg::binding_group_handle> vulkan_staging_binding_group::mint()
                                            .binding = i,
                                            .bound_as = sg::view_class_of(b),
                                            .elements = {}};
-            for (int e = 0; e < int(b.count); ++e)
+            for (int e = 0; e < element_count(b); ++e)
             {
                 auto const& res = _resources[flat + e];
                 ab.elements.push_back({.buffer = res.buffer, .texture = res.texture, .range = res.range});
@@ -195,7 +201,7 @@ cc::result<sg::binding_group_handle> vulkan_staging_binding_group::mint()
             }
             // else: a scalar slot with no resource — the null acceleration structure, which tracks nothing.
         }
-        flat += int(b.count);
+        flat += element_count(b);
     }
 
     auto r = vulkan_binding_group::create_from_image(_ctx, _vk_layout, _image, cc::move(referenced),
@@ -210,6 +216,7 @@ namespace sg::backend::vulkan
 {
 cc::result<vulkan_staging_binding_group_handle> vulkan_context::create_vulkan_staging_binding_group(
     sg::binding_group_layout_handle const& layout,
+    int unbounded_capacity,
     sg::lifetime_scope scope)
 {
     CC_ASSERT(scope == sg::lifetime_scope::persistent, "a staging_binding_group is persistent — it exists to outlive "
@@ -217,6 +224,6 @@ cc::result<vulkan_staging_binding_group_handle> vulkan_context::create_vulkan_st
     CC_ASSERT(layout != nullptr, "staging_binding_group requires a binding_group_layout");
     auto vk_layout = std::dynamic_pointer_cast<vulkan_binding_group_layout const>(layout);
     CC_ASSERT(vk_layout != nullptr, "binding_group_layout is not a vulkan one");
-    return vulkan_staging_binding_group::create(*this, cc::move(vk_layout));
+    return vulkan_staging_binding_group::create(*this, cc::move(vk_layout), unbounded_capacity);
 }
 } // namespace sg::backend::vulkan

@@ -355,6 +355,7 @@ private:
                                                                             lifetime_scope scope) override;
     [[nodiscard]] cc::result<staging_binding_group_handle> try_create_staging_binding_group(
         binding_group_layout_handle layout,
+        int unbounded_capacity,
         lifetime_scope scope) override;
 
     MTL::Device* _device = nullptr;

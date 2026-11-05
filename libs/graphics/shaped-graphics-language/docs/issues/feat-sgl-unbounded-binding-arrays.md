@@ -22,6 +22,10 @@ HLSL writes `name[]` (EMIT-210), slib's generated field is a `cc::vector` of vie
 Left:
 
 * metal, through an argument buffer, which sg's metal backend does not lay out yet (EMIT-211).
-* A `staging_binding_group`, and so a `bindless_array`, over an unbounded binding, whose image is the layout's size today.
 * `length` of one, which no target reads back (CHK-491); the host passes it in.
 * An array of samplers, and one of more than one dimension.
+
+## Also done on 2026-11-05
+
+A `staging_binding_group`, and so a `bindless_array`, over an unbounded binding, given a capacity at creation: `create_staging_binding_group(layout, n)`.
+sg's compute test sets five buffers of a capacity of 16, replaces one in place, and reads both snapshots on dx12 and vulkan.

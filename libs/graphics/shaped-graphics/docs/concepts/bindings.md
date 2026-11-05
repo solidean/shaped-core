@@ -147,7 +147,9 @@ It needs `feature::unbounded_binding_arrays`, which dx12 grants at resource bind
 It is the layout's last binding and takes its highest index, since vulkan sizes only a set's last binding, and it holds no sampler, constants buffer or acceleration structure.
 A layout that breaks any of that is refused by `try_create_binding_group_layout`, with an error naming the binding, on every backend alike.
 dx12 writes the range as an unbounded one at its table's end, and vulkan gives the binding a capacity of the device's per-stage limit, at most 65536.
-A `staging_binding_group`, and so a `bindless_array`, keeps an image of the layout's size, so neither takes an unbounded binding yet; a bounded count treated as capacity is the bindless table.
+A `staging_binding_group` over such a layout is given a capacity, `create_staging_binding_group(layout, n)`.
+Its unbounded binding holds `n` elements, vacant until set, and every snapshot is a group of that size.
+So a `bindless_array` over it is a bindless table whose size the application picks, rather than the shader; vulkan refuses a capacity past the layout's.
 It is an error rather than an assert because these bindings usually come from reflecting someone's shader, which makes an unbounded array content rather than a contract violation.
 See [error-handling.md](../../../../../docs/error-handling.md).
 The dx12 layout builder keeps its own assert as a backstop.

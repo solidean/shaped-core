@@ -353,6 +353,7 @@ public:
                                                                                   sg::lifetime_scope scope);
     [[nodiscard]] cc::result<dx12_staging_binding_group_handle> create_dx12_staging_binding_group(
         dx12_binding_group_layout_handle layout,
+        int unbounded_capacity,
         sg::lifetime_scope scope);
 
     // Render-target / depth-stencil descriptors.
@@ -438,6 +439,7 @@ public:
                                                                                 sg::lifetime_scope scope) override;
     [[nodiscard]] cc::result<sg::staging_binding_group_handle> try_create_staging_binding_group(
         sg::binding_group_layout_handle layout,
+        int unbounded_capacity,
         sg::lifetime_scope scope) override;
 
     // The swapchain uses note_device_removed_if_lost (below) to mark the context lost on a failed Present.

@@ -340,9 +340,8 @@ public:
     }
 
     /// A staging group is a mutable array of descriptors, and WebGPU core has neither arrays nor mutable groups.
-    [[nodiscard]] cc::result<sg::staging_binding_group_handle> try_create_staging_binding_group(
-        sg::binding_group_layout_handle,
-        sg::lifetime_scope) override
+    [[nodiscard]] cc::result<sg::staging_binding_group_handle>
+    try_create_staging_binding_group(sg::binding_group_layout_handle, int, sg::lifetime_scope) override
     {
         return cc::error("webgpu has no binding arrays, so it has no staging binding groups "
                          "(ctx.supports(sg::feature::binding_arrays) is false)");

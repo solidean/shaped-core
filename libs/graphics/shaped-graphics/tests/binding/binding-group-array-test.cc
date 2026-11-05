@@ -248,6 +248,12 @@ INVOCABLE_TEST("sg - an unbounded array binding is its layout's last, and each g
         auto const nv = sg::named_view{.name = "Textures", .view = cc::move(elements)};
         CHECK(ctx->persistent.create_binding_group(layout, cc::span<sg::named_view const>(&nv, 1)) != nullptr);
     }
-    // a staging group's image is the layout's own, which has no count for an unbounded binding
+    // a staging group holds the capacity it is given, and needs one
     CHECK_THROWS_AS(ctx->persistent.create_staging_binding_group(layout), sg::binding_group_exception);
+    auto const staging = ctx->persistent.create_staging_binding_group(layout, 8);
+    auto const slot = staging->slot_of("Textures");
+    CHECK(staging->is_array(slot));
+    CHECK(staging->array_size(slot) == 8);
+    staging->unset_array(slot);
+    CHECK(staging->snapshot() != nullptr);
 }

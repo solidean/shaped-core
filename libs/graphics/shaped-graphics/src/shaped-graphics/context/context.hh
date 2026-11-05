@@ -793,9 +793,12 @@ protected:
                                                                                     lifetime_scope scope) = 0;
 
     /// Builds a staging_binding_group over `layout` — a mutable descriptor image, fully vacant, that mints binding_groups on demand.
+    /// `unbounded_capacity` is how many elements the layout's unbounded binding holds, and 0 where it has none; the
+    /// persistent scope has judged the pair.
     /// `scope` must be persistent: a staging group exists to outlive the epoch that built it.
     [[nodiscard]] virtual cc::result<staging_binding_group_handle> try_create_staging_binding_group(
         binding_group_layout_handle layout,
+        int unbounded_capacity,
         lifetime_scope scope) = 0;
 
     backend_kind _backend;

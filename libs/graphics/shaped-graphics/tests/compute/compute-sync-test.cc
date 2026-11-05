@@ -223,6 +223,78 @@ ASYNC_INVOCABLE_TEST("sg - an SGL unbounded binding array takes as many views as
         CHECK(got[i] == (i % lanes) * 1000 + i);
 }
 
+ASYNC_INVOCABLE_TEST("sg - a staging group over an unbounded binding array holds its capacity, set and replaced in "
+                     "place",
+                     (sg::context_handle const& ctx))
+{
+    REQUIRE(ctx != nullptr);
+    if (!sg_test::shaders_reach(*ctx))
+        SKIP("no compiler builds this binary's shaders into a format this context accepts");
+    if (!ctx->supports(sg::feature::unbounded_binding_arrays))
+        SKIP("this context has no unbounded binding arrays");
+
+    auto const pipeline = co_await shaders::unbounded_arrays::gather_unbounded.acquire_pipeline(*ctx);
+    auto const group_layout = ctx->cached.acquire_binding_group_layout<shaders::unbounded_arrays::parts>();
+
+    constexpr auto count = 64;
+    constexpr auto lanes = 5;
+    auto const source = [&](i32 base)
+    {
+        auto data = cc::vector<i32>();
+        for (auto i = 0; i < count; ++i)
+            data.push_back(base + i);
+        return ctx->persistent.create_buffer_from_data(cc::move(data), sg::buffer_usage::readonly_buffer);
+    };
+    auto sources = cc::vector<sg::buffer<i32>>();
+    for (auto lane = 0; lane < lanes; ++lane)
+        sources.push_back(source(lane * 1000));
+    auto const merged = ctx->persistent.create_buffer_from_data(
+        cc::vector<i32>::create_defaulted(count), sg::buffer_usage::readwrite_buffer | sg::buffer_usage::copy_src);
+
+    // room for 16, of which the shader reads the first five and the rest stay vacant
+    auto const staging = ctx->persistent.create_staging_binding_group(group_layout, 16);
+    auto const slot = staging->slot_of(shaders::unbounded_arrays::parts::arrays::sources.name);
+    REQUIRE(staging->array_size(slot) == 16);
+    staging->set_binding(staging->slot_of("parts.merged"), merged.as_readwrite_buffer());
+    auto views = cc::vector<sg::raw_view>();
+    for (auto const& b : sources)
+        views.push_back(b.as_readonly_buffer());
+    staging->set_array(slot, views);
+
+    auto const run = [&]() -> cc::shared_async<cc::vector<i32>>
+    {
+        auto reads = cc::vector<sg::array_buffer_access>();
+        for (auto lane = 0; lane < lanes; ++lane)
+            reads.push_back({.index = lane, .access = sg::access_flag::shader_read});
+        auto cmd = ctx->create_command_list();
+        cmd->compute.bind_pipeline(*pipeline);
+        cmd->compute.bind_group(0, *staging->snapshot());
+        auto const declared
+            = cmd->compute.declare_array_buffer_access(shaders::unbounded_arrays::parts::arrays::sources, reads);
+        cmd->compute.dispatch_threads(count);
+        auto const back = cmd->download.data_from_buffer(merged);
+        ctx->submit_command_list(cc::move(cmd));
+        auto const got = co_await back.data();
+        auto out = cc::vector<i32>();
+        for (auto const v : got)
+            out.push_back(v);
+        co_return out;
+    };
+
+    auto const first = co_await run();
+    REQUIRE(first.size() == isize(count));
+    for (auto i = 0; i < count; ++i)
+        CHECK(first[i] == (i % lanes) * 1000 + i);
+
+    // one element replaced, and the next snapshot reads it
+    auto const replaced = source(70000);
+    staging->set_array_element(slot, 2, replaced.as_readonly_buffer());
+    auto const second = co_await run();
+    REQUIRE(second.size() == isize(count));
+    for (auto i = 0; i < count; ++i)
+        CHECK(second[i] == (i % lanes == 2 ? 70000 : (i % lanes) * 1000) + i);
+}
+
 ASYNC_INVOCABLE_TEST("sg - SGL bytes are loaded and stored a word at a time, and picked per thread from an array",
                      (sg::context_handle const& ctx))
 {

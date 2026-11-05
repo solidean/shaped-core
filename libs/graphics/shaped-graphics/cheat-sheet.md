@@ -780,6 +780,7 @@ layout->static_samplers()   // -> span<named_sampler const> — the ones baked i
 // staging_binding_group — MUTABLE builder; set one descriptor at a time, snapshot immutable groups out of it. For big, mostly-stable (bindless) tables.
 #include <shaped-graphics/binding/staging_binding_group.hh>
 ctx.persistent.create_staging_binding_group(group_layout)  // -> staging_binding_group_handle = shared_ptr<staging_binding_group> (MUTABLE handle); persistent only (+ try_ twin)
+ctx.persistent.create_staging_binding_group(layout, n)     // a layout with an unbounded binding: it holds n elements in this group; n >= 1 there, 0 elsewhere
 sg::binding_slot            // enum class : u32 — a position in layout->bindings(); NOT a descriptor position (dx12 splits views and samplers into two tables and remaps)
                             //   that indirection is where every set is resolved and bounds-checked; `invalid` is what an unknown name resolves to
                             //   meaningful only for the layout it came from — a foreign slot is in range, wrong and silent, where a wrong NAME is an error message

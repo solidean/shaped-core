@@ -1077,8 +1077,12 @@ cc::result<sg::binding_group_handle> metal_context::try_create_binding_group(bin
 }
 
 cc::result<sg::staging_binding_group_handle> metal_context::try_create_staging_binding_group(binding_group_layout_handle layout,
+                                                                                             int unbounded_capacity,
                                                                                              lifetime_scope scope)
 {
+    // metal grants no unbounded binding arrays yet, so no layout it made has one
+    if (unbounded_capacity != 0)
+        return cc::error("staging_binding_group: metal has no unbounded binding arrays yet");
     return create_metal_staging_binding_group(cc::move(layout), scope);
 }
 } // namespace sg::backend::metal

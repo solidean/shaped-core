@@ -302,7 +302,8 @@ cc::result<vulkan_binding_group_handle> vulkan_binding_group::create_from_image(
     cc::vector<vulkan_array_binding> array_bindings)
 {
     CC_ASSERT(layout != nullptr, "binding_group requires a binding_group_layout");
-    CC_ASSERT(image.size() == layout->_size_in_bytes, "the descriptor image must be one layout-sized set");
+    CC_ASSERT(image.size() <= layout->_size_in_bytes, "the descriptor image is one set, its unbounded binding cut "
+                                                      "short");
 
     auto group = std::make_shared<vulkan_binding_group>();
     group->_ctx = &ctx;
@@ -310,7 +311,7 @@ cc::result<vulkan_binding_group_handle> vulkan_binding_group::create_from_image(
     group->creation_epoch = ctx.current_epoch();
 
     {
-        auto r = allocate_range(ctx, layout->_size_in_bytes, /*transient =*/false);
+        auto r = allocate_range(ctx, image.size(), /*transient =*/false);
         CC_RETURN_IF_ERROR(r);
         group->range = cc::move(r.value());
     }
