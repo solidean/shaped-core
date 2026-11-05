@@ -4,13 +4,13 @@ tags: [lsp]
 refs:
   - file: libs/graphics/shaped-graphics-language/docs/lsp.md
   - file: libs/graphics/shaped-graphics-language/src/shaped-graphics-language/driver/references.hh
-claimed-by: Claude (for Philip Trettner)
-claimed-at: 2026-11-05T17:26Z
+closed: 2026-11-05
+resolution: fixed
 ---
 
 # Hover, go-to-definition, completion and formatting in sgl lsp
 
-Hover, go to definition and completion are done, on 2026-11-05: `sgl::reference_at` and `sgl::completions_at` answer them, and the server translates ([lsp.md](../lsp.md)).
+Hover, go to definition and completion are done, on 2026-11-05: `sgl::reference_at` and `sgl::completions_at` answer them, and the server translates ([lsp.md](../../../../lsp.md)).
 Left:
 
 * **A formatter**, which is a piece of its own: the line tree decides most of the layout, so it is mostly spacing inside a line.
