@@ -6,7 +6,6 @@ using namespace sgl::builtins;
 
 namespace
 {
-using check::is_16_bit;
 using check::scalar;
 using check::value_kind;
 using check::wide_kind_of;
