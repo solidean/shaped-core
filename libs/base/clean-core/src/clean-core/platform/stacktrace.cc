@@ -7,16 +7,17 @@
 
 #if defined(__EMSCRIPTEN__)
 #include <emscripten/emscripten.h> // emscripten_get_callstack, the only route to frame text here
-#else
+#elif !defined(__APPLE__)
 #include <string> // std::to_string(std::stacktrace) is the only renderer the standard offers
 #endif
 
-#if defined(__EMSCRIPTEN__)
+#if defined(__EMSCRIPTEN__) || defined(__APPLE__)
 
 #include <clean-core/container/fixed_vector.hh>
+#if defined(__EMSCRIPTEN__)
 #include <clean-core/platform/impl/wasm_frames.hh>
+#endif
 #include <clean-core/platform/stack_capture.hh>
-#include <clean-core/platform/symbolize.hh>
 #include <clean-core/string/format.hh>
 
 using namespace cc::primitive_defines;
@@ -31,11 +32,12 @@ constexpr isize max_trace_frames = 128;
 ///
 /// `module+offset` is the fallback rather than an error: a build with no name section still names WHERE a frame is,
 /// which is exactly what the offline resolver needs and all it needs.
-[[nodiscard]] cc::string render(cc::symbol_info const& info, u32 address)
+#if defined(__EMSCRIPTEN__)
+[[nodiscard]] cc::string render(cc::symbol_info const& info, u64 address)
 {
     if ((address & cc::impl::wasm_js_frame_bit) != 0)
     {
-        auto const line = address & ~cc::impl::wasm_js_frame_bit;
+        auto const line = address & ~u64(cc::impl::wasm_js_frame_bit);
         return info.has_function() ? cc::format("{} (js:{})", info.function, line) : cc::format("js:{}", line);
     }
 
@@ -43,6 +45,18 @@ constexpr isize max_trace_frames = 128;
         return cc::format("{} (wasm+{:#x})", info.function, address);
     return cc::format("wasm+{:#x}", address);
 }
+#else
+/// `module+offset` always, since it is what `atos -o <module> -l <base>` takes; the function before it where dladdr
+/// found one, and the address alone where no image claims it.
+[[nodiscard]] cc::string render(cc::symbol_info const& info, u64 address)
+{
+    if (info.module.empty())
+        return cc::format("{:#x}", address);
+    if (info.has_function())
+        return cc::format("{} + {} ({}+{:#x})", info.function, info.displacement, info.module, info.module_offset);
+    return cc::format("{}+{:#x}", info.module, info.module_offset);
+}
+#endif
 
 /// The deepest stack any of the overloads below reads.
 /// A fixed buffer, so a capture allocates nothing beyond the trace it returns.
@@ -59,7 +73,7 @@ cc::stacktrace cc::stacktrace::from_frames(cc::span<void* const> frames, std::si
         if (std::size_t(result._frames.size()) >= max_depth)
             break;
 
-        auto const address = u32(reinterpret_cast<uintptr_t>(*f));
+        auto const address = u64(reinterpret_cast<uintptr_t>(*f));
         result._frames.push_back(cc::stacktrace_entry(address, render(symbols.resolve(*f), address)));
     }
 
@@ -95,11 +109,11 @@ cc::stacktrace cc::stacktrace::current(std::size_t skip, std::size_t max_depth) 
     return from_frames(cc::span<void* const>(frames, captured.count), max_depth);
 }
 
-#endif // __EMSCRIPTEN__
+#endif // __EMSCRIPTEN__ || __APPLE__
 
 cc::string cc::to_string(cc::stacktrace const& trace)
 {
-#if defined(__EMSCRIPTEN__)
+#if defined(__EMSCRIPTEN__) || defined(__APPLE__)
     auto out = cc::string();
     for (auto const& frame : trace)
     {

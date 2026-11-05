@@ -4,6 +4,7 @@
 #include <clean-core/common/utility.hh>
 #include <clean-core/error/impl/posix_thread_stacks.hh>
 #include <clean-core/error/impl/signal_stack.hh>
+#include <clean-core/platform/stack_capture.hh>
 #include <clean-core/platform/stacktrace.hh>
 #include <clean-core/platform/symbolize.hh> // cc::impl::with_dbghelp_if_free, so the walk never waits on a suspended thread's lock
 #include <clean-core/record/thread_scopes.hh>
@@ -49,6 +50,11 @@ bool g_report_minidump = false;
 int g_report_count = 0; // reports this process kept: a second in the same second gets a name of its own
 char g_report_stem[k_max_report_path] = {}; // the last report's path without its extension
 int g_report_stem_length = 0;
+
+#ifndef CC_OS_WINDOWS
+/// The interrupted registers of the thread a signal is reporting, which its frames are walked from; null outside one.
+void* g_fault_context = nullptr;
+#endif
 
 void append_text(char* out, int& length, char const* text) noexcept
 {
@@ -575,6 +581,38 @@ void run_hooks() noexcept
             g_hooks[i]();
 }
 
+/// The top frames of a thread a signal interrupted, walked from its interrupted registers rather than from here.
+/// A handler running on a signal stack of its own starts a plain walk outside the thread's stack, which finds nothing.
+/// Each frame carries `module+offset` beside its name, which `atos` resolves to a file and a line offline.
+/// False where there is no such context, or no walk from one, which leaves the plain walk to the caller.
+[[nodiscard]] bool report_fault_frames() noexcept
+{
+#if defined(CC_OS_WINDOWS)
+    return false;
+#else
+    if (g_fault_context == nullptr)
+        return false;
+
+    void* frames[64] = {};
+    auto const captured
+        = cc::capture_stack_from_native_context(g_fault_context, cc::unwind_snapshot{}, cc::span<void*>(frames));
+    if (captured.count == 0)
+        return false;
+
+    auto symbols = cc::symbolizer();
+    for (auto i = 0; i < int(captured.count); ++i)
+    {
+        auto const& info = symbols.resolve(frames[i]);
+        auto const name = info.has_function() ? info.to_string() : cc::string("<unknown>");
+        std::fprintf(stderr, "  #%-2d %.*s  (%.*s+0x%llx)\n", int(i), int(name.size()), name.data(),
+                     int(info.module.size()), info.module.data(), static_cast<unsigned long long>(info.module_offset));
+    }
+    if (captured.truncated)
+        std::fputs("  ... deeper frames not printed\n", stderr);
+    return true;
+#endif
+}
+
 // Shared best-effort reporter: a banner, the reason, registered context, then a stacktrace of this thread and of
 // every other one.
 // Uses stdio (not std::cerr) to keep the crash path as small as possible.
@@ -591,9 +629,12 @@ void run_hooks() noexcept
 
 #if CC_HAS_STACKTRACE
     std::fputs("\nstacktrace (faulting thread):\n", stderr);
-    auto const text = cc::to_string(cc::stacktrace::current());
-    std::fwrite(text.data(), 1, text.size(), stderr);
-    std::fputc('\n', stderr);
+    if (!report_fault_frames())
+    {
+        auto const text = cc::to_string(cc::stacktrace::current());
+        std::fwrite(text.data(), 1, text.size(), stderr);
+        std::fputc('\n', stderr);
+    }
 #else
     std::fputs("\n<stacktrace unavailable on this platform>\n", stderr);
 #endif
@@ -787,8 +828,9 @@ char const* signal_reason(int sig) noexcept
     return is_access && info != nullptr && cc::impl::is_stack_overflow_address(info->si_addr);
 }
 
-void signal_handler(int sig, siginfo_t* info, void*) noexcept
+void signal_handler(int sig, siginfo_t* info, void* context) noexcept
 {
+    g_fault_context = context;
     release_report(report_crash(is_stack_overflow(sig, info) ? "stack overflow" : signal_reason(sig)));
     // Restore the default disposition and re-raise so the process exits with the
     // signal's normal status (and can still produce a core dump).

@@ -129,8 +129,10 @@ namespace cc
 /// Captures a stack from a thread's saved machine context rather than from here.
 ///
 /// This is what sampling needs: a thread is suspended, its context read, and its stack walked from outside.
-/// `native_context` is a `CONTEXT*` on Windows and null elsewhere, since no other platform walks a foreign thread
-/// this way — POSIX sampling runs the walk ON the target, from a signal handler, where plain capture_stack works.
+/// `native_context` is a `CONTEXT*` on Windows, and a `ucontext_t*` on Linux and macOS where the frame chain is kept.
+/// The POSIX form is for a signal handler walking the thread it interrupted from the interrupted registers: running on a
+/// signal stack of its own, plain capture_stack starts outside the thread's stack and stops at once.
+/// It walks no foreign thread, so stack_capture_from_context_available stays false there.
 ///
 /// **The target must not be running.** Walking a live thread's stack reads a chain that is being rewritten underneath.
 /// Functions are looked up in `unwind` alone, never through the OS, so the walk takes no lock the target may hold.
