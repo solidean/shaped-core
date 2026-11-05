@@ -5,10 +5,11 @@
 //   xcrun -sdk macosx metal -O2 -o raytrace.metallib raytrace.metal
 //   xxd -i raytrace.metallib > raytrace.metallib.h
 //
-// **HAND-WRITTEN, AND TEMPORARY.**
-// A fixture written by hand can agree with the backend and still disagree with every real shader.
-// Every other tier-2 fixture is an SGL package in tests/shaders; this one is not yet:
-// TEMPORARY(debt-sg-metal-hand-written-fixtures).
+// **HAND-WRITTEN, ON PURPOSE.**
+// Every other tier-2 fixture is the SGL package in tests/shaders, tracing.sgl among them.
+// Two tests still take their shaders from here, because SGL cannot express them: a closest hit that recurses through its
+// own table, which SGL refuses as a recursive trace, and a procedural hit group carrying an any-hit, which the backend
+// refuses and SGL cannot spell.
 //
 // The binding shape is written by hand in the test beside it, so the test states what it means rather than inheriting
 // whatever a reflector produced.

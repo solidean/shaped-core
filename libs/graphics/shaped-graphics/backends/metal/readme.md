@@ -495,10 +495,12 @@ So the argument-buffer convention a test exercises is the one every real shader'
 The vertex-input tests state their vertex layout themselves, and their quad carries decoy vertices and decoy indices ahead of the real ones.
 So a draw that ignored `vertex_offset` or the first index covers a different part of the target.
 
-`raytrace.metal` is the ray-tracing fixture, still hand-written MSL: one library with seven entry points, plus `raytrace_second.metal`.
-Two raygen kernels and the inline ray-query one, plus a miss function, a closest-hit function, an any-hit function and a procedural intersection function.
-Its tests drive the backend's ray-tracing pipeline description with those functions directly, which SGL's generated pipelines do not spell.
-[debt-sg-metal-hand-written-fixtures](../../docs/issues/debt-sg-metal-hand-written-fixtures.md) carries it.
+`tracing.sgl` holds the ray-tracing pipelines: an inline query, a closest hit and a miss, a rejecting any-hit, a procedural intersection, and a second pipeline whose miss differs.
+Each test builds the pipeline and the shader table from the package's description through the backend's own calls.
+Since SGL compiles each shader on its own, every such pipeline hands the backend one library per shader.
+
+`raytrace.metal` stays hand-written MSL for two tests SGL cannot express: a closest hit recursing through its own table, and a procedural hit group carrying an any-hit, which the backend must refuse.
+The two-ray-type test compiles its own MSL from source in the test, for the same kind of reason.
 Every test builds its own context, because the context is its subject.
 The whole binary runs with API validation armed, so a violation anywhere in it ends the run.
 

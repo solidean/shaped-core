@@ -130,5 +130,6 @@ if(SC_BUILD_TESTS)
             cube.sgl:*
             kernels.sgl:*
             draws.sgl:*
+            tracing.sgl:*
     )
 endif()

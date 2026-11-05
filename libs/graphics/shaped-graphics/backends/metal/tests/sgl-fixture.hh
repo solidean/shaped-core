@@ -8,6 +8,7 @@
 #include <metal_sgl_shaders.hh>
 #include <nexus/async-test.hh>
 #include <shaped-graphics/binding/compiled_shader.hh>
+#include <shaped-graphics/raytracing/raytracing_pipeline.hh>
 #include <shaped-shader-library/compiler/metal_compiler.hh>
 #include <shaped-shader-library/compiler/sgl_compiler.hh>
 #include <shaped-shader-library/shader_library.hh>
@@ -34,5 +35,17 @@ template <class Symbol>
     co_await cc::async_settled(shader);
     REQUIRE(shader->has_value()).context(shader->has_error() ? shader->try_error()->underlying().to_string() : cc::string());
     co_return *shader->try_value();
+}
+
+/// `symbol`'s ray-tracing pipeline description, its shaders compiled for `ctx` the way `sgl_shader` compiles one.
+/// The layout in it is `ctx`'s cached one, so a group the cache builds for the same binding fits it.
+template <class Pipeline>
+[[nodiscard]] cc::shared_async<sg::raytracing_pipeline_description> sgl_pipeline(metal_context& ctx,
+                                                                                 Pipeline const& symbol)
+{
+    auto lib = slib::shader_library();
+    lib.add_compiler(slib::create_sgl_compiler(slib::create_metal_compiler()));
+    lib.add_package(shaders::package());
+    co_return co_await symbol.description(ctx);
 }
 } // namespace sg::backend::metal::test
