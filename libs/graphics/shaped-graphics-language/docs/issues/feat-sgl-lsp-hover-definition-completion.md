@@ -4,6 +4,8 @@ tags: [lsp]
 refs:
   - file: libs/graphics/shaped-graphics-language/docs/lsp.md
   - file: libs/graphics/shaped-graphics-language/src/shaped-graphics-language/driver/references.hh
+claimed-by: Claude (for Philip Trettner)
+claimed-at: 2026-11-05T17:26Z
 ---
 
 # Hover, go-to-definition, completion and formatting in sgl lsp
