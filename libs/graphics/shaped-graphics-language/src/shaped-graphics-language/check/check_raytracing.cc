@@ -214,7 +214,7 @@ type_id checker::check_pipeline_trace(function_scope& scope, ast::expr_id id, as
         auto const bool_type = type_of_builtin(builtins::k_bool, file, where);
         auto const uint_type = type_of_builtin(builtins::k_uint, file, where);
         auto const type = number_of(file, reorder).is_number ? check_expected(scope, reorder, uint_type)
-                                                              : check_expr(scope, reorder);
+                                                             : check_expr(scope, reorder);
         if (type == bool_type)
         {
             if (!known_condition(file, reorder).has_value())

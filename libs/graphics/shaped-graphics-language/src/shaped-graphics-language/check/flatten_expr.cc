@@ -517,8 +517,7 @@ auto sgl::check::impl::flattener::flatten_ray_trace(ast::expr_id id, ast::call c
     // CHK-433: a raygen of a dx12 compile whose device reorders traces through a hit object; every other trace is the
     // plain one, its hint unevaluated, since a hint changes nothing a shader computes
     auto const target = compiled_for();
-    auto const reorders = ast::is_valid(reorder) && entry.entry_stage == stage::raygen
-                       && target.api == graphics_api::dx12
+    auto const reorders = ast::is_valid(reorder) && entry.entry_stage == stage::raygen && target.api == graphics_api::dx12
                        && target.device_features.has(feature::shader_execution_reordering);
     auto hint = flat_expr_id::none;
     auto hint_bits = flat_expr_id::none;
@@ -543,7 +542,8 @@ auto sgl::check::impl::flattener::flatten_ray_trace(ast::expr_id id, ast::call c
         for (auto const& fr : frames)
             within.push_back(fr.function);
         auto const used = feature_set(feature::shader_execution_reordering);
-        feature_uses.push_back({.file = file(), .call = id, .features = used, .within = cc::move(within), .granted = used});
+        feature_uses.push_back(
+            {.file = file(), .call = id, .features = used, .within = cc::move(within), .granted = used});
     }
     auto const count = c.out.at(c.out.at(c.out.at(t.set).type).members).size();
 

@@ -576,10 +576,10 @@ written write_trace_ray_reordered(call_context const& ctx)
     result.lines.push_back(cc::format("{}.TMin = {};", desc, ctx.arguments[3].text));
     result.lines.push_back(cc::format("{}.Direction = {};", desc, ctx.arguments[2].text));
     result.lines.push_back(cc::format("{}.TMax = {};", desc, ctx.arguments[4].text));
-    result.lines.push_back(cc::format("dx::HitObject {} = dx::HitObject::TraceRay({}, uint({}), uint({}), {}, {}, {}, {}, {});",
-                                      hit, ctx.arguments[0].text, ctx.arguments[5].text, ctx.arguments[6].text,
-                                      ctx.arguments[7].text, ctx.arguments[8].text, ctx.arguments[9].text, desc,
-                                      payload));
+    result.lines.push_back(
+        cc::format("dx::HitObject {} = dx::HitObject::TraceRay({}, uint({}), uint({}), {}, {}, {}, {}, {});", hit,
+                   ctx.arguments[0].text, ctx.arguments[5].text, ctx.arguments[6].text, ctx.arguments[7].text,
+                   ctx.arguments[8].text, ctx.arguments[9].text, desc, payload));
     if (ctx.data == 1)
         result.lines.push_back(cc::format("dx::MaybeReorderThread({}, uint({}), uint({}));", hit,
                                           ctx.arguments[10].text, ctx.arguments[11].text));
@@ -798,16 +798,18 @@ void sgl::builtins::register_raytracing(registry& r)
             .features = check::feature_set(check::feature::raytracing_pipeline),
         });
 
-    r.add_comment("// A trace of a ray type with `reorder` where the device has shader execution reordering (CHK-433).");
+    r.add_comment("// A trace of a ray type with `reorder` where the device has shader execution reordering "
+                  "(CHK-433).");
     for (auto const is_hinted : {false, true})
         for (auto const geometry : {"triangles", "procedural", "mixed"})
             r.add(function_record{
-                .signature = cc::format(
-                    "@internal @stages(.raygen) fun {}(world: acceleration_structure[.{}], origin: pos3, direction: vec3, "
-                    "t_min: float, t_max: float, flags: ray_flags, mask: int, contribution: int, multiplier: int, "
-                    "miss: int{})",
-                    is_hinted ? "trace_ray_reordered_by_hint" : "trace_ray_reordered", geometry,
-                    is_hinted ? ", hint: uint, bits: int" : ""),
+                .signature = cc::format("@internal @stages(.raygen) fun {}(world: acceleration_structure[.{}], origin: "
+                                        "pos3, direction: vec3, "
+                                        "t_min: float, t_max: float, flags: ray_flags, mask: int, contribution: int, "
+                                        "multiplier: int, "
+                                        "miss: int{})",
+                                        is_hinted ? "trace_ray_reordered_by_hint" : "trace_ray_reordered", geometry,
+                                        is_hinted ? ", hint: uint, bits: int" : ""),
                 .doc = "/// Traces as `trace_ray` does, regrouping the invocations by the hit before its shaders run.",
                 .evaluate = nothing,
                 .write = {.kind = spelling_kind::custom,
