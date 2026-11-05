@@ -3,6 +3,7 @@
 #include <shaped-graphics/binding/binding.hh>
 #include <shaped-graphics/binding/binding_group.hh> // sg::named_view
 #include <shaped-graphics/binding/binding_group_layout.hh>
+#include <shaped-graphics/binding/staging_binding_group.hh>
 #include <shaped-graphics/context/context.hh>
 #include <shaped-graphics/exceptions.hh>
 #include <shaped-graphics/resource/buffer.hh>

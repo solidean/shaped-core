@@ -4,6 +4,7 @@
 #include <clean-core/thread/async_coroutine.hh>
 #include <nexus/async-test.hh>
 #include <sg_test_sgl_shaders.hh>
+#include <shaped-graphics/binding/staging_binding_group.hh>
 #include <shaped-graphics/command_list/command_list.hh>
 #include <shaped-graphics/compute/compute_pipeline.hh>
 #include <shaped-graphics/context/context.hh>
