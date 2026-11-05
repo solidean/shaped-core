@@ -51,9 +51,9 @@ A box is closed: a ray touching its surface enters it.
 
 | units | holds |
 |---|---|
-| 1 | header: x node count, y first instance unit, z instance count, w kinds present (bit 0 triangles, bit 1 boxes) |
+| 1 | header: x node count, y first instance unit, z instance count, w kinds present (bit 0 triangles, bit 1 boxes) and bit 2 where an instance moves |
 | 2 per node | the nodes; a leaf's primitives are instance indices |
-| 7 per instance | the instances |
+| 7 per instance, 10 where one moves | the instances |
 
 An instance, 7 units:
 
@@ -66,7 +66,12 @@ An instance, 7 units:
 The instance flags are:
 * bit 24: forced opaque;
 * bit 25: forced non-opaque;
-* bits 26 and 27: the triangle cull mode (0 back, 1 front, 2 none).
+* bits 26 and 27: the triangle cull mode (0 back, 1 front, 2 none);
+* bit 28: the instance moves.
+
+In a TLAS whose header sets bit 2, every instance takes 10 units, and units 7 to 9 are its object-to-world rows at time 1.
+A static instance writes its transform there again; a moving one's units 0 to 2 are unread, since the walk inverts the map at the ray's time.
+Its TLAS nodes bound the instance over the whole interval, as the boxes of both its transforms do.
 
 ## BLAS region
 

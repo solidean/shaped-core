@@ -190,6 +190,9 @@ public:
         case sg::feature::view_instancing:
             // WebGPU has no multiview; WebXR hands out a texture per view instead
             return false;
+        case sg::feature::ray_tracing_motion_blur:
+            // the polyfill's walk places a moving instance at the ray's time
+            return true;
         case sg::feature::vertex_pipeline_stores:
             // a vertex stage binds no writable storage on any WebGPU device
             return false;
@@ -342,9 +345,8 @@ public:
     }
 
     /// A staging group is a mutable array of descriptors, and WebGPU core has neither arrays nor mutable groups.
-    [[nodiscard]] cc::result<sg::staging_binding_group_handle> try_create_staging_binding_group(
-        sg::binding_group_layout_handle,
-        sg::lifetime_scope) override
+    [[nodiscard]] cc::result<sg::staging_binding_group_handle>
+    try_create_staging_binding_group(sg::binding_group_layout_handle, int, sg::lifetime_scope) override
     {
         return cc::error("webgpu has no binding arrays, so it has no staging binding groups "
                          "(ctx.supports(sg::feature::binding_arrays) is false)");

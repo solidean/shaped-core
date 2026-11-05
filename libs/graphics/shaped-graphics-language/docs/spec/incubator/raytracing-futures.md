@@ -29,7 +29,9 @@ It would be a builtin behind a feature, and a hit object is a type the vocabular
 They are properties of a BLAS, which sg builds, so most of their cost lands in sg; SGL would gain little beyond a ray flag and a hit's micro-triangle fields.
 
 **Motion blur.**
-A ray carries a time, and a BLAS or an instance its motion; `ray` would gain a `time`, and the targets that have it would take it.
+Done for instances in the emulated trace: a ray carries a `time`, and a moving instance stands where it puts it (EVAL-130).
+Left: a native trace where a device has motion, a BLAS whose vertices move, and keyframes beyond two.
+Metal's intersector takes a time with motion acceleration structures, and vulkan's `VK_NV_ray_tracing_motion_blur` a pipeline's `traceRayMotionNV`.
 
 **Ray queries in the vertex stage.**
 Nothing refuses an inline trace in a vertex stage, and the text every target writes looks right; no GPU test has run one yet.

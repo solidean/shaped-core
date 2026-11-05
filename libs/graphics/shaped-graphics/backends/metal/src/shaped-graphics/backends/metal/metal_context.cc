@@ -162,6 +162,9 @@ bool metal_context::supports(sg::feature f) const
     case sg::feature::view_instancing:
         // vertex amplification would grant it, and is not wired up yet
         return false;
+    case sg::feature::ray_tracing_motion_blur:
+        // Metal's motion acceleration structures are not wired up yet
+        return false;
     case sg::feature::vertex_pipeline_stores:
         // a vertex function writes a device buffer on every Apple GPU
         return true;
@@ -1081,8 +1084,12 @@ cc::result<sg::binding_group_handle> metal_context::try_create_binding_group(bin
 }
 
 cc::result<sg::staging_binding_group_handle> metal_context::try_create_staging_binding_group(binding_group_layout_handle layout,
+                                                                                             int unbounded_capacity,
                                                                                              lifetime_scope scope)
 {
+    // metal grants no unbounded binding arrays yet, so no layout it made has one
+    if (unbounded_capacity != 0)
+        return cc::error("staging_binding_group: metal has no unbounded binding arrays yet");
     return create_metal_staging_binding_group(cc::move(layout), scope);
 }
 } // namespace sg::backend::metal

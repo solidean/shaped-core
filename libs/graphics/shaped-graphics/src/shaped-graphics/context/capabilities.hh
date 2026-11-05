@@ -214,6 +214,11 @@ enum class sg::feature
     /// A shader may take the minimum or the maximum of a buffer's 64-bit unsigned integer atomically, and do nothing else to it.
     /// Every device with `shader_int64_atomics` has it; Metal grants it alone, on the Apple GPUs that have 64-bit atomics.
     shader_int64_min_max_atomics,
+
+    /// A TLAS instance may move over the frame (`tlas_instance::transform_at_end`), and a trace places it at its ray's time.
+    /// webgpu has it through the ray-query polyfill; DXR has no motion, and vulkan's VK_NV_ray_tracing_motion_blur
+    /// reaches no ray query, so neither native backend answers it yet, nor metal.
+    ray_tracing_motion_blur,
 };
 
 CC_FLAG_ENUM_INDEXED(sg, feature, cc::u64);
@@ -264,9 +269,9 @@ inline constexpr feature k_all_features[] = {
     feature::unbounded_binding_arrays,
     feature::shader_shared_int64_atomics,
     feature::shader_int64_min_max_atomics,
+    feature::ray_tracing_motion_blur,
 };
-static_assert(isize(sizeof(k_all_features) / sizeof(k_all_features[0]))
-                  == isize(feature::shader_int64_min_max_atomics) + 1,
+static_assert(isize(sizeof(k_all_features) / sizeof(k_all_features[0])) == isize(feature::ray_tracing_motion_blur) + 1,
               "k_all_features lists every feature");
 
 /// The enumerator's name, `ray_query`, which is also what SGL's `require` spells it as.
@@ -352,6 +357,8 @@ static_assert(isize(sizeof(k_all_features) / sizeof(k_all_features[0]))
         return "shader_shared_int64_atomics";
     case feature::shader_int64_min_max_atomics:
         return "shader_int64_min_max_atomics";
+    case feature::ray_tracing_motion_blur:
+        return "ray_tracing_motion_blur";
     }
     return "";
 }

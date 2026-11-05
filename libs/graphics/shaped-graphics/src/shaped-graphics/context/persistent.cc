@@ -158,9 +158,10 @@ cc::result<binding_group_handle> context_persistent_scope::try_create_binding_gr
     return group;
 }
 
-staging_binding_group_handle context_persistent_scope::create_staging_binding_group(binding_group_layout_handle layout)
+staging_binding_group_handle context_persistent_scope::create_staging_binding_group(binding_group_layout_handle layout,
+                                                                                    int unbounded_capacity)
 {
-    auto r = try_create_staging_binding_group(cc::move(layout));
+    auto r = try_create_staging_binding_group(cc::move(layout), unbounded_capacity);
     if (r.has_value())
         return cc::move(r.value());
     if (_ctx.is_device_lost())
@@ -169,16 +170,24 @@ staging_binding_group_handle context_persistent_scope::create_staging_binding_gr
 }
 
 cc::result<staging_binding_group_handle> context_persistent_scope::try_create_staging_binding_group(
-    binding_group_layout_handle layout)
+    binding_group_layout_handle layout,
+    int unbounded_capacity)
 {
-    // a staging group's image is the layout's, so it has no count for an unbounded array to take
+    if (unbounded_capacity < 0)
+        return cc::error(cc::format("staging_binding_group: an unbounded capacity of {} elements", unbounded_capacity));
+    auto unbounded = cc::string_view();
     if (layout != nullptr)
         for (auto const& b : layout->bindings())
             if (b.is_unbounded())
-                return cc::error(cc::format("staging_binding_group: '{}' is an unbounded array, which only an "
-                                            "immutable binding_group sizes",
-                                            b.name));
-    auto created = _ctx.try_create_staging_binding_group(cc::move(layout), lifetime_scope::persistent);
+                unbounded = b.name;
+    if (!unbounded.empty() && unbounded_capacity == 0)
+        return cc::error(cc::format("staging_binding_group: '{}' is an unbounded array, and the group needs a capacity "
+                                    "for it",
+                                    unbounded));
+    if (unbounded.empty() && unbounded_capacity != 0)
+        return cc::error("staging_binding_group: a capacity for a layout without an unbounded array");
+    auto created
+        = _ctx.try_create_staging_binding_group(cc::move(layout), unbounded_capacity, lifetime_scope::persistent);
     if (created.has_value())
     {
         created.value()->_float32_filtering = _ctx.supports(feature::float32_filtering);

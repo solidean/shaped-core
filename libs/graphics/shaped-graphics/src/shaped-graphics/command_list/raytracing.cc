@@ -141,6 +141,9 @@ blas_handle command_list_raytracing_scope::build_blas(cc::span<blas_aabbs const>
 tlas_handle command_list_raytracing_scope::build_tlas(cc::span<tlas_instance const> instances, accel_build_flags flags)
 {
     _cmd._stats.add(stat::tlas_builds);
+    for (auto const& instance : instances)
+        CC_ASSERT(!instance.transform_at_end.has_value() || _cmd.context().supports(feature::ray_tracing_motion_blur),
+                  "build_tlas: an instance moves, and this context has no sg::feature::ray_tracing_motion_blur");
     auto tlas = _cmd.raytracing_build_tlas(instances, flags);
 
     // Only what the hit-record check at dispatch_rays reads, and only where it runs.

@@ -384,6 +384,9 @@ public:
             return _float_denormals;
         case sg::feature::view_instancing:
             return _view_instancing;
+        case sg::feature::ray_tracing_motion_blur:
+            // VK_NV_ray_tracing_motion_blur reaches a pipeline's trace alone, which no SGL text writes yet
+            return false;
         case sg::feature::vertex_pipeline_stores:
             return _vertex_pipeline_stores;
         // SPIR-V's `Coherent` decoration is core, and storage-image atomics on r32 integer formats are required.
@@ -659,13 +662,16 @@ public:
     }
     [[nodiscard]] cc::result<vulkan_staging_binding_group_handle> create_vulkan_staging_binding_group(
         sg::binding_group_layout_handle const& layout,
+        int unbounded_capacity,
         sg::lifetime_scope scope);
 
     [[nodiscard]] cc::result<sg::staging_binding_group_handle> try_create_staging_binding_group(
         sg::binding_group_layout_handle layout,
+        int unbounded_capacity,
         sg::lifetime_scope scope) override
     {
-        return cc::result<sg::staging_binding_group_handle>(create_vulkan_staging_binding_group(layout, scope));
+        return cc::result<sg::staging_binding_group_handle>(
+            create_vulkan_staging_binding_group(layout, unbounded_capacity, scope));
     }
 
     sg::submission_token submit_command_list(std::unique_ptr<sg::command_list> cmd) override

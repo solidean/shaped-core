@@ -7,8 +7,10 @@ namespace sg
 {
 staging_binding_group::~staging_binding_group() = default;
 
-staging_binding_group::staging_binding_group(binding_group_layout_handle layout, cc::vector<int> descriptor_offsets)
-  : _layout(cc::move(layout))
+staging_binding_group::staging_binding_group(binding_group_layout_handle layout,
+                                             cc::vector<int> descriptor_offsets,
+                                             int unbounded_capacity)
+  : _layout(cc::move(layout)), _unbounded_capacity(unbounded_capacity)
 {
     CC_ASSERT(_layout != nullptr, "staging_binding_group requires a binding_group_layout");
 
@@ -57,7 +59,7 @@ bool staging_binding_group::is_array(binding_slot slot) const
 
 int staging_binding_group::array_size(binding_slot slot) const
 {
-    return int(info_of(slot).declared->count);
+    return element_count(*info_of(slot).declared);
 }
 
 void staging_binding_group::touch(binding_slot slot)
@@ -212,7 +214,7 @@ void staging_binding_group::record_use(binding_slot slot, int first_element, cc:
             _slot_tlases.resize_to_defaulted(index + 1);
         auto& elements = _slot_tlases[index];
         if (elements.empty())
-            elements.resize_to_defaulted(isize(b.count));
+            elements.resize_to_defaulted(isize(element_count(b)));
         for (auto i = isize(0); i < views.size(); ++i)
         {
             auto const* const tlas = try_as_tlas_view(views[i]);
@@ -237,7 +239,7 @@ void staging_binding_group::write_run(binding_slot slot, int first_element, cc::
     auto const& b = *info.declared;
     CC_ASSERT(!is_sampler(b.type), "staging_binding_group: that binding is a sampler — it takes no view");
     CC_ASSERT(info.first_descriptor >= 0, "staging_binding_group: that binding has no view descriptor");
-    CC_ASSERT(first_element >= 0 && first_element + views.size() <= isize(b.count),
+    CC_ASSERT(first_element >= 0 && first_element + views.size() <= isize(element_count(b)),
               "staging_binding_group: the run does not fit inside the binding's element count");
     if (views.empty())
         return;
@@ -281,7 +283,7 @@ void staging_binding_group::clear_run(binding_slot slot, int first_element, int 
     auto const& b = *info.declared;
     CC_ASSERT(!is_sampler(b.type), "staging_binding_group: that binding is a sampler — it takes no view");
     CC_ASSERT(info.first_descriptor >= 0, "staging_binding_group: that binding has no view descriptor");
-    CC_ASSERT(count >= 0 && first_element >= 0 && first_element + count <= int(b.count),
+    CC_ASSERT(count >= 0 && first_element >= 0 && first_element + count <= element_count(b),
               "staging_binding_group: the run does not fit inside the binding's element count");
     if (count == 0)
         return;

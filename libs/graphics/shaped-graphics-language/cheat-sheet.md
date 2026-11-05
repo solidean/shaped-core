@@ -566,6 +566,7 @@ let h = scene.world.trace(r)                             // -> triangle_hit; h.i
 let h = scene.world.trace(r, cutout)                     // cutout: (triangle_candidate) -> hit_decision, a name or a lambda
 let h = scene.world.trace(r, flags = ray_flags.force_opaque, mask = 0x01)
 let h = scene.world.trace(r, cutout, flags = ray_flags.force_omm_2_state)  // micromap unknowns take their guess, never asking cutout
+let r = ray(origin = o, direction = d, time = 0.5)       // a moving instance stands where `time` puts it, 0 to 1 (EVAL-130); emulated trace only
 let p = spheres.trace(r, sphere, cutout_sphere)          // .procedural: (procedural_box) -> report[A], then the any hit
 let m = both.trace(r, any_hit = a, intersection = s, procedural_any_hit = b)   // .mixed -> mixed_hit[A]: m.kind, m.triangle(), m.procedural()
 is_occluded(scene.world, r)                              // the shadow ray
