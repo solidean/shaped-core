@@ -55,14 +55,18 @@ cc::result<cc::unit> vulkan_staging_binding_group::initialize()
 {
     auto const bindings = _vk_layout->bindings();
 
-    // A zeroed image is already every view binding's empty value — that is what a null descriptor is here — so only
-    // the sampler bindings need a write.
+    // Every view descriptor starts as the driver's null descriptor, which is not zeros on every device.
     // A static sampler's descriptor comes from the layout and is never touched again; a dynamic one starts at the
     // default sampler state, which is what unset_sampler means.
     for (isize i = 0; i < bindings.size(); ++i)
     {
         if (!sg::is_sampler(bindings[i].type))
+        {
+            for (auto element = 0; element < int(bindings[i].count); ++element)
+                write_null_descriptor(_ctx, bindings[i].type,
+                                      _image.data() + _vk_layout->descriptor_offset_of(i, element));
             continue;
+        }
 
         VkSampler sampler = _vk_layout->_slot_samplers[i];
         if (sampler == VK_NULL_HANDLE)
@@ -118,16 +122,10 @@ void vulkan_staging_binding_group::write_view_descriptors(int first_descriptor,
 
 void vulkan_staging_binding_group::clear_view_descriptors(int first_descriptor, sg::binding const& b, int count)
 {
-    auto const size = size_t(descriptor_size_of(_ctx, b.type));
     for (int k = 0; k < count; ++k)
     {
         int const flat = first_descriptor + k;
-
-        // The empty value of a view descriptor is a zeroed one — see write_view_descriptor's vacant arm, which this
-        // deliberately spells the same way rather than calling through with a vacant_view.
-        byte* const dst = at(flat);
-        for (size_t i = 0; i < size; ++i)
-            dst[i] = byte(0);
+        write_null_descriptor(_ctx, b.type, at(flat));
         _resources[flat] = {};
     }
 }
