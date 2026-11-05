@@ -393,16 +393,12 @@ if(SC_BUILD_TESTS)
                 fragment_hazard.hlsl:fragment:ps_write
                 fragment_hazard.hlsl:fragment:ps_read
                 pattern_fill.hlsl:compute:main
-                ping_pong.hlsl:compute:main
         )
         # What tests/shaders/shader_fixtures.cc keys on: the SGL package is always there, this one is not.
         target_compile_definitions(shaped-graphics-test PRIVATE SG_TEST_HAS_HLSL_SHADERS=1)
 
         # The one tier-1 test that executes raster shaders, for the hazard only a running GPU shows.
         target_sources(shaped-graphics-test PRIVATE tests/command_list/fragment-write-hazard-test.cc)
-
-        # Frame-shaped: what creating render targets every frame costs against keeping them, per backend.
-        target_sources(shaped-graphics-test PRIVATE tests/transient/transient-benchmark.cc)
 
         # The render-routine framework tests are backend-agnostic invocables like the rest of the tier-1
         # suite, so they need only the shader package this block already gated: the end-to-end test
@@ -451,6 +447,8 @@ if(SC_BUILD_TESTS)
             tests/pipeline/stages-test.cc
             tests/pipeline/ray-query-test.cc
             tests/pipeline/raytracing-pipeline-test.cc
+            # Frame-shaped: what creating render targets every frame costs against keeping them, per backend.
+            tests/transient/transient-benchmark.cc
         )
         sc_add_shader_package(
             TARGET     shaped-graphics-test
@@ -466,6 +464,7 @@ if(SC_BUILD_TESTS)
                 double_values.sgl:*
                 quads.sgl:*
                 textures.sgl:*
+                ping_pong.sgl:*
                 footprint.sgl:*
                 layout.sgl:*
                 sync.sgl:*

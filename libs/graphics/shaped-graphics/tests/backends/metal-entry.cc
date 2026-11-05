@@ -42,3 +42,5 @@ ASYNC_TEST("sg metal backend")
 }
 
 static bool const sg_metal_registered = sg_test::register_backend("sg metal backend", "metal");
+static bool const sg_metal_factory_registered
+    = sg_test::register_context_factory("metal", [] { return sg::create_metal_context({}); });
