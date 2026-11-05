@@ -27,3 +27,9 @@ That one is `inf * 0`, a strict `fmul` in the DXIL that the driver returns as 0,
 `-Gis` was not landed: shaped-viewer-test then hung for over 170 s inside igd12um64xe2.dll creating sv's pipelines, where without it the binary passes in 38 s.
 So dx12 needs either a driver that compiles strict DXIL in time, or `-Gis` opt-in per shader or per vendor, and that is the decision this question now holds for dx12.
 Vulkan needs the `SignedZeroInfNanPreserve` execution mode, which DXC can write through `[[vk::ext_execution_mode]]` behind a device feature check; WebGPU offers no switch at all.
+
+## The answer, agreed 2026-11-05
+
+Not one promise for every shader, but a ladder an entry point climbs where it needs to: `fast`, `specials`, `precise` and `ieee`, with `fast` the default.
+[incubator/float-guarantees.md](../spec/incubator/float-guarantees.md) is the design, and [epic-sgl-float-guarantee-ladder](epic-sgl-float-guarantee-ladder.md) the work.
+This question closes when the epic's first child lands.

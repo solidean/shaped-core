@@ -46,3 +46,4 @@ Each file has the same shape, so an idea can be picked up cold:
 | [compute-throughput.md](compute-throughput.md) | matrix fragments as a feature, which a fast compute kernel such as a denoise network needs beside the 16-bit float |
 | [specialization.md](specialization.md) | `const if` over target, feature, option and generic parameter, and a function body in the target's own text under it |
 | [autodiff.md](autodiff.md) | `fwd_diff f` and `bwd_diff f` written by the compiler as a transform of the flat tree, checked against central differences on the interpreter |
+| [float-guarantees.md](float-guarantees.md) | a ladder of float guarantees from `fast` to `ieee`, stated per function, kept per entry point, and refused where a target cannot keep it |

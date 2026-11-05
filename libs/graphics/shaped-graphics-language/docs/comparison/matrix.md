@@ -48,7 +48,7 @@ A per-target cell reads `dx12 / vulkan / metal / webgpu`.
 |---|---|---|---|---|---|
 | **B1** Portable by default | ❌ each hop accepts or rejects on its own, late | ⚠️ capabilities reject missing features statically; behaviour is implementation-defined | ⚠️ designed portable; Naga and Tint disagree on uniformity | ❌ | ✅ one check judges every target; a non-portable form needs a feature (floats: B3) |
 | **B2** Integer semantics | ❌ per target | ⚠️ unsigned wrap defined; the rest unspecified | ✅ fully defined, polyfilled on every target | ❌ division overflow, ÷0 and wide shifts undefined | ⚠️ wrap, truncating `/`, signed `%`, masked shifts defined; ÷0 and `INT_MIN / -1` undefined, a constant one is an error, and a profile reports or ends a run one (B10, B11) |
-| **B3** Float semantics | ⚠️ per target; Metal fast math by default | ⚠️ implementation-defined; `precise` has no effect on Metal | ⚠️ loose by spec; Metal relaxed by default in Dawn and wgpu | ❌ per target | ⚠️ the spec says IEEE f32, which Metal keeps in safe math mode, while Vulkan and WebGPU may still assume no NaN or infinity 🗺️ [question](../issues/question-sgl-float-semantics-on-every-target.md) |
+| **B3** Float semantics | ⚠️ per target; Metal fast math by default | ⚠️ implementation-defined; `precise` has no effect on Metal | ⚠️ loose by spec; Metal relaxed by default in Dawn and wgpu | ❌ per target | ⚠️ the spec says IEEE f32, which Metal keeps in safe math mode, while the other targets may still assume no NaN or infinity; a per-entry ladder from `fast` to `ieee`, refused where a target cannot keep it, is designed 🗺️ [epic](../issues/epic-sgl-float-guarantee-ladder.md) |
 | **B4** Out-of-bounds access | ⚠️ per target and robustness setting | ⚠️ undefined by spec | ⚠️ bounded outcomes, where the translator is configured for them | ❌ undefined unless robustness is on | ⚠️ undefined; the interpreter reports it as a program error, and a profile guards an array index (B10, B11) |
 | **B5** Uniformity, derivatives, discard | ⚠️ no uniformity check; a failure surfaces at Tint or in the browser | ⚠️ no model of WGSL uniformity; open bugs | ⚠️ Tint enforces it; Naga skips derivative checks | ⚠️ no uniformity analysis | ⚠️ its own uniformity pass for every target; discard's helper lanes on metal 🗺️ [feat](../issues/feat-sgl-discard-helper-emulation.md) |
 | **B6** Float and 64-bit atomics | ⚠️ 64-bit on DX12 and Vulkan; reported by whichever hop fails | ⚠️ neither on Metal or WGSL; a static capability error | ⚠️ core has 32-bit only; native-only extensions | ⚠️ SPIRV-Cross refuses 64-bit atomics for MSL | ⚠️ 32-bit only; float and 64-bit refused statically 🗺️ [feat](../issues/feat-sgl-float-and-64-bit-atomics.md) |
@@ -204,7 +204,7 @@ Per row and column:
   - Slang: SLANG issue 13689
   - WGSL: WGSL §15.7, TINT `ShaderModuleMTL.mm`
   - GLSL + chain: GLSL
-  - SGL: EVAL-6, and sg's metal backend `metal_common.cc`, which compiles with default options
+  - SGL: EVAL-6, sg's metal backend `metal_common.cc`, [incubator/float-guarantees.md](../spec/incubator/float-guarantees.md) (2026-11-05)
 - **B4**
   - HLSL + chain: WGSL §6.5.7, Vulkan robustness
   - Slang: SLANGSPEC
