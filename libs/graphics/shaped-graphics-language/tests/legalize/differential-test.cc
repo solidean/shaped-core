@@ -61,6 +61,30 @@ TEST("sgl legalize - random structured programs behave the same once they are co
     CHECK(result.failed == 0);
 }
 
+TEST("sgl legalize - random programs behave the same with their divisions guarded (LEGAL-65)")
+{
+    auto const checked = flat_test_module();
+    auto const& m = checked.module;
+    for (auto const guard : {undefined_guard::abort, undefined_guard::report})
+    {
+        auto const result = run_seeds(m, nx::is_thorough() ? 20'000 : 400, {.guards_undefined = guard});
+        CHECK(result.failures == "");
+        CHECK(result.failed == 0);
+    }
+
+    // the generator divides by `e * e + 1`, which never fails, so every such guard stands and none trips
+    auto guarded = 0;
+    for (auto seed = u64(0); seed < 200; ++seed)
+    {
+        auto const structured = random_program(m, seed, shape_of(seed));
+        guarded
+            += dump_entry_point(m, legalize(m, structured, {.guards_undefined = undefined_guard::report})).contains("divisor")
+                 ? 1
+                 : 0;
+    }
+    CHECK(guarded >= 20);
+}
+
 TEST("sgl legalize - the random programs exercise every rule")
 {
     auto const checked = flat_test_module();

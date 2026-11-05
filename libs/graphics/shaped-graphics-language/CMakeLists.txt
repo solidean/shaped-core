@@ -89,6 +89,7 @@ add_library(shaped-graphics-language
     src/shaped-graphics-language/legalize/legalize_cases.cc
     src/shaped-graphics-language/legalize/legalize_exits.cc
     src/shaped-graphics-language/legalize/legalize_exprs.cc
+    src/shaped-graphics-language/legalize/legalize_guards.cc
     src/shaped-graphics-language/legalize/legalize_erase.cc
     src/shaped-graphics-language/legalize/legalize_lets.cc
     src/shaped-graphics-language/legalize/legalize_onces.cc
@@ -435,6 +436,7 @@ if(SC_BUILD_TESTS)
         tests/legalize/random-program.cc
         tests/legalize/differential-test.cc
         tests/legalize/legalize-rules-test.cc
+        tests/legalize/guard-test.cc
 
         tests/emit/emit-test-support.hh
         tests/emit/core-emit-test.cc

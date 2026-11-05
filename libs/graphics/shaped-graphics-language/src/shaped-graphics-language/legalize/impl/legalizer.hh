@@ -35,6 +35,15 @@ using stmt_list = cc::vector<flat_stmt_id>;
 /// Rule V0, first: no check and no `assert` is left, since no target writes one, and neither is what computed its condition.
 [[nodiscard]] stmt_list erase_checks(flat_builder& out, stmt_list const& body, bool erases_prints, bool lowers_asserts);
 
+/// Rule G1, before every other: each operation that may have no value is a block that tests its operands first (LEGAL-65).
+/// With `undefined_guard::none` it is `body` as it is.
+[[nodiscard]] stmt_list guard_undefined(flat_builder& out, stmt_list const& body, legalize_options const& options);
+
+/// What ends the invocation of the entry point's stage where an `assert` failed or a guard tripped, appended to `into`.
+/// A stage that returns nothing returns, a pixel stage discards, and a stage with a result returns one that culls what
+/// it is part of; nothing for a stage it does not know how to end.
+void end_invocation(flat_builder& out, stmt_list& into);
+
 /// Rule V1: no local, assignment or result of type void is left, and what evaluating one did stays as an `eval`.
 [[nodiscard]] stmt_list erase_void(flat_builder& out, stmt_list const& body);
 

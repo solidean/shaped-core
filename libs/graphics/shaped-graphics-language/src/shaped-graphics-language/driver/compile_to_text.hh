@@ -10,6 +10,7 @@
 #include <shaped-graphics-language/check/symbols.hh>
 #include <shaped-graphics-language/driver/describe.hh>
 #include <shaped-graphics-language/emit/emit.hh>
+#include <shaped-graphics-language/legalize/legalize.hh>
 
 /// One entry point of one SGL source, asked for as the text of one target.
 struct sgl::text_request
@@ -37,6 +38,9 @@ struct sgl::text_request
     /// Writes every print and every failed assert into sg's debug buffer, and describes each site (EMIT-183).
     /// Without it the text holds neither.
     bool diagnostics = false;
+    /// What the text does where an integer division by zero or an array index outside the array would run (LEGAL-65).
+    /// `report` prints through the debug buffer, and so is `abort` without `diagnostics`.
+    check::undefined_guard guards_undefined = check::undefined_guard::none;
     /// What the device has, each named as `sg::feature` names it, which `has` answers once inlined (CHK-426).
     /// With `float_atomic_add` an `atomic[float]` is the target's own float atomic where the target can say one,
     /// vulkan and metal, and a `uint`'s bits elsewhere.

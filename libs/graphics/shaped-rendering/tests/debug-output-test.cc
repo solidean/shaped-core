@@ -80,3 +80,61 @@ ASYNC_INVOCABLE_TEST("sr - a shader's failed assert reaches the log with its val
     // and the window's reset, which decoding it queued, lands before the test ends
     co_await ctx.idle_completion();
 }
+
+ASYNC_INVOCABLE_TEST("sr - a shader's division by zero is reported as a failed assert where it would have run, and "
+                     "that "
+                     "invocation ends, past a barrier where one follows (LEGAL-65)",
+                     (sg::context_handle const& ctx_h))
+{
+    REQUIRE(ctx_h != nullptr);
+    auto& ctx = *ctx_h;
+    if (inner_compiler_for(ctx) == nullptr)
+        SKIP("sg binds no debug window on this backend yet");
+    // thread 2 divides by zero: once at once, and once with a barrier behind it that every thread must reach
+    nx::expect_error("guard.sgl:2: assert failed: `12 / 0` has no value", nx::exactly(2));
+
+    cc::string_view const sources[] = {
+        "@compute(4) fun cs(@thread_id id: int3):\n"
+        "    let q = 12 / (id.x - 2)\n"
+        "    print \"thread $(id.x): $q\"\n",
+        "@compute(4) fun cs(@thread_id id: int3):\n"
+        "    let q = 12 / (id.x - 2)\n"
+        "    workgroup_barrier()\n"
+        "    print \"thread $(id.x): $q\"\n",
+    };
+    for (auto const source : sources)
+    {
+        auto const compiler = slib::create_sgl_compiler(
+            inner_compiler_for(ctx),
+            {.persistent_cache = nullptr, .diagnostics = true, .guards_undefined = slib::sgl_undefined_guard::report});
+        auto desc = slib::shader_source_description{.source = cc::string(source),
+                                                    .entry_point = "cs",
+                                                    .stage = sg::shader_stage::compute,
+                                                    .label = "guard.sgl"};
+        auto preprocessed = compiler->preprocess(desc, [](cc::string_view) { return cc::optional<cc::string>(); });
+        REQUIRE(preprocessed.has_value());
+        REQUIRE(preprocessed.value().stated.has_value());
+        auto shader = preprocessed.value().stated.value();
+
+        desc.source = preprocessed.value().source;
+        if (!preprocessed.value().entry_point.empty())
+            desc.entry_point = preprocessed.value().entry_point;
+        auto const compiled = co_await compiler->compile(desc);
+        shader.bytecode = compiled.bytecode;
+        shader.compiler = compiled.compiler;
+
+        auto const layout = ctx.uncached.create_pipeline_layout({});
+        auto const pipeline = ctx.uncached.create_compute_pipeline({.shader = shader, .layout = layout});
+
+        auto cmd = ctx.create_command_list();
+        cmd->compute.bind_pipeline(*pipeline);
+        cmd->compute.dispatch_threads(4);
+        ctx.submit_command_list(cc::move(cmd));
+        ctx.advance_epoch();
+
+        co_await ctx.idle_completion();
+        co_await ctx.idle_completion();
+        ctx.process_completed_epochs();
+        co_await ctx.idle_completion();
+    }
+}

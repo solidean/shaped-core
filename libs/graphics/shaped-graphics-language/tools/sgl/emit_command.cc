@@ -27,6 +27,7 @@ COMMAND("emit")
     auto run_tests = false;
     auto line_directives = false;
     auto diagnostics = false;
+    auto undefined = cc::string("none");
     auto device_feature_names = cc::vector<cc::string>();
     auto option_arguments = cc::vector<cc::string>();
     auto module_dirs = cc::vector<cc::string>();
@@ -42,6 +43,10 @@ COMMAND("emit")
                       "statement"});
     args.arg({"diagnostics"}, diagnostics,
              {.desc = "write print and assert into sg's debug buffer, as a dev build does"});
+    args.arg({"undefined"}, undefined,
+             {.desc = "what an integer division by zero or an array index outside the array does: none, abort, or "
+                      "report, which prints it with --diagnostics",
+              .metavar = "GUARD"});
     args.arg({"device-feature"}, device_feature_names,
              {.desc = "a feature the device has, which `has` answers and slib passes for every one a context has, "
                       "`--device-feature float_atomic_add`; repeat for each",
@@ -71,6 +76,17 @@ COMMAND("emit")
     if (!is_known)
     {
         cc::eprintln("sgl emit: unknown target '{}' (one of hlsl-dx12, hlsl-vulkan, wgsl, msl)", target_name);
+        return exit_usage;
+    }
+
+    auto guards_undefined = sgl::check::undefined_guard::none;
+    if (undefined == "abort")
+        guards_undefined = sgl::check::undefined_guard::abort;
+    else if (undefined == "report")
+        guards_undefined = sgl::check::undefined_guard::report;
+    else if (undefined != "none")
+    {
+        cc::eprintln("sgl emit: unknown --undefined '{}' (one of none, abort, report)", undefined);
         return exit_usage;
     }
 
@@ -109,6 +125,7 @@ COMMAND("emit")
                                             .run_tests = run_tests,
                                             .line_directives = line_directives,
                                             .diagnostics = diagnostics,
+                                            .guards_undefined = guards_undefined,
                                             .device_features = device_features});
     if (text.has_error())
     {
