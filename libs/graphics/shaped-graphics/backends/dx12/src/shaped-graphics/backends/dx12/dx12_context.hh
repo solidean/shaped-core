@@ -245,6 +245,9 @@ public:
         case sg::feature::float_specials:
             // DXIL keeps them on every device once DXC compiles with -Gis
             return true;
+        case sg::feature::float_denormals:
+            // -denorm preserve, from Shader Model 6.2, which every shader of this backend compiles at or above
+            return true;
         case sg::feature::float_atomic_add:
             // HLSL's float atomics are bitwise exchanges alone; an add is NVAPI's, which this backend does not take
             return false;

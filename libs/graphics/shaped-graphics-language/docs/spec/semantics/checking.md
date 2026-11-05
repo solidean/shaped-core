@@ -902,7 +902,7 @@ A feature is what a device may lack, so using one makes a shader non-portable on
   The 16-bit types add `shader_f16` and `shader_int16` (CHK-382), and the subgroup operations `subgroups` (CHK-376).
   Coherent memory adds `device_coherence` (CHK-368), image atomics `image_atomics` (CHK-372), and a pixel stage's strong compare-exchange `helper_lane_query` (EMIT-163).
   A `@layer` field adds `vertex_layer_output` (CHK-419).
-  A vulkan entry point at `@float(.specials)` or above adds `float_specials`, which no program needs to name (EMIT-185).
+  A vulkan entry point at `@float(.specials)` or above adds `float_specials`, and at `.ieee` `float_denormals`, which no program needs to name (EMIT-185).
   What `has` asks rather than a `require` needs adds `float_atomic_add` and `shader_execution_reordering` (CHK-426).
   The stages and stage inputs a device may lack add `primitive_index`, `sample_rate_shading`, `geometry_shader` and `tessellation_shader`.
   Any other name is the normal error `unknown-feature`, and its detail lists the names.

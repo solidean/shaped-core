@@ -338,11 +338,12 @@ private:
                                                 .entry_point = emitted.entry_point,
                                                 .used_modules = emitted.library_files,
                                                 .warnings = emitted.warnings};
-        // EMIT-185: DXIL keeps the special values and the order only with every float operation strict, and
-        // denormals only where Shader Model 6.2 is asked to preserve them
-        if (_target == sgl::emit::target::hlsl_dx12 && emitted.float_guarantee != sgl::check::float_level::fast)
+        // EMIT-185: DXC keeps the special values and the order only with every float operation strict, which in
+        // SPIR-V is SignedZeroInfNanPreserve and NoContraction, and denormals only where it is asked to preserve them
+        auto const is_hlsl = _target == sgl::emit::target::hlsl_dx12 || _target == sgl::emit::target::hlsl_vulkan;
+        if (is_hlsl && emitted.float_guarantee != sgl::check::float_level::fast)
             result.dxc_args.push_back(cc::string("-Gis"));
-        if (_target == sgl::emit::target::hlsl_dx12 && emitted.float_guarantee == sgl::check::float_level::ieee)
+        if (is_hlsl && emitted.float_guarantee == sgl::check::float_level::ieee)
         {
             result.dxc_args.push_back(cc::string("-denorm"));
             result.dxc_args.push_back(cc::string("preserve"));

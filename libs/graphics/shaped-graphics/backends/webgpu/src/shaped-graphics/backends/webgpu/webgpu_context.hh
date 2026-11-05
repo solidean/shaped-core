@@ -173,6 +173,7 @@ public:
             // WebGPU has no ray-tracing pipeline to reorder.
             return false;
         case sg::feature::float_specials:
+        case sg::feature::float_denormals:
             // WGSL may assume no NaN or infinity arises, and nothing a shader says reaches the compiler's float handling
             return false;
         case sg::feature::unaligned_block_compression:

@@ -119,6 +119,8 @@ ctx.supports(sg::feature::ray_query)               // bool — THE capability qu
                                                    //   | float_specials (floats keep NaNs, infinities, signed zeros on request; vulkan
                                                    //     with shaderSignedZeroInfNanPreserveFloat32, true on dx12 and metal, false on webgpu;
                                                    //     a vulkan SGL entry point at @float(.specials) needs it)
+                                                   //   | float_denormals (floats keep denormals on request; vulkan with
+                                                   //     shaderDenormPreserveFloat32, true on dx12, false on metal and webgpu; @float(.ieee))
                                                    //   vulkan's geometry, tessellation, sample-rate and wireframe answers are the device features creation enabled
                                                    //   binding_arrays false (webgpu) = no count > 1 bindings, no staging_binding_group, no bindless_array
                                                    //   the per-scope bools (cmd.raytracing.is_supported(), cmd.query.is_supported(),

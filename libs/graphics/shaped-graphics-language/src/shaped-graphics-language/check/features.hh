@@ -53,6 +53,8 @@ enum class sgl::check::feature : sgl::u8
     /// 32-bit floats that keep NaNs, infinities and signed zeros, which vulkan asks of the device (EMIT-185).
     /// No program names it: a vulkan text needs it for an entry point at `@float(.specials)` or above.
     float_specials,
+    /// 32-bit floats that keep denormals, which vulkan asks of the device for an entry point at `@float(.ieee)`.
+    float_denormals,
 };
 
 CC_FLAG_ENUM_INDEXED(sgl::check, feature, u32);
@@ -84,6 +86,7 @@ inline constexpr cc::string_view k_feature_names[] = {
     "shader_execution_reordering", //
     "opacity_micromap",            //
     "float_specials",              //
+    "float_denormals",             //
 };
 inline constexpr isize k_feature_count = isize(sizeof(k_feature_names) / sizeof(k_feature_names[0]));
 

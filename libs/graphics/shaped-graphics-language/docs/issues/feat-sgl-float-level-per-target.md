@@ -8,8 +8,10 @@ refs:
 
 # Each target's compile keeps the level its entry point states
 
-Done on 2026-11-05: dx12; metal, whose safe math keeps up to `precise`; and vulkan up to `specials`, behind sg's `float_specials`.
-Left: vulkan's `precise`, which needs `NoContraction` on each operation, and its `ieee` with `DenormPreserve`; metal's denormals.
+Done on 2026-11-05: dx12; metal, whose safe math keeps up to `precise`; and vulkan at every level.
+For SPIR-V DXC's `-Gis` writes `SignedZeroInfNanPreserve` and `NoContraction` on every float operation, and `-denorm preserve` writes `DenormPreserve`.
+Each stands behind sg's `float_specials` and `float_denormals`, the device's float controls.
+Left: whether metal's safe math keeps denormals, which decides whether metal keeps `ieee`.
 
 dx12: `-Gis` from `specials` on, and `-denorm preserve` for `ieee`, handed to DXC by slib's SGL edge per entry point.
 metal: safe math from `specials` on, which sg sets today for every compile and would set per pipeline instead.

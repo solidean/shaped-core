@@ -117,9 +117,6 @@ public:
 
     /// Everything of the function up to and including the line that opens its body.
     virtual void write_function_head(cc::string& out, plan const& p) const = 0;
-    /// What the entry point's body opens with before its first statement, such as an execution mode SPIR-V states
-    /// from inside the function; nothing for most targets.
-    virtual void write_body_prologue(cc::string&, plan const&) const {}
     /// What follows the entry point's function, such as the hull function a tessellation control stage hands its
     /// control points on through; nothing for most stages.
     virtual void write_function_tail(cc::string&, plan const&) const {}

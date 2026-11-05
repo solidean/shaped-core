@@ -152,6 +152,7 @@ public:
             = VkPhysicalDeviceProperties2{.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2, .pNext = &vulkan12};
         vkGetPhysicalDeviceProperties2(_physical_device, &properties);
         _float_specials = vulkan12.shaderSignedZeroInfNanPreserveFloat32 == VK_TRUE;
+        _float_denormals = vulkan12.shaderDenormPreserveFloat32 == VK_TRUE;
 
         // A device must have D24S8 or D32S8 as a depth-stencil attachment, and not necessarily the one sg names.
         auto d32s8 = VkFormatProperties{};
@@ -319,6 +320,8 @@ public:
             return false;
         case sg::feature::float_specials:
             return _float_specials;
+        case sg::feature::float_denormals:
+            return _float_denormals;
         // SPIR-V's `Coherent` decoration is core, and storage-image atomics on r32 integer formats are required.
         // BaseInstance is the DrawParameters capability, which creation requires `shaderDrawParameters` for.
         case sg::feature::device_coherence:
@@ -874,6 +877,7 @@ public:
     bool _tessellation_shader = false;
     bool _sample_rate_shading = false;
     bool _float_specials = false;
+    bool _float_denormals = false;
     bool _wireframe_fill = false;
     bool _depth32_float_stencil8 = false;
     /// The 16-bit kinds each with the 16-bit buffer storage they need, and the whole subgroup family in compute and pixel.

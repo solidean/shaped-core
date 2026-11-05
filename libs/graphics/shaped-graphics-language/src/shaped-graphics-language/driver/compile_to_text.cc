@@ -126,9 +126,10 @@ check::float_level kept_float_level(emit::target target)
     // safe math keeps the specials and the order; whether it keeps denormals is not known
     case emit::target::msl:
         return check::float_level::precise;
-    // SignedZeroInfNanPreserve keeps the specials; the order needs NoContraction on each operation, not written yet
+    // DXC's -Gis writes SignedZeroInfNanPreserve and NoContraction on every float operation, and -denorm preserve
+    // writes DenormPreserve, each behind the device property it needs
     case emit::target::hlsl_vulkan:
-        return check::float_level::specials;
+        return check::float_level::ieee;
     // nothing a shader says reaches Tint's or Naga's float handling
     case emit::target::wgsl:
         return check::float_level::fast;
@@ -161,10 +162,12 @@ cc::result<emitted_source, cc::string> emit_text(driver::impl::front_end const& 
                                         emit::to_string(target), float_level_name(kept_float_level(target))));
         float_guarantee = check::float_level::fast;
     }
-    // EMIT-185: vulkan keeps the specials through an execution mode the device must have
+    // EMIT-185: vulkan keeps a level through execution modes the device must have
     auto entry = e;
     if (target == emit::target::hlsl_vulkan && float_guarantee != check::float_level::fast)
         entry.features.set(check::feature::float_specials);
+    if (target == emit::target::hlsl_vulkan && float_guarantee == check::float_level::ieee)
+        entry.features.set(check::feature::float_denormals);
     // The check pass writes the structured form, and a target prints the core form.
     // WebGPU traces through the emulated form of a trace, and every other target through its native query.
     // LEGAL-63, LEGAL-64: without diagnostics the text holds no print and no assert, and with them both write a record

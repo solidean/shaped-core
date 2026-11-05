@@ -1836,7 +1836,6 @@ sgl::emit::impl::written_text sgl::emit::impl::write_text(plan& p, dialect const
     if (p.writes_debug)
         d.write_debug_buffer(w.out);
     d.write_function_head(w.out, p);
-    d.write_body_prologue(w.out, p);
     if (d.declares_workgroup_in_function())
         for (auto const& memory : p.workgroup)
         {
