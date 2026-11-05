@@ -22,6 +22,15 @@ This page is for whoever works on the server.
   A hover is its declaration as SGL writes it, in a `sgl` code block, then the `///` lines above the declaration.
   A definition is the declared name, which for a builtin is in its `sgl-prelude:` document.
   A swizzle, an array's `length` and `self` have a hover and no definition.
+* **Hover lists the rest of an overload set**, up to eight, after a rule; `reference::overloads` holds them all.
+  A program's function of a prelude function's name hides the prelude's rather than joining its set.
+* **Signature help**, with `(` and `,` as triggers: `sgl::signature_help_at`.
+  It reads the tokens back from the cursor to the call's paren rather than the check, so a call still being written answers.
+  The candidates are the overload set the check resolved the callee to, or every function of the name where it resolved none.
+  A named argument marks the parameter it names; the active signature is the resolved one while it has the argument the cursor is in.
+* **References and rename**: `sgl::occurrences_at`, which resolves the name at the cursor and then every name of the same text in every file, keeping those that resolve to the same declaration.
+  A rename refuses a keyword, a word that is no name, and a declaration of the prelude; `prepareRename` answers null for those.
+* **Formatting**: `sgl::format_source`, one edit replacing the whole document; an error where the document has syntax errors.
 * **Completion**, with `.` as its trigger: `sgl::completions_at`, filtered by the word the cursor ends.
   After `x.` it is what `x` has; while that line does not parse yet, `x` is read as a name in scope, since nothing checked it.
   Anywhere else it is the locals declared before the cursor in a block still open, the parameters, the document's and its module's declarations, the prelude's, and the keywords.
@@ -113,7 +122,7 @@ Recorded so they are not re-derived:
 * **Reusing a checked prelude and checked modules** across analyses, which waits for the compilation model's interfaces.
 * **Completion from the last analysis that checked**, so `x.` completes `x` by its checked type even where the line under edit breaks its function's check.
   Today the name is looked up again by its text, which knows locals, parameters and module-level names, and not `a.b.` chains.
-* **Signature help** while a call's arguments are written, and every overload in a hover, which `sgl::reference_at` would answer per call record.
-* **Find references and rename**, which invert the same side tables.
-* **A formatter**.
+* **Occurrences from an index**: `occurrences_at` resolves every name of the right text, which is fine at a document's size and would want an index across many modules.
+* **A formatter beyond spacing**: line breaks for an overlong line, and indentation normalized to four spaces, which the line tree would have to judge.
+* **Document symbols, folding and workspace symbols**, which the declarations and the line tree answer.
 * **A Test Explorer** view beside the gutter marks.

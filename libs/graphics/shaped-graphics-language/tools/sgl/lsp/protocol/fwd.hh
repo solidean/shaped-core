@@ -43,6 +43,13 @@ struct code_action;
 struct text_document_position_params;
 struct hover;
 struct completion_item;
+struct signature_information;
+struct signature_help;
+struct reference_params;
+struct rename_params;
+struct document_edits;
+struct workspace_edit;
+struct prepare_rename_result;
 struct log_message_params;
 
 class text_index;

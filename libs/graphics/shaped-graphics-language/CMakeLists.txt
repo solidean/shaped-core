@@ -121,6 +121,8 @@ add_library(shaped-graphics-language
     src/shaped-graphics-language/driver/inferred_results.cc
     src/shaped-graphics-language/driver/unannotated_bindings.cc
     src/shaped-graphics-language/driver/references.cc
+    src/shaped-graphics-language/driver/signatures.cc
+    src/shaped-graphics-language/driver/format.cc
     src/shaped-graphics-language/driver/completions.cc
 )
 
@@ -346,6 +348,7 @@ if(SC_BUILD_TOOLS)
         tools/sgl/emit_command.cc
         tools/sgl/prelude_command.cc
         tools/sgl/test_command.cc
+        tools/sgl/format_command.cc
         tools/sgl/lsp_command.cc
         # the SGL half of the language server, which translates what the library answers into LSP
         tools/sgl/lsp/analysis.hh
@@ -474,6 +477,7 @@ if(SC_BUILD_TESTS)
 
         tests/driver/classify-test.cc
         tests/driver/references-test.cc
+        tests/driver/format-test.cc
         tests/driver/compile-to-text-test.cc
         tests/driver/compile-profile-test.cc
         tests/driver/options-test.cc

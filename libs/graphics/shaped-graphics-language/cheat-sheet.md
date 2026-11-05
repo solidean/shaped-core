@@ -126,6 +126,16 @@ sgl::reference_at(files, m, f, offset)     // -> optional<reference { where, cls
 sgl::completions_at(files, m, f, offset)   // -> vector<completion { label, cls, detail }>, filtered by the word ending at offset
                                            // after `x.`: x's members; else locals in scope, parameters, declarations, keywords
                                            // `x.` that does not parse yet: x is read as a name; one entry per overloaded name
+                                           // reference::overloads: the rest of a function's overload set, as signatures
+sgl::occurrences_at(files, m, f, offset)   // -> vector<occurrence { file, where, is_declaration }>: what rename edits
+                                           // empty for a swizzle or self; another overload of the name is another function
+sgl::signature_help_at(files, m, f, offset) // -> optional<signature_help { signatures, active_signature, active_parameter }>
+                                           // reads the tokens, so a half-written call that does not parse still answers
+sgl::is_keyword(word)                      // -> bool
+#include <shaped-graphics-language/driver/format.hh>
+sgl::format_source(source)                 // -> result<formatted_source { text, unformatted_lines }, string>
+                                           // spacing within lines only; refuses syntax errors except `a+b`, which it spaces
+                                           // the output parses to the same tree, checked; unformatted_lines are formatter bugs
 ```
 
 ## Parsing a file
@@ -430,6 +440,7 @@ uv run dev.py run sgl -- prelude [--check <path> | --write <path>]       # the g
 uv run dev.py run sgl -- describe shader.sgl                             # sgl::describe as JSON: what slib's generator reads;
                                                                          # each entry point and pipeline carries its sg `features`
 sgl lsp                                                                  # the language server over stdio; the VS Code extension starts it
+uv run dev.py run sgl -- format [--check] a.sgl b.sgl                    # SGL's spacing in place; --check exits 2 where a file would change
 uv run dev.py test sgl                                                   # the language server's tests, carried by the binary (docs/lsp.md)
 uv run dev.py check sgl-prelude [--fix]                                  # the gate over prelude/builtins.sgl
 ```

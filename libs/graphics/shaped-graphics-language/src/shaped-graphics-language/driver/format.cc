@@ -1,0 +1,227 @@
+#include "format.hh"
+
+#include <clean-core/string/format.hh>
+#include <shaped-graphics-language/ast/build.hh>
+#include <shaped-graphics-language/ast/dump.hh>
+#include <shaped-graphics-language/syntax/parsed_file.hh>
+
+using namespace sgl;
+
+namespace
+{
+[[nodiscard]] bool is_open(token_kind k)
+{
+    return k == token_kind::round_open || k == token_kind::square_open || k == token_kind::curly_open;
+}
+
+[[nodiscard]] bool is_close(token_kind k)
+{
+    return k == token_kind::round_close || k == token_kind::square_close || k == token_kind::curly_close;
+}
+
+[[nodiscard]] bool ends_operand(token_kind k)
+{
+    return k == token_kind::symbol || k == token_kind::wildcard || k == token_kind::quote_close || is_close(k);
+}
+
+[[nodiscard]] bool is_binary_operator(cc::string_view op)
+{
+    constexpr cc::string_view operators[] = {
+        "=",  "==", "!=", "<", ">", "<=", ">=", "+",  "-",  "*",  "/",   "%",   "+=",  "-=",  "*=",
+        "/=", "%=", "&",  "|", "^", "<<", ">>", "&=", "|=", "^=", "<<=", ">>=", "..<", "..=",
+    };
+    for (auto const o : operators)
+        if (o == op)
+            return true;
+    return false;
+}
+
+/// An error that keeps a source from being formatted: what it means is not settled.
+/// An operator that touches both operands has one reading, which the tree carries, and spacing it is the formatter's job.
+[[nodiscard]] bool is_blocking(diagnostic const& d)
+{
+    return d.level != severity::warning && d.kind != diagnostic_kind::operator_needs_spaces;
+}
+
+/// The line, counted from 0, holding byte `offset`.
+[[nodiscard]] i32 line_of(parsed_file const& f, u32 offset)
+{
+    auto line = 0;
+    for (auto i = isize(0); i < f.lines.size() && f.lines[i].text.offset <= offset; ++i)
+        line = i32(i);
+    return line;
+}
+
+/// The first blocking syntax error of `f`, as `line 3: summary`; empty where it has none.
+[[nodiscard]] cc::string first_error(parsed_file const& f, ast::file_ast const& a)
+{
+    for (auto const* list : {&f.diagnostics, &a.diagnostics})
+        for (auto const& d : *list)
+            if (is_blocking(d))
+                return cc::format("line {}: {}", line_of(f, d.where.offset) + 1, summary_of(d.kind));
+    return {};
+}
+
+/// The formatter over one parsed file: what each line becomes, and whether a set of lines formats safely.
+struct formatter
+{
+    parsed_file const& file;
+    cc::string reference_tree;
+    /// Binary operators that touch both neighbours, `a+b`, which take a space on each side.
+    cc::vector<bool> spaced_operator;
+    /// Whether each token stands inside a string, whose spacing is its content.
+    cc::vector<bool> in_string;
+
+    explicit formatter(parsed_file const& f, ast::file_ast const& a) : file(f), reference_tree(ast::dump(f, a))
+    {
+        auto const& t = file.tokens;
+        spaced_operator.resize_to_filled(t.size(), false);
+        in_string.resize_to_filled(t.size(), false);
+        auto depth = 0;
+        for (auto i = isize(0); i < t.size(); ++i)
+        {
+            if (t[i].kind == token_kind::quote_close)
+                --depth;
+            in_string[i] = depth > 0;
+            if (t[i].kind == token_kind::quote_open)
+                ++depth;
+        }
+        for (auto i = isize(1); i + 1 < t.size(); ++i)
+        {
+            if (t[i].kind != token_kind::op || in_string[i] || !is_binary_operator(file.text_of(t[i].where)))
+                continue;
+            if (!fused(i) || !fused(i + 1) || !ends_operand(t[i - 1].kind))
+                continue;
+            // `1e-3` is one number the tokenizer split
+            auto const before = file.text_of(t[i - 1].where);
+            auto const op = file.text_of(t[i].where);
+            if ((op == "-" || op == "+") && !before.empty() && before[0] >= '0' && before[0] <= '9'
+                && (before.ends_with('e') || before.ends_with('E')))
+                continue;
+            spaced_operator[i] = true;
+        }
+    }
+
+    /// Whether token `i` touches the one before it.
+    [[nodiscard]] bool fused(isize i) const { return file.is_fused_left(token_id(i32(i))); }
+
+    /// The whitespace between tokens `i - 1` and `i` of one line.
+    [[nodiscard]] cc::string_view gap(isize i) const
+    {
+        auto const& t = file.tokens;
+        auto const& a = t[i - 1];
+        auto const& b = t[i];
+        auto const written = file.text_of({.offset = a.where.end(), .length = b.where.offset - a.where.end()});
+        if (in_string[i] || in_string[i - 1] || a.kind == token_kind::quote_open)
+            return written;
+        if (b.kind == token_kind::comment)
+            return written.empty() ? " " : written; // a trailing comment may be aligned with its neighbours'
+        if (b.kind == token_kind::comma || b.kind == token_kind::semicolon || is_close(b.kind) || is_open(a.kind))
+            return "";
+        if (a.kind == token_kind::comma || a.kind == token_kind::semicolon)
+            return " ";
+        // `=>:` opens a block body, and keeps its colon
+        if (a.kind == token_kind::double_arrow && b.kind == token_kind::colon)
+            return written;
+        if (a.kind == token_kind::arrow || a.kind == token_kind::double_arrow || b.kind == token_kind::arrow
+            || b.kind == token_kind::double_arrow)
+            return " ";
+        if (spaced_operator[i] || spaced_operator[i - 1])
+            return " ";
+        return written.empty() ? "" : " ";
+    }
+
+    /// Line `l` as the formatter writes it, without its terminator.
+    [[nodiscard]] cc::string format_line(isize l) const
+    {
+        auto const& line = file.lines[l];
+        auto const written = file.text_of(line.text);
+        if (line.kind == line_kind::blank)
+            return {};
+        if (line.kind == line_kind::string_content || line.token_count == 0)
+            return cc::string(written);
+        auto out = cc::string(written.subview({.offset = 0, .size = isize(line.indent_bytes)}));
+        auto const first = isize(line.first_token);
+        auto const last = first + isize(line.token_count);
+        for (auto i = first; i < last; ++i)
+        {
+            if (i > first)
+                out += gap(i);
+            out += file.text_of(file.tokens[i].where);
+        }
+        // what follows an opening quote at the line's end is the string's
+        if (line.opens_string)
+            out += file.text_of({.offset = file.tokens[last - 1].where.end(),
+                                 .length = line.text.end() - file.tokens[last - 1].where.end()});
+        else // a comment runs to the line's end, its trailing whitespace included
+            while (!out.empty() && (out.back() == ' ' || out.back() == '\t'))
+                out.resize_down_to(out.size() - 1);
+        return out;
+    }
+
+    /// The file with the lines `formatted[l]` marks formatted and every other one as written.
+    [[nodiscard]] cc::string render(cc::span<cc::string const> lines, cc::span<bool const> formatted) const
+    {
+        auto out = cc::string();
+        auto terminator = cc::string_view("\n");
+        auto end = file.lines.size();
+        // blank lines at the end go
+        while (end > 0 && file.lines[end - 1].kind == line_kind::blank)
+            --end;
+        for (auto l = isize(0); l < end; ++l)
+        {
+            auto const& line = file.lines[l];
+            out += formatted[l] ? cc::string_view(lines[l]) : file.text_of(line.text);
+            auto const t = file.text_of({.offset = line.text.end(), .length = line.terminator_length});
+            if (!t.empty() && terminator == "\n")
+                terminator = t;
+            out += t.empty() ? terminator : t;
+        }
+        return out;
+    }
+
+    /// Whether `text` parses to the tree the source did.
+    [[nodiscard]] bool parses_the_same(cc::string const& text) const
+    {
+        auto const f = parse(text);
+        auto const a = ast::build(f);
+        return first_error(f, a).empty() && ast::dump(f, a) == reference_tree;
+    }
+};
+} // namespace
+
+cc::result<formatted_source, cc::string> sgl::format_source(cc::string_view source)
+{
+    auto const f = parse(cc::string(source));
+    auto const a = ast::build(f);
+    if (auto const e = first_error(f, a); !e.empty())
+        return cc::error(e);
+
+    auto const fm = formatter(f, a);
+    auto lines = cc::vector<cc::string>();
+    for (auto l = isize(0); l < f.lines.size(); ++l)
+        lines.push_back(fm.format_line(l));
+    auto formatted = cc::vector<bool>();
+    formatted.resize_to_filled(f.lines.size(), true);
+    auto out = formatted_source{.text = fm.render(lines, formatted)};
+    if (fm.parses_the_same(out.text))
+        return out;
+
+    // some rule is wrong for some line: take the changed lines one at a time, each only where the file still parses the
+    // same with it
+    for (auto l = isize(0); l < f.lines.size(); ++l)
+        formatted[l] = lines[l] == f.text_of(f.lines[l].text) || f.lines[l].kind == line_kind::blank;
+    for (auto l = isize(0); l < f.lines.size(); ++l)
+    {
+        if (formatted[l])
+            continue;
+        formatted[l] = true;
+        if (!fm.parses_the_same(fm.render(lines, formatted)))
+        {
+            formatted[l] = false;
+            out.unformatted_lines.push_back(i32(l));
+        }
+    }
+    out.text = fm.render(lines, formatted);
+    return out;
+}

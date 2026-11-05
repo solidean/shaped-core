@@ -112,6 +112,8 @@ inline constexpr i32 internal_error = -32603;
 inline constexpr i32 server_not_initialized = -32002;
 inline constexpr i32 request_cancelled = -32800;
 inline constexpr i32 content_modified = -32801;
+/// The request was valid and the server declines it, as a rename to a keyword.
+inline constexpr i32 request_failed = -32803;
 } // namespace error_code
 } // namespace lsp
 
@@ -249,6 +251,55 @@ struct lsp::completion_item
     cc::string detail;
 };
 
+/// One signature of a call; each parameter label is a substring of `label`, as the specification allows.
+struct lsp::signature_information
+{
+    cc::string label;
+    /// Markdown; empty for none.
+    cc::string documentation;
+    cc::vector<cc::string> parameters;
+};
+
+struct lsp::signature_help
+{
+    cc::vector<signature_information> signatures;
+    i32 active_signature = 0;
+    i32 active_parameter = 0;
+};
+
+struct lsp::reference_params
+{
+    cc::string uri;
+    lsp::position position;
+    bool include_declaration = true;
+};
+
+struct lsp::rename_params
+{
+    cc::string uri;
+    lsp::position position;
+    cc::string new_name;
+};
+
+/// The edits of one document within a `workspace_edit`.
+struct lsp::document_edits
+{
+    cc::string uri;
+    cc::vector<text_edit> edits;
+};
+
+struct lsp::workspace_edit
+{
+    cc::vector<document_edits> changes;
+};
+
+/// What `textDocument/prepareRename` answers: the name's range, and the name an editor offers to replace.
+struct lsp::prepare_rename_result
+{
+    lsp::range range;
+    cc::string placeholder;
+};
+
 struct lsp::log_message_params
 {
     message_type type = message_type::log;
@@ -271,6 +322,8 @@ namespace lsp
 [[nodiscard]] bool read(json::ref in, inlay_hint_params& out);
 [[nodiscard]] bool read(json::ref in, code_action_params& out);
 [[nodiscard]] bool read(json::ref in, text_document_position_params& out);
+[[nodiscard]] bool read(json::ref in, reference_params& out);
+[[nodiscard]] bool read(json::ref in, rename_params& out);
 
 // writing
 void write_fields(json::writer& w, position const& v);
@@ -287,4 +340,8 @@ void write_fields(json::writer& w, code_action const& v);
 void write_fields(json::writer& w, log_message_params const& v);
 void write_fields(json::writer& w, hover const& v);
 void write_fields(json::writer& w, completion_item const& v);
+void write_fields(json::writer& w, signature_information const& v);
+void write_fields(json::writer& w, signature_help const& v);
+void write_fields(json::writer& w, workspace_edit const& v);
+void write_fields(json::writer& w, prepare_rename_result const& v);
 } // namespace lsp

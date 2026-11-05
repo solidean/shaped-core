@@ -42,6 +42,11 @@ struct unannotated_binding;
 struct inferred_result;
 struct reference;
 struct completion;
+struct occurrence;
+struct parameter_label;
+struct call_signature;
+struct signature_help;
+struct formatted_source;
 
 enum class described_member_kind : u8;
 struct described_sampler;

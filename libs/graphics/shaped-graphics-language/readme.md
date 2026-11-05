@@ -101,6 +101,14 @@ Open [examples/sample.sgl](tools/vscode-extension/examples/sample.sgl) to check:
 The extensions directory differs for other builds: `.vscode-insiders`, `.vscode-oss`, `.cursor`, and `.vscode-server` when working over Remote / WSL.
 To uninstall, delete the link and reload.
 
+### The formatter
+
+`sgl format FILE…` writes SGL's spacing into each file in place; `--check` changes nothing and exits 2 where a file would change.
+It is the spacing within a line: one space where tokens stand apart, a space after a comma, around an arrow and around a binary operator, none inside brackets or before a comma.
+Indentation and line breaks are the line tree's, comments and strings are content, and all of them stay as written.
+It formats a file whose only errors are operators without their spaces, `a+b`, and refuses one with any other syntax error.
+Its output always parses to the tree its input did, which it checks; a line whose formatting would not is left as written and named, as a bug of the formatter.
+
 ### The language server
 
 The extension starts the server when the first `.sgl` file opens, and its log is the **SGL Language Server** output channel.
@@ -109,9 +117,12 @@ What the server provides:
 * diagnostics, pushed as you type;
 * semantic tokens, which colour what the grammar cannot tell apart;
 * inlay hints showing inferred types: ` : float` after a `let` that writes none, and `-> float` before the `=>` of a function that writes none;
-* hover: a name's declaration as SGL writes it, `fun mix(a: float, b: float, t: float) -> float`, with its `///` comment;
+* hover: a name's declaration as SGL writes it, `fun mix(a: float, b: float, t: float) -> float`, with its `///` comment, and the rest of its overload set;
 * go to definition, into the prelude too, whose files open as read-only `sgl-prelude:` documents;
 * completion: after a `.` what the object has, anywhere else the locals in scope, the declarations and the keywords;
+* signature help while a call's arguments are written, every overload listed and the argument under the cursor marked, a named one by its name;
+* find all references and rename, across the document and its modules; a name the prelude declares is not renamed;
+* formatting, by the rules of `sgl format` above;
 * test results: a failing `check` is a diagnostic, and every check site gets a gutter mark.
 
 Accepting a hint writes it into the source, except on a property of a type body, which takes no `-> type`.
@@ -163,6 +174,10 @@ A manual test after a change, with the extension installed by `uv run dev.py ins
 7. Hover a call of `mix`: its signature and its doc comment show.
    **Go to Definition** on it opens `builtins.sgl` from the prelude at its declaration.
 8. In a function taking a struct `l`, type `l.`: the completion list offers its fields and methods.
+9. Type `mix(` and a first argument and a comma: signature help shows `mix`'s overloads with the second parameter marked.
+10. **Rename Symbol** on a local: every use changes; on `mix` it is refused.
+    **Find All References** on a function lists its declaration and its calls.
+11. Write `a+b` and **Format Document**: it becomes `a + b`.
 
 ### Working on the grammar
 

@@ -106,7 +106,7 @@ A per-target cell reads `dx12 / vulkan / metal / webgpu`.
 | **F4** Compile speed | ❓ | ❓ | ✅ Naga: 20–60 µs per small shader and backend | ❓ | ✅ a corpus of bgfx shaders compiles as fast as with Naga; a fixed cost of ~115 µs per compile against Naga's ~18 µs 🗺️ [epic](../issues/epic-sgl-prelude-check-cost.md) |
 | **F5** Permutations | ⚠️ macros; specialization constants on SPIR-V only | ✅ macros, specialization constants, link-time specialization | ⚠️ `override` constants; WESL `@if` | ✅ macros and specialization constants | ✅ options; a false branch leaves the text and the footprint; no specialization constants |
 | **F6** Shipping and caching | ✅ offline bundles | ⚠️ precompiled modules; determinism undocumented | ⚠️ no bundle format | ⚠️ SPIR-V as the cached form | ✅ frozen bundles, a persistent cache, deterministic text |
-| **F7** Editor tooling | ⚠️ third-party language servers | ⚠️ `slangd`; no formatter | ⚠️ wgsl-analyzer | ⚠️ community language servers | ⚠️ an in-tree language server: diagnostics, tokens, inlay hints, hover, go-to-definition, completion and test runs; no formatter, signature help or rename 🗺️ [feat](../issues/feat-sgl-lsp-hover-definition-completion.md) |
+| **F7** Editor tooling | ⚠️ third-party language servers | ⚠️ `slangd`; no formatter | ⚠️ wgsl-analyzer | ⚠️ community language servers | ⚠️ an in-tree language server: diagnostics, tokens, inlay hints, hover with every overload, go-to-definition, completion, signature help, references, rename, formatting and test runs; a formatter, `sgl format`, that proves its output parses the same; no document outline or workspace symbols yet, no issue yet |
 | **F8** Toolchain hosts | ⚠️ MSC on macOS and Windows only | ⚠️ text anywhere; metallib needs Apple's tool | ✅ | ✅ | ⚠️ text anywhere, wasm included; DXIL needs DXC (Windows, Linux), a metallib needs macOS |
 | **F9** Licensing | ⚠️ MSC is proprietary; whether an app may ship it is unanswered | ✅ Apache-2.0 with LLVM exception | ✅ MIT, Apache-2.0, BSD-3 | ✅ permissive | ✅ MIT |
 
@@ -395,7 +395,7 @@ Per row and column:
 - **F7**
   - Slang: SLANG release (`slangd`)
   - WGSL: WESL
-  - SGL: [lsp.md](../lsp.md), [feat-sgl-lsp-hover-definition-completion](../issues/feat-sgl-lsp-hover-definition-completion.md) (2026-11-05)
+  - SGL: [lsp.md](../lsp.md), `src/shaped-graphics-language/driver/format.hh` (2026-11-05)
 - **F8**
   - HLSL + chain: MSC, <https://vulkan.lunarg.com/doc/view/latest/mac/getting_started.html>
   - Slang: SLANG `slangc` reference

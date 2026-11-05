@@ -496,3 +496,94 @@ TEST("sgl lsp - a module file open in the editor is what the documents using it 
     sgl_lsp::set_module_dirs({});
     CHECK(last_of_document() == "");
 }
+
+TEST("sgl lsp - signature help shows the call's overloads and the argument the cursor is in", main_thread)
+{
+    auto s = session("/// Half of `x`.\nfun halve(x: float, y: float) -> float => x * y\nfun f() -> float => "
+                     "halve(2.0, 1.0)\n");
+    auto const r = s.ask(5, "textDocument/signatureHelp", at_position(2, 31));
+    auto const help = r["result"];
+    REQUIRE(help["signatures"].size() == 1);
+    CHECK(help["signatures"][0]["label"].as_string() == "halve(x: float, y: float) -> float");
+    CHECK(help["signatures"][0]["documentation"]["value"].as_string() == "Half of `x`.");
+    REQUIRE(help["signatures"][0]["parameters"].size() == 2);
+    CHECK(help["signatures"][0]["parameters"][1]["label"].as_string() == "y: float");
+    CHECK(help["activeParameter"].as_double() == 1);
+
+    // outside any call's parens it is a null result
+    auto const nothing = s.ask(6, "textDocument/signatureHelp", at_position(2, 5));
+    CHECK(nothing["result"].is_null());
+}
+
+TEST("sgl lsp - references list the declaration and every use, and leave the declaration out when asked", main_thread)
+{
+    auto s = session("fun halve(x: float) -> float => x * 0.5\nfun f() -> float => halve(2.0) + halve(4.0)\n");
+    auto const params = [](bool include)
+    {
+        return cc::format(R"({{"textDocument":{{"uri":"file:///t.sgl"}},"position":{{"line":1,"character":22}},)"
+                          R"("context":{{"includeDeclaration":{}}}}})",
+                          include ? "true" : "false");
+    };
+    auto const all = s.ask(5, "textDocument/references", params(true));
+    REQUIRE(all["result"].size() == 3);
+    CHECK(all["result"][0]["range"]["start"]["line"].as_double() == 0);
+    CHECK(all["result"][0]["range"]["start"]["character"].as_double() == 4);
+    CHECK(all["result"][2]["range"]["start"]["character"].as_double() == 33);
+    auto const uses = s.ask(6, "textDocument/references", params(false));
+    CHECK(uses["result"].size() == 2);
+}
+
+TEST("sgl lsp - a rename edits every occurrence, and refuses a keyword and a name the prelude declares", main_thread)
+{
+    auto s = session("fun f(v: vec3) -> float:\n    let d = dot(v, v)\n    return d * d\n");
+    auto const rename = [&](i32 id, i32 line, i32 character, cc::string_view name)
+    {
+        return s.ask(id, "textDocument/rename",
+                     cc::format(R"({{"textDocument":{{"uri":"file:///t.sgl"}},"position":{{"line":{},"character":{}}},)"
+                                R"("newName":"{}"}})",
+                                line, character, name));
+    };
+    auto const ok = rename(5, 2, 11, "len2");
+    auto const edits = ok["result"]["changes"]["file:///t.sgl"];
+    REQUIRE(edits.size() == 3);
+    for (auto i = isize(0); i < edits.size(); ++i)
+        CHECK(edits[i]["newText"].as_string() == "len2");
+    CHECK(edits[0]["range"]["start"]["line"].as_double() == 1);
+
+    CHECK(rename(6, 2, 11, "return")["error"]["message"].as_string().contains("keyword"));
+    CHECK(rename(7, 2, 11, "2d")["error"]["message"].as_string().contains("no name"));
+    // `dot` is the prelude's, so neither a rename nor its preparation is offered
+    CHECK(rename(8, 1, 13, "inner")["error"]["message"].as_string().contains("prelude"));
+    auto const prepare = s.ask(9, "textDocument/prepareRename", at_position(1, 13));
+    CHECK(prepare["result"].is_null());
+    auto const local = s.ask(10, "textDocument/prepareRename", at_position(2, 11));
+    CHECK(local["result"]["placeholder"].as_string() == "d");
+}
+
+TEST("sgl lsp - a hover on an overloaded function lists the rest of the set after a rule", main_thread)
+{
+    auto s = session("fun halve(x: float) -> float => x * 0.5\nfun halve(x: int) -> int => x / 2\nfun f() -> int => "
+                     "halve(2)\n");
+    auto const r = s.ask(5, "textDocument/hover", at_position(2, 20));
+    CHECK(r["result"]["contents"]["value"].as_string()
+          == "```sgl\nfun halve(x: int) -> int\n```\n\n---\n\nOther overloads:\n\n```sgl\nfun halve(x: float) -> "
+             "float\n```");
+}
+
+TEST("sgl lsp - formatting replaces the whole document, edits nothing where it is formatted, and refuses errors",
+     main_thread)
+{
+    auto const doc = R"({"textDocument":{"uri":"file:///t.sgl"},"options":{"tabSize":4,"insertSpaces":true}})";
+    auto s = session("fun f(a: float,b: float) -> float => a*b\n");
+    auto const r = s.ask(5, "textDocument/formatting", doc);
+    REQUIRE(r["result"].size() == 1);
+    CHECK(r["result"][0]["newText"].as_string() == "fun f(a: float, b: float) -> float => a * b\n");
+    CHECK(r["result"][0]["range"]["start"]["line"].as_double() == 0);
+    CHECK(r["result"][0]["range"]["end"]["line"].as_double() == 1);
+
+    auto tidy = session("fun f(a: float, b: float) -> float => a * b\n");
+    CHECK(tidy.ask(5, "textDocument/formatting", doc)["result"].size() == 0);
+
+    auto broken = session("fun f() -> float:\n    return (1.0\n");
+    CHECK(broken.ask(5, "textDocument/formatting", doc)["error"]["message"].as_string().contains("syntax errors"));
+}

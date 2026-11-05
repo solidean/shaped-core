@@ -144,9 +144,18 @@ struct reader
         return check::is_valid(s.owner) ? m.at(s.owner).name + "." : cc::string();
     }
 
-    [[nodiscard]] cc::string function_signature(check::symbol const& s) const
+    /// `fun dot(a: vec3, b: vec3) -> float`.
+    /// `as_call` writes it as a call reads it instead: no `fun`, no `self`, and a constructor as `vec3(x: float, …)`.
+    /// `params`, where given, receives where each parameter stands in the result.
+    [[nodiscard]] cc::string function_signature(check::symbol const& s,
+                                                bool as_call = false,
+                                                cc::vector<parameter_label>* params = nullptr) const
     {
-        auto out = cc::string("fun ") + owner_prefix(s) + s.name;
+        auto const is_constructor = s.role == check::function_role::constructor;
+        auto out = as_call ? cc::string() : cc::string("fun ");
+        if (!is_constructor)
+            out += owner_prefix(s);
+        out += s.name;
         auto const* d = decl_of(s);
         auto const* fd = d != nullptr ? d->node.try_as<ast::fun_decl>() : nullptr;
         if (fd != nullptr && !fd->type_parameters.empty())
@@ -174,9 +183,15 @@ struct reader
                 first = false;
                 if (p.name == "self")
                 {
+                    if (as_call)
+                    {
+                        first = true;
+                        continue;
+                    }
                     out += p.is_mut ? "mut self" : "self";
                     continue;
                 }
+                auto const start = u32(out.size());
                 out.appendf("{}{}: {}{}", p.is_named_only ? "." : "", p.name, p.is_mut ? "mut " : "", type_name(p.type));
                 if (p.has_default && has_file(s.file) && ast::is_valid(p.field))
                 {
@@ -185,10 +200,12 @@ struct reader
                     if (ast::is_valid(def) && is_valid(own.ast.at(def).form))
                         out.appendf(" = {}", own.file.text_of(own.file.at(own.ast.at(def).form).where));
                 }
+                if (params != nullptr)
+                    params->push_back({.offset = start, .length = u32(out.size()) - start});
             }
             out += ")";
         }
-        if (f.result != check::checked_module::void_type && check::is_valid(f.result))
+        if (!is_constructor && f.result != check::checked_module::void_type && check::is_valid(f.result))
             out.appendf(" -> {}", type_name(f.result));
         return out;
     }
@@ -234,12 +251,36 @@ struct reader
         return nullptr;
     }
 
+    /// The other functions of `id`'s overload set: its name, scope and role, the symbol itself left out.
+    /// A program's function of a prelude function's name hides it rather than joining its set.
+    [[nodiscard]] cc::vector<check::symbol_id> overloads_of(check::symbol_id id) const
+    {
+        auto out = cc::vector<check::symbol_id>();
+        auto const& s = m.at(id);
+        if (s.kind != check::symbol_kind::function)
+            return out;
+        auto const is_prelude = s.file < m.prelude_file_count();
+        for (auto i = isize(0); i < m.symbols.size(); ++i)
+        {
+            auto const& o = m.symbols[i];
+            if (check::symbol_id(i) != id && o.kind == check::symbol_kind::function && o.name == s.name
+                && o.owner == s.owner && o.role == s.role && o.operator_spelling == s.operator_spelling
+                && (o.file < m.prelude_file_count()) == is_prelude)
+                out.push_back(check::symbol_id(i));
+        }
+        return out;
+    }
+
     void resolve_symbol(reference& r, check::symbol_id id) const
     {
         auto const& s = m.at(id);
         r.declaring_file = s.file;
         r.declared = declared_name_of(s);
         r.signature = symbol_signature(s);
+        r.overloads.clear();
+        if (s.role != check::function_role::constructor)
+            for (auto const o : overloads_of(id))
+                r.overloads.push_back(symbol_signature(m.at(o)));
     }
 
     void resolve_member(reference& r, check::symbol_id owner, i32 index, bool is_binding) const

@@ -378,3 +378,11 @@ cc::vector<completion> sgl::completions_at(cc::span<check::module_file const> fi
         c.complete_names();
     return cc::move(c.out);
 }
+
+bool sgl::is_keyword(cc::string_view word)
+{
+    for (auto const k : k_keywords)
+        if (k == word)
+            return true;
+    return false;
+}

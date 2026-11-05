@@ -220,3 +220,135 @@ TEST("sgl references - a name declared many times is one completion, and the pre
     CHECK(dots == 1);
     CHECK(!has_label(cs, "by_target"));
 }
+
+namespace
+{
+/// Each occurrence as `text@line:column`, space-separated, a declaration marked with a `*`, in the user's file only.
+[[nodiscard]] cc::string occurrences(marked const& m)
+{
+    auto out = cc::string();
+    for (auto const& o : sgl::occurrences_at(m.files, m.checked.module, m.checked.user_file(), m.offset))
+    {
+        auto const& source = m.files[o.file].file.source;
+        auto line = 0;
+        auto line_start = isize(0);
+        for (auto i = isize(0); i < isize(o.where.offset); ++i)
+            if (source[i] == '\n')
+            {
+                ++line;
+                line_start = i + 1;
+            }
+        out.appendf("{}{}@{}:{} ", o.is_declaration ? "*" : "", m.files[o.file].file.text_of(o.where), line,
+                    isize(o.where.offset) - line_start);
+    }
+    return out;
+}
+
+[[nodiscard]] sgl::signature_help help(marked const& m)
+{
+    auto const h = sgl::signature_help_at(m.files, m.checked.module, m.checked.user_file(), m.offset);
+    REQUIRE(h.has_value());
+    return h.value();
+}
+
+/// The active signature's label with the active parameter in brackets.
+[[nodiscard]] cc::string active(sgl::signature_help const& h)
+{
+    REQUIRE(h.active_signature < h.signatures.size());
+    auto const& s = h.signatures[h.active_signature];
+    if (h.active_parameter >= s.parameters.size())
+        return s.label;
+    auto const p = s.parameters[h.active_parameter];
+    auto const label = cc::string_view(s.label);
+    return cc::format("{}[{}]{}", label.subview({.offset = 0, .size = isize(p.offset)}),
+                      label.subview({.offset = isize(p.offset), .size = isize(p.length)}), label.subview(isize(p.end())));
+}
+} // namespace
+
+TEST("sgl references - a local's occurrences are its let and its uses, and a namesake elsewhere is another local")
+{
+    auto const m = marked("fun f(v: vec3) -> float:\n"
+                          "    let d = dot(v, v)\n"
+                          "    return |d * d\n"
+                          "fun g() -> float:\n"
+                          "    let d = 1.0\n"
+                          "    return d\n");
+    CHECK(occurrences(m) == "*d@1:8 d@2:11 d@2:15 ");
+}
+
+TEST("sgl references - a function's occurrences are its declaration and its calls, and an overload is another function")
+{
+    auto const m = marked("fun halve(x: float) -> float => x * 0.5\n"
+                          "fun halve(x: int) -> int => x / 2\n"
+                          "fun f() -> float => halve(2.0) + halve(4.0)\n"
+                          "fun g() -> int => hal|ve(2)\n");
+    CHECK(occurrences(m) == "*halve@1:4 halve@3:18 ");
+    // a field is named by its declaration and every access, across functions
+    auto const field = marked("struct light:\n"
+                              "    pow|er: float\n"
+                              "fun f(l: light) -> float => l.power\n"
+                              "fun g(l: light) -> float => l.power * 2.0\n");
+    CHECK(occurrences(field) == "*power@1:4 power@2:30 power@3:30 ");
+    // a swizzle names nothing declared
+    CHECK(occurrences(marked("fun f(v: vec3) -> float => v.|xz\n")) == "");
+}
+
+TEST("sgl references - a hover on an overloaded function lists the rest of its overload set")
+{
+    auto const m = marked("fun halve(x: float) -> float => x * 0.5\n"
+                          "fun halve(x: int) -> int => x / 2\n"
+                          "fun f() -> float => hal|ve(2.0)\n");
+    auto const r = m.reference();
+    REQUIRE(r.has_value());
+    CHECK(r.value().signature == "fun halve(x: float) -> float");
+    REQUIRE(r.value().overloads.size() == 1);
+    CHECK(r.value().overloads[0] == "fun halve(x: int) -> int");
+    // a function without overloads lists none
+    auto const single = marked("fun twice(x: float) -> float => x * 2.0\nfun f() -> float => tw|ice(2.0)\n");
+    REQUIRE(single.reference().has_value());
+    CHECK(single.reference().value().overloads.empty());
+}
+
+TEST("sgl references - signature help names the call's function and the argument the cursor is in")
+{
+    auto const source = cc::string("/// Half of `x`.\n"
+                                   "fun halve(x: float, y: float, .bias: float = 0.0) -> float => x * 0.5 + bias\n");
+    auto const first = help(marked(source + "fun f() -> float => halve(|2.0, 1.0)\n"));
+    REQUIRE(first.signatures.size() == 1);
+    CHECK(active(first) == "halve([x: float], y: float, .bias: float = 0.0) -> float");
+    CHECK(first.signatures[0].doc == "Half of `x`.");
+    CHECK(active(help(marked(source + "fun f() -> float => halve(2.0, |1.0)\n")))
+          == "halve(x: float, [y: float], .bias: float = 0.0) -> float");
+    // a named argument is the parameter it names, wherever it stands
+    CHECK(active(help(marked(source + "fun f() -> float => halve(2.0, 1.0, bias = |0.5)\n")))
+          == "halve(x: float, y: float, [.bias: float = 0.0]) -> float");
+    // the brackets and braces of an argument are looked through, and a call inside one is its own
+    CHECK(active(help(marked(source + "fun f() -> float => halve(max(1.0, 2.0), |1.0)\n")))
+          == "halve(x: float, [y: float], .bias: float = 0.0) -> float");
+    CHECK(
+        help(marked(source + "fun f() -> float => halve(max(1.0, |2.0), 1.0)\n")).signatures[0].label.starts_with("max("));
+    // outside a call's parens there is nothing to help with
+    auto const outside = marked(source + "fun f() -> float => halve|(2.0, 1.0)\n");
+    CHECK(!sgl::signature_help_at(outside.files, outside.checked.module, outside.checked.user_file(), outside.offset)
+               .has_value());
+}
+
+TEST("sgl references - signature help answers a call still being written, and lists every overload")
+{
+    // the call does not parse yet, so nothing resolved it: every function of the name is a candidate
+    auto const h = help(marked("fun halve(x: float) -> float => x * 0.5\n"
+                               "fun halve(x: int, y: int) -> int => x / y\n"
+                               "fun f() -> float:\n"
+                               "    let a = halve(1, |\n"
+                               "    return 0.0\n"));
+    REQUIRE(h.signatures.size() == 2);
+    // the first that has a second parameter is active
+    CHECK(active(h) == "halve(x: int, [y: int]) -> int");
+
+    // a method's receiver is no argument
+    auto const method = help(marked("struct light:\n"
+                                    "    power: float\n"
+                                    "fun light.scaled(self, k: float) -> float => self.power * k\n"
+                                    "fun f(l: light) -> float => l.scaled(|2.0)\n"));
+    CHECK(active(method) == "light.scaled([k: float]) -> float");
+}

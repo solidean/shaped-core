@@ -44,6 +44,34 @@ namespace sgl_lsp
                                                               lsp::position at,
                                                               lsp::position_encoding e);
 
+/// The call whose parens hold `at`, its overloads and the argument `at` is in; nothing outside a call.
+[[nodiscard]] cc::optional<lsp::signature_help> signature_help_of(analysis const& a,
+                                                                  lsp::position at,
+                                                                  lsp::position_encoding e);
+
+/// Every place that names what the name at `at` refers to, the declaration where `include_declaration`.
+/// A place in the prelude is in its `sgl-prelude:` document.
+[[nodiscard]] cc::vector<lsp::location> references_of(analysis const& a,
+                                                      lsp::position at,
+                                                      bool include_declaration,
+                                                      lsp::position_encoding e);
+
+/// The name at `at`, where it may be renamed: declared in the document or a module file, and not by the prelude.
+[[nodiscard]] cc::optional<lsp::prepare_rename_result> prepare_rename_of(analysis const& a,
+                                                                         lsp::position at,
+                                                                         lsp::position_encoding e);
+
+/// The edits that rename what the name at `at` refers to, in every file that names it.
+/// An error where `new_name` is no name, is a keyword, or what is named may not be renamed.
+[[nodiscard]] lsp::answer<lsp::workspace_edit> rename_of(analysis const& a,
+                                                         lsp::position at,
+                                                         cc::string_view new_name,
+                                                         lsp::position_encoding e);
+
+/// The edit that formats the whole document, by `sgl::format_source`; none where it is formatted already.
+/// An error where the document has syntax errors, which a formatter must not guess around.
+[[nodiscard]] lsp::answer<cc::vector<lsp::text_edit>> formatting_of(analysis const& a, lsp::position_encoding e);
+
 } // namespace sgl_lsp
 
 /// One test run of one analysis, and whether it was stopped before its end.
