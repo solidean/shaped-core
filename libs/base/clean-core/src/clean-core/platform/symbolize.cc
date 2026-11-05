@@ -11,6 +11,10 @@
 #elif defined(_WIN32)
 #include <clean-core/platform/win32_sanitized.hh>
 #include <dbghelp.h> // SymFromAddr / SymGetLineFromAddr64, the only route to a name on Windows
+#elif defined(__APPLE__)
+#include <cxxabi.h> // abi::__cxa_demangle, since dladdr names a symbol as it is mangled
+#include <dlfcn.h>  // dladdr: the exported and local symbols of every loaded image, without debug info
+#include <stdlib.h> // free, for what __cxa_demangle allocated
 #endif
 
 using namespace cc::primitive_defines;
@@ -109,6 +113,18 @@ void ensure_symbol_handler()
 {
     auto const guard = dbghelp_lock().lock_scoped();
     cc::impl::ensure_process_symbols_locked();
+}
+#elif defined(__APPLE__)
+// dladdr names what an image's symbol table holds, which is a function and a module but never a file or a line:
+// those need the debug info, and `atos` reads it offline from the module and the offset.
+constexpr bool has_symbolization = true;
+
+/// The part of `path` after its last slash.
+[[nodiscard]] cc::string_view file_name_of(char const* path)
+{
+    auto const full = cc::string_view(path);
+    auto const slash = full.rfind('/');
+    return slash >= 0 ? full.subview(slash + 1) : full;
 }
 #else
 constexpr bool has_symbolization = false;
@@ -304,6 +320,28 @@ cc::symbol_info const& cc::symbolizer::resolve(void const* address)
 
             out.module_offset = key - u64(base);
         }
+#elif defined(__APPLE__)
+    if (is_foreign())
+        return out; // dladdr only knows this process's images, and the recorded table has already answered
+
+    auto info = Dl_info{};
+    if (::dladdr(reinterpret_cast<void const*>(key), &info) == 0)
+        return out;
+
+    if (info.dli_fname != nullptr)
+        out.module = file_name_of(info.dli_fname);
+    if (info.dli_fbase != nullptr)
+        out.module_offset = key - u64(reinterpret_cast<uintptr_t>(info.dli_fbase));
+
+    if (info.dli_sname != nullptr)
+    {
+        auto status = 0;
+        auto* const demangled = abi::__cxa_demangle(info.dli_sname, nullptr, nullptr, &status);
+        out.function = status == 0 && demangled != nullptr ? cc::string_view(demangled) : cc::string_view(info.dli_sname);
+        ::free(demangled);
+        if (info.dli_saddr != nullptr)
+            out.displacement = key - u64(reinterpret_cast<uintptr_t>(info.dli_saddr));
+    }
 #endif
 
     return out;

@@ -431,11 +431,11 @@ target_compile_definitions(clean-core
 # only because the header believed itself. When the probe finds nothing (WASI ships no such header at all) this is
 # not fatal: the header falls back to an empty stub. Only the GCC paths need a link library.
 # PUBLIC because consumers include stacktrace.hh and must reach the same verdict.
-# Emscripten is decided before the probe and against it: it ships no <stacktrace>, so the probe says NOTFOUND, but it
-# can still produce frame text through emscripten_get_callstack -- which is the only thing the stub cannot do.
-# platform/stacktrace.cc is that backend; see stacktrace.hh for why it reports text rather than addresses.
-if(EMSCRIPTEN)
-    message(STATUS "[clean-core] std::stacktrace unavailable - using the Emscripten callstack backend")
+# Emscripten and Apple are decided before the probe and against it: neither ships a <stacktrace> that links, but both
+# still produce frames through cc::capture_stack and names through cc::symbolizer -- which the stub cannot.
+# platform/stacktrace.cc is that backend.
+if(EMSCRIPTEN OR APPLE)
+    message(STATUS "[clean-core] std::stacktrace unavailable - using clean-core's own capture-and-symbolize backend")
     target_compile_definitions(clean-core PUBLIC CC_HAS_STACKTRACE=1)
 else()
 
