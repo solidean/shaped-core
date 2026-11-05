@@ -12,6 +12,11 @@ namespace sg::backend::webgpu
 WGPUCommandEncoder webgpu_command_list::encoder() const
 {
     _ctx.assert_on_device_thread();
+    // a command of the encoder runs after the last pass ended, so that pass's end is no longer "now", and before the
+    // next pass begins, so a timestamp waiting for that beginning is written ahead of it
+    _last_pass_end = {};
+    if (_pending_begin.index >= 0)
+        const_cast<webgpu_command_list*>(this)->flush_pending_begin();
     return _encoder.get();
 }
 
@@ -58,6 +63,11 @@ cc::result<std::unique_ptr<webgpu_command_list>> webgpu_context::create_webgpu_c
 
 void webgpu_command_list::end_open_pass(cc::string_view split_cause, split_remedy remedy)
 {
+    if (_compute_pass || _render_pass)
+    {
+        _last_pass_end = _open_pass_end;
+        _open_pass_end = {};
+    }
     if (_compute_pass)
     {
         wgpuComputePassEncoderEnd(compute_pass());

@@ -59,6 +59,28 @@ public:
     /// Timestamp query sets leased by this list, resolved just before it submits.
     cc::vector<webgpu_query_lease*> _query_leases;
 
+    /// One slot of a lease, where a pass writes a timestamp; `index` < 0 for none.
+    struct query_slot
+    {
+        webgpu_query_lease* lease = nullptr;
+        int index = -1;
+    };
+    /// WebGPU promises a pass's own beginning and end, and no point between passes, so a timestamp is one of those.
+    /// Once this list recorded one, every pass it opens writes its end into a slot of its own.
+    bool _is_timed = false;
+    /// A timestamp recorded with no pass before it, which the next pass's beginning writes.
+    query_slot _pending_begin;
+    /// The end slot of the open pass.
+    query_slot _open_pass_end;
+    /// The end slot of the pass that ended last, which a timestamp recorded next takes as its own.
+    /// Any command of the encoder itself, a copy, clears it, since that runs after the pass ends.
+    mutable query_slot _last_pass_end;
+
+    /// The timestamp writes of a pass about to open, or null where it writes none.
+    [[nodiscard]] WGPUPassTimestampWrites const* pass_timestamp_writes(WGPUPassTimestampWrites& storage);
+    /// Writes the pending beginning in an empty pass of its own, where no pass came to take it.
+    void flush_pending_begin();
+
     /// Every resource this list names, kept alive until it submits: a transient handle can leave scope before then.
     cc::vector<std::shared_ptr<void const>> _keep_alive;
 

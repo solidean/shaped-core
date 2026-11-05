@@ -18,8 +18,9 @@ struct sg::backend::webgpu::webgpu_query_lease
 
 /// The query sets behind `cmd.query`, present only where the device has `timestamp-query`.
 ///
-/// WebGPU writes timestamps only at the start or end of a pass, never at an arbitrary point.
-/// So a recorded timestamp ends whatever pass is open and runs an empty compute pass whose beginning writes the query, which is as close to "now" as the API can say.
+/// WebGPU writes timestamps only at the start or end of a pass, and promises each only for its own pass.
+/// So a recorded timestamp is the end of the pass just before it, or the beginning of the next one.
+/// An empty pass between the two would be ordered after nothing, and could close before the work it follows ran.
 /// Ticks are nanoseconds.
 class sg::backend::webgpu::webgpu_query_system
 {
