@@ -23,6 +23,10 @@ namespace
         return "gs";
     case sg::shader_stage::fragment:
         return "ps";
+    case sg::shader_stage::task:
+        return "as"; // amplification
+    case sg::shader_stage::mesh:
+        return "ms";
     // Ray-tracing stages all target a single-entry DXIL library.
     case sg::shader_stage::raygen:
     case sg::shader_stage::closest_hit:

@@ -65,6 +65,8 @@ VkDescriptorType to_vk_descriptor_type(sg::binding_type t)
     add(sg::shader_stage::miss, VK_SHADER_STAGE_MISS_BIT_KHR);
     add(sg::shader_stage::intersection, VK_SHADER_STAGE_INTERSECTION_BIT_KHR);
     add(sg::shader_stage::callable, VK_SHADER_STAGE_CALLABLE_BIT_KHR);
+    add(sg::shader_stage::task, VK_SHADER_STAGE_TASK_BIT_EXT);
+    add(sg::shader_stage::mesh, VK_SHADER_STAGE_MESH_BIT_EXT);
     return flags;
 }
 } // namespace

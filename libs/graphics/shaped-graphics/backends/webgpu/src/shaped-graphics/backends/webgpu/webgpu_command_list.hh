@@ -291,6 +291,8 @@ protected:
     void raster_set_blend_constants(tg::vec4f constants) override;
     void raster_set_inline_constants(cc::span<byte const> data, cc::optional<isize> offset) override;
     void raster_draw(sg::draw_config const& config) override;
+    // webgpu builds no mesh-shaded pipeline, so none is ever bound to draw
+    void raster_draw_mesh_tasks(int, int, int) override { CC_UNREACHABLE("webgpu has no mesh stage"); }
     void raster_draw_indexed(sg::draw_indexed_config const& config) override;
     void raster_draw_indexed_indirect(sg::raw_buffer_handle const& args, isize offset_in_bytes, isize count) override;
 

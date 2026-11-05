@@ -455,6 +455,17 @@ void vulkan_command_list::raster_draw(sg::draw_config const& config)
               u32(config.instance_range.offset));
 }
 
+void vulkan_command_list::raster_draw_mesh_tasks(int x, int y, int z)
+{
+    CC_ASSERT(_in_render_pass, "draw_mesh_tasks requires an open rendering scope");
+    CC_ASSERT(_bound_raster_layout != nullptr, "bind a raster pipeline before drawing");
+    CC_ASSERT(_ctx._cmd_draw_mesh_tasks != nullptr, "a mesh draw needs VK_EXT_mesh_shader");
+    declare_raster_draw_barriers(false);
+    flush_barriers();
+    resume_rendering();
+    _ctx._cmd_draw_mesh_tasks(_buffer, u32(x), u32(y), u32(z));
+}
+
 void vulkan_command_list::raster_draw_indexed(sg::draw_indexed_config const& config)
 {
     CC_ASSERT(_in_render_pass, "draw_indexed requires an open rendering scope");

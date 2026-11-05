@@ -359,7 +359,10 @@ struct raster_target_formats;       // {color formats, depth format, sample coun
 namespace impl
 {
 // records the target set and formats of a raster pipeline a backend just built; defined in raster/raster_pipeline.cc
-void set_targets(raster_pipeline const& pipeline, cc::string_view target_set, raster_target_formats const& formats);
+void set_targets(raster_pipeline const& pipeline,
+                 cc::string_view target_set,
+                 raster_target_formats const& formats,
+                 bool is_mesh_shaded);
 // records what a pipeline's code does to each binding; defined beside each pipeline kind
 void set_footprint(compute_pipeline const& pipeline, pipeline_footprint footprint);
 void set_footprint(raster_pipeline const& pipeline, pipeline_footprint footprint);

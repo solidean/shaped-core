@@ -25,7 +25,9 @@ enum class sg::shader_stage
     miss,
     intersection,
     callable,
-    // Future: mesh, task, ...
+    // Mesh shading, last so the stages before keep their values in a cache or a bundle.
+    task, ///< dx12 amplification (as): launches mesh workgroups, handing each one payload
+    mesh, ///< dx12 mesh (ms): a workgroup writes vertices and primitives for the rasterizer
 };
 
 CC_FLAG_ENUM_INDEXED(sg, shader_stage, cc::u16);

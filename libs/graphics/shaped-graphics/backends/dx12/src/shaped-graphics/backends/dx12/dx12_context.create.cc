@@ -618,6 +618,10 @@ cc::result<context_handle> create_dx12_context(backend::dx12::dx12_config const&
     ctx->_view_instancing
         = SUCCEEDED(check_feature_support(ctx->_device.Get(), D3D12_FEATURE_D3D12_OPTIONS3, &options3, sizeof(options3)))
        && options3.ViewInstancingTier != D3D12_VIEW_INSTANCING_TIER_NOT_SUPPORTED;
+    D3D12_FEATURE_DATA_D3D12_OPTIONS7 options7 = {};
+    ctx->_mesh_shader
+        = SUCCEEDED(check_feature_support(ctx->_device.Get(), D3D12_FEATURE_D3D12_OPTIONS7, &options7, sizeof(options7)))
+       && options7.MeshShaderTier != D3D12_MESH_SHADER_TIER_NOT_SUPPORTED;
 
     // One dispatch per argument record, no root-signature changes, so the signature takes no root signature.
     {

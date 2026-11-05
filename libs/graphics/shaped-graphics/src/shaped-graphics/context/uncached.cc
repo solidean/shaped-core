@@ -43,16 +43,32 @@ cc::optional<cc::string> refusal_of(sg::compute_pipeline_description const& desc
     return misfit_of(desc.shader, desc.layout);
 }
 
+/// The name a raster pipeline's errors give it: its vertex stage's, or its mesh stage's.
+cc::string_view entry_point_of(sg::raster_pipeline_description const& desc)
+{
+    return desc.mesh_shader.has_value() ? cc::string_view(desc.mesh_shader.value().entry_point)
+                                        : cc::string_view(desc.vertex_shader.entry_point);
+}
+
+struct raster_stages
+{
+    sg::compiled_shader const* at[7];
+};
+
+/// Every stage `desc` sets, null where one is not: the vertex stage, or the mesh stage in its place.
+raster_stages stages_of(sg::raster_pipeline_description const& desc)
+{
+    auto const optional = [](cc::optional<sg::compiled_shader> const& s) { return s.has_value() ? &s.value() : nullptr; };
+    return {{desc.mesh_shader.has_value() ? nullptr : &desc.vertex_shader, optional(desc.fragment_shader),
+             optional(desc.tessellation_control_shader), optional(desc.tessellation_evaluation_shader),
+             optional(desc.geometry_shader), optional(desc.task_shader), optional(desc.mesh_shader)}};
+}
+
 // What the frontend checks of a raster description before any backend sees it.
 cc::optional<cc::string> refusal_of(sg::raster_pipeline_description const& desc, sg::feature_set supported)
 {
-    sg::compiled_shader const* const stages[] = {
-        &desc.vertex_shader,
-        desc.fragment_shader.has_value() ? &desc.fragment_shader.value() : nullptr,
-        desc.tessellation_control_shader.has_value() ? &desc.tessellation_control_shader.value() : nullptr,
-        desc.tessellation_evaluation_shader.has_value() ? &desc.tessellation_evaluation_shader.value() : nullptr,
-        desc.geometry_shader.has_value() ? &desc.geometry_shader.value() : nullptr,
-    };
+    auto const listed = stages_of(desc);
+    auto const stages = cc::span<sg::compiled_shader const* const>(listed.at);
     // a stage the device lacks is refused by its feature, whatever language its shader was written in
     auto const has_tessellation
         = desc.tessellation_control_shader.has_value() || desc.tessellation_evaluation_shader.has_value();
@@ -61,6 +77,23 @@ cc::optional<cc::string> refusal_of(sg::raster_pipeline_description const& desc,
                           "sg::feature::tessellation_shader");
     if (desc.geometry_shader.has_value() && !supported.has(sg::feature::geometry_shader))
         return cc::string("the pipeline has a geometry stage, and this device lacks sg::feature::geometry_shader");
+    if (desc.task_shader.has_value() && !desc.mesh_shader.has_value())
+        return cc::string("the pipeline has a task stage and no mesh stage for it to launch");
+    if (desc.mesh_shader.has_value())
+    {
+        if (!supported.has(sg::feature::mesh_shader))
+            return cc::string("the pipeline has a mesh stage, and this device lacks sg::feature::mesh_shader");
+        if (!desc.vertex_shader.bytecode.empty())
+            return cc::string("the pipeline has a mesh stage and a vertex stage; the mesh stage takes the vertex "
+                              "stage's place");
+        if (has_tessellation || desc.geometry_shader.has_value())
+            return cc::string("the pipeline has a mesh stage beside a tessellation or geometry stage");
+        if (!desc.vertex_input.slots.empty())
+            return cc::string("the pipeline has a mesh stage and a vertex input; a mesh stage reads its "
+                              "vertices from bindings");
+        if (desc.view_count > 1)
+            return cc::string("the pipeline renders several views from a mesh stage, which sg does not wire up yet");
+    }
     if (desc.view_count > 1 && !supported.has(sg::feature::view_instancing))
         return cc::string("the pipeline renders several views, and this device lacks sg::feature::view_instancing");
     if (desc.rasterization.fill == sg::fill_mode::wireframe && !supported.has(sg::feature::wireframe_fill))
@@ -103,7 +136,7 @@ cc::optional<cc::string> refusal_of(sg::raster_pipeline_description const& desc,
     if ((ds.depth_test || ds.depth_write || ds.stencil_test) && desc.depth_stencil_format == sg::pixel_format::undefined)
         CC_LOG_WARNING("a raster pipeline for '{}' tests depth or stencil and has no depth_stencil_format, "
                        "so it draws without either",
-                       desc.vertex_shader.entry_point);
+                       entry_point_of(desc));
     return {};
 }
 
@@ -155,13 +188,8 @@ void add_debug_sites(sg::impl::debug_windows& windows, sg::compute_pipeline_desc
 
 void add_debug_sites(sg::impl::debug_windows& windows, sg::raster_pipeline_description const& desc)
 {
-    sg::compiled_shader const* const stages[] = {
-        &desc.vertex_shader,
-        desc.fragment_shader.has_value() ? &desc.fragment_shader.value() : nullptr,
-        desc.tessellation_control_shader.has_value() ? &desc.tessellation_control_shader.value() : nullptr,
-        desc.tessellation_evaluation_shader.has_value() ? &desc.tessellation_evaluation_shader.value() : nullptr,
-        desc.geometry_shader.has_value() ? &desc.geometry_shader.value() : nullptr,
-    };
+    auto const listed = stages_of(desc);
+    auto const stages = cc::span<sg::compiled_shader const* const>(listed.at);
     add_debug_sites(windows, stages);
 }
 
@@ -173,13 +201,8 @@ sg::impl::pipeline_footprint footprint_of(sg::compute_pipeline_description const
 
 sg::impl::pipeline_footprint footprint_of(sg::raster_pipeline_description const& desc)
 {
-    sg::compiled_shader const* const stages[] = {
-        &desc.vertex_shader,
-        desc.fragment_shader.has_value() ? &desc.fragment_shader.value() : nullptr,
-        desc.tessellation_control_shader.has_value() ? &desc.tessellation_control_shader.value() : nullptr,
-        desc.tessellation_evaluation_shader.has_value() ? &desc.tessellation_evaluation_shader.value() : nullptr,
-        desc.geometry_shader.has_value() ? &desc.geometry_shader.value() : nullptr,
-    };
+    auto const listed = stages_of(desc);
+    auto const stages = cc::span<sg::compiled_shader const* const>(listed.at);
     return footprint_of(*desc.layout, stages);
 }
 
@@ -207,10 +230,11 @@ cc::optional<cc::string> bound_sampler_refusal(sg::pipeline_layout_description c
 cc::shared_async<sg::raster_pipeline_handle> named(cc::shared_async<sg::raster_pipeline_handle> built,
                                                    cc::string target_set,
                                                    sg::raster_target_formats formats,
+                                                   bool is_mesh_shaded,
                                                    sg::impl::pipeline_footprint footprint)
 {
     auto pipeline = co_await built;
-    sg::impl::set_targets(*pipeline, target_set, formats);
+    sg::impl::set_targets(*pipeline, target_set, formats, is_mesh_shaded);
     sg::impl::set_footprint(*pipeline, cc::move(footprint));
     co_return pipeline;
 }
@@ -311,7 +335,7 @@ raster_pipeline_handle context_uncached_scope::create_raster_pipeline(raster_pip
         return cc::move(r.value());
     if (_ctx.is_device_lost())
         throw device_lost_exception(_ctx.device_loss_reason());
-    throw pipeline_creation_exception(desc.vertex_shader.entry_point, r.error());
+    throw pipeline_creation_exception(entry_point_of(desc), r.error());
 }
 
 cc::result<raster_pipeline_handle> context_uncached_scope::try_create_raster_pipeline(raster_pipeline_description const& desc)
@@ -323,7 +347,7 @@ cc::result<raster_pipeline_handle> context_uncached_scope::try_create_raster_pip
     auto r = _ctx.try_create_raster_pipeline(desc, lifetime_scope::persistent);
     if (r.has_value())
     {
-        impl::set_targets(*r.value(), target_set_of(desc), target_formats_of(desc));
+        impl::set_targets(*r.value(), target_set_of(desc), target_formats_of(desc), desc.mesh_shader.has_value());
         add_debug_sites(_ctx._debug_windows, desc);
         impl::set_footprint(*r.value(), footprint_of(desc));
     }
@@ -352,7 +376,8 @@ cc::shared_async<raster_pipeline_handle> context_uncached_scope::create_raster_p
     _ctx._stats.add(stat::pipelines_created);
     auto built = _ctx.create_raster_pipeline_async(desc, lifetime_scope::persistent);
     add_debug_sites(_ctx._debug_windows, desc);
-    return named(cc::move(built), cc::string(target_set_of(desc)), target_formats_of(desc), footprint_of(desc));
+    return named(cc::move(built), cc::string(target_set_of(desc)), target_formats_of(desc),
+                 desc.mesh_shader.has_value(), footprint_of(desc));
 }
 
 raytracing_pipeline_handle context_uncached_scope::create_raytracing_pipeline(raytracing_pipeline_description const& desc)

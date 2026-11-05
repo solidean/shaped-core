@@ -407,6 +407,18 @@ void dx12_command_list::raster_draw(sg::draw_config const& config)
                          UINT(config.vertex_range.offset), UINT(config.instance_range.offset));
 }
 
+void dx12_command_list::raster_draw_mesh_tasks(int x, int y, int z)
+{
+    CC_ASSERT(_in_render_pass, "draw_mesh_tasks requires an open rendering scope");
+    CC_ASSERT(_bound_raster_layout != nullptr, "bind a raster pipeline before drawing");
+    declare_raster_draw_barriers(false);
+    flush_barriers();
+    ComPtr<ID3D12GraphicsCommandList6> list6;
+    auto const queried = _list->QueryInterface(IID_PPV_ARGS(&list6));
+    CC_ASSERT(SUCCEEDED(queried), "a device with mesh shaders records them through ID3D12GraphicsCommandList6");
+    list6->DispatchMesh(UINT(x), UINT(y), UINT(z));
+}
+
 void dx12_command_list::raster_draw_indexed(sg::draw_indexed_config const& config)
 {
     CC_ASSERT(_in_render_pass, "draw_indexed requires an open rendering scope");

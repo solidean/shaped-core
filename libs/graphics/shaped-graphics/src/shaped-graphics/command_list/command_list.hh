@@ -174,6 +174,7 @@ protected:
     void bind_raster_index_buffer(index_buffer_view const& view);
     void draw(draw_config const& config);
     void draw_indexed(draw_indexed_config const& config);
+    void draw_mesh_tasks(int x, int y, int z);
     void draw_indexed_indirect(raw_buffer_handle const& args, isize offset_in_bytes, isize count);
     void bind_raytracing_pipeline(raytracing_pipeline const& pipeline);
     void bind_raytracing_group(int group_index, binding_group const& group);
@@ -201,6 +202,8 @@ protected:
     virtual void raster_set_inline_constants(cc::span<byte const> data, cc::optional<isize> offset) = 0;
     virtual void raster_draw(draw_config const& config) = 0;
     virtual void raster_draw_indexed(draw_indexed_config const& config) = 0;
+    // A mesh-shaded pipeline is bound, and every count is positive.
+    virtual void raster_draw_mesh_tasks(int x, int y, int z) = 0;
     // `count` draws of `sg::draw_indexed_args` records from `offset_in_bytes` on; count > 0.
     // The facade has checked the usage, the alignment and the bounds; the backend declares `args` as an indirect read.
     virtual void raster_draw_indexed_indirect(raw_buffer_handle const& args, isize offset_in_bytes, isize count) = 0;
@@ -292,6 +295,7 @@ private:
     bool check_hit_records(raytracing_shader_table const& table);
 
     cc::string _rendering_target_set;                       // of the open rendering, or empty
+    bool _raster_is_mesh_shaded = false;                    // of the bound raster pipeline
     cc::optional<raster_target_formats> _rendering_formats; // of the open rendering, or empty when none is open
 
     // One entry per color and depth-stencil target of the open rendering, the subresources a copy inside the scope
