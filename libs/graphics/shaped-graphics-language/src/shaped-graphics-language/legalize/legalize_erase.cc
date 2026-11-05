@@ -13,73 +13,45 @@ using namespace sgl::check::impl;
 
 namespace
 {
-struct void_eraser
+/// LEGAL-64, LEGAL-65: what ends an invocation, by its stage.
+struct invocation_ender
 {
     flat_builder& out;
-    /// False for rule V0, which drops the checks and changes nothing else.
-    bool erases_void = true;
-    /// LEGAL-63: V0 drops the prints too.
-    bool erases_prints = false;
-    /// LEGAL-64: V0 lowers each assert instead of dropping it.
-    bool lowers_asserts = false;
 
-    /// LEGAL-64: assert `k`'s body, then its message printed and the invocation ended where the condition is false.
-    void lower_assert(flat_stmt const& s, flat_check const& k, stmt_list& into, int depth)
+    void end(stmt_list& into)
     {
-        for (auto const id : erase(ids_of_range(k.body), depth + 1))
-            into.push_back(id);
-        auto const site = out.e.check_sites[k.site];
-        auto const nodes = out.e.at(site.nodes);
-        if (nodes.empty())
-            return;
-        out.from = s.from;
-        out.inlined_through = s.inlined_through;
-        auto message = site.message;
-        if (message < 0)
-        {
-            out.e.messages.push_back({.pieces = {cc::string()}});
-            message = i32(out.e.messages.size() - 1);
-        }
-        out.e.messages[message].is_assert = true;
-        auto values = cc::vector<flat_expr_id>();
-        if (is_known(out.e, site.message_values))
-            for (auto const v : out.e.at(site.message_values))
-                values.push_back(expr(v, 0));
-        auto failed = cc::vector<flat_stmt_id>();
-        failed.push_back(out.print(message, values));
         // what ends an invocation: a stage that returns nothing returns, and a pixel stage discards
         auto const stage = out.e.entry_stage;
         if (stage == check::stage::pixel)
-            failed.push_back(out.discard());
+            into.push_back(out.discard());
         else if (stage == check::stage::compute || stage == check::stage::raygen || stage == check::stage::miss
                  || stage == check::stage::closest_hit || stage == check::stage::callable
                  || stage == check::stage::geometry)
-            failed.push_back(out.return_(flat_expr_id::none));
+            into.push_back(out.return_(flat_expr_id::none));
         else if (stage == check::stage::vertex || stage == check::stage::tessellation_evaluation)
         {
             // a vertex at a NaN position, which culls every primitive it is part of
-            if (auto const culled = culled_vertex(failed); is_valid(culled))
-                failed.push_back(out.return_(culled));
+            if (auto const culled = culled_vertex(into); is_valid(culled))
+                into.push_back(out.return_(culled));
         }
         else if (stage == check::stage::tessellation_control)
         {
             // a patch whose edge factors are zero, which the tessellator culls
-            if (auto const culled = culled_patch(failed); is_valid(culled))
-                failed.push_back(out.return_(culled));
+            if (auto const culled = culled_patch(into); is_valid(culled))
+                into.push_back(out.return_(culled));
         }
         else if (stage == check::stage::any_hit)
         {
             // the candidate is no hit
             if (auto const ignore = case_of(out.e.result, "ignore"); is_valid(ignore))
-                failed.push_back(out.return_(ignore));
+                into.push_back(out.return_(ignore));
         }
         else if (stage == check::stage::intersection)
         {
             // the box reports no hit
-            if (auto const none = no_report(failed); is_valid(none))
-                failed.push_back(out.return_(none));
+            if (auto const none = no_report(into); is_valid(none))
+                into.push_back(out.return_(none));
         }
-        into.push_back(out.if_(out.not_(out.local(nodes[0].value)), failed));
     }
 
     /// LEGAL-64: the stage's result with its `@position` at NaN, its other members unset; none without a position.
@@ -169,6 +141,45 @@ struct void_eraser
         into.push_back(out.var(local));
         into.push_back(out.assign(out.member(out.local(local), i32(is_hit)), out.bool_literal(false)));
         return out.local(local);
+    }
+};
+
+struct void_eraser
+{
+    flat_builder& out;
+    /// False for rule V0, which drops the checks and changes nothing else.
+    bool erases_void = true;
+    /// LEGAL-63: V0 drops the prints too.
+    bool erases_prints = false;
+    /// LEGAL-64: V0 lowers each assert instead of dropping it.
+    bool lowers_asserts = false;
+
+    /// LEGAL-64: assert `k`'s body, then its message printed and the invocation ended where the condition is false.
+    void lower_assert(flat_stmt const& s, flat_check const& k, stmt_list& into, int depth)
+    {
+        for (auto const id : erase(ids_of_range(k.body), depth + 1))
+            into.push_back(id);
+        auto const site = out.e.check_sites[k.site];
+        auto const nodes = out.e.at(site.nodes);
+        if (nodes.empty())
+            return;
+        out.from = s.from;
+        out.inlined_through = s.inlined_through;
+        auto message = site.message;
+        if (message < 0)
+        {
+            out.e.messages.push_back({.pieces = {cc::string()}});
+            message = i32(out.e.messages.size() - 1);
+        }
+        out.e.messages[message].is_assert = true;
+        auto values = cc::vector<flat_expr_id>();
+        if (is_known(out.e, site.message_values))
+            for (auto const v : out.e.at(site.message_values))
+                values.push_back(expr(v, 0));
+        auto failed = cc::vector<flat_stmt_id>();
+        failed.push_back(out.print(message, values));
+        end_invocation(out, failed);
+        into.push_back(out.if_(out.not_(out.local(nodes[0].value)), failed));
     }
 
     [[nodiscard]] stmt_list ids_of_range(ast::range_of<flat_stmt_id> range) const
@@ -389,6 +400,11 @@ struct void_eraser
     }
 };
 } // namespace
+
+void sgl::check::impl::end_invocation(flat_builder& out, stmt_list& into)
+{
+    invocation_ender{.out = out}.end(into);
+}
 
 stmt_list sgl::check::impl::erase_checks(flat_builder& out, stmt_list const& body, bool erases_prints, bool lowers_asserts)
 {

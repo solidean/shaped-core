@@ -1,5 +1,15 @@
 # Minimum versions and the rationale: docs/requirements.md
 cmake_minimum_required(VERSION 3.28)
+
+# Under clang-cl, CMake picks the .rc rule at every configure by whether `rc` is on PATH, not by the cached compiler.
+# A reconfigure outside the MSVC environment then pairs the llvm-rc rule with a cached rc.exe, which rejects its input,
+# and `cmake -E cmake_llvm_rc` deadlocks on the error text instead of failing: SDL3's version.rc hangs the build.
+# Seeding the choice from the cache keeps the rule and the compiler one pair, whoever configures.
+if(CMAKE_RC_COMPILER AND NOT CMAKE_RC_COMPILER_INIT)
+    set(CMAKE_RC_COMPILER_INIT "${CMAKE_RC_COMPILER}")
+endif()
+include("${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/ConfigureEnvironment.cmake")
+
 project(shaped-core LANGUAGES CXX)
 
 # Lock in C++23 for the whole repo.
@@ -126,6 +136,16 @@ else()
     set(_sc_shader_diagnostics_default ON)
 endif()
 option(SC_SHADER_DIAGNOSTICS "Shaders write print and assert records, which sg reads back and logs" ${_sc_shader_diagnostics_default})
+
+# What an SGL shader does where an operation of it has no value, an integer division by zero or an array index outside
+# the array: NONE leaves it the target's undefined behaviour, ABORT ends the invocation, and REPORT logs it as a failed
+# assert first, which needs SC_SHADER_DIAGNOSTICS and is ABORT without it.
+# libs/graphics/shaped-graphics-language/docs/spec/semantics/legalization.md LEGAL-65 is the rule.
+set(SC_SHADER_UNDEFINED "NONE" CACHE STRING "What an SGL shader does at an operation with no value: NONE, ABORT or REPORT")
+set_property(CACHE SC_SHADER_UNDEFINED PROPERTY STRINGS NONE ABORT REPORT)
+if(NOT SC_SHADER_UNDEFINED MATCHES "^(NONE|ABORT|REPORT)$")
+    message(FATAL_ERROR "SC_SHADER_UNDEFINED is NONE, ABORT or REPORT, not '${SC_SHADER_UNDEFINED}'")
+endif()
 
 # Keep a frame pointer in every frame, so cc::capture_stack can walk the chain by chasing it — a few nanoseconds a
 # frame, against a microsecond for the table-driven unwind that is the only alternative.

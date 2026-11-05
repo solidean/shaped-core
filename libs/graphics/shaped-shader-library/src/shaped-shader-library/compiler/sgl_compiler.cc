@@ -172,11 +172,13 @@ class sgl_shader_compiler final : public slib::shader_compiler
 public:
     sgl_shader_compiler(std::unique_ptr<slib::shader_compiler> inner,
                         cc::optional<bcache::blob_cache*> persistent_cache,
-                        bool diagnostics)
+                        bool diagnostics,
+                        sgl::check::undefined_guard guards_undefined)
       : _inner(cc::move(inner)),
         _target(target_of(_inner->target_format())),
         _persistent_cache(persistent_cache),
-        _diagnostics(diagnostics)
+        _diagnostics(diagnostics),
+        _guards_undefined(guards_undefined)
     {
     }
 
@@ -221,6 +223,7 @@ private:
         b.add_string(desc.label);
         b.add_pod(_target);
         b.add_pod(_diagnostics);
+        b.add_pod(_guards_undefined);
         b.add_pod(i64(desc.options.size()));
         for (auto const& o : desc.options)
         {
@@ -316,6 +319,7 @@ private:
              // EMIT-182: DXC's and Metal's messages, and PIX's and Xcode's source view, name the SGL line
              .line_directives = true,
              .diagnostics = _diagnostics,
+             .guards_undefined = _guards_undefined,
              .device_features = device_features});
         if (text.has_error())
             return cc::error(cc::format("SGL reported errors:\n{}", text.error()));
@@ -411,6 +415,7 @@ private:
     /// As `sgl_compiler_options` holds it, resolved at each compile so the default follows whatever is installed then.
     cc::optional<bcache::blob_cache*> _persistent_cache = {};
     bool _diagnostics = false;
+    sgl::check::undefined_guard _guards_undefined = sgl::check::undefined_guard::none;
 };
 } // namespace
 
@@ -432,9 +437,13 @@ slib::shader_option slib::option_of(cc::string_view name, sg::pixel_format value
     CC_UNREACHABLE("every sg::pixel_format has a name");
 }
 
+static_assert(int(slib::sgl_undefined_guard::abort) == int(sgl::check::undefined_guard::abort)
+              && int(slib::sgl_undefined_guard::report) == int(sgl::check::undefined_guard::report));
+
 std::unique_ptr<slib::shader_compiler> slib::create_sgl_compiler(std::unique_ptr<shader_compiler> inner,
                                                                  sgl_compiler_options const& options)
 {
     CC_ASSERT(inner != nullptr, "an SGL compiler needs the compiler that builds its text");
-    return std::make_unique<sgl_shader_compiler>(cc::move(inner), options.persistent_cache, options.diagnostics);
+    return std::make_unique<sgl_shader_compiler>(cc::move(inner), options.persistent_cache, options.diagnostics,
+                                                 sgl::check::undefined_guard(options.guards_undefined));
 }

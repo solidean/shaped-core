@@ -3,6 +3,18 @@
 #include <shaped-graphics-language/check/checked_module.hh>
 #include <shaped-graphics-language/check/flat.hh>
 
+/// What a text does where an operation of the program would have no value: the robustness profile of LEGAL-65.
+enum class sgl::check::undefined_guard : sgl::u8
+{
+    /// Nothing is guarded, and such an operation is the target's undefined behaviour, at no cost.
+    none,
+    /// The invocation ends instead, before the operation runs, and nothing reports it.
+    abort,
+    /// The operation and its operands are printed as a failed `assert` is, and the invocation ends as for `abort`.
+    /// Without diagnostics there is nothing to print into, and it is `abort`.
+    report,
+};
+
 /// Switches that exist for the tests of the legalizer, each one breaking a rule on purpose.
 /// A differential test that still passes with one of them set has no teeth.
 struct sgl::check::legalize_options
@@ -18,6 +30,8 @@ struct sgl::check::legalize_options
     bool erases_prints = false;
     /// Keeps every `assert` as `if (!condition) { print; end }` rather than dropping it, for a text with diagnostics (LEGAL-64).
     bool lowers_asserts = false;
+    /// LEGAL-65: what an integer division by zero, or an array index outside the array, does in the text.
+    undefined_guard guards_undefined = undefined_guard::none;
 };
 
 namespace sgl::check
