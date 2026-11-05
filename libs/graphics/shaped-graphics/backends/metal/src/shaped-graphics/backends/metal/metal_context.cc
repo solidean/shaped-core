@@ -159,6 +159,9 @@ bool metal_context::supports(sg::feature f) const
     case sg::feature::float_denormals:
         // whether safe math keeps denormals is not known
         return false;
+    case sg::feature::view_instancing:
+        // vertex amplification would grant it, and is not wired up yet
+        return false;
     case sg::feature::wireframe_fill:
         // `MTLTriangleFillModeLines` is on every Apple GPU.
         return true;

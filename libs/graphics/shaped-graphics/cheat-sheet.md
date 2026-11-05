@@ -111,6 +111,9 @@ ctx.supports(sg::feature::ray_query)               // bool — THE capability qu
                                                    //     compare-exchange in a pixel stage needs it; false on webgpu)
                                                    //   | vertex_layer_output (a vertex stage picks the layer of an array target,
                                                    //     SGL's @layer; dx12 and vulkan ask the device, true on metal, false on webgpu)
+                                                   //   | view_instancing (one draw renders view_count views, view i into layer i;
+                                                   //     SGL's @view_index; dx12's ViewInstancingTier, vulkan's multiview,
+                                                   //     false on metal (amplification not wired yet) and webgpu)
                                                    //   | float_atomic_add (a float atomic add in one instruction; vulkan with
                                                    //     VK_EXT_shader_atomic_float, true on metal, false on dx12 and webgpu;
                                                    //     slib asks SGL for the native add where it is true; no `require`)
@@ -374,7 +377,8 @@ auto pass = cmd.raster.render_to({.color_targets={rtv.cleared(tg::vec4f(1,0,0,1)
 // pass.command_list() -> command_list& (for non-raster ops: .context(), .upload) | pass.render_target_size() -> tg::vec2i (targets' shared extent)
 //   pass.color_formats() -> span<pixel_format const> | pass.depth_format() -> optional<pixel_format>. The raster draw calls are also on `pass`.
 // view builders: view.cleared(color/depth[,stencil]) | view.preserved() | view.discarded() -> color_target / depth_stencil_target
-// rendering_info { fixed_vector<color_target,max_color_targets> color_targets; optional<depth_stencil_target>; optional<viewport>; optional<tg::aabb2i> scissor; string_view target_set }
+// rendering_info { fixed_vector<color_target,max_color_targets> color_targets; optional<depth_stencil_target>; optional<viewport>; optional<tg::aabb2i> scissor; int view_count=1; string_view target_set }
+//   view_count > 1: every target's view spans exactly that many array layers, and the bound pipeline's view_count matches (asserted)
 //   target_set: a generated SGL target's name; bind_pipeline asserts a pipeline naming another set. Empty on either side is unchecked.
 //   viewport/scissor unset => full target extent. sg::viewport { tg::pos2f offset; tg::vec2f size; float min_depth=0, max_depth=1 }
 cmd.raster.manual.begin_rendering(info) / .end_rendering()   // void — same, by hand (must balance); prefer render_to
@@ -838,7 +842,9 @@ d.withdraw();                                            // ends it now; destroy
 sg::raster_pipeline_description   // { pipeline_layout_handle layout; compiled_shader vertex_shader; optional<compiled_shader> fragment_shader;
                                   //   optional<compiled_shader> tessellation_control_shader/tessellation_evaluation_shader (both-or-neither, need patch_list); optional<compiled_shader> geometry_shader;
                                   //   vertex_input_layout vertex_input; primitive_topology topology=triangle_list; int patch_control_points=0 (1..32, patch_list only); rasterization_state; depth_stencil_state;
-                                  //   small_vector<color_target_state,8> color_targets; pixel_format depth_stencil_format=undefined; int sample_count=1; pinned_data cached_pipeline={}; string target_set }
+                                  //   small_vector<color_target_state,8> color_targets; pixel_format depth_stencil_format=undefined; int sample_count=1;
+                                  //   int view_count=1 (>1 needs view_instancing: view i into layer i, SGL's @view_index; dx12 caps it at 4);
+                                  //   pinned_data cached_pipeline={}; string target_set }
                                   //   depth/stencil state with no depth_stencil_format warns at creation: it would draw without either
                                   //   creation refuses a stage whose reflection does not fit `layout` (sg::describe_layout_misfit, binding/layout_fit.hh),
                                   //   and a fragment shader's color_output_count (at most color_targets; the rest need an empty write_mask) and target_set; an empty target_set takes the shader's

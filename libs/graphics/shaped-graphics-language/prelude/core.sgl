@@ -346,3 +346,4 @@ struct raster_pipeline_description:
     color_targets: color_target_state
     depth_stencil_format: pixel_format
     sample_count: int
+    view_count: int

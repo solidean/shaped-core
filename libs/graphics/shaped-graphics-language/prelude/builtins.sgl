@@ -4099,6 +4099,7 @@ enum feature:
     opacity_micromap
     float_specials
     float_denormals
+    view_instancing
 
 /// The API this compile writes for, known once a body is inlined; no const holds it.
 const target_api: graphics_api = .none

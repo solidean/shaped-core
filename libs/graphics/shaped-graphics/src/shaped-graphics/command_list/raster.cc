@@ -90,6 +90,17 @@ void command_list::open_rendering(rendering_info const& info)
         formats.sample_count = info.color_targets[0].view.texture()->sample_count();
     else if (info.depth_stencil_target.has_value())
         formats.sample_count = info.depth_stencil_target.value().view.texture()->sample_count();
+    formats.view_count = info.view_count;
+    CC_ASSERTF(info.view_count >= 1, "a rendering renders at least one view, not {}", info.view_count);
+    if (info.view_count > 1)
+    {
+        CC_ASSERT(context().supports(feature::view_instancing), "a rendering of several views needs "
+                                                                "sg::feature::view_instancing");
+        for (auto const& target : _rendering_targets)
+            CC_ASSERTF(target.range.array_range.end - target.range.array_range.start == info.view_count,
+                       "a rendering of {} views needs every target's view to span {} layers, and one spans {}",
+                       info.view_count, info.view_count, target.range.array_range.end - target.range.array_range.start);
+    }
     _rendering_formats = formats;
 
     raster_begin_rendering(info);
@@ -228,6 +239,8 @@ void command_list::bind_raster_pipeline(raster_pipeline const& pipeline)
         CC_ASSERTF(built.sample_count == open.sample_count,
                    "this pipeline is built for {} samples, and the open rendering has {}", built.sample_count,
                    open.sample_count);
+        CC_ASSERTF(built.view_count == open.view_count, "this pipeline renders {} views, and the open rendering {}",
+                   built.view_count, open.view_count);
     }
     if (auto const* layout = pipeline.footprint().layout(); layout == nullptr || layout != _raster_layout)
     {
