@@ -125,7 +125,7 @@ sg::memory_requirements vulkan_memory_heap::query_buffer_requirements(isize size
     vkDestroyBuffer(_ctx._device, probe, nullptr);
 
     return sg::memory_requirements{
-        .alignment_in_bytes = isize(requirements.alignment),
+        .alignment_in_bytes = _ctx.vk_buffer_alignment(usage, requirements.alignment),
         .size_in_bytes = isize(requirements.size),
     };
 }

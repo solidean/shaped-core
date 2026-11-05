@@ -247,6 +247,10 @@ public:
     /// Where micromaps are enabled, an acceleration-structure usage carries its micromap twin too, so one buffer serves either build.
     [[nodiscard]] VkBufferUsageFlags vk_buffer_usage(sg::buffer_usages usage) const;
 
+    /// The alignment a buffer of `usage` is placed at, here and by every requirements probe alike: `required`, raised
+    /// to what Vulkan demands of the addresses a use reads through, which no memory requirement reports.
+    [[nodiscard]] isize vk_buffer_alignment(sg::buffer_usages usage, VkDeviceSize required) const;
+
     /// Serializes every queue operation on this device.
     ///
     /// **Vulkan queues are externally synchronized; D3D12's are free-threaded.**
