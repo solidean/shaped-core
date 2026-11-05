@@ -489,3 +489,40 @@ TEST("sgl guards - a bytes load past the end or off a word ends the invocation, 
     CHECK(past.status == run_status::program_error);
     CHECK(past_guarded.status == run_status::discarded);
 }
+
+TEST("sgl guards - once a guard may set the flag, every write before the barrier is skipped where it is set (LEGAL-67)")
+{
+    constexpr auto source = "binding work:\n"
+                            "    values: mut buffer[int]\n"
+                            "    hits: mut buffer[atomic[uint]]\n"
+                            "\n"
+                            "@compute(64) fun cs(@thread_id id: int3){work}:\n"
+                            "    let q = 7 / id.x\n"
+                            "    work.values[id.x] = q\n"
+                            "    work.hits[0].add(1u)\n"
+                            "    workgroup_barrier()\n"
+                            "    work.values[id.y] = q\n";
+    auto const dump = guarded_dump(source);
+    auto masks = 0;
+    for (auto at = dump.find("(not (local aborted"); at >= 0; at = dump.find("(not (local aborted", at + 1))
+        ++masks;
+    // the store and the atomic before the barrier; the barrier itself is never skipped, and past the end-test of the
+    // flag the invocation has ended
+    CHECK(masks == 2).dump("core", dump);
+    CHECK(dump.contains("workgroup_barrier")).dump("core", dump);
+}
+
+TEST("sgl guards - without a guard that may set the flag no write is masked")
+{
+    constexpr auto source = "binding work:\n"
+                            "    values: mut buffer[int]\n"
+                            "\n"
+                            "@compute(64) fun cs(@thread_id id: int3){work}:\n"
+                            "    work.values[0] = 7\n"
+                            "    workgroup_barrier()\n";
+    auto const checked = check_sources(read_prelude(), source);
+    REQUIRE(reports_of(checked) == "");
+    auto const core = legalize(checked.module, checked.module.entry_points[0],
+                               {.guards_undefined = undefined_guard::abort, .guards_buffers = false});
+    CHECK(!dump_entry_point(checked.module, core).contains("aborted"));
+}

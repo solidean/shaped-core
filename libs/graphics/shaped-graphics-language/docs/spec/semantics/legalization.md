@@ -39,7 +39,7 @@ The worked examples are WGSL, since it is the strictest target: no `do … while
   A failed test ends the invocation as an `assert` of LEGAL-64 does, and `report` first prints the operation and its operands as that `assert`'s message.
   Where a barrier, a derivative or a subgroup operation may still follow, every invocation must reach it, so the end waits:
   the guard sets a flag and replaces the failing operand with one that cannot fail, a divisor of 1 or an index of 0.
-  The invocation then ends after the last statement of the entry point's body that holds such an operation, and what it writes until then is not masked.
+  The invocation then ends after the last statement of the entry point's body that holds such an operation, and what it writes until then is skipped (LEGAL-67).
   Until then, a loop that holds none of those operations is left at the top of each iteration once the flag is set, so a safe operand never keeps it running long.
   A loop that holds one has a trip count every invocation of the workgroup shares, so its guards trip in all of them or in none.
   It guards the maths builtins of EVAL-87 too, each by the test the interpreter asks: `pow`, `asin`, `acos`, `atan2`, `smoothstep` and `clamp`, whose operands share one number shape.
@@ -50,6 +50,10 @@ The worked examples are WGSL, since it is the strictest target: no `do … while
   So does a `bytes` load or store whose offset is no multiple of 4, or whose last word reaches past the bound memory (EVAL-97).
   The memory itself is never bound to a local, so only the offset and a stored value are, in their order.
   MSL reads no length, so a metal text guards neither.
+* **LEGAL-67** (G1) Once a guard may set that flag, every write up to the flag's test is skipped where it is set, so a safe operand's result reaches no memory.
+  A write is a store to a buffer element or to workgroup memory, and a call with an effect, an atomic or an image store, that stands as a statement.
+  A barrier, a derivative and a subgroup operation are never skipped, since every invocation must reach them.
+  An atomic whose result is bound by a `let` is not skipped yet.
 * **LEGAL-52** (V1) A core tree holds no `void` local, and no `let`, `var`, assignment, `return` or read of a `void` value: what evaluating one does stays as an `eval`, and the value itself is gone.
   It follows every rule that introduces a local for a result, since a `void` result is one of them; only the let rules come after it.
 

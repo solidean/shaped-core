@@ -11,3 +11,8 @@ Where a barrier, a derivative or a subgroup operation follows a tripped guard, t
 Until then it writes buffers, images and workgroup memory with values computed from that operand, which another invocation may read.
 Masking would test the flag at each store, atomic and image write between the guard and the end, and skip it.
 Without masking the abort profile can still let a wrong value reach memory, which is what it exists to prevent.
+
+## Done on 2026-11-05
+
+LEGAL-67: once a guard may set the flag, every store to a buffer element or workgroup memory, and every atomic or image store standing as a statement, is skipped where the flag is set.
+Left: an atomic whose result a `let` binds, as in `let slot = counter.add(1)`, which still counts; the `let` would become a `var` assigned under the mask.

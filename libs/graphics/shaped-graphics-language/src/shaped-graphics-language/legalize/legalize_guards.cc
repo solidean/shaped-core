@@ -824,6 +824,33 @@ struct guarder
 
     /// A loop's `body` with `if aborted { leave label }` in front, where `breaks_loops` asks for it and the body is free
     /// of what every invocation must reach together.
+    /// Whether `s` writes memory another invocation may read: a store to a buffer element or to workgroup memory, or
+    /// a call with an effect that is no barrier, derivative or subgroup operation, which every invocation must reach.
+    [[nodiscard]] bool writes_memory(flat_stmt const& s) const
+    {
+        if (auto const* const assign = s.node.try_as<flat_assign>())
+        {
+            auto place = assign->place;
+            for (auto steps = 0; steps < k_max_depth && is_known(out.e, place); ++steps)
+            {
+                auto const& x = out.e.at(place);
+                if (auto const* const member = x.node.try_as<flat_member>())
+                    place = member->object;
+                else if (auto const* const element = x.node.try_as<flat_element>())
+                    place = element->object;
+                else if (auto const* const b = x.node.try_as<flat_binding_member>())
+                    return b->is_workgroup;
+                else
+                    return x.node.is<flat_buffer_element>();
+            }
+            return false;
+        }
+        if (auto const* const eval = s.node.try_as<flat_eval>(); eval != nullptr && is_known(out.e, eval->value))
+            if (auto const* const call = out.e.at(eval->value).node.try_as<flat_call>())
+                return !call->is_pure && !constrains_uniformity(*call);
+        return false;
+    }
+
     ast::range_of<flat_stmt_id> left_once_aborted(label_id label, ast::range_of<flat_stmt_id> range, bool& changed)
     {
         if (!breaks_loops || !is_valid(label) || !is_known(out.e, range) || body_constrains(range, 0))
@@ -909,10 +936,23 @@ struct guarder
                 && out.e.check_sites[n->site].stops)
                 return deferred_assert(copy, *n);
         }
-        if (!changed)
-            return id;
-        out.e.stmts.push_back(cc::move(copy));
-        return flat_stmt_id(out.e.stmts.size() - 1);
+        auto result = id;
+        if (changed)
+        {
+            out.e.stmts.push_back(cc::move(copy));
+            result = flat_stmt_id(out.e.stmts.size() - 1);
+        }
+        // LEGAL-67: an invocation whose guard tripped computes on with a safe operand, and writes none of it
+        if (breaks_loops && writes_memory(out.e.at(result)))
+        {
+            auto const& s = out.e.at(result);
+            out.from = s.from;
+            out.inlined_through = s.inlined_through;
+            auto then = stmt_list();
+            then.push_back(result);
+            return out.if_(out.not_(out.local(aborted)), then);
+        }
+        return result;
     }
 };
 } // namespace
