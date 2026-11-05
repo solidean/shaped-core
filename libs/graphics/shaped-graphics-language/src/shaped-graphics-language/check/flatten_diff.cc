@@ -316,6 +316,8 @@ struct differentiator
             n->buffer = clone(n->buffer);
             n->index = clone(n->index);
         }
+        else if (auto* const n = x.node.try_as<flat_buffer_length>())
+            n->buffer = clone(n->buffer);
         else if (auto* const n = x.node.try_as<flat_construct>())
         {
             auto arguments = copy_of(n->arguments);

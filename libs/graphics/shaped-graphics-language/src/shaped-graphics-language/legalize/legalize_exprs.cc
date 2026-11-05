@@ -398,6 +398,8 @@ struct expr_lowering
             element->buffer = lowered[0];
             element->index = lowered[1];
         }
+        else if (auto* const length = copy.node.try_as<flat_buffer_length>())
+            length->buffer = lowered[0];
         else if (auto* const element = copy.node.try_as<flat_element>())
         {
             element->object = lowered[0];

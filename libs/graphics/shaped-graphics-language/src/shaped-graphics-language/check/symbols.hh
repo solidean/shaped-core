@@ -782,6 +782,8 @@ enum class sgl::check::target_kind : sgl::u8
     receiver,
     /// On a `member`: an array's `length`, a constant (CHK-288).
     array_length,
+    /// On a `member`: a buffer's or a `bytes`' `length`, which the bound memory decides (CHK-460).
+    buffer_length,
     /// On a `member`: a swizzle of the struct `symbol`, whose fields `index` packs (`swizzle::unpacked`, CHK-385).
     swizzle,
     /// On a call: `T[N].filled(v)`, an array holding `v` in every element (CHK-289).

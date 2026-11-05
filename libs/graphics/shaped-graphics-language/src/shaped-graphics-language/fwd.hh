@@ -40,6 +40,8 @@ struct classified_span;
 struct classify_options;
 struct unannotated_binding;
 struct inferred_result;
+struct reference;
+struct completion;
 
 enum class described_member_kind : u8;
 struct described_sampler;
@@ -283,6 +285,7 @@ struct flat_binding_member;
 struct flat_file_sampler;
 struct flat_member;
 struct flat_buffer_element;
+struct flat_buffer_length;
 struct flat_element;
 struct flat_construct;
 struct flat_call;

@@ -184,6 +184,9 @@ public:
         case sg::feature::view_instancing:
             // WebGPU has no multiview; WebXR hands out a texture per view instead
             return false;
+        case sg::feature::vertex_pipeline_stores:
+            // a vertex stage binds no writable storage on any WebGPU device
+            return false;
         case sg::feature::unaligned_block_compression:
             // Lifted by `texture-compression-unaligned`, which the emdawnwebgpu this builds against does not offer.
             return false;

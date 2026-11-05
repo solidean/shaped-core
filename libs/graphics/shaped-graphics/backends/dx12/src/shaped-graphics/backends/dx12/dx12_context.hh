@@ -264,6 +264,9 @@ public:
             return true;
         case sg::feature::view_instancing:
             return _view_instancing;
+        case sg::feature::vertex_pipeline_stores:
+            // a UAV is visible to every stage of a root signature
+            return true;
         case sg::feature::float_atomic_add:
             // HLSL's float atomics are bitwise exchanges alone; an add is NVAPI's, which this backend does not take
             return false;

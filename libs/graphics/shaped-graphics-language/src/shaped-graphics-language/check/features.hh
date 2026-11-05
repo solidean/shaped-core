@@ -57,6 +57,9 @@ enum class sgl::check::feature : sgl::u8
     float_denormals,
     /// `@view_index` (CHK-437): one draw renders several views, which WebGPU has on no device.
     view_instancing,
+    /// A vertex, geometry or tessellation stage writes a storage buffer, which vulkan asks of the device (EMIT-183).
+    /// No program names it: a vulkan text writes a `print` from those stages where the device has it, and drops one elsewhere.
+    vertex_pipeline_stores,
     /// `long`, `ulong` and their vectors (CHK-451), which WebGPU has on no device.
     shader_int64,
     /// `double` and its vectors (CHK-451), which WebGPU and Metal have on no device.
@@ -96,6 +99,7 @@ inline constexpr cc::string_view k_feature_names[] = {
     "float_specials",              //
     "float_denormals",             //
     "view_instancing",             //
+    "vertex_pipeline_stores",      //
     "shader_int64",                //
     "shader_f64",                  //
     "shader_int64_atomics",        //

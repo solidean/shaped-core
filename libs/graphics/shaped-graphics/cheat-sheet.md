@@ -118,6 +118,9 @@ ctx.supports(sg::feature::ray_query)               // bool — THE capability qu
                                                    //   | view_instancing (one draw renders view_count views, view i into layer i;
                                                    //     SGL's @view_index; dx12's ViewInstancingTier, vulkan's multiview,
                                                    //     false on metal (amplification not wired yet) and webgpu)
+                                                   //   | vertex_pipeline_stores (a vertex, geometry or tessellation stage writes
+                                                   //     storage, which SGL's print and assert there need; vulkan's
+                                                   //     vertexPipelineStoresAndAtomics, true on dx12 and metal, false on webgpu)
                                                    //   | float_atomic_add (a float atomic add in one instruction; vulkan with
                                                    //     VK_EXT_shader_atomic_float, true on metal, false on dx12 and webgpu;
                                                    //     slib asks SGL for the native add where it is true; no `require`)

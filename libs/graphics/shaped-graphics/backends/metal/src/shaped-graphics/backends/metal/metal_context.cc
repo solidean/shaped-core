@@ -162,6 +162,9 @@ bool metal_context::supports(sg::feature f) const
     case sg::feature::view_instancing:
         // vertex amplification would grant it, and is not wired up yet
         return false;
+    case sg::feature::vertex_pipeline_stores:
+        // a vertex function writes a device buffer on every Apple GPU
+        return true;
     case sg::feature::wireframe_fill:
         // `MTLTriangleFillModeLines` is on every Apple GPU.
         return true;

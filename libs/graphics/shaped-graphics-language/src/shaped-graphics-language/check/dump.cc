@@ -163,87 +163,93 @@ struct dumper
             dump_expr(e, rhs, indent);
         };
 
-        x.node.visit(
-            [&](flat_invalid const&) { out += "(invalid"; },
-            [&](flat_literal const& l)
-            {
-                // `1.0` and not `1`: the dump says float where the type is not in view
-                auto const text = cc::format("{}", l.value);
-                auto const is_whole = !text.contains('.') && !text.contains('e') && !text.contains('n');
-                out.appendf("(lit {}{}", text, is_whole ? ".0" : "");
-            },
-            [&](flat_int_literal const& l)
-            {
-                if (l.is_unsigned)
-                    out.appendf("(lit {}u", u32(l.value));
-                else
-                    out.appendf("(lit {}", l.value);
-            },
-            [&](flat_wide_literal const& l) { out.appendf("(lit {}i64", i64(l.bits)); }, [&](flat_bool_literal const& l)
-            { out.appendf("(lit {}", l.value ? "true" : "false"); }, [&](flat_buffer_element const& b)
-            { operands("elem", b.buffer, b.index); }, [&](flat_element const& a) { operands("at", a.object, a.index); },
-            [&](flat_enum_value const& v)
-            {
-                auto const cases = m.at(m.at(x.type).cases);
-                auto const name = v.case_index >= 0 && v.case_index < cases.size()
-                                    ? cc::string_view(cases[v.case_index].name)
-                                    : cc::string_view("?");
-                out.appendf("(case .{}", name);
-            },
-            [&](flat_local_ref const& l) { out.appendf("(local {}", local_name(e, l.local)); },
-            [&](flat_binding_member const& b)
-            {
-                auto const& binding = m.bindings[m.at(b.binding).info];
-                out.appendf("(binding {} {}", m.at(b.binding).name, m.at(binding.members)[b.member].name);
-            },
-            [&](flat_file_sampler const& smp) { out.appendf("(sampler {}", m.at(smp.sampler).name); },
-            [&](flat_member const& member)
-            {
-                out += "(member ";
-                dump_expr(e, member.object, indent);
-                auto const fields = is_valid(member.object) && index_of(member.object) < e.exprs.size()
-                                      ? m.at(m.at(e.at(member.object).type).members)
-                                      : cc::span<member_info const>();
-                auto const name_of = [&](i32 field)
-                { return field >= 0 && field < fields.size() ? cc::string_view(fields[field].name) : "?"; };
-                if (!member.is_swizzle())
-                {
-                    out.appendf(" {}", name_of(member.member));
-                    return;
-                }
-                out += " ";
-                for (auto i = 0; i < member.letters.count; ++i)
-                    out += name_of(member.letters.fields[i]);
-            },
-            [&](flat_construct const& c)
-            {
-                out += "(construct";
-                arguments(c.arguments, is_broken);
-            },
-            [&](flat_call const& c)
-            {
-                out.appendf("(call{}{} {}", c.is_pure ? "" : ":effect", c.text >= 0 ? ":text" : "", m.at(c.callee).name);
-                arguments(c.arguments, false);
-            },
-            [&](flat_not const& n)
-            {
-                out += "(not ";
-                dump_expr(e, n.operand, indent);
-            },
-            [&](flat_and const& a) { operands("and", a.lhs, a.rhs); },
-            [&](flat_or const& o) { operands("or", o.lhs, o.rhs); },
-            [&](flat_block const& b)
-            {
-                out.appendf("(block ${}", label_name(e, b.label));
-                dump_body(e, b.body, indent + 4);
-            },
-            [&](flat_by_target const& both)
-            {
-                out += "(by_target native=";
-                dump_expr(e, both.native, indent);
-                out += " emulated=";
-                dump_expr(e, both.emulated, indent);
-            });
+        x.node.visit([&](flat_invalid const&) { out += "(invalid"; },
+                     [&](flat_literal const& l)
+                     {
+                         // `1.0` and not `1`: the dump says float where the type is not in view
+                         auto const text = cc::format("{}", l.value);
+                         auto const is_whole = !text.contains('.') && !text.contains('e') && !text.contains('n');
+                         out.appendf("(lit {}{}", text, is_whole ? ".0" : "");
+                     },
+                     [&](flat_int_literal const& l)
+                     {
+                         if (l.is_unsigned)
+                             out.appendf("(lit {}u", u32(l.value));
+                         else
+                             out.appendf("(lit {}", l.value);
+                     },
+                     [&](flat_wide_literal const& l) { out.appendf("(lit {}i64", i64(l.bits)); },
+                     [&](flat_bool_literal const& l) { out.appendf("(lit {}", l.value ? "true" : "false"); },
+                     [&](flat_buffer_element const& b) { operands("elem", b.buffer, b.index); },
+                     [&](flat_buffer_length const& b)
+                     {
+                         out += "(length ";
+                         dump_expr(e, b.buffer, indent);
+                     },
+                     [&](flat_element const& a) { operands("at", a.object, a.index); },
+                     [&](flat_enum_value const& v)
+                     {
+                         auto const cases = m.at(m.at(x.type).cases);
+                         auto const name = v.case_index >= 0 && v.case_index < cases.size()
+                                             ? cc::string_view(cases[v.case_index].name)
+                                             : cc::string_view("?");
+                         out.appendf("(case .{}", name);
+                     },
+                     [&](flat_local_ref const& l) { out.appendf("(local {}", local_name(e, l.local)); },
+                     [&](flat_binding_member const& b)
+                     {
+                         auto const& binding = m.bindings[m.at(b.binding).info];
+                         out.appendf("(binding {} {}", m.at(b.binding).name, m.at(binding.members)[b.member].name);
+                     },
+                     [&](flat_file_sampler const& smp) { out.appendf("(sampler {}", m.at(smp.sampler).name); },
+                     [&](flat_member const& member)
+                     {
+                         out += "(member ";
+                         dump_expr(e, member.object, indent);
+                         auto const fields = is_valid(member.object) && index_of(member.object) < e.exprs.size()
+                                               ? m.at(m.at(e.at(member.object).type).members)
+                                               : cc::span<member_info const>();
+                         auto const name_of = [&](i32 field)
+                         { return field >= 0 && field < fields.size() ? cc::string_view(fields[field].name) : "?"; };
+                         if (!member.is_swizzle())
+                         {
+                             out.appendf(" {}", name_of(member.member));
+                             return;
+                         }
+                         out += " ";
+                         for (auto i = 0; i < member.letters.count; ++i)
+                             out += name_of(member.letters.fields[i]);
+                     },
+                     [&](flat_construct const& c)
+                     {
+                         out += "(construct";
+                         arguments(c.arguments, is_broken);
+                     },
+                     [&](flat_call const& c)
+                     {
+                         out.appendf("(call{}{} {}", c.is_pure ? "" : ":effect", c.text >= 0 ? ":text" : "",
+                                     m.at(c.callee).name);
+                         arguments(c.arguments, false);
+                     },
+                     [&](flat_not const& n)
+                     {
+                         out += "(not ";
+                         dump_expr(e, n.operand, indent);
+                     },
+                     [&](flat_and const& a) { operands("and", a.lhs, a.rhs); },
+                     [&](flat_or const& o) { operands("or", o.lhs, o.rhs); },
+                     [&](flat_block const& b)
+                     {
+                         out.appendf("(block ${}", label_name(e, b.label));
+                         dump_body(e, b.body, indent + 4);
+                     },
+                     [&](flat_by_target const& both)
+                     {
+                         out += "(by_target native=";
+                         dump_expr(e, both.native, indent);
+                         out += " emulated=";
+                         dump_expr(e, both.emulated, indent);
+                     });
         out.appendf(" : {})", m.name_of(x.type));
     }
 

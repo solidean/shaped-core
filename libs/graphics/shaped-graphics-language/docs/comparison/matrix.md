@@ -3,7 +3,8 @@
 How SGL compares with the other ways to write one set of shaders for DX12, Vulkan, WebGPU and Metal.
 Every row is judged for a renderer that targets all four, WebGPU in a browser included, and wants hardware ray tracing wherever a platform has it.
 
-**As of 2026-11-02**; SGL's E3 and E4 as of 2026-11-03, its B8 as of 2026-11-04, its A5, A7, B2, B3, B4, B9, B10, B11, B12, E4, F2, F7 and G5 as of 2026-11-05.
+**As of 2026-11-02**; SGL's E3 and E4 as of 2026-11-03, its B8 as of 2026-11-04, its A5, A7, B2, B3, B4, B6, B8, B9, B10, B11, B12, E4, F2, F7 and G5 as of 2026-11-05.
+Every cell's marker was judged again on 2026-11-05, when ✅ came to mean full support to the extent the targets allow.
 The other columns move fast, Slang's Metal and WGSL support above all, so each cell carries a source and the date it was checked; see [Sources](#sources).
 
 ## Columns
@@ -20,12 +21,16 @@ The other columns move fast, Slang's Metal and WGSL support above all, so each c
 
 | Marker | Meaning |
 |---|---|
-| ✅ | Yes, and it works for this setup. |
-| ⚠️ | Partly, or with a caveat the cell names. |
+| ✅ | Full support, to the extent the targets allow: every target that can deliver it gets it, and where one cannot, the stack says so before run time. |
+| ⚠️ | Partly: a target that could deliver it does not get it from this stack, or a caveat the cell names. |
 | ❌ | No. |
+| — | In a per-target cell: the target itself cannot deliver it, so no stack owes it there. |
+| ➕ | In a per-target cell: delivered beyond what the target has, as an emulation. |
 | ❓ | Unsure: not verified, or documented but never shown to run. |
 | 🗺️ | SGL only: on the roadmap, linked to the issue or incubator note that tracks it. |
 
+A target's own limit is never held against a stack, so a row whose best possible answer leaves a target out can still be ✅.
+A target can deliver a capability when its API or hardware has it, or when a lowering of modest cost reaches it, as a float atomic add through a compare-exchange loop.
 A per-target cell reads `dx12 / vulkan / metal / webgpu`.
 "No issue yet" in an SGL cell marks a gap nothing tracks so far.
 
@@ -36,9 +41,9 @@ A per-target cell reads `dx12 / vulkan / metal / webgpu`.
 | **A1** DX12 path | ✅ DXC → DXIL, one hop | ✅ HLSL text → DXC, in process | ⚠️ HLSL text → DXC, two hops | ⚠️ SPIR-V → SPIRV-Cross HLSL → DXC, three hops | ✅ HLSL text → DXC |
 | **A2** Vulkan path | ✅ DXC → SPIR-V (a community-maintained backend) | ✅ SPIR-V directly | ✅ SPIR-V directly | ✅ glslang → SPIR-V | ✅ HLSL text → DXC → SPIR-V |
 | **A3** Metal path | ⚠️ two hops: DXIL → MSC, or SPIR-V → SPIRV-Cross → MSL | ✅ MSL text; metallib through Apple's tool | ✅ MSL text | ✅ SPIRV-Cross → MSL | ✅ MSL text; metallib, or the driver compiles the MSL |
-| **A4** WebGPU path | ⚠️ SPIR-V → Tint or Naga; drops bindless, int64 and ray queries | ⚠️ WGSL text; no ray tracing, mesh, geometry or tessellation | ✅ the browser takes it as is; wgpu-only extensions do not reach a browser | ⚠️ SPIR-V → Tint or Naga, a subset | ⚠️ WGSL text directly; what WebGPU lacks is refused by feature; ray queries emulated |
-| **A5** Inline ray queries | ✅ / ✅ / ✅ / ❌ | ✅ / ✅ / ⚠️ / ❌ metal: one fixed query shape, first run on hardware 2026-10 | ⚠️ / ⚠️ / ⚠️ / ❌ a wgpu-only experimental extension; a WGSL proposal was accepted 2026-10-27 | ✅ / ✅ / ✅ / ❌ | ✅ / ✅ / ✅ / ⚠️ metal: every inline-trace GPU test passes on an M4; not yet run on an M-series GPU without hardware ray tracing 🗺️ [chore](../issues/chore-sgl-metal-raytracing-on-apple-hardware.md); webgpu emulated in software, not watertight 🗺️ [bug](../issues/bug-sgl-emulated-trace-not-watertight.md) |
-| **A6** Ray-tracing pipelines | ✅ / ✅ / ⚠️ / ❌ metal through MSC alone, emulated as a compute kernel over function tables | ✅ / ✅ / ❌ / ❌ metal at design stage | ❌ / ⚠️ / ❌ / ❌ Naga to SPIR-V only, experimental | ❌ / ✅ / ❌ / ❌ SPIRV-Cross has no ray-tracing stages | ✅ / ✅ / ⚠️ / ❌ metal: four gaps to DXR 🗺️ [epic](../issues/epic-sgl-metal-raytracing-dxr-parity.md); webgpu: a polyfill in the 🗺️ [incubator](../spec/incubator/raytracing-futures.md) |
+| **A4** WebGPU path | ⚠️ SPIR-V → Tint or Naga; drops bindless, int64 and ray queries | ✅ WGSL text; ray tracing, mesh, geometry and tessellation, which WebGPU lacks, are capability errors | ✅ the browser takes it as is; wgpu-only extensions do not reach a browser | ⚠️ SPIR-V → Tint or Naga, a subset | ✅ WGSL text directly; what WebGPU lacks is refused by feature; ray queries emulated beyond it |
+| **A5** Inline ray queries | ✅ / ✅ / ✅ / — | ✅ / ✅ / ⚠️ / — metal: one fixed query shape, first run on hardware 2026-10 | ⚠️ / ⚠️ / ⚠️ / — a wgpu-only experimental extension; a WGSL proposal was accepted 2026-10-27 | ✅ / ✅ / ✅ / — | ✅ / ✅ / ✅ / ➕ metal: every inline-trace GPU test passes on an M4; not yet run on an M-series GPU without hardware ray tracing 🗺️ [chore](../issues/chore-sgl-metal-raytracing-on-apple-hardware.md); webgpu emulated in software, not watertight 🗺️ [bug](../issues/bug-sgl-emulated-trace-not-watertight.md) |
+| **A6** Ray-tracing pipelines | ✅ / ✅ / ⚠️ / — metal through MSC alone, emulated as a compute kernel over function tables | ✅ / ✅ / ❌ / — metal at design stage | ❌ / ⚠️ / ❌ / — Naga to SPIR-V only, experimental | ❌ / ✅ / ❌ / — SPIRV-Cross has no ray-tracing stages | ✅ / ✅ / ⚠️ / — metal: four gaps to DXR 🗺️ [epic](../issues/epic-sgl-metal-raytracing-dxr-parity.md); webgpu: a polyfill in the 🗺️ [incubator](../spec/incubator/raytracing-futures.md) |
 | **A7** Ray-tracing host side across DXR and Metal | ⚠️ MSC's runtime header helps; the engine still writes both host paths | ❌ the engine writes the shader table and Metal's function tables | ❌ | ❌ | ✅ pipeline description and shader tables generated for dx12, vulkan and metal; the metal side passes sg's, sr's and sv's pipeline tests on an M4 |
 | **A8** Ray-tracing depth | ⚠️ full on DX12 and Vulkan; MSC fuses any hit into intersection, no payload qualifiers | ⚠️ full on DX12 and Vulkan; motion blur NVIDIA-only; Metal ray queries only | ⚠️ no callables, no intersection stage | ⚠️ full on Vulkan; elsewhere ray queries only | ⚠️ callables, intersection, any hit, ray flags; no recursive trace graph, no motion blur 🗺️ [incubator](../spec/incubator/raytracing-futures.md) |
 
@@ -47,16 +52,16 @@ A per-target cell reads `dx12 / vulkan / metal / webgpu`.
 | Row | HLSL + chain | Slang | WGSL | GLSL + chain | SGL |
 |---|---|---|---|---|---|
 | **B1** Portable by default | ❌ each hop accepts or rejects on its own, late | ⚠️ capabilities reject missing features statically; behaviour is implementation-defined | ⚠️ designed portable; Naga and Tint disagree on uniformity | ❌ | ✅ one check judges every target; a non-portable form needs a feature (floats: B3) |
-| **B2** Integer semantics | ❌ per target | ⚠️ unsigned wrap defined; the rest unspecified | ✅ fully defined, polyfilled on every target | ❌ division overflow, ÷0 and wide shifts undefined | ⚠️ wrap, truncating `/`, signed `%`, masked shifts defined; ÷0 and `INT_MIN / -1` undefined, a constant one is an error, and a profile reports or ends a run one (B10, B11) |
+| **B2** Integer semantics | ❌ per target | ⚠️ unsigned wrap defined; the rest unspecified | ✅ fully defined, polyfilled on every target | ❌ division overflow, ÷0 and wide shifts undefined | ⚠️ wrap, truncating `/`, signed `%`, masked shifts defined; ÷0 and `INT_MIN / -1` undefined, a constant one is an error, and a profile reports one, ends its invocation, or gives it WGSL's value (B10, B11) |
 | **B3** Float semantics | ⚠️ per target; Metal fast math by default; DXC writes a float `!=` as an ordered compare in SPIR-V, so `NaN != NaN` is false on Vulkan | ⚠️ implementation-defined; `precise` has no effect on Metal | ⚠️ loose by spec; Metal relaxed by default in Dawn and wgpu | ❌ per target | ⚠️ the exact meaning is IEEE f32, which the interpreter computes; on a GPU an entry point's `@float` level licenses named departures, `fast` by default (B12); `!=` is true for a NaN on every target |
-| **B4** Out-of-bounds access | ⚠️ per target and robustness setting | ⚠️ undefined by spec | ⚠️ bounded outcomes, where the translator is configured for them | ❌ undefined unless robustness is on | ⚠️ undefined; the interpreter reports it as a program error, and a profile guards an array index (B10, B11) |
+| **B4** Out-of-bounds access | ⚠️ per target and robustness setting | ⚠️ undefined by spec | ⚠️ bounded outcomes, where the translator is configured for them | ❌ undefined unless robustness is on | ⚠️ undefined; the interpreter reports it as a program error, and a profile guards an array index, a buffer index and a `bytes` access by `values.length`, except on metal (B10, B11) |
 | **B5** Uniformity, derivatives, discard | ⚠️ no uniformity check; a failure surfaces at Tint or in the browser | ⚠️ no model of WGSL uniformity; open bugs | ⚠️ Tint enforces it; Naga skips derivative checks | ⚠️ no uniformity analysis | ⚠️ its own uniformity pass for every target; discard's helper lanes on metal 🗺️ [feat](../issues/feat-sgl-discard-helper-emulation.md) |
-| **B6** Float and 64-bit atomics | ⚠️ 64-bit on DX12 and Vulkan; reported by whichever hop fails | ⚠️ neither on Metal or WGSL; a static capability error | ⚠️ core has 32-bit only; native-only extensions | ⚠️ SPIRV-Cross refuses 64-bit atomics for MSL | ⚠️ 32-bit only; float and 64-bit refused statically 🗺️ [feat](../issues/.closed/2026/11/feat-sgl-float-and-64-bit-atomics.md) |
+| **B6** Float and 64-bit atomics | ⚠️ 64-bit on DX12 and Vulkan; reported by whichever hop fails | ⚠️ neither on Metal or WGSL; a static capability error | ⚠️ core has 32-bit only; native-only extensions | ⚠️ SPIRV-Cross refuses 64-bit atomics for MSL | ⚠️ `atomic[float]` on all four, native on vulkan and metal and a compare-exchange loop on dx12 and webgpu, which have no float add; no 64-bit yet 🗺️ [feat](../issues/.closed/2026/11/feat-sgl-float-and-64-bit-atomics.md) |
 | **B7** Subgroup operations | ⚠️ MSC requires wave size 32; WGSL needs its extension | ⚠️ docs and code disagree for WGSL; wave size left to the user | ✅ `subgroups` extension, shipped in Chrome 134 | ✅ to Wave and SIMD-group ops | ✅ behind `subgroups` on all four; code must be correct at any size |
-| **B8** Vendor features (SER, OMM) | ⚠️ DX12 only (SM 6.9); DXC has no SPIR-V lowering; none on Metal or WebGPU; not reported statically | ⚠️ SER on DX12 and Vulkan, checked statically; no OMM | ❌ | ⚠️ extensions reach Vulkan; other targets fail at SPIRV-Cross | ⚠️ opacity micromaps traced on vulkan with no change to the shader, sg building them; no 2-state ray flag yet 🗺️ [feat](../issues/feat-sgl-two-state-opacity-ray-flag.md); no SER 🗺️ [incubator](../spec/incubator/specialization.md) |
+| **B8** Vendor features (SER, OMM) | ⚠️ DX12 only (SM 6.9); DXC has no SPIR-V lowering; none on Metal or WebGPU; not reported statically | ⚠️ SER on DX12 and Vulkan, checked statically; no OMM | ❌ | ⚠️ extensions reach Vulkan; other targets fail at SPIRV-Cross | ⚠️ opacity micromaps traced on dx12 and vulkan with no change to the shader, sg building them, and `ray_flags.force_omm_2_state` on both; SER on dx12, `maybe_reorder` and a first-class hit object, checked statically; vulkan's waits on DXC's SPIR-V lowering |
 | **B9** Inline target code | ⚠️ inline SPIR-V, Vulkan only | ✅ `__target_switch`, `__intrinsic_asm`, `spirv_asm` | ⚠️ whole-module passthrough in wgpu only | ❌ | ✅ a function body in HLSL, WGSL or MSL text under `const if` on target, feature and option, with placeholders, a file preamble per language, text types and a declared contract (`@pure`, `@barrier`, `@subgroup`, `@derivatives`); SER is written this way; no buffer parameter or `#line` inside the text yet 🗺️ [incubator](../spec/incubator/specialization.md) |
-| **B10** Finding UB in development | ⚠️ the API validation layers catch out-of-bounds memory, per API and against its objects; nothing checks an integer division | ⚠️ the same API layers; none of its own | ❌ defined rather than reported: a division by zero has a value, an access is clamped, and nothing says so | ⚠️ the same API layers | ⚠️ the `report` profile logs a division by zero or an array index past its array at its `.sgl` line, with its operands, on dx12, vulkan and webgpu, and so do `pow`, `asin`, `acos`, `atan2`, `smoothstep` and `clamp` with no value; metal ends the run without a report; buffers and `bytes` not yet 🗺️ [epic](../issues/epic-sgl-robustness-profiles.md) |
-| **B11** Containing UB in production | ⚠️ per API: vulkan's robust buffer access, dx12's zero for an out-of-range descriptor; integer division per target | ⚠️ the same | ✅ every access bounded and every integer operation defined, polyfilled on every target | ⚠️ vulkan's robustness alone | ⚠️ the `abort` profile ends the invocation, with no debug window; writes before an end that waits for a barrier are not masked 🗺️ [feat](../issues/feat-sgl-guard-write-masking.md); a profile that defines every result 🗺️ [feat](../issues/feat-sgl-defined-profile.md) |
+| **B10** Finding UB in development | ⚠️ the API validation layers catch out-of-bounds memory, per API and against its objects; nothing checks an integer division | ⚠️ the same API layers; none of its own | ❌ defined rather than reported: a division by zero has a value, an access is clamped, and nothing says so | ⚠️ the same API layers | ⚠️ the `report` profile logs a division by zero or an array index past its array at its `.sgl` line, with its operands, on dx12, vulkan and webgpu, and so do `pow`, `asin`, `acos`, `atan2`, `smoothstep` and `clamp` with no value; so does a buffer index or a `bytes` access past the bound memory, except on metal, which carries no buffer length; metal ends the run without a report; workgroup memory read before a write not yet 🗺️ [epic](../issues/epic-sgl-robustness-profiles.md) |
+| **B11** Containing UB in production | ⚠️ per API: vulkan's robust buffer access, dx12's zero for an out-of-range descriptor; integer division per target | ⚠️ the same | ✅ every access bounded and every integer operation defined, polyfilled on every target | ⚠️ vulkan's robustness alone | ⚠️ the `abort` profile ends the invocation, with no debug window; where the end waits for a barrier, the invocation's writes until then are skipped, except an atomic whose result a `let` binds 🗺️ [feat](../issues/feat-sgl-guard-write-masking.md); the `define` profile gives each such operation WGSL's value instead and goes on, a buffer that holds nothing excepted |
 | **B12** Float conformance and fast modes | ⚠️ DXC's `-Gis` per compile and `precise` per variable, `-denorm` from SM 6.2; the later hops carry neither, and nothing refuses a target that drops them | ⚠️ `-fp-mode precise` or `fast` per compile, and denormal modes for SPIR-V and DXIL; nothing documented for Metal or WGSL ❓ | ❌ one mode, whose implementations may assume no NaN or infinity | ⚠️ `precise` per variable, `NoContraction` in SPIR-V; nothing keeps NaNs or infinities | ⚠️ a ladder from `fast` to `ieee`, stated per function and kept per entry point; dx12 keeps every level, metal up to `precise`, vulkan every level where the device has its float controls; webgpu refuses above `fast` unless the host weakens it 🗺️ [feat](../issues/feat-sgl-float-level-per-target.md); `x != x` at `fast` warns |
 
 ## C. Host integration and reflection
@@ -74,9 +79,9 @@ A per-target cell reads `dx12 / vulkan / metal / webgpu`.
 |---|---|---|---|---|---|
 | **D1** Generics | ✅ templates (HLSL 2021), no constraints | ✅ interfaces and checked generics | ❌ (WESL: draft) | ❌ | ✅ templates checked per instance: type and value parameters, generic structs; no interfaces, by design |
 | **D2** Modules | ❌ `#include` | ✅ modules, precompiled modules, link-time specialization | ⚠️ WESL imports | ⚠️ `#include` extension | ⚠️ modules, no separate compilation 🗺️ [epic](../issues/epic-sgl-modules-beyond-a-tracer.md) |
-| **D3** Bindless | ✅ / ✅ / ✅ (MSC) / ❌ | ✅ / ✅ / ⚠️ / ⚠️ | ⚠️ / ⚠️ / ⚠️ / ❌ native extension only | ✅ / ✅ / ⚠️ / ❌ | ✅ / ✅ / ✅ / ❌ fixed-size binding arrays, checked `nonuniform`; unbounded arrays not yet 🗺️ [feat](../issues/feat-sgl-unbounded-binding-arrays.md) |
+| **D3** Bindless | ✅ / ✅ / ✅ (MSC) / — | ✅ / ✅ / ⚠️ / ⚠️ | ⚠️ / ⚠️ / ⚠️ / — native extension only | ✅ / ✅ / ⚠️ / — | ⚠️ / ⚠️ / ⚠️ / — fixed-size binding arrays, checked `nonuniform`; unbounded arrays not yet 🗺️ [feat](../issues/feat-sgl-unbounded-binding-arrays.md) |
 | **D4** GPU pointers | ⚠️ Vulkan only | ⚠️ SPIR-V; Metal partly | ❌ | ⚠️ Vulkan, and Metal through SPIRV-Cross | ❌ 🗺️ [feat](../issues/feat-sgl-gpu-pointers.md) |
-| **D5** half, f64, int64, int16 | ⚠️ f64 not on Metal or WebGPU; 64- and 16-bit ints not on WebGPU | ⚠️ the same shape | ⚠️ f16 extension; no f64 or int64 in a browser | ⚠️ the same shape as HLSL | ⚠️ half and 16-bit ints behind features (webgpu: half only); no f64 or int64 anywhere 🗺️ [feat](../issues/.closed/2026/11/feat-sgl-64-bit-types.md) |
+| **D5** half, f64, int64, int16 | ✅ f64 on DX12 and Vulkan, which alone have it; 64- and 16-bit ints everywhere but WebGPU | ✅ the same shape | ⚠️ f16 extension; no f64 or int64 in a browser | ✅ the same shape as HLSL | ⚠️ half and 16-bit ints behind features (webgpu: half only); no f64 or int64 anywhere 🗺️ [feat](../issues/.closed/2026/11/feat-sgl-64-bit-types.md) |
 | **D6** Mesh, geometry, tessellation, work graphs | ⚠️ mesh on DX12, Vulkan and MSC; work graphs on DX12 | ⚠️ mesh on DX12, Vulkan and Metal; geometry and tessellation on DX12 and Vulkan | ⚠️ Naga experimental mesh; none in a browser | ⚠️ mesh to HLSL and MSL | ⚠️ geometry and tessellation on dx12 and vulkan; no mesh 🗺️ [feat](../issues/feat-sgl-mesh-and-task-stages.md), no work graphs |
 | **D7** Autodiff | ❌ | ✅ forward and backward | ❌ | ❌ | ❌ 🗺️ [epic](../issues/epic-sgl-autodiff.md) |
 | **D8** Methods, operators, enums, inference | ⚠️ methods, operators, enums, `auto`; no constructors | ✅ | ⚠️ no methods, operators or enums | ❌ | ✅ methods, properties, `@operator`, enums, inference, arrow lambdas |
@@ -88,7 +93,7 @@ A per-target cell reads `dx12 / vulkan / metal / webgpu`.
 | **E1** Shader unit tests without a GPU | ❌ | ✅ CPU target and an interpreter, documented as incomplete | ❌ (WESL tests run on a GPU) | ❌ | ✅ `test` blocks run on the spec's interpreter; no textures, subgroups or derivatives yet 🗺️ [feat](../issues/feat-sgl-test-texture-bindings.md) |
 | **E2** Diagnostics | ⚠️ later hops report against IR, once per hop | ⚠️ once against the source; downstream errors per target | ✅ once against the source | ⚠️ SPIRV-Cross errors per target, against SPIR-V | ✅ once against the source, for every target |
 | **E3** Debugging the output | ⚠️ PIX at source level on DXIL; mapping lost after a hop | ⚠️ debug info and line directives | ⚠️ readable output, no source stepping | ⚠️ readable output, mapping lost | ✅ readable text with SGL's names; `#line` in HLSL and MSL, so DXC, Metal and PIX name the `.sgl` line; webgpu logs Tint's messages at the `.sgl` line and its inlined calls |
-| **E4** printf and assert on a GPU | ⚠️ printf on Vulkan only | ⚠️ printf except on WGSL; no assert | ⚠️ Naga printf on Metal and Vulkan | ⚠️ printf on Vulkan only | ⚠️ `print` and `assert` with interpolated values on dx12, vulkan and webgpu, logged once the epoch completes; a failed assert ends its invocation, after any barrier still ahead, and fails a test; metal not yet, and no vertex-stage `print` on vulkan or webgpu 🗺️ [feat](../issues/feat-sgl-gpu-print-and-assert.md) |
+| **E4** printf and assert on a GPU | ⚠️ printf on Vulkan only | ⚠️ printf except on WGSL; no assert | ⚠️ Naga printf on Metal and Vulkan | ⚠️ printf on Vulkan only | ⚠️ `print` and `assert` with interpolated values on dx12, vulkan and webgpu, logged once the epoch completes; a failed assert ends its invocation, after any barrier still ahead, and fails a test; a vertex stage's on vulkan where the device lets it store, and never on webgpu, which has no storage there; metal not yet 🗺️ [feat](../issues/feat-sgl-gpu-print-and-assert.md) |
 | **E5** Normative specification | ⚠️ an Ecma working draft; DXC is the de facto spec | ⚠️ a spec, self-described incomplete | ✅ W3C Candidate Recommendation | ✅ GLSL 4.60 | ✅ normative, with stable rule ids; every example in it is a test |
 
 ## F. Workflow and production
@@ -101,7 +106,7 @@ A per-target cell reads `dx12 / vulkan / metal / webgpu`.
 | **F4** Compile speed | ❓ | ❓ | ✅ Naga: 20–60 µs per small shader and backend | ❓ | ✅ a corpus of bgfx shaders compiles as fast as with Naga; a fixed cost of ~115 µs per compile against Naga's ~18 µs 🗺️ [epic](../issues/epic-sgl-prelude-check-cost.md) |
 | **F5** Permutations | ⚠️ macros; specialization constants on SPIR-V only | ✅ macros, specialization constants, link-time specialization | ⚠️ `override` constants; WESL `@if` | ✅ macros and specialization constants | ✅ options; a false branch leaves the text and the footprint; no specialization constants |
 | **F6** Shipping and caching | ✅ offline bundles | ⚠️ precompiled modules; determinism undocumented | ⚠️ no bundle format | ⚠️ SPIR-V as the cached form | ✅ frozen bundles, a persistent cache, deterministic text |
-| **F7** Editor tooling | ⚠️ third-party language servers | ⚠️ `slangd`; no formatter | ⚠️ wgsl-analyzer | ⚠️ community language servers | ⚠️ an in-tree language server: diagnostics, tokens, inlay hints, tests; no hover, completion or formatter 🗺️ [feat](../issues/feat-sgl-lsp-hover-definition-completion.md) |
+| **F7** Editor tooling | ⚠️ third-party language servers | ⚠️ `slangd`; no formatter | ⚠️ wgsl-analyzer | ⚠️ community language servers | ⚠️ an in-tree language server: diagnostics, tokens, inlay hints, hover, go-to-definition, completion and test runs; no formatter, signature help or rename 🗺️ [feat](../issues/feat-sgl-lsp-hover-definition-completion.md) |
 | **F8** Toolchain hosts | ⚠️ MSC on macOS and Windows only | ⚠️ text anywhere; metallib needs Apple's tool | ✅ | ✅ | ⚠️ text anywhere, wasm included; DXIL needs DXC (Windows, Linux), a metallib needs macOS |
 | **F9** Licensing | ⚠️ MSC is proprietary; whether an app may ship it is unanswered | ✅ Apache-2.0 with LLVM exception | ✅ MIT, Apache-2.0, BSD-3 | ✅ permissive | ✅ MIT |
 
@@ -211,7 +216,7 @@ Per row and column:
   - Slang: SLANGSPEC
   - WGSL: NAGA `proc/index.rs`, TINT robustness transform
   - GLSL + chain: GLSL §5.11
-  - SGL: EVAL-90, EVAL-97
+  - SGL: EVAL-90, EVAL-97, CHK-460, LEGAL-66, EMIT-195 (2026-11-05)
 - **B5**
   - HLSL + chain: DXC 1.9.2609 notes, WGSL uniformity
   - Slang: SLANG uniformity guide, issues 6962, 13631, 13640
@@ -246,13 +251,13 @@ Per row and column:
   - Slang: SLANG (no runtime check of its own in the user guide)
   - WGSL: WGSL §8, §6.5.7
   - GLSL + chain: as HLSL + chain
-  - SGL: [legalization.md](../spec/semantics/legalization.md) LEGAL-65, shaped-rendering `tests/debug-output-test.cc` (2026-11-05)
+  - SGL: [legalization.md](../spec/semantics/legalization.md) LEGAL-65, LEGAL-66, shaped-rendering `tests/debug-output-test.cc` (2026-11-05)
 - **B11**
   - HLSL + chain: Vulkan `VK_EXT_robustness2`, D3D12 descriptor out-of-bounds behaviour
   - Slang: SLANGSPEC
   - WGSL: WGSL §8, §6.5.7, TINT robustness transform
   - GLSL + chain: Vulkan `VK_EXT_robustness2`
-  - SGL: LEGAL-65, [epic-sgl-robustness-profiles](../issues/epic-sgl-robustness-profiles.md) (2026-11-05)
+  - SGL: LEGAL-65, LEGAL-66, LEGAL-67, [epic-sgl-robustness-profiles](../issues/epic-sgl-robustness-profiles.md) (2026-11-05)
 - **B12**
   - HLSL + chain: DXC `-help` (`-Gis`, `-denorm`), SXC, TINT
   - Slang: SLANG `docs/command-line-slangc-reference.md` (`-fp-mode`, `-denorm-mode-fp16/32/64`), read 2026-11-05
@@ -349,7 +354,7 @@ Per row and column:
   - Slang: SLANG capdef `printf`
   - WGSL: NAGA `debug_printf.rs`
   - GLSL + chain: Khronos registry
-  - SGL: CHK-424, EVAL-103, LEGAL-63, LEGAL-64, LEGAL-65, EMIT-183 (2026-11-05)
+  - SGL: CHK-424, EVAL-103, LEGAL-63, LEGAL-64, LEGAL-65, EMIT-183, sg's `vertex_pipeline_stores` (2026-11-05)
 - **E5**
   - HLSL + chain: HLSLSPEC, <https://ecma-international.org/technical-committees/tc57/>
   - Slang: SLANGSPEC

@@ -700,8 +700,8 @@ A shader using one then gets a diagnostic that names the feature, rather than a 
 
 ## Open
 
-* `values.length` — WGSL, HLSL and SPIR-V can all answer it without packing data, and MSL cannot: a Metal buffer argument is a pointer and carries no length.
-  Until metal is a target with a compiler behind it, a shader passes the count in.
+* `values.length` on metal: HLSL and WGSL read it (CHK-460, EMIT-195), and a Metal buffer argument is a pointer that carries no length.
+  sg would pass the lengths in, as a buffer of sizes beside the argument table; until it does, a metal compile that reads one is refused.
 * A buffer as a field of a struct, which is `unsupported-yet` like every buffer outside a binding member.
   It could be allowed where the buffer is hoisted and stays uniform across every use, a scalarization of the struct that inlining makes possible.
 * The functions over textures and images — sampling, loads, stores and sizes — and a default sampler on a texture member ([texture-methods.md](incubator/texture-methods.md)).

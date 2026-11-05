@@ -308,6 +308,15 @@ struct sgl::check::flat_buffer_element
     constexpr bool operator==(flat_buffer_element const&) const = default;
 };
 
+/// `values.length` of a buffer or of `bytes`: how many elements, or bytes, the bound memory holds (CHK-460).
+/// `buffer` is always a `flat_binding_member`, a leaf no pass rewrites.
+struct sgl::check::flat_buffer_length
+{
+    flat_expr_id buffer = flat_expr_id::none;
+
+    constexpr bool operator==(flat_buffer_length const&) const = default;
+};
+
 /// `object[index]` on an array value: its element, read or, as a place, assigned.
 /// The index is evaluated after the object; outside `0 ..< length` it is a program error (EVAL-90).
 struct sgl::check::flat_element
@@ -410,6 +419,7 @@ struct sgl::check::flat_expr
                 flat_file_sampler,
                 flat_member,
                 flat_buffer_element,
+                flat_buffer_length,
                 flat_element,
                 flat_construct,
                 flat_call,

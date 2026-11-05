@@ -377,6 +377,8 @@ public:
             return _float_denormals;
         case sg::feature::view_instancing:
             return _view_instancing;
+        case sg::feature::vertex_pipeline_stores:
+            return _vertex_pipeline_stores;
         // SPIR-V's `Coherent` decoration is core, and storage-image atomics on r32 integer formats are required.
         // BaseInstance is the DrawParameters capability, which creation requires `shaderDrawParameters` for.
         case sg::feature::device_coherence:
@@ -957,6 +959,8 @@ public:
     bool _vertex_layer_output = false;
     /// `multiview`, enabled wherever the device has it.
     bool _view_instancing = false;
+    /// `vertexPipelineStoresAndAtomics`, enabled wherever the device has it.
+    bool _vertex_pipeline_stores = false;
     /// `VK_EXT_shader_atomic_float`, enabled with its buffer and shared float32 atomics and adds alike.
     bool _float_atomic_add = false;
     /// What a pipeline may require of its subgroups' size: all zero where `subgroupSizeControl` was not enabled.

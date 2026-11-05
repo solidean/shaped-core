@@ -4792,6 +4792,7 @@ enum feature:
     float_specials
     float_denormals
     view_instancing
+    vertex_pipeline_stores
     shader_int64
     shader_f64
     shader_int64_atomics

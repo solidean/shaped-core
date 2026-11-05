@@ -177,6 +177,10 @@ enum class sg::feature
     /// yet, and WebGPU has no such thing.
     view_instancing,
 
+    /// A vertex, geometry or tessellation stage may write a storage buffer, which SGL's `print` and `assert` need there.
+    /// D3D12 and Metal grant it on every device, Vulkan with `vertexPipelineStoresAndAtomics`, and WebGPU on none.
+    vertex_pipeline_stores,
+
     /// A shader may compute and store 64-bit integers (SGL's `long` and `ulong`), in registers and in buffers.
     /// D3D12 grants it with `Int64ShaderOps`, Vulkan with `shaderInt64`, and Metal always; WebGPU has none.
     shader_int64,
@@ -233,6 +237,7 @@ inline constexpr feature k_all_features[] = {
     feature::float_specials,
     feature::float_denormals,
     feature::view_instancing,
+    feature::vertex_pipeline_stores,
     feature::shader_int64,
     feature::shader_f64,
     feature::shader_int64_atomics,
@@ -307,6 +312,8 @@ static_assert(isize(sizeof(k_all_features) / sizeof(k_all_features[0])) == isize
         return "float_denormals";
     case feature::view_instancing:
         return "view_instancing";
+    case feature::vertex_pipeline_stores:
+        return "vertex_pipeline_stores";
     case feature::shader_int64:
         return "shader_int64";
     case feature::shader_f64:

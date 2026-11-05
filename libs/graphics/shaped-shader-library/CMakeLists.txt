@@ -76,7 +76,9 @@ target_sources(shaped-shader-library
 # Private: it changes what a library reads at run time, never a type a consumer sees.
 target_compile_definitions(shaped-shader-library PRIVATE SLIB_FROZEN_SHADERS=$<BOOL:${SC_FROZEN_SHADERS}>)
 # SC_SHADER_UNDEFINED is the root CMakeLists' switch, as slib::sgl_undefined_guard's value; a consumer that never set it guards nothing
-if(SC_SHADER_UNDEFINED STREQUAL "REPORT")
+if(SC_SHADER_UNDEFINED STREQUAL "DEFINE")
+    target_compile_definitions(shaped-shader-library PRIVATE SLIB_SHADER_UNDEFINED=3)
+elseif(SC_SHADER_UNDEFINED STREQUAL "REPORT")
     target_compile_definitions(shaped-shader-library PRIVATE SLIB_SHADER_UNDEFINED=2)
 elseif(SC_SHADER_UNDEFINED STREQUAL "ABORT")
     target_compile_definitions(shaped-shader-library PRIVATE SLIB_SHADER_UNDEFINED=1)
