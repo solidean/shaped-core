@@ -40,6 +40,8 @@ struct classified_span;
 struct classify_options;
 struct unannotated_binding;
 struct inferred_result;
+struct reference;
+struct completion;
 
 enum class described_member_kind : u8;
 struct described_sampler;
