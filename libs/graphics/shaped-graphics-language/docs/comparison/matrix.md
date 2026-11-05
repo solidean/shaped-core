@@ -370,7 +370,7 @@ Per row and column:
 - **F8**
   - HLSL + chain: MSC, <https://vulkan.lunarg.com/doc/view/latest/mac/getting_started.html>
   - Slang: SLANG `slangc` reference
-  - SGL: root `CMakeLists.txt`, slib `docs/issues/feat-slib-hlsl-to-metal-route.md`
+  - SGL: root `CMakeLists.txt`, slib `docs/issues/.closed/2026/11/feat-slib-hlsl-to-metal-route.md`
 - **F9**
   - HLSL + chain: DXC, SXC, TINT, NAGA licenses, MSC agreements
   - Slang: SLANG `LICENSES/`
@@ -400,7 +400,7 @@ Per row and column:
 - **G5**
   - HLSL + chain: vendor repositories
   - Slang: SLANG (inferred from G4, A5, A6)
-  - SGL: shaped-rendering `shaders/fsr3/`, slib `docs/issues/feat-slib-hlsl-to-metal-route.md`
+  - SGL: shaped-rendering `shaders/fsr3/`, slib `docs/issues/.closed/2026/11/feat-slib-hlsl-to-metal-route.md`
 - **G6**
   - HLSL + chain: MSC manual performance notes
   - Slang: SLANG issues 11774, 13220, 13245, 14016

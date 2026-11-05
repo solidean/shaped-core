@@ -4,6 +4,8 @@ tags: [metal]
 refs:
   - file: libs/graphics/shaped-shader-compiler-msl
   - file: examples/graphics/rotating-cube
+closed: 2026-11-04
+resolution: wontfix
 ---
 
 # A shader authored in HLSL has no route to metal
@@ -20,4 +22,10 @@ DXC publishes no macOS binary, and SPIRV-Cross is unvendored, so nothing turns H
 Its source is HLSL, so the cube reaches metal through `sgl-cube` instead, from a package rather than an embedded blob.
 `metal-cube` was the stand-in for that and is gone, along with its copy of the geometry, the camera maths, the hand-written vertex layout and the checked-in metallib.
 
-The hand-written metal tier-2 fixtures in shaped-graphics wait on the same route: [debt-sg-metal-hand-written-fixtures](../../../shaped-graphics/docs/issues/debt-sg-metal-hand-written-fixtures.md).
+The hand-written metal tier-2 fixtures in shaped-graphics waited on the same route:
+[debt-sg-metal-hand-written-fixtures](../../../../../../shaped-graphics/docs/issues/debt-sg-metal-hand-written-fixtures.md).
+
+**Closed as wontfix on 2026-11-04: HLSL not reaching metal is expected and accepted.**
+SGL is the one source language promised on every target; HLSL serves dx12 and vulkan only.
+`rotating-cube` stays without a metal arm, and an MSL twin of it would add little beside `sgl-cube`.
+The fixtures debt now targets SGL instead of this route.

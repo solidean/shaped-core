@@ -9,11 +9,8 @@
 // double_compute.metal does for the dispatch path.
 //
 // **HAND-WRITTEN, AND TEMPORARY.**
-// The agreed shape is HLSL run through SPIRV-Cross, with the HLSL, the generated MSL and the metallib all checked in —
-// because the argument-buffer layout this backend encodes was chosen to match what SPIRV-Cross emits, so a fixture
-// written by hand can agree with the backend and still disagree with every real shader.
-// Neither DXC nor SPIRV-Cross is available on an arm64 macOS host today, which is why this exists in the meantime.
-// Regenerate it from HLSL once they are: TEMPORARY(debt-sg-metal-hand-written-fixtures).
+// A fixture written by hand can agree with the backend and still disagree with every real shader.
+// The target is an SGL package, as metal-sgl-test.cc is: TEMPORARY(debt-sg-metal-hand-written-fixtures).
 //
 // The binding shape is written by hand in the test beside it, so the test states what it means rather than inheriting
 // whatever a reflector produced.

@@ -4,8 +4,7 @@
 //   xcrun -sdk macosx metal -O2 -o mesh.metallib mesh.metal
 //   xxd -i mesh.metallib > mesh.metallib.h
 //
-// Hand-written and temporary, for the reason raytrace.metal's own comment gives: the agreed shape is HLSL through
-// SPIRV-Cross with all three artifacts checked in, and neither tool runs on an arm64 macOS host today.
+// Hand-written and temporary, for the reason raytrace.metal's own comment gives: the target is an SGL package.
 // TEMPORARY(debt-sg-metal-hand-written-fixtures)
 //
 // The binding convention it is written against, which the backend encodes:
