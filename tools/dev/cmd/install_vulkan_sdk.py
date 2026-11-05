@@ -5,7 +5,7 @@ lib/toolchain/vulkan_sdk.py is that half.
 
 The download is checked against the pinned SHA-256 before anything runs or unpacks.
 On Windows the SDK is LunarG's installer, run unattended into the pinned folder.
-Should it insist on admin rights, it is started again elevated, and the user confirms one prompt.
+Its core component needs admin rights even there, so it is started again elevated, and the user confirms one prompt.
 On Linux it is LunarG's tarball, unpacked; nothing there needs admin rights.
 """
 
@@ -54,6 +54,14 @@ def list_state() -> None:
         print(f"  {console.dim('not installed')}")
 
 
+def _sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as f:
+        while chunk := f.read(1 << 20):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
 def _download(url: str, dest: Path, expected_sha256: str, ctx: Context) -> None:
     """Streams `url` into `dest`, which is removed again unless its SHA-256 is the pinned one."""
     print(console.dim(f"  download {url}"), flush=True)
@@ -85,15 +93,37 @@ def _run_elevated(command: list[str]) -> int:
     return subprocess.run(["powershell", "-NoProfile", "-NonInteractive", "-Command", script]).returncode
 
 
+def _run_streamed(command: list[str]) -> tuple[int, bool]:
+    """Runs `command` with its output passed through, and says whether it stopped for want of admin rights."""
+    needs_admin = False
+    with subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, errors="replace") as p:
+        assert p.stdout is not None
+        for line in p.stdout:
+            sys.stdout.write(line)
+            needs_admin = needs_admin or _ELEVATION_MESSAGE in line
+    sys.stdout.flush()
+    return p.returncode, needs_admin
+
+
+# What the installer prints when its core component needs admin rights a command-line run cannot ask for.
+# It unpacks everything first, then rolls the whole install back and exits with 1, so this line is the only tell.
+_ELEVATION_MESSAGE = "Cannot elevate access rights while running from command line"
+
+
 def _install_windows(installer: Path, target: Path, ctx: Context) -> None:
     # LunarG's documented unattended install; the folder must not exist yet.
     command = [str(installer), "--root", str(target), "--accept-licenses", "--default-answer", "--confirm-command", "install"]
     print(console.dim(f"  {' '.join(command)}"), flush=True)
     try:
-        code = subprocess.run(command).returncode
+        code, needs_admin = _run_streamed(command)
     except OSError as e:
         if getattr(e, "winerror", None) != _ERROR_ELEVATION_REQUIRED:
             ctx.die(f"starting the installer failed: {e}")
+        code, needs_admin = 1, True
+    if code != 0 and needs_admin:
+        # The rolled-back attempt leaves no folder behind, which the installer needs for its second run.
+        if target.exists():
+            shutil.rmtree(target)
         code = _run_elevated(command)
     if code != 0:
         ctx.die(f"the Vulkan SDK installer exited with {code}")
@@ -139,15 +169,17 @@ def run(args: argparse.Namespace, ctx: Context) -> None:
 
     vk.default_root().mkdir(parents=True, exist_ok=True)
     name = _kit_file(version, kit)
+    # Kept until an install succeeds, so a failed one is retried without downloading it again.
     download = vk.default_root() / f".{name}"
-    _download(f"{_DOWNLOADS}/{version}/{kit}/{name}", download, digests[kit], ctx)
-    try:
-        if kit == "windows":
-            _install_windows(download, target, ctx)
-        else:
-            _install_linux(download, version, ctx)
-    finally:
-        download.unlink(missing_ok=True)
+    if download.is_file() and _sha256(download) == digests[kit]:
+        print(console.dim(f"  reusing the verified {download}"), flush=True)
+    else:
+        _download(f"{_DOWNLOADS}/{version}/{kit}/{name}", download, digests[kit], ctx)
+    if kit == "windows":
+        _install_windows(download, target, ctx)
+    else:
+        _install_linux(download, version, ctx)
+    download.unlink(missing_ok=True)
 
     if not vk.is_complete(sdk):
         ctx.die(f"{sdk} holds no vulkan/vulkan.h and loader library after installing; nothing dev.py can point VULKAN_SDK at")

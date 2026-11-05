@@ -250,7 +250,8 @@ uv run dev.py install vulkan-sdk   # into ~/tools/vulkan-sdk/<version>, checked 
 
 **Every dev.py run then points `VULKAN_SDK` at it**, and adds its validation layer to `VK_ADD_LAYER_PATH`, so no environment variable is yours to set.
 A `VULKAN_SDK` already set wins: an SDK you chose is never replaced by the pinned one.
-On Windows the SDK is LunarG's installer, run unattended; if it asks for admin rights, `dev.py` starts it again elevated and Windows asks you to confirm.
+On Windows the SDK is LunarG's installer, run unattended.
+Its core component needs admin rights even when installing into your home, so `dev.py` starts it again elevated and Windows asks you to confirm once.
 On Linux it is LunarG's tarball, unpacked, which needs no admin rights.
 There are kits for Windows and Linux x86-64 only; macOS builds the metal backend and needs none.
 
