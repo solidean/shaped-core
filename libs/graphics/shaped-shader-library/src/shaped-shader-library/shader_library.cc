@@ -95,6 +95,9 @@ cc::string reflection_mismatch(sg::compiled_shader const& reflected,
     auto out = cc::string();
     for (auto const& r : reflected.bindings)
     {
+        // sg's debug window, which sg binds itself wherever a shader writes print or assert records (EMIT-183)
+        if (r.name == "sg_debug" && !stated.debug_sites.empty())
+            continue;
         sg::binding const* match = nullptr;
         for (auto const& d : declared)
             if (emitted_name_of(d) == r.name)

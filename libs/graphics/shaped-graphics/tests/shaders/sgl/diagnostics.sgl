@@ -1,0 +1,10 @@
+// A package shader that writes debug records, which a context acquires and runs like any other (EMIT-183).
+// The assert holds for every input the test gives, so a passing run logs nothing.
+
+binding checked:
+    values: mut buffer[int]
+
+@compute(4) fun double_checked(@thread_id id: int3){checked}:
+    let v = checked.values[id.x]
+    assert v >= 0, "a negative input $v"
+    checked.values[id.x] = v * 2

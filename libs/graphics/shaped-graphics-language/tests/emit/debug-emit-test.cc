@@ -78,6 +78,49 @@ TEST("sgl emit - each site is described: an id, its pieces, its values' shapes a
     CHECK(compile(k_compute, target::wgsl).debug_sites[0].id == print.id);
 }
 
+TEST("sgl emit - one print reached along two call chains is two sites, even in two compiles of one entry point")
+{
+    // what an option picks is another permutation of `cs`, and sg keeps one description per id across all of them
+    constexpr auto source = "@option const via_a = true\n"
+                            "\n"
+                            "binding work:\n"
+                            "    values: mut buffer[int]\n"
+                            "\n"
+                            "fun shared(x: int) -> int:\n"
+                            "    print \"x = $x\"\n"
+                            "    return x\n"
+                            "\n"
+                            "fun a(x: int) -> int:\n"
+                            "    return shared(x + 1)\n"
+                            "\n"
+                            "fun b(x: int) -> int:\n"
+                            "    return shared(x + 2)\n"
+                            "\n"
+                            "@compute(64) fun cs(@thread_id id: int3){work}:\n"
+                            "    if via_a:\n"
+                            "        work.values[id.x] = a(id.x)\n"
+                            "    else:\n"
+                            "        work.values[id.x] = b(id.x)\n";
+    auto const compile_with = [&](cc::string_view via_a)
+    {
+        sgl::check::option_value const options[] = {{.name = "via_a", .value = cc::string(via_a)}};
+        auto r = sgl::compile_to_text({.source = source,
+                                       .source_name = "debug.sgl",
+                                       .entry_point = "cs",
+                                       .target = target::hlsl_dx12,
+                                       .options = options,
+                                       .diagnostics = true});
+        REQUIRE(r.has_value()).dump("errors", r.has_value() ? cc::string() : r.error());
+        REQUIRE(r.value().debug_sites.size() == 1);
+        return r.value().debug_sites[0];
+    };
+    auto const through_a = compile_with("true");
+    auto const through_b = compile_with("false");
+    CHECK(through_a.origin.at == through_b.origin.at);
+    CHECK(!(through_a.origin == through_b.origin));
+    CHECK(through_a.id != through_b.id);
+}
+
 TEST("sgl emit - a stage that cannot write the buffer drops its prints and declares none")
 {
     constexpr auto vertex = "struct varyings:\n"
