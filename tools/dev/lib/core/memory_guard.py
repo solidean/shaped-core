@@ -6,6 +6,7 @@ On Windows dev.py puts itself into a Job Object, which every process it starts i
 - all of them together at most the total, half of physical RAM by default;
 - an allocation past either fails in the process that asked, so a runaway ends on its own failed allocation.
 On every platform a watchdog thread reads the free physical memory, and below the floor, 5 GB by default, it ends dev.py and everything it started.
+On macOS the floor is 2 GB: the one Mac this repository is developed on has 16 GB, and its parallel GPU test binaries alone take it below 5 GB.
 Elsewhere than Windows only the watchdog runs: a per-process address-space limit would also refuse the sanitizers' shadow reservations.
 
 The environment overrides each, in GB, 0 turning it off: SC_DEV_MEMORY_PROCESS_GB, SC_DEV_MEMORY_TOTAL_GB, SC_DEV_MEMORY_FREE_GB.
@@ -25,7 +26,7 @@ import time
 
 GB = 1 << 30
 DEFAULT_PROCESS_GB = 30.0
-DEFAULT_FREE_GB = 5.0
+DEFAULT_FREE_GB = 2.0 if platform.system() == "Darwin" else 5.0
 WATCH_SECONDS = 0.5
 
 _installed = False
@@ -148,8 +149,29 @@ if platform.system() == "Windows":
 
 else:
 
+    _darwin_total = 0
+
+    def _darwin_memory() -> tuple[int, int]:
+        """macOS has no /proc: the total is `sysctl hw.memsize`, and what is available the pages `vm_stat` counts reclaimable.
+        Free, inactive, speculative and purgeable pages are those the kernel hands out without swapping, as MemAvailable counts on Linux."""
+        global _darwin_total
+        try:
+            if _darwin_total == 0:
+                _darwin_total = int(subprocess.run(["sysctl", "-n", "hw.memsize"], capture_output=True, text=True,
+                                                   timeout=10).stdout.strip())
+            out = subprocess.run(["vm_stat"], capture_output=True, text=True, timeout=10).stdout
+            page = int(out.split("page size of ")[1].split()[0])
+            pages = {line.split(":")[0]: int(line.split(":")[1].strip().rstrip(".")) for line in out.splitlines()[1:]
+                     if ":" in line}
+        except (OSError, subprocess.SubprocessError, ValueError, IndexError):
+            return 0, 0
+        reclaimable = ("Pages free", "Pages inactive", "Pages speculative", "Pages purgeable")
+        return _darwin_total, sum(pages.get(name, 0) for name in reclaimable) * page
+
     def _memory() -> tuple[int, int]:
-        """Physical memory in bytes: (total, available), from /proc/meminfo; (0, 0) where there is none."""
+        """Physical memory in bytes: (total, available), from /proc/meminfo or macOS's own counters; (0, 0) where there is none."""
+        if platform.system() == "Darwin":
+            return _darwin_memory()
         try:
             with open("/proc/meminfo", encoding="ascii") as f:
                 fields = {line.split(":")[0]: int(line.split()[1]) * 1024 for line in f if line.split()[1:2]}

@@ -1572,28 +1572,12 @@ void metal_command_list::raytracing_dispatch_rays(raytracing_shader_table const&
     declare_bound_groups(sg::pipeline_stage_flag::raytracing, &_bound_raytracing->footprint());
     declare_array_accesses(&_bound_raytracing->footprint(), _bound_raytracing, sg::pipeline_stage_flag::raytracing,
                            _compute_arrays);
-    // One TLAS per dispatch: a kernel tracing two would read the first one's offsets for both.
-    auto const* traced = static_cast<metal_tlas const*>(nullptr);
-    auto tlas_count = 0;
+    // A kernel reads the hit-group offsets of whichever bound TLAS it traced.
     for (auto const* const bound_group : _bound_groups)
-    {
-        if (bound_group == nullptr)
-            continue;
-        for (auto const& bound : bound_group->bound_tlases())
-        {
-            auto const* const t = static_cast<metal_tlas const*>(bound.get());
-            if (t != traced)
-                ++tlas_count;
-            if (traced == nullptr)
-                traced = t;
-        }
-    }
-    if (tlas_count > 1)
-        CC_LOG_WARNING("dispatch_rays binds {} TLASes, and a kernel finds its closest hits by the first one's "
-                       "instances",
-                       tlas_count);
-    if (traced != nullptr && traced->hit_group_offsets() != nullptr)
-        declare_buffer(traced->hit_group_offsets(), sg::pipeline_stage_flag::raytracing, sg::access_flag::storage_read);
+        if (bound_group != nullptr)
+            for (auto const& bound : bound_group->bound_tlases())
+                if (auto const& offsets = static_cast<metal_tlas const&>(*bound).hit_group_offsets(); offsets != nullptr)
+                    declare_buffer(offsets, sg::pipeline_stage_flag::raytracing, sg::access_flag::storage_read);
     flush_barriers();
 
     auto* const encoder = compute_encoder();
@@ -1605,15 +1589,26 @@ void metal_command_list::raytracing_dispatch_rays(raytracing_shader_table const&
     argument_table()->setAddress(MTL::GPUAddress(binding.arguments->gpuAddress()),
                                  NS::UInteger(sg::reserved_binding_group));
 
-    // The traced TLAS's per-instance hit-group offsets, which a kernel finds a closest hit's record by.
+    // Each bound group's hit-offsets mirror, which a kernel finds a closest hit's record through, staged per dispatch
+    // since the groups bound may change between two.
     // The slot is always bound, because the kernel declares it whether this dispatch traces or not: an unbound slot
     // would hand it the previous dispatch's address.
-    auto offsets_address = MTL::GPUAddress(_metal_context.zero_hit_group_offsets()->gpuAddress());
-    if (traced != nullptr && traced->hit_group_offsets() != nullptr)
-        if (auto const address = static_cast<metal_buffer const&>(*traced->hit_group_offsets()).gpu_address();
-            address != 0)
-            offsets_address = MTL::GPUAddress(address);
-    argument_table()->setAddress(offsets_address, NS::UInteger(k_hit_group_offsets_buffer_index));
+    u64 mirrors[sg::max_binding_groups] = {};
+    for (auto g = 0; g < sg::max_binding_groups; ++g)
+        if (_bound_groups[g] != nullptr)
+            mirrors[g] = _bound_groups[g]->hit_offsets_address();
+    auto const staging = _metal_context.upload_ring().reserve(isize(sizeof(mirrors)));
+    if (!staging.is_valid())
+    {
+        _metal_context.report_feedback_error(sg::device_error_kind::creation_failed,
+                                             "dispatch_rays could not stage its hit offsets: the metal device refused "
+                                             "a one-off staging buffer");
+        return;
+    }
+    adopt_overflow_staging(staging);
+    cc::memcpy(staging.bytes().data(), mirrors, sizeof(mirrors));
+    argument_table()->setAddress(staging.buffer->gpuAddress() + u64(staging.offset),
+                                 NS::UInteger(k_hit_group_offsets_buffer_index));
 
     // A raygen kernel is dispatched by thread count rather than by threadgroup: sg's width/height/depth is a ray grid,
     // and Metal takes the threadgroup shape separately.

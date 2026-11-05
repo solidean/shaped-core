@@ -150,3 +150,23 @@ TEST("sgl compile target - the native float add is the device's float_atomic_add
     CHECK(native.value().text.contains("atomic_fetch_add_explicit"));
     CHECK(!loop.value().text.contains("atomic_fetch_add_explicit(&"));
 }
+
+// MSL has float atomics in threadgroup memory only from 4.1, past sg's floor of 4.0: an entry point sharing one keeps
+// every `atomic[float]` a uint's bits on metal, its buffers' included, while vulkan's add stays the device's own.
+TEST("sgl compile target - metal keeps the float add a loop where workgroup memory holds a float atomic")
+{
+    constexpr auto source = "binding work:\n"
+                            "    sum: mut buffer[atomic[float]]\n"
+                            "@workgroup binding tile:\n"
+                            "    shared: atomic[float]\n"
+                            "@compute(64) fun main_cs(@thread_id id: int3){work, tile}:\n"
+                            "    tile.shared.add(1.0)\n"
+                            "    work.sum[0].add(tile.shared.load())\n";
+    auto const metal = compiled(source, target::msl, with(sgl::check::feature::float_atomic_add));
+    auto const vulkan = compiled(source, target::hlsl_vulkan, with(sgl::check::feature::float_atomic_add));
+    REQUIRE(metal.has_value());
+    REQUIRE(vulkan.has_value());
+    CHECK(!metal.value().text.contains("atomic_float"));
+    CHECK(metal.value().text.contains("threadgroup atomic_uint"));
+    CHECK(vulkan.value().text.contains("sgl_atomic_add_float"));
+}

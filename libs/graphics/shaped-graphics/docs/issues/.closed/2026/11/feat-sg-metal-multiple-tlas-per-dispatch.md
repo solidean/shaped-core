@@ -4,8 +4,8 @@ parent: epic-sg-raytracing-pipeline-gaps
 tags: [metal]
 refs:
   - file: libs/graphics/shaped-graphics/backends/metal/src/shaped-graphics/backends/metal/metal_command_list.cc
-claimed-by: Claude (for Julius Nehring-Wirxel)
-claimed-at: 2026-11-05T08:47Z
+closed: 2026-11-05
+resolution: fixed
 ---
 
 # metal traces one TLAS per dispatch

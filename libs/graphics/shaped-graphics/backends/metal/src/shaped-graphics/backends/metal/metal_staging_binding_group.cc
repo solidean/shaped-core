@@ -201,11 +201,18 @@ cc::result<sg::binding_group_handle> metal_staging_binding_group::mint()
         if (r != nullptr)
             bound_tlases.push_back(r);
 
+    auto hit_offsets = metal_binding_group::create_hit_offsets(_ctx, _tlas_resources);
+    if (hit_offsets.has_error())
+    {
+        arguments->release();
+        return cc::error(cc::move(hit_offsets.error()));
+    }
+
     _ctx.residency().add(arguments);
 
     auto typed = std::static_pointer_cast<metal_binding_group_layout const>(layout());
     return sg::binding_group_handle(std::make_shared<metal_binding_group const>(
         _ctx, cc::move(typed), arguments, cc::move(bound), cc::move(bound_textures), cc::move(bound_tlases),
-        cc::move(array_bindings)));
+        cc::move(array_bindings), hit_offsets.value()));
 }
 } // namespace sg::backend::metal

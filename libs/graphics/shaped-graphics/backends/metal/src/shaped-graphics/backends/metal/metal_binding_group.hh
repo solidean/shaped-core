@@ -73,11 +73,24 @@ public:
                         cc::vector<bound_buffer> bound_buffers,
                         cc::vector<bound_texture> bound_textures = {},
                         cc::vector<sg::tlas_handle> bound_tlases = {},
-                        cc::vector<array_binding> array_bindings = {});
+                        cc::vector<array_binding> array_bindings = {},
+                        MTL::Buffer* hit_offsets = nullptr);
     ~metal_binding_group() override;
+
+    /// The mirror of an argument buffer, one entry per slot, that a ray-tracing kernel finds a closest hit's record by.
+    /// Slot `n` holds the per-instance hit-group offsets of `tlas_at_slot[n]`, and zero where that is null.
+    /// Null where no slot holds a TLAS, since nothing could trace through this group then.
+    [[nodiscard]] static cc::result<MTL::Buffer*> create_hit_offsets(metal_context& ctx,
+                                                                     cc::span<sg::tlas_handle const> tlas_at_slot);
 
     /// The address an argument table binds this group at.
     [[nodiscard]] u64 argument_address() const { return _arguments != nullptr ? u64(_arguments->gpuAddress()) : 0; }
+
+    /// The address of this group's hit-offsets mirror, which `dispatch_rays` hands the kernel; 0 where it has none.
+    [[nodiscard]] u64 hit_offsets_address() const
+    {
+        return _hit_offsets != nullptr ? u64(_hit_offsets->gpuAddress()) : 0;
+    }
 
     [[nodiscard]] metal_binding_group_layout const& layout() const { return *_layout; }
 
@@ -98,6 +111,7 @@ private:
     metal_context& _ctx;
     metal_binding_group_layout_handle _layout;
     MTL::Buffer* _arguments = nullptr;
+    MTL::Buffer* _hit_offsets = nullptr;
     cc::vector<bound_buffer> _bound_buffers;
     cc::vector<bound_texture> _bound_textures;
     cc::vector<sg::tlas_handle> _bound_tlases;

@@ -2,6 +2,7 @@
 
 A build, a test's dumps and the page file all grow on disk, and a full system drive takes the machine with it; refusing early is the better outcome.
 It checks the system drive (Windows' %SystemDrive%, / elsewhere) and the drive holding the repository, and refuses below the floor, 50 GB by default.
+On macOS the default is 15 GB: the one Mac this repository is developed on has a 256 GB drive, which its build trees alone fill to within 50 GB.
 A refusal usually needs a person to free space, so it says so; an agent stops and escalates rather than working around it.
 
 SC_DEV_DISK_FREE_GB overrides the floor in GB, 0 turning it off; on CI (CI set) the default is off, since runners' disks are small and disposable.
@@ -16,7 +17,7 @@ import sys
 from pathlib import Path
 
 GB = 1 << 30
-DEFAULT_FREE_GB = 50.0
+DEFAULT_FREE_GB = 15.0 if platform.system() == "Darwin" else 50.0
 
 
 def _floor_gb() -> float:
