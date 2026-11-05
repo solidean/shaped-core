@@ -263,6 +263,20 @@ The prelude writes it as a text body under `const if has(…)`, so the compile t
 On dx12 with the feature, the trace is a hit object: traced, regrouped by it, then its shaders run, so invocations meeting one material shade together.
 Everywhere else it is the plain trace, which computes the same.
 
+**A hit object is a trace whose closest hit or miss has not run yet** (CHK-434), so a raygen can read what was hit before its shaders run:
+
+```sgl sketch
+const if has(.shader_execution_reordering):
+    let h = trace_hit(b.world, r, rs.primary, mut p)
+    h.reorder(h.instance_id as uint, 4)
+    if h.is_hit => hits += 1
+    h.invoke(mut p)
+else:
+    trace(b.world, r, rs.primary, mut p)
+```
+
+Nothing but a device with the feature can trace without running those shaders, so a hit object has no fallback, and the `else` is the program's to write.
+
 ### Hit groups
 
 **`hit_group name for set:` is one row of the table: a record per ray type** (CHK-330).

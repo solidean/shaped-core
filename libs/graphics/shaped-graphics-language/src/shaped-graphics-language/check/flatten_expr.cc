@@ -474,9 +474,13 @@ auto sgl::check::impl::flattener::flatten_ray_trace(ast::expr_id id, ast::call c
 {
     auto const arguments = ast().at(call.arguments);
     auto const where = origin{.file = file(), .expr = id};
+    if (t.kind == ray_trace_kind::invoke)
+        return flatten_hit_invoke(id, call);
     auto const world = flatten_expr(arguments[0].value);
     auto const world_type = tables().type_at(arguments[0].value);
-    auto const* const overloads = c.prelude_names.get_ptr("trace_ray");
+    // CHK-434: a trace_hit gives the hit object, and runs no shader but the traversal's
+    auto const is_hit_object = t.kind == ray_trace_kind::hit_object;
+    auto const* const overloads = c.prelude_names.get_ptr(cc::string_view(is_hit_object ? "trace_hit_ray" : "trace_ray"));
     auto callee = symbol_id::none;
     for (auto const candidate :
          overloads == nullptr ? cc::span<symbol_id const>() : cc::span<symbol_id const>(*overloads))
@@ -586,7 +590,47 @@ auto sgl::check::impl::flattener::flatten_ray_trace(ast::expr_id id, ast::call c
     auto const traced = builtin_call(id, callee, values);
     if (is_local)
         return traced;
+    if (is_hit_object)
+    {
+        auto const hit = add_local(local_kind::let, "hit", entry.at(traced).type);
+        add_stmt(where, flat_let{.local = hit, .value = traced});
+        add_stmt(where, flat_assign{.place = again(place, id), .value = again(payload, id)});
+        return local_ref(hit, id);
+    }
     add_stmt(where, flat_eval{.value = traced});
+    add_stmt(where, flat_assign{.place = again(place, id), .value = again(payload, id)});
+    return add_expr(checked_module::void_type, id, flat_construct{});
+}
+
+auto sgl::check::impl::flattener::flatten_hit_invoke(ast::expr_id id, ast::call const& call) -> flat_expr_id
+{
+    auto const where = origin{.file = file(), .expr = id};
+    auto const& member = ast().at(call.callee).node.as<ast::member>();
+    auto const arguments = ast().at(call.arguments);
+    auto const* const overloads = c.prelude_names.get_ptr("hit_object_invoke");
+    auto const hit = flatten_expr(member.object);
+    if (overloads == nullptr || overloads->empty() || !is_valid(hit))
+        return fail();
+
+    // the payload a trace hands over, copied through a local where it is no local itself
+    auto place = flatten_expr(arguments[0].value);
+    if (!is_valid(place))
+        return fail();
+    auto const is_local = entry.at(place).node.is<flat_local_ref>();
+    auto payload = place;
+    if (!is_local)
+    {
+        place = with_bound_index(place, id);
+        auto const local = add_local(local_kind::var, "payload", entry.at(place).type);
+        add_stmt(where, flat_var{.local = local});
+        add_stmt(where, flat_assign{.place = add_expr(entry.at(place).type, id, flat_local_ref{.local = local}),
+                                    .value = again(place, id)});
+        payload = local_ref(local, id);
+    }
+    auto const invoked = builtin_call(id, overloads->front(), cc::vector<flat_expr_id>{hit, payload});
+    if (is_local)
+        return invoked;
+    add_stmt(where, flat_eval{.value = invoked});
     add_stmt(where, flat_assign{.place = again(place, id), .value = again(payload, id)});
     return add_expr(checked_module::void_type, id, flat_construct{});
 }

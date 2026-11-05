@@ -554,6 +554,9 @@ trace(b.world, r, path_rays.surface, mut p, flags = f)   // a trace of a ray typ
 maybe_reorder(hint, 4)                                   // raygen: regroup invocations by hint's low bits; dx12 SM 6.9 SER, else nothing
 trace(b.world, r, set.ray, mut p, reorder = true)       // raygen: dx12 SER traces a hit object, regroups by it, invokes; else plain
 trace(…, reorder = material, reorder_bits = 4)          // by the hit and a uint hint's low bits, 1..16 (CHK-433)
+let h = trace_hit(b.world, r, set.ray, mut p)           // raygen, under has(.shader_execution_reordering): no closest hit or miss yet
+h.is_hit; h.t; h.instance_id; h.primitive_index         // what was hit, before its shaders run (CHK-434)
+h.reorder(); h.reorder(hint, 4); h.invoke(mut p)        // regroup by it, then run its shaders on that ray type's payload
 hit_group textured for path_rays:                        // one row: a record per ray type (CHK-330)
     surface = (closest_hit = shade, any_hit = cutout)
     occlusion = ()                                       // empty: accept, run no closest hit

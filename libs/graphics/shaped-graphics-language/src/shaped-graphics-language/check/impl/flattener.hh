@@ -451,6 +451,8 @@ struct flattener
     /// contribution and its miss, and the set's size as its multiplier.
     /// The payload is handed over as a local the call writes through, copied in and out where it is another place.
     flat_expr_id flatten_ray_trace(ast::expr_id id, ast::call const& call, ray_trace const& t);
+    /// `h.invoke(mut p)`: the hit object's shaders, run on the payload (CHK-434).
+    flat_expr_id flatten_hit_invoke(ast::expr_id id, ast::call const& call);
 
     /// CHK-345: a report beyond the ray's range is none, and one in it is what the any hit decides of it.
     flat_expr_id decide_report(origin from, flat_expr_id reported);
