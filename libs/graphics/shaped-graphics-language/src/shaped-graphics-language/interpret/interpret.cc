@@ -1703,8 +1703,9 @@ cc::result<run_inputs> sgl::check::resolve_inputs(checked_module const& m,
             auto const& resource = type.kind == type_kind::array ? m.at(type.element) : type;
             if (resource.kind == type_kind::texture || resource.kind == type_kind::image)
             {
+                // an unbounded binding array holds what its group binds (CHK-490)
                 auto const count = type.kind == type_kind::array ? type.count : 1;
-                if (d != nullptr && d->textures.size() > count)
+                if (d != nullptr && count > 0 && d->textures.size() > count)
                     return cc::error(cc::format("{}.{} is bound {} textures, and holds {}", name, member.name,
                                                 d->textures.size(), count));
                 for (auto k = isize(0); d != nullptr && k < d->textures.size(); ++k)
