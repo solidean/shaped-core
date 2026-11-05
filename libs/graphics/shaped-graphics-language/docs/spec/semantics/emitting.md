@@ -36,6 +36,7 @@ Back to the [semantics](_index.md); the reasons are in [why/emitting.md](why/emi
 * **EMIT-109** An entry point that needs a feature no device of the target has is `target-lacks-feature`, and its detail names the feature.
   Today that is `wgsl` against `binding_arrays`, `multisampled_array_textures`, `raytracing_pipeline`, `geometry_shader` and `tessellation_shader`.
   It is also `wgsl` against `shader_int16`, `device_coherence`, `image_atomics`, `first_instance` and `helper_lane_query`, which core WebGPU has none of.
+  And it is `wgsl` against `shader_int64`, `shader_f64` and `shader_int64_atomics`, which no WebGPU has.
   `ray_query` is none of them: WGSL writes a trace's emulated form (EMIT-135).
   The shader chose it by `require`, so a portable shader still meets EMIT-13's promise.
 * **EMIT-66** A tree that is not core is the error `not-core`, and its detail names the first node that offends.
@@ -119,6 +120,13 @@ struct target_ {
 * **EMIT-140** HLSL writes a 16-bit float as `float16_t` and never as `half`, which without `-enable-16bit-types` silently means a 32-bit float (EMIT-4).
   A literal of a 16-bit type is a construction of its type around it on every target, `float16_t(0.5)`, `f16(0.5)` and `half(0.5)`.
   MSL's bare `0.5` is a 32-bit float, and would widen the expression it stands in.
+* **EMIT-190** HLSL writes a 64-bit integer as `int64_t` and `uint64_t` and a double as `double`, MSL as `long` and `ulong`.
+  A 64-bit literal carries its width's suffix, `5LL` and `5ULL` in HLSL and `5L` and `5UL` in MSL, so no target reads it as 32 bits; the most negative long is `(-9223372036854775807LL - 1LL)`.
+  A double literal is suffixed `L` in HLSL, whose bare `0.1` is a float rounded to 24 bits.
+  A shift of a 64-bit value masks a count that is no literal to its low six bits, which HLSL and MSL leave undefined past 63.
+* **EMIT-191** A constant block's array of one value per row (EMIT-172) is one of two-vectors for a 64-bit scalar, `int64_t2` in HLSL, since a 16-byte row holds two.
+* **EMIT-192** `msl` refuses an entry point that needs `shader_f64` or `shader_int64_atomics` as `target-lacks-feature`, as EMIT-109 says.
+  MSL has no double, and its 64-bit atomics are a ulong's min and max alone.
 * **EMIT-141** WGSL enables what its text uses ahead of every declaration: `enable f16;` where it names a 16-bit float, and `enable subgroups;` where it holds a subgroup operation or stage input.
 
 ## Enums
@@ -417,7 +425,8 @@ fn main_ps(p: pixel_input) -> target_ {
   The buffer stands in sg's reserved group: `register(u0, space11)` in `hlsl-dx12` and `[[vk::binding(19, 3)]]` in `hlsl-vulkan`.
   It is `@group(3) @binding(19)` in WGSL, and the entry point's parameter `[[buffer(30)]]` in MSL, the argument table's last slot, clear of the vertex buffers from `[[buffer(5)]]` up.
   A text declares it only where it writes a record.
-  WebGPU's vertex stage has no writable storage, vulkan's vertex, geometry and tessellation stages write none without a feature sg does not ask for, and MSL's ray-tracing stages take no buffer.
+  WebGPU's vertex stage has no writable storage, and MSL's ray-tracing stages take no buffer.
+  vulkan's vertex, geometry and tessellation stages write one only on a device with `vertex_pipeline_stores`, which no program names.
   There a print is dropped and the text declares none.
   A site's id hashes the entry point's name, the message and the line it stands on, so one site has one id on every target.
 
@@ -478,6 +487,8 @@ So `{float3; float}` is written with `packed_float3`: the `float` is at byte 12 
 * **EMIT-186** HLSL writes `!=` of float or half lanes as `!(a == b)`, and a whole vector's as `any(!(a == b))`, which is true where either is a NaN.
   DXC lowers HLSL's own float `!=` to SPIR-V as `OpFOrdNotEqual`, false for a NaN, where DXIL's is unordered; the negated `==` is unordered on both.
   WGSL and MSL write `!=`, which is unordered in both.
+* **EMIT-195** HLSL reads a buffer's length (CHK-460) through `GetDimensions`, in a helper per buffer, and WGSL through `arrayLength`, four bytes per word of a `bytes`.
+  A Metal buffer argument is a pointer that carries no length, and sg passes none in yet, so an MSL compile that reads one is `target-lacks-feature`.
 * **EMIT-136** HLSL writes a ray-tracing stage as a library export named by its kind, `[shader("closesthit")]` over `void`, whose payload is an `inout` parameter.
   A triangle closest hit or any hit takes `BuiltInTriangleIntersectionAttributes` too.
   An any hit's decision ends the stage: `ignore` is `IgnoreHit()`, `accept_and_end_search` `AcceptHitAndEndSearch()`, and `accept` a plain `return`.

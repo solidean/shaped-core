@@ -227,6 +227,14 @@ struct sgl::check::flat_int_literal
     constexpr bool operator==(flat_int_literal const&) const = default;
 };
 
+/// Of `long` or `ulong`, its 64 bits two's complement either way (CHK-450).
+struct sgl::check::flat_wide_literal
+{
+    u64 bits = 0;
+
+    constexpr bool operator==(flat_wide_literal const&) const = default;
+};
+
 /// Of the prelude's type `bool`.
 struct sgl::check::flat_bool_literal
 {
@@ -298,6 +306,15 @@ struct sgl::check::flat_buffer_element
     flat_expr_id index = flat_expr_id::none;
 
     constexpr bool operator==(flat_buffer_element const&) const = default;
+};
+
+/// `values.length` of a buffer or of `bytes`: how many elements, or bytes, the bound memory holds (CHK-460).
+/// `buffer` is always a `flat_binding_member`, a leaf no pass rewrites.
+struct sgl::check::flat_buffer_length
+{
+    flat_expr_id buffer = flat_expr_id::none;
+
+    constexpr bool operator==(flat_buffer_length const&) const = default;
 };
 
 /// `object[index]` on an array value: its element, read or, as a place, assigned.
@@ -394,6 +411,7 @@ struct sgl::check::flat_expr
     cc::variant<flat_invalid,
                 flat_literal,
                 flat_int_literal,
+                flat_wide_literal,
                 flat_bool_literal,
                 flat_enum_value,
                 flat_local_ref,
@@ -401,6 +419,7 @@ struct sgl::check::flat_expr
                 flat_file_sampler,
                 flat_member,
                 flat_buffer_element,
+                flat_buffer_length,
                 flat_element,
                 flat_construct,
                 flat_call,

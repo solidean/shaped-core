@@ -268,8 +268,8 @@ auto sgl::check::impl::flattener::is_substitutable(flat_expr_id id) const -> boo
     if (!is_valid(id))
         return false;
     auto const& x = entry.at(id);
-    if (x.node.is<flat_literal>() || x.node.is<flat_int_literal>() || x.node.is<flat_bool_literal>()
-        || x.node.is<flat_enum_value>())
+    if (x.node.is<flat_literal>() || x.node.is<flat_int_literal>() || x.node.is<flat_wide_literal>()
+        || x.node.is<flat_bool_literal>() || x.node.is<flat_enum_value>())
         return true;
     auto const* const ref = x.node.try_as<flat_local_ref>();
     return ref != nullptr && !entry.at(ref->local).is_mut;
@@ -296,8 +296,8 @@ auto sgl::check::impl::flattener::is_literal_construction(flat_expr_id id) const
     for (auto const a : entry.at(made->arguments))
     {
         auto const& x = entry.at(a).node;
-        auto const is_literal
-            = x.is<flat_literal>() || x.is<flat_int_literal>() || x.is<flat_bool_literal>() || x.is<flat_enum_value>();
+        auto const is_literal = x.is<flat_literal>() || x.is<flat_int_literal>() || x.is<flat_wide_literal>()
+                             || x.is<flat_bool_literal>() || x.is<flat_enum_value>();
         if (!is_literal && !is_literal_construction(a))
             return false;
     }
@@ -312,6 +312,8 @@ auto sgl::check::impl::flattener::again(flat_expr_id id, ast::expr_id from) -> f
     if (auto const* const l = x.node.try_as<flat_literal>())
         return add_expr(x.type, from, *l);
     if (auto const* const l = x.node.try_as<flat_int_literal>())
+        return add_expr(x.type, from, *l);
+    if (auto const* const l = x.node.try_as<flat_wide_literal>())
         return add_expr(x.type, from, *l);
     if (auto const* const l = x.node.try_as<flat_bool_literal>())
         return add_expr(x.type, from, *l);
@@ -335,6 +337,8 @@ auto sgl::check::impl::flattener::again(flat_expr_id id, ast::expr_id from) -> f
         auto const object = again(member->object, from);
         return add_expr(x.type, from, flat_member{.object = object, .member = index, .letters = letters});
     }
+    if (auto const* const length = x.node.try_as<flat_buffer_length>())
+        return add_expr(x.type, from, flat_buffer_length{.buffer = again(length->buffer, from)});
     if (auto const* const element = x.node.try_as<flat_buffer_element>())
     {
         auto const buffer = again(element->buffer, from);

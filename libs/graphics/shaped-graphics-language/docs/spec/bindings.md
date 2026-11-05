@@ -486,7 +486,8 @@ On metal not where the entry point's workgroup memory holds an `atomic[float]`: 
 Everywhere else it is the bits of a `uint` atomic, and its `add` reads them, adds in float, and retries a compare-exchange until no other update came between.
 Either way it is exact once per update and in no promised order.
 A helper invocation's atomics have no effect, so a pixel stage would never leave that loop, and its `add` takes no pixel stage.
-64 bits and a vertex stage are [the incubator's](incubator/atomics.md).
+**An `atomic[ulong]` and an `atomic[long]` have every operation an `atomic[uint]` has**, behind `shader_int64_atomics`, and stand in a `mut buffer` alone (CHK-296).
+dx12 and vulkan have them, metal and WebGPU do not; workgroup memory's and a vertex stage are [the incubator's](incubator/atomics.md).
 
 **`add_reduced(mut slot, key, v)` adds where many invocations add to one slot**, as every pixel a splat covers adds to the splat's gradient.
 Where every active invocation of the subgroup names the same `key`, it adds the subgroup's sum once, from the first of them, and otherwise each adds its own.
@@ -699,8 +700,8 @@ A shader using one then gets a diagnostic that names the feature, rather than a 
 
 ## Open
 
-* `values.length` — WGSL, HLSL and SPIR-V can all answer it without packing data, and MSL cannot: a Metal buffer argument is a pointer and carries no length.
-  Until metal is a target with a compiler behind it, a shader passes the count in.
+* `values.length` on metal: HLSL and WGSL read it (CHK-460, EMIT-195), and a Metal buffer argument is a pointer that carries no length.
+  sg would pass the lengths in, as a buffer of sizes beside the argument table; until it does, a metal compile that reads one is refused.
 * A buffer as a field of a struct, which is `unsupported-yet` like every buffer outside a binding member.
   It could be allowed where the buffer is hoisted and stays uniform across every use, a scalarization of the struct that inlining makes possible.
 * The functions over textures and images — sampling, loads, stores and sizes — and a default sampler on a texture member ([texture-methods.md](incubator/texture-methods.md)).

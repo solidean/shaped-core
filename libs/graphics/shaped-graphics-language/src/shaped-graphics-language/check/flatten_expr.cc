@@ -91,6 +91,8 @@ auto sgl::check::impl::flattener::flatten_expr(ast::expr_id id) -> flat_expr_id
                             flat_binding_member{.binding = where.symbol,
                                                 .member = where.index,
                                                 .is_workgroup = c.is_workgroup_binding(where.symbol)});
+        if (where.kind == target_kind::buffer_length)
+            return add_expr(type, id, flat_buffer_length{.buffer = flatten_expr(m->object)});
         // CHK-288: a constant, and an object with an effect still runs for it
         if (where.kind == target_kind::array_length)
         {
@@ -245,6 +247,11 @@ auto sgl::check::impl::flattener::value_of(type_id type, ast::expr_id from, cc::
                 return add_expr(type, from, flat_int_literal{.value = leaf.widened().as_int(), .is_unsigned = true});
             case value_kind::boolean:
                 return add_expr(type, from, flat_bool_literal{.value = leaf.as_bool()});
+            case value_kind::scalar_long:
+            case value_kind::scalar_ulong:
+                return add_expr(type, from, flat_wide_literal{.bits = leaf.wide_bits()});
+            case value_kind::scalar_double:
+                return add_expr(type, from, flat_literal{.value = leaf.as_double()});
             default:
                 return fail();
             }
@@ -309,7 +316,8 @@ auto sgl::check::impl::flattener::flatten_number(ast::expr_id id, type_id type) 
     if (auto const suffixed = split_suffix(text); suffixed.has_value())
         text = suffixed.value().body;
     auto const is_half = type == c.prelude_type(builtins::k_half);
-    auto const is_float = is_half || type == c.prelude_type(builtins::k_float);
+    auto const is_float
+        = is_half || type == c.prelude_type(builtins::k_float) || type == c.prelude_type(builtins::k_double);
     // CHK-253: a half literal is the half nearest its value, which every target's text then spells exactly
     auto const literal = [&](f64 v)
     { return add_expr(type, id, flat_literal{.value = is_half ? f64(scalar::of_half(v).widened().as_float()) : v}); };
@@ -320,6 +328,9 @@ auto sgl::check::impl::flattener::flatten_number(ast::expr_id id, type_id type) 
             return fail();
         if (is_float)
             return literal(f64(value.value()));
+        // CHK-450: a 64-bit literal keeps all of its bits, two's complement for either type
+        if (type == c.prelude_type(builtins::k_long) || type == c.prelude_type(builtins::k_ulong))
+            return add_expr(type, id, flat_wide_literal{.bits = u64(value.value())});
         // an unsigned literal keeps its bits in `value`
         auto const is_unsigned = type == c.prelude_type(builtins::k_uint) || type == c.prelude_type(builtins::k_ushort);
         auto const v = value.value();
@@ -335,7 +346,10 @@ auto sgl::check::impl::flattener::flatten_number(ast::expr_id id, type_id type) 
 auto sgl::check::impl::flattener::flatten_folded(ast::expr_id id, type_id type, number_literal const& n) -> flat_expr_id
 {
     auto const is_half = type == c.prelude_type(builtins::k_half);
-    auto const is_float = is_half || type == c.prelude_type(builtins::k_float);
+    auto const is_float
+        = is_half || type == c.prelude_type(builtins::k_float) || type == c.prelude_type(builtins::k_double);
+    if (n.is_integer && (type == c.prelude_type(builtins::k_long) || type == c.prelude_type(builtins::k_ulong)))
+        return add_expr(type, id, flat_wide_literal{.bits = u64(n.integer)});
     if (n.is_integer && !is_float)
     {
         auto const is_unsigned = type == c.prelude_type(builtins::k_uint) || type == c.prelude_type(builtins::k_ushort);

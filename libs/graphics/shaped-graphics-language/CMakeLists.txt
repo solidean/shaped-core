@@ -34,6 +34,7 @@ add_library(shaped-graphics-language
 
     src/shaped-graphics-language/builtins/register.cc
     src/shaped-graphics-language/builtins/impl/soft_math.cc
+    src/shaped-graphics-language/builtins/register_64_bit_math.cc
     src/shaped-graphics-language/builtins/register_bit_math.cc
     src/shaped-graphics-language/builtins/register_bytes.cc
     src/shaped-graphics-language/builtins/register_math.cc
@@ -118,6 +119,8 @@ add_library(shaped-graphics-language
     src/shaped-graphics-language/driver/classify.cc
     src/shaped-graphics-language/driver/inferred_results.cc
     src/shaped-graphics-language/driver/unannotated_bindings.cc
+    src/shaped-graphics-language/driver/references.cc
+    src/shaped-graphics-language/driver/completions.cc
 )
 
 # The prelude is three files, and two of them are embedded.
@@ -351,6 +354,7 @@ if(SC_BUILD_TOOLS)
         tools/sgl/lsp/diagnostics.cc
         tools/sgl/lsp/semantic_tokens.cc
         tools/sgl/lsp/inlay_hints.cc
+        tools/sgl/lsp/navigation.cc
         tools/sgl/lsp/run_tests.cc
         tools/sgl/lsp/server.hh
         tools/sgl/lsp/server.cc
@@ -459,10 +463,12 @@ if(SC_BUILD_TESTS)
         tests/emit/swizzle-emit-test.cc
         tests/emit/vector-emit-test.cc
         tests/emit/sixteen-bit-emit-test.cc
+        tests/emit/sixty-four-bit-emit-test.cc
         tests/emit/line-mapping-emit-test.cc
         tests/emit/debug-emit-test.cc
 
         tests/driver/classify-test.cc
+        tests/driver/references-test.cc
         tests/driver/compile-to-text-test.cc
         tests/driver/compile-profile-test.cc
         tests/driver/options-test.cc

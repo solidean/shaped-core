@@ -536,8 +536,14 @@ struct machine
         auto const kind = builtin != nullptr ? builtin->leaf_kind : value_kind::none;
         if (auto const* const l = x.node.try_as<flat_literal>())
         {
-            result.leaves.push_back(kind == value_kind::scalar_half ? scalar::of_half(l->value)
-                                                                    : scalar::of(f32(l->value)));
+            result.leaves.push_back(kind == value_kind::scalar_half     ? scalar::of_half(l->value)
+                                    : kind == value_kind::scalar_double ? scalar::of_double(l->value)
+                                                                        : scalar::of(f32(l->value)));
+            return {};
+        }
+        if (auto const* const l = x.node.try_as<flat_wide_literal>())
+        {
+            result.leaves.push_back(scalar::of_wide(kind, l->bits));
             return {};
         }
         if (auto const* const l = x.node.try_as<flat_int_literal>())
@@ -590,6 +596,24 @@ struct machine
                 return {};
             }
             return type_error("a binding member the inputs do not hold");
+        }
+        // CHK-460: what the inputs bound, in elements, or in bytes of a `bytes`
+        if (auto const* const length = x.node.try_as<flat_buffer_length>())
+        {
+            auto const* const named
+                = is_known(e, length->buffer) ? e.at(length->buffer).node.try_as<flat_binding_member>() : nullptr;
+            if (named == nullptr)
+                return type_error("the length of a buffer that no binding member names");
+            auto const& type = m.at(e.at(length->buffer).type);
+            for (auto const& b : out.buffers)
+                if (b.binding == named->binding && b.member == named->member)
+                {
+                    auto const count = type.kind == type_kind::bytes ? 1 : leaf_count_of(m, type.element);
+                    auto const n = type.kind == type_kind::bytes ? b.leaves.size() * 4 : b.leaves.size() / count;
+                    result.leaves.push_back(scalar::of_uint(u32(n)));
+                    return {};
+                }
+            return type_error("a buffer the inputs do not hold");
         }
         if (auto const* const element = x.node.try_as<flat_buffer_element>())
         {
@@ -1301,6 +1325,16 @@ sgl::f32 sgl::check::scalar::as_float() const
     return cc::bit_cast<f32>(bits);
 }
 
+scalar sgl::check::scalar::of_double(f64 v)
+{
+    return of_wide(value_kind::scalar_double, cc::bit_cast<u64>(v));
+}
+
+sgl::f64 sgl::check::scalar::as_double() const
+{
+    return cc::bit_cast<f64>(wide_bits());
+}
+
 scalar sgl::check::scalar::widened() const
 {
     switch (kind)
@@ -1417,17 +1451,39 @@ outcome sgl::check::interpret(checked_module const& m,
 
 namespace
 {
+/// The bytes `member_data` gives a leaf of `kind`: a word, and two for a 64-bit leaf, its low word first.
+isize leaf_bytes(value_kind kind)
+{
+    return is_64_bit(kind) ? 8 : 4;
+}
+
+/// The bytes `member_data` gives `leaves`.
+isize bytes_of(cc::span<scalar const> leaves)
+{
+    auto size = isize(0);
+    for (auto const& leaf : leaves)
+        size += leaf_bytes(leaf.kind);
+    return size;
+}
+
 /// Fills the scalars of `leaves`, whose kinds they keep, from `bytes` as `member_data` lays them out.
 void read_leaves(cc::span<byte const> bytes, cc::span<scalar> leaves)
 {
-    for (auto i = isize(0); i < leaves.size(); ++i)
+    auto at = isize(0);
+    auto const word_at = [&]
     {
         auto word = u32(0);
         for (auto b = 0; b < 4; ++b)
-            word |= u32(bytes[i * 4 + b]) << (8 * b);
-        leaves[i].bits = leaves[i].kind == value_kind::boolean ? u32(word != 0)
-                       : is_16_bit(leaves[i].kind)             ? word & 0xffffu
-                                                               : word;
+            word |= u32(bytes[at + b]) << (8 * b);
+        at += 4;
+        return word;
+    };
+    for (auto& leaf : leaves)
+    {
+        auto const word = word_at();
+        leaf.bits = leaf.kind == value_kind::boolean ? u32(word != 0) : is_16_bit(leaf.kind) ? word & 0xffffu : word;
+        if (is_64_bit(leaf.kind))
+            leaf.high = word_at();
     }
 }
 
@@ -1491,7 +1547,7 @@ cc::result<run_inputs> sgl::check::resolve_inputs(checked_module const& m,
             if (type.kind == type_kind::buffer)
             {
                 auto const element = zero_value(m, type.element);
-                auto const stride = element.leaves.size() * 4;
+                auto const stride = bytes_of(element.leaves);
                 if (stride == 0 || bytes.size() % stride != 0)
                     return cc::error(cc::format("{}.{} is {} bytes, which is no whole number of {}-byte elements", name,
                                                 member.name, bytes.size(), stride));
@@ -1504,9 +1560,9 @@ cc::result<run_inputs> sgl::check::resolve_inputs(checked_module const& m,
             }
 
             auto v = zero_value(m, member.type);
-            if (d != nullptr && bytes.size() != v.leaves.size() * 4)
+            if (d != nullptr && bytes.size() != bytes_of(v.leaves))
                 return cc::error(cc::format("{}.{} is {} bytes, and its value is {}", name, member.name, bytes.size(),
-                                            v.leaves.size() * 4));
+                                            bytes_of(v.leaves)));
             if (d != nullptr)
                 read_leaves(bytes, v.leaves);
             whole.leaves.push_back_range(v.leaves);
@@ -1526,10 +1582,11 @@ void sgl::check::write_back(checked_module const& m, outcome const& o, driver_bi
         auto const* const d = find_member(bound, m.at(b.binding).name, members[b.member].name);
         if (d == nullptr || d->mutable_bytes.empty())
             continue;
-        CC_ASSERT(d->mutable_bytes.size() == b.leaves.size() * 4, "a run never changes the size of a buffer");
-        for (auto i = isize(0); i < b.leaves.size(); ++i)
-            for (auto k = 0; k < 4; ++k)
-                d->mutable_bytes[i * 4 + k] = byte(u8(b.leaves[i].bits >> (8 * k)));
+        CC_ASSERT(d->mutable_bytes.size() == bytes_of(b.leaves), "a run never changes the size of a buffer");
+        auto at = isize(0);
+        for (auto const& leaf : b.leaves)
+            for (auto k = 0; k < leaf_bytes(leaf.kind); ++k)
+                d->mutable_bytes[at++] = byte(u8(leaf.wide_bits() >> (8 * k)));
     }
 }
 
@@ -1547,8 +1604,8 @@ bool sgl::check::is_constant(checked_module const& m, flat_entry_point const& e,
                 return false;
         return true;
     };
-    if (x.node.is<flat_literal>() || x.node.is<flat_int_literal>() || x.node.is<flat_bool_literal>()
-        || x.node.is<flat_enum_value>())
+    if (x.node.is<flat_literal>() || x.node.is<flat_int_literal>() || x.node.is<flat_wide_literal>()
+        || x.node.is<flat_bool_literal>() || x.node.is<flat_enum_value>())
         return true;
     if (auto const* const construct = x.node.try_as<flat_construct>())
         return all_constant(construct->arguments);
@@ -1598,6 +1655,12 @@ cc::string sgl::check::dump(outcome const& o)
                 out.appendf(" {}{}", wide.as_int(), leaf.kind == value_kind::scalar_short ? "i16" : "");
             else if (wide.kind == value_kind::scalar_uint)
                 out.appendf(" {}u{}", wide.as_uint(), leaf.kind == value_kind::scalar_ushort ? "16" : "");
+            else if (leaf.kind == value_kind::scalar_long)
+                out.appendf(" {}i64", leaf.as_long());
+            else if (leaf.kind == value_kind::scalar_ulong)
+                out.appendf(" {}u64", leaf.as_ulong());
+            else if (leaf.kind == value_kind::scalar_double)
+                out.appendf(" {}f64", leaf.as_double());
             else
                 out.appendf(" {}", leaf.as_bool() ? "true" : "false");
         }

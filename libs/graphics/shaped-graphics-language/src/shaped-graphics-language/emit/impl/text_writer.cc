@@ -38,6 +38,20 @@ cc::string int_literal_text(i32 value)
     return cc::to_string(value);
 }
 
+/// A 64-bit integer literal of `kind` in `language`, suffixed so no target reads it as 32 bits (EMIT-190):
+/// `5LL` and `5ULL` in HLSL, `5L` and `5UL` in MSL, whose long is 64 bits.
+/// The most negative long is a minus in front of a number that does not fit, as for an int.
+cc::string wide_literal_text(u64 bits, value_kind kind, builtins::language language)
+{
+    auto const is_hlsl = language == builtins::language::hlsl;
+    if (kind == value_kind::scalar_ulong)
+        return cc::format("{}{}", bits, is_hlsl ? "ULL" : "UL");
+    auto const suffix = is_hlsl ? "LL" : "L";
+    if (bits == u64(1) << 63)
+        return cc::format("(-9223372036854775807{0} - 1{0})", suffix);
+    return cc::format("{}{}", i64(bits), suffix);
+}
+
 struct writer
 {
     plan& p;
@@ -1305,6 +1319,9 @@ struct writer
         auto const* const literal_type = p.m.builtin_type_of(x.type);
         auto const narrow = [&](rendered r)
         {
+            // EMIT-190: a double literal is suffixed in HLSL, where a bare one is a float
+            if (literal_type != nullptr && literal_type->leaf_kind == value_kind::scalar_double)
+                return rendered{.text = r.text + "L", .binds = r.binds};
             if (literal_type == nullptr || !is_16_bit(literal_type->leaf_kind))
                 return r;
             return rendered{.text = cc::format("{}({})", literal_type->spelled_in(d.language()), r.text)};
@@ -1321,6 +1338,13 @@ struct writer
                                           : int_literal_text(l.value);
                 result = narrow(
                     {.text = cc::move(text), .binds = l.value < 0 && !is_wrapped ? level::unary : level::primary});
+            },
+            [&](flat_wide_literal const& l)
+            {
+                auto const kind = literal_type != nullptr ? literal_type->leaf_kind : value_kind::scalar_long;
+                auto const is_negative = kind == value_kind::scalar_long && i64(l.bits) < 0 && l.bits != u64(1) << 63;
+                result = {.text = wide_literal_text(l.bits, kind, d.language()),
+                          .binds = is_negative ? level::unary : level::primary};
             },
             [&](flat_bool_literal const& l) { result = {.text = l.value ? "true" : "false"}; },
             [&](flat_enum_value const& v)
@@ -1344,6 +1368,11 @@ struct writer
                 result = read_as_value(id, result);
             },
             [&](flat_file_sampler const& smp) { result = {.text = p.samplers[sampler_of(p, smp.sampler)].name}; },
+            [&](flat_buffer_length const& b)
+            {
+                auto const is_bytes = p.m.at(p.e.at(b.buffer).type).kind == check::type_kind::bytes;
+                result = {.text = d.buffer_length(expr(b.buffer).text, is_bytes), .binds = level::primary};
+            },
             [&](flat_buffer_element const& b)
             {
                 auto const buffer = wrapped(expr(b.buffer), level::primary);
@@ -1811,6 +1840,23 @@ void sgl::emit::impl::write_helpers(cc::string& out, plan const& p, dialect cons
         if (!is_known)
             written.push_back(cc::move(text));
     }
+    // CHK-460: a length the target reads through a helper, once per buffer
+    for (auto const& x : p.e.exprs)
+    {
+        auto const* const length = x.node.try_as<check::flat_buffer_length>();
+        auto const* const member
+            = length != nullptr ? p.e.at(length->buffer).node.try_as<check::flat_binding_member>() : nullptr;
+        auto const found = member != nullptr ? resource_of(p, member->binding, member->member) : -1;
+        if (found < 0)
+            continue;
+        auto const is_bytes = p.m.at(p.e.at(length->buffer).type).kind == check::type_kind::bytes;
+        auto text = d.buffer_length_helper(p.resources[found].name, is_bytes);
+        auto is_known = text.empty();
+        for (auto const& w : written)
+            is_known = is_known || w == text;
+        if (!is_known)
+            written.push_back(cc::move(text));
+    }
     for (auto const& w : written)
         out.appendf("{}\n", w);
 }
@@ -1819,7 +1865,7 @@ sgl::emit::impl::written_text sgl::emit::impl::write_text(plan& p, dialect const
 {
     auto w = writer{.p = p, .d = d, .sources = sources};
     // EMIT-183: a stage that cannot write the buffer drops its prints, and declares no buffer
-    if (sources.diagnostics && d.writes_debug_in(p.e.entry_stage))
+    if (sources.diagnostics && d.writes_debug_in(p.e.entry_stage, sources.device_features))
         for (auto const& s : p.e.stmts)
             p.writes_debug = p.writes_debug || s.node.is<flat_print>();
     for (auto const& r : p.resources)

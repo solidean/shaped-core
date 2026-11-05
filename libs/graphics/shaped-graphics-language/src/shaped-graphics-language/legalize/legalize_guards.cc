@@ -35,6 +35,10 @@ struct guarder
     bool guards = true;
     /// Prints the operation and its operands before the invocation ends.
     bool reports = false;
+    /// Bounds a buffer index by the bound buffer's length, which the target can read.
+    bool guards_buffers = true;
+    /// LEGAL-68: a failed test replaces the operand with its safe value and goes on, ending nothing.
+    bool defines = false;
     /// LEGAL-64: an `assert` before the last barrier is lowered here, where the flag is, rather than ending at once.
     bool lowers_asserts = false;
     /// The flag a guard sets where a barrier, a derivative or a subgroup operation may still follow, which the
@@ -119,7 +123,10 @@ struct guarder
         if (!is_valid(type))
             return {};
         auto const is_integer = [](cc::string_view name)
-        { return name == "int" || name == "uint" || name == "short" || name == "ushort"; };
+        {
+            return name == "int" || name == "uint" || name == "short" || name == "ushort" || name == "long"
+                || name == "ulong";
+        };
         auto const name = out.m.name_of(type);
         if (is_integer(name))
             return shape{.width = 1, .element = name};
@@ -141,7 +148,7 @@ struct guarder
         return result;
     }
 
-    /// Lane `i` of the value `local` holds, widened to 32 bits.
+    /// Lane `i` of the value `local` holds, widened to 32 bits; a 64-bit lane stays as it is.
     [[nodiscard]] flat_expr_id lane_of(local_id local, shape const& s, i32 i)
     {
         auto value = s.lanes.empty() ? out.local(local) : out.member(out.local(local), s.lanes[i]);
@@ -152,7 +159,12 @@ struct guarder
         return value;
     }
 
-    [[nodiscard]] bool is_signed(shape const& s) const { return s.element == "int" || s.element == "short"; }
+    [[nodiscard]] bool is_signed(shape const& s) const
+    {
+        return s.element == "int" || s.element == "short" || s.element == "long";
+    }
+
+    [[nodiscard]] static bool is_64_bit(shape const& s) { return s.element == "long" || s.element == "ulong"; }
 
     flat_expr_id uint_literal(i32 value)
     {
@@ -160,15 +172,18 @@ struct guarder
     }
 
     /// `int` or `uint` `value`, as the lanes `lane_of` gives compare to it.
-    flat_expr_id literal_for(shape const& s, i32 value)
+    flat_expr_id literal_for(shape const& s, i64 value)
     {
-        return is_signed(s) ? out.int_literal(value) : uint_literal(value);
+        if (is_64_bit(s))
+            return out.add_expr(out.type_named(s.element), flat_wide_literal{.bits = u64(value)});
+        return is_signed(s) ? out.int_literal(i32(value)) : uint_literal(i32(value));
     }
 
     flat_expr_id compare(cc::string_view op, shape const& s, flat_expr_id a, flat_expr_id b)
     {
         flat_expr_id const args[] = {a, b};
-        return out.call(cc::format("{}_{}", op, is_signed(s) ? builtins::k_int : builtins::k_uint), args);
+        auto const family = is_64_bit(s) ? s.element : is_signed(s) ? builtins::k_int : builtins::k_uint;
+        return out.call(cc::format("{}_{}", op, family), args);
     }
 
     /// A value of `type`, of shape `s`, whose every lane is 1.
@@ -192,6 +207,8 @@ struct guarder
     /// Whether a divisor is a literal that can never fail: no zero, and no -1 under an int.
     [[nodiscard]] bool is_safe_divisor(flat_expr_id divisor, shape const& dividend) const
     {
+        if (auto const* const wide = out.e.at(divisor).node.try_as<flat_wide_literal>())
+            return wide->bits != 0 && (wide->bits != ~u64(0) || dividend.element != "long");
         auto const* const literal = out.e.at(divisor).node.try_as<flat_int_literal>();
         if (literal == nullptr || literal->value == 0)
             return false;
@@ -210,6 +227,12 @@ struct guarder
     stmt_list failed(cc::vector<cc::string> pieces, cc::span<flat_expr_id const> values, cc::span<replacement const> safe)
     {
         auto result = stmt_list();
+        if (defines)
+        {
+            for (auto const& r : safe)
+                result.push_back(out.assign(out.local(r.place), r.value));
+            return result;
+        }
         if (reports)
         {
             out.e.messages.push_back({.pieces = cc::move(pieces), .is_assert = true});
@@ -237,7 +260,7 @@ struct guarder
     local_id pinned(cc::string_view name, flat_expr_id value, stmt_list& into)
     {
         auto const type = out.e.at(value).type;
-        if (defers)
+        if (defers || defines)
         {
             auto const local = add_temporary_var(out, name, type);
             into.push_back(out.var(local, value));
@@ -282,19 +305,22 @@ struct guarder
         {
             auto const b_lane = lane_of(b, b_shape, b_shape.lanes.empty() ? 0 : i);
             auto lane_bad = compare("equal", b_shape, b_lane, literal_for(b_shape, 0));
-            if (a_shape.element == "int")
+            if (a_shape.element == "int" || a_shape.element == "long")
             {
                 auto const a_lane = lane_of(a, a_shape, a_shape.lanes.empty() ? 0 : i);
-                auto const overflows = out.and_(
-                    compare("equal", b_shape, lane_of(b, b_shape, b_shape.lanes.empty() ? 0 : i), out.int_literal(-1)),
-                    compare("less", a_shape, a_lane, out.int_literal(-2147483647)));
+                auto const lowest_but_one = a_shape.element == "int" ? i64(-2147483647) : -i64((u64(1) << 63) - 1);
+                auto const overflows
+                    = out.and_(compare("equal", b_shape, lane_of(b, b_shape, b_shape.lanes.empty() ? 0 : i),
+                                       literal_for(b_shape, -1)),
+                               compare("less", a_shape, a_lane, literal_for(a_shape, lowest_but_one)));
                 lane_bad = out.or_(lane_bad, overflows);
             }
             bad = is_valid(bad) ? out.or_(bad, lane_bad) : lane_bad;
         }
 
         auto const op = cc::string_view(out.m.at(call.callee).operator_spelling);
-        auto const is_16_bit = a_shape.element == "short" || a_shape.element == "ushort";
+        // a report writes 32-bit words alone, so a 16-bit or a 64-bit operand is left out of it
+        auto const is_16_bit = a_shape.element == "short" || a_shape.element == "ushort" || is_64_bit(a_shape);
         flat_expr_id const values[] = {out.local(a), out.local(b)};
         auto pieces = is_16_bit
                         ? cc::vector<cc::string>{cc::format("an integer `{}` has no value", op)}
@@ -344,6 +370,159 @@ struct guarder
         stmts.push_back(out.if_(bad, on_failure));
         stmts.push_back(out.leave(label, out.local(i)));
         return out.block_expr(label, index_type, stmts);
+    }
+
+    /// The index of `element`, a buffer's, as a block that ends the invocation where it is past the bound buffer's end
+    /// (EVAL-90, LEGAL-66); `none` where it needs no guard or the buffer is no binding member.
+    flat_expr_id guarded_buffer_index(flat_expr const& x, flat_buffer_element const& element)
+    {
+        if (!guards_buffers || !is_known(out.e, element.buffer) || !is_known(out.e, element.index))
+            return flat_expr_id::none;
+        if (!out.e.at(element.buffer).node.is<flat_binding_member>())
+            return flat_expr_id::none;
+        auto const index_type = out.e.at(element.index).type;
+        auto const index_known = integer_shape_of(index_type);
+        if (!index_known.has_value() || !index_known.value().lanes.empty()
+            || (index_known.value().element != "int" && index_known.value().element != "uint"))
+            return flat_expr_id::none;
+        auto const index_shape = index_known.value();
+        auto const uint_shape = shape{.element = builtins::k_uint};
+
+        out.from = x.from;
+        out.inlined_through = x.inlined_through;
+        auto const label = out.add_label("guard");
+        auto stmts = stmt_list();
+        auto const i = pinned("index", element.index, stmts);
+        auto const length = pinned(
+            "length", out.add_expr(out.type_named(builtins::k_uint), flat_buffer_length{.buffer = element.buffer}),
+            stmts);
+        auto unsigned_index = out.local(i);
+        if (index_shape.element == "int")
+        {
+            flat_expr_id const argument[] = {out.local(i)};
+            unsigned_index = out.call("convert_int_to_uint", argument);
+        }
+        auto bad = out.not_(compare("less", uint_shape, unsigned_index, out.local(length)));
+        if (index_shape.element == "int")
+            bad = out.or_(compare("less", index_shape, out.local(i), out.int_literal(0)), bad);
+        flat_expr_id const values[] = {out.local(i), out.local(length)};
+        auto const on_failure
+            = failed({cc::string("index "), cc::string(" is outside a buffer of "), cc::string(" elements")}, values, i,
+                     literal_for(index_shape, 0));
+        stmts.push_back(out.if_(bad, on_failure));
+        stmts.push_back(out.leave(label, out.local(i)));
+        return out.block_expr(label, index_type, stmts);
+    }
+
+    /// How many words a load or a store of `bytes` reaches, or 0 for a call that is none (EVAL-97).
+    [[nodiscard]] i32 bytes_words_of(flat_call const& call) const
+    {
+        if (!guards_buffers || !is_valid(call.intrinsic) || index_of(call.intrinsic) >= registry.functions.size()
+            || !is_known(out.e, call.arguments) || call.arguments.count < 2)
+            return 0;
+        auto const arguments = out.e.at(call.arguments);
+        if (out.m.at(out.e.at(arguments[0]).type).kind != type_kind::bytes
+            || !out.e.at(arguments[0]).node.is<flat_binding_member>())
+            return 0;
+        auto const& r = registry.at(call.intrinsic);
+        if (r.name == "load")
+            return 1;
+        if (r.name == "load2" || r.name == "load3" || r.name == "load4")
+            return r.name[4] - '0';
+        if (r.name == "store" && arguments.size() == 3)
+            if (auto const s = integer_shape_of(out.e.at(arguments[2]).type); s.has_value())
+                return s.value().width;
+        return 0;
+    }
+
+    /// `call`, a load or a store of `bytes`, as a block that ends the invocation where its offset is no multiple of 4
+    /// or a word it reaches is past the bound memory's end (EVAL-97, LEGAL-66).
+    flat_expr_id guard_bytes(flat_expr_id id, i32 words)
+    {
+        auto const x = out.e.at(id);
+        auto const& call = *x.node.try_as<flat_call>();
+        auto operands = cc::vector<flat_expr_id>();
+        for (auto const a : out.e.at(call.arguments))
+            operands.push_back(a);
+        auto const uint_shape = shape{.element = builtins::k_uint};
+
+        out.from = x.from;
+        out.inlined_through = x.inlined_through;
+        auto const label = out.add_label("guard");
+        auto stmts = stmt_list();
+        // the memory is a resource and no local holds one; the offset and a stored value keep their order
+        auto const offset = pinned("offset", operands[1], stmts);
+        auto stored = local_id::none;
+        if (operands.size() == 3)
+            stored = pinned("stored", operands[2], stmts);
+        auto const length = pinned(
+            "length", out.add_expr(out.type_named(builtins::k_uint), flat_buffer_length{.buffer = operands[0]}), stmts);
+
+        flat_expr_id const remainder_args[] = {out.local(offset), uint_literal(4)};
+        auto const misaligned
+            = compare("not_equal", uint_shape, out.call("remainder_uint", remainder_args), uint_literal(0));
+        auto const reach = uint_literal(4 * words);
+        flat_expr_id const room_args[] = {out.local(length), reach};
+        auto const past_the_end
+            = out.or_(compare("less", uint_shape, out.local(length), uint_literal(4 * words)),
+                      compare("less", uint_shape, out.call("subtract_uint", room_args), out.local(offset)));
+        flat_expr_id const values[] = {out.local(offset), out.local(length)};
+        auto const on_failure
+            = failed({cc::string("the offset "), cc::format(" of {} words is unaligned or outside memory of ", words),
+                      cc::string(" bytes")},
+                     values, offset, uint_literal(0));
+        stmts.push_back(out.if_(out.or_(misaligned, past_the_end), on_failure));
+
+        auto guarded = call;
+        auto arguments = cc::vector<flat_expr_id>{operands[0], out.local(offset)};
+        if (operands.size() == 3)
+            arguments.push_back(out.local(stored));
+        guarded.arguments = out.expr_list(arguments);
+        stmts.push_back(out.leave(label, out.add_expr(x.type, guarded)));
+        return out.block_expr(label, x.type, stmts);
+    }
+
+    /// The size of the matrix whose row or column `call` reads (EVAL-87), or 0 for a call that reads none.
+    [[nodiscard]] i32 matrix_part_size_of(flat_call const& call) const
+    {
+        if (!is_valid(call.intrinsic) || index_of(call.intrinsic) >= registry.functions.size()
+            || !is_known(out.e, call.arguments) || call.arguments.count != 2)
+            return 0;
+        auto const& r = registry.at(call.intrinsic);
+        if (r.name != "matrix_row" && r.name != "matrix_column")
+            return 0;
+        auto const matrix = out.m.name_of(out.e.at(out.e.at(call.arguments)[0]).type);
+        return matrix == "mat4" ? 4 : matrix == "mat3" ? 3 : matrix == "mat2" ? 2 : 0;
+    }
+
+    /// `call`, a matrix's row or column, as a block that ends the invocation where its index is outside the matrix.
+    flat_expr_id guard_matrix_part(flat_expr_id id, i32 size)
+    {
+        auto const x = out.e.at(id);
+        auto const& call = *x.node.try_as<flat_call>();
+        auto const arguments = out.e.at(call.arguments);
+        auto const matrix_value = arguments[0];
+        auto const index_value = arguments[1];
+        if (out.e.at(index_value).node.is<flat_int_literal>())
+            return id;
+        auto const int_shape = shape{.element = builtins::k_int};
+
+        out.from = x.from;
+        out.inlined_through = x.inlined_through;
+        auto const label = out.add_label("guard");
+        auto stmts = stmt_list();
+        auto const matrix = pinned("matrix", matrix_value, stmts);
+        auto const i = pinned("index", index_value, stmts);
+        auto const bad = out.or_(compare("less", int_shape, out.local(i), out.int_literal(0)),
+                                 out.not_(compare("less", int_shape, out.local(i), out.int_literal(size))));
+        auto const value = out.local(i);
+        stmts.push_back(out.if_(bad, failed({cc::string("matrix index "), cc::format(" is outside 0 ..< {}", size)},
+                                            cc::span<flat_expr_id const>(&value, 1), i, out.int_literal(0))));
+        auto guarded = call;
+        flat_expr_id const operands[] = {out.local(matrix), out.local(i)};
+        guarded.arguments = out.expr_list(operands);
+        stmts.push_back(out.leave(label, out.add_expr(x.type, guarded)));
+        return out.block_expr(label, x.type, stmts);
     }
 
     // ---- the maths builtins of EVAL-87 --------------------------------------------------------------------------------
@@ -450,13 +629,24 @@ struct guarder
         auto operands = cc::vector<flat_expr_id>();
         for (auto const a : out.e.at(call.arguments))
             operands.push_back(a);
-        auto const type = out.e.at(operands[0]).type;
-        auto const known = number_shape_of(type);
-        if (!known.has_value())
-            return id;
-        auto const s = known.value();
+        // the widest operand's shape, and each operand's own: a scalar beside a vector reads as every lane of it
+        auto shapes = cc::vector<shape>();
+        auto types = cc::vector<type_id>();
         for (auto const a : operands)
-            if (out.e.at(a).type != type)
+        {
+            auto const known = number_shape_of(out.e.at(a).type);
+            if (!known.has_value())
+                return id;
+            shapes.push_back(known.value());
+            types.push_back(out.e.at(a).type);
+        }
+        auto widest = isize(0);
+        for (auto k = isize(1); k < shapes.size(); ++k)
+            if (shapes[k].width > shapes[widest].width)
+                widest = k;
+        auto const s = shapes[widest];
+        for (auto const& o : shapes)
+            if (o.element != s.element || (o.width != s.width && o.width != 1))
                 return id;
 
         out.from = x.from;
@@ -470,7 +660,7 @@ struct guarder
         auto bad = flat_expr_id::none;
         for (auto i = 0; i < s.width; ++i)
         {
-            auto const lane = [&](isize k) { return number_lane(locals[k], s, s.lanes.empty() ? 0 : i); };
+            auto const lane = [&](isize k) { return number_lane(locals[k], shapes[k], shapes[k].lanes.empty() ? 0 : i); };
             auto const literal = [&](f64 v) { return number_literal(s, v); };
             auto lane_bad = flat_expr_id::none;
             if (name == "pow")
@@ -494,19 +684,22 @@ struct guarder
 
         // what the operation computes once a deferring guard tripped: any value, so one that has one
         auto safe = cc::vector<replacement>();
+        auto const fill = [&](isize k, f64 v) { return filled(types[k], shapes[k], v); };
         if (name == "pow")
-            safe.push_back({.place = locals[0], .value = filled(type, s, 1.0)});
+            safe.push_back({.place = locals[0], .value = fill(0, 1.0)});
         else if (name == "asin" || name == "acos")
-            safe.push_back({.place = locals[0], .value = filled(type, s, 0.0)});
+            safe.push_back({.place = locals[0], .value = fill(0, 0.0)});
         else if (name == "atan2")
-            safe.push_back({.place = locals[1], .value = filled(type, s, 1.0)});
+            safe.push_back({.place = locals[1], .value = fill(1, 1.0)});
         else if (name == "smoothstep")
         {
-            safe.push_back({.place = locals[0], .value = filled(type, s, 0.0)});
-            safe.push_back({.place = locals[1], .value = filled(type, s, 1.0)});
+            safe.push_back({.place = locals[0], .value = fill(0, 0.0)});
+            safe.push_back({.place = locals[1], .value = fill(1, 1.0)});
         }
-        else if (name == "clamp")
+        else if (name == "clamp" && types[1] == types[2])
             safe.push_back({.place = locals[2], .value = out.local(locals[1])});
+        else if (name == "clamp")
+            return id;
 
         auto const is_16_bit_int = s.element == "short" || s.element == "ushort";
         auto pieces = cc::vector<cc::string>();
@@ -593,6 +786,12 @@ struct guarder
                 element->index = index;
                 changed = true;
             }
+        if (auto* const element = copy.node.try_as<flat_buffer_element>(); element != nullptr && may_guard)
+            if (auto const index = guarded_buffer_index(copy, *element); is_valid(index))
+            {
+                element->index = index;
+                changed = true;
+            }
         auto result = id;
         if (changed)
         {
@@ -605,6 +804,12 @@ struct guarder
         if (auto const* const call = out.e.at(result).node.try_as<flat_call>(); call != nullptr && may_guard)
             if (auto const name = guarded_math_of(*call); !name.empty())
                 return guard_math(result, name);
+        if (auto const* const call = out.e.at(result).node.try_as<flat_call>(); call != nullptr && may_guard)
+            if (auto const words = bytes_words_of(*call); words > 0)
+                return guard_bytes(result, words);
+        if (auto const* const call = out.e.at(result).node.try_as<flat_call>(); call != nullptr && may_guard)
+            if (auto const size = matrix_part_size_of(*call); size > 0)
+                return guard_matrix_part(result, size);
         return result;
     }
 
@@ -703,6 +908,62 @@ struct guarder
 
     /// A loop's `body` with `if aborted { leave label }` in front, where `breaks_loops` asks for it and the body is free
     /// of what every invocation must reach together.
+    /// Whether `s` writes memory another invocation may read: a store to a buffer element or to workgroup memory, or
+    /// a call with an effect that is no barrier, derivative or subgroup operation, which every invocation must reach.
+    [[nodiscard]] bool writes_memory(flat_stmt const& s) const
+    {
+        if (auto const* const assign = s.node.try_as<flat_assign>())
+        {
+            auto place = assign->place;
+            for (auto steps = 0; steps < k_max_depth && is_known(out.e, place); ++steps)
+            {
+                auto const& x = out.e.at(place);
+                if (auto const* const member = x.node.try_as<flat_member>())
+                    place = member->object;
+                else if (auto const* const element = x.node.try_as<flat_element>())
+                    place = element->object;
+                else if (auto const* const b = x.node.try_as<flat_binding_member>())
+                    return b->is_workgroup;
+                else
+                    return x.node.is<flat_buffer_element>();
+            }
+            return false;
+        }
+        if (auto const* const eval = s.node.try_as<flat_eval>(); eval != nullptr && is_known(out.e, eval->value))
+            if (auto const* const call = out.e.at(eval->value).node.try_as<flat_call>())
+                return !call->is_pure && !constrains_uniformity(*call);
+        return false;
+    }
+
+    /// `s` as `let x = (0 where the flag is set, else the call)` where `s` binds the result of a call that writes memory,
+    /// a number scalar's; `none` for any other statement.
+    flat_stmt_id masked_binding(flat_stmt const& s)
+    {
+        auto const* const let = s.node.try_as<flat_let>();
+        if (let == nullptr || !is_known(out.e, let->value))
+            return flat_stmt_id::none;
+        auto const* const call = out.e.at(let->value).node.try_as<flat_call>();
+        if (call == nullptr || call->is_pure || constrains_uniformity(*call))
+            return flat_stmt_id::none;
+        auto const type = out.e.at(let->value).type;
+        auto const name = out.m.name_of(type);
+        auto const zero = name == builtins::k_int   ? out.int_literal(0)
+                        : name == builtins::k_uint  ? uint_literal(0)
+                        : name == builtins::k_float ? out.literal(0.0)
+                                                    : flat_expr_id::none;
+        if (!is_valid(zero))
+            return flat_stmt_id::none;
+        out.from = s.from;
+        out.inlined_through = s.inlined_through;
+        auto const label = out.add_label("masked");
+        auto skipped = stmt_list();
+        skipped.push_back(out.leave(label, zero));
+        auto stmts = stmt_list();
+        stmts.push_back(out.if_(out.local(aborted), skipped));
+        stmts.push_back(out.leave(label, let->value));
+        return out.let(let->local, out.block_expr(label, type, stmts));
+    }
+
     ast::range_of<flat_stmt_id> left_once_aborted(label_id label, ast::range_of<flat_stmt_id> range, bool& changed)
     {
         if (!breaks_loops || !is_valid(label) || !is_known(out.e, range) || body_constrains(range, 0))
@@ -788,10 +1049,27 @@ struct guarder
                 && out.e.check_sites[n->site].stops)
                 return deferred_assert(copy, *n);
         }
-        if (!changed)
-            return id;
-        out.e.stmts.push_back(cc::move(copy));
-        return flat_stmt_id(out.e.stmts.size() - 1);
+        auto result = id;
+        if (changed)
+        {
+            out.e.stmts.push_back(cc::move(copy));
+            result = flat_stmt_id(out.e.stmts.size() - 1);
+        }
+        // LEGAL-67: an atomic whose result a let binds runs only where the flag is clear, and gives 0 where it is set
+        if (breaks_loops)
+            if (auto const masked = masked_binding(out.e.at(result)); is_valid(masked))
+                return masked;
+        // LEGAL-67: an invocation whose guard tripped computes on with a safe operand, and writes none of it
+        if (breaks_loops && writes_memory(out.e.at(result)))
+        {
+            auto const& s = out.e.at(result);
+            out.from = s.from;
+            out.inlined_through = s.inlined_through;
+            auto then = stmt_list();
+            then.push_back(result);
+            return out.if_(out.not_(out.local(aborted)), then);
+        }
+        return result;
     }
 };
 } // namespace
@@ -803,6 +1081,8 @@ stmt_list sgl::check::impl::guard_undefined(flat_builder& out, stmt_list const& 
     auto g = guarder{.out = out,
                      .guards = options.guards_undefined != undefined_guard::none,
                      .reports = options.guards_undefined == undefined_guard::report && !options.erases_prints,
+                     .guards_buffers = options.guards_buffers,
+                     .defines = options.guards_undefined == undefined_guard::define,
                      .lowers_asserts = options.lowers_asserts};
 
     // The last statement of the body that holds a barrier, a derivative or a subgroup operation, which an invocation

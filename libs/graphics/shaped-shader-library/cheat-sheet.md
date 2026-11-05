@@ -212,7 +212,8 @@ slib::create_sgl_compiler(std::unique_ptr<shader_compiler> inner, sgl_compiler_o
                                    //   so a test compiling a shader that warns declares it: nx::expect_warning("unroll-too-long", ...)
                                    // options: {.diagnostics = true} writes print/assert records;
                                    //   {.guards_undefined = sgl_undefined_guard::report} logs a division by zero or an
-                                   //   index past an array as a failed assert and ends that invocation (abort: ends it only);
+                                   //   index past an array as a failed assert and ends that invocation (abort: ends it only;
+                                   //   define: gives it WGSL's value and goes on);
                                    //   add_available_compilers takes SC_SHADER_UNDEFINED
                                    // an entry point's @float picks DXC's flags (-Gis, -denorm preserve) through preprocessed_source::dxc_args;
                                    //   on WebGPU one it cannot keep is refused, unless acquire is passed
@@ -404,6 +405,7 @@ auto const items = ctx.persistent.create_buffer_from_data(cc::vector<shaders::co
 //   under `@padding(.none)` it is plain tg::mat3f, 36 bytes.
 // SGL `bool32` -> slib::gpu_bool (gpu_bool.hh): a bool as one 32-bit lane; a plain bool assigns into it.
 // SGL `half` -> tg::f16, `short`/`ushort` -> cc::i16/cc::u16, their vectors tg::vec<N, T>; a 2-byte gap is `cc::u16 _padN`.
+// SGL `long`/`ulong` -> cc::i64/cc::u64, `double` -> double, their vectors tg::vec<N, T>.
 // within one file a name is generated once, so a binding named like the file's entry point type (`main_t`) or options
 //   struct (`options`) is a generator error.
 // a module's types live in NS::<module> instead, whichever of its files declares them, reached as
