@@ -171,6 +171,13 @@ staging_binding_group_handle context_persistent_scope::create_staging_binding_gr
 cc::result<staging_binding_group_handle> context_persistent_scope::try_create_staging_binding_group(
     binding_group_layout_handle layout)
 {
+    // a staging group's image is the layout's, so it has no count for an unbounded array to take
+    if (layout != nullptr)
+        for (auto const& b : layout->bindings())
+            if (b.is_unbounded())
+                return cc::error(cc::format("staging_binding_group: '{}' is an unbounded array, which only an "
+                                            "immutable binding_group sizes",
+                                            b.name));
     auto created = _ctx.try_create_staging_binding_group(cc::move(layout), lifetime_scope::persistent);
     if (created.has_value())
     {

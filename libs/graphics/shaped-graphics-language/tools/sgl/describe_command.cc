@@ -94,8 +94,8 @@ void write_binding(babel::json::object_writer& o, sgl::described_binding const& 
         mo.write("slot", m.slot);
         if (m.kind == sgl::described_member_kind::buffer)
             mo.write("stride", m.stride);
-        // a binding array's length, which is 1 for any other resource
-        if (m.count > 1)
+        // a binding array's length, 0 where unbounded (CHK-490), and 1 for any other resource
+        if (m.count != 1)
             mo.write("count", m.count);
         mo.write("host_name", cc::string_view(m.host_name));
         // The sg enum values a binding of this kind states, each written only where it applies.

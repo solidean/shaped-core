@@ -56,7 +56,6 @@ cc::result<dx12_binding_group_layout_handle> dx12_binding_group_layout::create(
 
     for (auto const& b : bindings)
     {
-        CC_ASSERT(b.count >= 1, "unbounded / zero-count bindings are not supported yet");
         // A binding without a space takes its group's slot, which is only known once a pipeline layout places the group.
         // Absent is never read as 0: absent and 0 are different keys in the layout hash, and a layout reflected from
         // a shader states its space, so the two never meet as one layout by accident.
@@ -91,9 +90,10 @@ cc::result<dx12_binding_group_layout_handle> dx12_binding_group_layout::create(
             continue;
         }
 
+        // an unbounded binding, which the context placed last, is the table's tail: each group sizes it
         D3D12_DESCRIPTOR_RANGE range = {};
         range.RangeType = range_type_of(b);
-        range.NumDescriptors = b.count;
+        range.NumDescriptors = b.is_unbounded() ? UINT_MAX : b.count;
         range.BaseShaderRegister = b.index; // (space, index) -> (register space, register); register-type from the kind
         range.RegisterSpace = space;
         range.OffsetInDescriptorsFromTableStart = UINT(view_offset);

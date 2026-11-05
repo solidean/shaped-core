@@ -441,6 +441,13 @@ if(SC_BUILD_TESTS)
         )
         target_link_libraries(shaped-rendering-test PRIVATE ${_sr_test_backends})
 
+        # LLVM 22's CRC recognition inside LoopIdiomRecognize (HashRecognize) runs away on one coroutine's cleanup in
+        # this file at -O3: measured on an M4, 30 minutes for the file against 1.6 s with loop idioms off.
+        # Off for this file alone, where turning loops into memset and memcpy buys a test nothing; drop it once a
+        # fixed LLVM is the floor.
+        set_source_files_properties(tests/denoise-test.cc TARGET_DIRECTORY shaped-rendering-test PROPERTIES
+            COMPILE_OPTIONS "$<$<CXX_COMPILER_ID:Clang,AppleClang>:-mllvm;-disable-loop-idiom-all>")
+
         # Intel's own filter, as the oracle the OIDN member is measured against, where it was fetched on request.
         # Linked here and nowhere else: the member runs the weights in its own shaders and never calls the library.
         # Its facade loads its core and its CPU device module by name out of its own directory, so all of them have to

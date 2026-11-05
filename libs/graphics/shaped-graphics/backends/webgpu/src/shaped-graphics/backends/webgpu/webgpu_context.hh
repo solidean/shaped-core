@@ -182,6 +182,9 @@ public:
         case sg::feature::shader_int64_atomics:
             // WGSL has no 64-bit integer and no double, on any device.
             return false;
+        case sg::feature::unbounded_binding_arrays:
+            // WebGPU has no binding arrays at all
+            return false;
         case sg::feature::view_instancing:
             // WebGPU has no multiview; WebXR hands out a texture per view instead
             return false;
