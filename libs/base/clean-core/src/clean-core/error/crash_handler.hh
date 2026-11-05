@@ -44,7 +44,7 @@ using crash_context_hook = void (*)() noexcept;
 /// It then lets the process terminate with the fault's normal disposition.
 ///
 /// The other threads are the point of a deadlock or a hung test, where the thread that noticed is never the one that matters.
-/// Reaching them means suspending each in turn and walking it with DbgHelp on Windows, and asking each to unwind itself through a signal on Linux.
+/// Reaching them means suspending each in turn and walking it with DbgHelp on Windows or through Mach on macOS, and asking each to unwind itself through a signal on Linux.
 /// Elsewhere only the faulting thread is reported, and a core dump carries the rest.
 ///
 /// On Windows a stack overflow is reported by a thread parked for it at install, since the overflowed stack has no room left for the report.
