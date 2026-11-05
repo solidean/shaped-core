@@ -5,6 +5,7 @@
 #include <clean-core/streams/file_stream.hh>
 #include <clean-core/string/format.hh>
 #include <clean-core/string/string.hh>
+#include <clean-core/thread/native_thread.hh>
 #include <nexus/args/ambient.hh>
 #include <nexus/test.hh>
 
@@ -88,4 +89,29 @@ TEST("crash handler - a report kept in a file holds what stderr got, and on Wind
     // the process goes on after a report, and so must the symbols every later profile resolves through
     if (had_symbols)
         CHECK(cc::symbolizer().resolve(reinterpret_cast<void const*>(&read_file)).has_function());
+}
+
+namespace
+{
+/// Recurses until the stack runs out, a frame of real stack each, which the optimizer cannot fold into a loop.
+[[gnu::noinline]] int overflow_stack(int depth)
+{
+    char volatile frame[1024];
+    frame[0] = char(depth);
+    return overflow_stack(depth + 1) + frame[0];
+}
+} // namespace
+
+// Ends the process by design, so it never runs in a sweep: run it by its exact name, and read what stderr got.
+// The report it should leave is the one any other crash leaves, with the reason `stack overflow`.
+TEST("crash handler - a stack overflow is reported", nx::config::manual, nx::config::exclusive())
+{
+    CHECK(overflow_stack(0) == 0); // never returns
+}
+
+// The same, on a thread clean-core started, which takes a signal stack of its own when it starts.
+TEST("crash handler - a stack overflow on a clean-core thread is reported", nx::config::manual, nx::config::exclusive())
+{
+    auto thread = cc::native_thread::start([] { (void)overflow_stack(0); });
+    thread.join();
 }
