@@ -251,9 +251,41 @@ fun graded(a: float) -> float:
   A store to a `mut buffer` the driver bound as mutable bytes is written back into them when the run ends.
   `bytes` is its words, 4 bytes each, and must be a whole number of them.
   A member name its binding lacks, or bytes that are no whole value or no whole number of elements, fail the test as `invalid-bindings`, and it never runs.
+  A texture, an image or a binding array of them is bound as EVAL-120's texels, with its extent, layers, levels and samples; texels that are no whole set of them fail as `invalid-bindings` too.
+  A dynamic sampler is bound as the state `sg::sampler` holds.
 * **EVAL-95** A trace runs its emulated form, over the acceleration pool the driver binds, laid out as sg's webgpu backend lays it out.
   `acceleration_root(world)` is the root unit the driver gives that member, and `acceleration_pool_load(u)` is unit `u` of the pool.
   A run without a pool reads zero at every unit, so every trace misses; a unit past the end of a pool it has is a `program-error`.
+
+## Textures
+
+* **EVAL-120** A texture or an image the driver binds is its texels as the shader reads them: a `float4` texel is four floats, and a depth texel one.
+  They stand level after level, each layer after layer, slice after slice, row after row, texel after texel, and each texel's samples after one another.
+  A cube's layers are its six faces, +x, -x, +y, -y, +z, -z, cube after cube.
+  Level `l` is level 0's extent halved `l` times along each axis, and never below 1.
+  An image holds the value a store gave it, never its format's encoding: a GPU rounds what it stores to an `rgba8_unorm` texel, and the run does not.
+* **EVAL-121** A texture the driver binds nothing to is empty: its size, its levels and its samples are 0, and a read of it is a `program-error`.
+  A load's coordinate, level, layer or sample outside the texture is a `program-error` too, as is the size of a level past the last.
+  A store to an image writes the texel, which a later load of the run reads, and is written back to the driver's mutable texels when the run ends.
+* **EVAL-122** A sample's coordinate `u` along an axis of `n` texels is `u * n` in texel space, so texel `i` is centred at `(i + 0.5) / n`.
+  A `nearest` filter reads texel `floor(u * n)`, plus an offset.
+  A `linear` filter reads `i0 = floor(u * n - 0.5)` plus an offset and `i0 + 1`, weighted by `w = (u * n - 0.5) - floor(u * n - 0.5)`, as `a * (1 - w) + b * w`.
+  The axes interpolate in order, x first, then y, then z, each in f32.
+  A GPU computes `w` to 8 bits of fraction or a few more, so a test compares a value between texel centres to that precision rather than exactly.
+* **EVAL-123** An index outside `0 ..< n` takes the sampler's address mode along its axis: `repeat` is `i mod n`, `mirror_repeat` mirrors every other tile, and `clamp_edge` clamps.
+  A static sampler and a file-scope sampler filter as the source sets them; a dynamic one as the driver sets it, and as `sg::sampler`'s default where it sets nothing.
+  A sample clamps its layer to the array, as D3D and Vulkan both define it.
+* **EVAL-124** A sample's level is its `level`, or from its gradients `log2` of the longer one in texels, plus the sampler's `mip_lod_bias` and a `bias` argument, clamped to `min_lod` and `max_lod`.
+  A run is one invocation, whose derivatives are 0 (EVAL-88), so a sample that takes its level from them reads the lowest level the clamps allow.
+  A level of 0 or below magnifies, and filters by `mag_filter`; above 0 by `min_filter`.
+  A `nearest` mip filter reads level `floor(level + 0.5)`, clamped to the levels the texture has; GPUs round a level of exactly a half differently.
+  A `linear` one mixes the two levels around it, as EVAL-122 mixes texels.
+* **EVAL-125** A comparison sampler reads each texel as 1 where `reference op texel` holds and 0 where it does not, then filters those as EVAL-122 does.
+  A gather reads one channel of the four texels a `linear` sample of level 0 weighs, as `(i0, j1)`, `(i1, j1)`, `(i1, j0)` and `(i0, j0)`, the order every target gives.
+* **EVAL-126** A cube's direction picks the face of its largest component, z before y before x where two are equal, and the coordinate on that face as Vulkan's table gives it.
+  The face is filtered as `clamp_edge`, whatever the sampler's address modes say.
+  A GPU filters across a face's edge into the next face, so a sample within half a texel of an edge differs there.
+  A texel atomic of an `@atomic` image still reads zero, as EVAL-100 says, and a multisampled texture is loaded by sample and never sampled.
 * **EVAL-44** A run is bounded by a fuel count, one unit per statement, per expression node and per iteration, and running out is a status as well.
 
 ## Open

@@ -361,7 +361,7 @@ enum light_kind:
   A binding member the test lists is its own and no capture, whatever the function lists.
   A callee that needs a binding the test does not list is `binding-not-listed` by CHK-131, with a note that listing it gives it.
 * **CHK-333** `test {a, b}:` lists the bindings the test reads, as a function's `{...}` does, and the driver that runs the test gives their values (EVAL-94).
-  A binding it lists holds values, buffers and acceleration structures; a texture, an image or a sampler in one is `unsupported-yet`.
+  A binding it lists holds values, buffers, acceleration structures, textures, images and samplers, whose texels the driver binds too (EVAL-120).
   A `@workgroup` binding needs no listing (CHK-295).
 * **CHK-229** In the flat tree a check or an `assert` is a `check` statement, whose body leaves every node of the condition in a `var` of its own.
   A node is an `and`, an `or`, a `not`, a comparison, a comparison chain, or a leaf any other expression is; it runs in the order and under the conditions the condition itself would run it.
@@ -509,7 +509,7 @@ fun shade(k: float) -> float:
   Its settings and its attributes are judged as CHK-204 judges a binding's static sampler.
   It is used by its name, handed to a builtin as CHK-206 says, or through a texture's `@sampler` (CHK-279).
   Either way it filters as a static sampler does for CHK-210 and CHK-281.
-  Its name anywhere else is `unsupported-yet`, and so is its name in a test, which samples no texture.
+  Its name anywhere else is `unsupported-yet`; a test names it as a function does, and samples a texture its driver binds with it.
 * **CHK-366** A function of the program may take a texture, an image or a sampler as a parameter, which inlining substitutes as it does a prelude function's (CHK-324) ([why](why/checking.md#chk-366)).
   Its argument is a binding member of exactly the parameter's type, an element of a binding array, a file-scope sampler, or a parameter of that type handed on.
   Anything else does not match it, by CHK-70.

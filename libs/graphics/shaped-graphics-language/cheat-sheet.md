@@ -393,8 +393,13 @@ sgl::check::evaluate_constant(m, e, id)    // -> outcome: `ok` with .result, or 
 sgl::check::driver_bindings{.groups = {{.name = "frame", .members = {{.name = "exposure", .bytes = b}}}}, .acceleration_pool = p}
                                            // bound BY NAME (EVAL-94): a value is its scalars, 4 bytes each, NEVER padded;
                                            // a buffer its elements so; .mutable_bytes for a mut buffer; .acceleration_root
+{.name = "albedo", .textures = {{.width = 4, .height = 4, .levels = 3, .texels = t}}}   // EVAL-120: the texels the
+                                           // shader reads, 4 bytes a scalar, level, layer, slice, row, texel; an image's
+                                           // .mutable_texels come back; .samplers = {sampler_state{...}} for a dynamic one
+                                           // a texture bound nothing is empty: size 0, and a read of it a program-error
+                                           // filtering is exact f32 (EVAL-122): compare between texel centres to ~8 bits
 sgl::check::resolve_inputs(m, e, bound)    // -> cc::result<run_inputs>; left out: zero, empty, root 0 (the empty TLAS)
-sgl::check::write_back(m, o, bound)        // what the run stored, into each .mutable_bytes
+sgl::check::write_back(m, o, bound)        // what the run stored, into each .mutable_bytes and image .mutable_texels
 
 #include <shaped-graphics-language/test/run_tests.hh>
 m.tests  m.test_units                      // test_info { symbol, file, where, scope_path, comment, unit } and its flat tree
