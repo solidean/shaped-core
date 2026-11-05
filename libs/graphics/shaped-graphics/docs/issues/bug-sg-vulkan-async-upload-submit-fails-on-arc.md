@@ -25,7 +25,13 @@ The machine is Windows 11 with an Intel Arc B580 beside an AMD iGPU, Vulkan SDK 
   That is fixed (`vulkan_context::vk_buffer_alignment`), and the Arc still loses its device afterwards, so it was not this.
 - The iGPU's one remaining failure is a negative timestamp delta of exactly −2³² ticks: `bug-sg-vulkan-timestamp-wraps-on-amd-igpu`.
 
-## Next
+## Cause (2026-11-05)
 
-- Find the submission that hangs the GPU: run the suite's tests one at a time with `--repeat`, or under the validation layer's GPU-assisted mode.
-- Hypothesis, unconfirmed: ray tracing on this driver, since the slow ray-tracing tests (21 s alone) are the likeliest to trip a TDR when other work shares the GPU.
+- **A vacant array element was written as all-zero bytes, which is not Intel's null descriptor.**
+  The test that loses the device alone is `sg vulkan - a draw with an undeclared array binding logs once, and the draw runs`, a draw through a table of four vacant elements.
+  Running each test file alone, then each test of `vulkan-raster-test.cc`, found it; "each test passes alone" above had sampled the wrong file.
+- VK_EXT_descriptor_buffer's null descriptor is what `vkGetDescriptorEXT` returns for no resource, which the nullDescriptor feature makes a valid request.
+  Its bytes are the driver's: NVIDIA and RADV answer zeros, so sg's zeros worked there, and the Arc reads a zeroed descriptor as a real one.
+- **Fixed** by `write_null_descriptor`, which asks the driver, in the binding group's vacant elements and in a staging group's initial and cleared descriptors.
+  The vulkan backend suite then passes on the Arc, three runs in a row.
+- The ray-tracing hypothesis was wrong.
