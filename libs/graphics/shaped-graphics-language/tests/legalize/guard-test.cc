@@ -275,3 +275,70 @@ TEST("sgl guards - once the flag is set, a loop without a barrier is left, and o
     REQUIRE(barrier >= 0);
     CHECK(!after.subview({.offset = 0, .size = barrier}).contains("(break")).dump("core", dump);
 }
+
+TEST("sgl guards - a maths builtin with no value for its operands ends the invocation, and one with a value runs alike")
+{
+    // `p.a` is 0.25 and `p.b` 0.75; each `bad` has no value by EVAL-87, each `good` has one
+    struct one_case
+    {
+        cc::string_view bad;
+        cc::string_view good;
+    };
+    one_case const cases[] = {
+        {"pow(p.a - 1.0, 2.0)", "pow(p.a, 2.0)"},
+        {"pow(p.a - 0.25, -1.0)", "pow(p.b, -1.0)"},
+        {"asin(p.b * 2.0)", "asin(p.b)"},
+        {"acos(p.a - 2.0)", "acos(p.a)"},
+        {"atan2(p.a - 0.25, p.b - 0.75)", "atan2(p.a, p.b)"},
+        {"smoothstep(p.b, p.a, 0.5)", "smoothstep(p.a, p.b, 0.5)"},
+        {"smoothstep(p.a, p.a, 0.5)", "smoothstep(p.a, p.b, 0.6)"},
+        {"clamp(0.5, p.b, p.a)", "clamp(0.5, p.a, p.b)"},
+        {"float(clamp(int(p.b * 4.0), 3, 1))", "float(clamp(int(p.b * 4.0), 1, 3))"},
+    };
+    for (auto const& c : cases)
+    {
+        auto const program = [&](cc::string_view call)
+        {
+            return cc::format("@pixel fun ps(p: frag) -> target:\n"
+                              "    let v = {}\n"
+                              "    return {{\n"
+                              "        color = float4(v, 0.0, 0.0, 1.0)\n"
+                              "    }}\n",
+                              call);
+        };
+        auto const bad = run_both(program(c.bad), undefined_guard::report);
+        CHECK(bad.structured.status == run_status::program_error).dump("call", c.bad);
+        CHECK(bad.guarded.status == run_status::discarded).dump("call", c.bad).dump("core", bad.dump);
+        CHECK(bad.guarded.printed.size() == 1).dump("call", c.bad);
+
+        auto const good = run_both(program(c.good), undefined_guard::abort);
+        CHECK(good.structured.status == run_status::ok).dump("call", c.good);
+        CHECK(good.guarded == good.structured).dump("call", c.good).dump("core", good.dump);
+    }
+}
+
+TEST("sgl guards - every target writes the guards of the maths builtins, scalar, vector and half")
+{
+    constexpr auto source = "binding work:\n"
+                            "    values: mut buffer[float4]\n"
+                            "\n"
+                            "require shader_f16\n"
+                            "\n"
+                            "@compute(64) fun cs(@thread_id id: int3){work}:\n"
+                            "    let v = work.values[id.x]\n"
+                            "    let h = half(v.x)\n"
+                            "    let a = pow(v, v) + asin(v) + acos(v.zyxw) + atan2(v, v.wzyx)\n"
+                            "    let b = smoothstep(v.x, v.y, v.z) + clamp(v.w, v.x, v.y) + float(pow(h, h))\n"
+                            "    work.values[id.x] = a + float4(b, 0.0, 0.0, 0.0)\n";
+    for (auto const t : sgl::emit::all_targets())
+    {
+        auto const text
+            = sgl::compile_to_text({.source = source,
+                                    .entry_point = "cs",
+                                    .target = t,
+                                    .guards_undefined = undefined_guard::abort,
+                                    .device_features = sgl::check::feature_set(sgl::check::feature::shader_f16)});
+        REQUIRE(text.has_value()).dump("error", text.has_error() ? text.error() : cc::string());
+        CHECK(text.value().text.contains("operand")).dump("text", text.value().text);
+    }
+}

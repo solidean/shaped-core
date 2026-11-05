@@ -198,9 +198,16 @@ struct guarder
         return literal->is_unsigned || literal->value != -1 || dividend.element != "int";
     }
 
+    /// A safe value a deferring guard assigns to one of the operands it bound.
+    struct replacement
+    {
+        local_id place = local_id::none;
+        flat_expr_id value = flat_expr_id::none;
+    };
+
     /// What fails: a print of `message` with `values` where the guard reports, then the end of the invocation, or the
-    /// flag and the safe value `fallback` assigned to `place` where the end must wait.
-    stmt_list failed(cc::vector<cc::string> pieces, cc::span<flat_expr_id const> values, local_id place, flat_expr_id fallback)
+    /// flag and each safe value assigned to its operand where the end must wait.
+    stmt_list failed(cc::vector<cc::string> pieces, cc::span<flat_expr_id const> values, cc::span<replacement const> safe)
     {
         auto result = stmt_list();
         if (reports)
@@ -212,11 +219,18 @@ struct guarder
         {
             sets_flag = true;
             result.push_back(out.assign(out.local(aborted), out.bool_literal(true)));
-            result.push_back(out.assign(out.local(place), fallback));
+            for (auto const& r : safe)
+                result.push_back(out.assign(out.local(r.place), r.value));
         }
         else
             end_invocation(out, result);
         return result;
+    }
+
+    stmt_list failed(cc::vector<cc::string> pieces, cc::span<flat_expr_id const> values, local_id place, flat_expr_id fallback)
+    {
+        replacement const safe[] = {{.place = place, .value = fallback}};
+        return failed(cc::move(pieces), values, safe);
     }
 
     /// A local holding `value`: mutable where a deferring guard replaces it.
@@ -332,6 +346,193 @@ struct guarder
         return out.block_expr(label, index_type, stmts);
     }
 
+    // ---- the maths builtins of EVAL-87 --------------------------------------------------------------------------------
+
+    /// The shape of `type`, where it is a scalar of a number type, `float` and `half` included, or a vector of one.
+    [[nodiscard]] cc::optional<shape> number_shape_of(type_id type) const
+    {
+        if (!is_valid(type))
+            return {};
+        auto const is_number = [](cc::string_view name)
+        {
+            return name == "int" || name == "uint" || name == "short" || name == "ushort" || name == "float"
+                || name == "half";
+        };
+        auto const name = out.m.name_of(type);
+        if (is_number(name))
+            return shape{.width = 1, .element = name};
+        auto const& t = out.m.at(type);
+        if (t.kind != type_kind::structure || !t.has_swizzles)
+            return {};
+        auto const members = out.m.at(t.members);
+        if (members.size() < 2 || members.size() > 4)
+            return {};
+        auto result = shape{.width = i32(members.size()), .element = out.m.name_of(members[0].type)};
+        if (!is_number(result.element))
+            return {};
+        for (auto i = isize(0); i < members.size(); ++i)
+        {
+            if (out.m.name_of(members[i].type) != result.element)
+                return {};
+            result.lanes.push_back(i32(i));
+        }
+        return result;
+    }
+
+    [[nodiscard]] static bool is_float(shape const& s) { return s.element == "float" || s.element == "half"; }
+
+    /// Lane `i` of `local` in the type its comparisons are written in: `int`, `uint`, or `float`, a half widened.
+    [[nodiscard]] flat_expr_id number_lane(local_id local, shape const& s, i32 i)
+    {
+        if (!is_float(s))
+            return lane_of(local, s, i);
+        auto value = s.lanes.empty() ? out.local(local) : out.member(out.local(local), s.lanes[i]);
+        if (s.element == "half")
+            value = out.call("float", cc::span<flat_expr_id const>(&value, 1));
+        return value;
+    }
+
+    /// `value` as a literal of the type `number_lane` compares in.
+    flat_expr_id number_literal(shape const& s, f64 value)
+    {
+        return is_float(s) ? out.literal(value) : literal_for(s, i32(value));
+    }
+
+    /// `a op b` for lanes of shape `s`, where `op` is `less`, `less_equal` or `equal`.
+    flat_expr_id compare_numbers(cc::string_view op, shape const& s, flat_expr_id a, flat_expr_id b)
+    {
+        if (!is_float(s))
+            return compare(op, s, a, b);
+        flat_expr_id const args[] = {a, b};
+        return out.call(op, args);
+    }
+
+    /// A value of `type`, of shape `s`, whose every lane is `value` in the lane's own type.
+    flat_expr_id filled(type_id type, shape const& s, f64 value)
+    {
+        auto const one = [&]
+        {
+            auto lane = number_literal(s, value);
+            if (s.element == "half" || s.element == "short" || s.element == "ushort")
+                lane = out.call(s.element, cc::span<flat_expr_id const>(&lane, 1));
+            return lane;
+        };
+        if (s.lanes.empty())
+            return one();
+        auto lanes = cc::vector<flat_expr_id>();
+        for (auto i = 0; i < s.width; ++i)
+            lanes.push_back(one());
+        return out.construct(type, lanes);
+    }
+
+    /// The name of `call`'s builtin where it is one of EVAL-87's this pass guards; empty for every other call.
+    [[nodiscard]] cc::string_view guarded_math_of(flat_call const& call) const
+    {
+        if (!is_valid(call.intrinsic) || index_of(call.intrinsic) >= registry.functions.size())
+            return {};
+        auto const& r = registry.at(call.intrinsic);
+        if (r.undefined_when == nullptr)
+            return {};
+        for (auto const name : {"pow", "asin", "acos", "atan2", "smoothstep", "clamp"})
+            if (r.name == name)
+                return name;
+        return {};
+    }
+
+    /// `call`, a maths builtin of EVAL-87, as a block that ends the invocation where its operands have no value, each
+    /// test the one the interpreter asks; `id` itself where its operands are not of one number shape.
+    flat_expr_id guard_math(flat_expr_id id, cc::string_view name)
+    {
+        auto const x = out.e.at(id);
+        auto const& call = *x.node.try_as<flat_call>();
+        if (!is_known(out.e, call.arguments) || call.arguments.count == 0)
+            return id;
+        auto operands = cc::vector<flat_expr_id>();
+        for (auto const a : out.e.at(call.arguments))
+            operands.push_back(a);
+        auto const type = out.e.at(operands[0]).type;
+        auto const known = number_shape_of(type);
+        if (!known.has_value())
+            return id;
+        auto const s = known.value();
+        for (auto const a : operands)
+            if (out.e.at(a).type != type)
+                return id;
+
+        out.from = x.from;
+        out.inlined_through = x.inlined_through;
+        auto const label = out.add_label("guard");
+        auto stmts = stmt_list();
+        auto locals = cc::vector<local_id>();
+        for (auto const a : operands)
+            locals.push_back(pinned("operand", a, stmts));
+
+        auto bad = flat_expr_id::none;
+        for (auto i = 0; i < s.width; ++i)
+        {
+            auto const lane = [&](isize k) { return number_lane(locals[k], s, s.lanes.empty() ? 0 : i); };
+            auto const literal = [&](f64 v) { return number_literal(s, v); };
+            auto lane_bad = flat_expr_id::none;
+            if (name == "pow")
+                lane_bad = out.or_(compare_numbers("less", s, lane(0), literal(0.0)),
+                                   out.and_(compare_numbers("equal", s, lane(0), literal(0.0)),
+                                            compare_numbers("less_equal", s, lane(1), literal(0.0))));
+            else if (name == "asin" || name == "acos")
+                lane_bad = out.or_(compare_numbers("less", s, lane(0), literal(-1.0)),
+                                   compare_numbers("less", s, literal(1.0), lane(0)));
+            else if (name == "atan2")
+                lane_bad = out.and_(compare_numbers("equal", s, lane(0), literal(0.0)),
+                                    compare_numbers("equal", s, lane(1), literal(0.0)));
+            else if (name == "smoothstep")
+                lane_bad = out.not_(compare_numbers("less", s, lane(0), lane(1)));
+            else if (name == "clamp")
+                lane_bad = compare_numbers("less", s, lane(2), lane(1));
+            if (!is_valid(lane_bad))
+                return id;
+            bad = is_valid(bad) ? out.or_(bad, lane_bad) : lane_bad;
+        }
+
+        // what the operation computes once a deferring guard tripped: any value, so one that has one
+        auto safe = cc::vector<replacement>();
+        if (name == "pow")
+            safe.push_back({.place = locals[0], .value = filled(type, s, 1.0)});
+        else if (name == "asin" || name == "acos")
+            safe.push_back({.place = locals[0], .value = filled(type, s, 0.0)});
+        else if (name == "atan2")
+            safe.push_back({.place = locals[1], .value = filled(type, s, 1.0)});
+        else if (name == "smoothstep")
+        {
+            safe.push_back({.place = locals[0], .value = filled(type, s, 0.0)});
+            safe.push_back({.place = locals[1], .value = filled(type, s, 1.0)});
+        }
+        else if (name == "clamp")
+            safe.push_back({.place = locals[2], .value = out.local(locals[1])});
+
+        auto const is_16_bit_int = s.element == "short" || s.element == "ushort";
+        auto pieces = cc::vector<cc::string>();
+        auto values = cc::vector<flat_expr_id>();
+        if (is_16_bit_int)
+            pieces.push_back(cc::format("`{}` has no value for these operands", name));
+        else
+        {
+            pieces.push_back(cc::format("`{}(", name));
+            for (auto k = isize(1); k < locals.size(); ++k)
+                pieces.push_back(cc::string(", "));
+            pieces.push_back(cc::string(")` has no value"));
+            for (auto const local : locals)
+                values.push_back(out.local(local));
+        }
+        stmts.push_back(out.if_(bad, failed(cc::move(pieces), values, safe)));
+
+        auto guarded = call;
+        auto arguments = cc::vector<flat_expr_id>();
+        for (auto const local : locals)
+            arguments.push_back(out.local(local));
+        guarded.arguments = out.expr_list(arguments);
+        stmts.push_back(out.leave(label, out.add_expr(x.type, guarded)));
+        return out.block_expr(label, x.type, stmts);
+    }
+
     [[nodiscard]] bool is_integer_division(flat_call const& call) const
     {
         if (!is_valid(call.intrinsic) || index_of(call.intrinsic) >= registry.functions.size())
@@ -401,6 +602,9 @@ struct guarder
         if (auto const* const call = out.e.at(result).node.try_as<flat_call>();
             call != nullptr && may_guard && is_integer_division(*call))
             return guard_division(result);
+        if (auto const* const call = out.e.at(result).node.try_as<flat_call>(); call != nullptr && may_guard)
+            if (auto const name = guarded_math_of(*call); !name.empty())
+                return guard_math(result, name);
         return result;
     }
 
