@@ -438,6 +438,9 @@ constexpr cc::string_view k_bool = "bool";
 constexpr cc::string_view k_half = "half";
 constexpr cc::string_view k_short = "short";
 constexpr cc::string_view k_ushort = "ushort";
+constexpr cc::string_view k_long = "long";
+constexpr cc::string_view k_ulong = "ulong";
+constexpr cc::string_view k_double = "double";
 constexpr cc::string_view k_hpos4 = "hpos4";
 
 /// Every builtin SGL has, registered in a fixed order and finalized.

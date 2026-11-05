@@ -446,6 +446,10 @@ struct optional_shader_features
 {
     VkBool32 shader_float16 = VK_FALSE;
     VkBool32 shader_int16 = VK_FALSE;
+    VkBool32 shader_int64 = VK_FALSE;
+    VkBool32 shader_float64 = VK_FALSE;
+    /// sg::feature::shader_int64_atomics, a buffer's; SGL holds no 64-bit atomic in workgroup memory yet.
+    VkBool32 buffer_int64_atomics = VK_FALSE;
     VkBool32 storage_buffer_16bit = VK_FALSE;
     VkBool32 uniform_and_storage_buffer_16bit = VK_FALSE;
     /// An HLSL push constant may hold a 16-bit member, which needs this bit; SGL refuses one in an `@inline` binding.
@@ -480,6 +484,7 @@ struct optional_shader_features
     }
     [[nodiscard]] bool has_f16() const { return shader_float16 == VK_TRUE && has_16bit_support(); }
     [[nodiscard]] bool has_int16() const { return shader_int16 == VK_TRUE && has_16bit_support(); }
+    [[nodiscard]] bool has_int64_atomics() const { return shader_int64 == VK_TRUE && buffer_int64_atomics == VK_TRUE; }
 };
 
 optional_shader_features query_optional_shader_features(VkPhysicalDevice dev)
@@ -516,6 +521,9 @@ optional_shader_features query_optional_shader_features(VkPhysicalDevice dev)
     return {
         .shader_float16 = vk12.shaderFloat16,
         .shader_int16 = features.features.shaderInt16,
+        .shader_int64 = features.features.shaderInt64,
+        .shader_float64 = features.features.shaderFloat64,
+        .buffer_int64_atomics = vk12.shaderBufferInt64Atomics,
         .storage_buffer_16bit = vk11.storageBuffer16BitAccess,
         .uniform_and_storage_buffer_16bit = vk11.uniformAndStorageBuffer16BitAccess,
         .storage_push_constant_16bit = vk11.storagePushConstant16,
@@ -872,6 +880,7 @@ cc::result<context_handle> create_vulkan_context(backend::vulkan::vulkan_config 
     auto vk12_features = VkPhysicalDeviceVulkan12Features{
         .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES,
         .pNext = &vk13_features,
+        .shaderBufferInt64Atomics = shader_features.buffer_int64_atomics,
         .shaderFloat16 = shader_features.shader_float16,
         .shaderUniformBufferArrayNonUniformIndexing = shader_features.uniform_buffer_array_non_uniform_indexing,
         .shaderSampledImageArrayNonUniformIndexing = shader_features.sampled_image_array_non_uniform_indexing,
@@ -952,6 +961,8 @@ cc::result<context_handle> create_vulkan_context(backend::vulkan::vulkan_config 
                      .vertexPipelineStoresAndAtomics = supported.vertexPipelineStoresAndAtomics,
                      .fragmentStoresAndAtomics = VK_TRUE,
                      .shaderStorageImageExtendedFormats = supported.shaderStorageImageExtendedFormats,
+                     .shaderFloat64 = shader_features.shader_float64,
+                     .shaderInt64 = shader_features.shader_int64,
                      .shaderInt16 = shader_features.shader_int16},
     };
 
@@ -1076,6 +1087,9 @@ cc::result<context_handle> create_vulkan_context(backend::vulkan::vulkan_config 
     }
     ctx->_shader_f16 = shader_features.has_f16();
     ctx->_shader_int16 = shader_features.has_int16();
+    ctx->_shader_int64 = shader_features.shader_int64 == VK_TRUE;
+    ctx->_shader_f64 = shader_features.shader_float64 == VK_TRUE;
+    ctx->_shader_int64_atomics = shader_features.has_int64_atomics();
     ctx->_subgroups = shader_features.subgroups;
     ctx->_vertex_layer_output = shader_features.shader_output_layer == VK_TRUE;
     ctx->_view_instancing = shader_features.multiview == VK_TRUE;

@@ -816,6 +816,11 @@ cc::string_view sgl::emit::impl::atomic_text(plan const& p, check::type_id type)
     if (element == builtins::k_float && p.native_float_atomics)
         return p.which == target::msl ? "atomic_float" : "float";
     auto const is_signed = element == builtins::k_int;
+    // a 64-bit atomic is no target's but HLSL's (EMIT-192)
+    if (element == builtins::k_long)
+        return "int64_t";
+    if (element == builtins::k_ulong)
+        return "uint64_t";
     switch (p.which)
     {
     case target::hlsl_dx12:
@@ -1196,6 +1201,13 @@ cc::string_view sgl::emit::impl::row_vector_of(plan const& p, check::type_id ele
         return "short4";
     case check::value_kind::scalar_ushort:
         return "ushort4";
+    // a row of 16 bytes holds two 64-bit scalars (EMIT-191)
+    case check::value_kind::scalar_long:
+        return "long2";
+    case check::value_kind::scalar_ulong:
+        return "ulong2";
+    case check::value_kind::scalar_double:
+        return "double2";
     default:
         return "float4";
     }

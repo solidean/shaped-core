@@ -743,6 +743,12 @@ type_id checker::scalar_of_closed(type_id of) const
             return prelude_type("short");
         case value_kind::scalar_ushort:
             return prelude_type("ushort");
+        case value_kind::scalar_long:
+            return prelude_type("long");
+        case value_kind::scalar_ulong:
+            return prelude_type("ulong");
+        case value_kind::scalar_double:
+            return prelude_type("double");
         case value_kind::boolean:
             return prelude_type("bool");
         default:

@@ -197,10 +197,21 @@ bool every_language(language)
     return true;
 }
 
-/// The data word: the operation, and whether the atomic holds an `int`.
-u32 atomic_data(atomic_op op, bool is_signed)
+/// The data word: the operation, whether the atomic holds a signed integer, and whether a 64-bit one (CHK-296).
+u32 atomic_data(atomic_op op, bool is_signed, bool is_wide = false)
 {
-    return u32(op) | (is_signed ? 0x100u : 0u);
+    return u32(op) | (is_signed ? 0x100u : 0u) | (is_wide ? 0x200u : 0u);
+}
+
+/// The integer an atomic of `data` holds, as `target` spells it; a 64-bit one is never MSL's or WGSL's (EMIT-192).
+cc::string_view atomic_scalar(u32 data, language target)
+{
+    auto const is_signed = (data & 0x100u) != 0;
+    if ((data & 0x200u) != 0)
+        return is_signed ? "int64_t" : "uint64_t";
+    if (target == language::wgsl)
+        return is_signed ? "i32" : "u32";
+    return is_signed ? "int" : "uint";
 }
 
 /// A fresh name of the text, or `desired` itself where no text is being written.
@@ -315,7 +326,7 @@ written write_exchange(call_context const& ctx,
 written write_hlsl_exchange(call_context const& ctx, cc::string_view place, written result)
 {
     auto const& info = k_atomics[ctx.data & 0xffu];
-    auto const t = (ctx.data & 0x100u) != 0 ? "int" : "uint";
+    auto const t = atomic_scalar(ctx.data, language::hlsl);
     auto const before = minted(ctx, "atomic_before");
     auto const desired = wrapped(ctx.arguments[2], precedence::primary);
     if (info.op == atomic_op::compare_exchange_strong)
@@ -354,11 +365,13 @@ written write_atomic(call_context const& ctx)
     {
         // `Interlocked*` gives the value before through an out parameter, so a local declared ahead holds it
         auto const before = minted(ctx, "atomic_before");
+        auto const is_wide = (ctx.data & 0x200u) != 0;
+        auto const zero = is_wide ? (is_signed ? "0LL" : "0ULL") : (is_signed ? "0" : "0u");
         auto const operand = info.op == atomic_op::subtract ? cc::format("-{}", v)
-                           : info.op == atomic_op::load     ? cc::string(is_signed ? "0" : "0u")
+                           : info.op == atomic_op::load     ? cc::string(zero)
                                                             : v;
         auto result = written{.text = before};
-        result.lines.push_back(cc::format("{} {};", is_signed ? "int" : "uint", before));
+        result.lines.push_back(cc::format("{} {};", atomic_scalar(ctx.data, language::hlsl), before));
         result.lines.push_back(cc::format("Interlocked{}({}, {}, {});", info.hlsl, a, operand, before));
         if (info.op == atomic_op::store)
             result.text = {};
@@ -376,32 +389,36 @@ written write_atomic(call_context const& ctx)
     return {};
 }
 
-template <bool IsSigned>
+/// An update of the integer of `Kind`, 32 or 64 bits, wrapping in either.
+template <value_kind Kind>
 scalar updated(atomic_op op, scalar old, scalar v)
 {
-    auto const kind = IsSigned ? value_kind::scalar_int : value_kind::scalar_uint;
-    auto const a = old.bits;
-    auto const b = v.bits;
-    auto const less = IsSigned ? i32(a) < i32(b) : a < b;
+    constexpr auto is_wide = check::is_64_bit(Kind);
+    constexpr auto is_signed = Kind == value_kind::scalar_int || Kind == value_kind::scalar_long;
+    auto const a = old.wide_bits();
+    auto const b = v.wide_bits();
+    auto const less = !is_signed ? a < b : is_wide ? i64(a) < i64(b) : i32(u32(a)) < i32(u32(b));
+    auto const of = [](u64 bits)
+    { return check::is_64_bit(Kind) ? scalar::of_wide(Kind, bits) : scalar{.kind = Kind, .bits = u32(bits)}; };
     switch (op)
     {
     case atomic_op::add:
-        return {.kind = kind, .bits = a + b};
+        return of(a + b);
     case atomic_op::subtract:
-        return {.kind = kind, .bits = a - b};
+        return of(a - b);
     case atomic_op::min:
-        return {.kind = kind, .bits = less ? a : b};
+        return of(less ? a : b);
     case atomic_op::max:
-        return {.kind = kind, .bits = less ? b : a};
+        return of(less ? b : a);
     case atomic_op::bit_and:
-        return {.kind = kind, .bits = a & b};
+        return of(a & b);
     case atomic_op::bit_or:
-        return {.kind = kind, .bits = a | b};
+        return of(a | b);
     case atomic_op::bit_xor:
-        return {.kind = kind, .bits = a ^ b};
+        return of(a ^ b);
     case atomic_op::exchange:
     case atomic_op::store:
-        return {.kind = kind, .bits = b};
+        return of(b);
     case atomic_op::load:
         return old;
     case atomic_op::compare_exchange_strong:
@@ -412,20 +429,20 @@ scalar updated(atomic_op op, scalar old, scalar v)
 }
 
 /// The atomic's value first, then the operand; gives what the atomic holds after (EVAL-93).
-template <atomic_op Op, bool IsSigned>
+template <atomic_op Op, value_kind Kind>
 void atomic_update(cc::span<scalar const> in, cc::vector<scalar>& out)
 {
-    out.push_back(updated<IsSigned>(Op, in[0], in.size() > 1 ? in[1] : in[0]));
+    out.push_back(updated<Kind>(Op, in[0], in.size() > 1 ? in[1] : in[0]));
 }
 
 /// The atomic's value, `expected` and `desired`: a run is one invocation, so no other update makes it fail (EVAL-93).
 /// The interpreter decides a weak one's spurious failures itself, and gives the value read and whether it stored.
 void exchanged(cc::span<scalar const> in, cc::vector<scalar>& out)
 {
-    out.push_back(in[0].bits == in[1].bits ? in[2] : in[0]);
+    out.push_back(in[0].wide_bits() == in[1].wide_bits() ? in[2] : in[0]);
 }
 
-template <bool IsSigned>
+template <value_kind Kind>
 evaluator evaluator_of(atomic_op op)
 {
     switch (op)
@@ -434,25 +451,25 @@ evaluator evaluator_of(atomic_op op)
     case atomic_op::compare_exchange_weak:
         return exchanged;
     case atomic_op::add:
-        return atomic_update<atomic_op::add, IsSigned>;
+        return atomic_update<atomic_op::add, Kind>;
     case atomic_op::subtract:
-        return atomic_update<atomic_op::subtract, IsSigned>;
+        return atomic_update<atomic_op::subtract, Kind>;
     case atomic_op::min:
-        return atomic_update<atomic_op::min, IsSigned>;
+        return atomic_update<atomic_op::min, Kind>;
     case atomic_op::max:
-        return atomic_update<atomic_op::max, IsSigned>;
+        return atomic_update<atomic_op::max, Kind>;
     case atomic_op::bit_and:
-        return atomic_update<atomic_op::bit_and, IsSigned>;
+        return atomic_update<atomic_op::bit_and, Kind>;
     case atomic_op::bit_or:
-        return atomic_update<atomic_op::bit_or, IsSigned>;
+        return atomic_update<atomic_op::bit_or, Kind>;
     case atomic_op::bit_xor:
-        return atomic_update<atomic_op::bit_xor, IsSigned>;
+        return atomic_update<atomic_op::bit_xor, Kind>;
     case atomic_op::exchange:
-        return atomic_update<atomic_op::exchange, IsSigned>;
+        return atomic_update<atomic_op::exchange, Kind>;
     case atomic_op::load:
-        return atomic_update<atomic_op::load, IsSigned>;
+        return atomic_update<atomic_op::load, Kind>;
     case atomic_op::store:
-        return atomic_update<atomic_op::store, IsSigned>;
+        return atomic_update<atomic_op::store, Kind>;
     }
     return nullptr;
 }
@@ -807,9 +824,23 @@ void sgl::builtins::register_sync(registry& r)
     r.add_comment("// Atomics, called as methods of the atomic they update: `stats.hits[0].add(1)`.\n"
                   "// Each is relaxed, and each but a store gives the value before; only the stages its `@stages` "
                   "names take one (CHK-296).");
-    for (auto const is_signed : {false, true})
+    struct atomic_type
     {
-        auto const t = is_signed ? "int" : "uint";
+        cc::string_view name;
+        value_kind kind;
+    };
+    // CHK-296: a 64-bit atomic needs shader_int64_atomics, which a buffer's and workgroup memory's alike
+    for (auto const [t, kind] : {atomic_type{"uint", value_kind::scalar_uint},
+                                 {"int", value_kind::scalar_int},
+                                 {"ulong", value_kind::scalar_ulong},
+                                 {"long", value_kind::scalar_long}})
+    {
+        auto const is_signed = kind == value_kind::scalar_int || kind == value_kind::scalar_long;
+        auto const is_wide = check::is_64_bit(kind);
+        auto const evaluate = kind == value_kind::scalar_uint  ? evaluator_of<value_kind::scalar_uint>
+                            : kind == value_kind::scalar_int   ? evaluator_of<value_kind::scalar_int>
+                            : kind == value_kind::scalar_ulong ? evaluator_of<value_kind::scalar_ulong>
+                                                               : evaluator_of<value_kind::scalar_long>;
         for (auto const& info : k_atomics)
         {
             auto const signature
@@ -824,16 +855,17 @@ void sgl::builtins::register_sync(registry& r)
             r.add(function_record{
                 .signature = cc::format("{} {}", k_atomic_stages, signature),
                 .doc = info.doc,
-                .evaluate = is_signed ? evaluator_of<true>(info.op) : evaluator_of<false>(info.op),
+                .evaluate = evaluate(info.op),
                 .write = {.kind = spelling_kind::custom,
                           .custom = write_atomic,
                           .writes_lines = is_compare_exchange(info.op) ? every_language : is_hlsl,
-                          .data = atomic_data(info.op, is_signed),
+                          .data = atomic_data(info.op, is_signed, is_wide),
                           .hlsl_names = k_atomics_hlsl,
                           .wgsl_names = k_atomics_wgsl,
                           .msl_names = k_atomics_msl},
                 .is_atomic = true,
                 .gives_prelude_struct = info.op == atomic_op::compare_exchange_weak,
+                .features = is_wide ? check::feature_set(check::feature::shader_int64_atomics) : check::feature_set(),
                 .pixel_features = strong_pixel_features(info.op),
             });
         }

@@ -60,6 +60,12 @@ enum class sgl::check::feature : sgl::u8
     /// A vertex, geometry or tessellation stage writes a storage buffer, which vulkan asks of the device (EMIT-183).
     /// No program names it: a vulkan text writes a `print` from those stages where the device has it, and drops one elsewhere.
     vertex_pipeline_stores,
+    /// `long`, `ulong` and their vectors (CHK-451), which WebGPU has on no device.
+    shader_int64,
+    /// `double` and its vectors (CHK-451), which WebGPU and Metal have on no device.
+    shader_f64,
+    /// `atomic[long]` and `atomic[ulong]` in a buffer (CHK-296), which WebGPU and Metal have on no device.
+    shader_int64_atomics,
 };
 
 CC_FLAG_ENUM_INDEXED(sgl::check, feature, u32);
@@ -94,6 +100,9 @@ inline constexpr cc::string_view k_feature_names[] = {
     "float_denormals",             //
     "view_instancing",             //
     "vertex_pipeline_stores",      //
+    "shader_int64",                //
+    "shader_f64",                  //
+    "shader_int64_atomics",        //
 };
 inline constexpr isize k_feature_count = isize(sizeof(k_feature_names) / sizeof(k_feature_names[0]));
 

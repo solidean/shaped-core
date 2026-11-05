@@ -13,6 +13,7 @@ void sgl::builtins::register_builtins(registry& r)
     register_transforms(r);
     register_conversions(r);
     register_bit_math(r);
+    register_64_bit_math(r);
     register_math(r);
     register_textures(r);
     register_bytes(r);
@@ -273,11 +274,15 @@ cc::string_view impl::clamp_undefined(cc::span<scalar const> in)
     {
         auto const low = in[width + i];
         auto const high = in[2 * width + i];
-        auto is_above = low.bits > high.bits;
+        auto is_above = low.wide_bits() > high.wide_bits();
         if (low.kind == value_kind::scalar_float)
             is_above = low.as_float() > high.as_float();
         else if (low.kind == value_kind::scalar_int)
             is_above = low.as_int() > high.as_int();
+        else if (low.kind == value_kind::scalar_double)
+            is_above = low.as_double() > high.as_double();
+        else if (low.kind == value_kind::scalar_long)
+            is_above = low.as_long() > high.as_long();
         if (is_above)
             return "clamp whose low bound is above its high one";
     }
