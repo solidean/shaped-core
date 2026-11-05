@@ -381,6 +381,9 @@ public:
             return _float_denormals;
         case sg::feature::view_instancing:
             return _view_instancing;
+        case sg::feature::ray_tracing_motion_blur:
+            // VK_NV_ray_tracing_motion_blur reaches a pipeline's trace alone, which no SGL text writes yet
+            return false;
         case sg::feature::vertex_pipeline_stores:
             return _vertex_pipeline_stores;
         // SPIR-V's `Coherent` decoration is core, and storage-image atomics on r32 integer formats are required.

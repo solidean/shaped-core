@@ -188,6 +188,9 @@ public:
         case sg::feature::view_instancing:
             // WebGPU has no multiview; WebXR hands out a texture per view instead
             return false;
+        case sg::feature::ray_tracing_motion_blur:
+            // the polyfill's walk places a moving instance at the ray's time
+            return true;
         case sg::feature::vertex_pipeline_stores:
             // a vertex stage binds no writable storage on any WebGPU device
             return false;

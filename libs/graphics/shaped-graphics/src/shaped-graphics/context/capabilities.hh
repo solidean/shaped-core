@@ -206,6 +206,11 @@ enum class sg::feature
     /// D3D12 grants it at resource binding tier 3, Vulkan with `descriptorBindingVariableDescriptorCount`.
     /// Metal would reach it through an argument buffer, which is not wired up yet, and WebGPU has no binding arrays.
     unbounded_binding_arrays,
+
+    /// A TLAS instance may move over the frame (`tlas_instance::transform_at_end`), and a trace places it at its ray's time.
+    /// webgpu has it through the ray-query polyfill; DXR has no motion, and vulkan's VK_NV_ray_tracing_motion_blur
+    /// reaches no ray query, so neither native backend answers it yet, nor metal.
+    ray_tracing_motion_blur,
 };
 
 CC_FLAG_ENUM_INDEXED(sg, feature, cc::u64);
@@ -254,8 +259,9 @@ inline constexpr feature k_all_features[] = {
     feature::shader_f64,
     feature::shader_int64_atomics,
     feature::unbounded_binding_arrays,
+    feature::ray_tracing_motion_blur,
 };
-static_assert(isize(sizeof(k_all_features) / sizeof(k_all_features[0])) == isize(feature::unbounded_binding_arrays) + 1,
+static_assert(isize(sizeof(k_all_features) / sizeof(k_all_features[0])) == isize(feature::ray_tracing_motion_blur) + 1,
               "k_all_features lists every feature");
 
 /// The enumerator's name, `ray_query`, which is also what SGL's `require` spells it as.
@@ -337,6 +343,8 @@ static_assert(isize(sizeof(k_all_features) / sizeof(k_all_features[0])) == isize
         return "shader_int64_atomics";
     case feature::unbounded_binding_arrays:
         return "unbounded_binding_arrays";
+    case feature::ray_tracing_motion_blur:
+        return "ray_tracing_motion_blur";
     }
     return "";
 }
