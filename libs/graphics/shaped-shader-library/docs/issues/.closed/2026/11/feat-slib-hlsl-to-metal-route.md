@@ -23,7 +23,7 @@ Its source is HLSL, so the cube reaches metal through `sgl-cube` instead, from a
 `metal-cube` was the stand-in for that and is gone, along with its copy of the geometry, the camera maths, the hand-written vertex layout and the checked-in metallib.
 
 The hand-written metal tier-2 fixtures in shaped-graphics waited on the same route:
-[debt-sg-metal-hand-written-fixtures](../../../../../../shaped-graphics/docs/issues/debt-sg-metal-hand-written-fixtures.md).
+[debt-sg-metal-hand-written-fixtures](../../../../../../shaped-graphics/docs/issues/.closed/2026/11/debt-sg-metal-hand-written-fixtures.md).
 
 **Closed as wontfix on 2026-11-04: HLSL not reaching metal is expected and accepted.**
 SGL is the one source language promised on every target; HLSL serves dx12 and vulkan only.

@@ -38,6 +38,7 @@ struct sr::micromap_bake_input
 
 /// What a bake hands `cmd.raytracing.build_micromap` and the `blas_triangles` that names it.
 /// The states are written on the GPU by the dispatch that made them, which the build is ordered after.
+/// **Every buffer is transient**: build the micromap and the BLAS in the epoch of the bake; a later build reads freed memory.
 struct sr::micromap_bake
 {
     sg::micromap_triangles triangles;

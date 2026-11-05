@@ -500,6 +500,16 @@ struct sgl::check::symbol
     bool operator==(symbol const&) const = default;
 };
 
+namespace sgl::check
+{
+/// A function of a type scope, which is reached through its type and inlined, so no target text writes its name (CHK-105).
+/// A constructor's name is its struct's, which the struct takes anyway.
+[[nodiscard]] inline bool takes_no_emitted_name(symbol const& s)
+{
+    return s.kind == symbol_kind::function && s.owner != symbol_id::none;
+}
+} // namespace sgl::check
+
 enum class sgl::check::constant_kind : sgl::u8
 {
     integer,

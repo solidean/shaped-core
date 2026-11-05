@@ -53,7 +53,11 @@ sg::memory_requirements dx12_memory_heap::query_buffer_requirements(isize size_i
     if (size_in_bytes == 0)
         return {.alignment_in_bytes = D3D12_DEFAULT_RESOURCE_PLACEMENT_ALIGNMENT, .size_in_bytes = 0};
 
-    D3D12_RESOURCE_DESC const desc = buffer_resource_desc(size_in_bytes, usage);
+    // the acceleration-structure flag is the enhanced creation calls' alone, and changes no size
+    auto desc = buffer_resource_desc(size_in_bytes, usage);
+#if SG_HAS_AGILITY
+    desc.Flags &= ~D3D12_RESOURCE_FLAG_RAYTRACING_ACCELERATION_STRUCTURE;
+#endif
     D3D12_RESOURCE_ALLOCATION_INFO const info = _device->GetResourceAllocationInfo(0, 1, &desc);
     return {.alignment_in_bytes = isize(info.Alignment), .size_in_bytes = isize(info.SizeInBytes)};
 }

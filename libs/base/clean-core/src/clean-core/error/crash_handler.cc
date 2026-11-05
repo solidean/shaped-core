@@ -497,6 +497,8 @@ bool with_symbols(F&& walk) noexcept
             // common case where the process never crashes at all.
             // A report that is not fatal keeps the process running, so the session it shares stays up after it.
             cc::impl::ensure_process_symbols_locked();
+            // the session came up at the first symbolization, so a module loaded since is unknown to it until refreshed
+            SymRefreshModuleList(GetCurrentProcess());
             walk();
         });
 }

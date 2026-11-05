@@ -242,19 +242,19 @@ type_id checker::check_pipeline_trace(function_scope& scope, ast::expr_id id, as
         }
         else if (type == uint_type)
         {
-            auto const bits = ast::is_valid(reorder_bits) ? constant_count(file, reorder_bits, &scope) : cc::nullopt;
+            // checked as any expression is, so a const or an arithmetic of literals is flattened like one
+            auto const is_int = ast::is_valid(reorder_bits)
+                             && check_expected(scope, reorder_bits, type_of_builtin(builtins::k_int, file, where))
+                                    != checked_module::error_type;
+            auto const bits = is_int ? constant_count(file, reorder_bits, &scope) : cc::nullopt;
             if (!bits.has_value() || bits.value() < 1 || bits.value() > 16)
             {
-                if (ast::is_valid(reorder_bits))
-                    (void)check_expr(scope, reorder_bits);
                 report(diagnostic_kind::invalid_constant_argument, file,
                        span_of(file, ast::is_valid(reorder_bits) ? reorder_bits : reorder),
                        "a uint hint says how many of its low bits regroup by, as an int constant from 1 to 16: "
                        "`reorder_bits = 4`");
                 is_sound = false;
             }
-            else
-                set_type(file, reorder_bits, type_of_builtin(builtins::k_int, file, where));
         }
         else if (type != checked_module::error_type)
         {

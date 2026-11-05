@@ -6,6 +6,8 @@ parent: epic-xr
 refs:
   - symbol: sg::backend::vulkan::vulkan_config
   - symbol: sg::backend::dx12::dx12_config
+claimed-by: Claude (for Philip Trettner)
+claimed-at: 2026-11-05T12:44Z
 ---
 
 # Contexts created to a spec someone else dictates

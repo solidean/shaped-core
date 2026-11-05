@@ -35,7 +35,7 @@ D3D12_RESOURCE_DESC buffer_resource_desc(isize size_in_bytes, sg::buffer_usages 
 #if SG_HAS_AGILITY
     // The Agility runtime marks an acceleration structure's buffer with a flag of its own, which a micromap array must
     // carry beside the UAV flag.
-    if (usage.has(sg::buffer_usage::accel_structure_storage) && runs_agility_runtime())
+    if (usage.has(sg::buffer_usage::accel_structure_storage) && marks_acceleration_structures())
         desc.Flags |= D3D12_RESOURCE_FLAG_RAYTRACING_ACCELERATION_STRUCTURE;
 #endif
     return desc;
@@ -186,10 +186,9 @@ cc::result<dx12_buffer_handle> dx12_context::create_dx12_buffer(isize size_in_by
         auto const is_flagged_structure = (desc.Flags & D3D12_RESOURCE_FLAG_RAYTRACING_ACCELERATION_STRUCTURE) != 0;
         ComPtr<ID3D12Device10> device10;
         if (is_flagged_structure)
-        {
-            [[maybe_unused]] HRESULT const device10_hr = _device.As(&device10);
-            CC_ASSERT(SUCCEEDED(device10_hr) && device10, "the Agility runtime's device has no ID3D12Device10");
-        }
+            if (HRESULT hr = _device.As(&device10); FAILED(hr) || device10 == nullptr)
+                return dx12_error(FAILED(hr) ? hr : E_NOINTERFACE, "the Agility runtime's device has no "
+                                                                   "ID3D12Device10");
         auto const desc1 = D3D12_RESOURCE_DESC1{.Dimension = desc.Dimension,
                                                 .Alignment = desc.Alignment,
                                                 .Width = desc.Width,

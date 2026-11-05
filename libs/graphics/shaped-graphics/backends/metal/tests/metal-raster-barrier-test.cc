@@ -1,5 +1,5 @@
-#include "mesh-fixture.hh"
 #include "metal-test-common.hh"
+#include "sgl-fixture.hh"
 
 #include <clean-core/common/utility.hh>
 #include <clean-core/string/format.hh>
@@ -39,31 +39,42 @@ constexpr auto k_hazard_count = k_size * k_size;
     });
 }
 
-/// A group layout holding one binding of `type` named `name`, at index 0.
-[[nodiscard]] cc::result<sg::binding_group_layout_handle> one_binding_layout(mtl::metal_context_handle const& ctx,
-                                                                             cc::string_view name,
-                                                                             sg::binding_type type,
-                                                                             sg::access_mode access
-                                                                             = sg::access_mode::read)
-{
-    auto bindings = cc::vector<sg::binding>();
-    bindings.push_back({.name = cc::string(name), .space = 0, .index = 0, .count = 1, .type = type, .access = access});
+namespace draws = mtl::test::shaders::draws;
+namespace kernels = mtl::test::shaders::kernels;
 
+/// A group layout over `bindings`, which a group of the package declares.
+[[nodiscard]] cc::result<sg::binding_group_layout_handle> group_layout_of(mtl::metal_context_handle const& ctx,
+                                                                          cc::span<sg::binding const> bindings)
+{
     auto layout = ctx->create_metal_binding_group_layout(bindings, {}, sg::lifetime_scope::persistent);
     if (layout.has_error())
         return cc::error(layout.error().to_string());
     return sg::binding_group_layout_handle(layout.value());
 }
 
-/// The raster pipeline of the two hazard draws: no vertex input, one group, and `entry` as the fragment stage.
+/// The two stages of a full-screen draw: the covering triangle, and `Fragment`'s shader.
+struct full_screen_stages
+{
+    sg::compiled_shader vertex;
+    sg::compiled_shader fragment;
+};
+
+template <class Fragment>
+[[nodiscard]] cc::shared_async<full_screen_stages> compile_full_screen(mtl::metal_context& ctx, Fragment const& fragment)
+{
+    co_return full_screen_stages{.vertex = co_await mtl::test::sgl_shader(ctx, draws::covering_vs),
+                                 .fragment = co_await mtl::test::sgl_shader(ctx, fragment)};
+}
+
+/// The raster pipeline of a full-screen draw: no vertex input, one group, and `stages`.
 [[nodiscard]] cc::result<mtl::metal_raster_pipeline_handle> make_hazard_pipeline(mtl::metal_context_handle const& ctx,
                                                                                  sg::pipeline_layout_handle const& layout,
-                                                                                 cc::string entry)
+                                                                                 full_screen_stages const& stages)
 {
     auto desc = sg::raster_pipeline_description{
         .layout = layout,
-        .vertex_shader = mtl::test::mesh_shader(sg::shader_stage::vertex, "hazard_vertex_main"),
-        .fragment_shader = mtl::test::mesh_shader(sg::shader_stage::fragment, cc::move(entry)),
+        .vertex_shader = stages.vertex,
+        .fragment_shader = stages.fragment,
         .rasterization = {.cull = sg::cull_mode::none},
     };
     desc.color_targets.push_back({.format = sg::pixel_format::rgba8_unorm});
@@ -72,7 +83,7 @@ constexpr auto k_hazard_count = k_size * k_size;
 }
 } // namespace
 
-TEST("sg metal - a draw loop over a readonly group emits no barrier")
+ASYNC_TEST("sg metal - a draw loop over a readonly group emits no barrier", exclusive("slib-shader-library"))
 {
     auto const ctx = mtl::test::make_context();
     if (ctx == nullptr)
@@ -82,7 +93,7 @@ TEST("sg metal - a draw loop over a readonly group emits no barrier")
     // draw has to wait on.
     // Declaring `shader_read | shader_write` for every binding instead made each draw meet the previous draw's
     // unordered write — one barrier per draw, for a loop that never writes anything at all.
-    auto group_layout = one_binding_layout(ctx, "palette", sg::binding_type::buffer);
+    auto group_layout = group_layout_of(ctx, draws::palette::declared_bindings());
     REQUIRE(group_layout.has_value());
 
     auto layout_desc = sg::pipeline_layout_description{};
@@ -90,13 +101,14 @@ TEST("sg metal - a draw loop over a readonly group emits no barrier")
     auto pipeline_layout = ctx->create_metal_pipeline_layout(layout_desc, sg::lifetime_scope::persistent);
     REQUIRE(pipeline_layout.has_value());
 
-    auto pipeline = make_hazard_pipeline(ctx, sg::pipeline_layout_handle(pipeline_layout.value()), "hazard_read_main");
+    auto pipeline = make_hazard_pipeline(ctx, sg::pipeline_layout_handle(pipeline_layout.value()),
+                                         co_await compile_full_screen(*ctx, draws::palette_ps));
     REQUIRE(pipeline.has_value()).context(pipeline.has_error() ? pipeline.error().to_string() : cc::string());
 
     auto const palette
         = ctx->persistent.create_raw_buffer(k_hazard_count * isize(sizeof(u32)), sg::buffer_usage::readonly_buffer);
     auto const nv = sg::named_view{
-        .name = "palette",
+        .name = "palette.entries",
         .view = palette->as_raw_readonly({.offset = 0, .size = palette->size_in_bytes()}, isize(sizeof(u32)))};
     auto group = ctx->create_metal_binding_group(group_layout.value(), cc::span<sg::named_view const>(&nv, 1), {},
                                                  sg::lifetime_scope::persistent);
@@ -128,7 +140,7 @@ TEST("sg metal - a draw loop over a readonly group emits no barrier")
     CHECK(emitted == 0).context(cc::format("64 read-only draws emitted {} barrier(s)", emitted));
 }
 
-ASYNC_TEST("sg metal - two dispatches reading one buffer emit no barrier between them")
+ASYNC_TEST("sg metal - two dispatches reading one buffer emit no barrier between them", exclusive("slib-shader-library"))
 {
     auto const ctx = mtl::test::make_context();
     if (ctx == nullptr)
@@ -137,14 +149,7 @@ ASYNC_TEST("sg metal - two dispatches reading one buffer emit no barrier between
     // The compute twin of the draw loop, and the path that had the bug first: `declare_bound_groups` is shared.
     // One `source` read by both dispatches, and a `target` of its own for each, so the only thing either could order
     // against is the shared read.
-    auto shader = mtl::test::mesh_kernel("copy_main");
-    shader.bindings.push_back({.name = "source", .space = 0, .index = 0, .count = 1, .type = sg::binding_type::buffer});
-    shader.bindings.push_back({.name = "target",
-                               .space = 0,
-                               .index = 1,
-                               .count = 1,
-                               .type = sg::binding_type::buffer,
-                               .access = sg::access_mode::read_write});
+    auto const shader = co_await mtl::test::sgl_shader(*ctx, kernels::copy_main);
 
     auto group_layout = ctx->create_metal_binding_group_layout(shader.bindings, {}, sg::lifetime_scope::persistent);
     REQUIRE(group_layout.has_value());
@@ -166,10 +171,10 @@ ASYNC_TEST("sg metal - two dispatches reading one buffer emit no barrier between
     {
         auto views = cc::vector<sg::named_view>();
         views.push_back(
-            {.name = "source",
+            {.name = "copied.source",
              .view = source->as_raw_readonly({.offset = 0, .size = source->size_in_bytes()}, isize(sizeof(u32)))});
         views.push_back(
-            {.name = "target",
+            {.name = "copied.target",
              .view = target->as_raw_readwrite({.offset = 0, .size = target->size_in_bytes()}, isize(sizeof(u32)))});
         return ctx->create_metal_binding_group(group_layout.value(), views, {}, sg::lifetime_scope::persistent);
     };
@@ -221,7 +226,7 @@ ASYNC_TEST("sg metal - two dispatches reading one buffer emit no barrier between
     CHECK(mismatches == 0);
 }
 
-ASYNC_TEST("sg metal - a draw sees what the previous draw's fragment shader wrote")
+ASYNC_TEST("sg metal - a draw sees what the previous draw's fragment shader wrote", exclusive("slib-shader-library"))
 {
     auto const ctx = mtl::test::make_context();
     if (ctx == nullptr)
@@ -235,7 +240,7 @@ ASYNC_TEST("sg metal - a draw sees what the previous draw's fragment shader wrot
     //
     // **It may pass by timing rather than by ordering**: a 4×4 draw is short enough to finish before the next one
     // starts on an M-series GPU, so a failure here is real and a pass is not proof on its own.
-    auto group_layout = one_binding_layout(ctx, "results", sg::binding_type::buffer, sg::access_mode::read_write);
+    auto group_layout = group_layout_of(ctx, draws::hazard::declared_bindings());
     REQUIRE(group_layout.has_value());
 
     auto layout_desc = sg::pipeline_layout_description{};
@@ -244,15 +249,15 @@ ASYNC_TEST("sg metal - a draw sees what the previous draw's fragment shader wrot
     REQUIRE(pipeline_layout.has_value());
 
     auto const layout = sg::pipeline_layout_handle(pipeline_layout.value());
-    auto writer = make_hazard_pipeline(ctx, layout, "hazard_write_main");
+    auto writer = make_hazard_pipeline(ctx, layout, co_await compile_full_screen(*ctx, draws::hazard_write_ps));
     REQUIRE(writer.has_value()).context(writer.has_error() ? writer.error().to_string() : cc::string());
-    auto reader = make_hazard_pipeline(ctx, layout, "hazard_read_main");
+    auto reader = make_hazard_pipeline(ctx, layout, co_await compile_full_screen(*ctx, draws::hazard_read_ps));
     REQUIRE(reader.has_value()).context(reader.has_error() ? reader.error().to_string() : cc::string());
 
     auto const results = ctx->persistent.create_raw_buffer(k_hazard_count * isize(sizeof(u32)),
                                                            k_copy_both | sg::buffer_usage::readwrite_buffer);
     auto const nv = sg::named_view{
-        .name = "results",
+        .name = "hazard.results",
         .view = results->as_raw_readwrite({.offset = 0, .size = results->size_in_bytes()}, isize(sizeof(u32)))};
     auto group = ctx->create_metal_binding_group(group_layout.value(), cc::span<sg::named_view const>(&nv, 1), {},
                                                  sg::lifetime_scope::persistent);
@@ -297,7 +302,7 @@ ASYNC_TEST("sg metal - a draw sees what the previous draw's fragment shader wrot
     REQUIRE(bytes.has_value());
     auto const pixels = bytes.value();
 
-    // `hazard_write_main` writes `index + 1` per pixel and `hazard_read_main` scales it by 1/255, so texel i reads
+    // `hazard_write_ps` writes `index + 1` per pixel and `hazard_read_ps` scales it by 1/255, so texel i reads
     // back as i + 1 — and a texel the second draw found unwritten reads back as 0.
     auto wrong = 0;
     auto first_wrong = -1;
@@ -318,7 +323,7 @@ ASYNC_TEST("sg metal - a draw sees what the previous draw's fragment shader wrot
                             first_wrong, first_wrong >= 0 ? int(u8(pixels[first_wrong * 4])) : 0, first_wrong + 1));
 }
 
-ASYNC_TEST("sg metal - a reopened pass keeps its contents and its encoder state")
+ASYNC_TEST("sg metal - a reopened pass keeps its contents and its encoder state", exclusive("slib-shader-library"))
 {
     auto const ctx = mtl::test::make_context();
     if (ctx == nullptr)
@@ -331,7 +336,7 @@ ASYNC_TEST("sg metal - a reopened pass keeps its contents and its encoder state"
     //
     // Each half is a colour here: the left was drawn before the reopen and must survive it, and the right is drawn
     // after and says the scissor came back.
-    auto group_layout = one_binding_layout(ctx, "results", sg::binding_type::buffer, sg::access_mode::read_write);
+    auto group_layout = group_layout_of(ctx, draws::hazard::declared_bindings());
     REQUIRE(group_layout.has_value());
 
     auto layout_desc = sg::pipeline_layout_description{};
@@ -340,15 +345,15 @@ ASYNC_TEST("sg metal - a reopened pass keeps its contents and its encoder state"
     REQUIRE(pipeline_layout.has_value());
 
     auto const layout = sg::pipeline_layout_handle(pipeline_layout.value());
-    auto writer = make_hazard_pipeline(ctx, layout, "hazard_write_main");
+    auto writer = make_hazard_pipeline(ctx, layout, co_await compile_full_screen(*ctx, draws::hazard_write_ps));
     REQUIRE(writer.has_value());
-    auto reader = make_hazard_pipeline(ctx, layout, "hazard_read_main");
+    auto reader = make_hazard_pipeline(ctx, layout, co_await compile_full_screen(*ctx, draws::hazard_read_ps));
     REQUIRE(reader.has_value());
 
     auto const results = ctx->persistent.create_raw_buffer(k_hazard_count * isize(sizeof(u32)),
                                                            k_copy_both | sg::buffer_usage::readwrite_buffer);
     auto const nv = sg::named_view{
-        .name = "results",
+        .name = "hazard.results",
         .view = results->as_raw_readwrite({.offset = 0, .size = results->size_in_bytes()}, isize(sizeof(u32)))};
     auto group = ctx->create_metal_binding_group(group_layout.value(), cc::span<sg::named_view const>(&nv, 1), {},
                                                  sg::lifetime_scope::persistent);
@@ -417,7 +422,8 @@ ASYNC_TEST("sg metal - a reopened pass keeps its contents and its encoder state"
         .context(cc::format("{} right-half texels were not what the replayed scissor allows", wrong_right));
 }
 
-ASYNC_TEST("sg metal - a scope reading what an earlier scope's fragment shader wrote reopens nothing")
+ASYNC_TEST("sg metal - a scope reading what an earlier scope's fragment shader wrote reopens nothing",
+           exclusive("slib-shader-library"))
 {
     auto const ctx = mtl::test::make_context();
     if (ctx == nullptr)
@@ -427,7 +433,7 @@ ASYNC_TEST("sg metal - a scope reading what an earlier scope's fragment shader w
     // Each scope is its own render encoder, and the first one's publish is what the second one's open waits on, so the
     // fragment-stage write is already ordered — a reopen here would store and reload the target for nothing.
     // This is the shape of every post-process pass: render into a texture, then sample it in the next scope.
-    auto group_layout = one_binding_layout(ctx, "results", sg::binding_type::buffer, sg::access_mode::read_write);
+    auto group_layout = group_layout_of(ctx, draws::hazard::declared_bindings());
     REQUIRE(group_layout.has_value());
 
     auto layout_desc = sg::pipeline_layout_description{};
@@ -436,15 +442,15 @@ ASYNC_TEST("sg metal - a scope reading what an earlier scope's fragment shader w
     REQUIRE(pipeline_layout.has_value());
 
     auto const layout = sg::pipeline_layout_handle(pipeline_layout.value());
-    auto writer = make_hazard_pipeline(ctx, layout, "hazard_write_main");
+    auto writer = make_hazard_pipeline(ctx, layout, co_await compile_full_screen(*ctx, draws::hazard_write_ps));
     REQUIRE(writer.has_value()).context(writer.has_error() ? writer.error().to_string() : cc::string());
-    auto reader = make_hazard_pipeline(ctx, layout, "hazard_read_main");
+    auto reader = make_hazard_pipeline(ctx, layout, co_await compile_full_screen(*ctx, draws::hazard_read_ps));
     REQUIRE(reader.has_value()).context(reader.has_error() ? reader.error().to_string() : cc::string());
 
     auto const results = ctx->persistent.create_raw_buffer(k_hazard_count * isize(sizeof(u32)),
                                                            k_copy_both | sg::buffer_usage::readwrite_buffer);
     auto const nv = sg::named_view{
-        .name = "results",
+        .name = "hazard.results",
         .view = results->as_raw_readwrite({.offset = 0, .size = results->size_in_bytes()}, isize(sizeof(u32)))};
     auto group = ctx->create_metal_binding_group(group_layout.value(), cc::span<sg::named_view const>(&nv, 1), {},
                                                  sg::lifetime_scope::persistent);

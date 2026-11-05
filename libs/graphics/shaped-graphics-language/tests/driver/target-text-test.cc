@@ -389,6 +389,36 @@ TEST("sgl target text - maybe_reorder asks shader execution reordering of the de
     CHECK(!without.value().features.has(sgl::check::feature::shader_execution_reordering));
 }
 
+TEST("sgl target text - a reordering trace takes its hint's bits from a named const")
+{
+    // CHK-433: the bits are checked as an expression like any other, so a name in them is flattened like one
+    constexpr auto source
+        = "require raytracing_pipeline\n"
+          "\n"
+          "const hint_bits = 2\n"
+          "\n"
+          "struct radiance:\n"
+          "    color: float\n"
+          "\n"
+          "rays rs:\n"
+          "    primary: radiance\n"
+          "\n"
+          "binding work:\n"
+          "    world: acceleration_structure[.triangles]\n"
+          "    values: mut buffer[float]\n"
+          "\n"
+          "@raygen fun main_cs(@launch_id id: int3){work}:\n"
+          "    let mut p = radiance(0.0)\n"
+          "    let r = ray(origin = pos3(0.0, 0.0, 0.0), direction = vec3(0.0, 0.0, 1.0))\n"
+          "    trace(work.world, r, rs.primary, mut p, reorder = id.x as uint, reorder_bits = hint_bits)\n"
+          "    work.values[id.x] = p.color\n";
+    auto device = sgl::check::feature_set();
+    device.set(sgl::check::feature::shader_execution_reordering);
+    auto const with = compiled(source, target::hlsl_dx12, device);
+    REQUIRE(with.has_value()).dump("error", with.has_error() ? cc::string(with.error()) : cc::string());
+    CHECK(with.value().text.contains("dx::MaybeReorderThread("));
+}
+
 TEST("sgl target text - a dx12 ray query sees the opacity micromaps of a device that has them")
 {
     // EMIT-184: no program names the feature; the compile states it for each query

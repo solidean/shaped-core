@@ -454,8 +454,6 @@ struct checker
     /// The functions of each struct's and enum's type scope, keyed by the index of the type's symbol, then by name.
     /// Members are declared with their type, and extensions once every file is declared (CHK-233, CHK-237).
     layered_map<i32, cc::map<cc::string, cc::vector<symbol_id>>> type_scopes;
-    /// The symbols `type_scopes` holds, which take no name an emitter writes: a call of one is inlined, never named.
-    cc::set<i32> scoped_functions;
     /// The types `resource_type` and `buffer_type` interned, by spelling, so a mention looks up only its equals.
     /// The function arguments of every call checked so far; `call_arguments::functions` indexes it.
     cc::vector<function_argument> function_arguments;

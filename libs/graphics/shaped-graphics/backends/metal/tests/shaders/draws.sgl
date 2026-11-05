@@ -1,0 +1,81 @@
+// The tier-2 raster fixtures, written in SGL: the draws the metal backend's raster, vertex-input and barrier tests make.
+
+@pixel struct color_target:
+    color: float4
+
+struct covered:
+    @position position: hpos4
+
+// A triangle covering the whole target, from the vertex index alone, so a draw needs no vertex buffer.
+@vertex fun covering_vs(@vertex_index v: int) -> covered:
+    let x = if v == 2 => 3.0 else -1.0
+    let y = if v == 0 => -3.0 else 1.0
+    return {
+        position = hpos4(x, y, 0.0, 1.0)
+    }
+
+// One colour, so every texel a draw reaches reads it back.
+@pixel fun covering_ps(p: covered) -> color_target:
+    return {
+        color = float4(0.25, 0.5, 0.75, 1.0)
+    }
+
+// ---- vertex input and inline constants: the tint multiplies every vertex's colour, so a block that never arrived
+// reads as black rather than as geometry gone wrong
+
+@inline binding tint:
+    tint: float4
+
+// The test states the vertex layout itself, so this struct only names the attributes: position at 0, colour at 1.
+@vertex struct mesh_vertex:
+    position: float2
+    color: float4
+
+struct tinted:
+    @position position: hpos4
+    color: float4
+
+@vertex fun tinted_vs(v: mesh_vertex){tint} -> tinted:
+    return {
+        position = hpos4(v.position.x, v.position.y, 0.0, 1.0)
+        color = v.color * tint.tint
+    }
+
+@pixel fun tinted_ps(p: tinted) -> color_target:
+    return {
+        color = p.color
+    }
+
+// ---- the two halves of the fragment-write hazard: draw A writes `results`, draw B reads what A wrote, in one pass
+// The target is 4 texels square, and each fragment owns the slot of its own pixel.
+
+binding hazard:
+    results: mut buffer[uint]
+
+// Writes a known pattern, one value per pixel, and outputs green: what a reopened pass must still hold.
+@pixel fun hazard_write_ps(p: covered){hazard} -> color_target:
+    let at = (p.position.y as int) * 4 + (p.position.x as int)
+    hazard.results[at] = (at as uint) + 1u
+    return {
+        color = float4(0.0, 1.0, 0.0, 1.0)
+    }
+
+// Copies what A wrote into the target; a value that never arrived reads as 0 and lands as black.
+@pixel fun hazard_read_ps(p: covered){hazard} -> color_target:
+    let at = (p.position.y as int) * 4 + (p.position.x as int)
+    let v = (hazard.results[at] as float) / 255.0
+    return {
+        color = float4(v, v, v, 1.0)
+    }
+
+// ---- a group a draw only reads: a loop of draws over it must order against nothing
+
+binding palette:
+    entries: buffer[uint]
+
+@pixel fun palette_ps(p: covered){palette} -> color_target:
+    let at = (p.position.y as int) * 4 + (p.position.x as int)
+    let v = (palette.entries[at] as float) / 255.0
+    return {
+        color = float4(v, v, v, 1.0)
+    }

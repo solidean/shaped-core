@@ -204,8 +204,7 @@ cc::result<dx12_raytracing_pipeline_handle> dx12_raytracing_pipeline::create(ID3
     shader_config.MaxAttributeSizeInBytes = UINT(desc.max_attribute_size);
 
     // a device with micromaps lets every trace see them, as a vulkan pipeline does
-    D3D12_RAYTRACING_PIPELINE_CONFIG1 pipeline_config = {};
-    pipeline_config.MaxTraceRecursionDepth = desc.max_recursion_depth;
+    auto pipeline_config = D3D12_RAYTRACING_PIPELINE_CONFIG1{.MaxTraceRecursionDepth = UINT(desc.max_recursion_depth)};
 #if SG_HAS_AGILITY
     if (allows_micromaps)
         pipeline_config.Flags |= D3D12_RAYTRACING_PIPELINE_FLAG_ALLOW_OPACITY_MICROMAPS;
