@@ -3,6 +3,8 @@ created: 2026-11-05
 priority: next
 tags: [xr]
 parent: epic-xr
+claimed-by: Claude (for Philip Trettner)
+claimed-at: 2026-11-05T13:59Z
 ---
 
 # Wrap a native image as an sg texture and render target
