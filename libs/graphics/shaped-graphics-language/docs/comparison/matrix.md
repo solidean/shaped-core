@@ -120,7 +120,7 @@ A per-target cell reads `dx12 / vulkan / metal / webgpu`.
 | **G3** Exit cost | ✅ you keep HLSL | ✅ readable output; Slang-only features lost | ✅ a standard with two implementations | ✅ | ⚠️ the emitted HLSL, MSL and WGSL are readable and can be kept; they follow sg's binding model; MIT allows a fork |
 | **G4** Migration from HLSL | ✅ none | ✅ accepts most HLSL | ❌ a rewrite | ❌ a rewrite | ⚠️ a rewrite; LLM-assisted ports of hundreds of shaders have gone through |
 | **G5** Vendor libraries (FSR, NRD, RTXDI) | ✅ native; NVAPI on DX12 only | ⚠️ compile for DX12 and Vulkan | ❌ | ⚠️ | ⚠️ beside SGL as HLSL packages on dx12 and vulkan, or ported; reachable from SGL through a text body (B9) over a preamble, untried on a whole vendor library |
-| **G6** Speed of the emitted code | ⚠️ near native on DXIL and SPIR-V; later hops unbenchmarked | ❓ | ⚠️ bounds checks and polyfills cost | ❓ | ⚠️ against hand-written HLSL on three kernels, dx12: 0.91–1.02×, vulkan: 0.98–1.02×; metal and webgpu unmeasured 🗺️ [chore](../issues/chore-sgl-emitted-code-speed-on-every-target.md); WGSL unoptimized 🗺️ [epic](../issues/epic-sgl-optimizing-passes-and-ir-targets.md) |
+| **G6** Speed of the emitted code | ⚠️ near native on DXIL and SPIR-V; later hops unbenchmarked | ❓ | ⚠️ bounds checks and polyfills cost | ❓ | ⚠️ against the same three kernels written by hand, dx12: 0.91–1.02×, vulkan: 0.98–1.02×, webgpu: 0.73–1.00× (Dawn and wgpu); metal unmeasured 🗺️ [chore](../issues/chore-sgl-emitted-code-speed-on-every-target.md) |
 
 ## Sources
 
