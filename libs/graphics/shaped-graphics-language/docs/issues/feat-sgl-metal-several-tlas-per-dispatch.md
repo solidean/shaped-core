@@ -6,6 +6,8 @@ blocked-by: [feat-sg-metal-multiple-tlas-per-dispatch]
 refs:
   - file: libs/graphics/shaped-graphics-language/src/shaped-graphics-language/emit/impl/msl.cc
   - file: libs/graphics/shaped-graphics-language/docs/spec/raytracing.md
+claimed-by: Claude (for Julius Nehring-Wirxel)
+claimed-at: 2026-11-05T08:47Z
 ---
 
 # metal: a pipeline dispatch that traces several TLAS
