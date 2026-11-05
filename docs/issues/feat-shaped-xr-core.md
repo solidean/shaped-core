@@ -4,6 +4,8 @@ priority: next
 tags: [xr]
 parent: epic-xr
 blocked-by: [feat-sg-external-device-requirements, feat-sg-wrap-native-texture]
+claimed-by: Claude (for Philip)
+claimed-at: 2026-11-05T14:54Z
 ---
 
 # shaped-xr: the library, its system, session and frame
