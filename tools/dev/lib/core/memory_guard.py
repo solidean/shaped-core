@@ -9,6 +9,7 @@ On every platform a watchdog thread reads the free physical memory, and below th
 Elsewhere than Windows only the watchdog runs: a per-process address-space limit would also refuse the sanitizers' shadow reservations.
 
 The environment overrides each, in GB, 0 turning it off: SC_DEV_MEMORY_PROCESS_GB, SC_DEV_MEMORY_TOTAL_GB, SC_DEV_MEMORY_FREE_GB.
+A nexus binary caps itself by the same per-process variable (nx::install_memory_cap), so one run by hand or from a script is not left unguarded.
 The user chose the defaults (2026-10-31): gates failing on them is accepted, swapping is not.
 """
 

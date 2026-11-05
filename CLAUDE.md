@@ -220,6 +220,7 @@ Each entry above names what it depends on, and the `CMakeLists.txt` files are th
 * **`.clang-format` is authoritative.** Source must not change under it (requires clang-format >= 22); it wins over prose docs.
   `.clang-tidy` is still being calibrated — treat its warnings as advisory, not gospel.
 * **Building or testing requires the `building-and-testing` skill.** Activate it before the first `dev.py` build/test in a session, and don't drive `dev.py` from memory.
+* **When dev.py refuses for lack of disk space, stop working and escalate to the user** (lib/core/disk_guard.py): it usually needs them, and lowering the floor is not yours to decide.
 * **Never run a nexus binary's tests directly** — go through `uv run dev.py test`, which passes `--tests`.
   A nexus binary run with nothing selected runs its default `APP` or `COMMAND`, or lists what it holds; test binaries are still named `*-test` by convention.
   dev.py finds them through the `nexus-binaries.json` manifest configure writes, not the name — `sc_nexus_binary` in [NexusBinaries.cmake](libs/base/nexus/cmake/NexusBinaries.cmake).
