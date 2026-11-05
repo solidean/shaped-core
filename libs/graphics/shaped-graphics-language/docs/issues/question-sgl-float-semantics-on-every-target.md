@@ -17,3 +17,13 @@ Denormals are the same question on every target, and so is contraction into a fu
 `compute-float-specials-test.cc` is what shows a target's behaviour, and it skips every backend but metal until that target's compile asks for the same.
 The question is what the spec promises everywhere, and what each target's compile must ask for to keep that promise.
 The measured cost of metal's safe math on sv's megakernel was within run-to-run noise, at most about 3% in adjacent runs.
+
+## dx12 with `-Gis`, measured 2026-11-05
+
+On an Intel Arc B580, driver 32.0.101.9150, the float-specials probe was run with and without DXC's `-Gis` added for dx12.
+Without it, DXC marks every float operation `fast`: `0 / 0` is no NaN, `(1e30 + 1) - 1e30` reassociates to 1, and all three NaN comparisons come out wrong.
+With it, the DXIL is IEEE-strict, no `fast` flags and the NaN tests kept, and every check passes but one.
+That one is `inf * 0`, a strict `fmul` in the DXIL that the driver returns as 0, which suggests its own compiler folds `x * 0`; not reproduced standalone.
+`-Gis` was not landed: shaped-viewer-test then hung for over 170 s inside igd12um64xe2.dll creating sv's pipelines, where without it the binary passes in 38 s.
+So dx12 needs either a driver that compiles strict DXIL in time, or `-Gis` opt-in per shader or per vendor, and that is the decision this question now holds for dx12.
+Vulkan needs the `SignedZeroInfNanPreserve` execution mode, which DXC can write through `[[vk::ext_execution_mode]]` behind a device feature check; WebGPU offers no switch at all.
