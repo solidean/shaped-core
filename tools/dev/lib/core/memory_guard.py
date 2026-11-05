@@ -148,8 +148,29 @@ if platform.system() == "Windows":
 
 else:
 
+    _darwin_total = 0
+
+    def _darwin_memory() -> tuple[int, int]:
+        """macOS has no /proc: the total is `sysctl hw.memsize`, and what is available the pages `vm_stat` counts reclaimable.
+        Free, inactive, speculative and purgeable pages are those the kernel hands out without swapping, as MemAvailable counts on Linux."""
+        global _darwin_total
+        try:
+            if _darwin_total == 0:
+                _darwin_total = int(subprocess.run(["sysctl", "-n", "hw.memsize"], capture_output=True, text=True,
+                                                   timeout=10).stdout.strip())
+            out = subprocess.run(["vm_stat"], capture_output=True, text=True, timeout=10).stdout
+            page = int(out.split("page size of ")[1].split()[0])
+            pages = {line.split(":")[0]: int(line.split(":")[1].strip().rstrip(".")) for line in out.splitlines()[1:]
+                     if ":" in line}
+        except (OSError, subprocess.SubprocessError, ValueError, IndexError):
+            return 0, 0
+        reclaimable = ("Pages free", "Pages inactive", "Pages speculative", "Pages purgeable")
+        return _darwin_total, sum(pages.get(name, 0) for name in reclaimable) * page
+
     def _memory() -> tuple[int, int]:
-        """Physical memory in bytes: (total, available), from /proc/meminfo; (0, 0) where there is none."""
+        """Physical memory in bytes: (total, available), from /proc/meminfo or macOS's own counters; (0, 0) where there is none."""
+        if platform.system() == "Darwin":
+            return _darwin_memory()
         try:
             with open("/proc/meminfo", encoding="ascii") as f:
                 fields = {line.split(":")[0]: int(line.split()[1]) * 1024 for line in f if line.split()[1:2]}
