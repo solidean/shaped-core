@@ -159,6 +159,7 @@ if(SC_BUILD_TESTS)
         tests/vulkan-forward-waits-test.cc
         tests/vulkan-compute-test.cc
         tests/vulkan-entry.cc
+        tests/vulkan-external-device-test.cc
         tests/vulkan-raster-test.cc
         tests/vulkan-query-test.cc
         tests/vulkan-raytracing-test.cc

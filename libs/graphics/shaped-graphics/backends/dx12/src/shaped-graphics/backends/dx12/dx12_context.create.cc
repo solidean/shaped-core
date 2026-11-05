@@ -181,6 +181,7 @@ sg::adapter_info describe_adapter(IDXGIAdapter1* adapter)
     info.vendor_id = u32(desc.VendorId);
     info.device_id = u32(desc.DeviceId);
     info.is_software = is_software_adapter(desc);
+    info.luid = u64(desc.AdapterLuid.LowPart) | (u64(u32(desc.AdapterLuid.HighPart)) << 32);
 
     // What the board has, which is NOT the budget this process gets — see adapter_info.
     // Zero is a real answer for an integrated GPU, so it is reported rather than treated as absent.
@@ -467,36 +468,57 @@ cc::result<context_handle> create_dx12_context(backend::dx12::dx12_config const&
 
     // The warp pin hides hardware from every request, an explicit `hardware` included, not only from hardware_or_warp.
     auto const hardware_hidden = pin == adapter_pin::warp || pin == adapter_pin::nothing;
+    // The hardware pin hides WARP from every request in turn, an explicit `warp` included.
+    auto const warp_hidden = pin == adapter_pin::hardware || pin == adapter_pin::nothing;
     ComPtr<IDXGIAdapter1> adapter;
-    auto const search = hardware_hidden ? adapter_search_result{} : find_hardware_adapter(factory.Get(), adapter);
-
-    // Reported rather than worked around: the machine has a GPU that just reset, and creating this context on
-    // a different one would hide that behind whatever goes wrong next.
-    if (search.status == adapter_search::device_lost)
-        return dx12_error(search.device_loss_hr, "the hardware adapter reports a device reset or removal; "
-                                                 "something already running on this GPU took it down");
-
-    if (choice != dx12_adapter::warp && search.status != adapter_search::found)
+    if (config.adapter_luid.has_value())
     {
-        if (choice == dx12_adapter::hardware && hardware_hidden)
-            return cc::error(cc::format("no Direct3D 12 capable hardware adapter found (SC_DX12_ADAPTER={} hides them)",
-                                        pin == adapter_pin::warp ? "warp" : "none"));
-        if (choice == dx12_adapter::hardware)
-            return cc::error("no Direct3D 12 capable hardware adapter found");
-        choice = dx12_adapter::warp;
+        auto const luid = config.adapter_luid.value();
+        auto const native = LUID{.LowPart = DWORD(luid & 0xFFFF'FFFFu), .HighPart = LONG(luid >> 32)};
+        if (HRESULT hr = factory->EnumAdapterByLuid(native, IID_PPV_ARGS(&adapter)); FAILED(hr))
+            return cc::error(cc::format("no adapter has the LUID {:016x} (hr=0x{:08X})", luid, u32(hr)));
+
+        DXGI_ADAPTER_DESC1 desc = {};
+        adapter->GetDesc1(&desc);
+        auto const software = is_software_adapter(desc);
+        if (software ? warp_hidden : hardware_hidden)
+            return cc::error(cc::format("the adapter with the LUID {:016x} is hidden by SC_DX12_ADAPTER", luid));
     }
-    if (choice == dx12_adapter::warp)
+    else
     {
-        // The hardware pin hides WARP from every request in turn, an explicit `warp` included.
-        if (pin == adapter_pin::hardware || pin == adapter_pin::nothing)
-            return cc::error(cc::format("no WARP adapter (SC_DX12_ADAPTER={} hides it)",
-                                        pin == adapter_pin::hardware ? "hardware" : "none"));
-        if (HRESULT hr = factory->EnumWarpAdapter(IID_PPV_ARGS(&adapter)); FAILED(hr))
-            return dx12_error(hr, "IDXGIFactory4::EnumWarpAdapter failed");
+        auto const search = hardware_hidden ? adapter_search_result{} : find_hardware_adapter(factory.Get(), adapter);
+
+        // Reported rather than worked around: the machine has a GPU that just reset, and creating this context on
+        // a different one would hide that behind whatever goes wrong next.
+        if (search.status == adapter_search::device_lost)
+            return dx12_error(search.device_loss_hr, "the hardware adapter reports a device reset or removal; "
+                                                     "something already running on this GPU took it down");
+
+        if (choice != dx12_adapter::warp && search.status != adapter_search::found)
+        {
+            if (choice == dx12_adapter::hardware && hardware_hidden)
+                return cc::error(cc::format("no Direct3D 12 capable hardware adapter found (SC_DX12_ADAPTER={} hides "
+                                            "them)",
+                                            pin == adapter_pin::warp ? "warp" : "none"));
+            if (choice == dx12_adapter::hardware)
+                return cc::error("no Direct3D 12 capable hardware adapter found");
+            choice = dx12_adapter::warp;
+        }
+        if (choice == dx12_adapter::warp)
+        {
+            if (warp_hidden)
+                return cc::error(cc::format("no WARP adapter (SC_DX12_ADAPTER={} hides it)",
+                                            pin == adapter_pin::hardware ? "hardware" : "none"));
+            if (HRESULT hr = factory->EnumWarpAdapter(IID_PPV_ARGS(&adapter)); FAILED(hr))
+                return dx12_error(hr, "IDXGIFactory4::EnumWarpAdapter failed");
+        }
     }
 
+    // sg's own floor is 11_0; a caller may demand more, and never less.
+    auto const feature_level
+        = config.minimum_feature_level > D3D_FEATURE_LEVEL_11_0 ? config.minimum_feature_level : D3D_FEATURE_LEVEL_11_0;
     ComPtr<ID3D12Device> device;
-    if (HRESULT hr = create_d3d12_device(adapter.Get(), D3D_FEATURE_LEVEL_11_0, IID_PPV_ARGS(&device)); FAILED(hr))
+    if (HRESULT hr = create_d3d12_device(adapter.Get(), feature_level, IID_PPV_ARGS(&device)); FAILED(hr))
         return dx12_error(hr, "D3D12CreateDevice failed");
     process_has_device() = true;
 

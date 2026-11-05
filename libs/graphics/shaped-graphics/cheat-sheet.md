@@ -142,7 +142,8 @@ ctx.set_hit_record_checks(bool)                    // dispatch_rays checks the h
 ctx.threading()                                    // sg::thread_model — which ops are concurrency-safe
 ctx.is_on_device_thread()                          // -> bool; may this thread make a bound call (always true under multi_threaded)
 ctx.device_home()                                  // cc::async_scheduler* — where sg's asyncs move before touching the device; main under main_thread
-ctx.metrics.adapter()                              // sg::adapter_info const& — { name, vendor_id, device_id, driver_version, is_software }, fixed at creation
+ctx.metrics.adapter()                              // sg::adapter_info const& — { name, vendor_id, device_id, driver_version, luid, is_software }, fixed at creation
+ctx.metrics.adapter().luid                         // optional<u64> — the GPU's id across dx12, vulkan and XR runtimes; Windows only, never persist it
                                                    // driver_version is OPAQUE: compare for equality, never parse. Empty = unknown. Key any driver-produced blob on this
 ctx.metrics.adapter().dedicated_video_memory_bytes // optional<i64> — what the BOARD has; 0 is real on an integrated GPU
 ctx.metrics.query_gpu_memory()                     // result<gpu_memory_usage> — { budget_bytes, current_usage_bytes }
@@ -232,6 +233,13 @@ ctx.is_shut_down()                                 // bool
 #include <shaped-graphics/backends/vulkan/vulkan_context.hh>
 sg::create_vulkan_context(vulkan_config = {})      // -> cc::result<context_handle>
 // vulkan_config { bool enable_validation_layers=false; bool prefer_software_device=false; }  (independent flags)
+// created to someone else's spec (an XR runtime's): MOVE-ONLY once a hook is set
+//   vulkan_config { extra_instance_extensions / extra_device_extensions  (cc::vector<cc::string>; a missing one fails creation, naming it)
+//                   create_instance(info, out) / create_device(phys, info, out)  (in place of vkCreate*; the context owns and destroys the result)
+//                   choose_physical_device(instance)  (in place of sg's ranking; the choice still has to meet sg's floor) }
+// vulkan::required_api_version                    // the version every context is created at — what a runtime's version range is checked against
+// vk_ctx.instance() / physical_device() / device() / queue() / queue_family_index()  // the native objects, for another API to name
+//   GOTCHA: the queue is externally synchronized — anything else submitting to it (an XR runtime) holds vk_ctx.queue_guard()
 #include <shaped-graphics/backends/webgpu/webgpu_context.hh>   // wasm + SC_WASM_WEBGPU only
 co_await sg::request_webgpu_context(webgpu_config = {})  // -> context_handle; any thread (it requests on main); FAILS without WebGPU / adapter
 sg::create_webgpu_context(WGPUDevice, webgpu_config = {}) // -> cc::result<context_handle> over a device someone else requested; main only
@@ -240,6 +248,9 @@ sg::create_webgpu_context(WGPUDevice, webgpu_config = {}) // -> cc::result<conte
 #include <shaped-graphics/backends/dx12/dx12_context.hh>
 sg::create_dx12_context(dx12_config = {})          // -> cc::result<context_handle>
 // dx12_config { activate_global_debug_layer=false; adapter=hardware (or warp / hardware_or_warp; SC_DX12_ADAPTER=warp hides hardware process-wide, =hardware hides WARP — every Microsoft-vendor adapter, flagged or not —, =none hides both); upload_ring_bytes/download_ring_bytes/async_{upload,download}_window_bytes=16 MiB; descriptor+sampler heap sizing }
+// dx12_config { adapter_luid  (optional<u64>; overrides `adapter`, fails rather than falling back; SC_DX12_ADAPTER still hides it)
+//               minimum_feature_level=11_0  (a runtime may demand more, never less) }
+// dx12_ctx.device() / queue()                     // ID3D12Device* / ID3D12CommandQueue*, owned by the context
 // GOTCHA: activate_global_debug_layer is PROCESS-wide and one-way, unlike vulkan's per-instance enable_validation_layers.
 //   false = 'this context does not ask for it', NOT 'this context is unvalidated' — nothing ever deactivates it.
 //   it must be activated before the process's FIRST device: a later activation is refused, because performing it
