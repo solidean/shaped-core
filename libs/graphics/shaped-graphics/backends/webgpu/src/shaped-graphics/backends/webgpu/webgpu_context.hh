@@ -180,6 +180,8 @@ public:
         case sg::feature::shader_int64:
         case sg::feature::shader_f64:
         case sg::feature::shader_int64_atomics:
+        case sg::feature::shader_shared_int64_atomics:
+        case sg::feature::shader_int64_min_max_atomics:
             // WGSL has no 64-bit integer and no double, on any device.
             return false;
         case sg::feature::unbounded_binding_arrays:

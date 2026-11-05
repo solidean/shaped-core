@@ -70,45 +70,52 @@ enum class sgl::check::feature : sgl::u8
     shader_int64_atomics,
     /// A binding array `T[]` whose length the host binds (CHK-490), which WebGPU and Metal have on no device yet.
     unbounded_binding_arrays,
+    /// `atomic[long]` and `atomic[ulong]` in workgroup memory (CHK-510), which both APIs make optional.
+    shader_shared_int64_atomics,
+    /// `atomic[ulong]` in a buffer, its `min` and `max` alone (CHK-511); `shader_int64_atomics` grants it too.
+    /// It is all of Metal's 64-bit atomics, on the GPUs that have any.
+    shader_int64_min_max_atomics,
 };
 
-CC_FLAG_ENUM_INDEXED(sgl::check, feature, u32);
+CC_FLAG_ENUM_INDEXED(sgl::check, feature, u64);
 
 namespace sgl::check
 {
 using feature_set = cc::flags<feature>;
 
 inline constexpr cc::string_view k_feature_names[] = {
-    "binding_arrays",              //
-    "extended_image_formats",      //
-    "readwrite_image_formats",     //
-    "multisampled_array_textures", //
-    "ray_query",                   //
-    "raytracing_pipeline",         //
-    "primitive_index",             //
-    "sample_rate_shading",         //
-    "geometry_shader",             //
-    "tessellation_shader",         //
-    "mesh_shader",                 //
-    "shader_f16",                  //
-    "shader_int16",                //
-    "subgroups",                   //
-    "device_coherence",            //
-    "image_atomics",               //
-    "first_instance",              //
-    "helper_lane_query",           //
-    "vertex_layer_output",         //
-    "float_atomic_add",            //
-    "shader_execution_reordering", //
-    "opacity_micromap",            //
-    "float_specials",              //
-    "float_denormals",             //
-    "view_instancing",             //
-    "vertex_pipeline_stores",      //
-    "shader_int64",                //
-    "shader_f64",                  //
-    "shader_int64_atomics",        //
-    "unbounded_binding_arrays",    //
+    "binding_arrays",               //
+    "extended_image_formats",       //
+    "readwrite_image_formats",      //
+    "multisampled_array_textures",  //
+    "ray_query",                    //
+    "raytracing_pipeline",          //
+    "primitive_index",              //
+    "sample_rate_shading",          //
+    "geometry_shader",              //
+    "tessellation_shader",          //
+    "mesh_shader",                  //
+    "shader_f16",                   //
+    "shader_int16",                 //
+    "subgroups",                    //
+    "device_coherence",             //
+    "image_atomics",                //
+    "first_instance",               //
+    "helper_lane_query",            //
+    "vertex_layer_output",          //
+    "float_atomic_add",             //
+    "shader_execution_reordering",  //
+    "opacity_micromap",             //
+    "float_specials",               //
+    "float_denormals",              //
+    "view_instancing",              //
+    "vertex_pipeline_stores",       //
+    "shader_int64",                 //
+    "shader_f64",                   //
+    "shader_int64_atomics",         //
+    "unbounded_binding_arrays",     //
+    "shader_shared_int64_atomics",  //
+    "shader_int64_min_max_atomics", //
 };
 inline constexpr isize k_feature_count = isize(sizeof(k_feature_names) / sizeof(k_feature_names[0]));
 

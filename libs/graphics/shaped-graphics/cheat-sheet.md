@@ -106,6 +106,10 @@ ctx.supports(sg::feature::ray_query)               // bool — THE capability qu
                                                    //     vulkan shaderInt64 / shaderFloat64; metal has longs and no double, webgpu neither)
                                                    //   | shader_int64_atomics (atomic[long] in a buffer; dx12 Int64ShaderOps on SM 6.6,
                                                    //     vulkan shaderBufferInt64Atomics; none on metal or webgpu)
+                                                   //   | shader_shared_int64_atomics (those in workgroup memory; dx12
+                                                   //     AtomicInt64OnGroupSharedSupported, vulkan shaderSharedInt64Atomics)
+                                                   //   | shader_int64_min_max_atomics (a buffer's ulong min and max alone; with
+                                                   //     shader_int64_atomics everywhere, and on metal from Apple8, unverified)
                                                    //   | subgroups (wave / SIMD-group ops in compute and pixel; dx12 WaveOps, webgpu needs subgroups)
                                                    //   | device_coherence (globallycoherent / coherent(device); false on webgpu)
                                                    //   | image_atomics (atomics on r32 integer images; false on webgpu)

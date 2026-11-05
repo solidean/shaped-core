@@ -186,7 +186,7 @@ constexpr cc::string_view k_atomics_msl[] = {
     "atomic_fetch_max_explicit", "atomic_fetch_and_explicit", "atomic_fetch_or_explicit",
     "atomic_fetch_xor_explicit", "atomic_exchange_explicit",  "atomic_load_explicit",
     "atomic_store_explicit",     "memory_order_relaxed",      "atomic_compare_exchange_weak_explicit",
-    "simd_is_helper_thread",
+    "simd_is_helper_thread",     "atomic_min_explicit",       "atomic_max_explicit",
 };
 
 /// CHK-296: every stage that writes memory once per invocation the program can count.
@@ -385,6 +385,14 @@ written write_atomic(call_context const& ctx)
             return {.text = cc::format("atomicLoad(&{})", a)};
         return {.text = cc::format("atomic{}(&{}, {})", info.wgsl, a, v)};
     case language::msl:
+        // EMIT-218: MSL's ulong min and max give nothing back, so they stand as statements alone
+        if ((ctx.data & 0x200u) != 0 && (info.op == atomic_op::min || info.op == atomic_op::max))
+        {
+            auto result = written{};
+            result.lines.push_back(cc::format("atomic_{}_explicit(&{}, {}, memory_order_relaxed);",
+                                              info.op == atomic_op::min ? "min" : "max", a, v));
+            return result;
+        }
         if (info.op == atomic_op::load)
             return {.text = cc::format("atomic_load_explicit(&{}, memory_order_relaxed)", a)};
         return {.text = cc::format("atomic_{}_explicit(&{}, {}, memory_order_relaxed)", info.msl, a, v)};
@@ -927,7 +935,7 @@ void sgl::builtins::register_sync(registry& r)
         cc::string_view name;
         value_kind kind;
     };
-    // CHK-296: a 64-bit atomic needs shader_int64_atomics, which a buffer's and workgroup memory's alike
+    // CHK-296: a 64-bit atomic needs shader_int64_atomics, but a ulong's min and max, which need less (CHK-511)
     for (auto const [t, kind] : {atomic_type{"uint", value_kind::scalar_uint},
                                  {"int", value_kind::scalar_int},
                                  {"ulong", value_kind::scalar_ulong},
@@ -956,14 +964,21 @@ void sgl::builtins::register_sync(registry& r)
                 .evaluate = evaluate(info.op),
                 .write = {.kind = spelling_kind::custom,
                           .custom = write_atomic,
-                          .writes_lines = is_compare_exchange(info.op) ? every_language : is_hlsl,
+                          // MSL's 64-bit min and max stand as statements (EMIT-218)
+                          .writes_lines = is_compare_exchange(info.op)
+                                               || (is_wide && (info.op == atomic_op::min || info.op == atomic_op::max))
+                                            ? every_language
+                                            : is_hlsl,
                           .data = atomic_data(info.op, is_signed, is_wide),
                           .hlsl_names = k_atomics_hlsl,
                           .wgsl_names = k_atomics_wgsl,
                           .msl_names = k_atomics_msl},
                 .is_atomic = true,
                 .gives_prelude_struct = info.op == atomic_op::compare_exchange_weak,
-                .features = is_wide ? check::feature_set(check::feature::shader_int64_atomics) : check::feature_set(),
+                .features = !is_wide ? check::feature_set()
+                          : kind == value_kind::scalar_ulong && (info.op == atomic_op::min || info.op == atomic_op::max)
+                              ? check::feature_set(check::feature::shader_int64_min_max_atomics)
+                              : check::feature_set(check::feature::shader_int64_atomics),
                 .pixel_features = strong_pixel_features(info.op),
             });
         }

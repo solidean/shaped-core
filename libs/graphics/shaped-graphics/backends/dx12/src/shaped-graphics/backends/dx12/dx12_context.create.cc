@@ -577,6 +577,12 @@ cc::result<context_handle> create_dx12_context(backend::dx12::dx12_config const&
        && options1.WaveOps;
     // Shader Model 6.6, below the required 6.8, makes a buffer's 64-bit atomics part of `Int64ShaderOps`.
     auto const int64_shader_ops = options1.Int64ShaderOps != 0;
+    // Workgroup memory's 64-bit atomics are optional, beside a buffer's
+    D3D12_FEATURE_DATA_D3D12_OPTIONS9 options9 = {};
+    auto const shared_int64_atomics
+        = int64_shader_ops
+       && SUCCEEDED(check_feature_support(device.Get(), D3D12_FEATURE_D3D12_OPTIONS9, &options9, sizeof(options9)))
+       && options9.AtomicInt64OnGroupSharedSupported;
 
     // Every SM 6.9 device beside ray-tracing pipelines takes the reordering calls, whether or not it really reorders.
     // Shader Model 6.9 is the Agility SDK's alone, whose headers are the ones that name it.
@@ -611,6 +617,7 @@ cc::result<context_handle> create_dx12_context(backend::dx12::dx12_config const&
     // tier 3 takes every view type unbounded; tier 2 caps a UAV range and a CBV range
     ctx->_unbounded_binding_arrays = options.ResourceBindingTier >= D3D12_RESOURCE_BINDING_TIER_3;
     ctx->_int64_atomics = int64_shader_ops;
+    ctx->_shared_int64_atomics = shared_int64_atomics;
     ctx->_shader_execution_reordering = shader_execution_reordering;
     ctx->_opacity_micromap = opacity_micromap;
     if (opacity_micromap)

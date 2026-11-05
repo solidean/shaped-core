@@ -125,7 +125,8 @@ struct target_ {
   A double literal is suffixed `L` in HLSL, whose bare `0.1` is a float rounded to 24 bits.
   A shift of a 64-bit value masks a count that is no literal to its low six bits, which HLSL and MSL leave undefined past 63.
 * **EMIT-191** A constant block's array of one value per row (EMIT-172) is one of two-vectors for a 64-bit scalar, `int64_t2` in HLSL, since a 16-byte row holds two.
-* **EMIT-192** `msl` refuses an entry point that needs `shader_f64` or `shader_int64_atomics` as `target-lacks-feature`, as EMIT-109 says.
+* **EMIT-192** `msl` refuses an entry point that needs `shader_f64`, `shader_int64_atomics` or `shader_shared_int64_atomics` as `target-lacks-feature`, as EMIT-109 says.
+  `shader_int64_min_max_atomics` alone it writes (EMIT-218).
   MSL has no double, and its 64-bit atomics are a ulong's min and max alone.
 * **EMIT-141** WGSL enables what its text uses ahead of every declaration: `enable f16;` where it names a 16-bit float, and `enable subgroups;` where it holds a subgroup operation or stage input.
 
@@ -505,6 +506,9 @@ So `{float3; float}` is written with `packed_float3`: the `float` is at byte 12 
   A Metal buffer argument is a pointer that carries no length, and sg passes none in yet, so an MSL compile that reads one is `target-lacks-feature`.
 * **EMIT-196** Neither MSL nor DXIL carries a 64-bit value between stages, so an MSL or `hlsl-dx12` vertex or pixel stage whose link holds one is `target-lacks-feature`.
   SPIR-V carries one, so `hlsl-vulkan` writes it; splitting it into two words would reach the other two.
+* **EMIT-218** MSL writes a buffer's `atomic[ulong]` as `atomic_ulong`, and its `min` and `max` as `atomic_min_explicit` and `atomic_max_explicit`, which give nothing back.
+  So each stands as a statement alone, and an MSL compile whose program reads what one gave back is `target-lacks-feature`.
+  HLSL writes a workgroup memory's 64-bit atomic as a `groupshared` `int64_t` or `uint64_t` under the same `Interlocked*` calls as a buffer's.
 * **EMIT-136** HLSL writes a ray-tracing stage as a library export named by its kind, `[shader("closesthit")]` over `void`, whose payload is an `inout` parameter.
   A triangle closest hit or any hit takes `BuiltInTriangleIntersectionAttributes` too.
   An any hit's decision ends the stage: `ignore` is `IgnoreHit()`, `accept_and_end_search` `AcceptHitAndEndSearch()`, and `accept` a plain `return`.
