@@ -38,8 +38,6 @@ And [bug-sv-guarded-raster-pipeline-stalls-intel-driver](../../../shaped-viewer/
 
 The children, and:
 
-- Deferral is defined but not bounded in time: a loop whose bound a safe operand gave, `x / 1` where `x / 0` was, may run long enough to reset the driver.
-  An iteration cap while the flag is set is one answer, and it is a design question.
 - A site nested past the legalizer's depth limit is left unguarded, silently.
 
 - Turning `report` on by default in a dev build, once the suite has run under it.

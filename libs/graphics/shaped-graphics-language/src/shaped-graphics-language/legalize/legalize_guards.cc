@@ -43,6 +43,10 @@ struct guarder
     /// Whether the statement being guarded comes before or holds that last statement.
     bool defers = false;
     bool sets_flag = false;
+    /// The second walk, once a guard set the flag: a loop that holds no barrier, derivative or subgroup operation is left
+    /// at the top of each iteration once the flag is set, so a safe operand that bounds it cannot keep the
+    /// invocation running long; a loop that holds one has a trip count every invocation shares, and runs on.
+    bool breaks_loops = false;
 
     // ---- what a statement holds ---------------------------------------------------------------------------------------
 
@@ -493,6 +497,22 @@ struct guarder
         return out.block(out.add_label("assert"), list);
     }
 
+    /// A loop's `body` with `if aborted { leave label }` in front, where `breaks_loops` asks for it and the body is free
+    /// of what every invocation must reach together.
+    ast::range_of<flat_stmt_id> left_once_aborted(label_id label, ast::range_of<flat_stmt_id> range, bool& changed)
+    {
+        if (!breaks_loops || !is_valid(label) || !is_known(out.e, range) || body_constrains(range, 0))
+            return range;
+        auto exit = stmt_list();
+        exit.push_back(out.leave(label));
+        auto list = stmt_list();
+        list.push_back(out.if_(out.local(aborted), exit));
+        for (auto const id : out.e.at(range))
+            list.push_back(id);
+        changed = true;
+        return out.stmt_list(list);
+    }
+
     flat_stmt_id stmt(flat_stmt_id id, int depth)
     {
         if (!is_known(out.e, id) || depth > k_max_depth)
@@ -529,17 +549,17 @@ struct guarder
         else if (auto* const n = copy.node.try_as<flat_leave>())
             value(n->value);
         else if (auto* const n = copy.node.try_as<flat_loop>())
-            n->body = body(n->body, depth, changed);
+            n->body = left_once_aborted(n->label, body(n->body, depth, changed), changed);
         else if (auto* const n = copy.node.try_as<flat_while>())
         {
             value(n->condition);
-            n->body = body(n->body, depth, changed);
+            n->body = left_once_aborted(n->label, body(n->body, depth, changed), changed);
         }
         else if (auto* const n = copy.node.try_as<flat_for>())
         {
             value(n->first);
             value(n->end);
-            n->body = body(n->body, depth, changed);
+            n->body = left_once_aborted(n->label, body(n->body, depth, changed), changed);
         }
         else if (auto* const n = copy.node.try_as<flat_once>())
             n->body = body(n->body, depth, changed);
@@ -591,6 +611,8 @@ stmt_list sgl::check::impl::guard_undefined(flat_builder& out, stmt_list const& 
         g.aborted = add_temporary_var(out, "aborted", out.type_named(builtins::k_bool));
 
     auto result = stmt_list();
+    // past the test of the flag, a set flag has ended the invocation and no loop can see it
+    auto flag_seen_up_to = isize(0);
     for (auto i = isize(0); i < body.size(); ++i)
     {
         g.defers = i <= last;
@@ -602,9 +624,23 @@ stmt_list sgl::check::impl::guard_undefined(flat_builder& out, stmt_list const& 
             auto ends = stmt_list();
             end_invocation(out, ends);
             result.push_back(out.if_(out.local(g.aborted), ends));
+            flag_seen_up_to = result.size();
         }
     }
-    if (g.sets_flag)
-        result.insert_at(0, out.var(g.aborted, out.bool_literal(false)));
+    if (!g.sets_flag)
+        return result;
+
+    // The loops the flag may still find running, those of the statements up to the last one that holds such an operation
+    g.guards = false;
+    g.lowers_asserts = false;
+    g.breaks_loops = true;
+    for (auto i = isize(0); i < flag_seen_up_to; ++i)
+    {
+        auto const& s = out.e.at(result[i]);
+        out.from = s.from;
+        out.inlined_through = s.inlined_through;
+        result[i] = g.stmt(result[i], 0);
+    }
+    result.insert_at(0, out.var(g.aborted, out.bool_literal(false)));
     return result;
 }
