@@ -40,6 +40,8 @@ The worked examples are WGSL, since it is the strictest target: no `do … while
   Where a barrier, a derivative or a subgroup operation may still follow, every invocation must reach it, so the end waits:
   the guard sets a flag and replaces the failing operand with one that cannot fail, a divisor of 1 or an index of 0.
   The invocation then ends after the last statement of the entry point's body that holds such an operation, and what it writes until then is not masked.
+  Until then, a loop that holds none of those operations is left at the top of each iteration once the flag is set, so a safe operand never keeps it running long.
+  A loop that holds one has a trip count every invocation of the workgroup shares, so its guards trip in all of them or in none.
   A buffer element, `bytes` (EVAL-97), workgroup memory (EVAL-92) and the builtins of EVAL-87 are not guarded yet.
   Wherever the input has a value, the tree behaves as the input does; where it has none, the tree ends the invocation instead.
 * **LEGAL-52** (V1) A core tree holds no `void` local, and no `let`, `var`, assignment, `return` or read of a `void` value: what evaluating one does stays as an `eval`, and the value itself is gone.

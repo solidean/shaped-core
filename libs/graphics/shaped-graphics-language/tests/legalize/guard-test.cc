@@ -239,3 +239,39 @@ TEST("sgl guards - with diagnostics an assert before a barrier sets the flag, an
     CHECK(core.messages[0].is_assert);
     CHECK(core.messages[1].is_assert);
 }
+
+TEST("sgl guards - once the flag is set, a loop without a barrier is left, and one holding a barrier runs on")
+{
+    // a divisor of 0 trips every invocation, whose safe divisor of 1 would make the first loop run `total` times
+    constexpr auto source = "binding params:\n"
+                            "    total: int\n"
+                            "    parts: int\n"
+                            "\n"
+                            "binding work:\n"
+                            "    values: mut buffer[int]\n"
+                            "\n"
+                            "@workgroup binding shared:\n"
+                            "    total: atomic[int]\n"
+                            "\n"
+                            "@compute(64) fun cs(@thread_id id: int3){params, work, shared}:\n"
+                            "    let steps = params.total / params.parts\n"
+                            "    let mut sum = 0\n"
+                            "    for i in 0 ..< steps:\n"
+                            "        sum = sum + i\n"
+                            "    for round in 0 ..< 4:\n"
+                            "        shared.total.add(sum)\n"
+                            "        workgroup_barrier()\n"
+                            "    work.values[id.x] = sum\n";
+    auto const dump = guarded_dump(source);
+    auto const first = dump.find("(for");
+    REQUIRE(first >= 0);
+    auto const second = dump.find("(for", first + 1);
+    REQUIRE(second > first);
+    auto const between = cc::string_view(dump).subview({.offset = first, .size = second - first});
+    auto const after = cc::string_view(dump).subview({.offset = second, .size = dump.size() - second});
+    CHECK(between.contains("aborted")).dump("core", dump);
+    CHECK(between.contains("(break")).dump("core", dump);
+    auto const barrier = after.find("workgroup_barrier");
+    REQUIRE(barrier >= 0);
+    CHECK(!after.subview({.offset = 0, .size = barrier}).contains("(break")).dump("core", dump);
+}

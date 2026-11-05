@@ -17,6 +17,10 @@ A listing here is the dump of a flat tree, shortened: a label is `$name`, and a 
 * **EVAL-4** Two trees **behave the same** when every input gives them the same result and the same trace.
 * **EVAL-5** An implementation may produce anything that behaves the same as the structured form: this is the **as-if rule** ([why](why/evaluation.md#eval-5)).
 * **EVAL-6** A `float` is a 32-bit IEEE number, an `int` is 32 bits, signed, and its arithmetic wraps, and a `bool` is true or false.
+  That is a float's exact meaning, which the interpreter computes; on a GPU an entry point's `@float` level licenses a target to depart from it (CHK-435).
+  At `.fast` a target may assume no NaN or infinity arises, ignore the sign of zero, reassociate, contract into a fused multiply-add, divide through a reciprocal and flush denormals.
+  `.specials` keeps NaNs, infinities and signed zeros, `.precise` keeps the order of evaluation as well, and `.ieee` keeps denormals too.
+  At every level a builtin is as precise as its target states.
 * **EVAL-96** A `half` is a 16-bit IEEE number, and a `short` and a `ushort` are 16 bits whose arithmetic wraps (CHK-381).
   An operation of them computes as its 32-bit family does and rounds its result once: a half to nearest, ties to even, and an integer to its low 16 bits.
   So `+`, `-`, `*`, `/` and `sqrt` of halves are exactly binary16's own, and a builtin of several steps, such as `mix` or `dot`, rounds once where a GPU may round each step.

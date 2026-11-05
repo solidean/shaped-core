@@ -41,6 +41,9 @@ struct sgl::text_request
     /// What the text does where an integer division by zero or an array index outside the array would run (LEGAL-65).
     /// `report` prints through the debug buffer, and so is `abort` without `diagnostics`.
     check::undefined_guard guards_undefined = check::undefined_guard::none;
+    /// Compiles an entry point whose `@float` WGSL cannot keep at `fast`, with a warning, rather than refusing it (EMIT-185).
+    /// The host's to give, since only the code that picked WebGPU knows whether running without the guarantee will do.
+    bool weakens_float = false;
     /// What the device has, each named as `sg::feature` names it, which `has` answers once inlined (CHK-426).
     /// With `float_atomic_add` an `atomic[float]` is the target's own float atomic where the target can say one,
     /// vulkan and metal, and a `uint`'s bits elsewhere.
@@ -109,6 +112,10 @@ struct sgl::emitted_source
     cc::string target_struct;
     /// What a device needs to run the entry point, each named as `sg::feature` names it; empty is portable.
     check::feature_set features;
+    /// The float guarantee the text keeps (CHK-435, EMIT-185): the entry point's, or `fast` where it was weakened.
+    check::float_level float_guarantee = check::float_level::fast;
+    /// The function that raised the entry point's guarantee, by name; empty at `fast`.
+    cc::string float_raised_by;
     /// The options the entry point reaches, by name, in declaration order (CHK-355).
     cc::vector<cc::string> options;
     /// What the entry point's code does to each binding it lists, keyed by host name; a slot it never touches is absent.

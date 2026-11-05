@@ -629,7 +629,7 @@ void checker::judge_attributes(i32 file,
                 unsupported(file, span_of(file, a.list), "@unroll with arguments, which would unroll a loop in part");
         }
         else if (sgl::is_valid(a.list) && name != "operator" && name != "compute" && name != "preferred_subgroup_size"
-                 && name != "stream" && name != "stages" && name != "shadowable" && name != "expect"
+                 && name != "float" && name != "stream" && name != "stages" && name != "shadowable" && name != "expect"
                  && name != "interpolate" && name != "format" && name != "depth" && name != "sampler"
                  && name != "geometry" && name != "tessellation_control" && name != "padding" && name != "swizzle"
                  && name != "forward" && name != "backward")

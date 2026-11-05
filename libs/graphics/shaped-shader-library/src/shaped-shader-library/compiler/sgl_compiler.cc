@@ -289,8 +289,14 @@ private:
         // option of the source; an sg feature no shader asks about is no name SGL knows, and is left out
         auto options = cc::vector<sgl::check::option_value>();
         auto device_features = sgl::check::feature_set();
+        auto weakens_float = false;
         for (auto const& o : desc.options)
         {
+            if (o.name == slib::k_weakens_float_option)
+            {
+                weakens_float = o.value == "true";
+                continue;
+            }
             if (o.name != slib::k_device_features_option)
             {
                 options.push_back({.name = o.name, .value = o.value});
@@ -320,6 +326,7 @@ private:
              .line_directives = true,
              .diagnostics = _diagnostics,
              .guards_undefined = _guards_undefined,
+             .weakens_float = weakens_float,
              .device_features = device_features});
         if (text.has_error())
             return cc::error(cc::format("SGL reported errors:\n{}", text.error()));
@@ -331,6 +338,15 @@ private:
                                                 .entry_point = emitted.entry_point,
                                                 .used_modules = emitted.library_files,
                                                 .warnings = emitted.warnings};
+        // EMIT-185: DXIL keeps the special values and the order only with every float operation strict, and
+        // denormals only where Shader Model 6.2 is asked to preserve them
+        if (_target == sgl::emit::target::hlsl_dx12 && emitted.float_guarantee != sgl::check::float_level::fast)
+            result.dxc_args.push_back(cc::string("-Gis"));
+        if (_target == sgl::emit::target::hlsl_dx12 && emitted.float_guarantee == sgl::check::float_level::ieee)
+        {
+            result.dxc_args.push_back(cc::string("-denorm"));
+            result.dxc_args.push_back(cc::string("preserve"));
+        }
         for (auto const& b : emitted.bindings)
         {
             auto binding = binding_of(b, shader.format, shader.stage);

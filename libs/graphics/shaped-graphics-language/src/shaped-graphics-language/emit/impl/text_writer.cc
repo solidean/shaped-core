@@ -134,6 +134,10 @@ struct writer
             id = hashed(id, piece);
         if (site.origin.at.file >= 0)
             id = hashed(id, cc::format("{}:{}", name_of(site.origin.at.file), site.origin.at.line));
+        // one line inlined along two call chains is two sites, which another permutation of this entry point may hold
+        for (auto const& from : site.origin.inlined_from)
+            if (from.file >= 0)
+                id = hashed(id, cc::format("<{}:{}", name_of(from.file), from.line));
         site.id = id;
 
         auto const count = isize(words.size()) + 2;
