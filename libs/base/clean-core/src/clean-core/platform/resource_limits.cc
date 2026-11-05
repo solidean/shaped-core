@@ -1,10 +1,16 @@
+#include <clean-core/common/assertf.hh>
 #include <clean-core/common/macros.hh> // CC_OS_WINDOWS
 #include <clean-core/common/utility.hh>
 #include <clean-core/platform/impl/cpuid.hh>
 #include <clean-core/platform/impl/text_file.hh>
+#include <clean-core/platform/leak_annotations.hh>
+#include <clean-core/platform/process_metrics.hh>
 #include <clean-core/platform/resource_limits.hh>
 #include <clean-core/platform/system_info.hh>
 #include <clean-core/string/from_string.hh>
+#include <clean-core/thread/atomic.hh>
+#include <clean-core/thread/native_thread.hh>
+#include <clean-core/thread/thread.hh>
 
 #if defined(CC_OS_WINDOWS)
 
@@ -256,4 +262,74 @@ i32 cc::recommended_worker_count()
     }
 
     return count < 1 ? 1 : count;
+}
+
+namespace
+{
+constinit cc::atomic<i64> g_memory_cap = 0;
+constinit cc::atomic<bool> g_memory_watchdog = false;
+
+/// What the watchdog compares against the cap: the commit charge where Windows has one, the resident set elsewhere.
+i64 watched_bytes()
+{
+    auto const usage = cc::query_process_usage();
+    if (!usage.has_value())
+        return 0;
+#if defined(CC_OS_WINDOWS)
+    return usage.value().private_bytes;
+#else
+    return usage.value().resident_bytes;
+#endif
+}
+
+#if defined(CC_OS_WINDOWS)
+/// A new job with the cap as its per-process commit limit, this process in it; false where Windows refused either step.
+bool join_capped_job(i64 bytes)
+{
+    auto const job = ::CreateJobObjectW(nullptr, nullptr);
+    if (job == nullptr)
+        return false;
+    auto limits = JOBOBJECT_EXTENDED_LIMIT_INFORMATION{};
+    limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_PROCESS_MEMORY;
+    limits.ProcessMemoryLimit = SIZE_T(bytes);
+    if (!::SetInformationJobObject(job, JobObjectExtendedLimitInformation, &limits, sizeof(limits))
+        || !::AssignProcessToJobObject(job, ::GetCurrentProcess()))
+    {
+        ::CloseHandle(job);
+        return false;
+    }
+    // the handle stays open for the process's life: closing the last one would not lift the limit, but keeping it costs nothing
+    return true;
+}
+#endif
+} // namespace
+
+void cc::cap_process_memory(i64 bytes)
+{
+    if (bytes <= 0)
+        return;
+    g_memory_cap.store(bytes, cc::memory_order_relaxed);
+#if defined(CC_OS_WINDOWS)
+    (void)join_capped_job(bytes);
+#endif
+#if CC_HAS_THREADS
+    if (g_memory_watchdog.exchange(true))
+        return;
+    // never joined: it runs until the process ends, and the thread object is leaked on purpose so no destructor waits for it
+    auto const scope = cc::leak_scope();
+    (void)new cc::native_thread(cc::native_thread::start(
+        []
+        {
+            while (true)
+            {
+                auto const cap = g_memory_cap.load(cc::memory_order_relaxed);
+                auto const used = watched_bytes();
+                CC_ASSERTF_ALWAYS(used < cap,
+                                  "memory cap: the process holds {} bytes, past its cap of {} (cc::cap_process_memory)",
+                                  used, cap);
+                cc::this_thread_sleep_secs(0.1);
+            }
+        },
+        {.name = "cc memory cap"}));
+#endif
 }

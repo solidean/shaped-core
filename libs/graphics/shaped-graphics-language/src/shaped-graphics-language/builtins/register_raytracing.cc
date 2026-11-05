@@ -453,10 +453,13 @@ written write_polyfill(call_context const& ctx)
 /// A ray-tracing stage's trace: (world, origin, direction, t_min, t_max, flags, mask, contribution, multiplier, miss,
 /// payload).
 /// EMIT-139: metal's trace is the kernel's own intersector, then a miss or a closest hit called through sg's tables, the
-/// closest hit's record found from the instance's offset as DXR finds it.
+/// closest hit's record found from the instance's offset as DXR finds it, in the offsets of the structure it traced.
 written write_trace_ray_msl(call_context const& ctx)
 {
     auto const& a = ctx.arguments;
+    // empty only where no member is named, which the registry's own checks write: those read the first slot
+    auto const offsets
+        = ctx.hit_offsets.empty() ? cc::string_view("sgl_ctx.hit_offsets->groups[0][0].instances") : ctx.hit_offsets;
     auto const mint = [&](cc::string_view name) { return ctx.mint.is_valid() ? ctx.mint(name) : cc::string(name); };
     auto const data = mint("sgl_d");
     auto const traversal = mint("sgl_i");
@@ -479,10 +482,10 @@ written write_trace_ray_msl(call_context const& ctx)
     lines.push_back(cc::format("if ({}.type == intersection_type::none)", found));
     lines.push_back(cc::format("    sgl_t.miss[uint({})]({}.payload, {}, sgl_ctx);", a[9].text, data, record));
     lines.push_back(cc::format("else if ((uint({}) & 8u) == 0u)", a[5].text));
-    lines.push_back(cc::format("    sgl_t.closest_hit[sgl_ctx.hit_offsets[{0}.instance_id] + {0}.geometry_id * "
+    lines.push_back(cc::format("    sgl_t.closest_hit[{5}[{0}.instance_id] + {0}.geometry_id * "
                                "uint({1}) + "
                                "uint({2})]({3}.payload, {4}, sgl_ctx);",
-                               found, a[8].text, a[7].text, data, record));
+                               found, a[8].text, a[7].text, data, record, offsets));
     result.text = cc::format("sgl_load({}, {}.payload)", a[10].text, data);
     return result;
 }
@@ -561,7 +564,113 @@ written write_trace_ray(call_context const& ctx)
     return result;
 }
 
+/// `trace_ray_reordered`: the trace as a hit object, the invocations regrouped by it, and its shaders run from it.
+/// `data` 1 adds a coherence hint and its bits, the arguments past the miss index.
+written write_trace_ray_reordered(call_context const& ctx)
+{
+    if (ctx.target != language::hlsl)
+        return {};
+    auto const desc = ctx.mint.is_valid() ? ctx.mint("ray_desc") : cc::string("ray_desc");
+    auto const hit = ctx.mint.is_valid() ? ctx.mint("hit_object") : cc::string("hit_object");
+    auto const payload = ctx.arguments[ctx.arguments.size() - 1].text;
+    auto result = written();
+    result.lines.push_back(cc::format("RayDesc {};", desc));
+    result.lines.push_back(cc::format("{}.Origin = {};", desc, ctx.arguments[1].text));
+    result.lines.push_back(cc::format("{}.TMin = {};", desc, ctx.arguments[3].text));
+    result.lines.push_back(cc::format("{}.Direction = {};", desc, ctx.arguments[2].text));
+    result.lines.push_back(cc::format("{}.TMax = {};", desc, ctx.arguments[4].text));
+    result.lines.push_back(
+        cc::format("dx::HitObject {} = dx::HitObject::TraceRay({}, uint({}), uint({}), {}, {}, {}, {}, {});", hit,
+                   ctx.arguments[0].text, ctx.arguments[5].text, ctx.arguments[6].text, ctx.arguments[7].text,
+                   ctx.arguments[8].text, ctx.arguments[9].text, desc, payload));
+    if (ctx.data == 1)
+        result.lines.push_back(cc::format("dx::MaybeReorderThread({}, uint({}), uint({}));", hit,
+                                          ctx.arguments[10].text, ctx.arguments[11].text));
+    else
+        result.lines.push_back(cc::format("dx::MaybeReorderThread({});", hit));
+    result.text = cc::format("dx::HitObject::Invoke({}, {})", hit, payload);
+    return result;
+}
+
+/// `trace_hit_ray`: the trace as a hit object, whose shaders run only when it is invoked (CHK-434).
+written write_trace_hit_ray(call_context const& ctx)
+{
+    if (ctx.target != language::hlsl)
+        return {};
+    auto const desc = ctx.mint.is_valid() ? ctx.mint("ray_desc") : cc::string("ray_desc");
+    auto result = written();
+    result.lines.push_back(cc::format("RayDesc {};", desc));
+    result.lines.push_back(cc::format("{}.Origin = {};", desc, ctx.arguments[1].text));
+    result.lines.push_back(cc::format("{}.TMin = {};", desc, ctx.arguments[3].text));
+    result.lines.push_back(cc::format("{}.Direction = {};", desc, ctx.arguments[2].text));
+    result.lines.push_back(cc::format("{}.TMax = {};", desc, ctx.arguments[4].text));
+    result.text = cc::format("dx::HitObject::TraceRay({}, uint({}), uint({}), {}, {}, {}, {}, {})",
+                             ctx.arguments[0].text, ctx.arguments[5].text, ctx.arguments[6].text, ctx.arguments[7].text,
+                             ctx.arguments[8].text, ctx.arguments[9].text, desc, ctx.arguments[10].text);
+    return result;
+}
+
+/// What a hit object answers before its shaders run, by `data`, and HLSL's member that answers it.
+struct hit_object_read
+{
+    cc::string_view name;
+    cc::string_view type;
+    evaluator evaluate;
+    cc::string_view hlsl;
+    cc::string_view doc;
+};
+constexpr hit_object_read k_hit_object_reads[] = {
+    {"is_hit", "bool", no_bool, "IsHit", "/// Whether the trace hit a primitive."},
+    {"is_miss", "bool", no_bool, "IsMiss", "/// Whether the trace left the scene, so invoking it runs the miss."},
+    {"t", "float", zero_float, "GetRayTCurrent",
+     "/// How far along the ray the hit is, or the ray's t_max where it missed."},
+    {"instance_id", "int", zero_int, "GetInstanceID", "/// The instance's own id, as the TLAS gives it."},
+    {"instance_index", "int", zero_int, "GetInstanceIndex", "/// The instance's position in the TLAS."},
+    {"geometry_index", "int", zero_int, "GetGeometryIndex", "/// The geometry's position in its BLAS."},
+    {"primitive_index", "int", zero_int, "GetPrimitiveIndex", "/// The primitive's position in its geometry."},
+};
+
+written write_hit_object_read(call_context const& ctx)
+{
+    if (ctx.target != language::hlsl)
+        return {};
+    auto const& read = k_hit_object_reads[ctx.data];
+    if (read.type == "int")
+        return {.text = cc::format("int({}.{}())", ctx.arguments[0].text, read.hlsl)};
+    return {.text = cc::format("{}.{}()", ctx.arguments[0].text, read.hlsl)};
+}
+
+/// `hit_object_reorder`, `data` 0, or by a hint, 1; `hit_object_invoke` is 2.
+written write_hit_object_step(call_context const& ctx)
+{
+    if (ctx.target != language::hlsl)
+        return {};
+    if (ctx.data == 2)
+        return {.text = cc::format("dx::HitObject::Invoke({}, {})", ctx.arguments[0].text, ctx.arguments[1].text)};
+    if (ctx.data == 1)
+        return {.text = cc::format("dx::MaybeReorderThread({}, uint({}), uint({}))", ctx.arguments[0].text,
+                                   ctx.arguments[1].text, ctx.arguments[2].text)};
+    return {.text = cc::format("dx::MaybeReorderThread({})", ctx.arguments[0].text)};
+}
+
 constexpr cc::string_view k_trace_ray_hlsl[] = {"RayDesc", "TraceRay"};
+constexpr cc::string_view k_hit_object_hlsl[] = {
+    "RayDesc",
+    "dx",
+    "HitObject",
+    "TraceRay",
+    "Invoke",
+    "MaybeReorderThread",
+    "IsHit",
+    "IsMiss",
+    "GetRayTCurrent",
+    "GetInstanceID",
+    "GetInstanceIndex",
+    "GetGeometryIndex",
+    "GetPrimitiveIndex",
+};
+constexpr cc::string_view k_trace_ray_reordered_hlsl[]
+    = {"RayDesc", "dx", "HitObject", "TraceRay", "MaybeReorderThread", "Invoke"};
 constexpr cc::string_view k_trace_ray_msl[] = {
     "sgl_configure",
     "sgl_record_of",
@@ -623,6 +732,7 @@ cc::string hlsl_ray_query_type(u32 flags)
         "CULL_NON_OPAQUE",
         "SKIP_TRIANGLES",
         "SKIP_PROCEDURAL_PRIMITIVES",
+        "FORCE_OMM_2_STATE",
     };
     auto text = cc::string();
     auto bit = 0;
@@ -652,7 +762,8 @@ void sgl::builtins::register_raytracing(registry& r)
                        "    cull_opaque = 64\n"
                        "    cull_non_opaque = 128\n"
                        "    skip_triangles = 256\n"
-                       "    skip_procedural = 512",
+                       "    skip_procedural = 512\n"
+                       "    force_omm_2_state = 1024",
         .doc = "/// What a trace may skip, cull or decide without asking: DXR's `RAY_FLAG_*` without the prefix.",
         .hlsl = "int",
         .wgsl = "i32",
@@ -767,6 +878,95 @@ void sgl::builtins::register_raytracing(registry& r)
             .takes_element = true,
             .features = check::feature_set(check::feature::raytracing_pipeline),
         });
+
+    r.add_comment("// A trace of a ray type with `reorder` where the device has shader execution reordering "
+                  "(CHK-433).");
+    for (auto const is_hinted : {false, true})
+        for (auto const geometry : {"triangles", "procedural", "mixed"})
+            r.add(function_record{
+                .signature = cc::format("@internal @stages(.raygen) fun {}(world: acceleration_structure[.{}], origin: "
+                                        "pos3, direction: vec3, "
+                                        "t_min: float, t_max: float, flags: ray_flags, mask: int, contribution: int, "
+                                        "multiplier: int, "
+                                        "miss: int{})",
+                                        is_hinted ? "trace_ray_reordered_by_hint" : "trace_ray_reordered", geometry,
+                                        is_hinted ? ", hint: uint, bits: int" : ""),
+                .doc = "/// Traces as `trace_ray` does, regrouping the invocations by the hit before its shaders run.",
+                .evaluate = nothing,
+                .write = {.kind = spelling_kind::custom,
+                          .custom = write_trace_ray_reordered,
+                          .data = is_hinted ? 1u : 0u,
+                          .writes_lines = is_not_wgsl,
+                          .hlsl_names = k_trace_ray_reordered_hlsl},
+                .writes_through = written_argument::element,
+                .takes_element = true,
+                // shader execution reordering too, which the trace that chose it records as the device's grant
+                .features = check::feature_set(check::feature::raytracing_pipeline),
+            });
+
+    r.add_comment("// A hit object: a trace whose shaders have not run, which only a device with shader execution "
+                  "reordering has (CHK-434).");
+    auto const ser = check::feature_set(check::feature::raytracing_pipeline)
+                   | check::feature_set(check::feature::shader_execution_reordering);
+    r.add(type_record{
+        .declaration = "struct hit_object",
+        .doc = "/// A trace whose shaders have not run yet: `let h = trace_hit(...)`, then `h.invoke(mut p)`.",
+        .hlsl = "dx::HitObject",
+        .features = ser,
+        .local_only_reason = "it is a trace in flight, which only its invocation completes",
+    });
+    for (auto const geometry : {"triangles", "procedural", "mixed"})
+        r.add(function_record{
+            .signature = cc::format("@internal @stages(.raygen) fun trace_hit_ray(world: acceleration_structure[.{}], "
+                                    "origin: pos3, direction: vec3, t_min: float, t_max: float, flags: ray_flags, "
+                                    "mask: int, contribution: int, multiplier: int, miss: int) -> hit_object",
+                                    geometry),
+            .doc = "/// Traces as `trace_ray` does, running the any-hit and intersection shaders and no other.",
+            .evaluate = nothing,
+            .write = {.kind = spelling_kind::custom,
+                      .custom = write_trace_hit_ray,
+                      .writes_lines = is_not_wgsl,
+                      .hlsl_names = k_hit_object_hlsl},
+            .writes_through = written_argument::element,
+            .takes_element = true,
+            .features = ser,
+        });
+    for (auto i = u32(0); i < u32(sizeof(k_hit_object_reads) / sizeof(k_hit_object_reads[0])); ++i)
+        r.add(function_record{
+            .signature = cc::format("@internal @pure @stages(.raygen) fun hit_object_{}(h: hit_object) -> {}",
+                                    k_hit_object_reads[i].name, k_hit_object_reads[i].type),
+            .doc = cc::string(k_hit_object_reads[i].doc),
+            .evaluate = k_hit_object_reads[i].evaluate,
+            .write
+            = {.kind = spelling_kind::custom, .custom = write_hit_object_read, .data = i, .hlsl_names = k_hit_object_hlsl},
+            .features = ser,
+        });
+    r.add(function_record{
+        .signature = "@internal @stages(.raygen) fun hit_object_reorder(h: hit_object)",
+        .doc = "/// Regroups the invocations by what their hit objects run.",
+        .evaluate = nothing,
+        .write = {.kind = spelling_kind::custom, .custom = write_hit_object_step, .hlsl_names = k_hit_object_hlsl},
+        .features = ser,
+    });
+    r.add(function_record{
+        .signature = "@internal @stages(.raygen) fun hit_object_reorder_by_hint(h: hit_object, hint: uint, bits: int)",
+        .doc = "/// Regroups the invocations by what their hit objects run, and by the low `bits` bits of `hint`.",
+        .evaluate = nothing,
+        .write
+        = {.kind = spelling_kind::custom, .custom = write_hit_object_step, .data = 1, .hlsl_names = k_hit_object_hlsl},
+        .features = ser,
+    });
+    r.add(function_record{
+        .signature = "@internal @stages(.raygen) fun hit_object_invoke(h: hit_object)",
+        .doc = "/// Runs the closest hit or the miss the hit object holds, handing the payload over past the "
+               "signature.",
+        .evaluate = nothing,
+        .write
+        = {.kind = spelling_kind::custom, .custom = write_hit_object_step, .data = 2, .hlsl_names = k_hit_object_hlsl},
+        .writes_through = written_argument::element,
+        .takes_element = true,
+        .features = ser,
+    });
 
     r.add_comment("// A call of a callable, which `table[i](mut p)` lowers to with the table's place in the section "
                   "added "

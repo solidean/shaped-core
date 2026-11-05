@@ -1196,6 +1196,28 @@ struct writer
         return {.text = cc::move(result)};
     }
 
+    /// EMIT-139: the per-instance hit-group offsets of the acceleration structure `id` names, which sg's metal backend
+    /// mirrors slot for slot beside each group's argument buffer: `hit_offsets->groups[group][slot + element]`.
+    /// Empty where `id` is no acceleration-structure member, or an element of one.
+    cc::string hit_offsets_of(flat_expr_id id)
+    {
+        if (p.m.at(p.e.at(id).type).kind != type_kind::acceleration_structure)
+            return {};
+        auto named = id;
+        auto element = cc::string();
+        if (auto const* const e = p.e.at(id).node.try_as<flat_element>())
+        {
+            named = e->object;
+            element = cc::format(" + {}", wrapped(expr(e->index), level::additive));
+        }
+        auto const* const member = p.e.at(named).node.try_as<flat_binding_member>();
+        auto const found = member != nullptr ? resource_of(p, member->binding, member->member) : -1;
+        if (found < 0)
+            return {};
+        auto const& r = p.resources[found];
+        return cc::format("sgl_ctx.hit_offsets->groups[{}][{}{}].instances", r.group, r.slot, element);
+    }
+
     /// Every call is written from its registry record; nothing here knows one builtin from another.
     rendered call(flat_call const& c, check::type_id type)
     {
@@ -1218,6 +1240,9 @@ struct writer
         case builtins::spelling_kind::custom:
         {
             auto mint = [&](cc::string_view desired) { return p.names.mint(desired); };
+            auto const offsets = d.language() == builtins::language::msl && !arguments.empty()
+                                   ? hit_offsets_of(p.e.at(c.arguments)[0])
+                                   : cc::string();
             auto result = how.custom({.target = d.language(),
                                       .arguments = arguments,
                                       .builtins = *p.m.builtins,
@@ -1226,6 +1251,7 @@ struct writer
                                       .result_type = p.m.builtin_type_of(type) != nullptr || record.gives_prelude_struct
                                                        ? type_text(p, d, type)
                                                        : cc::string_view(),
+                                      .hit_offsets = offsets,
                                       .is_device_coherent = is_device_coherent,
                                       .is_pixel_stage = p.e.entry_stage == check::stage::pixel,
                                       .native_float_atomics = p.native_float_atomics});
@@ -1468,10 +1494,17 @@ struct writer
         auto const dimensions = array_dimensions(p, local.type);
         auto const* const type_record = p.m.builtin_type_of(local.type);
         auto const& flags = p.local_flags[index_of(id)];
-        auto const type = declares_only && d.language() == builtins::language::hlsl && type_record != nullptr
-                               && type_record->hlsl_flagged != nullptr && flags.has_value()
-                            ? type_record->hlsl_flagged(flags.value())
-                            : cc::string(type_text(p, d, local.type));
+        // EMIT-184: forcing micromaps to 2 states is a name of Shader Model 6.9 alone, and the template only a hint
+        auto const sees_micromaps = p.e.features.has(check::feature::opacity_micromap);
+        auto type = declares_only && d.language() == builtins::language::hlsl && type_record != nullptr
+                         && type_record->hlsl_flagged != nullptr && flags.has_value()
+                      ? type_record->hlsl_flagged(sees_micromaps ? flags.value() : flags.value() & ~1024u)
+                      : cc::string(type_text(p, d, local.type));
+        // EMIT-184: a query of an entry point that states opacity micromaps sees them, which HLSL asks of each query
+        if (declares_only && type_record != nullptr && type_record->hlsl_flagged != nullptr
+            && d.language() == builtins::language::hlsl && sees_micromaps && type.ends_with(">"))
+            type = cc::format("{}, RAYQUERY_FLAG_ALLOW_OPACITY_MICROMAPS>",
+                              type.subview({.offset = 0, .size = type.size() - 1}));
         d.write_local(declaration, {.name = name,
                                     .type = type,
                                     .value = text,

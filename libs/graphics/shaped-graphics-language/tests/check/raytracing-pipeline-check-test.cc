@@ -124,6 +124,70 @@ TEST("sgl check - a trace hands over its ray type's payload as a place")
           == "unknown-member user:[bounce] path_rays has no ray type bounce\n");
 }
 
+TEST("sgl check - a trace reorders by a constant bool or by a uint hint and its bits")
+{
+    auto const trace_with = [](cc::string_view arguments, cc::string_view before = "")
+    {
+        return reports(cc::string("@raygen fun other(@launch_id id: int3){frame}:\n") + before
+                       + "    let mut p = radiance(float3(0.0, 0.0, 0.0))\n"
+                         "    trace(frame.world, ray(origin = pos3(0.0, 0.0, 0.0), direction = vec3(0.0, 0.0, 1.0), "
+                         "t_min = 0.0, t_max = 1.0), path_rays.surface, mut p"
+                       + arguments + ")\n");
+    };
+    // CHK-433: the hit alone, or a hint's low bits beside it
+    CHECK(trace_with(", reorder = true") == "");
+    CHECK(trace_with(", reorder = id.x as uint, reorder_bits = 4") == "");
+    CHECK(trace_with(", reorder = 7, reorder_bits = 16") == "");
+    // a bool is a constant, and a hint has its bits, from 1 to 16, beside it and nowhere else
+    CHECK(trace_with(", reorder = id.x > 2").starts_with("invalid-constant-argument"));
+    CHECK(trace_with(", reorder = id.x as uint").starts_with("invalid-constant-argument"));
+    CHECK(trace_with(", reorder = id.x as uint, reorder_bits = 17").starts_with("invalid-constant-argument"));
+    CHECK(trace_with(", reorder = true, reorder_bits = 4").starts_with("no-matching-overload"));
+    CHECK(trace_with(", reorder_bits = 4").starts_with("no-matching-overload"));
+    CHECK(trace_with(", reorder = id.x").starts_with("type-mismatch"));
+}
+
+TEST("sgl check - a hit object is a let of its trace_hit, and its invocation takes that ray type's payload")
+{
+    auto const raygen_with = [](cc::string_view body, bool is_granted = true)
+    {
+        auto source
+            = cc::string("struct other:\n    v: float\n\n@raygen fun other_raygen(@launch_id id: int3){frame}:\n"
+                         "    let mut p = radiance(float3(0.0, 0.0, 0.0))\n"
+                         "    let mut q = other(0.0)\n"
+                         "    let r = ray(origin = pos3(0.0, 0.0, 0.0), direction = vec3(0.0, 0.0, 1.0))\n");
+        source += is_granted ? "    const if has(.shader_execution_reordering):\n" : "    if true:\n";
+        auto is_line_start = true;
+        for (auto const ch : body)
+        {
+            if (is_line_start)
+                source += "        ";
+            source += ch;
+            is_line_start = ch == '\n';
+        }
+        return reports(source);
+    };
+    auto const traced = cc::string_view("let h = trace_hit(frame.world, r, path_rays.surface, mut p)\n");
+    // CHK-434: traced, inspected, regrouped and invoked, where the device has shader execution reordering
+    CHECK(raygen_with(cc::string(traced)
+                      + "if h.is_hit and h.t > 0.5 => p.color = float3(h.instance_id as float, 0.0, 0.0)\n"
+                        "h.reorder(h.primitive_index as uint, 4)\nh.invoke(mut p)\n")
+          == "");
+    CHECK(raygen_with(cc::string(traced) + "h.reorder()\nh.invoke(mut p)\n") == "");
+    // the payload is the traced ray type's, handed over as the caller's place
+    CHECK(raygen_with(cc::string(traced) + "h.invoke(mut q)\n").starts_with("type-mismatch"));
+    CHECK(raygen_with(cc::string(traced) + "h.invoke(p)\n").starts_with("no-matching-overload"));
+    CHECK(raygen_with(cc::string(traced) + "h.invoke(mut p, mut p)\n").starts_with("no-matching-overload"));
+    // a hit object is the let its trace_hit gave, so no other value of it is invoked
+    CHECK(raygen_with("let mut h = trace_hit(frame.world, r, path_rays.surface, mut p)\n").starts_with("unsupported-yet"));
+    CHECK(raygen_with(cc::string(traced) + "let g = h\ng.invoke(mut p)\n").starts_with("unsupported-yet"));
+    // regrouped by its own reorder, not the trace's
+    CHECK(raygen_with("let h = trace_hit(frame.world, r, path_rays.surface, mut p, reorder = true)\n")
+              .starts_with("no-matching-overload"));
+    // only a device with the feature has hit objects
+    CHECK(raygen_with(cc::string(traced) + "h.invoke(mut p)\n", false).contains("shader_execution_reordering"));
+}
+
 TEST("sgl check - a hit group's shaders carry the payloads of their ray types")
 {
     CHECK(reports("hit_group swapped for path_rays:\n    occlusion = (any_hit = cutout)\n")

@@ -6,11 +6,14 @@
 #include <clean-core/container/span.hh>
 #include <clean-core/error/crash_handler.hh>
 #include <clean-core/memory/unique_ptr.hh>
+#include <clean-core/platform/environment.hh>
 #include <clean-core/platform/process_metrics.hh>
+#include <clean-core/platform/resource_limits.hh>
 #include <clean-core/record/crash_dump.hh>
 #include <clean-core/record/quantity_format.hh>
 #include <clean-core/record/stat.hh>
 #include <clean-core/streams/file_stream.hh>
+#include <clean-core/string/from_string.hh>
 #include <clean-core/string/print.hh>
 #include <clean-core/string/string.hh>
 #include <clean-core/string/string_view.hh>
@@ -443,6 +446,15 @@ int report_run(nx::test_schedule_config const& config,
 } // namespace
 
 
+void nx::install_memory_cap()
+{
+    auto gb = 30.0;
+    if (auto const raw = cc::environment_variable("SC_DEV_MEMORY_PROCESS_GB"); raw.has_value() && !raw.value().empty())
+        gb = cc::from_string<f64>(raw.value()).value_or(gb);
+    if (gb > 0)
+        cc::cap_process_memory(i64(gb * f64(i64(1) << 30)));
+}
+
 int nx::run(int argc, char** argv)
 {
     // Before anything else can start a thread: a test asking for nx::main_thread means THIS one.
@@ -456,6 +468,9 @@ int nx::run(int argc, char** argv)
     // stacktrace instead of a bare non-zero exit code.
     cc::install_crash_handler();
     cc::add_crash_context_hook(&nx::impl::report_running_test);
+
+    // A test binary run outside dev.py has no Job Object over it, so it caps itself.
+    nx::install_memory_cap();
     // Under a driver that asks for it, every report is kept in a file too, with a minidump on Windows, so a flake can be read after the run.
     if (auto const directory = nx::impl::crash_directory(); !directory.empty())
         cc::set_crash_report_files({.directory = directory, .name = nx::program_name()});

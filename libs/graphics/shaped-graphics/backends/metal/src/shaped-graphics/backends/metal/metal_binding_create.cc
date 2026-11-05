@@ -145,6 +145,7 @@ cc::result<metal_binding_group_handle> metal_context::create_metal_binding_group
     auto bound_buffers = cc::vector<metal_binding_group::bound_buffer>();
     auto bound_textures = cc::vector<metal_binding_group::bound_texture>();
     auto bound_tlases = cc::vector<sg::tlas_handle>();
+    auto tlas_at_slot = cc::vector<sg::tlas_handle>::create_defaulted(slot_count);
     auto array_bindings = cc::vector<metal_binding_group::array_binding>();
 
     auto const find_binding = [&](cc::string_view name) -> isize
@@ -222,6 +223,7 @@ cc::result<metal_binding_group_handle> metal_context::create_metal_binding_group
                         cc::format("binding_group: '{}' — the bound acceleration structure has expired", b.name));
 
                 slots[slot_of(b, element)] = mtl_tlas.storage().resource_id()._impl;
+                tlas_at_slot[slot_of(b, element)] = tlas_view->tlas;
                 bound_tlases.push_back(tlas_view->tlas);
                 continue;
             }
@@ -316,10 +318,17 @@ cc::result<metal_binding_group_handle> metal_context::create_metal_binding_group
     if (slot_count > 0)
         cc::memcpy(arguments->contents(), slots.data(), size_t(slot_count * k_argument_slot_size));
 
+    auto hit_offsets = metal_binding_group::create_hit_offsets(*this, tlas_at_slot);
+    if (hit_offsets.has_error())
+    {
+        arguments->release();
+        return cc::error(cc::move(hit_offsets.error()));
+    }
+
     _residency.add(arguments);
 
-    return std::make_shared<metal_binding_group const>(*this, cc::move(typed_layout), arguments,
-                                                       cc::move(bound_buffers), cc::move(bound_textures),
-                                                       cc::move(bound_tlases), cc::move(array_bindings));
+    return std::make_shared<metal_binding_group const>(*this, cc::move(typed_layout), arguments, cc::move(bound_buffers),
+                                                       cc::move(bound_textures), cc::move(bound_tlases),
+                                                       cc::move(array_bindings), hit_offsets.value());
 }
 } // namespace sg::backend::metal

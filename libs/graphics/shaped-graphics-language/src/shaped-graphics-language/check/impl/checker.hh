@@ -454,6 +454,8 @@ struct checker
     /// The functions of each struct's and enum's type scope, keyed by the index of the type's symbol, then by name.
     /// Members are declared with their type, and extensions once every file is declared (CHK-233, CHK-237).
     layered_map<i32, cc::map<cc::string, cc::vector<symbol_id>>> type_scopes;
+    /// The symbols `type_scopes` holds, which take no name an emitter writes: a call of one is inlined, never named.
+    cc::set<i32> scoped_functions;
     /// The types `resource_type` and `buffer_type` interned, by spelling, so a mention looks up only its equals.
     /// The function arguments of every call checked so far; `call_arguments::functions` indexes it.
     cc::vector<function_argument> function_arguments;
@@ -752,6 +754,17 @@ struct checker
     [[nodiscard]] cc::optional<ray_trace> ray_type_of(i32 file, ast::expr_id expr);
     /// `trace(world, r, set.ray, mut payload)`, the trace of a ray-tracing stage (CHK-329).
     type_id check_pipeline_trace(function_scope& scope, ast::expr_id id, ast::call const& call, ray_trace ray);
+    /// `h.invoke(mut p)` of a hit object a `trace_hit` let holds (CHK-434).
+    type_id check_hit_invoke(function_scope& scope, ast::expr_id id, ast::call const& call);
+    /// A hit object's let, and the ray type its trace traced.
+    struct hit_let
+    {
+        i32 file = 0;
+        i32 statement = -1;
+        symbol_id set = symbol_id::none;
+        i32 ray = 0;
+    };
+    cc::vector<hit_let> hit_lets;
     /// CHK-326: an entry point of a ray-tracing stage, which `judge_entry_point` hands on.
     void judge_ray_stage(symbol_id id, cc::function_ref<void(cc::string_view)> invalid);
     /// The one name of a `@stream(name)` or a `@sampler(name)`; empty without one, and after a bad argument it reports.

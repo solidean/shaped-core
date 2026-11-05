@@ -96,9 +96,23 @@ ASYNC_INVOCABLE_TEST("sv - a view stepping sideways in front of a wall reports t
         auto const history = sv::view_history{};
         auto const id = def.views[0].id;
 
+        // The camera the guide slot last recorded, which a layer updates only on a frame it traced.
+        auto const last_traced_x = [&]() -> cc::optional<f32>
+        {
+            auto const* const state = store.peek_ptr(id);
+            auto const* const slot
+                = state != nullptr ? state->temporal.get_ptr(sv::temporal_id::motion_guide(0)) : nullptr;
+            if (slot == nullptr || !slot->has_last_camera)
+                return {};
+            return slot->last_camera.position[0];
+        };
+
         // Frames past the first one that wrote a guide: the first has no previous camera, so it reports none.
+        // Only a guide from a traced frame after a traced frame counts: a layer declines while a compile is pending,
+        // which leaves the guide as it was, and the next traced frame's motion reaches back to the last traced camera.
         auto settled = -1;
         auto index = u64(0);
+        auto was_traced = false;
         auto const start = cc::current_time_steady_secs();
         auto guide = cc::vector<tg::vec2f>();
         while (settled < 4)
@@ -113,8 +127,13 @@ ASYNC_INVOCABLE_TEST("sv - a view stepping sideways in front of a wall reports t
             resources.advance_to(ctx.current_epoch());
             store.begin_frame(u64(ctx.current_epoch()));
             auto const plan = sv::build_render_plan(def, size, index++, history);
+            auto const before = last_traced_x();
             (void)sv::viewer_renderer::execute(*cmd, def, plan, resources, store,
                                                output.as_render_target_view().cleared(tg::vec4f(0, 0, 0, 1)));
+            auto const after = last_traced_x();
+            auto const is_traced = after.has_value() && (!before.has_value() || after.value() != before.value());
+            auto const follows_traced = is_traced && was_traced;
+            was_traced = is_traced;
             auto const* const state = store.peek_ptr(id);
             auto const* const slot
                 = state != nullptr ? state->temporal.get_ptr(sv::temporal_id::motion_guide(0)) : nullptr;
@@ -134,9 +153,10 @@ ASYNC_INVOCABLE_TEST("sv - a view stepping sideways in front of a wall reports t
                 continue;
             }
 
-            auto const& pixels = co_await motion.data();
+            auto const pixels_async = motion.data();
+            auto const& pixels = co_await pixels_async;
             auto const center = pixels[isize(size[1] / 2) * isize(size[0]) + isize(size[0] / 2)];
-            if (settled < 0 && center[0] == 0.0f && center[1] == 0.0f)
+            if (!follows_traced || (settled < 0 && center[0] == 0.0f && center[1] == 0.0f))
                 continue;
             ++settled;
             guide = cc::vector<tg::vec2f>();

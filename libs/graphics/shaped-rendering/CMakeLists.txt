@@ -17,6 +17,7 @@ add_library(shaped-rendering
     src/shaped-rendering/svgf_denoise_routine.cc
     src/shaped-rendering/mix_routine.cc
     src/shaped-rendering/exposure_meter_routine.cc
+    src/shaped-rendering/micromap_bake_routine.cc
     src/shaped-rendering/dlss_rr_routine.cc
     src/shaped-rendering/nrd_denoise_routine.cc
     src/shaped-rendering/oidn_denoise_routine.cc
@@ -62,6 +63,7 @@ target_sources(shaped-rendering
     src/shaped-rendering/svgf_denoise_routine.hh
     src/shaped-rendering/mix_routine.hh
     src/shaped-rendering/exposure_meter_routine.hh
+    src/shaped-rendering/micromap_bake_routine.hh
     src/shaped-rendering/dlss_rr_routine.hh
     src/shaped-rendering/nrd_denoise_routine.hh
     src/shaped-rendering/oidn_denoise_routine.hh
@@ -294,6 +296,7 @@ sc_add_shader_package(
         slug_quads.sgl:*
         mix.sgl:*
         exposure_meter.sgl:*
+        micromap_bake.sgl:*
         atrous_denoise.sgl:*
         svgf.sgl:*
         fsr_prepare_depth.sgl:*
@@ -426,6 +429,7 @@ if(SC_BUILD_TESTS)
             tests/fsr-clear-test.cc
             tests/mix-test.cc
             tests/exposure-meter-test.cc
+            tests/micromap-bake-test.cc
             tests/svgf-reference-test.cc
             tests/oidn-test.cc
             tests/nn-conv-test.cc
@@ -460,6 +464,7 @@ if(SC_BUILD_TESTS)
                 bc_decode.sgl:*
                 slug_traced.sgl:*
                 slug_traced_pipeline.sgl:*
+                micromap_trace.sgl:*
         )
     endif()
 

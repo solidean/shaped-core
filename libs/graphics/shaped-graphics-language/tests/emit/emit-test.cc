@@ -634,6 +634,20 @@ TEST("sgl emit - a local named after a function is a local of its own in the tex
     CHECK(wgsl.contains("let helper_1: f32"));
 }
 
+TEST("sgl emit - a local named after a method or a property keeps its name, which no text writes")
+{
+    // CHK-105: `mat4.row`, `float.bits` and `hit_object.t` are reached through their types, and inlined
+    auto const wgsl = text_of(with_edges("@pixel fun main_ps(p: pixel_input) -> frame:\n"
+                                         "    let row = p.normal.x\n"
+                                         "    let bits = row * 2.0\n"
+                                         "    let t = bits + 1.0\n"
+                                         "    return { color = float4(row, bits, t, 1.0) }\n"),
+                              target::wgsl);
+    CHECK(wgsl.contains("let row: f32"));
+    CHECK(wgsl.contains("let bits: f32"));
+    CHECK(wgsl.contains("let t: f32"));
+}
+
 TEST("sgl emit - a function of the user file with a prelude function's parameter types is the one called")
 {
     // CHK-192: the call is the inlined body of the user file's `dot`, not the builtin

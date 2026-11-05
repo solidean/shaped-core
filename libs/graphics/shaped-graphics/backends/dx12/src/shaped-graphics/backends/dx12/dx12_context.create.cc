@@ -562,8 +562,11 @@ cc::result<context_handle> create_dx12_context(backend::dx12::dx12_config const&
         = runs_agility_runtime() && raytracing_tier >= D3D12_RAYTRACING_TIER_1_0
        && SUCCEEDED(check_feature_support(device.Get(), D3D12_FEATURE_SHADER_MODEL, &sm69, sizeof(sm69)))
        && sm69.HighestShaderModel >= D3D_SHADER_MODEL_6_9;
+    // DXR 1.2 brings micromaps, and the query flag that lets a ray query see them needs Shader Model 6.9 too.
+    auto const opacity_micromap = shader_execution_reordering && raytracing_tier >= D3D12_RAYTRACING_TIER_1_2;
 #else
     auto const shader_execution_reordering = false;
+    auto const opacity_micromap = false;
 #endif
 
     auto ctx = std::make_shared<dx12_context>();
@@ -580,6 +583,7 @@ cc::result<context_handle> create_dx12_context(backend::dx12::dx12_config const&
     ctx->_native_16bit_shader_ops = native_16bit_shader_ops;
     ctx->_wave_ops = wave_ops;
     ctx->_shader_execution_reordering = shader_execution_reordering;
+    ctx->_opacity_micromap = opacity_micromap;
     ctx->_vertex_layer_output = vertex_layer_output;
 
     // One dispatch per argument record, no root-signature changes, so the signature takes no root signature.

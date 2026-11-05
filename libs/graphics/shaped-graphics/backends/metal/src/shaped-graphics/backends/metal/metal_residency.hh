@@ -19,6 +19,7 @@
 /// libs/graphics/shaped-graphics/backends/metal/readme.md records it as the optimization it is.
 ///
 /// Every mutation is followed by `commit`, which is what publishes the change to the queue.
+/// An addition is also followed by `requestResidency`, without which work right after it could miss it.
 class sg::backend::metal::metal_residency_set
 {
 public:

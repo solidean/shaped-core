@@ -351,6 +351,7 @@ template <class T>
 class layered;
 template <class K, class V>
 class layered_map;
+enum class ray_trace_kind : u8;
 } // namespace sgl::check
 
 namespace sgl::test

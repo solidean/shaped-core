@@ -54,9 +54,40 @@ One BLAS per mesh and cutout material where two instances differ; blob-cache onl
 
 ## Status
 
-The sg API and the vulkan backend are in; the shaped-rendering baker, sv's integration and dx12 are not.
+The sg API, the vulkan and dx12 backends and the shaped-rendering baker, `sr::micromap_bake_routine`, are in.
+The baker reads the UVs on the host to size the build, and a GPU test traces a baked cutout on both backends.
+`ray_flags.force_omm_2_state` is in SGL, and a test traces the baked quad both ways on both backends: 4-state exact, 2-state taking the guesses.
+Left is sv's integration.
+dx12 needs the Agility SDK, and its two GPU tests run on a device of ray-tracing tier 1.2.
 **Sponza no longer motivates the rest.**
 Its 2.5 ms came from a dirt decal whose opacity is a soft mask, 79% of it strictly between 0 and 1, where an exact micromap decides little.
 sv's hybrid now skips such coverage instances through the instance mask instead, which removed the cost.
 What remains is thresholded foliage, Bistro's for one, measured before the baker is built.
 
+
+## sv's integration, the part left
+
+Mapped on 2026-11-05 for whoever takes it; paths are under `libs/graphics/shaped-viewer/`.
+
+**A micromapped BLAS is keyed on mesh and opacity, not on mesh alone.**
+`mesh_manager::acquire_blas` (`resources/resource_managers.cc`) builds one BLAS per position-and-index content, shared by every material, and never rebuilds it.
+A micromap belongs to a mesh, its opacity texture, its UV set and its cutoff, so a cutout instance needs a BLAS of its own beside the shared one.
+It is built late, once its texture lands, and until then the instance traces the shared BLAS and asks its any-hit decision as today.
+
+**The hook is the landed-texture list.**
+`texture_manager::collect_settled` feeds `gpu_resource_manager::_collect_textures` and `_queue_mip_work`, which is where a bake can be queued for every cutout instance waiting on that texture.
+
+**The bake needs the CPU UVs and indices, which sv drops.**
+The managers free a mesh's staging bytes after the copy; only the caller's `sv::mesh` and `sv::asset_data` keep their pinned payloads.
+Either `create_mesh` keeps the UV and index payloads of a mesh a cutout material names, or the baker learns to read them from the GPU buffers.
+
+**Check how forcing an instance non-opaque meets a micromap.**
+A cutout instance is built with `opaque_override = false`, which is FORCE_NON_OPAQUE (`rendering/view_renderer.cc`).
+If that override wins over the micromap on DXR 1.2 or vulkan, a micromapped instance must drop it and its geometry must be built non-opaque instead.
+
+**The hybrid's rays force 2 states, the others stay 4-state.**
+`trace_hit`, `blocked` and `reaches` in `shaders/sgl/tracer_wavefront.sgl` are shared by the hybrid and the wavefront, so they take a flags parameter, or the hybrid gets its own spellings.
+
+**The baker takes sv's sampler as it is**: an `sg::sampler_address_mode` per axis and an `sg::sampler_filter`.
+
+**Done** is still the measurement: Bistro's thresholded foliage, whose candidate stops `tests/hybrid-benchmark.cc` already counts.
