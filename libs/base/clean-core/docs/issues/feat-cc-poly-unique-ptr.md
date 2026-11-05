@@ -10,6 +10,8 @@ refs:
 So a non-template struct cannot own an object whose type is a template parameter of the functions that use it.
 Example: a container of records shared by functions templated over an arithmetic, each record holding data whose layout depends on that arithmetic.
 Today a consumer serializes such data into bytes, or reaches for `std::unique_ptr`, which the lint discourages.
+`cc::shared_ptr` upcasts only within one Traits, its default control block sized by the static type.
+`cc::poly_node_allocation` can own through a base, but needs every base to report its node class through a virtual: too low-level for an interface others implement.
 
 Wanted: `cc::poly_unique_ptr<Base>`, move-only, made by `cc::make_poly_unique<Derived>(...)` and converting from `poly_unique_ptr<Derived>`.
 - It frees what it was made with: the size, alignment and destructor of the most derived type, captured at make, not taken from `Base`.
