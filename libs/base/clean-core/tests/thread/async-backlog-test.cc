@@ -1,5 +1,6 @@
 #include <clean-core/common/macros.hh> // CC_HAS_THREADS
 #include <clean-core/common/time.hh>
+#include <clean-core/common/utility.hh> // CC_DEFER
 #include <clean-core/container/span.hh>
 #include <clean-core/container/vector.hh>
 #include <clean-core/thread/async.hh>
@@ -404,20 +405,27 @@ TEST("async backlog - a parked awaiter torn down hands the work it awaited, stil
 
 namespace
 {
-/// A capture whose destruction takes a while, and says where it is: 1 begun, 2 ended.
+/// A capture whose destruction holds until `release`, and says where it is: 1 begun, 2 ended.
 struct slow_capture
 {
     cc::atomic<int>* stage = nullptr;
+    cc::atomic<bool>* release = nullptr;
 
-    explicit slow_capture(cc::atomic<int>* s) : stage(s) {}
-    slow_capture(slow_capture&& rhs) noexcept : stage(cc::exchange(rhs.stage, nullptr)) {}
+    slow_capture(cc::atomic<int>* s, cc::atomic<bool>* r) : stage(s), release(r) {}
+    slow_capture(slow_capture&& rhs) noexcept
+      : stage(cc::exchange(rhs.stage, nullptr)), release(cc::exchange(rhs.release, nullptr))
+    {
+    }
     slow_capture& operator=(slow_capture&&) = delete;
     ~slow_capture()
     {
         if (stage == nullptr)
             return;
         stage->store(1);
-        cc::this_thread_sleep_secs(0.05);
+        // bounded only so that a test that never releases fails instead of hanging
+        auto const t0 = cc::current_time_steady_secs();
+        while (!release->load() && cc::current_time_steady_secs() - t0 < 10.0)
+            cc::this_thread_yield();
         stage->store(2);
     }
 };
@@ -433,11 +441,18 @@ TEST("async backlog - settled waits for a node dropped unresolved to finish its 
     cc::scoped_compute_async_scheduler const as_compute(pool);
 
     auto stage = cc::atomic<int>(0);
+    auto release = cc::atomic<bool>(false);
     auto backlog = cc::async_backlog("teardown");
-    auto node = cc::make_async_lazy([held = slow_capture(&stage)] { return 0; });
+    auto node = cc::make_async_lazy([held = slow_capture(&stage, &release)] { return 0; });
     backlog.track(node);
 
     auto dropper = cc::native_thread::start([n = cc::move(node)]() mutable { n = {}; });
+    // however the test ends, so a failed REQUIRE does not leave the thread unjoined
+    CC_DEFER
+    {
+        release.store(true);
+        dropper.join();
+    };
     // bounded only so that a dropper that never runs fails instead of hanging
     auto const t0 = cc::current_time_steady_secs();
     while (stage.load() == 0 && cc::current_time_steady_secs() - t0 < 10.0)
@@ -446,13 +461,13 @@ TEST("async backlog - settled waits for a node dropped unresolved to finish its 
     CHECK(backlog.outstanding_count() == 1); // no strong handle is left, and it still counts
 
     auto const settled = cc::async_start(backlog.settled());
-    CHECK(!settled->is_ready()); // the capture's destructor sleeps, so the teardown is still running here
+    CHECK(!settled->is_ready()); // the capture's destructor holds, so the teardown is still running here
+    release.store(true);
     auto const t1 = cc::current_time_steady_secs();
     while (!settled->is_ready() && cc::current_time_steady_secs() - t1 < 10.0)
         cc::this_thread_yield();
     CHECK(settled->is_ready());
     CHECK(stage.load() == 2);
     CHECK(backlog.outstanding_count() == 0);
-    dropper.join();
 }
 #endif

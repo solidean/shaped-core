@@ -89,6 +89,21 @@ inline f64 burn_until_sampled(u64 samples, f64 cap_secs = 5.0)
     return cc::current_time_steady_secs() - start;
 }
 
+/// Burns until the sampler has ticked `ticks` more times, which samples every covered thread that often.
+///
+/// Counting `taken` instead would count every thread of the process, and with tests running in parallel that is
+/// one or two ticks: too few to catch another thread of the test in any particular state.
+inline f64 burn_until_ticked(u64 ticks, f64 cap_secs = 5.0)
+{
+    auto const target = cc::rec::sampling_statistics().ticks + ticks;
+    auto const start = cc::current_time_steady_secs();
+    u64 volatile sink = 0;
+    while (cc::rec::sampling_statistics().ticks < target && cc::current_time_steady_secs() - start < cap_secs)
+        for (int i = 0; i < 4096; ++i)
+            sink = sink + u64(i);
+    return cc::current_time_steady_secs() - start;
+}
+
 /// A recording's event sequence, block by block, as something two recordings can be compared on.
 ///
 /// Counts are a weak assertion for anything that MOVES events: a transform that relocates every sample to the end
