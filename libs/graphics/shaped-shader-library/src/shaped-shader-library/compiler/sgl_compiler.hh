@@ -22,6 +22,8 @@ enum class slib::sgl_undefined_guard : slib::u8
     /// The operation and its operands are logged as a failed `assert` is, and the invocation ends as for `abort`.
     /// It needs `diagnostics` to log, and is `abort` without it.
     report,
+    /// The operation runs on a substitute operand that has a value, and the invocation goes on, as in WGSL.
+    define,
 };
 
 /// Where an SGL edge keeps SGL's front end, beside the in-memory tier every SGL edge in the process shares.

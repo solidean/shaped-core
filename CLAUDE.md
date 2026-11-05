@@ -335,8 +335,8 @@ The loop is **run `dev.py`, then diagnose with `repo_tools`** — `build_diag` a
 * `SC_SHADER_DIAGNOSTICS` (default: on unless `SC_FROZEN_SHADERS`) is whether a shader's `print` and `assert` reach the log → `SG_SHADER_DIAGNOSTICS`.
   SGL writes them as records into a debug window sg binds, reads back after the epoch and logs, so a failed GPU assert fails a test.
   See [docs/platforms.md](docs/platforms.md#shader-diagnostics-sc_shader_diagnostics).
-* `SC_SHADER_UNDEFINED` (default `NONE`; `ABORT`, `REPORT`) is SGL's robustness profile: what an integer division by zero or an array index past the array does.
-  `REPORT` logs it as a failed shader assert at the `.sgl` line and ends that invocation, `ABORT` only ends it.
+* `SC_SHADER_UNDEFINED` (default `NONE`; `ABORT`, `REPORT`, `DEFINE`) is SGL's robustness profile: what an integer division by zero or an index past an array or a buffer does.
+  `REPORT` logs it as a failed shader assert at the `.sgl` line and ends that invocation, `ABORT` only ends it, and `DEFINE` gives it WGSL's value and goes on.
   See [docs/platforms.md](docs/platforms.md#operations-with-no-value-sc_shader_undefined).
 * `SC_CHECK_WIDE_ARITH` (default OFF) checks typed-geometry's `fixed_int` claims — a result width, a shift amount — at runtime → `TG_CHECK_WIDE_ARITH`.
   Off by default because they sit in predicate hot loops; the `debug-nopch` presets turn it on, so CI and `check --all-presets` exercise it.

@@ -305,12 +305,14 @@ A dx12, a vulkan and a webgpu context bind it so far; metal shaders write no rec
 
 ## Operations with no value (`SC_SHADER_UNDEFINED`)
 
-`SC_SHADER_UNDEFINED` (default `NONE`) is the robustness profile of every SGL shader slib compiles: what an integer division by zero or an array index outside the array does.
+`SC_SHADER_UNDEFINED` (default `NONE`) is the robustness profile of every SGL shader slib compiles: what an integer division by zero, or an index outside an array, a buffer or a `bytes`, does.
 `NONE` leaves it the target's undefined behaviour, at no cost.
 `REPORT` logs the operation and its operands as a failed assert, at the `.sgl` line, and ends that invocation; it needs `SC_SHADER_DIAGNOSTICS`, and is `ABORT` without it or on metal.
 `ABORT` ends the invocation alone, with no debug window, so a shader that reaches one stops working rather than working by accident.
-Both cost a test and a branch at each guarded operation, which a literal divisor or index does not need.
-SGL's [LEGAL-65](../libs/graphics/shaped-graphics-language/docs/spec/semantics/legalization.md) is the rule, and `sgl emit --undefined` shows what it writes.
+`DEFINE` runs the operation on a substitute operand instead and goes on: a divisor of 1, so `x / 0` is `x` and `x % 0` is 0 as in WGSL, and an index of 0.
+It is for a shader that must survive untrusted input, and it hides a bug the other two would show.
+Each costs a test and a branch at each guarded operation, which a literal divisor or index does not need.
+SGL's [LEGAL-65](../libs/graphics/shaped-graphics-language/docs/spec/semantics/legalization.md) to LEGAL-68 are the rules, and `sgl emit --undefined` shows what they write.
 [epic-sgl-robustness-profiles](../libs/graphics/shaped-graphics-language/docs/issues/epic-sgl-robustness-profiles.md) is the plan, and what is not guarded yet.
 
 ## Example backend (`SC_EXAMPLE_BACKEND`)

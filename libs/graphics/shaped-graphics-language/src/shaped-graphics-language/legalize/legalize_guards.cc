@@ -37,6 +37,8 @@ struct guarder
     bool reports = false;
     /// Bounds a buffer index by the bound buffer's length, which the target can read.
     bool guards_buffers = true;
+    /// LEGAL-68: a failed test replaces the operand with its safe value and goes on, ending nothing.
+    bool defines = false;
     /// LEGAL-64: an `assert` before the last barrier is lowered here, where the flag is, rather than ending at once.
     bool lowers_asserts = false;
     /// The flag a guard sets where a barrier, a derivative or a subgroup operation may still follow, which the
@@ -212,6 +214,12 @@ struct guarder
     stmt_list failed(cc::vector<cc::string> pieces, cc::span<flat_expr_id const> values, cc::span<replacement const> safe)
     {
         auto result = stmt_list();
+        if (defines)
+        {
+            for (auto const& r : safe)
+                result.push_back(out.assign(out.local(r.place), r.value));
+            return result;
+        }
         if (reports)
         {
             out.e.messages.push_back({.pieces = cc::move(pieces), .is_assert = true});
@@ -239,7 +247,7 @@ struct guarder
     local_id pinned(cc::string_view name, flat_expr_id value, stmt_list& into)
     {
         auto const type = out.e.at(value).type;
-        if (defers)
+        if (defers || defines)
         {
             auto const local = add_temporary_var(out, name, type);
             into.push_back(out.var(local, value));
@@ -965,6 +973,7 @@ stmt_list sgl::check::impl::guard_undefined(flat_builder& out, stmt_list const& 
                      .guards = options.guards_undefined != undefined_guard::none,
                      .reports = options.guards_undefined == undefined_guard::report && !options.erases_prints,
                      .guards_buffers = options.guards_buffers,
+                     .defines = options.guards_undefined == undefined_guard::define,
                      .lowers_asserts = options.lowers_asserts};
 
     // The last statement of the body that holds a barrier, a derivative or a subgroup operation, which an invocation

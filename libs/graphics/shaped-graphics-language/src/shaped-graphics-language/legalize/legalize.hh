@@ -13,6 +13,9 @@ enum class sgl::check::undefined_guard : sgl::u8
     /// The operation and its operands are printed as a failed `assert` is, and the invocation ends as for `abort`.
     /// Without diagnostics there is nothing to print into, and it is `abort`.
     report,
+    /// The operation runs on a substitute operand that has a value, so it gives a value the rule names and the
+    /// invocation goes on, as WGSL defines its integer division (LEGAL-68).
+    define,
 };
 
 /// Switches that exist for the tests of the legalizer, each one breaking a rule on purpose.

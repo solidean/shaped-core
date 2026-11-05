@@ -33,7 +33,7 @@ The worked examples are WGSL, since it is the strictest target: no `do … while
   An any hit returns `ignore`, and an intersection a report whose `is_hit` is false.
   An `assert` before the last barrier, derivative or subgroup operation sets LEGAL-65's flag instead, and its invocation ends where a guard's does.
   The tree then prints nothing; it is the one way it may behave otherwise than its input, and only when the caller asked.
-* **LEGAL-65** (G1) Asked to, legalization first guards each operation that may have no value: the robustness profile `abort` or `report`.
+* **LEGAL-65** (G1) Asked to, legalization first guards each operation that may have no value: the robustness profile `abort`, `report` or `define` (LEGAL-68).
   That is an integer `/` or `%` whose divisor is no literal that cannot fail (EVAL-84), and an array index that is no literal (EVAL-90).
   The guard is a block in the operation's place that binds the operands, tests them, and only then runs the operation, so every later rule keeps its order and its short circuits.
   A failed test ends the invocation as an `assert` of LEGAL-64 does, and `report` first prints the operation and its operands as that `assert`'s message.
@@ -54,6 +54,12 @@ The worked examples are WGSL, since it is the strictest target: no `do … while
   A write is a store to a buffer element or to workgroup memory, and a call with an effect, an atomic or an image store, that stands as a statement.
   A barrier, a derivative and a subgroup operation are never skipped, since every invocation must reach them.
   An atomic whose result is bound by a `let` is not skipped yet.
+* **LEGAL-68** (G1) The profile `define` runs each guard of LEGAL-65 and LEGAL-66 without ending anything: a failed test replaces the operand by its safe value, and the operation runs on it.
+  A divisor of 1, so `x / 0` is `x`, `x % 0` is 0 and `INT_MIN / -1` is `INT_MIN`, which are WGSL's values; an index or an offset of 0.
+  A maths builtin of EVAL-87 runs on the operands its deferred guard gives: `pow` on a base of 1, `asin` and `acos` on 0, `atan2` on an `x` of 1.
+  `smoothstep` runs on the edges 0 and 1, and `clamp` on a `high` of `low`.
+  It prints nothing and needs no flag, since no invocation ends, and the tree has a value wherever the input has one.
+  An index of 0 is still past the end of a buffer that holds nothing, which it leaves to the target.
 * **LEGAL-52** (V1) A core tree holds no `void` local, and no `let`, `var`, assignment, `return` or read of a `void` value: what evaluating one does stays as an `eval`, and the value itself is gone.
   It follows every rule that introduces a local for a result, since a `void` result is one of them; only the let rules come after it.
 

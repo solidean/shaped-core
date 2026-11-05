@@ -526,3 +526,59 @@ TEST("sgl guards - without a guard that may set the flag no write is masked")
                                {.guards_undefined = undefined_guard::abort, .guards_buffers = false});
     CHECK(!dump_entry_point(checked.module, core).contains("aborted"));
 }
+
+TEST("sgl guards - define gives a division by zero WGSL's value, and an index past the end the first element "
+     "(LEGAL-68)")
+{
+    // p.a is 0.25, so d is 0; p.b is 0.75, so i is 6, past the table's 3
+    auto const r = run_both("@pixel fun ps(p: frag) -> target:\n"
+                            "    let d = int(p.a)\n"
+                            "    let table = [1.0, 2.0, 3.0]\n"
+                            "    let i = int(p.b * 8.0)\n"
+                            "    return {\n"
+                            "        color = float4(float(7 / d), float(7 % d), table[i], pow(p.a - 1.0, 0.5))\n"
+                            "    }\n",
+                            undefined_guard::define);
+    CHECK(r.structured.status == run_status::program_error);
+    REQUIRE(r.guarded.status == run_status::ok).dump("core", r.dump);
+    // a divisor of 1: `7 / 0` is 7 and `7 % 0` is 0, as in WGSL
+    CHECK(r.guarded.result.leaves[0].as_float() == 7.0f);
+    CHECK(r.guarded.result.leaves[1].as_float() == 0.0f);
+    CHECK(r.guarded.result.leaves[2].as_float() == 1.0f);
+    // pow of a negative base runs on a base of 1
+    CHECK(r.guarded.result.leaves[3].as_float() == 1.0f);
+    CHECK(r.guarded.printed.empty());
+    CHECK(!r.dump.contains("(discard")).dump("core", r.dump);
+}
+
+TEST("sgl guards - define leaves a program that never fails a guard as it is, and prints nothing")
+{
+    auto const r = run_both("@pixel fun ps(p: frag) -> target:\n"
+                            "    let d = int(p.b * 4.0)\n"
+                            "    return {\n"
+                            "        color = float4(float(-9 / d), 0.0, 0.0, 1.0)\n"
+                            "    }\n",
+                            undefined_guard::define);
+    CHECK(r.structured.status == run_status::ok);
+    CHECK(r.guarded == r.structured).dump("core", r.dump);
+}
+
+TEST("sgl guards - every target writes the define profile, before a barrier too")
+{
+    constexpr auto source = "binding work:\n"
+                            "    values: mut buffer[int]\n"
+                            "\n"
+                            "@compute(64) fun cs(@thread_id id: int3){work}:\n"
+                            "    let table = [3, 1, 4]\n"
+                            "    let q = work.values[0] / id.x + table[id.y]\n"
+                            "    workgroup_barrier()\n"
+                            "    work.values[id.x] = q\n";
+    for (auto const target : sgl::emit::all_targets())
+    {
+        auto const text = sgl::compile_to_text(
+            {.source = source, .entry_point = "cs", .target = target, .guards_undefined = undefined_guard::define});
+        REQUIRE(text.has_value()).dump("error", text.has_error() ? text.error() : cc::string());
+        CHECK(text.value().text.contains("divisor")).dump("text", text.value().text);
+        CHECK(!text.value().text.contains("aborted")).dump("text", text.value().text);
+    }
+}
