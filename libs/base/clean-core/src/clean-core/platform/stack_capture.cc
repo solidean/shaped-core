@@ -521,19 +521,20 @@ stack_bounds const& current_stack_bounds()
 namespace
 {
 #if CC_CAN_CHASE_FRAME_POINTERS
-/// Chases the frame chain from `start_frame`, optionally emitting `start_pc` first.
+/// Chases the frame chain from `start_frame` within `bounds`, optionally emitting `start_pc` first.
 ///
 /// `start_pc` is what a sampled context contributes and a self-capture does not have: for a foreign thread the
 /// program counter is where it IS, and the chain only ever yields return addresses.
+/// `bounds` is the walked thread's stack, which is the caller's own unless it walks a thread stopped from outside.
 cc::stack_capture_result chase_chain(frame const* start_frame,
                                      void* start_pc,
                                      cc::span<void*> out,
                                      isize skip,
-                                     void const* stop_frame)
+                                     void const* stop_frame,
+                                     stack_bounds const& bounds)
 {
     cc::stack_capture_result result;
 
-    auto const& bounds = current_stack_bounds();
     auto const stop = reinterpret_cast<u64>(stop_frame);
     auto remaining_skip = skip;
 
@@ -676,7 +677,8 @@ cc::stack_capture_result cc::capture_stack_from_native_context(void* native_cont
     auto const fp = uc->uc_mcontext.gregs[REG_RBP];
     auto const pc = uc->uc_mcontext.gregs[REG_RIP];
 #endif
-    return chase_chain(reinterpret_cast<frame const*>(fp), reinterpret_cast<void*>(pc), out, skip, stop_frame);
+    return chase_chain(reinterpret_cast<frame const*>(fp), reinterpret_cast<void*>(pc), out, skip, stop_frame,
+                       current_stack_bounds());
 #else
     (void)unwind;
     (void)native_context;
@@ -684,6 +686,29 @@ cc::stack_capture_result cc::capture_stack_from_native_context(void* native_cont
     (void)skip;
     (void)stop_frame;
     (void)walk;
+    return {};
+#endif
+}
+
+cc::stack_capture_result cc::capture_stack_from_frame(void const* frame_pointer,
+                                                      void* program_counter,
+                                                      u64 stack_low,
+                                                      u64 stack_high,
+                                                      cc::span<void*> out,
+                                                      void const* stop_frame)
+{
+#if CC_CAN_CHASE_FRAME_POINTERS
+    if (out.empty() || stack_low == 0 || stack_high <= stack_low)
+        return {};
+    return chase_chain(static_cast<frame const*>(frame_pointer), program_counter, out, 0, stop_frame,
+                       stack_bounds{.low = stack_low, .high = stack_high, .known = true});
+#else
+    (void)frame_pointer;
+    (void)program_counter;
+    (void)stack_low;
+    (void)stack_high;
+    (void)out;
+    (void)stop_frame;
     return {};
 #endif
 }
@@ -734,7 +759,8 @@ CC_DONT_INLINE cc::stack_capture_result cc::capture_stack(cc::span<void*> out,
     if (resolve(walk) == cc::stack_walk::frame_pointers)
     {
         // This frame's own return address is the caller's call site, which is exactly frame 0 — no implicit skip.
-        return chase_chain(static_cast<frame const*>(__builtin_frame_address(0)), nullptr, out, skip, stop_frame);
+        return chase_chain(static_cast<frame const*>(__builtin_frame_address(0)), nullptr, out, skip, stop_frame,
+                           current_stack_bounds());
     }
 #endif
 

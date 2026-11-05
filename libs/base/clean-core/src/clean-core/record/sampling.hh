@@ -87,9 +87,13 @@ namespace cc::rec
 /// `include_unknown_threads` widens it to every OS thread in the process, at the cost documented on that field.
 ///
 /// Requires an initialized recorder, and does nothing where a foreign thread's stack cannot be walked
-/// (`cc::stack_capture_from_context_available`).
+/// (`cc::rec::sampling_available`).
 /// Calling it while already sampling replaces the configuration.
 void start_sampling(rec::sampling_config const& cfg = {});
+
+/// Whether this build can sample at all: a thread walked from outside, by its `CONTEXT` on Windows and through Mach
+/// on macOS.
+[[nodiscard]] bool sampling_available();
 
 /// Stops the sampler and waits for it, so nothing is in flight when this returns.
 void stop_sampling();
