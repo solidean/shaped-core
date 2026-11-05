@@ -3,6 +3,8 @@ created: 2026-11-05
 refs:
   - file: libs/graphics/shaped-viewer/tests/moving-view-motion-test.cc
   - test: "sv - a view stepping sideways in front of a wall reports the step as every pixel's motion"
+closed: 2026-11-05
+resolution: fixed
 ---
 
 # The moving-view motion test fails on a loaded machine by its 60-second wall-clock budget
