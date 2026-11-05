@@ -385,6 +385,15 @@ def _build_checks(ctx: Context, *, memo: dev.CheckMemo | None = None, all_preset
 
         return run
 
+    def check_abspaths(*, fix: bool, scope: dev.ChangeScope | None, mirror: bool, verbose: bool) -> bool:
+        # The default preset's build, configured where it was not: its definitions, and the sources its generators wrote.
+        # Not fixable, and repo-wide by nature, so fix and scope are ignored.
+        from tools.dev.lib.quality import abspaths
+
+        preset = ctx.resolve_presets([ctx.default_preset_name()])[0]
+        ctx.discover(preset)
+        return abspaths.gate(preset.build_dir, ctx.root, abspaths.SHAPED_CORE_EXCEPTIONS, dev.ui.write_line)
+
     def check_tests(*, fix: bool, scope: dev.ChangeScope | None, mirror: bool, verbose: bool) -> bool:
         # The variants come from dev.py's Policy tables, and a platform with no sibling for one of them simply contributes none.
         # Not fixable, so fix and scope are ignored.
@@ -537,6 +546,12 @@ def _build_checks(ctx: Context, *, memo: dev.CheckMemo | None = None, all_preset
                   watches=("libs/graphics/shaped-graphics-language/**", "libs/graphics/shaped-shader-library/**",
                            "libs/graphics/shaped-graphics/**"),
                   builds=("sgl",)),
+        dev.Check("abspaths",
+                  "no compile definition or generated source carries an absolute source or build path "
+                  "(sc_target_source_paths + nx::source_path instead)",
+                  False, check_abspaths,
+                  watches=("**/CMakeLists.txt", "**/*.cmake", "CMakePresets.json", "**/generate_*.py",
+                           "tools/dev/lib/quality/abspaths.py")),
         dev.Check("test",
                   "build + run the full suite on the default preset; with --all-presets also on the debug, release, "
                   "single-threaded and sanitizer ones, under --smoke",
