@@ -119,6 +119,7 @@ add_library(shaped-graphics-language
     src/shaped-graphics-language/driver/inferred_results.cc
     src/shaped-graphics-language/driver/unannotated_bindings.cc
     src/shaped-graphics-language/driver/references.cc
+    src/shaped-graphics-language/driver/completions.cc
 )
 
 # The prelude is three files, and two of them are embedded.
