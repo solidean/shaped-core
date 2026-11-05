@@ -59,7 +59,7 @@ public:
     // ---- EMIT-183: sg's debug buffer, a header of a cursor, a capacity and a dropped count, then 32-bit words ----
 
     /// False where a stage cannot write the buffer, which drops its prints: WGSL's vertex stage, MSL's ray-tracing stages.
-    [[nodiscard]] virtual bool writes_debug_in(check::stage) const { return true; }
+    [[nodiscard]] virtual bool writes_debug_in(check::stage, check::feature_set) const { return true; }
     /// The buffer's declaration at file scope, followed by an empty line.
     virtual void write_debug_buffer(cc::string& out) const = 0;
     /// The declaration of `at` on a line of its own, where the reservation cannot declare it; empty where it can.

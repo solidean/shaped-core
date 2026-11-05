@@ -51,7 +51,7 @@ public:
     bool has_line_directives() const override { return true; }
 
     // a ray-tracing stage is a visible function, which takes no buffer of its own
-    bool writes_debug_in(check::stage s) const override { return s < check::stage::raygen; }
+    bool writes_debug_in(check::stage s, check::feature_set) const override { return s < check::stage::raygen; }
     void write_debug_buffer(cc::string& out) const override
     {
         out += "struct sg_debug_buffer\n{\n    atomic_uint cursor;\n    uint capacity;\n    atomic_uint dropped;\n"

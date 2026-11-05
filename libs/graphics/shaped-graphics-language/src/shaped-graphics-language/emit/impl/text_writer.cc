@@ -1819,7 +1819,7 @@ sgl::emit::impl::written_text sgl::emit::impl::write_text(plan& p, dialect const
 {
     auto w = writer{.p = p, .d = d, .sources = sources};
     // EMIT-183: a stage that cannot write the buffer drops its prints, and declares no buffer
-    if (sources.diagnostics && d.writes_debug_in(p.e.entry_stage))
+    if (sources.diagnostics && d.writes_debug_in(p.e.entry_stage, sources.device_features))
         for (auto const& s : p.e.stmts)
             p.writes_debug = p.writes_debug || s.node.is<flat_print>();
     for (auto const& r : p.resources)
