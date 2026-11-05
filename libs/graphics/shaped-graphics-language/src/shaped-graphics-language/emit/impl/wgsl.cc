@@ -47,7 +47,12 @@ public:
     bool assigns_through_swizzles() const override { return false; }
 
     // WebGPU's vertex stage has no writable storage
-    bool writes_debug_in(check::stage s) const override { return s != check::stage::vertex; }
+    bool writes_debug_in(check::stage s, check::feature_set) const override { return s != check::stage::vertex; }
+    // a `bytes` is an array of words
+    cc::string buffer_length(cc::string_view name, bool is_bytes) const override
+    {
+        return is_bytes ? cc::format("(arrayLength(&{}) * 4u)", name) : cc::format("arrayLength(&{})", name);
+    }
     void write_debug_buffer(cc::string& out) const override
     {
         out += "struct sg_debug_buffer {\n    cursor: atomic<u32>,\n    capacity: u32,\n    dropped: atomic<u32>,\n"

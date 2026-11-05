@@ -74,6 +74,24 @@ void vulkan_command_list::finalize_queries_before_close()
         offset_bytes += isize(lease->next_slot) * isize(sizeof(u64));
     }
 
+    // **Every stage, not just the copy one, before anything reads what the query copy wrote.**
+    // Synchronization2 puts vkCmdCopyQueryPoolResults in the copy stage, so the tracker's copy-to-copy barrier below is
+    // enough by the letter.
+    // AMD's Windows driver writes it from another stage, and the readback then copied zeros out of a pool that held real
+    // ticks; a barrier from every stage is what it honours, once per list that times anything.
+    auto const after_query_copy = VkMemoryBarrier2{
+        .sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER_2,
+        .srcStageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
+        .srcAccessMask = VK_ACCESS_2_MEMORY_WRITE_BIT,
+        .dstStageMask = VK_PIPELINE_STAGE_2_COPY_BIT,
+        .dstAccessMask = VK_ACCESS_2_TRANSFER_READ_BIT,
+    };
+    auto const dependency = VkDependencyInfo{
+        .sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
+        .memoryBarrierCount = 1,
+        .pMemoryBarriers = &after_query_copy,
+    };
+    vkCmdPipelineBarrier2(_buffer, &dependency);
     track_buffer_access(*resolve, sg::pipeline_stage_flag::copy, sg::access_flag::copy_read);
     flush_barriers();
 

@@ -16,10 +16,17 @@ constexpr cc::string_view k_compute = "binding work:\n"
                                       "    assert v >= 0.0, \"negative $v\"\n"
                                       "    work.values[id.x] = v * 2.0\n";
 
-sgl::emitted_source compile(cc::string_view source, target t, cc::string_view entry = "cs")
+sgl::emitted_source compile(cc::string_view source,
+                            target t,
+                            cc::string_view entry = "cs",
+                            sgl::check::feature_set device = {})
 {
-    auto r = sgl::compile_to_text(
-        {.source = source, .source_name = "debug.sgl", .entry_point = entry, .target = t, .diagnostics = true});
+    auto r = sgl::compile_to_text({.source = source,
+                                   .source_name = "debug.sgl",
+                                   .entry_point = entry,
+                                   .target = t,
+                                   .diagnostics = true,
+                                   .device_features = device});
     REQUIRE(r.has_value()).dump("errors", r.has_value() ? cc::string() : r.error());
     return cc::move(r.value());
 }
@@ -133,8 +140,11 @@ TEST("sgl emit - a stage that cannot write the buffer drops its prints and decla
     CHECK(!wgsl.text.contains("sg_debug"));
     CHECK(wgsl.debug_sites.empty());
     CHECK(compile(vertex, target::hlsl_dx12, "vs").text.contains("sg_debug"));
-    // vulkan writes no storage from a vertex stage without a feature sg does not ask for
+    // vulkan writes storage from a vertex stage only on a device with vertexPipelineStoresAndAtomics
     CHECK(!compile(vertex, target::hlsl_vulkan, "vs").text.contains("sg_debug"));
+    auto const stores = compile(vertex, target::hlsl_vulkan, "vs", sgl::check::feature::vertex_pipeline_stores);
+    CHECK(stores.text.contains("[[vk::binding(19, 3)]] RWByteAddressBuffer sg_debug;"));
+    CHECK(stores.debug_sites.size() == 1);
 }
 
 TEST("sgl emit - MSL takes sg's debug buffer at the argument table's last slot, clear of the vertex buffers")

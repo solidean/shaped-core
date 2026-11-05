@@ -455,7 +455,8 @@ slib::shader_option slib::option_of(cc::string_view name, sg::pixel_format value
 }
 
 static_assert(int(slib::sgl_undefined_guard::abort) == int(sgl::check::undefined_guard::abort)
-              && int(slib::sgl_undefined_guard::report) == int(sgl::check::undefined_guard::report));
+              && int(slib::sgl_undefined_guard::report) == int(sgl::check::undefined_guard::report)
+              && int(slib::sgl_undefined_guard::define) == int(sgl::check::undefined_guard::define));
 
 std::unique_ptr<slib::shader_compiler> slib::create_sgl_compiler(std::unique_ptr<shader_compiler> inner,
                                                                  sgl_compiler_options const& options)

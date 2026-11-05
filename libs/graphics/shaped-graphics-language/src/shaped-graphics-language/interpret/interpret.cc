@@ -591,6 +591,24 @@ struct machine
             }
             return type_error("a binding member the inputs do not hold");
         }
+        // CHK-460: what the inputs bound, in elements, or in bytes of a `bytes`
+        if (auto const* const length = x.node.try_as<flat_buffer_length>())
+        {
+            auto const* const named
+                = is_known(e, length->buffer) ? e.at(length->buffer).node.try_as<flat_binding_member>() : nullptr;
+            if (named == nullptr)
+                return type_error("the length of a buffer that no binding member names");
+            auto const& type = m.at(e.at(length->buffer).type);
+            for (auto const& b : out.buffers)
+                if (b.binding == named->binding && b.member == named->member)
+                {
+                    auto const count = type.kind == type_kind::bytes ? 1 : leaf_count_of(m, type.element);
+                    auto const n = type.kind == type_kind::bytes ? b.leaves.size() * 4 : b.leaves.size() / count;
+                    result.leaves.push_back(scalar::of_uint(u32(n)));
+                    return {};
+                }
+            return type_error("a buffer the inputs do not hold");
+        }
         if (auto const* const element = x.node.try_as<flat_buffer_element>())
         {
             auto buffer = isize(-1);

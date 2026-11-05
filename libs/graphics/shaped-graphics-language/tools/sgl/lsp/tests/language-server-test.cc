@@ -274,6 +274,81 @@ TEST("sgl lsp - a diagnostic the checker knows a fix for offers it as a preferre
     CHECK(elsewhere["result"].size() == 0);
 }
 
+namespace
+{
+/// The params of a request about one position of `file:///t.sgl`.
+cc::string at_position(i32 line, i32 character)
+{
+    return cc::format(R"({{"textDocument":{{"uri":"file:///t.sgl"}},"position":{{"line":{},"character":{}}}}})", line,
+                      character);
+}
+} // namespace
+
+TEST("sgl lsp - a hover shows the declaration as SGL writes it, with its doc comment, over the name's range", main_thread)
+{
+    auto s = session("/// Half of `x`.\nfun half(x: float) -> float => x * 0.5\nfun f() -> float => half(2.0)\n");
+    auto const r = s.ask(5, "textDocument/hover", at_position(2, 22));
+    auto const contents = r["result"]["contents"];
+    CHECK(contents["kind"].as_string() == "markdown");
+    CHECK(contents["value"].as_string() == "```sgl\nfun half(x: float) -> float\n```\n\nHalf of `x`.");
+    CHECK(r["result"]["range"]["start"]["line"].as_double() == 2);
+    CHECK(r["result"]["range"]["start"]["character"].as_double() == 20);
+    CHECK(r["result"]["range"]["end"]["character"].as_double() == 24);
+
+    // a keyword has nothing to show, which is a null result
+    auto const nothing = s.ask(6, "textDocument/hover", at_position(2, 1));
+    CHECK(nothing.has("result"));
+    CHECK(nothing["result"].is_null());
+}
+
+TEST("sgl lsp - go to definition lands on the declared name, a builtin's in its virtual prelude document", main_thread)
+{
+    auto s = session("fun f(v: vec3) -> float:\n    let d = dot(v, v)\n    return d\n");
+    auto const local = s.ask(5, "textDocument/definition", at_position(2, 11));
+    CHECK(local["result"]["uri"].as_string() == "file:///t.sgl");
+    CHECK(local["result"]["range"]["start"]["line"].as_double() == 1);
+    CHECK(local["result"]["range"]["start"]["character"].as_double() == 8);
+
+    auto const builtin = s.ask(6, "textDocument/definition", at_position(1, 13));
+    CHECK(builtin["result"]["uri"].as_string().starts_with("sgl-prelude:/"));
+    // the virtual document the client fetches holds the declaration at that line
+    auto const text = s.ask(7, "sgl/preludeText", cc::format(R"({{"uri":"{}"}})", builtin["result"]["uri"].as_string()));
+    auto const line = i32(builtin["result"]["range"]["start"]["line"].as_double());
+    auto const prelude = text["result"]["text"].as_string();
+    auto start = isize(0);
+    for (auto i = 0; i < line; ++i)
+    {
+        start = prelude.find('\n', start) + 1;
+        REQUIRE(start > 0);
+    }
+    auto const end = prelude.find('\n', start);
+    CHECK(prelude.subview({.start = start, .end = end < 0 ? prelude.size() : end}).contains("fun dot("));
+}
+
+TEST("sgl lsp - completion after a dot lists the object's members, and announces the dot as its trigger", main_thread)
+{
+    auto s = session("struct light:\n    power: float\nfun f(l: light) -> float:\n    let p = l.\n    return 0.0\n");
+    auto const r = s.ask(5, "textDocument/completion", at_position(3, 14));
+    auto const items = r["result"];
+    REQUIRE(items.size() == 1);
+    CHECK(items[0]["label"].as_string() == "power");
+    CHECK(items[0]["kind"].as_double() == i32(lsp::completion_item_kind::field));
+    CHECK(items[0]["detail"].as_string() == "light.power : float");
+
+    // a name's completions include the parameter, the prelude's builtins and the keywords
+    auto const names = s.ask(6, "textDocument/completion", at_position(4, 11));
+    auto has = [&](cc::string_view label)
+    {
+        for (auto i = isize(0); i < names["result"].size(); ++i)
+            if (names["result"][i]["label"].as_string() == label)
+                return true;
+        return false;
+    };
+    CHECK(has("l"));
+    CHECK(has("dot"));
+    CHECK(has("return"));
+}
+
 TEST("sgl lsp - positions count UTF-16 units unless the client offers UTF-8", main_thread)
 {
     // `é` is two bytes and one UTF-16 unit, so the unknown name after it on its line sits one character further left

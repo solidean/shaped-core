@@ -140,11 +140,12 @@ option(SC_SHADER_DIAGNOSTICS "Shaders write print and assert records, which sg r
 # What an SGL shader does where an operation of it has no value, an integer division by zero or an array index outside
 # the array: NONE leaves it the target's undefined behaviour, ABORT ends the invocation, and REPORT logs it as a failed
 # assert first, which needs SC_SHADER_DIAGNOSTICS and is ABORT without it.
+# DEFINE gives the operation a value instead, a substitute operand's, and the invocation goes on.
 # libs/graphics/shaped-graphics-language/docs/spec/semantics/legalization.md LEGAL-65 is the rule.
-set(SC_SHADER_UNDEFINED "NONE" CACHE STRING "What an SGL shader does at an operation with no value: NONE, ABORT or REPORT")
-set_property(CACHE SC_SHADER_UNDEFINED PROPERTY STRINGS NONE ABORT REPORT)
-if(NOT SC_SHADER_UNDEFINED MATCHES "^(NONE|ABORT|REPORT)$")
-    message(FATAL_ERROR "SC_SHADER_UNDEFINED is NONE, ABORT or REPORT, not '${SC_SHADER_UNDEFINED}'")
+set(SC_SHADER_UNDEFINED "NONE" CACHE STRING "What an SGL shader does at an operation with no value: NONE, ABORT, REPORT or DEFINE")
+set_property(CACHE SC_SHADER_UNDEFINED PROPERTY STRINGS NONE ABORT REPORT DEFINE)
+if(NOT SC_SHADER_UNDEFINED MATCHES "^(NONE|ABORT|REPORT|DEFINE)$")
+    message(FATAL_ERROR "SC_SHADER_UNDEFINED is NONE, ABORT, REPORT or DEFINE, not '${SC_SHADER_UNDEFINED}'")
 endif()
 
 # Keep a frame pointer in every frame, so cc::capture_stack can walk the chain by chasing it — a few nanoseconds a

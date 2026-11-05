@@ -359,3 +359,35 @@ ASYNC_INVOCABLE_TEST("sg - SGL's subgroup sum after a loop each lane leaves at i
         CHECK(got_sums[i] == size * (size - 1u) / 2u);
     }
 }
+
+ASYNC_INVOCABLE_TEST("sg - an SGL buffer's length and a bytes' length are what the bound memory holds (CHK-460)",
+                     (sg::context_handle const& ctx))
+{
+    REQUIRE(ctx != nullptr);
+    if (!sg_test::shaders_reach(*ctx))
+        SKIP("no compiler builds this binary's shaders into a format this context accepts");
+    if (ctx->backend() == sg::backend_kind::metal)
+        SKIP("a Metal buffer carries no length, which sg passes in nowhere yet (EMIT-195)");
+
+    auto const pipeline = co_await shaders::bytes::measure.acquire_pipeline(*ctx);
+    auto const layout = ctx->cached.acquire_binding_group_layout<shaders::bytes::measured>();
+    auto const sizes = ctx->persistent.create_buffer_from_data(
+        cc::vector<u32>::create_defaulted(8), sg::buffer_usage::readwrite_buffer | sg::buffer_usage::copy_src);
+    auto const raw = ctx->persistent.create_buffer_from_data(cc::vector<u32>::create_defaulted(12),
+                                                             sg::buffer_usage::readonly_buffer);
+    auto cmd = ctx->create_command_list();
+    auto const group = ctx->transient.create_binding_group(
+        *cmd, layout,
+        shaders::bytes::measured{.sizes = sizes.as_readwrite_buffer(),
+                                 .raw = raw.raw()->as_raw_readonly().as_readonly<byte>()});
+    cmd->compute.bind_pipeline(*pipeline);
+    cmd->compute.bind_group(0, *group);
+    cmd->compute.dispatch_threads(1);
+    auto const back = cmd->download.data_from_buffer(sizes);
+    ctx->submit_command_list(cc::move(cmd));
+
+    auto const got = co_await back.data();
+    REQUIRE(got.size() == 8);
+    CHECK(got[0] == 8u);
+    CHECK(got[1] == 48u);
+}

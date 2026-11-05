@@ -977,8 +977,10 @@ type_id checker::check_member(function_scope& scope, ast::expr_id id, ast::membe
             auto is_handed = false;
             for (auto const h : handed)
                 is_handed = is_handed || h == id;
+            // CHK-460: a `bytes` whose length is read is named as a subscripted buffer is
+            auto const is_measured = out.at(type).kind == type_kind::bytes && id == subscripted;
             if (type != error_type && is_resource(out.at(type).kind) && out.at(type).kind != type_kind::buffer
-                && !is_handed)
+                && !is_handed && !is_measured)
             {
                 unsupported(file, span_of(file, id),
                             cc::format("{} as a value; call a builtin on it, as in `t.load(xy)`", out.name_of(type)));
@@ -1014,7 +1016,12 @@ type_id checker::check_member(function_scope& scope, ast::expr_id id, ast::membe
         }
     }
 
+    // CHK-460: `values.length` names a buffer without reading an element of it, as a subscript does
+    auto const outer = subscripted;
+    if (name == "length")
+        subscripted = member.object;
     auto const object = check_expr(scope, member.object);
+    subscripted = outer;
     if (object == error_type || member.name.empty())
         return error_type;
 
@@ -1029,6 +1036,18 @@ type_id checker::check_member(function_scope& scope, ast::expr_id id, ast::membe
         }
         set_target(file, id, {.kind = target_kind::array_length, .index = out.at(object).count});
         return type_of_builtin(builtins::k_int, file, span_of(file, id));
+    }
+
+    // CHK-460: a buffer's length is the bound memory's, a binding member's alone
+    if ((out.at(object).kind == type_kind::buffer || out.at(object).kind == type_kind::bytes) && name == "length")
+    {
+        if (ast_of(file).at(member.object).node.is<ast::index>())
+        {
+            unsupported(file, span_of(file, id), "the length of an element of a binding array");
+            return error_type;
+        }
+        set_target(file, id, {.kind = target_kind::buffer_length});
+        return type_of_builtin(builtins::k_uint, file, span_of(file, id));
     }
 
     // CHK-249: `a.foo` is the field where there is one, and a call of `foo` with `a` otherwise

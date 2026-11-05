@@ -61,6 +61,11 @@ bool lsp::read(json::ref in, code_action_params& out)
     return json::read(in["textDocument"]["uri"], out.uri) && read(in["range"], out.range);
 }
 
+bool lsp::read(json::ref in, text_document_position_params& out)
+{
+    return json::read(in["textDocument"]["uri"], out.uri) && read(in["position"], out.position);
+}
+
 void lsp::write_fields(json::writer& w, position const& v)
 {
     w.write("line", v.line);
@@ -161,4 +166,21 @@ void lsp::write_fields(json::writer& w, log_message_params const& v)
 {
     w.write("type", i32(v.type));
     json::put(w, "message", v.message);
+}
+
+void lsp::write_fields(json::writer& w, hover const& v)
+{
+    w.begin_object("contents");
+    json::put(w, "kind", cc::string_view("markdown"));
+    json::put(w, "value", v.markdown);
+    w.end_object();
+    json::put(w, "range", v.range);
+}
+
+void lsp::write_fields(json::writer& w, completion_item const& v)
+{
+    json::put(w, "label", v.label);
+    w.write("kind", i32(v.kind));
+    if (!v.detail.empty())
+        json::put(w, "detail", v.detail);
 }

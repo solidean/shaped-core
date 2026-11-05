@@ -1036,6 +1036,9 @@ A `require` in a test's body that nothing in it uses is `unused-require`, and a 
   A lane of a mutable vector is a place, which an assignment writes, and past the last lane at run time is EVAL-90's program error, as past an array's last element is.
   Every target subscripts its vectors as it does its arrays, so the text is `v[i]` on each.
 * **CHK-288** `xs.length` is an array's length, an `int` constant, and the one member an array has; it is never assigned.
+* **CHK-460** `values.length` of a buffer is how many elements the bound buffer holds, and of a `bytes` how many bytes, a `uint` the host decides.
+  It names the buffer without reading an element, as a subscript does, and is never assigned.
+  Of an element of a binding array it is `unsupported-yet`; a binding array's own `length` is CHK-288's.
 * **CHK-289** `T[N].filled(v)` is an array of `T[N]` whose every element is `v`, which converts to `T` as an argument does.
   Where `T` is an array itself, `v` may instead be its innermost element, which then stands in every scalar: `float[4, 4].filled(0.0)`.
 * **CHK-290** A square literal converts to the array type expected where it stands, with exactly as many elements, each converting to the element type.
@@ -1687,7 +1690,7 @@ A diagnostic of this pass has a kind, a file, a byte span in that file, and a de
 
 | kind | reported by |
 |---|---|
-| `unsupported-yet` | CHK-8, CHK-61, CHK-134, CHK-213, CHK-237, CHK-291, CHK-299, CHK-307, CHK-314, CHK-321, CHK-329, CHK-333, CHK-338, CHK-339, CHK-344, CHK-346, CHK-347, CHK-350, CHK-352, CHK-353, CHK-357, CHK-366, CHK-374, CHK-379, CHK-381, CHK-383, CHK-387, CHK-389, CHK-397, CHK-431, CHK-432, CHK-434 |
+| `unsupported-yet` | CHK-8, CHK-61, CHK-134, CHK-213, CHK-237, CHK-291, CHK-299, CHK-307, CHK-314, CHK-321, CHK-329, CHK-333, CHK-338, CHK-339, CHK-344, CHK-346, CHK-347, CHK-350, CHK-352, CHK-353, CHK-357, CHK-366, CHK-374, CHK-379, CHK-381, CHK-383, CHK-387, CHK-389, CHK-397, CHK-431, CHK-432, CHK-434, CHK-460 |
 | `duplicate-declaration` | CHK-12, CHK-28, CHK-241, CHK-347, CHK-351 |
 | `dependency-cycle` | CHK-18, CHK-136 |
 | `unknown-module`, `use-of-own-module` | CHK-347 |
