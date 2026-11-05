@@ -13,7 +13,7 @@ Each thing below is what one target or another lacks, so each comes back behind 
 
 | what | who lacks it | how it would come back |
 |---|---|---|
-| 64-bit atomics | WGSL | an sg feature over `atomic[long]` and `atomic[ulong]`, once SGL has 64-bit integers, named as `short` and `ushort` are |
+| 64-bit atomics in workgroup memory | WGSL, Metal | a feature of their own beside `shader_int64_atomics`, which a buffer's alone needs now (CHK-296): dx12's `AtomicInt64OnGroupSharedSupported`, vulkan's `shaderSharedInt64Atomics` |
 | a vertex stage's atomics and stores | WebGPU; vulkan needs `vertexPipelineStoresAndAtomics` | `vertex_stores`, adding `.vertex` to the atomics' `@stages` |
 | orderings stronger than relaxed | WGSL, which has relaxed alone | acquire and release as named arguments, once a shader needs orderings rather than the coherence `@coherent` gives |
 

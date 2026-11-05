@@ -145,9 +145,16 @@ feature_set checker::features_of_type(type_id type) const
     switch (t.kind)
     {
     case type_kind::array:
-    case type_kind::atomic:
     case type_kind::buffer:
         return features_of_type(t.element);
+    // CHK-296: a 64-bit atomic needs its integer's feature and an atomic's
+    case type_kind::atomic:
+    {
+        auto result = features_of_type(t.element);
+        if (auto const* const record = out.builtin_type_of(t.element); record != nullptr && is_64_bit(record->leaf_kind))
+            result |= feature::shader_int64_atomics;
+        return result;
+    }
     case type_kind::structure:
     {
         auto result = feature_set();

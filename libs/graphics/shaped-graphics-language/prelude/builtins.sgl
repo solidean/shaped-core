@@ -3268,6 +3268,58 @@ struct exchange_result[T]:
 /// Stores `desired` where the value is `expected`, and gives the value before and whether it stored.
 /// It may fail although the value was `expected`, so only `exchanged` says it stored: retry in a loop.
 @builtin @stages(.pixel, .compute, .raygen, .miss, .closest_hit, .callable) fun compare_exchange_weak(a: mut atomic[int], expected: int, desired: int) -> exchange_result[int]
+/// Adds `v`, wrapping, and gives the value before.
+@builtin @stages(.pixel, .compute, .raygen, .miss, .closest_hit, .callable) fun add(a: mut atomic[ulong], v: ulong) -> ulong
+/// Subtracts `v`, wrapping, and gives the value before.
+@builtin @stages(.pixel, .compute, .raygen, .miss, .closest_hit, .callable) fun subtract(a: mut atomic[ulong], v: ulong) -> ulong
+/// Keeps the smaller of the value and `v`, and gives the value before.
+@builtin @stages(.pixel, .compute, .raygen, .miss, .closest_hit, .callable) fun min(a: mut atomic[ulong], v: ulong) -> ulong
+/// Keeps the larger of the value and `v`, and gives the value before.
+@builtin @stages(.pixel, .compute, .raygen, .miss, .closest_hit, .callable) fun max(a: mut atomic[ulong], v: ulong) -> ulong
+/// Keeps the bits `v` shares, and gives the value before.
+@builtin @stages(.pixel, .compute, .raygen, .miss, .closest_hit, .callable) fun bit_and(a: mut atomic[ulong], v: ulong) -> ulong
+/// Sets the bits of `v`, and gives the value before.
+@builtin @stages(.pixel, .compute, .raygen, .miss, .closest_hit, .callable) fun bit_or(a: mut atomic[ulong], v: ulong) -> ulong
+/// Flips the bits of `v`, and gives the value before.
+@builtin @stages(.pixel, .compute, .raygen, .miss, .closest_hit, .callable) fun bit_xor(a: mut atomic[ulong], v: ulong) -> ulong
+/// Stores `v`, and gives the value before.
+@builtin @stages(.pixel, .compute, .raygen, .miss, .closest_hit, .callable) fun exchange(a: mut atomic[ulong], v: ulong) -> ulong
+/// The value, read in one step.
+@builtin @stages(.pixel, .compute, .raygen, .miss, .closest_hit, .callable) fun load(a: atomic[ulong]) -> ulong
+/// Stores `v` in one step.
+@builtin @stages(.pixel, .compute, .raygen, .miss, .closest_hit, .callable) fun store(a: out atomic[ulong], v: ulong)
+/// Stores `desired` where the value is `expected`, and gives the value before.
+/// It never fails spuriously: it stored exactly where what it gives is `expected`.
+@builtin @stages(.pixel, .compute, .raygen, .miss, .closest_hit, .callable) fun compare_exchange_strong(a: mut atomic[ulong], expected: ulong, desired: ulong) -> ulong
+/// Stores `desired` where the value is `expected`, and gives the value before and whether it stored.
+/// It may fail although the value was `expected`, so only `exchanged` says it stored: retry in a loop.
+@builtin @stages(.pixel, .compute, .raygen, .miss, .closest_hit, .callable) fun compare_exchange_weak(a: mut atomic[ulong], expected: ulong, desired: ulong) -> exchange_result[ulong]
+/// Adds `v`, wrapping, and gives the value before.
+@builtin @stages(.pixel, .compute, .raygen, .miss, .closest_hit, .callable) fun add(a: mut atomic[long], v: long) -> long
+/// Subtracts `v`, wrapping, and gives the value before.
+@builtin @stages(.pixel, .compute, .raygen, .miss, .closest_hit, .callable) fun subtract(a: mut atomic[long], v: long) -> long
+/// Keeps the smaller of the value and `v`, and gives the value before.
+@builtin @stages(.pixel, .compute, .raygen, .miss, .closest_hit, .callable) fun min(a: mut atomic[long], v: long) -> long
+/// Keeps the larger of the value and `v`, and gives the value before.
+@builtin @stages(.pixel, .compute, .raygen, .miss, .closest_hit, .callable) fun max(a: mut atomic[long], v: long) -> long
+/// Keeps the bits `v` shares, and gives the value before.
+@builtin @stages(.pixel, .compute, .raygen, .miss, .closest_hit, .callable) fun bit_and(a: mut atomic[long], v: long) -> long
+/// Sets the bits of `v`, and gives the value before.
+@builtin @stages(.pixel, .compute, .raygen, .miss, .closest_hit, .callable) fun bit_or(a: mut atomic[long], v: long) -> long
+/// Flips the bits of `v`, and gives the value before.
+@builtin @stages(.pixel, .compute, .raygen, .miss, .closest_hit, .callable) fun bit_xor(a: mut atomic[long], v: long) -> long
+/// Stores `v`, and gives the value before.
+@builtin @stages(.pixel, .compute, .raygen, .miss, .closest_hit, .callable) fun exchange(a: mut atomic[long], v: long) -> long
+/// The value, read in one step.
+@builtin @stages(.pixel, .compute, .raygen, .miss, .closest_hit, .callable) fun load(a: atomic[long]) -> long
+/// Stores `v` in one step.
+@builtin @stages(.pixel, .compute, .raygen, .miss, .closest_hit, .callable) fun store(a: out atomic[long], v: long)
+/// Stores `desired` where the value is `expected`, and gives the value before.
+/// It never fails spuriously: it stored exactly where what it gives is `expected`.
+@builtin @stages(.pixel, .compute, .raygen, .miss, .closest_hit, .callable) fun compare_exchange_strong(a: mut atomic[long], expected: long, desired: long) -> long
+/// Stores `desired` where the value is `expected`, and gives the value before and whether it stored.
+/// It may fail although the value was `expected`, so only `exchanged` says it stored: retry in a loop.
+@builtin @stages(.pixel, .compute, .raygen, .miss, .closest_hit, .callable) fun compare_exchange_weak(a: mut atomic[long], expected: long, desired: long) -> exchange_result[long]
 
 // A float's atomics, which every target holds as the bits of a `uint` atomic.
 // Its add retries a compare-exchange of those bits, so a stage with helper invocations takes none.

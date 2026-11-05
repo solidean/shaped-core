@@ -703,7 +703,7 @@ public:
     bool _wave_ops = false;                    // D3D12_OPTIONS1, cached at creation
     bool _int64_shader_ops = false;            // D3D12_OPTIONS1, cached at creation
     bool _double_shader_ops = false;           // D3D12_OPTIONS, cached at creation
-    bool _int64_atomics = false;               // D3D12_OPTIONS1 and OPTIONS9, cached at creation
+    bool _int64_atomics = false;               // D3D12_OPTIONS1 on Shader Model 6.6, cached at creation
     bool _shader_execution_reordering = false; // SM 6.9 beside ray-tracing pipelines, from the Agility SDK
     bool _opacity_micromap = false;            // DXR 1.2 and SM 6.9, from the Agility SDK
     bool _vertex_layer_output = false;         // D3D12_OPTIONS, cached at creation

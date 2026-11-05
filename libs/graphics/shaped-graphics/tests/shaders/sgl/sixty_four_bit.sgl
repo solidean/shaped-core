@@ -3,6 +3,7 @@
 
 require shader_int64
 require shader_f64
+require shader_int64_atomics
 
 // In a constant block a long takes 8 bytes, and a ulong2 starts on the next 16-byte row.
 binding long_sums:
@@ -25,8 +26,18 @@ binding double_sums:
     values: buffer[double2]
     results: mut buffer[double2]
 
-// 2^-40 is lost to a float beside any integer past 2^-16, and a double keeps it through every step.
+// A float keeps 24 bits, so 2^-40 beside a small integer is lost to it, and a double keeps it through every step.
 @compute(64) fun sum_doubles(@thread_id id: int3){double_sums}:
     let v = double_sums.values[id.x]
     let fine = v.x + 1.0f64 / 1099511627776.0f64
     double_sums.results[id.x] = double2(fine * double_sums.scale - v.x * double_sums.scale, min(v.y, -v.x) / 4.0f64)
+
+binding long_atomics:
+    totals: mut buffer[atomic[ulong]]
+    lows: mut buffer[atomic[long]]
+
+// Every invocation of a group adds a multiple of 2^33 to the group's element, which no low word holds, and keeps the
+// most negative of its id times -2^40.
+@compute(64) fun tally_longs(@thread_id id: int3, @local_thread_index local: int, @workgroup_id group: int3){long_atomics}:
+    long_atomics.totals[group.x].add(((local as uint as ulong) + 1u64) << 33)
+    long_atomics.lows[group.x].min(-(id.x as long) << 40)

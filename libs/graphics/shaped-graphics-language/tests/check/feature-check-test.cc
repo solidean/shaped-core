@@ -327,6 +327,22 @@ TEST("sgl check - a 64-bit value needs its feature, crosses no stage edge and st
           == "unsupported-yet user:[long] a 64-bit value in an @inline binding, in work.seed: long\n");
 }
 
+TEST("sgl check - a 64-bit atomic needs shader_int64_atomics, and stands in a buffer alone")
+{
+    // CHK-296: a buffer's, which needs the atomics' feature beside the integer's
+    CHECK(reports_for(listing("require shader_int64\n\n", "    totals: mut buffer[atomic[ulong]]\n"))
+              .contains("needs shader_int64_atomics"));
+    CHECK(reports_for(listing("require shader_int64, shader_int64_atomics\n\n", "    totals: mut "
+                                                                                "buffer[atomic[long]]\n"))
+          == "");
+    // workgroup memory's are optional on every device that has a buffer's
+    CHECK(reports_for("require shader_int64, shader_int64_atomics\n\n@workgroup binding local:\n    sum: "
+                      "atomic[ulong]\n")
+              .contains("a 64-bit atomic in workgroup memory, in local.sum"));
+    CHECK(reports_for(listing("require shader_int64\n\n", "    counts: mut buffer[atomic[short]]\n"))
+              .contains("an atomic holds a `uint`, an `int`, a `float`, a `ulong` or a `long`"));
+}
+
 TEST("sgl check - a constant block holds no 64-bit vector wider than a 16-byte row")
 {
     // CHK-453: a long3 is 24 bytes, which no row of a constant block holds

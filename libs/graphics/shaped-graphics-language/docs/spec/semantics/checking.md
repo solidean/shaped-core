@@ -1115,7 +1115,9 @@ A `require` in a test's body that nothing in it uses is `unused-require`, and a 
 
 ## Atomics
 
-* **CHK-296** `atomic[T]` is an atomic of `uint`, `int` or `float`, and of any other `T` `wrong-kind-of-name`.
+* **CHK-296** `atomic[T]` is an atomic of `uint`, `int`, `float`, `ulong` or `long`, and of any other `T` `wrong-kind-of-name`.
+  A 64-bit one needs `shader_int64_atomics` beside `shader_int64`, and stands in a `mut buffer` alone.
+  One in workgroup memory is `unsupported-yet`, since a device that has a buffer's 64-bit atomics may lack those.
   It is the element of a `mut buffer` or a member of a `@workgroup` binding, arrays of them included; in a read-only buffer or a constant block it is `wrong-kind-of-name`.
   Its builtins are `@stages(.pixel, .compute, .raygen, .miss, .closest_hit, .callable)`.
 * **CHK-404** A traversal's decision writes no memory through a binding ([why](why/checking.md#chk-404)).

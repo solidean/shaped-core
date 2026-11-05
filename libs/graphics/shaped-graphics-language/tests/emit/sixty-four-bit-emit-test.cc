@@ -93,6 +93,30 @@ TEST("sgl emit - a long and a long2 are 8 and 16 bytes, and a ulong3 in a buffer
     CHECK(vulkan.contains("[[vk::offset(28)]] uint _pad1;\n"));
 }
 
+TEST("sgl emit - a 64-bit atomic is Interlocked* of an int64_t in HLSL, and Metal and WebGPU refuse it")
+{
+    constexpr auto source = cc::string_view("require shader_int64, shader_int64_atomics\n"
+                                            "\n"
+                                            "binding stats:\n"
+                                            "    totals: mut buffer[atomic[ulong]]\n"
+                                            "\n"
+                                            "@compute(64) fun run(@thread_id id: int3){stats}:\n"
+                                            "    let before = stats.totals[0].add(1u64 << 40)\n"
+                                            "    stats.totals[1].store(stats.totals[2].load() + before)\n");
+    for (auto const t : {target::hlsl_dx12, target::hlsl_vulkan})
+    {
+        auto const hlsl = text_of(source, t);
+        CHECK(hlsl.contains("RWStructuredBuffer<uint64_t> stats_totals"));
+        CHECK(hlsl.contains("InterlockedAdd(stats_totals[0], (1ULL << 40ULL), atomic_before);"));
+        // a load is an `Or` of zero, which names its 64-bit zero so the 64-bit overload is the one taken
+        CHECK(hlsl.contains("InterlockedOr(stats_totals[2], 0ULL, atomic_before_1);"));
+    }
+    CHECK(sgl::emit::dump_errors(emit_source(source, 0, target::msl))
+              .contains("needs shader_int64_atomics, which Metal does not have"));
+    CHECK(sgl::emit::dump_errors(emit_source(source, 0, target::wgsl))
+              .contains("needs shader_int64_atomics, which WebGPU does not have"));
+}
+
 TEST("sgl emit - a double is double in HLSL, its literal suffixed L, and Metal and WebGPU refuse it")
 {
     auto const hlsl = text_of(k_doubles, target::hlsl_dx12);

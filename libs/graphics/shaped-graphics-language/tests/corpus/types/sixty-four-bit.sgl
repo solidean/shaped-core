@@ -1,6 +1,6 @@
 // long, ulong and double: the 64-bit int, uint and float, and their vectors (CHK-450)
 
-require shader_int64, shader_f64
+require shader_int64, shader_f64, shader_int64_atomics
 
 // a literal converts to a long or a ulong whole, and a suffix of 64 names them (CHK-253, CHK-357)
 test:
@@ -95,3 +95,14 @@ binding scaling:
 // an integer divided by zero has no value, as at 32 bits (EVAL-84)
 @expect(error = "constant-without-value")
 test 1i64 / 0i64 == 0i64
+
+// a 64-bit atomic stands in a buffer, behind shader_int64_atomics (CHK-296)
+binding tallies:
+    totals: mut buffer[atomic[ulong]]
+    lows: mut buffer[atomic[long]]
+
+@compute(64) fun tally(@thread_id id: int3){tallies}:
+    let v = (id.x as uint as ulong) << 33
+    let before = tallies.totals[0].add(v)
+    tallies.totals[id.x].max(before + v)
+    tallies.lows[0].min(-(before as long))

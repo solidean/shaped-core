@@ -486,7 +486,8 @@ On metal not where the entry point's workgroup memory holds an `atomic[float]`: 
 Everywhere else it is the bits of a `uint` atomic, and its `add` reads them, adds in float, and retries a compare-exchange until no other update came between.
 Either way it is exact once per update and in no promised order.
 A helper invocation's atomics have no effect, so a pixel stage would never leave that loop, and its `add` takes no pixel stage.
-64 bits and a vertex stage are [the incubator's](incubator/atomics.md).
+**An `atomic[ulong]` and an `atomic[long]` have every operation an `atomic[uint]` has**, behind `shader_int64_atomics`, and stand in a `mut buffer` alone (CHK-296).
+dx12 and vulkan have them, metal and WebGPU do not; workgroup memory's and a vertex stage are [the incubator's](incubator/atomics.md).
 
 **`add_reduced(mut slot, key, v)` adds where many invocations add to one slot**, as every pixel a splat covers adds to the splat's gradient.
 Where every active invocation of the subgroup names the same `key`, it adds the subgroup's sum once, from the first of them, and otherwise each adds its own.

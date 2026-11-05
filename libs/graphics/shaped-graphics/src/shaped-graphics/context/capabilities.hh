@@ -185,10 +185,10 @@ enum class sg::feature
     /// D3D12 grants it with `DoublePrecisionFloatShaderOps`, Vulkan with `shaderFloat64`; Metal and WebGPU have none.
     shader_f64,
 
-    /// A shader may update a 64-bit integer of a buffer or of workgroup memory atomically (SGL's `atomic[long]`).
-    /// D3D12 grants it with `Int64ShaderOps` on Shader Model 6.6, which makes raw and structured buffers' 64-bit atomics
-    /// required, and workgroup ones with `AtomicInt64OnGroupSharedSupported`.
-    /// Vulkan grants it with `shaderBufferInt64Atomics` and `shaderSharedInt64Atomics`.
+    /// A shader may update a 64-bit integer of a buffer atomically (SGL's `atomic[long]` in a `mut buffer`).
+    /// D3D12 grants it with `Int64ShaderOps`, since Shader Model 6.6 makes raw and structured buffers' 64-bit atomics
+    /// part of it; Vulkan grants it with `shaderBufferInt64Atomics`.
+    /// Workgroup memory's are optional on both, and SGL holds no 64-bit atomic there yet.
     /// Metal's 64-bit atomics are a ulong's min and max alone, and WebGPU has none.
     shader_int64_atomics,
 };

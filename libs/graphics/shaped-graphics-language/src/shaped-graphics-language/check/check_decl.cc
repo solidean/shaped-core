@@ -1700,6 +1700,23 @@ void checker::compile_binding(symbol_id id)
                     unsupported(file, span_of(file, ast_of(file).at(m.field).type),
                                 cc::format("a {}-bit value in an @inline binding, in {}.{}{}", bits, out.at(id).name,
                                            m.name, path));
+    // CHK-296: a 64-bit atomic stands in a buffer alone, since workgroup memory's are optional on every device
+    if (is_workgroup)
+        for (auto const& m : out.at(members))
+        {
+            auto element = m.type;
+            while (is_valid(element) && element != checked_module::error_type && out.builtin_type_of(element) == nullptr
+                   && out.at(element).kind == type_kind::array)
+                element = out.at(element).element;
+            if (!is_valid(element) || element == checked_module::error_type || out.builtin_type_of(element) != nullptr
+                || out.at(element).kind != type_kind::atomic)
+                continue;
+            if (auto const* const record = out.builtin_type_of(out.at(element).element);
+                record != nullptr && is_64_bit(record->leaf_kind))
+                unsupported(file, span_of(file, ast_of(file).at(m.field).type),
+                            cc::format("a 64-bit atomic in workgroup memory, in {}.{}, which a buffer holds instead",
+                                       out.at(id).name, m.name));
+        }
     // CHK-453: a 64-bit three- or four-vector is wider than a 16-byte row, which a constant block lays no vector across
     if (!is_workgroup)
         for (auto const& m : out.at(members))

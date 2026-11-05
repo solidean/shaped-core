@@ -61,7 +61,7 @@ enum class sgl::check::feature : sgl::u8
     shader_int64,
     /// `double` and its vectors (CHK-451), which WebGPU and Metal have on no device.
     shader_f64,
-    /// `atomic[long]` and `atomic[ulong]` (CHK-296), which WebGPU and Metal have on no device.
+    /// `atomic[long]` and `atomic[ulong]` in a buffer (CHK-296), which WebGPU and Metal have on no device.
     shader_int64_atomics,
 };
 

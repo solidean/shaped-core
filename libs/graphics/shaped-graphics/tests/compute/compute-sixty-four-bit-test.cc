@@ -113,3 +113,43 @@ ASYNC_INVOCABLE_TEST("sg - an SGL compute shader's doubles keep what a float rou
         CHECK(data[i][1] == (v[1] < -v[0] ? v[1] : -v[0]) / 4.0);
     }
 }
+
+ASYNC_INVOCABLE_TEST("sg - an SGL compute shader's 64-bit atomics update all 64 bits of a buffer's element",
+                     (sg::context_handle const& ctx))
+{
+    REQUIRE(ctx != nullptr);
+    if (!sg_test::shaders_reach(*ctx))
+        SKIP("no compiler builds this binary's shaders into a format this context accepts");
+    if (!ctx->supports(sg::feature::shader_int64_atomics))
+        SKIP("this context has no 64-bit atomics");
+
+    auto const pipeline = co_await shaders::sixty_four_bit::tally_longs.acquire_pipeline(*ctx);
+    auto const layout = ctx->cached.acquire_binding_group_layout<shaders::sixty_four_bit::long_atomics>();
+
+    constexpr auto groups = 4;
+    auto const usage = sg::buffer_usage::readwrite_buffer | sg::buffer_usage::copy_src;
+    auto const totals = ctx->persistent.create_buffer_from_data(cc::vector<u64>::create_defaulted(groups), usage);
+    auto const lows = ctx->persistent.create_buffer_from_data(cc::vector<i64>::create_defaulted(groups), usage);
+
+    auto cmd = ctx->create_command_list();
+    auto const group = ctx->transient.create_binding_group(
+        *cmd, layout,
+        shaders::sixty_four_bit::long_atomics{.totals = totals.as_readwrite_buffer(), .lows = lows.as_readwrite_buffer()});
+    cmd->compute.bind_pipeline(*pipeline);
+    cmd->compute.bind_group(0, *group);
+    cmd->compute.dispatch_threads(groups * 64);
+    auto const totals_back = cmd->download.data_from_buffer(totals);
+    auto const lows_back = cmd->download.data_from_buffer(lows);
+    ctx->submit_command_list(cc::move(cmd));
+
+    // 1 + 2 + ... + 64 is 2080, so each group's element is 2080 * 2^33, and its lowest its last id times -2^40
+    auto const got_totals = co_await totals_back.data();
+    auto const got_lows = co_await lows_back.data();
+    REQUIRE(got_totals.size() == isize(groups));
+    REQUIRE(got_lows.size() == isize(groups));
+    for (auto g = 0; g < groups; ++g)
+    {
+        CHECK(got_totals[g] == u64(2080) << 33);
+        CHECK(got_lows[g] == -(i64(64 * g + 63) << 40));
+    }
+}
