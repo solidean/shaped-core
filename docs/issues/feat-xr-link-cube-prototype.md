@@ -32,8 +32,11 @@ What it proves is the loop — runtime, session, frames, poses, images — and w
 3. **Bring-up.** `xrCreateInstance` with `XR_KHR_D3D12_enable`, `xrGetSystem` for a head-mounted display, `xrGetD3D12GraphicsRequirementsKHR`.
    Then `sg::create_dx12_context({.adapter_luid = …, .minimum_feature_level = …})` with the LUID read as `LowPart | HighPart << 32`, and a session over `device()` and `queue()`.
 4. **Images.** One `XrSwapchain` per eye, `DXGI_FORMAT_R8G8B8A8_UNORM_SRGB`, at the recommended view size.
-   sg renders each eye into a texture of its own; a `dx12_native_scope` transitions the acquired XR image and copies into it — `TEMPORARY(feat-sg-wrap-native-texture)`.
+   sg renders each eye into a texture of its own; a `dx12_native_scope` transitions the acquired XR image and copies into it.
    The runtime expects the image back in `D3D12_RESOURCE_STATE_RENDER_TARGET`.
+   **Transition the XR image with legacy `ResourceBarrier` calls, never enhanced ones**, and never hand it to sg to track.
+   The runtime creates it through the legacy API in RENDER_TARGET, and D3D12 lets sg's enhanced barriers meet a legacy state only at COMMON.
+   So the native copy is how dx12 fills it for good, not only until `feat-sg-wrap-native-texture`: that wrap covers COMMON-state resources on dx12, and the XR image is not one.
 5. **Frames.** `xrWaitFrame`, `xrBeginFrame`, `xrLocateViews` in a `LOCAL` reference space, one draw per eye — `TEMPORARY(feat-sg-view-instancing)` — then `xrEndFrame` with one projection layer.
    The eye projection is `tg::perspective_off_center` from the view's four angles, as tangents times the near distance.
    OpenXR is right-handed with +y up and −z forward, and tg's default is left-handed with +z forward, so the pose and the view matrix flip z at the edge.
