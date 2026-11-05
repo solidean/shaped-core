@@ -332,6 +332,8 @@ public:
             return _geometry_shader;
         case sg::feature::tessellation_shader:
             return _tessellation_shader;
+        case sg::feature::mesh_shader:
+            return _mesh_shader;
         case sg::feature::binding_arrays:
         case sg::feature::readwrite_image_formats:
         case sg::feature::unaligned_block_compression:
@@ -950,6 +952,9 @@ public:
     bool _view_instancing = false;
     /// `VK_EXT_shader_atomic_float`, enabled with its buffer and shared float32 atomics and adds alike.
     bool _float_atomic_add = false;
+    /// `VK_EXT_mesh_shader`'s mesh and task stages, enabled wherever the device has both, and its draw.
+    bool _mesh_shader = false;
+    PFN_vkCmdDrawMeshTasksEXT _cmd_draw_mesh_tasks = nullptr;
     /// What a pipeline may require of its subgroups' size: all zero where `subgroupSizeControl` was not enabled.
     struct subgroup_size_control
     {

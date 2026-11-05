@@ -89,7 +89,7 @@ ctx.backend()                                      // sg::backend_kind (coarse t
 ctx.accepted_shader_formats()                      // span<shader_format const>, most-preferred first, never empty (dx12 -> dxil, vulkan -> spirv)
 ctx.accepts_shader_format(f)                       // bool — hand this to slib's acquire(ctx) rather than assuming a format; see docs/shaders.md
 ctx.supports(sg::feature::ray_query)               // bool — THE capability question; feature is deliberately coarse (see context/capabilities.hh)
-                                                   //   ray_query | raytracing_pipeline | timestamp_query | headless_present | geometry_shader | tessellation_shader | binding_arrays
+                                                   //   ray_query | raytracing_pipeline | timestamp_query | headless_present | geometry_shader | tessellation_shader | mesh_shader | binding_arrays
                                                    //   | readwrite_image_formats (false on core webgpu: read_write storage only in r32 formats)
                                                    //   | float32_filtering (filter r32/rg32/rgba32_float) | extended_image_formats (storage beyond is_portable_image_format)
                                                    //   | unaligned_block_compression (false on webgpu and metal: a BC texture needs whole 4x4 blocks,
@@ -397,6 +397,8 @@ cmd.raster.draw({.vertex_range={.offset=0,.size=3}, .instance_range={.offset=0,.
 cmd.raster.draw_indexed({.index_range={.offset=0,.size=N}, .instance_range={.offset=0,.size=1}, .vertex_offset=0})  // void
 //   GOTCHA: view.offset_in_bytes + index_range.offset*index_size must be 4-byte aligned (sg::index_buffer_offset_alignment).
 //   So an ODD first index into a uint16 buffer asserts — metal draws only part of the mesh, silently, and dx12/vulkan do not mind.
+cmd.raster.draw_mesh_tasks(x, y = 1, z = 1)  // void — x*y*z workgroups of a mesh-shaded pipeline's task stage, or mesh stage without one;
+//   only a pipeline with a mesh stage draws this way (pipeline.is_mesh_shaded()), and it asserts in draw / draw_indexed
 cmd.raster.draw_indexed_indirect(args, first = 0, count = 1)  // void — `count` indexed draws, each record of buffer<sg::draw_indexed_args> read by the GPU
 //   sg::draw_indexed_args { u32 index_count, instance_count = 1, first_index; i32 vertex_offset; u32 first_instance } — D3D12/Vk/Metal/WebGPU layout
 //   args need buffer_usage::indirect_command_buffer; instance_count 0 draws nothing, and first_instance is where @instance_index starts
@@ -841,6 +843,7 @@ d.withdraw();                                            // ends it now; destroy
 //   bind_pipeline ASSERTS the rendering's color count/formats, depth format and sample count equal pipeline.target_formats()
 sg::raster_pipeline_description   // { pipeline_layout_handle layout; compiled_shader vertex_shader; optional<compiled_shader> fragment_shader;
                                   //   optional<compiled_shader> tessellation_control_shader/tessellation_evaluation_shader (both-or-neither, need patch_list); optional<compiled_shader> geometry_shader;
+                                  //   optional<compiled_shader> mesh_shader, task_shader (need mesh_shader; mesh replaces vertex stage + vertex input; one view);
                                   //   vertex_input_layout vertex_input; primitive_topology topology=triangle_list; int patch_control_points=0 (1..32, patch_list only); rasterization_state; depth_stencil_state;
                                   //   small_vector<color_target_state,8> color_targets; pixel_format depth_stencil_format=undefined; int sample_count=1;
                                   //   int view_count=1 (>1 needs view_instancing: view i into layer i, SGL's @view_index; dx12 caps it at 4);

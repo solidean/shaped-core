@@ -151,6 +151,7 @@ public:
         case sg::feature::wireframe_fill:
         case sg::feature::geometry_shader:
         case sg::feature::tessellation_shader:
+        case sg::feature::mesh_shader:
         case sg::feature::binding_arrays:
         case sg::feature::multisampled_array_textures:
         case sg::feature::primitive_index:

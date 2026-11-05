@@ -56,7 +56,8 @@ cc::result<vulkan_raster_pipeline_handle> vulkan_raster_pipeline::create(vulkan_
                                                                          sg::raster_pipeline_description const& desc)
 {
     CC_ASSERT(desc.layout != nullptr, "raster pipeline requires a pipeline_layout");
-    CC_ASSERT(desc.vertex_shader.stage == sg::shader_stage::vertex, "the vertex stage must be a vertex shader");
+    CC_ASSERT(desc.mesh_shader.has_value() || desc.vertex_shader.stage == sg::shader_stage::vertex,
+              "the vertex stage must be a vertex shader");
 
     auto vk_layout = std::dynamic_pointer_cast<vulkan_pipeline_layout const>(desc.layout);
     CC_ASSERT(vk_layout != nullptr, "pipeline_layout is not a vulkan pipeline_layout");
@@ -97,6 +98,20 @@ cc::result<vulkan_raster_pipeline_handle> vulkan_raster_pipeline::create(vulkan_
         return cc::unit{};
     };
 
+    // A mesh stage takes the vertex stage's place, and the input assembler's
+    auto const is_mesh_shaded = desc.mesh_shader.has_value();
+    if (is_mesh_shaded)
+    {
+        CC_ASSERT(ctx.supports(sg::feature::mesh_shader), "a mesh-shaded pipeline needs sg::feature::mesh_shader");
+        if (desc.task_shader.has_value())
+        {
+            auto r = add_stage(desc.task_shader.value(), VK_SHADER_STAGE_TASK_BIT_EXT, "task shader");
+            CC_RETURN_IF_ERROR(r);
+        }
+        auto r = add_stage(desc.mesh_shader.value(), VK_SHADER_STAGE_MESH_BIT_EXT, "mesh shader");
+        CC_RETURN_IF_ERROR(r);
+    }
+    else
     {
         auto r = add_stage(desc.vertex_shader, VK_SHADER_STAGE_VERTEX_BIT, "vertex shader");
         CC_RETURN_IF_ERROR(r);
@@ -303,8 +318,8 @@ cc::result<vulkan_raster_pipeline_handle> vulkan_raster_pipeline::create(vulkan_
         .flags = VK_PIPELINE_CREATE_DESCRIPTOR_BUFFER_BIT_EXT,
         .stageCount = u32(stages.size()),
         .pStages = stages.data(),
-        .pVertexInputState = &vertex_input,
-        .pInputAssemblyState = &input_assembly,
+        .pVertexInputState = is_mesh_shaded ? nullptr : &vertex_input,
+        .pInputAssemblyState = is_mesh_shaded ? nullptr : &input_assembly,
         .pTessellationState = has_tessellation ? &tessellation : nullptr,
         .pViewportState = &viewport_state,
         .pRasterizationState = &rasterization,

@@ -69,7 +69,7 @@ def emit_sampler(sampler: DeclaredSampler) -> str:
 # exactly as the enum does, so the generator emits the enumerator rather than a string for C++ to parse back.
 VALID_STAGES = (
     "vertex", "tessellation_control", "tessellation_evaluation", "geometry", "fragment", "compute",
-    "raygen", "closest_hit", "any_hit", "miss", "intersection", "callable",
+    "raygen", "closest_hit", "any_hit", "miss", "intersection", "callable", "task", "mesh",
 )
 
 VALID_LANGUAGES = ("hlsl", "wgsl", "sgl")

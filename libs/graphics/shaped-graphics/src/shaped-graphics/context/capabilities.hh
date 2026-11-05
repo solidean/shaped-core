@@ -41,6 +41,11 @@ enum class sg::feature
     /// Both or neither, which is why they are one feature rather than two.
     tessellation_shader,
 
+    /// The mesh stage exists, and the task stage that launches it, so a raster pipeline may draw from workgroups rather than vertices.
+    /// D3D12 grants it with mesh shader tier 1, Vulkan with VK_EXT_mesh_shader's `meshShader` and `taskShader`.
+    /// Metal's object and mesh stages are not wired up yet, and WebGPU has neither.
+    mesh_shader,
+
     /// A binding may be an array (`count > 1`), and so `staging_binding_group` and `bindless_array` work.
     /// WebGPU core has no binding arrays at all, so a bindless renderer asks once rather than finding out at layout creation.
     binding_arrays,
@@ -193,6 +198,7 @@ inline constexpr feature k_all_features[] = {
     feature::headless_present,
     feature::geometry_shader,
     feature::tessellation_shader,
+    feature::mesh_shader,
     feature::binding_arrays,
     feature::readwrite_image_formats,
     feature::float32_filtering,
@@ -239,6 +245,8 @@ static_assert(isize(sizeof(k_all_features) / sizeof(k_all_features[0])) == isize
         return "geometry_shader";
     case feature::tessellation_shader:
         return "tessellation_shader";
+    case feature::mesh_shader:
+        return "mesh_shader";
     case feature::binding_arrays:
         return "binding_arrays";
     case feature::readwrite_image_formats:

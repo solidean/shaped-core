@@ -211,6 +211,10 @@ public:
     void draw(draw_config const& config = {});
     /// Records an indexed draw of the active pipeline (an index buffer must be bound).
     void draw_indexed(draw_indexed_config const& config = {});
+    /// Records a draw of the bound mesh-shaded pipeline: `x * y * z` workgroups of its task stage, or of its mesh stage
+    /// where it has none, each of which writes its own vertices and primitives.
+    /// Only a pipeline with a mesh stage draws this way, and it draws no other way.
+    void draw_mesh_tasks(int x, int y = 1, int z = 1);
     /// Records `count` indexed draws of the active pipeline, whose parameters the GPU reads from `args[first, first + count)` when they run.
     ///
     /// This is how a pass that only the GPU decides — culling — chooses what draws, with no readback: a draw it rejects holds an `instance_count` of 0, which draws nothing.
@@ -278,6 +282,7 @@ public:
     }
     void draw(draw_config const& config = {});
     void draw_indexed(draw_indexed_config const& config = {});
+    void draw_mesh_tasks(int x, int y = 1, int z = 1);
     void draw_indexed_indirect(buffer<draw_indexed_args> const& args, isize first = 0, isize count = 1);
 
     // Pinned to its owning command list: neither copyable nor movable.
@@ -346,6 +351,7 @@ public:
     }
     void draw(draw_config const& config = {});
     void draw_indexed(draw_indexed_config const& config = {});
+    void draw_mesh_tasks(int x, int y = 1, int z = 1);
     void draw_indexed_indirect(buffer<draw_indexed_args> const& args, isize first = 0, isize count = 1);
 
     // Pinned to its owning command list: neither copyable nor movable.

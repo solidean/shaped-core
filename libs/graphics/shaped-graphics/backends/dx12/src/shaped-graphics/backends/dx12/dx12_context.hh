@@ -258,6 +258,8 @@ public:
             return true;
         case sg::feature::view_instancing:
             return _view_instancing;
+        case sg::feature::mesh_shader:
+            return _mesh_shader;
         case sg::feature::float_atomic_add:
             // HLSL's float atomics are bitwise exchanges alone; an add is NVAPI's, which this backend does not take
             return false;
@@ -699,6 +701,7 @@ public:
     bool _opacity_micromap = false;            // DXR 1.2 and SM 6.9, from the Agility SDK
     bool _vertex_layer_output = false;         // D3D12_OPTIONS, cached at creation
     bool _view_instancing = false;             // D3D12_OPTIONS3's ViewInstancingTier, cached at creation
+    bool _mesh_shader = false;                 // D3D12_OPTIONS7's MeshShaderTier, cached at creation
 
     // Where debug-layer messages go; empty means stderr.
     // See set_message_callback.

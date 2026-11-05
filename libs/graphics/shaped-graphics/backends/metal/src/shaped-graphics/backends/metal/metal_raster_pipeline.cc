@@ -129,6 +129,8 @@ cc::result<metal_raster_pipeline_handle> metal_context::create_metal_raster_pipe
         return cc::error("raster_pipeline: the metal backend has no geometry stage");
     if (desc.tessellation_control_shader.has_value() || desc.tessellation_evaluation_shader.has_value())
         return cc::error("raster_pipeline: the metal backend has no tessellation stages");
+    if (desc.mesh_shader.has_value())
+        return cc::error("raster_pipeline: the metal backend does not wire up object and mesh stages yet");
 
     auto const scope = autorelease_scope();
 

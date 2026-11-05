@@ -330,6 +330,8 @@ cc::hash128 pipeline_cache::compute_raster_pipeline_key(raster_pipeline_descript
     add_optional_shader(b, desc.tessellation_control_shader);
     add_optional_shader(b, desc.tessellation_evaluation_shader);
     add_optional_shader(b, desc.geometry_shader);
+    add_optional_shader(b, desc.task_shader);
+    add_optional_shader(b, desc.mesh_shader);
 
     b.add_pod(u64(desc.vertex_input.slots.size()));
     for (auto const& s : desc.vertex_input.slots)

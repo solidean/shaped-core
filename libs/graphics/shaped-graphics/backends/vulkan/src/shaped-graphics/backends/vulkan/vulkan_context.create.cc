@@ -782,6 +782,22 @@ cc::result<context_handle> create_vulkan_context(backend::vulkan::vulkan_config 
     if (float_atomic_add_supported)
         device_extensions.push_back(VK_EXT_SHADER_ATOMIC_FLOAT_EXTENSION_NAME);
 
+    // The mesh and task stages, which sg's feature grants together.
+    char const* const mesh_names[] = {VK_EXT_MESH_SHADER_EXTENSION_NAME};
+    auto mesh_shader_supported = false;
+    if (device_extensions_available(best_device, mesh_names))
+    {
+        auto mesh_query = VkPhysicalDeviceMeshShaderFeaturesEXT{
+            .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MESH_SHADER_FEATURES_EXT,
+        };
+        auto features
+            = VkPhysicalDeviceFeatures2{.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2, .pNext = &mesh_query};
+        vkGetPhysicalDeviceFeatures2(best_device, &features);
+        mesh_shader_supported = mesh_query.meshShader == VK_TRUE && mesh_query.taskShader == VK_TRUE;
+    }
+    if (mesh_shader_supported)
+        device_extensions.push_back(VK_EXT_MESH_SHADER_EXTENSION_NAME);
+
     auto const shader_features = query_optional_shader_features(best_device);
     if (shader_features.has_compute_derivatives)
         device_extensions.push_back(VK_KHR_COMPUTE_SHADER_DERIVATIVES_EXTENSION_NAME);
@@ -975,10 +991,18 @@ cc::result<context_handle> create_vulkan_context(backend::vulkan::vulkan_config 
         .shaderSharedFloat32AtomicAdd = VK_TRUE,
     };
 
+    auto* const after_mesh
+        = float_atomic_add_supported ? static_cast<void*>(&float_atomic_features) : float_atomic_features.pNext;
+    auto mesh_features = VkPhysicalDeviceMeshShaderFeaturesEXT{
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MESH_SHADER_FEATURES_EXT,
+        .pNext = after_mesh,
+        .taskShader = VK_TRUE,
+        .meshShader = VK_TRUE,
+    };
+
     auto const device_info = VkDeviceCreateInfo{
         .sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO,
-        .pNext
-        = float_atomic_add_supported ? static_cast<void const*>(&float_atomic_features) : float_atomic_features.pNext,
+        .pNext = mesh_shader_supported ? static_cast<void const*>(&mesh_features) : after_mesh,
         .queueCreateInfoCount = u32(queue_infos.size()),
         .pQueueCreateInfos = queue_infos.data(),
         .enabledExtensionCount = u32(device_extensions.size()),
@@ -1079,6 +1103,9 @@ cc::result<context_handle> create_vulkan_context(backend::vulkan::vulkan_config 
     ctx->_vertex_layer_output = shader_features.shader_output_layer == VK_TRUE;
     ctx->_view_instancing = shader_features.multiview == VK_TRUE;
     ctx->_float_atomic_add = float_atomic_add_supported;
+    if (mesh_shader_supported)
+        ctx->_cmd_draw_mesh_tasks = PFN_vkCmdDrawMeshTasksEXT(vkGetDeviceProcAddr(device, "vkCmdDrawMeshTasksEXT"));
+    ctx->_mesh_shader = ctx->_cmd_draw_mesh_tasks != nullptr;
     if (shader_features.subgroup_size_control == VK_TRUE)
         ctx->_subgroup_size_control = {
             .min_size = shader_features.vk13_properties.minSubgroupSize,
