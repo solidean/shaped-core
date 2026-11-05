@@ -599,3 +599,35 @@ TEST("sgl guards - an atomic whose result a let binds runs only where the flag i
     CHECK(dump.contains("(assign (local slot : uint) = (lit 0u : uint))")).dump("core", dump);
     CHECK(dump.contains("(assign (local slot : uint) = (call:effect add")).dump("core", dump);
 }
+
+TEST("sgl guards - a matrix row or column outside the matrix ends the invocation, and define reads column 0")
+{
+    // p.b is 0.75, so i is 6, past a mat4's 4 columns
+    constexpr auto source = "@pixel fun ps(p: frag) -> target:\n"
+                            "    let m = mat4(float4(1.0, 0.0, 0.0, 0.0), float4(0.0, 1.0, 0.0, 0.0), "
+                            "float4(0.0, 0.0, 1.0, 0.0), float4(0.0, 0.0, 0.0, 1.0))\n"
+                            "    let i = int(p.b * 8.0)\n"
+                            "    return {\n"
+                            "        color = m.column(i)\n"
+                            "    }\n";
+    auto const aborted = run_both(source, undefined_guard::abort);
+    CHECK(aborted.structured.status == run_status::program_error);
+    CHECK(aborted.guarded.status == run_status::discarded).dump("core", aborted.dump);
+    auto const defined = run_both(source, undefined_guard::define);
+    REQUIRE(defined.guarded.status == run_status::ok).dump("core", defined.dump);
+    CHECK(defined.guarded.result.leaves[0].as_float() == 1.0f);
+    CHECK(defined.guarded.result.leaves[1].as_float() == 0.0f);
+}
+
+TEST("sgl guards - a vector clamped between two scalars is guarded lane by lane")
+{
+    // p.a is 0.25 and p.b 0.75: the bounds cross, so the clamp has no value
+    auto const r = run_both("@pixel fun ps(p: frag) -> target:\n"
+                            "    let v = float3(p.a, p.b, 0.5)\n"
+                            "    return {\n"
+                            "        color = float4(clamp(v, p.b, p.a).x, 0.0, 0.0, 1.0)\n"
+                            "    }\n",
+                            undefined_guard::abort);
+    CHECK(r.structured.status == run_status::program_error);
+    CHECK(r.guarded.status == run_status::discarded).dump("core", r.dump);
+}

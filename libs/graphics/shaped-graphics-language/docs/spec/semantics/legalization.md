@@ -42,8 +42,9 @@ The worked examples are WGSL, since it is the strictest target: no `do … while
   The invocation then ends after the last statement of the entry point's body that holds such an operation, and what it writes until then is skipped (LEGAL-67).
   Until then, a loop that holds none of those operations is left at the top of each iteration once the flag is set, so a safe operand never keeps it running long.
   A loop that holds one has a trip count every invocation of the workgroup shares, so its guards trip in all of them or in none.
-  It guards the maths builtins of EVAL-87 too, each by the test the interpreter asks: `pow`, `asin`, `acos`, `atan2`, `smoothstep` and `clamp`, whose operands share one number shape.
-  Workgroup memory read before it is written (EVAL-92) and the matrix part builtins are not guarded yet.
+  It guards the maths builtins of EVAL-87 too, each by the test the interpreter asks: `pow`, `asin`, `acos`, `atan2`, `smoothstep` and `clamp`, a scalar beside a vector read as every lane of it.
+  So is a matrix's `row` or `column` whose index is outside the matrix.
+  Workgroup memory read before it is written (EVAL-92) is not guarded yet.
   Wherever the input has a value, the tree behaves as the input does; where it has none, the tree ends the invocation instead.
 * **LEGAL-66** (G1) Where the target reads a buffer's length (EMIT-195), those profiles also guard a buffer index and a `bytes` access, by the length of CHK-460.
   A buffer index outside `0 ..< values.length` ends the invocation as an array index does (EVAL-90).

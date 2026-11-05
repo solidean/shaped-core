@@ -466,6 +466,49 @@ struct guarder
         return out.block_expr(label, x.type, stmts);
     }
 
+    /// The size of the matrix whose row or column `call` reads (EVAL-87), or 0 for a call that reads none.
+    [[nodiscard]] i32 matrix_part_size_of(flat_call const& call) const
+    {
+        if (!is_valid(call.intrinsic) || index_of(call.intrinsic) >= registry.functions.size()
+            || !is_known(out.e, call.arguments) || call.arguments.count != 2)
+            return 0;
+        auto const& r = registry.at(call.intrinsic);
+        if (r.name != "matrix_row" && r.name != "matrix_column")
+            return 0;
+        auto const matrix = out.m.name_of(out.e.at(out.e.at(call.arguments)[0]).type);
+        return matrix == "mat4" ? 4 : matrix == "mat3" ? 3 : matrix == "mat2" ? 2 : 0;
+    }
+
+    /// `call`, a matrix's row or column, as a block that ends the invocation where its index is outside the matrix.
+    flat_expr_id guard_matrix_part(flat_expr_id id, i32 size)
+    {
+        auto const x = out.e.at(id);
+        auto const& call = *x.node.try_as<flat_call>();
+        auto const arguments = out.e.at(call.arguments);
+        auto const matrix_value = arguments[0];
+        auto const index_value = arguments[1];
+        if (out.e.at(index_value).node.is<flat_int_literal>())
+            return id;
+        auto const int_shape = shape{.element = builtins::k_int};
+
+        out.from = x.from;
+        out.inlined_through = x.inlined_through;
+        auto const label = out.add_label("guard");
+        auto stmts = stmt_list();
+        auto const matrix = pinned("matrix", matrix_value, stmts);
+        auto const i = pinned("index", index_value, stmts);
+        auto const bad = out.or_(compare("less", int_shape, out.local(i), out.int_literal(0)),
+                                 out.not_(compare("less", int_shape, out.local(i), out.int_literal(size))));
+        auto const value = out.local(i);
+        stmts.push_back(out.if_(bad, failed({cc::string("matrix index "), cc::format(" is outside 0 ..< {}", size)},
+                                            cc::span<flat_expr_id const>(&value, 1), i, out.int_literal(0))));
+        auto guarded = call;
+        flat_expr_id const operands[] = {out.local(matrix), out.local(i)};
+        guarded.arguments = out.expr_list(operands);
+        stmts.push_back(out.leave(label, out.add_expr(x.type, guarded)));
+        return out.block_expr(label, x.type, stmts);
+    }
+
     // ---- the maths builtins of EVAL-87 --------------------------------------------------------------------------------
 
     /// The shape of `type`, where it is a scalar of a number type, `float` and `half` included, or a vector of one.
@@ -570,13 +613,24 @@ struct guarder
         auto operands = cc::vector<flat_expr_id>();
         for (auto const a : out.e.at(call.arguments))
             operands.push_back(a);
-        auto const type = out.e.at(operands[0]).type;
-        auto const known = number_shape_of(type);
-        if (!known.has_value())
-            return id;
-        auto const s = known.value();
+        // the widest operand's shape, and each operand's own: a scalar beside a vector reads as every lane of it
+        auto shapes = cc::vector<shape>();
+        auto types = cc::vector<type_id>();
         for (auto const a : operands)
-            if (out.e.at(a).type != type)
+        {
+            auto const known = number_shape_of(out.e.at(a).type);
+            if (!known.has_value())
+                return id;
+            shapes.push_back(known.value());
+            types.push_back(out.e.at(a).type);
+        }
+        auto widest = isize(0);
+        for (auto k = isize(1); k < shapes.size(); ++k)
+            if (shapes[k].width > shapes[widest].width)
+                widest = k;
+        auto const s = shapes[widest];
+        for (auto const& o : shapes)
+            if (o.element != s.element || (o.width != s.width && o.width != 1))
                 return id;
 
         out.from = x.from;
@@ -590,7 +644,7 @@ struct guarder
         auto bad = flat_expr_id::none;
         for (auto i = 0; i < s.width; ++i)
         {
-            auto const lane = [&](isize k) { return number_lane(locals[k], s, s.lanes.empty() ? 0 : i); };
+            auto const lane = [&](isize k) { return number_lane(locals[k], shapes[k], shapes[k].lanes.empty() ? 0 : i); };
             auto const literal = [&](f64 v) { return number_literal(s, v); };
             auto lane_bad = flat_expr_id::none;
             if (name == "pow")
@@ -614,19 +668,22 @@ struct guarder
 
         // what the operation computes once a deferring guard tripped: any value, so one that has one
         auto safe = cc::vector<replacement>();
+        auto const fill = [&](isize k, f64 v) { return filled(types[k], shapes[k], v); };
         if (name == "pow")
-            safe.push_back({.place = locals[0], .value = filled(type, s, 1.0)});
+            safe.push_back({.place = locals[0], .value = fill(0, 1.0)});
         else if (name == "asin" || name == "acos")
-            safe.push_back({.place = locals[0], .value = filled(type, s, 0.0)});
+            safe.push_back({.place = locals[0], .value = fill(0, 0.0)});
         else if (name == "atan2")
-            safe.push_back({.place = locals[1], .value = filled(type, s, 1.0)});
+            safe.push_back({.place = locals[1], .value = fill(1, 1.0)});
         else if (name == "smoothstep")
         {
-            safe.push_back({.place = locals[0], .value = filled(type, s, 0.0)});
-            safe.push_back({.place = locals[1], .value = filled(type, s, 1.0)});
+            safe.push_back({.place = locals[0], .value = fill(0, 0.0)});
+            safe.push_back({.place = locals[1], .value = fill(1, 1.0)});
         }
-        else if (name == "clamp")
+        else if (name == "clamp" && types[1] == types[2])
             safe.push_back({.place = locals[2], .value = out.local(locals[1])});
+        else if (name == "clamp")
+            return id;
 
         auto const is_16_bit_int = s.element == "short" || s.element == "ushort";
         auto pieces = cc::vector<cc::string>();
@@ -734,6 +791,9 @@ struct guarder
         if (auto const* const call = out.e.at(result).node.try_as<flat_call>(); call != nullptr && may_guard)
             if (auto const words = bytes_words_of(*call); words > 0)
                 return guard_bytes(result, words);
+        if (auto const* const call = out.e.at(result).node.try_as<flat_call>(); call != nullptr && may_guard)
+            if (auto const size = matrix_part_size_of(*call); size > 0)
+                return guard_matrix_part(result, size);
         return result;
     }
 
