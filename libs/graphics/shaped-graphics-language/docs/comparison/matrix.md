@@ -3,7 +3,7 @@
 How SGL compares with the other ways to write one set of shaders for DX12, Vulkan, WebGPU and Metal.
 Every row is judged for a renderer that targets all four, WebGPU in a browser included, and wants hardware ray tracing wherever a platform has it.
 
-**As of 2026-11-02**; SGL's E3 and E4 as of 2026-11-03, its B8 and B9 as of 2026-11-04, its A5, A7, B10, B11 and F7 as of 2026-11-05.
+**As of 2026-11-02**; SGL's E3 and E4 as of 2026-11-03, its B8 and B9 as of 2026-11-04, its A5, A7, B10, B11, F2 and F7 as of 2026-11-05.
 The other columns move fast, Slang's Metal and WGSL support above all, so each cell carries a source and the date it was checked; see [Sources](#sources).
 
 ## Columns
@@ -95,7 +95,7 @@ A per-target cell reads `dx12 / vulkan / metal / webgpu`.
 | Row | HLSL + chain | Slang | WGSL | GLSL + chain | SGL |
 |---|---|---|---|---|---|
 | **F1** Hot reload, native | ✅ libraries in process | ✅ in-process API | ✅ microseconds to translate | ✅ libraries in process | ✅ survives a broken edit |
-| **F2** Compile in the browser | ❌ no official DXC for wasm (a third-party build is ~17 MB); no MSC | ✅ official slang-wasm, 25 MB (10 MB zipped) | ✅ the browser takes WGSL; Naga is 1.6 MB as wasm | ⚠️ glslang ~0.9 MB plus a 1.7 MB translator | ⚠️ the compiler runs in the page; ❓ the live-edit loop is missing 🗺️ [feat](../../../shaped-shader-library/docs/issues/feat-slib-wasm-live-edit.md); the wasm size is unmeasured |
+| **F2** Compile in the browser | ❌ no official DXC for wasm (a third-party build is ~17 MB); no MSC | ✅ official slang-wasm, 25 MB (10 MB zipped) | ✅ the browser takes WGSL; Naga is 1.6 MB as wasm | ⚠️ glslang ~0.9 MB plus a 1.7 MB translator | ⚠️ the compiler runs in the page; ❓ the live-edit loop is missing 🗺️ [feat](../../../shaped-shader-library/docs/issues/feat-slib-wasm-live-edit.md); the whole `sgl` tool, language server included, is 5.6 MB as wasm (1.7 MB gzip, 1.2 MB brotli) |
 | **F3** Compile in a shipped product | ⚠️ DXC is tens of MB; MSC's redistribution terms are unclear | ⚠️ 26.5 MB, plus DXC for DXIL | ⚠️ Naga is small; DX12 still needs DXC | ⚠️ a heavy chain | ⚠️ the compiler depends on clean-core alone; dx12 and vulkan still need DXC; metal and webgpu need no toolchain |
 | **F4** Compile speed | ❓ | ❓ | ✅ Naga: 20–60 µs per small shader and backend | ❓ | ✅ a corpus of bgfx shaders compiles as fast as with Naga; a fixed cost of ~115 µs per compile against Naga's ~18 µs 🗺️ [epic](../issues/epic-sgl-prelude-check-cost.md) |
 | **F5** Permutations | ⚠️ macros; specialization constants on SPIR-V only | ✅ macros, specialization constants, link-time specialization | ⚠️ `override` constants; WESL `@if` | ✅ macros and specialization constants | ✅ options; a false branch leaves the text and the footprint; no specialization constants |
@@ -360,7 +360,7 @@ Per row and column:
   - Slang: SLANG release `slang-2026.20-wasm.zip`, measured
   - WGSL: NAGA 30.0.1 built for wasm32, measured
   - GLSL + chain: <https://unpkg.com/@webgpu/glslang@0.0.15/>, Babylon twgsl
-  - SGL: `examples/graphics/sgl-cube`, slib `docs/structure.md`
+  - SGL: `examples/graphics/sgl-cube`, slib `docs/structure.md`, the `sgl` tool built with `emscripten-release`, measured (2026-11-05)
 - **F3**
   - HLSL + chain: MSC changelog 3.1, <https://developer.apple.com/forums/thread/829379>
   - Slang: SLANG Windows release, measured
