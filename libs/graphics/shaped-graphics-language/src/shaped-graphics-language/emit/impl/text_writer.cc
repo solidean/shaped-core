@@ -1196,6 +1196,28 @@ struct writer
         return {.text = cc::move(result)};
     }
 
+    /// EMIT-139: the per-instance hit-group offsets of the acceleration structure `id` names, which sg's metal backend
+    /// mirrors slot for slot beside each group's argument buffer: `hit_offsets->groups[group][slot + element]`.
+    /// Empty where `id` is no acceleration-structure member, or an element of one.
+    cc::string hit_offsets_of(flat_expr_id id)
+    {
+        if (p.m.at(p.e.at(id).type).kind != type_kind::acceleration_structure)
+            return {};
+        auto named = id;
+        auto element = cc::string();
+        if (auto const* const e = p.e.at(id).node.try_as<flat_element>())
+        {
+            named = e->object;
+            element = cc::format(" + {}", wrapped(expr(e->index), level::additive));
+        }
+        auto const* const member = p.e.at(named).node.try_as<flat_binding_member>();
+        auto const found = member != nullptr ? resource_of(p, member->binding, member->member) : -1;
+        if (found < 0)
+            return {};
+        auto const& r = p.resources[found];
+        return cc::format("sgl_ctx.hit_offsets->groups[{}][{}{}].instances", r.group, r.slot, element);
+    }
+
     /// Every call is written from its registry record; nothing here knows one builtin from another.
     rendered call(flat_call const& c, check::type_id type)
     {
@@ -1218,6 +1240,9 @@ struct writer
         case builtins::spelling_kind::custom:
         {
             auto mint = [&](cc::string_view desired) { return p.names.mint(desired); };
+            auto const offsets = d.language() == builtins::language::msl && !arguments.empty()
+                                   ? hit_offsets_of(p.e.at(c.arguments)[0])
+                                   : cc::string();
             auto result = how.custom({.target = d.language(),
                                       .arguments = arguments,
                                       .builtins = *p.m.builtins,
@@ -1226,6 +1251,7 @@ struct writer
                                       .result_type = p.m.builtin_type_of(type) != nullptr || record.gives_prelude_struct
                                                        ? type_text(p, d, type)
                                                        : cc::string_view(),
+                                      .hit_offsets = offsets,
                                       .is_device_coherent = is_device_coherent,
                                       .is_pixel_stage = p.e.entry_stage == check::stage::pixel,
                                       .native_float_atomics = p.native_float_atomics});

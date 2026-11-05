@@ -17,8 +17,8 @@ using namespace sgl::emit::impl;
 constexpr auto k_inline_constants_buffer = 4;
 /// sg's reserved group, where metal's ray-tracing tables arrive; sg's `sg::reserved_binding_group`.
 constexpr auto k_reserved_group = 3;
-/// Where metal's `dispatch_rays` binds each TLAS instance's hit-group offset, the first vertex-buffer slot, which a
-/// kernel never has; sg's metal `k_hit_group_offsets_buffer_index`.
+/// Where metal's `dispatch_rays` binds, per group, the slot-for-slot mirror of each bound TLAS's per-instance hit-group
+/// offsets, at the first vertex-buffer slot, which a kernel never has; sg's metal `k_hit_group_offsets_buffer_index`.
 constexpr auto k_hit_offsets_buffer = 5;
 
 /// MSL's texture types, parallel to `texture_shape`, and the depth ones where a shape has one.
@@ -466,11 +466,16 @@ public:
                 payload_size = cc::format("({0} > {1} ? {0} : {1})", payload_size, next);
             }
         }
+        // sg mirrors each group's argument buffer slot for slot with the offsets of the structure bound there, and
+        // binds one such mirror per group
+        // a struct at each level, since a buffer's pointee may hold a pointer only as an argument buffer does
+        out += "struct sgl_slot_hit_offsets\n{\n    device uint const* instances;\n};\n\n"
+               "struct sgl_hit_offsets_table\n{\n    device sgl_slot_hit_offsets const* groups[3];\n};\n\n";
         out += "struct sgl_context\n{\n"
                "    constant void* groups[3];\n"
                "    constant void* constants;\n"
                "    device void* tables;\n"
-               "    device uint const* hit_offsets;\n"
+               "    constant sgl_hit_offsets_table* hit_offsets;\n"
                "    uint3 launch_id;\n"
                "    uint3 launch_size;\n"
                "};\n\n";
@@ -563,7 +568,8 @@ public:
                 parameters.push_back(cc::format("constant {}& {} [[buffer({})]]", p.constants.value().block_name,
                                                 p.constants.value().name, k_inline_constants_buffer));
             parameters.push_back(cc::format("device sgl_tables& sgl_t [[buffer({})]]", k_reserved_group));
-            parameters.push_back(cc::format("device uint const* sgl_hit_offsets [[buffer({})]]", k_hit_offsets_buffer));
+            parameters.push_back(
+                cc::format("constant sgl_hit_offsets_table& sgl_hit_offsets [[buffer({})]]", k_hit_offsets_buffer));
             parameters.push_back("uint3 sgl_launch_id [[thread_position_in_grid]]");
             parameters.push_back("uint3 sgl_launch_size [[threads_per_grid]]");
             auto list = cc::string();
@@ -579,7 +585,7 @@ public:
             out.appendf("    sgl_ctx.constants = {};\n",
                         p.constants.has_value() ? cc::format("&{}", p.constants.value().name) : cc::string("nullptr"));
             out += "    sgl_ctx.tables = &sgl_t;\n"
-                   "    sgl_ctx.hit_offsets = sgl_hit_offsets;\n"
+                   "    sgl_ctx.hit_offsets = &sgl_hit_offsets;\n"
                    "    sgl_ctx.launch_id = sgl_launch_id;\n"
                    "    sgl_ctx.launch_size = sgl_launch_size;\n";
         }

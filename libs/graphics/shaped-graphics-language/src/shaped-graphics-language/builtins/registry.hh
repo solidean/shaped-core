@@ -68,6 +68,9 @@ struct sgl::builtins::call_context
     /// The call's result type as the target spells it, for such a local; empty where no text is being written, and
     /// for a result of no builtin type but the prelude struct of `function_record::gives_prelude_struct`.
     cc::string_view result_type;
+    /// MSL: the per-instance hit-group offsets of the acceleration structure the first argument names, which a trace
+    /// finds its closest hit's record by (EMIT-139); empty where that argument is no acceleration structure.
+    cc::string_view hit_offsets;
     /// The entry point holds a `@coherent` member, whose writes a barrier publishes to the whole dispatch (EMIT-150).
     bool is_device_coherent = false;
     /// The entry point is a pixel stage, whose helper invocations run its atomics without effect (EMIT-162).

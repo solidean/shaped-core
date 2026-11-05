@@ -1088,3 +1088,66 @@ ASYNC_INVOCABLE_TEST("sg - an SGL any hit's accept_and_end_search stops the trav
     CHECK(got[1][0] == 1).context("boxes");
     CHECK(got[1][1] == 2).context("boxes");
 }
+
+// `three_scenes_path` traces three TLASes in one dispatch, two bound in one group and the third in another, and each
+// one's instance names a hit group of its own: so each trace has to find its record through its own TLAS's instances.
+// Metal is where that is not free, since it finds a record from an offsets buffer sg binds beside the TLAS.
+ASYNC_INVOCABLE_TEST("sg - an SGL ray-tracing pipeline finds each traced TLAS's records through that TLAS's instances",
+                     (sg::context_handle const& ctx))
+{
+    REQUIRE(ctx != nullptr);
+    if (!sg_test::shaders_reach(*ctx))
+        SKIP("no compiler builds this binary's shaders into a format this context accepts");
+    if (!ctx->supports(sg::feature::raytracing_pipeline))
+        SKIP("this device has no ray-tracing pipelines");
+
+    using scenes_t = shaders::raytracing_pipeline::three_scenes_path_t;
+    auto const pipeline = co_await ctx->cached.acquire_raytracing_pipeline(
+        co_await shaders::raytracing_pipeline::three_scenes_path.description(*ctx));
+    REQUIRE(pipeline != nullptr);
+    auto table_desc = scenes_t::table_description(pipeline);
+    auto const one = scenes_t::add_row(table_desc, scenes_t::hit_groups_t::marked_one);
+    auto const two = scenes_t::add_row(table_desc, scenes_t::hit_groups_t::marked_two);
+    auto const three = scenes_t::add_row(table_desc, scenes_t::hit_groups_t::marked_three);
+    auto const table = ctx->uncached.create_raytracing_shader_table(table_desc);
+    REQUIRE(table != nullptr);
+
+    float const vertices[] = {0, 0, 0, 4, 0, 0, 0, 4, 0, 4, 0, 0, 4, 4, 0, 0, 4, 0};
+    auto const input = ctx->persistent.create_buffer_from_data(vertices, sg::buffer_usage::accel_structure_build_input);
+    auto const marks = ctx->persistent.create_buffer_from_data(
+        cc::vector<tg::vec4i>::create_defaulted(1), sg::buffer_usage::readwrite_buffer | sg::buffer_usage::copy_src);
+
+    auto cmd = ctx->create_command_list();
+    auto const triangles = sg::blas_triangles{.vertices = input.raw(), .vertex_count = 6};
+    auto const blas = cmd->raytracing.build_blas(cc::span<sg::blas_triangles const>(&triangles, 1),
+                                                 sg::accel_build_flag::fast_trace, scenes_t::ray_count);
+    auto const tlas_of = [&](sg::hit_row const& row)
+    {
+        sg::tlas_instance const instance[] = {{.blas = blas, .hit_group_offset = table->offset_of(row)}};
+        return cmd->raytracing.build_tlas(instance);
+    };
+    auto const first = tlas_of(one);
+    auto const second = tlas_of(two);
+    auto const third = tlas_of(three);
+
+    auto const near_group = ctx->transient.create_binding_group(
+        *cmd, ctx->cached.acquire_binding_group_layout<shaders::raytracing_pipeline::near_scenes>(),
+        shaders::raytracing_pipeline::near_scenes{.first = first->as_view(),
+                                                  .second = second->as_view(),
+                                                  .marks = marks.as_readwrite_buffer()});
+    auto const far_group = ctx->transient.create_binding_group(
+        *cmd, ctx->cached.acquire_binding_group_layout<shaders::raytracing_pipeline::far_scenes>(),
+        shaders::raytracing_pipeline::far_scenes{.third = third->as_view()});
+    cmd->raytracing.bind_pipeline(*pipeline);
+    cmd->raytracing.bind_group(0, *near_group);
+    cmd->raytracing.bind_group(1, *far_group);
+    cmd->raytracing.dispatch_rays(*table, sg::raygen_index(0), 1, 1);
+    auto const back = cmd->download.data_from_buffer(marks);
+    ctx->submit_command_list(cc::move(cmd));
+
+    auto const got = co_await back.data();
+    REQUIRE(got.size() == 1);
+    CHECK(got[0][0] == 1);
+    CHECK(got[0][1] == 2);
+    CHECK(got[0][2] == 3);
+}

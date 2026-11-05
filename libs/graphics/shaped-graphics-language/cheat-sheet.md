@@ -712,7 +712,7 @@ ops[i](mut v)                                            // raygen, miss, closes
   The inline one needs `ray_query` where the entry point REACHES it (CHK-322), so a stage that never traces runs on a device without it.
 - **A trace graph with a cycle is `recursive-trace`** (CHK-332): a miss or closest hit tracing its own ray type, directly or through others, is refused, never bounded.
 - **A payload on HLSL is `[raypayload]` with inferred qualifiers**, unless a `.host` pipeline (or no pipeline) traces it: then every field is widest (EMIT-137).
-- **Metal's pipeline traces one TLAS per dispatch**; transforms and `accept_and_end_search` behave as DXR's, and its GPU tests pass on an M4.
+- **Metal's pipeline traces any bound TLAS**, two in one group or across groups; transforms and `accept_and_end_search` behave as DXR's, and its GPU tests pass on an M4.
 - **An arrow body without `-> T` infers its result**, and a BLOCK body without one returns `void`.
   Its body is checked as part of compiling it, so two such functions that need each other are `dependency-cycle`, not `recursive-call`.
   An overload whose parameters cannot take a call is not demanded by it, so an overload set works from inside one of its inferred members.

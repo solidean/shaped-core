@@ -90,7 +90,7 @@ Each of these is a fact about Metal rather than a gap in the backend.
   MTL4's render encoder has no `setVertexBuffer`, and Metal has no root constants and no push constants — so both arrive the way a binding group does, as an address in the one `MTL4ArgumentTable`.
   That fixes a buffer-index convention the shader has to agree with, and `metal_common.hh` is where it is stated.
   Groups at 0 to 2, sg's reserved group at 3, inline constants at 4, and vertex-input slot `n` at 5 + `n`.
-  `dispatch_rays` borrows 5, `k_hit_group_offsets_buffer_index`, for the traced TLAS's hit-group offsets, since a kernel draws no vertices.
+  `dispatch_rays` borrows 5, `k_hit_group_offsets_buffer_index`, for the bound groups' hit-offsets mirrors, since a kernel draws no vertices.
   An `[[attribute(n)]]` index is the attribute's position in `vertex_input_layout::attributes`, which is the workaround the vulkan backend already states for its SPIR-V locations.
   Both are a workaround for the same missing field: sg names a vertex input by an HLSL semantic, and neither MSL nor SPIR-V has one.
   **Nothing below checks any of it.**
@@ -307,14 +307,14 @@ The pipeline path maps as follows.
   The reservation already existed for exactly this, so nothing about what `group_index` means changes.
   A caller still gets groups 0 to 2.
   Ray tracing and shader-side diagnostics now share that group, so those `[[id(n)]]` assignments are one namespace rather than two.
-- **A TLAS carries its instances' hit-group offsets, and `dispatch_rays` binds them at MSL buffer 5.**
+- **A TLAS carries its instances' hit-group offsets, and a binding group mirrors them slot for slot.**
   Metal's intersection result names the instance but not the `intersectionFunctionTableOffset` it carried, and a kernel needs that offset to find a closest hit's record.
   So `build_tlas` also uploads one `u32` per instance into `metal_tlas::hit_group_offsets()`.
-  `dispatch_rays` binds it at `k_hit_group_offsets_buffer_index`, which is vertex-input slot 0's index, free during a dispatch.
-  A dispatch with no such TLAS binds a context-wide zeroed buffer there instead, since the kernel declares the slot either way.
-  A kernel then calls the closest-hit table at `offsets[instance] + geometry * stride + ray type`, which is how SGL's kernels find it.
-  **A dispatch traces one TLAS**: it binds the first bound TLAS's offsets, and logs a warning when the bound groups hold more than one.
-  This is untested on metal hardware so far; the tier-1 pipeline tests exercise it in CI.
+  A group holding a TLAS gets a second buffer beside its argument buffer: slot `n` holds the offsets address of the TLAS at slot `n`.
+  `dispatch_rays` stages the three bound groups' mirror addresses and binds them at `k_hit_group_offsets_buffer_index`, which is vertex-input slot 0's index, free during a dispatch.
+  A kernel then calls the closest-hit table at `mirrors[group][slot + element][instance] + geometry * stride + ray type`, which is how SGL's kernels find it.
+  So any number of TLASes trace in one dispatch, in one group or across groups, and through an array; the convention needs nothing beyond `[[id(n)]]` being the slot.
+  `sg - an SGL ray-tracing pipeline finds each traced TLAS's records through that TLAS's instances` pins it on metal hardware.
 - **An empty closest-hit slot holds no function**, and a kernel must not call one.
   A group without a closest hit leaves its slot empty, which is valid for the table and not callable.
   SGL's kernels call every record's closest hit, so slib fills the empty slots with `sgl_empty_closest_hit` for them.
