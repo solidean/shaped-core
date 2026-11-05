@@ -31,6 +31,7 @@ What a target lacks is the exception: WGSL's emulated ray tracing pays for being
 
 `uv run dev.py benchmark "sr - SGL against the HLSL it was ported from"` measures it on dx12, with sr's shaders against the hand-written HLSL they were ported from.
 On an RTX 5070 Ti in October 2026 SGL took 0.99x to 1.00x the HLSL's GPU time for à-trous, 0.99x for the network's convolution, and 1.02x for SVGF's filter.
+On an Intel Arc B580 in November 2026 it took 0.91x to 0.97x of it on dx12, and 0.98x to 1.02x on vulkan, where both go through DXC's SPIR-V backend.
 
 ## Where to look
 
