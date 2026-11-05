@@ -353,6 +353,7 @@ if(SC_BUILD_TOOLS)
         tools/sgl/lsp/diagnostics.cc
         tools/sgl/lsp/semantic_tokens.cc
         tools/sgl/lsp/inlay_hints.cc
+        tools/sgl/lsp/navigation.cc
         tools/sgl/lsp/run_tests.cc
         tools/sgl/lsp/server.hh
         tools/sgl/lsp/server.cc

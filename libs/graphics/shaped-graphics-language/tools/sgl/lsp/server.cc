@@ -81,6 +81,22 @@ cc::shared_async<lsp::answer<cc::vector<lsp::code_action>>> actions_request(sgl_
         co_return lsp::answer<cc::vector<lsp::code_action>>(cc::error(cancelled()));
     co_return lsp::answer<cc::vector<lsp::code_action>>(sgl_lsp::code_actions_of(*analysis, around, e));
 }
+
+/// A request about one position, answered by `feature` from the analysis of the version it was asked about.
+template <class R>
+cc::shared_async<lsp::answer<R>> position_request(sgl_lsp::analysis_cache::handle a,
+                                                  lsp::position at,
+                                                  lsp::position_encoding e,
+                                                  cc::shared_ptr<lsp::cancel_flag> flag,
+                                                  R (*feature)(sgl_lsp::analysis const&,
+                                                               lsp::position,
+                                                               lsp::position_encoding))
+{
+    auto const& analysis = co_await a;
+    if (flag->is_raised.load())
+        co_return lsp::answer<R>(cc::error(cancelled()));
+    co_return lsp::answer<R>(feature(*analysis, at, e));
+}
 } // namespace
 
 cc::unique_ptr<sgl_lsp::language_server> sgl_lsp::language_server::create()
@@ -101,6 +117,13 @@ sgl_lsp::language_server::language_server()
             w.end_object();
             w.write("inlayHintProvider", true);
             w.write("codeActionProvider", true);
+            w.write("hoverProvider", true);
+            w.write("definitionProvider", true);
+            w.begin_object("completionProvider");
+            w.begin_array("triggerCharacters");
+            w.write(".");
+            w.end_array();
+            w.end_object();
         },
     })
 {
@@ -135,6 +158,35 @@ sgl_lsp::language_server::language_server()
                                                     return actions_request(cc::move(a), p.range, _server.encoding(),
                                                                            ctx.flag);
                                                 });
+
+    // hover, definition and completion: each one position, answered from the analysis of the version asked about
+    _server.on_request<lsp::text_document_position_params>(
+        "textDocument/hover",
+        [this](lsp::request_context const& ctx, lsp::text_document_position_params p)
+        {
+            auto a = _analyses.of(_server.workspace().snapshot(), p.uri);
+            if (!a)
+                return answer_now(cc::optional<lsp::hover>());
+            return position_request(cc::move(a), p.position, _server.encoding(), ctx.flag, &hover_of);
+        });
+    _server.on_request<lsp::text_document_position_params>(
+        "textDocument/definition",
+        [this](lsp::request_context const& ctx, lsp::text_document_position_params p)
+        {
+            auto a = _analyses.of(_server.workspace().snapshot(), p.uri);
+            if (!a)
+                return answer_now(cc::optional<lsp::location>());
+            return position_request(cc::move(a), p.position, _server.encoding(), ctx.flag, &definition_of);
+        });
+    _server.on_request<lsp::text_document_position_params>(
+        "textDocument/completion",
+        [this](lsp::request_context const& ctx, lsp::text_document_position_params p)
+        {
+            auto a = _analyses.of(_server.workspace().snapshot(), p.uri);
+            if (!a)
+                return answer_now(cc::vector<lsp::completion_item>());
+            return position_request(cc::move(a), p.position, _server.encoding(), ctx.flag, &completions_of);
+        });
 
     _server.on_request<prelude_text_params>(
         "sgl/preludeText",

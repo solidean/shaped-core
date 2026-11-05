@@ -108,6 +108,9 @@ What the server provides:
 * diagnostics, pushed as you type;
 * semantic tokens, which colour what the grammar cannot tell apart;
 * inlay hints showing inferred types: ` : float` after a `let` that writes none, and `-> float` before the `=>` of a function that writes none;
+* hover: a name's declaration as SGL writes it, `fun mix(a: float, b: float, t: float) -> float`, with its `///` comment;
+* go to definition, into the prelude too, whose files open as read-only `sgl-prelude:` documents;
+* completion: after a `.` what the object has, anywhere else the locals in scope, the declarations and the keywords;
 * test results: a failing `check` is a diagnostic, and every check site gets a gutter mark.
 
 Accepting a hint writes it into the source, except on a property of a type body, which takes no `-> type`.
@@ -156,6 +159,9 @@ A manual test after a change, with the extension installed by `uv run dev.py ins
 5. Rebuild with `uv run dev.py build -t sgl`: the "A newer sgl was built." prompt appears, and **Restart** brings the new server up.
    The output channel's `using …` line names the default preset's build directory.
 6. With the marks of step 3 showing, add a line above a check: its mark moves down with it, and stays on that line once it dims.
+7. Hover a call of `mix`: its signature and its doc comment show.
+   **Go to Definition** on it opens `builtins.sgl` from the prelude at its declaration.
+8. In a function taking a struct `l`, type `l.`: the completion list offers its fields and methods.
 
 ### Working on the grammar
 
