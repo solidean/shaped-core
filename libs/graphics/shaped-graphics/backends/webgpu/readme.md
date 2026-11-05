@@ -61,7 +61,8 @@ What this backend adds to it:
   The roots sit at the first uniform-offset alignment past the inline constants, in one placed block, so both dynamic offsets point into the same constant page.
   slib's WGSL reader accepts exactly those two declarations there and binds neither through a group.
 - **The pool is at most 128 MiB**, the default largest storage binding, and a build that would outgrow it throws `sg::allocation_exception`.
-- **The tree follows the primitive order**, with no spatial sort, so a triangle soup traces slowly.
+- **The records are Morton-sorted on the GPU before the tree is boxed**, so a mesh traces as fast in any triangle order.
+  The sort is a radix sort in plain WGSL, with no subgroups and no float atomics, through one scratch buffer bound at binding 5 of every build kernel.
   [acceleration-structures](../../docs/concepts/acceleration-structures.md#webgpu-implementation-a-software-polyfill) has the rest.
 - **There is no ray-tracing pipeline**, emulated or otherwise: a path tracer here is written against ray queries.
   `create_raytracing_pipeline` and the shader table fail with an error naming `sg::feature::raytracing_pipeline`.
