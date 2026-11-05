@@ -343,6 +343,7 @@ struct reader
             r.signature = cc::format("self : {}", type_name(use_type));
             return;
         case check::target_kind::array_length:
+        case check::target_kind::buffer_length:
             r.signature = cc::format("length : {}", type_name(use_type));
             return;
         case check::target_kind::swizzle:
