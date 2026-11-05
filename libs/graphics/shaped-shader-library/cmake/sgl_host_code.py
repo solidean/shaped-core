@@ -56,11 +56,28 @@ HOST_TYPES: dict[str, tuple[str, int, str | None]] = {
     "ushort2": ("tg::vec<2, cc::u16>", 4, None),
     "ushort3": ("tg::vec<3, cc::u16>", 6, None),
     "ushort4": ("tg::vec<4, cc::u16>", 8, None),
+    # the 64-bit families, which no WGSL text holds
+    "long": ("cc::i64", 8, None),
+    "long2": ("tg::vec<2, cc::i64>", 16, None),
+    "long3": ("tg::vec<3, cc::i64>", 24, None),
+    "long4": ("tg::vec<4, cc::i64>", 32, None),
+    "ulong": ("cc::u64", 8, None),
+    "ulong2": ("tg::vec<2, cc::u64>", 16, None),
+    "ulong3": ("tg::vec<3, cc::u64>", 24, None),
+    "ulong4": ("tg::vec<4, cc::u64>", 32, None),
+    "double": ("double", 8, None),
+    "double2": ("tg::vec<2, double>", 16, None),
+    "double3": ("tg::vec<3, double>", 24, None),
+    "double4": ("tg::vec<4, double>", 32, None),
+    "atomic[long]": ("cc::i64", 8, None),
+    "atomic[ulong]": ("cc::u64", 8, None),
 }
 
 # The 16-bit types the generated code names, and the vectors among them.
 HALF_TYPES = {"half", "half2", "half3", "half4"}
 SIXTEEN_BIT_VECTORS = {"half2", "half3", "half4", "short2", "short3", "short4", "ushort2", "ushort3", "ushort4"}
+WIDE_INTEGERS = {"long", "ulong", "atomic[long]", "atomic[ulong]"}
+WIDE_VECTORS = {f"{family}{width}" for family in ("long", "ulong", "double") for width in (2, 3, 4)}
 
 
 # An option as the host sets it: its C++ type, and its default as `describe` spells it, written as a C++ value.
@@ -393,11 +410,12 @@ def includes(entries: SglEntries) -> list[str]:
     if arrays:
         out.append("<clean-core/container/fixed_array.hh>")
     types |= {element for element, _ in arrays}
-    if types & {"int", "uint", "atomic[int]", "atomic[uint]", "short", "ushort"}:
+    if types & ({"int", "uint", "atomic[int]", "atomic[uint]", "short", "ushort"} | WIDE_INTEGERS):
         out.append("<clean-core/fwd.hh>")
     if types & HALF_TYPES:
         out.append("<typed-geometry/scalar/half_float.hh>")
-    if types & ({"float2", "float3", "vec3", "float4", "int2", "int3", "int4", "uint2", "uint3", "uint4"} | SIXTEEN_BIT_VECTORS):
+    plain_vectors = {"float2", "float3", "vec3", "float4", "int2", "int3", "int4", "uint2", "uint3", "uint4"}
+    if types & (plain_vectors | SIXTEEN_BIT_VECTORS | WIDE_VECTORS):
         out.append("<typed-geometry/linalg/vec.hh>")
     if any(m["kind"] == "sampler" for _, b in entries.bindings for m in b["members"]):
         out.append("<shaped-graphics/binding/sampler.hh>")

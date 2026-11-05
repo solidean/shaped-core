@@ -422,8 +422,8 @@ struct let_simplifier
             for_each_operand(e(), x, [&](flat_expr_id operand) { result = result && is_stable(operand, depth + 1); });
             return result;
         };
-        if (x.node.is<flat_literal>() || x.node.is<flat_int_literal>() || x.node.is<flat_bool_literal>()
-            || x.node.is<flat_enum_value>() || x.node.is<flat_file_sampler>())
+        if (x.node.is<flat_literal>() || x.node.is<flat_int_literal>() || x.node.is<flat_wide_literal>()
+            || x.node.is<flat_bool_literal>() || x.node.is<flat_enum_value>() || x.node.is<flat_file_sampler>())
             return true;
         if (auto const* const ref = x.node.try_as<flat_local_ref>())
             return is_fixed(canonical(ref->local));
@@ -468,6 +468,7 @@ struct let_simplifier
         auto h = cc::make_hash(u64(index_of(x.type)), u64(x.node.index()));
         x.node.visit([&](flat_literal const& n) { h = cc::make_hash(h, cc::bit_cast<u64>(n.value)); },
                      [&](flat_int_literal const& n) { h = cc::make_hash(h, u64(u32(n.value)), n.is_unsigned); },
+                     [&](flat_wide_literal const& n) { h = cc::make_hash(h, n.bits); },
                      [&](flat_bool_literal const& n) { h = cc::make_hash(h, n.value); },
                      [&](flat_enum_value const& n) { h = cc::make_hash(h, n.case_index); },
                      [&](flat_local_ref const& n) { h = cc::make_hash(h, u64(index_of(canonical(n.local)))); },
@@ -509,6 +510,7 @@ struct let_simplifier
             [&](flat_literal const& n)
             { equal = cc::bit_cast<u64>(n.value) == cc::bit_cast<u64>(y.node.as<flat_literal>().value); },
             [&](flat_int_literal const& n) { equal = n == y.node.as<flat_int_literal>(); },
+            [&](flat_wide_literal const& n) { equal = n == y.node.as<flat_wide_literal>(); },
             [&](flat_bool_literal const& n) { equal = n == y.node.as<flat_bool_literal>(); },
             [&](flat_enum_value const& n) { equal = n == y.node.as<flat_enum_value>(); }, [&](flat_local_ref const& n)
             { equal = canonical(n.local) == canonical(y.node.as<flat_local_ref>().local); },

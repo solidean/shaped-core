@@ -948,13 +948,20 @@ type_id checker::resolve_overload(function_scope& scope,
                           spelling));
         return error_type;
     }
-    // CHK-270: a shift by a literal count outside the bits of an int can only be a mistake, as WGSL has it
+    // CHK-270: a shift by a literal count outside the bits of an int can only be a mistake, as WGSL has it, and
+    // CHK-452: of a long or a ulong, outside its 64 bits
+    auto const shift_bits = [&]
+    {
+        auto const* const record = out.builtin_type_of(out.functions[chosen_symbol.info].result);
+        return record != nullptr && is_64_bit(record->leaf_kind) ? i64(64) : i64(32);
+    };
     if ((spelling == "operator <<" || spelling == "operator >>") && arguments.numbers.size() == 2
         && arguments.numbers[1].is_number && arguments.numbers[1].is_integer
-        && (arguments.numbers[1].integer < 0 || arguments.numbers[1].integer > 31))
+        && (arguments.numbers[1].integer < 0 || arguments.numbers[1].integer >= shift_bits()))
     {
         report(diagnostic_kind::shift_out_of_range, file, where,
-               cc::format("a shift by {} moves every bit out of 32; a count is 0 to 31", arguments.numbers[1].integer));
+               cc::format("a shift by {} moves every bit out of {}; a count is 0 to {}", arguments.numbers[1].integer,
+                          shift_bits(), shift_bits() - 1));
         return error_type;
     }
     // CHK-313: `/` and `%` are the operators whose integer and float answers differ, so over integer literals alone

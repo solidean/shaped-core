@@ -145,9 +145,16 @@ feature_set checker::features_of_type(type_id type) const
     switch (t.kind)
     {
     case type_kind::array:
-    case type_kind::atomic:
     case type_kind::buffer:
         return features_of_type(t.element);
+    // CHK-296: a 64-bit atomic needs its integer's feature and an atomic's
+    case type_kind::atomic:
+    {
+        auto result = features_of_type(t.element);
+        if (auto const* const record = out.builtin_type_of(t.element); record != nullptr && is_64_bit(record->leaf_kind))
+            result |= feature::shader_int64_atomics;
+        return result;
+    }
     case type_kind::structure:
     {
         auto result = feature_set();
@@ -160,19 +167,39 @@ feature_set checker::features_of_type(type_id type) const
     }
 }
 
-cc::string checker::sixteen_bit_path(type_id type) const
+cc::string checker::sized_value_path(type_id type, i32 bits) const
 {
     if (type == checked_module::error_type)
         return {};
     if (auto const* const record = out.builtin_type_of(type))
-        return is_16_bit(record->leaf_kind) ? cc::format(": {}", out.name_of(type)) : cc::string();
+        return (bits == 16 ? is_16_bit(record->leaf_kind) : is_64_bit(record->leaf_kind))
+                 ? cc::format(": {}", out.name_of(type))
+                 : cc::string();
     auto const& t = out.at(type);
     if (t.kind == type_kind::array)
-        return sixteen_bit_path(t.element);
+        return sized_value_path(t.element, bits);
     if (t.kind != type_kind::structure)
         return {};
     for (auto const& m : out.at(t.members))
-        if (auto inner = sixteen_bit_path(m.type); !inner.empty())
+        if (auto inner = sized_value_path(m.type, bits); !inner.empty())
+            return cc::format(".{}{}", m.name, inner);
+    return {};
+}
+
+cc::string checker::wide_vector_path(type_id type) const
+{
+    if (type == checked_module::error_type)
+        return {};
+    if (auto const* const record = out.builtin_type_of(type))
+        return is_64_bit(record->leaf_kind) && record->leaf_count >= 3 ? cc::format(": {}", out.name_of(type))
+                                                                       : cc::string();
+    auto const& t = out.at(type);
+    if (t.kind == type_kind::array)
+        return wide_vector_path(t.element);
+    if (t.kind != type_kind::structure)
+        return {};
+    for (auto const& m : out.at(t.members))
+        if (auto inner = wide_vector_path(m.type); !inner.empty())
             return cc::format(".{}{}", m.name, inner);
     return {};
 }
@@ -186,8 +213,10 @@ void checker::judge_edge_16_bit(i32 file, source_span where, type_id type)
     if (type == checked_module::error_type || out.builtin_type_of(type) != nullptr
         || out.at(type).kind != type_kind::structure)
         return;
-    if (auto const found = sixteen_bit_path(type); !found.empty())
-        unsupported(file, where, cc::format("a 16-bit value crossing a stage edge, in {}{}", out.name_of(type), found));
+    for (auto const bits : {16, 64})
+        if (auto const found = sized_value_path(type, bits); !found.empty())
+            unsupported(file, where,
+                        cc::format("a {}-bit value crossing a stage edge, in {}{}", bits, out.name_of(type), found));
 }
 
 checker::local_only_found checker::local_only_path(type_id type, bool in_memory, bool in_link) const

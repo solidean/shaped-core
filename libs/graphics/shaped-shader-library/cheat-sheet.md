@@ -405,6 +405,7 @@ auto const items = ctx.persistent.create_buffer_from_data(cc::vector<shaders::co
 //   under `@padding(.none)` it is plain tg::mat3f, 36 bytes.
 // SGL `bool32` -> slib::gpu_bool (gpu_bool.hh): a bool as one 32-bit lane; a plain bool assigns into it.
 // SGL `half` -> tg::f16, `short`/`ushort` -> cc::i16/cc::u16, their vectors tg::vec<N, T>; a 2-byte gap is `cc::u16 _padN`.
+// SGL `long`/`ulong` -> cc::i64/cc::u64, `double` -> double, their vectors tg::vec<N, T>.
 // within one file a name is generated once, so a binding named like the file's entry point type (`main_t`) or options
 //   struct (`options`) is a generator error.
 // a module's types live in NS::<module> instead, whichever of its files declares them, reached as

@@ -121,8 +121,10 @@ INVOCABLE_TEST("sgl corpus - a file checks clean, passes its tests, and writes e
     CHECK(texts.value().size() == tested.entry_points.size() * isize(sgl::emit::all_targets().size()));
     for (auto const& e : texts.value())
     {
-        // EMIT-109: WebGPU has some features on no device, and an entry point that requires one is refused there alone
-        if (e.target == sgl::emit::target::wgsl && e.text.has_error() && is_lacking_feature(e.text.error()))
+        // EMIT-109 and EMIT-192: WebGPU and Metal have some features on no device, and an entry point that requires one
+        // is refused there alone
+        if ((e.target == sgl::emit::target::wgsl || e.target == sgl::emit::target::msl) && e.text.has_error()
+            && is_lacking_feature(e.text.error()))
             continue;
         CHECK(e.text.has_value()).dump("entry point", e.entry_point).dump("target", sgl::emit::to_string(e.target));
         if (e.text.has_error())

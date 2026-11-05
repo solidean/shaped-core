@@ -177,6 +177,13 @@ cc::string_view scalar_spelling(builtins::type_record const& record, emit::targe
         return is_hlsl(t) ? "int16_t" : "short";
     case value_kind::scalar_ushort:
         return is_hlsl(t) ? "uint16_t" : "ushort";
+    // WGSL has no 64-bit scalar, so a long never reaches a WGSL form either (EMIT-109)
+    case value_kind::scalar_long:
+        return is_hlsl(t) ? "int64_t" : "long";
+    case value_kind::scalar_ulong:
+        return is_hlsl(t) ? "uint64_t" : "ulong";
+    case value_kind::scalar_double:
+        return "double";
     default:
         return is_wgsl ? "f32" : "float";
     }

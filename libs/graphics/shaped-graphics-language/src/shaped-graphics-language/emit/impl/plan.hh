@@ -386,7 +386,8 @@ void plan_memory_accesses(plan& p);
 /// Whether member `member` of `object_type` is an array of 3-vectors its target holds as 4-vectors (EMIT-169).
 [[nodiscard]] bool holds_widened_array(plan const& p, check::type_id object_type, isize member);
 
-/// The prelude's 4-vector of the scalar of `element`, `float4` for a `float2`, which holds one element per row.
+/// The prelude's vector of one 16-byte row of the scalar of `element`, `float4` for a `float2` and `long2` for a
+/// `long`, which holds one element per row.
 [[nodiscard]] cc::string_view row_vector_of(plan const& p, check::type_id element);
 
 /// `members` must belong to a binding that passed `validate_binding`.

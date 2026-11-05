@@ -24,6 +24,11 @@ A listing here is the dump of a flat tree, shortened: a label is `$name`, and a 
 * **EVAL-96** A `half` is a 16-bit IEEE number, and a `short` and a `ushort` are 16 bits whose arithmetic wraps (CHK-381).
   An operation of them computes as its 32-bit family does and rounds its result once: a half to nearest, ties to even, and an integer to its low 16 bits.
   So `+`, `-`, `*`, `/` and `sqrt` of halves are exactly binary16's own, and a builtin of several steps, such as `mix` or `dot`, rounds once where a GPU may round each step.
+* **EVAL-104** A `long` and a `ulong` are 64 bits whose arithmetic wraps, and a `double` is a 64-bit IEEE number, each operation rounded once to nearest, ties to even (CHK-450).
+  Their bits work as EVAL-86 says of 32, a shift using the low six bits of its count.
+  An integer `/` and `%` of them have no value where EVAL-84 says so of an `int`: a zero divisor, and the most negative long divided by -1.
+  A conversion that has a 64-bit side converts the value exactly where the other side holds it: an `int` sign-extends, a `uint` zero-extends, and a `long` to an `int` keeps its low 32 bits.
+  A double to a float rounds once; a float to a double is exact.
 * **EVAL-83** An integer `/` truncates toward zero, and `%` is what it leaves, with the sign of its left operand: `-7 / 2` is `-3` and `-7 % 3` is `-1`.
   A float `%` is `a - b * trunc(a / b)`, with the sign of `a` the same way.
 * **EVAL-86** `&`, `|`, `^` and `~` work on the 32 bits of an `int` or a `uint`, componentwise over their vectors.

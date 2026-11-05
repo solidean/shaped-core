@@ -8,6 +8,7 @@ so `ship` is the only command that pushes.
 The gate is the project's own `dev.py check`, whatever registry the project wired, so its extra roots already cover the submodules' prose and links.
 A push the remote rejected because it moved merges again and re-runs the static gates on top of what came in, up to three rounds;
 the tests ran on this change already, and what came in was gated by whoever pushed it.
+A submodule's push is retried the same way, its own static gate re-run and its pointer bumped again, within the same rounds.
 """
 
 from __future__ import annotations
@@ -169,6 +170,25 @@ def _gate(ctx: Context, *, tests: bool) -> None:
         ctx.die("ship: the tests failed; nothing was pushed (the bump commit, if any, stays local)")
 
 
+def _gate_submodule(ctx: Context, s: lib.Submodule, *, tests: bool) -> None:
+    """A submodule's own check, where it has a driver of its own: the static gates, then the tests where asked."""
+    repo = ctx.root / s.path
+    if not (repo / "dev.py").is_file():
+        return
+    _say(f"gating {s.path} with its own check")
+    if subprocess.run(["uv", "run", "dev.py", "check", "--fix", "--no-test"], cwd=str(repo)).returncode != 0:
+        ctx.die(f"ship: {s.path}'s own gate failed; nothing was pushed")
+    if dirty := _dirty(repo):
+        ctx.die(_changed_during_gate(dirty, f"commit them in {s.path} and ship again", f"{s.path}'s "))
+    if tests and subprocess.run(["uv", "run", "dev.py", "check", "test"], cwd=str(repo)).returncode != 0:
+        ctx.die(f"ship: {s.path}'s own tests failed; nothing was pushed")
+
+
+def _is_rejected(text: str) -> bool:
+    """Whether a failed push failed because the remote moved, which a merge answers, rather than for a reason it does not."""
+    return "fetch first" in text or "non-fast-forward" in text or "rejected" in text
+
+
 def run(args: argparse.Namespace, ctx: Context) -> None:
     branch = _branch_of(ctx.root)
     if branch is None:
@@ -211,16 +231,7 @@ def run(args: argparse.Namespace, ctx: Context) -> None:
 
     # A submodule with a driver of its own has a gate of its own, which its rules require before its push; the parent's gate does not run it.
     for s in shipping:
-        repo = ctx.root / s.path
-        if not (repo / "dev.py").is_file():
-            continue
-        _say(f"gating {s.path} with its own check")
-        if subprocess.run(["uv", "run", "dev.py", "check", "--fix", "--no-test"], cwd=str(repo)).returncode != 0:
-            ctx.die(f"ship: {s.path}'s own gate failed; nothing was pushed")
-        if dirty := _dirty(repo):
-            ctx.die(_changed_during_gate(dirty, f"commit them in {s.path} and ship again", f"{s.path}'s "))
-        if subprocess.run(["uv", "run", "dev.py", "check", "test"], cwd=str(repo)).returncode != 0:
-            ctx.die(f"ship: {s.path}'s own tests failed; nothing was pushed")
+        _gate_submodule(ctx, s, tests=True)
 
     _bump(ctx, bumping)
     if args.closes:
@@ -230,12 +241,23 @@ def run(args: argparse.Namespace, ctx: Context) -> None:
         # A later round follows a merge the remote forced: the static gates see what it broke, and the tests ran on this change already.
         _gate(ctx, tests=round_no == 1)
         # Submodules first, so the pointers the parent pushes always name commits their remotes have.
-        for s in shipping:
+        # One whose remote moved merges what came in, gates it statically and is bumped again, and the round starts over.
+        moved = None
+        for s in list(shipping):
             pushed = _git(ctx.root / s.path, "push", "origin", f"HEAD:{s.branch}")
             if pushed.returncode != 0:
-                ctx.die(f"ship: pushing {s.path} failed; its remote moved, so ship again to merge it:\n{pushed.stderr.strip()}")
+                if not _is_rejected(pushed.stdout + pushed.stderr):
+                    ctx.die(f"ship: pushing {s.path} failed:\n{pushed.stderr.strip()}")
+                moved = s
+                break
             _say(f"pushed {s.path} to origin/{s.branch}")
-        shipping = []
+            shipping.remove(s)
+        if moved is not None:
+            _say(f"origin/{moved.branch} of {moved.path} moved during the gate (round {round_no}); merging it and gating again")
+            _merge_upstream(ctx, ctx.root / moved.path, moved.branch, moved.path)
+            _gate_submodule(ctx, moved, tests=False)
+            _bump(ctx, [moved])
+            continue
         # Every pointer the parent's new commits record has to be fetchable, or the push breaks the next recursive pull.
         if missing := _pointers_off_remote(ctx, branch, subs):
             ctx.die("ship: these submodule pointers name commits no remote branch holds; push them, or bump to ones it does, "
@@ -245,9 +267,9 @@ def run(args: argparse.Namespace, ctx: Context) -> None:
             dev.ui.write_line(console.green(f"ship: pushed {branch} to origin"))
             return
         text = pushed.stdout + pushed.stderr
-        if "fetch first" not in text and "non-fast-forward" not in text and "rejected" not in text:
+        if not _is_rejected(text):
             ctx.die(f"ship: git push failed:\n{text.strip()}")
         _say(f"origin/{branch} moved during the gate (round {round_no}); merging it and gating again")
         _merge_upstream(ctx, ctx.root, branch, "this repository")
         _dev(ctx, "submodules", "sync")
-    ctx.die(f"ship: origin/{branch} moved {_ROUNDS} times while gating; it is busy, ship again in a moment")
+    ctx.die(f"ship: a remote moved {_ROUNDS} times while gating; it is busy, ship again in a moment")

@@ -582,3 +582,52 @@ TEST("sgl guards - every target writes the define profile, before a barrier too"
         CHECK(!text.value().text.contains("aborted")).dump("text", text.value().text);
     }
 }
+
+TEST("sgl guards - an atomic whose result a let binds runs only where the flag is clear (LEGAL-67)")
+{
+    constexpr auto source = "binding work:\n"
+                            "    values: mut buffer[int]\n"
+                            "    hits: mut buffer[atomic[uint]]\n"
+                            "\n"
+                            "@compute(64) fun cs(@thread_id id: int3){work}:\n"
+                            "    let q = 7 / id.x\n"
+                            "    let slot = work.hits[0].add(1u)\n"
+                            "    workgroup_barrier()\n"
+                            "    work.values[slot] = q\n";
+    auto const dump = guarded_dump(source);
+    // the atomic stands in the else of the flag's test, and the then gives the let 0
+    CHECK(dump.contains("(assign (local slot : uint) = (lit 0u : uint))")).dump("core", dump);
+    CHECK(dump.contains("(assign (local slot : uint) = (call:effect add")).dump("core", dump);
+}
+
+TEST("sgl guards - a matrix row or column outside the matrix ends the invocation, and define reads column 0")
+{
+    // p.b is 0.75, so i is 6, past a mat4's 4 columns
+    constexpr auto source = "@pixel fun ps(p: frag) -> target:\n"
+                            "    let m = mat4(float4(1.0, 0.0, 0.0, 0.0), float4(0.0, 1.0, 0.0, 0.0), "
+                            "float4(0.0, 0.0, 1.0, 0.0), float4(0.0, 0.0, 0.0, 1.0))\n"
+                            "    let i = int(p.b * 8.0)\n"
+                            "    return {\n"
+                            "        color = m.column(i)\n"
+                            "    }\n";
+    auto const aborted = run_both(source, undefined_guard::abort);
+    CHECK(aborted.structured.status == run_status::program_error);
+    CHECK(aborted.guarded.status == run_status::discarded).dump("core", aborted.dump);
+    auto const defined = run_both(source, undefined_guard::define);
+    REQUIRE(defined.guarded.status == run_status::ok).dump("core", defined.dump);
+    CHECK(defined.guarded.result.leaves[0].as_float() == 1.0f);
+    CHECK(defined.guarded.result.leaves[1].as_float() == 0.0f);
+}
+
+TEST("sgl guards - a vector clamped between two scalars is guarded lane by lane")
+{
+    // p.a is 0.25 and p.b 0.75: the bounds cross, so the clamp has no value
+    auto const r = run_both("@pixel fun ps(p: frag) -> target:\n"
+                            "    let v = float3(p.a, p.b, 0.5)\n"
+                            "    return {\n"
+                            "        color = float4(clamp(v, p.b, p.a).x, 0.0, 0.0, 1.0)\n"
+                            "    }\n",
+                            undefined_guard::abort);
+    CHECK(r.structured.status == run_status::program_error);
+    CHECK(r.guarded.status == run_status::discarded).dump("core", r.dump);
+}

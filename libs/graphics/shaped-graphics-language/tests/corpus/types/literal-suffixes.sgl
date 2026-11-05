@@ -45,9 +45,12 @@ test 1u16 == 1u
 @expect(error = "literal-not-representable")
 test 65536u16 as uint == 0u
 
+// a width of 64 names the 64-bit types (CHK-450)
+test (1u64 as uint) == 1u and (-2i64 as int) == -2 and (0.5f64 as float) == 0.5
+
 // no other width names a type
 @expect(error = "unsupported-yet")
-test 1i64 == 1
+test 1i8 == 1
 
 // every target writes the literal as its type's own
 binding counts:

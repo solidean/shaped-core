@@ -136,14 +136,19 @@ struct constant_pass
                 return judged::sound;
             for (auto const& leaf : operand.result.leaves)
             {
-                if (record->judged_last == builtins::judged_operand::shift_count && leaf.bits > 31u)
+                // a 64-bit operand counts to 63 (CHK-452)
+                auto const width = is_64_bit(leaf.kind) ? 64u : 32u;
+                if (record->judged_last == builtins::judged_operand::shift_count && leaf.wide_bits() >= width)
                 {
                     report(id, diagnostic_kind::shift_out_of_range,
-                           cc::format("shifts by {}, which moves every bit out of 32; a constant count is 0 to 31",
-                                      leaf.kind == value_kind::scalar_int ? i64(leaf.as_int()) : i64(leaf.bits)));
+                           cc::format("shifts by {}, which moves every bit out of {}; a constant count is 0 to {}",
+                                      leaf.kind == value_kind::scalar_int    ? i64(leaf.as_int())
+                                      : leaf.kind == value_kind::scalar_long ? leaf.as_long()
+                                                                             : i64(leaf.wide_bits()),
+                                      width, width - 1));
                     return judged::reported;
                 }
-                if (record->judged_last == builtins::judged_operand::divisor && leaf.bits == 0)
+                if (record->judged_last == builtins::judged_operand::divisor && leaf.wide_bits() == 0)
                 {
                     report(id, diagnostic_kind::constant_without_value,
                            "divides an integer by a constant zero, which no target gives a value");
