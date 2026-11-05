@@ -73,6 +73,10 @@ struct sg::rendering_info
     cc::optional<sg::viewport> viewport;
     cc::optional<tg::aabb2i> scissor; ///< pixel rect; unset => full target extent
 
+    /// The views each draw renders, view `i` into layer `i` of every target, as its pipeline's `view_count` says.
+    /// More than 1 needs every target's view to span exactly that many layers of an array.
+    int view_count = 1;
+
     /// The name of the target set these color targets are, as a generated SGL render target states it; empty for none.
     /// Binding a pipeline built for another set is refused.
     /// The command list copies the name, so it need not outlive the call.

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <clean-core/container/vector.hh>
+#include <clean-core/error/optional.hh>
 #include <clean-core/thread/atomic.hh>
 #include <clean-core/thread/mutex.hh>
 #include <shaped-graphics/backends/vulkan/fwd.hh>
@@ -29,7 +30,8 @@ public:
                    sg::texture_description const& desc,
                    VkImage image,
                    VkDeviceMemory memory,
-                   bool owns_image = true)
+                   bool owns_image = true,
+                   cc::optional<sg::texture_layout> current_layout = {})
       : sg::raw_texture(desc),
         _ctx(ctx),
         _live(ctx_base_of(ctx)),
@@ -37,8 +39,13 @@ public:
         _image(image),
         _memory(memory),
         _owns_image(owns_image),
-        _access(vulkan_texture_access(subresource_extent_of(desc), desc.resolved_initial_layout()))
+        _access(
+            vulkan_texture_access(subresource_extent_of(desc), current_layout.value_or(desc.resolved_initial_layout())))
     {
+        // An image already in a layout owes no transition out of UNDEFINED.
+        if (current_layout.has_value())
+            _access.lock([](vulkan_texture_access& a) { a.mark_in_resting_layout(); });
+
         // A timeline only where a transfer is even possible — see the same rule on vulkan_buffer.
         if (desc.usage.has(sg::texture_usage::copy_dst))
             _upload_group = ctx_acquire_completion_group(ctx);

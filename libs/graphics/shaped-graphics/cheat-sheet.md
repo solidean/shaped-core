@@ -111,6 +111,9 @@ ctx.supports(sg::feature::ray_query)               // bool — THE capability qu
                                                    //     compare-exchange in a pixel stage needs it; false on webgpu)
                                                    //   | vertex_layer_output (a vertex stage picks the layer of an array target,
                                                    //     SGL's @layer; dx12 and vulkan ask the device, true on metal, false on webgpu)
+                                                   //   | view_instancing (one draw renders view_count views, view i into layer i;
+                                                   //     SGL's @view_index; dx12's ViewInstancingTier, vulkan's multiview,
+                                                   //     false on metal (amplification not wired yet) and webgpu)
                                                    //   | float_atomic_add (a float atomic add in one instruction; vulkan with
                                                    //     VK_EXT_shader_atomic_float, true on metal, false on dx12 and webgpu;
                                                    //     slib asks SGL for the native add where it is true; no `require`)
@@ -240,6 +243,9 @@ sg::create_vulkan_context(vulkan_config = {})      // -> cc::result<context_hand
 // vulkan::required_api_version                    // the version every context is created at — what a runtime's version range is checked against
 // vk_ctx.instance() / physical_device() / device() / queue() / queue_family_index()  // the native objects, for another API to name
 //   GOTCHA: the queue is externally synchronized — anything else submitting to it (an XR runtime) holds vk_ctx.queue_guard()
+vk_ctx.wrap_vulkan_texture(VkImage, desc, layout)  // -> result<vulkan_texture_handle> over a foreign image (an XR swapchain image)
+//   `layout` is where the image IS now (undefined = sg moves it out of UNDEFINED); sg never destroys the image;
+//   hand it back with cmd.ensure_layout(tex, layout) — sg leaves it where the last list did; desc is trusted, not checked
 #include <shaped-graphics/backends/webgpu/webgpu_context.hh>   // wasm + SC_WASM_WEBGPU only
 co_await sg::request_webgpu_context(webgpu_config = {})  // -> context_handle; any thread (it requests on main); FAILS without WebGPU / adapter
 sg::create_webgpu_context(WGPUDevice, webgpu_config = {}) // -> cc::result<context_handle> over a device someone else requested; main only
@@ -251,6 +257,9 @@ sg::create_dx12_context(dx12_config = {})          // -> cc::result<context_hand
 // dx12_config { adapter_luid  (optional<u64>; overrides `adapter`, fails rather than falling back; SC_DX12_ADAPTER still hides it)
 //               minimum_feature_level=11_0  (a runtime may demand more, never less) }
 // dx12_ctx.device() / queue()                     // ID3D12Device* / ID3D12CommandQueue*, owned by the context
+dx12_ctx.wrap_dx12_texture(ID3D12Resource*, desc)  // -> result<dx12_texture_handle>; refuses a shape or flag mismatch
+//   GOTCHA: only a resource in COMMON at every submit — sg's enhanced barriers meet a legacy state nowhere else, so an
+//   OpenXR D3D12 image (legacy RENDER_TARGET) is filled from a dx12_native_scope with legacy ResourceBarrier calls instead
 // GOTCHA: activate_global_debug_layer is PROCESS-wide and one-way, unlike vulkan's per-instance enable_validation_layers.
 //   false = 'this context does not ask for it', NOT 'this context is unvalidated' — nothing ever deactivates it.
 //   it must be activated before the process's FIRST device: a later activation is refused, because performing it
@@ -368,7 +377,8 @@ auto pass = cmd.raster.render_to({.color_targets={rtv.cleared(tg::vec4f(1,0,0,1)
 // pass.command_list() -> command_list& (for non-raster ops: .context(), .upload) | pass.render_target_size() -> tg::vec2i (targets' shared extent)
 //   pass.color_formats() -> span<pixel_format const> | pass.depth_format() -> optional<pixel_format>. The raster draw calls are also on `pass`.
 // view builders: view.cleared(color/depth[,stencil]) | view.preserved() | view.discarded() -> color_target / depth_stencil_target
-// rendering_info { fixed_vector<color_target,max_color_targets> color_targets; optional<depth_stencil_target>; optional<viewport>; optional<tg::aabb2i> scissor; string_view target_set }
+// rendering_info { fixed_vector<color_target,max_color_targets> color_targets; optional<depth_stencil_target>; optional<viewport>; optional<tg::aabb2i> scissor; int view_count=1; string_view target_set }
+//   view_count > 1: every target's view spans exactly that many array layers, and the bound pipeline's view_count matches (asserted)
 //   target_set: a generated SGL target's name; bind_pipeline asserts a pipeline naming another set. Empty on either side is unchecked.
 //   viewport/scissor unset => full target extent. sg::viewport { tg::pos2f offset; tg::vec2f size; float min_depth=0, max_depth=1 }
 cmd.raster.manual.begin_rendering(info) / .end_rendering()   // void — same, by hand (must balance); prefer render_to
@@ -832,7 +842,9 @@ d.withdraw();                                            // ends it now; destroy
 sg::raster_pipeline_description   // { pipeline_layout_handle layout; compiled_shader vertex_shader; optional<compiled_shader> fragment_shader;
                                   //   optional<compiled_shader> tessellation_control_shader/tessellation_evaluation_shader (both-or-neither, need patch_list); optional<compiled_shader> geometry_shader;
                                   //   vertex_input_layout vertex_input; primitive_topology topology=triangle_list; int patch_control_points=0 (1..32, patch_list only); rasterization_state; depth_stencil_state;
-                                  //   small_vector<color_target_state,8> color_targets; pixel_format depth_stencil_format=undefined; int sample_count=1; pinned_data cached_pipeline={}; string target_set }
+                                  //   small_vector<color_target_state,8> color_targets; pixel_format depth_stencil_format=undefined; int sample_count=1;
+                                  //   int view_count=1 (>1 needs view_instancing: view i into layer i, SGL's @view_index; dx12 caps it at 4);
+                                  //   pinned_data cached_pipeline={}; string target_set }
                                   //   depth/stencil state with no depth_stencil_format warns at creation: it would draw without either
                                   //   creation refuses a stage whose reflection does not fit `layout` (sg::describe_layout_misfit, binding/layout_fit.hh),
                                   //   and a fragment shader's color_output_count (at most color_targets; the rest need an empty write_mask) and target_set; an empty target_set takes the shader's

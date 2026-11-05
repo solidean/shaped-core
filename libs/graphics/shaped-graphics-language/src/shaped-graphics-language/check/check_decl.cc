@@ -2607,6 +2607,14 @@ cc::span<stage_input_info const> sgl::check::stage_inputs()
          .type = "int",
          .feature = i32(feature::subgroups),
          .needs_feature_everywhere = true},
+        // CHK-437: one draw of several views, which WebGPU has on no device
+        {.input = stage_input::view_index,
+         .name = "view_index",
+         .in_stage = stage::vertex,
+         .also_in = u16(stage_bit(stage::pixel)),
+         .type = "int",
+         .feature = i32(feature::view_instancing),
+         .needs_feature_everywhere = true},
     };
     return k_inputs;
 }

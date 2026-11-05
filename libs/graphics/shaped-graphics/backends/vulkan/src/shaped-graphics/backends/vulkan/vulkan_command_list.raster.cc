@@ -147,6 +147,8 @@ void vulkan_command_list::raster_begin_rendering(sg::rendering_info const& info)
         layers = info.depth_stencil_target.value().view.range().array_range;
     }
     _rendering_layer_count = u32(layers.end - layers.start);
+    // Several views replace the layer count: view `i` renders into layer `i` of every attachment.
+    _rendering_view_mask = info.view_count > 1 ? (1u << u32(info.view_count)) - 1u : 0u;
 
     _rendering_area = {.offset = {0, 0}, .extent = {u32(extent_w), u32(extent_h)}};
 
@@ -154,6 +156,7 @@ void vulkan_command_list::raster_begin_rendering(sg::rendering_info const& info)
         .sType = VK_STRUCTURE_TYPE_RENDERING_INFO,
         .renderArea = _rendering_area,
         .layerCount = _rendering_layer_count,
+        .viewMask = _rendering_view_mask,
         .colorAttachmentCount = u32(color_attachments.size()),
         .pColorAttachments = color_attachments.empty() ? nullptr : color_attachments.data(),
         .pDepthAttachment = _rendering_has_depth ? &depth_attachment : nullptr,
@@ -192,6 +195,7 @@ void vulkan_command_list::reopen_rendering()
         .sType = VK_STRUCTURE_TYPE_RENDERING_INFO,
         .renderArea = _rendering_area,
         .layerCount = _rendering_layer_count,
+        .viewMask = _rendering_view_mask,
         .colorAttachmentCount = u32(_rendering_color_attachments.size()),
         .pColorAttachments = _rendering_color_attachments.empty() ? nullptr : _rendering_color_attachments.data(),
         .pDepthAttachment = _rendering_has_depth ? &_rendering_depth_attachment : nullptr,

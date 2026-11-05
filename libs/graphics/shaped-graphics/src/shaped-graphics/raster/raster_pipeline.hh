@@ -65,6 +65,11 @@ struct sg::raster_pipeline_description
     /// MSAA sample count of the targets (1 = no multisampling).
     int sample_count = 1;
 
+    /// The views one draw renders, view `i` into layer `i` of every target's view, which SGL's `@view_index` reads.
+    /// More than 1 needs sg::feature::view_instancing, and a rendering scope of the same `view_count` to draw in.
+    /// dx12 takes at most 4 views, vulkan its device's `maxMultiviewViewCount`.
+    int view_count = 1;
+
     /// The name of the target set these color targets are, as a generated SGL render target states it; empty for none.
     /// A pipeline that names one refuses to bind into a rendering that names another, even where the formats agree.
     cc::string target_set;

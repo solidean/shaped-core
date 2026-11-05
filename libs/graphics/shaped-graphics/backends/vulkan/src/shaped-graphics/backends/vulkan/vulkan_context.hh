@@ -369,6 +369,8 @@ public:
             return _float_specials;
         case sg::feature::float_denormals:
             return _float_denormals;
+        case sg::feature::view_instancing:
+            return _view_instancing;
         // SPIR-V's `Coherent` decoration is core, and storage-image atomics on r32 integer formats are required.
         // BaseInstance is the DrawParameters capability, which creation requires `shaderDrawParameters` for.
         case sg::feature::device_coherence:
@@ -488,6 +490,17 @@ public:
                                                                         VkBufferUsageFlags extra_usage = 0);
     [[nodiscard]] cc::result<vulkan_texture_handle> create_vulkan_texture(sg::texture_description const& desc,
                                                                           sg::allocation_info const& alloc);
+    /// An sg texture over an image someone else created, such as an XR runtime's swapchain image.
+    ///
+    /// `layout` is the layout the image is in when the first list using the texture runs, and sg tracks it from there;
+    /// `undefined` makes the first list transition it out of UNDEFINED, discarding its contents, as for any new texture.
+    /// Hand it back in the layout its owner expects with `cmd.ensure_layout`, since sg leaves it where the last list did.
+    /// The texture never destroys the image, so the image must outlive it and every list that used it.
+    /// Vulkan cannot be asked an image's shape, so `desc` must be the one it was created with; nothing checks it.
+    [[nodiscard]] cc::result<vulkan_texture_handle> wrap_vulkan_texture(VkImage image,
+                                                                        sg::texture_description const& desc,
+                                                                        sg::texture_layout layout);
+
     /// The VkImage a texture of `desc` is, created with no memory bound: what create_vulkan_texture binds, and what a heap asks requirements of.
     [[nodiscard]] cc::result<VkImage> create_vk_image(sg::texture_description const& desc);
     sg::submission_token submit_vulkan_command_list(std::unique_ptr<vulkan_command_list> cmd);
@@ -933,6 +946,8 @@ public:
     bool _shader_int16 = false;
     bool _subgroups = false;
     bool _vertex_layer_output = false;
+    /// `multiview`, enabled wherever the device has it.
+    bool _view_instancing = false;
     /// `VK_EXT_shader_atomic_float`, enabled with its buffer and shared float32 atomics and adds alike.
     bool _float_atomic_add = false;
     /// What a pipeline may require of its subgroups' size: all zero where `subgroupSizeControl` was not enabled.

@@ -55,6 +55,8 @@ enum class sgl::check::feature : sgl::u8
     float_specials,
     /// 32-bit floats that keep denormals, which vulkan asks of the device for an entry point at `@float(.ieee)`.
     float_denormals,
+    /// `@view_index` (CHK-437): one draw renders several views, which WebGPU has on no device.
+    view_instancing,
 };
 
 CC_FLAG_ENUM_INDEXED(sgl::check, feature, u32);
@@ -87,6 +89,7 @@ inline constexpr cc::string_view k_feature_names[] = {
     "opacity_micromap",            //
     "float_specials",              //
     "float_denormals",             //
+    "view_instancing",             //
 };
 inline constexpr isize k_feature_count = isize(sizeof(k_feature_names) / sizeof(k_feature_names[0]));
 
