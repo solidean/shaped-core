@@ -245,6 +245,39 @@ cc::optional<selected_physical_device> pick_physical_device(VkInstance instance,
     return best;
 }
 
+// The device a caller chose, with its graphics family, or nullopt where it chose none or one with no graphics queue.
+cc::optional<selected_physical_device> chosen_physical_device(VkPhysicalDevice device)
+{
+    u32 family = 0;
+    if (device == VK_NULL_HANDLE || !find_graphics_queue_family(device, family))
+        return {};
+    return selected_physical_device{.device = device, .queue_family = family};
+}
+
+// Appends each name of `extra` that `enabled` does not hold yet, terminated in place so `enabled` can point into it.
+// `extra` must not change while `enabled` is in use.
+// Returns the first name `available` refuses, or an empty view where every one was appended.
+template <class Available>
+cc::string_view append_extra_extensions(cc::vector<char const*>& enabled,
+                                        cc::vector<cc::string>& extra,
+                                        Available&& available)
+{
+    for (auto& name : extra)
+    {
+        auto const* const terminated = name.c_str_materialize();
+        auto already_enabled = false;
+        for (auto const* e : enabled)
+            if (cc::string_view(e) == cc::string_view(terminated))
+                already_enabled = true;
+        if (already_enabled)
+            continue;
+        if (!available(terminated))
+            return name;
+        enabled.push_back(terminated);
+    }
+    return {};
+}
+
 /// What vulkan says about the physical device that was picked.
 ///
 /// `driverVersion` is vendor-encoded and vulkan defines no portable decomposition, so it is recorded as the raw
@@ -260,6 +293,17 @@ sg::adapter_info describe_adapter(VkPhysicalDevice device)
     info.device_id = u32(props.deviceID);
     info.driver_version = cc::format("{}", props.driverVersion);
     info.is_software = props.deviceType == VK_PHYSICAL_DEVICE_TYPE_CPU;
+
+    auto ids = VkPhysicalDeviceIDProperties{.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ID_PROPERTIES};
+    auto props2 = VkPhysicalDeviceProperties2{.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2, .pNext = &ids};
+    vkGetPhysicalDeviceProperties2(device, &props2);
+    if (ids.deviceLUIDValid == VK_TRUE)
+    {
+        static_assert(VK_LUID_SIZE == sizeof(u64));
+        auto luid = u64(0);
+        cc::memcpy(&luid, ids.deviceLUID, sizeof(luid));
+        info.luid = luid;
+    }
 
     // Vulkan reports heaps rather than a board size, so the card's memory is the sum of the DEVICE_LOCAL ones.
     // On an integrated GPU every heap is host memory and the sum is 0, which is the honest answer there.
@@ -287,7 +331,7 @@ void destroy_debug_messenger(VkInstance instance, VkDebugUtilsMessengerEXT messe
 // The Vulkan version sg requires of a device, and the floor every feature below is core in.
 // Hardcoded rather than probed per capability: a branch taken on nobody's machine is a path nobody exercises,
 // so a device under the floor is refused at creation with one legible error instead of degrading silently.
-constexpr u32 k_required_api_version = VK_API_VERSION_1_3;
+constexpr u32 k_required_api_version = required_api_version;
 
 // Descriptor buffers back the whole bind path: a binding group is a range of plain memory a shader reads through a
 // bound address, which is what lets a staging group snapshot by copying bytes rather than re-writing every descriptor.
@@ -579,6 +623,14 @@ cc::result<context_handle> create_vulkan_context(backend::vulkan::vulkan_config 
     enable_platform_surface(sg::window_platform::wayland, VK_KHR_WAYLAND_SURFACE_EXTENSION_NAME);
 #endif
 
+    // Copies, since a name is handed to Vulkan as a terminated string and the config is const; they must outlive device creation.
+    auto extra_instance_extensions = config.extra_instance_extensions;
+    auto extra_device_extensions = config.extra_device_extensions;
+    if (auto const added = append_extra_extensions(extensions, extra_instance_extensions,
+                                                   [](char const* name) { return instance_extension_available(name); });
+        !added.empty())
+        return cc::error(cc::format("the Vulkan loader does not offer the requested instance extension {}", added));
+
     auto const dbg_info = make_debug_messenger_info();
 
     // Chained ahead of the messenger rather than instead of it, so sync-validation findings arrive through the same
@@ -608,7 +660,14 @@ cc::result<context_handle> create_vulkan_context(backend::vulkan::vulkan_config 
     };
 
     VkInstance instance = VK_NULL_HANDLE;
-    if (VkResult r = vkCreateInstance(&instance_info, nullptr, &instance); r != VK_SUCCESS)
+    if (config.create_instance)
+    {
+        if (VkResult r = config.create_instance(instance_info, instance); r != VK_SUCCESS)
+            return vulkan_error(r, "vulkan_config::create_instance failed");
+        if (instance == VK_NULL_HANDLE)
+            return cc::error("vulkan_config::create_instance reported success and created no instance");
+    }
+    else if (VkResult r = vkCreateInstance(&instance_info, nullptr, &instance); r != VK_SUCCESS)
         return vulkan_error(r, "vkCreateInstance failed");
 
     // The standalone messenger is created after the context below, so it can carry it as user data and a caller can
@@ -616,13 +675,16 @@ cc::result<context_handle> create_vulkan_context(backend::vulkan::vulkan_config 
     // Instance create/destroy messages are already covered by dbg_info on the instance's pNext.
     VkDebugUtilsMessengerEXT messenger = VK_NULL_HANDLE;
 
-    // Physical device selection: rank every device that exposes a graphics queue, keep the best.
-    auto const picked = pick_physical_device(instance, config.prefer_software_device);
+    // Physical device selection: rank every device that exposes a graphics queue, keep the best — or take the one the caller chose.
+    auto const picked = config.choose_physical_device ? chosen_physical_device(config.choose_physical_device(instance))
+                                                      : pick_physical_device(instance, config.prefer_software_device);
     if (!picked.has_value())
     {
         destroy_debug_messenger(instance, messenger);
         vkDestroyInstance(instance, nullptr);
-        return cc::error("no Vulkan device with a graphics queue found");
+        return cc::error(config.choose_physical_device
+                             ? "vulkan_config::choose_physical_device chose no device, or one without a graphics queue"
+                             : "no Vulkan device with a graphics queue found");
     }
     auto const best_device = picked.value().device;
     auto const best_family = picked.value().queue_family;
@@ -728,6 +790,15 @@ cc::result<context_handle> create_vulkan_context(backend::vulkan::vulkan_config 
     bool const maintenance5_supported = device_extensions_available(best_device, maintenance5_names);
     if (maintenance5_supported)
         device_extensions.push_back(VK_KHR_MAINTENANCE_5_EXTENSION_NAME);
+
+    if (auto const added = append_extra_extensions(device_extensions, extra_device_extensions,
+                                                   [&](char const* name)
+                                                   {
+                                                       char const* const names[] = {name};
+                                                       return device_extensions_available(best_device, names);
+                                                   });
+        !added.empty())
+        return cc::error(cc::format("the chosen Vulkan device does not offer the requested device extension {}", added));
 
     // Logical device with a single graphics queue.
     // Every feature is enabled up front, whether or not the milestone using it has landed: a feature costs nothing
@@ -913,10 +984,15 @@ cc::result<context_handle> create_vulkan_context(backend::vulkan::vulkan_config 
     auto const created = [&]
     {
         backend::vulkan::device_driver_barrier const barrier; // see vulkan_forward_waits.hh
+        if (config.create_device)
+            return config.create_device(best_device, device_info, device);
         return vkCreateDevice(best_device, &device_info, nullptr, &device);
     }();
     if (created != VK_SUCCESS)
-        return vulkan_error(created, "vkCreateDevice failed");
+        return vulkan_error(created,
+                            config.create_device ? "vulkan_config::create_device failed" : "vkCreateDevice failed");
+    if (device == VK_NULL_HANDLE)
+        return cc::error("vulkan_config::create_device reported success and created no device");
 
     VkQueue queue = VK_NULL_HANDLE;
     vkGetDeviceQueue(device, best_family, 0, &queue);

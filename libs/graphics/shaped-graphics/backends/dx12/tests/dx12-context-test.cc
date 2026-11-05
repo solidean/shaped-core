@@ -8,6 +8,8 @@
 #include <shaped-graphics/backends/dx12/dx12_context.hh>
 #include <shaped-graphics/backends/dx12/dx12_runtime.hh>
 
+using namespace cc::primitive_defines;
+
 // dx12 backend bring-up: a command list and buffers through the public sg::context API.
 // Part of the dx12 test binary (shaped-graphics-dx12-test), built only where the dx12 backend builds (Windows), so it never needs an #ifdef guard.
 // See libs/graphics/shaped-graphics/docs/concepts/backends.md for how backend tests are organized.
@@ -120,6 +122,47 @@ TEST("sg dx12 - SC_DX12_ADAPTER=hardware hides WARP from every request", exclusi
     }
     else
         CHECK(fallback.has_error());
+}
+
+// What an XR runtime names a GPU by, and the only way to put two APIs on one adapter.
+TEST("sg dx12 - a context created by LUID runs on that adapter, whatever `adapter` asks")
+{
+    auto const warp = dx12::as_test_context(
+        sg::create_dx12_context({.activate_global_debug_layer = true, .adapter = dx12::dx12_adapter::warp}));
+    if (warp.has_error())
+        SKIP("no WARP adapter");
+    REQUIRE(warp.value()->metrics.adapter().luid.has_value());
+    auto const luid = warp.value()->metrics.adapter().luid.value();
+
+    // make_test_context asks for hardware_or_warp, which the LUID overrides even where a GPU is there to take.
+    auto const by_luid = dx12::make_test_context({.adapter_luid = luid, .minimum_feature_level = D3D_FEATURE_LEVEL_12_0});
+    REQUIRE(by_luid.has_value());
+    CHECK(by_luid.value()->metrics.adapter().is_software);
+    CHECK(by_luid.value()->metrics.adapter().luid == luid);
+    CHECK(by_luid.value()->device() != nullptr);
+    CHECK(by_luid.value()->queue() != nullptr);
+}
+
+TEST("sg dx12 - a LUID no adapter has fails creation rather than falling back")
+{
+    auto const ctx = dx12::make_test_context({.adapter_luid = ~u64(0)});
+    REQUIRE(ctx.has_error());
+    CHECK(ctx.error().to_string().contains("LUID"));
+}
+
+// The variable is process-wide, so this runs beside nothing, like the two above it.
+TEST("sg dx12 - SC_DX12_ADAPTER hides the adapter a LUID names", exclusive())
+{
+    auto const warp = dx12::as_test_context(
+        sg::create_dx12_context({.activate_global_debug_layer = true, .adapter = dx12::dx12_adapter::warp}));
+    if (warp.has_error())
+        SKIP("no WARP adapter");
+    auto const luid = warp.value()->metrics.adapter().luid.value();
+
+    auto const pin = cc::scoped_environment_variable("SC_DX12_ADAPTER", "hardware");
+    auto const hidden = sg::create_dx12_context({.activate_global_debug_layer = true, .adapter_luid = luid});
+    REQUIRE(hidden.has_error());
+    CHECK(hidden.error().to_string().contains("SC_DX12_ADAPTER"));
 }
 
 // A context that withholds ray tracing answers as one on an adapter without DXR, on every spelling of the question.

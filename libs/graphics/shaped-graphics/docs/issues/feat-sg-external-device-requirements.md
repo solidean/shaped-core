@@ -25,3 +25,12 @@ An XR runtime chooses the GPU and the device features, so sg's backends must acc
 ## Known
 
 - The requirements are the primitive and shaped-xr creating the context is convenience on top (decided in `epic-xr`).
+- webgpu needs nothing new: `sg::create_webgpu_context(WGPUDevice, …)` already adopts a device someone else requested.
+
+## Progress (2026-11-05)
+
+- **dx12 is done and tested**: `dx12_config::adapter_luid` and `minimum_feature_level`, `dx12_context::device()` / `queue()`.
+- **`sg::adapter_info::luid`** is reported by dx12 and by vulkan, so a context on one API can name its GPU to the other, or to an XR runtime.
+- **vulkan is written and not yet compiled**: the development machine has no Vulkan SDK, so configure skips the backend.
+  `vulkan_config` gained the extra extensions and the `create_instance` / `choose_physical_device` / `create_device` hooks, and `vulkan_context` the native accessors.
+  `vulkan-external-device-test.cc` covers them; it runs once the SDK is installed.

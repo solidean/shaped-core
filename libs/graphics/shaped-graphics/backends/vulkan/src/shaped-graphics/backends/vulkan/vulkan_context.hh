@@ -1,8 +1,10 @@
 #pragma once
 
 #include <clean-core/common/assert.hh>
+#include <clean-core/container/vector.hh>
 #include <clean-core/error/optional.hh>
 #include <clean-core/function/unique_function.hh>
+#include <clean-core/string/string.hh>
 #include <clean-core/thread/mutex.hh>
 #include <shaped-graphics/backends/vulkan/fwd.hh>
 #include <shaped-graphics/backends/vulkan/vulkan_binding_group.hh>
@@ -92,7 +94,40 @@ struct sg::backend::vulkan::vulkan_config
     /// A bindless group takes its whole table per snapshot, so this must hold several of the largest one.
     isize descriptor_heap_bytes = isize(16) * 1024 * 1024;
     float descriptor_transient_fraction = 0.25f;
+
+    // How a context is created to a spec someone else dictates, such as an XR runtime's.
+    // Each is empty by default, and sg then decides alone.
+
+    /// Instance extensions enabled beside sg's own.
+    /// Creation fails naming the first one the loader does not offer.
+    cc::vector<cc::string> extra_instance_extensions;
+
+    /// Device extensions enabled beside sg's own.
+    /// Creation fails naming the first one the chosen device does not offer, rather than choosing another device.
+    cc::vector<cc::string> extra_device_extensions;
+
+    /// Creates the instance in place of `vkCreateInstance`, from the create info sg built.
+    /// For a runtime that adds what it needs and creates the instance itself, as OpenXR's `xrCreateVulkanInstanceKHR` does.
+    /// The instance it hands back in `out` is the context's from then on, and the context destroys it.
+    cc::unique_function<VkResult(VkInstanceCreateInfo const& info, VkInstance& out)> create_instance;
+
+    /// The physical device to use, chosen on the instance sg created, in place of sg's own ranking.
+    /// VK_NULL_HANDLE fails creation.
+    /// It must have a graphics queue family and meet sg's floor like any other device; a device that does not is refused, not replaced.
+    cc::unique_function<VkPhysicalDevice(VkInstance instance)> choose_physical_device;
+
+    /// Creates the device in place of `vkCreateDevice`, from the create info sg built.
+    /// For a runtime that creates the device itself, as OpenXR's `xrCreateVulkanDeviceKHR` does.
+    /// The device it hands back in `out` is the context's from then on, and the context destroys it.
+    cc::unique_function<VkResult(VkPhysicalDevice physical_device, VkDeviceCreateInfo const& info, VkDevice& out)> create_device;
 };
+
+namespace sg::backend::vulkan
+{
+/// The Vulkan version every context is created at, and the least a device must report.
+/// What a runtime with a version range of its own — OpenXR's graphics requirements — is checked against.
+inline constexpr u32 required_api_version = VK_API_VERSION_1_3;
+} // namespace sg::backend::vulkan
 
 /// Severity of a validation-layer message, mapped from VkDebugUtilsMessageSeverityFlagBitsEXT.
 /// Ordered worst-first so `severity <= vulkan_message_severity::warning` reads as "warning or worse",
@@ -179,6 +214,14 @@ public:
 
     // create_vulkan_context fills these in once it has picked a physical device.
     using sg::context::set_adapter_info;
+
+    /// The native objects this context runs on, for whoever must name them to another API, such as an XR runtime's session.
+    /// All are owned by the context and outlive nothing it does not.
+    /// **The queue is externally synchronized**: anything else that submits to it, or calls an API that does, holds `queue_guard()` meanwhile.
+    [[nodiscard]] VkInstance instance() const { return _instance; }
+    [[nodiscard]] VkPhysicalDevice physical_device() const { return _physical_device; }
+    [[nodiscard]] VkDevice device() const { return _device; }
+    [[nodiscard]] VkQueue queue() const { return _queue; }
 
     /// The context's stat totals, for the transfer systems that count into them.
     [[nodiscard]] sg::impl::stat_totals& stat_totals() { return _stats; }
