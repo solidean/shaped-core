@@ -1,0 +1,10 @@
+// An unbounded binding array: the host binds as many views as it has, and each thread picks one.
+
+require binding_arrays, unbounded_binding_arrays
+
+binding parts:
+    merged: mut buffer[int]
+    sources: buffer[int][]
+
+@compute(64) fun gather_unbounded(@thread_id id: int3){parts}:
+    parts.merged[id.x] = parts.sources[nonuniform (id.x % 5)][id.x]

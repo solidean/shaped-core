@@ -133,6 +133,8 @@ ctx.supports(sg::feature::ray_query)               // bool — THE capability qu
                                                    //     shaderDenormPreserveFloat32, true on dx12, false on metal and webgpu; @float(.ieee))
                                                    //   vulkan's geometry, tessellation, sample-rate and wireframe answers are the device features creation enabled
                                                    //   binding_arrays false (webgpu) = no count > 1 bindings, no staging_binding_group, no bindless_array
+                                                   //   unbounded_binding_arrays (dx12 tier 3, vulkan's variable descriptor count) = a count 0 binding,
+                                                   //     the layout's last, each binding_group sized by its views; no staging group or bindless_array over it
                                                    //   the per-scope bools (cmd.raytracing.is_supported(), cmd.query.is_supported(),
                                                    //   ctx.supports_headless_present()) all forward here, so there is one answer per question
 ctx.supported_features()                           // sg::feature_set (cc::flags<feature>) — every feature supports() says yes to

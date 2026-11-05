@@ -1070,9 +1070,13 @@ A `require` in a test's body that nothing in it uses is `unused-require`, and a 
 * **CHK-299** A binding member `T[N]` of a texture, an image or a buffer is a **binding array**, which needs `binding_arrays`.
   Its `N` is at least 2, or it is `invalid-constant-argument`: one resource is a plain member.
   It is read by element alone, `name[i]`, and naming it whole is `wrong-kind-of-name`; an element is the resource, which only a builtin takes.
-  `T[]`, an array of samplers and one of more than one dimension are `unsupported-yet`.
+  `T[]` is an unbounded one (CHK-490); an array of samplers and one of more than one dimension are `unsupported-yet`.
   An array whose innermost element is a value is no binding array, whatever its dimensions: CHK-291 is what judges it.
   An access word stands before it and qualifies its element: `out image_2d[.rgba8_unorm][4]`.
+* **CHK-490** A binding member `T[]` of a texture, an image, a buffer or `bytes` is an **unbounded binding array**, whose length each binding group decides.
+  It needs `binding_arrays` and `unbounded_binding_arrays`, and is its binding's last member, or it is `member-not-allowed-here`: both APIs size only a group's last binding.
+  An index into it is judged as one into any binding array (CHK-300).
+* **CHK-491** `xs.length` of an unbounded binding array is `unsupported-yet`: the host decides it, and no target reads it back, so a shader that needs it is passed it.
 * **CHK-300** An index into a binding array that the uniformity pass proves the same in every invocation needs no mark ([why](why/checking.md#chk-300)).
   Any other is marked `uniform i` or `nonuniform i`.
   Unmarked, an index the pass proves varying (CHK-399) is `non-uniform-index`, and one it proves neither way is `unproven-index`, whose detail offers both marks.
@@ -1721,7 +1725,8 @@ A diagnostic of this pass has a kind, a file, a byte span in that file, and a de
 
 | kind | reported by |
 |---|---|
-| `unsupported-yet` | CHK-8, CHK-61, CHK-134, CHK-213, CHK-237, CHK-291, CHK-299, CHK-307, CHK-314, CHK-321, CHK-329, CHK-333, CHK-338, CHK-339, CHK-344, CHK-346, CHK-347, CHK-350, CHK-352, CHK-353, CHK-357, CHK-366, CHK-374, CHK-379, CHK-381, CHK-383, CHK-387, CHK-389, CHK-397, CHK-431, CHK-432, CHK-434, CHK-460, CHK-450, CHK-453 |
+| `unsupported-yet` | CHK-8, CHK-61, CHK-134, CHK-213, CHK-237, CHK-291, CHK-299, CHK-307, CHK-314, CHK-321, CHK-329, CHK-333, CHK-338, CHK-339, CHK-344, CHK-346, CHK-347, CHK-350, CHK-352, CHK-353, CHK-357, CHK-366, CHK-374, CHK-379, CHK-381, CHK-383, CHK-387, CHK-389, CHK-397, CHK-431, CHK-432, CHK-434, CHK-460, CHK-450, CHK-453, CHK-491 |
+| `member-not-allowed-here` | CHK-490 |
 | `duplicate-declaration` | CHK-12, CHK-28, CHK-241, CHK-347, CHK-351 |
 | `dependency-cycle` | CHK-18, CHK-136 |
 | `unknown-module`, `use-of-own-module` | CHK-347 |

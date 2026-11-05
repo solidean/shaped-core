@@ -476,6 +476,7 @@ if(SC_BUILD_TESTS)
                 layout.sgl:*
                 sync.sgl:*
                 binding_arrays.sgl:*
+                unbounded_arrays.sgl:*
                 sticky_arrays.sgl:*
                 sticky_arrays_traced.sgl:*
                 bytes.sgl:*

@@ -491,6 +491,9 @@ So `{float3; float}` is written with `packed_float3`: the `float` is at byte 12 
 * **EMIT-186** HLSL writes `!=` of float or half lanes as `!(a == b)`, and a whole vector's as `any(!(a == b))`, which is true where either is a NaN.
   DXC lowers HLSL's own float `!=` to SPIR-V as `OpFOrdNotEqual`, false for a NaN, where DXIL's is unordered; the negated `==` is unordered on both.
   WGSL and MSL write `!=`, which is unordered in both.
+* **EMIT-210** HLSL writes an unbounded binding array (CHK-490) as `name[]`, at the register or vulkan binding its slot gives, and the pipeline layout leaves its range open.
+* **EMIT-211** An entry point that needs `unbounded_binding_arrays` is `target-lacks-feature` in WGSL, which has no binding arrays.
+  So is it in MSL, until sg's metal backend binds one through an argument buffer.
 * **EMIT-195** HLSL reads a buffer's length (CHK-460) through `GetDimensions`, in a helper per buffer, and WGSL through `arrayLength`, four bytes per word of a `bytes`.
   A Metal buffer argument is a pointer that carries no length, and sg passes none in yet, so an MSL compile that reads one is `target-lacks-feature`.
 * **EMIT-136** HLSL writes a ray-tracing stage as a library export named by its kind, `[shader("closesthit")]` over `void`, whose payload is an `inout` parameter.

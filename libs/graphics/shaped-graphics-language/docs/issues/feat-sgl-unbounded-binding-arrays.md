@@ -11,3 +11,15 @@ An unbounded `T[]`, an array of samplers and a multi-dimensional array are `unsu
 
 An unbounded array is what a scene of unknown size binds its textures and geometry through: dx12 and vulkan have it, metal through argument buffers, and WebGPU has no binding arrays at all.
 sg decides how many slots a group holds, so this has an sg side too.
+
+## Done on 2026-11-05
+
+`T[]` is an unbounded binding array on dx12 and vulkan (CHK-490), under `unbounded_binding_arrays`, as its binding's last member.
+sg sizes it per binding group by the views it is given: dx12 at resource binding tier 3, vulkan with a variable descriptor count.
+HLSL writes `name[]` (EMIT-210), slib's generated field is a `cc::vector` of views, and sg's compute test reads five buffers through one on both.
+Left:
+
+* metal, through an argument buffer, which sg's metal backend does not lay out yet (EMIT-211).
+* A `staging_binding_group`, and so a `bindless_array`, over an unbounded binding, whose image is the layout's size today.
+* `length` of one, which no target reads back (CHK-491); the host passes it in.
+* An array of samplers, and one of more than one dimension.

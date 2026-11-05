@@ -308,6 +308,7 @@ An entry point must declare each of those itself: by its file, by a binding it l
 | `image*[.F]` with `F` outside the portable image formats | `sg::feature::extended_image_formats`, WebGPU's `texture-formats-tier1` |
 | filtering a 32-bit float texture | `sg::feature::float32_filtering`, WebGPU's `float32-filterable`; refused by sg at bind time, never by SGL |
 | `T[N]` of a resource | `sg::feature::binding_arrays`, which WebGPU lacks ([Binding arrays](#binding-arrays)) |
+| `T[]` of a resource | `sg::feature::unbounded_binding_arrays`, which WebGPU lacks and sg's metal backend does not grant yet |
 | `acceleration_structure[.geometry]` | `sg::feature::ray_query`, or `raytracing_pipeline` in a file that grants that one |
 | a call that traces inline, `world.trace(r)` | `sg::feature::ray_query`, emulated on WebGPU; counted where the entry point reaches the call (CHK-322) |
 | a ray-tracing stage, a trace of a ray type, a callable's call | `sg::feature::raytracing_pipeline`, which WebGPU lacks |
@@ -424,8 +425,10 @@ let counted = materials.albedo[uniform (counts.picked[0] % 64)].sample(p.uv)
   A mark stands only as the index itself; on a `let` or on a value array's index it would mean nothing, and is refused.
 * A function's index is judged by what each call reaching it passes, in each entry point alone (CHK-401, CHK-402).
   A helper that one call reaches with a uniform index and another with a varying one is split in two, or marked `nonuniform` and pays on both.
-* `T[]`, whose length the host binds, is the spelling an unbounded array has, and `unsupported-yet` until sg binds one.
-  An array of samplers, and one of more than one dimension, are `unsupported-yet` too.
+* `T[]` is an unbounded array, whose length each binding group decides by the views the host gives it (CHK-490).
+  It needs `unbounded_binding_arrays` beside `binding_arrays`, and is its binding's last member, since both APIs size only a group's last binding.
+  Its `length` is the host's, which a shader that needs it is passed (CHK-491).
+  An array of samplers, and one of more than one dimension, are `unsupported-yet`.
 * HLSL writes `Texture2D<float4> albedo[64]` and `NonUniformResourceIndex` around a `nonuniform` index, and a `uniform` one plain, as MSL writes both.
   WebGPU has no binding arrays, so WGSL refuses by the feature.
 
