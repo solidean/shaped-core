@@ -134,6 +134,7 @@ public:
             return "";
         }
         case struct_role::stage_link:
+        case struct_role::primitive_link:
             return cc::format("SGL{}", member.location);
         case struct_role::patch_constants:
             // EMIT-123: the factors are the tessellator's, and any other member reaches the evaluation stage as a link
@@ -367,6 +368,13 @@ public:
         // Stated on every matrix, so no `-Zpr` and no `#pragma pack_matrix` can turn one around.
         if (type == "float4x4" || type == "float4x3" || type == "float3x3")
             out += "column_major ";
+        // EMIT-209: a per-triangle value is flat, and the pixel stage's SPIR-V input says it comes per primitive
+        if (owner != nullptr && owner->role == struct_role::primitive_link && p.e.entry_stage == stage::pixel)
+        {
+            if (_is_vulkan)
+                out += "[[vk::ext_decorate(5271)]] ";
+            out += "nointerpolation ";
+        }
         // EMIT-129: a stage link's interpolation, as HLSL's qualifiers spell it
         if (owner != nullptr && owner->role == struct_role::stage_link)
         {
@@ -699,12 +707,21 @@ public:
                 parameters.push_back(cc::format("out vertices {} {}_vertices[{}]", type_text(p, *this, t.element), name,
                                                 mesh.max_vertices));
                 parameters.push_back(cc::format("out indices uint3 {}_triangles[{}]", name, mesh.max_primitives));
+                if (check::is_valid(t.primitive))
+                    parameters.push_back(cc::format("out primitives {} {}_primitives[{}]",
+                                                    type_text(p, *this, t.primitive), name, mesh.max_primitives));
                 continue;
             }
             if (t.kind == type_kind::stream)
             {
                 auto const stream = t.count == 1 ? "PointStream" : t.count == 2 ? "LineStream" : "TriangleStream";
                 parameters.push_back(cc::format("inout {}<{}> {}", stream, type_text(p, *this, t.element), name));
+                continue;
+            }
+            // EMIT-208: a mesh stage's one struct parameter is the payload its task stage handed it
+            if (p.e.entry_stage == stage::mesh)
+            {
+                parameters.push_back(cc::format("in payload {} {}", type_text(p, *this, local.type), name));
                 continue;
             }
             factors = local.type;
@@ -778,6 +795,25 @@ public:
         auto parameters = cc::vector<cc::string>();
         if (check::is_valid(p.e.input))
             parameters.push_back(cc::format("{} {}", type_text(p, *this, p.e.input), p.locals[0]));
+        // CHK-489: a pixel stage's second struct, what a mesh stage wrote per triangle
+        auto takes_per_triangle = false;
+        if (p.e.entry_stage == stage::pixel && check::is_valid(p.e.input))
+            for (auto i = isize(1); i < p.e.locals.size(); ++i)
+            {
+                auto const& local = p.e.locals[i];
+                auto is_input = false;
+                for (auto const& s : p.e.stage_inputs)
+                    is_input = is_input || index_of(s.local) == i;
+                if (local.kind == check::local_kind::parameter && !is_input
+                    && p.m.at(local.type).kind == type_kind::structure && local.type != p.e.input)
+                {
+                    parameters.push_back(cc::format("{} {}", type_text(p, *this, local.type), p.locals[i]));
+                    takes_per_triangle = true;
+                }
+            }
+        // EMIT-209: SPIR-V reads a per-primitive input only beside the mesh shading capability
+        if (_is_vulkan && takes_per_triangle)
+            out += "[[vk::ext_extension(\"SPV_EXT_mesh_shader\")]] [[vk::ext_capability(5283)]]\n";
         for (auto i = isize(0); i < p.e.stage_inputs.size(); ++i)
         {
             auto const& spelled = spelling_of(p.e.stage_inputs[i].input);
@@ -824,7 +860,7 @@ public:
             return;
         }
 
-        if (p.e.entry_stage == stage::compute)
+        if (p.e.entry_stage == stage::compute || p.e.entry_stage == stage::task)
         {
             out.appendf("[numthreads({}, {}, {})]\n", p.e.workgroup[0], p.e.workgroup[1], p.e.workgroup[2]);
             // EMIT-148: the range form, which every dx12 device runs, prefers the size where the device has it

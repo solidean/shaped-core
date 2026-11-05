@@ -192,9 +192,9 @@ cc::string moved(Built const& built, Now const& now)
 }
 
 /// `d`'s stage handles, each null without its stage.
-cc::fixed_array<slib::shader_asset_handle const*, 6> stages_of(slib::pipeline_definition const& d)
+cc::fixed_array<slib::shader_asset_handle const*, 7> stages_of(slib::pipeline_definition const& d)
 {
-    return {d.vertex, d.pixel, d.geometry, d.tessellation_control, d.tessellation_evaluation, d.mesh};
+    return {d.vertex, d.pixel, d.geometry, d.tessellation_control, d.tessellation_evaluation, d.mesh, d.task};
 }
 
 /// The stage whose source holds the pipeline declaration's file: the vertex stage, or the mesh stage in its place.
@@ -209,7 +209,7 @@ struct live_pipeline
     slib::pipeline_definition const* definition = nullptr;
     /// The stages' generations the configuration was last read at, in `stages_of` order; the build's settings are
     /// generation 0's.
-    cc::fixed_array<u64, 6> generations = {};
+    cc::fixed_array<u64, 7> generations = {};
     slib::pipeline_configuration configuration;
 
     /// The stages last described on a context with a set of option values, while the frozen part still matched.
@@ -222,6 +222,7 @@ struct live_pipeline
         cc::optional<sg::compiled_shader> tessellation_control;
         cc::optional<sg::compiled_shader> tessellation_evaluation;
         cc::optional<sg::compiled_shader> mesh;
+        cc::optional<sg::compiled_shader> task;
     };
     slib::impl::kept_builds<stages> kept;
 };
@@ -234,7 +235,8 @@ live_pipeline::stages stages_in(sg::raster_pipeline_description const& desc)
             .geometry = desc.geometry_shader,
             .tessellation_control = desc.tessellation_control_shader,
             .tessellation_evaluation = desc.tessellation_evaluation_shader,
-            .mesh = desc.mesh_shader};
+            .mesh = desc.mesh_shader,
+            .task = desc.task_shader};
 }
 
 void use_stages(sg::raster_pipeline_description& desc, live_pipeline::stages const& s)
@@ -245,6 +247,7 @@ void use_stages(sg::raster_pipeline_description& desc, live_pipeline::stages con
     desc.tessellation_control_shader = s.tessellation_control;
     desc.tessellation_evaluation_shader = s.tessellation_evaluation;
     desc.mesh_shader = s.mesh;
+    desc.task_shader = s.task;
 }
 
 cc::mutex<cc::vector<cc::unique_ptr<live_pipeline>>>& live_pipelines()
@@ -272,7 +275,7 @@ cc::string slib::impl::frozen_moved(cc::span<cc::string_view const> built, cc::s
 
 slib::pipeline_configuration slib::configuration_of(pipeline_definition const& d)
 {
-    auto generations = cc::fixed_array<u64, 6>{};
+    auto generations = cc::fixed_array<u64, 7>{};
     auto const stages = stages_of(d);
     for (auto i = isize(0); i < stages.size(); ++i)
         generations[i] = stages[i] != nullptr && *stages[i] != nullptr ? (*stages[i])->generation() : 0;
@@ -388,6 +391,8 @@ cc::shared_async<sg::raster_pipeline_description> slib::describe_raster_pipeline
         desc.vertex_shader = co_await (*d.vertex)->acquire(*ctx, options);
     if (d.mesh != nullptr)
         desc.mesh_shader = co_await (*d.mesh)->acquire(*ctx, options);
+    if (d.task != nullptr)
+        desc.task_shader = co_await (*d.task)->acquire(*ctx, options);
     if (d.pixel != nullptr)
         desc.fragment_shader = co_await (*d.pixel)->acquire(*ctx, options);
     if (d.geometry != nullptr)

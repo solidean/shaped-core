@@ -41,6 +41,7 @@ constexpr barrier k_barriers[] = {
 
 constexpr cc::string_view k_barriers_hlsl[] = {"GroupMemoryBarrierWithGroupSync", "DeviceMemoryBarrierWithGroupSync"};
 constexpr cc::string_view k_mesh_output_hlsl[] = {"SetMeshOutputCounts"};
+constexpr cc::string_view k_dispatch_mesh_hlsl[] = {"DispatchMesh", "sgl_payload"};
 constexpr cc::string_view k_barriers_wgsl[] = {"workgroupBarrier", "storageBarrier", "textureBarrier"};
 constexpr cc::string_view k_barriers_msl[]
     = {"threadgroup_barrier", "mem_flags", "atomic_thread_fence", "memory_order_seq_cst", "thread_scope_device"};
@@ -190,7 +191,8 @@ constexpr cc::string_view k_atomics_msl[] = {
 
 /// CHK-296: every stage that writes memory once per invocation the program can count.
 /// A vertex stage has no writable storage in WebGPU, and any-hit and intersection stages run as often as traversal decides.
-constexpr cc::string_view k_atomic_stages = "@stages(.pixel, .compute, .mesh, .raygen, .miss, .closest_hit, .callable)";
+constexpr cc::string_view k_atomic_stages
+    = "@stages(.pixel, .compute, .task, .mesh, .raygen, .miss, .closest_hit, .callable)";
 
 /// A compare-exchange writes statements in every target (EMIT-161).
 bool every_language(language)
@@ -764,13 +766,55 @@ written write_mesh_output(call_context const& ctx)
     auto const& o = ctx.arguments[0].text;
     if (ctx.data == 0)
         return {.text = cc::format("SetMeshOutputCounts({}, {})", ctx.arguments[1].text, ctx.arguments[2].text)};
-    auto const array = ctx.data == 1 ? "vertices" : "triangles";
+    auto const array = ctx.data == 1 ? "vertices" : ctx.data == 2 ? "triangles" : "primitives";
     return {.text = cc::format("{}_{}[{}] = {}", o, array, ctx.arguments[1].text, ctx.arguments[2].text)};
+}
+
+/// EMIT-207: HLSL hands a payload over from groupshared memory alone, so the call stores it there first.
+written write_dispatch_mesh(call_context const& ctx)
+{
+    auto result = written{.text = cc::format("DispatchMesh({}, {}, {}, sgl_payload)", ctx.arguments[0].text,
+                                             ctx.arguments[1].text, ctx.arguments[2].text)};
+    // no WGSL or MSL text writes a task stage, which the feature refuses
+    if (ctx.target == language::hlsl)
+        result.lines.push_back(cc::format("sgl_payload = {};", ctx.arguments[3].text));
+    return result;
+}
+
+/// The groupshared payload the call stores into, of the payload's type.
+cc::string dispatch_mesh_helper(helper_context const& h)
+{
+    if (h.target != language::hlsl || h.argument_types.size() < 4)
+        return {};
+    return cc::format("groupshared {} sgl_payload;\n", h.argument_types[3]);
+}
+
+bool is_hlsl_text(language l)
+{
+    return l == language::hlsl;
 }
 } // namespace
 
 void sgl::builtins::register_sync(registry& r)
 {
+    r.add_comment("// A task stage's launch (CHK-485): `dispatch_mesh(x, y, z, payload)` starts x * y * z mesh "
+                  "workgroups, "
+                  "each\n"
+                  "// handed the struct `payload`, once, as the entry point's last statement.");
+    r.add(function_record{
+        .signature = "@stages(.task) fun dispatch_mesh(x: uint, y: uint, z: uint)",
+        .doc = "/// Launches the mesh workgroups, handing each the payload passed as a fourth argument.",
+        .evaluate = nothing,
+        .write = {.kind = spelling_kind::custom,
+                  .custom = write_dispatch_mesh,
+                  .helper = dispatch_mesh_helper,
+                  .writes_lines = is_hlsl_text,
+                  .hlsl_names = k_dispatch_mesh_hlsl,
+                  .wgsl_names = k_dispatch_mesh_hlsl,
+                  .msl_names = k_dispatch_mesh_hlsl},
+        .takes_element = true,
+        .is_barrier = true,
+    });
     r.add_comment("// A mesh stage's output, called as its methods (CHK-482): `out.set_counts(v, t)` says how many\n"
                   "// vertices and triangles it writes, once, in control flow every invocation of the workgroup "
                   "takes.\n"
@@ -794,6 +838,14 @@ void sgl::builtins::register_sync(registry& r)
         .doc = "/// Writes the vertex at `i`, handed as a third argument of the output's own type.",
         .evaluate = nothing,
         .write = {.kind = spelling_kind::custom, .custom = write_mesh_output, .data = 1},
+        .takes_element = true,
+    });
+    r.add(function_record{
+        .signature = "@stages(.mesh) fun primitive(o: mut mesh_output, i: uint)",
+        .doc = "/// Writes the values of the triangle at `i`, handed as a third argument of the output's second "
+               "struct.",
+        .evaluate = nothing,
+        .write = {.kind = spelling_kind::custom, .custom = write_mesh_output, .data = 3},
         .takes_element = true,
     });
     r.add(function_record{
@@ -827,7 +879,7 @@ void sgl::builtins::register_sync(registry& r)
                   "(CHK-282).");
     for (auto i = u32(0); i < u32(sizeof(k_barriers) / sizeof(k_barriers[0])); ++i)
         r.add(function_record{
-            .signature = cc::format("@stages(.compute, .mesh) fun {}()", k_barriers[i].name),
+            .signature = cc::format("@stages(.compute, .task, .mesh) fun {}()", k_barriers[i].name),
             .doc = k_barriers[i].doc,
             .evaluate = nothing,
             .write = {.kind = spelling_kind::custom,

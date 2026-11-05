@@ -81,7 +81,7 @@ TEST("sgl check - a mesh output's vertex takes one of its own type at an index (
     CHECK(!wrong.empty());
     auto const extra = with_head("@mesh(1, vertices = 3, triangles = 1) fun ms(output: mut mesh_output[corner]):\n"
                                  "    output.vertex(0u)\n");
-    CHECK(extra.contains("vertex takes an index and the vertex written there")).dump("reports", extra);
+    CHECK(extra.contains("vertex takes an index and the value written there")).dump("reports", extra);
 }
 
 TEST("sgl check - a mesh output's counts are set in control flow the whole workgroup takes (CHK-482)")
@@ -118,4 +118,114 @@ TEST("sgl check - @workgroup memory and barriers belong to a mesh stage too")
                     "    workgroup_barrier()\n"
                     "    output.set_counts(0u, 0u)\n")
           == "");
+}
+
+namespace
+{
+constexpr auto k_task = cc::string_view("struct handed:\n    blue: float\n"
+                                        "@task(1) fun ts():\n"
+                                        "    let h: handed = {blue = 1.0}\n"
+                                        "    dispatch_mesh(2u, 1u, 1u, h)\n"
+                                        "@mesh(1, vertices = 3, triangles = 1)\n"
+                                        "fun ms(h: handed, output: mut mesh_output[corner]):\n"
+                                        "    output.set_counts(0u, 0u)\n");
+} // namespace
+
+TEST("sgl check - a task stage and its mesh stage check as a pipeline (CHK-484 to CHK-487)")
+{
+    CHECK(with_head(cc::string(k_task)
+                    + "pipeline:\n    task = ts\n    mesh = ms\n    pixel = ps\n    format = .rgba8_unorm\n")
+          == "");
+}
+
+TEST("sgl check - a task stage dispatches once, as the last statement of its body (CHK-485)")
+{
+    auto const head = cc::string_view("struct handed:\n    blue: float\n");
+    auto const before = with_head(cc::string(head)
+                                  + "@task(1) fun ts():\n"
+                                    "    let h: handed = {blue = 1.0}\n"
+                                    "    dispatch_mesh(1u, 1u, 1u, h)\n"
+                                    "    let after = 1\n");
+    CHECK(before.contains("calls dispatch_mesh once, as the last statement")).dump("reports", before);
+    auto const none = with_head("@task(1) fun ts():\n    let x = 1\n");
+    CHECK(none.contains("calls dispatch_mesh once")).dump("reports", none);
+    auto const varying = with_head(cc::string(head)
+                                   + "@task(4) fun ts(@local_thread_index k: int):\n"
+                                     "    let h: handed = {blue = 1.0}\n"
+                                     "    if k == 0:\n"
+                                     "        dispatch_mesh(1u, 1u, 1u, h)\n");
+    CHECK(!varying.empty()).dump("reports", varying);
+}
+
+TEST("sgl check - a payload is a struct of the program (CHK-485)")
+{
+    auto const scalar = with_head("@task(1) fun ts():\n    dispatch_mesh(1u, 1u, 1u, 1.0)\n");
+    CHECK(scalar.contains("a payload is a struct of the program")).dump("reports", scalar);
+    auto const arity = with_head("@task(1) fun ts():\n    dispatch_mesh(1u, 1u, 1u)\n");
+    CHECK(arity.contains("dispatch_mesh takes three workgroup counts and the payload")).dump("reports", arity);
+}
+
+TEST("sgl check - a pipeline's mesh stage takes exactly the payload its task stage hands on (CHK-487)")
+{
+    auto const other
+        = with_head(cc::string(k_task) + "struct other:\n    red: float\n"
+                    + "@mesh(1, vertices = 3, triangles = 1)\n"
+                      "fun ms2(o: other, output: mut mesh_output[corner]):\n"
+                      "    output.set_counts(0u, 0u)\n"
+                    + "pipeline:\n    task = ts\n    mesh = ms2\n    pixel = ps\n    format = .rgba8_unorm\n");
+    CHECK(other.contains("ts hands its mesh stage handed, and ms2 takes other")).dump("reports", other);
+    auto const without_task
+        = with_head(cc::string(k_task) + "pipeline:\n    mesh = ms\n    pixel = ps\n    format = .rgba8_unorm\n");
+    CHECK(without_task.contains("ms takes a payload, which only a task stage hands it")).dump("reports", without_task);
+    auto const without_mesh
+        = with_head(cc::string(k_task) + "pipeline:\n    task = ts\n    pixel = ps\n    format = .rgba8_unorm\n");
+    CHECK(without_mesh.contains("a pipeline with a task stage has a mesh stage")).dump("reports", without_mesh);
+}
+
+namespace
+{
+constexpr auto k_faces
+    = cc::string_view("struct face:\n    tint: float4\n"
+                      "@mesh(1, vertices = 3, triangles = 1)\n"
+                      "fun ms(output: mut mesh_output[corner, face]):\n"
+                      "    output.set_counts(3u, 1u)\n"
+                      "    output.primitive(0u, {tint = float4(1.0)})\n"
+                      "@pixel fun tinting(c: corner, f: face) -> target => { color = c.color + f.tint }\n");
+} // namespace
+
+TEST("sgl check - a mesh output writes values per triangle, which the pixel stage takes beside its stage struct "
+     "(CHK-488, CHK-489)")
+{
+    CHECK(with_head(cc::string(k_faces) + "pipeline:\n    mesh = ms\n    pixel = tinting\n    format = .rgba8_unorm\n")
+          == "");
+}
+
+TEST("sgl check - a per-triangle struct holds no @position, and primitive needs one (CHK-488)")
+{
+    auto const positioned
+        = with_head("struct face:\n    @position p: hpos4\n"
+                    "@mesh(1, vertices = 3, triangles = 1) fun ms(output: mut mesh_output[corner, face]):\n"
+                    "    output.set_counts(0u, 0u)\n");
+    CHECK(positioned.contains("no @position or @per_draw member")).dump("reports", positioned);
+    auto const without = with_head("@mesh(1, vertices = 3, triangles = 1) fun ms(output: mut mesh_output[corner]):\n"
+                                   "    output.set_counts(1u, 1u)\n"
+                                   "    output.primitive(0u, {color = float4(1.0)})\n");
+    CHECK(without.contains("writes no values per triangle")).dump("reports", without);
+    auto const scalar
+        = with_head("@mesh(1, vertices = 3, triangles = 1) fun ms(output: mut mesh_output[corner, float]):\n"
+                    "    output.set_counts(0u, 0u)\n");
+    CHECK(scalar.contains("the struct it writes per triangle")).dump("reports", scalar);
+}
+
+TEST("sgl check - a pipeline's pixel stage takes exactly what its mesh stage writes per triangle (CHK-489)")
+{
+    auto const missing
+        = with_head(cc::string(k_faces) + "pipeline:\n    mesh = ms\n    pixel = ps\n    format = .rgba8_unorm\n");
+    CHECK(missing.contains("ms writes face per triangle, and ps takes none")).dump("reports", missing);
+    auto const vertex
+        = with_head(cc::string(k_faces)
+                    + "@vertex fun vs(@vertex_index i: int) -> corner => { position = hpos4(0.0, 0.0, 0.0, "
+                      "1.0), color = float4(1.0) }\n"
+                    + "pipeline:\n    vertex = vs\n    pixel = tinting\n    format = .rgba8_unorm\n");
+    CHECK(vertex.contains("tinting takes face per triangle, which only a mesh stage's output writes")).dump("reports", vertex);
 }

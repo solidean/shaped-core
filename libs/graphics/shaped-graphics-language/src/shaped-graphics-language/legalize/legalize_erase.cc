@@ -26,7 +26,7 @@ struct invocation_ender
             into.push_back(out.discard());
         else if (stage == check::stage::compute || stage == check::stage::raygen || stage == check::stage::miss
                  || stage == check::stage::closest_hit || stage == check::stage::callable
-                 || stage == check::stage::geometry || stage == check::stage::mesh)
+                 || stage == check::stage::geometry || stage == check::stage::mesh || stage == check::stage::task)
             into.push_back(out.return_(flat_expr_id::none));
         else if (stage == check::stage::vertex || stage == check::stage::tessellation_evaluation)
         {

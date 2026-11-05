@@ -75,8 +75,12 @@ cc::string spelling_of(check::type_info const& t, checked_module const& m)
                          : t.count == 3 ? "triangle_stream"
                                         : "mesh_output";
         // a builtin's bare pattern takes every stream of its shape
-        return t.element == type_id::none ? cc::format("{}{}", access_prefix(t.access), shape)
-                                          : cc::format("{}{}[{}]", access_prefix(t.access), shape, m.name_of(t.element));
+        if (t.element == type_id::none)
+            return cc::format("{}{}", access_prefix(t.access), shape);
+        if (t.primitive != type_id::none)
+            return cc::format("{}{}[{}, {}]", access_prefix(t.access), shape, m.name_of(t.element),
+                              m.name_of(t.primitive));
+        return cc::format("{}{}[{}]", access_prefix(t.access), shape, m.name_of(t.element));
     }
     default:
         return {};

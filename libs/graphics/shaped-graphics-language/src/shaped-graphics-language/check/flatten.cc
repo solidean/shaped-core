@@ -838,7 +838,7 @@ void checker::flatten_entry_point(symbol_id id, traversal_request const* travers
 
     auto const parameters = out.at(info.parameters);
     // A compute entry point hands nothing back, so `nothing` is its result and not a hole.
-    auto const wants_result = info.entry_stage != stage::compute;
+    auto const wants_result = info.entry_stage != stage::compute && info.entry_stage != stage::task;
     auto is_parameter_sound = true;
     for (auto const& parameter : parameters)
         is_parameter_sound = is_parameter_sound && is_sound(parameter.type);
@@ -1168,6 +1168,48 @@ void checker::flatten_entry_point(symbol_id id, traversal_request const* travers
         || (info.stages & stage_bit(info.entry_stage)) == 0 || (!is_linear && !f.quad_calls.empty()))
         return;
     f.entry.body = f.root_body();
+
+    // CHK-485: a task stage launches its mesh workgroups once, as the last thing its body does
+    if (info.entry_stage == stage::task)
+    {
+        auto const is_dispatch = [&](flat_expr_id id)
+        {
+            auto const* const call = is_valid(id) ? f.entry.at(id).node.try_as<flat_call>() : nullptr;
+            auto const* const record
+                = call != nullptr && is_valid(call->intrinsic) ? out.builtin_function(call->intrinsic) : nullptr;
+            return record != nullptr && record->name == "dispatch_mesh";
+        };
+        auto dispatches = 0;
+        for (auto i = isize(0); i < f.entry.exprs.size(); ++i)
+            dispatches += is_dispatch(flat_expr_id(i)) ? 1 : 0;
+        // the last statement's value, through the blocks a call is flattened into, down to what each leaves with
+        auto ends_in_dispatch = false;
+        auto top = f.entry.at(f.entry.body);
+        for (auto depth = 0; depth < 8 && !top.empty() && !ends_in_dispatch; ++depth)
+        {
+            auto const& last = f.entry.at(top[top.size() - 1]).node;
+            auto value = flat_expr_id::none;
+            if (auto const* const eval = last.try_as<flat_eval>())
+                value = eval->value;
+            else if (auto const* const leave = last.try_as<flat_leave>())
+                value = leave->value;
+            if (!is_valid(value))
+                break;
+            ends_in_dispatch = is_dispatch(value);
+            auto const* const block = f.entry.at(value).node.try_as<flat_block>();
+            if (block == nullptr)
+                break;
+            top = f.entry.at(block->body);
+        }
+        if (dispatches != 1 || !ends_in_dispatch)
+        {
+            report(diagnostic_kind::invalid_entry_point, s.file,
+                   ast_of(s.file).at(s.declaration).node.as<ast::fun_decl>().name,
+                   cc::format("{} is a task stage, which calls dispatch_mesh once, as the last statement of its body",
+                              s.name));
+            return;
+        }
+    }
 
     // Every later walk stops descending at the limit and leaves a hole where it stopped, so a tree past it must never
     // reach them: the hole would surface as a missing id rather than as the limit (CHK-268).
