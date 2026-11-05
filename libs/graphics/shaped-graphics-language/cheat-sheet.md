@@ -803,7 +803,8 @@ ops[i](mut v)                                            // raygen, miss, closes
   Literals: `5i64`, `5u64`, `0.1f64`, or an unsuffixed literal where the type is asked; a `ulong` literal stops at 2^63 - 1, so `~0u64` is the largest.
   Arithmetic, comparisons, bits (a shift counts to 63), `abs` / `min` / `max` / `clamp` / `select`; no maths function of a double and no subgroup operation yet.
   `as` converts within a width or within a family: `x as long as double`, never `int as double` in one step.
-  No 64-bit value crosses a stage edge or sits in an `@inline` binding, and a constant block holds no `long3` / `double4` (CHK-453); a buffer does.
+  A 64-bit scalar or two-vector crosses a stage link flat on vulkan alone (CHK-454, EMIT-196).
+  None sits in an `@inline` binding, and a constant block holds no `long3` / `double4` (CHK-453); a buffer does.
   `atomic[ulong]` / `atomic[long]` in a `mut buffer` take `require shader_int64_atomics` (dx12 SM 6.6, vulkan); none in workgroup memory yet.
   **No layout is guaranteed without an annotation** (EMIT-116): the compiler may reorder members, so the host goes through the generated struct, never through offsets it assumed.
 - **A warning never fails `compile_to_text`, and only a text carries one.** A failed compile's error holds its errors alone.

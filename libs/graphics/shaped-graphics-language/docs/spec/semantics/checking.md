@@ -124,7 +124,9 @@ use view
   Their operators are the arithmetic, the comparisons, a vector beside its scalar, and for `long` and `ulong` the bit operators; `abs`, `min`, `max`, `clamp` and `select` take them too.
   No other builtin takes one yet: no maths function of a double, which DXIL has none of, and no subgroup operation.
 * **CHK-451** `long`, `ulong` and their vectors name the feature `shader_int64`, and `double` and its vectors `shader_f64`, as CHK-382 says of the 16-bit types.
-* **CHK-383** A 16-bit or a 64-bit value crosses no stage edge: a member of one, at any depth of a struct an entry point takes or returns, is `unsupported-yet`.
+* **CHK-383** A 16-bit value crosses no stage edge: a member of one, at any depth of a struct an entry point takes or returns, is `unsupported-yet`.
+* **CHK-454** A 64-bit scalar or two-vector crosses a stage link, flat as an integer does (CHK-273), a location apiece.
+  A 64-bit three- or four-vector there takes two locations and is `unsupported-yet`, and so is a 64-bit value in a vertex input or a pixel stage's target, which no API has a format for.
 * **CHK-388** `bytes` and `mut bytes` are resources of their own kind, and `out bytes` is an error.
   The prelude's loads take either, its stores `mut bytes` alone, and `@coherent` applies to `mut bytes` as to a `mut buffer`.
 * **CHK-387** An `@inline` binding holds no 16-bit value: a member that is one, or holds one at any depth, is `unsupported-yet` ([why](why/checking.md#chk-387)).
@@ -1725,7 +1727,7 @@ A diagnostic of this pass has a kind, a file, a byte span in that file, and a de
 
 | kind | reported by |
 |---|---|
-| `unsupported-yet` | CHK-8, CHK-61, CHK-134, CHK-213, CHK-237, CHK-291, CHK-299, CHK-307, CHK-314, CHK-321, CHK-329, CHK-333, CHK-338, CHK-339, CHK-344, CHK-346, CHK-347, CHK-350, CHK-352, CHK-353, CHK-357, CHK-366, CHK-374, CHK-379, CHK-381, CHK-383, CHK-387, CHK-389, CHK-397, CHK-431, CHK-432, CHK-434, CHK-460, CHK-450, CHK-453, CHK-491 |
+| `unsupported-yet` | CHK-8, CHK-61, CHK-134, CHK-213, CHK-237, CHK-291, CHK-299, CHK-307, CHK-314, CHK-321, CHK-329, CHK-333, CHK-338, CHK-339, CHK-344, CHK-346, CHK-347, CHK-350, CHK-352, CHK-353, CHK-357, CHK-366, CHK-374, CHK-379, CHK-381, CHK-383, CHK-387, CHK-389, CHK-397, CHK-431, CHK-432, CHK-434, CHK-460, CHK-450, CHK-453, CHK-454, CHK-491 |
 | `member-not-allowed-here` | CHK-490 |
 | `duplicate-declaration` | CHK-12, CHK-28, CHK-241, CHK-347, CHK-351 |
 | `dependency-cycle` | CHK-18, CHK-136 |

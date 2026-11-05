@@ -962,7 +962,7 @@ struct checker
     /// The path from `type` down to the first 64-bit vector of three or four components it holds, as `sized_value_path`.
     [[nodiscard]] cc::string wide_vector_path(type_id type) const;
     /// CHK-383: refuses each 16-bit and 64-bit value a struct crossing a stage edge holds, reported at `where` of `file`.
-    void judge_edge_16_bit(i32 file, source_span where, type_id type);
+    void judge_edge_16_bit(i32 file, source_span where, type_id type, bool is_link);
     /// The first value of function bodies alone that `type` holds, such as a `mat3`, through struct members, arrays and
     /// a buffer's element; `path` is empty when it holds none (CHK-397).
     struct local_only_found

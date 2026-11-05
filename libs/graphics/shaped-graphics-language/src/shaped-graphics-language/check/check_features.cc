@@ -207,7 +207,7 @@ cc::string checker::wide_vector_path(type_id type) const
     return {};
 }
 
-void checker::judge_edge_16_bit(i32 file, source_span where, type_id type)
+void checker::judge_edge_16_bit(i32 file, source_span where, type_id type, bool is_link)
 {
     // a patch and a geometry stage's vertices are arrays of the struct that crosses, and a stream holds it
     while (type != checked_module::error_type && out.builtin_type_of(type) == nullptr
@@ -216,10 +216,20 @@ void checker::judge_edge_16_bit(i32 file, source_span where, type_id type)
     if (type == checked_module::error_type || out.builtin_type_of(type) != nullptr
         || out.at(type).kind != type_kind::structure)
         return;
-    for (auto const bits : {16, 64})
-        if (auto const found = sized_value_path(type, bits); !found.empty())
+    if (auto const found = sized_value_path(type, 16); !found.empty())
+        unsupported(file, where, cc::format("a 16-bit value crossing a stage edge, in {}{}", out.name_of(type), found));
+    // CHK-454: a stage link carries a 64-bit scalar or two-vector, a location apiece; no vertex input or target does
+    if (!is_link)
+    {
+        if (auto const found = sized_value_path(type, 64); !found.empty())
             unsupported(file, where,
-                        cc::format("a {}-bit value crossing a stage edge, in {}{}", bits, out.name_of(type), found));
+                        cc::format("a 64-bit value in a vertex input or a target, in {}{}", out.name_of(type), found));
+    }
+    else if (auto const found = wide_vector_path(type); !found.empty())
+        unsupported(file, where,
+                    cc::format("a 64-bit three- or four-vector crossing a stage edge, in {}{}, which takes two "
+                               "locations",
+                               out.name_of(type), found));
 }
 
 checker::local_only_found checker::local_only_path(type_id type, bool in_memory, bool in_link) const
