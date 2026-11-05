@@ -1,5 +1,6 @@
 #include <clean-core/common/log.hh>
 #include <clean-core/container/vector.hh>
+#include <clean-core/thread/atomic.hh>
 #include <clean-core/thread/mutex.hh>
 #include <shaped-graphics/backends/dx12/dx12_runtime.hh>
 
@@ -114,6 +115,21 @@ HRESULT shared_agility_device(ID3D12DeviceFactory* factory,
 #endif
 } // namespace
 } // namespace sg::backend::dx12
+
+namespace
+{
+cc::atomic<bool> g_marks_acceleration_structures = false;
+}
+
+bool sg::backend::dx12::marks_acceleration_structures()
+{
+    return g_marks_acceleration_structures.load(cc::memory_order_acquire);
+}
+
+void sg::backend::dx12::mark_acceleration_structures()
+{
+    g_marks_acceleration_structures.store(true, cc::memory_order_release);
+}
 
 bool sg::backend::dx12::runs_agility_runtime()
 {

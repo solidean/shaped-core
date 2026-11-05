@@ -545,6 +545,16 @@ cc::string msl_trace_helper(helper_context const& ctx)
            "}\n";
 }
 
+/// The `RayDesc` a pipeline trace hands DXR, from its origin, direction, t_min and t_max (arguments 1 to 4), as lines.
+void ray_desc_lines(call_context const& ctx, cc::string_view desc, written& result)
+{
+    result.lines.push_back(cc::format("RayDesc {};", desc));
+    result.lines.push_back(cc::format("{}.Origin = {};", desc, ctx.arguments[1].text));
+    result.lines.push_back(cc::format("{}.TMin = {};", desc, ctx.arguments[3].text));
+    result.lines.push_back(cc::format("{}.Direction = {};", desc, ctx.arguments[2].text));
+    result.lines.push_back(cc::format("{}.TMax = {};", desc, ctx.arguments[4].text));
+}
+
 written write_trace_ray(call_context const& ctx)
 {
     if (ctx.target == language::msl)
@@ -553,11 +563,7 @@ written write_trace_ray(call_context const& ctx)
         return {};
     auto const desc = ctx.mint.is_valid() ? ctx.mint("ray_desc") : cc::string("ray_desc");
     auto result = written();
-    result.lines.push_back(cc::format("RayDesc {};", desc));
-    result.lines.push_back(cc::format("{}.Origin = {};", desc, ctx.arguments[1].text));
-    result.lines.push_back(cc::format("{}.TMin = {};", desc, ctx.arguments[3].text));
-    result.lines.push_back(cc::format("{}.Direction = {};", desc, ctx.arguments[2].text));
-    result.lines.push_back(cc::format("{}.TMax = {};", desc, ctx.arguments[4].text));
+    ray_desc_lines(ctx, desc, result);
     result.text = cc::format("TraceRay({}, uint({}), uint({}), {}, {}, {}, {}, {})", ctx.arguments[0].text,
                              ctx.arguments[5].text, ctx.arguments[6].text, ctx.arguments[7].text, ctx.arguments[8].text,
                              ctx.arguments[9].text, desc, ctx.arguments[10].text);
@@ -574,11 +580,7 @@ written write_trace_ray_reordered(call_context const& ctx)
     auto const hit = ctx.mint.is_valid() ? ctx.mint("hit_object") : cc::string("hit_object");
     auto const payload = ctx.arguments[ctx.arguments.size() - 1].text;
     auto result = written();
-    result.lines.push_back(cc::format("RayDesc {};", desc));
-    result.lines.push_back(cc::format("{}.Origin = {};", desc, ctx.arguments[1].text));
-    result.lines.push_back(cc::format("{}.TMin = {};", desc, ctx.arguments[3].text));
-    result.lines.push_back(cc::format("{}.Direction = {};", desc, ctx.arguments[2].text));
-    result.lines.push_back(cc::format("{}.TMax = {};", desc, ctx.arguments[4].text));
+    ray_desc_lines(ctx, desc, result);
     result.lines.push_back(
         cc::format("dx::HitObject {} = dx::HitObject::TraceRay({}, uint({}), uint({}), {}, {}, {}, {}, {});", hit,
                    ctx.arguments[0].text, ctx.arguments[5].text, ctx.arguments[6].text, ctx.arguments[7].text,
@@ -599,11 +601,7 @@ written write_trace_hit_ray(call_context const& ctx)
         return {};
     auto const desc = ctx.mint.is_valid() ? ctx.mint("ray_desc") : cc::string("ray_desc");
     auto result = written();
-    result.lines.push_back(cc::format("RayDesc {};", desc));
-    result.lines.push_back(cc::format("{}.Origin = {};", desc, ctx.arguments[1].text));
-    result.lines.push_back(cc::format("{}.TMin = {};", desc, ctx.arguments[3].text));
-    result.lines.push_back(cc::format("{}.Direction = {};", desc, ctx.arguments[2].text));
-    result.lines.push_back(cc::format("{}.TMax = {};", desc, ctx.arguments[4].text));
+    ray_desc_lines(ctx, desc, result);
     result.text = cc::format("dx::HitObject::TraceRay({}, uint({}), uint({}), {}, {}, {}, {}, {})",
                              ctx.arguments[0].text, ctx.arguments[5].text, ctx.arguments[6].text, ctx.arguments[7].text,
                              ctx.arguments[8].text, ctx.arguments[9].text, desc, ctx.arguments[10].text);

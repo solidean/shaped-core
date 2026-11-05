@@ -259,7 +259,6 @@ void checker::add_member(symbol s, source_span name_where)
         return;
     }
     type_scopes[i32(index_of(owner))][name].push_back(id);
-    (void)scoped_functions.insert(i32(index_of(id)));
 }
 
 void checker::attach_extensions(isize first)

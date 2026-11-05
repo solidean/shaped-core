@@ -235,12 +235,13 @@ sg::micromap_handle dx12_command_list::raytracing_build_micromap(sg::micromap_tr
         = {.StartAddress = descriptors->gpu_virtual_address() + UINT64(triangles.descriptors_offset_in_bytes),
            .StrideInBytes = sizeof(sg::micromap_descriptor)},
     };
-    D3D12_BUILD_RAYTRACING_ACCELERATION_STRUCTURE_INPUTS inputs = {};
-    inputs.Type = D3D12_RAYTRACING_ACCELERATION_STRUCTURE_TYPE_OPACITY_MICROMAP_ARRAY;
-    inputs.Flags = D3D12_RAYTRACING_ACCELERATION_STRUCTURE_BUILD_FLAG_PREFER_FAST_TRACE;
-    inputs.NumDescs = 1;
-    inputs.DescsLayout = D3D12_ELEMENTS_LAYOUT_ARRAY;
-    inputs.pOpacityMicromapArrayDesc = &array;
+    auto const inputs = D3D12_BUILD_RAYTRACING_ACCELERATION_STRUCTURE_INPUTS{
+        .Type = D3D12_RAYTRACING_ACCELERATION_STRUCTURE_TYPE_OPACITY_MICROMAP_ARRAY,
+        .Flags = D3D12_RAYTRACING_ACCELERATION_STRUCTURE_BUILD_FLAG_PREFER_FAST_TRACE,
+        .NumDescs = 1,
+        .DescsLayout = D3D12_ELEMENTS_LAYOUT_ARRAY,
+        .pOpacityMicromapArrayDesc = &array,
+    };
 
     D3D12_RAYTRACING_ACCELERATION_STRUCTURE_PREBUILD_INFO prebuild = {};
     {
@@ -266,10 +267,10 @@ sg::micromap_handle dx12_command_list::raytracing_build_micromap(sg::micromap_tr
     track_buffer_access(descriptors, sg::pipeline_stage_flag::accel_build, sg::access_flag::shader_read);
     flush_barriers();
 
-    D3D12_BUILD_RAYTRACING_ACCELERATION_STRUCTURE_DESC build_desc = {};
-    build_desc.DestAccelerationStructureData = result->gpu_virtual_address();
-    build_desc.ScratchAccelerationStructureData = scratch->gpu_virtual_address();
-    build_desc.Inputs = inputs;
+    auto const build_desc = D3D12_BUILD_RAYTRACING_ACCELERATION_STRUCTURE_DESC{
+        .DestAccelerationStructureData = result->gpu_virtual_address(),
+        .Inputs = inputs,
+        .ScratchAccelerationStructureData = scratch->gpu_virtual_address()};
     {
         sg::impl::raytracing_driver_hold const driver_guard;
         list4->BuildRaytracingAccelerationStructure(&build_desc, 0, nullptr);
