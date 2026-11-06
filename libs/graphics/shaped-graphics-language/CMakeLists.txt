@@ -53,6 +53,13 @@ add_library(shaped-graphics-language
     src/shaped-graphics-language/builtins/register_vector_math.cc
     src/shaped-graphics-language/builtins/registry.cc
 
+    src/shaped-graphics-language/ir/ir.cc
+    src/shaped-graphics-language/ir/lower.cc
+    src/shaped-graphics-language/ir/lower_call.cc
+    src/shaped-graphics-language/ir/lower_expr.cc
+    src/shaped-graphics-language/ir/lower_memory.cc
+    src/shaped-graphics-language/ir/spirv.cc
+
     src/shaped-graphics-language/check/check.cc
     src/shaped-graphics-language/check/check_driver.cc
     src/shaped-graphics-language/check/check_arrays.cc

@@ -3,6 +3,9 @@
 #include <clean-core/string/format.hh>
 #include <shaped-graphics-language/emit/impl/dialect.hh>
 #include <shaped-graphics-language/emit/impl/plan.hh>
+#include <shaped-graphics-language/ir/ir.hh>
+#include <shaped-graphics-language/ir/lower.hh>
+#include <shaped-graphics-language/ir/spirv.hh>
 #include <shaped-graphics-language/legalize/legalize.hh>
 
 namespace
@@ -349,10 +352,35 @@ sgl::emit::emitted_text sgl::emit::emit_entry_point(check::checked_module const&
                 }
     if (!result.errors.empty())
         return result;
-    auto written = impl::write_text(plan, impl::dialect_of(t), sources);
-    result.text = cc::move(written.text);
-    result.lines = cc::move(written.lines);
-    result.debug_sites = cc::move(written.debug_sites);
+    // The plan decided every name and address already, so a binary answers to the host as the text would.
+    auto is_native = false;
+    if (sources.native != native_route::text)
+    {
+        auto program = ir::program();
+        if (auto const gap = ir::lower(plan, program); !gap.has_value())
+        {
+            result.spirv = ir::write_spirv(program);
+            result.text = ir::dump(program);
+            is_native = true;
+        }
+        else if (sources.native == native_route::prefer)
+            result.native_gap = gap.value();
+        else
+        {
+            result.errors.push_back({.kind = error_kind::unsupported,
+                                     .symbol = e.function,
+                                     .detail = cc::format("{} holds {}, which the SPIR-V route does not lower yet",
+                                                          e.name, gap.value())});
+            return result;
+        }
+    }
+    if (!is_native)
+    {
+        auto written = impl::write_text(plan, impl::dialect_of(t), sources);
+        result.text = cc::move(written.text);
+        result.lines = cc::move(written.lines);
+        result.debug_sites = cc::move(written.debug_sites);
+    }
     result.entry_point = plan.entry_name;
     if (plan.constants.has_value())
         result.bound_names.push_back({.emitted = plan.constants.value().name, .host = plan.constants.value().host_name});

@@ -51,6 +51,8 @@ struct sgl::text_request
     /// With `float_atomic_add` an `atomic[float]` is the target's own float atomic where the target can say one,
     /// vulkan and metal, and a `uint`'s bits elsewhere.
     check::feature_set device_features;
+    /// `hlsl-vulkan` written as SPIR-V by SGL itself, which `emitted_source::spirv` then holds.
+    emit::native_route native = emit::native_route::text;
 };
 
 /// Every entry point of one SGL source, asked for as the text of each of `targets`.
@@ -99,6 +101,10 @@ struct sgl::interface_binding
 struct sgl::emitted_source
 {
     cc::string text;
+    /// The SPIR-V `text_request::native` asked for; empty where the text is what was written.
+    cc::vector<u32> spirv;
+    /// What kept a `prefer` from writing `spirv`, for a reader.
+    cc::string native_gap;
     /// The source's name, unless the target reserves it: HLSL and MSL both reserve words an SGL author may pick.
     /// A caller compiling the text asks for THIS name.
     cc::string entry_point;

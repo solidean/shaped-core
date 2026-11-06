@@ -384,6 +384,7 @@ namespace sgl::emit
 {
 enum class target : u8;
 enum class error_kind : u8;
+enum class native_route : u8;
 struct error;
 struct emitted_text;
 struct bound_name;
@@ -395,6 +396,11 @@ struct debug_value;
 struct debug_site;
 struct options;
 } // namespace sgl::emit
+
+namespace sgl::ir
+{
+struct program;
+} // namespace sgl::ir
 
 namespace sgl::builtins::texture
 {

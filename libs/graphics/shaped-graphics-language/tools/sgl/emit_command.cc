@@ -1,6 +1,7 @@
 #include "files.hh"
 #include "module_dirs.hh"
 
+#include <clean-core/streams/file_stream.hh>
 #include <clean-core/string/print.hh>
 #include <nexus/args/ambient.hh>
 #include <nexus/args/args.hh>
@@ -38,7 +39,9 @@ COMMAND("emit")
                                          "warnings on stderr, or the diagnostics that kept it from being written."});
     args.positional("FILE", path, {.desc = "the SGL source"});
     args.arg({"entry"}, entry, {.desc = "the entry point, by name", .metavar = "NAME", .required = true});
-    args.arg({"target"}, target_name, {.desc = "hlsl-dx12, hlsl-vulkan, wgsl or msl", .metavar = "TARGET"});
+    args.arg({"target"}, target_name, {.desc = "hlsl-dx12, hlsl-vulkan, wgsl, msl or spirv", .metavar = "TARGET"});
+    auto spirv_path = cc::string();
+    args.arg({"spirv"}, spirv_path, {.desc = "where --target spirv writes the module", .metavar = "FILE"});
     args.arg({"run-tests"}, run_tests, {.desc = "run the file's tests first, and write nothing where one fails"});
     args.arg({"line-directives"}, line_directives,
              {.desc = "write `#line` into HLSL and MSL, as a host's compile does, naming the SGL line of each "
@@ -73,6 +76,10 @@ COMMAND("emit")
     }
 
     auto target = sgl::emit::target::hlsl_dx12;
+    // SPIR-V is vulkan's, written by SGL's own layer rather than by DXC from the text
+    auto const is_spirv = target_name == "spirv";
+    if (is_spirv)
+        target_name = "hlsl-vulkan";
     auto is_known = false;
     for (auto const t : sgl::emit::all_targets())
         if (sgl::emit::to_string(t) == target_name)
@@ -137,7 +144,9 @@ COMMAND("emit")
                                             .guards_undefined = guards_undefined,
                                             .software_trace = software_trace,
                                             .weakens_float = weaken_float,
-                                            .device_features = device_features});
+                                            .device_features = device_features,
+                                            .native = is_spirv ? sgl::emit::native_route::require
+                                                               : sgl::emit::native_route::text});
     if (text.has_error())
     {
         cc::eprint(text.error());
@@ -146,6 +155,19 @@ COMMAND("emit")
     }
     for (auto const& w : text.value().warnings)
         cc::eprintln("{}", w);
+    if (is_spirv && !spirv_path.empty())
+    {
+        auto written = cc::file_write_stream_adapter::create(spirv_path);
+        if (written.has_error())
+        {
+            cc::eprintln("sgl emit: cannot write {}", spirv_path);
+            return exit_usage;
+        }
+        auto stream = written.value().stream();
+        auto const& words = text.value().spirv;
+        (void)stream.write(cc::span<byte const>(reinterpret_cast<byte const*>(words.data()), words.size() * 4));
+        (void)stream.flush();
+    }
     cc::print(text.value().text);
     cc::flush();
     return exit_ok;
