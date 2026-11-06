@@ -357,6 +357,11 @@ enum class sgl::ir::op : sgl::u16
     access_chain,
     /// Operands: the block's pointer, the position of its runtime array as a literal.
     array_length,
+    /// Operands: a position in `program::stage_elements` as a literal, then an index where its `array_size` is set.
+    /// A pure value, so `construct_ssa` has nothing to promote and a dead one disappears.
+    stage_load,
+    /// Operands: a position in `program::stage_elements` as a literal, the value, then an index likewise.
+    stage_store,
     // ---- atomics: operands are the pointer, then the values
     atomic_load,
     atomic_store,
@@ -453,7 +458,7 @@ struct sgl::ir::constant
 /// What a global is to a target that names each kind of binding apart, which its pointer's type does not say.
 enum class sgl::ir::global_kind : sgl::u8
 {
-    /// Workgroup memory or a stage input, which `space` of its pointer tells apart.
+    /// Workgroup memory.
     plain,
     /// A group's block of constants.
     constants,
@@ -548,9 +553,11 @@ struct sgl::ir::stage_element
     /// A range of `program::names`, for a reader.
     u32 name_first = 0;
     u32 name_size = 0;
+    /// The variable's pointer type, for a target with variables.
+    type_ref pointer = type_ref::none;
 };
 
-/// A variable outside the function: a resource, a block, workgroup memory or a stage input.
+/// A variable outside the function: a resource, a block or workgroup memory.
 struct sgl::ir::global
 {
     /// The pointer's type.
@@ -559,8 +566,6 @@ struct sgl::ir::global
     /// A descriptor's address, -1 for none.
     i32 set = -1;
     i32 binding = -1;
-    /// What a stage input holds.
-    built_in input = built_in::none;
     bool is_read_only = false;
     bool is_write_only = false;
     bool is_coherent = false;

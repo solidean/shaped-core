@@ -22,8 +22,6 @@ namespace
     if (!is_global(pointer))
         return false;
     auto const& g = p.globals[index_of(pointer)];
-    if (p.at(g.type).space == storage::input)
-        return true;
     switch (g.kind)
     {
     case global_kind::constants:

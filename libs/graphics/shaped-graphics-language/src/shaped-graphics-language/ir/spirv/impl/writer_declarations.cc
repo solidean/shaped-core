@@ -232,6 +232,24 @@ void writer::write_constants()
     }
 }
 
+void writer::write_stage_elements()
+{
+    for (auto i = isize(0); i < _p.stage_elements.size(); ++i)
+    {
+        auto const& e = _p.stage_elements[i];
+        auto const id = _elements + u32(i);
+        emit(_declarations, spv::Variable, {id_of(e.pointer), id, storage_of(_p.at(e.pointer).space)});
+        name(id, _p.name_at(e.name_first, e.name_size));
+        for (auto const& known : k_built_ins)
+            if (known.input == e.system)
+            {
+                emit(_annotations, spv::Decorate, {id, spv::BuiltIn, known.number});
+                if (known.is_subgroup)
+                    require(spv::GroupNonUniform);
+            }
+    }
+}
+
 void writer::write_globals()
 {
     for (auto i = isize(0); i < _p.globals.size(); ++i)
@@ -244,13 +262,6 @@ void writer::write_globals()
             emit(_annotations, spv::Decorate, {id, spv::DescriptorSet, u32(g.set)});
         if (g.binding >= 0)
             emit(_annotations, spv::Decorate, {id, spv::Binding, u32(g.binding)});
-        for (auto const& known : k_built_ins)
-            if (known.input == g.input)
-            {
-                emit(_annotations, spv::Decorate, {id, spv::BuiltIn, known.number});
-                if (known.is_subgroup)
-                    require(spv::GroupNonUniform);
-            }
         auto const space = _p.at(g.type).space;
         auto const is_storage = space == storage::storage_buffer
                              || (space == storage::resource && _p.at(_p.at(g.type).element).is_storage_image);
@@ -265,11 +276,13 @@ void writer::write_globals()
 
 void writer::write_entry()
 {
-    auto const words = 3 + string_words(_p.entry_name) + _p.globals.size();
+    auto const words = 3 + string_words(_p.entry_name) + _p.stage_elements.size() + _p.globals.size();
     head(_entry, spv::EntryPoint, words);
     _entry.push_back(5); // GLCompute
     _entry.push_back(_function);
     string_into(_entry, _p.entry_name);
+    for (auto i = isize(0); i < _p.stage_elements.size(); ++i)
+        _entry.push_back(_elements + u32(i));
     for (auto i = isize(0); i < _p.globals.size(); ++i)
         _entry.push_back(_globals + u32(i));
     emit(_modes, spv::ExecutionMode, {_function, 17u, u32(_p.workgroup[0]), u32(_p.workgroup[1]), u32(_p.workgroup[2])});

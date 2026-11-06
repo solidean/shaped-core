@@ -163,7 +163,7 @@ void lowering::elements_of_struct(check::type_id t, stage_part part, u32 array_s
     }
 }
 
-void lowering::element_of_input(isize index)
+u32 lowering::element_of_input(isize index)
 {
     auto const& input = _e.stage_inputs[index];
     auto const& spelled = emit::impl::spelling_of(input.input);
@@ -175,11 +175,12 @@ void lowering::element_of_input(isize index)
     auto const is_system_mode = _e.entry_stage == stage::pixel
                              && (input.input == stage_input::primitive_id || input.input == stage_input::is_front_facing
                                  || input.input == stage_input::sample_index);
-    add_stage_element({.part = stage_part::input,
-                       .system = built_in_of(input.input),
-                       .type = type,
-                       .interpolate = is_system_mode ? interpolation::flat : interpolation::none},
-                      spelled.hlsl_semantic, _plan.stage_input_names[index]);
+    return add_stage_element({.part = stage_part::input,
+                              .system = built_in_of(input.input),
+                              .type = type,
+                              .interpolate = is_system_mode ? interpolation::flat : interpolation::none,
+                              .pointer = pointer_type(type, storage::input)},
+                             spelled.hlsl_semantic, _plan.stage_input_names[index]);
 }
 
 void lowering::declare_stage_elements()

@@ -33,6 +33,7 @@ enum class rule_kind : u8
     composite,
     store,
     array_length,
+    stage_load,
     atomic,
     atomic_fadd,
     barrier,
@@ -132,6 +133,7 @@ constexpr op_rule k_rules[] = {
     {op::shuffle, rule_kind::composite, spv::VectorShuffle},
     {op::store, rule_kind::store, spv::Store},
     {op::array_length, rule_kind::array_length, spv::ArrayLength},
+    {op::stage_load, rule_kind::stage_load, spv::Load},
     {op::atomic_load, rule_kind::atomic, spv::AtomicLoad},
     {op::atomic_store, rule_kind::atomic, spv::AtomicStore},
     {op::atomic_exchange, rule_kind::atomic, spv::AtomicExchange},
@@ -301,6 +303,8 @@ void writer::instruction_of(u32 index)
         return emit(_code, rule.opcode, {id_of_raw(operands[0]), id_of_raw(operands[1])});
     case rule_kind::array_length:
         return emit(_code, rule.opcode, {id_of(i.type), id, id_of_raw(operands[0]), operands[1]});
+    case rule_kind::stage_load:
+        return emit(_code, rule.opcode, {id_of(i.type), id, _elements + operands[0]});
     case rule_kind::atomic:
         return atomic(rule.opcode, i, id);
     case rule_kind::atomic_fadd:

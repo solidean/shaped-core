@@ -53,7 +53,7 @@ private:
     void declare_stage_inputs();
     u32 add_stage_element(stage_element e, cc::string_view semantic, cc::string_view name);
     void elements_of_struct(check::type_id t, stage_part part, u32 array_size);
-    void element_of_input(isize index);
+    u32 element_of_input(isize index);
     /// Everything the entry point's edge holds, in declared order; lower_stage.cc.
     void declare_stage_elements();
     void statements(ast::range_of<flat_stmt_id> range);

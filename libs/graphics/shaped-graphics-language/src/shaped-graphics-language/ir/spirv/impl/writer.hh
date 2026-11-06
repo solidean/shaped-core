@@ -64,6 +64,7 @@ private:
     void write_structure(ir::type const& t, u32 id);
     void write_image(ir::type const& t, u32 id);
     void write_constants();
+    void write_stage_elements();
     void write_globals();
     void write_entry();
 
@@ -87,6 +88,7 @@ private:
     program const& _p;
     u32 _types = 0;
     u32 _constants = 0;
+    u32 _elements = 0;
     u32 _globals = 0;
     u32 _locals = 0;
     u32 _instructions = 0;

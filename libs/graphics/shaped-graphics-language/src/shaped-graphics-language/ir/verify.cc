@@ -50,6 +50,8 @@ enum class shape : u8
     store,
     access_chain,
     array_length,
+    stage_load,
+    stage_store,
     atomic,
     atomic_store,
     no_result,
@@ -138,6 +140,8 @@ constexpr shape k_shapes[] = {
     shape::store,               // store
     shape::access_chain,        // access_chain
     shape::array_length,        // array_length
+    shape::stage_load,          // stage_load
+    shape::stage_store,         // stage_store
     shape::atomic,              // atomic_load
     shape::atomic_store,        // atomic_store
     shape::atomic,              // atomic_exchange
@@ -239,6 +243,16 @@ private:
         for (auto const& l : _p.locals)
             if (!is_type(l.type) || _p.at(l.type).kind != type_kind::pointer)
                 return fail("a local that is no pointer");
+        for (auto const& e : _p.stage_elements)
+        {
+            if (!is_type(e.type))
+                return fail("a stage element of no type");
+            auto const kind = _p.at(e.type).kind;
+            if (kind == type_kind::matrix || kind == type_kind::array || kind == type_kind::structure
+                || kind == type_kind::pointer)
+                return fail("a stage element of {}, which crosses an edge only as scalars and vectors",
+                            type_name(_p, e.type));
+        }
     }
 
     void check_blocks()
@@ -628,9 +642,9 @@ private:
     {
         auto const operands = _p.operands_of(i);
         auto const s = k_shapes[isize(i.code)];
-        auto const gives_nothing = s == shape::store || s == shape::atomic_store || s == shape::no_result
-                                || s == shape::image_write || s == shape::branch || s == shape::branch_conditional
-                                || s == shape::switch_ || s == shape::leaves;
+        auto const gives_nothing = s == shape::store || s == shape::stage_store || s == shape::atomic_store
+                                || s == shape::no_result || s == shape::image_write || s == shape::branch
+                                || s == shape::branch_conditional || s == shape::switch_ || s == shape::leaves;
         if (gives_nothing)
         {
             if (gives_value(i))
@@ -827,6 +841,23 @@ private:
             for (auto k = isize(2); k < operands.size(); ++k)
                 if (operands[k] >= held && operands[k] != 0xffffffffu)
                     return wrong("names lane {} of {}", operands[k], held);
+            return;
+        }
+        case shape::stage_load:
+        case shape::stage_store:
+        {
+            auto const is_load = s == shape::stage_load;
+            if (operands.empty() || operands[0] >= u32(_p.stage_elements.size()))
+                return wrong("names no stage element");
+            auto const& element = _p.stage_elements[operands[0]];
+            auto const held = is_load ? 1 : 2;
+            need_count(operands, element.array_size > 0 ? held + 1 : held);
+            if (!_failure.empty())
+                return;
+            if (is_load && i.type != element.type)
+                return wrong("gives {} of an element of {}", type_name(_p, i.type), type_name(_p, element.type));
+            if (!is_load && type_at(operands, 1) != element.type)
+                mismatch(type_at(operands, 1), type_name(_p, element.type));
             return;
         }
         case shape::load:
