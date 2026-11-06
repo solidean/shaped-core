@@ -706,7 +706,10 @@ public:
                 auto const& mesh = p.m.functions[p.m.at(p.e.function).info];
                 parameters.push_back(cc::format("out vertices {} {}_vertices[{}]", type_text(p, *this, t.element), name,
                                                 mesh.max_vertices));
-                parameters.push_back(cc::format("out indices uint3 {}_triangles[{}]", name, mesh.max_primitives));
+                if (mesh.is_line_mesh)
+                    parameters.push_back(cc::format("out indices uint2 {}_lines[{}]", name, mesh.max_primitives));
+                else
+                    parameters.push_back(cc::format("out indices uint3 {}_triangles[{}]", name, mesh.max_primitives));
                 if (check::is_valid(t.primitive))
                     parameters.push_back(cc::format("out primitives {} {}_primitives[{}]",
                                                     type_text(p, *this, t.primitive), name, mesh.max_primitives));
@@ -734,7 +737,7 @@ public:
         auto const& info = p.m.functions[p.m.at(p.e.function).info];
         if (p.e.entry_stage == stage::mesh)
         {
-            out += "[outputtopology(\"triangle\")]\n";
+            out.appendf("[outputtopology(\"{}\")]\n", info.is_line_mesh ? "line" : "triangle");
             out.appendf("[numthreads({}, {}, {})]\n", p.e.workgroup[0], p.e.workgroup[1], p.e.workgroup[2]);
             out.appendf("void {}({})\n{{\n", p.entry_name, list);
         }

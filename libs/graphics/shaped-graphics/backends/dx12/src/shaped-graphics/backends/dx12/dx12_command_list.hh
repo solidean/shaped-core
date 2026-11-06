@@ -276,6 +276,7 @@ protected:
     void raster_draw_mesh_tasks(int x, int y, int z) override;
     void raster_draw_indexed(sg::draw_indexed_config const& config) override;
     void raster_draw_indexed_indirect(sg::raw_buffer_handle const& args, isize offset_in_bytes, isize count) override;
+    void raster_draw_mesh_tasks_indirect(sg::raw_buffer_handle const& args, isize offset_in_bytes, isize count) override;
 
     // Ray-tracing acceleration-structure builds (reached through cmd.raytracing). Bodies in dx12_raytracing.cc.
     [[nodiscard]] bool raytracing_is_supported() const override;

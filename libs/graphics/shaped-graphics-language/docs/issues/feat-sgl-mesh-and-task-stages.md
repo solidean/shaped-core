@@ -29,6 +29,11 @@ The task stage and per-triangle values are done too (2026-11-05): `@task(x, y, z
 sg's mesh-test.cc draws a task stage launching two mesh workgroups, and a quad of two differently tinted triangles, on dx12 and vulkan.
 Left:
 
-* Line and point topologies, which the attribute would name.
 * metal, once sg's metal backend builds a mesh pipeline.
-* An indirect mesh draw, sg's own.
+* Points, which D3D12's mesh stage cannot write; vulkan alone has them.
+
+## Lines and an indirect draw (2026-11-06)
+
+`@mesh(…, lines = M)` writes lines through `o.line(i, l)`, and its pipeline rasterizes a line list (CHK-480, CHK-482, CHK-483, EMIT-205).
+sg's `draw_mesh_tasks_indirect` reads each draw's workgroup counts from a buffer of `sg::dispatch_args`.
+sg's mesh-test.cc draws two crossing lines, and an indirect draw of one record and of two, on dx12 and vulkan.

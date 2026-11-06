@@ -1320,6 +1320,7 @@ A mesh stage takes the vertex stage's place: a workgroup writes the vertices and
 HLSL writes it on dx12 and vulkan; WebGPU has none, and sg's metal backend does not wire Metal's up yet, so WGSL and MSL refuse it.
 
 * **CHK-480** `@mesh(x, y, z, vertices = N, triangles = M)` makes an entry point of the mesh stage, which needs `mesh_shader`.
+  `lines = M` in place of `triangles = M` makes one that writes lines; one of the two is named, once.
   One to three workgroup sizes come first, as `@compute`'s do (CHK-370), and hold at most 128 invocations together.
   `N` and `M` are what the workgroup writes at most, each from 1 to 256, and each is named once; anything else is `invalid-attribute-arguments`.
   A mesh stage takes `@thread_id`, `@local_thread_id`, `@local_thread_index` and `@workgroup_id` as a compute stage does, and lists `@workgroup` bindings (CHK-294).
@@ -1329,8 +1330,10 @@ HLSL writes it on dx12 and vulkan; WebGPU has none, and sg's metal backend does 
 * **CHK-482** `o.set_counts(v, t)` states how many vertices and triangles the workgroup writes, at most `N` and `M`.
   It is a barrier of CHK-282, so it stands in control flow every invocation of the workgroup takes, and it comes before any write.
   `o.vertex(i, v)` writes the vertex `v`, which converts to `T`, at the `uint` index `i`, and `o.triangle(i, t)` the triangle of the three vertices the `uint3` `t` indexes.
+  A mesh stage of `lines` writes `o.line(i, l)`, the line of the two vertices the `uint2` `l` indexes, instead; the other of the two is `wrong-kind-of-name`.
   Each is a mesh stage's alone; an index at or past its count, or a write before the counts, is the target's undefined behaviour.
 * **CHK-483** A pipeline names its mesh stage as `mesh = f`, in the vertex stage's place, with no tessellation or geometry stage beside it.
+  The mesh stage says what primitives it writes, so the pipeline sets no `topology`, and one of `lines` rasterizes a line list.
   What the mesh stage writes is what the pixel stage takes, by CHK-183's rule, and the pipeline reads no vertex input.
 * **CHK-484** `@task(x, y, z)` makes an entry point of the task stage, which needs `mesh_shader`.
   Its workgroup sizes are `@compute`'s, and it takes the compute stage's inputs and `@workgroup` bindings, and returns nothing.

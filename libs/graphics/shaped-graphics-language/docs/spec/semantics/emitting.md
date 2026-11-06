@@ -185,6 +185,7 @@ const light_kind_sun: i32 = 2;
 * **EMIT-205** HLSL writes a mesh stage as `[outputtopology("triangle")]` and `[numthreads(x, y, z)]` over `void`.
   Its output `o` is two parameters, `out vertices T o_vertices[N]` and `out indices uint3 o_triangles[M]`.
   `set_counts` is `SetMeshOutputCounts`, and `vertex` and `triangle` are writes to those arrays.
+  A mesh stage of `lines` is `[outputtopology("line")]` over `out indices uint2 o_lines[M]`, which `line` writes.
 * **EMIT-207** HLSL writes a task stage as `[numthreads(x, y, z)]` over `void`, and declares `groupshared P sgl_payload` for its payload's struct `P`.
   `dispatch_mesh` stores its payload there and calls `DispatchMesh(x, y, z, sgl_payload)`, since HLSL hands a payload over from groupshared memory alone.
 * **EMIT-208** A mesh stage's payload parameter is `in payload P p`.

@@ -222,6 +222,11 @@ public:
     /// `args` needs `buffer_usage::indirect_command_buffer`, and a shader writing it needs `readwrite_buffer` too; it must not be bound writable to the same draw.
     /// An index buffer must be bound, and a 16-bit one needs every `first_index` even, which nothing can check on the CPU.
     void draw_indexed_indirect(buffer<draw_indexed_args> const& args, isize first = 0, isize count = 1);
+    /// Records `count` mesh draws of the bound mesh-shaded pipeline, each the workgroup counts the GPU reads from
+    /// `args[first, first + count)` when it runs: a culling pass decides how many meshlets draw, with no readback.
+    /// A record of a zero count draws nothing; `args` needs `buffer_usage::indirect_command_buffer`, as for
+    /// `draw_indexed_indirect`.
+    void draw_mesh_tasks_indirect(buffer<dispatch_args> const& args, isize first = 0, isize count = 1);
 
 private:
     friend class command_list_raster_scope;
@@ -284,6 +289,7 @@ public:
     void draw_indexed(draw_indexed_config const& config = {});
     void draw_mesh_tasks(int x, int y = 1, int z = 1);
     void draw_indexed_indirect(buffer<draw_indexed_args> const& args, isize first = 0, isize count = 1);
+    void draw_mesh_tasks_indirect(buffer<dispatch_args> const& args, isize first = 0, isize count = 1);
 
     // Pinned to its owning command list: neither copyable nor movable.
     command_list_raster_manual_scope(command_list_raster_manual_scope const&) = delete;
@@ -353,6 +359,7 @@ public:
     void draw_indexed(draw_indexed_config const& config = {});
     void draw_mesh_tasks(int x, int y = 1, int z = 1);
     void draw_indexed_indirect(buffer<draw_indexed_args> const& args, isize first = 0, isize count = 1);
+    void draw_mesh_tasks_indirect(buffer<dispatch_args> const& args, isize first = 0, isize count = 1);
 
     // Pinned to its owning command list: neither copyable nor movable.
     command_list_raster_scope(command_list_raster_scope const&) = delete;

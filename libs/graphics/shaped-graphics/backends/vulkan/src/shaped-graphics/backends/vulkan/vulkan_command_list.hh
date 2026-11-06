@@ -333,6 +333,7 @@ protected:
     void raster_draw_mesh_tasks(int x, int y, int z) override;
     void raster_draw_indexed(sg::draw_indexed_config const& config) override;
     void raster_draw_indexed_indirect(sg::raw_buffer_handle const& args, isize offset_in_bytes, isize count) override;
+    void raster_draw_mesh_tasks_indirect(sg::raw_buffer_handle const& args, isize offset_in_bytes, isize count) override;
 
     // Ray tracing (reached through cmd.raytracing).
     // is_supported()'s body is in vulkan_command_list.cc, which has vulkan_context complete.

@@ -459,4 +459,22 @@ void dx12_command_list::raster_draw_indexed_indirect(sg::raw_buffer_handle const
     _list->ExecuteIndirect(_ctx._draw_indexed_signature.Get(), UINT(count), buffer->_resource.Get(),
                            UINT64(offset_in_bytes), nullptr, 0);
 }
+
+void dx12_command_list::raster_draw_mesh_tasks_indirect(sg::raw_buffer_handle const& args,
+                                                        isize offset_in_bytes,
+                                                        isize count)
+{
+    CC_ASSERT(_in_render_pass, "an indirect mesh draw requires an open rendering scope");
+    CC_ASSERT(_bound_raster_layout != nullptr, "bind a raster pipeline before drawing");
+    CC_ASSERT(_ctx._draw_mesh_signature != nullptr, "an indirect mesh draw needs a device with mesh shaders");
+    auto const buffer = std::dynamic_pointer_cast<dx12_buffer const>(args);
+    CC_ASSERT(buffer != nullptr, "indirect mesh draw arguments are not a dx12 buffer");
+    CC_ASSERT(!buffer->is_expired(), "indirect mesh draw arguments are a transient buffer used past its epoch");
+
+    track_buffer_access(buffer, sg::pipeline_stage_flag::draw_indirect, sg::access_flag::indirect_read);
+    declare_raster_draw_barriers(false);
+    flush_barriers();
+    _list->ExecuteIndirect(_ctx._draw_mesh_signature.Get(), UINT(count), buffer->_resource.Get(),
+                           UINT64(offset_in_bytes), nullptr, 0);
+}
 } // namespace sg::backend::dx12

@@ -66,8 +66,8 @@ checker::mesh_shape checker::mesh_of(i32 file, ast::attribute const& a)
     auto const fail = [&]
     {
         report(diagnostic_kind::invalid_attribute_arguments, file, a.name,
-               "@mesh takes one to three workgroup sizes, then `vertices = N` and `triangles = M`, each from 1 to "
-               "256: `@mesh(32, vertices = 64, triangles = 126)`");
+               "@mesh takes one to three workgroup sizes, then `vertices = N` and `triangles = M` or `lines = M`, each "
+               "from 1 to 256: `@mesh(32, vertices = 64, triangles = 126)`");
         return mesh_shape{.workgroup = {1, 1, 1}, .vertices = 1, .triangles = 1};
     };
     for (auto const& argument : ast_of(file).at(a.arguments))
@@ -81,8 +81,11 @@ checker::mesh_shape checker::mesh_of(i32 file, ast::attribute const& a)
             result.workgroup[sizes++] = value.value();
         else if (key == "vertices" && result.vertices == 0 && value.value() <= k_max_mesh_outputs)
             result.vertices = value.value();
-        else if (key == "triangles" && result.triangles == 0 && value.value() <= k_max_mesh_outputs)
+        else if ((key == "triangles" || key == "lines") && result.triangles == 0 && value.value() <= k_max_mesh_outputs)
+        {
             result.triangles = value.value();
+            result.is_lines = key == "lines";
+        }
         else
             return fail();
     }

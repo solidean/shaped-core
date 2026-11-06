@@ -511,4 +511,28 @@ void vulkan_command_list::raster_draw_indexed_indirect(sg::raw_buffer_handle con
     for (auto i = isize(0); i < count; ++i)
         vkCmdDrawIndexedIndirect(_buffer, buffer->_buffer, VkDeviceSize(offset_in_bytes + i * stride), 1, u32(stride));
 }
+
+void vulkan_command_list::raster_draw_mesh_tasks_indirect(sg::raw_buffer_handle const& args,
+                                                          isize offset_in_bytes,
+                                                          isize count)
+{
+    CC_ASSERT(_in_render_pass, "an indirect mesh draw requires an open rendering scope");
+    CC_ASSERT(_bound_raster_layout != nullptr, "bind a raster pipeline before drawing");
+    CC_ASSERT(_ctx._cmd_draw_mesh_tasks_indirect != nullptr, "an indirect mesh draw needs VK_EXT_mesh_shader");
+    auto const buffer = std::dynamic_pointer_cast<vulkan_buffer const>(args);
+    CC_ASSERT(buffer != nullptr, "indirect mesh draw arguments are not a vulkan buffer");
+    CC_ASSERT(!buffer->is_expired(), "indirect mesh draw arguments are a transient buffer used past its epoch");
+    static_assert(sizeof(sg::dispatch_args) == sizeof(VkDrawMeshTasksIndirectCommandEXT));
+
+    track_buffer_access(*buffer, sg::pipeline_stage_flag::draw_indirect, sg::access_flag::indirect_read);
+    declare_raster_draw_barriers(false);
+    flush_barriers();
+    resume_rendering();
+
+    // One draw per call, as for an indexed draw: several in one need `multiDrawIndirect`
+    auto const stride = isize(sizeof(sg::dispatch_args));
+    for (auto i = isize(0); i < count; ++i)
+        _ctx._cmd_draw_mesh_tasks_indirect(_buffer, buffer->_buffer, VkDeviceSize(offset_in_bytes + i * stride), 1,
+                                           u32(stride));
+}
 } // namespace sg::backend::vulkan

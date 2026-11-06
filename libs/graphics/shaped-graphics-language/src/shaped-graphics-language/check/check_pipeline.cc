@@ -1079,6 +1079,23 @@ void checker::compile_pipeline(symbol_id id)
         else if (!is_valid(control) && is_patch)
             pc.fail(s.file, s.where, "a pipeline draws patches through its tessellation stages, and this one has none");
     }
+    // CHK-483: a mesh stage writes its own primitives, so the pipeline rasterizes what it writes
+    if (is_valid(mesh))
+    {
+        for (auto const& s : settings)
+            if (s.path == "topology")
+                pc.fail(s.file, s.where,
+                        "a mesh stage says what primitives it writes, so a pipeline with one sets no "
+                        "topology");
+        if (out.functions[out.at(mesh).info].is_line_mesh)
+            settings.push_back({.path = "topology",
+                                .kind = setting_kind::enum_case,
+                                .enum_case = "line_list",
+                                .enum_name = "primitive_topology",
+                                .source = setting_source::stage,
+                                .file = file,
+                                .where = where});
+    }
     if (is_valid(control))
     {
         settings.push_back({.path = "topology",
