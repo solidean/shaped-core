@@ -360,12 +360,27 @@ struct planner
                 auto const n = name == "mat2" ? 2 : name == "mat3" ? 3 : 4;
                 return {.piece = prelude_type_named(n == 2 ? "float2" : n == 3 ? "float3" : "float4"), .count = n};
             }
+            if (auto const words = words_of(type); is_valid(words))
+                return {.piece = words, .count = 1};
             return {};
         }
         auto const& t = p.m.at(type);
         if (t.kind == type_kind::array && t.count > 0 && p.m.builtin_type_of(t.element) != nullptr)
-            return {.piece = t.element, .count = i32(t.count)};
+        {
+            auto const words = words_of(t.element);
+            return {.piece = is_valid(words) ? words : t.element, .count = i32(t.count)};
+        }
         return {};
+    }
+
+    /// EMIT-196: the uint2 or uint4 a 64-bit scalar or two-vector crosses a link as where the target carries no 64-bit
+    /// value between stages; none elsewhere.
+    [[nodiscard]] type_id words_of(type_id type) const
+    {
+        auto const* const record = p.m.builtin_type_of(type);
+        if (record == nullptr || !is_word_split(p, type))
+            return type_id::none;
+        return prelude_type_named(record->leaf_count == 1 ? "uint2" : "uint4");
     }
 
     cc::vector<planned_member> members_of(cc::span<member_info const> members, bool has_locations, i32 first_location = 0)

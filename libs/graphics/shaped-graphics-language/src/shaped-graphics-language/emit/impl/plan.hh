@@ -379,6 +379,10 @@ struct block_placement
 /// `p.accesses` must hold the element's object already.
 [[nodiscard]] bool is_piece(plan const& p, check::flat_element const& element);
 
+/// EMIT-196: whether a 64-bit scalar or two-vector of `type` crosses a link as its 32-bit words, low word first, where
+/// the target carries no 64-bit value between stages (`hlsl-dx12`, MSL).
+[[nodiscard]] bool is_word_split(plan const& p, check::type_id type);
+
 /// EMIT-173: fills `p.accesses` from the target, its blocks and its structs in memory, and from where each expression
 /// stands: a place, or an array indexed in place, is spelled as held, and every other read is converted back.
 void plan_memory_accesses(plan& p);
