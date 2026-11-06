@@ -1,7 +1,7 @@
 # shaped-xr design
 
 What the library is today, the decisions behind it, and what comes next.
-The epic is [epic-xr](../../../../docs/issues/epic-xr.md); what the first prototype taught is on [feat-shaped-xr-core](../../../../docs/issues/feat-shaped-xr-core.md).
+The epic is [epic-xr](../../../../docs/issues/epic-xr.md); what the first prototype taught is on [feat-shaped-xr-core](../../../../docs/issues/.closed/2026/11/feat-shaped-xr-core.md).
 
 ## What exists
 

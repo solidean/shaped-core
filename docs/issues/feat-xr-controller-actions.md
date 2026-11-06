@@ -3,7 +3,6 @@ created: 2026-11-05
 priority: normal
 tags: [xr, input]
 parent: epic-xr
-blocked-by: [feat-shaped-xr-core]
 ---
 
 # Controller input as OpenXR-style actions

@@ -3,16 +3,16 @@ created: 2026-11-05
 priority: normal
 tags: [xr, ar]
 parent: epic-xr
-blocked-by: [feat-shaped-xr-core]
 ---
 
 # Passthrough: AR as an alpha-blend session
 
 ## Wanted
 
-- `xr::blend_mode`: `opaque`, `alpha_blend`, `additive`.
-- On Quest, alpha blend rides `XR_FB_passthrough` beneath the projection layer.
-- sr's tonemapping writes premultiplied alpha into an sRGB target, clearing to transparent.
+- `xr::blend_mode`: `opaque`, `alpha_blend`, `additive`, replacing `session_description::passthrough`, which is the one bool there is today.
+- An additive runtime reports as such, since a blend the runtime lacks is not one a session can ask for.
+- Premultiplied alpha from whatever tonemaps an AR frame, clearing to transparent.
+  sr has no tonemapping routine yet, so this waits for one, and `xr-cube` writes its colors directly until then.
 
 ## Known
 

@@ -3,7 +3,6 @@ created: 2026-11-05
 priority: normal
 tags: [xr, wasm]
 parent: epic-xr
-blocked-by: [feat-shaped-xr-core]
 ---
 
 # WebXR backend over the webgpu context

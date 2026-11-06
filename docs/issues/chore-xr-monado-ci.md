@@ -3,7 +3,6 @@ created: 2026-11-05
 priority: normal
 tags: [xr, ci]
 parent: epic-xr
-blocked-by: [feat-shaped-xr-core]
 ---
 
 # Run shaped-xr's tests against Monado headless in CI
