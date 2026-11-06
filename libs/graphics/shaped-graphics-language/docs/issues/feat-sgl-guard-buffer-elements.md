@@ -15,8 +15,16 @@ Workgroup memory read before any write (EVAL-92) needs a shadow of what was writ
 
 `values.length` of a buffer or a `bytes` (CHK-460), read through `GetDimensions` in HLSL and `arrayLength` in WGSL (EMIT-195).
 The `abort` and `report` profiles bound every buffer index and `bytes` access by it on dx12, vulkan and webgpu (LEGAL-66).
-Left:
 
-* metal, whose buffers carry no length until sg passes the lengths in, a buffer of sizes beside the argument table.
-* An element of a binding array, whose length is `unsupported-yet`, so its index is not guarded.
-* Workgroup memory read before any write (EVAL-92).
+Workgroup memory read before any write followed on 2026-11-06 (LEGAL-69).
+
+## Done on 2026-11-06
+
+An element of a binding array has its own `length` (CHK-460), and an access through one is guarded by it, its index pinned so it runs once (LEGAL-66).
+A binding array's own index is guarded by its `N`, on metal too (LEGAL-65).
+`define` runs no access of memory too short for it, so a read is zero, a store is dropped and an atomic gives zero (LEGAL-68).
+
+## Left
+
+metal, whose buffers carry no length until sg passes the lengths in, a buffer of sizes beside the argument table.
+That is all that keeps B11 ⚠️ in the matrix.

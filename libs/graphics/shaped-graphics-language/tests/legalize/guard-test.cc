@@ -405,16 +405,6 @@ TEST("sgl - a buffer's length is how many elements the bound buffer holds (CHK-4
     CHECK(run.result.leaves[0].as_float() == float(k_store_elements));
 }
 
-TEST("sgl - the length of an element of a binding array is unsupported-yet (CHK-460)")
-{
-    auto const checked = check_sources(read_prelude(), "binding parts:\n"
-                                                       "    chunks: buffer[float][2]\n"
-                                                       "\n"
-                                                       "@compute(1) fun cs(@thread_id id: int3){parts}:\n"
-                                                       "    let n = parts.chunks[0].length\n");
-    CHECK(reports_of(checked).contains("unsupported-yet")).dump("reports", reports_of(checked));
-}
-
 TEST("sgl emit - a buffer's length is read through GetDimensions in HLSL and arrayLength in WGSL, and refused in MSL "
      "(EMIT-195)")
 {

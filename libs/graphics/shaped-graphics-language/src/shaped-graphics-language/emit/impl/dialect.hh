@@ -70,6 +70,10 @@ public:
     [[nodiscard]] virtual cc::string buffer_length(cc::string_view name, bool is_bytes) const = 0;
     /// What the text declares before the entry point for `buffer_length` of `name`, empty where nothing.
     [[nodiscard]] virtual cc::string buffer_length_helper(cc::string_view, bool) const { return {}; }
+    /// `buffer_length` of the element `index` of the binding array `name`; only HLSL reaches this, since WGSL has no
+    /// binding arrays and MSL no lengths.
+    [[nodiscard]] virtual cc::string buffer_length_at(cc::string_view, cc::string_view, bool) const { return "0u"; }
+    [[nodiscard]] virtual cc::string buffer_length_at_helper(cc::string_view, bool, bool) const { return {}; }
     /// The statement that reserves `count` words and leaves the first one's index in `at`.
     [[nodiscard]] virtual cc::string debug_reserve(cc::string_view at, isize count) const = 0;
     /// The condition under which `count` words from `at` fit.

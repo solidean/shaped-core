@@ -1524,7 +1524,12 @@ struct writer
             [&](flat_buffer_length const& b)
             {
                 auto const is_bytes = p.m.at(p.e.at(b.buffer).type).kind == check::type_kind::bytes;
-                result = {.text = d.buffer_length(expr(b.buffer).text, is_bytes), .binds = level::primary};
+                if (auto const* const element = p.e.at(b.buffer).node.try_as<flat_element>())
+                    result = {.text = d.buffer_length_at(expr(element->object).text, expr(element->index).text,
+                                                         is_nonuniform_mark(element->index)),
+                              .binds = level::primary};
+                else
+                    result = {.text = d.buffer_length(expr(b.buffer).text, is_bytes), .binds = level::primary};
             },
             [&](flat_buffer_element const& b)
             {
@@ -1704,7 +1709,7 @@ struct writer
                                     .value = text,
                                     .dimensions = dimensions,
                                     .is_mut = is_mut || declares_only,
-                                    .is_zeroed = text.empty() && is_padded(local.type)});
+                                    .is_zeroed = text.empty() && (is_padded(local.type) || local.is_zeroed)});
         line(declaration);
     }
 
@@ -2123,13 +2128,20 @@ void sgl::emit::impl::write_helpers(cc::string& out, plan const& p, dialect cons
     for (auto const& x : p.e.exprs)
     {
         auto const* const length = x.node.try_as<check::flat_buffer_length>();
-        auto const* const member
-            = length != nullptr ? p.e.at(length->buffer).node.try_as<check::flat_binding_member>() : nullptr;
+        if (length == nullptr)
+            continue;
+        auto const* const element = p.e.at(length->buffer).node.try_as<check::flat_element>();
+        auto const named = element != nullptr ? element->object : length->buffer;
+        auto const* const member = p.e.at(named).node.try_as<check::flat_binding_member>();
         auto const found = member != nullptr ? resource_of(p, member->binding, member->member) : -1;
         if (found < 0)
             continue;
         auto const is_bytes = p.m.at(p.e.at(length->buffer).type).kind == check::type_kind::bytes;
-        auto text = d.buffer_length_helper(p.resources[found].name, is_bytes);
+        auto const* const call = element != nullptr ? p.e.at(element->index).node.try_as<check::flat_call>() : nullptr;
+        auto const* const mark = call != nullptr ? p.m.builtin_function(call->intrinsic) : nullptr;
+        auto const is_nonuniform = mark != nullptr && mark->mark == builtins::index_mark::nonuniform;
+        auto text = element != nullptr ? d.buffer_length_at_helper(p.resources[found].name, is_nonuniform, is_bytes)
+                                       : d.buffer_length_helper(p.resources[found].name, is_bytes);
         auto is_known = text.empty();
         for (auto const& w : written)
             is_known = is_known || w == text;

@@ -337,19 +337,86 @@ struct guarder
         return out.block_expr(label, x.type, stmts);
     }
 
-    /// The index of `element`, an array's, as a block that ends the invocation where it is outside the array (EVAL-90);
-    /// `none` where it needs no guard.
+    /// The call of `nonuniform i` or `uniform i`, where `index` is one; a mark is read only where it indexes (CHK-300).
+    [[nodiscard]] flat_call const* mark_of(flat_expr_id index) const
+    {
+        auto const* const call = out.e.at(index).node.try_as<flat_call>();
+        auto const* const record = call != nullptr ? out.m.builtin_function(call->intrinsic) : nullptr;
+        return record != nullptr && record->mark != builtins::index_mark::none ? call : nullptr;
+    }
+
+    /// What `index` marks, or `index` itself.
+    [[nodiscard]] flat_expr_id unmarked(flat_expr_id index) const
+    {
+        auto const* const call = mark_of(index);
+        return call != nullptr ? out.e.at(call->arguments)[0] : index;
+    }
+
+    /// `value` under the mark `index` carries, or `value` itself.
+    flat_expr_id remarked(flat_expr_id index, flat_expr_id value)
+    {
+        auto const* const mark = mark_of(index);
+        if (mark == nullptr)
+            return value;
+        auto const call = *mark;
+        auto const type = out.e.at(index).type;
+        flat_expr_id const arguments[] = {value};
+        return out.add_expr(type, flat_call{.callee = call.callee,
+                                            .intrinsic = call.intrinsic,
+                                            .is_pure = call.is_pure,
+                                            .arguments = out.expr_list(arguments),
+                                            .text = call.text});
+    }
+
+    /// CHK-491's constant of the unbounded binding array `object` names, as a `uint`; `none` where its binding holds none.
+    flat_expr_id unbounded_length_of(flat_expr_id object)
+    {
+        auto const* const b = out.e.at(object).node.try_as<flat_binding_member>();
+        if (b == nullptr)
+            return flat_expr_id::none;
+        auto const named = *b;
+        auto const members = out.m.at(out.m.bindings[out.m.at(named.binding).info].members);
+        for (auto i = isize(0); i < members.size(); ++i)
+            if (members[i].length_of == named.member)
+            {
+                flat_expr_id const held[]
+                    = {out.add_expr(members[i].type, flat_binding_member{.binding = named.binding, .member = i32(i)})};
+                return out.call("convert_int_to_uint", held);
+            }
+        return flat_expr_id::none;
+    }
+
+    /// The test that the pinned `i` of shape `s` is outside `0 ..< length`, a pinned `uint`.
+    flat_expr_id outside_length(local_id i, shape const& s, local_id length)
+    {
+        auto unsigned_index = out.local(i);
+        if (s.element == "int")
+        {
+            flat_expr_id const argument[] = {out.local(i)};
+            unsigned_index = out.call("convert_int_to_uint", argument);
+        }
+        auto bad = out.not_(compare("less", shape{.element = builtins::k_uint}, unsigned_index, out.local(length)));
+        if (s.element == "int")
+            bad = out.or_(compare("less", s, out.local(i), out.int_literal(0)), bad);
+        return bad;
+    }
+
+    /// The index of `element`, an array's or a binding array's, as a block that ends the invocation where it is outside
+    /// the array (EVAL-90); `none` where it needs no guard, or where no length of it is known.
     flat_expr_id guarded_index(flat_expr const& x, flat_element const& element)
     {
         if (!is_known(out.e, element.object) || !is_known(out.e, element.index))
             return flat_expr_id::none;
         auto const& array = out.m.at(out.e.at(element.object).type);
-        if (array.kind != type_kind::array || array.count <= 0 || is_resource(out.m.at(array.element).kind))
+        if (array.kind != type_kind::array)
             return flat_expr_id::none;
-        if (out.e.at(element.index).node.is<flat_int_literal>())
+        auto const count = array.count;
+        auto const is_unbounded = count <= 0;
+        auto const value = unmarked(element.index);
+        if (out.e.at(value).node.is<flat_int_literal>() && !is_unbounded)
             return flat_expr_id::none;
         // a type, not a reference: the guard grows the tree it would point into
-        auto const index_type = out.e.at(element.index).type;
+        auto const index_type = out.e.at(value).type;
         auto const index_known = integer_shape_of(index_type);
         if (!index_known.has_value() || !index_known.value().lanes.empty()
             || (index_known.value().element != "int" && index_known.value().element != "uint"))
@@ -360,57 +427,289 @@ struct guarder
         out.inlined_through = x.inlined_through;
         auto const label = out.add_label("guard");
         auto stmts = stmt_list();
-        auto const i = pinned("index", element.index, stmts);
-        auto bad = out.not_(compare("less", index_shape, out.local(i), literal_for(index_shape, array.count)));
-        if (index_shape.element == "int")
-            bad = out.or_(compare("less", index_shape, out.local(i), out.int_literal(0)), bad);
-        auto const value = out.local(i);
-        auto const on_failure = failed({cc::string("index "), cc::format(" is outside 0 ..< {}", array.count)},
-                                       cc::span<flat_expr_id const>(&value, 1), i, literal_for(index_shape, 0));
-        stmts.push_back(out.if_(bad, on_failure));
+        auto const length = is_unbounded ? unbounded_length_of(element.object) : flat_expr_id::none;
+        if (is_unbounded && !is_valid(length))
+            return flat_expr_id::none;
+        auto const i = pinned("index", value, stmts);
+        if (is_unbounded)
+        {
+            auto const n = pinned("length", length, stmts);
+            flat_expr_id const values[] = {out.local(i), out.local(n)};
+            auto const on_failure
+                = failed({cc::string("index "), cc::string(" is outside a binding array of "), cc::string(" elements")},
+                         values, i, literal_for(index_shape, 0));
+            stmts.push_back(out.if_(outside_length(i, index_shape, n), on_failure));
+        }
+        else
+        {
+            auto bad = out.not_(compare("less", index_shape, out.local(i), literal_for(index_shape, count)));
+            if (index_shape.element == "int")
+                bad = out.or_(compare("less", index_shape, out.local(i), out.int_literal(0)), bad);
+            auto const shown = out.local(i);
+            auto const on_failure = failed({cc::string("index "), cc::format(" is outside 0 ..< {}", count)},
+                                           cc::span<flat_expr_id const>(&shown, 1), i, literal_for(index_shape, 0));
+            stmts.push_back(out.if_(bad, on_failure));
+        }
         stmts.push_back(out.leave(label, out.local(i)));
-        return out.block_expr(label, index_type, stmts);
+        return remarked(element.index, out.block_expr(label, index_type, stmts));
     }
 
-    /// The index of `element`, a buffer's, as a block that ends the invocation where it is past the bound buffer's end
-    /// (EVAL-90, LEGAL-66); `none` where it needs no guard or the buffer is no binding member.
-    flat_expr_id guarded_buffer_index(flat_expr const& x, flat_buffer_element const& element)
+    /// The pinned index and length a test of `index` against the memory `buffer` names leaves behind.
+    struct bounded_index
     {
-        if (!guards_buffers || !is_known(out.e, element.buffer) || !is_known(out.e, element.index))
-            return flat_expr_id::none;
-        if (!out.e.at(element.buffer).node.is<flat_binding_member>())
-            return flat_expr_id::none;
-        auto const index_type = out.e.at(element.index).type;
-        auto const index_known = integer_shape_of(index_type);
+        local_id index = local_id::none;
+        local_id length = local_id::none;
+    };
+
+    /// `index` of `buffer` pinned into `into`, tested against the bound length, failing as a guard does.
+    cc::optional<bounded_index> bound_buffer_index(flat_expr_id index, flat_expr_id buffer, stmt_list& into)
+    {
+        auto const index_known = integer_shape_of(out.e.at(index).type);
         if (!index_known.has_value() || !index_known.value().lanes.empty()
             || (index_known.value().element != "int" && index_known.value().element != "uint"))
-            return flat_expr_id::none;
+            return {};
         auto const index_shape = index_known.value();
-        auto const uint_shape = shape{.element = builtins::k_uint};
-
-        out.from = x.from;
-        out.inlined_through = x.inlined_through;
-        auto const label = out.add_label("guard");
-        auto stmts = stmt_list();
-        auto const i = pinned("index", element.index, stmts);
+        auto const i = pinned("index", index, into);
         auto const length = pinned(
-            "length", out.add_expr(out.type_named(builtins::k_uint), flat_buffer_length{.buffer = element.buffer}),
-            stmts);
-        auto unsigned_index = out.local(i);
-        if (index_shape.element == "int")
-        {
-            flat_expr_id const argument[] = {out.local(i)};
-            unsigned_index = out.call("convert_int_to_uint", argument);
-        }
-        auto bad = out.not_(compare("less", uint_shape, unsigned_index, out.local(length)));
-        if (index_shape.element == "int")
-            bad = out.or_(compare("less", index_shape, out.local(i), out.int_literal(0)), bad);
+            "length", out.add_expr(out.type_named(builtins::k_uint), flat_buffer_length{.buffer = buffer}), into);
         flat_expr_id const values[] = {out.local(i), out.local(length)};
         auto const on_failure
             = failed({cc::string("index "), cc::string(" is outside a buffer of "), cc::string(" elements")}, values, i,
                      literal_for(index_shape, 0));
-        stmts.push_back(out.if_(bad, on_failure));
-        stmts.push_back(out.leave(label, out.local(i)));
+        into.push_back(out.if_(outside_length(i, index_shape, length), on_failure));
+        return bounded_index{.index = i, .length = length};
+    }
+
+    /// Whether a guard of `element` must hold the whole access rather than its index.
+    /// An element of a binding array names its memory twice, for the length and for the access, so its index is pinned
+    /// in front of both; under `define` an access of memory that holds nothing is not to run at all (LEGAL-68).
+    [[nodiscard]] bool guards_whole_access(flat_buffer_element const& element) const
+    {
+        return guards_buffers && is_known(out.e, element.buffer)
+            && (defines || out.e.at(element.buffer).node.is<flat_element>());
+    }
+
+    /// The buffer element at the root of the place `id`, or nothing where it is rooted elsewhere.
+    [[nodiscard]] flat_buffer_element const* buffer_root_of(flat_expr_id id) const
+    {
+        for (auto steps = 0; steps < k_max_depth && is_known(out.e, id); ++steps)
+        {
+            auto const& x = out.e.at(id);
+            if (auto const* const member = x.node.try_as<flat_member>())
+                id = member->object;
+            else if (auto const* const element = x.node.try_as<flat_element>())
+                id = element->object;
+            else
+                return x.node.try_as<flat_buffer_element>();
+        }
+        return nullptr;
+    }
+
+    [[nodiscard]] bool is_whole_buffer_access(flat_expr_id id) const
+    {
+        auto const* const root = buffer_root_of(id);
+        return root != nullptr && guards_whole_access(*root);
+    }
+
+    /// `resource`, a binding member or an element of a binding array of them, naming the same thing however often it is
+    /// read: an element's index is pinned into `pins`.
+    flat_expr_id pinned_resource(flat_expr_id resource, stmt_list& pins)
+    {
+        auto x = out.e.at(resource);
+        auto* const element = x.node.try_as<flat_element>();
+        if (element == nullptr || out.e.at(element->index).node.is<flat_int_literal>())
+            return resource;
+        auto const value = unmarked(element->index);
+        auto const index = out.add_local(local_kind::temporary, "element", out.e.at(value).type);
+        pins.push_back(out.let(index, value));
+        element->index = remarked(element->index, out.local(index));
+        out.e.exprs.push_back(x);
+        return flat_expr_id(out.e.exprs.size() - 1);
+    }
+
+    /// A buffer place with its indices pinned, and the length its root was tested against.
+    struct buffer_access
+    {
+        flat_expr_id place = flat_expr_id::none;
+        local_id length = local_id::none;
+    };
+
+    /// `id`, a place rooted at a buffer element, with each index pinned into `pins` in the order the place evaluates them.
+    cc::optional<buffer_access> pinned_buffer_place(flat_expr_id id, stmt_list& pins)
+    {
+        auto x = out.e.at(id);
+        auto result = buffer_access();
+        if (auto* const root = x.node.try_as<flat_buffer_element>())
+        {
+            auto const buffer = pinned_resource(root->buffer, pins);
+            auto const bounded = bound_buffer_index(root->index, buffer, pins);
+            if (!bounded.has_value())
+                return {};
+            root->buffer = buffer;
+            root->index = out.local(bounded.value().index);
+            result.length = bounded.value().length;
+        }
+        else if (auto* const member = x.node.try_as<flat_member>())
+        {
+            auto const inner = pinned_buffer_place(member->object, pins);
+            if (!inner.has_value())
+                return {};
+            member->object = inner.value().place;
+            result.length = inner.value().length;
+        }
+        else if (auto* const element = x.node.try_as<flat_element>())
+        {
+            auto const inner = pinned_buffer_place(element->object, pins);
+            if (!inner.has_value())
+                return {};
+            element->object = inner.value().place;
+            if (!out.e.at(element->index).node.is<flat_int_literal>())
+            {
+                auto const index = out.add_local(local_kind::temporary, "index", out.e.at(element->index).type);
+                pins.push_back(out.let(index, element->index));
+                element->index = out.local(index);
+            }
+            result.length = inner.value().length;
+        }
+        else
+            return {};
+        out.e.exprs.push_back(x);
+        result.place = flat_expr_id(out.e.exprs.size() - 1);
+        return result;
+    }
+
+    /// LEGAL-68: leaves `label` with a zero of `type` where `is_short`, memory too short for the access to run at all.
+    void left_with_zero(flat_expr_id is_short, label_id label, type_id type, stmt_list& into)
+    {
+        auto const zero = add_temporary_var(out, "zero", type);
+        out.e.locals[index_of(zero)].is_zeroed = true;
+        into.push_back(out.var(zero));
+        flat_stmt_id const leave[] = {out.leave(label, out.local(zero))};
+        into.push_back(out.if_(is_short, leave));
+    }
+
+    [[nodiscard]] flat_expr_id holds_nothing(local_id length)
+    {
+        return compare("equal", shape{.element = builtins::k_uint}, out.local(length), uint_literal(0));
+    }
+
+    /// `id`, a read of a whole-access buffer place, as a block; under `define` it is zero where the memory holds nothing.
+    flat_expr_id guard_buffer_read(flat_expr_id id)
+    {
+        auto const x = out.e.at(id);
+        out.from = x.from;
+        out.inlined_through = x.inlined_through;
+        auto stmts = stmt_list();
+        auto const access = pinned_buffer_place(id, stmts);
+        if (!access.has_value())
+            return id;
+        auto const label = out.add_label("guard");
+        if (defines)
+            left_with_zero(holds_nothing(access.value().length), label, x.type, stmts);
+        stmts.push_back(out.leave(label, access.value().place));
+        return out.block_expr(label, x.type, stmts);
+    }
+
+    /// `s`, a store to a whole-access buffer place, as a block that evaluates its place, then its value, then stores;
+    /// under `define` memory that holds nothing drops the store.
+    flat_stmt_id guard_buffer_store(flat_stmt const& s, flat_assign const& n)
+    {
+        out.from = s.from;
+        out.inlined_through = s.inlined_through;
+        auto stmts = stmt_list();
+        auto const access = pinned_buffer_place(n.place, stmts);
+        if (!access.has_value())
+            return flat_stmt_id::none;
+        auto const stored = out.add_local(local_kind::temporary, "stored", out.e.at(n.value).type);
+        stmts.push_back(out.let(stored, n.value));
+        auto const store = out.assign(access.value().place, out.local(stored));
+        if (defines)
+        {
+            flat_stmt_id const then[] = {store};
+            stmts.push_back(out.if_(out.not_(holds_nothing(access.value().length)), then));
+        }
+        else
+            stmts.push_back(store);
+        return out.block(out.add_label("stored"), stmts);
+    }
+
+    /// Whether `call` is an atomic of a whole-access buffer place.
+    [[nodiscard]] bool is_buffer_call(flat_call const& call) const
+    {
+        if (!guards_buffers || !is_valid(call.intrinsic) || index_of(call.intrinsic) >= registry.functions.size()
+            || !is_known(out.e, call.arguments) || call.arguments.count < 1)
+            return false;
+        return registry.at(call.intrinsic).is_atomic && is_whole_buffer_access(out.e.at(call.arguments)[0]);
+    }
+
+    /// `id`, an atomic of a whole-access buffer place, with its place and its operands pinned, in their order.
+    /// Under `define`, memory that holds nothing runs no atomic, and gives zero.
+    /// A call that gives nothing is a statement, which `into` receives instead of a block.
+    flat_expr_id guard_buffer_call(flat_expr_id id, stmt_list* into)
+    {
+        auto const x = out.e.at(id);
+        auto call = *x.node.try_as<flat_call>();
+        out.from = x.from;
+        out.inlined_through = x.inlined_through;
+        auto stmts = stmt_list();
+        auto arguments = cc::vector<flat_expr_id>();
+        for (auto const a : out.e.at(call.arguments))
+            arguments.push_back(a);
+        auto const access = pinned_buffer_place(arguments[0], stmts);
+        if (!access.has_value())
+            return id;
+        arguments[0] = access.value().place;
+        for (auto i = isize(1); i < arguments.size(); ++i)
+        {
+            auto const operand = out.add_local(local_kind::temporary, "operand", out.e.at(arguments[i]).type);
+            stmts.push_back(out.let(operand, arguments[i]));
+            arguments[i] = out.local(operand);
+        }
+        call.arguments = out.expr_list(arguments);
+        auto const guarded = out.add_expr(x.type, call);
+        if (into != nullptr)
+        {
+            auto const run = out.eval(guarded);
+            if (defines)
+            {
+                flat_stmt_id const then[] = {run};
+                stmts.push_back(out.if_(out.not_(holds_nothing(access.value().length)), then));
+            }
+            else
+                stmts.push_back(run);
+            for (auto const s : stmts)
+                into->push_back(s);
+            return id;
+        }
+        auto const label = out.add_label("guard");
+        if (defines)
+            left_with_zero(holds_nothing(access.value().length), label, x.type, stmts);
+        auto const result = out.add_local(local_kind::temporary, "result", x.type);
+        stmts.push_back(out.let(result, guarded));
+        stmts.push_back(out.leave(label, out.local(result)));
+        return out.block_expr(label, x.type, stmts);
+    }
+
+    /// The index of `element`, a buffer's, as a block that ends the invocation where it is past the bound buffer's end
+    /// (EVAL-90, LEGAL-66); `none` where it needs no guard, the buffer is no binding member, or the whole access is
+    /// guarded instead.
+    flat_expr_id guarded_buffer_index(flat_expr const& x, flat_buffer_element const& element)
+    {
+        if (!guards_buffers || !is_known(out.e, element.buffer) || !is_known(out.e, element.index)
+            || guards_whole_access(element))
+            return flat_expr_id::none;
+        if (!out.e.at(element.buffer).node.is<flat_binding_member>())
+            return flat_expr_id::none;
+        auto const index_type = out.e.at(element.index).type;
+
+        out.from = x.from;
+        out.inlined_through = x.inlined_through;
+        auto const label = out.add_label("guard");
+        auto stmts = stmt_list();
+        auto const bounded = bound_buffer_index(element.index, element.buffer, stmts);
+        if (!bounded.has_value())
+            return flat_expr_id::none;
+        stmts.push_back(out.leave(label, out.local(bounded.value().index)));
         return out.block_expr(label, index_type, stmts);
     }
 
@@ -421,8 +720,7 @@ struct guarder
             || !is_known(out.e, call.arguments) || call.arguments.count < 2)
             return 0;
         auto const arguments = out.e.at(call.arguments);
-        if (out.m.at(out.e.at(arguments[0]).type).kind != type_kind::bytes
-            || !out.e.at(arguments[0]).node.is<flat_binding_member>())
+        if (out.m.at(out.e.at(arguments[0]).type).kind != type_kind::bytes)
             return 0;
         auto const& r = registry.at(call.intrinsic);
         if (r.name == "load")
@@ -437,7 +735,9 @@ struct guarder
 
     /// `call`, a load or a store of `bytes`, as a block that ends the invocation where its offset is no multiple of 4
     /// or a word it reaches is past the bound memory's end (EVAL-97, LEGAL-66).
-    flat_expr_id guard_bytes(flat_expr_id id, i32 words)
+    /// Under `define`, memory too short for those words runs no load or store: a load is zero, and a store is dropped.
+    /// A store gives nothing, so under `define` it is a statement, which `into` receives instead of a block.
+    flat_expr_id guard_bytes(flat_expr_id id, i32 words, stmt_list* into)
     {
         auto const x = out.e.at(id);
         auto const& call = *x.node.try_as<flat_call>();
@@ -450,13 +750,14 @@ struct guarder
         out.inlined_through = x.inlined_through;
         auto const label = out.add_label("guard");
         auto stmts = stmt_list();
-        // the memory is a resource and no local holds one; the offset and a stored value keep their order
+        // the memory is a resource and no local holds one; its index, the offset and a stored value keep their order
+        auto const memory = pinned_resource(operands[0], stmts);
         auto const offset = pinned("offset", operands[1], stmts);
         auto stored = local_id::none;
         if (operands.size() == 3)
             stored = pinned("stored", operands[2], stmts);
         auto const length = pinned(
-            "length", out.add_expr(out.type_named(builtins::k_uint), flat_buffer_length{.buffer = operands[0]}), stmts);
+            "length", out.add_expr(out.type_named(builtins::k_uint), flat_buffer_length{.buffer = memory}), stmts);
 
         flat_expr_id const remainder_args[] = {out.local(offset), uint_literal(4)};
         auto const misaligned
@@ -474,11 +775,23 @@ struct guarder
         stmts.push_back(out.if_(out.or_(misaligned, past_the_end), on_failure));
 
         auto guarded = call;
-        auto arguments = cc::vector<flat_expr_id>{operands[0], out.local(offset)};
+        auto arguments = cc::vector<flat_expr_id>{memory, out.local(offset)};
         if (operands.size() == 3)
             arguments.push_back(out.local(stored));
         guarded.arguments = out.expr_list(arguments);
-        stmts.push_back(out.leave(label, out.add_expr(x.type, guarded)));
+        auto const access = out.add_expr(x.type, guarded);
+        if (into != nullptr)
+        {
+            flat_stmt_id const then[] = {out.eval(access)};
+            stmts.push_back(
+                out.if_(out.not_(compare("less", uint_shape, out.local(length), uint_literal(4 * words))), then));
+            for (auto const s : stmts)
+                into->push_back(s);
+            return id;
+        }
+        if (defines)
+            left_with_zero(compare("less", uint_shape, out.local(length), uint_literal(4 * words)), label, x.type, stmts);
+        stmts.push_back(out.leave(label, access));
         return out.block_expr(label, x.type, stmts);
     }
 
@@ -1117,6 +1430,8 @@ struct guarder
             operand(buffer->buffer);
             operand(buffer->index);
         }
+        else if (auto* const length = copy.node.try_as<flat_buffer_length>())
+            operand(length->buffer);
         else if (auto* const element = copy.node.try_as<flat_element>())
         {
             next_is_chain_object = true;
@@ -1128,6 +1443,8 @@ struct guarder
         else if (auto* const call = copy.node.try_as<flat_call>())
         {
             if (tests_reads && is_workgroup_call(*call))
+                own_places.push_back(out.e.at(call->arguments)[0]);
+            if (guards && is_buffer_call(*call))
                 own_places.push_back(out.e.at(call->arguments)[0]);
             call->arguments = exprs(call->arguments, depth, changed);
         }
@@ -1168,10 +1485,16 @@ struct guarder
         // LEGAL-69: a read of workgroup memory tests the shadow; a place inside a place is no read of its own
         if (tests_reads && !is_chain_object && !own_places.values().contains(id) && is_workgroup_place(result))
             return guard_workgroup_read(result);
+        // LEGAL-66: a read of a binding array's buffer, and every read under `define`, holds its own test
+        if (may_guard && !is_chain_object && !own_places.values().contains(id) && is_whole_buffer_access(result))
+            return guard_buffer_read(result);
         if (auto const* const call = out.e.at(result).node.try_as<flat_call>();
             call != nullptr && tests_reads && out.e.at(result).type != checked_module::void_type
             && is_workgroup_call(*call))
             return guard_workgroup_call(result, nullptr);
+        if (auto const* const call = out.e.at(result).node.try_as<flat_call>();
+            call != nullptr && may_guard && out.e.at(result).type != checked_module::void_type && is_buffer_call(*call))
+            return guard_buffer_call(result, nullptr);
         if (auto const* const call = out.e.at(result).node.try_as<flat_call>();
             call != nullptr && may_guard && is_integer_division(*call))
             return guard_division(result);
@@ -1179,8 +1502,9 @@ struct guarder
             if (auto const name = guarded_math_of(*call); !name.empty())
                 return guard_math(result, name);
         if (auto const* const call = out.e.at(result).node.try_as<flat_call>(); call != nullptr && may_guard)
-            if (auto const words = bytes_words_of(*call); words > 0)
-                return guard_bytes(result, words);
+            if (auto const words = bytes_words_of(*call);
+                words > 0 && !(defines && out.e.at(result).type == checked_module::void_type))
+                return guard_bytes(result, words, nullptr);
         if (auto const* const call = out.e.at(result).node.try_as<flat_call>(); call != nullptr && may_guard)
             if (auto const size = matrix_part_size_of(*call); size > 0)
                 return guard_matrix_part(result, size);
@@ -1372,12 +1696,16 @@ struct guarder
         {
             // LEGAL-69: a store to workgroup memory marks what it stored, and is no read of it
             auto const is_store = guards && !shadow.empty() && is_workgroup_place(n->place);
-            if (is_store)
+            auto const is_buffer_store = guards && is_whole_buffer_access(n->place);
+            if (is_store || is_buffer_store)
                 own_places.push_back(n->place);
             value(n->place);
             value(n->value);
             if (is_store)
                 if (auto const block = guard_workgroup_store(copy, *n); is_valid(block))
+                    return block;
+            if (is_buffer_store)
+                if (auto const block = guard_buffer_store(copy, *n); is_valid(block))
                     return block;
         }
         else if (auto* const n = copy.node.try_as<flat_print>())
@@ -1392,6 +1720,17 @@ struct guarder
             {
                 auto stmts = stmt_list();
                 guard_workgroup_call(n->value, &stmts);
+                if (!stmts.empty())
+                    return out.block(out.add_label("stored"), stmts);
+            }
+            if (auto const* const call = out.e.at(n->value).node.try_as<flat_call>();
+                call != nullptr && guards && out.e.at(n->value).type == checked_module::void_type)
+            {
+                auto stmts = stmt_list();
+                if (is_buffer_call(*call))
+                    guard_buffer_call(n->value, &stmts);
+                else if (auto const words = bytes_words_of(*call); defines && words > 0)
+                    guard_bytes(n->value, words, &stmts);
                 if (!stmts.empty())
                     return out.block(out.add_label("stored"), stmts);
             }
