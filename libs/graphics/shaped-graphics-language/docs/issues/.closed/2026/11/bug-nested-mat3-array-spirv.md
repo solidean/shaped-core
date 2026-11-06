@@ -2,6 +2,8 @@
 created: 2026-11-01
 refs:
   - file: libs/graphics/shaped-graphics-language/src/shaped-graphics-language/emit/impl/plan.cc
+closed: 2026-11-06
+resolution: fixed
 ---
 
 # A nested array of mat3 in GPU memory loses its last column through DXC's SPIR-V
