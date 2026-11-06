@@ -131,8 +131,8 @@ ASYNC_TEST("shaped-xr session - vulkan renders into the runtime's images, frame 
 ASYNC_TEST("shaped-xr session - a blend mode the runtime lacks falls back to opaque, and says so",
            nx::config::exclusive("openxr"))
 {
-    nx::expect_warning("a blend mode was asked of a session*");
     auto const system = simulated_system({.api = sxr::graphics_api::vulkan});
+    nx::expect_warning("a blend mode was asked of a session*");
     CHECK(system->offers_blend(sxr::blend_mode::opaque));
     CHECK(!system->offers_blend(sxr::blend_mode::additive));
 
