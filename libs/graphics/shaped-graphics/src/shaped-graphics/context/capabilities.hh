@@ -133,6 +133,11 @@ enum class sg::feature
     /// WGSL has no builtin for it.
     first_instance,
 
+    /// An indirect draw's `first_instance` may be other than 0.
+    /// Without it such a record is invalid on vulkan and draws nothing on WebGPU, with no error on either.
+    /// D3D12 and Metal always have it; vulkan needs `drawIndirectFirstInstance` and WebGPU `indirect-first-instance`.
+    indirect_first_instance,
+
     /// A pixel shader may tell a helper invocation from a real one, which SGL's strong compare-exchange needs there (EMIT-163).
     /// D3D12 has HLSL's `IsHelperLane()` from SM 6.6, Vulkan has the core `HelperInvocation` built-in, Metal has `simd_is_helper_thread()`.
     /// D3D12's and Vulkan's compare-exchange is strong already, so their strong form needs no loop and asks no test.
@@ -257,6 +262,7 @@ inline constexpr feature k_all_features[] = {
     feature::device_coherence,
     feature::image_atomics,
     feature::first_instance,
+    feature::indirect_first_instance,
     feature::helper_lane_query,
     feature::opacity_micromap,
     feature::vertex_layer_output,
@@ -330,6 +336,8 @@ static_assert(isize(sizeof(k_all_features) / sizeof(k_all_features[0])) == isize
         return "image_atomics";
     case feature::first_instance:
         return "first_instance";
+    case feature::indirect_first_instance:
+        return "indirect_first_instance";
     case feature::helper_lane_query:
         return "helper_lane_query";
     case feature::opacity_micromap:
