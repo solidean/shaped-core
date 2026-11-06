@@ -461,10 +461,12 @@ fun is_occluded(world: acceleration_structure[.triangles], r: ray, .mask: int = 
 /// Lets the target regroup a ray-generation stage's invocations so those agreeing on the low `bits` bits of `hint` run
 /// together, as the traces they go on to make are likelier to run alike.
 /// A hint: each invocation goes on as it was, and only which ones share a wave changes.
-/// It is dx12's `MaybeReorderThread` where the device has `shader_execution_reordering`, and nothing elsewhere.
+/// It is dx12's `MaybeReorderThread` and vulkan's `OpReorderThreadWithHintEXT` where the device has `shader_execution_reordering`, and nothing elsewhere.
 @stages(.raygen)
 fun maybe_reorder(hint: uint, bits: int):
-    const if has(.shader_execution_reordering):
+    const if has(.shader_execution_reordering) and target_api == .vulkan:
+        reorder_thread_by_hint(hint, bits)
+    else if has(.shader_execution_reordering):
         "hlsl
             dx::MaybeReorderThread($hint, (uint)$bits);
         "

@@ -166,12 +166,13 @@ The fallback has to reach the `uint` bits of an `atomic[float]`, which no SGL sp
 **SER, second.**
 The first half is done: prelude `maybe_reorder(hint, bits)`, a text body under `has(.shader_execution_reordering)` with an empty fallback.
 sg reports the feature on dx12 where the Agility SDK's runtime gives Shader Model 6.9, and slib compiles an entry point that uses it at 6.9.
-A GPU test traces through a reordering raygen on dx12, really reordering, and through its fallback on vulkan.
+It reports it on vulkan where `VK_EXT_ray_tracing_invocation_reorder` reorders, and the vulkan branch is a builtin, since its instruction must be declared outside the body.
+GPU tests trace through a reordering raygen on dx12 and on vulkan, each really reordering, and through the fallback on a device without the feature.
 The second half is a compiler construct rather than a text type, since only the compiler knows a ray type's table indices.
-`trace(…, reorder = true)`, or `reorder = hint, reorder_bits = n`, traces into a hit object, regroups by it and invokes it on dx12 (CHK-433), and is the plain trace elsewhere.
+`trace(…, reorder = true)`, or `reorder = hint, reorder_bits = n`, traces into a hit object, regroups by it and invokes it on dx12 and vulkan (CHK-433), and is the plain trace elsewhere.
 A first-class `hit_object` lets a raygen read a hit before it runs its shaders (CHK-434).
 It is gated on the feature rather than specialized: no other target can trace without running them, so the program writes the plain `trace` beside it.
-Under `.vulkan` it needs SPIR-V instructions of its own, since no DXC lowers SER to SPIR-V; neither the pinned 1.9.2602 nor the Vulkan SDK's does.
+Under `.vulkan` it is SPIR-V instructions of its own, since no DXC lowers SER to SPIR-V; neither the pinned 1.9.2602 nor the Vulkan SDK's does (EMIT-225).
 
 **Opacity micromaps need no text body.**
 sg builds them on vulkan already, and a trace honors one with no change to the shader.

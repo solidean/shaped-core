@@ -20,7 +20,7 @@
 /// What `finalize` fills in — a name, the parameter types — is read back from that parse, never stated a second time.
 /// libs/graphics/shaped-graphics-language/docs/adding-a-builtin.md is the walk-through.
 
-/// The three text formats; the two HLSL targets spell every builtin alike.
+/// The three text formats; the two HLSL targets spell every builtin alike, but for what `is_vulkan` tells apart.
 enum class sgl::builtins::language : sgl::u8
 {
     hlsl,
@@ -59,7 +59,11 @@ struct sgl::builtins::written
 struct sgl::builtins::call_context
 {
     language target = language::hlsl;
+    /// HLSL for vulkan, whose DXC lowers some of HLSL's calls to no SPIR-V, which the text then states itself.
+    bool is_vulkan = false;
     cc::span<written const> arguments;
+    /// Each argument's type as the target spells it, for a record with a `helper`; empty for any other.
+    cc::span<cc::string const> argument_types;
     registry const& builtins;
     /// The record's `spelling::data`, which lets one writer serve a family of records.
     u32 data = 0;
@@ -84,6 +88,8 @@ struct sgl::builtins::call_context
 struct sgl::builtins::helper_context
 {
     language target = language::hlsl;
+    /// HLSL for vulkan.
+    bool is_vulkan = false;
     cc::span<cc::string const> argument_types;
     /// The record's `spelling::data`.
     u32 data = 0;
@@ -208,6 +214,8 @@ struct sgl::builtins::type_record
     cc::string doc;
 
     cc::string hlsl;
+    /// HLSL for vulkan, where it is not `hlsl`: a type DXC has no SPIR-V for, which the text spells as SPIR-V's own.
+    cc::string hlsl_vulkan;
     cc::string wgsl;
     cc::string msl;
     /// The HLSL spelling of a local whose flags are known constants, as `RayQuery<RAY_FLAG_FORCE_OPAQUE>`; none where its type takes none.

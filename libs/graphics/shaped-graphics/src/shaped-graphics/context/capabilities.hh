@@ -159,7 +159,8 @@ enum class sg::feature
 
     /// A ray-generation shader may reorder its invocations by a coherence hint, so threads that will run alike run together.
     /// D3D12 grants it from Shader Model 6.9 beside ray-tracing pipelines, which only the Agility SDK's runtime has.
-    /// Vulkan's `VK_EXT_ray_tracing_invocation_reorder` has no compiler path from HLSL yet, and metal and WebGPU have none.
+    /// Vulkan grants it through `VK_EXT_ray_tracing_invocation_reorder` on a device that reorders rather than only accepting the calls.
+    /// Metal and WebGPU have none.
     /// SGL's `maybe_reorder` is a hint: without the feature it does nothing, so it is what `has` asks.
     shader_execution_reordering,
 

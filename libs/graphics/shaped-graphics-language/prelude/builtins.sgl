@@ -4937,6 +4937,8 @@ struct exchange_result[T]:
 @builtin @internal @stages(.raygen) fun hit_object_reorder_by_hint(h: hit_object, hint: uint, bits: int)
 /// Runs the closest hit or the miss the hit object holds, handing the payload over past the signature.
 @builtin @internal @stages(.raygen) fun hit_object_invoke(h: hit_object)
+/// Regroups the invocations by the low `bits` bits of `hint`, which `maybe_reorder` writes on vulkan.
+@builtin @internal @stages(.raygen) fun reorder_thread_by_hint(hint: uint, bits: int)
 
 // A call of a callable, which `table[i](mut p)` lowers to with the table's place in the section added (CHK-344).
 /// Calls the callable at `index` of the pipeline's callable section, handing the parameter over past the signature.

@@ -131,7 +131,8 @@ ctx.supports(sg::feature::ray_query)               // bool — THE capability qu
                                                    //     VK_EXT_shader_atomic_float, true on metal, false on dx12 and webgpu;
                                                    //     slib asks SGL for the native add where it is true; no `require`)
                                                    //   | shader_execution_reordering (a raygen regroups by a hint; dx12 on the
-                                                   //     Agility SDK's SM 6.9 beside RT pipelines; SGL's maybe_reorder asks it)
+                                                   //     Agility SDK's SM 6.9 beside RT pipelines, vulkan with a reordering
+                                                   //     VK_EXT_ray_tracing_invocation_reorder; SGL's maybe_reorder asks it)
                                                    //   | float_specials (floats keep NaNs, infinities, signed zeros on request; vulkan
                                                    //     with shaderSignedZeroInfNanPreserveFloat32, true on dx12 and metal, false on webgpu;
                                                    //     a vulkan SGL entry point at @float(.specials) needs it)
