@@ -1,4 +1,5 @@
 #include <clean-core/algorithm/sort.hh>
+#include <clean-core/common/macros.hh> // CC_OS_WINDOWS
 #include <clean-core/record/log.hh>
 #include <clean-core/streams/file_stream.hh>
 #include <clean-core/string/format.hh>
@@ -23,6 +24,13 @@ using sgl::ir::dxil::signature_element;
 using sgl::ir::dxil::signature_table;
 
 namespace fs = std::filesystem;
+
+// DXC's compile to DXIL ends in reflection through d3d12shader.h, which the Linux release does not ship.
+#ifdef CC_OS_WINDOWS
+constexpr bool k_dxc_writes_dxil = true;
+#else
+constexpr bool k_dxc_writes_dxil = false;
+#endif
 
 [[nodiscard]] cc::string read_file(cc::string_view path)
 {
@@ -344,6 +352,8 @@ void report(sweep_counts const& counts)
 TEST("sgl signature - DXIL's packer places every element of the repo's SGL as DXC does",
      nx::config::rerun_on("libs/graphics/shaped-graphics-language/src/shaped-graphics-language/ir/dxil/signature.cc"))
 {
+    if constexpr (!k_dxc_writes_dxil)
+        SKIP("DXC writes DXIL on Windows alone");
     auto compiler = ssc::dxc::compiler::create();
     if (compiler.has_error())
         SKIP("no DXC");
@@ -584,6 +594,8 @@ void compare_source(ssc::dxc::compiler& compiler, cc::string_view source, sweep_
 TEST("sgl signature - the places no shader of the repo declares match DXC too",
      nx::config::rerun_on("libs/graphics/shaped-graphics-language/src/shaped-graphics-language/ir/dxil/signature.cc"))
 {
+    if constexpr (!k_dxc_writes_dxil)
+        SKIP("DXC writes DXIL on Windows alone");
     auto compiler = ssc::dxc::compiler::create();
     if (compiler.has_error())
         SKIP("no DXC");
@@ -603,6 +615,8 @@ TEST("sgl signature - the places no shader of the repo declares match DXC too",
 TEST("sgl signature - an element placed apart from DXC is caught, by this comparison and by the validator",
      nx::config::rerun_on("libs/graphics/shaped-graphics-language/src/shaped-graphics-language/ir/dxil/signature.cc"))
 {
+    if constexpr (!k_dxc_writes_dxil)
+        SKIP("DXC writes DXIL on Windows alone");
     auto compiler = ssc::dxc::compiler::create();
     if (compiler.has_error())
         SKIP("no DXC");
@@ -689,6 +703,8 @@ TEST("sgl signature - an element placed apart from DXC is caught, by this compar
 TEST("sgl signature - random stage links match DXC, and each side of a link agrees",
      nx::config::rerun_on("libs/graphics/shaped-graphics-language/src/shaped-graphics-language/ir/dxil/signature.cc"))
 {
+    if constexpr (!k_dxc_writes_dxil)
+        SKIP("DXC writes DXIL on Windows alone");
     auto compiler = ssc::dxc::compiler::create();
     if (compiler.has_error())
         SKIP("no DXC");
