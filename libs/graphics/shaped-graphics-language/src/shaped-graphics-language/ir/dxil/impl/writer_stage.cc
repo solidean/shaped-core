@@ -189,7 +189,7 @@ void writer::stage_load(u32 index, instruction const& i)
     {
         _uses.view_id = _uses.view_id || e.system == ir::built_in::view_index;
         _scratch.clear();
-        _scratch.push_back(value_of(e.system == ir::built_in::view_index  ? dx_op::view_id
+        _scratch.push_back(value_of(e.system == ir::built_in::view_index    ? dx_op::view_id
                                     : e.system == ir::built_in::sample_mask ? dx_op::coverage
                                                                             : dx_op::sample_index));
         return define(index);
@@ -534,7 +534,8 @@ void writer::write_entry_metadata()
         {
             auto const is_input = e.table == signature_table::input;
             auto const is_sampled = e.mode == interpolation::sample || e.mode == interpolation::noperspective_sample;
-            _summary.writes_depth = _summary.writes_depth || (!is_input && (e.system_value == 65 || e.system_value >= 67));
+            _summary.writes_depth
+                = _summary.writes_depth || (!is_input && (e.system_value == 65 || e.system_value >= 67));
             _summary.runs_per_sample = _summary.runs_per_sample || (is_input && (is_sampled || e.system_value == 10));
         }
     // the PSV lists a module's bindings in this order, whichever order they were found in

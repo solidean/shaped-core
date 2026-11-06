@@ -338,6 +338,5 @@ inline constexpr dx_op_info k_dx_ops[] = {
 // clang-format on
 
 static_assert(sizeof(k_dx_ops) / sizeof(k_dx_ops[0]) == sizeof(char[isize(dx_op::texture_gather_cmp) + 1]));
-static_assert(sizeof(k_dx_classes) / sizeof(k_dx_classes[0])
-              == sizeof(char[isize(dx_class_id::texture_gather_cmp) + 1]));
+static_assert(sizeof(k_dx_classes) / sizeof(k_dx_classes[0]) == sizeof(char[isize(dx_class_id::texture_gather_cmp) + 1]));
 } // namespace sgl::ir::dxil::impl

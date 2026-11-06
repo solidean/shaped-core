@@ -405,7 +405,8 @@ value_ref lowering::bound_resource(i32 index)
         break;
     }
     if (is_array || r.count != 1)
-        pointee = r.count == 0 ? runtime_array_type(pointee, 0) : intern({.kind = type_kind::array, .count = u32(r.count), .element = pointee});
+        pointee = r.count == 0 ? runtime_array_type(pointee, 0)
+                               : intern({.kind = type_kind::array, .count = u32(r.count), .element = pointee});
     known = add_global({.type = pointer_type(pointee, space),
                         .kind = kind,
                         .set = r.group,
@@ -539,8 +540,9 @@ cc::optional<place> lowering::place_of(flat_expr_id id)
     auto operands = cc::vector<u32>::create_with_capacity(chain.size() + 1);
     operands.push_back(u32(base.value().pointer));
     operands.push_back_range(chain);
-    return place{.pointer = add(op::access_chain, pointer_type(at, space), operands, 0, nonuniform_of(base.value().pointer)),
-                 .type = base.value().type};
+    return place{
+        .pointer = add(op::access_chain, pointer_type(at, space), operands, 0, nonuniform_of(base.value().pointer)),
+        .type = base.value().type};
 }
 
 bool lowering::is_nonuniform(flat_expr_id id) const

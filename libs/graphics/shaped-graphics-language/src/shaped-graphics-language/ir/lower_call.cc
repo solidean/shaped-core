@@ -505,8 +505,9 @@ value_ref lowering::texture_call(flat_call const& c, builtins::function_record c
         if (auto const* const smp = node.try_as<flat_file_sampler>())
             return bound_sampler(emit::impl::sampler_of(_plan, smp->sampler));
         auto const* const bound = node.try_as<flat_binding_member>();
-        auto const pointer = bound != nullptr ? bound_resource(emit::impl::resource_of(_plan, bound->binding, bound->member))
-                                              : bound_element(id);
+        auto const pointer = bound != nullptr
+                               ? bound_resource(emit::impl::resource_of(_plan, bound->binding, bound->member))
+                               : bound_element(id);
         if (!is_valid(pointer))
             unsupported("a texture of a binding array");
         return pointer;

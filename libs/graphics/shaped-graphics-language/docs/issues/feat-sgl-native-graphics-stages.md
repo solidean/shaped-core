@@ -228,7 +228,8 @@ On 2026-11-06, on the Arc B580 and over the repo's SGL:
 - **The signature golden holds at no mismatch**, and now shows it can fail.
   An element moved a row, moved a column or put in another mode is caught by the comparison, and the validator refuses a container whose `OSG1` moved one.
 - **The mixed-route test draws the surface through each pairing of the routes**, on dx12 and vulkan, every lane within 1e-4 of DXC's pair.
-  Its stages are [`pixel_surface.sgl`](../../../shaped-graphics/tests/shaders/sgl_mixed/pixel_surface.sgl), which covers `discard`, derivatives, the stage inputs, `@depth`, centroid and sample interpolation, and the sampling family.
+  Its stages are [`pixel_surface.sgl`](../../../shaped-graphics/tests/shaders/sgl_mixed/pixel_surface.sgl).
+  They cover `discard`, derivatives, the stage inputs, `@depth`, centroid and sample interpolation, and the sampling family.
   A discarded pixel's neighbour reads the derivative only a helper can give, exactly 2, and a depth test shows the depth written.
 - **`slug-cube`'s captures are byte for byte DXC's**, on dx12 through DXIL and on vulkan through SPIR-V.
 - **Compute did not move.** Of 396 outputs, 356 are the bytes they were, and the other 40 are 20 entry points that lower now and did not.

@@ -224,92 +224,93 @@ value_ref lowering::expr(flat_expr_id id)
 {
     auto const& x = _e.at(id);
     auto result = value_ref::none;
-    x.node.visit([&](flat_invalid const&) { unsupported("an unfilled node"); },
-                 [&](flat_literal const&) { result = literal(x); }, //
-                 [&](flat_int_literal const&) { result = literal(x); }, [&](flat_wide_literal const&)
-                 { result = literal(x); }, [&](flat_bool_literal const&) { result = literal(x); },
-                 [&](flat_enum_value const& v) { result = int_constant(_m.at(_m.at(x.type).cases)[v.case_index].value); },
-                 [&](flat_local_ref const& l)
-                 {
-                     auto const position = index_of(l.local);
-                     result = _locals[position];
-                     if (_is_variable[position])
-                         result = load({.pointer = result, .type = x.type});
-                 },
-                 [&](flat_binding_member const&)
-                 {
-                     if (auto const memory = place_of(id); memory.has_value())
-                         result = load(memory.value());
-                     else
-                         unsupported("a resource used as a value");
-                 },
-                 [&](flat_file_sampler const&) { unsupported("a file sampler used as a value"); },
-                 [&](flat_buffer_element const&)
-                 {
-                     if (auto const memory = place_of(id); memory.has_value())
-                         result = load(memory.value());
-                     else
-                         unsupported("a buffer element no place reaches");
-                 },
-                 [&](flat_buffer_length const& b)
-                 {
-                     auto const* const bound = _e.at(b.buffer).node.try_as<flat_binding_member>();
-                     auto const memory = bound != nullptr
-                                           ? bound_resource(emit::impl::resource_of(_plan, bound->binding, bound->member))
-                                           : bound_element(b.buffer);
-                     if (!ir::is_valid(memory))
-                         return unsupported("the length of a binding array's element");
-                     u32 const operands[] = {u32(memory), 0u};
-                     auto length = add(op::array_length, _uint, operands);
-                     if (_m.at(_e.at(b.buffer).type).kind == check::type_kind::bytes)
-                         length = add(op::imul, _uint, {length, uint_constant(4)});
-                     auto const wanted = value_type(x.type);
-                     result = wanted == _uint ? length : add(op::bitcast, wanted, {length});
-                 },
-                 [&](flat_element const& a)
-                 {
-                     if (auto const memory = place_of(id); memory.has_value())
-                     {
-                         result = load(memory.value());
-                         return;
-                     }
-                     auto const object = expr(a.object);
-                     auto const type = value_type(x.type);
-                     if (auto const* const k = _e.at(a.index).node.try_as<flat_int_literal>())
-                     {
-                         result = extracted(object, type, u32(k->value));
-                         return;
-                     }
-                     // an index that is no constant reaches an array in a variable alone
-                     auto const variable = spilled(object, _e.at(a.object).type);
-                     u32 const chain[] = {u32(variable), u32(expr(a.index))};
-                     auto const pointer = add(op::access_chain, pointer_type(type, storage::function), chain);
-                     result = add(op::load, type, {pointer});
-                 },
-                 [&](flat_member const& m)
-                 {
-                     // a place keeps a read of one field from loading the whole value around it
-                     if (!m.is_swizzle())
-                         if (auto const memory = place_of(id); memory.has_value())
-                         {
-                             result = load(memory.value());
-                             return;
-                         }
-                     result = member_of(x, m);
-                 },
-                 [&](flat_construct const& c)
-                 {
-                     auto operands = cc::vector<u32>();
-                     for (auto const argument : _e.at(c.arguments))
-                         if (_e.at(argument).type != checked_module::void_type)
-                             operands.push_back(u32(expr(argument)));
-                     result = add(op::construct, value_type(x.type), operands);
-                 },
-                 [&](flat_call const& c) { result = call(x, c); },
-                 [&](flat_not const& n) { result = add(op::logical_not, _bool, {expr(n.operand)}); },
-                 [&](flat_and const& a) { result = short_circuit(a.lhs, a.rhs, true); },
-                 [&](flat_or const& o) { result = short_circuit(o.lhs, o.rhs, false); },
-                 [&](flat_block const&) { unsupported("a block in a core tree"); },
-                 [&](flat_by_target const&) { unsupported("a trace's two forms in a core tree"); });
+    x.node.visit(
+        [&](flat_invalid const&) { unsupported("an unfilled node"); },
+        [&](flat_literal const&) { result = literal(x); }, //
+        [&](flat_int_literal const&) { result = literal(x); }, [&](flat_wide_literal const&) { result = literal(x); },
+        [&](flat_bool_literal const&) { result = literal(x); },
+        [&](flat_enum_value const& v) { result = int_constant(_m.at(_m.at(x.type).cases)[v.case_index].value); },
+        [&](flat_local_ref const& l)
+        {
+            auto const position = index_of(l.local);
+            result = _locals[position];
+            if (_is_variable[position])
+                result = load({.pointer = result, .type = x.type});
+        },
+        [&](flat_binding_member const&)
+        {
+            if (auto const memory = place_of(id); memory.has_value())
+                result = load(memory.value());
+            else
+                unsupported("a resource used as a value");
+        },
+        [&](flat_file_sampler const&) { unsupported("a file sampler used as a value"); },
+        [&](flat_buffer_element const&)
+        {
+            if (auto const memory = place_of(id); memory.has_value())
+                result = load(memory.value());
+            else
+                unsupported("a buffer element no place reaches");
+        },
+        [&](flat_buffer_length const& b)
+        {
+            auto const* const bound = _e.at(b.buffer).node.try_as<flat_binding_member>();
+            auto const memory = bound != nullptr
+                                  ? bound_resource(emit::impl::resource_of(_plan, bound->binding, bound->member))
+                                  : bound_element(b.buffer);
+            if (!ir::is_valid(memory))
+                return unsupported("the length of a binding array's element");
+            u32 const operands[] = {u32(memory), 0u};
+            auto length = add(op::array_length, _uint, operands);
+            if (_m.at(_e.at(b.buffer).type).kind == check::type_kind::bytes)
+                length = add(op::imul, _uint, {length, uint_constant(4)});
+            auto const wanted = value_type(x.type);
+            result = wanted == _uint ? length : add(op::bitcast, wanted, {length});
+        },
+        [&](flat_element const& a)
+        {
+            if (auto const memory = place_of(id); memory.has_value())
+            {
+                result = load(memory.value());
+                return;
+            }
+            auto const object = expr(a.object);
+            auto const type = value_type(x.type);
+            if (auto const* const k = _e.at(a.index).node.try_as<flat_int_literal>())
+            {
+                result = extracted(object, type, u32(k->value));
+                return;
+            }
+            // an index that is no constant reaches an array in a variable alone
+            auto const variable = spilled(object, _e.at(a.object).type);
+            u32 const chain[] = {u32(variable), u32(expr(a.index))};
+            auto const pointer = add(op::access_chain, pointer_type(type, storage::function), chain);
+            result = add(op::load, type, {pointer});
+        },
+        [&](flat_member const& m)
+        {
+            // a place keeps a read of one field from loading the whole value around it
+            if (!m.is_swizzle())
+                if (auto const memory = place_of(id); memory.has_value())
+                {
+                    result = load(memory.value());
+                    return;
+                }
+            result = member_of(x, m);
+        },
+        [&](flat_construct const& c)
+        {
+            auto operands = cc::vector<u32>();
+            for (auto const argument : _e.at(c.arguments))
+                if (_e.at(argument).type != checked_module::void_type)
+                    operands.push_back(u32(expr(argument)));
+            result = add(op::construct, value_type(x.type), operands);
+        },
+        [&](flat_call const& c) { result = call(x, c); },
+        [&](flat_not const& n) { result = add(op::logical_not, _bool, {expr(n.operand)}); },
+        [&](flat_and const& a) { result = short_circuit(a.lhs, a.rhs, true); },
+        [&](flat_or const& o) { result = short_circuit(o.lhs, o.rhs, false); },
+        [&](flat_block const&) { unsupported("a block in a core tree"); },
+        [&](flat_by_target const&) { unsupported("a trace's two forms in a core tree"); });
     return result;
 }

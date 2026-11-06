@@ -607,13 +607,14 @@ TEST("sgl signature - an element placed apart from DXC is caught, by this compar
     if (compiler.has_error())
         SKIP("no DXC");
     // `tail` shares `near`'s row, so moving it is the mistake a packer that took one row per location makes
-    constexpr cc::string_view source = "struct shared_row:\n"
-                                       "    @position position: hpos4\n"
-                                       "    near: float3\n"
-                                       "    tail: float\n"
-                                       "@vertex fun shared_vs(@vertex_index v: int) -> shared_row:\n"
-                                       "    let x = v as float\n"
-                                       "    return { position = hpos4(x, x, x, 1.0), near = float3(x, x, x), tail = x }\n";
+    constexpr cc::string_view source
+        = "struct shared_row:\n"
+          "    @position position: hpos4\n"
+          "    near: float3\n"
+          "    tail: float\n"
+          "@vertex fun shared_vs(@vertex_index v: int) -> shared_row:\n"
+          "    let x = v as float\n"
+          "    return { position = hpos4(x, x, x, 1.0), near = float3(x, x, x), tail = x }\n";
     auto request = sgl::text_request{.source = source,
                                      .entry_point = "shared_vs",
                                      .target = sgl::emit::target::hlsl_dx12,

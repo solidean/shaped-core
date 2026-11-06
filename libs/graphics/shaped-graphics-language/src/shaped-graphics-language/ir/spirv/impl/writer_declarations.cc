@@ -35,12 +35,24 @@ struct built_in_number
     bool is_subgroup = false;
 };
 constexpr built_in_number k_built_ins[] = {
-    {built_in::thread_id, 28},        {built_in::local_thread_id, 27},     {built_in::local_thread_index, 29},
-    {built_in::workgroup_id, 26},     {built_in::subgroup_size, 36, true}, {built_in::subgroup_invocation_id, 41, true},
-    {built_in::position, 0},          {built_in::vertex_index, 42},        {built_in::instance_index, 43},
-    {built_in::first_instance, 4425}, {built_in::is_front_facing, 17},    {built_in::sample_index, 18},
-    {built_in::sample_mask, 20},      {built_in::primitive_id, 7},         {built_in::view_index, 4440},
-    {built_in::layer, 9},             {built_in::depth, 22},               {built_in::depth_greater_equal, 22},
+    {built_in::thread_id, 28},
+    {built_in::local_thread_id, 27},
+    {built_in::local_thread_index, 29},
+    {built_in::workgroup_id, 26},
+    {built_in::subgroup_size, 36, true},
+    {built_in::subgroup_invocation_id, 41, true},
+    {built_in::position, 0},
+    {built_in::vertex_index, 42},
+    {built_in::instance_index, 43},
+    {built_in::first_instance, 4425},
+    {built_in::is_front_facing, 17},
+    {built_in::sample_index, 18},
+    {built_in::sample_mask, 20},
+    {built_in::primitive_id, 7},
+    {built_in::view_index, 4440},
+    {built_in::layer, 9},
+    {built_in::depth, 22},
+    {built_in::depth_greater_equal, 22},
     {built_in::depth_less_equal, 22},
 };
 /// A pixel stage reads `@position` as what the rasterizer made of it, where a vertex stage's is `Position`.
@@ -255,7 +267,8 @@ void writer::write_constants()
 
 u32 writer::space_of(stage_element const& e) const
 {
-    auto const is_input = e.part == stage_part::input || (e.part == stage_part::primitive && _p.stage == check::stage::pixel);
+    auto const is_input
+        = e.part == stage_part::input || (e.part == stage_part::primitive && _p.stage == check::stage::pixel);
     return is_input ? u32(spv::Input) : u32(spv::Output);
 }
 
