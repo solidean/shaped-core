@@ -209,6 +209,8 @@ TEST("sgl emit - MSL writes a buffer's ulong min and max as statements, and refu
     CHECK(standing.value().text.contains("atomic_ulong")).dump("text", standing.value().text);
     CHECK(standing.value().text.contains("atomic_max_explicit(&")).dump("text", standing.value().text);
     CHECK(standing.value().text.contains("atomic_min_explicit(&")).dump("text", standing.value().text);
+    // the statements are the whole of each call, with no empty value left to discard after them
+    CHECK(!standing.value().text.contains("(void)()")).dump("text", standing.value().text);
     auto const reading = text_for("reading", target::msl);
     REQUIRE(reading.has_error());
     CHECK(reading.error().contains("which Metal's does not give")).dump("error", reading.error());

@@ -505,6 +505,7 @@ if(SC_BUILD_TESTS)
                 sixteen_bit.sgl:*
                 sixty_four_bit.sgl:*
                 sixty_four_bit_shared.sgl:*
+                sixty_four_bit_min_max.sgl:*
                 float_atomics.sgl:*
                 option_formats.sgl:*
         )
