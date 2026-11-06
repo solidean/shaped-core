@@ -250,5 +250,5 @@ ASYNC_INVOCABLE_TEST("sg - a package that did not opt in is refused a tlas that 
     }
     CHECK(refused.contains("SOFTWARE_TRACE"));
     ctx->submit_command_list(cc::move(cmd));
-    co_return;
+    co_await ctx->idle_completion();
 }
