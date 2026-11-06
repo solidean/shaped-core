@@ -54,6 +54,7 @@ add_library(shaped-graphics-language
     src/shaped-graphics-language/builtins/registry.cc
 
     src/shaped-graphics-language/ir/ir.cc
+    src/shaped-graphics-language/ir/pipeline.cc
     src/shaped-graphics-language/ir/lower.cc
     src/shaped-graphics-language/ir/lower_call.cc
     src/shaped-graphics-language/ir/lower_expr.cc

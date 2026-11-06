@@ -1,16 +1,10 @@
 #include "emit.hh"
 
-#include <clean-core/common/asserts.hh>
 #include <clean-core/string/format.hh>
 #include <shaped-graphics-language/emit/impl/dialect.hh>
 #include <shaped-graphics-language/emit/impl/plan.hh>
-#include <shaped-graphics-language/ir/dxil/dxil.hh>
 #include <shaped-graphics-language/ir/ir.hh>
-#include <shaped-graphics-language/ir/lower.hh>
-#include <shaped-graphics-language/ir/simplify.hh>
-#include <shaped-graphics-language/ir/spirv.hh>
-#include <shaped-graphics-language/ir/ssa.hh>
-#include <shaped-graphics-language/ir/verify.hh>
+#include <shaped-graphics-language/ir/pipeline.hh>
 #include <shaped-graphics-language/legalize/legalize.hh>
 
 namespace
@@ -21,18 +15,6 @@ constexpr sgl::emit::target k_all_targets[] = {
     sgl::emit::target::wgsl,
     sgl::emit::target::msl,
 };
-
-/// A pass's mistake stops here, where assertions are on, rather than reaching a driver.
-void check_ir([[maybe_unused]] sgl::ir::program const& p,
-              [[maybe_unused]] sgl::ir::control_flow flow,
-              [[maybe_unused]] cc::string_view after)
-{
-#if CC_ASSERT_ENABLED
-    auto const wrong = sgl::ir::verify(p, flow);
-    CC_ASSERTS(!wrong.has_value(), cc::format("the program after {} of '{}': {}", after, p.entry_name,
-                                              wrong.has_value() ? wrong.value() : ""));
-#endif
-}
 } // namespace
 
 cc::span<sgl::emit::target const> sgl::emit::all_targets()
@@ -374,24 +356,11 @@ sgl::emit::emitted_text sgl::emit::emit_entry_point(check::checked_module const&
     if (sources.native != native_route::text)
     {
         auto program = ir::program();
-        auto gap = ir::lower(plan, program);
         auto const is_dxil = t == target::hlsl_dx12;
+        auto const gap
+            = is_dxil ? ir::compile_dxil(plan, program, result.dxil) : ir::compile_spirv(plan, program, result.spirv);
         if (!gap.has_value())
         {
-            check_ir(program, ir::control_flow::structured, "lowering");
-            ir::construct_ssa(program);
-            check_ir(program, ir::control_flow::structured, "construct_ssa");
-        }
-        if (!gap.has_value() && is_dxil)
-        {
-            ir::simplify(program);
-            check_ir(program, ir::control_flow::unstructured, "simplify");
-            gap = ir::write_dxil(program, result.dxil);
-        }
-        if (!gap.has_value())
-        {
-            if (!is_dxil)
-                result.spirv = ir::write_spirv(program);
             result.text = ir::dump(program);
             is_native = true;
         }
