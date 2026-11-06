@@ -39,7 +39,7 @@ Never on the arch, and never on a hand-rolled `sizeof(void*) == 8`.
 | macOS | arm64 | Homebrew LLVM (clang) | 1 | CI — macOS 26.0 and later, the [deployment target](requirements.md#macos-deployment-target-and-sdk) the presets pin |
 | WebAssembly | wasm32 | Emscripten (Clang) | 1 | CI — single-threaded, no WebGPU; runs under Node |
 | iOS | arm64 | Apple Clang | 2 | CI — build-only (cross-compiled, not test-run) |
-| Android | arm64 | NDK (Clang) | 2 | CI — build-only; `android-ndk-arm64-*` presets (NDK from `dev.py install android-sdk` or `$ANDROID_NDK_ROOT`); `dev.py android run` deploys an APK |
+| Android | arm64 | NDK (Clang) | 2 | CI — build-only; `android-ndk-arm64-*` presets (NDK from `$ANDROID_NDK_ROOT`) |
 | SteamOS | x64 | Clang | 2 | No CI — built and run by hand, semi-regularly; see [SteamOS](#steamos) below |
 | WebAssembly + threads | wasm32 | Emscripten (Clang) | 2 | No CI — `-pthread`; `emscripten-threads-*` presets, run under Node |
 | WebAssembly memory64 | wasm64 | Emscripten (Clang) | 3 | No preset here — `-sMEMORY64=1` on every object, which a consumer sets; clean-core knows it as `CC_ARCH_WASM64` |

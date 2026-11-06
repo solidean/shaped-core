@@ -329,6 +329,7 @@ value_ref lowering::bound_block(emit::impl::planned_constants const& block)
     auto const space = is_packed ? address_space::packed_constants : address_space::constants;
     auto const pointee = block_of_members(block.block_name, block.members, space);
     known = add_global({.type = pointer_type(pointee, is_inline ? storage::push_constant : storage::uniform),
+                        .kind = is_inline ? global_kind::inline_constants : global_kind::constants,
                         .set = block.group,
                         .binding = is_inline ? -1 : block.slot,
                         .is_read_only = true},
@@ -389,7 +390,26 @@ value_ref lowering::bound_resource(i32 index)
     auto const is_image = info.kind == check::type_kind::image;
     auto const writes
         = (info.kind != check::type_kind::image && r.is_mut) || (is_image && info.access != access_mode::read);
+    auto kind = global_kind::buffer;
+    switch (info.kind)
+    {
+    case check::type_kind::bytes:
+        kind = global_kind::bytes;
+        break;
+    case check::type_kind::texture:
+        kind = global_kind::texture;
+        break;
+    case check::type_kind::image:
+        kind = global_kind::image;
+        break;
+    case check::type_kind::sampler:
+        kind = global_kind::sampler;
+        break;
+    default:
+        break;
+    }
     known = add_global({.type = pointer_type(pointee, space),
+                        .kind = kind,
                         .set = r.group,
                         .binding = r.slot,
                         .is_read_only = !writes,
@@ -417,6 +437,7 @@ value_ref lowering::bound_sampler(i32 index)
     auto const& s = _plan.samplers[index];
     // the reserved set, whose binding 0 no static sampler takes (EMIT-133)
     known = add_global({.type = pointer_type(intern({.kind = type_kind::sampler}), storage::resource),
+                        .kind = global_kind::file_sampler,
                         .set = 3,
                         .binding = s.index + 1,
                         .is_read_only = true},

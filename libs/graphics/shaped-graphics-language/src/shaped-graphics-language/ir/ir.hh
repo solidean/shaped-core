@@ -445,11 +445,32 @@ struct sgl::ir::constant
     bool is_undefined = false;
 };
 
+/// What a global is to a target that names each kind of binding apart, which its pointer's type does not say.
+enum class sgl::ir::global_kind : sgl::u8
+{
+    /// Workgroup memory or a stage input, which `space` of its pointer tells apart.
+    plain,
+    /// A group's block of constants.
+    constants,
+    /// The entry point's own constants, which no group holds.
+    inline_constants,
+    /// A buffer of elements.
+    buffer,
+    /// A buffer addressed by byte.
+    bytes,
+    texture,
+    image,
+    sampler,
+    /// A sampler the file declares, which no group holds.
+    file_sampler,
+};
+
 /// A variable outside the function: a resource, a block, workgroup memory or a stage input.
 struct sgl::ir::global
 {
     /// The pointer's type.
     type_ref type = type_ref::none;
+    global_kind kind = global_kind::plain;
     /// A descriptor's address, -1 for none.
     i32 set = -1;
     i32 binding = -1;
@@ -518,6 +539,31 @@ struct sgl::ir::program
 
 namespace sgl::ir
 {
+/// The name of `code`, for a reader.
+[[nodiscard]] cc::string_view op_name(op code);
+
+} // namespace sgl::ir
+
+/// What one position of an operation's operands holds.
+enum class sgl::ir::operand : sgl::u8
+{
+    value,
+    block,
+    literal,
+};
+
+namespace sgl::ir
+{
+
+/// What position `at` of an operation of `code` holds, so a pass can rewrite operands it does not otherwise know.
+[[nodiscard]] operand operand_role(op code, isize at);
+
+/// The blocks a terminator reaches, which `scratch` holds; one block may stand twice.
+[[nodiscard]] cc::span<u32 const> successors_of(program const& p, instruction const& terminator, cc::vector<u32>& scratch);
+
+/// Every block by where it opened: a block's instructions are one run, so their position is that order.
+[[nodiscard]] cc::vector<block_ref> blocks_in_order(program const& p);
+
 /// The program as text, one operation a line, for a reader and for a test to compare.
 [[nodiscard]] cc::string dump(program const& p);
 } // namespace sgl::ir
