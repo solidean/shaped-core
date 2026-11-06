@@ -487,8 +487,24 @@ struct writer
                 declaration,
                 {.name = name, .type = type_text(p, d, type), .dimensions = array_dimensions(p, type), .is_mut = true});
             line(declaration);
+            auto const element = p.m.at(type).element;
             for (auto i = isize(0); i < isize(p.m.at(type).count); ++i)
-                line(cc::format("{}[{}] = {}_{};", name, i, raw, i));
+            {
+                auto const piece = cc::format("{}_{}", raw, i);
+                line(cc::format("{}[{}] = {};", name, i,
+                                is_word_split(p, element) ? joined_words(element, piece) : piece));
+            }
+            return name;
+        }
+        if (is_word_split(p, type))
+        {
+            auto const text = joined_words(type, cc::format("{}_0", raw));
+            if (!is_local)
+                return text;
+            auto const name = p.names.mint("gathered");
+            auto declaration = cc::string();
+            d.write_local(declaration, {.name = name, .type = type_text(p, d, type), .value = text, .is_mut = true});
+            line(declaration);
             return name;
         }
         // a matrix from its columns, which HLSL's constructor reads as rows
@@ -560,6 +576,8 @@ struct writer
     /// EMIT-174: stores `value`, of `type`, into `raw`'s pieces, its elements or its columns, from one evaluation.
     void store_pieces(cc::string_view raw, type_id type, cc::string_view value)
     {
+        if (is_word_split(p, type))
+            return store_words(cc::format("{}_0", raw), type, value);
         auto const is_hlsl_matrix = !is_array(type) && d.language() == builtins::language::hlsl;
         auto name = cc::string(value);
         if (is_hlsl_matrix || !is_name(value))
@@ -580,8 +598,72 @@ struct writer
                      : p.m.name_of(type) == "mat2" ? 2
                      : p.m.name_of(type) == "mat3" ? 3
                                                    : 4;
+        auto const element = is_array(type) ? p.m.at(type).element : type_id::none;
         for (auto i = 0; i < n; ++i)
-            line(cc::format("{}_{} = {}[{}];", raw, i, name, i));
+            if (is_array(type) && is_word_split(p, element))
+                store_words(cc::format("{}_{}", raw, i), element, cc::format("{}[{}]", name, i));
+            else
+                line(cc::format("{}_{} = {}[{}];", raw, i, name, i));
+    }
+
+    /// EMIT-196: `words`, the uint2 or uint4 a 64-bit scalar or two-vector of `type` crosses a link as, joined back.
+    [[nodiscard]] cc::string joined_words(type_id type, cc::string_view words) const
+    {
+        if (d.language() != builtins::language::hlsl)
+            return cc::format("as_type<{}>({})", type_text(p, d, type), words);
+        auto const* const record = p.m.builtin_type_of(type);
+        auto const join = [&](char low, char high)
+        {
+            if (record->leaf_kind == check::value_kind::scalar_double)
+                return cc::format("asdouble({}.{}, {}.{})", words, low, words, high);
+            auto const bits = cc::format("((uint64_t({}.{}) << 32) | uint64_t({}.{}))", words, high, words, low);
+            return record->leaf_kind == check::value_kind::scalar_long ? cc::format("int64_t{}", bits) : bits;
+        };
+        if (record->leaf_count == 1)
+            return join('x', 'y');
+        return cc::format("{}({}, {})", type_text(p, d, type), join('x', 'y'), join('z', 'w'));
+    }
+
+    /// EMIT-196: stores `value`, a 64-bit scalar or two-vector of `type`, into `words`, its 32-bit words low first.
+    void store_words(cc::string_view words, type_id type, cc::string_view value)
+    {
+        auto const* const record = p.m.builtin_type_of(type);
+        if (d.language() != builtins::language::hlsl)
+            return line(cc::format("{} = as_type<{}>({});", words, record->leaf_count == 1 ? "uint2" : "uint4", value));
+        auto name = cc::string(value);
+        if (!is_name(value))
+        {
+            name = p.names.mint("scattered");
+            auto declaration = cc::string();
+            d.write_local(declaration, {.name = name, .type = type_text(p, d, type), .value = cc::string(value)});
+            line(declaration);
+        }
+        auto const lanes = record->leaf_count == 1
+                             ? cc::vector<cc::string>{name}
+                             : cc::vector<cc::string>{cc::format("{}.x", name), cc::format("{}.y", name)};
+        auto parts = cc::vector<cc::string>();
+        for (auto const& lane : lanes)
+        {
+            if (record->leaf_kind != check::value_kind::scalar_double)
+            {
+                // masked, since DXC warns of a constant whose value a narrowing changes
+                parts.push_back(cc::format("uint(uint64_t({}) & 0xffffffffULL)", lane));
+                parts.push_back(cc::format("uint(uint64_t({}) >> 32)", lane));
+                continue;
+            }
+            // HLSL splits a double only into out parameters
+            auto const low = p.names.mint("low");
+            auto const high = p.names.mint("high");
+            line(cc::format("uint {}, {};", low, high));
+            line(cc::format("asuint({}, {}, {});", lane, low, high));
+            parts.push_back(low);
+            parts.push_back(high);
+        }
+        auto text = cc::format("{} = uint{}(", words, parts.size());
+        for (auto i = isize(0); i < parts.size(); ++i)
+            text.appendf("{}{}", i == 0 ? "" : ", ", parts[i]);
+        text += ");";
+        line(text);
     }
 
     /// `nonuniform i`, whose own text is `i`; `uniform i` is no such mark, since it is written as the plain index.
@@ -1258,11 +1340,15 @@ struct writer
         case builtins::spelling_kind::custom:
         {
             auto mint = [&](cc::string_view desired) { return p.names.mint(desired); };
+            // the types a helper is given, which a record with one may read too; another's need not be spelled
+            auto const types = how.helper != nullptr ? argument_types_of(p, d, c) : cc::vector<cc::string>();
             auto const offsets = d.language() == builtins::language::msl && !arguments.empty()
                                    ? hit_offsets_of(p.e.at(c.arguments)[0])
                                    : cc::string();
             auto result = how.custom({.target = d.language(),
+                                      .is_vulkan = p.which == emit::target::hlsl_vulkan,
                                       .arguments = arguments,
+                                      .argument_types = types,
                                       .builtins = *p.m.builtins,
                                       .data = how.data,
                                       .mint = mint,
@@ -1781,7 +1867,9 @@ cc::string_view sgl::emit::impl::type_text(plan const& p, dialect const& d, chec
     if (type == check::checked_module::void_type)
         return "void";
     if (auto const* const record = p.m.builtin_type_of(type))
-        return record->spelled_in(d.language());
+        return p.which == emit::target::hlsl_vulkan && !record->hlsl_vulkan.empty()
+                 ? cc::string_view(record->hlsl_vulkan)
+                 : record->spelled_in(d.language());
     // An enum is its cases' `int` on every target (EVAL-64); the constants of EMIT-76 are what its values read as.
     if (is_valid(type) && p.m.at(type).kind == check::type_kind::enumeration && p.m.builtins != nullptr)
     {
@@ -1800,6 +1888,18 @@ cc::string_view sgl::emit::impl::type_text(plan const& p, dialect const& d, chec
     return p.structs[p.struct_of_type[index_of(type)]].name;
 }
 
+
+cc::vector<cc::string> sgl::emit::impl::argument_types_of(plan const& p, dialect const& d, check::flat_call const& c)
+{
+    auto types = cc::vector<cc::string>();
+    for (auto const argument : p.e.at(c.arguments))
+    {
+        auto const type = p.e.at(argument).type;
+        types.push_back(check::is_resource(p.m.at(type).kind) ? d.resource_text(p, type)
+                                                              : cc::string(type_text(p, d, type)));
+    }
+    return types;
+}
 
 void sgl::emit::impl::write_helpers(cc::string& out, plan const& p, dialect const& d)
 {
@@ -1826,14 +1926,11 @@ void sgl::emit::impl::write_helpers(cc::string& out, plan const& p, dialect cons
         auto const* const record = call != nullptr ? p.m.builtin_function(call->intrinsic) : nullptr;
         if (record == nullptr || record->write.helper == nullptr)
             continue;
-        auto types = cc::vector<cc::string>();
-        for (auto const argument : p.e.at(call->arguments))
-        {
-            auto const type = p.e.at(argument).type;
-            types.push_back(check::is_resource(p.m.at(type).kind) ? d.resource_text(p, type)
-                                                                  : cc::string(type_text(p, d, type)));
-        }
-        auto text = record->write.helper({.target = d.language(), .argument_types = types, .data = record->write.data});
+        auto const types = argument_types_of(p, d, *call);
+        auto text = record->write.helper({.target = d.language(),
+                                          .is_vulkan = p.which == emit::target::hlsl_vulkan,
+                                          .argument_types = types,
+                                          .data = record->write.data});
         auto is_known = text.empty();
         for (auto const& w : written)
             is_known = is_known || w == text;

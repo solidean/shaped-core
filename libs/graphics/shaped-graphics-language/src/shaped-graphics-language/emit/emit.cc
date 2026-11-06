@@ -224,41 +224,6 @@ sgl::emit::emitted_text sgl::emit::emit_entry_point(check::checked_module const&
                 return result;
             }
 
-    // EMIT-196: neither MSL nor DXIL carries a 64-bit value between stages
-    if ((t == target::msl || t == target::hlsl_dx12)
-        && (e.entry_stage == check::stage::vertex || e.entry_stage == check::stage::pixel)
-        && check::is_valid(e.function) && m.at(e.function).info >= 0 && m.at(e.function).info < m.functions.size())
-    {
-        auto const& info = m.functions[m.at(e.function).info];
-        auto carries = [&](auto const& self, check::type_id type, int depth) -> bool
-        {
-            if (!check::is_valid(type) || depth > 8)
-                return false;
-            if (auto const* const record = m.builtin_type_of(type))
-                return check::is_64_bit(record->leaf_kind);
-            auto const& t = m.at(type);
-            if (t.kind == check::type_kind::array)
-                return self(self, t.element, depth + 1);
-            if (t.kind != check::type_kind::structure)
-                return false;
-            for (auto const& member : m.at(t.members))
-                if (self(self, member.type, depth + 1))
-                    return true;
-            return false;
-        };
-        auto found = carries(carries, info.result, 0);
-        for (auto const& p : m.at(info.parameters))
-            found = found || carries(carries, p.type, 0);
-        if (found)
-        {
-            result.errors.push_back({.kind = error_kind::target_lacks_feature,
-                                     .symbol = e.function,
-                                     .detail = cc::format("{} carries a 64-bit value between stages, which {} does not",
-                                                          e.name, t == target::msl ? "MSL" : "DXIL")});
-            return result;
-        }
-    }
-
     // EMIT-122: Metal has no geometry stage, and its tessellation is shaped otherwise: a compute kernel writes the factors
     if (t == target::msl
         && (e.features.has(check::feature::geometry_shader) || e.features.has(check::feature::tessellation_shader)))

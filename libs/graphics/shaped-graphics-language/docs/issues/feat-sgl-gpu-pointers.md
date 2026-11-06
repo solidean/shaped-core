@@ -1,5 +1,6 @@
 ---
 created: 2026-11-02
+parent: epic-sgl-gpu-pointers
 refs:
   - file: libs/graphics/shaped-graphics-language/docs/spec/bindings.md
 ---

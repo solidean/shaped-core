@@ -9,4 +9,5 @@ refs:
 
 The interpreter runs any entry point exactly, with bindings a driver hands it; a capture provides those bindings and the invocation's stage inputs.
 Its trace gives every print and every value along the way, so the replay steps through the `.sgl` source and names the first value where the GPU and the exact result part.
-Texture sampling, derivatives and subgroups are what the interpreter lacks today (feat-sgl-test-texture-bindings), and a replay needs them as the GPU computed them, from the capture.
+The interpreter samples textures and runs derivatives and subgroups, by the spec's rules (EVAL-120 to EVAL-145).
+A replay needs them as the GPU computed them, from the capture, which those rules do not promise.

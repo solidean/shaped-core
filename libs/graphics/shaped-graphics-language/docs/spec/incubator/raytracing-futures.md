@@ -22,8 +22,8 @@ The host's groups are what it cannot see, so a pipeline with `.host` would stay 
 It is the same move [stage-polyfills.md](stage-polyfills.md) makes for the geometry and tessellation stages.
 
 **Shader execution reordering.**
-DXR 1.2's `MaybeReorderThread` and its hit objects let a closest hit run on a thread sorted by what it hit.
-It would be a builtin behind a feature, and a hit object is a type the vocabulary would gain.
+Done on dx12 and vulkan: `maybe_reorder`, a reordering `trace` and a first-class `hit_object` (CHK-433, CHK-434, EMIT-225).
+Metal and WebGPU have no reordering to write.
 
 **Opacity micromaps and displacement micromaps.**
 They are properties of a BLAS, which sg builds, so most of their cost lands in sg; SGL would gain little beyond a ray flag and a hit's micro-triangle fields.

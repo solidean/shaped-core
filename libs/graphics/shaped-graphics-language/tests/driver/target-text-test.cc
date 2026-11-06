@@ -389,6 +389,58 @@ TEST("sgl target text - maybe_reorder asks shader execution reordering of the de
     CHECK(!without.value().features.has(sgl::check::feature::shader_execution_reordering));
 }
 
+TEST("sgl target text - vulkan reorders through SPIR-V's own instructions, which DXC lowers none of HLSL's to")
+{
+    // EMIT-225: a hit object is SPIR-V's type, each instruction a declared function, the payload handed over in a
+    // variable of the ray-payload storage class
+    constexpr auto source = "require raytracing_pipeline\n"
+                            "\n"
+                            "struct radiance:\n"
+                            "    color: float\n"
+                            "\n"
+                            "rays rs:\n"
+                            "    primary: radiance\n"
+                            "\n"
+                            "binding work:\n"
+                            "    world: acceleration_structure[.triangles]\n"
+                            "    values: mut buffer[float]\n"
+                            "\n"
+                            "@raygen fun main_cs(@launch_id id: int3){work}:\n"
+                            "    maybe_reorder(id.x as uint, 1)\n"
+                            "    let mut p = radiance(0.0)\n"
+                            "    let r = ray(origin = pos3(0.0, 0.0, 0.0), direction = vec3(0.0, 0.0, 1.0))\n"
+                            "    trace(work.world, r, rs.primary, mut p, reorder = id.y as uint, reorder_bits = 2)\n"
+                            "    const if has(.shader_execution_reordering):\n"
+                            "        let h = trace_hit(work.world, r, rs.primary, mut p)\n"
+                            "        h.reorder()\n"
+                            "        if h.is_hit => h.invoke(mut p)\n"
+                            "    work.values[id.x] = p.color\n";
+    auto device = sgl::check::feature_set();
+    device.set(sgl::check::feature::shader_execution_reordering);
+    auto const with = compiled(source, target::hlsl_vulkan, device);
+    REQUIRE(with.has_value()).dump("error", with.has_error() ? cc::string(with.error()) : cc::string());
+    auto const& text = with.value().text;
+    CHECK(with.value().features.has(sgl::check::feature::shader_execution_reordering));
+    CHECK(!text.contains("dx::"));
+    CHECK(text.contains("[[vk::ext_storage_class(/* RayPayloadKHR */ 5338)]] static radiance "
+                        "sgl_hit_payload_radiance;"));
+    CHECK(text.contains("vk::SpirvOpaqueType<5313> h = "));
+    CHECK(text.contains("sgl_reorder_thread(uint(uint(id.x)), uint(1));"));
+    CHECK(text.contains("sgl_hit_object_trace_reorder_execute("));
+    CHECK(text.contains("sgl_hit_object_trace_ray("));
+    CHECK(text.contains("sgl_hit_object_execute(h, sgl_hit_payload_radiance);"));
+    // the payload's variable is declared once, though three calls hand a payload of its type over
+    constexpr auto declaration = cc::string_view("static radiance sgl_hit_payload_radiance;");
+    auto const first = cc::string_view(text).find(declaration);
+    REQUIRE(first >= 0);
+    CHECK(!cc::string_view(text).subview(first + 1).contains(declaration));
+
+    auto const without = compiled(source, target::hlsl_vulkan);
+    REQUIRE(without.has_value());
+    CHECK(!without.value().text.contains("sgl_hit_object"));
+    CHECK(!without.value().text.contains("sgl_reorder_thread"));
+}
+
 TEST("sgl target text - a reordering trace takes its hint's bits from a named const")
 {
     // CHK-433: the bits are checked as an expression like any other, so a name in them is flattened like one

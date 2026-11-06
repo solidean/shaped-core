@@ -31,6 +31,8 @@ void register_bit_math(registry& r);
 void register_64_bit_math(registry& r);
 /// Transcendentals, rounding, derivatives, geometry, integer bit functions, packing and reinterpreting bits.
 void register_math(registry& r);
+/// The rounding, roots, geometry and tests of a double and its vectors, which the text writes as HLSL of its own.
+void register_double_math(registry& r);
 /// The barriers of a compute workgroup, its uniform load, the atomics and a geometry stage's streams.
 void register_sync(registry& r);
 /// The subgroup and quad operations.
