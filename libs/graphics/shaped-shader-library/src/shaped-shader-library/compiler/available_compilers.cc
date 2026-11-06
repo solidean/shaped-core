@@ -51,6 +51,9 @@ void slib::add_available_compilers(shader_library& lib)
         if (auto sgl_spirv = create_dxc_spirv_compiler(); sgl_spirv.has_value())
             lib.add_compiler(create_sgl_compiler(cc::move(sgl_spirv.value()), k_sgl_options));
     }
+#else
+    // no DXC, so vulkan's SGL shaders are what SGL can write itself
+    lib.add_compiler(create_sgl_spirv_compiler(k_sgl_options));
 #endif
 
 #if SLIB_HAS_METAL

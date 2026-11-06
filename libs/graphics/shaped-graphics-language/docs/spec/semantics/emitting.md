@@ -420,6 +420,16 @@ fn main_ps(p: pixel_input) -> target_ {
 }
 ```
 
+## SPIR-V
+
+* **EMIT-232** Where a compile asks, `hlsl-vulkan` is written as a SPIR-V 1.6 module by SGL itself rather than as text for DXC: `text_request::native`, `sgl emit --target spirv`.
+  The plan is the text's, so every name, address and layout the host reads is the same on either route.
+  `require` makes an entry point with no lowering yet the error `unsupported`, naming what it holds, and `prefer` writes the text and says why in `emitted_source::native_gap`.
+  Only a compute entry point lowers so far, and never a print, a target's own text, a binding array, a texel atomic, a ray query or a workgroup prologue.
+  Float `!=` is unordered, a shift's count is masked to its width, and `and` and `or` branch where their right side could go wrong; nothing here widens what a program may do.
+* **EMIT-233** A float operation of an entry point past `fast` is decorated `NoContraction`, and the entry point states `SignedZeroInfNanPreserve` per float width, and `DenormPreserve` for `ieee`.
+  This is what DXC's `-Gis` and `-denorm preserve` write, per operation in the layer, so a guarantee narrower than an entry point needs no change to the form.
+
 ## Lines
 
 * **EMIT-181** Each line of the function body maps to the source line it writes, and to every call it was inlined through, innermost first.

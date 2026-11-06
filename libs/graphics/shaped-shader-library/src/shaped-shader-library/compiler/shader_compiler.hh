@@ -76,6 +76,9 @@ struct slib::preprocessed_source
     /// The module files the source reached through `use`, by virtual path: what it depends on beside itself.
     /// Only SGL fills it.
     cc::vector<cc::string> used_modules;
+    /// The target's own binary where SGL wrote one, which is then all a compile needs; `source` is the program it was
+    /// written from, for a reader.
+    cc::vector<byte> bytecode;
     /// What the compiler warned of while writing the text, one diagnostic each, its notes on the lines under it.
     /// Only SGL fills it, and a cached result keeps them; a shader_library logs each once.
     cc::vector<cc::string> warnings;
@@ -100,6 +103,11 @@ namespace slib
 /// in the enum's order, which SGL's `has` answers (CHK-426).
 /// The SGL compiler takes it as the compile's device, not as an option of the source, and the cache keys on it alike.
 inline constexpr cc::string_view k_device_features_option = "device_features";
+
+/// The option `shader_asset::acquire` adds for a context that prefers SGL's own SPIR-V, valued `true`: a compile of an
+/// entry point SGL has no lowering for still goes through DXC.
+/// `sg::context::prefers_native_spirv`'s; the cache keys on it as on any option.
+inline constexpr cc::string_view k_native_spirv_option = "native_spirv";
 
 /// The option a caller passes to `shader_asset::acquire`, valued `true`, to let a WebGPU pipeline run an SGL entry
 /// point at `fast` whose `@float` WGSL cannot keep, with a warning, rather than refusing it (EMIT-185).
@@ -142,6 +150,11 @@ struct slib::shader_source_description
     cc::string metal_language_version;
     /// The package's `SOFTWARE_TRACE`, which only SGL reads: an inline trace takes the software walk on HLSL too.
     bool software_trace = false;
+    /// The package's `NATIVE_SPIRV`, which only SGL reads: its SPIR-V is SGL's own, and an entry point with no lowering
+    /// yet is an error rather than a compile through DXC.
+    bool native_spirv = false;
+    /// What `preprocess` wrote in place of text, which a compile hands on as it is; empty where it wrote text.
+    cc::vector<byte> bytecode;
 };
 
 /// One compilation edge: `source_language` -> `target_format`.

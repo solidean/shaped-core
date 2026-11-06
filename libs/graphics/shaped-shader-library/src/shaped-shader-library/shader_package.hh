@@ -61,4 +61,7 @@ struct slib::shader_package
     /// `SOFTWARE_TRACE` in sc_add_shader_package: its inline traces take the software walk on dx12 and vulkan too, on every device.
     /// They then see what moves, and nothing chooses this for a package that did not ask.
     bool software_trace = false;
+    /// `NATIVE_SPIRV` in sc_add_shader_package: its SPIR-V is written by SGL itself, and an entry point SGL has no lowering
+    /// for yet fails to compile rather than going through DXC.
+    bool native_spirv = false;
 };

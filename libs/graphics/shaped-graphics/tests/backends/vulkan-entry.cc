@@ -48,6 +48,26 @@ ASYNC_TEST("sg vulkan backend")
     }
 }
 
+// The whole sweep again with SGL's shaders in SGL's own SPIR-V, where it has a lowering for them, and in DXC's elsewhere.
+// One test body holds both routes to one answer, and the validation layer reads every module this route writes.
+ASYNC_TEST("sg vulkan native-spirv backend")
+{
+    auto ctx = sg::create_vulkan_context(
+        {.enable_validation_layers = true, .native_spirv = true, .enable_sync_validation = true});
+    if (ctx.has_error())
+        SKIP("no vulkan device");
+    else
+    {
+        (void)sg_test::shader_fixtures(); // alive before any child acquires through it
+        ctx.value()->set_portability_checks(true);
+        ctx.value()->set_hit_record_checks(true);
+        co_await nx::async_invoke_tests_in_sequence("vulkan-native-spirv", ctx.value());
+        CHECK(!ctx.value()->is_device_lost())
+            .context(cc::format("the device was lost while running this binary's GPU tests: {}",
+                                ctx.value()->device_loss_reason()));
+    }
+}
+
 // The whole sweep again under a browser's rules; see the dx12 never-block driver.
 // Under --thorough only, like the dx12 one beside a GPU; a vulkan device here is a hardware one.
 ASYNC_TEST("sg vulkan never-block backend")
@@ -75,6 +95,8 @@ ASYNC_TEST("sg vulkan never-block backend")
 }
 
 static bool const sg_vulkan_registered = sg_test::register_backend("sg vulkan backend", "vulkan");
+static bool const sg_vulkan_native_spirv_registered
+    = sg_test::register_backend("sg vulkan native-spirv backend", "vulkan-native-spirv");
 static bool const sg_vulkan_never_block_registered
     = sg_test::register_backend("sg vulkan never-block backend", "vulkan-never-block");
 static bool const sg_vulkan_factory_registered

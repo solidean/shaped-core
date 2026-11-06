@@ -273,6 +273,8 @@ static cc::shared_async<cc::unit> compare_on(sg::context& ctx)
         REQUIRE(source4.has_value());
 
         auto const sgl_layout = ctx.cached.acquire_binding_group_layout<sr::sgl_shaders::nn_conv::nn_conv_buffers>();
+        auto const sgl_shader = co_await sr::sgl_shaders::nn_conv::main_cs->acquire(ctx);
+        CC_LOG_INFO("the convolution's SGL came through {}", sgl_shader.compiler.name);
         auto const sgl_pipeline = sr::sgl_shaders::nn_conv::main_cs.acquire_pipeline(ctx);
         auto hlsl = hlsl_pipeline<sr_bench::hlsl::nn_conv_bindings>{
             .shader = sr_bench::hlsl::nn_conv.compute.main_cs->acquire(ctx)};
@@ -351,6 +353,15 @@ ASYNC_BENCHMARK("sr - SGL against the HLSL it was ported from, GPU time per disp
 ASYNC_BENCHMARK("sr - SGL against the HLSL it was ported from, GPU time per dispatch, on vulkan")
 {
     auto created = sg::create_vulkan_context({});
+    if (created.has_error())
+        SKIP("no vulkan device");
+    co_await compare_on(*created.value());
+}
+
+// The same kernels with SGL's own SPIR-V against DXC's of the hand-written HLSL, which is what DXC's optimizer is worth.
+ASYNC_BENCHMARK("sr - SGL's own SPIR-V against the HLSL it was ported from, GPU time per dispatch, on vulkan")
+{
+    auto created = sg::create_vulkan_context({.native_spirv = true});
     if (created.has_error())
         SKIP("no vulkan device");
     co_await compare_on(*created.value());
