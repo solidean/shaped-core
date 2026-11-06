@@ -58,6 +58,9 @@ struct sv::material_permutation
     /// The hybrid's forward pixel stage, `generated_material_shader::hybrid_source`, compiled and cached like `raster_source`.
     cc::string hybrid_source;
 
+    /// The bound raster mode's pixel stage, `generated_material_shader::bound_source`, compiled and cached like `raster_source`.
+    cc::string bound_source;
+
     /// Where this permutation's base color lives, which every instance shading with it copies into its record for a secondary hit to read.
     material_secondary secondary;
 

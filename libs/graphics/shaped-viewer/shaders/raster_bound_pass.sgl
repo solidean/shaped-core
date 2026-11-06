@@ -1,0 +1,26 @@
+// The bound raster mode's fixed stages: the vertex stage every material's draw shares, and the environment behind the surfaces.
+//
+// The pixel stage of a surface is generated per material permutation, spelled `bound`, and compiled at run time.
+// No `first_instance`, which WGSL has no builtin for: a draw is one instance, so `@instance_index` is its first one, its row.
+// sv::raster_bound_routine builds the pipelines; libs/graphics/shaped-viewer/docs/plans/raster-bound.md is the design.
+
+use raster
+use raster_bound
+
+/// One vertex of the draw's row: an indexed draw through the index pool, with the mesh's base vertex, and no vertex buffer.
+@vertex fun bound_vs(@vertex_index vertex: int, @instance_index row: int){raster_bound.bound} -> raster_bound.varyings:
+    return raster_bound.vertex_of(vertex, row as uint)
+
+/// What the environment pass hands its pixel stage: the position alone, whose pixel is the camera ray.
+struct environment_varyings:
+    @position position: hpos4
+
+/// Vertices 0, 1 and 2 land at (0,0), (2,0) and (0,2): one triangle covering the target, on the far plane, depth 0 reversed.
+@vertex fun bound_environment_vs(@vertex_index vertex: int) -> environment_varyings:
+    let t = float2(((vertex << 1) & 2) as float, (vertex & 2) as float)
+    let clip = t * float2(2.0, -2.0) + float2(-1.0, 1.0)
+    return { position = hpos4(clip.x, clip.y, 0.0, 1.0) }
+
+/// The environment where no surface was drawn, which the depth test against the far plane decides.
+@pixel fun bound_environment_ps(p: environment_varyings){raster_bound.bound} -> raster_bound.targets:
+    return raster_bound.environment(float2(p.position.x, p.position.y))

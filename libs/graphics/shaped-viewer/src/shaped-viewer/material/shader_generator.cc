@@ -247,15 +247,57 @@ enum class load_shape
     }
 }
 
+/// What differs between the stages a material's body is spelled for: how a texture picks its level, whether an index
+/// is marked, and whether its buffers are bindless slots or the bound mode's pools.
+///
+/// Everything else — the loads, the fragment, the layout — is the same text for a traced hit and a rasterized pixel.
+struct body_spelling
+{
+    /// Whether every sample names level 0, which a hit has to since it has no derivatives, or lets the pixel's derivatives pick it.
+    /// A pixel's cutout does not read through these loads: `raster.is_cut` reads `tracer.instance_opacity`, at level 0 as a hit does.
+    bool explicit_level = true;
+    /// What an index into a bindless table is written behind: `nonuniform ` at a hit, where the lanes of a wave hit
+    /// different instances, and nothing in a pixel, whose instance is `@per_draw` (`raster.varyings`).
+    cc::string_view mark = "nonuniform ";
+    /// Whether the body reads the bound raster mode's pools, `raster_bound.bound`, in place of `tracer.bindless`.
+    /// A record's offsets are the same either way; its slots are simply not read.
+    bool bound = false;
+
+    /// The group the body's functions list.
+    [[nodiscard]] cc::string_view group() const { return bound ? "raster_bound.bound" : "tracer.bindless"; }
+
+    /// The buffer holding the parameter block whose slot is the local `block`.
+    [[nodiscard]] cc::string params() const
+    {
+        return bound ? cc::string("raster_bound.bound.params") : cc::format("tracer.bindless.buffers[{}block]", mark);
+    }
+
+    /// The buffer holding the attribute the descriptor named `desc` names, whose slot is the local `<desc>_buffer`.
+    [[nodiscard]] cc::string attributes(cc::string_view desc) const
+    {
+        return bound ? cc::string("raster_bound.bound.attributes")
+                     : cc::format("tracer.bindless.buffers[{}{}_buffer]", mark, desc);
+    }
+};
+
+/// The spelling a hit group and a wavefront shade kernel read their attributes in.
+constexpr auto traced_spelling = body_spelling{};
+
+/// The spelling a raster pixel stage reads its attributes in.
+constexpr auto raster_spelling = body_spelling{.explicit_level = false, .mark = ""};
+
+/// The spelling the bound raster mode's pixel stage reads its attributes in: the pools of `raster_bound.bound`.
+constexpr auto bound_spelling = body_spelling{.explicit_level = false, .mark = "", .bound = true};
+
 /// The load of mesh attribute `binding` through the descriptor named `desc`, as a float expression of `components` lanes.
-/// It reads the buffer through a local `<desc>_buffer`, since only a name may stand as a non-uniform index.
+/// It reads a bindless buffer through a local `<desc>_buffer`, since only a name may stand as a non-uniform index.
 [[nodiscard]] cc::string mesh_load(mesh_attribute_binding const& binding,
                                    cc::string_view desc,
                                    int components,
                                    bool rotates,
-                                   cc::string_view mark)
+                                   body_spelling const& spelling)
 {
-    auto const buffer = cc::format("tracer.bindless.buffers[{}{}_buffer]", mark, desc);
+    auto const buffer = spelling.attributes(desc);
     if (shape_of(binding.frequency) == load_shape::flat)
         return cc::format("material.load_element_{}({}, {}, {})", load_suffix(components), buffer, desc,
                           element_expression(binding.frequency));
@@ -265,25 +307,6 @@ enum class load_shape
                       element_expression(binding.frequency));
 }
 
-/// What differs between the stages a material's body is spelled for: how a texture picks its level, and whether an index is marked.
-///
-/// Everything else — the loads, the fragment, the bindless tables and the sampler palette among them — is the same text for a traced hit and a rasterized pixel.
-struct body_spelling
-{
-    /// Whether every sample names level 0, which a hit has to since it has no derivatives, or lets the pixel's derivatives pick it.
-    /// A pixel's cutout does not read through these loads: `raster.is_cut` reads `tracer.instance_opacity`, at level 0 as a hit does.
-    bool explicit_level = true;
-    /// What an index into a bindless table is written behind: `nonuniform ` at a hit, where the lanes of a wave hit
-    /// different instances, and nothing in a pixel, whose instance is `@per_draw` (`raster.varyings`).
-    cc::string_view mark = "nonuniform ";
-};
-
-/// The spelling a hit group and a wavefront shade kernel read their attributes in.
-constexpr auto traced_spelling = body_spelling{};
-
-/// The spelling a raster pixel stage reads its attributes in.
-constexpr auto raster_spelling = body_spelling{.explicit_level = false, .mark = ""};
-
 /// `fun sv_attribute_<name>(ctx)`: the load of attribute `index`, out of the parameter block, a mesh attribute or a texture.
 [[nodiscard]] cc::string attribute_function(resolved_material const& r,
                                             material_parameter_layout const& layout,
@@ -292,11 +315,13 @@ constexpr auto raster_spelling = body_spelling{.explicit_level = false, .mark = 
 {
     auto const& a = r.attributes[index];
     auto const components = a.format.component_count();
+    auto const params = spelling.params();
 
     auto out = cc::string();
-    cc::format_append(out, "fun sv_attribute_{}(ctx: material.shading_context){{tracer.bindless}} -> {}:\n", a.name,
-                      sgl_type_of(a.format));
-    out += "    let block = ctx.param_buffer as int\n";
+    cc::format_append(out, "fun sv_attribute_{}(ctx: material.shading_context){{{}}} -> {}:\n", a.name,
+                      spelling.group(), sgl_type_of(a.format));
+    if (!spelling.bound)
+        out += "    let block = ctx.param_buffer as int\n";
 
     switch (a.frequency)
     {
@@ -307,8 +332,7 @@ constexpr auto raster_spelling = body_spelling{.explicit_level = false, .mark = 
         // A constant is read out of the parameter block whatever it is worth, which is why gold and copper share this source.
         auto const& s = slot_for(layout, index, material_slot_kind::constant);
         auto const load = components == 1 ? cc::string("load") : cc::format("load{}", components);
-        auto const raw
-            = cc::format("tracer.bindless.buffers[{}block].{}(ctx.param_offset + {}u)", spelling.mark, load, s.offset);
+        auto const raw = cc::format("{}.{}(ctx.param_offset + {}u)", params, load, s.offset);
         auto value = raw;
         if (a.format.scalar == scalar_type::f32)
             value = cc::format("reinterpret_as_float({})", raw);
@@ -321,36 +345,41 @@ constexpr auto raster_spelling = body_spelling{.explicit_level = false, .mark = 
     case material_frequency::mesh_attribute:
     {
         auto const& s = slot_for(layout, index, material_slot_kind::attribute_descriptor);
-        cc::format_append(out,
-                          "    let desc = material.load_attribute_desc(tracer.bindless.buffers[{}block], "
-                          "ctx.param_offset + {}u)\n",
-                          spelling.mark, s.offset);
-        out += "    let desc_buffer = desc.buffer as int\n";
+        cc::format_append(out, "    let desc = material.load_attribute_desc({}, ctx.param_offset + {}u)\n", params,
+                          s.offset);
+        if (!spelling.bound)
+            out += "    let desc_buffer = desc.buffer as int\n";
         auto const rotates = a.interpolation == attribute_interpolation::rotation;
         cc::format_append(out, "    return {}\n",
-                          as_format(mesh_load(*a.attribute, "desc", components, rotates, spelling.mark), a.format));
+                          as_format(mesh_load(*a.attribute, "desc", components, rotates, spelling), a.format));
         break;
     }
 
     case material_frequency::material_texture:
     case material_frequency::mesh_texture_binding:
     {
-        auto const& tex = slot_for(layout, index, material_slot_kind::texture_index);
-        auto const& uv_slot = slot_for(layout, index, material_slot_kind::attribute_descriptor);
-        cc::format_append(out,
-                          "    let uv_desc = material.load_attribute_desc(tracer.bindless.buffers[{}block], "
-                          "ctx.param_offset + {}u)\n",
-                          spelling.mark, uv_slot.offset);
-        out += "    let uv_desc_buffer = uv_desc.buffer as int\n";
-        // A uv is only ever a triangle attribute, so the two shapes are the barycentric one and the flat one.
-        cc::format_append(out, "    let uv = {}\n", mesh_load(*a.uv, "uv_desc", 2, false, spelling.mark));
-        cc::format_append(out, "    let image = tracer.bindless.buffers[{}block].load(ctx.param_offset + {}u) as int\n",
-                          spelling.mark, tex.offset);
-        // An explicit level where there are no derivatives, at a hit.
-        // The texel is named because a constant selector reads it twice.
-        cc::format_append(out, "    let texel = tracer.bindless.textures_2d[{}image].sample(uv, tracer.bindless.{}{})\n",
-                          spelling.mark, sgl_palette_sampler(a.sample->sampler),
-                          spelling.explicit_level ? ", level = 0.0" : "");
+        if (spelling.bound)
+        {
+            // TEMPORARY(debt-sv-bound-textures-read-white): the bound mode binds no textures before C1, so a sample reads
+            // a white texel through the attribute's own swizzle and transform, which shows a factor-scaled map as its factor.
+            out += "    let texel = float4(1.0)\n";
+        }
+        else
+        {
+            auto const& tex = slot_for(layout, index, material_slot_kind::texture_index);
+            auto const& uv_slot = slot_for(layout, index, material_slot_kind::attribute_descriptor);
+            cc::format_append(out, "    let uv_desc = material.load_attribute_desc({}, ctx.param_offset + {}u)\n",
+                              params, uv_slot.offset);
+            out += "    let uv_desc_buffer = uv_desc.buffer as int\n";
+            // A uv is only ever a triangle attribute, so the two shapes are the barycentric one and the flat one.
+            cc::format_append(out, "    let uv = {}\n", mesh_load(*a.uv, "uv_desc", 2, false, spelling));
+            cc::format_append(out, "    let image = {}.load(ctx.param_offset + {}u) as int\n", params, tex.offset);
+            // An explicit level where there are no derivatives, at a hit.
+            // The texel is named because a constant selector reads it twice.
+            cc::format_append(
+                out, "    let texel = tracer.bindless.textures_2d[{}image].sample(uv, tracer.bindless.{}{})\n",
+                spelling.mark, sgl_palette_sampler(a.sample->sampler), spelling.explicit_level ? ", level = 0.0" : "");
+        }
 
         auto value = texel_expression(a.sample->swizzle, a.format);
 
@@ -360,11 +389,9 @@ constexpr auto raster_spelling = body_spelling{.explicit_level = false, .mark = 
             auto const& tf = slot_for(layout, index, material_slot_kind::sample_transform);
             auto const lanes = component_swizzle(components);
             cc::format_append(out,
-                              "    let scale = reinterpret_as_float(tracer.bindless.buffers[{0}block].load4("
-                              "ctx.param_offset + {1}u))\n"
-                              "    let bias = reinterpret_as_float(tracer.bindless.buffers[{0}block].load4("
-                              "ctx.param_offset + {2}u))\n",
-                              spelling.mark, tf.offset, tf.offset + 16);
+                              "    let scale = reinterpret_as_float({0}.load4(ctx.param_offset + {1}u))\n"
+                              "    let bias = reinterpret_as_float({0}.load4(ctx.param_offset + {2}u))\n",
+                              params, tf.offset, tf.offset + 16);
             value = cc::format("{} * scale.{} + bias.{}", value, lanes, lanes);
         }
         cc::format_append(out, "    return {}\n", as_format(cc::move(value), a.format));
@@ -586,7 +613,8 @@ constexpr auto raster_spelling = body_spelling{.explicit_level = false, .mark = 
         src += "\n";
     }
 
-    src += "fun sv_evaluate_material(ctx: material.shading_context){tracer.bindless} -> openpbr.surface:\n";
+    cc::format_append(src, "fun sv_evaluate_material(ctx: material.shading_context){{{}}} -> openpbr.surface:\n",
+                      spelling.group());
     for (auto const& a : r.attributes)
         cc::format_append(src, "    let {} = sv_attribute_{}(ctx)\n", a.name, a.name);
     src += "    let mut surface = openpbr.default_surface()\n";
@@ -752,6 +780,31 @@ constexpr auto raster_spelling = body_spelling{.explicit_level = false, .mark = 
                       occlusion);
     opening("sv_gbuffer", "raster.thin_targets");
     cc::format_append(src, "    return raster.thin(p, ctx, sv_evaluate_material(ctx), {})\n", supplied_frame);
+    return src;
+}
+
+/// The bound raster mode's pixel stage of one triangle permutation, over `raster_bound_pass.sgl`'s vertex stage: `sv_raster_bound`.
+///
+/// The material body is spelled `bound`, so it reads the pools of `raster_bound.bound` and lists no bindless table.
+/// The draw is indexed, so a pixel learns its triangle from `@primitive_id`, as the raster path's does.
+/// No cutout yet: the opacity record is read through `tracer.instance_opacity`, which reads a bindless table.
+[[nodiscard]] cc::string generate_bound_raster_pixel(resolved_material const& r, material_parameter_layout const& layout)
+{
+    cc::string_view const uses[] = {"raster", "raster_bound"};
+    auto src = source_header(r, geometry_kind::triangles, "require primitive_index\n", uses);
+    auto supplied_frame = cc::string();
+    src += material_body(r, layout, supplied_frame, bound_spelling);
+
+    auto const occlusion = r.type->occlusion_attribute.empty()
+                             ? cc::string("1.0")
+                             : cc::format("sv_attribute_{}(ctx)", r.type->occlusion_attribute);
+    cc::format_append(src,
+                      "@pixel fun sv_raster_bound(p: raster_bound.varyings, @primitive_id primitive: "
+                      "int){{raster_bound."
+                      "bound}} -> raster_bound.targets:\n"
+                      "    let ctx = raster_bound.pixel_context(p, primitive as uint)\n"
+                      "    return raster_bound.shade(p, ctx, sv_evaluate_material(ctx), {}, {})\n",
+                      supplied_frame, occlusion);
     return src;
 }
 
@@ -939,6 +992,7 @@ generated_material_shader generate_material_shader(resolved_material const& r, m
     auto const triangles = opts.kind == geometry_kind::triangles;
     auto raster_source = triangles ? generate_raster_pixel(r, layout, opacity) : generate_quadric_raster_pixel(r, layout);
     auto hybrid_source = triangles ? generate_hybrid_pixel(r, layout, opacity) : generate_quadric_hybrid_pixel(r, layout);
+    auto bound_source = triangles ? generate_bound_raster_pixel(r, layout) : cc::string();
     // Read off the layout before it is moved into the result.
     auto const factor_of = [&](cc::string const& attribute)
     { return attribute.empty() ? material_emission_factor{} : emission_factor_of(r, layout, attribute); };
@@ -956,6 +1010,7 @@ generated_material_shader generate_material_shader(resolved_material const& r, m
             .shade_source = cc::move(shade_source),
             .raster_source = cc::move(raster_source),
             .hybrid_source = cc::move(hybrid_source),
+            .bound_source = cc::move(bound_source),
             .layout = cc::move(layout),
             .secondary = secondary,
             .opacity = opacity,

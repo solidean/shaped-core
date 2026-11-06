@@ -167,6 +167,11 @@ struct sv::generated_material_shader
     /// Empty for a quadric permutation.
     cc::string hybrid_source;
 
+    /// The bound raster mode's pixel stage, `@pixel fun sv_raster_bound`: the same material spelled `bound`, reading the pools
+    /// through `raster_bound.bound` where every other source reads `tracer.bindless`, and lit through `raster_bound.shade`.
+    /// Empty for a quadric permutation, which the bound mode does not draw yet.
+    cc::string bound_source;
+
     material_parameter_layout layout;
 
     /// Where this permutation's secondary material lives.

@@ -117,6 +117,7 @@ material_permutation const& material_shader_cache::acquire(resolved_material con
                                                      .shade_source = cc::move(generated.shade_source),
                                                      .raster_source = cc::move(generated.raster_source),
                                                      .hybrid_source = cc::move(generated.hybrid_source),
+                                                     .bound_source = cc::move(generated.bound_source),
                                                      .secondary = procedural ? material_secondary() : generated.secondary,
                                                      .label = cc::move(label)});
 }

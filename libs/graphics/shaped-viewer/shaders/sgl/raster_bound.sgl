@@ -1,0 +1,161 @@
+// The bound raster mode's surroundings: group 0, how a draw pulls its triangles, how a pixel finds its surface, and how it is lit.
+//
+// The bindless raster mode reads every buffer through a slot of `tracer.bindless`; this mode binds the four pools those slots named.
+// So nothing here needs `binding_arrays`, which WebGPU's core lacks, and a material body spelled `bound` reads from `bound`.
+// The lighting is `raster`'s, through the functions of it that read no binding; what reads one is spelled again here over `bound`.
+// libs/graphics/shaped-viewer/docs/plans/raster-bound.md is the design.
+module raster_bound
+
+use material
+use openpbr
+use pt
+use raster
+use scene
+use tracer
+
+/// Group 0 of every bound pipeline: `raster.drawn`'s scene, then the pools.
+///
+/// Eight storage buffers, WebGPU's default for one stage, which is why the decals `raster.drawn` holds wait for room.
+binding bound:
+    /// One element, the frame constants.
+    frame: buffer[raster.frame_constants]
+
+    /// The per-item table; one draw is one row of it.
+    instances: buffer[tracer.instance_record]
+
+    /// Every light of the layer, `light_count` of them.
+    lights: buffer[tracer.light_record]
+
+    /// The environment, `sv::background_gpu` byte for byte: its 16 SH lanes, then a dome's.
+    background: buffer[float4]
+
+    /// The mesh manager's central pools: positions, three floats each, and indices relative to a mesh's base vertex.
+    vertices: bytes
+    indices: bytes
+
+    /// The parameter pool, every instance's block at its record's `param_offset`.
+    params: bytes
+
+    /// The attribute pool, every attribute at its descriptor's offset.
+    attributes: bytes
+
+/// What the vertex stage hands the pixel stage, as `raster.varyings` does.
+/// The row is flat rather than `@per_draw`: it comes from `@instance_index`, which is the row only because a draw is one instance.
+struct varyings:
+    @position position: hpos4
+    @interpolate(.flat) instance: uint
+    /// the point in the mesh's own space, where the barycentrics are found
+    object: float3
+    world: float3
+
+/// What a bound frame writes: the lit radiance and the clip depth the layer's drawings test against.
+///
+/// 20 bytes a pixel, under WebGPU's default of 32 for a pass's color targets; the bindless mode's G-buffer would be 58.
+@pixel struct targets:
+    /// radiance, and its luminance squared in alpha, `pt.moment_of`, as the accumulation slot holds it
+    @format(.rgba32_float) color: float4
+    /// the clip depth, `1 - near_plane / depth`
+    @format(.r32_float) primary_depth: float
+
+/// The 16 SH coefficients of the environment, as `raster.background_sh` reads them from `raster.drawn`.
+fun background_sh(){bound} -> float4[16]:
+    let mut sh = float4[16].filled(float4(0.0))
+    for k in 0 ..< 16:
+        sh[k] = bound.background[k]
+    return sh
+
+/// The whole environment, as `raster.background_lanes` reads it.
+fun background_lanes(){bound} -> float4[28]:
+    let mut env = float4[28].filled(float4(0.0))
+    for k in 0 ..< 28:
+        env[k] = bound.background[k]
+    return env
+
+/// Vertex `vertex` of row `instance` of the instance table, pulled out of the vertex pool, as `raster.vertex_of` pulls it.
+/// The draw is indexed through the index pool with the mesh's base vertex, so `vertex` is the pool's own index.
+fun vertex_of(vertex: int, instance: uint){bound} -> varyings:
+    let f = bound.frame[0]
+    let inst = scene.instance(..bound.instances[instance as int])
+    let object = reinterpret_as_float(bound.vertices.load3((vertex as uint) * 12u))
+    let world = raster.to_world_point(inst, object)
+    return {
+        position = raster.project(scene.camera(..f.camera), world, f.near_plane, raster.jitter_shift(f.jitter, f.size))
+        instance = instance
+        object = object
+        world = world
+    }
+
+/// The shading context of the pixel's triangle `primitive`, as `raster.pixel_context` makes one.
+/// Its parameter block is read from `bound.params` at the record's offset, whatever slot the record names.
+fun pixel_context(p: varyings, primitive: uint){bound} -> material.shading_context:
+    let inst = scene.instance(..bound.instances[p.instance as int])
+    let corner = material.triangle_corners(inst, bound.indices, primitive)
+    let o0 = material.position_of(inst, bound.vertices, corner.x)
+    let o1 = material.position_of(inst, bound.vertices, corner.y)
+    let o2 = material.position_of(inst, bound.vertices, corner.z)
+    let bary = raster.barycentrics_of(p.object, o0, o1, o2)
+    return material.shading_context(inst.param_buffer, inst.param_offset, primitive, corner, bary)
+
+/// The face of `ctx`'s triangle of `inst` seen from `eye`, as `raster.face_of` describes it, its corners read from the pool.
+fun face_of(inst: scene.instance, ctx: material.shading_context, world: float3, eye: float3, surface: openpbr.surface, supplied_tangent_frame: bool){bound} -> raster.pixel_face:
+    let w0 = raster.to_world_point(inst, material.position_of(inst, bound.vertices, ctx.corner.x))
+    let w1 = raster.to_world_point(inst, material.position_of(inst, bound.vertices, ctx.corner.y))
+    let w2 = raster.to_world_point(inst, material.position_of(inst, bound.vertices, ctx.corner.z))
+    let mut n = pt.triangle_normal(w1 - w0, w2 - w0, normalize(eye - world)) * raster.mirroring_of(inst)
+
+    // Which side the viewer is on, read off the geometry BEFORE the normal is turned to face it.
+    let exiting = dot(n, eye - world) < 0.0
+    if exiting => n = -n
+
+    let mut authored = openpbr.frame(float3(0.0), float3(0.0), float3(0.0))
+    if supplied_tangent_frame:
+        let local = openpbr.frame_from_quaternion(surface.geometry_tangent_frame, surface.geometry_handedness)
+        authored = openpbr.frame(normalize(raster.to_world_vector(inst, local.t)), normalize(raster.to_world_vector(inst, local.b)), normalize(raster.to_world_vector(inst, local.n)))
+    return { n = n, exiting = exiting, authored = authored, reach = pt.corner_reach(world, w0, w1, w2) }
+
+/// The environment's light at a surface, unoccluded, as `raster.ambient` approximates it.
+fun ambient(surface: openpbr.surface, n: float3, v: float3){bound} -> float3:
+    let sh = background_sh()
+    let diffuse = scene.background_irradiance(sh, n) / pt.pi
+    let mirror = normalize(openpbr.reflect_about(-v, n))
+    let specular = mix(scene.background_radiance(sh, mirror), diffuse, openpbr.pt_roughness(surface))
+    return openpbr.pt_diffuse_albedo(surface) * diffuse + openpbr.pt_specular_albedo(surface) * specular
+
+/// Shades the pixel `p` covers, whose material evaluated to `surface_in` through `ctx`, as `raster.shade` shades it.
+///
+/// Lit directly from every light, unshadowed, and from the environment's SH; `occlusion` darkens the environment alone.
+/// No decals yet: they would need two more storage buffers than group 0 has room for.
+fun shade(p: varyings, ctx: material.shading_context, surface_in: openpbr.surface, supplied_tangent_frame: bool, occlusion: float){bound} -> targets:
+    let f = bound.frame[0]
+    let cam = scene.camera(..f.camera)
+    let inst = scene.instance(..bound.instances[p.instance as int])
+    let face = face_of(inst, ctx, p.world, cam.position, surface_in, supplied_tangent_frame)
+    let n = face.n
+    let v = normalize(cam.position - p.world)
+    let view_depth = dot(p.world - cam.position, normalize(cam.forward))
+
+    let mut surface = surface_in
+    let shading = openpbr.shading_frame(mut surface, n, v, face.authored, supplied_tangent_frame)
+    let b = openpbr.bsdf_prepare(surface, face.exiting, 3u)
+    let wo_local = openpbr.to_local(shading, v)
+
+    let mut color = b.emission
+    if wo_local.z > 0.0:
+        for i in 0 ..< (f.light_count as int):
+            color += raster.direct_light(scene.light(..bound.lights[i]), b, shading, n, wo_local, p.world)
+        color += ambient(surface, shading.n, v) * occlusion
+    return {
+        color = float4(..color, pt.moment_of(color))
+        primary_depth = max(1.0 - f.near_plane / view_depth, 0.0)
+    }
+
+/// What a pixel no surface covers holds: the environment along its camera ray, and the far clip depth.
+fun environment(pixel: float2){bound} -> targets:
+    let f = bound.frame[0]
+    let cam = scene.camera(..f.camera)
+    let dir = normalize(scene.camera_ray_offset(cam, pixel + f.jitter, f.size))
+    let backdrop = scene.environment_backdrop(background_lanes(), dir)
+    return {
+        color = float4(..backdrop, pt.moment_of(backdrop))
+        primary_depth = 1.0
+    }

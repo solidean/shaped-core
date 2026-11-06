@@ -187,6 +187,7 @@ target_compile_options(shaped-viewer
 # Module `tracer` is exported because a material's hit group, generated and compiled at run time, lists its bindings and traces its rays.
 # Module `raster` is exported for the same reason: a material's pixel shader is generated too, and lists its bindings and writes its targets.
 # Module `hybrid` is exported because the forward hybrid's pixel shader is generated too, and lists its inline constants.
+# Module `raster_bound` is exported because the bound raster mode's pixel shader is generated too, and lists its group 0.
 # The fullscreen blit lives in shaped-rendering (sr::blit_routine).
 # Must be declared here, in the CMakeLists that defines the target — the generated sources are added as
 # PRIVATE sources and add_custom_command(OUTPUT) is directory-scoped. Deliberately not gated on a compiler:
@@ -202,9 +203,11 @@ sc_add_shader_package(
         module:tracer
         module:raster
         module:hybrid
+        module:raster_bound
         tracer_pipeline.sgl:*
         wavefront.sgl:*
         raster_pass.sgl:*
+        raster_bound_pass.sgl:*
         raster_cull.sgl:*
         hybrid_pass.sgl:*
         layout.sgl:*
