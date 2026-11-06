@@ -188,6 +188,85 @@ TEST("sgl check - a hit object is a let of its trace_hit, and its invocation tak
     CHECK(raygen_with(cc::string(traced) + "h.invoke(mut p)\n", false).contains("shader_execution_reordering"));
 }
 
+TEST("sgl check - a hit object is held by its let alone, whatever reaches it")
+{
+    auto const raygen_with = [](cc::string_view declarations, cc::string_view body)
+    {
+        auto source = cc::string(declarations);
+        // a `require` rather than `const if has`, whose branch a check for no device in particular never flattens
+        source += "\n@raygen fun other_raygen(@launch_id id: int3){frame}:\n"
+                  "    require shader_execution_reordering\n"
+                  "    let mut p = radiance(float3(0.0, 0.0, 0.0))\n"
+                  "    let r = ray(origin = pos3(0.0, 0.0, 0.0), direction = vec3(0.0, 0.0, 1.0))\n"
+                  "    let a = trace_hit(frame.world, r, path_rays.surface, mut p)\n"
+                  "    let b = trace_hit(frame.world, r, path_rays.surface, mut p)\n";
+        auto is_line_start = true;
+        for (auto const ch : body)
+        {
+            if (is_line_start)
+                source += "    ";
+            source += ch;
+            is_line_start = ch == '\n';
+        }
+        return reports(source);
+    };
+    constexpr auto carrier = cc::string_view("struct carrier:\n    h: hit_object\n    w: float\n");
+    constexpr auto box = cc::string_view("struct box[T]:\n    v: T\n");
+    constexpr auto read_x = cc::string_view("fun read(x: hit_object) -> float:\n    return x.t\n");
+    auto const refused = [&](cc::string_view declarations, cc::string_view body, cc::string_view detail)
+    {
+        auto const report = raygen_with(declarations, body);
+        CHECK(report.starts_with("unsupported-yet")).dump("report", report).dump("body", body);
+        CHECK(report.contains(detail)).dump("report", report).dump("body", body);
+    };
+
+    // CHK-516: a struct and an array are memory, and memory is what SPIR-V forbids a hit object
+    refused(carrier, "let c = carrier(a, 1.0)\n", "a carrier holding a hit object");
+    refused(carrier, "let mut c = carrier(a, 1.0)\nc.h = b\n", "a carrier holding a hit object");
+    refused(cc::string(carrier) + "struct outer:\n    c: carrier\n", "let o = outer(carrier(a, 1.0))\n",
+            "holding a hit object");
+    refused(box, "let c = box(a)\np.color = float3(c.v.t, 0.0, 0.0)\n", "a box[hit_object] holding a hit object");
+    refused("", "let c = [a, b]\n", "a hit_object[2] holding a hit object");
+    refused("", "p.color = float3([a, b][id.x].t, 0.0, 0.0)\n", "holding a hit object");
+    // what chooses between two has to hold whichever it chose, even where the writer could have named it
+    refused("", "p.color = float3((if id.x > 0 => a else b).t, 0.0, 0.0)\n", "an `if` or a `return` hands on");
+    refused(read_x, "p.color = float3(read(if id.x > 0 => a else b), 0.0, 0.0)\n", "an `if` or a `return` hands on");
+    refused("fun pick(x: hit_object, y: hit_object, c: bool) -> hit_object:\n    if c:\n        return x\n    return "
+            "y\n",
+            "p.color = float3(pick(a, b, id.x > 0).t, 0.0, 0.0)\n", "an `if` or a `return` hands on");
+    refused("fun same(x: hit_object) -> hit_object:\n    return x\n", "p.color = float3(same(a).t, 0.0, 0.0)\n",
+            "an `if` or a `return` hands on");
+    refused("fun same[T](x: T) -> T:\n    return x\n", "p.color = float3(same(a).t, 0.0, 0.0)\n",
+            "an `if` or a `return` hands on");
+    // a print has no text for one, and a compile that keeps prints would hand DXC a call it cannot match
+    refused("", "print(a)\n", "a print of a hit object");
+    // what the let's check refuses before any of that
+    refused("", "let c = a\n", "a hit object that is no `let h = trace_hit");
+    refused("", "let c = if id.x > 0 => a else b\n", "a hit object that is no `let h = trace_hit");
+    refused("fun same(x: hit_object) -> hit_object:\n    return x\n", "let c = same(a)\n",
+            "a hit object that is no `let h = trace_hit");
+    refused("", "let mut c = a\n", "a `let mut` of a hit object");
+    CHECK(raygen_with("", "let c: hit_object[2]\n").starts_with("unsupported-yet"));
+    CHECK(raygen_with("", "let c = select(id.x > 0, a, b)\n").starts_with("no-matching-overload"));
+    CHECK(raygen_with("", "if a == b => p.color = float3(0.0, 0.0, 0.0)\n").starts_with("no-matching-overload"));
+    CHECK(raygen_with("", "let c = hit_object()\n").starts_with("no-matching-overload"));
+
+    // handed to a function it stays the let's own, since a call is inlined with its arguments standing in
+    CHECK(raygen_with(read_x, "p.color = float3(read(a), 0.0, 0.0)\n") == "");
+    CHECK(raygen_with("fun hit_object.doubled => self.t * 2.0\n", "p.color = float3(a.doubled, 0.0, 0.0)\n") == "");
+    // a struct no value of exists holds nothing
+    CHECK(raygen_with(carrier, "p.color = float3(a.t, 0.0, 0.0)\n") == "");
+}
+
+TEST("sgl hit object - nothing in memory or at an edge holds one")
+{
+    // CHK-397 and CHK-434: what no function body reaches, so nothing above has a value to judge
+    CHECK(reports("struct held:\n    h: hit_object\n\nrays held_rays:\n    primary: held\n").contains("in a ray payload"));
+    CHECK(reports("binding kept:\n    held: buffer[hit_object]\n").contains("in a buffer's element"));
+    CHECK(reports("@raygen fun handed(@launch_id id: int3, h: hit_object){frame}:\n    let x = id\n")
+              .starts_with("invalid-entry-point"));
+}
+
 TEST("sgl check - a hit group's shaders carry the payloads of their ray types")
 {
     CHECK(reports("hit_group swapped for path_rays:\n    occlusion = (any_hit = cutout)\n")

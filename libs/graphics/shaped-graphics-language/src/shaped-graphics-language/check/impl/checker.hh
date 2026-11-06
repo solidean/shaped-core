@@ -989,6 +989,15 @@ struct checker
     };
     /// `in_memory`: what GPU memory holds, where a builtin with a layout there is no value of function bodies alone.
     [[nodiscard]] local_only_found local_only_path(type_id type, bool in_memory = false, bool in_link = false) const;
+    /// A value of a hit object that no target can keep: where it stands, and what it is.
+    struct hit_object_misuse
+    {
+        origin where;
+        cc::string detail;
+    };
+    /// CHK-516: the first value of `e` holding a hit object other than a trace's own.
+    /// `e` has every generic and call resolved, since a copy is reached through them as much as written.
+    [[nodiscard]] cc::optional<hit_object_misuse> find_hit_object_misuse(flat_entry_point const& e) const;
     /// CHK-397: refuses a value of function bodies alone a struct crossing a stage edge holds; true where it did.
     /// `is_link`: the edge is a stage link, where a mat2 and a mat3 cross a column per location (CHK-422).
     bool judge_edge_local_only(i32 file, source_span where, type_id type, bool is_link = false);

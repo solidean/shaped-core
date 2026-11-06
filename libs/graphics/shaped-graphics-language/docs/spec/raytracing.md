@@ -282,6 +282,8 @@ else:
 
 Nothing but a device with the feature can trace without running those shaders, so a hit object has no fallback, and the `else` is the program's to write.
 
+A hit object stays where its trace put it (CHK-516): a function may read it, and no struct, array, `if` or `return` holds it.
+
 ### Hit groups
 
 **`hit_group name for set:` is one row of the table: a record per ray type** (CHK-330).
