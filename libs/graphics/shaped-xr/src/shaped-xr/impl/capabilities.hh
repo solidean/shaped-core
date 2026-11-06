@@ -17,6 +17,9 @@ struct system_support
     bool environment_raycast = false;
 };
 
+/// `c` as a log reads it.
+[[nodiscard]] char const* name_of(capability c);
+
 /// The extensions `c` needs enabled, its dependencies included, as terminated strings that live forever.
 [[nodiscard]] cc::span<char const* const> required_extensions(capability c);
 

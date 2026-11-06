@@ -170,7 +170,7 @@ cc::result<cc::unique_ptr<sxr::system>> sxr::system::try_create(system_descripti
         if (has_all)
             listed.push_back(c);
         else
-            CC_LOG_INFO("capability {} is wanted, but the runtime does not list what it needs", int(c));
+            CC_LOG_INFO("{} is wanted, but the runtime does not list what it needs", impl::name_of(c));
     }
     for (auto const* name : impl::extensions_of(listed))
         extensions.push_back(name);
@@ -209,7 +209,7 @@ cc::result<cc::unique_ptr<sxr::system>> sxr::system::try_create(system_descripti
         if (impl::is_supported(c, answer.value().support))
             s->offered.push_back(c);
         else
-            CC_LOG_INFO("capability {} is listed, but this headset says it does not have it", int(c));
+            CC_LOG_INFO("{} is listed, but this headset says it does not have it", impl::name_of(c));
     CC_LOG_INFO("{} on {}", s->system_name, s->runtime_name);
     return cc::make_unique<system>(cc::move(s));
 }

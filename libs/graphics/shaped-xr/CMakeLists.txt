@@ -59,12 +59,13 @@ if(TARGET openxr_loader)
 endif()
 
 if(SC_BUILD_TESTS)
-    # the conversions at OpenXR's edge, which need no runtime
+    # the conversions at OpenXR's edge, which need no runtime, and sessions, which skip without Monado (docs/testing.md)
     add_executable(shaped-xr-test
         tests/main.cc
         tests/view-math-test.cc
         tests/actions-test.cc
         tests/capabilities-test.cc
+        tests/session-test.cc
     )
     target_link_libraries(shaped-xr-test PRIVATE shaped-xr nexus)
     sc_stage_runtime_dlls(shaped-xr-test DLLS "$<TARGET_RUNTIME_DLLS:shaped-xr-test>")

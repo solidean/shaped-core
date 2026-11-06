@@ -1,0 +1,148 @@
+#include <clean-core/platform/environment.hh>
+#include <clean-core/thread/thread.hh>
+#include <nexus/async-test.hh>
+#include <nexus/test.hh>
+#include <shaped-graphics/all.hh>
+#include <shaped-xr/runtime_report.hh>
+#include <shaped-xr/xr.hh>
+
+using namespace cc::primitive_defines;
+
+// These run against Monado's simulated headset and null compositor, and skip without them, since on any other runtime a session would start on someone's head.
+// XRT_COMPOSITOR_NULL is what opts in, see docs/testing.md.
+// The loader holds one instance per process, so they run one at a time.
+
+namespace
+{
+void require_simulated_headset()
+{
+    if (!cc::environment_variable("XRT_COMPOSITOR_NULL").has_value())
+        SKIP("needs Monado's simulated headset, see shaped-xr's docs/testing.md");
+}
+
+[[nodiscard]] cc::unique_ptr<sxr::system> simulated_system(sxr::system_description const& desc)
+{
+    require_simulated_headset();
+    auto created = sxr::system::try_create(desc);
+    REQUIRE(created.has_value());
+    return cc::move(created.value());
+}
+
+// a session starts when the runtime is ready, and its first frames ask for nothing, which must still end
+[[nodiscard]] sxr::frame next_rendered_frame(sxr::session& session)
+{
+    for (auto attempt = 0; attempt < 10000; ++attempt)
+    {
+        REQUIRE(session.poll_events());
+        auto frame = session.wait_frame();
+        if (!frame.has_value())
+            cc::this_thread_sleep_secs(0.001);
+        else if (frame.value().should_render)
+            return cc::move(frame.value());
+        else
+        {
+            CHECK(frame.value().views.empty());
+            session.submit_frame(nullptr);
+        }
+    }
+    FAIL("the runtime never asked for a frame");
+    return {};
+}
+
+void check_stereo(sxr::frame const& frame)
+{
+    REQUIRE(frame.views.size() == 2);
+    CHECK(frame.width > 0);
+    CHECK(frame.height > 0);
+    CHECK(frame.color.array_layers() == 2);
+    CHECK(frame.depth.array_layers() == 2);
+    auto const between_eyes = frame.views[1].camera_to_world.translation() - frame.views[0].camera_to_world.translation();
+    CHECK(between_eyes.length() > 0.0f);
+}
+
+[[nodiscard]] std::unique_ptr<sg::command_list> cleared(sg::context& ctx, sxr::frame const& frame, tg::vec4f color)
+{
+    auto cmd = ctx.create_command_list();
+    {
+        auto pass = cmd->raster.render_to({.color_targets = {frame.color.as_render_target_view().cleared(color)},
+                                           .depth_stencil_target = frame.depth.as_depth_stencil_view().cleared(1.0f),
+                                           .view_count = 2});
+    }
+    return cmd;
+}
+} // namespace
+
+TEST("shaped-xr session - the report names the simulated headset, which has none of Meta's AR",
+     nx::config::exclusive("openxr"))
+{
+    require_simulated_headset();
+
+    auto const report = sxr::inspect_runtime();
+    REQUIRE(report.has_value());
+    CHECK(!report.value().system_name.empty());
+    CHECK(!report.value().extensions.empty());
+    for (auto const& feature : report.value().features)
+        CHECK(!feature.is_supported);
+}
+
+TEST("shaped-xr session - a system wanting what the runtime lacks is created, and offers none of it",
+     nx::config::exclusive("openxr"))
+{
+    auto const system = simulated_system(
+        {.wants = {sxr::capability::passthrough, sxr::capability::environment_depth, sxr::capability::hit_tests}});
+    CHECK(!system->offers(sxr::capability::passthrough));
+    CHECK(!system->offers(sxr::capability::environment_depth));
+    CHECK(!system->offers(sxr::capability::hit_tests));
+}
+
+ASYNC_TEST("shaped-xr session - vulkan renders into the runtime's images, frame after frame",
+           nx::config::exclusive("openxr"))
+{
+    auto const system = simulated_system({.api = sxr::graphics_api::vulkan});
+    auto const ctx = system->create_context().value();
+    REQUIRE(ctx->supports(sg::feature::view_instancing));
+    auto const session = system->create_session(*ctx, {}).value();
+    CHECK(session->availability_of(sxr::capability::hit_tests) == sxr::availability::unsupported);
+
+    for (auto i = 0; i < 3; ++i)
+    {
+        auto const frame = next_rendered_frame(*session);
+        check_stereo(frame);
+        session->submit_frame(cleared(*ctx, frame, tg::vec4f(0, 0, 0, 1)));
+        ctx->advance_epoch();
+        co_await ctx->epochs_in_flight_completion(2);
+    }
+    co_await ctx->idle_completion();
+}
+
+#ifdef CC_OS_WINDOWS
+// dx12 renders into images of its own and copies, so unlike vulkan's the frame's image can be read back
+ASYNC_TEST("shaped-xr session - dx12 draws both eyes, each into its own layer", nx::config::exclusive("openxr"))
+{
+    auto const system = simulated_system({.api = sxr::graphics_api::dx12});
+    auto const ctx = system->create_context().value();
+    REQUIRE(ctx->supports(sg::feature::view_instancing));
+    auto const session = system->create_session(*ctx, {}).value();
+
+    auto const frame = next_rendered_frame(*session);
+    check_stereo(frame);
+
+    // the same in rgba and bgra, and in linear and sRGB
+    auto cmd = cleared(*ctx, frame, tg::vec4f(1, 0, 1, 1));
+    auto const left = cmd->download.bytes_from_texture(frame.color.raw(), {.array_layer = 0});
+    auto const right = cmd->download.bytes_from_texture(frame.color.raw(), {.array_layer = 1});
+    session->submit_frame(cc::move(cmd));
+    ctx->advance_epoch();
+
+    for (auto const& layer : {left, right})
+    {
+        auto const bytes = co_await layer.bytes();
+        REQUIRE(bytes.size() == frame.width * frame.height * 4);
+        CHECK(u8(bytes[0]) == 255);
+        CHECK(u8(bytes[1]) == 0);
+        CHECK(u8(bytes[2]) == 255);
+        CHECK(u8(bytes[3]) == 255);
+    }
+    co_await ctx->idle_completion();
+}
+#endif

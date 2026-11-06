@@ -85,7 +85,7 @@ constexpr auto grab_trigger = 0.7f;  // trigger travel that grabs, and below `re
 constexpr auto release_trigger = 0.3f;
 } // namespace
 
-// `dev.py example xr-cube --test-args "--dx12"` takes the dx12 binding
+// `dev.py example xr-cube --test-args=--dx12` takes the dx12 binding
 ASYNC_EXAMPLE("shaped-graphics/xr-cube", nx::config::args("--vulkan"))
 {
     auto api = sxr::graphics_api::vulkan;

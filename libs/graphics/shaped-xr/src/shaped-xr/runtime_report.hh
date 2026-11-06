@@ -30,5 +30,6 @@ namespace sxr
 {
 /// Reports on the active runtime through an instance of its own, with no graphics binding and no session.
 /// Fails where the build has no OpenXR loader or no runtime is active; a missing headset is a report, not a failure.
+/// No `sxr::system` may exist meanwhile, since the loader holds one instance per process.
 [[nodiscard]] cc::result<runtime_report> inspect_runtime();
 } // namespace sxr

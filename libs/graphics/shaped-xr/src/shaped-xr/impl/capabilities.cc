@@ -14,6 +14,28 @@ constexpr char const* persistent_anchor_extensions[]
 constexpr char const* hit_test_extensions[] = {"XR_EXT_future", "XR_META_environment_raycast"};
 } // namespace
 
+char const* sxr::impl::name_of(capability c)
+{
+    switch (c)
+    {
+    case capability::passthrough:
+        return "passthrough";
+    case capability::environment_depth:
+        return "environment depth";
+    case capability::scene_planes:
+        return "scene planes";
+    case capability::scene_meshes:
+        return "scene meshes";
+    case capability::anchors:
+        return "anchors";
+    case capability::persistent_anchors:
+        return "persistent anchors";
+    case capability::hit_tests:
+        return "hit tests";
+    }
+    return "unknown";
+}
+
 cc::span<char const* const> sxr::impl::required_extensions(capability c)
 {
     switch (c)

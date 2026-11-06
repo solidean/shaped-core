@@ -1,4 +1,4 @@
-# The SGL cube in a headset through shaped-xr: vulkan by default, dx12 with `--test-args "--dx12"`.
+# The SGL cube in a headset through shaped-xr: vulkan by default, dx12 with `--test-args=--dx12`.
 # Built where shaped-xr can create a system, a backend exists, and DXC compiles the shader.
 
 if(NOT TARGET shaped-xr OR NOT TARGET openxr_loader OR NOT SC_HAS_DXC_COMPILER)

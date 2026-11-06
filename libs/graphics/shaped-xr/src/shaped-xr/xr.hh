@@ -127,7 +127,8 @@ struct sxr::view
 /// Render both views in one pass with view instancing (`view_count = 2`, SGL's `@view_index`), or one pass a layer.
 struct sxr::frame
 {
-    /// False where the runtime wants nothing drawn this frame, which still ends through `session::submit_frame`.
+    /// False where the runtime wants nothing drawn this frame, as the first ones of a session do: `views` is empty and
+    /// the images are invalid, and the frame still ends, through `session::submit_frame(nullptr)`.
     bool should_render = false;
     cc::vector<view> views;
     int width = 0;
@@ -141,7 +142,7 @@ struct sxr::frame
 ///
 /// The runtime dictates the GPU, and on vulkan the instance and device extensions, so the context comes from here:
 /// `create_context` creates it to the runtime's spec, on the backend `graphics_api` names.
-/// A system outlives every session created from it.
+/// A system outlives every session created from it, and a process has one at a time, since the loader holds one instance.
 class sxr::system
 {
 public:

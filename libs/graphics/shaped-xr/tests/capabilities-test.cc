@@ -21,10 +21,13 @@ constexpr sxr::capability every_capability[]
 }
 } // namespace
 
-TEST("shaped-xr capabilities - every capability names at least one extension")
+TEST("shaped-xr capabilities - every capability has a name and at least one extension")
 {
     for (auto const c : every_capability)
+    {
+        CHECK(cc::string_view(sxr::impl::name_of(c)) != "unknown");
         CHECK(!sxr::impl::required_extensions(c).empty());
+    }
 }
 
 TEST("shaped-xr capabilities - an extension shared by two capabilities is enabled once")
