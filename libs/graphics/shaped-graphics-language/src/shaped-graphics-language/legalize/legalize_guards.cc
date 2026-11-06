@@ -734,10 +734,368 @@ struct guarder
         return r.undefined_when != nullptr && (r.name.starts_with("divide") || r.name.starts_with("remainder"));
     }
 
+    // ---- LEGAL-69: workgroup memory read before anything stored it ---------------------------------------------------
+
+    /// The first scalar of one `@workgroup` binding member in the shadow, which counts every scalar of the entry
+    /// point's workgroup memory once, in the order its members are listed.
+    struct shadow_member
+    {
+        symbol_id binding = symbol_id::none;
+        i32 member = -1;
+        u32 first = 0;
+    };
+    /// The members the shadow covers; empty where no read is tested.
+    cc::vector<shadow_member> shadow;
+    /// Places whose parent tests or marks them itself, as an assignment's, an atomic's and a uniform load's.
+    cc::vector<flat_expr_id> own_places;
+    /// Set for the walk into the object of a member or an element, which is part of a place rather than a read.
+    bool next_is_chain_object = false;
+
+    /// A place of workgroup memory as the shadow sees it: rebuilt over pinned indices, so the shadow's test and the
+    /// access itself read each index once.
+    struct shadow_place
+    {
+        flat_expr_id place = flat_expr_id::none;
+        /// The first scalar it reaches, a `uint`.
+        flat_expr_id first = flat_expr_id::none;
+        u32 count = 0;
+        /// A swizzle reaches its fields one at a time: each field's offset from `first`, one scalar each.
+        cc::vector<u32> fields;
+        /// The place as the report names it, around the indices in `values`.
+        cc::vector<cc::string> pieces;
+        cc::vector<flat_expr_id> values;
+    };
+
+    [[nodiscard]] u32 slots_of(type_id type) const
+    {
+        if (auto const* const record = out.m.builtin_type_of(type))
+            return u32(record->leaf_count > 0 ? record->leaf_count : 1);
+        auto const& t = out.m.at(type);
+        if (t.kind == type_kind::array)
+            return u32(t.count > 0 ? t.count : 0) * slots_of(t.element);
+        if (t.kind == type_kind::structure)
+        {
+            auto total = u32(0);
+            for (auto const& m : out.m.at(t.members))
+                total += slots_of(m.type);
+            return total;
+        }
+        // an atomic and an enum are one scalar
+        return 1;
+    }
+
+    [[nodiscard]] u32 offset_of_member(type_id type, i32 member) const
+    {
+        auto offset = u32(0);
+        auto const members = out.m.at(out.m.at(type).members);
+        for (auto i = 0; i < member && i < members.size(); ++i)
+            offset += slots_of(members[i].type);
+        return offset;
+    }
+
+    [[nodiscard]] bool is_workgroup_place(flat_expr_id id) const
+    {
+        for (auto steps = 0; steps < k_max_depth && is_known(out.e, id); ++steps)
+        {
+            auto const& x = out.e.at(id);
+            if (auto const* const member = x.node.try_as<flat_member>())
+                id = member->object;
+            else if (auto const* const element = x.node.try_as<flat_element>())
+                id = element->object;
+            else if (auto const* const b = x.node.try_as<flat_binding_member>())
+                return b->is_workgroup;
+            else
+                return false;
+        }
+        return false;
+    }
+
+    /// `id`, a place of workgroup memory, with each index pinned into `pins` in the order the place evaluates them.
+    cc::optional<shadow_place> pinned_place(flat_expr_id id, stmt_list& pins)
+    {
+        auto x = out.e.at(id);
+        if (auto const* const b = x.node.try_as<flat_binding_member>())
+        {
+            for (auto const& s : shadow)
+                if (s.binding == b->binding && s.member == b->member)
+                {
+                    auto const& binding = out.m.bindings[out.m.at(b->binding).info];
+                    auto const name
+                        = cc::format("{}.{}", out.m.at(b->binding).name, out.m.at(binding.members)[b->member].name);
+                    return shadow_place{.place = id,
+                                        .first = uint_literal(i32(s.first)),
+                                        .count = slots_of(x.type),
+                                        .pieces = {cc::format("workgroup memory `{}", name)}};
+                }
+            return {};
+        }
+        if (auto* const member = x.node.try_as<flat_member>())
+        {
+            auto inner = pinned_place(member->object, pins);
+            if (!inner.has_value())
+                return {};
+            auto result = cc::move(inner.value());
+            auto const object_type = out.e.at(member->object).type;
+            auto const members = out.m.at(out.m.at(object_type).members);
+            member->object = result.place;
+            out.e.exprs.push_back(x);
+            result.place = flat_expr_id(out.e.exprs.size() - 1);
+            auto field_names = cc::string();
+            if (member->is_swizzle())
+            {
+                for (auto i = 0; i < member->letters.count; ++i)
+                {
+                    auto const field = member->letters.fields[i];
+                    result.fields.push_back(offset_of_member(object_type, field));
+                    field_names += members[field].name;
+                }
+            }
+            else
+            {
+                if (auto const offset = offset_of_member(object_type, member->member); offset > 0)
+                {
+                    flat_expr_id const args[] = {result.first, uint_literal(i32(offset))};
+                    result.first = out.call("add_uint", args);
+                }
+                result.count = slots_of(x.type);
+                field_names = members[member->member].name;
+            }
+            result.pieces.back() += cc::format(".{}", field_names);
+            return result;
+        }
+        if (auto* const element = x.node.try_as<flat_element>())
+        {
+            auto inner = pinned_place(element->object, pins);
+            if (!inner.has_value())
+                return {};
+            auto result = cc::move(inner.value());
+            auto const index_type = out.e.at(element->index).type;
+            auto const index_known = integer_shape_of(index_type);
+            if (!index_known.has_value() || !index_known.value().lanes.empty()
+                || (index_known.value().element != "int" && index_known.value().element != "uint"))
+                return {};
+            auto const index = out.add_local(local_kind::temporary, "index", index_type);
+            pins.push_back(out.let(index, element->index));
+            auto unsigned_index = out.local(index);
+            if (index_known.value().element == "int")
+            {
+                flat_expr_id const argument[] = {out.local(index)};
+                unsigned_index = out.call("convert_int_to_uint", argument);
+            }
+            flat_expr_id const scaled_args[] = {unsigned_index, uint_literal(i32(slots_of(x.type)))};
+            flat_expr_id const first_args[] = {result.first, out.call("multiply_uint", scaled_args)};
+            result.first = out.call("add_uint", first_args);
+            result.count = slots_of(x.type);
+            element->object = result.place;
+            element->index = out.local(index);
+            out.e.exprs.push_back(x);
+            result.place = flat_expr_id(out.e.exprs.size() - 1);
+            result.pieces.back() += "[";
+            result.values.push_back(out.local(index));
+            result.pieces.push_back(cc::string("]"));
+            return result;
+        }
+        return {};
+    }
+
+    flat_expr_id uint_call(cc::string_view name, flat_expr_id a, flat_expr_id b)
+    {
+        flat_expr_id const args[] = {a, b};
+        return out.call(name, args);
+    }
+
+    /// Calls `each(word, bits)` for every word of the shadow that the scalars `first ..< first + count` take, with the
+    /// bits they take there; `first` is a pinned `uint`.
+    template <class Each>
+    void for_each_word(local_id first, u32 count, stmt_list& into, Each const& each)
+    {
+        // the most words `count` scalars can touch, starting anywhere in one
+        auto const words = i32((count + 62) / 32);
+        auto const at = [&](flat_expr_id k, stmt_list& body)
+        {
+            auto const word = out.add_local(local_kind::temporary, "word", out.type_named(builtins::k_uint));
+            body.push_back(out.let(
+                word, uint_call("add_uint", uint_call("shift_right_uint", out.local(first), uint_literal(5)), k)));
+            flat_expr_id const bits_args[] = {out.local(word), out.local(first), uint_literal(i32(count))};
+            auto const bits = out.add_local(local_kind::temporary, "bits", out.type_named(builtins::k_uint));
+            body.push_back(out.let(bits, out.call("workgroup_written_bits", bits_args)));
+            each(word, bits, body);
+        };
+        if (words <= 4)
+        {
+            for (auto k = 0; k < words; ++k)
+                at(uint_literal(k), into);
+            return;
+        }
+        auto const label = out.add_label("words");
+        auto const k = out.add_local(local_kind::index, "k", out.type_named(builtins::k_int));
+        auto body = stmt_list();
+        flat_expr_id const k_args[] = {out.local(k)};
+        at(out.call("convert_int_to_uint", k_args), body);
+        into.push_back(out.for_(label, k, out.int_literal(0), out.int_literal(words), body));
+    }
+
+    /// Whether every scalar `first ..< first + count` was stored by some invocation, as a pinned `bool`.
+    local_id stored(local_id first, u32 count, stmt_list& into)
+    {
+        auto const ok = add_temporary_var(out, "stored", out.type_named(builtins::k_bool));
+        into.push_back(out.var(ok, out.bool_literal(true)));
+        for_each_word(first, count, into,
+                      [&](local_id word, local_id bits, stmt_list& body)
+                      {
+                          flat_expr_id const word_args[] = {out.local(word)};
+                          auto const held = uint_call("bit_and_uint", out.call("workgroup_written_word", word_args),
+                                                      out.local(bits));
+                          auto const missing = out.and_(
+                              compare("not_equal", shape{.element = builtins::k_uint}, out.local(bits), uint_literal(0)),
+                              compare("not_equal", shape{.element = builtins::k_uint}, held, out.local(bits)));
+                          flat_stmt_id const unset[] = {out.assign(out.local(ok), out.bool_literal(false))};
+                          body.push_back(out.if_(missing, unset));
+                      });
+        return ok;
+    }
+
+    void mark_stored(local_id first, u32 count, stmt_list& into)
+    {
+        for_each_word(
+            first, count, into,
+            [&](local_id word, local_id bits, stmt_list& body)
+            {
+                flat_expr_id const mark_args[] = {out.local(word), out.local(bits)};
+                flat_stmt_id const mark[] = {out.eval(out.call("workgroup_mark_written", mark_args))};
+                body.push_back(out.if_(
+                    compare("not_equal", shape{.element = builtins::k_uint}, out.local(bits), uint_literal(0)), mark));
+            });
+    }
+
+    /// The scalars `place` reaches, each range as a pinned first scalar and its size.
+    cc::vector<cc::pair<local_id, u32>> ranges_of(shadow_place const& place, stmt_list& into)
+    {
+        auto const first = out.add_local(local_kind::temporary, "first", out.type_named(builtins::k_uint));
+        into.push_back(out.let(first, place.first));
+        auto result = cc::vector<cc::pair<local_id, u32>>();
+        if (place.fields.empty())
+        {
+            result.push_back({first, place.count});
+            return result;
+        }
+        for (auto const offset : place.fields)
+        {
+            auto const field = out.add_local(local_kind::temporary, "first", out.type_named(builtins::k_uint));
+            into.push_back(out.let(field, uint_call("add_uint", out.local(first), uint_literal(i32(offset)))));
+            result.push_back({field, 1});
+        }
+        return result;
+    }
+
+    /// A test of every range of `place`, failing as a guard does where one was never stored.
+    void test_stored(shadow_place const& place, cc::span<cc::pair<local_id, u32> const> ranges, stmt_list& into)
+    {
+        for (auto const& [first, count] : ranges)
+        {
+            auto const ok = stored(first, count, into);
+            auto pieces = place.pieces;
+            pieces.back() += "` is read before any invocation stored it";
+            into.push_back(out.if_(out.not_(out.local(ok)), failed(cc::move(pieces), place.values, {})));
+        }
+    }
+
+    /// `id`, a read of workgroup memory, as a block that ends the invocation where a scalar it reads was never stored.
+    flat_expr_id guard_workgroup_read(flat_expr_id id)
+    {
+        auto const x = out.e.at(id);
+        out.from = x.from;
+        out.inlined_through = x.inlined_through;
+        auto stmts = stmt_list();
+        auto const place = pinned_place(id, stmts);
+        if (!place.has_value())
+            return id;
+        auto const label = out.add_label("guard");
+        auto const ranges = ranges_of(place.value(), stmts);
+        test_stored(place.value(), ranges, stmts);
+        stmts.push_back(out.leave(label, place.value().place));
+        return out.block_expr(label, x.type, stmts);
+    }
+
+    /// Whether `call` is an atomic or a uniform load whose first argument is workgroup memory the shadow covers.
+    [[nodiscard]] bool is_workgroup_call(flat_call const& call) const
+    {
+        if (shadow.empty() || !is_valid(call.intrinsic) || index_of(call.intrinsic) >= registry.functions.size()
+            || !is_known(out.e, call.arguments) || call.arguments.count < 1)
+            return false;
+        auto const& r = registry.at(call.intrinsic);
+        return (r.is_atomic || r.is_uniform_load) && is_workgroup_place(out.e.at(call.arguments)[0]);
+    }
+
+    /// `id`, an atomic or a uniform load of workgroup memory, with its place pinned and the mark of what it stores after.
+    /// What it reads is tested before it, or after a uniform load, whose barrier makes another invocation's store visible.
+    /// A call that gives nothing is a statement, which `into` receives instead of a block.
+    flat_expr_id guard_workgroup_call(flat_expr_id id, stmt_list* into)
+    {
+        auto const x = out.e.at(id);
+        auto call = *x.node.try_as<flat_call>();
+        auto const& r = registry.at(call.intrinsic);
+        out.from = x.from;
+        out.inlined_through = x.inlined_through;
+        auto stmts = stmt_list();
+        auto arguments = cc::vector<flat_expr_id>();
+        for (auto const a : out.e.at(call.arguments))
+            arguments.push_back(a);
+        auto const place = pinned_place(arguments[0], stmts);
+        if (!place.has_value())
+            return id;
+        auto const ranges = ranges_of(place.value(), stmts);
+        if (!r.is_uniform_load && r.name != "store")
+            test_stored(place.value(), ranges, stmts);
+        arguments[0] = place.value().place;
+        call.arguments = out.expr_list(arguments);
+        auto const guarded = out.add_expr(x.type, call);
+        auto const label = out.add_label("guard");
+        auto result = local_id::none;
+        if (into != nullptr)
+            stmts.push_back(out.eval(guarded));
+        else
+        {
+            result = out.add_local(local_kind::temporary, "result", x.type);
+            stmts.push_back(out.let(result, guarded));
+        }
+        if (r.is_uniform_load)
+            test_stored(place.value(), ranges, stmts);
+        else if (r.name != "load")
+            for (auto const& [first, count] : ranges)
+                mark_stored(first, count, stmts);
+        if (into != nullptr)
+        {
+            for (auto const s : stmts)
+                into->push_back(s);
+            return id;
+        }
+        stmts.push_back(out.leave(label, out.local(result)));
+        return out.block_expr(label, x.type, stmts);
+    }
+
+    /// `s`, a store to workgroup memory, as a block that pins its place, stores, then marks what it stored.
+    flat_stmt_id guard_workgroup_store(flat_stmt const& s, flat_assign const& n)
+    {
+        out.from = s.from;
+        out.inlined_through = s.inlined_through;
+        auto stmts = stmt_list();
+        auto const place = pinned_place(n.place, stmts);
+        if (!place.has_value())
+            return flat_stmt_id::none;
+        auto const ranges = ranges_of(place.value(), stmts);
+        stmts.push_back(out.assign(place.value().place, n.value));
+        for (auto const& [first, count] : ranges)
+            mark_stored(first, count, stmts);
+        return out.block(out.add_label("stored"), stmts);
+    }
+
     // ---- the walk -------------------------------------------------------------------------------------------------------
 
     flat_expr_id expr(flat_expr_id id, int depth)
     {
+        auto const is_chain_object = next_is_chain_object;
+        next_is_chain_object = false;
         if (!is_known(out.e, id) || depth > k_max_depth)
             return id;
         auto copy = out.e.at(id);
@@ -748,8 +1106,12 @@ struct guarder
             changed = changed || y != x;
             x = y;
         };
+        auto const tests_reads = guards && !shadow.empty() && depth + k_guard_depth_reserve <= k_max_depth;
         if (auto* const member = copy.node.try_as<flat_member>())
+        {
+            next_is_chain_object = true;
             operand(member->object);
+        }
         else if (auto* const buffer = copy.node.try_as<flat_buffer_element>())
         {
             operand(buffer->buffer);
@@ -757,13 +1119,18 @@ struct guarder
         }
         else if (auto* const element = copy.node.try_as<flat_element>())
         {
+            next_is_chain_object = true;
             operand(element->object);
             operand(element->index);
         }
         else if (auto* const construct = copy.node.try_as<flat_construct>())
             construct->arguments = exprs(construct->arguments, depth, changed);
         else if (auto* const call = copy.node.try_as<flat_call>())
+        {
+            if (tests_reads && is_workgroup_call(*call))
+                own_places.push_back(out.e.at(call->arguments)[0]);
             call->arguments = exprs(call->arguments, depth, changed);
+        }
         else if (auto* const n = copy.node.try_as<flat_not>())
             operand(n->operand);
         else if (auto* const a = copy.node.try_as<flat_and>())
@@ -798,6 +1165,13 @@ struct guarder
             out.e.exprs.push_back(cc::move(copy));
             result = flat_expr_id(out.e.exprs.size() - 1);
         }
+        // LEGAL-69: a read of workgroup memory tests the shadow; a place inside a place is no read of its own
+        if (tests_reads && !is_chain_object && !own_places.values().contains(id) && is_workgroup_place(result))
+            return guard_workgroup_read(result);
+        if (auto const* const call = out.e.at(result).node.try_as<flat_call>();
+            call != nullptr && tests_reads && out.e.at(result).type != checked_module::void_type
+            && is_workgroup_call(*call))
+            return guard_workgroup_call(result, nullptr);
         if (auto const* const call = out.e.at(result).node.try_as<flat_call>();
             call != nullptr && may_guard && is_integer_division(*call))
             return guard_division(result);
@@ -996,13 +1370,32 @@ struct guarder
             value(n->value);
         else if (auto* const n = copy.node.try_as<flat_assign>())
         {
+            // LEGAL-69: a store to workgroup memory marks what it stored, and is no read of it
+            auto const is_store = guards && !shadow.empty() && is_workgroup_place(n->place);
+            if (is_store)
+                own_places.push_back(n->place);
             value(n->place);
             value(n->value);
+            if (is_store)
+                if (auto const block = guard_workgroup_store(copy, *n); is_valid(block))
+                    return block;
         }
         else if (auto* const n = copy.node.try_as<flat_print>())
             n->values = exprs(n->values, 0, changed);
         else if (auto* const n = copy.node.try_as<flat_eval>())
+        {
             value(n->value);
+            // an atomic store gives nothing, so its test and its mark stand as statements around it
+            if (auto const* const call = out.e.at(n->value).node.try_as<flat_call>();
+                call != nullptr && guards && out.e.at(n->value).type == checked_module::void_type
+                && is_workgroup_call(*call))
+            {
+                auto stmts = stmt_list();
+                guard_workgroup_call(n->value, &stmts);
+                if (!stmts.empty())
+                    return out.block(out.add_label("stored"), stmts);
+            }
+        }
         else if (auto* const n = copy.node.try_as<flat_if>())
         {
             value(n->condition);
@@ -1072,6 +1465,90 @@ struct guarder
         return result;
     }
 };
+/// The bytes `type` takes in workgroup memory, laid out as WGSL lays out workgroup variables, as CHK-293 measures it.
+i32 workgroup_bytes_of(checked_module const& m, type_id type)
+{
+    struct measured
+    {
+        i32 size = 0;
+        i32 alignment = 1;
+    };
+    auto const round_up = [](i32 n, i32 to) { return (n + to - 1) / to * to; };
+    auto const measure = [&](auto const& self, type_id t) -> measured
+    {
+        if (auto const* const record = m.builtin_type_of(t))
+        {
+            if (record->wgsl_layout.size == 0)
+                return {.size = 4 * record->leaf_count, .alignment = 4};
+            return {.size = record->wgsl_layout.size, .alignment = record->wgsl_layout.alignment};
+        }
+        auto const& info = m.at(t);
+        if (info.kind == type_kind::atomic)
+            return self(self, info.element);
+        if (info.kind == type_kind::enumeration)
+            return {.size = 4, .alignment = 4};
+        if (info.kind == type_kind::array)
+        {
+            auto const element = self(self, info.element);
+            return {.size = round_up(element.size, element.alignment) * info.count, .alignment = element.alignment};
+        }
+        auto result = measured();
+        for (auto const& member : m.at(info.members))
+        {
+            auto const inner = self(self, member.type);
+            result.size = round_up(result.size, inner.alignment) + inner.size;
+            result.alignment = inner.alignment > result.alignment ? inner.alignment : result.alignment;
+        }
+        result.size = round_up(result.size, result.alignment);
+        return result;
+    };
+    return measure(measure, type).size;
+}
+
+/// LEGAL-69: the shadow of a compute stage's workgroup memory where the profile tests reads, or its zeroing under
+/// `define`, and the invocation's index in its workgroup that the text's prologue strides by.
+void prepare_workgroup(flat_builder& out, guarder& g)
+{
+    auto& e = out.e;
+    auto members = cc::vector<guarder::shadow_member>();
+    auto slots = u32(0);
+    auto bytes = 0;
+    for (auto const id : e.bindings)
+    {
+        auto const& b = out.m.bindings[out.m.at(id).info];
+        if (!b.is_workgroup)
+            continue;
+        auto const list = out.m.at(b.members);
+        for (auto i = isize(0); i < list.size(); ++i)
+        {
+            members.push_back({.binding = id, .member = i32(i), .first = slots});
+            slots += g.slots_of(list[i].type);
+            bytes += workgroup_bytes_of(out.m, list[i].type);
+        }
+    }
+    auto const words = i32((slots + 31) / 32);
+    // the shadow takes a word per 32 scalars, beside the memory it shadows, in the budget CHK-294 holds every stage to
+    constexpr auto k_portable_workgroup_bytes = 16384;
+    auto const shadows = !g.defines && bytes + 4 * words <= k_portable_workgroup_bytes;
+    if (members.empty() || (!g.defines && !shadows))
+        return;
+
+    for (auto const& input : e.stage_inputs)
+        if (input.input == stage_input::local_thread_index)
+            e.workgroup_index = input.local;
+    if (!is_valid(e.workgroup_index))
+    {
+        e.workgroup_index = out.add_local(local_kind::parameter, "local_index", out.type_named(builtins::k_int));
+        e.stage_inputs.push_back({.input = stage_input::local_thread_index, .local = e.workgroup_index});
+    }
+    if (g.defines)
+    {
+        e.zeroes_workgroup = true;
+        return;
+    }
+    e.written_words = words;
+    g.shadow = cc::move(members);
+}
 } // namespace
 
 stmt_list sgl::check::impl::guard_undefined(flat_builder& out, stmt_list const& body, legalize_options const& options)
@@ -1084,6 +1561,8 @@ stmt_list sgl::check::impl::guard_undefined(flat_builder& out, stmt_list const& 
                      .guards_buffers = options.guards_buffers,
                      .defines = options.guards_undefined == undefined_guard::define,
                      .lowers_asserts = options.lowers_asserts};
+    if (g.guards && out.e.entry_stage == stage::compute)
+        prepare_workgroup(out, g);
 
     // The last statement of the body that holds a barrier, a derivative or a subgroup operation, which an invocation
     // that ended earlier would leave the others waiting at or reading from; a guard before it sets a flag instead.

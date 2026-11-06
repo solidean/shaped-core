@@ -1858,7 +1858,110 @@ struct writer
                 line(cc::format("return {};", expr(r.value, true).text));
             });
     }
+
+    // ---- EMIT-229: what the body may assume of workgroup memory ---------------------------------------------------------
+
+    [[nodiscard]] bool holds_atomic(type_id type) const
+    {
+        if (p.m.builtin_type_of(type) != nullptr)
+            return false;
+        auto const& t = p.m.at(type);
+        if (t.kind == type_kind::atomic)
+            return true;
+        if (t.kind == type_kind::array)
+            return holds_atomic(t.element);
+        if (t.kind == type_kind::structure)
+            for (auto const& m : p.m.at(t.members))
+                if (holds_atomic(m.type))
+                    return true;
+        return false;
+    }
+
+    /// `place`, of `type`, set to zero; MSL stores an atomic, which no assignment may name, in one step.
+    void zero(cc::string const& place, type_id type)
+    {
+        auto const is_msl = d.language() == builtins::language::msl;
+        auto const& t = p.m.at(type);
+        if (p.m.builtin_type_of(type) == nullptr && t.kind == type_kind::array)
+        {
+            auto const i = p.names.mint("zeroed");
+            open(cc::format("for (uint {0} = 0u; {0} < {1}u; ++{0})", i, t.count));
+            zero(cc::format("{}[{}]", place, i), t.element);
+            close();
+            return;
+        }
+        if (is_msl && holds_atomic(type))
+        {
+            if (t.kind == type_kind::atomic)
+            {
+                line(cc::format("atomic_store_explicit(&{}, 0, memory_order_relaxed);", place));
+                return;
+            }
+            auto const& s = p.structs[p.struct_of_type[index_of(type)]];
+            for (auto const& member : s.members)
+                zero(cc::format("{}.{}", place, member.name), member.type);
+            return;
+        }
+        if (is_msl)
+            line(cc::format("{} = {}{{}};", place, type_text(p, d, type)));
+        else
+            line(cc::format("{} = ({})0;", place, type_text(p, d, type)));
+    }
+
+    /// Clears the shadow of LEGAL-69 and zeroes workgroup memory under `define`, each invocation its stride of both,
+    /// then waits for the workgroup; WGSL's workgroup memory starts at zero, so its text needs neither.
+    void workgroup_prologue()
+    {
+        if (d.language() == builtins::language::wgsl || (p.e.written_words <= 0 && !p.e.zeroes_workgroup)
+            || !is_valid(p.e.workgroup_index))
+            return;
+        auto const is_msl = d.language() == builtins::language::msl;
+        auto const index = cc::format("uint({})", p.locals[index_of(p.e.workgroup_index)]);
+        auto const group = p.e.workgroup[0] * p.e.workgroup[1] * p.e.workgroup[2];
+        auto const strided = [&](cc::string_view i, i32 count)
+        { return cc::format("for (uint {0} = {1}; {0} < {2}u; {0} += {3}u)", i, index, count, group); };
+        if (p.e.written_words > 0)
+        {
+            auto const w = p.names.mint("word");
+            open(strided(w, p.e.written_words));
+            line(is_msl ? cc::format("atomic_store_explicit(&sgl_written[{}], 0u, memory_order_relaxed);", w)
+                        : cc::format("sgl_written[{}] = 0u;", w));
+            close();
+        }
+        if (p.e.zeroes_workgroup)
+            for (auto const& memory : p.workgroup)
+            {
+                auto const& t = p.m.at(memory.type);
+                if (p.m.builtin_type_of(memory.type) == nullptr && t.kind == type_kind::array)
+                {
+                    auto const i = p.names.mint("zeroed");
+                    open(strided(i, t.count));
+                    zero(cc::format("{}[{}]", memory.name, i), t.element);
+                    close();
+                    continue;
+                }
+                open(cc::format("if ({} == 0u)", index));
+                zero(memory.name, memory.type);
+                close();
+            }
+        line(is_msl ? "threadgroup_barrier(mem_flags::mem_threadgroup);" : "GroupMemoryBarrierWithGroupSync();");
+    }
 };
+
+/// The shadow of LEGAL-69: a bit per scalar of workgroup memory, `words` words of it.
+cc::string written_shadow_declaration(builtins::language language, i32 words)
+{
+    switch (language)
+    {
+    case builtins::language::hlsl:
+        return cc::format("groupshared uint sgl_written[{}];", words);
+    case builtins::language::wgsl:
+        return cc::format("var<workgroup> sgl_written: array<atomic<u32>, {}>;", words);
+    case builtins::language::msl:
+        return cc::format("threadgroup atomic_uint sgl_written[{}];", words);
+    }
+    return {};
+}
 } // namespace
 
 void sgl::emit::impl::write_enum_constants(cc::string& out, plan const& p, dialect const& d)
@@ -2009,17 +2112,24 @@ sgl::emit::impl::written_text sgl::emit::impl::write_text(plan& p, dialect const
                   d.description());
     w.out += "// Generated: the SGL source is what to edit.\n\n";
     d.write_declarations(w.out, p);
+    if (p.e.written_words > 0 && !d.declares_workgroup_in_function())
+        w.out.appendf("{}\n\n", written_shadow_declaration(d.language(), p.e.written_words));
     write_helpers(w.out, p, d);
     if (p.writes_debug)
         d.write_debug_buffer(w.out);
     d.write_function_head(w.out, p);
     if (d.declares_workgroup_in_function())
+    {
         for (auto const& memory : p.workgroup)
         {
             auto declaration = cc::string();
             d.write_workgroup(declaration, memory, p);
             w.line(declaration);
         }
+        if (p.e.written_words > 0)
+            w.line(written_shadow_declaration(d.language(), p.e.written_words));
+    }
+    w.workgroup_prologue();
     for (auto const id : p.e.at(p.e.body))
         w.statement(p.e.at(id));
     w.out += "}\n";

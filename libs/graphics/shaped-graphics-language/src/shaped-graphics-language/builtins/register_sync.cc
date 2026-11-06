@@ -98,6 +98,93 @@ void loaded(cc::span<check::scalar const> in, cc::vector<check::scalar>& out)
 {
     out.push_back_range(in);
 }
+
+// ---- LEGAL-69: the shadow of workgroup memory ----------------------------------------------------------------------
+
+// One bit per scalar of the entry point's workgroup memory, which the text declares as `sgl_written` and clears before
+// the body (EMIT-229); a robustness profile sets a scalar's bit where it is stored and tests it where it is read.
+// The interpreter never runs these: it reports such a read itself (EVAL-92), so to it every bit is set.
+
+constexpr cc::string_view k_written_names[] = {"sgl_written", "sgl_written_bits", "InterlockedOr"};
+constexpr cc::string_view k_written_wgsl_names[] = {"sgl_written", "sgl_written_bits", "atomicLoad", "atomicOr"};
+constexpr cc::string_view k_written_msl_names[]
+    = {"sgl_written", "sgl_written_bits", "atomic_load_explicit", "atomic_fetch_or_explicit", "memory_order_relaxed"};
+
+written write_written_word(call_context const& ctx)
+{
+    auto const& word = ctx.arguments[0].text;
+    switch (ctx.target)
+    {
+    case language::hlsl:
+        return {.text = cc::format("sgl_written[{}]", word)};
+    case language::wgsl:
+        return {.text = cc::format("atomicLoad(&sgl_written[{}])", word)};
+    case language::msl:
+        return {.text = cc::format("atomic_load_explicit(&sgl_written[{}], memory_order_relaxed)", word)};
+    }
+    return {};
+}
+
+written write_mark_written(call_context const& ctx)
+{
+    auto const& word = ctx.arguments[0].text;
+    auto const& bits = ctx.arguments[1].text;
+    switch (ctx.target)
+    {
+    case language::hlsl:
+        return {.text = cc::format("InterlockedOr(sgl_written[{}], {})", word, bits)};
+    case language::wgsl:
+        return {.text = cc::format("atomicOr(&sgl_written[{}], {})", word, bits)};
+    case language::msl:
+        return {.text = cc::format("atomic_fetch_or_explicit(&sgl_written[{}], {}, memory_order_relaxed)", word, bits)};
+    }
+    return {};
+}
+
+/// The bits of word `word` that the scalars `first ..< first + count` take.
+cc::string written_bits_helper(helper_context const& c)
+{
+    if (c.target == language::wgsl)
+        return "fn sgl_written_bits(word: u32, first: u32, count: u32) -> u32\n"
+               "{\n"
+               "    let lo = max(first, word * 32u);\n"
+               "    let hi = min(first + count, word * 32u + 32u);\n"
+               "    if (hi <= lo) { return 0u; }\n"
+               "    var mask = 0xffffffffu;\n"
+               "    if (hi - lo < 32u) { mask = (1u << (hi - lo)) - 1u; }\n"
+               "    return mask << (lo - word * 32u);\n"
+               "}\n";
+    return "uint sgl_written_bits(uint word, uint first, uint count)\n"
+           "{\n"
+           "    uint lo = max(first, word * 32u);\n"
+           "    uint hi = min(first + count, word * 32u + 32u);\n"
+           "    if (hi <= lo)\n"
+           "        return 0u;\n"
+           "    uint mask = hi - lo < 32u ? (1u << (hi - lo)) - 1u : 0xffffffffu;\n"
+           "    return mask << (lo - word * 32u);\n"
+           "}\n";
+}
+
+void every_bit_written(cc::span<check::scalar const>, cc::vector<check::scalar>& out)
+{
+    out.push_back(scalar::of_uint(0xffffffffu));
+}
+
+void written_bits(cc::span<check::scalar const> in, cc::vector<check::scalar>& out)
+{
+    auto const word = u64(in[0].as_uint());
+    auto const first = u64(in[1].as_uint());
+    auto const count = u64(in[2].as_uint());
+    auto const lo = first > word * 32 ? first : word * 32;
+    auto const hi = first + count < word * 32 + 32 ? first + count : word * 32 + 32;
+    if (hi <= lo)
+    {
+        out.push_back(scalar::of_uint(0));
+        return;
+    }
+    auto const mask = hi - lo < 32 ? (u64(1) << (hi - lo)) - 1 : u64(0xffffffffu);
+    out.push_back(scalar::of_uint(u32(mask << (lo - word * 32))));
+}
 // ---- atomics ------------------------------------------------------------------------------------------------------
 
 enum class atomic_op : u8
@@ -912,6 +999,43 @@ void sgl::builtins::register_sync(registry& r)
             .is_barrier = true,
             .is_uniform_load = true,
         });
+
+    r.add_comment("// The shadow of workgroup memory a robustness profile tests a read by (LEGAL-69): a bit per "
+                  "scalar,\n"
+                  "// set where it is stored; the legalizer alone calls these.");
+    r.add(function_record{
+        .signature = "@internal @stages(.compute) fun workgroup_written_word(word: uint) -> uint",
+        .doc = "/// Word `word` of the shadow, one bit per scalar some invocation stored.",
+        .evaluate = every_bit_written,
+        .write = {.kind = spelling_kind::custom,
+                  .custom = write_written_word,
+                  .hlsl_names = k_written_names,
+                  .wgsl_names = k_written_wgsl_names,
+                  .msl_names = k_written_msl_names},
+        .reads_only = true,
+    });
+    r.add(function_record{
+        .signature = "@internal @stages(.compute) fun workgroup_mark_written(word: uint, bits: uint)",
+        .doc = "/// Sets `bits` of word `word` of the shadow, in one step.",
+        .evaluate = nothing,
+        .write = {.kind = spelling_kind::custom,
+                  .custom = write_mark_written,
+                  .hlsl_names = k_written_names,
+                  .wgsl_names = k_written_wgsl_names,
+                  .msl_names = k_written_msl_names},
+    });
+    r.add(function_record{
+        .signature = "@internal @pure fun workgroup_written_bits(word: uint, first: uint, count: uint) -> uint",
+        .doc = "/// The bits of word `word` that the scalars `first ..< first + count` take; 0 where it holds none.",
+        .evaluate = written_bits,
+        .write = {.hlsl = "sgl_written_bits",
+                  .wgsl = "sgl_written_bits",
+                  .msl = "sgl_written_bits",
+                  .helper = written_bits_helper,
+                  .hlsl_names = k_written_names,
+                  .wgsl_names = k_written_wgsl_names,
+                  .msl_names = k_written_msl_names},
+    });
 
     r.add_comment("// What a weak compare-exchange gives, a struct of fields every target declares as a program's "
                   "own.\n"

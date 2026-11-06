@@ -439,7 +439,7 @@ sgl::test::diagnostic_of(m, r)             // `test-failed` at the test, one rel
 ```bash
 uv run dev.py run sgl -- emit shader.sgl --entry main_ps --target wgsl   # the text and its warnings on stderr, or the diagnostics and exit 2
 uv run dev.py run sgl -- emit shader.sgl --entry main_cs --option tile=16 # an option set for this compile; `describe` takes it too
-uv run dev.py run sgl -- emit shader.sgl --entry main_cs --undefined report --diagnostics  # the guards of LEGAL-65 and LEGAL-66; abort: no report; define: WGSL's values
+uv run dev.py run sgl -- emit shader.sgl --entry main_cs --undefined report --diagnostics  # the guards of LEGAL-65, LEGAL-66 and LEGAL-69 (workgroup memory read unstored); abort: no report; define: WGSL's values
 uv run dev.py run sgl -- emit shader.sgl --entry main_cs --target wgsl --weaken-float     # a @float WGSL cannot keep, at .fast with a warning
 uv run dev.py run sgl -- test a.sgl b.sgl                                # the tests of each file; exit 2 when one fails
 #   emit, test and describe take --module-dir DIR, repeatable: the .sgl files directly in it are modules to `use`
