@@ -1,5 +1,6 @@
 #include "../shaders/shader_fixtures.hh"
 
+#include <clean-core/common/macros.hh>  // CC_COMPILER_MSVC, CC_ARCH_ARM64
 #include <clean-core/common/utility.hh> // cc::move
 #include <clean-core/container/fixed_vector.hh>
 #include <clean-core/thread/async_coroutine.hh>
@@ -14,6 +15,11 @@
 using namespace cc::primitive_defines;
 
 namespace shaders = sg::test::sgl_shaders;
+
+// Workaround: MSVC 14.44's arm64-hosted compiler crashes (C1001) optimizing this file; the x64-hosted one does not.
+#if defined(CC_COMPILER_MSVC) && defined(CC_ARCH_ARM64)
+#pragma optimize("", off)
+#endif
 
 namespace
 {
