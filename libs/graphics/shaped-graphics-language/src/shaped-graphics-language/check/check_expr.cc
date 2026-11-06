@@ -571,6 +571,14 @@ type_id checker::check_cast(function_scope& scope, ast::expr_id id, ast::cast co
             note_program_call(scope, candidate, where);
         return to;
     }
+    // CHK-150: an enum's `as int` takes the enum as the int it is held as, as its `==` does
+    if (out.is_plain_enum(from) && to == prelude_type(builtins::k_int))
+        if (auto const* const found = prelude_names.get_ptr("enum_as_int");
+            found != nullptr && demand((*found)[0], file, where) == symbol_state::checked)
+        {
+            set_target(file, id, {.kind = target_kind::overload, .symbol = (*found)[0]});
+            return to;
+        }
     report(diagnostic_kind::no_matching_overload, file, where,
            cc::format("{} as {}: no conversion", out.name_of(from), out.name_of(to)));
     return error_type;

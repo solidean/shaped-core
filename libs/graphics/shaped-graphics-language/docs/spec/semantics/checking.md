@@ -326,7 +326,9 @@ An option is read like any `const`, and a branch on it leaves the text with what
 * **CHK-148** An enum's own name is no value, by CHK-63.
 * **CHK-149** `==` and `!=` over two values of one enum are the language's own, as `and` is by CHK-116: no function declares them, and each gives a `bool`.
   A leading dot on either side is a case of the other side's enum, by CHK-152: `api == .vulkan`.
-* **CHK-150** An enum converts to no type and no type converts to it, `int` included, and it has no other operator ([why](why/checking.md#chk-150)).
+* **CHK-150** An enum converts implicitly to no type and no type converts to it, `int` included, and it has no other operator ([why](why/checking.md#chk-150)).
+  `e as int` is the one explicit conversion: the value of `e`'s case, written or counted (AST-115), so a case can be stored in a buffer without a `case`.
+  It does not hold for a `@builtin enum`, whose value is its record's, and nothing converts back.
 * **CHK-151** A nested declaration in an `enum` block is `unsupported-yet`; its properties and methods are those of a struct (CHK-233).
 * **CHK-218** `bool` is a `@builtin enum` of the prelude with the cases `false` and `true`, in that order, so `bool.true` is a value like `light_kind.sun`.
   Its record makes it the targets' bool: CHK-149 and CHK-150 do not hold for it, since its `==` is the prelude's and `and`, `or` and `not` take it (CHK-116).

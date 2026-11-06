@@ -1692,6 +1692,9 @@
 @builtin @pure @operator("as") fun convert_bool_to_bool32(x: bool) -> bool32
 @builtin @pure @operator("as") fun convert_bool32_to_bool(x: bool32) -> bool
 
+// an enum as the int of its case (CHK-150), which is what every target and the interpreter hold
+@builtin @internal @pure fun enum_as_int(x: int) -> int
+
 // a direction or a position as the plain vector of its width, which every target writes it as already;
 // the way back is a constructor, which says what the numbers become (CHK-412)
 @builtin @pure @operator("as") fun convert_vec3_to_float3(x: vec3) -> float3
