@@ -507,9 +507,10 @@ So `{float3; float}` is written with `packed_float3`: the `float` is at byte 12 
   A Metal buffer argument is a pointer that carries no length, and sg passes none in yet, so an MSL compile that reads one is `target-lacks-feature`.
 * **EMIT-196** Neither MSL nor DXIL carries a 64-bit value between stages, so on `hlsl-dx12` and MSL a link's 64-bit scalar crosses as a `uint2` of its words.
   A two-vector crosses as a `uint4`, each low word first, and either keeps the member's one location.
+  A three- or four-vector crosses as two `uint4`s at its two locations, the second holding its last one or two lanes; a three-vector's last two words are zero.
   The member is declared as its piece `<name>_0`, and an array of them as one per element, as EMIT-174 declares a link's array.
   A write splits the value, through `asuint` for a double in HLSL and `as_type` in MSL, and a read joins the words back, so the program never sees them.
-  SPIR-V carries the value itself, so `hlsl-vulkan` writes it as declared.
+  SPIR-V carries the value itself, so `hlsl-vulkan` writes it as declared, a three- or four-vector at the first of its two locations.
 * **EMIT-218** MSL writes a buffer's `atomic[ulong]` as `atomic_ulong`, and its `min` and `max` as `atomic_min_explicit` and `atomic_max_explicit`, which give nothing back.
   So each stands as a statement alone, and an MSL compile whose program reads what one gave back is `target-lacks-feature`.
   HLSL writes a workgroup memory's 64-bit atomic as a `groupshared` `int64_t` or `uint64_t` under the same `Interlocked*` calls as a buffer's.

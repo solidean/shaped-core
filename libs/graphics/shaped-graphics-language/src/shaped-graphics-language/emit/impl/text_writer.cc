@@ -488,17 +488,16 @@ struct writer
                 {.name = name, .type = type_text(p, d, type), .dimensions = array_dimensions(p, type), .is_mut = true});
             line(declaration);
             auto const element = p.m.at(type).element;
+            auto const is_words = is_word_split(p, element);
             for (auto i = isize(0); i < isize(p.m.at(type).count); ++i)
-            {
-                auto const piece = cc::format("{}_{}", raw, i);
                 line(cc::format("{}[{}] = {};", name, i,
-                                is_word_split(p, element) ? joined_words(element, piece) : piece));
-            }
+                                is_words ? joined_words(element, raw, i32(i) * word_pieces(p, element))
+                                         : cc::format("{}_{}", raw, i)));
             return name;
         }
         if (is_word_split(p, type))
         {
-            auto const text = joined_words(type, cc::format("{}_0", raw));
+            auto const text = joined_words(type, raw, 0);
             if (!is_local)
                 return text;
             auto const name = p.names.mint("gathered");
@@ -577,7 +576,7 @@ struct writer
     void store_pieces(cc::string_view raw, type_id type, cc::string_view value)
     {
         if (is_word_split(p, type))
-            return store_words(cc::format("{}_0", raw), type, value);
+            return store_words(raw, 0, type, value);
         auto const is_hlsl_matrix = !is_array(type) && d.language() == builtins::language::hlsl;
         auto name = cc::string(value);
         if (is_hlsl_matrix || !is_name(value))
@@ -601,18 +600,29 @@ struct writer
         auto const element = is_array(type) ? p.m.at(type).element : type_id::none;
         for (auto i = 0; i < n; ++i)
             if (is_array(type) && is_word_split(p, element))
-                store_words(cc::format("{}_{}", raw, i), element, cc::format("{}[{}]", name, i));
+                store_words(raw, i * word_pieces(p, element), element, cc::format("{}[{}]", name, i));
             else
                 line(cc::format("{}_{} = {}[{}];", raw, i, name, i));
     }
 
-    /// EMIT-196: `words`, the uint2 or uint4 a 64-bit scalar or two-vector of `type` crosses a link as, joined back.
-    [[nodiscard]] cc::string joined_words(type_id type, cc::string_view words) const
+    /// EMIT-196: a 64-bit value of `type` joined back from the pieces `<raw>_<first>` on, which hold its 32-bit words.
+    /// A scalar is one uint2, a two-vector one uint4, and a three- or four-vector two uint4s, the third's tail unused.
+    [[nodiscard]] cc::string joined_words(type_id type, cc::string_view raw, i32 first) const
     {
-        if (d.language() != builtins::language::hlsl)
-            return cc::format("as_type<{}>({})", type_text(p, d, type), words);
         auto const* const record = p.m.builtin_type_of(type);
-        auto const join = [&](char low, char high)
+        auto const piece = [&](i32 i) { return cc::format("{}_{}", raw, first + i); };
+        auto const text = type_text(p, d, type);
+        if (d.language() != builtins::language::hlsl)
+        {
+            if (record->leaf_count <= 2)
+                return cc::format("as_type<{}>({})", text, piece(0));
+            // the scalar and the two-vector of the same leaf, by the spelling of the vector
+            auto const scalar = cc::string_view(text).subview({.offset = 0, .size = isize(text.size()) - 1});
+            auto const tail = record->leaf_count == 3 ? cc::format("as_type<{}>({}.xy)", scalar, piece(1))
+                                                      : cc::format("as_type<{}2>({})", scalar, piece(1));
+            return cc::format("{}(as_type<{}2>({}), {})", text, scalar, piece(0), tail);
+        }
+        auto const join = [&](cc::string_view words, char low, char high)
         {
             if (record->leaf_kind == check::value_kind::scalar_double)
                 return cc::format("asdouble({}.{}, {}.{})", words, low, words, high);
@@ -620,16 +630,23 @@ struct writer
             return record->leaf_kind == check::value_kind::scalar_long ? cc::format("int64_t{}", bits) : bits;
         };
         if (record->leaf_count == 1)
-            return join('x', 'y');
-        return cc::format("{}({}, {})", type_text(p, d, type), join('x', 'y'), join('z', 'w'));
+            return join(piece(0), 'x', 'y');
+        auto result = cc::format("{}(", text);
+        for (auto lane = 0; lane < record->leaf_count; ++lane)
+        {
+            auto const even = lane % 2 == 0;
+            result.appendf("{}{}", lane == 0 ? "" : ", ", join(piece(lane / 2), even ? 'x' : 'z', even ? 'y' : 'w'));
+        }
+        return result + ")";
     }
 
-    /// EMIT-196: stores `value`, a 64-bit scalar or two-vector of `type`, into `words`, its 32-bit words low first.
-    void store_words(cc::string_view words, type_id type, cc::string_view value)
+    /// EMIT-196: stores `value`, a 64-bit value of `type`, into the pieces `<raw>_<first>` on, its 32-bit words low first.
+    void store_words(cc::string_view raw, i32 first, type_id type, cc::string_view value)
     {
         auto const* const record = p.m.builtin_type_of(type);
-        if (d.language() != builtins::language::hlsl)
-            return line(cc::format("{} = as_type<{}>({});", words, record->leaf_count == 1 ? "uint2" : "uint4", value));
+        auto const piece = [&](i32 i) { return cc::format("{}_{}", raw, first + i); };
+        if (d.language() != builtins::language::hlsl && record->leaf_count <= 2)
+            return line(cc::format("{} = as_type<{}>({});", piece(0), record->leaf_count == 1 ? "uint2" : "uint4", value));
         auto name = cc::string(value);
         if (!is_name(value))
         {
@@ -638,9 +655,19 @@ struct writer
             d.write_local(declaration, {.name = name, .type = type_text(p, d, type), .value = cc::string(value)});
             line(declaration);
         }
-        auto const lanes = record->leaf_count == 1
-                             ? cc::vector<cc::string>{name}
-                             : cc::vector<cc::string>{cc::format("{}.x", name), cc::format("{}.y", name)};
+        if (d.language() != builtins::language::hlsl)
+        {
+            line(cc::format("{} = as_type<uint4>({}.xy);", piece(0), name));
+            if (record->leaf_count == 3)
+                return line(cc::format("{} = uint4(as_type<uint2>({}.z), 0u, 0u);", piece(1), name));
+            return line(cc::format("{} = as_type<uint4>({}.zw);", piece(1), name));
+        }
+        auto lanes = cc::vector<cc::string>();
+        if (record->leaf_count == 1)
+            lanes.push_back(name);
+        else
+            for (auto lane = 0; lane < record->leaf_count; ++lane)
+                lanes.push_back(cc::format("{}.{}", name, "xyzw"[lane]));
         auto parts = cc::vector<cc::string>();
         for (auto const& lane : lanes)
         {
@@ -659,11 +686,18 @@ struct writer
             parts.push_back(low);
             parts.push_back(high);
         }
-        auto text = cc::format("{} = uint{}(", words, parts.size());
-        for (auto i = isize(0); i < parts.size(); ++i)
-            text.appendf("{}{}", i == 0 ? "" : ", ", parts[i]);
-        text += ");";
-        line(text);
+        // a three-vector's second piece is a uint4 too, its last two words zero
+        while (parts.size() > 4 && parts.size() < 8)
+            parts.push_back("0u");
+        for (auto at = isize(0); at < parts.size(); at += 4)
+        {
+            auto const count = cc::min(isize(4), parts.size() - at);
+            auto text = cc::format("{} = uint{}(", piece(i32(at / 4)), count);
+            for (auto k = isize(0); k < count; ++k)
+                text.appendf("{}{}", k == 0 ? "" : ", ", parts[at + k]);
+            text += ");";
+            line(text);
+        }
     }
 
     /// `nonuniform i`, whose own text is `i`; `uniform i` is no such mark, since it is written as the plain index.

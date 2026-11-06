@@ -105,7 +105,18 @@ bool sgl::emit::impl::is_word_split(plan const& p, check::type_id type)
     if (p.which != emit::target::hlsl_dx12 && p.which != emit::target::msl)
         return false;
     auto const* const record = is_valid(type) ? p.m.builtin_type_of(type) : nullptr;
-    return record != nullptr && check::is_64_bit(record->leaf_kind) && record->leaf_count <= 2;
+    return record != nullptr && check::is_64_bit(record->leaf_kind) && record->leaf_count <= 4;
+}
+
+i32 sgl::emit::impl::word_pieces(plan const& p, check::type_id type)
+{
+    return is_wide_64_bit(p, type) ? 2 : 1;
+}
+
+bool sgl::emit::impl::is_wide_64_bit(plan const& p, check::type_id type)
+{
+    auto const* const record = is_valid(type) ? p.m.builtin_type_of(type) : nullptr;
+    return record != nullptr && check::is_64_bit(record->leaf_kind) && record->leaf_count >= 3 && record->leaf_count <= 4;
 }
 
 void sgl::emit::impl::plan_memory_accesses(plan& p)
