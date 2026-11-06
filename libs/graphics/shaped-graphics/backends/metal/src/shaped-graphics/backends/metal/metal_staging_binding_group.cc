@@ -170,6 +170,9 @@ cc::result<sg::binding_group_handle> metal_staging_binding_group::mint()
     for (isize binding = 0; binding < all_bindings.size(); ++binding)
     {
         auto const& b = all_bindings[binding];
+        // a sampler names no resource, so it has nothing to keep alive and no access to declare, an array as one alone
+        if (sg::is_sampler(b.type))
+            continue;
         auto const shape = sg::shape_of(b.type);
         auto const count = isize(b.count < 1 ? 1 : b.count);
         auto const is_array = b.is_array() && shape != sg::view_shape::acceleration_structure;

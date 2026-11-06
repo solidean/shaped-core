@@ -183,7 +183,7 @@ Element resources are still kept alive by the group, exactly like scalar binding
 Arrays of constants buffers or acceleration structures are not supported.
 An array of samplers is, behind `feature::binding_arrays`, and is always dynamic: a static sampler array is refused at layout creation.
 A group supplies one `named_sampler` per element, each naming its `element`, and a staging group sets one with `set_sampler_element`.
-sg's metal backend refuses one at layout creation, since it does not bind one yet.
+On metal each element is one slot of the argument buffer, at the binding's index plus the element.
 
 ## Staging a group instead of rebuilding it
 
