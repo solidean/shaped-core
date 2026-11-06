@@ -64,11 +64,15 @@ cc::shared_async<cc::unit> sxr::controller_routine::init(sg::routine_init_scope 
         co_return;
     }
 
-    // described here rather than by an SGL pipeline, whose target set would have to match every caller's pass
+    // A description naming no target set takes the shader's, which would tie this to one pass.
+    // It draws into the caller's, so it names none at all.
+    auto fragment_shader = *compiled_ps;
+    fragment_shader.target_set = {};
+
     _pipeline = ctx.cached.acquire_raster_pipeline(sg::raster_pipeline_description{
         .layout = shaders::main_vs.acquire_layout(ctx),
         .vertex_shader = *compiled_vs,
-        .fragment_shader = *compiled_ps,
+        .fragment_shader = fragment_shader,
         .topology = sg::primitive_topology::triangle_strip,
         .rasterization = {.cull = sg::cull_mode::none},
         .depth_stencil = {.depth_test = true, .depth_write = true, .depth_compare = sg::compare_op::less},

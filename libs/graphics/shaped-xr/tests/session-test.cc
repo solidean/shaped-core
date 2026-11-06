@@ -236,7 +236,8 @@ namespace
     {
         auto pass = cmd->raster.render_to({.color_targets = {frame.color.as_render_target_view().cleared(readback_clear)},
                                            .depth_stencil_target = frame.depth.as_depth_stencil_view().cleared(1.0f),
-                                           .view_count = 2});
+                                           .view_count = 2,
+                                           .target_set = "an::application's::own::target"});
         CHECK(sxr::controller_routine::execute(pass, frame, hands) == sg::routine_outcome::executed);
     }
     auto const left = cmd->download.bytes_from_texture(frame.color.raw(), {.array_layer = 0});
