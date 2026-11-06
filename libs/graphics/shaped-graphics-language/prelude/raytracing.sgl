@@ -17,7 +17,7 @@ struct ray:
     direction: vec3
     t_min: float = 0.0
     t_max: float = 3.0e38
-    /// Where in the frame's interval the ray is cast, 0 at its start and 1 at its end, which a moving instance
+    /// Where in the frame's interval the ray is cast, 0 at its start and 1 at its end, which moving instances and vertices
     /// is placed at (EVAL-130); a static scene ignores it.
     time: float = 0.0
 
@@ -809,15 +809,30 @@ fun hit_object.reorder(self, hint: uint, bits: int) => hit_object_reorder_by_hin
 /// Whether the instance moves over the frame: flag bit 28, whose end transform stands in units 7 to 9.
 @internal fun is_moving_instance(instance: uint4) -> bool => ((instance.z >> 28) & 1) != 0
 
+/// How far through the frame's interval `time` is: a time below 0, and a NaN, is 0, and one above 1 is 1.
+@internal fun motion_fraction(time: float) -> float:
+    let mut s = 0.0
+    if time > 0.0 => s = min(time, 1.0)
+    return s
+
+/// The units a triangle of a BLAS takes: 6 where its header's bit 2 says it moves, the pose at time 1 in the last 3.
+@internal fun triangle_stride(region_header: uint4) -> uint:
+    if (region_header.w & 4) != 0 => return 6
+    return 3
+
+/// A vertex at `time`: `start`, mixed with its pose at time 1 in unit `at_end` where the BLAS moves (EVAL-132).
+@internal fun vertex_at(region_header: uint4, start: uint4, at_end: uint, time: float) -> float3:
+    let v = pool_float3(start)
+    if (region_header.w & 4) == 0 => return v
+    return v + (pool_float3(acceleration_pool_load(at_end)) - v) * motion_fraction(time)
+
 /// The instance's object-to-world map at `time`: its two transforms mixed element by element (EVAL-130).
-/// A time below 0, and a NaN, is 0, and one above 1 is 1.
 @internal fun instance_to_world(unit: uint, instance: uint4, time: float) -> affine3:
     let r0 = pool_float4(acceleration_pool_load(unit + 3))
     let r1 = pool_float4(acceleration_pool_load(unit + 4))
     let r2 = pool_float4(acceleration_pool_load(unit + 5))
     if not is_moving_instance(instance) => return affine3.from_rows(r0, r1, r2)
-    let mut s = 0.0
-    if time > 0.0 => s = min(time, 1.0)
+    let s = motion_fraction(time)
     let e0 = pool_float4(acceleration_pool_load(unit + 7))
     let e1 = pool_float4(acceleration_pool_load(unit + 8))
     let e2 = pool_float4(acceleration_pool_load(unit + 9))
@@ -935,11 +950,14 @@ fun hit_object.reorder(self, hint: uint, bits: int) => hit_object_reorder_by_hin
                 continue
 
             // a BLAS leaf holds triangles
-            let at = region_header.y + 3 * primitive
+            let at = region_header.y + triangle_stride(region_header) * primitive
             let a = acceleration_pool_load(at)
             let b = acceleration_pool_load(at + 1)
             let c = acceleration_pool_load(at + 2)
-            let found = triangle_entry(pool_float3(a), pool_float3(b), pool_float3(c), o, d)
+            let v0 = vertex_at(region_header, a, at + 3, r.time)
+            let v1 = vertex_at(region_header, b, at + 4, r.time)
+            let v2 = vertex_at(region_header, c, at + 5, r.time)
+            let found = triangle_entry(v0, v1, v2, o, d)
             if found.x < r.t_min or found.x > best.t => continue
 
             let instance_flags = instance.z >> 24
@@ -1230,11 +1248,14 @@ fun hit_object.reorder(self, hint: uint, bits: int) => hit_object_reorder_by_hin
                 continue
 
             if flags.has(ray_flags.skip_triangles) => continue
-            let at = region_header.y + 3 * primitive
+            let at = region_header.y + triangle_stride(region_header) * primitive
             let a = acceleration_pool_load(at)
             let b = acceleration_pool_load(at + 1)
             let c = acceleration_pool_load(at + 2)
-            let found = triangle_entry(pool_float3(a), pool_float3(b), pool_float3(c), o, d)
+            let v0 = vertex_at(region_header, a, at + 3, r.time)
+            let v1 = vertex_at(region_header, b, at + 4, r.time)
+            let v2 = vertex_at(region_header, c, at + 5, r.time)
+            let found = triangle_entry(v0, v1, v2, o, d)
             if found.x < r.t_min or found.x > best.t => continue
 
             // cull mode 1 is front: that instance flips its winding, as every native backend does

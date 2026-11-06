@@ -94,6 +94,11 @@ blas_handle command_list_raytracing_scope::build_blas(cc::span<blas_triangles co
     auto micromaps = cc::vector<micromap_handle>();
     for (auto const& g : geometries)
     {
+        CC_ASSERT(g.later_poses.empty() || _cmd.context().supports(feature::ray_tracing_motion_blur),
+                  "build_blas: a geometry moves, and this context has no sg::feature::ray_tracing_motion_blur");
+        CC_ASSERT(g.later_poses.size() <= 1, "build_blas: a geometry takes one later pose, its vertices at time 1");
+        for (auto const& pose : g.later_poses)
+            CC_ASSERT(pose.vertices != nullptr, "build_blas: a geometry's later pose names no vertices");
         if (g.micromap == nullptr)
             continue;
         CC_ASSERT(_cmd.context().supports(feature::opacity_micromap),

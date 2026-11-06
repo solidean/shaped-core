@@ -125,7 +125,7 @@ ctx.supports(sg::feature::ray_query)               // bool — THE capability qu
                                                    //   | vertex_pipeline_stores (a vertex, geometry or tessellation stage writes
                                                    //     storage, which SGL's print and assert there need; vulkan's
                                                    //     vertexPipelineStoresAndAtomics, true on dx12 and metal, false on webgpu)
-                                                   //   | ray_tracing_motion_blur (a tlas_instance moves over the frame; webgpu's polyfill
+                                                   //   | ray_tracing_motion_blur (a tlas_instance or a blas_triangles moves over the frame; webgpu's polyfill
                                                    //     alone, since DXR has no motion and vulkan's NV extension no ray query)
                                                    //   | float_atomic_add (a float atomic add in one instruction; vulkan with
                                                    //     VK_EXT_shader_atomic_float, true on metal, false on dx12 and webgpu;
@@ -896,7 +896,9 @@ sg::blas_handle   // std::shared_ptr<sg::blas const>   — bottom-level (one mes
 sg::tlas_handle   // std::shared_ptr<sg::tlas const>   — top-level (instances of blas); a tlas keeps its blases alive
 // input structs (value types; build-input buffers need buffer_usage::accel_structure_build_input):
 sg::blas_triangles { vertices(float3), vertex_count/stride/offset; optional indices+count+offset+index_type;
-                     optional transform buffer(3x4 row-major)+offset; is_opaque=true }
+                     optional transform buffer(3x4 row-major)+offset; is_opaque=true;
+                     vector<blas_pose> later_poses — at most one, the vertices at time 1; moving, needs ray_tracing_motion_blur }
+sg::blas_pose      { vertices(laid out as blas_triangles::vertices), offset_in_bytes }
 sg::blas_aabbs     { aabbs(6 floats each), aabb_count/stride/offset; is_opaque=true }
 sg::tlas_instance  { blas_handle blas; float transform[12] ROW-MAJOR 3x4 (transform[r*4+c], not tg col-major);
                      u32 instance_id:24; u32 hit_group_offset:24; u8 mask=0xFF; instance_cull_mode; optional opaque_override;

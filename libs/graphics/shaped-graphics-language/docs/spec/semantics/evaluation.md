@@ -268,6 +268,9 @@ fun graded(a: float) -> float:
   A static instance stands still at every time.
 * **EVAL-131** A hit or a candidate of a moving instance carries the maps at the ray's time, so `to_world` and `to_object` place a point where the ray met it.
   A native motion trace mixes a matrix as EVAL-130 does, as vulkan's matrix motion and Metal's do; a GPU rounds the mix and the inverse in its own order.
+* **EVAL-132** A moving triangle stands at the ray's `time`: each vertex is its two poses mixed, `v0 + (v1 - v0) * s`, with `s` as EVAL-130 has it, and the ray meets the triangle those three make.
+  Barycentrics are of that triangle, so a shader that needs an attribute of a moving vertex mixes it by the ray's `time` itself.
+  In a moving instance both take the same time.
 
 ## Textures
 

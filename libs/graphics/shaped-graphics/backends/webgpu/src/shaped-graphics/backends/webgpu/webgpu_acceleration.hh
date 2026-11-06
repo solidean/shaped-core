@@ -29,6 +29,7 @@ inline constexpr isize max_acceleration_members = acceleration_roots_bytes / 4;
 enum class sg::backend::webgpu::acceleration_kernel
 {
     write_triangles,
+    write_triangle_ends,
     write_boxes,
     write_leaves,
     write_levels,

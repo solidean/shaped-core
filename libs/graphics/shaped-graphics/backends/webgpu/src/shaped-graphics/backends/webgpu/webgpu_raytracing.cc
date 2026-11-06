@@ -356,6 +356,7 @@ sg::blas_handle webgpu_command_list::raytracing_build_blas_triangles(cc::span<sg
     CC_ASSERT(!geometries.empty(), "build_blas needs at least one geometry");
 
     auto triangle_count = u32(0);
+    auto is_moving = false;
     for (auto const& g : geometries)
     {
         CC_ASSERT(g.vertex_count > 0, "triangle geometry needs a positive vertex_count");
@@ -364,6 +365,14 @@ sg::blas_handle webgpu_command_list::raytracing_build_blas_triangles(cc::span<sg
         CC_ASSERT(g.vertex_offset_in_bytes >= 0 && g.vertex_offset_in_bytes % 4 == 0,
                   "webgpu reads vertices in whole words, so vertex_offset_in_bytes must be a multiple of 4");
         (void)require_build_input(g.vertices);
+        for (auto const& pose : g.later_poses)
+        {
+            CC_ASSERT(pose.offset_in_bytes >= 0 && pose.offset_in_bytes % 4 == 0,
+                      "webgpu reads vertices in whole words, so a later pose's offset_in_bytes must be a multiple of "
+                      "4");
+            (void)require_build_input(pose.vertices);
+            is_moving = true;
+        }
         if (g.indices != nullptr)
         {
             CC_ASSERT(g.index_count > 0 && g.index_count % 3 == 0, "indexed triangles need index_count > 0 and a "
@@ -389,11 +398,13 @@ sg::blas_handle webgpu_command_list::raytracing_build_blas_triangles(cc::span<sg
 
     auto const tree = lay_out_tree(triangle_count);
     auto const records = 1 + 2 * tree.node_count;
-    auto const units = isize(records) + 3 * isize(triangle_count);
+    // a BLAS with a moving geometry gives each triangle its pose at time 1 too, in units 3 to 5
+    auto const stride = is_moving ? u32(6) : u32(3);
+    auto const units = isize(records) + isize(stride) * isize(triangle_count);
     auto const unit = allocate_acceleration_region(units);
     auto const first_record = unit + records;
-    write_acceleration_region(
-        unit, units, region_start(tree, first_record, triangle_count, u32(webgpu_blas::primitive_kind::triangles)));
+    auto const kind_word = u32(webgpu_blas::primitive_kind::triangles) | (is_moving ? 4u : 0u);
+    write_acceleration_region(unit, units, region_start(tree, first_record, triangle_count, kind_word));
 
     auto first_triangle = u32(0);
     for (isize geometry = 0; geometry < geometries.size(); ++geometry)
@@ -402,9 +413,12 @@ sg::blas_handle webgpu_command_list::raytracing_build_blas_triangles(cc::span<sg
         auto const count = u32(g.indices != nullptr ? g.index_count / 3 : g.vertex_count / 3);
 
         // Every index is below vertex_count, so no vertex past the geometry's last one is read.
-        auto const vertices = bind_input_range(
-            require_build_input(g.vertices), g.vertex_offset_in_bytes,
-            g.vertex_offset_in_bytes + (g.vertex_count - 1) * g.vertex_stride_in_bytes + 3 * isize(sizeof(float)));
+        auto const vertices_at = [&](sg::raw_buffer_handle const& buffer, isize offset)
+        {
+            return bind_input_range(require_build_input(buffer), offset,
+                                    offset + (g.vertex_count - 1) * g.vertex_stride_in_bytes + 3 * isize(sizeof(float)));
+        };
+        auto const vertices = vertices_at(g.vertices, g.vertex_offset_in_bytes);
         auto indices = input_range{};
         if (g.indices != nullptr)
         {
@@ -418,7 +432,7 @@ sg::blas_handle webgpu_command_list::raytracing_build_blas_triangles(cc::span<sg
                                          g.transform_offset_in_bytes + 12 * isize(sizeof(float)));
 
         auto args = acceleration_kernel_args{};
-        args.words[2] = first_record + 3 * first_triangle;
+        args.words[2] = first_record + stride * first_triangle;
         args.words[3] = u32(geometry);
         args.words[4] = u32(vertices.lead_in_bytes / 4);
         args.words[5] = u32(g.vertex_stride_in_bytes / 4);
@@ -427,18 +441,33 @@ sg::blas_handle webgpu_command_list::raytracing_build_blas_triangles(cc::span<sg
         args.words[8] = g.transform != nullptr ? 1u : 0u;
         args.words[9] = u32(transform.lead_in_bytes / 4);
         args.words[10] = g.is_opaque ? 1u : 0u;
+        args.words[11] = stride;
 
         acceleration_kernel_input const inputs[3] = {vertices.input, indices.input, transform.input};
         record_acceleration_kernel(acceleration_kernel::write_triangles, args, count, inputs);
 
+        // a still geometry of a moving BLAS ends where it starts
+        if (is_moving)
+        {
+            auto const end = g.later_poses.empty()
+                               ? vertices
+                               : vertices_at(g.later_poses[0].vertices, g.later_poses[0].offset_in_bytes);
+            args.words[4] = u32(end.lead_in_bytes / 4);
+            acceleration_kernel_input const end_inputs[3] = {end.input, indices.input, transform.input};
+            record_acceleration_kernel(acceleration_kernel::write_triangle_ends, args, count, end_inputs);
+        }
+
         touch(g.vertices);
+        for (auto const& pose : g.later_poses)
+            touch(pose.vertices);
         if (g.indices != nullptr)
             touch(g.indices);
         if (g.transform != nullptr)
             touch(g.transform);
         first_triangle += count;
     }
-    record_tree_boxes(*this, unit, tree, u32(webgpu_blas::primitive_kind::triangles), first_record);
+    // leaf kind 4 is triangles that move, whose box holds both of their poses
+    record_tree_boxes(*this, unit, tree, is_moving ? 4 : u32(webgpu_blas::primitive_kind::triangles), first_record);
 
     return std::make_shared<webgpu_blas>(_ctx, unit, u32(units), webgpu_blas::primitive_kind::triangles, flags,
                                          int(geometries.size()));

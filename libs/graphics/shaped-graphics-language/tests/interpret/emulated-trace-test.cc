@@ -85,6 +85,24 @@ struct pool_writer
         return at;
     }
 
+    /// A BLAS whose triangles move from `start` to `end`: its header's w sets bit 2, and each triangle takes 6 units.
+    /// `root` holds both poses.
+    u32 moving_blas(cc::span<triangle const> start, cc::span<triangle const> end, bool is_opaque, box root)
+    {
+        auto const at = unit(1, size() + 3, u32(start.size()), 4);
+        leaf(root, u32(start.size()));
+        for (auto i = isize(0); i < start.size(); ++i)
+        {
+            point(start[i].v0, u32(i));
+            point(start[i].v1, 0);
+            point(start[i].v2, is_opaque ? 1 : 0);
+            point(end[i].v0, 0);
+            point(end[i].v1, 0);
+            point(end[i].v2, 0);
+        }
+        return at;
+    }
+
     /// A BLAS of procedural boxes, one geometry, index `geometry`, whose root leaf has the box `root`.
     u32 blas_of_boxes(cc::span<box const> boxes, bool is_opaque, box root, u32 geometry = 0)
     {
@@ -152,6 +170,9 @@ struct scenes
     u32 flipped = 0;
     u32 flipped_mixed = 0;
     u32 moving = 0;
+    u32 morphing = 0;
+    u32 morphing_moved = 0;
+    u32 morphing_mixed = 0;
 };
 
 // One box around the unit sphere at (3, 1, 1), which the tests' intersection reports.
@@ -208,6 +229,28 @@ scenes build_scenes()
         {.blas = opaque, .translation = {0, 50, 0}, .id = 22},
     };
     s.moving = s.pool.tlas(moving, {{0, 0, 2}, {11, 51, 5}});
+
+    // Primitive 0 falls from z = 5 to z = 1 and leans: its second vertex goes from x = 1 to x = 3.
+    // Primitive 1 stands at x = 20 in both poses, so one structure holds a moving triangle and a still one.
+    constexpr triangle morph_start[] = {
+        {{0, 0, 5}, {1, 0, 5}, {0, 1, 5}},
+        {{20, 0, 5}, {21, 0, 5}, {20, 1, 5}},
+    };
+    constexpr triangle morph_end[] = {
+        {{0, 0, 1}, {3, 0, 1}, {0, 1, 1}},
+        {{20, 0, 5}, {21, 0, 5}, {20, 1, 5}},
+    };
+    auto const morphing = s.pool.moving_blas(morph_start, morph_end, true, {{0, 0, 1}, {21, 1, 5}});
+    instance const morphs[] = {{.blas = morphing, .id = 31}};
+    s.morphing = s.pool.tlas(morphs, {{0, 0, 1}, {21, 1, 5}});
+
+    // the same vertices in an instance that moves too, from where it stands to x = 10
+    instance const morphs_moved[] = {{.blas = morphing, .id = 32, .end_translation = float3{10, 0, 0}}};
+    s.morphing_moved = s.pool.tlas(morphs_moved, {{0, 0, 1}, {31, 1, 5}});
+
+    // beside the ball's box, for the mixed walk
+    instance const morphs_mixed[] = {{.blas = morphing, .id = 33}, {.blas = ball, .id = 11}};
+    s.morphing_mixed = s.pool.tlas(morphs_mixed, {{0, 0, 0}, {21, 2, 5}}, 3);
     return s;
 }
 
@@ -228,6 +271,9 @@ sgl::check::driver_bindings bindings_of(scenes const& s)
                 {.name = "flipped", .acceleration_root = s.flipped},
                 {.name = "flipped_mixed", .acceleration_root = s.flipped_mixed},
                 {.name = "moving", .acceleration_root = s.moving},
+                {.name = "morphing", .acceleration_root = s.morphing},
+                {.name = "morphing_moved", .acceleration_root = s.morphing_moved},
+                {.name = "morphing_mixed", .acceleration_root = s.morphing_mixed},
             },
         }},
         .acceleration_pool = bytes_of(s.pool.words),
@@ -247,6 +293,9 @@ constexpr cc::string_view k_declarations = "require ray_query\n"
                                            "    flipped: acceleration_structure[.triangles]\n"
                                            "    flipped_mixed: acceleration_structure[.mixed]\n"
                                            "    moving: acceleration_structure[.triangles]\n"
+                                           "    morphing: acceleration_structure[.triangles]\n"
+                                           "    morphing_moved: acceleration_structure[.triangles]\n"
+                                           "    morphing_mixed: acceleration_structure[.mixed]\n"
                                            "fun is_near(a: float, b: float) -> bool => abs(a - b) < 1.0e-5\n"
                                            "fun along_z(x: float, y: float) -> ray => ray(origin = pos3(x, y, -1.0), "
                                            "direction = vec3(0.0, 0.0, 1.0))\n";
@@ -542,5 +591,55 @@ TEST("sgl emulated trace - a moving instance stands where its ray's time puts it
                       "test {scenes}:\n"
                       "    scenes.moving.trace(at(0.25, 50.25, 0.0)).instance_id == 22\n"
                       "    scenes.moving.trace(at(0.25, 50.25, 1.0)).instance_id == 22\n")
+          == "");
+}
+
+TEST("sgl emulated trace - a moving triangle stands where its ray's time puts it, each vertex on its own (EVAL-132)")
+{
+    // z falls from 5 to 1, so a ray from z = -1 meets it at t = 6 - 4 * time
+    CHECK(failures_of("fun at(x: float, y: float, time: float) -> ray => ray(origin = pos3(x, y, -1.0), direction = "
+                      "vec3(0.0, 0.0, 1.0), time = time)\n"
+                      "test {scenes}:\n"
+                      "    is_near(scenes.morphing.trace(at(0.25, 0.25, 0.0)).t, 6.0)\n"
+                      "    is_near(scenes.morphing.trace(at(0.25, 0.25, 1.0)).t, 2.0)\n"
+                      "    is_near(scenes.morphing.trace(at(0.25, 0.25, 0.25)).t, 5.0)\n"
+                      // a time outside 0 to 1 is held at its end, and a ray with none is cast at 0
+                      "test {scenes}:\n"
+                      "    is_near(scenes.morphing.trace(at(0.25, 0.25, -3.0)).t, 6.0)\n"
+                      "    is_near(scenes.morphing.trace(at(0.25, 0.25, 7.0)).t, 2.0)\n"
+                      "    is_near(scenes.morphing.trace(along_z(0.25, 0.25)).t, 6.0)\n"
+                      // the vertices move apart: x = 1.5 is past the edge at time 0 and inside it at time 1
+                      "test {scenes}:\n"
+                      "    not scenes.morphing.trace(at(1.5, 0.1, 0.0)).is_hit\n"
+                      "    scenes.morphing.trace(at(1.5, 0.1, 1.0)).is_hit\n"
+                      // at time 0.5 the second vertex is at x = 2, and barycentrics are of the triangle at that time
+                      "test {scenes}:\n"
+                      "    let m = scenes.morphing.trace(at(1.0, 0.25, 0.5))\n"
+                      "    m.is_hit and m.primitive_index == 0 and m.geometry_index == 0\n"
+                      "    is_near(m.t, 4.0) and is_near(m.barycentrics.y, 0.5) and is_near(m.barycentrics.z, 0.25)\n"
+                      // the still triangle of the same structure stands at every time
+                      "test {scenes}:\n"
+                      "    let s = scenes.morphing.trace(at(20.25, 0.25, 0.75))\n"
+                      "    s.primitive_index == 1 and is_near(s.t, 6.0)\n")
+          == "");
+}
+
+TEST("sgl emulated trace - moving vertices in a moving instance take the same time, on the mixed walk too")
+{
+    CHECK(mixed_failures_of("fun at(x: float, y: float, time: float) -> ray => ray(origin = pos3(x, y, -1.0), "
+                            "direction = "
+                            "vec3(0.0, 0.0, 1.0), time = time)\n"
+                            // at time 0.5 the instance stands at x = 5 and the triangle at z = 3
+                            "test {scenes}:\n"
+                            "    let h = scenes.morphing_moved.trace(at(5.25, 0.25, 0.5))\n"
+                            "    h.instance_id == 32 and is_near(h.t, 4.0)\n"
+                            "    not scenes.morphing_moved.trace(at(0.25, 0.25, 0.5)).is_hit\n"
+                            "    let p = h.to_world(pos3(0.0, 0.0, 3.0))\n"
+                            "    is_near(p.x, 5.0) and is_near(p.z, 3.0)\n"
+                            "test {scenes}:\n"
+                            "    let h = scenes.morphing_mixed.trace(at(0.25, 0.25, 1.0), ball_report)\n"
+                            "    h.kind == hit_kind.triangle and is_near(h.t, 2.0)\n"
+                            "    let i = scenes.morphing_mixed.trace(at(0.25, 0.25, 0.0), ball_report)\n"
+                            "    i.kind == hit_kind.triangle and is_near(i.t, 6.0)\n")
           == "");
 }

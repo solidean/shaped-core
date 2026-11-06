@@ -57,7 +57,7 @@ fn node_unit(node: u32) -> u32 {
 // write_triangles
 //   a: z the geometry's first record unit, w the geometry index
 //   b: x vertex offset in words, y vertex stride in words, z indices (0 none, 1 u16, 2 u32), w index offset in bytes
-//   c: x 1 with a transform, y transform offset in words, z 1 when opaque
+//   c: x 1 with a transform, y transform offset in words, z 1 when opaque, w units a triangle takes
 fn index_at(k: u32) -> u32 {
     if (args.b.z == 1u) {
         let byte_at = args.b.w + 2u * k;
@@ -90,10 +90,24 @@ fn write_triangles(@builtin(global_invocation_id) id: vec3u) {
         return;
     }
     let i = args.a.x + id.x;
-    let first = args.a.z + 3u * i;
+    let first = args.a.z + args.c.w * i;
     pool[first] = vec4u(vertex_bits(3u * i), i);
     pool[first + 1u] = vec4u(vertex_bits(3u * i + 1u), args.a.w);
     pool[first + 2u] = vec4u(vertex_bits(3u * i + 2u), args.c.z);
+}
+
+// write_triangle_ends: units 3 to 5 of a moving BLAS's 6-unit triangle, from the pose at time 1 in input0.
+// Its args are write_triangles', the indices and the transform shared with the start pose.
+@compute @workgroup_size(64)
+fn write_triangle_ends(@builtin(global_invocation_id) id: vec3u) {
+    if (id.x >= args.a.y) {
+        return;
+    }
+    let i = args.a.x + id.x;
+    let first = args.a.z + args.c.w * i;
+    pool[first + 3u] = vec4u(vertex_bits(3u * i), 0u);
+    pool[first + 4u] = vec4u(vertex_bits(3u * i + 1u), 0u);
+    pool[first + 5u] = vec4u(vertex_bits(3u * i + 2u), 0u);
 }
 
 // write_boxes
@@ -113,7 +127,8 @@ fn write_boxes(@builtin(global_invocation_id) id: vec3u) {
 }
 
 // write_leaves
-//   a: z the region's unit, w what a leaf holds (0 triangles, 1 boxes, 2 instances, 3 instances that move)
+//   a: z the region's unit, w what a leaf holds (0 triangles, 1 boxes, 2 instances, 3 instances that move, 4 triangles
+//      that move)
 //   b: x the first leaf's node index, y the first primitive or instance unit
 fn primitive_bounds(j: u32) -> bounds {
     if (args.a.w == 0u) {
@@ -122,6 +137,21 @@ fn primitive_bounds(j: u32) -> bounds {
         let v1 = as_vec3f(pool[first + 1u]);
         let v2 = as_vec3f(pool[first + 2u]);
         return bounds(min(v0, min(v1, v2)), max(v0, max(v1, v2)));
+    }
+    if (args.a.w == 4u) {
+        // Kind 4 is triangles that move, 6 units apiece: a vertex moves on a line between its two poses, so the box of
+        // both holds it at every time, widened since the mix rounds.
+        let first = args.b.y + 6u * j;
+        let v0 = as_vec3f(pool[first]);
+        let v1 = as_vec3f(pool[first + 1u]);
+        let v2 = as_vec3f(pool[first + 2u]);
+        let e0 = as_vec3f(pool[first + 3u]);
+        let e1 = as_vec3f(pool[first + 4u]);
+        let e2 = as_vec3f(pool[first + 5u]);
+        let lo = min(min(v0, min(v1, v2)), min(e0, min(e1, e2)));
+        let hi = max(max(v0, max(v1, v2)), max(e0, max(e1, e2)));
+        let pad = 1.0e-6 * max(abs(lo), abs(hi));
+        return bounds(lo - pad, hi + pad);
     }
     if (args.a.w == 1u) {
         let first = args.b.y + 2u * j;
@@ -201,7 +231,8 @@ fn write_levels(@builtin(global_invocation_id) id: vec3u) {
 }
 )";
 
-constexpr char const* k_kernel_entry_points[] = {"write_triangles", "write_boxes", "write_leaves", "write_levels"};
+constexpr char const* k_kernel_entry_points[]
+    = {"write_triangles", "write_triangle_ends", "write_boxes", "write_leaves", "write_levels"};
 
 [[nodiscard]] wgpu_buffer create_pool_buffer(WGPUDevice device, isize units, char const* label)
 {

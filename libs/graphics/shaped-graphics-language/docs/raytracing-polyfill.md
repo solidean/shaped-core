@@ -77,9 +77,9 @@ Its TLAS nodes bound the instance over the whole interval, as the boxes of both 
 
 | units | holds |
 |---|---|
-| 1 | header: x node count, y first primitive unit, z primitive count, w kind (0 triangles, 1 boxes) |
+| 1 | header: x node count, y first primitive unit, z primitive count, w kind (0 triangles, 1 boxes) and bit 2 where its triangles move |
 | 2 per node | the nodes; a leaf's primitives are primitive indices within this BLAS |
-| 3 or 2 per primitive | the primitives |
+| 3 or 2 per primitive, 6 per triangle that moves | the primitives |
 
 A triangle, 3 units, in object space and pre-fetched, so traversal never reads an index buffer:
 
@@ -88,6 +88,11 @@ A triangle, 3 units, in object space and pre-fetched, so traversal never reads a
 | 0 | vertex 0 | the primitive index within its geometry |
 | 1 | vertex 1 | the geometry index |
 | 2 | vertex 2 | 1 when the geometry is opaque, else 0 |
+
+In a BLAS whose header sets bit 2, every triangle takes 6 units, and units 3 to 5 are its vertices at time 1, their `w` unused.
+A still geometry of that BLAS writes its vertices there again.
+Its nodes bound the triangle over the whole interval, as the box of both poses does, widened by 1e-6 of the coordinates, since the mix rounds.
+A TLAS box over it needs nothing more: a point of a moving instance is a mix of two places of a point in that box.
 
 A box, 2 units:
 

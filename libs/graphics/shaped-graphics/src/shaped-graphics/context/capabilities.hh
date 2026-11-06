@@ -216,7 +216,8 @@ enum class sg::feature
     /// Every device with `shader_int64_atomics` has it; Metal grants it alone, on the Apple GPUs that have 64-bit atomics.
     shader_int64_min_max_atomics,
 
-    /// A TLAS instance may move over the frame (`tlas_instance::transform_at_end`), and a trace places it at its ray's time.
+    /// A TLAS instance (`tlas_instance::transform_at_end`) and a BLAS's vertices (`blas_triangles::later_poses`) may move
+    /// over the frame, and a trace places them at its ray's time.
     /// webgpu has it through the ray-query polyfill; DXR has no motion, and vulkan's VK_NV_ray_tracing_motion_blur
     /// reaches no ray query, so neither native backend answers it yet, nor metal.
     ray_tracing_motion_blur,

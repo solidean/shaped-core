@@ -40,6 +40,14 @@ namespace sg
 using accel_build_flags = cc::flags<accel_build_flag>;
 } // namespace sg
 
+/// Where a moving geometry's vertices stand at a later time: a buffer laid out as `blas_triangles::vertices`, with its stride and count.
+/// It must carry buffer_usage::accel_structure_build_input.
+struct sg::blas_pose
+{
+    raw_buffer_handle vertices = nullptr;
+    isize offset_in_bytes = 0;
+};
+
 /// One triangle geometry in a BLAS, indexed when an index buffer is given.
 /// Every buffer referenced here must carry buffer_usage::accel_structure_build_input.
 struct sg::blas_triangles
@@ -50,6 +58,12 @@ struct sg::blas_triangles
     isize vertex_count = 0;
     isize vertex_stride_in_bytes = isize(sizeof(float) * 3);
     isize vertex_offset_in_bytes = 0;
+
+    /// The geometry's poses after `vertices`, evenly spaced with the last at time 1, the topology staying the same.
+    /// A ray at time `s` meets each vertex at `v0 + (v1 - v0) * s`, on its own line (SGL's EVAL-132).
+    /// Empty, the geometry stands still; otherwise it requires `sg::feature::ray_tracing_motion_blur`.
+    /// At most one pose today, which is what VK_NV_ray_tracing_motion_blur takes; Metal's motion takes more.
+    cc::vector<blas_pose> later_poses = {};
 
     /// Optional index buffer; null means non-indexed.
     /// When set, `index_count` must be a multiple of 3, and `index_type` selects the element width.
