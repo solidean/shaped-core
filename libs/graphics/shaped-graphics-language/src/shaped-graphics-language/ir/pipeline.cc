@@ -60,10 +60,6 @@ cc::optional<cc::string> sgl::ir::compile_dxil(emit::impl::plan const& plan, pro
     assert_whole(p, control_flow::unstructured, "remove_unused");
     flatten_branches(p);
     assert_whole(p, control_flow::unstructured, "flatten_branches");
-    share_common_values(p);
-    assert_whole(p, control_flow::unstructured, "share_common_values");
-    remove_unused(p);
-    assert_whole(p, control_flow::unstructured, "remove_unused");
     chain_sums(p);
     assert_whole(p, control_flow::unstructured, "chain_sums");
     return write_dxil(p, out);
