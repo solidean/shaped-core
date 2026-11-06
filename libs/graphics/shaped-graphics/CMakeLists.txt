@@ -447,6 +447,7 @@ if(SC_BUILD_TESTS)
             tests/compute/compute-float-atomics-test.cc
             tests/compute/compute-texture-test.cc
             tests/raster/raster-test.cc
+            tests/raster/mixed-route-test.cc
             tests/barrier/footprint-barrier-test.cc
             tests/pipeline/module-bindings-test.cc
             tests/pipeline/pipeline_harness.cc
@@ -540,6 +541,36 @@ if(SC_BUILD_TESTS)
             NATIVE_DXIL
             SHADERS
                 native_dxil.sgl:*
+        )
+        # One stage pair three ways, which the mixed-route test links across routes.
+        sc_add_shader_package(
+            TARGET     shaped-graphics-test
+            NAME       sg_test_mixed_text
+            NAMESPACE  sg::test::mixed_text
+            SOURCE_DIR tests/shaders/sgl_mixed
+            LANGUAGE   sgl
+            SHADERS
+                mixed_link.sgl:*
+        )
+        sc_add_shader_package(
+            TARGET     shaped-graphics-test
+            NAME       sg_test_mixed_dxil
+            NAMESPACE  sg::test::mixed_dxil
+            SOURCE_DIR tests/shaders/sgl_mixed
+            LANGUAGE   sgl
+            NATIVE_DXIL
+            SHADERS
+                mixed_link.sgl:*
+        )
+        sc_add_shader_package(
+            TARGET     shaped-graphics-test
+            NAME       sg_test_mixed_spirv
+            NAMESPACE  sg::test::mixed_spirv
+            SOURCE_DIR tests/shaders/sgl_mixed
+            LANGUAGE   sgl
+            NATIVE_SPIRV
+            SHADERS
+                mixed_link.sgl:*
         )
 
         sc_add_shader_package(
