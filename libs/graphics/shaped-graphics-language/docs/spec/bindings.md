@@ -677,7 +677,8 @@ Everything not named here is the diagnostic `unsupported-yet`, never a guess.
 * `buffer[T]` and `mut buffer[T]`, for a `T` that is a scalar, a vector or a struct of the program, laid out at natural alignment (EMIT-111), or as C++ lays it out under `@padding(.none)` (EMIT-167).
 * `bytes` and `mut bytes`, loaded and stored a word at a time ([Bytes](#bytes)), alone or as a binding array.
 * A subscript on a buffer, as a value and as the place of an assignment.
-* A subscript on an image, as its `load` and as the place its `store` writes ([CHK-367](semantics/checking.md#bindings)), and on a texture, as its `load` alone ([CHK-514](semantics/checking.md#bindings)).
+* A subscript on an image, as its `load` and as the place its `store` writes ([CHK-367](semantics/checking.md#bindings)).
+* A subscript on a texture, as its `load` alone ([CHK-514](semantics/checking.md#bindings)).
 * Every texture, depth texture, image and sampler form above, with `@unfilterable` and `@non_filtering`.
 * A static sampler in a binding, and the `needs-feature` refusals.
 * A file-scope sampler, handed to a builtin by its name ([CHK-314](semantics/checking.md#bindings)).
