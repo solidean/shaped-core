@@ -1442,6 +1442,11 @@ HLSL writes it on dx12 and vulkan; WebGPU has none, and sg's metal backend does 
   `h.reorder()` or `h.reorder(hint, bits)` regroups the invocations by it.
   A hit object is a `let` of the `trace_hit` that gave it, which is how its invocation knows the payload's type; any other value of it is `unsupported-yet`, and so is a `reorder` on the trace itself.
   Every part of it needs `shader_execution_reordering`, so it stands under `has(.shader_execution_reordering)` with a plain `trace` beside it, and is raygen's alone.
+* **CHK-516** A value of a type that holds a `hit_object`, a struct or an array of it, is `unsupported-yet` wherever an entry point reaches one.
+  That is judged with every generic and call resolved, so a `box[hit_object]` counts as much as a struct written out.
+  So is a hit object an `if` or a `return` hands on, and a `print` of one.
+  A hit object lives in the variable its trace filled, and SPIR-V forbids moving it out (EMIT-225), so a value that has to hold it is one no vulkan compile can write.
+  An argument is none of these: a call is inlined, and a parameter stands for the `let` it was handed.
 * **CHK-330** A `hit_group name for set:` is one row of a ray-tracing pipeline's table, for the ray set it names.
   A name that is no ray set is `invalid-pipeline`, and one that names nothing `unknown-name`, in a hit group and in a pipeline's `rays` alike.
   Its settings are `geometry`, `intersection`, and at most one record per ray type of its set, `ray = (closest_hit = f, any_hit = g)`, either left out.
@@ -1770,7 +1775,7 @@ A diagnostic of this pass has a kind, a file, a byte span in that file, and a de
 
 | kind | reported by |
 |---|---|
-| `unsupported-yet` | CHK-8, CHK-61, CHK-134, CHK-213, CHK-237, CHK-291, CHK-299, CHK-307, CHK-314, CHK-321, CHK-329, CHK-333, CHK-338, CHK-339, CHK-344, CHK-346, CHK-347, CHK-350, CHK-352, CHK-353, CHK-357, CHK-366, CHK-374, CHK-381, CHK-383, CHK-387, CHK-389, CHK-397, CHK-431, CHK-432, CHK-434, CHK-450, CHK-453, CHK-454 |
+| `unsupported-yet` | CHK-8, CHK-61, CHK-134, CHK-213, CHK-237, CHK-291, CHK-299, CHK-307, CHK-314, CHK-321, CHK-329, CHK-333, CHK-338, CHK-339, CHK-344, CHK-346, CHK-347, CHK-350, CHK-352, CHK-353, CHK-357, CHK-366, CHK-374, CHK-381, CHK-383, CHK-387, CHK-389, CHK-397, CHK-431, CHK-432, CHK-434, CHK-516, CHK-450, CHK-453, CHK-454 |
 | `member-not-allowed-here` | CHK-490 |
 | `duplicate-declaration` | CHK-12, CHK-28, CHK-241, CHK-347, CHK-351 |
 | `dependency-cycle` | CHK-18, CHK-136 |

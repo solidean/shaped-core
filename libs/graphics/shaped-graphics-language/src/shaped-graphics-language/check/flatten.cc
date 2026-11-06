@@ -1228,6 +1228,14 @@ void checker::flatten_entry_point(symbol_id id, traversal_request const* travers
                cc::format("'{}' nests deeper than {} levels here, with every call inlined", s.name, k_max_depth));
         return;
     }
+    // CHK-516: here, with every call inlined, so a copy reached through a generic or a return is judged too
+    if (auto const misuse = find_hit_object_misuse(f.entry); misuse.has_value())
+    {
+        auto const& at = misuse.value().where;
+        unsupported(at.file, ast::is_valid(at.expr) ? span_of(at.file, at.expr) : span_of(at.file, at.stmt),
+                    misuse.value().detail);
+        return;
+    }
     judge_constants(f.entry);
     judge_assignments(f.entry);
     auto legalized = judge_uniformity(f.entry);

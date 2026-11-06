@@ -443,6 +443,48 @@ TEST("sgl target text - vulkan reorders through SPIR-V's own instructions, which
     CHECK(!without.value().text.contains("sgl_reorder_thread"));
 }
 
+TEST("sgl target text - a hit object handed to a function is the trace's own variable, on vulkan")
+{
+    // EMIT-225: a parameter stands for the let it was handed, so no copy reaches DXC, loop and early return included
+    constexpr auto source = "require raytracing_pipeline\n"
+                            "\n"
+                            "struct radiance:\n"
+                            "    color: float\n"
+                            "\n"
+                            "rays rs:\n"
+                            "    primary: radiance\n"
+                            "\n"
+                            "binding work:\n"
+                            "    world: acceleration_structure[.triangles]\n"
+                            "    values: mut buffer[float]\n"
+                            "\n"
+                            "fun total(x: hit_object, n: int) -> float:\n"
+                            "    if n < 0:\n"
+                            "        return 0.0\n"
+                            "    let mut v = x.t\n"
+                            "    for i in 0 ..< n:\n"
+                            "        v += x.t\n"
+                            "    return v\n"
+                            "\n"
+                            "@raygen fun main_cs(@launch_id id: int3){work}:\n"
+                            "    let mut p = radiance(0.0)\n"
+                            "    let r = ray(origin = pos3(0.0, 0.0, 0.0), direction = vec3(0.0, 0.0, 1.0))\n"
+                            "    const if has(.shader_execution_reordering):\n"
+                            "        let h = trace_hit(work.world, r, rs.primary, mut p)\n"
+                            "        p.color = total(h, id.x)\n"
+                            "    work.values[id.x] = p.color\n";
+    auto device = sgl::check::feature_set();
+    device.set(sgl::check::feature::shader_execution_reordering);
+    auto const with = compiled(source, target::hlsl_vulkan, device);
+    REQUIRE(with.has_value()).dump("error", with.has_error() ? cc::string(with.error()) : cc::string());
+    auto const& text = with.value().text;
+    CHECK(text.contains("vk::SpirvOpaqueType<5313> hit_object_1;"));
+    CHECK(text.contains("sgl_hit_object_t(hit_object_1)"));
+    CHECK(!text.contains("= hit_object"));
+    CHECK(!text.contains("vk::SpirvOpaqueType<5313> x"));
+    CHECK(!text.contains("dx::HitObject"));
+}
+
 TEST("sgl target text - a reordering trace takes its hint's bits from a named const")
 {
     // CHK-433: the bits are checked as an expression like any other, so a name in them is flattened like one

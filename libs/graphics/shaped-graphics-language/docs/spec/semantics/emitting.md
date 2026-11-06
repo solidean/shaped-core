@@ -551,6 +551,10 @@ So `{float3; float}` is written with `packed_float3`: the `float` is at byte 12 
   An instruction that hands a payload over takes a variable of the ray-payload storage class, one per payload type, which the call fills before and reads back after.
   A reordering trace is one `OpHitObjectTraceReorderExecuteEXT`, and `maybe_reorder` is `OpReorderThreadWithHintEXT`.
   A hit object's `let` declares nothing: SPIR-V forbids loading or storing a hit object, so the `let` names the variable its trace filled.
+  That variable is a `Function` pointer to the type, which is how the instructions take a hit object, and all a module may do with it.
+  A parameter holding one is the same name, since a call is inlined with its arguments standing in, so a hit object handed to a function is no copy.
+  What would be a copy, CHK-516 refuses before any text: DXC would lower it to `OpLoad` and `OpStore`, which `spirv-val` and the validation layer accept and a driver may crash on.
+  `sgl hit object spirv` in slib's tests reads DXC's module word by word to hold this, every path at `-O3` and `-Od`, and every raygen of the repo that reorders.
 * **EMIT-229** A compute stage whose workgroup memory LEGAL-69 shadows declares the shadow `sgl_written`, a `uint` atomic word per 32 scalars, beside that memory.
   Before the body, each invocation clears the words its index in the workgroup strides to, and a workgroup barrier follows, so no mark lands before a clear.
   Under `define` the same prologue zeroes workgroup memory instead: an array member element by element in that stride, any other member in invocation 0.
