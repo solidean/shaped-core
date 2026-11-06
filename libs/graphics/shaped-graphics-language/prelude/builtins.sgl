@@ -1328,6 +1328,23 @@
 /// `m` mirrored across its diagonal: its rows as columns, which is its inverse where it only rotates.
 @builtin @pure fun transpose(m: mat2) -> mat2
 
+// a matrix's sum, difference, negation and scale act on each element (EVAL-109)
+@builtin @pure @operator("+") fun add_mat4(a: mat4, b: mat4) -> mat4
+@builtin @pure @operator("-") fun subtract_mat4(a: mat4, b: mat4) -> mat4
+@builtin @pure @operator("-") fun negate_mat4(x: mat4) -> mat4
+@builtin @pure @operator("*") fun scale_mat4(a: mat4, b: float) -> mat4
+@builtin @pure @operator("*") fun scale_mat4_after(a: float, b: mat4) -> mat4
+@builtin @pure @operator("+") fun add_mat3(a: mat3, b: mat3) -> mat3
+@builtin @pure @operator("-") fun subtract_mat3(a: mat3, b: mat3) -> mat3
+@builtin @pure @operator("-") fun negate_mat3(x: mat3) -> mat3
+@builtin @pure @operator("*") fun scale_mat3(a: mat3, b: float) -> mat3
+@builtin @pure @operator("*") fun scale_mat3_after(a: float, b: mat3) -> mat3
+@builtin @pure @operator("+") fun add_mat2(a: mat2, b: mat2) -> mat2
+@builtin @pure @operator("-") fun subtract_mat2(a: mat2, b: mat2) -> mat2
+@builtin @pure @operator("-") fun negate_mat2(x: mat2) -> mat2
+@builtin @pure @operator("*") fun scale_mat2(a: mat2, b: float) -> mat2
+@builtin @pure @operator("*") fun scale_mat2_after(a: float, b: mat2) -> mat2
+
 // `x as T` between the numeric families of one width, and between the widths of one family,
 // component for component; each target writes a conversion to `T`
 @builtin @pure @operator("as") fun convert_float_to_int(x: float) -> int

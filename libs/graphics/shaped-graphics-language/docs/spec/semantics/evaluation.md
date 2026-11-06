@@ -52,6 +52,8 @@ A listing here is the dump of a flat tree, shortened: a label is `$name`, and a 
   A byte of `pack_unorm4x8` and `pack_snorm4x8` is `floor(v + 0.5)` of the scaled value, WGSL's formula, which HLSL's text writes too.
   Metal does not promise that rounding of a value exactly midway between two bytes, so MSL may take it to the even one.
 * **EVAL-99** `mat4(c0, c1, c2, c3)` is the matrix whose column `i` is `ci`, so its leaves are the four columns one behind the other, as a binding's bytes are.
+* **EVAL-109** `a + b` and `a - b` of two matrices of one type, `-m`, and `m * s` or `s * m` of a matrix and a float act on each element on its own, as float arithmetic does.
+  A matrix over a float has no `/`, since WGSL has none.
 * **EVAL-98** `determinant(m)` is the determinant of the 4x4 matrix `m`, which its transpose shares, so it does not depend on the layout being column-major.
   It is defined for every argument: a matrix two of whose columns are equal gives 0, and an element that is a NaN or an infinity gives what float arithmetic makes of it.
   A target rounds each of its products and sums, and the interpreter computes in f64 and rounds to float at the end, so the two agree exactly where every step is exact, as with small integers.

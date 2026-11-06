@@ -302,6 +302,58 @@ written write_product(call_context const& c)
     return product(c, c.arguments[0], c.arguments[1]);
 }
 
+/// `a op b` of two matrices of `N` leaves, element by element.
+template <isize N, char Op>
+void matrix_sum(leaves in, result& out)
+{
+    for (auto i = isize(0); i < N; ++i)
+    {
+        auto const a = in[i].as_float();
+        auto const b = in[N + i].as_float();
+        out.push_back(scalar::of(Op == '+' ? a + b : a - b));
+    }
+}
+
+template <isize N>
+void matrix_negated(leaves in, result& out)
+{
+    for (auto i = isize(0); i < N; ++i)
+        out.push_back(scalar::of(-in[i].as_float()));
+}
+
+/// Every element of a matrix of `N` leaves times the scalar beside it, which stands first where `IsScalarFirst`.
+template <isize N, bool IsScalarFirst>
+void matrix_scaled(leaves in, result& out)
+{
+    auto const s = in[IsScalarFirst ? 0 : N].as_float();
+    auto const first = IsScalarFirst ? isize(1) : isize(0);
+    for (auto i = isize(0); i < N; ++i)
+        out.push_back(scalar::of(s * in[first + i].as_float()));
+}
+
+/// HLSL negates a matrix as it does a vector, and WGSL has no `-` of one, so the other targets scale it.
+written write_matrix_negated(call_context const& c)
+{
+    if (c.target == language::hlsl)
+        return {.text = cc::format("-{}", wrapped(c.arguments[0], precedence::unary)), .binds = precedence::unary};
+    return write_infix("*", precedence::multiplicative, {.text = "-1.0f", .binds = precedence::unary}, c.arguments[0]);
+}
+
+template <isize Side>
+void add_matrix_arithmetic(registry& r, cc::string_view matrix)
+{
+    constexpr auto n = Side * Side;
+    impl::add_infix(r, "+", cc::format("add_{}", matrix), matrix, matrix, matrix, matrix_sum<n, '+'>);
+    impl::add_infix(r, "-", cc::format("subtract_{}", matrix), matrix, matrix, matrix, matrix_sum<n, '-'>);
+    r.add(function_record{
+        .signature = cc::format("@pure @operator(\"-\") fun negate_{}(x: {}) -> {}", matrix, matrix, matrix),
+        .evaluate = matrix_negated<n>,
+        .write = {.kind = spelling_kind::custom, .custom = write_matrix_negated},
+    });
+    impl::add_infix(r, "*", cc::format("scale_{}", matrix), matrix, "float", matrix, matrix_scaled<n, false>);
+    impl::add_infix(r, "*", cc::format("scale_{}_after", matrix), "float", matrix, matrix, matrix_scaled<n, true>);
+}
+
 constexpr cc::string_view k_mul[] = {"mul"};
 constexpr cc::string_view k_transpose[] = {"transpose"};
 
@@ -430,4 +482,9 @@ void sgl::builtins::register_transforms(registry& r)
     impl::add_function(r, "transpose", {"m", "mat2"}, "mat2", transpose<2>, {},
                        "/// `m` mirrored across its diagonal: its rows as columns, which is its inverse where it only "
                        "rotates.");
+
+    r.add_comment("// a matrix's sum, difference, negation and scale act on each element (EVAL-109)");
+    add_matrix_arithmetic<4>(r, "mat4");
+    add_matrix_arithmetic<3>(r, "mat3");
+    add_matrix_arithmetic<2>(r, "mat2");
 }

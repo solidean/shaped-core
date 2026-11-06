@@ -389,9 +389,6 @@ struct differentiator
             types.push_back(type_of(a));
         }
         auto const callee = find(name, types);
-        if (!is_valid(callee) && is_operator(name))
-            if (auto const by_columns = matrix_operation(name, arguments); is_valid(by_columns))
-                return by_columns;
         if (!is_valid(callee))
         {
             auto spelled = cc::string();
@@ -400,43 +397,6 @@ struct differentiator
             return failed(cc::format("its derivative needs {}({}), which no builtin is", name, spelled));
         }
         return f.builtin_call(at, callee, arguments);
-    }
-    /// TEMPORARY(debt-sgl-matrix-arithmetic): `+`, `-` and a scale of a matrix, column by column; none where
-    /// `arguments` are no such operation.
-    flat_expr_id matrix_operation(cc::string_view name, cc::span<flat_expr_id const> arguments)
-    {
-        auto matrix = type_id::none;
-        for (auto const a : arguments)
-            if (is_matrix(type_of(a)))
-                matrix = type_of(a);
-        if (!is_valid(matrix) || name == "/")
-            return flat_expr_id::none;
-        for (auto const a : arguments)
-            if (type_of(a) != matrix && !(name == "*" && is_scalar(type_of(a))))
-                return flat_expr_id::none;
-        if (name == "*" && arguments.size() == 2 && type_of(arguments[0]) == type_of(arguments[1]))
-            return flat_expr_id::none;
-        auto shared = cc::vector<flat_expr_id>();
-        auto any_matrix = flat_expr_id::none;
-        for (auto const a : arguments)
-        {
-            shared.push_back(share(a));
-            if (is_matrix(type_of(a)))
-                any_matrix = shared.back();
-        }
-        auto const column_count
-            = leaf_count(matrix) / leaf_count(type_of(call("matrix_column", use(any_matrix), integer(0))));
-        auto parts = cc::vector<flat_expr_id>();
-        for (auto c = 0; c < column_count; ++c)
-        {
-            auto pieces = cc::vector<flat_expr_id>();
-            for (auto const s : shared)
-                pieces.push_back(is_matrix(type_of(s)) ? call("matrix_column", use(s), integer(c)) : use(s));
-            auto const column = share(name == "*" ? mul(pieces[0], pieces[1]) : call(name, pieces));
-            for (auto row = 0; row < leaf_count(type_of(column)); ++row)
-                parts.push_back(component(column, row));
-        }
-        return assemble(matrix, parts);
     }
 
     flat_expr_id call(cc::string_view name, flat_expr_id a)
@@ -1033,8 +993,7 @@ struct differentiator
     {
         auto const place_type = type_of(place_of(root(), steps));
         type_id const types[] = {place_type, type_of(g)};
-        // a matrix has no `+` of the prelude's yet, and `call` writes it by columns
-        if (is_valid(find("+", types)) || (is_matrix(place_type) && place_type == type_of(g)))
+        if (is_valid(find("+", types)))
         {
             auto const read = place_of(root(), steps);
             return emit(flat_assign{.place = place_of(root(), steps), .value = call("+", read, use(g))});
@@ -1533,6 +1492,17 @@ struct differentiator
         return result;
     }
 
+    /// The sum of the products of two shared matrices' elements, column by column.
+    flat_expr_id inner_product(flat_expr_id a, flat_expr_id b)
+    {
+        auto const column_count = leaf_count(type_of(a)) / leaf_count(type_of(call("matrix_column", use(a), integer(0))));
+        auto result = flat_expr_id::none;
+        for (auto c = 0; c < column_count; ++c)
+            result = sum(result, call("dot", call("matrix_column", use(a), integer(c)),
+                                      call("matrix_column", use(b), integer(c))));
+        return result;
+    }
+
     /// `g`, shared, brought to the type of an operand that a builtin broadcast: a scalar from a vector is its sum.
     flat_expr_id reduce(flat_expr_id g, type_id to)
     {
@@ -1685,6 +1655,10 @@ struct differentiator
             }
             else if (is_vector(ut) && k == 1 && is_matrix(wt))
                 gu = call("*", call("transpose", use(w)), use(g));
+            else if (is_matrix(ut) && is_scalar(wt))
+                gu = mul(use(g), use(w));
+            else if (is_scalar(ut) && is_matrix(wt))
+                gu = inner_product(g, w);
             else if (is_matrix(ut) && is_matrix(wt))
                 gu = k == 0 ? call("*", use(g), call("transpose", use(w))) : call("*", call("transpose", use(w)), use(g));
             else
