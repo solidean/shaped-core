@@ -11,10 +11,10 @@ refs:
 
 - **A path that does not depend on DXC**, for F3 and F8 above all.
 - **A path a lot faster than DXC**, fast enough for a runtime compile and a hot reload.
-- **Nothing in process that can crash us.** DXC is known to crash in process now and then.
+- **Nothing in process that can crash us.** DXC is known to crash in process now and then, and compiling out of process runs counter to the speed goal.
 - **Better DXIL in some scenarios later**, which the disassembly and simulation work can show and measure.
 - **Features the text route does not expose**: motion traces, and reordering without inline SPIR-V.
-- **Per-operation float guarantees**, which [feat-sgl-float-level-block-scoped](feat-sgl-float-level-block-scoped.md) gains from.
+- **Per-operation float guarantees**, which [feat-sgl-float-level-block-scoped](feat-sgl-float-level-block-scoped.md) is blocked on.
 
 ## The shape, proposed
 
@@ -42,15 +42,10 @@ DXIL does not forgive that, so SSA construction arrives before DXIL does.
 4. **Features**: motion traces, and SER written directly.
 5. **DXIL**: LLVM 3.7 bitcode and the DXIL container, written by us.
 
-## What can stop or reshape this
+## What can reshape this
 
-- **Whether D3D12 takes a DXIL we wrote.** A container has carried a validator's hash, and dropping `dxil.dll` depends on whether the Agility SDK runs an unsigned one.
-  Settle this with a test before designing the writer; if it cannot, DXIL keeps a validator step.
+- **Whether D3D12 takes a DXIL we wrote.** A container has carried a validator's hash.
+  This decides whether `dxil.dll` can go, and not whether DXIL is worth writing: with a validator step it is still faster than DXC, and still ours to shape.
 - **The bug surface moves to us.** DXC's lowerings of odd cases, and what each driver's compiler happens to accept, become ours.
   A corpus compared across both routes is what holds it.
 - **Readable output** is lost on the native route, which is why the text route stays and `.sgl` lines are carried through.
-
-## Until then
-
-DXC's crashes can be contained today, without this epic: a compile out of process costs a process start and takes nothing down.
-That is a slib decision, and worth taking on its own if the crashes bite before step 3.
