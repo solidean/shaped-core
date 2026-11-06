@@ -260,6 +260,15 @@ enum class sgl::ir::group_fold : sgl::u8
     exclusive,
 };
 
+/// What a derivative across a pixel quad gives; the `sub` of `op::derivative`.
+enum class sgl::ir::derivative : sgl::u8
+{
+    x,
+    y,
+    /// `abs(x) + abs(y)`.
+    width,
+};
+
 enum class sgl::ir::barrier : sgl::u8
 {
     workgroup,
@@ -341,6 +350,8 @@ enum class sgl::ir::op : sgl::u16
     transpose,
     /// `sub` is a `math`.
     math,
+    /// `sub` is a `derivative`.
+    derivative,
     // ---- composites
     construct,
     /// Operands: the composite, then literal indices.
@@ -379,6 +390,8 @@ enum class sgl::ir::op : sgl::u16
     atomic_fadd,
     /// `sub` is a `barrier`.
     control_barrier,
+    /// A pixel is lost, and the invocation goes on as a helper, so a neighbour's derivatives stay whole: no terminator.
+    discard,
     // ---- textures and images
     combine_sampler,
     /// Operands: sampled image, coordinate, level, and an offset where `aux` is 1.

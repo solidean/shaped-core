@@ -74,6 +74,7 @@ constexpr cc::string_view k_names[] = {
     "matrix_times_matrix",
     "transpose",
     "math",
+    "derivative",
     "construct",
     "extract",
     "insert",
@@ -99,6 +100,7 @@ constexpr cc::string_view k_names[] = {
     "atomic_xor",
     "atomic_fadd",
     "control_barrier",
+    "discard",
     "combine_sampler",
     "sample_lod",
     "sample_implicit",
@@ -242,7 +244,7 @@ sgl::ir::operand sgl::ir::operand_role(op code, isize at)
 
 bool sgl::ir::has_effect(op code)
 {
-    if (u16(code) >= u16(op::atomic_load) && u16(code) <= u16(op::control_barrier))
+    if (u16(code) >= u16(op::atomic_load) && u16(code) <= u16(op::discard))
         return true;
     if (u16(code) >= u16(op::branch))
         return true;

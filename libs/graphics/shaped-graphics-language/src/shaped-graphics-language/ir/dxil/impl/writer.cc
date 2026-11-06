@@ -43,6 +43,8 @@ enum class rule_kind : u8
     stage_store,
     atomic,
     barrier,
+    discard,
+    derivative,
     texture,
     image_size,
     subgroup,
@@ -124,6 +126,7 @@ constexpr op_rule k_rules[] = {
     {op::matrix_times_matrix, rule_kind::linear_algebra},
     {op::transpose, rule_kind::linear_algebra},
     {op::math, rule_kind::math},
+    {op::derivative, rule_kind::derivative},
     {op::construct, rule_kind::construct},
     {op::extract, rule_kind::extract},
     {op::insert, rule_kind::insert},
@@ -148,6 +151,7 @@ constexpr op_rule k_rules[] = {
     {op::atomic_or, rule_kind::atomic},
     {op::atomic_xor, rule_kind::atomic},
     {op::control_barrier, rule_kind::barrier},
+    {op::discard, rule_kind::discard},
     {op::combine_sampler, rule_kind::texture},
     {op::sample_lod, rule_kind::texture},
     {op::sample_implicit, rule_kind::texture},
@@ -348,6 +352,10 @@ void writer::operation(u32 index)
         return array_length(index, i);
     case rule_kind::stage_load:
         return stage_load(index, i);
+    case rule_kind::discard:
+        return discard();
+    case rule_kind::derivative:
+        return derivative_lanes(index, i);
     case rule_kind::stage_store:
         return stage_store(i);
     case rule_kind::atomic:
@@ -588,6 +596,37 @@ void writer::bitcast_lanes(u32 index, instruction const& i)
     auto const a = value_ref(_p.operands_of(i)[0]);
     auto const to = scalar_type(scalar_at(i.type, 0));
     _scratch.clear();
+    // EMIT-196: a 64-bit value and its two words, which LLVM's `bitcast` cannot cross
+    if (leaves_of(i.type) == 1 && count_of(a) == 2)
+    {
+        auto const low = leaf_at(a, 0);
+        auto const high = leaf_at(a, 1);
+        if (_m.is_float(to))
+        {
+            ll_value const args[] = {_m.constant_i32(k_dx_ops[isize(dx_op::make_double)].number), low, high};
+            _scratch.push_back(call(dx_op::make_double, to, args));
+            return define(index);
+        }
+        auto const shifted = _m.binary(binary_op::shl, _m.cast(cast_op::zext, high, to), _m.constant_int(to, 32));
+        _scratch.push_back(_m.binary(binary_op::bit_or, _m.cast(cast_op::zext, low, to), shifted));
+        return define(index);
+    }
+    if (leaves_of(i.type) == 2 && count_of(a) == 1)
+    {
+        auto const held = leaf_at(a, 0);
+        if (_m.is_float(_m.type_of(held)))
+        {
+            ll_value const args[] = {_m.constant_i32(k_dx_ops[isize(dx_op::split_double)].number), held};
+            auto const words = call(dx_op::split_double, _m.type_of(held), args);
+            _scratch.push_back(_m.extract_value(words, 0));
+            _scratch.push_back(_m.extract_value(words, 1));
+            return define(index);
+        }
+        auto const shifted = _m.binary(binary_op::lshr, held, _m.constant_int(_m.type_of(held), 32));
+        _scratch.push_back(_m.cast(cast_op::trunc, held, to));
+        _scratch.push_back(_m.cast(cast_op::trunc, shifted, to));
+        return define(index);
+    }
     for (auto l = u32(0); l < count_of(a); ++l)
     {
         auto const held = leaf_at(a, l);

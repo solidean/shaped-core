@@ -192,7 +192,7 @@ void lowering::statement(flat_stmt_id id)
         [&](flat_if const& i) { if_(i); }, [&](flat_loop const& l) { loop_(l); },                                     //
         [&](flat_while const& w) { while_(w); }, [&](flat_for const& f) { for_(f); },                                 //
         [&](flat_continue const&) { branch(_continues.back()); }, [&](flat_discard const&)
-        { unsupported("a discard, in a stage that is not lowered yet"); }, [&](flat_once const& o) { once_(o); }, //
+        { add(op::discard, type_ref::none, cc::span<u32 const>()); }, [&](flat_once const& o) { once_(o); }, //
         [&](flat_break const&) { branch(_breaks.back()); }, [&](flat_switch const& sw) { switch_(sw); },
         [&](flat_return const& r)
         {

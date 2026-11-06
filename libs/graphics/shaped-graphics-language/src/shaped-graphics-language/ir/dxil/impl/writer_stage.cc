@@ -55,6 +55,14 @@ constexpr system_rule k_systems[] = {
     {6, 1},   // SV_VertexID
     {8, 2},   // SV_InstanceID
     {64, 16}, // SV_Target
+    {4, 4},   // SV_RenderTargetArrayIndex
+    {7, 10},  // SV_PrimitiveID
+    {9, 13},  // SV_IsFrontFace
+    {10, 12}, // SV_SampleIndex
+    {65, 17}, // SV_Depth
+    {66, 14}, // SV_Coverage
+    {67, 19}, // SV_DepthGreaterEqual
+    {68, 18}, // SV_DepthLessEqual
 };
 
 /// `DXIL::InterpolationMode`, parallel to `ir::interpolation`.
@@ -86,6 +94,8 @@ constexpr feature_rule k_features[] = {
     {&writer_uses::low_precision, 1ull << 5, 1ull << 18},
     {&writer_uses::typed_uav_load, 1ull << 13, 1ull << 11},
     {&writer_uses::start_location, 1ull << 38, 1ull << 32},
+    {&writer_uses::view_id, 1ull << 21, 1ull << 16},
+    {&writer_uses::layer_output, 1ull << 9, 1ull << 13},
 };
 /// What every module says: 16-bit types are native, as the text route's `-enable-16bit-types` has them.
 constexpr u64 k_native_low_precision = 1ull << 23;
@@ -157,11 +167,15 @@ void writer::stage_load(u32 index, instruction const& i)
     if (_p.stage == check::stage::compute)
         return built_in(index, e, i);
 
+    auto const value_of = [&](dx_op op)
+    {
+        ll_value const args[] = {_m.constant_i32(k_dx_ops[isize(op)].number)};
+        return call(op, _m.int_type(), args);
+    };
     auto const start_of = [&](dx_op op)
     {
         _uses.start_location = true;
-        ll_value const args[] = {_m.constant_i32(k_dx_ops[isize(op)].number)};
-        return call(op, _m.int_type(), args);
+        return value_of(op);
     };
     if (e.system == ir::built_in::first_instance)
     {
@@ -169,11 +183,24 @@ void writer::stage_load(u32 index, instruction const& i)
         _scratch.push_back(start_of(dx_op::start_instance_location));
         return define(index);
     }
+    // these are operations of their own, whether or not a signature names them
+    if (e.system == ir::built_in::view_index || e.system == ir::built_in::sample_mask
+        || e.system == ir::built_in::sample_index)
+    {
+        _uses.view_id = _uses.view_id || e.system == ir::built_in::view_index;
+        _scratch.clear();
+        _scratch.push_back(value_of(e.system == ir::built_in::view_index  ? dx_op::view_id
+                                    : e.system == ir::built_in::sample_mask ? dx_op::coverage
+                                                                            : dx_op::sample_index));
+        return define(index);
+    }
 
     auto const at = _element_signature[element];
     if (at < 0)
         return unsupported(cc::format("the stage input {} on DXIL", _p.name_at(e.name_first, e.name_size)));
-    auto const overload = scalar_type(scalar_at(i.type, 0));
+    // `SV_IsFrontFace` crosses as a uint
+    auto const is_bool = e.system == ir::built_in::is_front_facing;
+    auto const overload = is_bool ? _m.int_type() : scalar_type(scalar_at(i.type, 0));
     auto const number = _m.constant_i32(k_dx_ops[isize(dx_op::load_input)].number);
     auto const undefined = _m.constant_undef(_m.int_type());
     auto const id = _m.constant_i32(_signature_ids[at]);
@@ -189,6 +216,8 @@ void writer::stage_load(u32 index, instruction const& i)
         _scratch.push_back(_m.binary(binary_op::add, _loaded[0], start_of(dx_op::start_vertex_location)));
     else if (e.system == ir::built_in::instance_index)
         _scratch.push_back(_m.binary(binary_op::add, _loaded[0], start_of(dx_op::start_instance_location)));
+    else if (is_bool)
+        _scratch.push_back(_m.compare(predicate::i_ne, _loaded[0], _m.constant_i32(0)));
     else
         _scratch.push_back_range(_loaded);
     define(index);
@@ -212,6 +241,40 @@ void writer::stage_store(instruction const& i)
         ll_value const args[] = {number, id, _m.constant_i32(0), _m.constant_i8(l), lane};
         (void)call(dx_op::store_output, _m.type_of(lane), args);
     }
+}
+
+void writer::discard()
+{
+    ll_value const args[] = {_m.constant_i32(k_dx_ops[isize(dx_op::discard)].number), _m.constant_bool(true)};
+    (void)call(dx_op::discard, _m.void_type(), args);
+}
+
+void writer::derivative_lanes(u32 index, instruction const& i)
+{
+    auto const source = value_ref(_p.operands_of(i)[0]);
+    auto const overload = _m.type_of(leaf_at(source));
+    auto const across = [&](dx_op op, ll_value lane)
+    {
+        ll_value const args[] = {_m.constant_i32(k_dx_ops[isize(op)].number), lane};
+        return call(op, overload, args);
+    };
+    auto const kind = derivative(i.sub);
+    _loaded.clear();
+    for (auto l = u32(0); l < count_of(source); ++l)
+    {
+        auto const lane = leaf_at(source, l);
+        if (kind != derivative::width)
+        {
+            _loaded.push_back(across(kind == derivative::x ? dx_op::deriv_coarse_x : dx_op::deriv_coarse_y, lane));
+            continue;
+        }
+        auto const x = across(dx_op::fabs, across(dx_op::deriv_coarse_x, lane));
+        auto const y = across(dx_op::fabs, across(dx_op::deriv_coarse_y, lane));
+        _loaded.push_back(_m.binary(binary_op::add, x, y, flags_of(i)));
+    }
+    _scratch.clear();
+    _scratch.push_back_range(_loaded);
+    define(index);
 }
 
 void writer::read_usage()
@@ -253,6 +316,16 @@ void writer::fill_dependencies()
     // Every declared input lane reaches every declared output lane: a table can safely say too much.
     auto const words = (_summary.output_scalars + 31) / 32;
     _summary.dependencies.resize_to_filled(isize(_summary.input_rows) * 4 * words, 0u);
+    _summary.uses_view = _uses.view_id;
+    _summary.view_outputs.resize_to_filled(_uses.view_id ? isize(words) : isize(0), 0u);
+    if (_uses.view_id)
+        for (auto const& output : _summary.signature)
+            if (output.table == signature_table::output && output.row >= 0)
+                for (auto o = u32(0); o < output.lanes; ++o)
+                {
+                    auto const to = u32(output.row) * 4 + output.first_column + o;
+                    _summary.view_outputs[to / 32] |= 1u << (to % 32);
+                }
     for (auto const& input : _summary.signature)
     {
         if (input.table != signature_table::input || input.row < 0)
@@ -299,7 +372,7 @@ u32 writer::signature_list(signature_table table)
                               _m.md_i32(1),
                               byte_of(e.lanes),
                               _m.md_i32(u32(e.row)),
-                              byte_of(e.first_column),
+                              byte_of(e.row < 0 ? 0xffu : e.first_column),
                               extra};
         list.push_back(_m.md_node(fields));
     }
@@ -388,6 +461,9 @@ void writer::write_entry_metadata()
     auto const has_resources = !_bindings.empty();
     auto const resources_node = has_resources ? _m.md_node(resources) : 0;
 
+    if (_p.stage == check::stage::vertex)
+        for (auto const& e : _summary.signature)
+            _uses.layer_output = _uses.layer_output || (e.table == signature_table::output && e.system_value == 4);
     auto metadata_flags = k_native_low_precision;
     auto feature_flags = u64(0);
     for (auto const& f : k_features)
@@ -417,6 +493,8 @@ void writer::write_entry_metadata()
         auto state = cc::vector<ll_value>();
         state.push_back(_m.constant_i32(_summary.input_scalars));
         state.push_back(_m.constant_i32(_summary.output_scalars));
+        for (auto const word : _summary.view_outputs)
+            state.push_back(_m.constant_i32(word));
         for (auto k = u32(0); k < _summary.input_scalars * words; ++k)
             state.push_back(_m.constant_i32(_summary.dependencies[k]));
         auto const array = _m.array(_m.int_type(), u64(state.size()));
@@ -451,6 +529,14 @@ void writer::write_entry_metadata()
         for (auto const& e : _summary.signature)
             _summary.writes_position
                 = _summary.writes_position || (e.table == signature_table::output && e.system_value == 1);
+    if (_p.stage == check::stage::pixel)
+        for (auto const& e : _summary.signature)
+        {
+            auto const is_input = e.table == signature_table::input;
+            auto const is_sampled = e.mode == interpolation::sample || e.mode == interpolation::noperspective_sample;
+            _summary.writes_depth = _summary.writes_depth || (!is_input && (e.system_value == 65 || e.system_value >= 67));
+            _summary.runs_per_sample = _summary.runs_per_sample || (is_input && (is_sampled || e.system_value == 10));
+        }
     // the PSV lists a module's bindings in this order, whichever order they were found in
     for (auto const cls : {2u, 3u, 0u, 1u})
         for (auto const& b : _bindings)
@@ -566,6 +652,11 @@ ll_type writer::signature_type(char code, ll_type overload)
         return cbuf_ret_type(overload);
     case 'D':
         return dimensions_type();
+    case 'S':
+    {
+        ll_type const members[] = {_m.int_type(), _m.int_type()};
+        return _m.structure("dx.types.splitdouble", members);
+    }
     default:
         return ll_type::none;
     }

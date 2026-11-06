@@ -174,13 +174,14 @@ void pad_to_word(byte_writer& out)
     auto out = byte_writer();
     out.u32_le(k_runtime_info_size);
     // PSVRuntimeInfo0: a stage's own 16 bytes, then the wave sizes
-    out.u8_le(s.writes_position ? 1 : 0);
-    out.zeros(15);
+    out.u8_le(s.writes_position || s.writes_depth ? 1 : 0);
+    out.u8_le(s.runs_per_sample ? 1 : 0);
+    out.zeros(14);
     out.u32_le(0);
     out.u32_le(0xffffffffu);
     // PSVRuntimeInfo1
     out.u8_le(u8(s.psv_stage));
-    out.u8_le(0); // uses no view id
+    out.u8_le(s.uses_view ? 1 : 0);
     out.u16_le(0);
     out.u8_le(u8(inputs));
     out.u8_le(u8(outputs));
@@ -224,15 +225,19 @@ void pad_to_word(byte_writer& out)
         auto const& e = s.signature[i];
         out.u32_le(name_offsets[i]);
         out.u32_le(index_offsets[i]);
+        auto const has_row = e.row >= 0;
         out.u8_le(1); // the rows
-        out.u8_le(u8(e.row));
-        out.u8_le(u8(e.lanes | (e.first_column << 4) | 0x40)); // the columns, the first one, and that it is allocated
+        out.u8_le(has_row ? u8(e.row) : u8(0));
+        // the columns, then the first one and that it is allocated, which an element with no register is not
+        out.u8_le(u8(e.lanes | (has_row ? (e.first_column << 4) | 0x40 : 0)));
         out.u8_le(s.semantic_kinds[i]);
         out.u8_le(u8(e.component_type));
         out.u8_le(s.modes[i]);
         out.u8_le(0); // no dynamic index, the first stream
         out.u8_le(0);
     }
+    for (auto const word : s.view_outputs)
+        out.u32_le(word);
     for (auto const word : s.dependencies)
         out.u32_le(word);
     return out.take();

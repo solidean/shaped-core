@@ -38,7 +38,10 @@ constexpr built_in_number k_built_ins[] = {
     {built_in::thread_id, 28},        {built_in::local_thread_id, 27},     {built_in::local_thread_index, 29},
     {built_in::workgroup_id, 26},     {built_in::subgroup_size, 36, true}, {built_in::subgroup_invocation_id, 41, true},
     {built_in::position, 0},          {built_in::vertex_index, 42},        {built_in::instance_index, 43},
-    {built_in::first_instance, 4425},
+    {built_in::first_instance, 4425}, {built_in::is_front_facing, 17},    {built_in::sample_index, 18},
+    {built_in::sample_mask, 20},      {built_in::primitive_id, 7},         {built_in::view_index, 4440},
+    {built_in::layer, 9},             {built_in::depth, 22},               {built_in::depth_greater_equal, 22},
+    {built_in::depth_less_equal, 22},
 };
 /// A pixel stage reads `@position` as what the rasterizer made of it, where a vertex stage's is `Position`.
 constexpr u32 k_frag_coord = 15;
@@ -47,6 +50,9 @@ constexpr u32 k_model_vertex = 0;
 constexpr u32 k_model_fragment = 4;
 constexpr u32 k_model_compute = 5;
 constexpr u32 k_mode_origin_upper_left = 7;
+constexpr u32 k_mode_depth_replacing = 12;
+constexpr u32 k_mode_depth_greater = 14;
+constexpr u32 k_mode_depth_less = 15;
 constexpr u32 k_mode_local_size = 17;
 } // namespace
 
@@ -240,24 +246,47 @@ void writer::write_constants()
     }
 }
 
+u32 writer::space_of(stage_element const& e) const
+{
+    auto const is_input = e.part == stage_part::input || (e.part == stage_part::primitive && _p.stage == check::stage::pixel);
+    return is_input ? u32(spv::Input) : u32(spv::Output);
+}
+
 void writer::write_stage_elements()
 {
     for (auto i = isize(0); i < _p.stage_elements.size(); ++i)
     {
         auto const& e = _p.stage_elements[i];
         auto const id = _elements + u32(i);
-        auto const space = e.part == stage_part::input ? u32(spv::Input) : u32(spv::Output);
+        auto const space = space_of(e);
+        auto const is_mask = e.system == built_in::sample_mask;
         // a pointer type is declared once, and a program's own table holds none of these
         auto pointer = u32(0);
         for (auto k = isize(0); k < i; ++k)
-            if (_p.stage_elements[k].type == e.type && _p.stage_elements[k].part == e.part)
+            if (_p.stage_elements[k].type == e.type && space_of(_p.stage_elements[k]) == space
+                && (_p.stage_elements[k].system == built_in::sample_mask) == is_mask)
                 pointer = _element_pointers[k];
         if (pointer == 0)
         {
             pointer = _bound++;
-            emit(_declarations, spv::TypePointer, {pointer, space, id_of(e.type)});
+            auto held = id_of(e.type);
+            if (is_mask)
+            {
+                auto const array = _bound++;
+                auto const one = literal_id(1);
+                emit(_declarations, spv::TypeArray, {array, held, one});
+                held = array;
+            }
+            emit(_declarations, spv::TypePointer, {pointer, space, held});
         }
         _element_pointers.push_back(pointer);
+        auto lane = u32(0);
+        if (is_mask)
+        {
+            lane = _bound++;
+            emit(_declarations, spv::TypePointer, {lane, space, id_of(e.type)});
+        }
+        _element_lanes.push_back(lane);
         emit(_declarations, spv::Variable, {pointer, id, space});
         name(id, _p.name_at(e.name_first, e.name_size));
         for (auto const& known : k_built_ins)
@@ -269,11 +298,30 @@ void writer::write_stage_elements()
                     require(spv::GroupNonUniform);
                 if (e.system == built_in::first_instance)
                     require(spv::DrawParameters);
+                if (e.system == built_in::sample_index)
+                    require(spv::SampleRateShading);
+                if (e.system == built_in::view_index)
+                    require(spv::MultiView);
+                if (e.system == built_in::primitive_id)
+                    require(spv::Geometry);
+                if (e.system == built_in::layer)
+                    require(_p.stage == check::stage::pixel ? spv::Geometry : spv::ShaderLayer);
             }
         if (e.system == built_in::none && e.location >= 0)
             emit(_annotations, spv::Decorate, {id, spv::Location, u32(e.location)});
-        if (_p.stage == check::stage::pixel && e.part == stage_part::input && e.system == built_in::none)
-            write_interpolation(id, e.interpolate);
+        if (space == spv::Input && _p.stage == check::stage::pixel)
+        {
+            if (e.system == built_in::none)
+                write_interpolation(id, e.interpolate);
+            else if (e.system != built_in::position)
+                emit(_annotations, spv::Decorate, {id, spv::Flat});
+        }
+        if (e.part == stage_part::primitive)
+        {
+            require(spv::MeshShadingEXT);
+            require_extension("SPV_EXT_mesh_shader");
+            emit(_annotations, spv::Decorate, {id, spv::PerPrimitiveEXT});
+        }
     }
 }
 
@@ -332,7 +380,19 @@ void writer::write_entry()
     for (auto i = isize(0); i < _p.globals.size(); ++i)
         _entry.push_back(_globals + u32(i));
     if (_p.stage == check::stage::pixel)
+    {
         emit(_modes, spv::ExecutionMode, {_function, k_mode_origin_upper_left});
+        for (auto const& e : _p.stage_elements)
+        {
+            if (e.system == built_in::depth || e.system == built_in::depth_greater_equal
+                || e.system == built_in::depth_less_equal)
+                emit(_modes, spv::ExecutionMode, {_function, k_mode_depth_replacing});
+            if (e.system == built_in::depth_greater_equal)
+                emit(_modes, spv::ExecutionMode, {_function, k_mode_depth_greater});
+            if (e.system == built_in::depth_less_equal)
+                emit(_modes, spv::ExecutionMode, {_function, k_mode_depth_less});
+        }
+    }
     else if (_p.stage != check::stage::vertex)
         emit(_modes, spv::ExecutionMode,
              {_function, k_mode_local_size, u32(_p.workgroup[0]), u32(_p.workgroup[1]), u32(_p.workgroup[2])});

@@ -38,6 +38,8 @@ enum class rule_kind : u8
     atomic,
     atomic_fadd,
     barrier,
+    discard,
+    derivative,
     sample_lod,
     image_fetch,
     image_gather,
@@ -129,6 +131,7 @@ constexpr op_rule k_rules[] = {
     {op::image_levels, rule_kind::plain, spv::ImageQueryLevels},
     {op::image_samples, rule_kind::plain, spv::ImageQuerySamples},
     {op::math, rule_kind::math, 0},
+    {op::derivative, rule_kind::derivative, 0},
     {op::extract, rule_kind::composite, spv::CompositeExtract},
     {op::insert, rule_kind::composite, spv::CompositeInsert},
     {op::shuffle, rule_kind::composite, spv::VectorShuffle},
@@ -151,6 +154,7 @@ constexpr op_rule k_rules[] = {
     {op::atomic_xor, rule_kind::atomic, spv::AtomicXor},
     {op::atomic_fadd, rule_kind::atomic_fadd, spv::AtomicFAddEXT},
     {op::control_barrier, rule_kind::barrier, spv::ControlBarrier},
+    {op::discard, rule_kind::discard, spv::DemoteToHelperInvocation},
     {op::sample_lod, rule_kind::sample_lod, spv::ImageSampleExplicitLod},
     {op::sample_implicit, rule_kind::plain, spv::ImageSampleImplicitLod},
     {op::image_fetch, rule_kind::image_fetch, spv::ImageFetch},
@@ -275,6 +279,17 @@ void writer::group(instruction const& i, u32 id)
     }
 }
 
+u32 writer::element_pointer(u32 element)
+{
+    auto const lane = _element_lanes[element];
+    if (lane == 0)
+        return _elements + element;
+    // `SampleMask` is an array of one, the only element of a stage that stands behind one
+    auto const pointer = _bound++;
+    emit(_code, spv::AccessChain, {lane, pointer, _elements + element, literal_id(0)});
+    return pointer;
+}
+
 void writer::frag_coord(instruction const& i, u32 id)
 {
     constexpr u32 k_one_bits = 0x3f800000u;
@@ -325,9 +340,18 @@ void writer::instruction_of(u32 index)
     case rule_kind::stage_load:
         if (_p.stage == check::stage::pixel && _p.stage_elements[operands[0]].system == built_in::position)
             return frag_coord(i, id);
-        return emit(_code, rule.opcode, {id_of(i.type), id, _elements + operands[0]});
+        return emit(_code, rule.opcode, {id_of(i.type), id, element_pointer(operands[0])});
     case rule_kind::stage_store:
-        return emit(_code, rule.opcode, {_elements + operands[0], id_of_raw(operands[1])});
+        return emit(_code, rule.opcode, {element_pointer(operands[0]), id_of_raw(operands[1])});
+    case rule_kind::discard:
+        require(spv::CapDemoteToHelperInvocation);
+        return emit(_code, rule.opcode, {});
+    case rule_kind::derivative:
+        return emit(_code,
+                    derivative(i.sub) == derivative::x   ? spv::DPdx
+                    : derivative(i.sub) == derivative::y ? spv::DPdy
+                                                         : spv::Fwidth,
+                    {id_of(i.type), id, id_of_raw(operands[0])});
     case rule_kind::atomic:
         return atomic(rule.opcode, i, id);
     case rule_kind::atomic_fadd:

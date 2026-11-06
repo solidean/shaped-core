@@ -205,6 +205,20 @@ value_ref lowering::read_struct(check::type_id t, u32& element)
             parts.push_back(u32(read_element(element++)));
             continue;
         }
+        if (emit::impl::is_word_split(_plan, member.type))
+        {
+            parts.push_back(u32(joined_words(member.type, element)));
+            continue;
+        }
+        if (_m.at(member.type).kind == check::type_kind::array
+            && emit::impl::is_word_split(_plan, _m.at(member.type).element))
+        {
+            auto joined = cc::vector<u32>();
+            for (auto i = u32(0); i < _m.at(member.type).count; ++i)
+                joined.push_back(u32(joined_words(_m.at(member.type).element, element)));
+            parts.push_back(u32(add(op::construct, value_type(member.type), joined)));
+            continue;
+        }
         // EMIT-174: an array or a matrix crosses as its pieces
         auto pieces = cc::vector<u32>();
         for (auto i = 0; i < member.pieces; ++i)
@@ -212,6 +226,69 @@ value_ref lowering::read_struct(check::type_id t, u32& element)
         parts.push_back(u32(add(op::construct, value_type(member.type), pieces)));
     }
     return add(op::construct, type, parts);
+}
+
+value_ref lowering::joined_words(check::type_id t, u32& element)
+{
+    auto const type = value_type(t);
+    auto const scalar = scalar_of(type);
+    auto const lanes = lanes_of(type);
+    auto pieces = cc::vector<value_ref>();
+    for (auto i = 0; i < emit::impl::word_pieces(_plan, t); ++i)
+        pieces.push_back(read_element(element++));
+    auto const pair = vector_type(_uint, 2);
+    auto words = cc::vector<u32>();
+    for (auto lane = u32(0); lane < lanes; ++lane)
+    {
+        auto const piece = pieces[lane / 2];
+        auto held = piece;
+        if (lanes_of(_out.type_of(piece)) != 2)
+        {
+            auto const first = lane % 2 * 2;
+            u32 const operands[] = {u32(piece), u32(piece), first, first + 1};
+            held = add(op::shuffle, pair, operands);
+        }
+        words.push_back(u32(add(op::bitcast, scalar, {held})));
+    }
+    return lanes == 1 ? value_ref(words[0]) : add(op::construct, type, words);
+}
+
+void lowering::store_words(check::type_id t, value_ref value, u32& element)
+{
+    auto const type = value_type(t);
+    auto const scalar = scalar_of(type);
+    auto const lanes = lanes_of(type);
+    auto const pair = vector_type(_uint, 2);
+    auto const store_element = [&](value_ref word)
+    {
+        u32 const operands[] = {element++, u32(word)};
+        add(op::stage_store, type_ref::none, operands);
+    };
+    auto const pair_at = [&](u32 lane)
+    {
+        // a three-vector's last piece is two words and then two zeros
+        if (lane >= lanes)
+            return null_of(pair);
+        return add(op::bitcast, pair, {lanes == 1 ? value : extracted(value, scalar, lane)});
+    };
+    if (lanes == 1)
+        return store_element(pair_at(0));
+    for (auto lane = u32(0); lane < lanes; lane += 2)
+        store_element(add(op::construct, vector_type(_uint, 4), {pair_at(lane), pair_at(lane + 1)}));
+}
+
+bool lowering::is_primitive_parameter(isize position) const
+{
+    if (_e.entry_stage != stage::pixel || position < 1 || !check::is_valid(_e.input))
+        return false;
+    auto const& local = _e.locals[position];
+    if (local.kind != check::local_kind::parameter || _m.at(local.type).kind != check::type_kind::structure
+        || local.type == _e.input)
+        return false;
+    for (auto const& input : _e.stage_inputs)
+        if (index_of(input.local) == position)
+            return false;
+    return true;
 }
 
 void lowering::hold_parameter(check::local_id id, value_ref value)
@@ -235,28 +312,18 @@ void lowering::read_stage_edge()
 {
     for (auto const& e : _out.stage_elements)
     {
-        auto const is_read_here = e.system == built_in::none || e.system == built_in::position
-                               || e.system == built_in::vertex_index || e.system == built_in::instance_index
-                               || e.system == built_in::first_instance;
-        if (!is_read_here)
-            return unsupported(cc::format("the stage element {}", _out.name_at(e.name_first, e.name_size)));
-        if (e.part == stage_part::primitive)
-            return unsupported("what a mesh stage wrote per primitive");
         auto const& held = _out.at(e.type);
         auto const& scalar = held.kind == ir::type_kind::vector ? _out.at(held.element) : held;
-        if (scalar.width != 32 || scalar.kind == ir::type_kind::bool_)
-            return unsupported("a link that is no 32-bit number");
+        if (e.system == built_in::none && (scalar.width < 32 || scalar.kind == ir::type_kind::bool_))
+            return unsupported("a link that is no 32-bit or 64-bit number");
     }
-    // EMIT-196: a 64-bit value crossing as its words stands in 32-bit elements, and the check above never sees it
-    for (auto const& s : _plan.structs)
-        if (s.type == _e.input || s.type == _e.result)
-            for (auto const& member : s.members)
-                if (emit::impl::is_word_split(_plan, member.type))
-                    return unsupported("a 64-bit link, which crosses as its words");
 
     auto element = u32(0);
     if (check::is_valid(_e.input))
         hold_parameter(check::local_id(0), read_struct(_e.input, element));
+    for (auto i = isize(1); i < _e.locals.size(); ++i)
+        if (is_primitive_parameter(i))
+            hold_parameter(check::local_id(i), read_struct(_e.locals[i].type, element));
     for (auto i = isize(0); i < _e.stage_inputs.size(); ++i, ++element)
     {
         if (i < _plan.stage_input_read.size() && !_plan.stage_input_read[i])
@@ -294,6 +361,19 @@ void lowering::store_stage_result(value_ref result)
             store_element(whole);
             continue;
         }
+        if (emit::impl::is_word_split(_plan, member.type))
+        {
+            store_words(member.type, whole, element);
+            continue;
+        }
+        if (_m.at(member.type).kind == check::type_kind::array
+            && emit::impl::is_word_split(_plan, _m.at(member.type).element))
+        {
+            auto const held = _m.at(member.type).element;
+            for (auto i = u32(0); i < _m.at(member.type).count; ++i)
+                store_words(held, extracted(whole, value_type(held), i), element);
+            continue;
+        }
         for (auto i = 0; i < member.pieces; ++i)
             store_element(extracted(whole, value_type(member.piece), u32(i)));
     }
@@ -314,14 +394,9 @@ void lowering::declare_stage_elements()
         if (check::is_valid(_e.input))
             elements_of_struct(_e.input, stage_part::input, 0);
         // CHK-489: a pixel stage's second struct, what a mesh stage wrote per triangle
-        if (_e.entry_stage == stage::pixel && check::is_valid(_e.input))
-            for (auto i = isize(1); i < _e.locals.size(); ++i)
-            {
-                auto const& local = _e.locals[i];
-                if (local.kind == check::local_kind::parameter && input_of_local(i) < 0
-                    && _m.at(local.type).kind == check::type_kind::structure && local.type != _e.input)
-                    elements_of_struct(local.type, stage_part::primitive, 0);
-            }
+        for (auto i = isize(1); i < _e.locals.size(); ++i)
+            if (is_primitive_parameter(i))
+                elements_of_struct(_e.locals[i].type, stage_part::primitive, 0);
         for (auto i = isize(0); i < _e.stage_inputs.size(); ++i)
             element_of_input(i);
         if (check::is_valid(_e.result) && _e.result != check::checked_module::void_type)

@@ -52,11 +52,18 @@ struct module_summary
     cc::vector<u8> modes;
     /// A vertex stage that writes `SV_Position`, which `PSV0` states.
     bool writes_position = false;
+    /// A pixel stage's `PSV0` words: that it writes a depth, and that it runs per sample.
+    bool writes_depth = false;
+    bool runs_per_sample = false;
+    /// A stage that reads the view, whose `PSV0` then states which outputs depend on it.
+    bool uses_view = false;
     /// How many rows each signature takes, and how many scalars up to its last.
     u32 input_rows = 0;
     u32 output_rows = 0;
     u32 input_scalars = 0;
     u32 output_scalars = 0;
+    /// One bit per output scalar: what depends on the view, where a stage reads it.
+    cc::vector<u32> view_outputs;
     /// One bit per output scalar for each input scalar: what reaches what.
     /// `(output_scalars + 31) / 32` words per input scalar, `input_rows * 4` of them, so `PSV0` can state it as it is.
     cc::vector<u32> dependencies;
@@ -75,6 +82,9 @@ struct writer_uses
     bool typed_uav_load = false;
     /// `startVertexLocation` or `startInstanceLocation`, which shader model 6.8 brought.
     bool start_location = false;
+    bool view_id = false;
+    /// `SV_RenderTargetArrayIndex` from a stage feeding the rasterizer.
+    bool layer_output = false;
 };
 
 class writer
@@ -278,6 +288,8 @@ private:
     void number_signature();
     void stage_load(u32 index, instruction const& i);
     void stage_store(instruction const& i);
+    void discard();
+    void derivative_lanes(u32 index, instruction const& i);
     /// Which lanes the module's final operations touch, once nothing more can go.
     void read_usage();
     void fill_dependencies();

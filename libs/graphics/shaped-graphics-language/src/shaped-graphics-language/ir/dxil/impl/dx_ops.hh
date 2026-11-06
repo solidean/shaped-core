@@ -11,7 +11,8 @@ namespace sgl::ir::dxil::impl
 {
 /// A class's signature as text, the result then a colon then the parameters after the operation's number:
 /// `o` the overload, `v` void, `c` i1, `b` i8, `i` i32, `f` float, `h` a handle, `B` a binding, `P` a handle's
-/// properties, `R` a resource's return of the overload, `C` a constant block's row of it, `D` a resource's dimensions.
+/// properties, `R` a resource's return of the overload, `C` a constant block's row of it, `D` a resource's dimensions,
+/// `S` a double's two words.
 struct dx_class
 {
     cc::string_view name;
@@ -66,6 +67,12 @@ enum class dx_class_id : u8
     get_dimensions,
     atomic_bin_op,
     atomic_compare_exchange,
+    discard,
+    view_id,
+    coverage,
+    sample_index,
+    make_double,
+    split_double,
 };
 
 // clang-format off
@@ -110,6 +117,12 @@ inline constexpr dx_class k_dx_classes[] = {
     {"getDimensions", "D:hi", dx_class::read_only},
     {"atomicBinOp", "o:hiiiio"},
     {"atomicCompareExchange", "o:hiiioo"},
+    {"discard", "v:c"},
+    {"viewID", "o:", dx_class::read_none},
+    {"coverage", "o:", dx_class::read_none},
+    {"sampleIndex", "o:", dx_class::read_none},
+    {"makeDouble", "o:ii", dx_class::read_none},
+    {"splitDouble", "S:o", dx_class::read_none},
 };
 // clang-format on
 
@@ -202,6 +215,14 @@ enum class dx_op : u8
     get_dimensions,
     atomic_bin_op,
     atomic_compare_exchange,
+    discard,
+    view_id,
+    coverage,
+    sample_index,
+    deriv_coarse_x,
+    deriv_coarse_y,
+    make_double,
+    split_double,
 };
 
 struct dx_op_info
@@ -285,10 +306,18 @@ inline constexpr dx_op_info k_dx_ops[] = {
     {72, dx_class_id::get_dimensions, k_no_overload},
     {78, dx_class_id::atomic_bin_op, k_i32 | k_i64},
     {79, dx_class_id::atomic_compare_exchange, k_i32 | k_i64},
+    {82, dx_class_id::discard, k_no_overload},
+    {138, dx_class_id::view_id, k_i32},
+    {91, dx_class_id::coverage, k_i32},
+    {90, dx_class_id::sample_index, k_i32},
+    {83, dx_class_id::unary, k_f16 | k_f32},
+    {84, dx_class_id::unary, k_f16 | k_f32},
+    {101, dx_class_id::make_double, k_f64},
+    {102, dx_class_id::split_double, k_f64},
 };
 // clang-format on
 
-static_assert(sizeof(k_dx_ops) / sizeof(k_dx_ops[0]) == sizeof(char[isize(dx_op::atomic_compare_exchange) + 1]));
+static_assert(sizeof(k_dx_ops) / sizeof(k_dx_ops[0]) == sizeof(char[isize(dx_op::split_double) + 1]));
 static_assert(sizeof(k_dx_classes) / sizeof(k_dx_classes[0])
-              == sizeof(char[isize(dx_class_id::atomic_compare_exchange) + 1]));
+              == sizeof(char[isize(dx_class_id::split_double) + 1]));
 } // namespace sgl::ir::dxil::impl

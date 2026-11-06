@@ -56,6 +56,9 @@ enum class family : u8
     reinterpret,
     math_float,
     math_any_sign,
+    derivative_x,
+    derivative_y,
+    derivative_width,
 };
 
 struct family_name
@@ -127,6 +130,9 @@ constexpr family_name k_families[] = {
     {"fract", family::math_float, math::fract},
     {"sinh", family::math_float, math::sinh},
     {"cosh", family::math_float, math::cosh},
+    {"ddx", family::derivative_x},
+    {"ddy", family::derivative_y},
+    {"fwidth", family::derivative_width},
     {"tanh", family::math_float, math::tanh},
     {"asin", family::math_float, math::asin},
     {"acos", family::math_float, math::acos},
@@ -843,6 +849,12 @@ value_ref lowering::call(flat_expr const& x, flat_call const& c)
         u32 const chain[] = {u32(variable), u32(args[1])};
         return add(op::load, result, {add(op::access_chain, pointer_type(result, storage::function), chain)});
     }
+    case family::derivative_x:
+        return add(op::derivative, result, {args[0]}, u8(derivative::x));
+    case family::derivative_y:
+        return add(op::derivative, result, {args[0]}, u8(derivative::y));
+    case family::derivative_width:
+        return add(op::derivative, result, {args[0]}, u8(derivative::width));
     case family::transform:
         if (_out.at(_out.type_of(args[0])).kind != type_kind::matrix)
             break;

@@ -64,6 +64,7 @@ private:
     void write_structure(ir::type const& t, u32 id);
     void write_image(ir::type const& t, u32 id);
     void write_constants();
+    [[nodiscard]] u32 space_of(stage_element const& e) const;
     void write_stage_elements();
     void write_interpolation(u32 id, interpolation mode);
     void write_globals();
@@ -74,6 +75,8 @@ private:
     void atomic(u32 opcode, instruction const& i, u32 id);
     void group(instruction const& i, u32 id);
     void instruction_of(u32 index);
+    /// What a load or a store of an element goes through.
+    [[nodiscard]] u32 element_pointer(u32 element);
     /// `@position` in a pixel stage, whose `w` HLSL reads as the reciprocal of what `FragCoord` holds.
     void frag_coord(instruction const& i, u32 id);
 
@@ -94,6 +97,8 @@ private:
     u32 _elements = 0;
     /// Parallel to `program::stage_elements`, in the ids past `_bound`.
     cc::vector<u32> _element_pointers;
+    /// Parallel to it: the pointer to one lane of an element that stands in an array, or 0.
+    cc::vector<u32> _element_lanes;
     u32 _globals = 0;
     u32 _locals = 0;
     u32 _instructions = 0;

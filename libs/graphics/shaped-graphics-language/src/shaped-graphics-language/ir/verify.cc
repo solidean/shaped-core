@@ -132,6 +132,7 @@ constexpr shape k_shapes[] = {
     shape::matrix_times_matrix, // matrix_times_matrix
     shape::transpose,           // transpose
     shape::any_result,          // math
+    shape::real,                // derivative
     shape::construct,           // construct
     shape::extract,             // extract
     shape::insert,              // insert
@@ -157,6 +158,7 @@ constexpr shape k_shapes[] = {
     shape::atomic,              // atomic_xor
     shape::atomic,              // atomic_fadd
     shape::no_result,           // control_barrier
+    shape::no_result,           // discard
     shape::combine_sampler,     // combine_sampler
     shape::image_access,        // sample_lod
     shape::image_access,        // sample_implicit

@@ -408,6 +408,7 @@ struct type;
 enum class math : u8;
 enum class subgroup : u8;
 enum class group_fold : u8;
+enum class derivative : u8;
 enum class barrier : u8;
 struct instruction;
 enum class merge_kind : u8;

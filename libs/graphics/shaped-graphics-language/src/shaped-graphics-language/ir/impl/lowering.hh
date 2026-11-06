@@ -62,6 +62,12 @@ private:
     void store_stage_result(value_ref result);
     [[nodiscard]] value_ref read_element(u32 element);
     [[nodiscard]] value_ref read_struct(check::type_id t, u32& element);
+    /// EMIT-196: the 64-bit value of `t` read back from the words its next elements hold.
+    [[nodiscard]] value_ref joined_words(check::type_id t, u32& element);
+    /// EMIT-196: the elements from `element` on written with the 64-bit `value` of `t`, its words low first.
+    void store_words(check::type_id t, value_ref value, u32& element);
+    /// Whether the parameter at `position` is a pixel stage's second struct, what a mesh stage wrote per primitive.
+    [[nodiscard]] bool is_primitive_parameter(isize position) const;
     void hold_parameter(check::local_id id, value_ref value);
     void statements(ast::range_of<flat_stmt_id> range);
     void statement(flat_stmt_id id);

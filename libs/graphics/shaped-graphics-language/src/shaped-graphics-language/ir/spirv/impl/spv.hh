@@ -125,6 +125,9 @@ enum op_code : u32
     Not = 200,
     BitReverse = 204,
     BitCount = 205,
+    DPdx = 207,
+    DPdy = 208,
+    Fwidth = 209,
     ControlBarrier = 224,
     AtomicLoad = 227,
     AtomicStore = 228,
@@ -173,12 +176,14 @@ enum op_code : u32
     GroupNonUniformQuadBroadcast = 365,
     GroupNonUniformQuadSwap = 366,
     CopyLogical = 400,
+    DemoteToHelperInvocation = 5380,
     AtomicFAddEXT = 6035,
 };
 
 enum capability : u32
 {
     Shader = 1,
+    Geometry = 2,
     Float16 = 9,
     Float64 = 10,
     Int64 = 11,
@@ -202,9 +207,13 @@ enum capability : u32
     StorageBuffer16BitAccess = 4433,
     UniformAndStorageBuffer16BitAccess = 4434,
     StoragePushConstant16 = 4435,
+    ShaderLayer = 69,
     DrawParameters = 4427,
+    MultiView = 4439,
     DenormPreserve = 4464,
     SignedZeroInfNanPreserve = 4466,
+    CapDemoteToHelperInvocation = 5379,
+    MeshShadingEXT = 5283,
     AtomicFloat32AddEXT = 6033,
     AtomicFloat64AddEXT = 6034,
 };
@@ -228,6 +237,7 @@ enum decoration : u32
     DescriptorSet = 34,
     Offset = 35,
     NoContraction = 42,
+    PerPrimitiveEXT = 5271,
 };
 
 enum storage_class : u32
