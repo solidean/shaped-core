@@ -464,6 +464,9 @@ struct checker
     layered_map<cc::string, cc::vector<type_id>> interned_types;
     /// Every instance of a generic struct, by its generic and its argument: what `existing_instance` finds.
     layered_map<u64, type_id> instances;
+    /// The open types and the generic calls of the layers below, which `instantiate_generics` substitutes into.
+    cc::vector<type_id> open_types_below;
+    cc::vector<isize> open_calls_below;
     cc::vector<pending_extension> pending_extensions;
     /// Integer literals that do not fit an `int`, judged once every literal has met the type it converts to (CHK-61).
     cc::vector<wide_literal> wide_literals;
@@ -1023,7 +1026,11 @@ struct checker
     /// Whether `actual` is `pattern` with its open parameters bound, extending `bindings` with what that takes (CHK-340).
     [[nodiscard]] bool unify(type_id pattern, type_id actual, cc::vector<type_id>& bindings);
     /// Makes every instance a generic call's inlining will name, before any entry point is flattened.
-    void instantiate_generics();
+    /// Starts from the calls from `first_call` and the types from `first_type`, with the open ones of the layers below.
+    /// A lower layer's own calls were instantiated when it was checked, and its bindings touch no type of this layer.
+    void instantiate_generics(isize first_call, isize first_type);
+    /// Whether no type `bindings` binds a parameter to is open.
+    [[nodiscard]] bool is_closed(cc::span<type_id const> bindings) const;
     /// The instance of `function` for `bindings`, checked once; -1 where a binding is open or the function recursive.
     /// `file` and `where` are the call that asks, which an error in the body is noted under (CHK-338).
     i32 instantiate(symbol_id function, cc::span<type_id const> bindings, i32 file, source_span where);
@@ -1126,8 +1133,9 @@ struct checker
 
     /// Records the `test` `decl` stands for, with the names of `enclosing` it can see and must not use.
     void add_test(i32 file, ast::decl_id decl, cc::string scope_path, function_scope const* enclosing = nullptr);
-    /// Every `test` of every file that no other path found, checked as one at file scope with no names around it.
-    void add_unregistered_tests();
+    /// Every `test` of the files from `first_file` that no other path found, checked as one at file scope with no names
+    /// around it; the tests from `first_test` are the only ones those files can hold.
+    void add_unregistered_tests(i32 first_file, isize first_test);
     /// Every `test` a struct or an enum declares among its members.
     void add_member_tests(i32 file, ast::range_of<ast::decl_id> members, cc::string_view scope_path);
     /// Checks test `index` as a function of no parameter and no binding, and its last-line rule (CHK-226).
@@ -1270,9 +1278,9 @@ struct checker
                        bool& is_all_constant);
     void check_yield(function_scope& scope, source_span where, ast::expr_id value);
     /// Reports every loop of calls once, and marks the functions on it.
-    /// Walks the calls of the functions from symbol `first`: a lower layer's calls only its own, and were walked when
-    /// it was checked.
-    void find_recursion(isize first);
+    /// Walks the calls of the functions from symbol `first`, note `first_note` and call `first_call`.
+    /// A lower layer's functions call only their own layer's, and were walked when it was checked.
+    void find_recursion(isize first, isize first_note, isize first_call);
     /// True when `function` and every function it calls checked soundly and none is recursive, so all of it inlines.
     [[nodiscard]] bool inlines_whole(symbol_id function);
 

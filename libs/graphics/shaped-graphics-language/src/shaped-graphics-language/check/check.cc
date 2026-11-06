@@ -118,6 +118,14 @@ impl::resume_point freeze_layer(checker& c, i32 files)
     c.file_module.remove_back();
     c.uses.remove_back();
     c.out.file_modules.remove_back();
+    c.open_types_below.clear();
+    for (auto i = isize(0); i < c.out.types.size(); ++i)
+        if (c.is_open(type_id(i)))
+            c.open_types_below.push_back(type_id(i));
+    c.open_calls_below.clear();
+    for (auto i = isize(0); i < c.out.call_records.size(); ++i)
+        if (auto const b = c.out.at(c.out.call_records[i].type_arguments); !b.empty() && !c.is_closed(b))
+            c.open_calls_below.push_back(i);
     c.out.freeze_tables();
     c.prelude_names.freeze();
     c.prelude_operators.freeze();
@@ -142,6 +150,10 @@ impl::resume_point freeze_layer(checker& c, i32 files)
         .extensions = c.pending_extensions.size(),
         .tests = c.out.tests.size(),
         .wide_literals = c.wide_literals.size(),
+        .notes = c.notes.size(),
+        .calls = c.calls.size(),
+        .call_records = c.out.call_records.size(),
+        .types = c.out.types.size(),
     };
 }
 

@@ -67,9 +67,9 @@ void checker::add_test(i32 file, ast::decl_id decl, cc::string scope_path, funct
     test_enclosing.push_back(enclosing != nullptr ? enclosing->function : symbol_id::none);
 }
 
-void checker::add_unregistered_tests()
+void checker::add_unregistered_tests(i32 first_file, isize first_test)
 {
-    for (auto file = i32(0); file < i32(files.size()); ++file)
+    for (auto file = first_file; file < i32(files.size()); ++file)
     {
         auto const& ast = ast_of(file);
         for (auto d = isize(0); d < ast.decls.size(); ++d)
@@ -78,8 +78,8 @@ void checker::add_unregistered_tests()
             if (!ast.at(decl).node.is<ast::test_decl>())
                 continue;
             auto is_registered = false;
-            for (auto const& t : out.tests)
-                is_registered = is_registered || (t.file == file && t.declaration == decl);
+            for (auto i = first_test; i < out.tests.size(); ++i)
+                is_registered = is_registered || (out.tests[i].file == file && out.tests[i].declaration == decl);
             if (is_registered)
                 continue;
 

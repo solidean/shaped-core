@@ -1261,13 +1261,15 @@ void checker::flatten_metal_traversals()
             flatten_entry_point(p.intersection, &request);
         }
     }
+    if (!is_any)
+        return;
     // CHK-345: a record without a closest hit calls this one on metal, where a table slot holds a function or crashes
     // it stands for no function of the source, so it is owned by a ray-tracing function of the program
     auto owner = symbol_id::none;
     for (auto const& fn : out.functions)
         if (fn.entry_stage >= stage::raygen && out.at(fn.symbol).file == i32(out.files.size()) - 1)
             owner = fn.symbol;
-    if (!is_any || !is_valid(owner))
+    if (!is_valid(owner))
         return;
     auto f = flattener{.c = *this};
     f.entry.entry_stage = stage::closest_hit;
