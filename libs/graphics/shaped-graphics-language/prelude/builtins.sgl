@@ -5236,6 +5236,7 @@ enum feature:
     float_specials
     float_denormals
     view_instancing
+    pixel_view_read_workaround
     vertex_pipeline_stores
     shader_int64
     shader_f64

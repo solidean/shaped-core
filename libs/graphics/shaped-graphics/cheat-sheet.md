@@ -120,6 +120,7 @@ ctx.supports(sg::feature::ray_query)               // bool — THE capability qu
                                                    //   | vertex_layer_output (a vertex stage picks the layer of an array target,
                                                    //     SGL's @layer; dx12 and vulkan ask the device, true on metal, false on webgpu)
                                                    //   | view_instancing (one draw renders view_count views, view i into layer i;
+                                                   //   | pixel_view_read_workaround (no capability: Intel dx12 needs a pixel stage to read the view; SGL's keep_view asks for it)
                                                    //     SGL's @view_index; dx12's ViewInstancingTier, vulkan's multiview,
                                                    //     false on metal (amplification not wired yet) and webgpu)
                                                    //   | vertex_pipeline_stores (a vertex, geometry or tessellation stage writes

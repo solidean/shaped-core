@@ -246,17 +246,6 @@ pipeline moved_index_views:
     format = .rgba32_float
     view_count = 2
 
-// Only the vertex stage reads the view here, as a per-eye transform does.
-@pixel fun plain_tag_ps(p: viewed) -> float4:
-    return float4(p.tag as float, 0.0, 0.0, 1.0)
-
-pipeline moved_vertex_stage_only:
-    vertex = moved_vs
-    pixel = plain_tag_ps
-    cull = .none
-    format = .rgba32_float
-    view_count = 2
-
 pipeline moved_views_depth:
     vertex = moved_vs
     pixel = viewed_ps

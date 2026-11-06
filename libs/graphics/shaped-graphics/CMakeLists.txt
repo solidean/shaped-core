@@ -502,6 +502,7 @@ if(SC_BUILD_TESTS)
                 raytracing_open.sgl:*
                 raytracing_callables.sgl:*
                 pixel_semantics.sgl:*
+                view_unread.sgl:*
                 sampling.sgl:*
                 shapes.sgl:*
                 stages.sgl:*

@@ -347,3 +347,12 @@ struct raster_pipeline_description:
     depth_stencil_format: pixel_format
     sample_count: int
     view_count: int
+
+/// What a pixel stage of a pipeline of several views multiplies its color by, always 1.
+/// It reads the view where a driver draws nothing otherwise, and is free everywhere else.
+/// See docs/bugs-external/intel-d3d12-view-instancing-draws-nothing.
+@stages(.pixel)
+fun keep_view(view: int) -> float:
+    const if has(.pixel_view_read_workaround):
+        return if view < 0 => 0.0 else 1.0
+    return 1.0

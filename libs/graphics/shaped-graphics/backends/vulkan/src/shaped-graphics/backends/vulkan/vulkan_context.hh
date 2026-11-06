@@ -399,6 +399,8 @@ public:
             return _float_denormals;
         case sg::feature::view_instancing:
             return _view_instancing;
+        case sg::feature::pixel_view_read_workaround:
+            return false;
         case sg::feature::ray_tracing_motion_blur:
             // VK_NV_ray_tracing_motion_blur reaches a pipeline's trace alone, which no SGL text writes yet, so a
             // package's SOFTWARE_TRACE walks it in software

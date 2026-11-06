@@ -284,6 +284,9 @@ public:
             return true;
         case sg::feature::view_instancing:
             return _view_instancing;
+        case sg::feature::pixel_view_read_workaround:
+            // docs/bugs-external/intel-d3d12-view-instancing-draws-nothing
+            return _view_instancing && metrics.adapter().vendor_id == 0x8086 && !metrics.adapter().is_software;
         case sg::feature::mesh_shader:
             return _mesh_shader;
         case sg::feature::ray_tracing_motion_blur:

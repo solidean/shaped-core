@@ -144,7 +144,7 @@ void dx12_command_list::raster_begin_rendering(sg::rendering_info const& info)
     _list->OMSetRenderTargets(UINT(rtv_handles.size()), rtv_handles.empty() ? nullptr : rtv_handles.data(), FALSE,
                               info.depth_stencil_target.has_value() ? &dsv_handle : nullptr);
 
-    // A pipeline of several views renders only those the mask enables, and a list starts with view 0 alone.
+    // No pipeline asks for view instance masking, so none reads this; it states the views they all render anyway.
     if (info.view_count > 1)
     {
         ComPtr<ID3D12GraphicsCommandList1> list1;

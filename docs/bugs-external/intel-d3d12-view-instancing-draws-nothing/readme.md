@@ -72,15 +72,17 @@ Each was changed in an earlier version of this repro, on the failing rows, and n
 
 ## What we do about it
 
-The pixel stage of a pipeline that draws by view reads `@view_index`, in a way the compiler cannot fold away.
+`sg::feature::pixel_view_read_workaround` is set on Intel's dx12 hardware, and SGL's `keep_view(view)` reads the view only there, through `const if has`.
+A pixel stage of several views takes `@view_index` and multiplies its color by it.
 `libs/graphics/shaped-xr/shaders/controller.sgl` and `examples/graphics/xr-cube/shaders/xr_cube.sgl` both do.
+SGL warns of a `pipeline` declaration that does not (CHK-515, `pixel-stage-ignores-view`).
 `sg - one draw of two views moves geometry with only the vertex stage reading which` is the case itself, and skips on Intel's dx12.
 
-Nothing enforces this for a new shader.
+A hand-built pipeline gets no such warning, and neither does a pixel stage that takes the view and leaves it unread.
 `known_issues.py` has no probe for it, because its probes may not start a subprocess and only a device can name the adapter.
 
 ## When the vendor ships an update
 
 `uv run run.py` exits 1 while the bug reproduces, 0 once the adapters agree, and 2 if the debug layer objects to the run.
 A debug-layer complaint means the repro itself is wrong, and its results say nothing about the driver.
-Once it exits 0, drop the skip in `pixel-semantics-test.cc` and the workaround in both shaders.
+Once it exits 0, stop setting the feature for that driver and drop the skip in `pixel-semantics-test.cc`.

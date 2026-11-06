@@ -479,11 +479,13 @@ ASYNC_INVOCABLE_TEST("sg - one draw of two views moves geometry with only the ve
         SKIP("Intel's dx12 driver draws nothing here; see "
              "docs/bugs-external/intel-d3d12-view-instancing-draws-nothing");
 
+    nx::allow_warnings("takes no `@view_index`", "slib");
+
     // a full-screen rect the vertex stage squeezes into the left half of view 0 and the right half of view 1
     auto vertices = cc::vector<corner>();
     push_rect(vertices, tg::vec4f(-1, -1, 1, 1), 0.5f, 7);
     auto const buffer = ctx->persistent.create_buffer_from_data(cc::move(vertices), sg::buffer_usage::vertex_buffer);
-    auto const pipeline = co_await ctx->cached.acquire_raster_pipeline(shaders::pixel_semantics::moved_vertex_stage_only);
+    auto const pipeline = co_await ctx->cached.acquire_raster_pipeline(shaders::view_unread::moved_vertex_stage_only);
     auto const target = ctx->persistent.create_texture_2d_array(
         {.format = sg::pixel_format::rgba32_float,
          .width = 4,
@@ -496,7 +498,7 @@ ASYNC_INVOCABLE_TEST("sg - one draw of two views moves geometry with only the ve
         auto scope
             = cmd->raster.render_to({.color_targets = {target.as_render_target_view().cleared(tg::vec4f(-1, -1, -1, -1))},
                                      .view_count = 2,
-                                     .target_set = shaders::pixel_semantics::plain_tag_ps_target::name});
+                                     .target_set = shaders::view_unread::plain_tag_ps_target::name});
         scope.bind_pipeline(*pipeline);
         scope.bind_vertex_buffer(buffer.as_vertex_buffer());
         scope.draw({.vertex_range = {.offset = 0, .size = 6}});

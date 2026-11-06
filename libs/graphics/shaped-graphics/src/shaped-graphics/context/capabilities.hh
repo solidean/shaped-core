@@ -186,8 +186,12 @@ enum class sg::feature
     /// `vertex_layer_output` rasterises them separately.
     /// D3D12 grants it with a `ViewInstancingTier`, Vulkan with `multiview`; Metal's vertex amplification is not wired up
     /// yet, and WebGPU has no such thing.
-    /// Read the view in the pixel stage, or Intel's dx12 driver may write nothing: docs/bugs-external/intel-d3d12-view-instancing-draws-nothing.
     view_instancing,
+
+    /// Not a capability: this device's driver may write nothing for a draw of several views whose pixel stage ignores the view.
+    /// SGL's `keep_view` reads it where this is set, and is free everywhere else.
+    /// See docs/bugs-external/intel-d3d12-view-instancing-draws-nothing.
+    pixel_view_read_workaround,
 
     /// A vertex, geometry or tessellation stage may write a storage buffer, which SGL's `print` and `assert` need there.
     /// D3D12 and Metal grant it on every device, Vulkan with `vertexPipelineStoresAndAtomics`, and WebGPU on none.
@@ -272,6 +276,7 @@ inline constexpr feature k_all_features[] = {
     feature::float_specials,
     feature::float_denormals,
     feature::view_instancing,
+    feature::pixel_view_read_workaround,
     feature::vertex_pipeline_stores,
     feature::shader_int64,
     feature::shader_f64,
@@ -355,6 +360,8 @@ static_assert(isize(sizeof(k_all_features) / sizeof(k_all_features[0])) == isize
         return "float_denormals";
     case feature::view_instancing:
         return "view_instancing";
+    case feature::pixel_view_read_workaround:
+        return "pixel_view_read_workaround";
     case feature::vertex_pipeline_stores:
         return "vertex_pipeline_stores";
     case feature::shader_int64:

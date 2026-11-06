@@ -887,6 +887,9 @@ fun f() -> float:
   View `i` renders into layer `i` of every target, so a stereo frame is one draw into a two-layer array, and the shader picks each eye's camera by it.
   The count is the host's, so one shader serves one view and two alike: a pipeline of one view reads 0.
   It needs `view_instancing`, which WebGPU has on no device, so its WGSL is `target-lacks-feature`.
+* **CHK-515** A pipeline of more than one view whose pixel stage takes no `@view_index` is `pixel-stage-ignores-view`, a warning.
+  Intel's dx12 driver may draw nothing for one, so a pixel stage takes the view and multiplies its color by `keep_view(view)`, which costs nothing elsewhere.
+  A hand-built pipeline is not a `pipeline` declaration, so nothing reports it.
 * **CHK-91** A `@pixel fun` returns a `@pixel struct`, one color value, or nothing (CHK-418).
 * **CHK-418** A `@pixel fun` that returns one numeric scalar or plain vector of `float`, `half`, `int` or `uint` writes it as its one color target, named `color`.
   It stands for a `@pixel struct` of that one member, which the compiler declares as `<entry>_target`, or under a name past it where the module has that one.
@@ -1762,7 +1765,7 @@ fun make_mvp(model: mat4){frame} => frame.proj * frame.view * model
 ## Diagnostic kinds
 
 Every kind below is a normal error by [DIAG-4](../syntax/diagnostics.md#rules), except some warnings.
-They are `unreachable-code`, `no-effect`, `unused-require`, `needless-nonuniform`, `unroll-too-long`, `generic-not-instantiated` and `nan-test-at-fast`.
+They are `unreachable-code`, `no-effect`, `unused-require`, `pixel-stage-ignores-view`, `needless-nonuniform`, `unroll-too-long`, `generic-not-instantiated` and `nan-test-at-fast`.
 A diagnostic of this pass has a kind, a file, a byte span in that file, and a detail.
 
 | kind | reported by |
@@ -1802,6 +1805,7 @@ A diagnostic of this pass has a kind, a file, a byte span in that file, and a de
 | `unknown-feature` | CHK-258 |
 | `feature-not-declared` | CHK-264, CHK-322, CHK-382 |
 | `unused-require` | CHK-265 |
+| `pixel-stage-ignores-view` | CHK-515 |
 | `generic-not-instantiated` | CHK-338 |
 | `stage-not-allowed` | CHK-193, CHK-277, CHK-329, CHK-344, CHK-512 |
 | `ambiguous-overload` | CHK-72 |
