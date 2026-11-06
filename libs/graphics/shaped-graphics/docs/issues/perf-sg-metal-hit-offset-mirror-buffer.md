@@ -2,6 +2,8 @@
 created: 2026-11-05
 refs:
   - file: libs/graphics/shaped-graphics/backends/metal/src/shaped-graphics/backends/metal/metal_binding_group.cc
+claimed-by: Claude (for Julius Nehring-Wirxel)
+claimed-at: 2026-11-06T09:11Z
 ---
 
 # Every metal binding group with a TLAS allocates its own hit-offset mirror buffer
