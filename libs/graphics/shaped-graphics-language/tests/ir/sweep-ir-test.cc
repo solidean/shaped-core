@@ -12,6 +12,7 @@ using namespace cc::primitive_defines;
 // Every compute entry point the repo's SGL holds, down both routes.
 // Where assertions are on a compile verifies its program after lowering and after each pass, so this is what walks the
 // verifier over everything; `spirv-val` and DXC's validator only see the shaders sg and sr ship.
+// A debug build pays seconds per file for that, so a default run takes every eighth and --thorough takes them all.
 
 namespace
 {
@@ -37,17 +38,20 @@ namespace
 }
 } // namespace
 
-TEST("sgl ir - every compute entry point of the repo's SGL goes down both native routes")
+TEST("sgl ir - every compute entry point of the repo's SGL goes down both native routes",
+     nx::config::rerun_on("libs/graphics/shaped-graphics-language/src/shaped-graphics-language/ir/**"))
 {
     auto files = sources_under(nx::source_path(SGL_SG_SHADERS_DIR));
     files.push_back_range(sources_under(nx::source_path(SGL_SR_SHADERS_DIR)));
     files.push_back_range(sources_under(nx::source_path(SGL_CORPUS_DIR)));
     REQUIRE(!files.empty());
 
+    auto const stride = nx::is_thorough() ? 1 : 8;
     auto spirv = 0;
     auto dxil = 0;
-    for (auto const& file : files)
+    for (auto i = isize(0); i < files.size(); i += stride)
     {
+        auto const& file = files[i];
         auto const source = read_all(file);
         // what names a module of another directory is the module tests', and this one reads a file alone
         auto const all = sgl::compile_all_to_text({.source = source, .targets = {sgl::emit::target::hlsl_vulkan}});
@@ -68,6 +72,6 @@ TEST("sgl ir - every compute entry point of the repo's SGL goes down both native
             }
     }
     // the numbers the sweep reaches, so a lowering lost shows here rather than as a quiet fall back to DXC
-    CHECK(spirv >= 100);
-    CHECK(dxil >= 90);
+    CHECK(spirv >= 100 / stride);
+    CHECK(dxil >= 90 / stride);
 }
