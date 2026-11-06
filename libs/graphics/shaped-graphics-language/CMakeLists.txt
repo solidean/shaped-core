@@ -501,6 +501,10 @@ if(SC_BUILD_TESTS)
         tests/emit/sixty-four-bit-emit-test.cc
         tests/emit/double-maths-emit-test.cc
         tests/emit/spirv-emit-test.cc
+        tests/ir/ir-test-support.hh
+        tests/ir/passes-ir-test.cc
+        tests/ir/sweep-ir-test.cc
+        tests/ir/verify-ir-test.cc
         tests/emit/matrix-arithmetic-emit-test.cc
         tests/emit/line-mapping-emit-test.cc
         tests/emit/debug-emit-test.cc
