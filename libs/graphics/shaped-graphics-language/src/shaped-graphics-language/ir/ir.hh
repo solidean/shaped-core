@@ -542,6 +542,9 @@ namespace sgl::ir
 /// The name of `code`, for a reader.
 [[nodiscard]] cc::string_view op_name(op code);
 
+/// `t` as `dump` spells it, for a reader.
+[[nodiscard]] cc::string type_name(program const& p, type_ref t);
+
 } // namespace sgl::ir
 
 /// What one position of an operation's operands holds.

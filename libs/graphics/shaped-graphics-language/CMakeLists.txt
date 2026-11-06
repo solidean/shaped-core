@@ -62,6 +62,7 @@ add_library(shaped-graphics-language
     src/shaped-graphics-language/ir/dominance.cc
     src/shaped-graphics-language/ir/simplify.cc
     src/shaped-graphics-language/ir/ssa.cc
+    src/shaped-graphics-language/ir/verify.cc
     src/shaped-graphics-language/ir/dxil/dxil.cc
     src/shaped-graphics-language/ir/dxil/impl/container.cc
     src/shaped-graphics-language/ir/dxil/impl/llvm.cc
