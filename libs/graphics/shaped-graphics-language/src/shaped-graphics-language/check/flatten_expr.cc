@@ -323,6 +323,9 @@ auto sgl::check::impl::flattener::flatten_number(ast::expr_id id, type_id type) 
     { return add_expr(type, id, flat_literal{.value = is_half ? f64(scalar::of_half(v).widened().as_float()) : v}); };
     if (classify_number(text) == number_class::plain_integer)
     {
+        if (auto const past_long = parse_literal_past_long(text);
+            past_long.has_value() && type == c.prelude_type(builtins::k_ulong))
+            return add_expr(type, id, flat_wide_literal{.bits = past_long.value()});
         auto const value = parse_literal_integer(text);
         if (!value.has_value())
             return fail();

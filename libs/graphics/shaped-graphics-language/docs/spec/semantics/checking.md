@@ -120,7 +120,8 @@ use view
   An entry point whose flat tree holds a value of such a type needs its feature, and a binding member that holds one is a form CHK-201 judges.
 * **CHK-450** `long`, `ulong` and `double` are the prelude's 64-bit `int`, `uint` and `float`.
   Their vectors are `long2` to `long4`, `ulong2` to `ulong4` and `double2` to `double4`.
-  A literal converts to one by CHK-253, and since an integer literal is held in 64 bits, a `ulong` literal past 2^63 - 1 is `unsupported-yet`: `~0u64` spells the largest.
+  A literal converts to one by CHK-253.
+  A literal from 2^63 to 2^64 - 1 is held by a `ulong` alone, written `18446744073709551615u64` or wherever a `ulong` is asked for; no operator folds one with another number (CHK-394).
   Their operators are the arithmetic, the comparisons, a vector beside its scalar, and for `long` and `ulong` the bit operators; `abs`, `min`, `max`, `clamp` and `select` take them too.
   A double's maths functions are CHK-458's, and no subgroup operation takes a 64-bit value yet.
 * **CHK-458** A `double` and its vectors take `sqrt`, `inverse_sqrt`, `floor`, `ceil`, `trunc`, `round`, `fract`, `sign` and `saturate`.
@@ -608,7 +609,7 @@ fun shade(k: float) -> float:
   At its default type as anywhere else, it is one `float` holds by CHK-253, or `literal-not-representable`.
 * **CHK-61** A decimal literal of digits alone is an **integer literal**, whose default type is the prelude's `int`, and a sign directly on it is part of it.
   A number literal is of its default type wherever no other type is asked of it by CHK-253.
-  An integer literal is held in 64 bits, and one beyond them is `unsupported-yet`, as is a literal with a `p` exponent; a suffix is CHK-357.
+  An integer literal is held in 64 bits, signed or as a `ulong` (CHK-450), and one beyond them is `unsupported-yet`, as is a literal with a `p` exponent; a suffix is CHK-357.
   One the type it ends up with does not hold, its default type included, is `literal-not-representable`: `let u: uint = 3000000000` is legal and `let i = 3000000000` is not.
 * **CHK-269** A literal of hexadecimal digits behind `0x`, or of binary ones behind `0b`, is an integer literal like a decimal one ([why](why/checking.md#chk-269)).
   Its value is the number it spells: `0xffff'ffff` is 4294967295, which a `uint` holds and an `int` does not, and `-0x8000'0000` is the most negative `int`.

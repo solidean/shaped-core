@@ -2,6 +2,8 @@
 created: 2026-11-05
 refs:
   - file: libs/graphics/shaped-graphics-language/docs/spec/semantics/checking.md
+closed: 2026-11-06
+resolution: fixed
 ---
 
 # A ulong literal past 2^63 - 1

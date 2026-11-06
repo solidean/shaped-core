@@ -147,6 +147,8 @@ namespace
 /// float, a shift by a count outside the bits of an int (CHK-270), and an integer result past 64 bits.
 number_literal folded(cc::string_view op, number_literal const& a, number_literal const& b)
 {
+    if (a.is_past_long || b.is_past_long)
+        return {};
     if (a.is_integer && b.is_integer)
     {
         auto result = i64(0);
@@ -277,7 +279,7 @@ number_literal checker::number_of(i32 file, ast::expr_id expr) const
         if (call->spelling == ast::call_spelling::prefix && arguments.size() == 1)
         {
             auto const operand = number_of(file, arguments[0].value);
-            if (!operand.is_number)
+            if (!operand.is_number || operand.is_past_long)
                 return {};
             if (op == "-" && operand.is_integer && operand.integer != i64(1ull << 63))
                 return {.is_number = true, .is_integer = true, .integer = -operand.integer};
@@ -304,6 +306,8 @@ number_literal checker::number_of(i32 file, ast::expr_id expr) const
     {
     case number_class::plain_integer:
     {
+        if (auto const past_long = parse_literal_past_long(text); past_long.has_value())
+            return {.is_number = true, .is_integer = true, .integer = i64(past_long.value()), .is_past_long = true};
         auto const value = parse_literal_integer(text);
         if (!value.has_value())
             return {};

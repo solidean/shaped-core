@@ -679,12 +679,13 @@ type_id checker::check_literal(function_scope& scope, ast::expr_id id, ast::lite
     {
         // CHK-61: held in 64 bits, and refused only where it keeps a default type that does not hold it
         auto const value = parse_literal_integer(text);
-        if (!value.has_value())
+        auto const is_past_long = parse_literal_past_long(text).has_value();
+        if (!value.has_value() && !is_past_long)
         {
             unsupported(file, where, "an integer literal beyond 64 bits");
             return error_type;
         }
-        if (value.value() < -2147483647 - 1 || value.value() > 2147483647)
+        if (is_past_long || value.value() < -2147483647 - 1 || value.value() > 2147483647)
             wide_literals.push_back({.file = file, .expr = id, .function = scope.function, .instance = current_instance});
         return type_of_builtin(builtins::k_int, file, where);
     }
@@ -761,12 +762,16 @@ type_id checker::check_suffixed_literal(i32 file, source_span where, cc::string_
         return type;
     }
     auto const value = parse_literal_integer(s.body);
-    if (!value.has_value())
+    auto const past_long = parse_literal_past_long(s.body);
+    if (!value.has_value() && !past_long.has_value())
     {
         unsupported(file, where, "an integer literal beyond 64 bits");
         return error_type;
     }
-    if (!holds({.is_number = true, .is_integer = true, .integer = value.value()}, type))
+    auto const number = past_long.has_value()
+                          ? number_literal{.is_number = true, .is_integer = true, .is_past_long = true}
+                          : number_literal{.is_number = true, .is_integer = true, .integer = value.value()};
+    if (!holds(number, type))
     {
         report(diagnostic_kind::literal_not_representable, file, where, cc::format("{} does not hold {}", name, text));
         return error_type;

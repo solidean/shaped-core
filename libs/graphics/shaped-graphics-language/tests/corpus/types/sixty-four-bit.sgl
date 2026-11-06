@@ -15,6 +15,37 @@ test:
     let u: ulong = -1
     u == 0u64
 
+// the top half of a ulong is a literal too, which no other type holds
+test:
+    let top: ulong = 18'446'744'073'709'551'615
+    top == ~0u64
+    0xffff'ffff'ffff'ffffu64 == top
+    let middle: ulong = 9223372036854775808
+    middle == 1u64 << 63u64
+    (top >> 60u64) == 15u64
+
+fun largest() -> ulong => 18446744073709551615
+
+test largest() == ~0u64
+
+@expect(error = "literal-not-representable")
+test:
+    let n: long = 9223372036854775808
+    n == 0i64
+
+@expect(error = "literal-not-representable")
+test:
+    let n = 9223372036854775808
+    n == 0
+
+@expect(error = "literal-not-representable")
+test 9223372036854775808i64 == 0i64
+
+@expect(error = "unsupported-yet")
+test:
+    let n: ulong = 18446744073709551616
+    n == 0u64
+
 // long and ulong wrap at 64 bits, as int and uint do at 32
 test:
     let top = 9223372036854775807i64
