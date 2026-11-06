@@ -457,7 +457,7 @@ written write_polyfill(call_context const& ctx)
 written write_trace_ray_msl(call_context const& ctx)
 {
     auto const& a = ctx.arguments;
-    // empty only where no member is named, which the registry's own checks write: those read the first slot
+    // empty only in the registry's own checks, which write no program; the emitter always names the world's offsets
     auto const offsets
         = ctx.hit_offsets.empty() ? cc::string_view("sgl_ctx.hit_offsets->groups[0][0].instances") : ctx.hit_offsets;
     auto const mint = [&](cc::string_view name) { return ctx.mint.is_valid() ? ctx.mint(name) : cc::string(name); };

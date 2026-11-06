@@ -1,0 +1,20 @@
+// An acceleration structure is a binding member and no value, so whatever a trace names is a member or an element of
+// one, which is what lets metal find the hit offsets of the structure it traces (EMIT-139).
+
+require ray_query
+
+binding scenes:
+    world: acceleration_structure[.triangles]
+    other: acceleration_structure[.triangles]
+
+fun probe_ray() => ray(origin = pos3(0.0, 0.0, -1.0), direction = vec3(0.0, 0.0, 1.0), t_max = 100.0)
+
+@expect(error = "unsupported-yet")
+test {scenes}:
+    let w = scenes.world
+    true
+
+@expect(error = "unsupported-yet")
+test {scenes}:
+    let r = probe_ray()
+    (if r.t_max > 1.0 => scenes.world else scenes.other).trace(r).is_hit

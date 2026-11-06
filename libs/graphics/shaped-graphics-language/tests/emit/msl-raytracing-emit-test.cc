@@ -249,3 +249,78 @@ TEST("sgl emit msl - an inline trace outside a ray-tracing stage reaches metal::
         CHECK(!text.contains("ray_ ray_;")).dump("entry", entry);
     }
 }
+
+TEST("sgl emit msl - a pipeline trace finds its closest hit in the offsets of the world it traces, whatever names it")
+{
+    // the world is slot 1 of the entry point's second group, so a writer that guessed would read groups[0][0]
+    auto const stages = msl_stages_of(R"(
+require raytracing_pipeline, binding_arrays
+
+binding other:
+    results: mut buffer[float]
+
+binding scene:
+    results: mut buffer[float]
+    world: acceleration_structure[.triangles]
+    many: acceleration_structure[.triangles][4]
+
+struct probe:
+    value: float
+
+rays probe_rays:
+    marker: probe
+
+fun probe_ray() => ray(origin = pos3(0.0, 0.0, -1.0), direction = vec3(0.0, 0.0, 1.0), t_max = 100.0)
+
+fun trace_through(w: acceleration_structure[.triangles], p: mut probe):
+    trace(w, probe_ray(), probe_rays.marker, mut p)
+
+@raygen fun direct(@launch_id id: int3){other, scene}:
+    let mut p = probe(0.0)
+    trace(scene.world, probe_ray(), probe_rays.marker, mut p)
+    other.results[id.x] = p.value
+
+@raygen fun through_parameter(@launch_id id: int3){other, scene}:
+    let mut p = probe(0.0)
+    trace_through(scene.world, mut p)
+    other.results[id.x] = p.value
+
+@raygen fun element(@launch_id id: int3){other, scene}:
+    let mut p = probe(0.0)
+    trace_through(scene.many[nonuniform id.y], mut p)
+    other.results[id.x] = p.value
+
+@miss fun missed(p: mut probe):
+    p.value = -1.0
+
+@closest_hit fun hit(h: triangle_hit, p: mut probe):
+    p.value = h.t
+
+hit_group marked for probe_rays:
+    marker = (closest_hit = hit)
+
+@raytracing pipeline direct_path:
+    rays = probe_rays
+    raygen = direct
+    miss.marker = missed
+    hit_groups = (marked)
+
+@raytracing pipeline parameter_path:
+    rays = probe_rays
+    raygen = through_parameter
+    miss.marker = missed
+    hit_groups = (marked)
+
+@raytracing pipeline element_path:
+    rays = probe_rays
+    raygen = element
+    miss.marker = missed
+    hit_groups = (marked)
+)");
+    CHECK(text_of(stages, "direct").contains("sgl_t.closest_hit[sgl_ctx.hit_offsets->groups[1][1].instances["));
+    CHECK(text_of(stages, "through_parameter").contains("sgl_t.closest_hit[sgl_ctx.hit_offsets->groups[1][1].instances["));
+    // an element's offsets follow its member's slot by slot
+    CHECK(text_of(stages, "element").contains("sgl_ctx.hit_offsets->groups[1][2 + "));
+    for (auto const& [entry, text] : stages)
+        CHECK(!text.contains("hit_offsets->groups[0]")).dump("entry", entry);
+}
