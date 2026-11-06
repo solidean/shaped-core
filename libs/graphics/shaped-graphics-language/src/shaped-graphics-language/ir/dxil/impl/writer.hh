@@ -2,6 +2,7 @@
 
 #include <clean-core/container/span.hh>
 #include <clean-core/container/vector.hh>
+#include <clean-core/function/function_ref.hh>
 #include <clean-core/string/string.hh>
 #include <shaped-graphics-language/ir/dxil/impl/dx_ops.hh>
 #include <shaped-graphics-language/ir/dxil/impl/llvm.hh>
@@ -290,7 +291,11 @@ private:
     void stage_load(u32 index, instruction const& i);
     void stage_store(instruction const& i);
     /// A call through a sampler: the coordinate's lanes, its three offsets, none of them stated, then what `tail` adds.
-    void sampled(u32 index, instruction const& i, dx_op op, cc::span<ll_value const> tail, isize offsets = 3);
+    void sampled(u32 index,
+                 instruction const& i,
+                 dx_op op,
+                 cc::function_ref<void(cc::vector<ll_value>&)> tail,
+                 isize offsets = 3);
     void discard();
     void derivative_lanes(u32 index, instruction const& i);
     /// Which lanes the module's final operations touch, once nothing more can go.

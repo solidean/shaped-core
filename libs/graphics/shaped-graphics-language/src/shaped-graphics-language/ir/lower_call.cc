@@ -544,8 +544,7 @@ value_ref lowering::texture_call(flat_call const& c, builtins::function_record c
         return add(ir::op::construct, vector_type(scalar_of(xy_type), lanes_of(xy_type) + 1), {xy, layer});
     };
 
-    // the image and the sampler as one value, which every call through a sampler reads
-    auto const sampled = [&]() -> value_ref
+    auto const sampler_handle = [&]() -> value_ref
     {
         if (layout.offset >= 0)
         {
@@ -555,10 +554,11 @@ value_ref lowering::texture_call(flat_call const& c, builtins::function_record c
         auto const sampler = resource_at(arguments[layout.sampler]);
         if (!is_valid(sampler))
             return value_ref::none;
-        auto const handle = add(ir::op::load, _out.at(_out.type_of(sampler)).element, {sampler});
-        return add(ir::op::combine_sampler, intern({.kind = type_kind::sampled_image, .element = image_ref}),
-                   {image, handle});
+        return add(ir::op::load, _out.at(_out.type_of(sampler)).element, {sampler});
     };
+    // what every call through a sampler reads, combined last as SPIR-V has it next to its use
+    auto const with_image = [&](value_ref sampler)
+    { return add(ir::op::combine_sampler, intern({.kind = type_kind::sampled_image, .element = image_ref}), {image, sampler}); };
 
     switch (shape.what)
     {
@@ -570,72 +570,78 @@ value_ref lowering::texture_call(flat_call const& c, builtins::function_record c
     }
     case op::sample_level:
     {
-        auto const pair = sampled();
-        if (!is_valid(pair))
+        auto const sampler = sampler_handle();
+        if (!is_valid(sampler))
             return value_ref::none;
         auto const at = coordinate(expr(arguments[1]));
         auto level = expr(arguments[layout.first]);
         level = converted(level, _out.type_of(level), _float);
-        return narrowed(add(ir::op::sample_lod, texels, {pair, at, level}));
+        return narrowed(add(ir::op::sample_lod, texels, {with_image(sampler), at, level}));
     }
     case op::sample:
     {
-        auto const pair = sampled();
-        if (!is_valid(pair))
+        auto const sampler = sampler_handle();
+        if (!is_valid(sampler))
             return value_ref::none;
-        return narrowed(add(ir::op::sample_implicit, texels, {pair, coordinate(expr(arguments[1]))}));
+        auto const at = coordinate(expr(arguments[1]));
+        return narrowed(add(ir::op::sample_implicit, texels, {with_image(sampler), at}));
     }
     case op::sample_bias:
     {
-        auto const pair = sampled();
-        if (!is_valid(pair))
+        auto const sampler = sampler_handle();
+        if (!is_valid(sampler))
             return value_ref::none;
         auto const at = coordinate(expr(arguments[1]));
-        return narrowed(add(ir::op::sample_bias, texels, {pair, at, expr(arguments[layout.first])}));
+        auto const bias = expr(arguments[layout.first]);
+        return narrowed(add(ir::op::sample_bias, texels, {with_image(sampler), at, bias}));
     }
     case op::sample_grad:
     {
-        auto const pair = sampled();
-        if (!is_valid(pair))
+        auto const sampler = sampler_handle();
+        if (!is_valid(sampler))
             return value_ref::none;
         auto const at = coordinate(expr(arguments[1]));
         auto const x = expr(arguments[layout.first]);
-        return narrowed(add(ir::op::sample_grad, texels, {pair, at, x, expr(arguments[layout.second])}));
+        auto const y = expr(arguments[layout.second]);
+        return narrowed(add(ir::op::sample_grad, texels, {with_image(sampler), at, x, y}));
     }
     case op::gather:
     {
-        auto const pair = sampled();
-        if (!is_valid(pair))
+        auto const sampler = sampler_handle();
+        if (!is_valid(sampler))
             return value_ref::none;
         auto const at = coordinate(expr(arguments[1]));
         auto const component = layout.first >= 0 ? expr(arguments[layout.first]) : int_constant(0);
-        return add(ir::op::image_gather, texels, {pair, at, component});
+        return add(ir::op::image_gather, texels, {with_image(sampler), at, component});
     }
     case op::sample_compare:
     {
-        auto const pair = sampled();
-        if (!is_valid(pair))
+        auto const sampler = sampler_handle();
+        if (!is_valid(sampler))
             return value_ref::none;
         auto const at = coordinate(expr(arguments[1]));
-        return add(ir::op::sample_compare, result, {pair, at, expr(arguments[layout.first])});
+        auto const reference = expr(arguments[layout.first]);
+        return add(ir::op::sample_compare, result, {with_image(sampler), at, reference});
     }
     case op::sample_compare_level:
     {
-        auto const pair = sampled();
-        if (!is_valid(pair))
+        auto const sampler = sampler_handle();
+        if (!is_valid(sampler))
             return value_ref::none;
         // HLSL's `SampleCmpLevelZero`, whatever the level's constant says (CHK-280)
         auto const at = coordinate(expr(arguments[1]));
         auto const reference = expr(arguments[layout.first]);
-        return add(ir::op::sample_compare_zero, result, {pair, at, reference, float_constant(_float, 0.0)});
+        return add(ir::op::sample_compare_zero, result,
+                   {with_image(sampler), at, reference, float_constant(_float, 0.0)});
     }
     case op::gather_compare:
     {
-        auto const pair = sampled();
-        if (!is_valid(pair))
+        auto const sampler = sampler_handle();
+        if (!is_valid(sampler))
             return value_ref::none;
         auto const at = coordinate(expr(arguments[1]));
-        return add(ir::op::image_gather_compare, texels, {pair, at, expr(arguments[layout.first])});
+        auto const reference = expr(arguments[layout.first]);
+        return add(ir::op::image_gather_compare, texels, {with_image(sampler), at, reference});
     }
     case op::image_load:
         return narrowed(add(ir::op::image_read, texels, {image, coordinate(expr(arguments[1]))}));
