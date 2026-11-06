@@ -22,7 +22,9 @@ What the epic has to deliver, each a child issue when it is taken up:
 - **Ids across layers.** A layer's ids are stable without knowing what sits above it, which is the precondition for anything saved.
 - **Saved layers.** A checked layer written to disk and loaded instead of checked, keyed by its sources, the compiler's version and its options.
   The invalidation is the cost the prelude-check epic shelved this on; many short-lived processes, or a prelude far past today's size, reopen it.
-- **slib and the language server on layers.** slib builds each module's layer once per process for every shader and permutation; the language server keeps a module directory's layers live across edits.
-- **Interface-only layers, if ever.** A cheaper layer of signatures alone is an optimization of building one, never a different thing crossing between modules, since inlining and per-use generics need the bodies.
+- **slib and the language server on layers.** slib builds each module's layer once per process for every shader and permutation.
+  The language server keeps a module directory's layers live across edits.
+- **Interface-only layers, if ever.** A cheaper layer of signatures alone is an optimization of building one, never a different thing crossing between modules.
+  Inlining and per-use generics need the bodies.
 
 Out of scope here: cuts inside a single compile, the prelude parse's speed and the per-compile fixed cost, which are [epic-sgl-prelude-check-cost](epic-sgl-prelude-check-cost.md)'s.
