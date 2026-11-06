@@ -3,6 +3,8 @@ created: 2026-11-05
 priority: normal
 tags: [xr, ar]
 parent: epic-xr
+claimed-by: Claude (for Philip)
+claimed-at: 2026-11-06T12:32Z
 ---
 
 # Passthrough: AR as an alpha-blend session
