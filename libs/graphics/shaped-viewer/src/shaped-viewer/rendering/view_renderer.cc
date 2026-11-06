@@ -18,6 +18,7 @@
 #include <shaped-viewer/rendering/impl/emitters.hh>
 #include <shaped-viewer/rendering/impl/resolved_view.hh>
 #include <shaped-viewer/rendering/pathtrace_routine.hh>
+#include <shaped-viewer/rendering/raster_bound_routine.hh>
 #include <shaped-viewer/rendering/raster_routine.hh>
 #include <shaped-viewer/rendering/view_renderer.hh>
 #include <shaped-viewer/rendering/wavefront_routine.hh>
@@ -163,7 +164,7 @@ constexpr u8 instance_mask_hybrid_shadow_skips = 0xFD;
 /// A raster frame builds none, which is what lets it draw on a device without ray tracing.
 resolved_view resolve_scene(sg::command_list& cmd, layer const& l, gpu_resource_manager& resources, render_mode mode)
 {
-    auto const traced = mode != render_mode::raster;
+    auto const traced = !is_rasterized(mode);
     auto out = resolved_view{};
 
     // A frame mesh's attributes are written here, ahead of every read this command list records, so they are resident this frame.
@@ -1125,6 +1126,68 @@ struct raster_batch
     return outcome;
 }
 
+/// Draws one frame of layer `l` of `v` in `render_mode::raster_bound`, layer index `layer`, into `slot` and the layer's primary depth.
+///
+/// Converges as `raster_layer` does: a frame that draws is final, and one drawn through a stand-in still compiling restarts next frame.
+[[nodiscard]] sg::routine_outcome raster_bound_layer(sg::command_list& cmd,
+                                                     view_data const& v,
+                                                     layer const& l,
+                                                     u8 layer,
+                                                     tg::vec2i resolution,
+                                                     raster_scene const& scene,
+                                                     impl::view_state& rec,
+                                                     impl::temporal_slot& slot,
+                                                     gpu_resource_manager& resources)
+{
+    auto const& resolved = *scene.resolved;
+    auto const batch = raster_batch_of(resolved);
+
+    // No motion is written, so the previous camera is this one.
+    auto const fc = make_frame_constants(v, l, *scene.lights, resolution);
+    auto const frame = shaders::raster::frame_constants{
+        .camera = fc.camera,
+        .previous_camera = fc.camera,
+        .near_plane = f32(v.camera.projection.near_plane),
+        .light_count = u32(scene.lights->records.size()),
+        .decal_count = 0,
+        .pixel_spread = fc.pixel_spread,
+        .size = tg::vec2f(f32(resolution[0]), f32(resolution[1])),
+        .jitter = tg::vec2f(0, 0),
+    };
+
+    auto& ctx = cmd.context();
+    auto const background
+        = ctx.transient.create_buffer<background_gpu>(1, sg::buffer_usage::readonly_buffer | sg::buffer_usage::copy_dst);
+    cmd.upload.pod_to_buffer(background, *scene.background);
+
+    auto* const primary_depth = rec.temporal.get_ptr(temporal_id::primary_depth(layer));
+
+    auto stand_ins = stand_in_report{};
+    auto const outcome = raster_bound_routine::execute(
+        cmd, {.frame = frame,
+              .background = background,
+              .instance_table = upload_instances(cmd, resolved),
+              .lights = upload_lights(cmd, *scene.lights),
+              .draws = batch.draws,
+              .vertex_pool = resources.meshes.vertex_pool(),
+              .index_pool = resources.meshes.index_pool(),
+              .parameter_pool = resources.parameter_pool(),
+              .attribute_pool = resources.attributes.pool(),
+              .permutations = batch.permutations,
+              .fallback = &resources.shaders.acquire_fallback(),
+              .color = slot.texture,
+              .primary_depth = primary_depth != nullptr ? primary_depth->texture : sg::texture_2d(),
+              .stand_ins = &stand_ins});
+    if (outcome == sg::routine_outcome::declined)
+        return outcome;
+
+    slot.stand_in_hash = stand_ins.hash;
+    slot.reset_hash = stand_ins.pending ? cc::combine_hash(scene.hash, u64(1)) : scene.hash;
+    slot.accum_frame = 1;
+    slot.samples = stand_ins.pending ? 0 : accumulation_sample_cap;
+    return outcome;
+}
+
 /// The G-buffer slots `rec` keeps for layer `layer`, which a hybrid frame at the view's own size writes; `color` is left to the frame.
 [[nodiscard]] raster_gbuffer gbuffer_slots_of(impl::view_state& rec, u8 layer)
 {
@@ -1281,8 +1344,9 @@ render_mode resolve_render_mode(sg::context const& ctx, render_mode mode)
 {
     if (mode != render_mode::automatic)
         return mode;
-    auto const traces = ctx.supports(sg::feature::raytracing_pipeline) && ctx.supports(sg::feature::ray_query);
-    return traces ? render_mode::hybrid : render_mode::raster;
+    if (ctx.supports(sg::feature::raytracing_pipeline) && ctx.supports(sg::feature::ray_query))
+        return render_mode::hybrid;
+    return ctx.supports(sg::feature::binding_arrays) ? render_mode::raster : render_mode::raster_bound;
 }
 
 // NOLINTNEXTLINE(performance-unnecessary-value-param) — by value because it is a coroutine, see sg's init_once
@@ -1428,7 +1492,7 @@ void view_renderer::acquire_trace(sg::command_list& cmd,
     // trace records — under the same mode, which decides what a walk acquires.
     auto const& l = v.layers[tr.layer];
     auto const mode = planned_mode(l.settings.mode);
-    auto const is_traced = mode != render_mode::raster;
+    auto const is_traced = !is_rasterized(mode);
     // trace() declines a layer this device cannot trace, and says so; a walk for it would build BLASes nothing can.
     if (is_traced && missing_trace_feature(cmd.context(), mode).has_value())
         return;
@@ -1465,7 +1529,7 @@ sg::routine_outcome view_renderer::trace(sg::command_list& cmd,
         return sg::routine_outcome::executed; // resolve() refused it; there was nothing to accumulate
 
     auto const mode = planned_mode(l.settings.mode);
-    auto const is_traced = mode != render_mode::raster;
+    auto const is_traced = !is_rasterized(mode);
     if (is_traced && !can_trace(ctx, mode, rec, *slot))
         return sg::routine_outcome::declined;
 
@@ -1525,10 +1589,13 @@ sg::routine_outcome view_renderer::trace(sg::command_list& cmd,
     // A rasterized layer draws its final image and its G-buffer in one frame, so nothing below — accumulation,
     // denoising, upscaling — has anything to do with it.
     if (!is_traced)
-        return raster_layer(
-            cmd, v, l, tr.layer, tr.resolution,
-            {.resolved = &resolved, .lights = &lights, .decals = &decals, .background = &bg, .hash = hash}, rec, *slot,
-            resources);
+    {
+        auto const scene
+            = raster_scene{.resolved = &resolved, .lights = &lights, .decals = &decals, .background = &bg, .hash = hash};
+        if (mode == render_mode::raster_bound)
+            return raster_bound_layer(cmd, v, l, tr.layer, tr.resolution, scene, rec, *slot, resources);
+        return raster_layer(cmd, v, l, tr.layer, tr.resolution, scene, rec, *slot, resources);
+    }
 
     // Whether this frame's image differs from the last one's, which is what may trace it at the upscaler's extent.
     auto const image_changed = slot->reset_hash != hash;
@@ -2295,7 +2362,7 @@ sg::texture_2d view_renderer::execute(sg::command_list& cmd,
 
     // Resolved against the device here, since this path ensures a raster layer's slots itself.
     auto const mode = resolve_render_mode(ctx, scene->settings.mode);
-    auto const is_traced = mode != render_mode::raster;
+    auto const is_traced = !is_rasterized(mode);
     if (is_traced && !can_trace(ctx, mode, store.get_or_create(v.id), slot))
         return slot.texture;
 
@@ -2328,12 +2395,18 @@ sg::texture_2d view_renderer::execute(sg::command_list& cmd,
 
     if (!is_traced)
     {
+        auto const drawn
+            = raster_scene{.resolved = &resolved, .lights = &lights, .decals = &decals, .background = &bg, .hash = hash};
+        if (mode == render_mode::raster_bound)
+        {
+            (void)raster_bound_layer(cmd, v, *scene, layer, v.resolution, drawn, store.get_or_create(v.id), slot,
+                                     resources);
+            return slot.texture;
+        }
         // No plan sized the G-buffer either, so this path ensures it beside the image.
         for (auto const& s : impl::raster_slots)
             (void)ensure_temporal(ctx, store, v.id, s.id(layer), v.resolution, s.format);
-        (void)raster_layer(cmd, v, *scene, layer, v.resolution,
-                           {.resolved = &resolved, .lights = &lights, .decals = &decals, .background = &bg, .hash = hash},
-                           store.get_or_create(v.id), slot, resources);
+        (void)raster_layer(cmd, v, *scene, layer, v.resolution, drawn, store.get_or_create(v.id), slot, resources);
         return slot.texture;
     }
 

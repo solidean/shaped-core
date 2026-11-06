@@ -1,5 +1,11 @@
 #include "viewer_test_env.hh"
 
+#include <babel-serializer/image/image.hh>
+#include <clean-core/common/time.hh>
+#include <clean-core/platform/environment.hh>
+#include <clean-core/platform/file_path.hh>
+#include <clean-core/streams/file_stream.hh>
+#include <clean-core/string/format.hh>
 #include <clean-core/thread/async_coroutine.hh>
 #include <nexus/async-test.hh>
 #include <nexus/test.hh>
@@ -26,7 +32,24 @@ using namespace cc::primitive_defines;
                                     .withhold_raytracing = true,
                                     .withhold_binding_arrays = true});
 }
+
+/// The Cornell box seen straight through its open side.
+[[nodiscard]] sv::camera cornell_camera()
+{
+    auto cam = sv::camera{.position = tg::pos3d(0, 0, -3.4)};
+    cam.projection.vertical_fov = tg::angle_d::make_from_degree(45.0);
+    return cam;
+}
 } // namespace
+
+TEST("sv raster_bound - a device without ray tracing or binding arrays resolves automatic to raster_bound")
+{
+    auto created = create_webgpu_like_context();
+    if (created.has_error())
+        SKIP("no dx12 device here");
+    CHECK(sv::resolve_render_mode(*created.value(), sv::render_mode::automatic) == sv::render_mode::raster_bound);
+    CHECK(sv::resolve_render_mode(*created.value(), sv::render_mode::raster) == sv::render_mode::raster);
+}
 
 ASYNC_TEST("sv raster_bound - a resource manager on a device without binding arrays keeps its pools and no tables")
 {
@@ -81,4 +104,65 @@ ASYNC_TEST("sv raster_bound - a resource manager on a device without binding arr
 
     ctx.advance_epoch();
     co_await ctx.idle_completion();
+}
+
+// A bound layer's capture, end to end: the viewer comes up on the device, the image is the Cornell box's, and it is final.
+//
+// The capture asks for `accumulation_sample_cap` samples, which only a converged layer holds, so a file at all means the layer converged.
+// The capture protocol is process environment, which is why this carries capture-environment as dx12-entry.cc's drivers do.
+ASYNC_TEST("sv raster_bound - a bound layer draws the Cornell box on a device without binding arrays",
+           nx::config::exclusive("capture-environment"))
+{
+    if (!sv_test::shared_env().has_compiler)
+        SKIP("no SGL compiler, so the viewer's shaders do not build");
+    auto created = create_webgpu_like_context();
+    if (created.has_error())
+        SKIP("no dx12 device here");
+    auto& ctx = *created.value();
+    REQUIRE(!ctx.supports(sg::feature::binding_arrays));
+
+    constexpr auto size = tg::vec2i(96, 64);
+    auto const path = cc::temp_file_path("sv-raster-bound", ".png");
+    auto const on = cc::scoped_environment_variable(sr::capture_request_env_var, "1");
+    auto const out = cc::scoped_environment_variable(sr::capture_output_env_var, path);
+    auto const which = cc::scoped_environment_variable(sr::capture_name_env_var, "front");
+    auto const dim = cc::scoped_environment_variable(sr::capture_size_env_var, cc::format("{}x{}", size[0], size[1]));
+    auto const acc
+        = cc::scoped_environment_variable(sr::capture_accumulate_env_var, cc::format("{}", sv::accumulation_sample_cap));
+    auto const lim = cc::scoped_environment_variable(sr::capture_timeout_env_var, "40");
+
+    auto const box = sv_test::make_cornell_box();
+    auto const mesh = sv_test::as_mesh("cornell box", box.positions, box.materials);
+
+    auto const start = cc::current_time_steady_secs();
+    for (auto f : sv::interactive(ctx, "sv-test/raster-bound"))
+    {
+        auto view = f.window().view();
+        view.camera(cornell_camera());
+        f.register_capture("front", [](sv::capture_context const&) {});
+        auto scene = view.add_scene();
+        scene.add_mesh(mesh);
+        scene.add_rect_light("key", tg::pos3f(0, 0.99f, 0), tg::vec3f(0.35f, 0, 0), tg::vec3f(0, 0, 0.35f)).nits(40);
+        scene.settings({.mode = sv::render_mode::raster_bound});
+        REQUIRE(cc::current_time_steady_secs() - start < 35.0);
+    }
+    co_await cc::async_settled(sv::background_work(ctx));
+
+    {
+        auto reread = cc::file_read_stream_adapter::open(path);
+        REQUIRE(reread.has_value());
+        cc::read_stream in = reread.value();
+        auto const decoded = babel::image::read(in);
+        REQUIRE(decoded.has_value());
+        auto const& img = decoded.value();
+        REQUIRE(img.width == size[0]);
+        REQUIRE(img.height == size[1]);
+
+        // The left wall red and the right one green, as the bindless mode and the tracer draw them.
+        auto const at = [&](int x, int y, int c) { return int(img.pixels[(y * img.width + x) * img.channels + c]); };
+        CHECK(at(22, 32, 0) > at(22, 32, 1) + 20);
+        CHECK(at(74, 32, 1) > at(74, 32, 0) + 20);
+    }
+    cc::remove_file(path);
+    CHECK(!ctx.is_device_lost());
 }

@@ -1250,7 +1250,7 @@ void viewer::finish_frame(frame& f)
             // A hybrid frame is one sample per pixel, too noisy to show undenoised while the camera moves.
             if (l.settings.mode == render_mode::hybrid && l.settings.reconstruct.denoiser == sr::denoise_method::none)
                 l.settings.reconstruct.denoiser = sr::denoise_method::automatic;
-            if (l.settings.mode == render_mode::raster && !im.raster_fallback_reported)
+            if (is_rasterized(l.settings.mode) && !im.raster_fallback_reported)
             {
                 CC_LOG_WARNING("the device has no ray tracing, so every layer left render_mode::automatic is "
                                "rasterized: "

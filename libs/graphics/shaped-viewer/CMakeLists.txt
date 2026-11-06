@@ -52,6 +52,7 @@ add_library(shaped-viewer
     src/shaped-viewer/rendering/wavefront_routine.cc
     src/shaped-viewer/rendering/hybrid_routine.cc
     src/shaped-viewer/rendering/raster_routine.cc
+    src/shaped-viewer/rendering/raster_bound_routine.cc
     src/shaped-viewer/rendering/render_plan.cc
     src/shaped-viewer/rendering/layout_routine.cc
     src/shaped-viewer/rendering/depth_fill_routine.cc
@@ -140,6 +141,7 @@ target_sources(shaped-viewer
     src/shaped-viewer/rendering/stand_in_report.hh
     src/shaped-viewer/rendering/hybrid_routine.hh
     src/shaped-viewer/rendering/raster_routine.hh
+    src/shaped-viewer/rendering/raster_bound_routine.hh
     src/shaped-viewer/rendering/render_plan.hh
     src/shaped-viewer/rendering/layout_routine.hh
     src/shaped-viewer/rendering/depth_fill_routine.hh

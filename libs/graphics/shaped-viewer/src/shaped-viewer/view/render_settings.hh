@@ -28,6 +28,9 @@ inline constexpr u32 accumulation_sample_cap = 16384;
 
 /// The mode a layer asking for `mode` is drawn in on `ctx`: `mode` itself, unless it is `automatic`.
 [[nodiscard]] render_mode resolve_render_mode(sg::context const& ctx, render_mode mode);
+
+/// Whether `mode` draws its layer without tracing a ray: `raster` or `raster_bound`.
+[[nodiscard]] constexpr bool is_rasterized(render_mode mode);
 } // namespace sv
 
 /// How a layer's image is produced from its scene: traced by one of two path tracers, or rasterized.
@@ -37,7 +40,8 @@ inline constexpr u32 accumulation_sample_cap = 16384;
 /// On a Radeon 780M the wavefront wins the shallow scene too; libs/graphics/shaped-viewer/docs/wavefront.md has the measurements.
 enum class sv::render_mode : sv::u8
 {
-    /// The hybrid where the device has `sg::feature::raytracing_pipeline` and `ray_query` both, and `raster` where it has not, which the viewer warns of once.
+    /// The hybrid where the device has `sg::feature::raytracing_pipeline` and `ray_query` both, which the viewer warns of once where it has not.
+    /// Without them, `raster` where the device has `binding_arrays`, and `raster_bound` where it lacks those too, as WebGPU does.
     /// A layer left here that names no denoiser is denoised by `automatic`'s, since a hybrid frame is one sample per pixel.
     ///
     /// The hybrid rather than a path tracer because it holds a frame rate: about 8 to 16 ms a moving frame at 1920x1200 where the wavefront takes 15 to 39, on Bistro and Sponza.
@@ -64,6 +68,13 @@ enum class sv::render_mode : sv::u8
     /// Quadric batches are not drawn yet.
     /// libs/graphics/shaped-viewer/docs/raster.md is the design.
     raster,
+
+    /// `raster`'s image without `binding_arrays`: the central pools bound as buffers of their own, so it draws on WebGPU's core.
+    ///
+    /// It writes the lit image and the primary depth, and no G-buffer: WebGPU's color targets hold 32 bytes a pixel.
+    /// Not drawn yet: quadric batches, decals, and frame meshes over their own index buffers; every texture reads as a white texel.
+    /// libs/graphics/shaped-viewer/docs/plans/raster-bound.md is the design and the checkpoints that fill those in.
+    raster_bound,
 
     /// Rasterized primary hits, lit by the tracer's next-event estimate with shadow rays traced inline, and one bounce.
     ///
@@ -217,3 +228,8 @@ struct sv::render_settings
     /// Drawings and annotations are drawn after it and see none of it.
     sr::display_transform display = {};
 };
+
+constexpr bool sv::is_rasterized(render_mode mode)
+{
+    return mode == render_mode::raster || mode == render_mode::raster_bound;
+}

@@ -126,6 +126,11 @@ Today every load indexes `tracer.bindless`: the vertex and index pools, the inst
 **The managers pool on every backend**, so there is one resource model and one layout behind all three spellings.
 The traced and raster spellings then read the same pools through a bindless slot, and `bound` through a bound buffer.
 
+**Status 2026-11-06**: `render_mode::raster_bound` draws, through `sv::raster_bound_routine`, and `automatic` picks it where a device lacks `binding_arrays` and ray tracing.
+raster-bound-test draws the Cornell box through it on a dx12 context withholding both.
+Not drawn yet: quadric batches, decals, and frame meshes over their own index buffers; textures read white ([debt-sv-bound-textures-read-white](../issues/debt-sv-bound-textures-read-white.md)).
+Next is the web sample page: sv on emscripten-webgpu, OpenPBR spheres, the frame loop awaited.
+
 ### Probe GI
 
 A probe volume in the style of DDGI (Majercik et al. 2019), written from the paper: irradiance and visibility per probe, a fixed ray budget a frame spread over several frames.

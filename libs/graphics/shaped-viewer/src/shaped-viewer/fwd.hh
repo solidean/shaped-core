@@ -289,6 +289,8 @@ enum class raster_culling : u8; // how far a raster frame culls (rendering/raste
 enum class raster_shading : u8; // which pixel stage a raster frame's shading draws run (rendering/raster_routine.hh)
 struct raster_thin_targets;     // the hybrid's thin G-buffer (rendering/raster_routine.hh)
 class raster_routine;
+struct raster_bound_frame_desc; // one bound raster frame (rendering/raster_bound_routine.hh)
+class raster_bound_routine;
 enum class hybrid_lighting : u8; // where a hybrid frame lights its primary hits (view/render_settings.hh)
 enum class still_denoise : u8; // what denoises a still image once the temporal member hands over (view/render_settings.hh)
 enum class environment_estimate : u8; // how a traced layer estimates its environment's diffuse light (view/render_settings.hh)

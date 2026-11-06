@@ -58,11 +58,13 @@ sv::environment_estimate         // sampled | exact (default) — exact takes a 
 sv::viewer_config::frame_budget_ms // (16) the GPU ms a frame's still wavefront layers share, split evenly; each fits its share with whole rounds, then with a partial fill
                                  //   0 runs rounds_per_frame at full fill; a headless viewer forces 0; a plan built by hand takes viewer_definition::wavefront_budget_ms (0)
 sv::wavefront_routine::drain_rounds(max_bounces) // -> i32: a moving frame's rounds, max_bounces + free_refractions (8) + 2 + medium_roulette_after (16, pt.roulette_after)
-sv::render_mode              // automatic (default) | megakernel | wavefront | raster | hybrid — switching restarts the layer; the wavefront reads rounds_per_frame instead of samples_per_pixel
+sv::render_mode              // automatic (default) | megakernel | wavefront | raster | raster_bound | hybrid — switching restarts the layer; the wavefront reads rounds_per_frame instead of samples_per_pixel
                                  //   automatic: the hybrid (deferred) where the device has raytracing_pipeline and ray_query, raster with one warning where not;
+                                 //   raster_bound where the device lacks binding_arrays too, as WebGPU does (docs/plans/raster-bound.md)
                                  //   a layer left automatic that names no denoiser gets automatic's; name `wavefront` for full global illumination
                                  //   the viewer resolves it before planning, and a plan built by hand traces it with the wavefront
 sv::resolve_render_mode(ctx, m)  // -> render_mode: m itself unless automatic
+sv::is_rasterized(m)             // -> bool: raster or raster_bound, which trace no ray
                                  //   raster: the same materials drawn, lit directly and unshadowed, final every frame, never denoised (docs/raster.md)
                                  //   reconstruct defaults to denoiser none; NOTHING in it restarts accumulation (see "Denoising" below)
                                  //   sv owns reconstruct.fresh_samples and reconstruct.upscaler, and overwrites whatever a caller set: each half of the hand-off runs with its own value
