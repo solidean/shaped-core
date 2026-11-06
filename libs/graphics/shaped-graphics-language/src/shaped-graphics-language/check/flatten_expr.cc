@@ -407,22 +407,42 @@ auto sgl::check::impl::flattener::flatten_filled(ast::expr_id id, type_id type, 
     }
     auto const result = add_local(local_kind::var, "filled", type);
     body.push_back(make_stmt(where, flat_var{.local = result}));
-    // the statements that assign `filler` to every element of `place`, of type `t`, down to the filler's own type
-    auto const fill = [&](auto const& self, flat_expr_id place, type_id t) -> flat_stmt_id
+    // EMIT-231: a small array is filled one constant index at a time, so a target keeps it in registers
+    constexpr auto max_unrolled_fill = isize(64);
+    auto elements = isize(1);
+    for (auto t = type; t != value_type && elements <= max_unrolled_fill; t = c.out.at(t).element)
+        elements *= isize(c.out.at(t).count);
+    auto const is_unrolled = elements <= max_unrolled_fill;
+
+    // appends the statements that assign `filler` to every element of `place`, of type `t`, down to the filler's own type
+    auto const fill = [&](auto const& self, flat_expr_id place, type_id t, cc::vector<flat_stmt_id>& out) -> void
     {
         if (t == value_type)
-            return make_stmt(where, flat_assign{.place = place, .value = filler});
+        {
+            out.push_back(make_stmt(where, flat_assign{.place = place, .value = filler}));
+            return;
+        }
         auto const& info = c.out.at(t);
+        if (is_unrolled)
+        {
+            for (auto k = 0; k < info.count; ++k)
+            {
+                auto const at = add_expr(int_type(), id, flat_int_literal{.value = k});
+                self(self, add_expr(info.element, id, flat_element{.object = place, .index = at}), info.element, out);
+            }
+            return;
+        }
         auto const index = add_local(local_kind::index, "i", int_type());
         auto const element = add_expr(info.element, id, flat_element{.object = place, .index = local_ref(index, id)});
-        flat_stmt_id const store[] = {self(self, element, info.element)};
-        return make_stmt(where, flat_for{.label = add_label("fill"),
-                                         .index = index,
-                                         .first = add_expr(int_type(), id, flat_int_literal{.value = 0}),
-                                         .end = add_expr(int_type(), id, flat_int_literal{.value = info.count}),
-                                         .body = add_list(store)});
+        auto store = cc::vector<flat_stmt_id>();
+        self(self, element, info.element, store);
+        out.push_back(make_stmt(where, flat_for{.label = add_label("fill"),
+                                                .index = index,
+                                                .first = add_expr(int_type(), id, flat_int_literal{.value = 0}),
+                                                .end = add_expr(int_type(), id, flat_int_literal{.value = info.count}),
+                                                .body = add_list(store)}));
     };
-    body.push_back(fill(fill, local_ref(result, id), type));
+    fill(fill, local_ref(result, id), type, body);
     body.push_back(make_stmt(where, flat_leave{.target = label, .value = local_ref(result, id)}));
     return add_expr(type, id, flat_block{.label = label, .body = add_list(body)});
 }

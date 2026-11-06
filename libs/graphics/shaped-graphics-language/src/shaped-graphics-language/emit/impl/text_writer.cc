@@ -457,6 +457,35 @@ struct writer
             }
     }
 
+    /// EMIT-230: a literal, or an array or a vector built of nothing else.
+    [[nodiscard]] bool is_constant_leaf(flat_expr_id id) const
+    {
+        auto const& x = p.e.at(id);
+        if (x.node.is<flat_literal>())
+            return true;
+        auto const* const c = x.node.try_as<flat_construct>();
+        if (c == nullptr || !(is_array(x.type) || (is_builtin_type(p.m, x.type) && p.m.at(x.type).has_swizzles)))
+            return false;
+        for (auto const a : p.e.at(c->arguments))
+            if (!is_constant_leaf(a))
+                return false;
+        return true;
+    }
+
+    /// `{a, b, c}` of an array whose leaves are constants, nested per dimension.
+    [[nodiscard]] cc::string initializer_of(flat_expr_id id)
+    {
+        auto const& x = p.e.at(id);
+        if (!is_array(x.type))
+            return expr(id).text;
+        auto out = cc::string("{");
+        auto const arguments = p.e.at(x.node.as<flat_construct>().arguments);
+        for (auto i = isize(0); i < arguments.size(); ++i)
+            out.appendf("{}{}", i == 0 ? "" : ", ", initializer_of(arguments[i]));
+        out += "}";
+        return out;
+    }
+
     bool needs_member_assignment(flat_expr const& x) const
     {
         return x.node.is<flat_construct>() && !is_builtin_type(p.m, x.type)
@@ -1633,6 +1662,14 @@ struct writer
     {
         auto const& local = p.e.at(id);
         auto const name = cc::string_view(p.locals[index_of(id)]);
+        // EMIT-230: an array of constants that nothing writes is HLSL's `static const`, which no invocation fills
+        if (!is_mut && is_valid(value) && d.language() == builtins::language::hlsl && is_array(local.type)
+            && p.e.at(value).node.is<flat_construct>() && is_constant_leaf(value))
+        {
+            line(cc::format("static const {} {}{} = {};", type_text(p, d, local.type), name,
+                            array_dimensions(p, local.type), initializer_of(value)));
+            return;
+        }
         if (is_valid(value) && needs_member_assignment(p.e.at(value)))
         {
             build_struct(p.e.at(value), name);

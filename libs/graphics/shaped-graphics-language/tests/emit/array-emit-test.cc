@@ -43,11 +43,8 @@ TEST("sgl emit - an array is WGSL's and MSL's array type, and HLSL's lengths aft
 
     auto const hlsl = text_of(k_arrays, target::hlsl_dx12);
     CHECK(hlsl.contains("    float stops[2][3];\n"));
-    // HLSL has no array expression, so a literal is a local filled element by element
-    CHECK(hlsl.contains("    float weights[3];\n"
-                        "    weights[0] = 0.25;\n"
-                        "    weights[1] = 0.5;\n"
-                        "    weights[2] = 0.25;\n"));
+    // EMIT-230: a `let` of constants is HLSL's `static const`, which no invocation fills
+    CHECK(hlsl.contains("    static const float weights[3] = {0.25, 0.5, 0.25};\n"));
     CHECK(hlsl.contains("    float array_value[2][3];\n"
                         "    array_value[0] = weights;\n"
                         "    array_value[1] = filled;\n"
