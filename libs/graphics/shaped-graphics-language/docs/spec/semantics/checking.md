@@ -362,6 +362,7 @@ enum light_kind:
   A callee that needs a binding the test does not list is `binding-not-listed` by CHK-131, with a note that listing it gives it.
 * **CHK-333** `test {a, b}:` lists the bindings the test reads, as a function's `{...}` does, and the driver that runs the test gives their values (EVAL-94).
   A binding it lists holds values, buffers, acceleration structures, textures, images and samplers, whose texels the driver binds too (EVAL-120).
+  A test may state a texture's texels and a dynamic sampler's state itself, where its driver binds none (EVAL-127, EVAL-128).
   A `@workgroup` binding needs no listing (CHK-295).
 * **CHK-229** In the flat tree a check or an `assert` is a `check` statement, whose body leaves every node of the condition in a `var` of its own.
   A node is an `and`, an `or`, a `not`, a comparison, a comparison chain, or a leaf any other expression is; it runs in the order and under the conditions the condition itself would run it.
@@ -372,8 +373,10 @@ enum light_kind:
   An empty kind is `invalid-attribute-arguments`.
   Any other argument is `invalid-attribute-arguments`.
 * **CHK-278** A test that expects `.discard` passes where its run ends at a `discard`, and like one that expects `.fail` or `.assert` it need not end in a check.
-* **CHK-298** A test whose run reaches a builtin that takes derivatives is `stage-not-allowed` at that call: a run is one invocation, and has no quad to take one across.
-  A barrier waits for nobody in it, and an atomic updates the memory of its own run (EVAL-92, EVAL-93).
+* **CHK-298** A test whose run reaches a builtin that takes derivatives runs as a quad of lanes (EVAL-140), and each such call stands in uniform control flow, as CHK-282 says of an entry point's.
+  A barrier waits for nobody in it, and an atomic updates the memory its lanes share (EVAL-92, EVAL-93).
+* **CHK-512** `test_texel`, `test_state`, `test_lane` and `test_lane_count` are called by a test alone, since they state what its run binds and which lane it is (EVAL-127, EVAL-141).
+  An entry point that reaches one is `stage-not-allowed` at that call, and no target writes one.
 * **CHK-232** In a test with an `error` or a `warning` expectation, every diagnostic of any phase inside it is the test's, and is reported nowhere.
   Inside is from its keyword to the end of its body.
   One expected diagnostic usually brings others with it, and the test exists to show that the one it names is reported.
@@ -1249,7 +1252,7 @@ The stage inputs `@subgroup_size` and `@subgroup_invocation_id` (CHK-271) are it
 * **CHK-378** The lane of `subgroup_broadcast` is a constant `int` from 0 to 127, and the lane of `quad_broadcast` a constant from 0 to 3, or each is `invalid-constant-argument`.
   So are the mask of `subgroup_shuffle_xor` and the delta of `subgroup_shuffle_up` and `subgroup_shuffle_down`, from 0 to 127, which WGSL and MSL require every invocation to share.
   A constant is an `int` literal or the name of an `int` `const`; 128 is the most invocations a subgroup holds on any target, and WGSL refuses a lane past it.
-* **CHK-379** A test whose run reaches a subgroup operation is `unsupported-yet` at the call: a run is one invocation, and has no subgroup.
+* **CHK-379** A test whose run reaches a subgroup operation runs as the lanes of a subgroup, once per size a target has (EVAL-140), and each call stands where CHK-377 says.
 * **CHK-380** A compute entry point whose inlined body reaches a quad operation has a workgroup of one row, `(x, 1, 1)` with `x` a multiple of 4 ([why](why/checking.md#chk-380)).
   Any other workgroup makes each such call `invalid-entry-point`.
   That is the one shape whose quads HLSL forms of four consecutive invocations, as WGSL and MSL form every compute stage's.
@@ -1746,7 +1749,7 @@ A diagnostic of this pass has a kind, a file, a byte span in that file, and a de
 
 | kind | reported by |
 |---|---|
-| `unsupported-yet` | CHK-8, CHK-61, CHK-134, CHK-213, CHK-237, CHK-291, CHK-299, CHK-307, CHK-314, CHK-321, CHK-329, CHK-333, CHK-338, CHK-339, CHK-344, CHK-346, CHK-347, CHK-350, CHK-352, CHK-353, CHK-357, CHK-366, CHK-374, CHK-379, CHK-381, CHK-383, CHK-387, CHK-389, CHK-397, CHK-431, CHK-432, CHK-434, CHK-460, CHK-450, CHK-453, CHK-454 |
+| `unsupported-yet` | CHK-8, CHK-61, CHK-134, CHK-213, CHK-237, CHK-291, CHK-299, CHK-307, CHK-314, CHK-321, CHK-329, CHK-333, CHK-338, CHK-339, CHK-344, CHK-346, CHK-347, CHK-350, CHK-352, CHK-353, CHK-357, CHK-366, CHK-374, CHK-381, CHK-383, CHK-387, CHK-389, CHK-397, CHK-431, CHK-432, CHK-434, CHK-460, CHK-450, CHK-453, CHK-454 |
 | `member-not-allowed-here` | CHK-490 |
 | `duplicate-declaration` | CHK-12, CHK-28, CHK-241, CHK-347, CHK-351 |
 | `dependency-cycle` | CHK-18, CHK-136 |
@@ -1782,7 +1785,7 @@ A diagnostic of this pass has a kind, a file, a byte span in that file, and a de
 | `feature-not-declared` | CHK-264, CHK-322, CHK-382 |
 | `unused-require` | CHK-265 |
 | `generic-not-instantiated` | CHK-338 |
-| `stage-not-allowed` | CHK-193, CHK-277, CHK-298, CHK-329, CHK-344 |
+| `stage-not-allowed` | CHK-193, CHK-277, CHK-329, CHK-344, CHK-512 |
 | `ambiguous-overload` | CHK-72 |
 | `missing-field`, `unknown-field`, `duplicate-field` | CHK-178 |
 | `invalid-entry-point` | CHK-87, CHK-88, CHK-89, CHK-93, CHK-271, CHK-273, CHK-276, CHK-294, CHK-301 to CHK-306, CHK-326 to CHK-328, CHK-342, CHK-380, CHK-481, CHK-484, CHK-485 |
@@ -1802,7 +1805,7 @@ A diagnostic of this pass has a kind, a file, a byte span in that file, and a de
 | `constant-not-representable` | CHK-312, CHK-396 |
 | `missing-sampler` | CHK-279 |
 | `invalid-constant-argument` | CHK-280, CHK-285, CHK-299, CHK-309, CHK-378, CHK-389, CHK-425, CHK-426, CHK-433 |
-| `non-uniform-control-flow` | CHK-282, CHK-374, CHK-377, CHK-431 |
+| `non-uniform-control-flow` | CHK-282, CHK-298, CHK-374, CHK-377, CHK-379, CHK-431 |
 | `non-uniform-index` | CHK-300, CHK-401 |
 | `needless-nonuniform` | CHK-300, CHK-401 |
 | `unproven-index` | CHK-300 |

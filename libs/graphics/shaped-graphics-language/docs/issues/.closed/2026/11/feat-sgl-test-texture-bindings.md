@@ -3,6 +3,8 @@ created: 2026-10-17
 refs:
   - file: libs/graphics/shaped-graphics-language/src/shaped-graphics-language/interpret/interpret.hh
   - file: libs/graphics/shaped-graphics-language/src/shaped-graphics-language/test/run_tests.cc
+closed: 2026-11-06
+resolution: fixed
 ---
 
 # Textures, images and samplers in a test's bindings
@@ -19,9 +21,9 @@ Sampling covers nearest and linear filtering, the three address modes, mip level
 An image store comes back to the driver's `mutable_texels`, and the outcome compares stored images as it does buffers.
 CHK-333 and CHK-314 no longer refuse a texture, an image or a sampler in a test.
 
-## Left
+## Done on 2026-11-06
 
-* A way for a test to state texels in SGL, so `sgl test` and a corpus file can bind a texture without a C++ driver; today such a texture is empty there.
-* Texel atomics of an `@atomic` image, which still read zero (EVAL-100).
-* A format's quantization of what an image stores, which the run keeps exact (EVAL-120).
-* Anisotropic filtering, which the run leaves out, and filtering across a cube face's edge (EVAL-126).
+A test states a texel itself with `t.test_texel(xy, value)`, which grows a texture its driver bound nothing to, and a dynamic sampler's state with `s.test_state(from)` (EVAL-127, EVAL-128).
+So `sgl test` and a corpus file bind a texture with no C++ driver; `tests/corpus/tests/texels.sgl` is the corpus.
+A texel atomic of an `@atomic` image updates the texel the run holds, as a buffer's atomic does its element (EVAL-100).
+What the textures still leave out is [feat-sgl-interpreter-texture-fidelity](../../../feat-sgl-interpreter-texture-fidelity.md).

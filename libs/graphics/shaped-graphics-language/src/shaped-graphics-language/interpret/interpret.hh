@@ -125,6 +125,9 @@ struct sgl::check::run_inputs
     cc::pinned_data<byte const> acceleration_pool;
     /// The root unit of each acceleration member of the entry point, counted across its binding list in order; a missing one is 0.
     cc::vector<u32> acceleration_roots;
+    /// How many lanes the run is, one invocation each of one subgroup of that size, which run one after another (EVAL-140).
+    /// Its subgroup operations and derivatives exchange values between them; one lane has derivatives of 0.
+    i32 lane_count = 1;
 };
 
 /// The texels a driver binds to a texture or an image, laid out as `texture_contents` holds them.
@@ -205,10 +208,12 @@ struct sgl::check::check_failure
     cc::vector<value> loop_values;
     /// Parallel to the site's `message_values`: what an `assert`'s message interpolates.
     cc::vector<value> message_values;
+    /// The lane whose run it was false in (EVAL-140).
+    i32 lane = 0;
 
     [[nodiscard]] bool operator==(check_failure const& rhs) const
     {
-        return site == rhs.site && ast::impl::is_equal(values, rhs.values)
+        return site == rhs.site && lane == rhs.lane && ast::impl::is_equal(values, rhs.values)
             && ast::impl::is_equal(is_evaluated, rhs.is_evaluated) && ast::impl::is_equal(loop_values, rhs.loop_values)
             && ast::impl::is_equal(message_values, rhs.message_values);
     }

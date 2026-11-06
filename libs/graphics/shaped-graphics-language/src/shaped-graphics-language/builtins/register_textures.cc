@@ -77,6 +77,20 @@ sgl::builtins::texture::argument_layout sgl::builtins::texture::layout_of(call c
     auto const& s = traits_of(c.where);
     auto result = argument_layout();
     auto next = 2;
+    if (c.what == op::test_texel)
+    {
+        // `t.test_texel(xy, value, level, .layer, .face)`, or a multisampled one's `.sample` in place of the level
+        result.first = next++;
+        if (s.is_ms)
+            result.sample = next++;
+        else if (!c.is_image)
+            result.level = next++;
+        if (s.is_array)
+            result.layer = next++;
+        if (s.is_cube)
+            result.face = next++;
+        return result;
+    }
     if (c.what == op::image_store)
     {
         result.first = next++;
@@ -290,6 +304,8 @@ written hlsl_call(call const& c, call_context const& ctx)
             return {.text = cc::format("{}[{}]", t, index)};
         return {.text = cc::format("{}[{}] = {}", t, index, argument(ctx, l.first))};
     }
+    case op::test_texel:
+        break;
     }
     return {};
 }
@@ -379,6 +395,8 @@ written wgsl_call(call const& c, call_context const& ctx)
         return {.text = cc::format("textureStore({}, {}{}, {})", t, wgsl_texel_coordinate(s, argument(ctx, 1)), layer,
                                    padded(argument(ctx, l.first), c.width, c.kind, vector))};
     }
+    case op::test_texel:
+        break;
     }
     return {};
 }
@@ -472,6 +490,8 @@ written msl_call(call const& c, call_context const& ctx)
         return {.text = cc::format("{}.write({}, {}{})", t, padded(argument(ctx, l.first), c.width, c.kind, vector),
                                    uint_coord, layer)};
     }
+    case op::test_texel:
+        break;
     }
     return {};
 }
@@ -705,6 +725,29 @@ void add_texture_call(registry& r, call const& c, cc::string_view texture_type)
                           .is_texture_call = true});
 }
 
+/// EVAL-127: `t.test_texel(xy, value)`, how a test states a texel of what its run binds; no target writes it.
+void add_test_texel(registry& r, shape_traits const& s, call c, cc::string_view texture_type, cc::string_view texel)
+{
+    c.what = op::test_texel;
+    auto params = cc::format("t: {}, xy: {}, value: {}", texture_type,
+                             s.is_cube ? cc::string("int2") : coordinate_type(s, false), texel);
+    if (s.is_ms)
+        params += ", .sample: int = 0";
+    else if (!c.is_image)
+        params += ", level: int = 0";
+    if (s.is_array)
+        params += ", .layer: int = 0";
+    if (s.is_cube)
+        params += ", .face: int = 0";
+    r.add(function_record{
+        .signature = cc::format("fun test_texel({})", params),
+        .evaluate = nothing,
+        .write = {.kind = spelling_kind::custom, .custom = write_texture_call, .data = c.pack()},
+        .is_texture_call = true,
+        .is_test_only = true,
+    });
+}
+
 void add_sampled_shape(registry& r, shape_traits const& s)
 {
     // loads of every component type and width; samples and gathers of floats alone, since only they filter
@@ -713,6 +756,7 @@ void add_sampled_shape(registry& r, shape_traits const& s)
         {
             auto const texture_type = cc::format("{}[{}]", s.texture, type_name(stem_of(kind), width));
             auto const base = call{.where = s.s, .width = width, .kind = kind};
+            add_test_texel(r, s, base, texture_type, type_name(stem_of(kind), width));
             if (!s.is_cube)
             {
                 auto load = base;
@@ -750,6 +794,7 @@ void add_sampled_shape(registry& r, shape_traits const& s)
 void add_depth_shape(registry& r, shape_traits const& s)
 {
     auto const base = call{.where = s.s, .width = 1, .kind = value_kind::scalar_float, .is_depth = true};
+    add_test_texel(r, s, base, s.depth, "float");
     if (!s.is_cube)
     {
         auto load = base;
@@ -775,6 +820,9 @@ void add_image_shape(registry& r, shape_traits const& s)
         {
             auto const texel = type_name(stem_of(kind), width);
             auto const c = call{.where = s.s, .width = width, .kind = kind};
+            auto stated = c;
+            stated.is_image = true;
+            add_test_texel(r, s, stated, cc::format("{}[{}]", s.image, texel), texel);
             auto load = c;
             load.what = op::image_load;
             // An image is read where another invocation may have written it, so its load keeps its place: no @pure.
@@ -917,6 +965,20 @@ void sgl::builtins::register_textures(registry& r)
             .evaluate = identity,
             .write = {.kind = spelling_kind::custom, .custom = write_mark},
             .mark = index_mark::uniform,
+        });
+
+    r.add_comment("// What a test states of its run's bindings, which no target writes (EVAL-127, EVAL-128):\n"
+                  "// `t.test_texel(xy, value)` a texel of a texture or an image, and `s.test_state(from)` a dynamic "
+                  "sampler's state.");
+    for (auto const type : {"sampler", "comparison_sampler"})
+        r.add(function_record{
+            .signature = cc::format("fun test_state(s: {0}, from: {0})", type),
+            .doc = "/// Gives the dynamic sampler `s` the state of `from`, a sampler whose state the source sets.",
+            .evaluate = nothing,
+            // written as nothing, as a texel's statement is
+            .write
+            = {.kind = spelling_kind::custom, .custom = write_texture_call, .data = call{.what = op::test_texel}.pack()},
+            .is_test_only = true,
         });
 
     for (auto const& entry : check::k_shapes)

@@ -1,6 +1,7 @@
 #include <clean-core/string/format.hh>
 #include <shaped-graphics-language/builtins/register.hh>
 #include <shaped-graphics-language/builtins/registry.hh>
+#include <shaped-graphics-language/builtins/subgroup_calls.hh>
 
 using namespace sgl;
 using namespace sgl::builtins;
@@ -9,39 +10,16 @@ using namespace sgl::builtins;
 
 namespace
 {
-/// Gives nothing, which the interpreter takes for a wrong result: a test runs one invocation, which has no subgroup,
-/// and one that reaches a subgroup operation is refused before it runs (CHK-379).
+/// Gives nothing: the interpreter computes a subgroup operation itself, from what every lane gives it (EVAL-143).
 void no_subgroup(cc::span<check::scalar const>, cc::vector<check::scalar>&)
 {
 }
 
-enum class subgroup_op : u8
+/// What a test's run is in: its lane, and the subgroup's size, which the interpreter gives rather than evaluate.
+void no_lane(cc::span<check::scalar const>, cc::vector<check::scalar>& out)
 {
-    all,
-    any,
-    ballot,
-    add,
-    mul,
-    min,
-    max,
-    bit_and,
-    bit_or,
-    bit_xor,
-    exclusive_add,
-    exclusive_mul,
-    inclusive_add,
-    inclusive_mul,
-    broadcast,
-    broadcast_first,
-    shuffle,
-    shuffle_xor,
-    shuffle_up,
-    shuffle_down,
-    quad_swap_x,
-    quad_swap_y,
-    quad_swap_diagonal,
-    quad_broadcast,
-};
+    out.push_back(check::scalar::of(0));
+}
 
 /// What an operation takes besides the value it exchanges.
 enum class operand : u8
@@ -281,6 +259,12 @@ written write_subgroup(call_context const& ctx)
     return {.text = cc::format("{}({}, {})", name, x, lane)};
 }
 
+/// What no target writes, since only a test calls it (CHK-512).
+written write_nothing(call_context const&)
+{
+    return {};
+}
+
 /// HLSL has no inclusive prefix, which is the exclusive one combined with the invocation's own value.
 /// MSL's ballot is 64 bits, which fill the low two components of the `uint4`.
 cc::string subgroup_helper(helper_context const& c)
@@ -358,4 +342,23 @@ void sgl::builtins::register_subgroups(registry& r)
             });
         }
     }
+
+    r.add_comment("// What a test's run is in, which it reads where an entry point reads its subgroup's stage inputs "
+                  "(EVAL-141).\n"
+                  "// A test that reaches either runs once per subgroup size a target has; no target writes them.");
+    r.add(function_record{
+        .signature = "fun test_lane() -> int",
+        .doc = "/// This invocation's index in its subgroup, as `@subgroup_invocation_id` gives it.",
+        .evaluate = no_lane,
+        .write = {.kind = spelling_kind::custom, .custom = write_nothing},
+        .differs_between_invocations = true,
+        .is_test_only = true,
+    });
+    r.add(function_record{
+        .signature = "fun test_lane_count() -> int",
+        .doc = "/// How many invocations the subgroup has, as `@subgroup_size` gives it.",
+        .evaluate = no_lane,
+        .write = {.kind = spelling_kind::custom, .custom = write_nothing},
+        .is_test_only = true,
+    });
 }

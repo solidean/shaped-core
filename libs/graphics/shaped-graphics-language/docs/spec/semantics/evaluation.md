@@ -39,7 +39,7 @@ A listing here is the dump of a flat tree, shortened: a label is `$name`, and a 
   It is also `atan2` of a zero `y` and a zero `x`, which HLSL gives as pi / 2 and SPIR-V leaves undefined.
   And it is `clamp` whose `low` is above its `high`, of floats and of integers alike, which MSL leaves undefined and WGSL may answer for floats with the median of the three.
 * **EVAL-88** A transcendental builtin is computed to within a few units in the last place of a `float`, and no closer ([why](why/evaluation.md#eval-88)).
-  `round` is ties to even, `floor`, `ceil`, `trunc` and `fract` are exact, and a derivative in a run of one invocation is 0.
+  `round` is ties to even, `floor`, `ceil`, `trunc` and `fract` are exact, and a derivative in a run of one lane is 0 (EVAL-144).
   A rounding that lands on zero keeps the sign of its argument, so `round(-0.4)` is `-0.0`, as a GPU gives it.
   `step(edge, x)` is 1 where `x >= edge` and 0 elsewhere, as HLSL and WGSL define it, so a NaN on either side gives 0.
   A byte of `pack_unorm4x8` and `pack_snorm4x8` is `floor(v + 0.5)` of the scaled value, WGSL's formula, which HLSL's text writes too.
@@ -237,14 +237,14 @@ fun graded(a: float) -> float:
 * **EVAL-97** A load or store of `bytes` at an offset that is no multiple of 4, or reaching a word past the end of the memory, is the status `program-error`.
   No target agrees on a word that straddles two, and EVAL-90 already says why none defines one past the end.
 * **EVAL-92** A run holds the memory of each `@workgroup` binding it reaches, from its start, and a read of any part of it nothing was stored to is a `program-error`.
-  A run is one invocation, so a barrier waits for nobody and what it stored is all the memory holds.
+  Each lane holds its own, so a barrier waits for nobody and what a lane stored is all its memory holds (EVAL-142).
 * **EVAL-93** An atomic's update names its place first, then evaluates its other arguments, then reads, updates and writes the atomic in one step, giving the value it read.
-  A run is one invocation, so no other update ever falls between.
+  The lanes of a run run one after another, so no other update ever falls between (EVAL-142).
   A strong compare-exchange stores `desired` exactly where the value it read is `expected`.
 * **EVAL-100** A weak compare-exchange that reads `expected` fails spuriously every other time, the first time first: it stores nothing, and gives `exchanged` false.
   Each call of the source counts on its own, wherever it was inlined, and one that reads anything else fails as a strong one does ([why](why/evaluation.md#eval-100)).
   `run_limits::fails_weak_exchanges` false makes every one strong, for a driver that wants none.
-  A texel's, whose image a run holds no texels of, reads zero, and stores where zero is `expected`.
+  A texel's atomic updates the texel as a buffer's updates its element, and one of an image the run holds no texels of is a `program-error` (EVAL-121).
 * **EVAL-94** The bindings of a run are what its driver binds by name, a binding by its name and a member by its own.
   A value is its scalars in field order, 4 bytes each and never padded, and a buffer its elements one after another, each laid out so.
   A member the driver leaves out is zero, a buffer it leaves out is empty, and an acceleration member it leaves out is the empty TLAS.
@@ -281,7 +281,7 @@ fun graded(a: float) -> float:
   A static sampler and a file-scope sampler filter as the source sets them; a dynamic one as the driver sets it, and as `sg::sampler`'s default where it sets nothing.
   A sample clamps its layer to the array, as D3D and Vulkan both define it.
 * **EVAL-124** A sample's level is its `level`, or from its gradients `log2` of the longer one in texels, plus the sampler's `mip_lod_bias` and a `bias` argument, clamped to `min_lod` and `max_lod`.
-  A run is one invocation, whose derivatives are 0 (EVAL-88), so a sample that takes its level from them reads the lowest level the clamps allow.
+  A sample that takes its level from derivatives takes those of its coordinate across the quad (EVAL-144); in a run of one lane they are 0, so it reads the lowest level the clamps allow.
   A level of 0 or below magnifies, and filters by `mag_filter`; above 0 by `min_filter`.
   A `nearest` mip filter reads level `floor(level + 0.5)`, clamped to the levels the texture has; GPUs round a level of exactly a half differently.
   A `linear` one mixes the two levels around it, as EVAL-122 mixes texels.
@@ -290,11 +290,42 @@ fun graded(a: float) -> float:
 * **EVAL-126** A cube's direction picks the face of its largest component, z before y before x where two are equal, and the coordinate on that face as Vulkan's table gives it.
   The face is filtered as `clamp_edge`, whatever the sampler's address modes say.
   A GPU filters across a face's edge into the next face, so a sample within half a texel of an edge differs there.
-  A texel atomic of an `@atomic` image still reads zero, as EVAL-100 says, and a multisampled texture is loaded by sample and never sampled.
+  A multisampled texture is loaded by sample and never sampled.
+* **EVAL-127** `t.test_texel(xy, value)` in a test states the texel at `xy` of a texture or an image, at its `level`, `.layer`, `.face` or `.sample`, each 0 where it is left out.
+  Of one its driver binds nothing to, the texture grows to the smallest that holds every texel stated so far, and every texel no statement names is zero.
+  That is level 0's extent at least `(x + 1) << level` along each axis, and as many levels, layers and samples as the statements name; a cube grows by whole cubes.
+  Of one its driver binds, the texel lies inside it or is a `program-error`, and an image's comes back to the driver as a store's does.
+  A read sees the texture as stated so far, so a test states before it reads.
+* **EVAL-128** `s.test_state(from)` gives the dynamic sampler `s` the state `from` has, a static member, a file-scope sampler or a dynamic one, from there on.
+  A static `s` is a `program-error`, since its state is the source's.
 * **EVAL-44** A run is bounded by a fuel count, one unit per statement, per expression node and per iteration, and running out is a status as well.
 
+## Lanes
+
+A subgroup operation and a derivative exchange values between invocations, so a test that reaches one runs as several.
+
+* **EVAL-140** A run is one or more **lanes**, each one invocation of one subgroup of that many, and a test runs once per size it needs (CHK-298, CHK-379).
+  A test that reaches a subgroup operation outside a quad, `test_lane` or `test_lane_count` runs at every size a target has a subgroup of: 4, 8, 16, 32, 64 and 128.
+  One that reaches only derivatives and quad operations runs as one quad of 4 lanes, and every other test as one lane.
+  It passes where every size passes, and the first size that does not is the one it reports, with each failure's lane.
+* **EVAL-141** `test_lane()` is the lane's index, from 0, and `test_lane_count()` how many lanes the run has, as `@subgroup_invocation_id` and `@subgroup_size` are in an entry point.
+  Lanes `4k` to `4k + 3` are a quad, laid out as a pixel quad is: lane `4k + x + 2y` stands at `(x, y)`.
+* **EVAL-142** The lanes run one after another, lane 0 first, each from its start to its end.
+  They share the buffers, images and samplers the run binds, so a lane sees what the lanes before it stored and nothing of what those after it store.
+  A program that races on memory cannot tell that order from any other, and one that does not race has no order to tell.
+  Workgroup memory is each lane's own (EVAL-92).
+* **EVAL-143** A subgroup operation is given what every lane gave the same call the same number of times before, since every lane reaches it together (CHK-377).
+  A reduction combines the lanes in lane order, each step rounded as an operation of its type is, and a scan the lanes below this one, from its operation's identity.
+  A broadcast, a shuffle and a quad operation give the value of the lane they name, and zero where it names no lane of the subgroup (CHK-376).
+  A lane that reaches a call another does not is a `program-error`, which only a call no uniformity is judged of can do, such as one in a check's condition.
+* **EVAL-144** `ddx(v)` is `v` at the quad's `(1, 0)` minus `v` at its `(0, 0)`, and `ddy(v)` at `(0, 1)` minus `(0, 0)`, in every lane of the quad: the coarse derivative, which every target may give.
+  `fwidth(v)` is `abs(ddx(v)) + abs(ddy(v))`, and a sample that takes its level from derivatives takes `ddx` and `ddy` of its coordinate as its gradients (EVAL-124).
+  A run of fewer than four lanes has no quad, and its derivatives are 0.
+* **EVAL-145** A run ends as its first lane that does not end normally, in lane order, and normally where every lane does.
+  A `discard` ends its own lane, so the run is `discarded` (EVAL-89); a lane after it runs to its end, and reads zero where it exchanges a value with the discarded one.
 ## Open
 
 * Definite assignment: a `let` without a value is what would let a program read a `var` that holds nothing, and the check pass carries none yet.
 * Whether `float` arithmetic is exact across targets; the machine computes in `f32`, and a target may fuse or reorder.
 * Whether a pattern that has an effect is worth the ordering EVAL-68 has to promise, which a pattern language would make sharper ([patterns](../incubator/patterns.md)).
+* Whether a barrier waits for the lanes, which would make workgroup memory one the lanes share ([testing](../incubator/testing.md)).

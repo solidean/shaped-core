@@ -551,7 +551,7 @@ Its caveats are the other atomics' and a few of its own:
   There, a weak one in a retry loop, or a compute stage, is the way.
 * The result of either is non-uniform (CHK-283): an index taken from it into a binding array is `nonuniform`, and a barrier under a branch on it is refused.
   The strong form's loop is the target's, and leaves the control flow as uniform as it found it, so a barrier after the call is fine.
-* A test runs one invocation, which no other ever races ([EVAL-100](semantics/evaluation.md#errors-of-the-program)).
+* A test's lanes run one after another, so none of them ever races another ([EVAL-142](semantics/evaluation.md#lanes)).
   It fails a weak compare-exchange spuriously every other time each call meets `expected`, the first time first.
   So a weak one without its retry loop fails its test, as it may on a GPU.
 * A spin lock built from either, where one invocation waits for another to release it, may hang a GPU whose SIMD group cannot run both sides; SGL does not detect one.

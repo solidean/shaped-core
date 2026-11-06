@@ -11,6 +11,7 @@ using namespace sgl::builtins::texture;
 
 namespace
 {
+using impl::coordinate_gradients;
 using impl::texture_failure;
 
 texture_failure no_value(cc::string detail)
@@ -285,8 +286,12 @@ texture_failure addressed_texel(call const& c, texels const& t, cc::span<value c
 }
 
 /// The level a sample reads, from its explicit level or gradients, the sampler's bias and its clamps (EVAL-124).
-/// The derivatives of a run of one invocation are 0, so an implicit level is the lowest the clamps allow.
-f32 lod_of(call const& c, texels const& t, sampler_state const& s, cc::span<value const> args)
+/// An implicit level is from the quad's `gradients`; a run of one lane has none, so it is the lowest the clamps allow.
+f32 lod_of(call const& c,
+           texels const& t,
+           sampler_state const& s,
+           cc::span<value const> args,
+           coordinate_gradients const* gradients)
 {
     auto const l = layout_of(c);
     constexpr auto lowest = -3.4028235e38f;
@@ -298,10 +303,13 @@ f32 lod_of(call const& c, texels const& t, sampler_state const& s, cc::span<valu
         auto const a = arg(args, level_at);
         lod = a.empty() ? 0.0f : a[0].kind == value_kind::scalar_float ? a[0].as_float() : f32(a[0].as_int());
     }
-    else if (c.what == op::sample_grad)
+    else if (c.what == op::sample_grad
+             || (gradients != nullptr
+                 && (c.what == op::sample || c.what == op::sample_bias || c.what == op::sample_compare)))
     {
-        auto const gx = arg(args, l.first);
-        auto const gy = arg(args, l.second);
+        auto const is_implicit = c.what != op::sample_grad;
+        auto const gx = is_implicit ? cc::span<scalar const>(gradients->x) : arg(args, l.first);
+        auto const gy = is_implicit ? cc::span<scalar const>(gradients->y) : arg(args, l.second);
         f32 const extent[3] = {f32(t.width(0)), f32(t.height(0)), f32(t.depth(0))};
         auto const length = [&](cc::span<scalar const> g)
         {
@@ -333,7 +341,8 @@ texture_failure sampled(call const& c,
                         texels const& t,
                         sampler_state const& s,
                         cc::span<value const> args,
-                        cc::vector<scalar>& out)
+                        cc::vector<scalar>& out,
+                        coordinate_gradients const* gradients)
 {
     auto const& tex = t.t;
     auto const l = layout_of(c);
@@ -394,7 +403,7 @@ texture_failure sampled(call const& c,
         return {};
     }
 
-    auto const lod = lod_of(c, t, s, args);
+    auto const lod = lod_of(c, t, s, args, gradients);
     auto const is_magnified = lod <= 0.0f;
     auto const is_linear = (is_magnified ? s.mag_filter : s.min_filter) == 1;
     auto const top = f32(tex.levels - 1);
@@ -431,7 +440,8 @@ impl::texture_failure impl::run_texture_call(call const& c,
                                              sampler_state const* sampler,
                                              cc::span<value const> args,
                                              cc::vector<scalar>& out,
-                                             bool& stored)
+                                             bool& stored,
+                                             coordinate_gradients const* gradients)
 {
     auto const t = texels{.t = texture, .axes = axes_of(c.where)};
     switch (c.what)
@@ -443,6 +453,8 @@ impl::texture_failure impl::run_texture_call(call const& c,
     case op::image_size:
     case op::image_layer_count:
         return sizes(c, t, args, out);
+    case op::test_texel:
+        return malformed("a texel's statement run as a read");
     default:
         break;
     }
@@ -477,6 +489,110 @@ impl::texture_failure impl::run_texture_call(call const& c,
     default:
         if (sampler == nullptr)
             return malformed("a sample without its sampler");
-        return sampled(c, t, *sampler, args, out);
+        return sampled(c, t, *sampler, args, out, gradients);
     }
+}
+
+impl::texture_failure impl::state_texel(call const& c, texture_contents& texture, bool may_grow, cc::span<value const> args)
+{
+    auto const axes = axes_of(c.where);
+    auto const l = layout_of(c);
+    auto const coord = arg(args, 1);
+    auto const dim = axes.is_cube ? 2 : axes.dim;
+    i32 xyz[3] = {0, 0, 0};
+    for (auto i = 0; i < dim && i < coord.size(); ++i)
+        xyz[i] = coord[i].as_int();
+    auto const level = int_arg(args, l.level);
+    auto const sample = int_arg(args, l.sample);
+    auto const face = int_arg(args, l.face);
+    auto const layer = axes.is_cube ? int_arg(args, l.layer) * 6 + face : int_arg(args, l.layer);
+    auto const value = arg(args, l.first);
+    auto const channels = c.is_depth ? 1 : c.width;
+    if (value.size() != channels)
+        return malformed("a texel's statement of a value whose width is not its texel's");
+    for (auto i = 0; i < dim; ++i)
+        if (xyz[i] < 0)
+            return no_value(cc::format("a texel stated at the coordinate {}", xyz[i]));
+    if (level < 0 || level > 15 || sample < 0 || face < 0 || face > 5 || layer < 0)
+        return no_value(cc::format("a texel stated at level {}, layer {}, face {} or sample {}", level,
+                                   int_arg(args, l.layer), face, sample));
+
+    // the smallest texture that holds every texel stated so far, every other texel zero
+    if (may_grow)
+    {
+        auto const is_fresh = texture.width == 0;
+        // a fresh texture holds nothing yet, whatever its default extent says
+        auto const grown = [&](i32 old, i32 needed) { return is_fresh || needed > old ? needed : old; };
+        auto next = texture_contents{
+            .binding = texture.binding,
+            .member = texture.member,
+            .element = texture.element,
+            .width = grown(texture.width, (xyz[0] + 1) << level),
+            .height = dim >= 2 ? grown(texture.height, (xyz[1] + 1) << level) : 1,
+            .depth = dim == 3 ? grown(texture.depth, (xyz[2] + 1) << level) : 1,
+            .layers = grown(texture.layers, layer + 1),
+            .levels = grown(texture.levels, level + 1),
+            .samples = grown(texture.samples, sample + 1),
+            .channels = channels,
+        };
+        if (axes.is_cube && next.layers % 6 != 0)
+            next.layers += 6 - next.layers % 6;
+        auto const is_changed = is_fresh || next.width != texture.width || next.height != texture.height
+                             || next.depth != texture.depth || next.layers != texture.layers
+                             || next.levels != texture.levels || next.samples != texture.samples;
+        if (is_changed)
+        {
+            auto const from = texels{.t = texture, .axes = axes};
+            auto const to = texels{.t = next, .axes = axes};
+            next.texels.resize_to_filled(to.level_offset(next.levels), scalar{.kind = c.kind, .bits = 0});
+            for (auto lv = 0; !is_fresh && lv < texture.levels; ++lv)
+                for (auto ly = 0; ly < texture.layers; ++ly)
+                    for (auto z = 0; z < from.depth(lv); ++z)
+                        for (auto y = 0; y < from.height(lv); ++y)
+                            for (auto x = 0; x < from.width(lv); ++x)
+                                for (auto sm = 0; sm < texture.samples; ++sm)
+                                    for (auto ch = 0; ch < channels; ++ch)
+                                        next.texels[to.offset_of(lv, ly, x, y, z, sm) + ch]
+                                            = texture.texels[from.offset_of(lv, ly, x, y, z, sm) + ch];
+            texture = cc::move(next);
+        }
+    }
+
+    auto const t = texels{.t = texture, .axes = axes};
+    if (level >= texture.levels || layer >= texture.layers || sample >= texture.samples)
+        return no_value(cc::format("a texel stated at level {}, layer {} or sample {}, outside the texture the driver "
+                                   "bound",
+                                   level, layer, sample));
+    i32 const extent[3] = {t.width(level), t.height(level), t.depth(level)};
+    for (auto i = 0; i < dim; ++i)
+        if (xyz[i] >= extent[i])
+            return no_value(cc::format("a texel stated at the coordinate {}, outside 0 ..< {} of the texture the "
+                                       "driver bound",
+                                       xyz[i], extent[i]));
+    auto const offset = t.offset_of(level, layer, xyz[0], xyz[1], xyz[2], sample);
+    for (auto ch = 0; ch < channels; ++ch)
+        texture.texels[offset + ch] = value[ch];
+    return {};
+}
+
+impl::texture_failure impl::texel_offset(texture_contents const& texture,
+                                         shape_axes axes,
+                                         cc::span<scalar const> coord,
+                                         i32 layer,
+                                         isize& offset)
+{
+    if (texture.width == 0)
+        return no_value("an atomic of an image the run binds no texels to");
+    auto const t = texels{.t = texture, .axes = axes};
+    i32 xyz[3] = {0, 0, 0};
+    for (auto i = 0; i < axes.dim && i < coord.size(); ++i)
+        xyz[i] = coord[i].as_int();
+    i32 const extent[3] = {t.width(0), t.height(0), t.depth(0)};
+    for (auto i = 0; i < axes.dim; ++i)
+        if (xyz[i] < 0 || xyz[i] >= extent[i])
+            return no_value(cc::format("the texel coordinate {} is outside 0 ..< {}", xyz[i], extent[i]));
+    if (layer < 0 || layer >= texture.layers)
+        return no_value(cc::format("layer {} of an image of {} layers", layer, texture.layers));
+    offset = t.offset_of(0, layer, xyz[0], xyz[1], xyz[2], 0);
+    return {};
 }

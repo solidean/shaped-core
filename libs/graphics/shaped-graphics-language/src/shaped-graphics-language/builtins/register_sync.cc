@@ -739,20 +739,6 @@ written write_texel_atomic(call_context const& ctx)
     return {};
 }
 
-/// A test's image has no texels, so an update of one finds zero, as a load of it does.
-template <bool IsSigned>
-void texel_zero(cc::span<scalar const>, cc::vector<scalar>& out)
-{
-    out.push_back({.kind = IsSigned ? value_kind::scalar_int : value_kind::scalar_uint, .bits = 0});
-}
-
-/// A weak compare-exchange of a texel finds zero too, and stores where zero is `expected`; it never fails spuriously.
-void texel_exchanged_weak(cc::span<scalar const> in, cc::vector<scalar>& out)
-{
-    auto const& expected = in[in.size() - 2];
-    out.push_back({.kind = expected.kind, .bits = 0});
-    out.push_back({.kind = value_kind::boolean, .bits = expected.bits == 0 ? 1u : 0u});
-}
 
 // ---- a geometry stage's streams ---------------------------------------------------------------------------------
 
@@ -1055,10 +1041,9 @@ void sgl::builtins::register_sync(registry& r)
                 r.add(function_record{
                     .signature = cc::format("@internal {} {}", k_atomic_stages, signature),
                     .doc = info.doc,
-                    .evaluate = info.op == atomic_op::store                 ? nothing
-                              : info.op == atomic_op::compare_exchange_weak ? texel_exchanged_weak
-                              : is_signed                                   ? texel_zero<true>
-                                                                            : texel_zero<false>,
+                    // the interpreter updates the texel as it does a buffer's element (EVAL-100)
+                    .evaluate = is_signed ? evaluator_of<value_kind::scalar_int>(info.op)
+                                          : evaluator_of<value_kind::scalar_uint>(info.op),
                     .write = {.kind = spelling_kind::custom,
                               .custom = write_texel_atomic,
                               .writes_lines = is_compare_exchange(info.op) ? is_not_wgsl : is_hlsl,

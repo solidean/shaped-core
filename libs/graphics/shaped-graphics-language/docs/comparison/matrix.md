@@ -3,7 +3,8 @@
 How SGL compares with the other ways to write one set of shaders for DX12, Vulkan, WebGPU and Metal.
 Every row is judged for a renderer that targets all four, WebGPU in a browser included, and wants hardware ray tracing wherever a platform has it.
 
-**As of 2026-11-02**; SGL's E3 and E4 as of 2026-11-03, its B8 as of 2026-11-04, its A5, A7, A8, B2, B3, B4, B6, B8, B9, B10, B11, B12, D3, D5, D6, E1, E4, F2, F7, G5 and G6 as of 2026-11-05.
+**As of 2026-11-02**; SGL's E3 and E4 as of 2026-11-03, its B8 as of 2026-11-04, its A5, A7, A8, B2, B3, B4, B6, B8, B9, B10, B11, B12, D3, D5, D6, E4, F2, F7, G5 and G6 as of 2026-11-05.
+SGL's E1 as of 2026-11-06.
 Every cell's marker was judged again on 2026-11-05, when ✅ came to mean full support to the extent the targets allow.
 Where a stack lets a program choose defined behaviour on every target, as SGL's robustness profiles do, its semantics rows are ✅ though the default leaves a case undefined.
 The other columns move fast, Slang's Metal and WGSL support above all, so each cell carries a source and the date it was checked; see [Sources](#sources).
@@ -91,7 +92,7 @@ A per-target cell reads `dx12 / vulkan / metal / webgpu`.
 
 | Row | HLSL + chain | Slang | WGSL | GLSL + chain | SGL |
 |---|---|---|---|---|---|
-| **E1** Shader unit tests without a GPU | ❌ | ✅ CPU target and an interpreter, documented as incomplete | ❌ (WESL tests run on a GPU) | ❌ | ⚠️ `test` blocks run on the spec's interpreter, textures and samplers included where a C++ driver binds their texels; a test cannot state texels in SGL yet, and no subgroups or derivatives 🗺️ [feat](../issues/feat-sgl-test-texture-bindings.md) |
+| **E1** Shader unit tests without a GPU | ❌ | ✅ CPU target and an interpreter, documented as incomplete | ❌ (WESL tests run on a GPU) | ❌ | ✅ `test` blocks run on the spec's interpreter: buffers, textures, images and samplers, whose texels and state a test states itself or a driver binds, and subgroup operations and derivatives over lanes, at every subgroup size a target has |
 | **E2** Diagnostics | ⚠️ later hops report against IR, once per hop | ⚠️ once against the source; downstream errors per target | ✅ once against the source | ⚠️ SPIRV-Cross errors per target, against SPIR-V | ✅ once against the source, for every target |
 | **E3** Debugging the output | ⚠️ PIX at source level on DXIL; mapping lost after a hop | ⚠️ debug info and line directives | ⚠️ readable output, no source stepping | ⚠️ readable output, mapping lost | ✅ readable text with SGL's names; `#line` in HLSL and MSL, so DXC, Metal and PIX name the `.sgl` line; webgpu logs Tint's messages at the `.sgl` line and its inlined calls |
 | **E4** printf and assert on a GPU | ⚠️ printf on Vulkan only | ⚠️ printf except on WGSL; no assert | ⚠️ Naga printf on Metal and Vulkan | ⚠️ printf on Vulkan only | ⚠️ `print` and `assert` with interpolated values on dx12, vulkan and webgpu, logged once the epoch completes; a failed assert ends its invocation, after any barrier still ahead, and fails a test; a vertex stage's on vulkan where the device lets it store, and never on webgpu, which has no storage there; metal not yet 🗺️ [feat](../issues/feat-sgl-gpu-print-and-assert.md) |
@@ -339,7 +340,7 @@ Per row and column:
   - HLSL + chain: DXC
   - Slang: SLANG `slangc` targets (`slangvm`, `llvm`, `cpp`)
   - WGSL: WESL
-  - SGL: [evaluation.md](../spec/semantics/evaluation.md), [architecture.md](../architecture.md) "Tests"
+  - SGL: [evaluation.md](../spec/semantics/evaluation.md) EVAL-127, EVAL-128, EVAL-140 to EVAL-145, `tests/corpus/tests/lanes.sgl`, [architecture.md](../architecture.md) "Tests" (2026-11-06)
 - **E2**
   - HLSL + chain: TINT, NAGA, MSC error formats
   - Slang: SLANG
