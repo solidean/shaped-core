@@ -72,11 +72,17 @@ struct stream_no_first_write
 template <stream_access Access>
 using stream_first_write_t = std::conditional_t<stream_can_write(Access), byte*, stream_no_first_write>;
 
+/// Empty placeholder occupying the `write_end` slot on every stream but read_write.
+/// A type of its own: two members of one empty type must have distinct addresses, which grows a read_stream under the Itanium ABI.
+struct stream_no_write_end
+{
+};
+
 /// Present only on a read_write stream: the write-capacity end, distinct from `_end` (the read/valid end).
 /// On every other stream the write bound is just `_end`, so this is zero-sized.
 template <stream_access Access>
 using stream_write_end_t
-    = std::conditional_t<stream_can_read(Access) && stream_can_write(Access), byte*, stream_no_first_write>;
+    = std::conditional_t<stream_can_read(Access) && stream_can_write(Access), byte*, stream_no_write_end>;
 
 /// The single templated stream engine; the six public stream types in <clean-core/streams/stream.hh> inherit the matching instantiation and pull in its capability-relevant methods.
 /// Members and methods are gated by the template params.
