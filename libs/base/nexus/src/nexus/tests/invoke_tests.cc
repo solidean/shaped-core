@@ -141,7 +141,7 @@ nx::invocation_result nx::impl::invoke_tests_impl(cc::string_view name,
             matches.push_back(&decl);
 
     cc::sort(matches, cc::compare_by([](test_declaration const* d) { return cc::string_view(d->name); },
-                                     [](test_declaration const* d) { return cc::string_view(d->location.file_name()); },
+                                     [](test_declaration const* d) { return cc::string_view(d->file); },
                                      [](test_declaration const* d) { return d->location.line(); }));
 
     // Shuffled before -c scoping, by the driver's seed, so narrowing to one child never changes the order the others ran in.

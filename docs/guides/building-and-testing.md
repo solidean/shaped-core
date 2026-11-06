@@ -374,6 +374,30 @@ The newest 20 reports per preset are kept, within 2 GB ([crash_reports.py](../..
 Open a minidump against the binary beside it, never the build directory's, which a rebuild has replaced: `lldb` inside the folder, then `target create <binary>.exe --core <report>.dmp`.
 WinDbg takes the folder as both paths, `windbg -z <report>.dmp -i . -y .`.
 
+### Failure sites
+
+**The clang development presets build at `SC_SOURCE_SITES=OPAQUE`, so a failed check, assert or test names its site `<binary>+0x<offset>`**.
+[platforms](../platforms.md#source-sites-sc_source_sites) has why and which presets.
+After a failed run dev.py resolves every such site the logs name and prints it under `sites:`, here abridged:
+
+```text
+  sites:
+  clean-core-test.exe+0x1a52d5 -> libs/base/clean-core/tests/span-test.cc:46 (_nx_test_fn_4)
+      46 | CHECK(x + 1 == 5);
+  clean-core-test.exe+0x12ebe -> libs/base/clean-core/src/clean-core/container/impl/allocating_container.hh:133 (cc::allocating_container<int,cc::vector<int> >::operator[])
+      133 | CC_ASSERT(_data.obj_start <= p_obj && p_obj < _data.obj_end, "index out of bounds");
+      inlined into _nx_test_fn_5 at libs/base/clean-core/tests/span-test.cc:55
+  clean-core-test.exe+0x12de0 -> libs/base/clean-core/tests/span-test.cc:52 (_nx_test_fn_5)
+      51 | TEST("span - a failing test")
+      52 | {
+```
+
+The source line under each site is where an assert's condition is read: below `FULL` its message keeps no condition text.
+A test's own site is its body's opening brace, with its `TEST` line printed above it.
+The same lines are appended to the run's stderr log, so the kept failure folder and `test_diag` carry them.
+One `llvm-symbolizer` runs per binary, the one beside the build's compiler, else on `PATH`, or the one `LLVM_SYMBOLIZER` names.
+Without one dev.py prints the raw sites and that hint, and the run's result is the same either way ([sites.py](../../tools/dev/lib/pipeline/sites.py)).
+
 So the loop is **dev.py, then diagnose with the `repo_tools` MCP tools**:
 
 | After a... | Tool         | Typical call                                                       |

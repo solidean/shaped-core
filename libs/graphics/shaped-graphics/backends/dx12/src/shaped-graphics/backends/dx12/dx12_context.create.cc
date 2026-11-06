@@ -653,6 +653,18 @@ cc::result<context_handle> create_dx12_context(backend::dx12::dx12_config const&
         if (FAILED(hr))
             return dx12_error(hr, "ID3D12Device::CreateCommandSignature failed (indirect indexed draw)");
     }
+    // And for a mesh draw: `sg::dispatch_args` is `D3D12_DISPATCH_MESH_ARGUMENTS` field for field.
+    if (ctx->_mesh_shader)
+    {
+        static_assert(sizeof(sg::dispatch_args) == sizeof(D3D12_DISPATCH_MESH_ARGUMENTS));
+        auto const argument = D3D12_INDIRECT_ARGUMENT_DESC{.Type = D3D12_INDIRECT_ARGUMENT_TYPE_DISPATCH_MESH};
+        auto const desc = D3D12_COMMAND_SIGNATURE_DESC{.ByteStride = UINT(sizeof(D3D12_DISPATCH_MESH_ARGUMENTS)),
+                                                       .NumArgumentDescs = 1,
+                                                       .pArgumentDescs = &argument};
+        auto const hr = ctx->_device->CreateCommandSignature(&desc, nullptr, IID_PPV_ARGS(&ctx->_draw_mesh_signature));
+        if (FAILED(hr))
+            return dx12_error(hr, "ID3D12Device::CreateCommandSignature failed (indirect mesh draw)");
+    }
 
     ctx->_epoch_fence = cc::move(epoch_fence);
     ctx->_submission_fence = cc::move(submission_fence);

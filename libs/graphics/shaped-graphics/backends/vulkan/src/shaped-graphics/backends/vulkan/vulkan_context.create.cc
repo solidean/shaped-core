@@ -1175,6 +1175,8 @@ cc::result<context_handle> create_vulkan_context(backend::vulkan::vulkan_config 
     ctx->_shader_execution_reordering = raytracing_supported && reorder_supported;
     if (mesh_shader_supported)
         ctx->_cmd_draw_mesh_tasks = PFN_vkCmdDrawMeshTasksEXT(vkGetDeviceProcAddr(device, "vkCmdDrawMeshTasksEXT"));
+    ctx->_cmd_draw_mesh_tasks_indirect
+        = PFN_vkCmdDrawMeshTasksIndirectEXT(vkGetDeviceProcAddr(device, "vkCmdDrawMeshTasksIndirectEXT"));
     ctx->_mesh_shader = ctx->_cmd_draw_mesh_tasks != nullptr;
     if (shader_features.subgroup_size_control == VK_TRUE)
         ctx->_subgroup_size_control = {

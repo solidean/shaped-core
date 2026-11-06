@@ -823,6 +823,20 @@ type_id checker::check_dot_call(function_scope& scope, ast::expr_id id, ast::cal
     if (receiver != error_type && out.at(receiver).kind == type_kind::stream
         && (out.at(receiver).count > 0 || name == "vertex" || name == "primitive"))
         return check_stream_call(scope, id, call, receiver);
+    // CHK-482: what a primitive is follows from the entry point's `@mesh`, which writes lines or triangles
+    if (receiver != error_type && out.at(receiver).kind == type_kind::stream && (name == "line" || name == "triangle")
+        && is_valid(scope.function) && out.at(scope.function).info >= 0)
+    {
+        auto const is_lines = out.functions[out.at(scope.function).info].is_line_mesh;
+        if (is_lines != (name == "line"))
+        {
+            report(diagnostic_kind::wrong_kind_of_name, file, member.name,
+                   is_lines ? cc::string("this mesh stage writes lines, so a primitive is `o.line(i, l)`")
+                            : cc::string("this mesh stage writes triangles, so a primitive is `o.triangle(i, t)`; "
+                                         "`@mesh(…, lines = M)` writes lines"));
+            return error_type;
+        }
+    }
     if (receiver != error_type && name == "invoke" && out.name_of(receiver) == "hit_object"
         && out.builtin_type_of(receiver) != nullptr)
         return check_hit_invoke(scope, id, call);

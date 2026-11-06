@@ -760,7 +760,10 @@ written write_mesh_output(call_context const& ctx)
     auto const& o = ctx.arguments[0].text;
     if (ctx.data == 0)
         return {.text = cc::format("SetMeshOutputCounts({}, {})", ctx.arguments[1].text, ctx.arguments[2].text)};
-    auto const array = ctx.data == 1 ? "vertices" : ctx.data == 2 ? "triangles" : "primitives";
+    auto const array = ctx.data == 1 ? "vertices"
+                     : ctx.data == 2 ? "triangles"
+                     : ctx.data == 4 ? "lines"
+                                     : "primitives";
     return {.text = cc::format("{}_{}[{}] = {}", o, array, ctx.arguments[1].text, ctx.arguments[2].text)};
 }
 
@@ -847,6 +850,12 @@ void sgl::builtins::register_sync(registry& r)
         .doc = "/// Writes the triangle at `i`, of the three vertices `t` indexes.",
         .evaluate = nothing,
         .write = {.kind = spelling_kind::custom, .custom = write_mesh_output, .data = 2},
+    });
+    r.add(function_record{
+        .signature = "@stages(.mesh) fun line(o: mut mesh_output, i: uint, l: uint2)",
+        .doc = "/// Writes the line at `i`, of the two vertices `l` indexes, in a mesh stage of `lines = M`.",
+        .evaluate = nothing,
+        .write = {.kind = spelling_kind::custom, .custom = write_mesh_output, .data = 4},
     });
 
     r.add_comment("// A geometry stage's stream, called as its methods: `stream.emit(v)` appends the vertex `v`, which "

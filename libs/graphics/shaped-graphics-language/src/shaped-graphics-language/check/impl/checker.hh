@@ -739,7 +739,9 @@ struct checker
     {
         cc::fixed_array<i32, 3> workgroup = {1, 1, 1};
         i32 vertices = 0;
+        /// Triangles, or lines where `is_lines`.
         i32 triangles = 0;
+        bool is_lines = false;
     };
     /// A bad argument reports and leaves a shape of one vertex and one triangle.
     [[nodiscard]] mesh_shape mesh_of(i32 file, ast::attribute const& a);

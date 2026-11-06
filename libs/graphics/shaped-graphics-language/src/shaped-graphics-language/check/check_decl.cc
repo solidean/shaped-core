@@ -2217,6 +2217,7 @@ void checker::compile_function(symbol_id id)
         .float_guarantee = float_level_of(file, find_attribute(file, d.attributes, "float")),
         .max_vertices = max_vertices,
         .max_primitives = mesh_limits.triangles,
+        .is_line_mesh = mesh_limits.is_lines,
         .partitioning = tessellation.partitioning,
         .is_clockwise = tessellation.is_clockwise,
         .stages = stages_of(file, find_attribute(file, d.attributes, "stages")),

@@ -44,6 +44,7 @@ A mesh-shaded description sets no vertex stage, no vertex input, and no tessella
 It renders one view so far.
 dx12 builds it as a pipeline-state stream with `AS` and `MS` subobjects, the only form that states one, and vulkan passes no vertex-input or input-assembly state.
 Such a pipeline draws with `draw_mesh_tasks(x, y, z)`, the workgroup counts of its first stage, and `draw` and `draw_indexed` assert on it, as `draw_mesh_tasks` does on any other.
+`draw_mesh_tasks_indirect` reads the counts from a buffer of `sg::dispatch_args` when the draw runs, a record per draw, so a culling pass decides how many meshlets draw.
 Its reads fold into the `vertex` pipeline stage, as the geometry stages' do; vulkan's pre-rasterization stage bit covers mesh and task.
 
 ### Vertex input: explicit or type-driven

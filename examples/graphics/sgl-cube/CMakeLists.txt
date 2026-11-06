@@ -86,6 +86,8 @@ if(EMSCRIPTEN AND _sgl_cube_backend STREQUAL "shaped-graphics-webgpu" AND TARGET
         "SHELL:-s SINGLE_FILE=1"
         "SHELL:-s NODERAWFS=0"
         "SHELL:-s ALLOW_MEMORY_GROWTH=1"
+        # what web-shell.html hands an edit over with
+        "SHELL:-s EXPORTED_RUNTIME_METHODS=ccall,stringToUTF8,lengthBytesUTF8"
         "SHELL:--pre-js ${CMAKE_CURRENT_SOURCE_DIR}/web-arguments.js"
         "SHELL:--shell-file ${CMAKE_CURRENT_SOURCE_DIR}/web-shell.html"
     )

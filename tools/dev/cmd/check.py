@@ -186,7 +186,7 @@ def _build_checks(ctx: Context, *, memo: dev.CheckMemo | None = None, all_preset
             ("tools/dev/roots-self-test.py", [], (core, f"{dev_lib}/quality/**")),
             ("tools/dev/jsruntime-self-test.py", [], (core, f"{dev_lib}/toolchain/**", "tools/dev/js/*.json")),
             ("tools/dev/ui-self-test.py", [], (core,)),
-            ("tools/dev/symbolize-self-test.py", [], (core, "tools/dev/cmd/symbolize.py")),
+            ("tools/dev/symbolize-self-test.py", [], (core, "tools/dev/cmd/symbolize.py", f"{dev_lib}/pipeline/sites.py")),
             ("tools/dev/submodules-self-test.py", [], (core, f"{dev_lib}/project/**")),
             ("tools/dev/benchmarks-self-test.py", [], (core, f"{dev_lib}/pipeline/**")),
             ("tools/dev/memory-guard-self-test.py", [], (core,)),

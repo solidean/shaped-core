@@ -176,6 +176,7 @@ protected:
     void draw_indexed(draw_indexed_config const& config);
     void draw_mesh_tasks(int x, int y, int z);
     void draw_indexed_indirect(raw_buffer_handle const& args, isize offset_in_bytes, isize count);
+    void draw_mesh_tasks_indirect(raw_buffer_handle const& args, isize offset_in_bytes, isize count);
     void bind_raytracing_pipeline(raytracing_pipeline const& pipeline);
     void bind_raytracing_group(int group_index, binding_group const& group);
     void dispatch_rays(raytracing_shader_table const& table, raygen_index raygen, int width, int height, int depth);
@@ -207,6 +208,8 @@ protected:
     // `count` draws of `sg::draw_indexed_args` records from `offset_in_bytes` on; count > 0.
     // The facade has checked the usage, the alignment and the bounds; the backend declares `args` as an indirect read.
     virtual void raster_draw_indexed_indirect(raw_buffer_handle const& args, isize offset_in_bytes, isize count) = 0;
+    // The same for a mesh draw, whose records are `dispatch_args`; a mesh-shaded pipeline is bound.
+    virtual void raster_draw_mesh_tasks_indirect(raw_buffer_handle const& args, isize offset_in_bytes, isize count) = 0;
 
     // Ray-tracing acceleration-structure builds (reached through cmd.raytracing).
     // Split by geometry family, since a BLAS is triangles or AABBs and span-element overloads cannot

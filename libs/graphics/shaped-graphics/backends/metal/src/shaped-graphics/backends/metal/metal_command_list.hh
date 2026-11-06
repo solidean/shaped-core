@@ -190,6 +190,10 @@ private:
     void raster_draw(draw_config const& config) override;
     // metal builds no mesh-shaded pipeline yet, so none is ever bound to draw
     void raster_draw_mesh_tasks(int, int, int) override { CC_UNREACHABLE("metal's mesh stage is not wired up yet"); }
+    void raster_draw_mesh_tasks_indirect(raw_buffer_handle const&, isize, isize) override
+    {
+        CC_UNREACHABLE("metal's mesh stage is not wired up yet");
+    }
     void raster_draw_indexed(draw_indexed_config const& config) override;
     void raster_draw_indexed_indirect(raw_buffer_handle const& args, isize offset_in_bytes, isize count) override;
 

@@ -227,6 +227,28 @@ void command_list::draw_indexed_indirect(raw_buffer_handle const& args, isize of
     raster_draw_indexed_indirect(args, offset_in_bytes, count);
 }
 
+void command_list::draw_mesh_tasks_indirect(raw_buffer_handle const& args, isize offset_in_bytes, isize count)
+{
+    CC_ASSERT(_raster_is_mesh_shaded, "draw_mesh_tasks_indirect draws a mesh-shaded pipeline; bind one first");
+    CC_ASSERT(args != nullptr, "indirect mesh draw arguments buffer is null");
+    CC_ASSERT(args->usage().has(buffer_usage::indirect_command_buffer), "indirect mesh draw arguments need "
+                                                                        "buffer_usage::indirect_command_buffer");
+    CC_ASSERT(offset_in_bytes >= 0 && offset_in_bytes % 4 == 0, "indirect mesh draw arguments offset must be a "
+                                                                "non-negative multiple of 4");
+    CC_ASSERT(count >= 0, "indirect mesh draw count must be non-negative");
+    CC_ASSERT(offset_in_bytes + count * isize(sizeof(dispatch_args)) <= args->size_in_bytes(),
+              "indirect mesh draw arguments extend past the buffer");
+    if (count == 0)
+        return;
+    _stats.add(stat::draws, count);
+    if (context().portability_checks())
+    {
+        check_raster_aliasing(false);
+        _raster_aliasing.add_indirect_args(args.get());
+    }
+    raster_draw_mesh_tasks_indirect(args, offset_in_bytes, count);
+}
+
 void command_list::bind_raster_pipeline(raster_pipeline const& pipeline)
 {
     // A name empty on either side is a hand-built description, which the formats below still check.
@@ -367,6 +389,12 @@ void rendering_scope::draw_mesh_tasks(int x, int y, int z)
 {
     _cmd.draw_mesh_tasks(x, y, z);
 }
+void rendering_scope::draw_mesh_tasks_indirect(buffer<dispatch_args> const& args, isize first, isize count)
+{
+    CC_ASSERT(first >= 0 && count >= 0 && first + count <= args.element_count(), "indirect mesh draws read past the "
+                                                                                 "arguments buffer");
+    _cmd.draw_mesh_tasks_indirect(args.raw(), first * isize(sizeof(dispatch_args)), count);
+}
 void rendering_scope::draw_indexed_indirect(buffer<draw_indexed_args> const& args, isize first, isize count)
 {
     CC_ASSERT(first >= 0 && count >= 0 && first + count <= args.element_count(), "indirect draws read past the "
@@ -468,6 +496,12 @@ void command_list_raster_scope::draw_mesh_tasks(int x, int y, int z)
 {
     _cmd.draw_mesh_tasks(x, y, z);
 }
+void command_list_raster_scope::draw_mesh_tasks_indirect(buffer<dispatch_args> const& args, isize first, isize count)
+{
+    CC_ASSERT(first >= 0 && count >= 0 && first + count <= args.element_count(), "indirect mesh draws read past the "
+                                                                                 "arguments buffer");
+    _cmd.draw_mesh_tasks_indirect(args.raw(), first * isize(sizeof(dispatch_args)), count);
+}
 void command_list_raster_scope::draw_indexed_indirect(buffer<draw_indexed_args> const& args, isize first, isize count)
 {
     CC_ASSERT(first >= 0 && count >= 0 && first + count <= args.element_count(), "indirect draws read past the "
@@ -554,6 +588,12 @@ void command_list_raster_manual_scope::draw_indexed(draw_indexed_config const& c
 void command_list_raster_manual_scope::draw_mesh_tasks(int x, int y, int z)
 {
     _cmd.draw_mesh_tasks(x, y, z);
+}
+void command_list_raster_manual_scope::draw_mesh_tasks_indirect(buffer<dispatch_args> const& args, isize first, isize count)
+{
+    CC_ASSERT(first >= 0 && count >= 0 && first + count <= args.element_count(), "indirect mesh draws read past the "
+                                                                                 "arguments buffer");
+    _cmd.draw_mesh_tasks_indirect(args.raw(), first * isize(sizeof(dispatch_args)), count);
 }
 void command_list_raster_manual_scope::draw_indexed_indirect(buffer<draw_indexed_args> const& args, isize first, isize count)
 {

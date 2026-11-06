@@ -52,6 +52,8 @@ CC_ASSERTF(idx < n, "index {} out of range {}", idx, n);
 CC_ASSERTF_ALWAYS(cond, "fmt {}", x);
 // Enabled in debug + relwithdebinfo, stripped in release (unless CC_ENABLE_ASSERT_IN_RELEASE).
 // For invariants/pre/postconditions only — never for user input or expected errors (use result<>).
+// Below SC_SOURCE_SITES=FULL (the clang dev presets) the condition text is "" and the site `module+0xoffset`;
+// `dev.py test` resolves it to file:line and prints the source line.
 
 #include <clean-core/common/assert-handler.hh>   // who gets called when one fires
 cc::impl::scoped_assertion_handler h(fn);        // push on THIS THREAD's stack; a throwing handler is fine, it cannot leak to another thread

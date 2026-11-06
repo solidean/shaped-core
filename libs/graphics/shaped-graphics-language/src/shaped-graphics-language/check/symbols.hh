@@ -641,6 +641,8 @@ struct sgl::check::function_info
     i32 max_vertices = 0;
     /// `@mesh`'s `triangles`; 0 for every other stage.
     i32 max_primitives = 0;
+    /// `@mesh(…, lines = M)`: the mesh stage writes lines, of two vertices each, rather than triangles (CHK-480).
+    bool is_line_mesh = false;
     /// A task entry point's: the struct its `dispatch_mesh` hands the mesh stage (CHK-485); `none` before its body
     /// is checked, and for every other function.
     type_id mesh_payload = type_id::none;

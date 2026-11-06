@@ -22,30 +22,48 @@
 
 namespace nx::impl
 {
-void register_test(char const* name, config::cfg test_config, void (*fn)(), cc::source_location loc);
+/// Where a test is declared: the site a failure names, and the source file, which test selection by file matches.
+/// The file is kept at every source-sites level, since a test binary is never shipped.
+struct declaration_site
+{
+    cc::source_location location;
+    char const* file;
+};
+
+// The site of the declaration whose body is `fn`.
+// Below FULL it is the body's own entry, which the debug info resolves to the test's first line:
+// a site captured where the macro expands would lie in the registering dynamic initializer, which has no line.
+#if CC_SOURCE_SITES < 2
+#define NX_IMPL_DECLARATION_SITE(fn) \
+    (::nx::impl::declaration_site{::cc::source_location::at_address(reinterpret_cast<void const*>(&fn)), __FILE__})
+#else
+#define NX_IMPL_DECLARATION_SITE(fn) (::nx::impl::declaration_site{::cc::source_location::current(), __FILE__})
+#endif
+
+void register_test(char const* name, config::cfg test_config, void (*fn)(), declaration_site site);
 
 // Registers a COMMAND: `fn` is the body, and what it returns is the exit status its run reports.
-void register_command(char const* name, config::cfg test_config, int (*fn)(), cc::source_location loc);
+void register_command(char const* name, config::cfg test_config, int (*fn)(), declaration_site site);
 
 // Registers an ASYNC_TEST body: `fn` runs the body and deposits the graph it wants awaited in the sink.
 // Declared here rather than in nexus/async-test.hh so this header names no async type at all — that header carries the macro.
 void register_async_test(char const* name,
                          config::cfg test_config,
                          cc::unique_function<void(async_test_sink&)> fn,
-                         cc::source_location loc);
+                         declaration_site site);
 
 // Registers an ASYNC_COMMAND: `fn` runs the body and deposits the graph whose value is the exit status.
 void register_async_command(char const* name,
                             config::cfg test_config,
                             cc::unique_function<void(async_test_sink&)> fn,
-                            cc::source_location loc);
+                            declaration_site site);
 
 // Registers an ASYNC_INVOCABLE_TEST: `fn` runs the body with args sourced from typed_value slots and deposits its graph in the sink.
 void register_async_invocable_test(char const* name,
                                    config::cfg test_config,
                                    cc::vector<std::type_index> signature,
                                    cc::unique_function<void(cc::span<nx::typed_value*>, async_test_sink&)> fn,
-                                   cc::source_location loc);
+                                   declaration_site site);
 
 // Registers an invocable (inert) test.
 // `signature` is the decayed argument-type join key, and `fn` runs the body with args sourced from typed_value slots.
@@ -54,7 +72,7 @@ void register_invocable_test(char const* name,
                              config::cfg test_config,
                              cc::vector<std::type_index> signature,
                              cc::unique_function<void(cc::span<nx::typed_value*>)> fn,
-                             cc::source_location loc);
+                             declaration_site site);
 
 // Wraps a `void(A...)` test body into the type-erased invoker stored in the registry.
 // It unpacks the typed_value slots back into the concrete argument types and calls the body.
@@ -71,18 +89,19 @@ cc::unique_function<void(cc::span<nx::typed_value*>)> make_test_invoker(void (*f
 }
 } // namespace nx::impl
 
-#define NX_IMPL_TEST(name, unique_id, ...)                                               \
-    static void CC_MACRO_JOIN(_nx_test_fn_, unique_id)();                                \
-    static const bool CC_MACRO_JOIN(_nx_test_reg_, unique_id)                            \
-        = (::nx::impl::register_test(                                                    \
-               name,                                                                     \
-               []()                                                                      \
-               {                                                                         \
-                   using namespace nx::config;                                           \
-                   return ::nx::impl::merge_config(__VA_ARGS__);                         \
-               }(),                                                                      \
-               &CC_MACRO_JOIN(_nx_test_fn_, unique_id), cc::source_location::current()), \
-           true);                                                                        \
+#define NX_IMPL_TEST(name, unique_id, ...)                                        \
+    static void CC_MACRO_JOIN(_nx_test_fn_, unique_id)();                         \
+    static const bool CC_MACRO_JOIN(_nx_test_reg_, unique_id)                     \
+        = (::nx::impl::register_test(                                             \
+               name,                                                              \
+               []()                                                               \
+               {                                                                  \
+                   using namespace nx::config;                                    \
+                   return ::nx::impl::merge_config(__VA_ARGS__);                  \
+               }(),                                                               \
+               &CC_MACRO_JOIN(_nx_test_fn_, unique_id),                           \
+               NX_IMPL_DECLARATION_SITE(CC_MACRO_JOIN(_nx_test_fn_, unique_id))), \
+           true);                                                                 \
     static void CC_MACRO_JOIN(_nx_test_fn_, unique_id)()
 
 #define TEST(name, ...) NX_IMPL_TEST(name, __COUNTER__, __VA_ARGS__)
@@ -127,18 +146,19 @@ cc::unique_function<void(cc::span<nx::typed_value*>)> make_test_invoker(void (*f
 //   APP("viewer", default_entry) { run_viewer(nx::test_args()); }
 #define APP(name, ...) NX_IMPL_TEST(name, __COUNTER__, app, main_thread, exclusive() __VA_OPT__(, ) __VA_ARGS__)
 
-#define NX_IMPL_COMMAND(name, unique_id, ...)                                               \
-    static int CC_MACRO_JOIN(_nx_command_fn_, unique_id)();                                 \
-    static const bool CC_MACRO_JOIN(_nx_command_reg_, unique_id)                            \
-        = (::nx::impl::register_command(                                                    \
-               name,                                                                        \
-               []()                                                                         \
-               {                                                                            \
-                   using namespace nx::config;                                              \
-                   return ::nx::impl::merge_config(__VA_ARGS__);                            \
-               }(),                                                                         \
-               &CC_MACRO_JOIN(_nx_command_fn_, unique_id), cc::source_location::current()), \
-           true);                                                                           \
+#define NX_IMPL_COMMAND(name, unique_id, ...)                                        \
+    static int CC_MACRO_JOIN(_nx_command_fn_, unique_id)();                          \
+    static const bool CC_MACRO_JOIN(_nx_command_reg_, unique_id)                     \
+        = (::nx::impl::register_command(                                             \
+               name,                                                                 \
+               []()                                                                  \
+               {                                                                     \
+                   using namespace nx::config;                                       \
+                   return ::nx::impl::merge_config(__VA_ARGS__);                     \
+               }(),                                                                  \
+               &CC_MACRO_JOIN(_nx_command_fn_, unique_id),                           \
+               NX_IMPL_DECLARATION_SITE(CC_MACRO_JOIN(_nx_command_fn_, unique_id))), \
+           true);                                                                    \
     static int CC_MACRO_JOIN(_nx_command_fn_, unique_id)()
 
 // A command: a program in this binary that does one job and exits — a linter, a converter, a code generator.
@@ -175,7 +195,7 @@ cc::unique_function<void(cc::span<nx::typed_value*>)> make_test_invoker(void (*f
                }(),                                                                                              \
                ::cc::arg_types_of(::cc::signature_of<decltype(&CC_MACRO_JOIN(_nx_invocable_fn_, unique_id))>{}), \
                ::nx::impl::make_test_invoker(&CC_MACRO_JOIN(_nx_invocable_fn_, unique_id)),                      \
-               cc::source_location::current()),                                                                  \
+               NX_IMPL_DECLARATION_SITE(CC_MACRO_JOIN(_nx_invocable_fn_, unique_id))),                           \
            true);                                                                                                \
     static void CC_MACRO_JOIN(_nx_invocable_fn_, unique_id) params
 

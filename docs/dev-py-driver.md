@@ -68,7 +68,7 @@ It is grouped by responsibility, with a strict one-way dependency direction — 
 | `core`       | models, console, ui, logs, process, archive, report, profile      | —                     |
 | `project`    | presets, targets, compdb, flags (CMake File API)                  | core                  |
 | `toolchain`  | toolset, llvm_tools, clangd, disasm, doctor                       | core, project         |
-| `pipeline`   | cmake, configure, build, test, fingerprint, eligibility, prereqs  | core, project, toolchain |
+| `pipeline`   | cmake, configure, build, test, sites, fingerprint, eligibility, prereqs | core, project, toolchain |
 | `quality`    | format, crossrefs, checks                                         | core                  |
 | `perf`       | coverage, pgo, perf                                               | core, project, toolchain, pipeline |
 

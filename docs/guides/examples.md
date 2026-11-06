@@ -373,6 +373,9 @@ and `--shell-file` supplies the page itself instead of emcc's default shell.
 
 `examples/graphics/sgl-cube` builds `graphics-sgl-cube-example-web` the same way, into `web/sgl-cube.html`.
 It is the same cube with its shader written in SGL: one `cube.sgl` where `rotating-cube` has an HLSL file and two WGSL ones.
+Its page shows `cube.sgl` beside the canvas, and an edit there is built in the page as you type: the cube redraws with it, or keeps the last shader that built and shows why the edit does not.
+In Chrome and Edge it can follow a `cube.sgl` on disk instead, so a save in your editor reaches the page.
+Natively the example watches its source directory, so the same edit works there by saving the file.
 
 Take the pattern where an example is worth showing to someone who will not build it.
 It is not automatic: an example that needs a window system, or a backend with no web arm, has nothing to put on a page.

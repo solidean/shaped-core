@@ -97,3 +97,22 @@ pipeline tinted:
     pixel = tinting
     cull = .none
     format = .rgba8_unorm
+
+// Two lines through the centres of row 3 and column 5 of an 8 × 8 target, red and green (CHK-480's `lines`).
+@mesh(1, vertices = 4, lines = 2)
+fun crossing(output: mut mesh_output[corner]):
+    output.set_counts(4u, 2u)
+    let red = float4(1.0, 0.0, 0.0, 1.0)
+    let green = float4(0.0, 1.0, 0.0, 1.0)
+    output.vertex(0u, {position = hpos4(-1.0, 0.125, 0.0, 1.0), color = red})
+    output.vertex(1u, {position = hpos4(1.0, 0.125, 0.0, 1.0), color = red})
+    output.vertex(2u, {position = hpos4(0.375, -1.0, 0.0, 1.0), color = green})
+    output.vertex(3u, {position = hpos4(0.375, 1.0, 0.0, 1.0), color = green})
+    output.line(0u, uint2(0u, 1u))
+    output.line(1u, uint2(2u, 3u))
+
+pipeline crossed:
+    mesh = crossing
+    pixel = painting
+    cull = .none
+    format = .rgba8_unorm

@@ -178,6 +178,11 @@ The reload watcher subscribes to the distinct parent directory of each dependenc
 The notification wakes the actor's mailbox, so a watched watcher has no interval and no periodic wakeup at all.
 `nullopt` selects the polling fallback instead — [`filesystem::watch`](../src/shaped-shader-library/filesystem/filesystem.hh) carries the contract.
 
+**[done] — live edits on wasm.** A page has no source tree, so its edits arrive as text: a `memory_filesystem` mounted at a package's name shadows the embedded copy file by file.
+Its first write is a revision change like any other, and removing the file lands back on the embedded copy.
+Hot reload runs unthreaded there, so a frame's `poll_hot_reload` is the in-page recompile, and a broken edit keeps the last good shader as it does natively.
+`examples/graphics/sgl-cube`'s page is the loop end to end: an editor beside the canvas, or a file on disk the page follows where the browser lets it.
+
 **[in progress] — the other two backends.** Windows has `ReadDirectoryChangesW` over one IOCP and one thread.
 **Linux (inotify)** and **macOS (FSEvents)** are next; both currently take `watch_backend_none` and poll.
 `APPLE` also covers iOS, which has no FSEvents, and Android is inotify-flavoured Linux.

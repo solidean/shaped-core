@@ -146,7 +146,7 @@ cc::unique_function<void(async_test_sink&)> make_async_test_body(F* fn)
                    return ::nx::impl::merge_config(__VA_ARGS__);                                \
                }(),                                                                             \
                ::nx::impl::make_async_test_body(&CC_MACRO_JOIN(_nx_async_test_fn_, unique_id)), \
-               cc::source_location::current()),                                                 \
+               NX_IMPL_DECLARATION_SITE(CC_MACRO_JOIN(_nx_async_test_fn_, unique_id))),         \
            true);                                                                               \
     static ::cc::shared_async<::cc::unit> CC_MACRO_JOIN(_nx_async_test_fn_, unique_id)()
 
@@ -170,7 +170,7 @@ cc::unique_function<void(async_test_sink&)> make_async_test_body(F* fn)
                }(),                                                                                            \
                [](::nx::impl::async_test_sink& sink)                                                           \
                { ::nx::impl::submit_command_async(sink, CC_MACRO_JOIN(_nx_async_command_fn_, unique_id)()); }, \
-               cc::source_location::current()),                                                                \
+               NX_IMPL_DECLARATION_SITE(CC_MACRO_JOIN(_nx_async_command_fn_, unique_id))),                     \
            true);                                                                                              \
     static ::cc::shared_async<int> CC_MACRO_JOIN(_nx_async_command_fn_, unique_id)()
 
@@ -190,7 +190,7 @@ cc::unique_function<void(async_test_sink&)> make_async_test_body(F* fn)
                }(),                                                                                                    \
                ::cc::arg_types_of(::cc::signature_of<decltype(&CC_MACRO_JOIN(_nx_async_invocable_fn_, unique_id))>{}), \
                ::nx::impl::make_async_test_invoker(&CC_MACRO_JOIN(_nx_async_invocable_fn_, unique_id)),                \
-               cc::source_location::current()),                                                                        \
+               NX_IMPL_DECLARATION_SITE(CC_MACRO_JOIN(_nx_async_invocable_fn_, unique_id))),                           \
            true);                                                                                                      \
     static ::cc::shared_async<::cc::unit> CC_MACRO_JOIN(_nx_async_invocable_fn_, unique_id) params
 

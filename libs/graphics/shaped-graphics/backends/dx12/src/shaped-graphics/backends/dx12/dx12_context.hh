@@ -703,6 +703,8 @@ public:
     ComPtr<ID3D12CommandSignature> _dispatch_signature;
     // What ExecuteIndirect reads a `sg::draw_indexed_args` record through; created with the device.
     ComPtr<ID3D12CommandSignature> _draw_indexed_signature;
+    // A mesh draw's, made only where the device has mesh shaders.
+    ComPtr<ID3D12CommandSignature> _draw_mesh_signature;
 
     // Kept for QueryVideoMemoryInfo, which is on IDXGIAdapter3 and has no route through the device.
     // Re-obtaining it per query via EnumAdapterByLuid would work and would cost a COM round trip on a call a dashboard

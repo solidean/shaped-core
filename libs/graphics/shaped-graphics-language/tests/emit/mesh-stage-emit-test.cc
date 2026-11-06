@@ -104,3 +104,23 @@ TEST("sgl emit - a per-triangle struct is out primitives in a mesh stage, and a 
         CHECK(pixel.text.contains("[[vk::ext_capability(5283)]]") == (t == target::hlsl_vulkan)).dump("text", pixel.text);
     }
 }
+
+TEST("sgl emit - HLSL writes a mesh stage of lines as a line topology over two indices each (EMIT-205)")
+{
+    constexpr auto lines = cc::string_view("require mesh_shader\n"
+                                           "struct corner:\n    @position position: hpos4\n"
+                                           "@mesh(1, vertices = 2, lines = 1)\n"
+                                           "fun ms(output: mut mesh_output[corner]):\n"
+                                           "    output.set_counts(2u, 1u)\n"
+                                           "    output.vertex(0u, {position = hpos4(0.0, 0.0, 0.0, 1.0)})\n"
+                                           "    output.vertex(1u, {position = hpos4(1.0, 0.0, 0.0, 1.0)})\n"
+                                           "    output.line(0u, uint2(0u, 1u))\n");
+    for (auto const t : {target::hlsl_dx12, target::hlsl_vulkan})
+    {
+        auto const e = emit_source(lines, 0, t);
+        REQUIRE(sgl::emit::dump_errors(e) == "");
+        CHECK(e.text.contains("[outputtopology(\"line\")]\n")).dump("text", e.text);
+        CHECK(e.text.contains("out indices uint2 output_lines[1])")).dump("text", e.text);
+        CHECK(e.text.contains("output_lines[0u] = uint2(0u, 1u);")).dump("text", e.text);
+    }
+}

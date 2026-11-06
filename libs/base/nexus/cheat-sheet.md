@@ -624,6 +624,8 @@ NX_ALLOW_LOGS(cc::rec::level::warning, "sg.dx12", patterns);        // ... or ea
   Run an assert-enabled preset (debug / relwithdebinfo) to actually exercise them.
 - **The `_AS` exception checks match subclasses too**: a `std::runtime_error` satisfies `..._THROWS_AS(expr, std::exception)`.
 - **`SKIP` inside a `SECTION` skips that section alone**: the sections after it still run, and the test is reported skipped only when nothing in it ran but skips.
+- **Below `SC_SOURCE_SITES=FULL` (the clang development presets) a failure names its site `binary+0xoffset`**, and `dev.py test` resolves it to `file:line` and the source line.
+  A test's own site is its body's entry there; its file is kept, so selecting by file works, but the listings' line is 0.
 - **Data-driven / generators / matrices:** use `INVOCABLE_TEST` + `nx::invoke_tests` above, not Catch2 generators.
 - **Not supported yet:** Catch2 `INFO`/`CAPTURE`, tags, and type-parametrized (templated) tests.
   Use `.context()` / `.note()` / `.dump()` for messages, and `BENCHMARK` + `nx::bench` for benchmarks.

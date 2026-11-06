@@ -415,6 +415,7 @@ cmd.raster.draw_indexed({.index_range={.offset=0,.size=N}, .instance_range={.off
 //   So an ODD first index into a uint16 buffer asserts — metal draws only part of the mesh, silently, and dx12/vulkan do not mind.
 cmd.raster.draw_mesh_tasks(x, y = 1, z = 1)  // void — x*y*z workgroups of a mesh-shaded pipeline's task stage, or mesh stage without one;
 //   only a pipeline with a mesh stage draws this way (pipeline.is_mesh_shaded()), and it asserts in draw / draw_indexed
+cmd.raster.draw_mesh_tasks_indirect(args, first = 0, count = 1)  // void — `count` mesh draws, each record of buffer<sg::dispatch_args> (x, y, z) read by the GPU
 cmd.raster.draw_indexed_indirect(args, first = 0, count = 1)  // void — `count` indexed draws, each record of buffer<sg::draw_indexed_args> read by the GPU
 //   sg::draw_indexed_args { u32 index_count, instance_count = 1, first_index; i32 vertex_offset; u32 first_instance } — D3D12/Vk/Metal/WebGPU layout
 //   args need buffer_usage::indirect_command_buffer; instance_count 0 draws nothing, and first_instance is where @instance_index starts

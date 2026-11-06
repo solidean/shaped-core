@@ -229,3 +229,28 @@ TEST("sgl check - a pipeline's pixel stage takes exactly what its mesh stage wri
                     + "pipeline:\n    vertex = vs\n    pixel = tinting\n    format = .rgba8_unorm\n");
     CHECK(vertex.contains("tinting takes face per triangle, which only a mesh stage's output writes")).dump("reports", vertex);
 }
+
+TEST("sgl check - a mesh stage writes lines or triangles, and its primitives are the ones it says (CHK-480, CHK-482)")
+{
+    auto const lines = cc::string_view("@mesh(1, vertices = 2, lines = 1)\n"
+                                       "fun ms(output: mut mesh_output[corner]):\n"
+                                       "    output.set_counts(2u, 1u)\n"
+                                       "    output.line(0u, uint2(0u, 1u))\n");
+    CHECK(with_head(cc::string(lines) + "pipeline:\n    mesh = ms\n    pixel = ps\n    format = .rgba8_unorm\n") == "");
+    // one of the two, once
+    CHECK(with_head("@mesh(1, vertices = 2, lines = 1, triangles = 1)\nfun ms(output: mut mesh_output[corner]):\n"
+                    "    output.set_counts(2u, 1u)\n")
+              .contains("invalid-attribute-arguments"));
+    // a mesh of lines writes no triangle, and one of triangles no line
+    CHECK(with_head("@mesh(1, vertices = 3, lines = 1)\nfun ms(output: mut mesh_output[corner]):\n"
+                    "    output.set_counts(3u, 1u)\n    output.triangle(0u, uint3(0u, 1u, 2u))\n")
+              .contains("this mesh stage writes lines"));
+    auto with_line = cc::string(k_mesh);
+    with_line.replace_all("output.triangle(0u, uint3(0u, 1u, 2u))", "output.line(0u, uint2(0u, 1u))");
+    CHECK(with_head(with_line).contains("this mesh stage writes triangles"));
+    // the topology is the mesh stage's, which a pipeline does not set
+    CHECK(with_head(cc::string(lines)
+                    + "pipeline:\n    mesh = ms\n    pixel = ps\n    topology = .line_list\n    format = "
+                      ".rgba8_unorm\n")
+              .contains("sets no topology"));
+}
