@@ -146,7 +146,8 @@ cc::result<emitted_source, cc::string> emit_text(driver::impl::front_end const& 
                                                  check::undefined_guard guards_undefined,
                                                  bool asks_software_trace,
                                                  bool weakens_float,
-                                                 check::feature_set device_features)
+                                                 check::feature_set device_features,
+                                                 emit::native_route native = emit::native_route::text)
 {
     auto const& m = front.module;
     auto const source_name = front.source_name;
@@ -190,7 +191,8 @@ cc::result<emitted_source, cc::string> emit_text(driver::impl::front_end const& 
                                            .write_directives = line_directives,
                                            .diagnostics = diagnostics,
                                            .device_features = device_features,
-                                           .software_trace = software_trace});
+                                           .software_trace = software_trace,
+                                           .native = native});
     if (!emitted.has_text())
     {
         auto text = cc::string();
@@ -199,6 +201,8 @@ cc::result<emitted_source, cc::string> emit_text(driver::impl::front_end const& 
         return cc::error(cc::move(text));
     }
     auto result = sgl::emitted_source{.text = cc::move(emitted.text),
+                                      .spirv = cc::move(emitted.spirv),
+                                      .native_gap = cc::move(emitted.native_gap),
                                       .entry_point = cc::move(emitted.entry_point),
                                       .bindings = interface_of(m, legal, emitted.bound_names),
                                       .color_targets = emitted.color_targets,
@@ -294,7 +298,7 @@ cc::result<sgl::emitted_source, cc::string> sgl::compile_to_text(text_request co
         return cc::error(cc::move(own));
     auto result
         = emit_text(front, e, request.target, request.line_directives, request.diagnostics, request.guards_undefined,
-                    request.software_trace, request.weakens_float, request.device_features);
+                    request.software_trace, request.weakens_float, request.device_features, request.native);
     add_source_facts(result, front, e);
     if (result.has_value() && result.value().float_guarantee != e.float_guarantee)
         result.value().warnings.push_back(cc::format(

@@ -101,11 +101,8 @@ sg::async_compiled_shader slib::shader_asset::acquire(sg::shader_format format, 
     // What the device has is no option of the source, so no entry point lists it, and it may change what any of them
     // writes: a `has` anywhere it inlines, a prelude function's included.
     for (auto const& o : options)
-        if (o.name == k_device_features_option)
-        {
+        if (o.name == k_device_features_option || o.name == k_native_spirv_option)
             key.push_back(o);
-            break;
-        }
     cc::sort(key, [](shader_option const& a, shader_option const& b) { return a.name < b.name; });
 
     auto const entry_of = [&](state& s) -> format_entry&
@@ -204,6 +201,8 @@ sg::async_compiled_shader slib::shader_asset::acquire(sg::context const& ctx, cc
             weakens = weakens || o.name == k_weakens_float_option;
         if (!weakens && ctx.weakens_float_guarantees())
             with_device.push_back({.name = cc::string(k_weakens_float_option), .value = cc::string("true")});
+        if (ctx.prefers_native_spirv())
+            with_device.push_back({.name = cc::string(k_native_spirv_option), .value = cc::string("true")});
     }
 
     // The context lists what it takes in preference order, so the first one we can actually build wins.

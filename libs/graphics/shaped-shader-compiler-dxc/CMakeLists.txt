@@ -100,6 +100,7 @@ if(SC_BUILD_TESTS)
             tests/end-to-end-raster-cache-test.cc
             tests/end-to-end-cube-window-test.cc
             tests/end-to-end-raytraced-cube-window-test.cc
+            tests/dxil-signing-spike-test.cc
         )
         target_link_libraries(shaped-shader-compiler-dxc-test PRIVATE shaped-graphics-dx12)
     endif()
