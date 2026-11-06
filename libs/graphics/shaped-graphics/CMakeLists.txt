@@ -441,6 +441,7 @@ if(SC_BUILD_TESTS)
             tests/compute/compute-sixty-four-bit-test.cc
             tests/compute/compute-double-maths-test.cc
             tests/compute/compute-array-equality-test.cc
+            tests/compute/compute-native-spirv-test.cc
             tests/compute/compute-matrix-arithmetic-test.cc
             tests/compute/compute-float-atomics-test.cc
             tests/compute/compute-texture-test.cc
@@ -518,6 +519,17 @@ if(SC_BUILD_TESTS)
                 float_atomics.sgl:*
                 option_formats.sgl:*
         )
+        sc_add_shader_package(
+            TARGET     shaped-graphics-test
+            NAME       sg_test_native_spirv
+            NAMESPACE  sg::test::native_spirv
+            SOURCE_DIR tests/shaders/sgl_native
+            LANGUAGE   sgl
+            NATIVE_SPIRV
+            SHADERS
+                native_spirv.sgl:*
+        )
+
         sc_add_shader_package(
             TARGET     shaped-graphics-test
             NAME       sg_test_software_trace

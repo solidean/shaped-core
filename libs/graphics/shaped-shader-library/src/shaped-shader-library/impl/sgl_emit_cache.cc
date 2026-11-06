@@ -21,7 +21,7 @@ namespace
 {
 /// The layout revision `encode_preprocessed` writes; bump it with any change to what it writes.
 /// sg's codec version rides in the persistent key beside it, since a stated shader and its bindings are written in that codec.
-constexpr u32 k_codec_version = 3;
+constexpr u32 k_codec_version = 4;
 
 /// How many results the in-memory tier holds before it starts over; each is a few dozen kilobytes of text.
 constexpr isize k_memory_capacity = 512;
@@ -172,6 +172,7 @@ cc::vector<byte> slib::impl::encode_preprocessed(preprocessed_source const& sour
     auto out = cc::vector<byte>();
     put_u32(out, k_codec_version);
     put_string(out, source.source);
+    put_bytes(out, source.bytecode);
     put_string(out, source.entry_point);
 
     put_u64(out, u64(source.used_modules.size()));
@@ -224,6 +225,7 @@ cc::optional<slib::preprocessed_source> slib::impl::decode_preprocessed(cc::span
 
     auto result = preprocessed_source();
     result.source = r.get_string();
+    result.bytecode = cc::vector<byte>::create_copy_of(r.get_bytes());
     result.entry_point = r.get_string();
 
     // Every entry is at least its length prefixes, which bounds a count before anything is reserved for it.

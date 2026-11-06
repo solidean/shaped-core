@@ -56,6 +56,9 @@ struct sg::backend::vulkan::vulkan_config
     /// D3D12 has only a process-wide switch, which is why its flag is named for activating something global.
     bool enable_validation_layers = false;
 
+    /// SGL shaders take SGL's own SPIR-V where it has a lowering for them, and DXC's elsewhere; opt-in while that route grows.
+    bool native_spirv = false;
+
     /// Additionally enable the layer's *synchronization* validation, which tracks every resource access across
     /// submissions and reports hazards no other check can see — a read racing an earlier submission's write.
     /// Ignored unless enable_validation_layers is on, and off by default because it costs far more than core
@@ -323,6 +326,7 @@ public:
     }
 
     [[nodiscard]] sg::execution_model execution() const override { return _execution; }
+    [[nodiscard]] bool prefers_native_spirv() const override { return _native_spirv; }
 
     /// Vulkan has every stage sg models, and most of the rest are device facts.
     [[nodiscard]] bool supports(sg::feature f) const override
@@ -995,6 +999,7 @@ public:
     bool _float_atomic_add = false;
     /// `VK_EXT_ray_tracing_invocation_reorder`, enabled where the device reorders rather than only accepting the calls.
     bool _shader_execution_reordering = false;
+    bool _native_spirv = false;
     /// `VK_EXT_mesh_shader`'s mesh and task stages, enabled wherever the device has both, and its draw.
     bool _mesh_shader = false;
     PFN_vkCmdDrawMeshTasksEXT _cmd_draw_mesh_tasks = nullptr;

@@ -141,6 +141,11 @@ public:
     /// refusing it (SGL's EMIT-185).
     [[nodiscard]] virtual bool weakens_float_guarantees() const { return false; }
 
+    /// Whether SGL shaders for this context are written as SPIR-V by SGL itself rather than compiled through DXC, where
+    /// SGL has a lowering for them yet: only a vulkan context created with `vulkan_config::native_spirv`.
+    /// shaped-shader-library asks it, as it asks `weakens_float_guarantees`.
+    [[nodiscard]] virtual bool prefers_native_spirv() const { return false; }
+
     /// The home the bound calls run in, or null when there is none to move to.
     ///
     /// The main thread's under main_thread, null otherwise: a single_threaded context's creating thread has no home unless the application gives it one.

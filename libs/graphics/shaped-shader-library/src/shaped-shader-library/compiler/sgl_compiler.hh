@@ -64,4 +64,8 @@ namespace slib
 /// It needs no toolchain of its own, so it exists wherever `inner` does.
 [[nodiscard]] std::unique_ptr<shader_compiler> create_sgl_compiler(std::unique_ptr<shader_compiler> inner,
                                                                    sgl_compiler_options const& options = {});
+
+/// The edge `sgl -> spirv` with no compiler behind it: SGL writes the module itself, and an entry point it has no
+/// lowering for yet fails to compile.
+[[nodiscard]] std::unique_ptr<shader_compiler> create_sgl_spirv_compiler(sgl_compiler_options const& options = {});
 } // namespace slib

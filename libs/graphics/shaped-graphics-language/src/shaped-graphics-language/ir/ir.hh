@@ -492,7 +492,8 @@ struct sgl::ir::program
     {
         return cc::string_view(names).subview({.offset = isize(first), .size = isize(size)});
     }
-    [[nodiscard]] type const& at(type_ref t) const { return types[isize(t)]; }
+    /// A type that is none reads as a `void`, so a walk that already failed can run to the end of what it was doing.
+    [[nodiscard]] type const& at(type_ref t) const { return types[is_valid(t) ? isize(t) : 0]; }
     [[nodiscard]] cc::span<u32 const> operands_of(instruction const& i) const
     {
         return cc::span<u32 const>(operands.data() + i.first, isize(i.count));
@@ -500,6 +501,8 @@ struct sgl::ir::program
     /// The type of `v`, whichever table it stands in.
     [[nodiscard]] type_ref type_of(value_ref v) const
     {
+        if (!is_valid(v))
+            return type_ref::none;
         if (is_constant(v))
             return constants[index_of(v)].type;
         if (is_global(v))

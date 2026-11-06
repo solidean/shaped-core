@@ -1,6 +1,7 @@
 #include <clean-core/common/assert.hh>
 #include <clean-core/container/byte_stream_builder.hh>
 #include <clean-core/string/format.hh>
+#include <clean-core/container/pinned_data.hh>
 #include <clean-core/thread/async.hh> // sg::async_compiled_shader is a cc::shared_async
 #include <shaped-graphics-language/check/resources.hh>
 #include <shaped-graphics-language/driver/compile_to_text.hh>
@@ -170,12 +171,14 @@ static_assert(
 class sgl_shader_compiler final : public slib::shader_compiler
 {
 public:
+    /// `inner` may be null for spirv alone, which SGL then writes itself and nothing compiles.
     sgl_shader_compiler(std::unique_ptr<slib::shader_compiler> inner,
                         cc::optional<bcache::blob_cache*> persistent_cache,
                         bool diagnostics,
                         sgl::check::undefined_guard guards_undefined)
       : _inner(cc::move(inner)),
-        _target(target_of(_inner->target_format())),
+        _format(_inner != nullptr ? _inner->target_format() : sg::shader_format::spirv),
+        _target(target_of(_format)),
         _persistent_cache(persistent_cache),
         _diagnostics(diagnostics),
         _guards_undefined(guards_undefined)
@@ -183,7 +186,7 @@ public:
     }
 
     [[nodiscard]] slib::shader_language source_language() const override { return slib::shader_language::sgl; }
-    [[nodiscard]] sg::shader_format target_format() const override { return _inner->target_format(); }
+    [[nodiscard]] sg::shader_format target_format() const override { return _format; }
 
     [[nodiscard]] cc::result<slib::preprocessed_source> preprocess(slib::shader_source_description const& desc,
                                                                    slib::include_resolver resolve) const override
@@ -195,6 +198,20 @@ public:
 
     [[nodiscard]] sg::async_compiled_shader compile(slib::shader_source_description const& desc) const override
     {
+        // SGL wrote the binary itself, so nothing is left to compile and nothing can crash doing it
+        if (!desc.bytecode.empty())
+            return cc::make_async_from_value(
+                sg::compiled_shader{.stage = desc.stage,
+                                    .format = _format,
+                                    .entry_point = desc.entry_point,
+                                    .bytecode = cc::make_pinned_data(cc::span<byte const>(desc.bytecode)),
+                                    .compiler = {.name = cc::string("sgl"),
+                                                 .version = cc::string(sgl::compiler_fingerprint()),
+                                                 .signature = cc::string("spirv")}});
+        if (_inner == nullptr)
+            return cc::make_async_from_error<sg::compiled_shader>(cc::async_error::make_error(cc::any_error(
+                cc::format("'{}' has no SPIR-V of SGL's own, and this build has no DXC to compile its text",
+                           desc.entry_point))));
         // EMIT-4: what the emitted text needs of the compiler that builds it, whoever wired that compiler
         auto inner = desc;
         if (_target == sgl::emit::target::hlsl_dx12 || _target == sgl::emit::target::hlsl_vulkan)
@@ -208,6 +225,8 @@ public:
 
     [[nodiscard]] cc::optional<cc::vector<slib::block_layout>> reflect_layouts(sg::compiled_shader const& shader) const override
     {
+        if (_inner == nullptr)
+            return {};
         return _inner->reflect_layouts(shader);
     }
 
@@ -225,6 +244,7 @@ private:
         b.add_pod(_diagnostics);
         b.add_pod(_guards_undefined);
         b.add_pod(desc.software_trace);
+        b.add_pod(desc.native_spirv);
         b.add_pod(i64(desc.options.size()));
         for (auto const& o : desc.options)
         {
@@ -297,11 +317,20 @@ private:
         auto options = cc::vector<sgl::check::option_value>();
         auto device_features = sgl::check::feature_set();
         auto weakens_float = false;
+        auto const is_spirv = _target == sgl::emit::target::hlsl_vulkan;
+        auto native = is_spirv && (_inner == nullptr || desc.native_spirv) ? sgl::emit::native_route::require
+                                                                           : sgl::emit::native_route::text;
         for (auto const& o : desc.options)
         {
             if (o.name == slib::k_weakens_float_option)
             {
                 weakens_float = o.value == "true";
+                continue;
+            }
+            if (o.name == slib::k_native_spirv_option)
+            {
+                if (native == sgl::emit::native_route::text && is_spirv)
+                    native = sgl::emit::native_route::prefer;
                 continue;
             }
             if (o.name != slib::k_device_features_option)
@@ -335,17 +364,18 @@ private:
              .guards_undefined = _guards_undefined,
              .software_trace = desc.software_trace,
              .weakens_float = weakens_float,
-             .device_features = device_features});
+             .device_features = device_features,
+             .native = native});
         if (text.has_error())
             return cc::error(cc::format("SGL reported errors:\n{}", text.error()));
         auto const& emitted = text.value();
-        auto shader = sg::compiled_shader{.stage = desc.stage,
-                                          .format = _inner->target_format(),
-                                          .entry_point = emitted.entry_point};
+        auto shader = sg::compiled_shader{.stage = desc.stage, .format = _format, .entry_point = emitted.entry_point};
         auto result = slib::preprocessed_source{.source = emitted.text,
                                                 .entry_point = emitted.entry_point,
                                                 .used_modules = emitted.library_files,
                                                 .warnings = emitted.warnings};
+        if (!emitted.spirv.empty())
+            result.bytecode = cc::vector<byte>::create_copy_of(cc::span<u32 const>(emitted.spirv).as_bytes());
         // EMIT-185: DXC keeps the special values and the order only with every float operation strict, which in
         // SPIR-V is SignedZeroInfNanPreserve and NoContraction, and denormals only where it is asked to preserve them
         auto const is_hlsl = _target == sgl::emit::target::hlsl_dx12 || _target == sgl::emit::target::hlsl_vulkan;
@@ -436,6 +466,7 @@ private:
     }
 
     std::unique_ptr<slib::shader_compiler> _inner;
+    sg::shader_format _format;
     sgl::emit::target _target;
     /// As `sgl_compiler_options` holds it, resolved at each compile so the default follows whatever is installed then.
     cc::optional<bcache::blob_cache*> _persistent_cache = {};
@@ -471,5 +502,11 @@ std::unique_ptr<slib::shader_compiler> slib::create_sgl_compiler(std::unique_ptr
 {
     CC_ASSERT(inner != nullptr, "an SGL compiler needs the compiler that builds its text");
     return std::make_unique<sgl_shader_compiler>(cc::move(inner), options.persistent_cache, options.diagnostics,
+                                                 sgl::check::undefined_guard(options.guards_undefined));
+}
+
+std::unique_ptr<slib::shader_compiler> slib::create_sgl_spirv_compiler(sgl_compiler_options const& options)
+{
+    return std::make_unique<sgl_shader_compiler>(nullptr, options.persistent_cache, options.diagnostics,
                                                  sgl::check::undefined_guard(options.guards_undefined));
 }
