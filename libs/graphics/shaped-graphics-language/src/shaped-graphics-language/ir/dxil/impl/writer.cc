@@ -40,6 +40,7 @@ enum class rule_kind : u8
     access_chain,
     array_length,
     stage_load,
+    stage_store,
     atomic,
     barrier,
     texture,
@@ -132,6 +133,7 @@ constexpr op_rule k_rules[] = {
     {op::access_chain, rule_kind::access_chain},
     {op::array_length, rule_kind::array_length},
     {op::stage_load, rule_kind::stage_load},
+    {op::stage_store, rule_kind::stage_store},
     {op::atomic_load, rule_kind::atomic},
     {op::atomic_store, rule_kind::atomic},
     {op::atomic_exchange, rule_kind::atomic},
@@ -148,6 +150,7 @@ constexpr op_rule k_rules[] = {
     {op::control_barrier, rule_kind::barrier},
     {op::combine_sampler, rule_kind::texture},
     {op::sample_lod, rule_kind::texture},
+    {op::sample_implicit, rule_kind::texture},
     {op::image_fetch, rule_kind::texture},
     {op::image_gather, rule_kind::texture},
     {op::image_read, rule_kind::texture},
@@ -221,6 +224,7 @@ void writer::run()
     auto const void_function = _m.function(_m.void_type(), {});
     _entry = _m.add_function(_p.entry_name, void_function, entry_attributes(), false);
 
+    number_signature();
     find_reachable();
     declare_blocks();
     auto const order = blocks_in_order(_p);
@@ -240,6 +244,7 @@ void writer::run()
     fill_phis();
     _m.share_common_values();
     _m.remove_unused();
+    read_usage();
     write_entry_metadata();
 }
 
@@ -342,7 +347,9 @@ void writer::operation(u32 index)
     case rule_kind::array_length:
         return array_length(index, i);
     case rule_kind::stage_load:
-        return built_in(index, _p.stage_elements[_p.operands_of(i)[0]], i);
+        return stage_load(index, i);
+    case rule_kind::stage_store:
+        return stage_store(i);
     case rule_kind::atomic:
         return atomic_op(index, i);
     case rule_kind::barrier:

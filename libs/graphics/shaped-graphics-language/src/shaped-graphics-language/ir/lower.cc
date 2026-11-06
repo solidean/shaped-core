@@ -118,9 +118,11 @@ void lowering::branch_if(value_ref condition, block_ref yes, block_ref no)
 
 void lowering::run()
 {
-    if (_e.entry_stage != stage::compute)
+    auto const is_raster = _e.entry_stage == stage::vertex || _e.entry_stage == stage::pixel;
+    if (_e.entry_stage != stage::compute && !is_raster)
     {
-        unsupported(cc::format("a {} entry point, of which only compute is lowered yet", stage_name(_e.entry_stage)));
+        unsupported(cc::format("a {} entry point, of which only compute, vertex and pixel are lowered yet",
+                               stage_name(_e.entry_stage)));
         // what crosses its edge stands on its own, and DXIL's packer reads it ahead of any lowering of the body
         return declare_stage_elements();
     }
@@ -129,7 +131,13 @@ void lowering::run()
         return unsupported("the workgroup prologue of a robustness profile");
 
     open_block(new_block());
-    declare_stage_inputs();
+    if (is_raster)
+    {
+        declare_stage_elements();
+        read_stage_edge();
+    }
+    else
+        declare_stage_inputs();
     statements(_e.body);
     if (!_is_terminated)
         add(op::return_, type_ref::none, cc::span<u32 const>());
@@ -189,7 +197,7 @@ void lowering::statement(flat_stmt_id id)
         [&](flat_return const& r)
         {
             if (is_valid(r.value))
-                return unsupported("a return with a value");
+                store_stage_result(expr(r.value));
             add(op::return_, type_ref::none, cc::span<u32 const>());
         },
         // none of these is in a core tree

@@ -159,6 +159,7 @@ constexpr shape k_shapes[] = {
     shape::no_result,           // control_barrier
     shape::combine_sampler,     // combine_sampler
     shape::image_access,        // sample_lod
+    shape::image_access,        // sample_implicit
     shape::image_access,        // image_fetch
     shape::image_access,        // image_gather
     shape::image_access,        // image_read

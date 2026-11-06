@@ -101,6 +101,7 @@ constexpr cc::string_view k_names[] = {
     "control_barrier",
     "combine_sampler",
     "sample_lod",
+    "sample_implicit",
     "image_fetch",
     "image_gather",
     "image_read",

@@ -56,6 +56,13 @@ private:
     u32 element_of_input(isize index);
     /// Everything the entry point's edge holds, in declared order; lower_stage.cc.
     void declare_stage_elements();
+    /// A vertex or pixel stage's parameters, read from their elements ahead of the body.
+    void read_stage_edge();
+    /// Each output element of the value a `return` gives.
+    void store_stage_result(value_ref result);
+    [[nodiscard]] value_ref read_element(u32 element);
+    [[nodiscard]] value_ref read_struct(check::type_id t, u32& element);
+    void hold_parameter(check::local_id id, value_ref value);
     void statements(ast::range_of<flat_stmt_id> range);
     void statement(flat_stmt_id id);
     void if_(check::flat_if const& s);

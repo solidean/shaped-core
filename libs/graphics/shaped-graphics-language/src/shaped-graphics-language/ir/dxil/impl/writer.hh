@@ -5,6 +5,7 @@
 #include <clean-core/string/string.hh>
 #include <shaped-graphics-language/ir/dxil/impl/dx_ops.hh>
 #include <shaped-graphics-language/ir/dxil/impl/llvm.hh>
+#include <shaped-graphics-language/ir/dxil/signature.hh>
 #include <shaped-graphics-language/ir/ir.hh>
 
 /// One `ir::program` as an LLVM module of DXIL's dialect.
@@ -37,9 +38,28 @@ struct module_summary
     u32 program_kind = 0;
     /// The shader model, as a program's version word states it.
     u32 program_version = 0;
-    i32 workgroup[3] = {1, 1, 1};
+    /// The DXIL version a program's header states.
+    u32 dxil_version = 0;
+    i32 workgroup[3] = {};
     cc::string entry_name;
     cc::vector<resource_record> resources;
+    /// By table, then in declared order: `pack_signature`'s.
+    cc::vector<signature_element> signature;
+    /// Parallel to `signature`: the lanes the final operations read or write, counted from the element's first.
+    cc::vector<u8> usage;
+    /// Parallel to `signature`: `DXIL::SemanticKind` and `DXIL::InterpolationMode`.
+    cc::vector<u8> semantic_kinds;
+    cc::vector<u8> modes;
+    /// A vertex stage that writes `SV_Position`, which `PSV0` states.
+    bool writes_position = false;
+    /// How many rows each signature takes, and how many scalars up to its last.
+    u32 input_rows = 0;
+    u32 output_rows = 0;
+    u32 input_scalars = 0;
+    u32 output_scalars = 0;
+    /// One bit per output scalar for each input scalar: what reaches what.
+    /// `(output_scalars + 31) / 32` words per input scalar, `input_rows * 4` of them, so `PSV0` can state it as it is.
+    cc::vector<u32> dependencies;
 };
 
 /// What a module turned out to use, which the shader flags state.
@@ -53,6 +73,8 @@ struct writer_uses
     bool low_precision = false;
     /// A typed UAV read of more than one component.
     bool typed_uav_load = false;
+    /// `startVertexLocation` or `startInstanceLocation`, which shader model 6.8 brought.
+    bool start_location = false;
 };
 
 class writer
@@ -253,6 +275,13 @@ private:
     [[nodiscard]] u32 entry_attributes();
     void write_entry_metadata();
     void built_in(u32 index, stage_element const& e, instruction const& i);
+    void number_signature();
+    void stage_load(u32 index, instruction const& i);
+    void stage_store(instruction const& i);
+    /// Which lanes the module's final operations touch, once nothing more can go.
+    void read_usage();
+    void fill_dependencies();
+    [[nodiscard]] u32 signature_list(signature_table table);
 
     // ---- DXIL's vocabulary
     /// `is_stable` says what it reads never changes, so a second one with these arguments is the first.
@@ -302,6 +331,11 @@ private:
     cc::vector<i32> _global_memory;
     /// Parallel to `_p.globals`.
     cc::vector<handle_entry> _handles;
+
+    /// Parallel to `_p.stage_elements`: its position in `_summary.signature`, or -1 for one that stands in none.
+    cc::vector<i32> _element_signature;
+    /// Parallel to `_summary.signature`: the id an operation names it by, its position in its table.
+    cc::vector<u32> _signature_ids;
 
     cc::vector<binding_record> _bindings;
     cc::vector<row_entry> _rows;

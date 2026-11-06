@@ -99,6 +99,8 @@ TEST("slib - every compute entry point of the fixtures that SGL's DXIL lowers pa
 
     auto reached = 0;
     auto lowered = 0;
+    auto raster_reached = 0;
+    auto raster_lowered = 0;
     for (auto const& file : files)
     {
         auto const source = read_file(file);
@@ -110,18 +112,21 @@ TEST("slib - every compute entry point of the fixtures that SGL's DXIL lowers pa
         {
             auto const e = sgl::compile_to_text({.source = source,
                                                  .entry_point = entry.entry_point,
-                                                 .stage = sgl::check::stage::compute,
                                                  .target = sgl::emit::target::hlsl_dx12,
                                                  .native = sgl::emit::native_route::prefer});
             if (e.has_error())
                 continue;
-            ++reached;
+            auto const stage = e.value().stage;
+            auto const is_raster = stage == sgl::check::stage::vertex || stage == sgl::check::stage::pixel;
+            if (stage != sgl::check::stage::compute && !is_raster)
+                continue;
+            ++(is_raster ? raster_reached : reached);
             if (e.value().dxil.empty())
             {
                 CC_LOG_INFO("{}: {}: {}", file, entry.entry_point, e.value().native_gap);
                 continue;
             }
-            ++lowered;
+            ++(is_raster ? raster_lowered : lowered);
             auto const refused = compiler.value().validate(e.value().dxil);
             CHECK(!refused.has_value())
                 .dump("file", file)
@@ -129,9 +134,11 @@ TEST("slib - every compute entry point of the fixtures that SGL's DXIL lowers pa
                 .dump("validator", refused.value_or(cc::string()));
         }
     }
-    CC_LOG_INFO("SGL's DXIL lowers {} of the {} compute entry points", lowered, reached);
-    // the number the slice reaches, so a lowering lost shows here rather than as a quiet fall back to DXC
+    CC_LOG_INFO("SGL's DXIL lowers {} of the {} compute entry points and {} of the {} vertex and pixel ones", lowered,
+                reached, raster_lowered, raster_reached);
+    // the numbers the slice reaches, so a lowering lost shows here rather than as a quiet fall back to DXC
     CHECK(lowered >= 60);
+    CHECK(raster_lowered >= 1);
 }
 
 TEST("slib - DXIL's float flags stand on each operation, and only `fast` lets a sum reorder")

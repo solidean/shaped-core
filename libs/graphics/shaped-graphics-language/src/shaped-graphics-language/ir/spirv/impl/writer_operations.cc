@@ -34,6 +34,7 @@ enum class rule_kind : u8
     store,
     array_length,
     stage_load,
+    stage_store,
     atomic,
     atomic_fadd,
     barrier,
@@ -134,6 +135,7 @@ constexpr op_rule k_rules[] = {
     {op::store, rule_kind::store, spv::Store},
     {op::array_length, rule_kind::array_length, spv::ArrayLength},
     {op::stage_load, rule_kind::stage_load, spv::Load},
+    {op::stage_store, rule_kind::stage_store, spv::Store},
     {op::atomic_load, rule_kind::atomic, spv::AtomicLoad},
     {op::atomic_store, rule_kind::atomic, spv::AtomicStore},
     {op::atomic_exchange, rule_kind::atomic, spv::AtomicExchange},
@@ -150,6 +152,7 @@ constexpr op_rule k_rules[] = {
     {op::atomic_fadd, rule_kind::atomic_fadd, spv::AtomicFAddEXT},
     {op::control_barrier, rule_kind::barrier, spv::ControlBarrier},
     {op::sample_lod, rule_kind::sample_lod, spv::ImageSampleExplicitLod},
+    {op::sample_implicit, rule_kind::plain, spv::ImageSampleImplicitLod},
     {op::image_fetch, rule_kind::image_fetch, spv::ImageFetch},
     {op::image_gather, rule_kind::image_gather, spv::ImageGather},
     {op::image_write, rule_kind::image_write, spv::ImageWrite},
@@ -272,6 +275,22 @@ void writer::group(instruction const& i, u32 id)
     }
 }
 
+void writer::frag_coord(instruction const& i, u32 id)
+{
+    constexpr u32 k_one_bits = 0x3f800000u;
+    auto const element = _p.operands_of(i)[0];
+    auto const scalar = id_of(_p.at(i.type).element);
+    auto const one = _bound++;
+    auto const loaded = _bound++;
+    auto const w = _bound++;
+    auto const reciprocal = _bound++;
+    emit(_declarations, spv::Constant, {scalar, one, k_one_bits});
+    emit(_code, spv::Load, {id_of(i.type), loaded, _elements + element});
+    emit(_code, spv::CompositeExtract, {scalar, w, loaded, 3u});
+    emit(_code, spv::FDiv, {scalar, reciprocal, one, w});
+    emit(_code, spv::CompositeInsert, {id_of(i.type), id, reciprocal, loaded, 3u});
+}
+
 void writer::instruction_of(u32 index)
 {
     auto const& i = _p.instructions[index];
@@ -304,7 +323,11 @@ void writer::instruction_of(u32 index)
     case rule_kind::array_length:
         return emit(_code, rule.opcode, {id_of(i.type), id, id_of_raw(operands[0]), operands[1]});
     case rule_kind::stage_load:
+        if (_p.stage == check::stage::pixel && _p.stage_elements[operands[0]].system == built_in::position)
+            return frag_coord(i, id);
         return emit(_code, rule.opcode, {id_of(i.type), id, _elements + operands[0]});
+    case rule_kind::stage_store:
+        return emit(_code, rule.opcode, {_elements + operands[0], id_of_raw(operands[1])});
     case rule_kind::atomic:
         return atomic(rule.opcode, i, id);
     case rule_kind::atomic_fadd:

@@ -3,6 +3,7 @@
 #include <clean-core/algorithm/sort.hh>
 #include <clean-core/common/macros.hh>
 #include <clean-core/platform/environment.hh>
+#include <clean-core/record/log.hh>
 #include <clean-core/streams/file_stream.hh>
 #include <clean-core/string/format.hh>
 #include <nexus/source_root.hh>
@@ -117,7 +118,7 @@ TEST("sgl spirv - what has no lowering yet is named, and a preference falls back
     auto const preferred = written(k_rendered, "run", sgl::emit::native_route::prefer);
     REQUIRE(preferred.has_value());
     CHECK(preferred.value().spirv.empty());
-    CHECK(preferred.value().native_gap.contains("vertex"));
+    CHECK(preferred.value().native_gap.contains("no struct"));
     CHECK(!preferred.value().text.empty());
 }
 
@@ -144,6 +145,7 @@ TEST("sgl spirv - every compute entry point of the fixtures that lowers is what 
     REQUIRE(!files.empty());
 
     auto lowered = 0;
+    auto raster_lowered = 0;
     for (auto const& file : files)
     {
         auto const source = read_all(file);
@@ -155,17 +157,20 @@ TEST("sgl spirv - every compute entry point of the fixtures that lowers is what 
         {
             auto const e = sgl::compile_to_text({.source = source,
                                                  .entry_point = entry.entry_point,
-                                                 .stage = sgl::check::stage::compute,
                                                  .target = sgl::emit::target::hlsl_vulkan,
                                                  .native = sgl::emit::native_route::prefer});
             if (e.has_error() || e.value().spirv.empty())
                 continue;
-            ++lowered;
+            auto const is_raster
+                = e.value().stage == sgl::check::stage::vertex || e.value().stage == sgl::check::stage::pixel;
+            ++(is_raster ? raster_lowered : lowered);
             write_words(module_path, e.value().spirv);
             CHECK(std::system(command_text.data()) == 0).dump("file", file).dump("entry", entry.entry_point);
         }
     }
-    // the number the slice reaches, so a lowering lost shows here rather than as a quiet fall back to DXC
+    // the numbers the slice reaches, so a lowering lost shows here rather than as a quiet fall back to DXC
+    CC_LOG_INFO("SGL's SPIR-V lowers {} compute entry points and {} vertex and pixel ones", lowered, raster_lowered);
     CHECK(lowered >= 60);
+    CHECK(raster_lowered >= 1);
 #endif
 }
