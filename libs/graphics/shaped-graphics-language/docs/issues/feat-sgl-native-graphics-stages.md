@@ -162,7 +162,7 @@ Three lines of that table hold behaviour rather than a name:
 - **Conservative depth changes `@position`'s mode** in a pixel stage (EMIT-130). That row holds nothing else, and modes do not link, so the vertex stage needs no change.
 
 `discard` goes on running, as the text does, so lowering does not treat it as the end of a path, and `has_effect` keeps it through every pass.
-`flatten_branches` must not lift a store or a `discard` out of a branch, so both have to count as effects in `is_speculable`.
+`flatten_branches` must not lift a store or a `discard` out of a branch, so both have to count in `ir::has_effect`.
 
 **The later stages need one more operation each, and nothing new in the table.**
 

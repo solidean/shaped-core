@@ -19,8 +19,8 @@ void sgl::ir::chain_sums(program& p)
                     ++uses[index_of(value_ref(operands[k]))];
         }
     auto is_taken = cc::vector<bool>::create_filled(p.instructions.size(), false);
-    auto const is_sum = [&](instruction const& i)
-    { return i.code == op::fadd && i.guarantee == check::float_level::fast; };
+    auto const is_sum
+        = [&](instruction const& i) { return i.code == op::fadd && i.guarantee == check::float_level::fast; };
 
     struct leaf
     {
@@ -52,8 +52,8 @@ void sgl::ir::chain_sums(program& p)
                 for (auto k = isize(0); k < 2; ++k)
                 {
                     auto const v = value_ref(operands[k]);
-                    auto const is_here = is_operation(v) && index_of(v) >= block.first
-                                      && index_of(v) < block.first + block.count;
+                    auto const is_here
+                        = is_operation(v) && index_of(v) >= block.first && index_of(v) < block.first + block.count;
                     if (is_here && uses[index_of(v)] == 1 && is_sum(p.instructions[index_of(v)]))
                         pending.push_back(index_of(v));
                     else

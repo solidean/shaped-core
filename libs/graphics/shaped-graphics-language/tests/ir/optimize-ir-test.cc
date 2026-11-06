@@ -219,13 +219,15 @@ TEST("sgl ir flatten_branches - neither an effect nor what can trap runs on a pa
         auto const as_int = b.add(op::f_to_u, b.uint_type, {u32(x)});
         b.branch_if(b.add(op::flt, b.bool_type, {u32(x), u32(b.two)}), 1, 2);
         b.open(1);
-        auto const quotient = has_effect_in_arm ? value_ref::none : b.add(op::udiv, b.uint_type, {u32(b.three), u32(as_int)});
+        auto const quotient
+            = has_effect_in_arm ? value_ref::none : b.add(op::udiv, b.uint_type, {u32(b.three), u32(as_int)});
         if (has_effect_in_arm)
             b.keep(x);
         b.branch(2);
         b.open(2);
         if (!has_effect_in_arm)
-            b.keep(b.add(op::u_to_f, b.float_type, {u32(b.add(op::phi, b.uint_type, {u32(quotient), 1, u32(b.four), 0}))}));
+            b.keep(b.add(op::u_to_f, b.float_type,
+                         {u32(b.add(op::phi, b.uint_type, {u32(quotient), 1, u32(b.four), 0}))}));
         b.finish();
         flatten_branches(b.p);
         require_whole(b.p, control_flow::unstructured);

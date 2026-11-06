@@ -442,7 +442,8 @@ private:
             merge = yes;
             is_no = true;
         }
-        else if (ends_in_branch_to(isize(yes)) != k_nothing && ends_in_branch_to(isize(yes)) == ends_in_branch_to(isize(no))
+        else if (ends_in_branch_to(isize(yes)) != k_nothing
+                 && ends_in_branch_to(isize(yes)) == ends_in_branch_to(isize(no))
                  && can_move(yes, ends_in_branch_to(isize(yes))) && can_move(no, ends_in_branch_to(isize(no))))
         {
             merge = ends_in_branch_to(isize(yes));
