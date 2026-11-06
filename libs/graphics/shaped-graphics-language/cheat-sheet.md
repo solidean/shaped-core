@@ -133,6 +133,9 @@ sgl::signature_help_at(files, m, f, offset) // -> optional<signature_help { sign
                                            // reads the tokens, so a half-written call that does not parse still answers
 sgl::is_keyword(word)                      // -> bool
 #include <shaped-graphics-language/driver/format.hh>
+#include <shaped-graphics-language/driver/outline.hh>
+sgl::outline_of(pf, ast)                   // -> vector<outline_entry { name, kind, where, name_span, detail, children }>; tree only
+sgl::folds_of(pf)                          // -> vector<fold_range { first_line, last_line, is_comment }>: the line tree's blocks
 sgl::format_source(source)                 // -> result<formatted_source { text, unformatted_lines }, string>
                                            // spacing within lines only; refuses syntax errors except `a+b`, which it spaces
                                            // the output parses to the same tree, checked; unformatted_lines are formatter bugs

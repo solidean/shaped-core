@@ -68,6 +68,19 @@ namespace sgl_lsp
                                                          cc::string_view new_name,
                                                          lsp::position_encoding e);
 
+/// The document's declarations, each with what it holds, from its tree alone.
+[[nodiscard]] cc::vector<lsp::document_symbol> document_symbols_of(analysis const& a, lsp::position_encoding e);
+
+/// The runs of lines the document folds: every line that owns deeper ones, and runs of comment lines.
+[[nodiscard]] cc::vector<lsp::folding_range> folding_ranges_of(analysis const& a);
+
+/// Every declaration whose name holds `query`'s characters in order, ignoring case, in the open documents and the
+/// module directories' files that are not open; an empty query matches every one.
+/// Each file is parsed as it stands, so it answers whatever the check thinks of it.
+[[nodiscard]] cc::vector<lsp::symbol_information> workspace_symbols_of(lsp::snapshot const& open,
+                                                                       cc::string_view query,
+                                                                       lsp::position_encoding e);
+
 /// The edit that formats the whole document, by `sgl::format_source`; none where it is formatted already.
 /// An error where the document has syntax errors, which a formatter must not guess around.
 [[nodiscard]] lsp::answer<cc::vector<lsp::text_edit>> formatting_of(analysis const& a, lsp::position_encoding e);

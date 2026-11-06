@@ -126,6 +126,7 @@ What the server provides:
 * signature help while a call's arguments are written, every overload listed and the argument under the cursor marked, a named one by its name;
 * find all references and rename, across the document and its modules; a name the prelude declares is not renamed;
 * formatting, by the rules of `sgl format` above;
+* an outline of the document's declarations, folding by indentation and comment runs, and workspace symbols across the open documents and the module directories;
 * test results: a failing `check` is a diagnostic, and every check site gets a gutter mark.
 
 Accepting a hint writes it into the source, except on a property of a type body, which takes no `-> type`.
@@ -181,6 +182,7 @@ A manual test after a change, with the extension installed by `uv run dev.py ins
 10. **Rename Symbol** on a local: every use changes; on `mix` it is refused.
     **Find All References** on a function lists its declaration and its calls.
 11. Write `a+b` and **Format Document**: it becomes `a + b`.
+12. The **Outline** view lists the file's declarations, a struct's fields under it; **Go to Symbol in Workspace** finds a function by a few of its letters.
 
 ### Working on the grammar
 

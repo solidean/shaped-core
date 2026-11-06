@@ -123,6 +123,7 @@ add_library(shaped-graphics-language
     src/shaped-graphics-language/driver/references.cc
     src/shaped-graphics-language/driver/signatures.cc
     src/shaped-graphics-language/driver/format.cc
+    src/shaped-graphics-language/driver/outline.cc
     src/shaped-graphics-language/driver/completions.cc
 )
 
@@ -358,6 +359,7 @@ if(SC_BUILD_TOOLS)
         tools/sgl/lsp/semantic_tokens.cc
         tools/sgl/lsp/inlay_hints.cc
         tools/sgl/lsp/navigation.cc
+        tools/sgl/lsp/symbols.cc
         tools/sgl/lsp/run_tests.cc
         tools/sgl/lsp/server.hh
         tools/sgl/lsp/server.cc
@@ -478,6 +480,7 @@ if(SC_BUILD_TESTS)
         tests/driver/classify-test.cc
         tests/driver/references-test.cc
         tests/driver/format-test.cc
+        tests/driver/outline-test.cc
         tests/driver/compile-to-text-test.cc
         tests/driver/compile-profile-test.cc
         tests/driver/options-test.cc

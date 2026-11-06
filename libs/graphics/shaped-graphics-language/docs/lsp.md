@@ -31,6 +31,10 @@ This page is for whoever works on the server.
 * **References and rename**: `sgl::occurrences_at`, which resolves the name at the cursor and then every name of the same text in every file, keeping those that resolve to the same declaration.
   A rename refuses a keyword, a word that is no name, and a declaration of the prelude; `prepareRename` answers null for those.
 * **Formatting**: `sgl::format_source`, one edit replacing the whole document; an error where the document has syntax errors.
+* **Outline and folding**: `sgl::outline_of` and `sgl::folds_of`, read from the tree and the line tree alone, so a document whose check fails keeps both.
+  An entry's detail is its first line as written.
+* **Workspace symbols**: every open document and every module directory file that is not open, parsed per request, matched by the query's characters in order.
+  It runs on the thread driving the server, since a parse of a module directory's files takes a few milliseconds.
 * **Completion**, with `.` as its trigger: `sgl::completions_at`, filtered by the word the cursor ends.
   After `x.` it is what `x` has; while that line does not parse yet, `x` is read as a name in scope, since nothing checked it.
   Anywhere else it is the locals declared before the cursor in a block still open, the parameters, the document's and its module's declarations, the prelude's, and the keywords.
@@ -124,5 +128,5 @@ Recorded so they are not re-derived:
   Today the name is looked up again by its text, which knows locals, parameters and module-level names, and not `a.b.` chains.
 * **Occurrences from an index**: `occurrences_at` resolves every name of the right text, which is fine at a document's size and would want an index across many modules.
 * **A formatter beyond spacing**: line breaks for an overlong line, and indentation normalized to four spaces, which the line tree would have to judge.
-* **Document symbols, folding and workspace symbols**, which the declarations and the line tree answer.
+* **Workspace symbols from an index**, once module directories grow past what a parse per request affords.
 * **A Test Explorer** view beside the gutter marks.

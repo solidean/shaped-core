@@ -50,6 +50,11 @@ struct rename_params;
 struct document_edits;
 struct workspace_edit;
 struct prepare_rename_result;
+struct document_symbol;
+struct folding_range;
+struct workspace_symbol_params;
+struct symbol_information;
+enum class symbol_kind : i32;
 struct log_message_params;
 
 class text_index;

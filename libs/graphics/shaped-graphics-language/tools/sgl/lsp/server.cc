@@ -132,6 +132,9 @@ sgl_lsp::language_server::language_server()
             w.write("definitionProvider", true);
             w.write("referencesProvider", true);
             w.write("documentFormattingProvider", true);
+            w.write("documentSymbolProvider", true);
+            w.write("foldingRangeProvider", true);
+            w.write("workspaceSymbolProvider", true);
             w.begin_object("renameProvider");
             w.write("prepareProvider", true);
             w.end_object();
@@ -262,6 +265,31 @@ sgl_lsp::language_server::language_server()
             return analysis_request<cc::vector<lsp::text_edit>>(
                 cc::move(a), ctx.flag, [e = _server.encoding()](analysis const& an) { return formatting_of(an, e); });
         });
+
+    _server.on_request<lsp::text_document_params>("textDocument/documentSymbol",
+                                                  [this](lsp::request_context const& ctx, lsp::text_document_params p)
+                                                  {
+                                                      auto a = _analyses.of(_server.workspace().snapshot(), p.uri);
+                                                      if (!a)
+                                                          return answer_now(cc::vector<lsp::document_symbol>());
+                                                      return analysis_request<cc::vector<lsp::document_symbol>>(
+                                                          cc::move(a), ctx.flag,
+                                                          [e = _server.encoding()](analysis const& an)
+                                                          { return document_symbols_of(an, e); });
+                                                  });
+    _server.on_request<lsp::text_document_params>("textDocument/foldingRange",
+                                                  [this](lsp::request_context const& ctx, lsp::text_document_params p)
+                                                  {
+                                                      auto a = _analyses.of(_server.workspace().snapshot(), p.uri);
+                                                      if (!a)
+                                                          return answer_now(cc::vector<lsp::folding_range>());
+                                                      return analysis_request<cc::vector<lsp::folding_range>>(
+                                                          cc::move(a), ctx.flag,
+                                                          [](analysis const& an) { return folding_ranges_of(an); });
+                                                  });
+    _server.on_request<lsp::workspace_symbol_params>(
+        "workspace/symbol", [this](lsp::request_context const&, lsp::workspace_symbol_params p)
+        { return answer_now(workspace_symbols_of(_server.workspace().snapshot(), p.query, _server.encoding())); });
 
     _server.on_request<prelude_text_params>(
         "sgl/preludeText",

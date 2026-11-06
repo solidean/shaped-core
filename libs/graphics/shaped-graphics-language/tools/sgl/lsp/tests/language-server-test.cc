@@ -587,3 +587,52 @@ TEST("sgl lsp - formatting replaces the whole document, edits nothing where it i
     auto broken = session("fun f() -> float:\n    return (1.0\n");
     CHECK(broken.ask(5, "textDocument/formatting", doc)["error"]["message"].as_string().contains("syntax errors"));
 }
+
+TEST("sgl lsp - the outline is the document's declarations, each holding its members, with its first line as detail",
+     main_thread)
+{
+    auto s = session("struct light:\n    power: float\n\nfun shade(l: light) -> float:\n    return l.power\n");
+    auto const r = s.ask(5, "textDocument/documentSymbol", R"({"textDocument":{"uri":"file:///t.sgl"}})");
+    auto const symbols = r["result"];
+    REQUIRE(symbols.size() == 2);
+    CHECK(symbols[0]["name"].as_string() == "light");
+    CHECK(symbols[0]["kind"].as_double() == i32(lsp::symbol_kind::struct_));
+    REQUIRE(symbols[0]["children"].size() == 1);
+    CHECK(symbols[0]["children"][0]["name"].as_string() == "power");
+    CHECK(symbols[1]["name"].as_string() == "shade");
+    CHECK(symbols[1]["detail"].as_string() == "fun shade(l: light) -> float");
+    CHECK(symbols[1]["range"]["end"]["line"].as_double() == 4);
+    CHECK(symbols[1]["selectionRange"]["start"]["character"].as_double() == 4);
+}
+
+TEST("sgl lsp - folding ranges are the lines that own deeper ones, and runs of comments", main_thread)
+{
+    auto s = session("// a\n// b\nfun f() -> float:\n    return 1.0\n");
+    auto const r = s.ask(5, "textDocument/foldingRange", R"({"textDocument":{"uri":"file:///t.sgl"}})");
+    auto const folds = r["result"];
+    REQUIRE(folds.size() == 2);
+    auto has = [&](i32 start, i32 end, bool is_comment)
+    {
+        for (auto i = isize(0); i < folds.size(); ++i)
+            if (folds[i]["startLine"].as_double() == start && folds[i]["endLine"].as_double() == end
+                && folds[i].has("kind") == is_comment)
+                return true;
+        return false;
+    };
+    CHECK(has(2, 3, false));
+    CHECK(has(0, 1, true));
+}
+
+TEST("sgl lsp - workspace symbols match the query's characters in order, across the open documents", main_thread)
+{
+    auto s = session("struct light:\n    power: float\nfun shade_light(l: light) -> float => l.power\n");
+    auto const r = s.ask(5, "workspace/symbol", R"({"query":"shli"})");
+    auto const found = r["result"];
+    REQUIRE(found.size() == 1);
+    CHECK(found[0]["name"].as_string() == "shade_light");
+    CHECK(found[0]["location"]["uri"].as_string() == "file:///t.sgl");
+    // a member names the declaration that holds it
+    auto const member = s.ask(6, "workspace/symbol", R"({"query":"power"})");
+    REQUIRE(member["result"].size() == 1);
+    CHECK(member["result"][0]["containerName"].as_string() == "light");
+}

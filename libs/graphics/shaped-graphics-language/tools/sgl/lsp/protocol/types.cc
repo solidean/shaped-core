@@ -81,6 +81,11 @@ bool lsp::read(json::ref in, rename_params& out)
         && json::read(in["newName"], out.new_name);
 }
 
+bool lsp::read(json::ref in, workspace_symbol_params& out)
+{
+    return json::read(in["query"], out.query);
+}
+
 void lsp::write_fields(json::writer& w, position const& v)
 {
     w.write("line", v.line);
@@ -239,4 +244,33 @@ void lsp::write_fields(json::writer& w, prepare_rename_result const& v)
 {
     json::put(w, "range", v.range);
     json::put(w, "placeholder", v.placeholder);
+}
+
+void lsp::write_fields(json::writer& w, document_symbol const& v)
+{
+    json::put(w, "name", v.name);
+    if (!v.detail.empty())
+        json::put(w, "detail", v.detail);
+    w.write("kind", i32(v.kind));
+    json::put(w, "range", v.range);
+    json::put(w, "selectionRange", v.selection_range);
+    if (!v.children.empty())
+        json::put(w, "children", v.children);
+}
+
+void lsp::write_fields(json::writer& w, folding_range const& v)
+{
+    w.write("startLine", v.start_line);
+    w.write("endLine", v.end_line);
+    if (v.is_comment)
+        json::put(w, "kind", cc::string_view("comment"));
+}
+
+void lsp::write_fields(json::writer& w, symbol_information const& v)
+{
+    json::put(w, "name", v.name);
+    w.write("kind", i32(v.kind));
+    json::put(w, "location", v.location);
+    if (!v.container_name.empty())
+        json::put(w, "containerName", v.container_name);
 }

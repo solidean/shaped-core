@@ -300,6 +300,57 @@ struct lsp::prepare_rename_result
     cc::string placeholder;
 };
 
+/// What an editor draws beside a symbol, in the specification's numbering; a subset.
+enum class lsp::symbol_kind : lsp::i32
+{
+    module = 2,
+    namespace_ = 3,
+    method = 6,
+    property = 7,
+    field = 8,
+    enum_ = 10,
+    function = 12,
+    variable = 13,
+    constant = 14,
+    object = 19,
+    enum_member = 22,
+    struct_ = 23,
+    event = 24,
+    type_parameter = 26,
+};
+
+/// One declaration of a document's outline, with the ones it holds.
+struct lsp::document_symbol
+{
+    cc::string name;
+    cc::string detail;
+    symbol_kind kind = symbol_kind::function;
+    lsp::range range;
+    lsp::range selection_range;
+    cc::vector<document_symbol> children;
+};
+
+struct lsp::folding_range
+{
+    i32 start_line = 0;
+    i32 end_line = 0;
+    bool is_comment = false;
+};
+
+struct lsp::workspace_symbol_params
+{
+    cc::string query;
+};
+
+/// A declaration somewhere in the workspace, flat, with the declaration that holds it.
+struct lsp::symbol_information
+{
+    cc::string name;
+    symbol_kind kind = symbol_kind::function;
+    lsp::location location;
+    cc::string container_name;
+};
+
 struct lsp::log_message_params
 {
     message_type type = message_type::log;
@@ -324,6 +375,7 @@ namespace lsp
 [[nodiscard]] bool read(json::ref in, text_document_position_params& out);
 [[nodiscard]] bool read(json::ref in, reference_params& out);
 [[nodiscard]] bool read(json::ref in, rename_params& out);
+[[nodiscard]] bool read(json::ref in, workspace_symbol_params& out);
 
 // writing
 void write_fields(json::writer& w, position const& v);
@@ -344,4 +396,7 @@ void write_fields(json::writer& w, signature_information const& v);
 void write_fields(json::writer& w, signature_help const& v);
 void write_fields(json::writer& w, workspace_edit const& v);
 void write_fields(json::writer& w, prepare_rename_result const& v);
+void write_fields(json::writer& w, document_symbol const& v);
+void write_fields(json::writer& w, folding_range const& v);
+void write_fields(json::writer& w, symbol_information const& v);
 } // namespace lsp

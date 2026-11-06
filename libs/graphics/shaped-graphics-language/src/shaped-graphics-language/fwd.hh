@@ -47,8 +47,11 @@ struct parameter_label;
 struct call_signature;
 struct signature_help;
 struct formatted_source;
+struct outline_entry;
+struct fold_range;
 
 enum class described_member_kind : u8;
+enum class outline_kind : u8;
 struct described_sampler;
 struct described_file_sampler;
 struct described_binding_member;
