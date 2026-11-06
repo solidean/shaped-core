@@ -18,8 +18,13 @@ public:
     /// Whether every path from the entry to `b` passes through `a`.
     [[nodiscard]] bool dominates(u32 a, u32 b) const { return _entered[a] <= _entered[b] && _left[b] <= _left[a]; }
 
+    /// The closest strict dominator of `node`, the entry's being itself; `node` must be reached by a walk.
+    [[nodiscard]] u32 immediate(u32 node) const { return u32(_idom[node]); }
+
 private:
     /// When a walk of the dominator tree entered and left each node: a node dominates what falls inside its interval.
     cc::vector<u32> _entered;
     cc::vector<u32> _left;
+    /// -1 for a node no walk reaches.
+    cc::vector<i32> _idom;
 };

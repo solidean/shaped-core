@@ -65,6 +65,10 @@ Every value is a run of scalars in the writer, which is what DXIL asks and what 
 Memory is three kinds of place: arrays of scalars by leaf, for variables and workgroup memory; rows, for constant blocks; an element and a byte offset, for buffers.
 What SPIR-V and DXIL share lives in `ir/`: `lower*.cc`, `ssa.cc` and `dominance.cc`, with `simplify.cc` for what only an unstructured target may do.
 
+`ir/spirv/` is shaped the same way: `impl/spv.hh` is SPIR-V's numbers, and a new case is a row there too.
+`writer_operations.cc`'s `k_rules` says how each `ir::op` is written and its `k_groups` each `subgroup`, and `writer_declarations.cc` holds types, globals and `k_built_ins`.
+`ir/pipeline.hh` is each target's order of passes, one plain function per target, and `ir::verify` runs inside it wherever assertions are on.
+
 **A choice worth stating: memory has its own types.**
 Vulkan refuses layout decorations on a value in a function, so a struct in GPU memory and the same struct as a value are two SPIR-V types, and a whole read or write crosses with `OpCopyLogical`.
 This is why the module is SPIR-V 1.6, which needs Vulkan 1.3, the floor sg already holds.

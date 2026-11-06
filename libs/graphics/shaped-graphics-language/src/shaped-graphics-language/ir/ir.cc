@@ -204,6 +204,13 @@ cc::string_view sgl::ir::op_name(op code)
     return k_names[isize(code)];
 }
 
+cc::string sgl::ir::type_name(program const& p, type_ref t)
+{
+    auto out = cc::string();
+    append_type(out, p, t);
+    return out;
+}
+
 sgl::ir::operand sgl::ir::operand_role(op code, isize at)
 {
     switch (code)

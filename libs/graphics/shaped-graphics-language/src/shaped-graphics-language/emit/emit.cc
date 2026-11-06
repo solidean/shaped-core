@@ -3,12 +3,8 @@
 #include <clean-core/string/format.hh>
 #include <shaped-graphics-language/emit/impl/dialect.hh>
 #include <shaped-graphics-language/emit/impl/plan.hh>
-#include <shaped-graphics-language/ir/dxil/dxil.hh>
 #include <shaped-graphics-language/ir/ir.hh>
-#include <shaped-graphics-language/ir/lower.hh>
-#include <shaped-graphics-language/ir/simplify.hh>
-#include <shaped-graphics-language/ir/spirv.hh>
-#include <shaped-graphics-language/ir/ssa.hh>
+#include <shaped-graphics-language/ir/pipeline.hh>
 #include <shaped-graphics-language/legalize/legalize.hh>
 
 namespace
@@ -360,19 +356,11 @@ sgl::emit::emitted_text sgl::emit::emit_entry_point(check::checked_module const&
     if (sources.native != native_route::text)
     {
         auto program = ir::program();
-        auto gap = ir::lower(plan, program);
         auto const is_dxil = t == target::hlsl_dx12;
-        if (!gap.has_value())
-            ir::construct_ssa(program);
-        if (!gap.has_value() && is_dxil)
-        {
-            ir::simplify(program);
-            gap = ir::write_dxil(program, result.dxil);
-        }
+        auto const gap
+            = is_dxil ? ir::compile_dxil(plan, program, result.dxil) : ir::compile_spirv(plan, program, result.spirv);
         if (!gap.has_value())
         {
-            if (!is_dxil)
-                result.spirv = ir::write_spirv(program);
             result.text = ir::dump(program);
             is_native = true;
         }
