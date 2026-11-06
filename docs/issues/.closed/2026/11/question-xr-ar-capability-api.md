@@ -3,8 +3,8 @@ created: 2026-11-05
 priority: next
 tags: [xr, design]
 parent: epic-xr
-claimed-by: Claude (for Philip)
-claimed-at: 2026-11-06T09:36Z
+closed: 2026-11-06
+resolution: fixed
 ---
 
 # The session API for environment depth, scene, anchors and hit tests

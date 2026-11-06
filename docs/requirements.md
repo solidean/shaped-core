@@ -46,7 +46,7 @@ Configured per platform via presets.
 | Linux    | `clang++` / `clang` | Default (`relwithdebinfo-linux-clang`).                      |
 | Linux    | `g++` / `gcc`       | `relwithdebinfo-linux-gcc`, the only GCC preset. GCC **13+** for `std::stacktrace`. |
 | macOS    | Homebrew `llvm@22`  | Expects `/opt/homebrew/opt/llvm@22/bin/clang++` (arm64). The formula is versioned so a Homebrew bump cannot move the toolchain under us. Targets macOS 26.0; see [below](#macos-deployment-target-and-sdk). |
-| Android  | NDK (r27+)          | `android-ndk-arm64-*` presets; NDK located via `$ANDROID_NDK_ROOT`. |
+| Android  | NDK (r29)           | `android-ndk-arm64-*` presets; `uv run dev.py install android-sdk`, or `$ANDROID_NDK_ROOT`. |
 | WASM     | Emscripten (emsdk)  | `emscripten-*` presets (single-threaded). See below.        |
 
 See [platforms.md](platforms.md) for the full tier matrix — which platforms are actively tested, which are supported, and which are planned.
@@ -250,6 +250,31 @@ uv run dev.py install vulkan-sdk   # into ~/tools/vulkan-sdk/<version>, checked 
 
 **Every dev.py run then points `VULKAN_SDK` at it**, so no environment variable is yours to set.
 On Linux it also adds the SDK's layers to `VK_ADD_LAYER_PATH`, since an unpacked tarball registers none; the Windows installer registers its own.
+
+### Android SDK
+
+The NDK the Android presets build with, plus what packages and deploys an APK: platform-tools, build-tools and one platform.
+
+```bash
+uv run dev.py install android-sdk --accept-license   # into ~/tools/android-sdk, checked against the SHA-1 tools/android-sdk.version pins
+```
+
+**The flag is yours to pass**, after reading [Google's license](https://developer.android.com/studio/terms); nothing passes it for you.
+**Every dev.py run then points `ANDROID_NDK_ROOT` at it**, unless that is set already.
+It needs no Java, since it fetches the archives directly rather than through sdkmanager.
+`apksigner`, one of those build-tools, does need a Java runtime, which `feat-android-apk` has yet to settle.
+
+### Monado
+
+Monado is an OpenXR runtime with a simulated headset, which shaped-xr's session tests run on so that they need no hardware.
+Without it they skip.
+
+```bash
+uv run dev.py install monado   # builds the commit tools/monado.version pins into ~/tools/monado; Windows only so far
+```
+
+It builds from source with its dependencies through vcpkg, and needs the Vulkan SDK and MSVC.
+**`dev.py test` then selects it by itself, and nothing else does**: [testing.md](../libs/graphics/shaped-xr/docs/testing.md) says why.
 A `VULKAN_SDK` already set wins: an SDK you chose is never replaced by the pinned one.
 On Windows the SDK is LunarG's installer, run unattended.
 Its core component needs admin rights even when installing into your home, so `dev.py` starts it again elevated and Windows asks you to confirm once.

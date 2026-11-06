@@ -5,6 +5,7 @@
 #include <clean-core/common/profiling.hh>
 #include <clean-core/common/utility.hh> // cc::move
 #include <clean-core/platform/win32_sanitized.hh>
+#include <clean-core/record/log.hh>
 #include <shaped-rendering/impl/input_translation.hh>
 #include <shaped-rendering/impl/window_internals.hh>
 #include <shaped-rendering/window.hh>
@@ -426,6 +427,10 @@ cc::result<cc::unique_ptr<window_system>> window_system::try_create(window_syste
     if (!SDL_Init(SDL_INIT_VIDEO))
         return cc::error(last_sdl_error());
 
+    // A window works without gamepads, so losing them is no reason to fail.
+    if (!SDL_InitSubSystem(SDL_INIT_GAMEPAD))
+        CC_LOG_WARNING("no gamepads: {}", SDL_GetError());
+
     // The hint is a request, so confirm it took rather than trusting it.
     // A headless system that quietly got a real driver would open real windows on a CI machine, which the assert above cannot catch in a build with assertions off.
     if (desc.headless)
@@ -468,6 +473,9 @@ window_system::~window_system()
 {
     assert_owning_thread();
     CC_ASSERT(_windows.empty(), "every sr::window must be destroyed before its window_system");
+
+    for (auto const& pad : _gamepads)
+        SDL_CloseGamepad(SDL_GetGamepadFromID(pad.gamepad));
 
     // Before SDL_Quit: the cursors are SDL objects, and freeing them after the subsystem is down is a use-after-free that only shows up under a leak checker.
     destroy_cursors();
@@ -697,6 +705,78 @@ void window_system::poll_events()
                 push(w, file_drop_event{
                             .path = cc::string(event.drop.data),
                             .cursor_pos = impl::pixels_from_logical(event.drop.x, event.drop.y, density_of(w))});
+            }
+            break;
+
+        // SDL reports a gamepad's input only once it is opened, so opening happens here, on arrival.
+        case SDL_EVENT_GAMEPAD_ADDED:
+        {
+            auto* const pad = SDL_OpenGamepad(event.gdevice.which);
+            if (pad == nullptr)
+            {
+                CC_LOG_WARNING("a gamepad could not be opened: {}", SDL_GetError());
+                break;
+            }
+            auto const* const name = SDL_GetGamepadName(pad);
+            auto state = gamepad_state{.gamepad = event.gdevice.which, .name = cc::string(name != nullptr ? name : "")};
+            push(nullptr, gamepad_connection_event{.gamepad = state.gamepad, .name = state.name, .is_connected = true});
+            _gamepads.push_back(cc::move(state));
+            break;
+        }
+
+        case SDL_EVENT_GAMEPAD_REMOVED:
+            for (auto i = isize(0); i < _gamepads.size(); ++i)
+                if (_gamepads[i].gamepad == event.gdevice.which)
+                {
+                    SDL_CloseGamepad(SDL_GetGamepadFromID(event.gdevice.which));
+                    push(nullptr, gamepad_connection_event{.gamepad = event.gdevice.which, .name = _gamepads[i].name});
+                    _gamepads.remove_at(i);
+                    break;
+                }
+            break;
+
+        case SDL_EVENT_GAMEPAD_BUTTON_DOWN:
+        case SDL_EVENT_GAMEPAD_BUTTON_UP:
+            if (auto const button = impl::gamepad_button_from_sdl(event.gbutton.button); button.has_value())
+            {
+                for (auto& pad : _gamepads)
+                    if (pad.gamepad == event.gbutton.which)
+                        pad.held_buttons = event.gbutton.down ? pad.held_buttons | gamepad_button_bit(button.value())
+                                                              : pad.held_buttons & ~gamepad_button_bit(button.value());
+                push(nullptr, gamepad_button_event{.gamepad = event.gbutton.which,
+                                                   .button = button.value(),
+                                                   .is_down = event.gbutton.down});
+            }
+            break;
+
+        case SDL_EVENT_GAMEPAD_AXIS_MOTION:
+            if (auto const axis = impl::gamepad_axis_from_sdl(event.gaxis.axis); axis.has_value())
+            {
+                auto const value = impl::gamepad_axis_value(axis.value(), event.gaxis.value);
+                for (auto& pad : _gamepads)
+                    if (pad.gamepad == event.gaxis.which)
+                        switch (axis.value())
+                        {
+                        case gamepad_axis::left_x:
+                            pad.left_stick[0] = value;
+                            break;
+                        case gamepad_axis::left_y:
+                            pad.left_stick[1] = value;
+                            break;
+                        case gamepad_axis::right_x:
+                            pad.right_stick[0] = value;
+                            break;
+                        case gamepad_axis::right_y:
+                            pad.right_stick[1] = value;
+                            break;
+                        case gamepad_axis::left_trigger:
+                            pad.left_trigger = value;
+                            break;
+                        case gamepad_axis::right_trigger:
+                            pad.right_trigger = value;
+                            break;
+                        }
+                push(nullptr, gamepad_axis_event{.gamepad = event.gaxis.which, .axis = axis.value(), .value = value});
             }
             break;
 

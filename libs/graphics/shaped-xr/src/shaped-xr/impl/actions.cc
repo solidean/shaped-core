@@ -4,7 +4,7 @@
 
 using namespace cc::primitive_defines;
 
-bool xr::impl::is_valid_action_name(cc::string_view name)
+bool sxr::impl::is_valid_action_name(cc::string_view name)
 {
     if (name.empty())
         return false;
@@ -14,7 +14,7 @@ bool xr::impl::is_valid_action_name(cc::string_view name)
     return true;
 }
 
-cc::string xr::impl::problem_of(cc::span<action_description const> actions)
+cc::string sxr::impl::problem_of(cc::span<action_description const> actions)
 {
     for (auto i = isize(0); i < actions.size(); ++i)
     {
@@ -38,7 +38,7 @@ cc::string xr::impl::problem_of(cc::span<action_description const> actions)
     return {};
 }
 
-cc::vector<xr::impl::profile_bindings> xr::impl::bindings_by_profile(cc::span<action_description const> actions)
+cc::vector<sxr::impl::profile_bindings> sxr::impl::bindings_by_profile(cc::span<action_description const> actions)
 {
     auto out = cc::vector<profile_bindings>();
     for (auto i = isize(0); i < actions.size(); ++i)
@@ -59,7 +59,7 @@ cc::vector<xr::impl::profile_bindings> xr::impl::bindings_by_profile(cc::span<ac
     return out;
 }
 
-cc::vector<xr::action_description> xr::standard_controller_actions()
+cc::vector<sxr::action_description> sxr::standard_controller_actions()
 {
     constexpr auto touch = cc::string_view("/interaction_profiles/oculus/touch_controller");
     constexpr auto simple = cc::string_view("/interaction_profiles/khr/simple_controller");

@@ -4,6 +4,8 @@ priority: normal
 tags: [xr]
 parent: epic-xr
 blocked-by: [feat-shaped-xr-core, feat-sg-view-instancing, feat-sgl-view-index]
+closed: 2026-11-06
+resolution: fixed
 ---
 
 # `xr-cube`: one SGL source, multiview, in the headset

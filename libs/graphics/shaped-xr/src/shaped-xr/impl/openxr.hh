@@ -1,27 +1,38 @@
 #pragma once
 
-// OpenXR with the bindings this build has, and the state behind xr::system and xr::session.
+// OpenXR with the bindings this build has, and the state behind sxr::system and sxr::session.
 // Only shaped-xr's own sources include this: the public headers name no OpenXR, Vulkan or D3D12 type.
 
+#include <shaped-xr/impl/capabilities.hh>
 #include <shaped-xr/xr.hh>
 
-#if XR_HAS_OPENXR
+#if SXR_HAS_OPENXR
 
-#if XR_HAS_VULKAN
+#if SXR_HAS_VULKAN
 #include <shaped-graphics/backends/vulkan/vulkan_context.hh>
 #define XR_USE_GRAPHICS_API_VULKAN
 #endif
-#if XR_HAS_DX12
+#if SXR_HAS_DX12
 #include <shaped-graphics/backends/dx12/dx12_context.hh>
 #define XR_USE_GRAPHICS_API_D3D12
 #endif
 #include <openxr/openxr.h>
 #include <openxr/openxr_platform.h>
 
-namespace xr::impl
+namespace sxr::impl
 {
 /// `result` as a message naming `what`, or empty where it succeeded.
 [[nodiscard]] cc::string failed(XrInstance instance, XrResult result, cc::string_view what);
+
+/// The system's name and what it answers about the extensions in `enabled`, which were enabled on `instance`.
+struct system_answer
+{
+    cc::string name;
+    system_support support;
+};
+[[nodiscard]] cc::result<system_answer> read_system(XrInstance instance,
+                                                    XrSystemId system,
+                                                    cc::span<char const* const> enabled);
 
 /// An instance function the loader resolves by name, or null where the runtime lacks it.
 template <class F>
@@ -40,28 +51,31 @@ struct swapchain
     i64 format = 0;
     /// Per image: on vulkan the image itself, wrapped; empty on dx12, where `copied` is rendered into instead.
     cc::vector<sg::texture_2d_array> wrapped;
-#if XR_HAS_DX12
+#if SXR_HAS_DX12
     cc::vector<ID3D12Resource*> dx12_images;
 #endif
     u32 acquired = 0;
 };
-} // namespace xr::impl
+} // namespace sxr::impl
 
-struct xr::system::state
+struct sxr::system::state
 {
     XrInstance instance = XR_NULL_HANDLE;
     XrSystemId system = XR_NULL_SYSTEM_ID;
     graphics_api api = graphics_api::vulkan;
     cc::string runtime_name;
     cc::string system_name;
-    bool offers_passthrough = false;
+    /// What the description wanted and the headset has.
+    cc::vector<capability> offered;
+    /// What the runtime composes by itself, as `xrEnumerateEnvironmentBlendModes` lists it.
+    cc::vector<blend_mode> runtime_blends;
     /// Whether each view hands the runtime its depth too (`XR_KHR_composition_layer_depth`).
     bool offers_depth_layer = false;
 
     ~state();
 };
 
-struct xr::session::state
+struct sxr::session::state
 {
     system::state const* sys = nullptr;
     sg::context* ctx = nullptr;
@@ -80,6 +94,7 @@ struct xr::session::state
     sg::texture_2d_array own_color;
     sg::texture_2d_array own_depth;
 
+    blend_mode blend = blend_mode::opaque;
     XrPassthroughFB passthrough = XR_NULL_HANDLE;
     XrPassthroughLayerFB passthrough_layer = XR_NULL_HANDLE;
 

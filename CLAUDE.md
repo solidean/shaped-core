@@ -165,11 +165,11 @@ One-liner per library:
   `SR_HAS_WINDOW` (1/0) says whether a backend was compiled in.
   sr also hosts the **denoise members**, the vendor ones included: `SR_HAS_DLSS` (1/0) says whether NVIDIA's SDK was fetched.
   **That fetch is on request and nothing performs it for you** — `uv run extern/dlss/fetch-dlss.py` — because its license is NVIDIA's rather than one a build accepts on anyone's behalf.
-* **`libs/graphics/shaped-xr`** — sg rendering in a headset through OpenXR: `xr::system`, `xr::session` and its frames, Quest 3 over Quest Link first.
+* **`libs/graphics/shaped-xr`** — sg rendering in a headset through OpenXR: `sxr::system`, `sxr::session` and its frames, Quest 3 over Quest Link first.
   The runtime dictates the GPU, so `system::create_context` makes the sg context to its spec, on vulkan or dx12.
   A frame is one image of a layer an eye, color and depth, so view instancing draws both eyes in one pass; passthrough is the runtime's own layer.
   **Views are in tg's frame**: OpenXR's right-handed space is converted at the session's edge, and no public header names an OpenXR type.
-  Namespace `xr`.
+  Namespace `sxr`.
   Depends on shaped-rendering, plus the fetched OpenXR loader and an sg backend where the build has them.
   [docs/design.md](libs/graphics/shaped-xr/docs/design.md) has the decisions; `uv run dev.py example xr-cube --window` puts the cube in the headset.
 * **`libs/graphics/shaped-graphics-language`** — SGL, our own shading language, and its whole toolchain in one library: compiler, linter, language server.
@@ -572,7 +572,7 @@ A stale "no cc:: equivalent yet" reason sends the next author back to the old wa
 | Sanity-check the toolchain       | `uv run dev.py doctor`                                            |
 | Update a consumer's submodules   | `uv run dev.py submodules sync [--tip \| --bump]` — to the recorded commits (or the branch heads), fast-forwards only, never touches local work ([consuming-shaped-core](docs/guides/consuming-shaped-core.md#keeping-the-submodules-current)) |
 | Clone an opt-in companion repo   | `uv run dev.py companions init shader-rosetta` (`list` shows them, `sync` fast-forwards; [building-and-testing](docs/guides/building-and-testing.md#companion-repositories-companions)) |
-| Install a repo tool                  | `uv run dev.py install` (lists them; `install sgl-vscode` links the SGL extension, `install emsdk` the pinned Emscripten SDK, `install deno` the pinned deno, `install sde --archive <file>` Intel's CPU emulator, `install vulkan-sdk` the pinned Vulkan SDK every dev.py run then builds against, `install shaped-view` the model viewer a double-click opens) |
+| Install a repo tool                  | `uv run dev.py install` (lists them; `install sgl-vscode` links the SGL extension, `install emsdk` the pinned Emscripten SDK, `install deno` the pinned deno, `install sde --archive <file>` Intel's CPU emulator, `install vulkan-sdk` the pinned Vulkan SDK every dev.py run then builds against, `install android-sdk --accept-license` the pinned NDK and SDK tools, `install monado` the simulated headset `dev.py test` then runs shaped-xr's session tests on, `install shaped-view` the model viewer a double-click opens) |
 | List presets / targets           | `uv run dev.py list-presets` / `list-targets`                     |
 | Pin a compiler version           | `uv run dev.py build --toolset <ver>` (`list-toolsets` shows them) |
 | Review a PR, a branch or a design | `uv run review.py init <name> --range A..B --goal <goal>` ([readme](tools/review/readme.md); the `reviewing-a-pr` skill drives it) |

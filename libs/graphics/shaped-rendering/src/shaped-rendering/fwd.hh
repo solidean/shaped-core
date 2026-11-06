@@ -124,6 +124,12 @@ struct mouse_move_event;
 struct mouse_button_event;
 struct mouse_wheel_event;
 struct file_drop_event;
+enum class gamepad_button : u8;
+enum class gamepad_axis : u8;
+struct gamepad_connection_event;
+struct gamepad_button_event;
+struct gamepad_axis_event;
+struct gamepad_state;
 struct input_event;
 
 // Dear ImGui, drawn through sg.

@@ -7,62 +7,66 @@
 #include <shaped-xr/impl/openxr.hh>
 #include <shaped-xr/impl/view_math.hh>
 
-#if XR_HAS_DX12
+#if SXR_HAS_DX12
 #include <shaped-graphics/backends/dx12/dx12_native_scope.hh>
 
 using namespace cc::primitive_defines;
 #endif
 
-xr::session::session(cc::unique_ptr<state> s) : _state(cc::move(s))
+sxr::session::session(cc::unique_ptr<state> s) : _state(cc::move(s))
 {
 }
-xr::session::~session() = default;
+sxr::session::~session() = default;
 
-#if !XR_HAS_OPENXR
+#if !SXR_HAS_OPENXR
 
-struct xr::session::state
+struct sxr::session::state
 {
 };
-bool xr::session::poll_events()
+bool sxr::session::poll_events()
 {
     return false;
 }
-bool xr::session::is_running() const
+bool sxr::session::is_running() const
 {
     return false;
 }
-bool xr::session::is_focused() const
+bool sxr::session::is_focused() const
 {
     return false;
 }
-bool xr::session::shows_passthrough() const
+sxr::blend_mode sxr::session::blend() const
 {
-    return false;
+    return blend_mode::opaque;
 }
-cc::optional<xr::frame> xr::session::wait_frame()
+sxr::availability sxr::session::availability_of(capability) const
+{
+    return availability::unsupported;
+}
+cc::optional<sxr::frame> sxr::session::wait_frame()
 {
     return {};
 }
-void xr::session::submit_frame(std::unique_ptr<sg::command_list>)
+void sxr::session::submit_frame(std::unique_ptr<sg::command_list>)
 {
 }
-bool xr::session::pressed(cc::string_view, hand) const
+bool sxr::session::pressed(cc::string_view, hand) const
 {
     return false;
 }
-xr::f32 xr::session::scalar(cc::string_view, hand) const
+sxr::f32 sxr::session::scalar(cc::string_view, hand) const
 {
     return 0.0f;
 }
-tg::vec2f xr::session::vector2(cc::string_view, hand) const
+tg::vec2f sxr::session::vector2(cc::string_view, hand) const
 {
     return {};
 }
-cc::optional<tg::rigid_transform3f> xr::session::pose(cc::string_view, hand) const
+cc::optional<tg::rigid_transform3f> sxr::session::pose(cc::string_view, hand) const
 {
     return {};
 }
-void xr::session::vibrate(cc::string_view, hand, f32, f32)
+void sxr::session::vibrate(cc::string_view, hand, f32, f32)
 {
 }
 
@@ -90,10 +94,10 @@ namespace
 }
 
 /// What sg calls a swapchain format, among the ones `pick_format` is offered.
-[[nodiscard]] sg::pixel_format pixel_format_of(xr::graphics_api api, i64 format)
+[[nodiscard]] sg::pixel_format pixel_format_of(sxr::graphics_api api, i64 format)
 {
-#if XR_HAS_VULKAN
-    if (api == xr::graphics_api::vulkan)
+#if SXR_HAS_VULKAN
+    if (api == sxr::graphics_api::vulkan)
         switch (VkFormat(format))
         {
         case VK_FORMAT_R8G8B8A8_SRGB:
@@ -106,8 +110,8 @@ namespace
             return sg::pixel_format::undefined;
         }
 #endif
-#if XR_HAS_DX12
-    if (api == xr::graphics_api::dx12)
+#if SXR_HAS_DX12
+    if (api == sxr::graphics_api::dx12)
         switch (DXGI_FORMAT(format))
         {
         case DXGI_FORMAT_R8G8B8A8_UNORM_SRGB:
@@ -124,7 +128,7 @@ namespace
 }
 } // namespace
 
-xr::session::state::~state()
+sxr::session::state::~state()
 {
     auto const destroy_layer
         = impl::proc<PFN_xrDestroyPassthroughLayerFB>(sys->instance, "xrDestroyPassthroughLayerFB");
@@ -151,7 +155,7 @@ xr::session::state::~state()
         xrDestroySession(session);
 }
 
-cc::result<cc::unique_ptr<xr::session>> xr::system::create_session(sg::context& ctx, session_description const& desc)
+cc::result<cc::unique_ptr<sxr::session>> sxr::system::create_session(sg::context& ctx, session_description const& desc)
 {
     auto s = cc::make_unique<session::state>();
     s->sys = _state.get();
@@ -160,7 +164,7 @@ cc::result<cc::unique_ptr<xr::session>> xr::system::create_session(sg::context& 
     auto const instance = _state->instance;
 
     // ---- the session over the context's device and queue
-#if XR_HAS_VULKAN
+#if SXR_HAS_VULKAN
     auto vk_binding = XrGraphicsBindingVulkan2KHR{.type = XR_TYPE_GRAPHICS_BINDING_VULKAN2_KHR};
     if (_state->api == graphics_api::vulkan)
     {
@@ -174,7 +178,7 @@ cc::result<cc::unique_ptr<xr::session>> xr::system::create_session(sg::context& 
         vk_binding.queueIndex = 0;
     }
 #endif
-#if XR_HAS_DX12
+#if SXR_HAS_DX12
     auto dx_binding = XrGraphicsBindingD3D12KHR{.type = XR_TYPE_GRAPHICS_BINDING_D3D12_KHR};
     if (_state->api == graphics_api::dx12)
     {
@@ -186,11 +190,11 @@ cc::result<cc::unique_ptr<xr::session>> xr::system::create_session(sg::context& 
     }
 #endif
     void const* binding = nullptr;
-#if XR_HAS_VULKAN
+#if SXR_HAS_VULKAN
     if (_state->api == graphics_api::vulkan)
         binding = &vk_binding;
 #endif
-#if XR_HAS_DX12
+#if SXR_HAS_DX12
     if (_state->api == graphics_api::dx12)
         binding = &dx_binding;
 #endif
@@ -327,14 +331,14 @@ cc::result<cc::unique_ptr<xr::session>> xr::system::create_session(sg::context& 
 
     auto color_formats = cc::vector<i64>();
     auto depth_formats = cc::vector<i64>();
-#if XR_HAS_VULKAN
+#if SXR_HAS_VULKAN
     if (_state->api == graphics_api::vulkan)
     {
         color_formats = {VK_FORMAT_R8G8B8A8_SRGB, VK_FORMAT_B8G8R8A8_SRGB};
         depth_formats = {VK_FORMAT_D32_SFLOAT};
     }
 #endif
-#if XR_HAS_DX12
+#if SXR_HAS_DX12
     if (_state->api == graphics_api::dx12)
     {
         color_formats = {DXGI_FORMAT_R8G8B8A8_UNORM_SRGB, DXGI_FORMAT_B8G8R8A8_UNORM_SRGB};
@@ -353,6 +357,10 @@ cc::result<cc::unique_ptr<xr::session>> xr::system::create_session(sg::context& 
                                                     : XR_SWAPCHAIN_USAGE_COLOR_ATTACHMENT_BIT);
         if (is_dx12)
             usage |= XR_SWAPCHAIN_USAGE_TRANSFER_DST_BIT; // filled by a copy, see submit_frame
+        // dx12 renders into an image of its own, which can always be read
+        auto const is_readable = desc.readable_color && !is_depth && !is_dx12;
+        if (is_readable)
+            usage |= XR_SWAPCHAIN_USAGE_TRANSFER_SRC_BIT;
         auto const info = XrSwapchainCreateInfo{.type = XR_TYPE_SWAPCHAIN_CREATE_INFO,
                                                 .usageFlags = usage,
                                                 .format = chain.format,
@@ -374,10 +382,11 @@ cc::result<cc::unique_ptr<xr::session>> xr::system::create_session(sg::context& 
             .width = s->width,
             .height = s->height,
             .array_layers = int(view_count),
-            .usage = is_depth ? sg::texture_usages(sg::texture_usage::depth_stencil)
-                              : sg::texture_usages(sg::texture_usage::render_target),
+            .usage = is_depth    ? sg::texture_usages(sg::texture_usage::depth_stencil)
+                   : is_readable ? sg::texture_usage::render_target | sg::texture_usage::copy_src
+                                 : sg::texture_usages(sg::texture_usage::render_target),
         };
-#if XR_HAS_VULKAN
+#if SXR_HAS_VULKAN
         if (!is_dx12)
         {
             auto images = cc::vector<XrSwapchainImageVulkan2KHR>();
@@ -398,7 +407,7 @@ cc::result<cc::unique_ptr<xr::session>> xr::system::create_session(sg::context& 
             }
         }
 #endif
-#if XR_HAS_DX12
+#if SXR_HAS_DX12
         if (is_dx12)
         {
             auto images = cc::vector<XrSwapchainImageD3D12KHR>();
@@ -435,7 +444,9 @@ cc::result<cc::unique_ptr<xr::session>> xr::system::create_session(sg::context& 
     }
 
     // ---- the room behind the frame, running from the start
-    if (desc.passthrough && _state->offers_passthrough)
+    auto const blend = impl::choose_blend(desc.blend, _state->runtime_blends, offers(capability::passthrough));
+    s->blend = blend.shown;
+    if (blend.uses_camera_layer)
     {
         auto const create_passthrough = impl::proc<PFN_xrCreatePassthroughFB>(instance, "xrCreatePassthroughFB");
         auto const create_layer = impl::proc<PFN_xrCreatePassthroughLayerFB>(instance, "xrCreatePassthroughLayerFB");
@@ -457,16 +468,20 @@ cc::result<cc::unique_ptr<xr::session>> xr::system::create_session(sg::context& 
                                "xrCreatePassthroughLayerFB");
         }
         if (!why.empty())
+        {
             CC_LOG_WARNING("{}, so the frame shows no room behind it", why);
+            s->blend = blend_mode::opaque;
+        }
     }
-    else if (desc.passthrough)
-        CC_LOG_WARNING("passthrough was asked of a session whose system did not ask for it, or whose runtime has none");
+    else if (s->blend != desc.blend)
+        CC_LOG_WARNING("a blend mode was asked of a session whose system did not want passthrough, or whose runtime "
+                       "has neither");
 
     CC_LOG_INFO("{} views of {} x {}", view_count, s->width, s->height);
     return cc::make_unique<session>(cc::move(s));
 }
 
-bool xr::session::poll_events()
+bool sxr::session::poll_events()
 {
     auto& s = *_state;
     auto event = XrEventDataBuffer{.type = XR_TYPE_EVENT_DATA_BUFFER};
@@ -498,20 +513,29 @@ bool xr::session::poll_events()
     return true;
 }
 
-bool xr::session::is_running() const
+bool sxr::session::is_running() const
 {
     return _state->is_running;
 }
-bool xr::session::is_focused() const
+bool sxr::session::is_focused() const
 {
     return _state->current == XR_SESSION_STATE_FOCUSED;
 }
-bool xr::session::shows_passthrough() const
+sxr::availability sxr::session::availability_of(capability c) const
 {
-    return _state->passthrough_layer != XR_NULL_HANDLE;
+    // TEMPORARY(feat-android-apk): nothing asks a user yet, so needs_permission and denied wait for Android's permissions
+    for (auto const offered : _state->sys->offered)
+        if (offered == c)
+            return availability::available;
+    return availability::unsupported;
 }
 
-cc::optional<xr::frame> xr::session::wait_frame()
+sxr::blend_mode sxr::session::blend() const
+{
+    return _state->blend;
+}
+
+cc::optional<sxr::frame> sxr::session::wait_frame()
 {
     auto& s = *_state;
     CC_ASSERT(!s.in_frame, "wait_frame: the previous frame was never submitted");
@@ -600,7 +624,7 @@ cc::optional<xr::frame> xr::session::wait_frame()
     return f;
 }
 
-isize xr::session::state::action_index(cc::string_view name) const
+isize sxr::session::state::action_index(cc::string_view name) const
 {
     for (auto i = isize(0); i < desc.actions.size(); ++i)
         if (desc.actions[i].name == name)
@@ -612,7 +636,7 @@ isize xr::session::state::action_index(cc::string_view name) const
 namespace
 {
 /// What an action is read for: its handle and, for one per hand, which.
-[[nodiscard]] XrActionStateGetInfo state_info(xr::session::state const& s, isize i, xr::hand h)
+[[nodiscard]] XrActionStateGetInfo state_info(sxr::session::state const& s, isize i, sxr::hand h)
 {
     return {.type = XR_TYPE_ACTION_STATE_GET_INFO,
             .action = s.actions[i],
@@ -620,7 +644,7 @@ namespace
 }
 } // namespace
 
-bool xr::session::pressed(cc::string_view action, hand h) const
+bool sxr::session::pressed(cc::string_view action, hand h) const
 {
     auto const& s = *_state;
     auto const info = state_info(s, s.action_index(action), h);
@@ -628,7 +652,7 @@ bool xr::session::pressed(cc::string_view action, hand h) const
     return XR_SUCCEEDED(xrGetActionStateBoolean(s.session, &info, &state)) && state.isActive && state.currentState;
 }
 
-xr::f32 xr::session::scalar(cc::string_view action, hand h) const
+sxr::f32 sxr::session::scalar(cc::string_view action, hand h) const
 {
     auto const& s = *_state;
     auto const info = state_info(s, s.action_index(action), h);
@@ -638,7 +662,7 @@ xr::f32 xr::session::scalar(cc::string_view action, hand h) const
     return state.currentState;
 }
 
-tg::vec2f xr::session::vector2(cc::string_view action, hand h) const
+tg::vec2f sxr::session::vector2(cc::string_view action, hand h) const
 {
     auto const& s = *_state;
     auto const info = state_info(s, s.action_index(action), h);
@@ -648,14 +672,14 @@ tg::vec2f xr::session::vector2(cc::string_view action, hand h) const
     return tg::vec2f(state.currentState.x, state.currentState.y);
 }
 
-cc::optional<tg::rigid_transform3f> xr::session::pose(cc::string_view action, hand h) const
+cc::optional<tg::rigid_transform3f> sxr::session::pose(cc::string_view action, hand h) const
 {
     auto const& s = *_state;
     auto const i = s.action_index(action);
     return s.poses[i * 2 + (s.desc.actions[i].is_per_hand ? int(h) : 0)];
 }
 
-void xr::session::vibrate(cc::string_view action, hand h, f32 amplitude, f32 seconds)
+void sxr::session::vibrate(cc::string_view action, hand h, f32 amplitude, f32 seconds)
 {
     auto const& s = *_state;
     auto const i = s.action_index(action);
@@ -670,7 +694,7 @@ void xr::session::vibrate(cc::string_view action, hand h, f32 amplitude, f32 sec
     xrApplyHapticFeedback(s.session, &info, reinterpret_cast<XrHapticBaseHeader const*>(&vibration));
 }
 
-void xr::session::submit_frame(std::unique_ptr<sg::command_list> cmd)
+void sxr::session::submit_frame(std::unique_ptr<sg::command_list> cmd)
 {
     auto& s = *_state;
     CC_ASSERT(s.in_frame, "submit_frame: no frame was waited for");
@@ -679,7 +703,7 @@ void xr::session::submit_frame(std::unique_ptr<sg::command_list> cmd)
     if (s.frame_renders)
     {
         CC_ASSERT(cmd != nullptr, "submit_frame: a frame that should render needs the list that drew it");
-#if XR_HAS_VULKAN
+#if SXR_HAS_VULKAN
         // the runtime takes each image back in the layout it handed it over in
         if (!s.color.wrapped.empty())
         {
@@ -687,7 +711,7 @@ void xr::session::submit_frame(std::unique_ptr<sg::command_list> cmd)
             cmd->ensure_layout(s.depth.wrapped[s.depth.acquired].raw(), sg::texture_layout::depth_readwrite);
         }
 #endif
-#if XR_HAS_DX12
+#if SXR_HAS_DX12
         if (s.color.wrapped.empty())
         {
             namespace dx12 = sg::backend::dx12;
@@ -762,10 +786,18 @@ void xr::session::submit_frame(std::unique_ptr<sg::command_list> cmd)
                                                       .layerHandle = s.passthrough_layer};
     auto const projection = XrCompositionLayerProjection{
         .type = XR_TYPE_COMPOSITION_LAYER_PROJECTION,
-        .layerFlags = shows_room ? XrCompositionLayerFlags(XR_COMPOSITION_LAYER_BLEND_TEXTURE_SOURCE_ALPHA_BIT) : 0,
+        .layerFlags = s.blend == blend_mode::alpha_blend
+                        ? XrCompositionLayerFlags(XR_COMPOSITION_LAYER_BLEND_TEXTURE_SOURCE_ALPHA_BIT)
+                        : 0,
         .space = s.space,
         .viewCount = u32(projection_views.size()),
         .views = projection_views.data()};
+    // with a camera layer the runtime has no blending of its own to do, whatever the frame's mode
+    auto environment = XR_ENVIRONMENT_BLEND_MODE_OPAQUE;
+    if (!shows_room && s.blend == blend_mode::alpha_blend)
+        environment = XR_ENVIRONMENT_BLEND_MODE_ALPHA_BLEND;
+    if (s.blend == blend_mode::additive)
+        environment = XR_ENVIRONMENT_BLEND_MODE_ADDITIVE;
     auto layers = cc::vector<XrCompositionLayerBaseHeader const*>();
     if (shows_room)
         layers.push_back(reinterpret_cast<XrCompositionLayerBaseHeader const*>(&room));
@@ -773,7 +805,7 @@ void xr::session::submit_frame(std::unique_ptr<sg::command_list> cmd)
         layers.push_back(reinterpret_cast<XrCompositionLayerBaseHeader const*>(&projection));
     auto const end_info = XrFrameEndInfo{.type = XR_TYPE_FRAME_END_INFO,
                                          .displayTime = s.display_time,
-                                         .environmentBlendMode = XR_ENVIRONMENT_BLEND_MODE_OPAQUE,
+                                         .environmentBlendMode = environment,
                                          .layerCount = u32(layers.size()),
                                          .layers = layers.empty() ? nullptr : layers.data()};
     if (auto const why = impl::failed(s.sys->instance, xrEndFrame(s.session, &end_info), "xrEndFrame"); !why.empty())

@@ -3,6 +3,8 @@ created: 2026-11-05
 priority: normal
 tags: [input]
 parent: epic-xr
+closed: 2026-11-06
+resolution: fixed
 ---
 
 # Gamepads in sr, from SDL3
