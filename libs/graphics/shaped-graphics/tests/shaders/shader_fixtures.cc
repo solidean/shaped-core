@@ -6,6 +6,9 @@
 
 // The packages this target declares (sc_add_shader_package in shaped-graphics' CMakeLists), generated into the build
 // dir and private to this binary.
+#include <sg_test_mixed_dxil.hh>
+#include <sg_test_mixed_spirv.hh>
+#include <sg_test_mixed_text.hh>
 #include <sg_test_native_dxil.hh>
 #include <sg_test_native_spirv.hh>
 #include <sg_test_sgl_shaders.hh>
@@ -29,6 +32,9 @@ slib::shader_library& create_library()
     lib.add_package(sg::test::software_trace::package());
     lib.add_package(sg::test::native_dxil::package());
     lib.add_package(sg::test::native_spirv::package());
+    lib.add_package(sg::test::mixed_text::package());
+    lib.add_package(sg::test::mixed_dxil::package());
+    lib.add_package(sg::test::mixed_spirv::package());
 #if SG_TEST_HAS_HLSL_SHADERS
     lib.add_package(sg::test::shaders::package());
 #endif

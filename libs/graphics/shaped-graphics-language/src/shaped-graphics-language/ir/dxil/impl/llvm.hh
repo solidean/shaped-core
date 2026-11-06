@@ -242,6 +242,14 @@ public:
     [[nodiscard]] isize instruction_count() const { return _instructions.size(); }
     /// How many instructions call into DXIL's operations, and how many do anything else.
     [[nodiscard]] isize call_count() const { return _call_count; }
+    /// Hands `visit` the arguments of every call of `callee` still in the module, as raw `ll_value`s.
+    template <class Visit>
+    void calls_of(ll_value callee, Visit&& visit) const
+    {
+        for (auto const& inst : _instructions)
+            if (inst.code == inst_code::call && _args[inst.first] == u32(callee))
+                visit(cc::span<u32 const>(_args.data() + inst.first + 1, isize(inst.count) - 1));
+    }
 
     /// The module as bitcode, its magic first, `triple` and `layout` as LLVM's module states them.
     [[nodiscard]] cc::vector<byte> write(cc::string_view triple, cc::string_view layout) const;

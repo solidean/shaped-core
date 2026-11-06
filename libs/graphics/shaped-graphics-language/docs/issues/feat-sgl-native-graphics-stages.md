@@ -198,20 +198,29 @@ Clip and cull distances are no part of SGL, so `pack_signature` does not hold th
    The test stands in slib's, [`sgl-signature-golden-test.cc`](../../../shaped-shader-library/tests/sgl-signature-golden-test.cc), since `ssc::dxc` does not link SGL.
    It holds before a stage lowers, and it stays as the guard on a DXC upgrade.
 2. **`stage_element`, the two operations, and compute moved onto them: done.**
-3. **Vertex and pixel, on both writers**: `stage_load`, `stage_store`, and each return storing its outputs.
-   On DXIL that takes `dx.sig`, the signature parts and `PSV0`'s tables, with `spirv-val` and the validator on every entry.
+3. **Vertex and pixel, on both writers: done.** EMIT-236 and EMIT-237 state it, with implicit-level sampling brought forward from step 4, since a pixel stage lowers next to nothing without it.
+   On DXIL that took `dx.sig`, the signature parts and `PSV0`'s tables, with `spirv-val` and the validator on every entry.
    SPIR-V has no packing, so a fault only one writer shows is in that writer.
    **The mixed-route test lands with this slice**: each corpus pipeline's pair built both ways round, a DXC stage against a native one, through `CreateGraphicsPipelineState`.
    The golden test cannot say that the routes link; only this one can.
 4. **The pixel surface, on both writers**: `discard`, derivatives, implicit-level sampling, then the rest of the table.
 5. **Geometry and tessellation, then mesh and task, on both writers**, each with its corpus sweep and its pairs in the mixed-route test.
 
+## Measured on the first slice
+
+On 2026-11-06, on the Arc B580 and over the repo's SGL:
+
+- **47 of the 66 vertex and pixel entry points lower**, and every one passes DXC's validator, as do the SPIR-V of the same sweep under `spirv-val`.
+  Most of the rest are binding arrays, ray queries, and the stage surface of step 4: `@view_index`, `@layer`, `@depth` and `discard`.
+- **`SFI0`, `ISG1` and `OSG1` match DXC's bytes** on the stages compared by hand, and `PSV0` differs only in the dependency table.
+  DXC writes `ISG1` and `OSG1` sorted by register and column, and `dx.sig` and `PSV0` in declared order.
+- **The mixed-route test draws three route pairs against DXC's on dx12 and on vulkan**, every lane within 1e-4: [`mixed-route-test.cc`](../../../shaped-graphics/tests/raster/mixed-route-test.cc).
+- **`sgl-cube` captures are byte for byte DXC's**, on dx12 through DXIL and on vulkan through SPIR-V.
+- **The cube's pair compiles 11 times faster on DXIL and 13 times on SPIR-V**: 5.90 ms against 0.53 ms, and 5.06 ms against 0.38 ms, front end included, best of 60 and of 400.
+
 ## Not confirmed
 
-- **Whether the validator recomputes the dependency table from the module**, or compares `PSV0` with `dx.viewIdState` alone.
-  It reported the mismatch against the module's table, and a run with the module's own metadata changed was not tried, since nothing here can edit bitcode.
-  Step 4 answers it: a conservative table either passes or needs the bitset walk.
-- **Whether a driver uses that table.** The runtime took a zeroed one, and a conservative one is untested on any driver.
+- **Whether a driver uses the dependency table.** The validator and the debug layer take a conservative one, and the cube's image on the B580 is byte for byte DXC's, but no other driver was tried.
 - **Whether every path must store every output.** A path that ends in a `discard` stores nothing, and the validator's reading of a partial write is untried.
 - **How D3D12 links a mesh stage to a pixel stage.** The rows differ by construction, and sg's mesh tests pass through DXC, but no mismatched pair was tried.
 - **Geometry and tessellation pairs at pipeline creation.** Packing was measured there, and only vertex with pixel was linked by hand.

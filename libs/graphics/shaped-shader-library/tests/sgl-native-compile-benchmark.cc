@@ -1,3 +1,5 @@
+#include <clean-core/common/time.hh>
+#include <clean-core/record/log.hh>
 #include <clean-core/streams/file_stream.hh>
 #include <clean-core/string/format.hh>
 #include <nexus/bench/run.hh>
@@ -5,6 +7,8 @@
 #include <nexus/test.hh>
 #include <shaped-graphics-language/driver/compile_to_text.hh>
 #include <shaped-shader-compiler-dxc/compiler.hh>
+
+using namespace cc::primitive_defines;
 
 // What SGL's own SPIR-V costs against SGL's text through DXC, for shaders of real work.
 // Both go through SGL's front end, so the difference is the writer against DXC, which a hot reload waits for.
@@ -34,7 +38,79 @@ constexpr kernel k_kernels[] = {
     {"svgf", "libs/graphics/shaped-rendering/shaders/svgf.sgl", "atrous_cs"},
     {"convolution", "libs/graphics/shaped-rendering/shaders/nn_conv.sgl", "main_cs"},
 };
+
+/// The fastest of `runs` calls of `body`: a process lands in one of two speed modes, so a median across runs says little.
+template <class Body>
+[[nodiscard]] f64 best_of(int runs, Body&& body)
+{
+    auto best = 1e30;
+    for (auto i = 0; i < runs; ++i)
+    {
+        auto const start = cc::current_time_steady_secs();
+        body();
+        best = cc::min(best, cc::current_time_steady_secs() - start);
+    }
+    return best * 1000.0;
+}
 } // namespace
+
+BENCHMARK("slib - a vertex and pixel pair through SGL's own binaries against DXC, best of N")
+{
+    auto compiler = ssc::dxc::compiler::create();
+    if (compiler.has_error())
+        SKIP("no DXC");
+    constexpr auto path = cc::string_view("examples/graphics/sgl-cube/shaders/cube.sgl");
+    auto const source = read_source(path);
+    struct stage_entry
+    {
+        cc::string_view entry;
+        sg::shader_stage stage;
+    };
+    constexpr stage_entry k_pair[] = {{"main_vs", sg::shader_stage::vertex}, {"main_ps", sg::shader_stage::fragment}};
+
+    auto const through_dxc = [&](sgl::emit::target target, ssc::dxc::compile_target binary)
+    {
+        return best_of(
+            60,
+            [&]
+            {
+                for (auto const& s : k_pair)
+                {
+                    auto text = sgl::compile_to_text(
+                        {.source = source, .source_name = path, .entry_point = s.entry, .target = target});
+                    REQUIRE(text.has_value());
+                    auto built = compiler.value().compile(
+                        {.source = text.value().text, .entry_point = text.value().entry_point, .stage = s.stage},
+                        {.target = binary, .warnings_as_errors = false, .extra_args = {cc::string("-enable-16bit-types")}});
+                    REQUIRE(built.has_value());
+                }
+            });
+    };
+    auto const front_only = [&](sgl::emit::target target, sgl::emit::native_route route)
+    {
+        return best_of(
+            400,
+            [&]
+            {
+                for (auto const& s : k_pair)
+                {
+                    auto written = sgl::compile_to_text(
+                        {.source = source, .source_name = path, .entry_point = s.entry, .target = target, .native = route});
+                    REQUIRE(written.has_value());
+                }
+            });
+    };
+    using route = sgl::emit::native_route;
+    for (auto const target : {sgl::emit::target::hlsl_dx12, sgl::emit::target::hlsl_vulkan})
+    {
+        auto const is_dx12 = target == sgl::emit::target::hlsl_dx12;
+        auto const dxc = through_dxc(target, is_dx12 ? ssc::dxc::compile_target::dxil : ssc::dxc::compile_target::spirv);
+        auto const text = front_only(target, route::text);
+        auto const native = front_only(target, route::require);
+        CC_LOG_INFO("{}: through DXC {} ms, the text alone {} ms, SGL's own {} ms, {}x faster",
+                    is_dx12 ? "dxil" : "spirv", dxc, text, native, dxc / native);
+    }
+}
 
 BENCHMARK("slib - SGL's own DXIL against its text through DXC, one compile")
 {

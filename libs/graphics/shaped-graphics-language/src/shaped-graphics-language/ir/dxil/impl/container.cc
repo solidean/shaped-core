@@ -2,6 +2,7 @@
 
 using namespace sgl;
 using namespace sgl::ir;
+using namespace sgl::ir::dxil;
 using namespace sgl::ir::dxil::impl;
 
 // A DXBC container: a header, the offset of each part, then the parts.
@@ -19,8 +20,6 @@ constexpr u32 k_triple_dxbc = four_cc('D', 'X', 'B', 'C');
 /// What the epic's spike found the retail runtime takes in place of a validator's hash.
 constexpr u8 k_bypass_digest = 0x01;
 constexpr u32 k_bitcode_offset = 16;
-/// A module's DXIL version, as the program header states it.
-constexpr u32 k_dxil_version = 0x106;
 
 class byte_writer
 {
@@ -62,12 +61,73 @@ private:
     return out.take();
 }
 
-/// ISG1 and OSG1, which hold no element in a compute stage.
-[[nodiscard]] cc::vector<byte> empty_signature_part()
+/// Pads `out` to a word, as a part's string table ends.
+void pad_to_word(byte_writer& out)
 {
+    out.zeros(((out.size() + 3) & ~isize(3)) - out.size());
+}
+
+/// ISG1 and OSG1: the header, a 32-byte record per element, then each name once.
+/// A validator rebuilds this from the module and compares bytes, so nothing here is free to differ from DXC's layout.
+[[nodiscard]] cc::vector<byte> signature_part(module_summary const& s, signature_table table)
+{
+    constexpr auto k_header_size = u32(8);
+    constexpr auto k_element_size = u32(32);
+    auto elements = cc::vector<isize>();
+    for (auto i = isize(0); i < s.signature.size(); ++i)
+        if (s.signature[i].table == table)
+            elements.push_back(i);
+    // by register then column, where `PSV0` and `dx.sig` keep declared order; a no-row element's -1 sorts last
+    auto const place_of = [&](isize i) { return (u64(u32(s.signature[i].row)) << 8) | s.signature[i].first_column; };
+    for (auto a = isize(1); a < elements.size(); ++a)
+    {
+        auto const held = elements[a];
+        auto at = a;
+        for (; at > 0 && place_of(elements[at - 1]) > place_of(held); --at)
+            elements[at] = elements[at - 1];
+        elements[at] = held;
+    }
+
+    auto names = cc::vector<cc::string_view>();
+    auto offsets = cc::vector<u32>();
+    auto next = k_header_size + u32(elements.size()) * k_element_size;
+    auto const offset_of = [&](cc::string_view name)
+    {
+        for (auto n = isize(0); n < names.size(); ++n)
+            if (names[n] == name)
+                return offsets[n];
+        names.push_back(name);
+        offsets.push_back(next);
+        next += u32(name.size()) + 1;
+        return offsets.back();
+    };
+
     auto out = byte_writer();
-    out.u32_le(0); // the elements
-    out.u32_le(8); // where they would start
+    out.u32_le(u32(elements.size()));
+    out.u32_le(k_header_size);
+    for (auto const i : elements)
+    {
+        auto const& e = s.signature[i];
+        auto const used = u8(s.usage[i] << e.first_column);
+        out.u32_le(0); // the stream
+        out.u32_le(offset_of(e.name));
+        out.u32_le(e.semantic_index);
+        out.u32_le(e.system_value);
+        out.u32_le(e.component_type);
+        out.u32_le(u32(e.row));
+        out.u8_le(u8(e.mask()));
+        // an input states the lanes it reads, and an output the ones it never writes
+        out.u8_le(table == signature_table::input ? used : u8(~used & 0xf));
+        out.u16_le(0);
+        out.u32_le(0); // no minimum precision
+    }
+    for (auto const name : names)
+    {
+        for (auto const c : name)
+            out.u8_le(u8(c));
+        out.u8_le(0);
+    }
+    pad_to_word(out);
     return out.take();
 }
 
@@ -76,22 +136,63 @@ private:
 {
     constexpr auto k_runtime_info_size = u32(52);
     constexpr auto k_resource_size = u32(24);
+    constexpr auto k_signature_element_size = u32(16);
+
+    // the string table holds an ordinary element's name for each one, unshared, then the entry's
+    auto strings = byte_writer();
+    strings.u8_le(0);
+    auto name_offsets = cc::vector<u32>();
+    auto index_offsets = cc::vector<u32>();
+    auto indices = cc::vector<u32>();
+    auto inputs = 0;
+    auto outputs = 0;
+    for (auto const& e : s.signature)
+    {
+        (e.table == signature_table::input ? inputs : outputs) += 1;
+        auto name_at = u32(0);
+        if (e.system_value == 0)
+        {
+            name_at = u32(strings.size());
+            for (auto const c : cc::string_view(e.name))
+                strings.u8_le(u8(c));
+            strings.u8_le(0);
+        }
+        name_offsets.push_back(name_at);
+        auto index_at = isize(0);
+        while (index_at < indices.size() && indices[index_at] != e.semantic_index)
+            ++index_at;
+        if (index_at == indices.size())
+            indices.push_back(e.semantic_index);
+        index_offsets.push_back(u32(index_at));
+    }
+    auto const entry_at = u32(strings.size());
+    for (auto const c : cc::string_view(s.entry_name))
+        strings.u8_le(u8(c));
+    strings.u8_le(0);
+    pad_to_word(strings);
+
     auto out = byte_writer();
     out.u32_le(k_runtime_info_size);
     // PSVRuntimeInfo0: a stage's own 16 bytes, then the wave sizes
-    out.zeros(16);
+    out.u8_le(s.writes_position ? 1 : 0);
+    out.zeros(15);
     out.u32_le(0);
     out.u32_le(0xffffffffu);
     // PSVRuntimeInfo1
     out.u8_le(u8(s.psv_stage));
     out.u8_le(0); // uses no view id
     out.u16_le(0);
-    out.zeros(8); // the signature counts
+    out.u8_le(u8(inputs));
+    out.u8_le(u8(outputs));
+    out.u8_le(0); // no patch constants
+    out.u8_le(u8(s.input_rows));
+    out.u8_le(u8(s.output_rows));
+    out.zeros(3); // the other three streams
     // PSVRuntimeInfo2: the thread group
     for (auto axis = 0; axis < 3; ++axis)
         out.u32_le(u32(s.workgroup[axis]));
     // PSVRuntimeInfo3: where the entry's name stands in the string table
-    out.u32_le(1);
+    out.u32_le(entry_at);
 
     out.u32_le(u32(s.resources.size()));
     if (!s.resources.empty())
@@ -108,15 +209,32 @@ private:
         }
     }
 
-    // the string table: empty string first, padded to a word
-    auto const text = s.entry_name.size() + 2;
-    auto const padded = (text + 3) & ~isize(3);
-    out.u32_le(u32(padded));
-    out.u8_le(0);
-    for (auto const c : cc::string_view(s.entry_name))
-        out.u8_le(u8(c));
-    out.zeros(padded - text + 1);
-    out.u32_le(0); // no semantic indices
+    auto const string_bytes = strings.take();
+    out.u32_le(u32(string_bytes.size()));
+    out.append(string_bytes);
+    out.u32_le(u32(indices.size()));
+    for (auto const index : indices)
+        out.u32_le(index);
+    if (s.signature.empty())
+        return out.take();
+
+    out.u32_le(k_signature_element_size);
+    for (auto i = isize(0); i < s.signature.size(); ++i)
+    {
+        auto const& e = s.signature[i];
+        out.u32_le(name_offsets[i]);
+        out.u32_le(index_offsets[i]);
+        out.u8_le(1); // the rows
+        out.u8_le(u8(e.row));
+        out.u8_le(u8(e.lanes | (e.first_column << 4) | 0x40)); // the columns, the first one, and that it is allocated
+        out.u8_le(s.semantic_kinds[i]);
+        out.u8_le(u8(e.component_type));
+        out.u8_le(s.modes[i]);
+        out.u8_le(0); // no dynamic index, the first stream
+        out.u8_le(0);
+    }
+    for (auto const word : s.dependencies)
+        out.u32_le(word);
     return out.take();
 }
 
@@ -126,7 +244,7 @@ private:
     out.u32_le((s.program_kind << 16) | s.program_version);
     out.u32_le(u32((bitcode.size() + 24) / 4));
     out.u32_le(four_cc('D', 'X', 'I', 'L'));
-    out.u32_le(k_dxil_version);
+    out.u32_le(s.dxil_version);
     out.u32_le(k_bitcode_offset);
     out.u32_le(u32(bitcode.size()));
     out.append(bitcode);
@@ -149,8 +267,8 @@ cc::vector<byte> sgl::ir::dxil::impl::write_container(writer const& w)
     };
     auto parts = cc::vector<part>();
     parts.push_back({.name = four_cc('S', 'F', 'I', '0'), .bytes = feature_part(s)});
-    parts.push_back({.name = four_cc('I', 'S', 'G', '1'), .bytes = empty_signature_part()});
-    parts.push_back({.name = four_cc('O', 'S', 'G', '1'), .bytes = empty_signature_part()});
+    parts.push_back({.name = four_cc('I', 'S', 'G', '1'), .bytes = signature_part(s, signature_table::input)});
+    parts.push_back({.name = four_cc('O', 'S', 'G', '1'), .bytes = signature_part(s, signature_table::output)});
     parts.push_back({.name = four_cc('P', 'S', 'V', '0'), .bytes = pipeline_state_part(s)});
     parts.push_back({.name = four_cc('D', 'X', 'I', 'L'), .bytes = program_part(s, bitcode)});
 

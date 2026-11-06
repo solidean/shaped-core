@@ -65,6 +65,7 @@ private:
     void write_image(ir::type const& t, u32 id);
     void write_constants();
     void write_stage_elements();
+    void write_interpolation(u32 id, interpolation mode);
     void write_globals();
     void write_entry();
 
@@ -73,6 +74,8 @@ private:
     void atomic(u32 opcode, instruction const& i, u32 id);
     void group(instruction const& i, u32 id);
     void instruction_of(u32 index);
+    /// `@position` in a pixel stage, whose `w` HLSL reads as the reciprocal of what `FragCoord` holds.
+    void frag_coord(instruction const& i, u32 id);
 
     // ---- writer.cc
     void terminator(ir::block const& b, instruction const& i);

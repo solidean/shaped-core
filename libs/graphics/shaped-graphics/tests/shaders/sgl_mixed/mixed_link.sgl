@@ -1,0 +1,40 @@
+// One stage pair, built by three packages: through DXC, as SGL's DXIL, and as SGL's SPIR-V.
+// The link walks the packing rules, so a stage of one route that places an element apart from the other's does not link.
+
+struct link:
+    @position position: hpos4
+    near: float3
+    // shares `near`'s row
+    tail: float
+    // a mode of its own takes a row of its own
+    @interpolate(.linear) screen: float2
+    @interpolate(.flat) id: int
+    // crosses as its columns
+    frame: mat2
+    // perspective again, so it backfills a row an earlier member left open
+    late: float2
+
+@pixel struct colors:
+    first: float4
+    second: float4
+
+@vertex fun main_vs(@vertex_index v: int, @instance_index i: int) -> link:
+    let x = ((v & 1) as float) * 4.0 - 1.0
+    let y = ((v >> 1) as float) * 4.0 - 1.0
+    let w = 1.0 + (v as float) * 0.5
+    return {
+        position = hpos4(x * w, y * w, 0.5, w)
+        near = float3(x, y, x * y)
+        tail = x - y
+        screen = float2(x * 0.5, y * 0.25)
+        id = 7 + i
+        frame = mat2(float2(x, 1.0), float2(y, 2.0))
+        late = float2(y, x)
+    }
+
+@pixel fun main_ps(l: link) -> colors:
+    let turned = l.frame * l.late
+    return {
+        first = float4(l.near.x, l.near.y + l.tail, l.near.z, l.position.w)
+        second = float4(l.screen.x + turned.x, l.screen.y + turned.y, l.id as float, l.position.x)
+    }

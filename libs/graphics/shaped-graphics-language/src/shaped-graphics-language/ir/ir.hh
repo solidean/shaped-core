@@ -383,6 +383,8 @@ enum class sgl::ir::op : sgl::u16
     combine_sampler,
     /// Operands: sampled image, coordinate, level, and an offset where `aux` is 1.
     sample_lod,
+    /// Operands: sampled image, coordinate; a pixel stage's alone, whose level comes from its derivatives.
+    sample_implicit,
     /// Operands: image, coordinate, level, and a sample where `aux` is 1.
     image_fetch,
     /// Operands: sampled image, coordinate, component.

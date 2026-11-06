@@ -35,9 +35,19 @@ struct built_in_number
     bool is_subgroup = false;
 };
 constexpr built_in_number k_built_ins[] = {
-    {built_in::thread_id, 28},    {built_in::local_thread_id, 27},     {built_in::local_thread_index, 29},
-    {built_in::workgroup_id, 26}, {built_in::subgroup_size, 36, true}, {built_in::subgroup_invocation_id, 41, true},
+    {built_in::thread_id, 28},        {built_in::local_thread_id, 27},     {built_in::local_thread_index, 29},
+    {built_in::workgroup_id, 26},     {built_in::subgroup_size, 36, true}, {built_in::subgroup_invocation_id, 41, true},
+    {built_in::position, 0},          {built_in::vertex_index, 42},        {built_in::instance_index, 43},
+    {built_in::first_instance, 4425},
 };
+/// A pixel stage reads `@position` as what the rasterizer made of it, where a vertex stage's is `Position`.
+constexpr u32 k_frag_coord = 15;
+
+constexpr u32 k_model_vertex = 0;
+constexpr u32 k_model_fragment = 4;
+constexpr u32 k_model_compute = 5;
+constexpr u32 k_mode_origin_upper_left = 7;
+constexpr u32 k_mode_local_size = 17;
 } // namespace
 
 u32 writer::storage_of(storage s)
@@ -253,10 +263,34 @@ void writer::write_stage_elements()
         for (auto const& known : k_built_ins)
             if (known.input == e.system)
             {
-                emit(_annotations, spv::Decorate, {id, spv::BuiltIn, known.number});
+                auto const is_frag_coord = e.system == built_in::position && _p.stage == check::stage::pixel;
+                emit(_annotations, spv::Decorate, {id, spv::BuiltIn, is_frag_coord ? k_frag_coord : known.number});
                 if (known.is_subgroup)
                     require(spv::GroupNonUniform);
+                if (e.system == built_in::first_instance)
+                    require(spv::DrawParameters);
             }
+        if (e.system == built_in::none && e.location >= 0)
+            emit(_annotations, spv::Decorate, {id, spv::Location, u32(e.location)});
+        if (_p.stage == check::stage::pixel && e.part == stage_part::input && e.system == built_in::none)
+            write_interpolation(id, e.interpolate);
+    }
+}
+
+void writer::write_interpolation(u32 id, interpolation mode)
+{
+    auto const is_noperspective = mode == interpolation::noperspective || mode == interpolation::noperspective_centroid
+                               || mode == interpolation::noperspective_sample;
+    if (mode == interpolation::flat)
+        emit(_annotations, spv::Decorate, {id, spv::Flat});
+    if (is_noperspective)
+        emit(_annotations, spv::Decorate, {id, spv::NoPerspective});
+    if (mode == interpolation::centroid || mode == interpolation::noperspective_centroid)
+        emit(_annotations, spv::Decorate, {id, spv::Centroid});
+    if (mode == interpolation::sample || mode == interpolation::noperspective_sample)
+    {
+        require(spv::SampleRateShading);
+        emit(_annotations, spv::Decorate, {id, spv::Sample});
     }
 }
 
@@ -288,14 +322,20 @@ void writer::write_entry()
 {
     auto const words = 3 + string_words(_p.entry_name) + _p.stage_elements.size() + _p.globals.size();
     head(_entry, spv::EntryPoint, words);
-    _entry.push_back(5); // GLCompute
+    _entry.push_back(_p.stage == check::stage::vertex  ? k_model_vertex
+                     : _p.stage == check::stage::pixel ? k_model_fragment
+                                                       : k_model_compute);
     _entry.push_back(_function);
     string_into(_entry, _p.entry_name);
     for (auto i = isize(0); i < _p.stage_elements.size(); ++i)
         _entry.push_back(_elements + u32(i));
     for (auto i = isize(0); i < _p.globals.size(); ++i)
         _entry.push_back(_globals + u32(i));
-    emit(_modes, spv::ExecutionMode, {_function, 17u, u32(_p.workgroup[0]), u32(_p.workgroup[1]), u32(_p.workgroup[2])});
+    if (_p.stage == check::stage::pixel)
+        emit(_modes, spv::ExecutionMode, {_function, k_mode_origin_upper_left});
+    else if (_p.stage != check::stage::vertex)
+        emit(_modes, spv::ExecutionMode,
+             {_function, k_mode_local_size, u32(_p.workgroup[0]), u32(_p.workgroup[1]), u32(_p.workgroup[2])});
     name(_function, _p.entry_name);
 
     // what no operation can say: a whole entry point's float behaviour, by width

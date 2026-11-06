@@ -564,6 +564,22 @@ value_ref lowering::texture_call(flat_call const& c, builtins::function_record c
         auto const pair = add(ir::op::combine_sampler, combined, {image, sampler_handle});
         return narrowed(add(ir::op::sample_lod, texels, {pair, at, level}));
     }
+    case op::sample:
+    {
+        if (layout.offset >= 0)
+        {
+            unsupported("a sample with an offset");
+            return value_ref::none;
+        }
+        auto const sampler = resource_at(arguments[layout.sampler]);
+        if (!is_valid(sampler))
+            return value_ref::none;
+        auto const sampler_handle = add(ir::op::load, _out.at(_out.type_of(sampler)).element, {sampler});
+        auto const at = coordinate(expr(arguments[1]));
+        auto const combined = intern({.kind = type_kind::sampled_image, .element = image_ref});
+        auto const pair = add(ir::op::combine_sampler, combined, {image, sampler_handle});
+        return narrowed(add(ir::op::sample_implicit, texels, {pair, at}));
+    }
     case op::image_load:
         return narrowed(add(ir::op::image_read, texels, {image, coordinate(expr(arguments[1]))}));
     case op::image_store:

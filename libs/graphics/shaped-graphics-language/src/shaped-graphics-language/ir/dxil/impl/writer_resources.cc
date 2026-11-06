@@ -316,6 +316,30 @@ void writer::texture_op(u32 index, instruction const& i)
             _scratch.push_back(_m.extract_value(fetched, l));
         return define(index);
     }
+    case op::sample_implicit:
+    {
+        auto const pair = value_ref(operands[0]);
+        auto const at = value_ref(operands[1]);
+        auto const lanes = count_of(at);
+        auto const undefined_f = _m.constant_undef(_m.float_type());
+        auto const texel = scalar_type(scalar_at(i.type, 0));
+        ll_value const args[] = {_m.constant_i32(k_dx_ops[isize(dx_op::sample)].number),
+                                 leaf_at(pair, 0),
+                                 leaf_at(pair, 1),
+                                 leaf_at(at, 0),
+                                 lanes > 1 ? leaf_at(at, 1) : undefined_f,
+                                 lanes > 2 ? leaf_at(at, 2) : undefined_f,
+                                 lanes > 3 ? leaf_at(at, 3) : undefined_f,
+                                 undefined,
+                                 undefined,
+                                 undefined,
+                                 undefined_f};
+        auto const fetched = call(dx_op::sample, texel, args);
+        _scratch.clear();
+        for (auto l = u32(0); l < 4; ++l)
+            _scratch.push_back(_m.extract_value(fetched, l));
+        return define(index);
+    }
     default:
         return unsupported("this texture operation on DXIL");
     }
