@@ -57,7 +57,8 @@ A local an index reaches at run time stays a variable.
 - `writer.cc`'s `k_rules` says how each `ir::op` lowers, and `writer_math.cc`'s says the same of each `ir::math`.
   One function per case stands behind the rows that need more than one operation.
 - `writer_resources.cc`'s `rule_of` is one row per kind of binding, and its `k_rules` tables cover atomics and subgroups.
-- `writer_stage.cc` holds all that differs per stage, so a graphics stage adds there: a `stage_rule`, its built-ins in `k_built_ins`, and its signature.
+- `writer_stage.cc` holds all that differs per stage, so a graphics stage adds there: a `stage_rule`, and its built-ins in `k_built_ins`.
+  `signature.cc` is the one place that knows a row, and DXC holds it to account (EMIT-235).
   Its `k_features` is a row per feature a shader flag or the container states.
 - `container.cc` is a list of parts, each a function; `ISG1` and `OSG1` are written empty for compute, and a stage's signature fills them.
 
@@ -87,7 +88,7 @@ This is why the module is SPIR-V 1.6, which needs Vulkan 1.3, the floor sg alrea
 
 1. **The layer and a compute-only SPIR-V writer**, behind a flag: done on 2026-11-06, see below.
 2. **Measure on the G6 kernels and on compile time**: done, see below.
-3. **Graphics stages, then ray tracing**, to parity with the DXC route on the corpus.
+3. **Graphics stages, then ray tracing**, to parity with the DXC route on the corpus, SPIR-V and DXIL in near-lockstep: [feat-sgl-native-graphics-stages](feat-sgl-native-graphics-stages.md).
    [feat-sgl-native-graphics-stages](feat-sgl-native-graphics-stages.md) is the stage interface's design, and what was measured of DXC's packing and of D3D12's link check.
 4. **Features**: motion traces, and SER written directly.
 5. **DXIL**: LLVM 3.7 bitcode and the DXIL container, written by us: compute done on 2026-11-06, see below.
