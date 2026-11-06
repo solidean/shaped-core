@@ -549,6 +549,7 @@ What a host sees of an instance in GPU memory is still open, in the [incubator](
 `report.none()` must build a report without attributes, and SGL has no optional type and no default value of an arbitrary type.
 `undefined()` is that missing value, made safe by being the prelude's alone: the prelude never reads what it holds.
 The interpreter reads it as zeroes so that a miss, which copies undefined attributes into its result, still runs in a test.
+A `let mut` of it is the emulated trace's stack: the walk writes an entry before it reads it, and a fill would be 128 stores on every trace.
 
 ## CHK-342
 

@@ -331,7 +331,8 @@ void software_acceleration_pool::grow(state& s, isize min_units)
     auto tail = isize(0);
     if (!s.free.empty() && isize(s.free.back().unit) + isize(s.free.back().units) == old_units)
         tail = isize(s.free.back().units);
-    auto const required = old_units + min_units - tail;
+    // unit 0 is the empty TLAS, so an empty pool holds a unit less than it grows to
+    auto const required = cc::max(old_units, isize(1)) + min_units - tail;
     if (required > max_capacity_units)
         throw allocation_exception("acceleration pool allocation failed", min_units * unit_bytes,
                                    cc::any_error(cc::format("the software acceleration pool would outgrow {} bytes",

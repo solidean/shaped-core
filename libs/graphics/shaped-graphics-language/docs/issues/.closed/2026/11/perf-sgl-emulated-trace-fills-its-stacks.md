@@ -2,6 +2,8 @@
 created: 2026-10-22
 refs:
   - file: libs/graphics/shaped-graphics-language/prelude/raytracing.sgl
+closed: 2026-11-06
+resolution: fixed
 ---
 
 # The emulated trace fills both 64-entry stacks on every trace

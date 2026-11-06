@@ -266,7 +266,12 @@ void checker::check_let(function_scope& scope, ast::stmt_id id, ast::let_stmt co
     if (ast::is_valid(let.type))
     {
         type = resolve_value_type(file, let.type, &scope);
-        if (ast::is_valid(let.value))
+        // CHK-341: the prelude's `undefined()` has the type written of the `let mut` it stands in
+        auto const* const call = ast::is_valid(let.value) ? ast.at(let.value).node.try_as<ast::call>() : nullptr;
+        if (call != nullptr && let.is_mut && is_prelude_file(file) && is_named(file, call->callee, "undefined")
+            && ast.at(call->arguments).empty())
+            set_target(file, let.value, {.kind = target_kind::undefined_value});
+        else if (ast::is_valid(let.value))
             (void)check_expected(scope, let.value, type);
     }
     else if (ast::is_valid(let.value))

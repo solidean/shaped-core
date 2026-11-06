@@ -2,6 +2,8 @@
 created: 2026-10-17
 refs:
   - file: libs/graphics/shaped-graphics-language/prelude/raytracing.sgl
+closed: 2026-11-06
+resolution: fixed
 ---
 
 # `prelude/raytracing.sgl` repeats one stack walk in its three emulated traversals
