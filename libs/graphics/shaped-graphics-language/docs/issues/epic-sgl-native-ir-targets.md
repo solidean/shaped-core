@@ -78,6 +78,7 @@ This is why the module is SPIR-V 1.6, which needs Vulkan 1.3, the floor sg alrea
 1. **The layer and a compute-only SPIR-V writer**, behind a flag: done on 2026-11-06, see below.
 2. **Measure on the G6 kernels and on compile time**: done, see below.
 3. **Graphics stages, then ray tracing**, to parity with the DXC route on the corpus.
+   [feat-sgl-native-graphics-stages](feat-sgl-native-graphics-stages.md) is the stage interface's design, and what was measured of DXC's packing and of D3D12's link check.
 4. **Features**: motion traces, and SER written directly.
 5. **DXIL**: LLVM 3.7 bitcode and the DXIL container, written by us: compute done on 2026-11-06, see below.
 
