@@ -1,0 +1,107 @@
+// a test that reaches a subgroup operation runs as one lane per invocation of a subgroup, once per size a target has
+// (EVAL-140 to EVAL-145)
+
+require subgroups
+
+// every lane gives its index, so the sum is that of 0 to n - 1, whatever size n the run has
+test:
+    let n = test_lane_count()
+    subgroup_add(test_lane()) == n * (n - 1) / 2
+
+// a vote, a ballot and a broadcast agree in every lane
+test:
+    let lane = test_lane()
+    let every = subgroup_all(lane >= 0)
+    let some = subgroup_any(lane == 3)
+    let votes = subgroup_ballot(lane < 2)
+    let third = subgroup_broadcast(lane * 2, 3)
+    every
+    some
+    votes == uint4(3u, 0u, 0u, 0u)
+    third == 6
+    subgroup_broadcast_first(lane + 1) == 1
+
+// a reduction combines every lane, and a scan the lanes below this one
+test:
+    let lane = test_lane()
+    let n = test_lane_count()
+    let low = subgroup_min(lane)
+    let high = subgroup_max(lane as float)
+    let below = subgroup_exclusive_add(1)
+    let upto = subgroup_inclusive_add(1)
+    let odd = subgroup_bit_xor(1)
+    low == 0
+    high == (n - 1) as float
+    below == lane
+    upto == lane + 1
+    odd == 0
+
+// a shuffle reads another lane's value, by its index or by an offset from this one
+test:
+    let lane = test_lane()
+    let n = test_lane_count()
+    let mirrored = subgroup_shuffle(lane, n - 1 - lane)
+    let paired = subgroup_shuffle_xor(lane, 1)
+    let before = subgroup_shuffle_up(lane, 1)
+    mirrored == n - 1 - lane
+    paired == lane ^ 1
+    // the first lane has no lane before it, so what it reads is no lane's
+    lane == 0 or before == lane - 1
+
+// a quad is four lanes in a row, laid out as a pixel quad: lane 4 k + x + 2 y at (x, y)
+test:
+    let lane = test_lane()
+    let across = quad_swap_x(lane)
+    let down = quad_swap_y(lane)
+    let diagonal = quad_swap_diagonal(lane)
+    let first = quad_broadcast(lane, 0)
+    across == lane ^ 1
+    down == lane ^ 2
+    diagonal == lane ^ 3
+    first == lane - lane % 4
+
+// a derivative is across the quad: right minus left along its top row, bottom minus top down its left column
+fun ramp(p: float2) -> float => 3.0 * p.x + 5.0 * p.y
+
+test:
+    let lane = test_lane()
+    let p = float2((lane % 2) as float, ((lane / 2) % 2) as float)
+    let v = ramp(p)
+    ddx(v) == 3.0
+    ddy(v) == 5.0
+    fwidth(v) == 8.0
+
+// a sample that picks its own level takes it from its coordinate's derivatives
+binding scene:
+    pyramid: texture_2d[float]
+    sampler linear:
+        filter = .linear
+        mip_filter = .nearest
+
+test {scene}:
+    // 4 by 4 at level 0, all 1; 2 by 2 at level 1, all 2; 1 by 1 at level 2, 3
+    for y in 0 ..< 4:
+        for x in 0 ..< 4:
+            scene.pyramid.test_texel(int2(x, y), 1.0)
+    scene.pyramid.test_texel(int2(1, 1), 2.0, 1)
+    scene.pyramid.test_texel(int2(0, 1), 2.0, 1)
+    scene.pyramid.test_texel(int2(1, 0), 2.0, 1)
+    scene.pyramid.test_texel(int2(0, 0), 2.0, 1)
+    scene.pyramid.test_texel(int2(0, 0), 3.0, 2)
+    let lane = test_lane()
+    let p = float2((lane % 2) as float, ((lane / 2) % 2) as float)
+    // a step of a quarter texture per pixel is one texel of level 0, and of half a texture two
+    scene.pyramid.sample(p * 0.25 + float2(0.125), scene.linear) == 1.0
+    scene.pyramid.sample(p * 0.5 + float2(0.25), scene.linear) == 2.0
+
+// every lane reaches a subgroup operation together, or none does (CHK-377)
+@expect(error = "non-uniform-control-flow")
+test:
+    if test_lane() < 2:
+        let pair = subgroup_add(1)
+        pair == 2
+    true
+
+// what is written for one size alone fails at another
+@expect(.fail)
+test subgroup_add(1) == 32

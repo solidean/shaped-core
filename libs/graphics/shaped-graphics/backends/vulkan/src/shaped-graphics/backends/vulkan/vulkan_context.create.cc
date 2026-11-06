@@ -816,6 +816,33 @@ cc::result<context_handle> create_vulkan_context(backend::vulkan::vulkan_config 
     if (mesh_shader_supported)
         device_extensions.push_back(VK_EXT_MESH_SHADER_EXTENSION_NAME);
 
+    // Shader execution reordering, which SGL writes as SPIR-V instructions of its own, since DXC lowers none of HLSL's.
+    // Only a reordering device counts: one whose hint is `none` regroups nothing, and SGL's hit objects are no use there.
+    auto reorder_supported = false;
+#ifdef VK_EXT_ray_tracing_invocation_reorder
+    char const* const reorder_names[] = {VK_EXT_RAY_TRACING_INVOCATION_REORDER_EXTENSION_NAME};
+    if (raytracing_supported && device_extensions_available(best_device, reorder_names))
+    {
+        auto reorder_query = VkPhysicalDeviceRayTracingInvocationReorderFeaturesEXT{
+            .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_INVOCATION_REORDER_FEATURES_EXT,
+        };
+        auto features
+            = VkPhysicalDeviceFeatures2{.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2, .pNext = &reorder_query};
+        vkGetPhysicalDeviceFeatures2(best_device, &features);
+        auto reorder_props = VkPhysicalDeviceRayTracingInvocationReorderPropertiesEXT{
+            .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_INVOCATION_REORDER_PROPERTIES_EXT,
+        };
+        auto props = VkPhysicalDeviceProperties2{.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2,
+                                                 .pNext = &reorder_props};
+        vkGetPhysicalDeviceProperties2(best_device, &props);
+        reorder_supported = reorder_query.rayTracingInvocationReorder == VK_TRUE
+                         && reorder_props.rayTracingInvocationReorderReorderingHint
+                                == VK_RAY_TRACING_INVOCATION_REORDER_MODE_REORDER_EXT;
+    }
+    if (reorder_supported)
+        device_extensions.push_back(VK_EXT_RAY_TRACING_INVOCATION_REORDER_EXTENSION_NAME);
+#endif
+
     auto const shader_features = query_optional_shader_features(best_device);
     if (shader_features.has_compute_derivatives)
         device_extensions.push_back(VK_KHR_COMPUTE_SHADER_DERIVATIVES_EXTENSION_NAME);
@@ -1024,9 +1051,21 @@ cc::result<context_handle> create_vulkan_context(backend::vulkan::vulkan_config 
         .meshShader = VK_TRUE,
     };
 
+    void* const after_reorder = mesh_shader_supported ? static_cast<void*>(&mesh_features) : after_mesh;
+#ifdef VK_EXT_ray_tracing_invocation_reorder
+    auto reorder_features = VkPhysicalDeviceRayTracingInvocationReorderFeaturesEXT{
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_INVOCATION_REORDER_FEATURES_EXT,
+        .pNext = after_reorder,
+        .rayTracingInvocationReorder = VK_TRUE,
+    };
+    void const* const chain = reorder_supported ? static_cast<void const*>(&reorder_features) : after_reorder;
+#else
+    void const* const chain = after_reorder;
+#endif
+
     auto const device_info = VkDeviceCreateInfo{
         .sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO,
-        .pNext = mesh_shader_supported ? static_cast<void const*>(&mesh_features) : after_mesh,
+        .pNext = chain,
         .queueCreateInfoCount = u32(queue_infos.size()),
         .pQueueCreateInfos = queue_infos.data(),
         .enabledExtensionCount = u32(device_extensions.size()),
@@ -1133,6 +1172,7 @@ cc::result<context_handle> create_vulkan_context(backend::vulkan::vulkan_config 
     ctx->_view_instancing = shader_features.multiview == VK_TRUE;
     ctx->_vertex_pipeline_stores = supported.vertexPipelineStoresAndAtomics == VK_TRUE;
     ctx->_float_atomic_add = float_atomic_add_supported;
+    ctx->_shader_execution_reordering = raytracing_supported && reorder_supported;
     if (mesh_shader_supported)
         ctx->_cmd_draw_mesh_tasks = PFN_vkCmdDrawMeshTasksEXT(vkGetDeviceProcAddr(device, "vkCmdDrawMeshTasksEXT"));
     ctx->_cmd_draw_mesh_tasks_indirect

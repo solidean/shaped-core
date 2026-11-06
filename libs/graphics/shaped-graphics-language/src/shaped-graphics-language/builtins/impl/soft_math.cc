@@ -154,6 +154,61 @@ f64 impl::soft_sqrt(f64 x)
     return guess;
 }
 
+f64 impl::correctly_rounded_sqrt(f64 x)
+{
+    if (is_nan(x) || x < 0.0)
+        return quiet_nan();
+    if (x == 0.0 || !is_finite(x))
+        return x;
+
+    // x = m * 2^e with m an integer of 53 bits and e even, a subnormal's mantissa shifted up to the same width
+    auto const bits = cc::bit_cast<u64>(x);
+    auto m = bits & ((u64(1) << 52) - 1);
+    auto e = int((bits >> 52) & 0x7ff);
+    if (e == 0)
+    {
+        while ((m >> 52) == 0)
+        {
+            m <<= 1;
+            --e;
+        }
+        ++e;
+    }
+    else
+        m |= u64(1) << 52;
+    e -= 1075;
+    if ((e & 1) != 0)
+    {
+        m <<= 1;
+        --e;
+    }
+
+    // the root of m * 2^56, a bit pair of it at a time, so the 55-bit result has two bits past the 53 it keeps
+    auto root = u64(0);
+    auto remainder = u64(0);
+    for (auto pair = 54; pair >= 0; --pair)
+    {
+        auto const low_bit = 2 * pair - 56;
+        auto const bits_here = low_bit >= 0 ? (m >> low_bit) & 3u : u64(0);
+        remainder = (remainder << 2) | bits_here;
+        auto const trial = (root << 2) | 1u;
+        root <<= 1;
+        if (remainder >= trial)
+        {
+            remainder -= trial;
+            root |= 1u;
+        }
+    }
+
+    // to nearest, ties to even, though a root of a double is never a tie
+    auto const kept = root >> 2;
+    auto const guard = (root >> 1) & 1u;
+    auto const sticky = (root & 1u) != 0 || remainder != 0;
+    auto const rounded = kept + ((guard != 0 && (sticky || (kept & 1u) != 0)) ? 1u : 0u);
+    // the root is rounded * 2^(e / 2 - 28 + 2), and rounded has 53 bits, or 54 where rounding carried
+    return scaled(f64(rounded), e / 2 - 26);
+}
+
 f64 impl::soft_exp(f64 x)
 {
     if (is_nan(x))

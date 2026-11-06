@@ -24,5 +24,5 @@ The parse's remaining time is spread evenly down the form parser's precedence ch
 Single-loop precedence climbing is the next cut there, worth an estimated 1–2 ms.
 
 Step 3 of the compilation model, saving checked layers (`docs/spec/incubator/compilation-model.md`), would remove the 15 ms.
-It is shelved: a cache with its invalidation does not pay for 15 ms per process yet.
+It is shelved, and belongs to [epic-sgl-separate-compilation](epic-sgl-separate-compilation.md): a cache with its invalidation does not pay for 15 ms per process yet.
 What would reopen it: many short-lived processes compiling, or a prelude that grows well past today's size.

@@ -197,6 +197,30 @@ cc::string checker::miss_hint(function_scope& scope,
     }
     if (rotated_chain >= 0)
         return cc::format(": its condition comes first, as in {}", signature_text(spelling, rotated_types));
+
+    // CHK-458: a float's builtin with no double overload is one no target computes in 64 bits
+    auto const is_kind = [&](type_id type, value_kind kind)
+    {
+        auto const* const record = out.builtin_type_of(type);
+        return record != nullptr && record->leaf_kind == kind;
+    };
+    auto has_double = false;
+    for (auto const type : arguments.types)
+        has_double = has_double || is_kind(type, value_kind::scalar_double);
+    auto takes_float = false;
+    auto takes_double = false;
+    for (auto const candidate : candidates)
+        if (out.at(candidate).state == symbol_state::checked && out.at(candidate).info >= 0
+            && is_valid(out.at(candidate).intrinsic))
+            for (auto const& p : out.at(out.functions[out.at(candidate).info].parameters))
+            {
+                takes_float = takes_float || is_kind(p.type, value_kind::scalar_float);
+                takes_double = takes_double || is_kind(p.type, value_kind::scalar_double);
+            }
+    if (has_double && takes_float && !takes_double)
+        return cc::format(": no target computes `{}` of a double, so the prelude has none; `x as float` takes the "
+                          "float's",
+                          spelling);
     return {};
 }
 

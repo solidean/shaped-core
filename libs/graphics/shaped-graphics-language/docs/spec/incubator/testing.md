@@ -16,9 +16,9 @@ It needs `void` to be written everywhere, which it is, and a check to stay its o
 
 **Resource values in tests.**
 A test lists its bindings, and a C++ driver gives their values, buffers and acceleration structures included (CHK-333, EVAL-94).
-A test that `sgl test` runs alone has no driver, and a test of a sampling function has no texture yet.
-Both want something like a resource literal that exists only on the interpreter: `buffer[float](1.0, 2.0)`, or a small inline image.
-The local binding of [binding-effects.md](binding-effects.md) is where it plugs in.
+A test states a texture's texels and a dynamic sampler's state itself (EVAL-127, EVAL-128), so a test of a sampling function needs no driver.
+A buffer's contents and a value member still come from the driver alone, and `sgl test` sees them as zero.
+They want something like a resource literal that exists only on the interpreter, `buffer[float](1.0, 2.0)`, and the local binding of [binding-effects.md](binding-effects.md) is where it plugs in.
 
 **Capturing what is constant after inlining.**
 A test reads only a `const` of the function it stands in.
@@ -31,9 +31,11 @@ That keeps a test fail-closed where it cannot run yet.
 The way out is a module-level test that instantiates the generic and ends in `true // run the generic tests`.
 
 **A simulated workgroup.**
-A run is one invocation today, so a barrier waits for nobody, an atomic is its plain read-modify-write, and workgroup memory holds what that one invocation stored (EVAL-92).
+A test that reaches a subgroup operation or a derivative runs as the lanes of a subgroup, one after another (EVAL-140 to EVAL-145).
+A barrier still waits for nobody, and workgroup memory is each lane's own (EVAL-92).
 A test could name a workgroup size instead, and the interpreter run that many invocations, switching between them at each barrier and interleaving atomics in a fixed order.
 Races and barrier placement would then be testable off the GPU, deterministically; it needs a scheduler in the interpreter and a spelling for "run this test as a workgroup of 64".
+The lanes' exchange is already that scheduler's easy half: what crosses a lane is settled by running the lanes again until nothing they give changes.
 
 **Matching an expected diagnostic by its message.**
 `@expect(error = "kind")` matches the kind's name only, which is stable where a message is not.
@@ -42,7 +44,7 @@ A second argument that matches the message too is additive, and is worth buildin
 ## What it touches
 
 * The emitters and `sg`, for tests on the GPU: a compute entry point per test, and a buffer the host reads back.
-* The interpreter's `driver_bindings`, for textures.
+* The interpreter's lanes, for a workgroup that waits at its barriers.
 * The check pass, for captured constants and for message matching.
 
 ## Already fixed by the syntax

@@ -142,11 +142,15 @@ TEST("sgl check - an assert whose condition writes is refused, and one that only
           == "");
 }
 
-TEST("sgl check - a test takes no derivative, since its run is one invocation with no quad around it")
+TEST("sgl check - a test takes a derivative across the quad its lanes form, where every lane of it arrives together")
 {
-    auto const reports = reports_for("fun edge(x: float) -> float => ddx(x)\n\ntest edge(1.0) == 0.0\n");
-    CHECK(reports.contains("stage-not-allowed"));
-    CHECK(reports.contains("ddx takes derivatives across a quad of pixels, and a test runs one invocation"));
-    // a function that takes one is still fine where no test reaches it
-    CHECK(reports_for("fun edge(x: float) -> float => ddx(x)\n") == "");
+    // CHK-298: the run is a quad of lanes (EVAL-144), and a value every lane shares changes across none of them
+    CHECK(reports_for("fun edge(x: float) -> float => ddx(x)\n\ntest edge(1.0) == 0.0\n") == "");
+    auto const reports = reports_for("test:\n"
+                                     "    if test_lane() == 0:\n"
+                                     "        print ddx(1.0)\n"
+                                     "    true\n");
+    CHECK(reports.contains("non-uniform-control-flow"));
+    CHECK(reports.contains("ddx takes derivatives across a quad of pixels, and not every pixel of the quad reaches "
+                           "it"));
 }

@@ -12,6 +12,8 @@
 namespace sgl::builtins::impl
 {
 [[nodiscard]] f64 soft_sqrt(f64 x);
+/// The f64 nearest the root, as IEEE 754's sqrt; what a double's `sqrt` is, which soft_sqrt is not to the last bit.
+[[nodiscard]] f64 correctly_rounded_sqrt(f64 x);
 [[nodiscard]] f64 soft_exp(f64 x);
 /// -inf at 0, and NaN below it.
 [[nodiscard]] f64 soft_log(f64 x);
