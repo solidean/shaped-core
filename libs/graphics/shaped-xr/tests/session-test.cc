@@ -9,7 +9,7 @@
 using namespace cc::primitive_defines;
 
 // These run against Monado's simulated headset and null compositor, and skip without them, since on any other runtime a session would start on someone's head.
-// XRT_COMPOSITOR_NULL is what opts in, see docs/testing.md.
+// XRT_COMPOSITOR_NULL is what opts in, see libs/graphics/shaped-xr/docs/testing.md.
 // The loader holds one instance per process, so they run one at a time.
 
 namespace
