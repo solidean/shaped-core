@@ -31,6 +31,8 @@ struct stage_violation
     bool is_inlined_decision = false;
     /// The write is an assignment to a buffer's element, `call` its place; `callee` is then none.
     bool is_buffer_store = false;
+    /// The callee is a builtin only a test calls (CHK-512).
+    bool is_test_only = false;
 };
 
 /// Reads the checked ASTs through the side tables and writes the STRUCTURED form of one entry point's flat tree.
@@ -50,8 +52,6 @@ struct flattener
     stage inlined_decision = stage::none;
     /// A test's calls of a builtin only the ray-tracing stages reach, which a test cannot run yet.
     cc::vector<stage_violation> ray_stage_calls;
-    /// A test's calls of a subgroup operation, which a run of one invocation has no subgroup for (CHK-379).
-    cc::vector<stage_violation> subgroup_calls;
     /// A compute entry point's calls of a quad operation, whose workgroup then forms its quads along one axis (CHK-380).
     cc::vector<stage_violation> quad_calls;
     /// The condition of every `assert` whose run would write what outlives it, which its caller reports (CHK-227).

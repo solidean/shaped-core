@@ -326,6 +326,9 @@ struct sgl::builtins::function_record
     /// Impure only for what its value depends on, with no effect: a call of it whose value nothing reads may go.
     /// It stays impure, since moving it would read state that may have changed in between.
     bool reads_only = false;
+    /// Called by a test alone, which it states what the run binds or which lane runs to (EVAL-127, EVAL-140).
+    /// No target writes it, so an entry point that reaches one is `stage-not-allowed` (CHK-512).
+    bool is_test_only = false;
 
     /// Read back from the signature by `finalize`.
     cc::string name;

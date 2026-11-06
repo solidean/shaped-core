@@ -403,3 +403,8 @@ struct argument_layout;
 struct shape_axes;
 struct call;
 } // namespace sgl::builtins::texture
+
+namespace sgl::builtins
+{
+enum class subgroup_op : u8;
+} // namespace sgl::builtins

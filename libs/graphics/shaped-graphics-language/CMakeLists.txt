@@ -249,6 +249,7 @@ target_sources(shaped-graphics-language
     src/shaped-graphics-language/builtins/impl/soft_math.hh
     src/shaped-graphics-language/builtins/register.hh
     src/shaped-graphics-language/builtins/registry.hh
+    src/shaped-graphics-language/builtins/subgroup_calls.hh
     src/shaped-graphics-language/builtins/texture_calls.hh
 
     src/shaped-graphics-language/check/check.hh

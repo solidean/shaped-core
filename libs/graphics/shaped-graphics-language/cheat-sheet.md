@@ -411,6 +411,8 @@ sgl::check::driver_bindings{.groups = {{.name = "frame", .members = {{.name = "e
                                            // .mutable_texels come back; .samplers = {sampler_state{...}} for a dynamic one
                                            // a texture bound nothing is empty: size 0, and a read of it a program-error
                                            // filtering is exact f32 (EVAL-122): compare between texel centres to ~8 bits
+{.lane_count = 32}                         // run_inputs: the run is 32 lanes of one subgroup, run one after another;
+                                           // subgroup ops and derivatives exchange between them (EVAL-140 to EVAL-145)
 sgl::check::resolve_inputs(m, e, bound)    // -> cc::result<run_inputs>; left out: zero, empty, root 0 (the empty TLAS)
 sgl::check::write_back(m, o, bound)        // what the run stored, into each .mutable_bytes and image .mutable_texels
 
@@ -421,7 +423,11 @@ sgl::test::run_tests(m, files, {.file = f})  // -> vector<test_result { test, st
 sgl::test::run_test(m, files, t, limits, bound)  // ONE test, m.tests[t]: what a caller that stops between tests runs;
                                            // a test that expects diagnostics: judged_by_diagnostics; one that did not check: not_run
 {.bindings = bound}                        // test_options: what `test {frame}:` lists gets its values here (CHK-333);
-                                           // bytes that do not fit: invalid_bindings; textures are unsupported-yet
+                                           // bytes that do not fit: invalid_bindings; a test may state texels itself
+                                           // a test reaching subgroup ops runs at 4 to 128 lanes, derivatives at 4 (EVAL-140)
+scene.albedo.test_texel(int2(x, y), v)     // SGL, in a test alone: states a texel; one the driver bound none of grows (EVAL-127)
+scene.smp.test_state(scene.nearest)        // SGL, in a test alone: a dynamic sampler takes another's state (EVAL-128)
+test_lane()  test_lane_count()             // SGL, in a test alone: this lane, and how many the subgroup has (EVAL-141)
 r.sites                                    // site_mark { file, where, is_assert, passed, failed } per check and assert of its tree
                                            // an assert inlined from a helper names the helper's file
 sgl::test::diagnostic_of(m, r)             // `test-failed` at the test, one related note per narrowed part:
