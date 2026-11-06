@@ -357,6 +357,10 @@ cc::result<cc::unique_ptr<sxr::session>> sxr::system::create_session(sg::context
                                                     : XR_SWAPCHAIN_USAGE_COLOR_ATTACHMENT_BIT);
         if (is_dx12)
             usage |= XR_SWAPCHAIN_USAGE_TRANSFER_DST_BIT; // filled by a copy, see submit_frame
+        // dx12 renders into an image of its own, which can always be read
+        auto const is_readable = desc.readable_color && !is_depth && !is_dx12;
+        if (is_readable)
+            usage |= XR_SWAPCHAIN_USAGE_TRANSFER_SRC_BIT;
         auto const info = XrSwapchainCreateInfo{.type = XR_TYPE_SWAPCHAIN_CREATE_INFO,
                                                 .usageFlags = usage,
                                                 .format = chain.format,
@@ -378,8 +382,9 @@ cc::result<cc::unique_ptr<sxr::session>> sxr::system::create_session(sg::context
             .width = s->width,
             .height = s->height,
             .array_layers = int(view_count),
-            .usage = is_depth ? sg::texture_usages(sg::texture_usage::depth_stencil)
-                              : sg::texture_usages(sg::texture_usage::render_target),
+            .usage = is_depth    ? sg::texture_usages(sg::texture_usage::depth_stencil)
+                   : is_readable ? sg::texture_usage::render_target | sg::texture_usage::copy_src
+                                 : sg::texture_usages(sg::texture_usage::render_target),
         };
 #if SXR_HAS_VULKAN
         if (!is_dx12)

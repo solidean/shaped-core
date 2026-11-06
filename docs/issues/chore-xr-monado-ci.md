@@ -27,4 +27,3 @@ Without it those tests skip, so CI still runs none of them.
 
 - Monado on Linux: `dev.py install monado` refuses there, and a distro package or a build would do.
 - Whether Monado runs headless on GitHub's Linux and Windows runners at all, which also need a Vulkan device, likely lavapipe.
-- Reading a projection layer back on vulkan: the runtime's images have no `copy_src`, so only dx12 checks pixels today.

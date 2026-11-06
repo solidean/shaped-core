@@ -109,6 +109,9 @@ struct sxr::session_description
     /// What the session asks for; one the runtime lacks falls back to opaque with a warning, and `session::blend` says which.
     /// A camera layer needs `capability::passthrough` in `system_description::wants`.
     blend_mode blend = blend_mode::opaque;
+    /// Lets `frame.color` be read back, for a test or a mirror, until the frame is submitted.
+    /// Off by default, because it asks more of every image the runtime allocates.
+    bool readable_color = false;
     /// The actions the session reads, bound before it begins; `sxr::standard_controller_actions()` is the usual set.
     cc::vector<action_description> actions;
 };
@@ -144,6 +147,7 @@ struct sxr::frame
     int width = 0;
     int height = 0;
     /// `views.size()` layers each, with `render_target` and `depth_stencil` usage; what `submit_frame` hands the runtime.
+    /// `color` also has `copy_src` where `session_description::readable_color` asked for it.
     sg::texture_2d_array color;
     sg::texture_2d_array depth;
 };

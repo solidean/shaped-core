@@ -60,6 +60,15 @@ void check_stereo(sxr::frame const& frame)
     CHECK(between_eyes.length() > 0.0f);
 }
 
+void check_cleared(cc::span<byte const> bytes, sxr::frame const& frame)
+{
+    REQUIRE(bytes.size() == frame.width * frame.height * 4);
+    CHECK(u8(bytes[0]) == 255);
+    CHECK(u8(bytes[1]) == 0);
+    CHECK(u8(bytes[2]) == 255);
+    CHECK(u8(bytes[3]) == 255);
+}
+
 [[nodiscard]] std::unique_ptr<sg::command_list> cleared(sg::context& ctx, sxr::frame const& frame, tg::vec4f color)
 {
     auto cmd = ctx.create_command_list();
@@ -133,9 +142,35 @@ ASYNC_TEST("shaped-xr session - a blend mode the runtime lacks falls back to opa
     co_await ctx->idle_completion();
 }
 
+// a color that reads the same in rgba and bgra, and in linear and sRGB
+constexpr auto readback_clear = tg::vec4f(1, 0, 1, 1);
+
+ASYNC_TEST("shaped-xr session - a readable frame's clear reaches both layers of the runtime's vulkan image",
+           nx::config::exclusive("openxr"))
+{
+    auto const system = simulated_system({.api = sxr::graphics_api::vulkan});
+    auto const ctx = system->create_context().value();
+    auto const session = system->create_session(*ctx, {.readable_color = true}).value();
+
+    auto const frame = next_rendered_frame(*session);
+    auto cmd = cleared(*ctx, frame, readback_clear);
+    auto const left = cmd->download.bytes_from_texture(frame.color.raw(), {.array_layer = 0});
+    auto const right = cmd->download.bytes_from_texture(frame.color.raw(), {.array_layer = 1});
+    session->submit_frame(cc::move(cmd));
+    ctx->advance_epoch();
+
+    check_cleared(co_await left.bytes(), frame);
+    check_cleared(co_await right.bytes(), frame);
+
+    // the image went back to the runtime in its attachment layout, so the next frame still takes it
+    auto const next = next_rendered_frame(*session);
+    session->submit_frame(cleared(*ctx, next, readback_clear));
+    ctx->advance_epoch();
+    co_await ctx->idle_completion();
+}
+
 #ifdef CC_OS_WINDOWS
-// dx12 renders into images of its own and copies, so unlike vulkan's the frame's image can be read back
-ASYNC_TEST("shaped-xr session - dx12 draws both eyes, each into its own layer", nx::config::exclusive("openxr"))
+ASYNC_TEST("shaped-xr session - a frame's clear reaches both layers of dx12's own image", nx::config::exclusive("openxr"))
 {
     auto const system = simulated_system({.api = sxr::graphics_api::dx12});
     auto const ctx = system->create_context().value();
@@ -145,22 +180,14 @@ ASYNC_TEST("shaped-xr session - dx12 draws both eyes, each into its own layer", 
     auto const frame = next_rendered_frame(*session);
     check_stereo(frame);
 
-    // the same in rgba and bgra, and in linear and sRGB
-    auto cmd = cleared(*ctx, frame, tg::vec4f(1, 0, 1, 1));
+    auto cmd = cleared(*ctx, frame, readback_clear);
     auto const left = cmd->download.bytes_from_texture(frame.color.raw(), {.array_layer = 0});
     auto const right = cmd->download.bytes_from_texture(frame.color.raw(), {.array_layer = 1});
     session->submit_frame(cc::move(cmd));
     ctx->advance_epoch();
 
-    for (auto const& layer : {left, right})
-    {
-        auto const bytes = co_await layer.bytes();
-        REQUIRE(bytes.size() == frame.width * frame.height * 4);
-        CHECK(u8(bytes[0]) == 255);
-        CHECK(u8(bytes[1]) == 0);
-        CHECK(u8(bytes[2]) == 255);
-        CHECK(u8(bytes[3]) == 255);
-    }
+    check_cleared(co_await left.bytes(), frame);
+    check_cleared(co_await right.bytes(), frame);
     co_await ctx->idle_completion();
 }
 #endif

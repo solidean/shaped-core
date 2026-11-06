@@ -55,6 +55,7 @@ f.views[i].projection                              // LH zero-to-one: depth 0 at
 f.views[i].world_to_clip()                         // tg::mat4f, projection * inverse pose
 f.color; f.depth                                   // sg::texture_2d_array, views.size() layers: view i into layer i
 // render both in one pass: render_to({..., .view_count = 2}) with a `view_count = 2` SGL pipeline and @view_index
+// read a frame back with create_session(*ctx, {.readable_color = true}) and a download before submit_frame
 // clear color to transparent where blend() is not opaque: the frame meets the room by its premultiplied alpha
 ```
 

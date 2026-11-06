@@ -8,6 +8,7 @@ The conversions and mappings need no runtime and always run.
 
 It proves instance and system creation, the vulkan and dx12 bindings, a session reaching ready, the frame loop, and view instancing into the runtime's images.
 It proves nothing about Meta's AR extensions, which it does not have, and it composes nothing: its null compositor renders no image, so a test only reads back what it drew itself.
+A session opts into that with `session_description::readable_color`, since on vulkan the frame is the runtime's own image.
 The null compositor paces at 20 Hz, so each frame a test waits for costs 50 ms.
 The OpenXR loader holds one instance per process, so these tests take `exclusive("openxr")` and run one at a time.
 
