@@ -44,6 +44,7 @@ binding long_atomics:
 
 // 64-bit values cross from the vertex to the pixel stage flat (CHK-454), as their words on dx12 and metal (EMIT-196).
 // The pixel stage stores a long's two words, a double's bit past a float's, and a ulong2's high and low parts.
+// A double3 and a ulong4 take two locations each (CHK-454), so `tag` after them lands only if every location lines up.
 binding crossed:
     words: mut buffer[uint]
 
@@ -52,6 +53,9 @@ struct long_varyings:
     @interpolate(.flat) key: long
     @interpolate(.flat) ratio: double
     @interpolate(.flat) pair: ulong2
+    @interpolate(.flat) wide: double3
+    @interpolate(.flat) quad: ulong4
+    @interpolate(.flat) tag: uint
 
 @pixel struct long_target:
     color: float4
@@ -64,6 +68,9 @@ struct long_varyings:
         key = (0x12345678i64 << 32) | 0x9abcdefi64,
         ratio = 1.0f64 + 1.0f64 / 1099511627776.0f64,
         pair = ulong2(5u64 << 40, 3u64),
+        wide = double3(2.0f64, 3.0f64, 1.0f64 + 3.0f64 / 1099511627776.0f64),
+        quad = ulong4(1u64, 2u64 << 36, 3u64, (7u64 << 44) | 11u64),
+        tag = 0x5eedu,
     }
 
 @pixel fun long_ps(p: long_varyings){crossed} -> long_target:
@@ -71,6 +78,12 @@ struct long_varyings:
     crossed.words[1] = ((p.key >> 32) as ulong) as uint
     crossed.words[2] = (((p.ratio - 1.0f64) * 1099511627776.0f64) as long as ulong) as uint
     crossed.words[3] = ((p.pair.x >> 40) + p.pair.y) as uint
+    let tail = (((p.wide.z - 1.0f64) * 1099511627776.0f64) as long as ulong) as uint
+    crossed.words[4] = tail + (((p.wide.x + p.wide.y) as float) as uint)
+    crossed.words[5] = ((p.quad.y >> 36) + p.quad.x + p.quad.z) as uint
+    crossed.words[6] = (p.quad.w >> 44) as uint
+    crossed.words[7] = (p.quad.w & 0xffffffffu64) as uint
+    crossed.words[8] = p.tag
     return { color = float4(1.0, 0.0, 0.0, 1.0) }
 
 pipeline long_crossing:

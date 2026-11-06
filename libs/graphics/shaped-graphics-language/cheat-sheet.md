@@ -835,7 +835,7 @@ ops[i](mut v)                                            // raygen, miss, closes
   A double has `sqrt` (within an ULP on a GPU), `inverse_sqrt`, the exact roundings, `sign`, `saturate`, `is_nan`, `mix`, `step`, `smoothstep` and the vector geometry (CHK-458).
   No transcendental of a double, which no target has: `sin(x)` is `no-matching-overload`, and `sin(x as float)` is the float's.
   `as` converts within a width or within a family: `x as long as double`, never `int as double` in one step.
-  A 64-bit scalar or two-vector crosses a stage link flat (CHK-454); dx12 and metal carry it as its 32-bit words (EMIT-196).
+  A 64-bit value crosses a stage link flat, a three- or four-vector over two locations (CHK-454); dx12 and metal carry it as its 32-bit words (EMIT-196).
   None sits in an `@inline` binding, and a constant block holds no `long3` / `double4` (CHK-453); a buffer does.
   `atomic[ulong]` / `atomic[long]` in a `mut buffer` take `require shader_int64_atomics` (dx12 SM 6.6, vulkan).
   In workgroup memory they also take `shader_shared_int64_atomics` (CHK-510), which an Arc B580 lacks and an AMD Radeon iGPU has.

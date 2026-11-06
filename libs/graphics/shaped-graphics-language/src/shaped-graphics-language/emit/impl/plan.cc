@@ -259,8 +259,7 @@ struct planner
         for (auto const& member : p.m.at(p.m.at(type).members))
             if (!member.is_position && !member.is_layer && member.type != check::checked_module::void_type)
             {
-                auto const split = pieces_of(member.type);
-                count += split.count > 0 ? split.count : 1;
+                count += locations_taken(member.type);
             }
         return count;
     }
@@ -338,6 +337,7 @@ struct planner
     {
         type_id piece = type_id::none;
         i32 count = 0;
+        i32 piece_locations = 1;
     };
 
     [[nodiscard]] type_id prelude_type_named(cc::string_view name) const
@@ -361,26 +361,36 @@ struct planner
                 return {.piece = prelude_type_named(n == 2 ? "float2" : n == 3 ? "float3" : "float4"), .count = n};
             }
             if (auto const words = words_of(type); is_valid(words))
-                return {.piece = words, .count = 1};
+                return {.piece = words, .count = word_pieces(p, type)};
             return {};
         }
         auto const& t = p.m.at(type);
         if (t.kind == type_kind::array && t.count > 0 && p.m.builtin_type_of(t.element) != nullptr)
         {
             auto const words = words_of(t.element);
-            return {.piece = is_valid(words) ? words : t.element, .count = i32(t.count)};
+            return {.piece = is_valid(words) ? words : t.element,
+                    .count = i32(t.count) * (is_valid(words) ? word_pieces(p, t.element) : 1),
+                    .piece_locations = !is_valid(words) && is_wide_64_bit(p, t.element) ? 2 : 1};
         }
         return {};
     }
 
-    /// EMIT-196: the uint2 or uint4 a 64-bit scalar or two-vector crosses a link as where the target carries no 64-bit
-    /// value between stages; none elsewhere.
+    /// EMIT-196: the uint2 or uint4 a 64-bit value crosses a link as where the target carries no 64-bit value between
+    /// stages, a uint4 apiece for a three- or four-vector; none elsewhere.
     [[nodiscard]] type_id words_of(type_id type) const
     {
         auto const* const record = p.m.builtin_type_of(type);
         if (record == nullptr || !is_word_split(p, type))
             return type_id::none;
         return prelude_type_named(record->leaf_count == 1 ? "uint2" : "uint4");
+    }
+
+    /// CHK-454: the locations a member of `type` takes on a link, a 64-bit three- or four-vector two of them.
+    [[nodiscard]] i32 locations_taken(type_id type) const
+    {
+        if (auto const split = pieces_of(type); split.count > 0)
+            return split.count * split.piece_locations;
+        return is_wide_64_bit(p, type) ? 2 : 1;
     }
 
     cc::vector<planned_member> members_of(cc::span<member_info const> members, bool has_locations, i32 first_location = 0)
@@ -410,9 +420,10 @@ struct planner
                 .is_row_per_element = member.padding == check::padding_kind::every_element,
                 .pieces = split.count,
                 .piece = split.piece,
+                .piece_locations = split.piece_locations,
             });
             if (result.back().location >= 0)
-                next_location += split.count > 0 ? split.count : 1;
+                next_location += locations_taken(member.type);
         }
         return result;
     }
@@ -1201,7 +1212,7 @@ cc::vector<sgl::emit::impl::planned_member> sgl::emit::impl::declared_members(pl
             piece.name = cc::format("{}_{}", member.name, i);
             piece.source_name = cc::format("{}_{}", member.source_name, i);
             piece.type = member.piece;
-            piece.location = member.location + i;
+            piece.location = member.location + i * member.piece_locations;
             piece.pieces = 0;
             result.push_back(cc::move(piece));
         }

@@ -218,6 +218,74 @@ TEST("sgl emit - a double crosses a dx12 stage link through asuint and asdouble 
         .dump("text", ps.value().text);
 }
 
+TEST("sgl emit - a 64-bit three- or four-vector crosses a stage link over two locations, as two uint4s on dx12 and "
+     "metal (EMIT-196)")
+{
+    constexpr auto source = "require shader_int64\n"
+                            "require shader_f64\n"
+                            "\n"
+                            "struct varyings:\n"
+                            "    @position position: hpos4\n"
+                            "    @interpolate(.flat) key: long3\n"
+                            "    @interpolate(.flat) value: double4\n"
+                            "    @interpolate(.flat) steps: ulong4[2]\n"
+                            "    @interpolate(.flat) after: uint\n"
+                            "\n"
+                            "@vertex fun vs(@vertex_index v: int) -> varyings:\n"
+                            "    let k = (v as long) << 40\n"
+                            "    return {position = hpos4(0.0, 0.0, 0.0, 1.0), key = long3(-k, k, 3i64), "
+                            "value = double4(0.5f64), steps = [ulong4(1u64 << 33), ulong4(7u64)], after = 9u}\n"
+                            "\n"
+                            "@pixel fun ps(link: varyings) -> float4:\n"
+                            "    return float4(((link.key.z >> 1) as int) as float, link.value.w as float, "
+                            "((link.steps[1].w) as uint) as float, link.after as float)\n";
+    // metal has no double, so its compile carries a long4 where the others carry a double4
+    auto metal_source = cc::string(source);
+    metal_source.replace_all("double4(0.5f64)", "long4(5i64)");
+    metal_source.replace_all("link.value.w as float", "(link.value.w as int) as float");
+    metal_source.replace_all("double4", "long4");
+    metal_source.replace_all("require shader_f64\n", "");
+    auto const text_for = [&](cc::string_view entry, target t)
+    {
+        return sgl::compile_to_text(
+            {.source = t == target::msl ? cc::string_view(metal_source) : source, .entry_point = entry, .target = t});
+    };
+    for (auto const entry : {cc::string_view("vs"), cc::string_view("ps")})
+    {
+        // vulkan carries each as itself, two locations apiece, so `after` follows eight of them
+        auto const vulkan = text_for(entry, target::hlsl_vulkan);
+        REQUIRE(vulkan.has_value()).dump("error", vulkan.has_error() ? vulkan.error() : cc::string());
+        auto const& vk = vulkan.value().text;
+        CHECK(vk.contains("[[vk::location(0)]] nointerpolation int64_t3 key")).dump("text", vk);
+        CHECK(vk.contains("[[vk::location(2)]] nointerpolation double4 value")).dump("text", vk);
+        CHECK(vk.contains("[[vk::location(6)]] nointerpolation uint64_t4 steps_1")).dump("text", vk);
+        CHECK(vk.contains("[[vk::location(8)]] nointerpolation uint after")).dump("text", vk);
+
+        auto const dx12 = text_for(entry, target::hlsl_dx12);
+        REQUIRE(dx12.has_value()).dump("error", dx12.has_error() ? dx12.error() : cc::string());
+        auto const& hlsl = dx12.value().text;
+        CHECK(hlsl.contains("nointerpolation uint4 key_1 : SGL1")).dump("text", hlsl);
+        CHECK(hlsl.contains("nointerpolation uint4 value_0 : SGL2")).dump("text", hlsl);
+        CHECK(hlsl.contains("nointerpolation uint4 steps_3 : SGL7")).dump("text", hlsl);
+        CHECK(hlsl.contains("nointerpolation uint after : SGL8")).dump("text", hlsl);
+
+        auto const metal = text_for(entry, target::msl);
+        REQUIRE(metal.has_value()).dump("error", metal.has_error() ? metal.error() : cc::string());
+        CHECK(metal.value().text.contains("uint4 key_1 [[user(sgl1), flat]]")).dump("text", metal.value().text);
+        CHECK(metal.value().text.contains("uint after [[user(sgl8), flat]]")).dump("text", metal.value().text);
+    }
+    // a three-vector's second piece holds its third lane, then two zero words
+    auto const vs = text_for("vs", target::hlsl_dx12).value().text;
+    CHECK(vs.contains(" >> 32), 0u, 0u);")).dump("text", vs);
+    auto const ps = text_for("ps", target::hlsl_dx12).value().text;
+    CHECK(ps.contains("int64_t((uint64_t(link.key_1.y) << 32) | uint64_t(link.key_1.x)))")).dump("text", ps);
+    CHECK(ps.contains("asdouble(link.value_1.z, link.value_1.w))")).dump("text", ps);
+    auto const metal_vs = text_for("vs", target::msl).value().text;
+    CHECK(metal_vs.contains("uint4(as_type<uint2>(")).dump("text", metal_vs);
+    auto const metal_ps = text_for("ps", target::msl).value().text;
+    CHECK(metal_ps.contains("long3(as_type<long2>(")).dump("text", metal_ps);
+}
+
 TEST("sgl emit - a workgroup's 64-bit atomics are groupshared in HLSL, and no other target writes them (EMIT-218)")
 {
     constexpr auto source = "require shader_int64, shader_int64_atomics, shader_shared_int64_atomics\n"
