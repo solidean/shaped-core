@@ -46,7 +46,8 @@ These `sg` tests all pass on that Arc and on WARP, and each adds one ingredient 
 
 ## Resolved (2026-11-06)
 
-It is Intel's driver, not sg: a pixel stage that does not read `SV_ViewID` is what breaks a view-instanced pipeline there.
+It is Intel's driver, not sg: a view-instanced draw there writes nothing unless the right output varies, and the external bug has the rules.
+Reading `SV_ViewID` in the pixel stage satisfies them in every case tried.
 `sg - one draw of two views moves geometry with only the vertex stage reading which` shows it on the Arc, with WARP drawing.
-[The external bug](../../../../../../../../docs/bugs-external/intel-d3d12-view-dependent-position-draws-nothing/readme.md) reproduces it with no code of ours.
+[The external bug](../../../../../../../../docs/bugs-external/intel-d3d12-view-instancing-draws-nothing/readme.md) reproduces it with no code of ours.
 Both shaders that draw by view now read it in the pixel stage, and the dx12 hand test passes on the Arc.

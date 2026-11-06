@@ -42,7 +42,7 @@ So each entry carries the answer as something runnable.
 | [nvidia-device-create-vs-pending-wait-deadlock](nvidia-device-create-vs-pending-wait-deadlock/readme.md) | NVIDIA Vulkan driver, RTX 5070 Ti | not yet filed, worked around in shaped-graphics |
 | [d3d12-cached-pso-static-sampler-mixup](d3d12-cached-pso-static-sampler-mixup/readme.md) | NVIDIA D3D12 driver 32.0.15.9186, RTX 5070 Ti | not yet filed, worked around in shaped-graphics |
 | [intel-d3d12-cached-pso-draws-nothing](intel-d3d12-cached-pso-draws-nothing/readme.md) | Intel D3D12 driver 32.0.101.9150, Arc B580 | not yet filed, its tests skipped in shaped-viewer |
-| [intel-d3d12-view-dependent-position-draws-nothing](intel-d3d12-view-dependent-position-draws-nothing/readme.md) | Intel D3D12 driver 32.0.101.9150, Arc B580 | not yet filed, worked around in the shaders that draw by view |
+| [intel-d3d12-view-instancing-draws-nothing](intel-d3d12-view-instancing-draws-nothing/readme.md) | Intel D3D12 driver 32.0.101.9150, Arc B580 | not yet filed, worked around in the shaders that draw by view |
 | [intel-d3d12-strict-reciprocal-product-folds-to-one](intel-d3d12-strict-reciprocal-product-folds-to-one/readme.md) | Intel D3D12 driver 32.0.101.9150, Arc B580 | not yet filed, its one check skipped in shaped-graphics |
 | [vulkan-syncval-wait-before-signal-false-race](vulkan-syncval-wait-before-signal-false-race/readme.md) | Khronos validation layer, SDK 1.4.304–1.4.341 | fixed upstream in 1.4.350, flagged by `dev.py doctor` |
 | [webgpu-timestamp-write-index-sentinel](webgpu-timestamp-write-index-sentinel/readme.md) | emdawnwebgpu + Dawn, against wgpu | not yet filed, worked around in shaped-graphics |

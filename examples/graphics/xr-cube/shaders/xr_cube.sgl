@@ -35,7 +35,7 @@ fun shade(color: float3, normal: vec3) -> float3:
     return color * min(0.25 + key + fill, 1.0)
 
 // opaque, so where the room shows through only the cube covers it
-// Reads the view only because Intel's dx12 driver draws nothing otherwise: docs/bugs-external/intel-d3d12-view-dependent-position-draws-nothing.
+// Reads the view only because Intel's dx12 driver draws nothing otherwise: docs/bugs-external/intel-d3d12-view-instancing-draws-nothing.
 @pixel fun main_ps(p: pixel_input, @view_index view: int) -> target:
     require view_instancing
     let seen = if view < 0 => 0.0 else 1.0

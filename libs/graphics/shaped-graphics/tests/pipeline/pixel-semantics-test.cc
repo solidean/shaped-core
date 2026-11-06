@@ -477,7 +477,7 @@ ASYNC_INVOCABLE_TEST("sg - one draw of two views moves geometry with only the ve
     auto const& adapter = ctx->metrics.adapter();
     if (ctx->backend() == sg::backend_kind::dx12 && adapter.vendor_id == 0x8086 && !adapter.is_software)
         SKIP("Intel's dx12 driver draws nothing here; see "
-             "docs/bugs-external/intel-d3d12-view-dependent-position-draws-nothing");
+             "docs/bugs-external/intel-d3d12-view-instancing-draws-nothing");
 
     // a full-screen rect the vertex stage squeezes into the left half of view 0 and the right half of view 1
     auto vertices = cc::vector<corner>();
