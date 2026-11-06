@@ -464,6 +464,19 @@ type_id checker::check_call(function_scope& scope, ast::expr_id id, ast::call co
         if ((spelling == "==" || spelling == "!=") && arguments.types.size() == 2 && arguments.types[0] == void_type
             && arguments.types[1] == void_type)
             return type_of_builtin(builtins::k_bool, file, where);
+        // CHK-513: `==` and `!=` of two arrays of one type compare every element, unless the program declared its own
+        if ((spelling == "==" || spelling == "!=") && arguments.types.size() == 2
+            && arguments.types[0] == arguments.types[1] && out.at(arguments.types[0]).kind == type_kind::array)
+        {
+            type_id const both[] = {arguments.types[0], arguments.types[1]};
+            auto element = arguments.types[0];
+            while (out.at(element).kind == type_kind::array)
+                element = out.at(element).element;
+            auto const compared = out.is_plain_enum(element) ? type_of_builtin(builtins::k_int, file, where) : element;
+            type_id const elements[] = {compared, compared};
+            if (!is_valid(find_operator(file, spelling, both)) && is_valid(find_operator(file, "==", elements)))
+                return type_of_builtin(builtins::k_bool, file, where);
+        }
         auto const found = operators_of(file, spelling);
         auto const result = resolve_overload(scope, id, ast::expr_id::none, cc::span<symbol_id const>(found), arguments,
                                              cc::format("operator {}", spelling));

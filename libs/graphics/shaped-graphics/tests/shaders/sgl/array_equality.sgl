@@ -1,0 +1,18 @@
+// `==` and `!=` of arrays as the GPU runs them (CHK-513), a loop of the target's own over the elements.
+
+binding array_equality:
+    values: buffer[int]
+    results: mut buffer[int]
+
+@compute(1) fun compare_arrays(){array_equality}:
+    let a = [array_equality.values[0], array_equality.values[1]]
+    let b = [array_equality.values[2], array_equality.values[3]]
+    let grid: int[2, 2] = [a, b]
+    let swapped: int[2, 2] = [b, a]
+    let mut answers = 0
+    if a == [array_equality.values[0], array_equality.values[1]] => answers = answers | 1
+    if a != b => answers = answers | 2
+    if grid == [a, b] => answers = answers | 4
+    if grid != swapped => answers = answers | 8
+    if a == b => answers = answers | 16
+    array_equality.results[0] = answers
