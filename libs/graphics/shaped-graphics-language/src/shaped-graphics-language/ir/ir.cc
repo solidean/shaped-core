@@ -234,6 +234,29 @@ sgl::ir::operand sgl::ir::operand_role(op code, isize at)
     }
 }
 
+bool sgl::ir::has_effect(op code)
+{
+    if (u16(code) >= u16(op::atomic_load) && u16(code) <= u16(op::control_barrier))
+        return true;
+    if (u16(code) >= u16(op::branch))
+        return true;
+    return code == op::store || code == op::image_write;
+}
+
+bool sgl::ir::gives_only_a_value(op code)
+{
+    // everything from the first operation to `shuffle` is arithmetic, comparison, conversion or composite
+    return u16(code) <= u16(op::shuffle) || code == op::access_chain;
+}
+
+bool sgl::ir::may_speculate(op code)
+{
+    // an integer division can trap, where a float's gives a value
+    if (code == op::sdiv || code == op::udiv || code == op::srem || code == op::urem)
+        return false;
+    return gives_only_a_value(code);
+}
+
 cc::span<u32 const> sgl::ir::successors_of(program const& p, instruction const& terminator, cc::vector<u32>& scratch)
 {
     scratch.clear();

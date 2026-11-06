@@ -1,0 +1,361 @@
+#include "ir-test-support.hh"
+
+#include <clean-core/string/string.hh>
+#include <shaped-graphics-language/ir/passes.hh>
+#include <shaped-graphics-language/ir/verify.hh>
+
+using namespace cc::primitive_defines;
+using namespace sgl_test::impl;
+
+namespace
+{
+namespace check = sgl::check;
+
+void require_whole(program const& p, control_flow flow)
+{
+    auto const wrong = verify(p, flow);
+    CHECK(!wrong.has_value()).dump("first wrong", wrong.value_or(cc::string()));
+}
+
+[[nodiscard]] isize count_of(program const& p, op code)
+{
+    auto count = isize(0);
+    for (auto const& i : p.instructions)
+        count += i.code == code ? 1 : 0;
+    return count;
+}
+
+[[nodiscard]] instruction const& only(program const& p, op code)
+{
+    REQUIRE(count_of(p, code) == 1);
+    for (auto const& i : p.instructions)
+        if (i.code == code)
+            return i;
+    return p.instructions[0];
+}
+
+void mark(program_builder& b, value_ref v, u32 statement, check::float_level guarantee = check::float_level::fast)
+{
+    b.p.instructions[index_of(v)].statement = statement;
+    b.p.instructions[index_of(v)].guarantee = guarantee;
+}
+
+/// A read a pass can prove nothing about, so nothing folds it.
+[[nodiscard]] value_ref unknown(program_builder& b)
+{
+    return b.add(op::load, b.float_type, {u32(b.out)});
+}
+
+[[nodiscard]] value_ref read_only_buffer(program_builder& b)
+{
+    b.p.globals.push_back({.type = b.buffer_pointer, .kind = global_kind::buffer, .is_read_only = true});
+    return global_at(u32(b.p.globals.size() - 1));
+}
+} // namespace
+
+// ---- remove_unused
+
+TEST("sgl ir remove_unused - what nothing reads goes, and what has an effect keeps what it reads")
+{
+    auto b = program_builder();
+    b.blocks(1);
+    b.open(0);
+    auto const x = unknown(b);
+    auto const kept = b.add(op::fadd, b.float_type, {u32(x), u32(b.one)});
+    mark(b, kept, 7);
+    (void)b.add(op::fmul, b.float_type, {u32(x), u32(b.two)});
+    b.keep(kept);
+    b.finish();
+    remove_unused(b.p);
+    require_whole(b.p, control_flow::structured);
+    CHECK(count_of(b.p, op::fmul) == 0);
+    CHECK(only(b.p, op::fadd).statement == 7);
+}
+
+TEST("sgl ir remove_unused - phis that only read each other go, though each is read")
+{
+    auto b = program_builder();
+    b.blocks(4);
+    b.open(0);
+    b.branch(1);
+    b.open(1);
+    b.loop_merge(1, 3, 2);
+    auto const phi = b.add(op::phi, b.float_type, {u32(b.one), 0, 0, 2});
+    auto const go_on = b.add(op::flt, b.bool_type, {u32(unknown(b)), u32(b.two)});
+    b.branch_if(go_on, 2, 3);
+    b.open(2);
+    auto const more = b.add(op::fadd, b.float_type, {u32(phi), u32(b.one)});
+    b.branch(1);
+    b.open(3);
+    b.finish();
+    b.p.operands[b.p.instructions[index_of(phi)].first + 2] = u32(more);
+    require_whole(b.p, control_flow::structured);
+    remove_unused(b.p);
+    require_whole(b.p, control_flow::structured);
+    CHECK(count_of(b.p, op::phi) == 0);
+    CHECK(count_of(b.p, op::fadd) == 0);
+}
+
+// ---- share_common_values
+
+TEST("sgl ir share_common_values - the second of two equal operations reads the first, whose statement stays")
+{
+    auto b = program_builder();
+    b.blocks(1);
+    b.open(0);
+    auto const x = unknown(b);
+    auto const first = b.add(op::fmul, b.float_type, {u32(x), u32(b.two)});
+    mark(b, first, 1);
+    auto const second = b.add(op::fmul, b.float_type, {u32(x), u32(b.two)});
+    mark(b, second, 2);
+    b.keep(first);
+    b.keep(second);
+    b.finish();
+    share_common_values(b.p);
+    remove_unused(b.p);
+    require_whole(b.p, control_flow::structured);
+    CHECK(only(b.p, op::fmul).statement == 1);
+}
+
+TEST("sgl ir share_common_values - two guarantees are two values, so a narrower one is not lost to a wider")
+{
+    auto b = program_builder();
+    b.blocks(1);
+    b.open(0);
+    auto const x = unknown(b);
+    auto const fast = b.add(op::fmul, b.float_type, {u32(x), u32(b.two)});
+    auto const kept = b.add(op::fmul, b.float_type, {u32(x), u32(b.two)});
+    mark(b, kept, 2, check::float_level::precise);
+    b.keep(fast);
+    b.keep(kept);
+    b.finish();
+    share_common_values(b.p);
+    remove_unused(b.p);
+    require_whole(b.p, control_flow::structured);
+    CHECK(count_of(b.p, op::fmul) == 2);
+}
+
+TEST("sgl ir share_common_values - what one arm computed is not there for the other")
+{
+    auto b = program_builder();
+    b.blocks(4);
+    b.open(0);
+    b.select_merge(0, 3);
+    auto const x = unknown(b);
+    b.branch_if(b.add(op::flt, b.bool_type, {u32(x), u32(b.two)}), 1, 2);
+    b.open(1);
+    b.keep(b.add(op::fmul, b.float_type, {u32(x), u32(b.two)}));
+    b.branch(3);
+    b.open(2);
+    b.keep(b.add(op::fmul, b.float_type, {u32(x), u32(b.two)}));
+    b.branch(3);
+    b.open(3);
+    b.finish();
+    share_common_values(b.p);
+    require_whole(b.p, control_flow::structured);
+    remove_unused(b.p);
+    CHECK(count_of(b.p, op::fmul) == 2);
+}
+
+TEST("sgl ir share_common_values - a read shares only where the shader cannot write")
+{
+    auto b = program_builder();
+    auto const held = read_only_buffer(b);
+    b.blocks(1);
+    b.open(0);
+    b.keep(b.add(op::load, b.float_type, {u32(b.out)}));
+    b.keep(b.add(op::load, b.float_type, {u32(b.out)}));
+    b.keep(b.add(op::load, b.float_type, {u32(held)}));
+    b.keep(b.add(op::load, b.float_type, {u32(held)}));
+    b.finish();
+    share_common_values(b.p);
+    remove_unused(b.p);
+    require_whole(b.p, control_flow::structured);
+    CHECK(count_of(b.p, op::load) == 3);
+}
+
+// ---- flatten_branches
+
+TEST("sgl ir flatten_branches - a branch around little is a select, carrying the phi's statement and guarantee")
+{
+    auto b = program_builder();
+    b.blocks(4);
+    b.open(0);
+    b.select_merge(0, 3);
+    auto const x = unknown(b);
+    b.branch_if(b.add(op::flt, b.bool_type, {u32(x), u32(b.two)}), 1, 2);
+    b.open(1);
+    auto const then_value = b.add(op::fadd, b.float_type, {u32(x), u32(b.one)});
+    mark(b, then_value, 4);
+    b.branch(3);
+    b.open(2);
+    b.branch(3);
+    b.open(3);
+    auto const joined = b.add(op::phi, b.float_type, {u32(then_value), 1, u32(b.two), 2});
+    mark(b, joined, 9, check::float_level::precise);
+    b.keep(joined);
+    b.finish();
+    flatten_branches(b.p);
+    require_whole(b.p, control_flow::unstructured);
+    CHECK(b.p.blocks.size() == 1);
+    CHECK(b.p.blocks[0].merges == merge_kind::none);
+    CHECK(count_of(b.p, op::phi) == 0);
+    auto const& chosen = only(b.p, op::select);
+    CHECK(chosen.statement == 9);
+    CHECK(chosen.guarantee == check::float_level::precise);
+    // what ran in the arm keeps its own
+    CHECK(only(b.p, op::fadd).statement == 4);
+}
+
+TEST("sgl ir flatten_branches - neither an effect nor what can trap runs on a path that did not ask")
+{
+    for (auto const has_effect_in_arm : {true, false})
+    {
+        auto b = program_builder();
+        b.blocks(3);
+        b.open(0);
+        b.select_merge(0, 2);
+        auto const x = unknown(b);
+        auto const as_int = b.add(op::f_to_u, b.uint_type, {u32(x)});
+        b.branch_if(b.add(op::flt, b.bool_type, {u32(x), u32(b.two)}), 1, 2);
+        b.open(1);
+        auto const quotient = has_effect_in_arm ? value_ref::none : b.add(op::udiv, b.uint_type, {u32(b.three), u32(as_int)});
+        if (has_effect_in_arm)
+            b.keep(x);
+        b.branch(2);
+        b.open(2);
+        if (!has_effect_in_arm)
+            b.keep(b.add(op::u_to_f, b.float_type, {u32(b.add(op::phi, b.uint_type, {u32(quotient), 1, u32(b.four), 0}))}));
+        b.finish();
+        flatten_branches(b.p);
+        require_whole(b.p, control_flow::unstructured);
+        CHECK(b.p.blocks.size() == 3);
+        CHECK(count_of(b.p, op::select) == 0);
+    }
+}
+
+TEST("sgl ir flatten_branches - a block with one way in joins it, and what no walk reaches goes with its edges")
+{
+    auto b = program_builder();
+    b.blocks(4);
+    b.open(0);
+    auto const x = unknown(b);
+    b.branch(1);
+    b.open(1);
+    b.keep(x);
+    b.branch(3);
+    b.open(2);
+    b.branch(3);
+    b.open(3);
+    b.keep(b.add(op::phi, b.float_type, {u32(b.one), 1, u32(b.two), 2}));
+    b.finish();
+    flatten_branches(b.p);
+    require_whole(b.p, control_flow::unstructured);
+    CHECK(b.p.blocks.size() == 1);
+    CHECK(count_of(b.p, op::phi) == 0);
+    CHECK(dump(b.p).contains("store @ 0x3f800000"));
+}
+
+TEST("sgl ir flatten_branches - a loop stays a loop, and its phi still names its two ways in")
+{
+    auto b = program_builder();
+    b.blocks(4);
+    b.open(0);
+    b.branch(1);
+    b.open(1);
+    b.loop_merge(1, 3, 2);
+    auto const phi = b.add(op::phi, b.float_type, {u32(b.one), 0, 0, 2});
+    b.branch_if(b.add(op::flt, b.bool_type, {u32(phi), u32(b.two)}), 2, 3);
+    b.open(2);
+    auto const more = b.add(op::fadd, b.float_type, {u32(phi), u32(b.one)});
+    b.branch(1);
+    b.open(3);
+    b.keep(phi);
+    b.finish();
+    b.p.operands[b.p.instructions[index_of(phi)].first + 2] = u32(more);
+    flatten_branches(b.p);
+    require_whole(b.p, control_flow::unstructured);
+    CHECK(count_of(b.p, op::phi) == 1);
+    CHECK(count_of(b.p, op::branch_conditional) == 1);
+}
+
+// ---- chain_sums
+
+TEST("sgl ir chain_sums - a total meets each product alone, and each addition keeps its statement")
+{
+    auto b = program_builder();
+    b.blocks(1);
+    b.open(0);
+    auto const x = unknown(b);
+    auto const p0 = b.add(op::fmul, b.float_type, {u32(x), u32(b.one)});
+    auto const p1 = b.add(op::fmul, b.float_type, {u32(x), u32(b.two)});
+    auto const p2 = b.add(op::fmul, b.float_type, {u32(p0), u32(b.two)});
+    auto const inner = b.add(op::fadd, b.float_type, {u32(p1), u32(p2)});
+    mark(b, inner, 1);
+    auto const outer = b.add(op::fadd, b.float_type, {u32(p0), u32(inner)});
+    mark(b, outer, 2);
+    b.keep(outer);
+    b.finish();
+    chain_sums(b.p);
+    require_whole(b.p, control_flow::structured);
+    auto const sum_of = [&](value_ref v) { return b.p.operands_of(b.p.instructions[index_of(v)]); };
+    // earliest leaf first: the inner sum adds the first two products, the outer one the last
+    CHECK(sum_of(inner)[0] == u32(p0));
+    CHECK(sum_of(inner)[1] == u32(p1));
+    CHECK(sum_of(outer)[0] == u32(inner));
+    CHECK(sum_of(outer)[1] == u32(p2));
+    CHECK(b.p.instructions[index_of(inner)].statement == 1);
+    CHECK(b.p.instructions[index_of(outer)].statement == 2);
+}
+
+TEST("sgl ir chain_sums - a guarantee above fast holds a sum where it stands")
+{
+    auto b = program_builder();
+    b.blocks(1);
+    b.open(0);
+    auto const x = unknown(b);
+    auto const y = unknown(b);
+    auto const inner = b.add(op::fadd, b.float_type, {u32(x), u32(y)});
+    auto const outer = b.add(op::fadd, b.float_type, {u32(b.one), u32(inner)});
+    mark(b, inner, 1, check::float_level::precise);
+    mark(b, outer, 2, check::float_level::precise);
+    b.keep(outer);
+    b.finish();
+    auto const before = dump(b.p);
+    chain_sums(b.p);
+    CHECK(dump(b.p) == before);
+}
+
+TEST("sgl ir chain_sums - a fast sum does not reach through a precise one")
+{
+    auto b = program_builder();
+    b.blocks(1);
+    b.open(0);
+    auto const x = unknown(b);
+    auto const y = unknown(b);
+    auto const inner = b.add(op::fadd, b.float_type, {u32(x), u32(y)});
+    mark(b, inner, 1, check::float_level::precise);
+    auto const outer = b.add(op::fadd, b.float_type, {u32(b.one), u32(inner)});
+    b.keep(outer);
+    b.finish();
+    auto const before = dump(b.p);
+    chain_sums(b.p);
+    CHECK(dump(b.p) == before);
+}
+
+TEST("sgl ir chain_sums - a sum read twice stays a value of its own")
+{
+    auto b = program_builder();
+    b.blocks(1);
+    b.open(0);
+    auto const x = unknown(b);
+    auto const y = unknown(b);
+    auto const inner = b.add(op::fadd, b.float_type, {u32(x), u32(y)});
+    auto const outer = b.add(op::fadd, b.float_type, {u32(b.one), u32(inner)});
+    b.keep(outer);
+    b.keep(inner);
+    b.finish();
+    auto const before = dump(b.p);
+    chain_sums(b.p);
+    CHECK(dump(b.p) == before);
+}

@@ -55,6 +55,9 @@ add_library(shaped-graphics-language
 
     src/shaped-graphics-language/ir/ir.cc
     src/shaped-graphics-language/ir/pipeline.cc
+    src/shaped-graphics-language/ir/cleanup.cc
+    src/shaped-graphics-language/ir/chain_sums.cc
+    src/shaped-graphics-language/ir/flatten.cc
     src/shaped-graphics-language/ir/lower.cc
     src/shaped-graphics-language/ir/lower_call.cc
     src/shaped-graphics-language/ir/lower_expr.cc
@@ -506,6 +509,7 @@ if(SC_BUILD_TESTS)
         tests/emit/double-maths-emit-test.cc
         tests/emit/spirv-emit-test.cc
         tests/ir/ir-test-support.hh
+        tests/ir/optimize-ir-test.cc
         tests/ir/passes-ir-test.cc
         tests/ir/sweep-ir-test.cc
         tests/ir/verify-ir-test.cc
