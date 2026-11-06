@@ -35,6 +35,7 @@ add_library(shaped-graphics-language
     src/shaped-graphics-language/builtins/register.cc
     src/shaped-graphics-language/builtins/impl/soft_math.cc
     src/shaped-graphics-language/builtins/register_64_bit_math.cc
+    src/shaped-graphics-language/builtins/register_double_math.cc
     src/shaped-graphics-language/builtins/register_bit_math.cc
     src/shaped-graphics-language/builtins/register_bytes.cc
     src/shaped-graphics-language/builtins/register_math.cc
@@ -474,6 +475,7 @@ if(SC_BUILD_TESTS)
         tests/emit/vector-emit-test.cc
         tests/emit/sixteen-bit-emit-test.cc
         tests/emit/sixty-four-bit-emit-test.cc
+        tests/emit/double-maths-emit-test.cc
         tests/emit/line-mapping-emit-test.cc
         tests/emit/debug-emit-test.cc
 

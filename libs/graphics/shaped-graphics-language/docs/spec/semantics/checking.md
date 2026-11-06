@@ -122,7 +122,11 @@ use view
   Their vectors are `long2` to `long4`, `ulong2` to `ulong4` and `double2` to `double4`.
   A literal converts to one by CHK-253, and since an integer literal is held in 64 bits, a `ulong` literal past 2^63 - 1 is `unsupported-yet`: `~0u64` spells the largest.
   Their operators are the arithmetic, the comparisons, a vector beside its scalar, and for `long` and `ulong` the bit operators; `abs`, `min`, `max`, `clamp` and `select` take them too.
-  No other builtin takes one yet: no maths function of a double, which DXIL has none of, and no subgroup operation.
+  A double's maths functions are CHK-458's, and no subgroup operation takes a 64-bit value yet.
+* **CHK-458** A `double` and its vectors take `sqrt`, `inverse_sqrt`, `floor`, `ceil`, `trunc`, `round`, `fract`, `sign` and `saturate`.
+  They take `is_nan`, `is_inf`, `mix`, `step` and `smoothstep` too, the vectors `dot`, `length`, `distance` and `normalize`, and a `double3` `cross`.
+  No transcendental takes one, `sin` to `pow`: no target computes one in 64 bits, and a call is `no-matching-overload` whose detail says so; `x as float` takes the float's.
+  Neither DXIL nor DXC's SPIR-V has a double `sqrt` or rounding, and DXC narrows a double handed to its float functions without a word, so HLSL writes each as a function of the text (EMIT-219).
 * **CHK-451** `long`, `ulong` and their vectors name the feature `shader_int64`, and `double` and its vectors `shader_f64`, as CHK-382 says of the 16-bit types.
 * **CHK-383** A 16-bit value crosses no stage edge: a member of one, at any depth of a struct an entry point takes or returns, is `unsupported-yet`.
 * **CHK-454** A 64-bit scalar or two-vector crosses a stage link, flat as an integer does (CHK-273), a location apiece.
@@ -1773,7 +1777,7 @@ A diagnostic of this pass has a kind, a file, a byte span in that file, and a de
 | `recursive-call` | CHK-130 |
 | `recursive-trace` | CHK-332 |
 | `unknown-member` | CHK-64, CHK-147, CHK-152, CHK-279, CHK-329, CHK-385, CHK-488 |
-| `no-matching-overload` | CHK-71, CHK-155, CHK-316, CHK-340, CHK-329, CHK-344, CHK-365, CHK-366, CHK-367, CHK-392, CHK-396, CHK-433, CHK-434 |
+| `no-matching-overload` | CHK-71, CHK-155, CHK-316, CHK-340, CHK-329, CHK-344, CHK-365, CHK-366, CHK-367, CHK-392, CHK-396, CHK-433, CHK-434, CHK-458 |
 | `non-exhaustive-case` | CHK-160 |
 | `duplicate-case-pattern` | CHK-161 |
 | `missing-value-in-arm` | CHK-168 |

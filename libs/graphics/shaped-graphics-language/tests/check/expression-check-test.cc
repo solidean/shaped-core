@@ -395,6 +395,19 @@ TEST("sgl check - a select written with its condition last says the condition co
               .contains("its condition comes first, as in select(bool, int, int)"));
 }
 
+TEST("sgl check - a float's builtin a double has none of says no target computes it")
+{
+    // CHK-458: the transcendentals take no double, which reads as a gap unless the message says why
+    auto const source = [](cc::string_view returned)
+    { return cc::format("require shader_f64\nfun f(x: double) -> double:\n    return {}\n", returned); };
+    CHECK(reports_for(source("sin(x)"))
+              .contains("sin(double): no target computes `sin` of a double, so the prelude has none; `x as float` "
+                        "takes the float's"));
+    // a double overload that the arguments miss is an ordinary miss
+    CHECK(!reports_for(source("min(x, true)")).contains("no target computes"));
+    CHECK(reports_for(source("sqrt(x) + floor(x)")) == "");
+}
+
 TEST("sgl check - the side tables name what an editor asks for")
 {
     auto const checked = check_sources(read_prelude(), cc::string(pixel_edges)

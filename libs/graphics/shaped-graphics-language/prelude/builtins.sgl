@@ -2438,6 +2438,115 @@
 @builtin @pure fun pack_half2x16(v: float2) -> uint
 @builtin @pure fun unpack_half2x16(u: uint) -> float2
 
+// the maths of a double and its vectors (CHK-458): rounding exact, `sqrt` within an ULP and
+// `inverse_sqrt` within two, written as HLSL over a double's arithmetic, since no target has them;
+// no transcendental, which no target computes in 64 bits either
+@builtin @pure fun sqrt(x: double) -> double
+@builtin @pure fun inverse_sqrt(x: double) -> double
+@builtin @pure fun floor(x: double) -> double
+@builtin @pure fun ceil(x: double) -> double
+@builtin @pure fun trunc(x: double) -> double
+@builtin @pure fun round(x: double) -> double
+@builtin @pure fun fract(x: double) -> double
+/// -1, 0 or 1, by the sign of each component.
+@builtin @pure fun sign(x: double) -> double
+@builtin @pure fun saturate(x: double) -> double
+/// Whether each component is a NaN, read from its bits.
+@builtin @pure fun is_nan(x: double) -> bool
+/// Whether each component is an infinity, of either sign, read from its bits.
+@builtin @pure fun is_inf(x: double) -> bool
+/// `a * (1 - t) + b * t`, `a` where `t` is 0 and `b` where it is 1.
+@builtin @pure fun mix(a: double, b: double, t: double) -> double
+/// 0 where `x` is below `edge`, and 1 from it on.
+@builtin @pure fun step(edge: double, x: double) -> double
+/// 0 up to `low`, 1 from `high` on, and a smooth Hermite curve between.
+@builtin @pure fun smoothstep(low: double, high: double, x: double) -> double
+@builtin @pure fun sqrt(x: double2) -> double2
+@builtin @pure fun inverse_sqrt(x: double2) -> double2
+@builtin @pure fun floor(x: double2) -> double2
+@builtin @pure fun ceil(x: double2) -> double2
+@builtin @pure fun trunc(x: double2) -> double2
+@builtin @pure fun round(x: double2) -> double2
+@builtin @pure fun fract(x: double2) -> double2
+/// -1, 0 or 1, by the sign of each component.
+@builtin @pure fun sign(x: double2) -> double2
+@builtin @pure fun saturate(x: double2) -> double2
+/// Whether each component is a NaN, read from its bits.
+@builtin @pure fun is_nan(x: double2) -> bool2
+/// Whether each component is an infinity, of either sign, read from its bits.
+@builtin @pure fun is_inf(x: double2) -> bool2
+/// `a * (1 - t) + b * t`, `a` where `t` is 0 and `b` where it is 1.
+@builtin @pure fun mix(a: double2, b: double2, t: double) -> double2
+/// `mix` of each component by its own `t`.
+@builtin @pure fun mix(a: double2, b: double2, t: double2) -> double2
+/// 0 where `x` is below `edge`, and 1 from it on.
+@builtin @pure fun step(edge: double2, x: double2) -> double2
+/// 0 up to `low`, 1 from `high` on, and a smooth Hermite curve between.
+@builtin @pure fun smoothstep(low: double2, high: double2, x: double2) -> double2
+/// The products of the components, summed from the first on.
+@builtin @pure fun dot(a: double2, b: double2) -> double
+@builtin @pure fun length(v: double2) -> double
+@builtin @pure fun distance(a: double2, b: double2) -> double
+/// `v * inverse_sqrt(dot(v, v))`.
+@builtin @pure fun normalize(v: double2) -> double2
+@builtin @pure fun sqrt(x: double3) -> double3
+@builtin @pure fun inverse_sqrt(x: double3) -> double3
+@builtin @pure fun floor(x: double3) -> double3
+@builtin @pure fun ceil(x: double3) -> double3
+@builtin @pure fun trunc(x: double3) -> double3
+@builtin @pure fun round(x: double3) -> double3
+@builtin @pure fun fract(x: double3) -> double3
+/// -1, 0 or 1, by the sign of each component.
+@builtin @pure fun sign(x: double3) -> double3
+@builtin @pure fun saturate(x: double3) -> double3
+/// Whether each component is a NaN, read from its bits.
+@builtin @pure fun is_nan(x: double3) -> bool3
+/// Whether each component is an infinity, of either sign, read from its bits.
+@builtin @pure fun is_inf(x: double3) -> bool3
+/// `a * (1 - t) + b * t`, `a` where `t` is 0 and `b` where it is 1.
+@builtin @pure fun mix(a: double3, b: double3, t: double) -> double3
+/// `mix` of each component by its own `t`.
+@builtin @pure fun mix(a: double3, b: double3, t: double3) -> double3
+/// 0 where `x` is below `edge`, and 1 from it on.
+@builtin @pure fun step(edge: double3, x: double3) -> double3
+/// 0 up to `low`, 1 from `high` on, and a smooth Hermite curve between.
+@builtin @pure fun smoothstep(low: double3, high: double3, x: double3) -> double3
+/// The products of the components, summed from the first on.
+@builtin @pure fun dot(a: double3, b: double3) -> double
+@builtin @pure fun length(v: double3) -> double
+@builtin @pure fun distance(a: double3, b: double3) -> double
+/// `v * inverse_sqrt(dot(v, v))`.
+@builtin @pure fun normalize(v: double3) -> double3
+@builtin @pure fun sqrt(x: double4) -> double4
+@builtin @pure fun inverse_sqrt(x: double4) -> double4
+@builtin @pure fun floor(x: double4) -> double4
+@builtin @pure fun ceil(x: double4) -> double4
+@builtin @pure fun trunc(x: double4) -> double4
+@builtin @pure fun round(x: double4) -> double4
+@builtin @pure fun fract(x: double4) -> double4
+/// -1, 0 or 1, by the sign of each component.
+@builtin @pure fun sign(x: double4) -> double4
+@builtin @pure fun saturate(x: double4) -> double4
+/// Whether each component is a NaN, read from its bits.
+@builtin @pure fun is_nan(x: double4) -> bool4
+/// Whether each component is an infinity, of either sign, read from its bits.
+@builtin @pure fun is_inf(x: double4) -> bool4
+/// `a * (1 - t) + b * t`, `a` where `t` is 0 and `b` where it is 1.
+@builtin @pure fun mix(a: double4, b: double4, t: double) -> double4
+/// `mix` of each component by its own `t`.
+@builtin @pure fun mix(a: double4, b: double4, t: double4) -> double4
+/// 0 where `x` is below `edge`, and 1 from it on.
+@builtin @pure fun step(edge: double4, x: double4) -> double4
+/// 0 up to `low`, 1 from `high` on, and a smooth Hermite curve between.
+@builtin @pure fun smoothstep(low: double4, high: double4, x: double4) -> double4
+/// The products of the components, summed from the first on.
+@builtin @pure fun dot(a: double4, b: double4) -> double
+@builtin @pure fun length(v: double4) -> double
+@builtin @pure fun distance(a: double4, b: double4) -> double
+/// `v * inverse_sqrt(dot(v, v))`.
+@builtin @pure fun normalize(v: double4) -> double4
+@builtin @pure fun cross(a: double3, b: double3) -> double3
+
 // Textures and images, called as methods: `tex.sample(uv, smp)` is `sample(tex, uv, smp)`.
 // A texture samples, gathers and loads; an image loads where the shader may read it and stores where it may write it.
 // A sample takes its level from derivatives, or from a `level`, `bias` or `grad_x` / `grad_y` named at the call.
