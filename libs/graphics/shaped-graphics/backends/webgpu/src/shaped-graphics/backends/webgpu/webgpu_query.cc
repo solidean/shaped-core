@@ -65,34 +65,78 @@ sg::gpu_timestamp webgpu_command_list::query_record_gpu_timestamp()
 {
     if (!_ctx._queries.is_supported())
         return {};
+    _is_timed = true;
 
+    // The end of the pass just recorded, where nothing ran since: the pass's own end waits for its work.
+    end_open_pass("a timestamp query");
+    if (_last_pass_end.index >= 0)
+    {
+        auto const slot = _last_pass_end;
+        _last_pass_end = {};
+        return sg::gpu_timestamp(std::shared_ptr<sg::data_future<u64> const>(slot.lease->future), isize(slot.index),
+                                 1e-9);
+    }
+
+    // Otherwise the beginning of the next pass, or of an empty one where none comes first.
+    flush_pending_begin();
     if (_query_leases.empty() || _query_leases.back()->used >= webgpu_query_system::usable_queries_per_set)
         _query_leases.push_back(_ctx._queries.lease());
     auto* const lease = _query_leases.back();
-    auto const index = lease->used++;
+    _pending_begin = {.lease = lease, .index = lease->used++};
+    // Nanoseconds.
+    return sg::gpu_timestamp(std::shared_ptr<sg::data_future<u64> const>(lease->future), isize(_pending_begin.index),
+                             1e-9);
+}
 
-    // An empty pass whose beginning writes the query: everything recorded before it has run by then.
-    // WORKAROUND: the end of the pass writes into the set's last slot, which nothing reads.
+WGPUPassTimestampWrites const* webgpu_command_list::pass_timestamp_writes(WGPUPassTimestampWrites& storage)
+{
+    if (!_is_timed)
+        return nullptr;
+    // WORKAROUND: a pass that writes one end only names the set's last slot for the other, which nothing reads.
     // emdawnwebgpu passes WGPU_QUERY_SET_INDEX_UNDEFINED to JS as 4294967295 rather than as an absent field, which Dawn tolerates and wgpu refuses as out of bounds.
-    // See docs/bugs-external/webgpu-timestamp-write-index-sentinel; with the fix this goes back to the undefined index and every slot is usable.
-    end_open_pass("a timestamp query");
-    auto const writes = WGPUPassTimestampWrites{
+    // See docs/bugs-external/webgpu-timestamp-write-index-sentinel; with the fix this goes back to the undefined index.
+    constexpr auto discard = u32(webgpu_query_system::queries_per_set - 1);
+    auto* lease = _pending_begin.lease;
+    if (lease == nullptr)
+    {
+        if (_query_leases.empty() || _query_leases.back()->used >= webgpu_query_system::usable_queries_per_set)
+            _query_leases.push_back(_ctx._queries.lease());
+        lease = _query_leases.back();
+    }
+    // one set holds both ends, so a full one leaves this pass's end unclaimed
+    auto const end = lease->used < webgpu_query_system::usable_queries_per_set ? lease->used++ : -1;
+    storage = WGPUPassTimestampWrites{
         .nextInChain = nullptr,
         .querySet = lease->query_set.get(),
-        .beginningOfPassWriteIndex = u32(index),
+        .beginningOfPassWriteIndex = _pending_begin.index >= 0 ? u32(_pending_begin.index) : discard,
+        .endOfPassWriteIndex = end >= 0 ? u32(end) : discard,
+    };
+    _open_pass_end = end >= 0 ? query_slot{.lease = lease, .index = end} : query_slot{};
+    _pending_begin = {};
+    return &storage;
+}
+
+void webgpu_command_list::flush_pending_begin()
+{
+    if (_pending_begin.index < 0)
+        return;
+    auto const writes = WGPUPassTimestampWrites{
+        .nextInChain = nullptr,
+        .querySet = _pending_begin.lease->query_set.get(),
+        .beginningOfPassWriteIndex = u32(_pending_begin.index),
         .endOfPassWriteIndex = u32(webgpu_query_system::queries_per_set - 1),
     };
+    _pending_begin = {};
     auto const desc
         = WGPUComputePassDescriptor{.nextInChain = nullptr, .label = to_wgpu("sg timestamp"), .timestampWrites = &writes};
-    auto pass = wgpu_compute_pass(wgpuCommandEncoderBeginComputePass(encoder(), &desc));
+    auto pass = wgpu_compute_pass(wgpuCommandEncoderBeginComputePass(_encoder.get(), &desc));
     wgpuComputePassEncoderEnd(pass.get());
-
-    // Nanoseconds.
-    return sg::gpu_timestamp(std::shared_ptr<sg::data_future<u64> const>(lease->future), isize(index), 1e-9);
 }
 
 void webgpu_command_list::finalize_queries()
 {
+    end_open_pass("a query resolve");
+    flush_pending_begin();
     for (auto* const lease : _query_leases)
     {
         auto const bytes = isize(lease->used) * isize(sizeof(u64));

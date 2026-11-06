@@ -123,6 +123,7 @@ void webgpu_command_list::open_render_pass(bool reopen)
     auto attachments = cc::fixed_vector<WGPURenderPassColorAttachment, sg::max_color_targets>();
     for (auto const& a : _color_attachments)
         attachments.push_back(a.attachment);
+    auto writes = WGPUPassTimestampWrites{};
     auto const desc = WGPURenderPassDescriptor{
         .nextInChain = nullptr,
         .label = to_wgpu("sg rendering scope"),
@@ -130,9 +131,9 @@ void webgpu_command_list::open_render_pass(bool reopen)
         .colorAttachments = attachments.empty() ? nullptr : attachments.data(),
         .depthStencilAttachment = _has_depth ? &_depth_attachment : nullptr,
         .occlusionQuerySet = nullptr,
-        .timestampWrites = nullptr,
+        .timestampWrites = pass_timestamp_writes(writes),
     };
-    _render_pass = wgpu_render_pass(wgpuCommandEncoderBeginRenderPass(encoder(), &desc));
+    _render_pass = wgpu_render_pass(wgpuCommandEncoderBeginRenderPass(_encoder.get(), &desc));
 
     auto const pass = render_pass();
     wgpuRenderPassEncoderSetViewport(pass, _viewport.x, _viewport.y, _viewport.width, _viewport.height,

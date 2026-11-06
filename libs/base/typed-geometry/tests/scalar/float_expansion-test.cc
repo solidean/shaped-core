@@ -175,7 +175,8 @@ template <int K>
 void check_invalid()
 {
     using fe = tg::float_expansion_sbo<K>;
-    constexpr auto inf = 0x1p1023 * 2.0;
+    // GCC refuses an overflow in a constant expression, so the infinity is made at run time
+    auto const inf = 0x1p1023 * 2.0;
     auto const big = fe(0x1p1023) + fe(0x1p1023);
     auto const tiny = fe(0x1p-500) * fe(0x1p-500);
     auto const long_value = fe(1.0) + fe(0x1p-80) + fe(0x1p-200);

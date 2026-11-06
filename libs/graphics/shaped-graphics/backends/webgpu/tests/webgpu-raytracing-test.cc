@@ -481,7 +481,7 @@ ASYNC_INVOCABLE_TEST("sg webgpu - a moving instance's TLAS takes 10 units an ins
     auto const first = pool.word(region, 1);
     CHECK(((pool.word(first + 6, 2) >> 24) & (1u << 4)) != 0);
     CHECK(((pool.word(first + 10 + 6, 2) >> 24) & (1u << 4)) == 0);
-    CHECK(pool.word(first + 10 + 6, 1) == 2u);
+    CHECK((pool.word(first + 10 + 6, 1) & 0xffffffu) == 2u); // the id, below the mask
     auto mismatches = 0;
     for (auto k = 0; k < 12; ++k)
     {

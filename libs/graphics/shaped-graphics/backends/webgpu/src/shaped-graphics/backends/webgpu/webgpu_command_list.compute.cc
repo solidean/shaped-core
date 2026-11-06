@@ -97,9 +97,11 @@ void webgpu_command_list::open_compute_pass()
         end_open_pass("a dispatch");
     if (_compute_pass)
         return;
-    auto const desc
-        = WGPUComputePassDescriptor{.nextInChain = nullptr, .label = to_wgpu("sg compute"), .timestampWrites = nullptr};
-    _compute_pass = wgpu_compute_pass(wgpuCommandEncoderBeginComputePass(encoder(), &desc));
+    auto writes = WGPUPassTimestampWrites{};
+    auto const desc = WGPUComputePassDescriptor{.nextInChain = nullptr,
+                                                .label = to_wgpu("sg compute"),
+                                                .timestampWrites = pass_timestamp_writes(writes)};
+    _compute_pass = wgpu_compute_pass(wgpuCommandEncoderBeginComputePass(_encoder.get(), &desc));
     _compute.needs_full_apply = true;
 }
 
