@@ -452,6 +452,7 @@ if(SC_BUILD_TESTS)
         tests/legalize/differential-test.cc
         tests/legalize/legalize-rules-test.cc
         tests/legalize/guard-test.cc
+        tests/legalize/workgroup-guard-test.cc
 
         tests/emit/emit-test-support.hh
         tests/emit/core-emit-test.cc

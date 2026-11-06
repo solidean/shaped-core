@@ -458,6 +458,7 @@ let counted = materials.albedo[uniform (counts.picked[0] % 64)].sample(p.uv)
 * Everything it holds together fits 16 KiB, WebGPU's default limit and vulkan's required minimum (CHK-293).
 * Nothing is defined before it is stored: no target but WGSL zeroes it, and a shader that relies on either pays for it on every target.
   The interpreter reports a read of what was never stored as a program error (EVAL-92).
+  On a GPU, the `abort` and `report` profiles find such a read through a shadow of the memory, and `define` zeroes it everywhere (LEGAL-69).
 * A test holds workgroup memory of its own run, so it uses a `@workgroup` binding without listing it (CHK-295).
   Every other binding a test reads it lists, `test {frame}:`, and the driver that runs it gives the values (CHK-333).
 

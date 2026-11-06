@@ -34,11 +34,18 @@ slib's reflection check refused sg's debug window, and one line inlined along tw
 Left from it is [bug-sg-debug-readback-outlives-a-test](../../../shaped-graphics/docs/issues/bug-sg-debug-readback-outlives-a-test.md).
 And [bug-sv-guarded-raster-pipeline-stalls-intel-driver](../../../shaped-viewer/docs/issues/bug-sv-guarded-raster-pipeline-stalls-intel-driver.md), which stopped sv's part of the sweep.
 
+## Workgroup memory (2026-11-06)
+
+LEGAL-69 shadows a compute stage's workgroup memory with a bit per scalar, set by a store and tested by a read, under `abort` and `report`.
+`report` names the place and its indices, and a GPU test reports a read of what no invocation stored on dx12, vulkan and webgpu.
+`define` zeroes workgroup memory before the body instead, as WGSL does; the text writes both prologues (EMIT-229).
+
 ## Left
 
 The children, and:
 
 - A site nested past the legalizer's depth limit is left unguarded, silently.
+- A task and a mesh stage's workgroup memory is not shadowed yet, and a shadow that would pass the 16 KiB budget is left out.
 
 - Turning `report` on by default in a dev build, once the suite has run under it.
 - Range facts that drop a guard proven to hold, such as a `for` index into an array of its own length.
