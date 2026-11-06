@@ -267,6 +267,13 @@ if(SC_BUILD_TESTS)
 
     # The pipeline test walks the SGL prelude, which slib itself links privately.
     target_link_libraries(shaped-shader-library-test PRIVATE shaped-shader-library shaped-graphics-language blob-cache nexus)
+    if(TARGET shaped-shader-compiler-dxc)
+        target_sources(shaped-shader-library-test PRIVATE
+            tests/sgl-native-compile-benchmark.cc
+            tests/sgl-native-dxil-test.cc
+        )
+        target_link_libraries(shaped-shader-library-test PRIVATE shaped-shader-compiler-dxc)
+    endif()
 
     sc_target_pch(shaped-shader-library-test SG NEXUS)
 

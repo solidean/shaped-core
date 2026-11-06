@@ -166,6 +166,17 @@ struct sgl::emit::debug_site
     }
 };
 
+/// Whether a target's own binary is written in place of its text.
+enum class sgl::emit::native_route : sgl::u8
+{
+    /// The text, for the compiler behind the target.
+    text,
+    /// The binary, or the text where the entry point holds something the native layer has no lowering for yet.
+    prefer,
+    /// The binary, or an error `unsupported` that names what is missing.
+    require,
+};
+
 /// What an emit writes beside the text itself; the default writes no line table, no `#line` and no diagnostics.
 struct sgl::emit::options
 {
@@ -180,13 +191,24 @@ struct sgl::emit::options
     bool diagnostics = false;
     /// What the device has; with `float_atomic_add`, vulkan and metal write the target's own float atomics.
     check::feature_set device_features;
+    /// The tree was legalized to its emulated traces where the target has native ones (`text_request::software_trace`).
+    bool software_trace = false;
+    /// How `hlsl-vulkan` and `hlsl-dx12` are written: the text for DXC, or SPIR-V and DXIL from SGL's own layer (ir/ir.hh),
+    /// with no compiler behind it.
+    native_route native = native_route::text;
 };
 
 /// Either the text or the reasons there is none.
 struct sgl::emit::emitted_text
 {
-    /// Empty when `errors` is not.
+    /// Empty when `errors` is not; where `spirv` is written, the program it was written from, for a reader.
     cc::string text;
+    /// The module, where `options::native` wrote one for vulkan; empty otherwise.
+    cc::vector<u32> spirv;
+    /// The container, where `options::native` wrote one for dx12; empty otherwise.
+    cc::vector<byte> dxil;
+    /// What kept a `prefer` from writing `spirv`, for a reader; empty otherwise.
+    cc::string native_gap;
     /// The name the text actually declares the entry point under, which is the source's unless this target reserves it.
     /// A caller compiling the text has to ask for THIS name, not the one it requested.
     cc::string entry_point;
@@ -208,10 +230,12 @@ struct sgl::emit::emitted_text
 
     [[nodiscard]] bool operator==(emitted_text const& rhs) const
     {
-        return text == rhs.text && entry_point == rhs.entry_point && ast::impl::is_equal(bound_names, rhs.bound_names)
-            && color_targets == rhs.color_targets && target_struct == rhs.target_struct
-            && ast::impl::is_equal(layouts, rhs.layouts) && ast::impl::is_equal(lines, rhs.lines)
-            && ast::impl::is_equal(debug_sites, rhs.debug_sites) && ast::impl::is_equal(errors, rhs.errors);
+        return text == rhs.text && ast::impl::is_equal(spirv, rhs.spirv) && ast::impl::is_equal(dxil, rhs.dxil)
+            && native_gap == rhs.native_gap && entry_point == rhs.entry_point
+            && ast::impl::is_equal(bound_names, rhs.bound_names) && color_targets == rhs.color_targets
+            && target_struct == rhs.target_struct && ast::impl::is_equal(layouts, rhs.layouts)
+            && ast::impl::is_equal(lines, rhs.lines) && ast::impl::is_equal(debug_sites, rhs.debug_sites)
+            && ast::impl::is_equal(errors, rhs.errors);
     }
 };
 

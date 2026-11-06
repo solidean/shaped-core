@@ -163,6 +163,27 @@ Preserve these; the rest is tuning:
   A pipeline's kernel reads it to find a closest hit's record, since Metal's intersection result names the instance and not its offset.
   [raytracing-pipeline](raytracing-pipeline.md#metal-maps-it-onto-a-compute-pipeline-because-a-raygen-shader-is-the-kernel) says how it is bound.
 
+## dx12 and vulkan: the software walk, on request
+
+Motion has no native trace on either, so a structure that moves is traced by the walk webgpu uses, on the three conditions below.
+**Nothing picks this for you**: a device with or without hardware motion behaves the same, and the slowdown is one a build asked for.
+
+- **The shader's package takes `SOFTWARE_TRACE`** in `sc_add_shader_package`, which writes its inline traces as the walk on every device.
+  Its acceleration members come out with `sg::binding::traced_in_software`, so a layout holding one carries the pool and the roots.
+  A ray-tracing pipeline's `trace_ray` has no such form and sees no motion.
+- **The builds take `accel_build_flag::software_trace`**, a TLAS and every BLAS it places.
+  A build still makes the native structure, whose moving parts stand at time 0, and the binding keeps its native descriptor.
+- **The caller hands the geometry over on the CPU**, in the `cpu_*` spans of `blas_triangles`, `blas_pose` and `blas_aabbs`.
+  They are read within the call, the description's offsets apply to them, and a missing one is an assert: sg reads no GPU buffer back for a build.
+
+A binding not traced in software refuses a TLAS that moves when the group is made, naming `SOFTWARE_TRACE`.
+A binding traced in software refuses a TLAS built without the flag.
+Neither binding array nor staging group holds one traced in software yet, and a software geometry takes no micromap.
+
+The pool here is **host-visible and written at record time**, so a build records no GPU work for it and needs no compiled kernel.
+A region is new memory no recorded work reads, so nothing is ordered against it, and a shader reads it across the bus.
+So the boxes are the CPU's, the layout the same as webgpu's: [raytracing-polyfill.md](../../../shaped-graphics-language/docs/raytracing-polyfill.md).
+
 ## webgpu implementation: a software polyfill
 
 WebGPU has no acceleration structures, so sg builds its own and SGL's prelude traverses them; `ctx.implementation_of(sg::feature::ray_query)` is `emulated`.

@@ -452,23 +452,26 @@ pipeline_layout_handle pipeline_cache::acquire_pipeline_layout(context& ctx, pip
 async_compute_pipeline pipeline_cache::acquire_compute_pipeline(context& ctx, compute_pipeline_description const& desc)
 {
     auto const key = this->compute_compute_pipeline_key(desc);
-    return _compute_cache.acquire(key,
-                                  [&]() -> async_compute_pipeline
-                                  {
-                                      // The build runs later, possibly on a worker, so it owns the shader copy and layout handle rather than
-                                      // the description's reference.
-                                      auto node = build_compute_pipeline(&ctx, compiled_shader(desc.shader),
-                                                                         desc.layout, this->resolve_blob_cache(),
-                                                                         this->persistent_key(ctx, key, "pso"));
+    return _compute_cache.acquire(
+        key,
+        [&]() -> async_compute_pipeline
+        {
+            // The build runs later, possibly on a worker, so it owns the shader copy and layout handle rather than
+            // the description's reference.
+            // WebGPU has no blob to store, and the store's path builds synchronously, which only its
+            // async creation avoids: that one also settles after the shader's messages land.
+            auto* const store = ctx.backend() == backend_kind::webgpu ? nullptr : this->resolve_blob_cache();
+            auto node = build_compute_pipeline(&ctx, compiled_shader(desc.shader), desc.layout, store,
+                                               this->persistent_key(ctx, key, "pso"));
 
-                                      // Every segment on the device's home where it has one: the build and the seeded create both touch it.
-                                      if (auto* const home = ctx.device_home())
-                                          (void)node->try_home_cold(*home);
+            // Every segment on the device's home where it has one: the build and the seeded create both touch it.
+            if (auto* const home = ctx.device_home())
+                (void)node->try_home_cold(*home);
 
-                                      // A coroutine is cold; this tier has always handed back a scheduled node.
-                                      // Tracked on the context because nobody has to await it: the build references `ctx`.
-                                      return ctx.backlog.start(cc::move(node));
-                                  });
+            // A coroutine is cold; this tier has always handed back a scheduled node.
+            // Tracked on the context because nobody has to await it: the build references `ctx`.
+            return ctx.backlog.start(cc::move(node));
+        });
 }
 
 async_raster_pipeline pipeline_cache::acquire_raster_pipeline(context& ctx, raster_pipeline_description const& desc)

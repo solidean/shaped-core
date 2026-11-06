@@ -241,7 +241,7 @@ They apply in order, so a later setting overrides what an earlier one set, `filt
 | `sample(…, level = l)` | the same, and every stage | an explicit level: a `float`, and an `int` of a depth texture, which WGSL takes whole |
 | `sample(…, bias = b)` | a texture of floats | a bias on the level derivatives pick, in a pixel stage |
 | `sample(…, grad_x = …, grad_y = …)` | a texture of floats | the derivatives themselves |
-| `gather(…, component = texel_component.y)` | a 2D or cube texture of floats | one channel of the four texels a bilinear sample reads; `.x` by default |
+| `gather(…, component = texel_component.y)` | a 2D or cube texture | one channel of the four texels a bilinear sample reads, as a 4-vector of its component type; `.x` by default |
 | `sample_compare(…, reference = r)` | a depth texture | a comparison, through a `comparison_sampler`, in a pixel stage |
 | `sample_compare(…, reference = r, level = 0.0)` | the same, and every stage | a comparison at level 0, the one level every target compares at |
 | `gather_compare(…, reference = r)` | a 2D or cube depth texture | the comparisons of four texels |
@@ -429,6 +429,7 @@ let counted = materials.albedo[uniform (counts.picked[0] % 64)].sample(p.uv)
   It needs `unbounded_binding_arrays` beside `binding_arrays`, and is its binding's last member, since both APIs size only a group's last binding.
   Its `length` is the views the group was given, held as a constant of the binding that the generated host code fills (CHK-491).
   A binding whose code reads it gains that constant, and with it a constant block, so a group built by hand binds and fills one; a staging group's is its capacity.
+* An element of a buffer or `bytes` array has its own `length`, how many elements or bytes that view holds (CHK-460).
 * `sampler[N]` and `comparison_sampler[N]` are arrays of samplers, read by element and handed to a sample as the member would be.
   Each element is the host's per group, since sg has no static sampler array, and the generated field is a `cc::fixed_array<sg::sampler, N>`.
   An unbounded one and one of more than one dimension are `unsupported-yet`.
@@ -677,7 +678,8 @@ Everything not named here is the diagnostic `unsupported-yet`, never a guess.
 * `buffer[T]` and `mut buffer[T]`, for a `T` that is a scalar, a vector or a struct of the program, laid out at natural alignment (EMIT-111), or as C++ lays it out under `@padding(.none)` (EMIT-167).
 * `bytes` and `mut bytes`, loaded and stored a word at a time ([Bytes](#bytes)), alone or as a binding array.
 * A subscript on a buffer, as a value and as the place of an assignment.
-* A subscript on an image, as its `load` and as the place its `store` writes ([CHK-367](semantics/checking.md#bindings)); a texture's is not built.
+* A subscript on an image, as its `load` and as the place its `store` writes ([CHK-367](semantics/checking.md#bindings)).
+* A subscript on a texture, as its `load` alone ([CHK-514](semantics/checking.md#bindings)).
 * Every texture, depth texture, image and sampler form above, with `@unfilterable` and `@non_filtering`.
 * A static sampler in a binding, and the `needs-feature` refusals.
 * A file-scope sampler, handed to a builtin by its name ([CHK-314](semantics/checking.md#bindings)).

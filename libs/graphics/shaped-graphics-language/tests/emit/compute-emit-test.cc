@@ -1,5 +1,7 @@
 #include "emit-test-support.hh"
 
+#include <shaped-graphics-language/driver/compile_to_text.hh>
+
 using namespace sgl_test;
 using sgl::emit::target;
 
@@ -545,10 +547,47 @@ TEST("sgl emit - a WebGPU trace of the 17th acceleration member is too-many-acce
     };
     CHECK(sgl::emit::dump_errors(emit_source(source_tracing(16), 0, target::wgsl))
               .contains("too-many-acceleration-structures cs traces the acceleration member at position 16, and "
-                        "WebGPU binds 16 roots"));
+                        "sg binds 16 roots"));
     CHECK(text_of(source_tracing(15), target::wgsl).contains("sg_acceleration_roots[15 / 4][15 % 4]"));
     // a native trace names its member, and takes no root
     CHECK(sgl::emit::dump_errors(emit_source(source_tracing(16), 0, target::hlsl_dx12)) == "");
+}
+
+TEST("sgl emit - a software trace writes the emulated form on HLSL, and reads sg's pool (EMIT-135)")
+{
+    constexpr auto source
+        = "require ray_query\n"
+          "\n"
+          "binding scene:\n"
+          "    world: acceleration_structure[.triangles]\n"
+          "    dst: out image_2d[.rgba8_unorm]\n"
+          "\n"
+          "@compute(8, 8) fun cs(@thread_id id: int3){scene}:\n"
+          "    let h = scene.world.trace(ray(origin = pos3(0.0, 0.0, 0.0), direction = vec3(0.0, 0.0, "
+          "1.0), time = 0.5))\n"
+          "    scene.dst.store(int2(id.x, id.y), float4(h.t, 0.0, 0.0, 1.0))\n";
+    auto const text_at = [&](target t, bool software)
+    {
+        auto const emitted = sgl::compile_to_text(
+            {.source = source, .entry_point = "cs", .target = t, .software_trace = software, .device_features = {}});
+        REQUIRE(emitted.has_value());
+        return cc::string(emitted.value().text);
+    };
+
+    auto const dx12 = text_at(target::hlsl_dx12, true);
+    CHECK(dx12.contains("StructuredBuffer<uint4> sg_acceleration_pool : register(t0, space12);"));
+    CHECK(dx12.contains("cbuffer sg_acceleration_roots_block : register(b0, space12)"));
+    CHECK(dx12.contains("sg_acceleration_roots[0 / 4][0 % 4]"));
+    CHECK(!dx12.contains("RayQuery<"));
+
+    auto const vulkan = text_at(target::hlsl_vulkan, true);
+    CHECK(vulkan.contains("[[vk::binding(17, 3)]] StructuredBuffer<uint4> sg_acceleration_pool;"));
+    CHECK(vulkan.contains("[[vk::binding(18, 3)]] cbuffer sg_acceleration_roots_block"));
+
+    // without it HLSL stays native, and a Metal text has no pool to read
+    CHECK(text_at(target::hlsl_dx12, false).contains("RayQuery<"));
+    CHECK(!text_at(target::hlsl_dx12, false).contains("sg_acceleration_pool"));
+    CHECK(!text_at(target::msl, true).contains("sg_acceleration_pool"));
 }
 
 TEST("sgl emit - a library calls back into its shader, whose callback reads bindings the library never names")

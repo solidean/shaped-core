@@ -176,6 +176,7 @@ enum class sgl::diagnostic_kind : sgl::u8
     feature_not_declared,
     /// A `require` in a body that nothing needed; a warning.
     unused_require,
+    pixel_stage_ignores_view,
     /// A generic function nothing instantiates, so only its names were checked; a warning.
     generic_not_instantiated,
     /// A function reached from an entry point of a stage its `@stages` leaves out, `sample` in a compute shader.

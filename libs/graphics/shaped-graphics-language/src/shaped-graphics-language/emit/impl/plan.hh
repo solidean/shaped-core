@@ -15,6 +15,11 @@ namespace sgl::emit::impl
 /// How many groups an entry point may list besides its `@inline` binding, `sg::max_binding_groups`.
 /// sgl does not link sg, so the number is repeated here, and the pipeline layout sg builds is what it has to match.
 inline constexpr auto k_max_groups = 3;
+/// The space slib's binding pass gives the inline constants of a dx12 pipeline, `slib::inline_constants_space`.
+/// sgl does not link slib, so the number is repeated here, and the pipeline layout sg builds is what it has to match.
+inline constexpr auto k_inline_constants_space = 9;
+/// The space slib gives a pipeline layout's static samplers on dx12, `slib::bound_samplers_space`, repeated for the same reason.
+inline constexpr auto k_bound_samplers_space = 10;
 
 /// How many file-scope sampler indices a stage may reach.
 /// Metal's argument table and WebGPU's default `maxSamplersPerShaderStage` both hold 16.
@@ -393,6 +398,9 @@ struct block_placement
 /// stands: a place, or an array indexed in place, is spelled as held, and every other read is converted back.
 void plan_memory_accesses(plan& p);
 
+/// What reaches a matrix from an element of `type`, a multi-dimensional array of mat3 in HLSL's memory: `.m` of its
+/// `sgl_mat3_cell` (EMIT-168); empty for any other type.
+[[nodiscard]] cc::string_view mat3_cell_field(plan const& p, check::type_id type);
 /// Whether member `member` of `object_type` is a mat3 its target holds as a `float4x3`, where the struct is in memory.
 [[nodiscard]] bool holds_widened_mat3(plan const& p, check::type_id object_type, isize member);
 /// Whether member `member` of `object_type` is an array of 3-vectors its target holds as 4-vectors (EMIT-169).

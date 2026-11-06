@@ -7,6 +7,7 @@
 #include <shaped-graphics/backends/dx12/dx12_view_desc.hh>
 #include <shaped-graphics/binding/binding.hh>
 #include <shaped-graphics/binding/binding_group.hh>
+#include <shaped-graphics/raytracing/impl/software_trace.hh>
 #include <shaped-graphics/resource/views.hh>
 
 namespace sg::backend::dx12
@@ -221,6 +222,27 @@ cc::result<dx12_binding_group_handle> dx12_binding_group::create_resolved(dx12_c
                 }
 
                 create_accel_view(ctx._device.Get(), dx_tlas.get(), dst);
+
+                auto const software
+                    = dx_tlas != nullptr ? sg::impl::software_region_of(*dx_tlas) : sg::impl::software_region{};
+                if (software.is_moving && !s.binding.traced_in_software)
+                    return cc::error(
+                        cc::format("binding_group: '{}' binds a tlas that moves, which only the software walk "
+                                   "sees: the shader's package takes SOFTWARE_TRACE in sc_add_shader_package",
+                                   nv.name));
+                if (s.binding.traced_in_software)
+                {
+                    if (dx_tlas != nullptr && software.pool == nullptr)
+                        return cc::error(cc::format("binding_group: '{}' is traced in software, so its tlas is built "
+                                                    "with accel_build_flag::software_trace",
+                                                    nv.name));
+                    auto const position = sg::impl::acceleration_position(layout->bindings(), s.binding.index);
+                    while (group->acceleration_roots.size() <= position)
+                        group->acceleration_roots.push_back(0);
+                    group->acceleration_roots[position] = software.unit;
+                    if (av->tlas != nullptr)
+                        group->software_tlases.push_back(av->tlas);
+                }
 
                 if (dx_tlas != nullptr)
                 {

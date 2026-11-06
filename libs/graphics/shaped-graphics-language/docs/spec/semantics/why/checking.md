@@ -285,9 +285,9 @@ Until SGL has generics a program may declare, an overload family cannot be writt
 An enum that converts to `int` is an `int` with a nicer spelling, and the conversion is what makes it one.
 Once `light_kind` can be added to 1, every guarantee the type was declared for is a convention rather than a rule.
 The compiler stops being able to tell a case from a number that happens to be in range.
-So the first version converts in neither direction, which is the position it is possible to relax from.
-The relaxation is already named: `value as int` and `n as light_kind`, both unchecked, because a bounds test on every conversion is not worth its cost in a shader.
-[enum futures](../../incubator/enum-futures.md) is where it waits.
+So nothing converts implicitly, which is the position it is possible to relax from.
+`value as int` is the first relaxation, spelled out at the use and always defined, since every case is a value of the `int`.
+`n as light_kind` still waits in [enum futures](../../incubator/enum-futures.md): an `int` that names no case would be undefined behaviour the language has no profile for yet.
 Starting strict costs a cast somebody has to write; starting loose costs the type.
 
 ## CHK-154
@@ -549,6 +549,7 @@ What a host sees of an instance in GPU memory is still open, in the [incubator](
 `report.none()` must build a report without attributes, and SGL has no optional type and no default value of an arbitrary type.
 `undefined()` is that missing value, made safe by being the prelude's alone: the prelude never reads what it holds.
 The interpreter reads it as zeroes so that a miss, which copies undefined attributes into its result, still runs in a test.
+A `let mut` of it is the emulated trace's stack: the walk writes an entry before it reads it, and a fill would be 128 stores on every trace.
 
 ## CHK-342
 

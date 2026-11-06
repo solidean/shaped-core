@@ -120,7 +120,8 @@ use view
   An entry point whose flat tree holds a value of such a type needs its feature, and a binding member that holds one is a form CHK-201 judges.
 * **CHK-450** `long`, `ulong` and `double` are the prelude's 64-bit `int`, `uint` and `float`.
   Their vectors are `long2` to `long4`, `ulong2` to `ulong4` and `double2` to `double4`.
-  A literal converts to one by CHK-253, and since an integer literal is held in 64 bits, a `ulong` literal past 2^63 - 1 is `unsupported-yet`: `~0u64` spells the largest.
+  A literal converts to one by CHK-253.
+  A literal from 2^63 to 2^64 - 1 is held by a `ulong` alone, written `18446744073709551615u64` or wherever a `ulong` is asked for; no operator folds one with another number (CHK-394).
   Their operators are the arithmetic, the comparisons, a vector beside its scalar, and for `long` and `ulong` the bit operators; `abs`, `min`, `max`, `clamp` and `select` take them too.
   A double's maths functions are CHK-458's, and no subgroup operation takes a 64-bit value yet.
 * **CHK-458** A `double` and its vectors take `sqrt`, `inverse_sqrt`, `floor`, `ceil`, `trunc`, `round`, `fract`, `sign` and `saturate`.
@@ -326,7 +327,9 @@ An option is read like any `const`, and a branch on it leaves the text with what
 * **CHK-148** An enum's own name is no value, by CHK-63.
 * **CHK-149** `==` and `!=` over two values of one enum are the language's own, as `and` is by CHK-116: no function declares them, and each gives a `bool`.
   A leading dot on either side is a case of the other side's enum, by CHK-152: `api == .vulkan`.
-* **CHK-150** An enum converts to no type and no type converts to it, `int` included, and it has no other operator ([why](why/checking.md#chk-150)).
+* **CHK-150** An enum converts implicitly to no type and no type converts to it, `int` included, and it has no other operator ([why](why/checking.md#chk-150)).
+  `e as int` is the one explicit conversion: the value of `e`'s case, written or counted (AST-115), so a case can be stored in a buffer without a `case`.
+  It does not hold for a `@builtin enum`, whose value is its record's, and nothing converts back.
 * **CHK-151** A nested declaration in an `enum` block is `unsupported-yet`; its properties and methods are those of a struct (CHK-233).
 * **CHK-218** `bool` is a `@builtin enum` of the prelude with the cases `false` and `true`, in that order, so `bool.true` is a value like `light_kind.sun`.
   Its record makes it the targets' bool: CHK-149 and CHK-150 do not hold for it, since its `==` is the prelude's and `and`, `or` and `not` take it (CHK-116).
@@ -499,7 +502,7 @@ fun shade(k: float) -> float:
   it takes every image of that shape whose format's texel is that type, and which the shader may read where the pattern reads, or write where it writes.
 * **CHK-194** A builtin's bare `texture_2d` or `image_2d` parameter is a pattern too, which takes every texture, or every image, of that shape, whatever it holds and however it is read.
   It is for what depends on neither, such as a size.
-* **CHK-210** A call that hands a builtin an `@unfilterable` texture member and a sampler member that filters is `type-mismatch`, and its detail names both.
+* **CHK-210** A call that hands a builtin an `@unfilterable` texture member, or one of integers, and a sampler member that filters is `type-mismatch`, and its detail names both.
   A sampler a texture's `@sampler` supplies counts as handed (CHK-279).
   A `sampler` member filters unless it is `@non_filtering`, and a static sampler filters unless every filter is `.nearest`.
 * **CHK-211** `max_anisotropy` is an `int` literal from 1 to 16, and anything else is `invalid-attribute-arguments`.
@@ -527,6 +530,9 @@ fun shade(k: float) -> float:
   The subscript takes the arguments `load` takes, so an array's layer is named, `img[xy, layer = 2]`.
   It is judged as the call it stands for, so a read of an `out` image is `no-matching-overload`, and `img[xy] += v` reads and writes a `mut` one.
   A texel is stored whole, so a member of one is no place, and no `mut` argument hands one over: `img[xy].x = v` is `not-assignable`.
+* **CHK-514** `t[xy]` is a texel of a texture member, as CHK-367's is of an image: `t.load(xy)`, whose arguments the subscript takes, so `t[xy, level = 2]` names a level.
+  It takes level 0 unless told otherwise, as `load` does, and a cube has neither.
+  A texture is only read, so an assignment to one is `not-assignable`.
 * **CHK-390** `texel[F]` is a type: the texel of the image format `F`, which is what an image of that format loads and stores ([why](why/checking.md#chk-390)).
   `F` is judged as an image's argument is (CHK-200), so it may name an option, and the type is then decided per compile.
   Its component is `float` for a `_float`, `_unorm` or `_snorm` format, `uint` for a `_uint` one and `int` for a `_sint` one.
@@ -606,7 +612,7 @@ fun shade(k: float) -> float:
   At its default type as anywhere else, it is one `float` holds by CHK-253, or `literal-not-representable`.
 * **CHK-61** A decimal literal of digits alone is an **integer literal**, whose default type is the prelude's `int`, and a sign directly on it is part of it.
   A number literal is of its default type wherever no other type is asked of it by CHK-253.
-  An integer literal is held in 64 bits, and one beyond them is `unsupported-yet`, as is a literal with a `p` exponent; a suffix is CHK-357.
+  An integer literal is held in 64 bits, signed or as a `ulong` (CHK-450), and one beyond them is `unsupported-yet`, as is a literal with a `p` exponent; a suffix is CHK-357.
   One the type it ends up with does not hold, its default type included, is `literal-not-representable`: `let u: uint = 3000000000` is legal and `let i = 3000000000` is not.
 * **CHK-269** A literal of hexadecimal digits behind `0x`, or of binary ones behind `0b`, is an integer literal like a decimal one ([why](why/checking.md#chk-269)).
   Its value is the number it spells: `0xffff'ffff` is 4294967295, which a `uint` holds and an `int` does not, and `-0x8000'0000` is the most negative `int`.
@@ -881,6 +887,9 @@ fun f() -> float:
   View `i` renders into layer `i` of every target, so a stereo frame is one draw into a two-layer array, and the shader picks each eye's camera by it.
   The count is the host's, so one shader serves one view and two alike: a pipeline of one view reads 0.
   It needs `view_instancing`, which WebGPU has on no device, so its WGSL is `target-lacks-feature`.
+* **CHK-515** A pipeline of more than one view whose pixel stage takes no `@view_index` is `pixel-stage-ignores-view`, a warning.
+  Intel's dx12 driver may draw nothing for one, so a pixel stage takes the view and multiplies its color by `keep_view(view)`, which costs nothing elsewhere.
+  A hand-built pipeline is not a `pipeline` declaration, so nothing reports it.
 * **CHK-91** A `@pixel fun` returns a `@pixel struct`, one color value, or nothing (CHK-418).
 * **CHK-418** A `@pixel fun` that returns one numeric scalar or plain vector of `float`, `half`, `int` or `uint` writes it as its one color target, named `color`.
   It stands for a `@pixel struct` of that one member, which the compiler declares as `<entry>_target`, or under a name past it where the module has that one.
@@ -1058,12 +1067,15 @@ A `require` in a test's body that nothing in it uses is `unused-require`, and a 
 * **CHK-288** `xs.length` is an array's length, an `int` constant, and the one member an array has; it is never assigned.
 * **CHK-460** `values.length` of a buffer is how many elements the bound buffer holds, and of a `bytes` how many bytes, a `uint` the host decides.
   It names the buffer without reading an element, as a subscript does, and is never assigned.
-  Of an element of a binding array it is `unsupported-yet`; a binding array's own `length` is CHK-288's.
+  Of an element of a binding array it is that element's, whose index is an index like any other (CHK-300); a binding array's own `length` is CHK-288's, or CHK-491's.
 * **CHK-289** `T[N].filled(v)` is an array of `T[N]` whose every element is `v`, which converts to `T` as an argument does.
   Where `T` is an array itself, `v` may instead be its innermost element, which then stands in every scalar: `float[4, 4].filled(0.0)`.
 * **CHK-290** A square literal converts to the array type expected where it stands, with exactly as many elements, each converting to the element type.
   Where no array is expected it is an array of its first element's type, and every other element converts to that.
   It holds at least one element, and no name and no splat.
+* **CHK-513** `==` and `!=` of two arrays of one type are the language's own, each giving a `bool`, where the innermost element has a `==`, an enum's included (CHK-149).
+  Any other array is `no-matching-overload`.
+  A program's own `@operator("==")` over the type takes precedence.
 * **CHK-291** An array stands in GPU memory at its natural stride (EMIT-110): in a buffer's element, at any depth of its structs, and in a constant block.
   In a constant block every element must stride by whole 16-byte rows, at any depth, since a runtime index into a shorter one needs component arithmetic.
   A `float3`, a 4-vector, a `mat3`, a `mat4` and every struct do; a scalar, a 2-vector or a 16-bit vector shorter than a row is `unsupported-yet`, and the detail names it.
@@ -1705,6 +1717,7 @@ A call deduces what each parameter stands for, and inlining writes that in its p
   In an instance it is the constant its arguments make it, which a `const if` decides on (CHK-430): `const if T == float:`.
   Two mentions of one type are equal, and so are two instances of one generic struct whose arguments are (CHK-339).
 * **CHK-341** `undefined()` in the prelude is a value of the type of the parameter it meets, and binds no type parameter ([why](why/checking.md#chk-341)).
+  It is also the value of a `let mut` with a written type, which then is that local.
   It is a local declared and never assigned, which nobody may read: the interpreter reads it as zeroes, and a target reads what its local holds.
   `report.none()` is the use it exists for: a report with no hit has attributes of the report's type and no value.
 
@@ -1752,12 +1765,12 @@ fun make_mvp(model: mat4){frame} => frame.proj * frame.view * model
 ## Diagnostic kinds
 
 Every kind below is a normal error by [DIAG-4](../syntax/diagnostics.md#rules), except some warnings.
-They are `unreachable-code`, `no-effect`, `unused-require`, `needless-nonuniform`, `unroll-too-long`, `generic-not-instantiated` and `nan-test-at-fast`.
+They are `unreachable-code`, `no-effect`, `unused-require`, `pixel-stage-ignores-view`, `needless-nonuniform`, `unroll-too-long`, `generic-not-instantiated` and `nan-test-at-fast`.
 A diagnostic of this pass has a kind, a file, a byte span in that file, and a detail.
 
 | kind | reported by |
 |---|---|
-| `unsupported-yet` | CHK-8, CHK-61, CHK-134, CHK-213, CHK-237, CHK-291, CHK-299, CHK-307, CHK-314, CHK-321, CHK-329, CHK-333, CHK-338, CHK-339, CHK-344, CHK-346, CHK-347, CHK-350, CHK-352, CHK-353, CHK-357, CHK-366, CHK-374, CHK-381, CHK-383, CHK-387, CHK-389, CHK-397, CHK-431, CHK-432, CHK-434, CHK-460, CHK-450, CHK-453, CHK-454 |
+| `unsupported-yet` | CHK-8, CHK-61, CHK-134, CHK-213, CHK-237, CHK-291, CHK-299, CHK-307, CHK-314, CHK-321, CHK-329, CHK-333, CHK-338, CHK-339, CHK-344, CHK-346, CHK-347, CHK-350, CHK-352, CHK-353, CHK-357, CHK-366, CHK-374, CHK-381, CHK-383, CHK-387, CHK-389, CHK-397, CHK-431, CHK-432, CHK-434, CHK-450, CHK-453, CHK-454 |
 | `member-not-allowed-here` | CHK-490 |
 | `duplicate-declaration` | CHK-12, CHK-28, CHK-241, CHK-347, CHK-351 |
 | `dependency-cycle` | CHK-18, CHK-136 |
@@ -1775,7 +1788,7 @@ A diagnostic of this pass has a kind, a file, a byte span in that file, and a de
 | `binding-not-listed` | CHK-45, CHK-131, CHK-228 |
 | `as-precedence` | CHK-411 |
 | `type-mismatch` | CHK-52, CHK-56, CHK-77, CHK-112 to CHK-118, CHK-121, CHK-167, CHK-210, CHK-214, CHK-219, CHK-236, CHK-243, CHK-275, CHK-276, CHK-279, CHK-281, CHK-287, CHK-329, CHK-344, CHK-362, CHK-375, CHK-392, CHK-429, CHK-433, CHK-434 |
-| `not-assignable` | CHK-112, CHK-236, CHK-316, CHK-352, CHK-367 |
+| `not-assignable` | CHK-112, CHK-236, CHK-316, CHK-352, CHK-367, CHK-514 |
 | `read-before-assignment` | CHK-55 |
 | `missing-return` | CHK-125, CHK-236 |
 | `unreachable-code` | CHK-126, CHK-162, CHK-430 |
@@ -1792,6 +1805,7 @@ A diagnostic of this pass has a kind, a file, a byte span in that file, and a de
 | `unknown-feature` | CHK-258 |
 | `feature-not-declared` | CHK-264, CHK-322, CHK-382 |
 | `unused-require` | CHK-265 |
+| `pixel-stage-ignores-view` | CHK-515 |
 | `generic-not-instantiated` | CHK-338 |
 | `stage-not-allowed` | CHK-193, CHK-277, CHK-329, CHK-344, CHK-512 |
 | `ambiguous-overload` | CHK-72 |

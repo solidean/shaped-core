@@ -16,22 +16,55 @@
 #include <memory>
 
 /// The binding a session renders through, which decides the sg backend its context must be.
-enum class xr::graphics_api : xr::u8
+enum class sxr::graphics_api : sxr::u8
 {
     vulkan,
     dx12,
 };
 
-struct xr::system_description
+/// What an application can ask of a runtime beyond rendering.
+/// Each needs extensions the instance must be created with, so it is named in `system_description::wants`.
+enum class sxr::capability : sxr::u8
+{
+    passthrough,
+    environment_depth,
+    scene_planes,
+    scene_meshes,
+    anchors,
+    persistent_anchors,
+    hit_tests,
+};
+
+/// Whether a session may use a capability now.
+/// `needs_permission` and `denied` are the user's answer on a headset where one is asked, which no build reaches yet.
+enum class sxr::availability : sxr::u8
+{
+    unsupported, ///< the runtime or headset lacks it, or `system_description::wants` did not name it
+    needs_permission,
+    denied,
+    available,
+};
+
+/// How a frame meets the room behind it.
+enum class sxr::blend_mode : sxr::u8
+{
+    opaque,
+    /// The room shows through by the frame's alpha, which is premultiplied, so a frame clears to transparent.
+    alpha_blend,
+    /// The frame adds light to the room, the only thing an optical see-through display can do; black is invisible.
+    additive,
+};
+
+struct sxr::system_description
 {
     cc::string application_name = "shaped-core";
     graphics_api api = graphics_api::vulkan;
-    /// Asks for the runtime's passthrough (`XR_FB_passthrough`) where it offers it, so a session may show the room.
-    bool wants_passthrough = false;
+    /// What sessions of this system may use; what the runtime lacks is left out rather than failing, see `system::offers`.
+    cc::vector<capability> wants;
 };
 
 /// What an action reports: a button, an axis, a stick, where something is, or a vibration it makes.
-enum class xr::action_kind : xr::u8
+enum class sxr::action_kind : sxr::u8
 {
     boolean,
     scalar,
@@ -41,7 +74,7 @@ enum class xr::action_kind : xr::u8
 };
 
 /// Which hand an action is read for; an action declared for both is one action with a state per hand.
-enum class xr::hand : xr::u8
+enum class sxr::hand : sxr::u8
 {
     left,
     right,
@@ -50,7 +83,7 @@ enum class xr::hand : xr::u8
 /// One suggested binding: an input or output path of an interaction profile, such as
 /// `/interaction_profiles/oculus/touch_controller` and `/user/hand/left/input/trigger/value`.
 /// The runtime binds what the controllers in hand offer, and remaps a profile it does not have to one it does.
-struct xr::action_binding
+struct sxr::action_binding
 {
     cc::string profile;
     cc::string path;
@@ -58,39 +91,42 @@ struct xr::action_binding
 
 /// An action the application reads by name rather than by device path, OpenXR's model.
 /// `name` is lowercase letters, digits, `-`, `_` and `.`; `label` is what the runtime shows a user who rebinds it.
-struct xr::action_description
+struct sxr::action_description
 {
     cc::string name;
     cc::string label;
     action_kind kind = action_kind::boolean;
-    /// One state per hand, read with `xr::hand`; every binding then starts with `/user/hand/left` or `/user/hand/right`.
+    /// One state per hand, read with `sxr::hand`; every binding then starts with `/user/hand/left` or `/user/hand/right`.
     bool is_per_hand = true;
     cc::vector<action_binding> bindings;
 };
 
-struct xr::session_description
+struct sxr::session_description
 {
     /// The depth range every view's projection maps to 0 and 1, and the one the runtime is told for its depth layer.
     f32 near_distance = 0.05f;
     f32 far_distance = 100.0f;
-    /// Shows the headset's cameras behind what is rendered, where the system asked for passthrough and it came up.
-    /// The frame's color is then cleared to transparent where the room shows through.
-    bool passthrough = false;
-    /// The actions the session reads, bound before it begins; `xr::standard_controller_actions()` is the usual set.
+    /// What the session asks for; one the runtime lacks falls back to opaque with a warning, and `session::blend` says which.
+    /// A camera layer needs `capability::passthrough` in `system_description::wants`.
+    blend_mode blend = blend_mode::opaque;
+    /// Lets `frame.color` be read back, for a test or a mirror, until the frame is submitted.
+    /// Off by default, because it asks more of every image the runtime allocates.
+    bool readable_color = false;
+    /// The actions the session reads, bound before it begins; `sxr::standard_controller_actions()` is the usual set.
     cc::vector<action_description> actions;
 };
 
-namespace xr
+namespace sxr
 {
 /// Both hands' grip and aim poses, trigger, squeeze, thumbstick, the two face buttons, the thumbstick click, the menu
 /// button and haptics, named so, bound for Quest Touch and for OpenXR's simple controller.
 /// The face buttons are `primary` (A or X) and `secondary` (B or Y); the menu button is the left controller's alone.
 [[nodiscard]] cc::vector<action_description> standard_controller_actions();
-} // namespace xr
+} // namespace sxr
 
 /// One eye: where it is and how it projects, in tg's frame — left-handed, +y up, +z forward — of the session's space.
 /// OpenXR's frame is right-handed with -z forward, and the session converts at its edge so nothing above sees that.
-struct xr::view
+struct sxr::view
 {
     tg::rigid_transform3f camera_to_world;
     /// Left-handed, depth 0 at the session's near distance and 1 at its far one, as a depth cleared to 1 tests less.
@@ -102,14 +138,16 @@ struct xr::view
 
 /// One frame: its views, and the images each view renders into, view i into layer i.
 /// Render both views in one pass with view instancing (`view_count = 2`, SGL's `@view_index`), or one pass a layer.
-struct xr::frame
+struct sxr::frame
 {
-    /// False where the runtime wants nothing drawn this frame, which still ends through `session::submit_frame`.
+    /// False where the runtime wants nothing drawn this frame, as the first ones of a session do: `views` is empty and
+    /// the images are invalid, and the frame still ends, through `session::submit_frame(nullptr)`.
     bool should_render = false;
     cc::vector<view> views;
     int width = 0;
     int height = 0;
     /// `views.size()` layers each, with `render_target` and `depth_stencil` usage; what `submit_frame` hands the runtime.
+    /// `color` also has `copy_src` where `session_description::readable_color` asked for it.
     sg::texture_2d_array color;
     sg::texture_2d_array depth;
 };
@@ -118,8 +156,8 @@ struct xr::frame
 ///
 /// The runtime dictates the GPU, and on vulkan the instance and device extensions, so the context comes from here:
 /// `create_context` creates it to the runtime's spec, on the backend `graphics_api` names.
-/// A system outlives every session created from it.
-class xr::system
+/// A system outlives every session created from it, and a process has one at a time, since the loader holds one instance.
+class sxr::system
 {
 public:
     /// Fails where the build has no OpenXR loader, no runtime is active, the runtime lacks the binding, or no headset is
@@ -133,8 +171,11 @@ public:
     [[nodiscard]] cc::string_view runtime_name() const;
     [[nodiscard]] cc::string_view system_name() const;
     [[nodiscard]] graphics_api api() const;
-    /// Whether the runtime offers passthrough and the description asked for it.
-    [[nodiscard]] bool offers_passthrough() const;
+    /// Whether the description wanted `c`, the runtime lists all it needs, and the headset says it has it.
+    /// A runtime may still refuse a call, as a toggle in the Link app makes it do.
+    [[nodiscard]] bool offers(capability c) const;
+    /// Whether a session asking for `b` gets it, so far as can be told before one exists.
+    [[nodiscard]] bool offers_blend(blend_mode b) const;
 
     /// An sg context on the adapter the runtime composes on, with what the runtime requires of it.
     [[nodiscard]] cc::result<sg::context_handle> create_context() const;
@@ -160,7 +201,7 @@ private:
 ///
 /// The session begins when the runtime is ready and ends when it stops, as a headset taken off does; it resumes when
 /// the runtime is ready again, so `wait_frame` gives nothing in between.
-class xr::session
+class sxr::session
 {
 public:
     ~session();
@@ -174,8 +215,10 @@ public:
     [[nodiscard]] bool is_running() const;
     /// Whether the headset shows this application and gives it input.
     [[nodiscard]] bool is_focused() const;
-    /// Whether the room shows behind what is rendered.
-    [[nodiscard]] bool shows_passthrough() const;
+    /// How this session's frames meet the room, which is opaque where what was asked for did not come up.
+    [[nodiscard]] blend_mode blend() const;
+    /// Whether this session may use `c` now, which unlike `system::offers` may depend on what the user allowed.
+    [[nodiscard]] availability availability_of(capability c) const;
 
     /// Blocks until the runtime paces the next frame, and begins it; none while the session is not running.
     /// A frame that is returned must be ended by `submit_frame`, whether or not it should render.

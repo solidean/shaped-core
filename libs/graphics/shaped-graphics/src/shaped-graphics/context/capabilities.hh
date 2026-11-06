@@ -133,6 +133,11 @@ enum class sg::feature
     /// WGSL has no builtin for it.
     first_instance,
 
+    /// An indirect draw's `first_instance` may be other than 0.
+    /// Without it such a record is invalid on vulkan and draws nothing on WebGPU, with no error on either.
+    /// D3D12 and Metal always have it; vulkan needs `drawIndirectFirstInstance` and WebGPU `indirect-first-instance`.
+    indirect_first_instance,
+
     /// A pixel shader may tell a helper invocation from a real one, which SGL's strong compare-exchange needs there (EMIT-163).
     /// D3D12 has HLSL's `IsHelperLane()` from SM 6.6, Vulkan has the core `HelperInvocation` built-in, Metal has `simd_is_helper_thread()`.
     /// D3D12's and Vulkan's compare-exchange is strong already, so their strong form needs no loop and asks no test.
@@ -183,6 +188,11 @@ enum class sg::feature
     /// yet, and WebGPU has no such thing.
     view_instancing,
 
+    /// Not a capability: this device's driver may write nothing for a draw of several views whose pixel stage ignores the view.
+    /// SGL's `keep_view` reads it where this is set, and is free everywhere else.
+    /// See docs/bugs-external/intel-d3d12-view-instancing-draws-nothing.
+    pixel_view_read_workaround,
+
     /// A vertex, geometry or tessellation stage may write a storage buffer, which SGL's `print` and `assert` need there.
     /// D3D12 and Metal grant it on every device, Vulkan with `vertexPipelineStoresAndAtomics`, and WebGPU on none.
     vertex_pipeline_stores,
@@ -216,9 +226,11 @@ enum class sg::feature
     /// Every device with `shader_int64_atomics` has it; Metal grants it alone, on the Apple GPUs that have 64-bit atomics.
     shader_int64_min_max_atomics,
 
-    /// A TLAS instance may move over the frame (`tlas_instance::transform_at_end`), and a trace places it at its ray's time.
-    /// webgpu has it through the ray-query polyfill; DXR has no motion, and vulkan's VK_NV_ray_tracing_motion_blur
-    /// reaches no ray query, so neither native backend answers it yet, nor metal.
+    /// A TLAS instance (`tlas_instance::transform_at_end`) and a BLAS's vertices (`blas_triangles::later_poses`) may move
+    /// over the frame, and a trace places them at its ray's time.
+    /// **Emulated wherever it is offered**: webgpu through its polyfill, dx12 and vulkan through a package's SOFTWARE_TRACE.
+    /// A native trace sees none of it, since DXR has no motion and vulkan's VK_NV_ray_tracing_motion_blur reaches no ray query.
+    /// metal does not offer it yet.
     ray_tracing_motion_blur,
 };
 
@@ -255,6 +267,7 @@ inline constexpr feature k_all_features[] = {
     feature::device_coherence,
     feature::image_atomics,
     feature::first_instance,
+    feature::indirect_first_instance,
     feature::helper_lane_query,
     feature::opacity_micromap,
     feature::vertex_layer_output,
@@ -263,6 +276,7 @@ inline constexpr feature k_all_features[] = {
     feature::float_specials,
     feature::float_denormals,
     feature::view_instancing,
+    feature::pixel_view_read_workaround,
     feature::vertex_pipeline_stores,
     feature::shader_int64,
     feature::shader_f64,
@@ -328,6 +342,8 @@ static_assert(isize(sizeof(k_all_features) / sizeof(k_all_features[0])) == isize
         return "image_atomics";
     case feature::first_instance:
         return "first_instance";
+    case feature::indirect_first_instance:
+        return "indirect_first_instance";
     case feature::helper_lane_query:
         return "helper_lane_query";
     case feature::opacity_micromap:
@@ -344,6 +360,8 @@ static_assert(isize(sizeof(k_all_features) / sizeof(k_all_features[0])) == isize
         return "float_denormals";
     case feature::view_instancing:
         return "view_instancing";
+    case feature::pixel_view_read_workaround:
+        return "pixel_view_read_workaround";
     case feature::vertex_pipeline_stores:
         return "vertex_pipeline_stores";
     case feature::shader_int64:

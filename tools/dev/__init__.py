@@ -81,6 +81,7 @@ from .lib.toolchain import clangd
 from .lib.toolchain.doctor import doctor
 from .lib.toolchain.known_issues import WARN as KNOWN_ISSUE_WARN
 from .lib.toolchain.known_issues import warn_active as warn_known_issues
+from .lib.toolchain.android_sdk import activate as activate_android_sdk
 from .lib.toolchain.vulkan_sdk import activate as activate_vulkan_sdk
 from .lib.toolchain.llvm_tools import resolve_tool
 from .lib.toolchain.toolset import ToolsetError, apply_overrides, list_toolsets, toolset_hint
@@ -159,6 +160,7 @@ __all__ = [
     "doctor",
     "KNOWN_ISSUE_WARN",
     "warn_known_issues",
+    "activate_android_sdk",
     "activate_vulkan_sdk",
     "FormatResult",
     "FormatSetupError",

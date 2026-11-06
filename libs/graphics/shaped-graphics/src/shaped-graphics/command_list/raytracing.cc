@@ -6,6 +6,7 @@
 #include <shaped-graphics/command_list/raytracing.hh>
 #include <shaped-graphics/context/context.hh>
 #include <shaped-graphics/raytracing/impl/hit_record_check.hh>
+#include <shaped-graphics/raytracing/impl/software_trace.hh>
 #include <shaped-graphics/raytracing/raytracing_pipeline.hh>
 #include <shaped-graphics/raytracing/raytracing_shader_table.hh>
 
@@ -91,9 +92,19 @@ blas_handle command_list_raytracing_scope::build_blas(cc::span<blas_triangles co
                                                       int hit_record_stride)
 {
     CC_ASSERT(hit_record_stride >= 1, "build_blas: hit_record_stride must be >= 1");
+    auto* const pool = flags.has(accel_build_flag::software_trace) ? _cmd.context().software_pool() : nullptr;
+    auto const has_native_trace = _cmd.context().implementation_of(feature::ray_query) == feature_implementation::native;
     auto micromaps = cc::vector<micromap_handle>();
     for (auto const& g : geometries)
     {
+        CC_ASSERT(g.later_poses.empty() || !has_native_trace || pool != nullptr,
+                  "build_blas: a geometry moves, which only the software walk sees, so its build takes "
+                  "accel_build_flag::software_trace");
+        CC_ASSERT(g.later_poses.empty() || _cmd.context().supports(feature::ray_tracing_motion_blur),
+                  "build_blas: a geometry moves, and this context has no sg::feature::ray_tracing_motion_blur");
+        CC_ASSERT(g.later_poses.size() <= 1, "build_blas: a geometry takes one later pose, its vertices at time 1");
+        for (auto const& pose : g.later_poses)
+            CC_ASSERT(pose.vertices != nullptr, "build_blas: a geometry's later pose names no vertices");
         if (g.micromap == nullptr)
             continue;
         CC_ASSERT(_cmd.context().supports(feature::opacity_micromap),
@@ -106,6 +117,8 @@ blas_handle command_list_raytracing_scope::build_blas(cc::span<blas_triangles co
     auto blas = _cmd.raytracing_build_blas_triangles(geometries, flags, hit_record_stride);
     if (blas != nullptr)
     {
+        if (pool != nullptr)
+            impl::set_software_region(*blas, impl::build_software_blas(*pool, geometries));
         impl::set_build_record(*blas, blas_geometry::triangles, hit_record_stride);
         if (!micromaps.empty())
             impl::set_micromaps(*blas, cc::move(micromaps));
@@ -134,17 +147,30 @@ blas_handle command_list_raytracing_scope::build_blas(cc::span<blas_aabbs const>
     _cmd._stats.add(stat::blas_builds);
     auto blas = _cmd.raytracing_build_blas_aabbs(geometries, flags, hit_record_stride);
     if (blas != nullptr)
+    {
+        if (auto* const pool = flags.has(accel_build_flag::software_trace) ? _cmd.context().software_pool() : nullptr)
+            impl::set_software_region(*blas, impl::build_software_blas(*pool, geometries));
         impl::set_build_record(*blas, blas_geometry::aabbs, hit_record_stride);
+    }
     return blas;
 }
 
 tlas_handle command_list_raytracing_scope::build_tlas(cc::span<tlas_instance const> instances, accel_build_flags flags)
 {
     _cmd._stats.add(stat::tlas_builds);
+    auto* const pool = flags.has(accel_build_flag::software_trace) ? _cmd.context().software_pool() : nullptr;
+    auto const has_native_trace = _cmd.context().implementation_of(feature::ray_query) == feature_implementation::native;
     for (auto const& instance : instances)
+    {
         CC_ASSERT(!instance.transform_at_end.has_value() || _cmd.context().supports(feature::ray_tracing_motion_blur),
                   "build_tlas: an instance moves, and this context has no sg::feature::ray_tracing_motion_blur");
+        CC_ASSERT(!instance.transform_at_end.has_value() || !has_native_trace || pool != nullptr,
+                  "build_tlas: an instance moves, which only the software walk sees, so the build takes "
+                  "accel_build_flag::software_trace");
+    }
     auto tlas = _cmd.raytracing_build_tlas(instances, flags);
+    if (tlas != nullptr && pool != nullptr)
+        impl::set_software_region(*tlas, impl::build_software_tlas(*pool, instances));
 
     // Only what the hit-record check at dispatch_rays reads, and only where it runs.
     if (tlas != nullptr && _cmd.context().hit_record_checks())

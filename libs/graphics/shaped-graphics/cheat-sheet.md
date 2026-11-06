@@ -120,13 +120,14 @@ ctx.supports(sg::feature::ray_query)               // bool — THE capability qu
                                                    //   | vertex_layer_output (a vertex stage picks the layer of an array target,
                                                    //     SGL's @layer; dx12 and vulkan ask the device, true on metal, false on webgpu)
                                                    //   | view_instancing (one draw renders view_count views, view i into layer i;
+                                                   //   | pixel_view_read_workaround (no capability: Intel dx12 needs a pixel stage to read the view; SGL's keep_view asks for it)
                                                    //     SGL's @view_index; dx12's ViewInstancingTier, vulkan's multiview,
                                                    //     false on metal (amplification not wired yet) and webgpu)
                                                    //   | vertex_pipeline_stores (a vertex, geometry or tessellation stage writes
                                                    //     storage, which SGL's print and assert there need; vulkan's
                                                    //     vertexPipelineStoresAndAtomics, true on dx12 and metal, false on webgpu)
-                                                   //   | ray_tracing_motion_blur (a tlas_instance moves over the frame; webgpu's polyfill
-                                                   //     alone, since DXR has no motion and vulkan's NV extension no ray query)
+                                                   //   | ray_tracing_motion_blur (a tlas_instance or a blas_triangles moves over the frame; always emulated:
+                                                   //     webgpu's polyfill, or dx12 and vulkan through a package's SOFTWARE_TRACE)
                                                    //   | float_atomic_add (a float atomic add in one instruction; vulkan with
                                                    //     VK_EXT_shader_atomic_float, true on metal, false on dx12 and webgpu;
                                                    //     slib asks SGL for the native add where it is true; no `require`)
@@ -252,6 +253,8 @@ ctx.is_shut_down()                                 // bool
 #include <shaped-graphics/backends/vulkan/vulkan_context.hh>
 sg::create_vulkan_context(vulkan_config = {})      // -> cc::result<context_handle>
 // vulkan_config { bool enable_validation_layers=false; bool prefer_software_device=false; }  (independent flags)
+//   vulkan_config { bool native_spirv=false; }  SGL shaders take SGL's own SPIR-V where it lowers them, DXC's elsewhere; ctx.prefers_native_spirv()
+//   dx12_config { bool native_dxil=false; }    SGL shaders take SGL's own DXIL where it lowers them, DXC's elsewhere; ctx.prefers_native_dxil()
 // created to someone else's spec (an XR runtime's): MOVE-ONLY once a hook is set
 //   vulkan_config { extra_instance_extensions / extra_device_extensions  (cc::vector<cc::string>; a missing one fails creation, naming it)
 //                   create_instance(info, out) / create_device(phys, info, out)  (in place of vkCreate*; the context owns and destroys the result)
@@ -418,7 +421,7 @@ cmd.raster.draw_mesh_tasks(x, y = 1, z = 1)  // void — x*y*z workgroups of a m
 cmd.raster.draw_mesh_tasks_indirect(args, first = 0, count = 1)  // void — `count` mesh draws, each record of buffer<sg::dispatch_args> (x, y, z) read by the GPU
 cmd.raster.draw_indexed_indirect(args, first = 0, count = 1)  // void — `count` indexed draws, each record of buffer<sg::draw_indexed_args> read by the GPU
 //   sg::draw_indexed_args { u32 index_count, instance_count = 1, first_index; i32 vertex_offset; u32 first_instance } — D3D12/Vk/Metal/WebGPU layout
-//   args need buffer_usage::indirect_command_buffer; instance_count 0 draws nothing, and first_instance is where @instance_index starts
+//   args need buffer_usage::indirect_command_buffer; instance_count 0 draws nothing, and first_instance is where @instance_index starts (not 0 needs sg::feature::indirect_first_instance)
 //   the count is the CPU's: no GPU-written count yet (feat-sg-indirect-draws); one ExecuteIndirect on dx12, a draw per record elsewhere
 //   sg::is_aligned_index_fetch(format, view_offset, first_index) -> bool   // ask instead of asserting
 ```
@@ -896,12 +899,16 @@ sg::blas_handle   // std::shared_ptr<sg::blas const>   — bottom-level (one mes
 sg::tlas_handle   // std::shared_ptr<sg::tlas const>   — top-level (instances of blas); a tlas keeps its blases alive
 // input structs (value types; build-input buffers need buffer_usage::accel_structure_build_input):
 sg::blas_triangles { vertices(float3), vertex_count/stride/offset; optional indices+count+offset+index_type;
-                     optional transform buffer(3x4 row-major)+offset; is_opaque=true }
-sg::blas_aabbs     { aabbs(6 floats each), aabb_count/stride/offset; is_opaque=true }
+                     optional transform buffer(3x4 row-major)+offset; is_opaque=true;
+                     vector<blas_pose> later_poses — at most one, the vertices at time 1; moving, needs ray_tracing_motion_blur;
+                     span<byte const> cpu_vertices/cpu_indices/cpu_transform — what those buffers hold, for software_trace }
+sg::blas_pose      { vertices(laid out as blas_triangles::vertices), offset_in_bytes, cpu_vertices }
+sg::blas_aabbs     { aabbs(6 floats each), aabb_count/stride/offset; is_opaque=true; cpu_aabbs }
 sg::tlas_instance  { blas_handle blas; float transform[12] ROW-MAJOR 3x4 (transform[r*4+c], not tg col-major);
                      u32 instance_id:24; u32 hit_group_offset:24; u8 mask=0xFF; instance_cull_mode; optional opaque_override;
                      optional<fixed_array<float, 12>> transform_at_end — moving, needs ray_tracing_motion_blur }
-sg::accel_build_flag    // fast_trace(default)/fast_build/allow_update/allow_compaction/minimize_memory
+sg::accel_build_flag    // fast_trace(default)/fast_build/allow_update/allow_compaction/software_trace/minimize_memory
+                        // software_trace: dx12/vulkan also write the software walk's structure, from the cpu_* spans; what moves needs it
 sg::accel_build_flags   // cc::flags<accel_build_flag> — a set of them; combine with |, test with .has()
 sg::index_format        // uint16 | uint32  — index-buffer element width (shared with draw's bind_index_buffer)
 sg::index_size_in_bytes(format)          // -> 2 | 4

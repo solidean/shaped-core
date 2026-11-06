@@ -771,13 +771,14 @@ struct writer
         // EMIT-168: an element of an array of mat3 is a float4x3, which narrows as one does
         auto const is_matrix = is_mat3(p.m, innermost_of(p.m, x.type));
         for (auto const& at : index_paths(x.type))
-            line(is_matrix ? cc::format("{}{} = ((float3x3){}{});", name, at, raw, at)
+            line(is_matrix ? cc::format("{}{} = ((float3x3){}{}{});", name, at, raw, at, lanes)
                            : cc::format("{}{} = {}{}{};", name, at, raw, at, lanes));
         return name;
     }
 
     /// Stores `value`, an array of 3-vectors, into `raw`, which holds it as 4-vectors, element by element.
-    void widen_array_into(cc::string_view raw, type_id type, cc::string_view value)
+    /// `cell` is what reaches a matrix from an element of `raw` (EMIT-168), for an array of mat3.
+    void widen_array_into(cc::string_view raw, type_id type, cc::string_view value, cc::string_view cell)
     {
         auto const name = p.names.mint("widened");
         auto declaration = cc::string();
@@ -787,7 +788,7 @@ struct writer
         line(declaration);
         auto const is_matrix = is_mat3(p.m, innermost_of(p.m, type));
         for (auto const& at : index_paths(type))
-            line(is_matrix ? cc::format("{}{} = sgl_widen_mat3({}{});", raw, at, name, at)
+            line(is_matrix ? cc::format("{}{}{} = sgl_widen_mat3({}{});", raw, at, cell, name, at)
                            : cc::format("{}{}.xyz = {}{};", raw, at, name, at));
     }
 
@@ -850,7 +851,8 @@ struct writer
                              p.e.at(arguments[i]).type, expr(arguments[i]).text);
             else if (planned.member_of[i] >= 0 && holds_widened_array(p, x.type, i))
                 widen_array_into(cc::format("{}.{}", name, planned.members[planned.member_of[i]].name),
-                                 p.e.at(arguments[i]).type, expr(arguments[i]).text);
+                                 p.e.at(arguments[i]).type, expr(arguments[i]).text,
+                                 mat3_cell_field(p, p.e.at(arguments[i]).type));
             else if (planned.member_of[i] >= 0)
                 line(cc::format("{}.{} = {};", name, planned.members[planned.member_of[i]].name,
                                 holds_widened_mat3(p, x.type, i)
@@ -1305,7 +1307,7 @@ struct writer
         if (held == held_as::widened_array)
         {
             auto const value = expr(a.value, true).text;
-            return widen_array_into(expr(a.place).text, p.e.at(a.place).type, value);
+            return widen_array_into(expr(a.place).text, p.e.at(a.place).type, value, p.accesses[index_of(a.place)].lanes);
         }
         auto value = expr(a.value, true).text;
         if (held == held_as::widened_mat3)
@@ -1522,7 +1524,12 @@ struct writer
             [&](flat_buffer_length const& b)
             {
                 auto const is_bytes = p.m.at(p.e.at(b.buffer).type).kind == check::type_kind::bytes;
-                result = {.text = d.buffer_length(expr(b.buffer).text, is_bytes), .binds = level::primary};
+                if (auto const* const element = p.e.at(b.buffer).node.try_as<flat_element>())
+                    result = {.text = d.buffer_length_at(expr(element->object).text, expr(element->index).text,
+                                                         is_nonuniform_mark(element->index)),
+                              .binds = level::primary};
+                else
+                    result = {.text = d.buffer_length(expr(b.buffer).text, is_bytes), .binds = level::primary};
             },
             [&](flat_buffer_element const& b)
             {
@@ -1702,7 +1709,7 @@ struct writer
                                     .value = text,
                                     .dimensions = dimensions,
                                     .is_mut = is_mut || declares_only,
-                                    .is_zeroed = text.empty() && is_padded(local.type)});
+                                    .is_zeroed = text.empty() && (is_padded(local.type) || local.is_zeroed)});
         line(declaration);
     }
 
@@ -2121,13 +2128,20 @@ void sgl::emit::impl::write_helpers(cc::string& out, plan const& p, dialect cons
     for (auto const& x : p.e.exprs)
     {
         auto const* const length = x.node.try_as<check::flat_buffer_length>();
-        auto const* const member
-            = length != nullptr ? p.e.at(length->buffer).node.try_as<check::flat_binding_member>() : nullptr;
+        if (length == nullptr)
+            continue;
+        auto const* const element = p.e.at(length->buffer).node.try_as<check::flat_element>();
+        auto const named = element != nullptr ? element->object : length->buffer;
+        auto const* const member = p.e.at(named).node.try_as<check::flat_binding_member>();
         auto const found = member != nullptr ? resource_of(p, member->binding, member->member) : -1;
         if (found < 0)
             continue;
         auto const is_bytes = p.m.at(p.e.at(length->buffer).type).kind == check::type_kind::bytes;
-        auto text = d.buffer_length_helper(p.resources[found].name, is_bytes);
+        auto const* const call = element != nullptr ? p.e.at(element->index).node.try_as<check::flat_call>() : nullptr;
+        auto const* const mark = call != nullptr ? p.m.builtin_function(call->intrinsic) : nullptr;
+        auto const is_nonuniform = mark != nullptr && mark->mark == builtins::index_mark::nonuniform;
+        auto text = element != nullptr ? d.buffer_length_at_helper(p.resources[found].name, is_nonuniform, is_bytes)
+                                       : d.buffer_length_helper(p.resources[found].name, is_bytes);
         auto is_known = text.empty();
         for (auto const& w : written)
             is_known = is_known || w == text;
@@ -2155,6 +2169,14 @@ sgl::emit::impl::written_text sgl::emit::impl::write_text(plan& p, dialect const
                   d.description());
     w.out += "// Generated: the SGL source is what to edit.\n\n";
     d.write_declarations(w.out, p);
+    for (auto const& x : p.e.exprs)
+        if (auto const* const call = x.node.try_as<flat_call>())
+            if (auto const* const record = p.m.builtin_function(call->intrinsic);
+                record != nullptr && record->name == "acceleration_pool_load")
+            {
+                d.write_acceleration_pool(w.out);
+                break;
+            }
     if (p.e.written_words > 0 && !d.declares_workgroup_in_function())
         w.out.appendf("{}\n\n", written_shadow_declaration(d.language(), p.e.written_words));
     write_helpers(w.out, p, d);

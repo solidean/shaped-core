@@ -359,6 +359,10 @@ private:
                                 sg::impl::array_declaration_book& book);
 
     /// Declares every bound group's views at an op of `op_stages`, as `footprint` says the code touches them.
+    /// Sets the software walk's pool and roots, for a layout that carries them, right before an op runs.
+    void bind_software_trace(dx12_pipeline_layout const& layout,
+                             cc::span<dx12_binding_group const* const> groups,
+                             bool is_graphics);
     void declare_group_accesses(cc::span<dx12_binding_group const* const> groups,
                                 sg::impl::pipeline_footprint const* footprint,
                                 sg::pipeline_stage_flags op_stages);

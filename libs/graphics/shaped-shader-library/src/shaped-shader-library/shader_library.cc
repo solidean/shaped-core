@@ -98,6 +98,9 @@ cc::string reflection_mismatch(sg::compiled_shader const& reflected,
         // sg's debug window, which sg binds itself wherever a shader writes print or assert records (EMIT-183)
         if (r.name == "sg_debug" && !stated.debug_sites.empty())
             continue;
+        // what sg binds for an emulated trace, in the reserved group (EMIT-135)
+        if (r.name == "sg_acceleration_pool" || r.name == "sg_acceleration_roots_block")
+            continue;
         sg::binding const* match = nullptr;
         for (auto const& d : declared)
             if (emitted_name_of(d) == r.name)
@@ -379,7 +382,11 @@ void slib::shader_library::add_package(shader_package const& package, filesystem
     for (auto const& existing : _packages)
         CC_ASSERT(existing.name != package.name, "this shader package was already added");
 
-    _packages.push_back(package_entry{.name = cc::string::create_copy_of(package.name), .language = package.language});
+    _packages.push_back(package_entry{.name = cc::string::create_copy_of(package.name),
+                                      .language = package.language,
+                                      .software_trace = package.software_trace,
+                                      .native_spirv = package.native_spirv,
+                                      .native_dxil = package.native_dxil});
 
     if (fs != nullptr)
     {
@@ -487,7 +494,8 @@ slib::shader_library::compile_outcome slib::shader_library::compile_shader(cc::s
 
     // Where an `#include "..."` is looked for, most specific first: the shader's own directory, then the package's own root, then the mount root.
     _compile_text(outcome, cc::move(source.value()), virtual_path, impl::parent_path(virtual_path), package.name,
-                  file_namespace, package.language, stage, entry_point, format, options);
+                  file_namespace, package.language, stage, entry_point, format, options, package.software_trace,
+                  package.native_spirv, package.native_dxil);
     return outcome;
 }
 
@@ -513,7 +521,10 @@ void slib::shader_library::_compile_text(compile_outcome& outcome,
                                          sg::shader_stage stage,
                                          cc::string_view entry_point,
                                          sg::shader_format format,
-                                         cc::span<shader_option const> options) const
+                                         cc::span<shader_option const> options,
+                                         bool software_trace,
+                                         bool native_spirv,
+                                         bool native_dxil) const
 {
     // What an SGL source's `use` reaches, read as it is now: the modules are files like an include is.
     auto const modules = language == shader_language::sgl ? read_modules() : module_library();
@@ -585,7 +596,10 @@ void slib::shader_library::_compile_text(compile_outcome& outcome,
                                       .entry_point = cc::string::create_copy_of(entry_point),
                                       .stage = stage,
                                       .label = cc::string::create_copy_of(label),
-                                      .modules = module_files};
+                                      .modules = module_files,
+                                      .software_trace = software_trace,
+                                      .native_spirv = native_spirv,
+                                      .native_dxil = native_dxil};
     desc.options.push_back_range(options);
 
     auto preprocessed = compiler->preprocess(desc, resolve);
@@ -619,6 +633,7 @@ void slib::shader_library::_compile_text(compile_outcome& outcome,
     }
 
     desc.source = cc::move(preprocessed.value().source);
+    desc.bytecode = cc::move(preprocessed.value().bytecode);
     auto pending = cc::optional<sgl_interface>();
     if (preprocessed.value().stated.has_value())
     {

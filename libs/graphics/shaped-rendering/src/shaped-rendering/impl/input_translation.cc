@@ -160,6 +160,72 @@ float wheel_amount(float raw, SDL_MouseWheelDirection direction)
     return direction == SDL_MOUSEWHEEL_FLIPPED ? -raw : raw;
 }
 
+cc::optional<sr::gamepad_button> gamepad_button_from_sdl(u8 sdl_button)
+{
+    switch (sdl_button)
+    {
+    case SDL_GAMEPAD_BUTTON_SOUTH:
+        return gamepad_button::south;
+    case SDL_GAMEPAD_BUTTON_EAST:
+        return gamepad_button::east;
+    case SDL_GAMEPAD_BUTTON_WEST:
+        return gamepad_button::west;
+    case SDL_GAMEPAD_BUTTON_NORTH:
+        return gamepad_button::north;
+    case SDL_GAMEPAD_BUTTON_BACK:
+        return gamepad_button::back;
+    case SDL_GAMEPAD_BUTTON_GUIDE:
+        return gamepad_button::guide;
+    case SDL_GAMEPAD_BUTTON_START:
+        return gamepad_button::start;
+    case SDL_GAMEPAD_BUTTON_LEFT_STICK:
+        return gamepad_button::left_stick;
+    case SDL_GAMEPAD_BUTTON_RIGHT_STICK:
+        return gamepad_button::right_stick;
+    case SDL_GAMEPAD_BUTTON_LEFT_SHOULDER:
+        return gamepad_button::left_shoulder;
+    case SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER:
+        return gamepad_button::right_shoulder;
+    case SDL_GAMEPAD_BUTTON_DPAD_UP:
+        return gamepad_button::dpad_up;
+    case SDL_GAMEPAD_BUTTON_DPAD_DOWN:
+        return gamepad_button::dpad_down;
+    case SDL_GAMEPAD_BUTTON_DPAD_LEFT:
+        return gamepad_button::dpad_left;
+    case SDL_GAMEPAD_BUTTON_DPAD_RIGHT:
+        return gamepad_button::dpad_right;
+    default:
+        return {};
+    }
+}
+
+cc::optional<sr::gamepad_axis> gamepad_axis_from_sdl(u8 sdl_axis)
+{
+    switch (sdl_axis)
+    {
+    case SDL_GAMEPAD_AXIS_LEFTX:
+        return gamepad_axis::left_x;
+    case SDL_GAMEPAD_AXIS_LEFTY:
+        return gamepad_axis::left_y;
+    case SDL_GAMEPAD_AXIS_RIGHTX:
+        return gamepad_axis::right_x;
+    case SDL_GAMEPAD_AXIS_RIGHTY:
+        return gamepad_axis::right_y;
+    case SDL_GAMEPAD_AXIS_LEFT_TRIGGER:
+        return gamepad_axis::left_trigger;
+    case SDL_GAMEPAD_AXIS_RIGHT_TRIGGER:
+        return gamepad_axis::right_trigger;
+    default:
+        return {};
+    }
+}
+
+float gamepad_axis_value(sr::gamepad_axis axis, i16 raw)
+{
+    auto const value = raw < 0 ? float(raw) / 32768.0f : float(raw) / 32767.0f;
+    return axis == gamepad_axis::left_y || axis == gamepad_axis::right_y ? -value : value;
+}
+
 float pixel_density_from_sdl(float density)
 {
     return density > 0.0f ? density : 1.0f;

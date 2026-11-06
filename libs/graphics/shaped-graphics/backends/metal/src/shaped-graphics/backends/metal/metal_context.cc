@@ -162,6 +162,8 @@ bool metal_context::supports(sg::feature f) const
     case sg::feature::view_instancing:
         // vertex amplification would grant it, and is not wired up yet
         return false;
+    case sg::feature::pixel_view_read_workaround:
+        return false;
     case sg::feature::ray_tracing_motion_blur:
         // Metal's motion acceleration structures are not wired up yet
         return false;
@@ -172,6 +174,7 @@ bool metal_context::supports(sg::feature f) const
         // `MTLTriangleFillModeLines` is on every Apple GPU.
         return true;
     case sg::feature::first_instance:
+    case sg::feature::indirect_first_instance:
         // `[[base_instance]]` is on every Apple GPU this backend's Metal 4 floor admits.
         return true;
     case sg::feature::opacity_micromap:

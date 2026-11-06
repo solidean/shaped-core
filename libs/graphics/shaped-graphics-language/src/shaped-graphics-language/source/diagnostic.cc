@@ -204,6 +204,8 @@ cc::string_view sgl::to_string(diagnostic_kind kind)
         return "feature-not-declared";
     case diagnostic_kind::unused_require:
         return "unused-require";
+    case diagnostic_kind::pixel_stage_ignores_view:
+        return "pixel-stage-ignores-view";
     case diagnostic_kind::generic_not_instantiated:
         return "generic-not-instantiated";
     case diagnostic_kind::stage_not_allowed:
@@ -532,6 +534,8 @@ cc::string_view sgl::summary_of(diagnostic_kind kind)
         return "an entry point that uses a feature its file, its bindings and its body never `require`";
     case diagnostic_kind::unused_require:
         return "a `require` in a body that nothing there needed";
+    case diagnostic_kind::pixel_stage_ignores_view:
+        return "a pipeline of several views whose pixel stage takes no `@view_index`";
     case diagnostic_kind::generic_not_instantiated:
         return "a generic function that nothing instantiates, whose body is checked for its names alone";
     }
@@ -670,6 +674,7 @@ sgl::severity sgl::default_severity_of(diagnostic_kind kind)
     case diagnostic_kind::redundant_yield:
     case diagnostic_kind::unreachable_code:
     case diagnostic_kind::unused_require:
+    case diagnostic_kind::pixel_stage_ignores_view:
     case diagnostic_kind::generic_not_instantiated:
     case diagnostic_kind::unroll_too_long:
     case diagnostic_kind::nan_test_at_fast:

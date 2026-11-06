@@ -3,6 +3,12 @@
 #include <clean-core/string/format.hh>
 #include <shaped-graphics-language/emit/impl/dialect.hh>
 #include <shaped-graphics-language/emit/impl/plan.hh>
+#include <shaped-graphics-language/ir/dxil/dxil.hh>
+#include <shaped-graphics-language/ir/ir.hh>
+#include <shaped-graphics-language/ir/lower.hh>
+#include <shaped-graphics-language/ir/simplify.hh>
+#include <shaped-graphics-language/ir/spirv.hh>
+#include <shaped-graphics-language/ir/ssa.hh>
 #include <shaped-graphics-language/legalize/legalize.hh>
 
 namespace
@@ -176,7 +182,13 @@ sgl::emit::emitted_text sgl::emit::emit_entry_point(check::checked_module const&
                                          .detail = cc::format("{} needs {}, which WebGPU does not have", e.name,
                                                               check::k_feature_names[i])});
 
-        // EMIT-135: sg binds the roots as 16 words of one uniform, and the position is the call's last argument
+        if (!result.errors.empty())
+            return result;
+    }
+
+    // EMIT-135: sg binds the roots as 16 words of one uniform, and the position is the call's last argument
+    if (t == target::wgsl || sources.software_trace)
+    {
         constexpr auto max_roots = 16;
         for (auto const& x : e.exprs)
         {
@@ -192,12 +204,10 @@ sgl::emit::emitted_text sgl::emit::emit_entry_point(check::checked_module const&
             result.errors.push_back({.kind = error_kind::too_many_acceleration_structures,
                                      .symbol = member != nullptr ? member->binding : e.function,
                                      .detail = cc::format("{} traces the acceleration member at position {}, and "
-                                                          "WebGPU binds {} roots",
+                                                          "sg binds {} roots",
                                                           e.name, k->value, max_roots)});
-            break;
-        }
-        if (!result.errors.empty())
             return result;
+        }
     }
 
     // EMIT-211: a Metal argument buffer would hold an unbounded array, which sg does not lay out yet
@@ -345,10 +355,45 @@ sgl::emit::emitted_text sgl::emit::emit_entry_point(check::checked_module const&
                 }
     if (!result.errors.empty())
         return result;
-    auto written = impl::write_text(plan, impl::dialect_of(t), sources);
-    result.text = cc::move(written.text);
-    result.lines = cc::move(written.lines);
-    result.debug_sites = cc::move(written.debug_sites);
+    // The plan decided every name and address already, so a binary answers to the host as the text would.
+    auto is_native = false;
+    if (sources.native != native_route::text)
+    {
+        auto program = ir::program();
+        auto gap = ir::lower(plan, program);
+        auto const is_dxil = t == target::hlsl_dx12;
+        if (!gap.has_value())
+            ir::construct_ssa(program);
+        if (!gap.has_value() && is_dxil)
+        {
+            ir::simplify(program);
+            gap = ir::write_dxil(program, result.dxil);
+        }
+        if (!gap.has_value())
+        {
+            if (!is_dxil)
+                result.spirv = ir::write_spirv(program);
+            result.text = ir::dump(program);
+            is_native = true;
+        }
+        else if (sources.native == native_route::prefer)
+            result.native_gap = gap.value();
+        else
+        {
+            result.errors.push_back({.kind = error_kind::unsupported,
+                                     .symbol = e.function,
+                                     .detail = cc::format("{} holds {}, which the {} route does not lower yet", e.name,
+                                                          gap.value(), is_dxil ? "DXIL" : "SPIR-V")});
+            return result;
+        }
+    }
+    if (!is_native)
+    {
+        auto written = impl::write_text(plan, impl::dialect_of(t), sources);
+        result.text = cc::move(written.text);
+        result.lines = cc::move(written.lines);
+        result.debug_sites = cc::move(written.debug_sites);
+    }
     result.entry_point = plan.entry_name;
     if (plan.constants.has_value())
         result.bound_names.push_back({.emitted = plan.constants.value().name, .host = plan.constants.value().host_name});

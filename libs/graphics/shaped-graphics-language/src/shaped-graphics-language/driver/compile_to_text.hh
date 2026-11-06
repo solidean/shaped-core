@@ -41,6 +41,9 @@ struct sgl::text_request
     /// What the text does where an integer division by zero or an array index outside the array would run (LEGAL-65).
     /// `report` prints through the debug buffer, and so is `abort` without `diagnostics`.
     check::undefined_guard guards_undefined = check::undefined_guard::none;
+    /// Writes an inline trace as its emulated form on HLSL too, reading sg's acceleration pool (EMIT-135).
+    /// A package's `SOFTWARE_TRACE` asks for it; WGSL has no other form, and MSL keeps its native one.
+    bool software_trace = false;
     /// Compiles an entry point whose `@float` WGSL cannot keep at `fast`, with a warning, rather than refusing it (EMIT-185).
     /// The host's to give, since only the code that picked WebGPU knows whether running without the guarantee will do.
     bool weakens_float = false;
@@ -48,6 +51,8 @@ struct sgl::text_request
     /// With `float_atomic_add` an `atomic[float]` is the target's own float atomic where the target can say one,
     /// vulkan and metal, and a `uint`'s bits elsewhere.
     check::feature_set device_features;
+    /// `hlsl-vulkan` written as SPIR-V by SGL itself, which `emitted_source::spirv` then holds.
+    emit::native_route native = emit::native_route::text;
 };
 
 /// Every entry point of one SGL source, asked for as the text of each of `targets`.
@@ -96,6 +101,12 @@ struct sgl::interface_binding
 struct sgl::emitted_source
 {
     cc::string text;
+    /// The SPIR-V `text_request::native` asked for; empty where the text is what was written.
+    cc::vector<u32> spirv;
+    /// The DXIL container the same request asked for on dx12.
+    cc::vector<byte> dxil;
+    /// What kept a `prefer` from writing either, for a reader.
+    cc::string native_gap;
     /// The source's name, unless the target reserves it: HLSL and MSL both reserve words an SGL author may pick.
     /// A caller compiling the text asks for THIS name.
     cc::string entry_point;

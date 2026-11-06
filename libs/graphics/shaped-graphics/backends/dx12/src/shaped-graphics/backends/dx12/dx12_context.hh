@@ -18,6 +18,7 @@
 #include <shaped-graphics/backends/dx12/dx12_epoch.hh>
 #include <shaped-graphics/backends/dx12/dx12_memory_heap.hh>
 #include <shaped-graphics/backends/dx12/dx12_query.hh>
+#include <shaped-graphics/backends/dx12/dx12_software_pool.hh>
 #include <shaped-graphics/backends/dx12/dx12_swapchain.hh>
 #include <shaped-graphics/backends/dx12/dx12_texture.hh>
 #include <shaped-graphics/backends/dx12/dx12_upload_async.hh>
@@ -92,6 +93,10 @@ struct sg::backend::dx12::dx12_config
     ///
     /// Best-effort: skipped when the layer isn't installed.
     bool activate_global_debug_layer = false;
+
+    /// Write SGL shaders as DXIL with SGL itself, with no DXC behind them, where SGL has a lowering for them yet.
+    /// An entry point it has none for goes through DXC.
+    bool native_dxil = false;
 
     /// Enable DRED, so a device removal reports what the GPU was doing rather than only an HRESULT.
     ///
@@ -195,12 +200,21 @@ public:
     /// Whether this device supports ray tracing (DXR tier >= 1.0), cached from CheckFeatureSupport at creation.
     /// That is the pipeline and acceleration structures, so a build_blas / build_tlas requires it.
     /// Surfaced through cmd.raytracing.is_supported().
+    [[nodiscard]] sg::impl::software_acceleration_pool* software_pool() override { return &_software_pool; }
+
+    [[nodiscard]] sg::feature_implementation implementation_of_supported(sg::feature f) const override
+    {
+        return f == sg::feature::ray_tracing_motion_blur ? sg::feature_implementation::emulated
+                                                         : sg::feature_implementation::native;
+    }
+
     [[nodiscard]] bool supports_raytracing() const { return _raytracing_tier >= D3D12_RAYTRACING_TIER_1_0; }
 
     /// Whether this device supports inline `RayQuery` (DXR tier >= 1.1).
     [[nodiscard]] bool supports_ray_query() const { return _raytracing_tier >= D3D12_RAYTRACING_TIER_1_1; }
 
     [[nodiscard]] sg::execution_model execution() const override { return _execution; }
+    [[nodiscard]] bool prefers_native_dxil() const override { return _native_dxil; }
 
     /// D3D12 has every stage sg models, and headless present is always available here.
     ///
@@ -228,10 +242,11 @@ public:
         case sg::feature::sample_rate_shading:
         case sg::feature::wireframe_fill:
         case sg::feature::depth32_float_stencil8:
-        case sg::feature::device_coherence:       // `globallycoherent` is core HLSL
-        case sg::feature::image_atomics:          // typed UAV atomics on r32 integer formats are required
-        case sg::feature::texture_compression_bc: // BC1-BC7 are required at feature level 11_0
-        case sg::feature::first_instance:         // SV_StartInstanceLocation, of the shader model 6.8 SGL emits
+        case sg::feature::device_coherence:        // `globallycoherent` is core HLSL
+        case sg::feature::image_atomics:           // typed UAV atomics on r32 integer formats are required
+        case sg::feature::texture_compression_bc:  // BC1-BC7 are required at feature level 11_0
+        case sg::feature::first_instance:          // SV_StartInstanceLocation, of the shader model 6.8 SGL emits
+        case sg::feature::indirect_first_instance: // StartInstanceLocation is a plain field of the indirect arguments
         // `IsHelperLane()` needs SM 6.6 and SGL compiles at SM 6.8; `InterlockedCompareExchange` is strong, so no loop asks it
         case sg::feature::helper_lane_query:
             return true;
@@ -269,11 +284,14 @@ public:
             return true;
         case sg::feature::view_instancing:
             return _view_instancing;
+        case sg::feature::pixel_view_read_workaround:
+            // docs/bugs-external/intel-d3d12-view-instancing-draws-nothing
+            return _view_instancing && metrics.adapter().vendor_id == 0x8086 && !metrics.adapter().is_software;
         case sg::feature::mesh_shader:
             return _mesh_shader;
         case sg::feature::ray_tracing_motion_blur:
-            // DXR has no motion
-            return false;
+            // DXR has no motion, so a package's SOFTWARE_TRACE walks it in software
+            return supports_ray_query();
         case sg::feature::vertex_pipeline_stores:
             // a UAV is visible to every stage of a root signature
             return true;
@@ -718,6 +736,7 @@ public:
     bool _extended_image_formats = false;      // bgra8_unorm's typed UAV, cached at creation
     bool _native_16bit_shader_ops = false;     // D3D12_OPTIONS4, cached at creation
     bool _wave_ops = false;                    // D3D12_OPTIONS1, cached at creation
+    bool _native_dxil = false;                 // dx12_config::native_dxil
     bool _int64_shader_ops = false;            // D3D12_OPTIONS1, cached at creation
     bool _double_shader_ops = false;           // D3D12_OPTIONS, cached at creation
     bool _int64_atomics = false;               // D3D12_OPTIONS1 on Shader Model 6.6, cached at creation
@@ -817,6 +836,7 @@ public:
     // Shader-visible CBV/SRV/UAV heap binding_groups allocate their descriptor tables from.
     // Initialized in create_dx12_context.
     dx12_descriptor_heap _descriptor_heap;
+    dx12_software_pool _software_pool = {*this};
 
     // Shader-visible SAMPLER heap dynamic samplers are written into — a separate heap, since D3D12 binds one of each type.
     // Same transient/persistent split as _descriptor_heap; initialized in create_dx12_context.

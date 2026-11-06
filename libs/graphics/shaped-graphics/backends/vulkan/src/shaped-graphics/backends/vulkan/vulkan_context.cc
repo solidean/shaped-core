@@ -184,6 +184,7 @@ void vulkan_context::shutdown()
             advance_epoch();
             release_debug_windows();
         }
+        _software_pool.shutdown();
         _upload_async.shutdown();
         _download_async.shutdown();
     }

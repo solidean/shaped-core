@@ -68,10 +68,38 @@ struct hlsl_pipeline
     }
 };
 
+/// What SGL's side of each pair wrote, which holds two routes of one source to one answer.
+struct kernel_outputs
+{
+    cc::vector<byte> atrous;
+    cc::vector<byte> svgf;
+    cc::vector<f32> convolution;
+};
+
+/// The largest difference between two runs of floats, and how many differ at all.
+void compare_floats(cc::string_view kernel, cc::span<f32 const> a, cc::span<f32 const> b)
+{
+    REQUIRE(a.size() == b.size());
+    auto largest = 0.0f;
+    auto differing = isize(0);
+    for (auto i = isize(0); i < a.size(); ++i)
+    {
+        auto const difference = a[i] > b[i] ? a[i] - b[i] : b[i] - a[i];
+        differing += a[i] == b[i] ? 0 : 1;
+        largest = difference > largest ? difference : largest;
+        // both NaN is agreement, which a difference of them does not say
+        if (a[i] != a[i] || b[i] != b[i])
+            CHECK((a[i] != a[i]) == (b[i] != b[i]));
+    }
+    CC_LOG_INFO("{}: {} of {} floats differ, by at most {}", kernel, differing, a.size(), largest);
+    // DXC and SGL contract and reorder differently under `fast`, so a few ulps of each pass through a kernel are allowed
+    CHECK(largest < 1e-3f);
+}
 } // namespace
 
 /// Every pair on `ctx`: the HLSL through DXC to DXIL or SPIR-V, beside SGL's text through the same compiler.
-static cc::shared_async<cc::unit> compare_on(sg::context& ctx)
+/// `outputs`, where given, takes what SGL's side wrote.
+static cc::shared_async<cc::unit> compare_on(sg::context& ctx, kernel_outputs* outputs = nullptr)
 {
     CC_LOG_INFO("{} adapter: {}", ctx.backend() == sg::backend_kind::vulkan ? "vulkan" : "dx12",
                 ctx.metrics.adapter().name);
@@ -170,6 +198,15 @@ static cc::shared_async<cc::unit> compare_on(sg::context& ctx)
                  cmd.compute.dispatch_threads(k_extent[0], k_extent[1], 1);
              }});
         co_await measure(ctx, "à-trous", contenders);
+        if (outputs != nullptr)
+        {
+            auto cmd = ctx.create_command_list();
+            contenders[1].record(*cmd);
+            auto const written = cmd->download.bytes_from_texture(target.raw());
+            ctx.submit_command_list(cc::move(cmd));
+            auto const data = co_await written.bytes();
+            outputs->atrous = cc::vector<byte>::create_copy_of(cc::span<byte const>(data));
+        }
     }
 
     // ---- SVGF's filter, one pass at step 2 ---------------------------------------------------------------------------
@@ -236,6 +273,15 @@ static cc::shared_async<cc::unit> compare_on(sg::context& ctx)
                  cmd.compute.dispatch_threads(k_extent[0], k_extent[1], 1);
              }});
         co_await measure(ctx, "svgf filter", contenders);
+        if (outputs != nullptr)
+        {
+            auto cmd = ctx.create_command_list();
+            contenders[1].record(*cmd);
+            auto const written = cmd->download.bytes_from_texture(target.raw());
+            ctx.submit_command_list(cc::move(cmd));
+            auto const data = co_await written.bytes();
+            outputs->svgf = cc::vector<byte>::create_copy_of(cc::span<byte const>(data));
+        }
     }
 
     // ---- the network's convolution, one 32-in 32-out layer over 512 x 512 -------------------------------------------
@@ -260,7 +306,8 @@ static cc::shared_async<cc::unit> compare_on(sg::context& ctx)
             features.size(), sg::buffer_usage::readonly_buffer | sg::buffer_usage::copy_dst);
         auto const weight_buffer = ctx.persistent.create_buffer<f32>(
             weights.size(), sg::buffer_usage::readonly_buffer | sg::buffer_usage::copy_dst);
-        auto const conv_target = ctx.persistent.create_buffer<f32>(features.size(), sg::buffer_usage::readwrite_buffer);
+        auto const conv_target = ctx.persistent.create_buffer<f32>(
+            features.size(), sg::buffer_usage::readwrite_buffer | sg::buffer_usage::copy_src);
         {
             auto cmd = ctx.create_command_list();
             cmd->upload.data_to_buffer(source, features);
@@ -273,6 +320,8 @@ static cc::shared_async<cc::unit> compare_on(sg::context& ctx)
         REQUIRE(source4.has_value());
 
         auto const sgl_layout = ctx.cached.acquire_binding_group_layout<sr::sgl_shaders::nn_conv::nn_conv_buffers>();
+        auto const sgl_shader = co_await sr::sgl_shaders::nn_conv::main_cs->acquire(ctx);
+        CC_LOG_INFO("the convolution's SGL came through {}", sgl_shader.compiler.name);
         auto const sgl_pipeline = sr::sgl_shaders::nn_conv::main_cs.acquire_pipeline(ctx);
         auto hlsl = hlsl_pipeline<sr_bench::hlsl::nn_conv_bindings>{
             .shader = sr_bench::hlsl::nn_conv.compute.main_cs->acquire(ctx)};
@@ -334,6 +383,15 @@ static cc::shared_async<cc::unit> compare_on(sg::context& ctx)
                  dispatch(cmd);
              }});
         co_await measure(ctx, "convolution", contenders);
+        if (outputs != nullptr)
+        {
+            auto cmd = ctx.create_command_list();
+            contenders[1].record(*cmd);
+            auto const written = cmd->download.data_from_buffer(conv_target);
+            ctx.submit_command_list(cc::move(cmd));
+            auto const data = co_await written.data();
+            outputs->convolution = cc::vector<f32>::create_copy_of(cc::span<f32 const>(data));
+        }
     }
 
     co_await ctx.idle_completion();
@@ -347,10 +405,54 @@ ASYNC_BENCHMARK("sr - SGL against the HLSL it was ported from, GPU time per disp
     co_await compare_on(*created.value());
 }
 
+// The same kernels with SGL's own DXIL against DXC's of the hand-written HLSL, on a device that loads it unsigned.
+ASYNC_BENCHMARK("sr - SGL's own DXIL against the HLSL it was ported from, GPU time per dispatch, on dx12")
+{
+    auto created = sg::create_dx12_context({.native_dxil = true, .adapter = sg::backend::dx12::dx12_adapter::hardware});
+    if (created.has_error())
+        SKIP("no dx12 hardware device");
+    co_await compare_on(*created.value());
+}
+
+// One SGL source through both routes, on one device: an answer of its own, beside the speed above.
+ASYNC_BENCHMARK("sr - SGL's own DXIL computes what its text through DXC computes, on dx12")
+{
+    auto through_dxc = kernel_outputs();
+    auto native = kernel_outputs();
+    {
+        auto created = sg::create_dx12_context({.adapter = sg::backend::dx12::dx12_adapter::hardware});
+        if (created.has_error())
+            SKIP("no dx12 hardware device");
+        created.value()->download.set_budget(isize(128) << 20);
+        co_await compare_on(*created.value(), &through_dxc);
+    }
+    {
+        auto created
+            = sg::create_dx12_context({.native_dxil = true, .adapter = sg::backend::dx12::dx12_adapter::hardware});
+        REQUIRE(created.has_value());
+        created.value()->download.set_budget(isize(128) << 20);
+        co_await compare_on(*created.value(), &native);
+    }
+    auto const floats = [](cc::vector<byte> const& bytes)
+    { return cc::span<f32 const>(reinterpret_cast<f32 const*>(bytes.data()), bytes.size() / isize(sizeof(f32))); };
+    compare_floats("à-trous", floats(through_dxc.atrous), floats(native.atrous));
+    compare_floats("svgf filter", floats(through_dxc.svgf), floats(native.svgf));
+    compare_floats("convolution", through_dxc.convolution, native.convolution);
+}
+
 #if SR_BENCH_HAS_VULKAN
 ASYNC_BENCHMARK("sr - SGL against the HLSL it was ported from, GPU time per dispatch, on vulkan")
 {
     auto created = sg::create_vulkan_context({});
+    if (created.has_error())
+        SKIP("no vulkan device");
+    co_await compare_on(*created.value());
+}
+
+// The same kernels with SGL's own SPIR-V against DXC's of the hand-written HLSL, which is what DXC's optimizer is worth.
+ASYNC_BENCHMARK("sr - SGL's own SPIR-V against the HLSL it was ported from, GPU time per dispatch, on vulkan")
+{
+    auto created = sg::create_vulkan_context({.native_spirv = true});
     if (created.has_error())
         SKIP("no vulkan device");
     co_await compare_on(*created.value());

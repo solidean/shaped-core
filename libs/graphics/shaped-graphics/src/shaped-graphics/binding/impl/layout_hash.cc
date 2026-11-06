@@ -41,6 +41,7 @@ void add_binding(cc::byte_stream_builder& b, binding const& bnd)
     b.add_optional(bnd.image_format);
     b.add_optional(bnd.sample_type);
     b.add_optional(bnd.sampler_type);
+    b.add_pod(bnd.traced_in_software);
 }
 } // namespace
 

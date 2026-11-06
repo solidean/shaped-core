@@ -53,6 +53,26 @@ add_library(shaped-graphics-language
     src/shaped-graphics-language/builtins/register_vector_math.cc
     src/shaped-graphics-language/builtins/registry.cc
 
+    src/shaped-graphics-language/ir/ir.cc
+    src/shaped-graphics-language/ir/lower.cc
+    src/shaped-graphics-language/ir/lower_call.cc
+    src/shaped-graphics-language/ir/lower_expr.cc
+    src/shaped-graphics-language/ir/lower_memory.cc
+    src/shaped-graphics-language/ir/spirv.cc
+    src/shaped-graphics-language/ir/dominance.cc
+    src/shaped-graphics-language/ir/simplify.cc
+    src/shaped-graphics-language/ir/ssa.cc
+    src/shaped-graphics-language/ir/dxil/dxil.cc
+    src/shaped-graphics-language/ir/dxil/impl/container.cc
+    src/shaped-graphics-language/ir/dxil/impl/llvm.cc
+    src/shaped-graphics-language/ir/dxil/impl/llvm_bitcode.cc
+    src/shaped-graphics-language/ir/dxil/impl/llvm_passes.cc
+    src/shaped-graphics-language/ir/dxil/impl/writer.cc
+    src/shaped-graphics-language/ir/dxil/impl/writer_math.cc
+    src/shaped-graphics-language/ir/dxil/impl/writer_memory.cc
+    src/shaped-graphics-language/ir/dxil/impl/writer_resources.cc
+    src/shaped-graphics-language/ir/dxil/impl/writer_stage.cc
+
     src/shaped-graphics-language/check/check.cc
     src/shaped-graphics-language/check/check_driver.cc
     src/shaped-graphics-language/check/check_arrays.cc
@@ -452,6 +472,7 @@ if(SC_BUILD_TESTS)
         tests/legalize/differential-test.cc
         tests/legalize/legalize-rules-test.cc
         tests/legalize/guard-test.cc
+        tests/legalize/buffer-guard-test.cc
         tests/legalize/workgroup-guard-test.cc
 
         tests/emit/emit-test-support.hh
@@ -478,6 +499,8 @@ if(SC_BUILD_TESTS)
         tests/emit/sixteen-bit-emit-test.cc
         tests/emit/sixty-four-bit-emit-test.cc
         tests/emit/double-maths-emit-test.cc
+        tests/emit/spirv-emit-test.cc
+        tests/emit/matrix-arithmetic-emit-test.cc
         tests/emit/line-mapping-emit-test.cc
         tests/emit/debug-emit-test.cc
 
@@ -513,7 +536,8 @@ if(SC_BUILD_TESTS)
         SGL_CORPUS_DIR tests/corpus
         SGL_PRELUDE_DIR prelude
         # sg's metal ray-tracing shaders, whose MSL text is checked here on every box, while only a Mac runs them
-        SGL_SG_SHADERS_DIR ../shaped-graphics/tests/shaders/sgl)
+        SGL_SG_SHADERS_DIR ../shaped-graphics/tests/shaders/sgl
+        SGL_SR_SHADERS_DIR ../shaped-rendering/shaders)
 
     target_link_libraries(shaped-graphics-language-test
         PRIVATE

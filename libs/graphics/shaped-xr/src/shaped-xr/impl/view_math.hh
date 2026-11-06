@@ -2,7 +2,7 @@
 
 #include <shaped-xr/xr.hh>
 
-namespace xr::impl
+namespace sxr::impl
 {
 /// An OpenXR pose as its plain numbers: a unit quaternion (x, y, z, w) and a position, right-handed with -z forward.
 struct openxr_pose
@@ -23,4 +23,4 @@ struct openxr_fov
 
 /// The eye's projection: left-handed, depth 0 at `near_distance` and 1 at `far_distance`, from the four angles' tangents.
 [[nodiscard]] tg::projective_transform3f projection_of(openxr_fov const& fov, f32 near_distance, f32 far_distance);
-} // namespace xr::impl
+} // namespace sxr::impl

@@ -660,6 +660,16 @@ def bound_samplers(where: str, samplers: list[dict], names: list[str], indent: s
     return "".join(out)
 
 
+def mark_software_trace(entries: SglEntries) -> None:
+    """A package's SOFTWARE_TRACE, on each acceleration member of its bindings and of the modules it exports."""
+    for _, binding in entries.bindings:
+        for member in binding["members"]:
+            if member["kind"] == "acceleration_structure":
+                member["software_trace"] = True
+    for unit in entries.modules.values():
+        mark_software_trace(unit)
+
+
 def binding_entry(member: dict) -> str:
     """The sg::binding a resource member is, its fields in sg::binding's declaration order."""
     # a binding array takes `count` consecutive slots from its own
@@ -676,7 +686,8 @@ def binding_entry(member: dict) -> str:
                        f".texture_dimension = sg::texture_view_dimension::{member['texture_dimension']}, "
                        f".sample_type = sg::texture_sample_type::{member['sample_type']}}}")
     if kind == "acceleration_structure":
-        return head + ".type = sg::binding_type::acceleration_structure}"
+        software = ", .traced_in_software = true" if member.get("software_trace") else ""
+        return head + f".type = sg::binding_type::acceleration_structure{software}}}"
     if kind == "image":
         return head + (f".type = sg::binding_type::image, .access = sg::access_mode::{member['access']}, "
                        f".texture_dimension = sg::texture_view_dimension::{member['texture_dimension']}, "

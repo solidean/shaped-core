@@ -2,7 +2,7 @@
 
 #include <shaped-xr/xr.hh>
 
-namespace xr::impl
+namespace sxr::impl
 {
 /// Whether OpenXR takes `name` as an action's or an action set's: lowercase letters, digits, `-`, `_` and `.`, not empty.
 [[nodiscard]] bool is_valid_action_name(cc::string_view name);
@@ -21,4 +21,4 @@ struct profile_bindings
 
 /// The bindings grouped by profile, in the order the profiles first appear, since OpenXR suggests them a profile at a time.
 [[nodiscard]] cc::vector<profile_bindings> bindings_by_profile(cc::span<action_description const> actions);
-} // namespace xr::impl
+} // namespace sxr::impl

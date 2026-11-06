@@ -105,6 +105,7 @@ struct sg::draw_indexed_config
 /// D3D12's `D3D12_DRAW_INDEXED_ARGUMENTS`, vulkan's `VkDrawIndexedIndirectCommand`, Metal's and WebGPU's, field for field.
 /// A shader that writes them declares a struct of five 4-byte members in this order; a buffer of it re-types with `reinterpret_as`.
 /// `first_instance` is where `@instance_index` starts, which is how one draw of many learns which it is.
+/// A value other than 0 needs `sg::feature::indirect_first_instance`.
 struct sg::draw_indexed_args
 {
     u32 index_count = 0;

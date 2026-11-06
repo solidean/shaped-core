@@ -3,6 +3,8 @@ created: 2026-10-29
 refs:
   - test: sr - metalfx_rr denoises and upscales a noisy stream through the front
   - file: libs/graphics/shaped-rendering/tests/backends/metal-entry.cc
+claimed-by: Claude (for Julius Nehring-Wirxel)
+claimed-at: 2026-11-06T10:43Z
 ---
 
 # sr's metal tests overflow metal's upload ring under parallel GPU load

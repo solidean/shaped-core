@@ -66,6 +66,9 @@ sc_add_shader_package(
     ...
     LANGUAGE    sgl
     MODULE_DIRS shaders/modules         # more module directories; SOURCE_DIR always is one
+    NATIVE_SPIRV                        # SGL: its SPIR-V is SGL's own, no DXC; an entry point with no lowering yet fails to compile
+    NATIVE_DXIL                         # SGL: its DXIL is SGL's own, no DXC or dxil.dll; an entry point with no lowering yet is an error
+    SOFTWARE_TRACE                      # SGL: inline traces take the software walk on dx12 and vulkan too, on every device, and see what moves
     SHADERS
         module:view                     # export module `view`: its types into <NAMESPACE>::view
         blit.sgl:*)                     # `use view` in it resolves through the module directories

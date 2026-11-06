@@ -40,7 +40,7 @@ window focus          [done]  is_focused() as of the last poll, focus() to ask f
 borderless / topmost  [done]  window_description: has_decoration, is_always_on_top, has_taskbar_icon, is_focusable
 fullscreen            [planned]
 HiDPI                 [done]  high-density windows: pixel width()/height() and input, logical sizes and desktop coords
-gamepad                [planned]  SDL_JOYSTICK is currently compiled out; see issues/feat-sr-gamepad-input.md
+gamepad               [done]  gamepad events and window_system::gamepads(), by position; no rumble and no imgui navigation yet
 ```
 
 The hand-rolled Win32 windows in shaped-graphics' dx12 swapchain test and shaped-shader-compiler-dxc's cube tests **cannot** move to `sr::window`.

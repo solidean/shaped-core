@@ -1,0 +1,39 @@
+// An enum's `as int` is its case's value (CHK-150), so a case fits in a buffer without a `case`
+
+enum light_kind:
+    point
+    spot
+    sun
+
+enum mask:
+    red = 1
+    green = 2
+    blue = 4
+    after
+
+test:
+    light_kind.point as int == 0
+    light_kind.sun as int == 2
+    mask.blue as int == 4
+    mask.after as int == 5
+
+// it works on a value only known when the program runs, and a const computes it
+fun kind_of(x: float) -> light_kind:
+    if x > 0.0 => return light_kind.spot
+    return light_kind.sun
+
+const blue_bit = mask.blue as int
+
+test:
+    (kind_of(1.0) as int) * 10 + (kind_of(-1.0) as int) == 12
+    blue_bit == 4
+
+// a prelude's enum converts the same way
+test (hit_kind.none as int) >= 0
+
+// an entry point stores one as the int it is
+binding work:
+    values: mut buffer[int]
+
+@compute(1) fun stores(){work}:
+    work.values[0] = kind_of(work.values[1] as float) as int

@@ -49,6 +49,8 @@ ssc::dxc::compiler               // move-only; owns IDxcUtils + IDxcCompiler3 (p
 ssc::dxc::compiler::create()                     // -> cc::result<compiler>   (fails only on a broken DXC install)
 c.preprocess(desc, resolve_include, opts={})// -> cc::result<preprocessed_source>  (-P; resolves #includes)
 c.compile(desc, opts={})                    // -> cc::result<sg::compiled_shader>  (rejects #includes)
+c.validate(container)                       // -> cc::optional<cc::string>  dxil.dll's verdict on any container; empty for one it accepts
+c.disassemble(container)                    // -> cc::result<cc::string>  a container's LLVM text, whoever wrote it
 // compile() output: stage/format/entry_point set; format and bytecode follow options.target; bindings + (compute)
 // workgroup_size from reflection; compiler = {"dxc", version, joined-args signature}
 ```

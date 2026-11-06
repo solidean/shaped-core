@@ -81,6 +81,9 @@ public:
         return supports(f) ? implementation_of_supported(f) : feature_implementation::absent;
     }
 
+    /// The pool a build with `accel_build_flag::software_trace` writes into, where this backend keeps one: dx12 and vulkan.
+    [[nodiscard]] virtual impl::software_acceleration_pool* software_pool() { return nullptr; }
+
     /// What `shader` needs that this context lacks, which is what building a pipeline from it would be refused for.
     /// Empty for a shader whose `required_features` is unknown: nothing about it can be named.
     [[nodiscard]] feature_set missing_features(compiled_shader const& shader) const;
@@ -137,6 +140,14 @@ public:
     /// shaped-shader-library asks it, so SGL compiles such an entry point at `.fast` with a warning rather than
     /// refusing it (SGL's EMIT-185).
     [[nodiscard]] virtual bool weakens_float_guarantees() const { return false; }
+
+    /// Whether SGL shaders for this context are written as SPIR-V by SGL itself rather than compiled through DXC, where
+    /// SGL has a lowering for them yet: only a vulkan context created with `vulkan_config::native_spirv`.
+    /// shaped-shader-library asks it, as it asks `weakens_float_guarantees`.
+    [[nodiscard]] virtual bool prefers_native_spirv() const { return false; }
+
+    /// The same of DXIL: only a dx12 context created with `dx12_config::native_dxil`.
+    [[nodiscard]] virtual bool prefers_native_dxil() const { return false; }
 
     /// The home the bound calls run in, or null when there is none to move to.
     ///

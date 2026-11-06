@@ -8,9 +8,9 @@
 
 using namespace cc::primitive_defines;
 
-namespace xr
+namespace sxr
 {
-CC_REC_DEFINE_DOMAIN(g_rec_domain, "xr");
+CC_REC_DEFINE_DOMAIN(g_rec_domain, "sxr");
 }
 
 namespace
@@ -21,49 +21,53 @@ namespace
 }
 } // namespace
 
-xr::system::system(cc::unique_ptr<state> s) : _state(cc::move(s))
+sxr::system::system(cc::unique_ptr<state> s) : _state(cc::move(s))
 {
 }
-xr::system::~system() = default;
+sxr::system::~system() = default;
 
-#if !XR_HAS_OPENXR
+#if !SXR_HAS_OPENXR
 
-struct xr::system::state
+struct sxr::system::state
 {
 };
 
-cc::result<cc::unique_ptr<xr::system>> xr::system::try_create(system_description const&)
+cc::result<cc::unique_ptr<sxr::system>> sxr::system::try_create(system_description const&)
 {
     return cc::error(error_of("this build has no OpenXR loader (uv run extern/openxr/fetch-openxr.py)"));
 }
-cc::string_view xr::system::runtime_name() const
+cc::string_view sxr::system::runtime_name() const
 {
     return {};
 }
-cc::string_view xr::system::system_name() const
+cc::string_view sxr::system::system_name() const
 {
     return {};
 }
-xr::graphics_api xr::system::api() const
+sxr::graphics_api sxr::system::api() const
 {
     return graphics_api::vulkan;
 }
-bool xr::system::offers_passthrough() const
+bool sxr::system::offers(capability) const
 {
     return false;
 }
-cc::result<sg::context_handle> xr::system::create_context() const
+bool sxr::system::offers_blend(blend_mode b) const
+{
+    return b == blend_mode::opaque;
+}
+cc::result<sg::context_handle> sxr::system::create_context() const
 {
     return cc::error(error_of("no OpenXR"));
 }
-cc::result<cc::unique_ptr<xr::session>> xr::system::create_session(sg::context&, session_description const&)
+cc::result<cc::unique_ptr<sxr::session>> sxr::system::create_session(sg::context&, session_description const&)
 {
     return cc::error(error_of("no OpenXR"));
 }
 
 #else
 
-cc::string xr::impl::failed(XrInstance instance, XrResult result, cc::string_view what)
+cc::string sxr::impl::failed(XrInstance instance, XrResult result, cc::string_view what)
 {
     if (XR_SUCCEEDED(result))
         return {};
@@ -73,23 +77,63 @@ cc::string xr::impl::failed(XrInstance instance, XrResult result, cc::string_vie
     return cc::format("{} failed: {} ({})", what, name[0] != 0 ? name : "unknown", int(result));
 }
 
-xr::system::state::~state()
+cc::result<sxr::impl::system_answer> sxr::impl::read_system(XrInstance instance,
+                                                            XrSystemId system,
+                                                            cc::span<char const* const> enabled)
+{
+    auto entity = XrSystemSpatialEntityPropertiesFB{.type = XR_TYPE_SYSTEM_SPATIAL_ENTITY_PROPERTIES_FB};
+    auto discovery = XrSystemSpaceDiscoveryPropertiesMETA{.type = XR_TYPE_SYSTEM_SPACE_DISCOVERY_PROPERTIES_META};
+    auto persistence = XrSystemSpacePersistencePropertiesMETA{.type = XR_TYPE_SYSTEM_SPACE_PERSISTENCE_PROPERTIES_META};
+    auto depth = XrSystemEnvironmentDepthPropertiesMETA{.type = XR_TYPE_SYSTEM_ENVIRONMENT_DEPTH_PROPERTIES_META};
+    auto raycast = XrSystemEnvironmentRaycastPropertiesMETA{.type = XR_TYPE_SYSTEM_ENVIRONMENT_RAYCAST_PROPERTIES_META};
+    auto properties = XrSystemProperties{.type = XR_TYPE_SYSTEM_PROPERTIES};
+
+    // a struct may be chained only for an extension that was enabled
+    auto const chain = [&](char const* extension, auto& link)
+    {
+        for (auto const* name : enabled)
+            if (cc::string_view(name) == extension)
+            {
+                link.next = properties.next;
+                properties.next = &link;
+                return;
+            }
+    };
+    chain(XR_FB_SPATIAL_ENTITY_EXTENSION_NAME, entity);
+    chain(XR_META_SPATIAL_ENTITY_DISCOVERY_EXTENSION_NAME, discovery);
+    chain(XR_META_SPATIAL_ENTITY_PERSISTENCE_EXTENSION_NAME, persistence);
+    chain(XR_META_ENVIRONMENT_DEPTH_EXTENSION_NAME, depth);
+    chain(XR_META_ENVIRONMENT_RAYCAST_EXTENSION_NAME, raycast);
+    if (auto const why = failed(instance, xrGetSystemProperties(instance, system, &properties), "xrGetSystemProperties");
+        !why.empty())
+        return cc::error(error_of(why));
+
+    return system_answer{.name = cc::string(properties.systemName),
+                         .support = {.spatial_entity = entity.supportsSpatialEntity == XR_TRUE,
+                                     .space_discovery = discovery.supportsSpaceDiscovery == XR_TRUE,
+                                     .space_persistence = persistence.supportsSpacePersistence == XR_TRUE,
+                                     .environment_depth = depth.supportsEnvironmentDepth == XR_TRUE,
+                                     .hand_removal = depth.supportsHandRemoval == XR_TRUE,
+                                     .environment_raycast = raycast.supportsEnvironmentRaycast == XR_TRUE}};
+}
+
+sxr::system::state::~state()
 {
     if (instance != XR_NULL_HANDLE)
         xrDestroyInstance(instance);
 }
 
-cc::result<cc::unique_ptr<xr::system>> xr::system::try_create(system_description const& desc)
+cc::result<cc::unique_ptr<sxr::system>> sxr::system::try_create(system_description const& desc)
 {
     auto s = cc::make_unique<state>();
     s->api = desc.api;
 
     char const* binding = nullptr;
-#if XR_HAS_VULKAN
+#if SXR_HAS_VULKAN
     if (desc.api == graphics_api::vulkan)
         binding = XR_KHR_VULKAN_ENABLE2_EXTENSION_NAME;
 #endif
-#if XR_HAS_DX12
+#if SXR_HAS_DX12
     if (desc.api == graphics_api::dx12)
         binding = XR_KHR_D3D12_ENABLE_EXTENSION_NAME;
 #endif
@@ -119,9 +163,21 @@ cc::result<cc::unique_ptr<xr::system>> xr::system::try_create(system_description
     s->offers_depth_layer = offers(XR_KHR_COMPOSITION_LAYER_DEPTH_EXTENSION_NAME);
     if (s->offers_depth_layer)
         extensions.push_back(XR_KHR_COMPOSITION_LAYER_DEPTH_EXTENSION_NAME);
-    s->offers_passthrough = desc.wants_passthrough && offers(XR_FB_PASSTHROUGH_EXTENSION_NAME);
-    if (s->offers_passthrough)
-        extensions.push_back(XR_FB_PASSTHROUGH_EXTENSION_NAME);
+
+    // a capability missing one extension is left out whole, since what it needs comes together or not at all
+    auto listed = cc::vector<capability>();
+    for (auto const c : desc.wants)
+    {
+        auto has_all = true;
+        for (auto const* name : impl::required_extensions(c))
+            has_all = has_all && offers(name);
+        if (has_all)
+            listed.push_back(c);
+        else
+            CC_LOG_INFO("{} is wanted, but the runtime does not list what it needs", impl::name_of(c));
+    }
+    for (auto const* name : impl::extensions_of(listed))
+        extensions.push_back(name);
 
     auto info = XrInstanceCreateInfo{.type = XR_TYPE_INSTANCE_CREATE_INFO,
                                      .enabledExtensionCount = u32(extensions.size()),
@@ -149,35 +205,66 @@ cc::result<cc::unique_ptr<xr::system>> xr::system::try_create(system_description
     auto runtime = XrInstanceProperties{.type = XR_TYPE_INSTANCE_PROPERTIES};
     xrGetInstanceProperties(s->instance, &runtime);
     s->runtime_name = cc::string(runtime.runtimeName);
-    auto properties = XrSystemProperties{.type = XR_TYPE_SYSTEM_PROPERTIES};
-    xrGetSystemProperties(s->instance, s->system, &properties);
-    s->system_name = cc::string(properties.systemName);
+    auto answer = impl::read_system(s->instance, s->system, extensions);
+    if (answer.has_error())
+        return cc::error(cc::move(answer).error());
+    s->system_name = cc::move(answer.value().name);
+    for (auto const c : listed)
+        if (impl::is_supported(c, answer.value().support))
+            s->offered.push_back(c);
+        else
+            CC_LOG_INFO("{} is listed, but this headset says it does not have it", impl::name_of(c));
+
+    auto blend_count = u32(0);
+    xrEnumerateEnvironmentBlendModes(s->instance, s->system, XR_VIEW_CONFIGURATION_TYPE_PRIMARY_STEREO, 0, &blend_count,
+                                     nullptr);
+    auto listed_blends = cc::vector<XrEnvironmentBlendMode>();
+    for (auto i = u32(0); i < blend_count; ++i)
+        listed_blends.push_back(XR_ENVIRONMENT_BLEND_MODE_MAX_ENUM);
+    xrEnumerateEnvironmentBlendModes(s->instance, s->system, XR_VIEW_CONFIGURATION_TYPE_PRIMARY_STEREO, blend_count,
+                                     &blend_count, listed_blends.data());
+    for (auto const b : listed_blends)
+        if (b == XR_ENVIRONMENT_BLEND_MODE_OPAQUE)
+            s->runtime_blends.push_back(blend_mode::opaque);
+        else if (b == XR_ENVIRONMENT_BLEND_MODE_ADDITIVE)
+            s->runtime_blends.push_back(blend_mode::additive);
+        else if (b == XR_ENVIRONMENT_BLEND_MODE_ALPHA_BLEND)
+            s->runtime_blends.push_back(blend_mode::alpha_blend);
+
     CC_LOG_INFO("{} on {}", s->system_name, s->runtime_name);
     return cc::make_unique<system>(cc::move(s));
 }
 
-cc::string_view xr::system::runtime_name() const
+cc::string_view sxr::system::runtime_name() const
 {
     return _state->runtime_name;
 }
-cc::string_view xr::system::system_name() const
+cc::string_view sxr::system::system_name() const
 {
     return _state->system_name;
 }
-xr::graphics_api xr::system::api() const
+sxr::graphics_api sxr::system::api() const
 {
     return _state->api;
 }
-bool xr::system::offers_passthrough() const
+bool sxr::system::offers(capability c) const
 {
-    return _state->offers_passthrough;
+    for (auto const offered : _state->offered)
+        if (offered == c)
+            return true;
+    return false;
 }
 
-cc::result<sg::context_handle> xr::system::create_context() const
+bool sxr::system::offers_blend(blend_mode b) const
+{
+    return impl::choose_blend(b, _state->runtime_blends, offers(capability::passthrough)).shown == b;
+}
+
+cc::result<sg::context_handle> sxr::system::create_context() const
 {
     auto const instance = _state->instance;
     auto const system_id = _state->system;
-#if XR_HAS_VULKAN
+#if SXR_HAS_VULKAN
     if (_state->api == graphics_api::vulkan)
     {
         // the requirements must be asked before the instance, and sg creates at a version the range must include
@@ -233,7 +320,7 @@ cc::result<sg::context_handle> xr::system::create_context() const
         return sg::create_vulkan_context(config);
     }
 #endif
-#if XR_HAS_DX12
+#if SXR_HAS_DX12
     if (_state->api == graphics_api::dx12)
     {
         auto requirements = XrGraphicsRequirementsD3D12KHR{.type = XR_TYPE_GRAPHICS_REQUIREMENTS_D3D12_KHR};

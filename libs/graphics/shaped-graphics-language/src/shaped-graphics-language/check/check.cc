@@ -412,10 +412,12 @@ bool impl::is_hex_literal(cc::string_view text)
     return text.starts_with("0x");
 }
 
-cc::optional<i64> impl::parse_literal_integer(cc::string_view text)
+namespace
+{
+/// The magnitude `text` spells behind its sign, which must be `limit` or below.
+cc::optional<u64> parse_magnitude(cc::string_view text, u64 limit)
 {
     auto at = isize(0);
-    auto const is_negative = !text.empty() && text[0] == '-';
     if (!text.empty() && (text[0] == '-' || text[0] == '+'))
         ++at;
     auto base = u64(10);
@@ -425,8 +427,6 @@ cc::optional<i64> impl::parse_literal_integer(cc::string_view text)
         at += 2;
     }
 
-    // The magnitude of the most negative i64 is one past the largest positive one.
-    auto const limit = is_negative ? u64(1) << 63 : (u64(1) << 63) - 1;
     auto magnitude = u64(0);
     auto has_digit = false;
     for (; at < text.size(); ++at)
@@ -450,7 +450,28 @@ cc::optional<i64> impl::parse_literal_integer(cc::string_view text)
     }
     if (!has_digit)
         return cc::nullopt;
-    return is_negative ? i64(0u - magnitude) : i64(magnitude);
+    return magnitude;
+}
+} // namespace
+
+cc::optional<i64> impl::parse_literal_integer(cc::string_view text)
+{
+    auto const is_negative = !text.empty() && text[0] == '-';
+    // The magnitude of the most negative i64 is one past the largest positive one.
+    auto const magnitude = parse_magnitude(text, is_negative ? u64(1) << 63 : (u64(1) << 63) - 1);
+    if (!magnitude.has_value())
+        return cc::nullopt;
+    return is_negative ? i64(0u - magnitude.value()) : i64(magnitude.value());
+}
+
+cc::optional<u64> impl::parse_literal_past_long(cc::string_view text)
+{
+    if (text.empty() || text[0] == '-')
+        return cc::nullopt;
+    auto const magnitude = parse_magnitude(text, ~u64(0));
+    if (!magnitude.has_value() || magnitude.value() < u64(1) << 63)
+        return cc::nullopt;
+    return magnitude;
 }
 
 cc::optional<i32> impl::parse_plain_integer(cc::string_view text)

@@ -83,6 +83,27 @@ ASYNC_TEST("sg dx12 hardware backend")
     }
 }
 
+// The whole sweep again with SGL's shaders in SGL's own DXIL, where it has a lowering for them, and in DXC's elsewhere.
+// One test body holds both routes to one answer, and the debug layer reads every pipeline this route builds.
+ASYNC_TEST("sg dx12 native-dxil backend")
+{
+    auto ctx = sg::create_dx12_context(
+        {.activate_global_debug_layer = true, .native_dxil = true, .adapter = sg::backend::dx12::dx12_adapter::hardware});
+    if (ctx.has_error())
+        SKIP("no dx12 hardware device");
+    else
+    {
+        (void)sg_test::shader_fixtures();
+        ctx.value()->set_portability_checks(true);
+        ctx.value()->set_hit_record_checks(true);
+        co_await nx::async_invoke_tests_in_sequence("dx12-native-dxil", ctx.value());
+        auto& dx = static_cast<dx12::dx12_context&>(*ctx.value());
+        dx.poll_device_removal();
+        CHECK(!dx.is_device_lost())
+            .context(cc::format("the device was lost while running this binary's GPU tests: {}", dx.device_loss_reason()));
+    }
+}
+
 // The whole sweep again under a browser's rules: the context reports never_block, so any sg call that would wait on the calling thread asserts, and so does any test that reaches for one.
 // It proves the non-blocking spellings suffice on the dev box, long before a backend that genuinely cannot wait exists.
 //
@@ -119,6 +140,8 @@ ASYNC_TEST("sg dx12 never-block backend")
 
 static bool const sg_dx12_warp_registered = sg_test::register_backend("sg dx12 warp backend", "dx12-warp");
 static bool const sg_dx12_hw_registered = sg_test::register_backend("sg dx12 hardware backend", "dx12-hw");
+static bool const sg_dx12_native_dxil_registered
+    = sg_test::register_backend("sg dx12 native-dxil backend", "dx12-native-dxil");
 static bool const sg_dx12_never_block_registered
     = sg_test::register_backend("sg dx12 never-block backend", "dx12-never-block");
 static bool const sg_dx12_factory_registered = sg_test::register_context_factory(

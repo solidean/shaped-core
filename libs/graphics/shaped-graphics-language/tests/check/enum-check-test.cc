@@ -80,11 +80,16 @@ TEST("sgl check - an enum compares with == and != and converts to nothing")
     auto const unequal = "enum k:\n    a\n    b\n\nfun other(x: k) -> bool => x != k.a\n";
     CHECK(reports_for(unequal) == "");
 
-    // Neither direction converts, and no other operator resolves (CHK-150).
+    // Neither direction converts on its own, and no other operator resolves (CHK-150).
     CHECK(reports_for("enum k:\n    a\n\nfun n(x: k) -> int => x\n").contains("type-mismatch"));
     CHECK(reports_for("enum k:\n    a\n\nfun n(x: int) -> k => x\n").contains("type-mismatch"));
     CHECK(reports_for("enum k:\n    a\n\nfun n(x: k) -> bool => x < k.a\n").contains("no-matching-overload"));
     CHECK(reports_for("enum k:\n    a\n\nfun n(x: k) -> k => x + k.a\n").contains("no-matching-overload"));
+
+    // `as int` is the one conversion, and it does not come back.
+    CHECK(reports_for("enum k:\n    a\n\nfun n(x: k) -> int => x as int\n") == "");
+    CHECK(reports_for("enum k:\n    a\n\nfun n(x: k) -> uint => x as uint\n").contains("no-matching-overload"));
+    CHECK(reports_for("enum k:\n    a\n\nfun n(x: int) -> k => x as k\n").contains("no-matching-overload"));
 
     // Two enums are two types, so one never compares with the other.
     CHECK(reports_for("enum a:\n    x\nenum b:\n    x\n\nfun n(p: a, q: b) -> bool => p == q\n")

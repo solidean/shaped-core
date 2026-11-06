@@ -86,4 +86,5 @@ using vulkan_texture_handle = std::shared_ptr<vulkan_texture const>;
 /// The domain every recording site in the Vulkan backend is attributed to.
 /// It shadows sg's, so a backend message is never mistaken for a portable one.
 CC_REC_DECLARE_DOMAIN(g_rec_domain);
+class vulkan_software_pool;
 } // namespace sg::backend::vulkan

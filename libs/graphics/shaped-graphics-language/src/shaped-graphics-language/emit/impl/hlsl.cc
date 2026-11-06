@@ -5,11 +5,6 @@
 
 namespace
 {
-/// The space slib's binding pass gives the inline constants of a dx12 pipeline, `slib::inline_constants_space`.
-/// sgl does not link slib, so the number is repeated here, and the pipeline layout sg builds is what it has to match.
-constexpr auto k_inline_constants_space = 9;
-/// The space slib gives a pipeline layout's static samplers on dx12, `slib::bound_samplers_space`, repeated for the same reason.
-constexpr auto k_bound_samplers_space = 10;
 /// The descriptor set sg keeps for itself on vulkan, `sg::reserved_binding_group`, whose binding 0 no static sampler takes.
 constexpr auto k_reserved_set = 3;
 
@@ -58,6 +53,36 @@ public:
                           "return n;\n}}\n",
                           name);
     }
+    // a helper per mark: inside it, the parameter has lost the mark NonUniformResourceIndex must see
+    cc::string buffer_length_at(cc::string_view name, cc::string_view index, bool is_nonuniform) const override
+    {
+        return cc::format("sgl_length_{}{}({})", is_nonuniform ? "nonuniform_" : "", name, index);
+    }
+    cc::string buffer_length_at_helper(cc::string_view name, bool is_nonuniform, bool is_bytes) const override
+    {
+        auto const element
+            = is_nonuniform ? cc::format("{}[NonUniformResourceIndex(i)]", name) : cc::format("{}[i]", name);
+        auto const prefix = is_nonuniform ? "nonuniform_" : "";
+        if (is_bytes)
+            return cc::format("uint sgl_length_{}{}(uint i)\n{{\n    uint n;\n    {}.GetDimensions(n);\n    return "
+                              "n;\n}}\n",
+                              prefix, name, element);
+        return cc::format("uint sgl_length_{}{}(uint i)\n{{\n    uint n, stride;\n    {}.GetDimensions(n, stride);\n "
+                          "   return n;\n}}\n",
+                          prefix, name, element);
+    }
+    /// EMIT-135: an emulated trace reads sg's pool and the dispatch's roots, as WGSL's does.
+    void write_acceleration_pool(cc::string& out) const override
+    {
+        if (_is_vulkan)
+            out += "[[vk::binding(17, 3)]] StructuredBuffer<uint4> sg_acceleration_pool;\n"
+                   "[[vk::binding(18, 3)]] cbuffer sg_acceleration_roots_block\n"
+                   "{\n    uint4 sg_acceleration_roots[4];\n};\n\n";
+        else
+            out += "StructuredBuffer<uint4> sg_acceleration_pool : register(t0, space12);\n"
+                   "cbuffer sg_acceleration_roots_block : register(b0, space12)\n"
+                   "{\n    uint4 sg_acceleration_roots[4];\n};\n\n";
+    }
     void write_debug_buffer(cc::string& out) const override
     {
         if (_is_vulkan)
@@ -99,7 +124,7 @@ public:
     void write_local(cc::string& out, local_declaration const& local) const override
     {
         if (local.value.empty() && local.is_zeroed)
-            out.appendf("{} {} = ({})0;", local.type, local.name, local.type);
+            out.appendf("{} {}{} = ({}{})0;", local.type, local.name, local.dimensions, local.type, local.dimensions);
         else if (local.value.empty())
             out.appendf("{} {}{};", local.type, local.name, local.dimensions);
         else
@@ -361,8 +386,9 @@ public:
         // EMIT-175: a mat2 in a constant block is its two columns in one row, which no HLSL matrix there is
         auto const in_constants = owner == nullptr || owner->is_constants;
         auto const is_vector_mat2 = in_memory && in_constants && is_mat2(p.m, member.type);
-        auto const type = is_widened              ? cc::string("float4x3")
-                        : is_vector_mat2          ? cc::string("float4")
+        auto const type = is_widened && !mat3_cell_field(p, member.type).empty() ? cc::string("sgl_mat3_cell")
+                        : is_widened                                             ? cc::string("float4x3")
+                        : is_vector_mat2                                         ? cc::string("float4")
                         : !widened_vector.empty() ? widened_vector
                                                   : cc::string(type_text(p, *this, member.type));
         // Stated on every matrix, so no `-Zpr` and no `#pragma pack_matrix` can turn one around.
@@ -468,6 +494,25 @@ public:
             if (r.element_form.has_value())
                 for (auto const& leaf : r.element_form.value().leaves)
                     result = result || leaf.is_widened;
+        return result;
+    }
+
+    /// Whether any member in memory holds a multi-dimensional array of mat3, which holds its matrices in cells.
+    [[nodiscard]] static bool holds_mat3_cells(plan const& p)
+    {
+        auto const holds = [&](planned_member const& member)
+        { return member.offset >= 0 && !mat3_cell_field(p, member.type).empty(); };
+        auto result = false;
+        for (auto const& s : p.structs)
+            if (s.memory_size > 0 && !s.is_packed)
+                for (auto const& member : s.members)
+                    result = result || holds(member);
+        if (p.constants.has_value())
+            for (auto const& member : p.constants.value().members)
+                result = result || holds(member);
+        for (auto const& block : p.group_blocks)
+            for (auto const& member : block.members)
+                result = result || holds(member);
         return result;
     }
 
@@ -625,6 +670,8 @@ public:
         if (holds_widened_mat3(p))
             out += "float4x3 sgl_widen_mat3(float3x3 m)\n{\n    return float4x3(m[0], m[1], m[2], float3(0.0, 0.0, "
                    "0.0));\n}\n\n";
+        if (holds_mat3_cells(p))
+            out += "struct sgl_mat3_cell\n{\n    column_major float4x3 m;\n};\n\n";
         // A struct stands ahead of the groups, whose blocks and buffers may hold it.
         for (auto const& s : p.structs)
         {

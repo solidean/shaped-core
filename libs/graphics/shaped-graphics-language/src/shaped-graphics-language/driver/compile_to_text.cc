@@ -144,8 +144,10 @@ cc::result<emitted_source, cc::string> emit_text(driver::impl::front_end const& 
                                                  bool line_directives,
                                                  bool diagnostics,
                                                  check::undefined_guard guards_undefined,
+                                                 bool asks_software_trace,
                                                  bool weakens_float,
-                                                 check::feature_set device_features)
+                                                 check::feature_set device_features,
+                                                 emit::native_route native = emit::native_route::text)
 {
     auto const& m = front.module;
     auto const source_name = front.source_name;
@@ -169,10 +171,12 @@ cc::result<emitted_source, cc::string> emit_text(driver::impl::front_end const& 
     if (target == emit::target::hlsl_vulkan && float_guarantee == check::float_level::ieee)
         entry.features.set(check::feature::float_denormals);
     // The check pass writes the structured form, and a target prints the core form.
-    // WebGPU traces through the emulated form of a trace, and every other target through its native query.
+    // WebGPU traces through the emulated form of a trace, and every other target through its native query, unless the
+    // compile asks for software on HLSL (EMIT-135).
+    auto const software_trace = asks_software_trace && target != emit::target::msl;
     // LEGAL-63, LEGAL-64: without diagnostics the text holds no print and no assert, and with them both write a record
     auto const legal = check::legalize(m, entry,
-                                       {.is_emulated = target == emit::target::wgsl,
+                                       {.is_emulated = target == emit::target::wgsl || software_trace,
                                         .erases_prints = !diagnostics,
                                         .lowers_asserts = diagnostics,
                                         .guards_undefined = guards_undefined,
@@ -186,7 +190,9 @@ cc::result<emitted_source, cc::string> emit_text(driver::impl::front_end const& 
                                            .names = names,
                                            .write_directives = line_directives,
                                            .diagnostics = diagnostics,
-                                           .device_features = device_features});
+                                           .device_features = device_features,
+                                           .software_trace = software_trace,
+                                           .native = native});
     if (!emitted.has_text())
     {
         auto text = cc::string();
@@ -195,6 +201,9 @@ cc::result<emitted_source, cc::string> emit_text(driver::impl::front_end const& 
         return cc::error(cc::move(text));
     }
     auto result = sgl::emitted_source{.text = cc::move(emitted.text),
+                                      .spirv = cc::move(emitted.spirv),
+                                      .dxil = cc::move(emitted.dxil),
+                                      .native_gap = cc::move(emitted.native_gap),
                                       .entry_point = cc::move(emitted.entry_point),
                                       .bindings = interface_of(m, legal, emitted.bound_names),
                                       .color_targets = emitted.color_targets,
@@ -288,8 +297,9 @@ cc::result<sgl::emitted_source, cc::string> sgl::compile_to_text(text_request co
     // CHK-402: what was judged of another entry point's body is no error of this one
     if (auto own = front.errors_of(e.function); !own.empty())
         return cc::error(cc::move(own));
-    auto result = emit_text(front, e, request.target, request.line_directives, request.diagnostics,
-                            request.guards_undefined, request.weakens_float, request.device_features);
+    auto result
+        = emit_text(front, e, request.target, request.line_directives, request.diagnostics, request.guards_undefined,
+                    request.software_trace, request.weakens_float, request.device_features, request.native);
     add_source_facts(result, front, e);
     if (result.has_value() && result.value().float_guarantee != e.float_guarantee)
         result.value().warnings.push_back(cc::format(
@@ -322,9 +332,9 @@ cc::result<cc::vector<sgl::entry_text>, cc::string> sgl::compile_all_to_text(all
             auto const& e = front.module.entry_points[i];
             // CHK-402: an entry point's own errors are that element's, and leave the others built
             auto own = front.errors_of(e.function);
-            auto text = own.empty()
-                          ? emit_text(front, e, request.targets[k], false, false, check::undefined_guard::none, false, {})
-                          : cc::result<emitted_source, cc::string>(cc::error(own));
+            auto text = own.empty() ? emit_text(front, e, request.targets[k], false, false,
+                                                check::undefined_guard::none, false, false, {})
+                                    : cc::result<emitted_source, cc::string>(cc::error(own));
             add_source_facts(text, front, e);
             result.push_back({.entry_point = e.name, .target = request.targets[k], .text = cc::move(text)});
         }

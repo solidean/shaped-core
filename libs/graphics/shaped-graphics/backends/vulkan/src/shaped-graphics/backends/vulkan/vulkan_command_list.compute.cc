@@ -127,10 +127,39 @@ void vulkan_command_list::withdraw_array_declaration(u32 id)
 
 sg::raw_buffer_handle vulkan_command_list::bind_debug_window(sg::impl::pipeline_footprint const& footprint)
 {
+    // the op that follows a pipeline bind writes set 3 again, since binding descriptor buffers leaves its offset undefined
+    _software_set_layout = nullptr;
     if (!sg::impl::debug_windows::k_enabled)
         return {};
     _bound_debug_window = _ctx.debug_windows().window_for_recording(!footprint.debug_stages().is_empty());
     return _bound_debug_window;
+}
+
+void vulkan_command_list::bind_software_trace(vulkan_pipeline_layout const& layout,
+                                              cc::span<vulkan_binding_group const* const> groups,
+                                              VkPipelineBindPoint bind_point)
+{
+    if (!layout._traces_in_software)
+        return;
+    u32 roots[sg::impl::software_trace_roots] = {};
+    for (isize g = 0; g < groups.size(); ++g)
+        if (groups[g] != nullptr)
+            for (isize k = 0; k < groups[g]->acceleration_roots.size(); ++k)
+            {
+                auto const at = layout._acceleration_bases[g] + k;
+                CC_ASSERT(at < sg::impl::software_trace_roots, "a pipeline traces at most 16 acceleration members in "
+                                                               "software");
+                roots[at] = groups[g]->acceleration_roots[k];
+            }
+    auto const pool = _ctx._software_pool.storage();
+    // a loop of draws under one set of roots takes one region of the transient heap
+    if (_software_set_layout == &layout && _software_set_pool == pool.gpu_address
+        && cc::memcmp(_software_set_roots, roots, sizeof(roots)) == 0)
+        return;
+    layout.bind_software_trace(_buffer, bind_point, _bound_debug_window, pool, roots);
+    _software_set_layout = &layout;
+    _software_set_pool = pool.gpu_address;
+    cc::memcpy(_software_set_roots, roots, sizeof(roots));
 }
 
 void vulkan_command_list::declare_debug_window(sg::impl::pipeline_footprint const* footprint,
@@ -225,6 +254,7 @@ void vulkan_command_list::compute_dispatch(int x, int y, int z)
     // Declare each bound group's shader accesses before the dispatch: the tracker emits any hazard barrier (a prior
     // copy_write → shader_read RAW, a WAW between two dispatches), and — unlike dx12 — carries the access across
     // command lists, since Vulkan has no state decay to ride on.
+    bind_software_trace(*_bound_pipeline_layout, _bound_groups, VK_PIPELINE_BIND_POINT_COMPUTE);
     declare_group_accesses(_bound_groups, _bound_footprint, sg::pipeline_stage_flag::compute);
 
     // Array bindings are not auto-tracked — apply (and account for) the caller's explicit declarations.
@@ -245,6 +275,7 @@ void vulkan_command_list::compute_dispatch_indirect(sg::raw_buffer_handle const&
 
     // The arguments are fetched at DRAW_INDIRECT, before the dispatch's shaders run.
     track_buffer_access(*buffer, sg::pipeline_stage_flag::draw_indirect, sg::access_flag::indirect_read);
+    bind_software_trace(*_bound_pipeline_layout, _bound_groups, VK_PIPELINE_BIND_POINT_COMPUTE);
     declare_group_accesses(_bound_groups, _bound_footprint, sg::pipeline_stage_flag::compute);
     declare_array_accesses(_bound_groups, _bound_footprint, _bound_footprint_owner, sg::pipeline_stage_flag::compute,
                            _compute_arrays);

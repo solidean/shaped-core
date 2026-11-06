@@ -144,7 +144,7 @@ void dx12_command_list::raster_begin_rendering(sg::rendering_info const& info)
     _list->OMSetRenderTargets(UINT(rtv_handles.size()), rtv_handles.empty() ? nullptr : rtv_handles.data(), FALSE,
                               info.depth_stencil_target.has_value() ? &dsv_handle : nullptr);
 
-    // A pipeline of several views renders only those the mask enables, and a list starts with view 0 alone.
+    // No pipeline asks for view instance masking, so none reads this; it states the views they all render anyway.
     if (info.view_count > 1)
     {
         ComPtr<ID3D12GraphicsCommandList1> list1;
@@ -381,6 +381,7 @@ void dx12_command_list::declare_raster_draw_barriers(bool indexed)
     // Bound groups' shader reads/writes (same policy as compute_dispatch), keyed to the graphics stages.
     // Array bindings are tracked as the caller declared them, at the stages the code touches each in.
     auto const graphics_stages = sg::pipeline_stage_flag::vertex | sg::pipeline_stage_flag::fragment;
+    bind_software_trace(*_bound_raster_layout, _bound_raster_groups, true);
     declare_group_accesses(_bound_raster_groups, _bound_raster_footprint, graphics_stages);
     declare_array_accesses(_bound_raster_groups, _bound_raster_footprint, _bound_raster_footprint_owner,
                            graphics_stages, _raster_arrays);
