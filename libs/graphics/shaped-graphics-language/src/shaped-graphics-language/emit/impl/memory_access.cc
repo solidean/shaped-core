@@ -96,7 +96,16 @@ bool sgl::emit::impl::is_piece(plan const& p, flat_element const& element)
 {
     auto const type = p.e.at(element.object).type;
     return p.accesses[index_of(element.object)].held == held_as::pieces && p.m.builtin_type_of(type) == nullptr
-        && p.m.at(type).kind == type_kind::array && p.e.at(element.index).node.is<flat_int_literal>();
+        && p.m.at(type).kind == type_kind::array && p.e.at(element.index).node.is<flat_int_literal>()
+        && !is_word_split(p, p.m.at(type).element);
+}
+
+bool sgl::emit::impl::is_word_split(plan const& p, check::type_id type)
+{
+    if (p.which != emit::target::hlsl_dx12 && p.which != emit::target::msl)
+        return false;
+    auto const* const record = is_valid(type) ? p.m.builtin_type_of(type) : nullptr;
+    return record != nullptr && check::is_64_bit(record->leaf_kind) && record->leaf_count <= 2;
 }
 
 void sgl::emit::impl::plan_memory_accesses(plan& p)

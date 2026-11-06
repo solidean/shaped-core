@@ -257,11 +257,13 @@ The call writes through the payload: what the miss or the closest hit wrote is t
 
 **`maybe_reorder(hint, bits)` lets the target regroup a raygen's invocations** by the low `bits` bits of `hint`, before the traces they go on to make.
 It is a hint: each invocation goes on as it was, and only which ones share a wave changes.
-It is dx12's `dx::MaybeReorderThread` where the device has `shader_execution_reordering`, which needs Shader Model 6.9 from the Agility SDK, and nothing elsewhere.
-The prelude writes it as a text body under `const if has(…)`, so the compile that takes the text asks the feature of the pipeline (CHK-427).
+It is dx12's `dx::MaybeReorderThread` and vulkan's `OpReorderThreadWithHintEXT` where the device has `shader_execution_reordering`, and nothing elsewhere.
+On dx12 the feature needs Shader Model 6.9 from the Agility SDK, and on vulkan `VK_EXT_ray_tracing_invocation_reorder` on a device that reorders.
+The prelude writes dx12's as a text body under `const if has(…)`, so the compile that takes the text asks the feature of the pipeline (CHK-427).
 
 **`trace(…, reorder = true)` regroups by what the trace hit**, and `reorder = hint, reorder_bits = n` by the hit and the hint's low `n` bits (CHK-433).
-On dx12 with the feature, the trace is a hit object: traced, regrouped by it, then its shaders run, so invocations meeting one material shade together.
+On dx12 and vulkan with the feature, the trace is a hit object: traced, regrouped by it, then its shaders run, so invocations meeting one material shade together.
+DXC lowers none of this to SPIR-V, so vulkan's text writes SPIR-V's own instructions (EMIT-225).
 Everywhere else it is the plain trace, which computes the same.
 
 **A hit object is a trace whose closest hit or miss has not run yet** (CHK-434), so a raygen can read what was hit before its shaders run:

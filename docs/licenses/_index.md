@@ -32,7 +32,7 @@ Our own license is in [shaped-core.txt](shaped-core.txt), so this directory is a
 | [OIDN-Weights](https://github.com/RenderKit/oidn-weights) | 28883d1769d5930e13cf7f1676dd852bd81ed9e7 | `Apache-2.0` | shaped-rendering — the trained network sr::denoise_method::oidn runs | [oidn-weights.txt](oidn-weights.txt) |
 | [OpenXR loader](https://github.com/KhronosGroup/OpenXR-SDK) | release-1.1.65 | `Apache-2.0 OR MIT` | the xr-cube example, which talks to OpenXR directly until shaped-xr exists | [openxr-loader.txt](openxr-loader.txt) |
 | [SDL3](https://github.com/libsdl-org/SDL) | release-3.4.12 | `Zlib` | shaped-rendering — sr::window_system and sr::window | [sdl3.txt](sdl3.txt) |
-| [SPIRV-Reflect](https://github.com/KhronosGroup/SPIRV-Reflect) | vulkan-sdk-1.4.321.0 | `Apache-2.0` | shaped-shader-compiler-dxc — reflecting the bindings out of an emitted SPIR-V module | [spirv-reflect.txt](spirv-reflect.txt) |
+| [SPIRV-Reflect](https://github.com/KhronosGroup/SPIRV-Reflect) | vulkan-sdk-1.4.363.0 | `Apache-2.0` | shaped-shader-compiler-dxc — reflecting the bindings out of an emitted SPIR-V module | [spirv-reflect.txt](spirv-reflect.txt) |
 | [SQLite](https://sqlite.org) | 3.53.3 | `blessing` | babel-serializer — the babel::sqlite engine wrapper | [sqlite.txt](sqlite.txt) |
 | [stb](https://github.com/nothings/stb) | 31c1ad374564 | `MIT OR Unlicense` | babel-serializer — the JPEG codec behind babel::jpg | [stb.txt](stb.txt) |
 | [ufbx](https://github.com/ufbx/ufbx) | v0.23.1 | `MIT OR Unlicense` | babel-serializer — the FBX reader behind babel::fbx | [ufbx.txt](ufbx.txt) |

@@ -532,10 +532,11 @@ auto sgl::check::impl::flattener::flatten_ray_trace(ast::expr_id id, ast::call c
         else
             (name == "flags" ? flags : mask) = flatten_expr(arguments[i].value);
     }
-    // CHK-433: a raygen of a dx12 compile whose device reorders traces through a hit object; every other trace is the
-    // plain one, its hint unevaluated, since a hint changes nothing a shader computes
+    // CHK-433: a raygen of a dx12 or vulkan compile whose device reorders traces through a hit object; every other
+    // trace is the plain one, its hint unevaluated, since a hint changes nothing a shader computes
     auto const target = compiled_for();
-    auto const reorders = ast::is_valid(reorder) && entry.entry_stage == stage::raygen && target.api == graphics_api::dx12
+    auto const reorders = ast::is_valid(reorder) && entry.entry_stage == stage::raygen
+                       && (target.api == graphics_api::dx12 || target.api == graphics_api::vulkan)
                        && target.device_features.has(feature::shader_execution_reordering);
     auto hint = flat_expr_id::none;
     auto hint_bits = flat_expr_id::none;

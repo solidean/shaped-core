@@ -376,8 +376,7 @@ public:
         case sg::feature::float_atomic_add:
             return _float_atomic_add;
         case sg::feature::shader_execution_reordering:
-            // VK_EXT_ray_tracing_invocation_reorder is a device's, but no DXC lowers HLSL's reordering to SPIR-V yet.
-            return false;
+            return _shader_execution_reordering;
         case sg::feature::float_specials:
             return _float_specials;
         case sg::feature::float_denormals:
@@ -979,6 +978,8 @@ public:
     bool _vertex_pipeline_stores = false;
     /// `VK_EXT_shader_atomic_float`, enabled with its buffer and shared float32 atomics and adds alike.
     bool _float_atomic_add = false;
+    /// `VK_EXT_ray_tracing_invocation_reorder`, enabled where the device reorders rather than only accepting the calls.
+    bool _shader_execution_reordering = false;
     /// `VK_EXT_mesh_shader`'s mesh and task stages, enabled wherever the device has both, and its draw.
     bool _mesh_shader = false;
     PFN_vkCmdDrawMeshTasksEXT _cmd_draw_mesh_tasks = nullptr;

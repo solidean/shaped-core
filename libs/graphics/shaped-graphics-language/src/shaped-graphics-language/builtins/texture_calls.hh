@@ -25,6 +25,8 @@ enum class sgl::builtins::texture::op : sgl::u8
     image_store,
     image_size,
     image_layer_count,
+    /// A test's statement of one texel of what its run binds (EVAL-127), which no target writes.
+    test_texel,
 };
 
 /// One texture call, packed into a record's `spelling::data`.
@@ -37,11 +39,13 @@ struct sgl::builtins::texture::call
     check::value_kind kind = check::value_kind::scalar_float;
     bool is_depth = false;
     bool has_offset = false;
+    /// A `test_texel` of an image, which has no level.
+    bool is_image = false;
 
     [[nodiscard]] u32 pack() const
     {
         return u32(what) | u32(where) << 5 | u32(width) << 9 | u32(kind) << 12 | u32(is_depth) << 15
-             | u32(has_offset) << 16;
+             | u32(has_offset) << 16 | u32(is_image) << 17;
     }
     [[nodiscard]] static call unpack(u32 d)
     {
@@ -50,7 +54,8 @@ struct sgl::builtins::texture::call
                 .width = int((d >> 9) & 7u),
                 .kind = check::value_kind((d >> 12) & 7u),
                 .is_depth = ((d >> 15) & 1u) != 0,
-                .has_offset = ((d >> 16) & 1u) != 0};
+                .has_offset = ((d >> 16) & 1u) != 0,
+                .is_image = ((d >> 17) & 1u) != 0};
     }
 };
 
@@ -64,6 +69,10 @@ struct sgl::builtins::texture::argument_layout
     /// The second gradient, or a compare's level.
     int second = -1;
     int offset = -1;
+    /// A `test_texel`'s level, its multisampled texture's sample, and its cube's face.
+    int level = -1;
+    int sample = -1;
+    int face = -1;
 };
 
 /// The shape's coordinates: 1, 2 or 3, a cube's direction 3; and whether it has layers, faces or samples.

@@ -4,6 +4,7 @@
 #include <clean-core/math/bit.hh>
 #include <clean-core/string/format.hh>
 #include <shaped-graphics-language/builtins/impl/soft_math.hh>
+#include <shaped-graphics-language/builtins/subgroup_calls.hh>
 #include <shaped-graphics-language/interpret/impl/textures.hh>
 #include <shaped-graphics-language/legalize/impl/walk.hh>
 
@@ -54,6 +55,144 @@ void append_zero(checked_module const& m, type_id type, cc::vector<scalar>& leav
         append_zero(m, member.type, leaves, depth + 1);
 }
 
+/// One call that exchanges values between lanes, the `occurrence`-th time a lane runs it, and what each lane gave it.
+/// A subgroup operation stands only where every lane arrives together (CHK-377), so the n-th run of a call in one
+/// lane meets the n-th in every other.
+struct exchange
+{
+    flat_expr_id call = flat_expr_id::none;
+    i32 occurrence = 0;
+    /// Parallel to the lanes: the scalars of each lane's arguments, and whether it gave any.
+    cc::vector<cc::vector<scalar>> offers;
+    cc::vector<bool> has;
+
+    [[nodiscard]] bool is_complete() const
+    {
+        for (auto const h : has)
+            if (!h)
+                return false;
+        return true;
+    }
+};
+
+/// Every exchange of one round of a run's lanes (EVAL-143).
+struct exchange_table
+{
+    cc::vector<exchange> entries;
+
+    [[nodiscard]] exchange const* find(flat_expr_id call, i32 occurrence) const
+    {
+        for (auto const& x : entries)
+            if (x.call == call && x.occurrence == occurrence)
+                return &x;
+        return nullptr;
+    }
+
+    exchange& at(flat_expr_id call, i32 occurrence, i32 lanes)
+    {
+        for (auto& x : entries)
+            if (x.call == call && x.occurrence == occurrence)
+                return x;
+        auto& x = entries.emplace_back(exchange{.call = call, .occurrence = occurrence});
+        x.offers.resize_to_defaulted(lanes);
+        x.has.resize_to_filled(lanes, false);
+        return x;
+    }
+
+    /// Whether every lane gave every exchange the same arguments in both rounds, which settles the run.
+    [[nodiscard]] bool is_same_as(exchange_table const& other) const
+    {
+        if (entries.size() != other.entries.size())
+            return false;
+        for (auto const& x : entries)
+        {
+            auto const* const y = other.find(x.call, x.occurrence);
+            if (y == nullptr || x.has.size() != y->has.size())
+                return false;
+            for (auto i = isize(0); i < x.has.size(); ++i)
+                if (x.has[i] != y->has[i] || !ast::impl::is_equal(x.offers[i], y->offers[i]))
+                    return false;
+        }
+        return true;
+    }
+};
+
+/// What the lanes of a run share, which each lane starts from and leaves to the next (EVAL-142).
+struct shared_memory
+{
+    cc::vector<buffer_contents> buffers;
+    cc::vector<bool> is_stored;
+    cc::vector<texture_contents> textures;
+    cc::vector<bool> is_texture_stored;
+    /// Parallel to `textures`: one a test stated rather than its driver bound, which grows (EVAL-127).
+    cc::vector<bool> is_stated;
+    cc::vector<sampler_binding> samplers;
+};
+
+/// `a op b` of one scalar each, as a subgroup's reduction combines them, at the width of their kind.
+scalar combined(builtins::subgroup_op op, scalar a, scalar b)
+{
+    using builtins::subgroup_op;
+    auto const kind = a.kind;
+    auto const x = a.widened();
+    auto const y = b.widened();
+    auto result = x;
+    if (x.kind == value_kind::scalar_float)
+    {
+        auto const p = x.as_float();
+        auto const q = y.as_float();
+        auto const r = op == subgroup_op::min ? (q < p ? q : p)
+                     : op == subgroup_op::max ? (q > p ? q : p)
+                     : (op == subgroup_op::mul || op == subgroup_op::exclusive_mul || op == subgroup_op::inclusive_mul)
+                         ? p * q
+                         : p + q;
+        result = scalar::of(r);
+    }
+    else
+    {
+        auto const is_signed = x.kind == value_kind::scalar_int;
+        auto const p = x.bits;
+        auto const q = y.bits;
+        switch (op)
+        {
+        case subgroup_op::min:
+            result.bits = is_signed ? (i32(q) < i32(p) ? q : p) : (q < p ? q : p);
+            break;
+        case subgroup_op::max:
+            result.bits = is_signed ? (i32(q) > i32(p) ? q : p) : (q > p ? q : p);
+            break;
+        case subgroup_op::mul:
+        case subgroup_op::exclusive_mul:
+        case subgroup_op::inclusive_mul:
+            result.bits = p * q;
+            break;
+        case subgroup_op::bit_and:
+            result.bits = p & q;
+            break;
+        case subgroup_op::bit_or:
+            result.bits = p | q;
+            break;
+        case subgroup_op::bit_xor:
+            result.bits = p ^ q;
+            break;
+        default:
+            result.bits = p + q;
+            break;
+        }
+    }
+    return result.narrowed_to(kind);
+}
+
+/// The identity of a scan's operation, for the lanes below the first: 0 of a sum, 1 of a product.
+scalar identity_of(builtins::subgroup_op op, value_kind kind)
+{
+    auto const is_product = op == builtins::subgroup_op::exclusive_mul || op == builtins::subgroup_op::inclusive_mul;
+    auto const wide = scalar{.kind = kind}.widened().kind;
+    auto one = wide == value_kind::scalar_float ? scalar::of(is_product ? 1.0f : 0.0f)
+                                                : scalar{.kind = wide, .bits = is_product ? 1u : 0u};
+    return one.narrowed_to(kind);
+}
+
 enum class flow_kind : u8
 {
     normal,
@@ -100,6 +239,25 @@ struct machine
     /// Every texture and image the run binds, which an image store changes, and whether one did.
     cc::vector<texture_contents> textures;
     cc::vector<bool> is_texture_stored;
+    /// Parallel to 	extures: one the run stated rather than its driver bound, which grows as it is stated (EVAL-127).
+    cc::vector<bool> is_stated;
+    /// The state of each dynamic sampler the driver set or the run stated (EVAL-128).
+    cc::vector<sampler_binding> samplers;
+
+    /// EVAL-140: this lane among the run's, which exchange values at every subgroup operation and derivative.
+    i32 lane = 0;
+    i32 lane_count = 1;
+    /// What every lane gave each exchange in the round before, which this lane's results are made of.
+    exchange_table const* previous = nullptr;
+    /// What this round's lanes give, this one's included.
+    exchange_table* current = nullptr;
+    /// How often this lane ran each exchanging call so far.
+    struct occurrence
+    {
+        flat_expr_id call = flat_expr_id::none;
+        i32 count = 0;
+    };
+    cc::vector<occurrence> occurrences;
     /// What a call reads of a texture the run binds nothing to: 0 by 0, with no level (EVAL-121).
     texture_contents unbound_texture;
     /// Each weak compare-exchange of the source that met `expected` so far, and whether that last attempt failed.
@@ -233,10 +391,12 @@ struct machine
         if (arguments.empty() || !is_known(e, arguments[0]))
             return type_error("an atomic call without its atomic");
 
-        // where the atomic is: an element of a buffer's scalars, or of a cell of workgroup memory
+        // where the atomic is: an element of a buffer's scalars, a cell of workgroup memory, or an image's texel
         auto buffer = isize(-1);
         auto where = place_ref();
+        auto texture = isize(-1);
         auto offset = isize(0);
+        auto first_value = isize(1);
         auto const atomic = arguments[0];
         if (auto const* const element = e.at(atomic).node.try_as<flat_buffer_element>())
         {
@@ -249,12 +409,47 @@ struct machine
             if (auto const f = locate_place(atomic, where, offset, type); !f.is_normal())
                 return f;
         }
+        else if (is_texel_atomic(c))
+        {
+            // EVAL-100: the texel the image's coordinate and layer name, which the run holds as it holds any texel
+            auto binding = symbol_id::none;
+            auto member = i32(-1);
+            auto element = i32(0);
+            if (auto const f = resource_of(atomic, binding, member, element); !f.is_normal())
+                return f;
+            auto const axes = builtins::texture::axes_of(m.at(e.at(atomic).type).shape);
+            auto coord = value();
+            if (arguments.size() < 2)
+                return type_error("a texel atomic without its coordinate");
+            if (auto const f = eval(arguments[1], coord); !f.is_normal())
+                return f;
+            auto layer = value();
+            first_value = 2;
+            if (axes.is_array)
+            {
+                if (arguments.size() < 3)
+                    return type_error("a texel atomic of an array without its layer");
+                if (auto const f = eval(arguments[2], layer); !f.is_normal())
+                    return f;
+                first_value = 3;
+            }
+            for (auto i = isize(0); i < textures.size(); ++i)
+                if (textures[i].binding == binding && textures[i].member == member && textures[i].element == element)
+                    texture = i;
+            if (texture < 0)
+                return fail(run_status::program_error,
+                            cc::format("an atomic {} of an image the run binds no texels to", record.name));
+            if (auto const failure = texel_offset(textures[texture], axes, coord.leaves,
+                                                  layer.leaves.empty() ? 0 : layer.leaves[0].as_int(), offset);
+                !failure.is_ok())
+                return fail(failure.status, cc::format("{}, in an atomic {}", failure.detail, record.name));
+        }
         else
-            return type_error("an atomic that is no buffer element and no workgroup memory");
+            return type_error("an atomic that is no buffer element, no workgroup memory and no texel");
 
         auto in = cc::vector<scalar>();
         in.push_back({});
-        for (auto k = isize(1); k < arguments.size(); ++k)
+        for (auto k = first_value; k < arguments.size(); ++k)
         {
             auto v = value();
             if (auto const f = eval(arguments[k], v); !f.is_normal())
@@ -273,6 +468,8 @@ struct machine
                                m.at(m.bindings[m.at(cell.binding).info].members)[cell.member].name));
             in[0] = cell.memory.leaves[offset];
         }
+        else if (texture >= 0)
+            in[0] = textures[texture].texels[offset];
         else
             in[0] = out.buffers[buffer].leaves[offset];
 
@@ -299,6 +496,11 @@ struct machine
         {
             workgroup[where.cell].memory.leaves[offset] = after[0];
             workgroup[where.cell].is_written[offset] = true;
+        }
+        else if (texture >= 0)
+        {
+            textures[texture].texels[offset] = after[0];
+            is_texture_stored[texture] = true;
         }
         else
         {
@@ -423,7 +625,7 @@ struct machine
             return {};
         }
         state = sampler_state();
-        for (auto const& bound : inputs.samplers)
+        for (auto const& bound : samplers)
             if (bound.binding == binding && bound.member == member && bound.element == element)
                 state = bound.state;
         return {};
@@ -464,14 +666,53 @@ struct machine
         for (auto i = isize(0); i < textures.size(); ++i)
             if (textures[i].binding == binding && textures[i].member == member && textures[i].element == element)
                 texture = i;
+        result.type = x.type;
+        result.leaves.clear();
+
+        // EVAL-127: a test states a texel of what it binds, and one its driver bound nothing to grows to hold it
+        if (call.what == builtins::texture::op::test_texel)
+        {
+            if (texture < 0)
+            {
+                textures.push_back({.binding = binding, .member = member, .element = element});
+                is_texture_stored.push_back(false);
+                is_stated.push_back(true);
+                texture = textures.size() - 1;
+            }
+            if (auto const failure = state_texel(call, textures[texture], is_stated[texture], args); !failure.is_ok())
+                return fail(failure.status, cc::format("{}, in a call of '{}'", failure.detail, record.name));
+            // a texel of an image the driver bound comes back to it, as a store's does
+            if (call.is_image && !is_stated[texture])
+                is_texture_stored[texture] = true;
+            out.trace.push_back(result);
+            return {};
+        }
+
         unbound_texture = texture_contents{.binding = binding, .member = member, .element = element};
         auto& contents = texture >= 0 ? textures[texture] : unbound_texture;
 
-        result.type = x.type;
-        result.leaves.clear();
+        // EVAL-144: a sample that picks its own level takes it from its coordinate's derivatives across the quad
+        auto gradients = coordinate_gradients();
+        auto has_gradients = false;
+        if (record.uses_derivatives && lane_count >= 4 && args.size() > 1)
+        {
+            auto const* const before = exchanged(x, args[1].leaves);
+            auto const quad = lane & ~3;
+            if (before != nullptr && quad + 3 < lane_count)
+            {
+                auto const& o = before->offers;
+                for (auto k = isize(0); k < o[quad].size(); ++k)
+                {
+                    gradients.x.push_back(scalar::of(o[quad + 1][k].as_float() - o[quad][k].as_float()));
+                    gradients.y.push_back(scalar::of(o[quad + 2][k].as_float() - o[quad][k].as_float()));
+                }
+                has_gradients = true;
+            }
+        }
+
         auto stored = false;
-        if (auto const failure
-            = run_texture_call(call, contents, has_sampler ? &state : nullptr, args, result.leaves, stored);
+        if (auto const failure = run_texture_call(call, contents, has_sampler ? &state : nullptr, args, result.leaves,
+                                                  stored, has_gradients ? &gradients : nullptr);
             !failure.is_ok())
             return fail(failure.status, cc::format("{}, in a call of '{}'", failure.detail, record.name));
         if (stored && texture >= 0)
@@ -483,19 +724,237 @@ struct machine
         return {};
     }
 
+    /// EVAL-143: gives `offer` to the exchange this lane's call `x` meets now, and returns what every lane gave it
+    /// in the round before; null where some lane gave it nothing then, so this round's result is no result yet.
+    exchange const* exchanged(flat_expr const& x, cc::vector<scalar> offer)
+    {
+        auto const id = flat_expr_id(i32(&x - e.exprs.data()));
+        auto n = i32(-1);
+        for (auto& o : occurrences)
+            if (o.call == id)
+                n = o.count++;
+        if (n < 0)
+        {
+            occurrences.push_back({.call = id, .count = 1});
+            n = 0;
+        }
+        if (current == nullptr || previous == nullptr)
+            return nullptr;
+        auto& now = current->at(id, n, lane_count);
+        now.offers[lane] = cc::move(offer);
+        now.has[lane] = true;
+        auto const* const before = previous->find(id, n);
+        return before != nullptr && before->is_complete() ? before : nullptr;
+    }
+
+    /// EVAL-143: a subgroup operation over what every lane gave it, in lane order.
+    flow subgroup_call(flat_expr const& x, flat_call const& c, builtins::function_record const& record, value& result)
+    {
+        using builtins::subgroup_op;
+        auto args = cc::vector<value>();
+        if (auto const f = eval_all(c.arguments, args); !f.is_normal())
+            return f;
+        auto offer = cc::vector<scalar>();
+        for (auto const& a : args)
+            offer.push_back_range(a.leaves);
+        auto const takes_lane = args.size() == 2;
+        auto const width = takes_lane ? offer.size() - 1 : offer.size();
+        auto const named = takes_lane && !offer.empty() ? offer[width].as_int() : 0;
+        auto const* const before = exchanged(x, offer);
+
+        result = zero_value(m, x.type);
+        if (before == nullptr)
+        {
+            out.trace.push_back(result);
+            return {};
+        }
+        result.leaves.clear();
+        auto const& offers = before->offers;
+        auto const op = subgroup_op(record.write.data);
+        auto const n = lane_count;
+        auto const from_lane = [&](i32 source)
+        {
+            // a lane that names no invocation of the subgroup reads zero (CHK-376)
+            if (source < 0 || source >= n)
+            {
+                result = zero_value(m, x.type);
+                return;
+            }
+            for (auto k = isize(0); k < width; ++k)
+                result.leaves.push_back(offers[source][k]);
+        };
+        switch (op)
+        {
+        case subgroup_op::all:
+        case subgroup_op::any:
+        {
+            auto is = op == subgroup_op::all;
+            for (auto l = 0; l < n; ++l)
+                is = op == subgroup_op::all ? is && offers[l][0].as_bool() : is || offers[l][0].as_bool();
+            result.leaves.push_back(scalar::of(is));
+            break;
+        }
+        case subgroup_op::ballot:
+        {
+            u32 words[4] = {0, 0, 0, 0};
+            for (auto l = 0; l < n && l < 128; ++l)
+                if (offers[l][0].as_bool())
+                    words[l / 32] |= 1u << (l % 32);
+            for (auto const w : words)
+                result.leaves.push_back(scalar::of_uint(w));
+            break;
+        }
+        case subgroup_op::exclusive_add:
+        case subgroup_op::exclusive_mul:
+        case subgroup_op::inclusive_add:
+        case subgroup_op::inclusive_mul:
+        {
+            auto const is_inclusive = op == subgroup_op::inclusive_add || op == subgroup_op::inclusive_mul;
+            for (auto k = isize(0); k < width; ++k)
+            {
+                auto acc = identity_of(op, offers[lane][k].kind);
+                for (auto l = 0; l < lane + (is_inclusive ? 1 : 0); ++l)
+                    acc = combined(op, acc, offers[l][k]);
+                result.leaves.push_back(acc);
+            }
+            break;
+        }
+        case subgroup_op::broadcast:
+        case subgroup_op::shuffle:
+            from_lane(named);
+            break;
+        case subgroup_op::broadcast_first:
+            from_lane(0);
+            break;
+        case subgroup_op::shuffle_xor:
+            from_lane(lane ^ named);
+            break;
+        case subgroup_op::shuffle_up:
+            from_lane(lane - named);
+            break;
+        case subgroup_op::shuffle_down:
+            from_lane(lane + named);
+            break;
+        case subgroup_op::quad_swap_x:
+            from_lane(lane ^ 1);
+            break;
+        case subgroup_op::quad_swap_y:
+            from_lane(lane ^ 2);
+            break;
+        case subgroup_op::quad_swap_diagonal:
+            from_lane(lane ^ 3);
+            break;
+        case subgroup_op::quad_broadcast:
+            from_lane((lane & ~3) | named);
+            break;
+        default:
+            for (auto k = isize(0); k < width; ++k)
+            {
+                auto acc = offers[0][k];
+                for (auto l = 1; l < n; ++l)
+                    acc = combined(op, acc, offers[l][k]);
+                result.leaves.push_back(acc);
+            }
+            break;
+        }
+        result.type = x.type;
+        if (result.leaves.size() != leaf_count_of(m, x.type))
+            return type_error(cc::format("a call of '{}' with a result of the wrong type", record.name));
+        out.trace.push_back(result);
+        return {};
+    }
+
+    /// EVAL-144: a derivative across the quad, the coarse one: along its top row and down its left column.
+    flow derivative_call(flat_expr const& x, flat_call const& c, builtins::function_record const& record, value& result)
+    {
+        auto args = cc::vector<value>();
+        if (auto const f = eval_all(c.arguments, args); !f.is_normal())
+            return f;
+        if (args.size() != 1)
+            return type_error(cc::format("a call of '{}' without its one argument", record.name));
+        auto const* const before = exchanged(x, args[0].leaves);
+        result = zero_value(m, x.type);
+        auto const quad = lane & ~3;
+        if (before == nullptr || quad + 3 >= lane_count)
+            return {};
+        auto const& o = before->offers;
+        result.leaves.clear();
+        for (auto k = isize(0); k < o[quad].size(); ++k)
+        {
+            auto const dx = o[quad + 1][k].as_float() - o[quad][k].as_float();
+            auto const dy = o[quad + 2][k].as_float() - o[quad][k].as_float();
+            auto const fw = (dx < 0.0f ? -dx : dx) + (dy < 0.0f ? -dy : dy);
+            result.leaves.push_back(scalar::of(record.name == "ddx" ? dx : record.name == "ddy" ? dy : fw));
+        }
+        if (result.leaves.size() != leaf_count_of(m, x.type))
+            return type_error(cc::format("a call of '{}' with a result of the wrong type", record.name));
+        return {};
+    }
+
+    /// EVAL-128: `s.test_state(from)` gives a dynamic sampler the state of a sampler whose state the source sets.
+    flow state_sampler(flat_expr const& x, flat_call const& c, value& result)
+    {
+        auto const arguments = e.at(c.arguments);
+        if (arguments.size() != 2)
+            return type_error("a sampler's statement without its two samplers");
+        auto binding = symbol_id::none;
+        auto member = i32(-1);
+        auto element = i32(0);
+        if (auto const f = resource_of(arguments[0], binding, member, element); !f.is_normal())
+            return f;
+        auto const members = m.at(m.bindings[m.at(binding).info].members);
+        if (member < 0 || member >= members.size())
+            return type_error("a sampler member its binding does not have");
+        if (members[member].static_sampler >= 0)
+            return fail(run_status::program_error,
+                        cc::format("'{}' is a static sampler, whose state the source sets", members[member].name));
+        auto state = sampler_state();
+        if (auto const f = sampler_of(arguments[1], state); !f.is_normal())
+            return f;
+        auto is_found = false;
+        for (auto& s : samplers)
+            if (s.binding == binding && s.member == member && s.element == element)
+            {
+                s.state = state;
+                is_found = true;
+            }
+        if (!is_found)
+            samplers.push_back({.binding = binding, .member = member, .element = element, .state = state});
+        result.type = x.type;
+        result.leaves.clear();
+        out.trace.push_back(result);
+        return {};
+    }
+
     flow call(flat_expr const& x, flat_call const& c, value& result)
     {
         // CHK-427: a body in a target's own text runs where that target does, never here
         if (c.text >= 0)
             return type_error("a body in a target's own text, which only its target runs");
-        // a texel of an `@atomic` image is no memory a test holds, so its update is evaluated as a load of one is
-        if (auto const* const record = m.builtin_function(c.intrinsic);
-            record != nullptr && record->is_atomic && !is_texel_atomic(c))
+        if (auto const* const record = m.builtin_function(c.intrinsic); record != nullptr && record->is_atomic)
             return atomic_call(x, c, *record, result);
         if (auto const* const record = m.builtin_function(c.intrinsic); record != nullptr && record->bytes_words > 0)
             return bytes_call(x, c, *record, result);
         if (auto const* const record = m.builtin_function(c.intrinsic); record != nullptr && record->is_texture_call)
             return texture_call(x, c, *record, result);
+        if (auto const* const record = m.builtin_function(c.intrinsic); record != nullptr)
+        {
+            // EVAL-140, EVAL-141: what lane the run is in, and what its lanes exchange
+            if (record->is_subgroup_operation)
+                return subgroup_call(x, c, *record, result);
+            if (record->uses_derivatives && lane_count >= 4)
+                return derivative_call(x, c, *record, result);
+            if (record->is_test_only && record->name == "test_state")
+                return state_sampler(x, c, result);
+            if (record->is_test_only && (record->name == "test_lane" || record->name == "test_lane_count"))
+            {
+                result.type = x.type;
+                result.leaves.clear();
+                result.leaves.push_back(scalar::of(record->name == "test_lane" ? lane : lane_count));
+                out.trace.push_back(result);
+                return {};
+            }
+        }
         auto args = cc::vector<value>();
         if (auto const f = eval_all(c.arguments, args); !f.is_normal())
             return f;
@@ -1520,16 +1979,29 @@ value sgl::check::zero_value(checked_module const& m, type_id type)
     return result;
 }
 
-outcome sgl::check::interpret(checked_module const& m,
-                              flat_entry_point const& e,
-                              run_inputs const& inputs,
-                              run_limits const& limits)
+namespace
+{
+/// One lane's run of `e`, starting from `memory` and leaving it to the lane after it (EVAL-142).
+outcome run_lane(checked_module const& m,
+                 flat_entry_point const& e,
+                 run_inputs const& inputs,
+                 run_limits const& limits,
+                 shared_memory& memory,
+                 i32 lane,
+                 exchange_table const& previous,
+                 exchange_table& current)
 {
     auto run = machine{.m = m, .e = e, .inputs = inputs, .limits = limits, .fuel = limits.fuel};
-    run.out.buffers = inputs.buffers;
-    run.is_stored.resize_to_filled(inputs.buffers.size(), false);
-    run.textures = inputs.textures;
-    run.is_texture_stored.resize_to_filled(inputs.textures.size(), false);
+    run.out.buffers = cc::move(memory.buffers);
+    run.is_stored = cc::move(memory.is_stored);
+    run.textures = cc::move(memory.textures);
+    run.is_texture_stored = cc::move(memory.is_texture_stored);
+    run.is_stated = cc::move(memory.is_stated);
+    run.samplers = cc::move(memory.samplers);
+    run.lane = lane;
+    run.lane_count = inputs.lane_count < 1 ? 1 : inputs.lane_count;
+    run.previous = &previous;
+    run.current = &current;
     run.out.sites.resize_to_defaulted(e.check_sites.size());
     run.locals.resize_to_defaulted(e.locals.size());
     run.is_set.resize_to_filled(e.locals.size(), false);
@@ -1564,17 +2036,128 @@ outcome sgl::check::interpret(checked_module const& m,
     else if (f.kind != flow_kind::failed)
         run.type_error("an exit that nothing encloses");
 
-    auto stored = cc::vector<buffer_contents>();
-    for (auto i = isize(0); i < run.out.buffers.size(); ++i)
-        if (run.is_stored[i])
-            stored.push_back(cc::move(run.out.buffers[i]));
-    run.out.buffers = cc::move(stored);
-    for (auto i = isize(0); i < run.textures.size(); ++i)
-        if (run.is_texture_stored[i])
-            run.out.images.push_back(cc::move(run.textures[i]));
+    memory.buffers = cc::move(run.out.buffers);
+    memory.is_stored = cc::move(run.is_stored);
+    memory.textures = cc::move(run.textures);
+    memory.is_texture_stored = cc::move(run.is_texture_stored);
+    memory.is_stated = cc::move(run.is_stated);
+    memory.samplers = cc::move(run.samplers);
+    run.out.buffers.clear();
     return cc::move(run.out);
 }
 
+/// The name of the builtin the exchanging call `id` calls, for a report.
+cc::string_view exchanged_name(checked_module const& m, flat_entry_point const& e, flat_expr_id id)
+{
+    if (!is_known(e, id))
+        return "?";
+    auto const* const c = e.at(id).node.try_as<flat_call>();
+    auto const* const record = c != nullptr ? m.builtin_function(c->intrinsic) : nullptr;
+    return record != nullptr ? cc::string_view(record->name) : cc::string_view("?");
+}
+
+/// The run of every lane as one outcome: the first that did not end normally decides how it ended (EVAL-145).
+outcome merged(checked_module const& m,
+               flat_entry_point const& e,
+               run_limits const& limits,
+               cc::vector<outcome> runs,
+               shared_memory memory,
+               exchange_table const& exchanges,
+               bool is_settled)
+{
+    auto const lanes = i32(runs.size());
+    auto out = outcome();
+    out.sites.resize_to_defaulted(e.check_sites.size());
+    for (auto lane = i32(0); lane < lanes; ++lane)
+    {
+        auto& r = runs[lane];
+        if (out.status == run_status::ok && r.status != run_status::ok)
+        {
+            out.status = r.status;
+            out.detail = lanes > 1 ? cc::format("in lane {} of {}: {}", lane, lanes, r.detail) : cc::move(r.detail);
+        }
+        if (lane == 0)
+            out.result = cc::move(r.result);
+        out.trace.push_back_range(r.trace);
+        out.printed.push_back_range(r.printed);
+        for (auto& f : r.failures)
+        {
+            f.lane = lane;
+            if (out.failures.size() < limits.max_failures)
+                out.failures.push_back(cc::move(f));
+            else
+                ++out.failures_dropped;
+        }
+        out.failures_dropped += r.failures_dropped;
+        out.checks_run += r.checks_run;
+        out.asserts_run += r.asserts_run;
+        for (auto s = isize(0); s < out.sites.size() && s < r.sites.size(); ++s)
+        {
+            out.sites[s].passed += r.sites[s].passed;
+            out.sites[s].failed += r.sites[s].failed;
+        }
+    }
+    // CHK-377 puts a subgroup operation where every lane arrives together, so one a lane missed is a program's error
+    if (out.status == run_status::ok)
+        for (auto const& x : exchanges.entries)
+            for (auto lane = i32(0); lane < x.has.size(); ++lane)
+                if (!x.has[lane] && out.status == run_status::ok)
+                {
+                    out.status = run_status::program_error;
+                    out.detail = cc::format("lane {} of {} did not reach {} with the others, which every lane reaches "
+                                            "together or none does",
+                                            lane, lanes, exchanged_name(m, e, x.call));
+                }
+    if (out.status == run_status::ok && !is_settled)
+    {
+        out.status = run_status::program_error;
+        out.detail = "what the lanes exchange never settled";
+    }
+    for (auto i = isize(0); i < memory.buffers.size(); ++i)
+        if (memory.is_stored[i])
+            out.buffers.push_back(cc::move(memory.buffers[i]));
+    for (auto i = isize(0); i < memory.textures.size(); ++i)
+        if (memory.is_texture_stored[i])
+            out.images.push_back(cc::move(memory.textures[i]));
+    return out;
+}
+} // namespace
+
+outcome sgl::check::interpret(checked_module const& m,
+                              flat_entry_point const& e,
+                              run_inputs const& inputs,
+                              run_limits const& limits)
+{
+    // EVAL-143: each round runs every lane with what the round before exchanged, until nothing a lane gives changes
+    auto const lanes = inputs.lane_count < 1 ? 1 : inputs.lane_count;
+    auto previous = exchange_table();
+    for (auto round = isize(0);; ++round)
+    {
+        auto current = exchange_table();
+        auto memory = shared_memory{
+            .buffers = inputs.buffers,
+            .is_stored = cc::vector<bool>::create_filled(inputs.buffers.size(), false),
+            .textures = inputs.textures,
+            .is_texture_stored = cc::vector<bool>::create_filled(inputs.textures.size(), false),
+            .is_stated = cc::vector<bool>::create_filled(inputs.textures.size(), false),
+            .samplers = inputs.samplers,
+        };
+        auto runs = cc::vector<outcome>();
+        auto is_stopped = false;
+        for (auto lane = i32(0); lane < lanes && !is_stopped; ++lane)
+        {
+            runs.push_back(run_lane(m, e, inputs, limits, memory, lane, previous, current));
+            is_stopped = runs.back().status == run_status::stopped;
+        }
+        if (is_stopped)
+            return cc::move(runs.back());
+        // every round settles one exchange more than the one before, in the order the lanes reach them
+        auto const is_settled = current.is_same_as(previous);
+        if (is_settled || round > current.entries.size() + 1)
+            return merged(m, e, limits, cc::move(runs), cc::move(memory), current, is_settled);
+        previous = cc::move(current);
+    }
+}
 namespace
 {
 /// The bytes `member_data` gives a leaf of `kind`: a word, and two for a 64-bit leaf, its low word first.
