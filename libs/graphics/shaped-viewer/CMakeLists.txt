@@ -398,6 +398,7 @@ if(SC_BUILD_TESTS)
         target_sources(shaped-viewer-test PRIVATE
             tests/dx12-entry.cc
             tests/raster-without-raytracing-test.cc
+            tests/raster-bound-test.cc
             tests/wavefront-benchmark.cc
             tests/raster-benchmark.cc
             tests/hybrid-benchmark.cc

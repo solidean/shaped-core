@@ -199,6 +199,15 @@ gpu_resource_manager::gpu_resource_manager(sg::context& ctx,
 
 gpu_resource_manager gpu_resource_manager::create(sg::context& ctx, gpu_resource_manager_config const& cfg)
 {
+    auto tables = cc::vector<table_entry>();
+
+    // A device without binding arrays has no tables: the bound raster mode reads the pools through bound buffers instead.
+    if (!ctx.supports(sg::feature::binding_arrays))
+        return gpu_resource_manager(
+            ctx, mesh_manager::create(ctx, cfg.meshes), quadric_manager::create(ctx, cfg.quadrics),
+            texture_manager::create(ctx, cfg.textures), attribute_manager::create(ctx, cfg.attributes),
+            material_shader_cache::create(&ctx), nullptr, cc::move(tables), cfg.textures_policy, cfg.work);
+
     // The tracer's own layout, so the group a trace binds fits its pipeline and sg resolves its footprint by name.
     // It carries the material sampler palette too, as static samplers nothing sets.
     auto group = ctx.persistent.create_staging_binding_group(
@@ -206,7 +215,6 @@ gpu_resource_manager gpu_resource_manager::create(sg::context& ctx, gpu_resource
 
     // One array per binding, owned here: an array cannot refuse an acquire on behalf of its siblings, so nothing
     // else may hold one over a binding of this group.
-    auto tables = cc::vector<table_entry>();
     tables.reserve(isize(bindless_table::count_));
     for (auto i = u32(0); i < u32(bindless_table::count_); ++i)
     {
@@ -1057,6 +1065,9 @@ sg::bindless_index gpu_resource_manager::_acquire(bindless_table table, sg::raw_
 {
     CC_ASSERT(!_locked, "no acquires while frozen — the bound snapshot could not contain the mint");
     CC_ASSERT(table < bindless_table::count_, "not a bindless table");
+    // Without tables the index names nothing, and only a reader binding the resource itself ever runs.
+    if (!has_bindless_tables())
+        return sg::bindless_index(0);
     auto& t = _tables[u32(table)];
     auto const index = t.array.transient.acquire(view);
     _record(t, u32(index));
@@ -1066,6 +1077,8 @@ sg::bindless_index gpu_resource_manager::_acquire(bindless_table table, sg::raw_
 sg::bindless_element_handle gpu_resource_manager::_pin(bindless_table table, sg::raw_view const& view)
 {
     CC_ASSERT(table < bindless_table::count_, "not a bindless table");
+    CC_ASSERT(has_bindless_tables(), "a pin names an element of a table, which a device without binding arrays has "
+                                     "none of");
     auto& t = _tables[u32(table)];
     auto handle = t.array.persistent.acquire(view);
 
@@ -1348,12 +1361,16 @@ void gpu_resource_manager::unlock()
 bound_resources gpu_resource_manager::freeze()
 {
     lock();
+    if (!has_bindless_tables())
+        return bound_resources(*this, nullptr);
     return bound_resources(*this, _group->snapshot());
 }
 
 cc::result<bound_resources> gpu_resource_manager::try_freeze()
 {
     lock();
+    if (!has_bindless_tables())
+        return bound_resources(*this, nullptr);
     auto group = _group->try_snapshot();
     if (group.has_error())
         unlock();
@@ -1363,6 +1380,7 @@ cc::result<bound_resources> gpu_resource_manager::try_freeze()
 
 sg::binding_group_layout_handle const& gpu_resource_manager::bindless_layout() const
 {
+    CC_ASSERT(has_bindless_tables(), "a device without binding arrays has no bindless layout");
     return _group->layout();
 }
 

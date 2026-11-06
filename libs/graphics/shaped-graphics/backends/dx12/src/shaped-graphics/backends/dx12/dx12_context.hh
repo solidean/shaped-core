@@ -118,6 +118,13 @@ struct sg::backend::dx12::dx12_config
     /// Building an acceleration structure then breaks its precondition, exactly as it would on an adapter without DXR.
     bool withhold_raytracing = false;
 
+    /// Whether this context reports no `binding_arrays` whatever the device has, as WebGPU's core does.
+    ///
+    /// Test-only in intent, like `withhold_raytracing`.
+    /// It is how a suite runs a caller's non-bindless path, sv's bound raster mode above all, natively on a host whose device has them.
+    /// Only the report changes: a layout with an array binding still builds, so it is the caller's to honor it.
+    bool withhold_binding_arrays = false;
+
     /// Capacity of the inline UPLOAD ring buffer, in bytes.
     /// Bounds the per-epoch inline upload volume.
     isize upload_ring_bytes = sg::context_upload_scope::default_inline_budget_bytes;
@@ -210,8 +217,9 @@ public:
         case sg::feature::timestamp_query:
             return _query_system.supports_timestamps();
         case sg::feature::headless_present:
-        case sg::feature::geometry_shader:
         case sg::feature::binding_arrays:
+            return !_withhold_binding_arrays;
+        case sg::feature::geometry_shader:
         case sg::feature::tessellation_shader:
         case sg::feature::readwrite_image_formats:
         case sg::feature::float32_filtering:
@@ -658,6 +666,7 @@ public:
     D3D12_RAYTRACING_TIER _raytracing_tier = D3D12_RAYTRACING_TIER_NOT_SUPPORTED;
     bool _unaligned_block_textures = false;    // D3D12_OPTIONS8, cached at creation
     bool _extended_image_formats = false;      // bgra8_unorm's typed UAV, cached at creation
+    bool _withhold_binding_arrays = false;     // dx12_config::withhold_binding_arrays
     bool _native_16bit_shader_ops = false;     // D3D12_OPTIONS4, cached at creation
     bool _wave_ops = false;                    // D3D12_OPTIONS1, cached at creation
     bool _shader_execution_reordering = false; // SM 6.9 beside ray-tracing pipelines, from the Agility SDK

@@ -417,6 +417,10 @@ public:
     /// manager's contract a schema rather than a set of names a shader has to rediscover.
     [[nodiscard]] sg::binding_group_layout_handle const& bindless_layout() const;
 
+    /// Whether this manager has bindless tables at all: false on a device without `sg::feature::binding_arrays`.
+    /// Without them every acquire answers 0, and only the bound raster mode, which binds the pools themselves, can draw.
+    [[nodiscard]] bool has_bindless_tables() const { return !_tables.empty(); }
+
     /// How many elements `table` holds.
     [[nodiscard]] u32 table_capacity(bindless_table table) const;
 
