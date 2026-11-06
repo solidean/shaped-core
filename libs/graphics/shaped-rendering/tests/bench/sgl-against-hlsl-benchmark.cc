@@ -273,6 +273,8 @@ static cc::shared_async<cc::unit> compare_on(sg::context& ctx)
         REQUIRE(source4.has_value());
 
         auto const sgl_layout = ctx.cached.acquire_binding_group_layout<sr::sgl_shaders::nn_conv::nn_conv_buffers>();
+        auto const sgl_shader = co_await sr::sgl_shaders::nn_conv::main_cs->acquire(ctx);
+        CC_LOG_INFO("the convolution's SGL came through {}", sgl_shader.compiler.name);
         auto const sgl_pipeline = sr::sgl_shaders::nn_conv::main_cs.acquire_pipeline(ctx);
         auto hlsl = hlsl_pipeline<sr_bench::hlsl::nn_conv_bindings>{
             .shader = sr_bench::hlsl::nn_conv.compute.main_cs->acquire(ctx)};
