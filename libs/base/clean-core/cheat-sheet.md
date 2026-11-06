@@ -1471,6 +1471,8 @@ CC_HAS_THREAD_SANITIZER                             // 0/1 (common/macros.hh) �
                                                     // unwindable top. Not a way to skip a test that is merely slow.
 CC_HAS_ADDRESS_SANITIZER                            // 0/1 (common/macros.hh) — ASan's allocator ABORTS on a request it
                                                     // cannot grant, so an allocation failure never reaches its handler
+CC_NO_UNIQUE_ADDRESS T member;                      // (common/macros.hh) — ALWAYS this, never bare [[no_unique_address]]:
+                                                    // the MSVC ABI ignores that spelling, clang-cl included
 
 #include <clean-core/platform/leak_annotations.hh> // tell LeakSanitizer a leak is deliberate; no-op without it
 cc::leak_intentionally(p);                          // this object is never freed on purpose (state WHY at the site)

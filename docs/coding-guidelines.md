@@ -328,6 +328,7 @@ bool strip_matching_prefix_with(string_view s, EqPred&& eq)
 
 - `[[nodiscard]]` for non-void functions, **except** obvious getters (`get_xyz`, `is_xyz`, `has_xyz`).
 - All single-argument constructors must be `explicit` unless there's a **documented** reason for implicit conversion.
+- `CC_NO_UNIQUE_ADDRESS`, never bare `[[no_unique_address]]`: the MSVC ABI ignores the standard spelling, under clang-cl too.
 
 ### Constructors vs Factory Methods
 

@@ -2,6 +2,7 @@
 
 #include <clean-core/common/assert.hh>
 #include <clean-core/common/hash.hh>
+#include <clean-core/common/macros.hh> // CC_NO_UNIQUE_ADDRESS
 #include <clean-core/common/utility.hh>
 #include <clean-core/container/span.hh>
 #include <clean-core/fwd.hh>
@@ -42,7 +43,7 @@ private:
         u64 hash;   // finalized hash, kept to skip rehashing K on growth and to short-circuit chain compares
         node* next; // singly-linked collision chain (insert-at-head)
         K key;
-        [[no_unique_address]] V value; // no_unique_address makes an empty V free — cc::set rides on this
+        CC_NO_UNIQUE_ADDRESS V value; // an empty V is free — cc::set rides on this
 
         // constructs key from a single arg and value from the rest, both in place (immovable-safe)
         template <class KArg, class... VArgs>
@@ -649,6 +650,6 @@ private:
     cc::allocation<node*> _buckets; // power-of-two length; empty until first insert
     isize _size = 0;                // number of live entries
     cc::node_memory_resource* _node_res = cc::default_node_memory_resource; // backs the K/V nodes
-    [[no_unique_address]] Hash _hasher = {};
-    [[no_unique_address]] KeyEqual _eq = {};
+    CC_NO_UNIQUE_ADDRESS Hash _hasher = {};
+    CC_NO_UNIQUE_ADDRESS KeyEqual _eq = {};
 };

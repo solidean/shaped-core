@@ -1,6 +1,7 @@
 #pragma once
 
 #include <clean-core/common/assert.hh>
+#include <clean-core/common/macros.hh>  // CC_NO_UNIQUE_ADDRESS
 #include <clean-core/common/utility.hh> // min/max, unit
 #include <clean-core/container/span.hh>
 #include <clean-core/container/vector.hh> // read_all result buffer
@@ -62,8 +63,8 @@ constexpr bool seek_dir_is_dry(seek_dir d)
         || d == seek_dir::remaining_size_hint;
 }
 
-/// Empty placeholder occupying the `first_write` slot on read-only streams (zero-sized via
-/// [[no_unique_address]]), so read_stream keeps the exact {curr, end, flush, context} layout.
+/// Empty placeholder occupying the `first_write` slot on read-only streams, zero-sized via CC_NO_UNIQUE_ADDRESS.
+/// read_stream thus keeps the exact {curr, end, flush, context} layout.
 struct stream_no_first_write
 {
 };
@@ -573,7 +574,7 @@ private:
     byte* _end = nullptr;
     stream_flush_fn _flush = nullptr;
     void* _context = nullptr;
-    [[no_unique_address]] stream_first_write_t<Access> _first_write = {};
-    [[no_unique_address]] stream_write_end_t<Access> _write_end = {};
+    CC_NO_UNIQUE_ADDRESS stream_first_write_t<Access> _first_write = {};
+    CC_NO_UNIQUE_ADDRESS stream_write_end_t<Access> _write_end = {};
 };
 } // namespace cc::impl
