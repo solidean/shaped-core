@@ -488,10 +488,13 @@ bool vulkan_upload_async_system::run_one_window()
         if (candidate.source != nullptr && candidate.chunk.empty() && !candidate.source_done)
         {
             // The source is the caller's code, so it runs under the caller's context.
-            auto const job_context = candidate.ambient.get();
-            cc::async_ambient_install_scope const installed(job_context);
-
-            auto poll = candidate.source->try_next_chunk();
+            // That context ends with the call: a settlement below wakes the caller, and it must find no hold left here.
+            auto poll = [&]
+            {
+                auto const job_context = candidate.ambient.get();
+                cc::async_ambient_install_scope const installed(job_context);
+                return candidate.source->try_next_chunk();
+            }();
             if (poll.status == sg::stream_source_status::not_yet)
             {
                 stalled[picked.value()] = true;

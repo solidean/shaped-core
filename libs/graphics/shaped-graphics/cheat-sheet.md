@@ -418,7 +418,7 @@ cmd.raster.draw_mesh_tasks(x, y = 1, z = 1)  // void — x*y*z workgroups of a m
 cmd.raster.draw_mesh_tasks_indirect(args, first = 0, count = 1)  // void — `count` mesh draws, each record of buffer<sg::dispatch_args> (x, y, z) read by the GPU
 cmd.raster.draw_indexed_indirect(args, first = 0, count = 1)  // void — `count` indexed draws, each record of buffer<sg::draw_indexed_args> read by the GPU
 //   sg::draw_indexed_args { u32 index_count, instance_count = 1, first_index; i32 vertex_offset; u32 first_instance } — D3D12/Vk/Metal/WebGPU layout
-//   args need buffer_usage::indirect_command_buffer; instance_count 0 draws nothing, and first_instance is where @instance_index starts
+//   args need buffer_usage::indirect_command_buffer; instance_count 0 draws nothing, and first_instance is where @instance_index starts (not 0 needs sg::feature::indirect_first_instance)
 //   the count is the CPU's: no GPU-written count yet (feat-sg-indirect-draws); one ExecuteIndirect on dx12, a draw per record elsewhere
 //   sg::is_aligned_index_fetch(format, view_offset, first_index) -> bool   // ask instead of asserting
 ```

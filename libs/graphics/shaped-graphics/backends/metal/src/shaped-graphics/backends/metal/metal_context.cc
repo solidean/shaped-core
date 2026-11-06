@@ -172,6 +172,7 @@ bool metal_context::supports(sg::feature f) const
         // `MTLTriangleFillModeLines` is on every Apple GPU.
         return true;
     case sg::feature::first_instance:
+    case sg::feature::indirect_first_instance:
         // `[[base_instance]]` is on every Apple GPU this backend's Metal 4 floor admits.
         return true;
     case sg::feature::opacity_micromap:

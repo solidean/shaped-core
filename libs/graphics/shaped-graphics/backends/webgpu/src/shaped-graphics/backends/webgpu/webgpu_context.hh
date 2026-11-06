@@ -201,6 +201,8 @@ public:
             return false;
         case sg::feature::texture_compression_bc:
             return _texture_compression_bc;
+        case sg::feature::indirect_first_instance:
+            return _indirect_first_instance;
         }
         return false;
     }
@@ -521,6 +523,7 @@ public:
         bool shader_f16 = false;              ///< shader-f16
         bool subgroups = false;               ///< subgroups
         bool texture_compression_bc = false;  ///< texture-compression-bc
+        bool indirect_first_instance = false; ///< indirect-first-instance
     };
 
     // Set once at creation.
@@ -543,6 +546,7 @@ private:
     bool _shader_f16 = false; // shader-f16 was granted
     bool _subgroups = false;  // subgroups was granted
     bool _texture_compression_bc = false;
+    bool _indirect_first_instance = false;
 
     sg::epoch _current_epoch = sg::epoch::first;
     u64 _next_submission = u64(sg::submission_token::first);

@@ -180,6 +180,7 @@ public:
         _wireframe_fill = features.fillModeNonSolid == VK_TRUE;
         _sampler_anisotropy = features.samplerAnisotropy == VK_TRUE;
         _texture_compression_bc = features.textureCompressionBC == VK_TRUE;
+        _indirect_first_instance = features.drawIndirectFirstInstance == VK_TRUE;
 
         // a property rather than a feature: no creation enables it, and SPIR-V asks it of each entry point
         auto vulkan12
@@ -350,6 +351,8 @@ public:
             return true;
         case sg::feature::texture_compression_bc:
             return _texture_compression_bc;
+        case sg::feature::indirect_first_instance:
+            return _indirect_first_instance;
         case sg::feature::primitive_index:
             // SPIR-V's PrimitiveId in a fragment shader needs the Geometry capability, which the device feature grants.
             return _geometry_shader;
@@ -965,6 +968,7 @@ public:
     /// The device features of the same names, enabled wherever the device has them.
     bool _geometry_shader = false;
     bool _texture_compression_bc = false;
+    bool _indirect_first_instance = false;
     bool _tessellation_shader = false;
     bool _sample_rate_shading = false;
     bool _float_specials = false;
