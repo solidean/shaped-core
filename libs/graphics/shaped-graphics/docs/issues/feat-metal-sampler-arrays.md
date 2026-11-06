@@ -3,6 +3,8 @@ created: 2026-11-06
 refs:
   - file: libs/graphics/shaped-graphics/backends/metal/src/shaped-graphics/backends/metal/metal_binding_create.cc
   - test: "sg - an array of samplers binds each element, through a group and staged in place"
+claimed-by: Claude (for Julius Nehring-Wirxel)
+claimed-at: 2026-11-06T10:26Z
 ---
 
 # Arrays of samplers on metal
