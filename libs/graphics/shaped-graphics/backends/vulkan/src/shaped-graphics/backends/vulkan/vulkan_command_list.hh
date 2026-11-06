@@ -250,6 +250,14 @@ public:
                                 sg::impl::array_declaration_book& book);
 
     /// Declares every bound group's views at an op of `op_stages`, as `footprint` says the code touches them.
+    /// Binds set 3 of a layout traced in software, right before an op runs.
+    void bind_software_trace(vulkan_pipeline_layout const& layout,
+                             cc::span<vulkan_binding_group const* const> groups,
+                             VkPipelineBindPoint bind_point);
+    vulkan_pipeline_layout const* _software_set_layout = nullptr;
+    u64 _software_set_pool = 0;
+    u32 _software_set_roots[16] = {};
+
     void declare_group_accesses(cc::span<vulkan_binding_group const* const> groups,
                                 sg::impl::pipeline_footprint const* footprint,
                                 sg::pipeline_stage_flags op_stages);

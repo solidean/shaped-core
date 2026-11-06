@@ -28,7 +28,8 @@ enum class sg::accel_build_flag
     fast_build,       ///< optimize build speed:                   DX12/Vk PREFER_FAST_BUILD
     allow_update,     ///< permit a later refit:                   DX12/Vk ALLOW_UPDATE
     allow_compaction, ///< BLAS only — copy to a smaller buffer later: DX12/Vk ALLOW_COMPACTION
-    minimize_memory,  ///< TLAS only — smaller scratch/result:     DX12/Vk MINIMIZE_MEMORY
+    software_trace, ///< dx12 and vulkan: also build the software walk's structure, from the description's `cpu_*` spans
+    minimize_memory, ///< TLAS only — smaller scratch/result:     DX12/Vk MINIMIZE_MEMORY
 };
 
 CC_FLAG_ENUM_INDEXED(sg, accel_build_flag, u32);
@@ -46,6 +47,8 @@ struct sg::blas_pose
 {
     raw_buffer_handle vertices = nullptr;
     isize offset_in_bytes = 0;
+    /// What `vertices` holds, from byte 0, for `accel_build_flag::software_trace`; see blas_triangles::cpu_vertices.
+    cc::span<byte const> cpu_vertices = {};
 };
 
 /// One triangle geometry in a BLAS, indexed when an index buffer is given.
@@ -82,6 +85,13 @@ struct sg::blas_triangles
     /// Defaulted on as the common fast case; clear it for alpha-tested geometry.
     bool is_opaque = true;
 
+    /// What `vertices`, `indices` and `transform` hold, from byte 0 of each, for `accel_build_flag::software_trace`.
+    /// A build on dx12 and vulkan reads these within the call, on the CPU, and only them: sg reads no GPU buffer back.
+    /// The offsets above apply to them as to the buffers.
+    cc::span<byte const> cpu_vertices = {};
+    cc::span<byte const> cpu_indices = {};
+    cc::span<byte const> cpu_transform = {};
+
     /// Optional opacity micromap, which must be null where the context lacks `sg::feature::opacity_micromap`.
     /// `micromap_indices` then holds one index per triangle: a map of `micromap`, or a `micromap_special_index`.
     /// An unsigned `micromap_index_type` reads its bits as signed, so `0xFFFFFFFF` is `fully_transparent`.
@@ -106,6 +116,9 @@ struct sg::blas_aabbs
     isize aabb_stride_in_bytes = isize(sizeof(float) * 6);
     isize aabb_offset_in_bytes = 0;
     bool is_opaque = true;
+
+    /// What `aabbs` holds, from byte 0, for `accel_build_flag::software_trace`; see blas_triangles::cpu_vertices.
+    cc::span<byte const> cpu_aabbs = {};
 };
 
 /// Winding-based triangle cull selection for a TLAS instance.
@@ -164,6 +177,19 @@ struct sg::tlas_instance
 
 namespace sg::impl
 {
+/// A structure's region of a context's software pool, where a build with `accel_build_flag::software_trace` wrote one.
+struct software_region
+{
+    software_acceleration_pool* pool = nullptr; ///< null where the build wrote none
+    u32 unit = 0;
+    u32 units = 0;
+    /// It holds or reaches something that moves, which only a trace of the software walk can see.
+    bool is_moving = false;
+    /// What a TLAS over it needs of a BLAS: its root box.
+    float box_min[3] = {};
+    float box_max[3] = {};
+};
+
 /// What the hit-record check of `context::hit_record_checks` needs of one tlas instance.
 struct tlas_instance_record
 {
@@ -183,6 +209,12 @@ void set_micromaps(blas const& blas, cc::vector<micromap_handle> micromaps);
 
 /// What `set_instance_records` recorded, which is empty where it never ran.
 [[nodiscard]] cc::span<tlas_instance_record const> instance_records_of(tlas const& tlas);
+
+/// Records the region a build wrote, which the structure then releases.
+void set_software_region(blas const& blas, software_region region);
+void set_software_region(tlas const& tlas, software_region region);
+[[nodiscard]] software_region const& software_region_of(blas const& blas);
+[[nodiscard]] software_region const& software_region_of(tlas const& tlas);
 } // namespace sg::impl
 
 /// A bottom-level acceleration structure: an opaque, driver-built index over one mesh's triangles or procedural primitives.
@@ -251,7 +283,10 @@ protected:
 private:
     friend void impl::set_build_record(blas const& blas, blas_geometry geometry, int hit_record_stride);
     friend void impl::set_micromaps(blas const& blas, cc::vector<micromap_handle> micromaps);
+    friend void impl::set_software_region(blas const& blas, impl::software_region region);
+    friend impl::software_region const& impl::software_region_of(blas const& blas);
 
+    impl::software_region _software;
     blas_geometry _geometry = blas_geometry::triangles;
     int _hit_record_stride = 1;
     cc::vector<micromap_handle> _micromaps; // the ownership edge: keeps every micromap a geometry named alive
@@ -310,6 +345,9 @@ protected:
 private:
     friend void impl::set_instance_records(tlas const& tlas, cc::vector<impl::tlas_instance_record> records);
     friend cc::span<impl::tlas_instance_record const> impl::instance_records_of(tlas const& tlas);
+    friend void impl::set_software_region(tlas const& tlas, impl::software_region region);
+    friend impl::software_region const& impl::software_region_of(tlas const& tlas);
 
+    impl::software_region _software;
     cc::vector<impl::tlas_instance_record> _instance_records; // set once, as the tlas is made
 };

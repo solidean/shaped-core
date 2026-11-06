@@ -108,6 +108,7 @@ struct dx12_download_sink;
 /// The domain every recording site in the DirectX 12 backend is attributed to.
 /// It shadows sg's, so a backend message is never mistaken for a portable one.
 CC_REC_DECLARE_DOMAIN(g_rec_domain);
+class dx12_software_pool;
 } // namespace sg::backend::dx12
 
 namespace sg::backend::dx12

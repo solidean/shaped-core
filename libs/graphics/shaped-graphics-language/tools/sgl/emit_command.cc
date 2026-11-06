@@ -27,6 +27,7 @@ COMMAND("emit")
     auto run_tests = false;
     auto line_directives = false;
     auto diagnostics = false;
+    auto software_trace = false;
     auto undefined = cc::string("none");
     auto weaken_float = false;
     auto device_feature_names = cc::vector<cc::string>();
@@ -44,6 +45,8 @@ COMMAND("emit")
                       "statement"});
     args.arg({"diagnostics"}, diagnostics,
              {.desc = "write print and assert into sg's debug buffer, as a dev build does"});
+    args.arg({"software-trace"}, software_trace,
+             {.desc = "write an inline trace as its emulated walk on HLSL too, as a package's SOFTWARE_TRACE does"});
     args.arg({"undefined"}, undefined,
              {.desc = "what an integer division by zero or an array index outside the array does: none, abort, or "
                       "report, which prints it with --diagnostics",
@@ -132,6 +135,7 @@ COMMAND("emit")
                                             .line_directives = line_directives,
                                             .diagnostics = diagnostics,
                                             .guards_undefined = guards_undefined,
+                                            .software_trace = software_trace,
                                             .weakens_float = weaken_float,
                                             .device_features = device_features});
     if (text.has_error())

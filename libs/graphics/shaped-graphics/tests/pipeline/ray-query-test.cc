@@ -232,8 +232,9 @@ ASYNC_INVOCABLE_TEST("sg - an inline trace meets moving vertices and a moving in
     REQUIRE(ctx != nullptr);
     if (!sg_test::shaders_reach(*ctx))
         SKIP("no compiler builds this binary's shaders into a format this context accepts");
-    if (!ctx->supports(sg::feature::ray_tracing_motion_blur))
-        SKIP("this context has no ray-traced motion");
+    // dx12 and vulkan see motion through an opted-in package alone: software-trace-test.cc
+    if (ctx->implementation_of(sg::feature::ray_query) != sg::feature_implementation::emulated)
+        SKIP("this package traces natively, which sees no motion");
     auto const pipeline = co_await shaders::raytracing::trace_cells_midway.acquire_pipeline(*ctx);
     co_await trace_grid(ctx, pipeline, false, true);
 }

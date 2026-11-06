@@ -12,13 +12,12 @@
 #include <clean-core/math/bit.hh>
 #include <shaped-graphics/backends/webgpu/webgpu_acceleration.hh>
 #include <shaped-graphics/backends/webgpu/webgpu_context.hh>
+#include <shaped-graphics/raytracing/impl/software_trace.hh>
 
 namespace sg::backend::webgpu
 {
 namespace
 {
-constexpr u32 leaf_flag = 0x80000000u;
-constexpr u32 max_leaf_primitives = 4;
 constexpr u32 kernel_group_size = 64;
 
 /// WebGPU's default maxComputeWorkgroupsPerDimension, which the device is requested with.
@@ -27,83 +26,7 @@ constexpr u32 max_groups_per_dispatch = 65535;
 /// The largest minStorageBufferOffsetAlignment WebGPU allows, so a binding offset rounded down to it suits every device.
 constexpr isize storage_offset_alignment = 256;
 
-/// The shape of a BVH2 over a primitive count, with node 0 its root.
-struct tree_layout
-{
-    u32 node_count = 0;
-
-    /// The leaves are the last nodes, [first_leaf, node_count).
-    u32 first_leaf = 0;
-    u32 leaf_count = 0;
-
-    /// Each level's inner nodes, bottom-up, which is the order their boxes are computed in.
-    struct level
-    {
-        u32 first = 0;
-        u32 count = 0;
-    };
-    cc::vector<level> levels;
-
-    /// Two units per node, their boxes zero and their `w` words set.
-    cc::vector<u32> node_words;
-};
-
-/// Leaves over consecutive runs of up to 4 primitives, then each level pairing consecutive nodes, an odd one moving up unpaired.
-[[nodiscard]] tree_layout lay_out_tree(u32 primitive_count)
-{
-    CC_ASSERT(primitive_count > 0, "a tree holds at least one primitive");
-    auto const leaves = (primitive_count + max_leaf_primitives - 1) / max_leaf_primitives;
-
-    // Nodes are made bottom-up, so the one made k-th ends up at node_count - 1 - k, and the root, made last, at 0.
-    struct children
-    {
-        u32 left = 0;
-        u32 right = 0;
-    };
-    auto inner = cc::vector<children>();
-    auto made_levels = cc::vector<tree_layout::level>();
-    auto current = cc::vector<u32>();
-    for (auto leaf = u32(0); leaf < leaves; ++leaf)
-        current.push_back(leaf);
-    auto made = leaves;
-    while (current.size() > 1)
-    {
-        auto next = cc::vector<u32>();
-        auto const first = made;
-        for (isize i = 0; i < current.size(); i += 2)
-        {
-            if (i + 1 < current.size())
-            {
-                inner.push_back({.left = current[i], .right = current[i + 1]});
-                next.push_back(made++);
-            }
-            else
-                next.push_back(current[i]);
-        }
-        made_levels.push_back({.first = first, .count = made - first});
-        current = cc::move(next);
-    }
-
-    auto tree = tree_layout{.node_count = made, .first_leaf = made - leaves, .leaf_count = leaves};
-    auto const final_index = [&](u32 made_index) { return tree.node_count - 1 - made_index; };
-    tree.node_words = cc::vector<u32>::create_filled(isize(tree.node_count) * 8, u32(0));
-    for (auto leaf = u32(0); leaf < leaves; ++leaf)
-    {
-        auto const node = isize(final_index(leaf));
-        auto const first = leaf * max_leaf_primitives;
-        tree.node_words[node * 8 + 3] = first;
-        tree.node_words[node * 8 + 7] = cc::min(max_leaf_primitives, primitive_count - first) | leaf_flag;
-    }
-    for (isize k = 0; k < inner.size(); ++k)
-    {
-        auto const node = isize(final_index(leaves + u32(k)));
-        tree.node_words[node * 8 + 3] = final_index(inner[k].left);
-        tree.node_words[node * 8 + 7] = final_index(inner[k].right);
-    }
-    for (auto const& l : made_levels)
-        tree.levels.push_back({.first = tree.node_count - (l.first + l.count), .count = l.count});
-    return tree;
-}
+using tree_layout = sg::impl::acceleration_tree;
 
 void check_build_flags(sg::accel_build_flags flags)
 {
@@ -145,44 +68,6 @@ struct input_range
     };
 }
 
-[[nodiscard]] u32 float_bits(float f)
-{
-    return cc::bit_cast<u32>(f);
-}
-
-/// The inverse of a row-major 3x4 affine transform, row-major 3x4 again.
-/// A singular one, such as an instance scaled to nothing, inverts to zero, which moves every ray to the origin and away from every hit it could not have had.
-void invert_affine(float const (&m)[12], float (&out)[12])
-{
-    auto const a = [&](int r, int c) { return double(m[r * 4 + c]); };
-    double inv[3][3] = {
-        {a(1, 1) * a(2, 2) - a(1, 2) * a(2, 1), a(0, 2) * a(2, 1) - a(0, 1) * a(2, 2),
-         a(0, 1) * a(1, 2) - a(0, 2) * a(1, 1)},
-        {a(1, 2) * a(2, 0) - a(1, 0) * a(2, 2), a(0, 0) * a(2, 2) - a(0, 2) * a(2, 0),
-         a(0, 2) * a(1, 0) - a(0, 0) * a(1, 2)},
-        {a(1, 0) * a(2, 1) - a(1, 1) * a(2, 0), a(0, 1) * a(2, 0) - a(0, 0) * a(2, 1),
-         a(0, 0) * a(1, 1) - a(0, 1) * a(1, 0)},
-    };
-    auto const det = a(0, 0) * inv[0][0] + a(0, 1) * inv[1][0] + a(0, 2) * inv[2][0];
-    if (det == 0.0)
-    {
-        for (auto& v : out)
-            v = 0.0f;
-        return;
-    }
-    for (auto r = 0; r < 3; ++r)
-    {
-        auto translation = 0.0;
-        for (auto c = 0; c < 3; ++c)
-        {
-            inv[r][c] /= det;
-            out[r * 4 + c] = float(inv[r][c]);
-        }
-        for (auto c = 0; c < 3; ++c)
-            translation -= inv[r][c] * a(c, 3);
-        out[r * 4 + 3] = float(translation);
-    }
-}
 } // namespace
 
 // -- the pool, as a list records against it --
@@ -396,7 +281,7 @@ sg::blas_handle webgpu_command_list::raytracing_build_blas_triangles(cc::span<sg
         }
     }
 
-    auto const tree = lay_out_tree(triangle_count);
+    auto const tree = sg::impl::lay_out_acceleration_tree(triangle_count);
     auto const records = 1 + 2 * tree.node_count;
     // a BLAS with a moving geometry gives each triangle its pose at time 1 too, in units 3 to 5
     auto const stride = is_moving ? u32(6) : u32(3);
@@ -498,7 +383,7 @@ sg::blas_handle webgpu_command_list::raytracing_build_blas_aabbs(cc::span<sg::bl
         box_count += u32(g.aabb_count);
     }
 
-    auto const tree = lay_out_tree(box_count);
+    auto const tree = sg::impl::lay_out_acceleration_tree(box_count);
     auto const records = 1 + 2 * tree.node_count;
     auto const units = isize(records) + 2 * isize(box_count);
     auto const unit = allocate_acceleration_region(units);
@@ -555,7 +440,7 @@ sg::tlas_handle webgpu_command_list::raytracing_build_tlas(cc::span<sg::tlas_ins
     }
 
     auto const instance_count = u32(instances.size());
-    auto const tree = lay_out_tree(instance_count);
+    auto const tree = sg::impl::lay_out_acceleration_tree(instance_count);
     auto const records = 1 + 2 * tree.node_count;
     // a TLAS with a moving instance gives each instance its transform at time 1 too, in units 7 to 9
     auto const stride = is_moving ? isize(10) : isize(7);
@@ -567,30 +452,8 @@ sg::tlas_handle webgpu_command_list::raytracing_build_tlas(cc::span<sg::tlas_ins
     words.reserve(words.size() + 4 * stride * isize(instance_count));
     for (auto i = u32(0); i < instance_count; ++i)
     {
-        auto const& inst = instances[i];
-        auto const& blas = static_cast<webgpu_blas const&>(*inst.blas);
-
-        float world_to_object[12];
-        invert_affine(inst.transform, world_to_object);
-        for (auto const f : world_to_object)
-            words.push_back(float_bits(f));
-        for (auto const f : inst.transform)
-            words.push_back(float_bits(f));
-
-        auto instance_flags = u32(0);
-        if (inst.opaque_override.has_value())
-            instance_flags |= inst.opaque_override.value() ? 1u : 2u;
-        instance_flags |= u32(inst.cull_mode) << 2;
-        if (inst.transform_at_end.has_value())
-            instance_flags |= 1u << 4;
-        words.push_back(blas.unit());
-        words.push_back(inst.instance_id | (u32(inst.mask) << 24));
-        words.push_back(inst.hit_group_offset | (instance_flags << 24));
-        words.push_back(i);
-        if (is_moving)
-            for (auto k = 0; k < 12; ++k)
-                words.push_back(float_bits(inst.transform_at_end.has_value() ? inst.transform_at_end.value()[k]
-                                                                             : inst.transform[k]));
+        sg::impl::append_instance_words(words, instances[i], static_cast<webgpu_blas const&>(*instances[i].blas).unit(),
+                                        i, is_moving);
     }
     write_acceleration_region(unit, units, words);
     // leaf kind 3 is instances that move, whose box holds both of their transforms' boxes

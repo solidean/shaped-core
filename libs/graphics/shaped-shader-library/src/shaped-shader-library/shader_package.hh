@@ -57,4 +57,8 @@ struct slib::shader_package
 
     /// An SGL package's module directories, its own source dir first; their files are among `embedded_files`.
     cc::span<module_dir const> module_dirs;
+
+    /// `SOFTWARE_TRACE` in sc_add_shader_package: its inline traces take the software walk on dx12 and vulkan too, on every device.
+    /// They then see what moves, and nothing chooses this for a package that did not ask.
+    bool software_trace = false;
 };

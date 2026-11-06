@@ -62,6 +62,8 @@ public:
     [[nodiscard]] virtual bool writes_debug_in(check::stage, check::feature_set) const { return true; }
     /// The buffer's declaration at file scope, followed by an empty line.
     virtual void write_debug_buffer(cc::string& out) const = 0;
+    /// What an emulated trace reads, for a dialect whose `write_declarations` does not write it: WGSL's does.
+    virtual void write_acceleration_pool(cc::string&) const {}
     /// The declaration of `at` on a line of its own, where the reservation cannot declare it; empty where it can.
     [[nodiscard]] virtual cc::string debug_declare(cc::string_view) const { return {}; }
     /// The length of the buffer or `bytes` declared as `name`, in elements or bytes (CHK-460); MSL has none.

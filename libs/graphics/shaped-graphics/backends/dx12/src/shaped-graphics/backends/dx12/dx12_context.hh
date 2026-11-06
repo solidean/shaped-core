@@ -18,6 +18,7 @@
 #include <shaped-graphics/backends/dx12/dx12_epoch.hh>
 #include <shaped-graphics/backends/dx12/dx12_memory_heap.hh>
 #include <shaped-graphics/backends/dx12/dx12_query.hh>
+#include <shaped-graphics/backends/dx12/dx12_software_pool.hh>
 #include <shaped-graphics/backends/dx12/dx12_swapchain.hh>
 #include <shaped-graphics/backends/dx12/dx12_texture.hh>
 #include <shaped-graphics/backends/dx12/dx12_upload_async.hh>
@@ -195,6 +196,14 @@ public:
     /// Whether this device supports ray tracing (DXR tier >= 1.0), cached from CheckFeatureSupport at creation.
     /// That is the pipeline and acceleration structures, so a build_blas / build_tlas requires it.
     /// Surfaced through cmd.raytracing.is_supported().
+    [[nodiscard]] sg::impl::software_acceleration_pool* software_pool() override { return &_software_pool; }
+
+    [[nodiscard]] sg::feature_implementation implementation_of_supported(sg::feature f) const override
+    {
+        return f == sg::feature::ray_tracing_motion_blur ? sg::feature_implementation::emulated
+                                                         : sg::feature_implementation::native;
+    }
+
     [[nodiscard]] bool supports_raytracing() const { return _raytracing_tier >= D3D12_RAYTRACING_TIER_1_0; }
 
     /// Whether this device supports inline `RayQuery` (DXR tier >= 1.1).
@@ -272,8 +281,8 @@ public:
         case sg::feature::mesh_shader:
             return _mesh_shader;
         case sg::feature::ray_tracing_motion_blur:
-            // DXR has no motion
-            return false;
+            // DXR has no motion, so a package's SOFTWARE_TRACE walks it in software
+            return supports_ray_query();
         case sg::feature::vertex_pipeline_stores:
             // a UAV is visible to every stage of a root signature
             return true;
@@ -817,6 +826,7 @@ public:
     // Shader-visible CBV/SRV/UAV heap binding_groups allocate their descriptor tables from.
     // Initialized in create_dx12_context.
     dx12_descriptor_heap _descriptor_heap;
+    dx12_software_pool _software_pool = {*this};
 
     // Shader-visible SAMPLER heap dynamic samplers are written into — a separate heap, since D3D12 binds one of each type.
     // Same transient/persistent split as _descriptor_heap; initialized in create_dx12_context.

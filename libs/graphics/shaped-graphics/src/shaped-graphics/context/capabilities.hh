@@ -218,8 +218,9 @@ enum class sg::feature
 
     /// A TLAS instance (`tlas_instance::transform_at_end`) and a BLAS's vertices (`blas_triangles::later_poses`) may move
     /// over the frame, and a trace places them at its ray's time.
-    /// webgpu has it through the ray-query polyfill; DXR has no motion, and vulkan's VK_NV_ray_tracing_motion_blur
-    /// reaches no ray query, so neither native backend answers it yet, nor metal.
+    /// **Emulated wherever it is offered**: webgpu through its polyfill, dx12 and vulkan through a package's SOFTWARE_TRACE.
+    /// A native trace sees none of it, since DXR has no motion and vulkan's VK_NV_ray_tracing_motion_blur reaches no ray query.
+    /// metal does not offer it yet.
     ray_tracing_motion_blur,
 };
 

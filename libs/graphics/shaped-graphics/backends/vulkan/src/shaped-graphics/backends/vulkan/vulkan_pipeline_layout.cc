@@ -8,6 +8,7 @@
 #include <shaped-graphics/backends/vulkan/vulkan_view_desc.hh>
 #include <shaped-graphics/binding/impl/layout_hash.hh>
 #include <shaped-graphics/context/impl/debug_windows.hh>
+#include <shaped-graphics/raytracing/impl/software_trace.hh>
 
 namespace sg::backend::vulkan
 {
@@ -35,7 +36,17 @@ cc::result<vulkan_pipeline_layout_handle> vulkan_pipeline_layout::create(vulkan_
 
     // With diagnostics set 3 holds the debug window too, which an embedded-sampler set cannot
     auto const has_debug_window = sg::impl::debug_windows::k_enabled;
-    if (!desc.static_samplers.empty() || has_debug_window)
+    auto traces_in_software = false;
+    auto acceleration_bases = cc::vector<isize>();
+    auto acceleration_members = isize(0);
+    for (auto const& g : desc.groups)
+    {
+        acceleration_bases.push_back(acceleration_members);
+        acceleration_members += sg::impl::acceleration_count(g->bindings());
+        traces_in_software = traces_in_software || sg::impl::traces_in_software(g->bindings());
+    }
+    auto const has_regions = has_debug_window || traces_in_software;
+    if (!desc.static_samplers.empty() || has_regions)
     {
         auto reserved_bindings = cc::vector<VkDescriptorSetLayoutBinding>();
         for (isize i = 0; i < desc.static_samplers.size(); ++i)
@@ -60,7 +71,7 @@ cc::result<vulkan_pipeline_layout_handle> vulkan_pipeline_layout::create(vulkan_
                 .descriptorType = VK_DESCRIPTOR_TYPE_SAMPLER,
                 .descriptorCount = 1,
                 .stageFlags = VK_SHADER_STAGE_ALL,
-                .pImmutableSamplers = has_debug_window ? nullptr : &bound_samplers[i],
+                .pImmutableSamplers = has_regions ? nullptr : &bound_samplers[i],
             });
         if (has_debug_window)
             reserved_bindings.push_back(VkDescriptorSetLayoutBinding{
@@ -69,11 +80,27 @@ cc::result<vulkan_pipeline_layout_handle> vulkan_pipeline_layout::create(vulkan_
                 .descriptorCount = 1,
                 .stageFlags = VK_SHADER_STAGE_ALL,
             });
+        // The software walk's pool and roots, at the bindings EMIT-135 declares them at.
+        if (traces_in_software)
+        {
+            reserved_bindings.push_back(VkDescriptorSetLayoutBinding{
+                .binding = 17,
+                .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+                .descriptorCount = 1,
+                .stageFlags = VK_SHADER_STAGE_ALL,
+            });
+            reserved_bindings.push_back(VkDescriptorSetLayoutBinding{
+                .binding = 18,
+                .descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+                .descriptorCount = 1,
+                .stageFlags = VK_SHADER_STAGE_ALL,
+            });
+        }
 
         auto const reserved_info = VkDescriptorSetLayoutCreateInfo{
             .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
             .flags
-            = has_debug_window
+            = has_regions
                 ? VkDescriptorSetLayoutCreateFlags(VK_DESCRIPTOR_SET_LAYOUT_CREATE_DESCRIPTOR_BUFFER_BIT_EXT)
                 : VkDescriptorSetLayoutCreateFlags(VK_DESCRIPTOR_SET_LAYOUT_CREATE_DESCRIPTOR_BUFFER_BIT_EXT
                                                    | VK_DESCRIPTOR_SET_LAYOUT_CREATE_EMBEDDED_IMMUTABLE_SAMPLERS_BIT_EXT),
@@ -155,7 +182,9 @@ cc::result<vulkan_pipeline_layout_handle> vulkan_pipeline_layout::create(vulkan_
                                                            inline_bytes);
     result->_reserved_set_layout = reserved_set_layout;
     result->_empty_set_layout = empty_set_layout;
-    if (has_debug_window && reserved_set_layout != VK_NULL_HANDLE)
+    result->_acceleration_bases = cc::move(acceleration_bases);
+    result->_traces_in_software = traces_in_software;
+    if (has_regions && reserved_set_layout != VK_NULL_HANDLE)
     {
         auto size = VkDeviceSize(0);
         ctx._descriptor_functions.get_layout_size(ctx._device, reserved_set_layout, &size);
@@ -170,8 +199,18 @@ cc::result<vulkan_pipeline_layout_handle> vulkan_pipeline_layout::create(vulkan_
             result->_reserved_sampler_offsets.push_back(isize(offset));
         }
         auto offset = VkDeviceSize(0);
-        ctx._descriptor_functions.get_binding_offset(ctx._device, reserved_set_layout, 19, &offset);
-        result->_debug_window_offset = isize(offset);
+        if (has_debug_window)
+        {
+            ctx._descriptor_functions.get_binding_offset(ctx._device, reserved_set_layout, 19, &offset);
+            result->_debug_window_offset = isize(offset);
+        }
+        if (traces_in_software)
+        {
+            ctx._descriptor_functions.get_binding_offset(ctx._device, reserved_set_layout, 17, &offset);
+            result->_pool_offset = isize(offset);
+            ctx._descriptor_functions.get_binding_offset(ctx._device, reserved_set_layout, 18, &offset);
+            result->_roots_offset = isize(offset);
+        }
     }
     return vulkan_pipeline_layout_handle(cc::move(result));
 }
@@ -180,7 +219,8 @@ void vulkan_pipeline_layout::bind_reserved(VkCommandBuffer buffer,
                                            VkPipelineBindPoint bind_point,
                                            sg::raw_buffer_handle const& debug_window) const
 {
-    if (_reserved_set_layout == VK_NULL_HANDLE)
+    // a software trace's set 3 holds that op's roots, so each op binds it (bind_software_trace)
+    if (_reserved_set_layout == VK_NULL_HANDLE || _traces_in_software)
         return;
     if (!_reserved_has_regions)
     {
@@ -204,20 +244,7 @@ void vulkan_pipeline_layout::bind_reserved(VkCommandBuffer buffer,
                 write_sampler_descriptor(_ctx, _reserved_samplers[i], base + _reserved_sampler_offsets[i]);
 
             auto const& window = static_cast<vulkan_buffer const&>(*debug_window);
-            auto address = VkDescriptorAddressInfoEXT{
-                .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_ADDRESS_INFO_EXT,
-                .address = window._device_address,
-                .range = VkDeviceSize(debug_window->size_in_bytes()),
-                .format = VK_FORMAT_UNDEFINED,
-            };
-            auto const info = VkDescriptorGetInfoEXT{
-                .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_GET_INFO_EXT,
-                .type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-                .data = {.pStorageBuffer = &address},
-            };
-            _ctx._descriptor_functions.get_descriptor(_ctx._device, &info,
-                                                      size_t(descriptor_size_of(_ctx, sg::binding_type::buffer)),
-                                                      base + _debug_window_offset);
+            write_storage_descriptor(window._device_address, debug_window->size_in_bytes(), base + _debug_window_offset);
             auto const at = range.offset;
             regions.push_back({.window = debug_window.get(), .range = cc::move(range)});
             return at;
@@ -225,6 +252,65 @@ void vulkan_pipeline_layout::bind_reserved(VkCommandBuffer buffer,
 
     u32 const buffer_index = 0;
     auto const vk_offset = VkDeviceSize(offset);
+    _ctx._descriptor_functions.cmd_set_descriptor_offsets(buffer, bind_point, _layout, u32(sg::reserved_binding_group),
+                                                          1, &buffer_index, &vk_offset);
+}
+
+void vulkan_pipeline_layout::write_storage_descriptor(VkDeviceAddress address, isize size_in_bytes, byte* at) const
+{
+    auto range = VkDescriptorAddressInfoEXT{
+        .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_ADDRESS_INFO_EXT,
+        .address = address,
+        .range = VkDeviceSize(size_in_bytes),
+        .format = VK_FORMAT_UNDEFINED,
+    };
+    auto const info = VkDescriptorGetInfoEXT{
+        .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_GET_INFO_EXT,
+        .type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+        .data = {.pStorageBuffer = &range},
+    };
+    _ctx._descriptor_functions.get_descriptor(_ctx._device, &info,
+                                              size_t(descriptor_size_of(_ctx, sg::binding_type::buffer)), at);
+}
+
+void vulkan_pipeline_layout::bind_software_trace(VkCommandBuffer buffer,
+                                                 VkPipelineBindPoint bind_point,
+                                                 sg::raw_buffer_handle const& debug_window,
+                                                 sg::impl::software_pool_storage const& pool,
+                                                 cc::span<u32 const> roots) const
+{
+    // The set and the roots it names, in one transient range of the heap, which is a uniform buffer for this.
+    // 256 is the largest minUniformBufferOffsetAlignment Vulkan allows.
+    constexpr auto roots_alignment = isize(256);
+    auto const roots_bytes = roots.size() * isize(sizeof(u32));
+    auto range = _ctx._descriptor_heap.allocate_transient(_reserved_size + roots_alignment + roots_bytes);
+    CC_ASSERT(range.size > 0, "the descriptor heap has no room for set 3");
+    auto* const base = _ctx._descriptor_heap.mapped_at(range);
+    for (isize i = 0; i < _reserved_samplers.size(); ++i)
+        write_sampler_descriptor(_ctx, _reserved_samplers[i], base + _reserved_sampler_offsets[i]);
+    if (debug_window != nullptr)
+        write_storage_descriptor(static_cast<vulkan_buffer const&>(*debug_window)._device_address,
+                                 debug_window->size_in_bytes(), base + _debug_window_offset);
+    write_storage_descriptor(pool.gpu_address, pool.size_in_bytes, base + _pool_offset);
+
+    auto const roots_at = cc::align_up(range.offset + _reserved_size, roots_alignment);
+    cc::memcpy(base + (roots_at - range.offset), roots.data(), size_t(roots_bytes));
+    auto uniform = VkDescriptorAddressInfoEXT{
+        .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_ADDRESS_INFO_EXT,
+        .address = _ctx._descriptor_heap.device_address() + VkDeviceAddress(roots_at),
+        .range = VkDeviceSize(roots_bytes),
+        .format = VK_FORMAT_UNDEFINED,
+    };
+    auto const info = VkDescriptorGetInfoEXT{
+        .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_GET_INFO_EXT,
+        .type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+        .data = {.pUniformBuffer = &uniform},
+    };
+    _ctx._descriptor_functions.get_descriptor(
+        _ctx._device, &info, size_t(descriptor_size_of(_ctx, sg::binding_type::constants_buffer)), base + _roots_offset);
+
+    u32 const buffer_index = 0;
+    auto const vk_offset = VkDeviceSize(range.offset);
     _ctx._descriptor_functions.cmd_set_descriptor_offsets(buffer, bind_point, _layout, u32(sg::reserved_binding_group),
                                                           1, &buffer_index, &vk_offset);
 }

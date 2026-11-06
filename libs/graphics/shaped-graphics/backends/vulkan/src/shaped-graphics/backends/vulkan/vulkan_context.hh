@@ -27,6 +27,7 @@
 #include <shaped-graphics/backends/vulkan/vulkan_raytracing_pipeline.hh>
 #include <shaped-graphics/backends/vulkan/vulkan_raytracing_shader_table.hh>
 #include <shaped-graphics/backends/vulkan/vulkan_sampler.hh>
+#include <shaped-graphics/backends/vulkan/vulkan_software_pool.hh>
 #include <shaped-graphics/backends/vulkan/vulkan_staging_binding_group.hh>
 #include <shaped-graphics/backends/vulkan/vulkan_swapchain.hh>
 #include <shaped-graphics/backends/vulkan/vulkan_texture.hh>
@@ -211,6 +212,14 @@ public:
         }
     }
 
+    [[nodiscard]] sg::impl::software_acceleration_pool* software_pool() override { return &_software_pool; }
+
+    [[nodiscard]] sg::feature_implementation implementation_of_supported(sg::feature f) const override
+    {
+        return f == sg::feature::ray_tracing_motion_blur ? sg::feature_implementation::emulated
+                                                         : sg::feature_implementation::native;
+    }
+
     // Runs shutdown() before the base dtor asserts it, and swallows what shutdown() throws.
     // A lost device makes the drain inside shutdown() throw sg::device_lost_exception, and a destructor reached while
     // that same exception is unwinding would then call std::terminate — turning a recoverable device loss into an
@@ -384,8 +393,9 @@ public:
         case sg::feature::view_instancing:
             return _view_instancing;
         case sg::feature::ray_tracing_motion_blur:
-            // VK_NV_ray_tracing_motion_blur reaches a pipeline's trace alone, which no SGL text writes yet
-            return false;
+            // VK_NV_ray_tracing_motion_blur reaches a pipeline's trace alone, which no SGL text writes yet, so a
+            // package's SOFTWARE_TRACE walks it in software
+            return is_raytracing_supported();
         case sg::feature::vertex_pipeline_stores:
             return _vertex_pipeline_stores;
         // SPIR-V's `Coherent` decoration is core, and storage-image atomics on r32 integer formats are required.
@@ -888,6 +898,7 @@ public:
 
     /// Descriptors live here, and a binding group is a range of it.
     vulkan_descriptor_heap _descriptor_heap;
+    vulkan_software_pool _software_pool = {*this};
 
     /// The objects a descriptor can only name, rather than describe inline.
     /// Both are caches for the context's life: a view or sampler an sg value type describes has no lifetime of its

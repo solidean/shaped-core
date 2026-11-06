@@ -162,6 +162,7 @@ The prelude's `trace` holds both through an internal `by_target(native, emulated
 * **The native form** steps through the target's own query, HLSL's `RayQuery` or MSL's `intersection_query`, with each decision inlined into the branch of its candidate.
 * **The emulated form** is a software traversal written in SGL, in the prelude and `@internal` (CHK-323), over sg's acceleration pool.
   WGSL writes it, since WebGPU has no query, and the interpreter runs it too, so a `test` traces against a pool its driver binds (EVAL-95).
+  HLSL writes it where a compile asks, which a package's `SOFTWARE_TRACE` does and nothing does on its own.
   Its pool layout is an internal contract between sg and the prelude, [raytracing-polyfill.md](../raytracing-polyfill.md).
 * `t` and the barycentrics of the two forms agree within a tolerance, never bit for bit, and the emulated triangle test is not watertight yet.
 
@@ -402,8 +403,9 @@ A pipeline there waits for a polyfill, which the [incubator](incubator/raytracin
 **Motion blur** is a property of what sg builds, and `time` is the whole of a shader's side, so no shader changes when a target gains hardware.
 An instance may move from one transform at time 0 to another at time 1, and a triangle's vertices from one pose to another.
 The emulated trace places both at the ray's `time` (EVAL-130, EVAL-132), so webgpu and a test on the interpreter see motion.
+So do dx12 and vulkan, in a package that takes `SOFTWARE_TRACE`, whose inline traces are the emulated form on every device (EMIT-135).
 DXR has none, and vulkan's `VK_NV_ray_tracing_motion_blur` reaches a pipeline's trace alone, never a ray query, so neither native trace takes the time yet.
-sg refuses a moving instance or geometry where the context has no `ray_tracing_motion_blur`, which only webgpu answers today.
+sg refuses a moving instance or geometry where a build does not write the emulated form, and a group that binds one to a native trace; metal has neither yet.
 
 **metal** runs a pipeline as a kernel that intersects, then calls a miss or a closest hit through sg's tables (EMIT-139, CHK-345).
 

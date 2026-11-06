@@ -66,6 +66,7 @@ sc_add_shader_package(
     ...
     LANGUAGE    sgl
     MODULE_DIRS shaders/modules         # more module directories; SOURCE_DIR always is one
+    SOFTWARE_TRACE                      # SGL: inline traces take the software walk on dx12 and vulkan too, on every device, and see what moves
     SHADERS
         module:view                     # export module `view`: its types into <NAMESPACE>::view
         blit.sgl:*)                     # `use view` in it resolves through the module directories

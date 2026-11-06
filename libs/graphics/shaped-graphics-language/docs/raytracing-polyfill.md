@@ -1,7 +1,8 @@
 # The ray-query polyfill: pool, layout and binding
 
-For whoever works on the webgpu ray-query polyfill, on either side of it.
-sg's webgpu backend builds acceleration structures into the layout below, and SGL's prelude traverses them.
+For whoever works on the ray-query polyfill, on either side of it.
+sg builds acceleration structures into the layout below, and SGL's prelude traverses them.
+webgpu always does, and dx12 and vulkan do for a package that takes `SOFTWARE_TRACE`.
 **This is an internal contract, not part of the language.**
 A shader that reads the pool other than through `trace` is undefined, and nothing here promises stability across versions.
 Both sides change together, in one commit.
@@ -24,6 +25,15 @@ Binding 0 is the inline constants and bindings 1 to 16 are the bound samplers, s
   An entry point lists at most 16 acceleration members.
 * **The acceleration member itself takes no WGSL binding.**
   sg's webgpu layout keeps its slot in the group's numbering, so every other member's slot is what it is on the other targets.
+
+dx12 and vulkan carry the same two where a group's binding says `traced_in_software`, which is the one way a layout pays for them.
+
+* **dx12:** a root SRV at `t0, space12`, and 16 root constants at `b0, space12`, set right before each op.
+* **vulkan:** bindings 17 and 18 of set 3, a storage buffer and a uniform buffer.
+  Such a set is written per op into a transient range of the descriptor heap, which also holds the roots it names.
+  A run of ops under one pipeline and one set of roots shares a range.
+* **The pool** is one host-visible buffer per context, written as a build records.
+  Growing it copies it to a new one, and the old one stays until no recorded work can read it.
 
 ## Units
 
@@ -103,7 +113,8 @@ A box, 2 units:
 
 ## Building
 
-Every build is recorded compute work, ordered like any other command, so a trace recorded after it sees the result.
+On webgpu every build is recorded compute work, ordered like any other command, so a trace recorded after it sees the result.
+On dx12 and vulkan a build computes the same words on the CPU, boxes included, from the description's `cpu_*` spans.
 
 * **The tree is built over the primitive order, with no spatial sort.**
   Consecutive runs of up to 4 primitives are the leaves, and each level above pairs consecutive nodes.

@@ -125,7 +125,12 @@ public:
 
     vulkan_context* _ctx = nullptr; // creating context — outlives this group (for the deferred free)
     vulkan_binding_group_layout_handle layout;
-    vulkan_descriptor_range range;                         // this group's descriptors within the heap
+    vulkan_descriptor_range range; // this group's descriptors within the heap
+    /// Each acceleration member's root in the software pool, by binding index; 0, the empty TLAS, for a null one.
+    /// Filled only by a binding traced in software, and `software_tlases` keeps their regions alive.
+    cc::vector<u32> acceleration_roots;
+    cc::vector<sg::tlas_handle> software_tlases;
+
     cc::vector<vulkan_buffer_handle> referenced;           // keeps the bound buffers alive while the group lives
     cc::vector<vulkan_texture_handle> referenced_textures; // keeps the bound textures alive while the group lives
     cc::vector<vulkan_hazard_view> hazard_views;           // (buffer + view class) — declared for hazards at dispatch

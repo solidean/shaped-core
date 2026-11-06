@@ -166,6 +166,11 @@ struct memory_requirements; // value type (see memory/memory_heap.hh)
 
 } // namespace sg
 
+namespace sg::impl
+{
+class software_acceleration_pool; // what an opted-in dx12 or vulkan build writes into (see raytracing/impl/software_trace.hh)
+}
+
 /// Lifetime mode of a resource — a hard contract, not a hint.
 /// `persistent` lives until its handles are released; `transient` expires when its epoch retires.
 /// Using a transient resource past that is a hard error, and the backend may recycle it immediately.

@@ -2155,6 +2155,14 @@ sgl::emit::impl::written_text sgl::emit::impl::write_text(plan& p, dialect const
                   d.description());
     w.out += "// Generated: the SGL source is what to edit.\n\n";
     d.write_declarations(w.out, p);
+    for (auto const& x : p.e.exprs)
+        if (auto const* const call = x.node.try_as<flat_call>())
+            if (auto const* const record = p.m.builtin_function(call->intrinsic);
+                record != nullptr && record->name == "acceleration_pool_load")
+            {
+                d.write_acceleration_pool(w.out);
+                break;
+            }
     if (p.e.written_words > 0 && !d.declares_workgroup_in_function())
         w.out.appendf("{}\n\n", written_shadow_declaration(d.language(), p.e.written_words));
     write_helpers(w.out, p, d);

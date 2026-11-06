@@ -482,11 +482,15 @@ So `{float3; float}` is written with `packed_float3`: the `float` is at byte 12 
 * **EMIT-138** A member whose name is the name of a struct type one of its struct's members has is minted with trailing underscores, on every target ([why](why/emitting.md#emit-138)).
   In HLSL and MSL the member would hide the type from the members after it, so `ray: ray` is written `ray ray_;`.
 * **EMIT-135** A trace's native form is what HLSL and MSL write, and its emulated form what WGSL writes: the legalizer keeps the one its target has ([why](why/emitting.md#emit-135)).
+  A compile with `software_trace` keeps the emulated form on HLSL too, and MSL stays native since sg's metal backend keeps no pool.
   An acceleration member is `RaytracingAccelerationStructure` in HLSL and `instance_acceleration_structure` in MSL, and WGSL declares none: it keeps its slot and takes no binding.
   An entry point whose code reads sg's acceleration pool declares it and the dispatch's roots in sg's reserved group, beside the inline constants:
   `@group(3) @binding(17) var<storage, read> sg_acceleration_pool: array<vec4u>;` and `@group(3) @binding(18) var<uniform> sg_acceleration_roots: array<vec4u, 4>;`.
   The root of the entry point's k-th acceleration member (CHK-325) is `sg_acceleration_roots[k / 4][k % 4]`.
   So WGSL traces the first 16 acceleration members, and a trace of a later one is `too-many-acceleration-structures`.
+  HLSL's are the same pool and roots, as a `StructuredBuffer<uint4>` and a `cbuffer` holding `sg_acceleration_roots`.
+  dx12 places them at `register(t0, space12)` and `register(b0, space12)`, and vulkan at `[[vk::binding(17, 3)]]` and `[[vk::binding(18, 3)]]`.
+  The member stays declared there, and takes the same 16-member limit.
 * **EMIT-159** HLSL's `RayQuery` takes a trace's flags as its template where they are a constant, each by its `RAY_FLAG_` name, and `RAY_FLAG_NONE` where they are not.
   The template is ORed with the trace's own flags, so naming them there changes nothing but what a driver may specialize on.
   Forced opaque, the native form only steps the query to its end, since the target commits every candidate itself and none is left to decide.

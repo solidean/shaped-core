@@ -81,6 +81,9 @@ public:
         return supports(f) ? implementation_of_supported(f) : feature_implementation::absent;
     }
 
+    /// The pool a build with `accel_build_flag::software_trace` writes into, where this backend keeps one: dx12 and vulkan.
+    [[nodiscard]] virtual impl::software_acceleration_pool* software_pool() { return nullptr; }
+
     /// What `shader` needs that this context lacks, which is what building a pipeline from it would be refused for.
     /// Empty for a shader whose `required_features` is unknown: nothing about it can be named.
     [[nodiscard]] feature_set missing_features(compiled_shader const& shader) const;

@@ -140,6 +140,8 @@ struct slib::shader_source_description
     /// The oldest MSL version the text compiles at, as `-std=` spells it: "metal3.2"; empty takes the toolchain's default.
     /// Only a metal compiler building a metallib reads it, since the source arm's driver compiles at the device's newest.
     cc::string metal_language_version;
+    /// The package's `SOFTWARE_TRACE`, which only SGL reads: an inline trace takes the software walk on HLSL too.
+    bool software_trace = false;
 };
 
 /// One compilation edge: `source_language` -> `target_format`.

@@ -58,6 +58,18 @@ public:
                           "return n;\n}}\n",
                           name);
     }
+    /// EMIT-135: an emulated trace reads sg's pool and the dispatch's roots, as WGSL's does.
+    void write_acceleration_pool(cc::string& out) const override
+    {
+        if (_is_vulkan)
+            out += "[[vk::binding(17, 3)]] StructuredBuffer<uint4> sg_acceleration_pool;\n"
+                   "[[vk::binding(18, 3)]] cbuffer sg_acceleration_roots_block\n"
+                   "{\n    uint4 sg_acceleration_roots[4];\n};\n\n";
+        else
+            out += "StructuredBuffer<uint4> sg_acceleration_pool : register(t0, space12);\n"
+                   "cbuffer sg_acceleration_roots_block : register(b0, space12)\n"
+                   "{\n    uint4 sg_acceleration_roots[4];\n};\n\n";
+    }
     void write_debug_buffer(cc::string& out) const override
     {
         if (_is_vulkan)

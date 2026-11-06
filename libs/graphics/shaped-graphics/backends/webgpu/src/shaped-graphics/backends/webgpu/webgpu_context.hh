@@ -207,7 +207,9 @@ public:
 
     [[nodiscard]] sg::feature_implementation implementation_of_supported(sg::feature f) const override
     {
-        return f == sg::feature::ray_query ? sg::feature_implementation::emulated : sg::feature_implementation::native;
+        return f == sg::feature::ray_query || f == sg::feature::ray_tracing_motion_blur
+                 ? sg::feature_implementation::emulated
+                 : sg::feature_implementation::native;
     }
 
     /// Routes this device's validation and out-of-memory errors to `callback` too, as they arrive.

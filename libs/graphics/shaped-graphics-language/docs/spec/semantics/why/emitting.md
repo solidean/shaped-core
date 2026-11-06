@@ -265,6 +265,9 @@ So the trace is SGL source the prelude holds twice, a native and an emulated for
 The emulated form reads one pool per context rather than a binding per structure, since a traversal walks from a TLAS into BLASes nothing else binds.
 The acceleration member keeps its slot and takes no binding, so every other member's slot is what it is on the other targets, and one layout serves all four.
 
+HLSL takes the emulated form only by request, because a device's hardware must not decide how fast a shipped trace runs.
+A choice made per device would make the same build slow on some machines with nothing in its source saying so.
+
 ## EMIT-137
 
 DXR's payload qualifiers are a promise the driver optimizes by: a field nobody writes after the caller need not travel back.

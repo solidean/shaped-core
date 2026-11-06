@@ -111,6 +111,8 @@ class Manifest:
     namespace: str = ""
     source_dir: Path = Path()
     language: str = "hlsl"
+    # SOFTWARE_TRACE: its inline traces take the software walk on dx12 and vulkan too.
+    software_trace: bool = False
     shaders: list[str] = field(default_factory=list)
     # An SGL package's module directories beyond its source dir, absolute.
     module_dirs: list[Path] = field(default_factory=list)
@@ -173,6 +175,8 @@ def read_manifest(path: Path) -> Manifest:
             manifest.source_dir = Path(value)
         elif key == "LANGUAGE":
             manifest.language = value
+        elif key == "SOFTWARE_TRACE":
+            manifest.software_trace = True
         elif key == "SHADER":
             manifest.shaders.append(value)
         elif key == "MODULE_DIR":
@@ -966,6 +970,8 @@ def emit_source(manifest: Manifest, files: list[ShaderFile], bindings: list[Bind
     out.append("        .definitions = k_definitions,\n")
     if manifest.language == "sgl":
         out.append("        .module_dirs = k_module_dirs,\n")
+    if manifest.software_trace:
+        out.append("        .software_trace = true,\n")
     out.append("    };\n")
     out.append("    return pkg;\n")
     out.append("}\n")
@@ -1180,6 +1186,8 @@ def main() -> int:
         if manifest.language == "sgl":
             check_sgl_namespaces(manifest, entries)
             sgl_host_code.check_names(manifest.name, entries.sgl)
+            if manifest.software_trace:
+                sgl_host_code.mark_software_trace(entries.sgl)
         header = emit_header(manifest, entries)
         source = emit_source(manifest, entries.files, entries.bindings, embedded, entries.sgl)
         # each exported module in a namespace, a header and a source of its own, so its names are checked apart

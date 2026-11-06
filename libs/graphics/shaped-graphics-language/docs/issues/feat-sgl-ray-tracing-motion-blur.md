@@ -6,7 +6,7 @@ refs:
   - file: libs/graphics/shaped-graphics-language/docs/raytracing-polyfill.md
 ---
 
-# Ray-traced motion blur: hardware where a device has it, and software on the dx12 and vulkan devices without
+# Ray-traced motion blur: hardware where a device has it, and software by request on dx12 and vulkan
 
 The aim is timed transforms and timed vertices at the hardware level once SGL reaches it, with a software walk on everything else.
 `ray.time` is the whole of the shader's side, so a shader does not change when a target gains hardware.
@@ -20,18 +20,22 @@ Done, on webgpu and the interpreter:
   A list of poses leaves room for Metal's motion, which takes several.
 * **The boxes.** A BLAS box holds both poses and a TLAS box both transforms of that, so they hold every pose at every time.
 
+Done, on dx12 and vulkan, by request:
+
+* **An inline trace of a package that takes `SOFTWARE_TRACE`**, on every device, so a device's hardware never decides how fast a build runs (EMIT-135).
+  It is a build's choice three times over: the package, `accel_build_flag::software_trace`, and the `cpu_*` spans a build reads.
+  A package that did not opt in is refused a TLAS that moves when its group is made, naming the option.
+* **The pool** is host-visible and written at record time, which needs no kernel, and sg compiles none on these backends.
+
 Left:
 
-* **The software walk on dx12 and vulkan.** Neither answers `ray_tracing_motion_blur`, so a moving instance or geometry there is refused at the build.
-  An inline trace could take the walk the prelude already has, and three things stand in the way:
-  * **What picks the walk.** The legalizer keeps a trace's form by target (EMIT-135), so dx12 and vulkan always write the native one.
-    Choosing the emulated form needs an input of the compile: a shader `option`, a feature, or a mode of the package.
-    Whichever it is decides who pays when one device has motion and another does not, so it is a language and host question, not an emitter's.
-  * **The pool.** sg's pool is webgpu's, and its build kernels are WGSL text a WebGPU device compiles.
-    The dx12 and vulkan backends compile no shader text: sg does not depend on a compiler (slib's edges do).
-    So they need those kernels as committed bytecode per backend, kernels in slib or shaped-rendering, or a CPU build from data the caller also hands over.
-  * **The binding.** HLSL needs EMIT-135's pool and roots in sg's reserved group, which dx12's root signature and vulkan's set layout then carry.
-  A ray-tracing pipeline's trace has no emulated form and stays refused.
+* **Reading a build's input off the GPU**, so a caller need not keep its geometry on the CPU.
+  It would need the walk's build kernels as bytecode per backend, or a readback ahead of the build.
+* **A staging group or a binding array traced in software**: a snapshot carries descriptors, and the roots are none.
+* **A ray-tracing pipeline's `trace_ray`** has no emulated form on dx12 and vulkan, and sees no motion.
+  An inline trace inside a ray-tracing stage of an opted-in package does.
+* **Tracing beside native:** a hybrid that takes the native trace for what stands still and the walk for what moves would pay software speed less often.
+
 * **The hardware paths, none of which ran here.** Neither GPU of the development machine, an Intel Arc B580 and an AMD iGPU, has any of them.
   * **vulkan:** `VK_NV_ray_tracing_motion_blur` (NVIDIA only) takes both timed transforms and timed vertices, and reaches a pipeline's `traceRayMotionNV`, never a ray query.
     DXC has no HLSL for it, so a text body with `vk::ext_instruction` is one route.
