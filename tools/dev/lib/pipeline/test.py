@@ -21,6 +21,7 @@ from ..core import console, crash_reports, profile, ui
 from ..core.logs import parse_junit, step_fields, write_sidecar, write_step_junit
 from ..core.models import Preset, Target
 from ..core.process import emsdk_env, run_step
+from ..toolchain import monado
 from ..toolchain import jsruntime as jsr
 from ..project import targets as targets_mod
 from . import sites
@@ -216,6 +217,7 @@ def test(
         preset_env = _sanitizer_path_env(preset.build_dir)
         preset_env.update(_lsan_suppression_env())
         preset_env.update(_tsan_suppression_env())
+        preset_env.update(monado.test_env())
 
         # Emscripten test artifacts are .js/.wasm that run under node, which the emsdk environment puts on PATH.
         # Native presets keep the inherited environment.

@@ -250,6 +250,18 @@ uv run dev.py install vulkan-sdk   # into ~/tools/vulkan-sdk/<version>, checked 
 
 **Every dev.py run then points `VULKAN_SDK` at it**, so no environment variable is yours to set.
 On Linux it also adds the SDK's layers to `VK_ADD_LAYER_PATH`, since an unpacked tarball registers none; the Windows installer registers its own.
+
+### Monado
+
+Monado is an OpenXR runtime with a simulated headset, which shaped-xr's session tests run on so that they need no hardware.
+Without it they skip.
+
+```bash
+uv run dev.py install monado   # builds the commit tools/monado.version pins into ~/tools/monado; Windows only so far
+```
+
+It builds from source with its dependencies through vcpkg, and needs the Vulkan SDK and MSVC.
+**`dev.py test` then selects it by itself, and nothing else does**: [testing.md](../libs/graphics/shaped-xr/docs/testing.md) says why.
 A `VULKAN_SDK` already set wins: an SDK you chose is never replaced by the pinned one.
 On Windows the SDK is LunarG's installer, run unattended.
 Its core component needs admin rights even when installing into your home, so `dev.py` starts it again elevated and Windows asks you to confirm once.

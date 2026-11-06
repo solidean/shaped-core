@@ -18,11 +18,11 @@ Decided in `epic-xr`: try it, and accept not having it if GitHub runners cannot 
 
 It works locally on Windows, built from Monado 2b7f5cb: `tests/session-test.cc` runs real sessions on vulkan and dx12, and `xr-cube` runs on both.
 [testing.md](../../libs/graphics/shaped-xr/docs/testing.md) is how, and what Monado does not prove.
-Without Monado selected those tests skip, so the default suite and CI still run none of them.
+`dev.py install monado` builds it, and `dev.py test` then selects it, on Windows.
+Without it those tests skip, so CI still runs none of them.
 
 ## Left
 
-- A way to get Monado that is not a hand-run build: `dev.py install monado` at a pinned commit, or a package on Linux.
-- dev.py or the suite selecting it, so the tests run without three environment variables by hand.
+- Monado on Linux: `dev.py install monado` refuses there, and a distro package or a build would do.
 - Whether Monado runs headless on GitHub's Linux and Windows runners at all, which also need a Vulkan device, likely lavapipe.
 - Reading a projection layer back on vulkan: the runtime's images have no `copy_src`, so only dx12 checks pixels today.
