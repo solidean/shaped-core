@@ -102,39 +102,20 @@ cc::result<sxr::runtime_report> sxr::inspect_runtime()
     if (XR_FAILED(xrGetSystem(instance, &system_info, &system_id)))
         return report;
 
-    // a struct may be chained only for an extension that was enabled
-    auto entity = XrSystemSpatialEntityPropertiesFB{.type = XR_TYPE_SYSTEM_SPATIAL_ENTITY_PROPERTIES_FB};
-    auto discovery = XrSystemSpaceDiscoveryPropertiesMETA{.type = XR_TYPE_SYSTEM_SPACE_DISCOVERY_PROPERTIES_META};
-    auto persistence = XrSystemSpacePersistencePropertiesMETA{.type = XR_TYPE_SYSTEM_SPACE_PERSISTENCE_PROPERTIES_META};
-    auto depth = XrSystemEnvironmentDepthPropertiesMETA{.type = XR_TYPE_SYSTEM_ENVIRONMENT_DEPTH_PROPERTIES_META};
-    auto raycast = XrSystemEnvironmentRaycastPropertiesMETA{.type = XR_TYPE_SYSTEM_ENVIRONMENT_RAYCAST_PROPERTIES_META};
-    auto properties = XrSystemProperties{.type = XR_TYPE_SYSTEM_PROPERTIES};
-    auto const chain = [&](char const* extension, auto& link)
-    {
-        if (!contains(report.extensions, extension))
-            return;
-        link.next = properties.next;
-        properties.next = &link;
-    };
-    chain(XR_FB_SPATIAL_ENTITY_EXTENSION_NAME, entity);
-    chain(XR_META_SPATIAL_ENTITY_DISCOVERY_EXTENSION_NAME, discovery);
-    chain(XR_META_SPATIAL_ENTITY_PERSISTENCE_EXTENSION_NAME, persistence);
-    chain(XR_META_ENVIRONMENT_DEPTH_EXTENSION_NAME, depth);
-    chain(XR_META_ENVIRONMENT_RAYCAST_EXTENSION_NAME, raycast);
-    if (auto const why
-        = impl::failed(instance, xrGetSystemProperties(instance, system_id, &properties), "xrGetSystemProperties");
-        !why.empty())
-        return cc::error(error_of(why));
-    report.system_name = cc::string(properties.systemName);
+    auto answer = impl::read_system(instance, system_id, enabled);
+    if (answer.has_error())
+        return cc::error(cc::move(answer).error());
+    report.system_name = cc::move(answer.value().name);
+    auto const& support = answer.value().support;
 
-    auto const feature = [&](char const* name, XrBool32 is_supported)
-    { report.features.push_back({.name = cc::string(name), .is_supported = is_supported == XR_TRUE}); };
-    feature("spatial entities (FB)", entity.supportsSpatialEntity);
-    feature("space discovery (META)", discovery.supportsSpaceDiscovery);
-    feature("space persistence (META)", persistence.supportsSpacePersistence);
-    feature("environment depth (META)", depth.supportsEnvironmentDepth);
-    feature("environment depth hand removal (META)", depth.supportsHandRemoval);
-    feature("environment raycast (META)", raycast.supportsEnvironmentRaycast);
+    auto const feature = [&](char const* name, bool is_supported)
+    { report.features.push_back({.name = cc::string(name), .is_supported = is_supported}); };
+    feature("spatial entities (FB)", support.spatial_entity);
+    feature("space discovery (META)", support.space_discovery);
+    feature("space persistence (META)", support.space_persistence);
+    feature("environment depth (META)", support.environment_depth);
+    feature("environment depth hand removal (META)", support.hand_removal);
+    feature("environment raycast (META)", support.environment_raycast);
 
     // the cross-vendor family answers by listing capabilities, not by a property struct
     auto capabilities = cc::vector<XrSpatialCapabilityEXT>();

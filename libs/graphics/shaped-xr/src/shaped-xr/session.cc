@@ -39,6 +39,10 @@ bool sxr::session::shows_passthrough() const
 {
     return false;
 }
+sxr::availability sxr::session::availability_of(capability) const
+{
+    return availability::unsupported;
+}
 cc::optional<sxr::frame> sxr::session::wait_frame()
 {
     return {};
@@ -435,7 +439,7 @@ cc::result<cc::unique_ptr<sxr::session>> sxr::system::create_session(sg::context
     }
 
     // ---- the room behind the frame, running from the start
-    if (desc.passthrough && _state->offers_passthrough)
+    if (desc.passthrough && offers(capability::passthrough))
     {
         auto const create_passthrough = impl::proc<PFN_xrCreatePassthroughFB>(instance, "xrCreatePassthroughFB");
         auto const create_layer = impl::proc<PFN_xrCreatePassthroughLayerFB>(instance, "xrCreatePassthroughLayerFB");
@@ -460,7 +464,7 @@ cc::result<cc::unique_ptr<sxr::session>> sxr::system::create_session(sg::context
             CC_LOG_WARNING("{}, so the frame shows no room behind it", why);
     }
     else if (desc.passthrough)
-        CC_LOG_WARNING("passthrough was asked of a session whose system did not ask for it, or whose runtime has none");
+        CC_LOG_WARNING("passthrough was asked of a session whose system did not want it, or whose runtime has none");
 
     CC_LOG_INFO("{} views of {} x {}", view_count, s->width, s->height);
     return cc::make_unique<session>(cc::move(s));
@@ -506,6 +510,15 @@ bool sxr::session::is_focused() const
 {
     return _state->current == XR_SESSION_STATE_FOCUSED;
 }
+sxr::availability sxr::session::availability_of(capability c) const
+{
+    // TEMPORARY(feat-android-apk): nothing asks a user yet, so needs_permission and denied wait for Android's permissions
+    for (auto const offered : _state->sys->offered)
+        if (offered == c)
+            return availability::available;
+    return availability::unsupported;
+}
+
 bool sxr::session::shows_passthrough() const
 {
     return _state->passthrough_layer != XR_NULL_HANDLE;

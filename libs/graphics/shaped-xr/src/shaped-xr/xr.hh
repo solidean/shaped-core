@@ -22,12 +22,35 @@ enum class sxr::graphics_api : sxr::u8
     dx12,
 };
 
+/// What an application can ask of a runtime beyond rendering.
+/// Each needs extensions the instance must be created with, so it is named in `system_description::wants`.
+enum class sxr::capability : sxr::u8
+{
+    passthrough,
+    environment_depth,
+    scene_planes,
+    scene_meshes,
+    anchors,
+    persistent_anchors,
+    hit_tests,
+};
+
+/// Whether a session may use a capability now.
+/// `needs_permission` and `denied` are the user's answer on a headset where one is asked, which no build reaches yet.
+enum class sxr::availability : sxr::u8
+{
+    unsupported, ///< the runtime or headset lacks it, or `system_description::wants` did not name it
+    needs_permission,
+    denied,
+    available,
+};
+
 struct sxr::system_description
 {
     cc::string application_name = "shaped-core";
     graphics_api api = graphics_api::vulkan;
-    /// Asks for the runtime's passthrough (`XR_FB_passthrough`) where it offers it, so a session may show the room.
-    bool wants_passthrough = false;
+    /// What sessions of this system may use; what the runtime lacks is left out rather than failing, see `system::offers`.
+    cc::vector<capability> wants;
 };
 
 /// What an action reports: a button, an axis, a stick, where something is, or a vibration it makes.
@@ -133,8 +156,9 @@ public:
     [[nodiscard]] cc::string_view runtime_name() const;
     [[nodiscard]] cc::string_view system_name() const;
     [[nodiscard]] graphics_api api() const;
-    /// Whether the runtime offers passthrough and the description asked for it.
-    [[nodiscard]] bool offers_passthrough() const;
+    /// Whether the description wanted `c`, the runtime lists all it needs, and the headset says it has it.
+    /// A runtime may still refuse a call, as a toggle in the Link app makes it do.
+    [[nodiscard]] bool offers(capability c) const;
 
     /// An sg context on the adapter the runtime composes on, with what the runtime requires of it.
     [[nodiscard]] cc::result<sg::context_handle> create_context() const;
@@ -176,6 +200,8 @@ public:
     [[nodiscard]] bool is_focused() const;
     /// Whether the room shows behind what is rendered.
     [[nodiscard]] bool shows_passthrough() const;
+    /// Whether this session may use `c` now, which unlike `system::offers` may depend on what the user allowed.
+    [[nodiscard]] availability availability_of(capability c) const;
 
     /// Blocks until the runtime paces the next frame, and begins it; none while the session is not running.
     /// A frame that is returned must be ended by `submit_frame`, whether or not it should render.

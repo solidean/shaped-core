@@ -48,7 +48,7 @@ sxr::graphics_api sxr::system::api() const
 {
     return graphics_api::vulkan;
 }
-bool sxr::system::offers_passthrough() const
+bool sxr::system::offers(capability) const
 {
     return false;
 }
@@ -71,6 +71,46 @@ cc::string sxr::impl::failed(XrInstance instance, XrResult result, cc::string_vi
     if (instance != XR_NULL_HANDLE)
         xrResultToString(instance, result, name);
     return cc::format("{} failed: {} ({})", what, name[0] != 0 ? name : "unknown", int(result));
+}
+
+cc::result<sxr::impl::system_answer> sxr::impl::read_system(XrInstance instance,
+                                                            XrSystemId system,
+                                                            cc::span<char const* const> enabled)
+{
+    auto entity = XrSystemSpatialEntityPropertiesFB{.type = XR_TYPE_SYSTEM_SPATIAL_ENTITY_PROPERTIES_FB};
+    auto discovery = XrSystemSpaceDiscoveryPropertiesMETA{.type = XR_TYPE_SYSTEM_SPACE_DISCOVERY_PROPERTIES_META};
+    auto persistence = XrSystemSpacePersistencePropertiesMETA{.type = XR_TYPE_SYSTEM_SPACE_PERSISTENCE_PROPERTIES_META};
+    auto depth = XrSystemEnvironmentDepthPropertiesMETA{.type = XR_TYPE_SYSTEM_ENVIRONMENT_DEPTH_PROPERTIES_META};
+    auto raycast = XrSystemEnvironmentRaycastPropertiesMETA{.type = XR_TYPE_SYSTEM_ENVIRONMENT_RAYCAST_PROPERTIES_META};
+    auto properties = XrSystemProperties{.type = XR_TYPE_SYSTEM_PROPERTIES};
+
+    // a struct may be chained only for an extension that was enabled
+    auto const chain = [&](char const* extension, auto& link)
+    {
+        for (auto const* name : enabled)
+            if (cc::string_view(name) == extension)
+            {
+                link.next = properties.next;
+                properties.next = &link;
+                return;
+            }
+    };
+    chain(XR_FB_SPATIAL_ENTITY_EXTENSION_NAME, entity);
+    chain(XR_META_SPATIAL_ENTITY_DISCOVERY_EXTENSION_NAME, discovery);
+    chain(XR_META_SPATIAL_ENTITY_PERSISTENCE_EXTENSION_NAME, persistence);
+    chain(XR_META_ENVIRONMENT_DEPTH_EXTENSION_NAME, depth);
+    chain(XR_META_ENVIRONMENT_RAYCAST_EXTENSION_NAME, raycast);
+    if (auto const why = failed(instance, xrGetSystemProperties(instance, system, &properties), "xrGetSystemProperties");
+        !why.empty())
+        return cc::error(error_of(why));
+
+    return system_answer{.name = cc::string(properties.systemName),
+                         .support = {.spatial_entity = entity.supportsSpatialEntity == XR_TRUE,
+                                     .space_discovery = discovery.supportsSpaceDiscovery == XR_TRUE,
+                                     .space_persistence = persistence.supportsSpacePersistence == XR_TRUE,
+                                     .environment_depth = depth.supportsEnvironmentDepth == XR_TRUE,
+                                     .hand_removal = depth.supportsHandRemoval == XR_TRUE,
+                                     .environment_raycast = raycast.supportsEnvironmentRaycast == XR_TRUE}};
 }
 
 sxr::system::state::~state()
@@ -119,9 +159,21 @@ cc::result<cc::unique_ptr<sxr::system>> sxr::system::try_create(system_descripti
     s->offers_depth_layer = offers(XR_KHR_COMPOSITION_LAYER_DEPTH_EXTENSION_NAME);
     if (s->offers_depth_layer)
         extensions.push_back(XR_KHR_COMPOSITION_LAYER_DEPTH_EXTENSION_NAME);
-    s->offers_passthrough = desc.wants_passthrough && offers(XR_FB_PASSTHROUGH_EXTENSION_NAME);
-    if (s->offers_passthrough)
-        extensions.push_back(XR_FB_PASSTHROUGH_EXTENSION_NAME);
+
+    // a capability missing one extension is left out whole, since what it needs comes together or not at all
+    auto listed = cc::vector<capability>();
+    for (auto const c : desc.wants)
+    {
+        auto has_all = true;
+        for (auto const* name : impl::required_extensions(c))
+            has_all = has_all && offers(name);
+        if (has_all)
+            listed.push_back(c);
+        else
+            CC_LOG_INFO("capability {} is wanted, but the runtime does not list what it needs", int(c));
+    }
+    for (auto const* name : impl::extensions_of(listed))
+        extensions.push_back(name);
 
     auto info = XrInstanceCreateInfo{.type = XR_TYPE_INSTANCE_CREATE_INFO,
                                      .enabledExtensionCount = u32(extensions.size()),
@@ -149,9 +201,15 @@ cc::result<cc::unique_ptr<sxr::system>> sxr::system::try_create(system_descripti
     auto runtime = XrInstanceProperties{.type = XR_TYPE_INSTANCE_PROPERTIES};
     xrGetInstanceProperties(s->instance, &runtime);
     s->runtime_name = cc::string(runtime.runtimeName);
-    auto properties = XrSystemProperties{.type = XR_TYPE_SYSTEM_PROPERTIES};
-    xrGetSystemProperties(s->instance, s->system, &properties);
-    s->system_name = cc::string(properties.systemName);
+    auto answer = impl::read_system(s->instance, s->system, extensions);
+    if (answer.has_error())
+        return cc::error(cc::move(answer).error());
+    s->system_name = cc::move(answer.value().name);
+    for (auto const c : listed)
+        if (impl::is_supported(c, answer.value().support))
+            s->offered.push_back(c);
+        else
+            CC_LOG_INFO("capability {} is listed, but this headset says it does not have it", int(c));
     CC_LOG_INFO("{} on {}", s->system_name, s->runtime_name);
     return cc::make_unique<system>(cc::move(s));
 }
@@ -168,9 +226,12 @@ sxr::graphics_api sxr::system::api() const
 {
     return _state->api;
 }
-bool sxr::system::offers_passthrough() const
+bool sxr::system::offers(capability c) const
 {
-    return _state->offers_passthrough;
+    for (auto const offered : _state->offered)
+        if (offered == c)
+            return true;
+    return false;
 }
 
 cc::result<sg::context_handle> sxr::system::create_context() const

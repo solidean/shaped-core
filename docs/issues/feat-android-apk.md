@@ -22,3 +22,4 @@ The NDK presets build, but nothing packages an APK, so nothing runs on a Quest.
 - Decided against gradle: it would be the repo's first JVM toolchain.
 - SDL3 on Android brings its own Java activity, which competes for the entry point; an XR app needs no window.
 - A test binary still runs as a plain executable under `adb shell`, with no APK.
+- `session::availability_of` never reports `needs_permission` or `denied` until this exists: Android's `USE_SCENE` grant is what feeds them.

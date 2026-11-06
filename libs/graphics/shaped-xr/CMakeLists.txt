@@ -8,6 +8,7 @@ add_library(shaped-xr
     src/shaped-xr/session.cc
     src/shaped-xr/runtime_report.cc
     src/shaped-xr/impl/view_math.cc
+    src/shaped-xr/impl/capabilities.cc
     src/shaped-xr/impl/actions.cc
 )
 target_sources(shaped-xr
@@ -20,6 +21,7 @@ target_sources(shaped-xr
     src/shaped-xr/xr.hh
     src/shaped-xr/runtime_report.hh
     src/shaped-xr/impl/view_math.hh
+    src/shaped-xr/impl/capabilities.hh
     src/shaped-xr/impl/actions.hh
 )
 target_sources(shaped-xr PRIVATE src/shaped-xr/impl/openxr.hh)
@@ -62,6 +64,7 @@ if(SC_BUILD_TESTS)
         tests/main.cc
         tests/view-math-test.cc
         tests/actions-test.cc
+        tests/capabilities-test.cc
     )
     target_link_libraries(shaped-xr-test PRIVATE shaped-xr nexus)
     sc_stage_runtime_dlls(shaped-xr-test DLLS "$<TARGET_RUNTIME_DLLS:shaped-xr-test>")

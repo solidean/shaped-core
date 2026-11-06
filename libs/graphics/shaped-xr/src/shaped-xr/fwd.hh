@@ -10,6 +10,8 @@ using namespace cc::primitive_defines;
 enum class graphics_api : u8; // the binding a session renders through: vulkan or dx12
 struct system_description;    // what a system is created for
 struct session_description;   // what a session is created for
+enum class capability : u8;   // what an application can ask of a runtime beyond rendering
+enum class availability : u8; // whether a session may use a capability now
 enum class action_kind : u8;  // boolean, scalar, vector2, pose or vibration
 enum class hand : u8;         // left or right
 struct action_binding;        // an interaction profile's path an action is suggested at

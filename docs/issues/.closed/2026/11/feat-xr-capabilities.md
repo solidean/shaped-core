@@ -3,11 +3,13 @@ created: 2026-11-06
 priority: next
 tags: [xr, ar]
 parent: epic-xr
+closed: 2026-11-06
+resolution: fixed
 ---
 
 # Capabilities: asked for on the system, reported per session
 
-The seam every AR feature plugs into, designed in [shaped-xr's design](../../libs/graphics/shaped-xr/docs/design.md#ar-capabilities).
+The seam every AR feature plugs into, designed in [shaped-xr's design](../../../../../libs/graphics/shaped-xr/docs/design.md#ar-capabilities).
 
 ## Wanted
 

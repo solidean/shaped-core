@@ -92,7 +92,7 @@ ASYNC_EXAMPLE("shaped-graphics/xr-cube", nx::config::args("--vulkan"))
     for (auto const& arg : nx::test_args())
         if (cc::string_view(arg) == "--dx12")
             api = sxr::graphics_api::dx12;
-    auto created_system = sxr::system::try_create({.application_name = "shaped-core xr-cube", .api = api, .wants_passthrough = true});
+    auto created_system = sxr::system::try_create({.application_name = "shaped-core xr-cube", .api = api, .wants = {sxr::capability::passthrough}});
     if (created_system.has_error())
     {
         cc::eprintln("no headset: {}", created_system.error().to_string());

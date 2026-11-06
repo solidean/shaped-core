@@ -17,10 +17,11 @@ Format conventions live in [docs/guides/cheat-sheets.md](../../../docs/guides/ch
 
 ```cpp
 #include <shaped-xr/xr.hh>
-sxr::system::try_create({.application_name, .api = sxr::graphics_api::vulkan, .wants_passthrough})  // -> result<unique_ptr<system>>
+sxr::system::try_create({.application_name, .api = sxr::graphics_api::vulkan, .wants = {sxr::capability::passthrough}})  // -> result<unique_ptr<system>>
 //   fails naming why: no loader in the build, no active runtime, no binding, no headset (FORM_FACTOR_UNAVAILABLE)
 sys->create_context()                              // -> result<context_handle>, on the runtime's GPU and to its spec
-sys->runtime_name(); sys->system_name(); sys->api(); sys->offers_passthrough();
+sys->runtime_name(); sys->system_name(); sys->api();
+sys->offers(sxr::capability::environment_depth)   // -> bool: wanted, listed, and the headset says it has it
 sys->create_session(*ctx, {.near_distance = 0.05f, .far_distance = 100.0f, .passthrough})  // -> result<unique_ptr<session>>
 //   ctx must come from create_context and outlive the session; the system outlives every session
 SXR_HAS_OPENXR                                      // 1/0: whether the build has the loader at all
@@ -45,6 +46,7 @@ while (session->poll_events())                     // false once the runtime wan
     if (auto f = session->wait_frame())            // blocks on the runtime's pacing; none while not running
         session->submit_frame(cmd_or_null);        // EVERY waited frame is submitted, rendered or not
 session->is_running(); session->is_focused(); session->shows_passthrough();
+session->availability_of(sxr::capability::anchors) // -> availability: unsupported, needs_permission, denied, available
 f.should_render                                    // false: draw nothing, still submit_frame(nullptr)
 f.views[i].camera_to_world                         // tg::rigid_transform3f, tg's frame (LH, +y up, +z forward)
 f.views[i].projection                              // LH zero-to-one: depth 0 at near, 1 at far

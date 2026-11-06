@@ -3,6 +3,7 @@
 // OpenXR with the bindings this build has, and the state behind sxr::system and sxr::session.
 // Only shaped-xr's own sources include this: the public headers name no OpenXR, Vulkan or D3D12 type.
 
+#include <shaped-xr/impl/capabilities.hh>
 #include <shaped-xr/xr.hh>
 
 #if SXR_HAS_OPENXR
@@ -22,6 +23,16 @@ namespace sxr::impl
 {
 /// `result` as a message naming `what`, or empty where it succeeded.
 [[nodiscard]] cc::string failed(XrInstance instance, XrResult result, cc::string_view what);
+
+/// The system's name and what it answers about the extensions in `enabled`, which were enabled on `instance`.
+struct system_answer
+{
+    cc::string name;
+    system_support support;
+};
+[[nodiscard]] cc::result<system_answer> read_system(XrInstance instance,
+                                                    XrSystemId system,
+                                                    cc::span<char const* const> enabled);
 
 /// An instance function the loader resolves by name, or null where the runtime lacks it.
 template <class F>
@@ -54,7 +65,8 @@ struct sxr::system::state
     graphics_api api = graphics_api::vulkan;
     cc::string runtime_name;
     cc::string system_name;
-    bool offers_passthrough = false;
+    /// What the description wanted and the headset has.
+    cc::vector<capability> offered;
     /// Whether each view hands the runtime its depth too (`XR_KHR_composition_layer_depth`).
     bool offers_depth_layer = false;
 
