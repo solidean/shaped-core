@@ -1067,7 +1067,8 @@ A `require` in a test's body that nothing in it uses is `unused-require`, and a 
 * **CHK-290** A square literal converts to the array type expected where it stands, with exactly as many elements, each converting to the element type.
   Where no array is expected it is an array of its first element's type, and every other element converts to that.
   It holds at least one element, and no name and no splat.
-* **CHK-513** `==` and `!=` of two arrays of one type are the language's own, each giving a `bool`, where the innermost element has a `==`, an enum's included (CHK-149); any other array is `no-matching-overload`.
+* **CHK-513** `==` and `!=` of two arrays of one type are the language's own, each giving a `bool`, where the innermost element has a `==`, an enum's included (CHK-149).
+  Any other array is `no-matching-overload`.
   A program's own `@operator("==")` over the type takes precedence.
 * **CHK-291** An array stands in GPU memory at its natural stride (EMIT-110): in a buffer's element, at any depth of its structs, and in a constant block.
   In a constant block every element must stride by whole 16-byte rows, at any depth, since a runtime index into a shorter one needs component arithmetic.
