@@ -36,7 +36,7 @@ struct routine_run
 class sg::routine_init_scope
 {
 public:
-    [[nodiscard]] context& context() const;
+    [[nodiscard]] sg::context& context() const;
 
     /// The reload generation this initialization belongs to.
     /// A routine that folds it into a hash (to invalidate accumulated work on reload) reads it here.

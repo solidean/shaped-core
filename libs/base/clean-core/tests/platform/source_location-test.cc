@@ -68,7 +68,7 @@ TEST("cc source_location - describe_site prints what the level kept")
     if constexpr (CC_SOURCE_SITES == 2)
         CHECK(text.contains("source_location-test.cc"));
     else if constexpr (CC_SOURCE_SITES == 1)
-        CHECK(text.contains("+0x"));
+        CHECK(text.contains(cc::module_enumeration_available() ? "+0x" : "0x"));
     else
         CHECK(text.empty());
 }
