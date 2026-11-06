@@ -236,6 +236,28 @@ TEST("sgl ir flatten_branches - neither an effect nor what can trap runs on a pa
     }
 }
 
+TEST("sgl ir flatten_branches - a discard stays behind its branch, and goes on to what follows it")
+{
+    auto b = program_builder();
+    b.blocks(3);
+    b.open(0);
+    b.select_merge(0, 2);
+    auto const x = unknown(b);
+    b.branch_if(b.add(op::flt, b.bool_type, {u32(x), u32(b.two)}), 1, 2);
+    b.open(1);
+    b.add(op::discard, type_ref::none, {});
+    b.branch(2);
+    b.open(2);
+    b.keep(b.add(op::derivative, b.float_type, {u32(x)}, u8(derivative::x)));
+    b.finish();
+    remove_unused(b.p);
+    flatten_branches(b.p);
+    require_whole(b.p, control_flow::unstructured);
+    CHECK(b.p.blocks.size() == 3);
+    CHECK(count_of(b.p, op::discard) == 1);
+    CHECK(count_of(b.p, op::derivative) == 1);
+}
+
 TEST("sgl ir flatten_branches - a block with one way in joins it, and what no walk reaches goes with its edges")
 {
     auto b = program_builder();

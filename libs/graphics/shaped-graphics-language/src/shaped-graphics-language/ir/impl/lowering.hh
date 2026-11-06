@@ -105,6 +105,12 @@ private:
 
     [[nodiscard]] cc::optional<place> place_of(flat_expr_id id);
     [[nodiscard]] cc::optional<place> chain_of(flat_expr_id id, cc::vector<u32>& chain);
+    /// `nonuniform i`, whose value is `i`; `uniform i` is no such mark, since it is the plain index.
+    [[nodiscard]] bool is_nonuniform(flat_expr_id id) const;
+    /// A pointer to one element of a binding array, or none where `x` is no element of one.
+    [[nodiscard]] value_ref bound_element(flat_expr_id id);
+    /// `k_ir_nonuniform` where `pointer` came through such an index.
+    [[nodiscard]] u8 nonuniform_of(value_ref pointer) const;
     [[nodiscard]] value_ref load(place const& p);
     void store(place const& p, value_ref value);
     [[nodiscard]] value_ref spilled(value_ref value, type_id type);

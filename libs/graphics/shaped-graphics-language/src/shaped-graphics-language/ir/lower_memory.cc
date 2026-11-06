@@ -343,12 +343,8 @@ value_ref lowering::bound_resource(i32 index)
     if (ir::is_valid(known))
         return known;
     auto const& r = _plan.resources[index];
-    if (r.count != 1 || _m.at(r.type).kind == check::type_kind::array)
-    {
-        unsupported("a binding array");
-        return value_ref::none;
-    }
-    auto const& info = _m.at(r.type);
+    auto const is_array = _m.at(r.type).kind == check::type_kind::array;
+    auto const& info = _m.at(is_array ? _m.at(r.type).element : r.type);
     auto pointee = type_ref::none;
     auto space = storage::resource;
     switch (info.kind)
@@ -408,6 +404,8 @@ value_ref lowering::bound_resource(i32 index)
     default:
         break;
     }
+    if (is_array || r.count != 1)
+        pointee = r.count == 0 ? runtime_array_type(pointee, 0) : intern({.kind = type_kind::array, .count = u32(r.count), .element = pointee});
     known = add_global({.type = pointer_type(pointee, space),
                         .kind = kind,
                         .set = r.group,
@@ -473,8 +471,15 @@ cc::optional<place> lowering::chain_of(flat_expr_id id, cc::vector<u32>& chain)
         auto const* const b = _e.at(e->buffer).node.try_as<flat_binding_member>();
         if (b == nullptr)
         {
-            unsupported("a buffer of a binding array");
-            return {};
+            auto const element = bound_element(e->buffer);
+            if (!ir::is_valid(element))
+            {
+                unsupported("a buffer of a binding array");
+                return {};
+            }
+            chain.push_back(u32(uint_constant(0)));
+            chain.push_back(u32(expr(e->index)));
+            return place{.pointer = element, .type = x.type};
         }
         auto const found = emit::impl::resource_of(_plan, b->binding, b->member);
         chain.push_back(u32(uint_constant(0)));
@@ -534,7 +539,43 @@ cc::optional<place> lowering::place_of(flat_expr_id id)
     auto operands = cc::vector<u32>::create_with_capacity(chain.size() + 1);
     operands.push_back(u32(base.value().pointer));
     operands.push_back_range(chain);
-    return place{.pointer = add(op::access_chain, pointer_type(at, space), operands), .type = base.value().type};
+    return place{.pointer = add(op::access_chain, pointer_type(at, space), operands, 0, nonuniform_of(base.value().pointer)),
+                 .type = base.value().type};
+}
+
+bool lowering::is_nonuniform(flat_expr_id id) const
+{
+    auto const* const c = _e.at(id).node.try_as<flat_call>();
+    auto const* const record = c != nullptr ? _m.builtin_function(c->intrinsic) : nullptr;
+    return record != nullptr && record->mark == builtins::index_mark::nonuniform;
+}
+
+value_ref lowering::bound_element(flat_expr_id id)
+{
+    auto const* const element = _e.at(id).node.try_as<flat_element>();
+    auto const* const bound = element != nullptr ? _e.at(element->object).node.try_as<flat_binding_member>() : nullptr;
+    if (bound == nullptr)
+        return value_ref::none;
+    auto const found = emit::impl::resource_of(_plan, bound->binding, bound->member);
+    if (found < 0)
+        return value_ref::none;
+    auto const array = bound_resource(found);
+    if (!ir::is_valid(array))
+        return value_ref::none;
+    auto const& pointer = _out.at(_out.type_of(array));
+    auto const held = _out.at(pointer.element).element;
+    auto const space = pointer.space;
+    u32 const operands[] = {u32(array), u32(expr(element->index))};
+    return add(op::access_chain, pointer_type(held, space), operands, 0,
+               is_nonuniform(element->index) ? k_ir_nonuniform : u8(0));
+}
+
+u8 lowering::nonuniform_of(value_ref pointer) const
+{
+    if (!ir::is_valid(pointer) || is_constant(pointer) || is_global(pointer) || is_local(pointer))
+        return 0;
+    auto const& i = _out.instructions[index_of(pointer)];
+    return i.code == op::access_chain ? i.aux : u8(0);
 }
 
 value_ref lowering::load(place const& p)

@@ -53,6 +53,57 @@ constexpr cc::string_view k_rendered = "@vertex struct input:\n"
     return count;
 }
 
+/// How many instructions of `opcode` the module holds.
+[[nodiscard]] isize counted(cc::span<u32 const> words, u32 opcode)
+{
+    auto count = isize(0);
+    for (auto at = isize(5); at < words.size(); at += isize(words[at] >> 16))
+        count += (words[at] & 0xffffu) == opcode ? 1 : 0;
+    return count;
+}
+
+/// Whether the module states `capability`.
+[[nodiscard]] bool has_capability(cc::span<u32 const> words, u32 capability)
+{
+    for (auto at = isize(5); at < words.size(); at += isize(words[at] >> 16))
+        if ((words[at] & 0xffffu) == 17 && words[at + 1] == capability)
+            return true;
+    return false;
+}
+
+/// How many times the module states the execution mode `mode`.
+[[nodiscard]] isize with_mode(cc::span<u32 const> words, u32 mode)
+{
+    auto count = isize(0);
+    for (auto at = isize(5); at < words.size(); at += isize(words[at] >> 16))
+        if ((words[at] & 0xffffu) == 16 && words[at + 2] == mode)
+            ++count;
+    return count;
+}
+
+constexpr cc::string_view k_pixel_surface
+    = "require binding_arrays\n"
+      "struct link:\n"
+      "    @position position: hpos4\n"
+      "    near: float2\n"
+      "\n"
+      "@pixel struct written:\n"
+      "    color: float4\n"
+      "    @depth(.greater_equal) depth: float\n"
+      "    @sample_mask covered: uint\n"
+      "\n"
+      "@pixel fun surface_ps(l: link, @is_front_facing front: bool, @sample_mask seen: uint) -> written:\n"
+      "    if not front => discard\n"
+      "    return { color = float4(ddx(l.near.x), ddy(l.near.y), fwidth(l.near.x), 1.0), depth = 0.5, covered = seen }\n"
+      "\n"
+      "binding shelf:\n"
+      "    images: texture_2d[float4][2]\n"
+      "    smooth: sampler\n"
+      "\n"
+      "@pixel fun shelf_ps(l: link){shelf} -> float4:\n"
+      "    let at = (l.position.x as int) % 2\n"
+      "    return shelf.images[nonuniform at].sample(l.near, shelf.smooth)\n";
+
 /// The name of every `.sgl` file under `root`, sorted, so a failure reads the same on every run.
 [[nodiscard]] cc::vector<cc::string> files_under(cc::string_view root)
 {
@@ -107,6 +158,34 @@ TEST("sgl spirv - an entry point's guarantee stands on each float operation it k
     REQUIRE(precise.has_value());
     CHECK(decorated(fast.value().spirv, 42) == 0);
     CHECK(decorated(precise.value().spirv, 42) == 2);
+}
+
+TEST("sgl spirv - a pixel stage's surface is SPIR-V's own, and a discard goes on as a helper (EMIT-238)")
+{
+    auto const e = written(k_pixel_surface, "surface_ps", sgl::emit::native_route::require);
+    REQUIRE(e.has_value());
+    auto const& words = e.value().spirv;
+    CHECK(counted(words, 5380) == 1); // OpDemoteToHelperInvocation
+    CHECK(counted(words, 252) == 0);  // never OpKill, which would take the neighbour's derivatives with it
+    CHECK(counted(words, 207) == 1);  // OpDPdx
+    CHECK(counted(words, 208) == 1);  // OpDPdy
+    CHECK(counted(words, 209) == 1);  // OpFwidth
+    CHECK(has_capability(words, 5379));
+    CHECK(with_mode(words, 12) == 1); // DepthReplacing
+    CHECK(with_mode(words, 14) == 1); // DepthGreater
+    // `SampleMask` is an array of one, on both sides of the stage
+    CHECK(counted(words, 65) >= 2);
+}
+
+TEST("sgl spirv - a nonuniform index reaches each value it decides (EMIT-239)")
+{
+    auto const e = written(k_pixel_surface, "shelf_ps", sgl::emit::native_route::require);
+    REQUIRE(e.has_value());
+    auto const& words = e.value().spirv;
+    CHECK(has_capability(words, 5301));
+    CHECK(has_capability(words, 5307));
+    // the index, the chain, the load and the sampled image
+    CHECK(decorated(words, 5300) == 4);
 }
 
 TEST("sgl spirv - what has no lowering yet is named, and a preference falls back to the text")
@@ -170,7 +249,7 @@ TEST("sgl spirv - every compute entry point of the fixtures that lowers is what 
     }
     // the numbers the slice reaches, so a lowering lost shows here rather than as a quiet fall back to DXC
     CC_LOG_INFO("SGL's SPIR-V lowers {} compute entry points and {} vertex and pixel ones", lowered, raster_lowered);
-    CHECK(lowered >= 60);
-    CHECK(raster_lowered >= 45);
+    CHECK(lowered >= 95);
+    CHECK(raster_lowered >= 64);
 #endif
 }

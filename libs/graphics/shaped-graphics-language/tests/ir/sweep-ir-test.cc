@@ -73,6 +73,6 @@ TEST("sgl ir - every entry point of the repo's SGL goes down both native routes"
     }
     // the numbers the sweep reaches, so a lowering lost shows here rather than as a quiet fall back to DXC
     CC_LOG_INFO("{} entry points lowered to SPIR-V and {} to DXIL", spirv, dxil);
-    CHECK(spirv >= 100 / stride);
-    CHECK(dxil >= 90 / stride);
+    CHECK(spirv >= 200 / stride);
+    CHECK(dxil >= 180 / stride);
 }

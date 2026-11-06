@@ -103,15 +103,17 @@ void writer::declare_handles()
     }
 
     u32 next_id[4] = {};
-    auto const props_type = res_props_type();
-    auto const bind_type = res_bind_type();
+    (void)res_props_type();
+    (void)res_bind_type();
     for (auto g = isize(0); g < _p.globals.size(); ++g)
     {
         auto const& global = _p.globals[g];
         if (global.kind == global_kind::plain || !is_used[g])
             continue;
         auto const& pointer = _p.at(global.type);
-        auto const& held = _p.at(pointer.element);
+        auto const& outer = _p.at(pointer.element);
+        auto const is_array = outer.kind == type_kind::array || outer.kind == type_kind::runtime_array;
+        auto const& held = is_array ? _p.at(outer.element) : outer;
         auto const rule = rule_of(global.kind);
         auto const writes = (global.kind == global_kind::buffer || global.kind == global_kind::bytes
                              || global.kind == global_kind::image)
@@ -169,20 +171,21 @@ void writer::declare_handles()
         }
 
         auto const id = next_id[cls]++;
-        ll_value const bind_fields[]
-            = {_m.constant_i32(lower), _m.constant_i32(lower), _m.constant_i32(space), _m.constant_i8(cls)};
-        ll_value const bind_args[]
-            = {_m.constant_i32(k_dx_ops[isize(dx_op::create_handle_from_binding)].number),
-               _m.constant_struct(bind_type, bind_fields), _m.constant_i32(lower), _m.constant_bool(false)};
-        auto const binding = call(dx_op::create_handle_from_binding, _m.void_type(), bind_args);
-
+        // EMIT-210: an unbounded array is a range the pipeline layout leaves open
+        auto const range = !is_array ? 1u : outer.kind == type_kind::array ? outer.count : 0xffffffffu;
+        auto const upper = range == 0xffffffffu ? range : lower + range - 1;
         // bits 0 to 7 the kind, bit 12 a UAV, bit 14 globally coherent, bit 15 a sampler that compares
         auto const word0 = kind | (cls == 1 ? 1u << 12 : 0u) | (global.is_coherent ? 1u << 14 : 0u)
                          | (global.is_comparison ? 1u << 15 : 0u);
-        ll_value const prop_fields[] = {_m.constant_i32(word0), _m.constant_i32(word1)};
-        ll_value const annotate_args[] = {_m.constant_i32(k_dx_ops[isize(dx_op::annotate_handle)].number), binding,
-                                          _m.constant_struct(props_type, prop_fields)};
-        _handles[g] = {.annotated = call(dx_op::annotate_handle, _m.void_type(), annotate_args)};
+        _handles[g] = {.is_array = is_array,
+                       .lower = lower,
+                       .upper = upper,
+                       .space = space,
+                       .cls = cls,
+                       .word0 = word0,
+                       .word1 = word1};
+        if (!is_array)
+            _handles[g].annotated = made_handle(_handles[g], ll_value::none, false);
 
         _bindings.push_back({.global = u32(g),
                              .cls = cls,
@@ -194,7 +197,9 @@ void writer::declare_handles()
                              .stride = stride,
                              .component = component,
                              .psv_type = cls == 1 ? rule.psv_write : rule.psv_read,
-                             .is_comparison = global.is_comparison});
+                             .is_comparison = global.is_comparison,
+                             .upper = upper,
+                             .range = range});
     }
 }
 
@@ -240,6 +245,28 @@ u32 writer::memory_size(type_ref t, i32 matrix_stride)
 ll_value writer::handle_of(value_ref global)
 {
     return _handles[index_of(global)].annotated;
+}
+
+ll_value writer::handle_at(place const& p)
+{
+    return p.handle != ll_value::none ? p.handle : handle_of(global_at(p.root));
+}
+
+ll_value writer::made_handle(handle_entry const& h, ll_value index, bool is_nonuniform)
+{
+    ll_value const bind_fields[]
+        = {_m.constant_i32(h.lower), _m.constant_i32(h.upper), _m.constant_i32(h.space), _m.constant_i8(h.cls)};
+    auto const number = _m.constant_i32(k_dx_ops[isize(dx_op::create_handle_from_binding)].number);
+    auto const bind = _m.constant_struct(res_bind_type(), bind_fields);
+    auto const absolute = index == ll_value::none ? _m.constant_i32(h.lower)
+                        : h.lower == 0            ? index
+                                                  : _m.binary(binary_op::add, index, _m.constant_i32(h.lower));
+    ll_value const bind_args[] = {number, bind, absolute, _m.constant_bool(is_nonuniform)};
+    auto const binding = call(dx_op::create_handle_from_binding, _m.void_type(), bind_args);
+    ll_value const prop_fields[] = {_m.constant_i32(h.word0), _m.constant_i32(h.word1)};
+    ll_value const annotate_args[] = {_m.constant_i32(k_dx_ops[isize(dx_op::annotate_handle)].number), binding,
+                                      _m.constant_struct(res_props_type(), prop_fields)};
+    return call(dx_op::annotate_handle, _m.void_type(), annotate_args);
 }
 
 void writer::sampled(u32 index,
@@ -387,20 +414,19 @@ void writer::image_size(u32 index, instruction const& i)
 
 void writer::array_length(u32 index, instruction const& i)
 {
-    auto const global = value_ref(_p.operands_of(i)[0]);
+    auto const where = place_of(value_ref(_p.operands_of(i)[0]));
     auto const undefined = _m.constant_undef(_m.int_type());
-    ll_value const args[]
-        = {_m.constant_i32(k_dx_ops[isize(dx_op::get_dimensions)].number), handle_of(global), undefined};
+    ll_value const args[] = {_m.constant_i32(k_dx_ops[isize(dx_op::get_dimensions)].number), handle_at(where), undefined};
     auto const dimensions = call(dx_op::get_dimensions, _m.void_type(), args);
     auto const width = _m.extract_value(dimensions, 0);
     // a raw buffer states bytes, and the form counts its words
-    auto const is_raw = _p.globals[index_of(global)].kind == global_kind::bytes;
+    auto const is_raw = _p.globals[where.root].kind == global_kind::bytes;
     define_one(index, is_raw ? _m.binary(binary_op::lshr, width, _m.constant_i32(2)) : width);
 }
 
 ll_value writer::atomic_on_buffer(place const& p, u32 op, ll_value value, ll_type t)
 {
-    auto const handle = handle_of(global_at(p.root));
+    auto const handle = handle_at(p);
     auto const undefined = _m.constant_undef(_m.int_type());
     auto const is_raw = _p.globals[p.root].kind == global_kind::bytes;
     auto const first = is_raw ? _m.binary(binary_op::add, _m.binary(binary_op::mul, p.index, _m.constant_i32(4)),
@@ -452,7 +478,7 @@ void writer::atomic_op(u32 index, instruction const& i)
         }
         auto const undefined = _m.constant_undef(_m.int_type());
         ll_value const args[] = {_m.constant_i32(k_dx_ops[isize(dx_op::atomic_compare_exchange)].number),
-                                 handle_of(global_at(where.root)),
+                                 handle_at(where),
                                  where.index,
                                  byte_offset(where, where.offset),
                                  undefined,

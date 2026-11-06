@@ -217,6 +217,9 @@ enum capability : u32
     SignedZeroInfNanPreserve = 4466,
     CapDemoteToHelperInvocation = 5379,
     MeshShadingEXT = 5283,
+    ShaderNonUniform = 5301,
+    RuntimeDescriptorArray = 5302,
+    SampledImageArrayNonUniformIndexing = 5307,
     AtomicFloat32AddEXT = 6033,
     AtomicFloat64AddEXT = 6034,
 };
@@ -241,6 +244,7 @@ enum decoration : u32
     Offset = 35,
     NoContraction = 42,
     PerPrimitiveEXT = 5271,
+    NonUniform = 5300,
 };
 
 enum storage_class : u32

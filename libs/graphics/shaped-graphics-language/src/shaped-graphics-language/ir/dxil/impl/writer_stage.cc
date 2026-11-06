@@ -405,7 +405,7 @@ void writer::write_entry_metadata()
             fields.push_back(_m.md_string(""));
             fields.push_back(_m.md_i32(b.space));
             fields.push_back(_m.md_i32(b.lower));
-            fields.push_back(_m.md_i32(1));
+            fields.push_back(_m.md_i32(b.range));
             auto extra = u32(0);
             if (b.stride > 0)
             {
@@ -542,7 +542,7 @@ void writer::write_entry_metadata()
         for (auto const& b : _bindings)
             if (b.cls == cls)
                 _summary.resources.push_back(
-                    {.psv_type = b.psv_type, .space = b.space, .lower = b.lower, .upper = b.lower, .kind = b.kind});
+                    {.psv_type = b.psv_type, .space = b.space, .lower = b.lower, .upper = b.upper, .kind = b.kind});
     if (is_compute)
         for (auto axis = 0; axis < 3; ++axis)
             _summary.workgroup[axis] = _p.workgroup[axis];

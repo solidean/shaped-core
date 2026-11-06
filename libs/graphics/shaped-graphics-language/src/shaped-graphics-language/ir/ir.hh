@@ -433,6 +433,10 @@ enum class sgl::ir::op : sgl::u16
     unreachable,
 };
 
+/// The `aux` of an `access_chain` into a binding array, and of the `load` and `combine_sampler` it reaches: the
+/// index differs between invocations, which each target has to be told.
+inline constexpr sgl::u8 k_ir_nonuniform = 1;
+
 /// One operation; its position is the value it gives, where it gives one.
 struct sgl::ir::instruction
 {

@@ -102,7 +102,16 @@ void writer::access_chain(u32 index, instruction const& i)
     auto type = _p.at(_p.type_of(base)).element;
     auto const is_memory = result.kind == place::kind_t::memory;
 
-    for (auto k = isize(1); k < operands.size(); ++k)
+    auto first = isize(1);
+    // a binding array's element is a resource of its own, which only here has a handle
+    if (is_global(base) && _handles[index_of(base)].is_array)
+    {
+        result.handle = made_handle(_handles[index_of(base)], leaf_at(value_ref(operands[1])), i.aux == k_ir_nonuniform);
+        type = _p.at(type).element;
+        first = 2;
+    }
+
+    for (auto k = first; k < operands.size(); ++k)
     {
         auto const index_value = value_ref(operands[k]);
         auto const is_known = is_constant(index_value);
@@ -215,7 +224,7 @@ ll_value writer::constant_lane(place const& p, type_ref scalar, u32 offset)
 {
     auto const type = scalar_type(scalar);
     auto const size = _m.bits_of(type) / 8;
-    auto const handle = handle_of(global_at(p.root));
+    auto const handle = handle_at(p);
     auto row = ll_value::none;
     auto lane = (offset & 15) / size;
     if (p.dynamic == ll_value::none)
@@ -239,7 +248,7 @@ void writer::buffer_lanes(place const& p, type_ref scalar, u32 offset, u32 lanes
 {
     auto const type = scalar_type(scalar);
     auto const size = _m.bits_of(type) / 8;
-    auto const handle = handle_of(global_at(p.root));
+    auto const handle = handle_at(p);
     auto const is_raw = _p.globals[p.root].kind == global_kind::bytes;
     auto const element = is_raw ? p.index : p.index;
     auto const number = _m.constant_i32(k_dx_ops[isize(dx_op::raw_buffer_load)].number);
@@ -278,7 +287,7 @@ void writer::store_lanes(place const& p, type_ref scalar, u32 offset, cc::span<l
 {
     auto const type = scalar_type(scalar);
     auto const size = _m.bits_of(type) / 8;
-    auto const handle = handle_of(global_at(p.root));
+    auto const handle = handle_at(p);
     auto const is_raw = _p.globals[p.root].kind == global_kind::bytes;
     auto const number = _m.constant_i32(k_dx_ops[isize(dx_op::raw_buffer_store)].number);
     auto const undefined = _m.constant_undef(type);
@@ -399,6 +408,8 @@ void writer::load(u32 index, instruction const& i)
             return define_one(index, handle_of(pointer));
     }
     auto const where = place_of(pointer);
+    if (where.handle != ll_value::none && where.kind == place::kind_t::none)
+        return define_one(index, where.handle);
     if (where.kind == place::kind_t::none)
         return unsupported("a load of something that is no memory");
     _loaded.clear();

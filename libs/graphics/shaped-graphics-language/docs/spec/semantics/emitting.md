@@ -442,10 +442,26 @@ fn main_ps(p: pixel_input) -> target_ {
   So a stage of either route links against a stage of the text route, in both directions.
   A pixel stage's `@position.w` on SPIR-V is the reciprocal of `FragCoord.w`, as `-fvk-use-dx-position-w` writes it.
   `@vertex_index` and `@instance_index` add the draw's base on DXIL alone (EMIT-128), since `VertexIndex` and `InstanceIndex` already hold it.
-  A link of a member that is not a 32-bit number, a stage element but `@position`, `@vertex_index`, `@instance_index` and `@first_instance`, and a `discard` are `unsupported` so far.
+  A 64-bit link crosses as its words on DXIL (EMIT-196) and as itself on SPIR-V, and a pixel stage's second struct is what a mesh stage wrote per primitive (CHK-489), `PerPrimitiveEXT` on SPIR-V.
+  A link of 16-bit numbers is `unsupported` so far.
 * **EMIT-237** DXIL's `dx.viewIdState` and `PSV0` state that every declared input lane reaches every declared output lane.
   A table may say too much and never too little, and the validator takes this one.
   A signature's usage masks are read off the module's final operations, so a lane the passes dropped is no use.
+  A stage that reads `@view_index` also states that every output lane depends on the view, which may say too much in the same way.
+* **EMIT-238** A native route writes a pixel stage's surface as its target's own operations, and `discard` terminates on neither.
+  It is `OpDemoteToHelperInvocation` and `dx.op.discard(true)`, and the invocation goes on as a helper, so a neighbour's derivatives stay whole.
+  `ddx`, `ddy` and `fwidth` are `OpDPdx`, `OpDPdy` and `OpFwidth`, and on DXIL `derivCoarseX`, `derivCoarseY` and the sum of their absolute values, which is what HLSL's own names compile to.
+  `@depth` is `FragDepth` with `DepthReplacing`, plus `DepthGreater` or `DepthLess`, and DXIL's three depth elements.
+  `@sample_mask` is SPIR-V's array of one on both sides of the stage, and on DXIL an output element with no row or `dx.op.coverage`.
+  `@sample_index` stands in a signature with no row, and DXIL reads it with `dx.op.sampleIndex`; such an element is unallocated in `PSV0`.
+  `@view_index` is `dx.op.viewID` and in no signature, and `@layer` from a vertex stage is `ShaderLayer` and DXIL's shader flag for it.
+  Every built-in a pixel stage reads but `FragCoord` is `Flat` on SPIR-V.
+  A sample's offset is `unsupported` so far: SPIR-V takes it as a constant vector, which the form does not hold.
+  With diagnostics on, a `print` and an `assert` are `unsupported` in every stage, since neither writer reaches sg's debug window; with them off, legalize has erased both.
+* **EMIT-239** A binding array is one global of an array of resources, an unbounded one of a runtime array, and an `access_chain` picks the element.
+  On DXIL that element's handle is made where the chain stands, `createHandleFromBinding` over the array's whole range, since no handle exists ahead of its index.
+  `nonuniform i` marks the chain and what reads through it.
+  SPIR-V decorates the index, the chain, the load and the sampled image `NonUniform`, and DXIL sets `createHandleFromBinding`'s last argument.
 
 ## Lines
 

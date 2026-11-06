@@ -254,10 +254,12 @@ value_ref lowering::expr(flat_expr_id id)
                  [&](flat_buffer_length const& b)
                  {
                      auto const* const bound = _e.at(b.buffer).node.try_as<flat_binding_member>();
-                     if (bound == nullptr)
+                     auto const memory = bound != nullptr
+                                           ? bound_resource(emit::impl::resource_of(_plan, bound->binding, bound->member))
+                                           : bound_element(b.buffer);
+                     if (!ir::is_valid(memory))
                          return unsupported("the length of a binding array's element");
-                     auto const found = emit::impl::resource_of(_plan, bound->binding, bound->member);
-                     u32 const operands[] = {u32(bound_resource(found)), 0u};
+                     u32 const operands[] = {u32(memory), 0u};
                      auto length = add(op::array_length, _uint, operands);
                      if (_m.at(_e.at(b.buffer).type).kind == check::type_kind::bytes)
                          length = add(op::imul, _uint, {length, uint_constant(4)});

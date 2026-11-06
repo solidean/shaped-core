@@ -460,19 +460,21 @@ value_ref lowering::bytes_call(flat_call const& c, builtins::function_record con
 {
     auto const arguments = cc::vector<flat_expr_id>::create_copy_of(cc::span<flat_expr_id const>(_e.at(c.arguments)));
     auto const* const bound = _e.at(arguments[0]).node.try_as<flat_binding_member>();
-    if (bound == nullptr)
+    auto const memory = bound != nullptr ? bound_resource(emit::impl::resource_of(_plan, bound->binding, bound->member))
+                                         : bound_element(arguments[0]);
+    if (!is_valid(memory))
     {
         unsupported("bytes of a binding array");
         return value_ref::none;
     }
-    auto const memory = bound_resource(emit::impl::resource_of(_plan, bound->binding, bound->member));
+    auto const uniformity = nonuniform_of(memory);
     auto const offset = expr(arguments[1]);
     auto const first = add(op::shift_right_logical, _uint, {offset, uint_constant(2)});
     auto const pointer_to = pointer_type(_uint, storage::storage_buffer);
     auto const word_at = [&](i32 i)
     {
         auto const index = i == 0 ? first : add(op::iadd, _uint, {first, uint_constant(u32(i))});
-        return add(op::access_chain, pointer_to, {memory, uint_constant(0), index});
+        return add(op::access_chain, pointer_to, {memory, uint_constant(0), index}, 0, uniformity);
     };
     if (record.is_bytes_store)
     {
@@ -503,18 +505,18 @@ value_ref lowering::texture_call(flat_call const& c, builtins::function_record c
         if (auto const* const smp = node.try_as<flat_file_sampler>())
             return bound_sampler(emit::impl::sampler_of(_plan, smp->sampler));
         auto const* const bound = node.try_as<flat_binding_member>();
-        if (bound == nullptr)
-        {
+        auto const pointer = bound != nullptr ? bound_resource(emit::impl::resource_of(_plan, bound->binding, bound->member))
+                                              : bound_element(id);
+        if (!is_valid(pointer))
             unsupported("a texture of a binding array");
-            return value_ref::none;
-        }
-        return bound_resource(emit::impl::resource_of(_plan, bound->binding, bound->member));
+        return pointer;
     };
     auto const texture = resource_at(arguments[0]);
     if (!is_valid(texture))
         return value_ref::none;
     auto const image_ref = _out.at(_out.type_of(texture)).element;
-    auto const image = add(ir::op::load, image_ref, {texture});
+    auto const texture_uniformity = nonuniform_of(texture);
+    auto const image = add(ir::op::load, image_ref, {texture}, 0, texture_uniformity);
     auto const scalar = _out.at(image_ref).element;
     auto const texels = vector_type(scalar, 4);
 
@@ -554,11 +556,15 @@ value_ref lowering::texture_call(flat_call const& c, builtins::function_record c
         auto const sampler = resource_at(arguments[layout.sampler]);
         if (!is_valid(sampler))
             return value_ref::none;
-        return add(ir::op::load, _out.at(_out.type_of(sampler)).element, {sampler});
+        return add(ir::op::load, _out.at(_out.type_of(sampler)).element, {sampler}, 0, nonuniform_of(sampler));
     };
     // what every call through a sampler reads, combined last as SPIR-V has it next to its use
     auto const with_image = [&](value_ref sampler)
-    { return add(ir::op::combine_sampler, intern({.kind = type_kind::sampled_image, .element = image_ref}), {image, sampler}); };
+    {
+        auto const& loaded = _out.instructions[index_of(sampler)];
+        return add(ir::op::combine_sampler, intern({.kind = type_kind::sampled_image, .element = image_ref}),
+                   {image, sampler}, 0, u8(texture_uniformity | loaded.aux));
+    };
 
     switch (shape.what)
     {

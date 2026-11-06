@@ -137,8 +137,42 @@ TEST("slib - every compute entry point of the fixtures that SGL's DXIL lowers pa
     CC_LOG_INFO("SGL's DXIL lowers {} of the {} compute entry points and {} of the {} vertex and pixel ones", lowered,
                 reached, raster_lowered, raster_reached);
     // the numbers the slice reaches, so a lowering lost shows here rather than as a quiet fall back to DXC
-    CHECK(lowered >= 60);
-    CHECK(raster_lowered >= 45);
+    CHECK(lowered >= 90);
+    CHECK(raster_lowered >= 64);
+}
+
+TEST("slib - a pixel stage's surface is DXIL's own operations, and a binding array's element its own handle")
+{
+    auto compiler = ssc::dxc::compiler::create();
+    if (compiler.has_error())
+        SKIP("no DXC");
+    constexpr cc::string_view source
+        = "require binding_arrays\n"
+          "struct link:\n"
+          "    @position position: hpos4\n"
+          "    near: float2\n"
+          "\n"
+          "@pixel struct written:\n"
+          "    color: float4\n"
+          "    @depth depth: float\n"
+          "\n"
+          "binding shelf:\n"
+          "    images: texture_2d[float4][2]\n"
+          "\n"
+          "@pixel fun surface_ps(l: link, @is_front_facing front: bool){shelf} -> written:\n"
+          "    if not front => discard\n"
+          "    let at = (l.position.x as int) % 2\n"
+          "    return { color = shelf.images[nonuniform at].load(int2(0, 0)) * ddx(l.near.x), depth = 0.5 }\n";
+    auto const e = written(source, "surface_ps");
+    REQUIRE(e.has_value());
+    CHECK(!compiler.value().validate(e.value().dxil).has_value());
+    auto const text = compiler.value().disassemble(e.value().dxil);
+    REQUIRE(text.has_value());
+    CHECK(text.value().contains("@dx.op.discard(i32 82, i1 true)"));
+    CHECK(text.value().contains("@dx.op.unary.f32(i32 83,"));
+    // the second argument after the binding is the index, and the last says it differs between invocations
+    CHECK(text.value().contains(", i1 true)  ; CreateHandleFromBinding"));
+    CHECK(text.value().contains("SV_Depth"));
 }
 
 TEST("slib - DXIL's float flags stand on each operation, and only `fast` lets a sum reorder")

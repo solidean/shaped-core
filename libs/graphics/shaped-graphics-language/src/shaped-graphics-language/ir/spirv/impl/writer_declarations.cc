@@ -146,7 +146,14 @@ void writer::write_types()
             break;
         case type_kind::runtime_array:
             emit(_declarations, spv::TypeRuntimeArray, {id, id_of(t.element)});
-            emit(_annotations, spv::Decorate, {id, spv::ArrayStride, u32(t.stride)});
+            // none is an unbounded binding array, of which the descriptors are the elements
+            if (t.stride > 0)
+                emit(_annotations, spv::Decorate, {id, spv::ArrayStride, u32(t.stride)});
+            else
+            {
+                require(spv::RuntimeDescriptorArray);
+                require_extension("SPV_EXT_descriptor_indexing");
+            }
             break;
         case type_kind::structure:
             write_structure(t, id);
@@ -355,8 +362,11 @@ void writer::write_globals()
         if (g.binding >= 0)
             emit(_annotations, spv::Decorate, {id, spv::Binding, u32(g.binding)});
         auto const space = _p.at(g.type).space;
-        auto const is_storage = space == storage::storage_buffer
-                             || (space == storage::resource && _p.at(_p.at(g.type).element).is_storage_image);
+        auto const& pointee = _p.at(_p.at(g.type).element);
+        auto const& held = pointee.kind == type_kind::array || pointee.kind == type_kind::runtime_array
+                             ? _p.at(pointee.element)
+                             : pointee;
+        auto const is_storage = space == storage::storage_buffer || (space == storage::resource && held.is_storage_image);
         if (g.is_read_only && is_storage)
             emit(_annotations, spv::Decorate, {id, spv::NonWritable});
         if (g.is_write_only)

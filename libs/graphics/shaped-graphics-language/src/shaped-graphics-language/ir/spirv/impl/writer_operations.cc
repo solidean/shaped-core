@@ -287,6 +287,25 @@ void writer::group(instruction const& i, u32 id)
     }
 }
 
+void writer::nonuniform(instruction const& i, u32 id)
+{
+    require(spv::ShaderNonUniform);
+    if (i.code == op::combine_sampler)
+        require(spv::SampledImageArrayNonUniformIndexing);
+    auto const mark = [&](u32 marked)
+    {
+        for (auto const known : _nonuniform)
+            if (known == marked)
+                return;
+        _nonuniform.push_back(marked);
+        emit(_annotations, spv::Decorate, {marked, spv::NonUniform});
+    };
+    mark(id);
+    auto const index = value_ref(_p.operands_of(i)[i.code == op::access_chain ? 1 : 0]);
+    if (i.code == op::access_chain && !is_constant(index))
+        mark(id_of(index));
+}
+
 u32 writer::element_pointer(u32 element)
 {
     auto const lane = _element_lanes[element];
@@ -322,6 +341,8 @@ void writer::instruction_of(u32 index)
     auto const& rule = k_rule_of.rules[isize(i.code)];
     if (i.guarantee != check::float_level::fast && rule.keeps_contraction)
         emit(_annotations, spv::Decorate, {id, spv::NoContraction});
+    if (i.aux == k_ir_nonuniform && (i.code == op::access_chain || i.code == op::load || i.code == op::combine_sampler))
+        nonuniform(i, id);
 
     switch (rule.kind)
     {

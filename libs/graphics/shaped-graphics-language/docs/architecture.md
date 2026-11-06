@@ -209,6 +209,8 @@ The size and alignment the layout rules place a value by, and each target's own,
 `ir/pipeline.hh` is each target's whole way, one plain function per target, `ir::compile_spirv` and `ir::compile_dxil`; a pass joins a route there.
 A stage's edge is `program::stage_elements`, filled by `ir/lower_stage.cc` from the plan, which `op::stage_load` and `op::stage_store` reach; `ir/dxil/signature.hh` places it in DXIL's rows.
 Compute, vertex and pixel stages lower: a vertex or pixel entry reads its edge ahead of its body, and each `return` stores its outputs.
+A `discard` is an operation with an effect and no terminator, so a pass keeps it in its branch and the path goes on as a helper.
+A binding array is one global, and an `access_chain` picks the element, so DXIL makes that element's handle where the chain stands.
 `ir::write_spirv` ends the first, whose writer stands in `ir/spirv/`, and `ir::write_dxil` the second, whose backend stands in `ir/dxil/`.
 The optimizing passes stand in `ir/`, on values as they are, so each keeps every operation's statement and guarantee: `ir/passes.hh`, with `ir::simplify` beside it.
 `ir::simplify` and `ir::flatten_branches` give up structured control flow, so they are DXIL's alone, and SPIR-V's route runs no optimizing pass so far.

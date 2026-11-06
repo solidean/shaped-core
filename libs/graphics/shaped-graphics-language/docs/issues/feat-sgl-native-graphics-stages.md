@@ -203,7 +203,8 @@ Clip and cull distances are no part of SGL, so `pack_signature` does not hold th
    SPIR-V has no packing, so a fault only one writer shows is in that writer.
    **The mixed-route test lands with this slice**: each corpus pipeline's pair built both ways round, a DXC stage against a native one, through `CreateGraphicsPipelineState`.
    The golden test cannot say that the routes link; only this one can.
-4. **The pixel surface, on both writers**: `discard`, derivatives, implicit-level sampling, then the rest of the table.
+4. **The pixel surface, on both writers: done.** EMIT-238 states it, with the sampling family, 64-bit links and what a mesh stage wrote.
+   Binding arrays came with it (EMIT-239), since they stopped three of these entry points and more of compute's.
 5. **Geometry and tessellation, then mesh and task, on both writers**, each with its corpus sweep and its pairs in the mixed-route test.
 
 ## Measured on the first slice
@@ -217,6 +218,23 @@ On 2026-11-06, on the Arc B580 and over the repo's SGL:
 - **The mixed-route test draws three route pairs against DXC's on dx12 and on vulkan**, every lane within 1e-4: [`mixed-route-test.cc`](../../../shaped-graphics/tests/raster/mixed-route-test.cc).
 - **`sgl-cube` captures are byte for byte DXC's**, on dx12 through DXIL and on vulkan through SPIR-V.
 - **The cube's pair compiles 11 times faster on DXIL and 13 times on SPIR-V**: 5.90 ms against 0.53 ms, and 5.06 ms against 0.38 ms, front end included, best of 60 and of 400.
+
+## Measured on the pixel surface
+
+On 2026-11-06, on the Arc B580 and over the repo's SGL:
+
+- **65 of the 66 vertex and pixel entry points lower on both writers**, each past DXC's validator and `spirv-val`.
+  The one left, `trace_pixel_ps`, needs a ray query, which is [feat-sgl-native-ray-tracing](feat-sgl-native-ray-tracing.md)'s.
+- **The signature golden holds at no mismatch**, and now shows it can fail.
+  An element moved a row, moved a column or put in another mode is caught by the comparison, and the validator refuses a container whose `OSG1` moved one.
+- **The mixed-route test draws the surface through each pairing of the routes**, on dx12 and vulkan, every lane within 1e-4 of DXC's pair.
+  Its stages are [`pixel_surface.sgl`](../../../shaped-graphics/tests/shaders/sgl_mixed/pixel_surface.sgl), which covers `discard`, derivatives, the stage inputs, `@depth`, centroid and sample interpolation, and the sampling family.
+  A discarded pixel's neighbour reads the derivative only a helper can give, exactly 2, and a depth test shows the depth written.
+- **`slug-cube`'s captures are byte for byte DXC's**, on dx12 through DXIL and on vulkan through SPIR-V.
+- **Compute did not move.** Of 396 outputs, 356 are the bytes they were, and the other 40 are 20 entry points that lower now and did not.
+- **`print` and `assert` are the likely next gap.**
+  With `SC_SHADER_DIAGNOSTICS` on, the default, an entry point holding either falls back to DXC under a preference and is an error under `NATIVE_DXIL` or `NATIVE_SPIRV`.
+  Neither writer reaches sg's debug window yet, and that is one gap of every stage rather than of pixel stages.
 
 ## Not confirmed
 

@@ -75,6 +75,8 @@ private:
     void atomic(u32 opcode, instruction const& i, u32 id);
     void group(instruction const& i, u32 id);
     void instruction_of(u32 index);
+    /// Tells the target that `i`, of id `id`, came through an index that differs between invocations.
+    void nonuniform(instruction const& i, u32 id);
     /// What a load or a store of an element goes through.
     [[nodiscard]] u32 element_pointer(u32 element);
     /// `@position` in a pixel stage, whose `w` HLSL reads as the reciprocal of what `FragCoord` holds.
@@ -113,6 +115,8 @@ private:
     cc::vector<u32> _capabilities;
     cc::vector<cc::string_view> _extensions;
     cc::vector<literal> _literals;
+    /// What holds `NonUniform` already, which an index shared by two chains would otherwise take twice.
+    cc::vector<u32> _nonuniform;
     cc::vector<u32> _entry;
     cc::vector<u32> _modes;
     cc::vector<u32> _names;

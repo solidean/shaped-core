@@ -124,6 +124,8 @@ private:
         u32 stride = 0;
         /// The bytes between two columns of the matrix this reaches, 0 for no matrix.
         i32 matrix_stride = 0;
+        /// An element of a binding array's own handle, where the global has none.
+        ll_value handle = ll_value::none;
     };
 
     /// Variables or workgroup memory: one array of each scalar type a value of it holds, indexed by leaf.
@@ -138,8 +140,15 @@ private:
 
     struct handle_entry
     {
-        /// The handle as an operation takes it.
+        /// The handle as an operation takes it; none for a binding array, whose elements each make their own.
         ll_value annotated = ll_value::none;
+        bool is_array = false;
+        u32 lower = 0;
+        u32 upper = 0;
+        u32 space = 0;
+        u32 cls = 0;
+        u32 word0 = 0;
+        u32 word1 = 0;
     };
 
     /// One binding the module reaches, as its metadata states it.
@@ -158,6 +167,9 @@ private:
         /// The PSV's class of it.
         u32 psv_type = 0;
         bool is_comparison = false;
+        /// The last slot it takes, and how many: all ones for an unbounded array.
+        u32 upper = 0;
+        u32 range = 1;
     };
 
     /// A row of a constant block this basic block read already, which a second read of it takes.
@@ -275,6 +287,10 @@ private:
     [[nodiscard]] u32 constant_block_size(type_ref block);
     [[nodiscard]] u32 memory_size(type_ref t, i32 matrix_stride);
     [[nodiscard]] ll_value handle_of(value_ref global);
+    /// The handle of the resource `p` stands in.
+    [[nodiscard]] ll_value handle_at(place const& p);
+    /// A handle of one element of the binding, or of the binding itself where `index` is none.
+    [[nodiscard]] ll_value made_handle(handle_entry const& h, ll_value index, bool is_nonuniform);
     void texture_op(u32 index, instruction const& i);
     void image_size(u32 index, instruction const& i);
     void array_length(u32 index, instruction const& i);
