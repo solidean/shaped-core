@@ -7,7 +7,7 @@ parent: epic-xr
 
 # PCVR on dx12: the `XR_KHR_D3D12_enable` binding
 
-The dx12 binding exists: `xr::graphics_api::dx12`, run by `xr-cube --dx12`, with sg rendering into its own images and copying (see shaped-xr's design).
+The dx12 binding exists: `sxr::graphics_api::dx12`, run by `xr-cube --dx12`, with sg rendering into its own images and copying (see shaped-xr's design).
 
 ## Wanted
 

@@ -9,7 +9,7 @@ parent: epic-xr
 
 ## Wanted
 
-- `xr::blend_mode`: `opaque`, `alpha_blend`, `additive`, replacing `session_description::passthrough`, which is the one bool there is today.
+- `sxr::blend_mode`: `opaque`, `alpha_blend`, `additive`, replacing `session_description::passthrough`, which is the one bool there is today.
 - An additive runtime reports as such, since a blend the runtime lacks is not one a session can ask for.
 - Premultiplied alpha from whatever tonemaps an AR frame, clearing to transparent.
   sr has no tonemapping routine yet, so this waits for one, and `xr-cube` writes its colors directly until then.

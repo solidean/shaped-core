@@ -5,14 +5,15 @@ The epic is [epic-xr](../../../../docs/issues/epic-xr.md); what the first protot
 
 ## What exists
 
-- **`xr::system`** is the OpenXR instance and the headset it found.
+- **`sxr::system`** is the OpenXR instance and the headset it found.
   It hands out the context the runtime dictates: on vulkan the runtime creates the instance and the device itself, through `vulkan_config`'s hooks; on dx12 it names the adapter by LUID.
-- **`xr::session`** is the runtime's frame loop over that context.
+- **`sxr::session`** is the runtime's frame loop over that context.
   It begins when the runtime is ready and ends when it stops, as a headset taken off does, and resumes on the next ready.
 - **A frame is one image of a layer an eye**, color and depth, so view instancing draws both eyes in one pass.
   Depth reaches the runtime too, where it offers `XR_KHR_composition_layer_depth`.
 - **Actions** are OpenXR's: declared by name with suggested bindings per interaction profile, synced by `wait_frame`, read by name and hand.
-  `xr::standard_controller_actions()` is the usual set for Quest Touch and the simple controller, and poses come back in tg's frame.
+  `sxr::standard_controller_actions()` is the usual set for Quest Touch and the simple controller, and poses come back in tg's frame.
+- **`sxr::inspect_runtime`** reports what the active runtime lists and what the system says it supports, with no graphics binding and no session; `xr-probe` prints it.
 - **Passthrough** is the runtime's own camera layer (`XR_FB_passthrough`) under the frame, which blends over it by alpha.
 
 ## Decisions
@@ -26,6 +27,34 @@ The epic is [epic-xr](../../../../docs/issues/epic-xr.md); what the first protot
 - **On dx12 sg renders into images of its own and copies**, from a `dx12_native_scope` with legacy barriers.
   An OpenXR D3D12 image rests in a legacy state, `RENDER_TARGET` or `DEPTH_WRITE`, which sg's enhanced barriers never meet.
 - **Submission order on the shared queue is the synchronization**: the frame's list is submitted before the images are released and the frame ends.
+
+## AR capabilities
+
+Decided on 2026-11-06, none of it built yet; each is one issue under [epic-xr](../../../../docs/issues/epic-xr.md).
+What each platform offers comes from the pinned OpenXR headers and Meta's docs.
+
+- **Capabilities are asked for on the system and reported per session** (`feat-xr-capabilities`).
+  Extensions must be named before the instance exists, so `system_description::wants` replaces `wants_passthrough`.
+  `system::offers` is what the runtime has, and `session::availability_of` is what this session may use: `unsupported`, `needs_permission`, `denied` or `available`.
+  It is an enum where sg's `supports` is a bool, because a user can refuse `USE_SCENE`, and no one refuses a GPU feature.
+- **The Quest backend is written against `XR_FB` and `XR_META`, and the public API follows `XR_EXT_spatial_*`.**
+  EXT is the cross-vendor standard, and its model is the one to copy: capabilities, async discovery into a snapshot, entities holding components.
+  Quest's support for it was unconfirmed when this was decided, so EXT is added once Quest has plane tracking there.
+- **Environment depth is frame data plus an SGL module** (`feat-xr-environment-depth`).
+  Meta's depth map comes with its own pose and fov per eye, so a shader must reproject into it, and a plain texture would not be enough.
+  The exported module owns that, the encoding and the soft edge, so occlusion is one line in an app's material, as a Slug shape is.
+- **Scene is an immutable snapshot through `cc::shared_async`** (`feat-xr-scene`), requeried on a change event.
+  Discovery is async in OpenXR, and WebXR's live per-frame set can produce snapshots too, while the reverse would not hold.
+  A label is our enum with `other`, keeping the runtime's raw string.
+- **Hit tests are sources read per frame** (`feat-xr-hit-sources`).
+  `XR_META_environment_raycast` is a direct call and WebXR's is a source; a source can be built on a direct call, not the reverse.
+  Native's statuses survive in `hit_status`, since a ray out of the cameras' view is not a miss.
+- **Anchors stop at one headset** (`feat-xr-anchors`): created, located, persisted to an id the app stores, restored from it.
+  Sharing between headsets has its own account and network story.
+- **WebXR is a constraint on shapes and not a schedule.**
+  The WebXR/WebGPU binding had not shipped as far as we could find, and sg has no webgl, so `feat-xr-webxr` is parked.
+
+The order is depth, hit sources, scene, anchors, and `question-xr-link-ar-probe` may put the APK ahead of them.
 
 ## Planned
 
