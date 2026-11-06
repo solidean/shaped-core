@@ -59,9 +59,11 @@ set(SDL_CCACHE OFF CACHE BOOL "" FORCE) # our toolchain decides that, not SDL's
 # Haptic must stay off while joystick is — SDL errors out on that combination.
 set(SDL_VIDEO ON CACHE BOOL "" FORCE)
 set(SDL_AUDIO OFF CACHE BOOL "" FORCE)
-set(SDL_JOYSTICK OFF CACHE BOOL "" FORCE)
+set(SDL_JOYSTICK ON CACHE BOOL "" FORCE)
 set(SDL_HAPTIC OFF CACHE BOOL "" FORCE)
-set(SDL_HIDAPI OFF CACHE BOOL "" FORCE)
+# The virtual joystick the gamepad test drives depends on HIDAPI; libusb stays out, so it adds no dependency.
+set(SDL_HIDAPI ON CACHE BOOL "" FORCE)
+set(SDL_HIDAPI_LIBUSB OFF CACHE BOOL "" FORCE)
 set(SDL_SENSOR OFF CACHE BOOL "" FORCE)
 set(SDL_POWER OFF CACHE BOOL "" FORCE)
 set(SDL_CAMERA OFF CACHE BOOL "" FORCE)

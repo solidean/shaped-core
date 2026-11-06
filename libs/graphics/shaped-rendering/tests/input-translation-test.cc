@@ -1,5 +1,6 @@
 #include <nexus/test.hh>
 #include <shaped-rendering/impl/input_translation.hh>
+#include <shaped-rendering/window.hh>
 
 // The SDL-to-sr input mapping, tested directly.
 //
@@ -135,3 +136,107 @@ TEST("sr - a failed pixel density query reads as 1")
     CHECK(impl::pixel_density_from_sdl(2.0f) == 2.0f);
     CHECK(impl::pixel_density_from_sdl(1.5f) == 1.5f);
 }
+
+TEST("sr - gamepad buttons map by position, and what sr does not model reads as none")
+{
+    CHECK(impl::gamepad_button_from_sdl(SDL_GAMEPAD_BUTTON_SOUTH) == gamepad_button::south);
+    CHECK(impl::gamepad_button_from_sdl(SDL_GAMEPAD_BUTTON_DPAD_RIGHT) == gamepad_button::dpad_right);
+    CHECK(!impl::gamepad_button_from_sdl(SDL_GAMEPAD_BUTTON_TOUCHPAD).has_value());
+    CHECK(!impl::gamepad_button_from_sdl(SDL_GAMEPAD_BUTTON_MISC1).has_value());
+}
+
+TEST("sr - a stick reads up as positive, and reaches its end on both sides")
+{
+    // SDL's y points down, and its range is one longer below zero than above.
+    CHECK(impl::gamepad_axis_value(gamepad_axis::left_y, -32768) == 1.0f);
+    CHECK(impl::gamepad_axis_value(gamepad_axis::left_y, 32767) == -1.0f);
+    CHECK(impl::gamepad_axis_value(gamepad_axis::right_y, -32768) == 1.0f);
+
+    CHECK(impl::gamepad_axis_value(gamepad_axis::left_x, -32768) == -1.0f);
+    CHECK(impl::gamepad_axis_value(gamepad_axis::left_x, 32767) == 1.0f);
+    CHECK(impl::gamepad_axis_value(gamepad_axis::left_x, 0) == 0.0f);
+}
+
+TEST("sr - a trigger reads 0 to 1")
+{
+    CHECK(impl::gamepad_axis_value(gamepad_axis::left_trigger, 0) == 0.0f);
+    CHECK(impl::gamepad_axis_value(gamepad_axis::right_trigger, 32767) == 1.0f);
+}
+
+#if SR_HAS_WINDOW
+
+namespace
+{
+[[nodiscard]] SDL_JoystickID attach_virtual_gamepad()
+{
+    auto desc = SDL_VirtualJoystickDesc{};
+    SDL_INIT_INTERFACE(&desc);
+    desc.type = SDL_JOYSTICK_TYPE_GAMEPAD;
+    desc.naxes = SDL_GAMEPAD_AXIS_COUNT;
+    desc.nbuttons = SDL_GAMEPAD_BUTTON_DPAD_RIGHT + 1;
+    desc.axis_mask = (1u << SDL_GAMEPAD_AXIS_COUNT) - 1;
+    desc.button_mask = (1u << (SDL_GAMEPAD_BUTTON_DPAD_RIGHT + 1)) - 1;
+    desc.name = "virtual pad";
+    return SDL_AttachVirtualJoystick(&desc);
+}
+} // namespace
+
+// SDL's virtual joystick goes through the same path a real pad's input does, from the driver up.
+TEST("sr - a gamepad connects, reports its input as events and state, and disconnects",
+     main_thread,
+     exclusive("sr-window-system"))
+{
+    auto const wsys = sr::window_system::create({.headless = true});
+    CHECK(wsys->gamepads().empty());
+
+    auto const id = attach_virtual_gamepad();
+    REQUIRE(id != 0);
+    wsys->poll_events();
+    REQUIRE(wsys->gamepads().size() == 1);
+    CHECK(wsys->gamepads()[0].gamepad == id);
+    CHECK(cc::string_view(wsys->gamepads()[0].name) == "virtual pad");
+    REQUIRE(wsys->events().size() == 1);
+    CHECK(wsys->events()[0].window == nullptr);
+    CHECK(wsys->events()[0].as_gamepad_connection().is_connected);
+
+    auto* const joystick = SDL_GetJoystickFromID(id);
+    REQUIRE(joystick != nullptr);
+    REQUIRE(SDL_SetJoystickVirtualButton(joystick, SDL_GAMEPAD_BUTTON_SOUTH, true));
+    REQUIRE(SDL_SetJoystickVirtualAxis(joystick, SDL_GAMEPAD_AXIS_LEFTY, -32768));
+    REQUIRE(SDL_SetJoystickVirtualAxis(joystick, SDL_GAMEPAD_AXIS_RIGHT_TRIGGER, 32767));
+    SDL_UpdateJoysticks();
+    wsys->poll_events();
+
+    auto const& pad = wsys->gamepads()[0];
+    CHECK(pad.is_held(gamepad_button::south));
+    CHECK(!pad.is_held(gamepad_button::east));
+    CHECK(pad.left_stick[1] == 1.0f);
+    CHECK(pad.right_trigger == 1.0f);
+
+    // SDL also reports every axis's value on the first update, so the moved one is looked for rather than counted.
+    auto buttons = 0;
+    auto saw_stick = false;
+    for (auto const& e : wsys->events())
+    {
+        buttons += e.is_gamepad_button() ? 1 : 0;
+        if (e.is_gamepad_axis() && e.as_gamepad_axis().axis == gamepad_axis::left_y)
+            saw_stick = saw_stick || e.as_gamepad_axis().value == 1.0f;
+    }
+    CHECK(buttons == 1);
+    CHECK(saw_stick);
+
+    REQUIRE(SDL_SetJoystickVirtualButton(joystick, SDL_GAMEPAD_BUTTON_SOUTH, false));
+    SDL_UpdateJoysticks();
+    wsys->poll_events();
+    CHECK(!wsys->gamepads()[0].is_held(gamepad_button::south));
+
+    REQUIRE(SDL_DetachVirtualJoystick(id));
+    wsys->poll_events();
+    CHECK(wsys->gamepads().empty());
+    auto disconnected = 0;
+    for (auto const& e : wsys->events())
+        disconnected += e.is_gamepad_connection() && !e.as_gamepad_connection().is_connected ? 1 : 0;
+    CHECK(disconnected == 1);
+}
+
+#endif

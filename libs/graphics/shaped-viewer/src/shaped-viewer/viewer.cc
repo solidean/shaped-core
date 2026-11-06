@@ -55,7 +55,10 @@ constexpr tg::vec4f clear_color = tg::vec4f(0.02f, 0.02f, 0.03f, 1.0f);
         [](sr::mouse_wheel_event const& w) { return result_t(w.cursor_pos); },  //
         [](sr::file_drop_event const& d) { return result_t(d.cursor_pos); },    //
         [](sr::key_event const&) { return result_t(); },                        //
-        [](sr::text_event const&) { return result_t(); });
+        [](sr::text_event const&) { return result_t(); },                       //
+        [](sr::gamepad_connection_event const&) { return result_t(); },         //
+        [](sr::gamepad_button_event const&) { return result_t(); },             //
+        [](sr::gamepad_axis_event const&) { return result_t(); });
 }
 
 [[nodiscard]] bool contains(tg::aabb2i const& r, tg::pos2f p)

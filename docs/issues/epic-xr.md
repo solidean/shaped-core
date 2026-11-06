@@ -87,4 +87,3 @@ Done: the sg hooks, shaped-xr's core, `xr-cube` in the headset, actions, passthr
 6. Standalone on the Quest: `feat-android-apk`, ahead of step 3 if the probe says so.
 7. `feat-xr-hand-tracking`, and `feat-xr-webxr` once the web platform allows it.
 
-`feat-sr-gamepads` follows from the input decision and blocks nothing.
