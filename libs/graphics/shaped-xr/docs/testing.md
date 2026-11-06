@@ -8,6 +8,7 @@ The conversions and mappings need no runtime and always run.
 
 It proves instance and system creation, the vulkan and dx12 bindings, a session reaching ready, the frame loop, and view instancing into the runtime's images.
 Its simulated controllers prove the actions are accepted and their poses located, but nothing presses them, so an input a person gives stays unproven.
+A drawn hand is checked by placing it in front of an eye and reading that eye back.
 It proves nothing about Meta's AR extensions, which it does not have, and it composes nothing: its null compositor renders no image, so a test only reads back what it drew itself.
 A session opts into that with `session_description::readable_color`, since on vulkan the frame is the runtime's own image.
 The null compositor paces at 20 Hz, so each frame a test waits for costs 50 ms.

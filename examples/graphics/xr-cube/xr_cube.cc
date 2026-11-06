@@ -2,7 +2,7 @@
 //
 // Vulkan by default, where the runtime's images are rendered into directly; `--dx12` takes the other binding.
 // Both eyes are one draw through view instancing, and the room shows behind the cube where the runtime offers passthrough.
-// Each hand holds a small cube; pull the trigger near the big one to grab it, and let go to leave it where it is.
+// Each hand is drawn by sxr::controller_routine; pull the trigger near the big one to grab it, and let go to leave it where it is.
 
 #include <clean-core/common/time.hh>
 #include <clean-core/string/print.hh>
@@ -14,6 +14,7 @@
 #include <shaped-graphics/all.hh>
 #include <shaped-shader-library/compiler/available_compilers.hh>
 #include <shaped-shader-library/shader_library.hh>
+#include <shaped-xr/controller_routine.hh>
 #include <shaped-xr/xr.hh>
 #include <typed-geometry/linalg/cross.hh>
 #include <typed-geometry/linalg/mat.hh>
@@ -79,7 +80,6 @@ constexpr int cube_index_count = 36;
 [[nodiscard]] tg::vec3f origin_of(tg::mat4f const& m) { return tg::vec3f(m[3, 0], m[3, 1], m[3, 2]); }
 
 constexpr auto cube_size = 0.3f;     // the big cube's edge, in metres
-constexpr auto hand_size = 0.06f;    // a hand's marker cube
 constexpr auto reach = 0.25f;        // how near the cube's centre a grip must be to grab it
 constexpr auto grab_trigger = 0.7f;  // trigger travel that grabs, and below `release_trigger` lets go
 constexpr auto release_trigger = 0.3f;
@@ -130,6 +130,7 @@ ASYNC_EXAMPLE("shaped-graphics/xr-cube", nx::config::args("--vulkan"))
     auto lib = slib::shader_library();
     slib::add_available_compilers(lib);
     lib.add_package(shaders::package());
+    lib.add_package(sxr::shader_package());
     auto vertices = ctx->persistent.create_buffer_from_data(build_cube_mesh(), sg::buffer_usage::vertex_buffer);
     auto indices = ctx->persistent.create_buffer_from_data(build_cube_indices(), sg::buffer_usage::index_buffer);
     auto pipeline = sg::raster_pipeline_handle();
@@ -217,14 +218,14 @@ ASYNC_EXAMPLE("shaped-graphics/xr-cube", nx::config::args("--vulkan"))
                     pass.draw_indexed({.index_range = {.offset = 0, .size = cube_index_count}});
                 };
                 draw(cube);
-                // a small cube in each hand, where the controller is held
-                for (auto const h : {sxr::hand::left, sxr::hand::right})
-                    if (auto const grip = session->pose("grip", h); grip.has_value())
-                        draw(grip.value().to_mat() * placed(tg::mat3f::identity, hand_size, tg::vec3f(0, 0, 0)));
+                // declines for the first frames, while its shaders compile, and the hands then appear
+                auto const hands = sxr::controller_poses(*session);
+                (void)sxr::controller_routine::execute(pass, frame, hands);
             }
         }
         session->submit_frame(cc::move(cmd));
         ctx->advance_epoch();
+        (void)ctx->routines.tick();
         co_await ctx->epochs_in_flight_completion(2);
 
         if (++frames % 300 == 0)
