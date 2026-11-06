@@ -14,7 +14,6 @@ claimed-at: 2026-11-06T13:27Z
 On dx12, on an Intel Arc B580 (driver 32.0.101.9150), `sxr::controller_routine` reports `executed` and writes no pixel.
 The same routine draws correctly on vulkan, on the same GPU, in both eyes, where each eye's pose puts it.
 `xr-cube --dx12` selects a matrix by view the same way, so it may be affected too, and nothing has read its pixels yet.
-Whether this is ours or the driver's is not known.
 
 ## What it needs
 
@@ -45,9 +44,9 @@ These `sg` tests all pass on that Arc and on WARP, and each adds one ingredient 
 - `sg - one draw of two views puts the same geometry somewhere else in each`, a position shifted by view.
 - The same over a depth array, and the same from `@vertex_index` with a triangle strip and no vertex buffer.
 
-## To try next
+## Resolved (2026-11-06)
 
-- Run the routine on a plain sg dx12 context, with no OpenXR, which separates the context from the shader.
-- Add what is still different to those `sg` tests one at a time: inline constants, the rgba8 sRGB format, a target of 640 x 720.
-- Read a frame of `xr-cube --dx12` back, to learn whether anything drawn by view works on this context.
-- Try another vendor's GPU, which this machine's iGPU may stand in for.
+It is Intel's driver, not sg: a pixel stage that does not read `SV_ViewID` is what breaks a view-instanced pipeline there.
+`sg - one draw of two views moves geometry with only the vertex stage reading which` shows it on the Arc, with WARP drawing.
+[The external bug](../../../../../docs/bugs-external/intel-d3d12-view-dependent-position-draws-nothing/readme.md) reproduces it with no code of ours.
+Both shaders that draw by view now read it in the pixel stage, and the dx12 hand test passes on the Arc.

@@ -186,6 +186,7 @@ enum class sg::feature
     /// `vertex_layer_output` rasterises them separately.
     /// D3D12 grants it with a `ViewInstancingTier`, Vulkan with `multiview`; Metal's vertex amplification is not wired up
     /// yet, and WebGPU has no such thing.
+    /// A pixel stage must read the view, or Intel's dx12 driver draws nothing: docs/bugs-external/intel-d3d12-view-dependent-position-draws-nothing.
     view_instancing,
 
     /// A vertex, geometry or tessellation stage may write a storage buffer, which SGL's `print` and `assert` need there.

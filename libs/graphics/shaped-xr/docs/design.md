@@ -16,7 +16,6 @@ The epic is [epic-xr](../../../../docs/issues/epic-xr.md); what the first protot
 - **Capabilities** are named in `system_description::wants`, and `system::offers` answers whether the headset has one.
   What is missing is left out rather than failing the system, and `session::availability_of` is what a session may use.
 - **`sxr::controller_routine`** draws each hand as a plain box and its aim ray as a thin one, inside the frame's own pass.
-  It writes no pixel on dx12 yet, which `bug-sg-dx12-view-instanced-controller-draws-nothing` tracks; vulkan, the path a Quest takes, is checked pixel by pixel.
 - **`sxr::inspect_runtime`** reports what the active runtime lists and what the system says it supports, with no graphics binding and no session; `xr-probe` prints it.
 - **`sxr::blend_mode`** is how a frame meets the room: opaque, alpha blend or additive, and `session::blend` says what came up.
   A camera layer serves alpha blend ahead of the runtime's own, since that layer under an opaque frame is what ran over Quest Link.

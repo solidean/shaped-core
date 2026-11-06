@@ -35,7 +35,6 @@ lib.add_package(sxr::shader_package());            // the application's shader l
 sxr::controller_poses(*session)                    // -> vector<controller_pose>: tracked hands, from `grip` and `aim`
 sxr::controller_routine::execute(pass, frame, hands)  // -> sg::routine_outcome; inside a view_count = 2 pass with frame.depth
 //   declines until built: asking registers it, ctx.routines.tick() builds it; prewarm(ctx, frame.color.format()) asks early
-//   VULKAN ONLY so far: on dx12 it reports executed and writes nothing (bug-sg-dx12-view-instanced-controller-draws-nothing)
 ```
 
 ## What a runtime offers

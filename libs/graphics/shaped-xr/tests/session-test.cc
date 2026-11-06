@@ -279,7 +279,6 @@ ASYNC_TEST("shaped-xr session - a hand is drawn where its pose puts it, on vulka
 #ifdef CC_OS_WINDOWS
 ASYNC_TEST("shaped-xr session - a hand is drawn where its pose puts it, on dx12", nx::config::exclusive("openxr"))
 {
-    SKIP("writes no pixel on dx12 yet: bug-sg-dx12-view-instanced-controller-draws-nothing");
     co_await check_a_hand_is_drawn(sxr::graphics_api::dx12);
 }
 #endif
