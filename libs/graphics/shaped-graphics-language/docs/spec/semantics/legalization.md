@@ -35,6 +35,8 @@ The worked examples are WGSL, since it is the strictest target: no `do … while
   The tree then prints nothing; it is the one way it may behave otherwise than its input, and only when the caller asked.
 * **LEGAL-65** (G1) Asked to, legalization first guards each operation that may have no value: the robustness profile `abort`, `report` or `define` (LEGAL-68).
   That is an integer `/` or `%` whose divisor is no literal that cannot fail (EVAL-84), and an array index that is no literal (EVAL-90).
+  A binding array's own index is one, whatever element it names, a mark staying on the index: by its `N`, or where it is unbounded by CHK-491's length.
+  That constant exists only where the shader reads it, so an unbounded array whose length no code reads is not guarded.
   The guard is a block in the operation's place that binds the operands, tests them, and only then runs the operation, so every later rule keeps its order and its short circuits.
   A failed test ends the invocation as an `assert` of LEGAL-64 does, and `report` first prints the operation and its operands as that `assert`'s message.
   Where a barrier, a derivative or a subgroup operation may still follow, every invocation must reach it, so the end waits:
@@ -50,6 +52,8 @@ The worked examples are WGSL, since it is the strictest target: no `do … while
   A buffer index outside `0 ..< values.length` ends the invocation as an array index does (EVAL-90).
   So does a `bytes` load or store whose offset is no multiple of 4, or whose last word reaches past the bound memory (EVAL-97).
   The memory itself is never bound to a local, so only the offset and a stored value are, in their order.
+  An element of a binding array names its memory for the length and again for the access, so its index is pinned in front of both, and evaluated once.
+  An access through one is a block of its own: a read gives the element, a store evaluates its place and then its value, and an atomic its place and then its operands.
   MSL reads no length, so a metal text guards neither.
 * **LEGAL-67** (G1) Once a guard may set that flag, every write up to the flag's test is skipped where it is set, so a safe operand's result reaches no memory.
   A write is a store to a buffer element or to workgroup memory, and a call with an effect, an atomic or an image store, that stands as a statement.
@@ -60,7 +64,9 @@ The worked examples are WGSL, since it is the strictest target: no `do … while
   A maths builtin of EVAL-87 runs on the operands its deferred guard gives: `pow` on a base of 1, `asin` and `acos` on 0, `atan2` on an `x` of 1.
   `smoothstep` runs on the edges 0 and 1, and `clamp` on a `high` of `low`.
   It prints nothing and needs no flag, since no invocation ends, and the tree has a value wherever the input has one.
-  An index of 0 is still past the end of a buffer that holds nothing, which it leaves to the target.
+  Memory too short for the access has no index or offset that is safe, so the access does not run.
+  A read and a `bytes` load are zero of their type, a store is dropped, and an atomic gives zero and changes nothing.
+  Its operands still run, in their order, as WGSL's bounded access evaluates them.
 * **LEGAL-69** (G1) Those profiles shadow a compute stage's workgroup memory with a bit per scalar, set where one is stored and tested where one is read (EVAL-92).
   A scalar is a leaf of a member's type, counted in the order the members are listed: a `float3` is three, an atomic one, whatever its width.
   A store and an atomic set the bits of the scalars they reach once they ran; every read, an atomic's but a store's included, tests them first.

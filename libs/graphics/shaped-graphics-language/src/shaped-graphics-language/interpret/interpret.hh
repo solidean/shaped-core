@@ -34,11 +34,14 @@ struct sgl::check::buffer_contents
     symbol_id binding = symbol_id::none;
     /// A position in the binding's `members`.
     i32 member = -1;
+    /// The element of a binding array; 0 for a member that is no array.
+    i32 element = 0;
     cc::vector<scalar> leaves;
 
     [[nodiscard]] bool operator==(buffer_contents const& rhs) const
     {
-        return binding == rhs.binding && member == rhs.member && ast::impl::is_equal(leaves, rhs.leaves);
+        return binding == rhs.binding && member == rhs.member && element == rhs.element
+            && ast::impl::is_equal(leaves, rhs.leaves);
     }
 };
 

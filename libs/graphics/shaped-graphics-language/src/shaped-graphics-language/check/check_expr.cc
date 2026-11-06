@@ -1061,14 +1061,9 @@ type_id checker::check_member(function_scope& scope, ast::expr_id id, ast::membe
         return type_of_builtin(builtins::k_int, file, span_of(file, id));
     }
 
-    // CHK-460: a buffer's length is the bound memory's, a binding member's alone
+    // CHK-460: a buffer's length is the bound memory's
     if ((out.at(object).kind == type_kind::buffer || out.at(object).kind == type_kind::bytes) && name == "length")
     {
-        if (ast_of(file).at(member.object).node.is<ast::index>())
-        {
-            unsupported(file, span_of(file, id), "the length of an element of a binding array");
-            return error_type;
-        }
         set_target(file, id, {.kind = target_kind::buffer_length});
         return type_of_builtin(builtins::k_uint, file, span_of(file, id));
     }

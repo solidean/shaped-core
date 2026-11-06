@@ -187,6 +187,8 @@ struct sgl::check::flat_local
     bool is_mut = false;
     /// The prelude's `undefined()`: never assigned, and handed on and stored as a value whose content means nothing.
     bool is_undefined = false;
+    /// LEGAL-68: declared with no value, and reading as a zero of its type.
+    bool is_zeroed = false;
 
     bool operator==(flat_local const&) const = default;
 };
@@ -300,7 +302,7 @@ struct sgl::check::flat_member
 };
 
 /// `values[i]` on a `buffer`: the element a shader loads, and the place it stores to.
-/// `buffer` is what names the resource, which today is always a `flat_binding_member`.
+/// `buffer` is what names the resource: a `flat_binding_member`, or a `flat_element` of a binding array of them.
 /// As a place, `index` is evaluated before the value that is stored.
 struct sgl::check::flat_buffer_element
 {
@@ -311,7 +313,7 @@ struct sgl::check::flat_buffer_element
 };
 
 /// `values.length` of a buffer or of `bytes`: how many elements, or bytes, the bound memory holds (CHK-460).
-/// `buffer` is always a `flat_binding_member`, a leaf no pass rewrites.
+/// `buffer` is a `flat_binding_member`, or a `flat_element` of a binding array of them.
 struct sgl::check::flat_buffer_length
 {
     flat_expr_id buffer = flat_expr_id::none;

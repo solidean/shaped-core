@@ -708,7 +708,8 @@ ops[i](mut v)                                            // raygen, miss, closes
   `@tessellation_control(partitioning = …, winding = …)` takes the patch and returns a factors struct, and `@tessellation_evaluation` takes both and `@domain_location`.
   HLSL writes them; WGSL and MSL refuse by the feature, so they are tested in C++ rather than in the corpus, which emits for all four targets.
 - **`T[N]` is a value like a struct** (CHK-285 to CHK-290): copied where passed, `float[3, 5]` is three arrays of five, and `xs.length` is a constant.
-- **`values.length` of a buffer is a `uint` the bound buffer decides** (CHK-460), of `bytes` its bytes; metal refuses it, since a Metal buffer carries no length (EMIT-195).
+- **`values.length` of a buffer is a `uint` the bound buffer decides** (CHK-460), of `bytes` its bytes, and `values[i].length` that element's of a binding array.
+  Metal refuses it, since a Metal buffer carries no length (EMIT-195).
   The robustness profiles bound every buffer index and `bytes` access by it, except on metal (LEGAL-66).
   `T[N].filled(v)` and a square literal `[a, b, c]` build one; `T[]` is a binding member's alone.
 - **`discard` is a jump, and only a `@pixel fun` may reach it** (CHK-277): anywhere else it is `stage-not-allowed` at the `discard`.

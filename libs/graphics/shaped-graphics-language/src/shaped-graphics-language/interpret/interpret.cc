@@ -525,15 +525,9 @@ struct machine
         auto const count = record.is_bytes_store ? 3 : 2;
         if (arguments.size() != count || !is_known(e, arguments[0]))
             return type_error(cc::format("a call of '{}' without its bytes", record.name));
-        auto const* const named = e.at(arguments[0]).node.try_as<flat_binding_member>();
-        if (named == nullptr)
-            return type_error("bytes that no binding member names");
         auto buffer = isize(-1);
-        for (auto i = isize(0); i < out.buffers.size(); ++i)
-            if (out.buffers[i].binding == named->binding && out.buffers[i].member == named->member)
-                buffer = i;
-        if (buffer < 0)
-            return type_error("bytes the inputs do not hold");
+        if (auto const f = buffer_named(arguments[0], buffer); !f.is_normal())
+            return f;
 
         auto offset = value();
         if (auto const f = eval(arguments[1], offset); !f.is_normal())
@@ -594,6 +588,27 @@ struct machine
             return type_error("a resource that no binding member names");
         binding = b->binding;
         member = b->member;
+        return {};
+    }
+
+    /// The position in `out.buffers` of the memory `id` names; its index, if it is a binding array's, runs here.
+    flow buffer_named(flat_expr_id id, isize& buffer)
+    {
+        auto binding = symbol_id::none;
+        auto member = i32(-1);
+        auto element = i32(0);
+        if (auto const f = resource_of(id, binding, member, element); !f.is_normal())
+            return f;
+        buffer = -1;
+        for (auto i = isize(0); i < out.buffers.size(); ++i)
+            if (out.buffers[i].binding == binding && out.buffers[i].member == member && out.buffers[i].element == element)
+                buffer = i;
+        // EVAL-90: past a binding array's last element, as past an array's
+        if (buffer < 0 && e.at(id).node.is<flat_element>())
+            return fail(run_status::program_error,
+                        cc::format("the index {} is out of bounds of a binding array", element));
+        if (buffer < 0)
+            return type_error("a buffer the inputs do not hold");
         return {};
     }
 
@@ -1052,18 +1067,8 @@ struct machine
             return f;
         if (!is_index(index))
             return type_error("a buffer index that is no int and no uint");
-        if (!is_known(e, b.buffer))
-            return type_error("an expression id that names nothing");
-        auto const* const named = e.at(b.buffer).node.try_as<flat_binding_member>();
-        if (named == nullptr)
-            return type_error("a buffer that no binding member names");
-
-        buffer = -1;
-        for (auto i = isize(0); i < out.buffers.size(); ++i)
-            if (out.buffers[i].binding == named->binding && out.buffers[i].member == named->member)
-                buffer = i;
-        if (buffer < 0)
-            return type_error("a buffer the inputs do not hold");
+        if (auto const f = buffer_named(b.buffer, buffer); !f.is_normal())
+            return f;
 
         auto const count = leaf_count_of(m, element_type);
         if (count <= 0 || out.buffers[buffer].leaves.size() % count != 0)
@@ -1180,20 +1185,15 @@ struct machine
         // CHK-460: what the inputs bound, in elements, or in bytes of a `bytes`
         if (auto const* const length = x.node.try_as<flat_buffer_length>())
         {
-            auto const* const named
-                = is_known(e, length->buffer) ? e.at(length->buffer).node.try_as<flat_binding_member>() : nullptr;
-            if (named == nullptr)
-                return type_error("the length of a buffer that no binding member names");
+            auto buffer = isize(-1);
+            if (auto const f = buffer_named(length->buffer, buffer); !f.is_normal())
+                return f;
             auto const& type = m.at(e.at(length->buffer).type);
-            for (auto const& b : out.buffers)
-                if (b.binding == named->binding && b.member == named->member)
-                {
-                    auto const count = type.kind == type_kind::bytes ? 1 : leaf_count_of(m, type.element);
-                    auto const n = type.kind == type_kind::bytes ? b.leaves.size() * 4 : b.leaves.size() / count;
-                    result.leaves.push_back(scalar::of_uint(u32(n)));
-                    return {};
-                }
-            return type_error("a buffer the inputs do not hold");
+            auto const& leaves = out.buffers[buffer].leaves;
+            auto const n
+                = type.kind == type_kind::bytes ? leaves.size() * 4 : leaves.size() / leaf_count_of(m, type.element);
+            result.leaves.push_back(scalar::of_uint(u32(n)));
+            return {};
         }
         if (auto const* const element = x.node.try_as<flat_buffer_element>())
         {
@@ -1716,7 +1716,7 @@ struct machine
             if (!is_valid(var->value))
             {
                 locals[index_of(var->local)] = zero_value(m, e.at(var->local).type);
-                is_set[index_of(var->local)] = false;
+                is_set[index_of(var->local)] = e.at(var->local).is_zeroed;
                 return {};
             }
             auto v = value();

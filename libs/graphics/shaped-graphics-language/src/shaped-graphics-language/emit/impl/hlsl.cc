@@ -58,6 +58,24 @@ public:
                           "return n;\n}}\n",
                           name);
     }
+    // a helper per mark: inside it, the parameter has lost the mark NonUniformResourceIndex must see
+    cc::string buffer_length_at(cc::string_view name, cc::string_view index, bool is_nonuniform) const override
+    {
+        return cc::format("sgl_length_{}{}({})", is_nonuniform ? "nonuniform_" : "", name, index);
+    }
+    cc::string buffer_length_at_helper(cc::string_view name, bool is_nonuniform, bool is_bytes) const override
+    {
+        auto const element
+            = is_nonuniform ? cc::format("{}[NonUniformResourceIndex(i)]", name) : cc::format("{}[i]", name);
+        auto const prefix = is_nonuniform ? "nonuniform_" : "";
+        if (is_bytes)
+            return cc::format("uint sgl_length_{}{}(uint i)\n{{\n    uint n;\n    {}.GetDimensions(n);\n    return "
+                              "n;\n}}\n",
+                              prefix, name, element);
+        return cc::format("uint sgl_length_{}{}(uint i)\n{{\n    uint n, stride;\n    {}.GetDimensions(n, stride);\n "
+                          "   return n;\n}}\n",
+                          prefix, name, element);
+    }
     /// EMIT-135: an emulated trace reads sg's pool and the dispatch's roots, as WGSL's does.
     void write_acceleration_pool(cc::string& out) const override
     {
@@ -111,7 +129,7 @@ public:
     void write_local(cc::string& out, local_declaration const& local) const override
     {
         if (local.value.empty() && local.is_zeroed)
-            out.appendf("{} {} = ({})0;", local.type, local.name, local.type);
+            out.appendf("{} {}{} = ({}{})0;", local.type, local.name, local.dimensions, local.type, local.dimensions);
         else if (local.value.empty())
             out.appendf("{} {}{};", local.type, local.name, local.dimensions);
         else

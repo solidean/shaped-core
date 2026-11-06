@@ -429,6 +429,7 @@ let counted = materials.albedo[uniform (counts.picked[0] % 64)].sample(p.uv)
   It needs `unbounded_binding_arrays` beside `binding_arrays`, and is its binding's last member, since both APIs size only a group's last binding.
   Its `length` is the views the group was given, held as a constant of the binding that the generated host code fills (CHK-491).
   A binding whose code reads it gains that constant, and with it a constant block, so a group built by hand binds and fills one; a staging group's is its capacity.
+* An element of a buffer or `bytes` array has its own `length`, how many elements or bytes that view holds (CHK-460).
 * `sampler[N]` and `comparison_sampler[N]` are arrays of samplers, read by element and handed to a sample as the member would be.
   Each element is the host's per group, since sg has no static sampler array, and the generated field is a `cc::fixed_array<sg::sampler, N>`.
   An unbounded one and one of more than one dimension are `unsupported-yet`.
