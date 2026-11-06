@@ -5,8 +5,8 @@ tags: [xr, dx12]
 refs:
   - test: shaped-xr session - a hand is drawn where its pose puts it, on dx12
   - file: libs/graphics/shaped-xr/shaders/controller.sgl
-claimed-by: Claude (for Philip)
-claimed-at: 2026-11-06T13:27Z
+closed: 2026-11-06
+resolution: fixed
 ---
 
 # A view-dependent position draws nothing through sxr::controller_routine on dx12
@@ -48,5 +48,5 @@ These `sg` tests all pass on that Arc and on WARP, and each adds one ingredient 
 
 It is Intel's driver, not sg: a pixel stage that does not read `SV_ViewID` is what breaks a view-instanced pipeline there.
 `sg - one draw of two views moves geometry with only the vertex stage reading which` shows it on the Arc, with WARP drawing.
-[The external bug](../../../../../docs/bugs-external/intel-d3d12-view-dependent-position-draws-nothing/readme.md) reproduces it with no code of ours.
+[The external bug](../../../../../../../../docs/bugs-external/intel-d3d12-view-dependent-position-draws-nothing/readme.md) reproduces it with no code of ours.
 Both shaders that draw by view now read it in the pixel stage, and the dx12 hand test passes on the Arc.
