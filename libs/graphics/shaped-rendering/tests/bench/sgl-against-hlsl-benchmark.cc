@@ -355,4 +355,13 @@ ASYNC_BENCHMARK("sr - SGL against the HLSL it was ported from, GPU time per disp
         SKIP("no vulkan device");
     co_await compare_on(*created.value());
 }
+
+// The same kernels with SGL's own SPIR-V against DXC's of the hand-written HLSL, which is what DXC's optimizer is worth.
+ASYNC_BENCHMARK("sr - SGL's own SPIR-V against the HLSL it was ported from, GPU time per dispatch, on vulkan")
+{
+    auto created = sg::create_vulkan_context({.native_spirv = true});
+    if (created.has_error())
+        SKIP("no vulkan device");
+    co_await compare_on(*created.value());
+}
 #endif
