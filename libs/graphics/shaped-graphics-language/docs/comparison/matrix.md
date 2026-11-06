@@ -79,10 +79,10 @@ A per-target cell reads `dx12 / vulkan / metal / webgpu`.
 | Row | HLSL + chain | Slang | WGSL | GLSL + chain | SGL |
 |---|---|---|---|---|---|
 | **D1** Generics | ✅ templates (HLSL 2021), no constraints | ✅ interfaces and checked generics | ❌ (WESL: draft) | ❌ | ✅ templates checked per instance: type and value parameters, generic structs; no interfaces, by design |
-| **D2** Modules | ❌ `#include` | ✅ modules, precompiled modules, link-time specialization | ⚠️ WESL imports | ⚠️ `#include` extension | ⚠️ modules, no separate compilation 🗺️ [epic](../issues/epic-sgl-modules-beyond-a-tracer.md) |
+| **D2** Modules | ❌ `#include` | ✅ modules, precompiled modules, link-time specialization | ⚠️ WESL imports | ⚠️ `#include` extension | ⚠️ modules, no separate compilation 🗺️ [epic](../issues/epic-sgl-separate-compilation.md); the rest a module cannot carry yet 🗺️ [epic](../issues/epic-sgl-modules-beyond-a-tracer.md) |
 | **D3** Bindless | ✅ / ✅ / ✅ (MSC) / — | ✅ / ✅ / ⚠️ / ⚠️ | ⚠️ / ⚠️ / ⚠️ / — native extension only | ✅ / ✅ / ⚠️ / — | ✅ / ✅ / ⚠️ / — fixed-size and unbounded binding arrays, checked `nonuniform`, an unbounded one sized per group; metal's unbounded arrays not yet 🗺️ [feat](../issues/feat-sgl-unbounded-binding-arrays.md) |
 | **D4** GPU pointers | ⚠️ Vulkan only | ⚠️ SPIR-V; Metal partly | ❌ | ⚠️ Vulkan, and Metal through SPIRV-Cross | ❌ whether to have them is an open design question 🗺️ [epic](../issues/epic-sgl-gpu-pointers.md) |
-| **D5** half, f64, int64, int16 | ✅ f64 on DX12 and Vulkan, which alone have it; 64- and 16-bit ints everywhere but WebGPU | ✅ the same shape | ⚠️ f16 extension; no f64 or int64 in a browser | ✅ the same shape as HLSL | ✅ half, 16- and 64-bit ints and double behind features, wherever the target has them: all of them on dx12 and vulkan, all but double on metal, half alone on webgpu; a 64-bit value crosses a stage link on every target with its type, as its words where DXIL and MSL carry none; a double's sqrt, rounding and vector geometry on dx12 and vulkan, written by SGL since DXC narrows a double handed to them; no transcendental of a double, which no target has |
+| **D5** half, f64, int64, int16 | ⚠️ f64 on DX12 and Vulkan, which alone have it, but DXC narrows a double handed to `sqrt`, `floor`, `lerp` or `sin` to a float without a word; 64- and 16-bit ints everywhere but WebGPU | ✅ the same shape | ⚠️ f16 extension; no f64 or int64 in a browser | ✅ the same shape as HLSL | ✅ half, 16- and 64-bit ints and double behind features, wherever the target has them: all of them on dx12 and vulkan, all but double on metal, half alone on webgpu; a 64-bit value crosses a stage link on every target with its type, as its words where DXIL and MSL carry none; a double's sqrt, rounding and vector geometry on dx12 and vulkan, written by SGL since DXC narrows a double handed to them; no transcendental of a double, which no target has |
 | **D6** Mesh, geometry, tessellation, work graphs | ⚠️ mesh on DX12, Vulkan and MSC; work graphs on DX12 | ⚠️ mesh on DX12, Vulkan and Metal; geometry and tessellation on DX12 and Vulkan | ⚠️ Naga experimental mesh; none in a browser | ⚠️ mesh to HLSL and MSL | ⚠️ geometry and tessellation on dx12 and vulkan; mesh and task stages with a payload and per-primitive attributes on dx12 and vulkan, refused on webgpu; triangles only, and metal not yet 🗺️ [feat](../issues/feat-sgl-mesh-and-task-stages.md); no work graphs |
 | **D7** Autodiff | ❌ | ✅ forward and backward | ❌ | ❌ | ❌ 🗺️ [epic](../issues/epic-sgl-autodiff.md) |
 | **D8** Methods, operators, enums, inference | ⚠️ methods, operators, enums, `auto`; no constructors | ✅ | ⚠️ no methods, operators or enums | ❌ | ✅ methods, properties, `@operator`, enums, inference, arrow lambdas |
@@ -313,7 +313,7 @@ Per row and column:
   - GLSL + chain: SXC
   - SGL: [bindings.md](../spec/bindings.md) "Bytes"
 - **D5**
-  - HLSL + chain: TINT capability list, MSC table
+  - HLSL + chain: TINT capability list, MSC table, DXC 1.9.2602's DXIL and SPIR-V for a double's `sqrt`, read 2026-11-06
   - Slang: SLANG target compatibility
   - WGSL: WGSL, NAGA
   - GLSL + chain: SXC

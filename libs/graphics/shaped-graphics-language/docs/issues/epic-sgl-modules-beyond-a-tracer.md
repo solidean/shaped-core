@@ -9,6 +9,7 @@ refs:
 
 Every compile parses the library and checks the modules the program reaches, in one pass with it, and keeps nothing between compiles.
 Interfaces, separate compilation and a parsed library shared across compiles are the [compilation model](../spec/incubator/compilation-model.md)'s.
+[epic-sgl-separate-compilation](epic-sgl-separate-compilation.md) is the work that builds them.
 The front end parses a library file only where its first line may be a `module` line, which keeps a module directory of programs cheap for the tool and slib.
 The language server still parses every file of its module directories.
 
