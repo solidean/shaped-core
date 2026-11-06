@@ -74,10 +74,11 @@ inline cc::shared_async<sg::texture_2d> filled_texture(sg::context& ctx,
 
 [[nodiscard]] inline sg::texture_2d target_texture(sg::context& ctx)
 {
-    return ctx.persistent.create_texture_2d({.format = sg::pixel_format::rgba32_float,
-                                             .width = k_extent[0],
-                                             .height = k_extent[1],
-                                             .usage = sg::texture_usage::texture | sg::texture_usage::image});
+    return ctx.persistent.create_texture_2d(
+        {.format = sg::pixel_format::rgba32_float,
+         .width = k_extent[0],
+         .height = k_extent[1],
+         .usage = sg::texture_usage::texture | sg::texture_usage::image | sg::texture_usage::copy_src});
 }
 
 /// Records `rounds` dispatches of each contender, alternating, and logs what they took.

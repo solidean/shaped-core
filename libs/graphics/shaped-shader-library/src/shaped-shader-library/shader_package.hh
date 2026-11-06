@@ -64,4 +64,6 @@ struct slib::shader_package
     /// `NATIVE_SPIRV` in sc_add_shader_package: its SPIR-V is written by SGL itself, and an entry point SGL has no lowering
     /// for yet fails to compile rather than going through DXC.
     bool native_spirv = false;
+    /// `NATIVE_DXIL` in sc_add_shader_package: the same of its DXIL, whose container nothing validates or signs.
+    bool native_dxil = false;
 };

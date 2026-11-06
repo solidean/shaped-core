@@ -95,7 +95,7 @@ set(SC_SGL_TOOL "" CACHE FILEPATH
     "A runnable `sgl`, for an SGL shader package's `*` and typed entries where the tree's own cannot run or is not built")
 
 function(sc_add_shader_package)
-    cmake_parse_arguments(PKG "SOFTWARE_TRACE;NATIVE_SPIRV" "TARGET;NAME;NAMESPACE;SOURCE_DIR;LANGUAGE" "SHADERS;MODULE_DIRS" ${ARGN})
+    cmake_parse_arguments(PKG "SOFTWARE_TRACE;NATIVE_SPIRV;NATIVE_DXIL" "TARGET;NAME;NAMESPACE;SOURCE_DIR;LANGUAGE" "SHADERS;MODULE_DIRS" ${ARGN})
 
     foreach(_required TARGET NAME NAMESPACE SOURCE_DIR SHADERS)
         if(NOT PKG_${_required})
@@ -116,6 +116,9 @@ function(sc_add_shader_package)
     endif()
     if(PKG_NATIVE_SPIRV AND NOT PKG_LANGUAGE STREQUAL "sgl")
         message(FATAL_ERROR "sc_add_shader_package(${PKG_NAME}): NATIVE_SPIRV is for an SGL package")
+    endif()
+    if(PKG_NATIVE_DXIL AND NOT PKG_LANGUAGE STREQUAL "sgl")
+        message(FATAL_ERROR "sc_add_shader_package(${PKG_NAME}): NATIVE_DXIL is for an SGL package")
     endif()
 
     # add_custom_command(OUTPUT) attaches to the directory scope it is called from, and a function does not create one.
@@ -163,6 +166,9 @@ function(sc_add_shader_package)
     endif()
     if(PKG_NATIVE_SPIRV)
         string(APPEND _manifest_text "NATIVE_SPIRV=1\n")
+    endif()
+    if(PKG_NATIVE_DXIL)
+        string(APPEND _manifest_text "NATIVE_DXIL=1\n")
     endif()
     foreach(_dir IN LISTS _module_dirs)
         string(APPEND _manifest_text "MODULE_DIR=${_dir}\n")

@@ -109,6 +109,9 @@ inline constexpr cc::string_view k_device_features_option = "device_features";
 /// `sg::context::prefers_native_spirv`'s; the cache keys on it as on any option.
 inline constexpr cc::string_view k_native_spirv_option = "native_spirv";
 
+/// The same for a context that prefers SGL's own DXIL, `sg::context::prefers_native_dxil`'s.
+inline constexpr cc::string_view k_native_dxil_option = "native_dxil";
+
 /// The option a caller passes to `shader_asset::acquire`, valued `true`, to let a WebGPU pipeline run an SGL entry
 /// point at `fast` whose `@float` WGSL cannot keep, with a warning, rather than refusing it (EMIT-185).
 /// The host's call, never the shader's, and the cache keys on it as on any option.
@@ -153,6 +156,8 @@ struct slib::shader_source_description
     /// The package's `NATIVE_SPIRV`, which only SGL reads: its SPIR-V is SGL's own, and an entry point with no lowering
     /// yet is an error rather than a compile through DXC.
     bool native_spirv = false;
+    /// The package's `NATIVE_DXIL`, the same of its DXIL.
+    bool native_dxil = false;
     /// What `preprocess` wrote in place of text, which a compile hands on as it is; empty where it wrote text.
     cc::vector<byte> bytecode;
 };
