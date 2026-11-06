@@ -414,6 +414,7 @@ enum class merge_kind : u8;
 struct block;
 struct constant;
 enum class global_kind : u8;
+enum class built_in : u8;
 struct global;
 struct local;
 enum class type_ref : u32;

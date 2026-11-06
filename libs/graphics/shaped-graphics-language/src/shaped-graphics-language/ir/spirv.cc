@@ -276,6 +276,22 @@ constexpr format_number k_formats[] = {
     {"rg16ui", 36, true},     {"rg8ui", 37, true},    {"r16ui", 38, true},    {"r8ui", 39, true},
 };
 
+/// SPIR-V's `BuiltIn` of each stage input.
+struct built_in_number
+{
+    built_in input = built_in::none;
+    u32 number = 0;
+    bool is_subgroup = false;
+};
+constexpr built_in_number k_built_ins[] = {
+    {built_in::thread_id, 28},
+    {built_in::local_thread_id, 27},
+    {built_in::local_thread_index, 29},
+    {built_in::workgroup_id, 26},
+    {built_in::subgroup_size, 36, true},
+    {built_in::subgroup_invocation_id, 41, true},
+};
+
 /// The opcode of an operation whose words are only its result and its operands, or 0.
 [[nodiscard]] constexpr u32 plain_opcode(ir::op code)
 {
@@ -769,12 +785,13 @@ private:
                 emit(_annotations, spv::Decorate, {id, spv::DescriptorSet, u32(g.set)});
             if (g.binding >= 0)
                 emit(_annotations, spv::Decorate, {id, spv::Binding, u32(g.binding)});
-            if (g.built_in >= 0)
-            {
-                emit(_annotations, spv::Decorate, {id, spv::BuiltIn, u32(g.built_in)});
-                if (g.built_in == 36 || g.built_in == 41)
-                    require(spv::GroupNonUniform);
-            }
+            for (auto const& known : k_built_ins)
+                if (known.input == g.input)
+                {
+                    emit(_annotations, spv::Decorate, {id, spv::BuiltIn, known.number});
+                    if (known.is_subgroup)
+                        require(spv::GroupNonUniform);
+                }
             auto const space = _p.at(g.type).space;
             auto const is_storage = space == storage::storage_buffer
                                  || (space == storage::resource && _p.at(_p.at(g.type).element).is_storage_image);

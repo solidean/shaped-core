@@ -465,6 +465,18 @@ enum class sgl::ir::global_kind : sgl::u8
     file_sampler,
 };
 
+/// A value the stage hands an entry point, which each target names its own way.
+enum class sgl::ir::built_in : sgl::u8
+{
+    none,
+    thread_id,
+    local_thread_id,
+    local_thread_index,
+    workgroup_id,
+    subgroup_size,
+    subgroup_invocation_id,
+};
+
 /// A variable outside the function: a resource, a block, workgroup memory or a stage input.
 struct sgl::ir::global
 {
@@ -474,8 +486,8 @@ struct sgl::ir::global
     /// A descriptor's address, -1 for none.
     i32 set = -1;
     i32 binding = -1;
-    /// SPIR-V's `BuiltIn` of a stage input, -1 for none.
-    i32 built_in = -1;
+    /// What a stage input holds.
+    built_in input = built_in::none;
     bool is_read_only = false;
     bool is_write_only = false;
     bool is_coherent = false;

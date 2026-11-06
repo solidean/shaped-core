@@ -8,22 +8,22 @@ using namespace sgl::ir::dxil::impl;
 
 namespace
 {
-/// A stage input by the number the form states it with, SPIR-V's `BuiltIn`.
+/// What DXIL reads a stage input with.
 struct built_in_rule
 {
-    i32 number = 0;
+    ir::built_in input = ir::built_in::none;
     dx_op op = dx_op::thread_id;
     /// Whether the operation takes a component, which a scalar's does not.
     bool has_component = true;
 };
 
 constexpr built_in_rule k_built_ins[] = {
-    {28, dx_op::thread_id},
-    {26, dx_op::group_id},
-    {27, dx_op::thread_id_in_group},
-    {29, dx_op::flattened_thread_id_in_group, false},
-    {36, dx_op::wave_get_lane_count, false},
-    {41, dx_op::wave_get_lane_index, false},
+    {ir::built_in::thread_id, dx_op::thread_id},
+    {ir::built_in::workgroup_id, dx_op::group_id},
+    {ir::built_in::local_thread_id, dx_op::thread_id_in_group},
+    {ir::built_in::local_thread_index, dx_op::flattened_thread_id_in_group, false},
+    {ir::built_in::subgroup_size, dx_op::wave_get_lane_count, false},
+    {ir::built_in::subgroup_invocation_id, dx_op::wave_get_lane_index, false},
 };
 
 /// What a stage is to the metadata and the container; only compute is lowered yet, and a stage is a row here.
@@ -78,10 +78,10 @@ void writer::built_in(u32 index, global const& g, instruction const& i)
 {
     built_in_rule const* found = nullptr;
     for (auto const& r : k_built_ins)
-        if (r.number == g.built_in)
+        if (r.input == g.input)
             found = &r;
     if (found == nullptr)
-        return unsupported(cc::format("the stage input {} on DXIL", g.built_in));
+        return unsupported(cc::format("the stage input {} on DXIL", int(g.input)));
     auto const number = _m.constant_i32(k_dx_ops[isize(found->op)].number);
     auto const is_wave = found->op == dx_op::wave_get_lane_count || found->op == dx_op::wave_get_lane_index;
     if (is_wave)
