@@ -224,7 +224,8 @@ value_ref lowering::column_wise(op code, value_ref a, value_ref b, type_ref matr
     for (auto i = u32(0); i < info.count; ++i)
     {
         auto const left = extracted(a, column, i);
-        columns.push_back(u32(is_valid(b) ? add(code, column, {left, extracted(b, column, i)}) : add(code, column, {left})));
+        columns.push_back(
+            u32(is_valid(b) ? add(code, column, {left, extracted(b, column, i)}) : add(code, column, {left})));
     }
     return add(op::construct, matrix, columns);
 }
@@ -238,10 +239,10 @@ value_ref lowering::converted(value_ref value, type_ref from, type_ref to)
     auto const target_scalar = scalar_of(to);
     if (source.kind == type_kind::bool_)
     {
-        auto const one = target.kind == type_kind::float_ ? float_constant(target_scalar, 1.0)
-                                                          : constant_of(target_scalar, 1u);
-        auto const zero = target.kind == type_kind::float_ ? float_constant(target_scalar, 0.0)
-                                                           : constant_of(target_scalar, 0u);
+        auto const one
+            = target.kind == type_kind::float_ ? float_constant(target_scalar, 1.0) : constant_of(target_scalar, 1u);
+        auto const zero
+            = target.kind == type_kind::float_ ? float_constant(target_scalar, 0.0) : constant_of(target_scalar, 0u);
         return add(op::select, to, {value, splat(one, to), splat(zero, to)});
     }
     if (target.kind == type_kind::bool_)
@@ -322,8 +323,10 @@ value_ref lowering::arithmetic(u32 shape, cc::span<value_ref const> args, type_r
     auto const bools = vector_type(_bool, lanes_of(wide));
     auto const compared = [&](op f, op s, op u) { return add(is_float ? f : is_signed ? s : u, bools, {a, b}); };
     auto const every = [&](value_ref v, op folded) { return lanes_of(wide) == 1 ? v : add(folded, _bool, {v}); };
-    auto const equals = [&]() { return is_bool ? add(op::logical_eq, bools, {a, b}) : compared(op::feq, op::ieq, op::ieq); };
-    auto const differs = [&]() { return is_bool ? add(op::logical_ne, bools, {a, b}) : compared(op::fne, op::ine, op::ine); };
+    auto const equals
+        = [&]() { return is_bool ? add(op::logical_eq, bools, {a, b}) : compared(op::feq, op::ieq, op::ieq); };
+    auto const differs
+        = [&]() { return is_bool ? add(op::logical_ne, bools, {a, b}) : compared(op::fne, op::ine, op::ine); };
     auto const shift_count = [&]
     {
         // a count past the width is masked (EVAL-84), where SPIR-V leaves it undefined
@@ -380,7 +383,7 @@ value_ref lowering::arithmetic(u32 shape, cc::span<value_ref const> args, type_r
     return value_ref::none;
 }
 
-value_ref lowering::atomic(flat_call const& c, u32, flat_expr const& x)
+value_ref lowering::atomic(flat_call const& c, flat_expr const& x)
 {
     auto const arguments = cc::vector<flat_expr_id>::create_copy_of(cc::span<flat_expr_id const>(_e.at(c.arguments)));
     auto const& record = *_m.builtin_function(c.intrinsic);
@@ -394,10 +397,10 @@ value_ref lowering::atomic(flat_call const& c, u32, flat_expr const& x)
     auto const held = _out.at(_out.type_of(pointer)).element;
     auto const& scalar = _out.at(held);
     auto const is_float = scalar.kind == type_kind::float_;
-    auto const declared_float = _m.at(_m.at(_e.at(arguments[0]).type).element).kind == check::type_kind::structure
-                             && _m.builtin_type_of(_m.at(_e.at(arguments[0]).type).element) != nullptr
-                             && _m.builtin_type_of(_m.at(_e.at(arguments[0]).type).element)->leaf_kind
-                                    == value_kind::scalar_float;
+    auto const declared_float
+        = _m.at(_m.at(_e.at(arguments[0]).type).element).kind == check::type_kind::structure
+       && _m.builtin_type_of(_m.at(_e.at(arguments[0]).type).element) != nullptr
+       && _m.builtin_type_of(_m.at(_e.at(arguments[0]).type).element)->leaf_kind == value_kind::scalar_float;
     if (declared_float && !is_float)
     {
         unsupported("a float atomic on a device that has no float add");
@@ -570,7 +573,8 @@ value_ref lowering::texture_call(flat_call const& c, builtins::function_record c
         auto const lanes = lanes_of(_out.type_of(value));
         if (lanes != 4)
         {
-            auto const zero = _out.at(scalar).kind == type_kind::float_ ? float_constant(scalar, 0.0) : constant_of(scalar, 0u);
+            auto const zero
+                = _out.at(scalar).kind == type_kind::float_ ? float_constant(scalar, 0.0) : constant_of(scalar, 0u);
             auto parts = cc::vector<u32>();
             for (auto i = u32(0); i < 4; ++i)
                 parts.push_back(u32(i < lanes ? extracted(value, scalar, i) : zero));
@@ -588,9 +592,9 @@ value_ref lowering::texture_call(flat_call const& c, builtins::function_record c
         auto const lanes = u32(axes.is_cube ? 2 : axes.dim) + (axes.is_array ? 1u : 0u);
         auto const whole = vector_type(_int, lanes);
         auto const asks_level = !is_storage && !axes.is_ms;
-        auto const level = !asks_level                                ? value_ref::none
+        auto const level = !asks_level                                 ? value_ref::none
                          : shape.what == op::size && layout.first >= 0 ? expr(arguments[layout.first])
-                                                                        : int_constant(0);
+                                                                       : int_constant(0);
         auto const queried = asks_level ? add(ir::op::image_size, whole, {image, level}, 0, 1)
                                         : add(ir::op::image_size, whole, {image});
         auto const is_layers = shape.what == op::layer_count || shape.what == op::image_layer_count;
@@ -709,7 +713,7 @@ value_ref lowering::call(flat_expr const& x, flat_call const& c)
     auto const& record = *found;
     auto const result = x.type == checked_module::void_type ? _void : value_type(x.type);
     if (record.is_atomic)
-        return atomic(c, 0, x);
+        return atomic(c, x);
     if (record.bytes_words > 0)
         return bytes_call(c, record);
     if (record.is_texture_call)
@@ -800,7 +804,8 @@ value_ref lowering::call(flat_expr const& x, flat_call const& c)
     case family::reverse_bits:
         return add(op::bit_reverse, result, {args[0]});
     case family::first_bit_high:
-        return add(op::math, result, {args[0]}, u8(_out.at(scalar_of(result)).is_signed ? math::find_smsb : math::find_umsb));
+        return add(op::math, result, {args[0]},
+                   u8(_out.at(scalar_of(result)).is_signed ? math::find_smsb : math::find_umsb));
     case family::saturate:
     {
         auto const scalar = scalar_of(result);
@@ -833,8 +838,7 @@ value_ref lowering::call(flat_expr const& x, flat_call const& c)
             break;
         auto const lifted = vector_type(_float, 4);
         auto const w = float_constant(_float, name.what == family::transform_position ? 1.0 : 0.0);
-        auto const product
-            = add(op::matrix_times_vector, lifted, {args[0], add(op::construct, lifted, {args[1], w})});
+        auto const product = add(op::matrix_times_vector, lifted, {args[0], add(op::construct, lifted, {args[1], w})});
         if (result == lifted)
             return product;
         u32 const operands[] = {u32(product), u32(product), 0u, 1u, 2u};
@@ -858,9 +862,15 @@ value_ref lowering::call(flat_expr const& x, flat_call const& c)
                 fn = math(u8(fn) + step);
             }
             else
-                fn = fn == math::fmin ? (step == 0 ? math::fmin : step == 1 ? math::smin : math::umin)
-                   : fn == math::fmax ? (step == 0 ? math::fmax : step == 1 ? math::smax : math::umax)
-                                      : (step == 0 ? math::fclamp : step == 1 ? math::sclamp : math::uclamp);
+                fn = fn == math::fmin ? (step == 0   ? math::fmin
+                                         : step == 1 ? math::smin
+                                                     : math::umin)
+                   : fn == math::fmax ? (step == 0   ? math::fmax
+                                         : step == 1 ? math::smax
+                                                     : math::umax)
+                                      : (step == 0   ? math::fclamp
+                                         : step == 1 ? math::sclamp
+                                                     : math::uclamp);
         }
         // a scalar beside vectors stands for a vector of it, where the call gives one
         auto operands = cc::vector<u32>();

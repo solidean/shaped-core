@@ -24,9 +24,6 @@ struct place
     check::type_id type = check::type_id::none;
 };
 
-/// What one builtin is to the lowering, read once from its record.
-struct call_shape;
-
 class lowering
 {
 public:
@@ -38,8 +35,6 @@ public:
     [[nodiscard]] cc::string const& failure() const { return _failure; }
 
 private:
-    friend struct call_shape;
-
     using flat_expr_id = check::flat_expr_id;
     using flat_stmt_id = check::flat_stmt_id;
     using type_id = check::type_id;
@@ -119,10 +114,14 @@ private:
     [[nodiscard]] value_ref converted(value_ref value, type_ref from, type_ref to);
     [[nodiscard]] value_ref column_wise(op code, value_ref a, value_ref b, type_ref matrix);
     [[nodiscard]] value_ref constructed(cc::span<value_ref const> args, type_ref result);
-    [[nodiscard]] value_ref atomic(check::flat_call const& c, u32 shape, check::flat_expr const& x);
+    [[nodiscard]] value_ref atomic(check::flat_call const& c, check::flat_expr const& x);
     [[nodiscard]] value_ref bytes_call(check::flat_call const& c, builtins::function_record const& record);
-    [[nodiscard]] value_ref texture_call(check::flat_call const& c, builtins::function_record const& record, type_ref result);
-    [[nodiscard]] value_ref subgroup_call(check::flat_call const& c, builtins::function_record const& record, type_ref result);
+    [[nodiscard]] value_ref texture_call(check::flat_call const& c,
+                                         builtins::function_record const& record,
+                                         type_ref result);
+    [[nodiscard]] value_ref subgroup_call(check::flat_call const& c,
+                                          builtins::function_record const& record,
+                                          type_ref result);
     [[nodiscard]] type_ref scalar_of(type_ref t) const;
     [[nodiscard]] u32 lanes_of(type_ref t) const;
 
@@ -133,7 +132,7 @@ private:
 
     cc::string _failure;
     block_ref _open = block_ref::none;
-    /// The open block's first operation; `program::blocks` is filled in the order blocks open.
+    /// Past the open block's last operation: what stands after a `break` never runs.
     bool _is_terminated = true;
     u32 _statement = 0xffffffffu;
     check::float_level _guarantee = check::float_level::fast;

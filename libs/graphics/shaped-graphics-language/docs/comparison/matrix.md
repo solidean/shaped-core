@@ -3,7 +3,7 @@
 How SGL compares with the other ways to write one set of shaders for DX12, Vulkan, WebGPU and Metal.
 Every row is judged for a renderer that targets all four, WebGPU in a browser included, and wants hardware ray tracing wherever a platform has it.
 
-**As of 2026-11-02**; SGL's E3 and E4 as of 2026-11-03, its A7, B2, B3, B6, D3, E4, F7 and G5 as of 2026-11-05, its A5, A8, B4, B8, B9, B10, B11, B12, D5, D6, D7, E1, F2, F4 and G6 as of 2026-11-06.
+**As of 2026-11-02**; SGL's E3 and E4 as of 2026-11-03, its A7, B2, B3, B6, D3, E4, F7 and G5 as of 2026-11-05, its A5, A8, B4, B8, B9, B10, B11, B12, D5, D6, D7, E1, F2, F3, F4 and G6 as of 2026-11-06.
 Every cell's marker was judged again on 2026-11-05, when ✅ came to mean full support to the extent the targets allow.
 Where a stack lets a program choose defined behaviour on every target, as SGL's robustness profiles do, its semantics rows are ✅ though the default leaves a case undefined.
 The other columns move fast, Slang's Metal and WGSL support above all, so each cell carries a source and the date it was checked; see [Sources](#sources).
@@ -103,7 +103,7 @@ A per-target cell reads `dx12 / vulkan / metal / webgpu`.
 |---|---|---|---|---|---|
 | **F1** Hot reload, native | ✅ libraries in process | ✅ in-process API | ✅ microseconds to translate | ✅ libraries in process | ✅ survives a broken edit |
 | **F2** Compile in the browser | ❌ no official DXC for wasm (a third-party build is ~17 MB); no MSC | ✅ official slang-wasm, 25 MB (10 MB zipped) | ✅ the browser takes WGSL; Naga is 1.6 MB as wasm | ⚠️ glslang ~0.9 MB plus a 1.7 MB translator | ✅ the compiler runs in the page, and edits live there: sgl-cube's page rebuilds its pipeline as its shader is typed or saved on disk, a broken edit keeping the last that built and showing its error; the whole `sgl` tool, language server included, is 5.6 MB as wasm (1.7 MB gzip, 1.2 MB brotli) |
-| **F3** Compile in a shipped product | ⚠️ DXC is tens of MB; MSC's redistribution terms are unclear | ⚠️ 26.5 MB, plus DXC for DXIL | ⚠️ Naga is small; DX12 still needs DXC | ⚠️ a heavy chain | ⚠️ the compiler depends on clean-core alone; dx12 and vulkan still need DXC; metal and webgpu need no toolchain |
+| **F3** Compile in a shipped product | ⚠️ DXC is tens of MB; MSC's redistribution terms are unclear | ⚠️ 26.5 MB, plus DXC for DXIL | ⚠️ Naga is small; DX12 still needs DXC | ⚠️ a heavy chain | ⚠️ the compiler depends on clean-core alone; metal and webgpu need no toolchain, nor does vulkan's compute where a package opts into SGL's own SPIR-V; graphics stages on vulkan and all of dx12 still need DXC 🗺️ [epic](../issues/epic-sgl-native-ir-targets.md) |
 | **F4** Compile speed | ❓ | ❓ | ✅ Naga: 20–60 µs per small shader and backend | ❓ | ✅ a corpus of bgfx shaders compiles as fast as with Naga; a compile's fixed cost is ~10 µs and the corpus's smallest shader takes 16 µs, against Naga's ~18 µs; the prelude's ~20 ms once per process remain 🗺️ [epic](../issues/epic-sgl-separate-compilation.md) |
 | **F5** Permutations | ⚠️ macros; specialization constants on SPIR-V only | ✅ macros, specialization constants, link-time specialization | ⚠️ `override` constants; WESL `@if` | ✅ macros and specialization constants | ✅ options; a false branch leaves the text and the footprint; no specialization constants |
 | **F6** Shipping and caching | ✅ offline bundles | ⚠️ precompiled modules; determinism undocumented | ⚠️ no bundle format | ⚠️ SPIR-V as the cached form | ✅ frozen bundles, a persistent cache, deterministic text |
