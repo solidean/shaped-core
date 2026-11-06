@@ -393,6 +393,9 @@ struct block_placement
 /// stands: a place, or an array indexed in place, is spelled as held, and every other read is converted back.
 void plan_memory_accesses(plan& p);
 
+/// What reaches a matrix from an element of `type`, a multi-dimensional array of mat3 in HLSL's memory: `.m` of its
+/// `sgl_mat3_cell` (EMIT-168); empty for any other type.
+[[nodiscard]] cc::string_view mat3_cell_field(plan const& p, check::type_id type);
 /// Whether member `member` of `object_type` is a mat3 its target holds as a `float4x3`, where the struct is in memory.
 [[nodiscard]] bool holds_widened_mat3(plan const& p, check::type_id object_type, isize member);
 /// Whether member `member` of `object_type` is an array of 3-vectors its target holds as 4-vectors (EMIT-169).

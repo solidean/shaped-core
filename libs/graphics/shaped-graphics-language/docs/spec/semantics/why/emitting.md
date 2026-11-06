@@ -189,6 +189,12 @@ A `column_major float4x3` is exactly the natural layout in both: three columns o
 Its upper-left 3x3 is the matrix, which is what HLSL's cast to `float3x3` reads, and a constructor from the matrix's three rows and a zero row writes it.
 So the matrix stays a field of its struct, and the cost is a cast at each read and a call at each write.
 
+## EMIT-171
+
+DXC decorates a struct member's matrix with its stride and its majorness through one array at most.
+A `float4x3 turns[2][2]` reaches SPIR-V with neither, so vulkan reads its last column as zero, while DXIL needs no decoration and is right.
+A matrix in a struct of its own is a member again, at any depth, and the struct adds no byte, so both targets hold one form.
+
 ## EMIT-116
 
 Reordering members is how a compiler packs a struct tighter, and it is planned: a `{float; float4; float}` block takes three rows where `{float4; float; float}` takes two.

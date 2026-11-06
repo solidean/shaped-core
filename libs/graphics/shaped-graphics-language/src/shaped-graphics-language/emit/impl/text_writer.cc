@@ -771,13 +771,14 @@ struct writer
         // EMIT-168: an element of an array of mat3 is a float4x3, which narrows as one does
         auto const is_matrix = is_mat3(p.m, innermost_of(p.m, x.type));
         for (auto const& at : index_paths(x.type))
-            line(is_matrix ? cc::format("{}{} = ((float3x3){}{});", name, at, raw, at)
+            line(is_matrix ? cc::format("{}{} = ((float3x3){}{}{});", name, at, raw, at, lanes)
                            : cc::format("{}{} = {}{}{};", name, at, raw, at, lanes));
         return name;
     }
 
     /// Stores `value`, an array of 3-vectors, into `raw`, which holds it as 4-vectors, element by element.
-    void widen_array_into(cc::string_view raw, type_id type, cc::string_view value)
+    /// `cell` is what reaches a matrix from an element of `raw` (EMIT-168), for an array of mat3.
+    void widen_array_into(cc::string_view raw, type_id type, cc::string_view value, cc::string_view cell)
     {
         auto const name = p.names.mint("widened");
         auto declaration = cc::string();
@@ -787,7 +788,7 @@ struct writer
         line(declaration);
         auto const is_matrix = is_mat3(p.m, innermost_of(p.m, type));
         for (auto const& at : index_paths(type))
-            line(is_matrix ? cc::format("{}{} = sgl_widen_mat3({}{});", raw, at, name, at)
+            line(is_matrix ? cc::format("{}{}{} = sgl_widen_mat3({}{});", raw, at, cell, name, at)
                            : cc::format("{}{}.xyz = {}{};", raw, at, name, at));
     }
 
@@ -850,7 +851,8 @@ struct writer
                              p.e.at(arguments[i]).type, expr(arguments[i]).text);
             else if (planned.member_of[i] >= 0 && holds_widened_array(p, x.type, i))
                 widen_array_into(cc::format("{}.{}", name, planned.members[planned.member_of[i]].name),
-                                 p.e.at(arguments[i]).type, expr(arguments[i]).text);
+                                 p.e.at(arguments[i]).type, expr(arguments[i]).text,
+                                 mat3_cell_field(p, p.e.at(arguments[i]).type));
             else if (planned.member_of[i] >= 0)
                 line(cc::format("{}.{} = {};", name, planned.members[planned.member_of[i]].name,
                                 holds_widened_mat3(p, x.type, i)
@@ -1305,7 +1307,7 @@ struct writer
         if (held == held_as::widened_array)
         {
             auto const value = expr(a.value, true).text;
-            return widen_array_into(expr(a.place).text, p.e.at(a.place).type, value);
+            return widen_array_into(expr(a.place).text, p.e.at(a.place).type, value, p.accesses[index_of(a.place)].lanes);
         }
         auto value = expr(a.value, true).text;
         if (held == held_as::widened_mat3)
