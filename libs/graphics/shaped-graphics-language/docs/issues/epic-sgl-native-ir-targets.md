@@ -51,7 +51,7 @@ A local an index reaches at run time stays a variable.
 `ir/dxil/` is general, and the four kernels it was measured on are no shape in it.
 
 - `impl/llvm.hh` is an LLVM 3.7 module as flat tables, which knows nothing of DXIL: a new DXIL operation never touches it, and only a new LLVM instruction does.
-  `llvm_bitcode.cc` writes it and `llvm_passes.cc` optimizes it.
+  `llvm_bitcode.cc` writes it, and `llvm_passes.cc` sweeps what only exists once a value is its lanes.
 - `impl/dx_ops.hh` is DXIL's operations: a row of `k_dx_ops` is an operation, and a row of `k_dx_classes` a signature, spelled as text.
   An overload a row does not list is a named gap, so a type no operation takes never reaches a driver.
 - `writer.cc`'s `k_rules` says how each `ir::op` lowers, and `writer_math.cc`'s says the same of each `ir::math`.
@@ -63,7 +63,17 @@ A local an index reaches at run time stays a variable.
 
 Every value is a run of scalars in the writer, which is what DXIL asks and what lets vectors, matrices and structs share one path.
 Memory is three kinds of place: arrays of scalars by leaf, for variables and workgroup memory; rows, for constant blocks; an element and a byte offset, for buffers.
-What SPIR-V and DXIL share lives in `ir/`: `lower*.cc`, `ssa.cc` and `dominance.cc`, with `simplify.cc` for what only an unstructured target may do.
+What SPIR-V and DXIL share lives in `ir/`: `lower*.cc`, `ssa.cc` and `dominance.cc`.
+The passes live there too, in `passes.hh`, with `simplify.cc` and `flatten.cc` for what only an unstructured target may do.
+
+**A choice worth stating: passes work on values as they stand, and no scalarize step exists.**
+`construct_ssa` already splits what crosses a block into scalars, so a sum or a phi the passes care about is one before a writer sees it.
+A pass counts a vector's lanes where cost matters, in `flatten.cc`'s `cost_of`.
+What is left is redundancy between lanes, which only the writer's expansion makes.
+A row of constants two blocks read is one, and so are `length`'s dot and `normalize`'s, and one lane of a vector operation beside a scalar one.
+The module's last sweep takes that, and it is worth 268 of SVGF's 2,559 instructions.
+A scalarize step would have to move all of `writer_math.cc` and the memory lowering to replace one small pass.
+A DXIL line table will have to carry each lane's statement through that sweep.
 
 `ir/spirv/` is shaped the same way: `impl/spv.hh` is SPIR-V's numbers, and a new case is a row there too.
 `writer_operations.cc`'s `k_rules` says how each `ir::op` is written and its `k_groups` each `subgroup`, and `writer_declarations.cc` holds types, globals and `k_built_ins`.
@@ -128,17 +138,17 @@ Time per dispatch on an Arc B580 with warm driver caches, six runs, each over DX
 
 | kernel | SGL through DXC | SGL's DXIL | spread of SGL's DXIL |
 |---|---|---|---|
-| à-trous | 1.0025× | 0.9871× | 0.9867 to 0.9873 |
-| SVGF | 0.9941× | 0.9842× | 0.9836 to 0.9849 |
-| convolution | 1.0001× | 1.0098× | 1.0094 to 1.0100 |
+| à-trous | 1.0023× | 0.9874× | 0.9870 to 0.9877 |
+| SVGF | 0.9946× | 0.9841× | 0.9837 to 0.9845 |
+| convolution | 1.0001× | 1.0093× | 1.0090 to 1.0099 |
 
 The outputs agree with SGL's text through DXC: SVGF and the convolution to the bit, and à-trous in 132 of 4.2 million floats, by at most 1.2e-7.
 
 | kernel | instructions, DXC | instructions, SGL | DXIL part, DXC | DXIL part, SGL | container, DXC | container, SGL |
 |---|---|---|---|---|---|---|
 | a small dispatch | 34 | 36 | 2,032 | 2,308 | 4,340 | 2,576 |
-| à-trous | 308 | 299 | 4,484 | 5,144 | 7,456 | 5,536 |
-| SVGF | 2,316 | 2,291 | 18,080 | 20,892 | 20,984 | 21,260 |
+| à-trous | 308 | 301 | 4,484 | 5,160 | 7,456 | 5,552 |
+| SVGF | 2,316 | 2,291 | 18,080 | 20,884 | 20,984 | 21,252 |
 | convolution | 714 | 666 | 6,168 | 6,404 | 8,856 | 6,724 |
 
 SGL writes no abbreviations yet, which is the larger DXIL part; a container holds no reflection or hash.
@@ -154,7 +164,25 @@ With `ir::simplify` alone and warm caches, à-trous and SVGF already read 0.989�
 `chain_sums` takes the convolution to 1.010×, because a running total meeting each product alone fuses into `mad`.
 What shares values, joins blocks and turns branches into selects moves no time here.
 It brings the instruction counts level with DXC, which a less capable driver may need, and it costs part of the writer's time.
-The remaining 1% of the convolution is unexplained.
+
+**The move to `ir/` cost nothing measurable, on 2026-11-06.**
+A process lands in one of two modes about 1.5× apart, so a median across runs says nothing here.
+This is the best of 400 compiles in one process, the writer and its passes over the text, in the fast mode:
+
+| kernel | passes on the module | passes on `ir::program` |
+|---|---|---|
+| a small dispatch | 0.017 ms | 0.020 ms |
+| à-trous | 0.196 ms | 0.212 ms |
+| SVGF | 0.620 ms | 0.638 ms |
+| convolution | 0.355 ms | 0.351 ms |
+
+Two more `br` in à-trous are the whole change in instructions: a block of `extract`s alone is empty to the module, and not to a pass of `ir/`.
+SPIR-V's route takes `share_common_values` and `remove_unused` for up to 3% more compile time and nothing measured in return, so it runs neither.
+
+**The remaining 1% of the convolution is still unexplained, with less room to hide.**
+Against DXC's DXIL from the same text, the loads, the products and the sums are the same in number, and both add one chain.
+No speculation at all, `k_most_speculated = 0`, reads the same 1.0094×, so ours having 9 more selects and 16 fewer branches is not it.
+What still differs: DXC stands every addition at the end of its block, after all the products, and writes `shl` and `or` where ours has `mul` and `add`.
 
 ## What was answered, and what can stop or reshape this
 

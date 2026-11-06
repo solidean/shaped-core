@@ -4,6 +4,7 @@
 #include <clean-core/string/format.hh>
 #include <shaped-graphics-language/ir/dxil/dxil.hh>
 #include <shaped-graphics-language/ir/lower.hh>
+#include <shaped-graphics-language/ir/passes.hh>
 #include <shaped-graphics-language/ir/simplify.hh>
 #include <shaped-graphics-language/ir/spirv/spirv.hh>
 #include <shaped-graphics-language/ir/ssa.hh>
@@ -53,5 +54,13 @@ cc::optional<cc::string> sgl::ir::compile_dxil(emit::impl::plan const& plan, pro
         return gap;
     simplify(p);
     assert_whole(p, control_flow::unstructured, "simplify");
+    share_common_values(p);
+    assert_whole(p, control_flow::unstructured, "share_common_values");
+    remove_unused(p);
+    assert_whole(p, control_flow::unstructured, "remove_unused");
+    flatten_branches(p);
+    assert_whole(p, control_flow::unstructured, "flatten_branches");
+    chain_sums(p);
+    assert_whole(p, control_flow::unstructured, "chain_sums");
     return write_dxil(p, out);
 }

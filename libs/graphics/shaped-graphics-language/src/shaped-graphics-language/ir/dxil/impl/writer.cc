@@ -238,10 +238,6 @@ void writer::run()
     fill_phis();
     _m.share_common_values();
     _m.remove_unused();
-    _m.flatten_branches();
-    _m.share_common_values();
-    _m.remove_unused();
-    _m.chain_sums();
     write_entry_metadata();
 }
 

@@ -207,7 +207,10 @@ The size and alignment the layout rules place a value by, and each target's own,
 
 `ir/` is one entry point below the flat tree, which a binary target writes out with no compiler behind it: `ir::lower` fills an `ir::program`, and `ir::construct_ssa` promotes its locals.
 `ir/pipeline.hh` is each target's whole way, one plain function per target, `ir::compile_spirv` and `ir::compile_dxil`; a pass joins a route there.
-`ir::write_spirv` ends the first, whose writer stands in `ir/spirv/`; `ir::simplify` and `ir::write_dxil` are DXIL's, whose backend stands in `ir/dxil/`.
+`ir::write_spirv` ends the first, whose writer stands in `ir/spirv/`, and `ir::write_dxil` the second, whose backend stands in `ir/dxil/`.
+The optimizing passes stand in `ir/`, on values as they are, so each keeps every operation's statement and guarantee: `ir/passes.hh`, with `ir::simplify` beside it.
+`ir::simplify` and `ir::flatten_branches` give up structured control flow, so they are DXIL's alone, and SPIR-V's route runs no optimizing pass so far.
+Below them the DXIL module sweeps only what exists once a value is its lanes: `share_common_values` and `remove_unused` of `llvm_passes.cc`.
 It reads the same `plan` a text target does, so it decides no name and no address, and it hangs off `emit_entry_point` rather than being a target of its own.
 A program is flat tables of small ids, an operation being 24 bytes, because this path exists to be fast.
 `ir::verify` says what every program must hold, and a compile runs it after lowering and after each pass wherever assertions are on.
