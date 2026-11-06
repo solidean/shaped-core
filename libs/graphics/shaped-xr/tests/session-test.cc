@@ -142,6 +142,39 @@ ASYNC_TEST("shaped-xr session - a blend mode the runtime lacks falls back to opa
     co_await ctx->idle_completion();
 }
 
+ASYNC_TEST("shaped-xr session - a controller's pose is read by name, per hand, and its inputs stay released",
+           nx::config::exclusive("openxr"))
+{
+    auto const system = simulated_system({.api = sxr::graphics_api::vulkan});
+    auto const ctx = system->create_context().value();
+    auto const session = system->create_session(*ctx, {.actions = sxr::standard_controller_actions()}).value();
+
+    if (!cc::environment_variable("SIMULATED_LEFT").has_value())
+        SKIP("needs Monado's simulated controllers, see shaped-xr's docs/testing.md");
+
+    // actions sync from the first focused frame on
+    auto left = cc::optional<tg::rigid_transform3f>();
+    auto right = cc::optional<tg::rigid_transform3f>();
+    for (auto i = 0; i < 100 && !(left.has_value() && right.has_value()); ++i)
+    {
+        auto const frame = next_rendered_frame(*session);
+        left = session->pose("grip", sxr::hand::left);
+        right = session->pose("grip", sxr::hand::right);
+        session->submit_frame(cleared(*ctx, frame, tg::vec4f(0, 0, 0, 1)));
+        ctx->advance_epoch();
+        co_await ctx->epochs_in_flight_completion(2);
+    }
+    CHECK(session->is_focused());
+    REQUIRE(left.has_value());
+    REQUIRE(right.has_value());
+    CHECK(left.value().translation()[0] < right.value().translation()[0]);
+
+    CHECK(!session->pressed("primary", sxr::hand::left));
+    CHECK(session->scalar("trigger", sxr::hand::right) == 0.0f);
+    session->vibrate("haptic", sxr::hand::left, 0.5f, 0.01f);
+    co_await ctx->idle_completion();
+}
+
 // a color that reads the same in rgba and bgra, and in linear and sRGB
 constexpr auto readback_clear = tg::vec4f(1, 0, 1, 1);
 

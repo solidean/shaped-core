@@ -33,6 +33,8 @@ class EnvFor(unittest.TestCase):
         self.assertEqual(env["XR_RUNTIME_JSON"], "m.json")
         self.assertEqual(env["XRT_COMPOSITOR_NULL"], "1")
         self.assertEqual(env["SIMULATED_ENABLE"], "1")
+        self.assertEqual(env["SIMULATED_LEFT"], "simple")
+        self.assertEqual(env["SIMULATED_RIGHT"], "simple")
 
     def test_a_chosen_runtime_wins(self) -> None:
         self.assertEqual(mo.env_for(Path("m.json"), {"XR_RUNTIME_JSON": "link.json"}), {})

@@ -40,7 +40,13 @@ def env_for(manifest: Path | None, environ: dict[str, str] | os._Environ[str]) -
     """What selects `manifest` as the simulated headset, or nothing where the environment chose a runtime already."""
     if manifest is None or environ.get("XR_RUNTIME_JSON"):
         return {}
-    return {"XR_RUNTIME_JSON": str(manifest), "XRT_COMPOSITOR_NULL": "1", "SIMULATED_ENABLE": "1"}
+    return {
+        "XR_RUNTIME_JSON": str(manifest),
+        "XRT_COMPOSITOR_NULL": "1",
+        "SIMULATED_ENABLE": "1",
+        "SIMULATED_LEFT": "simple",
+        "SIMULATED_RIGHT": "simple",
+    }
 
 
 def test_env() -> dict[str, str]:
