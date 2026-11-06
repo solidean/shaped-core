@@ -112,7 +112,10 @@ cc::result<sg::binding_group_handle> metal_staging_binding_group::mint()
 
     // A fresh buffer per snapshot, which is what makes snapshots independent of the builder and of each other: a
     // caller holding an old one keeps the descriptors it was minted with, whatever the builder does next.
-    auto const byte_size = cc::max(isize(sizeof(u64)), _slots.size() * isize(sizeof(u64)));
+    // The hit-offsets mirror rides in its tail, so a group holding a TLAS allocates nothing more.
+    auto const mirror = metal_binding_group::hit_offsets_mirror(_tlas_resources);
+    auto const hit_offsets_at = mirror.empty() ? isize(-1) : _slots.size() * isize(sizeof(u64));
+    auto const byte_size = cc::max(isize(sizeof(u64)), (_slots.size() + mirror.size()) * isize(sizeof(u64)));
     auto* const arguments = _ctx.device()->newBuffer(
         NS::UInteger(byte_size), MTL::ResourceStorageModeShared | MTL::ResourceHazardTrackingModeUntracked);
     if (arguments == nullptr)
@@ -138,6 +141,9 @@ cc::result<sg::binding_group_handle> metal_staging_binding_group::mint()
 
     if (!slots.empty())
         cc::memcpy(arguments->contents(), slots.data(), size_t(slots.size() * isize(sizeof(u64))));
+    if (hit_offsets_at >= 0)
+        cc::memcpy(static_cast<byte*>(arguments->contents()) + hit_offsets_at, mirror.data(),
+                   size_t(mirror.size() * isize(sizeof(u64))));
 
     // Everything the snapshot names, deduplicated only by being a handle each: the group has to outlive the builder's
     // next mutation.
@@ -201,18 +207,11 @@ cc::result<sg::binding_group_handle> metal_staging_binding_group::mint()
         if (r != nullptr)
             bound_tlases.push_back(r);
 
-    auto hit_offsets = metal_binding_group::create_hit_offsets(_ctx, _tlas_resources);
-    if (hit_offsets.has_error())
-    {
-        arguments->release();
-        return cc::error(cc::move(hit_offsets.error()));
-    }
-
     _ctx.residency().add(arguments);
 
     auto typed = std::static_pointer_cast<metal_binding_group_layout const>(layout());
     return sg::binding_group_handle(std::make_shared<metal_binding_group const>(
         _ctx, cc::move(typed), arguments, cc::move(bound), cc::move(bound_textures), cc::move(bound_tlases),
-        cc::move(array_bindings), hit_offsets.value()));
+        cc::move(array_bindings), hit_offsets_at));
 }
 } // namespace sg::backend::metal

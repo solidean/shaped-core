@@ -314,7 +314,11 @@ cc::result<metal_binding_group_handle> metal_context::create_metal_binding_group
             return cc::error(cc::format("binding_group: binding '{}' was not provided", bindings[i].name));
 
     // An empty layout still gets a buffer: an argument table binds an address, and a null one is not a legal binding.
-    auto const byte_size = cc::max(isize(k_argument_slot_size), slot_count * k_argument_slot_size);
+    // The hit-offsets mirror rides in its tail, so a group holding a TLAS allocates nothing more.
+    auto const mirror = metal_binding_group::hit_offsets_mirror(tlas_at_slot);
+    auto const hit_offsets_at = mirror.empty() ? isize(-1) : slot_count * k_argument_slot_size;
+    auto const byte_size
+        = cc::max(isize(k_argument_slot_size), slot_count * k_argument_slot_size + mirror.size() * isize(sizeof(u64)));
     auto* const arguments = _device->newBuffer(
         NS::UInteger(byte_size), MTL::ResourceStorageModeShared | MTL::ResourceHazardTrackingModeUntracked);
     if (arguments == nullptr)
@@ -323,18 +327,14 @@ cc::result<metal_binding_group_handle> metal_context::create_metal_binding_group
     arguments->setLabel(ns_string("sg binding group"));
     if (slot_count > 0)
         cc::memcpy(arguments->contents(), slots.data(), size_t(slot_count * k_argument_slot_size));
-
-    auto hit_offsets = metal_binding_group::create_hit_offsets(*this, tlas_at_slot);
-    if (hit_offsets.has_error())
-    {
-        arguments->release();
-        return cc::error(cc::move(hit_offsets.error()));
-    }
+    if (hit_offsets_at >= 0)
+        cc::memcpy(static_cast<byte*>(arguments->contents()) + hit_offsets_at, mirror.data(),
+                   size_t(mirror.size() * isize(sizeof(u64))));
 
     _residency.add(arguments);
 
-    return std::make_shared<metal_binding_group const>(*this, cc::move(typed_layout), arguments, cc::move(bound_buffers),
-                                                       cc::move(bound_textures), cc::move(bound_tlases),
-                                                       cc::move(array_bindings), hit_offsets.value());
+    return std::make_shared<metal_binding_group const>(*this, cc::move(typed_layout), arguments,
+                                                       cc::move(bound_buffers), cc::move(bound_textures),
+                                                       cc::move(bound_tlases), cc::move(array_bindings), hit_offsets_at);
 }
 } // namespace sg::backend::metal

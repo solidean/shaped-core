@@ -1215,7 +1215,7 @@ struct writer
     }
 
     /// EMIT-139: the per-instance hit-group offsets of the acceleration structure `id` names, which sg's metal backend
-    /// mirrors slot for slot beside each group's argument buffer: `hit_offsets->groups[group][slot + element]`.
+    /// mirrors slot for slot in the tail of each group's argument buffer: `hit_offsets->groups[group][slot + element]`.
     /// Empty where `id` is no acceleration structure; one is always a member or an element of one, since the checker
     /// refuses an acceleration structure as a value and inlining hands a parameter on as its member.
     cc::string hit_offsets_of(flat_expr_id id)
