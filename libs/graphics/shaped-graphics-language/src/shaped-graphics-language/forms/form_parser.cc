@@ -719,17 +719,7 @@ struct form_parser
     }
 
     /// Whether the cursor is on an infix operator of level `wanted`.
-    [[nodiscard]] bool infix_at(level wanted) const
-    {
-        if (at_end())
-            return false;
-        if (infix_levels.empty())
-            infix_levels.resize_to_filled(file.groups.size(), i8(-2));
-        auto& known = infix_levels[index_of(c.at)];
-        if (known == -2)
-            known = infix_level_of(c.at);
-        return known == i8(wanted);
-    }
+    [[nodiscard]] bool infix_at(level wanted) const { return infix_level_here() == i32(wanted); }
 
     /// What an operator token owes beyond its place in the ladder: a known spelling, and spaces around it.
     void check_operator(group_id g)
@@ -755,6 +745,26 @@ struct form_parser
             report(diagnostic_kind::operator_needs_spaces, span_of_group(g));
     }
 
+    /// The operand of a run at level `l`: at the connective level a `not` and what it negates, else the next level's.
+    form_id operand_of(level l)
+    {
+        auto const tighter = level(u8(l) + 1);
+        if (l == level::connective && !at_end() && is_word(c.at, "not"))
+        {
+            auto const result
+                = make({.kind = form_kind::prefix_operator, .where = span_of_group(c.at), .token = here().token});
+            auto const word = c.at;
+            advance();
+            auto last = form_id::none;
+            add_child(result, at_end() ? missing(span_of_group(word)) : parse_level(tighter), last);
+            return result;
+        }
+        return parse_level(tighter);
+    }
+
+    /// Precedence climbing: the leftmost operand of every level from `l` down is one and the same form.
+    /// So it is parsed once, at the tightest level it can be, and each level from there up to `l` takes the operators
+    /// that follow it, which builds the tree a descent through every level does, node for node and in its order.
     form_id parse_level(level l)
     {
         if (l == level::application)
@@ -762,23 +772,34 @@ struct form_parser
         if (l == level::arrow)
             return parse_arrow();
 
-        auto const tighter = level(u8(l) + 1);
-        auto const operand = [&]
+        auto const starts_with_not = l == level::connective && !at_end() && is_word(c.at, "not");
+        auto left = starts_with_not ? operand_of(level::connective) : parse_application();
+        // A level takes every operator of its own that follows, so the next one is always of a looser level.
+        auto top = i32(starts_with_not ? level::connective : level::mul_like);
+        for (auto next = infix_level_here(); next >= i32(l) && next <= top; next = infix_level_here())
         {
-            if (l == level::connective && !at_end() && is_word(c.at, "not"))
-            {
-                auto const result
-                    = make({.kind = form_kind::prefix_operator, .where = span_of_group(c.at), .token = here().token});
-                auto const word = c.at;
-                advance();
-                auto last = form_id::none;
-                add_child(result, at_end() ? missing(span_of_group(word)) : parse_level(tighter), last);
-                return result;
-            }
-            return parse_level(tighter);
-        };
+            left = level(next) == level::arrow ? arrow_tail(left) : run_tail(level(next), left);
+            top = next - 1;
+        }
+        return left;
+    }
 
-        auto const first = operand();
+    /// The level of the infix operator at the cursor, -1 where it is on none.
+    [[nodiscard]] i32 infix_level_here() const
+    {
+        if (at_end())
+            return -1;
+        if (infix_levels.empty())
+            infix_levels.resize_to_filled(file.groups.size(), i8(-2));
+        auto& known = infix_levels[index_of(c.at)];
+        if (known == -2)
+            known = infix_level_of(c.at);
+        return known;
+    }
+
+    /// `first`, or the run of level `l` operators it starts.
+    form_id run_tail(level l, form_id first)
+    {
         if (!infix_at(l))
             return first;
 
@@ -793,7 +814,7 @@ struct form_parser
             advance();
 
             auto const operand_group = c.at;
-            auto const right = at_end() ? missing(span_of_group(operator_group)) : operand();
+            auto const right = at_end() ? missing(span_of_group(operator_group)) : operand_of(l);
             if (l == level::ascription)
                 claim_attributes_at_cursor(right, operand_group);
             add_child(result, right, last);
@@ -804,9 +825,11 @@ struct form_parser
     }
 
     /// `->` nests to the right, so `a -> b -> c` is a function returning a function.
-    form_id parse_arrow()
+    form_id parse_arrow() { return arrow_tail(parse_level(level::range)); }
+
+    /// `left`, or the arrow it is the left side of.
+    form_id arrow_tail(form_id left)
     {
-        auto const left = parse_level(level::range);
         if (!infix_at(level::arrow))
             return left;
 
