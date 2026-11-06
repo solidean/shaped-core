@@ -792,7 +792,8 @@ struct checker
                                                              bool is_struct,
                                                              bool is_target_struct = false,
                                                              bool is_vertex_struct = false,
-                                                             bool is_workgroup = false);
+                                                             bool is_workgroup = false,
+                                                             cc::string_view binding_name = {});
     /// The bytes a value of `type` takes in workgroup memory, laid out as WGSL lays out its workgroup variables.
     [[nodiscard]] i32 workgroup_size_of(type_id type) const;
     /// The bytes one element of a `buffer[type]` takes by EMIT-111, before any stride rounding: each value aligned to

@@ -901,8 +901,9 @@ type_id checker::check_member(function_scope& scope, ast::expr_id id, ast::membe
     auto const find_member = [&](ast::range_of<member_info> range)
     {
         auto const members = out.at(range);
+        // the length of an unbounded array is reached through `.length` alone (CHK-491)
         for (auto i = isize(0); i < members.size(); ++i)
-            if (members[i].name == name)
+            if (members[i].name == name && members[i].length_of < 0)
                 return i;
         return isize(-1);
     };
@@ -1030,11 +1031,25 @@ type_id checker::check_member(function_scope& scope, ast::expr_id id, ast::membe
     // CHK-288: an array's length is a constant of its type, and it has no other member
     if (out.at(object).kind == type_kind::array)
     {
-        // CHK-491: an unbounded array's length is the host's, which no target reads back
+        // CHK-491: an unbounded array's length is the host's, which its binding holds as a constant
         if (name == "length" && out.at(object).count == 0)
         {
-            unsupported(file, span_of(file, id), "the length of an unbounded binding array, which the host passes in");
-            return error_type;
+            auto const where = tables_of(file).target_at(member.object);
+            if (where.kind != target_kind::binding_member)
+            {
+                unsupported(file, span_of(file, id),
+                            "the length of an unbounded binding array named otherwise than "
+                            "as its binding's member");
+                return error_type;
+            }
+            auto const members = out.at(out.bindings[out.at(where.symbol).info].members);
+            for (auto i = isize(0); i < members.size(); ++i)
+                if (members[i].length_of == where.index)
+                {
+                    set_target(file, id, {.kind = target_kind::binding_member, .symbol = where.symbol, .index = i32(i)});
+                    return members[i].type;
+                }
+            return error_type; // its name was taken, which the binding reported
         }
         if (name != "length")
         {

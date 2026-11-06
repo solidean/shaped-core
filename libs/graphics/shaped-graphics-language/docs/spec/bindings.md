@@ -427,7 +427,8 @@ let counted = materials.albedo[uniform (counts.picked[0] % 64)].sample(p.uv)
   A helper that one call reaches with a uniform index and another with a varying one is split in two, or marked `nonuniform` and pays on both.
 * `T[]` is an unbounded array, whose length each binding group decides by the views the host gives it (CHK-490).
   It needs `unbounded_binding_arrays` beside `binding_arrays`, and is its binding's last member, since both APIs size only a group's last binding.
-  Its `length` is the host's, which a shader that needs it is passed (CHK-491).
+  Its `length` is the views the group was given, held as a constant of the binding that the generated host code fills (CHK-491).
+  A binding whose code reads it gains that constant, and with it a constant block, so a group built by hand binds and fills one; a staging group's is its capacity.
 * `sampler[N]` and `comparison_sampler[N]` are arrays of samplers, read by element and handed to a sample as the member would be.
   Each element is the host's per group, since sg has no static sampler array, and the generated field is a `cc::fixed_array<sg::sampler, N>`.
   An unbounded one and one of more than one dimension are `unsupported-yet`.

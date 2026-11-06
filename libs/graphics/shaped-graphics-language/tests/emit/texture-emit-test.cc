@@ -816,6 +816,27 @@ TEST("sgl emit - a file-scope sampler named as a word the target reserves is ren
     CHECK((dx12.bound_names.back() == sgl::emit::bound_name{.emitted = "register_", .host = "register"}));
 }
 
+TEST("sgl emit - an unbounded array's length is a constant of its binding, which a namesake elsewhere does not gain")
+{
+    // CHK-491: the binding whose array's length is read holds it; the other has no constant block at all
+    constexpr auto arrays = "require binding_arrays, unbounded_binding_arrays\n"
+                            "\n"
+                            "binding read:\n"
+                            "    out_values: mut buffer[int]\n"
+                            "    sources: buffer[int][]\n"
+                            "\n"
+                            "binding unread:\n"
+                            "    sources: buffer[int][]\n"
+                            "\n"
+                            "@compute(64) fun cs(@thread_id id: int3){read, unread}:\n"
+                            "    read.out_values[id.x] = read.sources[nonuniform (id.x % read.sources.length)][0] + "
+                            "unread.sources[nonuniform id.x][0]\n";
+    auto const dx12 = text_of(arrays, target::hlsl_dx12);
+    CHECK(dx12.contains("struct read_data\n{\n    int sources_length;\n};\n")).dump("text", dx12);
+    CHECK(dx12.contains("read_sources[NonUniformResourceIndex(id.x % read.sources_length)][0]")).dump("text", dx12);
+    CHECK(!dx12.contains("unread_data")).dump("text", dx12);
+}
+
 TEST("sgl emit - an unbounded binding array is `name[]` in HLSL, and WGSL and MSL refuse it (EMIT-210, EMIT-211)")
 {
     constexpr auto arrays = "require binding_arrays, unbounded_binding_arrays\n"

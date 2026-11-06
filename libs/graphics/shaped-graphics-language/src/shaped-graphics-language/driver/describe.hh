@@ -77,6 +77,9 @@ struct sgl::described_binding_member
     i32 offset = -1;
     /// A constant's size in bytes; 0 for a resource.
     i32 size = 0;
+    /// The unbounded binding array whose length this constant holds, which no source declares and the host fills from
+    /// the views it binds (CHK-491); empty for every other member.
+    cc::string length_of;
     /// A resource's position among its binding's resources; -1 for a constant.
     /// A binding array takes `count` consecutive slots from this one.
     i32 slot = -1;

@@ -488,11 +488,21 @@ TEST("sgl check - a binding array is one dimension of resources, bounded, grante
                                  "    s: buffer[float]\n",
                                  granted))
               .contains("member-not-allowed-here"));
-    // CHK-491: the host decides the length, and nothing reads it back
+    // CHK-491: the host decides the length per group, and the binding holds it as a constant `.length` reads
     CHECK(reports_for(cc::format("{}require unbounded_binding_arrays\n\nbinding b:\n    t: texture_2d[float4][]\n\n"
                                  "@compute(1) fun cs(@thread_id id: int3){{b}}:\n    let n = b.t.length\n",
                                  granted))
-              .contains("the length of an unbounded binding array"));
+          == "");
+    // that constant is reached through `.length` alone, and takes a name no member may take beside it
+    CHECK(reports_for(cc::format("{}require unbounded_binding_arrays\n\nbinding b:\n    t: texture_2d[float4][]\n\n"
+                                 "@compute(1) fun cs(@thread_id id: int3){{b}}:\n    let n = b.t_length\n",
+                                 granted))
+              .contains("unknown-member"));
+    CHECK(reports_for(cc::format("{}require unbounded_binding_arrays\n\nbinding b:\n    t_length: int\n"
+                                 "    t: texture_2d[float4][]\n\n"
+                                 "@compute(1) fun cs(@thread_id id: int3){{b}}:\n    let n = b.t.length\n",
+                                 granted))
+              .contains("duplicate-declaration"));
     // an array of samplers is a binding array like any other, bound per group element by element
     CHECK(reports_for(cc::format("{}binding b:\n    s: comparison_sampler[4]\n", granted)) == "");
     // `sampler` is a keyword, and subscripted in a type position it reads as the name does (AST-135)

@@ -513,3 +513,53 @@ ASYNC_INVOCABLE_TEST("sg - an SGL buffer's length and a bytes' length are what t
     CHECK(got[0] == 8u);
     CHECK(got[1] == 48u);
 }
+
+ASYNC_INVOCABLE_TEST("sg - an SGL unbounded binding array's length is the views its group was given (CHK-491)",
+                     (sg::context_handle const& ctx))
+{
+    REQUIRE(ctx != nullptr);
+    if (!sg_test::shaders_reach(*ctx))
+        SKIP("no compiler builds this binary's shaders into a format this context accepts");
+    if (!ctx->supports(sg::feature::unbounded_binding_arrays))
+        SKIP("this context has no unbounded binding arrays");
+
+    auto const pipeline = co_await shaders::unbounded_arrays::gather_counted.acquire_pipeline(*ctx);
+    auto const group_layout = ctx->cached.acquire_binding_group_layout<shaders::unbounded_arrays::counted>();
+    constexpr auto count = 64;
+    auto sources = cc::vector<sg::buffer<i32>>();
+    for (auto lane = 0; lane < 4; ++lane)
+    {
+        auto data = cc::vector<i32>();
+        for (auto i = 0; i < count; ++i)
+            data.push_back(lane * 1000 + i);
+        sources.push_back(ctx->persistent.create_buffer_from_data(cc::move(data), sg::buffer_usage::readonly_buffer));
+    }
+
+    // three views, then four: the shader wraps by whichever the group holds
+    for (auto const lanes : {3, 4})
+    {
+        auto const merged = ctx->persistent.create_buffer_from_data(
+            cc::vector<i32>::create_defaulted(count), sg::buffer_usage::readwrite_buffer | sg::buffer_usage::copy_src);
+        auto counted = shaders::unbounded_arrays::counted{.merged = merged.as_readwrite_buffer()};
+        auto reads = cc::vector<sg::array_buffer_access>();
+        for (auto lane = 0; lane < lanes; ++lane)
+        {
+            counted.sources.push_back(sources[lane].as_readonly_buffer());
+            reads.push_back({.index = lane, .access = sg::access_flag::shader_read});
+        }
+        auto cmd = ctx->create_command_list();
+        auto const group = ctx->transient.create_binding_group(*cmd, group_layout, counted);
+        cmd->compute.bind_pipeline(*pipeline);
+        cmd->compute.bind_group(0, *group);
+        auto const declared
+            = cmd->compute.declare_array_buffer_access(shaders::unbounded_arrays::counted::arrays::sources, reads);
+        cmd->compute.dispatch_threads(count);
+        auto const back = cmd->download.data_from_buffer(merged);
+        ctx->submit_command_list(cc::move(cmd));
+
+        auto const got = co_await back.data();
+        REQUIRE(got.size() == isize(count));
+        for (auto i = 0; i < count; ++i)
+            CHECK(got[i] == (i % lanes) * 1000 + i).context(cc::format("{} views, thread {}", lanes, i));
+    }
+}
