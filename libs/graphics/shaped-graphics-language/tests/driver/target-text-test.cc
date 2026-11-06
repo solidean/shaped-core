@@ -424,11 +424,13 @@ TEST("sgl target text - vulkan reorders through SPIR-V's own instructions, which
     CHECK(!text.contains("dx::"));
     CHECK(text.contains("[[vk::ext_storage_class(/* RayPayloadKHR */ 5338)]] static radiance "
                         "sgl_hit_payload_radiance;"));
-    CHECK(text.contains("vk::SpirvOpaqueType<5313> h = "));
+    // SPIR-V forbids loading or storing a hit object, so its let names the trace's variable rather than copying it
+    CHECK(!text.contains("vk::SpirvOpaqueType<5313> h = "));
+    CHECK(!text.contains("= hit_object"));
     CHECK(text.contains("sgl_reorder_thread(uint(uint(id.x)), uint(1));"));
     CHECK(text.contains("sgl_hit_object_trace_reorder_execute("));
     CHECK(text.contains("sgl_hit_object_trace_ray("));
-    CHECK(text.contains("sgl_hit_object_execute(h, sgl_hit_payload_radiance);"));
+    CHECK(text.contains("sgl_hit_object_execute(hit_object"));
     // the payload's variable is declared once, though three calls hand a payload of its type over
     constexpr auto declaration = cc::string_view("static radiance sgl_hit_payload_radiance;");
     auto const first = cc::string_view(text).find(declaration);

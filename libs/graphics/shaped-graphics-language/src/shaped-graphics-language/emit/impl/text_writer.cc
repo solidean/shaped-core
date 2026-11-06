@@ -1684,6 +1684,13 @@ struct writer
             build_struct(p.e.at(value), name);
             return;
         }
+        // EMIT-225: SPIR-V forbids loading or storing a hit object, so on vulkan its let is no copy.
+        // The let takes the name of the variable its trace filled, which the trace's own lines declare.
+        if (p.which == emit::target::hlsl_vulkan && is_valid(value) && p.m.name_of(local.type) == "hit_object")
+        {
+            p.locals[index_of(id)] = expr(value, true).text;
+            return;
+        }
         // a value only a local may hold, such as a ray query: declared without an initializer, and never `const`
         auto const* const call = is_valid(value) ? p.e.at(value).node.try_as<flat_call>() : nullptr;
         auto const* const record = call != nullptr ? p.m.builtin_function(call->intrinsic) : nullptr;

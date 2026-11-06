@@ -546,6 +546,7 @@ So `{float3; float}` is written with `packed_float3`: the `float` is at byte 12 
   Each instruction is a function of DXC's inline SPIR-V the text declares ahead of the entry point, and a hit object is `vk::SpirvOpaqueType<5313>`, SPIR-V's `OpTypeHitObjectEXT`.
   An instruction that hands a payload over takes a variable of the ray-payload storage class, one per payload type, which the call fills before and reads back after.
   A reordering trace is one `OpHitObjectTraceReorderExecuteEXT`, and `maybe_reorder` is `OpReorderThreadWithHintEXT`.
+  A hit object's `let` declares nothing: SPIR-V forbids loading or storing a hit object, so the `let` names the variable its trace filled.
 * **EMIT-229** A compute stage whose workgroup memory LEGAL-69 shadows declares the shadow `sgl_written`, a `uint` atomic word per 32 scalars, beside that memory.
   Before the body, each invocation clears the words its index in the workgroup strides to, and a workgroup barrier follows, so no mark lands before a clear.
   Under `define` the same prologue zeroes workgroup memory instead: an array member element by element in that stride, any other member in invocation 0.
