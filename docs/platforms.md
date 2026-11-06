@@ -135,8 +135,8 @@ Expect roughly 0.5-2% and one register on x86-64 for keeping them, and next to n
 
 | Level | Kept at a site | For |
 |---|---|---|
-| `FULL` (default) | file, line and function, as strings, as `std::source_location` keeps them | development |
-| `OPAQUE` | the site's code address, nothing else | a shipped binary that should name none of its source, yet whose reports stay resolvable |
+| `FULL` (default) | file, line and function, as strings, as `std::source_location` keeps them | a binary that prints its own sites readably |
+| `OPAQUE` | the site's code address, nothing else | the clang development presets; a shipped binary that should name none of its source, yet whose reports stay resolvable |
 | `OFF` | nothing | a binary that should say nothing at all |
 
 The sites are every capture of `cc::any_error`, `cc::error`, `async_fail`, the `CC_ASSERT` family, `cc::rec` and nexus.
@@ -151,8 +151,20 @@ On clang and GCC that instruction is one `lea` (`adr` on arm64), the cost of `st
 A site evaluated in a constant expression has no code address, so it is unnamed below `FULL`: `cc::rec`'s descriptors are the case.
 wasm has no address to take either, so there `OPAQUE` keeps nothing, as `OFF` does.
 
+**`dev.py test` resolves the sites a failed run printed**: one `llvm-symbolizer` per binary, from the compiler's own LLVM install, against its PDB or DWARF.
+It prints each as `file:line (function)` with the source line there, which stands in for the condition text an assert drops below `FULL`.
+Without a symbolizer it prints the raw sites and how to point it at one, and the run's result is untouched.
+`LLVM_SYMBOLIZER` names a specific one.
+
+A test's own site, below `FULL`, is the entry of its body, which resolves to the line of its `TEST`.
+nexus keeps a test's source file at every level, so test selection by file and the listings work below `FULL` too; the listings' line is 0 there.
+
 A whole-build switch, never per-target: `cc::source_location`'s layout changes with it.
-The `singlethreaded-*` presets build at `OPAQUE`, so `check` exercises a level below `FULL`; a test reading what only `FULL` keeps skips below it.
+**The clang development presets on Windows and Linux build at `OPAQUE`**: `debug`, `relwithdebinfo`, `nopch`, `debug-nopch`, `coverage` and `sanitize-*`.
+There an edit that only moves lines, a comment or a reformat, changes the objects' debug info and nothing else, since no line or column is in code or data.
+`release-*`, `pgo-*` and `frozen` keep the default.
+The `singlethreaded-*` presets build at `FULL`, so `check --all-presets` still exercises it with assertions on; a test reading what only `FULL` keeps skips below it.
+The MSVC, GCC, macOS, iOS, Android and wasm presets stay at `FULL`: wasm has no address to take, and the others have not been verified below it.
 
 ## x86-64 feature level (`SC_X64_LEVEL`)
 

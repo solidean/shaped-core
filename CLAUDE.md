@@ -336,7 +336,9 @@ The loop is **run `dev.py`, then diagnose with `repo_tools`** — `build_diag` a
   Independent of `SANITIZE`, and no API or layout changes with it; only in-place resize does, since the system resource always declines.
   See [docs/platforms.md](docs/platforms.md#default-allocator-sc_mimalloc).
 * `SC_SOURCE_SITES` (default `FULL`; `OPAQUE`, `OFF`) is what a `cc::source_location` keeps → clean-core's `CC_SOURCE_SITES`: strings, the site's code address only, or nothing.
-  `OPAQUE` is for shipping: no source file or function in the binary, every site resolvable through the build's debug info; the `singlethreaded-*` presets build at it.
+  `OPAQUE` is no source file or function in the binary, every site resolvable through the build's debug info.
+  **The clang development presets build at `OPAQUE`**, so moving lines changes only debug info; `release-*` and the `singlethreaded-*` presets keep `FULL`.
+  `dev.py test` resolves a failed run's `module+0xoffset` sites to `file:line (function)` and the source line.
   Whole-build, since it changes `cc::source_location`'s layout; see [docs/platforms.md](docs/platforms.md#source-sites-sc_source_sites).
 * `SC_FROZEN_SHADERS` (default OFF) is the shipping mode for shaders: no shader file read, no hot reload, and recorded bytecode embedded where an executable asks with `sc_embed_shader_bundle`.
   A miss still compiles from the embedded sources, so DXC still ships; the `frozen-clang` preset sets it.

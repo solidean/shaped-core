@@ -144,7 +144,8 @@
             "description": "Debug build with full symbols",
             "inherits": "x64-windows-clang-ninja-base",
             "cacheVariables": {
-                "CMAKE_BUILD_TYPE": "Debug"
+                "CMAKE_BUILD_TYPE": "Debug",
+                "SC_SOURCE_SITES": "OPAQUE"
             }
         },
         {
@@ -162,7 +163,8 @@
             "description": "Optimized build with debug symbols",
             "inherits": "x64-windows-clang-ninja-base",
             "cacheVariables": {
-                "CMAKE_BUILD_TYPE": "RelWithDebInfo"
+                "CMAKE_BUILD_TYPE": "RelWithDebInfo",
+                "SC_SOURCE_SITES": "OPAQUE"
             }
         },
         {
@@ -210,7 +212,8 @@
             "description": "Debug build with full symbols",
             "inherits": "x64-linux-clang-ninja-base",
             "cacheVariables": {
-                "CMAKE_BUILD_TYPE": "Debug"
+                "CMAKE_BUILD_TYPE": "Debug",
+                "SC_SOURCE_SITES": "OPAQUE"
             }
         },
         {
@@ -228,7 +231,8 @@
             "description": "Optimized build with debug symbols",
             "inherits": "x64-linux-clang-ninja-base",
             "cacheVariables": {
-                "CMAKE_BUILD_TYPE": "RelWithDebInfo"
+                "CMAKE_BUILD_TYPE": "RelWithDebInfo",
+                "SC_SOURCE_SITES": "OPAQUE"
             }
         },
         {
@@ -237,7 +241,8 @@
             "description": "Debug build with full symbols",
             "inherits": "x64-linux-clang-ninja-base",
             "cacheVariables": {
-                "CMAKE_BUILD_TYPE": "Debug"
+                "CMAKE_BUILD_TYPE": "Debug",
+                "SC_SOURCE_SITES": "OPAQUE"
             }
         },
         {
@@ -255,7 +260,8 @@
             "description": "Optimized build with debug symbols",
             "inherits": "x64-linux-clang-ninja-base",
             "cacheVariables": {
-                "CMAKE_BUILD_TYPE": "RelWithDebInfo"
+                "CMAKE_BUILD_TYPE": "RelWithDebInfo",
+                "SC_SOURCE_SITES": "OPAQUE"
             }
         },
         {
@@ -266,7 +272,8 @@
             "cacheVariables": {
                 "CMAKE_BUILD_TYPE": "Debug",
                 "SANITIZE": "address,undefined",
-                "SC_MIMALLOC": "OFF"
+                "SC_MIMALLOC": "OFF",
+                "SC_SOURCE_SITES": "OPAQUE"
             }
         },
         {
@@ -277,7 +284,8 @@
             "cacheVariables": {
                 "CMAKE_BUILD_TYPE": "RelWithDebInfo",
                 "SANITIZE": "thread",
-                "SC_MIMALLOC": "OFF"
+                "SC_MIMALLOC": "OFF",
+                "SC_SOURCE_SITES": "OPAQUE"
             }
         },
         {
@@ -287,7 +295,8 @@
             "inherits": "x64-windows-clang-ninja-base",
             "cacheVariables": {
                 "CMAKE_BUILD_TYPE": "RelWithDebInfo",
-                "SC_COVERAGE": "ON"
+                "SC_COVERAGE": "ON",
+                "SC_SOURCE_SITES": "OPAQUE"
             }
         },
         {
@@ -297,7 +306,8 @@
             "inherits": "x64-linux-clang-ninja-base",
             "cacheVariables": {
                 "CMAKE_BUILD_TYPE": "RelWithDebInfo",
-                "SC_COVERAGE": "ON"
+                "SC_COVERAGE": "ON",
+                "SC_SOURCE_SITES": "OPAQUE"
             }
         },
         {
@@ -323,23 +333,23 @@
         {
             "name": "x64-windows-clang-ninja-singlethreaded",
             "displayName": "Single-threaded Clang (Ninja, Windows)",
-            "description": "RelWithDebInfo build with SC_THREADS=OFF: no OS threads, as on WASM; and SC_SOURCE_SITES=OPAQUE, so check exercises a level below FULL",
+            "description": "RelWithDebInfo build with SC_THREADS=OFF: no OS threads, as on WASM; and SC_SOURCE_SITES=FULL, the one level the development presets do not build at",
             "inherits": "x64-windows-clang-ninja-base",
             "cacheVariables": {
                 "CMAKE_BUILD_TYPE": "RelWithDebInfo",
                 "SC_THREADS": "OFF",
-                "SC_SOURCE_SITES": "OPAQUE"
+                "SC_SOURCE_SITES": "FULL"
             }
         },
         {
             "name": "x64-linux-clang-ninja-singlethreaded",
             "displayName": "Single-threaded Clang (Ninja, Linux)",
-            "description": "RelWithDebInfo build with SC_THREADS=OFF: no OS threads, as on WASM; and SC_SOURCE_SITES=OPAQUE, so check exercises a level below FULL",
+            "description": "RelWithDebInfo build with SC_THREADS=OFF: no OS threads, as on WASM; and SC_SOURCE_SITES=FULL, the one level the development presets do not build at",
             "inherits": "x64-linux-clang-ninja-base",
             "cacheVariables": {
                 "CMAKE_BUILD_TYPE": "RelWithDebInfo",
                 "SC_THREADS": "OFF",
-                "SC_SOURCE_SITES": "OPAQUE"
+                "SC_SOURCE_SITES": "FULL"
             }
         },
         {
@@ -353,7 +363,8 @@
                 "SC_CHECK_WIDE_ARITH": "ON",
                 "SC_CHECK_GEOMETRY_SPECIAL_CASES": "ON",
                 "SC_SIMD_EXHAUSTIVE_TESTS": "ON",
-                "SC_ASYNC_AMBIENT_TRACE": "ON"
+                "SC_ASYNC_AMBIENT_TRACE": "ON",
+                "SC_SOURCE_SITES": "OPAQUE"
             }
         },
         {
@@ -367,7 +378,8 @@
                 "SC_CHECK_WIDE_ARITH": "ON",
                 "SC_CHECK_GEOMETRY_SPECIAL_CASES": "ON",
                 "SC_SIMD_EXHAUSTIVE_TESTS": "ON",
-                "SC_ASYNC_AMBIENT_TRACE": "ON"
+                "SC_ASYNC_AMBIENT_TRACE": "ON",
+                "SC_SOURCE_SITES": "OPAQUE"
             }
         },
         {
@@ -391,7 +403,8 @@
             "inherits": "x64-windows-clang-ninja-base",
             "cacheVariables": {
                 "CMAKE_BUILD_TYPE": "RelWithDebInfo",
-                "CMAKE_DISABLE_PRECOMPILE_HEADERS": "ON"
+                "CMAKE_DISABLE_PRECOMPILE_HEADERS": "ON",
+                "SC_SOURCE_SITES": "OPAQUE"
             }
         },
         {
@@ -401,7 +414,8 @@
             "inherits": "x64-linux-clang-ninja-base",
             "cacheVariables": {
                 "CMAKE_BUILD_TYPE": "RelWithDebInfo",
-                "CMAKE_DISABLE_PRECOMPILE_HEADERS": "ON"
+                "CMAKE_DISABLE_PRECOMPILE_HEADERS": "ON",
+                "SC_SOURCE_SITES": "OPAQUE"
             }
         },
         {
@@ -472,7 +486,8 @@
             "cacheVariables": {
                 "CMAKE_BUILD_TYPE": "Debug",
                 "SANITIZE": "address,undefined",
-                "SC_MIMALLOC": "OFF"
+                "SC_MIMALLOC": "OFF",
+                "SC_SOURCE_SITES": "OPAQUE"
             }
         },
         {

@@ -23,6 +23,7 @@ from ..core.models import Preset, Target
 from ..core.process import emsdk_env, run_step
 from ..toolchain import jsruntime as jsr
 from ..project import targets as targets_mod
+from . import sites
 from .eligibility import nexus_filter
 
 # nexus prints this when a name filter matches no tests in a binary.
@@ -152,6 +153,17 @@ def _echo_sample_report(stdout_log: Path | None, recording: Path) -> None:
         ui.write_line(f"  {line}")
     if recording.is_file():
         ui.write_line(console.dim(f"  recording: {recording}"))
+
+
+def _resolve_sites(stdout_log: Path | None, stderr_log: Path | None, artifact: Path, build_dir: Path, root: Path) -> None:
+    """Print a failed run's opaque sites resolved, and append them to its stderr log; never raises."""
+    try:
+        lines = sites.report([stdout_log, stderr_log], artifact, build_dir, root)
+        if lines and stderr_log is not None:
+            with open(stderr_log, "a", encoding="utf-8") as f:
+                f.write("\n[dev.py] the sites above, resolved through the build's debug info:\n" + "\n".join(lines) + "\n")
+    except Exception as e:  # a report on a failure must not become a failure of its own
+        ui.write_line(console.yellow(f"  sites not resolved: {e}"))
 
 
 def test(
@@ -310,6 +322,11 @@ def test(
                     if verbose:
                         ui.write_line(console.dim(f"  {name}: no tests match {test_name!r}, skipping"))
                     continue
+
+                # Below SC_SOURCE_SITES=FULL a failure names its sites by address.
+                # Resolved here and appended to the stderr log, so the kept logs and test_diag carry them too.
+                if not result.ok and not preset.is_cross_compiling:
+                    _resolve_sites(result.stdout_log, result.stderr_log, target.artifact, preset.build_dir, root)
 
                 # a failure that left no crash report keeps its logs too: the next run overwrites them
                 if not result.ok and kept is None:
