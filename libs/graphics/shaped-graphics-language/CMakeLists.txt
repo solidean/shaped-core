@@ -35,6 +35,7 @@ add_library(shaped-graphics-language
     src/shaped-graphics-language/builtins/register.cc
     src/shaped-graphics-language/builtins/impl/soft_math.cc
     src/shaped-graphics-language/builtins/register_64_bit_math.cc
+    src/shaped-graphics-language/builtins/register_double_math.cc
     src/shaped-graphics-language/builtins/register_bit_math.cc
     src/shaped-graphics-language/builtins/register_bytes.cc
     src/shaped-graphics-language/builtins/register_math.cc
@@ -249,6 +250,7 @@ target_sources(shaped-graphics-language
     src/shaped-graphics-language/builtins/impl/soft_math.hh
     src/shaped-graphics-language/builtins/register.hh
     src/shaped-graphics-language/builtins/registry.hh
+    src/shaped-graphics-language/builtins/subgroup_calls.hh
     src/shaped-graphics-language/builtins/texture_calls.hh
 
     src/shaped-graphics-language/check/check.hh
@@ -450,6 +452,7 @@ if(SC_BUILD_TESTS)
         tests/legalize/differential-test.cc
         tests/legalize/legalize-rules-test.cc
         tests/legalize/guard-test.cc
+        tests/legalize/workgroup-guard-test.cc
 
         tests/emit/emit-test-support.hh
         tests/emit/core-emit-test.cc
@@ -474,6 +477,7 @@ if(SC_BUILD_TESTS)
         tests/emit/vector-emit-test.cc
         tests/emit/sixteen-bit-emit-test.cc
         tests/emit/sixty-four-bit-emit-test.cc
+        tests/emit/double-maths-emit-test.cc
         tests/emit/line-mapping-emit-test.cc
         tests/emit/debug-emit-test.cc
 

@@ -411,6 +411,8 @@ sgl::check::driver_bindings{.groups = {{.name = "frame", .members = {{.name = "e
                                            // .mutable_texels come back; .samplers = {sampler_state{...}} for a dynamic one
                                            // a texture bound nothing is empty: size 0, and a read of it a program-error
                                            // filtering is exact f32 (EVAL-122): compare between texel centres to ~8 bits
+{.lane_count = 32}                         // run_inputs: the run is 32 lanes of one subgroup, run one after another;
+                                           // subgroup ops and derivatives exchange between them (EVAL-140 to EVAL-145)
 sgl::check::resolve_inputs(m, e, bound)    // -> cc::result<run_inputs>; left out: zero, empty, root 0 (the empty TLAS)
 sgl::check::write_back(m, o, bound)        // what the run stored, into each .mutable_bytes and image .mutable_texels
 
@@ -421,7 +423,11 @@ sgl::test::run_tests(m, files, {.file = f})  // -> vector<test_result { test, st
 sgl::test::run_test(m, files, t, limits, bound)  // ONE test, m.tests[t]: what a caller that stops between tests runs;
                                            // a test that expects diagnostics: judged_by_diagnostics; one that did not check: not_run
 {.bindings = bound}                        // test_options: what `test {frame}:` lists gets its values here (CHK-333);
-                                           // bytes that do not fit: invalid_bindings; textures are unsupported-yet
+                                           // bytes that do not fit: invalid_bindings; a test may state texels itself
+                                           // a test reaching subgroup ops runs at 4 to 128 lanes, derivatives at 4 (EVAL-140)
+scene.albedo.test_texel(int2(x, y), v)     // SGL, in a test alone: states a texel; one the driver bound none of grows (EVAL-127)
+scene.smp.test_state(scene.nearest)        // SGL, in a test alone: a dynamic sampler takes another's state (EVAL-128)
+test_lane()  test_lane_count()             // SGL, in a test alone: this lane, and how many the subgroup has (EVAL-141)
 r.sites                                    // site_mark { file, where, is_assert, passed, failed } per check and assert of its tree
                                            // an assert inlined from a helper names the helper's file
 sgl::test::diagnostic_of(m, r)             // `test-failed` at the test, one related note per narrowed part:
@@ -433,7 +439,7 @@ sgl::test::diagnostic_of(m, r)             // `test-failed` at the test, one rel
 ```bash
 uv run dev.py run sgl -- emit shader.sgl --entry main_ps --target wgsl   # the text and its warnings on stderr, or the diagnostics and exit 2
 uv run dev.py run sgl -- emit shader.sgl --entry main_cs --option tile=16 # an option set for this compile; `describe` takes it too
-uv run dev.py run sgl -- emit shader.sgl --entry main_cs --undefined report --diagnostics  # the guards of LEGAL-65 and LEGAL-66; abort: no report; define: WGSL's values
+uv run dev.py run sgl -- emit shader.sgl --entry main_cs --undefined report --diagnostics  # the guards of LEGAL-65, LEGAL-66 and LEGAL-69 (workgroup memory read unstored); abort: no report; define: WGSL's values
 uv run dev.py run sgl -- emit shader.sgl --entry main_cs --target wgsl --weaken-float     # a @float WGSL cannot keep, at .fast with a warning
 uv run dev.py run sgl -- test a.sgl b.sgl                                # the tests of each file; exit 2 when one fails
 #   emit, test and describe take --module-dir DIR, repeatable: the .sgl files directly in it are modules to `use`
@@ -587,8 +593,8 @@ rays path_rays:                                          // a ray set: position 
 @intersection fun sphere(b: procedural_box) -> report[sphere_attributes]   // no payload; A a struct of the program
 @callable fun doubled(v: mut operand)
 trace(b.world, r, path_rays.surface, mut p, flags = f)   // a trace of a ray type: raygen, miss, closest hit only (CHK-329)
-maybe_reorder(hint, 4)                                   // raygen: regroup invocations by hint's low bits; dx12 SM 6.9 SER, else nothing
-trace(b.world, r, set.ray, mut p, reorder = true)       // raygen: dx12 SER traces a hit object, regroups by it, invokes; else plain
+maybe_reorder(hint, 4)                                   // raygen: regroup invocations by hint's low bits; SER on dx12 (SM 6.9) and vulkan, else nothing
+trace(b.world, r, set.ray, mut p, reorder = true)       // raygen: SER (dx12, vulkan) traces a hit object, regroups by it, invokes; else plain
 trace(…, reorder = material, reorder_bits = 4)          // by the hit and a uint hint's low bits, 1..16 (CHK-433)
 let h = trace_hit(b.world, r, set.ray, mut p)           // raygen, under has(.shader_execution_reordering): no closest hit or miss yet
 h.is_hit; h.t; h.instance_id; h.primitive_index         // what was hit, before its shaders run (CHK-434)
@@ -825,9 +831,11 @@ ops[i](mut v)                                            // raygen, miss, closes
   A buffer's element is whole 4-byte words: `buffer[half2]`, never `buffer[half]`.
 - **`long`, `ulong`, `double` and their vectors are the 64-bit families** (CHK-450): `require shader_int64` or `shader_f64`; WGSL has neither, MSL no double.
   Literals: `5i64`, `5u64`, `0.1f64`, or an unsuffixed literal where the type is asked; a `ulong` literal stops at 2^63 - 1, so `~0u64` is the largest.
-  Arithmetic, comparisons, bits (a shift counts to 63), `abs` / `min` / `max` / `clamp` / `select`; no maths function of a double and no subgroup operation yet.
+  Arithmetic, comparisons, bits (a shift counts to 63), `abs` / `min` / `max` / `clamp` / `select`; no subgroup operation yet.
+  A double has `sqrt` (within an ULP on a GPU), `inverse_sqrt`, the exact roundings, `sign`, `saturate`, `is_nan`, `mix`, `step`, `smoothstep` and the vector geometry (CHK-458).
+  No transcendental of a double, which no target has: `sin(x)` is `no-matching-overload`, and `sin(x as float)` is the float's.
   `as` converts within a width or within a family: `x as long as double`, never `int as double` in one step.
-  A 64-bit scalar or two-vector crosses a stage link flat on vulkan alone (CHK-454, EMIT-196).
+  A 64-bit value crosses a stage link flat, a three- or four-vector over two locations (CHK-454); dx12 and metal carry it as its 32-bit words (EMIT-196).
   None sits in an `@inline` binding, and a constant block holds no `long3` / `double4` (CHK-453); a buffer does.
   `atomic[ulong]` / `atomic[long]` in a `mut buffer` take `require shader_int64_atomics` (dx12 SM 6.6, vulkan).
   In workgroup memory they also take `shader_shared_int64_atomics` (CHK-510), which an Arc B580 lacks and an AMD Radeon iGPU has.

@@ -736,31 +736,31 @@ void checker::check_return(function_scope& scope, source_span where, ast::expr_i
 
 // ---- recursion ------------------------------------------------------------------------------------------------------
 
-void checker::find_recursion(isize first)
+void checker::find_recursion(isize first, isize first_note, isize first_call)
 {
-    // 0 is unvisited, 1 is on the path, 2 is done; one entry per function, as `notes`
+    // 0 is unvisited, 1 is on the path, 2 is done; one entry per function of this layer, from note `first_note`
     // A lower layer's function is done: it calls only its own layer's, whose loops were found when it was checked.
-    auto state = cc::vector<u8>::create_filled(notes.size(), 0);
-    for (auto i = isize(0); i < first; ++i)
-        if (auto const& s = out.symbols[i]; s.kind == symbol_kind::function && s.info >= 0)
-            state[s.info] = 2;
+    auto state = cc::vector<u8>::create_filled(notes.size() - first_note, 0);
+    auto const state_of = [&](isize info) -> u8& { return state[info - first_note]; };
+    auto const is_lower = [&](isize info) { return info < first_note; };
     auto path = cc::vector<symbol_id>();
 
     // Each function's calls, so a visit walks its own edges rather than every edge of the module.
-    auto calls_of = cc::vector<cc::vector<isize>>::create_defaulted(notes.size());
-    for (auto i = isize(0); i < calls.size(); ++i)
-        if (auto const info = out.at(calls[i].caller).info; info >= 0 && state[info] == 0)
-            calls_of[info].push_back(i);
+    auto calls_of = cc::vector<cc::vector<isize>>::create_defaulted(notes.size() - first_note);
+    for (auto i = first_call; i < calls.size(); ++i)
+        if (auto const info = out.at(calls[i].caller).info; info >= 0 && !is_lower(info))
+            calls_of[info - first_note].push_back(i);
 
     auto const visit = [&](auto&& self, symbol_id f) -> void
     {
-        state[out.at(f).info] = 1;
+        state_of(out.at(f).info) = 1;
         path.push_back(f);
-        for (auto const i : calls_of[out.at(f).info])
+        for (auto const i : calls_of[out.at(f).info - first_note])
         {
             // by value: a report does not touch `calls`, and a copy keeps this loop honest if one ever does
             auto const edge = calls[i];
-            auto const seen = state[out.at(edge.callee).info];
+            auto const callee = out.at(edge.callee).info;
+            auto const seen = is_lower(callee) ? u8(2) : state_of(callee);
             if (seen == 0)
                 self(self, edge.callee);
             if (seen != 1)
@@ -781,13 +781,13 @@ void checker::find_recursion(isize first)
             report(diagnostic_kind::recursive_call, edge.file, edge.where, cc::move(loop));
         }
         path.remove_back();
-        state[out.at(f).info] = 2;
+        state_of(out.at(f).info) = 2;
     };
 
     for (auto i = first; i < out.symbols.size(); ++i)
     {
         auto const& s = out.symbols[i];
-        if (s.kind == symbol_kind::function && s.info >= 0 && state[s.info] == 0)
+        if (s.kind == symbol_kind::function && s.info >= 0 && !is_lower(s.info) && state_of(s.info) == 0)
             visit(visit, symbol_id(i));
     }
 }

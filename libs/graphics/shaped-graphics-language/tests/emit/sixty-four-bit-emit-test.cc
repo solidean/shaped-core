@@ -138,27 +138,152 @@ TEST("sgl emit - a double is double in HLSL, its literal suffixed L, and Metal a
                         "not have"));
 }
 
-TEST("sgl emit - a long crosses a stage link on vulkan alone, since neither DXIL nor MSL carries one (EMIT-196)")
+TEST("sgl emit - a 64-bit value crosses a stage link as itself on vulkan, and as its words on dx12 and metal "
+     "(EMIT-196)")
 {
-    constexpr auto source = "require shader_int64\n"
+    constexpr auto source
+        = "require shader_int64\n"
+          "\n"
+          "struct varyings:\n"
+          "    @position position: hpos4\n"
+          "    @interpolate(.flat) key: long\n"
+          "    @interpolate(.flat) pair: ulong2\n"
+          "    @interpolate(.flat) steps: ulong[2]\n"
+          "\n"
+          "@vertex fun vs(@vertex_index v: int) -> varyings:\n"
+          "    let k = (v as long) << 40\n"
+          "    return {position = hpos4(0.0, 0.0, 0.0, 1.0), key = -k, pair = ulong2(k as ulong, ~0u64), "
+          "steps = [1u64 << 33, 7u64]}\n"
+          "\n"
+          "@pixel fun ps(link: varyings) -> float4:\n"
+          "    let mut w = link\n"
+          "    w.pair.y = w.pair.x ^ w.steps[1]\n"
+          "    return float4(((w.key >> 40) as int) as float, ((w.pair.y >> 33) as uint) as float, "
+          "((link.steps[0] >> 33) as uint) as float, 1.0)\n";
+    auto const text_for = [&](cc::string_view entry, target t)
+    { return sgl::compile_to_text({.source = source, .entry_point = entry, .target = t}); };
+    for (auto const entry : {cc::string_view("vs"), cc::string_view("ps")})
+    {
+        auto const vulkan = text_for(entry, target::hlsl_vulkan);
+        REQUIRE(vulkan.has_value()).dump("error", vulkan.has_error() ? vulkan.error() : cc::string());
+        CHECK(vulkan.value().text.contains("nointerpolation int64_t key : SGL0")).dump("text", vulkan.value().text);
+
+        auto const dx12 = text_for(entry, target::hlsl_dx12);
+        REQUIRE(dx12.has_value()).dump("error", dx12.has_error() ? dx12.error() : cc::string());
+        auto const& hlsl = dx12.value().text;
+        CHECK(hlsl.contains("nointerpolation uint2 key_0 : SGL0")).dump("text", hlsl);
+        CHECK(hlsl.contains("nointerpolation uint4 pair_0 : SGL1")).dump("text", hlsl);
+        CHECK(hlsl.contains("nointerpolation uint2 steps_1 : SGL3")).dump("text", hlsl);
+        CHECK(!hlsl.contains("int64_t key")).dump("text", hlsl);
+
+        auto const metal = text_for(entry, target::msl);
+        REQUIRE(metal.has_value()).dump("error", metal.has_error() ? metal.error() : cc::string());
+        CHECK(metal.value().text.contains("uint2 key_0 [[user(sgl0), flat]]")).dump("text", metal.value().text);
+    }
+    // a write splits the value into its words, low word first, and a read joins them
+    auto const vs = text_for("vs", target::hlsl_dx12).value().text;
+    CHECK(vs.contains("uint(")).dump("text", vs);
+    CHECK(vs.contains(" >> 32)")).dump("text", vs);
+    auto const ps = text_for("ps", target::hlsl_dx12).value().text;
+    CHECK(ps.contains("int64_t((uint64_t(w.key_0.y) << 32) | uint64_t(w.key_0.x))")).dump("text", ps);
+    auto const metal_ps = text_for("ps", target::msl).value().text;
+    CHECK(metal_ps.contains("as_type<ulong2>(")).dump("text", metal_ps);
+    CHECK(text_for("vs", target::msl).value().text.contains("as_type<uint4>(")).dump("text", "");
+}
+
+TEST("sgl emit - a double crosses a dx12 stage link through asuint and asdouble (EMIT-196)")
+{
+    constexpr auto source = "require shader_f64\n"
                             "\n"
                             "struct varyings:\n"
                             "    @position position: hpos4\n"
-                            "    @interpolate(.flat) key: long\n"
+                            "    @interpolate(.flat) value: double2\n"
                             "\n"
                             "@vertex fun vs(@vertex_index v: int) -> varyings:\n"
-                            "    return {position = hpos4(0.0, 0.0, 0.0, 1.0), key = v as long}\n";
-    auto const text_for
-        = [&](target t) { return sgl::compile_to_text({.source = source, .entry_point = "vs", .target = t}); };
-    auto const vulkan = text_for(target::hlsl_vulkan);
-    REQUIRE(vulkan.has_value()).dump("error", vulkan.has_error() ? vulkan.error() : cc::string());
-    CHECK(vulkan.value().text.contains("nointerpolation int64_t")).dump("text", vulkan.value().text);
-    for (auto const t : {target::hlsl_dx12, target::msl})
+                            "    return {position = hpos4(0.0, 0.0, 0.0, 1.0), value = double2(0.1f64, (v as float) as "
+                            "double)}\n"
+                            "\n"
+                            "@pixel fun ps(link: varyings) -> float4:\n"
+                            "    return float4(link.value.x as float, link.value.y as float, 0.0, 1.0)\n";
+    auto const text_for = [&](cc::string_view entry)
+    { return sgl::compile_to_text({.source = source, .entry_point = entry, .target = target::hlsl_dx12}); };
+    auto const vs = text_for("vs");
+    REQUIRE(vs.has_value()).dump("error", vs.has_error() ? vs.error() : cc::string());
+    CHECK(vs.value().text.contains("nointerpolation uint4 value_0 : SGL0")).dump("text", vs.value().text);
+    CHECK(vs.value().text.contains("asuint(")).dump("text", vs.value().text);
+    auto const ps = text_for("ps");
+    REQUIRE(ps.has_value()).dump("error", ps.has_error() ? ps.error() : cc::string());
+    CHECK(ps.value().text.contains("double2(asdouble(link.value_0.x, link.value_0.y), asdouble("
+                                   "link.value_0.z, link.value_0.w))"))
+        .dump("text", ps.value().text);
+}
+
+TEST("sgl emit - a 64-bit three- or four-vector crosses a stage link over two locations, as two uint4s on dx12 and "
+     "metal (EMIT-196)")
+{
+    constexpr auto source = "require shader_int64\n"
+                            "require shader_f64\n"
+                            "\n"
+                            "struct varyings:\n"
+                            "    @position position: hpos4\n"
+                            "    @interpolate(.flat) key: long3\n"
+                            "    @interpolate(.flat) value: double4\n"
+                            "    @interpolate(.flat) steps: ulong4[2]\n"
+                            "    @interpolate(.flat) after: uint\n"
+                            "\n"
+                            "@vertex fun vs(@vertex_index v: int) -> varyings:\n"
+                            "    let k = (v as long) << 40\n"
+                            "    return {position = hpos4(0.0, 0.0, 0.0, 1.0), key = long3(-k, k, 3i64), "
+                            "value = double4(0.5f64), steps = [ulong4(1u64 << 33), ulong4(7u64)], after = 9u}\n"
+                            "\n"
+                            "@pixel fun ps(link: varyings) -> float4:\n"
+                            "    return float4(((link.key.z >> 1) as int) as float, link.value.w as float, "
+                            "((link.steps[1].w) as uint) as float, link.after as float)\n";
+    // metal has no double, so its compile carries a long4 where the others carry a double4
+    auto metal_source = cc::string(source);
+    metal_source.replace_all("double4(0.5f64)", "long4(5i64)");
+    metal_source.replace_all("link.value.w as float", "(link.value.w as int) as float");
+    metal_source.replace_all("double4", "long4");
+    metal_source.replace_all("require shader_f64\n", "");
+    auto const text_for = [&](cc::string_view entry, target t)
     {
-        auto const refused = text_for(t);
-        REQUIRE(refused.has_error());
-        CHECK(refused.error().contains("carries a 64-bit value between stages")).dump("error", refused.error());
+        return sgl::compile_to_text(
+            {.source = t == target::msl ? cc::string_view(metal_source) : source, .entry_point = entry, .target = t});
+    };
+    for (auto const entry : {cc::string_view("vs"), cc::string_view("ps")})
+    {
+        // vulkan carries each as itself, two locations apiece, so `after` follows eight of them
+        auto const vulkan = text_for(entry, target::hlsl_vulkan);
+        REQUIRE(vulkan.has_value()).dump("error", vulkan.has_error() ? vulkan.error() : cc::string());
+        auto const& vk = vulkan.value().text;
+        CHECK(vk.contains("[[vk::location(0)]] nointerpolation int64_t3 key")).dump("text", vk);
+        CHECK(vk.contains("[[vk::location(2)]] nointerpolation double4 value")).dump("text", vk);
+        CHECK(vk.contains("[[vk::location(6)]] nointerpolation uint64_t4 steps_1")).dump("text", vk);
+        CHECK(vk.contains("[[vk::location(8)]] nointerpolation uint after")).dump("text", vk);
+
+        auto const dx12 = text_for(entry, target::hlsl_dx12);
+        REQUIRE(dx12.has_value()).dump("error", dx12.has_error() ? dx12.error() : cc::string());
+        auto const& hlsl = dx12.value().text;
+        CHECK(hlsl.contains("nointerpolation uint4 key_1 : SGL1")).dump("text", hlsl);
+        CHECK(hlsl.contains("nointerpolation uint4 value_0 : SGL2")).dump("text", hlsl);
+        CHECK(hlsl.contains("nointerpolation uint4 steps_3 : SGL7")).dump("text", hlsl);
+        CHECK(hlsl.contains("nointerpolation uint after : SGL8")).dump("text", hlsl);
+
+        auto const metal = text_for(entry, target::msl);
+        REQUIRE(metal.has_value()).dump("error", metal.has_error() ? metal.error() : cc::string());
+        CHECK(metal.value().text.contains("uint4 key_1 [[user(sgl1), flat]]")).dump("text", metal.value().text);
+        CHECK(metal.value().text.contains("uint after [[user(sgl8), flat]]")).dump("text", metal.value().text);
     }
+    // a three-vector's second piece holds its third lane, then two zero words
+    auto const vs = text_for("vs", target::hlsl_dx12).value().text;
+    CHECK(vs.contains(" >> 32), 0u, 0u);")).dump("text", vs);
+    auto const ps = text_for("ps", target::hlsl_dx12).value().text;
+    CHECK(ps.contains("int64_t((uint64_t(link.key_1.y) << 32) | uint64_t(link.key_1.x)))")).dump("text", ps);
+    CHECK(ps.contains("asdouble(link.value_1.z, link.value_1.w))")).dump("text", ps);
+    auto const metal_vs = text_for("vs", target::msl).value().text;
+    CHECK(metal_vs.contains("uint4(as_type<uint2>(")).dump("text", metal_vs);
+    auto const metal_ps = text_for("ps", target::msl).value().text;
+    CHECK(metal_ps.contains("long3(as_type<long2>(")).dump("text", metal_ps);
 }
 
 TEST("sgl emit - a workgroup's 64-bit atomics are groupshared in HLSL, and no other target writes them (EMIT-218)")

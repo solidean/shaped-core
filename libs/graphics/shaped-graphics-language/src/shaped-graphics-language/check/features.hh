@@ -46,7 +46,7 @@ enum class sgl::check::feature : sgl::u8
     /// A float added atomically in one instruction, which vulkan and metal write where the device has it.
     /// `atomic[float]` runs on every device without it, so it is what `has` asks rather than what a `require` needs.
     float_atomic_add,
-    /// A ray-generation stage reorders its invocations by a hint, which only dx12 on Shader Model 6.9 writes.
+    /// A ray-generation stage reorders its invocations by a hint, which dx12 on Shader Model 6.9 and vulkan write.
     /// `maybe_reorder` does nothing without it, so it is what `has` asks rather than what a `require` needs.
     shader_execution_reordering,
     /// A ray query that sees the opacity micromaps its BLASes hold, which only Shader Model 6.9 writes.

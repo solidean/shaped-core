@@ -107,9 +107,8 @@ fun source_at(p: int2){atrous_images, atrous_constants} -> float4:
 
     let mut sum = float3(0.0)
     let mut weight_sum = 0.0
-    @unroll
+    // a loop: its 25 copies made it 2% slower on vulkan's Arc driver, and no faster anywhere else (2026-11-06)
     for dy in -2 ..< 3:
-        @unroll
         for dx in -2 ..< 3:
             let offset = int2(dx, dy) * atrous_constants.step
             let q = p + offset

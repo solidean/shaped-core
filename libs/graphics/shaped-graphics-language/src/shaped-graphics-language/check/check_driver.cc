@@ -69,7 +69,7 @@ void checker::run(resume_point from)
 
     // A test in a body that was never checked, a function whose signature failed or a test inside a test, is found
     // nowhere else, and a test is run or fails: it is never left out (CHK-224).
-    add_unregistered_tests();
+    add_unregistered_tests(from.files, from.tests);
 
     // Last, since a test in a function body is found while that body is checked (CHK-224).
     for (auto i = from.tests; i < out.tests.size(); ++i)
@@ -77,7 +77,7 @@ void checker::run(resume_point from)
     warn_uninstantiated_generics(from.symbols);
 
     judge_wide_literals(from.wide_literals);
-    find_recursion(from.symbols);
+    find_recursion(from.symbols, from.notes, from.calls);
 
     // Every binding and body is checked by now, so what each entry point needs and declares is known.
     for (auto i = from.symbols; i < out.symbols.size(); ++i)
@@ -87,7 +87,7 @@ void checker::run(resume_point from)
     judge_mesh_payloads();
 
     index_builtin_symbols(from.symbols);
-    instantiate_generics();
+    instantiate_generics(from.call_records, from.types);
     // CHK-350: the entry points are the program's; a module the program uses is a library, whose own are not built
     for (auto i = from.symbols; i < out.symbols.size(); ++i)
         if (out.symbols[i].kind == symbol_kind::function && out.symbols[i].state == symbol_state::checked
@@ -453,12 +453,13 @@ void checker::judge_redeclarations(isize first)
             alike.push_back(i);
         }
     };
-    for (auto const& [name, ids] : prelude_names)
+    // a set a lower layer holds unchanged has no symbol of this layer, so only this layer's own entries can hold one
+    for (auto const& [name, ids] : prelude_names.own_entries())
         judge(ids);
     for (auto const& scope : module_scopes)
         for (auto const& [name, ids] : scope)
             judge(ids);
-    for (auto const& [owner, scope] : type_scopes)
+    for (auto const& [owner, scope] : type_scopes.own_entries())
         for (auto const& [name, ids] : scope)
             judge(ids);
 }

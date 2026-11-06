@@ -316,7 +316,7 @@ TEST("sgl check - a 64-bit value needs its feature, crosses no stage edge and st
     // a test runs on no device, and needs nothing
     CHECK(reports_for("test (1i64 << 40) > 0i64\n") == "");
 
-    // CHK-454: a stage link carries a 64-bit scalar or two-vector flat, and nothing wider
+    // CHK-454: a stage link carries a 64-bit value flat, a three- or four-vector over two locations
     auto const crossing = [](cc::string_view member)
     {
         return reports_for(cc::format("require shader_int64\n\n"
@@ -330,8 +330,8 @@ TEST("sgl check - a 64-bit value needs its feature, crosses no stage edge and st
     };
     CHECK(crossing("@interpolate(.flat) key: long = 1i64") == "");
     CHECK(crossing("@interpolate(.flat) key: ulong2 = ulong2(1u64)") == "");
-    CHECK(crossing("@interpolate(.flat) key: long3 = long3(1i64)")
-              .contains("a 64-bit three- or four-vector crossing a stage edge"));
+    CHECK(crossing("@interpolate(.flat) key: long3 = long3(1i64)") == "");
+    CHECK(crossing("@interpolate(.flat) keys: ulong4[2] = [ulong4(1u64), ulong4(2u64)]") == "");
     CHECK(crossing("key: long = 1i64").contains("crosses stages only flat"));
     CHECK(reports_for(listing("require shader_int64\n\n@inline ", "    seed: long\n"))
           == "unsupported-yet user:[long] a 64-bit value in an @inline binding, in work.seed: long\n");

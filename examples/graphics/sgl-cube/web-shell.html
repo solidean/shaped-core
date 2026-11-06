@@ -1,7 +1,11 @@
 <!doctype html>
 <!--
-  The page the standalone web build is wrapped in: one canvas, one status line, and nothing else.
+  The page the standalone web build is wrapped in: the canvas, and beside it the cube's shader, which edits live.
   emcc substitutes the module's script at {{{ SCRIPT }}}; the canvas id is what the example's swapchain selector names.
+
+  An edit reaches the example through two exported functions, and the example answers through Module.sglCube*.
+  A file on disk can be followed instead of the editor where the browser lets a page read one (Chrome and Edge).
+  `?selftest` makes one broken edit and one good one, and writes what came of them into the title.
 -->
 <html lang="en">
 <head>
@@ -16,37 +20,178 @@
         color: #c9ccd6;
         font: 14px/1.5 ui-sans-serif, system-ui, sans-serif;
         display: flex;
-        flex-direction: column;
-        align-items: center;
+        flex-wrap: wrap;
+        align-items: flex-start;
         justify-content: center;
         min-height: 100vh;
-        gap: 12px;
+        gap: 16px;
+        padding: 16px;
+        box-sizing: border-box;
     }
-    canvas { width: min(100vw - 32px, 100vh * 16 / 9 - 32px, 1280px); height: auto; aspect-ratio: 16 / 9; display: block; }
-    #status { min-height: 1.5em; font-variant-numeric: tabular-nums; }
+    main { display: flex; flex-direction: column; gap: 8px; flex: 1 1 640px; max-width: 1280px; min-width: 0; }
+    canvas { width: 100%; height: auto; aspect-ratio: 16 / 9; display: block; }
+    aside { display: flex; flex-direction: column; gap: 8px; flex: 1 1 420px; max-width: 720px; min-width: 0; }
+    #source {
+        width: 100%;
+        min-height: 60vh;
+        box-sizing: border-box;
+        resize: vertical;
+        background: #1b1d26;
+        color: #d8dbe4;
+        border: 1px solid #2c2f3c;
+        border-radius: 6px;
+        padding: 10px;
+        font: 13px/1.45 ui-monospace, SFMono-Regular, Consolas, monospace;
+        tab-size: 4;
+    }
+    #errors { margin: 0; white-space: pre-wrap; font: 13px/1.45 ui-monospace, SFMono-Regular, Consolas, monospace; color: #e2705f; }
+    #status, #live { min-height: 1.5em; font-variant-numeric: tabular-nums; }
     #status.error { color: #e2705f; }
-    a { color: #7fb3e8; }
+    .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+    button { background: #262938; color: #c9ccd6; border: 1px solid #3a3e50; border-radius: 6px; padding: 4px 10px; font: inherit; }
+    button:hover { background: #2f3345; }
 </style>
 </head>
 <body>
-<canvas id="canvas" width="1280" height="720" tabindex="-1"></canvas>
-<div id="status">starting …</div>
+<main>
+    <canvas id="canvas" width="1280" height="720" tabindex="-1"></canvas>
+    <div id="status">starting …</div>
+</main>
+<aside>
+    <div class="row">
+        <span id="live">loading the shader …</span>
+        <button id="follow" hidden>follow a cube.sgl on disk …</button>
+    </div>
+    <textarea id="source" spellcheck="false" autocomplete="off" disabled></textarea>
+    <pre id="errors"></pre>
+</aside>
 
 <script>
     var statusElement = document.getElementById('status');
+    var sourceElement = document.getElementById('source');
+    var errorsElement = document.getElementById('errors');
+    var liveElement = document.getElementById('live');
+    var followButton = document.getElementById('follow');
+    var sourcePath = null;
+    var reloadCount = 0;
+    var lastErrors = '';
+
+    // Hands `text` to the example as the source at `sourcePath`; the next frame builds it.
+    function commitEdit(text)
+    {
+        if (sourcePath === null) return;
+        var bytes = Module.lengthBytesUTF8(text) + 1;
+        var buffer = Module._sgl_cube_edit_buffer(bytes);
+        Module.stringToUTF8(text, buffer, bytes);
+        Module.ccall('sgl_cube_edit_commit', null, ['string'], [sourcePath]);
+    }
+
+    var editTimer = 0;
+    sourceElement.addEventListener('input', function ()
+    {
+        clearTimeout(editTimer);
+        editTimer = setTimeout(function () { commitEdit(sourceElement.value); }, 150);
+    });
+    sourceElement.addEventListener('keydown', function (e)
+    {
+        if (e.key !== 'Tab') return;
+        e.preventDefault();
+        sourceElement.setRangeText('    ', sourceElement.selectionStart, sourceElement.selectionEnd, 'end');
+        sourceElement.dispatchEvent(new Event('input'));
+    });
+
+    // Following a file: the browser hands out a handle, and the page reads it again whenever its time moves.
+    if (window.showOpenFilePicker)
+    {
+        followButton.hidden = false;
+        followButton.addEventListener('click', async function ()
+        {
+            var handles;
+            try { handles = await window.showOpenFilePicker({types: [{description: 'SGL', accept: {'text/plain': ['.sgl']}}]}); }
+            catch (e) { return; }
+            var handle = handles[0];
+            var seen = -1;
+            followButton.textContent = 'following ' + handle.name;
+            sourceElement.readOnly = true;
+            setInterval(async function ()
+            {
+                var file = await handle.getFile();
+                if (file.lastModified === seen) return;
+                seen = file.lastModified;
+                var text = await file.text();
+                sourceElement.value = text;
+                commitEdit(text);
+            }, 300);
+        });
+    }
+
     var Module = {
         canvas: document.getElementById('canvas'),
         setStatus: function (text) { if (text) statusElement.textContent = text; },
         print: function (text) { statusElement.textContent = text; },
         printErr: function (text) { console.error(text); },
+
+        sglCubeShowSource: function (path, text)
+        {
+            sourcePath = path;
+            sourceElement.value = text;
+            sourceElement.disabled = false;
+            liveElement.textContent = path + ' — edits are built as you type';
+            if (new URLSearchParams(location.search).has('selftest')) selfTest(text);
+        },
+        sglCubeReport: function (reloads, errors)
+        {
+            reloadCount = reloads;
+            lastErrors = errors;
+            errorsElement.textContent = errors;
+            if (sourcePath !== null)
+                liveElement.textContent = sourcePath + (errors ? ' — does not build, the cube keeps the last that did'
+                                                               : ' — built' + (reloads > 0 ? ', reloaded ' + reloads + '×' : ''));
+        },
     };
+
+    // A broken edit must be reported and leave the reload count alone; a good one must reload and clear the report.
+    function selfTest(original)
+    {
+        var waitFor = function (condition, timeout)
+        {
+            return new Promise(function (resolve)
+            {
+                var start = performance.now();
+                var tick = function ()
+                {
+                    if (condition()) resolve(true);
+                    else if (performance.now() - start > timeout) resolve(false);
+                    else setTimeout(tick, 20);
+                };
+                tick();
+            });
+        };
+        (async function ()
+        {
+            var result = 'selftest: ';
+            commitEdit(original + '\nfun broken( -> int:\n');
+            var reported = await waitFor(function () { return lastErrors !== ''; }, 5000);
+            var keptCount = reloadCount === 0;
+            var edited = original.replace('let mut light = 0.25', 'let mut light = 0.6');
+            commitEdit(edited);
+            var reloaded = await waitFor(function () { return reloadCount === 1 && lastErrors === ''; }, 5000);
+            result += (reported && keptCount && reloaded && edited !== original)
+                ? 'pass'
+                : 'fail (reported ' + reported + ', kept ' + keptCount + ', reloaded ' + reloaded + ', errors ' + JSON.stringify(lastErrors) + ')';
+            document.title = result;
+            document.body.setAttribute('data-selftest', result);
+            console.log(result);
+        })();
+    }
+
     if (!navigator.gpu)
     {
         statusElement.className = 'error';
         statusElement.textContent = 'this browser has no WebGPU — try Chrome or Edge 113+, or Safari 26+';
     }
     else
-        statusElement.textContent = 'an SGL shader on WebGPU — the cube spins on its own';
+        statusElement.textContent = 'an SGL shader on WebGPU — the cube spins on its own, and its shader is yours to edit';
 </script>
 {{{ SCRIPT }}}
 </body>

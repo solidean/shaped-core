@@ -44,7 +44,7 @@ The worked examples are WGSL, since it is the strictest target: no `do … while
   A loop that holds one has a trip count every invocation of the workgroup shares, so its guards trip in all of them or in none.
   It guards the maths builtins of EVAL-87 too, each by the test the interpreter asks: `pow`, `asin`, `acos`, `atan2`, `smoothstep` and `clamp`, a scalar beside a vector read as every lane of it.
   So is a matrix's `row` or `column` whose index is outside the matrix.
-  Workgroup memory read before it is written (EVAL-92) is not guarded yet.
+  So is workgroup memory read before any invocation stored it (EVAL-92), by LEGAL-69.
   Wherever the input has a value, the tree behaves as the input does; where it has none, the tree ends the invocation instead.
 * **LEGAL-66** (G1) Where the target reads a buffer's length (EMIT-195), those profiles also guard a buffer index and a `bytes` access, by the length of CHK-460.
   A buffer index outside `0 ..< values.length` ends the invocation as an array index does (EVAL-90).
@@ -61,6 +61,16 @@ The worked examples are WGSL, since it is the strictest target: no `do … while
   `smoothstep` runs on the edges 0 and 1, and `clamp` on a `high` of `low`.
   It prints nothing and needs no flag, since no invocation ends, and the tree has a value wherever the input has one.
   An index of 0 is still past the end of a buffer that holds nothing, which it leaves to the target.
+* **LEGAL-69** (G1) Those profiles shadow a compute stage's workgroup memory with a bit per scalar, set where one is stored and tested where one is read (EVAL-92).
+  A scalar is a leaf of a member's type, counted in the order the members are listed: a `float3` is three, an atomic one, whatever its width.
+  A store and an atomic set the bits of the scalars they reach once they ran; every read, an atomic's but a store's included, tests them first.
+  A uniform load tests them after its barrier, which is what makes another invocation's store visible to it.
+  A failed test ends the invocation as a guard does, and `report` names the place with its indices: ``workgroup memory `tile.values[2]` is read before any invocation stored it``.
+  A swizzle tests each field it reads, and each index of the place is pinned once, so the test and the access read the same element.
+  A read that races a store, with no barrier between, may or may not be reported.
+  The shadow takes a word per 32 scalars beside the memory it shadows, in CHK-294's 16384 bytes; where it would not fit, no read is tested.
+  The profile `define` shadows nothing and zeroes workgroup memory before the body instead, WGSL's value (EMIT-229).
+  A task and a mesh stage's workgroup memory is not shadowed yet.
 * **LEGAL-52** (V1) A core tree holds no `void` local, and no `let`, `var`, assignment, `return` or read of a `void` value: what evaluating one does stays as an `eval`, and the value itself is gone.
   It follows every rule that introduces a local for a result, since a `void` result is one of them; only the let rules come after it.
 

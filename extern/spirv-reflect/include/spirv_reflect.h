@@ -325,6 +325,7 @@ typedef enum SpvReflectGenerator {
   SPV_REFLECT_GENERATOR_KHRONOS_SPIRV_TOOLS_LINKER            = 17,
   SPV_REFLECT_GENERATOR_WINE_VKD3D_SHADER_COMPILER            = 18,
   SPV_REFLECT_GENERATOR_CLAY_CLAY_SHADER_COMPILER             = 19,
+  SPV_REFLECT_GENERATOR_SLANG_SHADER_COMPILER                 = 40,
 } SpvReflectGenerator;
 
 enum {
@@ -523,8 +524,31 @@ typedef struct SpvReflectDescriptorSet {
 } SpvReflectDescriptorSet;
 
 typedef enum SpvReflectExecutionModeValue {
-  SPV_REFLECT_EXECUTION_MODE_SPEC_CONSTANT = 0xFFFFFFFF // specialization constant
+  SPV_REFLECT_EXECUTION_MODE_SPEC_CONSTANT = (int)0xFFFFFFFF // specialization constant
 } SpvReflectExecutionModeValue;
+
+/*! @struct SpvReflectEntryPointResourceHeapAccess
+    @brief One distinct resource-heap access pattern (OpUntypedAccessChainKHR
+           element type + stride) reachable from this entry point.
+*/
+typedef struct SpvReflectEntryPointResourceHeapAccess {
+  const char*                       heap_name;
+  uint32_t                          runtime_array_type_id;
+  uint32_t                          stride;  // UINT32_MAX when not specified by shader (e.g. ArrayStride from OpConstantSizeOfEXT) or could not be resolved
+  SpvReflectDescriptorType          descriptor_type;
+  SpvReflectTypeDescription*        type_description;
+} SpvReflectEntryPointResourceHeapAccess;
+
+/*! @struct SpvReflectEntryPointSamplerHeapAccess
+    @brief One distinct sampler-heap access pattern reachable from this entry
+           point (usually at most one).
+*/
+typedef struct SpvReflectEntryPointSamplerHeapAccess {
+  const char*                       heap_name;
+  uint32_t                          runtime_array_type_id;
+  uint32_t                          stride;  // UINT32_MAX when not specified by shader (e.g. ArrayStride from OpConstantSizeOfEXT) or could not be resolved
+  SpvReflectTypeDescription*        type_description;
+} SpvReflectEntryPointSamplerHeapAccess;
 
 /*! @struct SpvReflectEntryPoint
 
@@ -561,6 +585,14 @@ typedef struct SpvReflectEntryPoint {
   } local_size;
   uint32_t                          invocations; // valid for geometry
   uint32_t                          output_vertices; // valid for geometry, tesselation
+
+  // SPV_EXT_descriptor_heap: distinct heap access patterns reachable from this
+  // entry point's static call graph. Each entry corresponds to a unique
+  // (heap variable, OpUntypedAccessChainKHR Data Type) pair.
+  uint32_t                                resource_heap_access_count;
+  SpvReflectEntryPointResourceHeapAccess* resource_heap_accesses;
+  uint32_t                                sampler_heap_access_count;
+  SpvReflectEntryPointSamplerHeapAccess*  sampler_heap_accesses;
 } SpvReflectEntryPoint;
 
 /*! @struct SpvReflectCapability
@@ -579,6 +611,21 @@ typedef struct SpvReflectSpecializationConstant {
   uint32_t spirv_id;
   uint32_t constant_id;
   const char* name;
+  SpvReflectTypeDescription* type_description;
+
+  // Size of the default value in bytes (always a multiple of 4).
+  // Will be 4 for 8/16/32-bit constants and 8 for 64-bit constants.
+  uint32_t default_value_size;
+
+  // Pointer to the raw default value data.  
+  // The interpretation of this data depends on type_description->op:  
+  // - SpvOpSpecConstantTrue:  size = 4, data = uint32_t(1)  
+  // - SpvOpSpecConstantFalse: size = 4, data = uint32_t(0)  
+  // - SpvOpSpecConstant:      data contains the bit pattern of the default value  
+  //   * The type will be a scalar integer or float.
+  //   * Types 32 bits wide or smaller take one word.  
+  //   * Larger types take multiple words, with low-order words appearing first.  
+  void* default_value;  
 } SpvReflectSpecializationConstant;
 
 /*! @struct SpvReflectShaderModule

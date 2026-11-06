@@ -2438,6 +2438,115 @@
 @builtin @pure fun pack_half2x16(v: float2) -> uint
 @builtin @pure fun unpack_half2x16(u: uint) -> float2
 
+// the maths of a double and its vectors (CHK-458): rounding exact, `sqrt` within an ULP and
+// `inverse_sqrt` within two, written as HLSL over a double's arithmetic, since no target has them;
+// no transcendental, which no target computes in 64 bits either
+@builtin @pure fun sqrt(x: double) -> double
+@builtin @pure fun inverse_sqrt(x: double) -> double
+@builtin @pure fun floor(x: double) -> double
+@builtin @pure fun ceil(x: double) -> double
+@builtin @pure fun trunc(x: double) -> double
+@builtin @pure fun round(x: double) -> double
+@builtin @pure fun fract(x: double) -> double
+/// -1, 0 or 1, by the sign of each component.
+@builtin @pure fun sign(x: double) -> double
+@builtin @pure fun saturate(x: double) -> double
+/// Whether each component is a NaN, read from its bits.
+@builtin @pure fun is_nan(x: double) -> bool
+/// Whether each component is an infinity, of either sign, read from its bits.
+@builtin @pure fun is_inf(x: double) -> bool
+/// `a * (1 - t) + b * t`, `a` where `t` is 0 and `b` where it is 1.
+@builtin @pure fun mix(a: double, b: double, t: double) -> double
+/// 0 where `x` is below `edge`, and 1 from it on.
+@builtin @pure fun step(edge: double, x: double) -> double
+/// 0 up to `low`, 1 from `high` on, and a smooth Hermite curve between.
+@builtin @pure fun smoothstep(low: double, high: double, x: double) -> double
+@builtin @pure fun sqrt(x: double2) -> double2
+@builtin @pure fun inverse_sqrt(x: double2) -> double2
+@builtin @pure fun floor(x: double2) -> double2
+@builtin @pure fun ceil(x: double2) -> double2
+@builtin @pure fun trunc(x: double2) -> double2
+@builtin @pure fun round(x: double2) -> double2
+@builtin @pure fun fract(x: double2) -> double2
+/// -1, 0 or 1, by the sign of each component.
+@builtin @pure fun sign(x: double2) -> double2
+@builtin @pure fun saturate(x: double2) -> double2
+/// Whether each component is a NaN, read from its bits.
+@builtin @pure fun is_nan(x: double2) -> bool2
+/// Whether each component is an infinity, of either sign, read from its bits.
+@builtin @pure fun is_inf(x: double2) -> bool2
+/// `a * (1 - t) + b * t`, `a` where `t` is 0 and `b` where it is 1.
+@builtin @pure fun mix(a: double2, b: double2, t: double) -> double2
+/// `mix` of each component by its own `t`.
+@builtin @pure fun mix(a: double2, b: double2, t: double2) -> double2
+/// 0 where `x` is below `edge`, and 1 from it on.
+@builtin @pure fun step(edge: double2, x: double2) -> double2
+/// 0 up to `low`, 1 from `high` on, and a smooth Hermite curve between.
+@builtin @pure fun smoothstep(low: double2, high: double2, x: double2) -> double2
+/// The products of the components, summed from the first on.
+@builtin @pure fun dot(a: double2, b: double2) -> double
+@builtin @pure fun length(v: double2) -> double
+@builtin @pure fun distance(a: double2, b: double2) -> double
+/// `v * inverse_sqrt(dot(v, v))`.
+@builtin @pure fun normalize(v: double2) -> double2
+@builtin @pure fun sqrt(x: double3) -> double3
+@builtin @pure fun inverse_sqrt(x: double3) -> double3
+@builtin @pure fun floor(x: double3) -> double3
+@builtin @pure fun ceil(x: double3) -> double3
+@builtin @pure fun trunc(x: double3) -> double3
+@builtin @pure fun round(x: double3) -> double3
+@builtin @pure fun fract(x: double3) -> double3
+/// -1, 0 or 1, by the sign of each component.
+@builtin @pure fun sign(x: double3) -> double3
+@builtin @pure fun saturate(x: double3) -> double3
+/// Whether each component is a NaN, read from its bits.
+@builtin @pure fun is_nan(x: double3) -> bool3
+/// Whether each component is an infinity, of either sign, read from its bits.
+@builtin @pure fun is_inf(x: double3) -> bool3
+/// `a * (1 - t) + b * t`, `a` where `t` is 0 and `b` where it is 1.
+@builtin @pure fun mix(a: double3, b: double3, t: double) -> double3
+/// `mix` of each component by its own `t`.
+@builtin @pure fun mix(a: double3, b: double3, t: double3) -> double3
+/// 0 where `x` is below `edge`, and 1 from it on.
+@builtin @pure fun step(edge: double3, x: double3) -> double3
+/// 0 up to `low`, 1 from `high` on, and a smooth Hermite curve between.
+@builtin @pure fun smoothstep(low: double3, high: double3, x: double3) -> double3
+/// The products of the components, summed from the first on.
+@builtin @pure fun dot(a: double3, b: double3) -> double
+@builtin @pure fun length(v: double3) -> double
+@builtin @pure fun distance(a: double3, b: double3) -> double
+/// `v * inverse_sqrt(dot(v, v))`.
+@builtin @pure fun normalize(v: double3) -> double3
+@builtin @pure fun sqrt(x: double4) -> double4
+@builtin @pure fun inverse_sqrt(x: double4) -> double4
+@builtin @pure fun floor(x: double4) -> double4
+@builtin @pure fun ceil(x: double4) -> double4
+@builtin @pure fun trunc(x: double4) -> double4
+@builtin @pure fun round(x: double4) -> double4
+@builtin @pure fun fract(x: double4) -> double4
+/// -1, 0 or 1, by the sign of each component.
+@builtin @pure fun sign(x: double4) -> double4
+@builtin @pure fun saturate(x: double4) -> double4
+/// Whether each component is a NaN, read from its bits.
+@builtin @pure fun is_nan(x: double4) -> bool4
+/// Whether each component is an infinity, of either sign, read from its bits.
+@builtin @pure fun is_inf(x: double4) -> bool4
+/// `a * (1 - t) + b * t`, `a` where `t` is 0 and `b` where it is 1.
+@builtin @pure fun mix(a: double4, b: double4, t: double) -> double4
+/// `mix` of each component by its own `t`.
+@builtin @pure fun mix(a: double4, b: double4, t: double4) -> double4
+/// 0 where `x` is below `edge`, and 1 from it on.
+@builtin @pure fun step(edge: double4, x: double4) -> double4
+/// 0 up to `low`, 1 from `high` on, and a smooth Hermite curve between.
+@builtin @pure fun smoothstep(low: double4, high: double4, x: double4) -> double4
+/// The products of the components, summed from the first on.
+@builtin @pure fun dot(a: double4, b: double4) -> double
+@builtin @pure fun length(v: double4) -> double
+@builtin @pure fun distance(a: double4, b: double4) -> double
+/// `v * inverse_sqrt(dot(v, v))`.
+@builtin @pure fun normalize(v: double4) -> double4
+@builtin @pure fun cross(a: double3, b: double3) -> double3
+
 // Textures and images, called as methods: `tex.sample(uv, smp)` is `sample(tex, uv, smp)`.
 // A texture samples, gathers and loads; an image loads where the shader may read it and stores where it may write it.
 // A sample takes its level from derivatives, or from a `level`, `bias` or `grad_x` / `grad_y` named at the call.
@@ -2460,6 +2569,14 @@
 @builtin @pure fun uniform(i: int) -> int
 /// `i`, which the author says is the same in every invocation that indexes with it.
 @builtin @pure fun uniform(i: uint) -> uint
+
+// What a test states of its run's bindings, which no target writes (EVAL-127, EVAL-128):
+// `t.test_texel(xy, value)` a texel of a texture or an image, and `s.test_state(from)` a dynamic sampler's state.
+/// Gives the dynamic sampler `s` the state of `from`, a sampler whose state the source sets.
+@builtin fun test_state(s: sampler, from: sampler)
+/// Gives the dynamic sampler `s` the state of `from`, a sampler whose state the source sets.
+@builtin fun test_state(s: comparison_sampler, from: comparison_sampler)
+@builtin fun test_texel(t: texture_1d[float], xy: int, value: float, level: int = 0)
 @builtin @pure fun load(t: texture_1d[float], xy: int, level: int = 0) -> float
 @builtin @pure @stages(.pixel) fun sample(t: texture_1d[float], coord: float, smp: sampler) -> float
 @builtin @pure @stages(.pixel) fun sample(t: texture_1d[float], coord: float) -> float
@@ -2469,6 +2586,7 @@
 @builtin @pure @stages(.pixel) fun sample(t: texture_1d[float], coord: float, .bias: float) -> float
 @builtin @pure fun sample(t: texture_1d[float], coord: float, smp: sampler, .grad_x: float, .grad_y: float) -> float
 @builtin @pure fun sample(t: texture_1d[float], coord: float, .grad_x: float, .grad_y: float) -> float
+@builtin fun test_texel(t: texture_1d[float2], xy: int, value: float2, level: int = 0)
 @builtin @pure fun load(t: texture_1d[float2], xy: int, level: int = 0) -> float2
 @builtin @pure @stages(.pixel) fun sample(t: texture_1d[float2], coord: float, smp: sampler) -> float2
 @builtin @pure @stages(.pixel) fun sample(t: texture_1d[float2], coord: float) -> float2
@@ -2478,6 +2596,7 @@
 @builtin @pure @stages(.pixel) fun sample(t: texture_1d[float2], coord: float, .bias: float) -> float2
 @builtin @pure fun sample(t: texture_1d[float2], coord: float, smp: sampler, .grad_x: float, .grad_y: float) -> float2
 @builtin @pure fun sample(t: texture_1d[float2], coord: float, .grad_x: float, .grad_y: float) -> float2
+@builtin fun test_texel(t: texture_1d[float3], xy: int, value: float3, level: int = 0)
 @builtin @pure fun load(t: texture_1d[float3], xy: int, level: int = 0) -> float3
 @builtin @pure @stages(.pixel) fun sample(t: texture_1d[float3], coord: float, smp: sampler) -> float3
 @builtin @pure @stages(.pixel) fun sample(t: texture_1d[float3], coord: float) -> float3
@@ -2487,6 +2606,7 @@
 @builtin @pure @stages(.pixel) fun sample(t: texture_1d[float3], coord: float, .bias: float) -> float3
 @builtin @pure fun sample(t: texture_1d[float3], coord: float, smp: sampler, .grad_x: float, .grad_y: float) -> float3
 @builtin @pure fun sample(t: texture_1d[float3], coord: float, .grad_x: float, .grad_y: float) -> float3
+@builtin fun test_texel(t: texture_1d[float4], xy: int, value: float4, level: int = 0)
 @builtin @pure fun load(t: texture_1d[float4], xy: int, level: int = 0) -> float4
 @builtin @pure @stages(.pixel) fun sample(t: texture_1d[float4], coord: float, smp: sampler) -> float4
 @builtin @pure @stages(.pixel) fun sample(t: texture_1d[float4], coord: float) -> float4
@@ -2496,41 +2616,62 @@
 @builtin @pure @stages(.pixel) fun sample(t: texture_1d[float4], coord: float, .bias: float) -> float4
 @builtin @pure fun sample(t: texture_1d[float4], coord: float, smp: sampler, .grad_x: float, .grad_y: float) -> float4
 @builtin @pure fun sample(t: texture_1d[float4], coord: float, .grad_x: float, .grad_y: float) -> float4
+@builtin fun test_texel(t: texture_1d[int], xy: int, value: int, level: int = 0)
 @builtin @pure fun load(t: texture_1d[int], xy: int, level: int = 0) -> int
+@builtin fun test_texel(t: texture_1d[int2], xy: int, value: int2, level: int = 0)
 @builtin @pure fun load(t: texture_1d[int2], xy: int, level: int = 0) -> int2
+@builtin fun test_texel(t: texture_1d[int3], xy: int, value: int3, level: int = 0)
 @builtin @pure fun load(t: texture_1d[int3], xy: int, level: int = 0) -> int3
+@builtin fun test_texel(t: texture_1d[int4], xy: int, value: int4, level: int = 0)
 @builtin @pure fun load(t: texture_1d[int4], xy: int, level: int = 0) -> int4
+@builtin fun test_texel(t: texture_1d[uint], xy: int, value: uint, level: int = 0)
 @builtin @pure fun load(t: texture_1d[uint], xy: int, level: int = 0) -> uint
+@builtin fun test_texel(t: texture_1d[uint2], xy: int, value: uint2, level: int = 0)
 @builtin @pure fun load(t: texture_1d[uint2], xy: int, level: int = 0) -> uint2
+@builtin fun test_texel(t: texture_1d[uint3], xy: int, value: uint3, level: int = 0)
 @builtin @pure fun load(t: texture_1d[uint3], xy: int, level: int = 0) -> uint3
+@builtin fun test_texel(t: texture_1d[uint4], xy: int, value: uint4, level: int = 0)
 @builtin @pure fun load(t: texture_1d[uint4], xy: int, level: int = 0) -> uint4
 @builtin @pure fun size(t: texture_1d, level: int = 0) -> int
 @builtin @pure fun level_count(t: texture_1d) -> int
+@builtin fun test_texel(t: image_1d[float], xy: int, value: float)
 @builtin fun load(i: image_1d[float], xy: int) -> float
 @builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun store(i: out image_1d[float], xy: int, value: float)
+@builtin fun test_texel(t: image_1d[float2], xy: int, value: float2)
 @builtin fun load(i: image_1d[float2], xy: int) -> float2
 @builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun store(i: out image_1d[float2], xy: int, value: float2)
+@builtin fun test_texel(t: image_1d[float3], xy: int, value: float3)
 @builtin fun load(i: image_1d[float3], xy: int) -> float3
 @builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun store(i: out image_1d[float3], xy: int, value: float3)
+@builtin fun test_texel(t: image_1d[float4], xy: int, value: float4)
 @builtin fun load(i: image_1d[float4], xy: int) -> float4
 @builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun store(i: out image_1d[float4], xy: int, value: float4)
+@builtin fun test_texel(t: image_1d[int], xy: int, value: int)
 @builtin fun load(i: image_1d[int], xy: int) -> int
 @builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun store(i: out image_1d[int], xy: int, value: int)
+@builtin fun test_texel(t: image_1d[int2], xy: int, value: int2)
 @builtin fun load(i: image_1d[int2], xy: int) -> int2
 @builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun store(i: out image_1d[int2], xy: int, value: int2)
+@builtin fun test_texel(t: image_1d[int3], xy: int, value: int3)
 @builtin fun load(i: image_1d[int3], xy: int) -> int3
 @builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun store(i: out image_1d[int3], xy: int, value: int3)
+@builtin fun test_texel(t: image_1d[int4], xy: int, value: int4)
 @builtin fun load(i: image_1d[int4], xy: int) -> int4
 @builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun store(i: out image_1d[int4], xy: int, value: int4)
+@builtin fun test_texel(t: image_1d[uint], xy: int, value: uint)
 @builtin fun load(i: image_1d[uint], xy: int) -> uint
 @builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun store(i: out image_1d[uint], xy: int, value: uint)
+@builtin fun test_texel(t: image_1d[uint2], xy: int, value: uint2)
 @builtin fun load(i: image_1d[uint2], xy: int) -> uint2
 @builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun store(i: out image_1d[uint2], xy: int, value: uint2)
+@builtin fun test_texel(t: image_1d[uint3], xy: int, value: uint3)
 @builtin fun load(i: image_1d[uint3], xy: int) -> uint3
 @builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun store(i: out image_1d[uint3], xy: int, value: uint3)
+@builtin fun test_texel(t: image_1d[uint4], xy: int, value: uint4)
 @builtin fun load(i: image_1d[uint4], xy: int) -> uint4
 @builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun store(i: out image_1d[uint4], xy: int, value: uint4)
 @builtin @pure fun size(t: image_1d) -> int
+@builtin fun test_texel(t: texture_1d_array[float], xy: int, value: float, level: int = 0, .layer: int = 0)
 @builtin @pure fun load(t: texture_1d_array[float], xy: int, level: int = 0, .layer: int) -> float
 @builtin @pure @stages(.pixel) fun sample(t: texture_1d_array[float], coord: float, smp: sampler, .layer: int) -> float
 @builtin @pure @stages(.pixel) fun sample(t: texture_1d_array[float], coord: float, .layer: int) -> float
@@ -2540,6 +2681,7 @@
 @builtin @pure @stages(.pixel) fun sample(t: texture_1d_array[float], coord: float, .layer: int, .bias: float) -> float
 @builtin @pure fun sample(t: texture_1d_array[float], coord: float, smp: sampler, .layer: int, .grad_x: float, .grad_y: float) -> float
 @builtin @pure fun sample(t: texture_1d_array[float], coord: float, .layer: int, .grad_x: float, .grad_y: float) -> float
+@builtin fun test_texel(t: texture_1d_array[float2], xy: int, value: float2, level: int = 0, .layer: int = 0)
 @builtin @pure fun load(t: texture_1d_array[float2], xy: int, level: int = 0, .layer: int) -> float2
 @builtin @pure @stages(.pixel) fun sample(t: texture_1d_array[float2], coord: float, smp: sampler, .layer: int) -> float2
 @builtin @pure @stages(.pixel) fun sample(t: texture_1d_array[float2], coord: float, .layer: int) -> float2
@@ -2549,6 +2691,7 @@
 @builtin @pure @stages(.pixel) fun sample(t: texture_1d_array[float2], coord: float, .layer: int, .bias: float) -> float2
 @builtin @pure fun sample(t: texture_1d_array[float2], coord: float, smp: sampler, .layer: int, .grad_x: float, .grad_y: float) -> float2
 @builtin @pure fun sample(t: texture_1d_array[float2], coord: float, .layer: int, .grad_x: float, .grad_y: float) -> float2
+@builtin fun test_texel(t: texture_1d_array[float3], xy: int, value: float3, level: int = 0, .layer: int = 0)
 @builtin @pure fun load(t: texture_1d_array[float3], xy: int, level: int = 0, .layer: int) -> float3
 @builtin @pure @stages(.pixel) fun sample(t: texture_1d_array[float3], coord: float, smp: sampler, .layer: int) -> float3
 @builtin @pure @stages(.pixel) fun sample(t: texture_1d_array[float3], coord: float, .layer: int) -> float3
@@ -2558,6 +2701,7 @@
 @builtin @pure @stages(.pixel) fun sample(t: texture_1d_array[float3], coord: float, .layer: int, .bias: float) -> float3
 @builtin @pure fun sample(t: texture_1d_array[float3], coord: float, smp: sampler, .layer: int, .grad_x: float, .grad_y: float) -> float3
 @builtin @pure fun sample(t: texture_1d_array[float3], coord: float, .layer: int, .grad_x: float, .grad_y: float) -> float3
+@builtin fun test_texel(t: texture_1d_array[float4], xy: int, value: float4, level: int = 0, .layer: int = 0)
 @builtin @pure fun load(t: texture_1d_array[float4], xy: int, level: int = 0, .layer: int) -> float4
 @builtin @pure @stages(.pixel) fun sample(t: texture_1d_array[float4], coord: float, smp: sampler, .layer: int) -> float4
 @builtin @pure @stages(.pixel) fun sample(t: texture_1d_array[float4], coord: float, .layer: int) -> float4
@@ -2567,43 +2711,64 @@
 @builtin @pure @stages(.pixel) fun sample(t: texture_1d_array[float4], coord: float, .layer: int, .bias: float) -> float4
 @builtin @pure fun sample(t: texture_1d_array[float4], coord: float, smp: sampler, .layer: int, .grad_x: float, .grad_y: float) -> float4
 @builtin @pure fun sample(t: texture_1d_array[float4], coord: float, .layer: int, .grad_x: float, .grad_y: float) -> float4
+@builtin fun test_texel(t: texture_1d_array[int], xy: int, value: int, level: int = 0, .layer: int = 0)
 @builtin @pure fun load(t: texture_1d_array[int], xy: int, level: int = 0, .layer: int) -> int
+@builtin fun test_texel(t: texture_1d_array[int2], xy: int, value: int2, level: int = 0, .layer: int = 0)
 @builtin @pure fun load(t: texture_1d_array[int2], xy: int, level: int = 0, .layer: int) -> int2
+@builtin fun test_texel(t: texture_1d_array[int3], xy: int, value: int3, level: int = 0, .layer: int = 0)
 @builtin @pure fun load(t: texture_1d_array[int3], xy: int, level: int = 0, .layer: int) -> int3
+@builtin fun test_texel(t: texture_1d_array[int4], xy: int, value: int4, level: int = 0, .layer: int = 0)
 @builtin @pure fun load(t: texture_1d_array[int4], xy: int, level: int = 0, .layer: int) -> int4
+@builtin fun test_texel(t: texture_1d_array[uint], xy: int, value: uint, level: int = 0, .layer: int = 0)
 @builtin @pure fun load(t: texture_1d_array[uint], xy: int, level: int = 0, .layer: int) -> uint
+@builtin fun test_texel(t: texture_1d_array[uint2], xy: int, value: uint2, level: int = 0, .layer: int = 0)
 @builtin @pure fun load(t: texture_1d_array[uint2], xy: int, level: int = 0, .layer: int) -> uint2
+@builtin fun test_texel(t: texture_1d_array[uint3], xy: int, value: uint3, level: int = 0, .layer: int = 0)
 @builtin @pure fun load(t: texture_1d_array[uint3], xy: int, level: int = 0, .layer: int) -> uint3
+@builtin fun test_texel(t: texture_1d_array[uint4], xy: int, value: uint4, level: int = 0, .layer: int = 0)
 @builtin @pure fun load(t: texture_1d_array[uint4], xy: int, level: int = 0, .layer: int) -> uint4
 @builtin @pure fun size(t: texture_1d_array, level: int = 0) -> int
 @builtin @pure fun layer_count(t: texture_1d_array) -> int
 @builtin @pure fun level_count(t: texture_1d_array) -> int
+@builtin fun test_texel(t: image_1d_array[float], xy: int, value: float, .layer: int = 0)
 @builtin fun load(i: image_1d_array[float], xy: int, .layer: int) -> float
 @builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun store(i: out image_1d_array[float], xy: int, value: float, .layer: int)
+@builtin fun test_texel(t: image_1d_array[float2], xy: int, value: float2, .layer: int = 0)
 @builtin fun load(i: image_1d_array[float2], xy: int, .layer: int) -> float2
 @builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun store(i: out image_1d_array[float2], xy: int, value: float2, .layer: int)
+@builtin fun test_texel(t: image_1d_array[float3], xy: int, value: float3, .layer: int = 0)
 @builtin fun load(i: image_1d_array[float3], xy: int, .layer: int) -> float3
 @builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun store(i: out image_1d_array[float3], xy: int, value: float3, .layer: int)
+@builtin fun test_texel(t: image_1d_array[float4], xy: int, value: float4, .layer: int = 0)
 @builtin fun load(i: image_1d_array[float4], xy: int, .layer: int) -> float4
 @builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun store(i: out image_1d_array[float4], xy: int, value: float4, .layer: int)
+@builtin fun test_texel(t: image_1d_array[int], xy: int, value: int, .layer: int = 0)
 @builtin fun load(i: image_1d_array[int], xy: int, .layer: int) -> int
 @builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun store(i: out image_1d_array[int], xy: int, value: int, .layer: int)
+@builtin fun test_texel(t: image_1d_array[int2], xy: int, value: int2, .layer: int = 0)
 @builtin fun load(i: image_1d_array[int2], xy: int, .layer: int) -> int2
 @builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun store(i: out image_1d_array[int2], xy: int, value: int2, .layer: int)
+@builtin fun test_texel(t: image_1d_array[int3], xy: int, value: int3, .layer: int = 0)
 @builtin fun load(i: image_1d_array[int3], xy: int, .layer: int) -> int3
 @builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun store(i: out image_1d_array[int3], xy: int, value: int3, .layer: int)
+@builtin fun test_texel(t: image_1d_array[int4], xy: int, value: int4, .layer: int = 0)
 @builtin fun load(i: image_1d_array[int4], xy: int, .layer: int) -> int4
 @builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun store(i: out image_1d_array[int4], xy: int, value: int4, .layer: int)
+@builtin fun test_texel(t: image_1d_array[uint], xy: int, value: uint, .layer: int = 0)
 @builtin fun load(i: image_1d_array[uint], xy: int, .layer: int) -> uint
 @builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun store(i: out image_1d_array[uint], xy: int, value: uint, .layer: int)
+@builtin fun test_texel(t: image_1d_array[uint2], xy: int, value: uint2, .layer: int = 0)
 @builtin fun load(i: image_1d_array[uint2], xy: int, .layer: int) -> uint2
 @builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun store(i: out image_1d_array[uint2], xy: int, value: uint2, .layer: int)
+@builtin fun test_texel(t: image_1d_array[uint3], xy: int, value: uint3, .layer: int = 0)
 @builtin fun load(i: image_1d_array[uint3], xy: int, .layer: int) -> uint3
 @builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun store(i: out image_1d_array[uint3], xy: int, value: uint3, .layer: int)
+@builtin fun test_texel(t: image_1d_array[uint4], xy: int, value: uint4, .layer: int = 0)
 @builtin fun load(i: image_1d_array[uint4], xy: int, .layer: int) -> uint4
 @builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun store(i: out image_1d_array[uint4], xy: int, value: uint4, .layer: int)
 @builtin @pure fun size(t: image_1d_array) -> int
 @builtin @pure fun layer_count(t: image_1d_array) -> int
+@builtin fun test_texel(t: texture_2d[float], xy: int2, value: float, level: int = 0)
 @builtin @pure fun load(t: texture_2d[float], xy: int2, level: int = 0) -> float
 @builtin @pure @stages(.pixel) fun sample(t: texture_2d[float], coord: float2, smp: sampler) -> float
 @builtin @pure @stages(.pixel) fun sample(t: texture_2d[float], coord: float2) -> float
@@ -2621,6 +2786,7 @@
 @builtin @pure fun gather(t: texture_2d[float], coord: float2, .component: texel_component = texel_component.x) -> float4
 @builtin @pure fun gather(t: texture_2d[float], coord: float2, smp: sampler, .component: texel_component = texel_component.x, .offset: int2) -> float4
 @builtin @pure fun gather(t: texture_2d[float], coord: float2, .component: texel_component = texel_component.x, .offset: int2) -> float4
+@builtin fun test_texel(t: texture_2d[float2], xy: int2, value: float2, level: int = 0)
 @builtin @pure fun load(t: texture_2d[float2], xy: int2, level: int = 0) -> float2
 @builtin @pure @stages(.pixel) fun sample(t: texture_2d[float2], coord: float2, smp: sampler) -> float2
 @builtin @pure @stages(.pixel) fun sample(t: texture_2d[float2], coord: float2) -> float2
@@ -2638,6 +2804,7 @@
 @builtin @pure fun gather(t: texture_2d[float2], coord: float2, .component: texel_component = texel_component.x) -> float4
 @builtin @pure fun gather(t: texture_2d[float2], coord: float2, smp: sampler, .component: texel_component = texel_component.x, .offset: int2) -> float4
 @builtin @pure fun gather(t: texture_2d[float2], coord: float2, .component: texel_component = texel_component.x, .offset: int2) -> float4
+@builtin fun test_texel(t: texture_2d[float3], xy: int2, value: float3, level: int = 0)
 @builtin @pure fun load(t: texture_2d[float3], xy: int2, level: int = 0) -> float3
 @builtin @pure @stages(.pixel) fun sample(t: texture_2d[float3], coord: float2, smp: sampler) -> float3
 @builtin @pure @stages(.pixel) fun sample(t: texture_2d[float3], coord: float2) -> float3
@@ -2655,6 +2822,7 @@
 @builtin @pure fun gather(t: texture_2d[float3], coord: float2, .component: texel_component = texel_component.x) -> float4
 @builtin @pure fun gather(t: texture_2d[float3], coord: float2, smp: sampler, .component: texel_component = texel_component.x, .offset: int2) -> float4
 @builtin @pure fun gather(t: texture_2d[float3], coord: float2, .component: texel_component = texel_component.x, .offset: int2) -> float4
+@builtin fun test_texel(t: texture_2d[float4], xy: int2, value: float4, level: int = 0)
 @builtin @pure fun load(t: texture_2d[float4], xy: int2, level: int = 0) -> float4
 @builtin @pure @stages(.pixel) fun sample(t: texture_2d[float4], coord: float2, smp: sampler) -> float4
 @builtin @pure @stages(.pixel) fun sample(t: texture_2d[float4], coord: float2) -> float4
@@ -2672,16 +2840,25 @@
 @builtin @pure fun gather(t: texture_2d[float4], coord: float2, .component: texel_component = texel_component.x) -> float4
 @builtin @pure fun gather(t: texture_2d[float4], coord: float2, smp: sampler, .component: texel_component = texel_component.x, .offset: int2) -> float4
 @builtin @pure fun gather(t: texture_2d[float4], coord: float2, .component: texel_component = texel_component.x, .offset: int2) -> float4
+@builtin fun test_texel(t: texture_2d[int], xy: int2, value: int, level: int = 0)
 @builtin @pure fun load(t: texture_2d[int], xy: int2, level: int = 0) -> int
+@builtin fun test_texel(t: texture_2d[int2], xy: int2, value: int2, level: int = 0)
 @builtin @pure fun load(t: texture_2d[int2], xy: int2, level: int = 0) -> int2
+@builtin fun test_texel(t: texture_2d[int3], xy: int2, value: int3, level: int = 0)
 @builtin @pure fun load(t: texture_2d[int3], xy: int2, level: int = 0) -> int3
+@builtin fun test_texel(t: texture_2d[int4], xy: int2, value: int4, level: int = 0)
 @builtin @pure fun load(t: texture_2d[int4], xy: int2, level: int = 0) -> int4
+@builtin fun test_texel(t: texture_2d[uint], xy: int2, value: uint, level: int = 0)
 @builtin @pure fun load(t: texture_2d[uint], xy: int2, level: int = 0) -> uint
+@builtin fun test_texel(t: texture_2d[uint2], xy: int2, value: uint2, level: int = 0)
 @builtin @pure fun load(t: texture_2d[uint2], xy: int2, level: int = 0) -> uint2
+@builtin fun test_texel(t: texture_2d[uint3], xy: int2, value: uint3, level: int = 0)
 @builtin @pure fun load(t: texture_2d[uint3], xy: int2, level: int = 0) -> uint3
+@builtin fun test_texel(t: texture_2d[uint4], xy: int2, value: uint4, level: int = 0)
 @builtin @pure fun load(t: texture_2d[uint4], xy: int2, level: int = 0) -> uint4
 @builtin @pure fun size(t: texture_2d, level: int = 0) -> int2
 @builtin @pure fun level_count(t: texture_2d) -> int
+@builtin fun test_texel(t: texture_2d_depth, xy: int2, value: float, level: int = 0)
 @builtin @pure fun load(t: texture_2d_depth, xy: int2, level: int = 0) -> float
 @builtin @pure @stages(.pixel) fun sample(t: texture_2d_depth, coord: float2, smp: sampler) -> float
 @builtin @pure @stages(.pixel) fun sample(t: texture_2d_depth, coord: float2) -> float
@@ -2697,31 +2874,44 @@
 @builtin @pure fun gather_compare(t: texture_2d_depth, coord: float2, .reference: float) -> float4
 @builtin @pure fun size(t: texture_2d_depth, level: int = 0) -> int2
 @builtin @pure fun level_count(t: texture_2d_depth) -> int
+@builtin fun test_texel(t: image_2d[float], xy: int2, value: float)
 @builtin fun load(i: image_2d[float], xy: int2) -> float
 @builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun store(i: out image_2d[float], xy: int2, value: float)
+@builtin fun test_texel(t: image_2d[float2], xy: int2, value: float2)
 @builtin fun load(i: image_2d[float2], xy: int2) -> float2
 @builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun store(i: out image_2d[float2], xy: int2, value: float2)
+@builtin fun test_texel(t: image_2d[float3], xy: int2, value: float3)
 @builtin fun load(i: image_2d[float3], xy: int2) -> float3
 @builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun store(i: out image_2d[float3], xy: int2, value: float3)
+@builtin fun test_texel(t: image_2d[float4], xy: int2, value: float4)
 @builtin fun load(i: image_2d[float4], xy: int2) -> float4
 @builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun store(i: out image_2d[float4], xy: int2, value: float4)
+@builtin fun test_texel(t: image_2d[int], xy: int2, value: int)
 @builtin fun load(i: image_2d[int], xy: int2) -> int
 @builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun store(i: out image_2d[int], xy: int2, value: int)
+@builtin fun test_texel(t: image_2d[int2], xy: int2, value: int2)
 @builtin fun load(i: image_2d[int2], xy: int2) -> int2
 @builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun store(i: out image_2d[int2], xy: int2, value: int2)
+@builtin fun test_texel(t: image_2d[int3], xy: int2, value: int3)
 @builtin fun load(i: image_2d[int3], xy: int2) -> int3
 @builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun store(i: out image_2d[int3], xy: int2, value: int3)
+@builtin fun test_texel(t: image_2d[int4], xy: int2, value: int4)
 @builtin fun load(i: image_2d[int4], xy: int2) -> int4
 @builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun store(i: out image_2d[int4], xy: int2, value: int4)
+@builtin fun test_texel(t: image_2d[uint], xy: int2, value: uint)
 @builtin fun load(i: image_2d[uint], xy: int2) -> uint
 @builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun store(i: out image_2d[uint], xy: int2, value: uint)
+@builtin fun test_texel(t: image_2d[uint2], xy: int2, value: uint2)
 @builtin fun load(i: image_2d[uint2], xy: int2) -> uint2
 @builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun store(i: out image_2d[uint2], xy: int2, value: uint2)
+@builtin fun test_texel(t: image_2d[uint3], xy: int2, value: uint3)
 @builtin fun load(i: image_2d[uint3], xy: int2) -> uint3
 @builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun store(i: out image_2d[uint3], xy: int2, value: uint3)
+@builtin fun test_texel(t: image_2d[uint4], xy: int2, value: uint4)
 @builtin fun load(i: image_2d[uint4], xy: int2) -> uint4
 @builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun store(i: out image_2d[uint4], xy: int2, value: uint4)
 @builtin @pure fun size(t: image_2d) -> int2
+@builtin fun test_texel(t: texture_2d_array[float], xy: int2, value: float, level: int = 0, .layer: int = 0)
 @builtin @pure fun load(t: texture_2d_array[float], xy: int2, level: int = 0, .layer: int) -> float
 @builtin @pure @stages(.pixel) fun sample(t: texture_2d_array[float], coord: float2, smp: sampler, .layer: int) -> float
 @builtin @pure @stages(.pixel) fun sample(t: texture_2d_array[float], coord: float2, .layer: int) -> float
@@ -2739,6 +2929,7 @@
 @builtin @pure fun gather(t: texture_2d_array[float], coord: float2, .layer: int, .component: texel_component = texel_component.x) -> float4
 @builtin @pure fun gather(t: texture_2d_array[float], coord: float2, smp: sampler, .layer: int, .component: texel_component = texel_component.x, .offset: int2) -> float4
 @builtin @pure fun gather(t: texture_2d_array[float], coord: float2, .layer: int, .component: texel_component = texel_component.x, .offset: int2) -> float4
+@builtin fun test_texel(t: texture_2d_array[float2], xy: int2, value: float2, level: int = 0, .layer: int = 0)
 @builtin @pure fun load(t: texture_2d_array[float2], xy: int2, level: int = 0, .layer: int) -> float2
 @builtin @pure @stages(.pixel) fun sample(t: texture_2d_array[float2], coord: float2, smp: sampler, .layer: int) -> float2
 @builtin @pure @stages(.pixel) fun sample(t: texture_2d_array[float2], coord: float2, .layer: int) -> float2
@@ -2756,6 +2947,7 @@
 @builtin @pure fun gather(t: texture_2d_array[float2], coord: float2, .layer: int, .component: texel_component = texel_component.x) -> float4
 @builtin @pure fun gather(t: texture_2d_array[float2], coord: float2, smp: sampler, .layer: int, .component: texel_component = texel_component.x, .offset: int2) -> float4
 @builtin @pure fun gather(t: texture_2d_array[float2], coord: float2, .layer: int, .component: texel_component = texel_component.x, .offset: int2) -> float4
+@builtin fun test_texel(t: texture_2d_array[float3], xy: int2, value: float3, level: int = 0, .layer: int = 0)
 @builtin @pure fun load(t: texture_2d_array[float3], xy: int2, level: int = 0, .layer: int) -> float3
 @builtin @pure @stages(.pixel) fun sample(t: texture_2d_array[float3], coord: float2, smp: sampler, .layer: int) -> float3
 @builtin @pure @stages(.pixel) fun sample(t: texture_2d_array[float3], coord: float2, .layer: int) -> float3
@@ -2773,6 +2965,7 @@
 @builtin @pure fun gather(t: texture_2d_array[float3], coord: float2, .layer: int, .component: texel_component = texel_component.x) -> float4
 @builtin @pure fun gather(t: texture_2d_array[float3], coord: float2, smp: sampler, .layer: int, .component: texel_component = texel_component.x, .offset: int2) -> float4
 @builtin @pure fun gather(t: texture_2d_array[float3], coord: float2, .layer: int, .component: texel_component = texel_component.x, .offset: int2) -> float4
+@builtin fun test_texel(t: texture_2d_array[float4], xy: int2, value: float4, level: int = 0, .layer: int = 0)
 @builtin @pure fun load(t: texture_2d_array[float4], xy: int2, level: int = 0, .layer: int) -> float4
 @builtin @pure @stages(.pixel) fun sample(t: texture_2d_array[float4], coord: float2, smp: sampler, .layer: int) -> float4
 @builtin @pure @stages(.pixel) fun sample(t: texture_2d_array[float4], coord: float2, .layer: int) -> float4
@@ -2790,17 +2983,26 @@
 @builtin @pure fun gather(t: texture_2d_array[float4], coord: float2, .layer: int, .component: texel_component = texel_component.x) -> float4
 @builtin @pure fun gather(t: texture_2d_array[float4], coord: float2, smp: sampler, .layer: int, .component: texel_component = texel_component.x, .offset: int2) -> float4
 @builtin @pure fun gather(t: texture_2d_array[float4], coord: float2, .layer: int, .component: texel_component = texel_component.x, .offset: int2) -> float4
+@builtin fun test_texel(t: texture_2d_array[int], xy: int2, value: int, level: int = 0, .layer: int = 0)
 @builtin @pure fun load(t: texture_2d_array[int], xy: int2, level: int = 0, .layer: int) -> int
+@builtin fun test_texel(t: texture_2d_array[int2], xy: int2, value: int2, level: int = 0, .layer: int = 0)
 @builtin @pure fun load(t: texture_2d_array[int2], xy: int2, level: int = 0, .layer: int) -> int2
+@builtin fun test_texel(t: texture_2d_array[int3], xy: int2, value: int3, level: int = 0, .layer: int = 0)
 @builtin @pure fun load(t: texture_2d_array[int3], xy: int2, level: int = 0, .layer: int) -> int3
+@builtin fun test_texel(t: texture_2d_array[int4], xy: int2, value: int4, level: int = 0, .layer: int = 0)
 @builtin @pure fun load(t: texture_2d_array[int4], xy: int2, level: int = 0, .layer: int) -> int4
+@builtin fun test_texel(t: texture_2d_array[uint], xy: int2, value: uint, level: int = 0, .layer: int = 0)
 @builtin @pure fun load(t: texture_2d_array[uint], xy: int2, level: int = 0, .layer: int) -> uint
+@builtin fun test_texel(t: texture_2d_array[uint2], xy: int2, value: uint2, level: int = 0, .layer: int = 0)
 @builtin @pure fun load(t: texture_2d_array[uint2], xy: int2, level: int = 0, .layer: int) -> uint2
+@builtin fun test_texel(t: texture_2d_array[uint3], xy: int2, value: uint3, level: int = 0, .layer: int = 0)
 @builtin @pure fun load(t: texture_2d_array[uint3], xy: int2, level: int = 0, .layer: int) -> uint3
+@builtin fun test_texel(t: texture_2d_array[uint4], xy: int2, value: uint4, level: int = 0, .layer: int = 0)
 @builtin @pure fun load(t: texture_2d_array[uint4], xy: int2, level: int = 0, .layer: int) -> uint4
 @builtin @pure fun size(t: texture_2d_array, level: int = 0) -> int2
 @builtin @pure fun layer_count(t: texture_2d_array) -> int
 @builtin @pure fun level_count(t: texture_2d_array) -> int
+@builtin fun test_texel(t: texture_2d_array_depth, xy: int2, value: float, level: int = 0, .layer: int = 0)
 @builtin @pure fun load(t: texture_2d_array_depth, xy: int2, level: int = 0, .layer: int) -> float
 @builtin @pure @stages(.pixel) fun sample(t: texture_2d_array_depth, coord: float2, smp: sampler, .layer: int) -> float
 @builtin @pure @stages(.pixel) fun sample(t: texture_2d_array_depth, coord: float2, .layer: int) -> float
@@ -2817,64 +3019,102 @@
 @builtin @pure fun size(t: texture_2d_array_depth, level: int = 0) -> int2
 @builtin @pure fun layer_count(t: texture_2d_array_depth) -> int
 @builtin @pure fun level_count(t: texture_2d_array_depth) -> int
+@builtin fun test_texel(t: image_2d_array[float], xy: int2, value: float, .layer: int = 0)
 @builtin fun load(i: image_2d_array[float], xy: int2, .layer: int) -> float
 @builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun store(i: out image_2d_array[float], xy: int2, value: float, .layer: int)
+@builtin fun test_texel(t: image_2d_array[float2], xy: int2, value: float2, .layer: int = 0)
 @builtin fun load(i: image_2d_array[float2], xy: int2, .layer: int) -> float2
 @builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun store(i: out image_2d_array[float2], xy: int2, value: float2, .layer: int)
+@builtin fun test_texel(t: image_2d_array[float3], xy: int2, value: float3, .layer: int = 0)
 @builtin fun load(i: image_2d_array[float3], xy: int2, .layer: int) -> float3
 @builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun store(i: out image_2d_array[float3], xy: int2, value: float3, .layer: int)
+@builtin fun test_texel(t: image_2d_array[float4], xy: int2, value: float4, .layer: int = 0)
 @builtin fun load(i: image_2d_array[float4], xy: int2, .layer: int) -> float4
 @builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun store(i: out image_2d_array[float4], xy: int2, value: float4, .layer: int)
+@builtin fun test_texel(t: image_2d_array[int], xy: int2, value: int, .layer: int = 0)
 @builtin fun load(i: image_2d_array[int], xy: int2, .layer: int) -> int
 @builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun store(i: out image_2d_array[int], xy: int2, value: int, .layer: int)
+@builtin fun test_texel(t: image_2d_array[int2], xy: int2, value: int2, .layer: int = 0)
 @builtin fun load(i: image_2d_array[int2], xy: int2, .layer: int) -> int2
 @builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun store(i: out image_2d_array[int2], xy: int2, value: int2, .layer: int)
+@builtin fun test_texel(t: image_2d_array[int3], xy: int2, value: int3, .layer: int = 0)
 @builtin fun load(i: image_2d_array[int3], xy: int2, .layer: int) -> int3
 @builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun store(i: out image_2d_array[int3], xy: int2, value: int3, .layer: int)
+@builtin fun test_texel(t: image_2d_array[int4], xy: int2, value: int4, .layer: int = 0)
 @builtin fun load(i: image_2d_array[int4], xy: int2, .layer: int) -> int4
 @builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun store(i: out image_2d_array[int4], xy: int2, value: int4, .layer: int)
+@builtin fun test_texel(t: image_2d_array[uint], xy: int2, value: uint, .layer: int = 0)
 @builtin fun load(i: image_2d_array[uint], xy: int2, .layer: int) -> uint
 @builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun store(i: out image_2d_array[uint], xy: int2, value: uint, .layer: int)
+@builtin fun test_texel(t: image_2d_array[uint2], xy: int2, value: uint2, .layer: int = 0)
 @builtin fun load(i: image_2d_array[uint2], xy: int2, .layer: int) -> uint2
 @builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun store(i: out image_2d_array[uint2], xy: int2, value: uint2, .layer: int)
+@builtin fun test_texel(t: image_2d_array[uint3], xy: int2, value: uint3, .layer: int = 0)
 @builtin fun load(i: image_2d_array[uint3], xy: int2, .layer: int) -> uint3
 @builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun store(i: out image_2d_array[uint3], xy: int2, value: uint3, .layer: int)
+@builtin fun test_texel(t: image_2d_array[uint4], xy: int2, value: uint4, .layer: int = 0)
 @builtin fun load(i: image_2d_array[uint4], xy: int2, .layer: int) -> uint4
 @builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun store(i: out image_2d_array[uint4], xy: int2, value: uint4, .layer: int)
 @builtin @pure fun size(t: image_2d_array) -> int2
 @builtin @pure fun layer_count(t: image_2d_array) -> int
+@builtin fun test_texel(t: texture_2d_ms[float], xy: int2, value: float, .sample: int = 0)
 @builtin @pure fun load(t: texture_2d_ms[float], xy: int2, .sample: int) -> float
+@builtin fun test_texel(t: texture_2d_ms[float2], xy: int2, value: float2, .sample: int = 0)
 @builtin @pure fun load(t: texture_2d_ms[float2], xy: int2, .sample: int) -> float2
+@builtin fun test_texel(t: texture_2d_ms[float3], xy: int2, value: float3, .sample: int = 0)
 @builtin @pure fun load(t: texture_2d_ms[float3], xy: int2, .sample: int) -> float3
+@builtin fun test_texel(t: texture_2d_ms[float4], xy: int2, value: float4, .sample: int = 0)
 @builtin @pure fun load(t: texture_2d_ms[float4], xy: int2, .sample: int) -> float4
+@builtin fun test_texel(t: texture_2d_ms[int], xy: int2, value: int, .sample: int = 0)
 @builtin @pure fun load(t: texture_2d_ms[int], xy: int2, .sample: int) -> int
+@builtin fun test_texel(t: texture_2d_ms[int2], xy: int2, value: int2, .sample: int = 0)
 @builtin @pure fun load(t: texture_2d_ms[int2], xy: int2, .sample: int) -> int2
+@builtin fun test_texel(t: texture_2d_ms[int3], xy: int2, value: int3, .sample: int = 0)
 @builtin @pure fun load(t: texture_2d_ms[int3], xy: int2, .sample: int) -> int3
+@builtin fun test_texel(t: texture_2d_ms[int4], xy: int2, value: int4, .sample: int = 0)
 @builtin @pure fun load(t: texture_2d_ms[int4], xy: int2, .sample: int) -> int4
+@builtin fun test_texel(t: texture_2d_ms[uint], xy: int2, value: uint, .sample: int = 0)
 @builtin @pure fun load(t: texture_2d_ms[uint], xy: int2, .sample: int) -> uint
+@builtin fun test_texel(t: texture_2d_ms[uint2], xy: int2, value: uint2, .sample: int = 0)
 @builtin @pure fun load(t: texture_2d_ms[uint2], xy: int2, .sample: int) -> uint2
+@builtin fun test_texel(t: texture_2d_ms[uint3], xy: int2, value: uint3, .sample: int = 0)
 @builtin @pure fun load(t: texture_2d_ms[uint3], xy: int2, .sample: int) -> uint3
+@builtin fun test_texel(t: texture_2d_ms[uint4], xy: int2, value: uint4, .sample: int = 0)
 @builtin @pure fun load(t: texture_2d_ms[uint4], xy: int2, .sample: int) -> uint4
 @builtin @pure fun size(t: texture_2d_ms) -> int2
 @builtin @pure fun sample_count(t: texture_2d_ms) -> int
+@builtin fun test_texel(t: texture_2d_ms_depth, xy: int2, value: float, .sample: int = 0)
 @builtin @pure fun load(t: texture_2d_ms_depth, xy: int2, .sample: int) -> float
 @builtin @pure fun size(t: texture_2d_ms_depth) -> int2
 @builtin @pure fun sample_count(t: texture_2d_ms_depth) -> int
+@builtin fun test_texel(t: texture_2d_ms_array[float], xy: int2, value: float, .sample: int = 0, .layer: int = 0)
 @builtin @pure fun load(t: texture_2d_ms_array[float], xy: int2, .sample: int, .layer: int) -> float
+@builtin fun test_texel(t: texture_2d_ms_array[float2], xy: int2, value: float2, .sample: int = 0, .layer: int = 0)
 @builtin @pure fun load(t: texture_2d_ms_array[float2], xy: int2, .sample: int, .layer: int) -> float2
+@builtin fun test_texel(t: texture_2d_ms_array[float3], xy: int2, value: float3, .sample: int = 0, .layer: int = 0)
 @builtin @pure fun load(t: texture_2d_ms_array[float3], xy: int2, .sample: int, .layer: int) -> float3
+@builtin fun test_texel(t: texture_2d_ms_array[float4], xy: int2, value: float4, .sample: int = 0, .layer: int = 0)
 @builtin @pure fun load(t: texture_2d_ms_array[float4], xy: int2, .sample: int, .layer: int) -> float4
+@builtin fun test_texel(t: texture_2d_ms_array[int], xy: int2, value: int, .sample: int = 0, .layer: int = 0)
 @builtin @pure fun load(t: texture_2d_ms_array[int], xy: int2, .sample: int, .layer: int) -> int
+@builtin fun test_texel(t: texture_2d_ms_array[int2], xy: int2, value: int2, .sample: int = 0, .layer: int = 0)
 @builtin @pure fun load(t: texture_2d_ms_array[int2], xy: int2, .sample: int, .layer: int) -> int2
+@builtin fun test_texel(t: texture_2d_ms_array[int3], xy: int2, value: int3, .sample: int = 0, .layer: int = 0)
 @builtin @pure fun load(t: texture_2d_ms_array[int3], xy: int2, .sample: int, .layer: int) -> int3
+@builtin fun test_texel(t: texture_2d_ms_array[int4], xy: int2, value: int4, .sample: int = 0, .layer: int = 0)
 @builtin @pure fun load(t: texture_2d_ms_array[int4], xy: int2, .sample: int, .layer: int) -> int4
+@builtin fun test_texel(t: texture_2d_ms_array[uint], xy: int2, value: uint, .sample: int = 0, .layer: int = 0)
 @builtin @pure fun load(t: texture_2d_ms_array[uint], xy: int2, .sample: int, .layer: int) -> uint
+@builtin fun test_texel(t: texture_2d_ms_array[uint2], xy: int2, value: uint2, .sample: int = 0, .layer: int = 0)
 @builtin @pure fun load(t: texture_2d_ms_array[uint2], xy: int2, .sample: int, .layer: int) -> uint2
+@builtin fun test_texel(t: texture_2d_ms_array[uint3], xy: int2, value: uint3, .sample: int = 0, .layer: int = 0)
 @builtin @pure fun load(t: texture_2d_ms_array[uint3], xy: int2, .sample: int, .layer: int) -> uint3
+@builtin fun test_texel(t: texture_2d_ms_array[uint4], xy: int2, value: uint4, .sample: int = 0, .layer: int = 0)
 @builtin @pure fun load(t: texture_2d_ms_array[uint4], xy: int2, .sample: int, .layer: int) -> uint4
 @builtin @pure fun size(t: texture_2d_ms_array) -> int2
 @builtin @pure fun layer_count(t: texture_2d_ms_array) -> int
 @builtin @pure fun sample_count(t: texture_2d_ms_array) -> int
+@builtin fun test_texel(t: texture_3d[float], xy: int3, value: float, level: int = 0)
 @builtin @pure fun load(t: texture_3d[float], xy: int3, level: int = 0) -> float
 @builtin @pure @stages(.pixel) fun sample(t: texture_3d[float], coord: float3, smp: sampler) -> float
 @builtin @pure @stages(.pixel) fun sample(t: texture_3d[float], coord: float3) -> float
@@ -2888,6 +3128,7 @@
 @builtin @pure @stages(.pixel) fun sample(t: texture_3d[float], coord: float3, .bias: float) -> float
 @builtin @pure fun sample(t: texture_3d[float], coord: float3, smp: sampler, .grad_x: float3, .grad_y: float3) -> float
 @builtin @pure fun sample(t: texture_3d[float], coord: float3, .grad_x: float3, .grad_y: float3) -> float
+@builtin fun test_texel(t: texture_3d[float2], xy: int3, value: float2, level: int = 0)
 @builtin @pure fun load(t: texture_3d[float2], xy: int3, level: int = 0) -> float2
 @builtin @pure @stages(.pixel) fun sample(t: texture_3d[float2], coord: float3, smp: sampler) -> float2
 @builtin @pure @stages(.pixel) fun sample(t: texture_3d[float2], coord: float3) -> float2
@@ -2901,6 +3142,7 @@
 @builtin @pure @stages(.pixel) fun sample(t: texture_3d[float2], coord: float3, .bias: float) -> float2
 @builtin @pure fun sample(t: texture_3d[float2], coord: float3, smp: sampler, .grad_x: float3, .grad_y: float3) -> float2
 @builtin @pure fun sample(t: texture_3d[float2], coord: float3, .grad_x: float3, .grad_y: float3) -> float2
+@builtin fun test_texel(t: texture_3d[float3], xy: int3, value: float3, level: int = 0)
 @builtin @pure fun load(t: texture_3d[float3], xy: int3, level: int = 0) -> float3
 @builtin @pure @stages(.pixel) fun sample(t: texture_3d[float3], coord: float3, smp: sampler) -> float3
 @builtin @pure @stages(.pixel) fun sample(t: texture_3d[float3], coord: float3) -> float3
@@ -2914,6 +3156,7 @@
 @builtin @pure @stages(.pixel) fun sample(t: texture_3d[float3], coord: float3, .bias: float) -> float3
 @builtin @pure fun sample(t: texture_3d[float3], coord: float3, smp: sampler, .grad_x: float3, .grad_y: float3) -> float3
 @builtin @pure fun sample(t: texture_3d[float3], coord: float3, .grad_x: float3, .grad_y: float3) -> float3
+@builtin fun test_texel(t: texture_3d[float4], xy: int3, value: float4, level: int = 0)
 @builtin @pure fun load(t: texture_3d[float4], xy: int3, level: int = 0) -> float4
 @builtin @pure @stages(.pixel) fun sample(t: texture_3d[float4], coord: float3, smp: sampler) -> float4
 @builtin @pure @stages(.pixel) fun sample(t: texture_3d[float4], coord: float3) -> float4
@@ -2927,41 +3170,62 @@
 @builtin @pure @stages(.pixel) fun sample(t: texture_3d[float4], coord: float3, .bias: float) -> float4
 @builtin @pure fun sample(t: texture_3d[float4], coord: float3, smp: sampler, .grad_x: float3, .grad_y: float3) -> float4
 @builtin @pure fun sample(t: texture_3d[float4], coord: float3, .grad_x: float3, .grad_y: float3) -> float4
+@builtin fun test_texel(t: texture_3d[int], xy: int3, value: int, level: int = 0)
 @builtin @pure fun load(t: texture_3d[int], xy: int3, level: int = 0) -> int
+@builtin fun test_texel(t: texture_3d[int2], xy: int3, value: int2, level: int = 0)
 @builtin @pure fun load(t: texture_3d[int2], xy: int3, level: int = 0) -> int2
+@builtin fun test_texel(t: texture_3d[int3], xy: int3, value: int3, level: int = 0)
 @builtin @pure fun load(t: texture_3d[int3], xy: int3, level: int = 0) -> int3
+@builtin fun test_texel(t: texture_3d[int4], xy: int3, value: int4, level: int = 0)
 @builtin @pure fun load(t: texture_3d[int4], xy: int3, level: int = 0) -> int4
+@builtin fun test_texel(t: texture_3d[uint], xy: int3, value: uint, level: int = 0)
 @builtin @pure fun load(t: texture_3d[uint], xy: int3, level: int = 0) -> uint
+@builtin fun test_texel(t: texture_3d[uint2], xy: int3, value: uint2, level: int = 0)
 @builtin @pure fun load(t: texture_3d[uint2], xy: int3, level: int = 0) -> uint2
+@builtin fun test_texel(t: texture_3d[uint3], xy: int3, value: uint3, level: int = 0)
 @builtin @pure fun load(t: texture_3d[uint3], xy: int3, level: int = 0) -> uint3
+@builtin fun test_texel(t: texture_3d[uint4], xy: int3, value: uint4, level: int = 0)
 @builtin @pure fun load(t: texture_3d[uint4], xy: int3, level: int = 0) -> uint4
 @builtin @pure fun size(t: texture_3d, level: int = 0) -> int3
 @builtin @pure fun level_count(t: texture_3d) -> int
+@builtin fun test_texel(t: image_3d[float], xy: int3, value: float)
 @builtin fun load(i: image_3d[float], xy: int3) -> float
 @builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun store(i: out image_3d[float], xy: int3, value: float)
+@builtin fun test_texel(t: image_3d[float2], xy: int3, value: float2)
 @builtin fun load(i: image_3d[float2], xy: int3) -> float2
 @builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun store(i: out image_3d[float2], xy: int3, value: float2)
+@builtin fun test_texel(t: image_3d[float3], xy: int3, value: float3)
 @builtin fun load(i: image_3d[float3], xy: int3) -> float3
 @builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun store(i: out image_3d[float3], xy: int3, value: float3)
+@builtin fun test_texel(t: image_3d[float4], xy: int3, value: float4)
 @builtin fun load(i: image_3d[float4], xy: int3) -> float4
 @builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun store(i: out image_3d[float4], xy: int3, value: float4)
+@builtin fun test_texel(t: image_3d[int], xy: int3, value: int)
 @builtin fun load(i: image_3d[int], xy: int3) -> int
 @builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun store(i: out image_3d[int], xy: int3, value: int)
+@builtin fun test_texel(t: image_3d[int2], xy: int3, value: int2)
 @builtin fun load(i: image_3d[int2], xy: int3) -> int2
 @builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun store(i: out image_3d[int2], xy: int3, value: int2)
+@builtin fun test_texel(t: image_3d[int3], xy: int3, value: int3)
 @builtin fun load(i: image_3d[int3], xy: int3) -> int3
 @builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun store(i: out image_3d[int3], xy: int3, value: int3)
+@builtin fun test_texel(t: image_3d[int4], xy: int3, value: int4)
 @builtin fun load(i: image_3d[int4], xy: int3) -> int4
 @builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun store(i: out image_3d[int4], xy: int3, value: int4)
+@builtin fun test_texel(t: image_3d[uint], xy: int3, value: uint)
 @builtin fun load(i: image_3d[uint], xy: int3) -> uint
 @builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun store(i: out image_3d[uint], xy: int3, value: uint)
+@builtin fun test_texel(t: image_3d[uint2], xy: int3, value: uint2)
 @builtin fun load(i: image_3d[uint2], xy: int3) -> uint2
 @builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun store(i: out image_3d[uint2], xy: int3, value: uint2)
+@builtin fun test_texel(t: image_3d[uint3], xy: int3, value: uint3)
 @builtin fun load(i: image_3d[uint3], xy: int3) -> uint3
 @builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun store(i: out image_3d[uint3], xy: int3, value: uint3)
+@builtin fun test_texel(t: image_3d[uint4], xy: int3, value: uint4)
 @builtin fun load(i: image_3d[uint4], xy: int3) -> uint4
 @builtin @stages(.pixel, .compute, .raygen, .closest_hit, .miss, .callable) fun store(i: out image_3d[uint4], xy: int3, value: uint4)
 @builtin @pure fun size(t: image_3d) -> int3
+@builtin fun test_texel(t: texture_cube[float], xy: int2, value: float, level: int = 0, .face: int = 0)
 @builtin @pure @stages(.pixel) fun sample(t: texture_cube[float], coord: float3, smp: sampler) -> float
 @builtin @pure @stages(.pixel) fun sample(t: texture_cube[float], coord: float3) -> float
 @builtin @pure fun sample(t: texture_cube[float], coord: float3, smp: sampler, .level: float) -> float
@@ -2972,6 +3236,7 @@
 @builtin @pure fun sample(t: texture_cube[float], coord: float3, .grad_x: float3, .grad_y: float3) -> float
 @builtin @pure fun gather(t: texture_cube[float], coord: float3, smp: sampler, .component: texel_component = texel_component.x) -> float4
 @builtin @pure fun gather(t: texture_cube[float], coord: float3, .component: texel_component = texel_component.x) -> float4
+@builtin fun test_texel(t: texture_cube[float2], xy: int2, value: float2, level: int = 0, .face: int = 0)
 @builtin @pure @stages(.pixel) fun sample(t: texture_cube[float2], coord: float3, smp: sampler) -> float2
 @builtin @pure @stages(.pixel) fun sample(t: texture_cube[float2], coord: float3) -> float2
 @builtin @pure fun sample(t: texture_cube[float2], coord: float3, smp: sampler, .level: float) -> float2
@@ -2982,6 +3247,7 @@
 @builtin @pure fun sample(t: texture_cube[float2], coord: float3, .grad_x: float3, .grad_y: float3) -> float2
 @builtin @pure fun gather(t: texture_cube[float2], coord: float3, smp: sampler, .component: texel_component = texel_component.x) -> float4
 @builtin @pure fun gather(t: texture_cube[float2], coord: float3, .component: texel_component = texel_component.x) -> float4
+@builtin fun test_texel(t: texture_cube[float3], xy: int2, value: float3, level: int = 0, .face: int = 0)
 @builtin @pure @stages(.pixel) fun sample(t: texture_cube[float3], coord: float3, smp: sampler) -> float3
 @builtin @pure @stages(.pixel) fun sample(t: texture_cube[float3], coord: float3) -> float3
 @builtin @pure fun sample(t: texture_cube[float3], coord: float3, smp: sampler, .level: float) -> float3
@@ -2992,6 +3258,7 @@
 @builtin @pure fun sample(t: texture_cube[float3], coord: float3, .grad_x: float3, .grad_y: float3) -> float3
 @builtin @pure fun gather(t: texture_cube[float3], coord: float3, smp: sampler, .component: texel_component = texel_component.x) -> float4
 @builtin @pure fun gather(t: texture_cube[float3], coord: float3, .component: texel_component = texel_component.x) -> float4
+@builtin fun test_texel(t: texture_cube[float4], xy: int2, value: float4, level: int = 0, .face: int = 0)
 @builtin @pure @stages(.pixel) fun sample(t: texture_cube[float4], coord: float3, smp: sampler) -> float4
 @builtin @pure @stages(.pixel) fun sample(t: texture_cube[float4], coord: float3) -> float4
 @builtin @pure fun sample(t: texture_cube[float4], coord: float3, smp: sampler, .level: float) -> float4
@@ -3002,8 +3269,17 @@
 @builtin @pure fun sample(t: texture_cube[float4], coord: float3, .grad_x: float3, .grad_y: float3) -> float4
 @builtin @pure fun gather(t: texture_cube[float4], coord: float3, smp: sampler, .component: texel_component = texel_component.x) -> float4
 @builtin @pure fun gather(t: texture_cube[float4], coord: float3, .component: texel_component = texel_component.x) -> float4
+@builtin fun test_texel(t: texture_cube[int], xy: int2, value: int, level: int = 0, .face: int = 0)
+@builtin fun test_texel(t: texture_cube[int2], xy: int2, value: int2, level: int = 0, .face: int = 0)
+@builtin fun test_texel(t: texture_cube[int3], xy: int2, value: int3, level: int = 0, .face: int = 0)
+@builtin fun test_texel(t: texture_cube[int4], xy: int2, value: int4, level: int = 0, .face: int = 0)
+@builtin fun test_texel(t: texture_cube[uint], xy: int2, value: uint, level: int = 0, .face: int = 0)
+@builtin fun test_texel(t: texture_cube[uint2], xy: int2, value: uint2, level: int = 0, .face: int = 0)
+@builtin fun test_texel(t: texture_cube[uint3], xy: int2, value: uint3, level: int = 0, .face: int = 0)
+@builtin fun test_texel(t: texture_cube[uint4], xy: int2, value: uint4, level: int = 0, .face: int = 0)
 @builtin @pure fun size(t: texture_cube, level: int = 0) -> int2
 @builtin @pure fun level_count(t: texture_cube) -> int
+@builtin fun test_texel(t: texture_cube_depth, xy: int2, value: float, level: int = 0, .face: int = 0)
 @builtin @pure @stages(.pixel) fun sample(t: texture_cube_depth, coord: float3, smp: sampler) -> float
 @builtin @pure @stages(.pixel) fun sample(t: texture_cube_depth, coord: float3) -> float
 @builtin @pure fun sample(t: texture_cube_depth, coord: float3, smp: sampler, .level: int) -> float
@@ -3018,6 +3294,7 @@
 @builtin @pure fun gather_compare(t: texture_cube_depth, coord: float3, .reference: float) -> float4
 @builtin @pure fun size(t: texture_cube_depth, level: int = 0) -> int2
 @builtin @pure fun level_count(t: texture_cube_depth) -> int
+@builtin fun test_texel(t: texture_cube_array[float], xy: int2, value: float, level: int = 0, .layer: int = 0, .face: int = 0)
 @builtin @pure @stages(.pixel) fun sample(t: texture_cube_array[float], coord: float3, smp: sampler, .layer: int) -> float
 @builtin @pure @stages(.pixel) fun sample(t: texture_cube_array[float], coord: float3, .layer: int) -> float
 @builtin @pure fun sample(t: texture_cube_array[float], coord: float3, smp: sampler, .layer: int, .level: float) -> float
@@ -3028,6 +3305,7 @@
 @builtin @pure fun sample(t: texture_cube_array[float], coord: float3, .layer: int, .grad_x: float3, .grad_y: float3) -> float
 @builtin @pure fun gather(t: texture_cube_array[float], coord: float3, smp: sampler, .layer: int, .component: texel_component = texel_component.x) -> float4
 @builtin @pure fun gather(t: texture_cube_array[float], coord: float3, .layer: int, .component: texel_component = texel_component.x) -> float4
+@builtin fun test_texel(t: texture_cube_array[float2], xy: int2, value: float2, level: int = 0, .layer: int = 0, .face: int = 0)
 @builtin @pure @stages(.pixel) fun sample(t: texture_cube_array[float2], coord: float3, smp: sampler, .layer: int) -> float2
 @builtin @pure @stages(.pixel) fun sample(t: texture_cube_array[float2], coord: float3, .layer: int) -> float2
 @builtin @pure fun sample(t: texture_cube_array[float2], coord: float3, smp: sampler, .layer: int, .level: float) -> float2
@@ -3038,6 +3316,7 @@
 @builtin @pure fun sample(t: texture_cube_array[float2], coord: float3, .layer: int, .grad_x: float3, .grad_y: float3) -> float2
 @builtin @pure fun gather(t: texture_cube_array[float2], coord: float3, smp: sampler, .layer: int, .component: texel_component = texel_component.x) -> float4
 @builtin @pure fun gather(t: texture_cube_array[float2], coord: float3, .layer: int, .component: texel_component = texel_component.x) -> float4
+@builtin fun test_texel(t: texture_cube_array[float3], xy: int2, value: float3, level: int = 0, .layer: int = 0, .face: int = 0)
 @builtin @pure @stages(.pixel) fun sample(t: texture_cube_array[float3], coord: float3, smp: sampler, .layer: int) -> float3
 @builtin @pure @stages(.pixel) fun sample(t: texture_cube_array[float3], coord: float3, .layer: int) -> float3
 @builtin @pure fun sample(t: texture_cube_array[float3], coord: float3, smp: sampler, .layer: int, .level: float) -> float3
@@ -3048,6 +3327,7 @@
 @builtin @pure fun sample(t: texture_cube_array[float3], coord: float3, .layer: int, .grad_x: float3, .grad_y: float3) -> float3
 @builtin @pure fun gather(t: texture_cube_array[float3], coord: float3, smp: sampler, .layer: int, .component: texel_component = texel_component.x) -> float4
 @builtin @pure fun gather(t: texture_cube_array[float3], coord: float3, .layer: int, .component: texel_component = texel_component.x) -> float4
+@builtin fun test_texel(t: texture_cube_array[float4], xy: int2, value: float4, level: int = 0, .layer: int = 0, .face: int = 0)
 @builtin @pure @stages(.pixel) fun sample(t: texture_cube_array[float4], coord: float3, smp: sampler, .layer: int) -> float4
 @builtin @pure @stages(.pixel) fun sample(t: texture_cube_array[float4], coord: float3, .layer: int) -> float4
 @builtin @pure fun sample(t: texture_cube_array[float4], coord: float3, smp: sampler, .layer: int, .level: float) -> float4
@@ -3058,9 +3338,18 @@
 @builtin @pure fun sample(t: texture_cube_array[float4], coord: float3, .layer: int, .grad_x: float3, .grad_y: float3) -> float4
 @builtin @pure fun gather(t: texture_cube_array[float4], coord: float3, smp: sampler, .layer: int, .component: texel_component = texel_component.x) -> float4
 @builtin @pure fun gather(t: texture_cube_array[float4], coord: float3, .layer: int, .component: texel_component = texel_component.x) -> float4
+@builtin fun test_texel(t: texture_cube_array[int], xy: int2, value: int, level: int = 0, .layer: int = 0, .face: int = 0)
+@builtin fun test_texel(t: texture_cube_array[int2], xy: int2, value: int2, level: int = 0, .layer: int = 0, .face: int = 0)
+@builtin fun test_texel(t: texture_cube_array[int3], xy: int2, value: int3, level: int = 0, .layer: int = 0, .face: int = 0)
+@builtin fun test_texel(t: texture_cube_array[int4], xy: int2, value: int4, level: int = 0, .layer: int = 0, .face: int = 0)
+@builtin fun test_texel(t: texture_cube_array[uint], xy: int2, value: uint, level: int = 0, .layer: int = 0, .face: int = 0)
+@builtin fun test_texel(t: texture_cube_array[uint2], xy: int2, value: uint2, level: int = 0, .layer: int = 0, .face: int = 0)
+@builtin fun test_texel(t: texture_cube_array[uint3], xy: int2, value: uint3, level: int = 0, .layer: int = 0, .face: int = 0)
+@builtin fun test_texel(t: texture_cube_array[uint4], xy: int2, value: uint4, level: int = 0, .layer: int = 0, .face: int = 0)
 @builtin @pure fun size(t: texture_cube_array, level: int = 0) -> int2
 @builtin @pure fun layer_count(t: texture_cube_array) -> int
 @builtin @pure fun level_count(t: texture_cube_array) -> int
+@builtin fun test_texel(t: texture_cube_array_depth, xy: int2, value: float, level: int = 0, .layer: int = 0, .face: int = 0)
 @builtin @pure @stages(.pixel) fun sample(t: texture_cube_array_depth, coord: float3, smp: sampler, .layer: int) -> float
 @builtin @pure @stages(.pixel) fun sample(t: texture_cube_array_depth, coord: float3, .layer: int) -> float
 @builtin @pure fun sample(t: texture_cube_array_depth, coord: float3, smp: sampler, .layer: int, .level: int) -> float
@@ -3225,6 +3514,15 @@
 @builtin @stages(.compute) fun workgroup_uniform_load(m: double3) -> double3
 /// `m`, a member of workgroup memory, read once every thread of the workgroup has arrived.
 @builtin @stages(.compute) fun workgroup_uniform_load(m: double4) -> double4
+
+// The shadow of workgroup memory a robustness profile tests a read by (LEGAL-69): a bit per scalar,
+// set where it is stored; the legalizer alone calls these.
+/// Word `word` of the shadow, one bit per scalar some invocation stored.
+@builtin @internal @stages(.compute) fun workgroup_written_word(word: uint) -> uint
+/// Sets `bits` of word `word` of the shadow, in one step.
+@builtin @internal @stages(.compute) fun workgroup_mark_written(word: uint, bits: uint)
+/// The bits of word `word` that the scalars `first ..< first + count` take; 0 where it holds none.
+@builtin @internal @pure fun workgroup_written_bits(word: uint, first: uint, count: uint) -> uint
 
 // What a weak compare-exchange gives, a struct of fields every target declares as a program's own.
 // The weak one may fail although the atomic held `expected`, so `old` alone cannot say whether it stored (EMIT-161).
@@ -4587,6 +4885,13 @@ struct exchange_result[T]:
 /// `x` of the quad's invocation `lane`, a constant from 0 to 3 (CHK-378).
 @builtin @stages(.pixel, .compute) fun quad_broadcast(x: ushort4, lane: int) -> ushort4
 
+// What a test's run is in, which it reads where an entry point reads its subgroup's stage inputs (EVAL-141).
+// A test that reaches either runs once per subgroup size a target has; no target writes them.
+/// This invocation's index in its subgroup, as `@subgroup_invocation_id` gives it.
+@builtin fun test_lane() -> int
+/// How many invocations the subgroup has, as `@subgroup_size` gives it.
+@builtin fun test_lane_count() -> int
+
 // Ray tracing: what a ray is traced with, and what a trace reads.
 // A shader calls `trace` of raytracing.sgl, never these: each is a step of HLSL's `RayQuery` and MSL's `intersection_query`.
 /// What a trace may skip, cull or decide without asking: DXR's `RAY_FLAG_*` without the prefix.
@@ -4752,6 +5057,8 @@ struct exchange_result[T]:
 @builtin @internal @stages(.raygen) fun hit_object_reorder_by_hint(h: hit_object, hint: uint, bits: int)
 /// Runs the closest hit or the miss the hit object holds, handing the payload over past the signature.
 @builtin @internal @stages(.raygen) fun hit_object_invoke(h: hit_object)
+/// Regroups the invocations by the low `bits` bits of `hint`, which `maybe_reorder` writes on vulkan.
+@builtin @internal @stages(.raygen) fun reorder_thread_by_hint(hint: uint, bits: int)
 
 // A call of a callable, which `table[i](mut p)` lowers to with the table's place in the section added (CHK-344).
 /// Calls the callable at `index` of the pipeline's callable section, handing the parameter over past the signature.

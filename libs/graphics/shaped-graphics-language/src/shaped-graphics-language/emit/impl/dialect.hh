@@ -133,7 +133,8 @@ protected:
 
 /// The name of a type as `d` writes it: a builtin's spelling, or the planned name of a struct of the program.
 [[nodiscard]] cc::string_view type_text(plan const& p, dialect const& d, check::type_id type);
-
+/// Each argument's type of `c` as `d` writes it, a resource's as its declaration names it.
+[[nodiscard]] cc::vector<cc::string> argument_types_of(plan const& p, dialect const& d, check::flat_call const& c);
 
 /// The constants of every enum of `p`, each set followed by an empty line; a dialect calls it from its declarations.
 void write_enum_constants(cc::string& out, plan const& p, dialect const& d);

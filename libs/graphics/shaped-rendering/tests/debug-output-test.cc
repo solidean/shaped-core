@@ -138,3 +138,70 @@ ASYNC_INVOCABLE_TEST("sr - a shader's division by zero is reported as a failed a
         co_await ctx.idle_completion();
     }
 }
+
+ASYNC_INVOCABLE_TEST("sr - a read of workgroup memory no invocation stored is reported where it would have run, and "
+                     "a read of what another stored is not (LEGAL-69)",
+                     (sg::context_handle const& ctx_h))
+{
+    REQUIRE(ctx_h != nullptr);
+    auto& ctx = *ctx_h;
+    if (inner_compiler_for(ctx) == nullptr)
+        SKIP("sg binds no debug window on this backend yet");
+    // thread 2 stores nothing, so thread 1 reads a hole; the second shader stores every element first
+    nx::expect_error("shadow.sgl:8: assert failed: workgroup memory `tile.values[2]` is read before any invocation "
+                     "stored it",
+                     nx::exactly(1));
+
+    cc::string_view const sources[] = {
+        "@workgroup binding tile:\n"
+        "    values: float[4]\n"
+        "\n"
+        "@compute(4) fun cs(@local_thread_index li: int){tile}:\n"
+        "    if li != 2:\n"
+        "        tile.values[li] = float(li)\n"
+        "    workgroup_barrier()\n"
+        "    print \"thread $li: $(tile.values[(li + 1) % 4])\"\n",
+        "@workgroup binding tile:\n"
+        "    values: float[4]\n"
+        "\n"
+        "@compute(4) fun cs(@local_thread_index li: int){tile}:\n"
+        "    tile.values[li] = float(li)\n"
+        "    workgroup_barrier()\n"
+        "    print \"thread $li: $(tile.values[(li + 1) % 4])\"\n",
+    };
+    for (auto const source : sources)
+    {
+        auto const compiler = slib::create_sgl_compiler(
+            inner_compiler_for(ctx),
+            {.persistent_cache = nullptr, .diagnostics = true, .guards_undefined = slib::sgl_undefined_guard::report});
+        auto desc = slib::shader_source_description{.source = cc::string(source),
+                                                    .entry_point = "cs",
+                                                    .stage = sg::shader_stage::compute,
+                                                    .label = "shadow.sgl"};
+        auto preprocessed = compiler->preprocess(desc, [](cc::string_view) { return cc::optional<cc::string>(); });
+        REQUIRE(preprocessed.has_value());
+        REQUIRE(preprocessed.value().stated.has_value());
+        auto shader = preprocessed.value().stated.value();
+
+        desc.source = preprocessed.value().source;
+        if (!preprocessed.value().entry_point.empty())
+            desc.entry_point = preprocessed.value().entry_point;
+        auto const compiled = co_await compiler->compile(desc);
+        shader.bytecode = compiled.bytecode;
+        shader.compiler = compiled.compiler;
+
+        auto const layout = ctx.uncached.create_pipeline_layout({});
+        auto const pipeline = ctx.uncached.create_compute_pipeline({.shader = shader, .layout = layout});
+
+        auto cmd = ctx.create_command_list();
+        cmd->compute.bind_pipeline(*pipeline);
+        cmd->compute.dispatch_threads(4);
+        ctx.submit_command_list(cc::move(cmd));
+        ctx.advance_epoch();
+
+        co_await ctx.idle_completion();
+        co_await ctx.idle_completion();
+        ctx.process_completed_epochs();
+        co_await ctx.idle_completion();
+    }
+}

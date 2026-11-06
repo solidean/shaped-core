@@ -9,17 +9,28 @@ refs:
 # Measure the emitted code's speed on every target
 
 The emitted code is measured against hand-written HLSL on dx12 and vulkan, three kernels each, in sr's `sgl-against-hlsl-benchmark.cc`.
-dx12 is 0.99× to 1.02× on an RTX 5070 Ti and 0.91× to 0.97× on an Arc B580, and vulkan 0.98× to 1.02× on the Arc (2026-11-05).
-WebGPU is measured against the same kernels written by hand in WGSL, in sr's `sgl-against-wgsl-benchmark.cc` (2026-11-05).
+dx12 is 0.99× to 1.02× on an RTX 5070 Ti (2026-10), and 0.99× to 1.00× on an Arc B580, and vulkan 0.97× to 0.99× on the Arc (2026-11-06).
+Three runs each agree to about 0.1%, but for one dx12 convolution at 1.105× among otherwise 1.000× runs.
+Every ratio here is SGL's time over the hand-written kernel's, so below 1 is SGL being faster.
+WebGPU is measured against the same kernels written by hand in WGSL, in sr's `sgl-against-wgsl-benchmark.cc` (2026-11-06).
 Each WGSL file ports the HLSL line for line and declares SGL's bindings slot for slot, and the two outputs are compared before they are timed.
 
 | runtime | adapter | à-trous | SVGF filter | convolution |
 |---|---|---|---|---|
-| node 24, Dawn over D3D12 | Arc B580, driver 32.0.101.9150 | 1.00× (min 1.02×) | 1.00× (0.99×) | 0.81× (0.82×) |
-| deno, wgpu | Arc B580 | 1.00× (1.00×) | 1.00× (1.00×) | 0.73× (0.75×) |
+| node 24, Dawn over D3D12 | Arc B580, driver 32.0.101.9150 | 0.98–1.04× (min 0.94–0.96×) | 0.98–1.00× (1.00–1.13×) | 0.81× (0.80–0.84×) |
+| deno, wgpu | Arc B580 | 0.99–1.01× (0.99–1.01×) | 0.98–0.99× (1.01×) | 0.52–0.55× (0.55×) |
 
 Each is SGL's median over the hand-written WGSL's, and the minima's ratio in parentheses, which other work on the GPU only pushes up.
+Dawn's run-to-run spread is about ±4%, so its à-trous and SVGF ranges are even with hand-written WGSL.
 The convolution's hand-written loops are not unrolled, since WGSL has no `[unroll]`, and SGL unrolls the fixed ones, which is the whole gap.
+wgpu's gap grew from 0.73× once a small `filled` stopped being a loop (EMIT-231).
+
+## What the gaps above 1.00× were
+
+Both were on vulkan on the Arc, and neither was in the target compiler.
+- **Convolution, 1.01× to 0.97×.** `filled` wrote a loop that DXC's SPIR-V backend leaves a loop, whose dynamic index kept four local arrays in memory (EMIT-231).
+- **À-trous, 1.02× to 0.99×.** `atrous_denoise.sgl` asked for `@unroll` and the HLSL it was ported from did not.
+  DXC's SPIR-V keeps that loop, and 25 copies ran slower on the Arc's vulkan driver; dx12 and webgpu were even either way.
 
 **The method is the wall clock, not timestamps.**
 sg's WebGPU timestamp is an empty compute pass, which nothing orders after the dispatches before it.

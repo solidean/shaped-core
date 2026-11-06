@@ -125,6 +125,8 @@ struct sgl::check::name_mint
     cc::set<cc::string> const* also_taken = nullptr;
     /// A lower layer's names, such as the prelude's every module-level name, which every program behind it shares.
     cc::set<cc::string> const* also_taken_below = nullptr;
+    /// A target's reserved words, which no name of the program written there may be.
+    cc::set<cc::string> const* also_reserved = nullptr;
     /// For each name `mint` found taken, the suffix it tries first the next time it is asked for that name.
     /// A name once taken stays taken, so the first free suffix only grows, and minting a name a thousand times is linear.
     cc::map<cc::string, i32> next_suffix;
@@ -782,6 +784,14 @@ struct sgl::check::flat_entry_point
     /// Set where a metal traversal's fused any hit decided `accept_and_end_search`, which the traversal's result then
     /// says (CHK-345); `none` for every other entry point.
     local_id ends_search = local_id::none;
+    /// LEGAL-69: the 32-bit words of the shadow that says which scalars of workgroup memory were stored, which the text
+    /// declares and clears before the body (EMIT-229); 0 where nothing tests it.
+    i32 written_words = 0;
+    /// LEGAL-69 under `define`: the text zeroes workgroup memory before the body, as WGSL does (EMIT-229).
+    bool zeroes_workgroup = false;
+    /// The local holding the invocation's index in its workgroup, which that prologue strides by; `none` where there is
+    /// none.
+    local_id workgroup_index = local_id::none;
 
     cc::vector<flat_local> locals;
     cc::vector<flat_label> labels;
@@ -832,6 +842,7 @@ struct sgl::check::flat_entry_point
             && is_equal(messages, rhs.messages) && body == rhs.body && names == rhs.names
             && is_equal(traced_rays, rhs.traced_rays) && is_equal(text_types, rhs.text_types)
             && attributes == rhs.attributes && is_equal(options, rhs.options) && float_guarantee == rhs.float_guarantee
-            && float_raised_by == rhs.float_raised_by;
+            && float_raised_by == rhs.float_raised_by && written_words == rhs.written_words
+            && zeroes_workgroup == rhs.zeroes_workgroup && workgroup_index == rhs.workgroup_index;
     }
 };

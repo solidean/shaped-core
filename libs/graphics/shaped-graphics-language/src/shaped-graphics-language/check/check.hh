@@ -116,6 +116,12 @@ struct resume_point
     isize extensions = 0;
     isize tests = 0;
     isize wide_literals = 0;
+    /// `notes` and `calls`: a lower layer's functions and calls, whose loops were found when it was checked.
+    isize notes = 0;
+    isize calls = 0;
+    /// `call_records` and `types`: a lower layer's generic calls and open types, instantiated when it was checked.
+    isize call_records = 0;
+    isize types = 0;
 };
 } // namespace sgl::check::impl
 

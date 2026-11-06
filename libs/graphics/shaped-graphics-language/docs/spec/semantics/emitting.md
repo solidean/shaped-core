@@ -77,6 +77,10 @@ struct target_ {
 * **EMIT-107** A struct whose every field is `void` is `unsupported`, since it would be a struct of no member, which WGSL has no spelling for.
 * **EMIT-118** An array is `array<T, N>` in WGSL and MSL, and in HLSL its element type with the lengths after the declared name, `float weights[3]`.
   A square literal is WGSL's constructor, and in HLSL and MSL a local assigned element by element, as a struct is (EMIT-55).
+* **EMIT-230** In HLSL, a `let` array whose every element is a literal, or a vector or an array of them, is `static const` with an initializer: `static const float kernel[5] = {0.0625, ...};`.
+  Each invocation filling a local of its own costs a store per element where an index into it is dynamic, which DXC's SPIR-V keeps.
+* **EMIT-231** `T[N].filled(v)` (CHK-289) of at most 64 elements in all is an assignment per element at a constant index, and a larger one a loop per level.
+  A loop's dynamic index keeps the array in memory wherever the target's compiler does not unroll it, as DXC's SPIR-V backend does not.
 * **EMIT-119** Each member of a `@workgroup` binding is a variable of its own, minted `<binding>_<member>`: `groupshared` in HLSL and `var<workgroup>` in WGSL at file scope,
   and `threadgroup` at the top of the kernel in MSL, which has it nowhere else.
   It takes no group, so the groups after it in a list keep their numbers.
@@ -505,11 +509,28 @@ So `{float3; float}` is written with `packed_float3`: the `float` is at byte 12 
   So is it in MSL, until sg's metal backend binds one through an argument buffer.
 * **EMIT-195** HLSL reads a buffer's length (CHK-460) through `GetDimensions`, in a helper per buffer, and WGSL through `arrayLength`, four bytes per word of a `bytes`.
   A Metal buffer argument is a pointer that carries no length, and sg passes none in yet, so an MSL compile that reads one is `target-lacks-feature`.
-* **EMIT-196** Neither MSL nor DXIL carries a 64-bit value between stages, so an MSL or `hlsl-dx12` vertex or pixel stage whose link holds one is `target-lacks-feature`.
-  SPIR-V carries one, so `hlsl-vulkan` writes it; splitting it into two words would reach the other two.
+* **EMIT-196** Neither MSL nor DXIL carries a 64-bit value between stages, so on `hlsl-dx12` and MSL a link's 64-bit scalar crosses as a `uint2` of its words.
+  A two-vector crosses as a `uint4`, each low word first, and either keeps the member's one location.
+  A three- or four-vector crosses as two `uint4`s at its two locations, the second holding its last one or two lanes; a three-vector's last two words are zero.
+  The member is declared as its piece `<name>_0`, and an array of them as one per element, as EMIT-174 declares a link's array.
+  A write splits the value, through `asuint` for a double in HLSL and `as_type` in MSL, and a read joins the words back, so the program never sees them.
+  SPIR-V carries the value itself, so `hlsl-vulkan` writes it as declared, a three- or four-vector at the first of its two locations.
 * **EMIT-218** MSL writes a buffer's `atomic[ulong]` as `atomic_ulong`, and its `min` and `max` as `atomic_min_explicit` and `atomic_max_explicit`, which give nothing back.
   So each stands as a statement alone, and an MSL compile whose program reads what one gave back is `target-lacks-feature`.
   HLSL writes a workgroup memory's 64-bit atomic as a `groupshared` `int64_t` or `uint64_t` under the same `Interlocked*` calls as a buffer's.
+* **EMIT-219** HLSL writes a double's maths (CHK-458) as functions of the text, `sgl_double_sqrt` and its siblings, declared once ahead of an entry point that calls any of them.
+  Each reads and writes a double's bits through `asuint` and `asdouble`, over its arithmetic and `fma`: DXC hands a double to its own `sqrt` or `floor` as a float.
+  `sqrt` and `inverse_sqrt` start from the float `rsqrt` of the mantissa brought to 1 to 4, take two Newton steps, and `sqrt` corrects by the residual `fma` gives.
+  `sign` and `saturate` are HLSL's own, which take a double.
+* **EMIT-225** `hlsl-vulkan` writes a hit object (CHK-434) and every reordering (CHK-433) as `SPV_EXT_shader_invocation_reorder`'s instructions, since DXC lowers none of HLSL's to SPIR-V.
+  Each instruction is a function of DXC's inline SPIR-V the text declares ahead of the entry point, and a hit object is `vk::SpirvOpaqueType<5313>`, SPIR-V's `OpTypeHitObjectEXT`.
+  An instruction that hands a payload over takes a variable of the ray-payload storage class, one per payload type, which the call fills before and reads back after.
+  A reordering trace is one `OpHitObjectTraceReorderExecuteEXT`, and `maybe_reorder` is `OpReorderThreadWithHintEXT`.
+* **EMIT-229** A compute stage whose workgroup memory LEGAL-69 shadows declares the shadow `sgl_written`, a `uint` atomic word per 32 scalars, beside that memory.
+  Before the body, each invocation clears the words its index in the workgroup strides to, and a workgroup barrier follows, so no mark lands before a clear.
+  Under `define` the same prologue zeroes workgroup memory instead: an array member element by element in that stride, any other member in invocation 0.
+  WGSL writes neither prologue, since WebGPU's workgroup memory starts at zero, the shadow's included.
+  An invocation's index is its `@local_thread_index` where the stage takes one, and a parameter the text adds where it does not.
 * **EMIT-136** HLSL writes a ray-tracing stage as a library export named by its kind, `[shader("closesthit")]` over `void`, whose payload is an `inout` parameter.
   A triangle closest hit or any hit takes `BuiltInTriangleIntersectionAttributes` too.
   An any hit's decision ends the stage: `ignore` is `IgnoreHit()`, `accept_and_end_search` `AcceptHitAndEndSearch()`, and `accept` a plain `return`.

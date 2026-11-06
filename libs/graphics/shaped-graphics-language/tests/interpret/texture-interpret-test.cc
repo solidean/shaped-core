@@ -194,6 +194,75 @@ TEST("sgl textures - a cube samples the face its direction's major axis picks")
     CHECK(driven_failures_of(source, bound({{.name = "sky", .textures = {cc::move(t)}}})) == "");
 }
 
+TEST("sgl textures - a test's stated texel grows a texture nothing bound, and stays inside one its driver bound")
+{
+    // EVAL-127: a stated texel outside the driver's texture has no value, since that texture is the driver's
+    auto const source = "binding scene:\n"
+                        "    heights: texture_2d[float]\n"
+                        "test {scene}:\n"
+                        "    scene.heights.test_texel(int2(1, 0), 5.0)\n"
+                        "    scene.heights.load(int2(1, 0)) == 5.0\n"
+                        "    scene.heights.size() == int2(2, 1)\n";
+    CHECK(driven_failures_of(source, bound({{.name = "heights", .textures = {texture(2, 1, 1.0f, 2.0f)}}})) == "");
+    CHECK(driven_failures_of(source, {}) == "");
+    CHECK(driven_failures_of(source, bound({{.name = "heights", .textures = {texture(1, 1, 1.0f)}}}))
+              .contains("outside 0 ..< 1 of the texture the driver bound"));
+    CHECK(driven_failures_of("binding scene:\n"
+                             "    heights: texture_2d[float]\n"
+                             "test {scene}:\n"
+                             "    scene.heights.test_texel(int2(-1, 0), 5.0)\n"
+                             "    true\n",
+                             {})
+              .contains("a texel stated at the coordinate -1"));
+}
+
+TEST("sgl textures - a texel atomic updates the texel its driver bound, gives what it held, and comes back")
+{
+    // EVAL-100: an `@atomic` image's texels are memory the run holds, as a buffer's elements are
+    u32 const words[] = {0u, 5u};
+    auto texels = bytes_of(words);
+    auto const source = "require image_atomics\n"
+                        "binding scene:\n"
+                        "    @atomic depth: mut image_2d[.r32_uint]\n"
+                        "test {scene}:\n"
+                        "    let before = scene.depth[int2(1, 0)].max(9u)\n"
+                        "    before == 5u\n"
+                        "    scene.depth[int2(1, 0)].load() == 9u\n"
+                        "    scene.depth[int2(0, 0)].add(2u) == 0u\n";
+    auto data = cc::vector<sgl::check::member_data>();
+    data.push_back({.name = "depth", .textures = {{.width = 2, .height = 1, .mutable_texels = texels}}});
+    CHECK(driven_failures_of(source, bound(cc::move(data))) == "");
+    CHECK(texels[0] == byte(2));
+    CHECK(texels[4] == byte(9));
+    // one the run binds no texels to has none to update
+    CHECK(driven_failures_of(source, {}).contains("an atomic texel_max of an image the run binds no texels to"));
+}
+
+TEST("sgl textures - a static sampler's state is the source's, which a test does not restate")
+{
+    // EVAL-128
+    CHECK(driven_failures_of("binding scene:\n"
+                             "    sampler nearest:\n"
+                             "        filter = .nearest\n"
+                             "test {scene}:\n"
+                             "    scene.nearest.test_state(scene.nearest)\n"
+                             "    true\n",
+                             {})
+              .contains("'nearest' is a static sampler, whose state the source sets"));
+}
+
+TEST("sgl lanes - a subgroup operation one lane misses has no value, where no check of uniformity sees it")
+{
+    // EVAL-143: a check's condition is no line the uniformity pass judges, so the run finds the lane that is missing
+    CHECK(driven_failures_of("require subgroups\n"
+                             "test:\n"
+                             "    if test_lane() == 0:\n"
+                             "        subgroup_add(1) == 1\n"
+                             "    true\n",
+                             {})
+              .contains("lane 1 of 4 did not reach subgroup_add with the others"));
+}
+
 TEST("sgl textures - bytes that are no whole set of texels are refused as invalid bindings")
 {
     auto const source = "binding scene:\n"

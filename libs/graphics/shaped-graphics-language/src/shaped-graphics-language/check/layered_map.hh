@@ -44,6 +44,9 @@ public:
         return _own[key];
     }
 
+    /// The entries this layer wrote, each of which it took over from the lower part or added.
+    [[nodiscard]] map const& own_entries() const { return _own; }
+
     /// Makes every entry part of the shared lower layer, which the layer above starts from and never writes.
     void freeze()
     {

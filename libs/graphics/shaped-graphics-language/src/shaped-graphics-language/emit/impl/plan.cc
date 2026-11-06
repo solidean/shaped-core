@@ -259,8 +259,7 @@ struct planner
         for (auto const& member : p.m.at(p.m.at(type).members))
             if (!member.is_position && !member.is_layer && member.type != check::checked_module::void_type)
             {
-                auto const split = pieces_of(member.type);
-                count += split.count > 0 ? split.count : 1;
+                count += locations_taken(member.type);
             }
         return count;
     }
@@ -338,6 +337,7 @@ struct planner
     {
         type_id piece = type_id::none;
         i32 count = 0;
+        i32 piece_locations = 1;
     };
 
     [[nodiscard]] type_id prelude_type_named(cc::string_view name) const
@@ -360,12 +360,37 @@ struct planner
                 auto const n = name == "mat2" ? 2 : name == "mat3" ? 3 : 4;
                 return {.piece = prelude_type_named(n == 2 ? "float2" : n == 3 ? "float3" : "float4"), .count = n};
             }
+            if (auto const words = words_of(type); is_valid(words))
+                return {.piece = words, .count = word_pieces(p, type)};
             return {};
         }
         auto const& t = p.m.at(type);
         if (t.kind == type_kind::array && t.count > 0 && p.m.builtin_type_of(t.element) != nullptr)
-            return {.piece = t.element, .count = i32(t.count)};
+        {
+            auto const words = words_of(t.element);
+            return {.piece = is_valid(words) ? words : t.element,
+                    .count = i32(t.count) * (is_valid(words) ? word_pieces(p, t.element) : 1),
+                    .piece_locations = !is_valid(words) && is_wide_64_bit(p, t.element) ? 2 : 1};
+        }
         return {};
+    }
+
+    /// EMIT-196: the uint2 or uint4 a 64-bit value crosses a link as where the target carries no 64-bit value between
+    /// stages, a uint4 apiece for a three- or four-vector; none elsewhere.
+    [[nodiscard]] type_id words_of(type_id type) const
+    {
+        auto const* const record = p.m.builtin_type_of(type);
+        if (record == nullptr || !is_word_split(p, type))
+            return type_id::none;
+        return prelude_type_named(record->leaf_count == 1 ? "uint2" : "uint4");
+    }
+
+    /// CHK-454: the locations a member of `type` takes on a link, a 64-bit three- or four-vector two of them.
+    [[nodiscard]] i32 locations_taken(type_id type) const
+    {
+        if (auto const split = pieces_of(type); split.count > 0)
+            return split.count * split.piece_locations;
+        return is_wide_64_bit(p, type) ? 2 : 1;
     }
 
     cc::vector<planned_member> members_of(cc::span<member_info const> members, bool has_locations, i32 first_location = 0)
@@ -395,9 +420,10 @@ struct planner
                 .is_row_per_element = member.padding == check::padding_kind::every_element,
                 .pieces = split.count,
                 .piece = split.piece,
+                .piece_locations = split.piece_locations,
             });
             if (result.back().location >= 0)
-                next_location += split.count > 0 ? split.count : 1;
+                next_location += locations_taken(member.type);
         }
         return result;
     }
@@ -1186,7 +1212,7 @@ cc::vector<sgl::emit::impl::planned_member> sgl::emit::impl::declared_members(pl
             piece.name = cc::format("{}_{}", member.name, i);
             piece.source_name = cc::format("{}_{}", member.source_name, i);
             piece.type = member.piece;
-            piece.location = member.location + i;
+            piece.location = member.location + i * member.piece_locations;
             piece.pieces = 0;
             result.push_back(cc::move(piece));
         }
@@ -1361,9 +1387,8 @@ sgl::emit::impl::plan sgl::emit::impl::make_plan(check::checked_module const& m,
     result.names.parent = &e.names;
     if (m.builtins != nullptr)
         result.names.also_taken = &m.builtins->names_written_in(language_of(t));
-    // Reserved first, so nothing minted below can be one of them.
-    for (auto const word : reserved_words(t))
-        (void)result.names.reserve(word);
+    // so nothing minted below can be a reserved word
+    result.names.also_reserved = &reserved_set(t);
     result.struct_of_type.resize_to_filled(m.types.size(), -1);
     result.enum_of_type.resize_to_filled(m.types.size(), -1);
     result.array_of_type.resize_to_filled(m.types.size(), -1);
@@ -1465,6 +1490,11 @@ sgl::emit::impl::plan sgl::emit::impl::make_plan(check::checked_module const& m,
             for (auto i = isize(0); i < e.stage_inputs.size(); ++i)
                 if (e.stage_inputs[i].local == ref->local)
                     result.stage_input_read[i] = true;
+    // EMIT-229: the prologue that clears the shadow or zeroes workgroup memory strides by this index
+    if (e.written_words > 0 || e.zeroes_workgroup)
+        for (auto i = isize(0); i < e.stage_inputs.size(); ++i)
+            if (e.stage_inputs[i].local == e.workgroup_index)
+                result.stage_input_read[i] = true;
 
     result.local_flags = cc::vector<cc::optional<u32>>::create_defaulted(e.locals.size());
     auto flags_known = cc::vector<bool>::create_filled(e.locals.size(), true);

@@ -183,11 +183,24 @@ TEST("sgl check - a preferred subgroup size is a power of two from 4 to 128, on 
               .contains("@preferred_subgroup_size asks for the subgroups of a compute entry point"));
 }
 
-TEST("sgl check - a test that reaches a subgroup operation is unsupported, and its uniform load is a read")
+TEST("sgl check - a test reaches a subgroup operation where its lanes arrive together, and its uniform load is a read")
 {
-    // CHK-379: a run is one invocation, which has no subgroup
-    CHECK(reports_for("test subgroup_add(1.0) == 1.0\n")
-              .contains("unsupported-yet user:[subgroup_add(1.0)] a test that reaches subgroup_add"));
+    // CHK-379: a test runs as one lane per invocation of a subgroup (EVAL-140), held to the uniformity an entry point is
+    CHECK(reports_for("require subgroups\n"
+                      "test subgroup_add(1.0) == test_lane_count() as float\n")
+          == "");
+    CHECK(reports_for("require subgroups\n"
+                      "test:\n"
+                      "    if test_lane() == 0:\n"
+                      "        let one = subgroup_add(1.0)\n"
+                      "        one == 1.0\n"
+                      "    true\n")
+              .contains("non-uniform-control-flow"));
+    // CHK-512: what only a test states, no entry point reaches
+    CHECK(reports_for("@compute(1) fun cs():\n"
+                      "    let lane = test_lane()\n")
+              .contains("stage-not-allowed user:[test_lane()] a compute entry point reaches this, and only a test "
+                        "calls test_lane"));
     CHECK(reports_for("@workgroup binding spd:\n"
                       "    finished: uint\n"
                       "\n"

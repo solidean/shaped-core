@@ -66,6 +66,8 @@ struct planned_member
     /// consecutive locations from `location` (EMIT-174); 0 for any other member.
     i32 pieces = 0;
     check::type_id piece = check::type_id::none;
+    /// The locations each piece takes: two for a 64-bit three- or four-vector the target carries as itself (CHK-454).
+    i32 piece_locations = 1;
     /// In `declared_members`: where the member stands in its struct's `members`, and which of its pieces this is, or -1.
     isize whole = -1;
     i32 piece_index = -1;
@@ -378,6 +380,14 @@ struct block_placement
 /// EMIT-174: whether `element` names one piece of an array held as pieces, by a literal index.
 /// `p.accesses` must hold the element's object already.
 [[nodiscard]] bool is_piece(plan const& p, check::flat_element const& element);
+
+/// EMIT-196: whether a 64-bit value of `type` crosses a link as its 32-bit words, low word first, where the target
+/// carries no 64-bit value between stages (`hlsl-dx12`, MSL).
+[[nodiscard]] bool is_word_split(plan const& p, check::type_id type);
+/// EMIT-196: the pieces a value of `type` crosses as where it is word split: one, or two for a three- or four-vector.
+[[nodiscard]] i32 word_pieces(plan const& p, check::type_id type);
+/// CHK-454: whether `type` is a 64-bit three- or four-vector, which takes two locations.
+[[nodiscard]] bool is_wide_64_bit(plan const& p, check::type_id type);
 
 /// EMIT-173: fills `p.accesses` from the target, its blocks and its structs in memory, and from where each expression
 /// stands: a place, or an array indexed in place, is spelled as held, and every other read is converted back.

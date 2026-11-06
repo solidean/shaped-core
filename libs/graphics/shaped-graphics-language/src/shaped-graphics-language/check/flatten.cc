@@ -81,16 +81,11 @@ void sgl::check::impl::flattener::judge_stage(ast::expr_id call, symbol_id calle
         feature_uses.push_back(
             {.file = file(), .call = call, .features = record->features, .within = cc::move(within), .granted = granted});
     }
-    // CHK-298: a test's run is one invocation, which has no quad to take a derivative across
+    // CHK-298, CHK-379: a test's run is as many lanes as its subgroup operations and derivatives need (EVAL-140)
     if (is_test)
     {
-        auto const* const record = c.out.builtin_function(c.out.at(callee).intrinsic);
-        if (record != nullptr && record->uses_derivatives)
-            stage_violations.push_back({.file = file(), .call = call, .callee = callee});
         auto const chain = entry.at(current()->chain);
         auto const written = chain.empty() ? call_site{.file = file(), .call = call} : chain[0];
-        if (record != nullptr && record->is_subgroup_operation)
-            subgroup_calls.push_back({.file = file(), .call = call, .callee = callee, .written = written});
         auto const ray_stages = stage_bit(stage::raygen) | stage_bit(stage::miss) | stage_bit(stage::closest_hit)
                               | stage_bit(stage::any_hit) | stage_bit(stage::intersection) | stage_bit(stage::callable);
         if (auto const& s = c.out.at(callee); s.info >= 0 && (c.out.functions[s.info].stages & ~ray_stages) == 0)
@@ -100,6 +95,12 @@ void sgl::check::impl::flattener::judge_stage(ast::expr_id call, symbol_id calle
     if (entry.entry_stage == stage::none)
         return;
     auto const* const record = c.out.builtin_function(c.out.at(callee).intrinsic);
+    // CHK-512: what only a test states, no target writes
+    if (record != nullptr && record->is_test_only)
+    {
+        stage_violations.push_back({.file = file(), .call = call, .callee = callee, .is_test_only = true});
+        return;
+    }
     if (record != nullptr && record->is_quad_operation && entry.entry_stage == stage::compute)
         quad_calls.push_back({.file = file(), .call = call, .callee = callee});
     // CHK-404: a decision runs as often as the traversal asks it, whichever stage's loop asks
@@ -714,9 +715,6 @@ void checker::flatten_test(i32 index)
     // a pipeline's trace or callable runs against tables a test has none of
     for (auto const& v : f.ray_stage_calls)
         report_reached(v, ", which only the ray-tracing stages run");
-    // CHK-379
-    for (auto const& v : f.subgroup_calls)
-        report_reached(v, ": a run is one invocation, and has no subgroup");
 
     // what a test reaches is of every compile, even where an entry point's tree judged it first
     for (auto const& u : f.unroll_reports)
@@ -731,6 +729,7 @@ void checker::flatten_test(i32 index)
             f.entry.body = f.root_body();
             judge_constants(f.entry);
             judge_assignments(f.entry);
+            (void)judge_uniformity(f.entry);
         }
         return;
     }
@@ -740,20 +739,18 @@ void checker::flatten_test(i32 index)
         report_once(diagnostic_kind::unsupported_yet, a.file, span_of(a.file, a.expr),
                     "an assert whose condition writes a buffer, prints, or calls a builtin with an effect")
             .entry_points.clear();
-    for (auto const& v : f.stage_violations)
-        report(diagnostic_kind::stage_not_allowed, v.file, span_of(v.file, v.call),
-               cc::format("{} takes derivatives across a quad of pixels, and a test runs one invocation",
-                          out.at(v.callee).name));
     if (f.is_failed && !f.meets_error)
         unsupported(test.file, test.where,
                     f.failure_detail.empty() ? cc::string("a test whose body reaches a construct the flat tree cannot "
                                                           "hold yet")
                                              : f.failure_detail);
-    if (f.is_failed || !f.stage_violations.empty() || !f.ray_stage_calls.empty() || !f.subgroup_calls.empty())
+    if (f.is_failed || !f.ray_stage_calls.empty())
         return;
     f.entry.body = f.root_body();
     judge_constants(f.entry);
     judge_assignments(f.entry);
+    // CHK-377, CHK-282: its lanes reach each subgroup operation and derivative together, as an entry point's do
+    (void)judge_uniformity(f.entry);
     out.tests.own(index).unit = i32(out.test_units.size());
     out.test_units.push_back(cc::move(f.entry));
 }
@@ -1082,6 +1079,14 @@ void checker::flatten_entry_point(symbol_id id, traversal_request const* travers
     for (auto const& v : f.stage_violations)
     {
         auto const where = span_of(v.file, v.call);
+        if (v.is_test_only)
+        {
+            report_of_entry(diagnostic_kind::stage_not_allowed, v.file, where,
+                            cc::format("a {} entry point reaches this, and only a test calls {}, which states what "
+                                       "its run binds or which lane it runs in",
+                                       check::stage_name(info.entry_stage), out.at(v.callee).name));
+            continue;
+        }
         if (v.decision == stage::none)
         {
             report_of_entry(diagnostic_kind::stage_not_allowed, v.file, where,
@@ -1256,13 +1261,15 @@ void checker::flatten_metal_traversals()
             flatten_entry_point(p.intersection, &request);
         }
     }
+    if (!is_any)
+        return;
     // CHK-345: a record without a closest hit calls this one on metal, where a table slot holds a function or crashes
     // it stands for no function of the source, so it is owned by a ray-tracing function of the program
     auto owner = symbol_id::none;
     for (auto const& fn : out.functions)
         if (fn.entry_stage >= stage::raygen && out.at(fn.symbol).file == i32(out.files.size()) - 1)
             owner = fn.symbol;
-    if (!is_any || !is_valid(owner))
+    if (!is_valid(owner))
         return;
     auto f = flattener{.c = *this};
     f.entry.entry_stage = stage::closest_hit;
