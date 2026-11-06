@@ -414,12 +414,14 @@ enum class merge_kind : u8;
 struct block;
 struct constant;
 enum class global_kind : u8;
+enum class built_in : u8;
 struct global;
 struct local;
 enum class type_ref : u32;
 enum class value_ref : u32;
 enum class block_ref : u32;
 enum class operand : u8;
+enum class control_flow : u8;
 class dominance;
 } // namespace sgl::ir
 

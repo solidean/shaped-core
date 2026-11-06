@@ -138,26 +138,26 @@ void lowering::declare_stage_inputs()
         auto const& input = _e.stage_inputs[i];
         if (i < _plan.stage_input_read.size() && !_plan.stage_input_read[i])
             continue;
-        auto built_in = -1;
+        auto given = built_in::none;
         switch (input.input)
         {
         case stage_input::thread_id:
-            built_in = 28;
+            given = built_in::thread_id;
             break;
         case stage_input::local_thread_id:
-            built_in = 27;
+            given = built_in::local_thread_id;
             break;
         case stage_input::local_thread_index:
-            built_in = 29;
+            given = built_in::local_thread_index;
             break;
         case stage_input::workgroup_id:
-            built_in = 26;
+            given = built_in::workgroup_id;
             break;
         case stage_input::subgroup_size:
-            built_in = 36;
+            given = built_in::subgroup_size;
             break;
         case stage_input::subgroup_invocation_id:
-            built_in = 41;
+            given = built_in::subgroup_invocation_id;
             break;
         default:
             return unsupported("a stage input of no compute entry point");
@@ -167,7 +167,7 @@ void lowering::declare_stage_inputs()
         auto const lanes = lanes_of(declared);
         auto const raw = lanes == 1 ? _uint : vector_type(_uint, lanes);
         auto const global_ref
-            = add_global({.type = pointer_type(raw, storage::input), .built_in = built_in}, _plan.stage_input_names[i]);
+            = add_global({.type = pointer_type(raw, storage::input), .input = given}, _plan.stage_input_names[i]);
         auto const loaded = add(op::load, raw, {global_ref});
         _locals[index_of(input.local)] = raw == declared ? loaded : add(op::bitcast, declared, {loaded});
     }

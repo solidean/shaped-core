@@ -22,6 +22,7 @@
 
 #elif defined(CC_OS_LINUX) || defined(CC_OS_ANDROID)
 
+#include <fcntl.h>
 #include <sched.h>
 #include <unistd.h>
 
@@ -270,6 +271,27 @@ constinit cc::atomic<i64> g_memory_cap = 0;
 constinit cc::atomic<bool> g_memory_watchdog = false;
 
 /// What the watchdog compares against the cap: the commit charge where Windows has one, the resident set elsewhere.
+/// The watchdog runs through exit, beside the destructors of whatever an allocation touches, so nothing here may allocate.
+#if defined(CC_OS_LINUX) || defined(CC_OS_ANDROID)
+i64 watched_bytes()
+{
+    auto const file = ::open("/proc/self/statm", O_RDONLY | O_CLOEXEC);
+    if (file < 0)
+        return 0;
+    char text[128];
+    auto const size = isize(::read(file, text, sizeof(text)));
+    ::close(file);
+
+    // "<total> <resident> ...", counted in pages
+    auto at = isize(0);
+    while (at < size && text[at] != ' ')
+        ++at;
+    auto pages = i64(0);
+    for (++at; at < size && text[at] >= '0' && text[at] <= '9'; ++at)
+        pages = pages * 10 + i64(text[at] - '0');
+    return pages * i64(::sysconf(_SC_PAGESIZE));
+}
+#else
 i64 watched_bytes()
 {
     auto const usage = cc::query_process_usage();
@@ -281,6 +303,7 @@ i64 watched_bytes()
     return usage.value().resident_bytes;
 #endif
 }
+#endif
 
 #if defined(CC_OS_WINDOWS)
 /// A new job with the cap as its per-process commit limit, this process in it; false where Windows refused either step.

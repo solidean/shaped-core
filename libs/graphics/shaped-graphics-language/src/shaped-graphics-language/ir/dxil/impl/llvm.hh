@@ -233,16 +233,6 @@ public:
     /// What reads memory counts only where `call` said that memory never changes, a block of constants above all.
     void share_common_values();
 
-    /// Joins a block to its only predecessor, and turns a branch around few enough safe operations into selects.
-    /// Every `ll_value` of an instruction and every `ll_block` taken before this is void afterwards.
-    void flatten_branches();
-
-    /// Rewrites a sum whose operations may reorder as one chain, earliest operand first, within a block.
-    /// A running total then meets each product on its own, and a compiler behind this fuses each pair into one `mad`.
-    /// Of everything this layer does this is what a dispatch's time answers to: see epic-sgl-native-ir-targets.
-    /// Only an addition `fast` licenses moves, so a guarantee stated on an operation stands.
-    void chain_sums();
-
     /// Drops every instruction nothing with an effect reads, a loop of phis among them.
     /// Every `ll_value` of an instruction taken before this is void afterwards, and blocks keep their numbers.
     void remove_unused();
@@ -386,8 +376,6 @@ private:
     [[nodiscard]] u32 add_name(cc::string_view name);
     [[nodiscard]] bool has_effect(inst_entry const& inst) const;
     [[nodiscard]] bool may_share(inst_entry const& inst) const;
-    /// Whether it may run though the branch around it would not have run it.
-    [[nodiscard]] bool is_speculable(inst_entry const& inst) const;
     /// What `binary` folds to for two known operands, or `none`.
     [[nodiscard]] ll_value folded_binary(binary_op op, ll_value a, ll_value b, u8 flags);
     /// Calls `visit` with a reference to each of the instruction's operands that is a value, not a type or a block.

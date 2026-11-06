@@ -7,7 +7,8 @@ using namespace sgl;
 sgl::ir::dominance::dominance(cc::span<u32 const> first, cc::span<u32 const> preds)
 {
     auto const count = first.size() - 1;
-    auto idom = cc::vector<i32>::create_filled(count, -1);
+    auto& idom = _idom;
+    idom.resize_to_filled(count, -1);
     idom[0] = 0;
     auto const intersect = [&](i32 a, i32 b)
     {

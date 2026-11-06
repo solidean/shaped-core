@@ -65,6 +65,11 @@ inline constexpr u32 k_index_mask = 0x1fffffffu;
 {
     return is_valid(v) && (u32(v) & (k_constant_bit | k_global_bit)) == 0 && (u32(v) & k_local_bit) != 0;
 }
+/// A value an instruction gives, whichever it is that gives it.
+[[nodiscard]] constexpr bool is_operation(value_ref v)
+{
+    return is_valid(v) && (u32(v) & (k_constant_bit | k_global_bit | k_local_bit)) == 0;
+}
 [[nodiscard]] constexpr u32 index_of(value_ref v)
 {
     return u32(v) & k_index_mask;
@@ -465,6 +470,18 @@ enum class sgl::ir::global_kind : sgl::u8
     file_sampler,
 };
 
+/// A value the stage hands an entry point, which each target names its own way.
+enum class sgl::ir::built_in : sgl::u8
+{
+    none,
+    thread_id,
+    local_thread_id,
+    local_thread_index,
+    workgroup_id,
+    subgroup_size,
+    subgroup_invocation_id,
+};
+
 /// A variable outside the function: a resource, a block, workgroup memory or a stage input.
 struct sgl::ir::global
 {
@@ -474,8 +491,8 @@ struct sgl::ir::global
     /// A descriptor's address, -1 for none.
     i32 set = -1;
     i32 binding = -1;
-    /// SPIR-V's `BuiltIn` of a stage input, -1 for none.
-    i32 built_in = -1;
+    /// What a stage input holds.
+    built_in input = built_in::none;
     bool is_read_only = false;
     bool is_write_only = false;
     bool is_coherent = false;
@@ -542,6 +559,9 @@ namespace sgl::ir
 /// The name of `code`, for a reader.
 [[nodiscard]] cc::string_view op_name(op code);
 
+/// `t` as `dump` spells it, for a reader.
+[[nodiscard]] cc::string type_name(program const& p, type_ref t);
+
 } // namespace sgl::ir
 
 /// What one position of an operation's operands holds.
@@ -557,6 +577,16 @@ namespace sgl::ir
 
 /// What position `at` of an operation of `code` holds, so a pass can rewrite operands it does not otherwise know.
 [[nodiscard]] operand operand_role(op code, isize at);
+
+/// Whether running `code` does something other than give a value, so an unread one still has to run.
+[[nodiscard]] bool has_effect(op code);
+
+/// Whether `code` depends on nothing but its operands, so two of the same operands are one value.
+/// A load is not, though `share_common_values` proves some are.
+[[nodiscard]] bool gives_only_a_value(op code);
+
+/// Whether `code` may run on a path that did not ask for it: it gives only a value, and no operand makes it trap.
+[[nodiscard]] bool may_speculate(op code);
 
 /// The blocks a terminator reaches, which `scratch` holds; one block may stand twice.
 [[nodiscard]] cc::span<u32 const> successors_of(program const& p, instruction const& terminator, cc::vector<u32>& scratch);
