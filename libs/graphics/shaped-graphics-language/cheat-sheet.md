@@ -438,6 +438,7 @@ sgl::test::diagnostic_of(m, r)             // `test-failed` at the test, one rel
 
 ```bash
 uv run dev.py run sgl -- emit shader.sgl --entry main_cs --target spirv --spirv out.spv   # SGL's own SPIR-V, compute alone so far (EMIT-232); prints its ir::program
+uv run dev.py run sgl -- emit shader.sgl --entry main_cs --target dxil --dxil out.dxil     # SGL's own DXIL, the same (EMIT-234); `dxc -dumpbin out.dxil` reads it
 uv run dev.py run sgl -- emit shader.sgl --entry main_ps --target wgsl   # the text and its warnings on stderr, or the diagnostics and exit 2
 uv run dev.py run sgl -- emit shader.sgl --entry main_cs --option tile=16 # an option set for this compile; `describe` takes it too
 uv run dev.py run sgl -- emit shader.sgl --entry main_cs --undefined report --diagnostics  # the guards of LEGAL-65, LEGAL-66 and LEGAL-69 (workgroup memory read unstored); abort: no report; define: WGSL's values

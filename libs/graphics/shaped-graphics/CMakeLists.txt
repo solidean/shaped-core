@@ -441,6 +441,7 @@ if(SC_BUILD_TESTS)
             tests/compute/compute-sixty-four-bit-test.cc
             tests/compute/compute-double-maths-test.cc
             tests/compute/compute-array-equality-test.cc
+            tests/compute/compute-native-dxil-test.cc
             tests/compute/compute-native-spirv-test.cc
             tests/compute/compute-matrix-arithmetic-test.cc
             tests/compute/compute-float-atomics-test.cc
@@ -528,6 +529,16 @@ if(SC_BUILD_TESTS)
             NATIVE_SPIRV
             SHADERS
                 native_spirv.sgl:*
+        )
+        sc_add_shader_package(
+            TARGET     shaped-graphics-test
+            NAME       sg_test_native_dxil
+            NAMESPACE  sg::test::native_dxil
+            SOURCE_DIR tests/shaders/sgl_native_dxil
+            LANGUAGE   sgl
+            NATIVE_DXIL
+            SHADERS
+                native_dxil.sgl:*
         )
 
         sc_add_shader_package(

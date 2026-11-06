@@ -429,6 +429,11 @@ fn main_ps(p: pixel_input) -> target_ {
   Float `!=` is unordered, a shift's count is masked to its width, and `and` and `or` branch where their right side could go wrong; nothing here widens what a program may do.
 * **EMIT-233** A float operation of an entry point past `fast` is decorated `NoContraction`, and the entry point states `SignedZeroInfNanPreserve` per float width, and `DenormPreserve` for `ieee`.
   This is what DXC's `-Gis` and `-denorm preserve` write, per operation in the layer, so a guarantee narrower than an entry point needs no change to the form.
+* **EMIT-234** Where a compile asks, `hlsl-dx12` is written as a DXIL container by SGL itself: `text_request::native`, `sgl emit --target dxil`.
+  It takes what EMIT-232 says of a plan, of `require` and `prefer`, and of what a program may do.
+  The container states shader model 6.6, and carries the retail bypass digest, which is what lets D3D12 load a shader no validator signed.
+  A `fast` float operation carries LLVM's fast flags, and one past it carries none, which is what `-Gis` writes; only a `fast` addition may reorder.
+  `ieee` states `fp32-denorm-mode` on the entry point, as `-denorm preserve` does.
 
 ## Lines
 

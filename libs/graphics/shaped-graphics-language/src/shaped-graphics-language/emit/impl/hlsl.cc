@@ -5,11 +5,6 @@
 
 namespace
 {
-/// The space slib's binding pass gives the inline constants of a dx12 pipeline, `slib::inline_constants_space`.
-/// sgl does not link slib, so the number is repeated here, and the pipeline layout sg builds is what it has to match.
-constexpr auto k_inline_constants_space = 9;
-/// The space slib gives a pipeline layout's static samplers on dx12, `slib::bound_samplers_space`, repeated for the same reason.
-constexpr auto k_bound_samplers_space = 10;
 /// The descriptor set sg keeps for itself on vulkan, `sg::reserved_binding_group`, whose binding 0 no static sampler takes.
 constexpr auto k_reserved_set = 3;
 

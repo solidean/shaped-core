@@ -385,7 +385,8 @@ void slib::shader_library::add_package(shader_package const& package, filesystem
     _packages.push_back(package_entry{.name = cc::string::create_copy_of(package.name),
                                       .language = package.language,
                                       .software_trace = package.software_trace,
-                                      .native_spirv = package.native_spirv});
+                                      .native_spirv = package.native_spirv,
+                                      .native_dxil = package.native_dxil});
 
     if (fs != nullptr)
     {
@@ -494,7 +495,7 @@ slib::shader_library::compile_outcome slib::shader_library::compile_shader(cc::s
     // Where an `#include "..."` is looked for, most specific first: the shader's own directory, then the package's own root, then the mount root.
     _compile_text(outcome, cc::move(source.value()), virtual_path, impl::parent_path(virtual_path), package.name,
                   file_namespace, package.language, stage, entry_point, format, options, package.software_trace,
-                  package.native_spirv);
+                  package.native_spirv, package.native_dxil);
     return outcome;
 }
 
@@ -522,7 +523,8 @@ void slib::shader_library::_compile_text(compile_outcome& outcome,
                                          sg::shader_format format,
                                          cc::span<shader_option const> options,
                                          bool software_trace,
-                                         bool native_spirv) const
+                                         bool native_spirv,
+                                         bool native_dxil) const
 {
     // What an SGL source's `use` reaches, read as it is now: the modules are files like an include is.
     auto const modules = language == shader_language::sgl ? read_modules() : module_library();
@@ -596,7 +598,8 @@ void slib::shader_library::_compile_text(compile_outcome& outcome,
                                       .label = cc::string::create_copy_of(label),
                                       .modules = module_files,
                                       .software_trace = software_trace,
-                                      .native_spirv = native_spirv};
+                                      .native_spirv = native_spirv,
+                                      .native_dxil = native_dxil};
     desc.options.push_back_range(options);
 
     auto preprocessed = compiler->preprocess(desc, resolve);

@@ -200,17 +200,17 @@ public:
     {
         // SGL wrote the binary itself, so nothing is left to compile and nothing can crash doing it
         if (!desc.bytecode.empty())
-            return cc::make_async_from_value(
-                sg::compiled_shader{.stage = desc.stage,
-                                    .format = _format,
-                                    .entry_point = desc.entry_point,
-                                    .bytecode = cc::make_pinned_data(cc::span<byte const>(desc.bytecode)),
-                                    .compiler = {.name = cc::string("sgl"),
-                                                 .version = cc::string(sgl::compiler_fingerprint()),
-                                                 .signature = cc::string("spirv")}});
+            return cc::make_async_from_value(sg::compiled_shader{
+                .stage = desc.stage,
+                .format = _format,
+                .entry_point = desc.entry_point,
+                .bytecode = cc::make_pinned_data(cc::span<byte const>(desc.bytecode)),
+                .compiler = {.name = cc::string("sgl"),
+                             .version = cc::string(sgl::compiler_fingerprint()),
+                             .signature = cc::string(_format == sg::shader_format::dxil ? "dxil" : "spirv")}});
         if (_inner == nullptr)
             return cc::make_async_from_error<sg::compiled_shader>(cc::async_error::make_error(cc::any_error(cc::format(
-                "'{}' has no SPIR-V of SGL's own, and this build has no DXC to compile its text", desc.entry_point))));
+                "'{}' has no binary of SGL's own, and this build has no DXC to compile its text", desc.entry_point))));
         // EMIT-4: what the emitted text needs of the compiler that builds it, whoever wired that compiler
         auto inner = desc;
         if (_target == sgl::emit::target::hlsl_dx12 || _target == sgl::emit::target::hlsl_vulkan)
@@ -244,6 +244,7 @@ private:
         b.add_pod(_guards_undefined);
         b.add_pod(desc.software_trace);
         b.add_pod(desc.native_spirv);
+        b.add_pod(desc.native_dxil);
         b.add_pod(i64(desc.options.size()));
         for (auto const& o : desc.options)
         {
@@ -317,8 +318,10 @@ private:
         auto device_features = sgl::check::feature_set();
         auto weakens_float = false;
         auto const is_spirv = _target == sgl::emit::target::hlsl_vulkan;
-        auto native = is_spirv && (_inner == nullptr || desc.native_spirv) ? sgl::emit::native_route::require
-                                                                           : sgl::emit::native_route::text;
+        auto const is_dxil = _target == sgl::emit::target::hlsl_dx12;
+        auto const requires_native
+            = (is_spirv && (_inner == nullptr || desc.native_spirv)) || (is_dxil && desc.native_dxil);
+        auto native = requires_native ? sgl::emit::native_route::require : sgl::emit::native_route::text;
         for (auto const& o : desc.options)
         {
             if (o.name == slib::k_weakens_float_option)
@@ -326,9 +329,10 @@ private:
                 weakens_float = o.value == "true";
                 continue;
             }
-            if (o.name == slib::k_native_spirv_option)
+            if (o.name == slib::k_native_spirv_option || o.name == slib::k_native_dxil_option)
             {
-                if (native == sgl::emit::native_route::text && is_spirv)
+                auto const is_for_this = o.name == slib::k_native_spirv_option ? is_spirv : is_dxil;
+                if (native == sgl::emit::native_route::text && is_for_this)
                     native = sgl::emit::native_route::prefer;
                 continue;
             }
@@ -375,6 +379,8 @@ private:
                                                 .warnings = emitted.warnings};
         if (!emitted.spirv.empty())
             result.bytecode = cc::vector<byte>::create_copy_of(cc::span<u32 const>(emitted.spirv).as_bytes());
+        if (!emitted.dxil.empty())
+            result.bytecode = cc::vector<byte>::create_copy_of(cc::span<byte const>(emitted.dxil));
         // EMIT-185: DXC keeps the special values and the order only with every float operation strict, which in
         // SPIR-V is SignedZeroInfNanPreserve and NoContraction, and denormals only where it is asked to preserve them
         auto const is_hlsl = _target == sgl::emit::target::hlsl_dx12 || _target == sgl::emit::target::hlsl_vulkan;

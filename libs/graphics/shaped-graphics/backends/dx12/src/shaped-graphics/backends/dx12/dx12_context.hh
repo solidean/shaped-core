@@ -94,6 +94,10 @@ struct sg::backend::dx12::dx12_config
     /// Best-effort: skipped when the layer isn't installed.
     bool activate_global_debug_layer = false;
 
+    /// Write SGL shaders as DXIL with SGL itself, with no DXC behind them, where SGL has a lowering for them yet.
+    /// An entry point it has none for goes through DXC.
+    bool native_dxil = false;
+
     /// Enable DRED, so a device removal reports what the GPU was doing rather than only an HRESULT.
     ///
     /// Auto-breadcrumbs cost a write per command-list operation, which is why this is off by default and worth
@@ -210,6 +214,7 @@ public:
     [[nodiscard]] bool supports_ray_query() const { return _raytracing_tier >= D3D12_RAYTRACING_TIER_1_1; }
 
     [[nodiscard]] sg::execution_model execution() const override { return _execution; }
+    [[nodiscard]] bool prefers_native_dxil() const override { return _native_dxil; }
 
     /// D3D12 has every stage sg models, and headless present is always available here.
     ///
@@ -728,6 +733,7 @@ public:
     bool _extended_image_formats = false;      // bgra8_unorm's typed UAV, cached at creation
     bool _native_16bit_shader_ops = false;     // D3D12_OPTIONS4, cached at creation
     bool _wave_ops = false;                    // D3D12_OPTIONS1, cached at creation
+    bool _native_dxil = false;                 // dx12_config::native_dxil
     bool _int64_shader_ops = false;            // D3D12_OPTIONS1, cached at creation
     bool _double_shader_ops = false;           // D3D12_OPTIONS, cached at creation
     bool _int64_atomics = false;               // D3D12_OPTIONS1 on Shader Model 6.6, cached at creation

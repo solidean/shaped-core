@@ -1,0 +1,274 @@
+#pragma once
+
+#include <clean-core/string/string_view.hh>
+#include <shaped-graphics-language/fwd.hh>
+
+/// DXIL's operations as data: a new one is a row of `k_dx_ops`, and a new shape a row of `k_dx_classes`.
+///
+/// An operation is a call of `dx.op.<class>[.<overload>]` whose first argument is its number.
+/// The numbers are DXIL's own, from its specification; nothing here links DXC.
+namespace sgl::ir::dxil::impl
+{
+/// A class's signature as text, the result then a colon then the parameters after the operation's number:
+/// `o` the overload, `v` void, `c` i1, `b` i8, `i` i32, `f` float, `h` a handle, `B` a binding, `P` a handle's
+/// properties, `R` a resource's return of the overload, `C` a constant block's row of it, `D` a resource's dimensions.
+struct dx_class
+{
+    cc::string_view name;
+    cc::string_view signature;
+    enum attr_kind : u8
+    {
+        no_attr,
+        read_none,
+        read_only,
+        no_duplicate,
+    } attr = no_attr;
+};
+
+enum class dx_class_id : u8
+{
+    unary,
+    unary_bits,
+    is_special_float,
+    binary,
+    tertiary,
+    dot2,
+    dot3,
+    dot4,
+    thread_id,
+    group_id,
+    thread_id_in_group,
+    flattened_thread_id_in_group,
+    wave_get_lane_index,
+    wave_get_lane_count,
+    wave_any_true,
+    wave_all_true,
+    wave_read_lane_at,
+    wave_read_lane_first,
+    wave_active_op,
+    wave_active_bit,
+    wave_prefix_op,
+    barrier,
+    create_handle_from_binding,
+    annotate_handle,
+    cbuffer_load_legacy,
+    raw_buffer_load,
+    raw_buffer_store,
+    texture_load,
+    texture_store,
+    sample_level,
+    texture_gather,
+    get_dimensions,
+    atomic_bin_op,
+    atomic_compare_exchange,
+};
+
+// clang-format off
+/// Parallel to `dx_class_id`.
+inline constexpr dx_class k_dx_classes[] = {
+    {"unary", "o:o", dx_class::read_none},
+    {"unaryBits", "i:o", dx_class::read_none},
+    {"isSpecialFloat", "c:o", dx_class::read_none},
+    {"binary", "o:oo", dx_class::read_none},
+    {"tertiary", "o:ooo", dx_class::read_none},
+    {"dot2", "o:oooo", dx_class::read_none},
+    {"dot3", "o:oooooo", dx_class::read_none},
+    {"dot4", "o:oooooooo", dx_class::read_none},
+    {"threadId", "o:i", dx_class::read_none},
+    {"groupId", "o:i", dx_class::read_none},
+    {"threadIdInGroup", "o:i", dx_class::read_none},
+    {"flattenedThreadIdInGroup", "o:", dx_class::read_none},
+    {"waveGetLaneIndex", "i:", dx_class::read_none},
+    {"waveGetLaneCount", "i:", dx_class::read_none},
+    {"waveAnyTrue", "c:c"},
+    {"waveAllTrue", "c:c"},
+    {"waveReadLaneAt", "o:oi"},
+    {"waveReadLaneFirst", "o:o"},
+    {"waveActiveOp", "o:obb"},
+    {"waveActiveBit", "o:ob"},
+    {"wavePrefixOp", "o:obb"},
+    {"barrier", "v:i", dx_class::no_duplicate},
+    {"createHandleFromBinding", "h:Bic", dx_class::read_none},
+    {"annotateHandle", "h:hP", dx_class::read_none},
+    {"cbufferLoadLegacy", "C:hi", dx_class::read_only},
+    {"rawBufferLoad", "R:hiibi", dx_class::read_only},
+    {"rawBufferStore", "v:hiioooobi"},
+    {"textureLoad", "R:hiiiiiii", dx_class::read_only},
+    {"textureStore", "v:hiiioooob"},
+    {"sampleLevel", "R:hhffffiiif", dx_class::read_only},
+    {"textureGather", "R:hhffffiii", dx_class::read_only},
+    {"getDimensions", "D:hi", dx_class::read_only},
+    {"atomicBinOp", "o:hiiiio"},
+    {"atomicCompareExchange", "o:hiiioo"},
+};
+// clang-format on
+
+/// The overloads an operation takes; none for one whose name has no overload.
+enum dx_overload_mask : u8
+{
+    k_no_overload = 0,
+    k_f16 = 1 << 0,
+    k_f32 = 1 << 1,
+    k_f64 = 1 << 2,
+    k_i1 = 1 << 3,
+    k_i16 = 1 << 4,
+    k_i32 = 1 << 5,
+    k_i64 = 1 << 6,
+    k_floats = k_f16 | k_f32 | k_f64,
+    k_ints = k_i16 | k_i32 | k_i64,
+    k_scalars = k_floats | k_ints,
+};
+
+enum class dx_op : u8
+{
+    fabs,
+    saturate,
+    is_nan,
+    is_inf,
+    cos,
+    sin,
+    tan,
+    acos,
+    asin,
+    atan,
+    hcos,
+    hsin,
+    htan,
+    exp,
+    frc,
+    log,
+    sqrt,
+    rsqrt,
+    round_ne,
+    round_ni,
+    round_pi,
+    round_z,
+    bfrev,
+    countbits,
+    firstbit_lo,
+    firstbit_hi,
+    firstbit_shi,
+    fmax,
+    fmin,
+    imax,
+    imin,
+    umax,
+    umin,
+    fmad,
+    fma,
+    imad,
+    umad,
+    dot2,
+    dot3,
+    dot4,
+    thread_id,
+    group_id,
+    thread_id_in_group,
+    flattened_thread_id_in_group,
+    wave_get_lane_index,
+    wave_get_lane_count,
+    wave_any_true,
+    wave_all_true,
+    wave_read_lane_at,
+    wave_read_lane_first,
+    wave_active_op,
+    wave_active_bit,
+    wave_prefix_op,
+    barrier,
+    create_handle_from_binding,
+    annotate_handle,
+    cbuffer_load_legacy,
+    raw_buffer_load,
+    raw_buffer_store,
+    texture_load,
+    texture_store,
+    sample_level,
+    texture_gather,
+    get_dimensions,
+    atomic_bin_op,
+    atomic_compare_exchange,
+};
+
+struct dx_op_info
+{
+    u16 number = 0;
+    dx_class_id shape = dx_class_id::unary;
+    u8 overloads = k_no_overload;
+};
+
+// clang-format off
+/// Parallel to `dx_op`.
+inline constexpr dx_op_info k_dx_ops[] = {
+    {6, dx_class_id::unary, k_floats},
+    {7, dx_class_id::unary, k_floats},
+    {8, dx_class_id::is_special_float, k_f16 | k_f32},
+    {9, dx_class_id::is_special_float, k_f16 | k_f32},
+    {12, dx_class_id::unary, k_f16 | k_f32},
+    {13, dx_class_id::unary, k_f16 | k_f32},
+    {14, dx_class_id::unary, k_f16 | k_f32},
+    {15, dx_class_id::unary, k_f16 | k_f32},
+    {16, dx_class_id::unary, k_f16 | k_f32},
+    {17, dx_class_id::unary, k_f16 | k_f32},
+    {18, dx_class_id::unary, k_f16 | k_f32},
+    {19, dx_class_id::unary, k_f16 | k_f32},
+    {20, dx_class_id::unary, k_f16 | k_f32},
+    {21, dx_class_id::unary, k_f16 | k_f32},
+    {22, dx_class_id::unary, k_f16 | k_f32},
+    {23, dx_class_id::unary, k_f16 | k_f32},
+    {24, dx_class_id::unary, k_f16 | k_f32},
+    {25, dx_class_id::unary, k_f16 | k_f32},
+    {26, dx_class_id::unary, k_f16 | k_f32},
+    {27, dx_class_id::unary, k_f16 | k_f32},
+    {28, dx_class_id::unary, k_f16 | k_f32},
+    {29, dx_class_id::unary, k_f16 | k_f32},
+    {30, dx_class_id::unary, k_ints},
+    {31, dx_class_id::unary_bits, k_ints},
+    {32, dx_class_id::unary_bits, k_ints},
+    {33, dx_class_id::unary_bits, k_ints},
+    {34, dx_class_id::unary_bits, k_ints},
+    {35, dx_class_id::binary, k_floats},
+    {36, dx_class_id::binary, k_floats},
+    {37, dx_class_id::binary, k_ints},
+    {38, dx_class_id::binary, k_ints},
+    {39, dx_class_id::binary, k_ints},
+    {40, dx_class_id::binary, k_ints},
+    {46, dx_class_id::tertiary, k_floats},
+    {47, dx_class_id::tertiary, k_f64},
+    {48, dx_class_id::tertiary, k_ints},
+    {49, dx_class_id::tertiary, k_ints},
+    {54, dx_class_id::dot2, k_f16 | k_f32},
+    {55, dx_class_id::dot3, k_f16 | k_f32},
+    {56, dx_class_id::dot4, k_f16 | k_f32},
+    {93, dx_class_id::thread_id, k_i32},
+    {94, dx_class_id::group_id, k_i32},
+    {95, dx_class_id::thread_id_in_group, k_i32},
+    {96, dx_class_id::flattened_thread_id_in_group, k_i32},
+    {111, dx_class_id::wave_get_lane_index, k_no_overload},
+    {112, dx_class_id::wave_get_lane_count, k_no_overload},
+    {113, dx_class_id::wave_any_true, k_no_overload},
+    {114, dx_class_id::wave_all_true, k_no_overload},
+    {117, dx_class_id::wave_read_lane_at, k_scalars | k_i1},
+    {118, dx_class_id::wave_read_lane_first, k_scalars | k_i1},
+    {119, dx_class_id::wave_active_op, k_scalars},
+    {120, dx_class_id::wave_active_bit, k_ints},
+    {121, dx_class_id::wave_prefix_op, k_scalars},
+    {80, dx_class_id::barrier, k_no_overload},
+    {217, dx_class_id::create_handle_from_binding, k_no_overload},
+    {216, dx_class_id::annotate_handle, k_no_overload},
+    {59, dx_class_id::cbuffer_load_legacy, k_scalars},
+    {139, dx_class_id::raw_buffer_load, k_scalars},
+    {140, dx_class_id::raw_buffer_store, k_scalars},
+    {66, dx_class_id::texture_load, k_f16 | k_f32 | k_i16 | k_i32},
+    {67, dx_class_id::texture_store, k_f16 | k_f32 | k_i16 | k_i32},
+    {62, dx_class_id::sample_level, k_f16 | k_f32},
+    {73, dx_class_id::texture_gather, k_f16 | k_f32 | k_i16 | k_i32},
+    {72, dx_class_id::get_dimensions, k_no_overload},
+    {78, dx_class_id::atomic_bin_op, k_i32 | k_i64},
+    {79, dx_class_id::atomic_compare_exchange, k_i32 | k_i64},
+};
+// clang-format on
+
+static_assert(sizeof(k_dx_ops) / sizeof(k_dx_ops[0]) == sizeof(char[isize(dx_op::atomic_compare_exchange) + 1]));
+static_assert(sizeof(k_dx_classes) / sizeof(k_dx_classes[0])
+              == sizeof(char[isize(dx_class_id::atomic_compare_exchange) + 1]));
+} // namespace sgl::ir::dxil::impl

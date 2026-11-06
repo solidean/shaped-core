@@ -205,7 +205,8 @@ The size and alignment the layout rules place a value by, and each target's own,
 
 ## The native layer
 
-`ir/` is one entry point below the flat tree, which a binary target writes out with no compiler behind it: `ir::lower` fills an `ir::program`, and `ir::write_spirv` writes it.
+`ir/` is one entry point below the flat tree, which a binary target writes out with no compiler behind it: `ir::lower` fills an `ir::program`, and `ir::construct_ssa` promotes its locals.
+`ir::write_spirv` writes that; `ir::simplify` and `ir::write_dxil` are DXIL's, whose backend stands in `ir/dxil/`.
 It reads the same `plan` a text target does, so it decides no name and no address, and it hangs off `emit_entry_point` rather than being a target of its own.
 A program is flat tables of small ids, an operation being 24 bytes, because this path exists to be fast.
 What has no lowering yet is one named gap, never a guess, and [epic-sgl-native-ir-targets](issues/epic-sgl-native-ir-targets.md) has the design and the numbers.
