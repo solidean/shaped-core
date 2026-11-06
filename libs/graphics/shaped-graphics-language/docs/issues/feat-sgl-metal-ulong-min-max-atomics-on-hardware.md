@@ -3,6 +3,8 @@ created: 2026-11-05
 refs:
   - file: libs/graphics/shaped-graphics-language/src/shaped-graphics-language/builtins/register_sync.cc
   - file: libs/graphics/shaped-graphics/backends/metal/src/shaped-graphics/backends/metal/metal_context.cc
+claimed-by: Claude (for Julius Nehring-Wirxel)
+claimed-at: 2026-11-06T09:25Z
 ---
 
 # Run metal's atomic ulong min and max on Apple hardware
