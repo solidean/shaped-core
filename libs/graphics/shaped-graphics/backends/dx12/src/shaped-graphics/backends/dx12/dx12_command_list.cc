@@ -80,6 +80,37 @@ void fold_stream_wait(cc::vector<sg::backend::dx12::dx12_group_value>& waits,
 }
 } // namespace
 
+void dx12_command_list::bind_software_trace(dx12_pipeline_layout const& layout,
+                                            cc::span<dx12_binding_group const* const> groups,
+                                            bool is_graphics)
+{
+    if (layout.software_pool_root_param < 0)
+        return;
+    u32 roots[sg::impl::software_trace_roots] = {};
+    for (isize g = 0; g < groups.size(); ++g)
+        if (groups[g] != nullptr)
+            for (isize k = 0; k < groups[g]->acceleration_roots.size(); ++k)
+            {
+                auto const at = layout.acceleration_bases[g] + k;
+                CC_ASSERT(at < sg::impl::software_trace_roots, "a pipeline traces at most 16 acceleration members in "
+                                                               "software");
+                roots[at] = groups[g]->acceleration_roots[k];
+            }
+    auto const address = _ctx._software_pool.storage().gpu_address;
+    if (is_graphics)
+    {
+        _list->SetGraphicsRootShaderResourceView(UINT(layout.software_pool_root_param), address);
+        _list->SetGraphicsRoot32BitConstants(UINT(layout.software_roots_root_param),
+                                             UINT(sg::impl::software_trace_roots), roots, 0);
+    }
+    else
+    {
+        _list->SetComputeRootShaderResourceView(UINT(layout.software_pool_root_param), address);
+        _list->SetComputeRoot32BitConstants(UINT(layout.software_roots_root_param),
+                                            UINT(sg::impl::software_trace_roots), roots, 0);
+    }
+}
+
 void dx12_command_list::bind_debug_window(dx12_pipeline_layout const& layout,
                                           sg::impl::pipeline_footprint const& footprint,
                                           bool is_graphics)
@@ -379,6 +410,7 @@ void dx12_command_list::compute_dispatch(int x, int y, int z)
     // Declare each bound group's shader accesses before the dispatch: the tracker emits any intra-list
     // hazard barrier (e.g. a prior copy_write → shader_read RAW, or a WAW between two dispatches).
     // Cross-list visibility rides on D3D12 decaying buffers to COMMON at ExecuteCommandLists.
+    bind_software_trace(*_bound_pipeline_layout, _bound_groups, false);
     declare_group_accesses(_bound_groups, _bound_footprint, sg::pipeline_stage_flag::compute);
 
     // Array bindings are not auto-tracked — apply (and account for) the caller's explicit declarations.
@@ -400,6 +432,7 @@ void dx12_command_list::compute_dispatch_indirect(sg::raw_buffer_handle const& a
 
     // The arguments are read by the command processor, a stage of their own, before the dispatch runs at all.
     track_buffer_access(buffer, sg::pipeline_stage_flag::draw_indirect, sg::access_flag::indirect_read);
+    bind_software_trace(*_bound_pipeline_layout, _bound_groups, false);
     declare_group_accesses(_bound_groups, _bound_footprint, sg::pipeline_stage_flag::compute);
     declare_array_accesses(_bound_groups, _bound_footprint, _bound_footprint_owner, sg::pipeline_stage_flag::compute,
                            _compute_arrays);
@@ -466,6 +499,7 @@ void dx12_command_list::raytracing_dispatch_rays(sg::raytracing_shader_table con
 
     // Declare each bound group's accesses at the raytracing stage (a bound TLAS surfaces as accel_read), same
     // rhythm as compute_dispatch.
+    bind_software_trace(*_bound_pipeline_layout, _bound_groups, false);
     declare_group_accesses(_bound_groups, _bound_footprint, sg::pipeline_stage_flag::raytracing);
 
     // Array bindings are not auto-tracked — apply (and account for) the caller's explicit declarations.

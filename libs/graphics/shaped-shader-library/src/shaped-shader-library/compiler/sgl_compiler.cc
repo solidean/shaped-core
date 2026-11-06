@@ -224,6 +224,7 @@ private:
         b.add_pod(_target);
         b.add_pod(_diagnostics);
         b.add_pod(_guards_undefined);
+        b.add_pod(desc.software_trace);
         b.add_pod(i64(desc.options.size()));
         for (auto const& o : desc.options)
         {
@@ -332,6 +333,7 @@ private:
              .line_directives = true,
              .diagnostics = _diagnostics,
              .guards_undefined = _guards_undefined,
+             .software_trace = desc.software_trace,
              .weakens_float = weakens_float,
              .device_features = device_features});
         if (text.has_error())

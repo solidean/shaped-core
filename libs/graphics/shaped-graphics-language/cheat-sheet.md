@@ -575,7 +575,7 @@ let h = scene.world.trace(r)                             // -> triangle_hit; h.i
 let h = scene.world.trace(r, cutout)                     // cutout: (triangle_candidate) -> hit_decision, a name or a lambda
 let h = scene.world.trace(r, flags = ray_flags.force_opaque, mask = 0x01)
 let h = scene.world.trace(r, cutout, flags = ray_flags.force_omm_2_state)  // micromap unknowns take their guess, never asking cutout
-let r = ray(origin = o, direction = d, time = 0.5)       // a moving instance stands where `time` puts it, 0 to 1 (EVAL-130); emulated trace only
+let r = ray(origin = o, direction = d, time = 0.5)       // moving instances and vertices stand where `time` puts them, 0 to 1 (EVAL-130, EVAL-132); emulated trace only, which dx12 and vulkan take through a package's SOFTWARE_TRACE
 let p = spheres.trace(r, sphere, cutout_sphere)          // .procedural: (procedural_box) -> report[A], then the any hit
 let m = both.trace(r, any_hit = a, intersection = s, procedural_any_hit = b)   // .mixed -> mixed_hit[A]: m.kind, m.triangle(), m.procedural()
 is_occluded(scene.world, r)                              // the shadow ray
@@ -699,6 +699,7 @@ ops[i](mut v)                                            // raygen, miss, closes
   `x.bits` and `float.from_bits(u)` are extensions in `core.sgl` over `reinterpret_as_*`, and a WGSL-indeterminate argument (`pow(-1.0, 0.5)`) is a `program-error`.
 - **`mat4` is the one matrix**, opaque and column-major, built from its columns: `mat4(c0, c1, c2, c3)` takes four `float4` (EVAL-99), `c3` being where the origin goes.
   `register_transforms.cc` holds it, `m * p`, `m * v`, `m * float4`, `m * m`, `determinant(m) -> float` (EVAL-98) and `transpose(m)` of a `mat4`, a `mat3` or a `mat2`, every target's own function.
+  `a + b`, `a - b`, `-m`, `m * s` and `s * m` act on each element of any of the three (EVAL-109).
   A `driver_bindings` matrix is 16 floats column by column too; `sgl test` alone sees a binding's matrix as zero.
 - **Stage inputs are parameters** (CHK-271): the stage struct first, then `@vertex_index i: int`, `@is_front_facing f: bool`, `@thread_id id: int3`, ….
   `flat_entry_point::input` is `none` for a vertex stage without a vertex buffer, and `stage_inputs` holds each input's local; `run_inputs::stage_inputs` gives them values.
@@ -708,7 +709,8 @@ ops[i](mut v)                                            // raygen, miss, closes
   `@tessellation_control(partitioning = …, winding = …)` takes the patch and returns a factors struct, and `@tessellation_evaluation` takes both and `@domain_location`.
   HLSL writes them; WGSL and MSL refuse by the feature, so they are tested in C++ rather than in the corpus, which emits for all four targets.
 - **`T[N]` is a value like a struct** (CHK-285 to CHK-290): copied where passed, `float[3, 5]` is three arrays of five, and `xs.length` is a constant.
-- **`values.length` of a buffer is a `uint` the bound buffer decides** (CHK-460), of `bytes` its bytes; metal refuses it, since a Metal buffer carries no length (EMIT-195).
+- **`values.length` of a buffer is a `uint` the bound buffer decides** (CHK-460), of `bytes` its bytes, and `values[i].length` that element's of a binding array.
+  Metal refuses it, since a Metal buffer carries no length (EMIT-195).
   The robustness profiles bound every buffer index and `bytes` access by it, except on metal (LEGAL-66).
   `T[N].filled(v)` and a square literal `[a, b, c]` build one; `T[]` is a binding member's alone.
 - **`discard` is a jump, and only a `@pixel fun` may reach it** (CHK-277): anywhere else it is `stage-not-allowed` at the `discard`.

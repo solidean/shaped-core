@@ -41,6 +41,9 @@ struct sgl::text_request
     /// What the text does where an integer division by zero or an array index outside the array would run (LEGAL-65).
     /// `report` prints through the debug buffer, and so is `abort` without `diagnostics`.
     check::undefined_guard guards_undefined = check::undefined_guard::none;
+    /// Writes an inline trace as its emulated form on HLSL too, reading sg's acceleration pool (EMIT-135).
+    /// A package's `SOFTWARE_TRACE` asks for it; WGSL has no other form, and MSL keeps its native one.
+    bool software_trace = false;
     /// Compiles an entry point whose `@float` WGSL cannot keep at `fast`, with a warning, rather than refusing it (EMIT-185).
     /// The host's to give, since only the code that picked WebGPU knows whether running without the guarantee will do.
     bool weakens_float = false;

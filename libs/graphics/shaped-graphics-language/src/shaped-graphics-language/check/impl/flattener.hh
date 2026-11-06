@@ -453,6 +453,8 @@ struct flattener
 
     /// What an operator over number literals folded to, as the type it was checked as.
     flat_expr_id flatten_folded(ast::expr_id id, type_id type, number_literal const& n);
+    /// `lhs == rhs` of two arrays, or `!=` where not `is_equal`: a loop over the elements, each side evaluated once.
+    flat_expr_id flatten_array_equality(ast::expr_id id, type_id type, bool is_equal, flat_expr_id lhs, flat_expr_id rhs);
 
     /// `[a, b, c]` of an array type, its elements in the order written (EVAL-91).
     flat_expr_id flatten_array_literal(ast::expr_id id, type_id type, ast::array const& literal);

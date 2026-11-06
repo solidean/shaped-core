@@ -180,6 +180,8 @@ struct sgl::emit::options
     bool diagnostics = false;
     /// What the device has; with `float_atomic_add`, vulkan and metal write the target's own float atomics.
     check::feature_set device_features;
+    /// The tree was legalized to its emulated traces where the target has native ones (`text_request::software_trace`).
+    bool software_trace = false;
 };
 
 /// Either the text or the reasons there is none.

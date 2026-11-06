@@ -53,10 +53,6 @@ cc::result<metal_binding_group_layout_handle> metal_context::create_metal_bindin
     {
         if (b.count == 0)
             return cc::error(cc::format("binding_group_layout: '{}' is an unbounded array, which sg rejects", b.name));
-        if (sg::is_sampler(b.type) && b.count != 1)
-            return cc::error(cc::format("binding_group_layout: '{}' is an array of samplers, which sg's metal backend "
-                                        "does not bind yet",
-                                        b.name));
     }
 
     auto const hash = sg::impl::binding_group_layout_hash(bindings, static_samplers);
@@ -288,6 +284,15 @@ cc::result<metal_binding_group_handle> metal_context::create_metal_binding_group
         filled[index] = char(1);
     }
 
+    // one flag per element of each binding, so a sampler array is filled element by element
+    auto sampler_first = cc::vector<isize>::create_filled(bindings.size(), isize(0));
+    auto sampler_elements = isize(0);
+    for (auto i = isize(0); i < bindings.size(); ++i)
+    {
+        sampler_first[i] = sampler_elements;
+        sampler_elements += sg::is_sampler(bindings[i].type) ? isize(bindings[i].count) : 0;
+    }
+    auto sampler_filled = cc::vector<char>::create_filled(sampler_elements, char(0));
     for (auto const& ns : samplers)
     {
         auto const index = find_binding(ns.name);
@@ -301,12 +306,28 @@ cc::result<metal_binding_group_handle> metal_context::create_metal_binding_group
             return cc::error(cc::format("binding_group: sampler '{}' is static — it is fixed by the layout and must "
                                         "not be provided",
                                         b.name));
+        if (ns.element < 0 || ns.element >= int(b.count))
+            return cc::error(cc::format("binding_group: sampler '{}' has no element {}", ns.name, ns.element));
+        auto& element_filled = sampler_filled[sampler_first[index] + ns.element];
+        if (element_filled != char(0))
+            return cc::error(
+                cc::format("binding_group: element {} of sampler '{}' was provided twice", ns.element, ns.name));
+        element_filled = char(1);
 
         auto* const state = _samplers.acquire(_device, ns.sampler);
         if (state == nullptr)
             return cc::error(cc::format("binding_group: the metal device refused a sampler state for '{}'", ns.name));
-        slots[slot_of(b, 0)] = state->gpuResourceID()._impl;
-        filled[index] = char(1);
+        slots[slot_of(b, ns.element)] = state->gpuResourceID()._impl;
+    }
+    for (auto i = isize(0); i < bindings.size(); ++i)
+    {
+        if (!sg::is_sampler(bindings[i].type) || filled[i] != char(0))
+            continue;
+        for (auto e = 0; e < int(bindings[i].count); ++e)
+            if (sampler_filled[sampler_first[i] + e] == char(0) && bindings[i].count > 1)
+                return cc::error(cc::format("binding_group: element {} of sampler array '{}' was not provided", e,
+                                            bindings[i].name));
+        filled[i] = sampler_filled[sampler_first[i]];
     }
 
     for (auto i = isize(0); i < bindings.size(); ++i)

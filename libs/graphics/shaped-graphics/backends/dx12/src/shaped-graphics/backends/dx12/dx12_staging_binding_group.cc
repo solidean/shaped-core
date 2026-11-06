@@ -9,6 +9,7 @@
 #include <shaped-graphics/backends/dx12/dx12_staging_binding_group.hh>
 #include <shaped-graphics/backends/dx12/dx12_view_desc.hh>
 #include <shaped-graphics/binding/binding.hh>
+#include <shaped-graphics/raytracing/impl/software_trace.hh>
 #include <shaped-graphics/resource/views.hh>
 
 namespace sg::backend::dx12
@@ -76,6 +77,9 @@ cc::result<dx12_staging_binding_group_handle> dx12_staging_binding_group::create
     for (auto const& s : layout->view_slots)
         if (s.binding.is_array() && s.binding.type == sg::binding_type::acceleration_structure)
             return cc::error("staging_binding_group: acceleration-structure arrays are not supported yet");
+    // a snapshot carries descriptors, and the software walk's roots are no descriptor
+    if (sg::impl::traces_in_software(layout->bindings()))
+        return cc::error("staging_binding_group: a binding traced in software takes a binding_group");
 
     auto offsets = descriptor_offsets_of(*layout);
     auto group

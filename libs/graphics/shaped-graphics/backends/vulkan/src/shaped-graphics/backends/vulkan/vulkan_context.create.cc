@@ -1001,6 +1001,7 @@ cc::result<context_handle> create_vulkan_context(backend::vulkan::vulkan_config 
     // So are the geometry and tessellation stages, per-sample shading and wireframe fill, which sg::feature reports the same way:
     // a pipeline that uses one without the device feature enabled fails validation, whatever the device has.
     // `samplerAnisotropy` is enabled wherever the device has it too, and a sampler asking for anisotropy without it is created with it off.
+    // `drawIndirectFirstInstance` too, without which an indirect record's `first_instance` must be 0.
     auto supported = VkPhysicalDeviceFeatures{};
     vkGetPhysicalDeviceFeatures(best_device, &supported);
     auto core_features = VkPhysicalDeviceFeatures2{
@@ -1011,6 +1012,7 @@ cc::result<context_handle> create_vulkan_context(backend::vulkan::vulkan_config 
                      .tessellationShader = supported.tessellationShader,
                      .sampleRateShading = supported.sampleRateShading,
                      .fillModeNonSolid = supported.fillModeNonSolid,
+                     .drawIndirectFirstInstance = supported.drawIndirectFirstInstance,
                      .samplerAnisotropy = supported.samplerAnisotropy,
                      .textureCompressionBC = supported.textureCompressionBC,
                      .vertexPipelineStoresAndAtomics = supported.vertexPipelineStoresAndAtomics,

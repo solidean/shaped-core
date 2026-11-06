@@ -118,9 +118,6 @@ What a differentiable buffer would be, once it is the language's:
 
 What it found in SGL itself:
 
-* **The prelude's matrices have no `+`, `-` nor scale by a scalar.**
-  A product rule over matrices needs all three, so the transform writes them column by column ([debt-sgl-matrix-arithmetic](../../issues/debt-sgl-matrix-arithmetic.md)).
-  They belong in the registry.
 * The emitted text is long, about 800 lines of HLSL for the splat's backward kernel, and DXC folds it to a DXIL of about the primal's size.
   A save of a local that is assigned once, and a flag that nothing reads after it, are what to cut first.
 
@@ -154,7 +151,7 @@ The prototype has done forward mode, reverse mode, loops of constant bounds over
 
 1. A loop whose bound is stated rather than constant, as Slang's `[MaxIters]` is, which a `while` needs.
 2. A struct's tangent type, a struct of its fields' tangents, so a struct holding a position says what it holds.
-3. The rules as registry records, and the matrix arithmetic in the registry.
+3. The rules as registry records.
 4. Differentiable buffers as binding members, over `atomic[float]`, with a subgroup reduction first where the index is uniform.
 
 ## Open

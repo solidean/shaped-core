@@ -482,11 +482,15 @@ So `{float3; float}` is written with `packed_float3`: the `float` is at byte 12 
 * **EMIT-138** A member whose name is the name of a struct type one of its struct's members has is minted with trailing underscores, on every target ([why](why/emitting.md#emit-138)).
   In HLSL and MSL the member would hide the type from the members after it, so `ray: ray` is written `ray ray_;`.
 * **EMIT-135** A trace's native form is what HLSL and MSL write, and its emulated form what WGSL writes: the legalizer keeps the one its target has ([why](why/emitting.md#emit-135)).
+  A compile with `software_trace` keeps the emulated form on HLSL too, and MSL stays native since sg's metal backend keeps no pool.
   An acceleration member is `RaytracingAccelerationStructure` in HLSL and `instance_acceleration_structure` in MSL, and WGSL declares none: it keeps its slot and takes no binding.
   An entry point whose code reads sg's acceleration pool declares it and the dispatch's roots in sg's reserved group, beside the inline constants:
   `@group(3) @binding(17) var<storage, read> sg_acceleration_pool: array<vec4u>;` and `@group(3) @binding(18) var<uniform> sg_acceleration_roots: array<vec4u, 4>;`.
   The root of the entry point's k-th acceleration member (CHK-325) is `sg_acceleration_roots[k / 4][k % 4]`.
   So WGSL traces the first 16 acceleration members, and a trace of a later one is `too-many-acceleration-structures`.
+  HLSL's are the same pool and roots, as a `StructuredBuffer<uint4>` and a `cbuffer` holding `sg_acceleration_roots`.
+  dx12 places them at `register(t0, space12)` and `register(b0, space12)`, and vulkan at `[[vk::binding(17, 3)]]` and `[[vk::binding(18, 3)]]`.
+  The member stays declared there, and takes the same 16-member limit.
 * **EMIT-159** HLSL's `RayQuery` takes a trace's flags as its template where they are a constant, each by its `RAY_FLAG_` name, and `RAY_FLAG_NONE` where they are not.
   The template is ORed with the trace's own flags, so naming them there changes nothing but what a driver may specialize on.
   Forced opaque, the native form only steps the query to its end, since the target commits every candidate itself and none is left to decide.
@@ -508,6 +512,7 @@ So `{float3; float}` is written with `packed_float3`: the `float` is at byte 12 
 * **EMIT-211** An entry point that needs `unbounded_binding_arrays` is `target-lacks-feature` in WGSL, which has no binding arrays.
   So is it in MSL, until sg's metal backend binds one through an argument buffer.
 * **EMIT-195** HLSL reads a buffer's length (CHK-460) through `GetDimensions`, in a helper per buffer, and WGSL through `arrayLength`, four bytes per word of a `bytes`.
+  An element of a binding array takes a helper with the index as its parameter, and one per mark, since `NonUniformResourceIndex` must stand inside it.
   A Metal buffer argument is a pointer that carries no length, and sg passes none in yet, so an MSL compile that reads one is `target-lacks-feature`.
 * **EMIT-196** Neither MSL nor DXIL carries a 64-bit value between stages, so on `hlsl-dx12` and MSL a link's 64-bit scalar crosses as a `uint2` of its words.
   A two-vector crosses as a `uint4`, each low word first, and either keeps the member's one location.
@@ -692,10 +697,10 @@ The C++ struct a package generates is that layout byte for byte, padding include
   An element of a split array reads its scalars at `k * i + c`, its index evaluated once, and a whole array reads and writes element by element.
   A packed matrix is split column by column, a `mat2` too.
 * **EMIT-171** A packed array of structs or of arrays waits, `unsupported` alike on every target, as does a packed block's array other than EMIT-154's.
-  So does a multi-dimensional array of `mat3`, whose last column DXC's SPIR-V loses (bug-nested-mat3-array-spirv).
   A packed block's array of whole rows is the exception, which EMIT-154 places.
   Any other multi-dimensional array nests the natural stride: each inner array strides by its size rounded up to its alignment, and every target declares it as nested arrays.
   HLSL widens a 3-vector at any depth, `float4 dirs[2][3]`, and only the innermost element reads through its lanes.
+  A `mat3` two or more dimensions deep stands in a `sgl_mat3_cell` of HLSL, one `column_major float4x3 m`, of the same 48 bytes, and is read through `.m` ([why](why/emitting.md#emit-171)).
 * **EMIT-168** HLSL holds a `mat3` in GPU memory as a `column_major float4x3`, three whole rows of a constant buffer and 48 bytes of a buffer ([why](why/emitting.md#emit-168)).
   A read narrows it, `((float3x3)m)`, and a write widens a value through `sgl_widen_mat3`, which the text declares wherever it holds one.
   A struct that stands in memory declares the `float4x3` as its field, so a read of the field narrows wherever the struct is.

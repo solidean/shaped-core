@@ -8,6 +8,7 @@
 #include <shaped-graphics/backends/vulkan/vulkan_texture.hh>
 #include <shaped-graphics/backends/vulkan/vulkan_view_desc.hh>
 #include <shaped-graphics/binding/binding.hh>
+#include <shaped-graphics/raytracing/impl/software_trace.hh>
 #include <shaped-graphics/resource/views.hh>
 
 namespace sg::backend::vulkan
@@ -199,6 +200,29 @@ cc::result<vulkan_binding_group_handle> vulkan_binding_group::create_resolved(vu
             if (sg::try_as_tlas_view(view) != nullptr && is_array)
                 return cc::error(
                     cc::format("binding_group: '{}' — acceleration-structure arrays are not supported yet", nv.name));
+            if (auto const* tv_as = sg::try_as_tlas_view(view); tv_as != nullptr)
+            {
+                auto const software
+                    = tv_as->tlas != nullptr ? sg::impl::software_region_of(*tv_as->tlas) : sg::impl::software_region{};
+                if (software.is_moving && !b.traced_in_software)
+                    return cc::error(cc::format("binding_group: '{}' binds a tlas that moves, which only the software "
+                                                "walk sees: the shader's package takes SOFTWARE_TRACE in "
+                                                "sc_add_shader_package",
+                                                nv.name));
+                if (b.traced_in_software)
+                {
+                    if (tv_as->tlas != nullptr && software.pool == nullptr)
+                        return cc::error(cc::format("binding_group: '{}' is traced in software, so its tlas is built "
+                                                    "with accel_build_flag::software_trace",
+                                                    nv.name));
+                    auto const position = sg::impl::acceleration_position(bindings, b.index);
+                    while (group->acceleration_roots.size() <= position)
+                        group->acceleration_roots.push_back(0);
+                    group->acceleration_roots[position] = software.unit;
+                    if (tv_as->tlas != nullptr)
+                        group->software_tlases.push_back(tv_as->tlas);
+                }
+            }
 
             write_view_descriptor(ctx, ctx._image_views, b, view,
                                   base + layout->descriptor_offset_of(slot, int(element)));

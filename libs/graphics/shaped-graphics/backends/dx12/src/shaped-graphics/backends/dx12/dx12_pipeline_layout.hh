@@ -46,6 +46,11 @@ public:
     int inline_constants_root_param = -1; ///< root-parameter index of the 32-bit-constants param, -1 if none
     int inline_constants_num_32bit = 0;   ///< block_size / 4, for full-replace size validation
     int debug_root_param = -1;            ///< root-parameter index of the debug window's root UAV
+    int software_pool_root_param = -1;  ///< root-parameter index of the software walk's pool, -1 unless a binding asks
+    int software_roots_root_param = -1; ///< root-parameter index of its 16 root constants
+
+    /// Each group's first acceleration member among the roots.
+    cc::vector<isize> acceleration_bases;
 
     /// Whether the root signature carries a static sampler, a group's or the layout's own.
     /// **A pipeline over one neither restores from a cached blob nor hands one out.**

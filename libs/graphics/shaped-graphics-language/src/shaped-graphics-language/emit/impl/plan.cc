@@ -1095,13 +1095,8 @@ void sgl::emit::impl::validate_binding(check::checked_module const& m, check::sy
         if (t.kind == check::type_kind::array)
         {
             auto const element = t.element;
-            // DXC's SPIR-V reads the last column of a nested array's float4x3 as zero, where dx12 reads it whole
-            // issue: bug-nested-mat3-array-spirv
-            if (m.builtin_type_of(element) == nullptr && m.at(element).kind == check::type_kind::array
-                && is_mat3(m, innermost_of(m, element)))
-                report(error_kind::unsupported, cc::format("a multi-dimensional array of mat3 in GPU memory: {}", where));
             // EMIT-154 places a packed block's array of whole rows, and EMIT-178 a buffer element's array of builtins
-            else if (is_packed(space) && m.builtin_type_of(element) == nullptr)
+            if (is_packed(space) && m.builtin_type_of(element) == nullptr)
                 report(error_kind::unsupported, cc::format("an array in @padding(.none) memory: {}", where));
             else if (space == address_space::packed_constants && !is_block_member)
                 report(error_kind::unsupported, cc::format("an array in @padding(.none) memory: {}", where));

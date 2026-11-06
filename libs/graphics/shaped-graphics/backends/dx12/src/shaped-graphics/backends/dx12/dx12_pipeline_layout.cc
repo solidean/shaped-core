@@ -5,6 +5,7 @@
 #include <shaped-graphics/binding/binding.hh> // sg::is_sampler
 #include <shaped-graphics/binding/impl/layout_hash.hh>
 #include <shaped-graphics/context/impl/debug_windows.hh>
+#include <shaped-graphics/raytracing/impl/software_trace.hh>
 
 namespace sg::backend::dx12
 {
@@ -111,6 +112,35 @@ cc::result<dx12_pipeline_layout_handle> dx12_pipeline_layout::create(ID3D12Devic
         param.Descriptor.RegisterSpace = 11;
         pl->debug_root_param = int(params.size());
         params.push_back(param);
+    }
+
+    // The software walk's pool and roots, in the space EMIT-135 declares them in, where a group's binding asks for them.
+    auto traces_in_software = false;
+    auto acceleration_members = isize(0);
+    for (auto const& g : groups)
+    {
+        pl->acceleration_bases.push_back(acceleration_members);
+        acceleration_members += sg::impl::acceleration_count(g->bindings());
+        traces_in_software = traces_in_software || sg::impl::traces_in_software(g->bindings());
+    }
+    if (traces_in_software)
+    {
+        D3D12_ROOT_PARAMETER pool = {};
+        pool.ParameterType = D3D12_ROOT_PARAMETER_TYPE_SRV;
+        pool.ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
+        pool.Descriptor.ShaderRegister = 0;
+        pool.Descriptor.RegisterSpace = 12;
+        pl->software_pool_root_param = int(params.size());
+        params.push_back(pool);
+
+        D3D12_ROOT_PARAMETER roots = {};
+        roots.ParameterType = D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS;
+        roots.ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
+        roots.Constants.Num32BitValues = UINT(sg::impl::software_trace_roots);
+        roots.Constants.ShaderRegister = 0;
+        roots.Constants.RegisterSpace = 12;
+        pl->software_roots_root_param = int(params.size());
+        params.push_back(roots);
     }
 
     pl->has_static_samplers = !static_sampler_descs.empty();

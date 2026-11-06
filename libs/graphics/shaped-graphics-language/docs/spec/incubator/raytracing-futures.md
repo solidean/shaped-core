@@ -29,8 +29,8 @@ Metal and WebGPU have no reordering to write.
 They are properties of a BLAS, which sg builds, so most of their cost lands in sg; SGL would gain little beyond a ray flag and a hit's micro-triangle fields.
 
 **Motion blur.**
-Done for instances in the emulated trace: a ray carries a `time`, and a moving instance stands where it puts it (EVAL-130).
-Left: a native trace where a device has motion, a BLAS whose vertices move, and keyframes beyond two.
+Done in the emulated trace: a ray carries a `time`, and a moving instance and moving vertices stand where it puts them (EVAL-130, EVAL-132).
+Left: a native trace where a device has motion, the emulated walk on dx12 and vulkan, and keyframes beyond two.
 Metal's intersector takes a time with motion acceleration structures, and vulkan's `VK_NV_ray_tracing_motion_blur` a pipeline's `traceRayMotionNV`.
 
 **Ray queries in the vertex stage.**

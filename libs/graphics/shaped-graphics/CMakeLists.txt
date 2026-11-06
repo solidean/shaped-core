@@ -22,6 +22,7 @@ add_library(shaped-graphics
     src/shaped-graphics/query/gpu_timestamp.cc
     src/shaped-graphics/raytracing/acceleration_structure.cc
     src/shaped-graphics/raytracing/impl/hit_record_check.cc
+    src/shaped-graphics/raytracing/impl/software_trace.cc
     src/shaped-graphics/barrier/command_list_slot.cc
     src/shaped-graphics/barrier/footprint.cc
     src/shaped-graphics/barrier/array_declarations.cc
@@ -111,6 +112,7 @@ target_sources(shaped-graphics
     src/shaped-graphics/query/gpu_timestamp.hh
     src/shaped-graphics/raytracing/acceleration_structure.hh
     src/shaped-graphics/raytracing/impl/hit_record_check.hh
+    src/shaped-graphics/raytracing/impl/software_trace.hh
     src/shaped-graphics/resource/raw_buffer.hh
     src/shaped-graphics/resource/buffer.hh
     src/shaped-graphics/resource/pixel_format.hh
@@ -438,6 +440,8 @@ if(SC_BUILD_TESTS)
             tests/compute/compute-sixteen-bit-test.cc
             tests/compute/compute-sixty-four-bit-test.cc
             tests/compute/compute-double-maths-test.cc
+            tests/compute/compute-array-equality-test.cc
+            tests/compute/compute-matrix-arithmetic-test.cc
             tests/compute/compute-float-atomics-test.cc
             tests/compute/compute-texture-test.cc
             tests/raster/raster-test.cc
@@ -455,6 +459,7 @@ if(SC_BUILD_TESTS)
             tests/pipeline/texture-shapes-test.cc
             tests/pipeline/stages-test.cc
             tests/pipeline/ray-query-test.cc
+            tests/pipeline/software-trace-test.cc
             tests/pipeline/raytracing-pipeline-test.cc
             # Frame-shaped: what creating render targets every frame costs against keeping them, per backend.
             tests/transient/transient-benchmark.cc
@@ -508,8 +513,20 @@ if(SC_BUILD_TESTS)
                 sixty_four_bit_shared.sgl:*
                 sixty_four_bit_min_max.sgl:*
                 double_maths.sgl:*
+                array_equality.sgl:*
+                matrix_arithmetic.sgl:*
                 float_atomics.sgl:*
                 option_formats.sgl:*
+        )
+        sc_add_shader_package(
+            TARGET     shaped-graphics-test
+            NAME       sg_test_software_trace
+            NAMESPACE  sg::test::software_trace
+            SOURCE_DIR tests/shaders/sgl_software
+            LANGUAGE   sgl
+            SOFTWARE_TRACE
+            SHADERS
+                software_trace.sgl:*
         )
     endif()
 

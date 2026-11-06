@@ -109,6 +109,7 @@ class raw_buffer;
 class raw_texture;
 class blas;                         // bottom-level acceleration structure (see raytracing/acceleration_structure.hh)
 class tlas;                         // top-level acceleration structure (see raytracing/acceleration_structure.hh)
+struct blas_pose;                   // value type — where a moving blas_triangles's vertices stand at a later time
 struct blas_triangles;              // value type — one triangle geometry input to build_blas
 struct blas_aabbs;                  // value type — one procedural (AABB) geometry input to build_blas
 struct tlas_instance;               // value type — one instance input to build_tlas
@@ -164,6 +165,11 @@ struct allocation_info;     // value type (see memory/allocation_info.hh) — no
 struct memory_requirements; // value type (see memory/memory_heap.hh)
 
 } // namespace sg
+
+namespace sg::impl
+{
+class software_acceleration_pool; // what an opted-in dx12 or vulkan build writes into (see raytracing/impl/software_trace.hh)
+}
 
 /// Lifetime mode of a resource — a hard contract, not a hint.
 /// `persistent` lives until its handles are released; `transient` expires when its epoch retires.

@@ -7,6 +7,7 @@
 // The packages this target declares (sc_add_shader_package in shaped-graphics' CMakeLists), generated into the build
 // dir and private to this binary.
 #include <sg_test_sgl_shaders.hh>
+#include <sg_test_software_trace.hh>
 
 #if SG_TEST_HAS_HLSL_SHADERS
 #include <sg_test_shaders.hh>
@@ -23,6 +24,7 @@ slib::shader_library& create_library()
     slib::add_available_compilers(lib);
 
     lib.add_package(sg::test::sgl_shaders::package());
+    lib.add_package(sg::test::software_trace::package());
 #if SG_TEST_HAS_HLSL_SHADERS
     lib.add_package(sg::test::shaders::package());
 #endif

@@ -656,7 +656,7 @@ emitted texture_record(call const& c, cc::string_view texture_type, bool with_sa
     case op::gather:
         params.appendf("{}{}", s.is_array ? ", .layer: int" : "",
                        c.is_depth ? "" : ", .component: texel_component = texel_component.x");
-        result_type = "float4";
+        result_type = type_name(stem_of(c.kind), 4);
         break;
     case op::sample_compare:
         params.appendf("{}, .reference: float", s.is_array ? ", .layer: int" : "");
@@ -750,7 +750,7 @@ void add_test_texel(registry& r, shape_traits const& s, call c, cc::string_view 
 
 void add_sampled_shape(registry& r, shape_traits const& s)
 {
-    // loads of every component type and width; samples and gathers of floats alone, since only they filter
+    // loads and gathers of every component type and width; samples of floats alone, since only they filter
     for (auto const kind : {value_kind::scalar_float, value_kind::scalar_int, value_kind::scalar_uint})
         for (auto width = 1; width <= 4; ++width)
         {
@@ -763,19 +763,20 @@ void add_sampled_shape(registry& r, shape_traits const& s)
                 load.what = op::load;
                 add_texture_call(r, load, texture_type);
             }
-            if (kind != value_kind::scalar_float || s.is_ms)
+            if (s.is_ms)
                 continue;
-            for (auto const o : {op::sample, op::sample_level, op::sample_bias, op::sample_grad})
-            {
-                auto sampled = base;
-                sampled.what = o;
-                add_texture_call(r, sampled, texture_type);
-                if (takes_offset(s) && (o == op::sample || o == op::sample_level))
+            if (kind == value_kind::scalar_float)
+                for (auto const o : {op::sample, op::sample_level, op::sample_bias, op::sample_grad})
                 {
-                    sampled.has_offset = true;
+                    auto sampled = base;
+                    sampled.what = o;
                     add_texture_call(r, sampled, texture_type);
+                    if (takes_offset(s) && (o == op::sample || o == op::sample_level))
+                    {
+                        sampled.has_offset = true;
+                        add_texture_call(r, sampled, texture_type);
+                    }
                 }
-            }
             // a gather reads four texels of 2D or cube shapes on every target
             if (s.dim >= 2 && (s.s == texture_shape::d2 || s.s == texture_shape::d2_array || s.is_cube))
             {

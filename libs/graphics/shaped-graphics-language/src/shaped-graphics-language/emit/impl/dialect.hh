@@ -62,12 +62,18 @@ public:
     [[nodiscard]] virtual bool writes_debug_in(check::stage, check::feature_set) const { return true; }
     /// The buffer's declaration at file scope, followed by an empty line.
     virtual void write_debug_buffer(cc::string& out) const = 0;
+    /// What an emulated trace reads, for a dialect whose `write_declarations` does not write it: WGSL's does.
+    virtual void write_acceleration_pool(cc::string&) const {}
     /// The declaration of `at` on a line of its own, where the reservation cannot declare it; empty where it can.
     [[nodiscard]] virtual cc::string debug_declare(cc::string_view) const { return {}; }
     /// The length of the buffer or `bytes` declared as `name`, in elements or bytes (CHK-460); MSL has none.
     [[nodiscard]] virtual cc::string buffer_length(cc::string_view name, bool is_bytes) const = 0;
     /// What the text declares before the entry point for `buffer_length` of `name`, empty where nothing.
     [[nodiscard]] virtual cc::string buffer_length_helper(cc::string_view, bool) const { return {}; }
+    /// `buffer_length` of the element `index` of the binding array `name`; only HLSL reaches this, since WGSL has no
+    /// binding arrays and MSL no lengths.
+    [[nodiscard]] virtual cc::string buffer_length_at(cc::string_view, cc::string_view, bool) const { return "0u"; }
+    [[nodiscard]] virtual cc::string buffer_length_at_helper(cc::string_view, bool, bool) const { return {}; }
     /// The statement that reserves `count` words and leaves the first one's index in `at`.
     [[nodiscard]] virtual cc::string debug_reserve(cc::string_view at, isize count) const = 0;
     /// The condition under which `count` words from `at` fit.

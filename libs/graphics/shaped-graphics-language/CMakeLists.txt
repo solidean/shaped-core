@@ -452,6 +452,7 @@ if(SC_BUILD_TESTS)
         tests/legalize/differential-test.cc
         tests/legalize/legalize-rules-test.cc
         tests/legalize/guard-test.cc
+        tests/legalize/buffer-guard-test.cc
         tests/legalize/workgroup-guard-test.cc
 
         tests/emit/emit-test-support.hh
@@ -478,6 +479,7 @@ if(SC_BUILD_TESTS)
         tests/emit/sixteen-bit-emit-test.cc
         tests/emit/sixty-four-bit-emit-test.cc
         tests/emit/double-maths-emit-test.cc
+        tests/emit/matrix-arithmetic-emit-test.cc
         tests/emit/line-mapping-emit-test.cc
         tests/emit/debug-emit-test.cc
 

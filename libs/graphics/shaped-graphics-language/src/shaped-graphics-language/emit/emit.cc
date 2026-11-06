@@ -176,7 +176,13 @@ sgl::emit::emitted_text sgl::emit::emit_entry_point(check::checked_module const&
                                          .detail = cc::format("{} needs {}, which WebGPU does not have", e.name,
                                                               check::k_feature_names[i])});
 
-        // EMIT-135: sg binds the roots as 16 words of one uniform, and the position is the call's last argument
+        if (!result.errors.empty())
+            return result;
+    }
+
+    // EMIT-135: sg binds the roots as 16 words of one uniform, and the position is the call's last argument
+    if (t == target::wgsl || sources.software_trace)
+    {
         constexpr auto max_roots = 16;
         for (auto const& x : e.exprs)
         {
@@ -192,12 +198,10 @@ sgl::emit::emitted_text sgl::emit::emit_entry_point(check::checked_module const&
             result.errors.push_back({.kind = error_kind::too_many_acceleration_structures,
                                      .symbol = member != nullptr ? member->binding : e.function,
                                      .detail = cc::format("{} traces the acceleration member at position {}, and "
-                                                          "WebGPU binds {} roots",
+                                                          "sg binds {} roots",
                                                           e.name, k->value, max_roots)});
-            break;
-        }
-        if (!result.errors.empty())
             return result;
+        }
     }
 
     // EMIT-211: a Metal argument buffer would hold an unbounded array, which sg does not lay out yet

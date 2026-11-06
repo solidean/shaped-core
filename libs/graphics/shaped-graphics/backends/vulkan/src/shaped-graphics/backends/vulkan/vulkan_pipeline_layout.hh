@@ -7,6 +7,7 @@
 #include <shaped-graphics/backends/vulkan/vulkan_descriptor_heap.hh>
 #include <shaped-graphics/binding/pipeline_layout.hh>
 #include <shaped-graphics/fwd.hh>
+#include <shaped-graphics/raytracing/impl/software_trace.hh>
 
 /// The ordered set of group layouts a pipeline binds against, as a VkPipelineLayout.
 ///
@@ -51,6 +52,14 @@ public:
                        VkPipelineBindPoint bind_point,
                        sg::raw_buffer_handle const& debug_window) const;
 
+    /// Binds set 3 of a layout traced in software, for one op: a transient region of its samplers, the debug window,
+    /// the pool and `roots`.
+    void bind_software_trace(VkCommandBuffer buffer,
+                             VkPipelineBindPoint bind_point,
+                             sg::raw_buffer_handle const& debug_window,
+                             sg::impl::software_pool_storage const& pool,
+                             cc::span<u32 const> roots) const;
+
     ~vulkan_pipeline_layout() override;
 
     /// Destroys the backend objects now; see sg::pipeline_layout::release_backend_objects.
@@ -77,6 +86,15 @@ public:
     cc::vector<VkSampler> _reserved_samplers;
     cc::vector<isize> _reserved_sampler_offsets;
     isize _debug_window_offset = 0;
+
+    /// A group's binding is traced in software, so set 3 also holds the pool and the roots.
+    bool _traces_in_software = false;
+    isize _pool_offset = 0;
+    isize _roots_offset = 0;
+    /// Each group's first acceleration member among the roots.
+    cc::vector<isize> _acceleration_bases;
+
+    void write_storage_descriptor(VkDeviceAddress address, isize size_in_bytes, byte* at) const;
 
     struct reserved_region
     {

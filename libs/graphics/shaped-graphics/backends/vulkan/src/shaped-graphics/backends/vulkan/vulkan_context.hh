@@ -27,6 +27,7 @@
 #include <shaped-graphics/backends/vulkan/vulkan_raytracing_pipeline.hh>
 #include <shaped-graphics/backends/vulkan/vulkan_raytracing_shader_table.hh>
 #include <shaped-graphics/backends/vulkan/vulkan_sampler.hh>
+#include <shaped-graphics/backends/vulkan/vulkan_software_pool.hh>
 #include <shaped-graphics/backends/vulkan/vulkan_staging_binding_group.hh>
 #include <shaped-graphics/backends/vulkan/vulkan_swapchain.hh>
 #include <shaped-graphics/backends/vulkan/vulkan_texture.hh>
@@ -179,6 +180,7 @@ public:
         _wireframe_fill = features.fillModeNonSolid == VK_TRUE;
         _sampler_anisotropy = features.samplerAnisotropy == VK_TRUE;
         _texture_compression_bc = features.textureCompressionBC == VK_TRUE;
+        _indirect_first_instance = features.drawIndirectFirstInstance == VK_TRUE;
 
         // a property rather than a feature: no creation enables it, and SPIR-V asks it of each entry point
         auto vulkan12
@@ -209,6 +211,14 @@ public:
             if ((properties.optimalTilingFeatures & VK_FORMAT_FEATURE_SAMPLED_IMAGE_FILTER_LINEAR_BIT) == 0)
                 _float32_filtering = false;
         }
+    }
+
+    [[nodiscard]] sg::impl::software_acceleration_pool* software_pool() override { return &_software_pool; }
+
+    [[nodiscard]] sg::feature_implementation implementation_of_supported(sg::feature f) const override
+    {
+        return f == sg::feature::ray_tracing_motion_blur ? sg::feature_implementation::emulated
+                                                         : sg::feature_implementation::native;
     }
 
     // Runs shutdown() before the base dtor asserts it, and swallows what shutdown() throws.
@@ -341,6 +351,8 @@ public:
             return true;
         case sg::feature::texture_compression_bc:
             return _texture_compression_bc;
+        case sg::feature::indirect_first_instance:
+            return _indirect_first_instance;
         case sg::feature::primitive_index:
             // SPIR-V's PrimitiveId in a fragment shader needs the Geometry capability, which the device feature grants.
             return _geometry_shader;
@@ -384,8 +396,9 @@ public:
         case sg::feature::view_instancing:
             return _view_instancing;
         case sg::feature::ray_tracing_motion_blur:
-            // VK_NV_ray_tracing_motion_blur reaches a pipeline's trace alone, which no SGL text writes yet
-            return false;
+            // VK_NV_ray_tracing_motion_blur reaches a pipeline's trace alone, which no SGL text writes yet, so a
+            // package's SOFTWARE_TRACE walks it in software
+            return is_raytracing_supported();
         case sg::feature::vertex_pipeline_stores:
             return _vertex_pipeline_stores;
         // SPIR-V's `Coherent` decoration is core, and storage-image atomics on r32 integer formats are required.
@@ -888,6 +901,7 @@ public:
 
     /// Descriptors live here, and a binding group is a range of it.
     vulkan_descriptor_heap _descriptor_heap;
+    vulkan_software_pool _software_pool = {*this};
 
     /// The objects a descriptor can only name, rather than describe inline.
     /// Both are caches for the context's life: a view or sampler an sg value type describes has no lifetime of its
@@ -954,6 +968,7 @@ public:
     /// The device features of the same names, enabled wherever the device has them.
     bool _geometry_shader = false;
     bool _texture_compression_bc = false;
+    bool _indirect_first_instance = false;
     bool _tessellation_shader = false;
     bool _sample_rate_shading = false;
     bool _float_specials = false;

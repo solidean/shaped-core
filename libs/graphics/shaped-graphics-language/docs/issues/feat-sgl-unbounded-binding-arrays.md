@@ -29,7 +29,7 @@ Left:
 A `staging_binding_group`, and so a `bindless_array`, over an unbounded binding, given a capacity at creation: `create_staging_binding_group(layout, n)`.
 sg's compute test sets five buffers of a capacity of 16, replaces one in place, and reads both snapshots on dx12 and vulkan.
 
-An array of samplers on dx12 and vulkan: `sampler[N]` in SGL, `named_sampler::element` and `set_sampler_element` in sg, and a `cc::fixed_array<sg::sampler, N>` field in the generated host code.
+An array of samplers on dx12, vulkan and metal: `sampler[N]` in SGL, `named_sampler::element` and `set_sampler_element` in sg, and a `cc::fixed_array<sg::sampler, N>` field in the generated host code.
 sg's sampler test reads one texture through three samplers, through a group and through a staging group whose element 0 it replaces.
 
 `xs.length` of an unbounded array (CHK-491): a constant of its binding, which the generated host code writes from the views it binds.

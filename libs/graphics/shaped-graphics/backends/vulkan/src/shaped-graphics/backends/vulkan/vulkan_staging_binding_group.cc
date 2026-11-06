@@ -7,6 +7,7 @@
 #include <shaped-graphics/backends/vulkan/vulkan_texture.hh>
 #include <shaped-graphics/backends/vulkan/vulkan_view_desc.hh>
 #include <shaped-graphics/binding/binding.hh>
+#include <shaped-graphics/raytracing/impl/software_trace.hh>
 
 namespace sg::backend::vulkan
 {
@@ -16,6 +17,9 @@ cc::result<vulkan_staging_binding_group_handle> vulkan_staging_binding_group::cr
 {
     CC_ASSERT(layout != nullptr, "staging_binding_group requires a binding_group_layout");
     auto const bindings = layout->bindings();
+    // a snapshot carries descriptors, and the software walk's roots are no descriptor
+    if (sg::impl::traces_in_software(bindings))
+        return cc::error("staging_binding_group: a binding traced in software takes a binding_group");
     if (unbounded_capacity > int(layout->_unbounded_capacity))
         return cc::error(cc::format("staging_binding_group: an unbounded capacity of {} elements, past the device's {}",
                                     unbounded_capacity, layout->_unbounded_capacity));

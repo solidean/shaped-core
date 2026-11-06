@@ -215,6 +215,7 @@ private:
     {
         cc::string name;
         shader_language language = shader_language::hlsl;
+        bool software_trace = false;
     };
 
     [[nodiscard]] shader_compiler const* find_compiler(shader_language language, sg::shader_format format) const;
@@ -240,7 +241,8 @@ private:
                        sg::shader_stage stage,
                        cc::string_view entry_point,
                        sg::shader_format format,
-                       cc::span<shader_option const> options = {}) const;
+                       cc::span<shader_option const> options = {},
+                       bool software_trace = false) const;
 
     /// Alive-token handed to every asset as a weak reference, cleared first thing on destruction.
     /// Aliasing with a no-op deleter — it owns nothing, it only tracks whether we are still here.

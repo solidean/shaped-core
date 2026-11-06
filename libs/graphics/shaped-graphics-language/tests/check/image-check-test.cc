@@ -81,7 +81,7 @@ TEST("sgl check - an image's subscript reads where the image may be read and wri
     CHECK(reports_for_body("    let w = canvas.weights[xy.x]\n").contains("no-matching-overload"));
 }
 
-TEST("sgl check - a texel is stored whole, and a sampled texture has no subscript yet")
+TEST("sgl check - a texel is stored whole, and a sampled texture subscript only reads")
 {
     // CHK-367: a part of a texel is no place, and no call writes through one
     CHECK(reports_for_body("    canvas.swatch[xy].x = 1.0\n")
@@ -94,7 +94,8 @@ TEST("sgl check - a texel is stored whole, and a sampled texture has no subscrip
                         "@compute(8, 8) fun cs(@thread_id id: int3){canvas}:\n"
                         "    clear(mut canvas.swatch[id.xy])\n")
               .contains("not-assignable"));
-    CHECK(reports_for_body("    let c = canvas.photo[xy]\n").contains("unsupported-yet"));
+    CHECK(reports_for_body("    let c = canvas.photo[xy]\n") == "");
+    CHECK(reports_for_body("    canvas.photo[xy] = float4(0.0)\n").contains("not-assignable"));
 }
 
 TEST("sgl check - @coherent stands on a mut buffer or a mut image, and needs device_coherence")

@@ -41,6 +41,12 @@ fun store(id: int3, h: triangle_hit){scene}:
 @compute(8, 8) fun trace_cells_accepting(@thread_id id: int3){scene}:
     store(id, scene.world.trace(cell_ray(id), c => hit_decision.accept))
 
+// The same rays halfway through the frame's interval, which moving vertices and instances stand at.
+@compute(8, 8) fun trace_cells_midway(@thread_id id: int3){scene}:
+    let c = cell_ray(id)
+    let midway = ray(origin = c.origin, direction = c.direction, time = 0.5)
+    store(id, scene.world.trace(midway, flags = ray_flags.force_opaque))
+
 // ---- the same scene, traced by a pixel stage ------------------------------------------------------------------------
 //
 // One pixel of an 8 × 8 target per cell: pixel (x, y), row 0 at the top, traces the ray `cell_ray` gives cell (x, y).

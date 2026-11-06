@@ -3,6 +3,8 @@ created: 2026-11-03
 tags: [sgl, autodiff]
 refs:
   - file: libs/graphics/shaped-graphics-language/src/shaped-graphics-language/check/flatten_diff.cc
+closed: 2026-11-06
+resolution: fixed
 ---
 
 # Matrices have no +, - nor scale by a scalar

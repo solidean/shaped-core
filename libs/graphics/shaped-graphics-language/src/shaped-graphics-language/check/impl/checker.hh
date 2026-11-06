@@ -51,6 +51,8 @@ struct suffixed_number
 /// `text` must be a `plain_integer`; nullopt when the value does not fit an i64, which is what a literal is held in
 /// until the type it meets is known (CHK-61).
 [[nodiscard]] cc::optional<i64> parse_literal_integer(cc::string_view text);
+/// The value of an unsigned integer literal from 2^63 to 2^64 - 1, which `parse_literal_integer` does not hold.
+[[nodiscard]] cc::optional<u64> parse_literal_past_long(cc::string_view text);
 
 /// Whether the number literal `text` is written in hex, suffixed or not.
 [[nodiscard]] bool is_hex_literal(cc::string_view text);
@@ -197,6 +199,8 @@ struct number_literal
     bool is_integer = false;
     i64 integer = 0;
     f64 real = 0;
+    /// `integer` is the bits of a value past 2^63 - 1, which a `ulong` alone holds (CHK-450).
+    bool is_past_long = false;
 };
 
 /// A generic argument a call states: by position where `name` is empty, else by the parameter's name (CHK-340).

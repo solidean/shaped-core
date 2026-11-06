@@ -55,7 +55,8 @@ f64 truncated(f64 x)
 /// 2^52, specials and a spread of mantissas over the whole range.
 cc::vector<f64> double_inputs()
 {
-    auto const zero = 0.0;
+    // not const: MSVC refuses a constant division by zero
+    auto zero = 0.0;
     auto values = cc::vector<f64>{0.0,
                                   -0.0,
                                   1.0,

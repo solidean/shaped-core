@@ -11,8 +11,8 @@ That strictness is right for the first version and wrong forever, and four relax
 `<`, `<=`, `>` and `>=` synthesized from the declaration order, so a threshold over a quality level reads as a comparison rather than a chain of equalities.
 Nothing about it is hard; it waits for a use.
 
-**Casts both ways.**
-`value as int` and `n as light_kind`, accepted without a check.
+**A cast from `int`.**
+`value as int` exists (CHK-150), and `n as light_kind` is the way back, accepted without a check.
 This is a shading language, so the performance of a bounds test on every conversion is not worth its safety: an `int` that names no case converts anyway, and the program that did it is on its own.
 That is a deliberate acceptance of undefined behaviour, and the documentation says so where the cast is introduced rather than in a footnote.
 It is also the relaxation most likely to come early, because a value arriving from a buffer is an `int` and has to become an enum somewhere.
