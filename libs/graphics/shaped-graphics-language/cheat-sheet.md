@@ -587,8 +587,8 @@ rays path_rays:                                          // a ray set: position 
 @intersection fun sphere(b: procedural_box) -> report[sphere_attributes]   // no payload; A a struct of the program
 @callable fun doubled(v: mut operand)
 trace(b.world, r, path_rays.surface, mut p, flags = f)   // a trace of a ray type: raygen, miss, closest hit only (CHK-329)
-maybe_reorder(hint, 4)                                   // raygen: regroup invocations by hint's low bits; dx12 SM 6.9 SER, else nothing
-trace(b.world, r, set.ray, mut p, reorder = true)       // raygen: dx12 SER traces a hit object, regroups by it, invokes; else plain
+maybe_reorder(hint, 4)                                   // raygen: regroup invocations by hint's low bits; SER on dx12 (SM 6.9) and vulkan, else nothing
+trace(b.world, r, set.ray, mut p, reorder = true)       // raygen: SER (dx12, vulkan) traces a hit object, regroups by it, invokes; else plain
 trace(…, reorder = material, reorder_bits = 4)          // by the hit and a uint hint's low bits, 1..16 (CHK-433)
 let h = trace_hit(b.world, r, set.ray, mut p)           // raygen, under has(.shader_execution_reordering): no closest hit or miss yet
 h.is_hit; h.t; h.instance_id; h.primitive_index         // what was hit, before its shaders run (CHK-434)

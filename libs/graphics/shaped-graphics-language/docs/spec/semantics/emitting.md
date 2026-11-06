@@ -509,6 +509,10 @@ So `{float3; float}` is written with `packed_float3`: the `float` is at byte 12 
 * **EMIT-218** MSL writes a buffer's `atomic[ulong]` as `atomic_ulong`, and its `min` and `max` as `atomic_min_explicit` and `atomic_max_explicit`, which give nothing back.
   So each stands as a statement alone, and an MSL compile whose program reads what one gave back is `target-lacks-feature`.
   HLSL writes a workgroup memory's 64-bit atomic as a `groupshared` `int64_t` or `uint64_t` under the same `Interlocked*` calls as a buffer's.
+* **EMIT-225** `hlsl-vulkan` writes a hit object (CHK-434) and every reordering (CHK-433) as `SPV_EXT_shader_invocation_reorder`'s instructions, since DXC lowers none of HLSL's to SPIR-V.
+  Each instruction is a function of DXC's inline SPIR-V the text declares ahead of the entry point, and a hit object is `vk::SpirvOpaqueType<5313>`, SPIR-V's `OpTypeHitObjectEXT`.
+  An instruction that hands a payload over takes a variable of the ray-payload storage class, one per payload type, which the call fills before and reads back after.
+  A reordering trace is one `OpHitObjectTraceReorderExecuteEXT`, and `maybe_reorder` is `OpReorderThreadWithHintEXT`.
 * **EMIT-136** HLSL writes a ray-tracing stage as a library export named by its kind, `[shader("closesthit")]` over `void`, whose payload is an `inout` parameter.
   A triangle closest hit or any hit takes `BuiltInTriangleIntersectionAttributes` too.
   An any hit's decision ends the stage: `ignore` is `IgnoreHit()`, `accept_and_end_search` `AcceptHitAndEndSearch()`, and `accept` a plain `return`.

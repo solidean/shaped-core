@@ -570,12 +570,97 @@ written write_trace_ray(call_context const& ctx)
     return result;
 }
 
+// ---- EMIT-225: vulkan's hit objects, as SPV_EXT_shader_invocation_reorder's instructions ----
+//
+// DXC lowers none of HLSL's reordering to SPIR-V, so vulkan's text declares each instruction it uses as a function of
+// DXC's inline SPIR-V, and spells a hit object as SPIR-V's own type.
+// An instruction that hands a payload over takes a variable of the ray-payload storage class, as a trace does.
+// So each payload type has one such variable, which the call fills before and reads back after.
+
+/// OpTypeHitObjectEXT.
+constexpr cc::string_view k_spirv_hit_object = "vk::SpirvOpaqueType<5313>";
+/// The extension and the capability, ShaderInvocationReorderEXT, that each declared instruction needs.
+constexpr cc::string_view k_spirv_reorder = "[[vk::ext_extension(\"SPV_EXT_shader_invocation_reorder\")]] "
+                                            "[[vk::ext_capability(5388)]]";
+/// A trace's operands past the hit object, as `OpHitObjectTraceRayEXT` and its kin take them.
+constexpr cc::string_view k_spirv_trace_operands
+    = "RaytracingAccelerationStructure world, uint flags, uint mask, uint contribution, uint multiplier, uint miss, "
+      "float3 origin, float t_min, float3 direction, float t_max";
+
+/// The variable of the ray-payload storage class that hands a payload of type `payload` over.
+cc::string spirv_payload_name(cc::string_view payload)
+{
+    auto name = cc::string("sgl_hit_payload_");
+    for (auto const c : payload)
+        name += (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') ? c : '_';
+    return name;
+}
+
+/// What vulkan's text declares for the instructions that take a payload of the call's last argument's type.
+cc::string spirv_payload_helper(helper_context const& h)
+{
+    if (h.target != language::hlsl || !h.is_vulkan || h.argument_types.empty())
+        return {};
+    auto const& payload = h.argument_types[h.argument_types.size() - 1];
+    auto const reference = cc::format("[[vk::ext_reference]] {} h", k_spirv_hit_object);
+    return cc::format("[[vk::ext_storage_class(/* RayPayloadKHR */ 5338)]] static {0} {1};\n"
+                      "{2} [[vk::ext_instruction(/* OpHitObjectTraceRayEXT */ 5316)]]\n"
+                      "void sgl_hit_object_trace_ray({3}, {4}, [[vk::ext_reference]] {0} payload);\n"
+                      "{2} [[vk::ext_instruction(/* OpHitObjectExecuteShaderEXT */ 5319)]]\n"
+                      "void sgl_hit_object_execute({3}, [[vk::ext_reference]] {0} payload);\n"
+                      "{2} [[vk::ext_instruction(/* OpHitObjectTraceReorderExecuteEXT */ 5311)]]\n"
+                      "void sgl_hit_object_trace_reorder_execute({3}, {4}, [[vk::ext_reference]] {0} payload);\n"
+                      "{2} [[vk::ext_instruction(/* OpHitObjectTraceReorderExecuteEXT */ 5311)]]\n"
+                      "void sgl_hit_object_trace_reorder_execute({3}, {4}, [[vk::ext_reference]] {0} payload, uint "
+                      "hint, uint bits);\n",
+                      payload, spirv_payload_name(payload), k_spirv_reorder, reference, k_spirv_trace_operands);
+}
+
+/// A trace into a hit object on vulkan: the local `hit` it fills, and the payload handed over in the variable of its
+/// type; `call` is the instruction and `tail` what follows the payload.
+void spirv_trace_lines(call_context const& ctx,
+                       cc::string_view call,
+                       cc::string_view hit,
+                       cc::string_view tail,
+                       written& result)
+{
+    auto const payload_index = ctx.argument_types.size() - 1;
+    auto const global = spirv_payload_name(ctx.argument_types[payload_index]);
+    auto const payload = ctx.arguments[payload_index].text;
+    result.lines.push_back(cc::format("{} {};", k_spirv_hit_object, hit));
+    result.lines.push_back(cc::format("{} = {};", global, payload));
+    result.lines.push_back(
+        cc::format("{}({}, {}, uint({}), uint({}), uint({}), uint({}), uint({}), {}, {}, {}, {}, {}{});", call, hit,
+                   ctx.arguments[0].text, ctx.arguments[5].text, ctx.arguments[6].text, ctx.arguments[7].text,
+                   ctx.arguments[8].text, ctx.arguments[9].text, ctx.arguments[1].text, ctx.arguments[3].text,
+                   ctx.arguments[2].text, ctx.arguments[4].text, global, tail));
+}
+
+/// The payload read back from the variable of its type, as the call's own statement; it is embedded nowhere.
+written spirv_payload_read_back(call_context const& ctx, cc::string_view payload)
+{
+    auto const& type = ctx.argument_types[ctx.argument_types.size() - 1];
+    return {.text = cc::format("{} = {}", payload, spirv_payload_name(type)), .binds = precedence::bitwise};
+}
+
 /// `trace_ray_reordered`: the trace as a hit object, the invocations regrouped by it, and its shaders run from it.
 /// `data` 1 adds a coherence hint and its bits, the arguments past the miss index.
 written write_trace_ray_reordered(call_context const& ctx)
 {
     if (ctx.target != language::hlsl)
         return {};
+    if (ctx.is_vulkan)
+    {
+        auto const hit = ctx.mint.is_valid() ? ctx.mint("hit_object") : cc::string("hit_object");
+        auto const tail = ctx.data == 1
+                            ? cc::format(", uint({}), uint({})", ctx.arguments[10].text, ctx.arguments[11].text)
+                            : cc::string();
+        auto lines = written();
+        spirv_trace_lines(ctx, "sgl_hit_object_trace_reorder_execute", hit, tail, lines);
+        auto result = spirv_payload_read_back(ctx, ctx.arguments[ctx.arguments.size() - 1].text);
+        result.lines = cc::move(lines.lines);
+        return result;
+    }
     auto const desc = ctx.mint.is_valid() ? ctx.mint("ray_desc") : cc::string("ray_desc");
     auto const hit = ctx.mint.is_valid() ? ctx.mint("hit_object") : cc::string("hit_object");
     auto const payload = ctx.arguments[ctx.arguments.size() - 1].text;
@@ -599,6 +684,16 @@ written write_trace_hit_ray(call_context const& ctx)
 {
     if (ctx.target != language::hlsl)
         return {};
+    if (ctx.is_vulkan)
+    {
+        auto const hit = ctx.mint.is_valid() ? ctx.mint("hit_object") : cc::string("hit_object");
+        auto result = written();
+        spirv_trace_lines(ctx, "sgl_hit_object_trace_ray", hit, "", result);
+        auto const back = spirv_payload_read_back(ctx, ctx.arguments[ctx.arguments.size() - 1].text);
+        result.lines.push_back(cc::format("{};", back.text));
+        result.text = hit;
+        return result;
+    }
     auto const desc = ctx.mint.is_valid() ? ctx.mint("ray_desc") : cc::string("ray_desc");
     auto result = written();
     ray_desc_lines(ctx, desc, result);
@@ -615,34 +710,85 @@ struct hit_object_read
     cc::string_view type;
     evaluator evaluate;
     cc::string_view hlsl;
+    /// SPV_EXT_shader_invocation_reorder's instruction, as vulkan declares it (EMIT-225).
+    cc::string_view spirv;
+    int opcode;
     cc::string_view doc;
 };
 constexpr hit_object_read k_hit_object_reads[] = {
-    {"is_hit", "bool", no_bool, "IsHit", "/// Whether the trace hit a primitive."},
-    {"is_miss", "bool", no_bool, "IsMiss", "/// Whether the trace left the scene, so invoking it runs the miss."},
-    {"t", "float", zero_float, "GetRayTCurrent",
+    {"is_hit", "bool", no_bool, "IsHit", "OpHitObjectIsHitEXT", 5351, "/// Whether the trace hit a primitive."},
+    {"is_miss", "bool", no_bool, "IsMiss", "OpHitObjectIsMissEXT", 5352,
+     "/// Whether the trace left the scene, so invoking it runs the miss."},
+    {"t", "float", zero_float, "GetRayTCurrent", "OpHitObjectGetRayTMaxEXT", 5333,
      "/// How far along the ray the hit is, or the ray's t_max where it missed."},
-    {"instance_id", "int", zero_int, "GetInstanceID", "/// The instance's own id, as the TLAS gives it."},
-    {"instance_index", "int", zero_int, "GetInstanceIndex", "/// The instance's position in the TLAS."},
-    {"geometry_index", "int", zero_int, "GetGeometryIndex", "/// The geometry's position in its BLAS."},
-    {"primitive_index", "int", zero_int, "GetPrimitiveIndex", "/// The primitive's position in its geometry."},
+    {"instance_id", "int", zero_int, "GetInstanceID", "OpHitObjectGetInstanceCustomIndexEXT", 5326,
+     "/// The instance's own id, as the TLAS gives it."},
+    {"instance_index", "int", zero_int, "GetInstanceIndex", "OpHitObjectGetInstanceIdEXT", 5325,
+     "/// The instance's position in the TLAS."},
+    {"geometry_index", "int", zero_int, "GetGeometryIndex", "OpHitObjectGetGeometryIndexEXT", 5324,
+     "/// The geometry's position in its BLAS."},
+    {"primitive_index", "int", zero_int, "GetPrimitiveIndex", "OpHitObjectGetPrimitiveIndexEXT", 5323,
+     "/// The primitive's position in its geometry."},
 };
+
+/// What vulkan's text declares for the instructions that read a hit object or regroup invocations (EMIT-225).
+cc::string spirv_hit_object_helper(helper_context const& h)
+{
+    if (h.target != language::hlsl || !h.is_vulkan)
+        return {};
+    auto const reference = cc::format("[[vk::ext_reference]] {} h", k_spirv_hit_object);
+    auto text = cc::string();
+    for (auto const& read : k_hit_object_reads)
+        text += cc::format("{} [[vk::ext_instruction(/* {} */ {})]]\n{} sgl_hit_object_{}({});\n", k_spirv_reorder,
+                           read.spirv, read.opcode, read.type == "int" ? cc::string_view("uint") : read.type, read.name,
+                           reference);
+    text += cc::format("{} [[vk::ext_instruction(/* OpReorderThreadWithHitObjectEXT */ 5315)]]\n"
+                       "void sgl_reorder_thread({});\n",
+                       k_spirv_reorder, reference);
+    text += cc::format("{} [[vk::ext_instruction(/* OpReorderThreadWithHitObjectEXT */ 5315)]]\n"
+                       "void sgl_reorder_thread({}, uint hint, uint bits);\n",
+                       k_spirv_reorder, reference);
+    text += cc::format("{} [[vk::ext_instruction(/* OpReorderThreadWithHintEXT */ 5314)]]\n"
+                       "void sgl_reorder_thread(uint hint, uint bits);\n",
+                       k_spirv_reorder);
+    return text;
+}
 
 written write_hit_object_read(call_context const& ctx)
 {
     if (ctx.target != language::hlsl)
         return {};
     auto const& read = k_hit_object_reads[ctx.data];
+    if (ctx.is_vulkan && read.type == "int")
+        return {.text = cc::format("int(sgl_hit_object_{}({}))", read.name, ctx.arguments[0].text)};
+    if (ctx.is_vulkan)
+        return {.text = cc::format("sgl_hit_object_{}({})", read.name, ctx.arguments[0].text)};
     if (read.type == "int")
         return {.text = cc::format("int({}.{}())", ctx.arguments[0].text, read.hlsl)};
     return {.text = cc::format("{}.{}()", ctx.arguments[0].text, read.hlsl)};
 }
 
-/// `hit_object_reorder`, `data` 0, or by a hint, 1; `hit_object_invoke` is 2.
+/// `hit_object_reorder`, `data` 0, or by a hint, 1; `hit_object_invoke` is 2; `reorder_thread_by_hint` is 3.
 written write_hit_object_step(call_context const& ctx)
 {
     if (ctx.target != language::hlsl)
         return {};
+    if (ctx.data == 3)
+        return {.text
+                = cc::format("{}(uint({}), uint({}))", ctx.is_vulkan ? "sgl_reorder_thread" : "dx::MaybeReorderThread",
+                             ctx.arguments[0].text, ctx.arguments[1].text)};
+    if (ctx.is_vulkan && ctx.data == 2)
+    {
+        auto const global = spirv_payload_name(ctx.argument_types[1]);
+        auto result = spirv_payload_read_back(ctx, ctx.arguments[1].text);
+        result.lines.push_back(cc::format("{} = {};", global, ctx.arguments[1].text));
+        result.lines.push_back(cc::format("sgl_hit_object_execute({}, {});", ctx.arguments[0].text, global));
+        return result;
+    }
+    if (ctx.is_vulkan)
+        return {.text = ctx.data == 1 ? cc::format("sgl_reorder_thread({}, uint({}), uint({}))", ctx.arguments[0].text,
+                                                   ctx.arguments[1].text, ctx.arguments[2].text)
+                                      : cc::format("sgl_reorder_thread({})", ctx.arguments[0].text)};
     if (ctx.data == 2)
         return {.text = cc::format("dx::HitObject::Invoke({}, {})", ctx.arguments[0].text, ctx.arguments[1].text)};
     if (ctx.data == 1)
@@ -654,6 +800,8 @@ written write_hit_object_step(call_context const& ctx)
 constexpr cc::string_view k_trace_ray_hlsl[] = {"RayDesc", "TraceRay"};
 constexpr cc::string_view k_hit_object_hlsl[] = {
     "RayDesc",
+    "vk",
+    "SpirvOpaqueType",
     "dx",
     "HitObject",
     "TraceRay",
@@ -668,7 +816,7 @@ constexpr cc::string_view k_hit_object_hlsl[] = {
     "GetPrimitiveIndex",
 };
 constexpr cc::string_view k_trace_ray_reordered_hlsl[]
-    = {"RayDesc", "dx", "HitObject", "TraceRay", "MaybeReorderThread", "Invoke"};
+    = {"RayDesc", "dx", "HitObject", "TraceRay", "MaybeReorderThread", "Invoke", "vk", "SpirvOpaqueType"};
 constexpr cc::string_view k_trace_ray_msl[] = {
     "sgl_configure",
     "sgl_record_of",
@@ -893,6 +1041,7 @@ void sgl::builtins::register_raytracing(registry& r)
                 .evaluate = nothing,
                 .write = {.kind = spelling_kind::custom,
                           .custom = write_trace_ray_reordered,
+                          .helper = spirv_payload_helper,
                           .writes_lines = is_not_wgsl,
                           .data = is_hinted ? 1u : 0u,
                           .hlsl_names = k_trace_ray_reordered_hlsl},
@@ -910,6 +1059,7 @@ void sgl::builtins::register_raytracing(registry& r)
         .declaration = "struct hit_object",
         .doc = "/// A trace whose shaders have not run yet: `let h = trace_hit(...)`, then `h.invoke(mut p)`.",
         .hlsl = "dx::HitObject",
+        .hlsl_vulkan = cc::string(k_spirv_hit_object),
         .features = ser,
         .local_only_reason = "it is a trace in flight, which only its invocation completes",
     });
@@ -923,6 +1073,7 @@ void sgl::builtins::register_raytracing(registry& r)
             .evaluate = nothing,
             .write = {.kind = spelling_kind::custom,
                       .custom = write_trace_hit_ray,
+                      .helper = spirv_payload_helper,
                       .writes_lines = is_not_wgsl,
                       .hlsl_names = k_hit_object_hlsl},
             .writes_through = written_argument::element,
@@ -935,23 +1086,32 @@ void sgl::builtins::register_raytracing(registry& r)
                                     k_hit_object_reads[i].name, k_hit_object_reads[i].type),
             .doc = cc::string(k_hit_object_reads[i].doc),
             .evaluate = k_hit_object_reads[i].evaluate,
-            .write
-            = {.kind = spelling_kind::custom, .custom = write_hit_object_read, .data = i, .hlsl_names = k_hit_object_hlsl},
+            .write = {.kind = spelling_kind::custom,
+                      .custom = write_hit_object_read,
+                      .helper = spirv_hit_object_helper,
+                      .data = i,
+                      .hlsl_names = k_hit_object_hlsl},
             .features = ser,
         });
     r.add(function_record{
         .signature = "@internal @stages(.raygen) fun hit_object_reorder(h: hit_object)",
         .doc = "/// Regroups the invocations by what their hit objects run.",
         .evaluate = nothing,
-        .write = {.kind = spelling_kind::custom, .custom = write_hit_object_step, .hlsl_names = k_hit_object_hlsl},
+        .write = {.kind = spelling_kind::custom,
+                  .custom = write_hit_object_step,
+                  .helper = spirv_hit_object_helper,
+                  .hlsl_names = k_hit_object_hlsl},
         .features = ser,
     });
     r.add(function_record{
         .signature = "@internal @stages(.raygen) fun hit_object_reorder_by_hint(h: hit_object, hint: uint, bits: int)",
         .doc = "/// Regroups the invocations by what their hit objects run, and by the low `bits` bits of `hint`.",
         .evaluate = nothing,
-        .write
-        = {.kind = spelling_kind::custom, .custom = write_hit_object_step, .data = 1, .hlsl_names = k_hit_object_hlsl},
+        .write = {.kind = spelling_kind::custom,
+                  .custom = write_hit_object_step,
+                  .helper = spirv_hit_object_helper,
+                  .data = 1,
+                  .hlsl_names = k_hit_object_hlsl},
         .features = ser,
     });
     r.add(function_record{
@@ -959,10 +1119,25 @@ void sgl::builtins::register_raytracing(registry& r)
         .doc = "/// Runs the closest hit or the miss the hit object holds, handing the payload over past the "
                "signature.",
         .evaluate = nothing,
-        .write
-        = {.kind = spelling_kind::custom, .custom = write_hit_object_step, .data = 2, .hlsl_names = k_hit_object_hlsl},
+        .write = {.kind = spelling_kind::custom,
+                  .custom = write_hit_object_step,
+                  .helper = spirv_payload_helper,
+                  .writes_lines = is_hlsl,
+                  .data = 2,
+                  .hlsl_names = k_hit_object_hlsl},
         .writes_through = written_argument::element,
         .takes_element = true,
+        .features = ser,
+    });
+    r.add(function_record{
+        .signature = "@internal @stages(.raygen) fun reorder_thread_by_hint(hint: uint, bits: int)",
+        .doc = "/// Regroups the invocations by the low `bits` bits of `hint`, which `maybe_reorder` writes on vulkan.",
+        .evaluate = nothing,
+        .write = {.kind = spelling_kind::custom,
+                  .custom = write_hit_object_step,
+                  .helper = spirv_hit_object_helper,
+                  .data = 3,
+                  .hlsl_names = k_hit_object_hlsl},
         .features = ser,
     });
 

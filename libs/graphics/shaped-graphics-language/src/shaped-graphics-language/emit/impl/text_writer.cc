@@ -1258,11 +1258,15 @@ struct writer
         case builtins::spelling_kind::custom:
         {
             auto mint = [&](cc::string_view desired) { return p.names.mint(desired); };
+            // the types a helper is given, which a record with one may read too; another's need not be spelled
+            auto const types = how.helper != nullptr ? argument_types_of(p, d, c) : cc::vector<cc::string>();
             auto const offsets = d.language() == builtins::language::msl && !arguments.empty()
                                    ? hit_offsets_of(p.e.at(c.arguments)[0])
                                    : cc::string();
             auto result = how.custom({.target = d.language(),
+                                      .is_vulkan = p.which == emit::target::hlsl_vulkan,
                                       .arguments = arguments,
+                                      .argument_types = types,
                                       .builtins = *p.m.builtins,
                                       .data = how.data,
                                       .mint = mint,
@@ -1781,7 +1785,9 @@ cc::string_view sgl::emit::impl::type_text(plan const& p, dialect const& d, chec
     if (type == check::checked_module::void_type)
         return "void";
     if (auto const* const record = p.m.builtin_type_of(type))
-        return record->spelled_in(d.language());
+        return p.which == emit::target::hlsl_vulkan && !record->hlsl_vulkan.empty()
+                 ? cc::string_view(record->hlsl_vulkan)
+                 : record->spelled_in(d.language());
     // An enum is its cases' `int` on every target (EVAL-64); the constants of EMIT-76 are what its values read as.
     if (is_valid(type) && p.m.at(type).kind == check::type_kind::enumeration && p.m.builtins != nullptr)
     {
@@ -1800,6 +1806,18 @@ cc::string_view sgl::emit::impl::type_text(plan const& p, dialect const& d, chec
     return p.structs[p.struct_of_type[index_of(type)]].name;
 }
 
+
+cc::vector<cc::string> sgl::emit::impl::argument_types_of(plan const& p, dialect const& d, check::flat_call const& c)
+{
+    auto types = cc::vector<cc::string>();
+    for (auto const argument : p.e.at(c.arguments))
+    {
+        auto const type = p.e.at(argument).type;
+        types.push_back(check::is_resource(p.m.at(type).kind) ? d.resource_text(p, type)
+                                                              : cc::string(type_text(p, d, type)));
+    }
+    return types;
+}
 
 void sgl::emit::impl::write_helpers(cc::string& out, plan const& p, dialect const& d)
 {
@@ -1826,14 +1844,11 @@ void sgl::emit::impl::write_helpers(cc::string& out, plan const& p, dialect cons
         auto const* const record = call != nullptr ? p.m.builtin_function(call->intrinsic) : nullptr;
         if (record == nullptr || record->write.helper == nullptr)
             continue;
-        auto types = cc::vector<cc::string>();
-        for (auto const argument : p.e.at(call->arguments))
-        {
-            auto const type = p.e.at(argument).type;
-            types.push_back(check::is_resource(p.m.at(type).kind) ? d.resource_text(p, type)
-                                                                  : cc::string(type_text(p, d, type)));
-        }
-        auto text = record->write.helper({.target = d.language(), .argument_types = types, .data = record->write.data});
+        auto const types = argument_types_of(p, d, *call);
+        auto text = record->write.helper({.target = d.language(),
+                                          .is_vulkan = p.which == emit::target::hlsl_vulkan,
+                                          .argument_types = types,
+                                          .data = record->write.data});
         auto is_known = text.empty();
         for (auto const& w : written)
             is_known = is_known || w == text;

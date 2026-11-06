@@ -1411,7 +1411,7 @@ HLSL writes it on dx12 and vulkan; WebGPU has none, and sg's metal backend does 
   `reorder_bits` is an `int` constant from 1 to 16, and stands exactly where `reorder` is a hint.
   Anything else is `invalid-constant-argument` or `no-matching-overload`, and a `reorder` of another type `type-mismatch`.
   It is a hint: a trace means what it means without it, and each invocation goes on as it was.
-  A raygen of a dx12 compile whose device has `shader_execution_reordering` traces into a hit object, regroups by it, then runs its shaders, and uses the feature.
+  A raygen of a dx12 or vulkan compile whose device has `shader_execution_reordering` traces into a hit object, regroups by it, then runs its shaders, and uses the feature.
   Every other trace is the plain one, its hint unevaluated.
 * **CHK-434** `trace_hit(world, r, set.ray, mut p)` traces as `trace` does, and runs the any-hit and intersection shaders alone: it gives a `hit_object`, and `flags` and `mask` follow by name.
   `h.invoke(mut p)` then runs the closest hit or the miss the hit object holds, on a payload of the ray type it traced, which is `type-mismatch` otherwise.
