@@ -263,7 +263,11 @@ void append_pod(cc::vector<byte>& out, T const& value)
 u32 gpu_resource_manager::_slot_index(instance_slot const& slot)
 {
     if (slot.kind == material_slot_kind::attribute_descriptor)
-        return u32(acquire_buffer(attributes.get(slot.attribute).data.as_readonly_buffer()));
+    {
+        CC_ASSERT(attributes.get(slot.attribute).state == residency::complete,
+                  "a block naming an attribute is built only once the attribute is in the pool");
+        return u32(acquire_buffer(attributes.pool().as_readonly_buffer()));
+    }
 
     CC_ASSERT(slot.kind == material_slot_kind::texture_index, "only a descriptor or a texture slot names an index");
     auto const& record = textures.get(slot.texture);
@@ -312,8 +316,9 @@ cc::vector<byte> gpu_resource_manager::build_instance_parameters(instance_record
 
         case material_slot_kind::attribute_descriptor:
         {
-            // Tightly packed from offset 0 within its own buffer, so the stride is just the element size.
-            u32 const desc[attribute_desc_size / sizeof(u32)] = {_slot_index(slot), 0u, slot.element_stride};
+            // Tightly packed from the attribute's offset in the pool, so the stride is just the element size.
+            auto const offset = u32(attributes.get(slot.attribute).offset);
+            u32 const desc[attribute_desc_size / sizeof(u32)] = {_slot_index(slot), offset, slot.element_stride};
             write(slot.offset, cc::span<u32 const>(desc).as_bytes());
             break;
         }
@@ -330,17 +335,56 @@ cc::vector<byte> gpu_resource_manager::build_instance_parameters(instance_record
     return out;
 }
 
+namespace
+{
+/// The parameter pool's first size, and the alignment of every block in it: a `load4` reads 16 bytes, and a block on a
+/// 16-byte boundary keeps every slot the layout aligned within it aligned in the pool too.
+constexpr isize initial_param_pool_bytes = 64 * 1024;
+constexpr isize param_block_alignment = 16;
+
+/// Read as `bytes` by every shader, written by uploads, and read back by whoever checks it.
+constexpr auto param_pool_usage
+    = sg::buffer_usage::readonly_buffer | sg::buffer_usage::copy_dst | sg::buffer_usage::copy_src;
+} // namespace
+
+isize gpu_resource_manager::_allocate_parameters(isize bytes)
+{
+    auto const size = cc::align_up(cc::max(bytes, isize(4)), param_block_alignment);
+    if (_param_pool.raw() == nullptr)
+    {
+        _param_pool = _ctx->persistent.create_buffer<byte>(initial_param_pool_bytes, param_pool_usage);
+        _param_ranges.grow(initial_param_pool_bytes);
+    }
+    auto offset = _param_ranges.allocate(size);
+    if (!offset.has_value())
+    {
+        // Every block uploads again into the larger pool: see `_param_pool`.
+        auto const capacity = cc::max(2 * _param_ranges.capacity(), _param_ranges.capacity() + size);
+        _param_pool = _ctx->persistent.create_buffer<byte>(capacity, param_pool_usage);
+        _param_ranges.grow(capacity);
+        ++_param_pool_generation;
+        offset = _param_ranges.allocate(size);
+        CC_LOG_INFO("grew the parameter pool to {} bytes", capacity);
+    }
+    CC_ASSERT(offset.has_value(), "a grown pool always fits the range it grew for");
+    return offset.value();
+}
+
 void gpu_resource_manager::_upload_parameters(sg::command_list& cmd, instance_record& r)
 {
     if (r.built_in == _record_stamp)
         return;
     r.built_in = _record_stamp;
 
+    if (r.param_offset < 0)
+        r.param_offset = _allocate_parameters(r.size_bytes);
+
     // Once a block is uploaded, only its indices can move from one epoch to the next: its constants are the record's own.
-    // So a later epoch re-acquires each index, as the access declaration needs, and patches and uploads only those that moved.
+    // So a later epoch re-acquires each index, as the access declaration needs, and patches only those that moved.
+    // A pool replaced since the last upload holds nothing of the block, so it uploads whole.
     if (!r.uploaded.empty())
     {
-        auto moved = false;
+        auto moved = r.param_generation != _param_pool_generation;
         for (auto const& slot : r.slots)
         {
             if (slot.kind != material_slot_kind::attribute_descriptor && slot.kind != material_slot_kind::texture_index)
@@ -355,29 +399,19 @@ void gpu_resource_manager::_upload_parameters(sg::command_list& cmd, instance_re
             moved = true;
         }
         if (moved)
-            cmd.upload.data_to_buffer(r.parameters, r.uploaded);
+            cmd.upload.data_to_buffer(_param_pool, cc::span<byte const>(r.uploaded), r.param_offset);
+        r.param_generation = _param_pool_generation;
         return;
     }
 
+    // An empty block, a material whose every attribute needs no parameter, still names its range, and uploads nothing.
     auto bytes = build_instance_parameters(r);
-
-    // A material whose every attribute is sourced from somewhere needing no parameter has an empty block, and a zero-sized
-    // buffer has no descriptor to acquire.
-    // Four bytes keep the shape uniform rather than making the shader branch on whether it has a block at all.
-    if (r.parameters.raw() == nullptr)
-        r.parameters = cmd.context().persistent.create_buffer<byte>(
-            bytes.empty() ? isize(4) : bytes.size(), sg::buffer_usage::readonly_buffer | sg::buffer_usage::copy_dst);
-
-    // The bytes are the epoch's, the buffer is not.
-    // In the steady state they come out identical, and skipping the copy is what keeps the upload path quiet — the buffer's
-    // own descriptor never moves either way, so the group's snapshot stays valid.
-    auto const unchanged = bytes.size() == r.uploaded.size()
-                        && (bytes.empty() || cc::memcmp(bytes.data(), r.uploaded.data(), size_t(bytes.size())) == 0);
-    if (!bytes.empty() && !unchanged)
+    if (!bytes.empty())
     {
-        cmd.upload.data_to_buffer(r.parameters, bytes);
+        cmd.upload.data_to_buffer(_param_pool, cc::span<byte const>(bytes), r.param_offset);
         r.uploaded = cc::move(bytes);
     }
+    r.param_generation = _param_pool_generation;
 }
 
 shaders::tracer::instance_record gpu_resource_manager::describe_instance(sg::command_list& cmd,
@@ -406,16 +440,18 @@ shaders::tracer::instance_record gpu_resource_manager::describe_instance(sg::com
     // The cube shades through the fallback, which reads no parameter block, so none is built: building it binds the attributes.
     // The index pool fills the slot, since a record has to name some buffer there.
     auto param_buffer = u32(acquire_buffer(meshes.index_pool().raw()->as_raw_readonly()));
+    auto param_offset = u32(0);
     if (!pending)
     {
         _upload_parameters(cmd, r);
-        param_buffer = u32(acquire_buffer(r.parameters.as_readonly_buffer()));
+        param_buffer = u32(acquire_buffer(_param_pool.as_readonly_buffer()));
+        param_offset = u32(r.param_offset);
     }
 
     // A landed quadric indexes nothing, so the field names its boxes, which the raster path draws each primitive as.
     auto const indices = pending ? meshes.index_pool().raw()->as_raw_readonly() : q.aabbs.raw()->as_raw_readonly();
     return {.param_buffer = param_buffer,
-            .param_offset = 0,
+            .param_offset = param_offset,
             .vertices = u32(acquire_buffer(vertices)),
             .indices = u32(acquire_buffer(indices)),
             .base_vertex = pending ? u32(cube.base_vertex) : 0u,
@@ -459,8 +495,8 @@ shaders::tracer::instance_record gpu_resource_manager::describe_instance(sg::com
 
     // Every index here is this epoch's, minted right where it is written — which is what puts all of them into the access
     // declaration `freeze()` hands the trace.
-    return {.param_buffer = u32(acquire_buffer(r.parameters.as_readonly_buffer())),
-            .param_offset = 0, // one block per buffer today; the shader reads through the offset regardless
+    return {.param_buffer = u32(acquire_buffer(_param_pool.as_readonly_buffer())),
+            .param_offset = u32(r.param_offset),
             .vertices = vertices,
             .indices = indices,
             .base_vertex = u32(geometry.base_vertex),
@@ -495,8 +531,8 @@ shaders::tracer::instance_record gpu_resource_manager::describe_instance(sg::com
                 .emitter = 0xffffffffu};
 
     _upload_parameters(cmd, r);
-    return {.param_buffer = u32(acquire_buffer(r.parameters.as_readonly_buffer())),
-            .param_offset = 0,
+    return {.param_buffer = u32(acquire_buffer(_param_pool.as_readonly_buffer())),
+            .param_offset = u32(r.param_offset),
             .vertices = vertices,
             .indices = indices,
             .base_vertex = 0,
@@ -1226,7 +1262,7 @@ i32 gpu_resource_manager::record_pending_work(sg::command_list& cmd)
     // triangles this frame rather than next.
     // What ORDER the transfers themselves ran in is the streaming actor's business, decided by the priority each
     // acquire set — this only collects the results.
-    (void)attributes.collect_settled();
+    (void)attributes.collect_settled(&cmd);
     (void)meshes.collect_settled();
     (void)quadrics.collect_settled();
     _collect_textures();

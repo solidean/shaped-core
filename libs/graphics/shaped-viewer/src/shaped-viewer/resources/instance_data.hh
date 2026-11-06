@@ -39,7 +39,7 @@ struct sv::instance_slot
     tg::vec4f placeholder_texel = tg::vec4f(1, 1, 1, 1);
 };
 
-/// One instance's material parameter block: the slots it is built from, and the buffer it is built into.
+/// One instance's material parameter block: the slots it is built from, and where in the parameter pool it lives.
 ///
 /// Minted by `gpu_resource_manager::acquire_instance` and content-cached on the resolved material's `parameter_key`, so two
 /// meshes drawn identically share one.
@@ -47,11 +47,10 @@ struct sv::instance_slot
 /// two materials differing only in their sampler share a `parameter_key` while splitting the permutation, so a copy stored
 /// beside the shared block could name either of them.
 ///
-/// **The buffer is persistent and the bytes in it are not.**
+/// **The range is persistent and the bytes in it are not.**
 /// Every index a block holds is the epoch's that wrote it, so `describe_instance` rebuilds the bytes each epoch — but into the
-/// same buffer, and it uploads only when they actually differ from `uploaded`.
-/// A stable working set therefore writes no descriptor, which is what keeps the staging group clean and its snapshot cached;
-/// a fresh transient buffer per frame would re-mint the whole bindless table on every trace.
+/// same range of the manager's one parameter pool, and it uploads only when they differ from `uploaded`.
+/// A stable working set therefore writes no descriptor, which is what keeps the staging group clean and its snapshot cached.
 struct sv::instance_record
 {
     /// how big the block is, which is `material_parameter_layout::size_bytes`
@@ -59,11 +58,14 @@ struct sv::instance_record
 
     cc::vector<instance_slot> slots;
 
-    /// Where the block lives, created on the first `describe_instance`.
-    /// At least 4 bytes even for an empty block: a zero-sized buffer has no descriptor to acquire.
-    sg::buffer<byte> parameters;
+    /// The block's byte offset in the manager's parameter pool, allocated on the first `describe_instance`; -1 before.
+    /// At least 4 bytes are reserved even for an empty block, so every record names a range.
+    isize param_offset = -1;
 
-    /// what was last uploaded into `parameters`, so an unchanged block costs a compare rather than a copy
+    /// The pool generation `uploaded` went into: a pool replaced by a larger one holds nothing until each block uploads again.
+    u64 param_generation = 0;
+
+    /// what was last uploaded into the pool, so an unchanged block costs a compare rather than a copy
     cc::vector<byte> uploaded;
 
     /// The manager's epoch stamp the block was last built in.

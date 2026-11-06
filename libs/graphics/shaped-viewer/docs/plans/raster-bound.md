@@ -105,6 +105,27 @@ S0 measures it before probe GI is designed around a guess.
 
 It needs no sv: an sg and SGL web page beside `sgl-cube`, and a nexus benchmark of the same kernels under node with Dawn.
 
+### C0: the generated material body, reading bound buffers
+
+**Decided 2026-11-06**: the pools hold every backend's blocks and attributes, and C0 draws no decals.
+The material body stays the generator's, as raster.md requires; what changes is the spelling of its loads.
+Today every load indexes `tracer.bindless`: the vertex and index pools, the instance's parameter block, each attribute's buffer, each texture.
+
+- **Everything a frame reads by slot becomes a pool bound in group 0**: the vertex and index pools sv already has, and two new ones.
+  A **parameter pool** holds every instance's block, so `param_offset` is absolute and `param_buffer` unused.
+  An **attribute pool** holds every attribute, so a descriptor's offset is absolute and its buffer unused.
+- **Group 0 is `raster.drawn`'s members plus those four pools**: frame, instances, lights, background, four pools.
+  That is exactly WebGPU's default of 8 storage buffers a stage, which is why decals wait: they would be 10.
+- **Group 1 is the material's**, its textures and their samplers, which C1 fills; C0 materials are untextured.
+- **Group 2 stays `slug.tables`**, for decals once group 0 has room for their records, by packing them into one buffer.
+- **The generator gains a third spelling, `bound`**, beside the traced and raster ones: `bound.params.load(...)` where it wrote `tracer.bindless.buffers[block].load(...)`.
+- **A module `raster_bound`** holds the group and the pixel stage's surroundings, calling `raster`'s lighting where it reads only `drawn`.
+- **The vertex stage pulls positions from the pool**, as `raster` does; vertex buffers are C1's, with the expansion of per-corner attributes.
+- **No GPU culling in C0**: one indexed draw per item, recorded by the CPU.
+
+**The managers pool on every backend**, so there is one resource model and one layout behind all three spellings.
+The traced and raster spellings then read the same pools through a bindless slot, and `bound` through a bound buffer.
+
 ### Probe GI
 
 A probe volume in the style of DDGI (Majercik et al. 2019), written from the paper: irradiance and visibility per probe, a fixed ray budget a frame spread over several frames.

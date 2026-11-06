@@ -897,8 +897,18 @@ void texture_manager::wait_for_settled(cc::vector<texture_id>& newly_resident)
 
 namespace
 {
-// readonly_buffer so a shader reads it as a `bytes` element through the bindless table; copy_dst for the upload.
-constexpr auto bindless_bytes_usage = sg::buffer_usage::readonly_buffer | sg::buffer_usage::copy_dst;
+// readonly_buffer so a shader reads the pool as `bytes`; copy_dst for the writes into it; copy_src for its growth and a readback.
+constexpr auto attribute_pool_usage
+    = sg::buffer_usage::readonly_buffer | sg::buffer_usage::copy_dst | sg::buffer_usage::copy_src;
+
+// What an attribute streams into before it is copied into its range.
+constexpr auto attribute_staging_usage = sg::buffer_usage::copy_src | sg::buffer_usage::copy_dst;
+
+/// The attribute pool's first size.
+constexpr isize initial_attribute_pool_bytes = 1024 * 1024;
+
+/// Every range starts on 16 bytes, so a `load4` of an element whose format is 16-byte aligned stays aligned in the pool.
+constexpr isize attribute_alignment = 16;
 } // namespace
 
 attribute_manager attribute_manager::create(sg::context& ctx, manager_config const& cfg)
@@ -916,23 +926,21 @@ attribute_id attribute_manager::acquire(mesh_attribute const& attribute)
     auto const bytes = attribute.data.span();
     CC_ASSERT(!bytes.empty(), "an attribute a material reads must carry elements");
 
-    // The buffer exists from here on, so a descriptor naming it is valid immediately; only its contents wait.
-    auto data = _ctx.persistent.create_buffer<byte>(bytes.size(), bindless_bytes_usage);
-
-    auto transfer = _ctx.stream.bytes_to_buffer(data.raw(), attribute.data);
+    auto staging = _ctx.persistent.create_buffer<byte>(bytes.size(), attribute_staging_usage);
+    auto transfer = _ctx.stream.bytes_to_buffer(staging.raw(), attribute.data);
     transfer.set_priority(impl::attribute_stream_priority);
 
     // Summarized while the payload is at hand, since it is the stream's from here on.
     auto const id = insert(attribute.hash,
                            {.state = residency::pending,
-                            .data = cc::move(data),
+                            .size_bytes = bytes.size(),
                             .format = attribute.format,
                             .frequency = attribute.frequency,
                             .element_count = attribute.element_count(),
                             .summary = summarize_elements(bytes, attribute.format, attribute.element_count())},
                            bytes.size());
 
-    _settling[id] = cc::move(transfer);
+    _settling[id] = {.staging = cc::move(staging), .transfer = cc::move(transfer)};
     return id;
 }
 
@@ -944,10 +952,9 @@ attribute_id attribute_manager::acquire_inline(mesh_attribute const& attribute)
     auto const bytes = attribute.data.span();
     CC_ASSERT(!bytes.empty(), "an attribute a material reads must carry elements");
 
-    auto data = _ctx.persistent.create_buffer<byte>(bytes.size(), bindless_bytes_usage);
     auto const id = insert(attribute.hash,
                            {.state = residency::pending,
-                            .data = cc::move(data),
+                            .size_bytes = bytes.size(),
                             .format = attribute.format,
                             .frequency = attribute.frequency,
                             .element_count = attribute.element_count(),
@@ -955,6 +962,35 @@ attribute_id attribute_manager::acquire_inline(mesh_attribute const& attribute)
                            bytes.size());
     _inline_bytes[id] = attribute.data;
     return id;
+}
+
+isize attribute_manager::_allocate(sg::command_list& cmd, isize bytes)
+{
+    _reclaim();
+    auto const size = cc::align_up(bytes, attribute_alignment);
+    if (_pool.raw() == nullptr)
+    {
+        auto const capacity = grown_capacity(initial_attribute_pool_bytes / 2, size);
+        _pool = _ctx.persistent.create_buffer<byte>(capacity, attribute_pool_usage);
+        _ranges.grow(capacity);
+    }
+    auto offset = _ranges.allocate(size);
+    if (!offset.has_value())
+    {
+        // Recorded on `cmd`, after every write into the old pool this manager already recorded or submitted.
+        auto const old_capacity = _ranges.capacity();
+        auto const capacity = grown_capacity(old_capacity, old_capacity + size);
+        auto grown = _ctx.persistent.create_buffer<byte>(capacity, attribute_pool_usage);
+        cmd.copy.buffer_data_region<byte>({.src = _pool.raw(), .dst = grown.raw(), .count = old_capacity});
+
+        // The old buffer stays alive for the lists in flight that read it, as every dropped sg handle does.
+        _pool = cc::move(grown);
+        _ranges.grow(capacity);
+        offset = _ranges.allocate(size);
+        CC_LOG_INFO("grew the attribute pool to {} bytes", capacity);
+    }
+    CC_ASSERT(offset.has_value(), "a grown pool always fits the range it grew for");
+    return offset.value();
 }
 
 void attribute_manager::record_inline_uploads(sg::command_list& cmd)
@@ -965,31 +1001,49 @@ void attribute_manager::record_inline_uploads(sg::command_list& cmd)
         auto* const record = mutable_record(id);
         if (record == nullptr)
             continue;
-        cmd.upload.bytes_to_buffer(record->data.raw(), bytes.span(), 0);
+        record->offset = _allocate(cmd, record->size_bytes);
+        cmd.upload.bytes_to_buffer(_pool.raw(), bytes.span(), record->offset);
         record->state = residency::complete;
     }
     _inline_bytes.clear();
 }
 
-isize attribute_manager::collect_settled()
+isize attribute_manager::collect_settled(sg::command_list* cmd)
 {
+    _reclaim();
     if (_settling.empty())
         return 0;
 
     auto finished = isize(0);
-    auto keep = cc::map<attribute_id, sg::stream_upload_handle>();
-    for (auto&& [id, transfer] : _settling)
+    auto keep = cc::map<attribute_id, pending_attribute>();
+    auto own = std::unique_ptr<sg::command_list>();
+    for (auto&& [id, p] : _settling)
     {
-        if (!transfer.is_settled())
+        if (!p.transfer.is_settled())
         {
-            keep[id] = cc::move(transfer);
+            keep[id] = cc::move(p);
             continue;
         }
-
-        if (auto* const record = mutable_record(id); record != nullptr)
-            record->state = transfer.is_complete() ? residency::complete : residency::failed;
         ++finished;
+
+        auto* const record = mutable_record(id);
+        if (record == nullptr)
+            continue;
+        if (!p.transfer.is_complete())
+        {
+            record->state = residency::failed;
+            continue;
+        }
+        if (cmd == nullptr && own == nullptr)
+            own = _ctx.create_command_list();
+        auto& copies = cmd != nullptr ? *cmd : *own;
+        record->offset = _allocate(copies, record->size_bytes);
+        copies.copy.buffer_data_region<byte>(
+            {.src = p.staging.raw(), .dst = _pool.raw(), .count = record->size_bytes, .dst_offset = record->offset});
+        record->state = residency::complete;
     }
+    if (own != nullptr)
+        _ctx.submit_command_list(cc::move(own));
 
     _settling = cc::move(keep);
     return finished;
@@ -997,13 +1051,40 @@ isize attribute_manager::collect_settled()
 
 void attribute_manager::wait_for_settled()
 {
-    for (auto&& [id, transfer] : _settling)
+    for (auto&& [id, p] : _settling)
     {
         (void)id;
-        transfer.promote_to_async();
-        (void)cc::try_async_blocking_get(transfer.completion());
+        p.transfer.promote_to_async();
+        (void)cc::try_async_blocking_get(p.transfer.completion());
     }
     (void)collect_settled();
+}
+
+void attribute_manager::on_remove(attribute_id id, attribute_record& record)
+{
+    // A still-streaming attribute never reached the pool; dropping its entry cancels the transfer into its staging.
+    _settling.erase(id);
+    _inline_bytes.erase(id);
+    if (record.offset >= 0)
+        _retiring.push_back({.offset = record.offset,
+                             .size_bytes = cc::align_up(record.size_bytes, attribute_alignment),
+                             .evicted_in = _ctx.current_epoch()});
+}
+
+void attribute_manager::_reclaim()
+{
+    if (_retiring.empty())
+        return;
+
+    auto const completed = u64(_ctx.completed_epoch());
+    for (auto i = _retiring.size() - 1; i >= 0; --i)
+    {
+        auto const& r = _retiring[i];
+        if (u64(r.evicted_in) > completed)
+            continue;
+        _ranges.free(r.offset, r.size_bytes);
+        _retiring.remove_at_unordered(i);
+    }
 }
 
 } // namespace sv

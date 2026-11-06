@@ -399,17 +399,20 @@ private:
     cc::map<quadric_set_id, pending_set> _settling;
 };
 
-/// One uploaded mesh attribute: its bytes as a byte-address buffer, plus what a shader has to know to read them.
+/// One uploaded mesh attribute: where its bytes sit in the manager's attribute pool, plus what a shader has to know to read them.
 ///
-/// Elements are tightly packed from offset 0, so the descriptor a parameter block carries is this epoch's bindless index of
-/// `data`, offset 0, and `format.size_bytes()` as the stride.
+/// Elements are tightly packed from `offset`, so the descriptor a parameter block carries is this epoch's bindless index of
+/// the pool, `offset`, and `format.size_bytes()` as the stride.
 struct sv::attribute_record
 {
-    /// The buffer exists from the moment the id is minted, so a descriptor pointing at it is always valid — what
-    /// `pending` means here is that its CONTENTS have not landed, and a shader reading it early reads zeros.
+    /// `pending` until the bytes are in the pool; only then does the record have a range, and may a descriptor name it.
     residency state = residency::pending;
 
-    sg::buffer<byte> data;
+    /// The elements' byte offset in `attribute_manager::pool()`, -1 while pending; fixed for the record's life once set.
+    isize offset = -1;
+
+    /// How many bytes the elements take, and so the range they hold in the pool.
+    isize size_bytes = 0;
 
     attribute_format format = attribute_format::of_scalar(scalar_type::f32);
     attribute_frequency frequency = attribute_frequency::per_vertex;
@@ -426,6 +429,12 @@ struct sv::attribute_record
 /// This is what makes the `mesh_attribute` rank of the material chain reach the GPU at all: any attribute a material resolves to,
 /// at any format and frequency, rather than the four PBR names the old repack knew.
 /// Keyed on the attribute's own `hash`, so a mesh re-acquired every frame costs one lookup.
+///
+/// **Every attribute lives in one pool**, each a range of it, read as `bytes` through one bindless slot or one bound buffer.
+/// An attribute streams into staging of its own and is copied into its range once it lands, so no stream ever targets the pool.
+/// A range is allocated only where a list then copies into it: when a stream settles, or when inline bytes are written.
+/// So the pool grows only there, its old contents copied over ahead of every write into the new one.
+/// An evicted range is reused only once the frames that may still read it have retired.
 class sv::attribute_manager : public impl::lru_pool<attribute_id, attribute_record>
 {
 public:
@@ -434,8 +443,7 @@ public:
 
     /// The attribute_id for `attribute.hash`, resident from a prior acquire (O(1)), or a freshly queued one.
     ///
-    /// The BUFFER exists immediately, so a descriptor naming it is valid from here on; its contents land when
-    /// `record_uploads` drains, and a shader that reads it before then reads zeros.
+    /// A queued attribute is `pending` and has no range until `collect_settled` copies it in, so nothing may name it before.
     /// That is why the manager's queue is drained ahead of the mesh one: an attribute is up before the geometry it
     /// belongs to is drawn with anything but a placeholder.
     [[nodiscard]] attribute_id acquire(mesh_attribute const& attribute);
@@ -453,9 +461,9 @@ public:
     /// How many attributes acquired inline wait for `record_inline_uploads`.
     [[nodiscard]] isize inline_count() const { return _inline_bytes.size(); }
 
-    /// Marks every attribute whose bytes have finished streaming `complete`; returns how many.
-    /// Nothing is recorded — an attribute is done the moment its transfer is, since nothing has to be built from it.
-    isize collect_settled();
+    /// Copies every attribute whose bytes have finished streaming into its range and marks it `complete`; returns how many.
+    /// The copies go on `cmd`, in order with what it already wrote into the pool, or on a list of their own submitted here.
+    isize collect_settled(sg::command_list* cmd = nullptr);
 
     /// Blocks until every queued transfer has landed, then collects them.
     void wait_for_settled();
@@ -463,13 +471,44 @@ public:
     /// How many attributes are still streaming.
     [[nodiscard]] isize settling_count() const { return _settling.size(); }
 
+    /// The pool every resident attribute lives in, at its record's `offset`; empty until the first one landed.
+    /// Replaced by a larger one when it fills, so read it per frame rather than keeping it.
+    [[nodiscard]] sg::buffer<byte> const& pool() const { return _pool; }
+
 private:
     explicit attribute_manager(sg::context& ctx) : _ctx(ctx) {}
 
+    /// One queued attribute: the staging it streams into, and the transfer filling it; dropping one cancels it.
+    struct pending_attribute
+    {
+        sg::buffer<byte> staging;
+        sg::stream_upload_handle transfer;
+    };
+
+    /// An evicted attribute's range, waiting for the last frame that may read it to retire.
+    struct retiring_range
+    {
+        isize offset = 0;
+        isize size_bytes = 0;
+        sg::epoch evicted_in = sg::epoch(0);
+    };
+
+    void on_remove(attribute_id id, attribute_record& record) override;
+
+    /// Frees every retiring range whose epoch has completed.
+    void _reclaim();
+
+    /// A range of `bytes` in the pool, recording on `cmd` the copy of the old pool into a grown one when none fits.
+    /// Everything this manager wrote into the pool before is recorded or submitted ahead of `cmd`'s next command.
+    [[nodiscard]] isize _allocate(sg::command_list& cmd, isize bytes);
+
     sg::context& _ctx;
 
-    /// The in-flight transfer per queued attribute; dropping one cancels it.
-    cc::map<attribute_id, sg::stream_upload_handle> _settling;
+    sg::buffer<byte> _pool;
+    impl::range_allocator _ranges;
+    cc::vector<retiring_range> _retiring;
+
+    cc::map<attribute_id, pending_attribute> _settling;
 
     /// Per attribute acquired inline, its bytes until a command list writes them; pinned, so holding them copies nothing.
     cc::map<attribute_id, cc::pinned_data<byte const>> _inline_bytes;
