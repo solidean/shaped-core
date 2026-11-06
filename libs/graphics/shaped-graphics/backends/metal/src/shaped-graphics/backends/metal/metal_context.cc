@@ -205,7 +205,7 @@ bool metal_context::supports(sg::feature f) const
         // MSL has no double, and its 64-bit atomics are a buffer's ulong min and max alone.
         return false;
     case sg::feature::shader_int64_min_max_atomics:
-        // MSL 3.1's atomic_ulong min and max, which Apple's feature set tables give from Apple8; not run on hardware yet
+        // MSL 3.1's atomic_ulong min and max, which Apple's feature set tables give from Apple8; run on an M4
         return _device != nullptr && _device->supportsFamily(MTL::GPUFamilyApple8);
     case sg::feature::unbounded_binding_arrays:
         // an argument buffer would hold one, which this backend does not lay out yet

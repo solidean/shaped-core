@@ -1774,17 +1774,21 @@ struct writer
             {
                 // an atomic HLSL writes as statements alone has nothing left to evaluate, nor has a target's own text
                 auto const* const evaluated = p.e.at(v.value).node.try_as<flat_call>();
+                auto const value = expr(v.value);
                 if (is_hlsl_atomic(v.value) || (evaluated != nullptr && evaluated->text >= 0))
+                    return;
+                // and one written as statements alone, as MSL's ulong min and max are (EMIT-218), left no text
+                if (value.text.empty())
                 {
-                    (void)expr(v.value);
+                    fence_after(v.value);
                     return;
                 }
                 // A call that gives nothing is a statement as it stands, in every target.
                 auto text = cc::string();
                 if (p.e.at(v.value).type == checked_module::void_type)
-                    text = cc::format("{};", expr(v.value).text);
+                    text = cc::format("{};", value.text);
                 else
-                    d.write_eval(text, expr(v.value).text);
+                    d.write_eval(text, value.text);
                 line(text);
                 fence_after(v.value);
             },

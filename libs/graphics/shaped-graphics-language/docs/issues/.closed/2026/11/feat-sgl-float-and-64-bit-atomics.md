@@ -13,4 +13,4 @@ dx12 grants it through `Int64ShaderOps` on Shader Model 6.6 and vulkan through `
 
 Later on 2026-11-05: workgroup memory's, behind `shader_shared_int64_atomics` (CHK-510), run on an AMD Radeon iGPU through vulkan, which an Intel Arc B580 lacks.
 And a ulong's min and max alone, behind `shader_int64_min_max_atomics` (CHK-511), which Metal writes (EMIT-218).
-Left: [feat-sgl-metal-ulong-min-max-atomics-on-hardware](../../../feat-sgl-metal-ulong-min-max-atomics-on-hardware.md), metal's on Apple hardware.
+Left: [feat-sgl-metal-ulong-min-max-atomics-on-hardware](feat-sgl-metal-ulong-min-max-atomics-on-hardware.md), metal's on Apple hardware.

@@ -161,6 +161,48 @@ ASYNC_INVOCABLE_TEST("sg - an SGL compute shader's 64-bit atomics update all 64 
     }
 }
 
+ASYNC_INVOCABLE_TEST("sg - an SGL compute shader's ulong atomic min and max compare all 64 bits of a buffer's element",
+                     (sg::context_handle const& ctx))
+{
+    REQUIRE(ctx != nullptr);
+    if (!sg_test::shaders_reach(*ctx))
+        SKIP("no compiler builds this binary's shaders into a format this context accepts");
+    if (!ctx->supports(sg::feature::shader_int64) || !ctx->supports(sg::feature::shader_int64_min_max_atomics))
+        SKIP("this context has no 64-bit atomic min and max");
+
+    auto const pipeline = co_await shaders::sixty_four_bit_min_max::extremes.acquire_pipeline(*ctx);
+    auto const layout = ctx->cached.acquire_binding_group_layout<shaders::sixty_four_bit_min_max::ulong_extremes>();
+
+    constexpr auto groups = 4;
+    auto const usage = sg::buffer_usage::readwrite_buffer | sg::buffer_usage::copy_src;
+    auto const lowest = ctx->persistent.create_buffer_from_data(cc::vector<u64>::create_filled(groups, ~u64(0)), usage);
+    auto const highest = ctx->persistent.create_buffer_from_data(cc::vector<u64>::create_defaulted(groups), usage);
+
+    auto cmd = ctx->create_command_list();
+    auto const group = ctx->transient.create_binding_group(
+        *cmd, layout,
+        shaders::sixty_four_bit_min_max::ulong_extremes{.lowest = lowest.as_readwrite_buffer(),
+                                                        .highest = highest.as_readwrite_buffer()});
+    cmd->compute.bind_pipeline(*pipeline);
+    cmd->compute.bind_group(0, *group);
+    cmd->compute.dispatch_threads(groups * 64);
+    auto const lowest_back = cmd->download.data_from_buffer(lowest);
+    auto const highest_back = cmd->download.data_from_buffer(highest);
+    ctx->submit_command_list(cc::move(cmd));
+
+    // id i offers i in the high word and its complement in the low one, so the group's first id is its lowest
+    auto const offered = [](u64 i) { return (i << 32) | (u64(0xffffffff) - i); };
+    auto const got_lowest = co_await lowest_back.data();
+    auto const got_highest = co_await highest_back.data();
+    REQUIRE(got_lowest.size() == isize(groups));
+    REQUIRE(got_highest.size() == isize(groups));
+    for (auto g = 0; g < groups; ++g)
+    {
+        CHECK(got_lowest[g] == offered(u64(64 * g)));
+        CHECK(got_highest[g] == offered(u64(64 * g + 63)));
+    }
+}
+
 ASYNC_INVOCABLE_TEST("sg - 64-bit values cross from the vertex to the pixel stage flat, all 64 bits (CHK-454, "
                      "EMIT-196)",
                      (sg::context_handle const& ctx))
