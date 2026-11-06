@@ -4,6 +4,8 @@ priority: normal
 tags: [xr, ci]
 parent: epic-xr
 blocked-by: [feat-shaped-xr-core]
+claimed-by: Claude (for Philip)
+claimed-at: 2026-11-06T11:00Z
 ---
 
 # Run shaped-xr's tests against Monado headless in CI
