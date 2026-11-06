@@ -6,6 +6,7 @@
 #include <clean-core/string/string_view.hh>
 #include <shaped-graphics-language/check/check.hh>
 #include <shaped-graphics-language/check/checked_module.hh>
+#include <shaped-graphics-language/ir/dxil/signature.hh>
 
 /// The text a graphics API compiles, written from one flat entry point of a checked module.
 ///
@@ -209,6 +210,9 @@ struct sgl::emit::emitted_text
     cc::vector<byte> dxil;
     /// What kept a `prefer` from writing `spirv`, for a reader; empty otherwise.
     cc::string native_gap;
+    /// Where DXIL's packer places what crosses the entry point's edge, wherever `options::native` asked for dx12.
+    /// It stands even where `native_gap` does, since a signature needs no lowering of the body.
+    cc::vector<ir::dxil::signature_element> signature;
     /// The name the text actually declares the entry point under, which is the source's unless this target reserves it.
     /// A caller compiling the text has to ask for THIS name, not the one it requested.
     cc::string entry_point;
@@ -231,11 +235,11 @@ struct sgl::emit::emitted_text
     [[nodiscard]] bool operator==(emitted_text const& rhs) const
     {
         return text == rhs.text && ast::impl::is_equal(spirv, rhs.spirv) && ast::impl::is_equal(dxil, rhs.dxil)
-            && native_gap == rhs.native_gap && entry_point == rhs.entry_point
-            && ast::impl::is_equal(bound_names, rhs.bound_names) && color_targets == rhs.color_targets
-            && target_struct == rhs.target_struct && ast::impl::is_equal(layouts, rhs.layouts)
-            && ast::impl::is_equal(lines, rhs.lines) && ast::impl::is_equal(debug_sites, rhs.debug_sites)
-            && ast::impl::is_equal(errors, rhs.errors);
+            && native_gap == rhs.native_gap && ast::impl::is_equal(signature, rhs.signature)
+            && entry_point == rhs.entry_point && ast::impl::is_equal(bound_names, rhs.bound_names)
+            && color_targets == rhs.color_targets && target_struct == rhs.target_struct
+            && ast::impl::is_equal(layouts, rhs.layouts) && ast::impl::is_equal(lines, rhs.lines)
+            && ast::impl::is_equal(debug_sites, rhs.debug_sites) && ast::impl::is_equal(errors, rhs.errors);
     }
 };
 

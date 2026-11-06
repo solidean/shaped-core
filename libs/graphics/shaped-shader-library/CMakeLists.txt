@@ -271,6 +271,7 @@ if(SC_BUILD_TESTS)
         target_sources(shaped-shader-library-test PRIVATE
             tests/sgl-native-compile-benchmark.cc
             tests/sgl-native-dxil-test.cc
+            tests/sgl-signature-golden-test.cc
         )
         target_link_libraries(shaped-shader-library-test PRIVATE shaped-shader-compiler-dxc)
     endif()

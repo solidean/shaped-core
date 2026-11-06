@@ -62,6 +62,7 @@ add_library(shaped-graphics-language
     src/shaped-graphics-language/ir/lower_call.cc
     src/shaped-graphics-language/ir/lower_expr.cc
     src/shaped-graphics-language/ir/lower_memory.cc
+    src/shaped-graphics-language/ir/lower_stage.cc
     src/shaped-graphics-language/ir/spirv/spirv.cc
     src/shaped-graphics-language/ir/spirv/impl/writer.cc
     src/shaped-graphics-language/ir/spirv/impl/writer_declarations.cc
@@ -71,6 +72,7 @@ add_library(shaped-graphics-language
     src/shaped-graphics-language/ir/ssa.cc
     src/shaped-graphics-language/ir/verify.cc
     src/shaped-graphics-language/ir/dxil/dxil.cc
+    src/shaped-graphics-language/ir/dxil/signature.cc
     src/shaped-graphics-language/ir/dxil/impl/container.cc
     src/shaped-graphics-language/ir/dxil/impl/llvm.cc
     src/shaped-graphics-language/ir/dxil/impl/llvm_bitcode.cc
@@ -511,6 +513,7 @@ if(SC_BUILD_TESTS)
         tests/ir/ir-test-support.hh
         tests/ir/optimize-ir-test.cc
         tests/ir/passes-ir-test.cc
+        tests/ir/signature-ir-test.cc
         tests/ir/sweep-ir-test.cc
         tests/ir/verify-ir-test.cc
         tests/emit/matrix-arithmetic-emit-test.cc

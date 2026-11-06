@@ -165,6 +165,10 @@ const light_kind_sun: i32 = 2;
   `sgl describe` states each member's semantic, which is what the host's input layout names the member by.
 * **EMIT-29** A member of a stage link at location i has the generated semantic `SGLi`, `[[vk::location(i)]]` in vulkan, and `@location(i)` in WGSL.
 * **EMIT-30** A member of a render target struct at location i is `SV_Targeti` in HLSL and `@location(i)` in WGSL.
+* **EMIT-235** A DXIL signature is packed as DXC's default `-pack-prefix-stable` packs it, so a stage of SGL's own DXIL links against a stage DXC compiled from the same plan, in either direction.
+  An element takes the first row, and the lowest free columns, that hold it, in declared order: a struct's members, then the stage inputs.
+  A row holds one interpolation mode, and an ordinary element never follows a system one in it.
+  A vertex input takes a row of its own, a render target the row of its index, and `SV_TessFactor` and `SV_InsideTessFactor` their fixed places.
 * **EMIT-31** A semantic is made from the name as the program writes it, whatever EMIT-18 made of the member.
 * **EMIT-32** A vertex input member whose semantic would start with `SV_` is `system-value-semantic`.
 * **EMIT-33** A member of an edge struct is of a builtin type whose record says it crosses an edge, which `mat4`, `int` and `bool` do not, or it is `unsupported`.

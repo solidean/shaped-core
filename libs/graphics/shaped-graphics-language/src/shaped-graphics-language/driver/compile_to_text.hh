@@ -107,6 +107,10 @@ struct sgl::emitted_source
     cc::vector<byte> dxil;
     /// What kept a `prefer` from writing either, for a reader.
     cc::string native_gap;
+    /// Where DXIL's packer places what crosses the entry point's edge, wherever a dx12 request took the native route.
+    /// It stands beside `native_gap`, since a signature needs no lowering of the body.
+    cc::vector<ir::dxil::signature_element> signature;
+    check::stage stage = check::stage::none;
     /// The source's name, unless the target reserves it: HLSL and MSL both reserve words an SGL author may pick.
     /// A caller compiling the text asks for THIS name.
     cc::string entry_point;

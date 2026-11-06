@@ -15,6 +15,7 @@ lowering::lowering(emit::impl::plan const& plan, program& out) : _plan(plan), _m
     for (auto axis = 0; axis < 3; ++axis)
         _out.workgroup[axis] = _e.workgroup[axis];
 
+    _out.stage = _e.entry_stage;
     _value_types.resize_to_filled(_m.types.size(), type_ref::none);
     _constant_slots.resize_to_filled(256, 0u);
     _locals.resize_to_filled(_e.locals.size(), value_ref::none);
@@ -118,8 +119,11 @@ void lowering::branch_if(value_ref condition, block_ref yes, block_ref no)
 void lowering::run()
 {
     if (_e.entry_stage != stage::compute)
-        return unsupported(
-            cc::format("a {} entry point, of which only compute is lowered yet", stage_name(_e.entry_stage)));
+    {
+        unsupported(cc::format("a {} entry point, of which only compute is lowered yet", stage_name(_e.entry_stage)));
+        // what crosses its edge stands on its own, and DXIL's packer reads it ahead of any lowering of the body
+        return declare_stage_elements();
+    }
     // EMIT-229: the prologue that clears workgroup memory
     if (_e.written_words > 0 || _e.zeroes_workgroup)
         return unsupported("the workgroup prologue of a robustness profile");
