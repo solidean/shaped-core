@@ -1,6 +1,7 @@
 #include "ir-test-support.hh"
 
 #include <clean-core/algorithm/sort.hh>
+#include <clean-core/record/log.hh>
 #include <clean-core/streams/file_stream.hh>
 #include <nexus/source_root.hh>
 #include <shaped-graphics-language/driver/compile_to_text.hh>
@@ -9,7 +10,7 @@
 
 using namespace cc::primitive_defines;
 
-// Every compute entry point the repo's SGL holds, down both routes.
+// Every entry point the repo's SGL holds, down both routes, where its stage is lowered yet.
 // Where assertions are on a compile verifies its program after lowering and after each pass, so this is what walks the
 // verifier over everything; `spirv-val` and DXC's validator only see the shaders sg and sr ship.
 // A debug build pays seconds per file for that, so a default run takes every eighth and --thorough takes them all.
@@ -38,7 +39,7 @@ namespace
 }
 } // namespace
 
-TEST("sgl ir - every compute entry point of the repo's SGL goes down both native routes",
+TEST("sgl ir - every entry point of the repo's SGL goes down both native routes",
      nx::config::rerun_on("libs/graphics/shaped-graphics-language/src/shaped-graphics-language/ir/**"))
 {
     auto files = sources_under(nx::source_path(SGL_SG_SHADERS_DIR));
@@ -62,7 +63,6 @@ TEST("sgl ir - every compute entry point of the repo's SGL goes down both native
             {
                 auto const e = sgl::compile_to_text({.source = source,
                                                      .entry_point = entry.entry_point,
-                                                     .stage = sgl::check::stage::compute,
                                                      .target = target,
                                                      .native = sgl::emit::native_route::prefer});
                 if (e.has_error())
@@ -72,6 +72,7 @@ TEST("sgl ir - every compute entry point of the repo's SGL goes down both native
             }
     }
     // the numbers the sweep reaches, so a lowering lost shows here rather than as a quiet fall back to DXC
+    CC_LOG_INFO("{} entry points lowered to SPIR-V and {} to DXIL", spirv, dxil);
     CHECK(spirv >= 100 / stride);
     CHECK(dxil >= 90 / stride);
 }

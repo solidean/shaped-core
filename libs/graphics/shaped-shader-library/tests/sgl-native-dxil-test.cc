@@ -138,7 +138,7 @@ TEST("slib - every compute entry point of the fixtures that SGL's DXIL lowers pa
                 reached, raster_lowered, raster_reached);
     // the numbers the slice reaches, so a lowering lost shows here rather than as a quiet fall back to DXC
     CHECK(lowered >= 60);
-    CHECK(raster_lowered >= 1);
+    CHECK(raster_lowered >= 45);
 }
 
 TEST("slib - DXIL's float flags stand on each operation, and only `fast` lets a sum reorder")

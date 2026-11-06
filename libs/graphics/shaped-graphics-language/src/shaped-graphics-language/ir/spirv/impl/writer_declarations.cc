@@ -35,9 +35,9 @@ struct built_in_number
     bool is_subgroup = false;
 };
 constexpr built_in_number k_built_ins[] = {
-    {built_in::thread_id, 28},    {built_in::local_thread_id, 27},     {built_in::local_thread_index, 29},
-    {built_in::workgroup_id, 26}, {built_in::subgroup_size, 36, true}, {built_in::subgroup_invocation_id, 41, true},
-    {built_in::position, 0},      {built_in::vertex_index, 42},        {built_in::instance_index, 43},
+    {built_in::thread_id, 28},        {built_in::local_thread_id, 27},     {built_in::local_thread_index, 29},
+    {built_in::workgroup_id, 26},     {built_in::subgroup_size, 36, true}, {built_in::subgroup_invocation_id, 41, true},
+    {built_in::position, 0},          {built_in::vertex_index, 42},        {built_in::instance_index, 43},
     {built_in::first_instance, 4425},
 };
 /// A pixel stage reads `@position` as what the rasterizer made of it, where a vertex stage's is `Position`.

@@ -30,7 +30,9 @@ cc::shared_async<cc::optional<sg::compiled_shader>> compiled(sg::context& ctx, A
     co_return *value;
 }
 
-sg::raster_pipeline_handle link_pipeline(sg::context& ctx, sg::compiled_shader const& vertex, sg::compiled_shader const& pixel)
+sg::raster_pipeline_handle link_pipeline(sg::context& ctx,
+                                         sg::compiled_shader const& vertex,
+                                         sg::compiled_shader const& pixel)
 {
     auto desc = sg::raster_pipeline_description{
         .layout = ctx.cached.acquire_pipeline_layout(sg::pipeline_layout_description{}),
@@ -43,7 +45,9 @@ sg::raster_pipeline_handle link_pipeline(sg::context& ctx, sg::compiled_shader c
     return ctx.uncached.create_raster_pipeline(desc);
 }
 
-cc::shared_async<sg_test::offscreen_pixels> drawn(sg::context& ctx, sg::compiled_shader const& vertex, sg::compiled_shader const& pixel)
+cc::shared_async<sg_test::offscreen_pixels> drawn(sg::context& ctx,
+                                                  sg::compiled_shader const& vertex,
+                                                  sg::compiled_shader const& pixel)
 {
     auto const pipeline = link_pipeline(ctx, vertex, pixel);
     co_return co_await sg_test::draw_offscreen(

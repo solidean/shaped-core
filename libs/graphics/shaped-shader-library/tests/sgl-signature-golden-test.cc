@@ -44,6 +44,8 @@ struct dxc_element
     u32 component_type = 0;
     u32 row = 0;
     u32 mask = 0;
+    /// The lanes an input reads, or the lanes an output never writes, as the final operations settled them.
+    u32 usage = 0;
     cc::string mode;
 };
 
@@ -70,7 +72,8 @@ void read_part(cc::span<byte const> part, signature_table table, cc::vector<dxc_
                        .system_value = read_at<u32>(part, at + 12),
                        .component_type = read_at<u32>(part, at + 16),
                        .row = read_at<u32>(part, at + 20),
-                       .mask = u32(read_at<u8>(part, at + 24))});
+                       .mask = u32(read_at<u8>(part, at + 24)),
+                       .usage = u32(read_at<u8>(part, at + 25))});
     }
 }
 
@@ -254,6 +257,8 @@ void read_modes(cc::string_view text, cc::vector<dxc_element>& elements)
 struct sweep_counts
 {
     i32 entries = 0;
+    /// Those SGL's DXIL wrote too, whose usage masks the comparison reaches.
+    i32 lowered = 0;
     i32 no_dxc = 0;
     i32 elements = 0;
     i32 stages[8] = {};
@@ -273,8 +278,13 @@ void compare_entry(ssc::dxc::compiler& compiler, sgl::text_request request, swee
     auto const stage = shader_stage_of(emitted.value().stage);
     if (!stage.has_value())
         return;
+    // a stage that lowers holds its program where the text would stand, and DXC wants the text
+    request.native = sgl::emit::native_route::text;
+    auto const text_route = sgl::compile_to_text(request);
+    if (text_route.has_error())
+        return;
     auto const built = compiler.compile(
-        {.source = emitted.value().text, .entry_point = emitted.value().entry_point, .stage = stage.value()},
+        {.source = text_route.value().text, .entry_point = text_route.value().entry_point, .stage = stage.value()},
         {.target = ssc::dxc::compile_target::dxil,
          .warnings_as_errors = false,
          .extra_args = {cc::string("-enable-16bit-types")}});
@@ -294,15 +304,32 @@ void compare_entry(ssc::dxc::compiler& compiler, sgl::text_request request, swee
     counts.elements += i32(theirs.size());
     for (auto& line : differences(emitted.value().signature, theirs))
         counts.mismatches.push_back(cc::format("{} {}: {}", label, request.entry_point, line));
+
+    // A lowered stage's own container: every output lane written as DXC writes it, and every lane DXC reads read.
+    // Ours may read more, since a struct an index reaches stays in memory, and a read no one can see links as well.
+    if (emitted.value().dxil.empty())
+        return;
+    ++counts.lowered;
+    for (auto const& o : signatures_of(emitted.value().dxil))
+        for (auto const& d : theirs)
+        {
+            if (o.table != d.table || o.name != d.name || o.semantic_index != d.semantic_index)
+                continue;
+            auto const agrees = o.table == signature_table::input ? (d.usage & ~o.usage) == 0 : d.usage == o.usage;
+            if (!agrees)
+                counts.mismatches.push_back(cc::format("{} {}: {}{} used {} against DXC's {}", label,
+                                                       request.entry_point, o.name, o.semantic_index, o.usage, d.usage));
+        }
 }
 
 void report(sweep_counts const& counts)
 {
     for (auto const& line : counts.mismatches)
         CC_LOG_INFO("{}", line);
-    CC_LOG_INFO("{} entry points, {} elements, {} refused by DXC, {} refused by SGL, {} mismatches; {}", counts.entries,
-                counts.elements, counts.no_dxc, counts.front_end_failures, counts.mismatches.size(),
-                counts.first_failure);
+    CC_LOG_INFO("{} entry points, {} of them lowered, {} elements, {} refused by DXC, {} refused by SGL, {} "
+                "mismatches; {}",
+                counts.entries, counts.lowered, counts.elements, counts.no_dxc, counts.front_end_failures,
+                counts.mismatches.size(), counts.first_failure);
 }
 [[nodiscard]] cc::vector<fs::path> sources_under(fs::path const& root)
 {

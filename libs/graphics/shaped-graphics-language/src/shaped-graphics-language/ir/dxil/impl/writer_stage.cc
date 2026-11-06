@@ -290,10 +290,17 @@ u32 writer::signature_list(signature_table table)
             u32 const tags[] = {_m.md_i32(k_tag_usage_mask), _m.md_i32(_summary.usage[s])};
             extra = _m.md_node(tags);
         }
-        u32 const fields[] = {_m.md_i32(_signature_ids[s]), _m.md_string(e.name),     byte_of(component),
-                              byte_of(_summary.semantic_kinds[s]), _m.md_node(indices), byte_of(_summary.modes[s]),
-                              _m.md_i32(1),                 byte_of(e.lanes),         _m.md_i32(u32(e.row)),
-                              byte_of(e.first_column),      extra};
+        u32 const fields[] = {_m.md_i32(_signature_ids[s]),
+                              _m.md_string(e.name),
+                              byte_of(component),
+                              byte_of(_summary.semantic_kinds[s]),
+                              _m.md_node(indices),
+                              byte_of(_summary.modes[s]),
+                              _m.md_i32(1),
+                              byte_of(e.lanes),
+                              _m.md_i32(u32(e.row)),
+                              byte_of(e.first_column),
+                              extra};
         list.push_back(_m.md_node(fields));
     }
     return list.empty() ? 0 : _m.md_node(list);
@@ -413,13 +420,13 @@ void writer::write_entry_metadata()
         for (auto k = u32(0); k < _summary.input_scalars * words; ++k)
             state.push_back(_m.constant_i32(_summary.dependencies[k]));
         auto const array = _m.array(_m.int_type(), u64(state.size()));
-        u32 const state_node[] = {_m.md_node(cc::span<u32 const>(
-            std::initializer_list<u32>{_m.md_value(array, _m.constant_struct(array, state))}))};
+        u32 const state_node[] = {_m.md_node(
+            cc::span<u32 const>(std::initializer_list<u32>{_m.md_value(array, _m.constant_struct(array, state))}))};
         _m.md_named("dx.viewIdState", state_node);
     }
     auto const properties_count = is_compute ? isize(4) : isize(2);
-    u32 const entry[] = {_m.md_value(_m.type_of(_entry), _entry), _m.md_string(_p.entry_name), signatures, resources_node,
-                         _m.md_node(cc::span<u32 const>(properties, properties_count))};
+    u32 const entry[] = {_m.md_value(_m.type_of(_entry), _entry), _m.md_string(_p.entry_name), signatures,
+                         resources_node, _m.md_node(cc::span<u32 const>(properties, properties_count))};
 
     u32 const version_node[] = {_m.md_node(version)};
     u32 const validator_node[] = {_m.md_node(validator)};
@@ -442,7 +449,8 @@ void writer::write_entry_metadata()
     _summary.entry_name = _p.entry_name;
     if (_p.stage == check::stage::vertex)
         for (auto const& e : _summary.signature)
-            _summary.writes_position = _summary.writes_position || (e.table == signature_table::output && e.system_value == 1);
+            _summary.writes_position
+                = _summary.writes_position || (e.table == signature_table::output && e.system_value == 1);
     // the PSV lists a module's bindings in this order, whichever order they were found in
     for (auto const cls : {2u, 3u, 0u, 1u})
         for (auto const& b : _bindings)

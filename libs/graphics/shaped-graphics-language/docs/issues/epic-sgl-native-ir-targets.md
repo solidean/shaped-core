@@ -60,7 +60,8 @@ A local an index reaches at run time stays a variable.
 - `writer_stage.cc` holds all that differs per stage, so a graphics stage adds there: a `stage_rule`, and its built-ins in `k_built_ins`.
   `signature.cc` is the one place that knows a row, and DXC holds it to account (EMIT-235).
   Its `k_features` is a row per feature a shader flag or the container states.
-- `container.cc` is a list of parts, each a function; `ISG1` and `OSG1` are written empty for compute, and a stage's signature fills them.
+- `container.cc` is a list of parts, each a function; `ISG1` and `OSG1` come from `pack_signature`'s result, and are empty for compute.
+  A validator rebuilds them and `PSV0` from the module and compares bytes, so their layout is DXC's to the byte.
 
 Every value is a run of scalars in the writer, which is what DXIL asks and what lets vectors, matrices and structs share one path.
 Memory is three kinds of place: arrays of scalars by leaf, for variables and workgroup memory; rows, for constant blocks; an element and a byte offset, for buffers.
@@ -90,6 +91,7 @@ This is why the module is SPIR-V 1.6, which needs Vulkan 1.3, the floor sg alrea
 2. **Measure on the G6 kernels and on compile time**: done, see below.
 3. **Graphics stages, then ray tracing**, to parity with the DXC route on the corpus, SPIR-V and DXIL in near-lockstep: [feat-sgl-native-graphics-stages](feat-sgl-native-graphics-stages.md).
    [feat-sgl-native-graphics-stages](feat-sgl-native-graphics-stages.md) is the stage interface's design, and what was measured of DXC's packing and of D3D12's link check.
+   Vertex and pixel are done on both writers, 47 of the 66 entry points, and link against DXC's stages in both directions.
 4. **Features**: motion traces, and SER written directly.
 5. **DXIL**: LLVM 3.7 bitcode and the DXIL container, written by us: compute done on 2026-11-06, see below.
 

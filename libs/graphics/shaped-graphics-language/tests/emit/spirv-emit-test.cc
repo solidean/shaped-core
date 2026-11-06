@@ -171,6 +171,6 @@ TEST("sgl spirv - every compute entry point of the fixtures that lowers is what 
     // the numbers the slice reaches, so a lowering lost shows here rather than as a quiet fall back to DXC
     CC_LOG_INFO("SGL's SPIR-V lowers {} compute entry points and {} vertex and pixel ones", lowered, raster_lowered);
     CHECK(lowered >= 60);
-    CHECK(raster_lowered >= 1);
+    CHECK(raster_lowered >= 45);
 #endif
 }

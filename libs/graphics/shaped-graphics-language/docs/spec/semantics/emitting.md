@@ -429,15 +429,23 @@ fn main_ps(p: pixel_input) -> target_ {
 * **EMIT-232** Where a compile asks, `hlsl-vulkan` is written as a SPIR-V 1.6 module by SGL itself rather than as text for DXC: `text_request::native`, `sgl emit --target spirv`.
   The plan is the text's, so every name, address and layout the host reads is the same on either route.
   `require` makes an entry point with no lowering yet the error `unsupported`, naming what it holds, and `prefer` writes the text and says why in `emitted_source::native_gap`.
-  Only a compute entry point lowers so far, and never a print, a target's own text, a binding array, a texel atomic, a ray query or a workgroup prologue.
+  Compute, vertex and pixel entry points lower so far, and never a print, a target's own text, a binding array, a texel atomic, a ray query or a workgroup prologue.
   Float `!=` is unordered, a shift's count is masked to its width, and `and` and `or` branch where their right side could go wrong; nothing here widens what a program may do.
 * **EMIT-233** A float operation of an entry point past `fast` is decorated `NoContraction`, and the entry point states `SignedZeroInfNanPreserve` per float width, and `DenormPreserve` for `ieee`.
   This is what DXC's `-Gis` and `-denorm preserve` write, per operation in the layer, so a guarantee narrower than an entry point needs no change to the form.
 * **EMIT-234** Where a compile asks, `hlsl-dx12` is written as a DXIL container by SGL itself: `text_request::native`, `sgl emit --target dxil`.
   It takes what EMIT-232 says of a plan, of `require` and `prefer`, and of what a program may do.
-  The container states shader model 6.6, and carries the retail bypass digest, which is what lets D3D12 load a shader no validator signed.
+  The container states shader model 6.6, or 6.8 where EMIT-128 reads a start location, and carries the retail bypass digest, which is what lets D3D12 load a shader no validator signed.
   A `fast` float operation carries LLVM's fast flags, and one past it carries none, which is what `-Gis` writes; only a `fast` addition may reorder.
   `ieee` states `fp32-denorm-mode` on the entry point, as `-denorm preserve` does.
+* **EMIT-236** A vertex or pixel entry point of a native route reads each element of its edge ahead of its body, and each `return` stores each output element.
+  So a stage of either route links against a stage of the text route, in both directions.
+  A pixel stage's `@position.w` on SPIR-V is the reciprocal of `FragCoord.w`, as `-fvk-use-dx-position-w` writes it.
+  `@vertex_index` and `@instance_index` add the draw's base on DXIL alone (EMIT-128), since `VertexIndex` and `InstanceIndex` already hold it.
+  A link of a member that is not a 32-bit number, a stage element but `@position`, `@vertex_index`, `@instance_index` and `@first_instance`, and a `discard` are `unsupported` so far.
+* **EMIT-237** DXIL's `dx.viewIdState` and `PSV0` state that every declared input lane reaches every declared output lane.
+  A table may say too much and never too little, and the validator takes this one.
+  A signature's usage masks are read off the module's final operations, so a lane the passes dropped is no use.
 
 ## Lines
 
