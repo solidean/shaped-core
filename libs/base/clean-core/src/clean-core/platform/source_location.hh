@@ -17,6 +17,7 @@
 //
 // Below FULL, file_name() and function_name() are "" and line() and column() 0, so code reading them still compiles;
 // describe_site is what prints a site at every level.
+// source_location::at_address, below FULL only, makes a site of an address taken another way.
 
 #if CC_SOURCE_SITES == 2
 
@@ -93,6 +94,19 @@ struct cc::source_location
             s._address = impl::current_code_address();
             return s;
         }
+    }
+
+    /// The site at a code address taken some other way, such as a function's own entry, which the debug info resolves to
+    /// the function's first line.
+    /// OFF names no site, as current() does.
+    [[nodiscard]] static source_location at_address(void const* address) noexcept
+    {
+        source_location s;
+        if constexpr (CC_SOURCE_SITES == 1)
+            s._address = address;
+        else
+            (void)address;
+        return s;
     }
 
     constexpr source_location() noexcept = default;

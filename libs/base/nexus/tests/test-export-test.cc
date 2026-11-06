@@ -154,12 +154,10 @@ TEST("schedule - would_run honors buckets and disabled, filter_matches ignores t
     }
 }
 
-// The registry these tests build records THIS file as every declaration's location, so the filters below are the real thing:
+// The registry these tests build records THIS file as every declaration's file, at every source-sites level, so the filters below are the real thing:
 // whatever spelling the compiler was invoked with, an absolute path with backslashes included.
 TEST("schedule - a filter matching no test name falls back to the source file")
 {
-    if constexpr (CC_SOURCE_SITES < 2)
-        SKIP("reads what only SC_SOURCE_SITES=FULL keeps of a site");
     auto const reg = make_axis_registry();
     auto const& alpha = reg.declarations[0];
     auto const& beta = reg.declarations[1];  // disabled
@@ -180,7 +178,7 @@ TEST("schedule - a filter matching no test name falls back to the source file")
 
     // The absolute path the declaration itself carries.
     {
-        char const* const args[] = {"prog", alpha.location.file_name()};
+        char const* const args[] = {"prog", alpha.file};
         auto const cfg = resolved_config(args, reg);
         CHECK(cfg.matching_files);
         CHECK(cfg.filter_matches(alpha));

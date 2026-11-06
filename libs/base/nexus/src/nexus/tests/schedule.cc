@@ -406,7 +406,7 @@ bool nx::test_schedule_config::filter_matches(test_declaration const& decl) cons
         return true;
 
     if (matching_files)
-        return any_file_matches(filters, decl.location.file_name());
+        return any_file_matches(filters, decl.file);
 
     // Simple substring match for now
     return any_name_matches(filters, decl.name);
