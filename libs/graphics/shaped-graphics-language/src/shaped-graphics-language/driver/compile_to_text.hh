@@ -103,7 +103,9 @@ struct sgl::emitted_source
     cc::string text;
     /// The SPIR-V `text_request::native` asked for; empty where the text is what was written.
     cc::vector<u32> spirv;
-    /// What kept a `prefer` from writing `spirv`, for a reader.
+    /// The DXIL container the same request asked for on dx12.
+    cc::vector<byte> dxil;
+    /// What kept a `prefer` from writing either, for a reader.
     cc::string native_gap;
     /// The source's name, unless the target reserves it: HLSL and MSL both reserve words an SGL author may pick.
     /// A caller compiling the text asks for THIS name.

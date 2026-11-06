@@ -146,6 +146,9 @@ public:
     /// shaped-shader-library asks it, as it asks `weakens_float_guarantees`.
     [[nodiscard]] virtual bool prefers_native_spirv() const { return false; }
 
+    /// The same of DXIL: only a dx12 context created with `dx12_config::native_dxil`.
+    [[nodiscard]] virtual bool prefers_native_dxil() const { return false; }
+
     /// The home the bound calls run in, or null when there is none to move to.
     ///
     /// The main thread's under main_thread, null otherwise: a single_threaded context's creating thread has no home unless the application gives it one.

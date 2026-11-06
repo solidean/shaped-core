@@ -59,6 +59,19 @@ add_library(shaped-graphics-language
     src/shaped-graphics-language/ir/lower_expr.cc
     src/shaped-graphics-language/ir/lower_memory.cc
     src/shaped-graphics-language/ir/spirv.cc
+    src/shaped-graphics-language/ir/dominance.cc
+    src/shaped-graphics-language/ir/simplify.cc
+    src/shaped-graphics-language/ir/ssa.cc
+    src/shaped-graphics-language/ir/dxil/dxil.cc
+    src/shaped-graphics-language/ir/dxil/impl/container.cc
+    src/shaped-graphics-language/ir/dxil/impl/llvm.cc
+    src/shaped-graphics-language/ir/dxil/impl/llvm_bitcode.cc
+    src/shaped-graphics-language/ir/dxil/impl/llvm_passes.cc
+    src/shaped-graphics-language/ir/dxil/impl/writer.cc
+    src/shaped-graphics-language/ir/dxil/impl/writer_math.cc
+    src/shaped-graphics-language/ir/dxil/impl/writer_memory.cc
+    src/shaped-graphics-language/ir/dxil/impl/writer_resources.cc
+    src/shaped-graphics-language/ir/dxil/impl/writer_stage.cc
 
     src/shaped-graphics-language/check/check.cc
     src/shaped-graphics-language/check/check_driver.cc

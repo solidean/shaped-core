@@ -199,6 +199,64 @@ void append_value(cc::string& out, program const& p, value_ref v)
 }
 } // namespace
 
+cc::string_view sgl::ir::op_name(op code)
+{
+    return k_names[isize(code)];
+}
+
+sgl::ir::operand sgl::ir::operand_role(op code, isize at)
+{
+    switch (code)
+    {
+    case op::extract:
+    case op::array_length:
+        return at < 1 ? operand::value : operand::literal;
+    case op::insert:
+    case op::shuffle:
+        return at < 2 ? operand::value : operand::literal;
+    case op::phi:
+        return at % 2 == 0 ? operand::value : operand::block;
+    case op::branch:
+        return operand::block;
+    case op::branch_conditional:
+        return at == 0 ? operand::value : operand::block;
+    case op::switch_:
+        return at == 0 ? operand::value : at == 1 || at % 2 == 1 ? operand::block : operand::literal;
+    default:
+        return operand::value;
+    }
+}
+
+cc::span<u32 const> sgl::ir::successors_of(program const& p, instruction const& terminator, cc::vector<u32>& scratch)
+{
+    scratch.clear();
+    auto const operands = p.operands_of(terminator);
+    for (auto k = isize(0); k < operands.size(); ++k)
+        if (operand_role(terminator.code, k) == operand::block)
+            scratch.push_back(operands[k]);
+    return cc::span<u32 const>(scratch);
+}
+
+cc::vector<sgl::ir::block_ref> sgl::ir::blocks_in_order(program const& p)
+{
+    auto order = cc::vector<block_ref>();
+    for (auto i = isize(0); i < p.blocks.size(); ++i)
+        order.push_back(block_ref(i));
+    // nearly sorted, since most blocks open in the order they were made
+    for (auto i = isize(1); i < order.size(); ++i)
+    {
+        auto const moved = order[i];
+        auto at = i;
+        while (at > 0 && p.blocks[isize(order[at - 1])].first > p.blocks[isize(moved)].first)
+        {
+            order[at] = order[at - 1];
+            --at;
+        }
+        order[at] = moved;
+    }
+    return order;
+}
+
 cc::string sgl::ir::dump(program const& p)
 {
     auto out = cc::string();

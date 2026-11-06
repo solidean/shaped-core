@@ -3,9 +3,12 @@
 #include <clean-core/string/format.hh>
 #include <shaped-graphics-language/emit/impl/dialect.hh>
 #include <shaped-graphics-language/emit/impl/plan.hh>
+#include <shaped-graphics-language/ir/dxil/dxil.hh>
 #include <shaped-graphics-language/ir/ir.hh>
 #include <shaped-graphics-language/ir/lower.hh>
+#include <shaped-graphics-language/ir/simplify.hh>
 #include <shaped-graphics-language/ir/spirv.hh>
+#include <shaped-graphics-language/ir/ssa.hh>
 #include <shaped-graphics-language/legalize/legalize.hh>
 
 namespace
@@ -357,9 +360,19 @@ sgl::emit::emitted_text sgl::emit::emit_entry_point(check::checked_module const&
     if (sources.native != native_route::text)
     {
         auto program = ir::program();
-        if (auto const gap = ir::lower(plan, program); !gap.has_value())
+        auto gap = ir::lower(plan, program);
+        auto const is_dxil = t == target::hlsl_dx12;
+        if (!gap.has_value())
+            ir::construct_ssa(program);
+        if (!gap.has_value() && is_dxil)
         {
-            result.spirv = ir::write_spirv(program);
+            ir::simplify(program);
+            gap = ir::write_dxil(program, result.dxil);
+        }
+        if (!gap.has_value())
+        {
+            if (!is_dxil)
+                result.spirv = ir::write_spirv(program);
             result.text = ir::dump(program);
             is_native = true;
         }
@@ -367,10 +380,10 @@ sgl::emit::emitted_text sgl::emit::emit_entry_point(check::checked_module const&
             result.native_gap = gap.value();
         else
         {
-            result.errors.push_back(
-                {.kind = error_kind::unsupported,
-                 .symbol = e.function,
-                 .detail = cc::format("{} holds {}, which the SPIR-V route does not lower yet", e.name, gap.value())});
+            result.errors.push_back({.kind = error_kind::unsupported,
+                                     .symbol = e.function,
+                                     .detail = cc::format("{} holds {}, which the {} route does not lower yet", e.name,
+                                                          gap.value(), is_dxil ? "DXIL" : "SPIR-V")});
             return result;
         }
     }

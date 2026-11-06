@@ -202,6 +202,7 @@ cc::result<emitted_source, cc::string> emit_text(driver::impl::front_end const& 
     }
     auto result = sgl::emitted_source{.text = cc::move(emitted.text),
                                       .spirv = cc::move(emitted.spirv),
+                                      .dxil = cc::move(emitted.dxil),
                                       .native_gap = cc::move(emitted.native_gap),
                                       .entry_point = cc::move(emitted.entry_point),
                                       .bindings = interface_of(m, legal, emitted.bound_names),

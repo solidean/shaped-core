@@ -36,6 +36,48 @@ constexpr kernel k_kernels[] = {
 };
 } // namespace
 
+BENCHMARK("slib - SGL's own DXIL against its text through DXC, one compile")
+{
+    auto compiler = ssc::dxc::compiler::create();
+    if (compiler.has_error())
+        SKIP("no DXC");
+    for (auto const& k : k_kernels)
+    {
+        auto const source = read_source(k.path);
+        auto const request = sgl::text_request{.source = source,
+                                               .source_name = k.path,
+                                               .entry_point = k.entry,
+                                               .target = sgl::emit::target::hlsl_dx12};
+        nx::bench::run(cc::format("{}: DXC", k.name),
+                       [&]
+                       {
+                           auto text = sgl::compile_to_text(request);
+                           REQUIRE(text.has_value());
+                           auto dxil = compiler.value().compile(
+                               {.source = text.value().text, .entry_point = text.value().entry_point},
+                               {.target = ssc::dxc::compile_target::dxil,
+                                .warnings_as_errors = false,
+                                .extra_args = {cc::string("-enable-16bit-types")}});
+                           REQUIRE(dxil.has_value());
+                       });
+        nx::bench::run(cc::format("{}: the text alone", k.name),
+                       [&]
+                       {
+                           auto text = sgl::compile_to_text(request);
+                           REQUIRE(text.has_value());
+                       });
+        auto native = request;
+        native.native = sgl::emit::native_route::require;
+        nx::bench::run(cc::format("{}: SGL's DXIL", k.name),
+                       [&]
+                       {
+                           auto written = sgl::compile_to_text(native);
+                           REQUIRE(written.has_value());
+                           REQUIRE(!written.value().dxil.empty());
+                       });
+    }
+}
+
 BENCHMARK("slib - SGL's own SPIR-V against its text through DXC, one compile")
 {
     auto compiler = ssc::dxc::compiler::create();

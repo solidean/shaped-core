@@ -1062,7 +1062,7 @@ private:
     void write_function()
     {
         emit(_code, spv::Function, {id_of(_void), _function, 0u, _function_type});
-        auto const order = blocks_in_order();
+        auto const order = blocks_in_order(_p);
         for (auto k = isize(0); k < order.size(); ++k)
         {
             auto const& b = _p.blocks[isize(order[k])];
@@ -1078,28 +1078,6 @@ private:
             terminator(b, _p.instructions[b.first + b.count - 1]);
         }
         emit(_code, spv::FunctionEnd, {});
-    }
-
-    /// Every block by where it opened: a block's instructions are one run, so their position is that order.
-    [[nodiscard]] cc::vector<block_ref> blocks_in_order() const
-    {
-        auto order = cc::vector<block_ref>();
-        for (auto i = isize(0); i < _p.blocks.size(); ++i)
-            order.push_back(block_ref(i));
-        auto const& blocks = _p.blocks;
-        // nearly sorted, since most blocks open in the order they were made
-        for (auto i = isize(1); i < order.size(); ++i)
-        {
-            auto const moved = order[i];
-            auto at = i;
-            while (at > 0 && blocks[isize(order[at - 1])].first > blocks[isize(moved)].first)
-            {
-                order[at] = order[at - 1];
-                --at;
-            }
-            order[at] = moved;
-        }
-        return order;
     }
 
     void write_entry()
