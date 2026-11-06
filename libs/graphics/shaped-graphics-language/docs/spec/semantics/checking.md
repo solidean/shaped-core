@@ -1705,6 +1705,7 @@ A call deduces what each parameter stands for, and inlining writes that in its p
   In an instance it is the constant its arguments make it, which a `const if` decides on (CHK-430): `const if T == float:`.
   Two mentions of one type are equal, and so are two instances of one generic struct whose arguments are (CHK-339).
 * **CHK-341** `undefined()` in the prelude is a value of the type of the parameter it meets, and binds no type parameter ([why](why/checking.md#chk-341)).
+  It is also the value of a `let mut` with a written type, which then is that local.
   It is a local declared and never assigned, which nobody may read: the interpreter reads it as zeroes, and a target reads what its local holds.
   `report.none()` is the use it exists for: a report with no hit has attributes of the report's type and no value.
 

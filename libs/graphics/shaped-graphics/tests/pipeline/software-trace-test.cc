@@ -122,6 +122,47 @@ ASYNC_INVOCABLE_TEST("sg - an opted-in package's inline trace meets what moves, 
     co_return;
 }
 
+ASYNC_INVOCABLE_TEST("sg - a ray through the edge two triangles share meets exactly one of them, on the GPU",
+                     (sg::context_handle const& ctx))
+{
+    REQUIRE(ctx != nullptr);
+    if (!sg_test::shaders_reach(*ctx))
+        SKIP("no compiler builds this binary's shaders into a format this context accepts");
+    if (!ctx->supports(sg::feature::ray_tracing_motion_blur))
+        SKIP("this context has no ray-traced motion");
+
+    auto const pipeline = co_await shaders::software_trace::trace_shared_edge.acquire_pipeline(*ctx);
+    auto const usage = sg::buffer_usage::readwrite_buffer | sg::buffer_usage::copy_src;
+    auto const hits
+        = ctx->persistent.create_buffer_from_data(cc::vector<tg::vec4f>::create_defaulted(grid * grid), usage);
+    auto const ids = ctx->persistent.create_buffer_from_data(cc::vector<tg::vec4i>::create_defaulted(grid * grid), usage);
+
+    auto cmd = ctx->create_command_list();
+    auto const scene = build_scene(*ctx, *cmd, sg::accel_build_flag::software_trace);
+    auto const layout = ctx->cached.acquire_binding_group_layout<shaders::software_trace::scene>();
+    auto const group
+        = ctx->transient.create_binding_group(*cmd, layout,
+                                              shaders::software_trace::scene{.world = scene.tlas->as_view(),
+                                                                             .hits = hits.as_readwrite_buffer(),
+                                                                             .ids = ids.as_readwrite_buffer()});
+    cmd->compute.bind_pipeline(*pipeline);
+    cmd->compute.bind_group(0, *group);
+    cmd->compute.dispatch_threads(grid, grid);
+    auto const ids_back = cmd->download.data_from_buffer(ids);
+    ctx->submit_command_list(cc::move(cmd));
+
+    auto const got = co_await ids_back.data();
+    REQUIRE(got.size() == grid * grid);
+    for (auto at = 0; at < grid * grid; ++at)
+    {
+        auto const where = cc::format("ray {}", at);
+        CHECK(got[at][0] == 1).context(where);
+        CHECK(got[at][1] == 0).context(where);
+        CHECK(got[at][3] == 0).context(where);
+    }
+    co_return;
+}
+
 ASYNC_INVOCABLE_TEST("sg - an opted-in package's pixel stage traces what moves", (sg::context_handle const& ctx))
 {
     REQUIRE(ctx != nullptr);

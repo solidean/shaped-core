@@ -164,7 +164,8 @@ The prelude's `trace` holds both through an internal `by_target(native, emulated
   WGSL writes it, since WebGPU has no query, and the interpreter runs it too, so a `test` traces against a pool its driver binds (EVAL-95).
   HLSL writes it where a compile asks, which a package's `SOFTWARE_TRACE` does and nothing does on its own.
   Its pool layout is an internal contract between sg and the prelude, [raytracing-polyfill.md](../raytracing-polyfill.md).
-* `t` and the barycentrics of the two forms agree within a tolerance, never bit for bit, and the emulated triangle test is not watertight yet.
+* `t` and the barycentrics of the two forms agree within a tolerance, never bit for bit.
+* **The emulated triangle test is watertight**: a ray through an edge two triangles of one structure share meets exactly one of them, and so does a ray through a corner they share.
 
 ## The pipeline
 

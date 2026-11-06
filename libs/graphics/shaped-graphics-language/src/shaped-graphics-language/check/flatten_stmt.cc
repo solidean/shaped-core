@@ -669,8 +669,13 @@ void sgl::check::impl::flattener::flatten_stmt(ast::stmt_id id)
         // minted ahead of its value, so the name the program wrote is its own and a callee inlined there mints past it
         auto const local = add_local(let->is_mut ? local_kind::var : local_kind::let, c.text_of(file(), name->where),
                                      tables().type_at(let->pattern));
+        // CHK-341: a `let mut` of `undefined()` is that local, with nothing to copy
+        auto const is_undefined
+            = ast::is_valid(let->value) && tables().target_at(let->value).kind == target_kind::undefined_value;
+        entry.locals[index_of(local)].is_undefined = is_undefined;
         // CHK-55: a `let mut` without a value holds nothing until it is assigned, which judge_assignments holds to
-        auto const value = ast::is_valid(let->value) || !let->is_mut ? flatten_expr(let->value) : flat_expr_id::none;
+        auto const value = !is_undefined && (ast::is_valid(let->value) || !let->is_mut) ? flatten_expr(let->value)
+                                                                                        : flat_expr_id::none;
         current()->bound.push_back({.where = {.kind = target_kind::local, .index = i32(id)}, .local = local});
         if (let->is_mut)
             add_stmt(from, flat_var{.local = local, .value = value});

@@ -132,8 +132,15 @@ A test's driver binds a pool and each acceleration member's root (EVAL-95), and 
 * Two levels with one stack: a TLAS leaf pushes its instances' BLAS roots, with the ray moved into object space.
 * A BLAS leaf is read as its region's header `w` says, triangles or boxes, so a mixed TLAS needs no marker of its own.
   The TLAS header's kinds are not read yet.
-* **Triangles are not tested watertight yet**: Möller–Trumbore with a determinant cutoff, so a ray through an edge two triangles share may hit both or neither.
-  A watertight test is what hardware promises, and until the traversal has one, a test of it keeps its rays off shared edges.
+* **Triangles are tested watertight**, as Woop, Benthin and Wald do: the ray is sheared onto +z through the origin, and a triangle's three edges are judged in that plane.
+  A rounded difference of rounded products is 0 or has the true sign, so only a tie is left to decide, and no target needs doubles for it.
+  A tie goes one way for an edge taken in its sorted direction, as if the ray stood infinitesimally beside every edge at once.
+  So two triangles sharing an edge take a ray through it exactly once, whatever their winding, and a fan takes a ray through its corner exactly once.
+  Sorting an edge has both triangles evaluate one expression, so a target that fuses a product still negates it exactly.
+  A product that rounds to a tie it is not can still decide a corner wrongly, within a rounding of that corner.
+  Only vertices equal bit for bit are shared, so an edge between two instances need not be.
+* **A box is entered a little past its sides**, by the rounding of the slab test's products, and a ray running along a side enters it, so a watertight triangle behind a box's face is reached.
+* A stack of nodes is written before it is read, so neither of its arrays is filled.
 * The intersection runs for every box the ray enters.
   The any-hit decision sees a non-opaque triangle, or the report of a non-opaque box, with the instance's forced opacity and the ray flags applied first.
 * `t` and the barycentrics agree with hardware within a tolerance, never bit for bit.
