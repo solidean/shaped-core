@@ -1,6 +1,5 @@
 ---
 created: 2026-11-06
-parent: epic-sgl-optimizing-passes-and-ir-targets
 refs:
   - file: libs/graphics/shaped-graphics-language/docs/architecture.md
   - file: libs/graphics/shaped-graphics-language/docs/issues/epic-sgl-shader-disassembly.md
