@@ -41,6 +41,9 @@ enum class rule_kind : u8
     discard,
     derivative,
     sample_lod,
+    sample_bias,
+    sample_grad,
+    sample_compare_zero,
     image_fetch,
     image_gather,
     image_write,
@@ -157,8 +160,13 @@ constexpr op_rule k_rules[] = {
     {op::discard, rule_kind::discard, spv::DemoteToHelperInvocation},
     {op::sample_lod, rule_kind::sample_lod, spv::ImageSampleExplicitLod},
     {op::sample_implicit, rule_kind::plain, spv::ImageSampleImplicitLod},
+    {op::sample_bias, rule_kind::sample_bias, spv::ImageSampleImplicitLod},
+    {op::sample_grad, rule_kind::sample_grad, spv::ImageSampleExplicitLod},
+    {op::sample_compare, rule_kind::plain, spv::ImageSampleDrefImplicitLod},
+    {op::sample_compare_zero, rule_kind::sample_compare_zero, spv::ImageSampleDrefExplicitLod},
     {op::image_fetch, rule_kind::image_fetch, spv::ImageFetch},
     {op::image_gather, rule_kind::image_gather, spv::ImageGather},
+    {op::image_gather_compare, rule_kind::image_gather, spv::ImageDrefGather},
     {op::image_write, rule_kind::image_write, spv::ImageWrite},
     {op::image_size, rule_kind::image_size, 0},
     {op::subgroup, rule_kind::subgroup, 0},
@@ -370,6 +378,17 @@ void writer::instruction_of(u32 index)
     case rule_kind::sample_lod:
         return emit(_code, rule.opcode,
                     {id_of(i.type), id, id_of_raw(operands[0]), id_of_raw(operands[1]), 0x2u, id_of_raw(operands[2])});
+    case rule_kind::sample_bias:
+        return emit(_code, rule.opcode,
+                    {id_of(i.type), id, id_of_raw(operands[0]), id_of_raw(operands[1]), 0x1u, id_of_raw(operands[2])});
+    case rule_kind::sample_grad:
+        return emit(_code, rule.opcode,
+                    {id_of(i.type), id, id_of_raw(operands[0]), id_of_raw(operands[1]), 0x4u, id_of_raw(operands[2]),
+                     id_of_raw(operands[3])});
+    case rule_kind::sample_compare_zero:
+        return emit(_code, rule.opcode,
+                    {id_of(i.type), id, id_of_raw(operands[0]), id_of_raw(operands[1]), id_of_raw(operands[2]), 0x2u,
+                     id_of_raw(operands[3])});
     case rule_kind::image_fetch:
         return emit(_code, rule.opcode,
                     {id_of(i.type), id, id_of_raw(operands[0]), id_of_raw(operands[1]), i.aux != 0 ? 0x40u : 0x2u,

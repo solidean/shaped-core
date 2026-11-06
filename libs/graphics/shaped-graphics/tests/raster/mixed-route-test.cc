@@ -60,6 +60,61 @@ cc::shared_async<sg_test::offscreen_pixels> drawn(sg::context& ctx,
         });
 }
 
+/// One pixel stage's four stages, its two routes each.
+struct routes
+{
+    cc::optional<sg::compiled_shader> vertex_text;
+    cc::optional<sg::compiled_shader> pixel_text;
+    cc::optional<sg::compiled_shader> vertex_native;
+    cc::optional<sg::compiled_shader> pixel_native;
+};
+
+/// What a draw of the surface's pixel stages differs by.
+struct surface_draw
+{
+    sg::pipeline_layout_handle layout;
+    sg::binding_group const* group = nullptr;
+    /// Tests the depth a stage writes against a cleared target of it.
+    bool has_depth = false;
+    cc::string_view target_set;
+};
+
+cc::shared_async<sg_test::offscreen_pixels> drawn_surface(sg::context& ctx,
+                                                          sg::compiled_shader const& vertex,
+                                                          sg::compiled_shader const& pixel,
+                                                          surface_draw const& how)
+{
+    auto desc = sg::raster_pipeline_description{
+        .layout = how.layout,
+        .vertex_shader = vertex,
+        .fragment_shader = pixel,
+        .rasterization = {.cull = sg::cull_mode::none},
+    };
+    desc.color_targets.push_back({.format = sg::pixel_format::rgba32_float});
+    desc.color_targets.push_back({.format = sg::pixel_format::rgba32_float});
+    if (how.has_depth)
+    {
+        desc.depth_stencil_format = sg::pixel_format::depth32_float;
+        desc.depth_stencil = {.depth_test = true, .depth_write = true, .depth_compare = sg::compare_op::less};
+    }
+    auto const pipeline = ctx.uncached.create_raster_pipeline(desc);
+    auto const colors = sg_test::offscreen{.width = k_size,
+                                           .height = k_size,
+                                           .colors = {sg::pixel_format::rgba32_float, sg::pixel_format::rgba32_float},
+                                           .depth_stencil = how.has_depth ? cc::optional<sg::pixel_format>(
+                                                                                sg::pixel_format::depth32_float)
+                                                                          : cc::optional<sg::pixel_format>(),
+                                           .clear_depth = 0.5f};
+    co_return co_await sg_test::draw_offscreen(ctx, colors,
+                                               [&](sg::rendering_scope& scope)
+                                               {
+                                                   scope.bind_pipeline(*pipeline);
+                                                   if (how.group != nullptr)
+                                                       scope.bind_group(0, *how.group);
+                                                   scope.draw({.vertex_range = {.offset = 0, .size = 3}});
+                                               });
+}
+
 void check_same(sg_test::offscreen_pixels const& seen, sg_test::offscreen_pixels const& reference, cc::string_view route)
 {
     for (auto target = 0; target < 2; ++target)
@@ -114,4 +169,126 @@ ASYNC_INVOCABLE_TEST("sg - a stage of SGL's own binary links against one through
     check_same(co_await drawn(*ctx, vertex_native.value(), pixel_text.value()), reference, "native vertex, DXC pixel");
     check_same(co_await drawn(*ctx, vertex_text.value(), pixel_native.value()), reference, "DXC vertex, native pixel");
     check_same(co_await drawn(*ctx, vertex_native.value(), pixel_native.value()), reference, "both native");
+}
+
+namespace
+{
+/// Draws one pixel stage through every pairing of the routes, and holds each to the pair through DXC.
+cc::shared_async<sg_test::offscreen_pixels> compared_routes(sg::context& ctx, routes const& r, surface_draw const& how, cc::string_view name)
+{
+    REQUIRE(r.vertex_text.has_value());
+    REQUIRE(r.pixel_text.has_value());
+    REQUIRE(r.vertex_native.has_value());
+    REQUIRE(r.pixel_native.has_value());
+    CHECK(r.pixel_text.value().compiler.name != "sgl");
+    CHECK(r.pixel_native.value().compiler.name == "sgl");
+    auto const reference = co_await drawn_surface(ctx, r.vertex_text.value(), r.pixel_text.value(), how);
+    check_same(co_await drawn_surface(ctx, r.vertex_native.value(), r.pixel_text.value(), how), reference,
+               cc::format("{}: native vertex, DXC pixel", name));
+    check_same(co_await drawn_surface(ctx, r.vertex_text.value(), r.pixel_native.value(), how), reference,
+               cc::format("{}: DXC vertex, native pixel", name));
+    check_same(co_await drawn_surface(ctx, r.vertex_native.value(), r.pixel_native.value(), how), reference,
+               cc::format("{}: both native", name));
+    co_return reference;
+}
+} // namespace
+
+ASYNC_INVOCABLE_TEST("sg - what a pixel stage reaches reads alike through SGL's binary and through DXC",
+                     (sg::context_handle const& ctx))
+{
+    REQUIRE(ctx != nullptr);
+    (void)sg_test::shader_fixtures();
+    if (ctx->prefers_native_dxil() || ctx->prefers_native_spirv())
+        SKIP("this context takes SGL's binary for every package, so there is no DXC route to mix with");
+    auto const takes_dxil = ctx->accepts_shader_format(sg::shader_format::dxil);
+    if (!takes_dxil && !ctx->accepts_shader_format(sg::shader_format::spirv))
+        SKIP("this context takes neither DXIL nor SPIR-V");
+    namespace text = sg::test::mixed_text::pixel_surface;
+    namespace dxil = sg::test::mixed_dxil::pixel_surface;
+    namespace spirv = sg::test::mixed_spirv::pixel_surface;
+    auto const probe = co_await compiled(*ctx, text::surface_vs);
+    if (!probe.has_value())
+        SKIP("this build has no DXC");
+    auto const native_vertex
+        = takes_dxil ? co_await compiled(*ctx, dxil::surface_vs) : co_await compiled(*ctx, spirv::surface_vs);
+
+    auto const empty = ctx->cached.acquire_pipeline_layout(sg::pipeline_layout_description{});
+    auto const discarding = co_await compared_routes(
+        *ctx,
+        routes{.vertex_text = probe,
+               .pixel_text = co_await compiled(*ctx, text::discarding_ps),
+               .vertex_native = native_vertex,
+               .pixel_native = takes_dxil ? co_await compiled(*ctx, dxil::discarding_ps)
+                                          : co_await compiled(*ctx, spirv::discarding_ps)},
+        {.layout = empty}, "discard");
+    // the discarded column stays as it was cleared, and its neighbour's derivative still read it, as a helper
+    CHECK(discarding[0].rgba_float(0, k_size / 2)[3] == 0.0f);
+    CHECK(discarding[0].rgba_float(1, k_size / 2)[0] == 2.0f);
+    CHECK(discarding[0].rgba_float(3, k_size / 2)[0] == 6.0f);
+
+    auto const inputs = co_await compared_routes(
+        *ctx,
+        routes{.vertex_text = probe,
+               .pixel_text = co_await compiled(*ctx, text::inputs_ps),
+               .vertex_native = native_vertex,
+               .pixel_native = takes_dxil ? co_await compiled(*ctx, dxil::inputs_ps)
+                                          : co_await compiled(*ctx, spirv::inputs_ps)},
+        {.layout = empty}, "inputs");
+    CHECK(inputs[1].rgba_float(k_size / 2, k_size / 2)[3] == 1.0f); // the one sample is covered
+
+    auto const depth = co_await compared_routes(
+        *ctx,
+        routes{.vertex_text = probe,
+               .pixel_text = co_await compiled(*ctx, text::depth_ps),
+               .vertex_native = native_vertex,
+               .pixel_native = takes_dxil ? co_await compiled(*ctx, dxil::depth_ps)
+                                          : co_await compiled(*ctx, spirv::depth_ps)},
+        {.layout = empty, .has_depth = true}, "depth");
+    // the written depth is an eighth of x against the 0.5 it clears to, and every interpolated one is 0.5
+    CHECK(depth[1].rgba_float(1, k_size / 2)[0] == 1.0f);
+    CHECK(depth[1].rgba_float(k_size - 1, k_size / 2)[0] == 0.0f);
+
+    // Four texels of a ramp, and a depth cleared to 0.5, each compare's reference on one side of it.
+    constexpr int extent = 4;
+    auto texels = cc::vector<byte>();
+    for (auto y = 0; y < extent; ++y)
+        for (auto x = 0; x < extent; ++x)
+            texels.push_back_range(cc::span<byte const>({byte(40 + 60 * x), byte(200 - 50 * y), byte(10 * x), byte(255)}));
+    auto const albedo = ctx->persistent.create_texture_2d({.format = sg::pixel_format::rgba8_unorm,
+                                                           .width = extent,
+                                                           .height = extent,
+                                                           .usage = sg::texture_usage::texture | sg::texture_usage::copy_dst});
+    auto const shadow = ctx->persistent.create_texture_2d({.format = sg::pixel_format::depth32_float,
+                                                           .width = extent,
+                                                           .height = extent,
+                                                           .usage = sg::texture_usage::depth_stencil | sg::texture_usage::texture});
+    auto cmd = ctx->create_command_list();
+    cmd->upload.bytes_to_texture(albedo.raw(), cc::span<byte const>(texels));
+    {
+        auto scope = cmd->raster.render_to({.depth_stencil_target = shadow.as_depth_stencil_view().cleared(0.5f)});
+    }
+    auto const group_layout = ctx->cached.acquire_binding_group_layout<text::surface_textures>();
+    auto const group = ctx->persistent.create_binding_group(
+        group_layout, text::surface_textures{.albedo = albedo.as_texture_view(),
+                                              .shadow = shadow.as_texture_view(),
+                                              .smooth = sg::sampler{.min_filter = sg::sampler_filter::linear,
+                                                                    .mag_filter = sg::sampler_filter::linear,
+                                                                    .mip_filter = sg::sampler_filter::nearest},
+                                              .compared = sg::sampler{.min_filter = sg::sampler_filter::nearest,
+                                                                      .mag_filter = sg::sampler_filter::nearest,
+                                                                      .mip_filter = sg::sampler_filter::nearest,
+                                                                      .compare = sg::compare_op::less}});
+    ctx->submit_command_list(cc::move(cmd));
+    auto const sampled = co_await compared_routes(
+        *ctx,
+        routes{.vertex_text = probe,
+               .pixel_text = co_await compiled(*ctx, text::sampled_ps),
+               .vertex_native = native_vertex,
+               .pixel_native = takes_dxil ? co_await compiled(*ctx, dxil::sampled_ps)
+                                          : co_await compiled(*ctx, spirv::sampled_ps)},
+        {.layout = text::sampled_ps.acquire_layout(*ctx), .group = &*group}, "sampling");
+    auto const second = sampled[1].rgba_float(k_size / 2, k_size / 2);
+    CHECK(second[3] == 1.0f); // the texels' alpha: a stage that sampled nothing reads 0
+    CHECK(second[0] == 1.0f); // 0.25 < 0.5
+    CHECK(second[1] == 0.0f); // 0.75 > 0.5
 }

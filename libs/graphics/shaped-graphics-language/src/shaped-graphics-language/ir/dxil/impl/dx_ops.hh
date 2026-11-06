@@ -73,6 +73,11 @@ enum class dx_class_id : u8
     sample_index,
     make_double,
     split_double,
+    sample_bias,
+    sample_grad,
+    sample_cmp,
+    sample_cmp_level_zero,
+    texture_gather_cmp,
 };
 
 // clang-format off
@@ -123,6 +128,11 @@ inline constexpr dx_class k_dx_classes[] = {
     {"sampleIndex", "o:", dx_class::read_none},
     {"makeDouble", "o:ii", dx_class::read_none},
     {"splitDouble", "S:o", dx_class::read_none},
+    {"sampleBias", "R:hhffffiiiff", dx_class::read_only},
+    {"sampleGrad", "R:hhffffiiifffffff", dx_class::read_only},
+    {"sampleCmp", "R:hhffffiiiff", dx_class::read_only},
+    {"sampleCmpLevelZero", "R:hhffffiiif", dx_class::read_only},
+    {"textureGatherCmp", "R:hhffffiiif", dx_class::read_only},
 };
 // clang-format on
 
@@ -223,6 +233,11 @@ enum class dx_op : u8
     deriv_coarse_y,
     make_double,
     split_double,
+    sample_bias,
+    sample_grad,
+    sample_cmp,
+    sample_cmp_level_zero,
+    texture_gather_cmp,
 };
 
 struct dx_op_info
@@ -314,10 +329,15 @@ inline constexpr dx_op_info k_dx_ops[] = {
     {84, dx_class_id::unary, k_f16 | k_f32},
     {101, dx_class_id::make_double, k_f64},
     {102, dx_class_id::split_double, k_f64},
+    {61, dx_class_id::sample_bias, k_f16 | k_f32},
+    {63, dx_class_id::sample_grad, k_f16 | k_f32},
+    {64, dx_class_id::sample_cmp, k_f16 | k_f32},
+    {65, dx_class_id::sample_cmp_level_zero, k_f16 | k_f32},
+    {74, dx_class_id::texture_gather_cmp, k_f16 | k_f32 | k_i16 | k_i32},
 };
 // clang-format on
 
-static_assert(sizeof(k_dx_ops) / sizeof(k_dx_ops[0]) == sizeof(char[isize(dx_op::split_double) + 1]));
+static_assert(sizeof(k_dx_ops) / sizeof(k_dx_ops[0]) == sizeof(char[isize(dx_op::texture_gather_cmp) + 1]));
 static_assert(sizeof(k_dx_classes) / sizeof(k_dx_classes[0])
-              == sizeof(char[isize(dx_class_id::split_double) + 1]));
+              == sizeof(char[isize(dx_class_id::texture_gather_cmp) + 1]));
 } // namespace sgl::ir::dxil::impl

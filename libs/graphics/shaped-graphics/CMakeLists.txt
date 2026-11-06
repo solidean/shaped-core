@@ -551,6 +551,7 @@ if(SC_BUILD_TESTS)
             LANGUAGE   sgl
             SHADERS
                 mixed_link.sgl:*
+                pixel_surface.sgl:*
         )
         sc_add_shader_package(
             TARGET     shaped-graphics-test
@@ -561,6 +562,7 @@ if(SC_BUILD_TESTS)
             NATIVE_DXIL
             SHADERS
                 mixed_link.sgl:*
+                pixel_surface.sgl:*
         )
         sc_add_shader_package(
             TARGET     shaped-graphics-test
@@ -571,6 +573,7 @@ if(SC_BUILD_TESTS)
             NATIVE_SPIRV
             SHADERS
                 mixed_link.sgl:*
+                pixel_surface.sgl:*
         )
 
         sc_add_shader_package(

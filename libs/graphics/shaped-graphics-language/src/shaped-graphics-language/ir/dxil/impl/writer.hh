@@ -156,6 +156,7 @@ private:
         u32 component = 0;
         /// The PSV's class of it.
         u32 psv_type = 0;
+        bool is_comparison = false;
     };
 
     /// A row of a constant block this basic block read already, which a second read of it takes.
@@ -288,6 +289,8 @@ private:
     void number_signature();
     void stage_load(u32 index, instruction const& i);
     void stage_store(instruction const& i);
+    /// A call through a sampler: the coordinate's lanes, its three offsets, none of them stated, then what `tail` adds.
+    void sampled(u32 index, instruction const& i, dx_op op, cc::span<ll_value const> tail, isize offsets = 3);
     void discard();
     void derivative_lanes(u32 index, instruction const& i);
     /// Which lanes the module's final operations touch, once nothing more can go.

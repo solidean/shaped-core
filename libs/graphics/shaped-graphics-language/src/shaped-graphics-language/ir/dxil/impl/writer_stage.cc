@@ -436,7 +436,7 @@ void writer::write_entry_metadata()
                 fields.push_back(0);
                 break;
             default: // a sampler: kind, extra
-                fields.push_back(_m.md_i32(0));
+                fields.push_back(_m.md_i32(b.is_comparison ? 1 : 0));
                 fields.push_back(0);
                 break;
             }

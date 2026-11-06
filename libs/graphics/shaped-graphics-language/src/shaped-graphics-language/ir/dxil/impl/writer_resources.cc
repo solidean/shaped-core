@@ -176,8 +176,9 @@ void writer::declare_handles()
                _m.constant_struct(bind_type, bind_fields), _m.constant_i32(lower), _m.constant_bool(false)};
         auto const binding = call(dx_op::create_handle_from_binding, _m.void_type(), bind_args);
 
-        // bits 0 to 7 the kind, bit 12 a UAV, bit 14 globally coherent
-        auto const word0 = kind | (cls == 1 ? 1u << 12 : 0u) | (global.is_coherent ? 1u << 14 : 0u);
+        // bits 0 to 7 the kind, bit 12 a UAV, bit 14 globally coherent, bit 15 a sampler that compares
+        auto const word0 = kind | (cls == 1 ? 1u << 12 : 0u) | (global.is_coherent ? 1u << 14 : 0u)
+                         | (global.is_comparison ? 1u << 15 : 0u);
         ll_value const prop_fields[] = {_m.constant_i32(word0), _m.constant_i32(word1)};
         ll_value const annotate_args[] = {_m.constant_i32(k_dx_ops[isize(dx_op::annotate_handle)].number), binding,
                                           _m.constant_struct(props_type, prop_fields)};
@@ -192,7 +193,8 @@ void writer::declare_handles()
                              .size = size,
                              .stride = stride,
                              .component = component,
-                             .psv_type = cls == 1 ? rule.psv_write : rule.psv_read});
+                             .psv_type = cls == 1 ? rule.psv_write : rule.psv_read,
+                             .is_comparison = global.is_comparison});
     }
 }
 
@@ -240,10 +242,36 @@ ll_value writer::handle_of(value_ref global)
     return _handles[index_of(global)].annotated;
 }
 
+void writer::sampled(u32 index, instruction const& i, dx_op op, cc::span<ll_value const> tail, isize offsets)
+{
+    auto const operands = _p.operands_of(i);
+    auto const pair = value_ref(operands[0]);
+    auto const at = value_ref(operands[1]);
+    auto const lanes = count_of(at);
+    auto const undefined = _m.constant_undef(_m.int_type());
+    auto const undefined_f = _m.constant_undef(_m.float_type());
+    auto args = cc::vector<ll_value>();
+    args.push_back(_m.constant_i32(k_dx_ops[isize(op)].number));
+    args.push_back(leaf_at(pair, 0));
+    args.push_back(leaf_at(pair, 1));
+    for (auto l = u32(0); l < 4; ++l)
+        args.push_back(l < lanes ? leaf_at(at, l) : undefined_f);
+    for (auto k = isize(0); k < offsets; ++k)
+        args.push_back(undefined);
+    args.push_back_range(tail);
+    auto const fetched = call(op, scalar_type(scalar_at(i.type, 0)), args);
+    _scratch.clear();
+    for (auto l = u32(0); l < leaves_of(i.type); ++l)
+        _scratch.push_back(_m.extract_value(fetched, l));
+    define(index);
+}
+
 void writer::texture_op(u32 index, instruction const& i)
 {
     auto const operands = _p.operands_of(i);
     auto const undefined = _m.constant_undef(_m.int_type());
+    // a coordinate lane no call reads, and a `clamp` none states
+    auto const clamp = _m.constant_undef(_m.float_type());
     switch (i.code)
     {
     case op::combine_sampler:
@@ -294,51 +322,53 @@ void writer::texture_op(u32 index, instruction const& i)
     }
     case op::sample_lod:
     {
-        auto const pair = value_ref(operands[0]);
-        auto const at = value_ref(operands[1]);
-        auto const lanes = count_of(at);
-        auto const undefined_f = _m.constant_undef(_m.float_type());
-        auto const texel = scalar_type(scalar_at(i.type, 0));
-        ll_value const args[] = {_m.constant_i32(k_dx_ops[isize(dx_op::sample_level)].number),
-                                 leaf_at(pair, 0),
-                                 leaf_at(pair, 1),
-                                 leaf_at(at, 0),
-                                 lanes > 1 ? leaf_at(at, 1) : undefined_f,
-                                 lanes > 2 ? leaf_at(at, 2) : undefined_f,
-                                 lanes > 3 ? leaf_at(at, 3) : undefined_f,
-                                 undefined,
-                                 undefined,
-                                 undefined,
-                                 leaf_at(value_ref(operands[2]))};
-        auto const fetched = call(dx_op::sample_level, texel, args);
-        _scratch.clear();
-        for (auto l = u32(0); l < 4; ++l)
-            _scratch.push_back(_m.extract_value(fetched, l));
-        return define(index);
+        ll_value const tail[] = {leaf_at(value_ref(operands[2]))};
+        return sampled(index, i, dx_op::sample_level, tail);
     }
     case op::sample_implicit:
     {
-        auto const pair = value_ref(operands[0]);
-        auto const at = value_ref(operands[1]);
-        auto const lanes = count_of(at);
-        auto const undefined_f = _m.constant_undef(_m.float_type());
-        auto const texel = scalar_type(scalar_at(i.type, 0));
-        ll_value const args[] = {_m.constant_i32(k_dx_ops[isize(dx_op::sample)].number),
-                                 leaf_at(pair, 0),
-                                 leaf_at(pair, 1),
-                                 leaf_at(at, 0),
-                                 lanes > 1 ? leaf_at(at, 1) : undefined_f,
-                                 lanes > 2 ? leaf_at(at, 2) : undefined_f,
-                                 lanes > 3 ? leaf_at(at, 3) : undefined_f,
-                                 undefined,
-                                 undefined,
-                                 undefined,
-                                 undefined_f};
-        auto const fetched = call(dx_op::sample, texel, args);
-        _scratch.clear();
-        for (auto l = u32(0); l < 4; ++l)
-            _scratch.push_back(_m.extract_value(fetched, l));
-        return define(index);
+        ll_value const tail[] = {clamp};
+        return sampled(index, i, dx_op::sample, tail);
+    }
+    case op::sample_bias:
+    {
+        ll_value const tail[] = {leaf_at(value_ref(operands[2])), clamp};
+        return sampled(index, i, dx_op::sample_bias, tail);
+    }
+    case op::sample_grad:
+    {
+        auto const x = value_ref(operands[2]);
+        auto const y = value_ref(operands[3]);
+        auto const lanes = count_of(x);
+        ll_value const tail[] = {leaf_at(x, 0),
+                                 lanes > 1 ? leaf_at(x, 1) : clamp,
+                                 lanes > 2 ? leaf_at(x, 2) : clamp,
+                                 leaf_at(y, 0),
+                                 lanes > 1 ? leaf_at(y, 1) : clamp,
+                                 lanes > 2 ? leaf_at(y, 2) : clamp,
+                                 clamp};
+        return sampled(index, i, dx_op::sample_grad, tail);
+    }
+    case op::sample_compare:
+    {
+        ll_value const tail[] = {leaf_at(value_ref(operands[2])), clamp};
+        return sampled(index, i, dx_op::sample_cmp, tail);
+    }
+    case op::sample_compare_zero:
+    {
+        ll_value const tail[] = {leaf_at(value_ref(operands[2]))};
+        return sampled(index, i, dx_op::sample_cmp_level_zero, tail);
+    }
+    case op::image_gather:
+    {
+        ll_value const tail[] = {leaf_at(value_ref(operands[2]))};
+        return sampled(index, i, dx_op::texture_gather, tail, 2);
+    }
+    case op::image_gather_compare:
+    {
+        // the channel comes first, and a compare takes the first
+        ll_value const tail[] = {_m.constant_i32(0), leaf_at(value_ref(operands[2]))};
+        return sampled(index, i, dx_op::texture_gather_cmp, tail, 2);
     }
     default:
         return unsupported("this texture operation on DXIL");

@@ -414,7 +414,8 @@ value_ref lowering::bound_resource(i32 index)
                         .binding = r.slot,
                         .is_read_only = !writes,
                         .is_write_only = is_image && info.access == access_mode::write,
-                        .is_coherent = r.is_coherent},
+                        .is_coherent = r.is_coherent,
+                        .is_comparison = info.kind == check::type_kind::sampler && info.is_comparison},
                        r.name);
     return known;
 }
@@ -440,7 +441,8 @@ value_ref lowering::bound_sampler(i32 index)
                         .kind = global_kind::file_sampler,
                         .set = 3,
                         .binding = s.index + 1,
-                        .is_read_only = true},
+                        .is_read_only = true,
+                        .is_comparison = _m.at(s.type).is_comparison},
                        s.name);
     return known;
 }

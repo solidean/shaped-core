@@ -600,6 +600,91 @@ TEST("sgl signature - the places no shader of the repo declares match DXC too",
     CHECK(counts.front_end_failures == 0);
 }
 
+TEST("sgl signature - an element placed apart from DXC is caught, by this comparison and by the validator",
+     nx::config::rerun_on("libs/graphics/shaped-graphics-language/src/shaped-graphics-language/ir/dxil/signature.cc"))
+{
+    auto compiler = ssc::dxc::compiler::create();
+    if (compiler.has_error())
+        SKIP("no DXC");
+    // `tail` shares `near`'s row, so moving it is the mistake a packer that took one row per location makes
+    constexpr cc::string_view source = "struct shared_row:\n"
+                                       "    @position position: hpos4\n"
+                                       "    near: float3\n"
+                                       "    tail: float\n"
+                                       "@vertex fun shared_vs(@vertex_index v: int) -> shared_row:\n"
+                                       "    let x = v as float\n"
+                                       "    return { position = hpos4(x, x, x, 1.0), near = float3(x, x, x), tail = x }\n";
+    auto request = sgl::text_request{.source = source,
+                                     .entry_point = "shared_vs",
+                                     .target = sgl::emit::target::hlsl_dx12,
+                                     .native = sgl::emit::native_route::require};
+    auto const emitted = sgl::compile_to_text(request);
+    REQUIRE(emitted.has_value());
+    REQUIRE(!emitted.value().dxil.empty());
+    request.native = sgl::emit::native_route::text;
+    auto const text = sgl::compile_to_text(request);
+    REQUIRE(text.has_value());
+    auto const built = compiler.value().compile(
+        {.source = text.value().text, .entry_point = "shared_vs", .stage = sg::shader_stage::vertex},
+        {.target = ssc::dxc::compile_target::dxil,
+         .warnings_as_errors = false,
+         .extra_args = {cc::string("-enable-16bit-types")}});
+    REQUIRE(built.has_value());
+    auto const bytes = cc::span<byte const>(built.value().bytecode.data(), built.value().bytecode.size());
+    auto theirs = signatures_of(bytes);
+    auto const disassembly = compiler.value().disassemble(bytes);
+    REQUIRE(disassembly.has_value());
+    read_modes(disassembly.value(), theirs);
+    CHECK(differences(emitted.value().signature, theirs).empty());
+
+    // this comparison: the element a row down, then in the columns it left free, then in another mode
+    auto const with = [&](auto&& change)
+    {
+        auto moved = cc::vector<signature_element>();
+        for (auto const& e : emitted.value().signature)
+        {
+            moved.push_back(e);
+            if (moved.back().table == signature_table::output && moved.back().semantic_index == 1)
+                change(moved.back());
+        }
+        return differences(moved, theirs);
+    };
+    auto const rowed = with([](signature_element& e) { ++e.row; });
+    REQUIRE(rowed.size() == 1);
+    CHECK(rowed[0].contains("row"));
+    auto const columned = with([](signature_element& e) { e.first_column = 0; });
+    REQUIRE(columned.size() == 1);
+    CHECK(columned[0].contains("mask"));
+    auto const moded = with([](signature_element& e) { e.mode = sgl::ir::interpolation::flat; });
+    REQUIRE(moded.size() == 1);
+    CHECK(moded[0].contains("mode"));
+
+    // the validator: the same move in a container's own table, which `dx.sig` and `PSV0` then disagree with
+    CHECK(!compiler.value().validate(emitted.value().dxil).has_value());
+    auto mispacked = cc::vector<byte>::create_copy_of(cc::span<byte const>(emitted.value().dxil));
+    auto const parts = isize(read_at<u32>(mispacked, 28));
+    auto moved_row = false;
+    for (auto i = isize(0); i < parts; ++i)
+    {
+        auto const at = isize(read_at<u32>(mispacked, 32 + i * 4));
+        if (cc::string_view(reinterpret_cast<char const*>(mispacked.data()) + at, 4) != "OSG1")
+            continue;
+        auto const part = at + 8;
+        auto const first = part + isize(read_at<u32>(mispacked, part + 4));
+        for (auto e = isize(0); e < isize(read_at<u32>(mispacked, part)); ++e)
+        {
+            auto const row_at = first + e * 32 + 20;
+            if (read_at<u32>(mispacked, first + e * 32 + 8) != 1)
+                continue;
+            auto const row = read_at<u32>(mispacked, row_at) + 1;
+            cc::memcpy(mispacked.data() + row_at, &row, sizeof(row));
+            moved_row = true;
+        }
+    }
+    REQUIRE(moved_row);
+    CHECK(compiler.value().validate(mispacked).has_value());
+}
+
 TEST("sgl signature - random stage links match DXC, and each side of a link agrees",
      nx::config::rerun_on("libs/graphics/shaped-graphics-language/src/shaped-graphics-language/ir/dxil/signature.cc"))
 {

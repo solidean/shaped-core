@@ -398,10 +398,20 @@ enum class sgl::ir::op : sgl::u16
     sample_lod,
     /// Operands: sampled image, coordinate; a pixel stage's alone, whose level comes from its derivatives.
     sample_implicit,
+    /// Operands: sampled image, coordinate, bias.
+    sample_bias,
+    /// Operands: sampled image, coordinate, the two gradients.
+    sample_grad,
+    /// Operands: sampled image, coordinate, reference; a pixel stage's alone.
+    sample_compare,
+    /// Operands: sampled image, coordinate, reference, a float zero: at level 0.
+    sample_compare_zero,
     /// Operands: image, coordinate, level, and a sample where `aux` is 1.
     image_fetch,
     /// Operands: sampled image, coordinate, component.
     image_gather,
+    /// Operands: sampled image, coordinate, reference.
+    image_gather_compare,
     image_read,
     /// Operands: image, coordinate, texel.
     image_write,
@@ -581,6 +591,8 @@ struct sgl::ir::global
     bool is_read_only = false;
     bool is_write_only = false;
     bool is_coherent = false;
+    /// A sampler that compares, which DXIL states and SPIR-V does not.
+    bool is_comparison = false;
     u32 name_first = 0;
     u32 name_size = 0;
 };
