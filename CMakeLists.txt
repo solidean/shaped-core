@@ -10,6 +10,15 @@ if(CMAKE_RC_COMPILER AND NOT CMAKE_RC_COMPILER_INIT)
 endif()
 include("${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/ConfigureEnvironment.cmake")
 
+# A cross preset names the Unix launcher, and a preset cannot pick one value by host, so a Windows host swaps it here.
+if(CMAKE_HOST_WIN32)
+    foreach(_launcher CMAKE_C_COMPILER_LAUNCHER CMAKE_CXX_COMPILER_LAUNCHER CMAKE_C_LINKER_LAUNCHER CMAKE_CXX_LINKER_LAUNCHER)
+        if("${${_launcher}}" MATCHES "diag_launcher\\.sh$")
+            set(${_launcher} "${CMAKE_CURRENT_SOURCE_DIR}/tools/bin/diag-launcher.exe" CACHE STRING "" FORCE)
+        endif()
+    endforeach()
+endif()
+
 project(shaped-core LANGUAGES CXX)
 
 # Lock in C++23 for the whole repo.
