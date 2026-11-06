@@ -14,6 +14,21 @@ constexpr char const* persistent_anchor_extensions[]
 constexpr char const* hit_test_extensions[] = {"XR_EXT_future", "XR_META_environment_raycast"};
 } // namespace
 
+sxr::impl::blend_choice sxr::impl::choose_blend(blend_mode wanted,
+                                                cc::span<blend_mode const> runtime_modes,
+                                                bool has_camera_layer)
+{
+    if (wanted == blend_mode::opaque)
+        return {};
+    // the layer goes first: it is what ran over Quest Link, whatever the runtime lists beside it
+    if (wanted == blend_mode::alpha_blend && has_camera_layer)
+        return {.shown = blend_mode::alpha_blend, .uses_camera_layer = true};
+    for (auto const m : runtime_modes)
+        if (m == wanted)
+            return {.shown = wanted};
+    return {};
+}
+
 char const* sxr::impl::name_of(capability c)
 {
     switch (c)

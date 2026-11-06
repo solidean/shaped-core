@@ -77,3 +77,51 @@ TEST("shaped-xr capabilities - persisting needs an entity, finding it again and 
     support.space_persistence = true;
     CHECK(sxr::impl::is_supported(sxr::capability::persistent_anchors, support));
 }
+
+TEST("shaped-xr blend - opaque needs nothing, and takes no camera layer even where there is one")
+{
+    auto const choice = sxr::impl::choose_blend(sxr::blend_mode::opaque, {}, true);
+    CHECK(choice.shown == sxr::blend_mode::opaque);
+    CHECK(!choice.uses_camera_layer);
+}
+
+TEST("shaped-xr blend - a camera layer serves alpha blend on a runtime that reports only opaque")
+{
+    sxr::blend_mode const runtime[] = {sxr::blend_mode::opaque};
+    auto const choice = sxr::impl::choose_blend(sxr::blend_mode::alpha_blend, runtime, true);
+    CHECK(choice.shown == sxr::blend_mode::alpha_blend);
+    CHECK(choice.uses_camera_layer);
+}
+
+TEST("shaped-xr blend - a camera layer wins over the runtime's own alpha blend")
+{
+    sxr::blend_mode const runtime[] = {sxr::blend_mode::opaque, sxr::blend_mode::alpha_blend};
+    CHECK(sxr::impl::choose_blend(sxr::blend_mode::alpha_blend, runtime, true).uses_camera_layer);
+}
+
+TEST("shaped-xr blend - without a camera layer the runtime's own blending serves")
+{
+    sxr::blend_mode const runtime[] = {sxr::blend_mode::alpha_blend, sxr::blend_mode::additive};
+
+    auto const alpha = sxr::impl::choose_blend(sxr::blend_mode::alpha_blend, runtime, false);
+    CHECK(alpha.shown == sxr::blend_mode::alpha_blend);
+    CHECK(!alpha.uses_camera_layer);
+
+    auto const additive = sxr::impl::choose_blend(sxr::blend_mode::additive, runtime, false);
+    CHECK(additive.shown == sxr::blend_mode::additive);
+    CHECK(!additive.uses_camera_layer);
+}
+
+TEST("shaped-xr blend - a camera layer does not make a display additive")
+{
+    sxr::blend_mode const runtime[] = {sxr::blend_mode::opaque};
+    auto const choice = sxr::impl::choose_blend(sxr::blend_mode::additive, runtime, true);
+    CHECK(choice.shown == sxr::blend_mode::opaque);
+    CHECK(!choice.uses_camera_layer);
+}
+
+TEST("shaped-xr blend - what nothing can serve falls back to opaque")
+{
+    sxr::blend_mode const runtime[] = {sxr::blend_mode::opaque};
+    CHECK(sxr::impl::choose_blend(sxr::blend_mode::alpha_blend, runtime, false).shown == sxr::blend_mode::opaque);
+}

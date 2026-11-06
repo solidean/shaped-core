@@ -17,6 +17,17 @@ struct system_support
     bool environment_raycast = false;
 };
 
+/// How a session gets a blend mode: the mode it ends up with, and whether the cameras are a layer of our own under the
+/// frame, which is how `XR_FB_passthrough` works, rather than the runtime's own blending.
+struct blend_choice
+{
+    blend_mode shown = blend_mode::opaque;
+    bool uses_camera_layer = false;
+};
+
+/// What asking for `wanted` gets, given the modes the runtime composes itself and whether a camera layer is available.
+[[nodiscard]] blend_choice choose_blend(blend_mode wanted, cc::span<blend_mode const> runtime_modes, bool has_camera_layer);
+
 /// `c` as a log reads it.
 [[nodiscard]] char const* name_of(capability c);
 

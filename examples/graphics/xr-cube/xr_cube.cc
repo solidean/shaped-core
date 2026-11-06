@@ -117,7 +117,7 @@ ASYNC_EXAMPLE("shaped-graphics/xr-cube", nx::config::args("--vulkan"))
         co_return;
     }
 
-    auto created_session = system->create_session(*ctx, {.passthrough = true, .actions = sxr::standard_controller_actions()});
+    auto created_session = system->create_session(*ctx, {.blend = sxr::blend_mode::alpha_blend, .actions = sxr::standard_controller_actions()});
     if (created_session.has_error())
     {
         cc::eprintln("no session: {}", created_session.error().to_string());
@@ -125,7 +125,7 @@ ASYNC_EXAMPLE("shaped-graphics/xr-cube", nx::config::args("--vulkan"))
         co_return;
     }
     auto const session = cc::move(created_session.value());
-    cc::println("xr: passthrough {}", session->shows_passthrough() ? "on" : "off");
+    cc::println("xr: the room shows behind the cube: {}", session->blend() != sxr::blend_mode::opaque ? "yes" : "no");
 
     auto lib = slib::shader_library();
     slib::add_available_compilers(lib);
@@ -199,7 +199,7 @@ ASYNC_EXAMPLE("shaped-graphics/xr-cube", nx::config::args("--vulkan"))
                 built_for = frame.color.format();
             }
 
-            auto const clear = session->shows_passthrough() ? tg::vec4f(0, 0, 0, 0) : tg::vec4f(0.02f, 0.02f, 0.03f, 1.0f);
+            auto const clear = session->blend() == sxr::blend_mode::opaque ? tg::vec4f(0.02f, 0.02f, 0.03f, 1.0f) : tg::vec4f(0, 0, 0, 0);
             cmd = ctx->create_command_list();
             {
                 auto pass = cmd->raster.render_to({.color_targets = {frame.color.as_render_target_view().cleared(clear)},

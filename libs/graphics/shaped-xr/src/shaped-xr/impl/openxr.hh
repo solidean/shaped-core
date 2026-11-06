@@ -67,6 +67,8 @@ struct sxr::system::state
     cc::string system_name;
     /// What the description wanted and the headset has.
     cc::vector<capability> offered;
+    /// What the runtime composes by itself, as `xrEnumerateEnvironmentBlendModes` lists it.
+    cc::vector<blend_mode> runtime_blends;
     /// Whether each view hands the runtime its depth too (`XR_KHR_composition_layer_depth`).
     bool offers_depth_layer = false;
 
@@ -92,6 +94,7 @@ struct sxr::session::state
     sg::texture_2d_array own_color;
     sg::texture_2d_array own_depth;
 
+    blend_mode blend = blend_mode::opaque;
     XrPassthroughFB passthrough = XR_NULL_HANDLE;
     XrPassthroughLayerFB passthrough_layer = XR_NULL_HANDLE;
 

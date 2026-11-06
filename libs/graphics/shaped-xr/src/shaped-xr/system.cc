@@ -52,6 +52,10 @@ bool sxr::system::offers(capability) const
 {
     return false;
 }
+bool sxr::system::offers_blend(blend_mode b) const
+{
+    return b == blend_mode::opaque;
+}
 cc::result<sg::context_handle> sxr::system::create_context() const
 {
     return cc::error(error_of("no OpenXR"));
@@ -210,6 +214,23 @@ cc::result<cc::unique_ptr<sxr::system>> sxr::system::try_create(system_descripti
             s->offered.push_back(c);
         else
             CC_LOG_INFO("{} is listed, but this headset says it does not have it", impl::name_of(c));
+
+    auto blend_count = u32(0);
+    xrEnumerateEnvironmentBlendModes(s->instance, s->system, XR_VIEW_CONFIGURATION_TYPE_PRIMARY_STEREO, 0, &blend_count,
+                                     nullptr);
+    auto listed_blends = cc::vector<XrEnvironmentBlendMode>();
+    for (auto i = u32(0); i < blend_count; ++i)
+        listed_blends.push_back(XR_ENVIRONMENT_BLEND_MODE_MAX_ENUM);
+    xrEnumerateEnvironmentBlendModes(s->instance, s->system, XR_VIEW_CONFIGURATION_TYPE_PRIMARY_STEREO, blend_count,
+                                     &blend_count, listed_blends.data());
+    for (auto const b : listed_blends)
+        if (b == XR_ENVIRONMENT_BLEND_MODE_OPAQUE)
+            s->runtime_blends.push_back(blend_mode::opaque);
+        else if (b == XR_ENVIRONMENT_BLEND_MODE_ADDITIVE)
+            s->runtime_blends.push_back(blend_mode::additive);
+        else if (b == XR_ENVIRONMENT_BLEND_MODE_ALPHA_BLEND)
+            s->runtime_blends.push_back(blend_mode::alpha_blend);
+
     CC_LOG_INFO("{} on {}", s->system_name, s->runtime_name);
     return cc::make_unique<system>(cc::move(s));
 }
@@ -232,6 +253,11 @@ bool sxr::system::offers(capability c) const
         if (offered == c)
             return true;
     return false;
+}
+
+bool sxr::system::offers_blend(blend_mode b) const
+{
+    return impl::choose_blend(b, _state->runtime_blends, offers(capability::passthrough)).shown == b;
 }
 
 cc::result<sg::context_handle> sxr::system::create_context() const

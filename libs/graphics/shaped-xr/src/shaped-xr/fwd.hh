@@ -12,6 +12,7 @@ struct system_description;    // what a system is created for
 struct session_description;   // what a session is created for
 enum class capability : u8;   // what an application can ask of a runtime beyond rendering
 enum class availability : u8; // whether a session may use a capability now
+enum class blend_mode : u8;   // how a frame meets the room behind it
 enum class action_kind : u8;  // boolean, scalar, vector2, pose or vibration
 enum class hand : u8;         // left or right
 struct action_binding;        // an interaction profile's path an action is suggested at

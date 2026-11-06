@@ -45,6 +45,16 @@ enum class sxr::availability : sxr::u8
     available,
 };
 
+/// How a frame meets the room behind it.
+enum class sxr::blend_mode : sxr::u8
+{
+    opaque,
+    /// The room shows through by the frame's alpha, which is premultiplied, so a frame clears to transparent.
+    alpha_blend,
+    /// The frame adds light to the room, the only thing an optical see-through display can do; black is invisible.
+    additive,
+};
+
 struct sxr::system_description
 {
     cc::string application_name = "shaped-core";
@@ -96,9 +106,9 @@ struct sxr::session_description
     /// The depth range every view's projection maps to 0 and 1, and the one the runtime is told for its depth layer.
     f32 near_distance = 0.05f;
     f32 far_distance = 100.0f;
-    /// Shows the headset's cameras behind what is rendered, where the system asked for passthrough and it came up.
-    /// The frame's color is then cleared to transparent where the room shows through.
-    bool passthrough = false;
+    /// What the session asks for; one the runtime lacks falls back to opaque with a warning, and `session::blend` says which.
+    /// A camera layer needs `capability::passthrough` in `system_description::wants`.
+    blend_mode blend = blend_mode::opaque;
     /// The actions the session reads, bound before it begins; `sxr::standard_controller_actions()` is the usual set.
     cc::vector<action_description> actions;
 };
@@ -160,6 +170,8 @@ public:
     /// Whether the description wanted `c`, the runtime lists all it needs, and the headset says it has it.
     /// A runtime may still refuse a call, as a toggle in the Link app makes it do.
     [[nodiscard]] bool offers(capability c) const;
+    /// Whether a session asking for `b` gets it, so far as can be told before one exists.
+    [[nodiscard]] bool offers_blend(blend_mode b) const;
 
     /// An sg context on the adapter the runtime composes on, with what the runtime requires of it.
     [[nodiscard]] cc::result<sg::context_handle> create_context() const;
@@ -199,8 +211,8 @@ public:
     [[nodiscard]] bool is_running() const;
     /// Whether the headset shows this application and gives it input.
     [[nodiscard]] bool is_focused() const;
-    /// Whether the room shows behind what is rendered.
-    [[nodiscard]] bool shows_passthrough() const;
+    /// How this session's frames meet the room, which is opaque where what was asked for did not come up.
+    [[nodiscard]] blend_mode blend() const;
     /// Whether this session may use `c` now, which unlike `system::offers` may depend on what the user allowed.
     [[nodiscard]] availability availability_of(capability c) const;
 

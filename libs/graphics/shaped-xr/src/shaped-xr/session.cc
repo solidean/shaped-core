@@ -35,9 +35,9 @@ bool sxr::session::is_focused() const
 {
     return false;
 }
-bool sxr::session::shows_passthrough() const
+sxr::blend_mode sxr::session::blend() const
 {
-    return false;
+    return blend_mode::opaque;
 }
 sxr::availability sxr::session::availability_of(capability) const
 {
@@ -439,7 +439,9 @@ cc::result<cc::unique_ptr<sxr::session>> sxr::system::create_session(sg::context
     }
 
     // ---- the room behind the frame, running from the start
-    if (desc.passthrough && offers(capability::passthrough))
+    auto const blend = impl::choose_blend(desc.blend, _state->runtime_blends, offers(capability::passthrough));
+    s->blend = blend.shown;
+    if (blend.uses_camera_layer)
     {
         auto const create_passthrough = impl::proc<PFN_xrCreatePassthroughFB>(instance, "xrCreatePassthroughFB");
         auto const create_layer = impl::proc<PFN_xrCreatePassthroughLayerFB>(instance, "xrCreatePassthroughLayerFB");
@@ -461,10 +463,14 @@ cc::result<cc::unique_ptr<sxr::session>> sxr::system::create_session(sg::context
                                "xrCreatePassthroughLayerFB");
         }
         if (!why.empty())
+        {
             CC_LOG_WARNING("{}, so the frame shows no room behind it", why);
+            s->blend = blend_mode::opaque;
+        }
     }
-    else if (desc.passthrough)
-        CC_LOG_WARNING("passthrough was asked of a session whose system did not want it, or whose runtime has none");
+    else if (s->blend != desc.blend)
+        CC_LOG_WARNING("a blend mode was asked of a session whose system did not want passthrough, or whose runtime "
+                       "has neither");
 
     CC_LOG_INFO("{} views of {} x {}", view_count, s->width, s->height);
     return cc::make_unique<session>(cc::move(s));
@@ -519,9 +525,9 @@ sxr::availability sxr::session::availability_of(capability c) const
     return availability::unsupported;
 }
 
-bool sxr::session::shows_passthrough() const
+sxr::blend_mode sxr::session::blend() const
 {
-    return _state->passthrough_layer != XR_NULL_HANDLE;
+    return _state->blend;
 }
 
 cc::optional<sxr::frame> sxr::session::wait_frame()
@@ -775,10 +781,18 @@ void sxr::session::submit_frame(std::unique_ptr<sg::command_list> cmd)
                                                       .layerHandle = s.passthrough_layer};
     auto const projection = XrCompositionLayerProjection{
         .type = XR_TYPE_COMPOSITION_LAYER_PROJECTION,
-        .layerFlags = shows_room ? XrCompositionLayerFlags(XR_COMPOSITION_LAYER_BLEND_TEXTURE_SOURCE_ALPHA_BIT) : 0,
+        .layerFlags = s.blend == blend_mode::alpha_blend
+                        ? XrCompositionLayerFlags(XR_COMPOSITION_LAYER_BLEND_TEXTURE_SOURCE_ALPHA_BIT)
+                        : 0,
         .space = s.space,
         .viewCount = u32(projection_views.size()),
         .views = projection_views.data()};
+    // with a camera layer the runtime has no blending of its own to do, whatever the frame's mode
+    auto environment = XR_ENVIRONMENT_BLEND_MODE_OPAQUE;
+    if (!shows_room && s.blend == blend_mode::alpha_blend)
+        environment = XR_ENVIRONMENT_BLEND_MODE_ALPHA_BLEND;
+    if (s.blend == blend_mode::additive)
+        environment = XR_ENVIRONMENT_BLEND_MODE_ADDITIVE;
     auto layers = cc::vector<XrCompositionLayerBaseHeader const*>();
     if (shows_room)
         layers.push_back(reinterpret_cast<XrCompositionLayerBaseHeader const*>(&room));
@@ -786,7 +800,7 @@ void sxr::session::submit_frame(std::unique_ptr<sg::command_list> cmd)
         layers.push_back(reinterpret_cast<XrCompositionLayerBaseHeader const*>(&projection));
     auto const end_info = XrFrameEndInfo{.type = XR_TYPE_FRAME_END_INFO,
                                          .displayTime = s.display_time,
-                                         .environmentBlendMode = XR_ENVIRONMENT_BLEND_MODE_OPAQUE,
+                                         .environmentBlendMode = environment,
                                          .layerCount = u32(layers.size()),
                                          .layers = layers.empty() ? nullptr : layers.data()};
     if (auto const why = impl::failed(s.sys->instance, xrEndFrame(s.session, &end_info), "xrEndFrame"); !why.empty())

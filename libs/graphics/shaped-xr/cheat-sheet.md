@@ -22,7 +22,7 @@ sxr::system::try_create({.application_name, .api = sxr::graphics_api::vulkan, .w
 sys->create_context()                              // -> result<context_handle>, on the runtime's GPU and to its spec
 sys->runtime_name(); sys->system_name(); sys->api();
 sys->offers(sxr::capability::environment_depth)   // -> bool: wanted, listed, and the headset says it has it
-sys->create_session(*ctx, {.near_distance = 0.05f, .far_distance = 100.0f, .passthrough})  // -> result<unique_ptr<session>>
+sys->create_session(*ctx, {.near_distance = 0.05f, .far_distance = 100.0f, .blend = sxr::blend_mode::alpha_blend})  // -> result<unique_ptr<session>>
 //   ctx must come from create_context and outlive the session; the system outlives every session
 SXR_HAS_OPENXR                                      // 1/0: whether the build has the loader at all
 ```
@@ -45,7 +45,9 @@ r.features                                         // {name, is_supported}: what
 while (session->poll_events())                     // false once the runtime wants the app to quit
     if (auto f = session->wait_frame())            // blocks on the runtime's pacing; none while not running
         session->submit_frame(cmd_or_null);        // EVERY waited frame is submitted, rendered or not
-session->is_running(); session->is_focused(); session->shows_passthrough();
+session->is_running(); session->is_focused();
+session->blend()                                  // -> blend_mode actually in effect; opaque where what was asked for did not come up
+sys->offers_blend(sxr::blend_mode::additive)      // -> bool, before a session exists
 session->availability_of(sxr::capability::anchors) // -> availability: unsupported, needs_permission, denied, available
 f.should_render                                    // false: draw nothing, still submit_frame(nullptr)
 f.views[i].camera_to_world                         // tg::rigid_transform3f, tg's frame (LH, +y up, +z forward)
@@ -53,7 +55,7 @@ f.views[i].projection                              // LH zero-to-one: depth 0 at
 f.views[i].world_to_clip()                         // tg::mat4f, projection * inverse pose
 f.color; f.depth                                   // sg::texture_2d_array, views.size() layers: view i into layer i
 // render both in one pass: render_to({..., .view_count = 2}) with a `view_count = 2` SGL pipeline and @view_index
-// clear color to transparent where shows_passthrough(): the frame blends over the room by its alpha
+// clear color to transparent where blend() is not opaque: the frame meets the room by its premultiplied alpha
 ```
 
 ## Actions

@@ -115,6 +115,24 @@ ASYNC_TEST("shaped-xr session - vulkan renders into the runtime's images, frame 
     co_await ctx->idle_completion();
 }
 
+ASYNC_TEST("shaped-xr session - a blend mode the runtime lacks falls back to opaque, and says so",
+           nx::config::exclusive("openxr"))
+{
+    nx::expect_warning("a blend mode was asked of a session*");
+    auto const system = simulated_system({.api = sxr::graphics_api::vulkan});
+    CHECK(system->offers_blend(sxr::blend_mode::opaque));
+    CHECK(!system->offers_blend(sxr::blend_mode::additive));
+
+    auto const ctx = system->create_context().value();
+    auto const session = system->create_session(*ctx, {.blend = sxr::blend_mode::additive}).value();
+    CHECK(session->blend() == sxr::blend_mode::opaque);
+
+    auto const frame = next_rendered_frame(*session);
+    session->submit_frame(cleared(*ctx, frame, tg::vec4f(0, 0, 0, 1)));
+    ctx->advance_epoch();
+    co_await ctx->idle_completion();
+}
+
 #ifdef CC_OS_WINDOWS
 // dx12 renders into images of its own and copies, so unlike vulkan's the frame's image can be read back
 ASYNC_TEST("shaped-xr session - dx12 draws both eyes, each into its own layer", nx::config::exclusive("openxr"))

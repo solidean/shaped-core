@@ -3,18 +3,18 @@ created: 2026-11-05
 priority: normal
 tags: [xr, ar]
 parent: epic-xr
-claimed-by: Claude (for Philip)
-claimed-at: 2026-11-06T12:32Z
 ---
 
 # Passthrough: AR as an alpha-blend session
 
 ## Wanted
 
-- `sxr::blend_mode`: `opaque`, `alpha_blend`, `additive`, replacing `session_description::passthrough`, which is the one bool there is today.
-- An additive runtime reports as such, since a blend the runtime lacks is not one a session can ask for.
 - Premultiplied alpha from whatever tonemaps an AR frame, clearing to transparent.
   sr has no tonemapping routine yet, so this waits for one, and `xr-cube` writes its colors directly until then.
+
+`sxr::blend_mode` landed on 2026-11-06, with `session::blend` and `system::offers_blend`.
+A runtime's own alpha blend and additive modes are tested only as a choice, so `xrEndFrame` has never been given one.
+Monado's simulated headset lists opaque alone, and which modes a Quest lists has not been read.
 
 ## Known
 

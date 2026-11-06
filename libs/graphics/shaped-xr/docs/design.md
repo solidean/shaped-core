@@ -16,6 +16,8 @@ The epic is [epic-xr](../../../../docs/issues/epic-xr.md); what the first protot
 - **Capabilities** are named in `system_description::wants`, and `system::offers` answers whether the headset has one.
   What is missing is left out rather than failing the system, and `session::availability_of` is what a session may use.
 - **`sxr::inspect_runtime`** reports what the active runtime lists and what the system says it supports, with no graphics binding and no session; `xr-probe` prints it.
+- **`sxr::blend_mode`** is how a frame meets the room: opaque, alpha blend or additive, and `session::blend` says what came up.
+  A camera layer serves alpha blend ahead of the runtime's own, since that layer under an opaque frame is what ran over Quest Link.
 - **Passthrough** is the runtime's own camera layer (`XR_FB_passthrough`) under the frame, which blends over it by alpha.
 
 ## Decisions
