@@ -82,6 +82,8 @@ constexpr cc::string_view k_names[] = {
     "store",
     "access_chain",
     "array_length",
+    "stage_load",
+    "stage_store",
     "atomic_load",
     "atomic_store",
     "atomic_exchange",
@@ -221,6 +223,9 @@ sgl::ir::operand sgl::ir::operand_role(op code, isize at)
     case op::insert:
     case op::shuffle:
         return at < 2 ? operand::value : operand::literal;
+    case op::stage_load:
+    case op::stage_store:
+        return at == 0 ? operand::literal : operand::value;
     case op::phi:
         return at % 2 == 0 ? operand::value : operand::block;
     case op::branch:
@@ -240,13 +245,13 @@ bool sgl::ir::has_effect(op code)
         return true;
     if (u16(code) >= u16(op::branch))
         return true;
-    return code == op::store || code == op::image_write;
+    return code == op::store || code == op::stage_store || code == op::image_write;
 }
 
 bool sgl::ir::gives_only_a_value(op code)
 {
     // everything from the first operation to `shuffle` is arithmetic, comparison, conversion or composite
-    return u16(code) <= u16(op::shuffle) || code == op::access_chain;
+    return u16(code) <= u16(op::shuffle) || code == op::access_chain || code == op::stage_load;
 }
 
 bool sgl::ir::may_speculate(op code)
@@ -291,6 +296,13 @@ cc::string sgl::ir::dump(program const& p)
 {
     auto out = cc::string();
     out.appendf("entry {} [{} {} {}]\n", p.entry_name, p.workgroup[0], p.workgroup[1], p.workgroup[2]);
+    for (auto e = isize(0); e < p.stage_elements.size(); ++e)
+    {
+        auto const& element = p.stage_elements[e];
+        out.appendf("element e{}: ", e);
+        append_type(out, p, element.type);
+        out.appendf(" {}\n", p.name_at(element.name_first, element.name_size));
+    }
     for (auto b = isize(0); b < p.blocks.size(); ++b)
     {
         auto const& block = p.blocks[b];
@@ -314,10 +326,14 @@ cc::string sgl::ir::dump(program const& p)
             if (instruction.code == op::math || instruction.code == op::subgroup
                 || instruction.code == op::control_barrier)
                 out.appendf(".{}", int(instruction.sub));
-            for (auto const raw : p.operands_of(instruction))
+            auto const operands = p.operands_of(instruction);
+            for (auto k = isize(0); k < operands.size(); ++k)
             {
                 out += " ";
-                append_value(out, p, value_ref(raw));
+                if (k == 0 && (instruction.code == op::stage_load || instruction.code == op::stage_store))
+                    out.appendf("e{}", operands[k]);
+                else
+                    append_value(out, p, value_ref(operands[k]));
             }
             out += "\n";
         }

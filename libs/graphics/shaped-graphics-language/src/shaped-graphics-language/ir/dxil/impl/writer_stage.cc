@@ -74,14 +74,14 @@ u32 writer::entry_attributes()
     return _m.attributes(list);
 }
 
-void writer::built_in(u32 index, global const& g, instruction const& i)
+void writer::built_in(u32 index, stage_element const& e, instruction const& i)
 {
     built_in_rule const* found = nullptr;
     for (auto const& r : k_built_ins)
-        if (r.input == g.input)
+        if (r.input == e.system)
             found = &r;
     if (found == nullptr)
-        return unsupported(cc::format("the stage input {} on DXIL", int(g.input)));
+        return unsupported(cc::format("the stage input {} on DXIL", int(e.system)));
     auto const number = _m.constant_i32(k_dx_ops[isize(found->op)].number);
     auto const is_wave = found->op == dx_op::wave_get_lane_count || found->op == dx_op::wave_get_lane_index;
     if (is_wave)

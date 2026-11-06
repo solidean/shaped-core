@@ -9,6 +9,7 @@ cc::vector<u32> writer::run()
     number_everything();
     write_types();
     write_constants();
+    write_stage_elements();
     write_globals();
     write_function();
     write_entry();
@@ -26,6 +27,7 @@ void writer::number_everything()
     };
     _types = take(_p.types.size());
     _constants = take(_p.constants.size());
+    _elements = take(_p.stage_elements.size());
     _globals = take(_p.globals.size());
     _locals = take(_p.locals.size());
     _instructions = take(_p.instructions.size());

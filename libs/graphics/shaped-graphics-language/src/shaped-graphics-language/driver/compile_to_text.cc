@@ -204,6 +204,8 @@ cc::result<emitted_source, cc::string> emit_text(driver::impl::front_end const& 
                                       .spirv = cc::move(emitted.spirv),
                                       .dxil = cc::move(emitted.dxil),
                                       .native_gap = cc::move(emitted.native_gap),
+                                      .signature = cc::move(emitted.signature),
+                                      .stage = entry.entry_stage,
                                       .entry_point = cc::move(emitted.entry_point),
                                       .bindings = interface_of(m, legal, emitted.bound_names),
                                       .color_targets = emitted.color_targets,

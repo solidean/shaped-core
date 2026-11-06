@@ -115,7 +115,6 @@ enum class sgl::ir::storage : sgl::u8
     storage_buffer,
     /// A texture, an image or a sampler.
     resource,
-    input,
 };
 
 /// One member of a structure; `offset` and `matrix_stride` mean something where it stands in GPU memory.
@@ -357,6 +356,11 @@ enum class sgl::ir::op : sgl::u16
     access_chain,
     /// Operands: the block's pointer, the position of its runtime array as a literal.
     array_length,
+    /// Operands: a position in `program::stage_elements` as a literal, then an index where its `array_size` is set.
+    /// A pure value, so `construct_ssa` has nothing to promote and a dead one disappears.
+    stage_load,
+    /// Operands: a position in `program::stage_elements` as a literal, the value, then an index likewise.
+    stage_store,
     // ---- atomics: operands are the pointer, then the values
     atomic_load,
     atomic_store,
@@ -453,7 +457,7 @@ struct sgl::ir::constant
 /// What a global is to a target that names each kind of binding apart, which its pointer's type does not say.
 enum class sgl::ir::global_kind : sgl::u8
 {
-    /// Workgroup memory or a stage input, which `space` of its pointer tells apart.
+    /// Workgroup memory.
     plain,
     /// A group's block of constants.
     constants,
@@ -480,9 +484,77 @@ enum class sgl::ir::built_in : sgl::u8
     workgroup_id,
     subgroup_size,
     subgroup_invocation_id,
+    position,
+    /// `@layer`.
+    layer,
+    vertex_index,
+    instance_index,
+    first_instance,
+    is_front_facing,
+    sample_index,
+    sample_mask,
+    primitive_id,
+    view_index,
+    domain_location,
+    depth,
+    depth_greater_equal,
+    depth_less_equal,
+    /// A patch's edge and inside tessellation factors, one element per factor.
+    tess_edge,
+    tess_inside,
 };
 
-/// A variable outside the function: a resource, a block, workgroup memory or a stage input.
+/// Which edge of an entry point an element crosses.
+enum class sgl::ir::stage_part : sgl::u8
+{
+    input,
+    output,
+    /// A tessellation stage's data per patch.
+    patch,
+    /// What a mesh stage writes per primitive, and a pixel stage reads of it.
+    primitive,
+};
+
+/// How a value crosses from the stage before; only a pixel stage's input does anything with it.
+enum class sgl::ir::interpolation : sgl::u8
+{
+    /// What no stage interpolates: a vertex input, a render target, a compute stage's input.
+    none,
+    perspective,
+    centroid,
+    sample,
+    noperspective,
+    noperspective_centroid,
+    noperspective_sample,
+    flat,
+};
+
+/// One thing that crosses the entry point's edge, a vector of up to four lanes at most.
+///
+/// It is target-neutral: it says what crosses and how, SPIR-V reads `location`, and DXIL reads the semantic.
+/// `program::stage_elements` holds one per declared piece, in declared order, which is the rule DXIL's packer reads.
+struct sgl::ir::stage_element
+{
+    stage_part part = stage_part::input;
+    /// `none` for a link, a vertex attribute or a render target.
+    built_in system = built_in::none;
+    /// A scalar or a vector, never a matrix, an array or a struct.
+    type_ref type = type_ref::none;
+    interpolation interpolate = interpolation::none;
+    /// -1 for a system element.
+    i32 location = -1;
+    /// Per control point, per vertex or per primitive; 0 for one value.
+    u32 array_size = 0;
+    /// HLSL's semantic, which a DXIL signature names it by, parted from its number: `SGL` and 10.
+    u32 semantic_first = 0;
+    u32 semantic_size = 0;
+    u32 semantic_index = 0;
+    /// A range of `program::names`, for a reader.
+    u32 name_first = 0;
+    u32 name_size = 0;
+};
+
+/// A variable outside the function: a resource, a block or workgroup memory.
 struct sgl::ir::global
 {
     /// The pointer's type.
@@ -491,8 +563,6 @@ struct sgl::ir::global
     /// A descriptor's address, -1 for none.
     i32 set = -1;
     i32 binding = -1;
-    /// What a stage input holds.
-    built_in input = built_in::none;
     bool is_read_only = false;
     bool is_write_only = false;
     bool is_coherent = false;
@@ -517,6 +587,7 @@ struct sgl::ir::program
     cc::vector<constant> constants;
     cc::vector<global> globals;
     cc::vector<local> locals;
+    cc::vector<stage_element> stage_elements;
     cc::vector<instruction> instructions;
     cc::vector<u32> operands;
     /// In the order a target writes them, each dominated by the ones before it; the first is the entry.
@@ -525,6 +596,7 @@ struct sgl::ir::program
     cc::string names;
 
     cc::string entry_name;
+    check::stage stage = check::stage::none;
     i32 workgroup[3] = {1, 1, 1};
     /// The entry point's guarantee: what no single operation can say, its denormals above all.
     check::float_level guarantee = check::float_level::fast;

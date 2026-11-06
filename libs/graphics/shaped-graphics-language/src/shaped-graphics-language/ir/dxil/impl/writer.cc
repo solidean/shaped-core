@@ -39,6 +39,7 @@ enum class rule_kind : u8
     store,
     access_chain,
     array_length,
+    stage_load,
     atomic,
     barrier,
     texture,
@@ -130,6 +131,7 @@ constexpr op_rule k_rules[] = {
     {op::store, rule_kind::store},
     {op::access_chain, rule_kind::access_chain},
     {op::array_length, rule_kind::array_length},
+    {op::stage_load, rule_kind::stage_load},
     {op::atomic_load, rule_kind::atomic},
     {op::atomic_store, rule_kind::atomic},
     {op::atomic_exchange, rule_kind::atomic},
@@ -339,6 +341,8 @@ void writer::operation(u32 index)
         return access_chain(index, i);
     case rule_kind::array_length:
         return array_length(index, i);
+    case rule_kind::stage_load:
+        return built_in(index, _p.stage_elements[_p.operands_of(i)[0]], i);
     case rule_kind::atomic:
         return atomic_op(index, i);
     case rule_kind::barrier:

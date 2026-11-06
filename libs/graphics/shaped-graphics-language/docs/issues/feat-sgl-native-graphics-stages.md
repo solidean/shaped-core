@@ -30,7 +30,7 @@ DXC 1.9.2602 on 2026-11-06, with the signature tables read from its disassembly,
 Its default is `-pack-prefix-stable`, which the repo's arguments do not change.
 
 **The rule is first fit, in declared order.**
-It predicts every element of every signature below, with nothing left over:
+EMIT-235 states it, and it predicts every element of every signature below, with nothing left over:
 
 - An element takes the first row, and the lowest free columns, that hold it.
 - A row holds one interpolation mode, which the pair of kind and sampling names.
@@ -40,11 +40,20 @@ It predicts every element of every signature below, with nothing left over:
 - A vertex input takes one row per element, unpacked, and a stage input among them too.
 - A render target takes the row of its index.
 - `SV_TessFactor` stands in column `w` of rows from 0, and `SV_InsideTessFactor` follows: column `x` of row 3 for a triangle, column `w` of rows 4 and 5 for a quad.
+- A link beside the factors takes the columns they leave, as a first fit from row 0.
 
-The evidence is 153 graphics entry points of the repo's SGL, emitted and compiled through DXC: 297 signatures and 592 elements, with no mismatch.
-Those are 90 pixel, 48 vertex, 5 mesh, 5 tessellation control, 2 tessellation evaluation, 2 geometry and 1 task.
-Another 250 random links matched too, with `SV_Position`, `SV_RenderTargetArrayIndex`, `SV_IsFrontFace`, `SV_PrimitiveID` and `SV_SampleIndex` mixed in.
-In each of those, the vertex outputs agreed with the pixel inputs.
+`pack_signature` itself now holds to that, field by field, against DXC on 2026-11-06:
+
+- **The repo's SGL:** 153 graphics entry points and 616 elements, with one entry point DXC refuses left out.
+  Those are 90 pixel, 49 vertex, 5 mesh, 5 tessellation control, 2 tessellation evaluation and 2 geometry.
+- **Twelve hand cases** of what no shader declares: links beside triangle, quad and line factors, `SV_PrimitiveID` in a tessellation stage, and each vertex and pixel system value.
+- **250 random links**, 500 entry points and 6,132 elements, with `SV_Position`, `SV_RenderTargetArrayIndex`, `SV_IsFrontFace`, `SV_PrimitiveID` and `SV_SampleIndex` mixed in; a default run takes 30.
+  In each, the vertex outputs agreed with the pixel inputs.
+
+The first run agreed on every row, mask, system value and component type of the repo's shaders.
+What it corrected was outside the rule.
+A patch constant has no mode, and a line's first factor is its density.
+`SV_PrimitiveID` is a signature element with no row in a geometry stage, and in no signature in a tessellation stage.
 
 **D3D12 checks a link by name, then register, then mask, and refuses at pipeline creation.**
 This holds with and without the debug layer, as `E_INVALIDARG`, so a wrong packing fails loudly rather than drawing garbage.
@@ -102,6 +111,8 @@ struct sgl::ir::stage_element
   The text is written from that same list, so a piece is an element and no writer rebuilds it.
 - **Order is meaning.** The table stands in declared order, a part's members then its stage inputs, because the packer reads that order.
 - **Compute moves onto it.** `declare_stage_inputs` writes elements, `global::built_in` goes, and so does `storage::input`, so there is one path and no second one for graphics to grow beside.
+  That landed, and with it one change of bytes.
+  A variable's pointer type is the SPIR-V writer's now, declared ahead of its variable rather than in the program's type table.
 
 **Two operations reach it.**
 
@@ -122,7 +133,7 @@ The value goes through a local, as a compute stage's does, so a struct that is n
 `hlsl.cc`'s `semantic_of` is what both routes must agree on, so it becomes a plan function which the text writer and lowering both call, as `vertex_semantics` already is.
 
 **Packing is DXIL's, in one function with a golden test.**
-`writer_stage.cc` gains `pack_signature`, which turns a part's elements into rows and columns by the rule above; no other code knows a row.
+[`ir/dxil/signature.cc`](../../src/shaped-graphics-language/ir/dxil/signature.cc) is `pack_signature`, which turns a part's elements into rows and columns by the rule above; no other code knows a row.
 SPIR-V never sees it, because a location is already the address (EMIT-26).
 Everything else of a signature comes from that one result: `dx.sig`, `ISG1`, `OSG1`, and `PSV0`'s elements.
 The usage masks are read off the final operations, after the passes, since a dead load is no use.
@@ -179,18 +190,21 @@ Clip and cull distances are no part of SGL, so `pack_signature` does not hold th
 
 ## What lands first
 
-1. **The plan function and the packer, with a golden test.**
-   Every graphics entry point of the corpus compiles through DXC, and its `ISG1` and `OSG1` must equal `pack_signature`'s, field by field, in `ssc::dxc`'s tests.
-   This holds before a stage lowers, and it stays as the guard on a DXC upgrade.
-2. **`stage_element`, the two operations, and compute moved onto them**, with no output changed.
-3. **Vertex and pixel on SPIR-V**, which has no packing, so a fault there is in the layer.
-4. **Vertex and pixel on DXIL**: `dx.sig`, the signature parts and `PSV0`'s tables, then `stage_load`, `stage_store`, and the validator on every entry.
-5. **A mixed-route test**: each corpus pipeline's pair built both ways round, a DXC stage against a native one, through `CreateGraphicsPipelineState`.
-   This is the test that says the routes link, and the golden test alone cannot.
-6. **The pixel surface**: `discard`, derivatives, implicit-level sampling, then the rest of the table.
-7. **Geometry and tessellation, then mesh and task**, each with its corpus sweep.
+**SPIR-V and DXIL move in near-lockstep: a stage slice is done once both writers have it.**
+**The mixed-route link test gates every slice from the first one**, since a stage that lowers and does not link is worth nothing.
 
-The spec gains a rule beside EMIT-29 when step 1 lands, stating that a DXIL signature is packed as DXC's prefix-stable default does.
+1. **The plan function and the packer, with a golden test: done.**
+   Every graphics entry point of the repo's SGL compiles through DXC, and its `ISG1`, `OSG1` and `PSG1` must equal `pack_signature`'s, field by field, with the mode out of the disassembly beside them.
+   The test stands in slib's, [`sgl-signature-golden-test.cc`](../../../shaped-shader-library/tests/sgl-signature-golden-test.cc), since `ssc::dxc` does not link SGL.
+   It holds before a stage lowers, and it stays as the guard on a DXC upgrade.
+2. **`stage_element`, the two operations, and compute moved onto them: done.**
+3. **Vertex and pixel, on both writers**: `stage_load`, `stage_store`, and each return storing its outputs.
+   On DXIL that takes `dx.sig`, the signature parts and `PSV0`'s tables, with `spirv-val` and the validator on every entry.
+   SPIR-V has no packing, so a fault only one writer shows is in that writer.
+   **The mixed-route test lands with this slice**: each corpus pipeline's pair built both ways round, a DXC stage against a native one, through `CreateGraphicsPipelineState`.
+   The golden test cannot say that the routes link; only this one can.
+4. **The pixel surface, on both writers**: `discard`, derivatives, implicit-level sampling, then the rest of the table.
+5. **Geometry and tessellation, then mesh and task, on both writers**, each with its corpus sweep and its pairs in the mixed-route test.
 
 ## Not confirmed
 
@@ -199,9 +213,7 @@ The spec gains a rule beside EMIT-29 when step 1 lands, stating that a DXIL sign
   Step 4 answers it: a conservative table either passes or needs the bitset walk.
 - **Whether a driver uses that table.** The runtime took a zeroed one, and a conservative one is untested on any driver.
 - **Whether every path must store every output.** A path that ends in a `discard` stores nothing, and the validator's reading of a partial write is untried.
-- **Packing beside patch constants.** With tess factors, `float3` and `float` take rows 0 and 1 beside column `w`, by one probe, and the corpus has no such member, so that case is outside the 592.
 - **How D3D12 links a mesh stage to a pixel stage.** The rows differ by construction, and sg's mesh tests pass through DXC, but no mismatched pair was tried.
 - **Geometry and tessellation pairs at pipeline creation.** Packing was measured there, and only vertex with pixel was linked by hand.
 - **`-Od` and `-Zi`.** The sweep compiled at the default optimization level, with no debug info.
-- **Which system elements take a row in stages other than vertex and pixel.** `SV_PrimitiveID` in a geometry or tessellation stage was not read.
 - **The Agility SDK's runtime and any GPU but the B580.** The link answers come from the D3D12 runtime rather than from a driver, so they should hold, but that is inference.

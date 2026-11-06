@@ -397,8 +397,6 @@ void writer::load(u32 index, instruction const& i)
         auto const& target = _p.at(_p.at(g.type).element);
         if (target.kind == type_kind::image || target.kind == type_kind::sampler)
             return define_one(index, handle_of(pointer));
-        if (_p.at(g.type).space == storage::input)
-            return built_in(index, g, i);
     }
     auto const where = place_of(pointer);
     if (where.kind == place::kind_t::none)

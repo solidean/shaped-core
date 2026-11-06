@@ -361,3 +361,24 @@ TEST("sgl ir chain_sums - a sum read twice stays a value of its own")
     chain_sums(b.p);
     CHECK(dump(b.p) == before);
 }
+
+TEST("sgl ir passes - a stage load is a pure value, and a stage store runs whether or not anything reads")
+{
+    auto b = program_builder();
+    b.p.stage_elements.push_back({.part = stage_part::input, .type = b.float_type});
+    b.p.stage_elements.push_back({.part = stage_part::output, .type = b.float_type});
+    b.blocks(1);
+    b.open(0);
+    b.add(op::stage_load, b.float_type, {0});
+    auto const first = b.add(op::stage_load, b.float_type, {0});
+    auto const second = b.add(op::stage_load, b.float_type, {0});
+    b.add(op::stage_store, b.void_type, {1, u32(first)});
+    b.add(op::stage_store, b.void_type, {1, u32(second)});
+    b.finish();
+
+    share_common_values(b.p);
+    remove_unused(b.p);
+    require_whole(b.p, control_flow::unstructured);
+    CHECK(count_of(b.p, op::stage_load) == 1);
+    CHECK(count_of(b.p, op::stage_store) == 2);
+}

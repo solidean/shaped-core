@@ -359,3 +359,37 @@ TEST("sgl ir verify - blocks must open after what dominates them")
     b.branch(1);
     CHECK(refusal_of(b.p).contains("which dominates it"));
 }
+
+TEST("sgl ir verify - a stage operation names an element and carries its type")
+{
+    auto whole = one_block();
+    whole.p.stage_elements.push_back({.part = stage_part::input, .type = whole.float_type});
+    whole.p.stage_elements.push_back({.part = stage_part::output, .type = whole.float_type});
+    auto const read = whole.add(op::stage_load, whole.float_type, {0});
+    whole.add(op::stage_store, whole.void_type, {1, u32(read)});
+    whole.finish();
+    CHECK(refusal_of(whole.p) == "");
+
+    auto past = one_block();
+    past.add(op::stage_load, past.float_type, {0});
+    past.finish();
+    CHECK(refusal_of(past.p).contains("no stage element"));
+
+    auto retyped = one_block();
+    retyped.p.stage_elements.push_back({.type = retyped.float_type});
+    retyped.add(op::stage_load, retyped.uint_type, {0});
+    retyped.finish();
+    CHECK(refusal_of(retyped.p).contains("of an element of"));
+
+    auto unindexed = one_block();
+    unindexed.p.stage_elements.push_back({.type = unindexed.float_type, .array_size = 3});
+    unindexed.add(op::stage_load, unindexed.float_type, {0});
+    unindexed.finish();
+    CHECK(refusal_of(unindexed.p) != "");
+
+    auto arrayed = one_block();
+    arrayed.p.types.push_back({.kind = type_kind::array, .count = 2, .element = arrayed.float_type});
+    arrayed.p.stage_elements.push_back({.type = type_ref(arrayed.p.types.size() - 1)});
+    arrayed.finish();
+    CHECK(refusal_of(arrayed.p).contains("only as scalars and vectors"));
+}

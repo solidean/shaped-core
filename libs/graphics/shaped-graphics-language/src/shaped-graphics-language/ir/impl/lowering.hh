@@ -51,6 +51,11 @@ private:
     void unsupported(cc::string_view what);
 
     void declare_stage_inputs();
+    u32 add_stage_element(stage_element e, cc::string_view semantic, cc::string_view name);
+    void elements_of_struct(check::type_id t, stage_part part, u32 array_size);
+    u32 element_of_input(isize index);
+    /// Everything the entry point's edge holds, in declared order; lower_stage.cc.
+    void declare_stage_elements();
     void statements(ast::range_of<flat_stmt_id> range);
     void statement(flat_stmt_id id);
     void if_(check::flat_if const& s);

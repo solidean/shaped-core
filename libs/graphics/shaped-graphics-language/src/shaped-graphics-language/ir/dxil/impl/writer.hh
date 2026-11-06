@@ -252,7 +252,7 @@ private:
     // ---- writer_stage.cc
     [[nodiscard]] u32 entry_attributes();
     void write_entry_metadata();
-    void built_in(u32 index, global const& g, instruction const& i);
+    void built_in(u32 index, stage_element const& e, instruction const& i);
 
     // ---- DXIL's vocabulary
     /// `is_stable` says what it reads never changes, so a second one with these arguments is the first.

@@ -415,6 +415,9 @@ struct block;
 struct constant;
 enum class global_kind : u8;
 enum class built_in : u8;
+enum class stage_part : u8;
+enum class interpolation : u8;
+struct stage_element;
 struct global;
 struct local;
 enum class type_ref : u32;
@@ -424,6 +427,12 @@ enum class operand : u8;
 enum class control_flow : u8;
 class dominance;
 } // namespace sgl::ir
+
+namespace sgl::ir::dxil
+{
+enum class signature_table : u8;
+struct signature_element;
+} // namespace sgl::ir::dxil
 
 namespace sgl::builtins::texture
 {
