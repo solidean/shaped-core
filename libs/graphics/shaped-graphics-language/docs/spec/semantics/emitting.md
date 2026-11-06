@@ -504,8 +504,11 @@ So `{float3; float}` is written with `packed_float3`: the `float` is at byte 12 
   So is it in MSL, until sg's metal backend binds one through an argument buffer.
 * **EMIT-195** HLSL reads a buffer's length (CHK-460) through `GetDimensions`, in a helper per buffer, and WGSL through `arrayLength`, four bytes per word of a `bytes`.
   A Metal buffer argument is a pointer that carries no length, and sg passes none in yet, so an MSL compile that reads one is `target-lacks-feature`.
-* **EMIT-196** Neither MSL nor DXIL carries a 64-bit value between stages, so an MSL or `hlsl-dx12` vertex or pixel stage whose link holds one is `target-lacks-feature`.
-  SPIR-V carries one, so `hlsl-vulkan` writes it; splitting it into two words would reach the other two.
+* **EMIT-196** Neither MSL nor DXIL carries a 64-bit value between stages, so on `hlsl-dx12` and MSL a link's 64-bit scalar crosses as a `uint2` of its words.
+  A two-vector crosses as a `uint4`, each low word first, and either keeps the member's one location.
+  The member is declared as its piece `<name>_0`, and an array of them as one per element, as EMIT-174 declares a link's array.
+  A write splits the value, through `asuint` for a double in HLSL and `as_type` in MSL, and a read joins the words back, so the program never sees them.
+  SPIR-V carries the value itself, so `hlsl-vulkan` writes it as declared.
 * **EMIT-218** MSL writes a buffer's `atomic[ulong]` as `atomic_ulong`, and its `min` and `max` as `atomic_min_explicit` and `atomic_max_explicit`, which give nothing back.
   So each stands as a statement alone, and an MSL compile whose program reads what one gave back is `target-lacks-feature`.
   HLSL writes a workgroup memory's 64-bit atomic as a `groupshared` `int64_t` or `uint64_t` under the same `Interlocked*` calls as a buffer's.

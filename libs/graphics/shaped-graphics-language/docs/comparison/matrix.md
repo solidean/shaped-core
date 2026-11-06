@@ -82,7 +82,7 @@ A per-target cell reads `dx12 / vulkan / metal / webgpu`.
 | **D2** Modules | ❌ `#include` | ✅ modules, precompiled modules, link-time specialization | ⚠️ WESL imports | ⚠️ `#include` extension | ⚠️ modules, no separate compilation 🗺️ [epic](../issues/epic-sgl-modules-beyond-a-tracer.md) |
 | **D3** Bindless | ✅ / ✅ / ✅ (MSC) / — | ✅ / ✅ / ⚠️ / ⚠️ | ⚠️ / ⚠️ / ⚠️ / — native extension only | ✅ / ✅ / ⚠️ / — | ✅ / ✅ / ⚠️ / — fixed-size and unbounded binding arrays, checked `nonuniform`, an unbounded one sized per group; metal's unbounded arrays not yet 🗺️ [feat](../issues/feat-sgl-unbounded-binding-arrays.md) |
 | **D4** GPU pointers | ⚠️ Vulkan only | ⚠️ SPIR-V; Metal partly | ❌ | ⚠️ Vulkan, and Metal through SPIRV-Cross | ❌ 🗺️ [feat](../issues/feat-sgl-gpu-pointers.md) |
-| **D5** half, f64, int64, int16 | ✅ f64 on DX12 and Vulkan, which alone have it; 64- and 16-bit ints everywhere but WebGPU | ✅ the same shape | ⚠️ f16 extension; no f64 or int64 in a browser | ✅ the same shape as HLSL | ⚠️ half, 16- and 64-bit ints and double behind features, wherever the target has them: all of them on dx12 and vulkan, all but double on metal, half alone on webgpu; a 64-bit value crosses a stage link on vulkan alone, since DXIL and MSL carry none and SGL does not split it into words yet 🗺️ [feat](../issues/feat-sgl-64-bit-stage-links-as-words.md); double has no maths builtins 🗺️ [feat](../issues/feat-sgl-double-maths-builtins.md) |
+| **D5** half, f64, int64, int16 | ✅ f64 on DX12 and Vulkan, which alone have it; 64- and 16-bit ints everywhere but WebGPU | ✅ the same shape | ⚠️ f16 extension; no f64 or int64 in a browser | ✅ the same shape as HLSL | ⚠️ half, 16- and 64-bit ints and double behind features, wherever the target has them: all of them on dx12 and vulkan, all but double on metal, half alone on webgpu; a 64-bit value crosses a stage link on every target with its type, as its words where DXIL and MSL carry none; double has no maths builtins 🗺️ [feat](../issues/feat-sgl-double-maths-builtins.md) |
 | **D6** Mesh, geometry, tessellation, work graphs | ⚠️ mesh on DX12, Vulkan and MSC; work graphs on DX12 | ⚠️ mesh on DX12, Vulkan and Metal; geometry and tessellation on DX12 and Vulkan | ⚠️ Naga experimental mesh; none in a browser | ⚠️ mesh to HLSL and MSL | ⚠️ geometry and tessellation on dx12 and vulkan; mesh and task stages with a payload and per-primitive attributes on dx12 and vulkan, refused on webgpu; triangles only, and metal not yet 🗺️ [feat](../issues/feat-sgl-mesh-and-task-stages.md); no work graphs |
 | **D7** Autodiff | ❌ | ✅ forward and backward | ❌ | ❌ | ❌ 🗺️ [epic](../issues/epic-sgl-autodiff.md) |
 | **D8** Methods, operators, enums, inference | ⚠️ methods, operators, enums, `auto`; no constructors | ✅ | ⚠️ no methods, operators or enums | ❌ | ✅ methods, properties, `@operator`, enums, inference, arrow lambdas |
@@ -316,7 +316,7 @@ Per row and column:
   - Slang: SLANG target compatibility
   - WGSL: WGSL, NAGA
   - GLSL + chain: SXC
-  - SGL: CHK-381, CHK-382, CHK-450 to CHK-453, EMIT-192 (2026-11-05)
+  - SGL: CHK-381, CHK-382, CHK-450 to CHK-454, EMIT-192, EMIT-196, sg `tests/compute/compute-sixty-four-bit-test.cc` (2026-11-06)
 - **D6**
   - HLSL + chain: MSC table
   - Slang: SLANG capdef `_meshshading`

@@ -161,7 +161,8 @@ ASYNC_INVOCABLE_TEST("sg - an SGL compute shader's 64-bit atomics update all 64 
     }
 }
 
-ASYNC_INVOCABLE_TEST("sg - a long crosses from the vertex to the pixel stage flat, all 64 bits (CHK-454)",
+ASYNC_INVOCABLE_TEST("sg - 64-bit values cross from the vertex to the pixel stage flat, all 64 bits (CHK-454, "
+                     "EMIT-196)",
                      (sg::context_handle const& ctx))
 {
     REQUIRE(ctx != nullptr);
@@ -170,12 +171,10 @@ ASYNC_INVOCABLE_TEST("sg - a long crosses from the vertex to the pixel stage fla
     if (!ctx->supports(sg::feature::shader_int64) || !ctx->supports(sg::feature::shader_f64)
         || !ctx->supports(sg::feature::shader_int64_atomics))
         SKIP("this context lacks a 64-bit feature the package requires");
-    if (ctx->backend() != sg::backend_kind::vulkan)
-        SKIP("only SPIR-V carries a 64-bit value between stages (EMIT-196)");
 
     auto const pipeline = co_await ctx->cached.acquire_raster_pipeline(shaders::sixty_four_bit::long_crossing);
     auto const words = ctx->persistent.create_buffer_from_data(
-        cc::vector<u32>::create_defaulted(2), sg::buffer_usage::readwrite_buffer | sg::buffer_usage::copy_src);
+        cc::vector<u32>::create_defaulted(4), sg::buffer_usage::readwrite_buffer | sg::buffer_usage::copy_src);
     auto const group = ctx->persistent.create_binding_group(
         ctx->cached.acquire_binding_group_layout<shaders::sixty_four_bit::crossed>(),
         shaders::sixty_four_bit::crossed{.words = words.as_readwrite_buffer()});
@@ -195,9 +194,11 @@ ASYNC_INVOCABLE_TEST("sg - a long crosses from the vertex to the pixel stage fla
     auto const back = cmd->download.data_from_buffer(words);
     ctx->submit_command_list(cc::move(cmd));
     auto const got = co_await back.data();
-    REQUIRE(got.size() == 2);
+    REQUIRE(got.size() == 4);
     CHECK(got[0] == 0x09abcdefu);
     CHECK(got[1] == 0x12345678u);
+    CHECK(got[2] == 1u);
+    CHECK(got[3] == 8u);
 }
 
 /// tests/shaders/sgl/sixty_four_bit_shared.sgl on `ctx`, which must have shader_shared_int64_atomics: four

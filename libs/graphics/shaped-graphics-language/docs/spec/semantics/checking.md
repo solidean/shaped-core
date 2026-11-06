@@ -125,7 +125,7 @@ use view
   No other builtin takes one yet: no maths function of a double, which DXIL has none of, and no subgroup operation.
 * **CHK-451** `long`, `ulong` and their vectors name the feature `shader_int64`, and `double` and its vectors `shader_f64`, as CHK-382 says of the 16-bit types.
 * **CHK-383** A 16-bit value crosses no stage edge: a member of one, at any depth of a struct an entry point takes or returns, is `unsupported-yet`.
-* **CHK-454** A 64-bit scalar or two-vector crosses a stage link, flat as an integer does (CHK-273), a location apiece.
+* **CHK-454** A 64-bit scalar or two-vector crosses a stage link, flat as an integer does (CHK-273), a location apiece, on every target that has its type (EMIT-196).
   A 64-bit three- or four-vector there takes two locations and is `unsupported-yet`, and so is a 64-bit value in a vertex input or a pixel stage's target, which no API has a format for.
 * **CHK-388** `bytes` and `mut bytes` are resources of their own kind, and `out bytes` is an error.
   The prelude's loads take either, its stores `mut bytes` alone, and `@coherent` applies to `mut bytes` as to a `mut buffer`.
