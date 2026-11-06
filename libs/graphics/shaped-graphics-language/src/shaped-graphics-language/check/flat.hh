@@ -125,6 +125,8 @@ struct sgl::check::name_mint
     cc::set<cc::string> const* also_taken = nullptr;
     /// A lower layer's names, such as the prelude's every module-level name, which every program behind it shares.
     cc::set<cc::string> const* also_taken_below = nullptr;
+    /// A target's reserved words, which no name of the program written there may be.
+    cc::set<cc::string> const* also_reserved = nullptr;
     /// For each name `mint` found taken, the suffix it tries first the next time it is asked for that name.
     /// A name once taken stays taken, so the first free suffix only grows, and minting a name a thousand times is linear.
     cc::map<cc::string, i32> next_suffix;

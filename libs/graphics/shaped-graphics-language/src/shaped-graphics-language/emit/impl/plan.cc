@@ -1387,9 +1387,8 @@ sgl::emit::impl::plan sgl::emit::impl::make_plan(check::checked_module const& m,
     result.names.parent = &e.names;
     if (m.builtins != nullptr)
         result.names.also_taken = &m.builtins->names_written_in(language_of(t));
-    // Reserved first, so nothing minted below can be one of them.
-    for (auto const word : reserved_words(t))
-        (void)result.names.reserve(word);
+    // so nothing minted below can be a reserved word
+    result.names.also_reserved = &reserved_set(t);
     result.struct_of_type.resize_to_filled(m.types.size(), -1);
     result.enum_of_type.resize_to_filled(m.types.size(), -1);
     result.array_of_type.resize_to_filled(m.types.size(), -1);
