@@ -382,6 +382,11 @@ struct block_placement
 /// element or column, named `<member>_<i>` at consecutive locations.
 [[nodiscard]] cc::vector<planned_member> declared_members(planned_struct const& s);
 
+/// The semantic HLSL declares member `member` of `s` under, which is what a DXIL signature names it by on both routes;
+/// empty for a member of a struct that crosses no edge.
+/// SPIR-V has no semantics: vulkan takes the location as an attribute, and keeps this because HLSL's grammar asks for it.
+[[nodiscard]] cc::string semantic_of(plan const& p, planned_struct const& s, planned_member const& member);
+
 /// EMIT-174: whether `element` names one piece of an array held as pieces, by a literal index.
 /// `p.accesses` must hold the element's object already.
 [[nodiscard]] bool is_piece(plan const& p, check::flat_element const& element);

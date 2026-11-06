@@ -1545,6 +1545,56 @@ cc::vector<cc::string> sgl::emit::impl::vertex_semantics(check::checked_module c
     return result;
 }
 
+cc::string sgl::emit::impl::semantic_of(plan const& p, planned_struct const& s, planned_member const& member)
+{
+    if (member.is_position)
+        return "SV_Position";
+    if (member.is_layer)
+        return "SV_RenderTargetArrayIndex";
+    switch (s.role)
+    {
+    case struct_role::vertex_input:
+    {
+        // EMIT-174: a piece is its member's semantic at its own index, `FRAME0`, which is how dx12 reads one
+        auto const at = member.whole >= 0 ? member.whole : &member - s.members.data();
+        auto const semantics = vertex_semantics(p.m, p.m.at(s.type));
+        for (auto i = isize(0); i < s.member_of.size(); ++i)
+            if (s.member_of[i] == at)
+                return member.piece_index >= 0 ? cc::format("{}{}", semantics[i], member.piece_index) : semantics[i];
+        return "";
+    }
+    case struct_role::stage_link:
+    case struct_role::primitive_link:
+        return cc::format("SGL{}", member.location);
+    case struct_role::patch_constants:
+        // EMIT-123: the factors are the tessellator's, and any other member reaches the evaluation stage as a link
+        if (member.factor == check::tessellation_factor::edge)
+            return "SV_TessFactor";
+        if (member.factor == check::tessellation_factor::inside)
+            return "SV_InsideTessFactor";
+        return cc::format("SGL{}", member.location);
+    case struct_role::render_targets:
+        // EMIT-130: the depth and the sample mask are outputs of their own
+        switch (member.output)
+        {
+        case check::pixel_output::depth:
+            return "SV_Depth";
+        case check::pixel_output::depth_greater_equal:
+            return "SV_DepthGreaterEqual";
+        case check::pixel_output::depth_less_equal:
+            return "SV_DepthLessEqual";
+        case check::pixel_output::sample_mask:
+            return "SV_Coverage";
+        case check::pixel_output::color:
+            break;
+        }
+        return cc::format("SV_Target{}", member.location);
+    case struct_role::plain:
+        break;
+    }
+    return "";
+}
+
 bool sgl::emit::impl::has_base(plan const& p, check::stage_input input)
 {
     auto const is_hlsl = p.which == target::hlsl_dx12 || p.which == target::hlsl_vulkan;
