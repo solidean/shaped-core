@@ -66,6 +66,33 @@ class IsInstalled(unittest.TestCase):
         self.assertFalse(sdk.is_installed(Path("."), []))
 
 
+class Devices(unittest.TestCase):
+    def test_the_heading_and_the_daemon_are_not_devices(self) -> None:
+        listing = "* daemon started successfully\nList of devices attached\n2G0YC1ZF8 device\n\n"
+        self.assertEqual(sdk.parse_devices(listing), [sdk.device("2G0YC1ZF8", "device")])
+
+    def test_nothing_connected_is_an_empty_list(self) -> None:
+        self.assertEqual(sdk.parse_devices("List of devices attached\n\n"), [])
+
+    def test_one_usable_device_is_chosen(self) -> None:
+        self.assertEqual(sdk.choose_device([sdk.device("a", "device")], None)[0], sdk.device("a", "device"))
+
+    def test_an_unconfirmed_device_says_what_to_do(self) -> None:
+        chosen, problem = sdk.choose_device([sdk.device("a", "unauthorized")], None)
+        self.assertIsNone(chosen)
+        self.assertIn("confirm", problem)
+
+    def test_several_devices_need_a_serial(self) -> None:
+        both = [sdk.device("a", "device"), sdk.device("b", "device")]
+        self.assertIsNone(sdk.choose_device(both, None)[0])
+        self.assertEqual(sdk.choose_device(both, "b")[0], sdk.device("b", "device"))
+
+    def test_no_device_is_a_message(self) -> None:
+        chosen, problem = sdk.choose_device([], None)
+        self.assertIsNone(chosen)
+        self.assertIn("no device", problem)
+
+
 class Extract(unittest.TestCase):
     def _archive(self, tmp: Path, entries: dict[str, tuple[int, bytes]]) -> Path:
         path = tmp / "a.zip"

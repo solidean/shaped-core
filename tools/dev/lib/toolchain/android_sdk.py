@@ -26,6 +26,36 @@ class archive:
     sha1: str
 
 
+@dataclass(frozen=True)
+class device:
+    serial: str
+    state: str
+
+
+def parse_devices(listing: str) -> list[device]:
+    """What `adb devices` lists, whose first line is a heading and whose daemon may have announced itself above it."""
+    lines = listing.split("\n")
+    heading = next((i for i, line in enumerate(lines) if line.startswith("List of devices")), len(lines))
+    return [device(*line.split()[:2]) for line in lines[heading + 1:] if len(line.split()) >= 2]
+
+
+def choose_device(devices: list[device], serial: str | None) -> tuple[device | None, str]:
+    """The device to use, or None and what to tell the person."""
+    if serial is not None:
+        named = [d for d in devices if d.serial == serial]
+        if not named:
+            return None, f"no device {serial} is connected"
+        devices = named
+    if not devices:
+        return None, "no device is connected: plug one in with USB debugging on, `dev.py android devices` lists what adb sees"
+    usable = [d for d in devices if d.state == "device"]
+    if not usable:
+        return None, f"{devices[0].serial} is {devices[0].state}: confirm the debugging prompt on the device"
+    if len(usable) > 1:
+        return None, f"several devices are connected, so name one with --serial: {', '.join(d.serial for d in usable)}"
+    return usable[0], ""
+
+
 def parse_pin(text: str) -> list[archive]:
     return [archive(*line.split()) for line in text.split("\n") if line.strip()]
 
