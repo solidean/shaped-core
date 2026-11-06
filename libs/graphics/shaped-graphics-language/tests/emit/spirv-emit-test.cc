@@ -123,8 +123,8 @@ TEST("sgl spirv - what has no lowering yet is named, and a preference falls back
 
 TEST("sgl spirv - every compute entry point of the fixtures that lowers is what spirv-val calls valid")
 {
-#if defined(CC_OS_EMSCRIPTEN)
-    SKIP("a browser has no spirv-val to run");
+#if defined(CC_OS_EMSCRIPTEN) || defined(CC_OS_IOS) || defined(CC_OS_TVOS)
+    SKIP("this platform runs no spirv-val, and has no std::system to start one with");
 #else
     // dev.py puts the pinned Vulkan SDK's tools on the path
 #if defined(CC_OS_WINDOWS)
