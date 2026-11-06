@@ -1,0 +1,61 @@
+// `t[xy]` is a texture's `load` (CHK-514), and a gather takes a texture of any component type (EVAL-125)
+
+binding scene:
+    ramp: texture_2d[float]
+    pyramid: texture_2d[float]
+    labels: texture_2d[int]
+    counts: texture_2d[uint2]
+    sampler nearest:
+        filter = .nearest
+        address = .clamp_edge
+    sampler linear:
+        filter = .linear
+        address = .clamp_edge
+
+test {scene}:
+    scene.ramp.test_texel(int2(1, 0), 5.0)
+    scene.ramp[int2(1, 0)] == 5.0
+    scene.ramp[int2(1, 0)] == scene.ramp.load(int2(1, 0))
+
+// a level is named, and the subscript takes level 0 unless told otherwise
+test {scene}:
+    scene.pyramid.test_texel(int2(0, 0), 8.0, 1)
+    scene.pyramid[int2(0, 0), level = 1] == 8.0
+    scene.pyramid[int2(0, 0)] == 0.0
+
+test {scene}:
+    scene.labels.test_texel(int2(1, 1), -7)
+    scene.labels[int2(1, 1)] == -7
+
+// a gather of integers is integers, exact however large
+test {scene}:
+    scene.labels.test_texel(int2(0, 0), 16777217)
+    scene.labels.test_texel(int2(1, 0), 2)
+    scene.labels.test_texel(int2(0, 1), -3)
+    scene.labels.test_texel(int2(1, 1), 4)
+    let g = scene.labels.gather(float2(0.5, 0.5), scene.nearest)
+    g == int4(-3, 4, 2, 16777217)
+
+test {scene}:
+    scene.counts.test_texel(int2(0, 0), uint2(1u, 10u))
+    scene.counts.test_texel(int2(1, 0), uint2(2u, 20u))
+    scene.counts.test_texel(int2(0, 1), uint2(3u, 30u))
+    scene.counts.test_texel(int2(1, 1), uint2(4u, 40u))
+    let g = scene.counts.gather(float2(0.5, 0.5), scene.nearest, component = texel_component.y)
+    g == uint4(30u, 40u, 20u, 10u)
+
+@expect(error = "not-assignable")
+test {scene}:
+    scene.ramp[int2(0, 0)] = 1.0
+    true
+
+// an integer texture is sampled through a sampler that does not filter
+@expect(error = "type-mismatch")
+test {scene}:
+    scene.labels.gather(float2(0.5, 0.5), scene.linear) == int4(0, 0, 0, 0)
+
+@compute(1) fun copies(@thread_id id: int3){scene}:
+    let x = scene.labels[id.xy]
+    let y = scene.labels.gather(float2(0.0, 0.0), scene.nearest)
+    if x == y.x:
+        return

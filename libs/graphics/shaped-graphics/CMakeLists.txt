@@ -440,6 +440,8 @@ if(SC_BUILD_TESTS)
             tests/compute/compute-sixteen-bit-test.cc
             tests/compute/compute-sixty-four-bit-test.cc
             tests/compute/compute-double-maths-test.cc
+            tests/compute/compute-array-equality-test.cc
+            tests/compute/compute-matrix-arithmetic-test.cc
             tests/compute/compute-float-atomics-test.cc
             tests/compute/compute-texture-test.cc
             tests/raster/raster-test.cc
@@ -511,6 +513,8 @@ if(SC_BUILD_TESTS)
                 sixty_four_bit_shared.sgl:*
                 sixty_four_bit_min_max.sgl:*
                 double_maths.sgl:*
+                array_equality.sgl:*
+                matrix_arithmetic.sgl:*
                 float_atomics.sgl:*
                 option_formats.sgl:*
         )

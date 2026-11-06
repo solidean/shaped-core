@@ -112,8 +112,9 @@ auto sgl::check::impl::flattener::flatten_expr(ast::expr_id id) -> flat_expr_id
     {
         auto const arguments = ast().at(indexed->arguments);
         auto const object_type = tables().type_at(indexed->object);
-        // CHK-367: a texel read is the `load` the check pass resolved it as
-        if (is_valid(object_type) && c.out.at(object_type).kind == type_kind::image)
+        // CHK-367, CHK-514: a texel read is the `load` the check pass resolved it as
+        if (is_valid(object_type)
+            && (c.out.at(object_type).kind == type_kind::image || c.out.at(object_type).kind == type_kind::texture))
             return tables().call_at(id) >= 0 && !c.out.at(object_type).is_atomic
                      ? flatten_bound_call(id, type, c.out.call_records[tables().call_at(id)])
                      : fail();
@@ -323,6 +324,9 @@ auto sgl::check::impl::flattener::flatten_number(ast::expr_id id, type_id type) 
     { return add_expr(type, id, flat_literal{.value = is_half ? f64(scalar::of_half(v).widened().as_float()) : v}); };
     if (classify_number(text) == number_class::plain_integer)
     {
+        if (auto const past_long = parse_literal_past_long(text);
+            past_long.has_value() && type == c.prelude_type(builtins::k_ulong))
+            return add_expr(type, id, flat_wide_literal{.bits = past_long.value()});
         auto const value = parse_literal_integer(text);
         if (!value.has_value())
             return fail();
@@ -479,6 +483,13 @@ auto sgl::check::impl::flattener::flatten_call(ast::expr_id id, type_id type, ta
             && tables().type_at(arguments[0].value) == checked_module::void_type
             && tables().type_at(arguments[1].value) == checked_module::void_type)
             return flatten_void_equality(id, type, spelling == "==", arguments[0].value, arguments[1].value);
+        if ((spelling == "==" || spelling == "!=") && arguments.size() == 2 && where.kind != target_kind::overload
+            && c.out.at(concrete(tables().type_at(arguments[0].value))).kind == type_kind::array)
+        {
+            auto const lhs = flatten_expr(arguments[0].value);
+            auto const rhs = flatten_expr(arguments[1].value);
+            return flatten_array_equality(id, type, spelling == "==", lhs, rhs);
+        }
     }
 
     for (auto const& t : c.out.ray_traces)
@@ -1059,6 +1070,60 @@ auto sgl::check::impl::flattener::flatten_void_equality(ast::expr_id id,
         make_stmt(where, flat_eval{.value = left}),
         make_stmt(where, flat_eval{.value = right}),
         make_stmt(where, flat_leave{.target = label, .value = add_expr(type, id, flat_bool_literal{.value = is_equal})}),
+    };
+    return add_expr(type, id, flat_block{.label = label, .body = add_list(body)});
+}
+
+auto sgl::check::impl::flattener::flatten_array_equality(ast::expr_id id,
+                                                         type_id type,
+                                                         bool is_equal,
+                                                         flat_expr_id lhs,
+                                                         flat_expr_id rhs) -> flat_expr_id
+{
+    auto const label = add_label("array_equality");
+    auto const where = origin{.file = file(), .expr = id};
+    auto const array = entry.at(lhs).type;
+    auto const element = c.out.at(array).element;
+    auto const left = add_local(local_kind::temporary, "left", array);
+    auto const right = add_local(local_kind::temporary, "right", array);
+    auto const index = add_local(local_kind::index, "i", int_type());
+    auto const element_of = [&](local_id of)
+    { return add_expr(element, id, flat_element{.object = local_ref(of, id), .index = local_ref(index, id)}); };
+
+    auto is_same = flat_expr_id::none;
+    if (c.out.at(element).kind == type_kind::array)
+        is_same = flatten_array_equality(id, type, true, element_of(left), element_of(right));
+    else
+    {
+        // an enum compares as the `int` its cases are (EVAL-64)
+        auto const compared = c.out.is_plain_enum(element) ? int_type() : element;
+        type_id const both[] = {compared, compared};
+        auto const equals = c.find_operator(file(), "==", both);
+        if (!is_valid(equals))
+            return fail();
+        flat_expr_id const elements[] = {element_of(left), element_of(right)};
+        is_same = builtin_call(id, equals, elements);
+    }
+
+    auto const answer = [&](bool value)
+    {
+        return make_stmt(where,
+                         flat_leave{.target = label, .value = add_expr(type, id, flat_bool_literal{.value = value})});
+    };
+    flat_stmt_id const differs[] = {answer(!is_equal)};
+    flat_stmt_id const loop_body[] = {
+        make_stmt(where, flat_if{.condition = add_expr(type, id, flat_not{.operand = is_same}),
+                                 .then_body = add_list(differs)}),
+    };
+    flat_stmt_id const body[] = {
+        make_stmt(where, flat_let{.local = left, .value = lhs}),
+        make_stmt(where, flat_let{.local = right, .value = rhs}),
+        make_stmt(where, flat_for{.label = add_label("each_element"),
+                                  .index = index,
+                                  .first = add_expr(int_type(), id, flat_int_literal{.value = 0}),
+                                  .end = add_expr(int_type(), id, flat_int_literal{.value = c.out.at(array).count}),
+                                  .body = add_list(loop_body)}),
+        answer(is_equal),
     };
     return add_expr(type, id, flat_block{.label = label, .body = add_list(body)});
 }

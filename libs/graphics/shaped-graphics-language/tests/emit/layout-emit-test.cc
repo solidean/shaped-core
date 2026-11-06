@@ -748,7 +748,8 @@ TEST("sgl emit layout - an array strides by its element rounded to its alignment
     CHECK(msl.contains("    device track* scene_tracks [[id(1)]];\n"));
 }
 
-TEST("sgl emit layout - a packed array of structs or of arrays, and a nested one of mat3, wait alike on every target")
+TEST("sgl emit layout - a packed array of structs or of arrays waits alike on every target, and a nested array of mat3 "
+     "stands in cells")
 {
     auto const source_of = [](cc::string_view member, cc::string_view field)
     {
@@ -766,8 +767,16 @@ TEST("sgl emit layout - a packed array of structs or of arrays, and a nested one
     // HLSL holds a 3-vector as a 4-vector at any depth
     CHECK(text_of(source_of("items: buffer[holder]", "dirs: float3[2, 3]"), target::hlsl_dx12)
               .contains("    float4 dirs[2][3];\n"));
-    CHECK(in_buffer("items: buffer[holder]", "turns: mat3[2, 2]")
-          == "unsupported a multi-dimensional array of mat3 in GPU memory: 'work.items'.turns\n");
+    // a nested array's matrix stands in a struct of its own, since DXC decorates no matrix deeper in SPIR-V
+    for (auto const t : sgl::emit::all_targets())
+        CHECK(sgl::emit::dump_errors(emit_source(source_of("items: buffer[holder]", "turns: mat3[2, 2]"), 0, t)) == "");
+    for (auto const t : {target::hlsl_dx12, target::hlsl_vulkan})
+    {
+        auto const text = text_of(source_of("items: buffer[holder]", "turns: mat3[2, 2]"), t);
+        CHECK(text.contains("struct sgl_mat3_cell\n{\n    column_major float4x3 m;\n};\n"));
+        CHECK(text.contains("sgl_mat3_cell turns[2][2];\n"));
+    }
+    CHECK(!text_of(source_of("items: buffer[holder]", "turns: mat3[2]"), target::hlsl_dx12).contains("sgl_mat3_cell"));
     CHECK(in_buffer("@padding(.none) items: buffer[holder]", "rows: float4[2, 2]")
           == "unsupported an array in @padding(.none) memory: 'work.items'.rows\n");
 }

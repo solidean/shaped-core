@@ -373,8 +373,9 @@ public:
         // EMIT-175: a mat2 in a constant block is its two columns in one row, which no HLSL matrix there is
         auto const in_constants = owner == nullptr || owner->is_constants;
         auto const is_vector_mat2 = in_memory && in_constants && is_mat2(p.m, member.type);
-        auto const type = is_widened              ? cc::string("float4x3")
-                        : is_vector_mat2          ? cc::string("float4")
+        auto const type = is_widened && !mat3_cell_field(p, member.type).empty() ? cc::string("sgl_mat3_cell")
+                        : is_widened                                             ? cc::string("float4x3")
+                        : is_vector_mat2                                         ? cc::string("float4")
                         : !widened_vector.empty() ? widened_vector
                                                   : cc::string(type_text(p, *this, member.type));
         // Stated on every matrix, so no `-Zpr` and no `#pragma pack_matrix` can turn one around.
@@ -480,6 +481,25 @@ public:
             if (r.element_form.has_value())
                 for (auto const& leaf : r.element_form.value().leaves)
                     result = result || leaf.is_widened;
+        return result;
+    }
+
+    /// Whether any member in memory holds a multi-dimensional array of mat3, which holds its matrices in cells.
+    [[nodiscard]] static bool holds_mat3_cells(plan const& p)
+    {
+        auto const holds = [&](planned_member const& member)
+        { return member.offset >= 0 && !mat3_cell_field(p, member.type).empty(); };
+        auto result = false;
+        for (auto const& s : p.structs)
+            if (s.memory_size > 0 && !s.is_packed)
+                for (auto const& member : s.members)
+                    result = result || holds(member);
+        if (p.constants.has_value())
+            for (auto const& member : p.constants.value().members)
+                result = result || holds(member);
+        for (auto const& block : p.group_blocks)
+            for (auto const& member : block.members)
+                result = result || holds(member);
         return result;
     }
 
@@ -637,6 +657,8 @@ public:
         if (holds_widened_mat3(p))
             out += "float4x3 sgl_widen_mat3(float3x3 m)\n{\n    return float4x3(m[0], m[1], m[2], float3(0.0, 0.0, "
                    "0.0));\n}\n\n";
+        if (holds_mat3_cells(p))
+            out += "struct sgl_mat3_cell\n{\n    column_major float4x3 m;\n};\n\n";
         // A struct stands ahead of the groups, whose blocks and buffers may hold it.
         for (auto const& s : p.structs)
         {

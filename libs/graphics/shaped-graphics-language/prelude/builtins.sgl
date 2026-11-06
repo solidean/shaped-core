@@ -1328,6 +1328,23 @@
 /// `m` mirrored across its diagonal: its rows as columns, which is its inverse where it only rotates.
 @builtin @pure fun transpose(m: mat2) -> mat2
 
+// a matrix's sum, difference, negation and scale act on each element (EVAL-109)
+@builtin @pure @operator("+") fun add_mat4(a: mat4, b: mat4) -> mat4
+@builtin @pure @operator("-") fun subtract_mat4(a: mat4, b: mat4) -> mat4
+@builtin @pure @operator("-") fun negate_mat4(x: mat4) -> mat4
+@builtin @pure @operator("*") fun scale_mat4(a: mat4, b: float) -> mat4
+@builtin @pure @operator("*") fun scale_mat4_after(a: float, b: mat4) -> mat4
+@builtin @pure @operator("+") fun add_mat3(a: mat3, b: mat3) -> mat3
+@builtin @pure @operator("-") fun subtract_mat3(a: mat3, b: mat3) -> mat3
+@builtin @pure @operator("-") fun negate_mat3(x: mat3) -> mat3
+@builtin @pure @operator("*") fun scale_mat3(a: mat3, b: float) -> mat3
+@builtin @pure @operator("*") fun scale_mat3_after(a: float, b: mat3) -> mat3
+@builtin @pure @operator("+") fun add_mat2(a: mat2, b: mat2) -> mat2
+@builtin @pure @operator("-") fun subtract_mat2(a: mat2, b: mat2) -> mat2
+@builtin @pure @operator("-") fun negate_mat2(x: mat2) -> mat2
+@builtin @pure @operator("*") fun scale_mat2(a: mat2, b: float) -> mat2
+@builtin @pure @operator("*") fun scale_mat2_after(a: float, b: mat2) -> mat2
+
 // `x as T` between the numeric families of one width, and between the widths of one family,
 // component for component; each target writes a conversion to `T`
 @builtin @pure @operator("as") fun convert_float_to_int(x: float) -> int
@@ -1674,6 +1691,9 @@
 // A bool32 is a bool as GPU memory holds one, and `as` is how either becomes the other
 @builtin @pure @operator("as") fun convert_bool_to_bool32(x: bool) -> bool32
 @builtin @pure @operator("as") fun convert_bool32_to_bool(x: bool32) -> bool
+
+// an enum as the int of its case (CHK-150), which is what every target and the interpreter hold
+@builtin @internal @pure fun enum_as_int(x: int) -> int
 
 // a direction or a position as the plain vector of its width, which every target writes it as already;
 // the way back is a constructor, which says what the numbers become (CHK-412)
@@ -2842,20 +2862,52 @@
 @builtin @pure fun gather(t: texture_2d[float4], coord: float2, .component: texel_component = texel_component.x, .offset: int2) -> float4
 @builtin fun test_texel(t: texture_2d[int], xy: int2, value: int, level: int = 0)
 @builtin @pure fun load(t: texture_2d[int], xy: int2, level: int = 0) -> int
+@builtin @pure fun gather(t: texture_2d[int], coord: float2, smp: sampler, .component: texel_component = texel_component.x) -> int4
+@builtin @pure fun gather(t: texture_2d[int], coord: float2, .component: texel_component = texel_component.x) -> int4
+@builtin @pure fun gather(t: texture_2d[int], coord: float2, smp: sampler, .component: texel_component = texel_component.x, .offset: int2) -> int4
+@builtin @pure fun gather(t: texture_2d[int], coord: float2, .component: texel_component = texel_component.x, .offset: int2) -> int4
 @builtin fun test_texel(t: texture_2d[int2], xy: int2, value: int2, level: int = 0)
 @builtin @pure fun load(t: texture_2d[int2], xy: int2, level: int = 0) -> int2
+@builtin @pure fun gather(t: texture_2d[int2], coord: float2, smp: sampler, .component: texel_component = texel_component.x) -> int4
+@builtin @pure fun gather(t: texture_2d[int2], coord: float2, .component: texel_component = texel_component.x) -> int4
+@builtin @pure fun gather(t: texture_2d[int2], coord: float2, smp: sampler, .component: texel_component = texel_component.x, .offset: int2) -> int4
+@builtin @pure fun gather(t: texture_2d[int2], coord: float2, .component: texel_component = texel_component.x, .offset: int2) -> int4
 @builtin fun test_texel(t: texture_2d[int3], xy: int2, value: int3, level: int = 0)
 @builtin @pure fun load(t: texture_2d[int3], xy: int2, level: int = 0) -> int3
+@builtin @pure fun gather(t: texture_2d[int3], coord: float2, smp: sampler, .component: texel_component = texel_component.x) -> int4
+@builtin @pure fun gather(t: texture_2d[int3], coord: float2, .component: texel_component = texel_component.x) -> int4
+@builtin @pure fun gather(t: texture_2d[int3], coord: float2, smp: sampler, .component: texel_component = texel_component.x, .offset: int2) -> int4
+@builtin @pure fun gather(t: texture_2d[int3], coord: float2, .component: texel_component = texel_component.x, .offset: int2) -> int4
 @builtin fun test_texel(t: texture_2d[int4], xy: int2, value: int4, level: int = 0)
 @builtin @pure fun load(t: texture_2d[int4], xy: int2, level: int = 0) -> int4
+@builtin @pure fun gather(t: texture_2d[int4], coord: float2, smp: sampler, .component: texel_component = texel_component.x) -> int4
+@builtin @pure fun gather(t: texture_2d[int4], coord: float2, .component: texel_component = texel_component.x) -> int4
+@builtin @pure fun gather(t: texture_2d[int4], coord: float2, smp: sampler, .component: texel_component = texel_component.x, .offset: int2) -> int4
+@builtin @pure fun gather(t: texture_2d[int4], coord: float2, .component: texel_component = texel_component.x, .offset: int2) -> int4
 @builtin fun test_texel(t: texture_2d[uint], xy: int2, value: uint, level: int = 0)
 @builtin @pure fun load(t: texture_2d[uint], xy: int2, level: int = 0) -> uint
+@builtin @pure fun gather(t: texture_2d[uint], coord: float2, smp: sampler, .component: texel_component = texel_component.x) -> uint4
+@builtin @pure fun gather(t: texture_2d[uint], coord: float2, .component: texel_component = texel_component.x) -> uint4
+@builtin @pure fun gather(t: texture_2d[uint], coord: float2, smp: sampler, .component: texel_component = texel_component.x, .offset: int2) -> uint4
+@builtin @pure fun gather(t: texture_2d[uint], coord: float2, .component: texel_component = texel_component.x, .offset: int2) -> uint4
 @builtin fun test_texel(t: texture_2d[uint2], xy: int2, value: uint2, level: int = 0)
 @builtin @pure fun load(t: texture_2d[uint2], xy: int2, level: int = 0) -> uint2
+@builtin @pure fun gather(t: texture_2d[uint2], coord: float2, smp: sampler, .component: texel_component = texel_component.x) -> uint4
+@builtin @pure fun gather(t: texture_2d[uint2], coord: float2, .component: texel_component = texel_component.x) -> uint4
+@builtin @pure fun gather(t: texture_2d[uint2], coord: float2, smp: sampler, .component: texel_component = texel_component.x, .offset: int2) -> uint4
+@builtin @pure fun gather(t: texture_2d[uint2], coord: float2, .component: texel_component = texel_component.x, .offset: int2) -> uint4
 @builtin fun test_texel(t: texture_2d[uint3], xy: int2, value: uint3, level: int = 0)
 @builtin @pure fun load(t: texture_2d[uint3], xy: int2, level: int = 0) -> uint3
+@builtin @pure fun gather(t: texture_2d[uint3], coord: float2, smp: sampler, .component: texel_component = texel_component.x) -> uint4
+@builtin @pure fun gather(t: texture_2d[uint3], coord: float2, .component: texel_component = texel_component.x) -> uint4
+@builtin @pure fun gather(t: texture_2d[uint3], coord: float2, smp: sampler, .component: texel_component = texel_component.x, .offset: int2) -> uint4
+@builtin @pure fun gather(t: texture_2d[uint3], coord: float2, .component: texel_component = texel_component.x, .offset: int2) -> uint4
 @builtin fun test_texel(t: texture_2d[uint4], xy: int2, value: uint4, level: int = 0)
 @builtin @pure fun load(t: texture_2d[uint4], xy: int2, level: int = 0) -> uint4
+@builtin @pure fun gather(t: texture_2d[uint4], coord: float2, smp: sampler, .component: texel_component = texel_component.x) -> uint4
+@builtin @pure fun gather(t: texture_2d[uint4], coord: float2, .component: texel_component = texel_component.x) -> uint4
+@builtin @pure fun gather(t: texture_2d[uint4], coord: float2, smp: sampler, .component: texel_component = texel_component.x, .offset: int2) -> uint4
+@builtin @pure fun gather(t: texture_2d[uint4], coord: float2, .component: texel_component = texel_component.x, .offset: int2) -> uint4
 @builtin @pure fun size(t: texture_2d, level: int = 0) -> int2
 @builtin @pure fun level_count(t: texture_2d) -> int
 @builtin fun test_texel(t: texture_2d_depth, xy: int2, value: float, level: int = 0)
@@ -2985,20 +3037,52 @@
 @builtin @pure fun gather(t: texture_2d_array[float4], coord: float2, .layer: int, .component: texel_component = texel_component.x, .offset: int2) -> float4
 @builtin fun test_texel(t: texture_2d_array[int], xy: int2, value: int, level: int = 0, .layer: int = 0)
 @builtin @pure fun load(t: texture_2d_array[int], xy: int2, level: int = 0, .layer: int) -> int
+@builtin @pure fun gather(t: texture_2d_array[int], coord: float2, smp: sampler, .layer: int, .component: texel_component = texel_component.x) -> int4
+@builtin @pure fun gather(t: texture_2d_array[int], coord: float2, .layer: int, .component: texel_component = texel_component.x) -> int4
+@builtin @pure fun gather(t: texture_2d_array[int], coord: float2, smp: sampler, .layer: int, .component: texel_component = texel_component.x, .offset: int2) -> int4
+@builtin @pure fun gather(t: texture_2d_array[int], coord: float2, .layer: int, .component: texel_component = texel_component.x, .offset: int2) -> int4
 @builtin fun test_texel(t: texture_2d_array[int2], xy: int2, value: int2, level: int = 0, .layer: int = 0)
 @builtin @pure fun load(t: texture_2d_array[int2], xy: int2, level: int = 0, .layer: int) -> int2
+@builtin @pure fun gather(t: texture_2d_array[int2], coord: float2, smp: sampler, .layer: int, .component: texel_component = texel_component.x) -> int4
+@builtin @pure fun gather(t: texture_2d_array[int2], coord: float2, .layer: int, .component: texel_component = texel_component.x) -> int4
+@builtin @pure fun gather(t: texture_2d_array[int2], coord: float2, smp: sampler, .layer: int, .component: texel_component = texel_component.x, .offset: int2) -> int4
+@builtin @pure fun gather(t: texture_2d_array[int2], coord: float2, .layer: int, .component: texel_component = texel_component.x, .offset: int2) -> int4
 @builtin fun test_texel(t: texture_2d_array[int3], xy: int2, value: int3, level: int = 0, .layer: int = 0)
 @builtin @pure fun load(t: texture_2d_array[int3], xy: int2, level: int = 0, .layer: int) -> int3
+@builtin @pure fun gather(t: texture_2d_array[int3], coord: float2, smp: sampler, .layer: int, .component: texel_component = texel_component.x) -> int4
+@builtin @pure fun gather(t: texture_2d_array[int3], coord: float2, .layer: int, .component: texel_component = texel_component.x) -> int4
+@builtin @pure fun gather(t: texture_2d_array[int3], coord: float2, smp: sampler, .layer: int, .component: texel_component = texel_component.x, .offset: int2) -> int4
+@builtin @pure fun gather(t: texture_2d_array[int3], coord: float2, .layer: int, .component: texel_component = texel_component.x, .offset: int2) -> int4
 @builtin fun test_texel(t: texture_2d_array[int4], xy: int2, value: int4, level: int = 0, .layer: int = 0)
 @builtin @pure fun load(t: texture_2d_array[int4], xy: int2, level: int = 0, .layer: int) -> int4
+@builtin @pure fun gather(t: texture_2d_array[int4], coord: float2, smp: sampler, .layer: int, .component: texel_component = texel_component.x) -> int4
+@builtin @pure fun gather(t: texture_2d_array[int4], coord: float2, .layer: int, .component: texel_component = texel_component.x) -> int4
+@builtin @pure fun gather(t: texture_2d_array[int4], coord: float2, smp: sampler, .layer: int, .component: texel_component = texel_component.x, .offset: int2) -> int4
+@builtin @pure fun gather(t: texture_2d_array[int4], coord: float2, .layer: int, .component: texel_component = texel_component.x, .offset: int2) -> int4
 @builtin fun test_texel(t: texture_2d_array[uint], xy: int2, value: uint, level: int = 0, .layer: int = 0)
 @builtin @pure fun load(t: texture_2d_array[uint], xy: int2, level: int = 0, .layer: int) -> uint
+@builtin @pure fun gather(t: texture_2d_array[uint], coord: float2, smp: sampler, .layer: int, .component: texel_component = texel_component.x) -> uint4
+@builtin @pure fun gather(t: texture_2d_array[uint], coord: float2, .layer: int, .component: texel_component = texel_component.x) -> uint4
+@builtin @pure fun gather(t: texture_2d_array[uint], coord: float2, smp: sampler, .layer: int, .component: texel_component = texel_component.x, .offset: int2) -> uint4
+@builtin @pure fun gather(t: texture_2d_array[uint], coord: float2, .layer: int, .component: texel_component = texel_component.x, .offset: int2) -> uint4
 @builtin fun test_texel(t: texture_2d_array[uint2], xy: int2, value: uint2, level: int = 0, .layer: int = 0)
 @builtin @pure fun load(t: texture_2d_array[uint2], xy: int2, level: int = 0, .layer: int) -> uint2
+@builtin @pure fun gather(t: texture_2d_array[uint2], coord: float2, smp: sampler, .layer: int, .component: texel_component = texel_component.x) -> uint4
+@builtin @pure fun gather(t: texture_2d_array[uint2], coord: float2, .layer: int, .component: texel_component = texel_component.x) -> uint4
+@builtin @pure fun gather(t: texture_2d_array[uint2], coord: float2, smp: sampler, .layer: int, .component: texel_component = texel_component.x, .offset: int2) -> uint4
+@builtin @pure fun gather(t: texture_2d_array[uint2], coord: float2, .layer: int, .component: texel_component = texel_component.x, .offset: int2) -> uint4
 @builtin fun test_texel(t: texture_2d_array[uint3], xy: int2, value: uint3, level: int = 0, .layer: int = 0)
 @builtin @pure fun load(t: texture_2d_array[uint3], xy: int2, level: int = 0, .layer: int) -> uint3
+@builtin @pure fun gather(t: texture_2d_array[uint3], coord: float2, smp: sampler, .layer: int, .component: texel_component = texel_component.x) -> uint4
+@builtin @pure fun gather(t: texture_2d_array[uint3], coord: float2, .layer: int, .component: texel_component = texel_component.x) -> uint4
+@builtin @pure fun gather(t: texture_2d_array[uint3], coord: float2, smp: sampler, .layer: int, .component: texel_component = texel_component.x, .offset: int2) -> uint4
+@builtin @pure fun gather(t: texture_2d_array[uint3], coord: float2, .layer: int, .component: texel_component = texel_component.x, .offset: int2) -> uint4
 @builtin fun test_texel(t: texture_2d_array[uint4], xy: int2, value: uint4, level: int = 0, .layer: int = 0)
 @builtin @pure fun load(t: texture_2d_array[uint4], xy: int2, level: int = 0, .layer: int) -> uint4
+@builtin @pure fun gather(t: texture_2d_array[uint4], coord: float2, smp: sampler, .layer: int, .component: texel_component = texel_component.x) -> uint4
+@builtin @pure fun gather(t: texture_2d_array[uint4], coord: float2, .layer: int, .component: texel_component = texel_component.x) -> uint4
+@builtin @pure fun gather(t: texture_2d_array[uint4], coord: float2, smp: sampler, .layer: int, .component: texel_component = texel_component.x, .offset: int2) -> uint4
+@builtin @pure fun gather(t: texture_2d_array[uint4], coord: float2, .layer: int, .component: texel_component = texel_component.x, .offset: int2) -> uint4
 @builtin @pure fun size(t: texture_2d_array, level: int = 0) -> int2
 @builtin @pure fun layer_count(t: texture_2d_array) -> int
 @builtin @pure fun level_count(t: texture_2d_array) -> int
@@ -3270,13 +3354,29 @@
 @builtin @pure fun gather(t: texture_cube[float4], coord: float3, smp: sampler, .component: texel_component = texel_component.x) -> float4
 @builtin @pure fun gather(t: texture_cube[float4], coord: float3, .component: texel_component = texel_component.x) -> float4
 @builtin fun test_texel(t: texture_cube[int], xy: int2, value: int, level: int = 0, .face: int = 0)
+@builtin @pure fun gather(t: texture_cube[int], coord: float3, smp: sampler, .component: texel_component = texel_component.x) -> int4
+@builtin @pure fun gather(t: texture_cube[int], coord: float3, .component: texel_component = texel_component.x) -> int4
 @builtin fun test_texel(t: texture_cube[int2], xy: int2, value: int2, level: int = 0, .face: int = 0)
+@builtin @pure fun gather(t: texture_cube[int2], coord: float3, smp: sampler, .component: texel_component = texel_component.x) -> int4
+@builtin @pure fun gather(t: texture_cube[int2], coord: float3, .component: texel_component = texel_component.x) -> int4
 @builtin fun test_texel(t: texture_cube[int3], xy: int2, value: int3, level: int = 0, .face: int = 0)
+@builtin @pure fun gather(t: texture_cube[int3], coord: float3, smp: sampler, .component: texel_component = texel_component.x) -> int4
+@builtin @pure fun gather(t: texture_cube[int3], coord: float3, .component: texel_component = texel_component.x) -> int4
 @builtin fun test_texel(t: texture_cube[int4], xy: int2, value: int4, level: int = 0, .face: int = 0)
+@builtin @pure fun gather(t: texture_cube[int4], coord: float3, smp: sampler, .component: texel_component = texel_component.x) -> int4
+@builtin @pure fun gather(t: texture_cube[int4], coord: float3, .component: texel_component = texel_component.x) -> int4
 @builtin fun test_texel(t: texture_cube[uint], xy: int2, value: uint, level: int = 0, .face: int = 0)
+@builtin @pure fun gather(t: texture_cube[uint], coord: float3, smp: sampler, .component: texel_component = texel_component.x) -> uint4
+@builtin @pure fun gather(t: texture_cube[uint], coord: float3, .component: texel_component = texel_component.x) -> uint4
 @builtin fun test_texel(t: texture_cube[uint2], xy: int2, value: uint2, level: int = 0, .face: int = 0)
+@builtin @pure fun gather(t: texture_cube[uint2], coord: float3, smp: sampler, .component: texel_component = texel_component.x) -> uint4
+@builtin @pure fun gather(t: texture_cube[uint2], coord: float3, .component: texel_component = texel_component.x) -> uint4
 @builtin fun test_texel(t: texture_cube[uint3], xy: int2, value: uint3, level: int = 0, .face: int = 0)
+@builtin @pure fun gather(t: texture_cube[uint3], coord: float3, smp: sampler, .component: texel_component = texel_component.x) -> uint4
+@builtin @pure fun gather(t: texture_cube[uint3], coord: float3, .component: texel_component = texel_component.x) -> uint4
 @builtin fun test_texel(t: texture_cube[uint4], xy: int2, value: uint4, level: int = 0, .face: int = 0)
+@builtin @pure fun gather(t: texture_cube[uint4], coord: float3, smp: sampler, .component: texel_component = texel_component.x) -> uint4
+@builtin @pure fun gather(t: texture_cube[uint4], coord: float3, .component: texel_component = texel_component.x) -> uint4
 @builtin @pure fun size(t: texture_cube, level: int = 0) -> int2
 @builtin @pure fun level_count(t: texture_cube) -> int
 @builtin fun test_texel(t: texture_cube_depth, xy: int2, value: float, level: int = 0, .face: int = 0)
@@ -3339,13 +3439,29 @@
 @builtin @pure fun gather(t: texture_cube_array[float4], coord: float3, smp: sampler, .layer: int, .component: texel_component = texel_component.x) -> float4
 @builtin @pure fun gather(t: texture_cube_array[float4], coord: float3, .layer: int, .component: texel_component = texel_component.x) -> float4
 @builtin fun test_texel(t: texture_cube_array[int], xy: int2, value: int, level: int = 0, .layer: int = 0, .face: int = 0)
+@builtin @pure fun gather(t: texture_cube_array[int], coord: float3, smp: sampler, .layer: int, .component: texel_component = texel_component.x) -> int4
+@builtin @pure fun gather(t: texture_cube_array[int], coord: float3, .layer: int, .component: texel_component = texel_component.x) -> int4
 @builtin fun test_texel(t: texture_cube_array[int2], xy: int2, value: int2, level: int = 0, .layer: int = 0, .face: int = 0)
+@builtin @pure fun gather(t: texture_cube_array[int2], coord: float3, smp: sampler, .layer: int, .component: texel_component = texel_component.x) -> int4
+@builtin @pure fun gather(t: texture_cube_array[int2], coord: float3, .layer: int, .component: texel_component = texel_component.x) -> int4
 @builtin fun test_texel(t: texture_cube_array[int3], xy: int2, value: int3, level: int = 0, .layer: int = 0, .face: int = 0)
+@builtin @pure fun gather(t: texture_cube_array[int3], coord: float3, smp: sampler, .layer: int, .component: texel_component = texel_component.x) -> int4
+@builtin @pure fun gather(t: texture_cube_array[int3], coord: float3, .layer: int, .component: texel_component = texel_component.x) -> int4
 @builtin fun test_texel(t: texture_cube_array[int4], xy: int2, value: int4, level: int = 0, .layer: int = 0, .face: int = 0)
+@builtin @pure fun gather(t: texture_cube_array[int4], coord: float3, smp: sampler, .layer: int, .component: texel_component = texel_component.x) -> int4
+@builtin @pure fun gather(t: texture_cube_array[int4], coord: float3, .layer: int, .component: texel_component = texel_component.x) -> int4
 @builtin fun test_texel(t: texture_cube_array[uint], xy: int2, value: uint, level: int = 0, .layer: int = 0, .face: int = 0)
+@builtin @pure fun gather(t: texture_cube_array[uint], coord: float3, smp: sampler, .layer: int, .component: texel_component = texel_component.x) -> uint4
+@builtin @pure fun gather(t: texture_cube_array[uint], coord: float3, .layer: int, .component: texel_component = texel_component.x) -> uint4
 @builtin fun test_texel(t: texture_cube_array[uint2], xy: int2, value: uint2, level: int = 0, .layer: int = 0, .face: int = 0)
+@builtin @pure fun gather(t: texture_cube_array[uint2], coord: float3, smp: sampler, .layer: int, .component: texel_component = texel_component.x) -> uint4
+@builtin @pure fun gather(t: texture_cube_array[uint2], coord: float3, .layer: int, .component: texel_component = texel_component.x) -> uint4
 @builtin fun test_texel(t: texture_cube_array[uint3], xy: int2, value: uint3, level: int = 0, .layer: int = 0, .face: int = 0)
+@builtin @pure fun gather(t: texture_cube_array[uint3], coord: float3, smp: sampler, .layer: int, .component: texel_component = texel_component.x) -> uint4
+@builtin @pure fun gather(t: texture_cube_array[uint3], coord: float3, .layer: int, .component: texel_component = texel_component.x) -> uint4
 @builtin fun test_texel(t: texture_cube_array[uint4], xy: int2, value: uint4, level: int = 0, .layer: int = 0, .face: int = 0)
+@builtin @pure fun gather(t: texture_cube_array[uint4], coord: float3, smp: sampler, .layer: int, .component: texel_component = texel_component.x) -> uint4
+@builtin @pure fun gather(t: texture_cube_array[uint4], coord: float3, .layer: int, .component: texel_component = texel_component.x) -> uint4
 @builtin @pure fun size(t: texture_cube_array, level: int = 0) -> int2
 @builtin @pure fun layer_count(t: texture_cube_array) -> int
 @builtin @pure fun level_count(t: texture_cube_array) -> int

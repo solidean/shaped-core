@@ -629,6 +629,8 @@ bool checker::holds(number_literal const& n, type_id to) const
 {
     if (!is_valid(to))
         return false;
+    if (n.is_past_long)
+        return to == prelude_type(builtins::k_ulong);
     if (to == prelude_type(builtins::k_int))
         return n.is_integer && n.integer >= -2147483648ll && n.integer <= 2147483647ll;
     if (to == prelude_type(builtins::k_uint))

@@ -371,6 +371,13 @@ void sgl::builtins::register_conversions(registry& r)
         .write = {.kind = spelling_kind::custom, .custom = write_bool32_to_bool},
     });
 
+    r.add_comment("// an enum as the int of its case (CHK-150), which is what every target and the interpreter hold");
+    r.add(function_record{
+        .signature = "@internal @pure fun enum_as_int(x: int) -> int",
+        .evaluate = same,
+        .write = {.kind = spelling_kind::custom, .custom = write_same},
+    });
+
     r.add_comment("// a direction or a position as the plain vector of its width, which every target writes it as "
                   "already;\n"
                   "// the way back is a constructor, which says what the numbers become (CHK-412)");

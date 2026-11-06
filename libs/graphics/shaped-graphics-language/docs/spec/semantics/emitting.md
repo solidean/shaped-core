@@ -696,10 +696,10 @@ The C++ struct a package generates is that layout byte for byte, padding include
   An element of a split array reads its scalars at `k * i + c`, its index evaluated once, and a whole array reads and writes element by element.
   A packed matrix is split column by column, a `mat2` too.
 * **EMIT-171** A packed array of structs or of arrays waits, `unsupported` alike on every target, as does a packed block's array other than EMIT-154's.
-  So does a multi-dimensional array of `mat3`, whose last column DXC's SPIR-V loses (bug-nested-mat3-array-spirv).
   A packed block's array of whole rows is the exception, which EMIT-154 places.
   Any other multi-dimensional array nests the natural stride: each inner array strides by its size rounded up to its alignment, and every target declares it as nested arrays.
   HLSL widens a 3-vector at any depth, `float4 dirs[2][3]`, and only the innermost element reads through its lanes.
+  A `mat3` two or more dimensions deep stands in a `sgl_mat3_cell` of HLSL, one `column_major float4x3 m`, of the same 48 bytes, and is read through `.m` ([why](why/emitting.md#emit-171)).
 * **EMIT-168** HLSL holds a `mat3` in GPU memory as a `column_major float4x3`, three whole rows of a constant buffer and 48 bytes of a buffer ([why](why/emitting.md#emit-168)).
   A read narrows it, `((float3x3)m)`, and a write widens a value through `sgl_widen_mat3`, which the text declares wherever it holds one.
   A struct that stands in memory declares the `float4x3` as its field, so a read of the field narrows wherever the struct is.

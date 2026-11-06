@@ -285,9 +285,9 @@ Until SGL has generics a program may declare, an overload family cannot be writt
 An enum that converts to `int` is an `int` with a nicer spelling, and the conversion is what makes it one.
 Once `light_kind` can be added to 1, every guarantee the type was declared for is a convention rather than a rule.
 The compiler stops being able to tell a case from a number that happens to be in range.
-So the first version converts in neither direction, which is the position it is possible to relax from.
-The relaxation is already named: `value as int` and `n as light_kind`, both unchecked, because a bounds test on every conversion is not worth its cost in a shader.
-[enum futures](../../incubator/enum-futures.md) is where it waits.
+So nothing converts implicitly, which is the position it is possible to relax from.
+`value as int` is the first relaxation, spelled out at the use and always defined, since every case is a value of the `int`.
+`n as light_kind` still waits in [enum futures](../../incubator/enum-futures.md): an `int` that names no case would be undefined behaviour the language has no profile for yet.
 Starting strict costs a cast somebody has to write; starting loose costs the type.
 
 ## CHK-154

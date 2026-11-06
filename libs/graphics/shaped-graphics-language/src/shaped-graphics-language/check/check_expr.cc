@@ -216,13 +216,13 @@ type_id checker::check_index(function_scope& scope, ast::expr_id id, ast::index 
     if (object == error_type)
         return error_type;
     auto const kind = out.at(object).kind;
-    if (kind == type_kind::image)
+    if (kind == type_kind::image || kind == type_kind::texture)
         return check_texel(scope, id, node, object);
     if (auto const lane = lane_type_of(object); is_valid(lane))
         return check_lane(scope, node, object, lane);
     if (kind != type_kind::buffer && kind != type_kind::array)
     {
-        unsupported(file, where, "a subscript on anything but a buffer, an image, an array or a vector");
+        unsupported(file, where, "a subscript on anything but a buffer, an image, a texture, an array or a vector");
         return error_type;
     }
 
@@ -335,6 +335,18 @@ type_id checker::check_texel(function_scope& scope, ast::expr_id id, ast::index 
     arguments.leading_dots.insert_at(0, {});
 
     auto const& info = out.at(image);
+    // CHK-514: a texture's texel reads as its `load`, and nothing stores one
+    if (info.kind == type_kind::texture)
+    {
+        if (id == assigned)
+        {
+            report(diagnostic_kind::not_assignable, file, span_of(file, id),
+                   "a texture is only read, and an image is what a shader stores into");
+            return error_type;
+        }
+        return resolve_overload(scope, id, ast::expr_id::none, candidates_of(file, "load", image), arguments, "load",
+                                call_spelling::dot_call);
+    }
     auto const texel = type_of_builtin(texel_name_of(info.format), file, span_of(file, id));
     if (texel == error_type)
         return error_type;
@@ -571,6 +583,14 @@ type_id checker::check_cast(function_scope& scope, ast::expr_id id, ast::cast co
             note_program_call(scope, candidate, where);
         return to;
     }
+    // CHK-150: an enum's `as int` takes the enum as the int it is held as, as its `==` does
+    if (out.is_plain_enum(from) && to == prelude_type(builtins::k_int))
+        if (auto const* const found = prelude_names.get_ptr("enum_as_int");
+            found != nullptr && demand((*found)[0], file, where) == symbol_state::checked)
+        {
+            set_target(file, id, {.kind = target_kind::overload, .symbol = (*found)[0]});
+            return to;
+        }
     report(diagnostic_kind::no_matching_overload, file, where,
            cc::format("{} as {}: no conversion", out.name_of(from), out.name_of(to)));
     return error_type;
@@ -671,12 +691,13 @@ type_id checker::check_literal(function_scope& scope, ast::expr_id id, ast::lite
     {
         // CHK-61: held in 64 bits, and refused only where it keeps a default type that does not hold it
         auto const value = parse_literal_integer(text);
-        if (!value.has_value())
+        auto const is_past_long = parse_literal_past_long(text).has_value();
+        if (!value.has_value() && !is_past_long)
         {
             unsupported(file, where, "an integer literal beyond 64 bits");
             return error_type;
         }
-        if (value.value() < -2147483647 - 1 || value.value() > 2147483647)
+        if (is_past_long || value.value() < -2147483647 - 1 || value.value() > 2147483647)
             wide_literals.push_back({.file = file, .expr = id, .function = scope.function, .instance = current_instance});
         return type_of_builtin(builtins::k_int, file, where);
     }
@@ -753,12 +774,16 @@ type_id checker::check_suffixed_literal(i32 file, source_span where, cc::string_
         return type;
     }
     auto const value = parse_literal_integer(s.body);
-    if (!value.has_value())
+    auto const past_long = parse_literal_past_long(s.body);
+    if (!value.has_value() && !past_long.has_value())
     {
         unsupported(file, where, "an integer literal beyond 64 bits");
         return error_type;
     }
-    if (!holds({.is_number = true, .is_integer = true, .integer = value.value()}, type))
+    auto const number = past_long.has_value()
+                          ? number_literal{.is_number = true, .is_integer = true, .is_past_long = true}
+                          : number_literal{.is_number = true, .is_integer = true, .integer = value.value()};
+    if (!holds(number, type))
     {
         report(diagnostic_kind::literal_not_representable, file, where, cc::format("{} does not hold {}", name, text));
         return error_type;
