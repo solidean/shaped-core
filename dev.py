@@ -287,6 +287,7 @@ def main() -> None:
     dev.configure_mirroring(mirror_test_output=args.mirror_test_output)
     # Before anything configures or runs: every child inherits it, CMake's FindVulkan and the validation layer's loader alike.
     dev.activate_vulkan_sdk()
+    dev.activate_android_sdk()
     if args.profile:
         dev.profile.configure(
             args.profile, fmt=args.profile_type, lane_mode=args.profile_lanes,

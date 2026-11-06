@@ -192,6 +192,8 @@ def _build_checks(ctx: Context, *, memo: dev.CheckMemo | None = None, all_preset
             ("tools/dev/memory-guard-self-test.py", [], (core,)),
             ("tools/dev/stall-report-self-test.py", [], (core,)),
             ("tools/dev/monado-self-test.py", [], (core, f"{dev_lib}/toolchain/monado.py", "tools/monado.version")),
+            ("tools/dev/android-sdk-self-test.py", [], (core, f"{dev_lib}/toolchain/android_sdk.py", "tools/dev/cmd/install_android_sdk.py",
+                                                        "tools/android-sdk.version")),
             ("extern/manifest-self-test.py", [], ("extern/**",)),
             ("libs/base/clean-simd/tools/check-link-map.py", ["--self-test"], ("libs/base/clean-simd/tools/**",)),
         )

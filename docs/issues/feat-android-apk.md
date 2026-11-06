@@ -20,6 +20,8 @@ The NDK presets build, but nothing packages an APK, so nothing runs on a Quest.
 ## Known
 
 - Decided against gradle: it would be the repo's first JVM toolchain.
+- `dev.py install android-sdk` provides `aapt2`, `zipalign`, `apksigner` and `adb` with no Java.
+- `apksigner` itself is a Java tool, so signing needs either a JRE or a signer of our own.
 - SDL3 on Android brings its own Java activity, which competes for the entry point; an XR app needs no window.
 - A test binary still runs as a plain executable under `adb shell`, with no APK.
 - `session::availability_of` never reports `needs_permission` or `denied` until this exists: Android's `USE_SCENE` grant is what feeds them.
