@@ -2,6 +2,8 @@
 created: 2026-11-05
 refs:
   - file: libs/graphics/shaped-graphics-language/src/shaped-graphics-language/emit/impl/text_writer.cc
+claimed-by: Claude (for Julius Nehring-Wirxel)
+claimed-at: 2026-11-06T08:39Z
 ---
 
 # A metal trace of a world that is no binding member reads group 0's hit offsets
