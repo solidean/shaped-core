@@ -399,7 +399,10 @@ texture_failure sampled(call const& c,
         auto const v = base.along(xyz[1], t.height(0), 1, true);
         i32 const corners[4][2] = {{u.i0, v.i1}, {u.i1, v.i1}, {u.i1, v.i0}, {u.i0, v.i0}};
         for (auto const& k : corners)
-            out.push_back(scalar::of(base.read(k[0], k[1], 0, component)));
+            if (c.kind == value_kind::scalar_float)
+                out.push_back(scalar::of(base.read(k[0], k[1], 0, component)));
+            else
+                out.push_back(t.at(0, base.layer, k[0], k[1], 0, 0, component));
         return {};
     }
 

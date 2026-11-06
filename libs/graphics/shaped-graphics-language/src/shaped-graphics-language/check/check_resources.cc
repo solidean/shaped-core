@@ -612,16 +612,21 @@ void checker::judge_filtering(i32 file, ast::expr_id id, source_span call, cc::s
 
     // CHK-210: an @unfilterable texture is sampled through a sampler that never filters.
     // CHK-281: so is a depth texture, which WebGPU has no filtering of outside a comparison.
+    // CHK-210: an integer texture is unfilterable by nature.
     auto texture = cc::string();
     auto is_depth = false;
+    auto is_integer = false;
     auto sampler = cc::string();
     for (auto const& [m, path] : members)
     {
         auto const& t = out.at(m.type);
-        if (t.kind == type_kind::texture && (m.is_unfilterable || t.is_depth))
+        auto const* const element = t.kind == type_kind::texture ? out.builtin_type_of(t.element) : nullptr;
+        auto const holds_integers = element != nullptr && element->leaf_kind != value_kind::scalar_float;
+        if (t.kind == type_kind::texture && (m.is_unfilterable || t.is_depth || holds_integers))
         {
             texture = path;
             is_depth = t.is_depth;
+            is_integer = holds_integers;
         }
         if (t.kind != type_kind::sampler || t.is_comparison)
             continue;
@@ -635,7 +640,11 @@ void checker::judge_filtering(i32 file, ast::expr_id id, source_span call, cc::s
         report(diagnostic_kind::type_mismatch, file, call,
                cc::format("{} is {}, and {} filters: sample it through a @non_filtering sampler, or a "
                           "static one whose filters are all .nearest",
-                          texture, is_depth ? "a depth texture" : "@unfilterable", sampler));
+                          texture,
+                          is_depth     ? "a depth texture"
+                          : is_integer ? "a texture of integers"
+                                       : "@unfilterable",
+                          sampler));
 }
 
 bool checker::is_constant_argument(i32 file, ast::expr_id expr) const

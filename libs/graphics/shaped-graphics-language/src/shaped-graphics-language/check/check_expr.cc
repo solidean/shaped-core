@@ -216,13 +216,13 @@ type_id checker::check_index(function_scope& scope, ast::expr_id id, ast::index 
     if (object == error_type)
         return error_type;
     auto const kind = out.at(object).kind;
-    if (kind == type_kind::image)
+    if (kind == type_kind::image || kind == type_kind::texture)
         return check_texel(scope, id, node, object);
     if (auto const lane = lane_type_of(object); is_valid(lane))
         return check_lane(scope, node, object, lane);
     if (kind != type_kind::buffer && kind != type_kind::array)
     {
-        unsupported(file, where, "a subscript on anything but a buffer, an image, an array or a vector");
+        unsupported(file, where, "a subscript on anything but a buffer, an image, a texture, an array or a vector");
         return error_type;
     }
 
@@ -335,6 +335,18 @@ type_id checker::check_texel(function_scope& scope, ast::expr_id id, ast::index 
     arguments.leading_dots.insert_at(0, {});
 
     auto const& info = out.at(image);
+    // CHK-514: a texture's texel reads as its `load`, and nothing stores one
+    if (info.kind == type_kind::texture)
+    {
+        if (id == assigned)
+        {
+            report(diagnostic_kind::not_assignable, file, span_of(file, id),
+                   "a texture is only read, and an image is what a shader stores into");
+            return error_type;
+        }
+        return resolve_overload(scope, id, ast::expr_id::none, candidates_of(file, "load", image), arguments, "load",
+                                call_spelling::dot_call);
+    }
     auto const texel = type_of_builtin(texel_name_of(info.format), file, span_of(file, id));
     if (texel == error_type)
         return error_type;

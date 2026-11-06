@@ -241,7 +241,7 @@ They apply in order, so a later setting overrides what an earlier one set, `filt
 | `sample(…, level = l)` | the same, and every stage | an explicit level: a `float`, and an `int` of a depth texture, which WGSL takes whole |
 | `sample(…, bias = b)` | a texture of floats | a bias on the level derivatives pick, in a pixel stage |
 | `sample(…, grad_x = …, grad_y = …)` | a texture of floats | the derivatives themselves |
-| `gather(…, component = texel_component.y)` | a 2D or cube texture of floats | one channel of the four texels a bilinear sample reads; `.x` by default |
+| `gather(…, component = texel_component.y)` | a 2D or cube texture | one channel of the four texels a bilinear sample reads, as a 4-vector of its component type; `.x` by default |
 | `sample_compare(…, reference = r)` | a depth texture | a comparison, through a `comparison_sampler`, in a pixel stage |
 | `sample_compare(…, reference = r, level = 0.0)` | the same, and every stage | a comparison at level 0, the one level every target compares at |
 | `gather_compare(…, reference = r)` | a 2D or cube depth texture | the comparisons of four texels |
@@ -677,7 +677,7 @@ Everything not named here is the diagnostic `unsupported-yet`, never a guess.
 * `buffer[T]` and `mut buffer[T]`, for a `T` that is a scalar, a vector or a struct of the program, laid out at natural alignment (EMIT-111), or as C++ lays it out under `@padding(.none)` (EMIT-167).
 * `bytes` and `mut bytes`, loaded and stored a word at a time ([Bytes](#bytes)), alone or as a binding array.
 * A subscript on a buffer, as a value and as the place of an assignment.
-* A subscript on an image, as its `load` and as the place its `store` writes ([CHK-367](semantics/checking.md#bindings)); a texture's is not built.
+* A subscript on an image, as its `load` and as the place its `store` writes ([CHK-367](semantics/checking.md#bindings)), and on a texture, as its `load` alone ([CHK-514](semantics/checking.md#bindings)).
 * Every texture, depth texture, image and sampler form above, with `@unfilterable` and `@non_filtering`.
 * A static sampler in a binding, and the `needs-feature` refusals.
 * A file-scope sampler, handed to a builtin by its name ([CHK-314](semantics/checking.md#bindings)).

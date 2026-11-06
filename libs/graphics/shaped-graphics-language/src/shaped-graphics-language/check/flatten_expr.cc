@@ -112,8 +112,9 @@ auto sgl::check::impl::flattener::flatten_expr(ast::expr_id id) -> flat_expr_id
     {
         auto const arguments = ast().at(indexed->arguments);
         auto const object_type = tables().type_at(indexed->object);
-        // CHK-367: a texel read is the `load` the check pass resolved it as
-        if (is_valid(object_type) && c.out.at(object_type).kind == type_kind::image)
+        // CHK-367, CHK-514: a texel read is the `load` the check pass resolved it as
+        if (is_valid(object_type)
+            && (c.out.at(object_type).kind == type_kind::image || c.out.at(object_type).kind == type_kind::texture))
             return tables().call_at(id) >= 0 && !c.out.at(object_type).is_atomic
                      ? flatten_bound_call(id, type, c.out.call_records[tables().call_at(id)])
                      : fail();
