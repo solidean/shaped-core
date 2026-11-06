@@ -77,6 +77,10 @@ struct target_ {
 * **EMIT-107** A struct whose every field is `void` is `unsupported`, since it would be a struct of no member, which WGSL has no spelling for.
 * **EMIT-118** An array is `array<T, N>` in WGSL and MSL, and in HLSL its element type with the lengths after the declared name, `float weights[3]`.
   A square literal is WGSL's constructor, and in HLSL and MSL a local assigned element by element, as a struct is (EMIT-55).
+* **EMIT-230** In HLSL, a `let` array whose every element is a literal, or a vector or an array of them, is `static const` with an initializer: `static const float kernel[5] = {0.0625, ...};`.
+  Each invocation filling a local of its own costs a store per element where an index into it is dynamic, which DXC's SPIR-V keeps.
+* **EMIT-231** `T[N].filled(v)` (CHK-289) of at most 64 elements in all is an assignment per element at a constant index, and a larger one a loop per level.
+  A loop's dynamic index keeps the array in memory wherever the target's compiler does not unroll it, as DXC's SPIR-V backend does not.
 * **EMIT-119** Each member of a `@workgroup` binding is a variable of its own, minted `<binding>_<member>`: `groupshared` in HLSL and `var<workgroup>` in WGSL at file scope,
   and `threadgroup` at the top of the kernel in MSL, which has it nowhere else.
   It takes no group, so the groups after it in a list keep their numbers.

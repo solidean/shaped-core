@@ -3,7 +3,8 @@
 How SGL compares with the other ways to write one set of shaders for DX12, Vulkan, WebGPU and Metal.
 Every row is judged for a renderer that targets all four, WebGPU in a browser included, and wants hardware ray tracing wherever a platform has it.
 
-**As of 2026-11-02**; SGL's E3 and E4 as of 2026-11-03, its B8 as of 2026-11-04, its A5, A7, A8, B2, B3, B4, B6, B8, B9, B10, B11, B12, D3, D5, D6, E1, E4, F2, F7, G5 and G6 as of 2026-11-05.
+**As of 2026-11-02**; SGL's E3 and E4 as of 2026-11-03, its B8 as of 2026-11-04, its A5, A7, A8, B2, B3, B4, B6, B8, B9, B10, B11, B12, D3, D5, D6, E1, E4, F2, F7 and G5 as of 2026-11-05.
+SGL's G6 as of 2026-11-06.
 Every cell's marker was judged again on 2026-11-05, when ✅ came to mean full support to the extent the targets allow.
 Where a stack lets a program choose defined behaviour on every target, as SGL's robustness profiles do, its semantics rows are ✅ though the default leaves a case undefined.
 The other columns move fast, Slang's Metal and WGSL support above all, so each cell carries a source and the date it was checked; see [Sources](#sources).
@@ -120,7 +121,7 @@ A per-target cell reads `dx12 / vulkan / metal / webgpu`.
 | **G3** Exit cost | ✅ you keep HLSL | ✅ readable output; Slang-only features lost | ✅ a standard with two implementations | ✅ | ⚠️ the emitted HLSL, MSL and WGSL are readable and can be kept; they follow sg's binding model; MIT allows a fork |
 | **G4** Migration from HLSL | ✅ none | ✅ accepts most HLSL | ❌ a rewrite | ❌ a rewrite | ⚠️ a rewrite; LLM-assisted ports of hundreds of shaders have gone through |
 | **G5** Vendor libraries (FSR, NRD, RTXDI) | ✅ native; NVAPI on DX12 only | ⚠️ compile for DX12 and Vulkan | ❌ | ⚠️ | ⚠️ beside SGL as HLSL packages on dx12 and vulkan, or ported; reachable from SGL through a text body (B9) over a preamble, untried on a whole vendor library |
-| **G6** Speed of the emitted code | ⚠️ near native on DXIL and SPIR-V; later hops unbenchmarked | ❓ | ⚠️ bounds checks and polyfills cost | ❓ | ⚠️ against the same three kernels written by hand, dx12: 0.91–1.02×, vulkan: 0.98–1.02×, webgpu: 0.73–1.00× (Dawn and wgpu); metal unmeasured 🗺️ [chore](../issues/chore-sgl-emitted-code-speed-on-every-target.md) |
+| **G6** Speed of the emitted code | ⚠️ near native on DXIL and SPIR-V; later hops unbenchmarked | ❓ | ⚠️ bounds checks and polyfills cost | ❓ | ⚠️ SGL's time over the same three kernels written by hand, so lower is faster, on an Arc B580: dx12 0.99–1.00×, vulkan 0.97–0.99×, webgpu 0.81–1.00× on Dawn and 0.52–1.00× on wgpu; metal unmeasured 🗺️ [chore](../issues/chore-sgl-emitted-code-speed-on-every-target.md) |
 
 ## Sources
 
@@ -435,5 +436,6 @@ Per row and column:
   - HLSL + chain: MSC manual performance notes
   - Slang: SLANG issues 11774, 13220, 13245, 14016
   - WGSL: NAGA `BoundsCheckPolicy`
-  - SGL: [readme.md](../../readme.md) "Performance", shaped-rendering `tests/bench/sgl-against-hlsl-benchmark.cc` (2026-11-05, Arc B580)
+  - SGL: [readme.md](../../readme.md) "Performance", shaped-rendering `tests/bench/sgl-against-hlsl-benchmark.cc`, `tests/bench/sgl-against-wgsl-benchmark.cc` (2026-11-06, Arc B580)
+  - SGL, what the text owes the target's compiler: EMIT-230, EMIT-231
   - SGL, the gap on an RTX: [perf-sgl-svgf-filter-two-percent](../issues/perf-sgl-svgf-filter-two-percent.md)
