@@ -5,7 +5,7 @@
 #include <shaped-graphics-language/ir/dxil/dxil.hh>
 #include <shaped-graphics-language/ir/lower.hh>
 #include <shaped-graphics-language/ir/simplify.hh>
-#include <shaped-graphics-language/ir/spirv.hh>
+#include <shaped-graphics-language/ir/spirv/spirv.hh>
 #include <shaped-graphics-language/ir/ssa.hh>
 #include <shaped-graphics-language/ir/verify.hh>
 

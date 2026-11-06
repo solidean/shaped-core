@@ -59,7 +59,10 @@ add_library(shaped-graphics-language
     src/shaped-graphics-language/ir/lower_call.cc
     src/shaped-graphics-language/ir/lower_expr.cc
     src/shaped-graphics-language/ir/lower_memory.cc
-    src/shaped-graphics-language/ir/spirv.cc
+    src/shaped-graphics-language/ir/spirv/spirv.cc
+    src/shaped-graphics-language/ir/spirv/impl/writer.cc
+    src/shaped-graphics-language/ir/spirv/impl/writer_declarations.cc
+    src/shaped-graphics-language/ir/spirv/impl/writer_operations.cc
     src/shaped-graphics-language/ir/dominance.cc
     src/shaped-graphics-language/ir/simplify.cc
     src/shaped-graphics-language/ir/ssa.cc

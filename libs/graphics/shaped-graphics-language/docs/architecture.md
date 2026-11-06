@@ -207,7 +207,7 @@ The size and alignment the layout rules place a value by, and each target's own,
 
 `ir/` is one entry point below the flat tree, which a binary target writes out with no compiler behind it: `ir::lower` fills an `ir::program`, and `ir::construct_ssa` promotes its locals.
 `ir/pipeline.hh` is each target's whole way, one plain function per target, `ir::compile_spirv` and `ir::compile_dxil`; a pass joins a route there.
-`ir::write_spirv` ends the first; `ir::simplify` and `ir::write_dxil` are DXIL's, whose backend stands in `ir/dxil/`.
+`ir::write_spirv` ends the first, whose writer stands in `ir/spirv/`; `ir::simplify` and `ir::write_dxil` are DXIL's, whose backend stands in `ir/dxil/`.
 It reads the same `plan` a text target does, so it decides no name and no address, and it hangs off `emit_entry_point` rather than being a target of its own.
 A program is flat tables of small ids, an operation being 24 bytes, because this path exists to be fast.
 `ir::verify` says what every program must hold, and a compile runs it after lowering and after each pass wherever assertions are on.
