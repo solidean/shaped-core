@@ -16,13 +16,13 @@
 #include <memory>
 
 /// The binding a session renders through, which decides the sg backend its context must be.
-enum class xr::graphics_api : xr::u8
+enum class sxr::graphics_api : sxr::u8
 {
     vulkan,
     dx12,
 };
 
-struct xr::system_description
+struct sxr::system_description
 {
     cc::string application_name = "shaped-core";
     graphics_api api = graphics_api::vulkan;
@@ -31,7 +31,7 @@ struct xr::system_description
 };
 
 /// What an action reports: a button, an axis, a stick, where something is, or a vibration it makes.
-enum class xr::action_kind : xr::u8
+enum class sxr::action_kind : sxr::u8
 {
     boolean,
     scalar,
@@ -41,7 +41,7 @@ enum class xr::action_kind : xr::u8
 };
 
 /// Which hand an action is read for; an action declared for both is one action with a state per hand.
-enum class xr::hand : xr::u8
+enum class sxr::hand : sxr::u8
 {
     left,
     right,
@@ -50,7 +50,7 @@ enum class xr::hand : xr::u8
 /// One suggested binding: an input or output path of an interaction profile, such as
 /// `/interaction_profiles/oculus/touch_controller` and `/user/hand/left/input/trigger/value`.
 /// The runtime binds what the controllers in hand offer, and remaps a profile it does not have to one it does.
-struct xr::action_binding
+struct sxr::action_binding
 {
     cc::string profile;
     cc::string path;
@@ -58,17 +58,17 @@ struct xr::action_binding
 
 /// An action the application reads by name rather than by device path, OpenXR's model.
 /// `name` is lowercase letters, digits, `-`, `_` and `.`; `label` is what the runtime shows a user who rebinds it.
-struct xr::action_description
+struct sxr::action_description
 {
     cc::string name;
     cc::string label;
     action_kind kind = action_kind::boolean;
-    /// One state per hand, read with `xr::hand`; every binding then starts with `/user/hand/left` or `/user/hand/right`.
+    /// One state per hand, read with `sxr::hand`; every binding then starts with `/user/hand/left` or `/user/hand/right`.
     bool is_per_hand = true;
     cc::vector<action_binding> bindings;
 };
 
-struct xr::session_description
+struct sxr::session_description
 {
     /// The depth range every view's projection maps to 0 and 1, and the one the runtime is told for its depth layer.
     f32 near_distance = 0.05f;
@@ -76,21 +76,21 @@ struct xr::session_description
     /// Shows the headset's cameras behind what is rendered, where the system asked for passthrough and it came up.
     /// The frame's color is then cleared to transparent where the room shows through.
     bool passthrough = false;
-    /// The actions the session reads, bound before it begins; `xr::standard_controller_actions()` is the usual set.
+    /// The actions the session reads, bound before it begins; `sxr::standard_controller_actions()` is the usual set.
     cc::vector<action_description> actions;
 };
 
-namespace xr
+namespace sxr
 {
 /// Both hands' grip and aim poses, trigger, squeeze, thumbstick, the two face buttons, the thumbstick click, the menu
 /// button and haptics, named so, bound for Quest Touch and for OpenXR's simple controller.
 /// The face buttons are `primary` (A or X) and `secondary` (B or Y); the menu button is the left controller's alone.
 [[nodiscard]] cc::vector<action_description> standard_controller_actions();
-} // namespace xr
+} // namespace sxr
 
 /// One eye: where it is and how it projects, in tg's frame — left-handed, +y up, +z forward — of the session's space.
 /// OpenXR's frame is right-handed with -z forward, and the session converts at its edge so nothing above sees that.
-struct xr::view
+struct sxr::view
 {
     tg::rigid_transform3f camera_to_world;
     /// Left-handed, depth 0 at the session's near distance and 1 at its far one, as a depth cleared to 1 tests less.
@@ -102,7 +102,7 @@ struct xr::view
 
 /// One frame: its views, and the images each view renders into, view i into layer i.
 /// Render both views in one pass with view instancing (`view_count = 2`, SGL's `@view_index`), or one pass a layer.
-struct xr::frame
+struct sxr::frame
 {
     /// False where the runtime wants nothing drawn this frame, which still ends through `session::submit_frame`.
     bool should_render = false;
@@ -119,7 +119,7 @@ struct xr::frame
 /// The runtime dictates the GPU, and on vulkan the instance and device extensions, so the context comes from here:
 /// `create_context` creates it to the runtime's spec, on the backend `graphics_api` names.
 /// A system outlives every session created from it.
-class xr::system
+class sxr::system
 {
 public:
     /// Fails where the build has no OpenXR loader, no runtime is active, the runtime lacks the binding, or no headset is
@@ -160,7 +160,7 @@ private:
 ///
 /// The session begins when the runtime is ready and ends when it stops, as a headset taken off does; it resumes when
 /// the runtime is ready again, so `wait_frame` gives nothing in between.
-class xr::session
+class sxr::session
 {
 public:
     ~session();

@@ -8,9 +8,9 @@
 
 using namespace cc::primitive_defines;
 
-namespace xr
+namespace sxr
 {
-CC_REC_DEFINE_DOMAIN(g_rec_domain, "xr");
+CC_REC_DEFINE_DOMAIN(g_rec_domain, "sxr");
 }
 
 namespace
@@ -21,49 +21,49 @@ namespace
 }
 } // namespace
 
-xr::system::system(cc::unique_ptr<state> s) : _state(cc::move(s))
+sxr::system::system(cc::unique_ptr<state> s) : _state(cc::move(s))
 {
 }
-xr::system::~system() = default;
+sxr::system::~system() = default;
 
-#if !XR_HAS_OPENXR
+#if !SXR_HAS_OPENXR
 
-struct xr::system::state
+struct sxr::system::state
 {
 };
 
-cc::result<cc::unique_ptr<xr::system>> xr::system::try_create(system_description const&)
+cc::result<cc::unique_ptr<sxr::system>> sxr::system::try_create(system_description const&)
 {
     return cc::error(error_of("this build has no OpenXR loader (uv run extern/openxr/fetch-openxr.py)"));
 }
-cc::string_view xr::system::runtime_name() const
+cc::string_view sxr::system::runtime_name() const
 {
     return {};
 }
-cc::string_view xr::system::system_name() const
+cc::string_view sxr::system::system_name() const
 {
     return {};
 }
-xr::graphics_api xr::system::api() const
+sxr::graphics_api sxr::system::api() const
 {
     return graphics_api::vulkan;
 }
-bool xr::system::offers_passthrough() const
+bool sxr::system::offers_passthrough() const
 {
     return false;
 }
-cc::result<sg::context_handle> xr::system::create_context() const
+cc::result<sg::context_handle> sxr::system::create_context() const
 {
     return cc::error(error_of("no OpenXR"));
 }
-cc::result<cc::unique_ptr<xr::session>> xr::system::create_session(sg::context&, session_description const&)
+cc::result<cc::unique_ptr<sxr::session>> sxr::system::create_session(sg::context&, session_description const&)
 {
     return cc::error(error_of("no OpenXR"));
 }
 
 #else
 
-cc::string xr::impl::failed(XrInstance instance, XrResult result, cc::string_view what)
+cc::string sxr::impl::failed(XrInstance instance, XrResult result, cc::string_view what)
 {
     if (XR_SUCCEEDED(result))
         return {};
@@ -73,23 +73,23 @@ cc::string xr::impl::failed(XrInstance instance, XrResult result, cc::string_vie
     return cc::format("{} failed: {} ({})", what, name[0] != 0 ? name : "unknown", int(result));
 }
 
-xr::system::state::~state()
+sxr::system::state::~state()
 {
     if (instance != XR_NULL_HANDLE)
         xrDestroyInstance(instance);
 }
 
-cc::result<cc::unique_ptr<xr::system>> xr::system::try_create(system_description const& desc)
+cc::result<cc::unique_ptr<sxr::system>> sxr::system::try_create(system_description const& desc)
 {
     auto s = cc::make_unique<state>();
     s->api = desc.api;
 
     char const* binding = nullptr;
-#if XR_HAS_VULKAN
+#if SXR_HAS_VULKAN
     if (desc.api == graphics_api::vulkan)
         binding = XR_KHR_VULKAN_ENABLE2_EXTENSION_NAME;
 #endif
-#if XR_HAS_DX12
+#if SXR_HAS_DX12
     if (desc.api == graphics_api::dx12)
         binding = XR_KHR_D3D12_ENABLE_EXTENSION_NAME;
 #endif
@@ -156,28 +156,28 @@ cc::result<cc::unique_ptr<xr::system>> xr::system::try_create(system_description
     return cc::make_unique<system>(cc::move(s));
 }
 
-cc::string_view xr::system::runtime_name() const
+cc::string_view sxr::system::runtime_name() const
 {
     return _state->runtime_name;
 }
-cc::string_view xr::system::system_name() const
+cc::string_view sxr::system::system_name() const
 {
     return _state->system_name;
 }
-xr::graphics_api xr::system::api() const
+sxr::graphics_api sxr::system::api() const
 {
     return _state->api;
 }
-bool xr::system::offers_passthrough() const
+bool sxr::system::offers_passthrough() const
 {
     return _state->offers_passthrough;
 }
 
-cc::result<sg::context_handle> xr::system::create_context() const
+cc::result<sg::context_handle> sxr::system::create_context() const
 {
     auto const instance = _state->instance;
     auto const system_id = _state->system;
-#if XR_HAS_VULKAN
+#if SXR_HAS_VULKAN
     if (_state->api == graphics_api::vulkan)
     {
         // the requirements must be asked before the instance, and sg creates at a version the range must include
@@ -233,7 +233,7 @@ cc::result<sg::context_handle> xr::system::create_context() const
         return sg::create_vulkan_context(config);
     }
 #endif
-#if XR_HAS_DX12
+#if SXR_HAS_DX12
     if (_state->api == graphics_api::dx12)
     {
         auto requirements = XrGraphicsRequirementsD3D12KHR{.type = XR_TYPE_GRAPHICS_REQUIREMENTS_D3D12_KHR};

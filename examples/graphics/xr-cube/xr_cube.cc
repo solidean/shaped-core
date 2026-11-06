@@ -88,11 +88,11 @@ constexpr auto release_trigger = 0.3f;
 // `dev.py example xr-cube --test-args "--dx12"` takes the dx12 binding
 ASYNC_EXAMPLE("shaped-graphics/xr-cube", nx::config::args("--vulkan"))
 {
-    auto api = xr::graphics_api::vulkan;
+    auto api = sxr::graphics_api::vulkan;
     for (auto const& arg : nx::test_args())
         if (cc::string_view(arg) == "--dx12")
-            api = xr::graphics_api::dx12;
-    auto created_system = xr::system::try_create({.application_name = "shaped-core xr-cube", .api = api, .wants_passthrough = true});
+            api = sxr::graphics_api::dx12;
+    auto created_system = sxr::system::try_create({.application_name = "shaped-core xr-cube", .api = api, .wants_passthrough = true});
     if (created_system.has_error())
     {
         cc::eprintln("no headset: {}", created_system.error().to_string());
@@ -100,7 +100,7 @@ ASYNC_EXAMPLE("shaped-graphics/xr-cube", nx::config::args("--vulkan"))
         co_return;
     }
     auto const system = cc::move(created_system.value());
-    cc::println("xr: {} on {}, through {}", system->system_name(), system->runtime_name(), api == xr::graphics_api::dx12 ? "dx12" : "vulkan");
+    cc::println("xr: {} on {}, through {}", system->system_name(), system->runtime_name(), api == sxr::graphics_api::dx12 ? "dx12" : "vulkan");
 
     auto created_context = system->create_context();
     if (created_context.has_error())
@@ -117,7 +117,7 @@ ASYNC_EXAMPLE("shaped-graphics/xr-cube", nx::config::args("--vulkan"))
         co_return;
     }
 
-    auto created_session = system->create_session(*ctx, {.passthrough = true, .actions = xr::standard_controller_actions()});
+    auto created_session = system->create_session(*ctx, {.passthrough = true, .actions = sxr::standard_controller_actions()});
     if (created_session.has_error())
     {
         cc::eprintln("no session: {}", created_session.error().to_string());
@@ -137,7 +137,7 @@ ASYNC_EXAMPLE("shaped-graphics/xr-cube", nx::config::args("--vulkan"))
 
     // a metre ahead of where the session started, at eye height; spinning until a hand holds it
     auto cube = placed(tg::mat3f::identity, cube_size, tg::vec3f(0, 0, 1));
-    auto held_by = cc::optional<xr::hand>();
+    auto held_by = cc::optional<sxr::hand>();
     auto held_offset = tg::mat4f::identity; // the cube in the holding grip's frame
 
     auto frames = u64(0);
@@ -158,7 +158,7 @@ ASYNC_EXAMPLE("shaped-graphics/xr-cube", nx::config::args("--vulkan"))
         last_time = now;
 
         // ---- the hands: a trigger pulled near the cube grabs it, and released lets it go where it is
-        for (auto const h : {xr::hand::left, xr::hand::right})
+        for (auto const h : {sxr::hand::left, sxr::hand::right})
         {
             auto const grip = session->pose("grip", h);
             auto const trigger = session->scalar("trigger", h);
@@ -218,7 +218,7 @@ ASYNC_EXAMPLE("shaped-graphics/xr-cube", nx::config::args("--vulkan"))
                 };
                 draw(cube);
                 // a small cube in each hand, where the controller is held
-                for (auto const h : {xr::hand::left, xr::hand::right})
+                for (auto const h : {sxr::hand::left, sxr::hand::right})
                     if (auto const grip = session->pose("grip", h); grip.has_value())
                         draw(grip.value().to_mat() * placed(tg::mat3f::identity, hand_size, tg::vec3f(0, 0, 0)));
             }

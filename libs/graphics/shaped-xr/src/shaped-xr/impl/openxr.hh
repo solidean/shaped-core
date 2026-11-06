@@ -1,24 +1,24 @@
 #pragma once
 
-// OpenXR with the bindings this build has, and the state behind xr::system and xr::session.
+// OpenXR with the bindings this build has, and the state behind sxr::system and sxr::session.
 // Only shaped-xr's own sources include this: the public headers name no OpenXR, Vulkan or D3D12 type.
 
 #include <shaped-xr/xr.hh>
 
-#if XR_HAS_OPENXR
+#if SXR_HAS_OPENXR
 
-#if XR_HAS_VULKAN
+#if SXR_HAS_VULKAN
 #include <shaped-graphics/backends/vulkan/vulkan_context.hh>
 #define XR_USE_GRAPHICS_API_VULKAN
 #endif
-#if XR_HAS_DX12
+#if SXR_HAS_DX12
 #include <shaped-graphics/backends/dx12/dx12_context.hh>
 #define XR_USE_GRAPHICS_API_D3D12
 #endif
 #include <openxr/openxr.h>
 #include <openxr/openxr_platform.h>
 
-namespace xr::impl
+namespace sxr::impl
 {
 /// `result` as a message naming `what`, or empty where it succeeded.
 [[nodiscard]] cc::string failed(XrInstance instance, XrResult result, cc::string_view what);
@@ -40,14 +40,14 @@ struct swapchain
     i64 format = 0;
     /// Per image: on vulkan the image itself, wrapped; empty on dx12, where `copied` is rendered into instead.
     cc::vector<sg::texture_2d_array> wrapped;
-#if XR_HAS_DX12
+#if SXR_HAS_DX12
     cc::vector<ID3D12Resource*> dx12_images;
 #endif
     u32 acquired = 0;
 };
-} // namespace xr::impl
+} // namespace sxr::impl
 
-struct xr::system::state
+struct sxr::system::state
 {
     XrInstance instance = XR_NULL_HANDLE;
     XrSystemId system = XR_NULL_SYSTEM_ID;
@@ -61,7 +61,7 @@ struct xr::system::state
     ~state();
 };
 
-struct xr::session::state
+struct sxr::session::state
 {
     system::state const* sys = nullptr;
     sg::context* ctx = nullptr;

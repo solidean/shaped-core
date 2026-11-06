@@ -165,11 +165,11 @@ One-liner per library:
   `SR_HAS_WINDOW` (1/0) says whether a backend was compiled in.
   sr also hosts the **denoise members**, the vendor ones included: `SR_HAS_DLSS` (1/0) says whether NVIDIA's SDK was fetched.
   **That fetch is on request and nothing performs it for you** — `uv run extern/dlss/fetch-dlss.py` — because its license is NVIDIA's rather than one a build accepts on anyone's behalf.
-* **`libs/graphics/shaped-xr`** — sg rendering in a headset through OpenXR: `xr::system`, `xr::session` and its frames, Quest 3 over Quest Link first.
+* **`libs/graphics/shaped-xr`** — sg rendering in a headset through OpenXR: `sxr::system`, `sxr::session` and its frames, Quest 3 over Quest Link first.
   The runtime dictates the GPU, so `system::create_context` makes the sg context to its spec, on vulkan or dx12.
   A frame is one image of a layer an eye, color and depth, so view instancing draws both eyes in one pass; passthrough is the runtime's own layer.
   **Views are in tg's frame**: OpenXR's right-handed space is converted at the session's edge, and no public header names an OpenXR type.
-  Namespace `xr`.
+  Namespace `sxr`.
   Depends on shaped-rendering, plus the fetched OpenXR loader and an sg backend where the build has them.
   [docs/design.md](libs/graphics/shaped-xr/docs/design.md) has the decisions; `uv run dev.py example xr-cube --window` puts the cube in the headset.
 * **`libs/graphics/shaped-graphics-language`** — SGL, our own shading language, and its whole toolchain in one library: compiler, linter, language server.

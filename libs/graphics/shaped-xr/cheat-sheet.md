@@ -1,7 +1,7 @@
 # shaped-xr cheat sheet
 
 sg rendering in a headset through OpenXR.
-Namespace `xr`; headers included by full path from `src/`.
+Namespace `sxr`; headers included by full path from `src/`.
 [readme.md](readme.md) is the front door; [docs/design.md](docs/design.md) has the decisions.
 
 How to read this: each block leads with the include; one symbol per line with a trailing comment giving the return type or the intuition.
@@ -9,7 +9,7 @@ Format conventions live in [docs/guides/cheat-sheets.md](../../../docs/guides/ch
 
 ---
 
-**Recording domain:** `xr`.
+**Recording domain:** `sxr`.
 
 **Early stage.** System, session, frames with depth, passthrough and actions exist; drawing controllers and Android are planned.
 
@@ -17,14 +17,26 @@ Format conventions live in [docs/guides/cheat-sheets.md](../../../docs/guides/ch
 
 ```cpp
 #include <shaped-xr/xr.hh>
-xr::system::try_create({.application_name, .api = xr::graphics_api::vulkan, .wants_passthrough})  // -> result<unique_ptr<system>>
+sxr::system::try_create({.application_name, .api = sxr::graphics_api::vulkan, .wants_passthrough})  // -> result<unique_ptr<system>>
 //   fails naming why: no loader in the build, no active runtime, no binding, no headset (FORM_FACTOR_UNAVAILABLE)
 sys->create_context()                              // -> result<context_handle>, on the runtime's GPU and to its spec
 sys->runtime_name(); sys->system_name(); sys->api(); sys->offers_passthrough();
 sys->create_session(*ctx, {.near_distance = 0.05f, .far_distance = 100.0f, .passthrough})  // -> result<unique_ptr<session>>
 //   ctx must come from create_context and outlive the session; the system outlives every session
-XR_HAS_OPENXR                                      // 1/0: whether the build has the loader at all
+SXR_HAS_OPENXR                                      // 1/0: whether the build has the loader at all
 ```
+
+## What a runtime offers
+
+```cpp
+#include <shaped-xr/runtime_report.hh>
+sxr::inspect_runtime()                             // -> result<runtime_report>; needs a runtime, no headset, no graphics
+r.runtime_name; r.runtime_version; r.system_name   // system_name empty: no headset connected
+r.extensions                                       // every extension listed; a listed one need not work
+r.features                                         // {name, is_supported}: what the system itself answers
+```
+
+`uv run dev.py example xr-probe` prints it.
 
 ## The frame loop
 
@@ -45,15 +57,15 @@ f.color; f.depth                                   // sg::texture_2d_array, view
 ## Actions
 
 ```cpp
-create_session(*ctx, {.actions = xr::standard_controller_actions()})  // grip, aim, trigger, squeeze, thumbstick, thumbstick_click,
+create_session(*ctx, {.actions = sxr::standard_controller_actions()})  // grip, aim, trigger, squeeze, thumbstick, thumbstick_click,
                                                    //   primary (A/X), secondary (B/Y), menu, haptic; Quest Touch + khr/simple
-xr::action_description{.name, .label, .kind = xr::action_kind::scalar, .is_per_hand = true, .bindings = {{profile, path}}}
+sxr::action_description{.name, .label, .kind = sxr::action_kind::scalar, .is_per_hand = true, .bindings = {{profile, path}}}
 //   name: lowercase, digits, - _ . ; a per-hand binding starts /user/hand/left/ or /user/hand/right/; vibration binds /output/
-session->pressed("primary", xr::hand::right)     // bool;   released while unfocused or unbound
-session->scalar("trigger", xr::hand::left)        // f32 0..1
-session->vector2("thumbstick", xr::hand::left)    // tg::vec2f
-session->pose("grip", xr::hand::left)             // optional<rigid_transform3f>, tg's frame, at the frame's display time
-session->vibrate("haptic", xr::hand::left, amplitude, seconds)
+session->pressed("primary", sxr::hand::right)     // bool;   released while unfocused or unbound
+session->scalar("trigger", sxr::hand::left)        // f32 0..1
+session->vector2("thumbstick", sxr::hand::left)    // tg::vec2f
+session->pose("grip", sxr::hand::left)             // optional<rigid_transform3f>, tg's frame, at the frame's display time
+session->vibrate("haptic", sxr::hand::left, amplitude, seconds)
 //   synced by wait_frame; an unknown name asserts
 ```
 
