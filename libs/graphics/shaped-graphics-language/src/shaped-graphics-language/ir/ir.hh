@@ -115,7 +115,6 @@ enum class sgl::ir::storage : sgl::u8
     storage_buffer,
     /// A texture, an image or a sampler.
     resource,
-    input,
 };
 
 /// One member of a structure; `offset` and `matrix_stride` mean something where it stands in GPU memory.
@@ -553,8 +552,6 @@ struct sgl::ir::stage_element
     /// A range of `program::names`, for a reader.
     u32 name_first = 0;
     u32 name_size = 0;
-    /// The variable's pointer type, for a target with variables.
-    type_ref pointer = type_ref::none;
 };
 
 /// A variable outside the function: a resource, a block or workgroup memory.

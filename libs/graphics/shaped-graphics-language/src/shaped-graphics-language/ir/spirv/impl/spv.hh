@@ -227,6 +227,7 @@ enum storage_class : u32
     UniformConstant = 0,
     Input = 1,
     Uniform = 2,
+    Output = 3,
     Workgroup = 4,
     FunctionStorage = 7,
     PushConstant = 9,

@@ -89,6 +89,8 @@ private:
     u32 _types = 0;
     u32 _constants = 0;
     u32 _elements = 0;
+    /// Parallel to `program::stage_elements`, in the ids past `_bound`.
+    cc::vector<u32> _element_pointers;
     u32 _globals = 0;
     u32 _locals = 0;
     u32 _instructions = 0;

@@ -178,8 +178,7 @@ u32 lowering::element_of_input(isize index)
     return add_stage_element({.part = stage_part::input,
                               .system = built_in_of(input.input),
                               .type = type,
-                              .interpolate = is_system_mode ? interpolation::flat : interpolation::none,
-                              .pointer = pointer_type(type, storage::input)},
+                              .interpolate = is_system_mode ? interpolation::flat : interpolation::none},
                              spelled.hlsl_semantic, _plan.stage_input_names[index]);
 }
 

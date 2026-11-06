@@ -56,8 +56,6 @@ u32 writer::storage_of(storage s)
         return spv::StorageBuffer;
     case storage::resource:
         return spv::UniformConstant;
-    case storage::input:
-        return spv::Input;
     }
     return spv::FunctionStorage;
 }
@@ -238,7 +236,19 @@ void writer::write_stage_elements()
     {
         auto const& e = _p.stage_elements[i];
         auto const id = _elements + u32(i);
-        emit(_declarations, spv::Variable, {id_of(e.pointer), id, storage_of(_p.at(e.pointer).space)});
+        auto const space = e.part == stage_part::input ? u32(spv::Input) : u32(spv::Output);
+        // a pointer type is declared once, and a program's own table holds none of these
+        auto pointer = u32(0);
+        for (auto k = isize(0); k < i; ++k)
+            if (_p.stage_elements[k].type == e.type && _p.stage_elements[k].part == e.part)
+                pointer = _element_pointers[k];
+        if (pointer == 0)
+        {
+            pointer = _bound++;
+            emit(_declarations, spv::TypePointer, {pointer, space, id_of(e.type)});
+        }
+        _element_pointers.push_back(pointer);
+        emit(_declarations, spv::Variable, {pointer, id, space});
         name(id, _p.name_at(e.name_first, e.name_size));
         for (auto const& known : k_built_ins)
             if (known.input == e.system)
