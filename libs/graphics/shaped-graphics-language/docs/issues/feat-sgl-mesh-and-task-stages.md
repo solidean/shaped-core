@@ -2,6 +2,8 @@
 created: 2026-11-02
 refs:
   - file: libs/graphics/shaped-graphics-language/docs/spec/semantics/checking.md
+claimed-by: Claude (for Philip Trettner)
+claimed-at: 2026-11-06T05:08Z
 ---
 
 # Mesh and task stages
