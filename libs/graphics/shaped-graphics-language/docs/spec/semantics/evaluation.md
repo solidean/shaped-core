@@ -24,6 +24,13 @@ A listing here is the dump of a flat tree, shortened: a label is `$name`, and a 
 * **EVAL-96** A `half` is a 16-bit IEEE number, and a `short` and a `ushort` are 16 bits whose arithmetic wraps (CHK-381).
   An operation of them computes as its 32-bit family does and rounds its result once: a half to nearest, ties to even, and an integer to its low 16 bits.
   So `+`, `-`, `*`, `/` and `sqrt` of halves are exactly binary16's own, and a builtin of several steps, such as `mix` or `dot`, rounds once where a GPU may round each step.
+* **EVAL-108** A double's rounding functions are exact, and a zero they give keeps the sign of the argument: `trunc(-0.5)` is -0.0 (CHK-458).
+  `round` takes a tie to the even neighbour, and `fract(x)` is `x - floor(x)`.
+  `sqrt` is the double nearest the root on the interpreter, and within one ULP of it on a GPU; `inverse_sqrt` is `1 / sqrt(x)` there, and within two ULP on a GPU.
+  Each other function is its formula, every step rounded to a double: `mix` is `a * (1 - t) + b * t`, `dot` sums from the first component on, and `normalize(v)` is `v * inverse_sqrt(dot(v, v))`.
+  `smoothstep` whose low edge is not below its high one has no value, as of a float.
+  An entry point's float level (CHK-435) licenses for a double what it licenses for a float: at `fast` a GPU may read a subnormal as a zero, and `fract` of a NaN or an infinity has no value it keeps.
+  `sqrt`, `inverse_sqrt`, `is_nan` and `is_inf` read a NaN and an infinity from the bits at every level.
 * **EVAL-104** A `long` and a `ulong` are 64 bits whose arithmetic wraps, and a `double` is a 64-bit IEEE number, each operation rounded once to nearest, ties to even (CHK-450).
   Their bits work as EVAL-86 says of 32, a shift using the low six bits of its count.
   An integer `/` and `%` of them have no value where EVAL-84 says so of an `int`: a zero divisor, and the most negative long divided by -1.

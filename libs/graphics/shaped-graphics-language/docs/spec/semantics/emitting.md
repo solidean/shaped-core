@@ -512,6 +512,10 @@ So `{float3; float}` is written with `packed_float3`: the `float` is at byte 12 
 * **EMIT-218** MSL writes a buffer's `atomic[ulong]` as `atomic_ulong`, and its `min` and `max` as `atomic_min_explicit` and `atomic_max_explicit`, which give nothing back.
   So each stands as a statement alone, and an MSL compile whose program reads what one gave back is `target-lacks-feature`.
   HLSL writes a workgroup memory's 64-bit atomic as a `groupshared` `int64_t` or `uint64_t` under the same `Interlocked*` calls as a buffer's.
+* **EMIT-219** HLSL writes a double's maths (CHK-458) as functions of the text, `sgl_double_sqrt` and its siblings, declared once ahead of an entry point that calls any of them.
+  Each reads and writes a double's bits through `asuint` and `asdouble`, over its arithmetic and `fma`: DXC hands a double to its own `sqrt` or `floor` as a float.
+  `sqrt` and `inverse_sqrt` start from the float `rsqrt` of the mantissa brought to 1 to 4, take two Newton steps, and `sqrt` corrects by the residual `fma` gives.
+  `sign` and `saturate` are HLSL's own, which take a double.
 * **EMIT-225** `hlsl-vulkan` writes a hit object (CHK-434) and every reordering (CHK-433) as `SPV_EXT_shader_invocation_reorder`'s instructions, since DXC lowers none of HLSL's to SPIR-V.
   Each instruction is a function of DXC's inline SPIR-V the text declares ahead of the entry point, and a hit object is `vk::SpirvOpaqueType<5313>`, SPIR-V's `OpTypeHitObjectEXT`.
   An instruction that hands a payload over takes a variable of the ray-payload storage class, one per payload type, which the call fills before and reads back after.
