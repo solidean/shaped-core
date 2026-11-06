@@ -132,21 +132,21 @@ COMMAND("emit")
         return exit_usage;
     }
 
-    auto const text = sgl::compile_to_text({.source = source.value(),
-                                            .source_name = path,
-                                            .library = sgl_tool::files_but(library.value(), path),
-                                            .entry_point = entry,
-                                            .target = target,
-                                            .options = options.value(),
-                                            .run_tests = run_tests,
-                                            .line_directives = line_directives,
-                                            .diagnostics = diagnostics,
-                                            .guards_undefined = guards_undefined,
-                                            .software_trace = software_trace,
-                                            .weakens_float = weaken_float,
-                                            .device_features = device_features,
-                                            .native = is_spirv ? sgl::emit::native_route::require
-                                                               : sgl::emit::native_route::text});
+    auto const text
+        = sgl::compile_to_text({.source = source.value(),
+                                .source_name = path,
+                                .library = sgl_tool::files_but(library.value(), path),
+                                .entry_point = entry,
+                                .target = target,
+                                .options = options.value(),
+                                .run_tests = run_tests,
+                                .line_directives = line_directives,
+                                .diagnostics = diagnostics,
+                                .guards_undefined = guards_undefined,
+                                .software_trace = software_trace,
+                                .weakens_float = weaken_float,
+                                .device_features = device_features,
+                                .native = is_spirv ? sgl::emit::native_route::require : sgl::emit::native_route::text});
     if (text.has_error())
     {
         cc::eprint(text.error());

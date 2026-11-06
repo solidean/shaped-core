@@ -6,6 +6,7 @@
 #include <clean-core/string/string_view.hh>
 #include <shaped-graphics-language/check/ids.hh>
 #include <shaped-graphics-language/check/symbols.hh>
+#include <shaped-graphics-language/fwd.hh>
 
 /// One entry point below the flat tree: typed operations in structured blocks, which each native target writes out.
 ///
@@ -18,21 +19,22 @@
 /// The float guarantee stands on each operation rather than on the entry point, so a guarantee can be narrower than a
 /// function without a change to this form.
 
-namespace sgl::ir
-{
-enum class type_ref : u32
+enum class sgl::ir::type_ref : sgl::u32
 {
     none = 0xffffffffu
 };
 /// A value of one of four tables, told apart by its top bits: an operation, a constant, a global or a local variable.
-enum class value_ref : u32
+enum class sgl::ir::value_ref : sgl::u32
 {
     none = 0xffffffffu
 };
-enum class block_ref : u32
+enum class sgl::ir::block_ref : sgl::u32
 {
     none = 0xffffffffu
 };
+
+namespace sgl::ir
+{
 
 inline constexpr u32 k_constant_bit = 0x80000000u;
 inline constexpr u32 k_global_bit = 0x40000000u;
@@ -80,7 +82,9 @@ inline constexpr u32 k_index_mask = 0x1fffffffu;
     return value_ref(i | k_local_bit);
 }
 
-enum class type_kind : u8
+} // namespace sgl::ir
+
+enum class sgl::ir::type_kind : sgl::u8
 {
     void_,
     bool_,
@@ -97,7 +101,7 @@ enum class type_kind : u8
     sampled_image,
 };
 
-enum class storage : u8
+enum class sgl::ir::storage : sgl::u8
 {
     function,
     workgroup,
@@ -110,7 +114,7 @@ enum class storage : u8
 };
 
 /// One member of a structure; `offset` and `matrix_stride` mean something where it stands in GPU memory.
-struct member
+struct sgl::ir::member
 {
     type_ref type = type_ref::none;
     /// -1 for a structure that is no memory.
@@ -122,7 +126,7 @@ struct member
     u32 name_size = 0;
 };
 
-struct type
+struct sgl::ir::type
 {
     type_kind kind = type_kind::void_;
     /// In bits, of an `int_` or a `float_`.
@@ -155,7 +159,7 @@ struct type
 };
 
 /// A math function, whose name every target knows differently.
-enum class math : u8
+enum class sgl::ir::math : sgl::u8
 {
     round_even,
     trunc,
@@ -215,7 +219,7 @@ enum class math : u8
 };
 
 /// What a subgroup operation does; the `sub` of `op::subgroup`.
-enum class subgroup : u8
+enum class sgl::ir::subgroup : sgl::u8
 {
     all,
     any,
@@ -244,7 +248,7 @@ enum class subgroup : u8
 };
 
 /// How a subgroup reduction folds: over the subgroup, up to and including this invocation, or up to it alone.
-enum class group_fold : u8
+enum class sgl::ir::group_fold : sgl::u8
 {
     none,
     reduce,
@@ -252,14 +256,14 @@ enum class group_fold : u8
     exclusive,
 };
 
-enum class barrier : u8
+enum class sgl::ir::barrier : sgl::u8
 {
     workgroup,
     storage,
     texture,
 };
 
-enum class op : u16
+enum class sgl::ir::op : sgl::u16
 {
     // ---- arithmetic: operands of one shape, and `guarantee` applies to the float ones
     fadd,
@@ -396,7 +400,7 @@ enum class op : u16
 };
 
 /// One operation; its position is the value it gives, where it gives one.
-struct instruction
+struct sgl::ir::instruction
 {
     op code = op::unreachable;
     /// What `code` says of it: a `math`, a `subgroup`, a `barrier`.
@@ -413,14 +417,14 @@ struct instruction
     u32 statement = 0xffffffffu;
 };
 
-enum class merge_kind : u8
+enum class sgl::ir::merge_kind : sgl::u8
 {
     none,
     selection,
     loop,
 };
 
-struct block
+struct sgl::ir::block
 {
     /// A range of `program::instructions`, whose last one is the terminator.
     u32 first = 0;
@@ -432,7 +436,7 @@ struct block
 };
 
 /// A scalar constant, its bits low word first, or zero or nothing of any type.
-struct constant
+struct sgl::ir::constant
 {
     type_ref type = type_ref::none;
     u32 low = 0;
@@ -442,7 +446,7 @@ struct constant
 };
 
 /// A variable outside the function: a resource, a block, workgroup memory or a stage input.
-struct global
+struct sgl::ir::global
 {
     /// The pointer's type.
     type_ref type = type_ref::none;
@@ -459,14 +463,13 @@ struct global
 };
 
 /// A variable of the function.
-struct local
+struct sgl::ir::local
 {
     /// The pointer's type.
     type_ref type = type_ref::none;
     u32 name_first = 0;
     u32 name_size = 0;
 };
-} // namespace sgl::ir
 
 /// One entry point, whole.
 struct sgl::ir::program

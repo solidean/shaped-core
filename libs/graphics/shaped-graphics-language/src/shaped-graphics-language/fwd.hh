@@ -400,6 +400,24 @@ struct options;
 namespace sgl::ir
 {
 struct program;
+enum class type_kind : u8;
+struct member;
+enum class op : u16;
+enum class storage : u8;
+struct type;
+enum class math : u8;
+enum class subgroup : u8;
+enum class group_fold : u8;
+enum class barrier : u8;
+struct instruction;
+enum class merge_kind : u8;
+struct block;
+struct constant;
+struct global;
+struct local;
+enum class type_ref : u32;
+enum class value_ref : u32;
+enum class block_ref : u32;
 } // namespace sgl::ir
 
 namespace sgl::builtins::texture

@@ -1,7 +1,7 @@
 #include <clean-core/common/assert.hh>
 #include <clean-core/container/byte_stream_builder.hh>
-#include <clean-core/string/format.hh>
 #include <clean-core/container/pinned_data.hh>
+#include <clean-core/string/format.hh>
 #include <clean-core/thread/async.hh> // sg::async_compiled_shader is a cc::shared_async
 #include <shaped-graphics-language/check/resources.hh>
 #include <shaped-graphics-language/driver/compile_to_text.hh>
@@ -209,9 +209,8 @@ public:
                                                  .version = cc::string(sgl::compiler_fingerprint()),
                                                  .signature = cc::string("spirv")}});
         if (_inner == nullptr)
-            return cc::make_async_from_error<sg::compiled_shader>(cc::async_error::make_error(cc::any_error(
-                cc::format("'{}' has no SPIR-V of SGL's own, and this build has no DXC to compile its text",
-                           desc.entry_point))));
+            return cc::make_async_from_error<sg::compiled_shader>(cc::async_error::make_error(cc::any_error(cc::format(
+                "'{}' has no SPIR-V of SGL's own, and this build has no DXC to compile its text", desc.entry_point))));
         // EMIT-4: what the emitted text needs of the compiler that builds it, whoever wired that compiler
         auto inner = desc;
         if (_target == sgl::emit::target::hlsl_dx12 || _target == sgl::emit::target::hlsl_vulkan)

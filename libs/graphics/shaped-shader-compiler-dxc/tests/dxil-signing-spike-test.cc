@@ -1,10 +1,8 @@
 #include <clean-core/record/log.hh>
 #include <clean-core/string/format.hh>
 #include <nexus/test.hh>
-#include <shaped-graphics/backends/dx12/dx12_context.hh>
+#include <shaped-graphics/backends/dx12/dx12_common.hh>
 #include <shaped-shader-compiler-dxc/compiler.hh>
-
-#include <d3d12.h>
 
 using namespace cc::primitive_defines;
 
@@ -20,7 +18,8 @@ constexpr auto k_digest_size = isize(16);
 [[nodiscard]] HRESULT pipeline_of(ID3D12Device* device, ID3D12RootSignature* root, cc::span<byte const> shader)
 {
     auto const desc = D3D12_COMPUTE_PIPELINE_STATE_DESC{
-        .pRootSignature = root, .CS = {.pShaderBytecode = shader.data(), .BytecodeLength = SIZE_T(shader.size())}};
+        .pRootSignature = root,
+        .CS = {.pShaderBytecode = shader.data(), .BytecodeLength = SIZE_T(shader.size())}};
     ID3D12PipelineState* pipeline = nullptr;
     auto const result = device->CreateComputePipelineState(&desc, IID_PPV_ARGS(&pipeline));
     if (pipeline != nullptr)
@@ -33,8 +32,9 @@ TEST("dxil signing spike - which containers D3D12 takes", nx::config::manual)
 {
     auto compiler = ssc::dxc::compiler::create();
     REQUIRE(compiler.has_value());
-    constexpr auto source = "RWStructuredBuffer<uint> values : register(u0);\n"
-                            "[numthreads(4, 1, 1)] void main(uint3 id : SV_DispatchThreadID) { values[id.x] = id.x; }\n";
+    constexpr auto source
+        = "RWStructuredBuffer<uint> values : register(u0);\n"
+          "[numthreads(4, 1, 1)] void main(uint3 id : SV_DispatchThreadID) { values[id.x] = id.x; }\n";
     auto signed_shader = compiler.value().compile({.source = source}, {});
     REQUIRE(signed_shader.has_value());
     auto unsigned_shader = compiler.value().compile({.source = source}, {.extra_args = {cc::string("-Vd")}});
@@ -56,8 +56,8 @@ TEST("dxil signing spike - which containers D3D12 takes", nx::config::manual)
     ID3DBlob* blob = nullptr;
     REQUIRE(SUCCEEDED(D3D12SerializeRootSignature(&described, D3D_ROOT_SIGNATURE_VERSION_1, &blob, nullptr)));
     ID3D12RootSignature* root = nullptr;
-    REQUIRE(SUCCEEDED(
-        device->CreateRootSignature(0, blob->GetBufferPointer(), blob->GetBufferSize(), IID_PPV_ARGS(&root))));
+    REQUIRE(
+        SUCCEEDED(device->CreateRootSignature(0, blob->GetBufferPointer(), blob->GetBufferSize(), IID_PPV_ARGS(&root))));
 
     auto const report = [&](cc::string_view name, cc::span<byte const> shader)
     {

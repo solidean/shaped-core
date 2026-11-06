@@ -118,7 +118,8 @@ void lowering::branch_if(value_ref condition, block_ref yes, block_ref no)
 void lowering::run()
 {
     if (_e.entry_stage != stage::compute)
-        return unsupported(cc::format("a {} entry point, of which only compute is lowered yet", stage_name(_e.entry_stage)));
+        return unsupported(
+            cc::format("a {} entry point, of which only compute is lowered yet", stage_name(_e.entry_stage)));
     // EMIT-229: the prologue that clears workgroup memory
     if (_e.written_words > 0 || _e.zeroes_workgroup)
         return unsupported("the workgroup prologue of a robustness profile");
@@ -165,8 +166,8 @@ void lowering::declare_stage_inputs()
         // the target hands every one over unsigned, and the program reads it as it declared it
         auto const lanes = lanes_of(declared);
         auto const raw = lanes == 1 ? _uint : vector_type(_uint, lanes);
-        auto const global_ref = add_global({.type = pointer_type(raw, storage::input), .built_in = built_in},
-                                           _plan.stage_input_names[i]);
+        auto const global_ref
+            = add_global({.type = pointer_type(raw, storage::input), .built_in = built_in}, _plan.stage_input_names[i]);
         auto const loaded = add(op::load, raw, {global_ref});
         _locals[index_of(input.local)] = raw == declared ? loaded : add(op::bitcast, declared, {loaded});
     }
@@ -186,28 +187,23 @@ void lowering::statement(flat_stmt_id id)
 {
     auto const& s = _e.at(id);
     _statement = u32(index_of(id));
-    s.node.visit([&](flat_let const& let) { declare(let.local, let.value, _e.at(let.local).is_mut); },
-                 [&](flat_var const& var) { declare(var.local, var.value, true); },
-                 [&](flat_assign const& a) { assign(a); },
-                 [&](flat_print const&) { unsupported("a print, which needs sg's debug window"); },
-                 [&](flat_eval const& v) { (void)expr(v.value); }, //
-                 [&](flat_if const& i) { if_(i); },
-                 [&](flat_loop const& l) { loop_(l); }, //
-                 [&](flat_while const& w) { while_(w); },
-                 [&](flat_for const& f) { for_(f); }, //
-                 [&](flat_continue const&) { branch(_continues.back()); },
-                 [&](flat_discard const&) { unsupported("a discard, in a stage that is not lowered yet"); },
-                 [&](flat_once const& o) { once_(o); }, //
-                 [&](flat_break const&) { branch(_breaks.back()); },
-                 [&](flat_switch const& sw) { switch_(sw); },
-                 [&](flat_return const& r)
-                 {
-                     if (is_valid(r.value))
-                         return unsupported("a return with a value");
-                     add(op::return_, type_ref::none, cc::span<u32 const>());
-                 },
-                 // none of these is in a core tree
-                 [&](flat_block const&) {}, [&](flat_leave const&) {}, [&](flat_case const&) {}, [&](flat_check const&) {});
+    s.node.visit(
+        [&](flat_let const& let) { declare(let.local, let.value, _e.at(let.local).is_mut); }, [&](flat_var const& var)
+        { declare(var.local, var.value, true); }, [&](flat_assign const& a) { assign(a); }, [&](flat_print const&)
+        { unsupported("a print, which needs sg's debug window"); }, [&](flat_eval const& v) { (void)expr(v.value); }, //
+        [&](flat_if const& i) { if_(i); }, [&](flat_loop const& l) { loop_(l); },                                     //
+        [&](flat_while const& w) { while_(w); }, [&](flat_for const& f) { for_(f); },                                 //
+        [&](flat_continue const&) { branch(_continues.back()); }, [&](flat_discard const&)
+        { unsupported("a discard, in a stage that is not lowered yet"); }, [&](flat_once const& o) { once_(o); }, //
+        [&](flat_break const&) { branch(_breaks.back()); }, [&](flat_switch const& sw) { switch_(sw); },
+        [&](flat_return const& r)
+        {
+            if (is_valid(r.value))
+                return unsupported("a return with a value");
+            add(op::return_, type_ref::none, cc::span<u32 const>());
+        },
+        // none of these is in a core tree
+        [&](flat_block const&) {}, [&](flat_leave const&) {}, [&](flat_case const&) {}, [&](flat_check const&) {});
 }
 
 void lowering::if_(flat_if const& s)
@@ -370,8 +366,8 @@ void lowering::switch_(flat_switch const& s)
             auto const* const named = _e.at(pattern).node.try_as<flat_enum_value>();
             if (value == nullptr && named == nullptr)
                 return unsupported("a switch pattern that is no literal");
-            auto const raw = value != nullptr ? value->value
-                                              : _m.at(_m.at(_e.at(pattern).type).cases)[named->case_index].value;
+            auto const raw
+                = value != nullptr ? value->value : _m.at(_m.at(_e.at(pattern).type).cases)[named->case_index].value;
             operands.push_back(u32(raw));
             operands.push_back(u32(b));
         }

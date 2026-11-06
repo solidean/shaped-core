@@ -367,10 +367,10 @@ sgl::emit::emitted_text sgl::emit::emit_entry_point(check::checked_module const&
             result.native_gap = gap.value();
         else
         {
-            result.errors.push_back({.kind = error_kind::unsupported,
-                                     .symbol = e.function,
-                                     .detail = cc::format("{} holds {}, which the SPIR-V route does not lower yet",
-                                                          e.name, gap.value())});
+            result.errors.push_back(
+                {.kind = error_kind::unsupported,
+                 .symbol = e.function,
+                 .detail = cc::format("{} holds {}, which the SPIR-V route does not lower yet", e.name, gap.value())});
             return result;
         }
     }

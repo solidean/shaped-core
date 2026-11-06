@@ -3,7 +3,8 @@
 How SGL compares with the other ways to write one set of shaders for DX12, Vulkan, WebGPU and Metal.
 Every row is judged for a renderer that targets all four, WebGPU in a browser included, and wants hardware ray tracing wherever a platform has it.
 
-**As of 2026-11-02**; SGL's E3 and E4 as of 2026-11-03, its A7, B2, B3, B6, D3, E4, F7 and G5 as of 2026-11-05, its A5, A8, B4, B8, B9, B10, B11, B12, D5, D6, D7, E1, F2, F3, F4 and G6 as of 2026-11-06.
+**As of 2026-11-02**; SGL's E3 and E4 as of 2026-11-03, its A7, B2, B3, B6, D3, E4, F7 and G5 as of 2026-11-05.
+Its A5, A8, B4, B8, B9, B10, B11, B12, D5, D6, D7, E1, F2, F3, F4 and G6 as of 2026-11-06.
 Every cell's marker was judged again on 2026-11-05, when ✅ came to mean full support to the extent the targets allow.
 Where a stack lets a program choose defined behaviour on every target, as SGL's robustness profiles do, its semantics rows are ✅ though the default leaves a case undefined.
 The other columns move fast, Slang's Metal and WGSL support above all, so each cell carries a source and the date it was checked; see [Sources](#sources).

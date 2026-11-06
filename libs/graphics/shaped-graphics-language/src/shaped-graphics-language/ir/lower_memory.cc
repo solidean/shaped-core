@@ -166,7 +166,8 @@ type_ref lowering::value_type(type_id t)
                 unsupported(cc::format("the type {}", _m.name_of(t)));
                 break;
             }
-            auto const declared = cc::vector<member_info>::create_copy_of(cc::span<member_info const>(_m.at(info.members)));
+            auto const declared
+                = cc::vector<member_info>::create_copy_of(cc::span<member_info const>(_m.at(info.members)));
             auto parts = cc::vector<ir::member>();
             for (auto const& m : declared)
             {
@@ -237,8 +238,8 @@ type_ref lowering::memory_type(type_id t, address_space space)
                 continue;
             auto part = memory_type(m.type, space);
             // an array member strides as its place says, which a member's own padding may widen
-            if (auto const& held = _m.at(m.type); _m.builtin_type_of(m.type) == nullptr
-                                                  && held.kind == check::type_kind::array && held.count > 0)
+            if (auto const& held = _m.at(m.type);
+                _m.builtin_type_of(m.type) == nullptr && held.kind == check::type_kind::array && held.count > 0)
                 part = array_type(memory_type(held.element, space), u32(held.count), placed.sizes[i] / held.count);
             auto const name_first = add_name(m.name);
             parts.push_back({.type = part,
@@ -307,9 +308,8 @@ value_ref lowering::add_global(global g, cc::string_view name)
 value_ref lowering::add_local(type_ref value, cc::string_view name)
 {
     auto const name_first = add_name(name);
-    _out.locals.push_back({.type = pointer_type(value, storage::function),
-                           .name_first = name_first,
-                           .name_size = u32(name.size())});
+    _out.locals.push_back(
+        {.type = pointer_type(value, storage::function), .name_first = name_first, .name_size = u32(name.size())});
     return local_at(u32(_out.locals.size() - 1));
 }
 
@@ -323,8 +323,9 @@ value_ref lowering::bound_block(emit::impl::planned_constants const& block)
     auto& known = is_inline ? _constants_global : _block_globals[index];
     if (ir::is_valid(known))
         return known;
-    auto const is_packed = block.symbol != symbol_id::none
-                        && emit::impl::block_space(_m.bindings[_m.at(block.symbol).info]) == address_space::packed_constants;
+    auto const is_packed
+        = block.symbol != symbol_id::none
+       && emit::impl::block_space(_m.bindings[_m.at(block.symbol).info]) == address_space::packed_constants;
     auto const space = is_packed ? address_space::packed_constants : address_space::constants;
     auto const pointee = block_of_members(block.block_name, block.members, space);
     known = add_global({.type = pointer_type(pointee, is_inline ? storage::push_constant : storage::uniform),
@@ -386,7 +387,8 @@ value_ref lowering::bound_resource(i32 index)
         return value_ref::none;
     }
     auto const is_image = info.kind == check::type_kind::image;
-    auto const writes = (info.kind != check::type_kind::image && r.is_mut) || (is_image && info.access != access_mode::read);
+    auto const writes
+        = (info.kind != check::type_kind::image && r.is_mut) || (is_image && info.access != access_mode::read);
     known = add_global({.type = pointer_type(pointee, space),
                         .set = r.group,
                         .binding = r.slot,

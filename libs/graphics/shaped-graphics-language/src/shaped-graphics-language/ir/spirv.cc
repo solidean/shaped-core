@@ -266,113 +266,183 @@ struct format_number
     bool is_extended;
 };
 constexpr format_number k_formats[] = {
-    {"rgba32f", 1, false},   {"rgba16f", 2, false},    {"r32f", 3, false},       {"rgba8", 4, false},
-    {"rgba8snorm", 5, false}, {"rg32f", 6, true},      {"rg16f", 7, true},       {"r11g11b10f", 8, true},
-    {"r16f", 9, true},       {"rgb10a2", 11, true},    {"rg8", 13, true},        {"r8", 15, true},
-    {"rg8snorm", 18, true},  {"r8snorm", 20, true},    {"rgba32i", 21, false},   {"rgba16i", 22, false},
-    {"rgba8i", 23, false},   {"r32i", 24, false},      {"rg32i", 25, true},      {"rg16i", 26, true},
-    {"rg8i", 27, true},      {"r16i", 28, true},       {"r8i", 29, true},        {"rgba32ui", 30, false},
-    {"rgba16ui", 31, false}, {"rgba8ui", 32, false},   {"r32ui", 33, false},     {"rg32ui", 35, true},
-    {"rg16ui", 36, true},    {"rg8ui", 37, true},      {"r16ui", 38, true},      {"r8ui", 39, true},
+    {"rgba32f", 1, false},    {"rgba16f", 2, false},  {"r32f", 3, false},     {"rgba8", 4, false},
+    {"rgba8snorm", 5, false}, {"rg32f", 6, true},     {"rg16f", 7, true},     {"r11g11b10f", 8, true},
+    {"r16f", 9, true},        {"rgb10a2", 11, true},  {"rg8", 13, true},      {"r8", 15, true},
+    {"rg8snorm", 18, true},   {"r8snorm", 20, true},  {"rgba32i", 21, false}, {"rgba16i", 22, false},
+    {"rgba8i", 23, false},    {"r32i", 24, false},    {"rg32i", 25, true},    {"rg16i", 26, true},
+    {"rg8i", 27, true},       {"r16i", 28, true},     {"r8i", 29, true},      {"rgba32ui", 30, false},
+    {"rgba16ui", 31, false},  {"rgba8ui", 32, false}, {"r32ui", 33, false},   {"rg32ui", 35, true},
+    {"rg16ui", 36, true},     {"rg8ui", 37, true},    {"r16ui", 38, true},    {"r8ui", 39, true},
 };
 
 /// The opcode of an operation whose words are only its result and its operands, or 0.
 [[nodiscard]] constexpr u32 plain_opcode(ir::op code)
 {
-    using enum ir::op;
     switch (code)
     {
-    case fadd: return spv::FAdd;
-    case fsub: return spv::FSub;
-    case fmul: return spv::FMul;
-    case fdiv: return spv::FDiv;
-    case frem: return spv::FRem;
-    case fneg: return spv::FNegate;
-    case iadd: return spv::IAdd;
-    case isub: return spv::ISub;
-    case imul: return spv::IMul;
-    case sdiv: return spv::SDiv;
-    case udiv: return spv::UDiv;
-    case srem: return spv::SRem;
-    case urem: return spv::UMod;
-    case ineg: return spv::SNegate;
-    case bit_and: return spv::BitwiseAnd;
-    case bit_or: return spv::BitwiseOr;
-    case bit_xor: return spv::BitwiseXor;
-    case bit_not: return spv::Not;
-    case bit_reverse: return spv::BitReverse;
-    case bit_count: return spv::BitCount;
-    case shift_left: return spv::ShiftLeftLogical;
-    case shift_right_logical: return spv::ShiftRightLogical;
-    case shift_right_arithmetic: return spv::ShiftRightArithmetic;
-    case feq: return spv::FOrdEqual;
-    case fne: return spv::FUnordNotEqual;
-    case flt: return spv::FOrdLessThan;
-    case fle: return spv::FOrdLessThanEqual;
-    case fgt: return spv::FOrdGreaterThan;
-    case fge: return spv::FOrdGreaterThanEqual;
-    case is_nan: return spv::IsNan;
-    case is_inf: return spv::IsInf;
-    case ieq: return spv::IEqual;
-    case ine: return spv::INotEqual;
-    case slt: return spv::SLessThan;
-    case sle: return spv::SLessThanEqual;
-    case sgt: return spv::SGreaterThan;
-    case sge: return spv::SGreaterThanEqual;
-    case ult: return spv::ULessThan;
-    case ule: return spv::ULessThanEqual;
-    case ugt: return spv::UGreaterThan;
-    case uge: return spv::UGreaterThanEqual;
-    case logical_and: return spv::LogicalAnd;
-    case logical_or: return spv::LogicalOr;
-    case logical_not: return spv::LogicalNot;
-    case logical_eq: return spv::LogicalEqual;
-    case logical_ne: return spv::LogicalNotEqual;
-    case any: return spv::Any;
-    case all: return spv::All;
-    case select: return spv::Select;
-    case f_to_s: return spv::ConvertFToS;
-    case f_to_u: return spv::ConvertFToU;
-    case s_to_f: return spv::ConvertSToF;
-    case u_to_f: return spv::ConvertUToF;
-    case f_resize: return spv::FConvert;
-    case s_resize: return spv::SConvert;
-    case u_resize: return spv::UConvert;
-    case bitcast: return spv::Bitcast;
-    case copy_logical: return spv::CopyLogical;
-    case dot: return spv::Dot;
-    case vector_times_scalar: return spv::VectorTimesScalar;
-    case matrix_times_scalar: return spv::MatrixTimesScalar;
-    case matrix_times_vector: return spv::MatrixTimesVector;
-    case matrix_times_matrix: return spv::MatrixTimesMatrix;
-    case transpose: return spv::Transpose;
-    case construct: return spv::CompositeConstruct;
-    case load: return spv::Load;
-    case access_chain: return spv::AccessChain;
-    case combine_sampler: return spv::SampledImage;
-    case image_read: return spv::ImageRead;
-    case image_levels: return spv::ImageQueryLevels;
-    case image_samples: return spv::ImageQuerySamples;
-    default: return 0;
+    case op::fadd:
+        return spv::FAdd;
+    case op::fsub:
+        return spv::FSub;
+    case op::fmul:
+        return spv::FMul;
+    case op::fdiv:
+        return spv::FDiv;
+    case op::frem:
+        return spv::FRem;
+    case op::fneg:
+        return spv::FNegate;
+    case op::iadd:
+        return spv::IAdd;
+    case op::isub:
+        return spv::ISub;
+    case op::imul:
+        return spv::IMul;
+    case op::sdiv:
+        return spv::SDiv;
+    case op::udiv:
+        return spv::UDiv;
+    case op::srem:
+        return spv::SRem;
+    case op::urem:
+        return spv::UMod;
+    case op::ineg:
+        return spv::SNegate;
+    case op::bit_and:
+        return spv::BitwiseAnd;
+    case op::bit_or:
+        return spv::BitwiseOr;
+    case op::bit_xor:
+        return spv::BitwiseXor;
+    case op::bit_not:
+        return spv::Not;
+    case op::bit_reverse:
+        return spv::BitReverse;
+    case op::bit_count:
+        return spv::BitCount;
+    case op::shift_left:
+        return spv::ShiftLeftLogical;
+    case op::shift_right_logical:
+        return spv::ShiftRightLogical;
+    case op::shift_right_arithmetic:
+        return spv::ShiftRightArithmetic;
+    case op::feq:
+        return spv::FOrdEqual;
+    case op::fne:
+        return spv::FUnordNotEqual;
+    case op::flt:
+        return spv::FOrdLessThan;
+    case op::fle:
+        return spv::FOrdLessThanEqual;
+    case op::fgt:
+        return spv::FOrdGreaterThan;
+    case op::fge:
+        return spv::FOrdGreaterThanEqual;
+    case op::is_nan:
+        return spv::IsNan;
+    case op::is_inf:
+        return spv::IsInf;
+    case op::ieq:
+        return spv::IEqual;
+    case op::ine:
+        return spv::INotEqual;
+    case op::slt:
+        return spv::SLessThan;
+    case op::sle:
+        return spv::SLessThanEqual;
+    case op::sgt:
+        return spv::SGreaterThan;
+    case op::sge:
+        return spv::SGreaterThanEqual;
+    case op::ult:
+        return spv::ULessThan;
+    case op::ule:
+        return spv::ULessThanEqual;
+    case op::ugt:
+        return spv::UGreaterThan;
+    case op::uge:
+        return spv::UGreaterThanEqual;
+    case op::logical_and:
+        return spv::LogicalAnd;
+    case op::logical_or:
+        return spv::LogicalOr;
+    case op::logical_not:
+        return spv::LogicalNot;
+    case op::logical_eq:
+        return spv::LogicalEqual;
+    case op::logical_ne:
+        return spv::LogicalNotEqual;
+    case op::any:
+        return spv::Any;
+    case op::all:
+        return spv::All;
+    case op::select:
+        return spv::Select;
+    case op::f_to_s:
+        return spv::ConvertFToS;
+    case op::f_to_u:
+        return spv::ConvertFToU;
+    case op::s_to_f:
+        return spv::ConvertSToF;
+    case op::u_to_f:
+        return spv::ConvertUToF;
+    case op::f_resize:
+        return spv::FConvert;
+    case op::s_resize:
+        return spv::SConvert;
+    case op::u_resize:
+        return spv::UConvert;
+    case op::bitcast:
+        return spv::Bitcast;
+    case op::copy_logical:
+        return spv::CopyLogical;
+    case op::dot:
+        return spv::Dot;
+    case op::vector_times_scalar:
+        return spv::VectorTimesScalar;
+    case op::matrix_times_scalar:
+        return spv::MatrixTimesScalar;
+    case op::matrix_times_vector:
+        return spv::MatrixTimesVector;
+    case op::matrix_times_matrix:
+        return spv::MatrixTimesMatrix;
+    case op::transpose:
+        return spv::Transpose;
+    case op::construct:
+        return spv::CompositeConstruct;
+    case op::load:
+        return spv::Load;
+    case op::access_chain:
+        return spv::AccessChain;
+    case op::combine_sampler:
+        return spv::SampledImage;
+    case op::image_read:
+        return spv::ImageRead;
+    case op::image_levels:
+        return spv::ImageQueryLevels;
+    case op::image_samples:
+        return spv::ImageQuerySamples;
+    default:
+        return 0;
     }
 }
 
 [[nodiscard]] constexpr bool keeps_contraction(ir::op code)
 {
-    using enum ir::op;
     switch (code)
     {
-    case fadd:
-    case fsub:
-    case fmul:
-    case fdiv:
-    case frem:
-    case fneg:
-    case vector_times_scalar:
-    case matrix_times_scalar:
-    case matrix_times_vector:
-    case matrix_times_matrix:
-    case dot:
+    case op::fadd:
+    case op::fsub:
+    case op::fmul:
+    case op::fdiv:
+    case op::frem:
+    case op::fneg:
+    case op::vector_times_scalar:
+    case op::matrix_times_scalar:
+    case op::matrix_times_vector:
+    case op::matrix_times_matrix:
+    case op::dot:
         return true;
     default:
         return false;
@@ -918,8 +988,9 @@ private:
                          literal_id(semantics)});
         }
         case op::sample_lod:
-            return emit(_code, spv::ImageSampleExplicitLod,
-                        {id_of(i.type), id, id_of_raw(operands[0]), id_of_raw(operands[1]), 0x2u, id_of_raw(operands[2])});
+            return emit(
+                _code, spv::ImageSampleExplicitLod,
+                {id_of(i.type), id, id_of_raw(operands[0]), id_of_raw(operands[1]), 0x2u, id_of_raw(operands[2])});
         case op::image_fetch:
             return emit(_code, spv::ImageFetch,
                         {id_of(i.type), id, id_of_raw(operands[0]), id_of_raw(operands[1]), i.aux != 0 ? 0x40u : 0x2u,
