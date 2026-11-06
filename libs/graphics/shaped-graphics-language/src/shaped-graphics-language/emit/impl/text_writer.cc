@@ -1360,8 +1360,9 @@ struct writer
     }
 
     /// EMIT-139: the per-instance hit-group offsets of the acceleration structure `id` names, which sg's metal backend
-    /// mirrors slot for slot beside each group's argument buffer: `hit_offsets->groups[group][slot + element]`.
-    /// Empty where `id` is no acceleration-structure member, or an element of one.
+    /// mirrors slot for slot in the tail of each group's argument buffer: `hit_offsets->groups[group][slot + element]`.
+    /// Empty where `id` is no acceleration structure; one is always a member or an element of one, since the checker
+    /// refuses an acceleration structure as a value and inlining hands a parameter on as its member.
     cc::string hit_offsets_of(flat_expr_id id)
     {
         if (p.m.at(p.e.at(id).type).kind != type_kind::acceleration_structure)
@@ -1376,7 +1377,8 @@ struct writer
         auto const* const member = p.e.at(named).node.try_as<flat_binding_member>();
         auto const found = member != nullptr ? resource_of(p, member->binding, member->member) : -1;
         if (found < 0)
-            return {};
+            CC_UNREACHABLE("every acceleration structure a trace names is a member the plan placed, or an element of "
+                           "one");
         auto const& r = p.resources[found];
         return cc::format("sgl_ctx.hit_offsets->groups[{}][{}{}].instances", r.group, r.slot, element);
     }

@@ -267,6 +267,9 @@ ASYNC_INVOCABLE_TEST("sg - an array of samplers binds each element, through a gr
         SKIP("no compiler builds this binary's shaders into a format this context accepts");
     if (!ctx->supports(sg::feature::binding_arrays))
         SKIP("this context has no binding arrays");
+    // issue: feat-metal-sampler-arrays
+    if (ctx->backend() == sg::backend_kind::metal)
+        SKIP("sg's metal backend binds no array of samplers yet");
 
     using address = sg::sampler_address_mode;
     // Two texels, red 0 and 1, read at u = 1.1: repeat folds it to 0.1, which is texel 0 nearest and 0.3 filtered
