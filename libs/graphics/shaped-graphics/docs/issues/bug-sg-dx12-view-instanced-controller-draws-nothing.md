@@ -5,6 +5,8 @@ tags: [xr, dx12]
 refs:
   - test: shaped-xr session - a hand is drawn where its pose puts it, on dx12
   - file: libs/graphics/shaped-xr/shaders/controller.sgl
+claimed-by: Claude (for Philip)
+claimed-at: 2026-11-06T13:27Z
 ---
 
 # A view-dependent position draws nothing through sxr::controller_routine on dx12
