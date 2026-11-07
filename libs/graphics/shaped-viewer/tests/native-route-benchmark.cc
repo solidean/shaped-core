@@ -244,7 +244,7 @@ ASYNC_BENCHMARK("sv - the tracers through SGL's own binary against its text thro
 {
     if (!sv_test::shared_env().has_compiler)
         SKIP("no SGL compiler for this backend to build the path-tracing shaders");
-    auto text = sg::create_dx12_context({.adapter = sg::backend::dx12::dx12_adapter::hardware});
+    auto text = sg::create_dx12_context({.native_dxil = false, .adapter = sg::backend::dx12::dx12_adapter::hardware});
     auto native = sg::create_dx12_context({.native_dxil = true, .adapter = sg::backend::dx12::dx12_adapter::hardware});
     if (text.has_error() || native.has_error())
         SKIP("no dx12 hardware device");
@@ -259,7 +259,7 @@ ASYNC_BENCHMARK("sv - the tracers through SGL's own binary against its text thro
 {
     if (!sv_test::shared_env().has_compiler)
         SKIP("no SGL compiler for this backend to build the path-tracing shaders");
-    auto text = sg::create_vulkan_context({});
+    auto text = sg::create_vulkan_context({.native_spirv = false});
     auto native = sg::create_vulkan_context({.native_spirv = true});
     if (text.has_error() || native.has_error())
         SKIP("no vulkan device");

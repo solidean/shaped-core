@@ -56,6 +56,24 @@ Native over DXC, GPU time on the Arc B580: the median of three processes, in eac
 
 Of the wavefront's kernels on dx12, only shade read high in both sets, 1.20 and 1.19, and connect went from 1.26 before to 0.96 and 1.02.
 
+The same benchmarks on the Radeon iGPU of a Ryzen 9 9950X3D2 (RDNA 2, driver 32.0.21042.62), `SC_GPU=amd`, the median of three processes:
+
+| what | dx12 | vulkan |
+|---|---:|---:|
+| à-trous, one dispatch | 0.997 | 1.000 |
+| SVGF filter, one dispatch | 1.011 | 1.001 |
+| convolution, one dispatch | **1.032** | 0.984 |
+| megakernel, one frame | 0.842 | 1.029 |
+| wavefront, one frame | 1.019 | 0.890 |
+
+Every ratio repeated to the third decimal in all three processes, so the AMD GPU shows none of the B580's speed modes.
+The convolution on dx12 is just past the bar, the one exception there, and the megakernel on vulkan just inside it.
+Neither has been diagnosed; the convolution's opposite sign on vulkan says the gap is the DXIL rather than the kernel.
+
+**Both benchmarks need the text route asked for by name.**
+Once the native route became each context's default, a context left at its defaults ran SGL's binary on both sides, and every ratio read 1.000.
+The AMD numbers above are from after that was fixed; the B580's are from before the default changed.
+
 "Before" is main at 35d0f1dba on dx12; on vulkan it already has the first fix below, which was in before the first vulkan run.
 Native's vulkan frame is a fifth faster than DXC's, and its extend, segment and sort read under half of DXC's in both sets.
 A difference that large is a question about what the two modules trace rather than a win, and it is open.

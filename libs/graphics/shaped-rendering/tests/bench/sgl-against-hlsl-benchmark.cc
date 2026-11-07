@@ -493,7 +493,7 @@ ASYNC_BENCHMARK("sr - SGL's own DXIL computes what its text through DXC computes
 // is held to (libs/graphics/shaped-graphics-language/docs/native-parity.md).
 ASYNC_BENCHMARK("sr - SGL's own binary against its text through DXC, GPU time per dispatch, on dx12")
 {
-    auto created = sg::create_dx12_context({.adapter = sg::backend::dx12::dx12_adapter::hardware});
+    auto created = sg::create_dx12_context({.native_dxil = false, .adapter = sg::backend::dx12::dx12_adapter::hardware});
     if (created.has_error())
         SKIP("no dx12 hardware device");
     co_await compare_on(*created.value(), nullptr, pairing::text_against_native);
@@ -502,7 +502,7 @@ ASYNC_BENCHMARK("sr - SGL's own binary against its text through DXC, GPU time pe
 #if SR_BENCH_HAS_VULKAN
 ASYNC_BENCHMARK("sr - SGL's own binary against its text through DXC, GPU time per dispatch, on vulkan")
 {
-    auto created = sg::create_vulkan_context({});
+    auto created = sg::create_vulkan_context({.native_spirv = false});
     if (created.has_error())
         SKIP("no vulkan device");
     co_await compare_on(*created.value(), nullptr, pairing::text_against_native);
