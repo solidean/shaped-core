@@ -489,7 +489,7 @@ ASYNC_BENCHMARK("sr - SGL's own DXIL computes what its text through DXC computes
 }
 
 // One SGL source, its text through DXC against SGL's own binary, interleaved on one device: the parity the native route
-// is held to (docs/native-parity.md).
+// is held to (libs/graphics/shaped-graphics-language/docs/native-parity.md).
 ASYNC_BENCHMARK("sr - SGL's own binary against its text through DXC, GPU time per dispatch, on dx12")
 {
     auto created = sg::create_dx12_context({.adapter = sg::backend::dx12::dx12_adapter::hardware});

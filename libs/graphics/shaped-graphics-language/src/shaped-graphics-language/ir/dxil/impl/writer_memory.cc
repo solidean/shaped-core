@@ -547,8 +547,8 @@ ll_value writer::linear_of(value_ref v, u32& added, int depth)
 
 ll_value writer::raw_address(place const& p, u32 offset)
 {
-    auto const word = p.index_bytes != ll_value::none ? p.index_bytes
-                                                       : _m.binary(binary_op::mul, p.index, _m.constant_i32(4));
+    auto const word
+        = p.index_bytes != ll_value::none ? p.index_bytes : _m.binary(binary_op::mul, p.index, _m.constant_i32(4));
     if (p.dynamic == ll_value::none && offset == 0)
         return word;
     return _m.binary(binary_op::add, word, byte_offset(p, offset));

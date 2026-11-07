@@ -112,8 +112,8 @@ void module_builder::merge_buffer_loads(u32 opcode)
         auto const v = ll_value(raw);
         return v != ll_value::none && !ll_is_constant(v) && !ll_is_global(v);
     };
-    auto const known = [&](u32 raw, u64& bits)
-    { return !ll_is_argument(ll_value(raw)) && constant_bits(ll_value(raw), bits); };
+    auto const known
+        = [&](u32 raw, u64& bits) { return !ll_is_argument(ll_value(raw)) && constant_bits(ll_value(raw), bits); };
     auto const is_undefined = [&](u32 raw)
     {
         auto const v = ll_value(raw);
@@ -153,7 +153,8 @@ void module_builder::merge_buffer_loads(u32 opcode)
         {
             auto const from = _args[inst.first];
             if (is_result(from))
-                lanes_read[ll_index(ll_value(from))] = cc::max(lanes_read[ll_index(ll_value(from))], _args[inst.first + 1] + 1);
+                lanes_read[ll_index(ll_value(from))]
+                    = cc::max(lanes_read[ll_index(ll_value(from))], _args[inst.first + 1] + 1);
             continue;
         }
         for_each_value(const_cast<inst_entry&>(inst),

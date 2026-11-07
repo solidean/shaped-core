@@ -917,10 +917,8 @@ private:
             if (!_visited[isize(b)])
             {
                 auto const& last = _p.instructions[block.first + block.count - 1];
-                instructions.push_back({.code = op::unreachable,
-                                        .first = u32(operands.size()),
-                                        .count = 0,
-                                        .statement = last.statement});
+                instructions.push_back(
+                    {.code = op::unreachable, .first = u32(operands.size()), .count = 0, .statement = last.statement});
                 blocks[isize(b)].first = start;
                 blocks[isize(b)].count = 1;
                 blocks[isize(b)].merges = merge_kind::none;

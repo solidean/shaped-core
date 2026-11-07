@@ -8,7 +8,7 @@
     uv run libs/graphics/shaped-graphics-language/tools/native-parity.py table [filter]
     uv run libs/graphics/shaped-graphics-language/tools/native-parity.py diff <file.sgl> <entry> <cs|vs|ps|lib>
 
-`table` prints docs/native-parity.md's size table over the repo's real shaders.
+`table` prints libs/graphics/shaped-graphics-language/docs/native-parity.md's size table over the repo's real shaders.
 `diff` prints one entry's opcode histogram difference, and leaves both binaries and their disassemblies in --out.
 It needs sgl built (`uv run dev.py build -t sgl`) and DXC fetched; it runs on Windows, where DXC's validator is.
 DXC gets slib's own arguments, so its side is what a context of the text route builds.

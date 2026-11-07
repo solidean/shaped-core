@@ -62,10 +62,9 @@ private:
             }
             auto const read = _p.operands_of(_p.instructions[lane]);
             auto const whole = read[0];
-            auto const is_vector
-                = is_operation(value_ref(whole)) ? _p.instructions[whole].type == vector
-                : is_constant(value_ref(whole))  ? _p.constants[index_of(value_ref(whole))].type == vector
-                                                 : false;
+            auto const is_vector = is_operation(value_ref(whole)) ? _p.instructions[whole].type == vector
+                                 : is_constant(value_ref(whole)) ? _p.constants[index_of(value_ref(whole))].type == vector
+                                                                 : false;
             if (read.size() != 2 || read[1] != u32(k) || !is_vector || (source != k_nothing && source != whole))
                 from_one = false;
             source = whole;
