@@ -64,6 +64,7 @@ add_library(shaped-graphics-language
     src/shaped-graphics-language/ir/lower.cc
     src/shaped-graphics-language/ir/lower_call.cc
     src/shaped-graphics-language/ir/lower_query.cc
+    src/shaped-graphics-language/ir/lower_ray.cc
     src/shaped-graphics-language/ir/lower_expr.cc
     src/shaped-graphics-language/ir/lower_memory.cc
     src/shaped-graphics-language/ir/lower_stage.cc

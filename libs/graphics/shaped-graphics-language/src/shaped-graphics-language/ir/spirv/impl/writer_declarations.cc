@@ -57,6 +57,21 @@ constexpr built_in_number k_built_ins[] = {
     {built_in::tess_edge, 11},
     {built_in::tess_inside, 12},
     {built_in::domain_location, 13},
+    {built_in::launch_id, 5319},
+    {built_in::launch_size, 5320},
+    {built_in::world_ray_origin, 5321},
+    {built_in::world_ray_direction, 5322},
+    {built_in::object_ray_origin, 5323},
+    {built_in::object_ray_direction, 5324},
+    {built_in::ray_t_min, 5325},
+    {built_in::ray_t_current, 5326},
+    {built_in::ray_instance_id, 5327},
+    {built_in::ray_instance_index, 6},
+    {built_in::ray_geometry_index, 5352},
+    {built_in::ray_primitive_index, 7},
+    {built_in::hit_kind, 5333},
+    {built_in::object_to_world, 5330},
+    {built_in::world_to_object, 5331},
 };
 /// A pixel stage reads `@position` as what the rasterizer made of it, where a vertex stage's is `Position`.
 constexpr u32 k_frag_coord = 15;
@@ -73,6 +88,17 @@ constexpr u32 k_model_tessellation_evaluation = 2;
 constexpr u32 k_model_geometry = 3;
 constexpr u32 k_model_fragment = 4;
 constexpr u32 k_model_compute = 5;
+constexpr u32 k_model_raygen = 5313;
+constexpr u32 k_model_intersection = 5314;
+constexpr u32 k_model_any_hit = 5315;
+constexpr u32 k_model_closest_hit = 5316;
+constexpr u32 k_model_miss = 5317;
+constexpr u32 k_model_callable = 5318;
+constexpr u32 k_callable_data = 5328;
+constexpr u32 k_incoming_callable_data = 5329;
+constexpr u32 k_ray_payload = 5338;
+constexpr u32 k_hit_attribute = 5339;
+constexpr u32 k_incoming_ray_payload = 5342;
 constexpr u32 k_model_task = 5364;
 constexpr u32 k_model_mesh = 5365;
 constexpr u32 k_mode_origin_upper_left = 7;
@@ -110,7 +136,7 @@ constexpr u32 k_primitive_triangle_indices = 5296;
 }
 } // namespace
 
-u32 writer::storage_of(storage s)
+u32 writer::storage_of(storage s) const
 {
     switch (s)
     {
@@ -128,6 +154,14 @@ u32 writer::storage_of(storage s)
         return spv::UniformConstant;
     case storage::task_payload:
         return spv::TaskPayloadWorkgroupEXT;
+    case storage::ray_input:
+        return _p.stage == check::stage::callable ? k_incoming_callable_data : k_incoming_ray_payload;
+    case storage::hit_attribute:
+        return k_hit_attribute;
+    case storage::ray_output:
+        return k_ray_payload;
+    case storage::callable_output:
+        return k_callable_data;
     }
     return spv::FunctionStorage;
 }
@@ -471,9 +505,11 @@ void writer::write_globals()
         name(id, _p.name_at(g.name_first, g.name_size));
         if (g.set >= 0)
             emit(_annotations, spv::Decorate, {id, spv::DescriptorSet, u32(g.set)});
-        if (g.binding >= 0)
-            emit(_annotations, spv::Decorate, {id, spv::Binding, u32(g.binding)});
         auto const space = _p.at(g.type).space;
+        if (g.binding >= 0 && (space == storage::ray_output || space == storage::callable_output))
+            emit(_annotations, spv::Decorate, {id, spv::Location, u32(g.binding)});
+        else if (g.binding >= 0)
+            emit(_annotations, spv::Decorate, {id, spv::Binding, u32(g.binding)});
         auto const& pointee = _p.at(_p.at(g.type).element);
         auto const& held = pointee.kind == type_kind::array || pointee.kind == type_kind::runtime_array
                              ? _p.at(pointee.element)
@@ -564,8 +600,31 @@ void writer::write_entry()
     case check::stage::mesh:
         model = k_model_mesh;
         break;
+    case check::stage::raygen:
+        model = k_model_raygen;
+        break;
+    case check::stage::miss:
+        model = k_model_miss;
+        break;
+    case check::stage::closest_hit:
+        model = k_model_closest_hit;
+        break;
+    case check::stage::any_hit:
+        model = k_model_any_hit;
+        break;
+    case check::stage::intersection:
+        model = k_model_intersection;
+        break;
+    case check::stage::callable:
+        model = k_model_callable;
+        break;
     default:
         break;
+    }
+    if (_p.stage >= check::stage::raygen)
+    {
+        require(spv::RayTracingKHR);
+        require_extension("SPV_KHR_ray_tracing");
     }
     head(_entry, spv::EntryPoint, 3 + string_words(_p.entry_name) + interface.size());
     _entry.push_back(model);
@@ -593,7 +652,7 @@ void writer::write_entry()
         if (model == k_model_mesh)
             write_primitive_modes();
     }
-    else if (model != k_model_vertex)
+    else if (model != k_model_vertex && _p.stage < check::stage::raygen)
         write_primitive_modes();
     name(_function, _p.entry_name);
 

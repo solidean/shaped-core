@@ -450,6 +450,7 @@ if(SC_BUILD_TESTS)
             tests/raster/raster-test.cc
             tests/raster/mixed-route-test.cc
             tests/raster/mixed-route-query-test.cc
+            tests/pipeline/mixed-route-ray-test.cc
             tests/barrier/footprint-barrier-test.cc
             tests/pipeline/module-bindings-test.cc
             tests/pipeline/pipeline_harness.cc
@@ -558,6 +559,7 @@ if(SC_BUILD_TESTS)
                 mesh_stages.sgl:*
                 diagnostic_routes.sgl:*
                 query_stages.sgl:*
+                ray_stages.sgl:*
         )
         sc_add_shader_package(
             TARGET     shaped-graphics-test
@@ -573,6 +575,7 @@ if(SC_BUILD_TESTS)
                 mesh_stages.sgl:*
                 diagnostic_routes.sgl:*
                 query_stages.sgl:*
+                ray_stages.sgl:*
         )
         sc_add_shader_package(
             TARGET     shaped-graphics-test
@@ -588,6 +591,7 @@ if(SC_BUILD_TESTS)
                 mesh_stages.sgl:*
                 diagnostic_routes.sgl:*
                 query_stages.sgl:*
+                ray_stages.sgl:*
         )
 
         sc_add_shader_package(

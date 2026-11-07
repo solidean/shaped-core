@@ -163,6 +163,9 @@ constexpr shape k_shapes[] = {
     shape::no_result,           // end_strip
     shape::no_result,           // set_mesh_counts
     shape::no_result,           // write_primitive
+    shape::no_result,           // trace_ray
+    shape::no_result,           // execute_callable
+    shape::any_result,          // report_hit
     shape::any_result,          // ray_query_begin
     shape::no_result,           // ray_query_trace
     shape::any_result,          // ray_query_proceed
@@ -191,6 +194,8 @@ constexpr shape k_shapes[] = {
     shape::branch_conditional,  // branch_conditional
     shape::switch_,             // switch_
     shape::leaves,              // dispatch_mesh
+    shape::leaves,              // ignore_hit
+    shape::leaves,              // accept_and_end_search
     shape::leaves,              // return_
     shape::leaves,              // unreachable
 };
@@ -268,6 +273,9 @@ private:
             if (!is_type(e.type))
                 return fail("a stage element of no type");
             auto const kind = _p.at(e.type).kind;
+            // a hit's transform is a matrix the target hands over whole, and nothing packs it
+            if (e.system == built_in::object_to_world || e.system == built_in::world_to_object)
+                continue;
             if (kind == type_kind::matrix || kind == type_kind::array || kind == type_kind::structure
                 || kind == type_kind::pointer)
                 return fail("a stage element of {}, which crosses an edge only as scalars and vectors",

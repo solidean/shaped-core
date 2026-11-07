@@ -58,7 +58,7 @@ private:
     [[nodiscard]] u32 literal_id(u32 value);
 
     // ---- writer_declarations.cc
-    [[nodiscard]] static u32 storage_of(storage s);
+    [[nodiscard]] u32 storage_of(storage s) const;
     [[nodiscard]] bool holds_16_bit(type_ref t) const;
     void write_types();
     void write_structure(ir::type const& t, u32 id);
