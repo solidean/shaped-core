@@ -2,6 +2,7 @@
 
 #include <clean-core/math/bit.hh>
 #include <shaped-graphics-language/ir/ir.hh>
+#include <shaped-graphics-language/ir/verify.hh>
 
 using namespace sgl;
 using namespace sgl::ir;
@@ -93,7 +94,7 @@ constexpr fold_rule k_folds[] = {
 class simplifier
 {
 public:
-    explicit simplifier(program& p) : _p(p) {}
+    simplifier(program& p, control_flow flow) : _p(p), _keeps_structure(flow == control_flow::structured) {}
 
     void run()
     {
@@ -374,6 +375,34 @@ private:
         set_alias(index, resolved(value_ref(parts[operands[1]])));
     }
 
+    /// The vector a `construct` rebuilds when each part is the lane of one value at its own position.
+    void fold_construct(u32 index, instruction const& i, cc::span<u32 const> operands)
+    {
+        auto const& whole = _p.at(i.type);
+        if (whole.kind != type_kind::vector || isize(whole.count) != operands.size())
+            return;
+        auto source = value_ref::none;
+        for (auto k = isize(0); k < operands.size(); ++k)
+        {
+            auto const part = resolved(value_ref(operands[k]));
+            if (!is_operation(part))
+                return;
+            auto const& read = _p.instructions[index_of(part)];
+            auto const from = _p.operands_of(read);
+            if (read.code != op::extract || from.size() != 2 || from[1] != u32(k))
+                return;
+            auto const of = resolved(value_ref(from[0]));
+            if (is_valid(source) && of != source)
+                return;
+            source = of;
+        }
+        auto const type = is_operation(source) ? _p.instructions[index_of(source)].type
+                        : is_constant(source)  ? _p.constants[index_of(source)].type
+                                               : type_ref::none;
+        if (type == i.type)
+            set_alias(index, source);
+    }
+
     void fold_conversion(u32 index, instruction const& i, value_ref a)
     {
         auto x = u64(0);
@@ -455,6 +484,11 @@ private:
                     fold_extract(index, resolved(value_ref(operands[0])), operands);
                     continue;
                 }
+                if (i.code == op::construct)
+                {
+                    fold_construct(index, i, operands);
+                    continue;
+                }
                 if (i.code == op::select)
                 {
                     fold_select(index, resolved(value_ref(operands[0])), resolved(value_ref(operands[1])),
@@ -473,7 +507,7 @@ private:
 
             auto const& last = _p.instructions[block.first + block.count - 1];
             auto const operands = _p.operands_of(last);
-            if (last.code == op::branch_conditional)
+            if (last.code == op::branch_conditional && !_keeps_structure)
             {
                 auto x = u64(0);
                 auto width = u32(0);
@@ -502,7 +536,7 @@ private:
         auto next = u32(0);
         for (auto const b : _order)
         {
-            if (!_visited[isize(b)])
+            if (!is_kept(b))
                 continue;
             auto const& block = _p.blocks[isize(b)];
             for (auto i = block.first; i < block.first + block.count; ++i)
@@ -523,7 +557,7 @@ private:
         auto blocks = cc::vector<ir::block>::create_copy_of(cc::span<ir::block const>(_p.blocks));
         for (auto const b : _order)
         {
-            if (!_visited[isize(b)])
+            if (!is_kept(b))
             {
                 blocks[isize(b)].first = u32(instructions.size());
                 blocks[isize(b)].count = 0;
@@ -578,10 +612,14 @@ private:
 
     [[nodiscard]] bool phi_edge_stays(block_ref from, block_ref to) const
     {
-        return _visited[isize(from)] && (_target[isize(from)] == k_no_target || _target[isize(from)] == u32(to));
+        return is_kept(from) && (_target[isize(from)] == k_no_target || _target[isize(from)] == u32(to));
     }
 
+    /// A block no walk reached is dropped, unless SPIR-V's merge and continue targets must keep naming it.
+    [[nodiscard]] bool is_kept(block_ref b) const { return _visited[isize(b)] || _keeps_structure; }
+
     program& _p;
+    bool _keeps_structure = false;
     cc::vector<block_ref> _order;
     cc::vector<value_ref> _alias;
     cc::vector<bool> _reached;
@@ -593,7 +631,12 @@ private:
 };
 } // namespace
 
+void sgl::ir::simplify(program& p, control_flow flow)
+{
+    simplifier(p, flow).run();
+}
+
 void sgl::ir::simplify(program& p)
 {
-    simplifier(p).run();
+    simplify(p, control_flow::unstructured);
 }
