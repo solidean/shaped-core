@@ -4,6 +4,8 @@
 #include <shaped-graphics-language/ir/ir.hh>
 #include <shaped-graphics-language/ir/verify.hh>
 
+#include <cmath>
+
 using namespace sgl;
 using namespace sgl::ir;
 
@@ -162,6 +164,314 @@ private:
     {
         _alias[index] = v;
         _changed = true;
+    }
+
+    /// The one value every lane of `v` holds, where `v` is a float known here.
+    [[nodiscard]] bool known_float(value_ref v, f64& value, int depth = 0) const
+    {
+        if (is_constant(v))
+        {
+            auto const& c = _p.constants[index_of(v)];
+            if (c.is_undefined)
+                return false;
+            if (c.is_null)
+            {
+                value = 0.0;
+                return true;
+            }
+            auto const& t = _p.at(c.type);
+            if (t.kind != type_kind::float_)
+                return false;
+            if (t.width == 32)
+                value = f64(cc::bit_cast<f32>(c.low));
+            else if (t.width == 64)
+                value = cc::bit_cast<f64>((u64(c.high) << 32) | c.low);
+            else if (t.width == 16 && (c.low & 0x7fffu) == 0)
+                value = 0.0;
+            else if (t.width == 16 && c.low == 0x3c00u)
+                value = 1.0;
+            else
+                return false;
+            return true;
+        }
+        if (!is_operation(v) || depth > 2)
+            return false;
+        auto const& i = _p.instructions[index_of(v)];
+        if (i.code != op::construct)
+            return false;
+        auto const parts = _p.operands_of(i);
+        for (auto k = isize(0); k < parts.size(); ++k)
+        {
+            auto lane = 0.0;
+            if (!known_float(resolved(value_ref(parts[k])), lane, depth + 1) || (k > 0 && lane != value))
+                return false;
+            value = lane;
+        }
+        return !parts.empty();
+    }
+
+    /// The lanes of a 32-bit float or a vector of up to four of them, where every one is known here.
+    struct lanes
+    {
+        u32 count = 0;
+        f32 at[4] = {};
+    };
+
+    [[nodiscard]] bool is_float32_shape(type_ref t, u32& count) const
+    {
+        auto const& info = _p.at(t);
+        if (info.kind == type_kind::float_ && info.width == 32)
+        {
+            count = 1;
+            return true;
+        }
+        if (info.kind != type_kind::vector || info.count < 2 || info.count > 4)
+            return false;
+        auto const& element = _p.at(info.element);
+        count = info.count;
+        return element.kind == type_kind::float_ && element.width == 32;
+    }
+
+    [[nodiscard]] bool known_lanes(value_ref v, lanes& out) const
+    {
+        auto count = u32(0);
+        if (is_constant(v))
+        {
+            auto const& c = _p.constants[index_of(v)];
+            if (c.is_undefined || !is_float32_shape(c.type, count))
+                return false;
+            out.count = count;
+            for (auto k = u32(0); k < count; ++k)
+                out.at[k] = c.is_null ? 0.0f : cc::bit_cast<f32>(c.low);
+            return true;
+        }
+        if (!is_operation(v))
+            return false;
+        auto const& i = _p.instructions[index_of(v)];
+        if (i.code != op::construct || !is_float32_shape(i.type, count))
+            return false;
+        auto const parts = _p.operands_of(i);
+        if (isize(count) != parts.size())
+            return false;
+        out.count = count;
+        for (auto k = u32(0); k < count; ++k)
+        {
+            auto part = lanes();
+            if (!known_lanes(resolved(value_ref(parts[k])), part) || part.count != 1)
+                return false;
+            out.at[k] = part.at[0];
+        }
+        return true;
+    }
+
+    /// `index` as the value `known` holds: a constant for a scalar, a construct of constants rewritten in place for a vector.
+    void set_known(u32 index, lanes const& known)
+    {
+        for (auto k = u32(0); k < known.count; ++k)
+            if (!std::isfinite(known.at[k]))
+                return;
+        auto const type = _p.instructions[index].type;
+        if (known.count == 1)
+            return set_alias(index, constant_of(type, cc::bit_cast<u32>(known.at[0])));
+        auto const element = _p.at(type).element;
+        auto parts = cc::vector<u32>();
+        for (auto k = u32(0); k < known.count; ++k)
+            parts.push_back(u32(constant_of(element, cc::bit_cast<u32>(known.at[k]))));
+        auto const first = u32(_p.operands.size());
+        _p.operands.push_back_range(parts);
+        auto& made = _p.instructions[index];
+        made.code = op::construct;
+        made.sub = 0;
+        made.aux = 0;
+        made.first = first;
+        made.count = known.count;
+        _changed = true;
+    }
+
+    /// An operation of float lanes all known here, worked out as the target would: arithmetic at every level, as the
+    /// scalar fold does, and a builtin only at `.fast`, where a builtin is as precise as its target states (EVAL-6).
+    [[nodiscard]] bool fold_lanes(u32 index, instruction const& i, cc::span<u32 const> operands)
+    {
+        auto count = u32(0);
+        if (!is_float32_shape(i.type, count) || operands.size() > 3 || operands.empty())
+            return false;
+        lanes args[3];
+        for (auto k = isize(0); k < operands.size(); ++k)
+            if (!known_lanes(resolved(value_ref(operands[k])), args[k]))
+                return false;
+        // a scalar beside vectors is the same in every lane
+        auto const lane = [&](isize k, u32 l) { return args[k].count == 1 ? args[k].at[0] : args[k].at[l]; };
+        auto result = lanes{.count = count};
+        auto const each = [&](auto&& f)
+        {
+            for (auto l = u32(0); l < count; ++l)
+                result.at[l] = f(l);
+            return true;
+        };
+        auto const is_fast = i.guarantee == check::float_level::fast;
+        auto done = false;
+        switch (i.code)
+        {
+        case op::fadd:
+            done = operands.size() == 2 && each([&](u32 l) { return lane(0, l) + lane(1, l); });
+            break;
+        case op::fsub:
+            done = operands.size() == 2 && each([&](u32 l) { return lane(0, l) - lane(1, l); });
+            break;
+        case op::fmul:
+            done = operands.size() == 2 && each([&](u32 l) { return lane(0, l) * lane(1, l); });
+            break;
+        case op::fdiv:
+            done = operands.size() == 2 && each([&](u32 l) { return lane(0, l) / lane(1, l); });
+            break;
+        case op::fneg:
+            done = operands.size() == 1 && each([&](u32 l) { return -lane(0, l); });
+            break;
+        case op::dot:
+            if (operands.size() == 2 && count == 1 && args[0].count == args[1].count)
+            {
+                auto sum = 0.0f;
+                for (auto l = u32(0); l < args[0].count; ++l)
+                    sum += args[0].at[l] * args[1].at[l];
+                result.at[0] = sum;
+                done = true;
+            }
+            break;
+        case op::math:
+            if (is_fast)
+                done = fold_math(math(i.sub), operands.size(), args, count, result);
+            break;
+        default:
+            break;
+        }
+        if (!done)
+            return false;
+        set_known(index, result);
+        return true;
+    }
+
+    [[nodiscard]] static bool fold_math(math m, isize n, lanes const (&args)[3], u32 count, lanes& result)
+    {
+        auto const lane = [&](isize k, u32 l) { return args[k].count == 1 ? args[k].at[0] : args[k].at[l]; };
+        auto const each = [&](isize needs, auto&& f)
+        {
+            if (n != needs)
+                return false;
+            for (auto l = u32(0); l < count; ++l)
+                result.at[l] = f(l);
+            return true;
+        };
+        switch (m)
+        {
+        case math::fabs:
+            return each(1, [&](u32 l) { return std::fabs(lane(0, l)); });
+        case math::floor:
+            return each(1, [&](u32 l) { return std::floor(lane(0, l)); });
+        case math::ceil:
+            return each(1, [&](u32 l) { return std::ceil(lane(0, l)); });
+        case math::trunc:
+            return each(1, [&](u32 l) { return std::trunc(lane(0, l)); });
+        case math::fract:
+            return each(1, [&](u32 l) { return lane(0, l) - std::floor(lane(0, l)); });
+        case math::sqrt:
+            return each(1, [&](u32 l) { return std::sqrt(lane(0, l)); });
+        case math::inverse_sqrt:
+            return each(1, [&](u32 l) { return 1.0f / std::sqrt(lane(0, l)); });
+        case math::exp:
+            return each(1, [&](u32 l) { return std::exp(lane(0, l)); });
+        case math::exp2:
+            return each(1, [&](u32 l) { return std::exp2(lane(0, l)); });
+        case math::log:
+            return each(1, [&](u32 l) { return std::log(lane(0, l)); });
+        case math::log2:
+            return each(1, [&](u32 l) { return std::log2(lane(0, l)); });
+        case math::sin:
+            return each(1, [&](u32 l) { return std::sin(lane(0, l)); });
+        case math::cos:
+            return each(1, [&](u32 l) { return std::cos(lane(0, l)); });
+        case math::fsign:
+            return each(1, [&](u32 l) { return lane(0, l) > 0.0f ? 1.0f : lane(0, l) < 0.0f ? -1.0f : 0.0f; });
+        case math::fmin:
+            return each(2, [&](u32 l) { return std::fmin(lane(0, l), lane(1, l)); });
+        case math::fmax:
+            return each(2, [&](u32 l) { return std::fmax(lane(0, l), lane(1, l)); });
+        case math::pow:
+            return each(2, [&](u32 l) { return std::pow(lane(0, l), lane(1, l)); });
+        case math::step:
+            return each(2, [&](u32 l) { return lane(1, l) < lane(0, l) ? 0.0f : 1.0f; });
+        case math::fclamp:
+            return each(3, [&](u32 l) { return std::fmin(std::fmax(lane(0, l), lane(1, l)), lane(2, l)); });
+        case math::fmix:
+            return each(3, [&](u32 l) { return lane(0, l) + (lane(1, l) - lane(0, l)) * lane(2, l); });
+        case math::fma:
+            return each(3, [&](u32 l) { return lane(0, l) * lane(1, l) + lane(2, l); });
+        case math::length:
+        {
+            if (n != 1 || count != 1)
+                return false;
+            auto sum = 0.0f;
+            for (auto l = u32(0); l < args[0].count; ++l)
+                sum += args[0].at[l] * args[0].at[l];
+            result.at[0] = std::sqrt(sum);
+            return true;
+        }
+        default:
+            return false;
+        }
+    }
+
+    /// The zero of `type`, a scalar or a vector.
+    [[nodiscard]] value_ref zero_of(type_ref type)
+    {
+        for (auto i = _p.constants.size(); i > 0; --i)
+            if (_p.constants[i - 1].type == type && _p.constants[i - 1].is_null)
+                return constant_at(u32(i - 1));
+        _p.constants.push_back({.type = type, .is_null = true});
+        return constant_at(u32(_p.constants.size() - 1));
+    }
+
+    /// EVAL-6's `.fast`: no NaN or infinity arises and a zero's sign is not kept, so a known zero or one decides an
+    /// operation of the other operand alone, which DXC's fast flags let it do and a lobe a material leaves at zero needs.
+    [[nodiscard]] bool fold_fast(u32 index, instruction const& i, value_ref a, value_ref b)
+    {
+        auto x = 0.0;
+        auto y = 0.0;
+        auto const has_a = known_float(a, x);
+        auto const has_b = known_float(b, y);
+        auto const same = _p.type_of(a) == i.type && _p.type_of(b) == i.type;
+        if (!same || (has_a && has_b))
+            return false;
+        switch (i.code)
+        {
+        case op::fmul:
+            if ((has_a && x == 0.0) || (has_b && y == 0.0))
+                return set_alias(index, zero_of(i.type)), true;
+            if (has_a && x == 1.0)
+                return set_alias(index, b), true;
+            if (has_b && y == 1.0)
+                return set_alias(index, a), true;
+            return false;
+        case op::fadd:
+            if (has_a && x == 0.0)
+                return set_alias(index, b), true;
+            if (has_b && y == 0.0)
+                return set_alias(index, a), true;
+            return false;
+        case op::fsub:
+            if (has_b && y == 0.0)
+                return set_alias(index, a), true;
+            if (a == b)
+                return set_alias(index, zero_of(i.type)), true;
+            return false;
+        case op::fdiv:
+            if (has_b && y == 1.0)
+                return set_alias(index, a), true;
+            if (has_a && x == 0.0)
+                return set_alias(index, zero_of(i.type)), true;
+            return false;
+        default:
+            return false;
+        }
     }
 
     void fold_binary(u32 index, instruction const& i, fold_kind kind, value_ref a, value_ref b)
@@ -361,6 +671,8 @@ private:
     /// The value `extract` lands on when what it reads was built here of parts one level down.
     void fold_extract(u32 index, value_ref source, cc::span<u32 const> operands)
     {
+        if (is_constant(source) && _p.constants[index_of(source)].is_null)
+            return set_alias(index, zero_of(_p.instructions[index].type));
         if (operands.size() != 2 || is_constant(source) || is_global(source) || is_local(source))
             return;
         auto const& built = _p.instructions[index_of(source)];
@@ -500,7 +812,14 @@ private:
                     fold_conversion(index, i, resolved(value_ref(operands[0])));
                     continue;
                 }
+                if ((i.code == op::fadd || i.code == op::fsub || i.code == op::fmul || i.code == op::fdiv
+                     || i.code == op::fneg || i.code == op::dot || i.code == op::math)
+                    && fold_lanes(index, i, operands))
+                    continue;
                 auto const kind = fold_kind_of(i.code);
+                if (kind == fold_kind::real && i.guarantee == check::float_level::fast
+                    && fold_fast(index, i, resolved(value_ref(operands[0])), resolved(value_ref(operands[1]))))
+                    continue;
                 if (kind != fold_kind::none)
                     fold_binary(index, i, kind, resolved(value_ref(operands[0])), resolved(value_ref(operands[1])));
             }
