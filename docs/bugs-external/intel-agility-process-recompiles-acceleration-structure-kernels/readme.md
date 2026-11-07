@@ -41,7 +41,8 @@ A dx12 device changing what a vulkan device of the same process costs can only h
 
 - **Tests.** `shaped-graphics-test` pays it once per build kind per process: 182 s in the full run against 9.9 s without the Agility SDK.
   The same tax lands on `shaped-graphics-dx12-test`, `shaped-rendering-test` and `shaped-viewer-test`.
-- **Applications.** Any process of ours that creates a dx12 device on this driver with the Agility SDK present should wait 26 s or more at its first trace build; `shaped-view` is expected to, but was not measured.
+- **Applications.** Any process of ours that creates a dx12 device on this driver with the Agility SDK present should wait 26 s or more at its first trace build.
+  `shaped-view` is expected to, but was not measured.
 
 ## What we do about it
 
