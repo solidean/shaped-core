@@ -119,6 +119,8 @@ struct writer_uses
     bool ray_query = false;
     /// More than the 8 UAVs a device need not have more of.
     bool many_uavs = false;
+    /// A 64-bit atomic in workgroup memory.
+    bool int64_shared_atomics = false;
     /// A hit object or a regrouping, which Shader Model 6.9 brought.
     bool reorders = false;
 };
@@ -212,6 +214,8 @@ private:
         /// The PSV's class of it.
         u32 psv_type = 0;
         bool is_comparison = false;
+        /// A 64-bit atomic reaches it, which its metadata and the PSV both say.
+        bool used_by_atomic64 = false;
         /// The last slot it takes, and how many: all ones for an unbounded array.
         u32 upper = 0;
         u32 range = 1;

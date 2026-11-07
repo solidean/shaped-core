@@ -209,6 +209,47 @@ TEST("slib - every entry point of the fixtures that SGL's DXIL lowers passes the
     CHECK(guarded >= 450 / guard_stride);
 }
 
+TEST("slib - a 64-bit atomic is the i64 form of DXIL's own, and states what it reaches (EMIT-247)")
+{
+    auto compiler = ssc::dxc::compiler::create();
+    if (compiler.has_error())
+        SKIP("no DXC");
+    constexpr cc::string_view source
+        = "require shader_int64, shader_int64_atomics, shader_shared_int64_atomics\n"
+          "binding results:\n"
+          "    totals: mut buffer[atomic[ulong]]\n"
+          "    plain: mut buffer[ulong]\n"
+          "\n"
+          "@workgroup binding local:\n"
+          "    lowest: atomic[long]\n"
+          "\n"
+          "@compute(64) fun in_buffer(@thread_id id: int3){results}:\n"
+          "    results.totals[0].add(1u64 << 33)\n"
+          "    results.plain[id.x] = results.totals[0].min(5u64)\n"
+          "\n"
+          "@compute(64) fun in_workgroup(@local_thread_index t: int){results, local}:\n"
+          "    local.lowest.min(-(1i64 << 40) - (t as long))\n"
+          "    workgroup_barrier()\n"
+          "    results.plain[t] = local.lowest.load() as ulong\n";
+    auto const buffer = written(source, "in_buffer");
+    REQUIRE(buffer.has_value());
+    CHECK(!compiler.value().validate(buffer.value().dxil).has_value());
+    auto const buffer_text = compiler.value().disassemble(buffer.value().dxil);
+    REQUIRE(buffer_text.has_value());
+    CHECK(buffer_text.value().contains("@dx.op.atomicBinOp.i64(i32 78"));
+    // the resource a 64-bit atomic reaches carries Atomic64Use, tag 3, beside its stride, and PSV0 says the same
+    CHECK(buffer_text.value().contains("!{i32 1, i32 8, i32 3, i32 1}"));
+    CHECK(!buffer_text.value().contains("64-bit Atomics on Group Shared"));
+
+    auto const shared = written(source, "in_workgroup");
+    REQUIRE(shared.has_value());
+    CHECK(!compiler.value().validate(shared.value().dxil).has_value());
+    auto const shared_text = compiler.value().disassemble(shared.value().dxil);
+    REQUIRE(shared_text.has_value());
+    CHECK(shared_text.value().contains("atomicrmw min i64 addrspace(3)*"));
+    CHECK(shared_text.value().contains("64-bit Atomics on Group Shared"));
+}
+
 TEST("slib - a debug record of every value family passes the validator, in each stage that writes one")
 {
     auto compiler = ssc::dxc::compiler::create();

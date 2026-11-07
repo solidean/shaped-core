@@ -516,6 +516,10 @@ fn main_ps(p: pixel_input) -> target_ {
   On DXIL it is a value of `%dx.types.HitObject`, from `hitObject_TraceRay`, at Shader Model 6.9.
   A trace with `reorder` is that, `maybeReorderThread` and `hitObject_Invoke`, and `maybe_reorder` regroups a `hitObject_MakeNop`.
   A regrouping with no hint states an undefined hint of 0 bits, as DXC's does.
+* **EMIT-247** A native route's atomic on a 64-bit integer is its target's own, as an `i32` one is.
+  On DXIL it is the `i64` form of `dx.op.atomicBinOp` and `dx.op.atomicCompareExchange` on a buffer, and an `atomicrmw` or `cmpxchg` of `i64` in workgroup memory.
+  A resource it reaches carries Atomic64Use in its metadata, and `PSV0` flags it `UsedByAtomic64`, since the validator compares the two.
+  One in workgroup memory states the shader flag for 64-bit atomics on group-shared memory, and one on a buffer needs nothing past 64-bit integers.
 
 ## Lines
 

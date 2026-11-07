@@ -111,6 +111,9 @@ constexpr u32 k_mesh_lines = 1;
 constexpr u32 k_mesh_triangles = 2;
 constexpr u32 k_tag_element_type = 0;
 constexpr u32 k_tag_structured_stride = 1;
+constexpr u32 k_tag_atomic64_use = 3;
+/// `PSVResourceFlag::UsedByAtomic64`.
+constexpr u32 k_psv_used_by_atomic64 = 1;
 
 /// A feature a module uses, as the entry's flags and the container's SFI0 state it.
 struct feature_rule
@@ -133,6 +136,7 @@ constexpr feature_rule k_features[] = {
     {&writer_uses::uavs_at_every_stage, 1ull << 16, 1ull << 2},
     {&writer_uses::ray_query, 1ull << 25, 1ull << 20},
     {&writer_uses::many_uavs, 1ull << 15, 1ull << 3},
+    {&writer_uses::int64_shared_atomics, 1ull << 28, 1ull << 23},
 };
 /// What every module says: 16-bit types are native, as the text route's `-enable-16bit-types` has them.
 constexpr u64 k_native_low_precision = 1ull << 23;
@@ -656,16 +660,15 @@ void writer::write_entry_metadata()
             fields.push_back(_m.md_i32(b.lower));
             fields.push_back(_m.md_i32(b.range));
             auto extra = u32(0);
+            auto tags = cc::vector<u32>();
             if (b.stride > 0)
-            {
-                u32 const tags[] = {_m.md_i32(k_tag_structured_stride), _m.md_i32(b.stride)};
-                extra = _m.md_node(tags);
-            }
+                tags.push_back_range(cc::vector<u32>{_m.md_i32(k_tag_structured_stride), _m.md_i32(b.stride)});
             else if (b.component > 0)
-            {
-                u32 const tags[] = {_m.md_i32(k_tag_element_type), _m.md_i32(b.component)};
+                tags.push_back_range(cc::vector<u32>{_m.md_i32(k_tag_element_type), _m.md_i32(b.component)});
+            if (b.used_by_atomic64)
+                tags.push_back_range(cc::vector<u32>{_m.md_i32(k_tag_atomic64_use), _m.md_i32(1)});
+            if (!tags.empty())
                 extra = _m.md_node(tags);
-            }
             switch (cls)
             {
             case 0: // an SRV: kind, sample count, extra
@@ -789,6 +792,7 @@ void writer::write_entry_metadata()
                          .lower = b.lower,
                          .upper = b.upper,
                          .kind = b.kind,
+                         .psv_flags = b.used_by_atomic64 ? k_psv_used_by_atomic64 : 0,
                          .cls = cls,
                          .id = b.id,
                          .name = _p.name_at(_p.globals[b.global].name_first, _p.globals[b.global].name_size)});
@@ -862,7 +866,12 @@ void writer::write_entry_metadata()
         for (auto const& b : _bindings)
             if (b.cls == cls)
                 _summary.resources.push_back(
-                    {.psv_type = b.psv_type, .space = b.space, .lower = b.lower, .upper = b.upper, .kind = b.kind});
+                    {.psv_type = b.psv_type,
+                     .space = b.space,
+                     .lower = b.lower,
+                     .upper = b.upper,
+                     .kind = b.kind,
+                     .psv_flags = b.used_by_atomic64 ? k_psv_used_by_atomic64 : 0});
     if (is_compute || _p.stage == check::stage::mesh || _p.stage == check::stage::task)
         for (auto axis = 0; axis < 3; ++axis)
             _summary.workgroup[axis] = _p.workgroup[axis];

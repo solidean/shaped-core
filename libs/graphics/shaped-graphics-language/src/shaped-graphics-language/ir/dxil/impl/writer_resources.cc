@@ -505,9 +505,16 @@ void writer::atomic_op(u32 index, instruction const& i)
     auto const operands = _p.operands_of(i);
     auto const where = place_of(value_ref(operands[0]));
     auto const held = _p.at(_p.type_of(value_ref(operands[0]))).element;
-    if (_p.at(held).kind != type_kind::int_ || _p.at(held).width != 32)
-        return unsupported("an atomic of anything but a 32-bit integer on DXIL");
-    auto const type = _m.int_type();
+    if (_p.at(held).kind != type_kind::int_ || (_p.at(held).width != 32 && _p.at(held).width != 64))
+        return unsupported("an atomic of anything but a 32- or 64-bit integer on DXIL");
+    auto const type = scalar_type(held);
+    // a buffer's 64-bit atomic needs nothing past Int64Ops, and one in workgroup memory states its own flag
+    if (_p.at(held).width == 64 && where.kind == place::kind_t::memory)
+        _uses.int64_shared_atomics = true;
+    if (_p.at(held).width == 64 && where.kind == place::kind_t::buffer)
+        for (auto& b : _bindings)
+            if (b.global == where.root)
+                b.used_by_atomic64 = true;
 
     if (i.code == op::atomic_compare_exchange)
     {
@@ -536,7 +543,7 @@ void writer::atomic_op(u32 index, instruction const& i)
     if (found == nullptr)
         return unsupported("this atomic on DXIL");
 
-    auto value = i.code == op::atomic_load ? _m.constant_i32(0) : leaf_at(value_ref(operands[1]));
+    auto value = i.code == op::atomic_load ? _m.constant_int(type, 0) : leaf_at(value_ref(operands[1]));
     if (where.kind == place::kind_t::memory)
     {
         auto const result = _m.atomic_rmw(found->llvm, memory_pointer(where, 0, held), value);
@@ -545,7 +552,7 @@ void writer::atomic_op(u32 index, instruction const& i)
         return;
     }
     if (i.code == op::atomic_isub)
-        value = _m.binary(binary_op::sub, _m.constant_i32(0), value);
+        value = _m.binary(binary_op::sub, _m.constant_int(type, 0), value);
     auto const result = atomic_on_buffer(where, found->dx, value, type);
     if (i.code != op::atomic_store)
         define_one(index, result);
