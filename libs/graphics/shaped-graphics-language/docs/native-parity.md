@@ -25,8 +25,10 @@ Three effects of the B580 decide how to read them:
 * A newly loaded binary runs in a driver's cold tier, up to 16% slow, for its first dispatches; both benchmarks run past it before timing.
 * A process lands in one of two speed modes about 1.5 times apart, which moves both routes alike but can move a ratio by 10% in one process.
   So a ratio is read across at least three processes, and one that only one process shows is that process's mode.
-* Outside a slow-mode process, sr's ratios repeat within 0.1% from process to process, and the wavefront's per-kernel ratios within about 3%.
-  So a difference under those is noise.
+* Outside a slow-mode process, sr's ratios repeat within 0.1% from process to process, and a whole frame's within about 3%.
+* A wavefront kernel's own ratio is where its timestamps land among stages the GPU overlaps, not what the kernel costs.
+  Between two sets of three processes, vulkan's finalize read 1.15 and then 3.17, and its connect 1.16 and then 0.36, while the frame's total moved by 3%.
+  So the bar is read on a frame and on a single dispatch, and a kernel's ratio is a pointer for where to look.
 
 **Size** is [tools/native-parity.py](../tools/native-parity.py), over every entry point of the real shaders:
 
@@ -42,29 +44,22 @@ An operation is one instruction inside the function, so declarations, names and 
 
 ## Runtime
 
-Native over DXC, GPU time on the Arc B580, the median of three processes; best and worst where they differ by more than noise.
+Native over DXC, GPU time on the Arc B580: the median of three processes, in each of two sets taken apart.
 
-| kernel | dx12 before | dx12 after | vulkan before | vulkan after |
+| what | dx12 before | dx12 after | vulkan before | vulkan after |
 |---|---:|---:|---:|---:|
-| à-trous | 0.985 | 0.985 | 0.999 | 1.000 |
-| SVGF filter | 0.989 | 0.989 | 1.003 | 1.001 |
-| convolution | 1.006 | 1.006 | 0.936 | 0.936 |
-| megakernel | 0.99 | 0.93 | 0.84 | 0.86 |
-| wavefront, whole frame | 1.08 | 1.05 | 0.79 | 0.82 |
-| wavefront begin | 1.01 | 1.01 | 1.00 | 1.00 |
-| wavefront extend | 1.02 | 1.00 | 0.46 | 0.50 |
-| wavefront segment | 1.01 | 0.99 | 0.52 | 0.55 |
-| wavefront sort | 1.00 | 0.99 | 0.56 | 0.55 |
-| wavefront shade | 1.18 | **1.20** | 1.06 | **1.09** |
-| wavefront connect | 1.26 | 0.96 | 1.13 | **1.16** |
-| wavefront finalize | 1.05 | **1.05** | 1.10 | **1.15** |
-| wavefront arguments | 1.23 | **1.09** | 0.94 | 1.01 |
-| wavefront resolve | 0.98 | 1.00 | 0.95 | 1.00 |
+| à-trous, one dispatch | 0.985 | 0.985, 0.984 | 0.999 | 1.000, 0.999 |
+| SVGF filter, one dispatch | 0.989 | 0.989, 0.988 | 1.003 | 1.001, 1.001 |
+| convolution, one dispatch | 1.006 | 1.006, 1.006 | 0.936 | 0.936, 0.935 |
+| megakernel, one frame | 0.99 | 0.93, 0.93 | 0.84 | 0.86, 0.88 |
+| wavefront, one frame | 1.08 | **1.05, 1.08** | 0.79 | 0.82, 0.79 |
+
+Of the wavefront's kernels on dx12, only shade read high in both sets, 1.20 and 1.19, and connect went from 1.26 before to 0.96 and 1.02.
 
 "Before" is main at 35d0f1dba on dx12; on vulkan it already has the first fix below, which was in before the first vulkan run.
-Native runs vulkan's extend, segment and sort in half the time both DXC routes take, and that stood before this work.
+Native's vulkan frame is a fifth faster than DXC's, and its extend, segment and sort read under half of DXC's in both sets.
 A difference that large is a question about what the two modules trace rather than a win, and it is open.
-The bold ratios are what remains outside ±3%, under [what remains](#what-remains).
+The bold ratio is what remains outside ±3%, under [what remains](#what-remains).
 
 ## Size
 
@@ -117,18 +112,14 @@ That is the container rather than the code: DXC's side is stripped of reflection
 
 ## What remains
 
-* **The shade kernel, 1.20 on dx12 and 1.09 on vulkan.**
-  Its DXIL still holds about 420 more `fmul`, 126 more `fdiv` and 86 more `dot3` than DXC's.
+* **dx12's wavefront frame, 1.05 to 1.08.**
+  Its shade kernel is the one that reads high in every set, 1.17 to 1.20, and its DXIL is 1.21 times DXC's in operations.
+  That DXIL still holds about 420 more `fmul`, 126 more `fdiv` and 86 more `dot3` than DXC's.
   The shape says values DXC shares across branches or rewrites, such as `x / c` as `x * (1 / c)`, which native computes again.
   Matching the two listings function by function is the next step; nothing measured so far is a cause.
-* **connect on vulkan, 1.16.**
-  Its SPIR-V holds 171 phis against DXC's 78, and no `OpSelect` against DXC's 14.
-  DXC's SPIR-V goes through spirv-opt, which turns a small if-else into a select, and native SPIR-V never does: `flatten_branches` is DXIL's alone.
-  On dx12, where both routes get selects, connect is 0.96, so a structured if-conversion is the lead.
-* **finalize on vulkan, 1.15.**
-  Its SPIR-V is at parity, 327 operations against 314, so nothing the counts show is the cause, and it is open.
-* **finalize and arguments on dx12, 1.05 and 1.09.**
-  These are a few short dispatches per frame, under 4 ms of 24 frames, so a fixed cost per dispatch shows as a ratio; their code is at parity or below.
+* **SPIR-V turns no if-else into a select.**
+  DXC's SPIR-V goes through spirv-opt, which does, and `flatten_branches` is DXIL's alone: connect's SPIR-V holds 171 phis and no `OpSelect` against DXC's 78 and 14.
+  vulkan's frame is faster than DXC's regardless, so this is a size gap, and a lead should a vulkan kernel come in slow.
 * **bc7's DXIL, 1.49 in size.**
   This is the unrolling above, in sr's own compression shader: 67 allocas against DXC's 27, and 1156 stores against 460.
   It is not timed here.
