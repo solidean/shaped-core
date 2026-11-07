@@ -447,7 +447,7 @@ static cc::shared_async<cc::unit> compare_on(sg::context& ctx,
 
 ASYNC_BENCHMARK("sr - SGL against the HLSL it was ported from, GPU time per dispatch")
 {
-    auto created = sg::create_dx12_context({.adapter = sg::backend::dx12::dx12_adapter::hardware});
+    auto created = sg::create_dx12_context({.native_dxil = false, .adapter = sg::backend::dx12::dx12_adapter::hardware});
     if (created.has_error())
         SKIP("no dx12 hardware device");
     co_await compare_on(*created.value());
@@ -468,7 +468,8 @@ ASYNC_BENCHMARK("sr - SGL's own DXIL computes what its text through DXC computes
     auto through_dxc = kernel_outputs();
     auto native = kernel_outputs();
     {
-        auto created = sg::create_dx12_context({.adapter = sg::backend::dx12::dx12_adapter::hardware});
+        auto created
+            = sg::create_dx12_context({.native_dxil = false, .adapter = sg::backend::dx12::dx12_adapter::hardware});
         if (created.has_error())
             SKIP("no dx12 hardware device");
         created.value()->download.set_budget(isize(128) << 20);
@@ -509,7 +510,7 @@ ASYNC_BENCHMARK("sr - SGL's own binary against its text through DXC, GPU time pe
 
 ASYNC_BENCHMARK("sr - SGL against the HLSL it was ported from, GPU time per dispatch, on vulkan")
 {
-    auto created = sg::create_vulkan_context({});
+    auto created = sg::create_vulkan_context({.native_spirv = false});
     if (created.has_error())
         SKIP("no vulkan device");
     co_await compare_on(*created.value());

@@ -56,8 +56,9 @@ struct sg::backend::vulkan::vulkan_config
     /// D3D12 has only a process-wide switch, which is why its flag is named for activating something global.
     bool enable_validation_layers = false;
 
-    /// SGL shaders take SGL's own SPIR-V where it has a lowering for them, and DXC's elsewhere; opt-in while that route grows.
-    bool native_spirv = false;
+    /// SGL shaders are SPIR-V that SGL writes itself, and an entry point it has no lowering for yet goes through DXC.
+    /// `false` takes the text route, SGL's HLSL through DXC, for every SGL shader of this context.
+    bool native_spirv = true;
 
     /// SGL's own SPIR-V carries each operation's `.sgl` line and the sources it names, for RenderDoc (EMIT-257).
     /// It changes no instruction, only the module's size, and does nothing for what DXC compiles.
