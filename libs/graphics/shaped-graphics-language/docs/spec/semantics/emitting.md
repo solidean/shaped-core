@@ -505,6 +505,8 @@ fn main_ps(p: pixel_input) -> target_ {
   The container holds `SFI0`, `RDAT` and `DXIL`, and `RDAT` states what the module implies, since the validator compares the two.
   An intersection fused with its any hit is metal's alone (EMIT-139), and `unsupported` here, and so is a closest hit of no payload on DXIL.
   A hit object and a reordering trace are `unsupported`.
+* **EMIT-245** A source a host compiles at run time takes the context's options as a package's shader does: what the device has, its float guarantees and its native route.
+  So a generated hit group, a host's callable and a generated kernel lower where the context prefers SGL's binary, and `has` answers for the device.
 
 ## Lines
 

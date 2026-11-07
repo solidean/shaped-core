@@ -36,6 +36,9 @@ struct slib::compile_source_options
 
     /// what a preprocessing or compile error names, since there is no path to name
     cc::string_view label = "<generated>";
+
+    /// what a source of the host's compiles with: for a context's, `add_context_options`
+    cc::span<shader_option const> options = {};
 };
 
 /// How the reload watcher runs.

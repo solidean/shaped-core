@@ -117,6 +117,8 @@ struct writer_uses
     bool uavs_at_every_stage = false;
     /// A ray query or a hit's geometry index, which raytracing tier 1.1 brought.
     bool ray_query = false;
+    /// More than the 8 UAVs a device need not have more of.
+    bool many_uavs = false;
 };
 
 class writer

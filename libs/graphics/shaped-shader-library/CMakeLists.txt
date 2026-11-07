@@ -273,6 +273,7 @@ if(SC_BUILD_TESTS)
             tests/sgl-native-compile-benchmark.cc
             tests/sgl-hit-object-spirv-test.cc
             tests/sgl-native-dxil-test.cc
+            tests/sgl-real-shaders-test.cc
             tests/sgl-signature-golden-test.cc
         )
         target_link_libraries(shaped-shader-library-test PRIVATE shaped-shader-compiler-dxc)

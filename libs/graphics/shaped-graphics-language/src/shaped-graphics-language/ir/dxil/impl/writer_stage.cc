@@ -128,6 +128,7 @@ constexpr feature_rule k_features[] = {
     {&writer_uses::layer_output, 1ull << 9, 1ull << 13},
     {&writer_uses::uavs_at_every_stage, 1ull << 16, 1ull << 2},
     {&writer_uses::ray_query, 1ull << 25, 1ull << 20},
+    {&writer_uses::many_uavs, 1ull << 15, 1ull << 3},
 };
 /// What every module says: 16-bit types are native, as the text route's `-enable-16bit-types` has them.
 constexpr u64 k_native_low_precision = 1ull << 23;
@@ -768,7 +769,7 @@ void writer::write_entry_metadata()
         _summary.program_version = (k_model_major << 4) | model_minor;
         _summary.dxil_version = 0x100 | model_minor;
         _summary.entry_name = _p.entry_name;
-        for (auto const cls : {0u, 1u, 2u, 3u})
+        for (auto const cls : {2u, 3u, 0u, 1u})
             for (auto const& b : _bindings)
                 if (b.cls == cls)
                     _summary.resources.push_back(

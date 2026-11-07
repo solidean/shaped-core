@@ -1026,7 +1026,7 @@ value_ref lowering::call(flat_expr const& x, flat_call const& c)
         auto const lanes = lanes_of(result);
         for (auto const a : args)
         {
-            auto const is_short = lanes > 1 && lanes_of(_out.type_of(a)) == 1;
+            auto const is_short = lanes > 1 && lanes_of(_out.type_of(a)) == 1 && fn != math::refract;
             operands.push_back(u32(is_short ? splat(a, result) : a));
         }
         return add(op::math, result, operands, u8(fn));

@@ -28,6 +28,7 @@ constexpr u32 k_kind_raw_buffer = 11;
 constexpr u32 k_kind_structured_buffer = 12;
 constexpr u32 k_kind_constants = 13;
 constexpr u32 k_kind_sampler = 14;
+constexpr u32 k_uavs_of_every_device = 8;
 constexpr u32 k_kind_acceleration_structure = 16;
 /// `DXIL::ComponentType::I32`, the element DXC states of a structure.
 constexpr u32 k_component_i32 = 4;
@@ -108,6 +109,7 @@ void writer::declare_handles()
     }
 
     u32 next_id[4] = {};
+    auto uav_count = u32(0);
     (void)res_props_type();
     (void)res_bind_type();
     for (auto g = isize(0); g < _p.globals.size(); ++g)
@@ -186,6 +188,11 @@ void writer::declare_handles()
         // EMIT-210: an unbounded array is a range the pipeline layout leaves open
         auto const range = !is_array ? 1u : outer.kind == type_kind::array ? outer.count : 0xffffffffu;
         auto const upper = range == 0xffffffffu ? range : lower + range - 1;
+        if (cls == 1)
+        {
+            uav_count = range == 0xffffffffu ? range : uav_count + range;
+            _uses.many_uavs = _uses.many_uavs || uav_count > k_uavs_of_every_device;
+        }
         // bits 0 to 7 the kind, bit 12 a UAV, bit 14 globally coherent, bit 15 a sampler that compares
         auto const word0 = kind | (cls == 1 ? 1u << 12 : 0u) | (global.is_coherent ? 1u << 14 : 0u)
                          | (global.is_comparison ? 1u << 15 : 0u);

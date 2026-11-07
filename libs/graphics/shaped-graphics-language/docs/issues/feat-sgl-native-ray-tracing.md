@@ -74,9 +74,34 @@ It can fail: reading the instance's index for its id in lowering logged 60 faile
 So a new `storage` made two pointer types collide, and a local took another's.
 It is the enum's size now.
 
+## Real shaders, measured
+
+On 2026-11-07, on the Arc B580, with every native gap turned into an error for the runs below, so nothing fell back.
+
+- **The viewer's path tracer traces what DXC's traces.** `path_trace`, its misses and every material's generated hit group, seven material cases on each API.
+  Each image is held to DXC's on the same API with `sv - the path tracer through SGL's binary`, at a relative tolerance of 1e-4.
+  The worst pixel is 5.5e-7 relative on DXIL and 2.4e-7 on SPIR-V, which is rounding: about half the pixels differ at all.
+- **`slug-traced`'s captures are byte for byte DXC's**, on dx12 and on vulkan, and sr's slug tests pass on both native contexts.
+- **sr's whole suite now runs on `dx12-native-dxil` and `vulkan-native-spirv`.**
+- **`sgl-real-shaders-test.cc` keeps them covered**: the viewer's shaders, sr's test shaders and the example's, modules and all, past DXC's validator and `spirv-val`.
+  52 entry points lower on DXIL and 54 on SPIR-V, and the two left on DXIL are metal's empty closest hit.
+- **`path_trace` compiles 12.7 times faster on DXIL and 19 times on SPIR-V.**
+  5.8 ms against 73.7 ms, and 5.05 ms against 98.2 ms, front end included, on `release-clang`, best of 40 and of 12.
+  The binaries are 29,236 bytes against 28,268, and 63,248 against 42,744, so SPIR-V's is half as large again.
+  DXC ran in process at SM 6.8 with its default arguments, which is close to slib's and not the same.
+
+What that found:
+
+- **A host's SGL never reached the native route, or the device.** `compile_source` took neither the context's features nor its route.
+  So every hit group the viewer generates went through DXC on a native context, and a compile that asks `has` saw no device.
+  `slib::add_context_options` is both now, and hit groups, callables, sv's raster stages and its shade kernels all pass it.
+- **`refract`'s eta was splat** into a vector, which `spirv-val` refuses.
+- **More than 8 UAVs is a flag** of the module and of `SFI0`, which `RDAT`'s function row leaves out.
+- **`RDAT` lists resources by class**, constant buffers and samplers first.
+- **A dead block of an earlier `simplify` round** could point past what a later round kept, which only a shader this large reached.
+
 **Left.**
 
 - **A hit object and a reordering trace** lower on neither writer, and fall back to DXC under a preference: `trace_ray_reordered`, `trace_hit_ray` and `hit_object_*`.
   Written natively they are the point of this issue's last line, along with motion traces.
-- **No test draws through the viewer's tracer on the native route.** `path_trace` compiles on both writers; nothing here ran it.
 - **Whether a driver treats a plain export or missing annotations differently.** The B580 did not, and no other GPU ran.
