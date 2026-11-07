@@ -29,7 +29,9 @@ It no longer does on main, but only because `merge_buffer_loads` runs: the hang 
   Merging changes no value a load reads, so the unmerged module means the same thing; a miscompile in `igc` under this kernel's size is the leading guess, unconfirmed.
 - Which loop, if any, fails to exit.
   The next step is a reduction: cut `light_thin` down until the unmerged form stops hanging, then compare the two listings of what remains.
-- Whether another GPU hangs on the unmerged form: no other adapter was tried.
+- Measured since: the AMD Radeon iGPU (RDNA 2, driver 32.0.21042.62) does not hang on the unmerged form.
+  With the merging skipped, `SC_GPU=amd SC_SG_COLD=all uv run dev.py test "sv - a frame mesh traces in the frame it is placed"` passed on its dx12 context in 7.8 s.
+  The same module hangs Intel's, which makes Intel's compiler the likelier culprit; a reduction is still what would settle it.
 
 ## The risk left open
 
