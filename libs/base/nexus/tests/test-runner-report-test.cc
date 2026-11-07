@@ -258,6 +258,8 @@ TEST("runner report - a sampled run lists the code each test ran, and not anothe
 {
     if (!cc::rec::sampling_available() || !nx::impl::run_recording_active())
         SKIP("needs a sampler and the run's recorder");
+    if (!cc::module_enumeration_available())
+        SKIP("a sample is filed under its module, which this platform cannot enumerate");
 
     nx::test_registry reg;
     reg.add_declaration("burns a", {}, [] { CHECK(burn_here_a(0.25) != 7); });
