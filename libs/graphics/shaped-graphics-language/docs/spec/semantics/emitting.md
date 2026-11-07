@@ -475,7 +475,7 @@ fn main_ps(p: pixel_input) -> target_ {
   `ISG1`, `OSG1` and `PSG1` list elements by register and then by the offset of the name, so a factor that declares first leads a link standing before it in its row.
   EMIT-237's table reaches across patch constants too: every input to every patch constant in a control stage, and every patch constant to every output in an evaluation stage.
 * **EMIT-241** A native route has no `print` of its own: it lowers what LEGAL-70 wrote, so sg reads a binary's records as it reads a text's, and one pipeline may mix the routes.
-  `DXIL` states `UAVs at every shader stage` wherever a stage that is neither pixel nor compute declares a UAV.
+  `DXIL` states `UAVs at every shader stage` wherever a vertex, geometry or tessellation stage declares a UAV.
   The prologue of EMIT-229 is `unsupported` so far, so a compute stage with workgroup memory lowers under no robustness profile.
 * **EMIT-242** A mesh or task entry point of a native route writes what its text writes, in its target's own operations, so it links against the text route's in either direction.
   `set_counts` is `OpSetMeshOutputsEXT` or `dx.op.setMeshOutputCounts`.

@@ -367,3 +367,52 @@ TEST("slib - a container SGL writes carries the digest the retail runtime takes 
     for (auto i = isize(4); i < 20; ++i)
         CHECK(u8(bytes[i]) == 1);
 }
+
+TEST("slib - a task stage's payload DXC's own task stage cannot write passes the validator in DXC's shape")
+{
+    auto compiler = ssc::dxc::compiler::create();
+    if (compiler.has_error())
+        SKIP("no DXC");
+    constexpr cc::string_view source
+        = "require mesh_shader\n"
+          "struct corner:\n"
+          "    @position position: hpos4\n"
+          "struct inner:\n"
+          "    a: float3\n"
+          "    b: uint\n"
+          "struct handed:\n"
+          "    m: mat3\n"
+          "    n: inner\n"
+          "    q: int2[2]\n"
+          "    last: float\n"
+          "@task(1) fun ts(@workgroup_id g: int3):\n"
+          "    let h: handed = {\n"
+          "        m = mat3(float3(1.0), float3(2.0), float3(g.x as float))\n"
+          "        n = {a = float3(1.0), b = 2u}\n"
+          "        q = [int2(1, 2), int2(3, 4)]\n"
+          "        last = 1.0\n"
+          "    }\n"
+          "    dispatch_mesh(1u, 1u, 1u, h)\n"
+          "@mesh(1, vertices = 3, triangles = 1)\n"
+          "fun ms(@workgroup_id g: int3, h: handed, output: mut mesh_output[corner]):\n"
+          "    output.set_counts(3u, 1u)\n"
+          "    let y = (h.m * float3(0.0, 1.0, 0.0)).y\n"
+          "    output.vertex(0u, {position = hpos4(y, h.n.a.y, h.q[g.x].y as float, h.last)})\n"
+          "    output.triangle(0u, uint3(0u, 0u, 0u))\n";
+    for (auto const entry : {"ts", "ms"})
+    {
+        auto const e = sgl::compile_to_text({.source = source,
+                                             .entry_point = entry,
+                                             .target = sgl::emit::target::hlsl_dx12,
+                                             .native = sgl::emit::native_route::require});
+        REQUIRE(e.has_value());
+        auto const refused = compiler.value().validate(e.value().dxil);
+        CHECK(!refused.has_value()).dump("entry", entry).dump("validator", refused.value_or(cc::string()));
+        auto const text = compiler.value().disassemble(e.value().dxil);
+        REQUIRE(text.has_value());
+        // the shape and the 72 bytes DXC's mesh stage reads the same source with, each member on its scalars' alignment
+        CHECK(text.value().contains("%struct.handed = type { [9 x float], %struct.inner, [2 x [2 x i32]], float }"))
+            .dump("text", text.value());
+        CHECK(text.value().contains("i32 72}")).dump("text", text.value());
+    }
+}

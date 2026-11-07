@@ -2,7 +2,6 @@
 #include "../shaders/shader_fixtures.hh"
 
 #include <clean-core/thread/async_coroutine.hh>
-#include <cstdio>
 #include <nexus/async-test.hh>
 #include <nexus/test.hh>
 #include <sg_test_mixed_dxil.hh>
@@ -486,8 +485,6 @@ cc::shared_async<sg_test::offscreen_pixels> drawn_mesh(sg::context& ctx, mesh_pi
     };
     if (p.task.text.has_value())
         desc.task_shader = chosen(p.task, 2);
-    fprintf(stderr, "TEMP-MESH %s mask %u dxil %d
-", cc::string(p.name).c_str(), mask, int(ctx.accepts_shader_format(sg::shader_format::dxil))); fflush(stderr);
     desc.color_targets.push_back({.format = sg::pixel_format::rgba32_float});
     desc.color_targets.push_back({.format = sg::pixel_format::rgba32_float});
     auto const pipeline = ctx.uncached.create_raster_pipeline(desc);

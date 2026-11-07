@@ -170,8 +170,9 @@ void writer::declare_handles()
             break;
         }
 
-        _uses.uavs_at_every_stage = _uses.uavs_at_every_stage
-                                 || (cls == 1 && _p.stage != check::stage::pixel && _p.stage != check::stage::compute);
+        auto const has_uavs_anyway = _p.stage == check::stage::pixel || _p.stage == check::stage::compute
+                                  || _p.stage == check::stage::mesh || _p.stage == check::stage::task;
+        _uses.uavs_at_every_stage = _uses.uavs_at_every_stage || (cls == 1 && !has_uavs_anyway);
         auto const id = next_id[cls]++;
         // EMIT-210: an unbounded array is a range the pipeline layout leaves open
         auto const range = !is_array ? 1u : outer.kind == type_kind::array ? outer.count : 0xffffffffu;
