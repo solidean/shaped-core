@@ -547,6 +547,15 @@ fn main_ps(p: pixel_input) -> target_ {
   Where the inlined calls change, a comment names them first, `// inlined from shade.sgl:12 > main.sgl:40`, each file by its name alone.
   The file name is a string literal, so a backslash or a quote in it is escaped.
   WGSL has no such directive, and its messages map back through the table (EMIT-181).
+* **EMIT-257** Asked for a native line table, a native route writes each operation's line of EMIT-181 into its binary, and nothing else changes.
+  It is opt-in, `text_request::native_line_table`, since it carries the text of each file a line names.
+  SPIR-V states an `OpString` and an `OpSource` with the text per file, and an `OpLine` before an operation whose line differs from the last in its block.
+  Core SPIR-V has no inlined calls, so an `OpLine` names the innermost line, where the operation stands.
+  The files' ids are the module's last, so every other id is the one it has without the table.
+  DXIL keeps its `DXIL` part byte for byte and writes DXC's `-Zi` form beside it: an `ILDB` part and an `ILDN` part naming `<entry>.pdb`.
+  `ILDB` is the module again, each instruction with a `DILocation`, an inlined statement's in a `DISubprogram` of its file with the chain of `inlinedAt` calls.
+  It holds `dx.source.contents`, so a debugger shows each line without the file, and no variable is described.
+  A function's expression inlines into the statement that calls it, so only a function's own statements keep an inlined line.
 
 ## Diagnostics
 

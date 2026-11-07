@@ -39,6 +39,8 @@ sgl::compile_all_to_text({.source = text, .source_name = "cube.sgl", .targets = 
                                            // a missing entry point names the ones the source holds; a wrong stage says both
 sgl::text_request                          // source, source_name ("<sgl>"), library, entry_point, stage (none = any), target, options, run_tests,
                                            // line_directives: `#line n "file"` in HLSL and MSL (EMIT-182); slib asks for them, `sgl emit` only with --line-directives
+                                           // native_line_table: each operation's line in SGL's own SPIR-V and DXIL (EMIT-257); opt-in, since it carries
+                                           // the sources; off writes the same bytes; `vulkan_config` / `dx12_config::native_line_tables` ask for it
                                            // the entry point is found by NAME; source_name is never opened
                                            // run_tests: the source's own tests run, and one that fails is an error
                                            // options: check::option_value{name, value} per `@option const` set, value as SGL spells it:
