@@ -67,6 +67,7 @@ void writer::declare_memory()
         auto alignment = u32(1);
         _summary.payload_bytes = payload_layout(pointer.element, alignment);
         _payload_type = payload_type(pointer.element);
+        _payload_roots.resize_to_filled(_p.globals.size(), {});
         // a task stage holds it in workgroup memory, and a mesh stage asks for what it was handed
         if (_p.stage == check::stage::task)
             _payload = _m.add_variable("sgl_payload", _payload_type, k_group_shared, alignment);
@@ -75,6 +76,7 @@ void writer::declare_memory()
             ll_value const args[] = {_m.constant_i32(k_dx_ops[isize(dx_op::get_mesh_payload)].number)};
             _payload = call(dx_op::get_mesh_payload, _payload_type, args);
         }
+        _payload_roots[g] = {.pointer = _payload, .type = _payload_type};
     }
 }
 
@@ -213,7 +215,7 @@ void writer::payload_pointers(type_ref t, cc::vector<ll_value>& path, bool is_co
         auto indices = cc::vector<ll_value>();
         indices.push_back(_m.constant_i32(0));
         indices.push_back_range(path);
-        out.push_back(_m.element_pointer(_payload_type, _payload, indices));
+        out.push_back(_m.element_pointer(_reached->type, _reached->pointer, indices));
     };
     switch (info.kind)
     {
@@ -247,6 +249,7 @@ cc::vector<ll_value> writer::payload_pointers_of(place const& p, type_ref t)
     auto path = cc::vector<ll_value>::create_copy_of(
         cc::span<ll_value const>(_paths.data() + p.path_first, isize(p.path_count)));
     auto out = cc::vector<ll_value>();
+    _reached = &_payload_roots[p.root];
     payload_pointers(t, path, p.is_column, out);
     return out;
 }
@@ -259,8 +262,19 @@ writer::place writer::place_of(value_ref pointer)
     {
         auto const index = index_of(pointer);
         auto const& g = _p.globals[index];
-        if (_p.at(g.type).space == storage::task_payload)
-            return {.kind = place::kind_t::payload, .root = index};
+        auto const space = _p.at(g.type).space;
+        if (space == storage::task_payload || space == storage::ray_input || space == storage::hit_attribute
+            || space == storage::ray_output || space == storage::callable_output)
+        {
+            auto result = place{.kind = place::kind_t::payload, .root = index};
+            if (_payload_roots[index].is_wrapped)
+            {
+                result.path_first = u32(_paths.size());
+                result.path_count = 1;
+                _paths.push_back(_m.constant_i32(0));
+            }
+            return result;
+        }
         switch (g.kind)
         {
         case global_kind::constants:

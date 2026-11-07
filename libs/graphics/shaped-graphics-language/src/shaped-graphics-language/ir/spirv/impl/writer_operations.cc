@@ -53,6 +53,7 @@ enum class rule_kind : u8
     image_size,
     subgroup,
     ray_query,
+    ray_stage,
     phi,
 };
 
@@ -178,6 +179,9 @@ constexpr op_rule k_rules[] = {
     {op::image_write, rule_kind::image_write, spv::ImageWrite},
     {op::image_size, rule_kind::image_size, 0},
     {op::subgroup, rule_kind::subgroup, 0},
+    {op::trace_ray, rule_kind::ray_stage, 0},
+    {op::execute_callable, rule_kind::ray_stage, 0},
+    {op::report_hit, rule_kind::ray_stage, 0},
     {op::ray_query_begin, rule_kind::ray_query, 0},
     {op::ray_query_trace, rule_kind::ray_query, 0},
     {op::ray_query_proceed, rule_kind::ray_query, 0},
@@ -524,6 +528,16 @@ void writer::instruction_of(u32 index)
         return group(i, id);
     case rule_kind::ray_query:
         return ray_query(i, id);
+    case rule_kind::ray_stage:
+    {
+        auto const at = [&](isize k) { return id_of_raw(operands[k]); };
+        if (i.code == op::execute_callable)
+            return emit(_code, spv::ExecuteCallableKHR, {at(0), at(1)});
+        if (i.code == op::report_hit)
+            return emit(_code, spv::ReportIntersectionKHR, {id_of(i.type), id, at(0), at(1)});
+        return emit(_code, spv::TraceRayKHR,
+                    {at(0), at(1), at(2), at(3), at(4), at(5), at(6), at(7), at(8), at(9), at(10)});
+    }
     case rule_kind::phi:
         head(_code, rule.opcode, 3 + operands.size());
         _code.push_back(id_of(i.type));

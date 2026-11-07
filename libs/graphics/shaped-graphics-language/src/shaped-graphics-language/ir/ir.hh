@@ -121,6 +121,14 @@ enum class sgl::ir::storage : sgl::u8
     resource,
     /// What a task stage hands its mesh workgroups: one per entry point, which the mesh stage reads.
     task_payload,
+    /// The payload a ray-tracing stage is handed, or a callable's parameter: the caller's, written back on return.
+    ray_input,
+    /// What an intersection reported, which a hit stage reads; a triangle's barycentrics.
+    hit_attribute,
+    /// What a trace hands over and reads back: one global per type.
+    ray_output,
+    /// What a call of a callable hands over and reads back: one global per type.
+    callable_output,
 };
 
 /// One member of a structure; `offset` and `matrix_stride` mean something where it stands in GPU memory.
@@ -406,6 +414,14 @@ enum class sgl::ir::op : sgl::u16
     set_mesh_counts,
     /// Operands: the primitive, then the `uint3` or `uint2` of its vertices.
     write_primitive,
+    // ---- ray-tracing stages
+    /// Operands: structure, flags, mask, contribution, multiplier, miss, origin, t_min, direction, t_max, then the
+    /// global of `storage::ray_output` the payload stands in.
+    trace_ray,
+    /// Operands: the index, then the global of `storage::callable_output` the parameter stands in.
+    execute_callable,
+    /// Operands: t, kind, then the global of `storage::hit_attribute` the attributes stand in.
+    report_hit,
     // ---- ray queries: every step changes what the query answers, so none moves past another
     /// Operands: the flags every trace of this query states, a constant.
     ray_query_begin,
@@ -461,6 +477,10 @@ enum class sgl::ir::op : sgl::u16
     switch_,
     /// Operands: the three counts, then the global a task stage stored its payload in; it ends the stage on both targets.
     dispatch_mesh,
+    /// An any hit turns the candidate down, which ends the stage.
+    ignore_hit,
+    /// An any hit accepts the candidate and ends the search, which ends the stage.
+    accept_and_end_search,
     return_,
     unreachable,
 };
@@ -581,6 +601,24 @@ enum class sgl::ir::built_in : sgl::u8
     primitive_id,
     view_index,
     domain_location,
+    launch_id,
+    launch_size,
+    world_ray_origin,
+    world_ray_direction,
+    object_ray_origin,
+    object_ray_direction,
+    ray_t_min,
+    ray_t_current,
+    /// The id the host gave the instance.
+    ray_instance_id,
+    /// The instance's position in its TLAS.
+    ray_instance_index,
+    ray_geometry_index,
+    ray_primitive_index,
+    hit_kind,
+    /// Four columns of three lanes.
+    object_to_world,
+    world_to_object,
     depth,
     depth_greater_equal,
     depth_less_equal,

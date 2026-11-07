@@ -26,38 +26,57 @@ On 2026-11-07, on the Arc B580 and over the repo's SGL, DXC 1.9.2602:
 Not done here: a query with opacity micromaps, and `@first_instance`-style reads nothing asks for, such as a query's own flags or t_min.
 No GPU but the B580 ran this, and the Agility runtime did not.
 
-## What the pipeline stages need, measured
+## What a pipeline stage is, measured
 
-Not started on either writer.
-A library is a different module and a different container, so this is several times the size of queries, and the DXIL half is most of it.
-These are `lib_6_9` compiles of [`raytracing_end_search.sgl`](../../../shaped-graphics/tests/shaders/sgl/raytracing_end_search.sgl) on DXC 1.9.2602, read from their disassembly and their parts.
+These are compiles of the repo's SGL on DXC 1.9.2602 and runs on the Arc B580, on 2026-11-07.
 
-**The container.** `SFI0`, `VERS`, `RDAT`, `STAT`, `HASH` and `DXIL`, with no `PSV0` and no signature.
-`RDAT` is new: 156 bytes for one export with no resource, and 268 for one with two resources.
-Whether the validator compares it to the module, as it does `PSV0`, and whether `STAT` and `VERS` may go, are not tried.
+**A stage's memory is one global per use**, of a `storage` of its own, and the writers differ only in what that global is.
 
-**The module.** `dx.shaderModel` is `lib`, and `dx.entryPoints` opens with a null entry.
+| global | SPIR-V | DXIL |
+|---|---|---|
+| `ray_input`, the payload or a callable's parameter | `IncomingRayPayloadKHR`, `IncomingCallableDataKHR` | the function's first parameter |
+| `hit_attribute` | `HitAttributeKHR` | a hit stage's second parameter, an intersection's `alloca` |
+| `ray_output`, `callable_output`, one per type | `RayPayloadKHR`, `CallableDataKHR` with a `Location` | an `alloca` |
 
-- **A resource is a global.** `external constant %dx.types.Handle`, loaded at the top of the function, then `createHandleForLib` (160) and `annotateHandle`.
-  `dx.resources` names that global through a constant `bitcast`, which `module_builder` cannot express yet.
-- **An entry point takes pointers.** `void (%struct.layers*, %struct.slab_attributes*)`, `noalias nocapture`, to named structs.
-  A function's parameters and named struct types are both new to the builder.
-- **Its name is mangled**, `\01?stop_at_slab@@YAX...`, and `RDAT` states the plain name, which is what sg's state object exports.
-- **Three more metadata lists.** `dx.typeAnnotations` states each struct's layout and each function's parameters.
-  The entry's properties state the kind, the payload size and the attribute size: `{8, 10, 6, 8, 7, 4, 5, {0}}` is a closest hit of an 8-byte payload and 4 bytes of attributes.
-  `dx.dxrPayloadAnnotations` carries `[raypayload]`'s access qualifiers, which the text route writes (EMIT-137).
-- **A payload lives in an `alloca` of the caller**, which `dx.op.traceRay.struct.layers` (157) takes by pointer, so the operation overloads on a named struct.
+A trace stores into its global, traces, and loads back, which is what EMIT-225's text does on vulkan.
+What a stage reads of its launch, its ray and its hit is a `stage_element` of a new `built_in`, which is SPIR-V's `BuiltIn` and a `dx.op` on DXIL.
+A hit's transform is the one element that is a matrix.
 
-**The design this suggests.**
+**A DXIL library needs less than DXC writes.**
 
-- A stage past `raygen` reaches `lowering` as a stage of no elements.
-  The flat tree already reads the launch and the hit through `launch_index`, `hit_*` and the rest, so those become one `op::ray_read` with a `sub`, as `op::ray_query_read` is.
-- A payload, a hit's attributes and a callable's data are one global each, of a new `storage`.
-  The writers differ only in what that global is: a parameter on DXIL, and a variable of `IncomingRayPayloadKHR`, `HitAttributeKHR` or `IncomingCallableDataKHR` on SPIR-V.
-  `op::trace_ray` and `op::call_callable` take a local, which SPIR-V copies through a `RayPayloadKHR` global, as EMIT-225's text does.
-- `IgnoreHit`, `AcceptHitAndEndSearch` and `ReportHit` are the new terminators and effects: `OpIgnoreIntersectionKHR` and `OpTerminateRayKHR` end a block on SPIR-V.
-- A hit object stays out of it at first, as a named gap on both writers, so CHK-516 and EMIT-225 hold by no hit object lowering at all.
-- `dxil/impl/library.cc` should hold what a library adds, and `container.cc` a second part list, so `compile_dxil` stays one function.
+- **The container is `SFI0`, `RDAT` and `DXIL`.** `STAT`, `VERS` and `HASH` can all go: the validator passes it, and `ID3D12StateObject` creation takes it under the bypass digest.
+- **The validator does compare `RDAT` with the module**, as it does `PSV0`, and refuses a mismatch: `Container part 'Runtime Data (RDAT)' does not match expected for module`.
+  So every field is what the module implies.
+  A hit's geometry index is raytracing tier 1.1 and shader model 6.5 there, which the flags and the row's target must say, as a query's do.
+  An intersection states no attribute size, though it reports attributes.
+- **`createHandleFromBinding` does not work in a library.** The validator took the operation, and no `RDAT` we could write matched it, since a function's resource list comes from what uses a global.
+  So a resource is an `external constant %dx.types.Handle`, loaded and handed to `createHandleForLib`, and `dx.resources` names it through a constant `bitcast`.
+- **`noreturn` is required.** `unreachable` after `ignoreHit` is refused unless the operation carries it.
+- **What it can leave out:** mangled names, `dx.typeAnnotations`, `dx.dxrPayloadAnnotations`, and `noalias` and `nocapture`.
+  A plain export name stands in `RDAT` as both names, and the validator and state object creation both take it.
+- **A nonuniform index is `!dx.nonuniform` on the `getelementptr`**, an attachment the builder writes in a block of its own.
 
-**The order.** SPIR-V's stages first as a commit, since they need no new container, and DXIL's behind them, both before the slice counts as done.
-The mixed test should try a native ray generation stage against DXC's hit groups, which a state object may or may not take, and that answer is open on both APIs.
+**Pipelines mix freely on both APIs.**
+Each of the 15 ways of taking raygen, miss, hit and callable stages from SGL's binary, the rest from DXC's, creates one pipeline and traces alike, on dx12 and vulkan, every lane within 1e-4.
+It is [`mixed-route-ray-test.cc`](../../../shaped-graphics/tests/pipeline/mixed-route-ray-test.cc).
+Its fixture is [`ray_stages.sgl`](../../../shaped-graphics/tests/shaders/sgl_mixed/ray_stages.sgl): a trace from a closest hit, all six stages, a callable picked per launch.
+DXC's stages state `[raypayload]` and ours do not, and neither runtime minded.
+It can fail: reading the instance's index for its id in lowering logged 60 failed checks.
+
+**The sweep.**
+
+- **SPIR-V lowers 60 of the 65 ray-tracing entry points, and DXIL 52.** Each passes `spirv-val` or DXC's validator.
+- **The five SPIR-V leaves are metal's**, an intersection fused with its any hit (EMIT-139), which has no stage on these targets.
+- **DXIL leaves those and eight `sgl_empty_closest_hit`**, a closest hit of no payload that slib builds for metal alone.
+- **`shaped-graphics-test`'s ray-tracing tests pass on `dx12-native-dxil` and `vulkan-native-spirv`**, with the debug layer and validation on.
+
+**One thing the work found.** `k_storage_classes`, the stride of `lowering::pointer_type`'s table, was a written 7.
+So a new `storage` made two pointer types collide, and a local took another's.
+It is the enum's size now.
+
+**Left.**
+
+- **A hit object and a reordering trace** lower on neither writer, and fall back to DXC under a preference: `trace_ray_reordered`, `trace_hit_ray` and `hit_object_*`.
+  Written natively they are the point of this issue's last line, along with motion traces.
+- **No test draws through the viewer's tracer on the native route.** `path_trace` compiles on both writers; nothing here ran it.
+- **Whether a driver treats a plain export or missing annotations differently.** The B580 did not, and no other GPU ran.

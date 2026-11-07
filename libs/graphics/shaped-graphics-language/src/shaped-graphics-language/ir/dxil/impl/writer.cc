@@ -52,6 +52,7 @@ enum class rule_kind : u8
     image_size,
     subgroup,
     ray_query,
+    ray_stage,
     phi,
 };
 
@@ -176,6 +177,9 @@ constexpr op_rule k_rules[] = {
     {op::image_levels, rule_kind::image_size},
     {op::image_samples, rule_kind::image_size},
     {op::subgroup, rule_kind::subgroup},
+    {op::trace_ray, rule_kind::ray_stage},
+    {op::execute_callable, rule_kind::ray_stage},
+    {op::report_hit, rule_kind::ray_stage},
     {op::ray_query_begin, rule_kind::ray_query},
     {op::ray_query_trace, rule_kind::ray_query},
     {op::ray_query_proceed, rule_kind::ray_query},
@@ -245,7 +249,7 @@ void writer::run()
     _places.resize_to_filled(_p.instructions.size(), {});
     _values.reserve(_p.instructions.size() * 2);
 
-    auto const void_function = _m.function(_m.void_type(), {});
+    auto const void_function = is_library() ? entry_function_type() : _m.function(_m.void_type(), {});
     auto const is_control = _p.stage == check::stage::tessellation_control;
     auto const attributes = entry_attributes();
     if (is_control)
@@ -255,12 +259,15 @@ void writer::run()
     if (!is_control)
         _body = _entry;
 
-    number_signature();
+    if (!is_library())
+        number_signature();
     find_reachable();
     declare_blocks();
     auto const order = blocks_in_order(_p);
     _m.open_block(_blocks[isize(order[0])]);
     declare_memory();
+    if (is_library())
+        declare_ray_roots();
     declare_handles();
     for (auto const b : order)
     {
@@ -277,7 +284,8 @@ void writer::run()
     _m.remove_unused();
     if (is_control)
         write_hull_function();
-    read_usage();
+    if (!is_library())
+        read_usage();
     write_entry_metadata();
 }
 
@@ -318,6 +326,10 @@ void writer::terminator(instruction const& i)
         (void)call(dx_op::dispatch_mesh, _payload_type, args);
         return _m.return_void();
     }
+    case op::ignore_hit:
+        return end_of_hit(dx_op::ignore_hit);
+    case op::accept_and_end_search:
+        return end_of_hit(dx_op::accept_hit_and_end_search);
     case op::return_:
         return _m.return_void();
     default:
@@ -418,6 +430,8 @@ void writer::operation(u32 index)
         return subgroup_op(index, i);
     case rule_kind::ray_query:
         return ray_query_op(index, i);
+    case rule_kind::ray_stage:
+        return ray_stage_op(index, i);
     case rule_kind::phi:
         return phi(index, i);
     }

@@ -122,7 +122,8 @@ void lowering::run()
     auto const is_raster = _e.entry_stage == stage::vertex || _e.entry_stage == stage::pixel;
     auto const is_primitive = _e.entry_stage == stage::geometry || _e.entry_stage == stage::tessellation_control
                            || _e.entry_stage == stage::tessellation_evaluation || _e.entry_stage == stage::mesh;
-    if (_e.entry_stage != stage::compute && _e.entry_stage != stage::task && !is_raster && !is_primitive)
+    if (_e.entry_stage != stage::compute && _e.entry_stage != stage::task && !is_raster && !is_primitive
+        && !is_ray_stage())
     {
         unsupported(cc::format("a {} entry point, whose stage is not lowered yet", stage_name(_e.entry_stage)));
         // what crosses its edge stands on its own, and DXIL's packer reads it ahead of any lowering of the body
@@ -144,6 +145,8 @@ void lowering::run()
         describe_primitive_stage();
         read_primitive_edge();
     }
+    else if (is_ray_stage())
+        read_ray_edge();
     else
         declare_stage_inputs();
     statements(_e.body);
@@ -204,7 +207,11 @@ void lowering::statement(flat_stmt_id id)
         [&](flat_break const&) { branch(_breaks.back()); }, [&](flat_switch const& sw) { switch_(sw); },
         [&](flat_return const& r)
         {
-            if (is_valid(r.value))
+            if (is_valid(r.value) && _e.entry_stage == stage::any_hit)
+                decide_hit(expr(r.value));
+            else if (is_valid(r.value) && _e.entry_stage == stage::intersection)
+                report_intersection(expr(r.value), _e.at(r.value).type);
+            else if (is_valid(r.value))
                 store_stage_result(expr(r.value));
             add(op::return_, type_ref::none, cc::span<u32 const>());
         },

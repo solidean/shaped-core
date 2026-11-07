@@ -105,6 +105,9 @@ constexpr cc::string_view k_names[] = {
     "end_strip",
     "set_mesh_counts",
     "write_primitive",
+    "trace_ray",
+    "execute_callable",
+    "report_hit",
     "ray_query_begin",
     "ray_query_trace",
     "ray_query_proceed",
@@ -133,6 +136,8 @@ constexpr cc::string_view k_names[] = {
     "branch_conditional",
     "switch",
     "dispatch_mesh",
+    "ignore_hit",
+    "accept_and_end_search",
     "return",
     "unreachable",
 };

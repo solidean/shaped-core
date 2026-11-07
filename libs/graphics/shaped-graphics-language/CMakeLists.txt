@@ -64,6 +64,7 @@ add_library(shaped-graphics-language
     src/shaped-graphics-language/ir/lower.cc
     src/shaped-graphics-language/ir/lower_call.cc
     src/shaped-graphics-language/ir/lower_query.cc
+    src/shaped-graphics-language/ir/lower_ray.cc
     src/shaped-graphics-language/ir/lower_expr.cc
     src/shaped-graphics-language/ir/lower_memory.cc
     src/shaped-graphics-language/ir/lower_stage.cc
@@ -85,6 +86,7 @@ add_library(shaped-graphics-language
     src/shaped-graphics-language/ir/dxil/impl/writer_math.cc
     src/shaped-graphics-language/ir/dxil/impl/writer_memory.cc
     src/shaped-graphics-language/ir/dxil/impl/writer_query.cc
+    src/shaped-graphics-language/ir/dxil/impl/writer_ray.cc
     src/shaped-graphics-language/ir/dxil/impl/writer_resources.cc
     src/shaped-graphics-language/ir/dxil/impl/writer_stage.cc
 

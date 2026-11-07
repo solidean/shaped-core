@@ -109,6 +109,8 @@ private:
 // block ids and record codes, as LLVM's bitcode reader names them
 constexpr u32 k_block_module = 8;
 constexpr u32 k_block_paramattr = 9;
+constexpr u32 k_cst_cast = 11;
+constexpr u32 k_cast_bitcast = 11;
 constexpr u32 k_block_paramattr_group = 10;
 constexpr u32 k_block_constants = 11;
 constexpr u32 k_block_function = 12;
@@ -186,7 +188,12 @@ constexpr cc::string_view k_metadata_kinds[] = {
     "dx.temp",
     "dx.dbg.varlayout",
     "dx.break.br",
+    "dx.nonuniform",
 };
+/// The number of "dx.nonuniform" in `k_metadata_kinds`.
+constexpr u32 k_kind_nonuniform = 17;
+constexpr u32 k_block_metadata_attachment = 16;
+constexpr u32 k_md_attachment = 11;
 
 /// A signed value as LLVM's VBR states it: its magnitude shifted up, the sign in the low bit.
 [[nodiscard]] constexpr u64 signed_vbr(i64 value)
@@ -205,14 +212,17 @@ cc::vector<byte> module_builder::write(cc::string_view triple, cc::string_view l
 
     auto const global_count = u32(_globals.size());
     auto const constant_count = u32(_constants.size());
+    auto const argument_count = u32(_arguments.size());
     auto const number_of = [&](u32 raw) -> u32
     {
         auto const v = ll_value(raw);
+        if (ll_is_argument(v))
+            return global_count + constant_count + ll_index(v);
         if (ll_is_constant(v))
             return global_count + ll_index(v);
         if (ll_is_global(v))
             return ll_index(v);
-        return global_count + constant_count + raw;
+        return global_count + constant_count + argument_count + raw;
     };
 
     out.enter_block(k_block_module, 3);
@@ -319,7 +329,8 @@ cc::vector<byte> module_builder::write(cc::string_view triple, cc::string_view l
     {
         if (!g.is_function)
         {
-            out.record(7, {u64(u32(g.type)), 2u | (u64(g.address_space) << 2), 0u, 0u, log2_plus_one(g.alignment), 0u});
+            out.record(7, {u64(u32(g.type)), (g.is_constant ? 3u : 2u) | (u64(g.address_space) << 2), 0u, 0u,
+                           log2_plus_one(g.alignment), 0u});
             continue;
         }
         u64 const fields[] = {
@@ -371,6 +382,12 @@ cc::vector<byte> module_builder::write(cc::string_view triple, cc::string_view l
                     scratch.push_back(number_of(_constant_args[c.first + k]));
                 out.record(k_cst_aggregate, scratch);
                 break;
+            case constant_code::bitcast:
+            {
+                auto const source = ll_value(_constant_args[c.first]);
+                out.record(k_cst_cast, {k_cast_bitcast, u64(u32(type_of(source))), u64(number_of(u32(source)))});
+                break;
+            }
             }
         }
         out.exit_block();
@@ -437,7 +454,7 @@ cc::vector<byte> module_builder::write(cc::string_view triple, cc::string_view l
         auto const end_block = body < _later_bodies.size() ? _later_bodies[body] : u32(_blocks.size());
         out.enter_block(k_block_function, 4);
         out.record(k_inst_declareblocks, {u64(end_block - first_block)});
-        auto next = global_count + constant_count;
+        auto next = global_count + constant_count + argument_count;
         auto values_here = u32(0);
         auto const local_number = [&](u32 raw) -> u32
         {
@@ -447,12 +464,16 @@ cc::vector<byte> module_builder::write(cc::string_view triple, cc::string_view l
         auto const relative = [&](u32 raw) -> u64 { return u64(next - local_number(raw)); };
         auto const signed_relative = [&](u32 raw) -> u64 { return signed_vbr(i64(next) - i64(local_number(raw))); };
         auto const block_number = [&](u32 raw) -> u64 { return u64(raw - first_block); };
+        auto marked = cc::vector<u32>();
+        auto position = u32(0);
         for (auto block_at = first_block; block_at < end_block; ++block_at)
         {
             auto const& b = _blocks[block_at];
-            for (auto i = b.first; i < b.first + b.count; ++i)
+            for (auto i = b.first; i < b.first + b.count; ++i, ++position)
             {
                 auto const& inst = _instructions[i];
+                if (inst.code == inst_code::element_pointer && inst.sub == k_ll_nonuniform)
+                    marked.push_back(position);
                 auto const args = cc::span<u32 const>(_args.data() + inst.first, isize(inst.count));
                 switch (inst.code)
                 {
@@ -562,6 +583,13 @@ cc::vector<byte> module_builder::write(cc::string_view triple, cc::string_view l
                     ++values_here;
                 }
             }
+        }
+        if (!marked.empty())
+        {
+            out.enter_block(k_block_metadata_attachment, 3);
+            for (auto const at : marked)
+                out.record(k_md_attachment, {u64(at), u64(k_kind_nonuniform), u64(_nonuniform_node - 1)});
+            out.exit_block();
         }
         out.exit_block();
         first_block = end_block;
