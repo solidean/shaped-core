@@ -75,7 +75,7 @@
 
 /// An affine map of space: a linear part and a translation, as three rows of four.
 /// It translates a `pos3` and leaves a `vec3` untranslated, so the type decides the w.
-/// A value of function bodies alone, which no GPU memory holds yet.
+/// In GPU memory its three rows stand back to back, 48 bytes, as an instance's transform does.
 @shadowable(false)
 @builtin struct affine3
 

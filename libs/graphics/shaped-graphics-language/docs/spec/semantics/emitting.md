@@ -491,7 +491,7 @@ fn main_ps(p: pixel_input) -> target_ {
   On DXIL it is one `dx.op.allocateRayQuery` where it begins, with the flags every trace of it states.
   A read of a query gives a value and goes where nothing uses it, but it neither moves nor merges, since each is valid only in the state the query is in where it stands.
   A row of a hit's transform is taken from the whole transform, which SPIR-V hands over by column and DXIL by row and column.
-  An `affine3` is a value of three rows, and no native route holds one in GPU memory yet.
+  An `affine3` is a value of three rows, and GPU memory holds one as EMIT-257 writes it.
   A query of an entry point that states opacity micromaps is EMIT-184's.
   What is undefined on one way into a merge takes the other way's value, since DXIL's validator refuses `undef` in a `select`.
 * **EMIT-244** A ray-tracing stage of a native route is one entry point of its target's own, so a pipeline may take each stage from either route.
@@ -651,6 +651,10 @@ So `{float3; float}` is written with `packed_float3`: the `float` is at byte 12 
 * **EMIT-255** HLSL writes a double's bits (CHK-517) as functions of the text, `sgl_double_bits` over `asuint` and `sgl_double_from_bits` over `asdouble`.
   `asuint` hands a double's words to two out parameters, which no expression can take.
   A native route bitcasts: SPIR-V's `OpBitcast` between a double and a `uint2`, and DXIL's `splitDouble` and `makeDouble` (EMIT-196).
+* **EMIT-257** Every target writes an `affine3` in GPU memory as CHK-518's three rows.
+  HLSL declares it `row_major float3x4`, and a buffer of them holds each in a struct of one field: DXC's DXIL drops a `row_major` written in a buffer's template.
+  WGSL's `mat3x4f` and MSL's `float3x4` hold the rows as their own columns.
+  A native route holds it as a matrix of three `float4` columns, one per row, at a stride of 16, which SPIR-V decorates `ColMajor`, as DXC does for HLSL's `row_major float3x4`.
 * **EMIT-254** `fma` is each target's own: HLSL's `fma` of a double and `mad` of a float or a half, and WGSL's and MSL's `fma`.
   A native route writes DXIL's `dx.op.fma` of a double and `dx.op.fmad` of the others, and SPIR-V's GLSL.std.450 `Fma`, as DXC writes them.
   Only a double's on DXIL is stated to round once, as HLSL's documentation of `fma` says, and every other may round the product first.

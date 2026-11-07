@@ -436,6 +436,7 @@ if(SC_BUILD_TESTS)
             tests/barrier/sticky-array-test.cc
             tests/compute/compute-coherence-test.cc
             tests/compute/compute-float-specials-test.cc
+            tests/compute/compute-affine-memory-test.cc
             tests/compute/compute-diagnostic-routes-test.cc
             tests/compute/compute-diagnostics-test.cc
             tests/compute/compute-sixteen-bit-test.cc
@@ -482,6 +483,7 @@ if(SC_BUILD_TESTS)
                 module_marking.sgl:*
                 module_tinting.sgl:*
                 double_values.sgl:*
+                affine_memory.sgl:*
                 quads.sgl:*
                 textures.sgl:*
                 ping_pong.sgl:*

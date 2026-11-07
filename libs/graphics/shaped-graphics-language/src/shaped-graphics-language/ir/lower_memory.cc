@@ -213,6 +213,9 @@ i32 lowering::column_stride(type_id t, address_space space)
     while (check::is_valid(at) && _m.builtin_type_of(at) == nullptr && _m.at(at).kind == check::type_kind::array)
         at = _m.at(at).element;
     auto const* const record = check::is_valid(at) ? _m.builtin_type_of(at) : nullptr;
+    // CHK-518: an affine3's rows, held as the columns of its value, stand 16 bytes apart
+    if (record != nullptr && record->name == "affine3")
+        return 16;
     if (record == nullptr || !record->name.starts_with("mat"))
         return 0;
     auto const columns = record->name == "mat2" ? 2 : record->name == "mat3" ? 3 : 4;
@@ -221,15 +224,8 @@ i32 lowering::column_stride(type_id t, address_space space)
 
 type_ref lowering::memory_type(type_id t, address_space space)
 {
-    if (auto const* const record = _m.builtin_type_of(t))
-    {
-        if (record->name == "affine3")
-        {
-            unsupported("an affine3 in GPU memory");
-            return type_ref::none;
-        }
+    if (_m.builtin_type_of(t) != nullptr)
         return value_type(t);
-    }
     auto const& info = _m.at(t);
     if (info.kind == check::type_kind::atomic || info.kind == check::type_kind::enumeration)
         return value_type(t);

@@ -159,10 +159,12 @@ use view
   A matrix has no subscript `m[i]`: HLSL's is a row and WGSL's and MSL's a column, so the name says which one is read.
   An index outside the matrix has no value, as EVAL-84 has it of a call no target defines.
 * **CHK-408** `affine3` is the prelude's affine map of space: a linear part and a translation, held as three rows of four `float`s ([why](why/checking.md#chk-408)).
-  It is a value of function bodies alone, as `mat3` is (CHK-397).
+  GPU memory holds it as CHK-518 states, and no stage edge carries one.
   `affine3.from_rows(r0, r1, r2)` makes one of its three `float4` rows, and `a.row(i)` reads one back, as CHK-407 reads a matrix's.
   `a * p` of a `pos3` translates it and gives a `pos3`, `a * v` of a `vec3` does not and gives a `vec3`, and `a * v` of a `float4` takes its own `w` and gives a `float3`.
   A ray-tracing stage's hit, candidate or box holds its placement as `object_to_world` and `world_to_object`, and crosses no stage edge for them: the flat tree builds it in place.
+* **CHK-518** An `affine3` in GPU memory is its three rows of four `float`s, 16 bytes apart: 48 bytes at an alignment of 16 ([why](why/checking.md#chk-518)).
+  That holds in a constant block, in a buffer and in a struct alike, and the host fills it as `slib::gpu_affine3`.
 * **CHK-233** A struct and an enum each have a **type scope**: the properties and functions declared in its block, and its extensions (CHK-237).
   A field and a case are members of the type, and no function.
 * **CHK-234** A `fun` in a type's block whose first parameter is `self` is a **method**, and `self` is a parameter of that type; `mut self` is CHK-48.

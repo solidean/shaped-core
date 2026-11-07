@@ -310,6 +310,9 @@ public:
         // Stated on every matrix, so no `-Zpr` and no `#pragma pack_matrix` can turn one around.
         if (type == "float4x4" || type == "float4x3" || type == "float3x3")
             out += "column_major ";
+        // CHK-518: an affine3 is its rows, which HLSL's `float3x4` holds as rows
+        if (in_memory && type == "float3x4")
+            out += "row_major ";
         // EMIT-209: a per-triangle value is flat, and the pixel stage's SPIR-V input says it comes per primitive
         if (owner != nullptr && owner->role == struct_role::primitive_link && p.e.entry_stage == stage::pixel)
         {
@@ -451,8 +454,12 @@ public:
                 out.appendf("[[vk::offset({})]] ", f.offset);
             auto const is_matrix
                 = f.type == "float4x4" || f.type == "float4x3" || f.type == "float3x3" || f.type == "float2x2";
-            out.appendf("{}{} {}{};\n", is_matrix ? "column_major " : "", f.type, f.name,
-                        f.count > 0 ? cc::format("[{}]", f.count) : cc::string());
+            if (is_matrix)
+                out += "column_major ";
+            // CHK-518: an affine3 is its rows
+            if (f.type == "float3x4")
+                out += "row_major ";
+            out.appendf("{} {}{};\n", f.type, f.name, f.count > 0 ? cc::format("[{}]", f.count) : cc::string());
         }
         out += "};\n\n";
     }
