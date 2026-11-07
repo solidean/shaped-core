@@ -204,7 +204,7 @@ ASYNC_INVOCABLE_TEST("sr - bloom matches its definition, keeps total light, and 
     auto const out = co_await bloomed(ctx, room, settings);
     auto const exact = exact_bloom(room, settings.strength, settings.knee);
 
-    // The chain is an approximation, so it answers to the final image, in most pixels, as docs/bloom.md states.
+    // The chain is an approximation, so it answers to the final image, in most pixels, as libs/graphics/shaped-rendering/docs/bloom.md states.
     CHECK(relative_error_at(out, exact, 0.5) < 0.01);
     CHECK(relative_error_at(out, exact, 0.99) < 0.05);
 

@@ -12,7 +12,7 @@
 ///
 /// `S(L)` is the light above a soft knee, and `k` a kernel of four Gaussians that sums to 1, sized by the image's height.
 /// A pixel gives up what it scatters, so total light is unchanged, and light below the knee only gains what lands on it.
-/// docs/bloom.md is the definition, and how close this mip chain comes to it.
+/// libs/graphics/shaped-rendering/docs/bloom.md is the definition, and how close this mip chain comes to it.
 class sr::bloom_routine : public sg::render_routine<bloom_routine>
 {
 public:

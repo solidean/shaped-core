@@ -16,7 +16,7 @@ enum class sr::display_curve : sr::u8
     neutral = 2,
 };
 
-/// The light that scatters in a lens, which `sr::bloom_routine` applies; docs/bloom.md is the definition.
+/// The light that scatters in a lens, which `sr::bloom_routine` applies; libs/graphics/shaped-rendering/docs/bloom.md is the definition.
 struct sr::bloom_settings
 {
     /// The share of the light above the knee that scatters; 0 is off.

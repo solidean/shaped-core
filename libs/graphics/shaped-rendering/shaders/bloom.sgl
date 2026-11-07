@@ -1,5 +1,5 @@
 // Bloom: a share of the light above a knee scatters through a wide kernel, and each pixel gives up what it scatters.
-// Paired with sr::bloom_routine; docs/bloom.md is the definition this approximates.
+// Paired with sr::bloom_routine; libs/graphics/shaped-rendering/docs/bloom.md is the definition this approximates.
 //
 // `first_cs` takes the light that scatters down to half size, `down_cs` halves it again per level, `up_cs` adds each level's weighted light on the way back, and `finish_cs` writes the image.
 // Past the first pass only the routine's own images are read, in a filterable format, so each tap is bilinear and the sampler mirrors at the edges, which keeps the light in frame.
