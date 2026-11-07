@@ -21,8 +21,10 @@ struct temp_dir
 {
     std::filesystem::path path;
 
-    explicit temp_dir(char const* name) : path(cc::temp_file_path(name).c_str())
+    explicit temp_dir(char const* name)
     {
+        auto const unique = cc::temp_file_path(name);
+        path = std::filesystem::path(unique.data(), unique.data() + unique.size());
         std::error_code ec;
         std::filesystem::remove_all(path, ec);
         std::filesystem::create_directories(path, ec);
