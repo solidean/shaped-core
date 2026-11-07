@@ -117,6 +117,12 @@ bool view_store::is_accumulation_converged(view_id id, cc::optional<u32> samples
     return st != nullptr && impl::is_accumulation_converged(*st, samples);
 }
 
+bool view_store::is_auto_exposure_read(view_id id)
+{
+    auto* const st = _entries.get_ptr(id);
+    return st == nullptr || impl::is_auto_exposure_read(*st);
+}
+
 void view_store::restart_accumulation(view_id id)
 {
     auto* const st = _entries.get_ptr(id);
@@ -146,6 +152,22 @@ void restart_accumulation(view_state& state)
 
     // A cut is what throws the rest away on the view's next trace: the temporal histories and the reprojection camera.
     state.camera_cut_pending = true;
+
+    // The image a meter was awaited for is gone with its samples.
+    for (auto& exposure : state.auto_exposure)
+        exposure.meter_awaited = 0;
+}
+
+bool is_auto_exposure_read(view_state& state)
+{
+    auto read = true;
+    for (auto& exposure : state.auto_exposure)
+    {
+        if (exposure.meter_awaited == 0)
+            exposure.meter_awaited = exposure.meters_started + 1;
+        read = read && exposure.meters_landed >= exposure.meter_awaited;
+    }
+    return read;
 }
 
 namespace

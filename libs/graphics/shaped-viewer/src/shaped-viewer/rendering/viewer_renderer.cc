@@ -57,15 +57,17 @@ void meter_auto_exposure(sg::command_list& cmd,
             return;
         auto const partials = state.pending.try_get_data();
         state.pending = {};
+        ++state.meters_landed;
         if (partials.has_value())
         {
             auto const average = sr::exposure_meter_routine::average_luminance(
                 cc::span<tg::vec2f const>(partials.value().data(), partials.value().size()));
-            if (average.has_value())
+            // At the meter's floor nothing was drawn yet, as while the shaders compile, and such a reading would prime the exposure about 11 stops over.
+            if (average.has_value() && average.value() > 1.01f * sr::exposure_meter_routine::darkest)
             {
-                // Held to a range a real image needs, so a black frame while the shaders compile does not throw it to infinity.
                 auto const target = cc::clamp(sr::exposure_for_average(average.value()), -24.0f, 24.0f);
-                state.exposure = state.primed ? state.exposure + (target - state.exposure) * auto_exposure_rate : target;
+                auto const rate = store.snaps_auto_exposure() ? 1.0f : auto_exposure_rate;
+                state.exposure = state.primed ? state.exposure + (target - state.exposure) * rate : target;
                 state.primed = true;
             }
         }
@@ -73,7 +75,10 @@ void meter_auto_exposure(sg::command_list& cmd,
 
     auto const partials = sr::exposure_meter_routine::execute(cmd, image);
     if (partials.has_value())
+    {
         state.pending = cmd.download.data_from_buffer(partials.value());
+        ++state.meters_started;
+    }
 }
 
 /// `draws` with every automatic exposure resolved: the layer's adapted exposure plus its compensation.
