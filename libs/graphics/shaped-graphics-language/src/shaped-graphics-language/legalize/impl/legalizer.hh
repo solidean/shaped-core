@@ -38,6 +38,12 @@ using stmt_list = cc::vector<flat_stmt_id>;
 /// LEGAL-70: every print of a finished core tree as statements, so what folding removed gets no site.
 [[nodiscard]] stmt_list expand_prints(flat_builder& out, stmt_list const& body, legalize_options const& options);
 
+/// LEGAL-71: whether `e` holds a shadow of workgroup memory, or zeroes that memory, which `expand_workgroup` writes.
+[[nodiscard]] bool has_workgroup_shadow(flat_entry_point const& e);
+
+/// LEGAL-71: the shadow's reads and marks as atomics, and the prologue ahead of `body`, of a finished core tree.
+[[nodiscard]] stmt_list expand_workgroup(flat_builder& out, stmt_list const& body, legalize_options const& options);
+
 /// The prelude's declaration of reserved binding `name`, or none where this prelude holds no such thing.
 [[nodiscard]] symbol_id reserved_symbol_of(checked_module const& m, cc::string_view name);
 

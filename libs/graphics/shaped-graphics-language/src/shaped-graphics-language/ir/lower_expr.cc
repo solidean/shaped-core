@@ -250,6 +250,7 @@ value_ref lowering::expr(flat_expr_id id)
                 unsupported("a resource used as a value");
         },
         [&](flat_file_sampler const&) { unsupported("a file sampler used as a value"); },
+        [&](flat_written_word const&) { unsupported("a word of the workgroup shadow used as a value"); },
         [&](flat_buffer_element const&)
         {
             if (auto const memory = place_of(id); memory.has_value())

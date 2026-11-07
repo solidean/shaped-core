@@ -146,9 +146,10 @@ flat_expr_id flat_builder::construct(type_id type, cc::span<flat_expr_id const> 
 
 flat_expr_id flat_builder::binding_member(symbol_id binding, i32 member)
 {
-    auto const members = m.at(m.bindings[m.at(binding).info].members);
+    auto const& info = m.bindings[m.at(binding).info];
+    auto const members = m.at(info.members);
     auto const type = member >= 0 && member < members.size() ? members[member].type : checked_module::error_type;
-    return add_expr(type, flat_binding_member{.binding = binding, .member = member});
+    return add_expr(type, flat_binding_member{.binding = binding, .member = member, .is_workgroup = info.is_workgroup});
 }
 
 flat_expr_id flat_builder::buffer_element(flat_expr_id buffer, flat_expr_id index)

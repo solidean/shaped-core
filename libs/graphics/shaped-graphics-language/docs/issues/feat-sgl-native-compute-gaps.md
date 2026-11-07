@@ -19,15 +19,14 @@ A body or a type in a target's own text, and an `affine3` in GPU memory.
 | gap | rule | where |
 |---|---|---|
 | 64-bit atomics on DXIL, on a buffer and in workgroup memory | EMIT-247 | the DXIL writer |
-| EMIT-229's workgroup prologue, under every robustness profile | EMIT-248 | shared lowering |
+| EMIT-229's workgroup prologue, under every robustness profile | EMIT-248, LEGAL-71 | legalize |
 | DXIL's shuffles, ballot, quad reads and inclusive folds | EMIT-249 | the DXIL writer |
 | a float atomic with no device add | EMIT-250 | shared lowering |
 | `bool32` | EMIT-251 | shared lowering |
 | texel atomics, in every image shape | EMIT-252 | `op::texel_pointer`, and a texel place on DXIL |
 | a `sample` or a `gather` offset | EMIT-253 | both writers |
 
-The prologue is a copy: the text route still writes EMIT-229 by hand, and lowering writes it again.
-Like `print` before LEGAL-70, it belongs in legalize, as flat statements over a workgroup `sgl_written` every route then lowers.
+The prologue is written once: legalize writes it as statements over the shadow's words (LEGAL-71), and every route lowers them.
 
 ## Measured on 2026-11-07
 

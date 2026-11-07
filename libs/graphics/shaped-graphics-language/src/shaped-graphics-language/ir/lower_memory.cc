@@ -490,6 +490,11 @@ cc::optional<place> lowering::chain_of(flat_expr_id id, cc::vector<u32>& chain)
         chain.push_back(u32(uint_constant(u32(block->block_member_of[b->member]))));
         return place{.pointer = bound_block(*block), .type = x.type};
     }
+    if (auto const* const w = x.node.try_as<flat_written_word>())
+    {
+        chain.push_back(u32(expr(w->word)));
+        return place{.pointer = written_shadow(), .type = x.type};
+    }
     if (auto const* const e = x.node.try_as<flat_buffer_element>())
     {
         auto const* const b = _e.at(e->buffer).node.try_as<flat_binding_member>();

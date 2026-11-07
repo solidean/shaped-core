@@ -516,6 +516,8 @@ struct compactor
         }
         else if (auto* const length = copy.node.try_as<flat_buffer_length>())
             length->buffer = expr(length->buffer, depth + 1);
+        else if (auto* const written = copy.node.try_as<flat_written_word>())
+            written->word = expr(written->word, depth + 1);
         else if (auto* const array_element = copy.node.try_as<flat_element>())
         {
             array_element->object = expr(array_element->object, depth + 1);
@@ -702,14 +704,18 @@ flat_entry_point sgl::check::legalize(checked_module const& m,
                                       legalize_options const& options)
 {
     auto core = core_form_of(m, given, options);
-    if (!options.expands_prints)
-        return core;
     auto prints = false;
-    for (auto const& s : core.stmts)
-        prints = prints || s.node.is<flat_print>();
-    if (!prints)
+    if (options.expands_prints)
+        for (auto const& s : core.stmts)
+            prints = prints || s.node.is<flat_print>();
+    auto const shadows = options.expands_workgroup && impl::has_workgroup_shadow(core);
+    if (!prints && !shadows)
         return core;
     auto out = flat_builder::extend(m, cc::move(core));
-    auto const body = impl::expand_prints(out, ids_of(out.e, out.e.body), options);
+    auto body = ids_of(out.e, out.e.body);
+    if (prints)
+        body = impl::expand_prints(out, body, options);
+    if (shadows)
+        body = impl::expand_workgroup(out, body, options);
     return compacted(m, out.e, body);
 }

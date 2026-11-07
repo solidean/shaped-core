@@ -1512,11 +1512,6 @@ sgl::emit::impl::plan sgl::emit::impl::make_plan(check::checked_module const& m,
             for (auto i = isize(0); i < e.stage_inputs.size(); ++i)
                 if (e.stage_inputs[i].local == ref->local)
                     result.stage_input_read[i] = true;
-    // EMIT-229: the prologue that clears the shadow or zeroes workgroup memory strides by this index
-    if (e.written_words > 0 || e.zeroes_workgroup)
-        for (auto i = isize(0); i < e.stage_inputs.size(); ++i)
-            if (e.stage_inputs[i].local == e.workgroup_index)
-                result.stage_input_read[i] = true;
 
     result.local_flags = cc::vector<cc::optional<u32>>::create_defaulted(e.locals.size());
     auto flags_known = cc::vector<bool>::create_filled(e.locals.size(), true);

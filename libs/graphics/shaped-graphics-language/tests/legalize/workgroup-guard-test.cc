@@ -7,7 +7,7 @@ using namespace sgl_test;
 using namespace sgl::check;
 
 // LEGAL-69: a profile shadows workgroup memory with a bit per scalar, set where one is stored and tested where one is
-// read, and `define` zeroes it instead; EMIT-229 is the text's side.
+// read, and `define` zeroes it instead; LEGAL-71 writes the shadow's atomics and the prologue, and EMIT-229 declares it.
 
 namespace
 {
@@ -225,14 +225,71 @@ TEST("sgl guards - every target writes the shadow, and every target but WGSL cle
             auto const text = text_of(k_reads_a_hole, target, guard);
             auto const declares = text.contains("sgl_written[1]") || text.contains("sgl_written: array<atomic<u32>, 1>");
             CHECK(declares).dump("text", text);
-            CHECK(text.contains("sgl_written_bits")).dump("text", text);
-            // WGSL's workgroup memory starts at zero
-            auto const clears = text.contains("+= 4u)");
+            // the bits a range takes are the tree's own arithmetic, and no target writes a helper for them
+            CHECK(!text.contains("sgl_written_bits")).dump("text", text);
+            // WGSL's workgroup memory starts at zero, so only it has no stride of the four invocations
+            auto const clears = text.contains("(k) * 4u");
             CHECK(clears == !is_wgsl).dump("text", text);
         }
         auto const defined = text_of(k_reads_a_hole, target, undefined_guard::define);
         CHECK(!defined.contains("sgl_written")).dump("text", defined);
-        auto const zeroes = defined.contains("+= 4u)");
+        auto const zeroes = defined.contains("(k) * 4u");
         CHECK(zeroes == !is_wgsl).dump("text", defined);
+    }
+}
+
+TEST("sgl guards - the last step writes the shadow's reads and marks as atomics on its words, behind the prologue "
+     "(LEGAL-71)")
+{
+    auto const checked = check_sources(read_prelude(), k_reads_a_hole);
+    REQUIRE(reports_of(checked) == "");
+    auto const& m = checked.module;
+    for (auto const starts_zeroed : {false, true})
+    {
+        auto const core = legalize(m, m.entry_points[0],
+                                   {.expands_workgroup = true,
+                                    .workgroup_starts_zeroed = starts_zeroed,
+                                    .guards_undefined = undefined_guard::abort});
+        CHECK(!find_core_violation(m, core).has_value());
+        auto const dump = dump_entry_point(m, core);
+        // no call of the shadow is left for a target to write
+        CHECK(!dump.contains("workgroup_written")).dump("core", dump);
+        CHECK(!dump.contains("workgroup_mark_written")).dump("core", dump);
+        CHECK(dump.contains("(written ")).dump("core", dump);
+        CHECK(dump.contains("bit_or")).dump("core", dump);
+        // the prologue's barrier comes ahead of the body's own; where memory starts at zero there is no prologue
+        auto barriers = 0;
+        auto const text = cc::string_view(dump);
+        for (auto at = text.find("workgroup_barrier"); at >= 0; at = text.find("workgroup_barrier", at + 1))
+            ++barriers;
+        CHECK(barriers == (starts_zeroed ? 1 : 2)).dump("core", dump);
+    }
+}
+
+TEST("sgl guards - define zeroes a struct holding an atomic and a matrix, piece by piece, on every target (LEGAL-71)")
+{
+    constexpr cc::string_view k_mixed = "struct cell:\n"
+                                        "    m: mat3\n"
+                                        "    v: float2\n"
+                                        "\n"
+                                        "@workgroup binding tile:\n"
+                                        "    cells: cell[8]\n"
+                                        "    last: cell\n"
+                                        "    counts: atomic[uint][8]\n"
+                                        "    count: atomic[uint]\n"
+                                        "\n"
+                                        "binding work:\n"
+                                        "    result: mut buffer[float]\n"
+                                        "\n"
+                                        "@compute(4) fun cs(@local_thread_index li: int){tile, work}:\n"
+                                        "    workgroup_barrier()\n"
+                                        "    let n = tile.counts[li].add(1u) + tile.count.load()\n"
+                                        "    let column = tile.cells[li].m * float3(1.0)\n"
+                                        "    work.result[li] = column.y + tile.last.v.x + float(n)\n";
+    for (auto const target : sgl::emit::all_targets())
+    {
+        auto const text = text_of(k_mixed, target, undefined_guard::define);
+        // every target but WGSL zeroes it in the stride, and an atomic only by its store
+        CHECK(text.contains("(k) * 4u") == (target != sgl::emit::target::wgsl)).dump("text", text);
     }
 }

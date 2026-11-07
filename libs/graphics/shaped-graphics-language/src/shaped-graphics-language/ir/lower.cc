@@ -130,8 +130,6 @@ void lowering::run()
         return declare_stage_elements();
     }
     _out.sees_micromaps = _e.features.has(check::feature::opacity_micromap);
-    if ((_e.written_words > 0 || _e.zeroes_workgroup) && _e.entry_stage != stage::compute)
-        return unsupported("the workgroup prologue of a stage that is no compute stage");
 
     open_block(new_block());
     if (is_raster)
@@ -150,7 +148,6 @@ void lowering::run()
     else
     {
         declare_stage_inputs();
-        workgroup_prologue();
     }
     statements(_e.body);
     if (!_is_terminated)
@@ -185,83 +182,6 @@ void lowering::declare_stage_inputs()
     }
 }
 
-void lowering::workgroup_prologue()
-{
-    if (_e.written_words <= 0 && !_e.zeroes_workgroup)
-        return;
-    if (!check::is_valid(_e.workgroup_index) || !is_valid(_locals[index_of(_e.workgroup_index)]))
-        return unsupported("a workgroup prologue with no invocation index");
-    auto const index = add(op::bitcast, _uint, {_locals[index_of(_e.workgroup_index)]});
-    auto const group = u32(_e.workgroup[0] * _e.workgroup[1] * _e.workgroup[2]);
-    if (_e.written_words > 0)
-    {
-        auto const shadow = written_shadow();
-        strided(index, u32(_e.written_words), group,
-                [&](value_ref word)
-                {
-                    auto const at = add(op::access_chain, pointer_type(_uint, storage::workgroup), {shadow, word});
-                    add(op::store, type_ref::none, {at, uint_constant(0)});
-                });
-    }
-    if (_e.zeroes_workgroup)
-        for (auto i = isize(0); i < _plan.workgroup.size(); ++i)
-        {
-            auto const memory = bound_workgroup(i32(i));
-            auto const& t = _m.at(_plan.workgroup[i].type);
-            if (_m.builtin_type_of(_plan.workgroup[i].type) == nullptr && t.kind == check::type_kind::array)
-            {
-                auto const element = value_type(t.element);
-                strided(index, u32(t.count), group,
-                        [&](value_ref at)
-                        {
-                            auto const place
-                                = add(op::access_chain, pointer_type(element, storage::workgroup), {memory, at});
-                            add(op::store, type_ref::none, {place, null_of(element)});
-                        });
-                continue;
-            }
-            auto const first = new_block();
-            auto const merge = new_block();
-            set_merge(merge_kind::selection, merge);
-            branch_if(add(op::ieq, _bool, {index, uint_constant(0)}), first, merge);
-            open_block(first);
-            add(op::store, type_ref::none, {memory, null_of(value_type(_plan.workgroup[i].type))});
-            branch(merge);
-            open_block(merge);
-        }
-    // no invocation marks a scalar before every one has cleared its words
-    add(op::control_barrier, type_ref::none, cc::span<u32 const>(), u8(barrier::workgroup));
-}
-
-void lowering::strided(value_ref first, u32 count, u32 step, cc::function_ref<void(value_ref)> body)
-{
-    auto const counter = add_local(_uint, "strided");
-    add(op::store, type_ref::none, {counter, first});
-    auto const header = new_block();
-    auto const test = new_block();
-    auto const inner = new_block();
-    auto const next = new_block();
-    auto const merge = new_block();
-    branch(header);
-
-    open_block(header);
-    set_merge(merge_kind::loop, merge, next);
-    branch(test);
-
-    open_block(test);
-    branch_if(add(op::ult, _bool, {add(op::load, _uint, {counter}), uint_constant(count)}), inner, merge);
-
-    open_block(inner);
-    body(add(op::load, _uint, {counter}));
-    branch(next);
-
-    open_block(next);
-    add(op::store, type_ref::none,
-        {counter, add(op::iadd, _uint, {add(op::load, _uint, {counter}), uint_constant(step)})});
-    branch(header);
-    open_block(merge);
-}
-
 value_ref lowering::written_shadow()
 {
     if (!is_valid(_written))
@@ -270,38 +190,6 @@ value_ref lowering::written_shadow()
         _written = add_global({.type = pointer_type(words, storage::workgroup)}, "sgl_written");
     }
     return _written;
-}
-
-value_ref lowering::shadow_call(flat_call const& c, builtins::function_record const& record)
-{
-    auto args = cc::vector<value_ref>();
-    for (auto const a : _e.at(c.arguments))
-        args.push_back(expr(a));
-    auto const word
-        = [&] { return add(op::access_chain, pointer_type(_uint, storage::workgroup), {written_shadow(), args[0]}); };
-    if (record.name == "workgroup_written_word")
-        return add(op::atomic_load, _uint, {word()});
-    if (record.name == "workgroup_mark_written")
-    {
-        add(op::atomic_or, _uint, {word(), args[1]});
-        return value_ref::none;
-    }
-    // the bits of word `word` that the scalars `first ..< first + count` take, 0 where it holds none
-    auto const base = add(op::shift_left, _uint, {args[0], uint_constant(5)});
-    auto const end = add(op::iadd, _uint, {args[1], args[2]});
-    auto const top = add(op::iadd, _uint, {base, uint_constant(32)});
-    auto const lo = add(op::select, _uint, {add(op::ugt, _bool, {args[1], base}), args[1], base});
-    auto const hi = add(op::select, _uint, {add(op::ult, _bool, {end, top}), end, top});
-    auto const holds = add(op::ugt, _bool, {hi, lo});
-    auto const n = add(op::select, _uint, {holds, add(op::isub, _uint, {hi, lo}), uint_constant(0)});
-    // a shift of 32 has no value on either target, so the whole word is its own case
-    auto const short_n = add(op::select, _uint, {add(op::ult, _bool, {n, uint_constant(32)}), n, uint_constant(0)});
-    auto const low_bits
-        = add(op::isub, _uint, {add(op::shift_left, _uint, {uint_constant(1), short_n}), uint_constant(1)});
-    auto const mask
-        = add(op::select, _uint, {add(op::uge, _bool, {n, uint_constant(32)}), uint_constant(0xffffffffu), low_bits});
-    auto const shift = add(op::select, _uint, {holds, add(op::isub, _uint, {lo, base}), uint_constant(0)});
-    return add(op::shift_left, _uint, {mask, shift});
 }
 
 void lowering::statements(ast::range_of<flat_stmt_id> range)
