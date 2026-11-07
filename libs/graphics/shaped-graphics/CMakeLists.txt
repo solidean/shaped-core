@@ -185,11 +185,6 @@ endif()
 # Public: a backend binds the debug window by it, and slib asks SGL for records by it.
 target_compile_definitions(shaped-graphics PUBLIC SG_SHADER_DIAGNOSTICS=$<BOOL:${SC_SHADER_DIAGNOSTICS}>)
 
-sc_declare_pch_tier(SG EXTENDS TG HEADERS <shaped-graphics/all.hh>)
-
-# The most include-bound target in the repo at 90 %, and the one a PCH helps most: 0.26 of the no-PCH compile time.
-sc_target_pch(shaped-graphics SG)
-
 # Enable conforming preprocessor for MSVC
 target_compile_options(shaped-graphics
     PUBLIC
@@ -373,8 +368,6 @@ if(SC_BUILD_TESTS)
         ${_sg_backends}
         nexus
     )
-
-    sc_target_pch(shaped-graphics-test SG NEXUS) # 0.36
 
     # A shader package declared by a *consumer* of sg. shaped-graphics itself does not depend on the
     # shader library -- the arrow points slib -> sg -- but a target built on sg may declare its own

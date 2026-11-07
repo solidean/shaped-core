@@ -136,6 +136,10 @@ public:
     [[nodiscard]] cc::string const& failure() const { return _failure; }
     [[nodiscard]] module_builder const& module() const { return _m; }
     [[nodiscard]] module_summary const& summary() const { return _summary; }
+    /// The program carries a line table, so the container holds the module once more with its debug info (EMIT-257).
+    [[nodiscard]] bool has_debug_info() const { return !_p.lines.is_empty(); }
+    /// What the debug name part calls the program's debug info.
+    [[nodiscard]] cc::string debug_name() const { return cc::string(_p.entry_name) + ".pdb"; }
 
 private:
     /// Where an access reaches.
@@ -248,6 +252,12 @@ private:
     void operation(u32 index);
     void terminator(instruction const& i);
     void fill_phis();
+
+    // ---- writer_lines.cc (EMIT-257)
+    /// What the instructions written for `i` carry as their location: its statement, where the line table names one.
+    void locate(instruction const& i);
+    /// The debug info the located instructions name: their files, scopes and inlined calls, after the passes ran.
+    void write_debug_info();
     [[nodiscard]] bool is_reachable(block_ref b) const { return _reachable[isize(b)]; }
     void find_reachable();
 

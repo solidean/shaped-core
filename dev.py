@@ -101,15 +101,10 @@ COMMANDS = [
 DEFAULT_BUILD_PRESETS: dict[str, str] = dev.DEFAULT_BUILD_PRESETS
 
 # Debug sibling of each default preset, run by the `test` check alongside the others.
-# Deliberately the *-nopch variants: precompiled headers reach every TU through /FI, so a source that dropped an
-# include it still uses compiles anyway, and nothing else in the repo would catch it — `blessed-includes` checks that
-# an include is allowed, not that a use is covered.
-# The debug leg is the cheapest of the four to give that up on.
-# It only covers Debug, so a Release-only ordering problem still reaches CI's nopch-linux-clang leg first.
 DEFAULT_DEBUG_PRESETS: dict[str, str] = {
-    "Windows": "debug-nopch-clang",
-    "Linux": "debug-nopch-linux-clang",
-    "Darwin": "macos-arm-llvm-debug-nopch",
+    "Windows": "debug-clang",
+    "Linux": "debug-linux-clang",
+    "Darwin": "macos-arm-llvm-debug",
 }
 
 # Release sibling of each default preset — the `test` check's CC_ASSERT-off leg.

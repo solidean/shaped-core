@@ -309,7 +309,6 @@ Both are no-ops when `SC_BUILD_EXAMPLES` is off, so a call site never needs an `
 sc_add_single_file_examples(clean-core
     FILES vector.cc string.cc result.cc map.cc
     LINK clean-core
-    PCH CC_STD NEXUS
 )
 
 # One binary from several sources, for an example with real internal structure.

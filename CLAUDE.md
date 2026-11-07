@@ -305,12 +305,8 @@ The loop is **run `dev.py`, then diagnose with `repo_tools`** — `build_diag` a
 * **`--preset` is a per-subcommand flag — it goes *after* the subcommand**: `uv run dev.py test --preset release-clang`.
 * `uv run dev.py list-presets` / `list-targets` show what's available.
 * `relwithdebinfo-*` has `CC_ASSERT` **on**; `release-*` has it **off**. If you touch assertion-gated code, build a `release-*` preset too.
-* **Per-target precompiled headers** are on by default ([tools/cmake/PrecompiledHeaders.cmake](tools/cmake/PrecompiledHeaders.cmake)).
-  Each library declares the tiers it owns with `sc_declare_pch_tier` in its own CMakeLists, and targets apply them with `sc_target_pch`.
-  A tier's header list belongs next to the headers it names, never centrally.
-  A bigger tier is not automatically better — pick one with `uv run dev.py compile-time pch`, never by eye.
-  [docs/guides/precompiled-headers.md](docs/guides/precompiled-headers.md) is what to read before changing one.
-  The `nopch-*` / `debug-nopch-*` presets set `CMAKE_DISABLE_PRECOMPILE_HEADERS=ON`; `check --all-presets`' debug leg and CI both run one, because a PCH's `/FI` otherwise hides a missing include.
+* **No precompiled headers**: incremental rebuilds after header edits matter more than the cold-build gain ([build-times](docs/notes/build-times.md#precompiled-headers-removed)).
+  Every TU includes what it uses.
 * `SC_EXAMPLE_BACKEND` (default `auto`) picks the graphics backend the `*-example` binaries build against: `auto`, `dx12`, `vulkan`, `metal` or `webgpu`.
   `auto` takes dx12 wherever there is one, so the setting exists to reach the vulkan arm — building `rotating-cube` both ways is how one HLSL source is shown to serve both.
   `sgl-cube` is the same cube from one SGL source, on every backend.
@@ -350,15 +346,15 @@ The loop is **run `dev.py`, then diagnose with `repo_tools`** — `build_diag` a
   `REPORT` logs it as a failed shader assert at the `.sgl` line and ends that invocation, `ABORT` only ends it, and `DEFINE` gives it WGSL's value and goes on.
   See [docs/platforms.md](docs/platforms.md#operations-with-no-value-sc_shader_undefined).
 * `SC_CHECK_WIDE_ARITH` (default OFF) checks typed-geometry's `fixed_int` claims — a result width, a shift amount — at runtime → `TG_CHECK_WIDE_ARITH`.
-  Off by default because they sit in predicate hot loops; the `debug-nopch` presets turn it on, so CI and `check --all-presets` exercise it.
+  Off by default because they sit in predicate hot loops; the clang `debug-*` presets turn it on, so CI and `check --all-presets` exercise it.
   See [docs/platforms.md](docs/platforms.md#wide-arithmetic-checks-sc_check_wide_arith).
-* `SC_SIMD_EXHAUSTIVE_TESTS` (default OFF) tests clean-simd at every lane width instead of one 256-bit type per element → `CIMD_EXHAUSTIVE_TESTS`; the `debug-nopch` presets turn it on.
+* `SC_SIMD_EXHAUSTIVE_TESTS` (default OFF) tests clean-simd at every lane width instead of one 256-bit type per element → `CIMD_EXHAUSTIVE_TESTS`; the clang `debug-*` presets turn it on.
   See [docs/platforms.md](docs/platforms.md#exhaustive-simd-tests-sc_simd_exhaustive_tests).
 * `SC_CHECK_GEOMETRY_SPECIAL_CASES` (default OFF) logs each special case a typed-geometry query assumes away — collinear lines, a ray in a triangle's plane → `TG_CHECK_SPECIAL_CASES`.
-  The `debug-nopch` presets turn it on, so a test that feeds one on purpose declares it with `nx::expect_warning`.
+  The clang `debug-*` presets turn it on, so a test that feeds one on purpose declares it with `nx::expect_warning`.
   See [docs/platforms.md](docs/platforms.md#geometry-special-case-checks-sc_check_geometry_special_cases).
 * `SC_ASYNC_AMBIENT_TRACE` (default OFF) lets nexus name who still holds a test's context when it reports leftover async work → `CC_ASYNC_AMBIENT_TRACE`.
-  Off, nothing is paid; on, every context release pays a load and a compare; the `debug-nopch` presets turn it on.
+  Off, nothing is paid; on, every context release pays a load and a compare; the clang `debug-*` presets turn it on.
   See [docs/platforms.md](docs/platforms.md#who-holds-a-tests-context-sc_async_ambient_trace).
 
 ---
@@ -547,7 +543,6 @@ A stale "no cc:: equivalent yet" reason sends the next author back to the old wa
 | Inspect compile/link flags       | `uv run dev.py info build-flags <target>` (also `link-flags`, `compile-command <file>`) |
 | Compile one glob of files, nothing else | `uv run dev.py build --files "libs/**/tests/**/*.cc"` (via ninja, so parallel and no link) |
 | Find what a header or TU costs to compile | `uv run dev.py compile-time headers/tu "<glob>"` ([compile-times](docs/guides/compile-times.md)) |
-| Find what a target's precompiled header is worth | `uv run dev.py compile-time pch "<glob>"` ([precompiled-headers](docs/guides/precompiled-headers.md)) |
 | See a function's codegen         | `uv run dev.py assembly search/show` ([disassembly](docs/guides/disassembly.md)) |
 | Resolve a wasm stack after the fact | `uv run dev.py symbolize --obj <sidecar> report.txt` ([platforms](docs/platforms.md#wasm-debug-sidecars-sc_wasm_debug_sidecars)) |
 | See what a function *actually ran* | `uv run dev.py assembly trace --target <t> --symbol <s>` ([instruction-tracer](tools/instruction-tracer/readme.md)) |

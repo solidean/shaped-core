@@ -138,6 +138,8 @@ struct sgl::emit::options
     /// How `hlsl-vulkan` and `hlsl-dx12` are written: the text for DXC, or SPIR-V and DXIL from SGL's own layer (ir/ir.hh),
     /// with no compiler behind it.
     native_route native = native_route::text;
+    /// Writes each operation's `.sgl` line into the native route's binary (EMIT-257); `files` must hold the sources.
+    bool native_line_table = false;
 };
 
 /// Either the text or the reasons there is none.

@@ -148,7 +148,8 @@ cc::result<emitted_source, cc::string> emit_text(driver::impl::front_end const& 
                                                  bool asks_software_trace,
                                                  bool weakens_float,
                                                  check::feature_set device_features,
-                                                 emit::native_route native = emit::native_route::text)
+                                                 emit::native_route native = emit::native_route::text,
+                                                 bool native_line_table = false)
 {
     auto const& m = front.module;
     auto const source_name = front.source_name;
@@ -202,7 +203,8 @@ cc::result<emitted_source, cc::string> emit_text(driver::impl::front_end const& 
                                            .diagnostics = diagnostics,
                                            .device_features = device_features,
                                            .software_trace = software_trace,
-                                           .native = native});
+                                           .native = native,
+                                           .native_line_table = native_line_table});
     if (!emitted.has_text())
     {
         auto text = cc::string();
@@ -309,9 +311,9 @@ cc::result<sgl::emitted_source, cc::string> sgl::compile_to_text(text_request co
     // CHK-402: what was judged of another entry point's body is no error of this one
     if (auto own = front.errors_of(e.function); !own.empty())
         return cc::error(cc::move(own));
-    auto result
-        = emit_text(front, e, request.target, request.line_directives, request.diagnostics, request.guards_undefined,
-                    request.software_trace, request.weakens_float, request.device_features, request.native);
+    auto result = emit_text(front, e, request.target, request.line_directives, request.diagnostics,
+                            request.guards_undefined, request.software_trace, request.weakens_float,
+                            request.device_features, request.native, request.native_line_table);
     add_source_facts(result, front, e);
     if (result.has_value() && result.value().float_guarantee != e.float_guarantee)
         result.value().warnings.push_back(cc::format(

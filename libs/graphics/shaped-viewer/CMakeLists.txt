@@ -175,8 +175,6 @@ elseif(APPLE AND TARGET shaped-graphics-metal)
     target_compile_definitions(shaped-viewer PRIVATE SV_DEFAULT_BACKEND_METAL=1)
 endif()
 
-sc_target_pch(shaped-viewer SG)
-
 target_compile_options(shaped-viewer
     PUBLIC
     $<$<CXX_COMPILER_ID:MSVC>:/Zc:preprocessor>
@@ -226,7 +224,6 @@ if(SC_BUILD_TOOLS AND WIN32 AND SC_HAS_DXC_COMPILER AND TARGET shaped-graphics-d
     )
     sc_nexus_binary(shaped-view KINDS tool)
     target_link_libraries(shaped-view PRIVATE shaped-viewer nexus)
-    sc_target_pch(shaped-view SG NEXUS)
 
     # A windowed program: opened from Explorer, a console subsystem binary would bring a console window up beside it.
     set_target_properties(shaped-view PROPERTIES WIN32_EXECUTABLE TRUE)
@@ -297,8 +294,6 @@ if(SC_BUILD_TESTS)
 
     # Where a fetched Bistro lands (extern/bistro/fetch-bistro.py), for the import test that reads the real scene when present.
     sc_target_source_paths(shaped-viewer-test PRIVATE SV_TEST_BISTRO_DIR ../../../extern/bistro/.install)
-
-    sc_target_pch(shaped-viewer-test SG NEXUS) # 0.53
 
     # The GPU tests run once per backend this build has: an entry driver per backend invokes every
     # `INVOCABLE_TEST(..., (sg::context_handle const&))` in the binary against one context of it.

@@ -165,6 +165,8 @@ constexpr u32 k_md_node = 3;
 constexpr u32 k_md_name = 4;
 constexpr u32 k_md_kind = 6;
 constexpr u32 k_md_named_node = 10;
+constexpr u32 k_inst_debug_loc_again = 33;
+constexpr u32 k_inst_debug_loc = 35;
 
 constexpr u32 k_order_seq_cst = 6;
 constexpr u32 k_scope_cross_thread = 1;
@@ -202,7 +204,7 @@ constexpr u32 k_md_attachment = 11;
 }
 } // namespace
 
-cc::vector<byte> module_builder::write(cc::string_view triple, cc::string_view layout) const
+cc::vector<byte> module_builder::write(cc::string_view triple, cc::string_view layout, bool with_debug_info) const
 {
     auto out = bit_writer();
     out.fixed('B', 8);
@@ -211,7 +213,9 @@ cc::vector<byte> module_builder::write(cc::string_view triple, cc::string_view l
     out.fixed(0xDE, 8);
 
     auto const global_count = u32(_globals.size());
-    auto const constant_count = u32(_constants.size());
+    // the debug info's constants come last and no instruction names one, so a write without it can leave them out
+    auto const constant_count
+        = with_debug_info ? u32(_constants.size()) : cc::min(u32(_constants.size()), _debug_constants_from);
     auto const argument_count = u32(_arguments.size());
     auto const number_of = [&](u32 raw) -> u32
     {
@@ -338,11 +342,11 @@ cc::vector<byte> module_builder::write(cc::string_view triple, cc::string_view l
         out.record(8, cc::span<u64 const>(fields, isize(sizeof(fields) / sizeof(fields[0]))));
     }
 
-    if (!_constants.empty())
+    if (constant_count > 0)
     {
         out.enter_block(k_block_constants, 4);
         auto current = ll_type::none;
-        for (auto const& c : _constants)
+        for (auto const& c : cc::span<constant_entry const>(_constants.data(), constant_count))
         {
             if (c.type != current)
             {
@@ -393,10 +397,12 @@ cc::vector<byte> module_builder::write(cc::string_view triple, cc::string_view l
         out.exit_block();
     }
 
-    if (!_metadata.empty())
+    auto const metadata_end = with_debug_info ? _metadata.size() : cc::min(_metadata.size(), isize(_debug_metadata_from));
+    auto const named_end = with_debug_info ? _named.size() : cc::min(_named.size(), isize(_debug_named_from));
+    if (metadata_end > 0)
     {
         out.enter_block(k_block_metadata, 3);
-        for (auto const& m : _metadata)
+        for (auto const& m : cc::span<md_entry const>(_metadata.data(), metadata_end))
             switch (m.code)
             {
             case md_code::string:
@@ -411,8 +417,14 @@ cc::vector<byte> module_builder::write(cc::string_view triple, cc::string_view l
                     scratch.push_back(_md_args[m.first + k]);
                 out.record(k_md_node, scratch);
                 break;
+            case md_code::record:
+                scratch.clear();
+                for (auto k = u32(0); k < m.count; ++k)
+                    scratch.push_back(_md_fields[m.first + k]);
+                out.record(m.record, scratch);
+                break;
             }
-        for (auto const& n : _named)
+        for (auto const& n : cc::span<named_md const>(_named.data(), named_end))
         {
             out.string_record(k_md_name, name_at(n.name_first, n.name_size));
             scratch.clear();
@@ -466,6 +478,7 @@ cc::vector<byte> module_builder::write(cc::string_view triple, cc::string_view l
         auto const block_number = [&](u32 raw) -> u64 { return u64(raw - first_block); };
         auto marked = cc::vector<u32>();
         auto position = u32(0);
+        auto last_location = u32(0);
         for (auto block_at = first_block; block_at < end_block; ++block_at)
         {
             auto const& b = _blocks[block_at];
@@ -576,6 +589,18 @@ cc::vector<byte> module_builder::write(cc::string_view triple, cc::string_view l
                 case inst_code::unreachable:
                     out.record(k_inst_unreachable, {});
                     break;
+                }
+                // EMIT-257: an instruction's location follows it, and one the same as the last is said again for free
+                if (with_debug_info && inst.location != 0 && inst.location <= u32(_debug_locations.size()))
+                {
+                    if (inst.location == last_location)
+                        out.record(k_inst_debug_loc_again, {});
+                    else
+                    {
+                        auto const& at = _debug_locations[inst.location - 1];
+                        out.record(k_inst_debug_loc, {u64(at.line), u64(at.column), u64(at.scope), u64(at.inlined_at)});
+                    }
+                    last_location = inst.location;
                 }
                 if (inst.type != _void)
                 {

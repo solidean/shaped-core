@@ -218,6 +218,32 @@ public:
     [[nodiscard]] u32 md_i1(bool value) { return md_value(_i1, constant_bool(value)); }
     [[nodiscard]] u32 md_node(cc::span<u32 const> operands);
     void md_named(cc::string_view name, cc::span<u32 const> nodes);
+    /// A specialized node, such as a `DIFile`: LLVM's record `code` and its fields as LLVM 3.7 writes them.
+    [[nodiscard]] u32 md_record(u32 code, cc::span<u64 const> fields);
+
+    // ---- debug info (EMIT-257), which only `write(..., with_debug_info)` states
+    /// Where an instruction's debug location stands, and in what scope; ids are metadata ids, 0 for none.
+    struct debug_location
+    {
+        u32 line = 0;
+        u32 column = 0;
+        u32 scope = 0;
+        u32 inlined_at = 0;
+    };
+    /// The key every instruction added from here on carries, 0 for none: a position in `set_debug_locations` plus one.
+    void set_location(u32 key) { _location = key; }
+    /// Which keys an instruction still carries, after the passes, by key minus one.
+    [[nodiscard]] cc::vector<bool> locations_used(u32 count) const;
+    /// What each key stands for, by key minus one.
+    void set_debug_locations(cc::vector<debug_location> locations) { _debug_locations = cc::move(locations); }
+    /// The metadata and named metadata added from here on are the debug info's, which a write without it leaves out.
+    /// So are the constants added from here on, which only the debug info's metadata may name.
+    void begin_debug_metadata()
+    {
+        _debug_metadata_from = u32(_metadata.size());
+        _debug_named_from = u32(_named.size());
+        _debug_constants_from = u32(_constants.size());
+    }
 
     // ---- the one function body; blocks are written in the order they are added
     /// Marks where the next function body starts: the blocks added from here on are its own.
@@ -283,7 +309,8 @@ public:
     }
 
     /// The module as bitcode, its magic first, `triple` and `layout` as LLVM's module states them.
-    [[nodiscard]] cc::vector<byte> write(cc::string_view triple, cc::string_view layout) const;
+    /// Without `with_debug_info` it is the same bytes whether or not the debug info was built.
+    [[nodiscard]] cc::vector<byte> write(cc::string_view triple, cc::string_view layout, bool with_debug_info = false) const;
 
 private:
     enum class type_code : u8
@@ -350,10 +377,13 @@ private:
         string,
         value,
         node,
+        record,
     };
     struct md_entry
     {
         md_code code = md_code::string;
+        /// A record's LLVM code.
+        u32 record = 0;
         ll_type type = ll_type::none;
         ll_value value = ll_value::none;
         u32 first = 0;
@@ -399,6 +429,8 @@ private:
         /// A range of `_args`.
         u32 first = 0;
         u32 count = 0;
+        /// The debug location's key, 0 for none.
+        u32 location = 0;
     };
     struct block_entry
     {
@@ -438,7 +470,15 @@ private:
     cc::vector<attribute_list> _attribute_lists;
     cc::vector<md_entry> _metadata;
     cc::vector<u32> _md_args;
+    /// The fields of every record, in `_metadata`'s order.
+    cc::vector<u64> _md_fields;
     cc::vector<named_md> _named;
+    /// Where the debug info's metadata starts; a write without it stops there.
+    u32 _debug_metadata_from = 0xffffffffu;
+    u32 _debug_named_from = 0xffffffffu;
+    u32 _debug_constants_from = 0xffffffffu;
+    cc::vector<debug_location> _debug_locations;
+    u32 _location = 0;
     cc::vector<inst_entry> _instructions;
     cc::vector<u32> _args;
     /// Parallel to the instructions that give a value: their position.

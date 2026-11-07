@@ -131,8 +131,6 @@ sc_add_source_fingerprint(shaped-shader-library
     HEADER shaped-shader-library/impl/sgl_emit_cache.hh
     FILES ${_slib_fingerprinted})
 
-sc_target_pch(shaped-shader-library SG)
-
 target_compile_options(shaped-shader-library
     PUBLIC
     $<$<CXX_COMPILER_ID:MSVC>:/Zc:preprocessor>
@@ -274,13 +272,12 @@ if(SC_BUILD_TESTS)
             tests/sgl-double-maths-spirv-test.cc
             tests/sgl-hit-object-spirv-test.cc
             tests/sgl-native-dxil-test.cc
+            tests/sgl-native-line-table-test.cc
             tests/sgl-real-shaders-test.cc
             tests/sgl-signature-golden-test.cc
         )
         target_link_libraries(shaped-shader-library-test PRIVATE shaped-shader-compiler-dxc)
     endif()
-
-    sc_target_pch(shaped-shader-library-test SG NEXUS)
 
     # slib declares a package of its own: the codegen has to be exercised by something, and the library that
     # ships sc_add_shader_package is the honest place for it.

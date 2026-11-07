@@ -296,6 +296,24 @@ void module_builder::md_named(cc::string_view name, cc::span<u32 const> nodes)
         {.name_first = add_name(name), .name_size = u32(name.size()), .first = first, .count = u32(nodes.size())});
 }
 
+u32 module_builder::md_record(u32 code, cc::span<u64 const> fields)
+{
+    auto const first = u32(_md_fields.size());
+    for (auto const f : fields)
+        _md_fields.push_back(f);
+    _metadata.push_back({.code = md_code::record, .record = code, .first = first, .count = u32(fields.size())});
+    return u32(_metadata.size());
+}
+
+cc::vector<bool> module_builder::locations_used(u32 count) const
+{
+    auto used = cc::vector<bool>::create_filled(count, false);
+    for (auto const& inst : _instructions)
+        if (inst.location != 0 && inst.location <= count)
+            used[inst.location - 1] = true;
+    return used;
+}
+
 void module_builder::begin_function()
 {
     if (!_blocks.empty())
@@ -319,8 +337,13 @@ ll_value module_builder::push(inst_code code, ll_type type, cc::span<u32 const> 
     auto const first = u32(_args.size());
     for (auto const a : args)
         _args.push_back(a);
-    _instructions.push_back(
-        {.code = code, .sub = sub, .flags = flags, .type = type, .first = first, .count = u32(args.size())});
+    _instructions.push_back({.code = code,
+                             .sub = sub,
+                             .flags = flags,
+                             .type = type,
+                             .first = first,
+                             .count = u32(args.size()),
+                             .location = _location});
     _blocks[isize(_open)].count = u32(_instructions.size()) - _blocks[isize(_open)].first;
     if (type == _void)
         return ll_value::none;

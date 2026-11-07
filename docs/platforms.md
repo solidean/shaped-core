@@ -160,7 +160,7 @@ A test's own site, below `FULL`, is the entry of its body, which resolves to the
 nexus keeps a test's source file at every level, so test selection by file and the listings work below `FULL` too; the listings' line is 0 there.
 
 A whole-build switch, never per-target: `cc::source_location`'s layout changes with it.
-**The clang development presets on Windows and Linux build at `OPAQUE`**: `debug`, `relwithdebinfo`, `nopch`, `debug-nopch`, `coverage` and `sanitize-*`.
+**The clang development presets on Windows and Linux build at `OPAQUE`**: `debug`, `relwithdebinfo`, `coverage` and `sanitize-*`.
 There an edit that only moves lines, a comment or a reformat, changes the objects' debug info and nothing else, since no line or column is in code or data.
 `release-*`, `pgo-*` and `frozen` keep the default.
 The `singlethreaded-*` presets build at `FULL`, so `check --all-presets` still exercises it with assertions on; a test reading what only `FULL` keeps skips below it.
@@ -258,7 +258,7 @@ These sit in the hottest loops of exact geometry predicates, which is why they a
 The asserts themselves are tested where the switch is on.
 
 Like `SC_THREADS` it is whole-build, never per-target: an inline function compiled with and without the check in one program is an ODR violation.
-The `debug-nopch` presets turn it on, so `dev.py check`'s debug leg exercises it on every platform.
+The clang debug presets turn it on, so `dev.py check`'s debug leg exercises it on every platform.
 
 ## Geometry special-case checks (`SC_CHECK_GEOMETRY_SPECIAL_CASES`)
 
@@ -269,7 +269,7 @@ Checked, each such assumption that an input violates logs a warning in the `tg` 
 A warning rather than an assert, because a test that feeds a special case on purpose has to be writable.
 nexus fails a passing test that logs an undeclared warning, so in a test it is a failure unless declared with `nx::expect_warning`; in an application it is a log line.
 
-Whole-build like `SC_CHECK_WIDE_ARITH`, for the same ODR reason, and turned on by the same `debug-nopch` presets.
+Whole-build like `SC_CHECK_WIDE_ARITH`, for the same ODR reason, and turned on by the same clang debug presets.
 
 ## Who holds a test's context (`SC_ASYNC_AMBIENT_TRACE`)
 
@@ -283,7 +283,7 @@ Off, the release path is exactly what it is without the feature.
 On, every release of a context link loads the watched link and compares, and only a watched link takes the slow path.
 `cc::async_ambient_watch_releases` is the hook; it returns false in a build without the switch, so a caller needs no `#if`.
 
-Whole-build like `SC_CHECK_WIDE_ARITH`, for the same ODR reason, since the release is inline; the `debug-nopch` presets turn it on.
+Whole-build like `SC_CHECK_WIDE_ARITH`, for the same ODR reason, since the release is inline; the clang debug presets turn it on.
 A Release build captures stacks without names, as every capture there does; a build with names, or a sidecar, is what reads them.
 
 ## Exhaustive SIMD tests (`SC_SIMD_EXHAUSTIVE_TESTS`)
@@ -294,7 +294,7 @@ On, at 128, 256, 512 and 1024 bits, which instantiates every kernel four times o
 The targeted tests — rounding, signed zeros, the edge lanes, permute, the looped shapes — run in both modes.
 
 Only the test binary sees it, and the dispatched battery's kernel TUs through it, so it is no ODR hazard and may differ between targets.
-The `debug-nopch` presets turn it on, so `dev.py check`'s debug leg and CI still build and run the full set.
+The clang debug presets turn it on, so `dev.py check`'s debug leg and CI still build and run the full set.
 
 ## Frozen shaders (`SC_FROZEN_SHADERS`)
 
@@ -380,6 +380,6 @@ CMake pairs whichever it finds with our compiler.
 The Android CI runner had one for its Linux clang jobs, and a scanner cannot read a precompiled header the NDK's clang produced, so every scan failed there.
 Turn it back on with the first `import`, and make sure the scanner matches the compiler.
 
-Every build type builds against per-target precompiled headers.
-The `nopch-*` and `debug-nopch-*` presets turn them off.
-Linux clang's CI matrix carries `nopch-linux-clang`, so a source relying on a header only the PCH supplied cannot land — see [precompiled-headers.md](guides/precompiled-headers.md).
+**No build uses precompiled headers.**
+They were removed: incremental rebuilds after header edits matter more than the cold-build gain.
+[notes/build-times.md](notes/build-times.md#precompiled-headers-removed) has the decision.

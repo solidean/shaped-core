@@ -37,7 +37,6 @@ sc_add_example(shaped-rendering-denoise-playground-example
     LINK
     shaped-rendering
     ${_sr_backend}
-    PCH SG NEXUS
 )
 
 # Which backend header the one context-creation call reaches for.

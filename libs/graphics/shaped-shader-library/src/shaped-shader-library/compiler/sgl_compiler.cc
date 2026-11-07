@@ -317,6 +317,7 @@ private:
         auto options = cc::vector<sgl::check::option_value>();
         auto device_features = sgl::check::feature_set();
         auto weakens_float = false;
+        auto native_line_table = false;
         auto const is_spirv = _target == sgl::emit::target::hlsl_vulkan;
         auto const is_dxil = _target == sgl::emit::target::hlsl_dx12;
         auto const requires_native
@@ -327,6 +328,11 @@ private:
             if (o.name == slib::k_weakens_float_option)
             {
                 weakens_float = o.value == "true";
+                continue;
+            }
+            if (o.name == slib::k_native_line_table_option)
+            {
+                native_line_table = o.value == "true";
                 continue;
             }
             if (o.name == slib::k_native_spirv_option || o.name == slib::k_native_dxil_option)
@@ -368,7 +374,8 @@ private:
              .software_trace = desc.software_trace,
              .weakens_float = weakens_float,
              .device_features = device_features,
-             .native = native});
+             .native = native,
+             .native_line_table = native_line_table});
         if (text.has_error())
             return cc::error(cc::format("SGL reported errors:\n{}", text.error()));
         auto const& emitted = text.value();

@@ -15,6 +15,7 @@ cc::vector<u32> writer::run()
     if (_p.stage == check::stage::tessellation_control)
         write_control_entry();
     write_entry();
+    declare_files();
     return assembled();
 }
 
@@ -168,6 +169,7 @@ void writer::write_function()
     {
         auto const& b = _p.blocks[isize(order[k])];
         emit(_code, spv::Label, {id_of(order[k])});
+        forget_line();
         if (k == 0)
             for (auto i = isize(0); i < _p.locals.size(); ++i)
             {
@@ -183,7 +185,11 @@ void writer::write_function()
                          {pointer_to(spv::FunctionStorage, id_of(_p.instructions[i].type)), _instructions + u32(i),
                           spv::FunctionStorage});
         for (auto i = b.first; i + 1 < b.first + b.count; ++i)
+        {
+            line_before(i);
             instruction_of(i);
+        }
+        line_before(b.first + b.count - 1);
         terminator(b, _p.instructions[b.first + b.count - 1]);
     }
     emit(_code, spv::FunctionEnd, {});
@@ -263,6 +269,7 @@ cc::vector<u32> writer::assembled()
     emit(out, spv::MemoryModel, {0u, 1u}); // Logical, GLSL450
     out.push_back_range(_entry);
     out.push_back_range(_modes);
+    out.push_back_range(_sources);
     out.push_back_range(_names);
     out.push_back_range(_annotations);
     out.push_back_range(_declarations);

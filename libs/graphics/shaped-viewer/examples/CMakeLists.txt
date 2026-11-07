@@ -39,7 +39,6 @@ sc_add_single_file_examples(shaped-viewer
     FILES
     ${_sv_example_sources}
     LINK shaped-viewer
-    PCH SG NEXUS
 )
 
 # Sponza is fetched on request (extern/sponza/fetch-sponza.py), and the example says so when it is missing.

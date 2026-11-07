@@ -116,8 +116,6 @@ target_link_libraries(shaped-rendering PUBLIC shaped-graphics shaped-shader-libr
 # PUBLIC because slug_shape.hh and slug_font.hh take a babel::font::face.
 target_link_libraries(shaped-rendering PUBLIC babel-serializer)
 
-sc_target_pch(shaped-rendering SG)
-
 target_compile_options(shaped-rendering
     PUBLIC
     $<$<CXX_COMPILER_ID:MSVC>:/Zc:preprocessor>
@@ -370,8 +368,6 @@ if(SC_BUILD_TESTS)
     )
     sc_target_source_paths(shaped-rendering-test PRIVATE SR_SGL_MODULE_DIR "${SR_SGL_MODULE_DIR}")
     target_include_directories(shaped-rendering-test PRIVATE "${BABEL_TEST_DIR}") # font/font_builder.hh, for crafted fonts
-
-    sc_target_pch(shaped-rendering-test SG NEXUS) # 0.44
 
     if(SC_HAS_SDL3)
         # These two reach into impl/ and see SDL headers directly, so they exist only with a backend.
