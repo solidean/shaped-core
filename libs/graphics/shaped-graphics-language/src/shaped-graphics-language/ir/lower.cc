@@ -415,6 +415,14 @@ void lowering::declare(local_id id, flat_expr_id value, bool is_mut)
         _locals[position] = begin_ray_query(id);
         return;
     }
+    // EMIT-246: the value the trace gave, which nothing holds in a variable and no let copies
+    if (_out.at(type).kind == type_kind::hit_object)
+    {
+        if (is_mut || !is_valid(value))
+            return unsupported("a hit object that is no let of its trace");
+        _locals[position] = expr(value);
+        return;
+    }
     if (l.is_undefined)
     {
         // the prelude's `undefined()`: nothing to evaluate, and a mutable one a variable that holds nothing yet

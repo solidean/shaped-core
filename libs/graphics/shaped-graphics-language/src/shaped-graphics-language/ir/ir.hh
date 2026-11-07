@@ -108,6 +108,9 @@ enum class sgl::ir::type_kind : sgl::u8
     acceleration_structure,
     /// One trace in flight, which `op::ray_query_begin` makes and no store or phi ever moves.
     ray_query,
+    /// A trace whose shaders have not run, which only `op::hit_object_trace` makes.
+    /// SPIR-V forbids moving one, so `ir::verify` refuses a phi, a select, a store or a member of it (EMIT-246).
+    hit_object,
 };
 
 enum class sgl::ir::storage : sgl::u8
@@ -422,6 +425,17 @@ enum class sgl::ir::op : sgl::u16
     execute_callable,
     /// Operands: t, kind, then the global of `storage::hit_attribute` the attributes stand in.
     report_hit,
+    /// Operands: as `trace_ray`; gives the hit object, whose shaders have not run.
+    hit_object_trace,
+    /// Operands: as `trace_ray`, then a hint and its bits where the call gives them.
+    /// A trace regrouped by its hit before its shaders run, which SPIR-V says in one instruction.
+    trace_reorder_execute,
+    /// Operands: hit object, then a hint and its bits where the call gives them.
+    hit_object_reorder,
+    /// Operands: a hint and its bits; regroups by nothing but them.
+    reorder_thread,
+    /// Operands: hit object, then the global of `storage::ray_output` the payload stands in.
+    hit_object_invoke,
     // ---- ray queries: every step changes what the query answers, so none moves past another
     /// Operands: the flags every trace of this query states, a constant.
     ray_query_begin,
@@ -438,6 +452,8 @@ enum class sgl::ir::op : sgl::u16
     /// Operands: query; `sub` is a `ray_query_value`, and `aux` 1 reads the committed hit rather than the candidate.
     /// A dead one goes, but none moves or merges: a read is valid only in the state the query is in where it stands.
     ray_query_read,
+    /// Operands: hit object; `sub` is a `hit_object_value`.
+    hit_object_read,
     // ---- textures and images
     combine_sampler,
     /// Operands: sampled image, coordinate, level, and an offset where `aux` is 1.
@@ -528,6 +544,18 @@ enum class sgl::ir::ray_query_value : sgl::u8
     world_to_object,
     object_ray_origin,
     object_ray_direction,
+};
+
+/// What a `hit_object_read` asks.
+enum class sgl::ir::hit_object_value : sgl::u8
+{
+    is_hit,
+    is_miss,
+    t,
+    instance_id,
+    instance_index,
+    geometry_index,
+    primitive_index,
 };
 
 enum class sgl::ir::merge_kind : sgl::u8

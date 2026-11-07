@@ -182,6 +182,12 @@ constexpr op_rule k_rules[] = {
     {op::trace_ray, rule_kind::ray_stage, 0},
     {op::execute_callable, rule_kind::ray_stage, 0},
     {op::report_hit, rule_kind::ray_stage, 0},
+    {op::hit_object_trace, rule_kind::ray_stage, 0},
+    {op::trace_reorder_execute, rule_kind::ray_stage, 0},
+    {op::hit_object_reorder, rule_kind::ray_stage, 0},
+    {op::reorder_thread, rule_kind::ray_stage, 0},
+    {op::hit_object_invoke, rule_kind::ray_stage, 0},
+    {op::hit_object_read, rule_kind::ray_stage, 0},
     {op::ray_query_begin, rule_kind::ray_query, 0},
     {op::ray_query_trace, rule_kind::ray_query, 0},
     {op::ray_query_proceed, rule_kind::ray_query, 0},
@@ -369,6 +375,48 @@ void writer::frag_coord(instruction const& i, u32 id)
     emit(_code, spv::CompositeInsert, {id_of(i.type), id, reciprocal, loaded, 3u});
 }
 
+void writer::hit_object(instruction const& i, u32 id)
+{
+    /// Parallel to `hit_object_value`.
+    constexpr u32 k_reads[] = {
+        spv::HitObjectIsHitEXT,
+        spv::HitObjectIsMissEXT,
+        spv::HitObjectGetRayTMaxEXT,
+        spv::HitObjectGetInstanceCustomIndexEXT,
+        spv::HitObjectGetInstanceIdEXT,
+        spv::HitObjectGetGeometryIndexEXT,
+        spv::HitObjectGetPrimitiveIndexEXT,
+    };
+    auto const operands = _p.operands_of(i);
+    auto const at = [&](isize k) { return id_of_raw(operands[k]); };
+    auto const trace = [&](u32 opcode)
+    {
+        head(_code, opcode, 2 + operands.size());
+        _code.push_back(id);
+        for (auto k = isize(0); k < operands.size(); ++k)
+            _code.push_back(at(k));
+    };
+    switch (i.code)
+    {
+    case op::hit_object_trace:
+        return trace(spv::HitObjectTraceRayEXT);
+    case op::trace_reorder_execute:
+        return trace(spv::TraceReorderExecuteEXT);
+    case op::hit_object_reorder:
+        if (operands.size() == 1)
+            return emit(_code, spv::ReorderThreadWithHitObjectEXT, {at(0)});
+        return emit(_code, spv::ReorderThreadWithHitObjectEXT, {at(0), at(1), at(2)});
+    case op::reorder_thread:
+        require(spv::ShaderInvocationReorderEXT);
+        require_extension("SPV_EXT_shader_invocation_reorder");
+        return emit(_code, spv::ReorderThreadWithHintEXT, {at(0), at(1)});
+    case op::hit_object_invoke:
+        return emit(_code, spv::HitObjectExecuteShaderEXT, {at(0), at(1)});
+    default:
+        return emit(_code, k_reads[i.sub], {id_of(i.type), id, at(0)});
+    }
+}
+
 void writer::ray_query(instruction const& i, u32 id)
 {
     /// Parallel to `ray_query_value`.
@@ -535,8 +583,10 @@ void writer::instruction_of(u32 index)
             return emit(_code, spv::ExecuteCallableKHR, {at(0), at(1)});
         if (i.code == op::report_hit)
             return emit(_code, spv::ReportIntersectionKHR, {id_of(i.type), id, at(0), at(1)});
-        return emit(_code, spv::TraceRayKHR,
-                    {at(0), at(1), at(2), at(3), at(4), at(5), at(6), at(7), at(8), at(9), at(10)});
+        if (i.code == op::trace_ray)
+            return emit(_code, spv::TraceRayKHR,
+                        {at(0), at(1), at(2), at(3), at(4), at(5), at(6), at(7), at(8), at(9), at(10)});
+        return hit_object(i, id);
     }
     case rule_kind::phi:
         head(_code, rule.opcode, 3 + operands.size());

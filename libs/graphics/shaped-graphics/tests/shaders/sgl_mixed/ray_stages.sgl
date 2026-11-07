@@ -135,6 +135,46 @@ hit_group balls for scene_rays:
     primary = (closest_hit = shade_ball, any_hit = cut_ball)
     shadow = ()
 
+@raygen fun regrouped(@launch_id id: int3, @launch_size size: int3){ray_scene}:
+    let zero = float3(0.0, 0.0, 0.0)
+    let mut p = surface(zero, -1.0, int4(0, 0, 0, 0), false, 0, zero, float4(0.0, 0.0, 0.0, 0.0), false)
+    maybe_reorder(if id.x < 4 => 0u else 1u, 1)
+    trace(ray_scene.world, scene_ray(id), scene_rays.primary, mut p, reorder = id.y as uint, reorder_bits = 3)
+    ray_scene.cells[(id.x + id.y * size.x) * 8] = float4(p.colour.x, p.colour.y, p.colour.z, p.t)
+    ray_scene.cells[(id.x + id.y * size.x) * 8 + 1] = float4(p.ids.x as float, p.ids.y as float, p.ids.z as float, p.ids.w as float)
+
+@raygen fun inspected(@launch_id id: int3, @launch_size size: int3){ray_scene}:
+    let zero = float3(0.0, 0.0, 0.0)
+    let mut p = surface(zero, -1.0, int4(0, 0, 0, 0), false, 0, zero, float4(0.0, 0.0, 0.0, 0.0), false)
+    let at = (id.x + id.y * size.x) * 8
+    const if has(.shader_execution_reordering):
+        let h = trace_hit(ray_scene.world, scene_ray(id), scene_rays.primary, mut p)
+        let mut said = 0.0
+        if h.is_hit => said = 1.0
+        if h.is_miss => said = said + 2.0
+        let instance = h.instance_id
+        ray_scene.cells[at + 2] = float4(said, h.t, instance as float, h.instance_index as float)
+        ray_scene.cells[at + 3] = float4(h.geometry_index as float, h.primitive_index as float, 0.0, 0.0)
+        h.reorder(instance as uint, 2)
+        h.invoke(mut p)
+    else:
+        trace(ray_scene.world, scene_ray(id), scene_rays.primary, mut p)
+    ray_scene.cells[at] = float4(p.colour.x, p.colour.y, p.colour.z, p.t)
+
+@raytracing pipeline regrouped_stage:
+    rays = scene_rays
+    raygen = regrouped
+    miss.primary = sky
+    miss.shadow = open_sky
+    hit_groups = (squares, balls)
+
+@raytracing pipeline inspected_stage:
+    rays = scene_rays
+    raygen = inspected
+    miss.primary = sky
+    miss.shadow = open_sky
+    hit_groups = (squares, balls)
+
 @raytracing pipeline every_stage:
     rays = scene_rays
     raygen = launch

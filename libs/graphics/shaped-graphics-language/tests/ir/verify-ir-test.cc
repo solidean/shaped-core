@@ -27,6 +27,63 @@ namespace
 }
 } // namespace
 
+// EMIT-246: SPIR-V forbids moving a hit object, so a pass that moves one has to stop here rather than at a driver.
+TEST("sgl ir verify - a hit object stays the value of its trace")
+{
+    auto const hit_of = [](program_builder& b) { return b.add_type({.kind = type_kind::hit_object}); };
+
+    auto read = one_block();
+    auto const read_type = hit_of(read);
+    auto const held = read.add(op::hit_object_trace, read_type, {});
+    read.add(op::hit_object_read, read.float_type, {u32(held)}, u8(hit_object_value::t));
+    read.finish();
+    CHECK(refusal_of(read.p) == "");
+
+    auto selected = one_block();
+    auto const selected_type = hit_of(selected);
+    auto const a = selected.add(op::hit_object_trace, selected_type, {});
+    auto const b = selected.add(op::hit_object_trace, selected_type, {});
+    selected.add(op::select, selected_type, {u32(selected.yes), u32(a), u32(b)});
+    selected.finish();
+    CHECK(refusal_of(selected.p).contains("moves a hit object"));
+
+    auto merged = program_builder();
+    auto const merged_type = hit_of(merged);
+    merged.blocks(4);
+    merged.open(0);
+    merged.select_merge(0, 3);
+    merged.branch_if(merged.yes, 1, 2);
+    merged.open(1);
+    auto const left = merged.add(op::hit_object_trace, merged_type, {});
+    merged.branch(3);
+    merged.open(2);
+    auto const right = merged.add(op::hit_object_trace, merged_type, {});
+    merged.branch(3);
+    merged.open(3);
+    merged.add(op::phi, merged_type, {u32(left), 1, u32(right), 2});
+    merged.finish();
+    CHECK(refusal_of(merged.p).contains("moves a hit object"));
+
+    auto stored = one_block();
+    auto const stored_type = hit_of(stored);
+    auto const traced = stored.add(op::hit_object_trace, stored_type, {});
+    stored.add(op::store, stored.void_type, {u32(stored.out), u32(traced)});
+    stored.finish();
+    CHECK(refusal_of(stored.p).contains("moves a hit object"));
+
+    auto local = one_block();
+    auto const local_type = hit_of(local);
+    local.p.locals.push_back({.type = local.add_type({.kind = type_kind::pointer, .element = local_type})});
+    local.finish();
+    CHECK(refusal_of(local.p).contains("a local that holds a hit object"));
+
+    auto member = one_block();
+    auto const member_type = hit_of(member);
+    member.p.members.push_back({.type = member_type});
+    member.finish();
+    CHECK(refusal_of(member.p).contains("a member that holds a hit object"));
+}
+
 TEST("sgl ir verify - a whole program passes in either form")
 {
     auto b = program_builder();

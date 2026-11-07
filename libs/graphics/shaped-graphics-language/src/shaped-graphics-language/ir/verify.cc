@@ -166,6 +166,11 @@ constexpr shape k_shapes[] = {
     shape::no_result,           // trace_ray
     shape::no_result,           // execute_callable
     shape::any_result,          // report_hit
+    shape::any_result,          // hit_object_trace
+    shape::any_result,          // trace_reorder_execute
+    shape::no_result,           // hit_object_reorder
+    shape::no_result,           // reorder_thread
+    shape::no_result,           // hit_object_invoke
     shape::any_result,          // ray_query_begin
     shape::no_result,           // ray_query_trace
     shape::any_result,          // ray_query_proceed
@@ -173,6 +178,7 @@ constexpr shape k_shapes[] = {
     shape::no_result,           // ray_query_commit_procedural
     shape::no_result,           // ray_query_abort
     shape::any_result,          // ray_query_read
+    shape::any_result,          // hit_object_read
     shape::combine_sampler,     // combine_sampler
     shape::image_access,        // sample_lod
     shape::image_access,        // sample_implicit
@@ -268,6 +274,15 @@ private:
         for (auto const& l : _p.locals)
             if (!is_type(l.type) || _p.at(l.type).kind != type_kind::pointer)
                 return fail("a local that is no pointer");
+        for (auto const& m : _p.members)
+            if (is_type(m.type) && holds_hit_object(m.type))
+                return fail("a member that holds a hit object, which nothing may move");
+        for (auto const& l : _p.locals)
+            if (is_type(l.type) && holds_hit_object(_p.at(l.type).element))
+                return fail("a local that holds a hit object, which nothing may move");
+        for (auto const& g : _p.globals)
+            if (is_type(g.type) && holds_hit_object(_p.at(g.type).element))
+                return fail("a global that holds a hit object, which nothing may move");
         for (auto const& e : _p.stage_elements)
         {
             if (!is_type(e.type))
@@ -444,8 +459,51 @@ private:
                     return wrong("a phi after a block's first other operation");
                 check_operands(inst);
                 if (_failure.empty())
+                    check_hit_object(inst);
+                if (_failure.empty())
                     check_shape(inst);
             }
+        }
+    }
+
+    /// Whether `t` is a hit object, or holds one in a member or an element.
+    [[nodiscard]] bool holds_hit_object(type_ref t) const
+    {
+        auto const& info = _p.at(t);
+        switch (info.kind)
+        {
+        case type_kind::hit_object:
+            return true;
+        case type_kind::array:
+        case type_kind::runtime_array:
+            return holds_hit_object(info.element);
+        case type_kind::structure:
+            for (auto m = u32(0); m < info.member_count; ++m)
+                if (holds_hit_object(_p.members[info.first_member + m].type))
+                    return true;
+            return false;
+        default:
+            return false;
+        }
+    }
+
+    /// EMIT-246: a hit object stays where its trace made it, whatever a pass did around it.
+    /// One value of one operation, read by the operations that take a hit object and by nothing else.
+    void check_hit_object(instruction const& inst)
+    {
+        auto const makes = inst.code == op::hit_object_trace || inst.code == op::trace_reorder_execute;
+        if (gives_value(inst) && holds_hit_object(inst.type) && !makes)
+            return wrong("moves a hit object, which only its trace gives");
+        auto const takes = inst.code == op::hit_object_reorder || inst.code == op::hit_object_invoke
+                        || inst.code == op::hit_object_read;
+        auto const operands = _p.operands_of(inst);
+        for (auto k = isize(0); k < operands.size(); ++k)
+        {
+            if (operand_role(inst.code, k) != operand::value)
+                continue;
+            auto const type = _p.type_of(value_ref(operands[k]));
+            if (is_type(type) && holds_hit_object(type) && (!takes || k != 0))
+                return wrong("operand {} moves a hit object, which only its readers take", k);
         }
     }
 

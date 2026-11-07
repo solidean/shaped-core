@@ -161,8 +161,89 @@ void writer::ray_element(u32 index, stage_element const& e, instruction const& i
     define_one(index, call(found->op, scalar_type(i.type), args));
 }
 
+void writer::hit_object_op(u32 index, instruction const& i)
+{
+    /// Parallel to `hit_object_value`.
+    constexpr dx_op k_reads[] = {
+        dx_op::hit_object_is_hit,          dx_op::hit_object_is_miss,        dx_op::hit_object_t,
+        dx_op::hit_object_instance_id,     dx_op::hit_object_instance_index, dx_op::hit_object_geometry_index,
+        dx_op::hit_object_primitive_index,
+    };
+    _uses.reorders = true;
+    auto const operands = _p.operands_of(i);
+    auto const at = [&](isize k) { return leaf_at(value_ref(operands[k])); };
+    auto const number = [&](dx_op code) { return _m.constant_i32(k_dx_ops[isize(code)].number); };
+    auto const reorder = [&](ll_value hit, ll_value hint, ll_value bits)
+    {
+        ll_value const args[] = {number(dx_op::maybe_reorder_thread), hit, hint, bits};
+        (void)call(dx_op::maybe_reorder_thread, _m.void_type(), args);
+    };
+    auto const invoke = [&](ll_value hit, payload_root const& root)
+    {
+        ll_value const args[] = {number(dx_op::hit_object_invoke), hit, root.pointer};
+        (void)call(dx_op::hit_object_invoke, root.type, args);
+    };
+    auto const traced = [&](payload_root const& root)
+    {
+        auto const origin = value_ref(operands[6]);
+        auto const direction = value_ref(operands[8]);
+        ll_value const args[] = {number(dx_op::hit_object_trace_ray),
+                                 at(0),
+                                 at(1),
+                                 at(2),
+                                 at(3),
+                                 at(4),
+                                 at(5),
+                                 leaf_at(origin, 0),
+                                 leaf_at(origin, 1),
+                                 leaf_at(origin, 2),
+                                 at(7),
+                                 leaf_at(direction, 0),
+                                 leaf_at(direction, 1),
+                                 leaf_at(direction, 2),
+                                 at(9),
+                                 root.pointer};
+        return call(dx_op::hit_object_trace_ray, root.type, args);
+    };
+    switch (i.code)
+    {
+    case op::hit_object_trace:
+        return define_one(index, traced(_payload_roots[index_of(value_ref(operands[10]))]));
+    case op::trace_reorder_execute:
+    {
+        auto const& root = _payload_roots[index_of(value_ref(operands[10]))];
+        auto const hit = traced(root);
+        if (operands.size() > 11)
+            reorder(hit, at(11), at(12));
+        else
+            reorder(hit, _m.constant_undef(_m.int_type()), _m.constant_i32(0));
+        invoke(hit, root);
+        return define_one(index, hit);
+    }
+    case op::hit_object_reorder:
+        if (operands.size() > 1)
+            return reorder(at(0), at(1), at(2));
+        return reorder(at(0), _m.constant_undef(_m.int_type()), _m.constant_i32(0));
+    case op::reorder_thread:
+    {
+        ll_value const args[] = {number(dx_op::hit_object_make_nop)};
+        return reorder(call(dx_op::hit_object_make_nop, _m.void_type(), args), at(0), at(1));
+    }
+    case op::hit_object_invoke:
+        return invoke(at(0), _payload_roots[index_of(value_ref(operands[1]))]);
+    default:
+    {
+        auto const code = k_reads[i.sub];
+        ll_value const args[] = {number(code), at(0)};
+        return define_one(index, call(code, scalar_type(i.type), args));
+    }
+    }
+}
+
 void writer::ray_stage_op(u32 index, instruction const& i)
 {
+    if (i.code != op::trace_ray && i.code != op::execute_callable && i.code != op::report_hit)
+        return hit_object_op(index, i);
     auto const operands = _p.operands_of(i);
     auto const at = [&](isize k) { return leaf_at(value_ref(operands[k])); };
     auto const number = [&](dx_op code) { return _m.constant_i32(k_dx_ops[isize(code)].number); };

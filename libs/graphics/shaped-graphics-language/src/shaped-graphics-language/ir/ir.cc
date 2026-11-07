@@ -108,6 +108,11 @@ constexpr cc::string_view k_names[] = {
     "trace_ray",
     "execute_callable",
     "report_hit",
+    "hit_object_trace",
+    "trace_reorder_execute",
+    "hit_object_reorder",
+    "reorder_thread",
+    "hit_object_invoke",
     "ray_query_begin",
     "ray_query_trace",
     "ray_query_proceed",
@@ -115,6 +120,7 @@ constexpr cc::string_view k_names[] = {
     "ray_query_commit_procedural",
     "ray_query_abort",
     "ray_query_read",
+    "hit_object_read",
     "combine_sampler",
     "sample_lod",
     "sample_implicit",
@@ -199,6 +205,9 @@ void append_type(cc::string& out, program const& p, type_ref t)
         break;
     case type_kind::ray_query:
         out += "ray_query";
+        break;
+    case type_kind::hit_object:
+        out += "hit_object";
         break;
     }
 }

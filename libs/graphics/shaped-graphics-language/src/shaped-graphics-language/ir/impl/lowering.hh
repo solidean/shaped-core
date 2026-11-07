@@ -102,6 +102,11 @@ private:
     void handed_back(flat_expr_id id, value_ref global);
     void trace_ray(check::flat_call const& c);
     void call_callable(check::flat_call const& c);
+    /// A trace's operands as `op::trace_ray` takes them, its payload copied over; false where something failed.
+    [[nodiscard]] bool trace_operands(cc::span<flat_expr_id const> arguments, storage space, cc::vector<u32>& out);
+    [[nodiscard]] value_ref hit_object_call(check::flat_expr const& x,
+                                            check::flat_call const& c,
+                                            builtins::function_record const& record);
     /// A read of a ray-tracing stage's launch, ray or hit.
     [[nodiscard]] value_ref ray_stage_call(builtins::function_record const& record,
                                            cc::span<value_ref const> args,

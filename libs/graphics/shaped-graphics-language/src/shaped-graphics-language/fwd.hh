@@ -416,6 +416,7 @@ struct type;
 enum class math : u8;
 enum class subgroup : u8;
 enum class ray_query_value : u8;
+enum class hit_object_value : u8;
 enum class group_fold : u8;
 enum class derivative : u8;
 enum class barrier : u8;

@@ -52,11 +52,11 @@ sg::raytracing_pipeline_description mixed(sg::raytracing_pipeline_description co
     return result;
 }
 
+template <class pipeline_t>
 cc::shared_async<cc::vector<tg::vec4f>> traced(sg::context_handle ctx, sg::raytracing_pipeline_description desc)
 {
     if (auto* const home = ctx->device_home())
         co_await cc::async_resume_on(*home);
-    using pipeline_t = text::every_stage_t;
     auto const pipeline = co_await ctx->cached.acquire_raytracing_pipeline(desc);
     REQUIRE(pipeline != nullptr);
     auto table_desc = pipeline_t::table_description(pipeline);
@@ -154,7 +154,7 @@ ASYNC_INVOCABLE_TEST("sg - each stage of a ray-tracing pipeline through SGL's bi
             }
     CHECK(stages >= 5);
 
-    auto const reference = co_await traced(ctx, dxc);
+    auto const reference = co_await traced<text::every_stage_t>(ctx, dxc);
     // the scene answers: a test that compares two blanks says nothing
     int kinds[2] = {};
     for (auto i = 0; i < k_grid * k_grid; ++i)
@@ -162,5 +162,44 @@ ASYNC_INVOCABLE_TEST("sg - each stage of a ray-tracing pipeline through SGL's bi
     CHECK(kinds[0] > 0);
     CHECK(kinds[1] > 0);
     for (auto mask = u32(1); mask < 16; ++mask)
-        check_same(co_await traced(ctx, mixed(dxc, native, mask)), reference, mask);
+        check_same(co_await traced<text::every_stage_t>(ctx, mixed(dxc, native, mask)), reference, mask);
+}
+
+// EMIT-246: a regrouped trace and a hit object through SGL's binary, on the one route that has them on this machine.
+ASYNC_INVOCABLE_TEST("sg - a hit object and a regrouped trace through SGL's binary trace what DXC's trace",
+                     (sg::context_handle const& ctx))
+{
+    REQUIRE(ctx != nullptr);
+    if (!sg_test::shaders_reach(*ctx))
+        SKIP("no compiler builds this binary's shaders into a format this context accepts");
+    if (!ctx->supports(sg::feature::shader_execution_reordering))
+        SKIP("this device has no shader execution reordering");
+    if (ctx->prefers_native_dxil() || ctx->prefers_native_spirv())
+        SKIP("this context takes SGL's binary for every package, so there is no DXC route to mix with");
+    auto const takes_dxil = ctx->accepts_shader_format(sg::shader_format::dxil);
+
+    auto const regrouped_dxc = co_await text::regrouped_stage.description(*ctx);
+    auto const regrouped_native = takes_dxil ? co_await dxil::regrouped_stage.description(*ctx)
+                                             : co_await spirv::regrouped_stage.description(*ctx);
+    CHECK(regrouped_dxc.raygen_shaders[0].compiler.name != "sgl");
+    CHECK(regrouped_native.raygen_shaders[0].compiler.name == "sgl");
+    auto const regrouped_reference = co_await traced<text::regrouped_stage_t>(ctx, regrouped_dxc);
+    check_same(co_await traced<text::regrouped_stage_t>(ctx, mixed(regrouped_dxc, regrouped_native, k_raygen)),
+               regrouped_reference, k_raygen);
+    check_same(co_await traced<text::regrouped_stage_t>(ctx, regrouped_native), regrouped_reference, 15);
+
+    auto const inspected_dxc = co_await text::inspected_stage.description(*ctx);
+    auto const inspected_native = takes_dxil ? co_await dxil::inspected_stage.description(*ctx)
+                                             : co_await spirv::inspected_stage.description(*ctx);
+    CHECK(inspected_native.raygen_shaders[0].compiler.name == "sgl");
+    auto const inspected_reference = co_await traced<text::inspected_stage_t>(ctx, inspected_dxc);
+    check_same(co_await traced<text::inspected_stage_t>(ctx, mixed(inspected_dxc, inspected_native, k_raygen)),
+               inspected_reference, k_raygen);
+    check_same(co_await traced<text::inspected_stage_t>(ctx, inspected_native), inspected_reference, 15);
+
+    // the hit objects answered: a test that compares two blanks says nothing
+    auto hits = 0;
+    for (auto i = 0; i < k_grid * k_grid; ++i)
+        hits += inspected_reference[i * k_cell_words + 2][0] == 1.0f ? 1 : 0;
+    CHECK(hits > 0);
 }

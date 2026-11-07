@@ -273,6 +273,8 @@ TEST("slib - a device's micromaps and reordering leave only the named gaps on ei
                     continue;
                 if (!e.value().native_gap.empty())
                 {
+                    CHECK(!e.value().native_gap.contains("hit_object")).dump("entry", entry.entry_point);
+                    CHECK(!e.value().native_gap.contains("reorder")).dump("entry", entry.entry_point);
                     CC_LOG_INFO("device gap {}: {}", target == sgl::emit::target::hlsl_dx12 ? "dxil" : "spirv",
                                 e.value().native_gap);
                     continue;
@@ -297,5 +299,5 @@ TEST("slib - a device's micromaps and reordering leave only the named gaps on ei
             }
     }
     CC_LOG_INFO("device features: {} lowered, {} refused", lowered, refused_count);
-    CHECK(lowered > 300);
+    CHECK(lowered >= 660);
 }

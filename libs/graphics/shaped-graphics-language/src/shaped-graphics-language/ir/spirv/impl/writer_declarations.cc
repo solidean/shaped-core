@@ -268,6 +268,11 @@ void writer::write_types()
         case type_kind::acceleration_structure:
             emit(_declarations, spv::TypeAccelerationStructureKHR, {id});
             break;
+        case type_kind::hit_object:
+            require(spv::ShaderInvocationReorderEXT);
+            require_extension("SPV_EXT_shader_invocation_reorder");
+            emit(_declarations, spv::TypeHitObjectEXT, {id});
+            break;
         case type_kind::ray_query:
             require(spv::CapRayQueryKHR);
             require_extension("SPV_KHR_ray_query");

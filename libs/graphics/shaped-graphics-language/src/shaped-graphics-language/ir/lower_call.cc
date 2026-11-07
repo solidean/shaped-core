@@ -847,6 +847,11 @@ value_ref lowering::call(flat_expr const& x, flat_call const& c)
         call_callable(c);
         return value_ref::none;
     }
+    // `hit_object_to_world_row` and `hit_object_ray_origin` are the hit's own, which a stage reads with no hit object
+    auto const is_hit_stage_read = record.name.ends_with("_row") || record.name.starts_with("hit_object_ray_");
+    if ((record.name.starts_with("hit_object_") && !is_hit_stage_read) || record.name.starts_with("trace_hit_ray")
+        || record.name.starts_with("trace_ray_reordered") || record.name == "reorder_thread_by_hint")
+        return hit_object_call(x, c, record);
     auto const result = x.type == checked_module::void_type ? _void : value_type(x.type);
     if (record.is_atomic)
         return atomic(c, x);

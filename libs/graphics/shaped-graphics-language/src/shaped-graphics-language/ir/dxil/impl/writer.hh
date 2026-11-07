@@ -119,6 +119,8 @@ struct writer_uses
     bool ray_query = false;
     /// More than the 8 UAVs a device need not have more of.
     bool many_uavs = false;
+    /// A hit object or a regrouping, which Shader Model 6.9 brought.
+    bool reorders = false;
 };
 
 class writer
@@ -366,6 +368,7 @@ private:
     void ray_element(u32 index, stage_element const& e, instruction const& i);
     void ray_stage_op(u32 index, instruction const& i);
     void end_of_hit(dx_op code);
+    void hit_object_op(u32 index, instruction const& i);
     [[nodiscard]] ll_value atomic_on_buffer(place const& p, u32 op, ll_value value, ll_type t);
 
     // ---- writer_stage.cc
@@ -400,6 +403,7 @@ private:
     [[nodiscard]] ll_value op_function(dx_op op, ll_type overload);
     [[nodiscard]] ll_type signature_type(char code, ll_type overload);
     [[nodiscard]] ll_type handle_type();
+    [[nodiscard]] ll_type hit_object_type();
     [[nodiscard]] ll_type res_ret_type(ll_type overload);
     [[nodiscard]] ll_type cbuf_ret_type(ll_type overload);
     [[nodiscard]] ll_type dimensions_type();
