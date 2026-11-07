@@ -190,7 +190,7 @@ def _build_checks(ctx: Context, *, memo: dev.CheckMemo | None = None, all_preset
             ("tools/dev/submodules-self-test.py", [], (core, f"{dev_lib}/project/**")),
             ("tools/dev/benchmarks-self-test.py", [], (core, f"{dev_lib}/pipeline/**")),
             ("tools/dev/build-server-self-test.py", [], (core, f"{dev_lib}/pipeline/build_server.py", f"{dev_lib}/pipeline/build.py",
-                                                        f"{dev_lib}/pipeline/test.py")),
+                                                        f"{dev_lib}/pipeline/test.py", "tools/dev/cmd/ship.py")),
             ("tools/dev/memory-guard-self-test.py", [], (core,)),
             ("tools/dev/stall-report-self-test.py", [], (core,)),
             ("tools/dev/monado-self-test.py", [], (core, f"{dev_lib}/toolchain/monado.py", "tools/monado.version")),

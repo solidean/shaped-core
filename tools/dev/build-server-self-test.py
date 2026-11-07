@@ -5,7 +5,8 @@
 
 """Self-test for tools/dev/lib/pipeline/build_server.py — when a build or test run goes through the optional build server, and when it falls back.
 
-A fake client stands in for the server: a Python script answering `ensure`, `build` and `test` with the exit codes and results a test asks for.
+A fake client stands in for the server: a Python script answering `ensure`, `build`, `test` and `proof` with the exit codes and results a test asks for.
+`ship`'s proof mode is tested here too: when it asks the server, and that a proof stands in for the gate's build and test steps only while it can.
 The fallback paths are the ones that matter, since they run only on a machine where the server is missing or broken.
 A failed compile through the server must stay a failed build, and a failed test a failed test, never a silent rerun without it.
 
@@ -36,6 +37,7 @@ VERBOSE = "-v" in sys.argv
 
 # The fake client: its behaviour comes from FAKE_SERVER (`ensure=<rc>,build=<rc>,failed`), and every call is appended to FAKE_SERVER_LOG.
 # Under `test` it answers from FAKE_TESTS, a JSON object of binary name to the result's fields plus `out`, the binary's console output.
+# Under `proof` it prints FAKE_PROOF, a report, and exits by its verdict, or exits `proof=<rc>` without one.
 FAKE = r'''
 import json, os, sys
 from pathlib import Path
@@ -44,6 +46,13 @@ with open(os.environ["FAKE_SERVER_LOG"], "a", encoding="utf-8") as f:
     f.write(" ".join(sys.argv[1:]) + "\n")
 if sys.argv[1] == "ensure":
     sys.exit(int(spec.get("ensure", "0")))
+if sys.argv[1] == "proof":
+    print("fake: proving", file=sys.stderr)
+    if "proof" in spec:
+        sys.exit(int(spec["proof"]))
+    report = os.environ["FAKE_PROOF"]
+    print(report)
+    sys.exit(0 if json.loads(report)["verdict"] == "pass" else 1)
 if sys.argv[1] == "test":
     if "test" in spec:
         print("fake: the server failed", file=sys.stderr)
@@ -362,6 +371,137 @@ def test_runs_with_side_outputs_bypass_the_server() -> None:
     assert pipeline_test._server_bypass(preset=native, **{**plain, "sample": True}) == "--sample"
     assert pipeline_test._server_bypass(preset=native, **{**plain, "write_xml": False})
     assert pipeline_test._server_bypass(preset=native, **{**plain, "extra_env": True})
+
+
+def _report(verdict: str, *, reasons: list[str] | None = None, over_budget: int = 0, must_run: int = 0) -> dict:
+    """A proof report in the client's shape, as much of it as dev.py reads."""
+    must = [{"binary": "b", "test": f"t{i}", "score": 0.0, "est_ms": 2000} for i in range(must_run)]
+    over = [{"binary": "b", "test": f"o{i}", "score": 0.5, "est_ms": 2000} for i in range(over_budget)]
+    ran = [{"binary": "b", "test": t["test"], "why": "must run", "outcome": "pass" if verdict == "pass" else "fail",
+            "served": False, "ms": 1} for t in must]
+    return {"verdict": verdict, "reasons": reasons or [], "declared": 10, "plan": {"must_run": must, "over_budget": over},
+            "ran": ran, "sideband": []}
+
+
+def _prove(f: Fixture, report: dict | None) -> bs.Proof | None:
+    if report is not None:
+        f.env["FAKE_PROOF"] = json.dumps(report)
+    lines: list[str] = []
+    proof = f.session.proof(f.dir, env=f.env, progress=lines.append)
+    assert proof is None or "fake: proving" in lines, lines
+    return proof
+
+
+@with_fixture("", jobs="8")
+def test_a_proof_that_holds_passes_with_the_build_s_cap(f: Fixture) -> None:
+    proof = _prove(f, _report("pass", must_run=2))
+    assert proof is not None and proof.passed and proof.reasons == [], proof
+    assert f.calls() == ["ensure --quiet", f"proof {f.dir} --json -j 8"], f.calls()
+    assert not f.session.warnings
+
+
+@with_fixture("")
+def test_a_failing_must_run_test_is_a_proof_that_does_not_hold_not_a_fallback(f: Fixture) -> None:
+    why = "b: t0: fail (must run)"
+    proof = _prove(f, _report("fail", reasons=[why], must_run=1))
+    assert proof is not None and not proof.passed and proof.reasons == [why], proof
+    assert not f.session.warnings, "a proof that does not hold is the gate's verdict, never a fallback"
+
+
+@with_fixture("")
+def test_tests_past_the_budget_do_not_block(f: Fixture) -> None:
+    # The must-run tests ran past the budget, and ranked ones did not fit: the verdict is the client's, and it holds.
+    proof = _prove(f, _report("pass", must_run=20, over_budget=5))
+    assert proof is not None and proof.passed
+    assert len(proof.report["plan"]["over_budget"]) == 5
+
+
+def test_each_unavailable_code_from_proof_falls_back() -> None:
+    for code in bs.UNAVAILABLE:
+        with tempfile.TemporaryDirectory() as d:
+            f = Fixture(Path(d), f"proof={code}")
+            assert _prove(f, None) is None, code
+            assert f.session.warnings and bs.UNAVAILABLE[code] in f.session.warnings[0], f.session.warnings
+
+
+@with_fixture("proof=1")
+def test_a_proof_without_a_verdict_falls_back(f: Fixture) -> None:
+    assert _prove(f, None) is None
+    assert "without a verdict" in f.session.warnings[0], f.session.warnings
+
+
+@with_fixture("ensure=11")
+def test_a_server_that_does_not_answer_falls_back_to_the_full_gate(f: Fixture) -> None:
+    assert _prove(f, _report("pass")) is None
+    assert f.calls() == ["ensure --quiet"], f.calls()
+
+
+def test_a_missing_client_falls_back_to_the_full_gate() -> None:
+    with tempfile.TemporaryDirectory() as d:
+        build = Path(d)
+        (build / "build.ninja").write_text("", encoding="utf-8")
+        s = bs.session(bs.BuildServer(client=build / "absent.exe", ship_proof=True), flag=True, environ={})
+        assert s is not None and s.proof(build, env={}) is None
+        assert "proving without the build server" in s.warnings[0], s.warnings
+
+
+@with_fixture("", ninja=False)
+def test_an_unconfigured_build_dir_falls_back_to_the_full_gate(f: Fixture) -> None:
+    assert _prove(f, _report("pass")) is None
+    assert f.calls() == [], "the server is never asked"
+
+
+def _ship_ctx(config: bs.BuildServer | None):
+    def die(msg: str) -> None:
+        raise SystemExit(msg)
+    return types.SimpleNamespace(policy=types.SimpleNamespace(build_server=config), root=Path("."), die=die)
+
+
+def test_ship_proves_only_when_asked_and_opted_in() -> None:
+    from tools.dev.cmd import ship
+    on = bs.BuildServer(client=Path(sys.executable), enabled=True)
+    asked = bs.BuildServer(client=Path(sys.executable), enabled=True, ship_proof=True)
+    saved = os.environ.pop(bs.ENV_ENABLE, None)
+    try:
+        assert ship._prover(_ship_ctx(on), None) is None, "off by default"
+        assert ship._prover(_ship_ctx(asked), None) is not None, "the project's setting"
+        assert ship._prover(_ship_ctx(asked), False) is None, "--no-proof wins"
+        assert ship._prover(_ship_ctx(on), True) is not None, "--proof for one run"
+        off = bs.BuildServer(client=Path(sys.executable), ship_proof=True)
+        assert ship._prover(_ship_ctx(off), True) is None, "never without the server opted in"
+        assert ship._prover(_ship_ctx(None), True) is None
+    finally:
+        if saved is not None:
+            os.environ[bs.ENV_ENABLE] = saved
+
+
+def test_ship_s_gate_takes_the_proof_for_the_build_and_test_steps() -> None:
+    from tools.dev.cmd import ship
+    calls: list[tuple] = []
+    saved = (ship._dev, ship._dirty, ship._prove)
+    ship._dev = lambda ctx, *argv: calls.append(argv) or 0
+    ship._dirty = lambda repo: []
+    ctx = _ship_ctx(None)
+    try:
+        for proven, expected in ((True, [("check", "--fix", "--no-test")]),
+                                 (None, [("check", "--fix", "--no-test"), ("check", "test", "--memo")])):
+            calls.clear()
+            ship._prove = lambda ctx, server, p=proven: p
+            ship._gate(ctx, tests=True, prover=object())
+            assert calls == expected, (proven, calls)
+        calls.clear()
+        ship._prove = lambda ctx, server: False
+        try:
+            ship._gate(ctx, tests=True, prover=object())
+            raise AssertionError("a proof that does not hold must stop ship")
+        except SystemExit as e:
+            assert "proof does not hold" in str(e), e
+        assert calls == [("check", "--fix", "--no-test")], "and the full gate does not run after it"
+        calls.clear()
+        ship._gate(ctx, tests=True)
+        assert calls[-1] == ("check", "test", "--memo"), "without a prover the gate is today's"
+    finally:
+        ship._dev, ship._dirty, ship._prove = saved
 
 
 def main() -> int:

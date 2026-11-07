@@ -350,6 +350,10 @@ It is opt-in and never required: without it, everything builds and tests exactly
   so the next `test` finds their results stored; off by default, and a request without it withdraws it.
 - **Test runs writing what the server does not keep run without it**: `--sample`, `--profile`, `--no-xml-reports`, and cross-compiled presets.
 - **`check` and `ship` build without it for now**, opted in or not, so the gate stays independent of it; turning that on is one constant, `debt-devpy-gate-without-build-server`.
+- **`ship` can prove instead of gating, when asked**: with the server opted in and `ship --proof` or the project's `BuildServer.ship_proof`,
+  the server's `proof` replaces the gate's build and test steps: a green build of exactly this tree, every test green at least once,
+  the tests without such a result run, then the ones most likely affected within a short budget; old tests' failures it only reports.
+  The static gates run as always, `--no-proof` runs the full gate, and so does any problem with the server; off by default, under the same debt.
 
 [build_server.py](../../tools/dev/lib/pipeline/build_server.py) has the client contract, and [its self-test](../../tools/dev/build-server-self-test.py) runs with `check`.
 
