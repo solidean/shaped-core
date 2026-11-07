@@ -30,8 +30,8 @@ struct footprint_builder
     void touch_member(flat_binding_member const& b, bool reads, bool writes)
     {
         auto const& info = m.bindings[m.at(b.binding).info];
-        // an `@inline` block is set rather than bound, and workgroup memory has no host side at all
-        if (info.is_inline || info.is_workgroup)
+        // an `@inline` block is set rather than bound, and workgroup memory and a reserved binding have no host side
+        if (info.is_inline || info.is_workgroup || m.at(b.binding).file < m.prelude_files)
             return;
         auto const& member = m.at(info.members)[b.member];
         auto const kind = m.at(member.type).kind;

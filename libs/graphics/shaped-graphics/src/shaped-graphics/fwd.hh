@@ -124,6 +124,7 @@ enum class micromap_format : u16;   // 2-state or 4-state
 enum class micromap_state : u8;     // one micro-triangle's state in a 4-state map
 enum class micromap_special_index : i32; // a whole triangle's state, in place of a map index
 
+struct reserved_binding_address;
 } // namespace sg
 
 /// Index-buffer element width — shared by draw index buffers (index_buffer_view) and raytracing BLAS

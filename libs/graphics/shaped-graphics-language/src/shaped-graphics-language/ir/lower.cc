@@ -196,9 +196,9 @@ void lowering::statement(flat_stmt_id id)
     s.node.visit(
         [&](flat_let const& let) { declare(let.local, let.value, _e.at(let.local).is_mut); }, [&](flat_var const& var)
         { declare(var.local, var.value, true); }, [&](flat_assign const& a) { assign(a); }, [&](flat_print const&)
-        { unsupported("a print, which needs sg's debug window"); }, [&](flat_eval const& v) { (void)expr(v.value); }, //
-        [&](flat_if const& i) { if_(i); }, [&](flat_loop const& l) { loop_(l); },                                     //
-        [&](flat_while const& w) { while_(w); }, [&](flat_for const& f) { for_(f); },                                 //
+        { unsupported("a print legalize left"); }, [&](flat_eval const& v) { (void)expr(v.value); }, //
+        [&](flat_if const& i) { if_(i); }, [&](flat_loop const& l) { loop_(l); },                    //
+        [&](flat_while const& w) { while_(w); }, [&](flat_for const& f) { for_(f); },                //
         [&](flat_continue const&) { branch(_continues.back()); }, [&](flat_discard const&)
         { add(op::discard, type_ref::none, cc::span<u32 const>()); }, [&](flat_once const& o) { once_(o); }, //
         [&](flat_break const&) { branch(_breaks.back()); }, [&](flat_switch const& sw) { switch_(sw); },

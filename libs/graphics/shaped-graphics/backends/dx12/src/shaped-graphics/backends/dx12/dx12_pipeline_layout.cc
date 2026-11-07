@@ -4,6 +4,7 @@
 #include <shaped-graphics/backends/dx12/dx12_sampler.hh>
 #include <shaped-graphics/binding/binding.hh> // sg::is_sampler
 #include <shaped-graphics/binding/impl/layout_hash.hh>
+#include <shaped-graphics/binding/reserved_bindings.hh>
 #include <shaped-graphics/context/impl/debug_windows.hh>
 #include <shaped-graphics/raytracing/impl/software_trace.hh>
 
@@ -108,8 +109,8 @@ cc::result<dx12_pipeline_layout_handle> dx12_pipeline_layout::create(ID3D12Devic
         D3D12_ROOT_PARAMETER param = {};
         param.ParameterType = D3D12_ROOT_PARAMETER_TYPE_UAV;
         param.ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
-        param.Descriptor.ShaderRegister = 0;
-        param.Descriptor.RegisterSpace = 11;
+        param.Descriptor.ShaderRegister = UINT(sg::reserved_debug_window.dx12_register);
+        param.Descriptor.RegisterSpace = UINT(sg::reserved_debug_window.dx12_space);
         pl->debug_root_param = int(params.size());
         params.push_back(param);
     }
@@ -128,8 +129,8 @@ cc::result<dx12_pipeline_layout_handle> dx12_pipeline_layout::create(ID3D12Devic
         D3D12_ROOT_PARAMETER pool = {};
         pool.ParameterType = D3D12_ROOT_PARAMETER_TYPE_SRV;
         pool.ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
-        pool.Descriptor.ShaderRegister = 0;
-        pool.Descriptor.RegisterSpace = 12;
+        pool.Descriptor.ShaderRegister = UINT(sg::reserved_acceleration_pool.dx12_register);
+        pool.Descriptor.RegisterSpace = UINT(sg::reserved_acceleration_pool.dx12_space);
         pl->software_pool_root_param = int(params.size());
         params.push_back(pool);
 
@@ -137,8 +138,8 @@ cc::result<dx12_pipeline_layout_handle> dx12_pipeline_layout::create(ID3D12Devic
         roots.ParameterType = D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS;
         roots.ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
         roots.Constants.Num32BitValues = UINT(sg::impl::software_trace_roots);
-        roots.Constants.ShaderRegister = 0;
-        roots.Constants.RegisterSpace = 12;
+        roots.Constants.ShaderRegister = UINT(sg::reserved_acceleration_roots.dx12_register);
+        roots.Constants.RegisterSpace = UINT(sg::reserved_acceleration_roots.dx12_space);
         pl->software_roots_root_param = int(params.size());
         params.push_back(roots);
     }

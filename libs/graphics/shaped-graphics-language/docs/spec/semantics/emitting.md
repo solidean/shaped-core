@@ -40,7 +40,8 @@ Back to the [semantics](_index.md); the reasons are in [why/emitting.md](why/emi
   `ray_query` is none of them: WGSL writes a trace's emulated form (EMIT-135).
   The shader chose it by `require`, so a portable shader still meets EMIT-13's promise.
 * **EMIT-66** A tree that is not core is the error `not-core`, and its detail names the first node that offends.
-* **EMIT-67** A `print` is `unsupported`: no target writes one yet, so the driver legalizes every entry point without them (LEGAL-63).
+* **EMIT-67** A `print` is `unsupported` without diagnostics, which is why the driver legalizes every entry point without them there (LEGAL-63).
+  A description holds whichever a compile asks for, so no print keeps `sgl describe` from writing one.
 
 ## Names
 
@@ -457,7 +458,6 @@ fn main_ps(p: pixel_input) -> target_ {
   `@view_index` is `dx.op.viewID` and in no signature, and `@layer` from a vertex stage is `ShaderLayer` and DXIL's shader flag for it.
   Every built-in a pixel stage reads but `FragCoord` is `Flat` on SPIR-V.
   A sample's offset is `unsupported` so far: SPIR-V takes it as a constant vector, which the form does not hold.
-  With diagnostics on, a `print` and an `assert` are `unsupported` in every stage, since neither writer reaches sg's debug window; with them off, legalize has erased both.
 * **EMIT-239** A binding array is one global of an array of resources, an unbounded one of a runtime array, and an `access_chain` picks the element.
   On DXIL that element's handle is made where the chain stands, `createHandleFromBinding` over the array's whole range, since no handle exists ahead of its index.
   `nonuniform i` marks the chain and what reads through it.
@@ -474,6 +474,9 @@ fn main_ps(p: pixel_input) -> target_ {
   `@domain_location` is `TessCoord`, three lanes on any domain, or `dx.op.domainLocation`, and `@primitive_id` outside a pixel stage is `dx.op.primitiveID`.
   `ISG1`, `OSG1` and `PSG1` list elements by register and then by the offset of the name, so a factor that declares first leads a link standing before it in its row.
   EMIT-237's table reaches across patch constants too: every input to every patch constant in a control stage, and every patch constant to every output in an evaluation stage.
+* **EMIT-241** A native route has no `print` of its own: it lowers what LEGAL-70 wrote, so sg reads a binary's records as it reads a text's, and one pipeline may mix the routes.
+  `DXIL` states `UAVs at every shader stage` wherever a stage that is neither pixel nor compute declares a UAV.
+  The prologue of EMIT-229 is `unsupported` so far, so a compute stage with workgroup memory lowers under no robustness profile.
 
 ## Lines
 
@@ -489,17 +492,13 @@ fn main_ps(p: pixel_input) -> target_ {
 
 ## Diagnostics
 
-* **EMIT-183** Asked for diagnostics, a text writes each `print` into sg's debug buffer as one record, and describes its site to the host.
-  The tree must keep its prints and lower its asserts (LEGAL-64); without diagnostics the driver drops both (LEGAL-63).
-  The buffer is a header of three words, a cursor, a capacity and a dropped count, then 32-bit words.
-  A record is the site's id, its word count, then each value's lanes in order, one word each: a float's bits, an int's, a bool as 0 or 1, and a `half` widened to a float first.
-  It reserves its words with one atomic add on the cursor, writes them where they fit under the capacity, and otherwise adds one to the dropped count.
-  The buffer stands in sg's reserved group: `register(u0, space11)` in `hlsl-dx12` and `[[vk::binding(19, 3)]]` in `hlsl-vulkan`.
-  It is `@group(3) @binding(19)` in WGSL, and the entry point's parameter `[[buffer(30)]]` in MSL, the argument table's last slot, clear of the vertex buffers from `[[buffer(5)]]` up.
-  A text declares it only where it writes a record.
-  WebGPU's vertex stage has no writable storage, and MSL's ray-tracing stages take no buffer.
-  vulkan's vertex, geometry and tessellation stages write one only on a device with `vertex_pipeline_stores`, which no program names.
-  There a print is dropped and the text declares none.
+* **EMIT-183** Asked for diagnostics, a compile writes each `print` into sg's debug window as one record, and describes its site to the host.
+  No target and no route holds this: the tree must keep its prints and lower its asserts (LEGAL-64), LEGAL-70 writes them as statements, and a target writes those like any others.
+  Without diagnostics the driver drops both (LEGAL-63).
+  The window, its record and its address on each target are [the contract with sg](../../reserved-bindings.md).
+  A compile declares the window only where a statement reaches it.
+  A stage the contract says cannot reach it drops its prints and declares none.
+  That is WebGPU's vertex stage, MSL's ray-tracing stages, and vulkan's vertex, geometry and tessellation stages without `vertex_pipeline_stores`, which no program names.
   A site's id hashes the entry point's name, the message and the line it stands on, so one site has one id on every target.
 
 

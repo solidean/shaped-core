@@ -53,6 +53,9 @@ add_library(shaped-graphics-language
     src/shaped-graphics-language/builtins/register_vector_math.cc
     src/shaped-graphics-language/builtins/registry.cc
 
+    src/shaped-graphics-language/check/reserved_bindings.cc
+    src/shaped-graphics-language/check/source_lines.cc
+    src/shaped-graphics-language/legalize/legalize_prints.cc
     src/shaped-graphics-language/ir/ir.cc
     src/shaped-graphics-language/ir/pipeline.cc
     src/shaped-graphics-language/ir/cleanup.cc
@@ -510,6 +513,7 @@ if(SC_BUILD_TESTS)
         tests/emit/sixty-four-bit-emit-test.cc
         tests/emit/double-maths-emit-test.cc
         tests/emit/spirv-emit-test.cc
+        tests/ir/debug-ir-test.cc
         tests/ir/ir-test-support.hh
         tests/ir/optimize-ir-test.cc
         tests/ir/passes-ir-test.cc

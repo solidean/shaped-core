@@ -113,6 +113,7 @@ constexpr feature_rule k_features[] = {
     {&writer_uses::start_location, 1ull << 38, 1ull << 32},
     {&writer_uses::view_id, 1ull << 21, 1ull << 16},
     {&writer_uses::layer_output, 1ull << 9, 1ull << 13},
+    {&writer_uses::uavs_at_every_stage, 1ull << 16, 1ull << 2},
 };
 /// What every module says: 16-bit types are native, as the text route's `-enable-16bit-types` has them.
 constexpr u64 k_native_low_precision = 1ull << 23;

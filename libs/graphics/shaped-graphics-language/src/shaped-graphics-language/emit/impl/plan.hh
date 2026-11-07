@@ -176,6 +176,8 @@ struct planned_resource
     bool is_mut = false;
     /// `@coherent`: HLSL declares it `globallycoherent`, and MSL `coherent(device)` (EMIT-150).
     bool is_coherent = false;
+    /// An entry of `k_reserved_bindings`: sg binds it, so the host never hears of it, and it stands at its fixed address.
+    bool is_reserved = false;
     i32 group = 0;
     /// The first of the `count` consecutive slots it takes: a binding array takes one per element (CHK-299).
     i32 slot = 0;
@@ -233,8 +235,6 @@ struct plan
     check::checked_module const& m;
     check::flat_entry_point const& e;
     target which;
-    /// EMIT-183: the text writes a print into sg's debug buffer, which it declares.
-    bool writes_debug = false;
     /// Every `atomic[float]` is the target's own float atomic, rather than a `uint`'s bits: the device adds floats in one
     /// instruction, and the target can say so (vulkan, metal).
     bool native_float_atomics = false;
