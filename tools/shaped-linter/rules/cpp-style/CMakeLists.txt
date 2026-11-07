@@ -6,6 +6,7 @@
 target_sources(shaped-linter-core PRIVATE
     blessed-includes/blessed_includes.cc
     blocking-wait/blocking_wait.cc
+    co-await-in-initializer/co_await_in_initializer.cc
     co-await-temporary/co_await_temporary.cc
     default-init-assignment/default_init_assignment.cc
     qualified-primitive/qualified_primitive.cc
@@ -16,6 +17,7 @@ if(SC_BUILD_TESTS)
     target_sources(shaped-linter-test PRIVATE
         blessed-includes/blessed_includes-test.cc
         blocking-wait/blocking_wait-test.cc
+        co-await-in-initializer/co_await_in_initializer-test.cc
         co-await-temporary/co_await_temporary-test.cc
         default-init-assignment/default_init_assignment-test.cc
         qualified-primitive/qualified_primitive-test.cc
