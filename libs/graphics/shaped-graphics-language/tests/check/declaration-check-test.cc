@@ -373,9 +373,11 @@ TEST("sgl check - a binding records @inline and its members")
     CHECK(reports_of(checked) == "");
     CHECK(
         sgl::check::dump(checked.module).ends_with("(binding a inline (m : mat4))\n(binding b (v : vec3) (k : float))\n"));
-    REQUIRE(checked.module.bindings.size() == 2);
-    CHECK(checked.module.bindings[0].is_inline);
-    CHECK(!checked.module.bindings[1].is_inline);
+    // the prelude's reserved bindings stand ahead of the program's
+    auto const& all = checked.module.bindings;
+    REQUIRE(all.size() >= 2);
+    CHECK(all[all.size() - 2].is_inline);
+    CHECK(!all[all.size() - 1].is_inline);
 }
 
 TEST("sgl check - the binding list is checked: every entry is the name of a binding")

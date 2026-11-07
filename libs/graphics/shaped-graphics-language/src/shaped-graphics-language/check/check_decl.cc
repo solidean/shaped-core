@@ -1706,7 +1706,7 @@ void checker::compile_binding(symbol_id id)
     auto const& d = ast_of(file).at(decl);
     auto const& b = d.node.as<ast::binding_decl>();
 
-    cc::string_view const known[] = {"inline", "workgroup", "shadowable", "no_padding", "padding"};
+    cc::string_view const known[] = {"inline", "workgroup", "shadowable", "no_padding", "padding", "internal"};
     judge_attributes(file, d.attributes, known, "a binding");
     auto const is_workgroup = find_attribute(file, d.attributes, "workgroup") != nullptr;
     auto const* const padded = find_attribute(file, d.attributes, "padding");

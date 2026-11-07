@@ -20,7 +20,14 @@ flat_expr_id add_call(flat_builder& b, cc::string_view name, cc::span<flat_expr_
         auto const parameters = b.m.at(f.parameters);
         auto is_match = parameters.size() == arguments.size();
         for (auto k = isize(0); is_match && k < parameters.size(); ++k)
-            is_match = parameters[k].type == b.e.at(arguments[k]).type;
+        {
+            auto const given = b.e.at(arguments[k]).type;
+            auto const& wanted = b.m.at(parameters[k].type);
+            // `mut atomic[T]` is a type of its own, and what reaches it is the place an `atomic[T]` stands in
+            is_match = parameters[k].type == given
+                    || (wanted.kind == type_kind::atomic && b.m.at(given).kind == type_kind::atomic
+                        && wanted.element == b.m.at(given).element);
+        }
         if (!is_match)
             continue;
         return b.add_expr(f.result, flat_call{.callee = symbol_id(i),

@@ -690,6 +690,65 @@ struct sgl::check::flat_switch
     constexpr bool operator==(flat_switch const&) const = default;
 };
 
+/// A line of an SGL source: a position in `checked_module::files`, and the line there, counted from 1.
+struct sgl::check::source_line
+{
+    /// -1 for no line at all.
+    i32 file = -1;
+    i32 line = 0;
+
+    constexpr bool operator==(source_line const&) const = default;
+};
+
+/// Where one line of the text came from (EMIT-181).
+struct sgl::check::line_origin
+{
+    /// The line of the text, counted from 1.
+    i32 emitted = 0;
+    /// The innermost source line outside the prelude: a prelude function's body maps to the line that called it.
+    source_line at;
+    /// The calls `at` was inlined through, innermost first, the prelude's left out; empty for the entry point's own body.
+    cc::vector<source_line> inlined_from;
+
+    bool operator==(line_origin const& rhs) const
+    {
+        return emitted == rhs.emitted && at == rhs.at && ast::impl::is_equal(inlined_from, rhs.inlined_from);
+    }
+};
+
+/// One value a debug record holds: its scalar family and its lanes, each lane one 32-bit word.
+struct sgl::check::debug_value
+{
+    /// `float`, `half`, `int`, `uint` or `bool`; an enum is `int`, and `type` names it.
+    cc::string family;
+    i32 lanes = 1;
+    /// The value's type as the program names it: `float3`, `material_kind`.
+    cc::string type;
+
+    bool operator==(debug_value const&) const = default;
+};
+
+/// One print or assert the text writes into sg's debug buffer (EMIT-183).
+/// Its record is `id`, the record's word count, then each value's lanes in order, one word each.
+struct sgl::check::debug_site
+{
+    /// What the record starts with, stable for one source line and message wherever the text is written.
+    u32 id = 0;
+    /// An assert's, which writes only where its condition was false.
+    bool is_assert = false;
+    /// The message around its values, one piece more than `values`; empty for a print of one bare value.
+    cc::vector<cc::string> pieces;
+    cc::vector<debug_value> values;
+    /// Where the print or assert stands; empty without the source files (EMIT-181).
+    line_origin origin;
+
+    bool operator==(debug_site const& rhs) const
+    {
+        return id == rhs.id && is_assert == rhs.is_assert && ast::impl::is_equal(pieces, rhs.pieces)
+            && ast::impl::is_equal(values, rhs.values) && origin == rhs.origin;
+    }
+};
+
 struct sgl::check::flat_stmt
 {
     origin from;
@@ -794,6 +853,10 @@ struct sgl::check::flat_entry_point
     /// The local holding the invocation's index in its workgroup, which that prologue strides by; `none` where there is
     /// none.
     local_id workgroup_index = local_id::none;
+    /// The entries of `k_reserved_bindings` the tree reaches, which no `bindings` list holds: legalize adds them.
+    cc::vector<symbol_id> reserved;
+    /// EMIT-183: each print legalize wrote as a record.
+    cc::vector<debug_site> debug_sites;
 
     cc::vector<flat_local> locals;
     cc::vector<flat_label> labels;
@@ -845,6 +908,7 @@ struct sgl::check::flat_entry_point
             && is_equal(traced_rays, rhs.traced_rays) && is_equal(text_types, rhs.text_types)
             && attributes == rhs.attributes && is_equal(options, rhs.options) && float_guarantee == rhs.float_guarantee
             && float_raised_by == rhs.float_raised_by && written_words == rhs.written_words
-            && zeroes_workgroup == rhs.zeroes_workgroup && workgroup_index == rhs.workgroup_index;
+            && zeroes_workgroup == rhs.zeroes_workgroup && workgroup_index == rhs.workgroup_index
+            && is_equal(reserved, rhs.reserved) && is_equal(debug_sites, rhs.debug_sites);
     }
 };

@@ -33,6 +33,12 @@ struct sgl::check::legalize_options
     bool erases_prints = false;
     /// Keeps every `assert` as `if (!condition) { print; end }` rather than dropping it, for a text with diagnostics (LEGAL-64).
     bool lowers_asserts = false;
+    /// Writes every print as flat statements over `sg_debug` (LEGAL-70), which is what a target compiles.
+    /// Left off, a print stays a `flat_print`, which only the interpreter runs.
+    bool expands_prints = false;
+    /// The files and their names a site's origin and id read (EMIT-183); empty leaves a site without a place.
+    cc::span<module_file const> files;
+    cc::span<cc::string_view const> names;
     /// LEGAL-65: what an integer division by zero, or an array index outside the array, does in the text.
     undefined_guard guards_undefined = undefined_guard::none;
     /// The target reads a buffer's length, so a guard also bounds a buffer index (LEGAL-66); MSL's buffers carry none.

@@ -382,15 +382,16 @@ sgl::emit::emitted_text sgl::emit::emit_entry_point(check::checked_module const&
         auto written = impl::write_text(plan, impl::dialect_of(t), sources);
         result.text = cc::move(written.text);
         result.lines = cc::move(written.lines);
-        result.debug_sites = cc::move(written.debug_sites);
     }
+    result.debug_sites = e.debug_sites;
     result.entry_point = plan.entry_name;
     if (plan.constants.has_value())
         result.bound_names.push_back({.emitted = plan.constants.value().name, .host = plan.constants.value().host_name});
     for (auto const& block : plan.group_blocks)
         result.bound_names.push_back({.emitted = block.name, .host = block.host_name});
     for (auto const& buffer : plan.resources)
-        result.bound_names.push_back({.emitted = buffer.name, .host = buffer.host_name});
+        if (!buffer.is_reserved)
+            result.bound_names.push_back({.emitted = buffer.name, .host = buffer.host_name});
     for (auto const& s : plan.samplers)
         result.bound_names.push_back({.emitted = s.name, .host = s.host_name});
     result.layouts = impl::layouts_of(plan);

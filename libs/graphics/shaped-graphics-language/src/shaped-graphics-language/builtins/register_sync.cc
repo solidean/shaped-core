@@ -1,6 +1,7 @@
 #include <clean-core/string/format.hh>
 #include <shaped-graphics-language/builtins/register.hh>
 #include <shaped-graphics-language/builtins/registry.hh>
+#include <shaped-graphics-language/check/reserved_bindings.hh>
 #include <shaped-graphics-language/check/resources.hh>
 
 using namespace sgl;
@@ -1041,6 +1042,10 @@ void sgl::builtins::register_sync(registry& r)
                   "own.\n"
                   "// The weak one may fail although the atomic held `expected`, so `old` alone cannot say whether it "
                   "stored (EMIT-161).");
+    r.add_comment("// What sg binds itself: an entry of `check::k_reserved_bindings`, which legalize alone reaches.");
+    for (auto const& b : check::k_reserved_bindings)
+        if (!b.declaration.empty())
+            r.add_declaration(b.declaration);
     r.add_declaration("/// What a weak compare-exchange read, and whether it stored `desired`.\n"
                       "struct exchange_result[T]:\n"
                       "    old: T\n"

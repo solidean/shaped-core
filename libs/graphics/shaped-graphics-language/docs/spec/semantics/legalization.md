@@ -27,6 +27,9 @@ The worked examples are WGSL, since it is the strictest target: no `do … while
 * **LEGAL-53** (V0) A core tree holds no `check`: each goes with its body, first, since no target writes a check or an `assert` (EVAL-75).
 * **LEGAL-63** (V0) Asked to, legalization drops every `print` with its values too, which is how a text is written without diagnostics.
 * **LEGAL-64** (V0) Asked to, it lowers each `assert` instead: its body, then `if not condition`, a print of its message and the end of the invocation.
+* **LEGAL-70** Asked to, the last step writes each `print` of the finished core tree as statements over the reserved binding `sg_debug`, for every target ([the contract](../../reserved-bindings.md)).
+  Each value is bound once, ahead of the reservation, and the site table is built here, so what folding removed has no site and no route can differ.
+  Left unasked, a print stays a statement, which only the interpreter runs.
   A compute, a geometry or a ray-tracing stage that returns nothing returns, and a pixel stage discards.
   A vertex and a tessellation evaluation stage return their result at a NaN position, which culls every primitive the vertex is part of.
   A tessellation control stage returns its edge factors at 0, which culls the patch.
