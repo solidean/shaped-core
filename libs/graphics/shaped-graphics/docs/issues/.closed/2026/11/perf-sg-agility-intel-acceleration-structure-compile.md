@@ -43,7 +43,7 @@ Option 1's knob is what an application would reach for there as well.
 
 ## Landed
 
-Option 2, chosen on 2026-11-07, and the workaround is now [debt-sg-intel-tests-keep-off-agility](../../../debt-sg-intel-tests-keep-off-agility.md).
+Option 2, chosen on 2026-11-07, and the workaround is now [debt-sg-intel-keeps-off-agility](../../../debt-sg-intel-keeps-off-agility.md).
 `dx12::choose_d3d12_runtime` and `SC_DX12_RUNTIME` pick the runtime per process, and on Intel each test binary picks the system one.
 `shaped-graphics-test` takes 23.6 s alone, its Agility process included, against over 175 s.
 The full `dev.py test` run, one binary at a time, takes 101 s, its longest binary `shaped-viewer-test` at 38–45 s.

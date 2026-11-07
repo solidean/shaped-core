@@ -7,7 +7,6 @@
 #include <nexus/tests/alias.hh> // nx::setup
 #include <shaped-graphics/backends/dx12/dx12_context.hh>
 #include <shaped-graphics/backends/dx12/dx12_expected_messages.hh>
-#include <shaped-graphics/backends/dx12/dx12_runtime.hh> // choose_test_d3d12_runtime
 
 // dx12 entry-point drivers for sr's GPU tests: each brings up ONE dx12 context and invokes every INVOCABLE_TEST taking an sg::context_handle against it.
 // Compiled only where the dx12 backend builds, so Windows.
@@ -28,12 +27,6 @@ namespace dx12 = sg::backend::dx12;
 // The debug-layer advisories sg provokes on purpose (dx12_expected_messages.hh), allowed in every test of this binary.
 // Validation fails a test through the log rule rather than through a listener, so anything else the layer says still fails it.
 NX_ALLOW_LOGS(cc::rec::level::warning, "sg.dx12", sg::backend::dx12::k_expected_validation_messages);
-
-// Before any device, so a process on Intel's driver never loads the Agility SDK (dx12_runtime.hh).
-NX_TEST_SETUP(nx::setup&)
-{
-    dx12::choose_test_d3d12_runtime();
-}
 
 ASYNC_TEST("sr dx12 - warp")
 {

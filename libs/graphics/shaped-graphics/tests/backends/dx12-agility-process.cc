@@ -20,7 +20,7 @@ using namespace cc::primitive_defines;
 //
 // On Intel's driver, a process that loaded the Agility SDK compiles every shader anew, on dx12 and vulkan alike.
 // docs/bugs-external/intel-agility-process-recompiles-acceleration-structure-kernels has the reproduction.
-// So there every test process picks the system runtime, through dx12::choose_test_d3d12_runtime.
+// So there every process of ours keeps to the system runtime unless asked otherwise (dx12_runtime.hh).
 // The launcher below then starts this binary again on the Agility SDK, running only the invocables listed here.
 // Everywhere else every driver runs on the Agility SDK already, and the launcher skips.
 
@@ -255,8 +255,6 @@ cc::shared_async<cc::unit> agility_sweep(cc::string invoke, bool native_dxil)
 
 NX_TEST_SETUP(nx::setup& s)
 {
-    dx12::choose_test_d3d12_runtime();
-
     auto const* const text = s.find_test(k_text_driver);
     auto const* const native = s.find_test(k_native_driver);
     auto fragments = cc::vector<nx::alias_fragment>();

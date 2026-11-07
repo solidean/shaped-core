@@ -26,16 +26,12 @@ void choose_d3d12_runtime(d3d12_runtime runtime);
 
 /// The runtime this process asked for, which calling it settles.
 /// That is `choose_d3d12_runtime`'s, else `SC_DX12_RUNTIME` (`system` or `agility`), else the Agility SDK's where fetched.
+/// The default is the system runtime where the first hardware adapter is Intel's, read through DXGI alone.
 [[nodiscard]] d3d12_runtime requested_d3d12_runtime();
 
 /// Whether this process's devices come from the Agility SDK's runtime rather than the system's.
 /// False where the Agility SDK was asked for and failed to load.
 [[nodiscard]] bool runs_agility_runtime();
-
-/// The policy every test binary of ours applies in its `NX_TEST_SETUP`, before any device.
-/// On an Intel GPU it asks for the system runtime, unless `SC_DX12_RUNTIME` names one.
-/// It reads the adapter through DXGI alone, so it loads no D3D12 runtime itself.
-void choose_test_d3d12_runtime();
 
 /// Whether acceleration-structure buffers carry `D3D12_RESOURCE_FLAG_RAYTRACING_ACCELERATION_STRUCTURE`, which a
 /// micromap array needs: from the first context that reports `sg::feature::opacity_micromap` on, and never before.

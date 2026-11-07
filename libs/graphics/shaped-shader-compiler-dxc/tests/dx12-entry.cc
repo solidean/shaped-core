@@ -4,7 +4,6 @@
 #include <nexus/tests/alias.hh>
 #include <nexus/tests/registry.hh>
 #include <shaped-graphics/backends/dx12/dx12_context.hh> // sg::create_dx12_context
-#include <shaped-graphics/backends/dx12/dx12_runtime.hh> // choose_test_d3d12_runtime
 
 // Entry-point drivers for the whole-chain integration tests: compile HLSL → reflect → bind → run on a device → read back.
 // Each brings up ONE context and invokes every INVOCABLE_TEST in the binary against it, so the suite costs one device per adapter that runs rather than one per test.
@@ -72,8 +71,6 @@ ASYNC_TEST("ssc::dxc + dx12 - hardware backend")
 // One alias per invocable, so `dev.py test "ssc::dxc + dx12 - <name>"` still selects that one test, on both adapters.
 NX_TEST_SETUP(nx::setup& s)
 {
-    sg::backend::dx12::choose_test_d3d12_runtime();
-
     auto const* const warp = s.find_test(warp_driver);
     auto const* const hardware = s.find_test(hardware_driver);
 

@@ -135,19 +135,6 @@ struct runtime_choice
 };
 cc::mutex<runtime_choice> g_runtime_choice;
 
-[[nodiscard]] d3d12_runtime default_runtime()
-{
-    if (auto const value = cc::environment_variable("SC_DX12_RUNTIME"); value.has_value())
-    {
-        if (value.value() == "system")
-            return d3d12_runtime::system;
-        if (value.value() == "agility")
-            return d3d12_runtime::agility;
-        CC_LOG_WARNING("SC_DX12_RUNTIME='{}' is ignored: the accepted values are 'system' and 'agility'", value.value());
-    }
-    return SG_HAS_AGILITY ? d3d12_runtime::agility : d3d12_runtime::system;
-}
-
 constexpr UINT k_intel_vendor_id = 0x8086;
 constexpr UINT k_microsoft_vendor_id = 0x1414;
 
@@ -169,6 +156,29 @@ constexpr UINT k_microsoft_vendor_id = 0x1414;
     }
     return 0;
 }
+[[nodiscard]] d3d12_runtime default_runtime()
+{
+    if (auto const value = cc::environment_variable("SC_DX12_RUNTIME"); value.has_value())
+    {
+        if (value.value() == "system")
+            return d3d12_runtime::system;
+        if (value.value() == "agility")
+            return d3d12_runtime::agility;
+        CC_LOG_WARNING("SC_DX12_RUNTIME='{}' is ignored: the accepted values are 'system' and 'agility'", value.value());
+    }
+    if (!SG_HAS_AGILITY)
+        return d3d12_runtime::system;
+    // TEMPORARY(debt-sg-intel-keeps-off-agility): Intel's driver compiles every shader of an Agility process anew.
+    if (first_hardware_vendor_id() == k_intel_vendor_id)
+    {
+        CC_LOG_INFO("dx12 runs on the system runtime on this Intel GPU, without SM 6.9, shader execution reordering "
+                    "and "
+                    "DXR 1.2: SC_DX12_RUNTIME=agility asks for the Agility SDK anyway");
+        return d3d12_runtime::system;
+    }
+    return d3d12_runtime::agility;
+}
+
 } // namespace
 } // namespace sg::backend::dx12
 
@@ -194,16 +204,6 @@ sg::backend::dx12::d3d12_runtime sg::backend::dx12::requested_d3d12_runtime()
                 c.settled = c.chosen.has_value() ? c.chosen.value() : default_runtime();
             return c.settled.value();
         });
-}
-
-void sg::backend::dx12::choose_test_d3d12_runtime()
-{
-    if (!SG_HAS_AGILITY || cc::environment_variable("SC_DX12_RUNTIME").has_value())
-        return;
-    // TEMPORARY(debt-sg-intel-tests-keep-off-agility): Intel's driver compiles every shader of an Agility process anew.
-    // So a test process there keeps to the system runtime, and sg's tests start one Agility process of their own.
-    if (first_hardware_vendor_id() == k_intel_vendor_id)
-        choose_d3d12_runtime(d3d12_runtime::system);
 }
 
 bool sg::backend::dx12::marks_acceleration_structures()

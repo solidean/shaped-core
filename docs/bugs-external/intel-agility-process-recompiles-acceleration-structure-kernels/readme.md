@@ -95,15 +95,15 @@ A shared root cause, a builder kernel the driver compiles at run time since that
 
 ## What we do about it
 
-**Test processes on an Intel GPU keep to the system runtime**, marked `TEMPORARY(debt-sg-intel-tests-keep-off-agility)`.
-`dx12::choose_test_d3d12_runtime()` makes the choice before any D3D12 runtime is loaded.
+**On an Intel GPU, every process of ours keeps to the system runtime unless asked otherwise**, marked `TEMPORARY(debt-sg-intel-keeps-off-agility)`.
+`dx12::requested_d3d12_runtime()` makes the choice through DXGI alone, before any D3D12 runtime is loaded.
 [dx12_runtime.cc](../../../libs/graphics/shaped-graphics/backends/dx12/src/shaped-graphics/backends/dx12/dx12_runtime.cc) holds it.
 `shaped-graphics-test` runs the tests that need the Agility SDK in a process of its own, which pays the compile once and in parallel.
 [dx12-agility-process.cc](../../../libs/graphics/shaped-graphics/tests/backends/dx12-agility-process.cc) lists them and starts it.
-[The debt issue](../../../libs/graphics/shaped-graphics/docs/issues/debt-sg-intel-tests-keep-off-agility.md) says what coverage that moves, and when to remove it.
+[The debt issue](../../../libs/graphics/shaped-graphics/docs/issues/debt-sg-intel-keeps-off-agility.md) says what coverage that moves, and when to remove it.
 
-An application can do the same with `SC_DX12_RUNTIME=system`, or `dx12::choose_d3d12_runtime` before its first device, at the cost of SM 6.9, shader execution reordering and DXR 1.2.
-Nothing of ours does so by default.
+Applications, `shaped-view` included, so run without SM 6.9, shader execution reordering and DXR 1.2 there.
+`SC_DX12_RUNTIME=agility`, or `dx12::choose_d3d12_runtime` before the first device, asks for the Agility SDK anyway and pays the compile.
 
 What it costs, measured on the machine above on 2026-11-07, each binary alone:
 

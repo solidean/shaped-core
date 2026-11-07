@@ -4,7 +4,6 @@
 #include <nexus/test.hh>
 #include <nexus/tests/alias.hh>
 #include <nexus/tests/registry.hh>
-#include <shaped-graphics/backends/dx12/dx12_runtime.hh> // choose_test_d3d12_runtime
 
 // Entry-point drivers for the dx12 backend suite (shaped-graphics-dx12-test).
 // Each brings up ONE context and invokes every INVOCABLE_TEST in the binary against it, so the suite costs one device per adapter that runs rather than one per test.
@@ -85,8 +84,6 @@ ASYNC_TEST("sg dx12 backend - hardware")
 // The tier-1 binary does the same over a registry of backends (shaped-graphics/tests/backends/backends.cc); here the two drivers are the whole set.
 NX_TEST_SETUP(nx::setup& s)
 {
-    dx12::choose_test_d3d12_runtime();
-
     auto const* const warp = s.find_test(warp_driver);
     auto const* const hardware = s.find_test(hardware_driver);
 

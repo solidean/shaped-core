@@ -43,7 +43,7 @@ These rules bind every GPU test in the repo — sg's two tiers, and the librarie
   `SG_HAS_PINNED_WARP` tells a test which of the two WARPs it runs on.
   `SC_SG_COLD=all` adds the other half of a CI runner, a first build of every shader and pipeline: the persistent tiers are neither read nor written.
   `pipelines` or `shaders` turns off one of the two, and the driver's own cache is out of its reach.
-- **On Intel, a test process keeps to the system D3D12 runtime.** Each test binary that creates dx12 devices calls `dx12::choose_test_d3d12_runtime()` from its `NX_TEST_SETUP`.
+- **On Intel, a test process keeps to the system D3D12 runtime**, as every process does there by default ([backends.md](concepts/backends.md)).
   A process that loaded the Agility SDK there compiles every shader anew, vulkan's too.
   [The external entry](../../../../docs/bugs-external/intel-agility-process-recompiles-acceleration-structure-kernels/readme.md) has the reproduction.
   `shaped-graphics-test` starts itself again on the Agility SDK for the invocables listed in `tests/backends/dx12-agility-process.cc`.
