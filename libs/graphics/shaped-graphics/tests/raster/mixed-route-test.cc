@@ -466,14 +466,16 @@ ASYNC_INVOCABLE_TEST("sg - geometry and tessellation stages of SGL's binary link
                                                 .patch_points = 4,
                                                 .vertices = 4,
                                                 .cull = sg::cull_mode::front});
-        (void)co_await compared_pairings(*ctx, {.name = "line patch",
-                                                .vertex = points,
-                                                .control = line_tc,
-                                                .evaluation = line_te,
-                                                .pixel = pixel,
-                                                .topology = sg::primitive_topology::patch_list,
-                                                .patch_points = 2,
-                                                .vertices = 2});
+        // WARP draws line patches wrong even with every stage from DXC; issue: bug-line-patches-draw-wrong-on-warp
+        if (!ctx->metrics.adapter().is_software)
+            (void)co_await compared_pairings(*ctx, {.name = "line patch",
+                                                    .vertex = points,
+                                                    .control = line_tc,
+                                                    .evaluation = line_te,
+                                                    .pixel = pixel,
+                                                    .topology = sg::primitive_topology::patch_list,
+                                                    .patch_points = 2,
+                                                    .vertices = 2});
     }
 #undef SG_ROUTES
 }
