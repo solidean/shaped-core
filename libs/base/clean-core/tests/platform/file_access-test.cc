@@ -87,6 +87,8 @@ TEST("file_access - nothing is noted while recording is off", exclusive("cc-file
     if (cc::file_access::is_recording())
         SKIP("a runner records this whole run, so the off state cannot be observed here");
     cc::file_access::note_read("cc-file-access-off/never.txt");
+    auto noted = false;
     for (auto const& r : cc::file_access::snapshot())
-        CHECK(cc::string_view(r.path) != "cc-file-access-off/never.txt");
+        noted = noted || cc::string_view(r.path) == "cc-file-access-off/never.txt";
+    CHECK(!noted); // a CHECK that runs even when nothing was ever recorded, as in a run where this test comes first
 }
