@@ -70,7 +70,30 @@ Without Agility, on the Arc B580:
 dx12 alone clears the bar of 100 iterations, and vulkan alone keeps the loss without dx12 beside it.
 dx12 reports `DXGI_ERROR_DEVICE_HUNG` in the whole suite only because the two share one hung GPU.
 It lands in a different test each time, Windows logs no driver timeout (4101) or TDR for it, and the test it is noticed in passes 40 of 40 repeated on its own.
-What on vulkan hangs the GPU is still unknown; the next narrowing is the `vulkan` context by test group, or with the validation layers off.
+What on vulkan hangs the GPU is still unknown.
+
+**Narrowed further, later on 2026-11-07, without Agility.**
+
+| configuration | clean iterations | losses |
+|---|---|---|
+| the `vulkan` context alone, validation layers and sync validation off | 59 | 1 |
+| tests named `sg stream - `, on every context | 100 | none |
+| tests whose name holds ` SGL `, on every context | 120 | none |
+
+- **The validation layers are not needed.** With them off, the loss came on iteration 60, so they neither cause it nor hide a message that would name it.
+  Its first symptom was a procedural-sphere trace reading zeros, another test the loss is only noticed in.
+- **The groups are too small to clear anything.** The `vulkan` context runs some 440 tests an iteration and loses the device about once in 26.
+  A loss spread evenly over them would show in a group holding a tenth of them about once in 300 iterations, so 100 clean ones exclude little.
+  A dev.py test pattern is a substring or a file glob, and a file glob reaches none of the invocable tests a context runs.
+  So halving the context needs a split by name that a pattern cannot express, and was not done.
+
+**The stale readback does not race on its own.**
+That test, repeated alone on every context, ran 240 iterations clean.
+Reading the actor: the submit stamps the latest pending upload value while the list still holds the buffer, and drops the handle after.
+The actor reads the handle count before the stamp, and only when the count is zero, so on x86 the compiler cannot move that read after the stamp's.
+So it needs other work beside it, and is more likely one more symptom of the GPU going wrong than a race of its own; it is not excluded.
+
+**Not done:** why a real loss exits 0xC0000409 rather than the abort handler's 3 now that the report completes, which is `crash_handler.cc`'s and left to it.
 
 **On the Agility SDK, the loss on every run is another bug.**
 Intel's dx12 driver removes the device creating one hit-object pipeline, through DXC's DXIL and SGL's alike.
