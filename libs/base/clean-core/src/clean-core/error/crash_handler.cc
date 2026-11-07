@@ -778,8 +778,22 @@ void start_overflow_reporter() noexcept
     g_reporter_id = id;
 }
 
+LONG g_abort_owner = 0;
+
 void abort_handler(int) noexcept
 {
+    // The CRT resets SIGABRT to its default before calling this, so a second thread's abort would otherwise end the
+    // process mid-report, as 0xC0000409 with no stacks: that thread waits for this report instead.
+    // Only the reporting thread's own abort, inside the report, takes the default path.
+    std::signal(SIGABRT, abort_handler);
+    auto const self = static_cast<LONG>(GetCurrentThreadId());
+    if (auto const owner = InterlockedCompareExchange(&g_abort_owner, self, 0); owner != 0)
+    {
+        if (owner != self)
+            Sleep(INFINITE); // the process ends once the first report is out
+        std::signal(SIGABRT, SIG_DFL);
+        return;
+    }
     auto const capture = report_crash("abort() / std::terminate");
     write_minidump(GetCurrentThreadId(), nullptr);
     release_report(capture);
