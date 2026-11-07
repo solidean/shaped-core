@@ -9,6 +9,10 @@ The gate is the project's own `dev.py check`, whatever registry the project wire
 A push the remote rejected because it moved merges again and re-runs the static gates on top of what came in, up to three rounds;
 the tests ran on this change already, and what came in was gated by whoever pushed it.
 A submodule's push is retried the same way, its own static gate re-run and its pointer bumped again, within the same rounds.
+
+With the build server opted in, `--proof` (or the project's `BuildServer.ship_proof`) replaces the gate's build and test steps with the server's proof:
+a green build of exactly this tree and every test green at least once, the tests without such a result run, then the likeliest affected within a short budget.
+The static gates run as always; any problem with the server runs the full gate instead (lib/pipeline/build_server.py).
 """
 
 from __future__ import annotations
@@ -21,6 +25,8 @@ from pathlib import Path
 from tools import dev
 from tools.dev import console
 
+from ..lib.pipeline import build_server
+from ..lib.pipeline import test as pipeline_test
 from ..lib.project import submodules as lib
 from .context import Context
 
@@ -40,6 +46,10 @@ def add_parser(sub: argparse._SubParsersAction) -> argparse.ArgumentParser:
     p.add_argument("--resolution", choices=("fixed", "wontfix", "duplicate", "obsolete"), default="fixed",
                    help="How --closes closes them (default: fixed)")
     p.add_argument("--dry-run", action="store_true", help="Say what would be pulled, bumped and pushed, and change nothing")
+    p.add_argument("--proof", action=argparse.BooleanOptionalAction, default=None,
+                   help="Prove the build and the tests through the build server instead of the gate's build and test steps "
+                        "(default: the project's BuildServer.ship_proof, off); needs the server opted in, "
+                        "and runs the full gate whenever the server cannot prove")
     return p
 
 
@@ -159,14 +169,53 @@ def _pointers_off_remote(ctx: Context, branch: str, subs: list[lib.Submodule]) -
     return missing
 
 
-def _gate(ctx: Context, *, tests: bool) -> None:
+def _prover(ctx: Context, flag: bool | None) -> build_server.Session | None:
+    """The build server to prove through, or None for the full gate: `--proof`/`--no-proof`, else the project's `ship_proof`.
+
+    Only with the server opted in, as `build` and `test` decide it; a missing client still gives a Session, which warns and falls back.
+    """
+    config = ctx.policy.build_server
+    if not (flag if flag is not None else bool(config and config.ship_proof)):
+        return None
+    session = build_server.session(config, flag=None)
+    if session is None:
+        _say("--proof: the build server is not opted in here, so the full gate runs")
+    return session
+
+
+def _prove(ctx: Context, server: build_server.Session) -> bool | None:
+    """The server's proof of the default preset's build: whether it holds, or None when the full gate has to run instead."""
+    preset = ctx.resolve_presets([ctx.default_preset_name()])[0]
+    proof = server.proof(preset.build_dir, env=pipeline_test.server_env(preset, ctx.root),
+                         progress=lambda line: dev.ui.write_line(console.dim(f"  {line}")))
+    if proof is None:
+        return None
+    plan = proof.report.get("plan") or {}
+    ran = proof.report.get("ran") or []
+    _say(f"proof: {proof.report.get('declared', 0)} test(s), {len(plan.get('must_run') or [])} without a green result ran, "
+         f"{len([r for r in ran if r.get('why') == 'affected'])} likely affected ran, "
+         f"{len(plan.get('over_budget') or [])} past the budget")
+    for s in proof.report.get("sideband") or []:
+        _say(f"sideband, not blocking: {s.get('config')} {s.get('mode')} {s.get('binary')}: {s.get('outcome')} {s.get('range')}")
+    for reason in proof.reasons:
+        dev.ui.write_line(console.red(f"ship: proof: {reason}"))
+    return proof.passed
+
+
+def _gate(ctx: Context, *, tests: bool, prover: build_server.Session | None = None) -> None:
     # The static gates first, then the question only they raise, so a fixer's rewrite stops ship before the test tail runs.
     if _dev(ctx, "check", "--fix", "--no-test") != 0:
         ctx.die("ship: the gate failed; nothing was pushed (the bump commit, if any, stays local)")
     if dirty := _dirty(ctx.root):
         ctx.die(_changed_during_gate(dirty, "commit them and ship again"))
+    if not tests:
+        return
+    # The server's proof stands in for the build and test steps; a server that cannot prove leaves them to run.
+    proven = _prove(ctx, prover) if prover is not None else None
+    if proven is False:
+        ctx.die("ship: the proof does not hold; nothing was pushed (the bump commit, if any, stays local)")
     # --memo, so a test binary that already passed on these exact bytes is not run again.
-    if tests and _dev(ctx, "check", "test", "--memo") != 0:
+    if proven is None and _dev(ctx, "check", "test", "--memo") != 0:
         ctx.die("ship: the tests failed; nothing was pushed (the bump commit, if any, stays local)")
 
 
@@ -220,8 +269,11 @@ def run(args: argparse.Namespace, ctx: Context) -> None:
         ctx.die(f"ship --bump: not a submodule: {', '.join(sorted(unknown))}")
 
     _say(f"submodules with unpushed work: {', '.join(s.path for s in shipping) or 'none'}")
+    prover = _prover(ctx, args.proof)
     if args.dry_run:
         _say(f"would bump: {', '.join(s.path for s in bumping) or 'nothing'}; would push {branch} and those submodules")
+        _say("would prove the build and the tests through the build server" if prover is not None
+             else "would run the full gate's build and test steps")
         return
 
     for s in shipping:
@@ -239,7 +291,7 @@ def run(args: argparse.Namespace, ctx: Context) -> None:
 
     for round_no in range(1, _ROUNDS + 1):
         # A later round follows a merge the remote forced: the static gates see what it broke, and the tests ran on this change already.
-        _gate(ctx, tests=round_no == 1)
+        _gate(ctx, tests=round_no == 1, prover=prover)
         # Submodules first, so the pointers the parent pushes always name commits their remotes have.
         # One whose remote moved merges what came in, gates it statically and is bumped again, and the round starts over.
         moved = None

@@ -95,6 +95,27 @@ def _sanitizer_path_env(build_dir: Path) -> dict[str, str]:
     return {"PATH": rtdir + os.pathsep + existing if existing else rtdir}
 
 
+def _preset_env(preset: Preset) -> dict[str, str]:
+    """Per-preset additions every binary gets, such as the Windows ASan runtime dir on PATH."""
+    env = _sanitizer_path_env(preset.build_dir)
+    env.update(_lsan_suppression_env())
+    env.update(_tsan_suppression_env())
+    env.update(monado.test_env())
+    return env
+
+
+def server_env(preset: Preset, root: Path, base: dict[str, str] | None = None,
+               preset_env: dict[str, str] | None = None) -> dict[str, str]:
+    """The environment a preset's binaries run in through the build server, which keys its results on it.
+
+    `ship`'s proof sends the same, so what it looks up is what `test` through the server stored.
+    """
+    return {
+        **os.environ, **(base or {}), **(_preset_env(preset) if preset_env is None else preset_env),
+        "SC_SOURCE_ROOT": str(root), "NX_CRASH_DIR": str(crash_reports.incoming_dir(preset.build_dir)),
+    }
+
+
 def _harvest_test_timings(timings_path: Path, *, binary: str, preset: str) -> None:
     """Add one job per test from the timings sidecar nexus wrote under --timings-json.
 
@@ -457,11 +478,7 @@ def test(
             t.name: t
             for t in targets_mod.discover_targets(preset.build_dir, preset.build_type)
         }
-        # Per-preset env additions that apply to every binary, such as the Windows ASan runtime dir on PATH.
-        preset_env = _sanitizer_path_env(preset.build_dir)
-        preset_env.update(_lsan_suppression_env())
-        preset_env.update(_tsan_suppression_env())
-        preset_env.update(monado.test_env())
+        preset_env = _preset_env(preset)
 
         # Emscripten test artifacts are .js/.wasm that run under node, which the emsdk environment puts on PATH.
         # Native presets keep the inherited environment.
@@ -492,10 +509,7 @@ def test(
                 built = [t for t in (by_name.get(n) for n in binary_names) if t is not None and t.artifact is not None]
                 # an artifact a runtime launches (a .js) is not a binary the server can start
                 targets = [t for t in built if not jsr.needs_launcher(False, t.artifact)]
-                served_env = {
-                    **os.environ, **(preset_base_env or {}), **preset_env,
-                    "SC_SOURCE_ROOT": str(root), "NX_CRASH_DIR": str(crash_reports.incoming_dir(preset.build_dir)),
-                }
+                served_env = server_env(preset, root, preset_base_env, preset_env)
                 served, left = _test_through_server(
                     server, preset, targets, root=root, test_name=test_name, extra_args=extra_args, env=served_env,
                     timeout=timeout, timeout_is_explicit=timeout_is_explicit, watchdog_fraction=watchdog_fraction,

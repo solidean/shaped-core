@@ -15,10 +15,16 @@ The client contract, which is all dev.py knows of a server:
 - it prints a JSON array on stdout, one object per binary: `name`, `path`, `status` (Passed, Failed, TimedOut, NoTests, Cancelled, Missing),
   `cached`, `verified`, `exit_code`, `ms`, `stored_ms`, `seed`, and `log`, a file with the binary's whole console output;
 - each binary's JUnit report is `<binary>.results.xml` beside it, where dev.py keeps its own;
-- exit 0, or 1 when any binary failed, with that array is a finished test run, 130 a cancelled one, 10-13 as above.
+- exit 0, or 1 when any binary failed, with that array is a finished test run, 130 a cancelled one, 10-13 as above;
+- `<client> proof <build-dir> --json [-j N]` builds the dir and proves its source state from the server's records: every test green at least once,
+  the ones without such a result run, then the ones most likely affected within a short budget;
+  it prints one JSON object on stdout with `verdict` (`pass` or `fail`), `reasons`, `plan`, `ran` and `sideband`, progress on stderr;
+- exit 0 with that object is a proof that holds, 1 one that does not, 10-13 as above.
 
 What opts in, the first that says either way: `--no-server`, `--server`, `SC_BUILD_SERVER=1|0`, the project's `BuildServer.enabled`.
 Background test runs are the project's choice alone, off unless `BuildServer.speculative_tests` is set.
+`ship` proves through the server instead of running the gate's build and test steps only with the server opted in and
+`ship --proof` or the project's `BuildServer.ship_proof`; any problem with the server runs the full gate instead.
 `SC_BUILD_SERVER_CLIENT` names the client executable, over the project's `BuildServer.client`.
 
 Public API:
@@ -26,6 +32,7 @@ Public API:
     session(config, flag)   the Session a command builds through, or None when nothing opted in
     Session.build(...)      one build step through the server, or None when the caller must build the plain way
     Session.test(...)       test binaries run through the server, or None when the caller must run them the plain way
+    Session.proof(...)      a build dir's source state proven through the server, or None when the caller must run the full gate
 """
 
 from __future__ import annotations
@@ -33,6 +40,7 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+import threading
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Mapping
@@ -45,6 +53,8 @@ ENV_CLIENT = "SC_BUILD_SERVER_CLIENT"
 
 # Whether `check` (and so `ship`) builds through the server; the gate stays independent of it until the server has proven itself.
 # Flipping this is the whole switch: every gate build already asks Context.build_server(gate=True).
+# The gate's other way through the server is `ship`'s proof (Session.proof), which replaces the gate's build and test steps:
+# off unless `ship --proof` or the project's BuildServer.ship_proof asks for it, and switched on under the same debt.
 # TEMPORARY(debt-devpy-gate-without-build-server)
 GATE_USES_BUILD_SERVER = False
 
@@ -72,6 +82,17 @@ class BuildServer:
     enabled: bool = False
     # Whether the server may run this project's tests in the background after building on its own (`test --speculate`).
     speculative_tests: bool = False
+    # Whether `ship` proves the tree through the server (`proof`) instead of running the gate's build and test steps.
+    ship_proof: bool = False
+
+
+@dataclass(frozen=True)
+class Proof:
+    """A proof's verdict, its blockers one per line, and the client's whole report."""
+
+    passed: bool
+    reasons: list[str]
+    report: dict
 
 
 def _flag_word(value: str) -> bool | None:
@@ -242,6 +263,50 @@ class Session:
                 raise SystemExit(CANCELLED)  # cancelled before it reported: nothing to fall back to
         why = UNAVAILABLE.get(rc) or f"its test run ended without results (exit {rc}; {result.stderr_log})"
         self._warn(f"{why}; running the tests without it", doing="testing")
+        return None
+
+    def proof(self, build_dir: Path, *, env: Mapping[str, str] | None, progress: Callable[[str], None] = ui.write_line) -> Proof | None:
+        """Builds `build_dir` and proves its source state through the server; None means the caller runs the full gate.
+
+        A proof that does not hold is returned as it is: only a server that could not prove falls back.
+        The client's progress goes to `progress` line by line, as it comes.
+        """
+        if not (build_dir / "build.ninja").is_file():
+            self._warn(f"{build_dir} is not a configured Ninja build dir; running the full gate", doing="proving")
+            return None
+        if not self._ensure(env, doing="proving"):
+            return None
+        assert self.command is not None
+        cmd = [*self.command, "proof", str(build_dir), "--json"]
+        jobs = (env if env is not None else os.environ).get("CMAKE_BUILD_PARALLEL_LEVEL", "").strip()
+        if jobs.isdigit() and int(jobs) > 0:
+            cmd += ["-j", jobs]
+        try:
+            # CREATE_NO_WINDOW, with both streams piped: the client and what it starts must never open a console window.
+            proc = subprocess.Popen(
+                cmd, env=dict(env) if env is not None else None, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE, text=True, encoding="utf-8", errors="replace",
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+            )
+        except OSError as e:
+            self._warn(f"its client could not be started ({e.strerror or e}); running the full gate", doing="proving")
+            return None
+        assert proc.stdout is not None and proc.stderr is not None
+        stderr = proc.stderr
+        relay = threading.Thread(target=lambda: [progress(line.rstrip("\n")) for line in stderr], daemon=True)
+        relay.start()
+        out = proc.stdout.read()
+        rc = proc.wait()
+        relay.join()
+        if rc in (0, 1):
+            try:
+                report = json.loads(out)
+            except ValueError:
+                report = None
+            if isinstance(report, dict) and report.get("verdict") in ("pass", "fail"):
+                return Proof(passed=rc == 0 and report["verdict"] == "pass", reasons=list(report.get("reasons") or []), report=report)
+        why = UNAVAILABLE.get(rc) or f"its proof ended without a verdict (exit {rc})"
+        self._warn(f"{why}; running the full gate", doing="proving")
         return None
 
 
