@@ -38,9 +38,11 @@ A type, a constant and a pointer are interned, each without a map of nodes.
 - Blocks are written in the order they open, which a structured tree makes a dominance order, and a block states its merge and continue targets.
 - `plan` decides every name and address as it does for text, so the host binds one interface whichever route wrote the shader.
 
-**The text targets stay, and stay the default.**
-A package takes the route with `NATIVE_SPIRV` or `NATIVE_DXIL`, where an entry point with no lowering is an error.
-A context takes it with `vulkan_config::native_spirv` or `dx12_config::native_dxil`, where such an entry point goes through DXC.
+**The native route is the default on dx12 and vulkan, and the text targets stay** (decided 2026-11-07).
+A context prefers it unless created with `vulkan_config::native_spirv` or `dx12_config::native_dxil` off, which is the text route.
+An entry point it does not lower goes through DXC, and slib logs which and why once, at info.
+DXC stays for the foreseeable future: for a body or a type in a target's own text (CHK-432), and for FSR and NRD.
+A package that must never reach DXC states `NATIVE_SPIRV` or `NATIVE_DXIL`, where an entry point with no lowering is an error.
 
 **The flat tree is the right input.**
 It is already structured, inlined and legalized, so SPIR-V's merge blocks come from what the tree says rather than from recovering them.

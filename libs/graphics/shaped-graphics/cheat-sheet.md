@@ -253,8 +253,8 @@ ctx.is_shut_down()                                 // bool
 #include <shaped-graphics/backends/vulkan/vulkan_context.hh>
 sg::create_vulkan_context(vulkan_config = {})      // -> cc::result<context_handle>
 // vulkan_config { bool enable_validation_layers=false; bool prefer_software_device=false; }  (independent flags)
-//   vulkan_config { bool native_spirv=false; }  SGL shaders take SGL's own SPIR-V where it lowers them, DXC's elsewhere; ctx.prefers_native_spirv()
-//   dx12_config { bool native_dxil=false; }    SGL shaders take SGL's own DXIL where it lowers them, DXC's elsewhere; ctx.prefers_native_dxil()
+//   vulkan_config { bool native_spirv=true; }   SGL shaders take SGL's own SPIR-V where it lowers them, DXC's elsewhere; false is the text route; ctx.prefers_native_spirv()
+//   dx12_config { bool native_dxil=true; }     SGL shaders take SGL's own DXIL where it lowers them, DXC's elsewhere; false is the text route; ctx.prefers_native_dxil()
 // created to someone else's spec (an XR runtime's): MOVE-ONLY once a hook is set
 //   vulkan_config { extra_instance_extensions / extra_device_extensions  (cc::vector<cc::string>; a missing one fails creation, naming it)
 //                   create_instance(info, out) / create_device(phys, info, out)  (in place of vkCreate*; the context owns and destroys the result)

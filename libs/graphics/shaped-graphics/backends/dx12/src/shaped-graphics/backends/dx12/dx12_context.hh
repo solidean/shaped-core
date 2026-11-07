@@ -94,9 +94,9 @@ struct sg::backend::dx12::dx12_config
     /// Best-effort: skipped when the layer isn't installed.
     bool activate_global_debug_layer = false;
 
-    /// Write SGL shaders as DXIL with SGL itself, with no DXC behind them, where SGL has a lowering for them yet.
-    /// An entry point it has none for goes through DXC.
-    bool native_dxil = false;
+    /// SGL shaders are DXIL that SGL writes itself, and an entry point it has no lowering for yet goes through DXC.
+    /// `false` takes the text route, SGL's HLSL through DXC, for every SGL shader of this context.
+    bool native_dxil = true;
 
     /// SGL's own DXIL carries each operation's `.sgl` line, in a debug module beside the program, for PIX (EMIT-257).
     /// The program part keeps its bytes, and what DXC compiles is untouched.

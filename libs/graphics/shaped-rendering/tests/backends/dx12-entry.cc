@@ -71,7 +71,9 @@ ASYNC_TEST("sr dx12 - native-dxil")
 
 ASYNC_TEST("sr dx12 - hardware")
 {
-    auto ctx = sg::create_dx12_context({.activate_global_debug_layer = true, .adapter = dx12::dx12_adapter::hardware});
+    // the text route, SGL's HLSL through DXC; `sr dx12 - native-dxil` is the default's
+    auto ctx = sg::create_dx12_context(
+        {.activate_global_debug_layer = true, .native_dxil = false, .adapter = dx12::dx12_adapter::hardware});
     // A host that has the adapter and still cannot bring up a device is broken, and a SKIP would hide it.
     if (ctx.has_error() && dx12::has_hardware_adapter())
         FAIL(cc::format("dx12 hardware device creation failed: {}", ctx.error().to_string()));

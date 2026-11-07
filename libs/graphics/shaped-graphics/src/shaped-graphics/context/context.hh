@@ -142,11 +142,11 @@ public:
     [[nodiscard]] virtual bool weakens_float_guarantees() const { return false; }
 
     /// Whether SGL shaders for this context are written as SPIR-V by SGL itself rather than compiled through DXC, where
-    /// SGL has a lowering for them yet: only a vulkan context created with `vulkan_config::native_spirv`.
+    /// SGL has a lowering for them yet: a vulkan context, unless it was created with `vulkan_config::native_spirv` off.
     /// shaped-shader-library asks it, as it asks `weakens_float_guarantees`.
     [[nodiscard]] virtual bool prefers_native_spirv() const { return false; }
 
-    /// The same of DXIL: only a dx12 context created with `dx12_config::native_dxil`.
+    /// The same of DXIL: a dx12 context, unless it was created with `dx12_config::native_dxil` off.
     [[nodiscard]] virtual bool prefers_native_dxil() const { return false; }
     /// Whether SGL's own SPIR-V and DXIL should carry each operation's `.sgl` line, for a debugger (EMIT-257).
     /// Opt-in, since it grows every binary by the sources it names: a context created with `native_line_tables`.

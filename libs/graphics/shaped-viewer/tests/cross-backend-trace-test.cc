@@ -655,13 +655,13 @@ ASYNC_TEST("sv - the path tracer through SGL's binary traces what DXC's traces, 
     if (nx::is_smoke())
         SKIP("a smoke run: the default preset holds the routes to each other");
     auto dx12_reference = sg::create_dx12_context(
-        {.activate_global_debug_layer = true, .adapter = sg::backend::dx12::dx12_adapter::hardware});
+        {.activate_global_debug_layer = true, .native_dxil = false, .adapter = sg::backend::dx12::dx12_adapter::hardware});
     auto dx12_native = sg::create_dx12_context(
         {.activate_global_debug_layer = true, .native_dxil = true, .adapter = sg::backend::dx12::dx12_adapter::hardware});
     if (dx12_reference.has_value() && dx12_native.has_value() && !cannot_trace(*dx12_native.value()).has_value())
         co_await held_to_dxc(dx12_native.value(), dx12_reference.value(), "DXIL");
 
-    auto vulkan_reference = sg::create_vulkan_context({.enable_validation_layers = true});
+    auto vulkan_reference = sg::create_vulkan_context({.enable_validation_layers = true, .native_spirv = false});
     auto vulkan_native = sg::create_vulkan_context({.enable_validation_layers = true, .native_spirv = true});
     if (vulkan_reference.has_value() && vulkan_native.has_value() && !cannot_trace(*vulkan_native.value()).has_value())
         co_await held_to_dxc(vulkan_native.value(), vulkan_reference.value(), "SPIR-V");

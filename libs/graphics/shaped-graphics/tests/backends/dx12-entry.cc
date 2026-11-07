@@ -58,8 +58,10 @@ ASYNC_TEST("sg dx12 warp backend")
 
 ASYNC_TEST("sg dx12 hardware backend")
 {
-    auto ctx = sg::create_dx12_context(
-        {.activate_global_debug_layer = true, .adapter = sg::backend::dx12::dx12_adapter::hardware});
+    // the text route, SGL's HLSL through DXC, which `sg dx12 native-dxil backend` is the default's counterpart to
+    auto ctx = sg::create_dx12_context({.activate_global_debug_layer = true,
+                                        .native_dxil = false,
+                                        .adapter = sg::backend::dx12::dx12_adapter::hardware});
     // A host that has the adapter and still cannot bring up a device is broken, and a SKIP would hide it.
     if (ctx.has_error() && dx12::has_hardware_adapter())
         FAIL(cc::format("dx12 hardware device creation failed: {}", ctx.error().to_string()));
