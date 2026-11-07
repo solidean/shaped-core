@@ -342,6 +342,17 @@ def test_binaries_of_another_timeout_go_in_a_request_of_their_own(f: TestFixture
     ], f.calls()
 
 
+@with_tests({"a": {}})
+def test_background_test_runs_are_asked_for_only_when_the_project_says_so(f: TestFixture) -> None:
+    f.run()
+    assert "--speculate" not in f.calls()[0], f.calls()
+    f.session.speculative_tests = True
+    f.run()
+    assert f.calls()[1] == f"test {f.dir} a --json --timeout 60 --speculate -- --watchdog 30", f.calls()
+    s = bs.session(bs.BuildServer(client=Path(sys.executable), speculative_tests=True), flag=True, environ={})
+    assert s is not None and s.speculative_tests
+
+
 def test_runs_with_side_outputs_bypass_the_server() -> None:
     native = types.SimpleNamespace(is_cross_compiling=False, is_emscripten=False)
     wasm = types.SimpleNamespace(is_cross_compiling=True, is_emscripten=True)

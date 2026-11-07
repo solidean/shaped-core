@@ -8,14 +8,17 @@ The client contract, which is all dev.py knows of a server:
 - `<client> build <build-dir> [-j N] [-k N] [targets...]` builds like ninja, printing ninja's `[done/total]` lines and `FAILED:` blocks;
 - exit 10 (another protocol version), 11 (no server answers), 12 (none could be started) or 13 (draining for a restart) means "not now";
 - exit 1 with a `FAILED:` block is a failed build, 130 a cancelled one;
-- `<client> test <build-dir> [names...] --json --timeout S [--threads N] [--rerun] [-v] [-- runner args]` runs those test binaries,
+- `<client> test <build-dir> [names...] --json --timeout S [--threads N] [--rerun] [--speculate] [-v] [-- runner args]` runs those test binaries,
   serving a stored result instead of a run when nothing a binary executes or reads changed;
+- `--speculate`, passed only when the project's `BuildServer.speculative_tests` says so, lets the server run those binaries again in the background
+  after it rebuilds them on its own, with this request's arguments and environment; the same request without it withdraws that;
 - it prints a JSON array on stdout, one object per binary: `name`, `path`, `status` (Passed, Failed, TimedOut, NoTests, Cancelled, Missing),
   `cached`, `verified`, `exit_code`, `ms`, `stored_ms`, `seed`, and `log`, a file with the binary's whole console output;
 - each binary's JUnit report is `<binary>.results.xml` beside it, where dev.py keeps its own;
 - exit 0, or 1 when any binary failed, with that array is a finished test run, 130 a cancelled one, 10-13 as above.
 
 What opts in, the first that says either way: `--no-server`, `--server`, `SC_BUILD_SERVER=1|0`, the project's `BuildServer.enabled`.
+Background test runs are the project's choice alone, off unless `BuildServer.speculative_tests` is set.
 `SC_BUILD_SERVER_CLIENT` names the client executable, over the project's `BuildServer.client`.
 
 Public API:
@@ -67,6 +70,8 @@ class BuildServer:
     # Printed with the fallback warning: how to install or update the server.
     install_hint: str = _GENERIC_HINT
     enabled: bool = False
+    # Whether the server may run this project's tests in the background after building on its own (`test --speculate`).
+    speculative_tests: bool = False
 
 
 def _flag_word(value: str) -> bool | None:
@@ -90,9 +95,10 @@ def session(config: BuildServer | None, *, flag: bool | None, environ: Mapping[s
         return None
     client = Path(environ[ENV_CLIENT]) if environ.get(ENV_CLIENT) else (config.client if config else None)
     hint = config.install_hint if config else _GENERIC_HINT
+    speculative = bool(config and config.speculative_tests)
     if client is None or not client.is_file():
-        return Session(None, hint, missing=f"no client at {client}" if client else "no client is configured")
-    return Session([str(client)], hint)
+        return Session(None, hint, missing=f"no client at {client}" if client else "no client is configured", speculative_tests=speculative)
+    return Session([str(client)], hint, speculative_tests=speculative)
 
 
 def _failed_block(result: StepResult) -> bool:
@@ -115,9 +121,12 @@ def _last_line(text: str) -> str:
 class Session:
     """The server for one dev.py run: `ensure` runs once, and once the server failed every later step builds the plain way."""
 
-    def __init__(self, command: list[str] | None, install_hint: str, *, missing: str | None = None) -> None:
+    def __init__(
+        self, command: list[str] | None, install_hint: str, *, missing: str | None = None, speculative_tests: bool = False,
+    ) -> None:
         self.command = command
         self.install_hint = install_hint
+        self.speculative_tests = speculative_tests
         # None until the first build asks; then whether the server serves this run.
         self.available: bool | None = None
         self._missing = missing or "no client"
@@ -217,6 +226,8 @@ class Session:
             cmd += ["--threads", str(threads)]
         if rerun:
             cmd.append("--rerun")
+        if self.speculative_tests:
+            cmd.append("--speculate")
         if verbose:
             cmd.append("-v")
         if runner_args:
