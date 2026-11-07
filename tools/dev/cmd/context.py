@@ -18,6 +18,7 @@ from pathlib import Path
 from tools import dev
 from tools.dev import console
 from tools.dev.lib.core import disk_guard, memory_guard
+from tools.dev.lib.pipeline import build_server
 from tools.dev.lib.project.targets import carries_examples, carries_tests, is_stub, is_tool
 
 
@@ -42,6 +43,8 @@ class Policy:
     default_branch: str
     # The opt-in repositories `companions` clones into gitignored paths (lib/project/companions.py).
     companions: tuple[dev.Companion, ...] = ()
+    # The optional local build server `build` and `test` build through when opted in (lib/pipeline/build_server.py).
+    build_server: dev.BuildServer | None = None
 
 
 @dataclass
@@ -72,6 +75,18 @@ class Context:
         """Report a failed build phase and exit(1) (for the build/test commands)."""
         dev.report.print_build_failure(results, presets, self.root)
         sys.exit(1)
+
+    def build_server(self, args: argparse.Namespace | None = None, *, gate: bool = False) -> build_server.Session | None:
+        """The build server to build through, or None: `--no-server` / `--server` in `args`, then SC_BUILD_SERVER, then the Policy.
+
+        A gate build (`check`, so `ship`) passes `gate=True` and gets None while GATE_USES_BUILD_SERVER is off.
+        """
+        if gate and not build_server.GATE_USES_BUILD_SERVER:
+            return None
+        flag = None
+        if args is not None:
+            flag = False if getattr(args, "no_server", False) else True if getattr(args, "server", False) else None
+        return build_server.session(self.policy.build_server, flag=flag)
 
     def is_test_target(self, target: dev.Target) -> bool:
         """A nexus binary carrying tests, as the build's nexus-binaries.json records it."""

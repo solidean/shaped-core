@@ -189,6 +189,7 @@ def _build_checks(ctx: Context, *, memo: dev.CheckMemo | None = None, all_preset
             ("tools/dev/symbolize-self-test.py", [], (core, "tools/dev/cmd/symbolize.py", f"{dev_lib}/pipeline/sites.py")),
             ("tools/dev/submodules-self-test.py", [], (core, f"{dev_lib}/project/**")),
             ("tools/dev/benchmarks-self-test.py", [], (core, f"{dev_lib}/pipeline/**")),
+            ("tools/dev/build-server-self-test.py", [], (core, f"{dev_lib}/pipeline/build_server.py", f"{dev_lib}/pipeline/build.py")),
             ("tools/dev/memory-guard-self-test.py", [], (core,)),
             ("tools/dev/stall-report-self-test.py", [], (core,)),
             ("tools/dev/monado-self-test.py", [], (core, f"{dev_lib}/toolchain/monado.py", "tools/monado.version")),
@@ -416,7 +417,8 @@ def _build_checks(ctx: Context, *, memo: dev.CheckMemo | None = None, all_preset
                 specs.append(sibling)
         presets = ctx.resolve_presets(specs)
 
-        results = dev.build(presets, None, root=ctx.root, auto_configure=True, mirror=mirror, verbose=verbose)
+        results = dev.build(presets, None, root=ctx.root, auto_configure=True, mirror=mirror, verbose=verbose,
+                            server=ctx.build_server(gate=True))
         if not all(r.ok for r in results):
             dev.report.print_build_failure(results, presets, ctx.root)
             return False
@@ -671,7 +673,8 @@ def _build_for_gates(ctx: Context, *, mirror: bool, verbose: bool):
         wanted = [t for t in targets if t in known]
         if not wanted:
             return True
-        results = dev.build(presets, wanted, root=ctx.root, auto_configure=True, mirror=mirror, verbose=verbose)
+        results = dev.build(presets, wanted, root=ctx.root, auto_configure=True, mirror=mirror, verbose=verbose,
+                            server=ctx.build_server(gate=True))
         if not all(r.ok for r in results):
             dev.report.print_build_failure(results, presets, ctx.root)
             return False

@@ -33,6 +33,9 @@ The driver is mechanism under `tools/dev/lib/` plus commands under `tools/dev/cm
   The driver's own files — the pinned clang-format, the emsdk pin — are found in the submodule without any configuration.
 - **Its own `check`**, since the gate registry is project policy.
   The `Check` type, the runner and the individual gates' machinery are all reusable.
+  A gate build passes `server=ctx.build_server(gate=True)`, so the gate follows shaped-core's when the optional build server is turned on for it.
+- Optionally a **`BuildServer`** in that Policy: where an optional local build server's client is installed, how to install it, and whether the project opts in by default.
+  [Building and testing](building-and-testing.md#an-optional-build-server) is what it changes.
 - Its own `CMakePresets.json`: the diag-launcher paths in ours are `${sourceDir}`-relative, so a consumer points them into the submodule.
 
 ## Keeping the submodules current

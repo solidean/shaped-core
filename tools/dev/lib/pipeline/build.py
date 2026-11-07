@@ -9,11 +9,12 @@ Public API:
 
 from __future__ import annotations
 
+import functools
 import time
 from datetime import datetime
 from pathlib import Path
 
-from . import cmake, diagjobs
+from . import build_server, cmake, diagjobs
 from .configure import ensure_configured_all
 from .host_tools import ensure_host_sgl
 from ..core import profile
@@ -45,6 +46,7 @@ def build(
     emsdk_path: str | None = None,
     keep_going: bool = False,
     one_step: bool = True,
+    server: build_server.Session | None = None,
 ) -> list[StepResult]:
     """Build `targets`, or everything when None or empty, across all presets.
 
@@ -54,6 +56,7 @@ def build(
 
     The whole list goes to one ninja invocation by default: a target per step builds them one at a time, each walking its own critical path with the rest of the machine idle.
     `one_step=False` is the itemized mode, one step and one log per target, for a caller that wants a line per target more than a balanced build.
+    `server` builds through the optional build server (build_server.py); configure stays cmake's, and a server that cannot serve falls back to cmake --build.
     """
     results: list[StepResult] = []
 
@@ -89,8 +92,8 @@ def build(
         for target in to_build:
             # Marked before the step because the compile sidecars accumulate across builds, and only the ones this step rewrote are ours.
             build_mark = diagjobs.mark(preset.build_dir) if profile.enabled() else None
-            result = run_step(
-                cmake.build_command(preset.build_dir, target, keep_going=keep_going),
+            step = functools.partial(
+                run_step,
                 step_type="build",
                 name=_step_name(target),
                 build_dir=preset.build_dir,
@@ -99,6 +102,10 @@ def build(
                 mirror=mirror,
                 verbose=verbose,
                 summary_extra=_build_extra,
+            )
+            result = build_server.build_step(
+                server, preset.build_dir, target, keep_going=keep_going, env=env, run=step,
+                plain=cmake.build_command(preset.build_dir, target, keep_going=keep_going),
             )
             if build_mark is not None:
                 profile.add_jobs(diagjobs.harvest(preset.build_dir, build_mark, ended_at=time.time()))
