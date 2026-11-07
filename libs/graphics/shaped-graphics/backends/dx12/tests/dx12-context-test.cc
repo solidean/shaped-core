@@ -199,12 +199,16 @@ ASYNC_INVOCABLE_TEST("sg dx12 - a context counts the textures and buffers alive 
     CHECK(ctx->live_resource_count() == before);
 }
 
-TEST("sg dx12 - devices come from the Agility SDK exactly where it was fetched")
+TEST("sg dx12 - devices come from the Agility SDK exactly where it was fetched and asked for")
 {
-    // A fetched SDK that fails to load would quietly cost every SM 6.9 feature, so a build with it asserts it loaded.
-    CHECK(dx12::runs_agility_runtime() == bool(SG_HAS_AGILITY));
+    // A fetched SDK that fails to load would quietly cost every SM 6.9 feature, so a process asking for it asserts it loaded.
+    auto const asked = SG_HAS_AGILITY && dx12::requested_d3d12_runtime() == dx12::d3d12_runtime::agility;
+    CHECK(dx12::runs_agility_runtime() == asked);
     if (!SG_HAS_AGILITY)
         SKIP("the Agility SDK was not fetched (uv run extern/agility/fetch-agility.py --accept-license)");
+    if (!asked)
+        SKIP("this process runs the system runtime by choice; sg's test binary loads the Agility SDK in a process of "
+             "its own");
     dx12::ComPtr<ID3D12Device> device;
     REQUIRE(SUCCEEDED(dx12::create_d3d12_device(nullptr, D3D_FEATURE_LEVEL_11_0, IID_PPV_ARGS(&device))));
     // the runtime that ships Shader Model 6.9 knows to answer for it, whatever the adapter's driver then supports

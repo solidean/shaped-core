@@ -345,7 +345,8 @@ if(SC_BUILD_TESTS)
             tests/present/present-test.cc
         )
         if(WIN32)
-            target_sources(shaped-graphics-test PRIVATE tests/backends/dx12-entry.cc tests/backends/dx12-rtv-record-time-test.cc)
+            target_sources(shaped-graphics-test PRIVATE tests/backends/dx12-entry.cc tests/backends/dx12-agility-process.cc
+                                                        tests/backends/dx12-rtv-record-time-test.cc)
         endif()
         if(Vulkan_FOUND)
             target_sources(shaped-graphics-test PRIVATE tests/backends/vulkan-entry.cc

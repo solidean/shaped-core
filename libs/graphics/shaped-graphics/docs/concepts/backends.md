@@ -30,6 +30,11 @@ That is what lets each backend **evolve on its own schedule** as its API demands
 Shader Model 6.9, DXR 1.2 and shader execution reordering arrive only through the SDK, so a feature that needs them reports unsupported without it.
 It is fetched on request, `uv run extern/agility/fetch-agility.py --accept-license`, since its terms are Microsoft's to accept rather than a build's; `SG_HAS_AGILITY` (1/0) says whether it was.
 
+* **The runtime is one per process, and a process may ask for the system's.**
+  `dx12::choose_d3d12_runtime` before the first device, else `SC_DX12_RUNTIME=system` or `agility`, else the SDK's where it was fetched.
+  A process that asked for the system runtime never creates the SDK's device factory.
+  That is the point: on Intel's driver the factory alone costs every later shader compile of the process its cache, vulkan's included ([the external entry](../../../../../docs/bugs-external/intel-agility-process-recompiles-acceleration-structure-kernels/readme.md)).
+  `requested_d3d12_runtime()` says what was asked for, and `runs_agility_runtime()` what loaded.
 * **No executable exports `D3D12SDKVersion`.**
   The backend loads D3D12Core.dll through `ID3D12SDKConfiguration1::CreateDeviceFactory`, so a static library chooses the runtime.
   It looks in a `D3D12` directory beside the executable first, which is how a shipped application would carry it, and in the fetched install otherwise.

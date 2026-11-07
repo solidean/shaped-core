@@ -5,6 +5,7 @@
 #include <nexus/tests/registry.hh>
 #include <shaped-graphics/backends/dx12/dx12_context.hh>           // sg::create_dx12_context
 #include <shaped-graphics/backends/dx12/dx12_expected_messages.hh> // the allowlist sg's suites share
+#include <shaped-graphics/backends/dx12/dx12_runtime.hh>           // choose_test_d3d12_runtime
 
 // Entry-point drivers for sv's GPU tests.
 // Each brings up ONE dx12 context and invokes every `INVOCABLE_TEST(..., (sg::context_handle const&))` in the binary against it.
@@ -88,6 +89,8 @@ ASYNC_TEST("sv dx12 - hardware", nx::config::exclusive("capture-environment"))
 // One alias per invocable, so `dev.py test "sv - <name>"` still selects that one test, on both adapters.
 NX_TEST_SETUP(nx::setup& s)
 {
+    sg::backend::dx12::choose_test_d3d12_runtime();
+
     auto const* const warp = s.find_test(warp_driver);
     auto const* const hardware = s.find_test(hardware_driver);
 
