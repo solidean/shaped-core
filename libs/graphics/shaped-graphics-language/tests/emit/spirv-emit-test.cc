@@ -396,6 +396,6 @@ TEST("sgl spirv - every entry point of the fixtures that lowers is what spirv-va
     CHECK(primitive_lowered >= 18);
     CHECK(recording >= 2);
     CHECK(guarded >= 150);
-    CHECK(mesh_lowered >= 6);
+    CHECK(mesh_lowered >= 13);
 #endif
 }

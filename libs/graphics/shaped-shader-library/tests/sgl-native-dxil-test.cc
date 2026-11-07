@@ -182,7 +182,7 @@ TEST("slib - every entry point of the fixtures that SGL's DXIL lowers passes the
     CHECK(lowered >= 90);
     CHECK(raster_lowered >= 64);
     CHECK(primitive_lowered == primitive_reached);
-    CHECK(mesh_reached >= 6);
+    CHECK(mesh_reached >= 13);
     CHECK(mesh_lowered == mesh_reached);
     CHECK(primitive_lowered >= 18);
     CHECK(recording >= 2);
