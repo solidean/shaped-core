@@ -136,6 +136,8 @@ type_ref lowering::value_type(type_id t)
         auto const lanes = record->leaf_count;
         if (record->name == "ray_query")
             result = intern({.kind = type_kind::ray_query});
+        else if (record->name == "hit_object")
+            result = intern({.kind = type_kind::hit_object});
         // three rows, held as the columns of a matrix, so a row is a column and nothing transposes
         else if (record->name == "affine3")
             result = intern({.kind = type_kind::matrix, .count = 3, .element = vector_type(_float, 4)});

@@ -159,10 +159,11 @@ void writer::write_function()
                 emit(_code, spv::Variable, {id_of(_p.locals[i].type), _locals + u32(i), spv::FunctionStorage});
                 name(_locals + u32(i), _p.name_at(_p.locals[i].name_first, _p.locals[i].name_size));
             }
-        // a query is a variable SPIR-V reaches by its pointer, however deep in the body it begins
+        // a query and a hit object are variables SPIR-V reaches by their pointer, however deep in the body they begin
         if (k == 0)
             for (auto i = isize(0); i < _p.instructions.size(); ++i)
-                if (_p.instructions[i].code == op::ray_query_begin)
+                if (_p.instructions[i].code == op::ray_query_begin || _p.instructions[i].code == op::hit_object_trace
+                    || _p.instructions[i].code == op::trace_reorder_execute)
                     emit(_code, spv::Variable,
                          {pointer_to(spv::FunctionStorage, id_of(_p.instructions[i].type)), _instructions + u32(i),
                           spv::FunctionStorage});

@@ -100,6 +100,41 @@ What that found:
 - **`RDAT` lists resources by class**, constant buffers and samplers first.
 - **A dead block of an earlier `simplify` round** could point past what a later round kept, which only a shader this large reached.
 
+## Hit objects and reordering, measured
+
+On 2026-11-07, DXC 1.9.2602, on the Arc B580.
+
+**The B580 has reordering on vulkan and not on dx12.**
+
+| context | `shader_execution_reordering` | `opacity_micromap` |
+|---|---|---|
+| vulkan, both routes | yes | no |
+| dx12, both routes | no | no |
+
+dx12's answer is this build's, not the card's: the feature needs Shader Model 6.9, which the Agility SDK alone brings, and `SG_HAS_AGILITY` is 0 here.
+So **vulkan's half is drawn, and dx12's is compile-verified only**: DXC's validator and disassembly, with no draw.
+
+- **What the sweep named, mapped to its entry.** `the type hit_object` was `inspected_primary`, and `the builtin reorder_thread_by_hint` was `reordered_primary`.
+  `a resource used as a value` was `hit_reordered_primary`, whose `trace_ray_reordered` reached the generic call path with its structure.
+- **All of them lower now.** The sweep with `opacity_micromap`, `shader_execution_reordering` and `vertex_pipeline_stores` lowers 672 entries.
+  Every SPIR-V passes `spirv-val` under `--thorough`, and every DXIL the validator.
+  What is left of it is metal's fused intersections and empty closest hit, and the gaps no device feature touches.
+- **A hit object never moves.** `ir::verify` refuses a phi, a `select`, a store or a composite of one, and a local, global or member holding one.
+  It runs after lowering and after every pass.
+  The audit: `construct_ssa` promotes locals, and a hit object is never one.
+  `flatten_branches` builds a `select` only from a phi, and `share_common_values` takes only `gives_only_a_value`, which `hit_object_read` is not.
+  So nothing can create the shape; the verifier is what says so if that changes.
+- **The shapes were read back.** `sgl hit object spirv - SGL's own binaries` walks each module word by word as DXC's are walked, on two arms, a read in a branch and a loop.
+  It reads DXIL's disassembly for the operation, and for no phi or `select` of one.
+  It can fail: a load of the hit object added to SPIR-V's reads failed it, and it was reverted.
+- **vulkan draws alike.** `mixed-route-ray-test.cc` holds a regrouped trace and a hit object through SGL's binary to DXC's within 1e-4, with validation on.
+  That is a native raygen among DXC's stages, and every stage native.
+  sg's reordering tests pass on `vulkan-native-spirv`.
+- **SPIR-V's reordering trace is one instruction, DXIL's three**, as each text writes it.
+
+`question-sgl-hit-object-as-parameter` is untouched: today's shapes lower, and none needed the answer.
+The crash class of 476f22005 was not reproduced here, as it never was: its report is an RTX's.
+
 ## Opacity micromaps, compile-verified only
 
 The B580 has no micromaps, so no draw has run this.
@@ -114,11 +149,10 @@ It is held by DXC's output under `--device-feature opacity_micromap`, on 2026-11
 - **The skip in `mixed-route-query-test.cc` is gone**, so that test runs on a device with micromaps, which none here is.
 
 **What a device feature pushes into a gap.** The sweep with `opacity_micromap`, `shader_execution_reordering` and `vertex_pipeline_stores` lowers 667 entries, and neither validator refuses one.
-Reordering alone adds a gap, on both writers: `the type hit_object`, `the builtin reorder_thread_by_hint`, and `a resource used as a value` from a reordering trace.
-A required-native package that traces with `reorder` or a hit object is an error on such a device, and only there.
+Reordering added three gaps here, which the section above closes.
 
 **Left.**
 
-- **A hit object and a reordering trace** lower on neither writer, and fall back to DXC under a preference: `trace_ray_reordered`, `trace_hit_ray` and `hit_object_*`.
-  Written natively they are the point of this issue's last line, along with motion traces.
+- **Motion traces**, which this issue's first line leaves last.
+- **Agility**: reordering and micromaps on dx12 have run on no device.
 - **Whether a driver treats a plain export or missing annotations differently.** The B580 did not, and no other GPU ran.

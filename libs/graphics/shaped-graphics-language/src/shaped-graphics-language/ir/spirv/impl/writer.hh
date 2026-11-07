@@ -77,6 +77,7 @@ private:
     void atomic(u32 opcode, instruction const& i, u32 id);
     void group(instruction const& i, u32 id);
     void ray_query(instruction const& i, u32 id);
+    void hit_object(instruction const& i, u32 id);
     void instruction_of(u32 index);
     /// Tells the target that `i`, of id `id`, came through an index that differs between invocations.
     void nonuniform(instruction const& i, u32 id);

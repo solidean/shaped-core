@@ -123,6 +123,11 @@ enum class dx_class_id : u8
     call_shader,
     create_handle_for_lib,
     allocate_ray_query_2,
+    hit_object_trace_ray,
+    hit_object_invoke,
+    maybe_reorder_thread,
+    hit_object_make_nop,
+    hit_object_state_scalar,
 };
 
 // clang-format off
@@ -222,6 +227,11 @@ inline constexpr dx_class k_dx_classes[] = {
     {"callShader", "v:ip"},
     {"createHandleForLib", "h:o", dx_class::read_only},
     {"allocateRayQuery2", "i:ii"},
+    {"hitObject_TraceRay", "H:hiiiiiffffffffp"},
+    {"hitObject_Invoke", "v:Hp"},
+    {"maybeReorderThread", "v:Hii"},
+    {"hitObject_MakeNop", "H:", dx_class::read_none},
+    {"hitObject_StateScalar", "o:H", dx_class::read_none},
 };
 // clang-format on
 
@@ -395,6 +405,17 @@ enum class dx_op : u8
     call_shader,
     create_handle_for_lib,
     allocate_ray_query_2,
+    hit_object_trace_ray,
+    hit_object_invoke,
+    maybe_reorder_thread,
+    hit_object_make_nop,
+    hit_object_is_hit,
+    hit_object_is_miss,
+    hit_object_t,
+    hit_object_instance_id,
+    hit_object_instance_index,
+    hit_object_geometry_index,
+    hit_object_primitive_index,
 };
 
 struct dx_op_info
@@ -557,10 +578,21 @@ inline constexpr dx_op_info k_dx_ops[] = {
     {159, dx_class_id::call_shader, k_udt},
     {160, dx_class_id::create_handle_for_lib, k_udt},
     {258, dx_class_id::allocate_ray_query_2, k_no_overload},
+    {262, dx_class_id::hit_object_trace_ray, k_udt},
+    {267, dx_class_id::hit_object_invoke, k_udt},
+    {268, dx_class_id::maybe_reorder_thread, k_no_overload},
+    {266, dx_class_id::hit_object_make_nop, k_no_overload},
+    {270, dx_class_id::hit_object_state_scalar, k_i1},
+    {269, dx_class_id::hit_object_state_scalar, k_i1},
+    {274, dx_class_id::hit_object_state_scalar, k_f32},
+    {283, dx_class_id::hit_object_state_scalar, k_i32},
+    {282, dx_class_id::hit_object_state_scalar, k_i32},
+    {281, dx_class_id::hit_object_state_scalar, k_i32},
+    {284, dx_class_id::hit_object_state_scalar, k_i32},
 };
 // clang-format on
 
-static_assert(sizeof(k_dx_ops) / sizeof(k_dx_ops[0]) == sizeof(char[isize(dx_op::allocate_ray_query_2) + 1]));
+static_assert(sizeof(k_dx_ops) / sizeof(k_dx_ops[0]) == sizeof(char[isize(dx_op::hit_object_primitive_index) + 1]));
 static_assert(sizeof(k_dx_classes) / sizeof(k_dx_classes[0])
-              == sizeof(char[isize(dx_class_id::allocate_ray_query_2) + 1]));
+              == sizeof(char[isize(dx_class_id::hit_object_state_scalar) + 1]));
 } // namespace sgl::ir::dxil::impl

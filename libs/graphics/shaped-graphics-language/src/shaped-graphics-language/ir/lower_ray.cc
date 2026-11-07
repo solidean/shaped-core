@@ -113,25 +113,114 @@ void lowering::handed_back(flat_expr_id id, value_ref global)
         store(place.value(), add(op::load, value_type(_e.at(id).type), {global}));
 }
 
+bool lowering::trace_operands(cc::span<flat_expr_id const> arguments, storage space, cc::vector<u32>& out)
+{
+    out.push_back(u32(acceleration_structure(arguments[0])));
+    for (auto i = isize(5); i < 10; ++i)
+        out.push_back(u32(converted(expr(arguments[i]), _int, _uint)));
+    out.push_back(u32(expr(arguments[1])));
+    out.push_back(u32(expr(arguments[3])));
+    out.push_back(u32(expr(arguments[2])));
+    out.push_back(u32(expr(arguments[4])));
+    out.push_back(u32(handed_over(arguments[arguments.size() - 1], space)));
+    return _failure.empty();
+}
+
 void lowering::trace_ray(flat_call const& c)
 {
     auto const arguments = cc::vector<flat_expr_id>::create_copy_of(cc::span<flat_expr_id const>(_e.at(c.arguments)));
-    auto const world = acceleration_structure(arguments[0]);
-    auto const as_uint = [&](isize i) { return u32(converted(expr(arguments[i]), _int, _uint)); };
-    u32 operands[11];
-    operands[0] = u32(world);
-    for (auto i = isize(0); i < 5; ++i)
-        operands[i + 1] = as_uint(i + 5);
-    operands[6] = u32(expr(arguments[1]));
-    operands[7] = u32(expr(arguments[3]));
-    operands[8] = u32(expr(arguments[2]));
-    operands[9] = u32(expr(arguments[4]));
-    auto const payload = handed_over(arguments[10], storage::ray_output);
-    if (!_failure.empty())
+    auto operands = cc::vector<u32>();
+    if (!trace_operands(arguments, storage::ray_output, operands))
         return;
-    operands[10] = u32(payload);
     add(op::trace_ray, type_ref::none, operands);
-    handed_back(arguments[10], payload);
+    handed_back(arguments[10], value_ref(operands[10]));
+}
+
+value_ref lowering::hit_object_call(flat_expr const& x, flat_call const& c, builtins::function_record const& record)
+{
+    auto const arguments = cc::vector<flat_expr_id>::create_copy_of(cc::span<flat_expr_id const>(_e.at(c.arguments)));
+    auto const& name = record.name;
+    auto const as_uint = [&](isize i)
+    {
+        auto const value = expr(arguments[i]);
+        return _out.type_of(value) == _uint ? value : converted(value, _int, _uint);
+    };
+    auto const hit_type = intern({.kind = type_kind::hit_object});
+    if (name.starts_with("trace_hit_ray"))
+    {
+        auto operands = cc::vector<u32>();
+        if (!trace_operands(arguments, storage::ray_output, operands))
+            return value_ref::none;
+        auto const hit = add(op::hit_object_trace, hit_type, operands);
+        handed_back(arguments[arguments.size() - 1], value_ref(operands[10]));
+        return hit;
+    }
+    if (name.starts_with("trace_ray_reordered"))
+    {
+        auto operands = cc::vector<u32>();
+        if (!trace_operands(arguments, storage::ray_output, operands))
+            return value_ref::none;
+        auto const payload = value_ref(operands[10]);
+        if (name.ends_with("_by_hint"))
+        {
+            operands.push_back(u32(as_uint(10)));
+            operands.push_back(u32(as_uint(11)));
+        }
+        (void)add(op::trace_reorder_execute, hit_type, operands);
+        handed_back(arguments[arguments.size() - 1], payload);
+        return value_ref::none;
+    }
+    if (name == "reorder_thread_by_hint")
+    {
+        add(op::reorder_thread, type_ref::none, {as_uint(0), as_uint(1)});
+        return value_ref::none;
+    }
+    auto const hit = expr(arguments[0]);
+    if (!_failure.empty())
+        return value_ref::none;
+    if (name == "hit_object_reorder")
+    {
+        add(op::hit_object_reorder, type_ref::none, {hit});
+        return value_ref::none;
+    }
+    if (name == "hit_object_reorder_by_hint")
+    {
+        add(op::hit_object_reorder, type_ref::none, {hit, as_uint(1), as_uint(2)});
+        return value_ref::none;
+    }
+    if (name == "hit_object_invoke")
+    {
+        auto const payload = handed_over(arguments[1], storage::ray_output);
+        if (!_failure.empty())
+            return value_ref::none;
+        add(op::hit_object_invoke, type_ref::none, {hit, payload});
+        handed_back(arguments[1], payload);
+        return value_ref::none;
+    }
+    struct read
+    {
+        cc::string_view name;
+        hit_object_value what;
+    };
+    constexpr read k_reads[] = {
+        {"hit_object_is_hit", hit_object_value::is_hit},
+        {"hit_object_is_miss", hit_object_value::is_miss},
+        {"hit_object_t", hit_object_value::t},
+        {"hit_object_instance_id", hit_object_value::instance_id},
+        {"hit_object_instance_index", hit_object_value::instance_index},
+        {"hit_object_geometry_index", hit_object_value::geometry_index},
+        {"hit_object_primitive_index", hit_object_value::primitive_index},
+    };
+    for (auto const& r : k_reads)
+        if (r.name == name)
+        {
+            auto const result = value_type(x.type);
+            auto const is_int = result == _int;
+            auto const value = add(op::hit_object_read, is_int ? _uint : result, {hit}, u8(r.what));
+            return is_int ? add(op::bitcast, _int, {value}) : value;
+        }
+    unsupported(cc::format("the builtin {}", name));
+    return value_ref::none;
 }
 
 void lowering::call_callable(flat_call const& c)

@@ -199,6 +199,62 @@ struct hit_object_walk
 constexpr cc::string_view k_trace = "trace_hit(work.world, r, rs.primary, mut p)";
 } // namespace
 
+// EMIT-246: the native route's own module, which no DXC stands behind.
+// Each shape is one that would tempt a pass: two traces in two arms, a read in a branch, one trace in a loop.
+TEST("sgl hit object spirv - SGL's own binaries hold each hit object in its one variable or value")
+{
+    auto compiler = ssc::dxc::compiler::create();
+    if (compiler.has_error())
+        SKIP("no DXC");
+    constexpr cc::string_view bodies[] = {
+        "let h = trace_hit(work.world, r, rs.primary, mut p)\nif h.is_hit => h.invoke(mut p)\n",
+        "if id.x > 3:\n    let h = trace_hit(work.world, r, rs.primary, mut p)\n    h.reorder()\n    h.invoke(mut p)\n"
+        "else:\n    let h = trace_hit(work.world, r, rs.primary, mut p)\n    h.reorder(id.x as uint, 2)\n    "
+        "h.invoke(mut p)\n",
+        "let h = trace_hit(work.world, r, rs.primary, mut p)\nlet mut t = 0.0\nif h.is_hit => t = h.t\nh.invoke(mut "
+        "p)\n",
+        "let mut i = 0\nwhile i < 2:\n    let h = trace_hit(work.world, r, rs.primary, mut p)\n    h.invoke(mut p)\n   "
+        " i = i + 1\n",
+    };
+    for (auto const body : bodies)
+    {
+        auto const source = raygen("", body);
+        auto const on_vulkan = sgl::compile_to_text({.source = source,
+                                                     .entry_point = "main_cs",
+                                                     .target = sgl::emit::target::hlsl_vulkan,
+                                                     .device_features = reordering_device(),
+                                                     .native = sgl::emit::native_route::require});
+        REQUIRE(on_vulkan.has_value()).dump("error", on_vulkan.has_error() ? cc::string(on_vulkan.error()) : cc::string());
+        auto const walk = walk_hit_objects(on_vulkan.value().spirv);
+        CHECK(walk.copies.empty()).dump("body", body).dump("first", walk.copies.empty() ? cc::string() : walk.copies[0]);
+        CHECK(walk.variables >= 1);
+
+        auto const on_dx12 = sgl::compile_to_text({.source = source,
+                                                   .entry_point = "main_cs",
+                                                   .target = sgl::emit::target::hlsl_dx12,
+                                                   .device_features = reordering_device(),
+                                                   .native = sgl::emit::native_route::require});
+        REQUIRE(on_dx12.has_value());
+#ifdef CC_OS_WINDOWS
+        auto const refused = compiler.value().validate(on_dx12.value().dxil);
+        CHECK(!refused.has_value()).dump("validator", refused.value_or(cc::string()));
+        auto const text = compiler.value().disassemble(on_dx12.value().dxil);
+        REQUIRE(text.has_value());
+        CHECK(text.value().contains("@dx.op.hitObject_TraceRay"));
+        CHECK(!text.value().contains("phi %dx.types.HitObject"));
+        auto selects_one = false;
+        for (auto rest = cc::string_view(text.value()); !rest.empty();)
+        {
+            auto const end = rest.find('\n');
+            auto const line = end < 0 ? rest : rest.subview({.offset = 0, .size = end});
+            selects_one = selects_one || (line.contains(" select ") && line.contains("HitObject"));
+            rest = end < 0 ? cc::string_view() : rest.subview({.offset = end + 1, .size = rest.size() - end - 1});
+        }
+        CHECK(!selects_one);
+#endif
+    }
+}
+
 TEST("sgl hit object spirv - the variable a trace fills is a pointer, and a copy of it is what the walk finds")
 {
     auto compiler = ssc::dxc::compiler::create();

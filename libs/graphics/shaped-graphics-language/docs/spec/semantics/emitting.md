@@ -504,9 +504,18 @@ fn main_ps(p: pixel_input) -> target_ {
   A resource there is an external handle a function loads, through `createHandleForLib`.
   The container holds `SFI0`, `RDAT` and `DXIL`, and `RDAT` states what the module implies, since the validator compares the two.
   An intersection fused with its any hit is metal's alone (EMIT-139), and `unsupported` here, and so is a closest hit of no payload on DXIL.
-  A hit object and a reordering trace are `unsupported`.
+  A hit object and a reordering trace are EMIT-246's.
 * **EMIT-245** A source a host compiles at run time takes the context's options as a package's shader does: what the device has, its float guarantees and its native route.
   So a generated hit group, a host's callable and a generated kernel lower where the context prefers SGL's binary, and `has` answers for the device.
+* **EMIT-246** A hit object of a native route is the value of its trace and nothing else, so EMIT-225's rule holds of the program and not only of its text.
+  No local, global or member holds one, and no phi, `select`, load, store or composite moves one, which `ir::verify` refuses after every pass.
+  Only `op::hit_object_trace` and `op::trace_reorder_execute` give one; only a read, a regrouping and an invocation take one.
+  A `let` of a trace names that value, and a parameter stands for it as EMIT-225 says.
+  On SPIR-V it is a `Function` variable of `OpTypeHitObjectEXT` at the top of the body, reached by its pointer, and a trace and an invocation hand their payload over in a `RayPayloadKHR` variable.
+  A trace with `reorder` is `OpHitObjectTraceReorderExecuteEXT`, and `maybe_reorder` is `OpReorderThreadWithHintEXT`.
+  On DXIL it is a value of `%dx.types.HitObject`, from `hitObject_TraceRay`, at Shader Model 6.9.
+  A trace with `reorder` is that, `maybeReorderThread` and `hitObject_Invoke`, and `maybe_reorder` regroups a `hitObject_MakeNop`.
+  A regrouping with no hint states an undefined hint of 0 bits, as DXC's does.
 
 ## Lines
 
