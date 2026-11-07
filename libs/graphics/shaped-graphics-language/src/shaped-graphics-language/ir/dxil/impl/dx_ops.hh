@@ -122,6 +122,7 @@ enum class dx_class_id : u8
     report_hit,
     call_shader,
     create_handle_for_lib,
+    allocate_ray_query_2,
 };
 
 // clang-format off
@@ -220,6 +221,7 @@ inline constexpr dx_class k_dx_classes[] = {
     {"reportHit", "c:fip"},
     {"callShader", "v:ip"},
     {"createHandleForLib", "h:o", dx_class::read_only},
+    {"allocateRayQuery2", "i:ii"},
 };
 // clang-format on
 
@@ -392,6 +394,7 @@ enum class dx_op : u8
     report_hit,
     call_shader,
     create_handle_for_lib,
+    allocate_ray_query_2,
 };
 
 struct dx_op_info
@@ -553,10 +556,11 @@ inline constexpr dx_op_info k_dx_ops[] = {
     {158, dx_class_id::report_hit, k_udt},
     {159, dx_class_id::call_shader, k_udt},
     {160, dx_class_id::create_handle_for_lib, k_udt},
+    {258, dx_class_id::allocate_ray_query_2, k_no_overload},
 };
 // clang-format on
 
-static_assert(sizeof(k_dx_ops) / sizeof(k_dx_ops[0]) == sizeof(char[isize(dx_op::create_handle_for_lib) + 1]));
+static_assert(sizeof(k_dx_ops) / sizeof(k_dx_ops[0]) == sizeof(char[isize(dx_op::allocate_ray_query_2) + 1]));
 static_assert(sizeof(k_dx_classes) / sizeof(k_dx_classes[0])
-              == sizeof(char[isize(dx_class_id::create_handle_for_lib) + 1]));
+              == sizeof(char[isize(dx_class_id::allocate_ray_query_2) + 1]));
 } // namespace sgl::ir::dxil::impl

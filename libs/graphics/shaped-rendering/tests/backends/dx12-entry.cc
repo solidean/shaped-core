@@ -52,6 +52,23 @@ ASYNC_TEST("sr dx12 - warp")
     }
 }
 
+// Every routine through SGL's own DXIL where it has a lowering, and DXC's elsewhere.
+ASYNC_TEST("sr dx12 - native-dxil")
+{
+    auto ctx = sg::create_dx12_context(
+        {.activate_global_debug_layer = true, .native_dxil = true, .adapter = dx12::dx12_adapter::hardware});
+    if (ctx.has_error())
+        SKIP("no dx12 hardware device");
+    else
+    {
+        (void)sr_test::shader_fixtures();
+        co_await nx::async_invoke_tests_in_sequence("dx12-native-dxil", ctx.value());
+        CHECK(!ctx.value()->is_device_lost())
+            .context(cc::format("the device was lost while running this binary's GPU tests: {}",
+                                ctx.value()->device_loss_reason()));
+    }
+}
+
 ASYNC_TEST("sr dx12 - hardware")
 {
     auto ctx = sg::create_dx12_context({.activate_global_debug_layer = true, .adapter = dx12::dx12_adapter::hardware});

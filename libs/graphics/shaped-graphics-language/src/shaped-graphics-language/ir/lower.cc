@@ -129,6 +129,7 @@ void lowering::run()
         // what crosses its edge stands on its own, and DXIL's packer reads it ahead of any lowering of the body
         return declare_stage_elements();
     }
+    _out.sees_micromaps = _e.features.has(check::feature::opacity_micromap);
     // EMIT-229: the prologue that clears workgroup memory
     if (_e.written_words > 0 || _e.zeroes_workgroup)
         return unsupported("the workgroup prologue of a robustness profile");

@@ -341,7 +341,6 @@ if(SC_BUILD_TESTS)
     # These compile in either build: they use only the public API, and guard on SR_HAS_WINDOW the few cases that need a live backend.
     add_executable(shaped-rendering-test
         tests/main.cc
-        tests/bloom-test.cc
         tests/smoke-test.cc
         tests/capture-request-test.cc
         tests/input-test.cc
@@ -421,6 +420,7 @@ if(SC_BUILD_TESTS)
         target_sources(shaped-rendering-test PRIVATE
             tests/backends/backends.cc
             tests/shader_fixtures.cc
+            tests/bloom-test.cc
             tests/compression/bc-compress-test.cc
             tests/blit-routine-test.cc
             tests/debug-output-test.cc

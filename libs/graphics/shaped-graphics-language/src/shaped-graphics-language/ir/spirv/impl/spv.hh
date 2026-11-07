@@ -247,6 +247,7 @@ enum capability : u32
     DenormPreserve = 4464,
     SignedZeroInfNanPreserve = 4466,
     CapRayQueryKHR = 4472,
+    RayTracingOpacityMicromapEXT = 5381,
     RayTracingKHR = 4479,
     CapDemoteToHelperInvocation = 5379,
     MeshShadingEXT = 5283,

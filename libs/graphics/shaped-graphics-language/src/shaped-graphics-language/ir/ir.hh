@@ -759,6 +759,8 @@ struct sgl::ir::program
     check::stage stage = check::stage::none;
     i32 workgroup[3] = {1, 1, 1};
     primitive_stage primitive;
+    /// EMIT-184: the device has opacity micromaps, so a trace sees them, which each target states.
+    bool sees_micromaps = false;
     /// The entry point's guarantee: what no single operation can say, its denormals above all.
     check::float_level guarantee = check::float_level::fast;
 

@@ -377,6 +377,7 @@ struct container_part
     constexpr u32 k_part_resources = 3;
     constexpr u32 k_part_functions = 4;
     constexpr u32 k_version = 0x10;
+    constexpr u32 k_feature_64_uavs = 1u << 3;
 
     auto strings = byte_writer();
     strings.u8_le(0);
@@ -416,7 +417,8 @@ struct container_part
     functions.u32_le(s.shader_kind);
     functions.u32_le(s.payload_bytes);
     functions.u32_le(s.attribute_bytes);
-    functions.u32_le(u32(s.feature_flags));
+    // how many UAVs a module holds is the module's, and a function states what it uses itself
+    functions.u32_le(u32(s.feature_flags) & ~k_feature_64_uavs);
     functions.u32_le(u32(s.feature_flags >> 32));
     functions.u32_le(1u << s.shader_kind);
     functions.u32_le((s.shader_kind << 16) | 0x60 | s.min_shader_minor);

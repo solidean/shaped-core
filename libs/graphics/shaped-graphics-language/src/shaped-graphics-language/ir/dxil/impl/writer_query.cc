@@ -80,6 +80,13 @@ void writer::ray_query_op(u32 index, instruction const& i)
     case op::ray_query_begin:
     {
         _uses.ray_query = true;
+        if (_p.sees_micromaps)
+        {
+            constexpr u32 k_allow_opacity_micromaps = 1;
+            ll_value const args[]
+                = {number(dx_op::allocate_ray_query_2), at(0), _m.constant_i32(k_allow_opacity_micromaps)};
+            return define_one(index, call(dx_op::allocate_ray_query_2, _m.void_type(), args));
+        }
         ll_value const args[] = {number(dx_op::allocate_ray_query), at(0)};
         return define_one(index, call(dx_op::allocate_ray_query, _m.void_type(), args));
     }
