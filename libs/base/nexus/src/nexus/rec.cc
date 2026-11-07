@@ -18,6 +18,7 @@
 #include <nexus/args/ambient.hh>
 #include <nexus/impl/rec_session.hh>
 #include <nexus/rec.hh>
+#include <nexus/tests/export/runner_report.hh>
 
 using namespace cc::primitive_defines;
 
@@ -340,6 +341,9 @@ void nx::impl::end_run_recording(cc::string_view log_dir)
     if (sampled)
         cc::rec::stop_sampling();
     g_sampling = false;
+
+    // A sampler must not outlive the recorder whose threads it walks.
+    nx::impl::pause_report_sampling();
 
     // One drain for the whole run, which is what deferring the per-test dumps bought.
     cc::rec::flush_blocking();

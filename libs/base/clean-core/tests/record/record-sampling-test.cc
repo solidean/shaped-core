@@ -6,11 +6,15 @@
 #include <clean-core/container/map.hh>
 #include <clean-core/container/vector.hh>
 #include <clean-core/platform/stack_capture.hh>
+#include <clean-core/record/async_scope.hh>
 #include <clean-core/record/recording.hh>
 #include <clean-core/record/sampling.hh>
 #include <clean-core/record/system.hh>
+#include <clean-core/record/trace.hh>
 #include <clean-core/string/print.hh>
 #include <clean-core/string/string.hh>
+#include <clean-core/thread/atomic.hh>
+#include <clean-core/thread/mutex.hh>
 #include <nexus/test.hh>
 
 #if defined(_WIN32)
@@ -145,6 +149,60 @@ REC_TEST("record/sampling - a sampler catches the running thread and names where
 
     CHECK(with_frames == samples);
     CHECK(with_anchor == samples);
+}
+
+namespace
+{
+/// What a sink saw: samples per owner, and whether each carried frames.
+struct sink_tally
+{
+    cc::mutex<cc::map<u64, isize>> by_owner;
+    cc::atomic<isize> without_frames = 0;
+
+    static void take(cc::rec::sample_view const& s, void* user)
+    {
+        auto& self = *static_cast<sink_tally*>(user);
+        if (s.frames.empty())
+            self.without_frames.fetch_add(1, cc::memory_order_relaxed);
+        self.by_owner.lock([&](cc::map<u64, isize>& m) { m[s.owner] += 1; });
+    }
+
+    [[nodiscard]] isize of(u64 owner)
+    {
+        return by_owner.lock(
+            [&](cc::map<u64, isize>& m)
+            {
+                auto const* n = m.get_ptr(owner);
+                return n == nullptr ? isize(0) : *n;
+            });
+    }
+};
+} // namespace
+
+REC_TEST("record/sampling - a sink receives each sample with the owner its thread was under")
+{
+    if (!sampling_possible())
+        SKIP("this build has no sampler — no foreign-thread walk, or no threads at all");
+
+    rec_fixture const fixture(deterministic_config());
+
+    sink_tally tally;
+    auto const owner = cc::rec::new_trace_id();
+    cc::rec::recording_listener rl;
+    {
+        scoped_listener const reg(rl);
+        {
+            cc::rec::sampling_scope const sampling({.rate_hz = 2000.0, .sink = &sink_tally::take, .sink_user = &tally});
+            cc::rec::owner_scope const under(owner);
+            busy_until_sampled(20);
+        }
+        cc::rec::flush_blocking();
+    }
+
+    // Every sample went to the sink, and the stream got none of them.
+    CHECK(tally.of(u64(owner)) > 0);
+    CHECK(tally.without_frames.load() == 0);
+    CHECK(count_samples(rl.take()) == 0);
 }
 
 REC_THOROUGH_TEST("record/sampling - stopping is synchronous, so nothing arrives afterwards")

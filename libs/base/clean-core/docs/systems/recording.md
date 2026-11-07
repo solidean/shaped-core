@@ -234,6 +234,10 @@ A high-resolution waitable timer floors near half a millisecond, and neither `ti
 `threads_per_tick = 1` gives a fixed budget split across however many threads exist instead.
 For one frame's worth of ticks that is a couple of samples each, which is not a profile of anything.
 
+**A sink takes the samples instead of the stream** (`sampling_config::sink`), for a consumer that aggregates as it goes rather than keeping every stack.
+It is called on the sampler thread once the sampled thread runs again, with the frames and the **owner** (`cc::rec::owner_scope`) the thread was under, read while it was suspended.
+That is how a test harness learns which functions each test ran: it installs an owner per test, and the sink files each sample's frames under it.
+
 Two limits worth knowing.
 Only threads the recorder already knows are sampled, which a thread joins by recording anything at all.
 Enumerating the process's OS threads instead is [feat-cc-rec-sampler-os-thread-enumeration](../issues/feat-cc-rec-sampler-os-thread-enumeration.md).

@@ -81,6 +81,7 @@ struct sample
     u32 chunk_offset = 0;
     u64 chunk_seq = 0;
     u64 native_tid = 0;
+    u64 owner = 0;
     cc::stack_capture_result capture;
 };
 
@@ -117,7 +118,13 @@ void read_anchor(cc::rec::impl::thread_state const& ts, sample& out)
     out.thread_index = ts.index;
 
     auto const* const w = ts.tls;
-    if (w == nullptr || w->current == nullptr)
+    if (w == nullptr)
+        return;
+
+    // What its next event would carry: a pending reset means it has left every context.
+    out.owner = w->ambient_reset_pending ? 0 : w->last_owner;
+
+    if (w->current == nullptr)
         return; // a thread that has recorded nothing has no position, and no state to recover either
 
     out.chunk_seq = w->current->seq;
@@ -648,7 +655,14 @@ void sampler_main()
                 {
                     // Inside the tick scope, so the sample and its cost stay together until splicing moves the sample
                     // onto the thread it caught.
-                    write_sample(s, frames);
+                    if (cfg.sink != nullptr)
+                        cfg.sink(cc::rec::sample_view{.native_tid = s.native_tid,
+                                                      .owner = s.owner,
+                                                      .frames = cc::span<void* const>(frames.data(), s.capture.count),
+                                                      .truncated = s.capture.truncated},
+                                 cfg.sink_user);
+                    else
+                        write_sample(s, frames);
                     g_taken.fetch_add(1, cc::memory_order_relaxed);
                 }
                 else if (attempted)

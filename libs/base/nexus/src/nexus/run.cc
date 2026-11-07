@@ -695,7 +695,8 @@ int nx::run(int argc, char** argv)
         if (auto const asked = cc::environment_variable(nx::runner_report_variable); asked.has_value())
         {
             runner_report_file = asked.value();
-            nx::begin_runner_report();
+            auto const hz = cc::environment_variable(nx::runner_report_sampling_variable);
+            nx::begin_runner_report(hz.has_value() ? cc::from_string<f64>(hz.value()).value_or(0.0) : 0.0);
         }
 
     // Its baseline is taken here, so the load it reports afterwards covers the tests and nothing that set them up.

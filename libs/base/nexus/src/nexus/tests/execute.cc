@@ -38,6 +38,7 @@
 #include <nexus/tests/check.hh>
 #include <nexus/tests/check_divert.hh>
 #include <nexus/tests/entry.hh>
+#include <nexus/tests/export/runner_report.hh>
 #include <nexus/tests/impl/test_ambient.hh>
 #include <nexus/tests/invoke_tests.hh>
 #include <nexus/tests/section.hh>
@@ -652,6 +653,11 @@ void begin_pass(test_context& ctx)
 {
     ctx.exec_count++;
     ctx.pass_owner = u64(nx::impl::new_pass_owner());
+    // The scheduled test this pass counts for, as a file access's context does: a dispatched child counts for its driver.
+    auto const* const exec = ctx.execution;
+    nx::impl::note_pass_owner(ctx.pass_owner, exec != nullptr && exec->invocation_group.empty()
+                                                  ? exec->instance.declaration
+                                                  : nx::impl::current_slot_declaration());
     ctx.log_declarations.lock([](cc::vector<impl::log_declaration>& d) { d.clear(); });
     ctx.leaf_section = nullptr;
     ctx.root_section->next_open_section = nullptr;

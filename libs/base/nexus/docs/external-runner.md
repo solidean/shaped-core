@@ -18,6 +18,25 @@ Accesses no test can be blamed for â€” static setup, a thread no test started â€
 The run seed is there when the run was shuffled.
 The format is in [`runner_report.hh`](../src/nexus/tests/export/runner_report.hh); its `version` changes with anything a reader must know about.
 
+## Which code each test ran, sampled
+
+Set `NX_EXTERNAL_RUNNER_SAMPLE_HZ` to a rate as well and the report says which code each test ran, as a sampling profiler saw it.
+clean-core's sampler (`cc::rec` sampling, [sampling.hh](../../clean-core/src/clean-core/record/sampling.hh)) walks every thread the recorder knows at that rate per thread, whole stacks,
+and hands each sample to nexus instead of the recording.
+nexus installs a fresh owner (`cc::rec::owner_scope`) around every pass of every test; the sampler reads the owner the thread was under while it holds the thread suspended,
+so a sample on a pool worker or in an async task counts for the test that started the work, and tests side by side never mix.
+A dispatched child counts for its driver; samples under no test, or under a nested run's tests, are `unattributed`.
+
+Per test the report then carries `samples`, how many caught it, and `sampled`, the code addresses they hit:
+per module its index into the top-level `modules` (path and build identity), then the sorted offsets into it.
+A caller's frame is its return address minus one, so every offset lies inside the instruction that ran or called; the build's debug info resolves them, inlined frames included.
+`body` is where the test's body starts, when the build keeps code addresses for source sites (below `SC_SOURCE_SITES=FULL`).
+The top-level `sampling` says the rate and how many samples were taken and lost.
+
+A sample is a statistical witness: code it names ran in that test, and code it does not name may still have run.
+A test of a few milliseconds is caught by few samples or none, so a runner unions the sets over many runs.
+Measured on this repo's `clean-core-test` and `nexus-test` at 1 kHz, the run took no measurably longer (within the noise of a few percent); without a recorder (`--no-recording`) nothing is sampled.
+
 ## How accesses are seen
 
 nexus turns on clean-core's file-access recording (`cc::file_access`, [file_access.hh](../../clean-core/src/clean-core/platform/file_access.hh)) for the whole run.

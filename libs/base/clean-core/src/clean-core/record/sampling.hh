@@ -1,5 +1,6 @@
 #pragma once
 
+#include <clean-core/container/span.hh>
 #include <clean-core/record/desc.hh>
 #include <clean-core/record/fwd.hh>
 
@@ -25,7 +26,29 @@ namespace cc::rec
 struct sampling_config;
 struct sampling_stats;
 struct sampling_scope;
+struct sample_view;
 } // namespace cc::rec
+
+/// One sample as a sink receives it (`sampling_config::sink`).
+struct cc::rec::sample_view
+{
+    /// The OS's id of the sampled thread.
+    u64 native_tid = 0;
+
+    /// The owner id (cc::rec::owner_scope) the sampled thread was running under, or 0 for none.
+    ///
+    /// Read while the thread was suspended, from the same state its ambient deltas are written from, so it is exactly
+    /// the owner an event recorded at that instant would carry.
+    /// A thread that left every context and has not recorded since counts as under none.
+    /// Always 0 for a thread the recorder does not know, and while attribution is not recorded.
+    u64 owner = 0;
+
+    /// Innermost first.
+    cc::span<void* const> frames;
+
+    /// The walk stopped at `max_frames` (or at a scope, under `stop_at_scope`).
+    bool truncated = false;
+};
 
 struct cc::rec::sampling_config
 {
@@ -76,6 +99,15 @@ struct cc::rec::sampling_config
     /// core to 7.4%.
     /// Turn it on when you are hunting a thread that records nothing, which is exactly what it is for.
     bool include_unknown_threads = false;
+
+    /// Where samples go instead of the recording, or null for the recording.
+    ///
+    /// For a consumer that aggregates as it goes — which functions ran under which owner, say — rather than keeping
+    /// every stack: the samples then cost no chunk space and reach no listener.
+    /// Called on the sampler thread, after the sampled thread runs again, with `sink_user`.
+    /// The next tick waits for it, so it should be quick; it may allocate and lock.
+    void (*sink)(rec::sample_view const& sample, void* user) = nullptr;
+    void* sink_user = nullptr;
 };
 
 namespace cc::rec

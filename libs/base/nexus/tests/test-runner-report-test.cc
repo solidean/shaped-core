@@ -1,10 +1,14 @@
 #include <babel-data/data/json.hh>
+#include <clean-core/common/time.hh>
 #include <clean-core/memory/allocation.hh>
 #include <clean-core/memory/large_allocations.hh>
 #include <clean-core/platform/file_access.hh>
 #include <clean-core/platform/file_path.hh>
+#include <clean-core/platform/module_table.hh>
+#include <clean-core/record/sampling.hh>
 #include <clean-core/streams/file_stream.hh>
 #include <clean-core/string/string.hh>
+#include <nexus/impl/rec_session.hh>
 #include <nexus/test.hh>
 #include <nexus/tests/execute.hh>
 #include <nexus/tests/export/runner_report.hh>
@@ -54,9 +58,12 @@ void read_file(cc::string const& path)
 struct report_scope
 {
     bool was = cc::file_access::is_recording();
-    report_scope() { nx::begin_runner_report(); }
+    bool sampled = nx::impl::report_samples().has_value();
+    explicit report_scope(f64 sample_hz = 0) { nx::begin_runner_report(sample_hz); }
     ~report_scope()
     {
+        if (!sampled)
+            (void)nx::impl::end_report_sampling();
         if (!was)
         {
             cc::file_access::stop_recording();
@@ -64,6 +71,52 @@ struct report_scope
         }
     }
 };
+
+/// Burns `secs` here and nowhere else, so a sample of it lands in this function's own few hundred bytes.
+CC_DONT_INLINE u64 burn_here_a(f64 secs)
+{
+    u64 volatile sink = 0;
+    auto const start = cc::current_time_steady_secs();
+    while (cc::current_time_steady_secs() - start < secs)
+        for (int i = 0; i < 4096; ++i)
+            sink = sink + u64(i);
+    return sink;
+}
+
+CC_DONT_INLINE u64 burn_here_b(f64 secs)
+{
+    u64 volatile sink = 1;
+    auto const start = cc::current_time_steady_secs();
+    while (cc::current_time_steady_secs() - start < secs)
+        for (int i = 0; i < 4096; ++i)
+            sink = sink * 3 + u64(i);
+    return sink;
+}
+
+/// Whether a test's "sampled" holds an address within `span` bytes after `fn`, in the module it lies in.
+bool sampled_near(babel::json::ref test, babel::json::ref modules, void const* fn, u64 span)
+{
+    auto const at = u64(reinterpret_cast<uintptr_t>(fn));
+    for (auto const& m : cc::enumerate_loaded_modules())
+    {
+        if (!m.contains(at))
+            continue;
+        auto const sampled = test["sampled"];
+        for (isize g = 0; g < sampled.size(); ++g)
+        {
+            auto const group = sampled[g];
+            if (modules[isize(group[0].as_double())]["path"].as_string() != cc::string_view(m.path))
+                continue;
+            for (isize i = 1; i < group.size(); ++i)
+            {
+                auto const rva = u64(group[i].as_double());
+                if (rva >= at - m.base && rva < at - m.base + span)
+                    return true;
+            }
+        }
+    }
+    return false;
+}
 } // namespace
 
 // Attribution follows the running test, so the inner tests run side by side here, each reading its own file many times.
@@ -195,4 +248,46 @@ TEST("runner report - each test has its wall-clock interval, and a test's large 
     CHECK(big["large_peak_bytes"].as_double() >= double(3 << 20));
     CHECK(big["large_allocations"].as_double() == 1);
     CHECK(!small.has("large_peak_bytes"));
+}
+
+// Samples are filed by the pass owner the sampled thread was under, so two tests side by side never mix.
+TEST("runner report - a sampled run lists the code each test ran, and not another test's",
+     no_scheduler,
+     exclusive("cc-file-access"))
+{
+    if (!cc::rec::sampling_available() || !nx::impl::run_recording_active())
+        SKIP("needs a sampler and the run's recorder");
+
+    nx::test_registry reg;
+    reg.add_declaration("burns a", {}, [] { CHECK(burn_here_a(0.25) != 7); });
+    reg.add_declaration("burns b", {}, [] { CHECK(burn_here_b(0.25) != 7); });
+
+    auto const scope = report_scope(1000.0);
+    auto const before = nx::impl::report_samples();
+    if (!before.has_value())
+        SKIP("another sampler is running");
+
+    auto schedule = nx::test_schedule::create({}, reg);
+    auto exec = nx::execute_tests(schedule, {});
+    auto const sampled = nx::impl::report_samples();
+    REQUIRE(sampled.has_value());
+    auto const doc = babel::json::read(nx::write_runner_report(exec, {}, {}, cc::nullopt, &sampled.value())).value();
+    auto const root = doc.root();
+
+    CHECK(root["sampling"]["taken"].as_double() > 0);
+    auto const ta = entry_named(root["tests"], "burns a");
+    auto const tb = entry_named(root["tests"], "burns b");
+    REQUIRE(ta.is_valid());
+    REQUIRE(tb.is_valid());
+    CHECK(ta["samples"].as_double() > 10);
+    CHECK(tb["samples"].as_double() > 10);
+    // Each function's own bytes: up to the other, where the linker put them side by side.
+    auto const a = u64(reinterpret_cast<uintptr_t>(&burn_here_a));
+    auto const b = u64(reinterpret_cast<uintptr_t>(&burn_here_b));
+    auto const span_a = b > a ? cc::min(b - a, u64(256)) : u64(256);
+    auto const span_b = a > b ? cc::min(a - b, u64(256)) : u64(256);
+    CHECK(sampled_near(ta, root["modules"], reinterpret_cast<void const*>(&burn_here_a), span_a));
+    CHECK(sampled_near(tb, root["modules"], reinterpret_cast<void const*>(&burn_here_b), span_b));
+    CHECK(!sampled_near(ta, root["modules"], reinterpret_cast<void const*>(&burn_here_b), span_b));
+    CHECK(!sampled_near(tb, root["modules"], reinterpret_cast<void const*>(&burn_here_a), span_a));
 }

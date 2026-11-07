@@ -1,11 +1,15 @@
 #pragma once
 
+#include <clean-core/container/map.hh>
 #include <clean-core/container/span.hh>
+#include <clean-core/container/vector.hh>
 #include <clean-core/error/optional.hh>
 #include <clean-core/memory/large_allocations.hh>
 #include <clean-core/platform/file_access.hh>
+#include <clean-core/platform/module_table.hh>
 #include <clean-core/string/string.hh>
 #include <clean-core/string/string_view.hh>
+#include <nexus/fwd.hh>
 #include <nexus/tests/execute.hh>
 
 // The report an external test runner asks for: per test, how it ended and every file it read, wrote or listed.
@@ -30,21 +34,77 @@
 // "large_peak_bytes" and "large_allocations" come from cc::large_allocations (blocks of 1 MiB and more, booked to the
 // test that allocated them and credited back when freed); present only for a test that allocated one.
 // "version" changes with anything a reader must know about.
+//
+// Sampled functions, when the runner also sets NX_EXTERNAL_RUNNER_SAMPLE_HZ to a rate (per thread, in Hz):
+// clean-core's sampler (cc::rec sampling, with a sink) walks every recording thread at that rate for the whole run,
+// files each stack under the test whose pass owner (cc::rec::owner_scope) the thread was under, and the report says,
+// per test, how many samples it got and which code addresses they hit, module-relative:
+//
+//     {"modules": [{"path": "C:/b/x-test.exe", "identity": "65A1B2C3d000"}, ...],
+//      "sampling": {"hz": 200, "taken": 5120, "failed": 0},
+//      "tests": [{..., "body": [0, 4096], "samples": 31, "sampled": [[0, 4100, 5230], [1, 812]]}],
+//      "unattributed": {..., "samples": 4, "sampled": [...]}}
+//
+// "sampled" lists per module (its index first) the sorted relative addresses; a caller's frame is its return address
+// minus one, so every address lies inside the instruction that was running or calling.
+// "body" is where the test's body starts, when the build keeps code addresses for source sites.
+// A sample is a statistical witness that code ran in a test, never a proof that other code did not.
+
+/// What the sampler saw under one context: how many samples, and the distinct code addresses they hit.
+struct nx::sampled_context
+{
+    isize samples = 0;
+    /// Absolute, sorted; a caller's frame is its return address minus one.
+    cc::vector<u64> addresses;
+};
+
+/// What the report's sampler saw over a run, by context (a scheduled test's declaration, 0 for none).
+struct nx::sampled_functions
+{
+    f64 hz = 0;
+    u64 taken = 0;
+    u64 failed = 0;
+    cc::map<u64, sampled_context> by_context;
+    /// The modules mapped when the run ended, which the addresses are placed in.
+    cc::vector<cc::loaded_module> modules;
+};
 
 namespace nx
 {
 /// The variable naming the report's path; unset, nothing is recorded.
 inline constexpr char const* runner_report_variable = "NX_EXTERNAL_RUNNER_REPORT";
 
+/// The variable asking for sampled functions in the report: a rate in Hz; unset or 0, nothing is sampled.
+inline constexpr char const* runner_report_sampling_variable = "NX_EXTERNAL_RUNNER_SAMPLE_HZ";
+
 /// Turns file-access recording on and attributes each access to the running test; call once, before any test runs.
-void begin_runner_report();
+/// A positive `sample_hz` also samples every recording thread at that rate, for the report's sampled functions.
+void begin_runner_report(f64 sample_hz = 0);
 
 /// Stops recording and returns the report of `execution`.
 cc::string end_runner_report(test_schedule_execution const& execution, cc::optional<u64> run_seed);
 
 /// The report of `execution` over `accesses` and `large`; contexts are the scheduled tests' declarations, 0 for none.
+/// With `sampled`, each test also carries its sampled addresses and where its body starts.
 cc::string write_runner_report(test_schedule_execution const& execution,
                                cc::span<cc::file_access::record const> accesses,
                                cc::span<cc::large_allocations::context_stats const> large,
-                               cc::optional<u64> run_seed);
+                               cc::optional<u64> run_seed,
+                               sampled_functions const* sampled = nullptr);
 } // namespace nx
+
+namespace nx::impl
+{
+/// Notes that samples under `owner` belong to the scheduled test `slot`; a no-op unless the report samples.
+/// Also starts the report's sampler again where a test that owned the recorder stopped it.
+void note_pass_owner(u64 owner, test_declaration const* slot);
+
+/// Stops the report's sampler before the recorder goes down; the next pass under an owner starts it again.
+void pause_report_sampling();
+
+/// What the report's sampler has seen so far, or nothing when the report does not sample; stops nothing.
+[[nodiscard]] cc::optional<sampled_functions> report_samples();
+
+/// Stops the report's sampler for good and returns what it saw, forgetting it.
+cc::optional<sampled_functions> end_report_sampling();
+} // namespace nx::impl
