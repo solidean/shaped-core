@@ -43,6 +43,7 @@ Nothing keeps that under test: no seam can fail a submit, so the check was a tem
 - **The process still aborts after a loss.** Under that forced loss, the suite failed its tests normally and then exited 0xC0000409, right after `vulkan-entry.cc`'s `is_device_lost` check.
   The real crash `063051` ended the same way with no assert at all, so this path may be the commoner one.
   The crash report of the forced runs was empty, so what aborts is unknown; context teardown is the suspect, and `shutdown_no_throw` already catches a thrown loss.
-- **A timeline value signalled twice.** One real crash logged VUID-VkSubmitInfo-pSignalSemaphores-03242, signal value 807 on a timeline already at 807, on `pSignalSemaphores[1]`, which is a completion value.
+- **A timeline value signalled twice.** One real crash logged VUID-VkSubmitInfo-pSignalSemaphores-03242, signal value 807 on a timeline already at 807.
+  It was on `pSignalSemaphores[1]`, which is a completion value.
   Whether it came before the loss or after is not known, so it may be a cause or a symptom.
   The same VUID against `UINT64_MAX` in another crash is only what a lost timeline reads.
