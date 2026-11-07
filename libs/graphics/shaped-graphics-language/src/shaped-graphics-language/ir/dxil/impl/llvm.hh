@@ -242,6 +242,9 @@ public:
 
     [[nodiscard]] ll_type type_of(ll_value v) const;
     [[nodiscard]] ll_type element_of(ll_type pointer_or_array) const;
+    [[nodiscard]] bool is_structure(ll_type t) const { return _types[isize(t)].code == type_code::structure; }
+    /// A struct's name.
+    [[nodiscard]] cc::string_view name_of(ll_type structure) const;
     [[nodiscard]] isize instruction_count() const { return _instructions.size(); }
     /// How many instructions call into DXIL's operations, and how many do anything else.
     [[nodiscard]] isize call_count() const { return _call_count; }

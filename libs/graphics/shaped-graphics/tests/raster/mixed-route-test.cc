@@ -479,3 +479,113 @@ ASYNC_INVOCABLE_TEST("sg - geometry and tessellation stages of SGL's binary link
     }
 #undef SG_ROUTES
 }
+
+namespace
+{
+/// One mesh-shaded pipeline; a task pair with neither route is a stage it does not have.
+struct mesh_pipeline
+{
+    cc::string_view name;
+    route_pair task;
+    route_pair mesh;
+    route_pair pixel;
+};
+
+/// `sg`'s pipeline of the stages `mask` names native: the mesh stage, the pixel stage, then the task stage.
+cc::shared_async<sg_test::offscreen_pixels> drawn_mesh(sg::context& ctx, mesh_pipeline const& p, u32 mask)
+{
+    auto const chosen
+        = [&](route_pair const& pair, u32 bit) { return (mask & (1u << bit)) != 0 ? pair.native : pair.text; };
+    auto desc = sg::raster_pipeline_description{
+        .layout = ctx.cached.acquire_pipeline_layout(sg::pipeline_layout_description{}),
+        .fragment_shader = chosen(p.pixel, 1).value(),
+        .mesh_shader = chosen(p.mesh, 0),
+        .rasterization = {.cull = sg::cull_mode::none},
+    };
+    if (p.task.text.has_value())
+        desc.task_shader = chosen(p.task, 2);
+    desc.color_targets.push_back({.format = sg::pixel_format::rgba32_float});
+    desc.color_targets.push_back({.format = sg::pixel_format::rgba32_float});
+    auto const pipeline = ctx.uncached.create_raster_pipeline(desc);
+    co_return co_await sg_test::draw_offscreen(
+        ctx,
+        {.width = k_size, .height = k_size, .colors = {sg::pixel_format::rgba32_float, sg::pixel_format::rgba32_float}},
+        [&](sg::rendering_scope& scope)
+        {
+            scope.bind_pipeline(*pipeline);
+            scope.draw_mesh_tasks(1);
+        });
+}
+
+/// Every pairing of the pipeline's routes against all of it through DXC.
+cc::shared_async<sg_test::offscreen_pixels> compared_mesh(sg::context& ctx, mesh_pipeline const& p)
+{
+    auto const has_route = [](route_pair const& pair) { return pair.text.has_value() && pair.native.has_value(); };
+    REQUIRE(has_route(p.mesh));
+    REQUIRE(has_route(p.pixel));
+    CHECK(p.mesh.text.value().compiler.name != "sgl");
+    CHECK(p.mesh.native.value().compiler.name == "sgl");
+    if (p.task.text.has_value())
+    {
+        REQUIRE(has_route(p.task));
+        CHECK(p.task.native.value().compiler.name == "sgl");
+    }
+    auto const stages = p.task.text.has_value() ? 3 : 2;
+    auto const reference = co_await drawn_mesh(ctx, p, 0);
+    auto covered = 0;
+    for (auto y = 0; y < k_size; ++y)
+        for (auto x = 0; x < k_size; ++x)
+            covered += reference[1].rgba_float(x, y)[3] == 1.0f ? 1 : 0;
+    // two blank images would agree, so the reference has to have drawn
+    CHECK(covered > 0).context(p.name);
+    for (auto mask = u32(1); mask < (1u << stages); ++mask)
+        check_same(co_await drawn_mesh(ctx, p, mask), reference, cc::format("{}: native stages {}", p.name, mask));
+    co_return reference;
+}
+} // namespace
+
+ASYNC_INVOCABLE_TEST("sg - mesh and task stages of SGL's binary link against DXC's in every pairing and draw alike",
+                     (sg::context_handle const& ctx))
+{
+    REQUIRE(ctx != nullptr);
+    (void)sg_test::shader_fixtures();
+    if (ctx->prefers_native_dxil() || ctx->prefers_native_spirv())
+        SKIP("this context takes SGL's binary for every package, so there is no DXC route to mix with");
+    auto const takes_dxil = ctx->accepts_shader_format(sg::shader_format::dxil);
+    if (!takes_dxil && !ctx->accepts_shader_format(sg::shader_format::spirv))
+        SKIP("this context takes neither DXIL nor SPIR-V");
+    if (!ctx->supports(sg::feature::mesh_shader))
+        SKIP("this device has no mesh stage");
+    namespace text = sg::test::mixed_text::mesh_stages;
+    namespace dxil = sg::test::mixed_dxil::mesh_stages;
+    namespace spirv = sg::test::mixed_spirv::mesh_stages;
+
+    // the two routes of one entry point, by its name in all three packages
+#define SG_ROUTES(entry)                                                                                    \
+    route_pair                                                                                              \
+    {                                                                                                       \
+        .text = co_await compiled(*ctx, text::entry),                                                       \
+        .native = takes_dxil ? co_await compiled(*ctx, dxil::entry) : co_await compiled(*ctx, spirv::entry) \
+    }
+    auto const plain = SG_ROUTES(plain_ps);
+    if (!plain.text.has_value())
+        SKIP("this build has no DXC");
+
+    (void)co_await compared_mesh(*ctx, {.name = "quad", .mesh = SG_ROUTES(quad_ms), .pixel = plain});
+    auto const faced
+        = co_await compared_mesh(*ctx, {.name = "faces", .mesh = SG_ROUTES(faces_ms), .pixel = SG_ROUTES(faced_ps)});
+    // each triangle read what the mesh stage wrote for it: the first in the target's lower right, the second opposite
+    CHECK(faced[1].rgba_float(k_size - 2, k_size - 2)[2] == 40.0f);
+    CHECK(faced[1].rgba_float(1, 1)[2] == 41.0f);
+    CHECK(faced[1].rgba_float(1, 1)[0] == 1.5f);
+    (void)co_await compared_mesh(*ctx, {.name = "lines", .mesh = SG_ROUTES(lines_ms), .pixel = plain});
+    auto const split = co_await compared_mesh(
+        *ctx, {.name = "split", .task = SG_ROUTES(split_ts), .mesh = SG_ROUTES(split_ms), .pixel = plain});
+    // the two workgroups read their own steps of the payload, and its last field keeps the bottom row clear
+    CHECK(split[1].rgba_float(1, 1)[2] == 9.0f);
+    CHECK(split[1].rgba_float(k_size - 2, 1)[2] == 10.0f);
+    CHECK(split[1].rgba_float(1, k_size - 1)[3] == 0.0f);
+    (void)co_await compared_mesh(
+        *ctx, {.name = "many invocations", .task = SG_ROUTES(many_ts), .mesh = SG_ROUTES(many_ms), .pixel = plain});
+#undef SG_ROUTES
+}

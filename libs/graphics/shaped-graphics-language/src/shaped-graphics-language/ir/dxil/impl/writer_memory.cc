@@ -37,6 +37,8 @@ u32 writer::memory_of_type(type_ref value, bool is_workgroup, cc::string_view na
             continue;
         auto const array = _m.array(type, entry.leaves);
         auto const alignment = _m.bits_of(type) / 8;
+        if (is_workgroup)
+            _summary.workgroup_bytes += entry.leaves * alignment;
         entry.storage[slot] = is_workgroup
                                 ? _m.add_variable(cc::format("{}.{}", name, slot), array, k_group_shared, alignment)
                                 : _m.alloca_of(array, alignment);
@@ -60,7 +62,193 @@ void writer::declare_memory()
         if (pointer.space == storage::workgroup)
             _global_memory[g] = i32(
                 memory_of_type(pointer.element, true, _p.name_at(_p.globals[g].name_first, _p.globals[g].name_size)));
+        if (pointer.space != storage::task_payload)
+            continue;
+        auto alignment = u32(1);
+        _summary.payload_bytes = payload_layout(pointer.element, alignment);
+        _payload_type = payload_type(pointer.element);
+        // a task stage holds it in workgroup memory, and a mesh stage asks for what it was handed
+        if (_p.stage == check::stage::task)
+            _payload = _m.add_variable("sgl_payload", _payload_type, k_group_shared, alignment);
+        else
+        {
+            ll_value const args[] = {_m.constant_i32(k_dx_ops[isize(dx_op::get_mesh_payload)].number)};
+            _payload = call(dx_op::get_mesh_payload, _payload_type, args);
+        }
     }
+}
+
+ll_type writer::payload_type(type_ref t)
+{
+    auto const& info = _p.at(t);
+    auto const scalar_of = [&](type_ref scalar)
+    {
+        auto const held = scalar_type(scalar);
+        return held == _m.bool_type() ? _m.int_type() : held;
+    };
+    switch (info.kind)
+    {
+    case type_kind::vector:
+        return _m.array(scalar_of(info.element), info.count);
+    case type_kind::matrix:
+        return _m.array(scalar_of(_p.at(info.element).element), u64(info.count) * _p.at(info.element).count);
+    case type_kind::array:
+        return _m.array(payload_type(info.element), info.count);
+    case type_kind::structure:
+    {
+        auto members = cc::vector<ll_type>();
+        for (auto m = u32(0); m < info.member_count; ++m)
+            members.push_back(payload_type(_p.members[info.first_member + m].type));
+        return _m.structure(cc::format("struct.{}", _p.name_at(info.name_first, info.name_size)), members);
+    }
+    default:
+        return scalar_of(t);
+    }
+}
+
+u32 writer::payload_layout(type_ref t, u32& alignment)
+{
+    auto const& info = _p.at(t);
+    auto const element_bytes = [&](type_ref element, u32 count)
+    {
+        auto held = u32(1);
+        auto const size = payload_layout(element, held);
+        alignment = cc::max(alignment, held);
+        return size * count;
+    };
+    switch (info.kind)
+    {
+    case type_kind::vector:
+    case type_kind::array:
+    case type_kind::matrix:
+        return element_bytes(info.element, info.count);
+    case type_kind::structure:
+    {
+        auto at = u32(0);
+        auto most = u32(1);
+        for (auto m = u32(0); m < info.member_count; ++m)
+        {
+            auto held = u32(1);
+            auto const size = payload_layout(_p.members[info.first_member + m].type, held);
+            at = (at + held - 1) / held * held + size;
+            most = cc::max(most, held);
+        }
+        alignment = cc::max(alignment, most);
+        return (at + most - 1) / most * most;
+    }
+    default:
+    {
+        auto const bytes = info.kind == type_kind::bool_ ? u32(4) : u32(info.width) / 8;
+        alignment = cc::max(alignment, bytes);
+        return bytes;
+    }
+    }
+}
+
+ll_value writer::index_sum(ll_value a, ll_value b)
+{
+    auto x = u64(0);
+    auto y = u64(0);
+    if (_m.constant_bits(a, x) && _m.constant_bits(b, y))
+        return _m.constant_i32(u32(x + y));
+    return _m.binary(binary_op::add, a, b);
+}
+
+void writer::payload_chain(u32 index, instruction const& i)
+{
+    auto const operands = _p.operands_of(i);
+    auto result = place_of(value_ref(operands[0]));
+    auto type = _p.at(_p.type_of(value_ref(operands[0]))).element;
+    auto path = cc::vector<ll_value>::create_copy_of(
+        cc::span<ll_value const>(_paths.data() + result.path_first, isize(result.path_count)));
+    for (auto k = isize(1); k < operands.size(); ++k)
+    {
+        auto const value = value_ref(operands[k]);
+        auto const& info = _p.at(type);
+        if (info.kind == type_kind::structure)
+        {
+            auto const member = _p.constants[index_of(value)].low;
+            path.push_back(_m.constant_i32(member));
+            type = _p.members[info.first_member + member].type;
+            continue;
+        }
+        auto const at = leaf_at(value);
+        if (info.kind == type_kind::matrix)
+        {
+            auto const rows = _p.at(info.element).count;
+            auto known = u64(0);
+            path.push_back(_m.constant_bits(at, known) ? _m.constant_i32(u32(known) * rows)
+                                                       : _m.binary(binary_op::mul, at, _m.constant_i32(rows)));
+            result.is_column = true;
+        }
+        else if (info.kind == type_kind::vector && result.is_column)
+        {
+            path.back() = index_sum(path.back(), at);
+            result.is_column = false;
+        }
+        else
+            path.push_back(at);
+        type = info.element;
+    }
+    result.path_first = u32(_paths.size());
+    result.path_count = u32(path.size());
+    _paths.push_back_range(path);
+    _places[index] = result;
+}
+
+void writer::payload_pointers(type_ref t, cc::vector<ll_value>& path, bool is_column, cc::vector<ll_value>& out)
+{
+    auto const& info = _p.at(t);
+    auto const each = [&](u32 count, auto&& visit)
+    {
+        for (auto k = u32(0); k < count; ++k)
+        {
+            path.push_back(_m.constant_i32(k));
+            visit(k);
+            path.pop_back();
+        }
+    };
+    auto const leaf = [&]
+    {
+        auto indices = cc::vector<ll_value>();
+        indices.push_back(_m.constant_i32(0));
+        indices.push_back_range(path);
+        out.push_back(_m.element_pointer(_payload_type, _payload, indices));
+    };
+    switch (info.kind)
+    {
+    case type_kind::structure:
+        return each(info.member_count,
+                    [&](u32 m) { payload_pointers(_p.members[info.first_member + m].type, path, false, out); });
+    case type_kind::array:
+        return each(info.count, [&](u32) { payload_pointers(info.element, path, false, out); });
+    case type_kind::matrix:
+        return each(info.count * _p.at(info.element).count, [&](u32) { leaf(); });
+    case type_kind::vector:
+    {
+        if (!is_column)
+            return each(info.count, [&](u32) { leaf(); });
+        auto const first = path.back();
+        for (auto k = u32(0); k < info.count; ++k)
+        {
+            path.back() = index_sum(first, _m.constant_i32(k));
+            leaf();
+        }
+        path.back() = first;
+        return;
+    }
+    default:
+        return leaf();
+    }
+}
+
+cc::vector<ll_value> writer::payload_pointers_of(place const& p, type_ref t)
+{
+    auto path = cc::vector<ll_value>::create_copy_of(
+        cc::span<ll_value const>(_paths.data() + p.path_first, isize(p.path_count)));
+    auto out = cc::vector<ll_value>();
+    payload_pointers(t, path, p.is_column, out);
+    return out;
 }
 
 writer::place writer::place_of(value_ref pointer)
@@ -71,6 +259,8 @@ writer::place writer::place_of(value_ref pointer)
     {
         auto const index = index_of(pointer);
         auto const& g = _p.globals[index];
+        if (_p.at(g.type).space == storage::task_payload)
+            return {.kind = place::kind_t::payload, .root = index};
         switch (g.kind)
         {
         case global_kind::constants:
@@ -99,6 +289,8 @@ void writer::access_chain(u32 index, instruction const& i)
     auto const operands = _p.operands_of(i);
     auto const base = value_ref(operands[0]);
     auto result = place_of(base);
+    if (result.kind == place::kind_t::payload)
+        return payload_chain(index, i);
     auto type = _p.at(_p.type_of(base)).element;
     auto const is_memory = result.kind == place::kind_t::memory;
 
@@ -180,6 +372,19 @@ ll_value writer::memory_pointer(place const& p, u32 leaf, type_ref scalar)
 
 void writer::load_memory(place const& p, type_ref t, cc::vector<ll_value>& out)
 {
+    if (p.kind == place::kind_t::payload)
+    {
+        auto const pointers = payload_pointers_of(p, t);
+        for (auto l = u32(0); l < leaves_of(t); ++l)
+        {
+            auto const wanted = scalar_type(scalar_at(t, l));
+            auto const is_bool = wanted == _m.bool_type();
+            auto const held = is_bool ? _m.int_type() : wanted;
+            auto const loaded = _m.load(held, pointers[l], _m.bits_of(held) / 8);
+            out.push_back(is_bool ? _m.compare(predicate::i_ne, loaded, _m.constant_i32(0)) : loaded);
+        }
+        return;
+    }
     if (p.kind == place::kind_t::memory)
     {
         for (auto l = u32(0); l < leaves_of(t); ++l)
@@ -198,6 +403,18 @@ void writer::load_memory(place const& p, type_ref t, cc::vector<ll_value>& out)
 
 void writer::store_memory(place const& p, type_ref t, cc::span<ll_value const> leaves)
 {
+    if (p.kind == place::kind_t::payload)
+    {
+        auto const pointers = payload_pointers_of(p, t);
+        for (auto l = u32(0); l < leaves_of(t); ++l)
+        {
+            auto value = leaves[l];
+            if (_m.type_of(value) == _m.bool_type())
+                value = _m.cast(cast_op::zext, value, _m.int_type());
+            _m.store(pointers[l], value, _m.bits_of(_m.type_of(value)) / 8);
+        }
+        return;
+    }
     if (p.kind == place::kind_t::memory)
     {
         for (auto l = u32(0); l < leaves_of(t); ++l)

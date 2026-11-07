@@ -554,6 +554,7 @@ if(SC_BUILD_TESTS)
                 mixed_link.sgl:*
                 pixel_surface.sgl:*
                 primitive_stages.sgl:*
+                mesh_stages.sgl:*
                 diagnostic_routes.sgl:*
         )
         sc_add_shader_package(
@@ -567,6 +568,7 @@ if(SC_BUILD_TESTS)
                 mixed_link.sgl:*
                 pixel_surface.sgl:*
                 primitive_stages.sgl:*
+                mesh_stages.sgl:*
                 diagnostic_routes.sgl:*
         )
         sc_add_shader_package(
@@ -580,6 +582,7 @@ if(SC_BUILD_TESTS)
                 mixed_link.sgl:*
                 pixel_surface.sgl:*
                 primitive_stages.sgl:*
+                mesh_stages.sgl:*
                 diagnostic_routes.sgl:*
         )
 

@@ -184,10 +184,10 @@ Three lines of that table hold behaviour rather than a name:
   Patch constants are `stage_part::patch`, where DXIL's factors take their fixed rows first.
   `program::primitive` holds what such a stage states beyond its elements, and mesh's limits and topology belong beside them.
   `module_builder::begin_function` is what lets one module hold the second function, which the mesh stage does not need.
-- **Mesh and task.** `op::set_mesh_counts`, `op::write_primitive` and `op::dispatch_mesh`, which is a terminator on SPIR-V, with outputs indexed by vertex or primitive.
+- **Mesh and task.** `op::set_mesh_counts`, `op::write_primitive` and `op::dispatch_mesh`, a terminator on both targets, with outputs indexed by vertex or primitive.
   Per-primitive values are `stage_part::primitive`, packed on their own from row 0 in the mesh stage.
   The pixel stage packs them after its vertex rows, as one list.
-  A task payload is workgroup-like memory, not a stage element.
+  A task payload is one global of `storage::task_payload`, not a stage element.
 
 Clip and cull distances are no part of SGL, so `pack_signature` does not hold their rule.
 
@@ -209,7 +209,7 @@ Clip and cull distances are no part of SGL, so `pack_signature` does not hold th
 4. **The pixel surface, on both writers: done.** EMIT-238 states it, with the sampling family, 64-bit links and what a mesh stage wrote.
    Binding arrays came with it (EMIT-239), since they stopped three of these entry points and more of compute's.
 5. **Geometry and tessellation, on both writers: done.** EMIT-240 states it.
-6. **Mesh and task, on both writers**, with its corpus sweep and its pairs in the mixed-route test.
+6. **Mesh and task, on both writers: done.** EMIT-242 states it.
 
 ## Measured on the first slice
 
@@ -276,10 +276,46 @@ What the measurements changed of the design:
 - **An evaluation stage's `PSG1` states what it reads, as an input does, and a control stage's what it never writes.**
 - **`gl_PrimitiveID` is `Patch` in an evaluation stage**, as DXC writes it.
 
+## Measured on mesh and task
+
+On 2026-11-07, on the Arc B580 and over the repo's SGL:
+
+- **All 13 mesh and task entry points lower on both writers**, each past DXC's validator and `spirv-val`.
+- **The signature golden holds at no mismatch.**
+- **The mixed-route test draws every pairing of the routes**, on dx12 and vulkan, every lane within 1e-4 of DXC's pipeline.
+  Its stages are [`mesh_stages.sgl`](../../../shaped-graphics/tests/shaders/sgl_mixed/mesh_stages.sgl).
+  Those are triangles, per-primitive values and lines, of 4 pairings each, and two task pipelines of 8.
+  A wrong primitive index in lowering fails the test on both backends, and a payload vector one lane too long fails it on dx12.
+- **D3D12 links a mesh stage to a pixel stage across their different rows.**
+  What a triangle writes stands at row 0 of `PSG1` in the mesh stage and after the link in the pixel stage, and a pipeline of either route's stages created and drew.
+
+What the measurements changed of the design:
+
+- **`dispatch_mesh` is a terminator on both targets**, since CHK-485 makes it the last statement: DXIL's call is followed by the return.
+- **A payload has DXC's shape on DXIL, from either route.**
+  LLVM's struct holds a vector or a matrix as an array of scalars, and a `bool` as an `i32`, each on its scalars' natural alignment, so its size is no HLSL rule.
+  So DXIL reaches it by paths of `getelementptr`, unlike the scalar arrays of workgroup memory.
+- **`PSG1` stands only in a mesh stage that writes per primitive**, where a tessellation stage always has one.
+- **A mesh or a task stage's UAV states no `UAVs at every shader stage`**, as a compute stage's does not.
+
+What DXC does here that the native route does not:
+
+- **DXC's task stage fails on three payloads its mesh stage takes.**
+  An array of vectors and a struct in the struct end in an internal `llvm::cast` error, and a matrix is refused by its own validator.
+  SGL's route writes all three, past the validator, in the shape DXC's mesh stage reads, which a test pins.
+  So those payloads have no DXC pair to draw against.
+
 ## Not confirmed
 
 - **Whether a driver uses the dependency table.** The validator and the debug layer take a conservative one, and the cube's image on the B580 is byte for byte DXC's, but no other driver was tried.
 - **Whether every path must store every output.** A path that ends in a `discard` stores nothing, and the validator's reading of a partial write is untried.
-- **How D3D12 links a mesh stage to a pixel stage.** The rows differ by construction, and sg's mesh tests pass through DXC, but no mismatched pair was tried.
+- **What crashed Intel's Vulkan compiler.** A task pipeline through DXC's SPIR-V, with a `bool` in its payload, crashed inside `igc_default64` at pipeline creation.
+  The same pipeline with a `uint` did not.
+  The native route's SPIR-V of that payload was never reached, so whether it crashes too is unknown, and no other change was isolated.
+- **What hung a mesh draw on the B580.** A draw of two task workgroups beside a `@task(2)` stage, whose two invocations each called `dispatch_mesh`, hung until the watchdog killed it.
+  With one task workgroup of one invocation nothing hangs, but which of the two did it, and on which route and backend, was not isolated.
+  `mesh_stages.sgl` holds neither shape, and a workgroup of more than one invocation is untested on any route.
+- **A `bool` in a payload on vulkan**, and the `OpControlBarrier` ahead of a dispatch from more than one invocation, for the same reasons: no draw covers them.
+- **Native mesh and task stages with a `@view_index`, or a `@layer`.** The first is no input of a mesh stage, and the second is written but no test draws it.
 - **`-Od` and `-Zi`.** The sweep compiled at the default optimization level, with no debug info.
 - **The Agility SDK's runtime and any GPU but the B580.** The link answers come from the D3D12 runtime rather than from a driver, so they should hold, but that is inference.

@@ -73,6 +73,8 @@ constexpr u32 k_model_tessellation_evaluation = 2;
 constexpr u32 k_model_geometry = 3;
 constexpr u32 k_model_fragment = 4;
 constexpr u32 k_model_compute = 5;
+constexpr u32 k_model_task = 5364;
+constexpr u32 k_model_mesh = 5365;
 constexpr u32 k_mode_origin_upper_left = 7;
 constexpr u32 k_mode_depth_replacing = 12;
 constexpr u32 k_mode_depth_greater = 14;
@@ -95,6 +97,12 @@ constexpr u32 k_mode_output_vertices = 26;
 constexpr u32 k_mode_output_points = 27;
 constexpr u32 k_mode_output_line_strip = 28;
 constexpr u32 k_mode_output_triangle_strip = 29;
+constexpr u32 k_mode_output_lines = 5269;
+constexpr u32 k_mode_output_primitives = 5270;
+constexpr u32 k_mode_output_triangles = 5298;
+/// `PrimitiveLineIndicesEXT` and `PrimitiveTriangleIndicesEXT`.
+constexpr u32 k_primitive_line_indices = 5295;
+constexpr u32 k_primitive_triangle_indices = 5296;
 
 [[nodiscard]] constexpr bool is_factor(built_in b)
 {
@@ -118,6 +126,8 @@ u32 writer::storage_of(storage s)
         return spv::StorageBuffer;
     case storage::resource:
         return spv::UniformConstant;
+    case storage::task_payload:
+        return spv::TaskPayloadWorkgroupEXT;
     }
     return spv::FunctionStorage;
 }
@@ -333,6 +343,23 @@ void writer::write_stage_elements()
         emit(_declarations, spv::Variable, {pointer_to(spv::Input, id_of(_uint)), _invocation, spv::Input});
         emit(_annotations, spv::Decorate, {_invocation, spv::BuiltIn, k_invocation_id});
     }
+    if (_p.stage == check::stage::mesh || _p.stage == check::stage::task)
+    {
+        require(spv::MeshShadingEXT);
+        require_extension("SPV_EXT_mesh_shader");
+    }
+    if (_p.stage == check::stage::mesh)
+    {
+        auto const held = id_of(_p.primitive.primitive_indices);
+        auto const array = _bound++;
+        emit(_declarations, spv::TypeArray, {array, held, literal_id(_p.primitive.max_primitives)});
+        _primitive_lane = pointer_to(spv::Output, held);
+        _primitive_indices = _bound++;
+        emit(_declarations, spv::Variable, {pointer_to(spv::Output, array), _primitive_indices, spv::Output});
+        emit(_annotations, spv::Decorate,
+             {_primitive_indices, spv::BuiltIn,
+              _p.primitive.writes_lines ? k_primitive_line_indices : k_primitive_triangle_indices});
+    }
     for (auto i = isize(0); i < _p.stage_elements.size(); ++i)
     {
         auto const& e = _p.stage_elements[i];
@@ -383,7 +410,7 @@ void writer::write_stage_elements()
                     require(spv::MultiView);
                 if (e.system == built_in::primitive_id && !is_tessellation)
                     require(spv::Geometry);
-                if (e.system == built_in::layer)
+                if (e.system == built_in::layer && _p.stage != check::stage::mesh)
                     require(_p.stage == check::stage::pixel || _p.stage == check::stage::geometry ? spv::Geometry
                                                                                                   : spv::ShaderLayer);
             }
@@ -457,6 +484,13 @@ void writer::write_primitive_modes()
 {
     auto const mode = [&](u32 number) { emit(_modes, spv::ExecutionMode, {_function, number}); };
     auto const& shape = _p.primitive;
+    if (_p.stage == check::stage::mesh)
+    {
+        mode(shape.writes_lines ? k_mode_output_lines : k_mode_output_triangles);
+        emit(_modes, spv::ExecutionMode, {_function, k_mode_output_vertices, shape.max_vertices});
+        emit(_modes, spv::ExecutionMode, {_function, k_mode_output_primitives, shape.max_primitives});
+        return;
+    }
     if (_p.stage == check::stage::geometry)
     {
         emit(_modes, spv::ExecutionMode, {_function, k_mode_output_vertices, shape.max_vertices});
@@ -493,6 +527,8 @@ void writer::write_entry()
             interface.push_back(_elements + u32(i));
     if (_invocation != 0)
         interface.push_back(_invocation);
+    if (_primitive_indices != 0)
+        interface.push_back(_primitive_indices);
     for (auto i = isize(0); i < _p.globals.size(); ++i)
         interface.push_back(_globals + u32(i));
 
@@ -513,6 +549,12 @@ void writer::write_entry()
         break;
     case check::stage::tessellation_evaluation:
         model = k_model_tessellation_evaluation;
+        break;
+    case check::stage::task:
+        model = k_model_task;
+        break;
+    case check::stage::mesh:
+        model = k_model_mesh;
         break;
     default:
         break;
@@ -536,9 +578,13 @@ void writer::write_entry()
                 emit(_modes, spv::ExecutionMode, {_function, k_mode_depth_less});
         }
     }
-    else if (model == k_model_compute)
+    else if (model == k_model_compute || model == k_model_task || model == k_model_mesh)
+    {
         emit(_modes, spv::ExecutionMode,
              {_function, k_mode_local_size, u32(_p.workgroup[0]), u32(_p.workgroup[1]), u32(_p.workgroup[2])});
+        if (model == k_model_mesh)
+            write_primitive_modes();
+    }
     else if (model != k_model_vertex)
         write_primitive_modes();
     name(_function, _p.entry_name);

@@ -103,6 +103,8 @@ constexpr cc::string_view k_names[] = {
     "discard",
     "emit_vertex",
     "end_strip",
+    "set_mesh_counts",
+    "write_primitive",
     "combine_sampler",
     "sample_lod",
     "sample_implicit",
@@ -123,6 +125,7 @@ constexpr cc::string_view k_names[] = {
     "branch",
     "branch_conditional",
     "switch",
+    "dispatch_mesh",
     "return",
     "unreachable",
 };
@@ -251,7 +254,7 @@ sgl::ir::operand sgl::ir::operand_role(op code, isize at)
 
 bool sgl::ir::has_effect(op code)
 {
-    if (u16(code) >= u16(op::atomic_load) && u16(code) <= u16(op::end_strip))
+    if (u16(code) >= u16(op::atomic_load) && u16(code) <= u16(op::write_primitive))
         return true;
     if (u16(code) >= u16(op::branch))
         return true;

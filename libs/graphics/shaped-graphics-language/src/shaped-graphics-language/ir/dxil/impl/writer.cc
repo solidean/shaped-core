@@ -45,6 +45,8 @@ enum class rule_kind : u8
     barrier,
     discard,
     stream,
+    set_mesh_counts,
+    write_primitive,
     derivative,
     texture,
     image_size,
@@ -155,6 +157,8 @@ constexpr op_rule k_rules[] = {
     {op::discard, rule_kind::discard},
     {op::emit_vertex, rule_kind::stream, u8(dx_op::emit_stream)},
     {op::end_strip, rule_kind::stream, u8(dx_op::cut_stream)},
+    {op::set_mesh_counts, rule_kind::set_mesh_counts},
+    {op::write_primitive, rule_kind::write_primitive},
     {op::combine_sampler, rule_kind::texture},
     {op::sample_lod, rule_kind::texture},
     {op::sample_implicit, rule_kind::texture},
@@ -298,6 +302,14 @@ void writer::terminator(instruction const& i)
         }
         return _m.switch_on(leaf_at(value_ref(operands[0])), _blocks[operands[1]], cases);
     }
+    case op::dispatch_mesh:
+    {
+        ll_value const args[]
+            = {_m.constant_i32(k_dx_ops[isize(dx_op::dispatch_mesh)].number), leaf_at(value_ref(operands[0])),
+               leaf_at(value_ref(operands[1])), leaf_at(value_ref(operands[2])), _payload};
+        (void)call(dx_op::dispatch_mesh, _payload_type, args);
+        return _m.return_void();
+    }
     case op::return_:
         return _m.return_void();
     default:
@@ -378,6 +390,10 @@ void writer::operation(u32 index)
         (void)call(dx, _m.void_type(), args);
         return;
     }
+    case rule_kind::set_mesh_counts:
+        return set_mesh_counts(i);
+    case rule_kind::write_primitive:
+        return write_primitive(i);
     case rule_kind::derivative:
         return derivative_lanes(index, i);
     case rule_kind::stage_store:

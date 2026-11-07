@@ -475,8 +475,18 @@ fn main_ps(p: pixel_input) -> target_ {
   `ISG1`, `OSG1` and `PSG1` list elements by register and then by the offset of the name, so a factor that declares first leads a link standing before it in its row.
   EMIT-237's table reaches across patch constants too: every input to every patch constant in a control stage, and every patch constant to every output in an evaluation stage.
 * **EMIT-241** A native route has no `print` of its own: it lowers what LEGAL-70 wrote, so sg reads a binary's records as it reads a text's, and one pipeline may mix the routes.
-  `DXIL` states `UAVs at every shader stage` wherever a stage that is neither pixel nor compute declares a UAV.
+  `DXIL` states `UAVs at every shader stage` wherever a vertex, geometry or tessellation stage declares a UAV.
   The prologue of EMIT-229 is `unsupported` so far, so a compute stage with workgroup memory lowers under no robustness profile.
+* **EMIT-242** A mesh or task entry point of a native route writes what its text writes, in its target's own operations, so it links against the text route's in either direction.
+  `set_counts` is `OpSetMeshOutputsEXT` or `dx.op.setMeshOutputCounts`.
+  `vertex` and `primitive` store each element at their index, through `storeVertexOutput` and `storePrimitiveOutput` on DXIL and an access chain on SPIR-V.
+  `triangle` and `line` are `dx.op.emitIndices`, a line's third index zero, or a store into `PrimitiveTriangleIndicesEXT` or `PrimitiveLineIndicesEXT`, an array no element holds.
+  Per-primitive elements are `PerPrimitiveEXT` on SPIR-V, and stand in `PSG1` on DXIL, a part it holds only where it writes any.
+  A task stage stores its payload whole in one global, and `dispatch_mesh` ends the stage on both targets: `OpEmitMeshTasksEXT`, or `dx.op.dispatchMesh` and a return.
+  A mesh stage reads the payload through that place, so reading an element of an array copies no array.
+  On SPIR-V the payload is `TaskPayloadWorkgroupEXT` of the struct itself, and a workgroup of more than one invocation has an `OpControlBarrier` ahead of the dispatch, as DXC writes.
+  On DXIL it is a struct of the shape DXC gives it, whatever the route: a vector or a matrix is an array of scalars, a `bool` an `i32`, and each lies at its natural alignment with no 16-byte rule.
+  So `float` then `float4` takes 20 bytes, the size the entry's metadata and `PSV0` both state, and a mesh stage reads it with `getMeshPayload`.
 
 ## Lines
 
