@@ -70,6 +70,11 @@ def add_parser(sub: argparse._SubParsersAction) -> argparse.ArgumentParser:
                    help="Let a heavy test narrow to its smallest case, as `check` asks of every preset but its default "
                         "one: tests read it through nx::is_smoke(). Forwarded to the runner as --smoke; "
                         "--thorough wins over it.")
+    p.add_argument("--shard", metavar="K/N",
+                   help="Run only shard K of N, 0-based: each test lands in one shard by a hash of its name, the "
+                        "same on every run, and an aliased driver's children (a backend's context, say) are placed "
+                        "one by one. Forwarded to the runner as --shard; the shards partition the run, which is "
+                        "what a bisection needs.")
     p.add_argument("--sample", action="store_true",
                    help="Profile the run: each binary samples its threads until the run ends, prints where the busy "
                         "time went, and keeps the recording as <binary>.ccrec beside it. "
@@ -120,6 +125,9 @@ def run(args: argparse.Namespace, ctx: Context) -> None:
 
     if args.seed is not None:
         runner_args = ["--seed", str(args.seed), *runner_args]
+
+    if args.shard is not None:
+        runner_args = ["--shard", args.shard, *runner_args]
 
     # The runner's own default is 60 s, which the default timeout would kill it before reaching.
     # Without --watchdog each binary gets half of ITS timeout, since a binary may declare a longer one than the default.

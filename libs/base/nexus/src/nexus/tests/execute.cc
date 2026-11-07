@@ -3324,6 +3324,11 @@ cc::shared_async<nx::invocation_result> nx::impl::async_invoke_tests_impl(cc::st
                 continue;
         }
 
+        // --shard: a driver that runs in every shard dispatches only this shard's children
+        if (parent->instance.shards_children
+            && !config.in_shard(cc::format("{} / {} / {}", parent->instance.declaration->name, name, decl->name)))
+            continue;
+
         if (is_declaration_active(decl))
         {
             report_invocation_cycle(decl);
