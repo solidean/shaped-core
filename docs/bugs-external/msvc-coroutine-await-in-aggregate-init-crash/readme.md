@@ -61,7 +61,7 @@ The `clang++` line is the control.
 
 Nothing in shaped-core may `co_await` inside the initializer of an aggregate or array with a destructor.
 Await into a named local first, as `NAMED` does.
-`mixed-route-test.cc` does that and names this directory, at both places it needs to.
+`mixed-route-test.cc` does that and names this directory, at each place it needs to.
 
 `raster-test.cc` crashed the same way on CI's arm64-hosted 14.44, at a `create_texture_2d` call with a designated-initializer argument and no `co_await` inside it.
 Moving that call out of the coroutine stopped it.
@@ -71,4 +71,4 @@ This repro does not explain that crash, so it may be another bug.
 
 Run `run.py` when CI's toolsets move.
 19.52 was a preview when this was written, and "compiles" is all that was measured: nobody has run the code it generates.
-Retire the rule and the two comments once every MSVC we build with reports `ok`.
+Retire the rule and the test's comments once every MSVC we build with reports `ok`.
