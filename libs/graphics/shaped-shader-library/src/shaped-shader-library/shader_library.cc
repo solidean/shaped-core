@@ -618,6 +618,11 @@ void slib::shader_library::_compile_text(compile_outcome& outcome,
         if (_logged_warnings.lock([&](cc::set<cc::string>& logged)
                                   { return logged.insert(cc::format("{}\n{}", name, w)); }))
             CC_LOG_WARNING("SGL warns of '{}' {}: {}", name, entry_point, w);
+    // A preferred native route that fell back is no fault, but nobody should run on DXC without being able to tell.
+    if (auto const& gap = preprocessed.value().native_gap; !gap.empty())
+        if (_logged_warnings.lock([&](cc::set<cc::string>& logged)
+                                  { return logged.insert(cc::format("{}\n{}\nnative: {}", name, entry_point, gap)); }))
+            CC_LOG_INFO("SGL compiles '{}' {} through DXC: it holds {}", name, entry_point, gap);
 
     for (auto& path : preprocessed.value().used_modules)
     {

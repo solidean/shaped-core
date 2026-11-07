@@ -21,7 +21,7 @@ namespace
 {
 /// The layout revision `encode_preprocessed` writes; bump it with any change to what it writes.
 /// sg's codec version rides in the persistent key beside it, since a stated shader and its bindings are written in that codec.
-constexpr u32 k_codec_version = 4;
+constexpr u32 k_codec_version = 5;
 
 /// How many results the in-memory tier holds before it starts over; each is a few dozen kilobytes of text.
 constexpr isize k_memory_capacity = 512;
@@ -186,6 +186,7 @@ cc::vector<byte> slib::impl::encode_preprocessed(preprocessed_source const& sour
     put_u64(out, u64(source.dxc_args.size()));
     for (auto const& a : source.dxc_args)
         put_string(out, a);
+    put_string(out, source.native_gap);
 
     put_u64(out, u64(source.layouts.size()));
     for (auto const& l : source.layouts)
@@ -240,6 +241,7 @@ cc::optional<slib::preprocessed_source> slib::impl::decode_preprocessed(cc::span
     auto const arg_count = r.get_count(8);
     for (auto i = isize(0); r.ok && i < arg_count; ++i)
         result.dxc_args.push_back(r.get_string());
+    result.native_gap = r.get_string();
 
     auto const layout_count = r.get_count(24);
     for (auto i = isize(0); r.ok && i < layout_count; ++i)

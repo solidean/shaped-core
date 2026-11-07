@@ -85,6 +85,10 @@ struct slib::preprocessed_source
     /// What the text asks of DXC beyond what its edge always hands it, which the compile of this text appends.
     /// Only SGL fills it: `-Gis` for an entry point whose `@float` keeps the special values (EMIT-185).
     cc::vector<cc::string> dxc_args;
+    /// Why a context that prefers SGL's own binary gets the text through DXC for this entry point instead: what it holds
+    /// that the native route does not lower yet. Empty where the binary is SGL's, and where nobody asked for it.
+    /// Only SGL fills it, and a shader_library logs each once.
+    cc::string native_gap;
 };
 
 /// A value one compile gives an option of an SGL source, by the option's name, spelled as SGL spells it: `16`, `true`, `.rgba16_float`.
