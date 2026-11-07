@@ -4,6 +4,7 @@
 #include <clean-core/common/utility.hh> // cc::min, cc::move
 #include <clean-core/container/span.hh>
 #include <clean-core/container/vector.hh>
+#include <clean-core/platform/file_access.hh>
 #include <clean-core/string/format.hh>
 #include <clean-core/string/string.hh>
 #include <nexus/source_root.hh>
@@ -40,8 +41,12 @@ cc::vector<corpus_file> corpus_files()
     auto const root = fs::path(nx::source_path(SCL_CORPUS_DIR).c_str_materialize());
 
     auto ec = std::error_code();
+    // Listed past clean-core, so declared for file-access recording (cc::file_access); the files are read through clean-core.
+    cc::file_access::note_list(root.string().c_str());
     for (auto const& e : fs::recursive_directory_iterator(root, ec))
     {
+        if (e.is_directory())
+            cc::file_access::note_list(e.path().string().c_str());
         if (!e.is_regular_file() || e.path().extension() != ".md")
             continue;
         auto const rel = fs::relative(e.path(), root, ec).generic_string();

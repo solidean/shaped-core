@@ -8,6 +8,11 @@
 
 #include <type_traits>
 
+namespace cc::file_access::impl
+{
+struct counters; // clean-core/platform/file_access.hh
+}
+
 // =========================================================================================================
 // File stream adapters
 // =========================================================================================================
@@ -64,7 +69,8 @@ private:
     cc::result<i64> impl_seek_and_fill(byte*& curr, byte*& end, i64 target);
 
     cc::impl::native_file _file;
-    i64 _buffer_offset = 0; // absolute file offset of _buffer[0]
+    cc::file_access::impl::counters* _access = nullptr; // where its bytes count while access recording is on
+    i64 _buffer_offset = 0;                             // absolute file offset of _buffer[0]
     byte _buffer[k_buffer_size];
 };
 
@@ -118,7 +124,8 @@ private:
     cc::result<i64> impl_reposition(byte*& curr, byte*& end, i64 target);
 
     cc::impl::native_file _file;
-    i64 _buffer_offset = 0; // absolute file offset of _buffer[0]
+    cc::file_access::impl::counters* _access = nullptr; // where its bytes count while access recording is on
+    i64 _buffer_offset = 0;                             // absolute file offset of _buffer[0]
     byte _buffer[k_buffer_size];
 };
 
@@ -163,6 +170,7 @@ private:
     cc::result<i64> impl_seek_and_fill(byte*& curr, byte*& end, byte*& write_end, i64 target);
 
     cc::impl::native_file _file;
-    i64 _buffer_offset = 0; // absolute file offset of _buffer[0]
+    cc::file_access::impl::counters* _access = nullptr; // where its bytes count while access recording is on
+    i64 _buffer_offset = 0;                             // absolute file offset of _buffer[0]
     byte _buffer[k_buffer_size];
 };

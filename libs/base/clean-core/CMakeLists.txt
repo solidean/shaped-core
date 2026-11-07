@@ -32,6 +32,7 @@ add_library(clean-core
     src/clean-core/platform/native.cc
     src/clean-core/platform/console.cc
     src/clean-core/platform/environment.cc
+    src/clean-core/platform/file_access.cc
     src/clean-core/platform/file_path.cc
     src/clean-core/platform/stack_capture.cc
     src/clean-core/platform/stacktrace.cc
@@ -51,6 +52,7 @@ add_library(clean-core
     src/clean-core/platform/network_devices.cc
     src/clean-core/platform/resource_snapshot.cc
     src/clean-core/memory/allocation.cc
+    src/clean-core/memory/large_allocations.cc
     src/clean-core/memory/node_allocation.cc
     src/clean-core/error/result.cc
     src/clean-core/record/domain.cc
@@ -178,6 +180,7 @@ target_sources(clean-core
     src/clean-core/math/wide_arith.hh
 
     src/clean-core/memory/allocation.hh
+    src/clean-core/memory/large_allocations.hh
     src/clean-core/memory/node_allocation.hh
     src/clean-core/memory/unique_ptr.hh
     src/clean-core/memory/impl/object_lifetime_util.hh
@@ -570,6 +573,7 @@ if(SC_BUILD_TESTS)
 
         tests/platform/console-test.cc
         tests/platform/environment-test.cc
+        tests/platform/file_access-test.cc
         tests/platform/file_path-test.cc
         tests/platform/native-test.cc
         tests/platform/stack-capture-test.cc
@@ -599,6 +603,7 @@ if(SC_BUILD_TESTS)
         tests/math/wide_arith-test.cc
 
         tests/memory/allocation-test.cc
+        tests/memory/large_allocations-test.cc
         tests/memory/node_allocation-test.cc
         tests/memory/node_allocation-default-test.cc
         tests/memory/node_allocation-patterns-test.cc

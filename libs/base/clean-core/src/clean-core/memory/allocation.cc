@@ -3,6 +3,7 @@
 #include <clean-core/common/assertf.hh>
 #include <clean-core/common/macros.hh>
 #include <clean-core/common/utility.hh>
+#include <clean-core/memory/large_allocations.hh>
 #include <clean-core/thread/atomic.hh>
 
 #include <cstdlib>
@@ -46,8 +47,11 @@ isize system_try_allocate_bytes(byte** out_ptr, isize min_bytes, isize max_bytes
     *out_ptr = result == 0 ? static_cast<byte*>(raw_ptr) : nullptr;
 #endif
 
-    // Return actual allocated size, or -1 on failure
-    return *out_ptr != nullptr ? bytes_to_allocate : -1;
+    if (*out_ptr == nullptr)
+        return -1;
+    // One compare on the small path; see large_allocations.hh.
+    cc::large_allocations::impl::on_allocate(*out_ptr, bytes_to_allocate);
+    return bytes_to_allocate;
 }
 
 isize system_allocate_bytes(byte** out_ptr, isize min_bytes, isize max_bytes, isize alignment, void* userdata)
@@ -60,9 +64,10 @@ isize system_allocate_bytes(byte** out_ptr, isize min_bytes, isize max_bytes, is
 
 void system_deallocate_bytes(byte* p, isize bytes, isize alignment, void* userdata)
 {
-    CC_UNUSED(bytes);
     CC_UNUSED(alignment);
     CC_UNUSED(userdata);
+
+    cc::large_allocations::impl::on_deallocate(p, bytes);
 
     // Contract: size and alignment are provided for resources that need them (e.g., pooling),
     //           but standard malloc/free don't require them for deallocation.
