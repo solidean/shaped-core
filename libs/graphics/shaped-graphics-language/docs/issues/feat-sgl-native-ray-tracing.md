@@ -23,7 +23,7 @@ On 2026-11-07, on the Arc B580 and over the repo's SGL, DXC 1.9.2602:
   A `select` must not read `undef`, so `flatten_branches` takes the other way's value.
   An operation declared and left with no call is refused, so `remove_unused` drops its declaration.
 
-Not done here: a query with opacity micromaps, and `@first_instance`-style reads nothing asks for, such as a query's own flags or t_min.
+Not done here: reads nothing asks for, such as a query's own flags or t_min.
 No GPU but the B580 ran this, and the Agility runtime did not.
 
 ## What a pipeline stage is, measured
@@ -99,6 +99,23 @@ What that found:
 - **More than 8 UAVs is a flag** of the module and of `SFI0`, which `RDAT`'s function row leaves out.
 - **`RDAT` lists resources by class**, constant buffers and samplers first.
 - **A dead block of an earlier `simplify` round** could point past what a later round kept, which only a shader this large reached.
+
+## Opacity micromaps, compile-verified only
+
+The B580 has no micromaps, so no draw has run this.
+It is held by DXC's output under `--device-feature opacity_micromap`, on 2026-11-07, and by both validators.
+
+- **DXIL needs `dx.op.allocateRayQuery2` (258)**, `(constRayFlags, 1)`, which SM 6.6 refuses, so the module is SM 6.9 and `dx.version` 1.9.
+  At 6.7 and above a module with UAVs states resources-may-not-alias, bit 33 of the shader flags, which `Flags must match usage` otherwise refuses.
+  `RDAT`'s row names 6.9 in a library that holds a query.
+- **SPIR-V needs `RayTracingOpacityMicromapEXT` and `SPV_EXT_opacity_micromap`.** A trace's flags carry `force_omm_2_state`, and no call changes.
+- **`program::sees_micromaps` carries it**, so a pipeline stage's trace on such a device states it too.
+- **A test fails if this regresses:** it requires the operation, the model and the capability on a compile that also forces 2 states.
+- **The skip in `mixed-route-query-test.cc` is gone**, so that test runs on a device with micromaps, which none here is.
+
+**What a device feature pushes into a gap.** The sweep with `opacity_micromap`, `shader_execution_reordering` and `vertex_pipeline_stores` lowers 667 entries, and neither validator refuses one.
+Reordering alone adds a gap, on both writers: `the type hit_object`, `the builtin reorder_thread_by_hint`, and `a resource used as a value` from a reordering trace.
+A required-native package that traces with `reorder` or a hit object is an error on such a device, and only there.
 
 **Left.**
 

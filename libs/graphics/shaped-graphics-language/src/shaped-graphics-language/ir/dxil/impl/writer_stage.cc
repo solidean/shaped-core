@@ -94,6 +94,10 @@ constexpr u32 k_modes[] = {0, 2, 3, 6, 4, 5, 7, 1};
 constexpr u32 k_model_major = 6;
 constexpr u32 k_model_minor = 6;
 constexpr u32 k_model_minor_start_location = 8;
+/// `allocateRayQuery2`, which a query that sees micromaps takes.
+constexpr u32 k_model_minor_micromaps = 9;
+/// Shader model 6.7 on, a module with UAVs states that resources may not alias.
+constexpr u64 k_flag_res_may_not_alias = 1ull << 33;
 constexpr u32 k_tag_shader_flags = 0;
 constexpr u32 k_tag_usage_mask = 3;
 constexpr u32 k_tag_geometry_state = 1;
@@ -697,7 +701,9 @@ void writer::write_entry_metadata()
     if (rule == nullptr)
         return unsupported(cc::format("a {} stage on DXIL", check::stage_name(_p.stage)));
     auto const is_compute = _p.stage == check::stage::compute;
-    auto const model_minor = _uses.start_location ? k_model_minor_start_location : k_model_minor;
+    auto const model_minor = _p.sees_micromaps    ? k_model_minor_micromaps
+                           : _uses.start_location ? k_model_minor_start_location
+                                                  : k_model_minor;
 
     u32 const version[] = {_m.md_i32(1), _m.md_i32(model_minor)};
     u32 const validator[] = {_m.md_i32(1), _m.md_i32(9)};
@@ -710,6 +716,9 @@ void writer::write_entry_metadata()
         for (auto const& e : _summary.signature)
             _uses.layer_output = _uses.layer_output || (e.table == signature_table::output && e.system_value == 4);
     auto metadata_flags = k_native_low_precision;
+    for (auto const& b : _bindings)
+        if (b.cls == 1 && model_minor >= 7)
+            metadata_flags |= k_flag_res_may_not_alias;
     auto feature_flags = u64(0);
     for (auto const& f : k_features)
         if (_uses.*f.used)
@@ -762,7 +771,7 @@ void writer::write_entry_metadata()
         _summary.shader_kind = rule->kind;
         if (_p.stage == check::stage::intersection)
             _summary.attribute_bytes = 0;
-        _summary.min_shader_minor = _uses.ray_query ? 5 : 3;
+        _summary.min_shader_minor = _p.sees_micromaps && _uses.ray_query ? 9 : _uses.ray_query ? 5 : 3;
         _summary.metadata_flags = metadata_flags;
         _summary.feature_flags = feature_flags;
         _summary.program_kind = k_library_kind;

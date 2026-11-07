@@ -1,10 +1,12 @@
 #include <clean-core/algorithm/sort.hh>
+#include <clean-core/common/macros.hh>
 #include <clean-core/platform/environment.hh>
 #include <clean-core/record/log.hh>
 #include <clean-core/streams/file_stream.hh>
 #include <clean-core/string/format.hh>
 #include <nexus/source_root.hh>
 #include <nexus/test.hh>
+#include <nexus/tests/thorough.hh>
 #include <shaped-graphics-language/driver/compile_to_text.hh>
 #include <shaped-shader-compiler-dxc/compiler.hh>
 
@@ -18,6 +20,12 @@ using namespace cc::primitive_defines;
 
 namespace
 {
+#ifdef CC_OS_WINDOWS
+constexpr bool k_has_validator = true;
+#else
+constexpr bool k_has_validator = false;
+#endif
+
 [[nodiscard]] cc::string read_file(cc::string_view path)
 {
     auto file = cc::file_read_stream_adapter::open(path);
@@ -81,6 +89,8 @@ struct module_library
 
 TEST("slib - the viewer's tracer and the traced drawings lower on both writers, each past its validator")
 {
+    if constexpr (!k_has_validator)
+        SKIP("DXC's validator is dxil.dll, which only Windows has");
     auto compiler = ssc::dxc::compiler::create();
     if (compiler.has_error())
         SKIP("no DXC");
@@ -151,4 +161,141 @@ TEST("slib - the viewer's tracer and the traced drawings lower on both writers, 
     CC_LOG_INFO("the viewer's and the drawings' shaders: {} through DXIL, {} through SPIR-V", dxil, spirv);
     CHECK(is_tracer_native);
     CHECK(is_slug_native);
+}
+
+// EMIT-184: on a device with micromaps every query takes `allocateRayQuery2` at Shader Model 6.9, and SPIR-V states the
+// capability DXC's own text leaves out.
+// A device with them cannot be asked for here, so this holds what no draw on such a device has.
+TEST("slib - a query on a device with opacity micromaps says so on both routes, past both validators")
+{
+    if constexpr (!k_has_validator)
+        SKIP("DXC's validator is dxil.dll, which only Windows has");
+    auto compiler = ssc::dxc::compiler::create();
+    if (compiler.has_error())
+        SKIP("no DXC");
+    constexpr cc::string_view source
+        = "require ray_query\n"
+          "\n"
+          "binding scene:\n"
+          "    world: acceleration_structure[.triangles]\n"
+          "    hits: mut buffer[float4]\n"
+          "\n"
+          "@compute(1) fun traced(@thread_id id: int3){scene}:\n"
+          "    let r = ray(origin = pos3(0.0, 0.0, -1.0), direction = vec3(0.0, 0.0, 1.0))\n"
+          "    let h = scene.world.trace(r, flags = ray_flags.force_omm_2_state)\n"
+          "    scene.hits[id.x] = float4(h.t, 0.0, 0.0, 0.0)\n";
+    auto const features = sgl::check::feature_set(sgl::check::feature::opacity_micromap);
+    auto const on_dx12 = sgl::compile_to_text({.source = source,
+                                               .entry_point = "traced",
+                                               .target = sgl::emit::target::hlsl_dx12,
+                                               .device_features = features,
+                                               .native = sgl::emit::native_route::require});
+    REQUIRE(on_dx12.has_value());
+    auto const refused = compiler.value().validate(on_dx12.value().dxil);
+    CHECK(!refused.has_value()).dump("validator", refused.value_or(cc::string()));
+    auto const text = compiler.value().disassemble(on_dx12.value().dxil);
+    REQUIRE(text.has_value());
+    CHECK(text.value().contains("@dx.op.allocateRayQuery2(i32 258, i32 1536, i32 1)"));
+    CHECK(text.value().contains("!\"cs\", i32 6, i32 9"));
+
+    auto const on_vulkan = sgl::compile_to_text({.source = source,
+                                                 .entry_point = "traced",
+                                                 .target = sgl::emit::target::hlsl_vulkan,
+                                                 .device_features = features,
+                                                 .native = sgl::emit::native_route::require});
+    REQUIRE(on_vulkan.has_value());
+    auto const& words = on_vulkan.value().spirv;
+    auto const states = [&](u32 opcode, u32 operand)
+    {
+        for (auto at = isize(5); at < words.size(); at += words[at] >> 16)
+            if ((words[at] & 0xffffu) == opcode && (words[at] >> 16) >= 2 && words[at + 1] == operand)
+                return true;
+        return false;
+    };
+    constexpr u32 k_op_capability = 17;
+    constexpr u32 k_opacity_micromap = 5381;
+    CHECK(states(k_op_capability, k_opacity_micromap));
+    if (std::system("spirv-val --version > NUL 2>&1") != 0)
+        return;
+    auto const module_path
+        = cc::format("{}/sgl-micromap-test.spv", std::filesystem::temp_directory_path().generic_string().c_str());
+    write_words(module_path, words);
+    auto const command = cc::format("spirv-val --target-env vulkan1.3 --scalar-block-layout \"{}\"", module_path);
+    auto command_text = cc::vector<char>::create_copy_of(cc::span<char const>(command.data(), command.size()));
+    command_text.push_back('\0');
+    CHECK(std::system(command_text.data()) == 0);
+}
+
+// A required-native package hard-errors on a gap, and a feature the test machine lacks hides one.
+// So every fixture is compiled as a device with these would, and what falls to a gap is named here to be seen.
+TEST("slib - a device's micromaps and reordering leave only the named gaps on either route")
+{
+    if constexpr (!k_has_validator)
+        SKIP("DXC's validator is dxil.dll, which only Windows has");
+    auto compiler = ssc::dxc::compiler::create();
+    if (compiler.has_error())
+        SKIP("no DXC");
+    auto const features = sgl::check::feature_set(sgl::check::feature::opacity_micromap)
+                        | sgl::check::feature::shader_execution_reordering | sgl::check::feature::vertex_pipeline_stores;
+    auto library = module_library();
+    library.read();
+    auto files = files_under(nx::source_path("libs/graphics/shaped-graphics/tests/shaders/sgl"));
+    files.push_back_range(files_under(nx::source_path("libs/graphics/shaped-graphics/tests/shaders/sgl_mixed")));
+    files.push_back_range(files_under(nx::source_path("libs/graphics/shaped-rendering/shaders")));
+    files.push_back_range(real_shaders());
+    auto const has_spirv_val = std::system("spirv-val --version > NUL 2>&1") == 0;
+    auto const module_path
+        = cc::format("{}/sgl-device-features-test.spv", std::filesystem::temp_directory_path().generic_string().c_str());
+    auto const command = cc::format("spirv-val --target-env vulkan1.3 --scalar-block-layout \"{}\"", module_path);
+    auto command_text = cc::vector<char>::create_copy_of(cc::span<char const>(command.data(), command.size()));
+    command_text.push_back('\0');
+    auto refused_count = 0;
+    auto lowered = 0;
+    for (auto const& file : files)
+    {
+        auto const source = read_file(file);
+        auto const all = sgl::compile_all_to_text(
+            {.source = source, .source_name = file, .library = library.files, .targets = {sgl::emit::target::hlsl_dx12}});
+        if (all.has_error())
+            continue;
+        for (auto const& entry : all.value())
+            for (auto const target : {sgl::emit::target::hlsl_dx12, sgl::emit::target::hlsl_vulkan})
+            {
+                auto const e = sgl::compile_to_text({.source = source,
+                                                     .source_name = file,
+                                                     .library = library.files,
+                                                     .entry_point = entry.entry_point,
+                                                     .target = target,
+                                                     .diagnostics = true,
+                                                     .device_features = features,
+                                                     .native = sgl::emit::native_route::prefer});
+                if (!e.has_value())
+                    continue;
+                if (!e.value().native_gap.empty())
+                {
+                    CC_LOG_INFO("device gap {}: {}", target == sgl::emit::target::hlsl_dx12 ? "dxil" : "spirv",
+                                e.value().native_gap);
+                    continue;
+                }
+                ++lowered;
+                if (target != sgl::emit::target::hlsl_dx12)
+                {
+                    // a process per module, so a default run validates every eighth and --thorough takes them all
+                    if (has_spirv_val && (nx::is_thorough() || lowered % 8 == 0))
+                    {
+                        write_words(module_path, e.value().spirv);
+                        CHECK(std::system(command_text.data()) == 0).dump("file", file).dump("entry", entry.entry_point);
+                    }
+                    continue;
+                }
+                auto const refused = compiler.value().validate(e.value().dxil);
+                refused_count += refused.has_value() ? 1 : 0;
+                CHECK(!refused.has_value())
+                    .dump("file", file)
+                    .dump("entry", entry.entry_point)
+                    .dump("validator", refused.value_or(cc::string()));
+            }
+    }
+    CC_LOG_INFO("device features: {} lowered, {} refused", lowered, refused_count);
+    CHECK(lowered > 300);
 }

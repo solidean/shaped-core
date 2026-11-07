@@ -582,6 +582,8 @@ So `{float3; float}` is written with `packed_float3`: the `float` is at byte 12 
   The entry point then states the feature, which no program names, and is compiled at Shader Model 6.9.
   vulkan sees micromaps without the flag, but DXC takes a ray forced to 2 states only beside it, and the entry point declares `SPV_EXT_opacity_micromap`'s capability, which DXC leaves out.
   `ray_flags.force_omm_2_state` is in a `RayQuery`'s template only there, since only 6.9 names it; elsewhere the template leaves it out, and the trace's flags still carry it.
+  A native route states the same: `SPV_EXT_opacity_micromap`'s capability on SPIR-V, whose traces see micromaps with no flag of their own.
+  On DXIL `dx.op.allocateRayQuery2` with the flag that allows them, at Shader Model 6.9, a library's function row included.
 * **EMIT-185** A text keeps its entry point's float guarantee (CHK-435), or the compile refuses with `float-guarantee-not-kept`, naming the function that asked.
   `hlsl-dx12` keeps every level: DXC compiles from `.specials` on with `-Gis`, and at `.ieee` with `-denorm preserve` too.
   `msl` keeps up to `.precise`, since Metal's safe math keeps the special values and the order, and is not known to keep denormals.

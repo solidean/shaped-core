@@ -9,7 +9,7 @@ using namespace sgl::ir::impl;
 
 namespace
 {
-/// The flag no query of a shader that states no micromaps may ask for (EMIT-184).
+/// The flag only a query that sees micromaps may state as a constant (EMIT-184).
 constexpr u32 k_force_omm_2_state = 1024;
 
 /// Parallel to `builtins::query_read`.
@@ -30,13 +30,9 @@ constexpr ray_query_value k_read_values[] = {
 
 value_ref lowering::begin_ray_query(local_id id)
 {
-    if (_e.features.has(check::feature::opacity_micromap))
-    {
-        unsupported("a query of an entry point that states opacity micromaps");
-        return value_ref::none;
-    }
     auto const& flags = _plan.local_flags[index_of(id)];
-    auto const constant = flags.has_value() ? flags.value() & ~k_force_omm_2_state : 0u;
+    auto const stated = flags.has_value() ? flags.value() : 0u;
+    auto const constant = _out.sees_micromaps ? stated : stated & ~k_force_omm_2_state;
     return add(op::ray_query_begin, value_type(_e.at(id).type), {uint_constant(constant)});
 }
 
