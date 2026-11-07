@@ -197,7 +197,7 @@ TEST("slib - every entry point of the fixtures that SGL's DXIL lowers passes the
     CC_LOG_INFO("and {} of the {} ray-tracing ones", ray_lowered, ray_reached);
     CC_LOG_INFO("{} of them write debug records, and the robustness profiles lower {} entry points", recording, guarded);
     // the numbers the slice reaches, so a lowering lost shows here rather than as a quiet fall back to DXC
-    CHECK(lowered >= 119);
+    CHECK(lowered >= 120);
     CHECK(ray_lowered >= 50);
     CHECK(raster_lowered == raster_reached);
     CHECK(raster_lowered >= 82);
@@ -206,7 +206,7 @@ TEST("slib - every entry point of the fixtures that SGL's DXIL lowers passes the
     CHECK(mesh_lowered == mesh_reached);
     CHECK(primitive_lowered >= 18);
     CHECK(recording >= 2);
-    CHECK(guarded >= 830 / guard_stride);
+    CHECK(guarded >= 840 / guard_stride);
 }
 
 TEST("slib - a 64-bit atomic is the i64 form of DXIL's own, and states what it reaches (EMIT-247)")

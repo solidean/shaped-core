@@ -5,22 +5,13 @@ parent: epic-sgl-native-ir-targets
 
 # What a compute entry point still cannot lower
 
-A body or a type in a target's own text, DXIL's `double` maths, and an `affine3` in GPU memory.
+A body or a type in a target's own text, and an `affine3` in GPU memory.
 
 ## Left, and why
 
 - **A body in a target's own text** (`double_values.sgl`'s `triple_values`) and **a type spelled in it** (`repack_values`'s `packed`, CHK-432), on both writers.
   These stay text by what they are: the source states the target's text, which only that target's compiler reads.
   What the prelude says that way is another matter: `maybe_reorder` moved to SGL, and so may anything else of the prelude's.
-- **DXIL's `double` maths** (`double_maths.sgl`'s `double_functions`): `floor`, `ceil`, `round`, `trunc`, `fract`, `sqrt` and `inverse_sqrt`.
-  DXIL has no operation for any of them at 64 bits, so the text writes EMIT-219's helpers of HLSL, about 340 lines that take the bits apart.
-  The native route would want the same helpers once, written in SGL in the prelude, rather than a second copy in either writer.
-  **SGL cannot say them yet**, checked on 2026-11-07: they take a double apart into its two words and put it back, and correct `sqrt` with an `fma`.
-  A float has `x.bits` and `float.from_bits(u)`, and a half CHK-417's; a double has neither, and no type has an `fma`.
-  The two wanted are `double.bits` as a `uint2` of its low and high words, with `double.from_bits(uint2)`, and `fma` of doubles.
-  Each maps to one operation on every target that has doubles: `asuint` and `asdouble` or `OpBitcast` or `splitDouble` and `makeDouble`, and `fma` or `Fma`.
-  A `uint2` rather than a `ulong` keeps them off `shader_int64`, which a device with doubles may lack.
-  Once they exist the helpers become SGL, the text route's HLSL goes, and the vulkan text route gains them too, since DXC hands a double to its float functions on SPIR-V as on DXIL (CHK-458).
 - **Metal's** fused intersection and empty closest hit, which no other target builds (EMIT-244).
 
 ## Landed on 2026-11-07
@@ -88,3 +79,44 @@ The offset is a `sample` or a `gather` operand of its own, the `construct` of co
 SPIR-V declares it as an `OpConstantComposite` where an image operation names it, and DXIL reads its lanes as immediates.
 `pixel_surface.sgl`'s new `offset_ps` takes both, and the mixed-route test draws it through every pairing on dx12 and vulkan, every lane within 1e-4 of DXC's.
 The vertex and pixel sweep lowers 83 of 83 on both writers, and dropping the offset in lowering failed every native pixel pairing.
+
+## A double's maths, measured on 2026-11-07
+
+SGL gained what the helpers needed: `fma` of every float type (EVAL-146, EMIT-254), and `d.bits` as a `uint2` with `double.from_bits` (CHK-517, EMIT-255).
+The helpers are SGL in `core.sgl` now, and EMIT-219's HLSL is gone, so every route inlines the one text (EMIT-256).
+
+| route | `sqrt` and the roundings, before | after |
+|---|---|---|
+| `hlsl-dx12` and `hlsl-vulkan` | the HLSL helpers | the SGL, inlined |
+| native DXIL | a gap, so DXC under a preference | the SGL |
+| native SPIR-V | GLSL.std.450 `Sqrt`, `Floor` and the rest | the SGL |
+
+The native SPIR-V route gave up GLSL.std.450 for a double on purpose.
+A route is not something a prelude body can tell apart: native SPIR-V and DXC's text both compile for `hlsl-vulkan`, so `target_language` is `.hlsl` for both.
+One body for both also means the two vulkan routes compute alike, which they did not before.
+
+The interpreter runs the same bodies, so the roundings are bit for bit what the GPU gives.
+`sqrt`, `inverse_sqrt` and `smoothstep` take its own answer where the language is `.sgl`: the nearest root, which EVAL-108 promises, and smoothstep's missing value.
+That missing value now stands at the program's call rather than inside `core.sgl` (CHK-311).
+
+On the Arc B580, with the Agility SDK, `--thorough`:
+
+| | before | after |
+|---|---|---|
+| DXIL, compute | 118 of 121 | 120 of 122 |
+| SPIR-V, compute | 119 of 121 | 120 of 122 |
+| DXIL, under the robustness profiles | 858 | 864 |
+| SPIR-V, under the robustness profiles | 885 | 888 |
+| both writers, with the device features | 691 | 696, none refused |
+
+The 122nd compute entry point is `sgl_mixed/double_routes.sgl`'s `double_steps`, and the two DXIL leaves are the target-text pair above.
+
+`compute-double-maths-test.cc` holds two tests:
+
+- The roundings exact and `sqrt` within an ULP, over 256 values with every edge case: both zeros, subnormals, ties, integers past 2^52, infinities and NaN.
+  It passes on all four contexts, `dx12-native-dxil` now through SGL's own DXIL.
+- `double_steps` through DXC and through the native route in one context, every lane alike to the bit, on `dx12-hw` and `vulkan`.
+  On dx12 it also holds that `fma((1 + 2^-27), (1 + 2^-27), -(1 + 2^-27))` is `2^-27 + 2^-54`, which a product rounded first loses.
+  Swapping the two words DXIL's `splitDouble` hands back failed it with 30 checks, which the other contexts passed; a double `fma` written as `fmad` is refused at pipeline creation.
+
+Not confirmed: whether vulkan's `Fma` of a double rounds once on the B580, since the test accepts either answer there.
