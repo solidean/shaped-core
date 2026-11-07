@@ -339,16 +339,21 @@ dev.py enters the environment itself, so configuring through it is always right;
 
 ## An optional build server
 
-`build` and `test` can hand their build step to an optional local build server, which keeps state such as a compile cache between builds.
-It is opt-in and never required: without it, everything builds exactly as before.
+`build` and `test` can hand their build step, and `test` its test runs, to an optional local build server, which keeps state such as a compile cache and test results between runs.
+It is opt-in and never required: without it, everything builds and tests exactly as before.
 
 - **Opting in**, the first that says either way: `--no-server`, `--server`, `SC_BUILD_SERVER=1` (or `0`), then the project's own default.
   `--no-server` always wins.
 - **Where the client is**: `SC_BUILD_SERVER_CLIENT` names its executable, over the location the project's `Policy.build_server` gives.
-- **Only the build step moves**: configure stays cmake's, and the server runs in the same developer environment dev.py builds in, which it passes to every command.
+- **Only the build step and the test runs move**: configure stays cmake's, and the server runs in the same developer environment dev.py builds in, which it passes to every command.
 - **When it cannot serve**, dev.py prints one warning naming the cause and how to install it, then builds as without it.
   That covers a missing client, a server that cannot be started, another protocol version, a server restarting, and a server failing on its own.
 - **A compile error through the server is a failed build** with the compiler's output, as with ninja, and never a rebuild without it.
+- **Tests run through it too**: it serves a stored pass when nothing a test binary executes or reads changed, and runs the rest side by side.
+  Each binary's line says whether it `ran` or was `cached`, and the table marks the cached ones.
+  A failure reads as without the server: the output's tail, the run logs, resolved sites, and the kept failure folder test_diag reads.
+  A failing test is a failure, never rerun without the server; `--repeat` has every binary run, whatever is stored.
+- **Test runs writing what the server does not keep run without it**: `--sample`, `--profile`, `--no-xml-reports`, and cross-compiled presets.
 - **`check` and `ship` build without it for now**, opted in or not, so the gate stays independent of it; turning that on is one constant, `debt-devpy-gate-without-build-server`.
 
 [build_server.py](../../tools/dev/lib/pipeline/build_server.py) has the client contract, and [its self-test](../../tools/dev/build-server-self-test.py) runs with `check`.

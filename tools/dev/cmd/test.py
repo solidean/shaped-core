@@ -133,6 +133,9 @@ def run(args: argparse.Namespace, ctx: Context) -> None:
     if args.test_args is not None:
         runner_args = ["--test-args", args.test_args, *runner_args]
 
+    # One server session for the build and the run, so it is asked once and a fallback warns once.
+    server = ctx.build_server(args)
+
     # Optionally build first (incremental — fast when nothing changed).
     if not args.no_build:
         target_names = (
@@ -143,7 +146,7 @@ def run(args: argparse.Namespace, ctx: Context) -> None:
             presets, target_names, root=ctx.root,
             auto_configure=not args.no_configure,
             mirror=args.mirror_output, verbose=args.verbose,
-            emsdk_path=args.emsdk_path, server=ctx.build_server(args),
+            emsdk_path=args.emsdk_path, server=server,
         )
         if not all(r.ok for r in results):
             ctx.fail_build(results, presets)
@@ -205,6 +208,8 @@ def run(args: argparse.Namespace, ctx: Context) -> None:
             emsdk_path=args.emsdk_path,
             runtime=jsr.JsRuntimeRequest.from_args(args),
             sample=args.sample,
+            # A repeat chases a flake, so a stored pass must not answer for it.
+            server=server, rerun=repeat > 1,
         )
 
         if any(r["returncode"] != 0 for r in records):

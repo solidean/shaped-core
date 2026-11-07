@@ -3,11 +3,11 @@
 # requires-python = ">=3.10"
 # ///
 
-"""Self-test for tools/dev/lib/pipeline/build_server.py — when a build goes through the optional build server, and when it falls back.
+"""Self-test for tools/dev/lib/pipeline/build_server.py — when a build or test run goes through the optional build server, and when it falls back.
 
-A fake client stands in for the server: a Python script answering `ensure` and `build` with the exit codes a test asks for.
+A fake client stands in for the server: a Python script answering `ensure`, `build` and `test` with the exit codes and results a test asks for.
 The fallback paths are the ones that matter, since they run only on a machine where the server is missing or broken.
-A failed compile through the server must stay a failed build, never a silent rebuild without it.
+A failed compile through the server must stay a failed build, and a failed test a failed test, never a silent rerun without it.
 
 Kept out of `dev.py test`, which drives the C++ nexus suites; this is Python tooling testing Python tooling.
 
@@ -17,27 +17,54 @@ Kept out of `dev.py test`, which drives the C++ nexus suites; this is Python too
 from __future__ import annotations
 
 import functools
+import json
 import os
 import sys
 import tempfile
+import types
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-from tools.dev.lib.core.models import StepResult  # noqa: E402
+from tools.dev.lib.core import crash_reports  # noqa: E402
+from tools.dev.lib.core.models import StepResult, Target  # noqa: E402
 from tools.dev.lib.core.process import run_step  # noqa: E402
 from tools.dev.lib.pipeline import build_server as bs  # noqa: E402
+from tools.dev.lib.pipeline import test as pipeline_test  # noqa: E402
 
 VERBOSE = "-v" in sys.argv
 
 # The fake client: its behaviour comes from FAKE_SERVER (`ensure=<rc>,build=<rc>,failed`), and every call is appended to FAKE_SERVER_LOG.
+# Under `test` it answers from FAKE_TESTS, a JSON object of binary name to the result's fields plus `out`, the binary's console output.
 FAKE = r'''
-import os, sys
+import json, os, sys
+from pathlib import Path
 spec = dict(kv.split("=", 1) if "=" in kv else (kv, "1") for kv in os.environ.get("FAKE_SERVER", "").split(",") if kv)
 with open(os.environ["FAKE_SERVER_LOG"], "a", encoding="utf-8") as f:
     f.write(" ".join(sys.argv[1:]) + "\n")
 if sys.argv[1] == "ensure":
     sys.exit(int(spec.get("ensure", "0")))
+if sys.argv[1] == "test":
+    if "test" in spec:
+        print("fake: the server failed", file=sys.stderr)
+        sys.exit(int(spec["test"]))
+    build, words = Path(sys.argv[2]), sys.argv[3:]
+    names = words[:words.index("--json")]
+    answers, results = json.loads(os.environ["FAKE_TESTS"]), []
+    for name in names:
+        a = dict(answers[name])
+        exe = build / f"{name}.exe"
+        log = build / f"{name}.exe.server.log"
+        log.write_text(a.pop("out", ""), encoding="utf-8")
+        if a.get("status", "Passed") == "Passed":
+            (build / f"{name}.exe.results.xml").write_text(
+                '<testsuites><testsuite name="s" tests="2" failures="0"><testcase name="a"/><testcase name="b"/>'
+                "</testsuite></testsuites>", encoding="utf-8")
+        results.append({"name": name, "path": str(exe), "status": "Passed", "cached": False, "verified": None,
+                        "exit_code": 0, "ms": 5, "stored_ms": 0, "seed": 7, "log": str(log), **a})
+    print(json.dumps(results, indent=2))
+    print("fake: done", file=sys.stderr)
+    sys.exit(1 if any(r["status"] not in ("Passed", "NoTests") for r in results) else 0)
 print("[1/2] Building CXX object a.obj")
 if "failed" in spec:
     print("FAILED: a.obj")
@@ -194,6 +221,136 @@ def test_after_a_fallback_later_steps_build_plain_without_asking_again(f: Fixtur
 def test_a_build_dir_without_build_ninja_builds_plain_silently(f: Fixture) -> None:
     assert f.step().ok
     assert f.plain_runs == 1 and f.calls() == [] and not f.session.warnings
+
+
+# --- test runs through the server ---
+
+
+class TestFixture:
+    """A build dir with fake test binaries, the fake client answering `test` from `answers`, and the preset dev.py would pass."""
+
+    def __init__(self, root: Path, answers: dict, spec: str = "", timeouts: dict | None = None) -> None:
+        self.dir = root / "build"
+        self.dir.mkdir()
+        fake = root / "fake_server.py"
+        fake.write_text(FAKE, encoding="utf-8")
+        self.log = root / "calls.log"
+        self.env = {**os.environ, "FAKE_SERVER": spec, "FAKE_SERVER_LOG": str(self.log), "FAKE_TESTS": json.dumps(answers)}
+        self.session = bs.Session([sys.executable, str(fake)], "install hint")
+        self.preset = types.SimpleNamespace(name="fake", build_dir=self.dir, is_cross_compiling=False, is_emscripten=False)
+        self.targets = []
+        for name in answers:
+            exe = self.dir / f"{name}.exe"
+            exe.write_bytes(b"")
+            self.targets.append(Target(name, "EXECUTABLE", exe, ("tests",), (timeouts or {}).get(name)))
+        self.root = root
+
+    def run(self, *, test_name=None, extra_args=(), timeout=60.0, explicit=False, rerun=False):
+        return pipeline_test._test_through_server(
+            self.session, self.preset, self.targets, root=self.root, test_name=test_name, extra_args=list(extra_args),
+            env=self.env, timeout=timeout, timeout_is_explicit=explicit, watchdog_fraction=0.5, rerun=rerun,
+            mirror=False, verbose=False,
+        )
+
+    def calls(self) -> list[str]:
+        return [c for c in self.log.read_text(encoding="utf-8").splitlines() if c != "ensure --quiet"]
+
+
+def with_tests(answers: dict, spec: str = "", **kw):
+    def wrap(test):
+        @functools.wraps(test)
+        def run() -> None:
+            with tempfile.TemporaryDirectory() as d:
+                test(TestFixture(Path(d), answers, spec, **kw))
+        return run
+    return wrap
+
+
+@with_tests({"a": {"cached": True, "stored_ms": 2500}, "b": {}})
+def test_tests_run_through_the_server_marked_served_or_ran(f: TestFixture) -> None:
+    records, left = f.run(extra_args=["--thorough"])
+    assert not left and not f.session.warnings, (left, f.session.warnings)
+    assert [r["name"] for r in records] == ["a", "b"], records
+    assert all(r["returncode"] == 0 for r in records), records
+    assert records[0]["build_server"]["cached"] is True and records[1]["build_server"]["cached"] is False, records
+    assert records[0]["junit"]["tests"] == 2, "the JUnit report beside the binary is read as from a plain run"
+    assert f.calls() == [f"test {f.dir} a b --json --timeout 60 -- --watchdog 30 --thorough"], f.calls()
+    assert "--seed 7" in " ".join(records[0]["command"]), "the record's command reproduces the run, seed and all"
+
+
+@with_tests({"a": {}, "bad": {"status": "Failed", "exit_code": 3, "out": "check failed at bad.exe+0x1f20\n"}})
+def test_a_failing_binary_is_a_failure_with_its_log_sites_and_kept_folder(f: TestFixture) -> None:
+    records, left = f.run()
+    assert not left and not f.session.warnings, "a test failure is never run again without the server"
+    bad = records[1]
+    assert bad["name"] == "bad" and bad["returncode"] == 3, bad
+    stdout = f.dir / bad["stdout_log"]
+    stderr = f.dir / bad["stderr_log"]
+    assert "bad.exe+0x1f20" in stdout.read_text(encoding="utf-8"), "the binary's output is in dev.py's run log"
+    err = stderr.read_text(encoding="utf-8")
+    assert "the sites above, resolved" in err and "bad.exe+0x1f20" in err, err
+    kept = list(crash_reports.crash_root(f.dir).glob("bad-*-failed"))
+    assert len(kept) == 1 and (kept[0] / stdout.name).is_file(), "the failed run's logs are kept for test_diag"
+
+
+@with_tests({"slow": {"status": "TimedOut", "exit_code": None}, "gone": {"status": "Missing", "exit_code": None}})
+def test_a_timeout_and_a_missing_binary_fail_as_in_a_plain_run(f: TestFixture) -> None:
+    records, left = f.run()
+    assert not left
+    assert records[0]["returncode"] == 124 and records[0]["timed_out"], records[0]
+    assert records[1]["returncode"] == 127, records[1]
+
+
+@with_tests({"a": {"status": "NoTests"}, "b": {}})
+def test_a_binary_whose_filter_selected_nothing_is_skipped(f: TestFixture) -> None:
+    records, _ = f.run(test_name="foo")
+    assert [r["name"] for r in records] == ["b"], records
+    assert f.calls()[0].endswith("-- foo --watchdog 30"), f.calls()
+
+
+def test_each_unavailable_code_from_test_falls_back() -> None:
+    for code in [*bs.UNAVAILABLE, 2]:
+        with tempfile.TemporaryDirectory() as d:
+            f = TestFixture(Path(d), {"a": {}, "b": {}}, f"test={code}")
+            records, left = f.run()
+            assert records == [] and [t.name for t in left] == ["a", "b"], (code, records, left)
+            assert len(f.session.warnings) == 1 and "testing without" in f.session.warnings[0], f.session.warnings
+
+
+@with_tests({"a": {}}, "ensure=11")
+def test_a_server_that_cannot_start_runs_every_test_plain(f: TestFixture) -> None:
+    records, left = f.run()
+    assert records == [] and len(left) == 1
+    assert f.calls() == [] and "no server answers" in f.session.warnings[0], f.session.warnings
+
+
+def test_a_missing_client_warns_that_it_tests_without_it() -> None:
+    s = bs.session(bs.BuildServer(client=Path("absent.exe")), flag=True, environ={})
+    assert s is not None
+    assert s.test(Path("."), ["a"], runner_args=[], timeout=60, threads=None, rerun=False, verbose=False, env={},
+                  run=lambda cmd: None) is None
+    assert "testing without the build server" in s.warnings[0], s.warnings
+
+
+@with_tests({"a": {}, "long": {}}, timeouts={"long": 300.0})
+def test_binaries_of_another_timeout_go_in_a_request_of_their_own(f: TestFixture) -> None:
+    records, _ = f.run(extra_args=["--jobs", "4"], rerun=True)
+    assert len(records) == 2
+    assert f.calls() == [
+        f"test {f.dir} a --json --timeout 60 --threads 4 --rerun -- --watchdog 30",
+        f"test {f.dir} long --json --timeout 300 --threads 4 --rerun -- --watchdog 150",
+    ], f.calls()
+
+
+def test_runs_with_side_outputs_bypass_the_server() -> None:
+    native = types.SimpleNamespace(is_cross_compiling=False, is_emscripten=False)
+    wasm = types.SimpleNamespace(is_cross_compiling=True, is_emscripten=True)
+    plain = dict(sample=False, write_xml=True, extra_env=False)
+    assert pipeline_test._server_bypass(preset=native, **plain) is None
+    assert pipeline_test._server_bypass(preset=wasm, **plain)
+    assert pipeline_test._server_bypass(preset=native, **{**plain, "sample": True}) == "--sample"
+    assert pipeline_test._server_bypass(preset=native, **{**plain, "write_xml": False})
+    assert pipeline_test._server_bypass(preset=native, **{**plain, "extra_env": True})
 
 
 def main() -> int:

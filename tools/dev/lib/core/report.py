@@ -140,7 +140,9 @@ def _print_test_table(records: list[dict]) -> None:
         return
 
     presets = {r.get("preset") for r in records}
-    label = (lambda r: f"{r['name']} [{r.get('preset')}]") if len(presets) > 1 else (lambda r: r["name"])
+    named = (lambda r: f"{r['name']} [{r.get('preset')}]") if len(presets) > 1 else (lambda r: r["name"])
+    # A pass the build server served from its cache shows the stored run's figures, and no wall time of its own.
+    label = lambda r: named(r) + (" (cached)" if (r.get("build_server") or {}).get("cached") else "")  # noqa: E731
     rows = sorted(records, key=lambda r: -r["duration_s"])
     width = max(len("binary"), *(len(label(r)) for r in rows))
 
