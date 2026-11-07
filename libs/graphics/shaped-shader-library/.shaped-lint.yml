@@ -5,6 +5,11 @@
 
 rules:
   - kind: allow-include
+    value: <cstdlib>
+    reason: std::system runs spirv-val over each module
+    files: tests/sgl-real-shaders-test.cc
+
+  - kind: allow-include
     value: <memory>
     reason: sg's handles ARE std::shared_ptr, and the filesystem and watch layers hold them — see shaped-graphics/docs/coding-guidelines.md
 

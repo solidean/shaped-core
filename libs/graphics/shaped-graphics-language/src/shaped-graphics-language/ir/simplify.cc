@@ -566,6 +566,10 @@ private:
             blocks[isize(b)].first = start;
             blocks[isize(b)].count = u32(instructions.size()) - start;
         }
+        // an earlier round's dead block is in no order, and it must not point past what this one kept
+        for (auto& block : blocks)
+            if (block.count == 0)
+                block.first = u32(instructions.size());
         _p.instructions = cc::move(instructions);
         _p.operands = cc::move(operands);
         // a block no walk reached stands at the end with nothing in it, which a writer's reachability skips

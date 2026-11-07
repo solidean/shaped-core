@@ -621,6 +621,12 @@ void writer::write_entry()
     default:
         break;
     }
+    // what a trace's flags may name, and what DXC's own text leaves out (EMIT-184)
+    if (_p.sees_micromaps)
+    {
+        require(spv::RayTracingOpacityMicromapEXT);
+        require_extension("SPV_EXT_opacity_micromap");
+    }
     if (_p.stage >= check::stage::raygen)
     {
         require(spv::RayTracingKHR);
