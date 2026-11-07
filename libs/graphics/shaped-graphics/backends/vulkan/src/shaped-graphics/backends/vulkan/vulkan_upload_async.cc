@@ -734,7 +734,17 @@ bool vulkan_upload_async_system::run_one_window()
         // Vulkan queues are externally synchronized — see vulkan_context::queue_guard.
         VkResult const r = _ctx->queue_guard().lock(
             [&](int&) { return vkQueueSubmit(_ctx->upload_queue(), 1, &submit, VK_NULL_HANDLE); });
-        CC_ASSERT(r == VK_SUCCESS, "vkQueueSubmit (async upload) failed");
+        if (r != VK_SUCCESS)
+        {
+            if (!_ctx->note_device_lost_if_lost(r, "vkQueueSubmit (async upload)"))
+                CC_ASSERT(false, "vkQueueSubmit (async upload) failed");
+            // nothing was queued, so this window never lands and the job settles here
+            _window_values[slot] = 0;
+            signal_on_queue(job.completion);
+            settle_now(job, /*delivered =*/false);
+            _pending.remove_at(index);
+            return true;
+        }
         if (signal_count == 2)
             note_signal_submitted(job.completion.group->forward_waits, job.completion.value);
 
