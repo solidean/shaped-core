@@ -345,6 +345,9 @@ It is opt-in and never required: without it, everything builds and tests exactly
   Each binary's line says whether it `ran` or was `cached`, and the table marks the cached ones.
   A failure reads as without the server: the output's tail, the run logs, resolved sites, and the kept failure folder test_diag reads.
   A failing test is a failure, never rerun without the server; `--repeat` has every binary run, whatever is stored.
+- **Background test runs are the project's choice**: with `BuildServer.speculative_tests` set, dev.py asks the server (`test --speculate`)
+  to rerun the binaries it tested once the server has rebuilt them on its own after an edit, with the same arguments and environment,
+  so the next `test` finds their results stored; off by default, and a request without it withdraws it.
 - **Test runs writing what the server does not keep run without it**: `--sample`, `--profile`, `--no-xml-reports`, and cross-compiled presets.
 - **`check` and `ship` build without it for now**, opted in or not, so the gate stays independent of it; turning that on is one constant, `debt-devpy-gate-without-build-server`.
 
