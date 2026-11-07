@@ -1,10 +1,10 @@
 #include "simplify.hh"
 
 #include <clean-core/math/bit.hh>
+#include <clean-core/math/float.hh>
+#include <shaped-graphics-language/builtins/impl/soft_math.hh>
 #include <shaped-graphics-language/ir/ir.hh>
 #include <shaped-graphics-language/ir/verify.hh>
-
-#include <cmath>
 
 using namespace sgl;
 using namespace sgl::ir;
@@ -122,6 +122,7 @@ private:
         _reached = cc::vector<bool>::create_filled(_p.blocks.size(), false);
         _visited = cc::vector<bool>::create_filled(_p.blocks.size(), false);
         _target = cc::vector<u32>::create_filled(_p.blocks.size(), k_no_target);
+        _skipped = cc::vector<bool>::create_filled(_p.blocks.size(), false);
         _changed = false;
     }
 
@@ -268,7 +269,7 @@ private:
     void set_known(u32 index, lanes const& known)
     {
         for (auto k = u32(0); k < known.count; ++k)
-            if (!std::isfinite(known.at[k]))
+            if (!cc::is_finite(known.at[k]))
                 return;
         auto const type = _p.instructions[index].type;
         if (known.count == 1)
@@ -328,7 +329,7 @@ private:
             done = operands.size() == 1 && each([&](u32 l) { return -lane(0, l); });
             break;
         case op::dot:
-            if (operands.size() == 2 && count == 1 && args[0].count == args[1].count)
+            if (is_fast && operands.size() == 2 && count == 1 && args[0].count == args[1].count)
             {
                 auto sum = 0.0f;
                 for (auto l = u32(0); l < args[0].count; ++l)
@@ -350,57 +351,73 @@ private:
         return true;
     }
 
+    /// Through soft_math rather than a libm, so every host folds a builtin to the same bits, as the interpreter does.
+    /// A NaN out stops the fold, so what a builtin gives outside its domain stays the target's to say.
     [[nodiscard]] static bool fold_math(math m, isize n, lanes const (&args)[3], u32 count, lanes& result)
     {
-        auto const lane = [&](isize k, u32 l) { return args[k].count == 1 ? args[k].at[0] : args[k].at[l]; };
+        namespace soft = sgl::builtins::impl;
+        auto const lane = [&](isize k, u32 l) { return f64(args[k].count == 1 ? args[k].at[0] : args[k].at[l]); };
         auto const each = [&](isize needs, auto&& f)
         {
             if (n != needs)
                 return false;
             for (auto l = u32(0); l < count; ++l)
-                result.at[l] = f(l);
+                result.at[l] = f32(f(l));
             return true;
         };
+        constexpr auto ln2 = 0.693147180559945309417;
+        auto const nan = cc::bit_cast<f64>(u64(0x7ff8000000000000ull));
+        auto const positive = [&](f64 x, auto&& f) { return x > 0.0 ? f(x) : nan; };
         switch (m)
         {
         case math::fabs:
-            return each(1, [&](u32 l) { return std::fabs(lane(0, l)); });
+            return each(1, [&](u32 l) { return lane(0, l) < 0.0 ? -lane(0, l) : lane(0, l); });
         case math::floor:
-            return each(1, [&](u32 l) { return std::floor(lane(0, l)); });
+            return each(1, [&](u32 l) { return soft::soft_floor(lane(0, l)); });
         case math::ceil:
-            return each(1, [&](u32 l) { return std::ceil(lane(0, l)); });
+            return each(1, [&](u32 l) { return -soft::soft_floor(-lane(0, l)); });
         case math::trunc:
-            return each(1, [&](u32 l) { return std::trunc(lane(0, l)); });
+            return each(1, [&](u32 l) { return soft::soft_trunc(lane(0, l)); });
         case math::fract:
-            return each(1, [&](u32 l) { return lane(0, l) - std::floor(lane(0, l)); });
+            return each(1, [&](u32 l) { return lane(0, l) - soft::soft_floor(lane(0, l)); });
         case math::sqrt:
-            return each(1, [&](u32 l) { return std::sqrt(lane(0, l)); });
+            return each(1, [&](u32 l) { return lane(0, l) < 0.0 ? nan : soft::soft_sqrt(lane(0, l)); });
         case math::inverse_sqrt:
-            return each(1, [&](u32 l) { return 1.0f / std::sqrt(lane(0, l)); });
+            return each(1, [&](u32 l) { return positive(lane(0, l), [](f64 x) { return 1.0 / soft::soft_sqrt(x); }); });
         case math::exp:
-            return each(1, [&](u32 l) { return std::exp(lane(0, l)); });
+            return each(1, [&](u32 l) { return soft::soft_exp(lane(0, l)); });
         case math::exp2:
-            return each(1, [&](u32 l) { return std::exp2(lane(0, l)); });
+            return each(1, [&](u32 l) { return soft::soft_exp(lane(0, l) * ln2); });
         case math::log:
-            return each(1, [&](u32 l) { return std::log(lane(0, l)); });
+            return each(1, [&](u32 l) { return positive(lane(0, l), [](f64 x) { return soft::soft_log(x); }); });
         case math::log2:
-            return each(1, [&](u32 l) { return std::log2(lane(0, l)); });
+            return each(1, [&](u32 l) { return positive(lane(0, l), [&](f64 x) { return soft::soft_log(x) / ln2; }); });
         case math::sin:
-            return each(1, [&](u32 l) { return std::sin(lane(0, l)); });
+            return each(1, [&](u32 l) { return soft::soft_sin(lane(0, l)); });
         case math::cos:
-            return each(1, [&](u32 l) { return std::cos(lane(0, l)); });
+            return each(1, [&](u32 l) { return soft::soft_cos(lane(0, l)); });
         case math::fsign:
-            return each(1, [&](u32 l) { return lane(0, l) > 0.0f ? 1.0f : lane(0, l) < 0.0f ? -1.0f : 0.0f; });
+            return each(1, [&](u32 l) { return lane(0, l) > 0.0 ? 1.0 : lane(0, l) < 0.0 ? -1.0 : 0.0; });
         case math::fmin:
-            return each(2, [&](u32 l) { return std::fmin(lane(0, l), lane(1, l)); });
+            return each(2, [&](u32 l) { return lane(1, l) < lane(0, l) ? lane(1, l) : lane(0, l); });
         case math::fmax:
-            return each(2, [&](u32 l) { return std::fmax(lane(0, l), lane(1, l)); });
+            return each(2, [&](u32 l) { return lane(1, l) > lane(0, l) ? lane(1, l) : lane(0, l); });
         case math::pow:
-            return each(2, [&](u32 l) { return std::pow(lane(0, l), lane(1, l)); });
+            return each(2,
+                        [&](u32 l)
+                        {
+                            auto const y = lane(1, l);
+                            return positive(lane(0, l), [&](f64 x) { return soft::soft_exp(y * soft::soft_log(x)); });
+                        });
         case math::step:
-            return each(2, [&](u32 l) { return lane(1, l) < lane(0, l) ? 0.0f : 1.0f; });
+            return each(2, [&](u32 l) { return lane(1, l) < lane(0, l) ? 0.0 : 1.0; });
         case math::fclamp:
-            return each(3, [&](u32 l) { return std::fmin(std::fmax(lane(0, l), lane(1, l)), lane(2, l)); });
+            return each(3,
+                        [&](u32 l)
+                        {
+                            auto const raised = lane(0, l) < lane(1, l) ? lane(1, l) : lane(0, l);
+                            return raised > lane(2, l) ? lane(2, l) : raised;
+                        });
         case math::fmix:
             return each(3, [&](u32 l) { return lane(0, l) + (lane(1, l) - lane(0, l)) * lane(2, l); });
         case math::fma:
@@ -409,10 +426,10 @@ private:
         {
             if (n != 1 || count != 1)
                 return false;
-            auto sum = 0.0f;
+            auto sum = 0.0;
             for (auto l = u32(0); l < args[0].count; ++l)
-                sum += args[0].at[l] * args[0].at[l];
-            result.at[0] = std::sqrt(sum);
+                sum += f64(args[0].at[l]) * f64(args[0].at[l]);
+            result.at[0] = f32(soft::soft_sqrt(sum));
             return true;
         }
         default:
@@ -768,6 +785,9 @@ private:
 
     [[nodiscard]] bool edge_is_live(block_ref from, block_ref to) const
     {
+        // a block the walk passed without reaching it never runs, whatever its terminator says
+        if (_skipped[isize(from)])
+            return false;
         // a block not walked yet may be a back edge, and one that never is goes in a later round
         if (!_visited[isize(from)])
             return true;
@@ -780,7 +800,10 @@ private:
         for (auto const b : _order)
         {
             if (!_reached[isize(b)])
+            {
+                _skipped[isize(b)] = true;
                 continue;
+            }
             auto const& block = _p.blocks[isize(b)];
             for (auto index = block.first; index + 1 < block.first + block.count; ++index)
             {
@@ -826,7 +849,9 @@ private:
 
             auto const& last = _p.instructions[block.first + block.count - 1];
             auto const operands = _p.operands_of(last);
-            if (last.code == op::branch_conditional && !_keeps_structure)
+            // a selection's header may go to one side alone and state no merge, which leaves the other side unreachable
+            // as SPIR-V allows; a loop's construct must keep its edges
+            if (last.code == op::branch_conditional && (!_keeps_structure || block.merges == merge_kind::selection))
             {
                 auto x = u64(0);
                 auto width = u32(0);
@@ -855,8 +880,12 @@ private:
         auto next = u32(0);
         for (auto const b : _order)
         {
-            if (!is_kept(b))
+            if (!_visited[isize(b)])
+            {
+                // a kept block no walk reached is its terminator alone, `unreachable`
+                next += is_kept(b) ? 1 : 0;
                 continue;
+            }
             auto const& block = _p.blocks[isize(b)];
             for (auto i = block.first; i < block.first + block.count; ++i)
                 if (!is_valid(_alias[i]))
@@ -884,6 +913,19 @@ private:
             }
             auto const& block = _p.blocks[isize(b)];
             auto const start = u32(instructions.size());
+            // SPIR-V's merge and continue targets still name it, so it stays, as a label and `OpUnreachable`
+            if (!_visited[isize(b)])
+            {
+                auto const& last = _p.instructions[block.first + block.count - 1];
+                instructions.push_back({.code = op::unreachable,
+                                        .first = u32(operands.size()),
+                                        .count = 0,
+                                        .statement = last.statement});
+                blocks[isize(b)].first = start;
+                blocks[isize(b)].count = 1;
+                blocks[isize(b)].merges = merge_kind::none;
+                continue;
+            }
             for (auto i = block.first; i < block.first + block.count; ++i)
             {
                 if (is_valid(_alias[i]))
@@ -931,7 +973,7 @@ private:
 
     [[nodiscard]] bool phi_edge_stays(block_ref from, block_ref to) const
     {
-        return is_kept(from) && (_target[isize(from)] == k_no_target || _target[isize(from)] == u32(to));
+        return _visited[isize(from)] && (_target[isize(from)] == k_no_target || _target[isize(from)] == u32(to));
     }
 
     /// A block no walk reached is dropped, unless SPIR-V's merge and continue targets must keep naming it.
@@ -943,6 +985,8 @@ private:
     cc::vector<value_ref> _alias;
     cc::vector<bool> _reached;
     cc::vector<bool> _visited;
+    /// Passed by the walk unreached: no edge out of it is taken.
+    cc::vector<bool> _skipped;
     /// Parallel to the blocks: the one block a folded branch goes to.
     cc::vector<u32> _target;
     cc::vector<u32> _scratch;
