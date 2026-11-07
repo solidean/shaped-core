@@ -304,9 +304,9 @@ void writer::terminator(instruction const& i)
     }
     case op::dispatch_mesh:
     {
-        ll_value const args[] = {_m.constant_i32(k_dx_ops[isize(dx_op::dispatch_mesh)].number),
-                                 leaf_at(value_ref(operands[0])), leaf_at(value_ref(operands[1])),
-                                 leaf_at(value_ref(operands[2])), _payload};
+        ll_value const args[]
+            = {_m.constant_i32(k_dx_ops[isize(dx_op::dispatch_mesh)].number), leaf_at(value_ref(operands[0])),
+               leaf_at(value_ref(operands[1])), leaf_at(value_ref(operands[2])), _payload};
         (void)call(dx_op::dispatch_mesh, _payload_type, args);
         return _m.return_void();
     }

@@ -218,8 +218,8 @@ void writer::payload_pointers(type_ref t, cc::vector<ll_value>& path, bool is_co
     switch (info.kind)
     {
     case type_kind::structure:
-        return each(info.member_count, [&](u32 m)
-                    { payload_pointers(_p.members[info.first_member + m].type, path, false, out); });
+        return each(info.member_count,
+                    [&](u32 m) { payload_pointers(_p.members[info.first_member + m].type, path, false, out); });
     case type_kind::array:
         return each(info.count, [&](u32) { payload_pointers(info.element, path, false, out); });
     case type_kind::matrix:

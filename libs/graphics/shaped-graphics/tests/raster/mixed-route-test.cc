@@ -570,23 +570,20 @@ ASYNC_INVOCABLE_TEST("sg - mesh and task stages of SGL's binary link against DXC
         SKIP("this build has no DXC");
 
     (void)co_await compared_mesh(*ctx, {.name = "quad", .mesh = SG_ROUTES(quad_ms), .pixel = plain});
-    auto const faced = co_await compared_mesh(*ctx, {.name = "faces", .mesh = SG_ROUTES(faces_ms), .pixel = SG_ROUTES(faced_ps)});
+    auto const faced
+        = co_await compared_mesh(*ctx, {.name = "faces", .mesh = SG_ROUTES(faces_ms), .pixel = SG_ROUTES(faced_ps)});
     // each triangle read what the mesh stage wrote for it: the first in the target's lower right, the second opposite
     CHECK(faced[1].rgba_float(k_size - 2, k_size - 2)[2] == 40.0f);
     CHECK(faced[1].rgba_float(1, 1)[2] == 41.0f);
     CHECK(faced[1].rgba_float(1, 1)[0] == 1.5f);
     (void)co_await compared_mesh(*ctx, {.name = "lines", .mesh = SG_ROUTES(lines_ms), .pixel = plain});
-    auto const split = co_await compared_mesh(*ctx, {.name = "split",
-                                                     .task = SG_ROUTES(split_ts),
-                                                     .mesh = SG_ROUTES(split_ms),
-                                                     .pixel = plain});
+    auto const split = co_await compared_mesh(
+        *ctx, {.name = "split", .task = SG_ROUTES(split_ts), .mesh = SG_ROUTES(split_ms), .pixel = plain});
     // the two workgroups read their own steps of the payload, and its last field keeps the bottom row clear
     CHECK(split[1].rgba_float(1, 1)[2] == 9.0f);
     CHECK(split[1].rgba_float(k_size - 2, 1)[2] == 10.0f);
     CHECK(split[1].rgba_float(1, k_size - 1)[3] == 0.0f);
-    (void)co_await compared_mesh(*ctx, {.name = "many invocations",
-                                        .task = SG_ROUTES(many_ts),
-                                        .mesh = SG_ROUTES(many_ms),
-                                        .pixel = plain});
+    (void)co_await compared_mesh(
+        *ctx, {.name = "many invocations", .task = SG_ROUTES(many_ts), .mesh = SG_ROUTES(many_ms), .pixel = plain});
 #undef SG_ROUTES
 }

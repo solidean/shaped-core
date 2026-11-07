@@ -288,7 +288,8 @@ void writer::stage_store(instruction const& i)
     }
     auto const& e = _p.stage_elements[operands[0]];
     auto const is_mesh = _p.stage == check::stage::mesh;
-    auto const op = is_mesh ? (e.part == stage_part::primitive ? dx_op::store_primitive_output : dx_op::store_vertex_output)
+    auto const op = is_mesh
+                      ? (e.part == stage_part::primitive ? dx_op::store_primitive_output : dx_op::store_vertex_output)
                   : e.part == stage_part::patch ? dx_op::store_patch_constant
                                                 : dx_op::store_output;
     auto const value = value_ref(operands[1]);
@@ -298,7 +299,8 @@ void writer::stage_store(instruction const& i)
     for (auto l = u32(0); l < count_of(value); ++l)
     {
         auto const lane = leaf_at(value, l);
-        ll_value const args[] = {number, id, row, _m.constant_i8(l), lane, is_mesh ? leaf_at(value_ref(operands[2])) : ll_value::none};
+        ll_value const args[]
+            = {number, id, row, _m.constant_i8(l), lane, is_mesh ? leaf_at(value_ref(operands[2])) : ll_value::none};
         (void)call(op, _m.type_of(lane), cc::span<ll_value const>(args, is_mesh ? 6 : 5));
     }
 }
@@ -316,8 +318,8 @@ void writer::write_primitive(instruction const& i)
     auto const operands = _p.operands_of(i);
     auto const corners = value_ref(operands[1]);
     // a line's third index is unused, and DXC writes it as zero
-    ll_value const args[] = {_m.constant_i32(k_dx_ops[isize(dx_op::emit_indices)].number), leaf_at(value_ref(operands[0])),
-                             leaf_at(corners, 0), leaf_at(corners, 1),
+    ll_value const args[] = {_m.constant_i32(k_dx_ops[isize(dx_op::emit_indices)].number),
+                             leaf_at(value_ref(operands[0])), leaf_at(corners, 0), leaf_at(corners, 1),
                              _p.primitive.writes_lines ? _m.constant_i32(0) : leaf_at(corners, 2)};
     (void)call(dx_op::emit_indices, _m.void_type(), args);
 }
