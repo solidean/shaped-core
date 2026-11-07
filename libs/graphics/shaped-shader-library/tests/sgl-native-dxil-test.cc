@@ -110,6 +110,9 @@ TEST("slib - every entry point of the fixtures that SGL's DXIL lowers passes the
     auto ray_lowered = 0;
     auto recording = 0;
     auto guarded = 0;
+    // A profile compiles and validates an entry again, which a debug build pays seconds for, so a default run samples them.
+    auto const guard_stride = nx::is_thorough() ? 1 : 8;
+    auto validated = 0;
     for (auto const& file : files)
     {
         auto const source = read_file(file);
@@ -157,6 +160,9 @@ TEST("slib - every entry point of the fixtures that SGL's DXIL lowers passes the
                 .dump("entry", entry.entry_point)
                 .dump("validator", refused.value_or(cc::string()));
 
+            if (validated++ % guard_stride != 0)
+                continue;
+
             // each robustness profile through the validator alone: nothing here runs what a guard stops
             for (auto const guard : {sgl::check::undefined_guard::abort, sgl::check::undefined_guard::report,
                                      sgl::check::undefined_guard::define})
@@ -200,7 +206,7 @@ TEST("slib - every entry point of the fixtures that SGL's DXIL lowers passes the
     CHECK(mesh_lowered == mesh_reached);
     CHECK(primitive_lowered >= 18);
     CHECK(recording >= 2);
-    CHECK(guarded >= 450);
+    CHECK(guarded >= 450 / guard_stride);
 }
 
 TEST("slib - a debug record of every value family passes the validator, in each stage that writes one")
