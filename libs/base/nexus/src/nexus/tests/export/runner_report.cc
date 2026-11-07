@@ -2,8 +2,10 @@
 
 #include <babel-data/data/json.hh>
 #include <clean-core/common/assert.hh>
+#include <clean-core/common/time.hh>
 #include <clean-core/container/map.hh>
 #include <clean-core/container/vector.hh>
+#include <clean-core/memory/large_allocations.hh>
 
 using namespace cc::primitive_defines;
 
@@ -49,21 +51,31 @@ void nx::begin_runner_report()
 {
     cc::file_access::set_context_hook(&slot_context);
     cc::file_access::start_recording();
+    cc::large_allocations::start_tracking();
 }
 
 cc::string nx::end_runner_report(test_schedule_execution const& execution, cc::optional<u64> run_seed)
 {
     // Stopped before the report is written, so the run's own report files are not among its tests' accesses.
     cc::file_access::stop_recording();
+    cc::large_allocations::stop_tracking();
     auto const accesses = cc::file_access::snapshot();
-    return write_runner_report(execution, accesses, run_seed);
+    auto const large = cc::large_allocations::snapshot();
+    return write_runner_report(execution, accesses, large, run_seed);
 }
 
 cc::string nx::write_runner_report(test_schedule_execution const& execution,
                                    cc::span<cc::file_access::record const> accesses,
+                                   cc::span<cc::large_allocations::context_stats const> large,
                                    cc::optional<u64> run_seed)
 {
     namespace json = babel::json;
+
+    // Read back to back, so a test's wall-clock interval is off by at most the gap between two clock reads.
+    auto const steady_to_wall = cc::current_time_wall_secs() - cc::current_time_steady_secs();
+    auto large_by_context = cc::map<u64, cc::large_allocations::context_stats>();
+    for (auto const& s : large)
+        large_by_context[s.context] = s;
 
     // Grouped by context once, so a run of many tests over many files stays linear.
     auto by_context = cc::map<u64, cc::vector<cc::file_access::record const*>>();
@@ -98,12 +110,39 @@ cc::string nx::write_runner_report(test_schedule_execution const& execution,
                 t.write("name", cc::string_view(exec.instance.declaration->name));
                 t.write("outcome", outcome_of(exec));
                 t.write("seconds", exec.root.duration_seconds);
+                // Unix epoch seconds, so a runner sampling the process from outside can place its samples in the interval.
+                if (exec.started_at_steady_s > 0)
+                {
+                    t.write("started", exec.started_at_steady_s + steady_to_wall);
+                    t.write("ended", exec.finished_at_steady_s + steady_to_wall);
+                }
+                if (auto const* s = large_by_context.get_ptr(context); s != nullptr)
+                {
+                    t.write("large_peak_bytes", s->peak_live_bytes);
+                    t.write("large_allocations", s->allocations);
+                }
                 auto files = t.write_array("files");
                 write_files(files, files_of(context));
             }
         }
 
         auto unattributed = root.write_object("unattributed");
+        {
+            // Large blocks no scheduled test allocated: peaks of different contexts never coincide for sure, so the largest stands for them.
+            auto peak = i64(0);
+            auto count = i64(0);
+            for (auto const& s : large)
+                if (!claimed.contains(s.context))
+                {
+                    peak = s.peak_live_bytes > peak ? s.peak_live_bytes : peak;
+                    count += s.allocations;
+                }
+            if (count > 0)
+            {
+                unattributed.write("large_peak_bytes", peak);
+                unattributed.write("large_allocations", count);
+            }
+        }
         auto files = unattributed.write_array("files");
         for (auto const& [context, records] : by_context)
             if (!claimed.contains(context))

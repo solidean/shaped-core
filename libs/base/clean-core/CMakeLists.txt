@@ -52,6 +52,7 @@ add_library(clean-core
     src/clean-core/platform/network_devices.cc
     src/clean-core/platform/resource_snapshot.cc
     src/clean-core/memory/allocation.cc
+    src/clean-core/memory/large_allocations.cc
     src/clean-core/memory/node_allocation.cc
     src/clean-core/error/result.cc
     src/clean-core/record/domain.cc
@@ -179,6 +180,7 @@ target_sources(clean-core
     src/clean-core/math/wide_arith.hh
 
     src/clean-core/memory/allocation.hh
+    src/clean-core/memory/large_allocations.hh
     src/clean-core/memory/node_allocation.hh
     src/clean-core/memory/unique_ptr.hh
     src/clean-core/memory/impl/object_lifetime_util.hh
@@ -601,6 +603,7 @@ if(SC_BUILD_TESTS)
         tests/math/wide_arith-test.cc
 
         tests/memory/allocation-test.cc
+        tests/memory/large_allocations-test.cc
         tests/memory/node_allocation-test.cc
         tests/memory/node_allocation-default-test.cc
         tests/memory/node_allocation-patterns-test.cc

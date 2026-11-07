@@ -520,3 +520,8 @@ namespace cc::file_access
 {
 struct record; // one path as file-access recording saw it (platform/file_access.hh)
 } // namespace cc::file_access
+
+namespace cc::large_allocations
+{
+struct context_stats; // what one context allocated in large blocks (memory/large_allocations.hh)
+} // namespace cc::large_allocations

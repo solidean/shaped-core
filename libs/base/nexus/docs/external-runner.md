@@ -8,6 +8,12 @@ Unset, nothing below happens and nothing is recorded.
 
 Per scheduled test: its name, how it ended (`pass`, `fail`, `skip`), its duration, and every file it read, wrote or listed, with the bytes moved.
 A dispatched child counts for its driver, which fails when any child fails.
+Each test's wall-clock interval (`started`, `ended`, Unix epoch seconds) lets a runner that samples the process's memory
+from outside tell which tests were running at each sample.
+A test that allocated blocks of 1 MiB or more through clean-core carries their peak live bytes and count
+(`large_peak_bytes`, `large_allocations`), from `cc::large_allocations`, which books each such block to the test that
+allocated it and credits it back when it is freed, on any thread.
+Small allocations, and memory taken past clean-core's resources, are not in it; a sampling runner sees the former.
 Accesses no test can be blamed for — static setup, a thread no test started — are listed once under `unattributed`, and count for every test.
 The run seed is there when the run was shuffled.
 The format is in [`runner_report.hh`](../src/nexus/tests/export/runner_report.hh); its `version` changes with anything a reader must know about.

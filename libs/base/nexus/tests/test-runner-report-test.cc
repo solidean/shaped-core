@@ -1,4 +1,6 @@
 #include <babel-data/data/json.hh>
+#include <clean-core/memory/allocation.hh>
+#include <clean-core/memory/large_allocations.hh>
 #include <clean-core/platform/file_access.hh>
 #include <clean-core/platform/file_path.hh>
 #include <clean-core/streams/file_stream.hh>
@@ -56,7 +58,10 @@ struct report_scope
     ~report_scope()
     {
         if (!was)
+        {
             cc::file_access::stop_recording();
+            cc::large_allocations::stop_tracking();
+        }
     }
 };
 } // namespace
@@ -95,7 +100,7 @@ TEST("runner report - each test lists what it read, wrote and listed, and nothin
     auto schedule = nx::test_schedule::create({}, reg);
     auto exec = nx::execute_tests(schedule, {});
     auto const accesses = cc::file_access::snapshot();
-    auto const doc = babel::json::read(nx::write_runner_report(exec, accesses, u64(42))).value();
+    auto const doc = babel::json::read(nx::write_runner_report(exec, accesses, {}, u64(42))).value();
     auto const root = doc.root();
 
     CHECK(root["format"].as_string() == "nexus-runner-report");
@@ -142,10 +147,52 @@ TEST("runner report - a failing test is a fail, and an access outside every test
     auto schedule = nx::test_schedule::create({}, reg);
     auto exec = nx::execute_tests(schedule, {});
     auto const accesses = cc::file_access::snapshot();
-    auto const doc = babel::json::read(nx::write_runner_report(exec, accesses, cc::nullopt)).value();
+    auto const doc = babel::json::read(nx::write_runner_report(exec, accesses, {}, cc::nullopt)).value();
     auto const root = doc.root();
 
     CHECK(!root.has("seed"));
     CHECK(entry_named(root["tests"], "fails")["outcome"].as_string() == "fail");
     CHECK(file_named(root["unattributed"]["files"], "nx-report-outside-any-test.txt")["read"].as_bool());
+}
+
+// A runner samples the process's memory from outside and needs each test's interval; large blocks are booked per test.
+TEST("runner report - each test has its wall-clock interval, and a test's large blocks are booked to it",
+     no_scheduler,
+     exclusive("cc-file-access"))
+{
+    nx::test_registry reg;
+    reg.add_declaration("allocates large", {},
+                        []
+                        {
+                            auto const& res = *cc::default_memory_resource;
+                            byte* p = nullptr;
+                            CHECK(res.allocate_bytes(&p, 3 << 20, 3 << 20, 16, res.userdata) >= 3 << 20);
+                            res.deallocate_bytes(p, 3 << 20, 16, res.userdata);
+                        });
+    reg.add_declaration("allocates small", {},
+                        []
+                        {
+                            auto const& res = *cc::default_memory_resource;
+                            byte* p = nullptr;
+                            CHECK(res.allocate_bytes(&p, 4096, 4096, 16, res.userdata) >= 4096);
+                            res.deallocate_bytes(p, 4096, 16, res.userdata);
+                        });
+
+    auto const scope = report_scope();
+    auto schedule = nx::test_schedule::create({}, reg);
+    auto exec = nx::execute_tests(schedule, {});
+    auto const accesses = cc::file_access::snapshot();
+    auto const large = cc::large_allocations::snapshot();
+    auto const doc = babel::json::read(nx::write_runner_report(exec, accesses, large, cc::nullopt)).value();
+    auto const tests = doc.root()["tests"];
+
+    auto const big = entry_named(tests, "allocates large");
+    auto const small = entry_named(tests, "allocates small");
+    REQUIRE(big.is_valid());
+    REQUIRE(small.is_valid());
+    CHECK(big["started"].as_double() > 1.0e9); // epoch seconds
+    CHECK(big["started"].as_double() <= big["ended"].as_double());
+    CHECK(big["large_peak_bytes"].as_double() >= double(3 << 20));
+    CHECK(big["large_allocations"].as_double() == 1);
+    CHECK(!small.has("large_peak_bytes"));
 }
