@@ -58,7 +58,8 @@ A hit's transform is the one element that is a matrix.
 
 **Pipelines mix freely on both APIs.**
 Each of the 15 ways of taking raygen, miss, hit and callable stages from SGL's binary, the rest from DXC's, creates one pipeline and traces alike, on dx12 and vulkan, every lane within 1e-4.
-It is [`mixed-route-ray-test.cc`](../../../shaped-graphics/tests/pipeline/mixed-route-ray-test.cc), with [`ray_stages.sgl`](../../../shaped-graphics/tests/shaders/sgl_mixed/ray_stages.sgl): a trace from a closest hit, all six stages, a callable picked per launch.
+It is [`mixed-route-ray-test.cc`](../../../shaped-graphics/tests/pipeline/mixed-route-ray-test.cc).
+Its fixture is [`ray_stages.sgl`](../../../shaped-graphics/tests/shaders/sgl_mixed/ray_stages.sgl): a trace from a closest hit, all six stages, a callable picked per launch.
 DXC's stages state `[raypayload]` and ours do not, and neither runtime minded.
 It can fail: reading the instance's index for its id in lowering logged 60 failed checks.
 
