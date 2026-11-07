@@ -44,6 +44,19 @@ cc::optional<cc::string> sgl::ir::compile_spirv(emit::impl::plan const& plan, pr
 {
     if (auto gap = lower_to_ssa(plan, p); gap.has_value())
         return gap;
+    // DXIL's passes less the two that fold a construct away: a SPIR-V header must keep naming its merge
+    simplify(p, control_flow::structured);
+    assert_whole(p, control_flow::structured, "simplify");
+    regroup_lanes(p);
+    assert_whole(p, control_flow::structured, "regroup_lanes");
+    simplify(p, control_flow::structured);
+    assert_whole(p, control_flow::structured, "simplify after regroup_lanes");
+    share_common_values(p);
+    assert_whole(p, control_flow::structured, "share_common_values");
+    remove_unused(p);
+    assert_whole(p, control_flow::structured, "remove_unused");
+    chain_sums(p);
+    assert_whole(p, control_flow::structured, "chain_sums");
     out = write_spirv(p);
     return {};
 }

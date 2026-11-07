@@ -491,12 +491,28 @@ void writer::instruction_of(u32 index)
     switch (rule.kind)
     {
     case rule_kind::plain:
+    {
+        // a vector of constants is a constant of the module, which a driver need not build per invocation
+        auto is_constant_composite = i.code == op::construct;
+        for (auto const v : operands)
+            is_constant_composite = is_constant_composite && is_constant(value_ref(v))
+                                 && !_p.constants[index_of(value_ref(v))].is_undefined;
+        if (is_constant_composite)
+        {
+            head(_declarations, spv::ConstantComposite, 3 + operands.size());
+            _declarations.push_back(id_of(i.type));
+            _declarations.push_back(id);
+            for (auto const v : operands)
+                _declarations.push_back(id_of_raw(v));
+            return;
+        }
         head(_code, rule.opcode, 3 + operands.size());
         _code.push_back(id_of(i.type));
         _code.push_back(id);
         for (auto const v : operands)
             _code.push_back(id_of_raw(v));
         return;
+    }
     case rule_kind::math:
         return ext_inst(i, id);
     case rule_kind::composite:

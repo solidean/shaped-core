@@ -28,6 +28,14 @@ void share_common_values(program& p);
 /// so this is for a target with no structured control flow to keep, DXIL.
 void flatten_branches(program& p);
 
+/// Gathers the phis a `construct` reads lane by lane back into one phi of the vector, where each way in hands over the
+/// lanes of one vector, the phi itself, or constants, which become a construct ahead of that way's branch.
+///
+/// SSA construction promotes a vector scalar by scalar, which DXIL wants and SPIR-V does not.
+/// A lane's phi becomes an `extract` of the new phi, and keeps its statement and guarantee there.
+/// Leaves the lanes' phis unread for `remove_unused`, and keeps control flow as it stood.
+void regroup_lanes(program& p);
+
 /// Reorders each run of `fast` additions in one block, so a total meets each product alone and fuses with it.
 ///
 /// A sum only reorders with sums of its own guarantee, and each addition keeps its statement and its place in the block.
