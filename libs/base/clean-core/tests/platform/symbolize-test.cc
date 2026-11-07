@@ -290,14 +290,15 @@ TEST("symbolize - a module table with no usable binaries still names the module"
     // Degrading to `module+offset` is the difference between a frame you can look up and a bare address.
     //
     // The drive must be one every machine has, and not one a developer might have mapped.
-    // What this pins is a path that is REACHABLE and absent, so the load is attempted and fails; the unreachable
-    // case is its own test below, and the two reach `module+offset` down different paths.
+    // What this pins is a path that is REACHABLE and absent; the unreachable case is its own test below.
     cc::loaded_module const invented = {
         .base = 0x4000'0000,
         .size = 0x1000,
         .path = "C:/nowhere/ghost.exe",
         .identity = "DEADBEEF1000",
     };
+
+    auto const t0 = cc::current_time_steady_secs();
 
     cc::symbolizer sym(cc::span<cc::loaded_module const>(&invented, 1));
 
@@ -306,6 +307,13 @@ TEST("symbolize - a module table with no usable binaries still names the module"
     CHECK(info.module == "ghost.exe");
     CHECK(info.module_offset == 0x123);
     CHECK(info.to_string() == "ghost.exe+0x123");
+
+    // An absent image costs nothing to look for, wherever the process runs.
+    // Registered, DbgHelp walked the working directory for it at the first resolve: 10 s from a checkout holding its
+    // agents' worktrees, while holding the lock every other symbolize test queues on.
+    // The bound is far above what the work needs and far below what one such walk costs.
+    auto const seconds = cc::current_time_steady_secs() - t0;
+    CHECK(seconds < 1.0);
 }
 
 TEST("symbolize - a module on an unreachable path resolves without waiting for the network")

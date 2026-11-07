@@ -204,9 +204,18 @@ cc::symbolizer::symbolizer(cc::span<cc::loaded_module const> modules, cc::symbol
             continue;
         }
 
+        // A local path with no file behind it is not registered either.
+        // DbgHelp would search for the image at the first resolve, recursively through its search path, which defaults
+        // to the working directory, and it holds the lock every symbolizer and crash report shares while it does.
+        // Without the image there is no debug record to find a PDB by, so the search could only ever come back empty.
+        if (is_locally_reachable(m.path) && ::GetFileAttributesA(m.path.c_str_materialize()) == INVALID_FILE_ATTRIBUTES)
+        {
+            CC_LOG_DEBUG("symbolize: {} not registered, there is no file at {}", m.name(), m.path);
+            continue;
+        }
+
         // At the base the RECORDING used, not wherever this process would have put it.
-        // A module whose file is missing simply fails to load, and resolve still reports its name and the offset from
-        // the table itself.
+        // resolve still reports a module's name and offset from the table itself, whatever DbgHelp makes of it.
         ::SymLoadModuleEx(HANDLE(_session), nullptr, m.path.c_str_materialize(), nullptr, DWORD64(m.base),
                           DWORD(m.size), nullptr, 0);
     }
