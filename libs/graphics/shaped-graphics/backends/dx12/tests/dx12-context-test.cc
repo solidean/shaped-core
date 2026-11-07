@@ -165,6 +165,59 @@ TEST("sg dx12 - SC_DX12_ADAPTER hides the adapter a LUID names", exclusive())
     CHECK(hidden.error().to_string().contains("SC_DX12_ADAPTER"));
 }
 
+// The variable is process-wide, so this runs beside nothing; on a machine with two GPUs it reaches both.
+TEST("sg dx12 - SC_GPU puts a context on the vendor or the name it gives, and fails where none matches", exclusive())
+{
+    if (!dx12::has_hardware_adapter())
+        SKIP("no hardware adapter");
+
+    struct vendor
+    {
+        char const* name;
+        u32 id;
+    };
+    auto found = 0;
+    for (auto const v : {vendor{.name = "intel", .id = 0x8086}, vendor{.name = "amd", .id = 0x1002},
+                         vendor{.name = "nvidia", .id = 0x10DE}})
+    {
+        auto const pin = cc::scoped_environment_variable("SC_GPU", v.name);
+        auto const ctx
+            = sg::create_dx12_context({.activate_global_debug_layer = true, .adapter = dx12::dx12_adapter::hardware});
+        if (ctx.has_error())
+        {
+            CHECK(ctx.error().to_string().contains("SC_GPU"));
+            continue;
+        }
+        ++found;
+        CHECK(ctx.value()->metrics.adapter().vendor_id == v.id);
+
+        // The adapter's own name reaches it as well.
+        auto const name = ctx.value()->metrics.adapter().name;
+        auto const by_name = cc::scoped_environment_variable("SC_GPU", name);
+        auto const again
+            = sg::create_dx12_context({.activate_global_debug_layer = true, .adapter = dx12::dx12_adapter::hardware});
+        REQUIRE(again.has_value());
+        CHECK(again.value()->metrics.adapter().name == name);
+    }
+    if (found == 0)
+        SKIP("no Intel, AMD or NVIDIA adapter");
+
+    // WARP is never taken in a missing GPU's place, and an adapter named in code still wins.
+    auto const pin = cc::scoped_environment_variable("SC_GPU", "no such gpu");
+    for (auto const adapter : {dx12::dx12_adapter::hardware, dx12::dx12_adapter::hardware_or_warp})
+    {
+        auto const ctx = sg::create_dx12_context({.activate_global_debug_layer = true, .adapter = adapter});
+        REQUIRE(ctx.has_error());
+        CHECK(ctx.error().to_string().contains("SC_GPU='no such gpu'"));
+    }
+    auto const warp = sg::create_dx12_context({.activate_global_debug_layer = true, .adapter = dx12::dx12_adapter::warp});
+    if (warp.has_value())
+    {
+        auto const luid = warp.value()->metrics.adapter().luid.value();
+        CHECK(sg::create_dx12_context({.activate_global_debug_layer = true, .adapter_luid = luid}).has_value());
+    }
+}
+
 // A context that withholds ray tracing answers as one on an adapter without DXR, on every spelling of the question.
 TEST("sg dx12 - a context withholding ray tracing reports neither half of it")
 {

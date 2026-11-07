@@ -251,6 +251,7 @@ ctx.is_shut_down()                                 // bool
 // invariant: a context must OUTLIVE every command list & buffer it created (must be shut down before dtor)
 // you never call sg::create_context — there is none. each backend library provides the factory:
 #include <shaped-graphics/backends/vulkan/vulkan_context.hh>
+// SC_GPU=intel|amd|nvidia|<name substring>  every hardware dx12 and vulkan context of the process on that GPU; none matching fails, never falls back
 sg::create_vulkan_context(vulkan_config = {})      // -> cc::result<context_handle>
 // vulkan_config { bool enable_validation_layers=false; bool prefer_software_device=false; }  (independent flags)
 //   vulkan_config { bool native_spirv=true; }   SGL shaders take SGL's own SPIR-V where it lowers them, DXC's elsewhere; false is the text route; ctx.prefers_native_spirv()

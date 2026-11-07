@@ -2,9 +2,11 @@
 #include <clean-core/container/vector.hh>
 #include <clean-core/error/optional.hh>
 #include <clean-core/platform/environment.hh>
+#include <clean-core/string/conversion.hh>
 #include <clean-core/thread/atomic.hh>
 #include <clean-core/thread/mutex.hh>
 #include <shaped-graphics/backends/dx12/dx12_runtime.hh>
+#include <shaped-graphics/context/gpu_selector.hh>
 
 #ifndef SG_HAS_AGILITY
 #error "SG_HAS_AGILITY must be defined by the dx12 backend's CMake"
@@ -138,9 +140,11 @@ cc::mutex<runtime_choice> g_runtime_choice;
 constexpr UINT k_intel_vendor_id = 0x8086;
 constexpr UINT k_microsoft_vendor_id = 0x1414;
 
-/// The vendor of the first hardware adapter, in the order the context's own search takes them; 0 where there is none.
-[[nodiscard]] UINT first_hardware_vendor_id()
+/// The vendor of the hardware adapter a context's own search takes first, `SC_GPU` included; 0 where there is none.
+/// It cannot ask the adapter for D3D12 support as that search does, since asking loads a runtime.
+[[nodiscard]] UINT selected_hardware_vendor_id()
 {
+    auto const selector = sg::gpu_selector_from_environment();
     ComPtr<IDXGIFactory4> factory;
     if (FAILED(CreateDXGIFactory2(0, IID_PPV_ARGS(&factory))))
         return 0;
@@ -152,10 +156,19 @@ constexpr UINT k_microsoft_vendor_id = 0x1414;
             continue;
         if ((desc.Flags & DXGI_ADAPTER_FLAG_SOFTWARE) != 0 || desc.VendorId == k_microsoft_vendor_id)
             continue;
+        auto const capacity = isize(sizeof(desc.Description) / sizeof(desc.Description[0]));
+        auto length = isize(0);
+        while (length < capacity && desc.Description[length] != L'\0')
+            ++length;
+        auto const name
+            = cc::utf16_to_utf8(cc::span<char16_t const>(reinterpret_cast<char16_t const*>(desc.Description), length));
+        if (!sg::gpu_selector_matches(selector, u32(desc.VendorId), name))
+            continue;
         return desc.VendorId;
     }
     return 0;
 }
+
 [[nodiscard]] d3d12_runtime default_runtime()
 {
     if (auto const value = cc::environment_variable("SC_DX12_RUNTIME"); value.has_value())
@@ -169,11 +182,10 @@ constexpr UINT k_microsoft_vendor_id = 0x1414;
     if (!SG_HAS_AGILITY)
         return d3d12_runtime::system;
     // TEMPORARY(debt-sg-intel-keeps-off-agility): Intel's driver compiles every shader of an Agility process anew.
-    if (first_hardware_vendor_id() == k_intel_vendor_id)
+    if (selected_hardware_vendor_id() == k_intel_vendor_id)
     {
         CC_LOG_INFO("dx12 runs on the system runtime on this Intel GPU, without SM 6.9, shader execution reordering "
-                    "and "
-                    "DXR 1.2: SC_DX12_RUNTIME=agility asks for the Agility SDK anyway");
+                    "and DXR 1.2: SC_DX12_RUNTIME=agility asks for the Agility SDK anyway");
         return d3d12_runtime::system;
     }
     return d3d12_runtime::agility;

@@ -12,6 +12,7 @@
 #include <shaped-graphics/backends/dx12/dx12_context.hh>
 #include <shaped-graphics/backends/dx12/dx12_dred.hh>
 #include <shaped-graphics/backends/dx12/dx12_runtime.hh>
+#include <shaped-graphics/context/gpu_selector.hh>
 
 // ID3D12Debug / ID3D12InfoQueue1, the debug-layer interfaces, live in the SDK-layers header, separate from d3d12.h.
 #include <d3d12sdklayers.h>
@@ -54,20 +55,46 @@ constexpr UINT k_microsoft_vendor_id = 0x1414;
     return (desc.Flags & DXGI_ADAPTER_FLAG_SOFTWARE) != 0 || desc.VendorId == k_microsoft_vendor_id;
 }
 
-/// The first hardware adapter that supports D3D12, into `out`.
+/// The name DXGI gives an adapter; Description is a fixed-size WCHAR buffer, NUL-terminated within it.
+[[nodiscard]] cc::string adapter_name(DXGI_ADAPTER_DESC1 const& desc)
+{
+    auto const capacity = isize(sizeof(desc.Description) / sizeof(desc.Description[0]));
+    auto length = isize(0);
+    while (length < capacity && desc.Description[length] != L'\0')
+        ++length;
+    return cc::utf16_to_utf8(cc::span<char16_t const>(reinterpret_cast<char16_t const*>(desc.Description), length));
+}
+
+/// Every hardware adapter's name, for an error that says what a selector could have matched.
+[[nodiscard]] cc::string hardware_adapter_names(IDXGIFactory4* factory)
+{
+    auto names = cc::string();
+    ComPtr<IDXGIAdapter1> adapter;
+    for (UINT i = 0; factory->EnumAdapters1(i, adapter.ReleaseAndGetAddressOf()) != DXGI_ERROR_NOT_FOUND; ++i)
+    {
+        DXGI_ADAPTER_DESC1 desc = {};
+        if (FAILED(adapter->GetDesc1(&desc)) || is_software_adapter(desc))
+            continue;
+        names += names.empty() ? "" : ", ";
+        names += adapter_name(desc);
+    }
+    return names.empty() ? cc::string("none") : names;
+}
+
+/// The first hardware adapter that supports D3D12 and that `selector` asks for (sg::gpu_selector_matches), into `out`.
 /// WARP is skipped here, so falling back to it is always the caller's explicit choice.
 ///
 /// **A device-loss HRESULT stops the search rather than skipping the adapter.**
 /// Treating a reset GPU as "unsuitable" and quietly moving to the next one migrates the whole process to a
 /// different physical device, which nobody asked for and which surfaces much later as something unrelated.
 /// A reset is what `is_device_lost()` exists to report, so it is reported.
-adapter_search_result find_hardware_adapter(IDXGIFactory4* factory, ComPtr<IDXGIAdapter1>& out)
+adapter_search_result find_hardware_adapter(IDXGIFactory4* factory, ComPtr<IDXGIAdapter1>& out, cc::string_view selector)
 {
     for (UINT i = 0; factory->EnumAdapters1(i, out.ReleaseAndGetAddressOf()) != DXGI_ERROR_NOT_FOUND; ++i)
     {
         DXGI_ADAPTER_DESC1 ad = {};
         out->GetDesc1(&ad);
-        if (is_software_adapter(ad))
+        if (is_software_adapter(ad) || !sg::gpu_selector_matches(selector, u32(ad.VendorId), adapter_name(ad)))
             continue;
 
         // A null out-param probes D3D12 support (FL 11_0) without creating a device.
@@ -155,6 +182,11 @@ cc::string loaded_warp_identity()
                       u16(fixed->dwFileVersionLS >> 16), u16(fixed->dwFileVersionLS & 0xFFFF), written);
 }
 
+void log_adapter(sg::adapter_info const& info)
+{
+    CC_LOG_INFO("dx12 context on '{}', driver {}", info.name, info.driver_version);
+}
+
 /// What DXGI says about the adapter that was picked.
 ///
 /// The driver version comes from CheckInterfaceSupport, which is the only place d3d12 exposes one at all.
@@ -171,12 +203,7 @@ sg::adapter_info describe_adapter(IDXGIAdapter1* adapter)
     if (FAILED(adapter->GetDesc1(&desc)))
         return info;
 
-    // Description is a fixed-size WCHAR buffer, NUL-terminated within it rather than length-prefixed.
-    auto const capacity = isize(sizeof(desc.Description) / sizeof(desc.Description[0]));
-    auto length = isize(0);
-    while (length < capacity && desc.Description[length] != L'\0')
-        ++length;
-    info.name = cc::utf16_to_utf8(cc::span<char16_t const>(reinterpret_cast<char16_t const*>(desc.Description), length));
+    info.name = adapter_name(desc);
 
     info.vendor_id = u32(desc.VendorId);
     info.device_id = u32(desc.DeviceId);
@@ -412,7 +439,7 @@ bool sg::backend::dx12::has_hardware_adapter()
         ComPtr<IDXGIAdapter1> adapter;
         // A reset adapter is still a hardware adapter: answering `false` here would quietly hand the run to
         // WARP, which is the same substitution this function's caller is trying to avoid.
-        return find_hardware_adapter(factory.Get(), adapter).status != adapter_search::none;
+        return find_hardware_adapter(factory.Get(), adapter, {}).status != adapter_search::none;
     }();
     return has;
 }
@@ -486,7 +513,9 @@ cc::result<context_handle> create_dx12_context(backend::dx12::dx12_config const&
     }
     else
     {
-        auto const search = hardware_hidden ? adapter_search_result{} : find_hardware_adapter(factory.Get(), adapter);
+        auto const selector = sg::gpu_selector_from_environment();
+        auto const search
+            = hardware_hidden ? adapter_search_result{} : find_hardware_adapter(factory.Get(), adapter, selector);
 
         // Reported rather than worked around: the machine has a GPU that just reset, and creating this context on
         // a different one would hide that behind whatever goes wrong next.
@@ -496,6 +525,11 @@ cc::result<context_handle> create_dx12_context(backend::dx12::dx12_config const&
 
         if (choice != dx12_adapter::warp && search.status != adapter_search::found)
         {
+            // Never WARP in its place: a run that asked for one GPU must not report results from another.
+            if (!selector.empty() && !hardware_hidden)
+                return cc::error(cc::format("SC_GPU='{}' matches no Direct3D 12 hardware adapter; the hardware "
+                                            "adapters are: {}",
+                                            selector, hardware_adapter_names(factory.Get())));
             if (choice == dx12_adapter::hardware && hardware_hidden)
                 return cc::error(cc::format("no Direct3D 12 capable hardware adapter found (SC_DX12_ADAPTER={} hides "
                                             "them)",
@@ -601,6 +635,7 @@ cc::result<context_handle> create_dx12_context(backend::dx12::dx12_config const&
 
     auto ctx = std::make_shared<dx12_context>();
     ctx->set_adapter_info(describe_adapter(adapter.Get()));
+    log_adapter(ctx->metrics.adapter());
     // IDXGIAdapter3 is where QueryVideoMemoryInfo lives; an older runtime leaves this null and the query then refuses.
     adapter.As(&ctx->_adapter);
 

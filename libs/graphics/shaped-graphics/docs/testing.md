@@ -50,6 +50,11 @@ These rules bind every GPU test in the repo — sg's two tiers, and the librarie
   Those are the ones whose dx12 path needs SM 6.9, shader execution reordering or opacity micromaps.
   **An invocable that comes to need the Agility SDK on dx12 is added to that list**, or no Intel run reaches that path.
   `SC_DX12_RUNTIME=system` or `agility` overrides the choice for a whole process, on any vendor.
+- **`SC_GPU` moves a whole run onto one GPU**, on dx12 and vulkan alike: `SC_GPU=amd uv run dev.py test` runs every hardware driver on the AMD one.
+  `intel`, `amd` and `nvidia` match by vendor, and anything else is a case-insensitive substring of the adapter's name, as `B580`.
+  A selector that matches nothing fails each context rather than falling back, so a run never reports results from a GPU it did not ask for.
+  It narrows the hardware search only: WARP, `SC_DX12_ADAPTER`'s hiding, and an adapter chosen in code are untouched by it.
+  Every context logs at info which adapter and driver it runs on, so a run's log says which GPU it reached.
 - **A test passes on any adapter.**
   Hardware and WARP differ in precision, in timing and in what a driver does with a blob, and a test is written against the contract rather than against one of them.
   Pinning a test to an adapter is reserved for a **known bug** in that adapter, named where it is pinned, and the list of those stays short.

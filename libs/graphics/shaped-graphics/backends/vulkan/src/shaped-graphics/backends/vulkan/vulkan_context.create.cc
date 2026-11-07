@@ -11,6 +11,7 @@
 #include <clean-core/string/string_view.hh>
 #include <shaped-graphics/backends/vulkan/vulkan_context.hh>
 #include <shaped-graphics/backends/vulkan/vulkan_forward_waits.hh>
+#include <shaped-graphics/context/gpu_selector.hh>
 
 
 namespace sg::backend::vulkan
@@ -216,9 +217,12 @@ struct selected_physical_device
     u32 queue_family;
 };
 
-// Highest-ranked physical device that exposes a graphics queue, or nullopt if none qualifies (no
-// devices at all, or none with a graphics queue).
-cc::optional<selected_physical_device> pick_physical_device(VkInstance instance, bool prefer_software)
+// Highest-ranked physical device that exposes a graphics queue and that `selector` asks for (sg::gpu_selector_matches),
+// or nullopt if none qualifies.
+// A CPU device ignores the selector, since it is the software fallback rather than a GPU anyone names.
+cc::optional<selected_physical_device> pick_physical_device(VkInstance instance,
+                                                            bool prefer_software,
+                                                            cc::string_view selector)
 {
     uint32_t device_count = 0;
     vkEnumeratePhysicalDevices(instance, &device_count, nullptr);
@@ -235,6 +239,9 @@ cc::optional<selected_physical_device> pick_physical_device(VkInstance instance,
 
         VkPhysicalDeviceProperties props = {};
         vkGetPhysicalDeviceProperties(device, &props);
+        if (props.deviceType != VK_PHYSICAL_DEVICE_TYPE_CPU
+            && !sg::gpu_selector_matches(selector, props.vendorID, cc::string_view(props.deviceName)))
+            continue;
         int const rank = device_type_rank(props.deviceType, prefer_software);
         if (rank > best_rank)
         {
@@ -245,6 +252,24 @@ cc::optional<selected_physical_device> pick_physical_device(VkInstance instance,
     return best;
 }
 
+// Every physical device's name, for an error that says what a selector could have matched.
+cc::string physical_device_names(VkInstance instance)
+{
+    uint32_t device_count = 0;
+    vkEnumeratePhysicalDevices(instance, &device_count, nullptr);
+    auto devices = cc::vector<VkPhysicalDevice>::create_uninitialized(device_count);
+    vkEnumeratePhysicalDevices(instance, &device_count, devices.data());
+    auto names = cc::string();
+    for (auto device : devices)
+    {
+        VkPhysicalDeviceProperties props = {};
+        vkGetPhysicalDeviceProperties(device, &props);
+        names += names.empty() ? "" : ", ";
+        names += cc::string_view(props.deviceName);
+    }
+    return names.empty() ? cc::string("none") : names;
+}
+
 // The device a caller chose, with its graphics family, or nullopt where it chose none or one with no graphics queue.
 cc::optional<selected_physical_device> chosen_physical_device(VkPhysicalDevice device)
 {
@@ -252,6 +277,11 @@ cc::optional<selected_physical_device> chosen_physical_device(VkPhysicalDevice d
     if (device == VK_NULL_HANDLE || !find_graphics_queue_family(device, family))
         return {};
     return selected_physical_device{.device = device, .queue_family = family};
+}
+
+void log_adapter(sg::adapter_info const& info)
+{
+    CC_LOG_INFO("vulkan context on '{}', driver {}", info.name, info.driver_version);
 }
 
 // Appends each name of `extra` that `enabled` does not hold yet, terminated in place so `enabled` can point into it.
@@ -697,15 +727,22 @@ cc::result<context_handle> create_vulkan_context(backend::vulkan::vulkan_config 
     VkDebugUtilsMessengerEXT messenger = VK_NULL_HANDLE;
 
     // Physical device selection: rank every device that exposes a graphics queue, keep the best — or take the one the caller chose.
-    auto const picked = config.choose_physical_device ? chosen_physical_device(config.choose_physical_device(instance))
-                                                      : pick_physical_device(instance, config.prefer_software_device);
+    auto const selector = config.choose_physical_device ? cc::string() : sg::gpu_selector_from_environment();
+    auto const picked = config.choose_physical_device
+                          ? chosen_physical_device(config.choose_physical_device(instance))
+                          : pick_physical_device(instance, config.prefer_software_device, selector);
     if (!picked.has_value())
     {
+        auto message = config.choose_physical_device ? cc::string("vulkan_config::choose_physical_device chose no "
+                                                                  "device, or one without a graphics "
+                                                                  "queue")
+                     : selector.empty()
+                         ? cc::string("no Vulkan device with a graphics queue found")
+                         : cc::format("SC_GPU='{}' matches no Vulkan device with a graphics queue; the devices are: {}",
+                                      selector, physical_device_names(instance));
         destroy_debug_messenger(instance, messenger);
         vkDestroyInstance(instance, nullptr);
-        return cc::error(config.choose_physical_device
-                             ? "vulkan_config::choose_physical_device chose no device, or one without a graphics queue"
-                             : "no Vulkan device with a graphics queue found");
+        return cc::error(cc::move(message));
     }
     auto const best_device = picked.value().device;
     auto const best_family = picked.value().queue_family;
@@ -1142,6 +1179,7 @@ cc::result<context_handle> create_vulkan_context(backend::vulkan::vulkan_config 
     ctx->set_device_properties(device_props.properties);
 
     ctx->set_adapter_info(describe_adapter(best_device));
+    log_adapter(ctx->metrics.adapter());
 
     // Ray tracing is supported only if its entry points are actually there too, which is the same all-or-nothing rule
     // the descriptor-buffer loader applies — except that here a false answer is a legitimate device rather than a

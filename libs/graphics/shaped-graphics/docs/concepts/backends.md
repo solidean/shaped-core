@@ -33,6 +33,7 @@ It is fetched on request, `uv run extern/agility/fetch-agility.py --accept-licen
 * **The runtime is one per process, and a process may ask for the system's.**
   `dx12::choose_d3d12_runtime` before the first device, else `SC_DX12_RUNTIME=system` or `agility`, else the SDK's where it was fetched.
   The default is the system runtime on an Intel GPU, until Intel's driver keeps its cache in an Agility process (`debt-sg-intel-keeps-off-agility`).
+  The GPU it asks about is the one the context's search takes, `SC_GPU` included, so `SC_GPU=amd` on a machine with an Intel GPU too runs on the Agility SDK.
   A process that asked for the system runtime never creates the SDK's device factory, so on Intel's driver it keeps its shader cache.
   There the factory alone costs every later shader compile of the process its cache, vulkan's included.
   [The external entry](../../../../../docs/bugs-external/intel-agility-process-recompiles-acceleration-structure-kernels/readme.md) has the reproduction.
