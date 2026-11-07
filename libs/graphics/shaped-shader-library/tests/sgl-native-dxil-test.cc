@@ -214,23 +214,22 @@ TEST("slib - a 64-bit atomic is the i64 form of DXIL's own, and states what it r
     auto compiler = ssc::dxc::compiler::create();
     if (compiler.has_error())
         SKIP("no DXC");
-    constexpr cc::string_view source
-        = "require shader_int64, shader_int64_atomics, shader_shared_int64_atomics\n"
-          "binding results:\n"
-          "    totals: mut buffer[atomic[ulong]]\n"
-          "    plain: mut buffer[ulong]\n"
-          "\n"
-          "@workgroup binding local:\n"
-          "    lowest: atomic[long]\n"
-          "\n"
-          "@compute(64) fun in_buffer(@thread_id id: int3){results}:\n"
-          "    results.totals[0].add(1u64 << 33)\n"
-          "    results.plain[id.x] = results.totals[0].min(5u64)\n"
-          "\n"
-          "@compute(64) fun in_workgroup(@local_thread_index t: int){results, local}:\n"
-          "    local.lowest.min(-(1i64 << 40) - (t as long))\n"
-          "    workgroup_barrier()\n"
-          "    results.plain[t] = local.lowest.load() as ulong\n";
+    constexpr cc::string_view source = "require shader_int64, shader_int64_atomics, shader_shared_int64_atomics\n"
+                                       "binding results:\n"
+                                       "    totals: mut buffer[atomic[ulong]]\n"
+                                       "    plain: mut buffer[ulong]\n"
+                                       "\n"
+                                       "@workgroup binding local:\n"
+                                       "    lowest: atomic[long]\n"
+                                       "\n"
+                                       "@compute(64) fun in_buffer(@thread_id id: int3){results}:\n"
+                                       "    results.totals[0].add(1u64 << 33)\n"
+                                       "    results.plain[id.x] = results.totals[0].min(5u64)\n"
+                                       "\n"
+                                       "@compute(64) fun in_workgroup(@local_thread_index t: int){results, local}:\n"
+                                       "    local.lowest.min(-(1i64 << 40) - (t as long))\n"
+                                       "    workgroup_barrier()\n"
+                                       "    results.plain[t] = local.lowest.load() as ulong\n";
     auto const buffer = written(source, "in_buffer");
     REQUIRE(buffer.has_value());
     CHECK(!compiler.value().validate(buffer.value().dxil).has_value());
