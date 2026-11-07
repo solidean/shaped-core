@@ -660,9 +660,12 @@ context::~context()
     CC_ASSERT(_is_shut_down, "context must be shut down before destruction");
 
     // A resource still alive here releases into this context after it is freed, which hangs or corrupts rather than fails.
-    CC_ASSERTF(_live_resources.load() == 0,
-               "{} textures and buffers outlive their context; release them before it is destroyed",
-               _live_resources.load());
+    // After a device loss it is what the failed work still holds, and an assert in this destructor would terminate the
+    // process instead of letting the loss be reported, so it is logged.
+    if (auto const live = _live_resources.load(); live != 0 && is_device_lost())
+        CC_LOG_ERROR("{} textures and buffers outlive a context whose device was lost", live);
+    else
+        CC_ASSERTF(live == 0, "{} textures and buffers outlive their context; release them before it is destroyed", live);
 }
 
 void context::shutdown()
