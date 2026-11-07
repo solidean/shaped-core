@@ -1,6 +1,8 @@
 ---
 created: 2026-11-06
 parent: epic-sgl-native-ir-targets
+closed: 2026-11-07
+resolution: fixed
 ---
 
 # SGL lines in the SPIR-V the native layer writes
