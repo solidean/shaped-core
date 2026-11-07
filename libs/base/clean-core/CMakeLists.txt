@@ -32,6 +32,7 @@ add_library(clean-core
     src/clean-core/platform/native.cc
     src/clean-core/platform/console.cc
     src/clean-core/platform/environment.cc
+    src/clean-core/platform/file_access.cc
     src/clean-core/platform/file_path.cc
     src/clean-core/platform/stack_capture.cc
     src/clean-core/platform/stacktrace.cc
@@ -570,6 +571,7 @@ if(SC_BUILD_TESTS)
 
         tests/platform/console-test.cc
         tests/platform/environment-test.cc
+        tests/platform/file_access-test.cc
         tests/platform/file_path-test.cc
         tests/platform/native-test.cc
         tests/platform/stack-capture-test.cc

@@ -48,6 +48,7 @@ add_library(nexus
     src/nexus/tests/export/pgo_json.cc
     src/nexus/tests/export/timings_json.cc
     src/nexus/tests/export/listing_json.cc
+    src/nexus/tests/export/runner_report.cc
     src/nexus/fuzz/machine.cc
     src/nexus/fuzz/generator.cc
     src/nexus/fuzz/minimizer.cc
@@ -125,6 +126,7 @@ target_sources(nexus
     src/nexus/tests/export/timings_json.hh
     src/nexus/tests/thorough.hh
     src/nexus/tests/export/listing_json.hh
+    src/nexus/tests/export/runner_report.hh
 
     src/nexus/fuzz/fwd.hh
     src/nexus/fuzz/async.hh
@@ -231,6 +233,7 @@ if(SC_BUILD_TESTS)
         tests/test-seed-test.cc
         tests/test-entry-test.cc
         tests/test-export-test.cc
+        tests/test-runner-report-test.cc
         tests/test-thorough-test.cc
         tests/test-registry-test.cc
         tests/test-section-test.cc

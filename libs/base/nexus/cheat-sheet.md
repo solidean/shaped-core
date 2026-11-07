@@ -120,6 +120,19 @@ nx::source_root()                        // cc::string_view: SC_SOURCE_ROOT, els
 - `dev.py` sets `SC_SOURCE_ROOT` for every binary it runs; a binary started by hand finds its build's `CMakeCache.txt`, wherever that build directory is.
 - For tests, examples and tools: a shipped library never asks, and links no nexus.
 
+## File access (`cc::file_access`)
+
+```cpp
+#include <clean-core/platform/file_access.hh>
+cc::file_access::note_read(path);        // DECLARE a file read past clean-core (std::filesystem, fopen, a library's own IO)
+cc::file_access::note_write(path);       //   ...written, created or deleted
+cc::file_access::note_list(directory);   //   ...a directory listed (clean-core has no iteration, so always declared)
+```
+
+- **Touch files through clean-core**: its streams record every path they open when a runner asks (`NX_EXTERNAL_RUNNER_REPORT`).
+  Anything past them is not seen unless declared, and a runner caching on reads then misses the dependency ([docs/external-runner.md](docs/external-runner.md)).
+- Free while nothing records: one relaxed atomic load.
+
 ## Examples (`EXAMPLE`)
 
 A runnable demonstration of an API **in practice**, in the `example` bucket, run one at a time by `dev.py example`.

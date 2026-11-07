@@ -4,6 +4,7 @@
 #include <clean-core/common/time.hh>
 #include <clean-core/common/utility.hh>
 #include <clean-core/container/pinned_data.hh>
+#include <clean-core/platform/file_access.hh>
 #include <clean-core/record/desc.hh>
 #include <clean-core/record/domain.hh>
 #include <clean-core/record/impl/serialized_format.hh>
@@ -150,6 +151,7 @@ cc::result<cc::unit> cc::rec::save_recording(cc::rec::recording const& r, cc::st
 
 cc::result<cc::unit> cc::rec::save_serialized_recording(cc::span<byte const> bytes, cc::string_view path)
 {
+    cc::file_access::note_write(path);
     auto file = cc::impl::native_file::open(path, cc::impl::file_mode::write_truncate);
     CC_RETURN_IF_ERROR(file);
 
@@ -535,6 +537,7 @@ cc::result<cc::rec::loaded_recording> cc::rec::deserialize(cc::span<byte const> 
 
 cc::result<cc::rec::loaded_recording> cc::rec::load_recording(cc::string_view path)
 {
+    cc::file_access::note_read(path);
     auto file = cc::impl::native_file::open(path, cc::impl::file_mode::read);
     CC_RETURN_IF_ERROR(file);
 
