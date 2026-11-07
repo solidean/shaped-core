@@ -1102,7 +1102,7 @@ void sgl::builtins::register_raytracing(registry& r)
     });
     r.add(function_record{
         .signature = "@internal @stages(.raygen) fun reorder_thread_by_hint(hint: uint, bits: int)",
-        .doc = "/// Regroups the invocations by the low `bits` bits of `hint`, which `maybe_reorder` writes on vulkan.",
+        .doc = "/// Regroups the invocations by the low `bits` bits of `hint`, which `maybe_reorder` writes.",
         .evaluate = nothing,
         .write = {.kind = spelling_kind::custom,
                   .custom = write_hit_object_step,

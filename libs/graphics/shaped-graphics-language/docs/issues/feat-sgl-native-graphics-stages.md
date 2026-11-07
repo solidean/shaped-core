@@ -318,4 +318,6 @@ What DXC does here that the native route does not:
 - **A `bool` in a payload on vulkan**, and the `OpControlBarrier` ahead of a dispatch from more than one invocation, for the same reasons: no draw covers them.
 - **Native mesh and task stages with a `@view_index`, or a `@layer`.** The first is no input of a mesh stage, and the second is written but no test draws it.
 - **`-Od` and `-Zi`.** The sweep compiled at the default optimization level, with no debug info.
-- **The Agility SDK's runtime and any GPU but the B580.** The link answers come from the D3D12 runtime rather than from a driver, so they should hold, but that is inference.
+- **Any GPU but the B580.** The link answers come from the D3D12 runtime rather than from a driver, so they should hold, but that is inference.
+- **Graphics stages on the Agility SDK's runtime.** Its 1.620.1 creates SGL's ray-tracing libraries under the bypass digest.
+  `dx12-native-dxil`'s whole sweep has not finished on it, since the dx12 device is lost first.

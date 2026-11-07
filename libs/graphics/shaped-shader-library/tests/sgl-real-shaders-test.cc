@@ -273,8 +273,11 @@ TEST("slib - a device's micromaps and reordering leave only the named gaps on ei
                     continue;
                 if (!e.value().native_gap.empty())
                 {
-                    CHECK(!e.value().native_gap.contains("hit_object")).dump("entry", entry.entry_point);
-                    CHECK(!e.value().native_gap.contains("reorder")).dump("entry", entry.entry_point);
+                    // what a ray-tracing stage leaves is metal's own, so a required-native package meets no other
+                    auto const is_metals = e.value().native_gap.contains("only metal");
+                    CHECK((e.value().stage < sgl::check::stage::raygen || is_metals))
+                        .dump("entry", entry.entry_point)
+                        .dump("gap", e.value().native_gap);
                     CC_LOG_INFO("device gap {}: {}", target == sgl::emit::target::hlsl_dx12 ? "dxil" : "spirv",
                                 e.value().native_gap);
                     continue;

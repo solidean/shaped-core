@@ -24,7 +24,7 @@ On 2026-11-07, on the Arc B580 and over the repo's SGL, DXC 1.9.2602:
   An operation declared and left with no call is refused, so `remove_unused` drops its declaration.
 
 Not done here: reads nothing asks for, such as a query's own flags or t_min.
-No GPU but the B580 ran this, and the Agility runtime did not.
+No GPU but the B580 ran this, and only on the system runtime.
 
 ## What a pipeline stage is, measured
 
@@ -45,6 +45,7 @@ A hit's transform is the one element that is a matrix.
 **A DXIL library needs less than DXC writes.**
 
 - **The container is `SFI0`, `RDAT` and `DXIL`.** `STAT`, `VERS` and `HASH` can all go: the validator passes it, and `ID3D12StateObject` creation takes it under the bypass digest.
+  That holds on the system runtime and on Agility 1.620.1.
 - **The validator does compare `RDAT` with the module**, as it does `PSV0`, and refuses a mismatch: `Container part 'Runtime Data (RDAT)' does not match expected for module`.
   So every field is what the module implies.
   A hit's geometry index is raytracing tier 1.1 and shader model 6.5 there, which the flags and the row's target must say, as a query's do.
@@ -104,19 +105,21 @@ What that found:
 
 On 2026-11-07, DXC 1.9.2602, on the Arc B580.
 
-**The B580 has reordering on vulkan and not on dx12.**
+**The B580 has reordering on both APIs once dx12 runs on the Agility SDK, and micromaps on neither.**
 
 | context | `shader_execution_reordering` | `opacity_micromap` |
 |---|---|---|
 | vulkan, both routes | yes | no |
-| dx12, both routes | no | no |
+| dx12, both routes, system runtime (`SG_HAS_AGILITY` 0) | no | no |
+| dx12, both routes, Agility SDK 1.620.1 | yes | no |
 
-dx12's answer is this build's, not the card's: the feature needs Shader Model 6.9, which the Agility SDK alone brings, and `SG_HAS_AGILITY` is 0 here.
-So **vulkan's half is drawn, and dx12's is compile-verified only**: DXC's validator and disassembly, with no draw.
+Reordering on dx12 is Shader Model 6.9, which only the Agility runtime reports, so it also confirms SM 6.9 on this runtime.
+Micromaps are reordering plus raytracing tier 1.2, so the B580's dx12 driver reports a tier below 1.2.
+**Both halves are drawn now**, dx12's on Agility 1.620.1 with the debug layer on.
 
 - **What the sweep named, mapped to its entry.** `the type hit_object` was `inspected_primary`, and `the builtin reorder_thread_by_hint` was `reordered_primary`.
   `a resource used as a value` was `hit_reordered_primary`, whose `trace_ray_reordered` reached the generic call path with its structure.
-- **All of them lower now.** The sweep with `opacity_micromap`, `shader_execution_reordering` and `vertex_pipeline_stores` lowers 672 entries.
+- **All of them lower now.** The sweep with `opacity_micromap`, `shader_execution_reordering` and `vertex_pipeline_stores` lowers 677 entries.
   Every SPIR-V passes `spirv-val` under `--thorough`, and every DXIL the validator.
   What is left of it is metal's fused intersections and empty closest hit, and the gaps no device feature touches.
 - **A hit object never moves.** `ir::verify` refuses a phi, a `select`, a store or a composite of one, and a local, global or member holding one.
@@ -127,9 +130,13 @@ So **vulkan's half is drawn, and dx12's is compile-verified only**: DXC's valida
 - **The shapes were read back.** `sgl hit object spirv - SGL's own binaries` walks each module word by word as DXC's are walked, on two arms, a read in a branch and a loop.
   It reads DXIL's disassembly for the operation, and for no phi or `select` of one.
   It can fail: a load of the hit object added to SPIR-V's reads failed it, and it was reverted.
-- **vulkan draws alike.** `mixed-route-ray-test.cc` holds a regrouped trace and a hit object through SGL's binary to DXC's within 1e-4, with validation on.
+- **Both APIs draw alike.** `mixed-route-ray-test.cc` holds a regrouped trace and a hit object through SGL's binary to DXC's within 1e-4.
+  That runs on `dx12-hw` and `vulkan`, with the debug layer and validation on.
   That is a native raygen among DXC's stages, and every stage native.
+  On dx12 those are SM 6.9 libraries, ours and DXC's, and both create state objects.
   sg's reordering tests pass on `vulkan-native-spirv`.
+- **The draw found a DXIL gap the sweep's check missed.** The prelude's `maybe_reorder` wrote `dx::MaybeReorderThread` as HLSL text on dx12, which the DXIL route does not lower.
+  It calls `reorder_thread_by_hint` on both APIs now, and the sweep refuses any gap a ray-tracing stage keeps unless it is metal's.
 - **SPIR-V's reordering trace is one instruction, DXIL's three**, as each text writes it.
 
 `question-sgl-hit-object-as-parameter` is untouched: today's shapes lower, and none needed the answer.
@@ -154,5 +161,8 @@ Reordering added three gaps here, which the section above closes.
 **Left.**
 
 - **Motion traces**, which this issue's first line leaves last.
-- **Agility**: reordering and micromaps on dx12 have run on no device.
+- **Micromaps** have run on no device: the B580 has them on neither API.
+- **`shaped-graphics-test` loses the dx12 device on Agility 1.620.1.** The `dx12-hw` sweep ends in `DXGI_ERROR_DRIVER_INTERNAL_ERROR` about 27 s in.
+  The same tree passes all 1958 tests on the system runtime.
+  The ray-tracing tests above pass when run alone, and which test removes the device is not known yet.
 - **Whether a driver treats a plain export or missing annotations differently.** The B580 did not, and no other GPU ran.

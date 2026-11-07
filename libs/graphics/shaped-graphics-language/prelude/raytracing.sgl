@@ -464,12 +464,8 @@ fun is_occluded(world: acceleration_structure[.triangles], r: ray, .mask: int = 
 /// It is dx12's `MaybeReorderThread` and vulkan's `OpReorderThreadWithHintEXT` where the device has `shader_execution_reordering`, and nothing elsewhere.
 @stages(.raygen)
 fun maybe_reorder(hint: uint, bits: int):
-    const if has(.shader_execution_reordering) and target_api == .vulkan:
+    const if has(.shader_execution_reordering):
         reorder_thread_by_hint(hint, bits)
-    else if has(.shader_execution_reordering):
-        "hlsl
-            dx::MaybeReorderThread($hint, (uint)$bits);
-        "
     else:
         return
 
