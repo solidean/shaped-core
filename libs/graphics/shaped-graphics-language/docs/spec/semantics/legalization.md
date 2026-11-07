@@ -78,8 +78,15 @@ The worked examples are WGSL, since it is the strictest target: no `do … while
   A swizzle tests each field it reads, and each index of the place is pinned once, so the test and the access read the same element.
   A read that races a store, with no barrier between, may or may not be reported.
   The shadow takes a word per 32 scalars beside the memory it shadows, in CHK-294's 16384 bytes; where it would not fit, no read is tested.
-  The profile `define` shadows nothing and zeroes workgroup memory before the body instead, WGSL's value (EMIT-229).
+  The profile `define` shadows nothing and zeroes workgroup memory before the body instead, WGSL's value (LEGAL-71).
   A task and a mesh stage's workgroup memory is not shadowed yet.
+* **LEGAL-71** The last step writes the shadow and its prologue as statements of the finished core tree, so no route knows of either.
+  A read of the shadow is an atomic `load` of its word, and a mark an atomic `bit_or`, each on a place no source can name, which the target declares `sgl_written` (EMIT-229).
+  Which bits a range of scalars takes is arithmetic in the tree, a whole word its own case, since no target shifts by 32.
+  Ahead of the body, each invocation stores 0 to the words its index in the workgroup strides to.
+  Under `define` it zeroes workgroup memory instead: an array member element by element in that stride, any other member in invocation 0, and an atomic by its store.
+  A `workgroup_barrier` follows either, so no mark lands before a clear and no read before the zero.
+  A target whose workgroup memory starts at zero, as WebGPU's does, gets no prologue.
 * **LEGAL-52** (V1) A core tree holds no `void` local, and no `let`, `var`, assignment, `return` or read of a `void` value: what evaluating one does stays as an `eval`, and the value itself is gone.
   It follows every rule that introduces a local for a result, since a `void` result is one of them; only the let rules come after it.
 

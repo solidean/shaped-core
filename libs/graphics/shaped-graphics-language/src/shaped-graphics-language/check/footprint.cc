@@ -101,8 +101,10 @@ cc::vector<slot_footprint> footprint_of(checked_module const& m, flat_entry_poin
                 place = element->object;
                 continue;
             }
-            // workgroup memory is no slot of the host's
+            // workgroup memory is no slot of the host's, and neither is its shadow
             if (auto const* const b = x.node.try_as<flat_binding_member>(); b != nullptr && b->is_workgroup)
+                break;
+            if (x.node.is<flat_written_word>())
                 break;
             if (auto const* const element = x.node.try_as<flat_buffer_element>())
             {

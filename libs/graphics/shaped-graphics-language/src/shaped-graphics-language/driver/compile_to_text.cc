@@ -189,6 +189,8 @@ cc::result<emitted_source, cc::string> emit_text(driver::impl::front_end const& 
                                         .erases_prints = !writes_records,
                                         .lowers_asserts = diagnostics,
                                         .expands_prints = writes_records,
+                                        .expands_workgroup = true,
+                                        .workgroup_starts_zeroed = target == emit::target::wgsl,
                                         .files = files,
                                         .names = names,
                                         .guards_undefined = guards_undefined,

@@ -54,14 +54,8 @@ private:
     void unsupported(cc::string_view what);
 
     void declare_stage_inputs();
-    /// EMIT-229: clears the shadow, or zeroes workgroup memory under `define`, each invocation its stride, then waits.
-    void workgroup_prologue();
-    /// `body(i)` for `i = first, first + step, ...` while `i < count`, which `first` may already pass.
-    void strided(value_ref first, u32 count, u32 step, cc::function_ref<void(value_ref)> body);
-    /// LEGAL-69's shadow, one `uint` per 32 scalars of workgroup memory.
+    /// LEGAL-69's shadow, one `uint` per 32 scalars of workgroup memory, which a `flat_written_word` indexes.
     [[nodiscard]] value_ref written_shadow();
-    /// `workgroup_written_word`, `workgroup_mark_written` and `workgroup_written_bits`, which legalize alone calls.
-    [[nodiscard]] value_ref shadow_call(check::flat_call const& c, builtins::function_record const& record);
     u32 add_stage_element(stage_element e, cc::string_view semantic, cc::string_view name);
     void elements_of_struct(check::type_id t, stage_part part, u32 array_size);
     u32 element_of_input(isize index);

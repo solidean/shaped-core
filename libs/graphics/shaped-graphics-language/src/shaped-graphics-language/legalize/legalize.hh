@@ -36,6 +36,11 @@ struct sgl::check::legalize_options
     /// Writes every print as flat statements over `sg_debug` (LEGAL-70), which is what a target compiles.
     /// Left off, a print stays a `flat_print`, which only the interpreter runs.
     bool expands_prints = false;
+    /// Writes the shadow of workgroup memory and its prologue as flat statements (LEGAL-71), which is what a target compiles.
+    /// Left off, a read and a mark of the shadow stay calls, which only the interpreter runs, and there is no prologue.
+    bool expands_workgroup = false;
+    /// The target's workgroup memory starts at zero, as WebGPU's does, so LEGAL-71 writes no prologue for it.
+    bool workgroup_starts_zeroed = false;
     /// The files and their names a site's origin and id read (EMIT-183); empty leaves a site without a place.
     cc::span<module_file const> files;
     cc::span<cc::string_view const> names;

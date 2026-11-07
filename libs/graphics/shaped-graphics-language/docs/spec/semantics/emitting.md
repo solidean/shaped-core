@@ -519,9 +519,8 @@ fn main_ps(p: pixel_input) -> target_ {
   On DXIL it is the `i64` form of `dx.op.atomicBinOp` and `dx.op.atomicCompareExchange` on a buffer, and an `atomicrmw` or `cmpxchg` of `i64` in workgroup memory.
   A resource it reaches carries Atomic64Use in its metadata, and `PSV0` flags it `UsedByAtomic64`, since the validator compares the two.
   One in workgroup memory states the shader flag for 64-bit atomics on group-shared memory, and one on a buffer needs nothing past 64-bit integers.
-* **EMIT-248** A native route writes EMIT-229's prologue as the text does, in shared lowering, so neither writer knows of it.
-  The shadow is one workgroup global `sgl_written` of a `uint` per 32 scalars, and the stride is a loop over the invocation's index in its workgroup, ahead of the body and a workgroup barrier.
-  A read of a word is an atomic load and a mark an atomic `or`, and which bits a range of scalars takes is arithmetic, with a whole word its own case since neither target shifts by 32.
+* **EMIT-248** A native route declares LEGAL-69's shadow as one workgroup global `sgl_written` of a `uint` per 32 scalars, and a word of it is that global's element.
+  What reads, marks and clears it is LEGAL-71's statements, which it lowers as any other, so neither writer knows of a prologue.
 * **EMIT-249** DXIL writes each subgroup and quad operation as the operations HLSL's text compiles to.
   A shuffle by an offset reads `waveReadLaneAt` at the lane it computes from `waveGetLaneIndex`, as EMIT-146's text does.
   An inclusive sum or product is `wavePrefixOp` and then this invocation's own value folded in, since DXIL's prefix is exclusive alone.
@@ -652,10 +651,9 @@ So `{float3; float}` is written with `packed_float3`: the `float` is at byte 12 
   What would be a copy, CHK-516 refuses before any text: DXC would lower it to `OpLoad` and `OpStore`, which `spirv-val` and the validation layer accept and a driver may crash on.
   `sgl hit object spirv` in slib's tests reads DXC's module word by word to hold this, every path at `-O3` and `-Od`, and every raygen of the repo that reorders.
 * **EMIT-229** A compute stage whose workgroup memory LEGAL-69 shadows declares the shadow `sgl_written`, a `uint` atomic word per 32 scalars, beside that memory.
-  Before the body, each invocation clears the words its index in the workgroup strides to, and a workgroup barrier follows, so no mark lands before a clear.
-  Under `define` the same prologue zeroes workgroup memory instead: an array member element by element in that stride, any other member in invocation 0.
-  WGSL writes neither prologue, since WebGPU's workgroup memory starts at zero, the shadow's included.
-  An invocation's index is its `@local_thread_index` where the stage takes one, and a parameter the text adds where it does not.
+  A word of the shadow is `sgl_written[w]`, and the prologue that clears it, or zeroes workgroup memory under `define`, is statements LEGAL-71 wrote.
+  WGSL has none, since WebGPU's workgroup memory starts at zero, the shadow's included.
+  An invocation's index is its `@local_thread_index` where the stage takes one, and a parameter legalize adds where it does not.
 * **EMIT-136** HLSL writes a ray-tracing stage as a library export named by its kind, `[shader("closesthit")]` over `void`, whose payload is an `inout` parameter.
   A triangle closest hit or any hit takes `BuiltInTriangleIntersectionAttributes` too.
   An any hit's decision ends the stage: `ignore` is `IgnoreHit()`, `accept_and_end_search` `AcceptHitAndEndSearch()`, and `accept` a plain `return`.

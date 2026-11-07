@@ -56,6 +56,7 @@ add_library(shaped-graphics-language
     src/shaped-graphics-language/check/reserved_bindings.cc
     src/shaped-graphics-language/check/source_lines.cc
     src/shaped-graphics-language/legalize/legalize_prints.cc
+    src/shaped-graphics-language/legalize/legalize_workgroup.cc
     src/shaped-graphics-language/ir/ir.cc
     src/shaped-graphics-language/ir/pipeline.cc
     src/shaped-graphics-language/ir/cleanup.cc

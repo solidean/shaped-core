@@ -321,6 +321,16 @@ struct sgl::check::flat_buffer_length
     constexpr bool operator==(flat_buffer_length const&) const = default;
 };
 
+/// Word `word` of the shadow of workgroup memory (LEGAL-69), an `atomic[uint]` place that only an atomic's call reaches.
+/// Only the last step of legalize writes it, so no pass between sees one, and each target declares the shadow beside
+/// that memory, `written_words` long.
+struct sgl::check::flat_written_word
+{
+    flat_expr_id word = flat_expr_id::none;
+
+    constexpr bool operator==(flat_written_word const&) const = default;
+};
+
 /// `object[index]` on an array value: its element, read or, as a place, assigned.
 /// The index is evaluated after the object; outside `0 ..< length` it is a program error (EVAL-90).
 struct sgl::check::flat_element
@@ -425,6 +435,7 @@ struct sgl::check::flat_expr
                 flat_buffer_element,
                 flat_buffer_length,
                 flat_element,
+                flat_written_word,
                 flat_construct,
                 flat_call,
                 flat_not,
@@ -845,10 +856,10 @@ struct sgl::check::flat_entry_point
     /// Set where a metal traversal's fused any hit decided `accept_and_end_search`, which the traversal's result then
     /// says (CHK-345); `none` for every other entry point.
     local_id ends_search = local_id::none;
-    /// LEGAL-69: the 32-bit words of the shadow that says which scalars of workgroup memory were stored, which the text
-    /// declares and clears before the body (EMIT-229); 0 where nothing tests it.
+    /// LEGAL-69: the 32-bit words of the shadow that says which scalars of workgroup memory were stored, which every
+    /// target declares (EMIT-229) and LEGAL-71 clears before the body; 0 where nothing tests it.
     i32 written_words = 0;
-    /// LEGAL-69 under `define`: the text zeroes workgroup memory before the body, as WGSL does (EMIT-229).
+    /// LEGAL-69 under `define`: LEGAL-71 zeroes workgroup memory before the body, as WGSL's starts.
     bool zeroes_workgroup = false;
     /// The local holding the invocation's index in its workgroup, which that prologue strides by; `none` where there is
     /// none.

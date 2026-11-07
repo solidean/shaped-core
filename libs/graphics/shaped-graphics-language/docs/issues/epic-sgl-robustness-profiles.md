@@ -38,7 +38,7 @@ And [bug-sv-guarded-raster-pipeline-stalls-intel-driver](../../../shaped-viewer/
 
 LEGAL-69 shadows a compute stage's workgroup memory with a bit per scalar, set by a store and tested by a read, under `abort` and `report`.
 `report` names the place and its indices, and a GPU test reports a read of what no invocation stored on dx12, vulkan and webgpu.
-`define` zeroes workgroup memory before the body instead, as WGSL does; the text writes both prologues (EMIT-229).
+`define` zeroes workgroup memory before the body instead, as WGSL does; legalize writes both prologues as statements every route lowers (LEGAL-71).
 
 ## Binding arrays and memory that holds nothing (2026-11-06)
 

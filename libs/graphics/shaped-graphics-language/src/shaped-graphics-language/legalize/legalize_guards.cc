@@ -1217,6 +1217,40 @@ struct guarder
         return out.call(name, args);
     }
 
+    /// The bits of shadow word `word` that the scalars `first ..< first + count` take, 0 where it holds none, as a
+    /// `uint` local; a shift by 32 has no value on any target, so a whole word is its own case.
+    local_id bits_of(local_id word, local_id first, u32 count, stmt_list& into)
+    {
+        auto const uint_type = out.type_named(builtins::k_uint);
+        auto const pinned = [&](cc::string_view name, flat_expr_id value)
+        {
+            auto const local = out.add_local(local_kind::temporary, name, uint_type);
+            into.push_back(out.let(local, value));
+            return local;
+        };
+        auto const base = pinned("base", uint_call("shift_left_uint", out.local(word), uint_literal(5)));
+        auto const lo = pinned("lo", uint_call("max", out.local(first), out.local(base)));
+        auto const hi = pinned("hi", uint_call("min", uint_call("add_uint", out.local(first), uint_literal(i32(count))),
+                                               uint_call("add_uint", out.local(base), uint_literal(32))));
+        auto const bits = add_temporary_var(out, "bits", uint_type);
+        into.push_back(out.var(bits, uint_literal(0)));
+        auto const n = out.add_local(local_kind::temporary, "n", uint_type);
+        auto const all = out.add_expr(uint_type, flat_int_literal{.value = -1, .is_unsigned = true, .is_hex = true});
+        auto const low_bits
+            = uint_call("subtract_uint", uint_call("shift_left_uint", uint_literal(1), out.local(n)), uint_literal(1));
+        flat_stmt_id const whole[] = {out.assign(out.local(bits), all)};
+        flat_stmt_id const part[]
+            = {out.assign(out.local(bits), uint_call("shift_left_uint", low_bits,
+                                                     uint_call("subtract_uint", out.local(lo), out.local(base))))};
+        flat_stmt_id const held[]
+            = {out.let(n, uint_call("subtract_uint", out.local(hi), out.local(lo))),
+               out.if_(compare("greater_equal", shape{.element = builtins::k_uint}, out.local(n), uint_literal(32)),
+                       whole, part)};
+        into.push_back(
+            out.if_(compare("greater", shape{.element = builtins::k_uint}, out.local(hi), out.local(lo)), held));
+        return bits;
+    }
+
     /// Calls `each(word, bits)` for every word of the shadow that the scalars `first ..< first + count` take, with the
     /// bits they take there; `first` is a pinned `uint`.
     template <class Each>
@@ -1229,10 +1263,7 @@ struct guarder
             auto const word = out.add_local(local_kind::temporary, "word", out.type_named(builtins::k_uint));
             body.push_back(out.let(
                 word, uint_call("add_uint", uint_call("shift_right_uint", out.local(first), uint_literal(5)), k)));
-            flat_expr_id const bits_args[] = {out.local(word), out.local(first), uint_literal(i32(count))};
-            auto const bits = out.add_local(local_kind::temporary, "bits", out.type_named(builtins::k_uint));
-            body.push_back(out.let(bits, out.call("workgroup_written_bits", bits_args)));
-            each(word, bits, body);
+            each(word, bits_of(word, first, count, body), body);
         };
         if (words <= 4)
         {
@@ -1845,7 +1876,7 @@ i32 workgroup_bytes_of(checked_module const& m, type_id type)
 }
 
 /// LEGAL-69: the shadow of a compute stage's workgroup memory where the profile tests reads, or its zeroing under
-/// `define`, and the invocation's index in its workgroup that the text's prologue strides by.
+/// `define`, and the invocation's index in its workgroup that LEGAL-71's prologue strides by.
 void prepare_workgroup(flat_builder& out, guarder& g)
 {
     auto& e = out.e;
