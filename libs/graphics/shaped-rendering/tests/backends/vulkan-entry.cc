@@ -30,7 +30,9 @@ ASYNC_TEST("sr vulkan - native-spirv")
 
 ASYNC_TEST("sr vulkan")
 {
-    auto ctx = sg::create_vulkan_context({.enable_validation_layers = true, .enable_sync_validation = true});
+    // the text route, SGL's HLSL through DXC; `sr vulkan - native-spirv` is the default's
+    auto ctx = sg::create_vulkan_context(
+        {.enable_validation_layers = true, .native_spirv = false, .enable_sync_validation = true});
     if (ctx.has_error())
         SKIP("no vulkan device");
     else

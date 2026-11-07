@@ -212,7 +212,21 @@ cc::vector<byte> module_builder::write(cc::string_view triple, cc::string_view l
     out.fixed(0xC0, 8);
     out.fixed(0xDE, 8);
 
-    auto const global_count = u32(_globals.size());
+    // The validator refuses an operation declared and never called, which a call the passes removed leaves behind.
+    // So a declaration nothing calls is left out as the module is written, and a global's number is its place among
+    // the ones kept: renumbering the module instead would leave stale every global value the writer holds.
+    auto is_kept = cc::vector<bool>::create_filled(_globals.size(), false);
+    for (auto const& inst : _instructions)
+        if (inst.code == inst_code::call)
+            is_kept[ll_index(ll_value(_args[inst.first]))] = true;
+    auto global_numbers = cc::vector<u32>::create_filled(_globals.size(), 0u);
+    auto global_count = u32(0);
+    for (auto g = isize(0); g < _globals.size(); ++g)
+    {
+        is_kept[g] = is_kept[g] || !_globals[g].is_declaration;
+        global_numbers[g] = global_count;
+        global_count += is_kept[g] ? 1 : 0;
+    }
     // the debug info's constants come last and no instruction names one, so a write without it can leave them out
     auto const constant_count
         = with_debug_info ? u32(_constants.size()) : cc::min(u32(_constants.size()), _debug_constants_from);
@@ -225,7 +239,7 @@ cc::vector<byte> module_builder::write(cc::string_view triple, cc::string_view l
         if (ll_is_constant(v))
             return global_count + ll_index(v);
         if (ll_is_global(v))
-            return ll_index(v);
+            return global_numbers[ll_index(v)];
         return global_count + constant_count + argument_count + raw;
     };
 
@@ -329,8 +343,11 @@ cc::vector<byte> module_builder::write(cc::string_view triple, cc::string_view l
     out.string_record(2, triple);
     out.string_record(3, layout);
     // a value's number is its record's position, so a variable and a function stand in the order they were added
-    for (auto const& g : _globals)
+    for (auto i = isize(0); i < _globals.size(); ++i)
     {
+        if (!is_kept[i])
+            continue;
+        auto const& g = _globals[i];
         if (!g.is_function)
         {
             out.record(7, {u64(u32(g.type)), (g.is_constant ? 3u : 2u) | (u64(g.address_space) << 2), 0u, 0u,
@@ -450,8 +467,10 @@ cc::vector<byte> module_builder::write(cc::string_view triple, cc::string_view l
     out.enter_block(k_block_value_symtab, 4);
     for (auto i = isize(0); i < _globals.size(); ++i)
     {
+        if (!is_kept[i])
+            continue;
         scratch.clear();
-        scratch.push_back(u64(i));
+        scratch.push_back(u64(global_numbers[i]));
         for (auto const c : name_at(_globals[i].name_first, _globals[i].name_size))
             scratch.push_back(u8(c));
         out.record(1, scratch);

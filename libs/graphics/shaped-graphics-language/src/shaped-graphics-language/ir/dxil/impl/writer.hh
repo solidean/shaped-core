@@ -167,6 +167,8 @@ private:
         /// The element of a buffer, and the bytes between two of them.
         ll_value index = ll_value::none;
         u32 stride = 0;
+        /// A raw buffer's element as the byte address of its word, which `raw_address` reads in place of `index`.
+        ll_value index_bytes = ll_value::none;
         /// The bytes between two columns of the matrix this reaches, 0 for no matrix.
         i32 matrix_stride = 0;
         /// An element of a binding array's own handle, where the global has none.
@@ -266,6 +268,13 @@ private:
     [[nodiscard]] u32 count_of(value_ref v);
     [[nodiscard]] u32 first_of_constant(u32 index);
     [[nodiscard]] ll_value leaf_at(value_ref v, u32 leaf = 0);
+    /// The byte address of a raw buffer's word `index`, which SGL reaches as a byte address shifted right by 2.
+    [[nodiscard]] ll_value word_address(value_ref index);
+    /// The byte address `offset` bytes into raw place `p`'s word.
+    [[nodiscard]] ll_value raw_address(place const& p, u32 offset);
+    /// `v` as a value plus `added`, gathering the constants additions and multiplications by constants hold, so
+    /// the addresses of neighbouring words share one base; none where `v` is a constant alone.
+    [[nodiscard]] ll_value linear_of(value_ref v, u32& added, int depth = 0);
     /// `_scratch` as what the operation at `index` gave.
     void define(u32 index);
     void define_one(u32 index, ll_value leaf);

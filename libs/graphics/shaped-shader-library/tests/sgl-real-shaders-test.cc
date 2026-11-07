@@ -179,6 +179,53 @@ TEST("slib - the viewer's tracer and the traced drawings lower on both writers, 
     CHECK(is_slug_native);
 }
 
+// A declaration the passes leave uncalled is dropped as the module is written, and the writer's own values of the
+// operations it still calls stay right: the environment's pixel stage reads a store_output declared after one such.
+TEST("slib - SGL's DXIL marks every target the viewer's environment writes, past a declaration the passes dropped")
+{
+    if constexpr (!k_has_validator)
+        SKIP("DXC's disassembler reads the container, and only Windows has it");
+    auto compiler = ssc::dxc::compiler::create();
+    if (compiler.has_error())
+        SKIP("no DXC");
+    auto library = module_library();
+    library.read();
+    auto const file = nx::source_path("libs/graphics/shaped-viewer/shaders/raster_pass.sgl");
+    auto const source = read_file(file);
+    auto const written = sgl::compile_to_text({.source = source,
+                                               .source_name = file,
+                                               .library = library.files,
+                                               .entry_point = "environment_ps",
+                                               .target = sgl::emit::target::hlsl_dx12,
+                                               .native = sgl::emit::native_route::require});
+    REQUIRE(written.has_value());
+    REQUIRE(!written.value().dxil.empty());
+    auto const text = compiler.value().disassemble(written.value().dxil);
+    REQUIRE(text.has_value());
+
+    // the output signature's rows, `; SV_Target <index> <mask> <register> TARGET float <used>`, before the PSV's
+    auto const all = cc::string_view(text.value());
+    auto const signature_end = all.size();
+    auto targets = 0;
+    auto unused = 0;
+    auto start = isize(0);
+    for (auto i = isize(0); i <= signature_end; ++i)
+    {
+        if (i < signature_end && all[i] != '\n')
+            continue;
+        auto line = all.subview({.offset = start, .size = i - start});
+        start = i + 1;
+        while (!line.empty() && (line[line.size() - 1] == ' ' || line[line.size() - 1] == '\r'))
+            line = line.subview({.offset = 0, .size = line.size() - 1});
+        if (!line.starts_with("; SV_Target") || !line.contains("TARGET"))
+            continue;
+        ++targets;
+        unused += line.ends_with("float") ? 1 : 0;
+    }
+    CHECK(targets == 8);
+    CHECK(unused == 0).dump("disassembly", text.value());
+}
+
 // EMIT-184: on a device with micromaps every query takes `allocateRayQuery2` at Shader Model 6.9, and SPIR-V states the
 // capability DXC's own text leaves out.
 // A device with them cannot be asked for here, so this holds what no draw on such a device has.

@@ -215,8 +215,11 @@ A `discard` is an operation with an effect and no terminator, so a pass keeps it
 A binding array is one global, and an `access_chain` picks the element, so DXIL makes that element's handle where the chain stands.
 `ir::write_spirv` ends the first, whose writer stands in `ir/spirv/`, and `ir::write_dxil` the second, whose backend stands in `ir/dxil/`.
 The optimizing passes stand in `ir/`, on values as they are, so each keeps every operation's statement and guarantee: `ir/passes.hh`, with `ir::simplify` beside it.
-`ir::simplify` and `ir::flatten_branches` give up structured control flow, so they are DXIL's alone, and SPIR-V's route runs no optimizing pass so far.
-Below them the DXIL module sweeps only what exists once a value is its lanes: `share_common_values` and `remove_unused` of `llvm_passes.cc`.
+`ir::flatten_branches` gives up structured control flow, so it is DXIL's alone.
+`ir::simplify` keeps it under `control_flow::structured`: a selection it decides branches to one side and leaves the other unreachable, as SPIR-V allows.
+SPIR-V's route runs that, and `ir::regroup_lanes`, which gathers the phis SSA made per lane back into one phi of the vector.
+Below them the DXIL module sweeps only what exists once a value is its lanes: `share_common_values`, `merge_buffer_loads` and `remove_unused` of `llvm_passes.cc`.
+[native-parity.md](native-parity.md) is how both routes measure against DXC's, and what is left between them.
 It reads the same `plan` a text target does, so it decides no name and no address, and it hangs off `emit_entry_point` rather than being a target of its own.
 A program is flat tables of small ids, an operation being 24 bytes, because this path exists to be fast.
 `ir::verify` says what every program must hold, and a compile runs it after lowering and after each pass wherever assertions are on.

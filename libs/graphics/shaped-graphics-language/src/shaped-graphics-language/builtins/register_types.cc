@@ -215,13 +215,17 @@ void sgl::builtins::register_types(registry& r)
         .declaration = "struct affine3",
         .doc = "/// An affine map of space: a linear part and a translation, as three rows of four.\n"
                "/// It translates a `pos3` and leaves a `vec3` untranslated, so the type decides the w.\n"
-               "/// A value of function bodies alone, which no GPU memory holds yet.",
+               "/// In GPU memory its three rows stand back to back, 48 bytes, as an instance's transform does.",
         .hlsl = "float3x4",
         .wgsl = "mat3x4f",
         .msl = "float3x4",
+        // CHK-518: three rows of 16, wherever it stands; HLSL declares it `row_major`, and the others hold rows as columns
+        .hlsl_layout = {.size = 48, .alignment = 16},
+        .wgsl_layout = {.size = 48, .alignment = 16},
+        .msl_layout = {.size = 48, .alignment = 16},
         .leaf_kind = value_kind::scalar_float,
         .leaf_count = 12,
-        .local_only_reason = "its layout in GPU memory is not decided yet",
+        .local_only_reason = "no stage edge carries one yet",
     });
 
     r.add(type_record{

@@ -40,8 +40,8 @@ A per-target cell reads `dx12 / vulkan / metal / webgpu`.
 
 | Row | HLSL + chain | Slang | WGSL | GLSL + chain | SGL |
 |---|---|---|---|---|---|
-| **A1** DX12 path | ✅ DXC → DXIL, one hop | ✅ HLSL text → DXC, in process | ⚠️ HLSL text → DXC, two hops | ⚠️ SPIR-V → SPIRV-Cross HLSL → DXC, three hops | ✅ HLSL text → DXC |
-| **A2** Vulkan path | ✅ DXC → SPIR-V (a community-maintained backend) | ✅ SPIR-V directly | ✅ SPIR-V directly | ✅ glslang → SPIR-V | ✅ HLSL text → DXC → SPIR-V |
+| **A1** DX12 path | ✅ DXC → DXIL, one hop | ✅ HLSL text → DXC, in process | ⚠️ HLSL text → DXC, two hops | ⚠️ SPIR-V → SPIRV-Cross HLSL → DXC, three hops | ✅ DXIL written directly, by default; an entry point holding a target's own text, and a context that asks for it, take HLSL text → DXC |
+| **A2** Vulkan path | ✅ DXC → SPIR-V (a community-maintained backend) | ✅ SPIR-V directly | ✅ SPIR-V directly | ✅ glslang → SPIR-V | ✅ SPIR-V written directly, by default; an entry point holding a target's own text, and a context that asks for it, take HLSL text → DXC → SPIR-V |
 | **A3** Metal path | ⚠️ two hops: DXIL → MSC, or SPIR-V → SPIRV-Cross → MSL | ✅ MSL text; metallib through Apple's tool | ✅ MSL text | ✅ SPIRV-Cross → MSL | ✅ MSL text; metallib, or the driver compiles the MSL |
 | **A4** WebGPU path | ⚠️ SPIR-V → Tint or Naga; drops bindless, int64 and ray queries | ✅ WGSL text; ray tracing, mesh, geometry and tessellation, which WebGPU lacks, are capability errors | ✅ the browser takes it as is; wgpu-only extensions do not reach a browser | ⚠️ SPIR-V → Tint or Naga, a subset | ✅ WGSL text directly; what WebGPU lacks is refused by feature; ray queries emulated beyond it |
 | **A5** Inline ray queries | ✅ / ✅ / ✅ / — | ✅ / ✅ / ⚠️ / — metal: one fixed query shape, first run on hardware 2026-10 | ⚠️ / ⚠️ / ⚠️ / — a wgpu-only experimental extension; a WGSL proposal was accepted 2026-10-27 | ✅ / ✅ / ✅ / — | ✅ / ✅ / ✅ / ➕ metal: every inline-trace GPU test passes on an M4; not yet run on an M-series GPU without hardware ray tracing 🗺️ [chore](../issues/chore-sgl-metal-raytracing-on-apple-hardware.md); webgpu emulated in software, as watertight as a target's float allows |
@@ -153,12 +153,14 @@ Per row and column:
   - WGSL: NAGA `back/hlsl`, TINT `lang/hlsl/writer`
   - GLSL + chain: SXC `spirv_hlsl.cpp`
   - SGL: [architecture.md](../architecture.md) "The emitters"
+  - SGL, the native default: [epic-sgl-native-ir-targets](../issues/epic-sgl-native-ir-targets.md), and the full sg, sr and sv suites on it (2026-11-07)
 - **A2**
   - HLSL + chain: DXC `docs/SPIR-V.rst`
   - Slang: SLANG `slangc` reference
   - WGSL: NAGA `back/spv`
   - GLSL + chain: glslang
   - SGL: [bindings.md](../spec/bindings.md) "What the compiler carries today"
+  - SGL, the native default: [epic-sgl-native-ir-targets](../issues/epic-sgl-native-ir-targets.md), and the full sg, sr and sv suites on it (2026-11-07)
 - **A3**
   - HLSL + chain: MSC
   - Slang: SXC

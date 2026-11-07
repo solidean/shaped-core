@@ -61,6 +61,7 @@ add_library(shaped-graphics-language
     src/shaped-graphics-language/ir/pipeline.cc
     src/shaped-graphics-language/ir/cleanup.cc
     src/shaped-graphics-language/ir/chain_sums.cc
+    src/shaped-graphics-language/ir/regroup.cc
     src/shaped-graphics-language/ir/flatten.cc
     src/shaped-graphics-language/ir/lower.cc
     src/shaped-graphics-language/ir/lower_call.cc

@@ -356,6 +356,8 @@ void writer::access_chain(u32 index, instruction const& i)
         if (info.kind == type_kind::runtime_array)
         {
             // a buffer's element, the one index a byte offset cannot say
+            if (result.kind == place::kind_t::buffer && _p.globals[result.root].kind == global_kind::bytes)
+                result.index_bytes = word_address(index_value);
             auto const value = leaf_at(index_value);
             result.index = value;
             result.stride = u32(info.stride);
@@ -459,6 +461,99 @@ void writer::store_memory(place const& p, type_ref t, cc::span<ll_value const> l
     store_bytes(p, t, p.offset, p.matrix_stride, leaves, at);
 }
 
+ll_value writer::word_address(value_ref index)
+{
+    // `bytes >> 2` multiplied back by 4 is `bytes & ~3`, and an offset no multiple of 4 is a program error (EVAL-97),
+    // so the address is the offset as HLSL's `Load` takes it; the words after it, `(bytes >> 2) + k`, are 4 k past it
+    auto words = u32(0);
+    auto at = index;
+    while (is_operation(at))
+    {
+        auto const& i = _p.instructions[index_of(at)];
+        auto const operands = _p.operands_of(i);
+        if (i.code != op::iadd || operands.size() != 2)
+            break;
+        auto const left = value_ref(operands[0]);
+        auto const right = value_ref(operands[1]);
+        if (is_constant(right))
+        {
+            words += _p.constants[index_of(right)].low;
+            at = left;
+        }
+        else if (is_constant(left))
+        {
+            words += _p.constants[index_of(left)].low;
+            at = right;
+        }
+        else
+            break;
+    }
+    if (is_operation(at))
+    {
+        auto const& i = _p.instructions[index_of(at)];
+        auto const operands = _p.operands_of(i);
+        auto const by = value_ref(operands.size() == 2 ? operands[1] : 0u);
+        if (i.code == op::shift_right_logical && is_constant(by) && _p.constants[index_of(by)].low == 2)
+        {
+            auto added = 4 * words;
+            auto const base = linear_of(value_ref(operands[0]), added);
+            if (base == ll_value::none)
+                return _m.constant_i32(added);
+            return added == 0 ? base : _m.binary(binary_op::add, base, _m.constant_i32(added));
+        }
+    }
+    return _m.binary(binary_op::mul, leaf_at(index), _m.constant_i32(4));
+}
+
+ll_value writer::linear_of(value_ref v, u32& added, int depth)
+{
+    if (is_constant(v))
+    {
+        added += _p.constants[index_of(v)].low;
+        return ll_value::none;
+    }
+    if (!is_operation(v) || depth > 8)
+        return leaf_at(v);
+    auto const& i = _p.instructions[index_of(v)];
+    auto const operands = _p.operands_of(i);
+    if (i.code == op::iadd && operands.size() == 2)
+    {
+        auto inner = u32(0);
+        auto const a = linear_of(value_ref(operands[0]), inner, depth + 1);
+        auto const b = linear_of(value_ref(operands[1]), inner, depth + 1);
+        added += inner;
+        if (a == ll_value::none)
+            return b;
+        if (b == ll_value::none)
+            return a;
+        return _m.binary(binary_op::add, a, b);
+    }
+    if (i.code == op::imul && operands.size() == 2)
+    {
+        auto const left = value_ref(operands[0]);
+        auto const right = value_ref(operands[1]);
+        auto const by = is_constant(left) ? left : is_constant(right) ? right : value_ref::none;
+        if (is_valid(by))
+        {
+            auto const factor = _p.constants[index_of(by)].low;
+            auto inner = u32(0);
+            auto const base = linear_of(by == left ? right : left, inner, depth + 1);
+            added += inner * factor;
+            return base == ll_value::none ? ll_value::none : _m.binary(binary_op::mul, base, _m.constant_i32(factor));
+        }
+    }
+    return leaf_at(v);
+}
+
+ll_value writer::raw_address(place const& p, u32 offset)
+{
+    auto const word
+        = p.index_bytes != ll_value::none ? p.index_bytes : _m.binary(binary_op::mul, p.index, _m.constant_i32(4));
+    if (p.dynamic == ll_value::none && offset == 0)
+        return word;
+    return _m.binary(binary_op::add, word, byte_offset(p, offset));
+}
+
 ll_value writer::byte_offset(place const& p, u32 offset)
 {
     return p.dynamic == ll_value::none ? _m.constant_i32(offset)
@@ -507,11 +602,7 @@ void writer::buffer_lanes(place const& p, type_ref scalar, u32 offset, u32 lanes
         if (is_raw)
         {
             // a byte address alone, the element being a word
-            auto const words = element == ll_value::none
-                                 ? byte_offset(p, at)
-                                 : _m.binary(binary_op::add, _m.binary(binary_op::mul, element, _m.constant_i32(4)),
-                                             byte_offset(p, at));
-            first = words;
+            first = element == ll_value::none ? byte_offset(p, at) : raw_address(p, at);
             second = _m.constant_undef(_m.int_type());
         }
         else
@@ -545,7 +636,7 @@ void writer::store_lanes(place const& p, type_ref scalar, u32 offset, cc::span<l
         auto second = ll_value::none;
         if (is_raw)
         {
-            first = _m.binary(binary_op::add, _m.binary(binary_op::mul, p.index, _m.constant_i32(4)), byte_offset(p, at));
+            first = raw_address(p, at);
             second = _m.constant_undef(_m.int_type());
         }
         else

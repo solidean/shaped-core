@@ -43,6 +43,8 @@ HOST_TYPES: dict[str, tuple[str, int, str | None]] = {
     # a float's atomic holds its bits, so the host writes and reads the float itself
     "atomic[float]": ("float", 4, None),
     "bool32": ("slib::gpu_bool", 4, None),
+    # three rows of four, as an instance's transform is (CHK-518)
+    "affine3": ("slib::gpu_affine3", 48, None),
     # the 16-bit families: typed-geometry's IEEE binary16, and clean-core's 16-bit integers
     "half": ("tg::f16", 2, None),
     "half2": ("tg::vec<2, tg::f16>", 4, None),
@@ -430,6 +432,8 @@ def includes(entries: SglEntries) -> list[str]:
         out.append("<typed-geometry/linalg/mat.hh>")
     if "bool32" in types:
         out.append("<shaped-shader-library/gpu_bool.hh>")
+    if "affine3" in types:
+        out.append("<shaped-shader-library/gpu_affine3.hh>")
     if any(padded_element(m) for _, b in entries.bindings for m in b["members"]) or any("[" in t for t in types):
         out.append("<shaped-shader-library/gpu_padded.hh>")
     return list(dict.fromkeys(out))

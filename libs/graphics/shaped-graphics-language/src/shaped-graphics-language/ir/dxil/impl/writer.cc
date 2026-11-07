@@ -289,6 +289,10 @@ void writer::run()
         return;
     _m.set_location(0);
     fill_phis();
+    // sharing first, so two loads of one handle read one handle; and again after, for the lanes merging leaves alike
+    _m.share_common_values();
+    // skipping this hangs Intel's dx12 device on sv's hybrid lighting; issue: bug-sgl-dxil-hybrid-light-hangs-without-load-merging
+    _m.merge_buffer_loads(k_dx_ops[isize(dx_op::raw_buffer_load)].number);
     _m.share_common_values();
     _m.remove_unused();
     if (is_control)

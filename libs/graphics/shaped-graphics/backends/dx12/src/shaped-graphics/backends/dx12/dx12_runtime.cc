@@ -1,5 +1,7 @@
 #include <clean-core/common/log.hh>
 #include <clean-core/container/vector.hh>
+#include <clean-core/error/optional.hh>
+#include <clean-core/platform/environment.hh>
 #include <clean-core/thread/atomic.hh>
 #include <clean-core/thread/mutex.hh>
 #include <shaped-graphics/backends/dx12/dx12_runtime.hh>
@@ -59,7 +61,7 @@ ComPtr<ID3D12DeviceFactory> make_agility_factory()
 
 ID3D12DeviceFactory* agility_factory()
 {
-    static auto const factory = make_agility_factory();
+    static auto const factory = requested_d3d12_runtime() == d3d12_runtime::agility ? make_agility_factory() : nullptr;
     return factory.Get();
 }
 
@@ -119,6 +121,89 @@ HRESULT shared_agility_device(ID3D12DeviceFactory* factory,
 namespace
 {
 cc::atomic<bool> g_marks_acceleration_structures = false;
+} // namespace
+
+namespace sg::backend::dx12
+{
+namespace
+{
+// What choose_d3d12_runtime asked for, and whether requested_d3d12_runtime has settled it.
+struct runtime_choice
+{
+    cc::optional<d3d12_runtime> chosen;
+    cc::optional<d3d12_runtime> settled;
+};
+cc::mutex<runtime_choice> g_runtime_choice;
+
+constexpr UINT k_intel_vendor_id = 0x8086;
+constexpr UINT k_microsoft_vendor_id = 0x1414;
+
+/// The vendor of the first hardware adapter, in the order the context's own search takes them; 0 where there is none.
+[[nodiscard]] UINT first_hardware_vendor_id()
+{
+    ComPtr<IDXGIFactory4> factory;
+    if (FAILED(CreateDXGIFactory2(0, IID_PPV_ARGS(&factory))))
+        return 0;
+    ComPtr<IDXGIAdapter1> adapter;
+    for (UINT i = 0; factory->EnumAdapters1(i, adapter.ReleaseAndGetAddressOf()) != DXGI_ERROR_NOT_FOUND; ++i)
+    {
+        auto desc = DXGI_ADAPTER_DESC1{};
+        if (FAILED(adapter->GetDesc1(&desc)))
+            continue;
+        if ((desc.Flags & DXGI_ADAPTER_FLAG_SOFTWARE) != 0 || desc.VendorId == k_microsoft_vendor_id)
+            continue;
+        return desc.VendorId;
+    }
+    return 0;
+}
+[[nodiscard]] d3d12_runtime default_runtime()
+{
+    if (auto const value = cc::environment_variable("SC_DX12_RUNTIME"); value.has_value())
+    {
+        if (value.value() == "system")
+            return d3d12_runtime::system;
+        if (value.value() == "agility")
+            return d3d12_runtime::agility;
+        CC_LOG_WARNING("SC_DX12_RUNTIME='{}' is ignored: the accepted values are 'system' and 'agility'", value.value());
+    }
+    if (!SG_HAS_AGILITY)
+        return d3d12_runtime::system;
+    // TEMPORARY(debt-sg-intel-keeps-off-agility): Intel's driver compiles every shader of an Agility process anew.
+    if (first_hardware_vendor_id() == k_intel_vendor_id)
+    {
+        CC_LOG_INFO("dx12 runs on the system runtime on this Intel GPU, without SM 6.9, shader execution reordering "
+                    "and "
+                    "DXR 1.2: SC_DX12_RUNTIME=agility asks for the Agility SDK anyway");
+        return d3d12_runtime::system;
+    }
+    return d3d12_runtime::agility;
+}
+
+} // namespace
+} // namespace sg::backend::dx12
+
+void sg::backend::dx12::choose_d3d12_runtime(d3d12_runtime runtime)
+{
+    g_runtime_choice.lock(
+        [&](runtime_choice& c)
+        {
+            CC_ASSERT(!c.settled.has_value() || c.settled.value() == runtime,
+                      "the D3D12 runtime was settled already, as another one: choose it before any device");
+            CC_ASSERT(!c.chosen.has_value() || c.chosen.value() == runtime, "the D3D12 runtime was chosen already, as "
+                                                                            "another one");
+            c.chosen = runtime;
+        });
+}
+
+sg::backend::dx12::d3d12_runtime sg::backend::dx12::requested_d3d12_runtime()
+{
+    return g_runtime_choice.lock(
+        [](runtime_choice& c)
+        {
+            if (!c.settled.has_value())
+                c.settled = c.chosen.has_value() ? c.chosen.value() : default_runtime();
+            return c.settled.value();
+        });
 }
 
 bool sg::backend::dx12::marks_acceleration_structures()

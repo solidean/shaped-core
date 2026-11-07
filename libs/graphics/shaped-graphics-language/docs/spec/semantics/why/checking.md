@@ -798,6 +798,12 @@ A generic `mat3x4` would carry the shape's two names along, since GLSL calls the
 The type decides the `w` instead: a position is translated and a direction is not, so no caller writes the `1.0` or the `0.0`.
 Three rows of four is how DXR, Vulkan and Metal hand a hit's transform over, so a hit's placement needs no conversion to become one.
 
+## CHK-518
+
+Three rows of 16 bytes is the layout D3D12's and Vulkan's instance descriptions already give a transform, so a scene's instances and a shader's buffer can share one.
+WGSL's `mat3x4f` and MSL's `float3x4` place their three columns of four exactly so, which makes the rows their columns at no cost.
+HLSL's `float3x4` is three rows, which only `row_major` keeps in that order, and DXC honours the qualifier on a field but not in a buffer's template (EMIT-259).
+
 ## CHK-404
 
 An atomic counts the invocations that reach it, so it means something only where the program can say how many there are.

@@ -109,6 +109,7 @@ struct dx12_download_sink;
 /// It shadows sg's, so a backend message is never mistaken for a portable one.
 CC_REC_DECLARE_DOMAIN(g_rec_domain);
 class dx12_software_pool;
+enum class d3d12_runtime : u8; // the D3D12 runtime this process runs (see dx12_runtime.hh)
 } // namespace sg::backend::dx12
 
 namespace sg::backend::dx12

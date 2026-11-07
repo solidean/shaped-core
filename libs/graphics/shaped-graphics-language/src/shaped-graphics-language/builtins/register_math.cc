@@ -725,7 +725,7 @@ void sgl::builtins::register_math(registry& r)
             smoothstep_undefined, false, "/// 0 up to `low`, 1 from `high` on, and a smooth Hermite curve between.");
         // EMIT-254: HLSL's `fma` takes a double alone, and `mad` is its float's, which DXIL leaves free to fuse
         add(r, cc::format("@pure fun fma(a: {0}, b: {0}, c: {0}) -> {0}", t),
-            t.starts_with("half") ? fma<true> : fma<false>, {.hlsl = "mad"}, nullptr, false,
+            t.starts_with("half") ? evaluator(fma<true>) : evaluator(fma<false>), {.hlsl = "mad"}, nullptr, false,
             "/// `a * b + c`, rounded once on the interpreter; a GPU may round the product first (EVAL-146).");
     }
 

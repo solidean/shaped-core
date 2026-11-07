@@ -29,7 +29,9 @@ ASYNC_TEST("sg vulkan backend")
     // two submissions, which is what the cross-list and cross-queue ordering work is about.
     // It needs a validation layer from SDK 1.4.350 or newer: older ones report WRITE_RACING_READ between queues that
     // never raced — docs/bugs-external/vulkan-syncval-wait-before-signal-false-race.
-    auto ctx = sg::create_vulkan_context({.enable_validation_layers = true, .enable_sync_validation = true});
+    // The text route, SGL's HLSL through DXC, which `sg vulkan native-spirv backend` is the default's counterpart to.
+    auto ctx = sg::create_vulkan_context(
+        {.enable_validation_layers = true, .native_spirv = false, .enable_sync_validation = true});
     if (ctx.has_error())
         SKIP("no vulkan device");
     else

@@ -281,11 +281,15 @@ public:
     /// Gives two equal computations one value, where the first dominates the second.
     /// What reads memory counts only where `call` said that memory never changes, a block of constants above all.
     void share_common_values();
+    /// Merges loads of one buffer whose lanes follow on in one block into one load of up to four lanes, as DXC does.
+    /// Only a load of a buffer the shader cannot write merges, `call`'s `is_stable`, so no store stands between two.
+    /// `opcode` is `rawBufferLoad`'s.
+    void merge_buffer_loads(u32 opcode);
 
     /// Drops every instruction nothing with an effect reads, a loop of phis among them.
     /// Every `ll_value` of an instruction taken before this is void afterwards, and blocks keep their numbers.
+    /// A declaration nothing calls any more keeps its value, and `write` leaves it out of the module.
     void remove_unused();
-    void remove_unused_declarations();
 
     [[nodiscard]] ll_type type_of(ll_value v) const;
     [[nodiscard]] ll_type element_of(ll_type pointer_or_array) const;

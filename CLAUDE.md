@@ -125,6 +125,8 @@ One-liner per library:
   dx12 and vulkan cover the whole surface; webgpu covers it but the ray-tracing pipeline, on wasm over emdawnwebgpu, and never blocks.
   **Ray tracing is two features**, `sg::feature::ray_query` and `raytracing_pipeline`; webgpu has ray queries alone, as a software polyfill `ctx.implementation_of` reports `emulated`.
   dx12 runs on the D3D12 Agility SDK where it was fetched, and on the system runtime otherwise; `SG_HAS_AGILITY` (1/0) says which.
+  On an Intel GPU it defaults to the system runtime, since Intel's driver recompiles every shader of an Agility process; `SC_DX12_RUNTIME=agility` overrides.
+  `SC_DX12_RUNTIME=system` keeps a process off it; every test process on an Intel GPU stays off it, since Intel's driver there compiles every shader anew.
   Fetching it is a choice nothing makes for you: `uv run extern/agility/fetch-agility.py --accept-license`.
   **metal** covers it too, on Metal 4 (macOS / iOS 26 floor, Apple silicon): windowed and headless presentation, ray tracing, and GPU timestamps.
   opengl and webgl are intended tiers with no backend yet.

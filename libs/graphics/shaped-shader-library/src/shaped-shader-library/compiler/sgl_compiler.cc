@@ -383,7 +383,8 @@ private:
         auto result = slib::preprocessed_source{.source = emitted.text,
                                                 .entry_point = emitted.entry_point,
                                                 .used_modules = emitted.library_files,
-                                                .warnings = emitted.warnings};
+                                                .warnings = emitted.warnings,
+                                                .native_gap = emitted.native_gap};
         if (!emitted.spirv.empty())
             result.bytecode = cc::vector<byte>::create_copy_of(cc::span<u32 const>(emitted.spirv).as_bytes());
         if (!emitted.dxil.empty())
