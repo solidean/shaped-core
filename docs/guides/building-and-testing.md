@@ -337,6 +337,22 @@ That is how a bare `cmake <build>` from a plain shell once gave SDL3's `version.
 dev.py enters the environment itself, so configuring through it is always right; a toolset or SDK update inside the environment only warns.
 [ConfigureEnvironment.cmake](../../tools/cmake/ConfigureEnvironment.cmake) is the check.
 
+## An optional build server
+
+`build` and `test` can hand their build step to an optional local build server, which keeps state such as a compile cache between builds.
+It is opt-in and never required: without it, everything builds exactly as before.
+
+- **Opting in**, the first that says either way: `--no-server`, `--server`, `SC_BUILD_SERVER=1` (or `0`), then the project's own default.
+  `--no-server` always wins.
+- **Where the client is**: `SC_BUILD_SERVER_CLIENT` names its executable, over the location the project's `Policy.build_server` gives.
+- **Only the build step moves**: configure stays cmake's, and the server runs in the same developer environment dev.py builds in, which it passes to every command.
+- **When it cannot serve**, dev.py prints one warning naming the cause and how to install it, then builds as without it.
+  That covers a missing client, a server that cannot be started, another protocol version, a server restarting, and a server failing on its own.
+- **A compile error through the server is a failed build** with the compiler's output, as with ninja, and never a rebuild without it.
+- **`check` and `ship` build without it for now**, opted in or not, so the gate stays independent of it; turning that on is one constant, `debt-devpy-gate-without-build-server`.
+
+[build_server.py](../../tools/dev/lib/pipeline/build_server.py) has the client contract, and [its self-test](../../tools/dev/build-server-self-test.py) runs with `check`.
+
 ## Quiet by default, and how to diagnose
 
 dev.py never streams child output into your scrollback.

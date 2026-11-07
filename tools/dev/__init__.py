@@ -24,6 +24,7 @@ from .lib.core.process import (
     run_step,
 )
 from .lib.pipeline.build import build
+from .lib.pipeline.build_server import BuildServer
 from .lib.pipeline.cmake import remove_build_dir
 from .lib.pipeline.configure import configure, ensure_configured
 from .lib.pipeline.diagjobs import BuildMark
