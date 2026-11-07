@@ -15,6 +15,12 @@ A body or a type in a target's own text, DXIL's `double` maths, and an `affine3`
 - **DXIL's `double` maths** (`double_maths.sgl`'s `double_functions`): `floor`, `ceil`, `round`, `trunc`, `fract`, `sqrt` and `inverse_sqrt`.
   DXIL has no operation for any of them at 64 bits, so the text writes EMIT-219's helpers of HLSL, about 340 lines that take the bits apart.
   The native route would want the same helpers once, written in SGL in the prelude, rather than a second copy in either writer.
+  **SGL cannot say them yet**, checked on 2026-11-07: they take a double apart into its two words and put it back, and correct `sqrt` with an `fma`.
+  A float has `x.bits` and `float.from_bits(u)`, and a half CHK-417's; a double has neither, and no type has an `fma`.
+  The two wanted are `double.bits` as a `uint2` of its low and high words, with `double.from_bits(uint2)`, and `fma` of doubles.
+  Each maps to one operation on every target that has doubles: `asuint` and `asdouble` or `OpBitcast` or `splitDouble` and `makeDouble`, and `fma` or `Fma`.
+  A `uint2` rather than a `ulong` keeps them off `shader_int64`, which a device with doubles may lack.
+  Once they exist the helpers become SGL, the text route's HLSL goes, and the vulkan text route gains them too, since DXC hands a double to its float functions on SPIR-V as on DXIL (CHK-458).
 - **Metal's** fused intersection and empty closest hit, which no other target builds (EMIT-244).
 
 ## Landed on 2026-11-07
