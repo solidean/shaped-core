@@ -121,8 +121,8 @@ void lowering::run()
 {
     auto const is_raster = _e.entry_stage == stage::vertex || _e.entry_stage == stage::pixel;
     auto const is_primitive = _e.entry_stage == stage::geometry || _e.entry_stage == stage::tessellation_control
-                           || _e.entry_stage == stage::tessellation_evaluation;
-    if (_e.entry_stage != stage::compute && !is_raster && !is_primitive)
+                           || _e.entry_stage == stage::tessellation_evaluation || _e.entry_stage == stage::mesh;
+    if (_e.entry_stage != stage::compute && _e.entry_stage != stage::task && !is_raster && !is_primitive)
     {
         unsupported(cc::format("a {} entry point, whose stage is not lowered yet", stage_name(_e.entry_stage)));
         // what crosses its edge stands on its own, and DXIL's packer reads it ahead of any lowering of the body

@@ -301,6 +301,7 @@ TEST("sgl spirv - every entry point of the fixtures that lowers is what spirv-va
     auto lowered = 0;
     auto raster_lowered = 0;
     auto primitive_lowered = 0;
+    auto mesh_lowered = 0;
     for (auto const& file : files)
     {
         auto const source = read_all(file);
@@ -321,18 +322,19 @@ TEST("sgl spirv - every entry point of the fixtures that lowers is what spirv-va
             auto const is_primitive = stage == sgl::check::stage::geometry
                                    || stage == sgl::check::stage::tessellation_control
                                    || stage == sgl::check::stage::tessellation_evaluation;
-            ++(is_primitive ? primitive_lowered : is_raster ? raster_lowered : lowered);
+            auto const is_mesh = stage == sgl::check::stage::mesh || stage == sgl::check::stage::task;
+            ++(is_mesh ? mesh_lowered : is_primitive ? primitive_lowered : is_raster ? raster_lowered : lowered);
             write_words(module_path, e.value().spirv);
             CHECK(std::system(command_text.data()) == 0).dump("file", file).dump("entry", entry.entry_point);
         }
     }
     // the numbers the slice reaches, so a lowering lost shows here rather than as a quiet fall back to DXC
-    CC_LOG_INFO("SGL's SPIR-V lowers {} compute entry points, {} vertex and pixel ones, and {} geometry and "
-                "tessellation "
-                "ones",
-                lowered, raster_lowered, primitive_lowered);
+    CC_LOG_INFO("SGL's SPIR-V lowers {} compute entry points, {} vertex and pixel ones, {} geometry and tessellation "
+                "ones, and {} mesh and task ones",
+                lowered, raster_lowered, primitive_lowered, mesh_lowered);
     CHECK(lowered >= 95);
     CHECK(raster_lowered >= 64);
     CHECK(primitive_lowered >= 18);
+    CHECK(mesh_lowered >= 6);
 #endif
 }

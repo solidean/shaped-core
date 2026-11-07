@@ -53,6 +53,11 @@ struct module_summary
     cc::vector<u8> modes;
     /// A stage ahead of the rasterizer that writes `SV_Position`, which `PSV0` states.
     bool writes_position = false;
+    /// A mesh or task stage's `PSV0` words: what it hands on, and a mesh stage's most of each and its primitives.
+    u32 workgroup_bytes = 0;
+    u32 payload_bytes = 0;
+    u32 max_primitives = 0;
+    u32 mesh_topology = 0;
     /// What a geometry or tessellation stage's `PSV0` words state, in DXIL's numbers.
     u32 input_primitive = 0;
     u32 output_topology = 0;
@@ -126,6 +131,8 @@ private:
             constants,
             /// A buffer's element `index`: `offset` counts bytes into it.
             buffer,
+            /// A task stage's payload: `path_first` and `path_count` are a range of `_paths`.
+            payload,
         } kind = kind_t::none;
         /// The storage in `_memories`, or the global.
         u32 root = 0;
@@ -139,6 +146,11 @@ private:
         i32 matrix_stride = 0;
         /// An element of a binding array's own handle, where the global has none.
         ll_value handle = ll_value::none;
+        /// How a payload's member is reached from the struct.
+        u32 path_first = 0;
+        u32 path_count = 0;
+        /// It reaches a column of a matrix, which a payload holds flat: the path's last index is the column's first lane.
+        bool is_column = false;
     };
 
     /// Variables or workgroup memory: one array of each scalar type a value of it holds, indexed by leaf.
@@ -281,6 +293,16 @@ private:
     void declare_memory();
     [[nodiscard]] ll_value add_dynamic(ll_value dynamic, ll_value index, u32 scale);
     [[nodiscard]] u32 memory_of_type(type_ref value, bool is_workgroup, cc::string_view name);
+    /// DXC's shape of a payload's `t`: a vector or a matrix is an array of scalars, and a `bool` an `i32`.
+    [[nodiscard]] ll_type payload_type(type_ref t);
+    /// The bytes `t` takes in a payload, and its alignment, as LLVM lays `payload_type` out.
+    [[nodiscard]] u32 payload_layout(type_ref t, u32& alignment);
+    void payload_chain(u32 index, instruction const& i);
+    /// `a + b`, folded where both are known.
+    [[nodiscard]] ll_value index_sum(ll_value a, ll_value b);
+    /// A pointer to every leaf of `t` reached by `path`, in leaf order.
+    void payload_pointers(type_ref t, cc::vector<ll_value>& path, bool is_column, cc::vector<ll_value>& out);
+    [[nodiscard]] cc::vector<ll_value> payload_pointers_of(place const& p, type_ref t);
     [[nodiscard]] place place_of(value_ref pointer);
     void access_chain(u32 index, instruction const& i);
     void load(u32 index, instruction const& i);
@@ -288,6 +310,8 @@ private:
     void load_memory(place const& p, type_ref t, cc::vector<ll_value>& out);
     void store_memory(place const& p, type_ref t, cc::span<ll_value const> leaves);
     [[nodiscard]] ll_value memory_pointer(place const& p, u32 leaf, type_ref scalar);
+    void set_mesh_counts(instruction const& i);
+    void write_primitive(instruction const& i);
     void load_bytes(place const& p, type_ref t, u32 offset, i32 matrix_stride, cc::vector<ll_value>& out);
     void store_bytes(place const& p, type_ref t, u32 offset, i32 matrix_stride, cc::span<ll_value const> leaves, u32& at);
     [[nodiscard]] ll_value constant_lane(place const& p, type_ref scalar, u32 offset);
@@ -369,6 +393,10 @@ private:
     cc::vector<ll_value> _scratch;
     /// What a load or a store reads through, beside `_scratch`.
     cc::vector<ll_value> _loaded;
+    /// The paths of every payload place, each a run in here, and what they are paths into.
+    cc::vector<ll_value> _paths;
+    ll_value _payload = ll_value::none;
+    ll_type _payload_type = ll_type::none;
     /// The positions of the phis, filled once every value exists.
     cc::vector<u32> _phis;
     /// Parallel to `_p.instructions`: where its leaves start, and how many.

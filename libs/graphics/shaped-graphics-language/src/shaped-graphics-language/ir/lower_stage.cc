@@ -267,7 +267,7 @@ value_ref lowering::joined_words(check::type_id t, u32& element, value_ref index
     return lanes == 1 ? value_ref(words[0]) : add(op::construct, type, words);
 }
 
-void lowering::store_words(check::type_id t, value_ref value, u32& element)
+void lowering::store_words(check::type_id t, value_ref value, u32& element, value_ref index)
 {
     auto const type = value_type(t);
     auto const scalar = scalar_of(type);
@@ -275,8 +275,8 @@ void lowering::store_words(check::type_id t, value_ref value, u32& element)
     auto const pair = vector_type(_uint, 2);
     auto const store_element = [&](value_ref word)
     {
-        u32 const operands[] = {element++, u32(word)};
-        add(op::stage_store, type_ref::none, operands);
+        u32 const operands[] = {element++, u32(word), u32(index)};
+        add(op::stage_store, type_ref::none, cc::span<u32 const>(operands, is_valid(index) ? 3 : 2));
     };
     auto const pair_at = [&](u32 lane)
     {
@@ -374,6 +374,13 @@ void lowering::describe_primitive_stage()
     shape.max_vertices = u32(info.max_vertices);
     if (_e.entry_stage == stage::geometry)
         return;
+    if (_e.entry_stage == stage::mesh)
+    {
+        shape.max_primitives = u32(info.max_primitives);
+        shape.writes_lines = info.is_line_mesh;
+        shape.primitive_indices = vector_type(_uint, info.is_line_mesh ? 2 : 3);
+        return;
+    }
     auto edges = 0;
     for (auto const& e : _out.stage_elements)
         edges += e.system == built_in::tess_edge ? 1 : 0;
@@ -407,6 +414,13 @@ void lowering::read_primitive_edge()
         if (input >= 0)
         {
             read_stage_input(input, first);
+            continue;
+        }
+        // EMIT-241: what a task stage handed on is read through the place it stands in, so an index copies nothing
+        if (_e.entry_stage == stage::mesh)
+        {
+            _is_variable[i] = true;
+            _locals[i] = payload_global(_e.locals[i].type);
             continue;
         }
         auto element = first;
@@ -452,7 +466,42 @@ void lowering::store_stage_result(value_ref result)
                  _e.entry_stage == stage::tessellation_control ? stage_part::patch : stage_part::output);
 }
 
-void lowering::store_struct(check::type_id t, value_ref result, stage_part part)
+void lowering::mesh_call(check::flat_call const& c, cc::string_view method)
+{
+    auto const arguments = _e.at(c.arguments);
+    auto const& output = _m.at(_e.at(arguments[0]).type);
+    auto const first = expr(arguments[1]);
+    auto const second = expr(arguments[2]);
+    if (method == "set_counts")
+        add(op::set_mesh_counts, type_ref::none, {first, second});
+    else if (method == "vertex")
+        store_struct(output.element, second, stage_part::output, first);
+    else if (method == "primitive")
+        store_struct(output.primitive, second, stage_part::primitive, first);
+    else
+        add(op::write_primitive, type_ref::none, {first, second});
+}
+
+value_ref lowering::payload_global(check::type_id t)
+{
+    if (!is_valid(_payload))
+        _payload = add_global({.type = pointer_type(value_type(t), storage::task_payload)}, "sgl_payload");
+    return _payload;
+}
+
+void lowering::dispatch_mesh(check::flat_call const& c)
+{
+    auto const arguments = _e.at(c.arguments);
+    auto const x = expr(arguments[0]);
+    auto const y = expr(arguments[1]);
+    auto const z = expr(arguments[2]);
+    auto const payload = payload_global(_e.at(arguments[3]).type);
+    add(op::store, type_ref::none, {payload, expr(arguments[3])});
+    u32 const operands[] = {u32(x), u32(y), u32(z), u32(payload)};
+    add(op::dispatch_mesh, type_ref::none, operands);
+}
+
+void lowering::store_struct(check::type_id t, value_ref result, stage_part part, value_ref index)
 {
     emit::impl::planned_struct const* found = nullptr;
     for (auto const& s : _plan.structs)
@@ -465,8 +514,8 @@ void lowering::store_struct(check::type_id t, value_ref result, stage_part part)
         ++element;
     auto const store_element = [&](value_ref value)
     {
-        u32 const operands[] = {element++, u32(value)};
-        add(op::stage_store, type_ref::none, operands);
+        u32 const operands[] = {element++, u32(value), u32(index)};
+        add(op::stage_store, type_ref::none, cc::span<u32 const>(operands, is_valid(index) ? 3 : 2));
     };
     for (auto m = isize(0); m < found->members.size(); ++m)
     {
@@ -485,7 +534,7 @@ void lowering::store_struct(check::type_id t, value_ref result, stage_part part)
         }
         if (emit::impl::is_word_split(_plan, member.type))
         {
-            store_words(member.type, whole, element);
+            store_words(member.type, whole, element, index);
             continue;
         }
         if (_m.at(member.type).kind == check::type_kind::array
@@ -493,7 +542,7 @@ void lowering::store_struct(check::type_id t, value_ref result, stage_part part)
         {
             auto const held = _m.at(member.type).element;
             for (auto i = u32(0); i < _m.at(member.type).count; ++i)
-                store_words(held, extracted(whole, value_type(held), i), element);
+                store_words(held, extracted(whole, value_type(held), i), element, index);
             continue;
         }
         for (auto i = 0; i < member.pieces; ++i)

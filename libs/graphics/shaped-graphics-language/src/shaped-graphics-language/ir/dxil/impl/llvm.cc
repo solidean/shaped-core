@@ -325,6 +325,11 @@ ll_type module_builder::element_of(ll_type t) const
     return _types[isize(t)].element;
 }
 
+cc::string_view module_builder::name_of(ll_type structure) const
+{
+    return name_at(_types[isize(structure)].name_first, _types[isize(structure)].name_size);
+}
+
 ll_value module_builder::folded_binary(binary_op op, ll_value a, ll_value b, u8 flags)
 {
     auto x = u64(0);
@@ -530,8 +535,14 @@ ll_value module_builder::element_pointer(ll_type source, ll_value base, cc::span
     for (auto i = isize(0); i < indices.size(); ++i)
     {
         raw.push_back(u32(indices[i]));
-        if (i > 0)
-            element = element_of(element);
+        if (i == 0)
+            continue;
+        auto const& held = _types[isize(element)];
+        auto member = u64(0);
+        // a struct's member is named by a constant, and every other type has the one element
+        element = held.code == type_code::structure && constant_bits(indices[i], member)
+                    ? ll_type(_type_args[held.first + isize(member)])
+                    : element_of(element);
     }
     auto const space = u32(_types[isize(type_of(base))].number);
     return push(inst_code::element_pointer, pointer(element, space), raw);

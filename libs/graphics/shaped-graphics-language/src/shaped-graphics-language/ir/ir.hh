@@ -115,6 +115,8 @@ enum class sgl::ir::storage : sgl::u8
     storage_buffer,
     /// A texture, an image or a sampler.
     resource,
+    /// What a task stage hands its mesh workgroups: one per entry point, which the mesh stage reads.
+    task_payload,
 };
 
 /// One member of a structure; `offset` and `matrix_stride` mean something where it stands in GPU memory.
@@ -396,6 +398,10 @@ enum class sgl::ir::op : sgl::u16
     emit_vertex,
     /// A geometry stage ends the strip it is appending to.
     end_strip,
+    /// Operands: vertices, primitives.
+    set_mesh_counts,
+    /// Operands: the primitive, then the `uint3` or `uint2` of its vertices.
+    write_primitive,
     // ---- textures and images
     combine_sampler,
     /// Operands: sampled image, coordinate, level, and an offset where `aux` is 1.
@@ -433,6 +439,8 @@ enum class sgl::ir::op : sgl::u16
     branch_conditional,
     /// Operands: selector, default block, then literal and block as pairs.
     switch_,
+    /// Operands: the three counts, then the global a task stage stored its payload in; it ends the stage on both targets.
+    dispatch_mesh,
     return_,
     unreachable,
 };
@@ -596,7 +604,7 @@ enum class sgl::ir::tessellation_domain : sgl::u8
     quad,
 };
 
-/// What a geometry or a tessellation stage states of its entry point beyond its elements.
+/// What a geometry, a tessellation or a mesh stage states of its entry point beyond its elements.
 ///
 /// A control stage's `program` is what HLSL calls its patch-constant function: the body runs once per patch.
 /// Each writer generates the part that hands each control point on, from the elements of `stage_part::output`.
@@ -604,8 +612,13 @@ struct sgl::ir::primitive_stage
 {
     /// The vertices of an input primitive, or the control points of a patch.
     u32 input_vertices = 0;
-    /// `@geometry(max_vertices = N)`'s `N`.
+    /// `@geometry(max_vertices = N)`'s `N`, or what a mesh workgroup writes at most.
     u32 max_vertices = 0;
+    /// A mesh stage's: what a workgroup writes at most, and whether those are lines rather than triangles.
+    u32 max_primitives = 0;
+    bool writes_lines = false;
+    /// A mesh stage's `uint3` or `uint2` of a primitive's vertices, which SPIR-V declares an array of.
+    type_ref primitive_indices = type_ref::none;
     /// The vertices of a primitive a geometry stage's stream appends: 1, 2 or 3.
     u32 output_vertices = 0;
     tessellation_domain domain = tessellation_domain::none;

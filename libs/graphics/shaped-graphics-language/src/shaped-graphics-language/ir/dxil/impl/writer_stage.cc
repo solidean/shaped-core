@@ -48,6 +48,8 @@ constexpr stage_rule k_stages[] = {
     {check::stage::geometry, "gs", 2},
     {check::stage::tessellation_control, "hs", 3},
     {check::stage::tessellation_evaluation, "ds", 4},
+    {check::stage::mesh, "ms", 13},
+    {check::stage::task, "as", 14},
 };
 
 /// What a signature's element is to `dx.sig` and `PSV0`, beside the `D3D_NAME` the packer gives.
@@ -92,6 +94,11 @@ constexpr u32 k_tag_geometry_state = 1;
 constexpr u32 k_tag_domain_state = 2;
 constexpr u32 k_tag_hull_state = 3;
 constexpr u32 k_tag_num_threads = 4;
+constexpr u32 k_tag_mesh_state = 9;
+constexpr u32 k_tag_task_state = 10;
+/// `DXIL::MeshOutputTopology`.
+constexpr u32 k_mesh_lines = 1;
+constexpr u32 k_mesh_triangles = 2;
 constexpr u32 k_tag_element_type = 0;
 constexpr u32 k_tag_structured_stride = 1;
 
@@ -181,7 +188,7 @@ void writer::stage_load(u32 index, instruction const& i)
 {
     auto const element = _p.operands_of(i)[0];
     auto const& e = _p.stage_elements[element];
-    if (_p.stage == check::stage::compute)
+    if (_p.stage == check::stage::compute || _p.stage == check::stage::task || _p.stage == check::stage::mesh)
         return built_in(index, e, i);
 
     auto const value_of = [&](dx_op op)
@@ -279,7 +286,10 @@ void writer::stage_store(instruction const& i)
         return unsupported(cc::format("the stage output {} on DXIL", _p.name_at(e.name_first, e.name_size)));
     }
     auto const& e = _p.stage_elements[operands[0]];
-    auto const op = e.part == stage_part::patch ? dx_op::store_patch_constant : dx_op::store_output;
+    auto const is_mesh = _p.stage == check::stage::mesh;
+    auto const op = is_mesh ? (e.part == stage_part::primitive ? dx_op::store_primitive_output : dx_op::store_vertex_output)
+                  : e.part == stage_part::patch ? dx_op::store_patch_constant
+                                                : dx_op::store_output;
     auto const value = value_ref(operands[1]);
     auto const number = _m.constant_i32(k_dx_ops[isize(op)].number);
     auto const id = _m.constant_i32(_signature_ids[at]);
@@ -287,9 +297,28 @@ void writer::stage_store(instruction const& i)
     for (auto l = u32(0); l < count_of(value); ++l)
     {
         auto const lane = leaf_at(value, l);
-        ll_value const args[] = {number, id, row, _m.constant_i8(l), lane};
-        (void)call(op, _m.type_of(lane), args);
+        ll_value const args[] = {number, id, row, _m.constant_i8(l), lane, is_mesh ? leaf_at(value_ref(operands[2])) : ll_value::none};
+        (void)call(op, _m.type_of(lane), cc::span<ll_value const>(args, is_mesh ? 6 : 5));
     }
+}
+
+void writer::set_mesh_counts(instruction const& i)
+{
+    auto const operands = _p.operands_of(i);
+    ll_value const args[] = {_m.constant_i32(k_dx_ops[isize(dx_op::set_mesh_output_counts)].number),
+                             leaf_at(value_ref(operands[0])), leaf_at(value_ref(operands[1]))};
+    (void)call(dx_op::set_mesh_output_counts, _m.void_type(), args);
+}
+
+void writer::write_primitive(instruction const& i)
+{
+    auto const operands = _p.operands_of(i);
+    auto const corners = value_ref(operands[1]);
+    // a line's third index is unused, and DXC writes it as zero
+    ll_value const args[] = {_m.constant_i32(k_dx_ops[isize(dx_op::emit_indices)].number), leaf_at(value_ref(operands[0])),
+                             leaf_at(corners, 0), leaf_at(corners, 1),
+                             _p.primitive.writes_lines ? _m.constant_i32(0) : leaf_at(corners, 2)};
+    (void)call(dx_op::emit_indices, _m.void_type(), args);
 }
 
 void writer::write_hull_function()
@@ -364,12 +393,14 @@ void writer::read_usage()
     {
         auto const shape = dx_class_id(f.key >> 32);
         if (shape != dx_class_id::load_input && shape != dx_class_id::store_output
-            && shape != dx_class_id::load_patch_constant && shape != dx_class_id::store_patch_constant)
+            && shape != dx_class_id::load_patch_constant && shape != dx_class_id::store_patch_constant
+            && shape != dx_class_id::store_vertex_output && shape != dx_class_id::store_primitive_output)
             continue;
-        // all four name an id and then a row and a lane, so one walk reads them
-        auto const table = shape == dx_class_id::load_input   ? signature_table::input
-                         : shape == dx_class_id::store_output ? signature_table::output
-                                                              : signature_table::patch;
+        // all of them name an id and then a row and a lane, so one walk reads them
+        auto const table = shape == dx_class_id::load_input ? signature_table::input
+                         : shape == dx_class_id::store_output || shape == dx_class_id::store_vertex_output
+                             ? signature_table::output
+                             : signature_table::patch;
         _m.calls_of(f.function,
                     [&](cc::span<u32 const> args)
                     {
@@ -426,7 +457,7 @@ void writer::fill_dependencies()
     _summary.view_outputs = view_mask(signature_table::output, _summary.output_scalars);
     _summary.dependencies
         = table_of(signature_table::input, _summary.input_rows, signature_table::output, _summary.output_scalars);
-    if (_p.stage == check::stage::tessellation_control)
+    if (_p.stage == check::stage::tessellation_control || _p.stage == check::stage::mesh)
     {
         _summary.view_patch = view_mask(signature_table::patch, _summary.patch_scalars);
         _summary.patch_dependencies
@@ -460,7 +491,7 @@ cc::vector<ll_value> writer::view_id_state()
         // the three streams SGL does not write
         for (auto stream = 0; stream < 3; ++stream)
             state.push_back(_m.constant_i32(0));
-    if (_p.stage == check::stage::tessellation_control)
+    if (_p.stage == check::stage::tessellation_control || _p.stage == check::stage::mesh)
     {
         state.push_back(_m.constant_i32(s.patch_scalars));
         push_all(s.view_patch);
@@ -478,6 +509,21 @@ void writer::stage_properties(cc::vector<u32>& properties)
 {
     auto const& shape = _p.primitive;
     auto const stage = _p.stage;
+    if (stage == check::stage::mesh || stage == check::stage::task)
+    {
+        u32 const threads[]
+            = {_m.md_i32(u32(_p.workgroup[0])), _m.md_i32(u32(_p.workgroup[1])), _m.md_i32(u32(_p.workgroup[2]))};
+        _summary.max_vertices = shape.max_vertices;
+        _summary.max_primitives = shape.max_primitives;
+        if (stage == check::stage::mesh)
+            _summary.mesh_topology = shape.writes_lines ? k_mesh_lines : k_mesh_triangles;
+        u32 const mesh_state[] = {_m.md_node(threads), _m.md_i32(shape.max_vertices), _m.md_i32(shape.max_primitives),
+                                  _m.md_i32(_summary.mesh_topology), _m.md_i32(_summary.payload_bytes)};
+        u32 const task_state[] = {_m.md_node(threads), _m.md_i32(_summary.payload_bytes)};
+        properties.push_back(_m.md_i32(stage == check::stage::mesh ? k_tag_mesh_state : k_tag_task_state));
+        properties.push_back(stage == check::stage::mesh ? _m.md_node(mesh_state) : _m.md_node(task_state));
+        return;
+    }
     if (stage == check::stage::geometry)
     {
         // DXIL numbers an input primitive by its vertices, but for the two with adjacency
@@ -663,7 +709,7 @@ void writer::write_entry_metadata()
     }
     stage_properties(properties);
     auto signatures = u32(0);
-    if (!is_compute)
+    if (!is_compute && _p.stage != check::stage::task)
     {
         fill_dependencies();
         u32 const lists_of_signature[] = {signature_list(signature_table::input), signature_list(signature_table::output),
@@ -719,7 +765,7 @@ void writer::write_entry_metadata()
             if (b.cls == cls)
                 _summary.resources.push_back(
                     {.psv_type = b.psv_type, .space = b.space, .lower = b.lower, .upper = b.upper, .kind = b.kind});
-    if (is_compute)
+    if (is_compute || _p.stage == check::stage::mesh || _p.stage == check::stage::task)
         for (auto axis = 0; axis < 3; ++axis)
             _summary.workgroup[axis] = _p.workgroup[axis];
 }
@@ -768,6 +814,8 @@ ll_type writer::dimensions_type()
 
 cc::string_view writer::overload_name(module_builder const& m, ll_type overload)
 {
+    if (m.is_structure(overload))
+        return m.name_of(overload);
     auto const bits = m.bits_of(overload);
     if (m.is_float(overload))
         return bits == 16 ? "f16" : bits == 64 ? "f64" : "f32";
@@ -776,6 +824,8 @@ cc::string_view writer::overload_name(module_builder const& m, ll_type overload)
 
 u8 writer::overload_mask(module_builder const& m, ll_type overload)
 {
+    if (m.is_structure(overload))
+        return k_udt;
     auto const bits = m.bits_of(overload);
     if (m.is_float(overload))
         return bits == 16 ? k_f16 : bits == 64 ? k_f64 : k_f32;
@@ -806,6 +856,10 @@ ll_type writer::signature_type(char code, ll_type overload)
     {
     case 'o':
         return overload;
+    case 'p':
+        return _m.pointer(overload);
+    case 'q':
+        return _m.pointer(overload, 3);
     case 'v':
         return _m.void_type();
     case 'c':

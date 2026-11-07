@@ -117,6 +117,9 @@ private:
     cc::vector<element_pointer_type> _pointer_types;
     /// A control stage's `InvocationId`, which no element holds.
     u32 _invocation = 0;
+    /// A mesh stage's array of each primitive's vertices, which no element holds, and the pointer to one of them.
+    u32 _primitive_indices = 0;
+    u32 _primitive_lane = 0;
     u32 _globals = 0;
     u32 _locals = 0;
     u32 _instructions = 0;

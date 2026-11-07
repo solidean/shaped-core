@@ -161,6 +161,8 @@ constexpr shape k_shapes[] = {
     shape::no_result,           // discard
     shape::no_result,           // emit_vertex
     shape::no_result,           // end_strip
+    shape::no_result,           // set_mesh_counts
+    shape::no_result,           // write_primitive
     shape::combine_sampler,     // combine_sampler
     shape::image_access,        // sample_lod
     shape::image_access,        // sample_implicit
@@ -181,6 +183,7 @@ constexpr shape k_shapes[] = {
     shape::branch,              // branch
     shape::branch_conditional,  // branch_conditional
     shape::switch_,             // switch_
+    shape::leaves,              // dispatch_mesh
     shape::leaves,              // return_
     shape::leaves,              // unreachable
 };

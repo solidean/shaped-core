@@ -12,7 +12,7 @@ namespace sgl::ir::dxil::impl
 /// A class's signature as text, the result then a colon then the parameters after the operation's number:
 /// `o` the overload, `v` void, `c` i1, `b` i8, `i` i32, `f` float, `h` a handle, `B` a binding, `P` a handle's
 /// properties, `R` a resource's return of the overload, `C` a constant block's row of it, `D` a resource's dimensions,
-/// `S` a double's two words.
+/// `S` a double's two words, `p` a pointer to the overload, `q` the same in workgroup memory.
 struct dx_class
 {
     cc::string_view name;
@@ -85,6 +85,12 @@ enum class dx_class_id : u8
     sample_cmp,
     sample_cmp_level_zero,
     texture_gather_cmp,
+    set_mesh_output_counts,
+    emit_indices,
+    get_mesh_payload,
+    store_vertex_output,
+    store_primitive_output,
+    dispatch_mesh,
 };
 
 // clang-format off
@@ -147,6 +153,12 @@ inline constexpr dx_class k_dx_classes[] = {
     {"sampleCmp", "R:hhffffiiiff", dx_class::read_only},
     {"sampleCmpLevelZero", "R:hhffffiiif", dx_class::read_only},
     {"textureGatherCmp", "R:hhffffiiif", dx_class::read_only},
+    {"setMeshOutputCounts", "v:ii"},
+    {"emitIndices", "v:iiii"},
+    {"getMeshPayload", "p:", dx_class::read_only},
+    {"storeVertexOutput", "v:iiboi"},
+    {"storePrimitiveOutput", "v:iiboi"},
+    {"dispatchMesh", "v:iiiq"},
 };
 // clang-format on
 
@@ -161,6 +173,8 @@ enum dx_overload_mask : u8
     k_i16 = 1 << 4,
     k_i32 = 1 << 5,
     k_i64 = 1 << 6,
+    /// A struct of the program, whose name stands where a scalar's does.
+    k_udt = 1 << 7,
     k_floats = k_f16 | k_f32 | k_f64,
     k_ints = k_i16 | k_i32 | k_i64,
     k_scalars = k_floats | k_ints,
@@ -259,6 +273,12 @@ enum class dx_op : u8
     sample_cmp,
     sample_cmp_level_zero,
     texture_gather_cmp,
+    set_mesh_output_counts,
+    emit_indices,
+    get_mesh_payload,
+    store_vertex_output,
+    store_primitive_output,
+    dispatch_mesh,
 };
 
 struct dx_op_info
@@ -362,9 +382,15 @@ inline constexpr dx_op_info k_dx_ops[] = {
     {64, dx_class_id::sample_cmp, k_f16 | k_f32},
     {65, dx_class_id::sample_cmp_level_zero, k_f16 | k_f32},
     {74, dx_class_id::texture_gather_cmp, k_f16 | k_f32 | k_i16 | k_i32},
+    {168, dx_class_id::set_mesh_output_counts, k_no_overload},
+    {169, dx_class_id::emit_indices, k_no_overload},
+    {170, dx_class_id::get_mesh_payload, k_udt},
+    {171, dx_class_id::store_vertex_output, k_f16 | k_f32 | k_i16 | k_i32},
+    {172, dx_class_id::store_primitive_output, k_f16 | k_f32 | k_i16 | k_i32},
+    {173, dx_class_id::dispatch_mesh, k_udt},
 };
 // clang-format on
 
-static_assert(sizeof(k_dx_ops) / sizeof(k_dx_ops[0]) == sizeof(char[isize(dx_op::texture_gather_cmp) + 1]));
-static_assert(sizeof(k_dx_classes) / sizeof(k_dx_classes[0]) == sizeof(char[isize(dx_class_id::texture_gather_cmp) + 1]));
+static_assert(sizeof(k_dx_ops) / sizeof(k_dx_ops[0]) == sizeof(char[isize(dx_op::dispatch_mesh) + 1]));
+static_assert(sizeof(k_dx_classes) / sizeof(k_dx_classes[0]) == sizeof(char[isize(dx_class_id::dispatch_mesh) + 1]));
 } // namespace sgl::ir::dxil::impl
