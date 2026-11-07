@@ -315,7 +315,8 @@ void writer::sampled(u32 index,
                      instruction const& i,
                      dx_op op,
                      cc::function_ref<void(cc::vector<ll_value>&)> tail,
-                     isize offsets)
+                     isize offsets,
+                     value_ref offset)
 {
     auto const operands = _p.operands_of(i);
     auto const pair = value_ref(operands[0]);
@@ -329,8 +330,10 @@ void writer::sampled(u32 index,
     args.push_back(leaf_at(pair, 1));
     for (auto l = u32(0); l < 4; ++l)
         args.push_back(l < lanes ? leaf_at(at, l) : undefined_f);
+    // a stated offset's lanes are its constants, which the validator wants as immediates; `undef` past them
+    auto const offset_lanes = is_valid(offset) ? isize(count_of(offset)) : 0;
     for (auto k = isize(0); k < offsets; ++k)
-        args.push_back(undefined);
+        args.push_back(k < offset_lanes ? leaf_at(offset, u32(k)) : undefined);
     tail(args);
     auto const fetched = call(op, scalar_type(scalar_at(i.type, 0)), args);
     _scratch.clear();
@@ -398,7 +401,9 @@ void writer::texture_op(u32 index, instruction const& i)
         return sampled(index, i, i.code == op::sample_lod ? dx_op::sample_level : dx_op::sample_cmp_level_zero,
                        [&](cc::vector<ll_value>& args) { args.push_back(leaf_at(value_ref(operands[2]))); });
     case op::sample_implicit:
-        return sampled(index, i, dx_op::sample, [&](cc::vector<ll_value>& args) { args.push_back(unstated()); });
+        return sampled(
+            index, i, dx_op::sample, [&](cc::vector<ll_value>& args) { args.push_back(unstated()); }, 3,
+            operands.size() > 2 ? value_ref(operands[2]) : value_ref::none);
     case op::sample_bias:
     case op::sample_compare:
         return sampled(index, i, i.code == op::sample_bias ? dx_op::sample_bias : dx_op::sample_cmp,
@@ -419,7 +424,8 @@ void writer::texture_op(u32 index, instruction const& i)
     case op::image_gather:
         return sampled(
             index, i, dx_op::texture_gather,
-            [&](cc::vector<ll_value>& args) { args.push_back(leaf_at(value_ref(operands[2]))); }, 2);
+            [&](cc::vector<ll_value>& args) { args.push_back(leaf_at(value_ref(operands[2]))); }, 2,
+            operands.size() > 3 ? value_ref(operands[3]) : value_ref::none);
     case op::image_gather_compare:
         // the channel comes first, and a compare takes the first
         return sampled(

@@ -463,7 +463,9 @@ enum class sgl::ir::op : sgl::u16
     combine_sampler,
     /// Operands: sampled image, coordinate, level, and an offset where `aux` is 1.
     sample_lod,
-    /// Operands: sampled image, coordinate; a pixel stage's alone, whose level comes from its derivatives.
+    /// Operands: sampled image, coordinate, then an offset where the call states one.
+    /// A pixel stage's alone, whose level comes from its derivatives.
+    /// An offset is a `construct` of integer constants, or one constant for a 1D texture (CHK-280).
     sample_implicit,
     /// Operands: sampled image, coordinate, bias.
     sample_bias,
@@ -475,7 +477,7 @@ enum class sgl::ir::op : sgl::u16
     sample_compare_zero,
     /// Operands: image, coordinate, level, and a sample where `aux` is 1.
     image_fetch,
-    /// Operands: sampled image, coordinate, component.
+    /// Operands: sampled image, coordinate, component, then an offset as `sample_implicit` takes one.
     image_gather,
     /// Operands: sampled image, coordinate, reference.
     image_gather_compare,

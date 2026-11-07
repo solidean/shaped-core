@@ -6,7 +6,6 @@ parent: epic-sgl-native-ir-targets
 # What a compute entry point still cannot lower
 
 A body or a type in a target's own text, DXIL's `double` maths, and an `affine3` in GPU memory.
-A sample's offset too, which no fixture holds.
 
 ## Left, and why
 
@@ -16,7 +15,6 @@ A sample's offset too, which no fixture holds.
 - **DXIL's `double` maths** (`double_maths.sgl`'s `double_functions`): `floor`, `ceil`, `round`, `trunc`, `fract`, `sqrt` and `inverse_sqrt`.
   DXIL has no operation for any of them at 64 bits, so the text writes EMIT-219's helpers of HLSL, about 340 lines that take the bits apart.
   The native route would want the same helpers once, written in SGL in the prelude, rather than a second copy in either writer.
-- **A sample's offset**: SPIR-V takes it as a constant vector, which the form does not hold (EMIT-238).
 - **Metal's** fused intersection and empty closest hit, which no other target builds (EMIT-244).
 
 ## Landed on 2026-11-07
@@ -29,6 +27,7 @@ A sample's offset too, which no fixture holds.
 | a float atomic with no device add | EMIT-250 | shared lowering |
 | `bool32` | EMIT-251 | shared lowering |
 | texel atomics, in every image shape | EMIT-252 | `op::texel_pointer`, and a texel place on DXIL |
+| a `sample` or a `gather` offset | EMIT-253 | both writers |
 
 The prologue is a copy: the text route still writes EMIT-229 by hand, and lowering writes it again.
 Like `print` before LEGAL-70, it belongs in legalize, as flat statements over a workgroup `sgl_written` every route then lowers.
@@ -76,3 +75,10 @@ The 121st entry is `coherence.sgl`'s new `texel_shapes`, one of each image shape
 It takes a signed `min` on a 1D image, an `add` on a 2D array's layer, an `exchange` on a 3D image, both compare-exchanges, and an atomic store and load.
 Its GPU test, in `compute-coherence-test.cc`, checks what each returns and leaves on every context, and a layer and a depth of their own beside each.
 A layer lowered as 0 failed `dx12-native-dxil` and `vulkan-native-spirv` alone, and DXC's contexts passed.
+
+## A sample's offset, measured on 2026-11-07
+
+The offset is a `sample` or a `gather` operand of its own, the `construct` of constants CHK-280 makes it, so the form holds no constant vector.
+SPIR-V declares it as an `OpConstantComposite` where an image operation names it, and DXIL reads its lanes as immediates.
+`pixel_surface.sgl`'s new `offset_ps` takes both, and the mixed-route test draws it through every pairing on dx12 and vulkan, every lane within 1e-4 of DXC's.
+The vertex and pixel sweep lowers 83 of 83 on both writers, and dropping the offset in lowering failed every native pixel pairing.

@@ -44,6 +44,7 @@ enum class rule_kind : u8
     write_primitive,
     derivative,
     sample_lod,
+    sample_implicit,
     sample_bias,
     sample_grad,
     sample_compare_zero,
@@ -169,7 +170,7 @@ constexpr op_rule k_rules[] = {
     {op::set_mesh_counts, rule_kind::set_mesh_counts, spv::SetMeshOutputsEXT},
     {op::write_primitive, rule_kind::write_primitive, spv::Store},
     {op::sample_lod, rule_kind::sample_lod, spv::ImageSampleExplicitLod},
-    {op::sample_implicit, rule_kind::plain, spv::ImageSampleImplicitLod},
+    {op::sample_implicit, rule_kind::sample_implicit, spv::ImageSampleImplicitLod},
     {op::sample_bias, rule_kind::sample_bias, spv::ImageSampleImplicitLod},
     {op::sample_grad, rule_kind::sample_grad, spv::ImageSampleExplicitLod},
     {op::sample_compare, rule_kind::plain, spv::ImageSampleDrefImplicitLod},
@@ -547,6 +548,12 @@ void writer::instruction_of(u32 index)
     case rule_kind::sample_lod:
         return emit(_code, rule.opcode,
                     {id_of(i.type), id, id_of_raw(operands[0]), id_of_raw(operands[1]), 0x2u, id_of_raw(operands[2])});
+    case rule_kind::sample_implicit:
+        if (operands.size() > 2)
+            return emit(_code, rule.opcode,
+                        {id_of(i.type), id, id_of_raw(operands[0]), id_of_raw(operands[1]), k_image_const_offset,
+                         constant_composite(value_ref(operands[2]))});
+        return emit(_code, rule.opcode, {id_of(i.type), id, id_of_raw(operands[0]), id_of_raw(operands[1])});
     case rule_kind::sample_bias:
         return emit(_code, rule.opcode,
                     {id_of(i.type), id, id_of_raw(operands[0]), id_of_raw(operands[1]), 0x1u, id_of_raw(operands[2])});
@@ -563,6 +570,10 @@ void writer::instruction_of(u32 index)
                     {id_of(i.type), id, id_of_raw(operands[0]), id_of_raw(operands[1]), i.aux != 0 ? 0x40u : 0x2u,
                      id_of_raw(operands[2])});
     case rule_kind::image_gather:
+        if (operands.size() > 3)
+            return emit(_code, rule.opcode,
+                        {id_of(i.type), id, id_of_raw(operands[0]), id_of_raw(operands[1]), id_of_raw(operands[2]),
+                         k_image_const_offset, constant_composite(value_ref(operands[3]))});
         return emit(_code, rule.opcode,
                     {id_of(i.type), id, id_of_raw(operands[0]), id_of_raw(operands[1]), id_of_raw(operands[2])});
     case rule_kind::image_write:

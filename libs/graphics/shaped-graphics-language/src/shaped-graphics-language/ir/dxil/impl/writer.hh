@@ -399,7 +399,8 @@ private:
                  instruction const& i,
                  dx_op op,
                  cc::function_ref<void(cc::vector<ll_value>&)> tail,
-                 isize offsets = 3);
+                 isize offsets = 3,
+                 value_ref offset = value_ref::none);
     void discard();
     void derivative_lanes(u32 index, instruction const& i);
     /// Which lanes the module's final operations touch, once nothing more can go.

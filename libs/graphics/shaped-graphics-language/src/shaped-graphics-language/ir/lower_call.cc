@@ -595,9 +595,32 @@ value_ref lowering::texture_call(flat_call const& c, builtins::function_record c
         return add(ir::op::construct, vector_type(scalar_of(xy_type), lanes_of(xy_type) + 1), {xy, layer});
     };
 
+    // EMIT-253: a `sample` or a `gather` takes its offset last, and nothing else states one
+    auto const takes_offset = shape.what == op::sample || shape.what == op::gather;
+    auto const with_offset = [&](std::initializer_list<value_ref> operands)
+    {
+        auto list = cc::vector<u32>();
+        for (auto const v : operands)
+            list.push_back(u32(v));
+        if (layout.offset < 0)
+            return list;
+        // CHK-280 makes it a constant, which SPIR-V names as one and DXIL takes as immediates
+        auto const offset = expr(arguments[layout.offset]);
+        auto is_known = is_constant(offset);
+        if (!is_known && is_operation(offset) && _out.instructions[u32(offset)].code == ir::op::construct)
+        {
+            is_known = true;
+            for (auto const part : _out.operands_of(_out.instructions[u32(offset)]))
+                is_known = is_known && is_constant(value_ref(part));
+        }
+        if (!is_known)
+            unsupported("an offset that lowers to no constant");
+        list.push_back(u32(offset));
+        return list;
+    };
     auto const sampler_handle = [&]() -> value_ref
     {
-        if (layout.offset >= 0)
+        if (layout.offset >= 0 && !takes_offset)
         {
             unsupported("a sample with an offset");
             return value_ref::none;
@@ -639,7 +662,7 @@ value_ref lowering::texture_call(flat_call const& c, builtins::function_record c
         if (!is_valid(sampler))
             return value_ref::none;
         auto const at = coordinate(expr(arguments[1]));
-        return narrowed(add(ir::op::sample_implicit, texels, {with_image(sampler), at}));
+        return narrowed(add(ir::op::sample_implicit, texels, with_offset({with_image(sampler), at})));
     }
     case op::sample_bias:
     {
@@ -667,7 +690,7 @@ value_ref lowering::texture_call(flat_call const& c, builtins::function_record c
             return value_ref::none;
         auto const at = coordinate(expr(arguments[1]));
         auto const component = layout.first >= 0 ? expr(arguments[layout.first]) : int_constant(0);
-        return add(ir::op::image_gather, texels, {with_image(sampler), at, component});
+        return add(ir::op::image_gather, texels, with_offset({with_image(sampler), at, component}));
     }
     case op::sample_compare:
     {

@@ -457,7 +457,7 @@ fn main_ps(p: pixel_input) -> target_ {
   `@sample_index` stands in a signature with no row, and DXIL reads it with `dx.op.sampleIndex`; such an element is unallocated in `PSV0`.
   `@view_index` is `dx.op.viewID` and in no signature, and `@layer` from a vertex stage is `ShaderLayer` and DXIL's shader flag for it.
   Every built-in a pixel stage reads but `FragCoord` is `Flat` on SPIR-V.
-  A sample's offset is `unsupported` so far: SPIR-V takes it as a constant vector, which the form does not hold.
+  A sample's offset is EMIT-253's.
 * **EMIT-239** A binding array is one global of an array of resources, an unbounded one of a runtime array, and an `access_chain` picks the element.
   On DXIL that element's handle is made where the chain stands, `createHandleFromBinding` over the array's whole range, since no handle exists ahead of its index.
   `nonuniform i` marks the chain and what reads through it.
@@ -534,6 +534,8 @@ fn main_ps(p: pixel_input) -> target_ {
 * **EMIT-252** A native route updates an `@atomic` image's texel through a place of its own, the image and the coordinate, with an array's layer as the coordinate's last lane.
   On SPIR-V it is `OpImageTexelPointer` of the image's variable, sample 0, in `Image` storage, which the atomics take as they take any pointer.
   On DXIL it is `atomicBinOp` or `atomicCompareExchange` of the image's handle, the coordinate's lanes as its offsets and `undef` past them.
+* **EMIT-253** A native route takes a `sample` or a `gather` offset as the constant CHK-280 makes it.
+  On SPIR-V it is the `ConstOffset` image operand of an `OpConstantComposite`, and on DXIL the immediate offsets of `sample` and `textureGather`, `undef` past its lanes.
 
 ## Lines
 
