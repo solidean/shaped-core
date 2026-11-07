@@ -98,6 +98,10 @@ struct sg::backend::dx12::dx12_config
     /// An entry point it has none for goes through DXC.
     bool native_dxil = false;
 
+    /// SGL's own DXIL carries each operation's `.sgl` line, in a debug module beside the program, for PIX (EMIT-257).
+    /// The program part keeps its bytes, and what DXC compiles is untouched.
+    bool native_line_tables = false;
+
     /// Enable DRED, so a device removal reports what the GPU was doing rather than only an HRESULT.
     ///
     /// Auto-breadcrumbs cost a write per command-list operation, which is why this is off by default and worth
@@ -215,6 +219,7 @@ public:
 
     [[nodiscard]] sg::execution_model execution() const override { return _execution; }
     [[nodiscard]] bool prefers_native_dxil() const override { return _native_dxil; }
+    [[nodiscard]] bool writes_native_line_tables() const override { return _native_line_tables; }
 
     /// D3D12 has every stage sg models, and headless present is always available here.
     ///
@@ -737,6 +742,7 @@ public:
     bool _native_16bit_shader_ops = false;     // D3D12_OPTIONS4, cached at creation
     bool _wave_ops = false;                    // D3D12_OPTIONS1, cached at creation
     bool _native_dxil = false;                 // dx12_config::native_dxil
+    bool _native_line_tables = false;          // dx12_config::native_line_tables
     bool _int64_shader_ops = false;            // D3D12_OPTIONS1, cached at creation
     bool _double_shader_ops = false;           // D3D12_OPTIONS, cached at creation
     bool _int64_atomics = false;               // D3D12_OPTIONS1 on Shader Model 6.6, cached at creation

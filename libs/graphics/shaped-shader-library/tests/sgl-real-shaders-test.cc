@@ -116,7 +116,7 @@ TEST("slib - the viewer's tracer and the traced drawings lower on both writers, 
             continue;
         for (auto const& entry : all.value())
         {
-            auto const compile = [&](sgl::emit::target target)
+            auto const compile = [&](sgl::emit::target target, bool line_table = false)
             {
                 return sgl::compile_to_text(
                     {.source = source,
@@ -126,7 +126,8 @@ TEST("slib - the viewer's tracer and the traced drawings lower on both writers, 
                      .target = target,
                      .diagnostics = true,
                      .device_features = sgl::check::feature_set(sgl::check::feature::vertex_pipeline_stores),
-                     .native = sgl::emit::native_route::prefer});
+                     .native = sgl::emit::native_route::prefer,
+                     .native_line_table = line_table});
             };
             auto const on_dx12 = compile(sgl::emit::target::hlsl_dx12);
             if (on_dx12.has_value() && !on_dx12.value().dxil.empty())
@@ -139,6 +140,14 @@ TEST("slib - the viewer's tracer and the traced drawings lower on both writers, 
                     .dump("file", file)
                     .dump("entry", entry.entry_point)
                     .dump("validator", refused.value_or(cc::string()));
+                // EMIT-257: with its line table too, whose lines a module directory's files reach
+                auto const lined = compile(sgl::emit::target::hlsl_dx12, true);
+                REQUIRE(lined.has_value());
+                auto const lined_refused = compiler.value().validate(lined.value().dxil);
+                CHECK(!lined_refused.has_value())
+                    .dump("file", file)
+                    .dump("entry", entry.entry_point)
+                    .dump("validator", lined_refused.value_or(cc::string()));
             }
             else if (on_dx12.has_value())
                 CC_LOG_INFO("{}: {}: {}", file, entry.entry_point, on_dx12.value().native_gap);
@@ -155,6 +164,13 @@ TEST("slib - the viewer's tracer and the traced drawings lower on both writers, 
             {
                 write_words(module_path, on_vulkan.value().spirv);
                 CHECK(std::system(command_text.data()) == 0).dump("file", file).dump("entry", entry.entry_point);
+                auto const lined = compile(sgl::emit::target::hlsl_vulkan, true);
+                REQUIRE(lined.has_value());
+                write_words(module_path, lined.value().spirv);
+                CHECK(std::system(command_text.data()) == 0)
+                    .dump("file", file)
+                    .dump("entry", entry.entry_point)
+                    .dump("with", "its line table");
             }
         }
     }

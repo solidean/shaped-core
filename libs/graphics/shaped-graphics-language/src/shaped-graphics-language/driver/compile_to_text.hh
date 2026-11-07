@@ -53,6 +53,9 @@ struct sgl::text_request
     check::feature_set device_features;
     /// `hlsl-vulkan` written as SPIR-V by SGL itself, which `emitted_source::spirv` then holds.
     emit::native_route native = emit::native_route::text;
+    /// Writes the `.sgl` line of each operation into what the native route writes, for a debugger to read (EMIT-257).
+    /// Off, the binary is byte for byte what it would be without this option; the text route has `line_directives`.
+    bool native_line_table = false;
 };
 
 /// Every entry point of one SGL source, asked for as the text of each of `targets`.

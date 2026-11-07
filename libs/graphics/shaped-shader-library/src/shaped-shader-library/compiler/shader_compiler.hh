@@ -116,6 +116,11 @@ inline constexpr cc::string_view k_native_spirv_option = "native_spirv";
 /// The same for a context that prefers SGL's own DXIL, `sg::context::prefers_native_dxil`'s.
 inline constexpr cc::string_view k_native_dxil_option = "native_dxil";
 
+/// The option `shader_asset::acquire` adds, valued `true`, for a context that asks SGL's own SPIR-V and DXIL to carry
+/// each operation's `.sgl` line, for a debugger (EMIT-257): `sg::context::writes_native_line_tables`'s.
+/// It changes nothing of what DXC compiles, and the cache keys on it as on any option.
+inline constexpr cc::string_view k_native_line_table_option = "native_line_table";
+
 /// The option a caller passes to `shader_asset::acquire`, valued `true`, to let a WebGPU pipeline run an SGL entry
 /// point at `fast` whose `@float` WGSL cannot keep, with a warning, rather than refusing it (EMIT-185).
 /// The host's call, never the shader's, and the cache keys on it as on any option.

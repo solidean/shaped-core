@@ -188,7 +188,7 @@ The default is the exact test, `distance_sqr_to(b) <= eps²`, so the overloads e
 A kernel may pad more cheaply in whatever way suits it (a barycentric margin, say), which is why the in-between is left open; none does yet.
 
 **The opt-in check.**
-`SC_CHECK_GEOMETRY_SPECIAL_CASES` (default off, on in the `debug-nopch` presets) reaches C++ as `TG_CHECK_SPECIAL_CASES`.
+`SC_CHECK_GEOMETRY_SPECIAL_CASES` (default off, on in the clang `debug-*` presets) reaches C++ as `TG_CHECK_SPECIAL_CASES`.
 Each assumption a kernel makes is a `TG_SPECIAL_CASE(cond, "what")`, which logs a warning in the `tg` recording domain when the flag is on and compiles to nothing otherwise.
 nexus fails a passing test that logs an undeclared warning, so a test that feeds a special case by accident fails, and one that does so on purpose declares it with `nx::expect_warning`.
 

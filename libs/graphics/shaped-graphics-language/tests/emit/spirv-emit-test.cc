@@ -305,6 +305,7 @@ TEST("sgl spirv - every entry point of the fixtures that lowers is what spirv-va
     auto ray_lowered = 0;
     auto recording = 0;
     auto guarded = 0;
+    auto lined_modules = 0;
     for (auto const& file : files)
     {
         auto const source = read_all(file);
@@ -338,6 +339,26 @@ TEST("sgl spirv - every entry point of the fixtures that lowers is what spirv-va
             recording += e.value().debug_sites.empty() ? 0 : 1;
             write_words(module_path, e.value().spirv);
             CHECK(std::system(command_text.data()) == 0).dump("file", file).dump("entry", entry.entry_point);
+
+            // EMIT-257: the line table is SPIR-V spirv-val takes too, every eighth module, and each under --thorough
+            if (nx::is_thorough() || lined_modules++ % 8 == 0)
+            {
+                auto const lined = sgl::compile_to_text(
+                    {.source = source,
+                     .source_name = file,
+                     .entry_point = entry.entry_point,
+                     .target = sgl::emit::target::hlsl_vulkan,
+                     .diagnostics = true,
+                     .device_features = sgl::check::feature_set(sgl::check::feature::vertex_pipeline_stores),
+                     .native = sgl::emit::native_route::prefer,
+                     .native_line_table = true});
+                REQUIRE(lined.has_value());
+                write_words(module_path, lined.value().spirv);
+                CHECK(std::system(command_text.data()) == 0)
+                    .dump("file", file)
+                    .dump("entry", entry.entry_point)
+                    .dump("with", "its line table");
+            }
 
             // each profile, nothing here running what it guards; a report writes through the debug buffer
             for (auto const guard : {sgl::check::undefined_guard::abort, sgl::check::undefined_guard::report,

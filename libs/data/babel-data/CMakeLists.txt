@@ -52,8 +52,6 @@ target_link_libraries(babel-data PUBLIC clean-core)
 # Enable conforming preprocessor for MSVC
 target_compile_options(babel-data PUBLIC $<$<CXX_COMPILER_ID:MSVC>:/Zc:preprocessor>)
 
-sc_target_pch(babel-data CC_ALL) # the same measured tier as babel-serializer
-
 # Test executable
 if(SC_BUILD_TESTS)
     add_executable(babel-data-test
@@ -72,8 +70,6 @@ if(SC_BUILD_TESTS)
         babel-data
         nexus
     )
-
-    sc_target_pch(babel-data-test CC_ALL NEXUS) # inherits the library's measured tier
 
     # Browser test runner (Emscripten only); no-op natively.
     sc_add_nexus_web_runner(babel-data-test)

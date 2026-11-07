@@ -774,6 +774,36 @@ struct sgl::ir::local
     u32 name_size = 0;
 };
 
+/// Where one statement came from (EMIT-257): a position in `line_table::files`, the line there, and its calls.
+struct sgl::ir::source_place
+{
+    /// -1 where the statement names no line.
+    i32 file = -1;
+    i32 line = 0;
+    /// A range of `line_table::calls`: the calls it was inlined through, innermost first.
+    u32 calls_first = 0;
+    u32 calls_count = 0;
+};
+
+/// What a writer states of the `.sgl` lines behind its operations; empty unless the compile asked for it (EMIT-257).
+struct sgl::ir::line_table
+{
+    /// What each file is called, and what it holds.
+    cc::vector<cc::string> names;
+    cc::vector<cc::string> texts;
+    /// Parallel to the flat entry point's statements, which an instruction's `statement` indexes.
+    cc::vector<source_place> statements;
+    /// The call sites of every place, each a place of its own with no calls.
+    cc::vector<source_place> calls;
+
+    [[nodiscard]] bool is_empty() const { return statements.empty(); }
+    /// The place of statement `s`, or one with no file.
+    [[nodiscard]] source_place place_of(u32 s) const
+    {
+        return s < u32(statements.size()) ? statements[isize(s)] : source_place();
+    }
+};
+
 /// One entry point, whole.
 struct sgl::ir::program
 {
@@ -798,6 +828,8 @@ struct sgl::ir::program
     bool sees_micromaps = false;
     /// The entry point's guarantee: what no single operation can say, its denormals above all.
     check::float_level guarantee = check::float_level::fast;
+    /// The `.sgl` lines each writer states beside its operations, where the compile asked for them.
+    line_table lines;
 
     [[nodiscard]] cc::string_view name_at(u32 first, u32 size) const
     {

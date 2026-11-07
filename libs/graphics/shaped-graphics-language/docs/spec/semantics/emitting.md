@@ -491,7 +491,7 @@ fn main_ps(p: pixel_input) -> target_ {
   On DXIL it is one `dx.op.allocateRayQuery` where it begins, with the flags every trace of it states.
   A read of a query gives a value and goes where nothing uses it, but it neither moves nor merges, since each is valid only in the state the query is in where it stands.
   A row of a hit's transform is taken from the whole transform, which SPIR-V hands over by column and DXIL by row and column.
-  An `affine3` is a value of three rows, and GPU memory holds one as EMIT-257 writes it.
+  An `affine3` is a value of three rows, and GPU memory holds one as EMIT-259 writes it.
   A query of an entry point that states opacity micromaps is EMIT-184's.
   What is undefined on one way into a merge takes the other way's value, since DXIL's validator refuses `undef` in a `select`.
 * **EMIT-244** A ray-tracing stage of a native route is one entry point of its target's own, so a pipeline may take each stage from either route.
@@ -547,6 +547,15 @@ fn main_ps(p: pixel_input) -> target_ {
   Where the inlined calls change, a comment names them first, `// inlined from shade.sgl:12 > main.sgl:40`, each file by its name alone.
   The file name is a string literal, so a backslash or a quote in it is escaped.
   WGSL has no such directive, and its messages map back through the table (EMIT-181).
+* **EMIT-257** Asked for a native line table, a native route writes each operation's line of EMIT-181 into its binary, and nothing else changes.
+  It is opt-in, `text_request::native_line_table`, since it carries the text of each file a line names.
+  SPIR-V states an `OpString` and an `OpSource` with the text per file, and an `OpLine` before an operation whose line differs from the last in its block.
+  Core SPIR-V has no inlined calls, so an `OpLine` names the innermost line, where the operation stands.
+  The files' ids are the module's last, so every other id is the one it has without the table.
+  DXIL keeps its `DXIL` part byte for byte and writes DXC's `-Zi` form beside it: an `ILDB` part and an `ILDN` part naming `<entry>.pdb`.
+  `ILDB` is the module again, each instruction with a `DILocation`, an inlined statement's in a `DISubprogram` of its file with the chain of `inlinedAt` calls.
+  It holds `dx.source.contents`, so a debugger shows each line without the file, and no variable is described.
+  A function's expression inlines into the statement that calls it, so only a function's own statements keep an inlined line.
 
 ## Diagnostics
 
@@ -654,7 +663,7 @@ So `{float3; float}` is written with `packed_float3`: the `float` is at byte 12 
 * **EMIT-258** SPIR-V's atomics of workgroup memory state `Workgroup` scope, and every other `Device`.
   A 64-bit atomic store of workgroup memory is an `OpAtomicExchange`, and a load an `OpAtomicOr` of 0, as DXC writes them.
   Intel's vulkan driver reads wrong after either plain form: [bug-sgl-intel-vulkan-shared-64-bit-atomic-load-store](../../issues/bug-sgl-intel-vulkan-shared-64-bit-atomic-load-store.md).
-* **EMIT-257** Every target writes an `affine3` in GPU memory as CHK-518's three rows.
+* **EMIT-259** Every target writes an `affine3` in GPU memory as CHK-518's three rows.
   HLSL declares it `row_major float3x4`, and a buffer of them holds each in a struct of one field: DXC's DXIL drops a `row_major` written in a buffer's template.
   WGSL's `mat3x4f` and MSL's `float3x4` hold the rows as their own columns.
   A native route holds it as a matrix of three `float4` columns, one per row, at a stride of 16, which SPIR-V decorates `ColMajor`, as DXC does for HLSL's `row_major float3x4`.

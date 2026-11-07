@@ -361,7 +361,6 @@ endif()
 # The CPU feature query is compiled at the x86-64 baseline, so a library can ask it on a CPU below SC_X64_LEVEL and fail cleanly.
 # At the build's level the compiler spends AVX even there, e.g. on zeroing the cc::cpu_features it returns.
 # Its two files define no inline function another TU emits too, so the linker cannot swap in a copy compiled above the baseline.
-# They skip the precompiled header, which is compiled at the build's level.
 # cl.exe has no spelling below its x64 default to override /arch:AVX2 with, so this holds for clang and GCC only.
 if(SC_ARCH_X64 AND NOT EMSCRIPTEN)
     if(CMAKE_CXX_COMPILER_ID MATCHES "Clang" AND MSVC)
@@ -371,7 +370,7 @@ if(SC_ARCH_X64 AND NOT EMSCRIPTEN)
     endif()
     if(DEFINED _cc_baseline)
         set_source_files_properties(src/clean-core/platform/cpu_features.cc src/clean-core/platform/impl/cpuid.cc
-            TARGET_DIRECTORY clean-core PROPERTIES COMPILE_OPTIONS "${_cc_baseline}" SKIP_PRECOMPILE_HEADERS ON)
+            TARGET_DIRECTORY clean-core PROPERTIES COMPILE_OPTIONS "${_cc_baseline}")
     endif()
 endif()
 
@@ -472,65 +471,6 @@ cc_detect_linker(_CC_LINKER)
 if(NOT _CC_LINKER STREQUAL "" AND NOT _CC_LINKER STREQUAL "msvc" AND NOT _CC_LINKER STREQUAL "wasm-ld")
     target_link_options(clean-core PUBLIC -fuse-ld=${_CC_LINKER})
 endif()
-
-# The PCH tiers clean-core owns. Every other library's tiers build on these, so they are declared first in the repo.
-# docs/guides/precompiled-headers.md is how to change one; the short version is that it is a measurement, not a guess.
-
-# The clean-core surface a typical TU reaches for.
-sc_declare_pch_tier(CC HEADERS
-    <clean-core/fwd.hh>
-    <clean-core/common/assert.hh>
-    <clean-core/common/macros.hh>
-    <clean-core/common/utility.hh>
-    <clean-core/common/hash.hh>
-    <clean-core/container/span.hh>
-    <clean-core/container/vector.hh>
-    <clean-core/container/array.hh>
-    <clean-core/container/map.hh>
-    <clean-core/container/set.hh>
-    <clean-core/container/pair.hh>
-    <clean-core/container/tuple.hh>
-    <clean-core/container/variant.hh>
-    <clean-core/container/small_vector.hh>
-    <clean-core/container/fixed_vector.hh>
-    <clean-core/string/string.hh>
-    <clean-core/string/string_view.hh>
-    <clean-core/string/format.hh>
-    <clean-core/error/optional.hh>
-    <clean-core/error/result.hh>
-    <clean-core/function/function_ref.hh>
-    <clean-core/function/unique_function.hh>
-    <clean-core/memory/unique_ptr.hh>
-    <clean-core/memory/shared_ptr.hh>
-    <clean-core/memory/allocation.hh>
-)
-
-# The heavy tail: threading, streams, node allocation.
-# A rung of its own because these churn most, and a given TU is least likely to need them.
-sc_declare_pch_tier(CC_ALL EXTENDS CC HEADERS
-    <clean-core/thread/mutex.hh>
-    <clean-core/thread/atomic.hh>
-    <clean-core/thread/async.hh>
-    <clean-core/thread/thread.hh>
-    <clean-core/memory/node_allocation.hh>
-    <clean-core/streams/stream.hh>
-    <clean-core/streams/file_stream.hh>
-    <clean-core/container/pinned_data.hh>
-    <clean-core/container/ringbuffer.hh>
-    <clean-core/math/random.hh>
-    <clean-core/platform/console.hh>
-    <clean-core/platform/stacktrace.hh>
-    <clean-core/sequence/sequence.hh>
-    <clean-core/common/log.hh>
-    <clean-core/common/profiling.hh>
-    <clean-core/record/record.hh>
-)
-
-# CC_ALL plus the expensive standard headers our containers and strings reach anyway.
-# A target that uses none of them is measurably worse off here than at CC_ALL — see shaped-linter-core.
-sc_declare_pch_tier(CC_STD EXTENDS CC_ALL STD)
-
-sc_target_pch(clean-core CC_STD) # 0.47
 
 # Test executable
 if(SC_BUILD_TESTS)
@@ -713,8 +653,6 @@ if(SC_BUILD_TESTS)
         xxhash # tests/benchmarks/hash-benchmark.cc calls the raw XXH3 entry points directly
         blake3 # and the raw BLAKE3 ones, in the same table
     )
-
-    sc_target_pch(clean-core-test CC_STD NEXUS) # 0.67
 
     # Browser test runner (Emscripten only): clean-core-test-web.html drives these tests one per frame.
     sc_add_nexus_web_runner(clean-core-test)

@@ -802,7 +802,7 @@ Three rows of four is how DXR, Vulkan and Metal hand a hit's transform over, so 
 
 Three rows of 16 bytes is the layout D3D12's and Vulkan's instance descriptions already give a transform, so a scene's instances and a shader's buffer can share one.
 WGSL's `mat3x4f` and MSL's `float3x4` place their three columns of four exactly so, which makes the rows their columns at no cost.
-HLSL's `float3x4` is three rows, which only `row_major` keeps in that order, and DXC honours the qualifier on a field but not in a buffer's template (EMIT-257).
+HLSL's `float3x4` is three rows, which only `row_major` keeps in that order, and DXC honours the qualifier on a field but not in a buffer's template (EMIT-259).
 
 ## CHK-404
 

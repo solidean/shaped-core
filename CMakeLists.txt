@@ -112,12 +112,12 @@ option(SC_MIMALLOC "Back the default memory resource with mimalloc; OFF uses the
 # amount, a float converted into a fixed_int.
 # These sit in the hottest loops of exact geometry predicates, which is why they are not CC_ASSERTs and default OFF.
 # A whole-build switch, never per-target: a header-only check compiled two ways in one program is an ODR violation.
-# The debug-nopch presets turn it on, so `dev.py check`'s debug leg exercises it on every platform.
+# The clang debug presets turn it on, so `dev.py check`'s debug leg exercises it on every platform.
 option(SC_CHECK_WIDE_ARITH "Check typed-geometry's fixed_int width claims and preconditions at runtime" OFF)
 
 # Log a warning wherever a typed-geometry query meets an input it assumes away: parallel lines, a zero-length segment.
 # A warning rather than an assert, so a test can feed a special case on purpose and declare it; nexus fails the rest.
-# Whole-build for the same ODR reason as SC_CHECK_WIDE_ARITH, and turned on by the same debug-nopch presets.
+# Whole-build for the same ODR reason as SC_CHECK_WIDE_ARITH, and turned on by the same debug presets.
 option(SC_CHECK_GEOMETRY_SPECIAL_CASES "Log typed-geometry's geometric special-case assumptions at runtime" OFF)
 
 # Let a context link's releases be watched, so nexus names who still holds a test's context when it reports leftover async work.
@@ -127,7 +127,7 @@ option(SC_ASYNC_AMBIENT_TRACE "Let nexus name who holds a test's context when it
 
 # Test clean-simd at every lane width it generates flat, rather than at one 256-bit type per element.
 # Every width is every kernel instantiated four times over, which is most of clean-simd-test's compile time.
-# Only the test binary sees it, so unlike the checks above it is no ODR hazard; the debug-nopch presets turn it on.
+# Only the test binary sees it, so unlike the checks above it is no ODR hazard; the clang debug presets turn it on.
 option(SC_SIMD_EXHAUSTIVE_TESTS "Test clean-simd at every lane width, not one per element type" OFF)
 
 # Shaders come from the binary alone: no source directory is mounted over a package's embedded copy, and nothing hot-reloads.
@@ -224,13 +224,6 @@ include(Simd)         # SC_X64_LEVEL — the x86-64 feature level every function
 include(FloatingPoint) # no floating-point contraction, on every compiler
 include(LibcxxFloatH)  # Homebrew LLVM < 23 on Apple: libc++'s <float.h> against the macOS 27 SDK
 include(MacosSdk)      # macOS: the SDK on the command line, so it moves only with a reconfigure
-
-# Per-target precompiled headers.
-# Each library declares the tiers it owns with sc_declare_pch_tier() and applies them with sc_target_pch();
-# sc_finalize_pch() at the bottom of this file resolves the two together.
-# Unlike the four above this one adds no flags of its own, so its position here is convention rather than a requirement.
-# CMAKE_DISABLE_PRECOMPILE_HEADERS=ON (the nopch-* presets) turns every application into a no-op.
-include(PrecompiledHeaders)
 
 # Staging an executable's DLLs beside it on Windows (sc_stage_runtime_dlls), which the example and shader-package
 # helpers below both call.
@@ -404,14 +397,10 @@ function(sc_finalize_build)
     # Check that every declared shader package found the shaped-shader-library target. See
     # libs/graphics/shaped-shader-library/cmake/ShaderPackage.cmake.
     sc_finalize_shader_packages()
-
-    # Apply the recorded sc_target_pch() requests, now that every library has declared the tiers it owns.
-    # Deferred so a target may name a tier from a library added after its own — clean-core-test wants nexus'.
-    sc_finalize_pch()
 endfunction()
 
 # As a subdirectory of another project, "every target" includes the consumer's, which do not exist yet here.
-# So the finalizers run at the end of the top-level CMakeLists instead, and the consumer's tests, PCH requests and shader packages are seen with ours.
+# So the finalizers run at the end of the top-level CMakeLists instead, and the consumer's tests and shader packages are seen with ours.
 # A consumer calls none of them itself: two writers of nexus-binaries.json would be a generate error.
 if(PROJECT_IS_TOP_LEVEL)
     sc_finalize_build()
