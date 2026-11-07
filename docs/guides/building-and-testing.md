@@ -156,14 +156,6 @@ uv run dev.py test  --preset "x64-linux-*"
 **When you touch assertion-gated code, build a `release-*` preset too.**
 The default preset only exercises the assertions-on branch the table above names.
 
-### No-PCH presets
-
-Every preset above builds against per-target precompiled headers.
-The `nopch-*` and `debug-nopch-*` presets set `CMAKE_DISABLE_PRECOMPILE_HEADERS=ON` instead, which is what catches a source relying on a header only the PCH's `/FI` supplied.
-`check --all-presets` runs `debug-nopch-*` as its debug leg and CI runs `nopch-linux-clang`, so you rarely reach for these by hand.
-`uv run dev.py build --preset nopch-clang` reproduces a CI canary failure locally.
-[precompiled-headers.md](precompiled-headers.md) is the tiers, how to pick one, and the ordering rule the SDK gates impose.
-
 ### Pinning toolset versions
 
 A preset names a compiler *family* (clang / gcc / msvc); the concrete version is otherwise whatever the environment defaults to.
@@ -527,7 +519,7 @@ static gates: lint 57.0 s, shaped-lint 2.7 s, format 906 ms, crossrefs 1.5 s  (w
 
 timing, per preset:
   relwithdebinfo-clang  build    2.0 s   test   72.5 s  (18 binaries)
-  debug-nopch-clang     build    3.0 s   test   95.1 s  (18 binaries)
+  debug-clang           build    3.0 s   test   95.1 s  (18 binaries)
   release-clang         build   164 ms   test   80.5 s  (18 binaries)
   singlethreaded-clang  build    1.9 s   test   77.5 s  (18 binaries)
   total 332.5 s across 4 preset(s)
@@ -620,8 +612,8 @@ A glob matching no tracked file is an error, so a moved file cannot silently dis
 It builds and runs the suite on the platform default **relwithdebinfo**, `CC_ASSERT` on.
 Each further variant is a whole build of its own, so they are opt-in: `--all-presets` adds them, each under `--smoke`, and CI runs them all:
 
-- **debug** — `-O0` plus mimalloc's `MI_DEBUG` heap, `CC_ASSERT` on, and **precompiled headers off**
-  (`debug-nopch-*`, the cheapest of the four to give a PCH up on, so a source that dropped an include the PCH's `/FI` was supplying fails here — see [precompiled-headers.md](precompiled-headers.md))
+- **debug** — `-O0` plus mimalloc's `MI_DEBUG` heap, `CC_ASSERT` on, and the runtime checks only the clang debug presets turn on
+  (`SC_CHECK_WIDE_ARITH`, `SC_CHECK_GEOMETRY_SPECIAL_CASES`, `SC_ASYNC_AMBIENT_TRACE`, `SC_SIMD_EXHAUSTIVE_TESTS` — see [platforms.md](../platforms.md#wide-arithmetic-checks-sc_check_wide_arith))
 - the **release** sibling — `CC_ASSERT` off
 - a **single-threaded** sibling — `SC_THREADS=OFF`, otherwise reachable only through a wasm build
 - on **Linux and macOS**, a **sanitizer** preset — ASan + UBSan

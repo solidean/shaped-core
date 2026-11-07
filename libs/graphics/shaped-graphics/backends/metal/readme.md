@@ -34,7 +34,7 @@ This backend is compiled against the macOS 26 SDK, so on an older OS the MTL4 se
 Every source here is an ordinary `.cc` over [metal-cpp](../../../../../extern/metal-cpp/dependency.yml), Apple's header-only C++ interface.
 
 The deciding argument was our own tooling rather than the API.
-`format.py`, `fingerprint.py`, `crossrefs.py` and the PCH tiers all hardcode `('.cc', '.hh')`.
+`format.py`, `fingerprint.py` and `crossrefs.py` all hardcode `('.cc', '.hh')`.
 A single `.mm` source would therefore mean editing the dev driver before writing a line of backend.
 metal-cpp also wraps QuartzCore, so even `CAMetalLayer` — the one place presentation genuinely touches Cocoa — needs no Objective-C.
 

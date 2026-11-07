@@ -42,8 +42,6 @@ target_include_directories(shaped-shader-compiler-msl
 # shaped-graphics provides sg::compiled_shader, which is this library's whole output type.
 target_link_libraries(shaped-shader-compiler-msl PUBLIC shaped-graphics)
 
-sc_target_pch(shaped-shader-compiler-msl SG)
-
 # Test binary. Named *-test so the dev.py runner discovers it.
 if(SC_BUILD_TESTS)
     add_executable(shaped-shader-compiler-msl-test
@@ -56,8 +54,6 @@ if(SC_BUILD_TESTS)
     sc_nexus_binary(shaped-shader-compiler-msl-test KINDS tests)
 
     target_link_libraries(shaped-shader-compiler-msl-test PRIVATE shaped-shader-compiler-msl nexus)
-
-    sc_target_pch(shaped-shader-compiler-msl-test SG NEXUS)
 
     # The metal backend is added before this library (root CMakeLists order), so its target exists here and the whole
     # chain can be tested: MSL text -> reflect -> layout -> dispatch -> read back.
