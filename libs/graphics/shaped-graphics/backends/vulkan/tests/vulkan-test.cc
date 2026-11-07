@@ -134,6 +134,22 @@ TEST("sg vulkan - SC_GPU puts a context on the vendor or the name it gives, and 
     CHECK(missing.error().to_string().contains("SC_GPU='no such gpu'"));
 }
 
+// AMD's DMA family copies only whole 16×16×8 blocks, and an upload names arbitrary rows.
+INVOCABLE_TEST("sg vulkan - async transfers run on a family that copies any texel region",
+               (vulkan::vulkan_context_handle const& handle))
+{
+    auto& c = *handle;
+    auto count = u32(0);
+    vkGetPhysicalDeviceQueueFamilyProperties(c.physical_device(), &count, nullptr);
+    auto families = cc::vector<VkQueueFamilyProperties>::create_uninitialized(count);
+    vkGetPhysicalDeviceQueueFamilyProperties(c.physical_device(), &count, families.data());
+    REQUIRE(c.transfer_queue_family() < count);
+    auto const g = families[c.transfer_queue_family()].minImageTransferGranularity;
+    CHECK(g.width == 1);
+    CHECK(g.height == 1);
+    CHECK(g.depth == 1);
+}
+
 ASYNC_INVOCABLE_TEST("sg vulkan - epoch advance and retire", (vulkan::vulkan_context_handle const& handle))
 {
     auto& c = *handle;

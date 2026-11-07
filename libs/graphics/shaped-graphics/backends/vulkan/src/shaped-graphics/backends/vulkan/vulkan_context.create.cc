@@ -140,6 +140,10 @@ bool find_graphics_queue_family(VkPhysicalDevice dev, u32& out_index)
 /// Where the family cannot give two, both directions share one and that stall is the cost; where there is no
 /// transfer family at all, they share the graphics queue and async transfer is asynchronous only in the CPU sense.
 /// Reporting which case applies is what keeps a surprise-free timing story: see vulkan_context::has_dedicated_transfer_queue.
+///
+/// **A family must copy any texel region**, a minImageTransferGranularity of 1×1×1, since an upload names arbitrary rows.
+/// AMD's DMA family reports 16×16×8; a copy below it is invalid usage, and an async texture upload hung behind one.
+/// A graphics or compute family always reports 1×1×1, so excluding a coarser one still leaves a family to take.
 u32 find_transfer_queue_family(VkPhysicalDevice dev, u32 graphics_family, u32& out_queue_count)
 {
     uint32_t count = 0;
@@ -150,7 +154,9 @@ u32 find_transfer_queue_family(VkPhysicalDevice dev, u32 graphics_family, u32& o
     auto const can_transfer = [&](uint32_t i)
     {
         // A graphics or compute family transfers implicitly, whether or not it sets the bit.
-        return (families[i].queueFlags & (VK_QUEUE_TRANSFER_BIT | VK_QUEUE_GRAPHICS_BIT | VK_QUEUE_COMPUTE_BIT)) != 0;
+        auto const g = families[i].minImageTransferGranularity;
+        return (families[i].queueFlags & (VK_QUEUE_TRANSFER_BIT | VK_QUEUE_GRAPHICS_BIT | VK_QUEUE_COMPUTE_BIT)) != 0
+            && g.width == 1 && g.height == 1 && g.depth == 1;
     };
 
     for (uint32_t i = 0; i < count; ++i)
