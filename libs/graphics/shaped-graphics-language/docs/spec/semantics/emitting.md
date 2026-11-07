@@ -526,6 +526,9 @@ fn main_ps(p: pixel_input) -> target_ {
   A shuffle by an offset reads `waveReadLaneAt` at the lane it computes from `waveGetLaneIndex`, as EMIT-146's text does.
   An inclusive sum or product is `wavePrefixOp` and then this invocation's own value folded in, since DXIL's prefix is exclusive alone.
   A ballot is `waveActiveBallot`'s four words, a quad swap `quadOp` of its axis, and a quad broadcast `quadReadLaneAt`.
+* **EMIT-250** A native route's `atomic[float]` held as a `uint`'s bits is that `uint`'s atomic, bitcast either side, in shared lowering.
+  Its add is the text's loop: a compare-exchange of the bits of the sum, retried with what it read until no other update came between.
+  The first guess is an atomic load where the text reads plainly, since either is only a guess the exchange checks.
 
 ## Lines
 

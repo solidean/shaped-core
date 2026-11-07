@@ -407,13 +407,44 @@ value_ref lowering::atomic(flat_call const& c, flat_expr const& x)
         = _m.at(_m.at(_e.at(arguments[0]).type).element).kind == check::type_kind::structure
        && _m.builtin_type_of(_m.at(_e.at(arguments[0]).type).element) != nullptr
        && _m.builtin_type_of(_m.at(_e.at(arguments[0]).type).element)->leaf_kind == value_kind::scalar_float;
-    if (declared_float && !is_float)
-    {
-        unsupported("a float atomic on a device that has no float add");
-        return value_ref::none;
-    }
     auto const name = cc::string_view(record.name);
     auto const value = arguments.size() > 1 ? expr(arguments[1]) : value_ref::none;
+    // a float held as a uint's bits, which every target but vulkan's with a device float add keeps it as
+    if (declared_float && !is_float)
+    {
+        if (name == "load")
+            return add(op::bitcast, _float, {add(op::atomic_load, held, {pointer})});
+        if (name == "store")
+            return add(op::atomic_store, type_ref::none, {pointer, add(op::bitcast, held, {value})});
+        if (name == "exchange")
+            return add(op::bitcast, _float, {add(op::atomic_exchange, held, {pointer, add(op::bitcast, held, {value})})});
+        if (name != "add")
+        {
+            unsupported(cc::format("the float atomic {} on a device that has no float add", name));
+            return value_ref::none;
+        }
+        // the add retries a compare-exchange of the bits until no other update came between, as the text's does
+        auto const expected = add_local(held, "atomic_expected");
+        add(op::store, type_ref::none, {expected, add(op::atomic_load, held, {pointer})});
+        auto const header = new_block();
+        auto const body = new_block();
+        auto const next = new_block();
+        auto const merge = new_block();
+        branch(header);
+        open_block(header);
+        set_merge(merge_kind::loop, merge, next);
+        branch(body);
+        open_block(body);
+        auto const guess = add(op::load, held, {expected});
+        auto const sum = add(op::fadd, _float, {add(op::bitcast, _float, {guess}), value});
+        auto const before = add(op::atomic_compare_exchange, held, {pointer, add(op::bitcast, held, {sum}), guess});
+        add(op::store, type_ref::none, {expected, before});
+        branch_if(add(op::ieq, _bool, {before, guess}), merge, next);
+        open_block(next);
+        branch(header);
+        open_block(merge);
+        return add(op::bitcast, _float, {add(op::load, held, {expected})});
+    }
     auto const sign = scalar.is_signed;
     if (name == "load")
         return add(op::atomic_load, held, {pointer});
