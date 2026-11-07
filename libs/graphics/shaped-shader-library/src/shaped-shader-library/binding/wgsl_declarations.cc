@@ -5,6 +5,7 @@
 #include <clean-core/string/char_predicates.hh>
 #include <clean-core/string/format.hh>
 #include <clean-core/string/from_string.hh>
+#include <shaped-graphics/binding/reserved_bindings.hh>
 #include <shaped-graphics/binding/shader_stage.hh>
 #include <shaped-graphics/fwd.hh> // sg::reserved_binding_group
 
@@ -675,9 +676,9 @@ private:
         auto const& type = resolved(p.type);
         auto const is_array_of_vec4u = type.name == "array" && type.args.size() == 1 && is_vec4u(type.args[0]);
 
-        if (index.value() == 17)
+        if (index.value() == sg::reserved_acceleration_pool.webgpu_binding)
         {
-            auto const is_pool = p.name == "sg_acceleration_pool" && p.address_space == "storage"
+            auto const is_pool = p.name == sg::reserved_acceleration_pool.name && p.address_space == "storage"
                               && (p.access.empty() || p.access == "read") && is_array_of_vec4u && type.count.empty();
             if (!is_pool)
                 return cc::error(cc::format("line {}: @group({}) @binding(17) is the ray-query polyfill's pool, which "
@@ -686,8 +687,8 @@ private:
             return true;
         }
 
-        auto is_roots = p.name == "sg_acceleration_roots" && p.address_space == "uniform" && is_array_of_vec4u
-                     && !type.count.empty();
+        auto is_roots = p.name == sg::reserved_acceleration_roots.name && p.address_space == "uniform"
+                     && is_array_of_vec4u && !type.count.empty();
         if (is_roots)
         {
             auto count = integer_of(type.count, p.line);
@@ -708,9 +709,9 @@ private:
         CC_RETURN_IF_ERROR(group);
         auto index = integer_of(p.index, p.line);
         CC_RETURN_IF_ERROR(index);
-        if (group.value() != sg::reserved_binding_group || index.value() != 19)
+        if (group.value() != sg::reserved_binding_group || index.value() != sg::reserved_debug_window.webgpu_binding)
             return false;
-        if (p.name != "sg_debug" || p.address_space != "storage" || p.access != "read_write")
+        if (p.name != sg::reserved_debug_window.name || p.address_space != "storage" || p.access != "read_write")
             return cc::error(cc::format("line {}: @group({}) @binding(19) is sg's debug window, which must be "
                                         "'var<storage, read_write> sg_debug'",
                                         p.line, group.value()));

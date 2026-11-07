@@ -236,7 +236,7 @@ On 2026-11-06, on the Arc B580 and over the repo's SGL:
 
 ## Measured on `print` and `assert`
 
-On 2026-11-07, on the Arc B580 and over the repo's SGL, with EMIT-240 in:
+On 2026-11-07, on the Arc B580 and over the repo's SGL, with LEGAL-70 in, so neither writer holds any of it:
 
 - **Every entry point that lowered still lowers with diagnostics on**, and the sweeps now run that way: 98 compute and 65 vertex and pixel entry points of SPIR-V, and 93 and 65 of DXIL.
   Two of them write records, and each passes `spirv-val` and DXC's validator.

@@ -462,11 +462,8 @@ fn main_ps(p: pixel_input) -> target_ {
   On DXIL that element's handle is made where the chain stands, `createHandleFromBinding` over the array's whole range, since no handle exists ahead of its index.
   `nonuniform i` marks the chain and what reads through it.
   SPIR-V decorates the index, the chain, the load and the sampled image `NonUniform`, and DXIL sets `createHandleFromBinding`'s last argument.
-* **EMIT-240** A native route writes each `print` as EMIT-183's record, at the address a text declares, and describes the same site under the same id.
-  So sg reads a binary's records as it reads a text's, and one pipeline may mix the routes.
-  What LEGAL-64 lowers an `assert` to and a `report` of LEGAL-65 writes are such prints, and the end of an invocation is the tree's own, so neither needs more of a target.
-  A stage that cannot write the buffer drops its prints with their values, as a text does, and declares no buffer.
-  DXIL states `UAVs at every shader stage` wherever a stage that is neither pixel nor compute declares a UAV.
+* **EMIT-240** A native route has no `print` of its own: it lowers what LEGAL-70 wrote, so sg reads a binary's records as it reads a text's, and one pipeline may mix the routes.
+  `DXIL` states `UAVs at every shader stage` wherever a stage that is neither pixel nor compute declares a UAV.
   The prologue of EMIT-229 is `unsupported` so far, so a compute stage with workgroup memory lowers under no robustness profile.
 
 ## Lines
@@ -483,17 +480,13 @@ fn main_ps(p: pixel_input) -> target_ {
 
 ## Diagnostics
 
-* **EMIT-183** Asked for diagnostics, a text writes each `print` into sg's debug buffer as one record, and describes its site to the host.
-  The tree must keep its prints and lower its asserts (LEGAL-64); without diagnostics the driver drops both (LEGAL-63).
-  The buffer is a header of three words, a cursor, a capacity and a dropped count, then 32-bit words.
-  A record is the site's id, its word count, then each value's lanes in order, one word each: a float's bits, an int's, a bool as 0 or 1, and a `half` widened to a float first.
-  It reserves its words with one atomic add on the cursor, writes them where they fit under the capacity, and otherwise adds one to the dropped count.
-  The buffer stands in sg's reserved group: `register(u0, space11)` in `hlsl-dx12` and `[[vk::binding(19, 3)]]` in `hlsl-vulkan`.
-  It is `@group(3) @binding(19)` in WGSL, and the entry point's parameter `[[buffer(30)]]` in MSL, the argument table's last slot, clear of the vertex buffers from `[[buffer(5)]]` up.
-  A text declares it only where it writes a record.
-  WebGPU's vertex stage has no writable storage, and MSL's ray-tracing stages take no buffer.
-  vulkan's vertex, geometry and tessellation stages write one only on a device with `vertex_pipeline_stores`, which no program names.
-  There a print is dropped and the text declares none.
+* **EMIT-183** Asked for diagnostics, a compile writes each `print` into sg's debug window as one record, and describes its site to the host.
+  No target and no route holds this: the tree must keep its prints and lower its asserts (LEGAL-64), LEGAL-70 writes them as statements, and a target writes those like any others.
+  Without diagnostics the driver drops both (LEGAL-63).
+  The window, its record and its address on each target are [the contract with sg](../../reserved-bindings.md).
+  A compile declares the window only where a statement reaches it.
+  A stage the contract says cannot reach it drops its prints and declares none.
+  That is WebGPU's vertex stage, MSL's ray-tracing stages, and vulkan's vertex, geometry and tessellation stages without `vertex_pipeline_stores`, which no program names.
   A site's id hashes the entry point's name, the message and the line it stands on, so one site has one id on every target.
 
 

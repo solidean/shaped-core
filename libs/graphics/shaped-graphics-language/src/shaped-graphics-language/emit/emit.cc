@@ -1,7 +1,6 @@
 #include "emit.hh"
 
 #include <clean-core/string/format.hh>
-#include <shaped-graphics-language/emit/impl/debug_sites.hh>
 #include <shaped-graphics-language/emit/impl/dialect.hh>
 #include <shaped-graphics-language/emit/impl/plan.hh>
 #include <shaped-graphics-language/ir/ir.hh>
@@ -326,9 +325,6 @@ sgl::emit::emitted_text sgl::emit::emit_entry_point(check::checked_module const&
     }
 
     auto plan = impl::make_plan(m, e, t, sources.device_features.has(check::feature::float_atomic_add));
-    impl::plan_debug_sites(
-        plan, sources.diagnostics && impl::dialect_of(t).writes_debug_in(e.entry_stage, sources.device_features),
-        sources);
     // EMIT-133: a ray-tracing stage's file sampler is a `constexpr sampler` on metal, which takes no mip bias
     if (t == target::msl && e.entry_stage >= check::stage::raygen)
         for (auto const& s : plan.samplers)
@@ -387,14 +383,15 @@ sgl::emit::emitted_text sgl::emit::emit_entry_point(check::checked_module const&
         result.text = cc::move(written.text);
         result.lines = cc::move(written.lines);
     }
-    result.debug_sites = cc::move(plan.debug_sites);
+    result.debug_sites = e.debug_sites;
     result.entry_point = plan.entry_name;
     if (plan.constants.has_value())
         result.bound_names.push_back({.emitted = plan.constants.value().name, .host = plan.constants.value().host_name});
     for (auto const& block : plan.group_blocks)
         result.bound_names.push_back({.emitted = block.name, .host = block.host_name});
     for (auto const& buffer : plan.resources)
-        result.bound_names.push_back({.emitted = buffer.name, .host = buffer.host_name});
+        if (!buffer.is_reserved)
+            result.bound_names.push_back({.emitted = buffer.name, .host = buffer.host_name});
     for (auto const& s : plan.samplers)
         result.bound_names.push_back({.emitted = s.name, .host = s.host_name});
     result.layouts = impl::layouts_of(plan);

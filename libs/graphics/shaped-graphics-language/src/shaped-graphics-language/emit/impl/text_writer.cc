@@ -3,7 +3,7 @@
 #include <clean-core/common/assert.hh>
 #include <clean-core/string/format.hh>
 #include <clean-core/string/to_string.hh>
-#include <shaped-graphics-language/emit/impl/debug_sites.hh>
+#include <shaped-graphics-language/check/source_lines.hh>
 #include <shaped-graphics-language/legalize/impl/walk.hh>
 
 namespace
@@ -70,7 +70,7 @@ struct writer
 
     /// EMIT-181: the files the line table reads, and the statement whose source line the next line writes.
     options const& sources;
-    source_lines origins;
+    check::source_lines origins;
     flat_stmt const* current = nullptr;
     cc::vector<line_origin> lines;
     /// The text's lines up to `counted`, which the next emitted line number counts on from.
@@ -81,48 +81,6 @@ struct writer
     cc::vector<source_line> commented;
     /// The statement just begun, until its first line is written.
     flat_stmt const* unwritten = nullptr;
-    /// EMIT-183: a print as one record in sg's debug buffer, written whole or counted as dropped.
-    void print_record(flat_stmt const& s, flat_print const& n)
-    {
-        auto const known = p.debug_site_of[&s - p.e.stmts.data()];
-        if (known < 0)
-            return;
-        auto const& site = p.debug_sites[known];
-
-        auto words = cc::vector<cc::string>();
-        auto position = isize(0);
-        for (auto const id : p.e.at(n.values))
-        {
-            auto const type = p.e.at(id).type;
-            auto const& value = site.values[position++];
-            // bound once, so a value is computed once whatever its lanes
-            auto const name = p.names.mint("printed");
-            auto declaration = cc::string();
-            auto const value_text = expr(id).text;
-            d.write_local(declaration, {.name = name, .type = type_text(p, d, type), .value = value_text});
-            line(declaration);
-            for (auto lane = 0; lane < value.lanes; ++lane)
-            {
-                auto const lane_text = value.lanes == 1 ? cc::string(name) : cc::format("{}.{}", name, "xyzw"[lane]);
-                words.push_back(d.debug_word(lane_text, value.family));
-            }
-        }
-
-        auto const count = isize(words.size()) + 2;
-        auto const at = p.names.mint("debug_at");
-        if (auto const declaration = d.debug_declare(at); !declaration.empty())
-            line(declaration);
-        line(d.debug_reserve(at, count));
-        open(condition_text("if", d.debug_fits(at, count)));
-        line(d.debug_store(at, 0, cc::format("{}u", site.id)));
-        line(d.debug_store(at, 1, cc::format("{}u", count)));
-        for (auto i = isize(0); i < words.size(); ++i)
-            line(d.debug_store(at, i + 2, words[i]));
-        reopen("else");
-        line(d.debug_drop());
-        close();
-    }
-
     /// The name a target writes member `name` of struct `type` with, which the plan may have renamed.
     [[nodiscard]] cc::string_view member_of(type_id type, cc::string_view name) const
     {
@@ -1669,7 +1627,7 @@ struct writer
             [&](flat_let const& let) { declare(let.local, let.value, p.e.at(let.local).is_mut); },
             [&](flat_var const& var) { declare(var.local, var.value, true); }, [&](flat_assign const& a) { assign(a); },
             // `validate` refuses a tree that holds one
-            [&](flat_print const& n) { print_record(s, n); }, //
+            [&](flat_print const&) {}, //
             [&](flat_eval const& v)
             {
                 // an atomic HLSL writes as statements alone has nothing left to evaluate, nor has a target's own text
@@ -1935,6 +1893,11 @@ void sgl::emit::impl::write_buffers(cc::string& out, plan const& p, dialect cons
                           cc::span<planned_resource const>(p.resources).subspan({.offset = first, .size = last - first}));
         first = last;
     }
+    // legalize's own bindings stand behind every group's, and a target declares each like any other resource
+    if (first < p.resources.size())
+        d.write_group(
+            out, p, nullptr,
+            cc::span<planned_resource const>(p.resources).subspan({.offset = first, .size = p.resources.size() - first}));
     for (auto const& s : p.samplers)
         d.write_file_sampler(out, p, s);
     if (!p.samplers.empty())
@@ -2047,7 +2010,8 @@ void sgl::emit::impl::write_helpers(cc::string& out, plan const& p, dialect cons
 
 sgl::emit::impl::written_text sgl::emit::impl::write_text(plan& p, dialect const& d, options const& sources)
 {
-    auto w = writer{.p = p, .d = d, .sources = sources, .origins = {.m = p.m, .sources = sources}};
+    auto w
+        = writer{.p = p, .d = d, .sources = sources, .origins = {.m = p.m, .files = sources.files, .names = sources.names}};
     for (auto const& r : p.resources)
         w.is_device_coherent = w.is_device_coherent || r.is_coherent;
     if (d.fences_image_stores())
@@ -2069,8 +2033,6 @@ sgl::emit::impl::written_text sgl::emit::impl::write_text(plan& p, dialect const
     if (p.e.written_words > 0 && !d.declares_workgroup_in_function())
         w.out.appendf("{}\n\n", written_shadow_declaration(d.language(), p.e.written_words));
     write_helpers(w.out, p, d);
-    if (p.writes_debug)
-        d.write_debug_buffer(w.out);
     d.write_function_head(w.out, p);
     if (d.declares_workgroup_in_function())
     {

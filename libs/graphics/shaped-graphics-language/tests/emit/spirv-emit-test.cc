@@ -265,6 +265,9 @@ TEST("sgl spirv - every compute entry point of the fixtures that lowers is what 
             if (profile.has_error() || profile.value().spirv.empty())
                 continue;
             ++guarded;
+            // a process per module, so a default run validates every eighth and --thorough takes them all
+            if (!nx::is_thorough() && guarded % 8 != 0)
+                continue;
             write_words(module_path, profile.value().spirv);
             CHECK(std::system(command_text.data()) == 0)
                 .dump("file", file)

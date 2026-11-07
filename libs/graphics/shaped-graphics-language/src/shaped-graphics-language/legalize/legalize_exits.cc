@@ -649,9 +649,11 @@ flat_entry_point sgl::check::impl::compacted(checked_module const& m, flat_entry
     return cc::move(c.out.e);
 }
 
-flat_entry_point sgl::check::legalize(checked_module const& m,
-                                      flat_entry_point const& given,
-                                      legalize_options const& options)
+namespace
+{
+[[nodiscard]] flat_entry_point core_form_of(checked_module const& m,
+                                            flat_entry_point const& given,
+                                            legalize_options const& options)
 {
     // First, each `flat_by_target` becomes the one form this target writes, and the other is left unreachable.
     auto chosen = given;
@@ -692,4 +694,22 @@ flat_entry_point sgl::check::legalize(checked_module const& m,
     auto const without_leaves = lower_exits(out, without_blocks, options);
     auto const without_void = erase_void(out, without_leaves);
     return compacted(m, out.e, simplify_lets(out, dissolve_onces(out, without_void)));
+}
+} // namespace
+
+flat_entry_point sgl::check::legalize(checked_module const& m,
+                                      flat_entry_point const& given,
+                                      legalize_options const& options)
+{
+    auto core = core_form_of(m, given, options);
+    if (!options.expands_prints)
+        return core;
+    auto prints = false;
+    for (auto const& s : core.stmts)
+        prints = prints || s.node.is<flat_print>();
+    if (!prints)
+        return core;
+    auto out = flat_builder::extend(m, cc::move(core));
+    auto const body = impl::expand_prints(out, ids_of(out.e, out.e.body), options);
+    return compacted(m, out.e, body);
 }

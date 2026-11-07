@@ -56,16 +56,8 @@ public:
     /// True where the target's compiler reads `#line 12 "file.sgl"` (EMIT-182).
     [[nodiscard]] virtual bool has_line_directives() const { return false; }
 
-    // ---- EMIT-183: sg's debug buffer, a header of a cursor, a capacity and a dropped count, then 32-bit words ----
-
-    /// False where a stage cannot write the buffer, which drops its prints: WGSL's vertex stage, MSL's ray-tracing stages.
-    [[nodiscard]] virtual bool writes_debug_in(check::stage, check::feature_set) const { return true; }
-    /// The buffer's declaration at file scope, followed by an empty line.
-    virtual void write_debug_buffer(cc::string& out) const = 0;
     /// What an emulated trace reads, for a dialect whose `write_declarations` does not write it: WGSL's does.
     virtual void write_acceleration_pool(cc::string&) const {}
-    /// The declaration of `at` on a line of its own, where the reservation cannot declare it; empty where it can.
-    [[nodiscard]] virtual cc::string debug_declare(cc::string_view) const { return {}; }
     /// The length of the buffer or `bytes` declared as `name`, in elements or bytes (CHK-460); MSL has none.
     [[nodiscard]] virtual cc::string buffer_length(cc::string_view name, bool is_bytes) const = 0;
     /// What the text declares before the entry point for `buffer_length` of `name`, empty where nothing.
@@ -74,16 +66,6 @@ public:
     /// binding arrays and MSL no lengths.
     [[nodiscard]] virtual cc::string buffer_length_at(cc::string_view, cc::string_view, bool) const { return "0u"; }
     [[nodiscard]] virtual cc::string buffer_length_at_helper(cc::string_view, bool, bool) const { return {}; }
-    /// The statement that reserves `count` words and leaves the first one's index in `at`.
-    [[nodiscard]] virtual cc::string debug_reserve(cc::string_view at, isize count) const = 0;
-    /// The condition under which `count` words from `at` fit.
-    [[nodiscard]] virtual cc::string debug_fits(cc::string_view at, isize count) const = 0;
-    /// The statement that stores `word` at word `at + i`.
-    [[nodiscard]] virtual cc::string debug_store(cc::string_view at, isize i, cc::string_view word) const = 0;
-    /// The statement that counts a record the buffer had no room for.
-    [[nodiscard]] virtual cc::string debug_drop() const = 0;
-    /// `value`, a scalar of `family` (`float`, `half`, `int`, `uint`, `bool`), as one 32-bit word.
-    [[nodiscard]] virtual cc::string debug_word(cc::string_view value, cc::string_view family) const = 0;
 
     /// True where `v.zy = value;` assigns through a swizzle; WGSL assigns one component at a time (EMIT-143).
     [[nodiscard]] virtual bool assigns_through_swizzles() const { return true; }

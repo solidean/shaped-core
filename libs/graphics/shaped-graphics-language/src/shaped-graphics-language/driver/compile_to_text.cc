@@ -1,6 +1,7 @@
 #include "compile_to_text.hh"
 
 #include <clean-core/string/format.hh>
+#include <shaped-graphics-language/check/reserved_bindings.hh>
 #include <shaped-graphics-language/check/resources.hh>
 #include <shaped-graphics-language/driver/impl/describe_binding.hh>
 #include <shaped-graphics-language/driver/impl/front_end.hh>
@@ -175,16 +176,23 @@ cc::result<emitted_source, cc::string> emit_text(driver::impl::front_end const& 
     // compile asks for software on HLSL (EMIT-135).
     auto const software_trace = asks_software_trace && target != emit::target::msl;
     // LEGAL-63, LEGAL-64: without diagnostics the text holds no print and no assert, and with them both write a record
-    auto const legal = check::legalize(m, entry,
-                                       {.is_emulated = target == emit::target::wgsl || software_trace,
-                                        .erases_prints = !diagnostics,
-                                        .lowers_asserts = diagnostics,
-                                        .guards_undefined = guards_undefined,
-                                        .guards_buffers = target != emit::target::msl});
     auto const files = driver::impl::module_files_of(front);
     auto names = cc::vector<cc::string_view>();
     for (auto i = isize(0); i < files.size(); ++i)
         names.push_back(front.name_of(i));
+    // EMIT-183: a stage that cannot write the window ends a failed assert all the same, and drops what it would log
+    auto const writes_records = diagnostics
+                             && check::reaches_reserved(*check::reserved_binding_named("sg_debug"), target,
+                                                        entry.entry_stage, device_features);
+    auto const legal = check::legalize(m, entry,
+                                       {.is_emulated = target == emit::target::wgsl || software_trace,
+                                        .erases_prints = !writes_records,
+                                        .lowers_asserts = diagnostics,
+                                        .expands_prints = writes_records,
+                                        .files = files,
+                                        .names = names,
+                                        .guards_undefined = guards_undefined,
+                                        .guards_buffers = target != emit::target::msl});
     auto emitted = emit::emit_entry_point(m, legal, target,
                                           {.files = files,
                                            .names = names,

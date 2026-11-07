@@ -53,6 +53,9 @@ add_library(shaped-graphics-language
     src/shaped-graphics-language/builtins/register_vector_math.cc
     src/shaped-graphics-language/builtins/registry.cc
 
+    src/shaped-graphics-language/check/reserved_bindings.cc
+    src/shaped-graphics-language/check/source_lines.cc
+    src/shaped-graphics-language/legalize/legalize_prints.cc
     src/shaped-graphics-language/ir/ir.cc
     src/shaped-graphics-language/ir/pipeline.cc
     src/shaped-graphics-language/ir/cleanup.cc
@@ -60,7 +63,6 @@ add_library(shaped-graphics-language
     src/shaped-graphics-language/ir/flatten.cc
     src/shaped-graphics-language/ir/lower.cc
     src/shaped-graphics-language/ir/lower_call.cc
-    src/shaped-graphics-language/ir/lower_debug.cc
     src/shaped-graphics-language/ir/lower_expr.cc
     src/shaped-graphics-language/ir/lower_memory.cc
     src/shaped-graphics-language/ir/lower_stage.cc
@@ -140,7 +142,6 @@ add_library(shaped-graphics-language
     src/shaped-graphics-language/emit/impl/memory_access.cc
     src/shaped-graphics-language/emit/impl/msl.cc
     src/shaped-graphics-language/emit/impl/plan.cc
-    src/shaped-graphics-language/emit/impl/debug_sites.cc
     src/shaped-graphics-language/emit/impl/text_writer.cc
     src/shaped-graphics-language/emit/impl/wgsl.cc
 

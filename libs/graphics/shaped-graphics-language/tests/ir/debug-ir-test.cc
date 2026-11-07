@@ -99,6 +99,24 @@ TEST("sgl ir - a stage the device lets write no storage drops its prints, and de
     CHECK(!e.value().text.contains("sg_debug"));
 }
 
+TEST("sgl ir - no program reaches a reserved binding")
+{
+    constexpr cc::string_view source = "@compute(1) fun cs(){sg_debug}:\n"
+                                       "    let a = 1\n";
+    CHECK(
+        !sgl::compile_to_text({.source = source, .entry_point = "cs", .target = sgl::emit::target::hlsl_dx12}).has_value());
+}
+
+TEST("sgl ir - a compile that reaches no record declares no window")
+{
+    constexpr cc::string_view source = "@compute(1) fun cs():\n"
+                                       "    let a = 1\n";
+    auto const e = sgl::compile_to_text(
+        {.source = source, .entry_point = "cs", .target = sgl::emit::target::hlsl_dx12, .diagnostics = true});
+    REQUIRE(e.has_value());
+    CHECK(!e.value().text.contains("sg_debug"));
+}
+
 TEST("sgl ir - a robustness report writes through the same record")
 {
     constexpr cc::string_view source = "binding work:\n"

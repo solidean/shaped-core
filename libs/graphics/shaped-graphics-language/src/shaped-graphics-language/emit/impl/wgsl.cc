@@ -1,6 +1,7 @@
 #include "dialect.hh"
 
 #include <clean-core/string/format.hh>
+#include <shaped-graphics-language/check/reserved_bindings.hh>
 #include <shaped-graphics-language/check/resources.hh>
 
 namespace
@@ -47,40 +48,10 @@ public:
     bool assigns_through_swizzles() const override { return false; }
 
     // WebGPU's vertex stage has no writable storage
-    bool writes_debug_in(check::stage s, check::feature_set) const override { return s != check::stage::vertex; }
     // a `bytes` is an array of words
     cc::string buffer_length(cc::string_view name, bool is_bytes) const override
     {
         return is_bytes ? cc::format("(arrayLength(&{}) * 4u)", name) : cc::format("arrayLength(&{})", name);
-    }
-    void write_debug_buffer(cc::string& out) const override
-    {
-        out += "struct sg_debug_buffer {\n    cursor: atomic<u32>,\n    capacity: u32,\n    dropped: atomic<u32>,\n"
-               "    words: array<u32>,\n}\n\n";
-        out += "@group(3) @binding(19) var<storage, read_write> sg_debug: sg_debug_buffer;\n\n";
-    }
-    cc::string debug_reserve(cc::string_view at, isize count) const override
-    {
-        return cc::format("let {}: u32 = atomicAdd(&sg_debug.cursor, {}u);", at, count);
-    }
-    cc::string debug_fits(cc::string_view at, isize count) const override
-    {
-        return cc::format("{} + {}u <= sg_debug.capacity", at, count);
-    }
-    cc::string debug_store(cc::string_view at, isize i, cc::string_view word) const override
-    {
-        return cc::format("sg_debug.words[{} + {}u] = {};", at, i, word);
-    }
-    cc::string debug_drop() const override { return "_ = atomicAdd(&sg_debug.dropped, 1u);"; }
-    cc::string debug_word(cc::string_view value, cc::string_view family) const override
-    {
-        if (family == "uint")
-            return cc::string(value);
-        if (family == "bool")
-            return cc::format("select(0u, 1u, {})", value);
-        if (family == "half")
-            return cc::format("bitcast<u32>(f32({}))", value);
-        return cc::format("bitcast<u32>({})", value);
     }
 
     void write_for_head(cc::string& out, cc::string_view index, cc::string_view first, cc::string_view end) const override
@@ -276,8 +247,13 @@ public:
                     record != nullptr && (record->takes_acceleration_index || record->name == "acceleration_pool_load"))
                     traces = true;
         if (traces)
-            out += "@group(3) @binding(17) var<storage, read> sg_acceleration_pool: array<vec4u>;\n"
-                   "@group(3) @binding(18) var<uniform> sg_acceleration_roots: array<vec4u, 4>;\n\n";
+        {
+            auto const& pool = check::reserved_binding_named("sg_acceleration_pool")->targets[u8(emit::target::wgsl)];
+            auto const& roots = check::reserved_binding_named("sg_acceleration_roots")->targets[u8(emit::target::wgsl)];
+            out.appendf("@group({}) @binding({}) var<storage, read> sg_acceleration_pool: array<vec4u>;\n"
+                        "@group({}) @binding({}) var<uniform> sg_acceleration_roots: array<vec4u, 4>;\n\n",
+                        pool.group, pool.slot, roots.group, roots.slot);
+        }
         for (auto const& s : p.structs)
         {
             out.appendf("struct {} {{\n", s.name);

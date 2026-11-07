@@ -71,9 +71,6 @@ private:
     void hold_parameter(check::local_id id, value_ref value);
     void statements(ast::range_of<flat_stmt_id> range);
     void statement(flat_stmt_id id);
-    void print_(flat_stmt_id id, check::flat_print const& n);
-    /// One lane of a printed value as the 32-bit word its record holds (EMIT-183).
-    [[nodiscard]] value_ref debug_word(value_ref lane, cc::string_view family);
     void if_(check::flat_if const& s);
     void loop_(check::flat_loop const& s);
     void while_(check::flat_while const& s);
@@ -103,8 +100,6 @@ private:
     [[nodiscard]] value_ref bound_resource(i32 index);
     [[nodiscard]] value_ref bound_workgroup(i32 index);
     [[nodiscard]] value_ref bound_sampler(i32 index);
-    /// EMIT-183: sg's debug buffer, which no plan lists since sg binds it itself.
-    [[nodiscard]] value_ref bound_debug();
     [[nodiscard]] value_ref add_global(global g, cc::string_view name);
     [[nodiscard]] value_ref add_local(type_ref value, cc::string_view name);
 
@@ -193,7 +188,6 @@ private:
     cc::vector<value_ref> _resource_globals;
     cc::vector<value_ref> _workgroup_globals;
     cc::vector<value_ref> _sampler_globals;
-    value_ref _debug_global = value_ref::none;
 
     type_ref _void = type_ref::none;
     type_ref _bool = type_ref::none;

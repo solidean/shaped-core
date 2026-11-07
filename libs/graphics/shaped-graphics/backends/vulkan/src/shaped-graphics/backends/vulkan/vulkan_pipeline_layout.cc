@@ -7,6 +7,7 @@
 #include <shaped-graphics/backends/vulkan/vulkan_sampler.hh>
 #include <shaped-graphics/backends/vulkan/vulkan_view_desc.hh>
 #include <shaped-graphics/binding/impl/layout_hash.hh>
+#include <shaped-graphics/binding/reserved_bindings.hh>
 #include <shaped-graphics/context/impl/debug_windows.hh>
 #include <shaped-graphics/raytracing/impl/software_trace.hh>
 
@@ -75,7 +76,7 @@ cc::result<vulkan_pipeline_layout_handle> vulkan_pipeline_layout::create(vulkan_
             });
         if (has_debug_window)
             reserved_bindings.push_back(VkDescriptorSetLayoutBinding{
-                .binding = 19,
+                .binding = u32(sg::reserved_debug_window.vulkan_binding),
                 .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
                 .descriptorCount = 1,
                 .stageFlags = VK_SHADER_STAGE_ALL,
@@ -84,13 +85,13 @@ cc::result<vulkan_pipeline_layout_handle> vulkan_pipeline_layout::create(vulkan_
         if (traces_in_software)
         {
             reserved_bindings.push_back(VkDescriptorSetLayoutBinding{
-                .binding = 17,
+                .binding = u32(sg::reserved_acceleration_pool.vulkan_binding),
                 .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
                 .descriptorCount = 1,
                 .stageFlags = VK_SHADER_STAGE_ALL,
             });
             reserved_bindings.push_back(VkDescriptorSetLayoutBinding{
-                .binding = 18,
+                .binding = u32(sg::reserved_acceleration_roots.vulkan_binding),
                 .descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
                 .descriptorCount = 1,
                 .stageFlags = VK_SHADER_STAGE_ALL,
