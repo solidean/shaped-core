@@ -275,6 +275,11 @@ sg::create_dx12_context(dx12_config = {})          // -> cc::result<context_hand
 // dx12_config { activate_global_debug_layer=false; adapter=hardware (or warp / hardware_or_warp; SC_DX12_ADAPTER=warp hides hardware process-wide, =hardware hides WARP — every Microsoft-vendor adapter, flagged or not —, =none hides both); upload_ring_bytes/download_ring_bytes/async_{upload,download}_window_bytes=16 MiB; descriptor+sampler heap sizing }
 // dx12_config { adapter_luid  (optional<u64>; overrides `adapter`, fails rather than falling back; SC_DX12_ADAPTER still hides it)
 //               minimum_feature_level=11_0  (a runtime may demand more, never less) }
+#include <shaped-graphics/backends/dx12/dx12_runtime.hh>  // ONE D3D12 runtime per process, settled by its first use
+dx12::choose_d3d12_runtime(d3d12_runtime::system)  // before any device; wins over SC_DX12_RUNTIME=system|agility; default agility where fetched
+dx12::requested_d3d12_runtime() / runs_agility_runtime()  // what was asked for / whether the Agility SDK actually loaded
+dx12::choose_test_d3d12_runtime()                  // test binaries' NX_TEST_SETUP: the system runtime on an Intel GPU
+// GOTCHA: on Intel, the Agility SDK's device factory alone costs the process every shader cache hit, vulkan's included
 // dx12_ctx.device() / queue()                     // ID3D12Device* / ID3D12CommandQueue*, owned by the context
 dx12_ctx.wrap_dx12_texture(ID3D12Resource*, desc)  // -> result<dx12_texture_handle>; refuses a shape or flag mismatch
 //   GOTCHA: only a resource in COMMON at every submit — sg's enhanced barriers meet a legacy state nowhere else, so an

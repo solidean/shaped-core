@@ -32,8 +32,9 @@ It is fetched on request, `uv run extern/agility/fetch-agility.py --accept-licen
 
 * **The runtime is one per process, and a process may ask for the system's.**
   `dx12::choose_d3d12_runtime` before the first device, else `SC_DX12_RUNTIME=system` or `agility`, else the SDK's where it was fetched.
-  A process that asked for the system runtime never creates the SDK's device factory.
-  That is the point: on Intel's driver the factory alone costs every later shader compile of the process its cache, vulkan's included ([the external entry](../../../../../docs/bugs-external/intel-agility-process-recompiles-acceleration-structure-kernels/readme.md)).
+  A process that asked for the system runtime never creates the SDK's device factory, so on Intel's driver it keeps its shader cache.
+  There the factory alone costs every later shader compile of the process its cache, vulkan's included.
+  [The external entry](../../../../../docs/bugs-external/intel-agility-process-recompiles-acceleration-structure-kernels/readme.md) has the reproduction.
   `requested_d3d12_runtime()` says what was asked for, and `runs_agility_runtime()` what loaded.
 * **No executable exports `D3D12SDKVersion`.**
   The backend loads D3D12Core.dll through `ID3D12SDKConfiguration1::CreateDeviceFactory`, so a static library chooses the runtime.

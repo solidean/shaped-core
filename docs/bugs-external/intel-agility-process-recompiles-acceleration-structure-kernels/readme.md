@@ -1,6 +1,6 @@
 # Intel: a process that loads the Agility SDK's device factory never reads its acceleration-structure compile from the driver's cache
 
-**Status:** open, reproduced standalone, not yet filed upstream and not worked around; measured on 2026-11-07.
+**Status:** open, reproduced standalone, not yet filed upstream, worked around in our test processes on Intel; measured on 2026-11-07.
 **Affects:** Intel Arc B580, driver 32.0.101.9150, Windows 11, D3D12 Agility SDK 1.620.1; dx12 and vulkan alike.
 **Found by:** `shaped-graphics-test` taking 182 s in `dev.py ship` against 9.9 s for the same binary built without the Agility SDK.
 
@@ -95,15 +95,28 @@ A shared root cause, a builder kernel the driver compiles at run time since that
 
 ## What we do about it
 
-Nothing yet.
-The mitigation options are in [the sg issue](../../../libs/graphics/shaped-graphics/docs/issues/perf-sg-agility-intel-acceleration-structure-compile.md).
+**Test processes on an Intel GPU keep to the system runtime**, marked `TEMPORARY(debt-sg-intel-tests-keep-off-agility)`.
+`dx12::choose_test_d3d12_runtime()` makes the choice before any D3D12 runtime is loaded.
+[dx12_runtime.cc](../../../libs/graphics/shaped-graphics/backends/dx12/src/shaped-graphics/backends/dx12/dx12_runtime.cc) holds it.
+`shaped-graphics-test` runs the tests that need the Agility SDK in a process of its own, which pays the compile once and in parallel.
+[dx12-agility-process.cc](../../../libs/graphics/shaped-graphics/tests/backends/dx12-agility-process.cc) lists them and starts it.
+[The debt issue](../../../libs/graphics/shaped-graphics/docs/issues/debt-sg-intel-tests-keep-off-agility.md) says what coverage that moves, and when to remove it.
 
-What it costs us:
+An application can do the same with `SC_DX12_RUNTIME=system`, or `dx12::choose_d3d12_runtime` before its first device, at the cost of SM 6.9, shader execution reordering and DXR 1.2.
+Nothing of ours does so by default.
 
-- **Tests.** Every test process that creates an Agility device pays it, and the compiles serialize behind one another.
-  `shaped-graphics-test` takes 182 s in the full run against 9.9 s without the Agility SDK, and `shaped-graphics-dx12-test`, `shaped-rendering-test` and `shaped-viewer-test` pay the same.
-- **Applications.** Any process of ours on this driver with the Agility SDK present should wait about 20 s at its first trace.
-  `shaped-view` is expected to, but was not measured.
+What it costs, measured on the machine above on 2026-11-07, each binary alone:
+
+| binary | Agility SDK in every process | system runtime on Intel |
+|---|---|---|
+| `shaped-graphics-test` | over 175 s | 23.6 s, its Agility process 23 s of that in parallel |
+| `shaped-graphics-dx12-test` | 85 s | 1.7 s |
+| `shaped-rendering-test` | 64 s | 11.7 s |
+| `shaped-viewer-test` | 63 s | 45 s |
+| `shaped-shader-compiler-dxc-test` | 25 s | 0.55 s |
+
+**Applications.** Any process of ours on this driver with the Agility SDK present should wait about 20 s at its first trace.
+`shaped-view` is expected to, but was not measured.
 
 ## Draft upstream report
 

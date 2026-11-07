@@ -14,12 +14,14 @@
 #include <shaped-graphics/backends/dx12/dx12_context.hh>
 #include <shaped-graphics/backends/dx12/dx12_runtime.hh>
 
+using namespace cc::primitive_defines;
+
 // The tests of the Agility SDK's own features, in a process of their own wherever this one keeps to the system runtime.
 //
-// On Intel's driver, a process that loaded the Agility SDK compiles every shader anew, on dx12 and vulkan alike
-// (docs/bugs-external/intel-agility-process-recompiles-acceleration-structure-kernels).
-// So there every test process picks the system runtime (dx12::choose_test_d3d12_runtime), and the launcher below
-// starts this binary again on the Agility SDK, running only the invocables listed here.
+// On Intel's driver, a process that loaded the Agility SDK compiles every shader anew, on dx12 and vulkan alike.
+// docs/bugs-external/intel-agility-process-recompiles-acceleration-structure-kernels has the reproduction.
+// So there every test process picks the system runtime, through dx12::choose_test_d3d12_runtime.
+// The launcher below then starts this binary again on the Agility SDK, running only the invocables listed here.
 // Everywhere else every driver runs on the Agility SDK already, and the launcher skips.
 
 namespace
@@ -92,7 +94,7 @@ constexpr char const* k_process_marker = "SG_TEST_AGILITY_PROCESS";
 {
     auto const names_match = [](wchar_t const* entry, cc::string_view assignment)
     {
-        for (auto i = cc::isize(0); i < assignment.size(); ++i)
+        for (auto i = isize(0); i < assignment.size(); ++i)
         {
             auto const a = assignment[i];
             auto e = entry[i];
@@ -148,7 +150,7 @@ constexpr char const* k_process_marker = "SG_TEST_AGILITY_PROCESS";
 }
 
 /// The last `max_bytes` of a text file, or nothing where it cannot be read.
-[[nodiscard]] cc::string file_tail(cc::string const& path, cc::isize max_bytes)
+[[nodiscard]] cc::string file_tail(cc::string const& path, isize max_bytes)
 {
     auto const file = CreateFileW(wide(path).data(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr,
                                   OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
@@ -156,7 +158,7 @@ constexpr char const* k_process_marker = "SG_TEST_AGILITY_PROCESS";
         return {};
     auto size = LARGE_INTEGER{};
     GetFileSizeEx(file, &size);
-    auto const take = size.QuadPart < max_bytes ? cc::isize(size.QuadPart) : max_bytes;
+    auto const take = size.QuadPart < max_bytes ? isize(size.QuadPart) : max_bytes;
     auto offset = LARGE_INTEGER{.QuadPart = size.QuadPart - take};
     SetFilePointerEx(file, offset, nullptr, FILE_BEGIN);
     auto out = cc::string();
@@ -164,7 +166,7 @@ constexpr char const* k_process_marker = "SG_TEST_AGILITY_PROCESS";
     auto read = DWORD(0);
     ReadFile(file, out.data(), DWORD(take), &read, nullptr);
     CloseHandle(file);
-    out.resize_down_to(cc::isize(read));
+    out.resize_down_to(isize(read));
     return out;
 }
 
@@ -258,16 +260,14 @@ NX_TEST_SETUP(nx::setup& s)
     auto const* const text = s.find_test(k_text_driver);
     auto const* const native = s.find_test(k_native_driver);
     auto fragments = cc::vector<nx::alias_fragment>();
-    auto found = cc::isize(0);
     for (auto const* t : s.invocables_with<sg::context_handle>())
         for (auto const* name : k_agility_tests)
             if (cc::string_view(t->name) == name)
             {
-                ++found;
                 fragments.push_back({.driver = text, .section_path = {"dx12-agility", t->name}});
                 fragments.push_back({.driver = native, .section_path = {"dx12-agility-native-dxil", t->name}});
             }
-    CC_ASSERT(found == cc::isize(sizeof(k_agility_tests) / sizeof(k_agility_tests[0])),
+    CC_ASSERT(fragments.size() == 2 * isize(sizeof(k_agility_tests) / sizeof(k_agility_tests[0])),
               "an Agility test listed in dx12-agility-process.cc names no invocable: one was renamed");
     s.define_alias(k_agility_alias, cc::move(fragments));
 }

@@ -1,39 +1,40 @@
 #pragma once
 
 #include <shaped-graphics/backends/dx12/dx12_common.hh>
+#include <shaped-graphics/backends/dx12/fwd.hh>
 
-// The D3D12 runtime this process creates its devices through.
+// The D3D12 runtime this process creates its devices through, one per process and settled at the first call here.
 //
-// Where the Agility SDK was fetched (`SG_HAS_AGILITY`), that is its D3D12Core.dll by default, loaded through
-// ID3D12SDKConfiguration1::CreateDeviceFactory: no executable exports D3D12SDKVersion, so a static library can choose it.
-// Everywhere else, where the SDK fails to load, and where the system runtime was asked for, it is the runtime Windows carries.
-// The choice is made once per process, at the first call of any function here, and never changes after.
-// A process that asked for the system runtime never calls CreateDeviceFactory, which on Intel's driver is what costs every
-// later process-wide shader compile its cache (docs/bugs-external/intel-agility-process-recompiles-acceleration-structure-kernels).
-namespace sg::backend::dx12
-{
-enum class d3d12_runtime : u8
+// Where the Agility SDK was fetched (`SG_HAS_AGILITY`), the default is its D3D12Core.dll.
+// It loads through ID3D12SDKConfiguration1::CreateDeviceFactory, since no executable exports D3D12SDKVersion.
+// Everywhere else, where the SDK fails to load, and where the system runtime was asked for, it is the one Windows carries.
+// A process on the system runtime never creates the SDK's device factory.
+// On Intel's driver that factory alone costs the process every shader cache hit, vulkan's included.
+// docs/bugs-external/intel-agility-process-recompiles-acceleration-structure-kernels has the reproduction.
+enum class sg::backend::dx12::d3d12_runtime : sg::u8
 {
     system,
     agility, ///< the system runtime where this build has no Agility SDK
 };
 
+namespace sg::backend::dx12
+{
+
 /// Asks for a runtime before this process uses one; it wins over `SC_DX12_RUNTIME`.
 /// It must be called before any device, debug interface or feature query, and a later call must ask for the same runtime.
 void choose_d3d12_runtime(d3d12_runtime runtime);
 
-/// The runtime this process asked for: `choose_d3d12_runtime`'s, else `SC_DX12_RUNTIME` (`system` or `agility`), else
-/// the Agility SDK's where it was fetched.
-/// Calling it settles the choice.
+/// The runtime this process asked for, which calling it settles.
+/// That is `choose_d3d12_runtime`'s, else `SC_DX12_RUNTIME` (`system` or `agility`), else the Agility SDK's where fetched.
 [[nodiscard]] d3d12_runtime requested_d3d12_runtime();
 
 /// Whether this process's devices come from the Agility SDK's runtime rather than the system's.
 /// False where the Agility SDK was asked for and failed to load.
 [[nodiscard]] bool runs_agility_runtime();
 
-/// The policy every test binary of ours applies at startup: the system runtime on an Intel GPU unless `SC_DX12_RUNTIME`
-/// names one, the default everywhere else.
-/// It reads the adapter through DXGI alone, so it never loads a D3D12 runtime itself.
+/// The policy every test binary of ours applies in its `NX_TEST_SETUP`, before any device.
+/// On an Intel GPU it asks for the system runtime, unless `SC_DX12_RUNTIME` names one.
+/// It reads the adapter through DXGI alone, so it loads no D3D12 runtime itself.
 void choose_test_d3d12_runtime();
 
 /// Whether acceleration-structure buffers carry `D3D12_RESOURCE_FLAG_RAYTRACING_ACCELERATION_STRUCTURE`, which a

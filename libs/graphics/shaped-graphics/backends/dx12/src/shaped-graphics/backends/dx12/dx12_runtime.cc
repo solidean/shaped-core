@@ -200,9 +200,8 @@ void sg::backend::dx12::choose_test_d3d12_runtime()
 {
     if (!SG_HAS_AGILITY || cc::environment_variable("SC_DX12_RUNTIME").has_value())
         return;
-    // TEMPORARY(perf-sg-agility-intel-acceleration-structure-compile): Intel's driver compiles every shader of a process
-    // that loaded the Agility SDK anew, so a test process there keeps to the system runtime, and the Agility SDK's own
-    // features are tested in a process of their own (docs/bugs-external/intel-agility-process-recompiles-acceleration-structure-kernels).
+    // TEMPORARY(debt-sg-intel-tests-keep-off-agility): Intel's driver compiles every shader of an Agility process anew.
+    // So a test process there keeps to the system runtime, and sg's tests start one Agility process of their own.
     if (first_hardware_vendor_id() == k_intel_vendor_id)
         choose_d3d12_runtime(d3d12_runtime::system);
 }

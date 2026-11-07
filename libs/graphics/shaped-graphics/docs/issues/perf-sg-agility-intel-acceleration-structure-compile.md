@@ -39,6 +39,13 @@ Every option below trades some of that on Intel for time, so which one is a deci
 Applications should be affected too: `shaped-view` on this driver would wait 26 s or more at its first trace build, though that was not measured.
 Option 1's knob is what an application would reach for there as well.
 
+## Landed
+
+Option 2, chosen on 2026-11-07, and the workaround is now [debt-sg-intel-tests-keep-off-agility](debt-sg-intel-tests-keep-off-agility.md).
+`dx12::choose_d3d12_runtime` and `SC_DX12_RUNTIME` pick the runtime per process, and on Intel each test binary picks the system one.
+`shaped-graphics-test` takes 23.6 s alone, its Agility process included, against over 175 s.
+The full `dev.py test` run, one binary at a time, takes 101 s, its longest binary `shaped-viewer-test` at 38–45 s.
+
 ## Not done
 
 - Nothing is filed with Intel yet; the external entry carries a draft report.
