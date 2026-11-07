@@ -8,6 +8,7 @@
 #include <clean-core/string/print.hh>
 #include <clean-core/thread/thread.hh>
 #include <nexus/test.hh>
+#include <shaped-graphics/backends/dx12/dx12_runtime.hh> // check_feature_support
 #include <shaped-graphics/context/context.hh>
 
 using namespace cc::primitive_defines;
@@ -67,8 +68,13 @@ INVOCABLE_TEST("sg dx12 - the memory budget is what this process may use, not wh
 
     // The budget shrinks as other processes take memory, so it never exceeds the board — the two are related but not
     // interchangeable, which is exactly what a dashboard gets wrong.
+    // On a UMA adapter the local segment is system memory, so its budget dwarfs the carve-out reported as dedicated.
+    auto architecture = D3D12_FEATURE_DATA_ARCHITECTURE{};
+    auto const uma = SUCCEEDED(dx12::check_feature_support(handle->device(), D3D12_FEATURE_ARCHITECTURE, &architecture,
+                                                           sizeof(architecture)))
+                  && architecture.UMA;
     auto const& board = handle->metrics.adapter().dedicated_video_memory_bytes;
-    if (board.has_value() && board.value() > 0)
+    if (!uma && board.has_value() && board.value() > 0)
         CHECK(memory.value().budget_bytes <= board.value());
 }
 

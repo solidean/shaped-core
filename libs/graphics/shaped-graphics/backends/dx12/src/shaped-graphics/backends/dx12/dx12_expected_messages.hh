@@ -33,6 +33,11 @@ inline constexpr cc::string_view k_expected_validation_messages[] = {
     // It stays unnarrowed on purpose — real applications raise it many times per frame, and its text differs between drivers.
     // No sg test provokes it yet; only sv's frame loop does.
     "resources contain the GPU Virtual Address range",
+
+    // Not one of ours: on the Agility SDK, AMD's driver 32.0.21042.62 asks the superseded query during a swapchain's calls.
+    // Every query sg makes goes through check_feature_support, which asks CheckFeatureSupport1 there.
+    // Intel's driver on the same runtime raises none of it.
+    "ID3D12Device::CheckFeatureSupport is superseded by ID3D12Device16::CheckFeatureSupport1",
 };
 
 /// Whether this debug-layer message is one of the advisories above.
