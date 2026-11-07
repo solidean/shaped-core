@@ -19,6 +19,11 @@ struct built_in_rule
     bool has_component = true;
 };
 
+[[nodiscard]] constexpr bool is_factor(ir::built_in b)
+{
+    return b == ir::built_in::tess_edge || b == ir::built_in::tess_inside;
+}
+
 constexpr built_in_rule k_built_ins[] = {
     {ir::built_in::thread_id, dx_op::thread_id},
     {ir::built_in::workgroup_id, dx_op::group_id},
@@ -40,6 +45,9 @@ constexpr stage_rule k_stages[] = {
     {check::stage::compute, "cs", 5},
     {check::stage::vertex, "vs", 1},
     {check::stage::pixel, "ps", 0},
+    {check::stage::geometry, "gs", 2},
+    {check::stage::tessellation_control, "hs", 3},
+    {check::stage::tessellation_evaluation, "ds", 4},
 };
 
 /// What a signature's element is to `dx.sig` and `PSV0`, beside the `D3D_NAME` the packer gives.
@@ -63,6 +71,12 @@ constexpr system_rule k_systems[] = {
     {66, 14}, // SV_Coverage
     {67, 19}, // SV_DepthGreaterEqual
     {68, 18}, // SV_DepthLessEqual
+    {11, 25}, // SV_TessFactor of a quad
+    {12, 26}, // SV_InsideTessFactor of a quad
+    {13, 25}, // SV_TessFactor of a triangle
+    {14, 26}, // SV_InsideTessFactor of a triangle
+    {15, 25}, // SV_TessFactor of a line: its detail
+    {16, 25}, // and its density
 };
 
 /// `DXIL::InterpolationMode`, parallel to `ir::interpolation`.
@@ -74,6 +88,9 @@ constexpr u32 k_model_minor = 6;
 constexpr u32 k_model_minor_start_location = 8;
 constexpr u32 k_tag_shader_flags = 0;
 constexpr u32 k_tag_usage_mask = 3;
+constexpr u32 k_tag_geometry_state = 1;
+constexpr u32 k_tag_domain_state = 2;
+constexpr u32 k_tag_hull_state = 3;
 constexpr u32 k_tag_num_threads = 4;
 constexpr u32 k_tag_element_type = 0;
 constexpr u32 k_tag_structured_stride = 1;
@@ -148,7 +165,7 @@ void writer::number_signature()
     {
         auto const& e = _summary.signature[s];
         _element_signature[e.element] = i32(s);
-        _signature_ids.push_back(next[isize(e.table)]++);
+        _signature_ids.push_back(e.continues ? next[isize(e.table)] - 1 : next[isize(e.table)]++);
         system_rule const* system = nullptr;
         for (auto const& r : k_systems)
             if (r.d3d_name == e.system_value)
@@ -184,30 +201,59 @@ void writer::stage_load(u32 index, instruction const& i)
         return define(index);
     }
     // these are operations of their own, whether or not a signature names them
+    auto const is_primitive_id = e.system == ir::built_in::primitive_id && _p.stage != check::stage::pixel;
     if (e.system == ir::built_in::view_index || e.system == ir::built_in::sample_mask
-        || e.system == ir::built_in::sample_index)
+        || e.system == ir::built_in::sample_index || is_primitive_id)
     {
         _uses.view_id = _uses.view_id || e.system == ir::built_in::view_index;
         _scratch.clear();
         _scratch.push_back(value_of(e.system == ir::built_in::view_index    ? dx_op::view_id
                                     : e.system == ir::built_in::sample_mask ? dx_op::coverage
+                                    : is_primitive_id                       ? dx_op::primitive_id
                                                                             : dx_op::sample_index));
+        return define(index);
+    }
+    if (e.system == ir::built_in::domain_location)
+    {
+        auto const number = _m.constant_i32(k_dx_ops[isize(dx_op::domain_location)].number);
+        _scratch.clear();
+        for (auto l = u32(0); l < leaves_of(i.type); ++l)
+        {
+            ll_value const args[] = {number, _m.constant_i8(l)};
+            _scratch.push_back(call(dx_op::domain_location, _m.float_type(), args));
+        }
         return define(index);
     }
 
     auto const at = _element_signature[element];
     if (at < 0)
         return unsupported(cc::format("the stage input {} on DXIL", _p.name_at(e.name_first, e.name_size)));
+    if (e.part == stage_part::patch)
+    {
+        auto const overload = scalar_type(scalar_at(i.type, 0));
+        auto const number = _m.constant_i32(k_dx_ops[isize(dx_op::load_patch_constant)].number);
+        auto const id = _m.constant_i32(_signature_ids[at]);
+        auto const row = _m.constant_i32(is_factor(e.system) ? e.semantic_index : 0);
+        _scratch.clear();
+        for (auto l = u32(0); l < leaves_of(i.type); ++l)
+        {
+            ll_value const args[] = {number, id, row, _m.constant_i8(l)};
+            _scratch.push_back(call(dx_op::load_patch_constant, overload, args, true));
+        }
+        return define(index);
+    }
     // `SV_IsFrontFace` crosses as a uint
     auto const is_bool = e.system == ir::built_in::is_front_facing;
     auto const overload = is_bool ? _m.int_type() : scalar_type(scalar_at(i.type, 0));
     auto const number = _m.constant_i32(k_dx_ops[isize(dx_op::load_input)].number);
-    auto const undefined = _m.constant_undef(_m.int_type());
+    auto const operands = _p.operands_of(i);
+    // the input vertex or control point, which DXIL calls the vertex axis
+    auto const axis = operands.size() > 1 ? leaf_at(value_ref(operands[1])) : _m.constant_undef(_m.int_type());
     auto const id = _m.constant_i32(_signature_ids[at]);
     _loaded.clear();
     for (auto l = u32(0); l < leaves_of(i.type); ++l)
     {
-        ll_value const args[] = {number, id, _m.constant_i32(0), _m.constant_i8(l), undefined};
+        ll_value const args[] = {number, id, _m.constant_i32(0), _m.constant_i8(l), axis};
         _loaded.push_back(call(dx_op::load_input, overload, args, true));
     }
     _scratch.clear();
@@ -232,15 +278,50 @@ void writer::stage_store(instruction const& i)
         auto const& e = _p.stage_elements[operands[0]];
         return unsupported(cc::format("the stage output {} on DXIL", _p.name_at(e.name_first, e.name_size)));
     }
+    auto const& e = _p.stage_elements[operands[0]];
+    auto const op = e.part == stage_part::patch ? dx_op::store_patch_constant : dx_op::store_output;
     auto const value = value_ref(operands[1]);
-    auto const number = _m.constant_i32(k_dx_ops[isize(dx_op::store_output)].number);
+    auto const number = _m.constant_i32(k_dx_ops[isize(op)].number);
     auto const id = _m.constant_i32(_signature_ids[at]);
+    auto const row = _m.constant_i32(is_factor(e.system) ? e.semantic_index : 0);
     for (auto l = u32(0); l < count_of(value); ++l)
     {
         auto const lane = leaf_at(value, l);
-        ll_value const args[] = {number, id, _m.constant_i32(0), _m.constant_i8(l), lane};
-        (void)call(dx_op::store_output, _m.type_of(lane), args);
+        ll_value const args[] = {number, id, row, _m.constant_i8(l), lane};
+        (void)call(op, _m.type_of(lane), args);
     }
+}
+
+void writer::write_hull_function()
+{
+    _m.begin_function();
+    _m.open_block(_m.add_block());
+    ll_value const point_args[] = {_m.constant_i32(k_dx_ops[isize(dx_op::output_control_point_id)].number)};
+    auto const point = call(dx_op::output_control_point_id, _m.int_type(), point_args);
+    auto const load_number = _m.constant_i32(k_dx_ops[isize(dx_op::load_input)].number);
+    auto const store_number = _m.constant_i32(k_dx_ops[isize(dx_op::store_output)].number);
+    // the k-th arrayed input is the k-th output: both are the one control point struct, member by member
+    auto output = isize(0);
+    for (auto i = isize(0); i < _p.stage_elements.size(); ++i)
+    {
+        auto const& e = _p.stage_elements[i];
+        if (e.part != stage_part::input || e.array_size == 0)
+            continue;
+        while (_p.stage_elements[output].part != stage_part::output)
+            ++output;
+        auto const from = _m.constant_i32(_signature_ids[_element_signature[i]]);
+        auto const to = _m.constant_i32(_signature_ids[_element_signature[output]]);
+        auto const overload = scalar_type(scalar_at(e.type, 0));
+        for (auto l = u32(0); l < leaves_of(e.type); ++l)
+        {
+            ll_value const load_args[] = {load_number, from, _m.constant_i32(0), _m.constant_i8(l), point};
+            auto const value = call(dx_op::load_input, overload, load_args, true);
+            ll_value const store_args[] = {store_number, to, _m.constant_i32(0), _m.constant_i8(l), value};
+            (void)call(dx_op::store_output, overload, store_args);
+        }
+        ++output;
+    }
+    _m.return_void();
 }
 
 void writer::discard()
@@ -282,9 +363,13 @@ void writer::read_usage()
     for (auto const& f : _functions)
     {
         auto const shape = dx_class_id(f.key >> 32);
-        if (shape != dx_class_id::load_input && shape != dx_class_id::store_output)
+        if (shape != dx_class_id::load_input && shape != dx_class_id::store_output
+            && shape != dx_class_id::load_patch_constant && shape != dx_class_id::store_patch_constant)
             continue;
-        auto const table = shape == dx_class_id::load_input ? signature_table::input : signature_table::output;
+        // all four name an id and then a row and a lane, so one walk reads them
+        auto const table = shape == dx_class_id::load_input   ? signature_table::input
+                         : shape == dx_class_id::store_output ? signature_table::output
+                                                              : signature_table::patch;
         _m.calls_of(f.function,
                     [&](cc::span<u32 const> args)
                     {
@@ -312,37 +397,127 @@ void writer::fill_dependencies()
     };
     extent(signature_table::input, _summary.input_rows, _summary.input_scalars);
     extent(signature_table::output, _summary.output_rows, _summary.output_scalars);
+    extent(signature_table::patch, _summary.patch_rows, _summary.patch_scalars);
 
-    // Every declared input lane reaches every declared output lane: a table can safely say too much.
-    auto const words = (_summary.output_scalars + 31) / 32;
-    _summary.dependencies.resize_to_filled(isize(_summary.input_rows) * 4 * words, 0u);
-    _summary.uses_view = _uses.view_id;
-    _summary.view_outputs.resize_to_filled(_uses.view_id ? isize(words) : isize(0), 0u);
-    if (_uses.view_id)
-        for (auto const& output : _summary.signature)
-            if (output.table == signature_table::output && output.row >= 0)
-                for (auto o = u32(0); o < output.lanes; ++o)
-                {
-                    auto const to = u32(output.row) * 4 + output.first_column + o;
-                    _summary.view_outputs[to / 32] |= 1u << (to % 32);
-                }
-    for (auto const& input : _summary.signature)
+    auto const each_scalar = [&](signature_table table, auto&& visit)
     {
-        if (input.table != signature_table::input || input.row < 0)
-            continue;
-        for (auto const& output : _summary.signature)
-        {
-            if (output.table != signature_table::output || output.row < 0)
-                continue;
-            for (auto i = u32(0); i < input.lanes; ++i)
-                for (auto o = u32(0); o < output.lanes; ++o)
-                {
-                    auto const to = u32(output.row) * 4 + output.first_column + o;
-                    auto const from = u32(input.row) * 4 + input.first_column + i;
-                    _summary.dependencies[isize(from) * words + to / 32] |= 1u << (to % 32);
-                }
-        }
+        for (auto const& e : _summary.signature)
+            if (e.table == table && e.row >= 0)
+                for (auto l = u32(0); l < e.lanes; ++l)
+                    visit(u32(e.row) * 4 + e.first_column + l);
+    };
+    // Every declared lane reaches every declared lane after it: a table can safely say too much.
+    auto const table_of = [&](signature_table from, u32 from_rows, signature_table to, u32 to_scalars)
+    {
+        auto const words = (to_scalars + 31) / 32;
+        auto table = cc::vector<u32>::create_filled(isize(from_rows) * 4 * words, 0u);
+        each_scalar(
+            from, [&](u32 a) { each_scalar(to, [&](u32 b) { table[isize(a) * words + b / 32] |= 1u << (b % 32); }); });
+        return table;
+    };
+    auto const view_mask = [&](signature_table table, u32 scalars)
+    {
+        auto mask = cc::vector<u32>::create_filled(_uses.view_id ? isize((scalars + 31) / 32) : isize(0), 0u);
+        if (_uses.view_id)
+            each_scalar(table, [&](u32 to) { mask[to / 32] |= 1u << (to % 32); });
+        return mask;
+    };
+    _summary.uses_view = _uses.view_id;
+    _summary.view_outputs = view_mask(signature_table::output, _summary.output_scalars);
+    _summary.dependencies
+        = table_of(signature_table::input, _summary.input_rows, signature_table::output, _summary.output_scalars);
+    if (_p.stage == check::stage::tessellation_control)
+    {
+        _summary.view_patch = view_mask(signature_table::patch, _summary.patch_scalars);
+        _summary.patch_dependencies
+            = table_of(signature_table::input, _summary.input_rows, signature_table::patch, _summary.patch_scalars);
     }
+    else if (_p.stage == check::stage::tessellation_evaluation)
+        _summary.patch_dependencies
+            = table_of(signature_table::patch, _summary.patch_rows, signature_table::output, _summary.output_scalars);
+}
+
+cc::vector<ll_value> writer::view_id_state()
+{
+    auto const& s = _summary;
+    auto const words_of = [](u32 scalars) { return (scalars + 31) / 32; };
+    auto state = cc::vector<ll_value>();
+    auto const push_all = [&](cc::span<u32 const> words)
+    {
+        for (auto const word : words)
+            state.push_back(_m.constant_i32(word));
+    };
+    auto const push_rows = [&](cc::vector<u32> const& table, u32 rows, u32 to_scalars)
+    {
+        for (auto k = isize(0); k < isize(rows) * words_of(to_scalars); ++k)
+            state.push_back(_m.constant_i32(table[k]));
+    };
+    state.push_back(_m.constant_i32(s.input_scalars));
+    state.push_back(_m.constant_i32(s.output_scalars));
+    push_all(s.view_outputs);
+    push_rows(s.dependencies, s.input_scalars, s.output_scalars);
+    if (_p.stage == check::stage::geometry)
+        // the three streams SGL does not write
+        for (auto stream = 0; stream < 3; ++stream)
+            state.push_back(_m.constant_i32(0));
+    if (_p.stage == check::stage::tessellation_control)
+    {
+        state.push_back(_m.constant_i32(s.patch_scalars));
+        push_all(s.view_patch);
+        push_rows(s.patch_dependencies, s.input_scalars, s.patch_scalars);
+    }
+    if (_p.stage == check::stage::tessellation_evaluation)
+    {
+        state.push_back(_m.constant_i32(s.patch_scalars));
+        push_rows(s.patch_dependencies, s.patch_scalars, s.output_scalars);
+    }
+    return state;
+}
+
+void writer::stage_properties(cc::vector<u32>& properties)
+{
+    auto const& shape = _p.primitive;
+    auto const stage = _p.stage;
+    if (stage == check::stage::geometry)
+    {
+        // DXIL numbers an input primitive by its vertices, but for the two with adjacency
+        _summary.input_primitive = shape.input_vertices == 4 ? 6 : shape.input_vertices == 6 ? 7 : shape.input_vertices;
+        // a point list, a line strip or a triangle strip
+        _summary.output_topology = shape.output_vertices == 1 ? 1 : shape.output_vertices == 2 ? 3 : 5;
+        _summary.max_vertices = shape.max_vertices;
+        u32 const state[] = {_m.md_i32(_summary.input_primitive), _m.md_i32(shape.max_vertices), _m.md_i32(1),
+                             _m.md_i32(_summary.output_topology), _m.md_i32(1)};
+        properties.push_back(_m.md_i32(k_tag_geometry_state));
+        properties.push_back(_m.md_node(state));
+        return;
+    }
+    if (stage != check::stage::tessellation_control && stage != check::stage::tessellation_evaluation)
+        return;
+    _summary.control_points = shape.input_vertices;
+    _summary.domain = u32(shape.domain);
+    if (stage == check::stage::tessellation_evaluation)
+    {
+        u32 const state[] = {_m.md_i32(_summary.domain), _m.md_i32(shape.input_vertices)};
+        properties.push_back(_m.md_i32(k_tag_domain_state));
+        properties.push_back(_m.md_node(state));
+        return;
+    }
+    using partitioning = check::tessellation_partitioning;
+    auto const spacing = shape.partitioning == partitioning::integer        ? u32(1)
+                       : shape.partitioning == partitioning::fractional_odd ? u32(3)
+                                                                            : u32(4);
+    // a line, or a triangle in the domain's own orientation
+    _summary.output_primitive = shape.domain == tessellation_domain::isoline ? 2 : shape.is_output_clockwise ? 3 : 4;
+    auto const max_factor = _m.constant_float(_m.float_type(), 0x42800000u);
+    u32 const state[] = {_m.md_value(_m.type_of(_body), _body),
+                         _m.md_i32(shape.input_vertices),
+                         _m.md_i32(shape.input_vertices),
+                         _m.md_i32(_summary.domain),
+                         _m.md_i32(spacing),
+                         _m.md_i32(_summary.output_primitive),
+                         _m.md_value(_m.float_type(), max_factor)};
+    properties.push_back(_m.md_i32(k_tag_hull_state));
+    properties.push_back(_m.md_node(state));
 }
 
 u32 writer::signature_list(signature_table table)
@@ -352,11 +527,14 @@ u32 writer::signature_list(signature_table table)
     for (auto s = isize(0); s < _summary.signature.size(); ++s)
     {
         auto const& e = _summary.signature[s];
-        if (e.table != table)
+        if (e.table != table || e.continues)
             continue;
         // `DXIL::ComponentType` of `DxilProgramSigCompType`: unsigned, signed, float
         auto const component = e.component_type == 3 ? 9u : e.component_type == 2 ? 4u : 5u;
-        u32 const indices[] = {_m.md_i32(e.semantic_index)};
+        auto indices = cc::vector<u32>();
+        indices.push_back(_m.md_i32(e.semantic_index));
+        for (auto next = s + 1; next < _summary.signature.size() && _summary.signature[next].continues; ++next)
+            indices.push_back(_m.md_i32(_summary.signature[next].semantic_index));
         auto extra = u32(0);
         if (_summary.usage[s] != 0)
         {
@@ -369,7 +547,7 @@ u32 writer::signature_list(signature_table table)
                               byte_of(_summary.semantic_kinds[s]),
                               _m.md_node(indices),
                               byte_of(_summary.modes[s]),
-                              _m.md_i32(1),
+                              _m.md_i32(u32(indices.size())),
                               byte_of(e.lanes),
                               _m.md_i32(u32(e.row)),
                               byte_of(e.row < 0 ? 0xffu : e.first_column),
@@ -461,7 +639,7 @@ void writer::write_entry_metadata()
     auto const has_resources = !_bindings.empty();
     auto const resources_node = has_resources ? _m.md_node(resources) : 0;
 
-    if (_p.stage == check::stage::vertex)
+    if (_p.stage == check::stage::vertex || _p.stage == check::stage::tessellation_evaluation)
         for (auto const& e : _summary.signature)
             _uses.layer_output = _uses.layer_output || (e.table == signature_table::output && e.system_value == 4);
     auto metadata_flags = k_native_low_precision;
@@ -475,36 +653,33 @@ void writer::write_entry_metadata()
 
     u32 const threads[]
         = {_m.md_i32(u32(_p.workgroup[0])), _m.md_i32(u32(_p.workgroup[1])), _m.md_i32(u32(_p.workgroup[2]))};
-    u32 const properties[]
-        = {_m.md_i32(k_tag_shader_flags), _m.md_value(_m.long_type(), _m.constant_int(_m.long_type(), metadata_flags)),
-           _m.md_i32(k_tag_num_threads), _m.md_node(threads)};
+    auto properties = cc::vector<u32>();
+    properties.push_back(_m.md_i32(k_tag_shader_flags));
+    properties.push_back(_m.md_value(_m.long_type(), _m.constant_int(_m.long_type(), metadata_flags)));
+    if (is_compute)
+    {
+        properties.push_back(_m.md_i32(k_tag_num_threads));
+        properties.push_back(_m.md_node(threads));
+    }
+    stage_properties(properties);
     auto signatures = u32(0);
     if (!is_compute)
     {
         fill_dependencies();
-        u32 const lists_of_signature[]
-            = {signature_list(signature_table::input), signature_list(signature_table::output), 0};
+        u32 const lists_of_signature[] = {signature_list(signature_table::input), signature_list(signature_table::output),
+                                          signature_list(signature_table::patch)};
         signatures = _m.md_node(lists_of_signature);
         if (!_failure.empty())
             return;
 
-        // `dx.viewIdState`: the counts of scalars, then one row per input scalar up to the last
-        auto const words = (_summary.output_scalars + 31) / 32;
-        auto state = cc::vector<ll_value>();
-        state.push_back(_m.constant_i32(_summary.input_scalars));
-        state.push_back(_m.constant_i32(_summary.output_scalars));
-        for (auto const word : _summary.view_outputs)
-            state.push_back(_m.constant_i32(word));
-        for (auto k = u32(0); k < _summary.input_scalars * words; ++k)
-            state.push_back(_m.constant_i32(_summary.dependencies[k]));
+        auto const state = view_id_state();
         auto const array = _m.array(_m.int_type(), u64(state.size()));
         u32 const state_node[] = {_m.md_node(
             cc::span<u32 const>(std::initializer_list<u32>{_m.md_value(array, _m.constant_struct(array, state))}))};
         _m.md_named("dx.viewIdState", state_node);
     }
-    auto const properties_count = is_compute ? isize(4) : isize(2);
     u32 const entry[] = {_m.md_value(_m.type_of(_entry), _entry), _m.md_string(_p.entry_name), signatures,
-                         resources_node, _m.md_node(cc::span<u32 const>(properties, properties_count))};
+                         resources_node, _m.md_node(properties)};
 
     u32 const version_node[] = {_m.md_node(version)};
     u32 const validator_node[] = {_m.md_node(validator)};
@@ -525,7 +700,7 @@ void writer::write_entry_metadata()
     _summary.program_version = (k_model_major << 4) | model_minor;
     _summary.dxil_version = 0x100 | model_minor;
     _summary.entry_name = _p.entry_name;
-    if (_p.stage == check::stage::vertex)
+    if (_p.stage != check::stage::pixel)
         for (auto const& e : _summary.signature)
             _summary.writes_position
                 = _summary.writes_position || (e.table == signature_table::output && e.system_value == 1);

@@ -1392,8 +1392,7 @@ sgl::emit::impl::plan sgl::emit::impl::make_plan(check::checked_module const& m,
     // a tessellation stage's control points take the first locations, and its factors struct's members the next
     if (check::is_valid(e.input) && m.at(e.input).kind == type_kind::array
         && (e.entry_stage == stage::tessellation_control || e.entry_stage == stage::tessellation_evaluation))
-        for (auto const& member : m.at(m.at(m.at(e.input).element).members))
-            p.patch_location_base += member.is_position ? 0 : 1;
+        p.patch_location_base = p.locations_of(m.at(e.input).element);
     p.need(e.input, input_role(e));
     p.need(e.result, result_role(e));
     // the geometry stage's stream, and the evaluation stage's factors, are parameters after the first

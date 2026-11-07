@@ -51,8 +51,15 @@ struct module_summary
     /// Parallel to `signature`: `DXIL::SemanticKind` and `DXIL::InterpolationMode`.
     cc::vector<u8> semantic_kinds;
     cc::vector<u8> modes;
-    /// A vertex stage that writes `SV_Position`, which `PSV0` states.
+    /// A stage ahead of the rasterizer that writes `SV_Position`, which `PSV0` states.
     bool writes_position = false;
+    /// What a geometry or tessellation stage's `PSV0` words state, in DXIL's numbers.
+    u32 input_primitive = 0;
+    u32 output_topology = 0;
+    u32 max_vertices = 0;
+    u32 control_points = 0;
+    u32 domain = 0;
+    u32 output_primitive = 0;
     /// A pixel stage's `PSV0` words: that it writes a depth, and that it runs per sample.
     bool writes_depth = false;
     bool runs_per_sample = false;
@@ -61,13 +68,19 @@ struct module_summary
     /// How many rows each signature takes, and how many scalars up to its last.
     u32 input_rows = 0;
     u32 output_rows = 0;
+    u32 patch_rows = 0;
     u32 input_scalars = 0;
     u32 output_scalars = 0;
+    u32 patch_scalars = 0;
     /// One bit per output scalar: what depends on the view, where a stage reads it.
     cc::vector<u32> view_outputs;
+    /// The same of a control stage's patch constants.
+    cc::vector<u32> view_patch;
     /// One bit per output scalar for each input scalar: what reaches what.
     /// `(output_scalars + 31) / 32` words per input scalar, `input_rows * 4` of them, so `PSV0` can state it as it is.
     cc::vector<u32> dependencies;
+    /// A control stage's input scalars onto its patch constants, or an evaluation stage's patch constants onto its outputs.
+    cc::vector<u32> patch_dependencies;
 };
 
 /// What a module turned out to use, which the shader flags state.
@@ -304,6 +317,12 @@ private:
     void write_entry_metadata();
     void built_in(u32 index, stage_element const& e, instruction const& i);
     void number_signature();
+    /// A control stage's entry point, generated from its elements: each control point handed on as it came.
+    void write_hull_function();
+    /// `dx.viewIdState`'s words: a bit table of what reaches what, and the scalars either side.
+    [[nodiscard]] cc::vector<ll_value> view_id_state();
+    /// The properties a stage adds to its entry after its flags, as metadata operands.
+    void stage_properties(cc::vector<u32>& properties);
     void stage_load(u32 index, instruction const& i);
     void stage_store(instruction const& i);
     /// A call through a sampler: the coordinate's lanes, its three offsets, none of them stated, then what `tail` adds.
@@ -339,6 +358,8 @@ private:
     cc::string _failure;
 
     ll_value _entry = ll_value::none;
+    /// What the program is written as: `_entry`, but for a control stage's patch-constant function.
+    ll_value _body = ll_value::none;
     cc::vector<ll_block> _blocks;
     cc::vector<bool> _reachable;
 

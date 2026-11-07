@@ -101,6 +101,8 @@ constexpr cc::string_view k_names[] = {
     "atomic_fadd",
     "control_barrier",
     "discard",
+    "emit_vertex",
+    "end_strip",
     "combine_sampler",
     "sample_lod",
     "sample_implicit",
@@ -249,7 +251,7 @@ sgl::ir::operand sgl::ir::operand_role(op code, isize at)
 
 bool sgl::ir::has_effect(op code)
 {
-    if (u16(code) >= u16(op::atomic_load) && u16(code) <= u16(op::discard))
+    if (u16(code) >= u16(op::atomic_load) && u16(code) <= u16(op::end_strip))
         return true;
     if (u16(code) >= u16(op::branch))
         return true;

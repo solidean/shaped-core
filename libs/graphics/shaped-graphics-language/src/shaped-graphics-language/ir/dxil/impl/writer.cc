@@ -44,6 +44,7 @@ enum class rule_kind : u8
     atomic,
     barrier,
     discard,
+    stream,
     derivative,
     texture,
     image_size,
@@ -152,6 +153,8 @@ constexpr op_rule k_rules[] = {
     {op::atomic_xor, rule_kind::atomic},
     {op::control_barrier, rule_kind::barrier},
     {op::discard, rule_kind::discard},
+    {op::emit_vertex, rule_kind::stream, u8(dx_op::emit_stream)},
+    {op::end_strip, rule_kind::stream, u8(dx_op::cut_stream)},
     {op::combine_sampler, rule_kind::texture},
     {op::sample_lod, rule_kind::texture},
     {op::sample_implicit, rule_kind::texture},
@@ -231,7 +234,14 @@ void writer::run()
     _values.reserve(_p.instructions.size() * 2);
 
     auto const void_function = _m.function(_m.void_type(), {});
-    _entry = _m.add_function(_p.entry_name, void_function, entry_attributes(), false);
+    auto const is_control = _p.stage == check::stage::tessellation_control;
+    auto const attributes = entry_attributes();
+    if (is_control)
+        _body = _m.add_function(_p.name_at(_p.primitive.body_name_first, _p.primitive.body_name_size), void_function,
+                                attributes, false);
+    _entry = _m.add_function(_p.entry_name, void_function, attributes, false);
+    if (!is_control)
+        _body = _entry;
 
     number_signature();
     find_reachable();
@@ -253,6 +263,8 @@ void writer::run()
     fill_phis();
     _m.share_common_values();
     _m.remove_unused();
+    if (is_control)
+        write_hull_function();
     read_usage();
     write_entry_metadata();
 }
@@ -359,6 +371,13 @@ void writer::operation(u32 index)
         return stage_load(index, i);
     case rule_kind::discard:
         return discard();
+    case rule_kind::stream:
+    {
+        auto const dx = dx_op(rule.data);
+        ll_value const args[] = {_m.constant_i32(k_dx_ops[isize(dx)].number), _m.constant_i8(0)};
+        (void)call(dx, _m.void_type(), args);
+        return;
+    }
     case rule_kind::derivative:
         return derivative_lanes(index, i);
     case rule_kind::stage_store:

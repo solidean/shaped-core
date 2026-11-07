@@ -392,6 +392,10 @@ enum class sgl::ir::op : sgl::u16
     control_barrier,
     /// A pixel is lost, and the invocation goes on as a helper, so a neighbour's derivatives stay whole: no terminator.
     discard,
+    /// A geometry stage appends the output elements as they stand, which leaves them undefined.
+    emit_vertex,
+    /// A geometry stage ends the strip it is appending to.
+    end_strip,
     // ---- textures and images
     combine_sampler,
     /// Operands: sampled image, coordinate, level, and an offset where `aux` is 1.
@@ -583,6 +587,36 @@ struct sgl::ir::stage_element
     u32 name_size = 0;
 };
 
+/// What a tessellator cuts, which a control stage's factors struct says by its edges (CHK-305).
+enum class sgl::ir::tessellation_domain : sgl::u8
+{
+    none,
+    isoline,
+    triangle,
+    quad,
+};
+
+/// What a geometry or a tessellation stage states of its entry point beyond its elements.
+///
+/// A control stage's `program` is what HLSL calls its patch-constant function: the body runs once per patch.
+/// Each writer generates the part that hands each control point on, from the elements of `stage_part::output`.
+struct sgl::ir::primitive_stage
+{
+    /// The vertices of an input primitive, or the control points of a patch.
+    u32 input_vertices = 0;
+    /// `@geometry(max_vertices = N)`'s `N`.
+    u32 max_vertices = 0;
+    /// The vertices of a primitive a geometry stage's stream appends: 1, 2 or 3.
+    u32 output_vertices = 0;
+    tessellation_domain domain = tessellation_domain::none;
+    check::tessellation_partitioning partitioning = check::tessellation_partitioning::integer;
+    /// In the domain's own orientation, which is both targets' and mirrors SGL's `winding` (EMIT-134).
+    bool is_output_clockwise = false;
+    /// A control stage's body as a function of its own, a range of `program::names`.
+    u32 body_name_first = 0;
+    u32 body_name_size = 0;
+};
+
 /// A variable outside the function: a resource, a block or workgroup memory.
 struct sgl::ir::global
 {
@@ -629,6 +663,7 @@ struct sgl::ir::program
     cc::string entry_name;
     check::stage stage = check::stage::none;
     i32 workgroup[3] = {1, 1, 1};
+    primitive_stage primitive;
     /// The entry point's guarantee: what no single operation can say, its denormals above all.
     check::float_level guarantee = check::float_level::fast;
 

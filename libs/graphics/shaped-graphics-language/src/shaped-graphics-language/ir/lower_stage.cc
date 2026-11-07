@@ -171,7 +171,11 @@ u32 lowering::element_of_input(isize index)
     auto const lanes = _out.at(declared).kind == ir::type_kind::vector ? _out.at(declared).count : 1;
     auto type = input.input == stage_input::is_front_facing ? _bool : lanes == 1 ? _uint : vector_type(_uint, lanes);
     if (input.input == stage_input::domain_location)
+    {
         type = declared;
+        // SPIR-V's `TessCoord` is three lanes whatever the domain, and that writer looks the type up
+        (void)vector_type(_float, 3);
+    }
     auto const is_system_mode = _e.entry_stage == stage::pixel
                              && (input.input == stage_input::primitive_id || input.input == stage_input::is_front_facing
                                  || input.input == stage_input::sample_index);
@@ -182,13 +186,14 @@ u32 lowering::element_of_input(isize index)
                              spelled.hlsl_semantic, _plan.stage_input_names[index]);
 }
 
-value_ref lowering::read_element(u32 element)
+value_ref lowering::read_element(u32 element, value_ref index)
 {
-    u32 const operands[] = {element};
-    return add(op::stage_load, _out.stage_elements[element].type, operands);
+    u32 const operands[] = {element, u32(index)};
+    auto const count = _out.stage_elements[element].array_size > 0 ? 2 : 1;
+    return add(op::stage_load, _out.stage_elements[element].type, cc::span<u32 const>(operands, count));
 }
 
-value_ref lowering::read_struct(check::type_id t, u32& element)
+value_ref lowering::read_struct(check::type_id t, u32& element, value_ref index)
 {
     emit::impl::planned_struct const* found = nullptr;
     for (auto const& s : _plan.structs)
@@ -200,14 +205,23 @@ value_ref lowering::read_struct(check::type_id t, u32& element)
     auto parts = cc::vector<u32>();
     for (auto const& member : found->members)
     {
+        // a factor crosses as one element per factor, where every other array crosses as pieces
+        if (member.factor != check::tessellation_factor::none && _m.at(member.type).kind == check::type_kind::array)
+        {
+            auto factors = cc::vector<u32>();
+            for (auto i = u32(0); i < u32(_m.at(member.type).count); ++i)
+                factors.push_back(u32(read_element(element++, index)));
+            parts.push_back(u32(add(op::construct, value_type(member.type), factors)));
+            continue;
+        }
         if (member.pieces == 0)
         {
-            parts.push_back(u32(read_element(element++)));
+            parts.push_back(u32(read_element(element++, index)));
             continue;
         }
         if (emit::impl::is_word_split(_plan, member.type))
         {
-            parts.push_back(u32(joined_words(member.type, element)));
+            parts.push_back(u32(joined_words(member.type, element, index)));
             continue;
         }
         if (_m.at(member.type).kind == check::type_kind::array
@@ -215,27 +229,27 @@ value_ref lowering::read_struct(check::type_id t, u32& element)
         {
             auto joined = cc::vector<u32>();
             for (auto i = u32(0); i < _m.at(member.type).count; ++i)
-                joined.push_back(u32(joined_words(_m.at(member.type).element, element)));
+                joined.push_back(u32(joined_words(_m.at(member.type).element, element, index)));
             parts.push_back(u32(add(op::construct, value_type(member.type), joined)));
             continue;
         }
         // EMIT-174: an array or a matrix crosses as its pieces
         auto pieces = cc::vector<u32>();
         for (auto i = 0; i < member.pieces; ++i)
-            pieces.push_back(u32(read_element(element++)));
+            pieces.push_back(u32(read_element(element++, index)));
         parts.push_back(u32(add(op::construct, value_type(member.type), pieces)));
     }
     return add(op::construct, type, parts);
 }
 
-value_ref lowering::joined_words(check::type_id t, u32& element)
+value_ref lowering::joined_words(check::type_id t, u32& element, value_ref index)
 {
     auto const type = value_type(t);
     auto const scalar = scalar_of(type);
     auto const lanes = lanes_of(type);
     auto pieces = cc::vector<value_ref>();
     for (auto i = 0; i < emit::impl::word_pieces(_plan, t); ++i)
-        pieces.push_back(read_element(element++));
+        pieces.push_back(read_element(element++, index));
     auto const pair = vector_type(_uint, 2);
     auto words = cc::vector<u32>();
     for (auto lane = u32(0); lane < lanes; ++lane)
@@ -308,7 +322,7 @@ void lowering::hold_parameter(check::local_id id, value_ref value)
     add(op::store, type_ref::none, {variable, value});
 }
 
-void lowering::read_stage_edge()
+void lowering::check_links()
 {
     for (auto const& e : _out.stage_elements)
     {
@@ -317,7 +331,11 @@ void lowering::read_stage_edge()
         if (e.system == built_in::none && (scalar.width < 32 || scalar.kind == ir::type_kind::bool_))
             return unsupported("a link that is no 32-bit or 64-bit number");
     }
+}
 
+void lowering::read_stage_edge()
+{
+    check_links();
     auto element = u32(0);
     if (check::is_valid(_e.input))
         hold_parameter(check::local_id(0), read_struct(_e.input, element));
@@ -325,27 +343,125 @@ void lowering::read_stage_edge()
         if (is_primitive_parameter(i))
             hold_parameter(check::local_id(i), read_struct(_e.locals[i].type, element));
     for (auto i = isize(0); i < _e.stage_inputs.size(); ++i, ++element)
+        read_stage_input(i, element);
+}
+
+void lowering::read_stage_input(isize input, u32 element)
+{
+    if (input < _plan.stage_input_read.size() && !_plan.stage_input_read[input])
+        return;
+    auto const local = _e.stage_inputs[input].local;
+    auto const raw = _out.stage_elements[element].type;
+    auto const loaded = read_element(element);
+    auto const declared = value_type(_e.at(local).type);
+    hold_parameter(local, raw == declared ? loaded : add(op::bitcast, declared, {loaded}));
+}
+
+void lowering::describe_primitive_stage()
+{
+    auto& shape = _out.primitive;
+    auto const& info = _m.functions[_m.at(_e.function).info];
+    for (auto const& local : _e.locals)
     {
-        if (i < _plan.stage_input_read.size() && !_plan.stage_input_read[i])
+        if (local.kind != check::local_kind::parameter)
             continue;
-        auto const& input = _e.stage_inputs[i];
-        auto const raw = _out.stage_elements[element].type;
-        auto const loaded = read_element(element);
-        auto const declared = value_type(_e.at(input.local).type);
-        hold_parameter(input.local, raw == declared ? loaded : add(op::bitcast, declared, {loaded}));
+        auto const& t = _m.at(local.type);
+        if (t.kind == check::type_kind::array)
+            shape.input_vertices = u32(t.count);
+        else if (t.kind == check::type_kind::stream)
+            shape.output_vertices = u32(t.count);
     }
+    shape.max_vertices = u32(info.max_vertices);
+    if (_e.entry_stage == stage::geometry)
+        return;
+    auto edges = 0;
+    for (auto const& e : _out.stage_elements)
+        edges += e.system == built_in::tess_edge ? 1 : 0;
+    if (edges < 2 || edges > 4)
+        return unsupported("a tessellation stage whose factors name no domain");
+    shape.domain = edges == 2 ? tessellation_domain::isoline
+                 : edges == 3 ? tessellation_domain::triangle
+                              : tessellation_domain::quad;
+    shape.partitioning = info.partitioning;
+    shape.is_output_clockwise = !info.is_clockwise;
+    if (_e.entry_stage == stage::tessellation_control)
+    {
+        shape.body_name_first = add_name(_plan.patch_function);
+        shape.body_name_size = u32(_plan.patch_function.size());
+    }
+}
+
+void lowering::read_primitive_edge()
+{
+    check_links();
+    for (auto i = isize(0); i < _e.locals.size() && _failure.empty(); ++i)
+    {
+        auto const first = _parameter_elements[i];
+        auto const kind = _m.at(_e.locals[i].type).kind;
+        if (first == k_no_element || kind == check::type_kind::array || kind == check::type_kind::stream)
+            continue;
+        auto input = isize(-1);
+        for (auto k = isize(0); k < _e.stage_inputs.size(); ++k)
+            if (index_of(_e.stage_inputs[k].local) == i)
+                input = k;
+        if (input >= 0)
+        {
+            read_stage_input(input, first);
+            continue;
+        }
+        auto element = first;
+        hold_parameter(check::local_id(i), read_struct(_e.locals[i].type, element));
+    }
+}
+
+u32 lowering::stage_array_of(flat_expr_id id) const
+{
+    auto const* const l = _e.at(id).node.try_as<check::flat_local_ref>();
+    if (l == nullptr || _m.at(_e.at(l->local).type).kind != check::type_kind::array)
+        return k_no_element;
+    return _parameter_elements[index_of(l->local)];
+}
+
+value_ref lowering::read_stage_array(check::type_id t, u32 first)
+{
+    auto const& array = _m.at(t);
+    auto parts = cc::vector<u32>();
+    for (auto i = u32(0); i < u32(array.count); ++i)
+    {
+        auto element = first;
+        parts.push_back(u32(read_struct(array.element, element, uint_constant(i))));
+    }
+    return add(op::construct, value_type(t), parts);
+}
+
+void lowering::stream_call(check::flat_call const& c, bool is_emit)
+{
+    if (!is_emit)
+    {
+        add(op::end_strip, type_ref::none, cc::span<u32 const>());
+        return;
+    }
+    auto const arguments = _e.at(c.arguments);
+    store_struct(_m.at(_e.at(arguments[0]).type).element, expr(arguments[1]), stage_part::output);
+    add(op::emit_vertex, type_ref::none, cc::span<u32 const>());
 }
 
 void lowering::store_stage_result(value_ref result)
 {
+    store_struct(_e.result, result,
+                 _e.entry_stage == stage::tessellation_control ? stage_part::patch : stage_part::output);
+}
+
+void lowering::store_struct(check::type_id t, value_ref result, stage_part part)
+{
     emit::impl::planned_struct const* found = nullptr;
     for (auto const& s : _plan.structs)
-        if (s.type == _e.result)
+        if (s.type == t)
             found = &s;
     if (found == nullptr)
         return unsupported("a stage result that is no struct");
     auto element = u32(0);
-    while (element < _out.stage_elements.size() && _out.stage_elements[element].part != stage_part::output)
+    while (element < _out.stage_elements.size() && _out.stage_elements[element].part != part)
         ++element;
     auto const store_element = [&](value_ref value)
     {
@@ -356,6 +472,12 @@ void lowering::store_stage_result(value_ref result)
     {
         auto const& member = found->members[m];
         auto const whole = extracted(result, value_type(member.type), u32(m));
+        if (member.factor != check::tessellation_factor::none && _m.at(member.type).kind == check::type_kind::array)
+        {
+            for (auto i = u32(0); i < u32(_m.at(member.type).count); ++i)
+                store_element(extracted(whole, value_type(_m.at(member.type).element), i));
+            continue;
+        }
         if (member.pieces == 0)
         {
             store_element(whole);
@@ -422,6 +544,7 @@ void lowering::declare_stage_elements()
         if (local.kind != check::local_kind::parameter)
             continue;
         auto const& t = _m.at(local.type);
+        _parameter_elements[i] = u32(_out.stage_elements.size());
         if (auto const input = input_of_local(i); input >= 0)
             element_of_input(input);
         else if (t.kind == check::type_kind::array)

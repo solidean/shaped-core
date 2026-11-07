@@ -419,6 +419,8 @@ enum class built_in : u8;
 enum class stage_part : u8;
 enum class interpolation : u8;
 struct stage_element;
+enum class tessellation_domain : u8;
+struct primitive_stage;
 struct global;
 struct local;
 enum class type_ref : u32;

@@ -11,7 +11,7 @@
 
 using namespace cc::primitive_defines;
 
-// A vertex stage of one route against a pixel stage of the other, on a real pipeline.
+// A stage of one route against a stage of the other, on a real pipeline.
 // The packer's golden test says each side matches DXC's table; only a draw says the two sides link and agree in value.
 
 namespace
@@ -295,4 +295,162 @@ ASYNC_INVOCABLE_TEST("sg - what a pixel stage reaches reads alike through SGL's 
     CHECK(second[3] == 1.0f); // the texels' alpha: a stage that sampled nothing reads 0
     CHECK(second[0] == 1.0f); // 0.25 < 0.5
     CHECK(second[1] == 0.0f); // 0.75 > 0.5
+}
+
+namespace
+{
+/// One stage, its two routes.
+struct route_pair
+{
+    cc::optional<sg::compiled_shader> text;
+    cc::optional<sg::compiled_shader> native;
+};
+
+/// One shape of pipeline; a pair with neither route is a stage it does not have.
+struct primitive_pipeline
+{
+    cc::string_view name;
+    route_pair vertex;
+    route_pair control;
+    route_pair evaluation;
+    route_pair geometry;
+    route_pair pixel;
+    sg::primitive_topology topology = sg::primitive_topology::triangle_list;
+    int patch_points = 0;
+    int vertices = 3;
+    /// What a patch's winding has to survive: a stage that winds it the wrong way draws nothing.
+    sg::cull_mode cull = sg::cull_mode::none;
+};
+
+/// `sg`'s pipeline of the stages `mask` names native, a bit per stage in the order of `stages_of`.
+cc::shared_async<sg_test::offscreen_pixels> drawn_primitive(sg::context& ctx, primitive_pipeline const& p, u32 mask)
+{
+    auto const chosen
+        = [&](route_pair const& pair, u32 bit) { return (mask & (1u << bit)) != 0 ? pair.native : pair.text; };
+    auto desc = sg::raster_pipeline_description{
+        .layout = ctx.cached.acquire_pipeline_layout(sg::pipeline_layout_description{}),
+        .vertex_shader = chosen(p.vertex, 0).value(),
+        .fragment_shader = chosen(p.pixel, 1).value(),
+        .rasterization = {.cull = p.cull},
+    };
+    desc.topology = p.topology;
+    desc.patch_control_points = p.patch_points;
+    if (p.geometry.text.has_value())
+        desc.geometry_shader = chosen(p.geometry, 2);
+    if (p.control.text.has_value())
+    {
+        desc.tessellation_control_shader = chosen(p.control, 2);
+        desc.tessellation_evaluation_shader = chosen(p.evaluation, 3);
+    }
+    desc.color_targets.push_back({.format = sg::pixel_format::rgba32_float});
+    desc.color_targets.push_back({.format = sg::pixel_format::rgba32_float});
+    auto const pipeline = ctx.uncached.create_raster_pipeline(desc);
+    co_return co_await sg_test::draw_offscreen(
+        ctx,
+        {.width = k_size, .height = k_size, .colors = {sg::pixel_format::rgba32_float, sg::pixel_format::rgba32_float}},
+        [&](sg::rendering_scope& scope)
+        {
+            scope.bind_pipeline(*pipeline);
+            scope.draw({.vertex_range = {.offset = 0, .size = p.vertices}, .instance_range = {.offset = 0, .size = 1}});
+        });
+}
+
+/// Every pairing of the pipeline's routes against all of it through DXC.
+cc::shared_async<sg_test::offscreen_pixels> compared_pairings(sg::context& ctx, primitive_pipeline const& p)
+{
+    auto const has_route = [](route_pair const& pair) { return pair.text.has_value() && pair.native.has_value(); };
+    REQUIRE(has_route(p.vertex));
+    REQUIRE(has_route(p.pixel));
+    for (auto const& stage : {p.control, p.evaluation, p.geometry})
+    {
+        if (!stage.text.has_value())
+            continue;
+        REQUIRE(has_route(stage));
+        CHECK(stage.text.value().compiler.name != "sgl");
+        CHECK(stage.native.value().compiler.name == "sgl");
+    }
+    auto const stages = p.control.text.has_value() ? 4 : p.geometry.text.has_value() ? 3 : 2;
+    auto const reference = co_await drawn_primitive(ctx, p, 0);
+    auto covered = 0;
+    for (auto y = 0; y < k_size; ++y)
+        for (auto x = 0; x < k_size; ++x)
+            covered += reference[1].rgba_float(x, y)[3] == 1.0f ? 1 : 0;
+    // two blank images would agree, so the reference has to have drawn
+    CHECK(covered > 0).context(p.name);
+    for (auto mask = u32(1); mask < (1u << stages); ++mask)
+        check_same(co_await drawn_primitive(ctx, p, mask), reference, cc::format("{}: native stages {}", p.name, mask));
+    co_return reference;
+}
+} // namespace
+
+ASYNC_INVOCABLE_TEST("sg - geometry and tessellation stages of SGL's binary link against DXC's in every pairing and "
+                     "draw alike",
+                     (sg::context_handle const& ctx))
+{
+    REQUIRE(ctx != nullptr);
+    (void)sg_test::shader_fixtures();
+    if (ctx->prefers_native_dxil() || ctx->prefers_native_spirv())
+        SKIP("this context takes SGL's binary for every package, so there is no DXC route to mix with");
+    auto const takes_dxil = ctx->accepts_shader_format(sg::shader_format::dxil);
+    if (!takes_dxil && !ctx->accepts_shader_format(sg::shader_format::spirv))
+        SKIP("this context takes neither DXIL nor SPIR-V");
+    namespace text = sg::test::mixed_text::primitive_stages;
+    namespace dxil = sg::test::mixed_dxil::primitive_stages;
+    namespace spirv = sg::test::mixed_spirv::primitive_stages;
+
+    // the two routes of one entry point, by its name in all three packages
+#define SG_ROUTES(entry)                                                                                    \
+    route_pair                                                                                              \
+    {                                                                                                       \
+        .text = co_await compiled(*ctx, text::entry),                                                       \
+        .native = takes_dxil ? co_await compiled(*ctx, dxil::entry) : co_await compiled(*ctx, spirv::entry) \
+    }
+    auto const pixel = SG_ROUTES(primitive_ps);
+    if (!pixel.text.has_value())
+        SKIP("this build has no DXC");
+
+    if (ctx->supports(sg::feature::geometry_shader))
+    {
+        auto const corners = SG_ROUTES(corner_vs);
+        (void)co_await compared_pairings(
+            *ctx, {.name = "turned", .vertex = corners, .geometry = SG_ROUTES(turned_gs), .pixel = pixel});
+        (void)co_await compared_pairings(
+            *ctx, {.name = "outline", .vertex = corners, .geometry = SG_ROUTES(outline_gs), .pixel = pixel});
+        (void)co_await compared_pairings(*ctx, {.name = "grown",
+                                                .vertex = corners,
+                                                .geometry = SG_ROUTES(grown_gs),
+                                                .pixel = pixel,
+                                                .topology = sg::primitive_topology::point_list,
+                                                .vertices = 1});
+    }
+    if (ctx->supports(sg::feature::tessellation_shader))
+    {
+        auto const points = SG_ROUTES(point_vs);
+        (void)co_await compared_pairings(*ctx, {.name = "triangle patch",
+                                                .vertex = points,
+                                                .control = SG_ROUTES(triangle_tc),
+                                                .evaluation = SG_ROUTES(triangle_te),
+                                                .pixel = pixel,
+                                                .topology = sg::primitive_topology::patch_list,
+                                                .patch_points = 3,
+                                                .cull = sg::cull_mode::back});
+        (void)co_await compared_pairings(*ctx, {.name = "quad patch",
+                                                .vertex = points,
+                                                .control = SG_ROUTES(quad_tc),
+                                                .evaluation = SG_ROUTES(quad_te),
+                                                .pixel = pixel,
+                                                .topology = sg::primitive_topology::patch_list,
+                                                .patch_points = 4,
+                                                .vertices = 4,
+                                                .cull = sg::cull_mode::front});
+        (void)co_await compared_pairings(*ctx, {.name = "line patch",
+                                                .vertex = points,
+                                                .control = SG_ROUTES(line_tc),
+                                                .evaluation = SG_ROUTES(line_te),
+                                                .pixel = pixel,
+                                                .topology = sg::primitive_topology::patch_list,
+                                                .patch_points = 2,
+                                                .vertices = 2});
+    }
+#undef SG_ROUTES
 }

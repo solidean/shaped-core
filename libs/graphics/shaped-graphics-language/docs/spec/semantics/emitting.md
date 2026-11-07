@@ -208,7 +208,7 @@ const light_kind_sun: i32 = 2;
   * the SGL body is that patch-constant function, `<name>_patch`, taking the `InputPatch`;
   * an evaluation stage is `[domain(…)]` over the function, taking the `const OutputPatch`, the patch constants, and `SV_DomainLocation`;
   * in patch constants, `@edge_factors` is `SV_TessFactor` and `@inside_factors` `SV_InsideTessFactor`;
-  * the other members of patch constants take the locations after the control point's, so vulkan's two never collide.
+  * the other members of patch constants take the locations after those the control point's members and pieces take, so vulkan's two never collide.
 * **EMIT-134** A control stage's `.counter_clockwise` is HLSL's `triangle_cw` and `.clockwise` its `triangle_ccw`.
   HLSL names the winding in its domain's own orientation, which mirrors the patch the domain location weighs (CHK-304).
 
@@ -462,6 +462,18 @@ fn main_ps(p: pixel_input) -> target_ {
   On DXIL that element's handle is made where the chain stands, `createHandleFromBinding` over the array's whole range, since no handle exists ahead of its index.
   `nonuniform i` marks the chain and what reads through it.
   SPIR-V decorates the index, the chain, the load and the sampled image `NonUniform`, and DXIL sets `createHandleFromBinding`'s last argument.
+* **EMIT-240** A geometry or tessellation entry point of a native route keeps the shape of the stage it stands for, so it links against the text route's in either direction.
+  A parameter's array stays where the stage holds it: `tri[i]` reads that vertex's elements at `i`, whatever `i` is, and only the array read whole loads every vertex.
+  `emit` stores the output elements and is `OpEmitVertex` or `dx.op.emitStream`; `end_strip` is `OpEndPrimitive` or `dx.op.cutStream`.
+  A control stage's body is one function, EMIT-123's patch-constant function, and each writer generates the rest from the elements.
+  On DXIL the entry point is the function that hands control point `outputControlPointID` on, and the patch-constant function is named in the entry's hull state.
+  On SPIR-V the entry point hands point `InvocationId` on, then `OpControlBarrier`, then calls the body where that id is 0.
+  A patch's elements are `Patch` on SPIR-V, `storePatchConstant` and `loadPatchConstant` on DXIL, read in an evaluation stage.
+  `@edge_factors` and `@inside_factors` are one element per factor.
+  SPIR-V holds them in `TessLevelOuter` of four and `TessLevelInner` of two, always that long, and DXIL states each array as one element of as many rows.
+  `@domain_location` is `TessCoord`, three lanes on any domain, or `dx.op.domainLocation`, and `@primitive_id` outside a pixel stage is `dx.op.primitiveID`.
+  `ISG1`, `OSG1` and `PSG1` list elements by register and then by the offset of the name, so a factor that declares first leads a link standing before it in its row.
+  EMIT-237's table reaches across patch constants too: every input to every patch constant in a control stage, and every patch constant to every output in an evaluation stage.
 
 ## Lines
 

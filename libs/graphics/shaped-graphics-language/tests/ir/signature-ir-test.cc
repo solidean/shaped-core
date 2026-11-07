@@ -116,15 +116,19 @@ TEST("sgl signature - tessellation factors keep their places, and links fill rou
     s.add(stage_part::patch, 1, interpolation::none, built_in::tess_inside);
     auto const packed = pack_signature(s.p);
     REQUIRE(packed.size() == 5);
-    // the factors stand first, whatever the struct declared
+    // the factors take their places ahead of the link, and the list stands as the struct declared it
     CHECK(packed[0].row == 0);
-    CHECK(packed[0].first_column == 3);
-    CHECK(packed[2].row == 2);
-    CHECK(packed[3].row == 3);
-    CHECK(packed[3].first_column == 0);
-    CHECK(packed[4].row == 0);
+    CHECK(packed[0].first_column == 0);
+    CHECK(packed[0].lanes == 3);
+    CHECK(packed[1].row == 0);
+    CHECK(packed[1].first_column == 3);
+    CHECK(!packed[1].continues);
+    CHECK(packed[2].continues);
+    CHECK(packed[3].row == 2);
+    CHECK(packed[3].continues);
+    CHECK(packed[4].row == 3);
     CHECK(packed[4].first_column == 0);
-    CHECK(packed[4].lanes == 3);
+    CHECK(!packed[4].continues);
 }
 
 TEST("sgl signature - what DXIL states with no row, or as an operation, takes no place")

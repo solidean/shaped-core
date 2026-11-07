@@ -37,6 +37,9 @@ struct sgl::ir::dxil::signature_element
     u32 first_column = 0;
     u32 lanes = 0;
     interpolation mode = {};
+    /// A later factor of one tessellation factor array, which `ISG1` and its like state row by row and `dx.sig` and
+    /// `PSV0` state as one element of as many rows.
+    bool continues = false;
 
     [[nodiscard]] u32 mask() const { return ((1u << lanes) - 1u) << first_column; }
     [[nodiscard]] bool operator==(signature_element const& rhs) const = default;

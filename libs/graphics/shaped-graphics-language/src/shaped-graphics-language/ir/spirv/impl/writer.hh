@@ -66,6 +66,8 @@ private:
     void write_constants();
     [[nodiscard]] u32 space_of(stage_element const& e) const;
     void write_stage_elements();
+    [[nodiscard]] u32 pointer_to(u32 space, u32 pointee);
+    void write_primitive_modes();
     void write_interpolation(u32 id, interpolation mode);
     void write_globals();
     void write_entry();
@@ -77,14 +79,18 @@ private:
     void instruction_of(u32 index);
     /// Tells the target that `i`, of id `id`, came through an index that differs between invocations.
     void nonuniform(instruction const& i, u32 id);
-    /// What a load or a store of an element goes through.
-    [[nodiscard]] u32 element_pointer(u32 element);
+    /// What a load or a store of an element goes through, `index` naming a control point or a vertex where it has one.
+    [[nodiscard]] u32 element_pointer(u32 element, u32 index = 0);
+    /// `TessCoord`, which is three lanes where a parameter may take two.
+    void tess_coord(instruction const& i, u32 id);
     /// `@position` in a pixel stage, whose `w` HLSL reads as the reciprocal of what `FragCoord` holds.
     void frag_coord(instruction const& i, u32 id);
 
     // ---- writer.cc
     void terminator(ir::block const& b, instruction const& i);
     void write_function();
+    /// A control stage's entry point: hands each control point on, then runs the body once per patch.
+    void write_control_entry();
     [[nodiscard]] cc::vector<u32> assembled();
 
     struct literal
@@ -92,21 +98,33 @@ private:
         u32 value = 0;
         u32 id = 0;
     };
+    struct element_pointer_type
+    {
+        u32 space = 0;
+        u32 pointee = 0;
+        u32 id = 0;
+    };
 
     program const& _p;
     u32 _types = 0;
     u32 _constants = 0;
     u32 _elements = 0;
-    /// Parallel to `program::stage_elements`, in the ids past `_bound`.
-    cc::vector<u32> _element_pointers;
+    /// Parallel to `program::stage_elements`: the variable each reads, one per element but a shared tessellation factor.
+    cc::vector<u32> _element_variables;
     /// Parallel to it: the pointer to one lane of an element that stands in an array, or 0.
     cc::vector<u32> _element_lanes;
+    /// Every pointer an element took, since SPIR-V declares a pointer type once.
+    cc::vector<element_pointer_type> _pointer_types;
+    /// A control stage's `InvocationId`, which no element holds.
+    u32 _invocation = 0;
     u32 _globals = 0;
     u32 _locals = 0;
     u32 _instructions = 0;
     u32 _blocks = 0;
     u32 _glsl = 0;
+    /// The entry point, and the function the program is written as, which only a control stage tells apart.
     u32 _function = 0;
+    u32 _body = 0;
     u32 _function_type = 0;
     u32 _bound = 0;
     type_ref _uint = type_ref::none;

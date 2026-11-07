@@ -12,6 +12,8 @@ cc::vector<u32> writer::run()
     write_stage_elements();
     write_globals();
     write_function();
+    if (_p.stage == check::stage::tessellation_control)
+        write_control_entry();
     write_entry();
     return assembled();
 }
@@ -34,6 +36,7 @@ void writer::number_everything()
     _blocks = take(_p.blocks.size());
     _glsl = take(1);
     _function = take(1);
+    _body = _p.stage == check::stage::tessellation_control ? take(1) : _function;
     _function_type = take(1);
     _bound = next;
 }
@@ -128,7 +131,7 @@ void writer::terminator(ir::block const& b, instruction const& i)
 
 void writer::write_function()
 {
-    emit(_code, spv::Function, {id_of(_void), _function, 0u, _function_type});
+    emit(_code, spv::Function, {id_of(_void), _body, 0u, _function_type});
     auto const order = blocks_in_order(_p);
     for (auto k = isize(0); k < order.size(); ++k)
     {
@@ -144,6 +147,55 @@ void writer::write_function()
             instruction_of(i);
         terminator(b, _p.instructions[b.first + b.count - 1]);
     }
+    emit(_code, spv::FunctionEnd, {});
+}
+
+void writer::write_control_entry()
+{
+    constexpr u32 k_scope_workgroup = 2;
+    constexpr u32 k_scope_invocation = 4;
+    auto bool_type = type_ref::none;
+    for (auto i = isize(0); i < _p.types.size(); ++i)
+        if (_p.types[i].kind == type_kind::bool_)
+            bool_type = type_ref(i);
+
+    name(_body, _p.name_at(_p.primitive.body_name_first, _p.primitive.body_name_size));
+    auto const point = _bound++;
+    auto const is_first = _bound++;
+    auto const start = _bound++;
+    auto const once = _bound++;
+    auto const merge = _bound++;
+    auto const ignored = _bound++;
+    emit(_code, spv::Function, {id_of(_void), _function, 0u, _function_type});
+    emit(_code, spv::Label, {start});
+    emit(_code, spv::Load, {id_of(_uint), point, _invocation});
+    // the k-th arrayed input is the k-th output: both are the one control point struct, member by member
+    auto output = isize(0);
+    for (auto i = isize(0); i < _p.stage_elements.size(); ++i)
+    {
+        auto const& e = _p.stage_elements[i];
+        if (e.part != stage_part::input || e.array_size == 0)
+            continue;
+        while (_p.stage_elements[output].part != stage_part::output)
+            ++output;
+        auto const from = _bound++;
+        auto const value = _bound++;
+        auto const to = _bound++;
+        emit(_code, spv::AccessChain, {_element_lanes[i], from, _element_variables[i], point});
+        emit(_code, spv::Load, {id_of(e.type), value, from});
+        emit(_code, spv::AccessChain, {_element_lanes[output], to, _element_variables[output], point});
+        emit(_code, spv::Store, {to, value});
+        ++output;
+    }
+    emit(_code, spv::ControlBarrier, {literal_id(k_scope_workgroup), literal_id(k_scope_invocation), literal_id(0)});
+    emit(_code, spv::IEqual, {id_of(bool_type), is_first, point, literal_id(0)});
+    emit(_code, spv::SelectionMerge, {merge, 0u});
+    emit(_code, spv::BranchConditional, {is_first, once, merge});
+    emit(_code, spv::Label, {once});
+    emit(_code, spv::FunctionCall, {id_of(_void), ignored, _body});
+    emit(_code, spv::Branch, {merge});
+    emit(_code, spv::Label, {merge});
+    emit(_code, spv::Return, {});
     emit(_code, spv::FunctionEnd, {});
 }
 
