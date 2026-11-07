@@ -312,6 +312,19 @@ struct route_pair
     cc::optional<sg::compiled_shader> native;
 };
 
+template <class Text, class Dxil, class Spirv>
+cc::shared_async<route_pair> route_pair_of(sg::context& ctx,
+                                           bool takes_dxil,
+                                           Text const& text_asset,
+                                           Dxil const& dxil_asset,
+                                           Spirv const& spirv_asset)
+{
+    auto pair = route_pair();
+    pair.text = co_await compiled(ctx, text_asset);
+    pair.native = co_await compiled_native(ctx, takes_dxil, dxil_asset, spirv_asset);
+    co_return pair;
+}
+
 /// One shape of pipeline; a pair with neither route is a stage it does not have.
 struct primitive_pipeline
 {
@@ -405,45 +418,49 @@ ASYNC_INVOCABLE_TEST("sg - geometry and tessellation stages of SGL's binary link
     namespace spirv = sg::test::mixed_spirv::primitive_stages;
 
     // the two routes of one entry point, by its name in all three packages
-#define SG_ROUTES(entry)                                                                                    \
-    route_pair                                                                                              \
-    {                                                                                                       \
-        .text = co_await compiled(*ctx, text::entry),                                                       \
-        .native = takes_dxil ? co_await compiled(*ctx, dxil::entry) : co_await compiled(*ctx, spirv::entry) \
-    }
-    auto const pixel = SG_ROUTES(primitive_ps);
+    // Workaround: a co_await inside an aggregate's initializer crashes MSVC 14.44 and 14.51 (C1001), so each pair has a name.
+#define SG_ROUTES(entry) route_pair_of(*ctx, takes_dxil, text::entry, dxil::entry, spirv::entry)
+    auto const pixel = co_await SG_ROUTES(primitive_ps);
     if (!pixel.text.has_value())
         SKIP("this build has no DXC");
 
     if (ctx->supports(sg::feature::geometry_shader))
     {
-        auto const corners = SG_ROUTES(corner_vs);
-        (void)co_await compared_pairings(
-            *ctx, {.name = "turned", .vertex = corners, .geometry = SG_ROUTES(turned_gs), .pixel = pixel});
-        (void)co_await compared_pairings(
-            *ctx, {.name = "outline", .vertex = corners, .geometry = SG_ROUTES(outline_gs), .pixel = pixel});
+        auto const corners = co_await SG_ROUTES(corner_vs);
+        auto const turned = co_await SG_ROUTES(turned_gs);
+        auto const outline = co_await SG_ROUTES(outline_gs);
+        auto const grown = co_await SG_ROUTES(grown_gs);
+        (void)co_await compared_pairings(*ctx, {.name = "turned", .vertex = corners, .geometry = turned, .pixel = pixel});
+        (void)co_await compared_pairings(*ctx,
+                                         {.name = "outline", .vertex = corners, .geometry = outline, .pixel = pixel});
         (void)co_await compared_pairings(*ctx, {.name = "grown",
                                                 .vertex = corners,
-                                                .geometry = SG_ROUTES(grown_gs),
+                                                .geometry = grown,
                                                 .pixel = pixel,
                                                 .topology = sg::primitive_topology::point_list,
                                                 .vertices = 1});
     }
     if (ctx->supports(sg::feature::tessellation_shader))
     {
-        auto const points = SG_ROUTES(point_vs);
+        auto const points = co_await SG_ROUTES(point_vs);
+        auto const triangle_tc = co_await SG_ROUTES(triangle_tc);
+        auto const triangle_te = co_await SG_ROUTES(triangle_te);
+        auto const quad_tc = co_await SG_ROUTES(quad_tc);
+        auto const quad_te = co_await SG_ROUTES(quad_te);
+        auto const line_tc = co_await SG_ROUTES(line_tc);
+        auto const line_te = co_await SG_ROUTES(line_te);
         (void)co_await compared_pairings(*ctx, {.name = "triangle patch",
                                                 .vertex = points,
-                                                .control = SG_ROUTES(triangle_tc),
-                                                .evaluation = SG_ROUTES(triangle_te),
+                                                .control = triangle_tc,
+                                                .evaluation = triangle_te,
                                                 .pixel = pixel,
                                                 .topology = sg::primitive_topology::patch_list,
                                                 .patch_points = 3,
                                                 .cull = sg::cull_mode::back});
         (void)co_await compared_pairings(*ctx, {.name = "quad patch",
                                                 .vertex = points,
-                                                .control = SG_ROUTES(quad_tc),
-                                                .evaluation = SG_ROUTES(quad_te),
+                                                .control = quad_tc,
+                                                .evaluation = quad_te,
                                                 .pixel = pixel,
                                                 .topology = sg::primitive_topology::patch_list,
                                                 .patch_points = 4,
@@ -451,8 +468,8 @@ ASYNC_INVOCABLE_TEST("sg - geometry and tessellation stages of SGL's binary link
                                                 .cull = sg::cull_mode::front});
         (void)co_await compared_pairings(*ctx, {.name = "line patch",
                                                 .vertex = points,
-                                                .control = SG_ROUTES(line_tc),
-                                                .evaluation = SG_ROUTES(line_te),
+                                                .control = line_tc,
+                                                .evaluation = line_te,
                                                 .pixel = pixel,
                                                 .topology = sg::primitive_topology::patch_list,
                                                 .patch_points = 2,
