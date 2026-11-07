@@ -69,8 +69,8 @@ private:
     void read_stage_input(isize input, u32 element);
     /// Each output element of the value a `return` gives.
     void store_stage_result(value_ref result);
-    /// The elements of `part` written with `value` of `t`, member by member.
-    void store_struct(check::type_id t, value_ref value, stage_part part);
+    /// The elements of `part` written with `value` of `t`, member by member, at `index` where they stand per vertex.
+    void store_struct(check::type_id t, value_ref value, stage_part part, value_ref index = value_ref::none);
     /// `element` as it stands, or at `index` where it stands once per control point or vertex.
     [[nodiscard]] value_ref read_element(u32 element, value_ref index = value_ref::none);
     [[nodiscard]] value_ref read_struct(check::type_id t, u32& element, value_ref index = value_ref::none);
@@ -82,8 +82,14 @@ private:
     [[nodiscard]] value_ref read_stage_array(check::type_id t, u32 first);
     /// `s.emit(v)` or `s.end_strip()` on a geometry stage's stream.
     void stream_call(check::flat_call const& c, bool is_emit);
+    /// One of a mesh stage's `mesh_output` methods, each a write of what the workgroup hands the rasterizer.
+    void mesh_call(check::flat_call const& c, cc::string_view method);
+    /// `dispatch_mesh(x, y, z, p)`, which stores `p` and ends the task stage.
+    void dispatch_mesh(check::flat_call const& c);
+    /// The one global a task stage's payload stands in, of the struct `t`.
+    [[nodiscard]] value_ref payload_global(check::type_id t);
     /// EMIT-196: the elements from `element` on written with the 64-bit `value` of `t`, its words low first.
-    void store_words(check::type_id t, value_ref value, u32& element);
+    void store_words(check::type_id t, value_ref value, u32& element, value_ref index = value_ref::none);
     /// Whether the parameter at `position` is a pixel stage's second struct, what a mesh stage wrote per primitive.
     [[nodiscard]] bool is_primitive_parameter(isize position) const;
     void hold_parameter(check::local_id id, value_ref value);
@@ -187,6 +193,8 @@ private:
     /// What a `break` and a `continue` reach, innermost last.
     cc::vector<block_ref> _breaks;
     cc::vector<block_ref> _continues;
+
+    value_ref _payload = value_ref::none;
 
     /// Parallel to `_m.types`.
     cc::vector<type_ref> _value_types;

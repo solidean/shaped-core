@@ -122,6 +122,18 @@ void writer::terminator(ir::block const& b, instruction const& i)
         }
         return;
     }
+    case op::dispatch_mesh:
+    {
+        // one payload of the workgroup, so each invocation's store stands before the mesh stage reads it
+        constexpr u32 k_scope_workgroup = 2;
+        constexpr u32 k_semantics_workgroup_acquire_release = 0x108;
+        if (_p.workgroup[0] * _p.workgroup[1] * _p.workgroup[2] > 1)
+            emit(_code, spv::ControlBarrier,
+                 {literal_id(k_scope_workgroup), literal_id(k_scope_workgroup),
+                  literal_id(k_semantics_workgroup_acquire_release)});
+        return emit(_code, spv::EmitMeshTasksEXT,
+                    {id_of_raw(operands[0]), id_of_raw(operands[1]), id_of_raw(operands[2]), id_of_raw(operands[3])});
+    }
     case op::return_:
         return emit(_code, spv::Return, {});
     default:

@@ -56,6 +56,8 @@ private:
 constexpr u32 k_psv_geometry = 2;
 constexpr u32 k_psv_hull = 3;
 constexpr u32 k_psv_domain = 4;
+constexpr u32 k_psv_mesh = 13;
+constexpr u32 k_psv_task = 14;
 
 /// SFI0: the features a pipeline must be able to give it.
 [[nodiscard]] cc::vector<byte> feature_part(module_summary const& s)
@@ -225,6 +227,16 @@ void pad_to_word(byte_writer& out)
         out.zeros(3);
         out.u32_le(s.domain);
     }
+    else if (s.psv_stage == k_psv_mesh)
+    {
+        out.u32_le(s.workgroup_bytes);
+        out.u32_le(0); // what of it depends on the view
+        out.u32_le(s.payload_bytes);
+        out.u16_le(u16(s.max_vertices));
+        out.u16_le(u16(s.max_primitives));
+    }
+    else if (s.psv_stage == k_psv_task)
+        out.u32_le(s.payload_bytes);
     else
     {
         out.u8_le(s.writes_position || s.writes_depth ? 1 : 0);
@@ -236,8 +248,8 @@ void pad_to_word(byte_writer& out)
     // PSVRuntimeInfo1
     out.u8_le(u8(s.psv_stage));
     out.u8_le(s.uses_view ? 1 : 0);
-    // a geometry stage's most vertices, or the rows of patch constants
-    out.u16_le(u16(s.psv_stage == k_psv_geometry ? s.max_vertices : s.patch_rows));
+    // a geometry stage's most vertices, or the rows of patch constants, beside a mesh stage's topology
+    out.u16_le(u16(s.psv_stage == k_psv_geometry ? s.max_vertices : s.patch_rows | (s.mesh_topology << 8)));
     out.u8_le(u8(inputs));
     out.u8_le(u8(outputs));
     out.u8_le(u8(patches));
@@ -337,8 +349,9 @@ cc::vector<byte> sgl::ir::dxil::impl::write_container(writer const& w)
     parts.push_back({.name = four_cc('S', 'F', 'I', '0'), .bytes = feature_part(s)});
     parts.push_back({.name = four_cc('I', 'S', 'G', '1'), .bytes = signature_part(s, signature_table::input)});
     parts.push_back({.name = four_cc('O', 'S', 'G', '1'), .bytes = signature_part(s, signature_table::output)});
-    // a stage with patch constants has the third, though it reads none
-    if (s.psv_stage == k_psv_hull || s.psv_stage == k_psv_domain)
+    // a stage with patch constants has the third, though it reads none; a mesh stage only where it writes per primitive
+    auto const writes_primitives = s.psv_stage == k_psv_mesh && s.patch_rows > 0;
+    if (s.psv_stage == k_psv_hull || s.psv_stage == k_psv_domain || writes_primitives)
         parts.push_back({.name = four_cc('P', 'S', 'G', '1'), .bytes = signature_part(s, signature_table::patch)});
     parts.push_back({.name = four_cc('P', 'S', 'V', '0'), .bytes = pipeline_state_part(s)});
     parts.push_back({.name = four_cc('D', 'X', 'I', 'L'), .bytes = program_part(s, bitcode)});

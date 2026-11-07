@@ -802,6 +802,17 @@ value_ref lowering::call(flat_expr const& x, flat_call const& c)
         stream_call(c, record.name == "emit");
         return value_ref::none;
     }
+    if (_e.entry_stage == stage::mesh && !_e.at(c.arguments).empty()
+        && _m.at(_e.at(_e.at(c.arguments)[0]).type).kind == check::type_kind::stream)
+    {
+        mesh_call(c, record.name);
+        return value_ref::none;
+    }
+    if (_e.entry_stage == stage::task && record.name == "dispatch_mesh")
+    {
+        dispatch_mesh(c);
+        return value_ref::none;
+    }
     auto const result = x.type == checked_module::void_type ? _void : value_type(x.type);
     if (record.is_atomic)
         return atomic(c, x);

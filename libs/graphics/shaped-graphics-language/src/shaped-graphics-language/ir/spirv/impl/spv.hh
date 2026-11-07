@@ -182,6 +182,8 @@ enum op_code : u32
     GroupNonUniformQuadBroadcast = 365,
     GroupNonUniformQuadSwap = 366,
     CopyLogical = 400,
+    EmitMeshTasksEXT = 5294,
+    SetMeshOutputsEXT = 5295,
     DemoteToHelperInvocation = 5380,
     AtomicFAddEXT = 6035,
 };
@@ -259,6 +261,7 @@ enum storage_class : u32
     Uniform = 2,
     Output = 3,
     Workgroup = 4,
+    TaskPayloadWorkgroupEXT = 5402,
     FunctionStorage = 7,
     PushConstant = 9,
     StorageBuffer = 12,

@@ -40,6 +40,8 @@ enum class rule_kind : u8
     barrier,
     discard,
     stream,
+    set_mesh_counts,
+    write_primitive,
     derivative,
     sample_lod,
     sample_bias,
@@ -161,6 +163,8 @@ constexpr op_rule k_rules[] = {
     {op::discard, rule_kind::discard, spv::DemoteToHelperInvocation},
     {op::emit_vertex, rule_kind::stream, spv::EmitVertex},
     {op::end_strip, rule_kind::stream, spv::EndPrimitive},
+    {op::set_mesh_counts, rule_kind::set_mesh_counts, spv::SetMeshOutputsEXT},
+    {op::write_primitive, rule_kind::write_primitive, spv::Store},
     {op::sample_lod, rule_kind::sample_lod, spv::ImageSampleExplicitLod},
     {op::sample_implicit, rule_kind::plain, spv::ImageSampleImplicitLod},
     {op::sample_bias, rule_kind::sample_bias, spv::ImageSampleImplicitLod},
@@ -402,6 +406,14 @@ void writer::instruction_of(u32 index)
     }
     case rule_kind::stream:
         return emit(_code, rule.opcode, {});
+    case rule_kind::set_mesh_counts:
+        return emit(_code, rule.opcode, {id_of_raw(operands[0]), id_of_raw(operands[1])});
+    case rule_kind::write_primitive:
+    {
+        auto const pointer = _bound++;
+        emit(_code, spv::AccessChain, {_primitive_lane, pointer, _primitive_indices, id_of_raw(operands[0])});
+        return emit(_code, rule.opcode, {pointer, id_of_raw(operands[1])});
+    }
     case rule_kind::discard:
         require(spv::CapDemoteToHelperInvocation);
         return emit(_code, rule.opcode, {});
