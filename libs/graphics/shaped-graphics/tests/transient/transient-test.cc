@@ -201,7 +201,8 @@ ASYNC_INVOCABLE_TEST("sg - transient budget change applies at the next epoch", (
     CC_DEFER
     {
         ctx->transient.set_budget(sg::context_transient_scope::default_budget_bytes);
-        ctx->advance_epoch();
+        if (!ctx->is_device_lost()) // a lost device throws, and this runs in the unwind of that very throw
+            ctx->advance_epoch();
     };
     for (int e = 1; e <= 4; ++e)
     {
@@ -231,7 +232,8 @@ ASYNC_INVOCABLE_TEST("sg - transient budget setter is repeatable before an advan
     CC_DEFER
     {
         ctx->transient.set_budget(sg::context_transient_scope::default_budget_bytes);
-        ctx->advance_epoch();
+        if (!ctx->is_device_lost()) // a lost device throws, and this runs in the unwind of that very throw
+            ctx->advance_epoch();
     };
     ctx->transient.set_budget(isize(256) * 1024);
     ctx->transient.set_budget(isize(768) * 1024); // last write wins at the next advance

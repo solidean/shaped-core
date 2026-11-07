@@ -45,6 +45,7 @@ So each entry carries the answer as something runnable.
 | [intel-d3d12-cached-pso-draws-nothing](intel-d3d12-cached-pso-draws-nothing/readme.md) | Intel D3D12 driver 32.0.101.9150, Arc B580 | not yet filed, its tests skipped in shaped-viewer |
 | [intel-d3d12-view-instancing-draws-nothing](intel-d3d12-view-instancing-draws-nothing/readme.md) | Intel D3D12 driver 32.0.101.9150, Arc B580 | not yet filed, worked around in the shaders that draw by view |
 | [intel-d3d12-strict-reciprocal-product-folds-to-one](intel-d3d12-strict-reciprocal-product-folds-to-one/readme.md) | Intel D3D12 driver 32.0.101.9150, Arc B580 | not yet filed, its one check skipped in shaped-graphics |
+| [intel-d3d12-hit-object-pipeline-removes-device](intel-d3d12-hit-object-pipeline-removes-device/readme.md) | Intel D3D12 driver 32.0.101.9150, Arc B580, Agility SDK 1.620.1 | not yet filed, its one test skipped in shaped-graphics |
 | [vulkan-syncval-wait-before-signal-false-race](vulkan-syncval-wait-before-signal-false-race/readme.md) | Khronos validation layer, SDK 1.4.304–1.4.341 | fixed upstream in 1.4.350, flagged by `dev.py doctor` |
 | [webgpu-timestamp-write-index-sentinel](webgpu-timestamp-write-index-sentinel/readme.md) | emdawnwebgpu + Dawn, against wgpu | not yet filed, worked around in shaped-graphics |
 | [deno-code-cache-stale-same-length-source](deno-code-cache-stale-same-length-source/readme.md) | Deno 2.9.6 | gone in 2.9.7, worked around in dev.py below it |

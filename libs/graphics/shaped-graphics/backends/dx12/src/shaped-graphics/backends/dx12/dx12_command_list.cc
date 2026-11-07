@@ -944,11 +944,6 @@ sg::submission_token dx12_context::submit_dx12_command_list(std::unique_ptr<dx12
             return t;
         });
 
-    // The Signal above may have observed device removal, marked rather than thrown inside the lock.
-    // Surface it now that the lock is released; the context is dead, so the post-submit bookkeeping is moot.
-    if (is_device_lost())
-        throw sg::device_lost_exception(device_loss_reason());
-
     // Stamp every resource this list touched with the token, so a later async upload to it defers its copy behind this list — the reverse per-resource cross-queue sync.
     // Reuses the access tracker's touched sets.
     // Done after submit returns the token: the caller then issues the async upload, which reads this stamp, so the ordering holds.
@@ -981,6 +976,12 @@ sg::submission_token dx12_context::submit_dx12_command_list(std::unique_ptr<dx12
     _command_list_slots.release(cmd->slot());
     _open_command_lists.fetch_sub(1, std::memory_order_relaxed);
     cmd->_consumed = true; // its dtor must not auto-drop it
+
+    // The Signal above may have observed device removal, marked rather than thrown inside the lock.
+    // Surfaced only after the bookkeeping: this list was executed, and throwing over it would let its destructor
+    // auto-drop it, an assert inside an unwind, which terminates instead of reporting the loss.
+    if (is_device_lost())
+        throw sg::device_lost_exception(device_loss_reason());
     return token;
 }
 
@@ -1023,14 +1024,17 @@ void dx12_context::reclaim_unsubmitted_command_list(dx12_command_list& cmd)
     // Never submitted, so the GPU never touched this allocator.
     // Close the list so it is poolable, then return both to the pool: the list for reuse, the allocator straight to the free pool.
     // It was never executed, so no epoch gates it; reset happens at reuse.
+    // A removed device fails the Close, and this runs from a destructor too, where an assert would terminate.
     HRESULT const closed = cmd._list->Close();
-    CC_ASSERT(SUCCEEDED(closed), "ID3D12GraphicsCommandList::Close failed");
+    if (FAILED(closed) && !note_device_removed_if_lost(closed, "command list Close"))
+        CC_ASSERT(false, "ID3D12GraphicsCommandList::Close failed");
     _cmd_pool.return_command_list(cmd._queue, cc::move(cmd._list));
     _cmd_pool.return_free_allocator({cc::move(cmd._allocator), cmd._queue});
     if (cmd._pre_list)
     {
         HRESULT const pre_closed = cmd._pre_list->Close();
-        CC_ASSERT(SUCCEEDED(pre_closed), "ID3D12GraphicsCommandList::Close failed (entry barriers)");
+        if (FAILED(pre_closed) && !note_device_removed_if_lost(pre_closed, "command list Close (entry barriers)"))
+            CC_ASSERT(false, "ID3D12GraphicsCommandList::Close failed (entry barriers)");
         _cmd_pool.return_command_list(cmd._queue, cc::move(cmd._pre_list));
         _cmd_pool.return_free_allocator({cc::move(cmd._pre_allocator), cmd._queue});
     }

@@ -38,12 +38,46 @@ A download must not go on, since its staging window holds none of the job's byte
 Forcing `VK_ERROR_DEVICE_LOST` on the fifth submit of each system shows the loss reaching tests as `sg::device_lost_exception`, named `vkQueueSubmit (async upload)` or `(async download)`.
 Nothing keeps that under test: no seam can fail a submit, so the check was a temporary mutation.
 
-## Left open
+## Measured on 2026-11-07, afternoon
 
-- **The process still aborts after a loss.** Under that forced loss, the suite failed its tests normally and then exited 0xC0000409, right after `vulkan-entry.cc`'s `is_device_lost` check.
-  The real crash `063051` ended the same way with no assert at all, so this path may be the commoner one.
-  The crash report of the forced runs was empty, so what aborts is unknown; context teardown is the suspect, and `shutdown_no_throw` already catches a thrown loss.
-- **A timeline value signalled twice.** One real crash logged VUID-VkSubmitInfo-pSignalSemaphores-03242, signal value 807 on a timeline already at 807.
-  It was on `pSignalSemaphores[1]`, which is a completion value.
-  Whether it came before the loss or after is not known, so it may be a cause or a symptom.
-  The same VUID against `UINT64_MAX` in another crash is only what a lost timeline reads.
+**Every abort after a loss had a cause of its own, and each is fixed.**
+A real loss now fails the run's tests instead of terminating the binary, and a crash report comes out whole.
+A forced one, a `vkQueueSubmit` made to fail with the GPU still running, no longer aborts but hangs a later wait instead.
+That is the mutation's doing rather than a real loss's, whose waits return `VK_ERROR_DEVICE_LOST`, so the forced loss stops being a test of this path.
+
+- **The empty reports were the crash reporter.** The CRT resets `SIGABRT` before calling the handler.
+  So a second thread's abort ended the process mid-report as 0xC0000409, and after a loss many threads fail at once.
+  It now waits for the first report.
+- **dx12's submit** threw over a list it had executed, whose destructor then asserted on `Close`.
+- **`~context`** asserted that no resource outlived it, which the work a loss fails always breaks; on a lost device it logs that instead.
+- **Five tests** advanced the epoch in a `CC_DEFER`, which throws a second time in the unwind of the first loss.
+
+**The doubled timeline signal is a symptom.**
+VUID-03242 shows up only after a loss: the validation layer still counts a failed submit's signals as pending, and the cancel path signals the value again.
+That second signal stays, because without it a wait on the value never returns where a submit failed but the GPU did not hang.
+A forced loss showed it: dropping the signal turned the run into a hang.
+
+**The loss needs neither the other API nor the Agility SDK.**
+Without Agility, on the Arc B580:
+
+| configuration | clean iterations | losses |
+|---|---|---|
+| the whole suite | 40 | 1, on its second iteration |
+| the `vulkan` context alone | 25 | 1 |
+| the `dx12-hw` context alone | 100 | none |
+
+**So it is vulkan's to explain.**
+dx12 alone clears the bar of 100 iterations, and vulkan alone keeps the loss without dx12 beside it.
+dx12 reports `DXGI_ERROR_DEVICE_HUNG` in the whole suite only because the two share one hung GPU.
+It lands in a different test each time, Windows logs no driver timeout (4101) or TDR for it, and the test it is noticed in passes 40 of 40 repeated on its own.
+What on vulkan hangs the GPU is still unknown; the next narrowing is the `vulkan` context by test group, or with the validation layers off.
+
+**On the Agility SDK, the loss on every run is another bug.**
+Intel's dx12 driver removes the device creating one hit-object pipeline, through DXC's DXIL and SGL's alike.
+[intel-d3d12-hit-object-pipeline-removes-device](../../../../../docs/bugs-external/intel-d3d12-hit-object-pipeline-removes-device/readme.md) is the write-up.
+With that one test skipped, 25 whole-suite iterations on Agility lost nothing, against 9 losses in 9 before.
+
+**A readback can be wrong without a loss.**
+`sg - an async upload a submitted list reads is copied even after the last handle is dropped` read stale bytes once on `vulkan-native-spirv`, in the 42 whole-suite iterations above.
+That test pins a race between the upload actor skipping a copy whose target nobody holds and a list waiting on its value.
+Whether the actor can read the handle count and the awaited stamp out of order is unproven, and it may be the readback that precedes a loss.

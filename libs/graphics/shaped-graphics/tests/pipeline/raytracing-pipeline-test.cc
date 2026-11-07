@@ -201,6 +201,11 @@ ASYNC_INVOCABLE_TEST("sg - an SGL hit object says what its closest hit is then h
         SKIP("no compiler builds this binary's shaders into a format this context accepts");
     if (!ctx->supports(sg::feature::raytracing_pipeline))
         SKIP("this device has no ray-tracing pipelines");
+    auto const& adapter = ctx->metrics.adapter();
+    if (ctx->backend() == sg::backend_kind::dx12 && adapter.vendor_id == 0x8086 && !adapter.is_software
+        && ctx->supports(sg::feature::shader_execution_reordering))
+        SKIP("Intel's dx12 driver removes the device creating this pipeline; see "
+             "docs/bugs-external/intel-d3d12-hit-object-pipeline-removes-device");
 
     auto const desc = co_await shaders::raytracing_pipeline::inspected_path.description(*ctx);
     REQUIRE(desc.raygen_shaders.size() == 1);

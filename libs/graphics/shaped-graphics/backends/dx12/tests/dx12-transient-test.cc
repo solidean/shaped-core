@@ -34,7 +34,8 @@ ASYNC_INVOCABLE_TEST("sg dx12 - transient buffer storage reused across many epoc
     CC_DEFER
     {
         c.transient.set_budget(sg::context_transient_scope::default_budget_bytes);
-        c.advance_epoch();
+        if (!c.is_device_lost()) // a lost device throws, and this runs in the unwind of that very throw
+            c.advance_epoch();
     };
 
     auto const usage = sg::buffer_usage::copy_src | sg::buffer_usage::copy_dst;
