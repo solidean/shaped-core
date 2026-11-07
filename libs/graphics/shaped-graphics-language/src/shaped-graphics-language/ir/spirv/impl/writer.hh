@@ -59,6 +59,14 @@ private:
     /// A constant, or a `construct` of constants as the one `OpConstantComposite` an image operand must name.
     [[nodiscard]] u32 constant_composite(value_ref v);
 
+    // ---- writer_lines.cc (EMIT-257)
+    /// States the line of instruction `index` before it, where the line table has one and it changed.
+    void line_before(u32 index);
+    /// Forgets the line stated, which a block's label ends.
+    void forget_line() { _line_file = -1; }
+    /// Gives each file a line named its `OpString` and `OpSource`, the last ids of the module, so no other id moves.
+    void declare_files();
+
     // ---- writer_declarations.cc
     [[nodiscard]] u32 storage_of(storage s) const;
     [[nodiscard]] bool holds_16_bit(type_ref t) const;
@@ -145,6 +153,13 @@ private:
     cc::vector<u32> _entry;
     cc::vector<u32> _modes;
     cc::vector<u32> _names;
+    /// `OpString` and `OpSource` of every file a line names, which stand ahead of the names.
+    cc::vector<u32> _sources;
+    /// Where in `_code` each `OpLine` names its file, by the line table's position until `declare_files`.
+    cc::vector<isize> _line_files;
+    /// The line last stated in the block being written; -1 for none.
+    i32 _line_file = -1;
+    i32 _line = 0;
     cc::vector<u32> _annotations;
     cc::vector<u32> _declarations;
     cc::vector<u32> _code;

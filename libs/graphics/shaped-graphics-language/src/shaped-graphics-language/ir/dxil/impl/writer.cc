@@ -287,6 +287,7 @@ void writer::run()
     }
     if (!_failure.empty())
         return;
+    _m.set_location(0);
     fill_phis();
     _m.share_common_values();
     _m.remove_unused();
@@ -295,6 +296,7 @@ void writer::run()
     if (!is_library())
         read_usage();
     write_entry_metadata();
+    write_debug_info();
 }
 
 void writer::lower_block(block_ref b)
@@ -302,9 +304,15 @@ void writer::lower_block(block_ref b)
     auto const& block = _p.blocks[isize(b)];
     _rows.clear();
     for (auto i = block.first; i + 1 < block.first + block.count && _failure.empty(); ++i)
+    {
+        locate(_p.instructions[i]);
         operation(i);
+    }
     if (_failure.empty())
+    {
+        locate(_p.instructions[block.first + block.count - 1]);
         terminator(_p.instructions[block.first + block.count - 1]);
+    }
 }
 
 void writer::terminator(instruction const& i)

@@ -10,8 +10,12 @@ namespace spv
 {
 enum op_code : u32
 {
+    SourceContinued = 2,
+    Source = 3,
     Name = 5,
     MemberName = 6,
+    String = 7,
+    Line = 8,
     Extension = 10,
     ExtInstImport = 11,
     ExtInst = 12,

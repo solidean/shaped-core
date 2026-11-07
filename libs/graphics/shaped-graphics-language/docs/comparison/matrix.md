@@ -94,7 +94,7 @@ A per-target cell reads `dx12 / vulkan / metal / webgpu`.
 |---|---|---|---|---|---|
 | **E1** Shader unit tests without a GPU | ❌ | ✅ CPU target and an interpreter, documented as incomplete | ❌ (WESL tests run on a GPU) | ❌ | ✅ `test` blocks run on the spec's interpreter: buffers, textures, images and samplers, whose texels and state a test states itself or a driver binds, and subgroup operations and derivatives over lanes, at every subgroup size a target has |
 | **E2** Diagnostics | ⚠️ later hops report against IR, once per hop | ⚠️ once against the source; downstream errors per target | ✅ once against the source | ⚠️ SPIRV-Cross errors per target, against SPIR-V | ✅ once against the source, for every target |
-| **E3** Debugging the output | ⚠️ PIX at source level on DXIL; mapping lost after a hop | ⚠️ debug info and line directives | ⚠️ readable output, no source stepping | ⚠️ readable output, mapping lost | ✅ readable text with SGL's names; `#line` in HLSL and MSL, so DXC, Metal and PIX name the `.sgl` line; webgpu logs Tint's messages at the `.sgl` line and its inlined calls |
+| **E3** Debugging the output | ⚠️ PIX at source level on DXIL; mapping lost after a hop | ⚠️ debug info and line directives | ⚠️ readable output, no source stepping | ⚠️ readable output, mapping lost | ✅ readable text with SGL's names; `#line` in HLSL and MSL, so DXC, Metal and PIX name the `.sgl` line; webgpu logs Tint's messages at the `.sgl` line and its inlined calls; SGL's own SPIR-V and DXIL carry the line of each operation when asked, DXIL with its inlined calls |
 | **E4** printf and assert on a GPU | ⚠️ printf on Vulkan only | ⚠️ printf except on WGSL; no assert | ⚠️ Naga printf on Metal and Vulkan | ⚠️ printf on Vulkan only | ⚠️ `print` and `assert` with interpolated values on dx12, vulkan and webgpu, logged once the epoch completes; a failed assert ends its invocation, after any barrier still ahead, and fails a test; a vertex stage's on vulkan where the device lets it store, and never on webgpu, which has no storage there; metal not yet 🗺️ [feat](../issues/feat-sgl-gpu-print-and-assert.md) |
 | **E5** Normative specification | ⚠️ an Ecma working draft; DXC is the de facto spec | ⚠️ a spec, self-described incomplete | ✅ W3C Candidate Recommendation | ✅ GLSL 4.60 | ✅ normative, with stable rule ids; every example in it is a test |
 
@@ -354,7 +354,7 @@ Per row and column:
 - **E3**
   - HLSL + chain: DXC 1.9.2602 notes, MSC changelog v2
   - Slang: SLANG `slangc` `-g`, `-line-directive-mode`
-  - SGL: EMIT-47, EMIT-181, EMIT-182 (2026-11-03)
+  - SGL: EMIT-47, EMIT-181, EMIT-182 (2026-11-03), EMIT-257 (2026-11-07), read back by DXC's own disassembly; no debugger was driven
 - **E4**
   - HLSL + chain: DXC `SPIR-V.rst`
   - Slang: SLANG capdef `printf`
