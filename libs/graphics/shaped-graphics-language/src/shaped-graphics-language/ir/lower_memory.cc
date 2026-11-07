@@ -146,7 +146,10 @@ type_ref lowering::value_type(type_id t)
             auto const columns = record->name == "mat2" ? 2u : record->name == "mat3" ? 3u : 4u;
             result = intern({.kind = type_kind::matrix, .count = columns, .element = vector_type(scalar, columns)});
         }
-        else if (ir::is_valid(scalar) && lanes >= 1 && lanes <= 4 && record->name != "bool32")
+        // a bool as GPU memory holds one: a `uint` of 0 or 1, which only `as` makes or reads
+        else if (record->name == "bool32")
+            result = _uint;
+        else if (ir::is_valid(scalar) && lanes >= 1 && lanes <= 4)
             result = vector_type(scalar, u32(lanes));
         else
             unsupported(cc::format("the type {}", record->name));

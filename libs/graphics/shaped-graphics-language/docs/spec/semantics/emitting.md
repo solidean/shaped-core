@@ -529,6 +529,8 @@ fn main_ps(p: pixel_input) -> target_ {
 * **EMIT-250** A native route's `atomic[float]` held as a `uint`'s bits is that `uint`'s atomic, bitcast either side, in shared lowering.
   Its add is the text's loop: a compare-exchange of the bits of the sum, retried with what it read until no other update came between.
   The first guess is an atomic load where the text reads plainly, since either is only a guess the exchange checks.
+* **EMIT-251** A native route holds a `bool32` as a `uint` of 0 or 1, in memory and as a value alike.
+  `x as bool32` is a `select` of 1 and 0, and `x as bool` is a comparison with 0, so any word but 0 reads as `true`, as the text's does.
 
 ## Lines
 

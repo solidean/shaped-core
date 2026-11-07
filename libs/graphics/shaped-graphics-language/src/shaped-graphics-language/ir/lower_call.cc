@@ -885,6 +885,10 @@ value_ref lowering::call(flat_expr const& x, flat_call const& c)
         return hit_object_call(x, c, record);
     if (record.name.starts_with("workgroup_written_") || record.name == "workgroup_mark_written")
         return shadow_call(c, record);
+    if (record.name == "convert_bool_to_bool32")
+        return add(op::select, _uint, {expr(_e.at(c.arguments)[0]), uint_constant(1), uint_constant(0)});
+    if (record.name == "convert_bool32_to_bool")
+        return add(op::ine, _bool, {expr(_e.at(c.arguments)[0]), uint_constant(0)});
     auto const result = x.type == checked_module::void_type ? _void : value_type(x.type);
     if (record.is_atomic)
         return atomic(c, x);
