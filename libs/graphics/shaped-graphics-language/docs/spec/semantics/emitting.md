@@ -492,7 +492,7 @@ fn main_ps(p: pixel_input) -> target_ {
   A read of a query gives a value and goes where nothing uses it, but it neither moves nor merges, since each is valid only in the state the query is in where it stands.
   A row of a hit's transform is taken from the whole transform, which SPIR-V hands over by column and DXIL by row and column.
   An `affine3` is a value of three rows, and no native route holds one in GPU memory yet.
-  A query of an entry point that states opacity micromaps is `unsupported`.
+  A query of an entry point that states opacity micromaps is EMIT-184's.
   What is undefined on one way into a merge takes the other way's value, since DXIL's validator refuses `undef` in a `select`.
 * **EMIT-244** A ray-tracing stage of a native route is one entry point of its target's own, so a pipeline may take each stage from either route.
   A payload, a callable's parameter and a hit's attributes are each one variable of the stage, and a trace or a call copies into a variable of the caller's, one per type, and back.
