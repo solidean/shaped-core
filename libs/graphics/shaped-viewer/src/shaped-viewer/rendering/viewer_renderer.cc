@@ -3,6 +3,7 @@
 #include <clean-core/container/vector.hh>
 #include <clean-core/thread/async_coroutine.hh>
 #include <shaped-graphics/all.hh>
+#include <shaped-rendering/bloom_routine.hh>
 #include <shaped-rendering/exposure_meter_routine.hh>
 #include <shaped-rendering/slug_routine.hh>
 #include <shaped-viewer/drawing/drawing_manager.hh>
@@ -79,6 +80,19 @@ void meter_auto_exposure(sg::command_list& cmd,
         state.pending = cmd.download.data_from_buffer(partials.value());
         ++state.meters_started;
     }
+}
+
+/// What trace `i`'s layer is shown at, its automatic exposure included once a reading has landed.
+[[nodiscard]] f32 shown_exposure_scale(viewer_definition const& def, render_plan const& plan, u32 i, view_store& store)
+{
+    auto const& tr = plan.traces[i];
+    auto const& v = def[tr.view];
+    auto display = v.layers[tr.layer].settings.display;
+    auto const* const rec = store.get_ptr(v.id);
+    if (display.automatic && rec != nullptr && isize(tr.layer) < rec->auto_exposure.size()
+        && rec->auto_exposure[tr.layer].primed)
+        display.exposure += rec->auto_exposure[tr.layer].exposure;
+    return display.exposure_scale();
 }
 
 /// `draws` with every automatic exposure resolved: the layer's adapted exposure plus its compensation.
@@ -303,7 +317,7 @@ sg::routine_outcome viewer_renderer::execute(sg::command_list& cmd,
 
     // Allocate (or resize) every texture the plan names, and touch every view it reaches.
     auto res = view_renderer::resolve(cmd, plan, store);
-    auto const textures = res.textures();
+    auto textures = res.textures();
 
     // Every drawing job's uploads, since a copy recorded inside a pass would split it.
     // A 3D job's depth is looked up now, though the trace writes it below: the slot is the same texture either way.
@@ -337,6 +351,25 @@ sg::routine_outcome viewer_renderer::execute(sg::command_list& cmd,
     // Every layer showing at an automatic exposure is metered from the image it shows, finished or not.
     for (auto i = u32(0); i < plan.traces.size(); ++i)
         meter_auto_exposure(cmd, def, plan, i, textures.traces[i], store);
+
+    // After the meter, so turning bloom up does not move an automatic exposure.
+    // From here a layer's image is the bloomed one, which only the composite reads; a trace next frame starts from its own mean.
+    auto shown_traces = cc::vector<sg::texture_2d>::create_copy_of(textures.traces);
+    for (auto i = u32(0); i < plan.traces.size(); ++i)
+    {
+        auto const& tr = plan.traces[i];
+        auto const& display = def[tr.view].layers[tr.layer].settings.display;
+        if (display.bloom.strength <= 0.0f || textures.traces[i].raw() == nullptr)
+            continue;
+
+        auto const bloomed = sr::bloom_routine::execute(cmd, textures.traces[i], display.bloom,
+                                                        shown_exposure_scale(def, plan, i, store));
+        if (bloomed.has_value())
+            shown_traces[i] = bloomed.value();
+        else
+            declined = true;
+    }
+    textures.traces = shown_traces;
 
     // Then one pass per target, in dependency order, so a source is finished before anything samples it.
     // Each pass closes before the next begins, which is what releases the output-merger binding — a target still bound

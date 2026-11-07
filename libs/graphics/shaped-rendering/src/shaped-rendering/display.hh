@@ -43,6 +43,9 @@ struct sr::display_transform
     /// A viewer adapts toward each reading; a still capture takes the reading of its finished image whole, so the same image gets the same exposure.
     bool automatic = false;
 
+    /// The light that scatters before any of this, which whoever draws the image applies with `sr::bloom_routine`; off by default.
+    bloom_settings bloom = {};
+
     /// `2^exposure`, the factor module `display`'s `transform` takes.
     [[nodiscard]] f32 exposure_scale() const;
 };
