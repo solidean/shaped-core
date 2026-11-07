@@ -320,7 +320,8 @@ Per row and column:
   - Slang: SLANG target compatibility
   - WGSL: WGSL, NAGA
   - GLSL + chain: SXC
-  - SGL: CHK-381, CHK-382, CHK-450 to CHK-454, CHK-458, EMIT-192, EMIT-196, EMIT-219, EMIT-254 to EMIT-256, EVAL-146, CHK-517, sg `tests/compute/compute-sixty-four-bit-test.cc`, `tests/compute/compute-double-maths-test.cc` (2026-11-06; native routes 2026-11-07)
+  - SGL: CHK-381, CHK-382, CHK-450 to CHK-454, CHK-458, EMIT-192, EMIT-196, EMIT-219, sg `tests/compute/compute-sixty-four-bit-test.cc`, `tests/compute/compute-double-maths-test.cc` (2026-11-06)
+  - SGL, for `fma`, a double's bits and the native routes: EVAL-146, CHK-517, EMIT-254 to EMIT-256, the same double test (2026-11-07)
 - **D6**
   - HLSL + chain: MSC table
   - Slang: SLANG capdef `_meshshading`
