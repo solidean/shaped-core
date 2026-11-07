@@ -49,6 +49,19 @@
 // minus one, so every address lies inside the instruction that was running or calling.
 // "body" is where the test's body starts, when the build keeps code addresses for source sites.
 // A sample is a statistical witness that code ran in a test, never a proof that other code did not.
+//
+// Covered functions, when the runner also sets NX_EXTERNAL_RUNNER_COVERAGE to 1 and the build counts coverage
+// (clang's -fprofile-instr-generate, as the coverage presets build): every test then runs alone, and nexus reads and
+// resets the profile counters as each top-level test begins and ends, so per test the report names exactly the
+// functions it entered, as indices into the run's table of the profile's function name hashes:
+//
+//     {"coverage": {"functions": [1234567890123, ...]},
+//      "tests": [{..., "covered": [0, 17, 18]}],
+//      "unattributed": {..., "covered": [...]}}
+//
+// A name hash is the profile's own (the low 64 bits of the MD5 of the function's profile name), which the build's
+// coverage mapping (llvm-cov) maps to a file and a line; "unattributed" is what ran outside every test.
+// A child process is not counted, and work a test left running counts for whichever test runs while it does.
 
 /// What the sampler saw under one context: how many samples, and the distinct code addresses they hit.
 struct nx::sampled_context
@@ -69,6 +82,15 @@ struct nx::sampled_functions
     cc::vector<cc::loaded_module> modules;
 };
 
+/// What the report's coverage counted over a run: the profile's functions, and per context the ones entered.
+struct nx::covered_functions
+{
+    /// The profile's function name hashes, in the runtime's record order.
+    cc::vector<u64> functions;
+    /// By context (a scheduled test's declaration, 0 for none): sorted indices into `functions`.
+    cc::map<u64, cc::vector<i32>> by_context;
+};
+
 namespace nx
 {
 /// The variable naming the report's path; unset, nothing is recorded.
@@ -77,20 +99,29 @@ inline constexpr char const* runner_report_variable = "NX_EXTERNAL_RUNNER_REPORT
 /// The variable asking for sampled functions in the report: a rate in Hz; unset or 0, nothing is sampled.
 inline constexpr char const* runner_report_sampling_variable = "NX_EXTERNAL_RUNNER_SAMPLE_HZ";
 
+/// The variable asking for covered functions in the report: 1 asks, and the build must count coverage.
+inline constexpr char const* runner_report_coverage_variable = "NX_EXTERNAL_RUNNER_COVERAGE";
+
+/// Whether this build counts coverage, so the report can name each test's covered functions.
+[[nodiscard]] bool build_counts_coverage();
+
 /// Turns file-access recording on and attributes each access to the running test; call once, before any test runs.
 /// A positive `sample_hz` also samples every recording thread at that rate, for the report's sampled functions.
-void begin_runner_report(f64 sample_hz = 0);
+/// `coverage` also counts each test's covered functions, where the build counts coverage;
+/// the run must then run every test alone (test_schedule_config::one_at_a_time).
+void begin_runner_report(f64 sample_hz = 0, bool coverage = false);
 
 /// Stops recording and returns the report of `execution`.
 cc::string end_runner_report(test_schedule_execution const& execution, cc::optional<u64> run_seed);
 
 /// The report of `execution` over `accesses` and `large`; contexts are the scheduled tests' declarations, 0 for none.
-/// With `sampled`, each test also carries its sampled addresses and where its body starts.
+/// With `sampled`, each test also carries its sampled addresses and where its body starts; with `covered`, its covered functions.
 cc::string write_runner_report(test_schedule_execution const& execution,
                                cc::span<cc::file_access::record const> accesses,
                                cc::span<cc::large_allocations::context_stats const> large,
                                cc::optional<u64> run_seed,
-                               sampled_functions const* sampled = nullptr);
+                               sampled_functions const* sampled = nullptr,
+                               covered_functions const* covered = nullptr);
 } // namespace nx
 
 namespace nx::impl
@@ -107,4 +138,16 @@ void pause_report_sampling();
 
 /// Stops the report's sampler for good and returns what it saw, forgetting it.
 cc::optional<sampled_functions> end_report_sampling();
+
+/// Starts counting the report's coverage; what ran before, static setup above all, is no test's.
+void begin_report_coverage();
+
+/// The coverage boundaries of a top-level test: what ran since the last boundary goes to the test running then
+/// (none between tests), and the counters start over.
+/// A no-op unless the report covers; a dispatched child or a nested run's test counts for the test it ran in.
+void note_coverage_begin(test_declaration const* slot);
+void note_coverage_end();
+
+/// Stops counting and returns what the report's coverage counted, or nothing when it does not cover.
+cc::optional<covered_functions> end_report_coverage();
 } // namespace nx::impl

@@ -153,6 +153,15 @@ void write_sampled(babel::json::object_writer& obj, nx::sampled_context const& c
     }
 }
 
+/// Writes `covered`: the sorted indices of the functions entered, into the report's coverage table; empty for none.
+void write_covered(babel::json::object_writer& obj, cc::vector<i32> const* indices)
+{
+    auto arr = obj.write_array("covered", babel::json::layout::compact);
+    if (indices != nullptr)
+        for (auto const i : *indices)
+            arr.write(i);
+}
+
 void write_files(babel::json::array_writer& files, cc::span<cc::file_access::record const* const> records)
 {
     namespace json = babel::json;
@@ -174,8 +183,10 @@ void write_files(babel::json::array_writer& files, cc::span<cc::file_access::rec
 }
 } // namespace
 
-void nx::begin_runner_report(f64 sample_hz)
+void nx::begin_runner_report(f64 sample_hz, bool coverage)
 {
+    if (coverage && build_counts_coverage())
+        impl::begin_report_coverage();
     cc::file_access::set_context_hook(&slot_context);
     cc::file_access::start_recording();
     cc::large_allocations::start_tracking();
@@ -259,16 +270,19 @@ cc::string nx::end_runner_report(test_schedule_execution const& execution, cc::o
     cc::file_access::stop_recording();
     cc::large_allocations::stop_tracking();
     auto const sampled = impl::end_report_sampling();
+    auto const covered = impl::end_report_coverage();
     auto const accesses = cc::file_access::snapshot();
     auto const large = cc::large_allocations::snapshot();
-    return write_runner_report(execution, accesses, large, run_seed, sampled.has_value() ? &sampled.value() : nullptr);
+    return write_runner_report(execution, accesses, large, run_seed, sampled.has_value() ? &sampled.value() : nullptr,
+                               covered.has_value() ? &covered.value() : nullptr);
 }
 
 cc::string nx::write_runner_report(test_schedule_execution const& execution,
                                    cc::span<cc::file_access::record const> accesses,
                                    cc::span<cc::large_allocations::context_stats const> large,
                                    cc::optional<u64> run_seed,
-                                   sampled_functions const* sampled)
+                                   sampled_functions const* sampled,
+                                   covered_functions const* covered)
 {
     namespace json = babel::json;
 
@@ -304,6 +318,13 @@ cc::string nx::write_runner_report(test_schedule_execution const& execution,
             s.write("hz", sampled->hz);
             s.write("taken", sampled->taken);
             s.write("failed", sampled->failed);
+        }
+        if (covered != nullptr)
+        {
+            auto c = root.write_object("coverage", json::layout::compact);
+            auto functions = c.write_array("functions", json::layout::compact);
+            for (auto const f : covered->functions)
+                functions.write(f);
         }
 
         // Contexts no scheduled test claims (0, or a test of a nested run) count for every test, as unattributed.
@@ -344,6 +365,8 @@ cc::string nx::write_runner_report(test_schedule_execution const& execution,
                     if (auto const* c = sampled->by_context.get_ptr(context); c != nullptr)
                         write_sampled(t, *c, mods);
                 }
+                if (covered != nullptr)
+                    write_covered(t, covered->by_context.get_ptr(context));
                 auto files = t.write_array("files");
                 write_files(files, files_of(context));
             }
@@ -379,6 +402,19 @@ cc::string nx::write_runner_report(test_schedule_execution const& execution,
                     }
                 cc::sort(rest.addresses);
                 write_sampled(unattributed, rest, mods);
+            }
+            if (covered != nullptr)
+            {
+                auto rest = cc::vector<i32>();
+                for (auto const& [context, c] : covered->by_context)
+                    if (!claimed.contains(context))
+                        rest.push_back_range(c);
+                cc::sort(rest);
+                auto unique = cc::vector<i32>();
+                for (auto const i : rest)
+                    if (unique.empty() || unique.back() != i)
+                        unique.push_back(i);
+                write_covered(unattributed, &unique);
             }
             auto files = unattributed.write_array("files");
             for (auto const& [context, records] : by_context)

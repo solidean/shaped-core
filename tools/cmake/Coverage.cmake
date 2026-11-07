@@ -13,4 +13,9 @@ if(SC_COVERAGE)
     endif()
     sc_build_options(COMPILE -fprofile-instr-generate -fcoverage-mapping)
     sc_build_options(LINK -fprofile-instr-generate -fcoverage-mapping)
+
+    # No precompiled headers: CMake marks its PCH header `#pragma clang system_header`, and clang neither counts nor maps code in a system header,
+    # so every inline and template function reached through a PCH would be missing from the coverage.
+    # Set before any target exists, since it initializes each target's DISABLE_PRECOMPILE_HEADERS.
+    set(CMAKE_DISABLE_PRECOMPILE_HEADERS ON)
 endif()

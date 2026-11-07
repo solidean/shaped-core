@@ -37,6 +37,20 @@ A sample is a statistical witness: code it names ran in that test, and code it d
 A test of a few milliseconds is caught by few samples or none, so a runner unions the sets over many runs.
 Measured on this repo's `clean-core-test` and `nexus-test` at 1 kHz, the run took no measurably longer (within the noise of a few percent); without a recorder (`--no-recording`) nothing is sampled.
 
+## Which functions each test entered, exactly
+
+In a coverage build (clang's `-fprofile-instr-generate`, as the `*-coverage` presets build), set `NX_EXTERNAL_RUNNER_COVERAGE=1` as well and the report says exactly which functions each test entered.
+The profile counters are per process, so nexus then runs every test alone (`test_schedule_config::one_at_a_time`), own_pool phases included; work inside a test still fans out over `--jobs`.
+As each top-level test begins and ends, nexus reads the counters of every function the profile runtime knows and resets them ([runner_coverage.cc](../src/nexus/tests/export/runner_coverage.cc)),
+so a test's set is what ran between its two boundaries: its dispatched children and a nested run's tests count for it.
+
+The top-level `coverage.functions` lists the profile's function name hashes, once per run, and each test's `covered` lists indices into it.
+`unattributed` holds what ran outside every test, static setup included.
+A hash is the profile's own, the low 64 bits of the MD5 of the function's profile name, so the build's coverage mapping names each one:
+`llvm-cov export -format=lcov` on the profile the run writes at exit lists every function by that name, with its file and line.
+A child process is not counted, and work a test left running counts for whichever test runs while it does.
+Asked of a build that does not count coverage, the report has no `coverage` and the run is scheduled as usual.
+
 ## How accesses are seen
 
 nexus turns on clean-core's file-access recording (`cc::file_access`, [file_access.hh](../../clean-core/src/clean-core/platform/file_access.hh)) for the whole run.

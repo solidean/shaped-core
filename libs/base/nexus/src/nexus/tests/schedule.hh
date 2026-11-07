@@ -72,6 +72,10 @@ struct nx::test_schedule_config
     // A test asking for own_pool(n) names its own width instead, and is unaffected.
     int jobs = 1;
 
+    // Every test runs alone, as if it were exclusive(), own_pool phases included; work inside a test still fans out.
+    // What process-wide per-test measurement needs: the runner report's coverage sets it.
+    bool one_at_a_time = false;
+
     // The command line did not parse, and nx::run reports it and exits rather than running a subset.
     // Running "most of" what was asked for is the one outcome a mistyped flag must never produce.
     bool parse_failed = false;

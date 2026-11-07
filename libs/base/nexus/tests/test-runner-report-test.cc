@@ -2,6 +2,7 @@
 #include <clean-core/common/time.hh>
 #include <clean-core/memory/allocation.hh>
 #include <clean-core/memory/large_allocations.hh>
+#include <clean-core/platform/environment.hh>
 #include <clean-core/platform/file_access.hh>
 #include <clean-core/platform/file_path.hh>
 #include <clean-core/platform/module_table.hh>
@@ -290,4 +291,103 @@ TEST("runner report - a sampled run lists the code each test ran, and not anothe
     CHECK(sampled_near(tb, root["modules"], reinterpret_cast<void const*>(&burn_here_b), span_b));
     CHECK(!sampled_near(ta, root["modules"], reinterpret_cast<void const*>(&burn_here_b), span_b));
     CHECK(!sampled_near(tb, root["modules"], reinterpret_cast<void const*>(&burn_here_a), span_a));
+}
+
+TEST("runner report - covered functions are indices into one table, and what no test claims is unattributed",
+     no_scheduler,
+     exclusive("cc-file-access"))
+{
+    nx::test_registry reg;
+    reg.add_declaration("covers", {}, [] { CHECK(true); });
+    reg.add_declaration("covers nothing", {}, [] { CHECK(true); });
+    auto schedule = nx::test_schedule::create({}, reg);
+    auto exec = nx::execute_tests(schedule, {});
+    REQUIRE(exec.executions.size() == 2);
+
+    auto covered = nx::covered_functions{.functions = {0xFFFF'FFFF'FFFF'FFF1ull, 7, 8}};
+    covered.by_context[u64(reinterpret_cast<uintptr_t>(exec.executions[0].instance.declaration))] = {0, 2};
+    covered.by_context[0] = {1};
+    covered.by_context[12345] = {1, 2}; // a nested run's test
+    auto const report = nx::write_runner_report(exec, {}, {}, cc::nullopt, nullptr, &covered);
+    auto const doc = babel::json::read(report).value();
+    auto const root = doc.root();
+
+    REQUIRE(root["coverage"]["functions"].size() == 3);
+    CHECK(cc::string_view(report).contains("18446744073709551601")); // a hash keeps all 64 bits, which a double would not
+    auto const c = entry_named(root["tests"], "covers")["covered"];
+    REQUIRE(c.size() == 2);
+    CHECK(c[0].as_double() == 0);
+    CHECK(c[1].as_double() == 2);
+    CHECK(entry_named(root["tests"], "covers nothing")["covered"].size() == 0);
+    auto const rest = root["unattributed"]["covered"];
+    REQUIRE(rest.size() == 2);
+    CHECK(rest[0].as_double() == 1);
+    CHECK(rest[1].as_double() == 2);
+}
+
+namespace
+{
+CC_DONT_INLINE int covered_only_by_a(int x)
+{
+    return x * 3 + 1;
+}
+
+CC_DONT_INLINE int covered_only_by_b(int x)
+{
+    return x * 5 + 2;
+}
+
+/// Whether `a` holds an index `b` does not.
+bool holds_one_not_in(cc::vector<i32> const& a, cc::vector<i32> const& b)
+{
+    for (auto const i : a)
+    {
+        auto found = false;
+        for (auto const j : b)
+            found |= i == j;
+        if (!found)
+            return true;
+    }
+    return false;
+}
+} // namespace
+
+// The counters are per process, so the boundaries are all there is to tell two tests apart.
+TEST("runner report - in a coverage build, a test's covered functions are what ran between its boundaries",
+     no_scheduler,
+     exclusive("cc-file-access"))
+{
+    if (!nx::build_counts_coverage())
+        SKIP("needs a coverage build (the coverage presets)");
+    if (cc::environment_variable(nx::runner_report_coverage_variable).has_value())
+        SKIP("the run's own coverage is counting");
+
+    nx::test_registry reg;
+    reg.add_declaration("a", {}, [] { CHECK(true); });
+    reg.add_declaration("b", {}, [] { CHECK(true); });
+    auto schedule = nx::test_schedule::create({}, reg);
+    auto exec = nx::execute_tests(schedule, {});
+    REQUIRE(exec.executions.size() == 2);
+    auto const* const a = exec.executions[0].instance.declaration;
+    auto const* const b = exec.executions[1].instance.declaration;
+
+    nx::impl::begin_report_coverage();
+    nx::impl::note_coverage_begin(a);
+    auto sink = covered_only_by_a(1);
+    nx::impl::note_coverage_end();
+    nx::impl::note_coverage_begin(b);
+    sink += covered_only_by_b(sink);
+    nx::impl::note_coverage_end();
+    auto const covered = nx::impl::end_report_coverage();
+    CHECK(sink != 0);
+
+    REQUIRE(covered.has_value());
+    CHECK(!covered.value().functions.empty());
+    auto const* const ca = covered.value().by_context.get_ptr(u64(reinterpret_cast<uintptr_t>(a)));
+    auto const* const cb = covered.value().by_context.get_ptr(u64(reinterpret_cast<uintptr_t>(b)));
+    REQUIRE(ca != nullptr);
+    REQUIRE(cb != nullptr);
+    CHECK(holds_one_not_in(*ca, *cb));
+    CHECK(holds_one_not_in(*cb, *ca));
+    CHECK(!nx::impl::end_report_coverage().has_value()); // ended for good
 }

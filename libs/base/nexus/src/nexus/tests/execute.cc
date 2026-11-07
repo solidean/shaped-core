@@ -149,6 +149,8 @@ struct nx::impl::test_context
 
     // This test's entry in the in-flight table, or -1 when the table was full.
     int in_flight_slot = -1;
+    // Started under no other test: neither a dispatched child nor a nested run's test, so it bounds the report's coverage.
+    bool top_level = false;
     nx::test_schedule_config const* config = nullptr;
     cc::unique_ptr<test_section> root_section;
     cc::vector<test_section*> curr_section;
@@ -584,6 +586,9 @@ cc::unique_ptr<test_context> test_execute_begin(nx::test_execution& execution,
     // So a nested execution inherits its ancestor's sink, and only a top-level one owns a buffer.
     auto const* const parent = current_context();
     ctx.verbose_sink = parent != nullptr ? parent->verbose_sink : &execution.verbose_output;
+    ctx.top_level = parent == nullptr && is_outermost_execution();
+    if (ctx.top_level)
+        nx::impl::note_coverage_begin(execution.instance.declaration);
 
     // Pinned when the declaration says so; otherwise from the name, never the position, so a filtered re-run reproduces it.
     // A dispatched child derives from its driver's seed and its group, since the same invocable may run under several drivers.
@@ -639,6 +644,8 @@ void test_execute_end(cc::unique_ptr<test_context> owned, bool keep_alive)
     ctx.execution->skip_reason = ctx.unskipped_passes == 0 ? cc::move(reason) : cc::string();
 
     ctx.is_finished.store(true, cc::memory_order_release);
+    if (ctx.top_level)
+        nx::impl::note_coverage_end();
     if (ctx.in_flight_slot >= 0)
         g_in_flight_tests[ctx.in_flight_slot].store(nullptr, cc::memory_order_relaxed);
     nx::impl::watchdog_heartbeat();
@@ -2697,7 +2704,7 @@ cc::shared_async<cc::unit> make_test_node(nx::test_execution* execution,
 
     return cc::make_async_lazy<cc::unit>(
         [execution, &config, &locks, &main_bodies, tag_locks = cc::move(tag_locks),
-         exclusive = test_config.exclusive_global, main_thread = test_config.main_thread,
+         exclusive = test_config.exclusive_global || config.one_at_a_time, main_thread = test_config.main_thread,
          pending_exclusive = cc::shared_async<cc::async_mutex_guard<cc::unit>>(),
          pending_shared = cc::shared_async<cc::async_shared_guard<cc::unit>>(),
          pending_tag = cc::shared_async<cc::async_mutex_guard<cc::unit>>(),

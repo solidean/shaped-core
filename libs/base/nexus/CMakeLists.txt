@@ -49,6 +49,7 @@ add_library(nexus
     src/nexus/tests/export/timings_json.cc
     src/nexus/tests/export/listing_json.cc
     src/nexus/tests/export/runner_report.cc
+    src/nexus/tests/export/runner_coverage.cc
     src/nexus/fuzz/machine.cc
     src/nexus/fuzz/generator.cc
     src/nexus/fuzz/minimizer.cc
