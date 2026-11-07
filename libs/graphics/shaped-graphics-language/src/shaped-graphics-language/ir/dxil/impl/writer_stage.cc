@@ -140,6 +140,15 @@ constexpr feature_rule k_features[] = {
 };
 /// What every module says: 16-bit types are native, as the text route's `-enable-16bit-types` has them.
 constexpr u64 k_native_low_precision = 1ull << 23;
+
+/// The producer every module names in `!llvm.ident`, which LLVM leaves optional and AMD's driver does not.
+/// Without it AMD's DXIL compiler crashes in CreateComputePipelineState; the string itself may even be empty.
+/// docs/bugs-external/amd-d3d12-dxil-without-llvm-ident-crashes has the reproduction.
+void name_producer(module_builder& m)
+{
+    u32 const ident[] = {m.md_node(cc::span<u32 const>(std::initializer_list<u32>{m.md_string("sgl")}))};
+    m.md_named("llvm.ident", ident);
+}
 } // namespace
 
 u32 writer::entry_attributes()
@@ -764,6 +773,7 @@ void writer::write_entry_metadata()
         u32 const validator_node[] = {_m.md_node(validator)};
         u32 const model_node[] = {_m.md_node(model)};
         u32 const resources_list[] = {resources_node};
+        name_producer(_m);
         _m.md_named("dx.version", version_node);
         _m.md_named("dx.valver", validator_node);
         _m.md_named("dx.shaderModel", model_node);
@@ -834,6 +844,7 @@ void writer::write_entry_metadata()
     u32 const model_node[] = {_m.md_node(model)};
     u32 const resources_list[] = {resources_node};
     u32 const entries[] = {_m.md_node(entry)};
+    name_producer(_m);
     _m.md_named("dx.version", version_node);
     _m.md_named("dx.valver", validator_node);
     _m.md_named("dx.shaderModel", model_node);

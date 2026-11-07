@@ -416,6 +416,31 @@ TEST("slib - DXIL's float flags stand on each operation, and only `fast` lets a 
     CHECK(strict_text.value().contains("fadd float"));
 }
 
+// AMD's DXIL compiler crashes on a module without it, though LLVM leaves it optional.
+// docs/bugs-external/amd-d3d12-dxil-without-llvm-ident-crashes has the reproduction.
+TEST("slib - every module SGL's DXIL writes names its producer in llvm.ident, a library's too")
+{
+    auto compiler = ssc::dxc::compiler::create();
+    if (compiler.has_error())
+        SKIP("no DXC");
+    auto const kernel = written(k_sums, "fast_sum");
+    constexpr cc::string_view miss_source = "require raytracing_pipeline\n"
+                                            "struct probe:\n"
+                                            "    is_missed: bool\n"
+                                            "@miss fun probe_miss(p: mut probe):\n"
+                                            "    p.is_missed = true\n";
+    auto const library = written(miss_source, "probe_miss");
+    REQUIRE(kernel.has_value());
+    REQUIRE(library.has_value());
+    for (auto const* e : {&kernel.value(), &library.value()})
+    {
+        auto const text = compiler.value().disassemble(e->dxil);
+        REQUIRE(text.has_value());
+        CHECK(text.value().contains("!llvm.ident = !{"));
+        CHECK(text.value().contains("!\"sgl\""));
+    }
+}
+
 TEST("slib - a container SGL writes carries the digest the retail runtime takes unsigned, and its stage's parts")
 {
     auto const e = written(k_sums, "fast_sum");
