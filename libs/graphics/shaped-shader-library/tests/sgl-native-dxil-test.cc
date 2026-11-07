@@ -197,7 +197,7 @@ TEST("slib - every entry point of the fixtures that SGL's DXIL lowers passes the
     CC_LOG_INFO("and {} of the {} ray-tracing ones", ray_lowered, ray_reached);
     CC_LOG_INFO("{} of them write debug records, and the robustness profiles lower {} entry points", recording, guarded);
     // the numbers the slice reaches, so a lowering lost shows here rather than as a quiet fall back to DXC
-    CHECK(lowered >= 117);
+    CHECK(lowered >= 119);
     CHECK(ray_lowered >= 50);
     CHECK(raster_lowered == raster_reached);
     CHECK(raster_lowered >= 82);

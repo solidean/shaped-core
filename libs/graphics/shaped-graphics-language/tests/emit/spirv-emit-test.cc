@@ -402,7 +402,7 @@ TEST("sgl spirv - every entry point of the fixtures that lowers is what spirv-va
                 lowered, raster_lowered, primitive_lowered, mesh_lowered);
     CC_LOG_INFO("and {} ray-tracing ones", ray_lowered);
     CC_LOG_INFO("{} of them write debug records, and the robustness profiles lower {} entry points", recording, guarded);
-    CHECK(lowered >= 118);
+    CHECK(lowered >= 119);
     CHECK(raster_lowered >= 82);
     CHECK(ray_lowered >= 48);
     CHECK(primitive_lowered >= 18);

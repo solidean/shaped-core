@@ -560,6 +560,7 @@ if(SC_BUILD_TESTS)
                 diagnostic_routes.sgl:*
                 query_stages.sgl:*
                 ray_stages.sgl:*
+                double_routes.sgl:*
         )
         sc_add_shader_package(
             TARGET     shaped-graphics-test
@@ -576,6 +577,7 @@ if(SC_BUILD_TESTS)
                 diagnostic_routes.sgl:*
                 query_stages.sgl:*
                 ray_stages.sgl:*
+                double_routes.sgl:*
         )
         sc_add_shader_package(
             TARGET     shaped-graphics-test
@@ -592,6 +594,7 @@ if(SC_BUILD_TESTS)
                 diagnostic_routes.sgl:*
                 query_stages.sgl:*
                 ray_stages.sgl:*
+                double_routes.sgl:*
         )
 
         sc_add_shader_package(

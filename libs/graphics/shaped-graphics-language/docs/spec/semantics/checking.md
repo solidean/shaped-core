@@ -127,7 +127,7 @@ use view
 * **CHK-458** A `double` and its vectors take `sqrt`, `inverse_sqrt`, `floor`, `ceil`, `trunc`, `round`, `fract`, `sign` and `saturate`.
   They take `is_nan`, `is_inf`, `mix`, `step`, `smoothstep` and `fma` too, the vectors `dot`, `length`, `distance` and `normalize`, and a `double3` `cross`.
   No transcendental takes one, `sin` to `pow`: no target computes one in 64 bits, and a call is `no-matching-overload` whose detail says so; `x as float` takes the float's.
-  Neither DXIL nor DXC's SPIR-V has a double `sqrt` or rounding, and DXC narrows a double handed to its float functions without a word, so HLSL writes each as a function of the text (EMIT-219).
+  Neither DXIL nor DXC's SPIR-V has a double `sqrt` or rounding, and DXC narrows a double handed to its float functions without a word, so the prelude writes each in SGL (EMIT-219).
 * **CHK-451** `long`, `ulong` and their vectors name the feature `shader_int64`, and `double` and its vectors `shader_f64`, as CHK-382 says of the 16-bit types.
 * **CHK-383** A 16-bit value crosses no stage edge: a member of one, at any depth of a struct an entry point takes or returns, is `unsupported-yet`.
 * **CHK-454** A 64-bit value crosses a stage link, flat as an integer does (CHK-273), on every target that has its type (EMIT-196).
@@ -695,6 +695,7 @@ fun shade(k: float) -> float:
   WGSL refuses at shader creation what CHK-270, CHK-311 and CHK-312 refuse, so they hold on every target, and an entry point is written for all of them or none (EMIT-13).
 * **CHK-311** A call with no value is the normal error `constant-without-value`.
   That is an integer `/` or `%` by a constant with a zero component, whatever it divides, and a call of constants that EVAL-84 or EVAL-87 leaves without a value.
+  One that stands in a prelude body is reported at the program's call that reached it, since a program cannot fix the prelude.
 * **CHK-312** A call of constants whose value its type cannot hold is the normal error `constant-not-representable`, which WGSL folds exactly and refuses.
   That is an `int` sum, difference, product, negation, absolute value or left shift outside the `int`s, and a `uint` shifted left past its top bit.
   It is also a negative `int` converted to `uint`, and a `float` result that is infinite or NaN.

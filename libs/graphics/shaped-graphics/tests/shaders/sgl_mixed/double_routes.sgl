@@ -1,0 +1,17 @@
+// A double's maths, its bits and fma through DXC and through SGL's own binary, which core.sgl writes once for both
+// (EMIT-219), so the two routes compute alike.
+
+require shader_f64
+
+binding double_routes:
+    values: buffer[double]
+    results: mut buffer[double4]
+
+// Three results per value: its roots and roundings, its other rounding and fraction and a length, then fma and its bits.
+@compute(64) fun double_steps(@thread_id id: int3){double_routes}:
+    let x = double_routes.values[id.x]
+    double_routes.results[3 * id.x] = double4(sqrt(x), inverse_sqrt(x), floor(x), ceil(x))
+    double_routes.results[3 * id.x + 1] = double4(round(x), fract(x), trunc(x), length(double2(x, 1.0f64)))
+    let words = x.bits
+    let negated = double.from_bits(uint2(words.x, words.y ^ 0x80000000u))
+    double_routes.results[3 * id.x + 2] = double4(fma(x, x, -x), negated, 0.0f64, 0.0f64)

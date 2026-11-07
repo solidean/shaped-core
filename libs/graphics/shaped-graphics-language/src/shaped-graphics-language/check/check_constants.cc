@@ -34,6 +34,20 @@ struct constant_pass
     void report(flat_expr_id id, diagnostic_kind kind, cc::string_view detail)
     {
         auto const& x = e.at(id);
+        // a prelude body is no program's to fix, so its constant is the program's call that reached it
+        if (c.is_prelude_file(x.from.file))
+            for (auto i = isize(x.inlined_through.count) - 1; i >= 0; --i)
+            {
+                auto const& site = e.call_sites[isize(x.inlined_through.first) + i];
+                if (c.is_prelude_file(site.file))
+                    continue;
+                auto const where = c.span_of(site.file, site.call);
+                for (auto const& d : c.out.diagnostics)
+                    if (d.what.kind == kind && d.file == site.file && d.what.where == where)
+                        return;
+                c.report(kind, site.file, where, cc::format("`{}` {}", c.text_of(site.file, where), detail));
+                return;
+            }
         auto const where
             = ast::is_valid(x.from.expr) ? c.span_of(x.from.file, x.from.expr) : c.span_of(x.from.file, x.from.stmt);
         // once, however many trees inline the function the expression stands in

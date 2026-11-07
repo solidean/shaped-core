@@ -638,10 +638,15 @@ So `{float3; float}` is written with `packed_float3`: the `float` is at byte 12 
 * **EMIT-218** MSL writes a buffer's `atomic[ulong]` as `atomic_ulong`, and its `min` and `max` as `atomic_min_explicit` and `atomic_max_explicit`, which give nothing back.
   So each stands as a statement alone, and an MSL compile whose program reads what one gave back is `target-lacks-feature`.
   HLSL writes a workgroup memory's 64-bit atomic as a `groupshared` `int64_t` or `uint64_t` under the same `Interlocked*` calls as a buffer's.
-* **EMIT-219** HLSL writes a double's maths (CHK-458) as functions of the text, `sgl_double_sqrt` and its siblings, declared once ahead of an entry point that calls any of them.
-  Each reads and writes a double's bits through `asuint` and `asdouble`, over its arithmetic and `fma`: DXC hands a double to its own `sqrt` or `floor` as a float.
-  `sqrt` and `inverse_sqrt` start from the float `rsqrt` of the mantissa brought to 1 to 4, take two Newton steps, and `sqrt` corrects by the residual `fma` gives.
+* **EMIT-219** A double's maths (CHK-458) is SGL in `core.sgl`, over a double's bits (CHK-517), its arithmetic and `fma`.
+  So a target writes what it inlines, and calls no function of its own for any of them.
+  DXC hands a double to its own `sqrt` or `floor` as a float, and DXIL has neither, so no route may call a target's.
+  `sqrt` and `inverse_sqrt` start from the float `inverse_sqrt` of the mantissa brought to 1 to 4, take two Newton steps, and `sqrt` corrects by the residual `fma` gives.
+  A rounding clears the fraction's bits, so `trunc`, `floor`, `ceil`, `round` and `fract` are exact on every route.
   `sign` and `saturate` are HLSL's own, which take a double.
+* **EMIT-256** Every route writes a double's maths from that one SGL, so `hlsl-dx12`, `hlsl-vulkan` and both native routes compute it with the same operations.
+  The native SPIR-V route takes no GLSL.std.450 `Sqrt`, `Floor` or `Round` of a double either: Vulkan states a double's precision as no better than a float's.
+  The interpreter runs the same bodies, except that `sqrt`, `inverse_sqrt` and `smoothstep` take its own answer where the language is `.sgl` (EVAL-108).
 * **EMIT-255** HLSL writes a double's bits (CHK-517) as functions of the text, `sgl_double_bits` over `asuint` and `sgl_double_from_bits` over `asdouble`.
   `asuint` hands a double's words to two out parameters, which no expression can take.
   A native route bitcasts: SPIR-V's `OpBitcast` between a double and a `uint2`, and DXIL's `splitDouble` and `makeDouble` (EMIT-196).
