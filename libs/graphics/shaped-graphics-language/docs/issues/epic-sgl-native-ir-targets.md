@@ -195,7 +195,8 @@ What still differs: DXC stands every addition at the end of its block, after all
   A cleared digest and a `-Vd` compile are refused with `E_INVALIDARG`, and so is a changed byte under a signed digest.
   The retail bypass digest, sixteen bytes of `0x01`, is taken; the preview one, of `0x02`, is refused.
   So `dxil.dll` can go, and a container of ours writes that digest, which sg's route has loaded under the debug layer.
-  The Agility SDK's runtime is unasked, since fetching it accepts Microsoft's license, which is the user's to do; this repeats by running the spike with it fetched.
+  The Agility SDK's runtime, 1.620.1, takes the retail digest too: SGL's ray-tracing libraries, SM 6.9 hit objects among them, create state objects on it under the debug layer, on 2026-11-07.
+  The spike itself creates its device without sg, so it still asks the system runtime, and the preview digest is unasked on Agility.
   Signing would not have stopped the writer either way: only the dependency hangs on it.
 - **The bug surface moves to us.** DXC's lowerings of odd cases, and what each driver's compiler happens to accept, become ours.
   A corpus compared across both routes is what holds it, which the second backend sweep is the start of.
