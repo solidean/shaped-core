@@ -1,0 +1,42 @@
+---
+created: 2026-11-07
+refs:
+  - file: docs/bugs-external/intel-agility-process-recompiles-acceleration-structure-kernels/readme.md
+  - file: libs/graphics/shaped-graphics/backends/dx12/src/shaped-graphics/backends/dx12/dx12_runtime.cc
+---
+
+# A process on the Agility SDK pays 25-37 s per acceleration-structure kind on Intel, so the test suite takes 182 s
+
+On Intel's driver 32.0.101.9150, a process that has made a D3D12 device on the Agility SDK's runtime recompiles the driver's acceleration-structure kernels on every run.
+Each first build of a kind costs 25–37 s, on dx12 and on vulkan alike, and the compiles queue behind one another.
+[The external entry](../../../../../docs/bugs-external/intel-agility-process-recompiles-acceleration-structure-kernels/readme.md) has the matrix that isolates it.
+
+## Measured, 2026-11-07, Arc B580
+
+- `shaped-graphics-test` alone: 9.9 s built without the Agility SDK, and over 175 s with it.
+  In `dev.py ship` it was 182 s, the whole run's critical path against a 120 s budget.
+- In that run, four unrelated tests took 27–28 s each, and every other case under 2 s.
+  Each was the first acceleration-structure build of its driver, or a test waiting behind one.
+- A quarter shard of the binary on Agility takes 89 s, and 55% of its sampled busy time is a vulkan TLAS build waiting in the driver's compiler.
+- Our part is nothing: two triangles, one driver call, 17 ms on the system runtime.
+
+## Mitigations, for a decision
+
+The coverage the Agility SDK buys on dx12 is shader model 6.9, shader execution reordering and opacity micromaps.
+Every option below trades some of that on Intel for time, so which one is a decision rather than a fix.
+
+1. **Keep the Agility runtime out of processes that do not need it.**
+   A `dx12_config` field, or a process-wide setting, picks the system runtime.
+   The default test drivers run on it, and one Agility driver runs the tests that need SM 6.9.
+   That driver must be its own process to help, since one Agility device poisons vulkan's builds too.
+   Nexus runs drivers in-process, so that is either a separate binary or `--thorough` only.
+2. **Scope it to the vendor.** The same, applied only where the adapter is Intel's, so other machines keep full coverage in the default run.
+3. **Leave it, and raise the budget.** Cheapest, and the 182 s stays.
+
+Applications should be affected too: `shaped-view` on this driver would wait 26 s or more at its first trace build, though that was not measured.
+Option 1's knob is what an application would reach for there as well.
+
+## Not done
+
+- No standalone reproduction yet, so nothing is filed with Intel.
+- Another Agility SDK version was not tried; that needs a new pin and its terms read.
