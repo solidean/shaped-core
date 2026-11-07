@@ -46,7 +46,7 @@ A dx12 device changing what a vulkan device of the same process costs can only h
 ## What we do about it
 
 Nothing yet.
-The mitigation options are in [the sg issue](../../libs/graphics/shaped-graphics/docs/issues/perf-sg-agility-intel-acceleration-structure-compile.md).
+The mitigation options are in [the sg issue](../../../libs/graphics/shaped-graphics/docs/issues/perf-sg-agility-intel-acceleration-structure-compile.md).
 
 ## Re-check when
 
