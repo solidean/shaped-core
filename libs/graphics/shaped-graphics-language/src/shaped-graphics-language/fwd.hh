@@ -415,6 +415,7 @@ enum class storage : u8;
 struct type;
 enum class math : u8;
 enum class subgroup : u8;
+enum class ray_query_value : u8;
 enum class group_fold : u8;
 enum class derivative : u8;
 enum class barrier : u8;
@@ -456,4 +457,6 @@ struct call;
 namespace sgl::builtins
 {
 enum class subgroup_op : u8;
+enum class query_op : u32;
+enum class query_read : u32;
 } // namespace sgl::builtins

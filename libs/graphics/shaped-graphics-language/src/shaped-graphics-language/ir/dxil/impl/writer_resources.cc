@@ -28,6 +28,9 @@ constexpr u32 k_kind_raw_buffer = 11;
 constexpr u32 k_kind_structured_buffer = 12;
 constexpr u32 k_kind_constants = 13;
 constexpr u32 k_kind_sampler = 14;
+constexpr u32 k_kind_acceleration_structure = 16;
+/// `DXIL::ComponentType::I32`, the element DXC states of a structure.
+constexpr u32 k_component_i32 = 4;
 
 /// What a binding is to DXIL, per `global_kind`; the row of a new kind is what adds it.
 struct resource_rule
@@ -56,6 +59,8 @@ struct resource_rule
     case global_kind::sampler:
     case global_kind::file_sampler:
         return {.cls = 3, .psv_read = 1, .psv_write = 1};
+    case global_kind::acceleration_structure:
+        return {.cls = 0, .psv_read = 4, .psv_write = 4};
     default:
         return {};
     }
@@ -165,6 +170,10 @@ void writer::declare_handles()
             break;
         case global_kind::sampler:
             kind = k_kind_sampler;
+            break;
+        case global_kind::acceleration_structure:
+            kind = k_kind_acceleration_structure;
+            component = k_component_i32;
             break;
         default:
             break;

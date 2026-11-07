@@ -163,6 +163,13 @@ constexpr shape k_shapes[] = {
     shape::no_result,           // end_strip
     shape::no_result,           // set_mesh_counts
     shape::no_result,           // write_primitive
+    shape::any_result,          // ray_query_begin
+    shape::no_result,           // ray_query_trace
+    shape::any_result,          // ray_query_proceed
+    shape::no_result,           // ray_query_commit_triangle
+    shape::no_result,           // ray_query_commit_procedural
+    shape::no_result,           // ray_query_abort
+    shape::any_result,          // ray_query_read
     shape::combine_sampler,     // combine_sampler
     shape::image_access,        // sample_lod
     shape::image_access,        // sample_implicit
