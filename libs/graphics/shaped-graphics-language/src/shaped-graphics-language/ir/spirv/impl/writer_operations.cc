@@ -276,11 +276,24 @@ void writer::atomic(u32 opcode, instruction const& i, u32 id)
 {
     auto const operands = _p.operands_of(i);
     auto const pointer = id_of_raw(operands[0]);
-    auto const scope = literal_id(k_scope_device);
+    auto const& pointed = _p.at(_p.type_of(value_ref(operands[0])));
+    // workgroup memory is one workgroup's, which is the scope DXC states of it too
+    auto const scope = literal_id(pointed.space == storage::workgroup ? k_scope_workgroup : k_scope_device);
     auto const none = literal_id(0);
-    auto const held = _p.at(_p.at(_p.type_of(value_ref(operands[0]))).element);
+    auto const held = _p.at(pointed.element);
     if (held.width == 64)
         require(spv::Int64Atomics);
+    // EMIT-258: a 64-bit word of workgroup memory is stored by an exchange and read by an `or` of 0, as DXC writes them
+    auto const is_shared_wide = held.width == 64 && pointed.space == storage::workgroup;
+    if (i.code == op::atomic_store && is_shared_wide)
+        return emit(_code, spv::AtomicExchange,
+                    {id_of(pointed.element), _bound++, pointer, scope, none, id_of_raw(operands[1])});
+    if (i.code == op::atomic_load && is_shared_wide)
+    {
+        auto const zero = _bound++;
+        emit(_declarations, spv::ConstantNull, {id_of(pointed.element), zero});
+        return emit(_code, spv::AtomicOr, {id_of(i.type), id, pointer, scope, none, zero});
+    }
     if (i.code == op::atomic_store)
         return emit(_code, opcode, {pointer, scope, none, id_of_raw(operands[1])});
     if (i.code == op::atomic_load)
