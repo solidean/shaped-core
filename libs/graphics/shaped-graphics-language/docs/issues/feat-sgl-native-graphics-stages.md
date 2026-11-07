@@ -237,9 +237,20 @@ On 2026-11-06, on the Arc B580 and over the repo's SGL:
   A discarded pixel's neighbour reads the derivative only a helper can give, exactly 2, and a depth test shows the depth written.
 - **`slug-cube`'s captures are byte for byte DXC's**, on dx12 through DXIL and on vulkan through SPIR-V.
 - **Compute did not move.** Of 396 outputs, 356 are the bytes they were, and the other 40 are 20 entry points that lower now and did not.
-- **`print` and `assert` are the likely next gap.**
-  With `SC_SHADER_DIAGNOSTICS` on, the default, an entry point holding either falls back to DXC under a preference and is an error under `NATIVE_DXIL` or `NATIVE_SPIRV`.
-  Neither writer reaches sg's debug window yet, and that is one gap of every stage rather than of pixel stages.
+
+## Measured on `print` and `assert`
+
+On 2026-11-07, on the Arc B580 and over the repo's SGL, with LEGAL-70 in, so neither writer holds any of it:
+
+- **Every entry point that lowered still lowers with diagnostics on**, and the sweeps now run that way: 98 compute and 65 vertex and pixel entry points of SPIR-V, and 93 and 65 of DXIL.
+  Two of them write records, and each passes `spirv-val` and DXC's validator.
+- **Each robustness profile passes the same validators**: 459 entry points across `abort`, `report` and `define` on DXIL, and 156 under `report` on SPIR-V.
+  None of them ran on a GPU under a failing guard, on purpose.
+- **A failed assert logs the same line through either route**, on dx12 and vulkan, in a compute and in a pixel stage.
+  The test is [`compute-diagnostic-routes-test.cc`](../../../shaped-graphics/tests/compute/compute-diagnostic-routes-test.cc).
+  Each line holds every value, and an exact count of two makes each route's line count.
+  The failing compute invocation stores nothing, and the failing pixel is discarded.
+- **A package never held a `print`.** `sgl describe` refused one, which only an `assert` escaped, so `NATIVE_DXIL` and `NATIVE_SPIRV` packages needed that too.
 
 ## Measured on geometry and tessellation
 

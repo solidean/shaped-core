@@ -2,6 +2,7 @@
 
 #include <clean-core/container/set.hh>
 #include <clean-core/string/format.hh>
+#include <shaped-graphics-language/check/reserved_bindings.hh>
 #include <shaped-graphics-language/check/resources.hh>
 #include <shaped-graphics-language/emit/impl/layout.hh>
 #include <shaped-graphics-language/emit/reserved_words.hh>
@@ -188,6 +189,8 @@ struct validator
             {
                 auto is_listed = false;
                 for (auto const id : e.bindings)
+                    is_listed = is_listed || id == b->binding;
+                for (auto const id : e.reserved)
                     is_listed = is_listed || id == b->binding;
                 if (!is_listed)
                     report(error_kind::malformed_tree, e.function,
@@ -586,6 +589,30 @@ struct planner
                 slot += count;
             }
             ++group;
+        }
+    }
+
+    /// What legalize reached of the reserved table, at its fixed address, behind every group's own.
+    void reserved_resources()
+    {
+        for (auto const id : p.e.reserved)
+        {
+            auto const& s = p.m.at(id);
+            auto const* const entry = check::reserved_binding_named(s.name);
+            CC_ASSERT(entry != nullptr, "the tree reaches a binding the reserved table does not hold");
+            auto const& on = entry->targets[u8(p.which)];
+            auto const& member = p.m.at(p.m.bindings[s.info].members)[0];
+            auto const& t = p.m.at(member.type);
+            p.resources.push_back({.binding = id,
+                                   .member = 0,
+                                   .name = s.name,
+                                   .type = member.type,
+                                   .element = t.element,
+                                   .space = address_space::storage,
+                                   .is_mut = t.is_mut,
+                                   .is_reserved = true,
+                                   .group = on.group,
+                                   .slot = on.slot});
         }
     }
 
@@ -1463,6 +1490,7 @@ sgl::emit::impl::plan sgl::emit::impl::make_plan(check::checked_module const& m,
     p.constants();
     p.group_blocks();
     p.resources();
+    p.reserved_resources();
     p.argument_buffers();
     p.workgroup_memory();
     p.file_samplers();
@@ -1754,7 +1782,7 @@ cc::vector<sgl::emit::emitted_layout> sgl::emit::impl::layouts_of(plan const& p)
         block(c);
     for (auto const& r : p.resources)
     {
-        if (p.m.at(r.type).kind != type_kind::buffer)
+        if (p.m.at(r.type).kind != type_kind::buffer || r.is_reserved)
             continue;
         auto layout = emitted_layout{.global = r.name, .stride = element_stride(p.m, r.element, r.space)};
         if (r.element_form.has_value())

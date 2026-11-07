@@ -899,7 +899,8 @@ cc::result<sgl::module_description, cc::string> sgl::describe(describe_request c
     {
         auto const before = errors.size();
         legal.push_back(e.legalized != nullptr ? *e.legalized : check::legalize(m, e));
-        emit_impl::validate(m, legal.back(), errors);
+        // a compile writes a print or drops it (LEGAL-63), so no print keeps a description from being written
+        emit_impl::validate(m, legal.back(), errors, true);
         if (errors.size() == before)
             result.entry_points.push_back(describe_entry_point(m, e, legal.back()));
     }

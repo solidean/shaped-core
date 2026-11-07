@@ -1,6 +1,7 @@
 #include "dialect.hh"
 
 #include <clean-core/string/format.hh>
+#include <shaped-graphics-language/check/reserved_bindings.hh>
 #include <shaped-graphics-language/check/resources.hh>
 
 namespace
@@ -35,13 +36,6 @@ public:
     bool is_c_like() const override { return true; }
     bool has_line_directives() const override { return true; }
 
-    // vulkan writes no storage from a vertex, geometry or tessellation stage without vertexPipelineStoresAndAtomics
-    bool writes_debug_in(check::stage s, check::feature_set device) const override
-    {
-        return !_is_vulkan || device.has(check::feature::vertex_pipeline_stores)
-            || (s != check::stage::vertex && s != check::stage::geometry && s != check::stage::tessellation_control
-                && s != check::stage::tessellation_evaluation);
-    }
     // GetDimensions writes through out parameters, so each buffer's length is a helper reading it
     cc::string buffer_length(cc::string_view name, bool) const override { return cc::format("sgl_length_{}()", name); }
     cc::string buffer_length_helper(cc::string_view name, bool is_bytes) const override
@@ -74,45 +68,18 @@ public:
     /// EMIT-135: an emulated trace reads sg's pool and the dispatch's roots, as WGSL's does.
     void write_acceleration_pool(cc::string& out) const override
     {
+        auto const which = u8(_is_vulkan ? emit::target::hlsl_vulkan : emit::target::hlsl_dx12);
+        auto const& pool = check::reserved_binding_named("sg_acceleration_pool")->targets[which];
+        auto const& roots = check::reserved_binding_named("sg_acceleration_roots")->targets[which];
         if (_is_vulkan)
-            out += "[[vk::binding(17, 3)]] StructuredBuffer<uint4> sg_acceleration_pool;\n"
-                   "[[vk::binding(18, 3)]] cbuffer sg_acceleration_roots_block\n"
-                   "{\n    uint4 sg_acceleration_roots[4];\n};\n\n";
+            out.appendf("[[vk::binding({}, {})]] StructuredBuffer<uint4> sg_acceleration_pool;\n"
+                        "[[vk::binding({}, {})]] cbuffer sg_acceleration_roots_block\n",
+                        pool.slot, pool.group, roots.slot, roots.group);
         else
-            out += "StructuredBuffer<uint4> sg_acceleration_pool : register(t0, space12);\n"
-                   "cbuffer sg_acceleration_roots_block : register(b0, space12)\n"
-                   "{\n    uint4 sg_acceleration_roots[4];\n};\n\n";
-    }
-    void write_debug_buffer(cc::string& out) const override
-    {
-        if (_is_vulkan)
-            out += "[[vk::binding(19, 3)]] RWByteAddressBuffer sg_debug;\n\n";
-        else
-            out += "RWByteAddressBuffer sg_debug : register(u0, space11);\n\n";
-    }
-    cc::string debug_reserve(cc::string_view at, isize count) const override
-    {
-        return cc::format("sg_debug.InterlockedAdd(0, {}, {});", count, at);
-    }
-    cc::string debug_declare(cc::string_view at) const override { return cc::format("uint {};", at); }
-    cc::string debug_fits(cc::string_view at, isize count) const override
-    {
-        return cc::format("{} + {} <= sg_debug.Load(4)", at, count);
-    }
-    cc::string debug_store(cc::string_view at, isize i, cc::string_view word) const override
-    {
-        return cc::format("sg_debug.Store(12 + ({} + {}) * 4, {});", at, i, word);
-    }
-    cc::string debug_drop() const override { return "sg_debug.InterlockedAdd(8, 1);"; }
-    cc::string debug_word(cc::string_view value, cc::string_view family) const override
-    {
-        if (family == "uint")
-            return cc::string(value);
-        if (family == "bool")
-            return cc::format("({} ? 1u : 0u)", value);
-        if (family == "half")
-            return cc::format("asuint(float({}))", value);
-        return cc::format("asuint({})", value);
+            out.appendf("StructuredBuffer<uint4> sg_acceleration_pool : register(t{}, space{});\n"
+                        "cbuffer sg_acceleration_roots_block : register(b{}, space{})\n",
+                        pool.slot, pool.group, roots.slot, roots.group);
+        out += "{\n    uint4 sg_acceleration_roots[4];\n};\n\n";
     }
     cc::string_view rolled_loop_hint() const override { return "[loop]"; }
 

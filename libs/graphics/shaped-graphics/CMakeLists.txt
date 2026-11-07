@@ -436,6 +436,7 @@ if(SC_BUILD_TESTS)
             tests/barrier/sticky-array-test.cc
             tests/compute/compute-coherence-test.cc
             tests/compute/compute-float-specials-test.cc
+            tests/compute/compute-diagnostic-routes-test.cc
             tests/compute/compute-diagnostics-test.cc
             tests/compute/compute-sixteen-bit-test.cc
             tests/compute/compute-sixty-four-bit-test.cc
@@ -554,6 +555,7 @@ if(SC_BUILD_TESTS)
                 pixel_surface.sgl:*
                 primitive_stages.sgl:*
                 mesh_stages.sgl:*
+                diagnostic_routes.sgl:*
         )
         sc_add_shader_package(
             TARGET     shaped-graphics-test
@@ -567,6 +569,7 @@ if(SC_BUILD_TESTS)
                 pixel_surface.sgl:*
                 primitive_stages.sgl:*
                 mesh_stages.sgl:*
+                diagnostic_routes.sgl:*
         )
         sc_add_shader_package(
             TARGET     shaped-graphics-test
@@ -580,6 +583,7 @@ if(SC_BUILD_TESTS)
                 pixel_surface.sgl:*
                 primitive_stages.sgl:*
                 mesh_stages.sgl:*
+                diagnostic_routes.sgl:*
         )
 
         sc_add_shader_package(

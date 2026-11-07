@@ -106,6 +106,8 @@ TEST("slib - every entry point of the fixtures that SGL's DXIL lowers passes the
     auto primitive_lowered = 0;
     auto mesh_reached = 0;
     auto mesh_lowered = 0;
+    auto recording = 0;
+    auto guarded = 0;
     for (auto const& file : files)
     {
         auto const source = read_file(file);
@@ -118,6 +120,7 @@ TEST("slib - every entry point of the fixtures that SGL's DXIL lowers passes the
             auto const e = sgl::compile_to_text({.source = source,
                                                  .entry_point = entry.entry_point,
                                                  .target = sgl::emit::target::hlsl_dx12,
+                                                 .diagnostics = true,
                                                  .native = sgl::emit::native_route::prefer});
             if (e.has_error())
                 continue;
@@ -136,17 +139,45 @@ TEST("slib - every entry point of the fixtures that SGL's DXIL lowers passes the
                 continue;
             }
             ++(is_mesh ? mesh_lowered : is_primitive ? primitive_lowered : is_raster ? raster_lowered : lowered);
+            recording += e.value().debug_sites.empty() ? 0 : 1;
             auto const refused = compiler.value().validate(e.value().dxil);
             CHECK(!refused.has_value())
                 .dump("file", file)
                 .dump("entry", entry.entry_point)
                 .dump("validator", refused.value_or(cc::string()));
+
+            // each robustness profile through the validator alone: nothing here runs what a guard stops
+            for (auto const guard : {sgl::check::undefined_guard::abort, sgl::check::undefined_guard::report,
+                                     sgl::check::undefined_guard::define})
+            {
+                auto const profile = sgl::compile_to_text({.source = source,
+                                                           .entry_point = entry.entry_point,
+                                                           .target = sgl::emit::target::hlsl_dx12,
+                                                           .diagnostics = true,
+                                                           .guards_undefined = guard,
+                                                           .native = sgl::emit::native_route::prefer});
+                if (profile.has_error() || profile.value().dxil.empty())
+                {
+                    if (profile.has_value())
+                        CC_LOG_INFO("{}: {}: under {}: {}", file, entry.entry_point, int(guard),
+                                    profile.value().native_gap);
+                    continue;
+                }
+                ++guarded;
+                auto const refused_guarded = compiler.value().validate(profile.value().dxil);
+                CHECK(!refused_guarded.has_value())
+                    .dump("file", file)
+                    .dump("entry", entry.entry_point)
+                    .dump("guard", int(guard))
+                    .dump("validator", refused_guarded.value_or(cc::string()));
+            }
         }
     }
     CC_LOG_INFO("SGL's DXIL lowers {} of the {} compute entry points, {} of the {} vertex and pixel ones, {} of the {} "
                 "geometry and tessellation ones, and {} of the {} mesh and task ones",
                 lowered, reached, raster_lowered, raster_reached, primitive_lowered, primitive_reached, mesh_lowered,
                 mesh_reached);
+    CC_LOG_INFO("{} of them write debug records, and the robustness profiles lower {} entry points", recording, guarded);
     // the numbers the slice reaches, so a lowering lost shows here rather than as a quiet fall back to DXC
     CHECK(lowered >= 90);
     CHECK(raster_lowered >= 64);
@@ -154,6 +185,60 @@ TEST("slib - every entry point of the fixtures that SGL's DXIL lowers passes the
     CHECK(mesh_reached >= 6);
     CHECK(mesh_lowered == mesh_reached);
     CHECK(primitive_lowered >= 18);
+    CHECK(recording >= 2);
+    CHECK(guarded >= 450);
+}
+
+TEST("slib - a debug record of every value family passes the validator, in each stage that writes one")
+{
+    auto compiler = ssc::dxc::compiler::create();
+    if (compiler.has_error())
+        SKIP("no DXC");
+    constexpr cc::string_view source
+        = "require shader_f16\n"
+          "enum tone:\n"
+          "    low\n"
+          "    high\n"
+          "\n"
+          "struct link:\n"
+          "    @position position: hpos4\n"
+          "\n"
+          "@pixel struct written:\n"
+          "    color: float4\n"
+          "\n"
+          "@compute(4) fun records_cs(@thread_id id: int3):\n"
+          "    print \"$(id.x) $(id.x as uint) $(id.x as float) $(half(0.5)) $(id.x > 1) $id $(tone.high)\"\n"
+          "\n"
+          "@vertex fun records_vs(@vertex_index v: int) -> link:\n"
+          "    print \"vertex $v\"\n"
+          "    return { position = hpos4(0.0, 0.0, 0.0, 1.0) }\n"
+          "\n"
+          "@pixel fun records_ps(l: link) -> written:\n"
+          "    print \"pixel $(l.position.x)\"\n"
+          "    return { color = float4(1.0) }\n";
+    for (auto const entry : {"records_cs", "records_vs", "records_ps"})
+    {
+        auto const e = sgl::compile_to_text({.source = source,
+                                             .entry_point = entry,
+                                             .target = sgl::emit::target::hlsl_dx12,
+                                             .diagnostics = true,
+                                             .native = sgl::emit::native_route::require});
+        REQUIRE(e.has_value());
+        REQUIRE(e.value().debug_sites.size() == 1);
+        auto const refused = compiler.value().validate(e.value().dxil);
+        CHECK(!refused.has_value()).dump("entry", entry).dump("validator", refused.value_or(cc::string()));
+    }
+
+    // a UAV outside a pixel or a compute stage is a feature the container states, which DXC's disassembly reads back
+    auto const vertex = sgl::compile_to_text({.source = source,
+                                              .entry_point = "records_vs",
+                                              .target = sgl::emit::target::hlsl_dx12,
+                                              .diagnostics = true,
+                                              .native = sgl::emit::native_route::require});
+    REQUIRE(vertex.has_value());
+    auto const text = compiler.value().disassemble(vertex.value().dxil);
+    REQUIRE(text.has_value());
+    CHECK(text.value().contains("UAVs at every shader stage"));
 }
 
 TEST("slib - a pixel stage's surface is DXIL's own operations, and a binding array's element its own handle")
