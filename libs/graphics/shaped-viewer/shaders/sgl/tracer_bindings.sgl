@@ -585,6 +585,7 @@ fun surface_payload_for(rng: uint, sigma_t: float3, albedo: float3, g: float, ch
 /// The 16 SH coefficients of the environment, copied out of their buffer into the array `scene.background_radiance` takes.
 fun background_sh(){traced} -> float4[16]:
     let mut sh = float4[16].filled(float4(0.0))
+    @unroll
     for k in 0 ..< 16:
         sh[k] = traced.background[k]
     return sh
@@ -592,6 +593,7 @@ fun background_sh(){traced} -> float4[16]:
 /// The whole environment, copied out of its buffer into the array `scene.environment_*` take.
 fun background_lanes(){traced} -> float4[28]:
     let mut env = float4[28].filled(float4(0.0))
+    @unroll
     for k in 0 ..< 28:
         env[k] = traced.background[k]
     return env
