@@ -82,17 +82,23 @@ The vertex and pixel sweep lowers 83 of 83 on both writers, and dropping the off
 ## A double's maths, measured on 2026-11-07
 
 SGL gained what the helpers needed: `fma` of every float type (EVAL-146, EMIT-254), and `d.bits` as a `uint2` with `double.from_bits` (CHK-517, EMIT-255).
-The helpers are SGL in `core.sgl` now, and EMIT-219's HLSL is gone, so every route inlines the one text (EMIT-256).
+The helpers are SGL in `core.sgl` now, and EMIT-219's HLSL is gone; each body chooses by `target_api` what it lowers to (EMIT-256).
 
 | route | `sqrt` and the roundings, before | after |
 |---|---|---|
-| `hlsl-dx12` and `hlsl-vulkan` | the HLSL helpers | the SGL, inlined |
+| `hlsl-dx12` | the HLSL helpers | the SGL, inlined |
 | native DXIL | a gap, so DXC under a preference | the SGL |
-| native SPIR-V | GLSL.std.450 `Sqrt`, `Floor` and the rest | the SGL |
+| `hlsl-vulkan` | the HLSL helpers | GLSL.std.450's, through DXC's inline SPIR-V |
+| native SPIR-V | GLSL.std.450 `Sqrt`, `Floor` and the rest | GLSL.std.450's |
 
-The native SPIR-V route gave up GLSL.std.450 for a double on purpose.
-A route is not something a prelude body can tell apart: native SPIR-V and DXC's text both compile for `hlsl-vulkan`, so `target_language` is `.hlsl` for both.
-One body for both also means the two vulkan routes compute alike, which they did not before.
+For a while both vulkan routes took the SGL too, on the reading that a body could not tell native SPIR-V from DXC's text.
+`target_api` tells the APIs apart, and the API is where the instructions differ, so vulkan went back to GLSL.std.450 on both its routes.
+The bodies were no sounder there: Vulkan states a double's precision as at least a float's for every instruction, the bodies' own `fma` included, which it states as a multiply then an add.
+DXC hands a double to its own `floor` or `sqrt` as a float even for SPIR-V, so its text declares each instruction through inline SPIR-V instead.
+
+On the Arc B580 both vulkan routes now agree bit for bit, and its driver's double `Sqrt` and `InverseSqrt` came out IEEE's to the bit over every positive normal test value.
+Its zeros, negatives, infinities and NaN came out IEEE's too, which no spec promises there.
+dx12's bodies stayed within 0 and 2 ULP.
 
 The interpreter runs the same bodies, so the roundings are bit for bit what the GPU gives.
 `sqrt`, `inverse_sqrt` and `smoothstep` take its own answer where the language is `.sgl`: the nearest root, which EVAL-108 promises, and smoothstep's missing value.

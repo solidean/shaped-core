@@ -838,7 +838,8 @@ ops[i](mut v)                                            // raygen, miss, closes
 - **`long`, `ulong`, `double` and their vectors are the 64-bit families** (CHK-450): `require shader_int64` or `shader_f64`; WGSL has neither, MSL no double.
   Literals: `5i64`, `5u64`, `0.1f64`, or an unsuffixed literal where the type is asked; a `ulong` literal stops at 2^63 - 1, so `~0u64` is the largest.
   Arithmetic, comparisons, bits (a shift counts to 63), `abs` / `min` / `max` / `clamp` / `select`; no subgroup operation yet.
-  A double has `sqrt` (within an ULP on a GPU), `inverse_sqrt`, the exact roundings, `sign`, `saturate`, `is_nan`, `mix`, `step`, `smoothstep` and the vector geometry (CHK-458).
+  A double has `sqrt`, `inverse_sqrt`, the exact roundings, `sign`, `saturate`, `is_nan`, `mix`, `step`, `smoothstep` and the vector geometry (CHK-458).
+  Its `sqrt` is within an ULP on dx12, and GLSL.std.450's on vulkan, which Vulkan bounds only as a float's (EVAL-108, EMIT-256).
   No transcendental of a double, which no target has: `sin(x)` is `no-matching-overload`, and `sin(x as float)` is the float's.
   `as` converts within a width or within a family: `x as long as double`, never `int as double` in one step.
   A 64-bit value crosses a stage link flat, a three- or four-vector over two locations (CHK-454); dx12 and metal carry it as its 32-bit words (EMIT-196).

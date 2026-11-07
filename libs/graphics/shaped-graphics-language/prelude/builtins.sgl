@@ -2509,6 +2509,22 @@
 /// smoothstep's steps, with no value where `low` is not below `high`.
 @builtin @internal @pure fun ordered_smoothstep(low: double, high: double, x: double) -> double
 
+// what vulkan takes a double to, which core.sgl calls where the API is vulkan (EMIT-256)
+/// The integral part, as GLSL.std.450's `Trunc`.
+@builtin @internal @pure fun spirv_trunc(x: double) -> double
+/// The integral part toward negative infinity, as GLSL.std.450's `Floor`.
+@builtin @internal @pure fun spirv_floor(x: double) -> double
+/// The integral part toward positive infinity, as GLSL.std.450's `Ceil`.
+@builtin @internal @pure fun spirv_ceil(x: double) -> double
+/// The nearest integer, a tie to the even one, as GLSL.std.450's `RoundEven`.
+@builtin @internal @pure fun spirv_round(x: double) -> double
+/// `x - floor(x)`, as GLSL.std.450's `Fract`.
+@builtin @internal @pure fun spirv_fract(x: double) -> double
+/// The root, as GLSL.std.450's `Sqrt`.
+@builtin @internal @pure fun spirv_sqrt(x: double) -> double
+/// `1 / sqrt(x)`, as GLSL.std.450's `InverseSqrt`.
+@builtin @internal @pure fun spirv_inverse_sqrt(x: double) -> double
+
 // Textures and images, called as methods: `tex.sample(uv, smp)` is `sample(tex, uv, smp)`.
 // A texture samples, gathers and loads; an image loads where the shader may read it and stores where it may write it.
 // A sample takes its level from derivatives, or from a `level`, `bias` or `grad_x` / `grad_y` named at the call.

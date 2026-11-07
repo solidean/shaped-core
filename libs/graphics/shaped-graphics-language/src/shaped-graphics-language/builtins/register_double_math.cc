@@ -93,6 +93,54 @@ cc::string double_from_bits_helper(helper_context const& c)
              : cc::string();
 }
 
+f64 ceil_of(f64 x)
+{
+    return -soft_floor(-x);
+}
+f64 fract_of(f64 x)
+{
+    return x - soft_floor(x);
+}
+f64 inverse_root_of(f64 x)
+{
+    return 1.0 / correctly_rounded_sqrt(x);
+}
+
+/// EMIT-256: a GLSL.std.450 instruction vulkan takes a double to, which core.sgl calls where the API is vulkan.
+struct spirv_double_op
+{
+    cc::string_view name;
+    cc::string_view spirv;
+    u32 opcode;
+    evaluator evaluate;
+    cc::string_view doc;
+};
+constexpr spirv_double_op k_spirv_double_ops[] = {
+    {"trunc", "Trunc", 3, unary<soft_trunc>, "/// The integral part, as GLSL.std.450's `Trunc`."},
+    {"floor", "Floor", 8, unary<soft_floor>, "/// The integral part toward negative infinity, as GLSL.std.450's `Floor`."},
+    {"ceil", "Ceil", 9, unary<ceil_of>, "/// The integral part toward positive infinity, as GLSL.std.450's `Ceil`."},
+    {"round", "RoundEven", 2, unary<soft_round>,
+     "/// The nearest integer, a tie to the even one, as GLSL.std.450's `RoundEven`."},
+    {"fract", "Fract", 10, unary<fract_of>, "/// `x - floor(x)`, as GLSL.std.450's `Fract`."},
+    {"sqrt", "Sqrt", 31, unary<correctly_rounded_sqrt>, "/// The root, as GLSL.std.450's `Sqrt`."},
+    {"inverse_sqrt", "InverseSqrt", 32, unary<inverse_root_of>, "/// `1 / sqrt(x)`, as GLSL.std.450's `InverseSqrt`."},
+};
+
+/// What `hlsl-vulkan` declares for one of them: DXC's inline SPIR-V, since its own `floor` of a double takes a float.
+cc::string spirv_double_helper(helper_context const& h)
+{
+    if (h.target != language::hlsl || !h.is_vulkan)
+        return {};
+    auto const& op = k_spirv_double_ops[h.data];
+    return cc::format("[[vk::ext_instruction(/* {} */ {}, \"GLSL.std.450\")]] double sgl_spirv_{}(double x);\n",
+                      op.spirv, op.opcode, op.name);
+}
+
+constexpr cc::string_view k_spirv_double_names[] = {
+    "sgl_spirv_trunc", "sgl_spirv_floor", "sgl_spirv_ceil",         "sgl_spirv_round",
+    "sgl_spirv_fract", "sgl_spirv_sqrt",  "sgl_spirv_inverse_sqrt",
+};
+
 constexpr cc::string_view k_double_bits_names[] = {"asuint", "asdouble", "sgl_double_bits", "sgl_double_from_bits"};
 constexpr cc::string_view k_sign[] = {"sign"};
 constexpr cc::string_view k_saturate[] = {"saturate"};
@@ -145,4 +193,19 @@ void sgl::builtins::register_double_math(registry& r)
         .evaluate = smoothstep,
         .undefined_when = smoothstep_undefined,
     });
+
+    r.add_comment("// what vulkan takes a double to, which core.sgl calls where the API is vulkan (EMIT-256)");
+    for (auto i = 0u; i < u32(sizeof(k_spirv_double_ops) / sizeof(k_spirv_double_ops[0])); ++i)
+    {
+        auto const& op = k_spirv_double_ops[i];
+        r.add(function_record{
+            .signature = cc::format("@internal @pure fun spirv_{}(x: double) -> double", op.name),
+            .doc = cc::string(op.doc),
+            .evaluate = op.evaluate,
+            .write = {.hlsl = cc::format("sgl_spirv_{}", op.name),
+                      .helper = spirv_double_helper,
+                      .data = i,
+                      .hlsl_names = k_spirv_double_names},
+        });
+    }
 }

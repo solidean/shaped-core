@@ -167,6 +167,14 @@ constexpr family_name k_families[] = {
     {"reflect", family::math_float, math::reflect},
     {"refract", family::math_float, math::refract},
     {"first_bit_low", family::math_float, math::find_ilsb},
+    // EMIT-256: what core.sgl calls for a double where the API is vulkan
+    {"spirv_trunc", family::math_float, math::trunc},
+    {"spirv_floor", family::math_float, math::floor},
+    {"spirv_ceil", family::math_float, math::ceil},
+    {"spirv_round", family::math_float, math::round_even},
+    {"spirv_fract", family::math_float, math::fract},
+    {"spirv_sqrt", family::math_float, math::sqrt},
+    {"spirv_inverse_sqrt", family::math_float, math::inverse_sqrt},
 };
 
 /// The position in `k_families` of the record called `name`, or -1.

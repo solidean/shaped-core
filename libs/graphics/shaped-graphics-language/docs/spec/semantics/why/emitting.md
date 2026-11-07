@@ -366,3 +366,26 @@ A compute stage has no helpers, so it takes the strong one on WebGPU as everywhe
 The refusal is a feature, `helper_lane_query`, rather than a rule of the WGSL emitter, so it holds on every target, as EMIT-13 asks.
 A pixel stage without the `require` is refused on the dev box at its line, and one with it is refused on WebGPU by name.
 Once WebGPU can tell a helper, sg reports the feature there and nothing else changes.
+
+## EMIT-219
+
+The bodies hold on dx12 because D3D states its double arithmetic exactly.
+The D3D11.3 functional spec's "64-bit (Double Precision) Floating Point" says "double-precision instructions match IEEE 754R behavior requirements".
+Its one exception is the reciprocal, "permitted 1.0 ULP tolerance and the exact result if representable", which the bodies never take.
+Its instruction list names `dfma` "double precision fused multiply-add", and the section says double instructions honor a subnormal rather than read it as zero.
+So each addition, multiplication and `fma` the bodies take is correctly rounded, and the residual `sqrt` corrects by is exact, which is what bounds it to an ULP.
+The rounding bodies clear bits, which needs no arithmetic to be exact at all.
+
+## EMIT-256
+
+vulkan gives the bodies nothing to stand on.
+The Vulkan spec's "Precision and Operation of SPIR-V Instructions" says "The precision of double-precision instructions is at least that of single precision".
+That covers the `OpFAdd`, `OpFMul` and `Fma` the bodies are made of.
+Its table states `fma()` as "Inherited from OpFMul followed by OpFAdd", so a vulkan `fma` need not round once, and the residual `sqrt` corrects by may itself be wrong.
+So on vulkan the bodies would be slower and no better bounded than the driver's own instructions, and their correction is not even sound there.
+The same table states `round`, `roundEven`, `trunc`, `floor`, `ceil` and `fract` as "Correctly rounded", `inversesqrt()` as 2 ULP, and `sqrt()` as "Inherited from 1.0 / inversesqrt()".
+
+The choice is by API rather than by route, since that is where the instructions differ.
+`target_api` already tells the two apart, and both vulkan routes end as SPIR-V, so writing the same instructions from each keeps them computing alike.
+DXC hands a double to its own `floor` or `sqrt` as a float even for SPIR-V, an `OpFConvert` on either side of the float instruction.
+Its inline SPIR-V, `[[vk::ext_instruction(8, "GLSL.std.450")]]`, takes the double as it is, which is the device of EMIT-225.

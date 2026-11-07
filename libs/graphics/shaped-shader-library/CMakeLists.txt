@@ -271,6 +271,7 @@ if(SC_BUILD_TESTS)
     if(TARGET shaped-shader-compiler-dxc)
         target_sources(shaped-shader-library-test PRIVATE
             tests/sgl-native-compile-benchmark.cc
+            tests/sgl-double-maths-spirv-test.cc
             tests/sgl-hit-object-spirv-test.cc
             tests/sgl-native-dxil-test.cc
             tests/sgl-real-shaders-test.cc

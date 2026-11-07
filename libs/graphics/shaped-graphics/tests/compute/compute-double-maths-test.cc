@@ -1,7 +1,9 @@
 #include "../shaders/shader_fixtures.hh"
 
+#include <clean-core/common/utility.hh>
 #include <clean-core/container/vector.hh>
 #include <clean-core/math/bit.hh>
+#include <clean-core/record/log.hh>
 #include <clean-core/thread/async_coroutine.hh>
 #include <nexus/async-test.hh>
 #include <sg_test_mixed_dxil.hh>
@@ -218,6 +220,14 @@ ASYNC_INVOCABLE_TEST("sg - an SGL compute shader's double sqrt and rounding are 
 
     auto const data = co_await future.data();
     REQUIRE(data.size() == 2 * count);
+    // EMIT-256: dx12 takes core.sgl's bodies, and vulkan GLSL.std.450's own, which Vulkan bounds only as a float's
+    auto const is_vulkan = ctx->accepts_shader_format(sg::shader_format::spirv);
+    // Vulkan's table: `inversesqrt` within 2 ULP of a float, and `sqrt` as 1 / inversesqrt, which a divide's 2.5 more
+    // ULP rounds; a float's ULP is at most 2^-23 of the value
+    auto const float_ulp = 1.1920928955078125e-07;
+    auto const within = [](f64 gpu, f64 cpu, f64 relative) { return tg::abs(gpu - cpu) <= relative * tg::abs(cpu); };
+    auto worst_root = i64(0);
+    auto worst_inverse = i64(0);
     for (auto i = isize(0); i < count; ++i)
     {
         auto const given = values[i];
@@ -229,16 +239,37 @@ ASYNC_INVOCABLE_TEST("sg - an SGL compute shader's double sqrt and rounding are 
         auto const flushed = given < 0.0 ? -0.0 : 0.0;
         auto const holds = [&](auto&& for_value) { return for_value(given) || (is_subnormal && for_value(flushed)); };
 
-        // EVAL-108: sqrt within one ULP, its inverse within two, and every rounding exact to the bit, a zero's sign kept
+        // EVAL-108: on dx12 sqrt within one ULP, its inverse within two; every rounding exact to the bit, a zero's sign kept
         auto const root_of = [](f64 x) { return x < 0.0 ? 0.0 / (x - x) : tg::sqrt(x); };
-        CHECK(holds([&](f64 x) { return ulps_apart(roots[0], root_of(x)) <= 1; }))
-            .dump("x", given)
-            .dump("gpu", roots[0])
-            .dump("cpu", root_of(given));
-        CHECK(holds([&](f64 x) { return ulps_apart(roots[1], 1.0 / root_of(x)) <= 2; }))
-            .dump("x", given)
-            .dump("gpu", roots[1])
-            .dump("cpu", 1.0 / root_of(given));
+        // Vulkan bounds a root only in ULP, so a zero, a negative, an infinity and a NaN have no answer stated there
+        auto const is_positive_finite = given > 0.0 && given - given == 0.0;
+        if (!is_vulkan)
+        {
+            CHECK(holds([&](f64 x) { return ulps_apart(roots[0], root_of(x)) <= 1; }))
+                .dump("x", given)
+                .dump("gpu", roots[0])
+                .dump("cpu", root_of(given));
+            CHECK(holds([&](f64 x) { return ulps_apart(roots[1], 1.0 / root_of(x)) <= 2; }))
+                .dump("x", given)
+                .dump("gpu", roots[1])
+                .dump("cpu", 1.0 / root_of(given));
+        }
+        else if (is_positive_finite)
+        {
+            CHECK(holds([&](f64 x) { return within(roots[0], root_of(x), 5 * float_ulp); }))
+                .dump("x", given)
+                .dump("gpu", roots[0])
+                .dump("cpu", root_of(given));
+            CHECK(holds([&](f64 x) { return within(roots[1], 1.0 / root_of(x), 2 * float_ulp); }))
+                .dump("x", given)
+                .dump("gpu", roots[1])
+                .dump("cpu", 1.0 / root_of(given));
+        }
+        if (is_positive_finite && !is_subnormal)
+        {
+            worst_root = cc::max(worst_root, ulps_apart(roots[0], root_of(given)));
+            worst_inverse = cc::max(worst_inverse, ulps_apart(roots[1], 1.0 / root_of(given)));
+        }
         auto const exact = [&](f64 gpu, f64 (*cpu)(f64), char const* what)
         {
             auto const is_same = holds(
@@ -254,6 +285,11 @@ ASYNC_INVOCABLE_TEST("sg - an SGL compute shader's double sqrt and rounding are 
         if (given - given == 0.0)
             exact(more[1], [](f64 x) { return x - tg::floor(x); }, "fract");
         auto const length = tg::sqrt(given * given + 1.0);
-        CHECK(ulps_apart(more[3], length) <= 1).dump("x", given).dump("gpu", more[3]).dump("cpu", length);
+        if (!is_vulkan)
+            CHECK(ulps_apart(more[3], length) <= 1).dump("x", given).dump("gpu", more[3]).dump("cpu", length);
+        else if (length - length == 0.0)
+            CHECK(within(more[3], length, 5 * float_ulp)).dump("x", given).dump("gpu", more[3]).dump("cpu", length);
     }
+    CC_LOG_INFO("{}: a double's sqrt within {} ULP of IEEE's and inverse_sqrt within {}, over positive normal values",
+                is_vulkan ? "vulkan" : "dx12", worst_root, worst_inverse);
 }

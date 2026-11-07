@@ -113,9 +113,10 @@ fun int4.from_bits(u: uint4) => reinterpret_as_int(u)
 
 // ---- the maths of a double ------------------------------------------------------------------------------------------
 //
-// CHK-458's functions, written once over a double's arithmetic, its bits and `fma`, which every route then lowers (EMIT-219).
-// No target has a double's sqrt or rounding to rely on: DXIL has neither, and DXC hands a double to its float ones.
-// Rounding is exact, so the interpreter runs these same bodies; `sqrt`, `inverse_sqrt` and `smoothstep` keep its own answer,
+// CHK-458's functions, written once, each choosing by the API what it lowers to (EMIT-256).
+// dx12 has no double rounding or root, so it takes the bodies below, over a double's arithmetic, its bits and `fma` (EMIT-219).
+// vulkan has its own in GLSL.std.450, which both its routes write, since the bodies' `fma` need not round once there.
+// Rounding is exact, so the interpreter runs the same bodies; `sqrt`, `inverse_sqrt` and `smoothstep` keep its own answer,
 // the nearest root and smoothstep's missing value, where the language is `.sgl` (EVAL-108).
 
 
@@ -212,24 +213,43 @@ fun int4.from_bits(u: uint4) => reinterpret_as_int(u)
     let parts = double_root_parts_of(x)
     return double_inverse_root_of_mantissa(parts.m) * double_power_of_two(parts.scale - parts.j)
 
-fun trunc(x: double) -> double => double_trunc(x)
-fun floor(x: double) -> double => double_floor(x)
-fun ceil(x: double) -> double => double_ceil(x)
-fun round(x: double) -> double => double_round(x)
-fun fract(x: double) -> double => x - double_floor(x)
+fun trunc(x: double) -> double:
+    const if target_api == .vulkan:
+        return spirv_trunc(x)
+    return double_trunc(x)
+fun floor(x: double) -> double:
+    const if target_api == .vulkan:
+        return spirv_floor(x)
+    return double_floor(x)
+fun ceil(x: double) -> double:
+    const if target_api == .vulkan:
+        return spirv_ceil(x)
+    return double_ceil(x)
+fun round(x: double) -> double:
+    const if target_api == .vulkan:
+        return spirv_round(x)
+    return double_round(x)
+fun fract(x: double) -> double:
+    const if target_api == .vulkan:
+        return spirv_fract(x)
+    return x - double_floor(x)
 fun is_nan(x: double) -> bool => double_is_nan(x)
 fun is_inf(x: double) -> bool => double_is_inf(x)
 
-/// The double nearest the root on the interpreter, and within an ULP of it on a GPU (EVAL-108).
+/// The double nearest the root on the interpreter, within an ULP of it on dx12, and vulkan's own `Sqrt` there (EVAL-108).
 fun sqrt(x: double) -> double:
     const if target_language == .sgl:
         return nearest_sqrt(x)
+    const if target_api == .vulkan:
+        return spirv_sqrt(x)
     return double_sqrt(x)
 
-/// `1 / sqrt(x)` on the interpreter, and within two ULP of it on a GPU (EVAL-108).
+/// `1 / sqrt(x)` on the interpreter, within two ULP of it on dx12, and vulkan's own `InverseSqrt` there (EVAL-108).
 fun inverse_sqrt(x: double) -> double:
     const if target_language == .sgl:
         return 1.0f64 / nearest_sqrt(x)
+    const if target_api == .vulkan:
+        return spirv_inverse_sqrt(x)
     return double_inverse_sqrt(x)
 
 fun trunc(x: double2) -> double2 => double2(trunc(x.x), trunc(x.y))
