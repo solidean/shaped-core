@@ -5,21 +5,22 @@ parent: epic-sgl-native-ir-targets
 
 # What a compute entry point still cannot lower
 
-Texel atomics, a body or a type in a target's own text, DXIL's `double` maths, and an `affine3` in GPU memory.
-A sample's offset too, which no fixture holds.
+A body or a type in a target's own text, DXIL's `double` maths, and an `affine3` in GPU memory.
 
 ## Left, and why
 
-- **Texel atomics** (`coherence.sgl`'s `reduce_max`), on both writers.
-  A texel is an image and a coordinate rather than a place, so `lowering::atomic` has no pointer to update.
-  It wants a place of its own: `OpImageTexelPointer` on SPIR-V, whose pointer the atomics already take, and on DXIL the image's handle with the coordinate as `atomicBinOp`'s three offsets.
 - **A body in a target's own text** (`double_values.sgl`'s `triple_values`) and **a type spelled in it** (`repack_values`'s `packed`, CHK-432), on both writers.
   These stay text by what they are: the source states the target's text, which only that target's compiler reads.
   What the prelude says that way is another matter: `maybe_reorder` moved to SGL, and so may anything else of the prelude's.
 - **DXIL's `double` maths** (`double_maths.sgl`'s `double_functions`): `floor`, `ceil`, `round`, `trunc`, `fract`, `sqrt` and `inverse_sqrt`.
   DXIL has no operation for any of them at 64 bits, so the text writes EMIT-219's helpers of HLSL, about 340 lines that take the bits apart.
   The native route would want the same helpers once, written in SGL in the prelude, rather than a second copy in either writer.
-- **A sample's offset**: SPIR-V takes it as a constant vector, which the form does not hold (EMIT-238).
+  **SGL cannot say them yet**, checked on 2026-11-07: they take a double apart into its two words and put it back, and correct `sqrt` with an `fma`.
+  A float has `x.bits` and `float.from_bits(u)`, and a half CHK-417's; a double has neither, and no type has an `fma`.
+  The two wanted are `double.bits` as a `uint2` of its low and high words, with `double.from_bits(uint2)`, and `fma` of doubles.
+  Each maps to one operation on every target that has doubles: `asuint` and `asdouble` or `OpBitcast` or `splitDouble` and `makeDouble`, and `fma` or `Fma`.
+  A `uint2` rather than a `ulong` keeps them off `shader_int64`, which a device with doubles may lack.
+  Once they exist the helpers become SGL, the text route's HLSL goes, and the vulkan text route gains them too, since DXC hands a double to its float functions on SPIR-V as on DXIL (CHK-458).
 - **Metal's** fused intersection and empty closest hit, which no other target builds (EMIT-244).
 
 ## Landed on 2026-11-07
@@ -31,6 +32,8 @@ A sample's offset too, which no fixture holds.
 | DXIL's shuffles, ballot, quad reads and inclusive folds | EMIT-249 | the DXIL writer |
 | a float atomic with no device add | EMIT-250 | shared lowering |
 | `bool32` | EMIT-251 | shared lowering |
+| texel atomics, in every image shape | EMIT-252 | `op::texel_pointer`, and a texel place on DXIL |
+| a `sample` or a `gather` offset | EMIT-253 | both writers |
 
 The prologue is a copy: the text route still writes EMIT-229 by hand, and lowering writes it again.
 Like `print` before LEGAL-70, it belongs in legalize, as flat statements over a workgroup `sgl_written` every route then lowers.
@@ -59,3 +62,29 @@ Each lowering runs on the GPU through `dx12-native-dxil` and `vulkan-native-spir
 - `bool32`: `compute-test.cc`'s layout test.
 
 A temporary mutation of each failed on the native contexts alone: a 64-bit `umin` as `umax`, a shadow cleared to ones, quad axis 1 as 2, the float sum added twice, and `as bool` read as `== 0`.
+
+## Texel atomics, measured on 2026-11-07
+
+`op::texel_pointer` is the image and the coordinate as a place, a pointer of `storage::image` every atomic takes unchanged.
+A texel load or store could take the same pointer, though nothing lowers one through it yet.
+Against DXC's output for `reduce_max`, the operations are the same: `OpImageTexelPointer` then `OpAtomicUMax` and `OpAtomicIAdd`, and `atomicBinOp` 7 and 0 with `undef` past the coordinate.
+
+| | before | after |
+|---|---|---|
+| SPIR-V, compute | 117 of 120 | 119 of 121 |
+| DXIL, compute | 116 of 120 | 118 of 121 |
+| SPIR-V, under the robustness profiles | 876 | 882 |
+| DXIL, under the robustness profiles | 849 | 855 |
+| both writers, with the device features | 687 | 691 |
+
+The 121st entry is `coherence.sgl`'s new `texel_shapes`, one of each image shape.
+It takes a signed `min` on a 1D image, an `add` on a 2D array's layer, an `exchange` on a 3D image, both compare-exchanges, and an atomic store and load.
+Its GPU test, in `compute-coherence-test.cc`, checks what each returns and leaves on every context, and a layer and a depth of their own beside each.
+A layer lowered as 0 failed `dx12-native-dxil` and `vulkan-native-spirv` alone, and DXC's contexts passed.
+
+## A sample's offset, measured on 2026-11-07
+
+The offset is a `sample` or a `gather` operand of its own, the `construct` of constants CHK-280 makes it, so the form holds no constant vector.
+SPIR-V declares it as an `OpConstantComposite` where an image operation names it, and DXIL reads its lanes as immediates.
+`pixel_surface.sgl`'s new `offset_ps` takes both, and the mixed-route test draws it through every pairing on dx12 and vulkan, every lane within 1e-4 of DXC's.
+The vertex and pixel sweep lowers 83 of 83 on both writers, and dropping the offset in lowering failed every native pixel pairing.

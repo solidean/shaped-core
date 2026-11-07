@@ -162,6 +162,8 @@ u32 writer::storage_of(storage s) const
         return k_ray_payload;
     case storage::callable_output:
         return k_callable_data;
+    case storage::image:
+        return spv::Image;
     }
     return spv::FunctionStorage;
 }

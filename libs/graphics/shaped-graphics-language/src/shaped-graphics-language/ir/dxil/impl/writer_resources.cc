@@ -315,7 +315,8 @@ void writer::sampled(u32 index,
                      instruction const& i,
                      dx_op op,
                      cc::function_ref<void(cc::vector<ll_value>&)> tail,
-                     isize offsets)
+                     isize offsets,
+                     value_ref offset)
 {
     auto const operands = _p.operands_of(i);
     auto const pair = value_ref(operands[0]);
@@ -329,8 +330,10 @@ void writer::sampled(u32 index,
     args.push_back(leaf_at(pair, 1));
     for (auto l = u32(0); l < 4; ++l)
         args.push_back(l < lanes ? leaf_at(at, l) : undefined_f);
+    // a stated offset's lanes are its constants, which the validator wants as immediates; `undef` past them
+    auto const offset_lanes = is_valid(offset) ? isize(count_of(offset)) : 0;
     for (auto k = isize(0); k < offsets; ++k)
-        args.push_back(undefined);
+        args.push_back(k < offset_lanes ? leaf_at(offset, u32(k)) : undefined);
     tail(args);
     auto const fetched = call(op, scalar_type(scalar_at(i.type, 0)), args);
     _scratch.clear();
@@ -398,7 +401,9 @@ void writer::texture_op(u32 index, instruction const& i)
         return sampled(index, i, i.code == op::sample_lod ? dx_op::sample_level : dx_op::sample_cmp_level_zero,
                        [&](cc::vector<ll_value>& args) { args.push_back(leaf_at(value_ref(operands[2]))); });
     case op::sample_implicit:
-        return sampled(index, i, dx_op::sample, [&](cc::vector<ll_value>& args) { args.push_back(unstated()); });
+        return sampled(
+            index, i, dx_op::sample, [&](cc::vector<ll_value>& args) { args.push_back(unstated()); }, 3,
+            operands.size() > 2 ? value_ref(operands[2]) : value_ref::none);
     case op::sample_bias:
     case op::sample_compare:
         return sampled(index, i, i.code == op::sample_bias ? dx_op::sample_bias : dx_op::sample_cmp,
@@ -419,7 +424,8 @@ void writer::texture_op(u32 index, instruction const& i)
     case op::image_gather:
         return sampled(
             index, i, dx_op::texture_gather,
-            [&](cc::vector<ll_value>& args) { args.push_back(leaf_at(value_ref(operands[2]))); }, 2);
+            [&](cc::vector<ll_value>& args) { args.push_back(leaf_at(value_ref(operands[2]))); }, 2,
+            operands.size() > 3 ? value_ref(operands[3]) : value_ref::none);
     case op::image_gather_compare:
         // the channel comes first, and a compare takes the first
         return sampled(
@@ -466,20 +472,34 @@ void writer::array_length(u32 index, instruction const& i)
     define_one(index, is_raw ? _m.binary(binary_op::lshr, width, _m.constant_i32(2)) : width);
 }
 
+void writer::atomic_offsets(place const& p, ll_value (&offsets)[3])
+{
+    auto const undefined = _m.constant_undef(_m.int_type());
+    offsets[0] = offsets[1] = offsets[2] = undefined;
+    if (p.kind == place::kind_t::texel)
+    {
+        for (auto l = u32(0); l < p.path_count && l < 3; ++l)
+            offsets[l] = _paths[p.path_first + l];
+        return;
+    }
+    auto const is_raw = _p.globals[p.root].kind == global_kind::bytes;
+    offsets[0] = is_raw ? _m.binary(binary_op::add, _m.binary(binary_op::mul, p.index, _m.constant_i32(4)),
+                                    byte_offset(p, p.offset))
+                        : p.index;
+    if (!is_raw)
+        offsets[1] = byte_offset(p, p.offset);
+}
+
 ll_value writer::atomic_on_buffer(place const& p, u32 op, ll_value value, ll_type t)
 {
-    auto const handle = handle_at(p);
-    auto const undefined = _m.constant_undef(_m.int_type());
-    auto const is_raw = _p.globals[p.root].kind == global_kind::bytes;
-    auto const first = is_raw ? _m.binary(binary_op::add, _m.binary(binary_op::mul, p.index, _m.constant_i32(4)),
-                                          byte_offset(p, p.offset))
-                              : p.index;
+    ll_value offsets[3];
+    atomic_offsets(p, offsets);
     ll_value const args[] = {_m.constant_i32(k_dx_ops[isize(dx_op::atomic_bin_op)].number),
-                             handle,
+                             handle_at(p),
                              _m.constant_i32(op),
-                             first,
-                             is_raw ? undefined : byte_offset(p, p.offset),
-                             undefined,
+                             offsets[0],
+                             offsets[1],
+                             offsets[2],
                              value};
     return call(dx_op::atomic_bin_op, t, args);
 }
@@ -525,12 +545,13 @@ void writer::atomic_op(u32 index, instruction const& i)
             auto const pointer = memory_pointer(where, 0, held);
             return define_one(index, _m.extract_value(_m.atomic_exchange(pointer, comparator, desired), 0));
         }
-        auto const undefined = _m.constant_undef(_m.int_type());
+        ll_value offsets[3];
+        atomic_offsets(where, offsets);
         ll_value const args[] = {_m.constant_i32(k_dx_ops[isize(dx_op::atomic_compare_exchange)].number),
                                  handle_at(where),
-                                 where.index,
-                                 byte_offset(where, where.offset),
-                                 undefined,
+                                 offsets[0],
+                                 offsets[1],
+                                 offsets[2],
                                  comparator,
                                  desired};
         return define_one(index, call(dx_op::atomic_compare_exchange, type, args));

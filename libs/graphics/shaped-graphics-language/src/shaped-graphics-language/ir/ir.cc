@@ -82,6 +82,7 @@ constexpr cc::string_view k_names[] = {
     "load",
     "store",
     "access_chain",
+    "texel_pointer",
     "array_length",
     "stage_load",
     "stage_store",
@@ -291,7 +292,8 @@ bool sgl::ir::has_effect(op code)
 bool sgl::ir::gives_only_a_value(op code)
 {
     // everything from the first operation to `shuffle` is arithmetic, comparison, conversion or composite
-    return u16(code) <= u16(op::shuffle) || code == op::access_chain || code == op::stage_load;
+    return u16(code) <= u16(op::shuffle) || code == op::access_chain || code == op::texel_pointer
+        || code == op::stage_load;
 }
 
 bool sgl::ir::may_speculate(op code)

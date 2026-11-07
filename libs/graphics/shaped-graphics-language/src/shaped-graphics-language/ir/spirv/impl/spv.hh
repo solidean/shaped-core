@@ -36,11 +36,13 @@ enum op_code : u32
     ConstantTrue = 41,
     ConstantFalse = 42,
     Constant = 43,
+    ConstantComposite = 44,
     ConstantNull = 46,
     Function = 54,
     FunctionEnd = 56,
     FunctionCall = 57,
     Variable = 59,
+    ImageTexelPointer = 60,
     Undef = 1,
     Load = 61,
     Store = 62,
@@ -306,6 +308,7 @@ enum storage_class : u32
     TaskPayloadWorkgroupEXT = 5402,
     FunctionStorage = 7,
     PushConstant = 9,
+    Image = 11,
     StorageBuffer = 12,
 };
 } // namespace spv
@@ -317,4 +320,6 @@ constexpr u32 k_semantics_acquire_release = 0x8;
 constexpr u32 k_semantics_uniform = 0x40;
 constexpr u32 k_semantics_workgroup = 0x100;
 constexpr u32 k_semantics_image = 0x800;
+/// The image operand of an offset every lane of which is a constant.
+constexpr u32 k_image_const_offset = 0x8;
 } // namespace sgl::ir::spirv::impl

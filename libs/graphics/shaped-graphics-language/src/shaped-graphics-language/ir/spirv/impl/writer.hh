@@ -56,6 +56,8 @@ private:
 
     /// A `uint` constant the writer itself needs, such as a scope or an array's length.
     [[nodiscard]] u32 literal_id(u32 value);
+    /// A constant, or a `construct` of constants as the one `OpConstantComposite` an image operand must name.
+    [[nodiscard]] u32 constant_composite(value_ref v);
 
     // ---- writer_declarations.cc
     [[nodiscard]] u32 storage_of(storage s) const;

@@ -95,6 +95,63 @@ ASYNC_INVOCABLE_TEST("sg - an SGL @atomic image keeps each texel's maximum and c
     }
 }
 
+ASYNC_INVOCABLE_TEST("sg - an SGL @atomic image's texel atomics reach the texel their coordinate names, in every shape",
+                     (sg::context_handle const& ctx))
+{
+    REQUIRE(ctx != nullptr);
+    if (!sg_test::shaders_reach(*ctx))
+        SKIP("no compiler builds this binary's shaders into a format this context accepts");
+    if (!ctx->supports(sg::feature::image_atomics))
+        SKIP("this context has no image atomics");
+
+    auto const pipeline = co_await shaders::coherence::texel_shapes.acquire_pipeline(*ctx);
+    auto const layout = ctx->cached.acquire_binding_group_layout<shaders::coherence::texel_shapes_of>();
+
+    auto const image_usage = sg::texture_usage::image | sg::texture_usage::copy_dst;
+    auto const flat = sg::texture_1d::from_raw(ctx->persistent.create_raw_texture(
+        {.format = sg::pixel_format::r32_sint, .dimension = sg::texture_dimension::d1, .width = 8, .usage = image_usage}));
+    auto const layered
+        = sg::texture_2d_array::from_raw(ctx->persistent.create_raw_texture({.format = sg::pixel_format::r32_uint,
+                                                                             .dimension = sg::texture_dimension::d2,
+                                                                             .width = 8,
+                                                                             .height = 1,
+                                                                             .array_layers = 2,
+                                                                             .usage = image_usage}));
+    auto const deep = sg::texture_3d::from_raw(ctx->persistent.create_raw_texture({.format = sg::pixel_format::r32_uint,
+                                                                                   .dimension = sg::texture_dimension::d3,
+                                                                                   .width = 8,
+                                                                                   .height = 2,
+                                                                                   .depth = 3,
+                                                                                   .usage = image_usage}));
+    auto const plain = make_image(ctx, sg::pixel_format::r32_uint, 8, 1);
+    auto const seen = ctx->persistent.create_buffer_from_data(
+        cc::vector<u32>::create_defaulted(80), sg::buffer_usage::readwrite_buffer | sg::buffer_usage::copy_src);
+
+    auto cmd = ctx->create_command_list();
+    auto const group = ctx->transient.create_binding_group(
+        *cmd, layout,
+        shaders::coherence::texel_shapes_of{.flat = flat.as_image_view<sg::pixel_format::r32_sint>(),
+                                            .layered = layered.as_image_view<sg::pixel_format::r32_uint>(),
+                                            .deep = deep.as_image_view<sg::pixel_format::r32_uint>(),
+                                            .plain = plain.as_image_view<sg::pixel_format::r32_uint>(),
+                                            .seen = seen.as_readwrite_buffer()});
+    cmd->compute.bind_pipeline(*pipeline);
+    cmd->compute.bind_group(0, *group);
+    cmd->compute.dispatch_threads(8);
+    auto const seen_back = cmd->download.data_from_buffer(seen);
+    ctx->submit_command_list(cc::move(cmd));
+
+    auto const got = co_await seen_back.data();
+    REQUIRE(got.size() == 80);
+    for (auto i = u32(0); i < 8; ++i)
+    {
+        // what each atomic gives back, then what it leaves, as the fixture's comments order them
+        u32 const expected[] = {9, i, 10, 10 + i, 20, 30 + i, i, 40 + i, 77, 88};
+        for (auto k = u32(0); k < 10; ++k)
+            CHECK(got[i * 10 + k] == expected[k]).dump("invocation", i).dump("slot", k);
+    }
+}
+
 ASYNC_INVOCABLE_TEST("sg - SGL's @coherent buffer and image take every invocation's write and the workgroups' count",
                      (sg::context_handle const& ctx))
 {

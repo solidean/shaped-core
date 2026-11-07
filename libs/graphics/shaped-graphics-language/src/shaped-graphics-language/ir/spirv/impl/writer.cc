@@ -95,6 +95,21 @@ u32 writer::literal_id(u32 value)
     return id;
 }
 
+u32 writer::constant_composite(value_ref v)
+{
+    if (is_constant(v))
+        return id_of(v);
+    auto const& made = _p.instructions[u32(v)];
+    auto const parts = _p.operands_of(made);
+    auto const id = _bound++;
+    head(_declarations, spv::ConstantComposite, 3 + parts.size());
+    _declarations.push_back(id_of(made.type));
+    _declarations.push_back(id);
+    for (auto const part : parts)
+        _declarations.push_back(id_of_raw(part));
+    return id;
+}
+
 void writer::terminator(ir::block const& b, instruction const& i)
 {
     auto const operands = _p.operands_of(i);

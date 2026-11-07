@@ -176,6 +176,9 @@ private:
     [[nodiscard]] value_ref add_local(type_ref value, cc::string_view name);
 
     [[nodiscard]] cc::optional<place> place_of(flat_expr_id id);
+    /// One texel of the storage image `image` as a place, which only an atomic takes so far.
+    /// `coordinate` holds an array's layer as its last lane, as SPIR-V takes it.
+    [[nodiscard]] cc::optional<place> texel_of(flat_expr_id image, value_ref coordinate);
     [[nodiscard]] cc::optional<place> chain_of(flat_expr_id id, cc::vector<u32>& chain);
     /// `nonuniform i`, whose value is `i`; `uniform i` is no such mark, since it is the plain index.
     [[nodiscard]] bool is_nonuniform(flat_expr_id id) const;

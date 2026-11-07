@@ -38,6 +38,7 @@ enum class rule_kind : u8
     load,
     store,
     access_chain,
+    texel_pointer,
     array_length,
     stage_load,
     stage_store,
@@ -139,6 +140,7 @@ constexpr op_rule k_rules[] = {
     {op::load, rule_kind::load},
     {op::store, rule_kind::store},
     {op::access_chain, rule_kind::access_chain},
+    {op::texel_pointer, rule_kind::texel_pointer},
     {op::array_length, rule_kind::array_length},
     {op::stage_load, rule_kind::stage_load},
     {op::stage_store, rule_kind::stage_store},
@@ -403,6 +405,8 @@ void writer::operation(u32 index)
         return store(i);
     case rule_kind::access_chain:
         return access_chain(index, i);
+    case rule_kind::texel_pointer:
+        return texel_pointer(index, i);
     case rule_kind::array_length:
         return array_length(index, i);
     case rule_kind::stage_load:

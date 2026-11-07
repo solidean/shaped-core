@@ -301,6 +301,13 @@ ASYNC_INVOCABLE_TEST("sg - what a pixel stage reaches reads alike through SGL's 
     CHECK(second[3] == 1.0f); // the texels' alpha: a stage that sampled nothing reads 0
     CHECK(second[0] == 1.0f); // 0.25 < 0.5
     CHECK(second[1] == 0.0f); // 0.75 > 0.5
+
+    auto const offset
+        = co_await compared_stage(*ctx, takes_dxil, vertex, text::offset_ps, dxil::offset_ps, spirv::offset_ps,
+                                  {.layout = text::offset_ps.acquire_layout(*ctx), .group = &*group}, "offset");
+    // a ramp moved a texel over reads another red: an offset dropped on every route would still match DXC's
+    CHECK(offset[0].rgba_float(k_size / 2, k_size / 2)[0] != sampled[0].rgba_float(k_size / 2, k_size / 2)[0]);
+    CHECK(offset[1].rgba_float(k_size / 2, k_size / 2)[3] == 1.0f);
 }
 
 namespace
