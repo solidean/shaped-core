@@ -598,13 +598,20 @@ void writer::subgroup_op(u32 index, instruction const& i)
         {
             auto const fold = group_fold(i.aux);
             auto const op = fold == group_fold::reduce ? dx_op::wave_active_op : dx_op::wave_prefix_op;
-            if (fold == group_fold::inclusive)
-                return unsupported("an inclusive subgroup fold on DXIL");
+            // DXIL's prefix is exclusive alone, and an inclusive one folds this invocation's own value in after it
+            if (fold == group_fold::inclusive && r.kind > 1)
+                return unsupported("an inclusive subgroup fold but a sum or a product on DXIL");
             for (auto l = u32(0); l < count_of(value); ++l)
             {
                 auto const lane = leaf_at(value, l);
                 ll_value const args[] = {number(op), lane, _m.constant_i8(r.kind), _m.constant_i8(r.sign)};
-                _scratch.push_back(call(op, _m.type_of(lane), args));
+                auto folded = call(op, _m.type_of(lane), args);
+                if (fold == group_fold::inclusive)
+                {
+                    auto const flags = _m.is_float(_m.type_of(lane)) ? flags_of(i) : u8(0);
+                    folded = _m.binary(r.kind == 0 ? binary_op::add : binary_op::mul, folded, lane, flags);
+                }
+                _scratch.push_back(folded);
             }
             return define(index);
         }
@@ -648,6 +655,61 @@ void writer::subgroup_op(u32 index, instruction const& i)
             _scratch.push_back(call(dx_op::wave_read_lane_first, _m.type_of(lane), args));
         }
         return define(index);
+    case subgroup::ballot:
+    {
+        ll_value const args[] = {number(dx_op::wave_active_ballot), leaf_at(value)};
+        auto const words = call(dx_op::wave_active_ballot, _m.void_type(), args);
+        for (auto l = u32(0); l < 4; ++l)
+            _scratch.push_back(_m.extract_value(words, l));
+        return define(index);
+    }
+    case subgroup::shuffle:
+    case subgroup::shuffle_xor:
+    case subgroup::shuffle_up:
+    case subgroup::shuffle_down:
+    {
+        // the lane an offset names is computed from this invocation's own, as HLSL's text does
+        auto lane = leaf_at(value_ref(operands[1]));
+        if (what != subgroup::shuffle)
+        {
+            ll_value const own_args[] = {number(dx_op::wave_get_lane_index)};
+            auto const own = call(dx_op::wave_get_lane_index, _m.void_type(), own_args);
+            auto const combine = what == subgroup::shuffle_xor ? binary_op::bit_xor
+                               : what == subgroup::shuffle_up  ? binary_op::sub
+                                                               : binary_op::add;
+            lane = _m.binary(combine, own, lane);
+        }
+        for (auto l = u32(0); l < count_of(value); ++l)
+        {
+            auto const lane_value = leaf_at(value, l);
+            ll_value const args[] = {number(dx_op::wave_read_lane_at), lane_value, lane};
+            _scratch.push_back(call(dx_op::wave_read_lane_at, _m.type_of(lane_value), args));
+        }
+        return define(index);
+    }
+    case subgroup::quad_broadcast:
+    {
+        auto const lane = leaf_at(value_ref(operands[1]));
+        for (auto l = u32(0); l < count_of(value); ++l)
+        {
+            auto const lane_value = leaf_at(value, l);
+            ll_value const args[] = {number(dx_op::quad_read_lane_at), lane_value, lane};
+            _scratch.push_back(call(dx_op::quad_read_lane_at, _m.type_of(lane_value), args));
+        }
+        return define(index);
+    }
+    case subgroup::quad_swap:
+    {
+        // `QuadOpKind`: 0 across x, 1 across y, 2 across the diagonal, which lowering states as a constant
+        auto const axis = _p.constants[index_of(value_ref(operands[1]))].low;
+        for (auto l = u32(0); l < count_of(value); ++l)
+        {
+            auto const lane_value = leaf_at(value, l);
+            ll_value const args[] = {number(dx_op::quad_op), lane_value, _m.constant_i8(axis)};
+            _scratch.push_back(call(dx_op::quad_op, _m.type_of(lane_value), args));
+        }
+        return define(index);
+    }
     default:
         return unsupported("this subgroup operation on DXIL");
     }

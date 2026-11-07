@@ -522,6 +522,10 @@ fn main_ps(p: pixel_input) -> target_ {
 * **EMIT-248** A native route writes EMIT-229's prologue as the text does, in shared lowering, so neither writer knows of it.
   The shadow is one workgroup global `sgl_written` of a `uint` per 32 scalars, and the stride is a loop over the invocation's index in its workgroup, ahead of the body and a workgroup barrier.
   A read of a word is an atomic load and a mark an atomic `or`, and which bits a range of scalars takes is arithmetic, with a whole word its own case since neither target shifts by 32.
+* **EMIT-249** DXIL writes each subgroup and quad operation as the operations HLSL's text compiles to.
+  A shuffle by an offset reads `waveReadLaneAt` at the lane it computes from `waveGetLaneIndex`, as EMIT-146's text does.
+  An inclusive sum or product is `wavePrefixOp` and then this invocation's own value folded in, since DXIL's prefix is exclusive alone.
+  A ballot is `waveActiveBallot`'s four words, a quad swap `quadOp` of its axis, and a quad broadcast `quadReadLaneAt`.
 
 ## Lines
 

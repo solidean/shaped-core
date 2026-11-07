@@ -12,7 +12,8 @@ namespace sgl::ir::dxil::impl
 /// A class's signature as text, the result then a colon then the parameters after the operation's number:
 /// `o` the overload, `v` void, `c` i1, `b` i8, `i` i32, `f` float, `h` a handle, `B` a binding, `P` a handle's
 /// properties, `R` a resource's return of the overload, `C` a constant block's row of it, `D` a resource's dimensions,
-/// `S` a double's two words, `p` a pointer to the overload, `q` the same in workgroup memory.
+/// `S` a double's two words, `F` a ballot's four words, `p` a pointer to the overload, `q` the same in workgroup
+/// memory.
 struct dx_class
 {
     cc::string_view name;
@@ -50,6 +51,9 @@ enum class dx_class_id : u8
     wave_active_op,
     wave_active_bit,
     wave_prefix_op,
+    wave_active_ballot,
+    quad_read_lane_at,
+    quad_op,
     barrier,
     create_handle_from_binding,
     annotate_handle,
@@ -154,6 +158,9 @@ inline constexpr dx_class k_dx_classes[] = {
     {"waveActiveOp", "o:obb"},
     {"waveActiveBit", "o:ob"},
     {"wavePrefixOp", "o:obb"},
+    {"waveActiveBallot", "F:c"},
+    {"quadReadLaneAt", "o:oi"},
+    {"quadOp", "o:ob"},
     {"barrier", "v:i", dx_class::no_duplicate},
     {"createHandleFromBinding", "h:Bic", dx_class::read_none},
     {"annotateHandle", "h:hP", dx_class::read_none},
@@ -308,6 +315,9 @@ enum class dx_op : u8
     wave_active_op,
     wave_active_bit,
     wave_prefix_op,
+    wave_active_ballot,
+    quad_read_lane_at,
+    quad_op,
     barrier,
     create_handle_from_binding,
     annotate_handle,
@@ -481,6 +491,9 @@ inline constexpr dx_op_info k_dx_ops[] = {
     {119, dx_class_id::wave_active_op, k_scalars},
     {120, dx_class_id::wave_active_bit, k_ints},
     {121, dx_class_id::wave_prefix_op, k_scalars},
+    {116, dx_class_id::wave_active_ballot, k_no_overload},
+    {122, dx_class_id::quad_read_lane_at, k_scalars | k_i1},
+    {123, dx_class_id::quad_op, k_scalars},
     {80, dx_class_id::barrier, k_no_overload},
     {217, dx_class_id::create_handle_from_binding, k_no_overload},
     {216, dx_class_id::annotate_handle, k_no_overload},

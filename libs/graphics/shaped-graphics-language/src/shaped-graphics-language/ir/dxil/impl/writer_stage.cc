@@ -865,13 +865,12 @@ void writer::write_entry_metadata()
     for (auto const cls : {2u, 3u, 0u, 1u})
         for (auto const& b : _bindings)
             if (b.cls == cls)
-                _summary.resources.push_back(
-                    {.psv_type = b.psv_type,
-                     .space = b.space,
-                     .lower = b.lower,
-                     .upper = b.upper,
-                     .kind = b.kind,
-                     .psv_flags = b.used_by_atomic64 ? k_psv_used_by_atomic64 : 0});
+                _summary.resources.push_back({.psv_type = b.psv_type,
+                                              .space = b.space,
+                                              .lower = b.lower,
+                                              .upper = b.upper,
+                                              .kind = b.kind,
+                                              .psv_flags = b.used_by_atomic64 ? k_psv_used_by_atomic64 : 0});
     if (is_compute || _p.stage == check::stage::mesh || _p.stage == check::stage::task)
         for (auto axis = 0; axis < 3; ++axis)
             _summary.workgroup[axis] = _p.workgroup[axis];
@@ -1001,6 +1000,11 @@ ll_type writer::signature_type(char code, ll_type overload)
     {
         ll_type const members[] = {_m.int_type(), _m.int_type()};
         return _m.structure("dx.types.splitdouble", members);
+    }
+    case 'F':
+    {
+        ll_type const members[] = {_m.int_type(), _m.int_type(), _m.int_type(), _m.int_type()};
+        return _m.structure("dx.types.fouri32", members);
     }
     default:
         return ll_type::none;

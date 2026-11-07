@@ -440,6 +440,61 @@ ASYNC_INVOCABLE_TEST("sg - SGL's quad swap, subgroup sum and uniform load agree 
     }
 }
 
+ASYNC_INVOCABLE_TEST("sg - SGL's shuffles, ballot, quad reads and inclusive sums read the lanes they name",
+                     (sg::context_handle const& ctx))
+{
+    REQUIRE(ctx != nullptr);
+    if (!sg_test::shaders_reach(*ctx))
+        SKIP("no compiler builds this binary's shaders into a format this context accepts");
+    if (!ctx->supports(sg::feature::subgroups))
+        SKIP("this context has no subgroup operations");
+
+    auto const pipeline = co_await shaders::subgroups::exchange.acquire_pipeline(*ctx);
+    auto const group_layout = ctx->cached.acquire_binding_group_layout<shaders::subgroups::wave_exchange>();
+
+    constexpr auto count = 2 * 64;
+    constexpr auto per = 12;
+    auto const usage = sg::buffer_usage::readwrite_buffer | sg::buffer_usage::copy_src;
+    auto const words = ctx->persistent.create_buffer_from_data(cc::vector<u32>::create_defaulted(count * per), usage);
+
+    auto cmd = ctx->create_command_list();
+    auto const group = ctx->transient.create_binding_group(
+        *cmd, group_layout, shaders::subgroups::wave_exchange{.words = words.as_readwrite_buffer()});
+    cmd->compute.bind_pipeline(*pipeline);
+    cmd->compute.bind_group(0, *group);
+    cmd->compute.dispatch_threads(count);
+    auto const words_back = cmd->download.data_from_buffer(words);
+    ctx->submit_command_list(cc::move(cmd));
+
+    auto const got = co_await words_back.data();
+    REQUIRE(got.size() == isize(count * per));
+    for (auto i = 0; i < count; ++i)
+    {
+        auto const* const w = got.data() + i * per;
+        auto const lane = w[10];
+        auto const size = w[11];
+        REQUIRE(size >= 4u);
+        REQUIRE(lane < size);
+        CHECK(w[0] == (lane + 1u) % size).context(cc::format("shuffle, lane {} of {}", lane, size));
+        CHECK(w[1] == (lane ^ 1u)).context(cc::format("shuffle_xor, lane {}", lane));
+        if (lane > 0)
+            CHECK(w[2] == lane - 1u).context(cc::format("shuffle_up, lane {}", lane));
+        if (lane + 1u < size)
+            CHECK(w[3] == lane + 1u).context(cc::format("shuffle_down, lane {}", lane));
+        // the even lanes of the subgroup's first 32
+        auto const lanes = size < 32u ? size : 32u;
+        auto ballot = u32(0);
+        for (auto k = u32(0); k < lanes; k += 2)
+            ballot |= 1u << k;
+        CHECK(w[4] == ballot).context(cc::format("ballot, size {}", size));
+        CHECK(w[5] == (lane & ~3u) + 2u).context(cc::format("quad_broadcast, lane {}", lane));
+        CHECK(w[6] == (lane ^ 2u)).context(cc::format("quad_swap_y, lane {}", lane));
+        CHECK(w[7] == (lane ^ 3u)).context(cc::format("quad_swap_diagonal, lane {}", lane));
+        CHECK(w[8] == lane + 1u).context(cc::format("inclusive add, lane {}", lane));
+        CHECK(w[9] == lane + 1u).context(cc::format("inclusive float add, lane {}", lane));
+    }
+}
+
 ASYNC_INVOCABLE_TEST("sg - SGL's subgroup sum after a loop each lane leaves at its own iteration counts every lane",
                      (sg::context_handle const& ctx))
 {
