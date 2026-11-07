@@ -70,20 +70,34 @@ constexpr kernel k_kernels[] = {
     using stage = sgl::check::stage;
     switch (s)
     {
-    case stage::vertex: return sg::shader_stage::vertex;
-    case stage::pixel: return sg::shader_stage::fragment;
-    case stage::geometry: return sg::shader_stage::geometry;
-    case stage::tessellation_control: return sg::shader_stage::tessellation_control;
-    case stage::tessellation_evaluation: return sg::shader_stage::tessellation_evaluation;
-    case stage::mesh: return sg::shader_stage::mesh;
-    case stage::task: return sg::shader_stage::task;
-    case stage::raygen: return sg::shader_stage::raygen;
-    case stage::miss: return sg::shader_stage::miss;
-    case stage::closest_hit: return sg::shader_stage::closest_hit;
-    case stage::any_hit: return sg::shader_stage::any_hit;
-    case stage::intersection: return sg::shader_stage::intersection;
-    case stage::callable: return sg::shader_stage::callable;
-    default: return sg::shader_stage::compute;
+    case stage::vertex:
+        return sg::shader_stage::vertex;
+    case stage::pixel:
+        return sg::shader_stage::fragment;
+    case stage::geometry:
+        return sg::shader_stage::geometry;
+    case stage::tessellation_control:
+        return sg::shader_stage::tessellation_control;
+    case stage::tessellation_evaluation:
+        return sg::shader_stage::tessellation_evaluation;
+    case stage::mesh:
+        return sg::shader_stage::mesh;
+    case stage::task:
+        return sg::shader_stage::task;
+    case stage::raygen:
+        return sg::shader_stage::raygen;
+    case stage::miss:
+        return sg::shader_stage::miss;
+    case stage::closest_hit:
+        return sg::shader_stage::closest_hit;
+    case stage::any_hit:
+        return sg::shader_stage::any_hit;
+    case stage::intersection:
+        return sg::shader_stage::intersection;
+    case stage::callable:
+        return sg::shader_stage::callable;
+    default:
+        return sg::shader_stage::compute;
     }
 }
 
@@ -368,13 +382,13 @@ BENCHMARK("slib - every SGL entry point sr and sv ship, cold, through the text r
                     auto args = cc::vector<cc::string>{cc::string("-enable-16bit-types")};
                     if (written.value().float_guarantee != sgl::check::float_level::fast)
                         args.push_back(cc::string("-Gis"));
-                    auto built = compiler.value().compile({.source = written.value().text,
-                                                           .entry_point = written.value().entry_point,
-                                                           .stage = sg_stage_of(s.stages[i])},
-                                                          {.target = is_dx12 ? ssc::dxc::compile_target::dxil
-                                                                             : ssc::dxc::compile_target::spirv,
-                                                           .warnings_as_errors = false,
-                                                           .extra_args = cc::move(args)});
+                    auto built = compiler.value().compile(
+                        {.source = written.value().text,
+                         .entry_point = written.value().entry_point,
+                         .stage = sg_stage_of(s.stages[i])},
+                        {.target = is_dx12 ? ssc::dxc::compile_target::dxil : ssc::dxc::compile_target::spirv,
+                         .warnings_as_errors = false,
+                         .extra_args = cc::move(args)});
                     // metal's empty closest hit is an entry point no DXC build takes, on either route
                     refused += built.has_value() ? 0 : 1;
                 }
