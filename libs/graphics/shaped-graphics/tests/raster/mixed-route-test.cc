@@ -30,6 +30,18 @@ cc::shared_async<cc::optional<sg::compiled_shader>> compiled(sg::context& ctx, A
     co_return *value;
 }
 
+/// The stage SGL's own binary gives, in whichever format this context takes.
+template <class Dxil, class Spirv>
+cc::shared_async<cc::optional<sg::compiled_shader>> compiled_native(sg::context& ctx,
+                                                                    bool takes_dxil,
+                                                                    Dxil const& dxil_asset,
+                                                                    Spirv const& spirv_asset)
+{
+    if (takes_dxil)
+        co_return co_await compiled(ctx, dxil_asset);
+    co_return co_await compiled(ctx, spirv_asset);
+}
+
 sg::raster_pipeline_handle link_pipeline(sg::context& ctx,
                                          sg::compiled_shader const& vertex,
                                          sg::compiled_shader const& pixel)
@@ -147,10 +159,10 @@ ASYNC_INVOCABLE_TEST("sg - a stage of SGL's own binary links against one through
 
     auto const vertex_text = co_await compiled(*ctx, sg::test::mixed_text::mixed_link::main_vs);
     auto const pixel_text = co_await compiled(*ctx, sg::test::mixed_text::mixed_link::main_ps);
-    auto const vertex_native = takes_dxil ? co_await compiled(*ctx, sg::test::mixed_dxil::mixed_link::main_vs)
-                                          : co_await compiled(*ctx, sg::test::mixed_spirv::mixed_link::main_vs);
-    auto const pixel_native = takes_dxil ? co_await compiled(*ctx, sg::test::mixed_dxil::mixed_link::main_ps)
-                                         : co_await compiled(*ctx, sg::test::mixed_spirv::mixed_link::main_ps);
+    auto const vertex_native = co_await compiled_native(*ctx, takes_dxil, sg::test::mixed_dxil::mixed_link::main_vs,
+                                                        sg::test::mixed_spirv::mixed_link::main_vs);
+    auto const pixel_native = co_await compiled_native(*ctx, takes_dxil, sg::test::mixed_dxil::mixed_link::main_ps,
+                                                       sg::test::mixed_spirv::mixed_link::main_ps);
     if (!vertex_text.has_value() || !pixel_text.has_value())
         SKIP("this build has no DXC");
     REQUIRE(vertex_native.has_value());
@@ -193,6 +205,22 @@ cc::shared_async<sg_test::offscreen_pixels> compared_routes(sg::context& ctx,
                cc::format("{}: both native", name));
     co_return reference;
 }
+
+/// `compared_routes` for the pixel stage these assets hold, over the vertex stages of `vertex`.
+template <class Text, class Dxil, class Spirv>
+cc::shared_async<sg_test::offscreen_pixels> compared_stage(sg::context& ctx,
+                                                           bool takes_dxil,
+                                                           routes vertex,
+                                                           Text const& text_asset,
+                                                           Dxil const& dxil_asset,
+                                                           Spirv const& spirv_asset,
+                                                           surface_draw how,
+                                                           cc::string_view name)
+{
+    vertex.pixel_text = co_await compiled(ctx, text_asset);
+    vertex.pixel_native = co_await compiled_native(ctx, takes_dxil, dxil_asset, spirv_asset);
+    co_return co_await compared_routes(ctx, vertex, how, name);
+}
 } // namespace
 
 ASYNC_INVOCABLE_TEST("sg - what a pixel stage reaches reads alike through SGL's binary and through DXC",
@@ -211,41 +239,24 @@ ASYNC_INVOCABLE_TEST("sg - what a pixel stage reaches reads alike through SGL's 
     auto const probe = co_await compiled(*ctx, text::surface_vs);
     if (!probe.has_value())
         SKIP("this build has no DXC");
-    auto const native_vertex
-        = takes_dxil ? co_await compiled(*ctx, dxil::surface_vs) : co_await compiled(*ctx, spirv::surface_vs);
+    // Workaround: a co_await inside this initializer crashes MSVC 14.44 and 14.51 (C1001).
+    auto const native_vertex = co_await compiled_native(*ctx, takes_dxil, dxil::surface_vs, spirv::surface_vs);
+    auto const vertex = routes{.vertex_text = probe, .vertex_native = native_vertex};
 
     auto const empty = ctx->cached.acquire_pipeline_layout(sg::pipeline_layout_description{});
-    auto const discarding
-        = co_await compared_routes(*ctx,
-                                   routes{.vertex_text = probe,
-                                          .pixel_text = co_await compiled(*ctx, text::discarding_ps),
-                                          .vertex_native = native_vertex,
-                                          .pixel_native = takes_dxil ? co_await compiled(*ctx, dxil::discarding_ps)
-                                                                     : co_await compiled(*ctx, spirv::discarding_ps)},
-                                   {.layout = empty}, "discard");
+    auto const discarding = co_await compared_stage(*ctx, takes_dxil, vertex, text::discarding_ps, dxil::discarding_ps,
+                                                    spirv::discarding_ps, {.layout = empty}, "discard");
     // the discarded column stays as it was cleared, and its neighbour's derivative still read it, as a helper
     CHECK(discarding[0].rgba_float(0, k_size / 2)[3] == 0.0f);
     CHECK(discarding[0].rgba_float(1, k_size / 2)[0] == 2.0f);
     CHECK(discarding[0].rgba_float(3, k_size / 2)[0] == 6.0f);
 
-    auto const inputs
-        = co_await compared_routes(*ctx,
-                                   routes{.vertex_text = probe,
-                                          .pixel_text = co_await compiled(*ctx, text::inputs_ps),
-                                          .vertex_native = native_vertex,
-                                          .pixel_native = takes_dxil ? co_await compiled(*ctx, dxil::inputs_ps)
-                                                                     : co_await compiled(*ctx, spirv::inputs_ps)},
-                                   {.layout = empty}, "inputs");
+    auto const inputs = co_await compared_stage(*ctx, takes_dxil, vertex, text::inputs_ps, dxil::inputs_ps,
+                                                spirv::inputs_ps, {.layout = empty}, "inputs");
     CHECK(inputs[1].rgba_float(k_size / 2, k_size / 2)[3] == 1.0f); // the one sample is covered
 
-    auto const depth
-        = co_await compared_routes(*ctx,
-                                   routes{.vertex_text = probe,
-                                          .pixel_text = co_await compiled(*ctx, text::depth_ps),
-                                          .vertex_native = native_vertex,
-                                          .pixel_native = takes_dxil ? co_await compiled(*ctx, dxil::depth_ps)
-                                                                     : co_await compiled(*ctx, spirv::depth_ps)},
-                                   {.layout = empty, .has_depth = true}, "depth");
+    auto const depth = co_await compared_stage(*ctx, takes_dxil, vertex, text::depth_ps, dxil::depth_ps,
+                                               spirv::depth_ps, {.layout = empty, .has_depth = true}, "depth");
     // the written depth is an eighth of x against the 0.5 it clears to, and every interpolated one is 0.5
     CHECK(depth[1].rgba_float(1, k_size / 2)[0] == 1.0f);
     CHECK(depth[1].rgba_float(k_size - 1, k_size / 2)[0] == 0.0f);
@@ -284,13 +295,8 @@ ASYNC_INVOCABLE_TEST("sg - what a pixel stage reaches reads alike through SGL's 
                                                                      .compare = sg::compare_op::less}});
     ctx->submit_command_list(cc::move(cmd));
     auto const sampled
-        = co_await compared_routes(*ctx,
-                                   routes{.vertex_text = probe,
-                                          .pixel_text = co_await compiled(*ctx, text::sampled_ps),
-                                          .vertex_native = native_vertex,
-                                          .pixel_native = takes_dxil ? co_await compiled(*ctx, dxil::sampled_ps)
-                                                                     : co_await compiled(*ctx, spirv::sampled_ps)},
-                                   {.layout = text::sampled_ps.acquire_layout(*ctx), .group = &*group}, "sampling");
+        = co_await compared_stage(*ctx, takes_dxil, vertex, text::sampled_ps, dxil::sampled_ps, spirv::sampled_ps,
+                                  {.layout = text::sampled_ps.acquire_layout(*ctx), .group = &*group}, "sampling");
     auto const second = sampled[1].rgba_float(k_size / 2, k_size / 2);
     CHECK(second[3] == 1.0f); // the texels' alpha: a stage that sampled nothing reads 0
     CHECK(second[0] == 1.0f); // 0.25 < 0.5

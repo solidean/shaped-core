@@ -1,6 +1,5 @@
 #include "../shaders/shader_fixtures.hh"
 
-#include <clean-core/common/macros.hh>  // CC_COMPILER_MSVC, CC_ARCH_ARM64
 #include <clean-core/common/utility.hh> // cc::move
 #include <clean-core/container/fixed_vector.hh>
 #include <clean-core/thread/async_coroutine.hh>
@@ -16,13 +15,15 @@ using namespace cc::primitive_defines;
 
 namespace shaders = sg::test::sgl_shaders;
 
-// Workaround: MSVC 14.44's arm64-hosted compiler crashes (C1001) optimizing this file; the x64-hosted one does not.
-#if defined(CC_COMPILER_MSVC) && defined(CC_ARCH_ARM64)
-#pragma optimize("", off)
-#endif
-
 namespace
 {
+/// Workaround: this call inside a coroutine crashes MSVC 14.44's arm64-hosted compiler (C1001).
+[[nodiscard]] auto small_color_target(sg::context& ctx)
+{
+    return ctx.persistent.create_texture_2d(
+        {.format = sg::pixel_format::rgba8_unorm, .width = 4, .height = 4, .usage = sg::texture_usage::render_target});
+}
+
 /// Why building `desc` failed, or empty when it built.
 cc::shared_async<cc::string> refusal_of(sg::context& ctx, sg::raster_pipeline_description desc)
 {
@@ -336,8 +337,7 @@ ASYNC_INVOCABLE_TEST("sg - a pipeline built for one target set refuses a renderi
     });
     CHECK(pipeline->target_set() == "sg::test::sgl_shaders::quads::overlay");
 
-    auto const image = ctx->persistent.create_texture_2d(
-        {.format = sg::pixel_format::rgba8_unorm, .width = 4, .height = 4, .usage = sg::texture_usage::render_target});
+    auto const image = small_color_target(*ctx);
 
     auto cmd = ctx->create_command_list();
     {
