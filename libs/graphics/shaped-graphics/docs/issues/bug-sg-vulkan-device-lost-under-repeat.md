@@ -17,7 +17,17 @@ Separately, `vulkan_upload_async.cc` asserts on `vkQueueSubmit` rather than mark
 - **`compute-float-specials-test.cc` read zeros on every line**, which is a dispatch that never ran rather than a float bug; it is one more place the loss was noticed.
 - **The abort is still the assert in `vulkan_upload_async.cc`**, `vkQueueSubmit (async upload) failed`.
 
-**The rate is not settled.**
-Across these runs, 3 of about 34 iterations crashed with the legalize change or its fallback in the tree, against 1 of 32 before it, and those counts are too few to say the change raised it.
-Measuring it means a long repeat on each side, one run at a time.
+**The legalize change did not raise the rate, as far as a comparison can show.**
+Across those earlier runs, 3 of about 34 iterations crashed against 1 of 32, which was too few to read.
+So `--repeat` alternated 3b9189646, before native `print`, with f7232f75a, which also holds mesh and task, four rounds of each.
+
+| side | iterations counted | device-loss aborts |
+|---|---|---|
+| before | 40 | 2 |
+| after | 40 | 2 |
+
+Each side also had two rounds cut off by a 175 s cap and not counted.
+Those rounds logged no crash, and no 20-iteration run fitted the cap, so the cap rather than a hang is the likely reason.
+All four aborts are `vkQueueSubmit` failing or `VK_ERROR_DEVICE_LOST`, at different tests each time, so the test running is where the loss is noticed rather than what causes it.
+This is a rate of very roughly one iteration in twenty to forty, so one `dev.py ship` meets it now and then.
 No hung submission has been identified, so what hangs the GPU is unknown.
