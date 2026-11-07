@@ -402,6 +402,11 @@ void lowering::declare(local_id id, flat_expr_id value, bool is_mut)
     if (!is_valid(type))
         return;
     auto const position = index_of(id);
+    if (_out.at(type).kind == type_kind::ray_query)
+    {
+        _locals[position] = begin_ray_query(id);
+        return;
+    }
     if (l.is_undefined)
     {
         // the prelude's `undefined()`: nothing to evaluate, and a mutable one a variable that holds nothing yet

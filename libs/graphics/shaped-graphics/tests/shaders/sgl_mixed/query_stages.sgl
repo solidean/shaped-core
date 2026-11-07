@@ -1,0 +1,116 @@
+// Inline traces that read everything a query answers, so two routes can only agree if each read is the same read.
+//
+// The scene is a square of two triangles and two boxes around spheres, at instances a turn and a scale apart.
+// Nothing here pins a number: mixed-route-query-test.cc holds each route to DXC's.
+require ray_query
+
+binding query_scene:
+    world: acceleration_structure[.mixed]
+    cells: mut buffer[float4]
+
+struct ball:
+    normal: vec3
+
+fun ball_report(b: procedural_box) -> report[ball]:
+    let centre = float3(2.0 * (b.primitive_index as float) + 1.0, 1.0, 1.0)
+    let o = float3(b.object_ray.origin.x, b.object_ray.origin.y, b.object_ray.origin.z)
+    let d = float3(b.object_ray.direction.x, b.object_ray.direction.y, b.object_ray.direction.z)
+    let oc = o - centre
+    let a = dot(d, d)
+    let half_b = dot(oc, d)
+    let disc = half_b * half_b - a * (dot(oc, oc) - 1.0)
+    if disc < 0.0 => return report.none()
+    let t = (-half_b - sqrt(disc)) / a
+    let p = o + d * t - centre
+    return report(t = t, attributes = ball(vec3(p.x, p.y, p.z)))
+
+// a triangle of id 1 is cut out, and another ends the search
+fun cut_triangle(c: triangle_candidate) -> hit_decision:
+    if c.primitive_index == 1 => return hit_decision.ignore
+    if c.instance_id == 77 => return hit_decision.accept_and_end_search
+    return hit_decision.accept
+
+fun cut_ball(c: procedural_candidate[ball]) -> hit_decision:
+    if c.primitive_index == 1 and c.t > 3.0 => return hit_decision.ignore
+    return hit_decision.accept
+
+fun kind_of(h: mixed_hit[ball]) -> float:
+    if h.kind == hit_kind.triangle => return 1.0
+    if h.kind == hit_kind.procedural => return 2.0
+    return 0.0
+
+fun query_ray(id: int3) -> ray => ray(
+    origin = pos3((id.x as float) + 0.3, 0.5 * (id.y as float) + 0.25, -1.0)
+    direction = vec3(0.0, 0.0, 1.0)
+)
+
+@compute(8, 8) fun read_everything(@thread_id id: int3){query_scene}:
+    let h = query_scene.world.trace(
+        query_ray(id)
+        any_hit = cut_triangle
+        intersection = ball_report
+        procedural_any_hit = cut_ball
+    )
+    let at = (id.x + id.y * 8) * 8
+    let mut front = 0.0
+    if h.is_front_face => front = 1.0
+    query_scene.cells[at] = float4(kind_of(h), h.t, h.instance_id as float, h.instance_index as float)
+    query_scene.cells[at + 1] = float4(h.geometry_index as float, h.primitive_index as float, front, 0.0)
+    query_scene.cells[at + 2] = float4(h.barycentrics.x, h.barycentrics.y, h.barycentrics.z, 0.0)
+    query_scene.cells[at + 3] = h.object_to_world.row(0)
+    query_scene.cells[at + 4] = h.object_to_world.row(2)
+    query_scene.cells[at + 5] = h.world_to_object.row(1)
+    let moved = h.world_to_object * float4(1.0, 2.0, 3.0, 1.0)
+    query_scene.cells[at + 6] = float4(moved.x, moved.y, moved.z, 0.0)
+    if h.kind == hit_kind.procedural:
+        let n = h.procedural().attributes.normal
+        query_scene.cells[at + 7] = float4(n.x, n.y, n.z, 1.0)
+    else:
+        query_scene.cells[at + 7] = float4(0.0, 0.0, 0.0, 0.0)
+
+// a query in a loop begins again at each step, on one variable of SPIR-V and on a handle of its own on DXIL
+@compute(8, 8) fun trace_twice(@thread_id id: int3){query_scene}:
+    let at = (id.x + id.y * 8) * 8
+    let mut sum = float4(0.0, 0.0, 0.0, 0.0)
+    let mut bounce = 0
+    while bounce < 2:
+        let r = query_ray(id)
+        let h = query_scene.world.trace(r, flags = ray_flags.force_opaque, intersection = ball_report)
+        sum = sum + float4(h.t, h.instance_id as float, 0.0, 1.0)
+        bounce = bounce + 1
+    query_scene.cells[at] = sum
+
+binding pixel_query_scene:
+    world: acceleration_structure[.mixed]
+
+struct query_varyings:
+    @position position: hpos4
+    origin: float3
+
+@pixel struct query_target:
+    color: float4
+
+// one triangle over the whole target, whose pixels trace across the scene
+@vertex fun query_vs(@vertex_index v: int) -> query_varyings:
+    let x = ((v & 1) * 4 - 1) as float
+    let y = ((v & 2) * 2 - 1) as float
+    return query_varyings(
+        position = hpos4(x, y, 0.0, 1.0)
+        origin = float3(4.0 * x + 4.0, 2.0 * y + 2.0, -1.0)
+    )
+
+@pixel fun query_ps(p: query_varyings){pixel_query_scene} -> query_target:
+    let r = ray(origin = pos3(p.origin.x, p.origin.y, p.origin.z), direction = vec3(0.0, 0.0, 1.0))
+    let h = pixel_query_scene.world.trace(
+        r
+        any_hit = cut_triangle
+        intersection = ball_report
+        procedural_any_hit = cut_ball
+    )
+    return query_target(color = float4(h.t, h.instance_id as float, h.primitive_index as float, kind_of(h)))
+
+pipeline query_pixels:
+    vertex = query_vs
+    pixel = query_ps
+    cull = .none
+    format = .rgba32_float

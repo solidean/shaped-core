@@ -88,6 +88,18 @@ private:
     void dispatch_mesh(check::flat_call const& c);
     /// The one global a task stage's payload stands in, of the struct `t`.
     [[nodiscard]] value_ref payload_global(check::type_id t);
+    /// `affine3_of_rows`, `affine3_row` and the three products.
+    [[nodiscard]] value_ref affine_call(builtins::function_record const& record,
+                                        cc::span<value_ref const> args,
+                                        type_ref result);
+    /// A step or a read of a query; `ray_query_begin` is `declare`'s, which knows the local's flags.
+    [[nodiscard]] value_ref ray_query_call(check::flat_call const& c, builtins::function_record const& record);
+    [[nodiscard]] value_ref ray_query_read(value_ref query, ray_query_value what, bool is_committed, type_ref result);
+    /// Row `row` of a transform, which the targets hand over by column.
+    [[nodiscard]] value_ref ray_query_row(value_ref query, ray_query_value what, bool is_committed, value_ref row);
+    [[nodiscard]] value_ref begin_ray_query(check::local_id id);
+    /// The structure `id` names, a member of a binding or an element of an array of them.
+    [[nodiscard]] value_ref acceleration_structure(check::flat_expr_id id);
     /// EMIT-196: the elements from `element` on written with the 64-bit `value` of `t`, its words low first.
     void store_words(check::type_id t, value_ref value, u32& element, value_ref index = value_ref::none);
     /// Whether the parameter at `position` is a pixel stage's second struct, what a mesh stage wrote per primitive.

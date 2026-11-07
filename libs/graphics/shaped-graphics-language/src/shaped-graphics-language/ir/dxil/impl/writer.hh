@@ -106,6 +106,8 @@ struct writer_uses
     bool layer_output = false;
     /// A UAV in a stage that is neither pixel nor compute.
     bool uavs_at_every_stage = false;
+    /// A ray query, which raytracing tier 1.1 brought.
+    bool ray_query = false;
 };
 
 class writer
@@ -336,6 +338,8 @@ private:
     void atomic_op(u32 index, instruction const& i);
     void barrier_op(instruction const& i);
     void subgroup_op(u32 index, instruction const& i);
+    void ray_query_op(u32 index, instruction const& i);
+    void ray_query_read(u32 index, instruction const& i);
     [[nodiscard]] ll_value atomic_on_buffer(place const& p, u32 op, ll_value value, ll_type t);
 
     // ---- writer_stage.cc
