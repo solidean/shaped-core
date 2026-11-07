@@ -57,3 +57,4 @@ Left: metal (Julius), whose SGL edge asks for no records until its backend binds
 vulkan's vertex, geometry and tessellation stages write their records on a device with `vertex_pipeline_stores`, which sg enables wherever the device has it (2026-11-05).
 A vertex and a tessellation evaluation stage end a failed assert at a NaN position, and a geometry stage returns (2026-11-03).
 A tessellation control stage ends one at zero edge factors, an any hit at `ignore`, and an intersection with no report.
+Both native routes write the same records in every stage they lower (EMIT-240, 2026-11-07), and `sgl describe` no longer refuses a package's `print`.

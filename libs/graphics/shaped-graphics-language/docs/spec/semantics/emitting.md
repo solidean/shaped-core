@@ -40,7 +40,8 @@ Back to the [semantics](_index.md); the reasons are in [why/emitting.md](why/emi
   `ray_query` is none of them: WGSL writes a trace's emulated form (EMIT-135).
   The shader chose it by `require`, so a portable shader still meets EMIT-13's promise.
 * **EMIT-66** A tree that is not core is the error `not-core`, and its detail names the first node that offends.
-* **EMIT-67** A `print` is `unsupported`: no target writes one yet, so the driver legalizes every entry point without them (LEGAL-63).
+* **EMIT-67** A `print` is `unsupported` without diagnostics, which is why the driver legalizes every entry point without them there (LEGAL-63).
+  A description holds whichever a compile asks for, so no print keeps `sgl describe` from writing one.
 
 ## Names
 
@@ -457,11 +458,16 @@ fn main_ps(p: pixel_input) -> target_ {
   `@view_index` is `dx.op.viewID` and in no signature, and `@layer` from a vertex stage is `ShaderLayer` and DXIL's shader flag for it.
   Every built-in a pixel stage reads but `FragCoord` is `Flat` on SPIR-V.
   A sample's offset is `unsupported` so far: SPIR-V takes it as a constant vector, which the form does not hold.
-  With diagnostics on, a `print` and an `assert` are `unsupported` in every stage, since neither writer reaches sg's debug window; with them off, legalize has erased both.
 * **EMIT-239** A binding array is one global of an array of resources, an unbounded one of a runtime array, and an `access_chain` picks the element.
   On DXIL that element's handle is made where the chain stands, `createHandleFromBinding` over the array's whole range, since no handle exists ahead of its index.
   `nonuniform i` marks the chain and what reads through it.
   SPIR-V decorates the index, the chain, the load and the sampled image `NonUniform`, and DXIL sets `createHandleFromBinding`'s last argument.
+* **EMIT-240** A native route writes each `print` as EMIT-183's record, at the address a text declares, and describes the same site under the same id.
+  So sg reads a binary's records as it reads a text's, and one pipeline may mix the routes.
+  What LEGAL-64 lowers an `assert` to and a `report` of LEGAL-65 writes are such prints, and the end of an invocation is the tree's own, so neither needs more of a target.
+  A stage that cannot write the buffer drops its prints with their values, as a text does, and declares no buffer.
+  DXIL states `UAVs at every shader stage` wherever a stage that is neither pixel nor compute declares a UAV.
+  The prologue of EMIT-229 is `unsupported` so far, so a compute stage with workgroup memory lowers under no robustness profile.
 
 ## Lines
 

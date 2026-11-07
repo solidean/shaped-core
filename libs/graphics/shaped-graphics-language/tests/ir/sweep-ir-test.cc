@@ -61,10 +61,13 @@ TEST("sgl ir - every entry point of the repo's SGL goes down both native routes"
         for (auto const& entry : all.value())
             for (auto const target : {sgl::emit::target::hlsl_vulkan, sgl::emit::target::hlsl_dx12})
             {
-                auto const e = sgl::compile_to_text({.source = source,
-                                                     .entry_point = entry.entry_point,
-                                                     .target = target,
-                                                     .native = sgl::emit::native_route::prefer});
+                auto const e = sgl::compile_to_text(
+                    {.source = source,
+                     .entry_point = entry.entry_point,
+                     .target = target,
+                     .diagnostics = true,
+                     .device_features = sgl::check::feature_set(sgl::check::feature::vertex_pipeline_stores),
+                     .native = sgl::emit::native_route::prefer});
                 if (e.has_error())
                     continue;
                 spirv += e.value().spirv.empty() ? 0 : 1;

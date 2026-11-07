@@ -154,7 +154,6 @@ struct written_text
 {
     cc::string text;
     cc::vector<line_origin> lines;
-    cc::vector<debug_site> debug_sites;
 };
 
 /// The whole text of the planned entry point: a header comment, the declarations, and the function.

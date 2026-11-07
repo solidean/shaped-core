@@ -226,6 +226,8 @@ TEST("sgl spirv - every compute entry point of the fixtures that lowers is what 
 
     auto lowered = 0;
     auto raster_lowered = 0;
+    auto recording = 0;
+    auto guarded = 0;
     for (auto const& file : files)
     {
         auto const source = read_all(file);
@@ -235,22 +237,78 @@ TEST("sgl spirv - every compute entry point of the fixtures that lowers is what 
             continue;
         for (auto const& entry : all.value())
         {
-            auto const e = sgl::compile_to_text({.source = source,
-                                                 .entry_point = entry.entry_point,
-                                                 .target = sgl::emit::target::hlsl_vulkan,
-                                                 .native = sgl::emit::native_route::prefer});
+            auto const e = sgl::compile_to_text(
+                {.source = source,
+                 .entry_point = entry.entry_point,
+                 .target = sgl::emit::target::hlsl_vulkan,
+                 .diagnostics = true,
+                 .device_features = sgl::check::feature_set(sgl::check::feature::vertex_pipeline_stores),
+                 .native = sgl::emit::native_route::prefer});
             if (e.has_error() || e.value().spirv.empty())
                 continue;
             auto const is_raster
                 = e.value().stage == sgl::check::stage::vertex || e.value().stage == sgl::check::stage::pixel;
             ++(is_raster ? raster_lowered : lowered);
+            recording += e.value().debug_sites.empty() ? 0 : 1;
             write_words(module_path, e.value().spirv);
             CHECK(std::system(command_text.data()) == 0).dump("file", file).dump("entry", entry.entry_point);
+
+            // a report writes through the debug buffer, and nothing here runs what it guards
+            auto const profile = sgl::compile_to_text(
+                {.source = source,
+                 .entry_point = entry.entry_point,
+                 .target = sgl::emit::target::hlsl_vulkan,
+                 .diagnostics = true,
+                 .guards_undefined = sgl::check::undefined_guard::report,
+                 .device_features = sgl::check::feature_set(sgl::check::feature::vertex_pipeline_stores),
+                 .native = sgl::emit::native_route::prefer});
+            if (profile.has_error() || profile.value().spirv.empty())
+                continue;
+            ++guarded;
+            write_words(module_path, profile.value().spirv);
+            CHECK(std::system(command_text.data()) == 0)
+                .dump("file", file)
+                .dump("entry", entry.entry_point)
+                .dump("guard", "report");
         }
     }
+    // what no fixture prints: every family a record holds, and a vertex stage's
+    constexpr cc::string_view records
+        = "require shader_f16\n"
+          "enum tone:\n"
+          "    low\n"
+          "    high\n"
+          "\n"
+          "struct link:\n"
+          "    @position position: hpos4\n"
+          "\n"
+          "@compute(4) fun records_cs(@thread_id id: int3):\n"
+          "    print \"$(id.x) $(id.x as uint) $(id.x as float) $(half(0.5)) $(id.x > 1) $id $(tone.high)\"\n"
+          "\n"
+          "@vertex fun records_vs(@vertex_index v: int) -> link:\n"
+          "    print \"vertex $v\"\n"
+          "    return { position = hpos4(0.0, 0.0, 0.0, 1.0) }\n";
+    for (auto const entry : {"records_cs", "records_vs"})
+    {
+        auto const e = sgl::compile_to_text(
+            {.source = records,
+             .entry_point = entry,
+             .target = sgl::emit::target::hlsl_vulkan,
+             .diagnostics = true,
+             .device_features = sgl::check::feature_set(sgl::check::feature::vertex_pipeline_stores),
+             .native = sgl::emit::native_route::require});
+        REQUIRE(e.has_value());
+        CHECK(e.value().debug_sites.size() == 1);
+        write_words(module_path, e.value().spirv);
+        CHECK(std::system(command_text.data()) == 0).dump("entry", entry);
+    }
+
     // the numbers the slice reaches, so a lowering lost shows here rather than as a quiet fall back to DXC
     CC_LOG_INFO("SGL's SPIR-V lowers {} compute entry points and {} vertex and pixel ones", lowered, raster_lowered);
+    CC_LOG_INFO("{} of them write debug records, and a robustness report lowers {} entry points", recording, guarded);
     CHECK(lowered >= 95);
     CHECK(raster_lowered >= 64);
+    CHECK(recording >= 2);
+    CHECK(guarded >= 150);
 #endif
 }

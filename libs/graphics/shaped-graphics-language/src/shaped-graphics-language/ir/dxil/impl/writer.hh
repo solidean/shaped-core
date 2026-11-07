@@ -86,6 +86,8 @@ struct writer_uses
     bool view_id = false;
     /// `SV_RenderTargetArrayIndex` from a stage feeding the rasterizer.
     bool layer_output = false;
+    /// A UAV in a stage that is neither pixel nor compute.
+    bool uavs_at_every_stage = false;
 };
 
 class writer

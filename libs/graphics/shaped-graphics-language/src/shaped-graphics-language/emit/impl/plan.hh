@@ -20,6 +20,10 @@ inline constexpr auto k_max_groups = 3;
 inline constexpr auto k_inline_constants_space = 9;
 /// The space slib gives a pipeline layout's static samplers on dx12, `slib::bound_samplers_space`, repeated for the same reason.
 inline constexpr auto k_bound_samplers_space = 10;
+/// Where sg binds its debug buffer (EMIT-183): a space of its own on dx12, and a binding of the reserved set on vulkan.
+inline constexpr auto k_debug_dx12_space = 11;
+inline constexpr auto k_debug_vulkan_set = 3;
+inline constexpr auto k_debug_vulkan_binding = 19;
 
 /// How many file-scope sampler indices a stage may reach.
 /// Metal's argument table and WebGPU's default `maxSamplersPerShaderStage` both hold 16.
@@ -233,8 +237,12 @@ struct plan
     check::checked_module const& m;
     check::flat_entry_point const& e;
     target which;
-    /// EMIT-183: the text writes a print into sg's debug buffer, which it declares.
+    /// EMIT-183: a print goes into sg's debug buffer, which a target then declares.
     bool writes_debug = false;
+    /// EMIT-183: each print a target writes, whichever route writes it.
+    cc::vector<debug_site> debug_sites;
+    /// Parallel to `e.stmts`: a position in `debug_sites`, or -1 for no print and for a print the stage drops.
+    cc::vector<i32> debug_site_of;
     /// Every `atomic[float]` is the target's own float atomic, rather than a `uint`'s bits: the device adds floats in one
     /// instruction, and the target can say so (vulkan, metal).
     bool native_float_atomics = false;

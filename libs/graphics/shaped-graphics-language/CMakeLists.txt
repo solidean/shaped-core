@@ -60,6 +60,7 @@ add_library(shaped-graphics-language
     src/shaped-graphics-language/ir/flatten.cc
     src/shaped-graphics-language/ir/lower.cc
     src/shaped-graphics-language/ir/lower_call.cc
+    src/shaped-graphics-language/ir/lower_debug.cc
     src/shaped-graphics-language/ir/lower_expr.cc
     src/shaped-graphics-language/ir/lower_memory.cc
     src/shaped-graphics-language/ir/lower_stage.cc
@@ -139,6 +140,7 @@ add_library(shaped-graphics-language
     src/shaped-graphics-language/emit/impl/memory_access.cc
     src/shaped-graphics-language/emit/impl/msl.cc
     src/shaped-graphics-language/emit/impl/plan.cc
+    src/shaped-graphics-language/emit/impl/debug_sites.cc
     src/shaped-graphics-language/emit/impl/text_writer.cc
     src/shaped-graphics-language/emit/impl/wgsl.cc
 
@@ -510,6 +512,7 @@ if(SC_BUILD_TESTS)
         tests/emit/sixty-four-bit-emit-test.cc
         tests/emit/double-maths-emit-test.cc
         tests/emit/spirv-emit-test.cc
+        tests/ir/debug-ir-test.cc
         tests/ir/ir-test-support.hh
         tests/ir/optimize-ir-test.cc
         tests/ir/passes-ir-test.cc
