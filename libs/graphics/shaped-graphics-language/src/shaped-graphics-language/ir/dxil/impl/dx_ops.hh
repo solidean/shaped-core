@@ -23,6 +23,7 @@ struct dx_class
         read_none,
         read_only,
         no_duplicate,
+        no_return,
     } attr = no_attr;
 };
 
@@ -100,6 +101,27 @@ enum class dx_class_id : u8
     ray_query_state_scalar,
     ray_query_state_vector,
     ray_query_state_matrix,
+    instance_id,
+    instance_index,
+    hit_kind,
+    ray_t_min,
+    ray_t_current,
+    primitive_index,
+    geometry_index,
+    dispatch_rays_index,
+    dispatch_rays_dimensions,
+    world_ray_origin,
+    world_ray_direction,
+    object_ray_origin,
+    object_ray_direction,
+    object_to_world,
+    world_to_object,
+    ignore_hit,
+    accept_hit_and_end_search,
+    trace_ray,
+    report_hit,
+    call_shader,
+    create_handle_for_lib,
 };
 
 // clang-format off
@@ -177,6 +199,27 @@ inline constexpr dx_class k_dx_classes[] = {
     {"rayQuery_StateScalar", "o:i", dx_class::read_only},
     {"rayQuery_StateVector", "o:ib", dx_class::read_only},
     {"rayQuery_StateMatrix", "o:iib", dx_class::read_only},
+    {"instanceID", "o:", dx_class::read_none},
+    {"instanceIndex", "o:", dx_class::read_none},
+    {"hitKind", "o:", dx_class::read_none},
+    {"rayTMin", "o:", dx_class::read_none},
+    {"rayTCurrent", "o:", dx_class::read_only},
+    {"primitiveIndex", "o:", dx_class::read_none},
+    {"geometryIndex", "o:", dx_class::read_none},
+    {"dispatchRaysIndex", "o:b", dx_class::read_none},
+    {"dispatchRaysDimensions", "o:b", dx_class::read_none},
+    {"worldRayOrigin", "o:b", dx_class::read_none},
+    {"worldRayDirection", "o:b", dx_class::read_none},
+    {"objectRayOrigin", "o:b", dx_class::read_none},
+    {"objectRayDirection", "o:b", dx_class::read_none},
+    {"objectToWorld", "o:ib", dx_class::read_none},
+    {"worldToObject", "o:ib", dx_class::read_none},
+    {"ignoreHit", "v:", dx_class::no_return},
+    {"acceptHitAndEndSearch", "v:", dx_class::no_return},
+    {"traceRay", "v:hiiiiiffffffffp"},
+    {"reportHit", "c:fip"},
+    {"callShader", "v:ip"},
+    {"createHandleForLib", "h:o", dx_class::read_only},
 };
 // clang-format on
 
@@ -328,6 +371,27 @@ enum class dx_op : u8
     ray_query_committed_primitive,
     ray_query_committed_object_origin,
     ray_query_committed_object_direction,
+    instance_id,
+    instance_index,
+    hit_kind,
+    ray_t_min,
+    ray_t_current,
+    primitive_index,
+    geometry_index,
+    dispatch_rays_index,
+    dispatch_rays_dimensions,
+    world_ray_origin,
+    world_ray_direction,
+    object_ray_origin,
+    object_ray_direction,
+    object_to_world,
+    world_to_object,
+    ignore_hit,
+    accept_hit_and_end_search,
+    trace_ray,
+    report_hit,
+    call_shader,
+    create_handle_for_lib,
 };
 
 struct dx_op_info
@@ -468,11 +532,31 @@ inline constexpr dx_op_info k_dx_ops[] = {
     {210, dx_class_id::ray_query_state_scalar, k_i32},
     {211, dx_class_id::ray_query_state_vector, k_f32},
     {212, dx_class_id::ray_query_state_vector, k_f32},
+    {141, dx_class_id::instance_id, k_i32},
+    {142, dx_class_id::instance_index, k_i32},
+    {143, dx_class_id::hit_kind, k_i32},
+    {153, dx_class_id::ray_t_min, k_f32},
+    {154, dx_class_id::ray_t_current, k_f32},
+    {161, dx_class_id::primitive_index, k_i32},
+    {213, dx_class_id::geometry_index, k_i32},
+    {145, dx_class_id::dispatch_rays_index, k_i32},
+    {146, dx_class_id::dispatch_rays_dimensions, k_i32},
+    {147, dx_class_id::world_ray_origin, k_f32},
+    {148, dx_class_id::world_ray_direction, k_f32},
+    {149, dx_class_id::object_ray_origin, k_f32},
+    {150, dx_class_id::object_ray_direction, k_f32},
+    {151, dx_class_id::object_to_world, k_f32},
+    {152, dx_class_id::world_to_object, k_f32},
+    {155, dx_class_id::ignore_hit, k_no_overload},
+    {156, dx_class_id::accept_hit_and_end_search, k_no_overload},
+    {157, dx_class_id::trace_ray, k_udt},
+    {158, dx_class_id::report_hit, k_udt},
+    {159, dx_class_id::call_shader, k_udt},
+    {160, dx_class_id::create_handle_for_lib, k_udt},
 };
 // clang-format on
 
-static_assert(sizeof(k_dx_ops) / sizeof(k_dx_ops[0])
-              == sizeof(char[isize(dx_op::ray_query_committed_object_direction) + 1]));
+static_assert(sizeof(k_dx_ops) / sizeof(k_dx_ops[0]) == sizeof(char[isize(dx_op::create_handle_for_lib) + 1]));
 static_assert(sizeof(k_dx_classes) / sizeof(k_dx_classes[0])
-              == sizeof(char[isize(dx_class_id::ray_query_state_matrix) + 1]));
+              == sizeof(char[isize(dx_class_id::create_handle_for_lib) + 1]));
 } // namespace sgl::ir::dxil::impl

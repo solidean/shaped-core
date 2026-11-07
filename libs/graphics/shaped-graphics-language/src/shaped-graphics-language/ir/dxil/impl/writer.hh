@@ -28,6 +28,10 @@ struct resource_record
     u32 upper = 0;
     u32 kind = 0;
     u32 psv_flags = 0;
+    /// What `RDAT` adds: its class, its id in that class, and its name.
+    u32 cls = 0;
+    u32 id = 0;
+    cc::string name;
 };
 
 /// All the container's parts need of the program, which the module alone does not say.
@@ -36,6 +40,11 @@ struct module_summary
     u64 metadata_flags = 0;
     u64 feature_flags = 0;
     u32 psv_stage = 0;
+    bool is_library = false;
+    /// A library function's attributes, `dx.op` and `RDAT` both state.
+    u32 attribute_bytes = 0;
+    u32 shader_kind = 0;
+    u32 min_shader_minor = 0;
     u32 program_kind = 0;
     /// The shader model, as a program's version word states it.
     u32 program_version = 0;
@@ -106,7 +115,7 @@ struct writer_uses
     bool layer_output = false;
     /// A UAV in a stage that is neither pixel nor compute.
     bool uavs_at_every_stage = false;
-    /// A ray query, which raytracing tier 1.1 brought.
+    /// A ray query or a hit's geometry index, which raytracing tier 1.1 brought.
     bool ray_query = false;
 };
 
@@ -171,6 +180,9 @@ private:
     {
         /// The handle as an operation takes it; none for a binding array, whose elements each make their own.
         ll_value annotated = ll_value::none;
+        /// What a library loads the handle from, a global of its own or an array of them.
+        ll_value variable = ll_value::none;
+        ll_type variable_type = ll_type::none;
         bool is_array = false;
         u32 lower = 0;
         u32 upper = 0;
@@ -340,6 +352,18 @@ private:
     void subgroup_op(u32 index, instruction const& i);
     void ray_query_op(u32 index, instruction const& i);
     void ray_query_read(u32 index, instruction const& i);
+
+    // ---- writer_ray.cc
+    [[nodiscard]] bool is_library() const;
+    /// The library function's type, which takes the payload and the attributes as pointers.
+    [[nodiscard]] ll_type entry_function_type();
+    [[nodiscard]] ll_type triangle_attributes_type();
+    /// What the global of a ray-tracing stage's memory is at DXIL, which is a struct whatever the program's type.
+    [[nodiscard]] ll_type root_type(u32 global);
+    void declare_ray_roots();
+    void ray_element(u32 index, stage_element const& e, instruction const& i);
+    void ray_stage_op(u32 index, instruction const& i);
+    void end_of_hit(dx_op code);
     [[nodiscard]] ll_value atomic_on_buffer(place const& p, u32 op, ll_value value, ll_type t);
 
     // ---- writer_stage.cc
@@ -401,6 +425,17 @@ private:
     cc::vector<ll_value> _loaded;
     /// The paths of every payload place, each a run in here, and what they are paths into.
     cc::vector<ll_value> _paths;
+    /// Parallel to `program::globals`: where each one reached through a path of a struct stands.
+    struct payload_root
+    {
+        ll_value pointer = ll_value::none;
+        ll_type type = ll_type::none;
+        /// A program's value the struct holds as its one member.
+        bool is_wrapped = false;
+    };
+    cc::vector<payload_root> _payload_roots;
+    /// The root `payload_pointers` is reaching into.
+    payload_root const* _reached = nullptr;
     ll_value _payload = ll_value::none;
     ll_type _payload_type = ll_type::none;
     /// The positions of the phis, filled once every value exists.

@@ -333,29 +333,14 @@ void pad_to_word(byte_writer& out)
 
 constexpr cc::string_view k_triple = "dxil-ms-dx";
 constexpr cc::string_view k_layout = "e-m:e-p:32:32-i1:32-i8:8-i16:16-i32:32-i64:64-f16:16-f32:32-f64:64-n8:16:32:64";
-} // namespace
-
-cc::vector<byte> sgl::ir::dxil::impl::write_container(writer const& w)
+struct container_part
 {
-    auto const bitcode = w.module().write(k_triple, k_layout);
-    auto const& s = w.summary();
+    u32 name;
+    cc::vector<byte> bytes;
+};
 
-    struct part
-    {
-        u32 name;
-        cc::vector<byte> bytes;
-    };
-    auto parts = cc::vector<part>();
-    parts.push_back({.name = four_cc('S', 'F', 'I', '0'), .bytes = feature_part(s)});
-    parts.push_back({.name = four_cc('I', 'S', 'G', '1'), .bytes = signature_part(s, signature_table::input)});
-    parts.push_back({.name = four_cc('O', 'S', 'G', '1'), .bytes = signature_part(s, signature_table::output)});
-    // a stage with patch constants has the third, though it reads none; a mesh stage only where it writes per primitive
-    auto const writes_primitives = s.psv_stage == k_psv_mesh && s.patch_rows > 0;
-    if (s.psv_stage == k_psv_hull || s.psv_stage == k_psv_domain || writes_primitives)
-        parts.push_back({.name = four_cc('P', 'S', 'G', '1'), .bytes = signature_part(s, signature_table::patch)});
-    parts.push_back({.name = four_cc('P', 'S', 'V', '0'), .bytes = pipeline_state_part(s)});
-    parts.push_back({.name = four_cc('D', 'X', 'I', 'L'), .bytes = program_part(s, bitcode)});
-
+[[nodiscard]] cc::vector<byte> assembled(cc::span<container_part const> parts)
+{
     auto header = u32(32 + parts.size() * 4);
     auto total = header;
     for (auto const& p : parts)
@@ -382,4 +367,121 @@ cc::vector<byte> sgl::ir::dxil::impl::write_container(writer const& w)
         out.append(p.bytes);
     }
     return out.take();
+}
+
+/// `RDAT`: the tables a state object reads a library by, which the validator builds again and compares.
+[[nodiscard]] cc::vector<byte> runtime_data_part(module_summary const& s)
+{
+    constexpr u32 k_part_strings = 1;
+    constexpr u32 k_part_index_arrays = 2;
+    constexpr u32 k_part_resources = 3;
+    constexpr u32 k_part_functions = 4;
+    constexpr u32 k_version = 0x10;
+
+    auto strings = byte_writer();
+    strings.u8_le(0);
+    auto const add_string = [&](cc::string_view text)
+    {
+        auto const at = u32(strings.size());
+        for (auto const c : text)
+            strings.u8_le(u8(c));
+        strings.u8_le(0);
+        return at;
+    };
+
+    auto resources = byte_writer();
+    resources.u32_le(u32(s.resources.size()));
+    resources.u32_le(32);
+    for (auto const& r : s.resources)
+    {
+        resources.u32_le(r.cls);
+        resources.u32_le(r.kind);
+        resources.u32_le(r.id);
+        resources.u32_le(r.space);
+        resources.u32_le(r.lower);
+        resources.u32_le(r.upper);
+        resources.u32_le(add_string(r.name));
+        resources.u32_le(0);
+    }
+    auto const name = add_string(s.entry_name);
+    pad_to_word(strings);
+
+    auto functions = byte_writer();
+    functions.u32_le(1);
+    functions.u32_le(52);
+    functions.u32_le(name);
+    functions.u32_le(name);
+    functions.u32_le(s.resources.empty() ? 0xffffffffu : 0u);
+    functions.u32_le(0xffffffffu);
+    functions.u32_le(s.shader_kind);
+    functions.u32_le(s.payload_bytes);
+    functions.u32_le(s.attribute_bytes);
+    functions.u32_le(u32(s.feature_flags));
+    functions.u32_le(u32(s.feature_flags >> 32));
+    functions.u32_le(1u << s.shader_kind);
+    functions.u32_le((s.shader_kind << 16) | 0x60 | s.min_shader_minor);
+    functions.u32_le(0);
+    functions.u32_le(0xffffffffu);
+
+    auto indices = byte_writer();
+    indices.u32_le(u32(s.resources.size()));
+    for (auto i = u32(0); i < u32(s.resources.size()); ++i)
+        indices.u32_le(i);
+
+    struct table
+    {
+        u32 kind;
+        cc::vector<byte> bytes;
+    };
+    auto tables = cc::vector<table>();
+    tables.push_back({k_part_strings, strings.take()});
+    if (!s.resources.empty())
+        tables.push_back({k_part_resources, resources.take()});
+    tables.push_back({k_part_functions, functions.take()});
+    if (!s.resources.empty())
+        tables.push_back({k_part_index_arrays, indices.take()});
+
+    auto out = byte_writer();
+    out.u32_le(k_version);
+    out.u32_le(u32(tables.size()));
+    auto offset = u32(8 + tables.size() * 4);
+    for (auto const& t : tables)
+    {
+        out.u32_le(offset);
+        offset += 8 + u32(t.bytes.size());
+    }
+    for (auto const& t : tables)
+    {
+        out.u32_le(t.kind);
+        out.u32_le(u32(t.bytes.size()));
+        out.append(t.bytes);
+    }
+    return out.take();
+}
+
+} // namespace
+
+cc::vector<byte> sgl::ir::dxil::impl::write_container(writer const& w)
+{
+    auto const bitcode = w.module().write(k_triple, k_layout);
+    auto const& s = w.summary();
+
+    auto parts = cc::vector<container_part>();
+    parts.push_back({.name = four_cc('S', 'F', 'I', '0'), .bytes = feature_part(s)});
+    if (s.is_library)
+    {
+        parts.push_back({.name = four_cc('R', 'D', 'A', 'T'), .bytes = runtime_data_part(s)});
+        parts.push_back({.name = four_cc('D', 'X', 'I', 'L'), .bytes = program_part(s, bitcode)});
+        return assembled(parts);
+    }
+    parts.push_back({.name = four_cc('I', 'S', 'G', '1'), .bytes = signature_part(s, signature_table::input)});
+    parts.push_back({.name = four_cc('O', 'S', 'G', '1'), .bytes = signature_part(s, signature_table::output)});
+    // a stage with patch constants has the third, though it reads none; a mesh stage only where it writes per primitive
+    auto const writes_primitives = s.psv_stage == k_psv_mesh && s.patch_rows > 0;
+    if (s.psv_stage == k_psv_hull || s.psv_stage == k_psv_domain || writes_primitives)
+        parts.push_back({.name = four_cc('P', 'S', 'G', '1'), .bytes = signature_part(s, signature_table::patch)});
+    parts.push_back({.name = four_cc('P', 'S', 'V', '0'), .bytes = pipeline_state_part(s)});
+    parts.push_back({.name = four_cc('D', 'X', 'I', 'L'), .bytes = program_part(s, bitcode)});
+
+    return assembled(parts);
 }

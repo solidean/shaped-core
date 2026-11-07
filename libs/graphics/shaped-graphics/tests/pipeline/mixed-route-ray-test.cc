@@ -135,9 +135,6 @@ ASYNC_INVOCABLE_TEST("sg - each stage of a ray-tracing pipeline through SGL's bi
     if (!takes_dxil && !ctx->accepts_shader_format(sg::shader_format::spirv))
         SKIP("this context takes neither DXIL nor SPIR-V");
 
-    if (takes_dxil)
-        SKIP("DXIL libraries are the next commit");
-
     auto const dxc = co_await text::every_stage.description(*ctx);
     auto const native
         = takes_dxil ? co_await dxil::every_stage.description(*ctx) : co_await spirv::every_stage.description(*ctx);
