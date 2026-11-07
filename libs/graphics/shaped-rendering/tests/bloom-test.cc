@@ -7,9 +7,12 @@
 #include <nexus/async-test.hh>
 #include <nexus/test.hh>
 #include <shaped-graphics/all.hh>
-#include <shaped-graphics/backends/dx12/dx12_context.hh> // sg::create_dx12_context
 #include <shaped-rendering/bloom_routine.hh>
 #include <typed-geometry/scalar/scalar.hh>
+
+#ifdef SR_TEST_HAS_DX12
+#include <shaped-graphics/backends/dx12/dx12_context.hh> // sg::create_dx12_context
+#endif
 
 using namespace cc::primitive_defines;
 
@@ -226,6 +229,7 @@ ASYNC_INVOCABLE_TEST("sr - bloom matches its definition, keeps total light, and 
     CHECK(relative_error_at(shown, out, 0.99) < 0.002);
 }
 
+#ifdef SR_TEST_HAS_DX12
 // What one image costs, in GPU time, at the two sizes a viewer lives at; a benchmark, which logs and asserts nothing.
 ASYNC_BENCHMARK("sr - bloom, GPU time per image, on dx12")
 {
@@ -277,3 +281,4 @@ ASYNC_BENCHMARK("sr - bloom, GPU time per image, on dx12")
         CC_LOG_INFO("bloom at {}x{}: median {} ms, min {} ms", size[0], size[1], ms[ms.size() / 2], ms[0]);
     }
 }
+#endif
