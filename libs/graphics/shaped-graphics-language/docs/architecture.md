@@ -222,6 +222,7 @@ A program is flat tables of small ids, an operation being 24 bytes, because this
 `ir::verify` says what every program must hold, and a compile runs it after lowering and after each pass wherever assertions are on.
 Nothing else stands between a pass's mistake and a driver, since no validator runs on a shipped compile.
 A query is a value of `type_kind::ray_query` that no store or phi moves, and `ir/lower_query.cc` lowers every step of it; `dxil/impl/writer_query.cc` is DXIL's half.
+A ray-tracing stage's edge is `ir/lower_ray.cc`, and `dxil/impl/writer_ray.cc` is what a DXIL library adds: its function's parameters, its roots and its operations.
 What has no lowering yet is one named gap, never a guess, and [epic-sgl-native-ir-targets](issues/epic-sgl-native-ir-targets.md) has the design and the numbers.
 A builtin reaches it by its record's name rather than by a spelling of its own: `lower_call.cc`'s table maps a name's stem to what it does, once per process.
 
