@@ -239,7 +239,7 @@ ASYNC_INVOCABLE_TEST("sg - what a pixel stage reaches reads alike through SGL's 
     auto const probe = co_await compiled(*ctx, text::surface_vs);
     if (!probe.has_value())
         SKIP("this build has no DXC");
-    // Workaround: a co_await inside this initializer crashes MSVC 14.44 and 14.51 (C1001).
+    // Workaround: docs/bugs-external/msvc-coroutine-await-in-aggregate-init-crash, so this is awaited first.
     auto const native_vertex = co_await compiled_native(*ctx, takes_dxil, dxil::surface_vs, spirv::surface_vs);
     auto const vertex = routes{.vertex_text = probe, .vertex_native = native_vertex};
 
@@ -418,7 +418,7 @@ ASYNC_INVOCABLE_TEST("sg - geometry and tessellation stages of SGL's binary link
     namespace spirv = sg::test::mixed_spirv::primitive_stages;
 
     // the two routes of one entry point, by its name in all three packages
-    // Workaround: a co_await inside an aggregate's initializer crashes MSVC 14.44 and 14.51 (C1001), so each pair has a name.
+    // Workaround: docs/bugs-external/msvc-coroutine-await-in-aggregate-init-crash, so each pair has a name.
 #define SG_ROUTES(entry) route_pair_of(*ctx, takes_dxil, text::entry, dxil::entry, spirv::entry)
     auto const pixel = co_await SG_ROUTES(primitive_ps);
     if (!pixel.text.has_value())
@@ -560,32 +560,34 @@ ASYNC_INVOCABLE_TEST("sg - mesh and task stages of SGL's binary link against DXC
     namespace dxil = sg::test::mixed_dxil::mesh_stages;
     namespace spirv = sg::test::mixed_spirv::mesh_stages;
 
-    // the two routes of one entry point, by its name in all three packages
-#define SG_ROUTES(entry)                                                                                    \
-    route_pair                                                                                              \
-    {                                                                                                       \
-        .text = co_await compiled(*ctx, text::entry),                                                       \
-        .native = takes_dxil ? co_await compiled(*ctx, dxil::entry) : co_await compiled(*ctx, spirv::entry) \
-    }
-    auto const plain = SG_ROUTES(plain_ps);
+    // Workaround: docs/bugs-external/msvc-coroutine-await-in-aggregate-init-crash, so each pair has a name.
+#define SG_ROUTES(entry) route_pair_of(*ctx, takes_dxil, text::entry, dxil::entry, spirv::entry)
+    auto const plain = co_await SG_ROUTES(plain_ps);
     if (!plain.text.has_value())
         SKIP("this build has no DXC");
 
-    (void)co_await compared_mesh(*ctx, {.name = "quad", .mesh = SG_ROUTES(quad_ms), .pixel = plain});
-    auto const faced
-        = co_await compared_mesh(*ctx, {.name = "faces", .mesh = SG_ROUTES(faces_ms), .pixel = SG_ROUTES(faced_ps)});
+    auto const quad_mesh = co_await SG_ROUTES(quad_ms);
+    (void)co_await compared_mesh(*ctx, {.name = "quad", .mesh = quad_mesh, .pixel = plain});
+    auto const faces_mesh = co_await SG_ROUTES(faces_ms);
+    auto const faces_pixel = co_await SG_ROUTES(faced_ps);
+    auto const faced = co_await compared_mesh(*ctx, {.name = "faces", .mesh = faces_mesh, .pixel = faces_pixel});
     // each triangle read what the mesh stage wrote for it: the first in the target's lower right, the second opposite
     CHECK(faced[1].rgba_float(k_size - 2, k_size - 2)[2] == 40.0f);
     CHECK(faced[1].rgba_float(1, 1)[2] == 41.0f);
     CHECK(faced[1].rgba_float(1, 1)[0] == 1.5f);
-    (void)co_await compared_mesh(*ctx, {.name = "lines", .mesh = SG_ROUTES(lines_ms), .pixel = plain});
-    auto const split = co_await compared_mesh(
-        *ctx, {.name = "split", .task = SG_ROUTES(split_ts), .mesh = SG_ROUTES(split_ms), .pixel = plain});
+    auto const lines_mesh = co_await SG_ROUTES(lines_ms);
+    (void)co_await compared_mesh(*ctx, {.name = "lines", .mesh = lines_mesh, .pixel = plain});
+    auto const split_task = co_await SG_ROUTES(split_ts);
+    auto const split_mesh = co_await SG_ROUTES(split_ms);
+    auto const split
+        = co_await compared_mesh(*ctx, {.name = "split", .task = split_task, .mesh = split_mesh, .pixel = plain});
     // the two workgroups read their own steps of the payload, and its last field keeps the bottom row clear
     CHECK(split[1].rgba_float(1, 1)[2] == 9.0f);
     CHECK(split[1].rgba_float(k_size - 2, 1)[2] == 10.0f);
     CHECK(split[1].rgba_float(1, k_size - 1)[3] == 0.0f);
-    (void)co_await compared_mesh(
-        *ctx, {.name = "many invocations", .task = SG_ROUTES(many_ts), .mesh = SG_ROUTES(many_ms), .pixel = plain});
+    auto const many_task = co_await SG_ROUTES(many_ts);
+    auto const many_mesh = co_await SG_ROUTES(many_ms);
+    (void)co_await compared_mesh(*ctx,
+                                 {.name = "many invocations", .task = many_task, .mesh = many_mesh, .pixel = plain});
 #undef SG_ROUTES
 }
