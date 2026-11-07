@@ -483,9 +483,7 @@ void writer::atomic_offsets(place const& p, ll_value (&offsets)[3])
         return;
     }
     auto const is_raw = _p.globals[p.root].kind == global_kind::bytes;
-    offsets[0] = is_raw ? _m.binary(binary_op::add, _m.binary(binary_op::mul, p.index, _m.constant_i32(4)),
-                                    byte_offset(p, p.offset))
-                        : p.index;
+    offsets[0] = is_raw ? raw_address(p, p.offset) : p.index;
     if (!is_raw)
         offsets[1] = byte_offset(p, p.offset);
 }

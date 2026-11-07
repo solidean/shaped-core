@@ -288,6 +288,9 @@ void writer::run()
     if (!_failure.empty())
         return;
     fill_phis();
+    // sharing first, so two loads of one handle read one handle; and again after, for the lanes merging leaves alike
+    _m.share_common_values();
+    _m.merge_buffer_loads(k_dx_ops[isize(dx_op::raw_buffer_load)].number);
     _m.share_common_values();
     _m.remove_unused();
     if (is_control)

@@ -104,6 +104,163 @@ bool module_builder::may_share(inst_entry const& inst) const
     }
 }
 
+void module_builder::merge_buffer_loads(u32 opcode)
+{
+    constexpr auto k_none = 0xffffffffu;
+    auto const is_result = [](u32 raw)
+    {
+        auto const v = ll_value(raw);
+        return v != ll_value::none && !ll_is_constant(v) && !ll_is_global(v);
+    };
+    auto const known = [&](u32 raw, u64& bits)
+    { return !ll_is_argument(ll_value(raw)) && constant_bits(ll_value(raw), bits); };
+    auto const is_undefined = [&](u32 raw)
+    {
+        auto const v = ll_value(raw);
+        return ll_is_constant(v) && !ll_is_argument(v) && _constants[ll_index(v)].code == constant_code::undefined;
+    };
+    // a value as a base and a constant added to it
+    auto const split = [&](u32 raw, u32& base, u64& added)
+    {
+        base = raw;
+        added = 0;
+        if (known(raw, added))
+        {
+            base = k_none;
+            return;
+        }
+        if (!is_result(raw))
+            return;
+        auto const& inst = _instructions[_results[ll_index(ll_value(raw))]];
+        if (inst.code != inst_code::binary || inst.sub != u8(binary_op::add))
+            return;
+        auto const a = _args[inst.first];
+        auto const b = _args[inst.first + 1];
+        if (known(b, added))
+            base = a;
+        else if (known(a, added))
+            base = b;
+        else
+            added = 0;
+    };
+
+    // what reads each load: a load is merged away only where every reader takes one of its lanes
+    auto lanes_read = cc::vector<u32>::create_filled(_results.size(), 0u);
+    auto other_reader = cc::vector<bool>::create_filled(_results.size(), false);
+    for (auto const& inst : _instructions)
+    {
+        if (inst.code == inst_code::extract_value)
+        {
+            auto const from = _args[inst.first];
+            if (is_result(from))
+                lanes_read[ll_index(ll_value(from))] = cc::max(lanes_read[ll_index(ll_value(from))], _args[inst.first + 1] + 1);
+            continue;
+        }
+        for_each_value(const_cast<inst_entry&>(inst),
+                       [&](u32& raw)
+                       {
+                           if (is_result(raw))
+                               other_reader[ll_index(ll_value(raw))] = true;
+                       });
+    }
+
+    struct open_load
+    {
+        u32 result = 0;
+        u32 inst = 0;
+        u32 handle = 0;
+        u32 base = 0;
+        bool is_raw = false;
+        ll_type type = ll_type::none;
+        u64 size = 0;
+        u64 start = 0;
+        u32 lanes = 0;
+    };
+    auto redirect = cc::vector<u32>::create_filled(_results.size(), k_none);
+    auto shift = cc::vector<u32>::create_filled(_results.size(), 0u);
+    auto result_of = cc::vector<u32>::create_filled(_instructions.size(), k_none);
+    for (auto r = isize(0); r < _results.size(); ++r)
+        result_of[_results[r]] = u32(r);
+    auto open = cc::vector<open_load>();
+    auto merged_any = false;
+    for (auto const& block : _blocks)
+    {
+        open.clear();
+        for (auto i = block.first; i < block.first + block.count; ++i)
+        {
+            auto const& inst = _instructions[i];
+            if (inst.code != inst_code::call || inst.flags == 0 || inst.count != 7 || result_of[i] == k_none)
+                continue;
+            auto const* const args = _args.data() + inst.first;
+            auto number = u64(0);
+            auto mask = u64(0);
+            auto size = u64(0);
+            if (!known(args[1], number) || number != opcode || !known(args[5], mask) || !known(args[6], size))
+                continue;
+            if (mask == 0 || (mask & (mask + 1)) != 0 || size == 0)
+                continue;
+            auto lanes = u32(0);
+            while ((mask >> lanes) & 1u)
+                ++lanes;
+            auto const own = result_of[i];
+            // a reader of the whole result, or of its status lane, keeps it as it is
+            if (other_reader[own] || lanes_read[own] > lanes)
+                continue;
+            // a raw buffer's lanes follow on in its byte address, a structured one's in the offset into its element
+            auto const is_raw = is_undefined(args[4]);
+            auto base = u32(0);
+            auto start = u64(0);
+            auto const handle = args[2];
+            if (is_raw)
+                split(args[3], base, start);
+            else
+            {
+                if (!known(args[4], start))
+                    continue;
+                base = args[3];
+            }
+            auto merged = false;
+            for (auto& o : open)
+            {
+                if (o.handle != handle || o.base != base || o.is_raw != is_raw || o.type != inst.type || o.size != size)
+                    continue;
+                if (start != o.start + o.lanes * size || o.lanes + lanes > 4)
+                    continue;
+                redirect[own] = o.result;
+                shift[own] = o.lanes;
+                o.lanes += lanes;
+                _args[_instructions[o.inst].first + 5] = u32(constant_i8(u8((1u << o.lanes) - 1)));
+                merged = true;
+                merged_any = true;
+                break;
+            }
+            if (!merged)
+                open.push_back({.result = own,
+                                .inst = i,
+                                .handle = handle,
+                                .base = base,
+                                .is_raw = is_raw,
+                                .type = inst.type,
+                                .size = size,
+                                .start = start,
+                                .lanes = lanes});
+        }
+    }
+    if (!merged_any)
+        return;
+    for (auto& inst : _instructions)
+    {
+        if (inst.code != inst_code::extract_value)
+            continue;
+        auto const from = _args[inst.first];
+        if (!is_result(from) || redirect[ll_index(ll_value(from))] == k_none)
+            continue;
+        auto const index = ll_index(ll_value(from));
+        _args[inst.first] = u32(ll_value(redirect[index]));
+        _args[inst.first + 1] += shift[index];
+    }
+}
+
 void module_builder::share_common_values()
 {
     // the graph first: a block's predecessors, as one run per block
